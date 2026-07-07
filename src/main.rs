@@ -1,5 +1,5 @@
 use anyhow::Context;
-use lixray::{open_db, router, Config};
+use lixray::{open_lix_service, router, Config};
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -11,13 +11,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    let db = open_db(&config).await?;
+    let service = open_lix_service(&config).await?;
     let listener = TcpListener::bind(&config.bind_addr)
         .await
         .with_context(|| format!("bind {}", config.bind_addr))?;
 
     tracing::info!(addr = %config.bind_addr, "lixray container listening");
-    axum::serve(listener, router(db))
+    axum::serve(listener, router(service))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("serve HTTP")

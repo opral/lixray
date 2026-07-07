@@ -1,83 +1,207 @@
-use crate::error::ApiError;
+use crate::error::{ApiError, ErrorEnvelope};
+use crate::store::LixService;
 use axum::{
-    body::Bytes,
-    extract::{Path, State},
-    http::{header, StatusCode},
-    response::IntoResponse,
-    routing::get,
+    extract::{Json, State},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse,
+    },
+    routing::{get, post},
     Router,
 };
-use serde::Serialize;
-use slatedb::Db;
-use std::sync::Arc;
-
-const MAX_KEY_BYTES: usize = 1024;
+use lix_engine::{
+    CreateBranchOptions, ExecuteOptions, ExecuteResult, LixError, ObserveEvent, Row, Value,
+    WireValue,
+};
+use serde::{Deserialize, Serialize};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 
 #[derive(Clone)]
 pub struct AppState {
-    db: Arc<Db>,
+    service: Arc<LixService>,
 }
 
-pub fn router(db: Arc<Db>) -> Router {
+pub fn router(service: Arc<LixService>) -> Router {
     Router::new()
         .route("/v1/container-health", get(container_health))
-        .route("/v1/kv/", get(empty_key).put(empty_key).delete(empty_key))
-        .route("/v1/kv/{key}", get(get_key).put(put_key).delete(delete_key))
-        .with_state(AppState { db })
+        .route("/v1/lix/branches", get(list_branches))
+        .route("/v1/lix/createBranch", post(create_branch))
+        .route("/v1/lix/execute", post(execute))
+        .route("/v1/lix/observe", post(observe))
+        .with_state(AppState { service })
 }
 
 async fn container_health() -> impl IntoResponse {
-    axum::Json(HealthBody {
+    Json(HealthBody {
         ok: true,
         service: "lixray-container",
     })
 }
 
-async fn get_key(
-    State(state): State<AppState>,
-    Path(key): Path<String>,
-) -> Result<impl IntoResponse, ApiError> {
-    validate_key(&key)?;
+async fn list_branches(State(state): State<AppState>) -> Result<Json<BranchesResponse>, ApiError> {
+    let result = state.service.list_branches().await?;
+    let branches = result
+        .rows()
+        .iter()
+        .map(branch_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
 
-    match state.db.get(key.as_bytes()).await? {
-        Some(value) => Ok(([(header::CONTENT_TYPE, "application/octet-stream")], value)),
-        None => Err(ApiError::NotFound),
+    Ok(Json(BranchesResponse { branches }))
+}
+
+async fn create_branch(
+    State(state): State<AppState>,
+    Json(request): Json<CreateBranchRequest>,
+) -> Result<Json<CreateBranchResponse>, ApiError> {
+    let branch_id = required_non_empty(request.branch_id, "branchId")?;
+    let name = required_non_empty(request.name, "name")?;
+    let receipt = state
+        .service
+        .create_branch(
+            branch_id,
+            CreateBranchOptions {
+                id: request.id,
+                name,
+                from_commit_id: request.from_commit_id,
+            },
+        )
+        .await?;
+
+    Ok(Json(CreateBranchResponse {
+        id: receipt.id,
+        name: receipt.name,
+        hidden: receipt.hidden,
+        commit_id: receipt.commit_id,
+    }))
+}
+
+async fn execute(
+    State(state): State<AppState>,
+    Json(request): Json<ExecuteRequest>,
+) -> Result<Json<ExecuteResponse>, ApiError> {
+    let branch_id = required_non_empty(request.branch_id, "branchId")?;
+    let sql = required_non_empty(request.sql, "sql")?;
+    let params = decode_params(request.params)?;
+    let options = ExecuteOptions {
+        origin_key: request.options.and_then(|options| options.origin_key),
+    };
+    let result = state
+        .service
+        .execute(branch_id, sql, params, options)
+        .await?;
+
+    Ok(Json(ExecuteResponse::try_from(result)?))
+}
+
+async fn observe(
+    State(state): State<AppState>,
+    Json(request): Json<ObserveRequest>,
+) -> Result<Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let branch_id = required_non_empty(request.branch_id, "branchId")?;
+    let sql = required_non_empty(request.sql, "sql")?;
+    let params = decode_params(request.params)?;
+    let mut events = state.service.observe(branch_id, sql, params).await?;
+
+    let stream = async_stream::stream! {
+        loop {
+            match events.next().await {
+                Ok(Some(event)) => {
+                    match ObserveEventResponse::try_from(event) {
+                        Ok(payload) => yield Ok(sse_json_event("next", &payload)),
+                        Err(error) => {
+                            yield Ok(sse_json_event("error", &ErrorEnvelope::from_lix_error(&error)));
+                            break;
+                        }
+                    }
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    yield Ok(sse_json_event("error", &ErrorEnvelope::from_lix_error(&error)));
+                    break;
+                }
+            }
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
+}
+
+fn sse_json_event<T>(event: &'static str, payload: &T) -> Event
+where
+    T: Serialize,
+{
+    match serde_json::to_string(payload) {
+        Ok(data) => Event::default().event(event).data(data),
+        Err(error) => Event::default().event("error").data(
+            serde_json::to_string(&ErrorEnvelope::from_lix_error(&LixError::new(
+                LixError::CODE_INTERNAL_ERROR,
+                format!("failed to serialize SSE event: {error}"),
+            )))
+            .unwrap_or_else(|_| {
+                "{\"error\":{\"code\":\"LIX_INTERNAL_ERROR\",\"message\":\"internal server error\"}}"
+                    .to_string()
+            }),
+        ),
     }
 }
 
-async fn put_key(
-    State(state): State<AppState>,
-    Path(key): Path<String>,
-    body: Bytes,
-) -> Result<StatusCode, ApiError> {
-    validate_key(&key)?;
-    state.db.put(key.as_bytes(), body).await?;
-    Ok(StatusCode::NO_CONTENT)
+fn decode_params(params: Vec<WireValue>) -> Result<Vec<Value>, ApiError> {
+    params
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value.try_into_engine().map_err(|error| {
+                ApiError::from(
+                    LixError::new(
+                        LixError::CODE_INVALID_PARAM,
+                        format!("invalid SQL parameter at index {index}: {}", error.message),
+                    )
+                    .with_details(serde_json::json!({
+                        "parameter_index": index,
+                        "source_code": error.code,
+                    })),
+                )
+            })
+        })
+        .collect()
 }
 
-async fn delete_key(
-    State(state): State<AppState>,
-    Path(key): Path<String>,
-) -> Result<StatusCode, ApiError> {
-    validate_key(&key)?;
-    state.db.delete(key.as_bytes()).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn empty_key() -> ApiError {
-    ApiError::BadRequest("key must not be empty")
-}
-
-fn validate_key(key: &str) -> Result<(), ApiError> {
-    if key.is_empty() {
-        return Err(ApiError::BadRequest("key must not be empty"));
+fn required_non_empty(value: Option<String>, field: &'static str) -> Result<String, ApiError> {
+    match value {
+        Some(value) if !value.trim().is_empty() => Ok(value),
+        _ => Err(ApiError::bad_request(format!("{field} is required"))),
     }
+}
 
-    if key.len() > MAX_KEY_BYTES {
-        return Err(ApiError::BadRequest("key is too long"));
+fn branch_from_row(row: &Row) -> Result<BranchResponse, ApiError> {
+    Ok(BranchResponse {
+        id: required_text(row, "id")?,
+        name: required_text(row, "name")?,
+        hidden: required_bool(row, "hidden")?,
+        commit_id: required_text(row, "commit_id")?,
+    })
+}
+
+fn required_text(row: &Row, column: &str) -> Result<String, ApiError> {
+    match row.value(column)? {
+        Value::Text(value) => Ok(value.clone()),
+        value => Err(ApiError::from(anyhow::anyhow!(
+            "expected text column {column}, got {value:?}"
+        ))),
     }
+}
 
-    Ok(())
+fn required_bool(row: &Row, column: &str) -> Result<bool, ApiError> {
+    match row.value(column)? {
+        Value::Boolean(value) => Ok(*value),
+        value => Err(ApiError::from(anyhow::anyhow!(
+            "expected bool column {column}, got {value:?}"
+        ))),
+    }
 }
 
 #[derive(Serialize)]
@@ -86,92 +210,451 @@ struct HealthBody {
     service: &'static str,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct BranchesResponse {
+    branches: Vec<BranchResponse>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BranchResponse {
+    id: String,
+    name: String,
+    hidden: bool,
+    commit_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateBranchRequest {
+    branch_id: Option<String>,
+    id: Option<String>,
+    name: Option<String>,
+    from_commit_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateBranchResponse {
+    id: String,
+    name: String,
+    hidden: bool,
+    commit_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecuteRequest {
+    branch_id: Option<String>,
+    sql: Option<String>,
+    #[serde(default)]
+    params: Vec<WireValue>,
+    options: Option<ExecuteOptionsRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecuteOptionsRequest {
+    origin_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ObserveRequest {
+    branch_id: Option<String>,
+    sql: Option<String>,
+    #[serde(default)]
+    params: Vec<WireValue>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecuteResponse {
+    columns: Vec<String>,
+    rows: Vec<Vec<WireValue>>,
+    rows_affected: u64,
+    notices: Vec<lix_engine::LixNotice>,
+}
+
+impl TryFrom<ExecuteResult> for ExecuteResponse {
+    type Error = LixError;
+
+    fn try_from(result: ExecuteResult) -> Result<Self, Self::Error> {
+        let rows = result
+            .rows()
+            .iter()
+            .map(|row| {
+                row.values()
+                    .iter()
+                    .map(WireValue::try_from_engine)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            columns: result.columns().to_vec(),
+            rows,
+            rows_affected: result.rows_affected(),
+            notices: result.notices().to_vec(),
+        })
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ObserveEventResponse {
+    sequence: u64,
+    mutation_sequence: u64,
+    result: ExecuteResponse,
+}
+
+impl TryFrom<ObserveEvent> for ObserveEventResponse {
+    type Error = LixError;
+
+    fn try_from(event: ObserveEvent) -> Result<Self, Self::Error> {
+        Ok(Self {
+            sequence: event.sequence,
+            mutation_sequence: event.mutation_sequence,
+            result: ExecuteResponse::try_from(event.rows)?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{router, Config, StorageConfig};
+    use crate::{open_lix_service, Config, StorageConfig};
     use axum::body::Body;
     use http::{Method, Request, StatusCode};
+    use http_body_util::BodyExt;
+    use serde_json::{json, Value as JsonValue};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tower::ServiceExt;
 
+    static TEST_ID: AtomicU64 = AtomicU64::new(0);
+
     async fn app() -> Router {
+        let id = TEST_ID.fetch_add(1, Ordering::Relaxed);
         let config = Config {
             bind_addr: "127.0.0.1:0".to_string(),
-            slatedb_path: format!("test-{}", std::process::id()),
+            slatedb_path: format!("test-{}-{id}", std::process::id()),
             storage: StorageConfig::Memory,
         };
-        let db = crate::open_db(&config).await.unwrap();
-        router(db)
+        let service = open_lix_service(&config).await.unwrap();
+        router(service)
+    }
+
+    async fn json_request(
+        app: Router,
+        method: Method,
+        uri: &str,
+        body: JsonValue,
+    ) -> http::Response<Body> {
+        app.oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn response_json<T>(response: http::Response<Body>) -> T
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    async fn main_branch_id(app: Router) -> String {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/v1/lix/branches")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let branches: BranchesResponse = response_json(response).await;
+        branches
+            .branches
+            .into_iter()
+            .find(|branch| branch.name == "main")
+            .expect("main branch exists")
+            .id
     }
 
     #[tokio::test]
-    async fn put_get_delete_round_trip() {
+    async fn branches_returns_main_branch() {
         let app = app().await;
+        let main = main_branch_id(app).await;
 
-        let put_response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(Method::PUT)
-                    .uri("/v1/kv/hello")
-                    .body(Body::from("world"))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
-
-        let get_response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(Method::GET)
-                    .uri("/v1/kv/hello")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(get_response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(get_response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        assert_eq!(&body[..], b"world");
-
-        let delete_response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(Method::DELETE)
-                    .uri("/v1/kv/hello")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
-
-        let missing_response = app
-            .oneshot(
-                Request::builder()
-                    .method(Method::GET)
-                    .uri("/v1/kv/hello")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
+        assert!(!main.is_empty());
     }
 
     #[tokio::test]
-    async fn missing_key_returns_404() {
+    async fn execute_can_insert_and_select_key_value() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+
+        let insert = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/lix/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
+                "params": [
+                    { "kind": "text", "value": "http-key" },
+                    { "kind": "text", "value": "http-value" }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(insert.status(), StatusCode::OK);
+        let insert_body: ExecuteResponse = response_json(insert).await;
+        assert_eq!(insert_body.rows_affected, 1);
+
+        let select = json_request(
+            app,
+            Method::POST,
+            "/v1/lix/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT value FROM lix_key_value WHERE key = $1",
+                "params": [{ "kind": "text", "value": "http-key" }]
+            }),
+        )
+        .await;
+        assert_eq!(select.status(), StatusCode::OK);
+        let select_body: ExecuteResponse = response_json(select).await;
+        assert_eq!(
+            select_body.rows,
+            vec![vec![WireValue::Json {
+                value: json!("http-value")
+            }]]
+        );
+    }
+
+    #[tokio::test]
+    async fn create_branch_creates_from_supplied_branch() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+
+        let response = json_request(
+            app,
+            Method::POST,
+            "/v1/lix/createBranch",
+            json!({
+                "branchId": branch_id,
+                "id": "http-draft",
+                "name": "HTTP draft"
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: CreateBranchResponse = response_json(response).await;
+        assert_eq!(body.id, "http-draft");
+        assert_eq!(body.name, "HTTP draft");
+        assert!(!body.commit_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn execute_uses_supplied_branch_context() {
+        let app = app().await;
+        let main_branch_id = main_branch_id(app.clone()).await;
+        let draft = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/lix/createBranch",
+            json!({
+                "branchId": main_branch_id,
+                "id": "http-branch-context",
+                "name": "HTTP branch context"
+            }),
+        )
+        .await;
+        assert_eq!(draft.status(), StatusCode::OK);
+
+        let file_path = "/http-branch-file.txt";
+        let insert = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/lix/execute",
+            json!({
+                "branchId": main_branch_id,
+                "sql": "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+                "params": [
+                    { "kind": "text", "value": file_path },
+                    { "kind": "blob", "base64": "aGVsbG8=" }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(insert.status(), StatusCode::OK);
+
+        let main_select = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/lix/execute",
+            json!({
+                "branchId": main_branch_id,
+                "sql": "SELECT path FROM lix_file WHERE path = $1",
+                "params": [{ "kind": "text", "value": file_path }]
+            }),
+        )
+        .await;
+        let main_body: ExecuteResponse = response_json(main_select).await;
+        assert_eq!(main_body.rows.len(), 1);
+
+        let draft_select = json_request(
+            app,
+            Method::POST,
+            "/v1/lix/execute",
+            json!({
+                "branchId": "http-branch-context",
+                "sql": "SELECT path FROM lix_file WHERE path = $1",
+                "params": [{ "kind": "text", "value": file_path }]
+            }),
+        )
+        .await;
+        let draft_body: ExecuteResponse = response_json(draft_select).await;
+        assert_eq!(draft_body.rows.len(), 0);
+    }
+
+    async fn next_sse_frame(body: &mut Body) -> String {
+        let frame = tokio::time::timeout(Duration::from_secs(2), body.frame())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let data = frame.into_data().unwrap();
+        String::from_utf8(data.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn observe_emits_initial_event_and_matching_update() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+
+        let response = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/lix/observe",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT key FROM lix_key_value WHERE key = $1",
+                "params": [{ "kind": "text", "value": "observe-http" }]
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/event-stream"
+        );
+
+        let mut body = response.into_body();
+        let initial = next_sse_frame(&mut body).await;
+        assert!(initial.contains("event: next"));
+        assert!(initial.contains("\"sequence\":0"));
+
+        let insert = json_request(
+            app,
+            Method::POST,
+            "/v1/lix/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
+                "params": [
+                    { "kind": "text", "value": "observe-http" },
+                    { "kind": "text", "value": "updated" }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(insert.status(), StatusCode::OK);
+
+        let update = next_sse_frame(&mut body).await;
+        assert!(update.contains("event: next"));
+        assert!(update.contains("\"sequence\":1"));
+        assert!(update.contains("observe-http"));
+    }
+
+    #[tokio::test]
+    async fn invalid_requests_are_structured_errors() {
+        let app = app().await;
+        let response = json_request(
+            app,
+            Method::POST,
+            "/v1/lix/execute",
+            json!({
+                "sql": "SELECT 1"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: JsonValue = response_json(response).await;
+        assert_eq!(body["error"]["code"], "LIX_INVALID_ARGUMENT");
+    }
+
+    #[tokio::test]
+    async fn observe_rejects_write_sql() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+        let response = json_request(
+            app,
+            Method::POST,
+            "/v1/lix/observe",
+            json!({
+                "branchId": branch_id,
+                "sql": "INSERT INTO lix_key_value (key, value) VALUES ('bad', 'bad')"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: JsonValue = response_json(response).await;
+        assert_eq!(body["error"]["code"], LixError::CODE_INVALID_PARAM);
+    }
+
+    #[tokio::test]
+    async fn unknown_branch_returns_404() {
+        let app = app().await;
+        let response = json_request(
+            app,
+            Method::POST,
+            "/v1/lix/execute",
+            json!({
+                "branchId": "missing-branch",
+                "sql": "SELECT lix_active_branch_commit_id()"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body: JsonValue = response_json(response).await;
+        assert_eq!(body["error"]["code"], LixError::CODE_BRANCH_NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn kv_routes_are_not_exposed() {
         let response = app()
             .await
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
-                    .uri("/v1/kv/missing")
+                    .uri("/v1/kv/test")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -179,40 +662,5 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn empty_key_returns_400() {
-        let response = app()
-            .await
-            .oneshot(
-                Request::builder()
-                    .method(Method::PUT)
-                    .uri("/v1/kv/")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn overlong_key_returns_400() {
-        let key = "a".repeat(MAX_KEY_BYTES + 1);
-        let response = app()
-            .await
-            .oneshot(
-                Request::builder()
-                    .method(Method::PUT)
-                    .uri(format!("/v1/kv/{key}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

@@ -1,6 +1,7 @@
 # lixray
 
-Minimal Cloudflare Worker + Durable Object Container + SlateDB KV service.
+Cloudflare Worker + Durable Object Container exposing Lix over HTTP, backed by
+SlateDB on R2.
 
 Production is deployed at:
 
@@ -21,14 +22,24 @@ Cloudflare state:
 
 - `GET /healthz` returns Worker health without auth or container startup.
 - `GET /v1/container-health` checks the Rust container after auth.
-- `PUT /v1/kv/:key` stores the raw request body.
-- `GET /v1/kv/:key` returns raw bytes or `404`.
-- `DELETE /v1/kv/:key` deletes a key.
+- `GET /v1/lix/branches` lists Lix branches so clients can discover the
+  generated `main` branch id.
+- `POST /v1/lix/createBranch` creates a branch from a supplied `branchId`.
+- `POST /v1/lix/execute` executes one Lix SQL statement on a supplied
+  `branchId`.
+- `POST /v1/lix/observe` streams Lix observe events as POST SSE.
 
 All `/v1/*` routes require:
 
 ```text
 Authorization: Bearer <LIXRAY_AUTH_TOKEN>
+```
+
+Values use Lix wire values:
+
+```json
+{ "kind": "text", "value": "hello" }
+{ "kind": "blob", "base64": "aGVsbG8=" }
 ```
 
 Production smoke test:
@@ -37,22 +48,50 @@ Production smoke test:
 TOKEN='<LIXRAY_AUTH_TOKEN>'
 
 curl -i https://api.lixray.com/healthz
-curl -i https://api.lixray.com/v1/container-health \
+
+curl -i https://api.lixray.com/v1/lix/branches \
 	-H "Authorization: Bearer $TOKEN"
 
-curl -i -X PUT https://api.lixray.com/v1/kv/test \
+BRANCH_ID="$(curl -fsS https://api.lixray.com/v1/lix/branches \
 	-H "Authorization: Bearer $TOKEN" \
-	--data-binary "hello lixray"
-curl -i https://api.lixray.com/v1/kv/test \
-	-H "Authorization: Bearer $TOKEN"
-curl -i -X DELETE https://api.lixray.com/v1/kv/test \
-	-H "Authorization: Bearer $TOKEN"
-curl -i https://api.lixray.com/v1/kv/test \
-	-H "Authorization: Bearer $TOKEN"
-```
+	| jq -r '.branches[] | select(.name == "main") | .id')"
 
-Expected responses: health `200`, container health `200`, put `204`, get
-returns the stored bytes, delete `204`, final get `404`.
+curl -i -X POST https://api.lixray.com/v1/lix/execute \
+	-H "Authorization: Bearer $TOKEN" \
+	-H "content-type: application/json" \
+	--data-binary @- <<EOF
+{
+  "branchId": "$BRANCH_ID",
+  "sql": "INSERT INTO lix_key_value (key, value) VALUES (\$1, \$2)",
+  "params": [
+    { "kind": "text", "value": "smoke" },
+    { "kind": "text", "value": "ok" }
+  ]
+}
+EOF
+
+curl -i -X POST https://api.lixray.com/v1/lix/execute \
+	-H "Authorization: Bearer $TOKEN" \
+	-H "content-type: application/json" \
+	--data-binary @- <<EOF
+{
+  "branchId": "$BRANCH_ID",
+  "sql": "SELECT value FROM lix_key_value WHERE key = \$1",
+  "params": [{ "kind": "text", "value": "smoke" }]
+}
+EOF
+
+curl -i -N -X POST https://api.lixray.com/v1/lix/observe \
+	-H "Authorization: Bearer $TOKEN" \
+	-H "content-type: application/json" \
+	--data-binary @- <<EOF
+{
+  "branchId": "$BRANCH_ID",
+  "sql": "SELECT value FROM lix_key_value WHERE key = \$1",
+  "params": [{ "kind": "text", "value": "smoke" }]
+}
+EOF
+```
 
 ## Local development
 
@@ -77,13 +116,15 @@ Then smoke test locally:
 TOKEN='dev-token'
 
 curl -i http://127.0.0.1:8787/healthz
-curl -i http://127.0.0.1:8787/v1/container-health \
-	-H "Authorization: Bearer $TOKEN"
-curl -i -X PUT http://127.0.0.1:8787/v1/kv/test \
+
+BRANCH_ID="$(curl -fsS http://127.0.0.1:8787/v1/lix/branches \
 	-H "Authorization: Bearer $TOKEN" \
-	--data-binary "hello"
-curl -i http://127.0.0.1:8787/v1/kv/test \
-	-H "Authorization: Bearer $TOKEN"
+	| jq -r '.branches[] | select(.name == "main") | .id')"
+
+curl -i -X POST http://127.0.0.1:8787/v1/lix/execute \
+	-H "Authorization: Bearer $TOKEN" \
+	-H "content-type: application/json" \
+	--data-binary "{\"branchId\":\"$BRANCH_ID\",\"sql\":\"SELECT 1 AS ok\"}"
 ```
 
 Run local development against the real R2 bucket only when deliberately testing
@@ -146,13 +187,6 @@ To rotate a secret:
 pnpm wrangler secret put LIXRAY_AUTH_TOKEN --config ./wrangler.jsonc
 pnpm wrangler secret put R2_ACCESS_KEY_ID --config ./wrangler.jsonc
 pnpm wrangler secret put R2_SECRET_ACCESS_KEY --config ./wrangler.jsonc
-```
-
-Create or recreate the R2 bucket:
-
-```sh
-pnpm wrangler r2 bucket create lixray
-pnpm wrangler r2 bucket list
 ```
 
 R2 S3 credentials are created in the Cloudflare dashboard under R2 API tokens.
