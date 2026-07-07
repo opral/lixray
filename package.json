@@ -7,19 +7,34 @@
 	"scripts": {
 		"check": "pnpm run check:cloudflare && cargo test",
 		"check:cloudflare": "pnpm typecheck && pnpm test:worker",
-		"dev": "wrangler dev --config ./wrangler.jsonc",
-		"dev:memory": "wrangler dev --config ./wrangler.jsonc --var SLATEDB_STORAGE:memory --var R2_ENDPOINT:https://example.invalid --var R2_BUCKET:local-memory",
-		"deploy:worker": "wrangler deploy --config ./wrangler.jsonc",
+		"dev": "vite dev --port 8787",
+		"build": "pnpm run routes:generate && vite build",
+		"preview": "vite preview",
+		"deploy:worker": "pnpm run build && wrangler deploy --config ./wrangler.jsonc",
+		"routes:generate": "node scripts/generate-routes.mjs",
 		"test:worker": "node --test --experimental-strip-types src/worker/handler.test.ts",
-		"typecheck": "tsc --noEmit",
+		"typecheck": "pnpm run routes:generate && tsc --noEmit",
 		"cf-typegen": "wrangler types --config ./wrangler.jsonc"
 	},
 	"dependencies": {
-		"@cloudflare/containers": "0.3.7"
+		"@clerk/backend": "^3.11.0",
+		"@clerk/tanstack-react-start": "^1.4.13",
+		"@cloudflare/containers": "0.3.7",
+		"@tanstack/react-router": "^1.170.17",
+		"@tanstack/react-start": "^1.168.27",
+		"lucide-react": "^1.23.0",
+		"react": "^19.2.7",
+		"react-dom": "^19.2.7"
 	},
 	"devDependencies": {
+		"@cloudflare/vite-plugin": "^1.43.0",
 		"@cloudflare/workers-types": "4.20260701.1",
+		"@tanstack/router-generator": "^1.167.18",
+		"@types/react": "^19.2.17",
+		"@types/react-dom": "^19.2.3",
+		"@vitejs/plugin-react": "^6.0.3",
 		"typescript": "^5.9.2",
+		"vite": "^8.1.3",
 		"wrangler": "^4.107.0"
 	}
 }

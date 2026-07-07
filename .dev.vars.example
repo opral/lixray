@@ -1,8 +1,11 @@
-LIXRAY_AUTH_TOKEN=dev-token
+CLERK_APP_ID=<clerk-app-id>
+CLERK_PUBLISHABLE_KEY=<clerk-publishable-key>
+VITE_CLERK_PUBLISHABLE_KEY=<clerk-publishable-key>
+CLERK_SECRET_KEY=<clerk-secret-key>
 
-# Use memory mode for local smoke tests without R2.
+# Use memory mode for local development without R2. The Worker still injects
+# SLATEDB_PATH from the active Clerk Organization id when each container starts.
 SLATEDB_STORAGE=memory
-SLATEDB_PATH=lixray/default
 
 # Required for production R2-backed runs.
 R2_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com

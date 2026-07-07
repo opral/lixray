@@ -2,11 +2,12 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "lixray",
 	"account_id": "11a1a6f76d167248cc6987e978efb7e5",
-	"main": "src/worker/index.ts",
+	"main": "src/server.ts",
 	"compatibility_date": "2026-07-07",
+	"compatibility_flags": ["nodejs_compat"],
 	"routes": [
 		{
-			"pattern": "api.lixray.com",
+			"pattern": "lixray.com",
 			"custom_domain": true
 		}
 	],
@@ -14,15 +15,17 @@
 		"enabled": true
 	},
 	"vars": {
+		"CLERK_APP_ID": "app_3GBViGp1pL2PtKZ2jU5vMWQcSik",
+		"CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsubGl4cmF5LmNvbSQ",
+		"VITE_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsubGl4cmF5LmNvbSQ",
 		"R2_ENDPOINT": "https://11a1a6f76d167248cc6987e978efb7e5.r2.cloudflarestorage.com",
 		"R2_BUCKET": "lixray",
 		"R2_REGION": "auto",
-		"SLATEDB_PATH": "lixray/default",
 		"SLATEDB_STORAGE": "r2"
 	},
 	"secrets": {
 		"required": [
-			"LIXRAY_AUTH_TOKEN",
+			"CLERK_SECRET_KEY",
 			"R2_ACCESS_KEY_ID",
 			"R2_SECRET_ACCESS_KEY"
 		]
@@ -31,7 +34,7 @@
 		{
 			"class_name": "SlateDbContainer",
 			"image": "./Dockerfile",
-			"max_instances": 1,
+			"max_instances": 10,
 			"instance_type": "lite"
 		}
 	],
