@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	authenticateWithClerk,
 	handleRequest,
 	type AuthenticateRequest,
 	type WorkerEnv,
 } from "./handler.ts";
+import { E2E_AUTH_TOKEN } from "../lib/e2e-auth.ts";
 
 test("GET /healthz returns Worker health without auth or proxying", async () => {
 	let proxied = false;
@@ -63,6 +65,7 @@ test("/v1 routes return 403 without an active workspace organization", async () 
 
 test("/v1 routes with Clerk org auth proxy to the org container", async () => {
 	const calls: Array<unknown> = [];
+	let startOptions: unknown;
 	const response = await handleRequest(
 		new Request("https://example.test/v1/container-health"),
 		env({
@@ -70,6 +73,7 @@ test("/v1 routes with Clerk org auth proxy to the org container", async () => {
 				calls.push(["getByName", name]);
 				return {
 					startAndWaitForPorts: async (options) => {
+						startOptions = options;
 						calls.push(["start", options.startOptions.envVars]);
 					},
 					fetch: async (request) => {
@@ -83,6 +87,24 @@ test("/v1 routes with Clerk org auth proxy to the org container", async () => {
 	);
 
 	assert.equal(response.status, 299);
+	assert.deepEqual(startOptions, {
+		ports: 8080,
+		cancellationOptions: {
+			instanceGetTimeoutMS: 30_000,
+			portReadyTimeoutMS: 30_000,
+		},
+		startOptions: {
+			envVars: {
+				R2_ENDPOINT: "https://r2.example",
+				R2_BUCKET: "lixray",
+				R2_ACCESS_KEY_ID: "access-key",
+				R2_SECRET_ACCESS_KEY: "secret-key",
+				R2_REGION: "auto",
+				SLATEDB_PATH: "org_abc",
+				SLATEDB_STORAGE: "r2",
+			},
+		},
+	});
 	assert.deepEqual(calls, [
 		["getByName", "org_abc"],
 		[
@@ -99,6 +121,51 @@ test("/v1 routes with Clerk org auth proxy to the org container", async () => {
 		],
 		["fetch", "/v1/container-health"],
 	]);
+});
+
+test("local e2e auth proxies to the configured e2e org container", async () => {
+	const calls: Array<unknown> = [];
+	const response = await handleRequest(
+		new Request("http://localhost/v1/container-health", {
+			headers: { Authorization: `Bearer ${E2E_AUTH_TOKEN}` },
+		}),
+		env({
+			extra: { LIXRAY_E2E_ORG_ID: "org_e2e" },
+			getByName: (name) => {
+				calls.push(["getByName", name]);
+				return {
+					startAndWaitForPorts: async (options) => {
+						calls.push(["start", options.startOptions.envVars.SLATEDB_PATH]);
+					},
+					fetch: async () => new Response("proxied", { status: 299 }),
+				};
+			},
+		}),
+	);
+
+	assert.equal(response.status, 299);
+	assert.deepEqual(calls, [
+		["getByName", "org_e2e"],
+		["start", "org_e2e"],
+	]);
+});
+
+test("e2e auth is ignored outside localhost", async () => {
+	const response = await authenticateWithClerk(
+		new Request("https://example.test/v1/container-health", {
+			headers: { Authorization: `Bearer ${E2E_AUTH_TOKEN}` },
+		}),
+		env({ extra: { LIXRAY_E2E_ORG_ID: "org_e2e" } }),
+	);
+
+	assert.equal(response.ok, false);
+	if (!response.ok) {
+		assert.equal(response.response.status, 500);
+		assert.equal(
+			await response.response.text(),
+			"CLERK_SECRET_KEY is not configured\n",
+		);
+	}
 });
 
 test("legacy bearer token does not bypass Clerk auth", async () => {

@@ -22,6 +22,8 @@ import {
 	parseParamsJson,
 	useLixrayApi,
 } from "../lib/lixray-api";
+import { E2E_WORKSPACE_NAME } from "../lib/e2e-auth";
+import { isE2eAuthEnabled } from "../lib/e2e-client";
 
 export const Route = createFileRoute("/")({
 	component: DashboardPage,
@@ -31,6 +33,14 @@ const defaultSql = "SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY 
 const defaultParams = "[]";
 
 function DashboardPage() {
+	if (isE2eAuthEnabled) {
+		return <WorkspaceDashboard organizationName={E2E_WORKSPACE_NAME} />;
+	}
+
+	return <ClerkDashboardPage />;
+}
+
+function ClerkDashboardPage() {
 	const { isLoaded, isSignedIn } = useAuth();
 	const { organization, isLoaded: organizationLoaded } = useOrganization();
 
@@ -160,22 +170,24 @@ function WorkspaceDashboard({ organizationName }: { organizationName: string }) 
 					</span>
 					<span>Lixray</span>
 				</Link>
-				<div className="topbar-actions">
-					<OrganizationSwitcher
-						hidePersonal
-						afterSelectOrganizationUrl="/"
-						afterCreateOrganizationUrl="/"
-					/>
-					<Link
-						to="/workspace"
-						className="button icon-button"
-						aria-label="Workspace settings"
-						title="Workspace settings"
-					>
-						<Settings size={16} aria-hidden="true" />
-					</Link>
-					<UserButton />
-				</div>
+				{isE2eAuthEnabled ? null : (
+					<div className="topbar-actions">
+						<OrganizationSwitcher
+							hidePersonal
+							afterSelectOrganizationUrl="/"
+							afterCreateOrganizationUrl="/"
+						/>
+						<Link
+							to="/workspace"
+							className="button icon-button"
+							aria-label="Workspace settings"
+							title="Workspace settings"
+						>
+							<Settings size={16} aria-hidden="true" />
+						</Link>
+						<UserButton />
+					</div>
+				)}
 			</header>
 			<main className="page">
 				<section className="page-heading">
@@ -203,13 +215,15 @@ function WorkspaceDashboard({ organizationName }: { organizationName: string }) 
 							) : branches.length === 0 ? (
 								<p className="status-line">No branches returned.</p>
 							) : (
-								<div className="branch-list">
+								<div className="branch-list" data-testid="branch-list">
 									{branches.map((branch) => (
 										<button
 											key={branch.id}
 											className="branch-button"
 											type="button"
 											data-active={branch.id === activeBranchId}
+											data-testid="branch-button"
+											aria-pressed={branch.id === activeBranchId}
 											onClick={() => setActiveBranchId(branch.id)}
 										>
 											<span className="branch-name">{branch.name}</span>
@@ -264,7 +278,11 @@ function WorkspaceDashboard({ organizationName }: { organizationName: string }) 
 									{executing ? "Executing" : "Execute"}
 								</button>
 							</div>
-							{error ? <div className="error-box">{error}</div> : null}
+							{error ? (
+								<div className="error-box" role="alert">
+									{error}
+								</div>
+							) : null}
 							{result ? <ResultTable result={result} /> : null}
 						</div>
 					</section>
@@ -276,7 +294,7 @@ function WorkspaceDashboard({ organizationName }: { organizationName: string }) 
 
 function ResultTable({ result }: { result: ExecuteResponse }) {
 	return (
-		<div className="result-shell">
+		<div className="result-shell" data-testid="query-result">
 			<div className="result-meta">
 				<span>
 					<TableProperties size={14} aria-hidden="true" /> {result.rows.length} rows
@@ -288,7 +306,7 @@ function ResultTable({ result }: { result: ExecuteResponse }) {
 				{result.columns.length === 0 ? (
 					<div className="panel-body status-line">Statement completed.</div>
 				) : (
-					<table>
+					<table data-testid="result-table">
 						<thead>
 							<tr>
 								{result.columns.map((column) => (

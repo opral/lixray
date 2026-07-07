@@ -6,7 +6,7 @@ export const Route = createFileRoute("/sign-up")({
 	component: SignUpPage,
 });
 
-function SignUpPage() {
+export function SignUpPage() {
 	return (
 		<main className="auth-page">
 			<div className="auth-card">

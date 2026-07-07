@@ -8,3 +8,7 @@
 /.dev.vars
 /.dev.vars.*
 /!.dev.vars.example
+
+# Playwright local artifacts
+/playwright-report/
+/test-results/

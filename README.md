@@ -85,7 +85,9 @@ pnpm install --frozen-lockfile
 ```
 
 Copy `.dev.vars.example` to `.dev.vars` for local secrets. `.dev.vars` is
-ignored and must not be committed.
+ignored and must not be committed. The dev Clerk publishable key is committed in
+`.env.development` so Vite serves the local app against the Clerk development
+instance.
 
 Use Clerk development keys locally, then run:
 
@@ -93,8 +95,16 @@ Use Clerk development keys locally, then run:
 pnpm dev
 ```
 
-The app is served at `http://127.0.0.1:8787`. Set `SLATEDB_STORAGE=memory` in
-`.dev.vars` for local container storage without R2.
+The app is served at `http://localhost:8787`. `pnpm dev` forces
+`SLATEDB_STORAGE=memory`, so local development does not depend on R2 credentials.
+Restart the dev server after changing storage mode so existing containers do not
+keep old startup env.
+
+Run against R2 explicitly when needed:
+
+```sh
+pnpm dev:r2
+```
 
 ## Iteration workflow
 
@@ -103,10 +113,38 @@ Before deploying:
 ```sh
 pnpm typecheck
 pnpm test:worker
+pnpm test:e2e
 pnpm build
 cargo test
 docker build .
 pnpm run deploy:worker --dry-run
+```
+
+Install the Playwright browser once before running e2e tests:
+
+```sh
+pnpm exec playwright install chromium
+```
+
+The e2e suite fails on browser runtime errors, console errors, and Vite's error
+overlay. It also runs the workspace dashboard under a localhost-only e2e auth
+mode and asserts that `/v1/branches` returns at least one branch and
+`SELECT 1 AS one` succeeds:
+
+```sh
+pnpm test:e2e
+```
+
+Playwright starts its own dev server on `http://localhost:8790` by default so it
+does not reuse a stale `pnpm dev` process on port `8787`. Override that with
+`E2E_PORT` when needed. The default e2e server uses in-memory SlateDB storage so
+it is deterministic and does not depend on local R2 secrets.
+
+Run the R2-backed e2e check explicitly when validating the same storage path used
+by R2 local development:
+
+```sh
+pnpm test:e2e:r2
 ```
 
 Deploy:

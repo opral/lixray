@@ -1,9 +1,12 @@
 import { useAuth } from "@clerk/tanstack-react-start";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { E2E_AUTH_TOKEN } from "./e2e-auth";
+import { isE2eAuthEnabled } from "./e2e-client";
 
 export type WireValue =
 	| { kind: "null" }
 	| { kind: "boolean"; value: boolean }
+	| { kind: "int"; value: number }
 	| { kind: "integer"; value: number }
 	| { kind: "real"; value: number }
 	| { kind: "text"; value: string }
@@ -51,10 +54,17 @@ export class LixrayApiError extends Error {
 
 export function useLixrayApi() {
 	const { getToken } = useAuth();
+	const getTokenRef = useRef(getToken);
+
+	useEffect(() => {
+		getTokenRef.current = getToken;
+	}, [getToken]);
 
 	const request = useCallback(
 		async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-			const token = await getToken();
+			const token = isE2eAuthEnabled
+				? E2E_AUTH_TOKEN
+				: await getTokenRef.current();
 			if (!token) {
 				throw new LixrayApiError(401, {
 					error: { message: "No Clerk session token is available" },
@@ -67,19 +77,25 @@ export function useLixrayApi() {
 				headers.set("content-type", "application/json");
 			}
 
-			const response = await fetch(path, {
-				...init,
-				headers,
-			});
-			const body = await parseResponseBody(response);
+			const { signal, cleanup } = requestSignal(init.signal);
+			try {
+				const response = await fetch(path, {
+					...init,
+					headers,
+					signal,
+				});
+				const body = await parseResponseBody(response);
 
-			if (!response.ok) {
-				throw new LixrayApiError(response.status, body);
+				if (!response.ok) {
+					throw new LixrayApiError(response.status, body);
+				}
+
+				return body as T;
+			} finally {
+				cleanup();
 			}
-
-			return body as T;
 		},
-		[getToken],
+		[],
 	);
 
 	return useMemo(
@@ -93,6 +109,33 @@ export function useLixrayApi() {
 		}),
 		[request],
 	);
+}
+
+function requestSignal(parentSignal: AbortSignal | null | undefined): {
+	signal: AbortSignal;
+	cleanup: () => void;
+} {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => {
+		controller.abort(new Error("Lixray request timed out."));
+	}, 45_000);
+	const abortFromParent = () => controller.abort(parentSignal?.reason);
+
+	if (parentSignal) {
+		if (parentSignal.aborted) {
+			abortFromParent();
+		} else {
+			parentSignal.addEventListener("abort", abortFromParent, { once: true });
+		}
+	}
+
+	return {
+		signal: controller.signal,
+		cleanup: () => {
+			clearTimeout(timeout);
+			parentSignal?.removeEventListener("abort", abortFromParent);
+		},
+	};
 }
 
 async function parseResponseBody(response: Response): Promise<unknown> {
@@ -128,6 +171,7 @@ export function formatWireValue(value: WireValue): string {
 		case "null":
 			return "null";
 		case "boolean":
+		case "int":
 		case "integer":
 		case "real":
 			return String(value.value);

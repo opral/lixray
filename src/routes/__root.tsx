@@ -6,6 +6,7 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { clerkPublishableKey } from "../lib/clerk-env";
 import appCss from "../styles.css?url";
 
 const title = "Lixray";
@@ -45,6 +46,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 			</head>
 			<body>
 				<ClerkProvider
+					publishableKey={clerkPublishableKey}
 					signInUrl="/sign-in"
 					signUpUrl="/sign-up"
 				>

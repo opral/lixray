@@ -6,7 +6,7 @@ export const Route = createFileRoute("/sign-in")({
 	component: SignInPage,
 });
 
-function SignInPage() {
+export function SignInPage() {
 	return (
 		<main className="auth-page">
 			<div className="auth-card">

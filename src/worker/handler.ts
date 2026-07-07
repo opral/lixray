@@ -1,4 +1,5 @@
 import { createClerkClient } from "@clerk/backend";
+import { E2E_AUTH_TOKEN } from "../lib/e2e-auth.ts";
 
 export interface WorkerEnv {
 	SLATEDB_CONTAINER: ContainerNamespace;
@@ -10,6 +11,7 @@ export interface WorkerEnv {
 	R2_SECRET_ACCESS_KEY?: string;
 	R2_REGION?: string;
 	SLATEDB_STORAGE?: string;
+	LIXRAY_E2E_ORG_ID?: string;
 }
 
 export interface ContainerNamespace {
@@ -18,6 +20,12 @@ export interface ContainerNamespace {
 
 export interface ContainerStub {
 	startAndWaitForPorts?(options: {
+		ports?: number | number[];
+		cancellationOptions?: {
+			instanceGetTimeoutMS?: number;
+			portReadyTimeoutMS?: number;
+			waitInterval?: number;
+		};
 		startOptions: { envVars: Record<string, string> };
 	}): Promise<unknown>;
 	fetch(request: Request): Promise<Response>;
@@ -60,6 +68,11 @@ export async function handleRequest(
 
 	const container = env.SLATEDB_CONTAINER.getByName(auth.orgId);
 	await container.startAndWaitForPorts?.({
+		ports: 8080,
+		cancellationOptions: {
+			instanceGetTimeoutMS: 30_000,
+			portReadyTimeoutMS: 30_000,
+		},
 		startOptions: {
 			envVars: containerEnv(env, auth.orgId),
 		},
@@ -71,6 +84,11 @@ export async function authenticateWithClerk(
 	request: Request,
 	env: WorkerEnv,
 ): Promise<AuthResult> {
+	const e2eAuth = authenticateE2e(request, env);
+	if (e2eAuth) {
+		return e2eAuth;
+	}
+
 	if (!env.CLERK_SECRET_KEY) {
 		return {
 			ok: false,
@@ -118,6 +136,34 @@ export async function authenticateWithClerk(
 	}
 
 	return { ok: true, orgId: auth.orgId };
+}
+
+function authenticateE2e(
+	request: Request,
+	env: WorkerEnv,
+): AuthResult | null {
+	if (!env.LIXRAY_E2E_ORG_ID) {
+		return null;
+	}
+
+	if (!isLocalhost(new URL(request.url).hostname)) {
+		return null;
+	}
+
+	if (request.headers.get("Authorization") !== `Bearer ${E2E_AUTH_TOKEN}`) {
+		return null;
+	}
+
+	return { ok: true, orgId: env.LIXRAY_E2E_ORG_ID };
+}
+
+function isLocalhost(hostname: string): boolean {
+	return (
+		hostname === "localhost" ||
+		hostname === "127.0.0.1" ||
+		hostname === "[::1]" ||
+		hostname === "::1"
+	);
 }
 
 export function containerEnv(
