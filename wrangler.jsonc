@@ -1,0 +1,45 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "lixray",
+	"main": "src/worker/index.ts",
+	"compatibility_date": "2026-07-07",
+	"observability": {
+		"enabled": true
+	},
+	"vars": {
+		"R2_ENDPOINT": "",
+		"R2_BUCKET": "",
+		"R2_REGION": "auto",
+		"SLATEDB_PATH": "lixray/default",
+		"SLATEDB_STORAGE": "r2"
+	},
+	"secrets": {
+		"required": [
+			"LIXRAY_AUTH_TOKEN",
+			"R2_ACCESS_KEY_ID",
+			"R2_SECRET_ACCESS_KEY"
+		]
+	},
+	"containers": [
+		{
+			"class_name": "SlateDbContainer",
+			"image": "./Dockerfile",
+			"max_instances": 1,
+			"instance_type": "lite"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "SLATEDB_CONTAINER",
+				"class_name": "SlateDbContainer"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["SlateDbContainer"]
+		}
+	]
+}

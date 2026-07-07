@@ -1,0 +1,24 @@
+{
+	"name": "lixray",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"packageManager": "pnpm@10.13.1",
+	"scripts": {
+		"check": "pnpm typecheck && pnpm test:worker && cargo test",
+		"dev": "wrangler dev --config ./wrangler.jsonc",
+		"dev:memory": "wrangler dev --config ./wrangler.jsonc --var SLATEDB_STORAGE:memory --var R2_ENDPOINT:https://example.invalid --var R2_BUCKET:local-memory",
+		"deploy": "wrangler deploy --config ./wrangler.jsonc",
+		"test:worker": "node --test --experimental-strip-types src/worker/handler.test.ts",
+		"typecheck": "tsc --noEmit",
+		"cf-typegen": "wrangler types --config ./wrangler.jsonc"
+	},
+	"dependencies": {
+		"@cloudflare/containers": "0.3.7"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "4.20260701.1",
+		"typescript": "^5.9.2",
+		"wrangler": "^4.107.0"
+	}
+}
