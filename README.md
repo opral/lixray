@@ -22,12 +22,12 @@ Cloudflare state:
 
 - `GET /healthz` returns Worker health without auth or container startup.
 - `GET /v1/container-health` checks the Rust container after auth.
-- `GET /v1/lix/branches` lists Lix branches so clients can discover the
+- `GET /v1/branches` lists Lix branches so clients can discover the
   generated `main` branch id.
-- `POST /v1/lix/createBranch` creates a branch from a supplied `branchId`.
-- `POST /v1/lix/execute` executes one Lix SQL statement on a supplied
+- `POST /v1/createBranch` creates a branch from a supplied `branchId`.
+- `POST /v1/execute` executes one Lix SQL statement on a supplied
   `branchId`.
-- `POST /v1/lix/observe` streams Lix observe events as POST SSE.
+- `POST /v1/observe` streams Lix observe events as POST SSE.
 
 All `/v1/*` routes require:
 
@@ -49,14 +49,14 @@ TOKEN='<LIXRAY_AUTH_TOKEN>'
 
 curl -i https://api.lixray.com/healthz
 
-curl -i https://api.lixray.com/v1/lix/branches \
+curl -i https://api.lixray.com/v1/branches \
 	-H "Authorization: Bearer $TOKEN"
 
-BRANCH_ID="$(curl -fsS https://api.lixray.com/v1/lix/branches \
+BRANCH_ID="$(curl -fsS https://api.lixray.com/v1/branches \
 	-H "Authorization: Bearer $TOKEN" \
 	| jq -r '.branches[] | select(.name == "main") | .id')"
 
-curl -i -X POST https://api.lixray.com/v1/lix/execute \
+curl -i -X POST https://api.lixray.com/v1/execute \
 	-H "Authorization: Bearer $TOKEN" \
 	-H "content-type: application/json" \
 	--data-binary @- <<EOF
@@ -70,7 +70,7 @@ curl -i -X POST https://api.lixray.com/v1/lix/execute \
 }
 EOF
 
-curl -i -X POST https://api.lixray.com/v1/lix/execute \
+curl -i -X POST https://api.lixray.com/v1/execute \
 	-H "Authorization: Bearer $TOKEN" \
 	-H "content-type: application/json" \
 	--data-binary @- <<EOF
@@ -81,7 +81,7 @@ curl -i -X POST https://api.lixray.com/v1/lix/execute \
 }
 EOF
 
-curl -i -N -X POST https://api.lixray.com/v1/lix/observe \
+curl -i -N -X POST https://api.lixray.com/v1/observe \
 	-H "Authorization: Bearer $TOKEN" \
 	-H "content-type: application/json" \
 	--data-binary @- <<EOF
@@ -117,11 +117,11 @@ TOKEN='dev-token'
 
 curl -i http://127.0.0.1:8787/healthz
 
-BRANCH_ID="$(curl -fsS http://127.0.0.1:8787/v1/lix/branches \
+BRANCH_ID="$(curl -fsS http://127.0.0.1:8787/v1/branches \
 	-H "Authorization: Bearer $TOKEN" \
 	| jq -r '.branches[] | select(.name == "main") | .id')"
 
-curl -i -X POST http://127.0.0.1:8787/v1/lix/execute \
+curl -i -X POST http://127.0.0.1:8787/v1/execute \
 	-H "Authorization: Bearer $TOKEN" \
 	-H "content-type: application/json" \
 	--data-binary "{\"branchId\":\"$BRANCH_ID\",\"sql\":\"SELECT 1 AS ok\"}"

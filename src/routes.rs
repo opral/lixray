@@ -24,10 +24,10 @@ pub struct AppState {
 pub fn router(service: Arc<LixService>) -> Router {
     Router::new()
         .route("/v1/container-health", get(container_health))
-        .route("/v1/lix/branches", get(list_branches))
-        .route("/v1/lix/createBranch", post(create_branch))
-        .route("/v1/lix/execute", post(execute))
-        .route("/v1/lix/observe", post(observe))
+        .route("/v1/branches", get(list_branches))
+        .route("/v1/createBranch", post(create_branch))
+        .route("/v1/execute", post(execute))
+        .route("/v1/observe", post(observe))
         .with_state(AppState { service })
 }
 
@@ -377,7 +377,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
-                    .uri("/v1/lix/branches")
+                    .uri("/v1/branches")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -409,7 +409,7 @@ mod tests {
         let insert = json_request(
             app.clone(),
             Method::POST,
-            "/v1/lix/execute",
+            "/v1/execute",
             json!({
                 "branchId": branch_id,
                 "sql": "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
@@ -427,7 +427,7 @@ mod tests {
         let select = json_request(
             app,
             Method::POST,
-            "/v1/lix/execute",
+            "/v1/execute",
             json!({
                 "branchId": branch_id,
                 "sql": "SELECT value FROM lix_key_value WHERE key = $1",
@@ -453,7 +453,7 @@ mod tests {
         let response = json_request(
             app,
             Method::POST,
-            "/v1/lix/createBranch",
+            "/v1/createBranch",
             json!({
                 "branchId": branch_id,
                 "id": "http-draft",
@@ -475,7 +475,7 @@ mod tests {
         let draft = json_request(
             app.clone(),
             Method::POST,
-            "/v1/lix/createBranch",
+            "/v1/createBranch",
             json!({
                 "branchId": main_branch_id,
                 "id": "http-branch-context",
@@ -489,7 +489,7 @@ mod tests {
         let insert = json_request(
             app.clone(),
             Method::POST,
-            "/v1/lix/execute",
+            "/v1/execute",
             json!({
                 "branchId": main_branch_id,
                 "sql": "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
@@ -505,7 +505,7 @@ mod tests {
         let main_select = json_request(
             app.clone(),
             Method::POST,
-            "/v1/lix/execute",
+            "/v1/execute",
             json!({
                 "branchId": main_branch_id,
                 "sql": "SELECT path FROM lix_file WHERE path = $1",
@@ -519,7 +519,7 @@ mod tests {
         let draft_select = json_request(
             app,
             Method::POST,
-            "/v1/lix/execute",
+            "/v1/execute",
             json!({
                 "branchId": "http-branch-context",
                 "sql": "SELECT path FROM lix_file WHERE path = $1",
@@ -549,7 +549,7 @@ mod tests {
         let response = json_request(
             app.clone(),
             Method::POST,
-            "/v1/lix/observe",
+            "/v1/observe",
             json!({
                 "branchId": branch_id,
                 "sql": "SELECT key FROM lix_key_value WHERE key = $1",
@@ -571,7 +571,7 @@ mod tests {
         let insert = json_request(
             app,
             Method::POST,
-            "/v1/lix/execute",
+            "/v1/execute",
             json!({
                 "branchId": branch_id,
                 "sql": "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
@@ -596,7 +596,7 @@ mod tests {
         let response = json_request(
             app,
             Method::POST,
-            "/v1/lix/execute",
+            "/v1/execute",
             json!({
                 "sql": "SELECT 1"
             }),
@@ -615,7 +615,7 @@ mod tests {
         let response = json_request(
             app,
             Method::POST,
-            "/v1/lix/observe",
+            "/v1/observe",
             json!({
                 "branchId": branch_id,
                 "sql": "INSERT INTO lix_key_value (key, value) VALUES ('bad', 'bad')"
@@ -634,7 +634,7 @@ mod tests {
         let response = json_request(
             app,
             Method::POST,
-            "/v1/lix/execute",
+            "/v1/execute",
             json!({
                 "branchId": "missing-branch",
                 "sql": "SELECT lix_active_branch_commit_id()"
