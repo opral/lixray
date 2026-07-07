@@ -143,7 +143,6 @@ Non-secret production values are checked into `wrangler.jsonc`:
 
 ```text
 CLERK_APP_ID=app_3GBViGp1pL2PtKZ2jU5vMWQcSik
-CLERK_PUBLISHABLE_KEY=pk_live_Y2xlcmsubGl4cmF5LmNvbSQ
 VITE_CLERK_PUBLISHABLE_KEY=pk_live_Y2xlcmsubGl4cmF5LmNvbSQ
 R2_ENDPOINT=https://11a1a6f76d167248cc6987e978efb7e5.r2.cloudflarestorage.com
 R2_BUCKET=lixray

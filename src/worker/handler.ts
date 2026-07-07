@@ -3,7 +3,6 @@ import { createClerkClient } from "@clerk/backend";
 export interface WorkerEnv {
 	SLATEDB_CONTAINER: ContainerNamespace;
 	CLERK_SECRET_KEY?: string;
-	CLERK_PUBLISHABLE_KEY?: string;
 	VITE_CLERK_PUBLISHABLE_KEY?: string;
 	R2_ENDPOINT?: string;
 	R2_BUCKET?: string;
@@ -81,11 +80,10 @@ export async function authenticateWithClerk(
 		};
 	}
 
-	const publishableKey = env.CLERK_PUBLISHABLE_KEY ?? env.VITE_CLERK_PUBLISHABLE_KEY;
-	if (!publishableKey) {
+	if (!env.VITE_CLERK_PUBLISHABLE_KEY) {
 		return {
 			ok: false,
-			response: new Response("CLERK_PUBLISHABLE_KEY is not configured\n", {
+			response: new Response("VITE_CLERK_PUBLISHABLE_KEY is not configured\n", {
 				status: 500,
 			}),
 		};
@@ -93,7 +91,7 @@ export async function authenticateWithClerk(
 
 	const client = createClerkClient({
 		secretKey: env.CLERK_SECRET_KEY,
-		publishableKey,
+		publishableKey: env.VITE_CLERK_PUBLISHABLE_KEY,
 	});
 	const requestState = await client.authenticateRequest(request);
 

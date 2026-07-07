@@ -5,7 +5,6 @@ export interface Env {
 	SLATEDB_CONTAINER: DurableObjectNamespace<SlateDbContainer>;
 	CLERK_APP_ID?: string;
 	CLERK_SECRET_KEY?: string;
-	CLERK_PUBLISHABLE_KEY?: string;
 	VITE_CLERK_PUBLISHABLE_KEY?: string;
 	R2_ENDPOINT?: string;
 	R2_BUCKET?: string;

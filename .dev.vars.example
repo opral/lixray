@@ -1,13 +1,9 @@
 CLERK_APP_ID=<clerk-app-id>
-CLERK_PUBLISHABLE_KEY=<clerk-publishable-key>
-VITE_CLERK_PUBLISHABLE_KEY=<clerk-publishable-key>
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_Y2FyaW5nLWxvY3VzdC04MC5jbGVyay5hY2NvdW50cy5kZXYk
 CLERK_SECRET_KEY=<clerk-secret-key>
 
-# Use memory mode for local development without R2. The Worker still injects
-# SLATEDB_PATH from the active Clerk Organization id when each container starts.
 SLATEDB_STORAGE=memory
 
-# Required for production R2-backed runs.
 R2_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
 R2_BUCKET=<bucket-name>
 R2_ACCESS_KEY_ID=<access-key-id>
