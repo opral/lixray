@@ -8,7 +8,7 @@
 		"check": "pnpm typecheck && pnpm test:worker && cargo test",
 		"dev": "wrangler dev --config ./wrangler.jsonc",
 		"dev:memory": "wrangler dev --config ./wrangler.jsonc --var SLATEDB_STORAGE:memory --var R2_ENDPOINT:https://example.invalid --var R2_BUCKET:local-memory",
-		"deploy": "wrangler deploy --config ./wrangler.jsonc",
+		"deploy:worker": "wrangler deploy --config ./wrangler.jsonc",
 		"test:worker": "node --test --experimental-strip-types src/worker/handler.test.ts",
 		"typecheck": "tsc --noEmit",
 		"cf-typegen": "wrangler types --config ./wrangler.jsonc"
