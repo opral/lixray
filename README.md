@@ -155,11 +155,22 @@ deploy` is pnpm's own workspace command.
 
 Workers Builds should use:
 
-- Project root: `submodule/lixray`
+- Project root: `/` when connected to the `lixray` repository, or
+  `submodule/lixray` when connected through the parent `flashtype` repository
 - Production branch: `main`
-- Build command: `pnpm check`
+- Build command: `pnpm run check:cloudflare`
 - Deploy command: `pnpm run deploy:worker`
 - Worker name: `lixray`
+
+Enable Workers Builds build caching. The Dockerfile uses BuildKit cache mounts
+for the Cargo registry, git checkouts, and target directory; without Cloudflare's
+build cache enabled, every deployment recompiles the Lix/DataFusion dependency
+graph from scratch.
+
+Do not run `cargo test` in the Workers Builds build command. `wrangler deploy`
+builds the container image and compiles the Rust release binary, so running the
+full `pnpm check` first causes two Rust compiles in the same Cloudflare build and
+can exceed the 20 minute Workers Builds timeout.
 
 ## Runtime config
 

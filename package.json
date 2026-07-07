@@ -5,7 +5,8 @@
 	"type": "module",
 	"packageManager": "pnpm@10.13.1",
 	"scripts": {
-		"check": "pnpm typecheck && pnpm test:worker && cargo test",
+		"check": "pnpm run check:cloudflare && cargo test",
+		"check:cloudflare": "pnpm typecheck && pnpm test:worker",
 		"dev": "wrangler dev --config ./wrangler.jsonc",
 		"dev:memory": "wrangler dev --config ./wrangler.jsonc --var SLATEDB_STORAGE:memory --var R2_ENDPOINT:https://example.invalid --var R2_BUCKET:local-memory",
 		"deploy:worker": "wrangler deploy --config ./wrangler.jsonc",
