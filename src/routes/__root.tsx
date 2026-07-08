@@ -6,6 +6,7 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { Toaster } from "~/components/ui/sonner";
 import { clerkPublishableKey } from "../lib/clerk-env";
 import appCss from "../styles.css?url";
 
@@ -52,6 +53,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 				>
 					{children}
 				</ClerkProvider>
+				<Toaster />
 				<Scripts />
 			</body>
 		</html>
