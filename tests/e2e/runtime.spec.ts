@@ -1,4 +1,8 @@
 import { expect, expectOk, test } from "./fixtures";
+import type {
+	BranchesResponse,
+	ExecuteResponse,
+} from "../../src/lib/lixray-api";
 
 test("sign-in route renders without runtime errors", async ({ page }) => {
 	await page.goto("/sign-in");
@@ -6,7 +10,9 @@ test("sign-in route renders without runtime errors", async ({ page }) => {
 	await expect(page.locator(".auth-card")).toBeVisible();
 });
 
-test("sql console loads branches and executes a trivial query", async ({ page }) => {
+test("sql console loads branches and executes a trivial query", async ({
+	page,
+}) => {
 	const branchesResponsePromise = page.waitForResponse(
 		(response) =>
 			response.url().includes("/v1/branches") &&
@@ -16,9 +22,11 @@ test("sql console loads branches and executes a trivial query", async ({ page })
 	await page.goto("/sql");
 	const branchesResponse = await branchesResponsePromise;
 
-	await expect(page.getByRole("heading", { name: "SQL console" })).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "SQL console" }),
+	).toBeVisible();
 	await expectOk(branchesResponse);
-	const branchesBody = await branchesResponse.json();
+	const branchesBody = (await branchesResponse.json()) as BranchesResponse;
 	expect(branchesBody.branches, JSON.stringify(branchesBody)).toEqual(
 		expect.any(Array),
 	);
@@ -52,7 +60,7 @@ test("sql console loads branches and executes a trivial query", async ({ page })
 	const executeResponse = await executeResponsePromise;
 
 	await expectOk(executeResponse);
-	const executeBody = await executeResponse.json();
+	const executeBody = (await executeResponse.json()) as ExecuteResponse;
 	expect(executeBody.columns, JSON.stringify(executeBody)).toEqual(["one"]);
 	expect(executeBody.rows, JSON.stringify(executeBody)).toEqual([
 		[{ kind: "int", value: 1 }],

@@ -22,9 +22,7 @@ export function DeleteDialog({
 }) {
 	const hasDirs = entries.some((entry) => entry.kind === "dir");
 	const label =
-		entries.length === 1
-			? `“${entries[0].name}”`
-			: `${entries.length} items`;
+		entries.length === 1 ? `“${entries[0].name}”` : `${entries.length} items`;
 
 	return (
 		<AlertDialog open={entries.length > 0} onOpenChange={onOpenChange}>

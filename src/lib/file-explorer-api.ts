@@ -47,7 +47,9 @@ export function normalizeDirPath(raw: unknown): string {
 }
 
 export function parentDirPath(dirPath: string): string {
-	return normalizeDirPath(dirPath.split("/").filter(Boolean).slice(0, -1).join("/"));
+	return normalizeDirPath(
+		dirPath.split("/").filter(Boolean).slice(0, -1).join("/"),
+	);
 }
 
 const UPLOAD_BATCH_MAX_FILES = 10;
@@ -102,25 +104,21 @@ export function useFileExplorerApi() {
 			]);
 
 			return [
-				...dirs.rows.map(
-					(row): DirEntry => ({
-						kind: "dir",
-						id: asText(row[0]),
-						path: asText(row[1]),
-						name: asText(row[2]),
-						updatedAt: asText(row[3]),
-					}),
-				),
-				...files.rows.map(
-					(row): FileEntry => ({
-						kind: "file",
-						id: asText(row[0]),
-						path: asText(row[1]),
-						name: asText(row[2]),
-						size: sizeFromMetadata(row[3]),
-						updatedAt: asText(row[4]),
-					}),
-				),
+				...dirs.rows.map((row): DirEntry => ({
+					kind: "dir",
+					id: asText(row[0]),
+					path: asText(row[1]),
+					name: asText(row[2]),
+					updatedAt: asText(row[3]),
+				})),
+				...files.rows.map((row): FileEntry => ({
+					kind: "file",
+					id: asText(row[0]),
+					path: asText(row[1]),
+					name: asText(row[2]),
+					size: sizeFromMetadata(row[3]),
+					updatedAt: asText(row[4]),
+				})),
 			];
 		}
 
@@ -160,7 +158,9 @@ export function useFileExplorerApi() {
 			dirPath: string,
 			items: Array<UploadItem>,
 		): Promise<void> {
-			const batches: Array<Array<{ path: string; base64: string; size: number }>> = [];
+			const batches: Array<
+				Array<{ path: string; base64: string; size: number }>
+			> = [];
 			let current: Array<{ path: string; base64: string; size: number }> = [];
 			let currentChars = 0;
 			for (const item of items) {
@@ -188,7 +188,10 @@ export function useFileExplorerApi() {
 			let uploaded = 0;
 			for (const batch of batches) {
 				const placeholders = batch
-					.map((_, index) => `($${index * 3 + 1}, $${index * 3 + 2}, $${index * 3 + 3})`)
+					.map(
+						(_, index) =>
+							`($${index * 3 + 1}, $${index * 3 + 2}, $${index * 3 + 3})`,
+					)
 					.join(", ");
 				const params = batch.flatMap((file): Array<WireValue> => [
 					text(file.path),
@@ -271,7 +274,10 @@ export function useFileExplorerApi() {
 					filesToFetch.push({ id: entry.id, zipPath: entry.name });
 				} else {
 					const basePrefix = parentDirPath(entry.path);
-					for (const subDirPath of await listSubtreeDirs(branchId, entry.path)) {
+					for (const subDirPath of await listSubtreeDirs(
+						branchId,
+						entry.path,
+					)) {
 						zipEntries[subDirPath.slice(basePrefix.length)] = new Uint8Array(0);
 					}
 					for (const file of await listSubtreeFiles(branchId, entry.path)) {
@@ -287,7 +293,7 @@ export function useFileExplorerApi() {
 				zipEntries[file.zipPath] = await fetchFileBytes(branchId, file.id);
 			});
 
-			return zipSync(zipEntries) as Uint8Array<ArrayBuffer>;
+			return zipSync(zipEntries);
 		}
 
 		async function renameEntry(

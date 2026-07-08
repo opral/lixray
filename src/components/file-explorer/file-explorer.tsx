@@ -31,7 +31,11 @@ type DialogState =
 	| { type: "delete"; entries: Array<ExplorerEntry> }
 	| null;
 
-export function FileExplorer({ organizationName }: { organizationName: string }) {
+export function FileExplorer({
+	organizationName,
+}: {
+	organizationName: string;
+}) {
 	const api = useFileExplorerApi();
 	const navigate = useNavigate();
 	const search = useSearch({ from: "/" });
@@ -54,7 +58,10 @@ export function FileExplorer({ organizationName }: { organizationName: string })
 			const response = await api.listBranches();
 			setBranches(response.branches);
 			setActiveBranchId((current) => {
-				if (current && response.branches.some((branch) => branch.id === current)) {
+				if (
+					current &&
+					response.branches.some((branch) => branch.id === current)
+				) {
 					return current;
 				}
 				return (
@@ -104,7 +111,9 @@ export function FileExplorer({ organizationName }: { organizationName: string })
 		}
 		const oversize = items.find((item) => item.bytes.length > MAX_FILE_BYTES);
 		if (oversize) {
-			toast.error(`“${oversize.relativePath}” is larger than 64 MB and cannot be uploaded.`);
+			toast.error(
+				`“${oversize.relativePath}” is larger than 64 MB and cannot be uploaded.`,
+			);
 			return;
 		}
 		if (items.some((item) => item.bytes.length > WARN_FILE_BYTES)) {
@@ -128,7 +137,9 @@ export function FileExplorer({ organizationName }: { organizationName: string })
 			);
 		} catch (caught) {
 			if (caught instanceof UploadError) {
-				toast.error(`Uploaded ${caught.uploaded} of ${caught.total} files: ${caught.message}`);
+				toast.error(
+					`Uploaded ${caught.uploaded} of ${caught.total} files: ${caught.message}`,
+				);
 			} else {
 				toast.error(formatCaughtError(caught));
 			}
@@ -182,7 +193,10 @@ export function FileExplorer({ organizationName }: { organizationName: string })
 				const zipName =
 					toDownload.length === 1 ? `${first.name}.zip` : "lixray-files.zip";
 				const bytes = await api.buildZip(activeBranchId, toDownload);
-				triggerBrowserDownload(zipName, new Blob([bytes], { type: "application/zip" }));
+				triggerBrowserDownload(
+					zipName,
+					new Blob([bytes], { type: "application/zip" }),
+				);
 				toast.success(`Downloaded ${zipName}`);
 			}
 		} catch (caught) {
@@ -216,7 +230,8 @@ export function FileExplorer({ organizationName }: { organizationName: string })
 		})();
 	};
 
-	const selectedEntries = entries?.filter((entry) => selected.has(entry.id)) ?? [];
+	const selectedEntries =
+		entries?.filter((entry) => selected.has(entry.id)) ?? [];
 
 	return (
 		<>
@@ -259,7 +274,9 @@ export function FileExplorer({ organizationName }: { organizationName: string })
 						onUploadFiles={() => fileInputRef.current?.click()}
 						onUploadFolder={() => folderInputRef.current?.click()}
 						onDownloadSelected={() => void downloadEntries(selectedEntries)}
-						onDeleteSelected={() => setDialog({ type: "delete", entries: selectedEntries })}
+						onDeleteSelected={() =>
+							setDialog({ type: "delete", entries: selectedEntries })
+						}
 						onClearSelection={() => setSelected(new Set())}
 					/>
 					<ExplorerBreadcrumb dirPath={dirPath} />
@@ -270,7 +287,11 @@ export function FileExplorer({ organizationName }: { organizationName: string })
 							<p role="alert" className="text-sm text-destructive">
 								{listError}
 							</p>
-							<Button variant="outline" size="sm" onClick={() => void refresh()}>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => void refresh()}
+							>
 								Retry
 							</Button>
 						</div>
@@ -285,7 +306,10 @@ export function FileExplorer({ organizationName }: { organizationName: string })
 							data-testid="explorer-empty"
 							className="flex flex-col items-center justify-center gap-2 py-16 text-center"
 						>
-							<FolderOpen aria-hidden="true" className="size-8 text-muted-foreground" />
+							<FolderOpen
+								aria-hidden="true"
+								className="size-8 text-muted-foreground"
+							/>
 							<p className="text-sm font-medium">This folder is empty</p>
 							<p className="text-sm text-muted-foreground">
 								Drag files here, or use the Upload button.
@@ -298,7 +322,9 @@ export function FileExplorer({ organizationName }: { organizationName: string })
 							onSelectedChange={setSelected}
 							onDownload={(entry) => void downloadEntries([entry])}
 							onRename={(entry) => setDialog({ type: "rename", entry })}
-							onDelete={(entry) => setDialog({ type: "delete", entries: [entry] })}
+							onDelete={(entry) =>
+								setDialog({ type: "delete", entries: [entry] })
+							}
 						/>
 					)}
 				</div>

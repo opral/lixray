@@ -9,7 +9,8 @@ import {
 } from "~/lib/lixray-api";
 import { formatCaughtError } from "~/lib/format";
 
-const defaultSql = "SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id";
+const defaultSql =
+	"SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id";
 const defaultParams = "[]";
 
 export function SqlConsole({ organizationName }: { organizationName: string }) {
@@ -35,7 +36,10 @@ export function SqlConsole({ organizationName }: { organizationName: string }) {
 			const response = await api.listBranches();
 			setBranches(response.branches);
 			setActiveBranchId((current) => {
-				if (current && response.branches.some((branch) => branch.id === current)) {
+				if (
+					current &&
+					response.branches.some((branch) => branch.id === current)
+				) {
 					return current;
 				}
 				return (
@@ -185,7 +189,8 @@ function ResultTable({ result }: { result: ExecuteResponse }) {
 		<div className="result-shell" data-testid="query-result">
 			<div className="result-meta">
 				<span>
-					<TableProperties size={14} aria-hidden="true" /> {result.rows.length} rows
+					<TableProperties size={14} aria-hidden="true" /> {result.rows.length}{" "}
+					rows
 				</span>
 				<span>{result.rowsAffected} rows affected</span>
 				<span>{result.notices.length} notices</span>

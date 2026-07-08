@@ -8,7 +8,7 @@ import {
 } from "./handler.ts";
 import { E2E_AUTH_TOKEN } from "../lib/e2e-auth.ts";
 
-test("GET /healthz returns Worker health without auth or proxying", async () => {
+void test("GET /healthz returns Worker health without auth or proxying", async () => {
 	let proxied = false;
 	const response = await handleRequest(
 		new Request("https://example.test/healthz"),
@@ -26,14 +26,16 @@ test("GET /healthz returns Worker health without auth or proxying", async () => 
 	assert.equal(proxied, false);
 });
 
-test("non-/v1 routes delegate to the frontend fallback", async () => {
+void test("non-/v1 routes delegate to the frontend fallback", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/"),
 		env({}),
 		{
 			authenticate: authenticated("org_123"),
 			fallback: async (request) =>
-				new Response(`frontend ${new URL(request.url).pathname}`, { status: 209 }),
+				new Response(`frontend ${new URL(request.url).pathname}`, {
+					status: 209,
+				}),
 		},
 	);
 
@@ -41,7 +43,7 @@ test("non-/v1 routes delegate to the frontend fallback", async () => {
 	assert.equal(await response.text(), "frontend /");
 });
 
-test("/v1 routes return 401 when Clerk auth fails", async () => {
+void test("/v1 routes return 401 when Clerk auth fails", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/v1/container-health"),
 		env({}),
@@ -52,7 +54,7 @@ test("/v1 routes return 401 when Clerk auth fails", async () => {
 	assert.equal(await response.text(), "Unauthorized\n");
 });
 
-test("/v1 routes return 403 without an active workspace organization", async () => {
+void test("/v1 routes return 403 without an active workspace organization", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/v1/container-health"),
 		env({}),
@@ -63,7 +65,7 @@ test("/v1 routes return 403 without an active workspace organization", async () 
 	assert.equal(await response.text(), "Active workspace required\n");
 });
 
-test("/v1 routes with Clerk org auth proxy to the org container", async () => {
+void test("/v1 routes with Clerk org auth proxy to the org container", async () => {
 	const calls: Array<unknown> = [];
 	let startOptions: unknown;
 	const response = await handleRequest(
@@ -123,7 +125,7 @@ test("/v1 routes with Clerk org auth proxy to the org container", async () => {
 	]);
 });
 
-test("local e2e auth proxies to the configured e2e org container", async () => {
+void test("local e2e auth proxies to the configured e2e org container", async () => {
 	const calls: Array<unknown> = [];
 	const response = await handleRequest(
 		new Request("http://localhost/v1/container-health", {
@@ -150,7 +152,7 @@ test("local e2e auth proxies to the configured e2e org container", async () => {
 	]);
 });
 
-test("e2e auth is ignored outside localhost", async () => {
+void test("e2e auth is ignored outside localhost", async () => {
 	const response = await authenticateWithClerk(
 		new Request("https://example.test/v1/container-health", {
 			headers: { Authorization: `Bearer ${E2E_AUTH_TOKEN}` },
@@ -168,7 +170,7 @@ test("e2e auth is ignored outside localhost", async () => {
 	}
 });
 
-test("legacy bearer token does not bypass Clerk auth", async () => {
+void test("legacy bearer token does not bypass Clerk auth", async () => {
 	let proxied = false;
 	const response = await handleRequest(
 		new Request("https://example.test/v1/container-health", {
@@ -222,5 +224,5 @@ function env(options: {
 				})),
 		},
 		...options.extra,
-	} as WorkerEnv;
+	};
 }

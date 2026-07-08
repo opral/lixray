@@ -10,6 +10,7 @@ import {
 	Folder,
 	type LucideIcon,
 } from "lucide-react";
+import { createElement } from "react";
 import { cn } from "~/lib/utils";
 
 const EXTENSION_ICONS: Record<string, LucideIcon> = {
@@ -89,16 +90,19 @@ export function EntryIcon({
 		return (
 			<Folder
 				aria-hidden="true"
-				className={cn("size-4 shrink-0 fill-muted-foreground/20 text-muted-foreground", className)}
+				className={cn(
+					"size-4 shrink-0 fill-muted-foreground/20 text-muted-foreground",
+					className,
+				)}
 			/>
 		);
 	}
-	const extension = name.includes(".") ? name.split(".").pop()?.toLowerCase() : undefined;
+	const extension = name.includes(".")
+		? name.split(".").pop()?.toLowerCase()
+		: undefined;
 	const Icon = (extension && EXTENSION_ICONS[extension]) || File;
-	return (
-		<Icon
-			aria-hidden="true"
-			className={cn("size-4 shrink-0 text-muted-foreground", className)}
-		/>
-	);
+	return createElement(Icon, {
+		"aria-hidden": true,
+		className: cn("size-4 shrink-0 text-muted-foreground", className),
+	});
 }

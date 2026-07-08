@@ -63,7 +63,12 @@ export function ExplorerToolbar({
 					<span className="text-sm text-muted-foreground">
 						{selectedCount} selected
 					</span>
-					<Button variant="outline" size="sm" onClick={onDownloadSelected} disabled={busy}>
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={onDownloadSelected}
+						disabled={busy}
+					>
 						<Download aria-hidden="true" />
 						Download
 					</Button>

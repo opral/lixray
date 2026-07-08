@@ -65,9 +65,15 @@ export function NameDialog({
 	};
 
 	return (
-		<Dialog open={open} onOpenChange={(next) => !submitting && onOpenChange(next)}>
+		<Dialog
+			open={open}
+			onOpenChange={(next) => !submitting && onOpenChange(next)}
+		>
 			<DialogContent className="sm:max-w-md">
-				<form onSubmit={handleSubmit} className="grid gap-4">
+				<form
+					onSubmit={(event) => void handleSubmit(event)}
+					className="grid gap-4"
+				>
 					<DialogHeader>
 						<DialogTitle>{title}</DialogTitle>
 						<DialogDescription>{description}</DialogDescription>

@@ -187,7 +187,7 @@ export function formatWireValue(value: WireValue): string {
 }
 
 export function parseParamsJson(value: string): Array<WireValue> {
-	const parsed = JSON.parse(value);
+	const parsed: unknown = JSON.parse(value);
 	if (!Array.isArray(parsed)) {
 		throw new Error("Params must be a JSON array of Lix wire values.");
 	}

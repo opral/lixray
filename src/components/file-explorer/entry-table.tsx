@@ -55,11 +55,14 @@ export function EntryTable({
 		[entries],
 	);
 
-	const allSelected = sorted.length > 0 && sorted.every((entry) => selected.has(entry.id));
+	const allSelected =
+		sorted.length > 0 && sorted.every((entry) => selected.has(entry.id));
 	const someSelected = sorted.some((entry) => selected.has(entry.id));
 
 	const toggleAll = () => {
-		onSelectedChange(allSelected ? new Set() : new Set(sorted.map((entry) => entry.id)));
+		onSelectedChange(
+			allSelected ? new Set() : new Set(sorted.map((entry) => entry.id)),
+		);
 	};
 
 	const toggleOne = (id: string) => {
@@ -78,7 +81,9 @@ export function EntryTable({
 				<TableRow className="hover:bg-transparent">
 					<TableHead className="w-10">
 						<Checkbox
-							checked={allSelected ? true : someSelected ? "indeterminate" : false}
+							checked={
+								allSelected ? true : someSelected ? "indeterminate" : false
+							}
 							onCheckedChange={toggleAll}
 							aria-label="Select all"
 						/>
@@ -162,7 +167,10 @@ export function EntryTable({
 										Rename
 									</DropdownMenuItem>
 									<DropdownMenuSeparator />
-									<DropdownMenuItem variant="destructive" onSelect={() => onDelete(entry)}>
+									<DropdownMenuItem
+										variant="destructive"
+										onSelect={() => onDelete(entry)}
+									>
 										<Trash2 aria-hidden="true" />
 										Delete
 									</DropdownMenuItem>

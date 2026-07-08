@@ -20,9 +20,7 @@ export default defineConfig({
 						config.vars?.LIXRAY_E2E_ORG_ID ??
 						"",
 					SLATEDB_STORAGE:
-						process.env.SLATEDB_STORAGE ??
-						config.vars?.SLATEDB_STORAGE ??
-						"r2",
+						process.env.SLATEDB_STORAGE ?? config.vars?.SLATEDB_STORAGE ?? "r2",
 				},
 			}),
 		}),

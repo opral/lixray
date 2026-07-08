@@ -34,7 +34,10 @@ export function formatRelativeTime(iso: string): string {
 	const elapsedSeconds = (timestamp - Date.now()) / 1000;
 	for (const { unit, seconds } of RELATIVE_TIME_STEPS) {
 		if (Math.abs(elapsedSeconds) >= seconds) {
-			return relativeTimeFormat.format(Math.round(elapsedSeconds / seconds), unit);
+			return relativeTimeFormat.format(
+				Math.round(elapsedSeconds / seconds),
+				unit,
+			);
 		}
 	}
 	return "just now";
@@ -52,7 +55,8 @@ export function formatSize(bytes: number | null): string {
 		value /= 1000;
 		unitIndex += 1;
 	}
-	const rounded = unitIndex === 0 ? String(value) : value.toFixed(value < 10 ? 1 : 0);
+	const rounded =
+		unitIndex === 0 ? String(value) : value.toFixed(value < 10 ? 1 : 0);
 	return `${rounded} ${SIZE_UNITS[unitIndex]}`;
 }
 

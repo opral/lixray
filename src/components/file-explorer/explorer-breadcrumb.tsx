@@ -28,7 +28,11 @@ export function ExplorerBreadcrumb({ dirPath }: { dirPath: string }) {
 						</BreadcrumbPage>
 					) : (
 						<BreadcrumbLink asChild>
-							<Link to="/" search={{}} className="inline-flex items-center gap-1.5">
+							<Link
+								to="/"
+								search={{}}
+								className="inline-flex items-center gap-1.5"
+							>
 								<HardDrive aria-hidden="true" className="size-3.5" />
 								Home
 							</Link>

@@ -70,9 +70,11 @@ async function readAllEntries(
 	const all: Array<FileSystemEntry> = [];
 	// readEntries returns at most ~100 entries per call; loop until exhausted.
 	for (;;) {
-		const batch = await new Promise<Array<FileSystemEntry>>((resolve, reject) => {
-			reader.readEntries(resolve, reject);
-		});
+		const batch = await new Promise<Array<FileSystemEntry>>(
+			(resolve, reject) => {
+				reader.readEntries(resolve, reject);
+			},
+		);
 		if (batch.length === 0) {
 			return all;
 		}

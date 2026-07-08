@@ -21,7 +21,10 @@ test("file explorer supports create, upload, navigate, rename, download, delete"
 	// Create a folder.
 	await page.getByRole("button", { name: "New folder" }).click();
 	await page.getByRole("dialog").getByLabel("Name").fill("docs");
-	await page.getByRole("dialog").getByRole("button", { name: "Create" }).click();
+	await page
+		.getByRole("dialog")
+		.getByRole("button", { name: "Create" })
+		.click();
 	const docsRow = page.getByTestId("entry-row").filter({ hasText: "docs" });
 	await expect(docsRow).toBeVisible({ timeout: 55_000 });
 
@@ -31,7 +34,9 @@ test("file explorer supports create, upload, navigate, rename, download, delete"
 		mimeType: "text/plain",
 		buffer: Buffer.from("hello lixray"),
 	});
-	const fileRow = page.getByTestId("entry-row").filter({ hasText: "hello.txt" });
+	const fileRow = page
+		.getByTestId("entry-row")
+		.filter({ hasText: "hello.txt" });
 	await expect(fileRow).toBeVisible({ timeout: 55_000 });
 	await expect(fileRow.getByText("12 B")).toBeVisible();
 	await expect(fileRow.getByRole("cell").nth(3)).toContainText(/now|ago/);
@@ -57,7 +62,10 @@ test("file explorer supports create, upload, navigate, rename, download, delete"
 	await fileRow.getByRole("button", { name: "Actions for hello.txt" }).click();
 	await page.getByRole("menuitem", { name: "Rename" }).click();
 	await page.getByRole("dialog").getByLabel("Name").fill("hello2.txt");
-	await page.getByRole("dialog").getByRole("button", { name: "Rename" }).click();
+	await page
+		.getByRole("dialog")
+		.getByRole("button", { name: "Rename" })
+		.click();
 	const renamedRow = page
 		.getByTestId("entry-row")
 		.filter({ hasText: "hello2.txt" });
@@ -65,7 +73,9 @@ test("file explorer supports create, upload, navigate, rename, download, delete"
 
 	// Download it and verify the content round-trips.
 	const downloadPromise = page.waitForEvent("download");
-	await renamedRow.getByRole("button", { name: "Actions for hello2.txt" }).click();
+	await renamedRow
+		.getByRole("button", { name: "Actions for hello2.txt" })
+		.click();
 	await page.getByRole("menuitem", { name: "Download" }).click();
 	const download = await downloadPromise;
 	expect(download.suggestedFilename()).toBe("hello2.txt");
