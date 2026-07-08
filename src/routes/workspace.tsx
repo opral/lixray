@@ -25,7 +25,9 @@ function WorkspacePage() {
 				<div className="workspace-empty-inner">
 					<p className="eyebrow">Workspace required</p>
 					<h1>Sign in to manage workspaces.</h1>
-					<p className="copy">Workspace membership is managed by Clerk Organizations.</p>
+					<p className="copy">
+						Workspace membership is managed by Clerk Organizations.
+					</p>
 					<div className="toolbar">
 						<Link className="button primary" to="/sign-in">
 							Sign in

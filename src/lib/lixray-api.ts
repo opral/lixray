@@ -4,11 +4,10 @@ import { E2E_AUTH_TOKEN } from "./e2e-auth";
 import { isE2eAuthEnabled } from "./e2e-client";
 
 export type WireValue =
-	| { kind: "null" }
-	| { kind: "boolean"; value: boolean }
+	| { kind: "null"; value?: null }
+	| { kind: "bool"; value: boolean }
 	| { kind: "int"; value: number }
-	| { kind: "integer"; value: number }
-	| { kind: "real"; value: number }
+	| { kind: "float"; value: number }
 	| { kind: "text"; value: string }
 	| { kind: "blob"; base64: string }
 	| { kind: "json"; value: unknown };
@@ -170,10 +169,9 @@ export function formatWireValue(value: WireValue): string {
 	switch (value.kind) {
 		case "null":
 			return "null";
-		case "boolean":
+		case "bool":
 		case "int":
-		case "integer":
-		case "real":
+		case "float":
 			return String(value.value);
 		case "text":
 			return value.value;
@@ -189,7 +187,7 @@ export function formatWireValue(value: WireValue): string {
 }
 
 export function parseParamsJson(value: string): Array<WireValue> {
-	const parsed = JSON.parse(value);
+	const parsed: unknown = JSON.parse(value);
 	if (!Array.isArray(parsed)) {
 		throw new Error("Params must be a JSON array of Lix wire values.");
 	}

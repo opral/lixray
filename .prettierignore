@@ -1,0 +1,9 @@
+node_modules
+dist
+.wrangler
+.output
+target
+pnpm-lock.yaml
+playwright-report
+test-results
+src/routeTree.gen.ts

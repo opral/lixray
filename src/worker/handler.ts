@@ -42,8 +42,7 @@ export type AuthenticateRequest = (
 ) => Promise<AuthResult>;
 
 export type AuthResult =
-	| { ok: true; orgId: string }
-	| { ok: false; response: Response };
+	{ ok: true; orgId: string } | { ok: false; response: Response };
 
 export async function handleRequest(
 	request: Request,
@@ -57,7 +56,10 @@ export async function handleRequest(
 	}
 
 	if (!url.pathname.startsWith("/v1/")) {
-		return options.fallback?.(request, env) ?? new Response("Not found\n", { status: 404 });
+		return (
+			options.fallback?.(request, env) ??
+			new Response("Not found\n", { status: 404 })
+		);
 	}
 
 	const authenticate = options.authenticate ?? authenticateWithClerk;
@@ -138,10 +140,7 @@ export async function authenticateWithClerk(
 	return { ok: true, orgId: auth.orgId };
 }
 
-function authenticateE2e(
-	request: Request,
-	env: WorkerEnv,
-): AuthResult | null {
+function authenticateE2e(request: Request, env: WorkerEnv): AuthResult | null {
 	if (!env.LIXRAY_E2E_ORG_ID) {
 		return null;
 	}

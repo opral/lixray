@@ -8,11 +8,11 @@
 	"routes": [
 		{
 			"pattern": "lixray.com",
-			"custom_domain": true
-		}
+			"custom_domain": true,
+		},
 	],
 	"observability": {
-		"enabled": true
+		"enabled": true,
 	},
 	"vars": {
 		"CLERK_APP_ID": "app_3GBViGp1pL2PtKZ2jU5vMWQcSik",
@@ -21,35 +21,35 @@
 		"R2_BUCKET": "lixray",
 		"R2_REGION": "auto",
 		"LIXRAY_E2E_ORG_ID": "",
-		"SLATEDB_STORAGE": "r2"
+		"SLATEDB_STORAGE": "r2",
 	},
 	"secrets": {
 		"required": [
 			"CLERK_SECRET_KEY",
 			"R2_ACCESS_KEY_ID",
-			"R2_SECRET_ACCESS_KEY"
-		]
+			"R2_SECRET_ACCESS_KEY",
+		],
 	},
 	"containers": [
 		{
 			"class_name": "SlateDbContainer",
 			"image": "./Dockerfile",
 			"max_instances": 10,
-			"instance_type": "lite"
-		}
+			"instance_type": "lite",
+		},
 	],
 	"durable_objects": {
 		"bindings": [
 			{
 				"name": "SLATEDB_CONTAINER",
-				"class_name": "SlateDbContainer"
-			}
-		]
+				"class_name": "SlateDbContainer",
+			},
+		],
 	},
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_sqlite_classes": ["SlateDbContainer"]
-		}
-	]
+			"new_sqlite_classes": ["SlateDbContainer"],
+		},
+	],
 }

@@ -1,6 +1,8 @@
 import { Container } from "@cloudflare/containers";
 import { handleRequest } from "./handler";
 
+type ContainerProps = Record<string, never>;
+
 export interface Env {
 	SLATEDB_CONTAINER: DurableObjectNamespace<SlateDbContainer>;
 	CLERK_APP_ID?: string;
@@ -18,7 +20,7 @@ export class SlateDbContainer extends Container<Env> {
 	defaultPort = 8080;
 	sleepAfter = "10m";
 
-	constructor(ctx: DurableObjectState<{}>, env: Env) {
+	constructor(ctx: DurableObjectState<ContainerProps>, env: Env) {
 		super(ctx, env);
 		this.envVars = baseContainerEnv(env);
 	}

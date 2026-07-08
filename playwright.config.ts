@@ -6,6 +6,9 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://${host}:${port}`;
 const e2eOrgId =
 	process.env.LIXRAY_E2E_ORG_ID ?? `org_lixray_e2e_${process.pid}`;
 const e2eStorage = process.env.E2E_SLATEDB_STORAGE ?? "memory";
+const webServerTimeoutMs = Number(
+	process.env.PLAYWRIGHT_WEB_SERVER_TIMEOUT_MS ?? 300_000,
+);
 
 export default defineConfig({
 	testDir: "./tests/e2e",
@@ -29,7 +32,7 @@ export default defineConfig({
 					VITE_LIXRAY_E2E: "1",
 				},
 				reuseExistingServer: false,
-				timeout: 120_000,
+				timeout: webServerTimeoutMs,
 				url: `${baseURL}/healthz`,
 			},
 	projects: [
