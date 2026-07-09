@@ -186,7 +186,17 @@ R2_ENDPOINT=https://11a1a6f76d167248cc6987e978efb7e5.r2.cloudflarestorage.com
 R2_BUCKET=lixray
 R2_REGION=auto
 SLATEDB_STORAGE=r2
+SLATEDB_CACHE_DIR=/tmp/lixray-slatedb-cache
+SLATEDB_CACHE_MAX_BYTES=2147483648
+SLATEDB_BLOCK_CACHE_BYTES=134217728
+SLATEDB_METADATA_CACHE_BYTES=33554432
 ```
+
+R2-backed containers preload SlateDB SSTs into the ephemeral 2 GiB disk cache
+at startup, keep bounded 128 MiB block and 32 MiB metadata caches in memory,
+and cache newly written SSTs after they have been persisted. R2 remains the
+durable source of truth; deleting the cache or restarting a container rebuilds
+it from the existing SlateDB objects without a migration.
 
 Production secrets live in Cloudflare Worker secrets:
 

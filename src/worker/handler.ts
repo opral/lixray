@@ -11,6 +11,10 @@ export interface WorkerEnv {
 	R2_SECRET_ACCESS_KEY?: string;
 	R2_REGION?: string;
 	SLATEDB_STORAGE?: string;
+	SLATEDB_CACHE_DIR?: string;
+	SLATEDB_CACHE_MAX_BYTES?: string;
+	SLATEDB_BLOCK_CACHE_BYTES?: string;
+	SLATEDB_METADATA_CACHE_BYTES?: string;
 	LIXRAY_E2E_ORG_ID?: string;
 }
 
@@ -178,6 +182,18 @@ export function containerEnv(
 	addOptionalEnv(vars, "R2_SECRET_ACCESS_KEY", env.R2_SECRET_ACCESS_KEY);
 	addOptionalEnv(vars, "R2_REGION", env.R2_REGION);
 	addOptionalEnv(vars, "SLATEDB_STORAGE", env.SLATEDB_STORAGE);
+	addOptionalEnv(vars, "SLATEDB_CACHE_DIR", env.SLATEDB_CACHE_DIR);
+	addOptionalEnv(vars, "SLATEDB_CACHE_MAX_BYTES", env.SLATEDB_CACHE_MAX_BYTES);
+	addOptionalEnv(
+		vars,
+		"SLATEDB_BLOCK_CACHE_BYTES",
+		env.SLATEDB_BLOCK_CACHE_BYTES,
+	);
+	addOptionalEnv(
+		vars,
+		"SLATEDB_METADATA_CACHE_BYTES",
+		env.SLATEDB_METADATA_CACHE_BYTES,
+	);
 	return vars;
 }
 
