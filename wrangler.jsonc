@@ -22,6 +22,10 @@
 		"R2_REGION": "auto",
 		"LIXRAY_E2E_ORG_ID": "",
 		"SLATEDB_STORAGE": "r2",
+		"SLATEDB_CACHE_DIR": "/tmp/lixray-slatedb-cache",
+		"SLATEDB_CACHE_MAX_BYTES": "2147483648",
+		"SLATEDB_BLOCK_CACHE_BYTES": "134217728",
+		"SLATEDB_METADATA_CACHE_BYTES": "33554432",
 	},
 	"secrets": {
 		"required": [
@@ -35,7 +39,7 @@
 			"class_name": "SlateDbContainer",
 			"image": "./Dockerfile",
 			"max_instances": 10,
-			"instance_type": "lite",
+			"instance_type": "basic",
 		},
 	],
 	"durable_objects": {

@@ -104,6 +104,10 @@ void test("/v1 routes with Clerk org auth proxy to the org container", async () 
 				R2_REGION: "auto",
 				SLATEDB_PATH: "org_abc",
 				SLATEDB_STORAGE: "r2",
+				SLATEDB_CACHE_DIR: "/tmp/lixray-slatedb-cache",
+				SLATEDB_CACHE_MAX_BYTES: "2147483648",
+				SLATEDB_BLOCK_CACHE_BYTES: "134217728",
+				SLATEDB_METADATA_CACHE_BYTES: "33554432",
 			},
 		},
 	});
@@ -119,6 +123,10 @@ void test("/v1 routes with Clerk org auth proxy to the org container", async () 
 				R2_REGION: "auto",
 				SLATEDB_PATH: "org_abc",
 				SLATEDB_STORAGE: "r2",
+				SLATEDB_CACHE_DIR: "/tmp/lixray-slatedb-cache",
+				SLATEDB_CACHE_MAX_BYTES: "2147483648",
+				SLATEDB_BLOCK_CACHE_BYTES: "134217728",
+				SLATEDB_METADATA_CACHE_BYTES: "33554432",
 			},
 		],
 		["fetch", "/v1/container-health"],
@@ -214,6 +222,10 @@ function env(options: {
 		R2_SECRET_ACCESS_KEY: "secret-key",
 		R2_REGION: "auto",
 		SLATEDB_STORAGE: "r2",
+		SLATEDB_CACHE_DIR: "/tmp/lixray-slatedb-cache",
+		SLATEDB_CACHE_MAX_BYTES: "2147483648",
+		SLATEDB_BLOCK_CACHE_BYTES: "134217728",
+		SLATEDB_METADATA_CACHE_BYTES: "33554432",
 		SLATEDB_CONTAINER: {
 			getByName:
 				options.getByName ??
