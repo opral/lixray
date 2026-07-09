@@ -158,8 +158,7 @@ deploy` is pnpm's own workspace command.
 
 Workers Builds should use:
 
-- Project root: `/` when connected to the `lixray` repository, or
-  `submodule/lixray` when connected through the parent `flashtype` repository
+- Project root: `/`
 - Production branch: `main`
 - Build command: `pnpm run check:cloudflare`
 - Deploy command: `pnpm run deploy:worker`
