@@ -10,9 +10,9 @@ export const Route = createFileRoute("/sql")({
 function SqlPage() {
 	return (
 		<WorkspaceGate>
-			{(organizationName) => (
-				<AppShell>
-					<SqlConsole organizationName={organizationName} />
+			{(activeWorkspace) => (
+				<AppShell key={activeWorkspace.workspace.id}>
+					<SqlConsole workspaceName={activeWorkspace.workspace.name} />
 				</AppShell>
 			)}
 		</WorkspaceGate>

@@ -1,4 +1,3 @@
-import { ClerkProvider } from "@clerk/tanstack-react-start";
 import {
 	createRootRoute,
 	HeadContent,
@@ -6,8 +5,9 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { AuthProvider } from "~/components/auth-provider";
 import { Toaster } from "~/components/ui/sonner";
-import { clerkPublishableKey } from "../lib/clerk-env";
+import { WorkspaceProvider } from "~/components/workspace-provider";
 import appCss from "../styles.css?url";
 
 const title = "Lixray";
@@ -46,13 +46,9 @@ function RootDocument({ children }: { children: ReactNode }) {
 				<HeadContent />
 			</head>
 			<body>
-				<ClerkProvider
-					publishableKey={clerkPublishableKey}
-					signInUrl="/sign-in"
-					signUpUrl="/sign-up"
-				>
-					{children}
-				</ClerkProvider>
+				<AuthProvider>
+					<WorkspaceProvider>{children}</WorkspaceProvider>
+				</AuthProvider>
 				<Toaster />
 				<Scripts />
 			</body>

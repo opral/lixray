@@ -31,11 +31,7 @@ type DialogState =
 	| { type: "delete"; entries: Array<ExplorerEntry> }
 	| null;
 
-export function FileExplorer({
-	organizationName,
-}: {
-	organizationName: string;
-}) {
+export function FileExplorer({ workspaceName }: { workspaceName: string }) {
 	const api = useFileExplorerApi();
 	const navigate = useNavigate();
 	const search = useSearch({ from: "/" });
@@ -236,7 +232,7 @@ export function FileExplorer({
 	return (
 		<>
 			<section className="page-heading">
-				<p className="eyebrow">{organizationName}</p>
+				<p className="eyebrow">{workspaceName}</p>
 				<h1>Files</h1>
 			</section>
 			<div

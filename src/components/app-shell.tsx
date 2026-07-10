@@ -1,10 +1,20 @@
-import { OrganizationSwitcher, UserButton } from "@clerk/tanstack-react-start";
 import { Link } from "@tanstack/react-router";
-import { DatabaseZap, Settings, SquareTerminal } from "lucide-react";
+import { DatabaseZap, LogOut, Settings, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
+import { useAuth } from "~/components/auth-provider";
+import { useWorkspace } from "~/components/workspace-provider";
 import { isE2eAuthEnabled } from "~/lib/e2e-client";
 
 export function AppShell({ children }: { children: ReactNode }) {
+	const { signOut } = useAuth();
+	const {
+		activeWorkspace,
+		organizations,
+		selectOrganization,
+		selectWorkspace,
+		selectedOrganization,
+	} = useWorkspace();
+
 	return (
 		<div className="app-shell">
 			<header className="topbar">
@@ -16,11 +26,38 @@ export function AppShell({ children }: { children: ReactNode }) {
 				</Link>
 				<div className="topbar-actions">
 					{isE2eAuthEnabled ? null : (
-						<OrganizationSwitcher
-							hidePersonal
-							afterSelectOrganizationUrl="/"
-							afterCreateOrganizationUrl="/"
-						/>
+						<>
+							<label className="sr-only" htmlFor="organization-switcher">
+								Organization
+							</label>
+							<select
+								id="organization-switcher"
+								className="compact-select"
+								value={selectedOrganization?.id ?? ""}
+								onChange={(event) => selectOrganization(event.target.value)}
+							>
+								{organizations.map((organization) => (
+									<option key={organization.id} value={organization.id}>
+										{organization.name}
+									</option>
+								))}
+							</select>
+							<label className="sr-only" htmlFor="workspace-switcher">
+								Workspace
+							</label>
+							<select
+								id="workspace-switcher"
+								className="compact-select"
+								value={activeWorkspace?.workspace.id ?? ""}
+								onChange={(event) => selectWorkspace(event.target.value)}
+							>
+								{selectedOrganization?.workspaces.map((workspace) => (
+									<option key={workspace.id} value={workspace.id}>
+										{workspace.name}
+									</option>
+								))}
+							</select>
+						</>
 					)}
 					<Link
 						to="/sql"
@@ -40,7 +77,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 							>
 								<Settings size={16} aria-hidden="true" />
 							</Link>
-							<UserButton />
+							<button
+								className="button icon-button"
+								type="button"
+								aria-label="Sign out"
+								title="Sign out"
+								onClick={() => void signOut()}
+							>
+								<LogOut size={16} aria-hidden="true" />
+							</button>
 						</>
 					)}
 				</div>

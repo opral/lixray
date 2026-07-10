@@ -1,6 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { SignUpPage } from "./sign-up";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/sign-up/$")({
-	component: SignUpPage,
+	component: LegacyNestedSignUpRedirect,
 });
+
+function LegacyNestedSignUpRedirect() {
+	return <Navigate to="/sign-in" replace />;
+}

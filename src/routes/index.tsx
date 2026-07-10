@@ -15,9 +15,9 @@ export const Route = createFileRoute("/")({
 function DashboardPage() {
 	return (
 		<WorkspaceGate>
-			{(organizationName) => (
-				<AppShell>
-					<FileExplorer organizationName={organizationName} />
+			{(activeWorkspace) => (
+				<AppShell key={activeWorkspace.workspace.id}>
+					<FileExplorer workspaceName={activeWorkspace.workspace.name} />
 				</AppShell>
 			)}
 		</WorkspaceGate>

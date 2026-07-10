@@ -13,7 +13,7 @@ const defaultSql =
 	"SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id";
 const defaultParams = "[]";
 
-export function SqlConsole({ organizationName }: { organizationName: string }) {
+export function SqlConsole({ workspaceName }: { workspaceName: string }) {
 	const api = useLixrayApi();
 	const [branches, setBranches] = useState<Array<Branch>>([]);
 	const [activeBranchId, setActiveBranchId] = useState("");
@@ -84,7 +84,7 @@ export function SqlConsole({ organizationName }: { organizationName: string }) {
 	return (
 		<>
 			<section className="page-heading">
-				<p className="eyebrow">{organizationName}</p>
+				<p className="eyebrow">{workspaceName}</p>
 				<h1>SQL console</h1>
 			</section>
 			<div className="dashboard-grid">

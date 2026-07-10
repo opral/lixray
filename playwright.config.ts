@@ -3,8 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 const port = Number(process.env.E2E_PORT ?? 8790);
 const host = "localhost";
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://${host}:${port}`;
-const e2eOrgId =
-	process.env.LIXRAY_E2E_ORG_ID ?? `org_lixray_e2e_${process.pid}`;
+const e2eWorkspaceId =
+	process.env.LIXRAY_E2E_WORKSPACE_ID ?? "00000000-0000-4000-8000-000000000002";
 const e2eStorage = process.env.E2E_SLATEDB_STORAGE ?? "memory";
 const webServerTimeoutMs = Number(
 	process.env.PLAYWRIGHT_WEB_SERVER_TIMEOUT_MS ?? 300_000,
@@ -27,7 +27,7 @@ export default defineConfig({
 				env: {
 					...process.env,
 					CLOUDFLARE_INCLUDE_PROCESS_ENV: "true",
-					LIXRAY_E2E_ORG_ID: e2eOrgId,
+					LIXRAY_E2E_WORKSPACE_ID: e2eWorkspaceId,
 					SLATEDB_STORAGE: e2eStorage,
 					VITE_LIXRAY_E2E: "1",
 				},

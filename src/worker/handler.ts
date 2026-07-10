@@ -1,10 +1,11 @@
-import { createClerkClient } from "@clerk/backend";
+import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
 import { E2E_AUTH_TOKEN } from "../lib/e2e-auth.ts";
 
 export interface WorkerEnv {
 	SLATEDB_CONTAINER: ContainerNamespace;
-	CLERK_SECRET_KEY?: string;
-	VITE_CLERK_PUBLISHABLE_KEY?: string;
+	SUPABASE_URL?: string;
+	SUPABASE_PUBLISHABLE_KEY?: string;
+	SUPABASE_JWKS_URL?: string;
 	R2_ENDPOINT?: string;
 	R2_BUCKET?: string;
 	R2_ACCESS_KEY_ID?: string;
@@ -15,7 +16,7 @@ export interface WorkerEnv {
 	SLATEDB_CACHE_MAX_BYTES?: string;
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
 	SLATEDB_METADATA_CACHE_BYTES?: string;
-	LIXRAY_E2E_ORG_ID?: string;
+	LIXRAY_E2E_WORKSPACE_ID?: string;
 }
 
 export interface ContainerNamespace {
@@ -37,7 +38,14 @@ export interface ContainerStub {
 
 export interface HandleRequestOptions {
 	authenticate?: AuthenticateRequest;
+	authorizeWorkspace?: AuthorizeWorkspace;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
+}
+
+export interface AuthenticatedUser {
+	userId: string;
+	token: string;
+	isE2e?: boolean;
 }
 
 export type AuthenticateRequest = (
@@ -45,8 +53,19 @@ export type AuthenticateRequest = (
 	env: WorkerEnv,
 ) => Promise<AuthResult>;
 
+export type AuthorizeWorkspace = (
+	workspaceId: string,
+	auth: AuthenticatedUser,
+	env: WorkerEnv,
+) => Promise<Response | null>;
+
 export type AuthResult =
-	{ ok: true; orgId: string } | { ok: false; response: Response };
+	{ ok: true; auth: AuthenticatedUser } | { ok: false; response: Response };
+
+const WORKSPACE_API_PATH = /^\/v1\/workspaces\/([^/]+)(\/.*)$/;
+const UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const jwksByUrl = new Map<string, JWTVerifyGetKey>();
 
 export async function handleRequest(
 	request: Request,
@@ -66,94 +85,196 @@ export async function handleRequest(
 		);
 	}
 
-	const authenticate = options.authenticate ?? authenticateWithClerk;
-	const auth = await authenticate(request, env);
-	if (!auth.ok) {
-		return auth.response;
+	const match = WORKSPACE_API_PATH.exec(url.pathname);
+	if (!match) {
+		return new Response("Not found\n", { status: 404 });
 	}
 
-	const container = env.SLATEDB_CONTAINER.getByName(auth.orgId);
+	const workspaceId = safeDecodeURIComponent(match[1]);
+	if (!workspaceId || !UUID_PATTERN.test(workspaceId)) {
+		return new Response("Invalid workspace id\n", { status: 400 });
+	}
+
+	const authenticate = options.authenticate ?? authenticateWithSupabase;
+	const authResult = await authenticate(request, env);
+	if (!authResult.ok) return authResult.response;
+
+	const authorizeWorkspace =
+		options.authorizeWorkspace ?? authorizeWorkspaceWithSupabase;
+	const authorizationFailure = await authorizeWorkspace(
+		workspaceId,
+		authResult.auth,
+		env,
+	);
+	if (authorizationFailure) return authorizationFailure;
+
+	const container = env.SLATEDB_CONTAINER.getByName(workspaceId);
 	await container.startAndWaitForPorts?.({
 		ports: 8080,
 		startOptions: {
-			envVars: containerEnv(env, auth.orgId),
+			envVars: containerEnv(env, workspaceId),
 		},
 	});
-	return container.fetch(request);
+	return container.fetch(rewriteWorkspaceRequest(request, match[2]));
 }
 
-export async function authenticateWithClerk(
+export async function authenticateWithSupabase(
 	request: Request,
 	env: WorkerEnv,
 ): Promise<AuthResult> {
 	const e2eAuth = authenticateE2e(request, env);
-	if (e2eAuth) {
-		return e2eAuth;
-	}
+	if (e2eAuth) return e2eAuth;
 
-	if (!env.CLERK_SECRET_KEY) {
+	const missingVariable = ["SUPABASE_URL", "SUPABASE_JWKS_URL"].find(
+		(name) => !env[name as keyof WorkerEnv],
+	);
+	if (missingVariable) {
 		return {
 			ok: false,
-			response: new Response("CLERK_SECRET_KEY is not configured\n", {
+			response: new Response(`${missingVariable} is not configured\n`, {
 				status: 500,
 			}),
 		};
 	}
 
-	if (!env.VITE_CLERK_PUBLISHABLE_KEY) {
+	const token = bearerToken(request);
+	if (!token) return unauthorized();
+
+	try {
+		const supabaseUrl = env.SUPABASE_URL?.replace(/\/$/, "") ?? "";
+		const { payload } = await jwtVerify(
+			token,
+			remoteJwks(env.SUPABASE_JWKS_URL ?? ""),
+			{
+				algorithms: ["ES256"],
+				issuer: `${supabaseUrl}/auth/v1`,
+				audience: "authenticated",
+			},
+		);
+		if (!payload.sub || payload.role !== "authenticated") return unauthorized();
 		return {
-			ok: false,
-			response: new Response("VITE_CLERK_PUBLISHABLE_KEY is not configured\n", {
-				status: 500,
-			}),
+			ok: true,
+			auth: { userId: payload.sub, token },
 		};
+	} catch {
+		return unauthorized();
+	}
+}
+
+export async function authorizeWorkspaceWithSupabase(
+	workspaceId: string,
+	auth: AuthenticatedUser,
+	env: WorkerEnv,
+): Promise<Response | null> {
+	if (auth.isE2e) {
+		return workspaceId === env.LIXRAY_E2E_WORKSPACE_ID
+			? null
+			: new Response("Workspace access denied\n", { status: 403 });
 	}
 
-	const client = createClerkClient({
-		secretKey: env.CLERK_SECRET_KEY,
-		publishableKey: env.VITE_CLERK_PUBLISHABLE_KEY,
-	});
-	const requestState = await client.authenticateRequest(request);
-
-	if (!requestState.isAuthenticated) {
-		return {
-			ok: false,
-			response: new Response("Unauthorized\n", {
-				status: 401,
-				headers: {
-					"WWW-Authenticate": "Bearer",
-				},
-			}),
-		};
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return new Response("Supabase Data API is not configured\n", {
+			status: 500,
+		});
 	}
 
-	const auth = requestState.toAuth();
-	if (!auth.orgId) {
-		return {
-			ok: false,
-			response: new Response("Active workspace required\n", {
-				status: 403,
-			}),
-		};
+	const lookupUrl = new URL("/rest/v1/workspaces", env.SUPABASE_URL);
+	lookupUrl.searchParams.set("select", "id");
+	lookupUrl.searchParams.set("id", `eq.${workspaceId}`);
+	lookupUrl.searchParams.set("limit", "1");
+
+	let response: Response;
+	try {
+		response = await fetch(lookupUrl, {
+			headers: {
+				apikey: env.SUPABASE_PUBLISHABLE_KEY,
+				Authorization: `Bearer ${auth.token}`,
+				Accept: "application/json",
+			},
+		});
+	} catch {
+		return new Response("Workspace authorization is unavailable\n", {
+			status: 502,
+		});
 	}
 
-	return { ok: true, orgId: auth.orgId };
+	if (!response.ok) {
+		return new Response("Workspace authorization is unavailable\n", {
+			status: 502,
+		});
+	}
+
+	try {
+		const rows: unknown = await response.json();
+		return Array.isArray(rows) &&
+			rows.length === 1 &&
+			workspaceRowId(rows[0]) === workspaceId
+			? null
+			: new Response("Workspace access denied\n", { status: 403 });
+	} catch {
+		return new Response("Workspace authorization is unavailable\n", {
+			status: 502,
+		});
+	}
+}
+
+function workspaceRowId(value: unknown): unknown {
+	return value && typeof value === "object" && "id" in value ? value.id : null;
 }
 
 function authenticateE2e(request: Request, env: WorkerEnv): AuthResult | null {
-	if (!env.LIXRAY_E2E_ORG_ID) {
-		return null;
-	}
-
-	if (!isLocalhost(new URL(request.url).hostname)) {
-		return null;
-	}
-
+	if (!env.LIXRAY_E2E_WORKSPACE_ID) return null;
+	if (!isLocalhost(new URL(request.url).hostname)) return null;
 	if (request.headers.get("Authorization") !== `Bearer ${E2E_AUTH_TOKEN}`) {
 		return null;
 	}
+	return {
+		ok: true,
+		auth: { userId: "lixray-e2e", token: E2E_AUTH_TOKEN, isE2e: true },
+	};
+}
 
-	return { ok: true, orgId: env.LIXRAY_E2E_ORG_ID };
+function bearerToken(request: Request): string | null {
+	const authorization = request.headers.get("Authorization");
+	if (!authorization?.startsWith("Bearer ")) return null;
+	const token = authorization.slice("Bearer ".length).trim();
+	return token || null;
+}
+
+function unauthorized(): AuthResult {
+	return {
+		ok: false,
+		response: new Response("Unauthorized\n", {
+			status: 401,
+			headers: { "WWW-Authenticate": "Bearer" },
+		}),
+	};
+}
+
+function remoteJwks(url: string): JWTVerifyGetKey {
+	let jwks = jwksByUrl.get(url);
+	if (!jwks) {
+		jwks = createRemoteJWKSet(new URL(url));
+		jwksByUrl.set(url, jwks);
+	}
+	return jwks;
+}
+
+function rewriteWorkspaceRequest(request: Request, containerPath: string) {
+	const url = new URL(request.url);
+	url.pathname = `/v1${containerPath}`;
+	const rewritten = new Request(url, request);
+	const headers = new Headers(rewritten.headers);
+	headers.delete("Authorization");
+	return new Request(rewritten, { headers });
+}
+
+function safeDecodeURIComponent(value: string): string | null {
+	try {
+		return decodeURIComponent(value);
+	} catch {
+		return null;
+	}
 }
 
 function isLocalhost(hostname: string): boolean {
@@ -167,11 +288,9 @@ function isLocalhost(hostname: string): boolean {
 
 export function containerEnv(
 	env: WorkerEnv,
-	orgId: string,
+	workspaceId: string,
 ): Record<string, string> {
-	const vars = {
-		SLATEDB_PATH: orgId,
-	};
+	const vars = { SLATEDB_PATH: workspaceId };
 	addOptionalEnv(vars, "R2_ENDPOINT", env.R2_ENDPOINT);
 	addOptionalEnv(vars, "R2_BUCKET", env.R2_BUCKET);
 	addOptionalEnv(vars, "R2_ACCESS_KEY_ID", env.R2_ACCESS_KEY_ID);
@@ -208,7 +327,5 @@ function addOptionalEnv(
 	name: string,
 	value: string | undefined,
 ) {
-	if (value !== undefined) {
-		vars[name] = value;
-	}
+	if (value !== undefined) vars[name] = value;
 }

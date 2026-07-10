@@ -6,7 +6,8 @@ test("file explorer supports create, upload, navigate, rename, download, delete"
 }) => {
 	const branchesResponsePromise = page.waitForResponse(
 		(response) =>
-			response.url().includes("/v1/branches") &&
+			response.url().includes("/v1/workspaces/") &&
+			response.url().endsWith("/branches") &&
 			response.request().method() === "GET",
 		{ timeout: 55_000 },
 	);
