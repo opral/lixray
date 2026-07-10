@@ -62,8 +62,7 @@
 	--ring: oklch(0.705 0.015 286.067);
 }
 
-.atelier-route,
-.atelier-mount {
+.atelier-route {
 	width: 100%;
 	height: 100%;
 }

@@ -178,6 +178,16 @@ Start with in-memory SlateDB:
 pnpm dev
 ```
 
+For local workspace development without Google sign-in, use the fixed
+localhost-only development identity:
+
+```sh
+pnpm dev:authless
+```
+
+This mode provides one fixed organization and workspace. Organization and
+workspace mutations are unavailable in authless mode.
+
 The app is served at `http://localhost:8787`. Run against R2 explicitly with:
 
 ```sh
