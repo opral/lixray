@@ -11,12 +11,16 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    let service = open_lix_service(&config).await?;
     let listener = TcpListener::bind(&config.bind_addr)
         .await
         .with_context(|| format!("bind {}", config.bind_addr))?;
+    tracing::info!(addr = %config.bind_addr, "lixray container port ready");
 
-    tracing::info!(addr = %config.bind_addr, "lixray container listening");
+    // Bind before opening SlateDB so the container runtime can observe port
+    // readiness immediately. Requests received while storage is opening wait
+    // in the listener backlog until Axum starts accepting connections.
+    let service = open_lix_service(&config).await?;
+    tracing::info!(addr = %config.bind_addr, "lixray container service ready");
     axum::serve(listener, router(service))
         .with_graceful_shutdown(shutdown_signal())
         .await

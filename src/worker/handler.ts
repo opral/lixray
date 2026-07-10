@@ -75,10 +75,6 @@ export async function handleRequest(
 	const container = env.SLATEDB_CONTAINER.getByName(auth.orgId);
 	await container.startAndWaitForPorts?.({
 		ports: 8080,
-		cancellationOptions: {
-			instanceGetTimeoutMS: 30_000,
-			portReadyTimeoutMS: 30_000,
-		},
 		startOptions: {
 			envVars: containerEnv(env, auth.orgId),
 		},

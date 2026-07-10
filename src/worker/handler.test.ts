@@ -91,10 +91,6 @@ void test("/v1 routes with Clerk org auth proxy to the org container", async () 
 	assert.equal(response.status, 299);
 	assert.deepEqual(startOptions, {
 		ports: 8080,
-		cancellationOptions: {
-			instanceGetTimeoutMS: 30_000,
-			portReadyTimeoutMS: 30_000,
-		},
 		startOptions: {
 			envVars: {
 				R2_ENDPOINT: "https://r2.example",
