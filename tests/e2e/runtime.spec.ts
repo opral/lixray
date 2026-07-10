@@ -8,6 +8,11 @@ test("sign-in route renders without runtime errors", async ({ page }) => {
 	await page.goto("/sign-in");
 
 	await expect(page.locator(".auth-card")).toBeVisible();
+	await expect(
+		page.getByRole("button", { name: "Continue with Google" }),
+	).toBeVisible();
+	await expect(page.getByRole("textbox")).toHaveCount(0);
+	await expect(page.getByText(/Microsoft/i)).toHaveCount(0);
 });
 
 test("sql console loads branches and executes a trivial query", async ({
@@ -15,7 +20,8 @@ test("sql console loads branches and executes a trivial query", async ({
 }) => {
 	const branchesResponsePromise = page.waitForResponse(
 		(response) =>
-			response.url().includes("/v1/branches") &&
+			response.url().includes("/v1/workspaces/") &&
+			response.url().endsWith("/branches") &&
 			response.request().method() === "GET",
 		{ timeout: 55_000 },
 	);
@@ -52,7 +58,8 @@ test("sql console loads branches and executes a trivial query", async ({
 	await expect(page.getByRole("button", { name: "Execute" })).toBeEnabled();
 	const executeResponsePromise = page.waitForResponse(
 		(response) =>
-			response.url().includes("/v1/execute") &&
+			response.url().includes("/v1/workspaces/") &&
+			response.url().endsWith("/execute") &&
 			response.request().method() === "POST",
 		{ timeout: 55_000 },
 	);
@@ -78,9 +85,12 @@ test("sql console loads branches and executes a trivial query", async ({
 	await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("nested Clerk sign-up routes are handled by Start", async ({ page }) => {
+test("legacy sign-up routes redirect to Google sign-in", async ({ page }) => {
 	const response = await page.goto("/sign-up/verify-email-address");
 
 	expect(response?.status()).not.toBe(404);
-	await expect(page.getByText("Not Found")).toHaveCount(0);
+	await expect(page).toHaveURL(/\/sign-in$/);
+	await expect(
+		page.getByRole("button", { name: "Continue with Google" }),
+	).toBeVisible();
 });

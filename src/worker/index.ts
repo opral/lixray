@@ -5,9 +5,9 @@ type ContainerProps = Record<string, never>;
 
 export interface Env {
 	SLATEDB_CONTAINER: DurableObjectNamespace<SlateDbContainer>;
-	CLERK_APP_ID?: string;
-	CLERK_SECRET_KEY?: string;
-	VITE_CLERK_PUBLISHABLE_KEY?: string;
+	SUPABASE_URL?: string;
+	SUPABASE_PUBLISHABLE_KEY?: string;
+	SUPABASE_JWKS_URL?: string;
 	R2_ENDPOINT?: string;
 	R2_BUCKET?: string;
 	R2_ACCESS_KEY_ID?: string;
@@ -18,6 +18,7 @@ export interface Env {
 	SLATEDB_CACHE_MAX_BYTES?: string;
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
 	SLATEDB_METADATA_CACHE_BYTES?: string;
+	LIXRAY_E2E_WORKSPACE_ID?: string;
 }
 
 export class SlateDbContainer extends Container<Env> {

@@ -20,6 +20,7 @@ export default tseslint.config(
 			".wrangler/**",
 			".output/**",
 			"target/**",
+			"submodule/**",
 			"playwright-report/**",
 			"test-results/**",
 			"src/routeTree.gen.ts",

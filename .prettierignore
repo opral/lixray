@@ -3,6 +3,7 @@ dist
 .wrangler
 .output
 target
+submodule
 pnpm-lock.yaml
 playwright-report
 test-results

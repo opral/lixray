@@ -3,116 +3,128 @@
 Cloudflare Worker + TanStack Start frontend + Durable Object Container exposing
 Lix over HTTP, backed by SlateDB on R2.
 
-Production is deployed at:
+Production is deployed at `https://lixray.com`.
+
+## Architecture
+
+- Supabase Auth provides Google-only sign-in.
+- Application-owned Supabase tables model organizations, memberships,
+  invitations, and workspaces.
+- One organization can contain many workspaces. Every organization member can
+  use and create workspaces; owners additionally administer the organization.
+- Every workspace UUID selects one Durable Object Container and one SlateDB R2
+  prefix.
+
+The Worker serves the TanStack Start application and handles `/healthz` plus
+workspace-scoped `/v1/*` requests before delegating all other routes to Start.
+
+## HTTP API
+
+- `GET /healthz` returns Worker health without authentication or container
+  startup.
+- `GET /v1/workspaces/:workspaceId/container-health` checks the workspace
+  container.
+- `GET /v1/workspaces/:workspaceId/branches` lists Lix branches.
+- `POST /v1/workspaces/:workspaceId/createBranch` creates a branch.
+- `POST /v1/workspaces/:workspaceId/execute` executes one Lix SQL statement.
+- `POST /v1/workspaces/:workspaceId/observe` streams Lix observe events as POST
+  SSE.
+
+All workspace routes require a Supabase access token:
 
 ```text
-https://lixray.com
+Authorization: Bearer <Supabase access token>
 ```
 
-Cloudflare state:
+The Worker verifies the ES256 JWT against Supabase JWKS, then looks up the URL's
+workspace UUID through the Supabase Data API with the same user token. Row Level
+Security proves membership. The Worker strips the workspace prefix and
+`Authorization` header before forwarding the request to the Rust container, so
+the container continues to expose its internal `/v1/branches`, `/v1/execute`,
+and related routes without receiving user credentials.
 
-- Account: `Opral` (`11a1a6f76d167248cc6987e978efb7e5`)
-- Zone: `lixray.com`
-- Worker: `lixray`
-- Custom Domain: `lixray.com`
-- R2 bucket: `lixray`
-- SlateDB path: `<Clerk org id>/`
-
-## Frontend
-
-The Worker serves the TanStack Start app and handles `/healthz` plus `/v1/*`
-before delegating all other routes to Start.
-
-- `/sign-in` and `/sign-up` use Clerk hosted components.
-- `/` is the signed-in workspace dashboard.
-- `/workspace` exposes Clerk organization selection, member management, and
-  invitations.
-
-A workspace is exactly a Clerk Organization. Personal workspaces are disabled.
-
-## API
-
-- `GET /healthz` returns Worker health without auth or container startup.
-- `GET /v1/container-health` checks the Rust container after Clerk auth.
-- `GET /v1/branches` lists Lix branches so clients can discover the generated
-  `main` branch id.
-- `POST /v1/createBranch` creates a branch from a supplied `branchId`.
-- `POST /v1/execute` executes one Lix SQL statement on a supplied `branchId`.
-- `POST /v1/observe` streams Lix observe events as POST SSE.
-
-All `/v1/*` routes require a Clerk session token from a signed-in user with an
-active organization:
-
-```text
-Authorization: Bearer <Clerk session token>
-```
-
-Requests without a valid Clerk session return `401`. Requests with a valid
-session but no active organization return `403 Active workspace required`.
-Workspace routing only uses the `orgId` from Clerk auth; the Worker does not
-accept workspace ids from headers, query params, or request bodies.
-
-Values use Lix wire values:
-
-```json
-{ "kind": "text", "value": "hello" }
-{ "kind": "blob", "base64": "aGVsbG8=" }
-```
+Invalid authentication returns `401`, malformed workspace UUIDs return `400`,
+and missing/inaccessible workspaces return `403` without revealing whether the
+workspace exists.
 
 ## Workspace storage
 
-Each active Clerk organization routes to one Durable Object Container:
+Each workspace routes to isolated runtime and storage state:
 
 ```text
-container name = <Clerk org id>
-SLATEDB_PATH = <Clerk org id>
-R2 object prefix = lixray/<Clerk org id>/
+container name = <workspace UUID>
+SLATEDB_PATH = <workspace UUID>
+R2 object prefix = lixray/<workspace UUID>/
 ```
 
-The Rust service requires `SLATEDB_PATH`. There is no fallback to
-`lixray/default`.
+There is no fallback to `lixray/default`. The Supabase cutover is a fresh start;
+old Clerk organization prefixes are not mapped into new workspaces. Leave them
+in place for rollback until a separate, confirmed deletion step.
 
-After production cutover, delete every object under the old `lixray/default`
-prefix from the `lixray` R2 bucket. Do this as an explicit operator step after
-confirming no deployed Worker version still points at the default prefix.
+## Supabase setup
 
-## Local development
-
-Install dependencies:
+Install dependencies and start the local Supabase stack:
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm exec supabase start
+pnpm exec supabase test db
 ```
 
-Copy `.dev.vars.example` to `.dev.vars` for local secrets. `.dev.vars` is
-ignored and must not be committed. The dev Clerk publishable key is committed in
-`.env.development` so Vite serves the local app against the Clerk development
-instance.
+Link and apply migrations to the configured development project from an
+authenticated Supabase CLI session:
 
-Use Clerk development keys locally, then run:
+```sh
+pnpm exec supabase login
+pnpm exec supabase link --project-ref xpkokrinmkjqcnjzbmpe
+pnpm exec supabase db push
+```
+
+In the Supabase Dashboard for the development project:
+
+1. Enable the Google provider and provide its Google OAuth client ID and secret.
+2. Disable email authentication.
+3. Set the site URL to `http://localhost:8787`.
+4. Add `http://localhost:8787/auth/callback` to the redirect allow list.
+
+In Google Auth Platform, add `http://localhost:8787` as an authorized JavaScript
+origin and use the Supabase project's `/auth/v1/callback` URL as the authorized
+redirect URI. Production needs equivalent entries for `https://lixray.com` and
+its production Supabase project.
+
+The checked-in Supabase URL, publishable key, and JWKS URL are public
+configuration. `SUPABASE_SECRET_KEY` is deliberately unused: browser queries and
+Worker authorization use the user's JWT plus RLS.
+
+## Local development
+
+Copy `.dev.vars.example` to `.dev.vars` for local R2 secrets when needed.
+`.dev.vars` is ignored and must not be committed. The public development
+Supabase configuration lives in `.env.development` and `wrangler.jsonc`.
+
+Start with in-memory SlateDB:
 
 ```sh
 pnpm dev
 ```
 
-The app is served at `http://localhost:8787`. `pnpm dev` forces
-`SLATEDB_STORAGE=memory`, so local development does not depend on R2 credentials.
-Restart the dev server after changing storage mode so existing containers do not
-keep old startup env.
-
-Run against R2 explicitly when needed:
+The app is served at `http://localhost:8787`. Run against R2 explicitly with:
 
 ```sh
 pnpm dev:r2
 ```
 
-## Iteration workflow
+Restart the dev server after changing storage mode so existing containers do
+not retain old startup environment.
 
-Before deploying:
+## Verification
 
 ```sh
 pnpm typecheck
+pnpm lint
 pnpm test:worker
+pnpm exec supabase start
+pnpm exec supabase test db
 pnpm test:e2e
 pnpm build
 cargo test
@@ -120,41 +132,21 @@ docker build .
 pnpm run deploy:worker --dry-run
 ```
 
-Install the Playwright browser once before running e2e tests:
+Install Playwright Chromium once with:
 
 ```sh
 pnpm exec playwright install chromium
 ```
 
-The e2e suite fails on browser runtime errors, console errors, and Vite's error
-overlay. It also runs the workspace dashboard under a localhost-only e2e auth
-mode and asserts that `/v1/branches` returns at least one branch and
-`SELECT 1 AS one` succeeds:
+Playwright starts a deterministic in-memory development server on port `8790`
+and uses a localhost-only E2E workspace identity. Use `E2E_PORT` to override the
+port or run `pnpm test:e2e:r2` for the R2-backed variant.
 
-```sh
-pnpm test:e2e
-```
-
-Playwright starts its own dev server on `http://localhost:8790` by default so it
-does not reuse a stale `pnpm dev` process on port `8787`. Override that with
-`E2E_PORT` when needed. The default e2e server uses in-memory SlateDB storage so
-it is deterministic and does not depend on local R2 secrets.
-
-Run the R2-backed e2e check explicitly when validating the same storage path used
-by R2 local development:
-
-```sh
-pnpm test:e2e:r2
-```
-
-Deploy:
+## Deployment
 
 ```sh
 pnpm run deploy:worker
 ```
-
-The `deploy:worker` script is used instead of `pnpm deploy` because `pnpm
-deploy` is pnpm's own workspace command.
 
 Workers Builds should use:
 
@@ -165,54 +157,43 @@ Workers Builds should use:
 - Worker name: `lixray`
 
 Enable Workers Builds build caching. The Dockerfile uses BuildKit cache mounts
-for the Cargo registry, git checkouts, and target directory; without
-Cloudflare's build cache enabled, every deployment recompiles the
-Lix/DataFusion dependency graph from scratch.
+for the Cargo registry, git checkouts, and target directory. Do not run
+`cargo test` in the Workers Builds build command: `wrangler deploy` already
+builds the container image and Rust release binary, and duplicating the Rust
+compile can exceed the build timeout.
 
-Do not run `cargo test` in the Workers Builds build command. `wrangler deploy`
-builds the container image and compiles the Rust release binary, so running the
-full `pnpm check` first causes two Rust compiles in the same Cloudflare build
-and can exceed the 20 minute Workers Builds timeout.
-
-## Runtime config
-
-Non-secret production values are checked into `wrangler.jsonc`:
+Public Worker variables are checked into `wrangler.jsonc`:
 
 ```text
-CLERK_APP_ID=app_3GBViGp1pL2PtKZ2jU5vMWQcSik
-VITE_CLERK_PUBLISHABLE_KEY=pk_live_Y2xlcmsubGl4cmF5LmNvbSQ
-R2_ENDPOINT=https://11a1a6f76d167248cc6987e978efb7e5.r2.cloudflarestorage.com
-R2_BUCKET=lixray
-R2_REGION=auto
-SLATEDB_STORAGE=r2
-SLATEDB_CACHE_DIR=/tmp/lixray-slatedb-cache
-SLATEDB_CACHE_MAX_BYTES=2147483648
-SLATEDB_BLOCK_CACHE_BYTES=134217728
-SLATEDB_METADATA_CACHE_BYTES=33554432
+VITE_SUPABASE_URL
+VITE_SUPABASE_KEY
+SUPABASE_URL
+SUPABASE_PUBLISHABLE_KEY
+SUPABASE_JWKS_URL
+R2_ENDPOINT
+R2_BUCKET
+R2_REGION
+SLATEDB_STORAGE
+SLATEDB_CACHE_DIR
+SLATEDB_CACHE_MAX_BYTES
+SLATEDB_BLOCK_CACHE_BYTES
+SLATEDB_METADATA_CACHE_BYTES
 ```
 
-R2-backed containers preload SlateDB SSTs into the ephemeral 2 GiB disk cache
-at startup, keep bounded 128 MiB block and 32 MiB metadata caches in memory,
-and cache newly written SSTs after they have been persisted. R2 remains the
-durable source of truth; deleting the cache or restarting a container rebuilds
-it from the existing SlateDB objects without a migration.
-
-Production secrets live in Cloudflare Worker secrets:
-
-```text
-CLERK_SECRET_KEY
-R2_ACCESS_KEY_ID
-R2_SECRET_ACCESS_KEY
-```
-
-To rotate a secret:
+Only the R2 credentials are Worker secrets:
 
 ```sh
-pnpm wrangler secret put CLERK_SECRET_KEY --config ./wrangler.jsonc
 pnpm wrangler secret put R2_ACCESS_KEY_ID --config ./wrangler.jsonc
 pnpm wrangler secret put R2_SECRET_ACCESS_KEY --config ./wrangler.jsonc
 ```
 
-R2 S3 credentials are created in the Cloudflare dashboard under R2 API tokens.
-Use an account token with Object Read & Write access scoped to the `lixray`
-bucket.
+No Supabase `wrangler secret put` command is needed. After a Clerk-free
+deployment has been verified, remove the obsolete secret:
+
+```sh
+pnpm wrangler secret delete CLERK_SECRET_KEY --config ./wrangler.jsonc
+```
+
+Before production cutover, replace the public development Supabase values with
+the production project's values, apply the same migrations, and configure its
+Google provider and redirect URLs.

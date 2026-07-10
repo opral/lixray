@@ -15,9 +15,9 @@ export default defineConfig({
 			config: (config) => ({
 				vars: {
 					...config.vars,
-					LIXRAY_E2E_ORG_ID:
-						process.env.LIXRAY_E2E_ORG_ID ??
-						config.vars?.LIXRAY_E2E_ORG_ID ??
+					LIXRAY_E2E_WORKSPACE_ID:
+						process.env.LIXRAY_E2E_WORKSPACE_ID ??
+						config.vars?.LIXRAY_E2E_WORKSPACE_ID ??
 						"",
 					SLATEDB_STORAGE:
 						process.env.SLATEDB_STORAGE ?? config.vars?.SLATEDB_STORAGE ?? "r2",

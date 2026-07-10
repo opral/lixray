@@ -15,7 +15,8 @@ import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
-import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
+import { Route as InviteTokenRouteImport } from './routes/invite.$token'
+import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 
 const WorkspaceRoute = WorkspaceRouteImport.update({
   id: '/workspace',
@@ -47,38 +48,46 @@ const SignUpSplatRoute = SignUpSplatRouteImport.update({
   path: '/$',
   getParentRoute: () => SignUpRoute,
 } as any)
-const SignInSplatRoute = SignInSplatRouteImport.update({
-  id: '/$',
-  path: '/$',
-  getParentRoute: () => SignInRoute,
+const InviteTokenRoute = InviteTokenRouteImport.update({
+  id: '/invite/$token',
+  path: '/invite/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/sign-in': typeof SignInRouteWithChildren
+  '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRouteWithChildren
   '/sql': typeof SqlRoute
   '/workspace': typeof WorkspaceRoute
-  '/sign-in/$': typeof SignInSplatRoute
+  '/auth/callback': typeof AuthCallbackRoute
+  '/invite/$token': typeof InviteTokenRoute
   '/sign-up/$': typeof SignUpSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/sign-in': typeof SignInRouteWithChildren
+  '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRouteWithChildren
   '/sql': typeof SqlRoute
   '/workspace': typeof WorkspaceRoute
-  '/sign-in/$': typeof SignInSplatRoute
+  '/auth/callback': typeof AuthCallbackRoute
+  '/invite/$token': typeof InviteTokenRoute
   '/sign-up/$': typeof SignUpSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/sign-in': typeof SignInRouteWithChildren
+  '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRouteWithChildren
   '/sql': typeof SqlRoute
   '/workspace': typeof WorkspaceRoute
-  '/sign-in/$': typeof SignInSplatRoute
+  '/auth/callback': typeof AuthCallbackRoute
+  '/invite/$token': typeof InviteTokenRoute
   '/sign-up/$': typeof SignUpSplatRoute
 }
 export interface FileRouteTypes {
@@ -89,7 +98,8 @@ export interface FileRouteTypes {
     | '/sign-up'
     | '/sql'
     | '/workspace'
-    | '/sign-in/$'
+    | '/auth/callback'
+    | '/invite/$token'
     | '/sign-up/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -98,7 +108,8 @@ export interface FileRouteTypes {
     | '/sign-up'
     | '/sql'
     | '/workspace'
-    | '/sign-in/$'
+    | '/auth/callback'
+    | '/invite/$token'
     | '/sign-up/$'
   id:
     | '__root__'
@@ -107,16 +118,19 @@ export interface FileRouteTypes {
     | '/sign-up'
     | '/sql'
     | '/workspace'
-    | '/sign-in/$'
+    | '/auth/callback'
+    | '/invite/$token'
     | '/sign-up/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  SignInRoute: typeof SignInRouteWithChildren
+  SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRouteWithChildren
   SqlRoute: typeof SqlRoute
   WorkspaceRoute: typeof WorkspaceRoute
+  AuthCallbackRoute: typeof AuthCallbackRoute
+  InviteTokenRoute: typeof InviteTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -163,26 +177,22 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignUpSplatRouteImport
       parentRoute: typeof SignUpRoute
     }
-    '/sign-in/$': {
-      id: '/sign-in/$'
-      path: '/$'
-      fullPath: '/sign-in/$'
-      preLoaderRoute: typeof SignInSplatRouteImport
-      parentRoute: typeof SignInRoute
+    '/invite/$token': {
+      id: '/invite/$token'
+      path: '/invite/$token'
+      fullPath: '/invite/$token'
+      preLoaderRoute: typeof InviteTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
-
-interface SignInRouteChildren {
-  SignInSplatRoute: typeof SignInSplatRoute
-}
-
-const SignInRouteChildren: SignInRouteChildren = {
-  SignInSplatRoute: SignInSplatRoute,
-}
-
-const SignInRouteWithChildren =
-  SignInRoute._addFileChildren(SignInRouteChildren)
 
 interface SignUpRouteChildren {
   SignUpSplatRoute: typeof SignUpSplatRoute
@@ -197,10 +207,12 @@ const SignUpRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  SignInRoute: SignInRouteWithChildren,
+  SignInRoute: SignInRoute,
   SignUpRoute: SignUpRouteWithChildren,
   SqlRoute: SqlRoute,
   WorkspaceRoute: WorkspaceRoute,
+  AuthCallbackRoute: AuthCallbackRoute,
+  InviteTokenRoute: InviteTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

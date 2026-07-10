@@ -1,5 +1,6 @@
-import { useAuth } from "@clerk/tanstack-react-start";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useAuth } from "~/components/auth-provider";
+import { useWorkspace } from "~/components/workspace-provider";
 import { E2E_AUTH_TOKEN } from "./e2e-auth";
 import { isE2eAuthEnabled } from "./e2e-client";
 
@@ -52,12 +53,15 @@ export class LixrayApiError extends Error {
 }
 
 export function useLixrayApi() {
-	const { getToken } = useAuth();
-	const getTokenRef = useRef(getToken);
+	const { getAccessToken } = useAuth();
+	const { activeWorkspace } = useWorkspace();
+	const getTokenRef = useRef(getAccessToken);
 
 	useEffect(() => {
-		getTokenRef.current = getToken;
-	}, [getToken]);
+		getTokenRef.current = getAccessToken;
+	}, [getAccessToken]);
+
+	const workspaceId = activeWorkspace?.workspace.id ?? null;
 
 	const request = useCallback(
 		async <T>(path: string, init: RequestInit = {}): Promise<T> => {
@@ -66,7 +70,12 @@ export function useLixrayApi() {
 				: await getTokenRef.current();
 			if (!token) {
 				throw new LixrayApiError(401, {
-					error: { message: "No Clerk session token is available" },
+					error: { message: "No Supabase access token is available" },
+				});
+			}
+			if (!workspaceId) {
+				throw new LixrayApiError(400, {
+					error: { message: "No active workspace is available" },
 				});
 			}
 
@@ -78,7 +87,7 @@ export function useLixrayApi() {
 
 			const { signal, cleanup } = requestSignal(init.signal);
 			try {
-				const response = await fetch(path, {
+				const response = await fetch(workspaceApiPath(workspaceId, path), {
 					...init,
 					headers,
 					signal,
@@ -94,20 +103,36 @@ export function useLixrayApi() {
 				cleanup();
 			}
 		},
-		[],
+		[workspaceId],
 	);
 
 	return useMemo(
 		() => ({
-			listBranches: () => request<BranchesResponse>("/v1/branches"),
+			listBranches: () => request<BranchesResponse>("/branches"),
 			execute: (body: ExecuteRequest) =>
-				request<ExecuteResponse>("/v1/execute", {
+				request<ExecuteResponse>("/execute", {
 					method: "POST",
 					body: JSON.stringify(body),
 				}),
 		}),
 		[request],
 	);
+}
+
+const UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function workspaceApiPath(
+	workspaceId: string,
+	endpoint: string,
+): string {
+	if (!UUID_PATTERN.test(workspaceId)) {
+		throw new Error("A valid workspace UUID is required");
+	}
+	if (!endpoint.startsWith("/") || endpoint.startsWith("//")) {
+		throw new Error("Workspace API endpoints must be absolute paths");
+	}
+	return `/v1/workspaces/${encodeURIComponent(workspaceId)}${endpoint}`;
 }
 
 function requestSignal(parentSignal: AbortSignal | null | undefined): {
