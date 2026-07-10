@@ -23,7 +23,7 @@ export interface Env {
 
 export class SlateDbContainer extends Container<Env> {
 	defaultPort = 8080;
-	sleepAfter = "10m";
+	sleepAfter = "336h";
 
 	constructor(ctx: DurableObjectState<ContainerProps>, env: Env) {
 		super(ctx, env);
