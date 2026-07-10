@@ -61,9 +61,9 @@ classification: `/@` ⇒ user space; agents, unfurlers, and MCP servers parse wi
 (`jsr.io/@std/http`). (e) `@` is legal in path segments per RFC 3986 (unlike `~`, which some
 tools mangle to `%7E`).
 
-**Rejected.** *Bare root* (GitHub-style): buys familiarity at the cost of the eternal blocklist
+**Rejected.** _Bare root_ (GitHub-style): buys familiarity at the cost of the eternal blocklist
 and retroactive-confiscation risk; every pain story in the research (GitLab `/-/`, Gitea `v2`,
-HF) was a bare-root retrofit. *`/x/{ns}` prefix* (Reddit/PyPI-style): same guarantee but three
+HF) was a bare-root retrofit. _`/x/{ns}` prefix_ (Reddit/PyPI-style): same guarantee but three
 opaque characters; prefixes fit resource types (packages, posts), sigils fit identities.
 
 **Consequences.** All UI/API output MUST emit only the `@` form. A courtesy 301 from bare
@@ -87,7 +87,7 @@ closed and documented; `/file/` on a directory MUST 301 to `/dir/` and vice vers
 the equivalent blob/tree correction in both directions, verified).
 
 **Why.** (a) Bare `/{slug}/{path}` would let user file trees swallow the sub-workspace URL space,
-forcing reserved words *inside user trees* (GitLab's `PROJECT_WILDCARD_ROUTES` disaster — users
+forcing reserved words _inside user trees_ (GitLab's `PROJECT_WILDCARD_ROUTES` disaster — users
 owned `tree`, `raw`, `badges` before GitLab reserved them). (b) Two verbs make the URL
 self-describing: the router picks the renderer before any storage lookup (relevant to SlateDB
 roundtrip economics); self-healing redirects mean wrong guesses still land. (c) **Vocabulary
@@ -200,6 +200,7 @@ resolve against the same handle registry that routes URLs, and MUST link to `lix
 by pure string concatenation — no mapping table, no lookup divergence.
 
 **Rules.**
+
 - Mentions are **stored as `namespace_id`** (immutable) and **rendered with the current handle** —
   renames never break or misdirect historical mentions.
 - Mentioning a handle in `redirect` state resolves to its namespace and renders the canonical
@@ -214,7 +215,7 @@ by pure string concatenation — no mapping table, no lookup divergence.
   must be structurally impossible.
 - Team mentions (`@org/team`) are a future extension; not in v1 grammar.
 
-**Why.** This coherence is the sigil's dividend (YouTube built handles *for* tagging — channel
+**Why.** This coherence is the sigil's dividend (YouTube built handles _for_ tagging — channel
 names weren't unique); it collapses "who is this" (URL), "notify them" (mention), and "who did
 this" (activity feed actor) into one registry, which agents can also resolve mechanically.
 
@@ -334,39 +335,40 @@ create unique index ws_one_active_slug on workspace_slugs (workspace_id)
 ```
 
 **How the registry works.**
-- *Routing* `/@{h}/{s}`: lower-case `h`, look up `handles` — `active` ⇒ serve; `redirect` ⇒ 301
+
+- _Routing_ `/@{h}/{s}`: lower-case `h`, look up `handles` — `active` ⇒ serve; `redirect` ⇒ 301
   to the namespace's active handle (partial unique index guarantees at most one; see deletion
   rule below); `tombstone` ⇒ 410; `reserved`/missing ⇒ 404. Namespace profiles are public, so
   this is safe at the handle tier. **Workspace slugs resolve visibility-first** (invariant 9):
   resolve `s` to its workspace, apply the visibility/RLS check, and only then emit 301
-  (redirect) or 410 (tombstone) — an anonymous request touching a *private* workspace's current,
+  (redirect) or 410 (tombstone) — an anonymous request touching a _private_ workspace's current,
   former, or deleted slug gets the uniform 404. Emitting 301/410 before the visibility check
   leaks existence, rename targets, and deletion dates to anonymous crawlers whose caches you
   cannot purge.
-- *First claim*: a single `INSERT` — the PK blocks exact duplicates, `handles_squat` blocks
+- _First claim_: a single `INSERT` — the PK blocks exact duplicates, `handles_squat` blocks
   case/punctuation twins (`launch-plan` vs `launchplan`), and because redirect/reserved/tombstone
   rows live in the same table, shadowing a live redirect or claiming a reserved/retired name
   fails on the same constraint.
-- *Re-materialization* (restore, post-cooldown reuse, rename-back): the PK row already exists, so
+- _Re-materialization_ (restore, post-cooldown reuse, rename-back): the PK row already exists, so
   these are **guarded state-transition UPDATEs**, the only other legal materializing primitive:
   `UPDATE handles SET state='active', namespace_id=$ns, deleted_at=null
-   WHERE handle=$h AND state='tombstone' AND deleted_at < now() - interval '90 days'`
+ WHERE handle=$h AND state='tombstone' AND deleted_at < now() - interval '90 days'`
   — require rowcount = 1, else abort. INSERT-or-guarded-UPDATE both serialize on the same PK
   row, so the repo-jacking race (GitHub's retirement was bypassed 4× via restore/transfer/race)
   stays structurally closed across every materializing path.
-- *Rename* (one transaction): `UPDATE handles SET state='redirect'
-  WHERE handle=$old AND state='active' AND namespace_id=$ns` (rowcount MUST be 1 — an unguarded
+- _Rename_ (one transaction): `UPDATE handles SET state='redirect'
+WHERE handle=$old AND state='active' AND namespace_id=$ns` (rowcount MUST be 1 — an unguarded
   update is a hijack primitive against other namespaces' live handles) + materialize `$new` as
   `active`. Old URLs 301 forever; mentions and permissions are untouched (they hold
   `namespace_id`).
-- *Delete* (one transaction): the active handle → `tombstone` (set `deleted_at`) **and all of the
+- _Delete_ (one transaction): the active handle → `tombstone` (set `deleted_at`) **and all of the
   entity's `redirect` rows → `tombstone`** — otherwise they would dangle, pointing at a namespace
   with no active handle to 301 to. Same rule for `workspace_slugs` on workspace deletion.
-- *Transfer*: update `namespaces.owner_*` — every URL, mention, and workspace survives verbatim.
+- _Transfer_: update `namespaces.owner_*` — every URL, mention, and workspace survives verbatim.
 - Intentional property: tombstoned rows keep their `squat_key` claimed, so punctuation variants
   of retired names stay blocked (repo-jacking hygiene); only the exact string can return, via the
   guarded transition. Known edge case: `handles_squat` also blocks an owner renaming to a
-  punctuation-variant of their *own* former handle (`launch-plan` → `launchplan`); resolve via
+  punctuation-variant of their _own_ former handle (`launch-plan` → `launchplan`); resolve via
   support tooling that retires the old row in the same transaction. Accepted cost of the
   race-free design.
 
