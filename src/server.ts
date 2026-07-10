@@ -12,6 +12,7 @@ export default {
 	): Promise<Response> {
 		ctx.passThroughOnException();
 		return handleRequest(request, env, {
+			executionContext: ctx,
 			fallback: async (fallbackRequest) =>
 				await startHandler.fetch(fallbackRequest),
 		});

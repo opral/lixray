@@ -24,3 +24,12 @@ enabled = false
 client_id = ""
 secret = ""
 skip_nonce_check = false
+
+[auth.hook.custom_access_token]
+enabled = true
+uri = "pg-functions://postgres/private/custom_access_token_hook"
+
+[auth.oauth_server]
+enabled = true
+authorization_url_path = "/oauth/consent"
+allow_dynamic_registration = true

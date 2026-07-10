@@ -19,16 +19,18 @@
 		"test:e2e": "playwright test",
 		"test:e2e:r2": "E2E_SLATEDB_STORAGE=r2 playwright test",
 		"test:db": "supabase test db",
-		"test:worker": "node --test --experimental-strip-types src/worker/handler.test.ts",
+		"test:worker": "node --test --experimental-strip-types src/worker/handler.test.ts src/mcp/*.test.ts",
 		"supabase:start": "supabase start",
 		"typecheck": "pnpm run routes:generate && tsc --noEmit",
 		"cf-typegen": "wrangler types --config ./wrangler.jsonc"
 	},
 	"dependencies": {
 		"@cloudflare/containers": "0.3.7",
+		"@modelcontextprotocol/sdk": "1.29.0",
 		"@supabase/supabase-js": "^2.110.2",
 		"@tanstack/react-router": "^1.170.17",
 		"@tanstack/react-start": "^1.168.27",
+		"agents": "0.17.3",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
 		"fflate": "^0.8.3",
@@ -38,7 +40,8 @@
 		"react": "^19.2.7",
 		"react-dom": "^19.2.7",
 		"sonner": "^2.0.7",
-		"tailwind-merge": "^3.6.0"
+		"tailwind-merge": "^3.6.0",
+		"zod": "4.4.3"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "^1.43.0",

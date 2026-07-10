@@ -199,6 +199,63 @@ a {
 	width: min(320px, 100%);
 }
 
+.consent-card {
+	justify-items: stretch;
+	max-width: 680px;
+}
+
+.consent-card > .brand,
+.consent-card > .auth-copy {
+	justify-self: center;
+}
+
+.consent-card .auth-copy > svg {
+	justify-self: center;
+	color: #4f46e5;
+}
+
+.consent-request,
+.consent-permissions {
+	border: 1px solid rgba(23, 25, 28, 0.1);
+	border-radius: 8px;
+	padding: 16px;
+}
+
+.consent-request p,
+.consent-permissions p {
+	margin: 0;
+}
+
+.consent-request a {
+	display: inline-block;
+	margin-top: 6px;
+	color: #4f46e5;
+	font-size: 13px;
+}
+
+.consent-permissions h2 {
+	margin: 0 0 10px;
+	font-size: 16px;
+}
+
+.consent-permissions ul {
+	margin: 0 0 12px;
+	padding-left: 20px;
+	color: #454b54;
+	line-height: 1.55;
+}
+
+.consent-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 10px;
+}
+
+.consent-redirect {
+	text-align: center;
+	font-size: 12px;
+}
+
 .page-heading {
 	max-width: 760px;
 	margin-bottom: 18px;

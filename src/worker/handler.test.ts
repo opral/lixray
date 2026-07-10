@@ -5,10 +5,18 @@ import {
 	authenticateWithSupabase,
 	authorizeWorkspaceWithSupabase,
 	handleRequest,
+	validateBrowserJwtClaims,
+	validateMcpJwtClaims,
 	type AuthenticateRequest,
+	type AuthenticateMcpRequest,
 	type AuthorizeWorkspace,
 	type WorkerEnv,
 } from "./handler.ts";
+import {
+	MCP_AUTHORIZATION_SERVER,
+	MCP_PROTECTED_RESOURCE_PATH,
+	MCP_RESOURCE,
+} from "../mcp/server.ts";
 
 const WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
@@ -42,6 +50,178 @@ void test("non-/v1 routes delegate to the frontend fallback", async () => {
 	);
 	assert.equal(response.status, 209);
 	assert.equal(await response.text(), "frontend /");
+});
+
+void test("protected resource discovery is public and precedes the frontend fallback", async () => {
+	let fellBack = false;
+	const response = await handleRequest(
+		new Request(`https://example.test${MCP_PROTECTED_RESOURCE_PATH}`),
+		env({}),
+		{
+			fallback: async () => {
+				fellBack = true;
+				return new Response("frontend");
+			},
+		},
+	);
+	assert.equal(response.status, 200);
+	assert.equal(fellBack, false);
+	assert.deepEqual(await response.json(), {
+		resource: MCP_RESOURCE,
+		authorization_servers: [MCP_AUTHORIZATION_SERVER],
+		scopes_supported: ["openid", "email", "profile"],
+		resource_documentation: "https://lixray.com/docs/mcp",
+	});
+});
+
+void test("unauthenticated MCP discovery returns an OAuth resource challenge before fallback", async () => {
+	let fellBack = false;
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", {
+			headers: { Accept: "application/json, text/event-stream" },
+		}),
+		env({}),
+		{
+			authenticateMcp: async () => ({
+				ok: false,
+				response: new Response("Unauthorized", {
+					status: 401,
+					headers: {
+						"WWW-Authenticate":
+							'Bearer resource_metadata="https://lixray.com/.well-known/oauth-protected-resource"',
+					},
+				}),
+			}),
+			fallback: async () => {
+				fellBack = true;
+				return new Response("frontend");
+			},
+		},
+	);
+	assert.equal(response.status, 401);
+	assert.match(
+		response.headers.get("www-authenticate") ?? "",
+		/resource_metadata="https:\/\/lixray\.com\/\.well-known\/oauth-protected-resource"/,
+	);
+	assert.equal(fellBack, false);
+});
+
+void test("authenticated MCP initialize reaches the MCP transport before fallback", async () => {
+	let fellBack = false;
+	let reachedTransport = false;
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", {
+			method: "POST",
+			headers: {
+				Authorization: "Bearer oauth-user-token",
+				Accept: "application/json, text/event-stream",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "handler-test", version: "1.0.0" },
+				},
+			}),
+		}),
+		env({}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			mcpTransport: async () => {
+				reachedTransport = true;
+				return Response.json({
+					jsonrpc: "2.0",
+					id: 1,
+					result: {
+						serverInfo: { name: "lixray", version: "0.1.0" },
+						capabilities: { tools: {} },
+					},
+				});
+			},
+			fallback: async () => {
+				fellBack = true;
+				return new Response("frontend");
+			},
+		},
+	);
+	assert.equal(response.status, 200);
+	assert.equal(fellBack, false);
+	assert.equal(reachedTransport, true);
+	const payload: unknown = await response.json();
+	assert.ok(isRecord(payload));
+	assert.ok(isRecord(payload.result));
+	assert.ok(isRecord(payload.result.serverInfo));
+	assert.equal(payload.result.serverInfo.name, "lixray");
+	assert.ok(payload.result.capabilities);
+});
+
+void test("MCP JWT claims require issuer, audience, expiry, OAuth client, and resource binding", () => {
+	const issuer = "https://project.supabase.co/auth/v1";
+	const now = 1_800_000_000;
+	const valid = {
+		iss: issuer,
+		aud: "authenticated",
+		exp: now + 300,
+		sub: "user-123",
+		role: "authenticated",
+		client_id: "chatgpt-client",
+		resource: MCP_RESOURCE,
+		lixray_mcp: true,
+		scope: "openid email profile",
+	};
+	assert.deepEqual(validateMcpJwtClaims(valid, issuer, now), {
+		ok: true,
+		userId: "user-123",
+		clientId: "chatgpt-client",
+	});
+
+	for (const claims of [
+		{ ...valid, iss: "https://attacker.invalid/auth/v1" },
+		{ ...valid, aud: "anon" },
+		{ ...valid, exp: now },
+		{ ...valid, role: "anon" },
+	]) {
+		const result = validateMcpJwtClaims(claims, issuer, now);
+		assert.equal(result.ok, false);
+		if (!result.ok) assert.equal(result.error, "invalid_token");
+	}
+
+	for (const claims of [
+		{ ...valid, client_id: undefined },
+		{ ...valid, resource: "https://other.example" },
+		{ ...valid, lixray_mcp: false },
+		{ ...valid, scope: "email profile" },
+	]) {
+		const result = validateMcpJwtClaims(claims, issuer, now);
+		assert.equal(result.ok, false);
+		if (!result.ok) assert.equal(result.error, "insufficient_scope");
+	}
+});
+
+void test("browser /v1 claims reject OAuth clients while normal sessions are unchanged", () => {
+	const browserClaims = {
+		sub: "user-123",
+		role: "authenticated",
+		aud: "authenticated",
+	};
+	assert.equal(validateBrowserJwtClaims(browserClaims), true);
+	assert.equal(
+		validateBrowserJwtClaims({
+			...browserClaims,
+			client_id: "chatgpt-client",
+			resource: MCP_RESOURCE,
+			lixray_mcp: true,
+		}),
+		false,
+	);
+	assert.equal(
+		validateBrowserJwtClaims({ ...browserClaims, role: "anon" }),
+		false,
+	);
 });
 
 void test("legacy unscoped /v1 routes return 404 before auth", async () => {
@@ -296,6 +476,17 @@ function authenticated(): AuthenticateRequest {
 	});
 }
 
+function authenticatedMcp(): AuthenticateMcpRequest {
+	return async () => ({
+		ok: true,
+		auth: {
+			userId: "user-123",
+			token: "oauth-user-token",
+			clientId: "chatgpt-client",
+		},
+	});
+}
+
 function rejected(status: number, body: string): AuthenticateRequest {
 	return async () => ({ ok: false, response: new Response(body, { status }) });
 }
@@ -335,4 +526,8 @@ function env(options: {
 		},
 		...options.extra,
 	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object";
 }

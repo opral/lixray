@@ -1,5 +1,22 @@
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
+import {
+	createRemoteJWKSet,
+	jwtVerify,
+	type JWTPayload,
+	type JWTVerifyGetKey,
+} from "jose";
 import { E2E_AUTH_TOKEN } from "../lib/e2e-auth.ts";
+import { WorkerFileServiceBackend } from "../mcp/backend.ts";
+import { LixFileService } from "../mcp/file-service.ts";
+import {
+	handleMcpTransport,
+	MCP_DOCUMENTATION_PATH,
+	MCP_PATH,
+	MCP_PROTECTED_RESOURCE_PATH,
+	MCP_RESOURCE,
+	mcpDocumentationResponse,
+	mcpUnauthorizedResponse,
+	protectedResourceMetadataResponse,
+} from "../mcp/server.ts";
 
 export interface WorkerEnv {
 	SLATEDB_CONTAINER: ContainerNamespace;
@@ -38,8 +55,11 @@ export interface ContainerStub {
 
 export interface HandleRequestOptions {
 	authenticate?: AuthenticateRequest;
+	authenticateMcp?: AuthenticateMcpRequest;
 	authorizeWorkspace?: AuthorizeWorkspace;
+	mcpTransport?: typeof handleMcpTransport;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
+	executionContext?: ExecutionContext;
 }
 
 export interface AuthenticatedUser {
@@ -48,10 +68,19 @@ export interface AuthenticatedUser {
 	isE2e?: boolean;
 }
 
+export interface AuthenticatedMcpUser extends AuthenticatedUser {
+	clientId: string;
+}
+
 export type AuthenticateRequest = (
 	request: Request,
 	env: WorkerEnv,
 ) => Promise<AuthResult>;
+
+export type AuthenticateMcpRequest = (
+	request: Request,
+	env: WorkerEnv,
+) => Promise<McpAuthResult>;
 
 export type AuthorizeWorkspace = (
 	workspaceId: string,
@@ -61,6 +90,17 @@ export type AuthorizeWorkspace = (
 
 export type AuthResult =
 	{ ok: true; auth: AuthenticatedUser } | { ok: false; response: Response };
+
+export type McpAuthResult =
+	{ ok: true; auth: AuthenticatedMcpUser } | { ok: false; response: Response };
+
+export type McpClaimsValidation =
+	| { ok: true; userId: string; clientId: string }
+	| {
+			ok: false;
+			error: "invalid_token" | "insufficient_scope";
+			description: string;
+	  };
 
 const WORKSPACE_API_PATH = /^\/v1\/workspaces\/([^/]+)(\/.*)$/;
 const UUID_PATTERN =
@@ -76,6 +116,39 @@ export async function handleRequest(
 
 	if (request.method === "GET" && url.pathname === "/healthz") {
 		return json({ ok: true, service: "lixray" });
+	}
+
+	if (url.pathname === MCP_PROTECTED_RESOURCE_PATH) {
+		if (request.method === "OPTIONS") return corsPreflight();
+		return request.method === "GET"
+			? protectedResourceMetadataResponse()
+			: new Response("Method not allowed\n", { status: 405 });
+	}
+
+	if (url.pathname === MCP_DOCUMENTATION_PATH) {
+		return request.method === "GET"
+			? mcpDocumentationResponse()
+			: new Response("Method not allowed\n", { status: 405 });
+	}
+
+	if (url.pathname === MCP_PATH) {
+		if (request.method === "OPTIONS") return corsPreflight();
+		const authenticateMcp =
+			options.authenticateMcp ?? authenticateMcpWithSupabase;
+		const authResult = await authenticateMcp(request, env);
+		if (!authResult.ok) return authResult.response;
+		const authorizeWorkspace =
+			options.authorizeWorkspace ?? authorizeWorkspaceWithSupabase;
+		const backend = new WorkerFileServiceBackend(
+			env,
+			authResult.auth,
+			async (workspaceId, auth) => authorizeWorkspace(workspaceId, auth, env),
+		);
+		return (options.mcpTransport ?? handleMcpTransport)(
+			request,
+			new LixFileService(backend),
+			options.executionContext ?? noopExecutionContext(),
+		);
 	}
 
 	if (!url.pathname.startsWith("/v1/")) {
@@ -151,14 +224,118 @@ export async function authenticateWithSupabase(
 				audience: "authenticated",
 			},
 		);
-		if (!payload.sub || payload.role !== "authenticated") return unauthorized();
+		if (!validateBrowserJwtClaims(payload)) return unauthorized();
 		return {
 			ok: true,
-			auth: { userId: payload.sub, token },
+			auth: { userId: payload.sub as string, token },
 		};
 	} catch {
 		return unauthorized();
 	}
+}
+
+export function validateBrowserJwtClaims(payload: JWTPayload): boolean {
+	return (
+		typeof payload.sub === "string" &&
+		payload.sub.length > 0 &&
+		payload.role === "authenticated" &&
+		typeof payload.client_id !== "string" &&
+		payload.lixray_mcp !== true
+	);
+}
+
+export async function authenticateMcpWithSupabase(
+	request: Request,
+	env: WorkerEnv,
+): Promise<McpAuthResult> {
+	if (!env.SUPABASE_URL || !env.SUPABASE_JWKS_URL) {
+		return {
+			ok: false,
+			response: new Response("MCP authentication is not configured\n", {
+				status: 500,
+			}),
+		};
+	}
+	const token = bearerToken(request);
+	if (!token) return { ok: false, response: mcpUnauthorizedResponse() };
+
+	try {
+		const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
+		const { payload } = await jwtVerify(
+			token,
+			remoteJwks(env.SUPABASE_JWKS_URL),
+			{
+				algorithms: ["ES256"],
+				issuer: `${supabaseUrl}/auth/v1`,
+				audience: "authenticated",
+			},
+		);
+		const claims = validateMcpJwtClaims(payload, `${supabaseUrl}/auth/v1`);
+		if (!claims.ok) {
+			return {
+				ok: false,
+				response: mcpUnauthorizedResponse(claims.error, claims.description),
+			};
+		}
+		return {
+			ok: true,
+			auth: {
+				userId: claims.userId,
+				token,
+				clientId: claims.clientId,
+			},
+		};
+	} catch {
+		return { ok: false, response: mcpUnauthorizedResponse() };
+	}
+}
+
+export function validateMcpJwtClaims(
+	payload: JWTPayload,
+	expectedIssuer: string,
+	nowSeconds = Math.floor(Date.now() / 1000),
+): McpClaimsValidation {
+	const audiences = Array.isArray(payload.aud)
+		? payload.aud
+		: typeof payload.aud === "string"
+			? [payload.aud]
+			: [];
+	if (
+		payload.iss !== expectedIssuer ||
+		!audiences.includes("authenticated") ||
+		typeof payload.exp !== "number" ||
+		payload.exp <= nowSeconds ||
+		!payload.sub ||
+		payload.role !== "authenticated"
+	) {
+		return {
+			ok: false,
+			error: "invalid_token",
+			description: "The Lixray access token is invalid or expired.",
+		};
+	}
+
+	const scopes =
+		typeof payload.scope === "string" ? payload.scope.split(/\s+/) : [];
+	if (
+		typeof payload.client_id !== "string" ||
+		!payload.client_id ||
+		payload.resource !== MCP_RESOURCE ||
+		payload.lixray_mcp !== true ||
+		!scopes.includes("openid")
+	) {
+		return {
+			ok: false,
+			error: "insufficient_scope",
+			description: "Authorize the Lixray MCP app to continue.",
+		};
+	}
+
+	return {
+		ok: true,
+		userId: payload.sub,
+		clientId: payload.client_id,
+	};
 }
 
 export async function authorizeWorkspaceWithSupabase(
@@ -284,6 +461,27 @@ function isLocalhost(hostname: string): boolean {
 		hostname === "[::1]" ||
 		hostname === "::1"
 	);
+}
+
+function corsPreflight(): Response {
+	return new Response(null, {
+		status: 204,
+		headers: {
+			"access-control-allow-origin": "*",
+			"access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+			"access-control-allow-headers":
+				"Authorization, Content-Type, MCP-Protocol-Version",
+			"access-control-max-age": "86400",
+		},
+	});
+}
+
+function noopExecutionContext(): ExecutionContext {
+	return {
+		waitUntil: () => undefined,
+		passThroughOnException: () => undefined,
+		props: {},
+	} as unknown as ExecutionContext;
 }
 
 export function containerEnv(

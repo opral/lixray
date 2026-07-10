@@ -17,6 +17,26 @@ pub struct LixService {
     engine: Engine<SlateDbBackend>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum FilesystemEntryKind {
+    File,
+    Directory,
+}
+
+#[derive(Debug)]
+pub enum FilesystemMutation {
+    ReplaceFile { data: Value, metadata: Value },
+    Move { destination_path: String },
+    Delete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilesystemMutationOutcome {
+    Applied,
+    Conflict,
+    AlreadyExists,
+}
+
 pub async fn open_lix_service(config: &Config) -> Result<Arc<LixService>> {
     let backend = match &config.storage {
         StorageConfig::Memory => SlateDbBackend::open_object_store(
@@ -117,6 +137,101 @@ impl LixService {
         .await
     }
 
+    pub async fn mutate_filesystem(
+        &self,
+        branch_id: String,
+        kind: FilesystemEntryKind,
+        path: String,
+        expected_revision: String,
+        mutation: FilesystemMutation,
+    ) -> Result<FilesystemMutationOutcome, LixError> {
+        self.run("mutate_filesystem", move |engine| async move {
+            ensure_branch_exists(&engine, &branch_id, "mutateFilesystem").await?;
+            let session = engine.open_session(branch_id).await?;
+            let mut transaction = session.begin_transaction().await?;
+            let table = match kind {
+                FilesystemEntryKind::File => "lix_file",
+                FilesystemEntryKind::Directory => "lix_directory",
+            };
+            let current = transaction
+                .execute(
+                    &format!("SELECT id, lixcol_change_id FROM {table} WHERE path = $1"),
+                    &[Value::Text(path)],
+                )
+                .await?;
+            let Some(row) = current.rows().first() else {
+                transaction.rollback().await?;
+                return Ok(FilesystemMutationOutcome::Conflict);
+            };
+            let id = required_row_text(row, "id")?;
+            let revision = required_row_text(row, "lixcol_change_id")?;
+            if revision != expected_revision {
+                transaction.rollback().await?;
+                return Ok(FilesystemMutationOutcome::Conflict);
+            }
+
+            let result = match mutation {
+                FilesystemMutation::ReplaceFile { data, metadata } => {
+                    if !matches!(kind, FilesystemEntryKind::File) {
+                        transaction.rollback().await?;
+                        return Err(LixError::new(
+                            LixError::CODE_INVALID_PARAM,
+                            "replace_file requires a file entry",
+                        ));
+                    }
+                    transaction
+                        .execute(
+                            "UPDATE lix_file SET data = $1, lixcol_metadata = $2 WHERE id = $3",
+                            &[data, metadata, Value::Text(id)],
+                        )
+                        .await?
+                }
+                FilesystemMutation::Move { destination_path } => {
+                    let file_path = destination_path.trim_end_matches('/').to_string();
+                    let directory_path = format!("{file_path}/");
+                    let file_collision = transaction
+                        .execute(
+                            "SELECT id FROM lix_file WHERE path = $1",
+                            &[Value::Text(file_path)],
+                        )
+                        .await?;
+                    let directory_collision = transaction
+                        .execute(
+                            "SELECT id FROM lix_directory WHERE path = $1",
+                            &[Value::Text(directory_path)],
+                        )
+                        .await?;
+                    if !file_collision.is_empty() || !directory_collision.is_empty() {
+                        transaction.rollback().await?;
+                        return Ok(FilesystemMutationOutcome::AlreadyExists);
+                    }
+                    transaction
+                        .execute(
+                            &format!("UPDATE {table} SET path = $1 WHERE id = $2"),
+                            &[Value::Text(destination_path), Value::Text(id)],
+                        )
+                        .await?
+                }
+                FilesystemMutation::Delete => {
+                    transaction
+                        .execute(
+                            &format!("DELETE FROM {table} WHERE id = $1"),
+                            &[Value::Text(id)],
+                        )
+                        .await?
+                }
+            };
+
+            if result.rows_affected() != 1 {
+                transaction.rollback().await?;
+                return Ok(FilesystemMutationOutcome::Conflict);
+            }
+            transaction.commit().await?;
+            Ok(FilesystemMutationOutcome::Applied)
+        })
+        .await
+    }
+
     pub async fn observe(
         &self,
         branch_id: String,
@@ -185,6 +300,16 @@ impl LixService {
             ),
         }
         result?
+    }
+}
+
+fn required_row_text(row: &lix_engine::Row, column: &str) -> Result<String, LixError> {
+    match row.value(column)? {
+        Value::Text(value) => Ok(value.clone()),
+        value => Err(LixError::new(
+            LixError::CODE_TYPE_MISMATCH,
+            format!("expected text column {column}, got {value:?}"),
+        )),
     }
 }
 

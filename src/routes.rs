@@ -1,5 +1,7 @@
 use crate::error::{ApiError, ErrorEnvelope};
-use crate::store::LixService;
+use crate::store::{
+    FilesystemEntryKind, FilesystemMutation, FilesystemMutationOutcome, LixService,
+};
 use axum::{
     extract::{Json, State},
     response::{
@@ -27,6 +29,7 @@ pub fn router(service: Arc<LixService>) -> Router {
         .route("/v1/branches", get(list_branches))
         .route("/v1/createBranch", post(create_branch))
         .route("/v1/execute", post(execute))
+        .route("/v1/filesystem/mutate", post(mutate_filesystem))
         .route("/v1/observe", post(observe))
         .with_state(AppState { service })
 }
@@ -91,6 +94,43 @@ async fn execute(
         .await?;
 
     Ok(Json(ExecuteResponse::try_from(result)?))
+}
+
+async fn mutate_filesystem(
+    State(state): State<AppState>,
+    Json(request): Json<FilesystemMutationRequest>,
+) -> Result<Json<FilesystemMutationResponse>, ApiError> {
+    let branch_id = required_non_empty(request.branch_id, "branchId")?;
+    let path = required_non_empty(request.path, "path")?;
+    let expected_revision = required_non_empty(request.expected_revision, "expectedRevision")?;
+    let kind = match request.kind {
+        FilesystemEntryKindRequest::File => FilesystemEntryKind::File,
+        FilesystemEntryKindRequest::Directory => FilesystemEntryKind::Directory,
+    };
+    let mutation = match request.mutation {
+        FilesystemMutationOperationRequest::ReplaceFile { data, metadata } => {
+            let mut values = decode_params(vec![data, metadata])?;
+            let metadata = values.pop().expect("two decoded mutation values");
+            let data = values.pop().expect("two decoded mutation values");
+            FilesystemMutation::ReplaceFile { data, metadata }
+        }
+        FilesystemMutationOperationRequest::Move { destination_path } => FilesystemMutation::Move {
+            destination_path: required_non_empty(destination_path, "destinationPath")?,
+        },
+        FilesystemMutationOperationRequest::Delete => FilesystemMutation::Delete,
+    };
+    let outcome = state
+        .service
+        .mutate_filesystem(branch_id, kind, path, expected_revision, mutation)
+        .await?;
+
+    Ok(Json(FilesystemMutationResponse {
+        outcome: match outcome {
+            FilesystemMutationOutcome::Applied => "applied".to_string(),
+            FilesystemMutationOutcome::Conflict => "conflict".to_string(),
+            FilesystemMutationOutcome::AlreadyExists => "already_exists".to_string(),
+        },
+    }))
 }
 
 async fn observe(
@@ -256,6 +296,42 @@ struct ExecuteRequest {
 #[serde(rename_all = "camelCase")]
 struct ExecuteOptionsRequest {
     origin_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FilesystemMutationRequest {
+    branch_id: Option<String>,
+    kind: FilesystemEntryKindRequest,
+    path: Option<String>,
+    expected_revision: Option<String>,
+    mutation: FilesystemMutationOperationRequest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FilesystemEntryKindRequest {
+    File,
+    Directory,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum FilesystemMutationOperationRequest {
+    ReplaceFile {
+        data: WireValue,
+        metadata: WireValue,
+    },
+    Move {
+        #[serde(rename = "destinationPath")]
+        destination_path: Option<String>,
+    },
+    Delete,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FilesystemMutationResponse {
+    outcome: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -443,6 +519,110 @@ mod tests {
                 value: json!("http-value")
             }]]
         );
+    }
+
+    #[tokio::test]
+    async fn filesystem_mutations_compare_revision_atomically() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+        for path in ["/move-source.txt", "/move-taken.txt"] {
+            let response = json_request(
+                app.clone(),
+                Method::POST,
+                "/v1/execute",
+                json!({
+                    "branchId": branch_id,
+                    "sql": "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+                    "params": [
+                        { "kind": "text", "value": path },
+                        { "kind": "blob", "base64": "aGVsbG8=" }
+                    ]
+                }),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+
+        let revision_response = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT lixcol_change_id FROM lix_file WHERE path = $1",
+                "params": [{ "kind": "text", "value": "/move-source.txt" }]
+            }),
+        )
+        .await;
+        let revision_body: ExecuteResponse = response_json(revision_response).await;
+        let revision = match &revision_body.rows[0][0] {
+            WireValue::Text { value } => value.clone(),
+            value => panic!("expected text revision, got {value:?}"),
+        };
+
+        let collision = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/filesystem/mutate",
+            json!({
+                "branchId": branch_id,
+                "kind": "file",
+                "path": "/move-source.txt",
+                "expectedRevision": revision,
+                "mutation": { "type": "move", "destinationPath": "/move-taken.txt" }
+            }),
+        )
+        .await;
+        assert_eq!(collision.status(), StatusCode::OK);
+        let collision_body: FilesystemMutationResponse = response_json(collision).await;
+        assert_eq!(collision_body.outcome, "already_exists");
+
+        let moved = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/filesystem/mutate",
+            json!({
+                "branchId": branch_id,
+                "kind": "file",
+                "path": "/move-source.txt",
+                "expectedRevision": revision,
+                "mutation": { "type": "move", "destinationPath": "/move-renamed.txt" }
+            }),
+        )
+        .await;
+        assert_eq!(moved.status(), StatusCode::OK);
+        let moved_body: FilesystemMutationResponse = response_json(moved).await;
+        assert_eq!(moved_body.outcome, "applied");
+
+        let stale_delete = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/filesystem/mutate",
+            json!({
+                "branchId": branch_id,
+                "kind": "file",
+                "path": "/move-renamed.txt",
+                "expectedRevision": "stale-revision",
+                "mutation": { "type": "delete" }
+            }),
+        )
+        .await;
+        let stale_body: FilesystemMutationResponse = response_json(stale_delete).await;
+        assert_eq!(stale_body.outcome, "conflict");
+
+        let select = json_request(
+            app,
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT path FROM lix_file WHERE path = $1",
+                "params": [{ "kind": "text", "value": "/move-renamed.txt" }]
+            }),
+        )
+        .await;
+        let select_body: ExecuteResponse = response_json(select).await;
+        assert_eq!(select_body.rows.len(), 1);
     }
 
     #[tokio::test]
