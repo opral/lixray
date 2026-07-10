@@ -32,8 +32,12 @@ export class SlateDbContainer extends Container<Env> {
 }
 
 export default {
-	async fetch(request: Request, env: Env): Promise<Response> {
-		return handleRequest(request, env);
+	async fetch(
+		request: Request,
+		env: Env,
+		ctx: ExecutionContext,
+	): Promise<Response> {
+		return handleRequest(request, env, { executionContext: ctx });
 	},
 };
 

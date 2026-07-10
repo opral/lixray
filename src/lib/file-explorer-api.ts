@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { zipSync } from "fflate";
+import { LixFileService, type FileServiceBackend } from "../mcp/file-service";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 import { type WireValue, useLixrayApi } from "./lixray-api";
 
@@ -8,6 +9,7 @@ export interface DirEntry {
 	id: string;
 	path: string;
 	name: string;
+	revision: string;
 	updatedAt: string;
 }
 
@@ -16,6 +18,7 @@ export interface FileEntry {
 	id: string;
 	path: string;
 	name: string;
+	revision: string;
 	size: number | null;
 	updatedAt: string;
 }
@@ -60,66 +63,43 @@ export function useFileExplorerApi() {
 	const api = useLixrayApi();
 
 	return useMemo(() => {
-		async function resolveDirectoryId(
-			branchId: string,
-			dirPath: string,
-		): Promise<string | null> {
-			if (dirPath === "/") {
-				return null;
-			}
-			const result = await api.execute({
-				branchId,
-				sql: "SELECT id FROM lix_directory WHERE path = $1",
-				params: [text(dirPath)],
-			});
-			const id = result.rows[0]?.[0];
-			if (!id || id.kind !== "text") {
-				throw new DirectoryNotFoundError(dirPath);
-			}
-			return id.value;
-		}
+		const workspaceId = api.workspaceId ?? "";
+		const service = new LixFileService({
+			listWorkspaces: () => Promise.resolve([]),
+			listBranches: async () => (await api.listBranches()).branches,
+			execute: async (_workspaceId, request) => api.execute(request),
+			mutate: async (_workspaceId, request) => api.mutateFilesystem(request),
+		} satisfies FileServiceBackend);
 
 		async function listDirectory(
 			branchId: string,
 			dirPath: string,
 		): Promise<Array<ExplorerEntry>> {
-			const directoryId = await resolveDirectoryId(branchId, dirPath);
-			const [dirs, files] = await Promise.all([
-				api.execute({
-					branchId,
-					sql:
-						directoryId === null
-							? "SELECT id, path, name, lixcol_updated_at FROM lix_directory WHERE parent_id IS NULL ORDER BY name"
-							: "SELECT id, path, name, lixcol_updated_at FROM lix_directory WHERE parent_id = $1 ORDER BY name",
-					params: directoryId === null ? [] : [text(directoryId)],
-				}),
-				api.execute({
-					branchId,
-					sql:
-						directoryId === null
-							? "SELECT id, path, name, lixcol_metadata, lixcol_updated_at FROM lix_file WHERE directory_id IS NULL ORDER BY name"
-							: "SELECT id, path, name, lixcol_metadata, lixcol_updated_at FROM lix_file WHERE directory_id = $1 ORDER BY name",
-					params: directoryId === null ? [] : [text(directoryId)],
-				}),
-			]);
-
-			return [
-				...dirs.rows.map((row): DirEntry => ({
-					kind: "dir",
-					id: asText(row[0]),
-					path: asText(row[1]),
-					name: asText(row[2]),
-					updatedAt: asText(row[3]),
-				})),
-				...files.rows.map((row): FileEntry => ({
-					kind: "file",
-					id: asText(row[0]),
-					path: asText(row[1]),
-					name: asText(row[2]),
-					size: sizeFromMetadata(row[3]),
-					updatedAt: asText(row[4]),
-				})),
-			];
+			const entries = await service.listDirectory(
+				workspaceId,
+				branchId,
+				dirPath,
+			);
+			return entries.map((entry): ExplorerEntry =>
+				entry.kind === "directory"
+					? {
+							kind: "dir",
+							id: entry.path,
+							path: entry.path,
+							name: entry.name,
+							revision: entry.revision,
+							updatedAt: entry.updatedAt,
+						}
+					: {
+							kind: "file",
+							id: entry.path,
+							path: entry.path,
+							name: entry.name,
+							revision: entry.revision,
+							size: entry.size ?? null,
+							updatedAt: entry.updatedAt,
+						},
+			);
 		}
 
 		async function createDirectory(
@@ -127,11 +107,11 @@ export function useFileExplorerApi() {
 			dirPath: string,
 			name: string,
 		): Promise<void> {
-			await api.execute({
+			await service.createDirectory(
+				workspaceId,
 				branchId,
-				sql: "INSERT INTO lix_directory (path) VALUES ($1)",
-				params: [text(`${dirPath}${name}/`)],
-			});
+				`${dirPath}${name}/`,
+			);
 		}
 
 		/** Creates directories if missing (used for empty dirs in folder uploads). */
@@ -215,6 +195,22 @@ export function useFileExplorerApi() {
 
 		async function fetchFileBytes(
 			branchId: string,
+			filePath: string,
+		): Promise<Uint8Array<ArrayBuffer>> {
+			const result = await api.execute({
+				branchId,
+				sql: "SELECT data FROM lix_file WHERE path = $1",
+				params: [text(filePath)],
+			});
+			const value = result.rows[0]?.[0];
+			if (!value || value.kind !== "blob") {
+				throw new Error("File data not found.");
+			}
+			return base64ToBytes(value.base64);
+		}
+
+		async function fetchFileBytesById(
+			branchId: string,
 			fileId: string,
 		): Promise<Uint8Array<ArrayBuffer>> {
 			const result = await api.execute({
@@ -290,7 +286,7 @@ export function useFileExplorerApi() {
 			}
 
 			await mapLimit(filesToFetch, DOWNLOAD_CONCURRENCY, async (file) => {
-				zipEntries[file.zipPath] = await fetchFileBytes(branchId, file.id);
+				zipEntries[file.zipPath] = await fetchFileBytesById(branchId, file.id);
 			});
 
 			return zipSync(zipEntries);
@@ -301,14 +297,14 @@ export function useFileExplorerApi() {
 			entry: ExplorerEntry,
 			newName: string,
 		): Promise<void> {
-			await api.execute({
+			const destination = `${entryParentPath(entry.path)}${newName}${entry.kind === "dir" ? "/" : ""}`;
+			await service.moveEntry(
+				workspaceId,
 				branchId,
-				sql:
-					entry.kind === "dir"
-						? "UPDATE lix_directory SET name = $1 WHERE id = $2"
-						: "UPDATE lix_file SET name = $1 WHERE id = $2",
-				params: [text(newName), text(entry.id)],
-			});
+				entry.path,
+				destination,
+				entry.revision,
+			);
 		}
 
 		/** Directory deletes are recursive (the engine removes the whole subtree). */
@@ -316,25 +312,21 @@ export function useFileExplorerApi() {
 			branchId: string,
 			entries: Array<ExplorerEntry>,
 		): Promise<void> {
-			for (const table of ["lix_file", "lix_directory"] as const) {
-				const kind = table === "lix_file" ? "file" : "dir";
-				const ids = entries
-					.filter((entry) => entry.kind === kind)
-					.map((entry) => entry.id);
-				if (ids.length === 0) {
-					continue;
-				}
-				const placeholders = ids.map((_, index) => `$${index + 1}`).join(", ");
-				await api.execute({
+			for (const entry of entries) {
+				await service.deleteEntry(
+					workspaceId,
 					branchId,
-					sql: `DELETE FROM ${table} WHERE id IN (${placeholders})`,
-					params: ids.map(text),
-				});
+					entry.path,
+					entry.revision,
+					entry.kind === "dir",
+				);
 			}
 		}
 
 		return {
-			listBranches: api.listBranches,
+			listBranches: async () => ({
+				branches: await service.listBranches(workspaceId),
+			}),
 			listDirectory,
 			createDirectory,
 			ensureDirectories,
@@ -345,6 +337,14 @@ export function useFileExplorerApi() {
 			deleteEntries,
 		};
 	}, [api]);
+}
+
+function entryParentPath(path: string): string {
+	const withoutDirectorySuffix = path.endsWith("/") ? path.slice(0, -1) : path;
+	return withoutDirectorySuffix.slice(
+		0,
+		withoutDirectorySuffix.lastIndexOf("/") + 1,
+	);
 }
 
 export class UploadError extends Error {
@@ -371,22 +371,6 @@ function asText(value: WireValue | undefined): string {
 		throw new Error("Expected a text value in the query result.");
 	}
 	return value.value;
-}
-
-function sizeFromMetadata(value: WireValue | undefined): number | null {
-	if (!value || value.kind !== "json") {
-		return null;
-	}
-	const metadata = value.value;
-	if (
-		metadata &&
-		typeof metadata === "object" &&
-		"size" in metadata &&
-		typeof metadata.size === "number"
-	) {
-		return metadata.size;
-	}
-	return null;
 }
 
 async function mapLimit<T>(

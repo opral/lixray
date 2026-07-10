@@ -3,6 +3,10 @@ import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
 import { E2E_AUTH_TOKEN } from "./e2e-auth";
 import { isE2eAuthEnabled } from "./e2e-client";
+import type {
+	FilesystemMutationOutcome,
+	FilesystemMutationRequest,
+} from "../mcp/file-service";
 
 export type WireValue =
 	| { kind: "null"; value?: null }
@@ -108,14 +112,25 @@ export function useLixrayApi() {
 
 	return useMemo(
 		() => ({
+			workspaceId,
 			listBranches: () => request<BranchesResponse>("/branches"),
 			execute: (body: ExecuteRequest) =>
 				request<ExecuteResponse>("/execute", {
 					method: "POST",
 					body: JSON.stringify(body),
 				}),
+			mutateFilesystem: async (body: FilesystemMutationRequest) => {
+				const response = await request<{ outcome: FilesystemMutationOutcome }>(
+					"/filesystem/mutate",
+					{
+						method: "POST",
+						body: JSON.stringify(body),
+					},
+				);
+				return response.outcome;
+			},
 		}),
-		[request],
+		[request, workspaceId],
 	);
 }
 

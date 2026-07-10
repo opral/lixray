@@ -15,8 +15,44 @@ Production is deployed at `https://lixray.com`.
 - Every workspace UUID selects one Durable Object Container and one SlateDB R2
   prefix.
 
-The Worker serves the TanStack Start application and handles `/healthz` plus
+The Worker serves the TanStack Start application and handles `/healthz`, the
+authenticated `/mcp` endpoint, OAuth protected-resource discovery, and
 workspace-scoped `/v1/*` requests before delegating all other routes to Start.
+
+## ChatGPT MCP app
+
+Lixray exposes a stateless Streamable HTTP MCP server at:
+
+```text
+https://lixray.com/mcp
+```
+
+`GET /.well-known/oauth-protected-resource` advertises the Lixray resource and
+the Supabase Auth OAuth 2.1 server. ChatGPT dynamically registers a client,
+uses PKCE, and sends a Supabase ES256 access token bound to
+`resource=https://lixray.com`. The Worker validates the token's issuer,
+audience, expiry, authenticated role, OAuth client ID, scope, and resource on
+every MCP request.
+
+The MCP server provides eleven data-only tools:
+
+- discovery: `list_workspaces`, `list_branches`
+- reads: `list_directory`, `find_files`, `read_file`
+- writes: `write_file`, `edit_file`, `create_directory`, `move_entry`,
+  `delete_entry`
+- raw SQL: `execute`
+
+Every operation names an existing workspace and branch. File-tool calls require
+canonical absolute paths and valid UTF-8 content of at most 1 MiB. Replacements,
+edits, moves, and deletes compare the supplied opaque revision with
+`lixcol_change_id`; stale operations fail without changing the file. Creates and
+moves never overwrite existing destinations, and directory deletion requires
+`recursive=true`. The `execute` tool accepts raw Lix SQL and wire-format
+parameters, is marked destructive, and bypasses these file-tool safeguards.
+
+The `/oauth/consent` page preserves the Google sign-in return path and shows
+the requesting client, scopes, and file permissions before allowing approval
+or denial.
 
 ## HTTP API
 
@@ -95,6 +131,40 @@ its production Supabase project.
 The checked-in Supabase URL, publishable key, and JWKS URL are public
 configuration. `SUPABASE_SECRET_KEY` is deliberately unused: browser queries and
 Worker authorization use the user's JWT plus RLS.
+
+### Enable MCP OAuth in Supabase
+
+Apply `20260710180000_lixray_mcp_oauth.sql` before enabling the OAuth server.
+The migration installs the custom access-token hook and RLS restrictions. MCP
+tokens can select only their accessible organization/workspace names and IDs;
+they cannot read profiles, rosters, or invitations, or mutate account and
+workspace metadata. Normal browser sessions retain their existing policies.
+
+Then configure the production project in Supabase Dashboard:
+
+1. Under **Authentication → OAuth Server**, enable the OAuth 2.1 server.
+2. Set the authorization/consent path to `/oauth/consent`.
+3. Enable dynamic client registration for personal ChatGPT developer-mode use.
+4. Under **Authentication → Hooks**, enable the custom access-token hook and
+   select `private.custom_access_token_hook`.
+5. Confirm the production site URL is `https://lixray.com`, the Google provider
+   is enabled, and `https://lixray.com/auth/callback` is allowed.
+
+After deployment, verify these endpoints before connecting ChatGPT:
+
+```sh
+curl https://lixray.com/.well-known/oauth-protected-resource
+curl -i https://lixray.com/mcp
+```
+
+The second command should return `401` with a `WWW-Authenticate` challenge that
+points back to the protected-resource metadata. Use MCP Inspector to verify
+discovery, consent, token refresh/revocation, `initialize`, `tools/list`, and a
+read/write/conflict cycle.
+
+In ChatGPT, enable developer mode, create a developer-mode app named
+**Lixray**, describe it as a safe workspace file editor, and use
+`https://lixray.com/mcp` as its MCP URL.
 
 ## Local development
 
