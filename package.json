@@ -7,6 +7,10 @@
 	"scripts": {
 		"check": "pnpm run check:cloudflare && cargo test",
 		"check:cloudflare": "pnpm typecheck && pnpm test:worker",
+		"atelier:build": "pnpm --filter @opral/atelier build",
+		"predev": "pnpm atelier:build",
+		"prebuild": "pnpm atelier:build",
+		"pretypecheck": "pnpm atelier:build",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"lint": "eslint . --max-warnings=0",
@@ -26,7 +30,9 @@
 	},
 	"dependencies": {
 		"@cloudflare/containers": "0.3.7",
+		"@lix-js/sdk": "^0.8.0",
 		"@modelcontextprotocol/sdk": "1.29.0",
+		"@opral/atelier": "workspace:*",
 		"@supabase/supabase-js": "^2.110.2",
 		"@tanstack/react-router": "^1.170.17",
 		"@tanstack/react-start": "^1.168.27",

@@ -1,0 +1,4 @@
+[submodule "vendor/atelier"]
+	path = vendor/atelier
+	url = https://github.com/opral/atelier.git
+	branch = main
