@@ -184,9 +184,7 @@ pnpm dev
 
 It starts the local Supabase stack, reads its URL and publishable key, and then
 starts the web app with those values. Cloudflare's local runtime builds and
-manages the in-memory Lix container. Supabase remains running when the web app
-stops so subsequent starts are fast; stop it explicitly with
-`pnpm --dir database stop`.
+manages the in-memory Lix container. Stopping the command also stops Supabase.
 
 Each module also works independently:
 

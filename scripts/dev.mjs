@@ -14,6 +14,9 @@ if (database.status !== 0) {
 	process.exit(database.status ?? 1);
 }
 
+let databaseStopped = false;
+process.on("exit", stopDatabase);
+
 const localSupabase = parseEnv(
 	execFileSync(
 		pnpm,
@@ -43,19 +46,26 @@ const webApp = spawn(pnpm, ["--dir", "web-app", "dev"], {
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
-	process.on(signal, () => webApp.kill(signal));
+	process.on(signal, () => {
+		webApp.kill(signal);
+	});
 }
 
 webApp.on("error", (error) => {
-	throw error;
+	console.error(error);
+	process.exit(1);
 });
 webApp.on("exit", (code, signal) => {
-	if (signal) {
-		process.kill(process.pid, signal);
-	} else {
-		process.exit(code ?? 0);
-	}
+	process.exit(
+		signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : (code ?? 0),
+	);
 });
+
+function stopDatabase() {
+	if (databaseStopped) return;
+	databaseStopped = true;
+	spawnSync(pnpm, ["--dir", "database", "stop"], { stdio: "inherit" });
+}
 
 function parseEnv(output) {
 	return Object.fromEntries(
