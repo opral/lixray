@@ -3,24 +3,6 @@
 	"private": true,
 	"packageManager": "pnpm@10.13.1",
 	"scripts": {
-		"build": "pnpm --dir web-app build",
-		"check": "pnpm run check:cloudflare && cargo test --manifest-path lix-server/Cargo.toml --locked",
-		"check:cloudflare": "pnpm --dir web-app check:cloudflare",
-		"dev": "pnpm --dir web-app dev",
-		"dev:authless": "pnpm --dir web-app dev:authless",
-		"dev:r2": "pnpm --dir web-app dev:r2",
-		"deploy:worker": "pnpm --dir web-app deploy:worker",
-		"format": "pnpm --dir web-app exec prettier --write --ignore-path ../.prettierignore --config ../.prettierrc.json ..",
-		"format:check": "pnpm --dir web-app exec prettier --check --ignore-path ../.prettierignore --config ../.prettierrc.json ..",
-		"lint": "pnpm --dir web-app lint",
-		"playwright:install": "pnpm --dir web-app exec playwright install chromium",
-		"supabase": "pnpm --dir web-app exec supabase --workdir ../database",
-		"supabase:start": "pnpm supabase start",
-		"test:db": "pnpm supabase test db",
-		"test:e2e": "pnpm --dir web-app test:e2e",
-		"test:e2e:r2": "pnpm --dir web-app test:e2e:r2",
-		"test:worker": "pnpm --dir web-app test:worker",
-		"typecheck": "pnpm --dir web-app typecheck",
-		"wrangler": "pnpm --dir web-app exec wrangler"
+		"dev": "node scripts/dev.mjs"
 	}
 }

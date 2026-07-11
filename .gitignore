@@ -8,6 +8,8 @@
 
 # Node / Cloudflare local output
 /node_modules/
+/database/node_modules/
+/database/supabase/.branches/
 /web-app/node_modules/
 /dist/
 /.wrangler/

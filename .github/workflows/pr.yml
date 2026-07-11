@@ -50,10 +50,12 @@ jobs:
           version: 2.109.1
 
       - name: Start Supabase
-        run: supabase start --workdir database
+        working-directory: database
+        run: supabase start
 
       - name: Test database policies and functions
-        run: supabase test db --workdir database
+        working-directory: database
+        run: supabase test db
 
   frontend:
     name: Frontend checks
@@ -81,16 +83,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check formatting
-        run: pnpm run format:check
+        run: pnpm --dir web-app format:check
 
       - name: Lint
-        run: pnpm run lint
+        run: pnpm --dir web-app lint
 
       - name: Typecheck and worker tests
-        run: pnpm run check:cloudflare
+        run: pnpm --dir web-app check:cloudflare
 
       - name: Build
-        run: pnpm run build
+        run: pnpm --dir web-app build
 
       - name: Verify generated files are committed
         run: git diff --exit-code
@@ -152,4 +154,4 @@ jobs:
         run: pnpm --dir web-app exec playwright install --with-deps chromium
 
       - name: Run e2e tests
-        run: pnpm test:e2e
+        run: pnpm --dir web-app test:e2e

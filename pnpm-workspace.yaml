@@ -1,5 +1,6 @@
 packages:
   - .
+  - database
   - web-app
   - vendor/atelier
 

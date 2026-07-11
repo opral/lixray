@@ -111,17 +111,17 @@ Install dependencies and start the local Supabase stack:
 ```sh
 git submodule update --init --recursive
 pnpm install --frozen-lockfile
-pnpm supabase start
-pnpm supabase test db
+pnpm --dir database start
+pnpm --dir database test
 ```
 
 Link and apply migrations to the configured development project from an
 authenticated Supabase CLI session:
 
 ```sh
-pnpm supabase login
-pnpm supabase link --project-ref xpkokrinmkjqcnjzbmpe
-pnpm supabase db push
+pnpm --dir database exec supabase login
+pnpm --dir database exec supabase link --project-ref xpkokrinmkjqcnjzbmpe
+pnpm --dir database exec supabase db push
 ```
 
 In the Supabase Dashboard for the development project:
@@ -176,22 +176,32 @@ In ChatGPT, enable developer mode, create a developer-mode app named
 
 ## Local development
 
-Copy `web-app/.dev.vars.example` to `web-app/.dev.vars` for local R2 secrets
-when needed. `.dev.vars` is ignored and must not be committed. The public
-development Supabase configuration lives in `web-app/.env.development` and
-`web-app/wrangler.jsonc`.
-
-Start with in-memory SlateDB:
+The root package is dependency-free and exposes one repository-level command:
 
 ```sh
 pnpm dev
 ```
 
-For local workspace development without Google sign-in, use the fixed
-localhost-only development identity:
+It starts the local Supabase stack, reads its URL and publishable key, and then
+starts the web app with those values. Cloudflare's local runtime builds and
+manages the in-memory Lix container. Supabase remains running when the web app
+stops so subsequent starts are fast; stop it explicitly with
+`pnpm --dir database stop`.
+
+Each module also works independently:
 
 ```sh
-pnpm dev:authless
+pnpm --dir database start
+pnpm --dir web-app dev
+cargo run --manifest-path lix-server/Cargo.toml
+```
+
+The standalone web app uses the Supabase configuration in
+`web-app/.env.development` and `web-app/wrangler.jsonc`. For workspace UI
+development without Google sign-in, use its fixed localhost-only identity:
+
+```sh
+pnpm --dir web-app dev:authless
 ```
 
 This mode provides one fixed organization and workspace. Organization and
@@ -200,7 +210,7 @@ workspace mutations are unavailable in authless mode.
 The app is served at `http://localhost:8787`. Run against R2 explicitly with:
 
 ```sh
-pnpm dev:r2
+pnpm --dir web-app dev:r2
 ```
 
 Restart the dev server after changing storage mode so existing containers do
@@ -209,40 +219,40 @@ not retain old startup environment.
 ## Verification
 
 ```sh
-pnpm typecheck
-pnpm lint
-pnpm test:worker
-pnpm supabase start
-pnpm supabase test db
-pnpm test:e2e
-pnpm build
+pnpm --dir web-app typecheck
+pnpm --dir web-app lint
+pnpm --dir web-app test:worker
+pnpm --dir database start
+pnpm --dir database test
+pnpm --dir web-app test:e2e
+pnpm --dir web-app build
 cargo test --manifest-path lix-server/Cargo.toml
 docker build lix-server
-pnpm run deploy:worker --dry-run
+pnpm --dir web-app deploy:worker --dry-run
 ```
 
 Install Playwright Chromium once with:
 
 ```sh
-pnpm playwright:install
+pnpm --dir web-app exec playwright install chromium
 ```
 
 Playwright starts a deterministic in-memory development server on port `8790`
 and uses a localhost-only E2E workspace identity. Use `E2E_PORT` to override the
-port or run `pnpm test:e2e:r2` for the R2-backed variant.
+port or run `pnpm --dir web-app test:e2e:r2` for the R2-backed variant.
 
 ## Deployment
 
 ```sh
-pnpm run deploy:worker
+pnpm --dir web-app deploy:worker
 ```
 
 Workers Builds should use:
 
 - Project root: `/`
 - Production branch: `main`
-- Build command: `pnpm run check:cloudflare`
-- Deploy command: `pnpm run deploy:worker`
+- Build command: `pnpm --dir web-app check:cloudflare && pnpm --dir web-app build`
+- Deploy command: `pnpm --dir web-app deploy:worker`
 - Worker name: `lixray`
 
 Enable Workers Builds build caching. `lix-server/Dockerfile` uses BuildKit cache
@@ -272,15 +282,15 @@ SLATEDB_METADATA_CACHE_BYTES
 Only the R2 credentials are Worker secrets:
 
 ```sh
-pnpm wrangler secret put R2_ACCESS_KEY_ID --config ./wrangler.jsonc
-pnpm wrangler secret put R2_SECRET_ACCESS_KEY --config ./wrangler.jsonc
+pnpm --dir web-app exec wrangler secret put R2_ACCESS_KEY_ID --config ./wrangler.jsonc
+pnpm --dir web-app exec wrangler secret put R2_SECRET_ACCESS_KEY --config ./wrangler.jsonc
 ```
 
 No Supabase `wrangler secret put` command is needed. After a Clerk-free
 deployment has been verified, remove the obsolete secret:
 
 ```sh
-pnpm wrangler secret delete CLERK_SECRET_KEY --config ./wrangler.jsonc
+pnpm --dir web-app exec wrangler secret delete CLERK_SECRET_KEY --config ./wrangler.jsonc
 ```
 
 Before production cutover, replace the public development Supabase values with

@@ -15,6 +15,12 @@ export default defineConfig({
 			config: (config) => ({
 				vars: {
 					...config.vars,
+					SUPABASE_JWKS_URL:
+						process.env.SUPABASE_JWKS_URL ?? config.vars?.SUPABASE_JWKS_URL,
+					SUPABASE_PUBLISHABLE_KEY:
+						process.env.SUPABASE_PUBLISHABLE_KEY ??
+						config.vars?.SUPABASE_PUBLISHABLE_KEY,
+					SUPABASE_URL: process.env.SUPABASE_URL ?? config.vars?.SUPABASE_URL,
 					LIXRAY_E2E_WORKSPACE_ID:
 						process.env.LIXRAY_E2E_WORKSPACE_ID ??
 						config.vars?.LIXRAY_E2E_WORKSPACE_ID ??
