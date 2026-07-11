@@ -50,6 +50,8 @@ export async function seedAtelierWorkspace(lix: Lix): Promise<void> {
 }
 
 async function seedInitialAtelierState(lix: Lix): Promise<void> {
+	// This dev fixture mirrors Atelier's private persisted layout schema. Production
+	// workspace setup should use a public Atelier initializer instead of copying it.
 	const readme = seedFiles[0];
 	const fileInstance = `atelier_file:${readme.id}`;
 	const uiState: JsonValue = {

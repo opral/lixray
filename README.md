@@ -102,6 +102,7 @@ in place for rollback until a separate, confirmed deletion step.
 Install dependencies and start the local Supabase stack:
 
 ```sh
+git submodule update --init --recursive
 pnpm install --frozen-lockfile
 pnpm exec supabase start
 pnpm exec supabase test db

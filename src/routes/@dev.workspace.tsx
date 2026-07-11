@@ -15,10 +15,8 @@ export const Route = createFileRoute("/@dev/workspace")({
 
 function DevWorkspacePage() {
 	const [lix, setLix] = useState<Lix | null>(null);
-	const [status, setStatus] = useState<"loading" | "ready" | "error">(
-		"loading",
-	);
 	const [error, setError] = useState<string | null>(null);
+	const isLoading = !lix && !error;
 
 	useEffect(() => {
 		let disposed = false;
@@ -30,7 +28,7 @@ function DevWorkspacePage() {
 				const openedLix = await openLix();
 
 				if (disposed) {
-					await openedLix.close();
+					await closeLix(openedLix);
 					return;
 				}
 
@@ -39,14 +37,12 @@ function DevWorkspacePage() {
 				if (disposed) return;
 
 				setLix(openedLix);
-				setStatus("ready");
 			} catch (caught) {
 				const lixToClose = activeLix;
 				activeLix = null;
-				if (lixToClose) await lixToClose.close();
+				if (lixToClose) await closeLix(lixToClose);
 				if (disposed) return;
 				setError(caught instanceof Error ? caught.message : String(caught));
-				setStatus("error");
 			}
 		};
 
@@ -56,12 +52,12 @@ function DevWorkspacePage() {
 			disposed = true;
 			const lixToClose = activeLix;
 			activeLix = null;
-			if (lixToClose) void lixToClose.close();
+			if (lixToClose) void closeLix(lixToClose);
 		};
 	}, []);
 
 	return (
-		<main className="atelier-route" aria-busy={status === "loading"}>
+		<main className="atelier-route" aria-busy={isLoading}>
 			{lix ? (
 				<Atelier
 					lix={lix}
@@ -79,10 +75,10 @@ function DevWorkspacePage() {
 					}}
 				/>
 			) : null}
-			{status === "loading" ? (
+			{isLoading ? (
 				<div className="atelier-route-status">Opening workspace…</div>
 			) : null}
-			{status === "error" ? (
+			{error ? (
 				<div className="atelier-route-status" role="alert">
 					<strong>Unable to open Atelier</strong>
 					<span>{error}</span>
@@ -90,6 +86,14 @@ function DevWorkspacePage() {
 			) : null}
 		</main>
 	);
+}
+
+async function closeLix(lix: Lix): Promise<void> {
+	try {
+		await lix.close();
+	} catch (caught) {
+		console.warn("Unable to close development Lix", caught);
+	}
 }
 
 function LixrayMark() {
