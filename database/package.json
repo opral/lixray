@@ -1,0 +1,17 @@
+{
+	"name": "@lixray/database",
+	"version": "0.1.0",
+	"private": true,
+	"packageManager": "pnpm@10.13.1",
+	"scripts": {
+		"start": "supabase start",
+		"stop": "supabase stop",
+		"status": "supabase status",
+		"env": "supabase status -o env",
+		"reset": "supabase db reset",
+		"test": "supabase test db"
+	},
+	"devDependencies": {
+		"supabase": "^2.109.1"
+	}
+}

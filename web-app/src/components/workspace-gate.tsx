@@ -89,7 +89,7 @@ function SignedOutHome() {
 	return (
 		<EmptyState eyebrow="Lixray" title="Sign in to continue.">
 			<Link className="button primary" to="/sign-in">
-				Sign in with Google
+				Sign in
 			</Link>
 		</EmptyState>
 	);

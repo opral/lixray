@@ -8,7 +8,7 @@ import {
 	useMemo,
 	useState,
 } from "react";
-import { getBrowserSupabaseClient } from "~/lib/supabase";
+import { getBrowserSupabaseClient, localDevCredentials } from "~/lib/supabase";
 import type { LixraySupabaseClient } from "~/lib/supabase";
 
 const RETURN_TO_KEY = "lixray.auth.return-to";
@@ -19,6 +19,7 @@ interface AuthContextValue {
 	user: User | null;
 	client: LixraySupabaseClient | null;
 	getAccessToken: () => Promise<string | null>;
+	signInAsLocalDev: () => Promise<void>;
 	signInWithGoogle: (returnTo?: string) => Promise<void>;
 	signOut: () => Promise<void>;
 }
@@ -77,6 +78,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		},
 		[client],
 	);
+	const signInAsLocalDev = useCallback(async () => {
+		if (!client) throw new Error("Authentication is still loading");
+		if (!localDevCredentials) {
+			throw new Error("Local development login is not enabled");
+		}
+		const { error } = await client.auth.signInWithPassword(localDevCredentials);
+		if (error) throw error;
+	}, [client]);
 
 	const signOut = useCallback(async () => {
 		if (!client) return;
@@ -91,10 +100,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			user: session?.user ?? null,
 			client,
 			getAccessToken,
+			signInAsLocalDev,
 			signInWithGoogle,
 			signOut,
 		}),
-		[client, getAccessToken, isLoaded, session, signInWithGoogle, signOut],
+		[
+			client,
+			getAccessToken,
+			isLoaded,
+			session,
+			signInAsLocalDev,
+			signInWithGoogle,
+			signOut,
+		],
 	);
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

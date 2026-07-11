@@ -5,6 +5,13 @@ Lix over HTTP, backed by SlateDB on R2.
 
 Production is deployed at `https://lixray.com`.
 
+The repository is split into three product modules:
+
+- `web-app/` contains the TanStack Start application, Cloudflare Worker, and
+  Atelier integration.
+- `lix-server/` contains the Rust Lix HTTP service and its container image.
+- `database/` contains the Supabase schema, migrations, seeds, and tests.
+
 ## Architecture
 
 - Supabase Auth provides Google-only sign-in.
@@ -104,17 +111,17 @@ Install dependencies and start the local Supabase stack:
 ```sh
 git submodule update --init --recursive
 pnpm install --frozen-lockfile
-pnpm exec supabase start
-pnpm exec supabase test db
+pnpm --dir database start
+pnpm --dir database test
 ```
 
 Link and apply migrations to the configured development project from an
 authenticated Supabase CLI session:
 
 ```sh
-pnpm exec supabase login
-pnpm exec supabase link --project-ref xpkokrinmkjqcnjzbmpe
-pnpm exec supabase db push
+pnpm --dir database exec supabase login
+pnpm --dir database exec supabase link --project-ref xpkokrinmkjqcnjzbmpe
+pnpm --dir database exec supabase db push
 ```
 
 In the Supabase Dashboard for the development project:
@@ -169,30 +176,35 @@ In ChatGPT, enable developer mode, create a developer-mode app named
 
 ## Local development
 
-Copy `.dev.vars.example` to `.dev.vars` for local R2 secrets when needed.
-`.dev.vars` is ignored and must not be committed. The public development
-Supabase configuration lives in `.env.development` and `wrangler.jsonc`.
-
-Start with in-memory SlateDB:
+The root package is dependency-free and exposes one repository-level command:
 
 ```sh
 pnpm dev
 ```
 
-For local workspace development without Google sign-in, use the fixed
-localhost-only development identity:
+It starts the local Supabase stack, provisions a deterministic local developer
+account, and starts the web app with the local URL and keys. Cloudflare's local
+runtime builds and manages the in-memory Lix container. Open
+`http://localhost:8787`, choose **Continue as local developer**, and use the
+normal authenticated organization and workspace flows. Stopping the command
+also stops Supabase.
+
+Each module also works independently:
 
 ```sh
-pnpm dev:authless
+pnpm --dir database start
+pnpm --dir web-app dev
+cargo run --manifest-path lix-server/Cargo.toml
 ```
 
-This mode provides one fixed organization and workspace. Organization and
-workspace mutations are unavailable in authless mode.
+The standalone web app uses the configured hosted Supabase project from
+`web-app/.env.development` and `web-app/wrangler.jsonc`; it does not provision
+the local developer account.
 
 The app is served at `http://localhost:8787`. Run against R2 explicitly with:
 
 ```sh
-pnpm dev:r2
+pnpm --dir web-app dev:r2
 ```
 
 Restart the dev server after changing storage mode so existing containers do
@@ -201,49 +213,49 @@ not retain old startup environment.
 ## Verification
 
 ```sh
-pnpm typecheck
-pnpm lint
-pnpm test:worker
-pnpm exec supabase start
-pnpm exec supabase test db
-pnpm test:e2e
-pnpm build
-cargo test
-docker build .
-pnpm run deploy:worker --dry-run
+pnpm --dir web-app typecheck
+pnpm --dir web-app lint
+pnpm --dir web-app test:worker
+pnpm --dir database start
+pnpm --dir database test
+pnpm --dir web-app test:e2e
+pnpm --dir web-app build
+cargo test --manifest-path lix-server/Cargo.toml
+docker build lix-server
+pnpm --dir web-app deploy:worker --dry-run
 ```
 
 Install Playwright Chromium once with:
 
 ```sh
-pnpm exec playwright install chromium
+pnpm --dir web-app exec playwright install chromium
 ```
 
 Playwright starts a deterministic in-memory development server on port `8790`
 and uses a localhost-only E2E workspace identity. Use `E2E_PORT` to override the
-port or run `pnpm test:e2e:r2` for the R2-backed variant.
+port or run `pnpm --dir web-app test:e2e:r2` for the R2-backed variant.
 
 ## Deployment
 
 ```sh
-pnpm run deploy:worker
+pnpm --dir web-app deploy:worker
 ```
 
 Workers Builds should use:
 
 - Project root: `/`
 - Production branch: `main`
-- Build command: `pnpm run check:cloudflare`
-- Deploy command: `pnpm run deploy:worker`
+- Build command: `pnpm --dir web-app check:cloudflare && pnpm --dir web-app build`
+- Deploy command: `pnpm --dir web-app deploy:worker`
 - Worker name: `lixray`
 
-Enable Workers Builds build caching. The Dockerfile uses BuildKit cache mounts
-for the Cargo registry, git checkouts, and target directory. Do not run
+Enable Workers Builds build caching. `lix-server/Dockerfile` uses BuildKit cache
+mounts for the Cargo registry, git checkouts, and target directory. Do not run
 `cargo test` in the Workers Builds build command: `wrangler deploy` already
 builds the container image and Rust release binary, and duplicating the Rust
 compile can exceed the build timeout.
 
-Public Worker variables are checked into `wrangler.jsonc`:
+Public Worker variables are checked into `web-app/wrangler.jsonc`:
 
 ```text
 VITE_SUPABASE_URL
@@ -264,15 +276,15 @@ SLATEDB_METADATA_CACHE_BYTES
 Only the R2 credentials are Worker secrets:
 
 ```sh
-pnpm wrangler secret put R2_ACCESS_KEY_ID --config ./wrangler.jsonc
-pnpm wrangler secret put R2_SECRET_ACCESS_KEY --config ./wrangler.jsonc
+pnpm --dir web-app exec wrangler secret put R2_ACCESS_KEY_ID --config ./wrangler.jsonc
+pnpm --dir web-app exec wrangler secret put R2_SECRET_ACCESS_KEY --config ./wrangler.jsonc
 ```
 
 No Supabase `wrangler secret put` command is needed. After a Clerk-free
 deployment has been verified, remove the obsolete secret:
 
 ```sh
-pnpm wrangler secret delete CLERK_SECRET_KEY --config ./wrangler.jsonc
+pnpm --dir web-app exec wrangler secret delete CLERK_SECRET_KEY --config ./wrangler.jsonc
 ```
 
 Before production cutover, replace the public development Supabase values with
