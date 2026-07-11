@@ -23,10 +23,9 @@ export default defineConfig({
 	webServer: process.env.PLAYWRIGHT_BASE_URL
 		? undefined
 		: {
-				command: `pnpm exec vite dev --host ${host} --port ${port}`,
+				command: `pnpm atelier:build && pnpm exec vite dev --host ${host} --port ${port}`,
 				env: {
 					...process.env,
-					CLOUDFLARE_INCLUDE_PROCESS_ENV: "true",
 					LIXRAY_E2E_WORKSPACE_ID: e2eWorkspaceId,
 					SLATEDB_STORAGE: e2eStorage,
 					VITE_LIXRAY_E2E: "1",

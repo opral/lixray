@@ -1,2 +1,8 @@
 packages:
   - .
+  - vendor/atelier
+
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - workerd

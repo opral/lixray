@@ -102,6 +102,7 @@ in place for rollback until a separate, confirmed deletion step.
 Install dependencies and start the local Supabase stack:
 
 ```sh
+git submodule update --init --recursive
 pnpm install --frozen-lockfile
 pnpm exec supabase start
 pnpm exec supabase test db
@@ -177,6 +178,16 @@ Start with in-memory SlateDB:
 ```sh
 pnpm dev
 ```
+
+For local workspace development without Google sign-in, use the fixed
+localhost-only development identity:
+
+```sh
+pnpm dev:authless
+```
+
+This mode provides one fixed organization and workspace. Organization and
+workspace mutations are unavailable in authless mode.
 
 The app is served at `http://localhost:8787`. Run against R2 explicitly with:
 

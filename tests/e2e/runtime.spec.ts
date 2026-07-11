@@ -15,6 +15,19 @@ test("sign-in route renders without runtime errors", async ({ page }) => {
 	await expect(page.getByText(/Microsoft/i)).toHaveCount(0);
 });
 
+test("dev workspace renders Atelier and can return home", async ({ page }) => {
+	await page.goto("/@dev/workspace");
+
+	const homeLink = page.getByRole("link", { name: "Back to Lixray home" });
+	await expect(homeLink).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByText("LixRay + Atelier")).toBeVisible({
+		timeout: 30_000,
+	});
+
+	await homeLink.click();
+	await expect(page).toHaveURL(/\/$/);
+});
+
 test("sql console loads branches and executes a trivial query", async ({
 	page,
 }) => {

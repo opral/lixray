@@ -61,3 +61,30 @@
 	--input: oklch(0.92 0.004 286.32);
 	--ring: oklch(0.705 0.015 286.067);
 }
+
+.atelier-route {
+	width: 100%;
+	height: 100%;
+	position: fixed;
+	inset: 0;
+	overflow: hidden;
+	background: #f4f2ef;
+}
+
+.atelier-route-status {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-content: center;
+	justify-items: center;
+	gap: 8px;
+	padding: 24px;
+	background: #f4f2ef;
+	color: #44403c;
+	text-align: center;
+}
+
+.atelier-route-status span {
+	max-width: 640px;
+	color: #78716c;
+}
