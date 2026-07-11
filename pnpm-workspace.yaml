@@ -4,6 +4,10 @@ packages:
   - web-app
   - vendor/atelier
 
+publicHoistPattern:
+  - "@types/react"
+  - vite
+
 onlyBuiltDependencies:
   - esbuild
   - sharp
