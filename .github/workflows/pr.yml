@@ -50,10 +50,10 @@ jobs:
           version: 2.109.1
 
       - name: Start Supabase
-        run: supabase start
+        run: supabase start --workdir database
 
       - name: Test database policies and functions
-        run: supabase test db
+        run: supabase test db --workdir database
 
   frontend:
     name: Frontend checks
@@ -111,15 +111,17 @@ jobs:
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lix-server
 
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo fmt --manifest-path lix-server/Cargo.toml --check
 
       - name: Lint
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --manifest-path lix-server/Cargo.toml --locked --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --locked
+        run: cargo test --manifest-path lix-server/Cargo.toml --locked
 
   e2e:
     name: End-to-end tests
@@ -147,7 +149,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm --dir web-app exec playwright install --with-deps chromium
 
       - name: Run e2e tests
         run: pnpm test:e2e

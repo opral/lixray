@@ -5,6 +5,13 @@ Lix over HTTP, backed by SlateDB on R2.
 
 Production is deployed at `https://lixray.com`.
 
+The repository is split into three product modules:
+
+- `web-app/` contains the TanStack Start application, Cloudflare Worker, and
+  Atelier integration.
+- `lix-server/` contains the Rust Lix HTTP service and its container image.
+- `database/` contains the Supabase schema, migrations, seeds, and tests.
+
 ## Architecture
 
 - Supabase Auth provides Google-only sign-in.
@@ -104,17 +111,17 @@ Install dependencies and start the local Supabase stack:
 ```sh
 git submodule update --init --recursive
 pnpm install --frozen-lockfile
-pnpm exec supabase start
-pnpm exec supabase test db
+pnpm supabase start
+pnpm supabase test db
 ```
 
 Link and apply migrations to the configured development project from an
 authenticated Supabase CLI session:
 
 ```sh
-pnpm exec supabase login
-pnpm exec supabase link --project-ref xpkokrinmkjqcnjzbmpe
-pnpm exec supabase db push
+pnpm supabase login
+pnpm supabase link --project-ref xpkokrinmkjqcnjzbmpe
+pnpm supabase db push
 ```
 
 In the Supabase Dashboard for the development project:
@@ -169,9 +176,10 @@ In ChatGPT, enable developer mode, create a developer-mode app named
 
 ## Local development
 
-Copy `.dev.vars.example` to `.dev.vars` for local R2 secrets when needed.
-`.dev.vars` is ignored and must not be committed. The public development
-Supabase configuration lives in `.env.development` and `wrangler.jsonc`.
+Copy `web-app/.dev.vars.example` to `web-app/.dev.vars` for local R2 secrets
+when needed. `.dev.vars` is ignored and must not be committed. The public
+development Supabase configuration lives in `web-app/.env.development` and
+`web-app/wrangler.jsonc`.
 
 Start with in-memory SlateDB:
 
@@ -204,19 +212,19 @@ not retain old startup environment.
 pnpm typecheck
 pnpm lint
 pnpm test:worker
-pnpm exec supabase start
-pnpm exec supabase test db
+pnpm supabase start
+pnpm supabase test db
 pnpm test:e2e
 pnpm build
-cargo test
-docker build .
+cargo test --manifest-path lix-server/Cargo.toml
+docker build lix-server
 pnpm run deploy:worker --dry-run
 ```
 
 Install Playwright Chromium once with:
 
 ```sh
-pnpm exec playwright install chromium
+pnpm playwright:install
 ```
 
 Playwright starts a deterministic in-memory development server on port `8790`
@@ -237,13 +245,13 @@ Workers Builds should use:
 - Deploy command: `pnpm run deploy:worker`
 - Worker name: `lixray`
 
-Enable Workers Builds build caching. The Dockerfile uses BuildKit cache mounts
-for the Cargo registry, git checkouts, and target directory. Do not run
+Enable Workers Builds build caching. `lix-server/Dockerfile` uses BuildKit cache
+mounts for the Cargo registry, git checkouts, and target directory. Do not run
 `cargo test` in the Workers Builds build command: `wrangler deploy` already
 builds the container image and Rust release binary, and duplicating the Rust
 compile can exceed the build timeout.
 
-Public Worker variables are checked into `wrangler.jsonc`:
+Public Worker variables are checked into `web-app/wrangler.jsonc`:
 
 ```text
 VITE_SUPABASE_URL

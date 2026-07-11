@@ -8,4 +8,4 @@ submodule
 pnpm-lock.yaml
 playwright-report
 test-results
-src/routeTree.gen.ts
+web-app/src/routeTree.gen.ts
