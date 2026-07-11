@@ -2,7 +2,24 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import process from "node:process";
 
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const signalExitCodes = {
+	SIGHUP: 129,
+	SIGINT: 130,
+	SIGQUIT: 131,
+	SIGTERM: 143,
+};
 
+let databaseStartAttempted = false;
+let databaseStopped = false;
+let shuttingDown = false;
+let webApp;
+
+process.on("exit", stopDatabase);
+for (const signal of Object.keys(signalExitCodes)) {
+	process.on(signal, () => handleSignal(signal));
+}
+
+databaseStartAttempted = true;
 const database = spawnSync(pnpm, ["--dir", "database", "start"], {
 	stdio: "inherit",
 });
@@ -13,10 +30,6 @@ if (database.error) {
 if (database.status !== 0) {
 	process.exit(database.status ?? 1);
 }
-
-let databaseStopped = false;
-process.on("exit", stopDatabase);
-
 const localSupabase = parseEnv(
 	execFileSync(
 		pnpm,
@@ -44,7 +57,7 @@ await ensureLocalDevUser({
 	supabaseUrl,
 });
 
-const webApp = spawn(pnpm, ["--dir", "web-app", "dev"], {
+webApp = spawn(pnpm, ["--dir", "web-app", "dev"], {
 	stdio: "inherit",
 	env: {
 		...process.env,
@@ -59,24 +72,32 @@ const webApp = spawn(pnpm, ["--dir", "web-app", "dev"], {
 	},
 });
 
-for (const signal of ["SIGINT", "SIGTERM"]) {
-	process.on(signal, () => {
-		webApp.kill(signal);
-	});
-}
-
 webApp.on("error", (error) => {
 	console.error(error);
 	process.exit(1);
 });
 webApp.on("exit", (code, signal) => {
-	process.exit(
-		signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : (code ?? 0),
-	);
+	process.exit(signal ? (signalExitCodes[signal] ?? 1) : (code ?? 0));
 });
 
+function handleSignal(signal) {
+	if (shuttingDown) return;
+	shuttingDown = true;
+
+	if (
+		webApp &&
+		webApp.exitCode === null &&
+		webApp.signalCode === null &&
+		webApp.kill(signal)
+	) {
+		return;
+	}
+
+	process.exit(signalExitCodes[signal] ?? 1);
+}
+
 function stopDatabase() {
-	if (databaseStopped) return;
+	if (!databaseStartAttempted || databaseStopped) return;
 	databaseStopped = true;
 	spawnSync(pnpm, ["--dir", "database", "stop"], { stdio: "inherit" });
 }
