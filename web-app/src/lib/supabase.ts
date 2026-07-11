@@ -4,12 +4,26 @@ import type { Database } from "./database.types";
 export type LixraySupabaseClient = SupabaseClient<Database>;
 
 const env = import.meta.env as {
+	readonly DEV?: boolean;
+	readonly VITE_LIXRAY_LOCAL_DEV?: string;
+	readonly VITE_LIXRAY_LOCAL_DEV_EMAIL?: string;
+	readonly VITE_LIXRAY_LOCAL_DEV_PASSWORD?: string;
 	readonly VITE_SUPABASE_URL?: string;
 	readonly VITE_SUPABASE_KEY?: string;
 };
 
 export const supabaseUrl = env.VITE_SUPABASE_URL;
 export const supabasePublishableKey = env.VITE_SUPABASE_KEY;
+export const localDevCredentials =
+	env.DEV === true &&
+	env.VITE_LIXRAY_LOCAL_DEV === "1" &&
+	env.VITE_LIXRAY_LOCAL_DEV_EMAIL &&
+	env.VITE_LIXRAY_LOCAL_DEV_PASSWORD
+		? {
+				email: env.VITE_LIXRAY_LOCAL_DEV_EMAIL,
+				password: env.VITE_LIXRAY_LOCAL_DEV_PASSWORD,
+			}
+		: null;
 
 if (!supabaseUrl) {
 	throw new Error("VITE_SUPABASE_URL is required");

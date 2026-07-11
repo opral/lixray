@@ -182,9 +182,12 @@ The root package is dependency-free and exposes one repository-level command:
 pnpm dev
 ```
 
-It starts the local Supabase stack, reads its URL and publishable key, and then
-starts the web app with those values. Cloudflare's local runtime builds and
-manages the in-memory Lix container. Stopping the command also stops Supabase.
+It starts the local Supabase stack, provisions a deterministic local developer
+account, and starts the web app with the local URL and keys. Cloudflare's local
+runtime builds and manages the in-memory Lix container. Open
+`http://localhost:8787`, choose **Continue as local developer**, and use the
+normal authenticated organization and workspace flows. Stopping the command
+also stops Supabase.
 
 Each module also works independently:
 
@@ -194,16 +197,9 @@ pnpm --dir web-app dev
 cargo run --manifest-path lix-server/Cargo.toml
 ```
 
-The standalone web app uses the Supabase configuration in
-`web-app/.env.development` and `web-app/wrangler.jsonc`. For workspace UI
-development without Google sign-in, use its fixed localhost-only identity:
-
-```sh
-pnpm --dir web-app dev:authless
-```
-
-This mode provides one fixed organization and workspace. Organization and
-workspace mutations are unavailable in authless mode.
+The standalone web app uses the configured hosted Supabase project from
+`web-app/.env.development` and `web-app/wrangler.jsonc`; it does not provision
+the local developer account.
 
 The app is served at `http://localhost:8787`. Run against R2 explicitly with:
 
