@@ -121,6 +121,58 @@ void test("mock remote Lix parses chunked POST-SSE observations", async () => {
 	await lix.close();
 });
 
+void test("unexpected SSE closure reconnects the shared observation hub", async () => {
+	const encoder = new TextEncoder();
+	let observeRequests = 0;
+	let executeRequests = 0;
+	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = requestUrl(input);
+		if (url.endsWith("/branches")) {
+			return jsonResponse({ branches: [branch("main-branch", "main")] });
+		}
+		if (url.endsWith("/observe")) {
+			observeRequests += 1;
+			return new Response(
+				new ReadableStream<Uint8Array>({
+					start(controller) {
+						if (observeRequests === 1) {
+							controller.close();
+							return;
+						}
+						controller.enqueue(
+							encoder.encode(
+								`event: next\ndata: ${JSON.stringify(observePayload("hub"))}\n\n`,
+							),
+						);
+						init?.signal?.addEventListener("abort", () => controller.close());
+					},
+				}),
+				{ headers: { "content-type": "text/event-stream" } },
+			);
+		}
+		if (url.endsWith("/execute")) {
+			executeRequests += 1;
+			return jsonResponse(observePayload(`refresh-${executeRequests}`).result);
+		}
+		throw new Error(`Unexpected request: ${url}`);
+	}) as typeof fetch;
+	const lix = await open(fetchMock);
+	const events = lix.observe("SELECT branch");
+
+	assert.equal(
+		(await events.next())?.result.rows[0]?.get("branch"),
+		"refresh-1",
+	);
+	assert.equal(
+		(await events.next())?.result.rows[0]?.get("branch"),
+		"refresh-2",
+	);
+	assert.equal(observeRequests, 2);
+
+	events.close();
+	await lix.close();
+});
+
 void test("branch switching restarts live observations and updates later executes", async () => {
 	const encoder = new TextEncoder();
 	const observedBranches: string[] = [];

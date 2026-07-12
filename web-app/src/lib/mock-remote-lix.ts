@@ -51,6 +51,8 @@ const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OBSERVATION_HUB_SQL =
 	"SELECT id FROM lix_change ORDER BY created_at DESC, id DESC LIMIT 1";
+const OBSERVATION_RETRY_BASE_MS = 100;
+const OBSERVATION_RETRY_MAX_MS = 5_000;
 
 /**
  * Opens the deliberately thin first version of a browser Lix session.
@@ -76,6 +78,8 @@ class MockRemoteLix {
 	#activeBranchId = "";
 	#observationController: AbortController | undefined;
 	#observationGeneration = 0;
+	#observationRetryAttempt = 0;
+	#observationRetryTimer: ReturnType<typeof setTimeout> | undefined;
 	#observationClock: ObserveClock = { sequence: 0, mutationSequence: 0 };
 	#closed = false;
 
@@ -265,7 +269,8 @@ class MockRemoteLix {
 		if (
 			this.#closed ||
 			this.#observers.size === 0 ||
-			this.#observationController
+			this.#observationController ||
+			this.#observationRetryTimer
 		) {
 			return;
 		}
@@ -280,6 +285,11 @@ class MockRemoteLix {
 		this.#observationGeneration += 1;
 		this.#observationController?.abort();
 		this.#observationController = undefined;
+		if (this.#observationRetryTimer) {
+			clearTimeout(this.#observationRetryTimer);
+			this.#observationRetryTimer = undefined;
+		}
+		this.#observationRetryAttempt = 0;
 	}
 
 	async #consumeObservationHub(
@@ -287,6 +297,7 @@ class MockRemoteLix {
 		generation: number,
 		controller: AbortController,
 	): Promise<void> {
+		let shouldReconnect = false;
 		try {
 			const response = await this.#openObservationHub(
 				branchId,
@@ -302,6 +313,7 @@ class MockRemoteLix {
 			for await (const frame of readSseFrames(response.body)) {
 				if (!this.#isCurrentObservationHub(generation, controller)) return;
 				if (frame.event === "next") {
+					this.#observationRetryAttempt = 0;
 					const payload = JSON.parse(frame.data) as ObservePayload;
 					this.#observationClock = {
 						sequence: payload.sequence,
@@ -328,12 +340,36 @@ class MockRemoteLix {
 			) {
 				return;
 			}
-			for (const observer of this.#observers) observer.fail(error);
+			shouldReconnect = true;
 		} finally {
 			if (this.#isCurrentObservationHub(generation, controller)) {
 				this.#observationController = undefined;
+				if (shouldReconnect) this.#scheduleObservationHubReconnect(generation);
 			}
 		}
+	}
+
+	#scheduleObservationHubReconnect(generation: number): void {
+		if (
+			this.#closed ||
+			this.#observers.size === 0 ||
+			generation !== this.#observationGeneration ||
+			this.#observationController ||
+			this.#observationRetryTimer
+		) {
+			return;
+		}
+		const delay = Math.min(
+			OBSERVATION_RETRY_BASE_MS * 2 ** this.#observationRetryAttempt,
+			OBSERVATION_RETRY_MAX_MS,
+		);
+		this.#observationRetryAttempt += 1;
+		this.#observationRetryTimer = setTimeout(() => {
+			this.#observationRetryTimer = undefined;
+			if (generation === this.#observationGeneration) {
+				this.#startObservationHub();
+			}
+		}, delay);
 	}
 
 	#isCurrentObservationHub(
