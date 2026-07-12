@@ -24,6 +24,8 @@ import { EntryIcon } from "./file-icon";
 
 export interface EntryTableProps {
 	entries: Array<ExplorerEntry>;
+	namespace: string;
+	workspaceSlug: string;
 	selected: Set<string>;
 	onSelectedChange: (next: Set<string>) => void;
 	onDownload: (entry: ExplorerEntry) => void;
@@ -38,6 +40,8 @@ const nameCollator = new Intl.Collator(undefined, {
 
 export function EntryTable({
 	entries,
+	namespace,
+	workspaceSlug,
 	selected,
 	onSelectedChange,
 	onDownload,
@@ -116,7 +120,8 @@ export function EntryTable({
 						<TableCell className="font-medium">
 							{entry.kind === "dir" ? (
 								<Link
-									to="/"
+									to="/@{$namespace}/$workspace"
+									params={{ namespace, workspace: workspaceSlug }}
 									search={{ dir: entry.path }}
 									className="inline-flex items-center gap-2 hover:underline"
 									data-testid="entry-name"

@@ -53,11 +53,19 @@ function AuthCallbackPage() {
 	}, [search.code, search.error, search.error_description]);
 
 	return (
-		<main className="workspace-empty">
-			<div className="workspace-empty-inner">
-				<p className="eyebrow">Authentication</p>
-				<h1>{error ? "Unable to sign in" : "Completing sign-in..."}</h1>
-				{error ? <p className="error-box">{error}</p> : null}
+		<main className="grid min-h-[calc(100vh-80px)] place-items-center bg-[var(--color-bg-app)] px-5 py-10 text-[var(--color-text-primary)]">
+			<div className="w-full max-w-[620px] rounded-[8px] border border-[var(--color-border-panel)] bg-[var(--color-bg-panel)] p-7 shadow-[var(--shadow-md)]">
+				<p className="mb-2 mt-0 text-[13px] font-[760] uppercase tracking-[0.08em] text-[var(--color-text-link)]">
+					Authentication
+				</p>
+				<h1 className="m-0 text-[clamp(30px,5vw,42px)] leading-[1.08] tracking-normal">
+					{error ? "Unable to sign in" : "Completing sign-in..."}
+				</h1>
+				{error ? (
+					<p className="mt-3.5 whitespace-pre-wrap rounded-[8px] border border-[var(--color-error-200)] bg-[var(--color-error-50)] px-3.5 py-3 text-[var(--color-error-800)]">
+						{error}
+					</p>
+				) : null}
 			</div>
 		</main>
 	);

@@ -31,10 +31,18 @@ type DialogState =
 	| { type: "delete"; entries: Array<ExplorerEntry> }
 	| null;
 
-export function FileExplorer({ workspaceName }: { workspaceName: string }) {
+export function FileExplorer({
+	workspaceName,
+	namespace,
+	workspaceSlug,
+}: {
+	workspaceName: string;
+	namespace: string;
+	workspaceSlug: string;
+}) {
 	const api = useFileExplorerApi();
 	const navigate = useNavigate();
-	const search = useSearch({ from: "/" });
+	const search = useSearch({ from: "/@{$namespace}/$workspace" });
 	const dirPath = normalizeDirPath(search.dir);
 
 	const [branches, setBranches] = useState<Array<Branch>>([]);
@@ -85,12 +93,16 @@ export function FileExplorer({ workspaceName }: { workspaceName: string }) {
 		} catch (caught) {
 			if (caught instanceof DirectoryNotFoundError) {
 				toast.error("Folder not found.");
-				void navigate({ to: "/", search: {} });
+				void navigate({
+					to: "/@{$namespace}/$workspace",
+					params: { namespace, workspace: workspaceSlug },
+					search: {},
+				});
 				return;
 			}
 			setListError(formatCaughtError(caught));
 		}
-	}, [api, activeBranchId, dirPath, navigate]);
+	}, [api, activeBranchId, dirPath, namespace, navigate, workspaceSlug]);
 
 	useEffect(() => {
 		setEntries(null);
@@ -231,9 +243,11 @@ export function FileExplorer({ workspaceName }: { workspaceName: string }) {
 
 	return (
 		<>
-			<section className="page-heading">
-				<p className="eyebrow">{workspaceName}</p>
-				<h1>Files</h1>
+			<section className="mb-[18px] max-w-[760px]">
+				<p className="mt-0 mb-2 text-[13px] font-bold tracking-[0.08em] text-text-link uppercase">
+					{workspaceName}
+				</p>
+				<h1 className="m-0 text-2xl leading-[1.2]">Files</h1>
 			</section>
 			<div
 				data-testid="file-explorer"
@@ -275,7 +289,11 @@ export function FileExplorer({ workspaceName }: { workspaceName: string }) {
 						}
 						onClearSelection={() => setSelected(new Set())}
 					/>
-					<ExplorerBreadcrumb dirPath={dirPath} />
+					<ExplorerBreadcrumb
+						dirPath={dirPath}
+						namespace={namespace}
+						workspaceSlug={workspaceSlug}
+					/>
 				</div>
 				<div className="min-h-64">
 					{listError ? (
@@ -314,6 +332,8 @@ export function FileExplorer({ workspaceName }: { workspaceName: string }) {
 					) : (
 						<EntryTable
 							entries={entries}
+							namespace={namespace}
+							workspaceSlug={workspaceSlug}
 							selected={selected}
 							onSelectedChange={setSelected}
 							onDownload={(entry) => void downloadEntries([entry])}

@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(16);
+select plan(21);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password,
@@ -48,6 +48,18 @@ select results_eq(
   'members only see their organization workspaces'
 );
 
+select results_eq(
+  'select handle from public.organizations where id = ''20000000-0000-0000-0000-000000000001''',
+  array['test-organization'::text],
+  'organizations receive a stable URL handle'
+);
+
+select results_eq(
+  'select slug from public.workspaces where id = ''30000000-0000-0000-0000-000000000001''',
+  array['first-workspace'::text],
+  'workspaces receive a stable URL slug'
+);
+
 select lives_ok(
   $$insert into public.workspaces (organization_id, name) values ('20000000-0000-0000-0000-000000000001', 'Member workspace')$$,
   'members can create workspaces'
@@ -64,6 +76,12 @@ select results_eq(
   $$update public.workspaces set name = 'Renamed workspace' where id = '30000000-0000-0000-0000-000000000001' returning name$$,
   array['Renamed workspace'::text],
   'members can rename their workspaces'
+);
+
+select results_eq(
+  'select slug from public.workspaces where id = ''30000000-0000-0000-0000-000000000001''',
+  array['first-workspace'::text],
+  'renaming a workspace does not change its canonical URL slug'
 );
 
 select throws_ok(
@@ -139,6 +157,19 @@ select throws_ok(
   'P0001',
   'Invitation is invalid or expired',
   'an accepted invitation cannot be reused'
+);
+
+set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000001';
+
+select lives_ok(
+  $$select public.delete_workspace('30000000-0000-0000-0000-000000000001')$$,
+  'members can soft-delete an accessible workspace'
+);
+
+select results_eq(
+  $$select count(*) from public.workspaces where id = '30000000-0000-0000-0000-000000000001'$$,
+  array[0::bigint],
+  'soft-deleted workspaces disappear from member reads'
 );
 
 select * from finish();

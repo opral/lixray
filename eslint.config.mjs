@@ -52,9 +52,11 @@ export default tseslint.config(
 				projectService: {
 					allowDefaultProject: [
 						"playwright.config.ts",
+						"playwright.full-auth.config.ts",
 						"src/worker/*.test.ts",
 						"tests/e2e/*.ts",
 					],
+					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 16,
 					defaultProject: "tsconfig.eslint.json",
 				},
 				tsconfigRootDir: import.meta.dirname,

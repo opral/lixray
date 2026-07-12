@@ -169,25 +169,24 @@ In ChatGPT, enable developer mode, create a developer-mode app named
 
 ## Local development
 
-Copy `.dev.vars.example` to `.dev.vars` for local R2 secrets when needed.
-`.dev.vars` is ignored and must not be committed. The public development
-Supabase configuration lives in `.env.development` and `wrangler.jsonc`.
-
-Start with in-memory SlateDB:
+Start the full local stack with in-memory SlateDB:
 
 ```sh
 pnpm dev
 ```
 
-For local workspace development without Google sign-in, use the fixed
-localhost-only development identity:
+This starts the local Supabase stack, provisions a deterministic local developer
+account, and starts the app with the local URL and keys. Open
+`http://localhost:8787`, choose **Continue as local developer**, and use the
+normal authenticated organization and workspace flows. Stopping the command
+also stops Supabase.
 
-```sh
-pnpm dev:authless
-```
+The checked-in `.env.development` and `wrangler.jsonc` configuration continues
+to target the hosted development project for commands that start Vite directly.
+Production and hosted development retain Google sign-in.
 
-This mode provides one fixed organization and workspace. Organization and
-workspace mutations are unavailable in authless mode.
+Copy `.dev.vars.example` to `.dev.vars` for local R2 secrets when needed.
+`.dev.vars` is ignored and must not be committed.
 
 The app is served at `http://localhost:8787`. Run against R2 explicitly with:
 

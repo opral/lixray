@@ -5,6 +5,8 @@
 /dist/
 /.wrangler/
 /.output/
+/supabase/.branches/
+/supabase/.temp/
 /.dev.vars
 /.dev.vars.*
 /!.dev.vars.example

@@ -1,19 +1,24 @@
-/*
- * Layer order must be declared before Tailwind's own @layer statement so the
- * legacy stylesheet slots between preflight (base) and shadcn utilities:
- * preflight < legacy < components < utilities.
- */
-@layer theme, base, legacy, components, utilities;
+@layer theme, base, components, utilities;
 
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "./styles/legacy.css" layer(legacy);
+/*
+ * Lixray reuses Atelier's semantic Tailwind tokens 1:1. Their role,
+ * prominence, and interaction-state aliases are modeled after Subframe's
+ * semantic color guidance:
+ * https://www.subframe.com/blog/how-to-setup-semantic-tailwind-colors
+ */
+@import "../vendor/atelier/src/shell/theme.css";
+
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
 	--font-sans:
-		Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-		"Segoe UI", sans-serif;
-	--font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+		ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+		"Segoe UI Symbol", "Noto Color Emoji";
+	--font-mono:
+		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+		"Courier New", monospace;
 	--radius-sm: calc(var(--radius) - 4px);
 	--radius-md: calc(var(--radius) - 2px);
 	--radius-lg: var(--radius);
@@ -40,51 +45,37 @@
 }
 
 :root {
-	--radius: 0.5rem;
-	--background: oklch(1 0 0);
-	--foreground: oklch(0.141 0.005 285.823);
-	--card: oklch(1 0 0);
-	--card-foreground: oklch(0.141 0.005 285.823);
-	--popover: oklch(1 0 0);
-	--popover-foreground: oklch(0.141 0.005 285.823);
-	--primary: oklch(0.21 0.006 285.885);
-	--primary-foreground: oklch(0.985 0 0);
-	--secondary: oklch(0.967 0.001 286.375);
-	--secondary-foreground: oklch(0.21 0.006 285.885);
-	--muted: oklch(0.967 0.001 286.375);
-	--muted-foreground: oklch(0.552 0.016 285.938);
-	--accent: oklch(0.967 0.001 286.375);
-	--accent-foreground: oklch(0.21 0.006 285.885);
-	--destructive: oklch(0.577 0.245 27.325);
-	--destructive-foreground: oklch(0.985 0 0);
-	--border: oklch(0.92 0.004 286.32);
-	--input: oklch(0.92 0.004 286.32);
-	--ring: oklch(0.705 0.015 286.067);
+	--radius: 0.625rem;
+	--background: var(--color-bg-panel);
+	--foreground: var(--color-text-primary);
+	--card: var(--color-bg-panel);
+	--card-foreground: var(--color-text-primary);
+	--popover: var(--color-bg-panel);
+	--popover-foreground: var(--color-text-primary);
+	--primary: var(--color-bg-action-primary);
+	--primary-foreground: var(--color-text-on-action-primary);
+	--secondary: var(--color-bg-notice-neutral);
+	--secondary-foreground: var(--color-text-notice-neutral);
+	--muted: var(--color-bg-panel-muted);
+	--muted-foreground: var(--color-text-secondary);
+	--accent: var(--color-bg-hover);
+	--accent-foreground: var(--color-text-primary);
+	--destructive: var(--color-error-700);
+	--destructive-foreground: var(--color-text-on-action-primary);
+	--border: var(--color-border-subtle);
+	--input: var(--color-border-subtle);
+	--ring: var(--color-ring-focus-visible);
 }
 
-.atelier-route {
-	width: 100%;
-	height: 100%;
-	position: fixed;
-	inset: 0;
-	overflow: hidden;
-	background: #f4f2ef;
-}
+@layer base {
+	:root {
+		color-scheme: light;
+	}
 
-.atelier-route-status {
-	position: absolute;
-	inset: 0;
-	display: grid;
-	place-content: center;
-	justify-items: center;
-	gap: 8px;
-	padding: 24px;
-	background: #f4f2ef;
-	color: #44403c;
-	text-align: center;
-}
-
-.atelier-route-status span {
-	max-width: 640px;
-	color: #78716c;
+	body {
+		min-width: 320px;
+		background: var(--color-bg-app);
+		color: var(--color-text-primary);
+		font-family: var(--font-sans);
+	}
 }

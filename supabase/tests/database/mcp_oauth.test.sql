@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(14);
+select plan(15);
 
 select is(
   private.custom_access_token_hook(
@@ -111,6 +111,13 @@ select results_eq(
   $$update public.workspaces set name = 'Forbidden rename' where id = '53000000-0000-0000-0000-000000000001' returning name$$,
   array[]::text[],
   'MCP workspace metadata updates affect no rows'
+);
+
+select throws_ok(
+  $$select public.delete_workspace('53000000-0000-0000-0000-000000000001')$$,
+  'P0001',
+  'Lixray MCP tokens cannot modify account or workspace metadata',
+  'MCP tokens cannot soft-delete workspace metadata'
 );
 
 select throws_ok(

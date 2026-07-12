@@ -1,5 +1,6 @@
 export const E2E_AUTH_TOKEN = "lixray-e2e";
 export const E2E_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
-export const E2E_ORGANIZATION_NAME = "E2E Organization";
+export const E2E_ORGANIZATION_NAME = "acme";
 export const E2E_WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
-export const E2E_WORKSPACE_NAME = "E2E Workspace";
+export const E2E_WORKSPACE_NAME = "launch-q3";
+export const E2E_CREATED_WORKSPACE_ID = "00000000-0000-4000-8000-000000000003";

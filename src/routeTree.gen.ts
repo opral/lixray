@@ -18,7 +18,8 @@ import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as OauthConsentRouteImport } from './routes/oauth.consent'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
-import { Route as AtdevWorkspaceRouteImport } from './routes/@dev.workspace'
+import { Route as AtChar123namespaceChar125WorkspaceRouteImport } from './routes/@{$namespace}.$workspace'
+import { Route as AtChar123namespaceChar125WorkspaceFileSplatRouteImport } from './routes/@{$namespace}.$workspace.file.$'
 
 const WorkspaceRoute = WorkspaceRouteImport.update({
   id: '/workspace',
@@ -65,11 +66,18 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
   path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AtdevWorkspaceRoute = AtdevWorkspaceRouteImport.update({
-  id: '/@dev/workspace',
-  path: '/@dev/workspace',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const AtChar123namespaceChar125WorkspaceRoute =
+  AtChar123namespaceChar125WorkspaceRouteImport.update({
+    id: '/@{$namespace}/$workspace',
+    path: '/@{$namespace}/$workspace',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AtChar123namespaceChar125WorkspaceFileSplatRoute =
+  AtChar123namespaceChar125WorkspaceFileSplatRouteImport.update({
+    id: '/file/$',
+    path: '/file/$',
+    getParentRoute: () => AtChar123namespaceChar125WorkspaceRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -77,11 +85,12 @@ export interface FileRoutesByFullPath {
   '/sign-up': typeof SignUpRouteWithChildren
   '/sql': typeof SqlRoute
   '/workspace': typeof WorkspaceRoute
-  '/@dev/workspace': typeof AtdevWorkspaceRoute
+  '/@{$namespace}/$workspace': typeof AtChar123namespaceChar125WorkspaceRouteWithChildren
   '/auth/callback': typeof AuthCallbackRoute
   '/invite/$token': typeof InviteTokenRoute
   '/oauth/consent': typeof OauthConsentRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/@{$namespace}/$workspace/file/$': typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -89,11 +98,12 @@ export interface FileRoutesByTo {
   '/sign-up': typeof SignUpRouteWithChildren
   '/sql': typeof SqlRoute
   '/workspace': typeof WorkspaceRoute
-  '/@dev/workspace': typeof AtdevWorkspaceRoute
+  '/@{$namespace}/$workspace': typeof AtChar123namespaceChar125WorkspaceRouteWithChildren
   '/auth/callback': typeof AuthCallbackRoute
   '/invite/$token': typeof InviteTokenRoute
   '/oauth/consent': typeof OauthConsentRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/@{$namespace}/$workspace/file/$': typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -102,11 +112,12 @@ export interface FileRoutesById {
   '/sign-up': typeof SignUpRouteWithChildren
   '/sql': typeof SqlRoute
   '/workspace': typeof WorkspaceRoute
-  '/@dev/workspace': typeof AtdevWorkspaceRoute
+  '/@{$namespace}/$workspace': typeof AtChar123namespaceChar125WorkspaceRouteWithChildren
   '/auth/callback': typeof AuthCallbackRoute
   '/invite/$token': typeof InviteTokenRoute
   '/oauth/consent': typeof OauthConsentRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/@{$namespace}/$workspace/file/$': typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -116,11 +127,12 @@ export interface FileRouteTypes {
     | '/sign-up'
     | '/sql'
     | '/workspace'
-    | '/@dev/workspace'
+    | '/@{$namespace}/$workspace'
     | '/auth/callback'
     | '/invite/$token'
     | '/oauth/consent'
     | '/sign-up/$'
+    | '/@{$namespace}/$workspace/file/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -128,11 +140,12 @@ export interface FileRouteTypes {
     | '/sign-up'
     | '/sql'
     | '/workspace'
-    | '/@dev/workspace'
+    | '/@{$namespace}/$workspace'
     | '/auth/callback'
     | '/invite/$token'
     | '/oauth/consent'
     | '/sign-up/$'
+    | '/@{$namespace}/$workspace/file/$'
   id:
     | '__root__'
     | '/'
@@ -140,11 +153,12 @@ export interface FileRouteTypes {
     | '/sign-up'
     | '/sql'
     | '/workspace'
-    | '/@dev/workspace'
+    | '/@{$namespace}/$workspace'
     | '/auth/callback'
     | '/invite/$token'
     | '/oauth/consent'
     | '/sign-up/$'
+    | '/@{$namespace}/$workspace/file/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -153,7 +167,7 @@ export interface RootRouteChildren {
   SignUpRoute: typeof SignUpRouteWithChildren
   SqlRoute: typeof SqlRoute
   WorkspaceRoute: typeof WorkspaceRoute
-  AtdevWorkspaceRoute: typeof AtdevWorkspaceRoute
+  AtChar123namespaceChar125WorkspaceRoute: typeof AtChar123namespaceChar125WorkspaceRouteWithChildren
   AuthCallbackRoute: typeof AuthCallbackRoute
   InviteTokenRoute: typeof InviteTokenRoute
   OauthConsentRoute: typeof OauthConsentRoute
@@ -224,12 +238,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/@dev/workspace': {
-      id: '/@dev/workspace'
-      path: '/@dev/workspace'
-      fullPath: '/@dev/workspace'
-      preLoaderRoute: typeof AtdevWorkspaceRouteImport
+    '/@{$namespace}/$workspace': {
+      id: '/@{$namespace}/$workspace'
+      path: '/@{$namespace}/$workspace'
+      fullPath: '/@{$namespace}/$workspace'
+      preLoaderRoute: typeof AtChar123namespaceChar125WorkspaceRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/@{$namespace}/$workspace/file/$': {
+      id: '/@{$namespace}/$workspace/file/$'
+      path: '/file/$'
+      fullPath: '/@{$namespace}/$workspace/file/$'
+      preLoaderRoute: typeof AtChar123namespaceChar125WorkspaceFileSplatRouteImport
+      parentRoute: typeof AtChar123namespaceChar125WorkspaceRoute
     }
   }
 }
@@ -245,13 +266,29 @@ const SignUpRouteChildren: SignUpRouteChildren = {
 const SignUpRouteWithChildren =
   SignUpRoute._addFileChildren(SignUpRouteChildren)
 
+interface AtChar123namespaceChar125WorkspaceRouteChildren {
+  AtChar123namespaceChar125WorkspaceFileSplatRoute: typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
+}
+
+const AtChar123namespaceChar125WorkspaceRouteChildren: AtChar123namespaceChar125WorkspaceRouteChildren =
+  {
+    AtChar123namespaceChar125WorkspaceFileSplatRoute:
+      AtChar123namespaceChar125WorkspaceFileSplatRoute,
+  }
+
+const AtChar123namespaceChar125WorkspaceRouteWithChildren =
+  AtChar123namespaceChar125WorkspaceRoute._addFileChildren(
+    AtChar123namespaceChar125WorkspaceRouteChildren,
+  )
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRouteWithChildren,
   SqlRoute: SqlRoute,
   WorkspaceRoute: WorkspaceRoute,
-  AtdevWorkspaceRoute: AtdevWorkspaceRoute,
+  AtChar123namespaceChar125WorkspaceRoute:
+    AtChar123namespaceChar125WorkspaceRouteWithChildren,
   AuthCallbackRoute: AuthCallbackRoute,
   InviteTokenRoute: InviteTokenRoute,
   OauthConsentRoute: OauthConsentRoute,

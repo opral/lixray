@@ -10,7 +10,15 @@ import {
 	BreadcrumbSeparator,
 } from "~/components/ui/breadcrumb";
 
-export function ExplorerBreadcrumb({ dirPath }: { dirPath: string }) {
+export function ExplorerBreadcrumb({
+	dirPath,
+	namespace,
+	workspaceSlug,
+}: {
+	dirPath: string;
+	namespace: string;
+	workspaceSlug: string;
+}) {
 	const segments = dirPath.split("/").filter(Boolean);
 	const crumbs = segments.map((name, index) => ({
 		name,
@@ -29,7 +37,8 @@ export function ExplorerBreadcrumb({ dirPath }: { dirPath: string }) {
 					) : (
 						<BreadcrumbLink asChild>
 							<Link
-								to="/"
+								to="/@{$namespace}/$workspace"
+								params={{ namespace, workspace: workspaceSlug }}
 								search={{}}
 								className="inline-flex items-center gap-1.5"
 							>
@@ -47,7 +56,11 @@ export function ExplorerBreadcrumb({ dirPath }: { dirPath: string }) {
 								<BreadcrumbPage>{crumb.name}</BreadcrumbPage>
 							) : (
 								<BreadcrumbLink asChild>
-									<Link to="/" search={{ dir: crumb.path }}>
+									<Link
+										to="/@{$namespace}/$workspace"
+										params={{ namespace, workspace: workspaceSlug }}
+										search={{ dir: crumb.path }}
+									>
 										{crumb.name}
 									</Link>
 								</BreadcrumbLink>

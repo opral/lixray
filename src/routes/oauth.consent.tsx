@@ -90,27 +90,41 @@ function OAuthConsentPage() {
 	};
 
 	return (
-		<main className="auth-page">
-			<div className="auth-card consent-card">
-				<a href="/" className="brand" aria-label="Lixray home">
-					<span className="brand-mark">
+		<main className="grid min-h-screen place-items-center bg-[var(--color-bg-app)] px-5 py-8 text-[var(--color-text-primary)]">
+			<div className="grid w-full max-w-[620px] justify-items-stretch gap-5 rounded-[8px] border border-[var(--color-border-panel)] bg-[var(--color-bg-panel)] p-7 shadow-[var(--shadow-md)]">
+				<a
+					href="/"
+					className="inline-flex items-center gap-2.5 justify-self-center font-[750] tracking-normal no-underline"
+					aria-label="Lixray home"
+				>
+					<span className="grid size-7 place-items-center rounded-[7px] bg-[var(--color-bg-action-secondary)] text-[var(--color-text-on-action-secondary)]">
 						<DatabaseZap size={17} aria-hidden="true" />
 					</span>
 					<span>Lixray</span>
 				</a>
-				<div className="auth-copy">
-					<ShieldCheck size={28} aria-hidden="true" />
-					<h1>Connect Lixray to ChatGPT</h1>
-					<p className="muted">
+				<div className="grid justify-self-center gap-2 text-center">
+					<ShieldCheck
+						size={28}
+						className="justify-self-center text-[var(--color-icon-brand)]"
+						aria-hidden="true"
+					/>
+					<h1 className="m-0 text-2xl leading-[1.2] tracking-normal">
+						Connect Lixray to ChatGPT
+					</h1>
+					<p className="m-0 text-[var(--color-text-tertiary)]">
 						Authorize a private MCP connection using your existing Lixray
 						account.
 					</p>
 				</div>
 
-				{!isLoaded ? <p className="status-line">Loading account…</p> : null}
+				{!isLoaded ? (
+					<p className="text-sm text-[var(--color-text-tertiary)]">
+						Loading account…
+					</p>
+				) : null}
 				{isLoaded && !user ? (
 					<button
-						className="button primary auth-action"
+						className="inline-flex min-h-[38px] w-full max-w-[320px] cursor-pointer items-center justify-center justify-self-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)]"
 						type="button"
 						onClick={() => void signInWithGoogle(returnTo)}
 					>
@@ -122,34 +136,44 @@ function OAuthConsentPage() {
 				{details ? (
 					<>
 						<section
-							className="consent-request"
+							className="rounded-[8px] border border-[var(--color-border-panel)] p-4"
 							aria-label="Connection request"
 						>
-							<p>
+							<p className="m-0">
 								<strong>{details.clientName}</strong> is requesting access to
 								your Lixray account.
 							</p>
 							{details.clientUri ? (
-								<a href={details.clientUri} target="_blank" rel="noreferrer">
+								<a
+									href={details.clientUri}
+									className="mt-1.5 inline-block text-[13px] text-[var(--color-text-link)] hover:text-[var(--color-text-link-hover)]"
+									target="_blank"
+									rel="noreferrer"
+								>
 									{details.clientUri}
 								</a>
 							) : null}
 						</section>
-						<section className="consent-permissions" aria-label="Permissions">
-							<h2>This connection will be able to:</h2>
-							<ul>
+						<section
+							className="rounded-[8px] border border-[var(--color-border-panel)] p-4"
+							aria-label="Permissions"
+						>
+							<h2 className="mb-2.5 mt-0 text-base">
+								This connection will be able to:
+							</h2>
+							<ul className="mb-3 mt-0 pl-5 leading-[1.55] text-[var(--color-text-secondary)]">
 								<li>
 									List your accessible organizations, workspaces, and branches.
 								</li>
 								<li>Create and edit files and directories.</li>
 							</ul>
-							<p className="muted">
+							<p className="m-0 text-[var(--color-text-tertiary)]">
 								Requested OAuth scopes: {details.scopes.join(", ") || "none"}
 							</p>
 						</section>
-						<div className="consent-actions">
+						<div className="flex justify-end gap-2.5">
 							<button
-								className="button"
+								className="inline-flex min-h-[38px] w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-border-panel)] bg-[var(--color-bg-panel)] px-3.5 font-[680] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] disabled:cursor-not-allowed disabled:opacity-55 min-[801px]:w-auto"
 								type="button"
 								disabled={submitting !== null}
 								onClick={() => void decide("deny")}
@@ -157,7 +181,7 @@ function OAuthConsentPage() {
 								{submitting === "deny" ? "Denying…" : "Deny"}
 							</button>
 							<button
-								className="button primary"
+								className="inline-flex min-h-[38px] w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] disabled:cursor-not-allowed disabled:opacity-55 min-[801px]:w-auto"
 								type="button"
 								disabled={submitting !== null}
 								onClick={() => void decide("approve")}
@@ -165,14 +189,18 @@ function OAuthConsentPage() {
 								{submitting === "approve" ? "Connecting…" : "Allow and connect"}
 							</button>
 						</div>
-						<p className="consent-redirect muted">
+						<p className="text-center text-xs text-[var(--color-text-tertiary)]">
 							After approval you will return to{" "}
 							{displayOrigin(details.redirectUri)}.
 						</p>
 					</>
 				) : null}
 
-				{error ? <p className="error-box">{error}</p> : null}
+				{error ? (
+					<p className="mt-3.5 whitespace-pre-wrap rounded-[8px] border border-[var(--color-error-200)] bg-[var(--color-error-50)] px-3.5 py-3 text-[var(--color-error-800)]">
+						{error}
+					</p>
+				) : null}
 			</div>
 		</main>
 	);

@@ -7,6 +7,35 @@ import {
 	useWorkspace,
 } from "~/components/workspace-provider";
 
+const workspaceEmptyClass =
+	"grid min-h-[calc(100vh_-_80px)] place-items-center px-5 py-10";
+const brandClass =
+	"inline-flex items-center gap-2.5 font-[750] tracking-normal no-underline";
+const brandMarkClass =
+	"grid size-7 place-items-center rounded-[7px] bg-bg-action-secondary text-text-on-action-secondary";
+const buttonClass =
+	"inline-flex min-h-[38px] cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-border-panel bg-bg-panel px-3.5 font-[680] text-text-secondary no-underline disabled:cursor-not-allowed disabled:opacity-[0.55]";
+const primaryButtonClass = `${buttonClass} border-bg-action-primary bg-bg-action-primary text-text-on-action-primary`;
+const panelClass =
+	"rounded-[8px] border border-border-panel bg-bg-panel shadow-md";
+const panelHeaderClass =
+	"flex items-center justify-between gap-3 border-b border-border-subtle px-[18px] py-4";
+const panelTitleClass = "m-0 text-[15px] font-[720] tracking-normal";
+const panelBodyStackClass = "grid gap-3.5 p-[18px]";
+const fieldClass =
+	"grid gap-2 [&_label]:text-[13px] [&_label]:font-[680] [&_label]:text-text-secondary";
+const inputClass =
+	"h-[42px] w-full rounded-[7px] border border-border-panel bg-bg-panel px-3 text-text-primary outline-none focus:border-border-panel focus:outline-2 focus:outline-offset-1 focus:outline-ring-focus-visible";
+const compactSelectClass =
+	"h-[38px] max-w-[210px] rounded-[7px] border border-border-panel bg-bg-panel py-0 pr-[30px] pl-2.5 text-text-primary max-[800px]:w-full max-[800px]:max-w-none";
+const settingsRowClass =
+	"flex items-center justify-between gap-4 border-b border-border-subtle py-3 last:border-b-0 max-[800px]:flex-col max-[800px]:items-stretch";
+const inlineActionsClass = "flex items-center gap-2.5 max-[800px]:w-full";
+const inlineFormClass =
+	"flex items-end gap-2.5 max-[800px]:flex-col max-[800px]:items-stretch";
+const errorClass =
+	"mt-3.5 whitespace-pre-wrap rounded-[8px] border border-error-200 bg-error-50 px-3.5 py-3 text-error-800";
+
 export const Route = createFileRoute("/workspace")({
 	component: WorkspacePage,
 });
@@ -122,31 +151,39 @@ function WorkspacePage() {
 	};
 
 	if (!authLoaded || !workspaceState.isLoaded) {
-		return <div className="workspace-empty">Loading...</div>;
+		return <div className={workspaceEmptyClass}>Loading...</div>;
 	}
 	if (!user) return <SignedOutSettings />;
 
 	return (
-		<div className="app-shell">
-			<header className="topbar">
-				<Link to="/" className="brand">
-					<span className="brand-mark">
+		<div className="min-h-screen">
+			<header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border-panel bg-bg-panel/86 px-7 py-5 backdrop-blur-[16px] max-[800px]:flex-col max-[800px]:items-start max-[800px]:px-[18px] max-[800px]:py-4">
+				<Link to="/" className={brandClass}>
+					<span className={brandMarkClass}>
 						<DatabaseZap size={17} aria-hidden="true" />
 					</span>
 					<span>Lixray</span>
 				</Link>
-				<Link to="/" className="button">
+				<Link to="/" className={`${buttonClass} max-[800px]:w-full`}>
 					Back to workspace
 				</Link>
 			</header>
-			<main className="page settings-grid">
-				<section className="page-heading">
-					<p className="eyebrow">Workspace settings</p>
-					<h1>Organizations, workspaces, and members</h1>
+			<main className="mx-auto grid w-[min(1180px,calc(100%_-_40px))] gap-[18px] pt-6 pb-12 max-[800px]:w-[min(1180px,calc(100%_-_24px))] max-[800px]:pt-[22px]">
+				<section className="mb-[18px] max-w-[760px]">
+					<p className="mb-2 text-[13px] font-[760] tracking-[0.08em] text-text-link uppercase">
+						Workspace settings
+					</p>
+					<h1 className="m-0 text-2xl leading-[1.2] tracking-normal">
+						Organizations, workspaces, and members
+					</h1>
 				</section>
 
-				{error ? <div className="error-box">{error}</div> : null}
-				{notice ? <div className="notice-box">{notice}</div> : null}
+				{error ? <div className={errorClass}>{error}</div> : null}
+				{notice ? (
+					<div className="rounded-[8px] border border-success-200 bg-success-50 px-3.5 py-3 text-success-800">
+						{notice}
+					</div>
+				) : null}
 
 				<OrganizationPanel workspaceState={workspaceState} />
 
@@ -253,16 +290,16 @@ function OrganizationPanel({
 	const [error, setError] = useState<string | null>(null);
 
 	return (
-		<section className="panel">
-			<div className="panel-header">
-				<h2 className="panel-title">Organizations</h2>
+		<section className={panelClass}>
+			<div className={panelHeaderClass}>
+				<h2 className={panelTitleClass}>Organizations</h2>
 			</div>
-			<div className="panel-body settings-stack">
-				<div className="field">
+			<div className={panelBodyStackClass}>
+				<div className={fieldClass}>
 					<label htmlFor="settings-organization">Selected organization</label>
 					<select
 						id="settings-organization"
-						className="input"
+						className={inputClass}
 						value={workspaceState.selectedOrganization?.id ?? ""}
 						onChange={(event) =>
 							workspaceState.selectOrganization(event.target.value)
@@ -310,7 +347,7 @@ function OrganizationPanel({
 						}}
 					/>
 				) : null}
-				{error ? <p className="error-box">{error}</p> : null}
+				{error ? <p className={errorClass}>{error}</p> : null}
 			</div>
 		</section>
 	);
@@ -325,20 +362,22 @@ function WorkspacePanel({
 	const [renames, setRenames] = useState<Record<string, string>>({});
 	const [error, setError] = useState<string | null>(null);
 	return (
-		<section className="panel">
-			<div className="panel-header">
-				<h2 className="panel-title">Workspaces</h2>
+		<section className={panelClass}>
+			<div className={panelHeaderClass}>
+				<h2 className={panelTitleClass}>Workspaces</h2>
 			</div>
-			<div className="panel-body settings-stack">
+			<div className={panelBodyStackClass}>
 				{workspaceState.selectedOrganization?.workspaces.map((workspace) => (
-					<div className="settings-row" key={workspace.id}>
+					<div className={settingsRowClass} key={workspace.id}>
 						<div>
 							<strong>{workspace.name}</strong>
-							<div className="code muted">{workspace.id}</div>
+							<div className="font-mono text-xs text-text-tertiary">
+								{workspace.id}
+							</div>
 						</div>
-						<div className="inline-actions">
+						<div className={inlineActionsClass}>
 							<input
-								className="input compact-input"
+								className={`${inputClass} w-[min(220px,100%)] max-[800px]:w-full max-[800px]:max-w-none`}
 								aria-label={`Rename ${workspace.name}`}
 								placeholder="New name"
 								value={renames[workspace.id] ?? ""}
@@ -350,7 +389,7 @@ function WorkspacePanel({
 								}
 							/>
 							<button
-								className="button"
+								className={buttonClass}
 								disabled={!renames[workspace.id]?.trim()}
 								onClick={() =>
 									void (async () => {
@@ -390,7 +429,7 @@ function WorkspacePanel({
 						}
 					}}
 				/>
-				{error ? <p className="error-box">{error}</p> : null}
+				{error ? <p className={errorClass}>{error}</p> : null}
 			</div>
 		</section>
 	);
@@ -414,30 +453,30 @@ function MemberPanel({
 	onLeave: () => void;
 }) {
 	return (
-		<section className="panel">
-			<div className="panel-header">
-				<h2 className="panel-title">Members</h2>
-				<button className="button" onClick={onLeave}>
+		<section className={panelClass}>
+			<div className={panelHeaderClass}>
+				<h2 className={panelTitleClass}>Members</h2>
+				<button className={buttonClass} onClick={onLeave}>
 					Leave organization
 				</button>
 			</div>
-			<div className="panel-body settings-stack">
+			<div className={panelBodyStackClass}>
 				{loading ? (
-					<p className="status-line">Loading members...</p>
+					<p className="text-sm text-text-tertiary">Loading members...</p>
 				) : (
 					members.map((member) => (
-						<div className="settings-row" key={member.userId}>
+						<div className={settingsRowClass} key={member.userId}>
 							<div>
 								<strong>
 									{member.name}
 									{member.userId === currentUserId ? " (you)" : ""}
 								</strong>
-								<div className="muted">{member.email}</div>
+								<div className="text-text-tertiary">{member.email}</div>
 							</div>
-							<div className="inline-actions">
+							<div className={inlineActionsClass}>
 								{isOwner ? (
 									<select
-										className="compact-select"
+										className={compactSelectClass}
 										aria-label={`Role for ${member.name}`}
 										value={member.role}
 										onChange={(event) =>
@@ -451,10 +490,13 @@ function MemberPanel({
 										<option value="owner">Owner</option>
 									</select>
 								) : (
-									<span className="muted">{member.role}</span>
+									<span className="text-text-tertiary">{member.role}</span>
 								)}
 								{isOwner && member.userId !== currentUserId ? (
-									<button className="button" onClick={() => onRemove(member)}>
+									<button
+										className={buttonClass}
+										onClick={() => onRemove(member)}
+									>
 										Remove
 									</button>
 								) : null}
@@ -484,30 +526,36 @@ function InvitationPanel({
 		onInvite(email);
 	};
 	return (
-		<section className="panel">
-			<div className="panel-header">
-				<h2 className="panel-title">Invitations</h2>
+		<section className={panelClass}>
+			<div className={panelHeaderClass}>
+				<h2 className={panelTitleClass}>Invitations</h2>
 			</div>
-			<div className="panel-body settings-stack">
-				<form className="inline-form" onSubmit={submit}>
-					<div className="field grow">
+			<div className={panelBodyStackClass}>
+				<form className={inlineFormClass} onSubmit={submit}>
+					<div className={`${fieldClass} grow`}>
 						<label htmlFor="invite-email">Google account email</label>
 						<input
 							id="invite-email"
-							className="input"
+							className={inputClass}
 							type="email"
 							value={email}
 							onChange={(event) => setEmail(event.target.value)}
 							required
 						/>
 					</div>
-					<button className="button primary">Create invite link</button>
+					<button className={`${primaryButtonClass} max-[800px]:w-full`}>
+						Create invite link
+					</button>
 				</form>
 				{inviteLink ? (
-					<div className="invite-link">
-						<input className="input code" readOnly value={inviteLink} />
+					<div className="flex items-center gap-2.5 max-[800px]:w-full">
+						<input
+							className={`${inputClass} font-mono text-xs`}
+							readOnly
+							value={inviteLink}
+						/>
 						<button
-							className="button"
+							className={buttonClass}
 							onClick={() => void navigator.clipboard.writeText(inviteLink)}
 						>
 							Copy
@@ -515,14 +563,17 @@ function InvitationPanel({
 					</div>
 				) : null}
 				{invitations.map((invitation) => (
-					<div className="settings-row" key={invitation.id}>
+					<div className={settingsRowClass} key={invitation.id}>
 						<div>
 							<strong>{invitation.email}</strong>
-							<div className="muted">
+							<div className="text-text-tertiary">
 								Expires {new Date(invitation.expiresAt).toLocaleString()}
 							</div>
 						</div>
-						<button className="button" onClick={() => onRevoke(invitation)}>
+						<button
+							className={`${buttonClass} max-[800px]:w-full`}
+							onClick={() => onRevoke(invitation)}
+						>
 							Revoke
 						</button>
 					</div>
@@ -550,17 +601,20 @@ function InlineNameForm({
 		void onSubmit();
 	};
 	return (
-		<form className="inline-form" onSubmit={submit}>
-			<div className="field grow">
+		<form className={inlineFormClass} onSubmit={submit}>
+			<div className={`${fieldClass} grow`}>
 				<label>{label}</label>
 				<input
-					className="input"
+					className={inputClass}
 					value={value}
 					maxLength={80}
 					onChange={(event) => onChange(event.target.value)}
 				/>
 			</div>
-			<button className="button" disabled={!value.trim()}>
+			<button
+				className={`${buttonClass} max-[800px]:w-full`}
+				disabled={!value.trim()}
+			>
 				{button}
 			</button>
 		</form>
@@ -569,13 +623,20 @@ function InlineNameForm({
 
 function SignedOutSettings() {
 	return (
-		<div className="workspace-empty">
-			<div className="workspace-empty-inner">
-				<p className="eyebrow">Workspace settings</p>
-				<h1>Sign in to manage workspaces.</h1>
-				<div className="toolbar">
-					<Link className="button primary" to="/sign-in">
-						Sign in with Google
+		<div className={workspaceEmptyClass}>
+			<div className="w-[min(620px,100%)] rounded-[8px] border border-border-panel bg-bg-panel p-7 shadow-md">
+				<p className="mb-2 text-[13px] font-[760] tracking-[0.08em] text-text-link uppercase">
+					Workspace settings
+				</p>
+				<h1 className="m-0 text-[clamp(30px,5vw,42px)] leading-[1.08] tracking-normal">
+					Sign in to manage workspaces.
+				</h1>
+				<div className="mt-3 flex items-center justify-between gap-3 max-[800px]:flex-col max-[800px]:items-stretch">
+					<Link
+						className={`${primaryButtonClass} max-[800px]:w-full`}
+						to="/sign-in"
+					>
+						Sign in
 					</Link>
 				</div>
 			</div>
