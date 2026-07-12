@@ -28,7 +28,7 @@ export default defineConfig({
 	webServer: process.env.PLAYWRIGHT_BASE_URL
 		? undefined
 		: {
-				command: `corepack pnpm run atelier:build && node_modules/.bin/vite dev --host ${host} --port ${port}`,
+				command: `corepack pnpm run atelier:build && corepack pnpm exec vite dev --host ${host} --port ${port}`,
 				env: {
 					...process.env,
 					LIXRAY_E2E_WORKSPACE_ID: e2eWorkspaceId,

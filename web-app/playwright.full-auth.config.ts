@@ -17,7 +17,7 @@ export default defineConfig({
 	},
 	globalTeardown: "./tests/e2e/global-teardown.ts",
 	webServer: {
-		command: "node scripts/dev.mjs",
+		command: "node ../scripts/dev.mjs",
 		env: {
 			...process.env,
 			LIXRAY_DEV_HOST: host,

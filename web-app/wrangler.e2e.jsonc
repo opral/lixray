@@ -12,7 +12,7 @@
 	"containers": [
 		{
 			"class_name": "SlateDbContainer",
-			"image": "./Dockerfile",
+			"image": "../lix-server/Dockerfile",
 			"image_vars": {
 				"LIXRAY_IMAGE_VARIANT": "e2e",
 			},

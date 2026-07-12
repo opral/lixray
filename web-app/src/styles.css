@@ -8,7 +8,7 @@
  * semantic color guidance:
  * https://www.subframe.com/blog/how-to-setup-semantic-tailwind-colors
  */
-@import "../vendor/atelier/src/shell/theme.css";
+@import "../../vendor/atelier/src/shell/theme.css";
 
 @custom-variant dark (&:is(.dark *));
 

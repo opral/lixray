@@ -50,9 +50,11 @@ jobs:
           version: 2.109.1
 
       - name: Start Supabase
+        working-directory: database
         run: supabase start
 
       - name: Test database policies and functions
+        working-directory: database
         run: supabase test db
 
   frontend:
@@ -81,16 +83,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check formatting
-        run: pnpm run format:check
+        run: pnpm --dir web-app format:check
 
       - name: Lint
-        run: pnpm run lint
+        run: pnpm --dir web-app lint
 
       - name: Typecheck and worker tests
-        run: pnpm run check:cloudflare
+        run: pnpm --dir web-app check:cloudflare
 
       - name: Build
-        run: pnpm run build
+        run: pnpm --dir web-app build
 
       - name: Verify generated files are committed
         run: git diff --exit-code
@@ -111,15 +113,17 @@ jobs:
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lix-server
 
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo fmt --manifest-path lix-server/Cargo.toml --check
 
       - name: Lint
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --manifest-path lix-server/Cargo.toml --locked --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --locked
+        run: cargo test --manifest-path lix-server/Cargo.toml --locked
 
   e2e:
     name: End-to-end tests
@@ -147,7 +151,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm --dir web-app exec playwright install --with-deps chromium
 
       - name: Run e2e tests
-        run: pnpm test:e2e
+        run: pnpm --dir web-app test:e2e

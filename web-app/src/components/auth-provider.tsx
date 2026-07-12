@@ -78,7 +78,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		},
 		[client],
 	);
-
 	const signInAsLocalDev = useCallback(async () => {
 		if (!client) throw new Error("Authentication is still loading");
 		if (!localDevCredentials) {
