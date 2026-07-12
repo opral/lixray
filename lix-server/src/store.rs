@@ -7,9 +7,9 @@ use lix_engine::{
 };
 use object_store::{aws::AmazonS3Builder, memory::InMemory, ObjectStore};
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::runtime::Builder;
+use tokio::runtime::Handle;
 use tracing::{info, warn};
 
 #[derive(Clone)]
@@ -130,6 +130,9 @@ impl LixService {
         options: ExecuteOptions,
     ) -> Result<ExecuteResult, LixError> {
         self.run("execute", move |engine| async move {
+            // A pinned session does not validate its branch until a branch-aware
+            // operation runs. Keep this guard so branch-free SQL cannot succeed
+            // against a missing branch.
             ensure_branch_exists(&engine, &branch_id, "execute").await?;
             let session = engine.open_session(branch_id).await?;
             session.execute_with_options(&sql, &params, options).await
@@ -243,7 +246,7 @@ impl LixService {
             let session = engine.open_session(branch_id).await?;
             let events = session.observe(&sql, &params)?;
             Ok(LixObserve {
-                events: Some(events),
+                events: Arc::new(Mutex::new(events)),
             })
         })
         .await
@@ -261,25 +264,20 @@ impl LixService {
     {
         let started = Instant::now();
         let engine = self.engine.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let runtime = Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|error| {
-                    LixError::new(
-                        LixError::CODE_INTERNAL_ERROR,
-                        format!("create Lix runtime: {error}"),
-                    )
-                })?;
-            runtime.block_on(operation(engine))
-        })
-        .await
-        .map_err(|error| {
+        let runtime = Handle::try_current().map_err(|error| {
             LixError::new(
                 LixError::CODE_INTERNAL_ERROR,
-                format!("join Lix runtime task: {error}"),
+                format!("access Lix runtime: {error}"),
             )
-        });
+        })?;
+        let result = tokio::task::spawn_blocking(move || runtime.block_on(operation(engine)))
+            .await
+            .map_err(|error| {
+                LixError::new(
+                    LixError::CODE_INTERNAL_ERROR,
+                    format!("join Lix runtime task: {error}"),
+                )
+            });
         match &result {
             Ok(Ok(_)) => info!(
                 operation = operation_name,
@@ -338,30 +336,38 @@ async fn ensure_branch_exists(
 }
 
 pub struct LixObserve {
-    events: Option<ObserveEvents<SlateDbBackend>>,
+    events: Arc<Mutex<ObserveEvents<SlateDbBackend>>>,
 }
 
 impl LixObserve {
     pub async fn next(&mut self) -> Result<Option<ObserveEvent>, LixError> {
-        let mut events = self.events.take().ok_or_else(|| {
+        let runtime = Handle::try_current().map_err(|error| {
             LixError::new(
-                LixError::CODE_CLOSED,
-                "Lix observe stream is already closed",
+                LixError::CODE_INTERNAL_ERROR,
+                format!("access Lix observe runtime: {error}"),
             )
         })?;
-
-        let (events, result) = tokio::task::spawn_blocking(move || {
-            let runtime = Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|error| {
-                    LixError::new(
-                        LixError::CODE_INTERNAL_ERROR,
-                        format!("create Lix observe runtime: {error}"),
-                    )
-                })?;
-            let result = runtime.block_on(events.next());
-            Ok::<_, LixError>((events, result))
+        let events = Arc::clone(&self.events);
+        // A started spawn_blocking task cannot be aborted. Keep this sender in
+        // the pending next() future so dropping that future wakes the blocking
+        // task and releases its observe stream without waiting for a mutation.
+        let (cancel_on_drop, cancel) = tokio::sync::oneshot::channel::<()>();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut events = events.lock().map_err(|error| {
+                LixError::new(
+                    LixError::CODE_INTERNAL_ERROR,
+                    format!("lock Lix observe stream: {error}"),
+                )
+            })?;
+            runtime.block_on(async {
+                tokio::select! {
+                    result = events.next() => result,
+                    _ = cancel => Err(LixError::new(
+                        LixError::CODE_CLOSED,
+                        "Lix observe wait was cancelled",
+                    )),
+                }
+            })
         })
         .await
         .map_err(|error| {
@@ -369,9 +375,10 @@ impl LixObserve {
                 LixError::CODE_INTERNAL_ERROR,
                 format!("join Lix observe task: {error}"),
             )
-        })??;
-
-        self.events = Some(events);
+        })?;
+        // Keep the cancellation sender alive until the blocking task has
+        // returned on the normal path.
+        drop(cancel_on_drop);
         result
     }
 }
@@ -388,5 +395,76 @@ async fn open_or_initialize_engine(backend: SlateDbBackend) -> Result<Engine<Sla
                 .context("open initialized Lix engine")
         }
         Err(error) => Err(error).context("open Lix engine"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    static TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[tokio::test]
+    async fn dropping_pending_observe_next_stops_its_blocking_task() {
+        let id = TEST_ID.fetch_add(1, Ordering::Relaxed);
+        let service = open_lix_service(&Config {
+            bind_addr: "127.0.0.1:0".to_string(),
+            slatedb_path: format!("store-observe-cancel-{}-{id}", std::process::id()),
+            storage: StorageConfig::Memory,
+        })
+        .await
+        .expect("open cancellation-test Lix service");
+        let branches = service
+            .list_branches()
+            .await
+            .expect("list cancellation-test branches");
+        let main_branch_id = branches
+            .rows()
+            .iter()
+            .find(|row| matches!(row.value("name"), Ok(Value::Text(name)) if name == "main"))
+            .and_then(|row| match row.value("id").ok()? {
+                Value::Text(id) => Some(id.clone()),
+                _ => None,
+            })
+            .expect("find cancellation-test main branch");
+        let mut observe = service
+            .observe(main_branch_id, "SELECT 1 AS value".to_string(), Vec::new())
+            .await
+            .expect("open cancellation-test observe stream");
+        assert!(observe
+            .next()
+            .await
+            .expect("read initial observe event")
+            .is_some());
+
+        // The test and LixObserve each hold one Arc. A third reference proves
+        // the blocking task has been dispatched and owns the stream wait.
+        let events = Arc::clone(&observe.events);
+        let mut pending = Box::pin(observe.next());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                tokio::select! {
+                    result = &mut pending => panic!("observe unexpectedly completed: {result:?}"),
+                    _ = tokio::task::yield_now() => {}
+                }
+                if Arc::strong_count(&events) == 3 {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("blocking observe task should start");
+
+        drop(pending);
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while Arc::strong_count(&events) != 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("cancelled blocking observe task should release its stream");
     }
 }
