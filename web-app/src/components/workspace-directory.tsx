@@ -36,7 +36,7 @@ import {
 	DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { triggerBrowserDownload } from "~/lib/download";
-import { isE2eAuthEnabled } from "~/lib/e2e-client";
+import { isE2eAuthEnabled, isPreviewMode } from "~/lib/e2e-client";
 import { formatCaughtError, formatRelativeTime } from "~/lib/format";
 import {
 	buildWorkspaceArchive,
@@ -66,12 +66,13 @@ export function WorkspaceDirectory() {
 	const workspaceState = useWorkspace();
 	const [dialog, setDialog] = useState<DialogState>(null);
 	const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
-	const signedIn = isE2eAuthEnabled || Boolean(auth.user);
+	const signedIn = isE2eAuthEnabled || isPreviewMode || Boolean(auth.user);
 	const organizations = workspaceState.organizations;
 
 	useEffect(() => {
 		let cancelled = false;
 		setFileCounts({});
+		if (isPreviewMode) return () => undefined;
 		for (const workspace of organizations.flatMap(
 			(organization) => organization.workspaces,
 		)) {
@@ -213,7 +214,7 @@ export function WorkspaceDirectory() {
 						)
 					)}
 
-					{firstWorkspace ? (
+					{firstWorkspace && !isPreviewMode ? (
 						<McpQuickstart
 							organization={firstWorkspace.organization}
 							workspace={firstWorkspace.workspace}
@@ -326,37 +327,43 @@ function DirectoryHeader() {
 				<img className="size-[19px]" src="/lixray-mark.svg" alt="" />
 				<span>lixray</span>
 			</Link>
-			<DropdownMenu>
-				<DropdownMenuTrigger asChild>
-					<button
-						className="ml-auto inline-flex size-[26px] cursor-pointer items-center justify-center rounded-full border-0 bg-bg-action-secondary p-0 text-[11px] font-semibold text-text-on-action-secondary transition hover:-translate-y-px hover:bg-bg-action-secondary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
-						type="button"
-						aria-label="Account menu"
+			{isPreviewMode ? (
+				<span className="ml-auto rounded-full border border-border-panel bg-bg-panel px-2.5 py-1 text-[11px] font-semibold tracking-[0.04em] text-text-secondary uppercase">
+					PR frontend preview
+				</span>
+			) : (
+				<DropdownMenu>
+					<DropdownMenuTrigger asChild>
+						<button
+							className="ml-auto inline-flex size-[26px] cursor-pointer items-center justify-center rounded-full border-0 bg-bg-action-secondary p-0 text-[11px] font-semibold text-text-on-action-secondary transition hover:-translate-y-px hover:bg-bg-action-secondary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+							type="button"
+							aria-label="Account menu"
+						>
+							{initial}
+						</button>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent
+						align="end"
+						className="min-w-[190px] border-border-panel bg-bg-panel"
 					>
-						{initial}
-					</button>
-				</DropdownMenuTrigger>
-				<DropdownMenuContent
-					align="end"
-					className="min-w-[190px] border-border-panel bg-bg-panel"
-				>
-					<DropdownMenuItem asChild>
-						<Link to="/workspace">
-							<Settings aria-hidden="true" />
-							Workspace settings
-						</Link>
-					</DropdownMenuItem>
-					{isE2eAuthEnabled ? null : (
-						<>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem onSelect={() => void signOut()}>
-								<LogOut aria-hidden="true" />
-								Sign out
-							</DropdownMenuItem>
-						</>
-					)}
-				</DropdownMenuContent>
-			</DropdownMenu>
+						<DropdownMenuItem asChild>
+							<Link to="/workspace">
+								<Settings aria-hidden="true" />
+								Workspace settings
+							</Link>
+						</DropdownMenuItem>
+						{isE2eAuthEnabled ? null : (
+							<>
+								<DropdownMenuSeparator />
+								<DropdownMenuItem onSelect={() => void signOut()}>
+									<LogOut aria-hidden="true" />
+									Sign out
+								</DropdownMenuItem>
+							</>
+						)}
+					</DropdownMenuContent>
+				</DropdownMenu>
+			)}
 		</header>
 	);
 }
@@ -381,6 +388,37 @@ function WorkspaceRow({
 	const path = workspacePath(organization, workspace);
 	const palette =
 		TILE_PALETTES[paletteIndex % TILE_PALETTES.length] ?? TILE_PALETTES[0];
+	const workspaceSummary = (
+		<>
+			<span
+				className="inline-flex size-[34px] shrink-0 items-center justify-center rounded-[9px] text-[13px] font-bold tracking-[-0.01em]"
+				style={{
+					background: palette.background,
+					boxShadow: `inset 0 0 0 1px ${palette.border}`,
+					color: palette.color,
+				}}
+				aria-hidden="true"
+			>
+				{workspaceInitials(workspace.name)}
+			</span>
+			<span className="flex min-w-0 flex-col gap-0.5">
+				<strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[15px] leading-tight font-semibold text-text-primary">
+					{workspace.name}
+				</strong>
+				<span className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] leading-tight text-text-tertiary">
+					{isPreviewMode ? (
+						"Frontend-only preview"
+					) : (
+						<>
+							{fileCount === undefined ? "…" : fileCount}{" "}
+							{pluralize(fileCount ?? 0, "file")} · active{" "}
+							{formatRelativeTime(workspace.updatedAt)}
+						</>
+					)}
+				</span>
+			</span>
+		</>
+	);
 
 	const copyUrl = async () => {
 		await navigator.clipboard.writeText(
@@ -407,34 +445,28 @@ function WorkspaceRow({
 
 	return (
 		<div className="relative flex min-h-[60px] items-center rounded-[10px] px-3.5 transition-colors hover:bg-bg-hover focus-within:bg-bg-hover has-[[data-state=open]]:bg-bg-hover max-[560px]:px-2">
-			<Link
-				className="flex min-w-0 flex-1 items-center gap-3.5 rounded-lg py-[13px] text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
-				to="/@{$namespace}/$workspace"
-				params={{ namespace: organization.handle, workspace: workspace.slug }}
-				search={{}}
-			>
-				<span
-					className="inline-flex size-[34px] shrink-0 items-center justify-center rounded-[9px] text-[13px] font-bold tracking-[-0.01em]"
-					style={{
-						background: palette.background,
-						boxShadow: `inset 0 0 0 1px ${palette.border}`,
-						color: palette.color,
-					}}
-					aria-hidden="true"
+			{isPreviewMode ? (
+				<button
+					className="flex min-w-0 flex-1 cursor-pointer items-center gap-3.5 rounded-lg border-0 bg-transparent py-[13px] text-left text-inherit focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+					type="button"
+					onClick={() =>
+						toast.info(
+							"Workspace files are unavailable in frontend PR previews",
+						)
+					}
 				>
-					{workspaceInitials(workspace.name)}
-				</span>
-				<span className="flex min-w-0 flex-col gap-0.5">
-					<strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[15px] leading-tight font-semibold text-text-primary">
-						{workspace.name}
-					</strong>
-					<span className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] leading-tight text-text-tertiary">
-						{fileCount === undefined ? "…" : fileCount}{" "}
-						{pluralize(fileCount ?? 0, "file")} · active{" "}
-						{formatRelativeTime(workspace.updatedAt)}
-					</span>
-				</span>
-			</Link>
+					{workspaceSummary}
+				</button>
+			) : (
+				<Link
+					className="flex min-w-0 flex-1 items-center gap-3.5 rounded-lg py-[13px] text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+					to="/@{$namespace}/$workspace"
+					params={{ namespace: organization.handle, workspace: workspace.slug }}
+					search={{}}
+				>
+					{workspaceSummary}
+				</Link>
+			)}
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
 					<button
@@ -454,17 +486,21 @@ function WorkspaceRow({
 						<Pencil aria-hidden="true" />
 						Rename
 					</DropdownMenuItem>
-					<DropdownMenuItem onSelect={() => void copyUrl()}>
-						<Link2 aria-hidden="true" />
-						Copy URL
-					</DropdownMenuItem>
-					<DropdownMenuItem
-						disabled={downloading}
-						onSelect={() => void download()}
-					>
-						<Download aria-hidden="true" />
-						{downloading ? "Preparing archive…" : "Download archive"}
-					</DropdownMenuItem>
+					{isPreviewMode ? null : (
+						<DropdownMenuItem onSelect={() => void copyUrl()}>
+							<Link2 aria-hidden="true" />
+							Copy URL
+						</DropdownMenuItem>
+					)}
+					{isPreviewMode ? null : (
+						<DropdownMenuItem
+							disabled={downloading}
+							onSelect={() => void download()}
+						>
+							<Download aria-hidden="true" />
+							{downloading ? "Preparing archive…" : "Download archive"}
+						</DropdownMenuItem>
+					)}
 					<DropdownMenuSeparator />
 					<DropdownMenuItem variant="destructive" onSelect={onDelete}>
 						<Trash2 aria-hidden="true" />

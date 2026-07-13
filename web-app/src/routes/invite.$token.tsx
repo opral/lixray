@@ -1,7 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "~/components/auth-provider";
+import { PreviewUnavailable } from "~/components/preview-unavailable";
 import { useWorkspace } from "~/components/workspace-provider";
+import { isPreviewMode } from "~/lib/e2e-client";
 
 export const Route = createFileRoute("/invite/$token")({
 	component: InvitationPage,
@@ -33,6 +35,7 @@ function InvitationPage() {
 				setStatus("accepted");
 			});
 	}, [client, isLoaded, token, user, workspaceState]);
+	if (isPreviewMode) return <PreviewUnavailable feature="Invitations" />;
 
 	return (
 		<main className="grid min-h-[calc(100vh-80px)] place-items-center bg-[var(--color-bg-app)] px-5 py-10 text-[var(--color-text-primary)]">

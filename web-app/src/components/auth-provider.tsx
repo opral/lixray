@@ -8,6 +8,7 @@ import {
 	useMemo,
 	useState,
 } from "react";
+import { isPreviewMode } from "~/lib/e2e-client";
 import { getBrowserSupabaseClient, localDevCredentials } from "~/lib/supabase";
 import type { LixraySupabaseClient } from "~/lib/supabase";
 
@@ -27,6 +28,31 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+	if (isPreviewMode) {
+		return <PreviewAuthProvider>{children}</PreviewAuthProvider>;
+	}
+	return <SupabaseAuthProvider>{children}</SupabaseAuthProvider>;
+}
+
+function PreviewAuthProvider({ children }: { children: ReactNode }) {
+	const unavailable = () =>
+		Promise.reject(
+			new Error("Authentication is unavailable in frontend PR previews"),
+		);
+	const value: AuthContextValue = {
+		isLoaded: true,
+		session: null,
+		user: null,
+		client: null,
+		getAccessToken: () => Promise.resolve(null),
+		signInAsLocalDev: unavailable,
+		signInWithGoogle: unavailable,
+		signOut: () => Promise.resolve(),
+	};
+	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 	const [client, setClient] = useState<LixraySupabaseClient | null>(null);
 	const [session, setSession] = useState<Session | null>(null);
 	const [isLoaded, setIsLoaded] = useState(false);

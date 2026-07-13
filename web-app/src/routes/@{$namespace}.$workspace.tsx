@@ -1,10 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect } from "react";
 import { useAuth } from "~/components/auth-provider";
+import { PreviewUnavailable } from "~/components/preview-unavailable";
 import { Button } from "~/components/ui/button";
 import { WorkspaceAtelier } from "~/components/workspace-atelier";
 import { useWorkspace } from "~/components/workspace-provider";
-import { isE2eAuthEnabled } from "~/lib/e2e-client";
+import { isE2eAuthEnabled, isPreviewMode } from "~/lib/e2e-client";
 import { normalizeDirPath } from "~/lib/file-explorer-api";
 import { findWorkspaceByRoute } from "~/lib/workspace-url";
 
@@ -35,6 +36,7 @@ function WorkspaceRoutePage() {
 			workspaceState.selectWorkspace(resolved.workspace.id);
 		}
 	}, [resolved, workspaceState]);
+	if (isPreviewMode) return <PreviewUnavailable feature="Workspace files" />;
 
 	if (
 		(!isE2eAuthEnabled && !auth.isLoaded) ||

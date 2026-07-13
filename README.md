@@ -293,6 +293,21 @@ Workers Builds should use:
 - Deploy command: `pnpm --dir web-app deploy:worker`
 - Worker name: `lixray`
 
+PR frontend previews use a separate `lixray-preview` Workers Builds project so
+Cloudflare can publish native commit and branch preview URLs. Configure it with:
+
+- Project root: `/`
+- Production branch: `main`
+- Build command: `pnpm --dir web-app build:preview`
+- Production deploy command: `pnpm --dir web-app deploy:preview`
+- Non-production deploy command: `pnpm --dir web-app deploy:preview`
+- Builds for non-production branches: enabled
+
+Disable non-production branch builds for the production `lixray` project. Its
+container Durable Object is intentionally absent from `lixray-preview`, so PR
+previews expose fixture-backed frontend flows only; workspace files, Supabase,
+MCP, and account management are unavailable.
+
 Enable Workers Builds build caching. `lix-server/Dockerfile` uses BuildKit cache
 mounts for the Cargo registry, git checkouts, and target directory. Do not run
 `cargo test` in the Workers Builds build command: `wrangler deploy` already

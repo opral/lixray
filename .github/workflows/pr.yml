@@ -94,6 +94,12 @@ jobs:
       - name: Build
         run: pnpm --dir web-app build
 
+      - name: Build frontend-only PR preview
+        run: pnpm --dir web-app build:preview
+
+      - name: Verify PR preview configuration
+        run: pnpm --dir web-app check:preview-config
+
       - name: Verify generated files are committed
         run: git diff --exit-code
 
@@ -155,3 +161,6 @@ jobs:
 
       - name: Run e2e tests
         run: pnpm --dir web-app test:e2e
+
+      - name: Run frontend preview e2e tests
+        run: pnpm --dir web-app test:e2e:preview

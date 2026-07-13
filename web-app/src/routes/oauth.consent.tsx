@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { DatabaseZap, LogIn, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "~/components/auth-provider";
+import { PreviewUnavailable } from "~/components/preview-unavailable";
+import { isPreviewMode } from "~/lib/e2e-client";
 
 interface ConsentSearch {
 	authorization_id?: string;
@@ -40,6 +42,7 @@ function OAuthConsentPage() {
 	);
 
 	useEffect(() => {
+		if (isPreviewMode) return;
 		if (!isLoaded || !user || !client) return;
 		if (!authorizationId) {
 			setError("The authorization request is missing its identifier.");
@@ -73,6 +76,7 @@ function OAuthConsentPage() {
 			disposed = true;
 		};
 	}, [authorizationId, client, isLoaded, user]);
+	if (isPreviewMode) return <PreviewUnavailable feature="MCP authorization" />;
 
 	const decide = async (decision: "approve" | "deny") => {
 		if (!client || !details) return;

@@ -2,10 +2,12 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { DatabaseZap } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useAuth } from "~/components/auth-provider";
+import { PreviewUnavailable } from "~/components/preview-unavailable";
 import {
 	type OrganizationRole,
 	useWorkspace,
 } from "~/components/workspace-provider";
+import { isPreviewMode } from "~/lib/e2e-client";
 
 const workspaceEmptyClass =
 	"grid min-h-[calc(100vh_-_80px)] place-items-center px-5 py-10";
@@ -135,6 +137,7 @@ function WorkspacePage() {
 	}, [client, selectedOrganization]);
 
 	useEffect(() => {
+		if (isPreviewMode) return;
 		void loadSettings();
 	}, [loadSettings]);
 
@@ -150,6 +153,7 @@ function WorkspacePage() {
 		}
 	};
 
+	if (isPreviewMode) return <PreviewUnavailable feature="Workspace settings" />;
 	if (!authLoaded || !workspaceState.isLoaded) {
 		return <div className={workspaceEmptyClass}>Loading...</div>;
 	}

@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import { AuthProvider } from "~/components/auth-provider";
 import { Toaster } from "~/components/ui/sonner";
 import { WorkspaceProvider } from "~/components/workspace-provider";
+import { isPreviewMode } from "~/lib/e2e-client";
 import appCss from "../styles.css?url";
 
 const title = "Lixray";
@@ -20,6 +21,9 @@ export const Route = createRootRoute({
 			{ name: "viewport", content: "width=device-width, initial-scale=1" },
 			{ title },
 			{ name: "description", content: description },
+			...(isPreviewMode
+				? [{ name: "robots", content: "noindex, nofollow" }]
+				: []),
 		],
 		links: [{ rel: "stylesheet", href: appCss }],
 	}),

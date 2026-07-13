@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { takeAuthReturnTo } from "~/components/auth-provider";
+import { PreviewUnavailable } from "~/components/preview-unavailable";
+import { isPreviewMode } from "~/lib/e2e-client";
 import { getBrowserSupabaseClient } from "~/lib/supabase";
 
 interface CallbackSearch {
@@ -26,6 +28,7 @@ function AuthCallbackPage() {
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
+		if (isPreviewMode) return;
 		if (search.error) {
 			setError(search.error_description ?? search.error);
 			return;
@@ -51,6 +54,7 @@ function AuthCallbackPage() {
 			disposed = true;
 		};
 	}, [search.code, search.error, search.error_description]);
+	if (isPreviewMode) return <PreviewUnavailable feature="Authentication" />;
 
 	return (
 		<main className="grid min-h-[calc(100vh-80px)] place-items-center bg-[var(--color-bg-app)] px-5 py-10 text-[var(--color-text-primary)]">

@@ -53,6 +53,7 @@ export default tseslint.config(
 					allowDefaultProject: [
 						"playwright.config.ts",
 						"playwright.full-auth.config.ts",
+						"playwright.preview.config.ts",
 						"src/worker/*.test.ts",
 						"tests/e2e/*.ts",
 					],

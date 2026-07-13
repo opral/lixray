@@ -2,6 +2,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { DatabaseZap, LogIn } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "~/components/auth-provider";
+import { PreviewUnavailable } from "~/components/preview-unavailable";
+import { isPreviewMode } from "~/lib/e2e-client";
 import { localDevCredentials } from "~/lib/supabase";
 
 export const Route = createFileRoute("/sign-in")({
@@ -13,6 +15,7 @@ function SignInPage() {
 	const navigate = useNavigate();
 	const [error, setError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
+	if (isPreviewMode) return <PreviewUnavailable feature="Authentication" />;
 
 	const signIn = async () => {
 		setSubmitting(true);

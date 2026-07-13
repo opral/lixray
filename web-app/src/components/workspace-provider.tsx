@@ -15,7 +15,7 @@ import {
 	E2E_WORKSPACE_ID,
 	E2E_WORKSPACE_NAME,
 } from "~/lib/e2e-auth";
-import { isE2eAuthEnabled } from "~/lib/e2e-client";
+import { isE2eAuthEnabled, isPreviewMode } from "~/lib/e2e-client";
 import type { LixraySupabaseClient } from "~/lib/supabase";
 
 export type OrganizationRole = "owner" | "member";
@@ -68,8 +68,12 @@ interface WorkspaceContextValue {
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-	if (isE2eAuthEnabled) {
-		return <E2eWorkspaceProvider>{children}</E2eWorkspaceProvider>;
+	if (isE2eAuthEnabled || isPreviewMode) {
+		return (
+			<FixtureWorkspaceProvider allowLocalMutations={isPreviewMode}>
+				{children}
+			</FixtureWorkspaceProvider>
+		);
 	}
 	return <SupabaseWorkspaceProvider>{children}</SupabaseWorkspaceProvider>;
 }
@@ -388,7 +392,13 @@ async function loadOrganizations(
 		.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
-function E2eWorkspaceProvider({ children }: { children: ReactNode }) {
+function FixtureWorkspaceProvider({
+	allowLocalMutations,
+	children,
+}: {
+	allowLocalMutations: boolean;
+	children: ReactNode;
+}) {
 	const [organization, setOrganization] = useState<Organization>(() => ({
 		id: E2E_ORGANIZATION_ID,
 		name: E2E_ORGANIZATION_NAME,
@@ -444,6 +454,35 @@ function E2eWorkspaceProvider({ children }: { children: ReactNode }) {
 		setSelectedWorkspaceId(workspace.id);
 		return Promise.resolve();
 	};
+	const renameWorkspace = (workspaceId: string, name: string) => {
+		if (!allowLocalMutations) return unsupported();
+		const normalizedName = normalizeName(name, "Workspace");
+		const now = new Date().toISOString();
+		setOrganization((current) => ({
+			...current,
+			updatedAt: now,
+			workspaces: current.workspaces.map((workspace) =>
+				workspace.id === workspaceId
+					? { ...workspace, name: normalizedName, updatedAt: now }
+					: workspace,
+			),
+		}));
+		return Promise.resolve();
+	};
+	const deleteWorkspace = (workspaceId: string) => {
+		if (!allowLocalMutations) return unsupported();
+		const now = new Date().toISOString();
+		setOrganization((current) => {
+			const workspaces = current.workspaces.filter(
+				(workspace) => workspace.id !== workspaceId,
+			);
+			setSelectedWorkspaceId((selected) =>
+				selected === workspaceId ? (workspaces[0]?.id ?? "") : selected,
+			);
+			return { ...current, updatedAt: now, workspaces };
+		});
+		return Promise.resolve();
+	};
 	const value: WorkspaceContextValue = {
 		isLoaded: true,
 		error: null,
@@ -458,8 +497,8 @@ function E2eWorkspaceProvider({ children }: { children: ReactNode }) {
 		createOrganization: unsupported,
 		renameOrganization: unsupported,
 		createWorkspace,
-		renameWorkspace: unsupported,
-		deleteWorkspace: unsupported,
+		renameWorkspace,
+		deleteWorkspace,
 	};
 	return (
 		<WorkspaceContext.Provider value={value}>
