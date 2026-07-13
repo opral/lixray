@@ -15,11 +15,13 @@ export default {
 		ctx: ExecutionContext,
 	): Promise<Response> {
 		ctx.passThroughOnException();
+		const previewHostname = new URL(request.url).hostname;
 		return handleRequest(request, env, {
 			executionContext: ctx,
 			workspaceFetch: (workspaceId, workspaceRequest) =>
 				workspaceBackend.fetch(
 					env.PREVIEW_STATE,
+					previewHostname,
 					workspaceId,
 					workspaceRequest,
 				),
