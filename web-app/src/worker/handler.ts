@@ -4,7 +4,7 @@ import {
 	type JWTPayload,
 	type JWTVerifyGetKey,
 } from "jose";
-import { E2E_AUTH_TOKEN } from "../lib/e2e-auth.ts";
+import { DEMO_AUTH_TOKEN } from "../lib/demo-identity.ts";
 import { WorkerFileServiceBackend } from "../mcp/backend.ts";
 import { LixFileService } from "../mcp/file-service.ts";
 import {
@@ -21,7 +21,7 @@ import {
 } from "../mcp/server.ts";
 
 export interface WorkerEnv {
-	SLATEDB_CONTAINER: ContainerNamespace;
+	SLATEDB_CONTAINER?: ContainerNamespace;
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
 	SUPABASE_JWKS_URL?: string;
@@ -35,8 +35,8 @@ export interface WorkerEnv {
 	SLATEDB_CACHE_MAX_BYTES?: string;
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
 	SLATEDB_METADATA_CACHE_BYTES?: string;
-	LIXRAY_E2E_WORKSPACE_ID?: string;
-	LIXRAY_E2E_WORKSPACE_IDS?: string;
+	LIXRAY_DEMO?: string;
+	LIXRAY_DEMO_WORKSPACE_IDS?: string;
 }
 
 export interface ContainerNamespace {
@@ -61,6 +61,7 @@ export interface HandleRequestOptions {
 	authenticateMcp?: AuthenticateMcpRequest;
 	authorizeWorkspace?: AuthorizeWorkspace;
 	mcpTransport?: typeof handleMcpTransport;
+	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	executionContext?: ExecutionContext;
 }
@@ -68,7 +69,7 @@ export interface HandleRequestOptions {
 export interface AuthenticatedUser {
 	userId: string;
 	token: string;
-	isE2e?: boolean;
+	isDemo?: boolean;
 }
 
 export interface AuthenticatedMcpUser extends AuthenticatedUser {
@@ -121,6 +122,10 @@ export async function handleRequest(
 		return json({ ok: true, service: "lixray" });
 	}
 
+	if (isDemoMode(env) && isProductionOnlyPath(url.pathname)) {
+		return new Response("Not found\n", { status: 404 });
+	}
+
 	if (url.pathname === MCP_PROTECTED_RESOURCE_PATH) {
 		if (request.method === "OPTIONS") return corsPreflight();
 		return request.method === "GET"
@@ -142,8 +147,13 @@ export async function handleRequest(
 		if (!authResult.ok) return authResult.response;
 		const authorizeWorkspace =
 			options.authorizeWorkspace ?? authorizeWorkspaceWithSupabase;
+		if (!env.SLATEDB_CONTAINER) {
+			return new Response("Workspace storage is not configured\n", {
+				status: 500,
+			});
+		}
 		const backend = new WorkerFileServiceBackend(
-			env,
+			{ ...env, SLATEDB_CONTAINER: env.SLATEDB_CONTAINER },
 			authResult.auth,
 			async (workspaceId, auth) => authorizeWorkspace(workspaceId, auth, env),
 		);
@@ -189,6 +199,15 @@ export async function handleRequest(
 	);
 	if (authorizationFailure) return authorizationFailure;
 
+	const rewrittenRequest = rewriteWorkspaceRequest(request, match[2]);
+	if (options.workspaceFetch) {
+		return options.workspaceFetch(workspaceId, rewrittenRequest);
+	}
+	if (!env.SLATEDB_CONTAINER) {
+		return new Response("Workspace storage is not configured\n", {
+			status: 500,
+		});
+	}
 	const container = env.SLATEDB_CONTAINER.getByName(workspaceId);
 	try {
 		await container.startAndWaitForPorts?.({
@@ -208,15 +227,15 @@ export async function handleRequest(
 			{ status: 503, headers: { "Retry-After": "1" } },
 		);
 	}
-	return container.fetch(rewriteWorkspaceRequest(request, match[2]));
+	return container.fetch(rewrittenRequest);
 }
 
 export async function authenticateWithSupabase(
 	request: Request,
 	env: WorkerEnv,
 ): Promise<AuthResult> {
-	const e2eAuth = authenticateE2e(request, env);
-	if (e2eAuth) return e2eAuth;
+	const demoAuth = authenticateDemo(request, env);
+	if (demoAuth) return demoAuth;
 
 	const missingVariable = ["SUPABASE_URL", "SUPABASE_JWKS_URL"].find(
 		(name) => !env[name as keyof WorkerEnv],
@@ -407,8 +426,8 @@ export async function authorizeWorkspaceWithSupabase(
 	auth: AuthenticatedUser,
 	env: WorkerEnv,
 ): Promise<Response | null> {
-	if (auth.isE2e) {
-		return e2eWorkspaceIds(env).has(workspaceId)
+	if (auth.isDemo) {
+		return demoWorkspaceIds(env).has(workspaceId)
 			? null
 			: new Response("Workspace access denied\n", { status: 403 });
 	}
@@ -463,24 +482,37 @@ function workspaceRowId(value: unknown): unknown {
 	return value && typeof value === "object" && "id" in value ? value.id : null;
 }
 
-function authenticateE2e(request: Request, env: WorkerEnv): AuthResult | null {
-	if (e2eWorkspaceIds(env).size === 0) return null;
-	if (!isLocalhost(new URL(request.url).hostname)) return null;
-	if (request.headers.get("Authorization") !== `Bearer ${E2E_AUTH_TOKEN}`) {
-		return null;
+function authenticateDemo(request: Request, env: WorkerEnv): AuthResult | null {
+	if (!isDemoMode(env)) return null;
+	if (request.headers.get("Authorization") !== `Bearer ${DEMO_AUTH_TOKEN}`) {
+		return unauthorized();
 	}
 	return {
 		ok: true,
-		auth: { userId: "lixray-e2e", token: E2E_AUTH_TOKEN, isE2e: true },
+		auth: { userId: "lixray-demo", token: DEMO_AUTH_TOKEN, isDemo: true },
 	};
 }
 
-function e2eWorkspaceIds(env: WorkerEnv): Set<string> {
+function demoWorkspaceIds(env: WorkerEnv): Set<string> {
 	return new Set(
-		(env.LIXRAY_E2E_WORKSPACE_IDS ?? env.LIXRAY_E2E_WORKSPACE_ID ?? "")
+		(env.LIXRAY_DEMO_WORKSPACE_IDS ?? "")
 			.split(",")
 			.map((workspaceId) => workspaceId.trim())
 			.filter(Boolean),
+	);
+}
+
+export function isDemoMode(env: WorkerEnv): boolean {
+	return env.LIXRAY_DEMO === "1";
+}
+
+function isProductionOnlyPath(pathname: string): boolean {
+	return (
+		pathname === MCP_PROTECTED_RESOURCE_PATH ||
+		pathname === MCP_DOCUMENTATION_PATH ||
+		pathname === MCP_PATH ||
+		pathname === "/auth/callback" ||
+		pathname === "/oauth/consent"
 	);
 }
 
@@ -525,15 +557,6 @@ function safeDecodeURIComponent(value: string): string | null {
 	} catch {
 		return null;
 	}
-}
-
-function isLocalhost(hostname: string): boolean {
-	return (
-		hostname === "localhost" ||
-		hostname === "127.0.0.1" ||
-		hostname === "[::1]" ||
-		hostname === "::1"
-	);
 }
 
 function corsPreflight(): Response {

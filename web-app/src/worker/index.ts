@@ -18,8 +18,8 @@ export interface Env {
 	SLATEDB_CACHE_MAX_BYTES?: string;
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
 	SLATEDB_METADATA_CACHE_BYTES?: string;
-	LIXRAY_E2E_WORKSPACE_ID?: string;
-	LIXRAY_E2E_WORKSPACE_IDS?: string;
+	LIXRAY_DEMO?: string;
+	LIXRAY_DEMO_WORKSPACE_IDS?: string;
 }
 
 export class SlateDbContainer extends Container<Env> {

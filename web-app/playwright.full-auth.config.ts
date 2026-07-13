@@ -15,15 +15,13 @@ export default defineConfig({
 		baseURL,
 		trace: "retain-on-failure",
 	},
-	globalTeardown: "./tests/e2e/global-teardown.ts",
 	webServer: {
 		command: "node ../scripts/dev.mjs",
 		env: {
 			...process.env,
 			LIXRAY_DEV_HOST: host,
 			LIXRAY_DEV_PORT: String(port),
-			LIXRAY_E2E_SERVER: "1",
-			SLATEDB_STORAGE: "memory",
+			LIXRAY_WORKER_TARGET: "e2e",
 		},
 		reuseExistingServer: false,
 		timeout: 300_000,

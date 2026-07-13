@@ -1,13 +1,13 @@
 import { zipSync } from "fflate";
 import { base64ToBytes } from "./base64";
-import { E2E_AUTH_TOKEN } from "./e2e-auth";
+import { DEMO_AUTH_TOKEN } from "./demo-identity";
 import type {
 	BranchesResponse,
 	ExecuteResponse,
 	WireValue,
 } from "./lixray-api";
 import { workspaceApiPath } from "./lixray-api";
-import { isE2eAuthEnabled } from "./e2e-client";
+import { isDemoModeEnabled } from "./demo-client";
 
 type AccessTokenGetter = () => Promise<string | null>;
 
@@ -83,7 +83,7 @@ async function workspaceRequest<T>(
 	path: string,
 	init: RequestInit = {},
 ): Promise<T> {
-	const token = isE2eAuthEnabled ? E2E_AUTH_TOKEN : await getAccessToken();
+	const token = isDemoModeEnabled ? DEMO_AUTH_TOKEN : await getAccessToken();
 	if (!token) throw new Error("Sign in to access this workspace.");
 	const headers = new Headers(init.headers);
 	headers.set("Authorization", `Bearer ${token}`);

@@ -1,0 +1,50 @@
+diff --git a/dist/workerd.d.ts b/dist/workerd.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..03d155eaf1c6df351d537d854c253659e9b19410
+--- /dev/null
++++ b/dist/workerd.d.ts
+@@ -0,0 +1,4 @@
++import type { LixBinding } from "./binding-types.js";
++
++/** Opens an in-memory Lix binding directly in a Cloudflare Worker isolate. */
++export declare function openMemoryLix(): Promise<LixBinding>;
+diff --git a/dist/workerd.js b/dist/workerd.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..898daae6a18c13210d1604c202e345b4d91bc081
+--- /dev/null
++++ b/dist/workerd.js
+@@ -0,0 +1,24 @@
++import wasmModule from "./wasm/lix_js_sdk_bg.wasm";
++import { initSync, openMemory } from "./wasm/lix_js_sdk.js";
++
++let initialized = false;
++
++function initializeWasm() {
++	if (initialized) return;
++	initSync({ module: wasmModule });
++	initialized = true;
++}
++
++/**
++ * Opens an in-memory Lix binding directly in a Cloudflare Worker isolate.
++ *
++ * The browser SDK intentionally uses Web Workers. Workerd does not implement
++ * that API, so this entry point initializes the precompiled module directly.
++ * Plugin execution is deliberately unavailable in this environment.
++ */
++export async function openMemoryLix() {
++	initializeWasm();
++	return openMemory(async () => {
++		throw new Error("Lix plugin execution is unavailable in Workerd");
++	});
++}
+diff --git a/package.json b/package.json
+index 82e57531bf6eb297a9416a74b0b9c96499fb8edd..21cdbf3f9d28ea143116a0f4f42d86e963830e21 100644
+--- a/package.json
++++ b/package.json
+@@ -14,0 +15,5 @@
++		},
++		"./workerd": {
++			"types": "./dist/workerd.d.ts",
++			"workerd": "./dist/workerd.js",
++			"default": "./dist/workerd.js"

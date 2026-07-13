@@ -26,6 +26,13 @@ The Worker serves the TanStack Start application and handles `/healthz`, the
 authenticated `/mcp` endpoint, OAuth protected-resource discovery, and
 workspace-scoped `/v1/*` requests before delegating all other routes to Start.
 
+Pull requests use a separate `lixray-preview` Worker. It runs the precompiled
+Lix Wasm module directly in each Cloudflare isolate and keeps a lazily opened
+in-memory Lix per demo workspace UUID. Preview state has no external binding:
+different isolates may see fresh independent workspaces, and eviction or a new
+deployment can erase everything. Production continues to use its Durable
+Object Container and R2 architecture.
+
 ## ChatGPT MCP app
 
 LixRay exposes a stateless Streamable HTTP MCP server at:
@@ -73,7 +80,7 @@ or denial.
 - `POST /v1/workspaces/:workspaceId/observe` streams Lix observe events as POST
   SSE.
 
-All workspace routes require a Supabase access token:
+All production workspace routes require a Supabase access token:
 
 ```text
 Authorization: Bearer <Supabase access token>
@@ -276,14 +283,29 @@ pnpm --dir web-app exec playwright install chromium
 ```
 
 Playwright starts a deterministic in-memory development server on port `8790`
-and uses a localhost-only E2E workspace identity. Use `E2E_PORT` to override the
-port or run `pnpm --dir web-app test:e2e:r2` for the R2-backed variant.
+using the same Workerd/Wasm entry and demo identity as PR previews. It does not
+start Docker, a Durable Object, or a container. Use `E2E_PORT` to override the
+port.
+
+Run the demo Worker directly with:
+
+```sh
+pnpm --dir web-app dev:demo
+```
 
 ## Deployment
 
 ```sh
 pnpm --dir web-app deploy:worker
 ```
+
+For same-repository pull requests, `.github/workflows/pr.yml` builds demo mode,
+uploads a Worker version with stable alias `pr-<number>`, smoke-tests the API
+and editor, and upserts one marker-based PR comment. Fork pull requests never
+receive Cloudflare credentials or a deployment. Preview mode exposes only the
+shared demo bearer identity and the two deterministic workspace UUIDs; Supabase,
+MCP, OAuth, Durable Objects, containers, R2, D1, KV, and other state bindings
+are absent.
 
 Workers Builds should use:
 

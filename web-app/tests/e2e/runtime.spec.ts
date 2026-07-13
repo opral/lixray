@@ -3,7 +3,7 @@ import type {
 	BranchesResponse,
 	ExecuteResponse,
 } from "../../src/lib/lixray-api";
-import { E2E_CREATED_WORKSPACE_ID } from "../../src/lib/e2e-auth";
+import { DEMO_CREATED_WORKSPACE_ID } from "../../src/lib/demo-identity";
 
 test("sign-in route renders without runtime errors", async ({ page }) => {
 	await page.goto("/sign-in");
@@ -21,6 +21,12 @@ test("sign-in route renders without runtime errors", async ({ page }) => {
 test("home lists workspaces and opens the canonical workspace route", async ({
 	page,
 }) => {
+	const supabaseRequests: string[] = [];
+	page.on("request", (request) => {
+		if (request.url().includes("supabase.co")) {
+			supabaseRequests.push(request.url());
+		}
+	});
 	await page.goto("/");
 
 	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
@@ -45,6 +51,7 @@ test("home lists workspaces and opens the canonical workspace route", async ({
 	await expect(
 		page.getByRole("link", { name: "Back to Lixray home" }),
 	).toBeVisible();
+	expect(supabaseRequests).toEqual([]);
 });
 
 test("workspace dialogs inherit Atelier's semantic theme", async ({ page }) => {
@@ -135,7 +142,7 @@ test("creates a workspace, cold-starts its storage, and opens Atelier", async ({
 		.fill("Fresh Workspace");
 	const branchesResponsePromise = page.waitForResponse(
 		(response) =>
-			response.url().includes(`/v1/workspaces/${E2E_CREATED_WORKSPACE_ID}/`) &&
+			response.url().includes(`/v1/workspaces/${DEMO_CREATED_WORKSPACE_ID}/`) &&
 			response.url().endsWith("/branches") &&
 			response.request().method() === "GET",
 		{ timeout: 55_000 },

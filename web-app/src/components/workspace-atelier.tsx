@@ -21,8 +21,8 @@ import {
 } from "react";
 import type { Lix } from "@lix-js/sdk";
 import { useAuth } from "~/components/auth-provider";
-import { E2E_AUTH_TOKEN } from "~/lib/e2e-auth";
-import { isE2eAuthEnabled } from "~/lib/e2e-client";
+import { isDemoModeEnabled } from "~/lib/demo-client";
+import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import { openMockRemoteLix } from "~/lib/mock-remote-lix";
 
 interface WorkspaceAtelierProps {
@@ -50,8 +50,8 @@ export function WorkspaceAtelier({
 	);
 	const getAccessToken = useCallback(
 		() =>
-			isE2eAuthEnabled
-				? Promise.resolve(E2E_AUTH_TOKEN)
+			isDemoModeEnabled
+				? Promise.resolve(DEMO_AUTH_TOKEN)
 				: getSessionAccessToken(),
 		[getSessionAccessToken],
 	);

@@ -5,6 +5,7 @@ export type LixraySupabaseClient = SupabaseClient<Database>;
 
 const env = import.meta.env as {
 	readonly DEV?: boolean;
+	readonly VITE_LIXRAY_DEMO?: string;
 	readonly VITE_LIXRAY_LOCAL_DEV?: string;
 	readonly VITE_LIXRAY_LOCAL_DEV_EMAIL?: string;
 	readonly VITE_LIXRAY_LOCAL_DEV_PASSWORD?: string;
@@ -25,10 +26,10 @@ export const localDevCredentials =
 			}
 		: null;
 
-if (!supabaseUrl) {
+if (env.VITE_LIXRAY_DEMO !== "1" && !supabaseUrl) {
 	throw new Error("VITE_SUPABASE_URL is required");
 }
-if (!supabasePublishableKey) {
+if (env.VITE_LIXRAY_DEMO !== "1" && !supabasePublishableKey) {
 	throw new Error("VITE_SUPABASE_KEY is required");
 }
 
@@ -38,10 +39,13 @@ export function getBrowserSupabaseClient(): LixraySupabaseClient {
 	if (typeof window === "undefined") {
 		throw new Error("The Supabase browser client is unavailable on the server");
 	}
+	if (!supabaseUrl || !supabasePublishableKey) {
+		throw new Error("Supabase is unavailable in demo mode");
+	}
 
 	browserClient ??= createClient<Database>(
-		supabaseUrl!,
-		supabasePublishableKey!,
+		supabaseUrl,
+		supabasePublishableKey,
 		{
 			auth: {
 				flowType: "pkce",

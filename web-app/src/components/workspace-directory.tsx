@@ -36,7 +36,7 @@ import {
 	DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { triggerBrowserDownload } from "~/lib/download";
-import { isE2eAuthEnabled } from "~/lib/e2e-client";
+import { isDemoModeEnabled } from "~/lib/demo-client";
 import { formatCaughtError, formatRelativeTime } from "~/lib/format";
 import {
 	buildWorkspaceArchive,
@@ -66,7 +66,7 @@ export function WorkspaceDirectory() {
 	const workspaceState = useWorkspace();
 	const [dialog, setDialog] = useState<DialogState>(null);
 	const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
-	const signedIn = isE2eAuthEnabled || Boolean(auth.user);
+	const signedIn = isDemoModeEnabled || Boolean(auth.user);
 	const organizations = workspaceState.organizations;
 
 	useEffect(() => {
@@ -91,7 +91,7 @@ export function WorkspaceDirectory() {
 		};
 	}, [auth.getAccessToken, organizations]);
 
-	if ((!isE2eAuthEnabled && !auth.isLoaded) || !workspaceState.isLoaded) {
+	if ((!isDemoModeEnabled && !auth.isLoaded) || !workspaceState.isLoaded) {
 		return <DirectoryStatus>Loading workspaces…</DirectoryStatus>;
 	}
 	if (!signedIn) return <SignedOutDirectory />;
@@ -314,7 +314,7 @@ Open the workspace preview at ${workspaceUrl}. Do not create or edit any files y
 
 function DirectoryHeader() {
 	const { signOut, user } = useAuth();
-	const initial = isE2eAuthEnabled ? "M" : accountInitial(user?.user_metadata);
+	const initial = isDemoModeEnabled ? "M" : accountInitial(user?.user_metadata);
 
 	return (
 		<header className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4">
@@ -346,7 +346,7 @@ function DirectoryHeader() {
 							Workspace settings
 						</Link>
 					</DropdownMenuItem>
-					{isE2eAuthEnabled ? null : (
+					{isDemoModeEnabled ? null : (
 						<>
 							<DropdownMenuSeparator />
 							<DropdownMenuItem onSelect={() => void signOut()}>

@@ -4,7 +4,7 @@ import { useAuth } from "~/components/auth-provider";
 import { Button } from "~/components/ui/button";
 import { WorkspaceAtelier } from "~/components/workspace-atelier";
 import { useWorkspace } from "~/components/workspace-provider";
-import { isE2eAuthEnabled } from "~/lib/e2e-client";
+import { isDemoModeEnabled } from "~/lib/demo-client";
 import { normalizeDirPath } from "~/lib/file-explorer-api";
 import { findWorkspaceByRoute } from "~/lib/workspace-url";
 
@@ -37,14 +37,14 @@ function WorkspaceRoutePage() {
 	}, [resolved, workspaceState]);
 
 	if (
-		(!isE2eAuthEnabled && !auth.isLoaded) ||
+		(!isDemoModeEnabled && !auth.isLoaded) ||
 		!workspaceState.isLoaded ||
 		(resolved &&
 			workspaceState.activeWorkspace?.workspace.id !== resolved.workspace.id)
 	) {
 		return <WorkspaceRouteStatus>Opening workspace…</WorkspaceRouteStatus>;
 	}
-	if (!isE2eAuthEnabled && !auth.user) {
+	if (!isDemoModeEnabled && !auth.user) {
 		return (
 			<WorkspaceRouteStatus>
 				<span>Sign in to open this workspace.</span>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { E2E_AUTH_TOKEN, E2E_WORKSPACE_ID } from "../lib/e2e-auth.ts";
+import { DEMO_AUTH_TOKEN, DEMO_WORKSPACE_ID } from "../lib/demo-identity.ts";
 import {
 	authenticateWithSupabase,
 	authorizeWorkspaceWithSupabase,
@@ -10,6 +10,7 @@ import {
 	type AuthenticateRequest,
 	type AuthenticateMcpRequest,
 	type AuthorizeWorkspace,
+	type ContainerNamespace,
 	type WorkerEnv,
 } from "./handler.ts";
 import {
@@ -425,39 +426,67 @@ void test("two workspaces route to distinct containers", async () => {
 	assert.deepEqual(names, [WORKSPACE_A, WORKSPACE_B]);
 });
 
-void test("localhost E2E auth only authorizes its configured workspace", async () => {
-	const testEnv = env({ extra: { LIXRAY_E2E_WORKSPACE_ID: E2E_WORKSPACE_ID } });
+void test("demo auth on workers.dev only authorizes configured workspaces", async () => {
+	const testEnv = env({
+		extra: {
+			LIXRAY_DEMO: "1",
+			LIXRAY_DEMO_WORKSPACE_IDS: DEMO_WORKSPACE_ID,
+		},
+	});
 	const accepted = await handleRequest(
-		new Request(`http://localhost/v1/workspaces/${E2E_WORKSPACE_ID}/branches`, {
-			headers: { Authorization: `Bearer ${E2E_AUTH_TOKEN}` },
-		}),
+		new Request(
+			`https://pr-42-lixray-preview.example.workers.dev/v1/workspaces/${DEMO_WORKSPACE_ID}/branches`,
+			{
+				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
+			},
+		),
 		testEnv,
 	);
 	assert.equal(accepted.status, 200);
 
 	const deniedResponse = await handleRequest(
-		new Request(`http://localhost/v1/workspaces/${WORKSPACE_A}/branches`, {
-			headers: { Authorization: `Bearer ${E2E_AUTH_TOKEN}` },
-		}),
+		new Request(
+			`https://pr-42-lixray-preview.example.workers.dev/v1/workspaces/${WORKSPACE_A}/branches`,
+			{
+				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
+			},
+		),
 		testEnv,
 	);
 	assert.equal(deniedResponse.status, 403);
 });
 
-void test("E2E auth is ignored outside localhost", async () => {
+void test("demo auth rejects an incorrect bearer token without Supabase", async () => {
 	const response = await authenticateWithSupabase(
-		workspaceRequest(E2E_WORKSPACE_ID, "/branches", {
-			headers: { Authorization: `Bearer ${E2E_AUTH_TOKEN}` },
+		workspaceRequest(DEMO_WORKSPACE_ID, "/branches", {
+			headers: { Authorization: "Bearer incorrect" },
 		}),
-		env({ extra: { LIXRAY_E2E_WORKSPACE_ID: E2E_WORKSPACE_ID } }),
+		env({
+			extra: {
+				LIXRAY_DEMO: "1",
+				LIXRAY_DEMO_WORKSPACE_IDS: DEMO_WORKSPACE_ID,
+			},
+		}),
 	);
 	assert.equal(response.ok, false);
 	if (!response.ok) {
-		assert.equal(response.response.status, 500);
-		assert.equal(
-			await response.response.text(),
-			"SUPABASE_URL is not configured\n",
+		assert.equal(response.response.status, 401);
+	}
+});
+
+void test("demo mode disables MCP and OAuth endpoints", async () => {
+	const testEnv = env({ extra: { LIXRAY_DEMO: "1" } });
+	for (const path of [
+		MCP_PROTECTED_RESOURCE_PATH,
+		"/mcp",
+		"/auth/callback",
+		"/oauth/consent",
+	]) {
+		const response = await handleRequest(
+			new Request(`https://preview.example${path}`),
+			testEnv,
 		);
+		assert.equal(response.status, 404);
 	}
 });
 
@@ -564,7 +593,7 @@ function denied(): AuthorizeWorkspace {
 
 function env(options: {
 	fetch?: (request: Request) => Promise<Response>;
-	getByName?: WorkerEnv["SLATEDB_CONTAINER"]["getByName"];
+	getByName?: ContainerNamespace["getByName"];
 	extra?: Partial<WorkerEnv>;
 }): WorkerEnv {
 	return {

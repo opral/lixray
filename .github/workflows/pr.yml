@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -155,3 +156,143 @@ jobs:
 
       - name: Run e2e tests
         run: pnpm --dir web-app test:e2e
+
+  preview:
+    name: Deploy PR preview
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(fromJSON('["opened", "reopened", "synchronize"]'), github.event.action)
+    needs: [frontend, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build preview Worker
+        id: build
+        continue-on-error: true
+        run: |
+          pnpm --dir web-app build:preview
+          pnpm --dir web-app exec node scripts/verify-preview-bundle.mjs
+
+      - name: Upload version and move PR alias
+        id: upload
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        working-directory: web-app
+        env:
+          PREVIEW_ALIAS: pr-${{ github.event.pull_request.number }}
+        run: |
+          set -o pipefail
+          NO_COLOR=1 pnpm exec wrangler versions upload \
+            --config ./dist/server/wrangler.json \
+            --preview-alias "$PREVIEW_ALIAS" | tee /tmp/lixray-preview-upload.txt
+          preview_url=$(grep -Eo 'https://[^[:space:]]+' /tmp/lixray-preview-upload.txt | grep "$PREVIEW_ALIAS-lixray-preview" | tail -1 | sed 's/[[:punct:]]$//')
+          test -n "$preview_url"
+          echo "url=$preview_url" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke-test preview API
+        id: api-smoke
+        if: steps.upload.outcome == 'success'
+        continue-on-error: true
+        run: node web-app/scripts/smoke-preview.mjs "${{ steps.upload.outputs.url }}"
+
+      - name: Install Playwright browser
+        if: steps.upload.outcome == 'success'
+        run: pnpm --dir web-app exec playwright install --with-deps chromium
+
+      - name: Smoke-test preview editor
+        id: browser-smoke
+        if: steps.upload.outcome == 'success'
+        continue-on-error: true
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ steps.upload.outputs.url }}
+        run: >-
+          pnpm --dir web-app exec playwright test tests/e2e/runtime.spec.ts
+          --grep "home lists workspaces and opens the canonical workspace route"
+
+      - name: Update preview comment
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.upload.outputs.url }}
+          BUILD_STATUS: ${{ steps.build.outcome }}
+          UPLOAD_STATUS: ${{ steps.upload.outcome }}
+          API_STATUS: ${{ steps.api-smoke.outcome }}
+          BROWSER_STATUS: ${{ steps.browser-smoke.outcome }}
+        with:
+          script: |
+            const marker = '<!-- lixray-preview -->'
+            const successful = [
+              process.env.BUILD_STATUS,
+              process.env.UPLOAD_STATUS,
+              process.env.API_STATUS,
+              process.env.BROWSER_STATUS,
+            ].every((status) => status === 'success')
+            const status = successful ? '✅ Ready' : '❌ Deployment failed'
+            const url = process.env.PREVIEW_URL
+            const body = [
+              marker,
+              `### Lixray Worker preview — ${status}`,
+              '',
+              url ? `[Open preview](${url})` : 'No preview URL was produced.',
+              '',
+              `Commit: \`${context.payload.pull_request.head.sha}\``,
+              `Checks: build ${process.env.BUILD_STATUS}, upload ${process.env.UPLOAD_STATUS}, API ${process.env.API_STATUS}, editor ${process.env.BROWSER_STATUS}`,
+              `[Workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+              '',
+              '_Preview data is isolate-local and may disappear at any time._',
+            ].join('\n')
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            })
+            const existing = comments.find((comment) => comment.body?.includes(marker))
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              })
+            }
+
+      - name: Fail when preview deployment is not ready
+        if: >-
+          always() &&
+          (steps.build.outcome != 'success' ||
+          steps.upload.outcome != 'success' ||
+          steps.api-smoke.outcome != 'success' ||
+          steps.browser-smoke.outcome != 'success')
+        run: exit 1
