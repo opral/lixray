@@ -21,6 +21,7 @@ import {
 } from "../mcp/server.ts";
 
 export interface WorkerEnv {
+	ASSETS?: Fetcher;
 	SLATEDB_CONTAINER?: ContainerNamespace;
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;

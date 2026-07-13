@@ -46,7 +46,12 @@ export default defineConfig({
 			}),
 		}),
 		tailwindcss(),
-		tanstackStart(),
+		tanstackStart({
+			spa: {
+				enabled: workerTarget !== "production",
+				prerender: { outputPath: "/index.html" },
+			},
+		}),
 		react(),
 	],
 });

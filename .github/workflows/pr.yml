@@ -207,7 +207,7 @@ jobs:
         run: |
           set -o pipefail
           NO_COLOR=1 pnpm exec wrangler versions upload \
-            --config ./dist/server/wrangler.json \
+            --config ./wrangler.preview-runtime.jsonc \
             --preview-alias "$PREVIEW_ALIAS" | tee /tmp/lixray-preview-upload.txt
           preview_url=$(grep -Eo 'https://[^[:space:]]+' /tmp/lixray-preview-upload.txt | grep "$PREVIEW_ALIAS-lixray-preview" | tail -1 | sed 's/[[:punct:]]$//')
           test -n "$preview_url"
