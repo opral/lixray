@@ -301,11 +301,11 @@ pnpm --dir web-app deploy:worker
 
 For same-repository pull requests, `.github/workflows/pr.yml` builds demo mode,
 uploads a Worker version with stable alias `pr-<number>`, smoke-tests the API
-and editor, and upserts one marker-based PR comment. Fork pull requests never
-receive Cloudflare credentials or a deployment. Preview mode exposes only the
-shared demo bearer identity and the two deterministic workspace UUIDs; Supabase,
-MCP, OAuth, Durable Objects, containers, R2, D1, KV, and other state bindings
-are absent.
+and editor. Fork pull requests never receive Cloudflare credentials or a
+deployment. Preview mode exposes only the shared demo bearer identity and the
+two deterministic workspace UUIDs. Its MCP endpoint is authless and
+isolate-local; Supabase, OAuth, Durable Objects, containers, R2, D1, KV, and
+other persistent state bindings are absent.
 
 Workers Builds should use:
 

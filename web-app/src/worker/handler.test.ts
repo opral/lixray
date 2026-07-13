@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEMO_AUTH_TOKEN, DEMO_WORKSPACE_ID } from "../lib/demo-identity.ts";
+import {
+	DEMO_AUTH_TOKEN,
+	DEMO_ORGANIZATION_ID,
+	DEMO_ORGANIZATION_NAME,
+	DEMO_WORKSPACE_ID,
+	DEMO_WORKSPACE_NAME,
+} from "../lib/demo-identity.ts";
+import { FileServiceError } from "../mcp/file-service.ts";
 import {
 	authenticateWithSupabase,
 	authorizeWorkspaceWithSupabase,
@@ -15,6 +22,7 @@ import {
 } from "./handler.ts";
 import {
 	MCP_AUTHORIZATION_SERVER,
+	MCP_DOCUMENTATION_PATH,
 	MCP_PROTECTED_RESOURCE_PATH,
 	MCP_RESOURCE,
 } from "../mcp/server.ts";
@@ -474,11 +482,11 @@ void test("demo auth rejects an incorrect bearer token without Supabase", async 
 	}
 });
 
-void test("demo mode disables MCP and OAuth endpoints", async () => {
+void test("demo mode keeps OAuth endpoints disabled", async () => {
 	const testEnv = env({ extra: { LIXRAY_DEMO: "1" } });
 	for (const path of [
 		MCP_PROTECTED_RESOURCE_PATH,
-		"/mcp",
+		MCP_DOCUMENTATION_PATH,
 		"/auth/callback",
 		"/oauth/consent",
 	]) {
@@ -488,6 +496,74 @@ void test("demo mode disables MCP and OAuth endpoints", async () => {
 		);
 		assert.equal(response.status, 404);
 	}
+});
+
+void test("demo mode exposes authless MCP through the in-memory workspace fetcher", async () => {
+	let workspaceFetches = 0;
+	const response = await handleRequest(
+		new Request("https://preview.example/mcp", { method: "POST" }),
+		{
+			LIXRAY_DEMO: "1",
+			LIXRAY_DEMO_WORKSPACE_IDS: `${DEMO_WORKSPACE_ID},${WORKSPACE_A}`,
+		},
+		{
+			workspaceFetch: async (workspaceId, request) => {
+				workspaceFetches += 1;
+				assert.equal(workspaceId, DEMO_WORKSPACE_ID);
+				assert.equal(new URL(request.url).pathname, "/v1/branches");
+				assert.equal(request.headers.get("authorization"), null);
+				return Response.json({
+					branches: [
+						{
+							id: "main",
+							name: "main",
+							hidden: false,
+							commitId: "commit-1",
+						},
+					],
+				});
+			},
+			mcpTransport: async (_request, service, _context, options) => {
+				assert.equal(options.authMode, "none");
+				assert.deepEqual(await service.listWorkspaces(), [
+					{
+						id: DEMO_WORKSPACE_ID,
+						name: DEMO_WORKSPACE_NAME,
+						organization: {
+							id: DEMO_ORGANIZATION_ID,
+							name: DEMO_ORGANIZATION_NAME,
+						},
+					},
+					{
+						id: WORKSPACE_A,
+						name: "demo-workspace-2",
+						organization: {
+							id: DEMO_ORGANIZATION_ID,
+							name: DEMO_ORGANIZATION_NAME,
+						},
+					},
+				]);
+				assert.deepEqual(await service.listBranches(DEMO_WORKSPACE_ID), [
+					{
+						id: "main",
+						name: "main",
+						hidden: false,
+						commitId: "commit-1",
+					},
+				]);
+				await assert.rejects(
+					service.listBranches(WORKSPACE_B),
+					(error: unknown) =>
+						error instanceof FileServiceError && error.code === "not_found",
+				);
+				return Response.json({ ok: true });
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), { ok: true });
+	assert.equal(workspaceFetches, 1);
 });
 
 void test("Supabase workspace authorization uses the user token and RLS-visible row", async () => {

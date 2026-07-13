@@ -253,12 +253,19 @@ function McpQuickstart({
 			return false;
 		}
 	})();
-	const mcpServerName = isLocalhost ? "LixRay-Localhost" : "LixRay";
+	const mcpServerName = isDemoModeEnabled
+		? "LixRay-Demo"
+		: isLocalhost
+			? "LixRay-Localhost"
+			: "LixRay";
+	const connectionInstructions = isDemoModeEnabled
+		? `If it is missing or points to another URL, create or replace that registration using ${mcpUrl}. This demo MCP server is authless, so do not run MCP login and do not reuse or replace a production LixRay connection.`
+		: `If it is missing or points to another URL, create or replace that registration using ${mcpUrl} and complete its OAuth connection.${isLocalhost ? " Do not reuse a production LixRay connection for this localhost workspace." : ""} Ask me only when an authorization approval must be clicked.`;
 	const workspaceUrl = `${origin || "http://localhost:8787"}${workspacePath(
 		organization,
 		workspace,
 	)}`;
-	const instructions = `Set up LixRay for me end to end in Codex. Use a global MCP server named "${mcpServerName}" with the exact URL ${mcpUrl}. First inspect the existing MCP configuration. Reuse it only if both its name and URL match exactly. If it is missing or points to another URL, create or replace that registration using ${mcpUrl} and complete its OAuth connection. Do not reuse a production LixRay connection for this localhost workspace. Ask me only when an authorization approval must be clicked. If a newly connected MCP server requires a fresh Codex task, create that task and continue the setup there.
+	const instructions = `Set up LixRay for me end to end in Codex. Use a global MCP server named "${mcpServerName}" with the exact URL ${mcpUrl}. First inspect the existing MCP configuration. Reuse it only if both its name and URL match exactly. ${connectionInstructions} If a newly connected MCP server requires a fresh Codex task, create that task and continue the setup there.
 
 Use this exact workspace:
 - Name: ${workspace.name}

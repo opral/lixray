@@ -34,6 +34,12 @@ test("home lists workspaces and opens the canonical workspace route", async ({
 	const workspaceLink = page.getByRole("link", { name: /launch-q3/ });
 	await expect(workspaceLink).toBeVisible();
 	await expect(workspaceLink).toContainText(/\d+ files?/);
+	const mcpPrompt = page.locator(
+		"section[aria-labelledby='mcp-quickstart-title'] pre",
+	);
+	await expect(mcpPrompt).toContainText('named "LixRay-Demo"');
+	await expect(mcpPrompt).toContainText("demo MCP server is authless");
+	await expect(mcpPrompt).not.toContainText("complete its OAuth connection");
 	await expect(page.getByRole("heading", { name: "Files" })).toHaveCount(0);
 
 	await page.getByRole("button", { name: "Actions for launch-q3" }).click();

@@ -23,7 +23,7 @@ interface ContainerStub {
 }
 
 export interface McpBackendEnv {
-	SLATEDB_CONTAINER: { getByName(name: string): ContainerStub };
+	SLATEDB_CONTAINER?: { getByName(name: string): ContainerStub };
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
 	R2_ENDPOINT?: string;
@@ -44,25 +44,43 @@ type AuthorizeWorkspace = (
 	env: McpBackendEnv,
 ) => Promise<Response | null>;
 
+export interface WorkerFileServiceBackendOptions {
+	fetcher?: typeof fetch;
+	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
+	workspaceSummaries?: ReadonlyArray<WorkspaceSummary>;
+}
+
 export class WorkerFileServiceBackend implements FileServiceBackend {
 	private readonly env: McpBackendEnv;
 	private readonly user: McpUser;
 	private readonly authorizeWorkspace: AuthorizeWorkspace;
 	private readonly fetcher: typeof fetch;
+	private readonly workspaceFetch:
+		((workspaceId: string, request: Request) => Promise<Response>) | undefined;
+	private readonly workspaceSummaries:
+		ReadonlyArray<WorkspaceSummary> | undefined;
 
 	constructor(
 		env: McpBackendEnv,
 		user: McpUser,
 		authorizeWorkspace: AuthorizeWorkspace,
-		fetcher: typeof fetch = fetch,
+		options: WorkerFileServiceBackendOptions = {},
 	) {
 		this.env = env;
 		this.user = user;
 		this.authorizeWorkspace = authorizeWorkspace;
-		this.fetcher = fetcher;
+		this.fetcher = options.fetcher ?? fetch;
+		this.workspaceFetch = options.workspaceFetch;
+		this.workspaceSummaries = options.workspaceSummaries;
 	}
 
 	async listWorkspaces(): Promise<Array<WorkspaceSummary>> {
+		if (this.workspaceSummaries) {
+			return this.workspaceSummaries.map((workspace) => ({
+				...workspace,
+				organization: { ...workspace.organization },
+			}));
+		}
 		const supabaseUrl = requiredEnv(this.env.SUPABASE_URL, "SUPABASE_URL");
 		const publishableKey = requiredEnv(
 			this.env.SUPABASE_PUBLISHABLE_KEY,
@@ -217,14 +235,28 @@ export class WorkerFileServiceBackend implements FileServiceBackend {
 				message || "Workspace access denied.",
 			);
 		}
-		const container = this.env.SLATEDB_CONTAINER.getByName(workspaceId);
-		await container.startAndWaitForPorts?.({
-			ports: 8080,
-			startOptions: { envVars: containerEnv(this.env, workspaceId) },
-		});
-		const response = await container.fetch(
-			new Request(`https://lixray-container.invalid${path}`, init),
+		const backendRequest = new Request(
+			`https://lixray-container.invalid${path}`,
+			init,
 		);
+		let response: Response;
+		if (this.workspaceFetch) {
+			response = await this.workspaceFetch(workspaceId, backendRequest);
+		} else {
+			const containerNamespace = this.env.SLATEDB_CONTAINER;
+			if (!containerNamespace) {
+				throw new FileServiceError(
+					"backend_error",
+					"Workspace storage is not configured.",
+				);
+			}
+			const container = containerNamespace.getByName(workspaceId);
+			await container.startAndWaitForPorts?.({
+				ports: 8080,
+				startOptions: { envVars: containerEnv(this.env, workspaceId) },
+			});
+			response = await container.fetch(backendRequest);
+		}
 		const body = await parseResponse(response);
 		if (!response.ok) {
 			throw new FileServiceError(

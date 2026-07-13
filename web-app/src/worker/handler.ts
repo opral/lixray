@@ -4,9 +4,15 @@ import {
 	type JWTPayload,
 	type JWTVerifyGetKey,
 } from "jose";
-import { DEMO_AUTH_TOKEN } from "../lib/demo-identity.ts";
+import {
+	DEMO_AUTH_TOKEN,
+	DEMO_ORGANIZATION_ID,
+	DEMO_ORGANIZATION_NAME,
+	DEMO_WORKSPACE_ID,
+	DEMO_WORKSPACE_NAME,
+} from "../lib/demo-identity.ts";
 import { WorkerFileServiceBackend } from "../mcp/backend.ts";
-import { LixFileService } from "../mcp/file-service.ts";
+import { LixFileService, type WorkspaceSummary } from "../mcp/file-service.ts";
 import {
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
@@ -148,15 +154,21 @@ export async function handleRequest(
 		if (!authResult.ok) return authResult.response;
 		const authorizeWorkspace =
 			options.authorizeWorkspace ?? authorizeWorkspaceWithSupabase;
-		if (!env.SLATEDB_CONTAINER) {
+		if (!env.SLATEDB_CONTAINER && !options.workspaceFetch) {
 			return new Response("Workspace storage is not configured\n", {
 				status: 500,
 			});
 		}
 		const backend = new WorkerFileServiceBackend(
-			{ ...env, SLATEDB_CONTAINER: env.SLATEDB_CONTAINER },
+			env,
 			authResult.auth,
 			async (workspaceId, auth) => authorizeWorkspace(workspaceId, auth, env),
+			{
+				workspaceFetch: options.workspaceFetch,
+				workspaceSummaries: isDemoMode(env)
+					? demoWorkspaceSummaries(env)
+					: undefined,
+			},
 		);
 		return (options.mcpTransport ?? handleMcpTransport)(
 			request,
@@ -167,6 +179,7 @@ export async function handleRequest(
 				},
 			}),
 			options.executionContext ?? noopExecutionContext(),
+			{ authMode: isDemoMode(env) ? "none" : "oauth" },
 		);
 	}
 
@@ -288,6 +301,17 @@ export async function authenticateMcpWithSupabase(
 	request: Request,
 	env: WorkerEnv,
 ): Promise<McpAuthResult> {
+	if (isDemoMode(env)) {
+		return {
+			ok: true,
+			auth: {
+				userId: "lixray-demo",
+				token: DEMO_AUTH_TOKEN,
+				clientId: "lixray-demo",
+				isDemo: true,
+			},
+		};
+	}
 	const protectedResourceUrl = mcpProtectedResourceUrl(new URL(request.url));
 	if (!env.SUPABASE_URL || !env.SUPABASE_JWKS_URL) {
 		return {
@@ -503,6 +527,20 @@ function demoWorkspaceIds(env: WorkerEnv): Set<string> {
 	);
 }
 
+function demoWorkspaceSummaries(env: WorkerEnv): Array<WorkspaceSummary> {
+	return [...demoWorkspaceIds(env)].map((workspaceId, index) => ({
+		id: workspaceId,
+		name:
+			workspaceId === DEMO_WORKSPACE_ID
+				? DEMO_WORKSPACE_NAME
+				: `demo-workspace-${index + 1}`,
+		organization: {
+			id: DEMO_ORGANIZATION_ID,
+			name: DEMO_ORGANIZATION_NAME,
+		},
+	}));
+}
+
 export function isDemoMode(env: WorkerEnv): boolean {
 	return env.LIXRAY_DEMO === "1";
 }
@@ -511,7 +549,6 @@ function isProductionOnlyPath(pathname: string): boolean {
 	return (
 		pathname === MCP_PROTECTED_RESOURCE_PATH ||
 		pathname === MCP_DOCUMENTATION_PATH ||
-		pathname === MCP_PATH ||
 		pathname === "/auth/callback" ||
 		pathname === "/oauth/consent"
 	);

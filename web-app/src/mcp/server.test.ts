@@ -196,6 +196,39 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 	}
 });
 
+void test("authless MCP tools advertise noauth security", async () => {
+	const server = createLixrayMcpServer(
+		new LixFileService(new ProtocolBackend()),
+		{ authMode: "none" },
+	);
+	const client = new Client({ name: "lixray-demo-test", version: "1.0.0" });
+	const [clientTransport, serverTransport] =
+		InMemoryTransport.createLinkedPair();
+	const rawMessages: Array<JSONRPCMessage> = [];
+	const send = serverTransport.send.bind(serverTransport);
+	serverTransport.send = async (message, options) => {
+		rawMessages.push(structuredClone(message));
+		await send(message, options);
+	};
+
+	try {
+		await server.connect(serverTransport);
+		await client.connect(clientTransport);
+		const listed = await client.listTools();
+		for (const tool of listed.tools) {
+			assert.deepEqual(tool._meta?.securitySchemes, [{ type: "noauth" }]);
+		}
+		const rawTools = findRawTools(rawMessages);
+		assert.equal(rawTools.length, 11);
+		for (const tool of rawTools) {
+			assert.deepEqual(tool.securitySchemes, [{ type: "noauth" }]);
+		}
+	} finally {
+		await client.close();
+		await server.close();
+	}
+});
+
 class ProtocolBackend implements FileServiceBackend {
 	readonly executeRequests: Array<{
 		workspaceId: string;

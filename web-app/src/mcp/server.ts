@@ -24,7 +24,18 @@ export const MCP_DOCUMENTATION_PATH = "/docs/mcp";
 export const MCP_PROTECTED_RESOURCE_URL = `${MCP_RESOURCE}${MCP_PROTECTED_RESOURCE_PATH}`;
 export const MCP_SCOPES = ["openid", "email", "profile"] as const;
 
-const securitySchemes = [{ type: "oauth2" as const, scopes: [...MCP_SCOPES] }];
+export type McpAuthMode = "oauth" | "none";
+
+export interface McpServerOptions {
+	authMode?: McpAuthMode;
+}
+
+type McpSecurityScheme =
+	{ type: "oauth2"; scopes: Array<string> } | { type: "noauth" };
+
+const oauthSecuritySchemes: Array<McpSecurityScheme> = [
+	{ type: "oauth2", scopes: [...MCP_SCOPES] },
+];
 
 const uuid = z.uuid().describe("Workspace UUID");
 const branchId = z
@@ -50,7 +61,7 @@ interface ToolDefinition {
 		title: string;
 		description: string;
 		inputSchema: Record<string, unknown>;
-		securitySchemes: Array<{ type: "oauth2"; scopes: Array<string> }>;
+		securitySchemes: Array<McpSecurityScheme>;
 		annotations: ToolAnnotations;
 		_meta: Record<string, unknown>;
 	};
@@ -58,7 +69,10 @@ interface ToolDefinition {
 	call(args: Record<string, unknown>): Promise<unknown>;
 }
 
-export function createLixrayMcpServer(service: LixFileService): Server {
+export function createLixrayMcpServer(
+	service: LixFileService,
+	options: McpServerOptions = {},
+): Server {
 	const server = new Server(
 		{ name: "LixRay", version: "0.1.0" },
 		{
@@ -67,7 +81,10 @@ export function createLixrayMcpServer(service: LixFileService): Server {
 				"Use LixRay tools to work with private workspace files. First list workspaces and branches. Always read an existing entry and use its revision before editing, moving, replacing, or deleting it. Never guess IDs or revisions. The execute tool runs raw Lix SQL and may bypass file safeguards; use it only when the user requests SQL or the file tools cannot perform the task.",
 		},
 	);
-	const tools = buildTools(service);
+	const tools = buildTools(
+		service,
+		options.authMode === "none" ? [{ type: "noauth" }] : oauthSecuritySchemes,
+	);
 
 	server.setRequestHandler(ListToolsRequestSchema, () => ({
 		tools: tools.map((tool) => tool.descriptor),
@@ -116,11 +133,12 @@ export async function handleMcpTransport(
 	request: Request,
 	service: LixFileService,
 	ctx: ExecutionContext,
+	options: McpServerOptions = {},
 ): Promise<Response> {
 	// Keep the Worker-only module out of Node's strip-types test loader. The
 	// production Worker resolves this Cloudflare module when the MCP route runs.
 	const { createMcpHandler } = await import("agents/mcp");
-	return createMcpHandler(createLixrayMcpServer(service), {
+	return createMcpHandler(createLixrayMcpServer(service, options), {
 		route: MCP_PATH,
 		enableJsonResponse: true,
 		sessionIdGenerator: undefined,
@@ -227,7 +245,27 @@ export function mcpAuthenticateChallenge(
 	return `Bearer resource_metadata="${protectedResourceUrl}", scope="${MCP_SCOPES.join(" ")}", error="${error}", error_description="${description.replaceAll('"', "'")}"`;
 }
 
-function buildTools(service: LixFileService): Array<ToolDefinition> {
+function buildTools(
+	service: LixFileService,
+	securitySchemes: Array<McpSecurityScheme>,
+): Array<ToolDefinition> {
+	const tool = <T extends z.ZodType<Record<string, unknown>>>(
+		name: string,
+		title: string,
+		description: string,
+		schema: T,
+		annotations: ToolAnnotations,
+		call: (args: z.output<T>) => Promise<unknown>,
+	) =>
+		createTool(
+			name,
+			title,
+			description,
+			schema,
+			annotations,
+			securitySchemes,
+			call,
+		);
 	return [
 		tool(
 			"list_workspaces",
@@ -497,12 +535,13 @@ function buildTools(service: LixFileService): Array<ToolDefinition> {
 	];
 }
 
-function tool<T extends z.ZodType<Record<string, unknown>>>(
+function createTool<T extends z.ZodType<Record<string, unknown>>>(
 	name: string,
 	title: string,
 	description: string,
 	schema: T,
 	annotations: ToolAnnotations,
+	securitySchemes: Array<McpSecurityScheme>,
 	call: (args: z.output<T>) => Promise<unknown>,
 ): ToolDefinition {
 	return {
@@ -511,16 +550,21 @@ function tool<T extends z.ZodType<Record<string, unknown>>>(
 			title,
 			description,
 			inputSchema: z.toJSONSchema(schema),
-			securitySchemes: securitySchemes.map((scheme) => ({
-				...scheme,
-				scopes: [...scheme.scopes],
-			})),
+			securitySchemes: securitySchemes.map(cloneSecurityScheme),
 			annotations,
-			_meta: { securitySchemes },
+			_meta: {
+				securitySchemes: securitySchemes.map(cloneSecurityScheme),
+			},
 		},
 		schema,
 		call: (args) => call(args as z.output<T>),
 	};
+}
+
+function cloneSecurityScheme(scheme: McpSecurityScheme): McpSecurityScheme {
+	return scheme.type === "oauth2"
+		? { ...scheme, scopes: [...scheme.scopes] }
+		: { ...scheme };
 }
 
 function readAnnotations(): ToolAnnotations {
