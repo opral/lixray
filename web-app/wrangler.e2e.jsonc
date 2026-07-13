@@ -4,6 +4,12 @@
 	"main": "src/preview-server.ts",
 	"compatibility_date": "2026-07-07",
 	"compatibility_flags": ["nodejs_compat"],
+	"r2_buckets": [
+		{
+			"binding": "PREVIEW_STATE",
+			"bucket_name": "lixray-preview",
+		},
+	],
 	"vars": {
 		"LIXRAY_DEMO": "",
 		"LIXRAY_DEMO_WORKSPACE_IDS": "",
