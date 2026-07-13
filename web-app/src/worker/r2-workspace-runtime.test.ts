@@ -123,6 +123,36 @@ void test("bootstrap and concurrent conditional writes converge without loss", a
 	assert.deepEqual(new Set([left.revision, right.revision]), new Set([1, 2]));
 });
 
+void test("concurrent writes in one isolate replay the losing mutation", async () => {
+	const storage = new FakeR2Bucket();
+	const openMemoryLix = snapshotBindingFactory();
+	const service = runtime(openMemoryLix);
+	await expectOk(
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
+	);
+	storage.resetMetrics();
+
+	await Promise.all([
+		setValue(service, storage, HOST_A, WORKSPACE_A, "left", "A"),
+		setValue(service, storage, HOST_A, WORKSPACE_A, "right", "B"),
+	]);
+
+	assert.equal(storage.putCalls.length, 3);
+	assert.equal(
+		storage.putCalls[0].etagMatches,
+		storage.putCalls[1].etagMatches,
+	);
+	const left = await getValue(service, storage, HOST_A, WORKSPACE_A, "left");
+	const right = await getValue(service, storage, HOST_A, WORKSPACE_A, "right");
+	assert.ok(left && right);
+	assert.deepEqual(new Set([left.revision, right.revision]), new Set([1, 2]));
+});
+
 void test("retry exhaustion returns a retryable 503 and preserves state", async () => {
 	const storage = new FakeR2Bucket();
 	const service = runtime(snapshotBindingFactory());
@@ -243,10 +273,168 @@ void test("failed API operations never overwrite the committed snapshot", async 
 	assert.deepEqual(storage.bytes(key), before);
 });
 
+void test("conditional reads reuse cached snapshots without redundant writes", async () => {
+	const storage = new FakeR2Bucket();
+	const openMemoryLix = snapshotBindingFactory();
+	const service = runtime(openMemoryLix);
+	const key = `lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`;
+
+	await expectOk(
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
+	);
+	const initialEtag = storage.etag(key);
+	storage.resetMetrics();
+
+	assert.equal(
+		await getValue(service, storage, HOST_A, WORKSPACE_A, "missing"),
+		null,
+	);
+	assert.equal(storage.getCalls.length, 1);
+	assert.equal(storage.getCalls[0].etagDoesNotMatch, initialEtag);
+	assert.equal(storage.bodyReads, 0);
+	assert.equal(storage.putCalls.length, 0);
+
+	await setValue(
+		runtime(openMemoryLix),
+		storage,
+		HOST_A,
+		WORKSPACE_A,
+		"shared",
+		"new",
+	);
+	storage.resetMetrics();
+
+	assert.deepEqual(
+		await getValue(service, storage, HOST_A, WORKSPACE_A, "shared"),
+		{ key: "shared", value: "new", revision: 1 },
+	);
+	assert.equal(storage.bodyReads, 1);
+	assert.equal(storage.putCalls.length, 0);
+	assert.equal(storage.getCalls[0].etagDoesNotMatch, initialEtag);
+
+	await getValue(service, storage, HOST_A, WORKSPACE_A, "shared");
+	assert.equal(storage.bodyReads, 1);
+	assert.equal(storage.putCalls.length, 0);
+});
+
+void test("a stalled snapshot read does not block another request", async () => {
+	const storage = new FakeR2Bucket();
+	const service = runtime(snapshotBindingFactory());
+	await expectOk(
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
+	);
+	storage.resetMetrics();
+	const gate = storage.blockNextGet();
+
+	const stalled = service.fetch(
+		storage.bucket,
+		HOST_A,
+		WORKSPACE_A,
+		request(HOST_A, "/branches"),
+	);
+	await withTimeout(gate.started, 250);
+	const concurrent = await withTimeout(
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
+		250,
+	);
+	assert.equal(concurrent.status, 200);
+	assert.equal(storage.getCalls.length, 2);
+
+	gate.release();
+	await expectOk(stalled);
+});
+
+void test("an old snapshot response cannot regress the isolate cache", async () => {
+	const storage = new FakeR2Bucket();
+	const service = runtime(snapshotBindingFactory());
+	await expectOk(
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
+	);
+	const gate = storage.blockNextGet();
+	const staleRead = service.fetch(
+		storage.bucket,
+		HOST_A,
+		WORKSPACE_A,
+		request(HOST_A, "/branches"),
+	);
+	await withTimeout(gate.started, 250);
+	await setValue(service, storage, HOST_A, WORKSPACE_A, "newer", "state");
+	const latestEtag = storage.etag(
+		`lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`,
+	);
+
+	gate.release();
+	await expectOk(staleRead);
+	storage.resetMetrics();
+	await expectOk(
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
+	);
+	assert.equal(storage.getCalls[0].etagDoesNotMatch, latestEtag);
+});
+
+void test("a stalled snapshot write does not block concurrent reads", async () => {
+	const storage = new FakeR2Bucket();
+	const service = runtime(snapshotBindingFactory());
+	await expectOk(
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
+	);
+	storage.resetMetrics();
+	const gate = storage.blockNextPut();
+	const stalled = execute(service, storage, HOST_A, WORKSPACE_A, "SET", [
+		text("blocked"),
+		text("write"),
+	]);
+	await withTimeout(gate.started, 250);
+
+	const concurrent = await withTimeout(
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
+		250,
+	);
+	assert.equal(concurrent.status, 200);
+
+	gate.release();
+	await expectOk(stalled);
+});
+
 void test("single and multiplexed observers receive cross-isolate changes once", async () => {
 	const storage = new FakeR2Bucket();
 	const openMemoryLix = snapshotBindingFactory();
-	const observerRuntime = runtime(openMemoryLix);
+	const observerRuntime = runtime(openMemoryLix, 20);
 	const writerRuntime = runtime(openMemoryLix);
 
 	const singleResponse = await observerRuntime.fetch(
@@ -312,8 +500,99 @@ void test("single and multiplexed observers receive cross-isolate changes once",
 	await multiplex.close();
 });
 
-function runtime(openMemoryLix: OpenMemoryLix) {
-	return createR2WorkspaceRuntime(openMemoryLix, { mainBranchId: MAIN_BRANCH });
+void test("observer polling is shared, single-flight, and never queues ticks", async () => {
+	const storage = new FakeR2Bucket();
+	const service = runtime(snapshotBindingFactory(), 20);
+	const first = new SseReader(
+		await service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/observe", {
+				branchId: MAIN_BRANCH,
+				sql: "GET",
+				params: [wireText("watch")],
+			}),
+		),
+	);
+	const second = new SseReader(
+		await service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/observe", {
+				branchId: MAIN_BRANCH,
+				sql: "GET",
+				params: [wireText("watch")],
+			}),
+		),
+	);
+	try {
+		await first.next();
+		await second.next();
+		storage.resetMetrics();
+		const gate = storage.blockNextGet();
+		await withTimeout(gate.started, 250);
+		await delay(70);
+		assert.equal(storage.getCalls.length, 1);
+
+		gate.release();
+		await delay(5);
+		assert.equal(storage.getCalls.length, 1);
+		await delay(30);
+		assert.ok(storage.getCalls.length >= 2);
+		assert.ok(storage.getCalls.length <= 3);
+	} finally {
+		await first.close();
+		await second.close();
+	}
+});
+
+void test("reopened observers never replay a stale cursor", async () => {
+	const storage = new FakeR2Bucket();
+	const openMemoryLix = snapshotBindingFactory();
+	const observerRuntime = runtime(openMemoryLix, 20);
+	const writerRuntime = runtime(openMemoryLix);
+	const observe = () =>
+		observerRuntime.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/observe", {
+				branchId: MAIN_BRANCH,
+				sql: "GET",
+				params: [wireText("reopen")],
+			}),
+		);
+
+	const first = new SseReader(await observe());
+	assert.equal((await first.next()).result.rows.length, 0);
+	await first.close();
+	await setValue(writerRuntime, storage, HOST_A, WORKSPACE_A, "reopen", "one");
+
+	const reopened = new SseReader(await observe());
+	try {
+		assert.equal((await reopened.next()).result.rows[0][1].value, "one");
+		await delay(60);
+		await setValue(
+			writerRuntime,
+			storage,
+			HOST_A,
+			WORKSPACE_A,
+			"reopen",
+			"two",
+		);
+		assert.equal((await reopened.next()).result.rows[0][1].value, "two");
+	} finally {
+		await reopened.close();
+	}
+});
+
+function runtime(openMemoryLix: OpenMemoryLix, previewPollIntervalMs?: number) {
+	return createR2WorkspaceRuntime(openMemoryLix, {
+		mainBranchId: MAIN_BRANCH,
+		previewPollIntervalMs,
+	});
 }
 
 async function setValue(
@@ -592,8 +871,17 @@ class FakeR2Bucket {
 	conflictsRemaining = 0;
 	failGets = false;
 	failPuts = false;
+	getCalls: Array<{ key: string; etagDoesNotMatch?: string }> = [];
+	putCalls: Array<{
+		key: string;
+		etagMatches?: string;
+		etagDoesNotMatch?: string;
+	}> = [];
+	bodyReads = 0;
 	#revision = 0;
 	#objects = new Map<string, { bytes: Uint8Array; etag: string }>();
+	#nextGetGate?: OperationGate;
+	#nextPutGate?: OperationGate;
 
 	has(key: string) {
 		return this.#objects.has(key);
@@ -603,15 +891,47 @@ class FakeR2Bucket {
 		return this.#objects.get(key)?.bytes.slice();
 	}
 
+	etag(key: string) {
+		return this.#objects.get(key)?.etag;
+	}
+
+	resetMetrics() {
+		this.getCalls = [];
+		this.putCalls = [];
+		this.bodyReads = 0;
+	}
+
+	blockNextGet() {
+		const gate = operationGate();
+		this.#nextGetGate = gate;
+		return gate.public;
+	}
+
+	blockNextPut() {
+		const gate = operationGate();
+		this.#nextPutGate = gate;
+		return gate.public;
+	}
+
 	async putRaw(key: string, bytes: Uint8Array) {
 		await this.put(key, bytes);
 	}
 
 	async get(key: string, options?: R2GetOptions) {
 		if (this.failGets) throw new Error("R2 get failed");
-		const stored = this.#objects.get(key);
-		if (!stored) return null;
 		const conditional = options?.onlyIf as R2Conditional | undefined;
+		this.getCalls.push({
+			key,
+			etagDoesNotMatch: conditional?.etagDoesNotMatch,
+		});
+		const stored = this.#objects.get(key);
+		const gate = this.#nextGetGate;
+		if (gate) {
+			this.#nextGetGate = undefined;
+			gate.start();
+			await gate.wait;
+		}
+		if (!stored) return null;
 		if (conditional?.etagDoesNotMatch === stored.etag) {
 			return this.object(key, stored, false);
 		}
@@ -624,8 +944,19 @@ class FakeR2Bucket {
 		options?: R2PutOptions,
 	) {
 		if (this.failPuts) throw new Error("R2 put failed");
-		const current = this.#objects.get(key);
 		const conditional = options?.onlyIf as R2Conditional | undefined;
+		this.putCalls.push({
+			key,
+			etagMatches: conditional?.etagMatches,
+			etagDoesNotMatch: conditional?.etagDoesNotMatch,
+		});
+		const gate = this.#nextPutGate;
+		if (gate) {
+			this.#nextPutGate = undefined;
+			gate.start();
+			await gate.wait;
+		}
+		const current = this.#objects.get(key);
 		if (
 			this.conflictsRemaining > 0 ||
 			(conditional?.etagDoesNotMatch === "*" && current) ||
@@ -657,15 +988,39 @@ class FakeR2Bucket {
 			size: stored.bytes.byteLength,
 			...(body
 				? {
-						arrayBuffer: async () =>
-							stored.bytes.buffer.slice(
+						arrayBuffer: async () => {
+							this.bodyReads += 1;
+							return stored.bytes.buffer.slice(
 								stored.bytes.byteOffset,
 								stored.bytes.byteOffset + stored.bytes.byteLength,
-							),
+							);
+						},
 					}
 				: {}),
 		};
 	}
+}
+
+interface OperationGate {
+	public: { started: Promise<void>; release: () => void };
+	start: () => void;
+	wait: Promise<void>;
+}
+
+function operationGate(): OperationGate {
+	let start = () => undefined;
+	let release = () => undefined;
+	const started = new Promise<void>((resolve) => {
+		start = resolve;
+	});
+	const wait = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	return { public: { started, release }, start, wait };
+}
+
+function delay(milliseconds: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 interface SsePayload {
