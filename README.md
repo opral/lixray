@@ -28,10 +28,12 @@ workspace-scoped `/v1/*` requests before delegating all other routes to Start.
 
 Pull requests use a separate `lixray-preview` Worker. It runs the precompiled
 Lix Wasm module directly in each Cloudflare isolate and keeps a lazily opened
-in-memory Lix per demo workspace UUID. Preview state has no external binding:
-different isolates may see fresh independent workspaces, and eviction or a new
-deployment can erase everything. Production continues to use its Durable
-Object Container and R2 architecture.
+in-memory Lix per demo workspace UUID. Every fresh workspace uses the same
+canonical demo `main` branch UUID, so a follow-up request can use a branch ID
+returned by another isolate. Preview state still has no external binding:
+different isolates may see fresh independent workspace contents, and eviction
+or a new deployment can erase everything. Production continues to use its
+Durable Object Container and R2 architecture.
 
 ## ChatGPT MCP app
 

@@ -54,6 +54,7 @@ export interface MemoryLixBinding {
 	): Promise<ExecuteResult>;
 	observe(sql: string, params: NativeValue[]): Promise<ObserveEvents>;
 	beginTransaction(): Promise<LixTransaction>;
+	activeBranchId(): Promise<string>;
 	createBranch(options: {
 		id?: string;
 		name: string;
@@ -68,6 +69,10 @@ export type OpenMemoryLix = () => Promise<MemoryLixBinding>;
 interface WorkspaceRuntime {
 	lix: MemoryLixBinding;
 	finiteQueue: Promise<void>;
+}
+
+interface MemoryWorkspaceBackendOptions {
+	mainBranchId: string;
 }
 
 const NOT_FOUND_CODES = new Set([
@@ -104,7 +109,12 @@ const SSE_HEADERS = {
 	"Content-Type": "text/event-stream",
 };
 
-export function createMemoryWorkspaceBackend(openMemoryLix: OpenMemoryLix) {
+const MAIN_BRANCH_BOOTSTRAP_NAME = "lixray-demo-main-bootstrap";
+
+export function createMemoryWorkspaceBackend(
+	openMemoryLix: OpenMemoryLix,
+	options: MemoryWorkspaceBackendOptions,
+) {
 	const runtimes = new Map<string, Promise<WorkspaceRuntime>>();
 
 	return {
@@ -112,7 +122,12 @@ export function createMemoryWorkspaceBackend(openMemoryLix: OpenMemoryLix) {
 			try {
 				return await routeRequest(
 					request,
-					await workspaceRuntime(workspaceId, openMemoryLix, runtimes),
+					await workspaceRuntime(
+						workspaceId,
+						openMemoryLix,
+						options.mainBranchId,
+						runtimes,
+					),
 				);
 			} catch (error) {
 				return errorResponse(error);
@@ -125,20 +140,72 @@ export function createMemoryWorkspaceBackend(openMemoryLix: OpenMemoryLix) {
 async function workspaceRuntime(
 	workspaceId: string,
 	openMemoryLix: OpenMemoryLix,
+	mainBranchId: string,
 	runtimes: Map<string, Promise<WorkspaceRuntime>>,
 ): Promise<WorkspaceRuntime> {
 	let runtime = runtimes.get(workspaceId);
 	if (!runtime) {
-		runtime = openMemoryLix().then((lix) => ({
-			lix,
-			finiteQueue: Promise.resolve(),
-		}));
+		runtime = openWorkspaceRuntime(openMemoryLix, mainBranchId);
 		runtimes.set(workspaceId, runtime);
 		runtime.catch(() => {
 			if (runtimes.get(workspaceId) === runtime) runtimes.delete(workspaceId);
 		});
 	}
 	return runtime;
+}
+
+async function openWorkspaceRuntime(
+	openMemoryLix: OpenMemoryLix,
+	mainBranchId: string,
+): Promise<WorkspaceRuntime> {
+	const lix = await openMemoryLix();
+	try {
+		await ensureCanonicalMainBranch(lix, mainBranchId);
+		return { lix, finiteQueue: Promise.resolve() };
+	} catch (error) {
+		try {
+			await lix.close();
+		} catch {
+			// Preserve the initialization error if closing also fails.
+		}
+		throw error;
+	}
+}
+
+async function ensureCanonicalMainBranch(
+	lix: MemoryLixBinding,
+	mainBranchId: string,
+): Promise<void> {
+	const generatedMainBranchId = await lix.activeBranchId();
+	if (generatedMainBranchId === mainBranchId) return;
+
+	await lix.createBranch({
+		id: mainBranchId,
+		name: MAIN_BRANCH_BOOTSTRAP_NAME,
+	});
+	await lix.switchBranch({ branchId: mainBranchId });
+	const deleted = await lix.execute("DELETE FROM lix_branch WHERE id = $1", [
+		{ kind: "text", value: generatedMainBranchId },
+	]);
+	if (deleted.rowsAffected !== 1) {
+		throw lixError(
+			"LIX_INTERNAL_ERROR",
+			"failed to replace the generated demo main branch",
+		);
+	}
+	const renamed = await lix.execute(
+		"UPDATE lix_branch SET name = $1 WHERE id = $2",
+		[
+			{ kind: "text", value: "main" },
+			{ kind: "text", value: mainBranchId },
+		],
+	);
+	if (renamed.rowsAffected !== 1) {
+		throw lixError(
+			"LIX_INTERNAL_ERROR",
+			"failed to name the canonical demo main branch",
+		);
+	}
 }
 
 async function routeRequest(

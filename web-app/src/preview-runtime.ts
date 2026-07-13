@@ -1,8 +1,11 @@
 import { openMemoryLix } from "@lix-js/sdk/workerd";
+import { DEMO_MAIN_BRANCH_ID } from "./lib/demo-identity";
 import { handleRequest, type WorkerEnv } from "./worker/handler";
 import { createMemoryWorkspaceBackend } from "./worker/memory-backend";
 
-const workspaceBackend = createMemoryWorkspaceBackend(openMemoryLix);
+const workspaceBackend = createMemoryWorkspaceBackend(openMemoryLix, {
+	mainBranchId: DEMO_MAIN_BRANCH_ID,
+});
 
 export default {
 	async fetch(

@@ -28,7 +28,7 @@ void test("wire values round-trip through native Lix values", () => {
 
 void test("workspace initialization is lazy, shared, and isolated by id", async () => {
 	let opens = 0;
-	const backend = createMemoryWorkspaceBackend(async () => {
+	const backend = testBackend(async () => {
 		opens += 1;
 		await Promise.resolve();
 		return fakeBinding();
@@ -45,6 +45,75 @@ void test("workspace initialization is lazy, shared, and isolated by id", async 
 	await backend.fetch(WORKSPACE_B, workspaceRequest("/branches"));
 	assert.equal(opens, 2);
 	assert.equal(backend.workspaceCount(), 2);
+});
+
+void test("canonical main branch ids work across independent isolates", async () => {
+	const first = testBackend(
+		async () => statefulBranchBinding(WORKSPACE_A),
+		BRANCH,
+	);
+	const second = testBackend(
+		async () => statefulBranchBinding(WORKSPACE_B),
+		BRANCH,
+	);
+
+	const firstResponse = await first.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/branches"),
+	);
+	const secondResponse = await second.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/branches"),
+	);
+	const firstMainBranch = mainBranch(await firstResponse.json());
+	const secondMainBranch = mainBranch(await secondResponse.json());
+
+	assert.equal(firstMainBranch.id, BRANCH);
+	assert.equal(secondMainBranch.id, BRANCH);
+	const executeResponse = await second.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/execute", {
+			branchId: firstMainBranch.id,
+			sql: "SELECT 1",
+		}),
+	);
+	assert.equal(executeResponse.status, 200);
+});
+
+void test("failed canonical branch initialization closes and evicts the runtime", async () => {
+	let opens = 0;
+	let closes = 0;
+	const backend = testBackend(async () => {
+		opens += 1;
+		if (opens === 1) {
+			return fakeBinding({
+				activeBranchId: async () => WORKSPACE_A,
+				createBranch: async () => {
+					throw new Error("canonicalization failed");
+				},
+				close: async () => {
+					closes += 1;
+				},
+			});
+		}
+		return statefulBranchBinding(WORKSPACE_B);
+	}, BRANCH);
+
+	const failed = await backend.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/branches"),
+	);
+	assert.equal(failed.status, 500);
+	assert.equal(closes, 1);
+	assert.equal(backend.workspaceCount(), 0);
+
+	const retried = await backend.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/branches"),
+	);
+	assert.equal(retried.status, 200);
+	assert.equal(opens, 2);
+	assert.equal(mainBranch(await retried.json()).id, BRANCH);
 });
 
 void test("finite operations serialize and select their requested branch", async () => {
@@ -64,7 +133,7 @@ void test("finite operations serialize and select their requested branch", async
 			return emptyResult();
 		},
 	});
-	const backend = createMemoryWorkspaceBackend(async () => binding);
+	const backend = testBackend(async () => binding);
 	const branches = [BRANCH, WORKSPACE_B];
 
 	const responses = await Promise.all(
@@ -100,7 +169,7 @@ void test("filesystem conflicts roll back without applying a mutation", async ()
 			},
 		}),
 	});
-	const backend = createMemoryWorkspaceBackend(async () => binding);
+	const backend = testBackend(async () => binding);
 	const response = await backend.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/filesystem/mutate", {
@@ -128,7 +197,7 @@ void test("Lix errors preserve envelopes and HTTP status mapping", async () => {
 			});
 		},
 	});
-	const backend = createMemoryWorkspaceBackend(async () => binding);
+	const backend = testBackend(async () => binding);
 	const response = await backend.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/execute", { branchId: BRANCH, sql: "SELECT 1" }),
@@ -170,7 +239,7 @@ void test("multiplex observations retain subscription ids and SSE framing", asyn
 			};
 		},
 	});
-	const backend = createMemoryWorkspaceBackend(async () => binding);
+	const backend = testBackend(async () => binding);
 	const response = await backend.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/observe/multiplex", {
@@ -205,6 +274,7 @@ function fakeBinding(
 			commit: async () => undefined,
 			rollback: async () => undefined,
 		}),
+		activeBranchId: async () => BRANCH,
 		createBranch: async ({ id, name }) => ({
 			id: id ?? BRANCH,
 			name,
@@ -215,6 +285,97 @@ function fakeBinding(
 		close: async () => undefined,
 		...overrides,
 	} as MemoryLixBinding;
+}
+
+function testBackend(
+	openMemoryLix: () => Promise<MemoryLixBinding>,
+	mainBranchId = BRANCH,
+) {
+	return createMemoryWorkspaceBackend(openMemoryLix, { mainBranchId });
+}
+
+function statefulBranchBinding(initialBranchId: string): MemoryLixBinding {
+	let activeBranchId = initialBranchId;
+	const branches = new Map([
+		["global", { name: "global", hidden: true }],
+		[initialBranchId, { name: "main", hidden: false }],
+	]);
+	return fakeBinding({
+		activeBranchId: async () => activeBranchId,
+		createBranch: async ({ id, name }: { id?: string; name: string }) => {
+			assert.ok(id);
+			branches.set(id, { name, hidden: false });
+			return { id, name, hidden: false, commitId: "commit-1" };
+		},
+		switchBranch: async ({ branchId }: { branchId: string }) => {
+			if (!branches.has(branchId)) {
+				throw Object.assign(new Error(`branch missing: ${branchId}`), {
+					code: "LIX_BRANCH_NOT_FOUND",
+				});
+			}
+			activeBranchId = branchId;
+			return { branchId };
+		},
+		execute: async (sql: string, params: unknown[]) => {
+			if (sql.startsWith("DELETE FROM lix_branch")) {
+				return mutationResult(branches.delete(nativeText(params[0])) ? 1 : 0);
+			}
+			if (sql.startsWith("UPDATE lix_branch SET name")) {
+				const id = nativeText(params[1]);
+				const branch = branches.get(id);
+				if (!branch) return mutationResult(0);
+				branch.name = nativeText(params[0]);
+				return mutationResult(1);
+			}
+			if (sql.includes("FROM lix_branch")) {
+				return branchesResult(branches);
+			}
+			return emptyResult();
+		},
+	});
+}
+
+function branchesResult(
+	branches: Map<string, { name: string; hidden: boolean }>,
+) {
+	return {
+		columns: ["id", "name", "hidden", "commit_id"],
+		rows: [...branches.entries()]
+			.sort((left, right) => left[1].name.localeCompare(right[1].name))
+			.map(([id, branch]) => [
+				{ kind: "text", value: id },
+				{ kind: "text", value: branch.name },
+				{ kind: "boolean", value: branch.hidden },
+				{ kind: "text", value: "commit-1" },
+			]),
+		rowsAffected: 0,
+		notices: [],
+	};
+}
+
+function mainBranch(value: unknown): { id: string; name: string } {
+	assert.ok(typeof value === "object" && value !== null && "branches" in value);
+	const branches = (value as { branches: Array<{ id: string; name: string }> })
+		.branches;
+	const main = branches.find((branch) => branch.name === "main");
+	assert.ok(main);
+	return main;
+}
+
+function nativeText(value: unknown): string {
+	assert.ok(
+		typeof value === "object" &&
+			value !== null &&
+			"kind" in value &&
+			value.kind === "text" &&
+			"value" in value &&
+			typeof value.value === "string",
+	);
+	return value.value;
+}
+
+function mutationResult(rowsAffected: number) {
+	return { ...emptyResult(), rowsAffected };
 }
 
 function branchResult() {

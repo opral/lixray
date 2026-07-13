@@ -3,7 +3,10 @@ import type {
 	BranchesResponse,
 	ExecuteResponse,
 } from "../../src/lib/lixray-api";
-import { DEMO_CREATED_WORKSPACE_ID } from "../../src/lib/demo-identity";
+import {
+	DEMO_CREATED_WORKSPACE_ID,
+	DEMO_MAIN_BRANCH_ID,
+} from "../../src/lib/demo-identity";
 
 test("sign-in route renders without runtime errors", async ({ page }) => {
 	await page.goto("/sign-in");
@@ -211,6 +214,9 @@ test("sql console loads branches and executes a trivial query", async ({
 		branchesBody.branches.length,
 		JSON.stringify(branchesBody),
 	).toBeGreaterThan(0);
+	expect(
+		branchesBody.branches.find((branch) => branch.name === "main")?.id,
+	).toBe(DEMO_MAIN_BRANCH_ID);
 	await expect(page.getByText("Loading branches...")).toBeHidden({
 		timeout: 50_000,
 	});
