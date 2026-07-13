@@ -21,12 +21,22 @@ create table public.profiles (
 create table public.organizations (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  handle text not null,
+  personal_owner_id uuid unique references auth.users(id) on delete restrict,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint organizations_name_valid check (
     name = btrim(name) and char_length(name) between 1 and 80
+  ),
+  constraint organizations_handle_valid check (
+    handle ~ '^[a-z0-9](?:-?[a-z0-9]){0,38}$' and char_length(handle) <= 39
   )
 );
+
+create unique index organizations_handle_unique
+  on public.organizations(handle);
+create unique index organizations_handle_squat_unique
+  on public.organizations(replace(handle, '-', ''));
 
 create table public.organization_members (
   organization_id uuid not null references public.organizations(id) on delete cascade,
@@ -43,15 +53,28 @@ create table public.workspaces (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
   name text not null,
+  slug text not null,
+  deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint workspaces_name_valid check (
     name = btrim(name) and char_length(name) between 1 and 80
+  ),
+  constraint workspaces_slug_valid check (
+    slug ~ '^[a-z0-9](?:-?[a-z0-9]){0,99}$' and char_length(slug) <= 100
   )
 );
 
 create unique index workspaces_organization_name_unique
-  on public.workspaces(organization_id, lower(name));
+  on public.workspaces(organization_id, lower(name))
+  where deleted_at is null;
+
+create unique index workspaces_organization_slug_unique
+  on public.workspaces(organization_id, slug)
+  where deleted_at is null;
+create unique index workspaces_organization_slug_squat_unique
+  on public.workspaces(organization_id, replace(slug, '-', ''))
+  where deleted_at is null;
 
 create index workspaces_organization_id_idx
   on public.workspaces(organization_id);
@@ -96,6 +119,71 @@ begin
 end;
 $$;
 
+create or replace function private.url_segment(source text, max_length integer)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select trim(both '-' from left(
+    trim(both '-' from regexp_replace(lower(coalesce(source, '')), '[^a-z0-9]+', '-', 'g')),
+    max_length
+  ));
+$$;
+
+create or replace function private.assign_organization_handle()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  base text := coalesce(nullif(private.url_segment(new.name, 39), ''), 'namespace');
+begin
+  if new.handle is null or btrim(new.handle) = '' then
+    perform pg_advisory_xact_lock(
+      hashtextextended('organization-handle:' || replace(base, '-', ''), 0)
+    );
+    new.handle := base;
+    if exists (
+      select 1 from public.organizations
+      where replace(handle, '-', '') = replace(new.handle, '-', '')
+    ) then
+      new.handle := left(base, 32) || '-' || left(replace(new.id::text, '-', ''), 6);
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function private.assign_workspace_slug()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  base text := coalesce(nullif(private.url_segment(new.name, 100), ''), 'workspace');
+begin
+  if new.slug is null or btrim(new.slug) = '' then
+    perform pg_advisory_xact_lock(
+      hashtextextended(
+        'workspace-slug:' || new.organization_id::text || ':' || replace(base, '-', ''),
+        0
+      )
+    );
+    new.slug := base;
+    if exists (
+      select 1 from public.workspaces
+      where organization_id = new.organization_id
+        and deleted_at is null
+        and replace(slug, '-', '') = replace(new.slug, '-', '')
+    ) then
+      new.slug := left(base, 93) || '-' || left(replace(new.id::text, '-', ''), 6);
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
 create trigger profiles_set_updated_at
 before update on public.profiles
 for each row execute function private.set_updated_at();
@@ -104,9 +192,17 @@ create trigger organizations_set_updated_at
 before update on public.organizations
 for each row execute function private.set_updated_at();
 
+create trigger organizations_assign_handle
+before insert on public.organizations
+for each row execute function private.assign_organization_handle();
+
 create trigger workspaces_set_updated_at
 before update on public.workspaces
 for each row execute function private.set_updated_at();
+
+create trigger workspaces_assign_slug
+before insert on public.workspaces
+for each row execute function private.assign_workspace_slug();
 
 create or replace function private.sync_auth_user_profile()
 returns trigger
@@ -250,16 +346,28 @@ using ((select private.is_organization_member(organization_id)));
 
 create policy workspaces_select_member
 on public.workspaces for select to authenticated
-using ((select private.is_organization_member(organization_id)));
+using (
+  deleted_at is null
+  and (select private.is_organization_member(organization_id))
+);
 
 create policy workspaces_insert_member
 on public.workspaces for insert to authenticated
-with check ((select private.is_organization_member(organization_id)));
+with check (
+  deleted_at is null
+  and (select private.is_organization_member(organization_id))
+);
 
 create policy workspaces_update_member
 on public.workspaces for update to authenticated
-using ((select private.is_organization_member(organization_id)))
-with check ((select private.is_organization_member(organization_id)));
+using (
+  deleted_at is null
+  and (select private.is_organization_member(organization_id))
+)
+with check (
+  deleted_at is null
+  and (select private.is_organization_member(organization_id))
+);
 
 create policy organization_invitations_select_owner
 on public.organization_invitations for select to authenticated
@@ -304,6 +412,81 @@ begin
   values (new_organization_id, current_user_id, 'owner');
 
   return new_organization_id;
+end;
+$$;
+
+create or replace function public.ensure_personal_workspace()
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  current_user_id uuid := auth.uid();
+  profile_record public.profiles%rowtype;
+  base_handle text;
+  candidate_handle text;
+  personal_organization_id uuid;
+  created_workspace boolean := false;
+begin
+  if current_user_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  perform pg_advisory_xact_lock(
+    hashtextextended('personal-workspace:' || current_user_id::text, 0)
+  );
+
+  select * into profile_record
+  from public.profiles
+  where id = current_user_id;
+
+  if profile_record.id is null then
+    raise exception 'Profile not found';
+  end if;
+
+  select id into personal_organization_id
+  from public.organizations
+  where personal_owner_id = current_user_id;
+
+  if personal_organization_id is null then
+    base_handle := coalesce(
+      nullif(private.url_segment(split_part(profile_record.email, '@', 1), 39), ''),
+      nullif(private.url_segment(profile_record.name, 39), ''),
+      'user'
+    );
+    candidate_handle := base_handle;
+
+    perform pg_advisory_xact_lock(
+      hashtextextended('organization-handle:' || replace(base_handle, '-', ''), 0)
+    );
+
+    if exists (
+      select 1 from public.organizations
+      where replace(handle, '-', '') = replace(candidate_handle, '-', '')
+    ) then
+      candidate_handle := left(base_handle, 26) || '-' ||
+        left(replace(current_user_id::text, '-', ''), 12);
+    end if;
+
+    insert into public.organizations (name, handle, personal_owner_id)
+    values (profile_record.name, candidate_handle, current_user_id)
+    returning id into personal_organization_id;
+
+    insert into public.organization_members (organization_id, user_id, role)
+    values (personal_organization_id, current_user_id, 'owner');
+  end if;
+
+  if not exists (
+    select 1 from public.workspaces
+    where organization_id = personal_organization_id and deleted_at is null
+  ) then
+    insert into public.workspaces (organization_id, name)
+    values (personal_organization_id, 'My workspace');
+    created_workspace := true;
+  end if;
+
+  return created_workspace;
 end;
 $$;
 
@@ -565,6 +748,7 @@ end;
 $$;
 
 revoke all on function public.create_organization(text) from public, anon;
+revoke all on function public.ensure_personal_workspace() from public, anon;
 revoke all on function public.rename_organization(uuid, text) from public, anon;
 revoke all on function public.create_organization_invitation(uuid, text) from public, anon;
 revoke all on function public.revoke_organization_invitation(uuid) from public, anon;
@@ -574,6 +758,7 @@ revoke all on function public.remove_organization_member(uuid, uuid) from public
 revoke all on function public.leave_organization(uuid) from public, anon;
 
 grant execute on function public.create_organization(text) to authenticated;
+grant execute on function public.ensure_personal_workspace() to authenticated;
 grant execute on function public.rename_organization(uuid, text) to authenticated;
 grant execute on function public.create_organization_invitation(uuid, text) to authenticated;
 grant execute on function public.revoke_organization_invitation(uuid) to authenticated;

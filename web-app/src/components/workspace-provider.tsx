@@ -85,7 +85,6 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
 		null,
 	);
-
 	const refresh = useCallback(
 		async (options: RefreshOptions = {}) => {
 			if (!client || !user) {
@@ -99,6 +98,10 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 
 			setError(null);
 			try {
+				const { error: provisioningError } = await client.rpc(
+					"ensure_personal_workspace",
+				);
+				if (provisioningError) throw provisioningError;
 				const nextOrganizations = await loadOrganizations(client, user.id);
 				const storedOrganizationId = window.localStorage.getItem(
 					organizationStorageKey(user.id),

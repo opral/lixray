@@ -199,10 +199,10 @@ codex mcp login LixRay
 ```
 
 Only register the local server while actively developing it, under the distinct
-name `LixRay-Dev`:
+name `LixRay-Localhost`:
 
 ```sh
-codex mcp add LixRay-Dev \
+codex mcp add LixRay-Localhost \
   --url http://localhost:8787/mcp \
   --oauth-resource https://lixray.com
 ```

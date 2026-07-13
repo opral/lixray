@@ -177,6 +177,62 @@ void test("edit_file requires unique exact matches unless replace_all is explici
 	assert.equal(backend.fileText("/edit.txt"), "green green cyan");
 });
 
+void test("agent-authenticated edits persist an Atelier review range", async () => {
+	const backend = new MemoryBackend();
+	backend.addFile("/review.md", new TextEncoder().encode("before"), "rev-3");
+	const service = new LixFileService(backend, {
+		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
+	});
+
+	await service.editFile(WORKSPACE_ID, BRANCH_ID, "/review.md", "rev-3", [
+		{ oldText: "before", newText: "after" },
+	]);
+
+	const ranges = backend.agentReviewRanges();
+	assert.equal(ranges.length, 1);
+	assert.deepEqual(
+		{
+			sourceId: ranges[0]?.sourceId,
+			beforeCommitId: ranges[0]?.beforeCommitId,
+			afterCommitId: ranges[0]?.afterCommitId,
+			sessionId: ranges[0]?.sessionId,
+		},
+		{
+			sourceId: "codex",
+			beforeCommitId: "commit-3",
+			afterCommitId: "commit-4",
+			sessionId: "oauth-client-1",
+		},
+	);
+});
+
+void test("agent reviews discard legacy ranges after the Atelier hard cut", async () => {
+	const backend = new MemoryBackend();
+	backend.addFile("/review.md", new TextEncoder().encode("before"), "rev-3");
+	backend.setAgentReviewRanges([
+		{
+			id: "legacy-review",
+			agent: "codex",
+			beforeCommitId: "commit-1",
+			afterCommitId: "commit-2",
+			startedAt: 1,
+			completedAt: 2,
+		},
+	]);
+	const service = new LixFileService(backend, {
+		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
+	});
+
+	await service.editFile(WORKSPACE_ID, BRANCH_ID, "/review.md", "rev-3", [
+		{ oldText: "before", newText: "after" },
+	]);
+
+	const ranges = backend.agentReviewRanges();
+	assert.equal(ranges.length, 1);
+	assert.equal(ranges[0]?.sourceId, "codex");
+	assert.equal(ranges[0]?.agent, undefined);
+});
+
 void test("move_entry never overwrites and requires the source revision", async () => {
 	const backend = new MemoryBackend();
 	backend.addFile("/source.txt", new TextEncoder().encode("source"), "rev-4");
@@ -248,6 +304,7 @@ class MemoryBackend implements FileServiceBackend {
 	private readonly files = new Map<string, StoredFile>();
 	private readonly directories = new Map<string, StoredDirectory>();
 	private revisionCounter = 0;
+	private reviewStore: { ranges: Array<Record<string, unknown>> } | undefined;
 
 	addFile(path: string, bytes: Uint8Array, revision: string): void {
 		this.files.set(path, { bytes, revision });
@@ -269,6 +326,14 @@ class MemoryBackend implements FileServiceBackend {
 		return new TextDecoder().decode(file.bytes);
 	}
 
+	agentReviewRanges(): Array<Record<string, unknown>> {
+		return this.reviewStore?.ranges ?? [];
+	}
+
+	setAgentReviewRanges(ranges: Array<Record<string, unknown>>): void {
+		this.reviewStore = { ranges };
+	}
+
 	async listWorkspaces() {
 		return [
 			{
@@ -281,7 +346,12 @@ class MemoryBackend implements FileServiceBackend {
 
 	async listBranches(): Promise<Array<Branch>> {
 		return [
-			{ id: BRANCH_ID, name: "main", hidden: false, commitId: "commit-1" },
+			{
+				id: BRANCH_ID,
+				name: "main",
+				hidden: false,
+				commitId: `commit-${this.revisionCounter}`,
+			},
 		];
 	}
 
@@ -292,6 +362,23 @@ class MemoryBackend implements FileServiceBackend {
 		assert.equal(request.branchId, BRANCH_ID);
 		const sql = request.sql;
 		const params = request.params ?? [];
+
+		if (
+			sql ===
+			"SELECT value FROM lix_key_value_by_branch WHERE key = $1 AND lixcol_branch_id = $2 LIMIT 1"
+		) {
+			return result(
+				this.reviewStore ? [[{ kind: "json", value: this.reviewStore }]] : [],
+			);
+		}
+		if (sql.startsWith("INSERT INTO lix_key_value_by_branch")) {
+			const value = params[1];
+			assert.equal(value?.kind, "json");
+			this.reviewStore = value.value as {
+				ranges: Array<Record<string, unknown>>;
+			};
+			return result([], 1);
+		}
 
 		if (
 			sql ===

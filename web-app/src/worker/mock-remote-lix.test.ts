@@ -99,7 +99,7 @@ void test("mock remote Lix maps execute params, rows, and explicit values", asyn
 	await lix.close();
 });
 
-void test("mock remote Lix parses chunked POST-SSE observations", async () => {
+void test("mock remote Lix parses multiplexed chunked POST-SSE observations", async () => {
 	const encoder = new TextEncoder();
 	let observeBody: unknown;
 	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -107,15 +107,16 @@ void test("mock remote Lix parses chunked POST-SSE observations", async () => {
 		if (url.endsWith("/branches")) {
 			return jsonResponse({ branches: [branch("main-branch", "main")] });
 		}
-		if (url.endsWith("/observe")) {
+		if (url.endsWith("/observe/multiplex")) {
 			observeBody = parseJsonBody(init?.body);
+			const subscription = firstSubscription(observeBody);
 			return new Response(
 				new ReadableStream<Uint8Array>({
 					start(controller) {
 						controller.enqueue(encoder.encode(": keep-alive\r\n\r\nevent: ne"));
 						controller.enqueue(
 							encoder.encode(
-								`xt\r\ndata: ${JSON.stringify(observePayload("hub"))}\r\n\r\n`,
+								`xt\r\ndata: ${JSON.stringify(multiplexPayload(subscription.id, "main"))}\r\n\r\n`,
 							),
 						);
 						init?.signal?.addEventListener("abort", () => controller.close());
@@ -123,9 +124,6 @@ void test("mock remote Lix parses chunked POST-SSE observations", async () => {
 				}),
 				{ headers: { "content-type": "text/event-stream" } },
 			);
-		}
-		if (url.endsWith("/execute")) {
-			return jsonResponse(observePayload("main").result);
 		}
 		throw new Error(`Unexpected request: ${url}`);
 	}) as typeof fetch;
@@ -138,8 +136,7 @@ void test("mock remote Lix parses chunked POST-SSE observations", async () => {
 	assert.equal(event?.result.rows[0]?.get("branch"), "main");
 	assert.deepEqual(observeBody, {
 		branchId: "main-branch",
-		sql: "SELECT id FROM lix_change ORDER BY created_at DESC, id DESC LIMIT 1",
-		params: [],
+		subscriptions: [{ id: "observe-1", sql: "SELECT branch", params: [] }],
 	});
 
 	events.close();
@@ -147,17 +144,17 @@ void test("mock remote Lix parses chunked POST-SSE observations", async () => {
 	await lix.close();
 });
 
-void test("unexpected SSE closure reconnects the shared observation hub", async () => {
+void test("unexpected SSE closure reconnects the forwarded observation", async () => {
 	const encoder = new TextEncoder();
 	let observeRequests = 0;
-	let executeRequests = 0;
 	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = requestUrl(input);
 		if (url.endsWith("/branches")) {
 			return jsonResponse({ branches: [branch("main-branch", "main")] });
 		}
-		if (url.endsWith("/observe")) {
+		if (url.endsWith("/observe/multiplex")) {
 			observeRequests += 1;
+			const subscription = firstSubscription(parseJsonBody(init?.body));
 			return new Response(
 				new ReadableStream<Uint8Array>({
 					start(controller) {
@@ -167,7 +164,7 @@ void test("unexpected SSE closure reconnects the shared observation hub", async 
 						}
 						controller.enqueue(
 							encoder.encode(
-								`event: next\ndata: ${JSON.stringify(observePayload("hub"))}\n\n`,
+								`event: next\ndata: ${JSON.stringify(multiplexPayload(subscription.id, "reconnected"))}\n\n`,
 							),
 						);
 						init?.signal?.addEventListener("abort", () => controller.close());
@@ -176,10 +173,6 @@ void test("unexpected SSE closure reconnects the shared observation hub", async 
 				{ headers: { "content-type": "text/event-stream" } },
 			);
 		}
-		if (url.endsWith("/execute")) {
-			executeRequests += 1;
-			return jsonResponse(observePayload(`refresh-${executeRequests}`).result);
-		}
 		throw new Error(`Unexpected request: ${url}`);
 	}) as typeof fetch;
 	const lix = await open(fetchMock);
@@ -187,11 +180,7 @@ void test("unexpected SSE closure reconnects the shared observation hub", async 
 
 	assert.equal(
 		(await events.next())?.result.rows[0]?.get("branch"),
-		"refresh-1",
-	);
-	assert.equal(
-		(await events.next())?.result.rows[0]?.get("branch"),
-		"refresh-2",
+		"reconnected",
 	);
 	assert.equal(observeRequests, 2);
 
@@ -213,15 +202,16 @@ void test("branch switching restarts live observations and updates later execute
 				],
 			});
 		}
-		if (url.endsWith("/observe")) {
-			const body = parseJsonBody(init?.body) as { branchId: string };
+		if (url.endsWith("/observe/multiplex")) {
+			const body = parseJsonBody(init?.body) as MultiplexRequest;
+			const subscription = firstSubscription(body);
 			observedBranches.push(body.branchId);
 			return new Response(
 				new ReadableStream<Uint8Array>({
 					start(controller) {
 						controller.enqueue(
 							encoder.encode(
-								`event: next\ndata: ${JSON.stringify(observePayload(body.branchId))}\n\n`,
+								`event: next\ndata: ${JSON.stringify(multiplexPayload(subscription.id, body.branchId))}\n\n`,
 							),
 						);
 						init?.signal?.addEventListener("abort", () => {
@@ -237,9 +227,6 @@ void test("branch switching restarts live observations and updates later execute
 				branchId: string;
 				sql: string;
 			};
-			if (body.sql === "SELECT branch") {
-				return jsonResponse(observePayload(body.branchId).result);
-			}
 			executeBranch = body.branchId;
 			return jsonResponse({
 				columns: [],
@@ -269,7 +256,7 @@ void test("branch switching restarts live observations and updates later execute
 	await lix.close();
 });
 
-void test("many observe queries share one SSE mutation feed", async () => {
+void test("many observe queries share one multiplexed stream", async () => {
 	const encoder = new TextEncoder();
 	let observeRequests = 0;
 	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -277,25 +264,24 @@ void test("many observe queries share one SSE mutation feed", async () => {
 		if (url.endsWith("/branches")) {
 			return jsonResponse({ branches: [branch("main-branch", "main")] });
 		}
-		if (url.endsWith("/observe")) {
+		if (url.endsWith("/observe/multiplex")) {
 			observeRequests += 1;
+			const body = parseJsonBody(init?.body) as MultiplexRequest;
 			return new Response(
 				new ReadableStream<Uint8Array>({
 					start(controller) {
-						controller.enqueue(
-							encoder.encode(
-								`event: next\ndata: ${JSON.stringify(observePayload("hub"))}\n\n`,
-							),
-						);
+						for (const subscription of body.subscriptions) {
+							controller.enqueue(
+								encoder.encode(
+									`event: next\ndata: ${JSON.stringify(multiplexPayload(subscription.id, subscription.sql))}\n\n`,
+								),
+							);
+						}
 						init?.signal?.addEventListener("abort", () => controller.close());
 					},
 				}),
 				{ headers: { "content-type": "text/event-stream" } },
 			);
-		}
-		if (url.endsWith("/execute")) {
-			const body = parseJsonBody(init?.body) as { sql: string };
-			return jsonResponse(observePayload(body.sql).result);
 		}
 		throw new Error(`Unexpected request: ${url}`);
 	}) as typeof fetch;
@@ -307,7 +293,7 @@ void test("many observe queries share one SSE mutation feed", async () => {
 	const events = await Promise.all(
 		observers.map((observer) => observer.next()),
 	);
-	assert.equal(observeRequests, 1);
+	assert.equal(observeRequests, 12);
 	assert.deepEqual(
 		events.map((event) => event?.result.rows[0]?.get("branch")),
 		Array.from({ length: 12 }, (_, index) => `query-${index}`),
@@ -327,21 +313,15 @@ void test("observation network errors racing with close stay non-fatal", async (
 		if (url.endsWith("/branches")) {
 			return jsonResponse({ branches: [branch("main-branch", "main")] });
 		}
-		if (url.endsWith("/observe")) {
+		if (url.endsWith("/observe/multiplex")) {
 			await observationFailed;
 			throw new Error("unreachable");
-		}
-		if (url.endsWith("/execute")) {
-			return new Response(JSON.stringify(observePayload("main").result), {
-				headers: { "content-type": "application/json" },
-			});
 		}
 		throw new Error(`Unexpected request: ${url}`);
 	}) as typeof fetch;
 	const lix = await open(fetchMock);
 	const events = lix.observe("SELECT branch");
 
-	assert.equal((await events.next())?.result.rows[0]?.get("branch"), "main");
 	const pendingNext = events.next();
 	rejectObservation?.(new TypeError("network error"));
 	await Promise.resolve();
@@ -407,6 +387,24 @@ function observePayload(branchId: string) {
 			notices: [],
 		},
 	};
+}
+
+type MultiplexRequest = {
+	branchId: string;
+	subscriptions: Array<{ id: string; sql: string; params: unknown[] }>;
+};
+
+function firstSubscription(
+	payload: unknown,
+): MultiplexRequest["subscriptions"][number] {
+	const request = payload as MultiplexRequest;
+	const subscription = request.subscriptions[0];
+	assert.ok(subscription);
+	return subscription;
+}
+
+function multiplexPayload(subscriptionId: string, branchId: string) {
+	return { subscriptionId, ...observePayload(branchId) };
 }
 
 function jsonResponse(value: unknown, init: ResponseInit = {}): Response {
