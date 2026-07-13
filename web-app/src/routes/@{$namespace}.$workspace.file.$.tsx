@@ -12,7 +12,7 @@ function WorkspaceFileRoute() {
 
 	useEffect(() => {
 		if (!atelier || !filePath) return;
-		void atelier.file.open({ path: `/${filePath}` }).catch((error: unknown) => {
+		void atelier.documents.open(`/${filePath}`).catch((error: unknown) => {
 			console.error("Unable to open the requested Atelier file", error);
 		});
 	}, [atelier, filePath]);

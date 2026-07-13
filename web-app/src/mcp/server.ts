@@ -133,13 +133,26 @@ export async function handleMcpTransport(
 	})(request, undefined, ctx);
 }
 
-export function protectedResourceMetadataResponse(): Response {
+export interface McpDiscoveryOptions {
+	protectedResourceUrl?: string;
+	authorizationServer?: string;
+	resourceDocumentationUrl?: string;
+	endpointUrl?: string;
+}
+
+export function protectedResourceMetadataResponse(
+	options: McpDiscoveryOptions = {},
+): Response {
 	return Response.json(
 		{
 			resource: MCP_RESOURCE,
-			authorization_servers: [MCP_AUTHORIZATION_SERVER],
+			authorization_servers: [
+				options.authorizationServer ?? MCP_AUTHORIZATION_SERVER,
+			],
 			scopes_supported: [...MCP_SCOPES],
-			resource_documentation: `${MCP_RESOURCE}${MCP_DOCUMENTATION_PATH}`,
+			resource_documentation:
+				options.resourceDocumentationUrl ??
+				`${MCP_RESOURCE}${MCP_DOCUMENTATION_PATH}`,
 		},
 		{
 			headers: {
@@ -150,12 +163,14 @@ export function protectedResourceMetadataResponse(): Response {
 	);
 }
 
-export function mcpDocumentationResponse(): Response {
+export function mcpDocumentationResponse(
+	options: McpDiscoveryOptions = {},
+): Response {
 	return new Response(
 		[
 			"LixRay MCP",
 			"",
-			`Endpoint: ${MCP_RESOURCE}${MCP_PATH}`,
+			`Endpoint: ${options.endpointUrl ?? `${MCP_RESOURCE}${MCP_PATH}`}`,
 			"Authentication: Supabase OAuth 2.1 with PKCE and dynamic client registration.",
 			"",
 			"Your LixRay browser session and your MCP client authorization are separate. Being signed in at lixray.com does not mean that Codex or another MCP client has a usable access and refresh token.",
@@ -181,8 +196,13 @@ export function mcpDocumentationResponse(): Response {
 export function mcpUnauthorizedResponse(
 	error = "invalid_token",
 	description = "Sign in to LixRay to continue.",
+	protectedResourceUrl = MCP_PROTECTED_RESOURCE_URL,
 ): Response {
-	const challenge = mcpAuthenticateChallenge(error, description);
+	const challenge = mcpAuthenticateChallenge(
+		error,
+		description,
+		protectedResourceUrl,
+	);
 	return Response.json(
 		{
 			error: "unauthorized",
@@ -202,8 +222,9 @@ export function mcpUnauthorizedResponse(
 export function mcpAuthenticateChallenge(
 	error = "invalid_token",
 	description = "Sign in to LixRay to continue.",
+	protectedResourceUrl = MCP_PROTECTED_RESOURCE_URL,
 ): string {
-	return `Bearer resource_metadata="${MCP_PROTECTED_RESOURCE_URL}", scope="${MCP_SCOPES.join(" ")}", error="${error}", error_description="${description.replaceAll('"', "'")}"`;
+	return `Bearer resource_metadata="${protectedResourceUrl}", scope="${MCP_SCOPES.join(" ")}", error="${error}", error_description="${description.replaceAll('"', "'")}"`;
 }
 
 function buildTools(service: LixFileService): Array<ToolDefinition> {

@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(21);
+select plan(27);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password,
@@ -36,15 +36,60 @@ insert into public.organization_invitations (
 set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
 
+select is(
+  public.ensure_personal_workspace(),
+  true,
+  'first login provisions a personal namespace and starter workspace'
+);
+
+select results_eq(
+  $$select handle from public.organizations where personal_owner_id = '10000000-0000-0000-0000-000000000002'$$,
+  array['member'::text],
+  'the personal handle is derived from the email username'
+);
+
+select is(
+  public.ensure_personal_workspace(),
+  false,
+  'personal workspace provisioning is idempotent'
+);
+
+select lives_ok(
+  $$select public.delete_workspace(
+    (select id from public.workspaces
+     where organization_id = (
+       select id from public.organizations
+       where personal_owner_id = '10000000-0000-0000-0000-000000000002'
+     ) and deleted_at is null)
+  )$$,
+  'the starter workspace can be soft-deleted'
+);
+
+select is(
+  public.ensure_personal_workspace(),
+  true,
+  'provisioning recreates a starter workspace after deletion'
+);
+
+select results_eq(
+  $$select count(*) from public.workspaces
+    where organization_id = (
+      select id from public.organizations
+      where personal_owner_id = '10000000-0000-0000-0000-000000000002'
+    ) and slug = 'my-workspace'$$,
+  array[1::bigint],
+  'the recreated workspace can reuse the deleted workspace slug'
+);
+
 select results_eq(
   'select count(*) from public.organizations',
-  array[1::bigint],
+  array[2::bigint],
   'members only see their organizations'
 );
 
 select results_eq(
   'select count(*) from public.workspaces',
-  array[1::bigint],
+  array[2::bigint],
   'members only see their organization workspaces'
 );
 

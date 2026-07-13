@@ -32,14 +32,18 @@ interface ObservePayload {
 	result: ExecuteResponse;
 }
 
+interface MultiplexObservePayload extends ObservePayload {
+	subscriptionId: string;
+}
+
+interface MultiplexObserveErrorPayload {
+	subscriptionId: string;
+	error?: { code?: string; message?: string };
+}
+
 interface SseFrame {
 	event: string;
 	data: string;
-}
-
-interface ObserveClock {
-	sequence: number;
-	mutationSequence: number;
 }
 
 type ObserveWaiter = {
@@ -49,8 +53,6 @@ type ObserveWaiter = {
 
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const OBSERVATION_HUB_SQL =
-	"SELECT id FROM lix_change ORDER BY created_at DESC, id DESC LIMIT 1";
 const OBSERVATION_RETRY_BASE_MS = 100;
 const OBSERVATION_RETRY_MAX_MS = 5_000;
 
@@ -59,8 +61,8 @@ const OBSERVATION_RETRY_MAX_MS = 5_000;
  *
  * The returned object implements the SDK surface Atelier currently uses while
  * delegating all canonical data and observations to LixRay's SlateDB-backed
- * workspace API. One SSE mutation feed fans out into REST query refreshes so
- * Atelier cannot exhaust the browser's per-origin connection pool.
+ * workspace API. Every observe call is forwarded to the remote Lix so tracked
+ * and untracked query changes retain native Lix observation semantics.
  */
 export async function openMockRemoteLix(
 	options: OpenMockRemoteLixOptions,
@@ -76,11 +78,11 @@ class MockRemoteLix {
 	readonly #fetch: typeof fetch;
 	readonly #observers = new Set<MockRemoteObserveEvents>();
 	#activeBranchId = "";
+	#nextObserverId = 0;
 	#observationController: AbortController | undefined;
 	#observationGeneration = 0;
 	#observationRetryAttempt = 0;
 	#observationRetryTimer: ReturnType<typeof setTimeout> | undefined;
-	#observationClock: ObserveClock = { sequence: 0, mutationSequence: 0 };
 	#closed = false;
 
 	constructor(options: OpenMockRemoteLixOptions) {
@@ -130,15 +132,16 @@ class MockRemoteLix {
 	observe(sql: string, params: SqlParam[] = []): MockRemoteObserveEvents {
 		this.#assertOpen();
 		const observer = new MockRemoteObserveEvents(
-			() => this.execute(sql, params),
+			`observe-${++this.#nextObserverId}`,
+			sql,
+			params.map((param) => sqlParamToWireValue(param)),
 			() => {
 				this.#observers.delete(observer);
-				if (this.#observers.size === 0) this.#stopObservationHub();
+				this.#restartObservationHub();
 			},
 		);
 		this.#observers.add(observer);
-		observer.refresh(this.#observationClock);
-		this.#startObservationHub();
+		this.#restartObservationHub();
 		return observer;
 	}
 
@@ -246,23 +249,10 @@ class MockRemoteLix {
 		return response;
 	}
 
-	async #openObservationHub(
-		branchId: string,
-		signal: AbortSignal,
-	): Promise<Response> {
-		return this.#request(
-			"/observe",
-			{
-				method: "POST",
-				headers: { Accept: "text/event-stream" },
-				body: JSON.stringify({
-					branchId,
-					sql: OBSERVATION_HUB_SQL,
-					params: [],
-				}),
-			},
-			signal,
-		);
+	#restartObservationHub(): void {
+		this.#stopObservationHub();
+		for (const observer of this.#observers) observer.restart();
+		this.#startObservationHub();
 	}
 
 	#startObservationHub(): void {
@@ -275,10 +265,9 @@ class MockRemoteLix {
 			return;
 		}
 		const generation = this.#observationGeneration;
-		const branchId = this.#activeBranchId;
 		const controller = new AbortController();
 		this.#observationController = controller;
-		void this.#consumeObservationHub(branchId, generation, controller);
+		void this.#consumeObservationHub(generation, controller);
 	}
 
 	#stopObservationHub(): void {
@@ -293,44 +282,52 @@ class MockRemoteLix {
 	}
 
 	async #consumeObservationHub(
-		branchId: string,
 		generation: number,
 		controller: AbortController,
 	): Promise<void> {
 		let shouldReconnect = false;
 		try {
-			const response = await this.#openObservationHub(
-				branchId,
+			const response = await this.#request(
+				"/observe/multiplex",
+				{
+					method: "POST",
+					headers: { Accept: "text/event-stream" },
+					body: JSON.stringify({
+						branchId: this.#activeBranchId,
+						subscriptions: [...this.#observers].map((observer) =>
+							observer.request(),
+						),
+					}),
+				},
 				controller.signal,
 			);
 			if (!this.#isCurrentObservationHub(generation, controller)) return;
 			if (!response.body) {
 				throw new MockRemoteLixError(
 					"LIX_OBSERVE_UNAVAILABLE",
-					"The observation response has no body.",
+					"The workspace observation stream has no body.",
 				);
 			}
 			for await (const frame of readSseFrames(response.body)) {
 				if (!this.#isCurrentObservationHub(generation, controller)) return;
 				if (frame.event === "next") {
 					this.#observationRetryAttempt = 0;
-					const payload = JSON.parse(frame.data) as ObservePayload;
-					this.#observationClock = {
-						sequence: payload.sequence,
-						mutationSequence: payload.mutationSequence,
-					};
-					for (const observer of this.#observers) {
-						observer.refresh(this.#observationClock);
-					}
+					const payload = JSON.parse(frame.data) as MultiplexObservePayload;
+					this.#observerById(payload.subscriptionId)?.accept(payload);
 				} else if (frame.event === "error") {
-					throw eventError(frame.data);
+					const payload = JSON.parse(
+						frame.data,
+					) as MultiplexObserveErrorPayload;
+					this.#observerById(payload.subscriptionId)?.fail(
+						new MockRemoteLixError(
+							payload.error?.code ?? "LIX_OBSERVE_FAILED",
+							payload.error?.message ?? "The observed query failed.",
+						),
+					);
 				}
 			}
 			if (this.#isCurrentObservationHub(generation, controller)) {
-				throw new MockRemoteLixError(
-					"LIX_OBSERVE_UNAVAILABLE",
-					"The workspace observation stream ended.",
-				);
+				shouldReconnect = true;
 			}
 		} catch (error) {
 			await yieldToBrowserTask();
@@ -347,6 +344,10 @@ class MockRemoteLix {
 				if (shouldReconnect) this.#scheduleObservationHubReconnect(generation);
 			}
 		}
+	}
+
+	#observerById(id: string): MockRemoteObserveEvents | undefined {
+		return [...this.#observers].find((observer) => observer.id === id);
 	}
 
 	#scheduleObservationHubReconnect(generation: number): void {
@@ -366,9 +367,8 @@ class MockRemoteLix {
 		this.#observationRetryAttempt += 1;
 		this.#observationRetryTimer = setTimeout(() => {
 			this.#observationRetryTimer = undefined;
-			if (generation === this.#observationGeneration) {
+			if (generation === this.#observationGeneration)
 				this.#startObservationHub();
-			}
 		}, delay);
 	}
 
@@ -384,12 +384,7 @@ class MockRemoteLix {
 	}
 
 	#restartObservers(): void {
-		this.#stopObservationHub();
-		this.#observationClock = { sequence: 0, mutationSequence: 0 };
-		for (const observer of this.#observers) {
-			observer.restart(this.#observationClock);
-		}
-		this.#startObservationHub();
+		this.#restartObservationHub();
 	}
 
 	#assertOpen(): void {
@@ -400,99 +395,74 @@ class MockRemoteLix {
 }
 
 class MockRemoteObserveEvents {
-	readonly #execute: () => Promise<ExecuteResult>;
+	readonly id: string;
+	readonly #sql: string;
+	readonly #params: WireValue[];
 	readonly #onClose: () => void;
 	#events: ObserveEvent[] = [];
 	#waiters: ObserveWaiter[] = [];
 	#error: Error | undefined;
 	#closed = false;
-	#generation = 0;
-	#refreshId = 0;
 
-	constructor(execute: () => Promise<ExecuteResult>, onClose: () => void) {
-		this.#execute = execute;
+	constructor(
+		id: string,
+		sql: string,
+		params: WireValue[],
+		onClose: () => void,
+	) {
+		this.id = id;
+		this.#sql = sql;
+		this.#params = params;
 		this.#onClose = onClose;
 	}
 
+	request(): { id: string; sql: string; params: WireValue[] } {
+		return { id: this.id, sql: this.#sql, params: this.#params };
+	}
+
 	next(): Promise<ObserveEvent | undefined> {
-		if (this.#events.length > 0) {
-			return Promise.resolve(this.#events.shift());
-		}
-		if (this.#error !== undefined) return Promise.reject(this.#error);
+		if (this.#events.length > 0) return Promise.resolve(this.#events.shift());
+		if (this.#error) return Promise.reject(this.#error);
 		if (this.#closed) return Promise.resolve(undefined);
 		return new Promise<ObserveEvent | undefined>((resolve, reject) => {
 			this.#waiters.push({ resolve, reject });
 		});
 	}
 
-	refresh(clock: ObserveClock): void {
+	accept(payload: ObservePayload): void {
 		if (this.#closed) return;
 		this.#error = undefined;
-		const generation = this.#generation;
-		const refreshId = ++this.#refreshId;
-		void this.#load(generation, refreshId, clock);
+		this.#push({
+			sequence: payload.sequence,
+			mutationSequence: payload.mutationSequence,
+			result: executeResponseToResult(payload.result),
+		});
 	}
 
-	restart(clock: ObserveClock): void {
+	restart(): void {
 		if (this.#closed) return;
-		this.#generation += 1;
-		this.#refreshId += 1;
 		this.#events = [];
 		this.#error = undefined;
-		this.refresh(clock);
 	}
 
-	fail(error: unknown): void {
+	fail(error: Error): void {
 		if (this.#closed) return;
-		this.#fail(error);
+		this.#error = error;
+		for (const waiter of this.#waiters.splice(0)) waiter.reject(error);
 	}
 
 	close(): void {
 		if (this.#closed) return;
 		this.#closed = true;
-		this.#generation += 1;
-		this.#refreshId += 1;
 		for (const waiter of this.#waiters.splice(0)) waiter.resolve(undefined);
 		this.#events = [];
 		this.#onClose();
-	}
-
-	async #load(
-		generation: number,
-		refreshId: number,
-		clock: ObserveClock,
-	): Promise<void> {
-		try {
-			const result = await this.#execute();
-			if (!this.#isCurrent(generation, refreshId)) return;
-			this.#push({ ...clock, result });
-		} catch (error) {
-			await yieldToBrowserTask();
-			if (!this.#isCurrent(generation, refreshId)) return;
-			this.#fail(error);
-		}
-	}
-
-	#isCurrent(generation: number, refreshId: number): boolean {
-		return (
-			!this.#closed &&
-			generation === this.#generation &&
-			refreshId === this.#refreshId
-		);
 	}
 
 	#push(event: ObserveEvent): void {
 		const waiter = this.#waiters.shift();
 		if (waiter) waiter.resolve(event);
 		else this.#events.push(event);
-	}
-
-	#fail(error: unknown): void {
-		const terminalError =
-			error instanceof Error ? error : new Error(String(error));
-		this.#refreshId += 1;
-		this.#error = terminalError;
-		for (const waiter of this.#waiters.splice(0)) waiter.reject(terminalError);
 	}
 }
 
@@ -733,19 +703,6 @@ async function responseError(response: Response): Promise<MockRemoteLixError> {
 		errorMessage(payload) ?? `Remote Lix request failed (${response.status})`;
 	const code = errorCode(payload) ?? "LIX_REMOTE_REQUEST_FAILED";
 	return new MockRemoteLixError(code, message, response.status);
-}
-
-function eventError(data: string): MockRemoteLixError {
-	let payload: unknown = data;
-	try {
-		payload = JSON.parse(data);
-	} catch {
-		// Keep the original event text as the fallback message.
-	}
-	return new MockRemoteLixError(
-		errorCode(payload) ?? "LIX_OBSERVE_FAILED",
-		errorMessage(payload) ?? data,
-	);
 }
 
 function errorMessage(payload: unknown): string | null {

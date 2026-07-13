@@ -10,8 +10,10 @@ import { LixFileService } from "../mcp/file-service.ts";
 import {
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
+	MCP_AUTHORIZATION_SERVER,
 	MCP_PATH,
 	MCP_PROTECTED_RESOURCE_PATH,
+	MCP_PROTECTED_RESOURCE_URL,
 	MCP_RESOURCE,
 	mcpDocumentationResponse,
 	mcpUnauthorizedResponse,
@@ -122,13 +124,13 @@ export async function handleRequest(
 	if (url.pathname === MCP_PROTECTED_RESOURCE_PATH) {
 		if (request.method === "OPTIONS") return corsPreflight();
 		return request.method === "GET"
-			? protectedResourceMetadataResponse()
+			? protectedResourceMetadataResponse(mcpDiscoveryOptions(url, env))
 			: new Response("Method not allowed\n", { status: 405 });
 	}
 
 	if (url.pathname === MCP_DOCUMENTATION_PATH) {
 		return request.method === "GET"
-			? mcpDocumentationResponse()
+			? mcpDocumentationResponse(mcpDiscoveryOptions(url, env))
 			: new Response("Method not allowed\n", { status: 405 });
 	}
 
@@ -147,7 +149,12 @@ export async function handleRequest(
 		);
 		return (options.mcpTransport ?? handleMcpTransport)(
 			request,
-			new LixFileService(backend),
+			new LixFileService(backend, {
+				agentReview: {
+					agent: "codex",
+					sessionId: authResult.auth.clientId,
+				},
+			}),
 			options.executionContext ?? noopExecutionContext(),
 		);
 	}
@@ -261,6 +268,7 @@ export async function authenticateMcpWithSupabase(
 	request: Request,
 	env: WorkerEnv,
 ): Promise<McpAuthResult> {
+	const protectedResourceUrl = mcpProtectedResourceUrl(new URL(request.url));
 	if (!env.SUPABASE_URL || !env.SUPABASE_JWKS_URL) {
 		return {
 			ok: false,
@@ -270,7 +278,16 @@ export async function authenticateMcpWithSupabase(
 		};
 	}
 	const token = bearerToken(request);
-	if (!token) return { ok: false, response: mcpUnauthorizedResponse() };
+	if (!token) {
+		return {
+			ok: false,
+			response: mcpUnauthorizedResponse(
+				"invalid_token",
+				"Sign in to LixRay to continue.",
+				protectedResourceUrl,
+			),
+		};
+	}
 
 	try {
 		const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
@@ -287,7 +304,11 @@ export async function authenticateMcpWithSupabase(
 		if (!claims.ok) {
 			return {
 				ok: false,
-				response: mcpUnauthorizedResponse(claims.error, claims.description),
+				response: mcpUnauthorizedResponse(
+					claims.error,
+					claims.description,
+					protectedResourceUrl,
+				),
 			};
 		}
 		return {
@@ -299,8 +320,38 @@ export async function authenticateMcpWithSupabase(
 			},
 		};
 	} catch {
-		return { ok: false, response: mcpUnauthorizedResponse() };
+		return {
+			ok: false,
+			response: mcpUnauthorizedResponse(
+				"invalid_token",
+				"Sign in to LixRay to continue.",
+				protectedResourceUrl,
+			),
+		};
 	}
+}
+
+function mcpDiscoveryOptions(url: URL, env: WorkerEnv) {
+	if (!isLocalDevelopmentUrl(url)) return {};
+	const supabaseUrl = env.SUPABASE_URL?.replace(/\/$/, "");
+	return {
+		protectedResourceUrl: mcpProtectedResourceUrl(url),
+		authorizationServer: supabaseUrl
+			? `${supabaseUrl}/auth/v1`
+			: MCP_AUTHORIZATION_SERVER,
+		resourceDocumentationUrl: `${url.origin}${MCP_DOCUMENTATION_PATH}`,
+		endpointUrl: `${url.origin}${MCP_PATH}`,
+	};
+}
+
+function mcpProtectedResourceUrl(url: URL): string {
+	return isLocalDevelopmentUrl(url)
+		? `${url.origin}${MCP_PROTECTED_RESOURCE_PATH}`
+		: MCP_PROTECTED_RESOURCE_URL;
+}
+
+function isLocalDevelopmentUrl(url: URL): boolean {
+	return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
 }
 
 export function validateMcpJwtClaims(

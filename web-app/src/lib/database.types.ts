@@ -33,6 +33,7 @@ export interface Database {
 					id: string;
 					name: string;
 					handle: string;
+					personal_owner_id: string | null;
 					created_at: string;
 					updated_at: string;
 				};
@@ -40,10 +41,16 @@ export interface Database {
 					id?: string;
 					name: string;
 					handle?: string;
+					personal_owner_id?: string | null;
 					created_at?: string;
 					updated_at?: string;
 				};
-				Update: { name?: string; handle?: string; updated_at?: string };
+				Update: {
+					name?: string;
+					handle?: string;
+					personal_owner_id?: string | null;
+					updated_at?: string;
+				};
 				Relationships: [];
 			};
 			organization_members: {
@@ -150,6 +157,7 @@ export interface Database {
 		Views: Record<never, never>;
 		Functions: {
 			create_organization: { Args: { p_name: string }; Returns: string };
+			ensure_personal_workspace: { Args: never; Returns: boolean };
 			rename_organization: {
 				Args: { p_organization_id: string; p_name: string };
 				Returns: undefined;

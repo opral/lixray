@@ -17,6 +17,7 @@ use lix_engine::{
 };
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc, time::Duration};
+use tokio::{sync::mpsc, task::JoinHandle};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -31,6 +32,7 @@ pub fn router(service: Arc<LixService>) -> Router {
         .route("/v1/execute", post(execute))
         .route("/v1/filesystem/mutate", post(mutate_filesystem))
         .route("/v1/observe", post(observe))
+        .route("/v1/observe/multiplex", post(observe_multiplex))
         .with_state(AppState { service })
 }
 
@@ -168,6 +170,90 @@ async fn observe(
             .interval(Duration::from_secs(15))
             .text("keep-alive"),
     ))
+}
+
+async fn observe_multiplex(
+    State(state): State<AppState>,
+    Json(request): Json<MultiplexObserveRequest>,
+) -> Result<Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let branch_id = required_non_empty(request.branch_id, "branchId")?;
+    let (sender, mut receiver) = mpsc::channel::<MultiplexObserveMessage>(64);
+    let mut tasks = Vec::with_capacity(request.subscriptions.len());
+
+    for subscription in request.subscriptions {
+        let subscription_id = required_non_empty(subscription.id, "subscriptions[].id")?;
+        let sql = required_non_empty(subscription.sql, "subscriptions[].sql")?;
+        let params = decode_params(subscription.params)?;
+        let mut events = state
+            .service
+            .observe(branch_id.clone(), sql, params)
+            .await?;
+        let sender = sender.clone();
+        tasks.push(tokio::spawn(async move {
+            loop {
+                let message = match events.next().await {
+                    Ok(Some(event)) => match ObserveEventResponse::try_from(event) {
+                        Ok(payload) => MultiplexObserveMessage::Next {
+                            subscription_id: subscription_id.clone(),
+                            payload,
+                        },
+                        Err(error) => MultiplexObserveMessage::Error {
+                            subscription_id: subscription_id.clone(),
+                            error: ErrorEnvelope::from_lix_error(&error),
+                        },
+                    },
+                    Ok(None) => break,
+                    Err(error) => MultiplexObserveMessage::Error {
+                        subscription_id: subscription_id.clone(),
+                        error: ErrorEnvelope::from_lix_error(&error),
+                    },
+                };
+                let terminal = matches!(message, MultiplexObserveMessage::Error { .. });
+                if sender.send(message).await.is_err() || terminal {
+                    break;
+                }
+            }
+        }));
+    }
+    drop(sender);
+
+    let stream = async_stream::stream! {
+        let _task_guard = ObserveTaskGuard(tasks);
+        while let Some(message) = receiver.recv().await {
+            match message {
+                MultiplexObserveMessage::Next { subscription_id, payload } => {
+                    yield Ok(sse_json_event("next", &MultiplexObserveEventResponse {
+                        subscription_id,
+                        sequence: payload.sequence,
+                        mutation_sequence: payload.mutation_sequence,
+                        result: payload.result,
+                    }));
+                }
+                MultiplexObserveMessage::Error { subscription_id, error } => {
+                    yield Ok(sse_json_event("error", &MultiplexObserveErrorResponse {
+                        subscription_id,
+                        error,
+                    }));
+                }
+            }
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
+}
+
+struct ObserveTaskGuard(Vec<JoinHandle<()>>);
+
+impl Drop for ObserveTaskGuard {
+    fn drop(&mut self) {
+        for task in self.0.drain(..) {
+            task.abort();
+        }
+    }
 }
 
 fn sse_json_event<T>(event: &'static str, payload: &T) -> Event
@@ -343,6 +429,21 @@ struct ObserveRequest {
     params: Vec<WireValue>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiplexObserveRequest {
+    branch_id: Option<String>,
+    subscriptions: Vec<MultiplexObserveSubscription>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MultiplexObserveSubscription {
+    id: Option<String>,
+    sql: Option<String>,
+    #[serde(default)]
+    params: Vec<WireValue>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecuteResponse {
@@ -382,6 +483,34 @@ struct ObserveEventResponse {
     sequence: u64,
     mutation_sequence: u64,
     result: ExecuteResponse,
+}
+
+enum MultiplexObserveMessage {
+    Next {
+        subscription_id: String,
+        payload: ObserveEventResponse,
+    },
+    Error {
+        subscription_id: String,
+        error: ErrorEnvelope,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiplexObserveEventResponse {
+    subscription_id: String,
+    sequence: u64,
+    mutation_sequence: u64,
+    result: ExecuteResponse,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiplexObserveErrorResponse {
+    subscription_id: String,
+    #[serde(flatten)]
+    error: ErrorEnvelope,
 }
 
 impl TryFrom<ObserveEvent> for ObserveEventResponse {

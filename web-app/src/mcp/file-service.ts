@@ -54,6 +54,15 @@ export interface FileServiceBackend {
 	): Promise<FilesystemMutationOutcome>;
 }
 
+export interface AgentReviewSource {
+	agent: "claude" | "codex";
+	sessionId?: string;
+}
+
+export interface LixFileServiceOptions {
+	agentReview?: AgentReviewSource;
+}
+
 export type EntryKind = "file" | "directory";
 
 export type FilesystemMutationOutcome =
@@ -120,9 +129,14 @@ export class FileServiceError extends Error {
 
 export class LixFileService {
 	private readonly backend: FileServiceBackend;
+	private readonly agentReview: AgentReviewSource | undefined;
 
-	constructor(backend: FileServiceBackend) {
+	constructor(
+		backend: FileServiceBackend,
+		options: LixFileServiceOptions = {},
+	) {
 		this.backend = backend;
+		this.agentReview = options.agentReview;
 	}
 
 	async listWorkspaces(): Promise<Array<WorkspaceSummary>> {
@@ -287,21 +301,96 @@ export class LixFileService {
 				],
 			});
 		} else {
-			const outcome = await this.backend.mutate(workspaceId, {
-				branchId,
-				kind: "file",
-				path,
-				expectedRevision,
-				mutation: {
-					type: "replace_file",
-					data: blob(bytes),
-					metadata: { kind: "json", value: { size: bytes.length } },
-				},
-			});
+			const outcome = await this.withAgentReview(workspaceId, branchId, () =>
+				this.backend.mutate(workspaceId, {
+					branchId,
+					kind: "file",
+					path,
+					expectedRevision,
+					mutation: {
+						type: "replace_file",
+						data: blob(bytes),
+						metadata: { kind: "json", value: { size: bytes.length } },
+					},
+				}),
+			);
 			assertMutationApplied(path, outcome);
 		}
 
 		return this.loadEntrySummary(workspaceId, branchId, path, "file");
+	}
+
+	private async withAgentReview<T>(
+		workspaceId: string,
+		branchId: string,
+		mutation: () => Promise<T>,
+	): Promise<T> {
+		if (!this.agentReview) return mutation();
+		const beforeCommitId = await this.branchCommitId(workspaceId, branchId);
+		const startedAt = Date.now();
+		const result = await mutation();
+		const afterCommitId = await this.branchCommitId(workspaceId, branchId);
+		if (beforeCommitId !== afterCommitId) {
+			await this.appendAgentReview(workspaceId, branchId, {
+				id: `mcp-${crypto.randomUUID()}`,
+				sourceId: this.agentReview.agent,
+				beforeCommitId,
+				afterCommitId,
+				...(this.agentReview.sessionId
+					? { sessionId: this.agentReview.sessionId }
+					: {}),
+				startedAt,
+				completedAt: Date.now(),
+			});
+		}
+		return result;
+	}
+
+	private async branchCommitId(
+		workspaceId: string,
+		branchId: string,
+	): Promise<string> {
+		const branch = (await this.backend.listBranches(workspaceId)).find(
+			(candidate) => candidate.id === branchId,
+		);
+		if (!branch) {
+			throw new FileServiceError("not_found", `Branch not found: ${branchId}`);
+		}
+		return branch.commitId;
+	}
+
+	private async appendAgentReview(
+		workspaceId: string,
+		branchId: string,
+		range: Record<string, unknown>,
+	): Promise<void> {
+		const key = "atelier_agent_turn_commit_range";
+		const current = await this.backend.execute(workspaceId, {
+			branchId,
+			sql: "SELECT value FROM lix_key_value_by_branch WHERE key = $1 AND lixcol_branch_id = $2 LIMIT 1",
+			params: [text(key), text(branchId)],
+		});
+		const value = current.rows[0]?.[0];
+		const existingRanges =
+			value?.kind === "json" &&
+			value.value &&
+			typeof value.value === "object" &&
+			Array.isArray((value.value as { ranges?: unknown }).ranges)
+				? (value.value as { ranges: Array<unknown> }).ranges.filter(
+						isCurrentAgentReviewRange,
+					)
+				: [];
+		await this.backend.execute(workspaceId, {
+			branchId,
+			sql: "INSERT INTO lix_key_value_by_branch (key, value, lixcol_branch_id, lixcol_global, lixcol_untracked) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (key, lixcol_branch_id) DO UPDATE SET value = $2",
+			params: [
+				text(key),
+				{ kind: "json", value: { ranges: [...existingRanges, range] } },
+				text(branchId),
+				{ kind: "bool", value: branchId === "global" },
+				{ kind: "bool", value: true },
+			],
+		});
 	}
 
 	async editFile(
@@ -642,6 +731,17 @@ function occurrenceCount(value: string, needle: string): number {
 		count += 1;
 		offset = index + needle.length;
 	}
+}
+
+function isCurrentAgentReviewRange(
+	value: unknown,
+): value is Record<string, unknown> {
+	return (
+		Boolean(value) &&
+		typeof value === "object" &&
+		!Array.isArray(value) &&
+		typeof (value as Record<string, unknown>).sourceId === "string"
+	);
 }
 
 function text(value: string): WireValue {

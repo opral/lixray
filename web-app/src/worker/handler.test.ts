@@ -74,6 +74,40 @@ void test("protected resource discovery is public and precedes the frontend fall
 	});
 });
 
+void test("localhost discovery advertises local OAuth without changing the stable resource", async () => {
+	const response = await handleRequest(
+		new Request(`http://localhost:8787${MCP_PROTECTED_RESOURCE_PATH}`),
+		env({
+			extra: { SUPABASE_URL: "http://127.0.0.1:54321" },
+		}),
+	);
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), {
+		resource: MCP_RESOURCE,
+		authorization_servers: ["http://127.0.0.1:54321/auth/v1"],
+		scopes_supported: ["openid", "email", "profile"],
+		resource_documentation: "http://localhost:8787/docs/mcp",
+	});
+});
+
+void test("unauthenticated localhost MCP requests challenge with local discovery", async () => {
+	const response = await handleRequest(
+		new Request("http://localhost:8787/mcp"),
+		env({
+			extra: {
+				SUPABASE_URL: "http://127.0.0.1:54321",
+				SUPABASE_JWKS_URL:
+					"http://127.0.0.1:54321/auth/v1/.well-known/jwks.json",
+			},
+		}),
+	);
+	assert.equal(response.status, 401);
+	assert.match(
+		response.headers.get("www-authenticate") ?? "",
+		/resource_metadata="http:\/\/localhost:8787\/\.well-known\/oauth-protected-resource"/,
+	);
+});
+
 void test("unauthenticated MCP discovery returns an OAuth resource challenge before fallback", async () => {
 	let fellBack = false;
 	const response = await handleRequest(
