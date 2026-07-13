@@ -164,16 +164,17 @@ export function createR2WorkspaceBackend(
 	return {
 		fetch: async (
 			bucket: R2Bucket,
+			previewHostname: string,
 			workspaceId: string,
 			request: Request,
 		): Promise<Response> => {
-			const { hostname, pathname } = new URL(request.url);
+			const { pathname } = new URL(request.url);
 			if (pathname === "/v1/container-health") {
 				return request.method === "GET"
 					? json({ ok: true, service: "lixray-container" })
 					: methodNotAllowed();
 			}
-			const key = `${PREVIEW_SNAPSHOT_PREFIX}/${hostname.toLowerCase()}/${workspaceId}.snapshot`;
+			const key = `${PREVIEW_SNAPSHOT_PREFIX}/${previewHostname.toLowerCase()}/${workspaceId}.snapshot`;
 			let state = workspaces.get(key);
 			if (!state) {
 				state = {

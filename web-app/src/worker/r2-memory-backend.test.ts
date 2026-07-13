@@ -19,13 +19,49 @@ void test("independent backends share exact R2 state and revisions", async () =>
 	const second = backend(openMemoryLix);
 
 	await expectOk(
-		first.fetch(storage.bucket, WORKSPACE_A, request(HOST_A, "/branches")),
+		first.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
 	);
 	await setValue(first, storage, HOST_A, WORKSPACE_A, "shared", "first");
 
 	const result = await getValue(second, storage, HOST_A, WORKSPACE_A, "shared");
 	assert.deepEqual(result, { key: "shared", value: "first", revision: 1 });
 	assert.ok(storage.has(`lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`));
+});
+
+void test("explicit preview hostname keeps synthetic MCP requests coherent and isolated", async () => {
+	const storage = new FakeR2Bucket();
+	const service = backend(snapshotBindingFactory());
+
+	await expectOk(
+		execute(
+			service,
+			storage,
+			HOST_A,
+			WORKSPACE_A,
+			"SET",
+			[text("from-mcp"), text("visible-to-api")],
+			"lixray-container.invalid",
+		),
+	);
+	assert.deepEqual(
+		await getValue(service, storage, HOST_A, WORKSPACE_A, "from-mcp"),
+		{ key: "from-mcp", value: "visible-to-api", revision: 1 },
+	);
+	assert.equal(
+		await getValue(service, storage, HOST_B, WORKSPACE_A, "from-mcp"),
+		null,
+	);
+	assert.equal(
+		storage.has(
+			`lixray-preview/v1/lixray-container.invalid/${WORKSPACE_A}.snapshot`,
+		),
+		false,
+	);
 });
 
 void test("preview hostnames and workspace ids are isolated", async () => {
@@ -51,10 +87,20 @@ void test("bootstrap and concurrent conditional writes converge without loss", a
 
 	await Promise.all([
 		expectOk(
-			first.fetch(storage.bucket, WORKSPACE_A, request(HOST_A, "/branches")),
+			first.fetch(
+				storage.bucket,
+				HOST_A,
+				WORKSPACE_A,
+				request(HOST_A, "/branches"),
+			),
 		),
 		expectOk(
-			second.fetch(storage.bucket, WORKSPACE_A, request(HOST_A, "/branches")),
+			second.fetch(
+				storage.bucket,
+				HOST_A,
+				WORKSPACE_A,
+				request(HOST_A, "/branches"),
+			),
 		),
 	]);
 	await Promise.all([
@@ -81,7 +127,12 @@ void test("retry exhaustion returns a retryable 503 and preserves state", async 
 	const storage = new FakeR2Bucket();
 	const service = backend(snapshotBindingFactory());
 	await expectOk(
-		service.fetch(storage.bucket, WORKSPACE_A, request(HOST_A, "/branches")),
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
 	);
 	storage.conflictsRemaining = 5;
 
@@ -110,6 +161,7 @@ void test("R2 failures and corrupt snapshots return distinct 503 errors", async 
 	const service = backend(snapshotBindingFactory());
 	const failed = await service.fetch(
 		unavailable.bucket,
+		HOST_A,
 		WORKSPACE_A,
 		request(HOST_A, "/branches"),
 	);
@@ -121,6 +173,7 @@ void test("R2 failures and corrupt snapshots return distinct 503 errors", async 
 	await expectOk(
 		failedPutService.fetch(
 			failedPutStorage.bucket,
+			HOST_A,
 			WORKSPACE_A,
 			request(HOST_A, "/branches"),
 		),
@@ -154,6 +207,7 @@ void test("R2 failures and corrupt snapshots return distinct 503 errors", async 
 	const before = corrupt.bytes(key);
 	const invalid = await backend(snapshotBindingFactory()).fetch(
 		corrupt.bucket,
+		HOST_A,
 		WORKSPACE_A,
 		request(HOST_A, "/branches"),
 	);
@@ -166,7 +220,12 @@ void test("failed API operations never overwrite the committed snapshot", async 
 	const storage = new FakeR2Bucket();
 	const service = backend(snapshotBindingFactory());
 	await expectOk(
-		service.fetch(storage.bucket, WORKSPACE_A, request(HOST_A, "/branches")),
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
 	);
 	const key = `lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`;
 	const before = storage.bytes(key);
@@ -192,6 +251,7 @@ void test("single and multiplexed observers receive cross-isolate changes once",
 
 	const singleResponse = await observerBackend.fetch(
 		storage.bucket,
+		HOST_A,
 		WORKSPACE_A,
 		request(HOST_A, "/observe", {
 			branchId: MAIN_BRANCH,
@@ -213,6 +273,7 @@ void test("single and multiplexed observers receive cross-isolate changes once",
 
 	const multiplexResponse = await observerBackend.fetch(
 		storage.bucket,
+		HOST_A,
 		WORKSPACE_A,
 		request(HOST_A, "/observe/multiplex", {
 			branchId: MAIN_BRANCH,
@@ -307,11 +368,13 @@ function execute(
 	workspaceId: string,
 	sql: string,
 	params: unknown[],
+	requestHostname = hostname,
 ) {
 	return service.fetch(
 		storage.bucket,
+		hostname,
 		workspaceId,
-		request(hostname, "/execute", {
+		request(requestHostname, "/execute", {
 			branchId: MAIN_BRANCH,
 			sql,
 			params: params.map(nativeToWire),
