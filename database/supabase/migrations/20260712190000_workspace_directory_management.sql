@@ -80,6 +80,9 @@ declare
   base text := coalesce(nullif(private.url_segment(new.name, 39), ''), 'namespace');
 begin
   if new.handle is null or btrim(new.handle) = '' then
+    perform pg_advisory_xact_lock(
+      hashtextextended('organization-handle:' || replace(base, '-', ''), 0)
+    );
     new.handle := base;
     if exists (
       select 1 from public.organizations
@@ -101,6 +104,12 @@ declare
   base text := coalesce(nullif(private.url_segment(new.name, 100), ''), 'workspace');
 begin
   if new.slug is null or btrim(new.slug) = '' then
+    perform pg_advisory_xact_lock(
+      hashtextextended(
+        'workspace-slug:' || new.organization_id::text || ':' || replace(base, '-', ''),
+        0
+      )
+    );
     new.slug := base;
     if exists (
       select 1 from public.workspaces

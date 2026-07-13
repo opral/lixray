@@ -12,12 +12,20 @@ export function findWorkspaceByRoute(
 	namespace: string,
 	workspaceSlug: string,
 ): { organization: Organization; workspace: Workspace } | null {
+	const normalizedNamespace = normalizeRouteSegment(namespace);
 	const organization = organizations.find(
-		(candidate) => candidate.handle === namespace.toLowerCase(),
+		(candidate) =>
+			normalizeRouteSegment(candidate.handle) === normalizedNamespace,
 	);
 	if (!organization) return null;
+	const normalizedWorkspaceSlug = normalizeRouteSegment(workspaceSlug);
 	const workspace = organization.workspaces.find(
-		(candidate) => candidate.slug === workspaceSlug.toLowerCase(),
+		(candidate) =>
+			normalizeRouteSegment(candidate.slug) === normalizedWorkspaceSlug,
 	);
 	return workspace ? { organization, workspace } : null;
+}
+
+function normalizeRouteSegment(value: string): string {
+	return value.toLowerCase().replaceAll("-", "");
 }

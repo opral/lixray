@@ -5,8 +5,34 @@ import {
 	MockRemoteLixError,
 	openMockRemoteLix,
 } from "../lib/mock-remote-lix.ts";
+import { findWorkspaceByRoute } from "../lib/workspace-url.ts";
 
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
+
+void test("workspace routes match canonical slugs with case and hyphens normalized", () => {
+	const workspace = {
+		id: WORKSPACE_ID,
+		organizationId: "00000000-0000-4000-8000-000000000001",
+		name: "Launch Q3",
+		slug: "launch-q3",
+		createdAt: "2026-07-12T00:00:00Z",
+		updatedAt: "2026-07-12T00:00:00Z",
+	};
+	const organization = {
+		id: workspace.organizationId,
+		name: "Acme Corp",
+		handle: "acme-corp",
+		role: "owner" as const,
+		createdAt: "2026-07-12T00:00:00Z",
+		updatedAt: "2026-07-12T00:00:00Z",
+		workspaces: [workspace],
+	};
+
+	assert.deepEqual(
+		findWorkspaceByRoute([organization], "ACMECORP", "LaunchQ3"),
+		{ organization, workspace },
+	);
+});
 
 void test("mock remote Lix maps execute params, rows, and explicit values", async () => {
 	const requests: Array<{ url: string; init?: RequestInit }> = [];

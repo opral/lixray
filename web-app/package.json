@@ -10,6 +10,7 @@
 		"predev": "pnpm atelier:build",
 		"predev:r2": "pnpm atelier:build",
 		"prebuild": "pnpm atelier:build",
+		"prelint": "pnpm atelier:build",
 		"pretypecheck": "pnpm atelier:build",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
