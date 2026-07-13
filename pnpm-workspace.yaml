@@ -4,11 +4,14 @@ packages:
   - web-app
   - vendor/atelier
 
-publicHoistPattern:
-  - "@types/react"
-  - vite
-
 onlyBuiltDependencies:
   - esbuild
   - sharp
   - workerd
+
+patchedDependencies:
+  "@lix-js/sdk@0.8.0": patches/@lix-js__sdk@0.8.0.patch
+
+publicHoistPattern:
+  - "@types/react"
+  - vite

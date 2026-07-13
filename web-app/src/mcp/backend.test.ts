@@ -117,6 +117,53 @@ void test("raw execute reauthorizes and strips the OAuth token", async () => {
 	});
 });
 
+void test("injected workspaces and workspace fetch bypass Supabase and containers", async () => {
+	let authorizationChecks = 0;
+	let received: Request | undefined;
+	const workspaceSummaries = [
+		{
+			id: WORKSPACE_ID,
+			name: "Demo workspace",
+			organization: { id: "org-demo", name: "Demo" },
+		},
+	];
+	const backend = new WorkerFileServiceBackend(
+		{},
+		{ userId: "lixray-demo", token: "lixray-demo" },
+		async (workspaceId) => {
+			authorizationChecks += 1;
+			assert.equal(workspaceId, WORKSPACE_ID);
+			return null;
+		},
+		{
+			workspaceSummaries,
+			workspaceFetch: async (workspaceId, request) => {
+				assert.equal(workspaceId, WORKSPACE_ID);
+				received = request;
+				return Response.json({
+					branches: [
+						{
+							id: "main",
+							name: "main",
+							hidden: false,
+							commitId: "commit-1",
+						},
+					],
+				});
+			},
+		},
+	);
+
+	assert.deepEqual(await backend.listWorkspaces(), workspaceSummaries);
+	assert.deepEqual(await backend.listBranches(WORKSPACE_ID), [
+		{ id: "main", name: "main", hidden: false, commitId: "commit-1" },
+	]);
+	assert.equal(authorizationChecks, 1);
+	assert.ok(received);
+	assert.equal(new URL(received.url).pathname, "/v1/branches");
+	assert.equal(received.headers.get("authorization"), null);
+});
+
 void test("filesystem mutations use the typed container endpoint without forwarding auth", async () => {
 	let received: Request | undefined;
 	const backend = new WorkerFileServiceBackend(
@@ -158,22 +205,24 @@ void test("workspace discovery uses the OAuth token and only joins RLS-visible r
 		env({}),
 		{ userId: "user-1", token: "secret-oauth-token" },
 		async () => null,
-		async (input, init) => {
-			const url = new URL(
-				typeof input === "string"
-					? input
-					: input instanceof URL
-						? input.href
-						: input.url,
-			);
-			requests.push({ url, headers: new Headers(init?.headers) });
-			if (url.pathname.endsWith("/organizations")) {
-				return Response.json([{ id: "org-1", name: "Example" }]);
-			}
-			return Response.json([
-				{ id: WORKSPACE_ID, organization_id: "org-1", name: "Personal" },
-				{ id: "hidden", organization_id: "not-visible", name: "Hidden" },
-			]);
+		{
+			fetcher: async (input, init) => {
+				const url = new URL(
+					typeof input === "string"
+						? input
+						: input instanceof URL
+							? input.href
+							: input.url,
+				);
+				requests.push({ url, headers: new Headers(init?.headers) });
+				if (url.pathname.endsWith("/organizations")) {
+					return Response.json([{ id: "org-1", name: "Example" }]);
+				}
+				return Response.json([
+					{ id: WORKSPACE_ID, organization_id: "org-1", name: "Personal" },
+					{ id: "hidden", organization_id: "not-visible", name: "Hidden" },
+				]);
+			},
 		},
 	);
 
@@ -236,7 +285,7 @@ void test("workspace discovery invokes the Worker fetch function without a class
 });
 
 function env(options: {
-	getByName?: McpBackendEnv["SLATEDB_CONTAINER"]["getByName"];
+	getByName?: NonNullable<McpBackendEnv["SLATEDB_CONTAINER"]>["getByName"];
 }): McpBackendEnv {
 	return {
 		SUPABASE_URL: "https://project.supabase.co",

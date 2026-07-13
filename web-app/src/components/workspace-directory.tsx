@@ -36,7 +36,7 @@ import {
 	DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { triggerBrowserDownload } from "~/lib/download";
-import { isE2eAuthEnabled } from "~/lib/e2e-client";
+import { isDemoModeEnabled } from "~/lib/demo-client";
 import { formatCaughtError, formatRelativeTime } from "~/lib/format";
 import {
 	buildWorkspaceArchive,
@@ -66,7 +66,7 @@ export function WorkspaceDirectory() {
 	const workspaceState = useWorkspace();
 	const [dialog, setDialog] = useState<DialogState>(null);
 	const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
-	const signedIn = isE2eAuthEnabled || Boolean(auth.user);
+	const signedIn = isDemoModeEnabled || Boolean(auth.user);
 	const organizations = workspaceState.organizations;
 
 	useEffect(() => {
@@ -91,7 +91,7 @@ export function WorkspaceDirectory() {
 		};
 	}, [auth.getAccessToken, organizations]);
 
-	if ((!isE2eAuthEnabled && !auth.isLoaded) || !workspaceState.isLoaded) {
+	if ((!isDemoModeEnabled && !auth.isLoaded) || !workspaceState.isLoaded) {
 		return <DirectoryStatus>Loading workspaces…</DirectoryStatus>;
 	}
 	if (!signedIn) return <SignedOutDirectory />;
@@ -253,12 +253,19 @@ function McpQuickstart({
 			return false;
 		}
 	})();
-	const mcpServerName = isLocalhost ? "LixRay-Localhost" : "LixRay";
+	const mcpServerName = isDemoModeEnabled
+		? "LixRay-Demo"
+		: isLocalhost
+			? "LixRay-Localhost"
+			: "LixRay";
+	const connectionInstructions = isDemoModeEnabled
+		? `If it is missing or points to another URL, create or replace that registration using ${mcpUrl}. This demo MCP server is authless, so do not run MCP login and do not reuse or replace a production LixRay connection.`
+		: `If it is missing or points to another URL, create or replace that registration using ${mcpUrl} and complete its OAuth connection.${isLocalhost ? " Do not reuse a production LixRay connection for this localhost workspace." : ""} Ask me only when an authorization approval must be clicked.`;
 	const workspaceUrl = `${origin || "http://localhost:8787"}${workspacePath(
 		organization,
 		workspace,
 	)}`;
-	const instructions = `Set up LixRay for me end to end in Codex. Use a global MCP server named "${mcpServerName}" with the exact URL ${mcpUrl}. First inspect the existing MCP configuration. Reuse it only if both its name and URL match exactly. If it is missing or points to another URL, create or replace that registration using ${mcpUrl} and complete its OAuth connection. Do not reuse a production LixRay connection for this localhost workspace. Ask me only when an authorization approval must be clicked. If a newly connected MCP server requires a fresh Codex task, create that task and continue the setup there.
+	const instructions = `Set up LixRay for me end to end in Codex. Use a global MCP server named "${mcpServerName}" with the exact URL ${mcpUrl}. First inspect the existing MCP configuration. Reuse it only if both its name and URL match exactly. ${connectionInstructions} If a newly connected MCP server requires a fresh Codex task, create that task and continue the setup there.
 
 Use this exact workspace:
 - Name: ${workspace.name}
@@ -314,7 +321,7 @@ Open the workspace preview at ${workspaceUrl}. Do not create or edit any files y
 
 function DirectoryHeader() {
 	const { signOut, user } = useAuth();
-	const initial = isE2eAuthEnabled ? "M" : accountInitial(user?.user_metadata);
+	const initial = isDemoModeEnabled ? "M" : accountInitial(user?.user_metadata);
 
 	return (
 		<header className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4">
@@ -346,7 +353,7 @@ function DirectoryHeader() {
 							Workspace settings
 						</Link>
 					</DropdownMenuItem>
-					{isE2eAuthEnabled ? null : (
+					{isDemoModeEnabled ? null : (
 						<>
 							<DropdownMenuSeparator />
 							<DropdownMenuItem onSelect={() => void signOut()}>

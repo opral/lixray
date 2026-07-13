@@ -5,7 +5,7 @@ import {
 	type ActiveWorkspace,
 	useWorkspace,
 } from "~/components/workspace-provider";
-import { isE2eAuthEnabled } from "~/lib/e2e-client";
+import { isDemoModeEnabled } from "~/lib/demo-client";
 
 const workspaceEmptyClass =
 	"grid min-h-[calc(100vh_-_80px)] place-items-center px-5 py-10";
@@ -23,7 +23,7 @@ export function WorkspaceGate({
 }: {
 	children: (activeWorkspace: ActiveWorkspace) => ReactNode;
 }) {
-	if (isE2eAuthEnabled) {
+	if (isDemoModeEnabled) {
 		return <LoadedWorkspace>{children}</LoadedWorkspace>;
 	}
 	return <AuthenticatedWorkspaceGate>{children}</AuthenticatedWorkspaceGate>;

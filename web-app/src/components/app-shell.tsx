@@ -3,7 +3,7 @@ import { DatabaseZap, LogOut, Settings, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
-import { isE2eAuthEnabled } from "~/lib/e2e-client";
+import { isDemoModeEnabled } from "~/lib/demo-client";
 
 const brandClass =
 	"inline-flex items-center gap-2.5 font-[750] tracking-normal no-underline";
@@ -51,7 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 					<span>Lixray</span>
 				</Link>
 				<div className="flex items-center gap-3 max-[800px]:w-full max-[800px]:flex-wrap max-[800px]:justify-start">
-					{isE2eAuthEnabled ? null : (
+					{isDemoModeEnabled ? null : (
 						<>
 							<label className="sr-only" htmlFor="organization-switcher">
 								Organization
@@ -109,7 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 					>
 						<SquareTerminal size={16} aria-hidden="true" />
 					</Link>
-					{isE2eAuthEnabled ? null : (
+					{isDemoModeEnabled ? null : (
 						<>
 							<Link
 								to="/workspace"

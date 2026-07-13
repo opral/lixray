@@ -3,7 +3,10 @@ import type {
 	BranchesResponse,
 	ExecuteResponse,
 } from "../../src/lib/lixray-api";
-import { E2E_CREATED_WORKSPACE_ID } from "../../src/lib/e2e-auth";
+import {
+	DEMO_CREATED_WORKSPACE_ID,
+	DEMO_MAIN_BRANCH_ID,
+} from "../../src/lib/demo-identity";
 
 test("sign-in route renders without runtime errors", async ({ page }) => {
 	await page.goto("/sign-in");
@@ -21,6 +24,12 @@ test("sign-in route renders without runtime errors", async ({ page }) => {
 test("home lists workspaces and opens the canonical workspace route", async ({
 	page,
 }) => {
+	const supabaseRequests: string[] = [];
+	page.on("request", (request) => {
+		if (request.url().includes("supabase.co")) {
+			supabaseRequests.push(request.url());
+		}
+	});
 	await page.goto("/");
 
 	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
@@ -28,6 +37,12 @@ test("home lists workspaces and opens the canonical workspace route", async ({
 	const workspaceLink = page.getByRole("link", { name: /launch-q3/ });
 	await expect(workspaceLink).toBeVisible();
 	await expect(workspaceLink).toContainText(/\d+ files?/);
+	const mcpPrompt = page.locator(
+		"section[aria-labelledby='mcp-quickstart-title'] pre",
+	);
+	await expect(mcpPrompt).toContainText('named "LixRay-Demo"');
+	await expect(mcpPrompt).toContainText("demo MCP server is authless");
+	await expect(mcpPrompt).not.toContainText("complete its OAuth connection");
 	await expect(page.getByRole("heading", { name: "Files" })).toHaveCount(0);
 
 	await page.getByRole("button", { name: "Actions for launch-q3" }).click();
@@ -45,6 +60,7 @@ test("home lists workspaces and opens the canonical workspace route", async ({
 	await expect(
 		page.getByRole("link", { name: "Back to Lixray home" }),
 	).toBeVisible();
+	expect(supabaseRequests).toEqual([]);
 });
 
 test("workspace dialogs inherit Atelier's semantic theme", async ({ page }) => {
@@ -60,6 +76,14 @@ test("workspace dialogs inherit Atelier's semantic theme", async ({ page }) => {
 	await page.getByRole("textbox", { name: "Workspace name" }).fill("hello");
 
 	const tokens = await page.evaluate(() => {
+		const resolveCssValue = (property: string, value: string) => {
+			const probe = document.createElement("div");
+			probe.style.setProperty(property, value);
+			document.body.append(probe);
+			const resolved = getComputedStyle(probe).getPropertyValue(property);
+			probe.remove();
+			return resolved;
+		};
 		const style = (selector: string) => {
 			const element = document.querySelector(selector);
 			if (!element) throw new Error(`Missing ${selector}`);
@@ -81,16 +105,19 @@ test("workspace dialogs inherit Atelier's semantic theme", async ({ page }) => {
 			input: style("[data-testid='workspace-dialog-fields'] input"),
 			newWorkspace: style("[data-testid='new-workspace-button']"),
 			root: {
-				primary: root.getPropertyValue("--primary").trim(),
-				radius: root.getPropertyValue("--radius").trim(),
-				ring: root.getPropertyValue("--ring").trim(),
+				primary: resolveCssValue("color", root.getPropertyValue("--primary")),
+				radius: resolveCssValue(
+					"border-top-left-radius",
+					root.getPropertyValue("--radius"),
+				),
+				ring: resolveCssValue("color", root.getPropertyValue("--ring")),
 			},
 		};
 	});
 
 	expect(tokens.root).toEqual({
 		primary: "rgb(194, 65, 12)",
-		radius: "0.625rem",
+		radius: "10px",
 		ring: "rgb(194, 65, 12)",
 	});
 	expect(tokens.app.background).toBe("rgb(244, 242, 239)");
@@ -135,7 +162,7 @@ test("creates a workspace, cold-starts its storage, and opens Atelier", async ({
 		.fill("Fresh Workspace");
 	const branchesResponsePromise = page.waitForResponse(
 		(response) =>
-			response.url().includes(`/v1/workspaces/${E2E_CREATED_WORKSPACE_ID}/`) &&
+			response.url().includes(`/v1/workspaces/${DEMO_CREATED_WORKSPACE_ID}/`) &&
 			response.url().endsWith("/branches") &&
 			response.request().method() === "GET",
 		{ timeout: 55_000 },
@@ -187,6 +214,9 @@ test("sql console loads branches and executes a trivial query", async ({
 		branchesBody.branches.length,
 		JSON.stringify(branchesBody),
 	).toBeGreaterThan(0);
+	expect(
+		branchesBody.branches.find((branch) => branch.name === "main")?.id,
+	).toBe(DEMO_MAIN_BRANCH_ID);
 	await expect(page.getByText("Loading branches...")).toBeHidden({
 		timeout: 50_000,
 	});

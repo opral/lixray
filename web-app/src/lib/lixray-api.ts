@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
-import { E2E_AUTH_TOKEN } from "./e2e-auth";
-import { isE2eAuthEnabled } from "./e2e-client";
+import { isDemoModeEnabled } from "./demo-client";
+import { DEMO_AUTH_TOKEN } from "./demo-identity";
 import type {
 	FilesystemMutationOutcome,
 	FilesystemMutationRequest,
@@ -69,8 +69,8 @@ export function useLixrayApi() {
 
 	const request = useCallback(
 		async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-			const token = isE2eAuthEnabled
-				? E2E_AUTH_TOKEN
+			const token = isDemoModeEnabled
+				? DEMO_AUTH_TOKEN
 				: await getTokenRef.current();
 			if (!token) {
 				throw new LixrayApiError(401, {

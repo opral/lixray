@@ -5,8 +5,13 @@ import react from "@vitejs/plugin-react";
 import process from "node:process";
 import { defineConfig } from "vite";
 
-const useE2eWorkerConfig =
-	process.env.VITE_LIXRAY_E2E === "1" || process.env.LIXRAY_E2E_SERVER === "1";
+const workerTarget = process.env.LIXRAY_WORKER_TARGET ?? "production";
+const workerConfigPath =
+	workerTarget === "preview"
+		? "./wrangler.preview.jsonc"
+		: workerTarget === "e2e"
+			? "./wrangler.e2e.jsonc"
+			: "./wrangler.jsonc";
 
 export default defineConfig({
 	resolve: {
@@ -14,9 +19,7 @@ export default defineConfig({
 	},
 	plugins: [
 		cloudflare({
-			configPath: useE2eWorkerConfig
-				? "./wrangler.e2e.jsonc"
-				: "./wrangler.jsonc",
+			configPath: workerConfigPath,
 			viteEnvironment: { name: "ssr" },
 			config: (config) => ({
 				vars: {
@@ -27,21 +30,28 @@ export default defineConfig({
 						process.env.SUPABASE_PUBLISHABLE_KEY ??
 						config.vars?.SUPABASE_PUBLISHABLE_KEY,
 					SUPABASE_URL: process.env.SUPABASE_URL ?? config.vars?.SUPABASE_URL,
-					LIXRAY_E2E_WORKSPACE_ID:
-						process.env.LIXRAY_E2E_WORKSPACE_ID ??
-						config.vars?.LIXRAY_E2E_WORKSPACE_ID ??
+					LIXRAY_DEMO:
+						process.env.LIXRAY_DEMO ?? config.vars?.LIXRAY_DEMO ?? "",
+					LIXRAY_DEMO_WORKSPACE_IDS:
+						process.env.LIXRAY_DEMO_WORKSPACE_IDS ??
+						config.vars?.LIXRAY_DEMO_WORKSPACE_IDS ??
 						"",
-					LIXRAY_E2E_WORKSPACE_IDS:
-						process.env.LIXRAY_E2E_WORKSPACE_IDS ??
-						config.vars?.LIXRAY_E2E_WORKSPACE_IDS ??
-						"",
-					SLATEDB_STORAGE:
-						process.env.SLATEDB_STORAGE ?? config.vars?.SLATEDB_STORAGE ?? "r2",
+					...((process.env.SLATEDB_STORAGE ?? config.vars?.SLATEDB_STORAGE)
+						? {
+								SLATEDB_STORAGE:
+									process.env.SLATEDB_STORAGE ?? config.vars?.SLATEDB_STORAGE,
+							}
+						: {}),
 				},
 			}),
 		}),
 		tailwindcss(),
-		tanstackStart(),
+		tanstackStart({
+			spa: {
+				enabled: workerTarget !== "production",
+				prerender: { outputPath: "/index.html" },
+			},
+		}),
 		react(),
 	],
 });

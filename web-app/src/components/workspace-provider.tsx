@@ -9,13 +9,13 @@ import {
 } from "react";
 import { useAuth } from "~/components/auth-provider";
 import {
-	E2E_CREATED_WORKSPACE_ID,
-	E2E_ORGANIZATION_ID,
-	E2E_ORGANIZATION_NAME,
-	E2E_WORKSPACE_ID,
-	E2E_WORKSPACE_NAME,
-} from "~/lib/e2e-auth";
-import { isE2eAuthEnabled } from "~/lib/e2e-client";
+	DEMO_CREATED_WORKSPACE_ID,
+	DEMO_ORGANIZATION_ID,
+	DEMO_ORGANIZATION_NAME,
+	DEMO_WORKSPACE_ID,
+	DEMO_WORKSPACE_NAME,
+} from "~/lib/demo-identity";
+import { isDemoModeEnabled } from "~/lib/demo-client";
 import type { LixraySupabaseClient } from "~/lib/supabase";
 
 export type OrganizationRole = "owner" | "member";
@@ -68,8 +68,8 @@ interface WorkspaceContextValue {
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-	if (isE2eAuthEnabled) {
-		return <E2eWorkspaceProvider>{children}</E2eWorkspaceProvider>;
+	if (isDemoModeEnabled) {
+		return <DemoWorkspaceProvider>{children}</DemoWorkspaceProvider>;
 	}
 	return <SupabaseWorkspaceProvider>{children}</SupabaseWorkspaceProvider>;
 }
@@ -388,35 +388,33 @@ async function loadOrganizations(
 		.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
-function E2eWorkspaceProvider({ children }: { children: ReactNode }) {
+function DemoWorkspaceProvider({ children }: { children: ReactNode }) {
 	const [organization, setOrganization] = useState<Organization>(() => ({
-		id: E2E_ORGANIZATION_ID,
-		name: E2E_ORGANIZATION_NAME,
-		handle: E2E_ORGANIZATION_NAME,
+		id: DEMO_ORGANIZATION_ID,
+		name: DEMO_ORGANIZATION_NAME,
+		handle: DEMO_ORGANIZATION_NAME,
 		role: "owner",
 		createdAt: "2026-07-01T12:00:00.000Z",
 		updatedAt: "2026-07-12T18:58:00.000Z",
 		workspaces: [
 			{
-				id: E2E_WORKSPACE_ID,
-				organizationId: E2E_ORGANIZATION_ID,
-				name: E2E_WORKSPACE_NAME,
-				slug: E2E_WORKSPACE_NAME,
+				id: DEMO_WORKSPACE_ID,
+				organizationId: DEMO_ORGANIZATION_ID,
+				name: DEMO_WORKSPACE_NAME,
+				slug: DEMO_WORKSPACE_NAME,
 				createdAt: "2026-07-01T12:00:00.000Z",
 				updatedAt: "2026-07-12T18:58:00.000Z",
 			},
 		],
 	}));
 	const [selectedWorkspaceId, setSelectedWorkspaceId] =
-		useState(E2E_WORKSPACE_ID);
+		useState(DEMO_WORKSPACE_ID);
 	const selectedWorkspace =
 		organization.workspaces.find(
 			(workspace) => workspace.id === selectedWorkspaceId,
 		) ?? organization.workspaces[0];
 	const unsupported = () =>
-		Promise.reject(
-			new Error("Workspace mutation is unavailable in E2E auth mode"),
-		);
+		Promise.reject(new Error("Workspace mutation is unavailable in demo mode"));
 	const createWorkspace = (name: string, organizationId?: string) => {
 		if (organizationId && organizationId !== organization.id) {
 			throw new Error("Create or select an organization first");
@@ -424,7 +422,7 @@ function E2eWorkspaceProvider({ children }: { children: ReactNode }) {
 		const normalizedName = normalizeName(name, "Workspace");
 		const now = new Date().toISOString();
 		const workspace: Workspace = {
-			id: E2E_CREATED_WORKSPACE_ID,
+			id: DEMO_CREATED_WORKSPACE_ID,
 			organizationId: organization.id,
 			name: normalizedName,
 			slug: workspaceSlug(normalizedName),
@@ -436,7 +434,7 @@ function E2eWorkspaceProvider({ children }: { children: ReactNode }) {
 			updatedAt: now,
 			workspaces: [
 				...current.workspaces.filter(
-					(candidate) => candidate.id !== E2E_CREATED_WORKSPACE_ID,
+					(candidate) => candidate.id !== DEMO_CREATED_WORKSPACE_ID,
 				),
 				workspace,
 			],

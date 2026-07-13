@@ -1,37 +1,11 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "lixray-e2e",
-	"main": "src/server.ts",
+	"main": "src/preview-server.ts",
 	"compatibility_date": "2026-07-07",
 	"compatibility_flags": ["nodejs_compat"],
 	"vars": {
-		"LIXRAY_E2E_WORKSPACE_ID": "",
-		"LIXRAY_E2E_WORKSPACE_IDS": "",
-		"SLATEDB_STORAGE": "memory",
+		"LIXRAY_DEMO": "",
+		"LIXRAY_DEMO_WORKSPACE_IDS": "",
 	},
-	"containers": [
-		{
-			"class_name": "SlateDbContainer",
-			"image": "../lix-server/Dockerfile",
-			"image_vars": {
-				"LIXRAY_IMAGE_VARIANT": "e2e",
-			},
-			"max_instances": 10,
-			"instance_type": "basic",
-		},
-	],
-	"durable_objects": {
-		"bindings": [
-			{
-				"name": "SLATEDB_CONTAINER",
-				"class_name": "SlateDbContainer",
-			},
-		],
-	},
-	"migrations": [
-		{
-			"tag": "v1",
-			"new_sqlite_classes": ["SlateDbContainer"],
-		},
-	],
 }

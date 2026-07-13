@@ -1,7 +1,7 @@
-import type { Page } from "@playwright/test";
+import type { Page, Request } from "@playwright/test";
 import { expect, expectOk, test } from "./fixtures";
 import type { BranchesResponse } from "../../src/lib/lixray-api";
-import { E2E_AUTH_TOKEN } from "../../src/lib/e2e-auth";
+import { DEMO_AUTH_TOKEN } from "../../src/lib/demo-identity";
 
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
 const FILE_PATH = "/atelier-first-slice.md";
@@ -9,6 +9,7 @@ const FILE_PATH = "/atelier-first-slice.md";
 test("Atelier renders the remote workspace and keeps file navigation in its host", async ({
 	page,
 }) => {
+	const pendingExecutes = trackPageExecutes(page);
 	await seedMarkdownFile(page);
 	await page.goto("/@acme/launch-q3");
 
@@ -26,6 +27,7 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 	).toBeVisible({
 		timeout: 30_000,
 	});
+	await settlePageExecutes(page, pendingExecutes);
 
 	await page.reload();
 	await expect(page).toHaveURL(
@@ -39,10 +41,36 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 	await expect(
 		page.getByRole("link", { name: "Back to Lixray home" }),
 	).toBeVisible();
+	await settlePageExecutes(page, pendingExecutes);
 });
 
+function trackPageExecutes(page: Page): Set<Request> {
+	const requests = new Set<Request>();
+	page.on("request", (request) => {
+		if (
+			request.method() === "POST" &&
+			new URL(request.url()).pathname.endsWith("/execute")
+		) {
+			requests.add(request);
+		}
+	});
+	page.on("requestfinished", (request) => requests.delete(request));
+	page.on("requestfailed", (request) => requests.delete(request));
+	return requests;
+}
+
+async function settlePageExecutes(page: Page, requests: Set<Request>) {
+	await page.evaluate(
+		() =>
+			new Promise<void>((resolve) =>
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+			),
+	);
+	await expect.poll(() => requests.size).toBe(0);
+}
+
 async function seedMarkdownFile(page: Page) {
-	const headers = { Authorization: `Bearer ${E2E_AUTH_TOKEN}` };
+	const headers = { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` };
 	const branchesResponse = await page.request.get(
 		`/v1/workspaces/${WORKSPACE_ID}/branches`,
 		{ headers },

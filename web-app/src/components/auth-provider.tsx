@@ -10,6 +10,8 @@ import {
 } from "react";
 import { getBrowserSupabaseClient, localDevCredentials } from "~/lib/supabase";
 import type { LixraySupabaseClient } from "~/lib/supabase";
+import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
+import { isDemoModeEnabled } from "~/lib/demo-client";
 
 const RETURN_TO_KEY = "lixray.auth.return-to";
 
@@ -27,6 +29,35 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+	return isDemoModeEnabled ? (
+		<DemoAuthProvider>{children}</DemoAuthProvider>
+	) : (
+		<SupabaseAuthProvider>{children}</SupabaseAuthProvider>
+	);
+}
+
+function DemoAuthProvider({ children }: { children: ReactNode }) {
+	const unsupported = useCallback(
+		() => Promise.reject(new Error("Authentication is disabled in demo mode")),
+		[],
+	);
+	const value = useMemo<AuthContextValue>(
+		() => ({
+			isLoaded: true,
+			session: null,
+			user: null,
+			client: null,
+			getAccessToken: () => Promise.resolve(DEMO_AUTH_TOKEN),
+			signInAsLocalDev: unsupported,
+			signInWithGoogle: unsupported,
+			signOut: () => Promise.resolve(),
+		}),
+		[unsupported],
+	);
+	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 	const [client, setClient] = useState<LixraySupabaseClient | null>(null);
 	const [session, setSession] = useState<Session | null>(null);
 	const [isLoaded, setIsLoaded] = useState(false);
