@@ -60,11 +60,11 @@ interface ToolDefinition {
 
 export function createLixrayMcpServer(service: LixFileService): Server {
 	const server = new Server(
-		{ name: "lixray", version: "0.1.0" },
+		{ name: "LixRay", version: "0.1.0" },
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"Use Lixray tools to work with private workspace files. First list workspaces and branches. Always read an existing entry and use its revision before editing, moving, replacing, or deleting it. Never guess IDs or revisions. The execute tool runs raw Lix SQL and may bypass file safeguards; use it only when the user requests SQL or the file tools cannot perform the task.",
+				"Use LixRay tools to work with private workspace files. First list workspaces and branches. Always read an existing entry and use its revision before editing, moving, replacing, or deleting it. Never guess IDs or revisions. The execute tool runs raw Lix SQL and may bypass file safeguards; use it only when the user requests SQL or the file tools cannot perform the task.",
 		},
 	);
 	const tools = buildTools(service);
@@ -101,11 +101,11 @@ export function createLixrayMcpServer(service: LixFileService): Server {
 			if (caught instanceof FileServiceError) {
 				return errorResult(caught.code, caught.message, caught.details);
 			}
-			console.error("Lixray MCP tool failed", {
+			console.error("LixRay MCP tool failed", {
 				tool: tool.descriptor.name,
 				error: errorDetails(caught),
 			});
-			return errorResult("internal_error", "The Lixray tool call failed.");
+			return errorResult("internal_error", "The LixRay tool call failed.");
 		}
 	});
 
@@ -153,10 +153,19 @@ export function protectedResourceMetadataResponse(): Response {
 export function mcpDocumentationResponse(): Response {
 	return new Response(
 		[
-			"Lixray MCP",
+			"LixRay MCP",
 			"",
 			`Endpoint: ${MCP_RESOURCE}${MCP_PATH}`,
 			"Authentication: Supabase OAuth 2.1 with PKCE and dynamic client registration.",
+			"",
+			"Your LixRay browser session and your MCP client authorization are separate. Being signed in at lixray.com does not mean that Codex or another MCP client has a usable access and refresh token.",
+			"",
+			"Connection check:",
+			"1. Confirm this endpoint is registered exactly once for the environment you intend to use.",
+			"2. Revoke or log out the MCP connection, then authorize it again.",
+			"3. Verify that initialize, tools/list, and list_workspaces all succeed in a fresh client process.",
+			"",
+			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
 			"The server exposes explicit-workspace, explicit-branch tools for listing, reading, creating, editing, moving, and deleting UTF-8 text files up to 1 MiB, plus a destructive raw Lix SQL execute tool. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards.",
 		].join("\n"),
@@ -171,7 +180,7 @@ export function mcpDocumentationResponse(): Response {
 
 export function mcpUnauthorizedResponse(
 	error = "invalid_token",
-	description = "Sign in to Lixray to continue.",
+	description = "Sign in to LixRay to continue.",
 ): Response {
 	const challenge = mcpAuthenticateChallenge(error, description);
 	return Response.json(
@@ -192,7 +201,7 @@ export function mcpUnauthorizedResponse(
 
 export function mcpAuthenticateChallenge(
 	error = "invalid_token",
-	description = "Sign in to Lixray to continue.",
+	description = "Sign in to LixRay to continue.",
 ): string {
 	return `Bearer resource_metadata="${MCP_PROTECTED_RESOURCE_URL}", scope="${MCP_SCOPES.join(" ")}", error="${error}", error_description="${description.replaceAll('"', "'")}"`;
 }
@@ -202,7 +211,7 @@ function buildTools(service: LixFileService): Array<ToolDefinition> {
 		tool(
 			"list_workspaces",
 			"List workspaces",
-			"List the Lixray workspaces the signed-in user can access.",
+			"List the LixRay workspaces the signed-in user can access.",
 			z.object({}).strict(),
 			readAnnotations(),
 			async () => ({ workspaces: await service.listWorkspaces() }),

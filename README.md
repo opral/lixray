@@ -28,13 +28,13 @@ workspace-scoped `/v1/*` requests before delegating all other routes to Start.
 
 ## ChatGPT MCP app
 
-Lixray exposes a stateless Streamable HTTP MCP server at:
+LixRay exposes a stateless Streamable HTTP MCP server at:
 
 ```text
 https://lixray.com/mcp
 ```
 
-`GET /.well-known/oauth-protected-resource` advertises the Lixray resource and
+`GET /.well-known/oauth-protected-resource` advertises the LixRay resource and
 the Supabase Auth OAuth 2.1 server. ChatGPT dynamically registers a client,
 uses PKCE, and sends a Supabase ES256 access token bound to
 `resource=https://lixray.com`. The Worker validates the token's issuer,
@@ -170,8 +170,52 @@ points back to the protected-resource metadata. Use MCP Inspector to verify
 discovery, consent, token refresh/revocation, `initialize`, `tools/list`, and a
 read/write/conflict cycle.
 
+The website login and MCP authorization are separate sessions. A working
+browser preview does not prove that an MCP client received and persisted its
+OAuth credentials. Supabase's authorization-code exchange returns a refresh
+token without an `offline_access` resource scope; do not add `offline_access`
+to the protected-resource metadata.
+
+For a non-interactive post-authorization check, run the probe with a temporary
+OAuth access token (never commit or paste the token into logs):
+
+```sh
+cd web-app
+LIXRAY_MCP_ACCESS_TOKEN='<token>' pnpm check:mcp
+```
+
+The probe starts a new MCP client, performs `initialize`, requests
+`tools/list`, calls `list_workspaces`, and fails if the discovery metadata does
+not advertise the authorization-code and refresh-token grants. Set
+`LIXRAY_MCP_URL` to test an environment other than `https://lixray.com/mcp`.
+
+Use one production registration with an explicit OAuth resource:
+
+```sh
+codex mcp add LixRay \
+  --url https://lixray.com/mcp \
+  --oauth-resource https://lixray.com
+codex mcp login LixRay
+```
+
+Only register the local server while actively developing it, under the distinct
+name `LixRay-Dev`:
+
+```sh
+codex mcp add LixRay-Dev \
+  --url http://localhost:8787/mcp \
+  --oauth-resource https://lixray.com
+```
+
+Do not leave production and inactive localhost or preview registrations enabled
+together. Check `codex mcp list` and remove stale entries before reconnecting.
+If Codex reports `No refresh token available`, run `codex mcp logout <name>`
+followed by `codex mcp login <name>`. If it recurs, record the Codex version,
+exact MCP URL, and attempt time without recording either token. A successful CLI
+login should still be followed by a fresh-task `list_workspaces` call.
+
 In ChatGPT, enable developer mode, create a developer-mode app named
-**Lixray**, describe it as a safe workspace file editor, and use
+**LixRay**, describe it as a safe workspace file editor, and use
 `https://lixray.com/mcp` as its MCP URL.
 
 ## Local development

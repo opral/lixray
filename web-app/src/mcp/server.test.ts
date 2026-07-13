@@ -15,6 +15,7 @@ import {
 	MCP_RESOURCE,
 	createLixrayMcpServer,
 	mcpAuthenticateChallenge,
+	mcpDocumentationResponse,
 	mcpUnauthorizedResponse,
 	protectedResourceMetadataResponse,
 } from "./server.ts";
@@ -47,6 +48,19 @@ void test("protected resource discovery advertises the Supabase authorization se
 		error_description: "Expired.",
 		_meta: { "mcp/www_authenticate": [challenge] },
 	});
+});
+
+void test("MCP documentation distinguishes browser and client authentication", async () => {
+	const response = mcpDocumentationResponse();
+	assert.equal(response.status, 200);
+	const documentation = await response.text();
+	assert.match(
+		documentation,
+		/browser session and your MCP client authorization are separate/,
+	);
+	assert.match(documentation, /initialize, tools\/list, and list_workspaces/);
+	assert.match(documentation, /no refresh token is available/);
+	assert.match(documentation, /do not include access or refresh tokens/);
 });
 
 void test("MCP initialize, tools/list, and tools/call expose the authenticated tool contract", async () => {
