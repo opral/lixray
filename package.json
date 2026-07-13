@@ -1,8 +1,8 @@
 {
-	"name": "lixray-workspace",
-	"private": true,
-	"packageManager": "pnpm@10.13.1",
-	"scripts": {
-		"dev": "node scripts/dev.mjs"
-	}
+  "name": "lixray-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.13.1",
+  "scripts": {
+    "dev": "node scripts/dev.mjs"
+  }
 }

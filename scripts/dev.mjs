@@ -1,7 +1,10 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { dirname } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const signalExitCodes = {
 	SIGHUP: 129,
 	SIGINT: 130,
@@ -21,6 +24,7 @@ for (const signal of Object.keys(signalExitCodes)) {
 
 databaseStartAttempted = true;
 const database = spawnSync(pnpm, ["--dir", "database", "start"], {
+	cwd: repositoryRoot,
 	stdio: "inherit",
 });
 
@@ -34,7 +38,7 @@ const localSupabase = parseEnv(
 	execFileSync(
 		pnpm,
 		["--dir", "database", "exec", "supabase", "status", "-o", "env"],
-		{ encoding: "utf8" },
+		{ cwd: repositoryRoot, encoding: "utf8" },
 	),
 );
 const supabaseUrl = localSupabase.API_URL;
@@ -57,20 +61,50 @@ await ensureLocalDevUser({
 	supabaseUrl,
 });
 
-webApp = spawn(pnpm, ["--dir", "web-app", "dev"], {
-	stdio: "inherit",
-	env: {
-		...process.env,
-		SUPABASE_JWKS_URL: `${supabaseUrl.replace(/\/$/, "")}/auth/v1/.well-known/jwks.json`,
-		SUPABASE_PUBLISHABLE_KEY: supabaseKey,
-		SUPABASE_URL: supabaseUrl,
-		VITE_LIXRAY_LOCAL_DEV: "1",
-		VITE_LIXRAY_LOCAL_DEV_EMAIL: localDevEmail,
-		VITE_LIXRAY_LOCAL_DEV_PASSWORD: localDevPassword,
-		VITE_SUPABASE_KEY: supabaseKey,
-		VITE_SUPABASE_URL: supabaseUrl,
+const atelierBuild = spawnSync(
+	pnpm,
+	["--dir", "web-app", "run", "atelier:build"],
+	{
+		cwd: repositoryRoot,
+		stdio: "inherit",
 	},
-});
+);
+if (atelierBuild.error) throw atelierBuild.error;
+if (atelierBuild.status !== 0) process.exit(atelierBuild.status ?? 1);
+
+const devPort = process.env.LIXRAY_DEV_PORT ?? "8787";
+const devHost = process.env.LIXRAY_DEV_HOST ?? "localhost";
+
+webApp = spawn(
+	pnpm,
+	[
+		"--dir",
+		"web-app",
+		"exec",
+		"vite",
+		"dev",
+		"--host",
+		devHost,
+		"--port",
+		devPort,
+	],
+	{
+		cwd: repositoryRoot,
+		stdio: "inherit",
+		env: {
+			...process.env,
+			SLATEDB_STORAGE: process.env.SLATEDB_STORAGE ?? "memory",
+			SUPABASE_JWKS_URL: `${supabaseUrl.replace(/\/$/, "")}/auth/v1/.well-known/jwks.json`,
+			SUPABASE_PUBLISHABLE_KEY: supabaseKey,
+			SUPABASE_URL: supabaseUrl,
+			VITE_LIXRAY_LOCAL_DEV: "1",
+			VITE_LIXRAY_LOCAL_DEV_EMAIL: localDevEmail,
+			VITE_LIXRAY_LOCAL_DEV_PASSWORD: localDevPassword,
+			VITE_SUPABASE_KEY: supabaseKey,
+			VITE_SUPABASE_URL: supabaseUrl,
+		},
+	},
+);
 
 webApp.on("error", (error) => {
 	console.error(error);
@@ -99,7 +133,10 @@ function handleSignal(signal) {
 function stopDatabase() {
 	if (!databaseStartAttempted || databaseStopped) return;
 	databaseStopped = true;
-	spawnSync(pnpm, ["--dir", "database", "stop"], { stdio: "inherit" });
+	spawnSync(pnpm, ["--dir", "database", "stop"], {
+		cwd: repositoryRoot,
+		stdio: "inherit",
+	});
 }
 
 async function ensureLocalDevUser({ email, password, secretKey, supabaseUrl }) {

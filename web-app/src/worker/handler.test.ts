@@ -340,6 +340,35 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 	assert.deepEqual(await proxiedRequest.json(), { sql: "SELECT 1" });
 });
 
+void test("container startup failures return a controlled 503 response", async () => {
+	let fetched = false;
+	const response = await handleRequest(
+		workspaceRequest(WORKSPACE_A, "/branches"),
+		env({
+			getByName: () => ({
+				startAndWaitForPorts: async () => {
+					throw new Error("Container failed to start");
+				},
+				fetch: async () => {
+					fetched = true;
+					return new Response("unexpected");
+				},
+			}),
+		}),
+		{ authenticate: authenticated(), authorizeWorkspace: allowed() },
+	);
+
+	assert.equal(response.status, 503);
+	assert.equal(response.headers.get("retry-after"), "1");
+	assert.equal(fetched, false);
+	assert.deepEqual(await response.json(), {
+		error: {
+			code: "CONTAINER_UNAVAILABLE",
+			message: "Workspace storage is temporarily unavailable.",
+		},
+	});
+});
+
 void test("two workspaces route to distinct containers", async () => {
 	const names: Array<string> = [];
 	const testEnv = env({

@@ -34,6 +34,7 @@ export interface WorkerEnv {
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
 	SLATEDB_METADATA_CACHE_BYTES?: string;
 	LIXRAY_E2E_WORKSPACE_ID?: string;
+	LIXRAY_E2E_WORKSPACE_IDS?: string;
 }
 
 export interface ContainerNamespace {
@@ -182,12 +183,24 @@ export async function handleRequest(
 	if (authorizationFailure) return authorizationFailure;
 
 	const container = env.SLATEDB_CONTAINER.getByName(workspaceId);
-	await container.startAndWaitForPorts?.({
-		ports: 8080,
-		startOptions: {
-			envVars: containerEnv(env, workspaceId),
-		},
-	});
+	try {
+		await container.startAndWaitForPorts?.({
+			ports: 8080,
+			startOptions: {
+				envVars: containerEnv(env, workspaceId),
+			},
+		});
+	} catch {
+		return Response.json(
+			{
+				error: {
+					code: "CONTAINER_UNAVAILABLE",
+					message: "Workspace storage is temporarily unavailable.",
+				},
+			},
+			{ status: 503, headers: { "Retry-After": "1" } },
+		);
+	}
 	return container.fetch(rewriteWorkspaceRequest(request, match[2]));
 }
 
@@ -344,7 +357,7 @@ export async function authorizeWorkspaceWithSupabase(
 	env: WorkerEnv,
 ): Promise<Response | null> {
 	if (auth.isE2e) {
-		return workspaceId === env.LIXRAY_E2E_WORKSPACE_ID
+		return e2eWorkspaceIds(env).has(workspaceId)
 			? null
 			: new Response("Workspace access denied\n", { status: 403 });
 	}
@@ -400,7 +413,7 @@ function workspaceRowId(value: unknown): unknown {
 }
 
 function authenticateE2e(request: Request, env: WorkerEnv): AuthResult | null {
-	if (!env.LIXRAY_E2E_WORKSPACE_ID) return null;
+	if (e2eWorkspaceIds(env).size === 0) return null;
 	if (!isLocalhost(new URL(request.url).hostname)) return null;
 	if (request.headers.get("Authorization") !== `Bearer ${E2E_AUTH_TOKEN}`) {
 		return null;
@@ -409,6 +422,15 @@ function authenticateE2e(request: Request, env: WorkerEnv): AuthResult | null {
 		ok: true,
 		auth: { userId: "lixray-e2e", token: E2E_AUTH_TOKEN, isE2e: true },
 	};
+}
+
+function e2eWorkspaceIds(env: WorkerEnv): Set<string> {
+	return new Set(
+		(env.LIXRAY_E2E_WORKSPACE_IDS ?? env.LIXRAY_E2E_WORKSPACE_ID ?? "")
+			.split(",")
+			.map((workspaceId) => workspaceId.trim())
+			.filter(Boolean),
+	);
 }
 
 function bearerToken(request: Request): string | null {

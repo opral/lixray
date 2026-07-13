@@ -32,16 +32,18 @@ export interface Database {
 				Row: {
 					id: string;
 					name: string;
+					handle: string;
 					created_at: string;
 					updated_at: string;
 				};
 				Insert: {
 					id?: string;
 					name: string;
+					handle?: string;
 					created_at?: string;
 					updated_at?: string;
 				};
-				Update: { name?: string; updated_at?: string };
+				Update: { name?: string; handle?: string; updated_at?: string };
 				Relationships: [];
 			};
 			organization_members: {
@@ -73,17 +75,26 @@ export interface Database {
 					id: string;
 					organization_id: string;
 					name: string;
+					slug: string;
 					created_at: string;
 					updated_at: string;
+					deleted_at: string | null;
 				};
 				Insert: {
 					id?: string;
 					organization_id: string;
 					name: string;
+					slug?: string;
 					created_at?: string;
 					updated_at?: string;
+					deleted_at?: string | null;
 				};
-				Update: { name?: string; updated_at?: string };
+				Update: {
+					name?: string;
+					slug?: string;
+					updated_at?: string;
+					deleted_at?: string | null;
+				};
 				Relationships: [
 					{
 						foreignKeyName: "workspaces_organization_id_fkey";
@@ -169,6 +180,10 @@ export interface Database {
 			};
 			leave_organization: {
 				Args: { p_organization_id: string };
+				Returns: undefined;
+			};
+			delete_workspace: {
+				Args: { p_workspace_id: string };
 				Returns: undefined;
 			};
 		};

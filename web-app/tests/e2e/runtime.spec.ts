@@ -3,11 +3,14 @@ import type {
 	BranchesResponse,
 	ExecuteResponse,
 } from "../../src/lib/lixray-api";
+import { E2E_CREATED_WORKSPACE_ID } from "../../src/lib/e2e-auth";
 
 test("sign-in route renders without runtime errors", async ({ page }) => {
 	await page.goto("/sign-in");
 
-	await expect(page.locator(".auth-card")).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "Sign in to Lixray" }),
+	).toBeVisible();
 	await expect(
 		page.getByRole("button", { name: "Continue with Google" }),
 	).toBeVisible();
@@ -15,17 +18,148 @@ test("sign-in route renders without runtime errors", async ({ page }) => {
 	await expect(page.getByText(/Microsoft/i)).toHaveCount(0);
 });
 
-test("dev workspace renders Atelier and can return home", async ({ page }) => {
-	await page.goto("/@dev/workspace");
+test("home lists workspaces and opens the canonical workspace route", async ({
+	page,
+}) => {
+	await page.goto("/");
 
-	const homeLink = page.getByRole("link", { name: "Back to Lixray home" });
-	await expect(homeLink).toBeVisible({ timeout: 30_000 });
-	await expect(page.getByText("LixRay + Atelier")).toBeVisible({
-		timeout: 30_000,
+	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "acme" })).toBeVisible();
+	const workspaceLink = page.getByRole("link", { name: /launch-q3/ });
+	await expect(workspaceLink).toBeVisible();
+	await expect(workspaceLink).toContainText(/\d+ files?/);
+	await expect(page.getByRole("heading", { name: "Files" })).toHaveCount(0);
+
+	await page.getByRole("button", { name: "Actions for launch-q3" }).click();
+	await expect(page.getByRole("menuitem", { name: "Rename" })).toBeVisible();
+	await expect(page.getByRole("menuitem", { name: "Copy URL" })).toBeVisible();
+	await page.keyboard.press("Escape");
+
+	await workspaceLink.click();
+	await expect(page).toHaveURL(/\/@acme\/launch-q3$/);
+	await expect(
+		page.getByRole("button", { name: "Toggle left panel" }),
+	).toBeVisible({
+		timeout: 55_000,
+	});
+	await expect(
+		page.getByRole("link", { name: "Back to Lixray home" }),
+	).toBeVisible();
+});
+
+test("workspace dialogs inherit Atelier's semantic theme", async ({ page }) => {
+	await page.goto("/");
+	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
+	await expect(page.getByRole("link", { name: /launch-q3/ })).toContainText(
+		/\d+ files?/,
+	);
+	await page.getByRole("button", { name: "New workspace" }).click();
+	await expect(
+		page.getByRole("dialog", { name: "New workspace" }),
+	).toBeVisible();
+	await page.getByRole("textbox", { name: "Workspace name" }).fill("hello");
+
+	const tokens = await page.evaluate(() => {
+		const style = (selector: string) => {
+			const element = document.querySelector(selector);
+			if (!element) throw new Error(`Missing ${selector}`);
+			const computed = getComputedStyle(element);
+			return {
+				background: computed.backgroundColor,
+				border: computed.borderColor,
+				boxShadow: computed.boxShadow,
+				color: computed.color,
+				font: computed.fontFamily,
+			};
+		};
+		const root = getComputedStyle(document.documentElement);
+		return {
+			app: style("[data-testid='workspace-directory']"),
+			cancel: style("[data-slot='dialog-footer'] [data-variant='outline']"),
+			create: style("[data-slot='dialog-footer'] [data-variant='default']"),
+			dialog: style("[data-slot='dialog-content']"),
+			input: style("[data-testid='workspace-dialog-fields'] input"),
+			newWorkspace: style("[data-testid='new-workspace-button']"),
+			root: {
+				primary: root.getPropertyValue("--primary").trim(),
+				radius: root.getPropertyValue("--radius").trim(),
+				ring: root.getPropertyValue("--ring").trim(),
+			},
+		};
 	});
 
-	await homeLink.click();
-	await expect(page).toHaveURL(/\/$/);
+	expect(tokens.root).toEqual({
+		primary: "rgb(194, 65, 12)",
+		radius: "0.625rem",
+		ring: "rgb(194, 65, 12)",
+	});
+	expect(tokens.app.background).toBe("rgb(244, 242, 239)");
+	expect(tokens.app.font).toContain("ui-sans-serif");
+	expect(tokens.dialog.background).toBe("rgb(255, 255, 255)");
+	expect(tokens.dialog.border).toBe("rgb(236, 232, 226)");
+	expect(tokens.create.background).toBe("rgb(194, 65, 12)");
+	expect(tokens.create.color).toBe("rgb(255, 255, 255)");
+	expect(tokens.newWorkspace.background).toBe(tokens.create.background);
+	expect(tokens.newWorkspace.color).toBe(tokens.create.color);
+	expect(tokens.cancel.border).toBe("rgb(236, 232, 226)");
+	expect(tokens.input.boxShadow).toContain("rgb(194, 65, 12)");
+
+	const createButton = page.getByRole("button", { name: "Create workspace" });
+	await createButton.hover();
+	await expect
+		.poll(() =>
+			createButton.evaluate(
+				(element) => getComputedStyle(element).backgroundColor,
+			),
+		)
+		.toBe("rgb(154, 52, 18)");
+});
+
+test("creates a workspace, cold-starts its storage, and opens Atelier", async ({
+	page,
+}) => {
+	test.setTimeout(120_000);
+	await page.goto("/");
+	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
+	await expect(page.getByRole("link", { name: /launch-q3/ })).toContainText(
+		/\d+ files?/,
+		{ timeout: 55_000 },
+	);
+
+	await page.getByRole("button", { name: "New workspace" }).click();
+	await expect(
+		page.getByRole("dialog", { name: "New workspace" }),
+	).toBeVisible();
+	await page
+		.getByRole("textbox", { name: "Workspace name" })
+		.fill("Fresh Workspace");
+	const branchesResponsePromise = page.waitForResponse(
+		(response) =>
+			response.url().includes(`/v1/workspaces/${E2E_CREATED_WORKSPACE_ID}/`) &&
+			response.url().endsWith("/branches") &&
+			response.request().method() === "GET",
+		{ timeout: 55_000 },
+	);
+	await page.getByRole("button", { name: "Create workspace" }).click();
+
+	const branchesResponse = await branchesResponsePromise;
+	await expectOk(branchesResponse);
+	await expect(
+		page.getByRole("dialog", { name: "New workspace" }),
+	).toBeHidden();
+	const workspaceLink = page.getByRole("link", { name: /Fresh Workspace/ });
+	await expect(workspaceLink).toContainText("0 files");
+
+	await workspaceLink.click();
+	await expect(page).toHaveURL(/\/@acme\/fresh-workspace$/);
+	await expect(
+		page.getByRole("button", { name: "Toggle left panel" }),
+	).toBeVisible({
+		timeout: 55_000,
+	});
+	await expect(
+		page.getByRole("link", { name: "Back to Lixray home" }),
+	).toBeVisible();
 });
 
 test("sql console loads branches and executes a trivial query", async ({

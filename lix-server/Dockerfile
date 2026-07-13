@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
 
+ARG LIXRAY_IMAGE_VARIANT=preview
+
 FROM rust:1-bookworm AS builder
 WORKDIR /app
 
@@ -14,6 +16,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 	&& cp /app/target/release/lixray /app/dist/lixray
 
 FROM debian:bookworm-slim AS runtime
+ARG LIXRAY_IMAGE_VARIANT
+LABEL com.lixray.image-variant=${LIXRAY_IMAGE_VARIANT}
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends ca-certificates \

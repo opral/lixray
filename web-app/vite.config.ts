@@ -5,12 +5,18 @@ import react from "@vitejs/plugin-react";
 import process from "node:process";
 import { defineConfig } from "vite";
 
+const useE2eWorkerConfig =
+	process.env.VITE_LIXRAY_E2E === "1" || process.env.LIXRAY_E2E_SERVER === "1";
+
 export default defineConfig({
 	resolve: {
 		tsconfigPaths: true,
 	},
 	plugins: [
 		cloudflare({
+			configPath: useE2eWorkerConfig
+				? "./wrangler.e2e.jsonc"
+				: "./wrangler.jsonc",
 			viteEnvironment: { name: "ssr" },
 			config: (config) => ({
 				vars: {
@@ -24,6 +30,10 @@ export default defineConfig({
 					LIXRAY_E2E_WORKSPACE_ID:
 						process.env.LIXRAY_E2E_WORKSPACE_ID ??
 						config.vars?.LIXRAY_E2E_WORKSPACE_ID ??
+						"",
+					LIXRAY_E2E_WORKSPACE_IDS:
+						process.env.LIXRAY_E2E_WORKSPACE_IDS ??
+						config.vars?.LIXRAY_E2E_WORKSPACE_IDS ??
 						"",
 					SLATEDB_STORAGE:
 						process.env.SLATEDB_STORAGE ?? config.vars?.SLATEDB_STORAGE ?? "r2",

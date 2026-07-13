@@ -7,6 +7,17 @@ import {
 } from "~/components/workspace-provider";
 import { isE2eAuthEnabled } from "~/lib/e2e-client";
 
+const workspaceEmptyClass =
+	"grid min-h-[calc(100vh_-_80px)] place-items-center px-5 py-10";
+const buttonClass =
+	"inline-flex min-h-[38px] cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-bg-action-primary bg-bg-action-primary px-3.5 font-[680] text-text-on-action-primary no-underline disabled:cursor-not-allowed disabled:opacity-[0.55] max-[800px]:w-full";
+const fieldClass =
+	"grid gap-2 [&_label]:text-[13px] [&_label]:font-[680] [&_label]:text-text-secondary";
+const inputClass =
+	"h-[42px] w-full rounded-[7px] border border-border-panel bg-bg-panel px-3 text-text-primary outline-none focus:border-border-panel focus:outline-2 focus:outline-offset-1 focus:outline-ring-focus-visible";
+const errorClass =
+	"mt-3.5 whitespace-pre-wrap rounded-[8px] border border-error-200 bg-error-50 px-3.5 py-3 text-error-800";
+
 export function WorkspaceGate({
 	children,
 }: {
@@ -36,13 +47,13 @@ function AuthenticatedWorkspaceGate({
 	} = useWorkspace();
 
 	if (!authLoaded || !workspaceLoaded) {
-		return <div className="workspace-empty">Loading...</div>;
+		return <div className={workspaceEmptyClass}>Loading...</div>;
 	}
 	if (!user) return <SignedOutHome />;
 	if (error) {
 		return (
 			<EmptyState eyebrow="Unable to load workspaces" title={error}>
-				<button className="button primary" onClick={() => void refresh()}>
+				<button className={buttonClass} onClick={() => void refresh()}>
 					Try again
 				</button>
 			</EmptyState>
@@ -71,7 +82,7 @@ function AuthenticatedWorkspaceGate({
 		);
 	}
 	if (!activeWorkspace) {
-		return <div className="workspace-empty">Loading workspace...</div>;
+		return <div className={workspaceEmptyClass}>Loading workspace...</div>;
 	}
 	return <>{children(activeWorkspace)}</>;
 }
@@ -88,7 +99,7 @@ function LoadedWorkspace({
 function SignedOutHome() {
 	return (
 		<EmptyState eyebrow="Lixray" title="Sign in to continue.">
-			<Link className="button primary" to="/sign-in">
+			<Link className={buttonClass} to="/sign-in">
 				Sign in
 			</Link>
 		</EmptyState>
@@ -131,27 +142,24 @@ function NamePrompt({
 	return (
 		<EmptyState eyebrow={eyebrow} title={title}>
 			<form
-				className="onboarding-form"
+				className="mt-3.5 grid w-full gap-3.5"
 				onSubmit={(event) => void submit(event)}
 			>
-				<div className="field">
+				<div className={fieldClass}>
 					<label htmlFor="onboarding-name">{label}</label>
 					<input
 						id="onboarding-name"
-						className="input"
+						className={inputClass}
 						value={name}
 						maxLength={80}
 						autoFocus
 						onChange={(event) => setName(event.target.value)}
 					/>
 				</div>
-				<button
-					className="button primary"
-					disabled={submitting || !name.trim()}
-				>
+				<button className={buttonClass} disabled={submitting || !name.trim()}>
 					{submitting ? "Creating..." : buttonLabel}
 				</button>
-				{error ? <p className="error-box">{error}</p> : null}
+				{error ? <p className={errorClass}>{error}</p> : null}
 			</form>
 		</EmptyState>
 	);
@@ -167,11 +175,17 @@ function EmptyState({
 	children: ReactNode;
 }) {
 	return (
-		<main className="workspace-empty">
-			<div className="workspace-empty-inner">
-				<p className="eyebrow">{eyebrow}</p>
-				<h1>{title}</h1>
-				<div className="toolbar">{children}</div>
+		<main className={workspaceEmptyClass}>
+			<div className="w-[min(620px,100%)] rounded-[8px] border border-border-panel bg-bg-panel p-7 shadow-md">
+				<p className="mb-2 text-[13px] font-[760] tracking-[0.08em] text-text-link uppercase">
+					{eyebrow}
+				</p>
+				<h1 className="m-0 text-[clamp(30px,5vw,42px)] leading-[1.08] tracking-normal">
+					{title}
+				</h1>
+				<div className="mt-3 flex items-center justify-between gap-3 max-[800px]:flex-col max-[800px]:items-stretch">
+					{children}
+				</div>
 			</div>
 		</main>
 	);

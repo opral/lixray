@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useAuth } from "~/components/auth-provider";
 import {
+	E2E_CREATED_WORKSPACE_ID,
 	E2E_ORGANIZATION_ID,
 	E2E_ORGANIZATION_NAME,
 	E2E_WORKSPACE_ID,
@@ -23,6 +24,7 @@ export interface Workspace {
 	id: string;
 	organizationId: string;
 	name: string;
+	slug: string;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -30,6 +32,7 @@ export interface Workspace {
 export interface Organization {
 	id: string;
 	name: string;
+	handle: string;
 	role: OrganizationRole;
 	createdAt: string;
 	updatedAt: string;
@@ -57,8 +60,9 @@ interface WorkspaceContextValue {
 	selectWorkspace: (workspaceId: string) => void;
 	createOrganization: (name: string) => Promise<void>;
 	renameOrganization: (name: string) => Promise<void>;
-	createWorkspace: (name: string) => Promise<void>;
+	createWorkspace: (name: string, organizationId?: string) => Promise<void>;
 	renameWorkspace: (workspaceId: string, name: string) => Promise<void>;
+	deleteWorkspace: (workspaceId: string) => Promise<void>;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -175,15 +179,19 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 
 	const selectWorkspace = useCallback(
 		(workspaceId: string) => {
-			if (!user || !selectedOrganization) return;
-			const workspace = selectedOrganization.workspaces.find(
+			if (!user) return;
+			const organization = organizations.find((candidate) =>
+				candidate.workspaces.some((workspace) => workspace.id === workspaceId),
+			);
+			const workspace = organization?.workspaces.find(
 				(candidate) => candidate.id === workspaceId,
 			);
-			if (!workspace) return;
+			if (!organization || !workspace) return;
+			setSelectedOrganizationId(organization.id);
 			setSelectedWorkspaceId(workspace.id);
-			persistSelection(user.id, selectedOrganization.id, workspace.id);
+			persistSelection(user.id, organization.id, workspace.id);
 		},
-		[selectedOrganization, user],
+		[organizations, user],
 	);
 
 	const createOrganization = useCallback(
@@ -218,43 +226,61 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 	);
 
 	const createWorkspace = useCallback(
-		async (name: string) => {
-			if (!client || !selectedOrganization) {
+		async (name: string, organizationId?: string) => {
+			const targetOrganization = organizations.find(
+				(organization) =>
+					organization.id === (organizationId ?? selectedOrganization?.id),
+			);
+			if (!client || !targetOrganization) {
 				throw new Error("Create or select an organization first");
 			}
 			const { data, error: createError } = await client
 				.from("workspaces")
 				.insert({
-					organization_id: selectedOrganization.id,
+					organization_id: targetOrganization.id,
 					name: normalizeName(name, "Workspace"),
 				})
 				.select("id")
 				.single();
 			if (createError) throw createError;
 			await refresh({
-				organizationId: selectedOrganization.id,
+				organizationId: targetOrganization.id,
 				workspaceId: String(data.id),
 			});
 		},
-		[client, refresh, selectedOrganization],
+		[client, organizations, refresh, selectedOrganization],
 	);
 
 	const renameWorkspace = useCallback(
 		async (workspaceId: string, name: string) => {
-			if (!client || !selectedOrganization) {
-				throw new Error("No organization is selected");
-			}
+			if (!client) throw new Error("Authentication is still loading");
+			const organization = organizations.find((candidate) =>
+				candidate.workspaces.some((workspace) => workspace.id === workspaceId),
+			);
+			if (!organization) throw new Error("Workspace not found");
 			const { error: renameError } = await client
 				.from("workspaces")
 				.update({ name: normalizeName(name, "Workspace") })
 				.eq("id", workspaceId);
 			if (renameError) throw renameError;
 			await refresh({
-				organizationId: selectedOrganization.id,
+				organizationId: organization.id,
 				workspaceId,
 			});
 		},
-		[client, refresh, selectedOrganization],
+		[client, organizations, refresh],
+	);
+
+	const deleteWorkspace = useCallback(
+		async (workspaceId: string) => {
+			if (!client) throw new Error("Authentication is still loading");
+			const { error: deleteError } = await client.rpc("delete_workspace", {
+				p_workspace_id: workspaceId,
+			});
+			if (deleteError) throw deleteError;
+			await refresh();
+		},
+		[client, refresh],
 	);
 
 	const value = useMemo<WorkspaceContextValue>(
@@ -271,11 +297,13 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			renameOrganization,
 			createWorkspace,
 			renameWorkspace,
+			deleteWorkspace,
 		}),
 		[
 			activeWorkspace,
 			createOrganization,
 			createWorkspace,
+			deleteWorkspace,
 			error,
 			isLoaded,
 			organizations,
@@ -312,13 +340,14 @@ async function loadOrganizations(
 	const organizationIds = membershipRows.map((row) => row.organization_id);
 	const { data: organizationRows, error: organizationError } = await client
 		.from("organizations")
-		.select("id, name, created_at, updated_at")
+		.select("id, name, handle, created_at, updated_at")
 		.in("id", organizationIds);
 	if (organizationError) throw organizationError;
 
 	const baseOrganizations = (organizationRows ?? []).map((row) => ({
 		id: row.id,
 		name: row.name,
+		handle: row.handle,
 		role: membershipByOrganization.get(row.id) ?? "member",
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
@@ -327,8 +356,9 @@ async function loadOrganizations(
 
 	const { data: workspaceRows, error: workspaceError } = await client
 		.from("workspaces")
-		.select("id, organization_id, name, created_at, updated_at")
+		.select("id, organization_id, name, slug, created_at, updated_at")
 		.in("organization_id", organizationIds)
+		.is("deleted_at", null)
 		.order("created_at", { ascending: true });
 	if (workspaceError) throw workspaceError;
 
@@ -340,6 +370,7 @@ async function loadOrganizations(
 			id: String(row.id),
 			organizationId,
 			name: String(row.name),
+			slug: String(row.slug),
 			createdAt: String(row.created_at),
 			updatedAt: String(row.updated_at),
 		});
@@ -355,47 +386,92 @@ async function loadOrganizations(
 }
 
 function E2eWorkspaceProvider({ children }: { children: ReactNode }) {
-	const organization: Organization = {
+	const [organization, setOrganization] = useState<Organization>(() => ({
 		id: E2E_ORGANIZATION_ID,
 		name: E2E_ORGANIZATION_NAME,
+		handle: E2E_ORGANIZATION_NAME,
 		role: "owner",
-		createdAt: "1970-01-01T00:00:00.000Z",
-		updatedAt: "1970-01-01T00:00:00.000Z",
+		createdAt: "2026-07-01T12:00:00.000Z",
+		updatedAt: "2026-07-12T18:58:00.000Z",
 		workspaces: [
 			{
 				id: E2E_WORKSPACE_ID,
 				organizationId: E2E_ORGANIZATION_ID,
 				name: E2E_WORKSPACE_NAME,
-				createdAt: "1970-01-01T00:00:00.000Z",
-				updatedAt: "1970-01-01T00:00:00.000Z",
+				slug: E2E_WORKSPACE_NAME,
+				createdAt: "2026-07-01T12:00:00.000Z",
+				updatedAt: "2026-07-12T18:58:00.000Z",
 			},
 		],
-	};
+	}));
+	const [selectedWorkspaceId, setSelectedWorkspaceId] =
+		useState(E2E_WORKSPACE_ID);
+	const selectedWorkspace =
+		organization.workspaces.find(
+			(workspace) => workspace.id === selectedWorkspaceId,
+		) ?? organization.workspaces[0];
 	const unsupported = () =>
 		Promise.reject(
 			new Error("Workspace mutation is unavailable in E2E auth mode"),
 		);
+	const createWorkspace = (name: string, organizationId?: string) => {
+		if (organizationId && organizationId !== organization.id) {
+			throw new Error("Create or select an organization first");
+		}
+		const normalizedName = normalizeName(name, "Workspace");
+		const now = new Date().toISOString();
+		const workspace: Workspace = {
+			id: E2E_CREATED_WORKSPACE_ID,
+			organizationId: organization.id,
+			name: normalizedName,
+			slug: workspaceSlug(normalizedName),
+			createdAt: now,
+			updatedAt: now,
+		};
+		setOrganization((current) => ({
+			...current,
+			updatedAt: now,
+			workspaces: [
+				...current.workspaces.filter(
+					(candidate) => candidate.id !== E2E_CREATED_WORKSPACE_ID,
+				),
+				workspace,
+			],
+		}));
+		setSelectedWorkspaceId(workspace.id);
+		return Promise.resolve();
+	};
 	const value: WorkspaceContextValue = {
 		isLoaded: true,
 		error: null,
 		organizations: [organization],
 		selectedOrganization: organization,
-		activeWorkspace: {
-			organization,
-			workspace: organization.workspaces[0],
-		},
+		activeWorkspace: selectedWorkspace
+			? { organization, workspace: selectedWorkspace }
+			: null,
 		refresh: () => Promise.resolve(),
 		selectOrganization: () => undefined,
-		selectWorkspace: () => undefined,
+		selectWorkspace: setSelectedWorkspaceId,
 		createOrganization: unsupported,
 		renameOrganization: unsupported,
-		createWorkspace: unsupported,
+		createWorkspace,
 		renameWorkspace: unsupported,
+		deleteWorkspace: unsupported,
 	};
 	return (
 		<WorkspaceContext.Provider value={value}>
 			{children}
 		</WorkspaceContext.Provider>
+	);
+}
+
+function workspaceSlug(name: string): string {
+	return (
+		name
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-+|-+$/g, "")
+			.slice(0, 100) || "workspace"
 	);
 }
 

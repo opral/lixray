@@ -19,6 +19,7 @@ export interface Env {
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
 	SLATEDB_METADATA_CACHE_BYTES?: string;
 	LIXRAY_E2E_WORKSPACE_ID?: string;
+	LIXRAY_E2E_WORKSPACE_IDS?: string;
 }
 
 export class SlateDbContainer extends Container<Env> {
@@ -27,6 +28,7 @@ export class SlateDbContainer extends Container<Env> {
 
 	constructor(ctx: DurableObjectState<ContainerProps>, env: Env) {
 		super(ctx, env);
+		this.sleepAfter = env.SLATEDB_STORAGE === "memory" ? "10m" : "336h";
 		this.envVars = baseContainerEnv(env);
 	}
 }
