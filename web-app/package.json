@@ -23,6 +23,7 @@
 		"build:preview": "LIXRAY_WORKER_TARGET=preview VITE_LIXRAY_DEMO=1 LIXRAY_DEMO=1 pnpm build",
 		"preview": "vite preview",
 		"deploy:worker": "pnpm run build && wrangler deploy --config ./dist/server/wrangler.json",
+		"deploy:preview": "wrangler versions upload --config ./dist/server/wrangler.json",
 		"routes:generate": "node scripts/generate-routes.mjs",
 		"test:e2e": "playwright test",
 		"test:e2e:full-auth": "playwright test --config playwright.full-auth.config.ts",

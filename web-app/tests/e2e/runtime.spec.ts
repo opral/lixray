@@ -67,6 +67,14 @@ test("workspace dialogs inherit Atelier's semantic theme", async ({ page }) => {
 	await page.getByRole("textbox", { name: "Workspace name" }).fill("hello");
 
 	const tokens = await page.evaluate(() => {
+		const resolveCssValue = (property: string, value: string) => {
+			const probe = document.createElement("div");
+			probe.style.setProperty(property, value);
+			document.body.append(probe);
+			const resolved = getComputedStyle(probe).getPropertyValue(property);
+			probe.remove();
+			return resolved;
+		};
 		const style = (selector: string) => {
 			const element = document.querySelector(selector);
 			if (!element) throw new Error(`Missing ${selector}`);
@@ -88,16 +96,19 @@ test("workspace dialogs inherit Atelier's semantic theme", async ({ page }) => {
 			input: style("[data-testid='workspace-dialog-fields'] input"),
 			newWorkspace: style("[data-testid='new-workspace-button']"),
 			root: {
-				primary: root.getPropertyValue("--primary").trim(),
-				radius: root.getPropertyValue("--radius").trim(),
-				ring: root.getPropertyValue("--ring").trim(),
+				primary: resolveCssValue("color", root.getPropertyValue("--primary")),
+				radius: resolveCssValue(
+					"border-top-left-radius",
+					root.getPropertyValue("--radius"),
+				),
+				ring: resolveCssValue("color", root.getPropertyValue("--ring")),
 			},
 		};
 	});
 
 	expect(tokens.root).toEqual({
 		primary: "rgb(194, 65, 12)",
-		radius: "0.625rem",
+		radius: "10px",
 		ring: "rgb(194, 65, 12)",
 	});
 	expect(tokens.app.background).toBe("rgb(244, 242, 239)");

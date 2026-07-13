@@ -25,7 +25,7 @@ export default defineConfig({
 	webServer: process.env.PLAYWRIGHT_BASE_URL
 		? undefined
 		: {
-				command: `pnpm run atelier:build && pnpm exec vite dev --host ${host} --port ${port}`,
+				command: `pnpm run build:preview && pnpm exec wrangler dev --config ./dist/server/wrangler.json --ip ${host} --port ${port}`,
 				env: {
 					...process.env,
 					LIXRAY_WORKER_TARGET: "e2e",
