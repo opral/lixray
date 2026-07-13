@@ -46,6 +46,10 @@ export interface WorkerEnv {
 	LIXRAY_DEMO_WORKSPACE_IDS?: string;
 }
 
+export interface PreviewWorkerEnv extends WorkerEnv {
+	PREVIEW_STATE: R2Bucket;
+}
+
 export interface ContainerNamespace {
 	getByName(name: string): ContainerStub;
 }

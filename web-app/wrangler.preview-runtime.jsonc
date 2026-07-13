@@ -7,6 +7,12 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"workers_dev": true,
 	"preview_urls": true,
+	"r2_buckets": [
+		{
+			"binding": "PREVIEW_STATE",
+			"bucket_name": "lixray-preview",
+		},
+	],
 	"assets": {
 		"directory": "./dist/client",
 		"binding": "ASSETS",

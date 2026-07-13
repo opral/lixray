@@ -61,10 +61,13 @@ export interface MemoryLixBinding {
 		fromCommitId?: string;
 	}): Promise<{ id: string; name: string; hidden: boolean; commitId: string }>;
 	switchBranch(options: { branchId: string }): Promise<{ branchId: string }>;
+	exportSnapshot(): Promise<Uint8Array>;
 	close(): Promise<void>;
 }
 
-export type OpenMemoryLix = () => Promise<MemoryLixBinding>;
+export type OpenMemoryLix = (options?: {
+	snapshot?: Uint8Array;
+}) => Promise<MemoryLixBinding>;
 
 interface WorkspaceRuntime {
 	lix: MemoryLixBinding;
@@ -73,6 +76,18 @@ interface WorkspaceRuntime {
 
 interface MemoryWorkspaceBackendOptions {
 	mainBranchId: string;
+}
+
+interface PersistentWorkspaceState {
+	key: string;
+	bucket: R2Bucket;
+	runtime?: WorkspaceRuntime;
+	etag?: string;
+	queue: Promise<void>;
+	generation: number;
+	subscribers: Set<() => void>;
+	poller?: ReturnType<typeof setInterval>;
+	pollError?: unknown;
 }
 
 const NOT_FOUND_CODES = new Set([
@@ -110,6 +125,9 @@ const SSE_HEADERS = {
 };
 
 const MAIN_BRANCH_BOOTSTRAP_NAME = "lixray-demo-main-bootstrap";
+const PREVIEW_SNAPSHOT_PREFIX = "lixray-preview/v1";
+const PREVIEW_POLL_INTERVAL_MS = 250;
+const PREVIEW_WRITE_ATTEMPTS = 5;
 
 export function createMemoryWorkspaceBackend(
 	openMemoryLix: OpenMemoryLix,
@@ -135,6 +153,325 @@ export function createMemoryWorkspaceBackend(
 		},
 		workspaceCount: () => runtimes.size,
 	};
+}
+
+export function createR2WorkspaceBackend(
+	openMemoryLix: OpenMemoryLix,
+	options: MemoryWorkspaceBackendOptions,
+) {
+	const workspaces = new Map<string, PersistentWorkspaceState>();
+
+	return {
+		fetch: async (
+			bucket: R2Bucket,
+			workspaceId: string,
+			request: Request,
+		): Promise<Response> => {
+			const { hostname, pathname } = new URL(request.url);
+			if (pathname === "/v1/container-health") {
+				return request.method === "GET"
+					? json({ ok: true, service: "lixray-container" })
+					: methodNotAllowed();
+			}
+			const key = `${PREVIEW_SNAPSHOT_PREFIX}/${hostname.toLowerCase()}/${workspaceId}.snapshot`;
+			let state = workspaces.get(key);
+			if (!state) {
+				state = {
+					key,
+					bucket,
+					queue: Promise.resolve(),
+					generation: 0,
+					subscribers: new Set(),
+				};
+				workspaces.set(key, state);
+			}
+			try {
+				if (
+					pathname === "/v1/observe" ||
+					pathname === "/v1/observe/multiplex"
+				) {
+					if (request.method !== "POST") return methodNotAllowed();
+					const body = await requestBody(request);
+					await serializePersistent(state, async () => {
+						await syncPersistentRuntime(
+							state,
+							openMemoryLix,
+							options.mainBranchId,
+						);
+					});
+					return persistentObservationResponse(
+						state,
+						body,
+						pathname === "/v1/observe/multiplex",
+						openMemoryLix,
+						options.mainBranchId,
+					);
+				}
+
+				const replay = await replayableRequest(request);
+				return await serializePersistent(state, async () => {
+					if (!isPersistentMutation(pathname, request.method)) {
+						const runtime = await syncPersistentRuntime(
+							state,
+							openMemoryLix,
+							options.mainBranchId,
+						);
+						return routeRequest(replay(), runtime);
+					}
+
+					for (
+						let attempt = 0;
+						attempt < PREVIEW_WRITE_ATTEMPTS;
+						attempt += 1
+					) {
+						const runtime = await syncPersistentRuntime(
+							state,
+							openMemoryLix,
+							options.mainBranchId,
+						);
+						let response: Response;
+						try {
+							response = await routeRequest(replay(), runtime);
+						} catch (error) {
+							await discardPersistentRuntime(state);
+							throw error;
+						}
+						if (
+							!response.ok ||
+							!(await shouldPersistMutation(pathname, response))
+						) {
+							if (!response.ok) await discardPersistentRuntime(state);
+							return response;
+						}
+
+						let committed: R2Object | null;
+						try {
+							const snapshot = await runtime.lix.exportSnapshot();
+							committed = await storageCall(() =>
+								state.bucket.put(state.key, snapshot, {
+									onlyIf: { etagMatches: requiredEtag(state) },
+								}),
+							);
+						} catch (error) {
+							await discardPersistentRuntime(state);
+							throw error;
+						}
+						if (committed) {
+							state.etag = committed.etag;
+							state.generation += 1;
+							state.pollError = undefined;
+							notifyPersistentObservers(state);
+							return response;
+						}
+
+						await discardPersistentRuntime(state);
+						if (attempt + 1 < PREVIEW_WRITE_ATTEMPTS) {
+							await conflictJitter(attempt);
+						}
+					}
+					throw previewError(
+						"PREVIEW_STORAGE_CONFLICT",
+						"preview state changed too frequently; retry the request",
+					);
+				});
+			} catch (error) {
+				return errorResponse(error);
+			}
+		},
+		workspaceCount: () => workspaces.size,
+	};
+}
+
+function serializePersistent<T>(
+	state: PersistentWorkspaceState,
+	operation: () => Promise<T>,
+): Promise<T> {
+	const result = state.queue.then(operation, operation);
+	state.queue = result.then(
+		() => undefined,
+		() => undefined,
+	);
+	return result;
+}
+
+async function syncPersistentRuntime(
+	state: PersistentWorkspaceState,
+	openMemoryLix: OpenMemoryLix,
+	mainBranchId: string,
+): Promise<WorkspaceRuntime> {
+	const object = state.runtime
+		? await storageCall(() =>
+				state.bucket.get(state.key, {
+					onlyIf: { etagDoesNotMatch: requiredEtag(state) },
+				}),
+			)
+		: await storageCall(() => state.bucket.get(state.key));
+
+	if (object && !hasR2Body(object)) {
+		state.pollError = undefined;
+		return state.runtime as WorkspaceRuntime;
+	}
+	if (object) {
+		const snapshot = new Uint8Array(
+			await storageCall(() => object.arrayBuffer()),
+		);
+		let lix: MemoryLixBinding;
+		try {
+			lix = await openMemoryLix({ snapshot });
+		} catch (error) {
+			throw previewError(
+				"PREVIEW_SNAPSHOT_INVALID",
+				"stored preview snapshot is invalid",
+				error,
+			);
+		}
+		const previous = state.runtime;
+		state.runtime = { lix, finiteQueue: Promise.resolve() };
+		state.etag = object.etag;
+		state.pollError = undefined;
+		if (previous) {
+			await closeQuietly(previous.lix);
+			state.generation += 1;
+			notifyPersistentObservers(state);
+		}
+		return state.runtime;
+	}
+
+	await discardPersistentRuntime(state);
+	const runtime = await openWorkspaceRuntime(openMemoryLix, mainBranchId);
+	let created: R2Object | null;
+	try {
+		const snapshot = await runtime.lix.exportSnapshot();
+		created = await storageCall(() =>
+			state.bucket.put(state.key, snapshot, {
+				onlyIf: { etagDoesNotMatch: "*" },
+			}),
+		);
+	} catch (error) {
+		await closeQuietly(runtime.lix);
+		throw error;
+	}
+	if (created) {
+		state.runtime = runtime;
+		state.etag = created.etag;
+		state.pollError = undefined;
+		state.generation += 1;
+		return runtime;
+	}
+
+	await closeQuietly(runtime.lix);
+	const winner = await storageCall(() => state.bucket.get(state.key));
+	if (!winner) {
+		throw previewError(
+			"PREVIEW_STORAGE_UNAVAILABLE",
+			"preview state disappeared during initialization",
+		);
+	}
+	const winnerSnapshot = new Uint8Array(
+		await storageCall(() => winner.arrayBuffer()),
+	);
+	let winnerLix: MemoryLixBinding;
+	try {
+		winnerLix = await openMemoryLix({ snapshot: winnerSnapshot });
+	} catch (error) {
+		throw previewError(
+			"PREVIEW_SNAPSHOT_INVALID",
+			"stored preview snapshot is invalid",
+			error,
+		);
+	}
+	state.runtime = { lix: winnerLix, finiteQueue: Promise.resolve() };
+	state.etag = winner.etag;
+	state.pollError = undefined;
+	state.generation += 1;
+	return state.runtime;
+}
+
+function hasR2Body(object: R2Object): object is R2ObjectBody {
+	return typeof (object as R2ObjectBody).arrayBuffer === "function";
+}
+
+function requiredEtag(state: PersistentWorkspaceState): string {
+	if (!state.etag) {
+		throw previewError(
+			"PREVIEW_STORAGE_UNAVAILABLE",
+			"preview state has no storage revision",
+		);
+	}
+	return state.etag;
+}
+
+async function discardPersistentRuntime(
+	state: PersistentWorkspaceState,
+): Promise<void> {
+	const runtime = state.runtime;
+	state.runtime = undefined;
+	state.etag = undefined;
+	if (runtime) await closeQuietly(runtime.lix);
+}
+
+async function closeQuietly(lix: MemoryLixBinding): Promise<void> {
+	try {
+		await lix.close();
+	} catch {
+		// Closing is best-effort while replacing an isolate-local cache entry.
+	}
+}
+
+async function storageCall<T>(operation: () => Promise<T>): Promise<T> {
+	try {
+		return await operation();
+	} catch (error) {
+		if (isPreviewError(error)) throw error;
+		throw previewError(
+			"PREVIEW_STORAGE_UNAVAILABLE",
+			"preview storage is unavailable",
+			error,
+		);
+	}
+}
+
+function isPersistentMutation(pathname: string, method: string): boolean {
+	return (
+		method === "POST" &&
+		(pathname === "/v1/createBranch" ||
+			pathname === "/v1/execute" ||
+			pathname === "/v1/filesystem/mutate")
+	);
+}
+
+async function shouldPersistMutation(
+	pathname: string,
+	response: Response,
+): Promise<boolean> {
+	if (pathname !== "/v1/filesystem/mutate") return true;
+	const body: unknown = await response.clone().json();
+	return (
+		typeof body === "object" &&
+		body !== null &&
+		"outcome" in body &&
+		body.outcome === "applied"
+	);
+}
+
+async function replayableRequest(request: Request): Promise<() => Request> {
+	const body =
+		request.method === "GET" || request.method === "HEAD"
+			? undefined
+			: await request.clone().arrayBuffer();
+	return () =>
+		new Request(request.url, {
+			method: request.method,
+			headers: request.headers,
+			body,
+		});
+}
+
+function conflictJitter(attempt: number): Promise<void> {
+	const maximum = Math.min(50, 5 * 2 ** attempt);
+	return new Promise((resolve) =>
+		setTimeout(resolve, Math.floor(Math.random() * (maximum + 1))),
+	);
 }
 
 async function workspaceRuntime(
@@ -314,6 +651,174 @@ async function routeRequest(
 		return observationResponse(observations, true);
 	}
 	return new Response("Not found\n", { status: 404 });
+}
+
+interface PersistentObservationQuery {
+	id?: string;
+	sql: string;
+	params: NativeValue[];
+}
+
+function persistentObservationResponse(
+	state: PersistentWorkspaceState,
+	body: Record<string, unknown>,
+	multiplex: boolean,
+	openMemoryLix: OpenMemoryLix,
+	mainBranchId: string,
+): Response {
+	const branchId = requiredString(body, "branchId");
+	let queries: PersistentObservationQuery[];
+	if (multiplex) {
+		if (!Array.isArray(body.subscriptions)) {
+			throw invalidArgument("subscriptions is required");
+		}
+		queries = body.subscriptions.map((subscription) => {
+			const value = requestObject(subscription, "subscriptions[]");
+			return {
+				id: requiredString(value, "id", "subscriptions[].id"),
+				sql: requiredString(value, "sql", "subscriptions[].sql"),
+				params: decodeParams(value.params),
+			};
+		});
+	} else {
+		queries = [
+			{
+				sql: requiredString(body, "sql"),
+				params: decodeParams(body.params),
+			},
+		];
+	}
+
+	const encoder = new TextEncoder();
+	const previous = new Array<string | undefined>(queries.length);
+	const sequences = new Array<number>(queries.length).fill(0);
+	let cancelled = false;
+	let running = false;
+	let pending = false;
+	let keepAlive: ReturnType<typeof setInterval> | undefined;
+	let unsubscribe: (() => void) | undefined;
+
+	const stream = new ReadableStream<Uint8Array>({
+		start(controller) {
+			const finish = (close: boolean) => {
+				if (cancelled) return;
+				cancelled = true;
+				if (keepAlive) clearInterval(keepAlive);
+				unsubscribe?.();
+				if (close) controller.close();
+			};
+			const schedule = () => {
+				if (cancelled) return;
+				if (running) {
+					pending = true;
+					return;
+				}
+				running = true;
+				void serializePersistent(state, async () => {
+					if (state.pollError) {
+						throw state.pollError instanceof Error
+							? state.pollError
+							: new Error("preview observer polling failed", {
+									cause: state.pollError,
+								});
+					}
+					const runtime = state.runtime;
+					if (!runtime) {
+						await syncPersistentRuntime(state, openMemoryLix, mainBranchId);
+					}
+					const active = state.runtime as WorkspaceRuntime;
+					return serialize(active, async () => {
+						await active.lix.switchBranch({ branchId });
+						const results = [];
+						for (const query of queries) {
+							results.push(
+								encodeExecuteResult(
+									await active.lix.execute(query.sql, query.params),
+								),
+							);
+						}
+						return results;
+					});
+				})
+					.then((results) => {
+						if (cancelled) return;
+						results.forEach((result, index) => {
+							const serialized = JSON.stringify(result);
+							if (serialized === previous[index]) return;
+							previous[index] = serialized;
+							const payload = {
+								...(multiplex ? { subscriptionId: queries[index].id } : {}),
+								sequence: sequences[index]++,
+								mutationSequence: state.generation,
+								result,
+							};
+							controller.enqueue(encoder.encode(sseFrame("next", payload)));
+						});
+					})
+					.catch((error) => {
+						if (cancelled) return;
+						controller.enqueue(
+							encoder.encode(sseFrame("error", errorEnvelope(error))),
+						);
+						finish(true);
+					})
+					.finally(() => {
+						running = false;
+						if (pending && !cancelled) {
+							pending = false;
+							schedule();
+						}
+					});
+			};
+
+			unsubscribe = subscribePersistentObserver(
+				state,
+				schedule,
+				openMemoryLix,
+				mainBranchId,
+			);
+			keepAlive = setInterval(() => {
+				if (!cancelled) controller.enqueue(encoder.encode(": keep-alive\n\n"));
+			}, 15_000);
+			schedule();
+		},
+		cancel() {
+			cancelled = true;
+			if (keepAlive) clearInterval(keepAlive);
+			unsubscribe?.();
+		},
+	});
+	return new Response(stream, { headers: SSE_HEADERS });
+}
+
+function subscribePersistentObserver(
+	state: PersistentWorkspaceState,
+	subscriber: () => void,
+	openMemoryLix: OpenMemoryLix,
+	mainBranchId: string,
+): () => void {
+	state.subscribers.add(subscriber);
+	if (!state.poller) {
+		state.poller = setInterval(() => {
+			void serializePersistent(state, async () => {
+				await syncPersistentRuntime(state, openMemoryLix, mainBranchId);
+			}).catch((error) => {
+				state.pollError = error;
+				notifyPersistentObservers(state);
+			});
+		}, PREVIEW_POLL_INTERVAL_MS);
+	}
+	return () => {
+		state.subscribers.delete(subscriber);
+		if (state.subscribers.size === 0 && state.poller) {
+			clearInterval(state.poller);
+			state.poller = undefined;
+		}
+	};
+}
+
+function notifyPersistentObservers(state: PersistentWorkspaceState): void {
+	for (const subscriber of state.subscribers) subscriber();
 }
 
 async function openObservation(
@@ -730,6 +1235,14 @@ function lixError(
 	return Object.assign(new Error(message), { code, hint, details });
 }
 
+function previewError(code: string, message: string, cause?: unknown) {
+	return Object.assign(new Error(message, { cause }), { code });
+}
+
+function isPreviewError(error: unknown): error is Error & { code: string } {
+	return isLixError(error) && error.code.startsWith("PREVIEW_");
+}
+
 function isLixError(error: unknown): error is Error & { code: string } {
 	return (
 		typeof error === "object" &&
@@ -763,14 +1276,20 @@ function errorEnvelope(error: unknown) {
 function errorResponse(error: unknown) {
 	const envelope = errorEnvelope(error);
 	const { code } = envelope.error;
-	const status = NOT_FOUND_CODES.has(code)
-		? 404
-		: BAD_REQUEST_CODES.has(code)
-			? 400
-			: code === "LIX_CLOSED" || code === "LIX_ERROR_CLOSED"
-				? 409
-				: 500;
-	return json(envelope, status);
+	const status = code.startsWith("PREVIEW_")
+		? 503
+		: NOT_FOUND_CODES.has(code)
+			? 404
+			: BAD_REQUEST_CODES.has(code)
+				? 400
+				: code === "LIX_CLOSED" || code === "LIX_ERROR_CLOSED"
+					? 409
+					: 500;
+	const response = json(envelope, status);
+	if (code === "PREVIEW_STORAGE_CONFLICT") {
+		response.headers.set("Retry-After", "1");
+	}
+	return response;
 }
 
 function errorMessage(error: unknown) {

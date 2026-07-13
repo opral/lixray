@@ -8,6 +8,7 @@ const demoCreatedWorkspaceId = "00000000-0000-4000-8000-000000000003";
 const webServerTimeoutMs = Number(
 	process.env.PLAYWRIGHT_WEB_SERVER_TIMEOUT_MS ?? 300_000,
 );
+const localStatePath = `.wrangler/e2e-${process.pid}`;
 
 export default defineConfig({
 	testDir: "./tests/e2e",
@@ -25,7 +26,7 @@ export default defineConfig({
 	webServer: process.env.PLAYWRIGHT_BASE_URL
 		? undefined
 		: {
-				command: `pnpm run build:preview && pnpm exec wrangler dev --config ./wrangler.preview-runtime.jsonc --ip ${host} --port ${port}`,
+				command: `pnpm run build:preview && pnpm exec wrangler dev --config ./wrangler.preview-runtime.jsonc --persist-to ${localStatePath} --ip ${host} --port ${port}`,
 				env: {
 					...process.env,
 					LIXRAY_WORKER_TARGET: "e2e",

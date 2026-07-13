@@ -3,26 +3,10 @@ import path from "node:path";
 import { gzipSync } from "node:zlib";
 
 const serverDirectory = path.resolve("dist/preview-worker");
-const config = JSON.parse(
-	(
-		await readFile(path.resolve("wrangler.preview-runtime.jsonc"), "utf8")
-	).replace(/,\s*([}\]])/g, "$1"),
-);
-
-const forbiddenBindings = [
-	...(config.durable_objects?.bindings ?? []),
-	...(config.containers ?? []),
-	...(config.r2_buckets ?? []),
-	...(config.d1_databases ?? []),
-	...(config.kv_namespaces ?? []),
-	...(config.services ?? []),
-];
-if (forbiddenBindings.length > 0) {
-	throw new Error("The preview Worker contains a state or service binding");
-}
-if (Object.keys(config.exports ?? {}).length > 0) {
-	throw new Error("The preview Worker exports a Durable Object implementation");
-}
+const config = await readJsonc("wrangler.preview-runtime.jsonc");
+const buildConfig = await readJsonc("wrangler.preview.jsonc");
+verifyBindings(config, "runtime");
+verifyBindings(buildConfig, "build");
 if (
 	config.assets?.binding !== "ASSETS" ||
 	config.assets?.not_found_handling !== "single-page-application"
@@ -54,7 +38,7 @@ if (compressedBytes >= 10 * 1024 * 1024) {
 }
 
 console.log(
-	`Preview bundle has no state bindings or container implementation (${compressedBytes} compressed bytes).`,
+	`Preview bundle has only the dedicated preview R2 binding and no container implementation (${compressedBytes} compressed bytes).`,
 );
 
 async function workerModuleFiles(directory) {
@@ -67,4 +51,40 @@ async function workerModuleFiles(directory) {
 		}
 	}
 	return files;
+}
+
+async function readJsonc(file) {
+	return JSON.parse(
+		(await readFile(path.resolve(file), "utf8")).replace(/,\s*([}\]])/g, "$1"),
+	);
+}
+
+function verifyBindings(workerConfig, label) {
+	const forbiddenBindings = [
+		...(workerConfig.durable_objects?.bindings ?? []),
+		...(workerConfig.containers ?? []),
+		...(workerConfig.d1_databases ?? []),
+		...(workerConfig.kv_namespaces ?? []),
+		...(workerConfig.services ?? []),
+	];
+	if (forbiddenBindings.length > 0) {
+		throw new Error(
+			`The preview ${label} config contains a forbidden state or service binding`,
+		);
+	}
+	const r2Bindings = workerConfig.r2_buckets ?? [];
+	if (
+		r2Bindings.length !== 1 ||
+		r2Bindings[0]?.binding !== "PREVIEW_STATE" ||
+		r2Bindings[0]?.bucket_name !== "lixray-preview"
+	) {
+		throw new Error(
+			`The preview ${label} config must bind only PREVIEW_STATE to lixray-preview`,
+		);
+	}
+	if (Object.keys(workerConfig.exports ?? {}).length > 0) {
+		throw new Error(
+			`The preview ${label} config exports a Durable Object implementation`,
+		);
+	}
 }

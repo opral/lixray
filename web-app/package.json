@@ -21,7 +21,7 @@
 		"dev:r2": "SLATEDB_STORAGE=r2 vite dev --port 8787",
 		"build": "pnpm run routes:generate && vite build",
 		"build:preview": "LIXRAY_WORKER_TARGET=preview VITE_LIXRAY_DEMO=1 LIXRAY_DEMO=1 pnpm build && pnpm bundle:preview",
-		"bundle:preview": "wrangler deploy --dry-run --config ./wrangler.preview-runtime.jsonc --outdir ./dist/preview-worker",
+		"bundle:preview": "node ./scripts/clean-preview-bundle.mjs && wrangler deploy --dry-run --config ./wrangler.preview-runtime.jsonc --outdir ./dist/preview-worker",
 		"preview": "vite preview",
 		"deploy:worker": "pnpm run build && wrangler deploy --config ./dist/server/wrangler.json",
 		"deploy:preview": "wrangler versions upload --config ./wrangler.preview-runtime.jsonc",
@@ -35,7 +35,7 @@
 	},
 	"dependencies": {
 		"@cloudflare/containers": "0.3.7",
-		"@lix-js/sdk": "^0.8.0",
+		"@lix-js/sdk": "^0.8.1",
 		"@modelcontextprotocol/sdk": "1.29.0",
 		"@opral/atelier": "workspace:*",
 		"@supabase/supabase-js": "^2.110.2",

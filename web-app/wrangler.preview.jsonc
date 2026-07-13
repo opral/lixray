@@ -7,6 +7,12 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"workers_dev": true,
 	"preview_urls": true,
+	"r2_buckets": [
+		{
+			"binding": "PREVIEW_STATE",
+			"bucket_name": "lixray-preview",
+		},
+	],
 	"vars": {
 		"LIXRAY_DEMO": "1",
 		"LIXRAY_DEMO_WORKSPACE_IDS": "00000000-0000-4000-8000-000000000002,00000000-0000-4000-8000-000000000003",

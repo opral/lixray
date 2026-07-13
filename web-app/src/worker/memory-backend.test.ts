@@ -282,6 +282,7 @@ function fakeBinding(
 			commitId: "commit-1",
 		}),
 		switchBranch: async ({ branchId }) => ({ branchId }),
+		exportSnapshot: async () => new Uint8Array(),
 		close: async () => undefined,
 		...overrides,
 	} as MemoryLixBinding;

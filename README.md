@@ -284,10 +284,10 @@ Install Playwright Chromium once with:
 pnpm --dir web-app exec playwright install chromium
 ```
 
-Playwright starts a deterministic in-memory development server on port `8790`
-using the same Workerd/Wasm entry and demo identity as PR previews. It does not
-start Docker, a Durable Object, or a container. Use `E2E_PORT` to override the
-port.
+Playwright starts a deterministic development server on port `8790` using the
+same Workerd/Wasm entry, local R2 binding, and demo identity as PR previews. It
+does not start Docker, a Durable Object, or a container. Use `E2E_PORT` to
+override the port.
 
 Run the demo Worker directly with:
 
@@ -305,9 +305,13 @@ For same-repository pull requests, `.github/workflows/pr.yml` builds demo mode,
 uploads a Worker version with stable alias `pr-<number>`, smoke-tests the API
 and editor. Fork pull requests never receive Cloudflare credentials or a
 deployment. Preview mode exposes only the shared demo bearer identity and the
-two deterministic workspace UUIDs. Its MCP endpoint is authless and
-isolate-local; Supabase, OAuth, Durable Objects, containers, R2, D1, KV, and
-other persistent state bindings are absent.
+two deterministic workspace UUIDs. Its MCP endpoint is authless. Preview Lix
+snapshots are stored only in the dedicated `lixray-preview` R2 bucket under
+`lixray-preview/v1/<preview-hostname>/<workspace-id>.snapshot`; an aliased PR
+hostname therefore persists across pushes, while versioned preview hostnames
+remain isolated. Supabase, OAuth, Durable Objects, containers, D1, KV, service
+bindings, and production storage are absent. Deleting a hostname prefix resets
+that preview; automatic retention cleanup is not currently enabled.
 
 Workers Builds should use:
 
