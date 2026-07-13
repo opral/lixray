@@ -95,12 +95,12 @@ function OAuthConsentPage() {
 				<a
 					href="/"
 					className="inline-flex items-center gap-2.5 justify-self-center font-[750] tracking-normal no-underline"
-					aria-label="Lixray home"
+					aria-label="LixRay home"
 				>
 					<span className="grid size-7 place-items-center rounded-[7px] bg-[var(--color-bg-action-secondary)] text-[var(--color-text-on-action-secondary)]">
 						<DatabaseZap size={17} aria-hidden="true" />
 					</span>
-					<span>Lixray</span>
+					<span>LixRay</span>
 				</a>
 				<div className="grid justify-self-center gap-2 text-center">
 					<ShieldCheck
@@ -109,14 +109,14 @@ function OAuthConsentPage() {
 						aria-hidden="true"
 					/>
 					<h1 className="m-0 text-2xl leading-[1.2] tracking-normal">
-						Connect Lixray to ChatGPT
+						Connect LixRay to ChatGPT
 					</h1>
 					<p className="m-0 text-[var(--color-text-tertiary)]">
-						Authorize a private MCP connection using your existing Lixray
+						Authorize a private MCP connection using your existing LixRay
 						account.
 					</p>
 					<p className="m-0 max-w-[480px] text-sm text-[var(--color-text-tertiary)]">
-						This authorization is separate from your Lixray browser session.
+						This authorization is separate from your LixRay browser session.
 						Being signed in to the website does not automatically connect your
 						MCP client.
 					</p>
@@ -146,7 +146,7 @@ function OAuthConsentPage() {
 						>
 							<p className="m-0">
 								<strong>{details.clientName}</strong> is requesting access to
-								your Lixray account.
+								your LixRay account.
 							</p>
 							{details.clientUri ? (
 								<a

@@ -28,13 +28,13 @@ workspace-scoped `/v1/*` requests before delegating all other routes to Start.
 
 ## ChatGPT MCP app
 
-Lixray exposes a stateless Streamable HTTP MCP server at:
+LixRay exposes a stateless Streamable HTTP MCP server at:
 
 ```text
 https://lixray.com/mcp
 ```
 
-`GET /.well-known/oauth-protected-resource` advertises the Lixray resource and
+`GET /.well-known/oauth-protected-resource` advertises the LixRay resource and
 the Supabase Auth OAuth 2.1 server. ChatGPT dynamically registers a client,
 uses PKCE, and sends a Supabase ES256 access token bound to
 `resource=https://lixray.com`. The Worker validates the token's issuer,
@@ -198,7 +198,7 @@ and attempt time without recording either token. A successful CLI login should
 still be followed by a fresh-task `list_workspaces` call.
 
 In ChatGPT, enable developer mode, create a developer-mode app named
-**Lixray**, describe it as a safe workspace file editor, and use
+**LixRay**, describe it as a safe workspace file editor, and use
 `https://lixray.com/mcp` as its MCP URL.
 
 ## Local development
