@@ -26,6 +26,7 @@
 		"test:e2e:full-auth": "playwright test --config playwright.full-auth.config.ts",
 		"test:e2e:r2": "E2E_SLATEDB_STORAGE=r2 playwright test",
 		"test:worker": "node --test --experimental-strip-types src/worker/*.test.ts src/mcp/*.test.ts",
+		"check:mcp": "node scripts/check-mcp-connection.mjs",
 		"typecheck": "pnpm run routes:generate && tsc --noEmit",
 		"cf-typegen": "wrangler types --config ./wrangler.jsonc"
 	},

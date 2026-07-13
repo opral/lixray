@@ -115,6 +115,11 @@ function OAuthConsentPage() {
 						Authorize a private MCP connection using your existing Lixray
 						account.
 					</p>
+					<p className="m-0 max-w-[480px] text-sm text-[var(--color-text-tertiary)]">
+						This authorization is separate from your Lixray browser session.
+						Being signed in to the website does not automatically connect your
+						MCP client.
+					</p>
 				</div>
 
 				{!isLoaded ? (
@@ -191,7 +196,8 @@ function OAuthConsentPage() {
 						</div>
 						<p className="text-center text-xs text-[var(--color-text-tertiary)]">
 							After approval you will return to{" "}
-							{displayOrigin(details.redirectUri)}.
+							{displayOrigin(details.redirectUri)}. The client must finish
+							saving its MCP credentials before the connection is ready.
 						</p>
 					</>
 				) : null}

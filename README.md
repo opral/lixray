@@ -170,6 +170,33 @@ points back to the protected-resource metadata. Use MCP Inspector to verify
 discovery, consent, token refresh/revocation, `initialize`, `tools/list`, and a
 read/write/conflict cycle.
 
+The website login and MCP authorization are separate sessions. A working
+browser preview does not prove that an MCP client received and persisted its
+OAuth credentials. Supabase's authorization-code exchange returns a refresh
+token without an `offline_access` resource scope; do not add `offline_access`
+to the protected-resource metadata.
+
+For a non-interactive post-authorization check, run the probe with a temporary
+OAuth access token (never commit or paste the token into logs):
+
+```sh
+cd web-app
+LIXRAY_MCP_ACCESS_TOKEN='<token>' pnpm check:mcp
+```
+
+The probe starts a new MCP client, performs `initialize`, requests
+`tools/list`, calls `list_workspaces`, and fails if the discovery metadata does
+not advertise the authorization-code and refresh-token grants. Set
+`LIXRAY_MCP_URL` to test an environment other than `https://lixray.com/mcp`.
+
+When testing with Codex, avoid registrations that differ only by capitalization
+or point to different environments. Check `codex mcp list` and remove stale
+localhost or preview entries before reconnecting. If Codex reports `No refresh
+token available`, run `codex mcp logout <name>` followed by
+`codex mcp login <name>`. If it recurs, record the Codex version, exact MCP URL,
+and attempt time without recording either token. A successful CLI login should
+still be followed by a fresh-task `list_workspaces` call.
+
 In ChatGPT, enable developer mode, create a developer-mode app named
 **Lixray**, describe it as a safe workspace file editor, and use
 `https://lixray.com/mcp` as its MCP URL.
