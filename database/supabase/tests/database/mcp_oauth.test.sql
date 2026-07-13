@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(15);
+select plan(17);
 
 select is(
   private.custom_access_token_hook(
@@ -130,8 +130,28 @@ select throws_ok(
 set local request.jwt.claims = '{
   "sub":"51000000-0000-0000-0000-000000000001",
   "role":"authenticated",
+  "aud":"authenticated",
+  "client_id":"other-oauth-client"
+}';
+
+select throws_ok(
+  $$select public.delete_workspace('53000000-0000-0000-0000-000000000001')$$,
+  'P0001',
+  'Interactive session required',
+  'non-MCP OAuth tokens cannot soft-delete workspace metadata'
+);
+
+set local request.jwt.claims = '{
+  "sub":"51000000-0000-0000-0000-000000000001",
+  "role":"authenticated",
   "aud":"authenticated"
 }';
+
+select results_eq(
+  $$select count(*) from public.workspaces where id = '53000000-0000-0000-0000-000000000001'$$,
+  array[1::bigint],
+  'rejected OAuth deletion leaves the workspace intact'
+);
 
 select results_eq(
   'select count(*) from public.profiles',

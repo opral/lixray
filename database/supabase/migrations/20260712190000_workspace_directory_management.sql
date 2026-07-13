@@ -171,6 +171,13 @@ as $$
 declare
   target_organization_id uuid;
 begin
+  if not private.is_interactive_session() then
+    if private.is_lixray_mcp_session() then
+      raise exception 'Lixray MCP tokens cannot modify account or workspace metadata';
+    end if;
+    raise exception 'Interactive session required';
+  end if;
+
   select organization_id into target_organization_id
   from public.workspaces
   where id = p_workspace_id and deleted_at is null;
