@@ -292,10 +292,7 @@ export function LandingPage() {
 					</div>
 				</section>
 
-				<section className="mx-auto flex max-w-4xl flex-col items-center gap-7 px-5 py-28 text-center">
-					<h2 className="m-0 text-4xl font-[760] tracking-[-.04em] sm:text-6xl">
-						Your shared workspace.
-					</h2>
+				<section className="mx-auto flex max-w-4xl justify-center px-5 py-20 text-center">
 					<a className={primaryButton} href={workspaceTo}>
 						{workspaceLabel} <ArrowRight className="size-4" aria-hidden="true" />
 					</a>
