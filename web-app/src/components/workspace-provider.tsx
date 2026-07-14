@@ -76,6 +76,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
 function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 	const { client, isLoaded: authLoaded, user } = useAuth();
+	const userId = user?.id ?? null;
 	const [isLoaded, setIsLoaded] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [organizations, setOrganizations] = useState<Array<Organization>>([]);
@@ -87,7 +88,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 	);
 	const refresh = useCallback(
 		async (options: RefreshOptions = {}) => {
-			if (!client || !user) {
+			if (!client || !userId) {
 				setOrganizations([]);
 				setSelectedOrganizationId(null);
 				setSelectedWorkspaceId(null);
@@ -102,9 +103,9 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 					"ensure_personal_workspace",
 				);
 				if (provisioningError) throw provisioningError;
-				const nextOrganizations = await loadOrganizations(client, user.id);
+				const nextOrganizations = await loadOrganizations(client, userId);
 				const storedOrganizationId = window.localStorage.getItem(
-					organizationStorageKey(user.id),
+					organizationStorageKey(userId),
 				);
 				const nextOrganization =
 					nextOrganizations.find(
@@ -116,7 +117,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 					null;
 
 				const storedWorkspaceId = window.localStorage.getItem(
-					workspaceStorageKey(user.id),
+					workspaceStorageKey(userId),
 				);
 				const nextWorkspace =
 					nextOrganization?.workspaces.find(
@@ -130,7 +131,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				setSelectedOrganizationId(nextOrganization?.id ?? null);
 				setSelectedWorkspaceId(nextWorkspace?.id ?? null);
 				persistSelection(
-					user.id,
+					userId,
 					nextOrganization?.id ?? null,
 					nextWorkspace?.id ?? null,
 				);
@@ -140,7 +141,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				setIsLoaded(true);
 			}
 		},
-		[client, user],
+		[client, userId],
 	);
 
 	useEffect(() => {
@@ -167,7 +168,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 
 	const selectOrganization = useCallback(
 		(organizationId: string) => {
-			if (!user) return;
+			if (!userId) return;
 			const organization = organizations.find(
 				(candidate) => candidate.id === organizationId,
 			);
@@ -175,14 +176,14 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			const workspace = organization.workspaces[0] ?? null;
 			setSelectedOrganizationId(organization.id);
 			setSelectedWorkspaceId(workspace?.id ?? null);
-			persistSelection(user.id, organization.id, workspace?.id ?? null);
+			persistSelection(userId, organization.id, workspace?.id ?? null);
 		},
-		[organizations, user],
+		[organizations, userId],
 	);
 
 	const selectWorkspace = useCallback(
 		(workspaceId: string) => {
-			if (!user) return;
+			if (!userId) return;
 			const organization = organizations.find((candidate) =>
 				candidate.workspaces.some((workspace) => workspace.id === workspaceId),
 			);
@@ -192,9 +193,9 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			if (!organization || !workspace) return;
 			setSelectedOrganizationId(organization.id);
 			setSelectedWorkspaceId(workspace.id);
-			persistSelection(user.id, organization.id, workspace.id);
+			persistSelection(userId, organization.id, workspace.id);
 		},
-		[organizations, user],
+		[organizations, userId],
 	);
 
 	const createOrganization = useCallback(
