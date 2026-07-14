@@ -20,7 +20,7 @@ const WORKSPACE_ROUTE = "/@acme/mcp-review";
 const PREVIEW_HOST = "127.0.0.1";
 const WEB_APP_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
-test("an MCP-created file immediately opens in review mode", async ({
+test("an MCP-created file enters review mode only after the user opens it", async ({
 	baseURL,
 	page,
 }) => {
@@ -71,10 +71,15 @@ test("an MCP-created file immediately opens in review mode", async ({
 		});
 		expect(result.isError, JSON.stringify(result)).not.toBe(true);
 
-		await expect(page).toHaveURL(
-			new URL(`${WORKSPACE_ROUTE}/file/${fileName}`, appBaseURL).toString(),
-			{ timeout: 30_000 },
-		);
+		const workspaceURL = new URL(WORKSPACE_ROUTE, appBaseURL);
+		workspaceURL.searchParams.set("branch", DEMO_MAIN_BRANCH_ID);
+		await expect(page).toHaveURL(workspaceURL.toString(), { timeout: 30_000 });
+		const createdFile = page.getByRole("treeitem", { name: fileName });
+		await expect(createdFile).toBeVisible({ timeout: 30_000 });
+		await createdFile.click();
+		const fileURL = new URL(`${WORKSPACE_ROUTE}/file/${fileName}`, appBaseURL);
+		fileURL.searchParams.set("branch", DEMO_MAIN_BRANCH_ID);
+		await expect(page).toHaveURL(fileURL.toString(), { timeout: 30_000 });
 		await expect(
 			page.getByRole("heading", { name: "Created through MCP" }),
 		).toBeVisible();

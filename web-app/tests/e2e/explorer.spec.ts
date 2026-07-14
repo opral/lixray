@@ -1,7 +1,10 @@
 import type { Page, Request } from "@playwright/test";
 import { expect, expectOk, test } from "./fixtures";
 import type { BranchesResponse } from "../../src/lib/lixray-api";
-import { DEMO_AUTH_TOKEN } from "../../src/lib/demo-identity";
+import {
+	DEMO_AUTH_TOKEN,
+	DEMO_MAIN_BRANCH_ID,
+} from "../../src/lib/demo-identity";
 
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
 const FILE_PATH = "/atelier-first-slice.md";
@@ -19,9 +22,12 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 	await expect(file).toBeVisible({ timeout: 55_000 });
 	await file.click();
 
-	await expect(page).toHaveURL(
-		/\/@acme\/launch-q3\/file\/atelier-first-slice\.md$/,
-	);
+	await expect(page).toHaveURL((url) => {
+		return (
+			url.pathname === "/@acme/launch-q3/file/atelier-first-slice.md" &&
+			url.searchParams.get("branch") === DEMO_MAIN_BRANCH_ID
+		);
+	});
 	await expect(
 		page.getByText("Hello from the SlateDB-backed Atelier"),
 	).toBeVisible({
@@ -30,9 +36,12 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 	await settlePageExecutes(page, pendingExecutes);
 
 	await page.reload();
-	await expect(page).toHaveURL(
-		/\/@acme\/launch-q3\/file\/atelier-first-slice\.md$/,
-	);
+	await expect(page).toHaveURL((url) => {
+		return (
+			url.pathname === "/@acme/launch-q3/file/atelier-first-slice.md" &&
+			url.searchParams.get("branch") === DEMO_MAIN_BRANCH_ID
+		);
+	});
 	await expect(
 		page.getByText("Hello from the SlateDB-backed Atelier"),
 	).toBeVisible({

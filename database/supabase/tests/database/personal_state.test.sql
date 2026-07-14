@@ -163,17 +163,16 @@ select throws_ok(
   'MCP OAuth tokens cannot write private review outcomes'
 );
 
-reset role;
-delete from public.organization_members
-where organization_id = '62000000-0000-0000-0000-000000000001'
-  and user_id = '61000000-0000-0000-0000-000000000002';
-set local role authenticated;
-set local request.jwt.claim.sub = '61000000-0000-0000-0000-000000000002';
 set local request.jwt.claims = '{
   "sub":"61000000-0000-0000-0000-000000000002",
   "role":"authenticated",
   "aud":"authenticated"
 }';
+reset role;
+delete from public.organization_members
+where organization_id = '62000000-0000-0000-0000-000000000001'
+  and user_id = '61000000-0000-0000-0000-000000000002';
+set local role authenticated;
 
 select results_eq(
   'select count(*) from public.user_workspace_preferences',
