@@ -454,7 +454,7 @@ function ProblemVisual() {
 }
 
 function IsolatedCard({ agent, className, file, fileType = "markdown", note, title }: { agent: Agent; className: string; file: string; fileType?: FileType; note: string; title: string }) {
-	return <div className={cn("absolute w-[min(290px,40%)] rounded-xl p-4 text-xs shadow-[0_22px_45px_rgba(66,35,17,.2)] max-sm:w-[72%]", className)}><div className="mb-3 flex items-center gap-2 font-bold"><AgentMark agent={agent} />{title}</div><strong className="flex items-center gap-2 rounded-lg border border-current/10 bg-white/35 px-3 py-2 font-mono"><FileMark type={fileType} />{file}</strong><span className="mt-2 block opacity-50">{note}</span></div>;
+	return <div className={cn("absolute w-[min(290px,40%)] rounded-xl p-4 text-xs shadow-[0_22px_45px_rgba(66,35,17,.2)] max-sm:w-[72%]", className)}><div className="mb-3 flex items-center gap-2 font-bold"><AgentMark className={agent === "chatgpt" ? "brightness-0 invert" : undefined} agent={agent} />{title}</div><strong className="flex items-center gap-2 rounded-lg border border-current/10 bg-white/35 px-3 py-2 font-mono"><FileMark type={fileType} />{file}</strong><span className="mt-2 block opacity-50">{note}</span></div>;
 }
 
 function SolutionVisual() {
