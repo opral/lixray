@@ -23,6 +23,7 @@ import {
 } from "react";
 import type { Lix } from "@lix-js/sdk";
 import { useAuth } from "~/components/auth-provider";
+import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import { openMockRemoteLix } from "~/lib/mock-remote-lix";
@@ -38,6 +39,7 @@ import {
 	createWorkspaceSessionStateStore,
 } from "~/lib/atelier-state";
 import type { BrowserLix } from "~/lib/mock-remote-lix";
+import { captureTelemetry } from "~/lib/telemetry";
 
 interface WorkspaceAtelierProps {
 	workspaceId: string;
@@ -73,6 +75,11 @@ export function WorkspaceAtelier({
 	const eventHandlerRef = useRef<(event: AtelierEvent) => void>(
 		() => undefined,
 	);
+	const atelierTelemetryHandlerRef = useRef<
+		ReturnType<typeof createAtelierTelemetryHandler> | undefined
+	>(undefined);
+	atelierTelemetryHandlerRef.current ??=
+		createAtelierTelemetryHandler(captureTelemetry);
 	useEffect(() => {
 		pathnameRef.current = pathname;
 	}, [pathname]);
@@ -117,6 +124,7 @@ export function WorkspaceAtelier({
 
 	useEffect(() => {
 		eventHandlerRef.current = (event) => {
+			atelierTelemetryHandlerRef.current?.(event);
 			const nextFilePath =
 				event.type === "document_viewed"
 					? event.filePath
@@ -213,6 +221,7 @@ export function WorkspaceAtelier({
 						onEvent: (event) => eventHandlerRef.current(event),
 					}),
 				);
+				captureTelemetry("workspace_opened");
 				const actualBranchId = lix.activeBranchSnapshot();
 				if (
 					shouldNormalizeInitialBranch({

@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
+import { captureTelemetry } from "~/lib/telemetry";
 
 export const Route = createFileRoute("/invite/$token")({
 	component: InvitationPage,
@@ -30,6 +31,7 @@ function InvitationPage() {
 					return;
 				}
 				await workspaceState.refresh({ organizationId: String(data) });
+				captureTelemetry("invitation_accepted");
 				setStatus("accepted");
 			});
 	}, [client, isLoaded, token, user, workspaceState]);
