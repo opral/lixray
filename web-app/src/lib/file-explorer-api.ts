@@ -80,25 +80,26 @@ export function useFileExplorerApi() {
 				branchId,
 				dirPath,
 			);
-			return entries.map((entry): ExplorerEntry =>
-				entry.kind === "directory"
-					? {
-							kind: "dir",
-							id: entry.path,
-							path: entry.path,
-							name: entry.name,
-							revision: entry.revision,
-							updatedAt: entry.updatedAt,
-						}
-					: {
-							kind: "file",
-							id: entry.path,
-							path: entry.path,
-							name: entry.name,
-							revision: entry.revision,
-							size: entry.size ?? null,
-							updatedAt: entry.updatedAt,
-						},
+			return entries.map(
+				(entry): ExplorerEntry =>
+					entry.kind === "directory"
+						? {
+								kind: "dir",
+								id: entry.path,
+								path: entry.path,
+								name: entry.name,
+								revision: entry.revision,
+								updatedAt: entry.updatedAt,
+							}
+						: {
+								kind: "file",
+								id: entry.path,
+								path: entry.path,
+								name: entry.name,
+								revision: entry.revision,
+								size: entry.size ?? null,
+								updatedAt: entry.updatedAt,
+							},
 			);
 		}
 
@@ -173,11 +174,13 @@ export function useFileExplorerApi() {
 							`($${index * 3 + 1}, $${index * 3 + 2}, $${index * 3 + 3})`,
 					)
 					.join(", ");
-				const params = batch.flatMap((file): Array<WireValue> => [
-					text(file.path),
-					{ kind: "blob", base64: file.base64 },
-					{ kind: "json", value: { size: file.size } },
-				]);
+				const params = batch.flatMap(
+					(file): Array<WireValue> => [
+						text(file.path),
+						{ kind: "blob", base64: file.base64 },
+						{ kind: "json", value: { size: file.size } },
+					],
+				);
 				try {
 					await api.execute({
 						branchId,

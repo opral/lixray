@@ -514,7 +514,13 @@ class MockRemoteObserveEvents {
 
 class MockValue {
 	readonly kind:
-		"null" | "boolean" | "integer" | "real" | "text" | "json" | "blob";
+		| "null"
+		| "boolean"
+		| "integer"
+		| "real"
+		| "text"
+		| "json"
+		| "blob";
 	readonly #value: unknown;
 
 	constructor(kind: MockValue["kind"], value: unknown) {

@@ -104,10 +104,12 @@ export type AuthorizeWorkspace = (
 ) => Promise<Response | null>;
 
 export type AuthResult =
-	{ ok: true; auth: AuthenticatedUser } | { ok: false; response: Response };
+	| { ok: true; auth: AuthenticatedUser }
+	| { ok: false; response: Response };
 
 export type McpAuthResult =
-	{ ok: true; auth: AuthenticatedMcpUser } | { ok: false; response: Response };
+	| { ok: true; auth: AuthenticatedMcpUser }
+	| { ok: false; response: Response };
 
 export type McpClaimsValidation =
 	| { ok: true; userId: string; clientId: string }
