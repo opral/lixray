@@ -39,8 +39,7 @@ test("an MCP-created file immediately opens in review mode", async ({
 	const content = "# Created through MCP\n";
 	let client: Client | undefined;
 	try {
-		await page.goto(new URL("/", appBaseURL).toString());
-		await page.getByRole("link", { name: /launch-q3/ }).click();
+		await page.goto(new URL(WORKSPACE_ROUTE, appBaseURL).toString());
 		await expect(page).toHaveURL(
 			new URL(WORKSPACE_ROUTE, appBaseURL).toString(),
 		);
