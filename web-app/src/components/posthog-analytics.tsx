@@ -3,33 +3,29 @@ import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
 import { initializeTelemetry } from "~/lib/telemetry";
 
-let identifiedUserId: string | null = null;
 let groupedOrganizationId: string | null = null;
 let groupedWorkspaceId: string | null = null;
 
 export function PostHogAnalytics() {
 	const { isLoaded: authLoaded, user } = useAuth();
 	const { activeWorkspace, isLoaded: workspaceLoaded } = useWorkspace();
+	const userId = user?.id;
 
 	useEffect(() => {
-		if (!authLoaded) return;
+		void initializeTelemetry();
+	}, []);
+
+	useEffect(() => {
+		if (!authLoaded || !userId) return;
 		let disposed = false;
-		void initializeTelemetry(user?.id ?? null).then((posthog) => {
+		void initializeTelemetry().then((posthog) => {
 			if (!posthog || disposed) return;
-			if (!user) {
-				identifiedUserId = null;
-				groupedOrganizationId = null;
-				groupedWorkspaceId = null;
-				return;
-			}
-			if (identifiedUserId === user.id) return;
-			identifiedUserId = user.id;
-			posthog.capture("user_authenticated");
+			posthog.identify(userId);
 		});
 		return () => {
 			disposed = true;
 		};
-	}, [authLoaded, user]);
+	}, [authLoaded, userId]);
 
 	useEffect(() => {
 		if (!authLoaded || !workspaceLoaded) return;

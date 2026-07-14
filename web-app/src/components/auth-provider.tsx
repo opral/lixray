@@ -12,6 +12,7 @@ import { getBrowserSupabaseClient, localDevCredentials } from "~/lib/supabase";
 import type { LixraySupabaseClient } from "~/lib/supabase";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import { isDemoModeEnabled } from "~/lib/demo-client";
+import { resetTelemetry } from "~/lib/telemetry";
 
 const RETURN_TO_KEY = "lixray.auth.return-to";
 
@@ -122,6 +123,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 		if (!client) return;
 		const { error } = await client.auth.signOut();
 		if (error) throw error;
+		resetTelemetry();
 	}, [client]);
 
 	const value = useMemo<AuthContextValue>(
