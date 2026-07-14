@@ -93,7 +93,8 @@ interface PersistentSnapshot {
 }
 
 type PersistentObserverUpdate =
-	{ snapshot: PersistentSnapshot } | { error: unknown };
+	| { snapshot: PersistentSnapshot }
+	| { error: unknown };
 
 interface ObserverState {
 	generation: number;

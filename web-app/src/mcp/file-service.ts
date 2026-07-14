@@ -66,7 +66,9 @@ export interface LixFileServiceOptions {
 export type EntryKind = "file" | "directory";
 
 export type FilesystemMutationOutcome =
-	"applied" | "conflict" | "already_exists";
+	| "applied"
+	| "conflict"
+	| "already_exists";
 
 export interface FilesystemMutationRequest {
 	branchId: string;
@@ -181,21 +183,25 @@ export class LixFileService {
 		]);
 
 		return [
-			...directories.rows.map((row): EntrySummary => ({
-				kind: "directory",
-				path: asText(row[0]),
-				name: asText(row[1]),
-				revision: asText(row[2]),
-				updatedAt: asText(row[3]),
-			})),
-			...files.rows.map((row): EntrySummary => ({
-				kind: "file",
-				path: asText(row[0]),
-				name: asText(row[1]),
-				size: sizeFromMetadata(row[2]),
-				revision: asText(row[3]),
-				updatedAt: asText(row[4]),
-			})),
+			...directories.rows.map(
+				(row): EntrySummary => ({
+					kind: "directory",
+					path: asText(row[0]),
+					name: asText(row[1]),
+					revision: asText(row[2]),
+					updatedAt: asText(row[3]),
+				}),
+			),
+			...files.rows.map(
+				(row): EntrySummary => ({
+					kind: "file",
+					path: asText(row[0]),
+					name: asText(row[1]),
+					size: sizeFromMetadata(row[2]),
+					revision: asText(row[3]),
+					updatedAt: asText(row[4]),
+				}),
+			),
 		];
 	}
 
@@ -229,14 +235,16 @@ export class LixFileService {
 			sql: `SELECT path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE ${prefixClause}LOWER(path) LIKE $1 ORDER BY path LIMIT ${boundedLimit}`,
 			params,
 		});
-		return result.rows.map((row): EntrySummary => ({
-			kind: "file",
-			path: asText(row[0]),
-			name: asText(row[1]),
-			size: sizeFromMetadata(row[2]),
-			revision: asText(row[3]),
-			updatedAt: asText(row[4]),
-		}));
+		return result.rows.map(
+			(row): EntrySummary => ({
+				kind: "file",
+				path: asText(row[0]),
+				name: asText(row[1]),
+				size: sizeFromMetadata(row[2]),
+				revision: asText(row[3]),
+				updatedAt: asText(row[4]),
+			}),
+		);
 	}
 
 	async readFile(

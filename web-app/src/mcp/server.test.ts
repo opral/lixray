@@ -186,7 +186,8 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		assert.equal(
 			(
 				invalidRead.structuredContent as
-					{ error?: { code?: string } } | undefined
+					| { error?: { code?: string } }
+					| undefined
 			)?.error?.code,
 			"invalid_path",
 		);

@@ -31,7 +31,8 @@ export interface McpServerOptions {
 }
 
 type McpSecurityScheme =
-	{ type: "oauth2"; scopes: Array<string> } | { type: "noauth" };
+	| { type: "oauth2"; scopes: Array<string> }
+	| { type: "noauth" };
 
 const oauthSecuritySchemes: Array<McpSecurityScheme> = [
 	{ type: "oauth2", scopes: [...MCP_SCOPES] },

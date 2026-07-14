@@ -56,9 +56,11 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	private readonly authorizeWorkspace: AuthorizeWorkspace;
 	private readonly fetcher: typeof fetch;
 	private readonly workspaceFetch:
-		((workspaceId: string, request: Request) => Promise<Response>) | undefined;
+		| ((workspaceId: string, request: Request) => Promise<Response>)
+		| undefined;
 	private readonly workspaceSummaries:
-		ReadonlyArray<WorkspaceSummary> | undefined;
+		| ReadonlyArray<WorkspaceSummary>
+		| undefined;
 
 	constructor(
 		env: WorkerLixRuntimeEnv,
