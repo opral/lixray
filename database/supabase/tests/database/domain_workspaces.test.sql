@@ -7,9 +7,9 @@ insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password,
   email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at
 ) values
-  ('71000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'person@gmail.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Gmail Person"}', now(), now()),
-  ('71000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'person@yahoo.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Yahoo Person"}', now(), now()),
-  ('71000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'person@outlook.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Outlook Person"}', now(), now()),
+  ('71000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'gmail.person@gmail.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Gmail Person"}', now(), now()),
+  ('71000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'yahoo.person@yahoo.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Yahoo Person"}', now(), now()),
+  ('71000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'outlook.person@outlook.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Outlook Person"}', now(), now()),
   ('71000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'owner@acme.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Acme Owner"}', now(), now()),
   ('71000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'member@acme.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Acme Member"}', now(), now()),
   ('71000000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'person@acme.co.uk', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Acme UK"}', now(), now()),
