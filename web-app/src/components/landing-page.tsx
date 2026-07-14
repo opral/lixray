@@ -429,7 +429,7 @@ function WorkspaceTable({ compact = false }: { compact?: boolean }) {
 
 function HeroVisual() {
 	return (
-		<div className={cn(visualShell, "mt-14 h-[460px] w-full max-w-6xl overflow-visible px-[8%] pt-8 shadow-[0_45px_100px_rgba(82,43,16,.16)] max-md:h-[360px] max-md:px-3 max-md:pt-4")} aria-label="A shared LixRay workspace used by multiple agents">
+		<div className="relative mt-14 h-[460px] w-full max-w-6xl px-[8%] pt-8 max-md:h-[360px] max-md:px-3 max-md:pt-4" aria-label="A shared LixRay workspace used by multiple agents">
 			<div className="max-md:origin-top max-md:scale-[.72]"><WorkspaceTable compact /></div>
 			<div className="absolute bottom-[-12px] left-[-2%] w-[330px] rounded-2xl border border-[#dfd2b6] bg-[#f8f1e4] shadow-[0_24px_60px_rgba(72,38,17,.3)] max-md:hidden">
 				<div className="flex h-11 items-center border-b border-[#e5dac4] px-4 text-xs font-bold"><img className="mr-2 size-4" src="/landing/claude-official.png" alt="" />Claude<span className="ml-auto flex items-center gap-1.5 text-stone-500"><PersonAvatar person="mara" />Mara</span></div>
