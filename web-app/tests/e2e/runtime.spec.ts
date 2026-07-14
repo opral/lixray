@@ -12,7 +12,7 @@ test("sign-in route renders without runtime errors", async ({ page }) => {
 	await page.goto("/sign-in");
 
 	await expect(
-		page.getByRole("heading", { name: "Sign in to Lixray" }),
+		page.getByRole("heading", { name: "Sign in to LixRay" }),
 	).toBeVisible();
 	await expect(
 		page.getByRole("button", { name: "Continue with Google" }),
@@ -58,7 +58,7 @@ test("home lists workspaces and opens the canonical workspace route", async ({
 		timeout: 55_000,
 	});
 	await expect(
-		page.getByRole("link", { name: "Back to Lixray home" }),
+		page.getByRole("link", { name: "Back to LixRay home" }),
 	).toBeVisible();
 	expect(supabaseRequests).toEqual([]);
 });
@@ -185,7 +185,7 @@ test("creates a workspace, cold-starts its storage, and opens Atelier", async ({
 		timeout: 55_000,
 	});
 	await expect(
-		page.getByRole("link", { name: "Back to Lixray home" }),
+		page.getByRole("link", { name: "Back to LixRay home" }),
 	).toBeVisible();
 });
 

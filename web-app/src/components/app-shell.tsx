@@ -51,7 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 					<span className={brandMarkClass}>
 						<DatabaseZap size={17} aria-hidden="true" />
 					</span>
-					<span>Lixray</span>
+					<span>LixRay</span>
 				</Link>
 				<div className="flex items-center gap-3 max-[800px]:w-full max-[800px]:flex-wrap max-[800px]:justify-start">
 					{isDemoModeEnabled ? null : (

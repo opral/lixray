@@ -423,7 +423,7 @@ export function validateMcpJwtClaims(
 		return {
 			ok: false,
 			error: "invalid_token",
-			description: "The Lixray access token is invalid or expired.",
+			description: "The LixRay access token is invalid or expired.",
 		};
 	}
 
@@ -439,7 +439,7 @@ export function validateMcpJwtClaims(
 		return {
 			ok: false,
 			error: "insufficient_scope",
-			description: "Authorize the Lixray MCP app to continue.",
+			description: "Authorize the LixRay MCP app to continue.",
 		};
 	}
 

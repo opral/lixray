@@ -10,7 +10,7 @@ import { Toaster } from "~/components/ui/sonner";
 import { WorkspaceProvider } from "~/components/workspace-provider";
 import appCss from "../styles.css?url";
 
-const title = "Lixray";
+const title = "LixRay";
 const description = "Workspace-scoped Lix over HTTP, backed by SlateDB on R2.";
 
 export const Route = createRootRoute({

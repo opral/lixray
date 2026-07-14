@@ -3,7 +3,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 /*
- * Lixray reuses Atelier's semantic Tailwind tokens 1:1. Their role,
+ * LixRay reuses Atelier's semantic Tailwind tokens 1:1. Their role,
  * prominence, and interaction-state aliases are modeled after Subframe's
  * semantic color guidance:
  * https://www.subframe.com/blog/how-to-setup-semantic-tailwind-colors

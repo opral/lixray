@@ -156,7 +156,7 @@ function requestSignal(parentSignal: AbortSignal | null | undefined): {
 } {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => {
-		controller.abort(new Error("Lixray request timed out."));
+		controller.abort(new Error("LixRay request timed out."));
 	}, 45_000);
 	const abortFromParent = () => controller.abort(parentSignal?.reason);
 
@@ -202,7 +202,7 @@ function formatApiError(status: number, body: unknown): string {
 		return body.trim();
 	}
 
-	return `Lixray request failed with status ${status}`;
+	return `LixRay request failed with status ${status}`;
 }
 
 export function formatWireValue(value: WireValue): string {

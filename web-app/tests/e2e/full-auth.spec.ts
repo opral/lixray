@@ -22,7 +22,7 @@ test("full-auth user can create and open a fresh workspace", async ({
 		if (await localSignIn.isVisible()) {
 			await localSignIn.click();
 		} else {
-			await page.getByRole("link", { name: "Continue to Lixray" }).click();
+			await page.getByRole("link", { name: "Continue to LixRay" }).click();
 		}
 
 		await expect(page).toHaveURL(/\/$/);

@@ -1,7 +1,7 @@
 {
 	"id": "/",
-	"name": "Lixray",
-	"short_name": "Lixray",
+	"name": "LixRay",
+	"short_name": "LixRay",
 	"description": "Explore and manage Lix workspaces.",
 	"start_url": "/",
 	"scope": "/",

@@ -165,7 +165,7 @@ function WorkspacePage() {
 					<span className={brandMarkClass}>
 						<DatabaseZap size={17} aria-hidden="true" />
 					</span>
-					<span>Lixray</span>
+					<span>LixRay</span>
 				</Link>
 				<Link to="/" className={`${buttonClass} max-[800px]:w-full`}>
 					Back to workspace

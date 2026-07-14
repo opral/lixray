@@ -107,7 +107,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				fetcher(workspacesUrl, { headers }),
 			]);
 		} catch (caught) {
-			console.error("Lixray workspace discovery fetch failed", {
+			console.error("LixRay workspace discovery fetch failed", {
 				error: errorDetails(caught),
 			});
 			throw new FileServiceError(
