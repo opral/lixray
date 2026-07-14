@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Page, Request } from "@playwright/test";
 import { expect, expectOk, test } from "./fixtures";
 import type { BranchesResponse } from "../../src/lib/lixray-api";
@@ -78,6 +79,41 @@ test("branch URL normalization preserves encoded file names", async ({
 	await settlePageExecutes(page, pendingExecutes);
 });
 
+test("a branch-only file survives reload and falls back to the workspace root on main", async ({
+	page,
+}) => {
+	const pendingExecutes = trackPageExecutes(page);
+	const { draftBranchId, filePath, mainBranchId } =
+		await seedBranchOnlyMarkdownFile(page);
+	const encodedPath = `/@acme/launch-q3/file/${encodeURIComponent(
+		filePath.slice(1),
+	)}`;
+
+	await page.goto(`${encodedPath}?branch=${encodeURIComponent(draftBranchId)}`);
+	await expect(
+		page.getByRole("heading", { name: "Draft-only file" }),
+	).toBeVisible({ timeout: 55_000 });
+	await page.reload();
+	await expect(page).toHaveURL((url) => {
+		return (
+			url.pathname === encodedPath &&
+			url.searchParams.get("branch") === draftBranchId
+		);
+	});
+	await expect(
+		page.getByRole("heading", { name: "Draft-only file" }),
+	).toBeVisible({ timeout: 55_000 });
+
+	await page.goto(`${encodedPath}?branch=${encodeURIComponent(mainBranchId)}`);
+	await expect(page).toHaveURL(
+		(url) =>
+			url.pathname === "/@acme/launch-q3" &&
+			url.searchParams.get("branch") === mainBranchId,
+		{ timeout: 55_000 },
+	);
+	await settlePageExecutes(page, pendingExecutes);
+});
+
 function trackPageExecutes(page: Page): Set<Request> {
 	const requests = new Set<Request>();
 	page.on("request", (request) => {
@@ -138,4 +174,55 @@ async function seedMarkdownFile(
 		},
 	);
 	await expectOk(executeResponse);
+}
+
+async function seedBranchOnlyMarkdownFile(page: Page): Promise<{
+	mainBranchId: string;
+	draftBranchId: string;
+	filePath: string;
+}> {
+	const headers = { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` };
+	const branchesResponse = await page.request.get(
+		`/v1/workspaces/${WORKSPACE_ID}/branches`,
+		{ headers },
+	);
+	await expectOk(branchesResponse);
+	const branches = (await branchesResponse.json()) as BranchesResponse;
+	const mainBranchId =
+		branches.branches.find((branch) => branch.name === "main")?.id ??
+		branches.branches[0]?.id;
+	expect(mainBranchId).toBeTruthy();
+	const draftBranchId = randomUUID();
+	const createBranchResponse = await page.request.post(
+		`/v1/workspaces/${WORKSPACE_ID}/createBranch`,
+		{
+			headers,
+			data: {
+				branchId: mainBranchId,
+				id: draftBranchId,
+				name: `Draft ${draftBranchId.slice(0, 8)}`,
+			},
+		},
+	);
+	await expectOk(createBranchResponse);
+	const filePath = `/draft-only-${randomUUID()}.md`;
+	const executeResponse = await page.request.post(
+		`/v1/workspaces/${WORKSPACE_ID}/execute`,
+		{
+			headers,
+			data: {
+				branchId: draftBranchId,
+				sql: "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+				params: [
+					{ kind: "text", value: filePath },
+					{
+						kind: "blob",
+						base64: Buffer.from("# Draft-only file\n").toString("base64"),
+					},
+				],
+			},
+		},
+	);
+	await expectOk(executeResponse);
+	return { mainBranchId, draftBranchId, filePath };
 }

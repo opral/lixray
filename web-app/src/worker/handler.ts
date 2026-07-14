@@ -179,7 +179,7 @@ export async function handleRequest(
 			new LixFileService(client, {
 				agentReview: {
 					agent: "codex",
-					sessionId: authResult.auth.clientId,
+					sessionId: authResult.auth.userId,
 				},
 			}),
 			options.executionContext ?? noopExecutionContext(),

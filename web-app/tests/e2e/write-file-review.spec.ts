@@ -11,16 +11,15 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { expect, test } from "./fixtures";
 import {
-	DEMO_CREATED_WORKSPACE_ID,
 	DEMO_MAIN_BRANCH_ID,
 	DEMO_WORKSPACE_ID,
 } from "../../src/lib/demo-identity";
 
-const WORKSPACE_ROUTE = "/@acme/mcp-review";
+const WORKSPACE_ROUTE = "/@acme/launch-q3";
 const PREVIEW_HOST = "127.0.0.1";
 const WEB_APP_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
-test("an MCP-created file enters review mode only after the user opens it", async ({
+test("an MCP-created file immediately opens in review mode", async ({
 	baseURL,
 	page,
 }) => {
@@ -41,12 +40,7 @@ test("an MCP-created file enters review mode only after the user opens it", asyn
 	let client: Client | undefined;
 	try {
 		await page.goto(new URL("/", appBaseURL).toString());
-		await page.getByRole("button", { name: "New workspace" }).click();
-		await page
-			.getByRole("textbox", { name: "Workspace name" })
-			.fill("MCP Review");
-		await page.getByRole("button", { name: "Create workspace" }).click();
-		await page.getByRole("link", { name: /MCP Review/ }).click();
+		await page.getByRole("link", { name: /launch-q3/ }).click();
 		await expect(page).toHaveURL(
 			new URL(WORKSPACE_ROUTE, appBaseURL).toString(),
 		);
@@ -63,7 +57,7 @@ test("an MCP-created file enters review mode only after the user opens it", asyn
 		const result = await client.callTool({
 			name: "write_file",
 			arguments: {
-				workspace_id: DEMO_CREATED_WORKSPACE_ID,
+				workspace_id: DEMO_WORKSPACE_ID,
 				branch_id: DEMO_MAIN_BRANCH_ID,
 				path: `/${fileName}`,
 				content,
@@ -71,12 +65,6 @@ test("an MCP-created file enters review mode only after the user opens it", asyn
 		});
 		expect(result.isError, JSON.stringify(result)).not.toBe(true);
 
-		const workspaceURL = new URL(WORKSPACE_ROUTE, appBaseURL);
-		workspaceURL.searchParams.set("branch", DEMO_MAIN_BRANCH_ID);
-		await expect(page).toHaveURL(workspaceURL.toString(), { timeout: 30_000 });
-		const createdFile = page.getByRole("treeitem", { name: fileName });
-		await expect(createdFile).toBeVisible({ timeout: 30_000 });
-		await createdFile.click();
 		const fileURL = new URL(`${WORKSPACE_ROUTE}/file/${fileName}`, appBaseURL);
 		fileURL.searchParams.set("branch", DEMO_MAIN_BRANCH_ID);
 		await expect(page).toHaveURL(fileURL.toString(), { timeout: 30_000 });
@@ -101,10 +89,17 @@ test("an MCP-created file enters review mode only after the user opens it", asyn
 		await expect(
 			page.getByRole("heading", { name: "Created through MCP" }),
 		).toBeVisible();
+		await page.reload();
+		await settlePageExecutes(page, pendingExecutes);
+		await expect(page).toHaveURL(fileURL.toString());
+		await expect(
+			page.getByRole("heading", { name: "Created through MCP" }),
+		).toBeVisible();
+		await expect(keepButton).toHaveCount(0);
 		const readBack = await client.callTool({
 			name: "read_file",
 			arguments: {
-				workspace_id: DEMO_CREATED_WORKSPACE_ID,
+				workspace_id: DEMO_WORKSPACE_ID,
 				branch_id: DEMO_MAIN_BRANCH_ID,
 				path: `/${fileName}`,
 			},
@@ -136,7 +131,7 @@ async function startIsolatedPreview(): Promise<{
 		...process.env,
 		LIXRAY_WORKER_TARGET: "e2e",
 		LIXRAY_DEMO: "1",
-		LIXRAY_DEMO_WORKSPACE_IDS: `${DEMO_WORKSPACE_ID},${DEMO_CREATED_WORKSPACE_ID}`,
+		LIXRAY_DEMO_WORKSPACE_IDS: DEMO_WORKSPACE_ID,
 		VITE_LIXRAY_DEMO: "1",
 	};
 	delete env.FORCE_COLOR;

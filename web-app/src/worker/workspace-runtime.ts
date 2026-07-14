@@ -678,6 +678,10 @@ interface PersistentObservationQuery {
 	params: NativeValue[];
 }
 
+type PersistentObservationEvaluation =
+	| { status: "success"; result: ReturnType<typeof encodeExecuteResult> }
+	| { status: "error"; error: unknown };
+
 function snapshotObservationResponse(
 	state: ObserverState,
 	body: Record<string, unknown>,
@@ -788,26 +792,45 @@ function snapshotObservationResponse(
 							branchId,
 							mainBranchId,
 							async (selectedLix) => {
-								const results = [];
+								const evaluations: PersistentObservationEvaluation[] = [];
 								for (const query of queries) {
-									results.push(
-										encodeExecuteResult(
-											await selectedLix.execute(query.sql, query.params),
-										),
-									);
+									try {
+										evaluations.push({
+											status: "success",
+											result: encodeExecuteResult(
+												await selectedLix.execute(query.sql, query.params),
+											),
+										});
+									} catch (error) {
+										if (!multiplex) throw error;
+										evaluations.push({ status: "error", error });
+									}
 								}
-								return results;
+								return evaluations;
 							},
 						);
 					} finally {
 						await closeQuietly(runtime.lix);
 					}
 				})()
-					.then((results) => {
+					.then((evaluations) => {
 						if (cancelled) return;
 						lastEvaluatedEtag = snapshotToRead.etag;
-						for (const [index, result] of results.entries()) {
-							const serialized = JSON.stringify(result);
+						for (const [index, evaluation] of evaluations.entries()) {
+							if (evaluation.status === "error") {
+								const envelope = errorEnvelope(evaluation.error);
+								const serialized = JSON.stringify(["error", envelope]);
+								if (serialized === previous[index]) continue;
+								const payload = {
+									subscriptionId: queries[index].id,
+									...envelope,
+								};
+								if (!enqueue(encoder.encode(sseFrame("error", payload)))) break;
+								previous[index] = serialized;
+								continue;
+							}
+							const result = evaluation.result;
+							const serialized = JSON.stringify(["next", result]);
 							if (serialized === previous[index]) continue;
 							const payload = {
 								...(multiplex ? { subscriptionId: queries[index].id } : {}),

@@ -17,6 +17,7 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
+	useLayoutEffect,
 	useRef,
 	useState,
 } from "react";
@@ -26,11 +27,15 @@ import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import { openMockRemoteLix } from "~/lib/mock-remote-lix";
 import {
+	isLixBranchNotFoundError,
+	resolveAtelierRouteBranchId,
+	shouldNormalizeInitialBranch,
+} from "~/lib/atelier-navigation";
+import {
 	createWorkspaceBranchSession,
 	createWorkspacePreferencesStore,
 	createWorkspaceReviewStatusStore,
 	createWorkspaceSessionStateStore,
-	readWorkspaceSessionBranch,
 } from "~/lib/atelier-state";
 import type { BrowserLix } from "~/lib/mock-remote-lix";
 
@@ -63,6 +68,7 @@ export function WorkspaceAtelier({
 	const pathnameRef = useRef(pathname);
 	const routeFilePathRef = useRef(routeFilePath);
 	const branchIdRef = useRef(branchId);
+	const routeBranchSwitchRef = useRef(0);
 	const suppressBranchNavigationRef = useRef(false);
 	const eventHandlerRef = useRef<(event: AtelierEvent) => void>(
 		() => undefined,
@@ -73,7 +79,7 @@ export function WorkspaceAtelier({
 	useEffect(() => {
 		routeFilePathRef.current = routeFilePath;
 	}, [routeFilePath]);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		branchIdRef.current = branchId;
 	}, [branchId]);
 	const getAccessToken = useCallback(
@@ -149,14 +155,16 @@ export function WorkspaceAtelier({
 		setInstance(null);
 		setError(null);
 
-		const userId = user?.id ?? "demo";
-		const initialBranchId =
-			branchIdRef.current ??
-			readWorkspaceSessionBranch({ userId, workspaceId });
+		const userId = isDemoModeEnabled ? DEMO_AUTH_TOKEN : user?.id;
+		if (!userId) {
+			setError("Unable to identify the current Atelier account.");
+			return;
+		}
+		const openingBranchId = branchIdRef.current ?? null;
 		void openMockRemoteLix({
 			workspaceId,
 			getAccessToken,
-			initialBranchId,
+			initialBranchId: openingBranchId,
 		})
 			.then(async (lix) => {
 				if (disposed) {
@@ -167,12 +175,16 @@ export function WorkspaceAtelier({
 				activeLixRef.current = lix;
 				const branchSession = createWorkspaceBranchSession({
 					lix,
-					userId,
-					workspaceId,
-					onSwitch: async (nextBranchId) => {
+					onSwitch: async (nextBranchId, context) => {
+						const routedBranchId = resolveAtelierRouteBranchId(
+							branchIdRef.current,
+							lix.mainBranchSnapshot(),
+						);
 						if (
 							suppressBranchNavigationRef.current ||
-							branchIdRef.current === nextBranchId
+							routedBranchId === nextBranchId ||
+							(context?.failedBranchId !== undefined &&
+								routedBranchId === context.failedBranchId)
 						) {
 							return;
 						}
@@ -183,6 +195,7 @@ export function WorkspaceAtelier({
 					createAtelier({
 						lix,
 						branchSession,
+						reviewRangeSessionId: userId,
 						sessionStateStore: createWorkspaceSessionStateStore({
 							userId,
 							workspaceId,
@@ -201,7 +214,13 @@ export function WorkspaceAtelier({
 					}),
 				);
 				const actualBranchId = lix.activeBranchSnapshot();
-				if (branchIdRef.current !== actualBranchId) {
+				if (
+					shouldNormalizeInitialBranch({
+						openingBranchId,
+						currentBranchId: branchIdRef.current ?? null,
+						actualBranchId,
+					})
+				) {
 					await navigateToCurrentPathBranch(actualBranchId, true);
 				}
 			})
@@ -228,21 +247,52 @@ export function WorkspaceAtelier({
 
 	useEffect(() => {
 		const lix = activeLixRef.current;
-		if (!instance || !lix || !branchId) return;
-		if (instance.branches.activeId() === branchId) return;
-		void instance.branches.switch(branchId).catch(async () => {
-			const mainBranchId = lix.mainBranchSnapshot();
-			if (instance.branches.activeId() !== mainBranchId) {
-				suppressBranchNavigationRef.current = true;
+		if (!instance || !lix) return;
+		const requestedBranchId = resolveAtelierRouteBranchId(
+			branchId,
+			lix.mainBranchSnapshot(),
+		);
+		const routeSwitch = ++routeBranchSwitchRef.current;
+		void (async () => {
+			try {
+				await instance.branches.switch(requestedBranchId);
+			} catch (caught) {
+				if (routeSwitch !== routeBranchSwitchRef.current) return;
+				if (!isLixBranchNotFoundError(caught)) {
+					console.error(
+						"Unable to switch to the requested Atelier branch",
+						caught,
+					);
+					return;
+				}
+				const mainBranchId = lix.mainBranchSnapshot();
 				try {
-					await instance.branches.switch(mainBranchId);
-				} finally {
-					suppressBranchNavigationRef.current = false;
+					if (instance.branches.activeId() !== mainBranchId) {
+						suppressBranchNavigationRef.current = true;
+						try {
+							await instance.branches.switch(mainBranchId);
+						} finally {
+							suppressBranchNavigationRef.current = false;
+						}
+					}
+					if (routeSwitch !== routeBranchSwitchRef.current) return;
+					await navigateToCurrentPathBranch(mainBranchId, true);
+				} catch (fallbackError) {
+					if (routeSwitch === routeBranchSwitchRef.current) {
+						console.error(
+							"Unable to recover from a missing Atelier branch",
+							fallbackError,
+						);
+					}
 				}
 			}
-			await navigateToCurrentPathBranch(mainBranchId, true);
-		});
-	}, [branchId, instance, navigateToCurrentPathBranch]);
+		})();
+		return () => {
+			if (routeSwitch === routeBranchSwitchRef.current) {
+				routeBranchSwitchRef.current += 1;
+			}
+		};
+	}, [branchId, instance, navigateToCurrentPathBranch, pathname]);
 
 	useEffect(() => {
 		if (!instance) return;

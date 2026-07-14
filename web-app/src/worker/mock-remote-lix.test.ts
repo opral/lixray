@@ -144,6 +144,125 @@ void test("mock remote Lix parses multiplexed chunked POST-SSE observations", as
 	await lix.close();
 });
 
+void test("multiplexed observation errors reject the identified observer", async () => {
+	const encoder = new TextEncoder();
+	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = requestUrl(input);
+		if (url.endsWith("/branches")) {
+			return jsonResponse({ branches: [branch("main-branch", "main")] });
+		}
+		if (url.endsWith("/observe/multiplex")) {
+			const subscription = firstSubscription(parseJsonBody(init?.body));
+			return new Response(
+				new ReadableStream<Uint8Array>({
+					start(controller) {
+						controller.enqueue(
+							encoder.encode(
+								`event: error\ndata: ${JSON.stringify({
+									subscriptionId: subscription.id,
+									error: {
+										code: "LIX_PARSE_ERROR",
+										message: "invalid observed query",
+									},
+								})}\n\n`,
+							),
+						);
+						init?.signal?.addEventListener("abort", () => controller.close());
+					},
+				}),
+				{ headers: { "content-type": "text/event-stream" } },
+			);
+		}
+		throw new Error(`Unexpected request: ${url}`);
+	}) as typeof fetch;
+	const lix = await open(fetchMock);
+	const events = lix.observe("INVALID QUERY");
+
+	await assert.rejects(events.next(), (error: unknown) => {
+		return (
+			error instanceof MockRemoteLixError &&
+			error.code === "LIX_PARSE_ERROR" &&
+			error.message === "invalid observed query"
+		);
+	});
+
+	events.close();
+	await lix.close();
+});
+
+void test("observers wait through stream-wide errors and recover after reconnect", async () => {
+	const encoder = new TextEncoder();
+	let globalErrorSent = false;
+	let observeRequests = 0;
+	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = requestUrl(input);
+		if (url.endsWith("/branches")) {
+			return jsonResponse({ branches: [branch("main-branch", "main")] });
+		}
+		if (url.endsWith("/observe/multiplex")) {
+			observeRequests += 1;
+			const body = parseJsonBody(init?.body) as MultiplexRequest;
+			return new Response(
+				new ReadableStream<Uint8Array>({
+					start(controller) {
+						if (body.subscriptions.length < 2) {
+							init?.signal?.addEventListener("abort", () => controller.close());
+							return;
+						}
+						if (!globalErrorSent) {
+							globalErrorSent = true;
+							controller.enqueue(
+								encoder.encode(
+									`event: error\ndata: ${JSON.stringify({
+										error: {
+											code: "PREVIEW_SNAPSHOT_INVALID",
+											message: "stored preview snapshot is invalid",
+										},
+									})}\n\n`,
+								),
+							);
+							controller.close();
+							return;
+						}
+						for (const subscription of body.subscriptions) {
+							controller.enqueue(
+								encoder.encode(
+									`event: next\ndata: ${JSON.stringify(multiplexPayload(subscription.id, `recovered:${subscription.sql}`))}\n\n`,
+								),
+							);
+						}
+						init?.signal?.addEventListener("abort", () => controller.close());
+					},
+				}),
+				{ headers: { "content-type": "text/event-stream" } },
+			);
+		}
+		throw new Error(`Unexpected request: ${url}`);
+	}) as typeof fetch;
+	const lix = await open(fetchMock);
+	const files = lix.observe("SELECT files");
+	const directories = lix.observe("SELECT directories");
+	const nextFiles = files.next();
+	const nextDirectories = directories.next();
+	const [filesEvent, directoriesEvent] = await Promise.all([
+		nextFiles,
+		nextDirectories,
+	]);
+	assert.equal(
+		filesEvent?.result.rows[0]?.get("branch"),
+		"recovered:SELECT files",
+	);
+	assert.equal(
+		directoriesEvent?.result.rows[0]?.get("branch"),
+		"recovered:SELECT directories",
+	);
+	assert.ok(observeRequests >= 2);
+
+	files.close();
+	directories.close();
+	await lix.close();
+});
+
 void test("unexpected SSE closure reconnects the forwarded observation", async () => {
 	const encoder = new TextEncoder();
 	let observeRequests = 0;
