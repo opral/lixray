@@ -17,6 +17,22 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 	await seedMarkdownFile(page);
 	await page.goto("/@acme/launch-q3");
 
+	const productHeaders = page.locator(
+		"header[data-atelier-titlebar], header[data-app-titlebar]",
+	);
+	await expect(productHeaders).toHaveCount(1, { timeout: 55_000 });
+	await expect(page.getByRole("main")).toHaveCount(1);
+	const productHeader = productHeaders.first();
+	await expect(
+		productHeader.getByRole("link", { name: "Back to LixRay home" }),
+	).toBeVisible();
+	await expect(
+		productHeader.getByRole("button", { name: "Toggle left panel" }),
+	).toBeVisible();
+	await expect(
+		productHeader.getByRole("button", { name: "Toggle right panel" }),
+	).toBeVisible();
+
 	const file = page.getByRole("treeitem", {
 		name: "atelier-first-slice.md",
 	});

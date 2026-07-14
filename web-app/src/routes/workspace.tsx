@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { DatabaseZap } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";
 import { useAuth } from "~/components/auth-provider";
 import {
 	type OrganizationRole,
@@ -8,11 +8,7 @@ import {
 } from "~/components/workspace-provider";
 
 const workspaceEmptyClass =
-	"grid min-h-[calc(100vh_-_80px)] place-items-center px-5 py-10";
-const brandClass =
-	"inline-flex items-center gap-2.5 font-[750] tracking-normal no-underline";
-const brandMarkClass =
-	"grid size-7 place-items-center rounded-[7px] bg-bg-action-secondary text-text-on-action-secondary";
+	"grid min-h-[calc(100vh_-_44px)] place-items-center px-5 py-10";
 const buttonClass =
 	"inline-flex min-h-[38px] cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-border-panel bg-bg-panel px-3.5 font-[680] text-text-secondary no-underline disabled:cursor-not-allowed disabled:opacity-[0.55]";
 const primaryButtonClass = `${buttonClass} border-bg-action-primary bg-bg-action-primary text-text-on-action-primary`;
@@ -151,26 +147,25 @@ function WorkspacePage() {
 	};
 
 	if (!authLoaded || !workspaceState.isLoaded) {
-		return <div className={workspaceEmptyClass}>Loading...</div>;
+		return (
+			<div className="min-h-screen bg-bg-app">
+				<AppTitlebar>
+					<AppTitlebarBrand />
+				</AppTitlebar>
+				<main className={workspaceEmptyClass}>Loading...</main>
+			</div>
+		);
 	}
 	if (!user) return <SignedOutSettings />;
 
 	return (
 		<div className="min-h-screen">
-			<header
-				data-app-titlebar
-				className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border-panel bg-bg-panel/86 px-7 py-5 backdrop-blur-[16px] max-[800px]:flex-col max-[800px]:items-start max-[800px]:px-[18px] max-[800px]:py-4"
-			>
-				<Link to="/" className={brandClass}>
-					<span className={brandMarkClass}>
-						<DatabaseZap size={17} aria-hidden="true" />
-					</span>
-					<span>LixRay</span>
-				</Link>
-				<Link to="/" className={`${buttonClass} max-[800px]:w-full`}>
+			<AppTitlebar className="sticky top-0 z-10 bg-bg-app/90 backdrop-blur-[16px]">
+				<AppTitlebarBrand />
+				<Link to="/" className={`${buttonClass} ml-auto min-h-7 px-2.5`}>
 					Back to workspace
 				</Link>
-			</header>
+			</AppTitlebar>
 			<main className="mx-auto grid w-[min(1180px,calc(100%_-_40px))] gap-[18px] pt-6 pb-12 max-[800px]:w-[min(1180px,calc(100%_-_24px))] max-[800px]:pt-[22px]">
 				<section className="mb-[18px] max-w-[760px]">
 					<p className="mb-2 text-[13px] font-[760] tracking-[0.08em] text-text-link uppercase">
@@ -626,23 +621,28 @@ function InlineNameForm({
 
 function SignedOutSettings() {
 	return (
-		<div className={workspaceEmptyClass}>
-			<div className="w-[min(620px,100%)] rounded-[8px] border border-border-panel bg-bg-panel p-7 shadow-md">
-				<p className="mb-2 text-[13px] font-[760] tracking-[0.08em] text-text-link uppercase">
-					Workspace settings
-				</p>
-				<h1 className="m-0 text-[clamp(30px,5vw,42px)] leading-[1.08] tracking-normal">
-					Sign in to manage workspaces.
-				</h1>
-				<div className="mt-3 flex items-center justify-between gap-3 max-[800px]:flex-col max-[800px]:items-stretch">
-					<Link
-						className={`${primaryButtonClass} max-[800px]:w-full`}
-						to="/sign-in"
-					>
-						Sign in
-					</Link>
+		<div className="min-h-screen bg-bg-app">
+			<AppTitlebar>
+				<AppTitlebarBrand />
+			</AppTitlebar>
+			<main className={workspaceEmptyClass}>
+				<div className="w-[min(620px,100%)] rounded-[8px] border border-border-panel bg-bg-panel p-7 shadow-md">
+					<p className="mb-2 text-[13px] font-[760] tracking-[0.08em] text-text-link uppercase">
+						Workspace settings
+					</p>
+					<h1 className="m-0 text-[clamp(30px,5vw,42px)] leading-[1.08] tracking-normal">
+						Sign in to manage workspaces.
+					</h1>
+					<div className="mt-3 flex items-center justify-between gap-3 max-[800px]:flex-col max-[800px]:items-stretch">
+						<Link
+							className={`${primaryButtonClass} max-[800px]:w-full`}
+							to="/sign-in"
+						>
+							Sign in
+						</Link>
+					</div>
 				</div>
-			</div>
+			</main>
 		</div>
 	);
 }

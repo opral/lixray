@@ -81,22 +81,38 @@
 }
 
 @media (display-mode: window-controls-overlay) {
-	.atelier-root > div > header,
 	[data-app-titlebar] {
 		box-sizing: border-box;
+		height: env(titlebar-area-height, 36px);
+		min-height: env(titlebar-area-height, 36px);
+		max-height: env(titlebar-area-height, 36px);
 		width: env(titlebar-area-width, 100%);
-		margin-left: env(titlebar-area-x, 0);
+		top: env(titlebar-area-y, 0px);
+		margin-top: env(titlebar-area-y, 0px);
+		margin-left: env(titlebar-area-x, 0px);
+		-webkit-user-select: none;
+		user-select: none;
 		-webkit-app-region: drag;
 		app-region: drag;
 	}
 
-	.atelier-root > div > header {
-		height: env(titlebar-area-height, 36px);
-		min-height: env(titlebar-area-height, 36px);
+	[data-app-titlebar-content] {
+		height: 100%;
+		min-width: 0;
 	}
 
-	.atelier-root > div > header :is(a, button, input, select),
-	[data-app-titlebar] :is(a, button, input, select) {
+	[data-app-titlebar]
+		:is(
+			a,
+			button,
+			input,
+			select,
+			textarea,
+			[contenteditable],
+			[role="button"],
+			[role="combobox"]
+		),
+	[data-app-no-drag] {
 		-webkit-app-region: no-drag;
 		app-region: no-drag;
 	}
