@@ -30,7 +30,6 @@ export function createAtelierTelemetryHandler(
 									fileExtension === "(none)" ? "no_extension" : "no_renderer",
 							}),
 					document_origin: event.documentOrigin,
-					source: "atelier",
 					view_kind: event.viewKind,
 				});
 				break;
@@ -39,7 +38,6 @@ export function createAtelierTelemetryHandler(
 				capture("document_viewed", {
 					document_origin: event.documentOrigin,
 					file_extension: fileExtensionProperty(event.filePath),
-					source: "atelier",
 					view_kind: event.viewKind,
 				});
 				break;
@@ -56,7 +54,6 @@ export function createAtelierTelemetryHandler(
 				capture("document_modified", {
 					file_extension: fileExtensionProperty(event.filePath),
 					modified_by: event.modifiedBy,
-					source: "atelier",
 				});
 				break;
 			}
@@ -64,20 +61,17 @@ export function createAtelierTelemetryHandler(
 				capture("extension_opened", {
 					extension_id: normalizeExtensionId(event.extensionId),
 					panel: event.panel,
-					source: "atelier",
 				});
 				break;
 			case "diff_opened":
 				capture("diff_opened", {
 					file_extension: fileExtensionProperty(event.filePath),
-					source: "atelier",
 				});
 				break;
 			case "diff_resolved":
 				capture("diff_resolved", {
 					file_extension: fileExtensionProperty(event.filePath),
 					outcome: event.outcome,
-					source: "atelier",
 				});
 				break;
 			case "document_closed":

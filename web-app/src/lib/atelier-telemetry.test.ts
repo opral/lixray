@@ -36,7 +36,6 @@ void test("Atelier events expose extensions and outcomes without file paths", ()
 				document_open_result: "viewed",
 				file_extension: "md",
 				document_origin: "existing",
-				source: "atelier",
 				view_kind: "atelier_file",
 			},
 		},
@@ -45,7 +44,6 @@ void test("Atelier events expose extensions and outcomes without file paths", ()
 			properties: {
 				file_extension: "md",
 				outcome: "accepted",
-				source: "atelier",
 			},
 		},
 	]);

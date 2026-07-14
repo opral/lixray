@@ -30,7 +30,7 @@ export function PostHogAnalytics() {
 			if (identifiedUserId === user.id) return;
 			posthog.identify(user.id);
 			identifiedUserId = user.id;
-			posthog.capture("user_authenticated", { source: "supabase_auth" });
+			posthog.capture("user_authenticated");
 		});
 		return () => {
 			disposed = true;

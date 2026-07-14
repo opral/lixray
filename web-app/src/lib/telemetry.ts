@@ -35,11 +35,7 @@ async function initializeTelemetryUncached(): Promise<PostHog | null> {
 	);
 	const { default: posthog } = await import("posthog-js");
 	posthog.init(token, buildPostHogConfig(host));
-	posthog.register({
-		surface: "web_app",
-		environment,
-		telemetry_environment: environment,
-	});
+	posthog.register({ environment });
 	client = posthog;
 	return client;
 }
@@ -75,10 +71,7 @@ export function captureTelemetry(
 ): void {
 	void initializeTelemetry()
 		.then((posthog) => {
-			posthog?.capture(event, {
-				source: "web_app",
-				...properties,
-			});
+			posthog?.capture(event, properties);
 		})
 		.catch((error: unknown) => {
 			console.warn("Failed to capture browser telemetry", error);

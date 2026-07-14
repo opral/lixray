@@ -221,7 +221,7 @@ export function WorkspaceAtelier({
 						onEvent: (event) => eventHandlerRef.current(event),
 					}),
 				);
-				captureTelemetry("workspace_opened", { source: "atelier" });
+				captureTelemetry("workspace_opened");
 				const actualBranchId = lix.activeBranchSnapshot();
 				if (
 					shouldNormalizeInitialBranch({
