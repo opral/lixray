@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { zipSync } from "fflate";
-import { LixFileService, type FileServiceBackend } from "../mcp/file-service";
+import { LixFileService, type LixRuntimeClient } from "../mcp/file-service";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 import { type WireValue, useLixrayApi } from "./lixray-api";
 
@@ -69,7 +69,7 @@ export function useFileExplorerApi() {
 			listBranches: async () => (await api.listBranches()).branches,
 			execute: async (_workspaceId, request) => api.execute(request),
 			mutate: async (_workspaceId, request) => api.mutateFilesystem(request),
-		} satisfies FileServiceBackend);
+		} satisfies LixRuntimeClient);
 
 		async function listDirectory(
 			branchId: string,

@@ -41,7 +41,7 @@ export interface WorkspaceSummary {
 	organization: { id: string; name: string };
 }
 
-export interface FileServiceBackend {
+export interface LixRuntimeClient {
 	listWorkspaces(): Promise<Array<WorkspaceSummary>>;
 	listBranches(workspaceId: string): Promise<Array<Branch>>;
 	execute(
@@ -109,7 +109,7 @@ export type FileServiceErrorCode =
 	| "file_too_large"
 	| "invalid_edit"
 	| "recursive_required"
-	| "backend_error";
+	| "upstream_error";
 
 export class FileServiceError extends Error {
 	readonly code: FileServiceErrorCode;
@@ -128,23 +128,20 @@ export class FileServiceError extends Error {
 }
 
 export class LixFileService {
-	private readonly backend: FileServiceBackend;
+	private readonly client: LixRuntimeClient;
 	private readonly agentReview: AgentReviewSource | undefined;
 
-	constructor(
-		backend: FileServiceBackend,
-		options: LixFileServiceOptions = {},
-	) {
-		this.backend = backend;
+	constructor(client: LixRuntimeClient, options: LixFileServiceOptions = {}) {
+		this.client = client;
 		this.agentReview = options.agentReview;
 	}
 
 	async listWorkspaces(): Promise<Array<WorkspaceSummary>> {
-		return this.backend.listWorkspaces();
+		return this.client.listWorkspaces();
 	}
 
 	async listBranches(workspaceId: string): Promise<Array<Branch>> {
-		return this.backend.listBranches(workspaceId);
+		return this.client.listBranches(workspaceId);
 	}
 
 	async executeSql(
@@ -153,7 +150,7 @@ export class LixFileService {
 		sql: string,
 		params: Array<WireValue> = [],
 	): Promise<ExecuteResponse> {
-		return this.backend.execute(workspaceId, { branchId, sql, params });
+		return this.client.execute(workspaceId, { branchId, sql, params });
 	}
 
 	async listDirectory(
@@ -171,12 +168,12 @@ export class LixFileService {
 			directoryId === null ? "parent_id IS NULL" : "parent_id = $1";
 		const params = directoryId === null ? [] : [text(directoryId)];
 		const [directories, files] = await Promise.all([
-			this.backend.execute(workspaceId, {
+			this.client.execute(workspaceId, {
 				branchId,
 				sql: `SELECT path, name, lixcol_change_id, lixcol_updated_at FROM lix_directory WHERE ${directoryFilter} ORDER BY name`,
 				params,
 			}),
-			this.backend.execute(workspaceId, {
+			this.client.execute(workspaceId, {
 				branchId,
 				sql: `SELECT path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE ${directoryId === null ? "directory_id IS NULL" : "directory_id = $1"} ORDER BY name`,
 				params,
@@ -227,7 +224,7 @@ export class LixFileService {
 						text(root),
 						text(prefixUpperBound(root)),
 					];
-		const result = await this.backend.execute(workspaceId, {
+		const result = await this.client.execute(workspaceId, {
 			branchId,
 			sql: `SELECT path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE ${prefixClause}LOWER(path) LIKE $1 ORDER BY path LIMIT ${boundedLimit}`,
 			params,
@@ -292,7 +289,7 @@ export class LixFileService {
 				);
 			}
 			await this.withAgentReview(workspaceId, branchId, () =>
-				this.backend.execute(workspaceId, {
+				this.client.execute(workspaceId, {
 					branchId,
 					sql: "INSERT INTO lix_file (path, data, lixcol_metadata) VALUES ($1, $2, $3)",
 					params: [
@@ -304,7 +301,7 @@ export class LixFileService {
 			);
 		} else {
 			const outcome = await this.withAgentReview(workspaceId, branchId, () =>
-				this.backend.mutate(workspaceId, {
+				this.client.mutate(workspaceId, {
 					branchId,
 					kind: "file",
 					path,
@@ -352,7 +349,7 @@ export class LixFileService {
 		workspaceId: string,
 		branchId: string,
 	): Promise<string> {
-		const branch = (await this.backend.listBranches(workspaceId)).find(
+		const branch = (await this.client.listBranches(workspaceId)).find(
 			(candidate) => candidate.id === branchId,
 		);
 		if (!branch) {
@@ -367,7 +364,7 @@ export class LixFileService {
 		range: Record<string, unknown>,
 	): Promise<void> {
 		const key = "atelier_agent_turn_commit_range";
-		const current = await this.backend.execute(workspaceId, {
+		const current = await this.client.execute(workspaceId, {
 			branchId,
 			sql: "SELECT value FROM lix_key_value_by_branch WHERE key = $1 AND lixcol_branch_id = $2 LIMIT 1",
 			params: [text(key), text(branchId)],
@@ -382,7 +379,7 @@ export class LixFileService {
 						isCurrentAgentReviewRange,
 					)
 				: [];
-		await this.backend.execute(workspaceId, {
+		await this.client.execute(workspaceId, {
 			branchId,
 			sql: "INSERT INTO lix_key_value_by_branch (key, value, lixcol_branch_id, lixcol_global, lixcol_untracked) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (key, lixcol_branch_id) DO UPDATE SET value = $2",
 			params: [
@@ -452,7 +449,7 @@ export class LixFileService {
 				`An entry already exists at ${path}.`,
 			);
 		}
-		await this.backend.execute(workspaceId, {
+		await this.client.execute(workspaceId, {
 			branchId,
 			sql: "INSERT INTO lix_directory (path) VALUES ($1)",
 			params: [text(path)],
@@ -488,7 +485,7 @@ export class LixFileService {
 				`An entry already exists at ${destination}.`,
 			);
 		}
-		const outcome = await this.backend.mutate(workspaceId, {
+		const outcome = await this.client.mutate(workspaceId, {
 			branchId,
 			kind,
 			path: source,
@@ -514,7 +511,7 @@ export class LixFileService {
 				"Directory deletion requires recursive=true because it removes the entire subtree.",
 			);
 		}
-		const outcome = await this.backend.mutate(workspaceId, {
+		const outcome = await this.client.mutate(workspaceId, {
 			branchId,
 			kind,
 			path,
@@ -531,7 +528,7 @@ export class LixFileService {
 		path: string,
 	): Promise<string | null> {
 		if (path === "/") return null;
-		const result = await this.backend.execute(workspaceId, {
+		const result = await this.client.execute(workspaceId, {
 			branchId,
 			sql: "SELECT id FROM lix_directory WHERE path = $1",
 			params: [text(path)],
@@ -553,7 +550,7 @@ export class LixFileService {
 		revision: string;
 		updatedAt: string;
 	}> {
-		const result = await this.backend.execute(workspaceId, {
+		const result = await this.client.execute(workspaceId, {
 			branchId,
 			sql: "SELECT data, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE path = $1",
 			params: [text(path)],
@@ -589,7 +586,7 @@ export class LixFileService {
 	): Promise<EntrySummary> {
 		const table = kind === "file" ? "lix_file" : "lix_directory";
 		const metadata = kind === "file" ? ", lixcol_metadata" : "";
-		const result = await this.backend.execute(workspaceId, {
+		const result = await this.client.execute(workspaceId, {
 			branchId,
 			sql: `SELECT path, name, lixcol_change_id, lixcol_updated_at${metadata} FROM ${table} WHERE path = $1`,
 			params: [text(path)],
@@ -616,12 +613,12 @@ export class LixFileService {
 		const fileCandidate = path.endsWith("/") ? path.slice(0, -1) : path;
 		const directoryCandidate = `${fileCandidate}/`;
 		const [file, directory] = await Promise.all([
-			this.backend.execute(workspaceId, {
+			this.client.execute(workspaceId, {
 				branchId,
 				sql: "SELECT id FROM lix_file WHERE path = $1",
 				params: [text(fileCandidate)],
 			}),
-			this.backend.execute(workspaceId, {
+			this.client.execute(workspaceId, {
 				branchId,
 				sql: "SELECT id FROM lix_directory WHERE path = $1",
 				params: [text(directoryCandidate)],
@@ -757,7 +754,7 @@ function blob(bytes: Uint8Array): WireValue {
 function asText(value: WireValue | undefined): string {
 	if (!value || value.kind !== "text") {
 		throw new FileServiceError(
-			"backend_error",
+			"upstream_error",
 			"Expected a text value from Lix.",
 		);
 	}
@@ -767,7 +764,7 @@ function asText(value: WireValue | undefined): string {
 function asBlob(value: WireValue | undefined): Uint8Array {
 	if (!value || value.kind !== "blob") {
 		throw new FileServiceError(
-			"backend_error",
+			"upstream_error",
 			"Expected file bytes from Lix.",
 		);
 	}

@@ -11,7 +11,7 @@ import {
 	DEMO_WORKSPACE_ID,
 	DEMO_WORKSPACE_NAME,
 } from "../lib/demo-identity.ts";
-import { WorkerFileServiceBackend } from "../mcp/backend.ts";
+import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
 import { LixFileService, type WorkspaceSummary } from "../mcp/file-service.ts";
 import {
 	handleMcpTransport,
@@ -163,7 +163,7 @@ export async function handleRequest(
 				status: 500,
 			});
 		}
-		const backend = new WorkerFileServiceBackend(
+		const client = new WorkerLixRuntimeClient(
 			env,
 			authResult.auth,
 			async (workspaceId, auth) => authorizeWorkspace(workspaceId, auth, env),
@@ -176,7 +176,7 @@ export async function handleRequest(
 		);
 		return (options.mcpTransport ?? handleMcpTransport)(
 			request,
-			new LixFileService(backend, {
+			new LixFileService(client, {
 				agentReview: {
 					agent: "codex",
 					sessionId: authResult.auth.clientId,
