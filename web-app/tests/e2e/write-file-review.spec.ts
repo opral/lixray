@@ -71,7 +71,9 @@ test("an MCP-created file immediately opens in review mode", async ({
 		await expect(
 			page.getByRole("heading", { name: "Created through MCP" }),
 		).toBeVisible();
-		const keepButton = page.getByRole("button", { name: /^Keep/ });
+		const keepButton = page.getByRole("button", {
+			name: /^Keep (?:current )?change$/,
+		});
 		await expect(keepButton).toBeVisible();
 		for (
 			let change = 0;

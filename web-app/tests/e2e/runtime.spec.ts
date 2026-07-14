@@ -37,6 +37,16 @@ test("home lists workspaces and opens the canonical workspace route", async ({
 	await page.goto("/");
 
 	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
+	const productHeaders = page.locator("header[data-app-titlebar]");
+	await expect(productHeaders).toHaveCount(1);
+	const titlebarContent = productHeaders.locator("[data-app-titlebar-content]");
+	await expect(titlebarContent).toHaveCount(1);
+	await expect(
+		titlebarContent.getByRole("link", { name: "LixRay home" }),
+	).toBeVisible();
+	await expect(
+		titlebarContent.getByRole("button", { name: "Account menu" }),
+	).toBeVisible();
 	await expect(page.getByRole("heading", { name: "acme" })).toBeVisible();
 	const workspaceLink = page.getByRole("link", { name: /launch-q3/ });
 	await expect(workspaceLink).toBeVisible();
@@ -209,6 +219,14 @@ test("sql console loads branches and executes a trivial query", async ({
 	await expect(
 		page.getByRole("heading", { name: "SQL console" }),
 	).toBeVisible();
+	const productHeaders = page.locator("header[data-app-titlebar]");
+	await expect(productHeaders).toHaveCount(1);
+	const titlebarContent = productHeaders.locator("[data-app-titlebar-content]");
+	await expect(titlebarContent).toHaveCount(1);
+	await expect(
+		titlebarContent.getByRole("link", { name: "LixRay home" }),
+	).toBeVisible();
+	await expect(titlebarContent.getByText("SQL console")).toBeVisible();
 	await expectOk(branchesResponse);
 	const branchesBody = (await branchesResponse.json()) as BranchesResponse;
 	expect(branchesBody.branches, JSON.stringify(branchesBody)).toEqual(
@@ -264,6 +282,66 @@ test("sql console loads branches and executes a trivial query", async ({
 		page.getByTestId("result-table").getByRole("cell", { name: "1" }),
 	).toBeVisible();
 	await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("PWA manifest opts into the window controls overlay and serves its icons", async ({
+	page,
+}) => {
+	await page.goto("/");
+	await expect(page.locator('link[rel="manifest"]')).toHaveAttribute(
+		"href",
+		"/manifest.webmanifest",
+	);
+
+	const manifestResponse = await page.request.get("/manifest.webmanifest");
+	await expectOk(manifestResponse);
+	expect(manifestResponse.headers()["content-type"]).toContain(
+		"application/manifest+json",
+	);
+	const manifest = (await manifestResponse.json()) as {
+		display?: unknown;
+		display_override?: unknown;
+		icons?: Array<{
+			purpose?: unknown;
+			sizes?: unknown;
+			src?: unknown;
+			type?: unknown;
+		}>;
+	};
+	expect(manifest.display_override).toEqual(["window-controls-overlay"]);
+	expect(manifest.display).toBe("standalone");
+	expect(manifest.icons).toEqual([
+		{
+			src: "/lixray-icon-192.png",
+			sizes: "192x192",
+			type: "image/png",
+		},
+		{
+			src: "/lixray-icon-512.png",
+			sizes: "512x512",
+			type: "image/png",
+		},
+		{
+			src: "/lixray-icon-maskable-192.png",
+			sizes: "192x192",
+			type: "image/png",
+			purpose: "maskable",
+		},
+		{
+			src: "/lixray-icon-maskable-512.png",
+			sizes: "512x512",
+			type: "image/png",
+			purpose: "maskable",
+		},
+	]);
+
+	for (const icon of manifest.icons ?? []) {
+		expect(typeof icon.src).toBe("string");
+		const iconResponse = await page.request.get(String(icon.src));
+		await expectOk(iconResponse);
+		expect(iconResponse.headers()["content-type"]).toContain("image/png");
+		expect((await iconResponse.body()).byteLength).toBeGreaterThan(0);
+	}
 });
 
 test("legacy sign-up routes redirect to Google sign-in", async ({ page }) => {

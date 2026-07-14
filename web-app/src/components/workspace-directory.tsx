@@ -14,6 +14,7 @@ import {
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
+import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";
 import {
 	type Organization,
 	type Workspace,
@@ -324,18 +325,8 @@ function DirectoryHeader() {
 	const initial = isDemoModeEnabled ? "M" : accountInitial(user?.user_metadata);
 
 	return (
-		<header
-			data-app-titlebar
-			className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4"
-		>
-			<Link
-				className="inline-flex items-center gap-2.5 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline"
-				to="/"
-				aria-label="LixRay home"
-			>
-				<img className="size-[19px]" src="/lixray-mark.svg" alt="" />
-				<span>LixRay</span>
-			</Link>
+		<AppTitlebar>
+			<AppTitlebarBrand />
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
 					<button
@@ -367,7 +358,7 @@ function DirectoryHeader() {
 					)}
 				</DropdownMenuContent>
 			</DropdownMenu>
-		</header>
+		</AppTitlebar>
 	);
 }
 
@@ -651,7 +642,18 @@ function WorkspaceDialog({
 
 function DirectoryStatus({ children }: { children: ReactNode }) {
 	return (
-		<main className="grid min-h-dvh place-content-center justify-items-center gap-3.5 bg-bg-app p-6 text-center text-text-secondary [&_h1]:max-w-[520px] [&_h1]:text-[28px]">
+		<div className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary">
+			<AppTitlebar>
+				<AppTitlebarBrand />
+			</AppTitlebar>
+			<DirectoryStatusContent>{children}</DirectoryStatusContent>
+		</div>
+	);
+}
+
+function DirectoryStatusContent({ children }: { children: ReactNode }) {
+	return (
+		<main className="grid min-h-0 flex-1 place-content-center justify-items-center gap-3.5 bg-bg-app p-6 text-center text-text-secondary [&_h1]:max-w-[520px] [&_h1]:text-[28px]">
 			{children}
 		</main>
 	);
@@ -660,24 +662,15 @@ function DirectoryStatus({ children }: { children: ReactNode }) {
 function SignedOutDirectory() {
 	return (
 		<div className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary">
-			<header
-				data-app-titlebar
-				className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4"
-			>
-				<Link
-					className="inline-flex items-center gap-2.5 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline"
-					to="/"
-				>
-					<img className="size-[19px]" src="/lixray-mark.svg" alt="" />
-					<span>LixRay</span>
-				</Link>
-			</header>
-			<DirectoryStatus>
+			<AppTitlebar>
+				<AppTitlebarBrand />
+			</AppTitlebar>
+			<DirectoryStatusContent>
 				<h1>Sign in to see your workspaces.</h1>
 				<Button asChild variant="secondary">
 					<Link to="/sign-in">Sign in</Link>
 				</Button>
-			</DirectoryStatus>
+			</DirectoryStatusContent>
 		</div>
 	);
 }

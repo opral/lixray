@@ -1,18 +1,19 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { DatabaseZap, LogOut, Settings, SquareTerminal } from "lucide-react";
+import { LogOut, Settings } from "lucide-react";
 import type { ReactNode } from "react";
+import {
+	AppTitlebar,
+	AppTitlebarBrand,
+	AppTitlebarTitle,
+} from "~/components/app-titlebar";
 import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 
-const brandClass =
-	"inline-flex items-center gap-2.5 font-[750] tracking-normal no-underline";
-const brandMarkClass =
-	"grid size-7 place-items-center rounded-[7px] bg-bg-action-secondary text-text-on-action-secondary";
 const compactSelectClass =
-	"h-[38px] max-w-[210px] rounded-[7px] border border-border-panel bg-bg-panel py-0 pr-[30px] pl-2.5 text-text-primary max-[800px]:w-full max-[800px]:max-w-none";
+	"h-7 min-w-0 w-[180px] rounded-[7px] border border-border-panel bg-bg-panel py-0 pr-7 pl-2 text-[12px] text-text-primary max-[800px]:w-[132px] max-[560px]:w-[92px]";
 const iconButtonClass =
-	"inline-flex size-[38px] cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-border-panel bg-bg-panel p-0 font-[680] text-text-secondary no-underline disabled:cursor-not-allowed disabled:opacity-[0.55]";
+	"inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[7px] border-0 bg-transparent p-0 font-[680] text-text-secondary no-underline transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible disabled:cursor-not-allowed disabled:opacity-[0.55]";
 
 export function AppShell({ children }: { children: ReactNode }) {
 	const { signOut } = useAuth();
@@ -43,17 +44,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 	return (
 		<div className="min-h-screen">
-			<header
-				data-app-titlebar
-				className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border-panel bg-bg-panel/86 px-7 py-5 backdrop-blur-[16px] max-[800px]:flex-col max-[800px]:items-start max-[800px]:px-[18px] max-[800px]:py-4"
-			>
-				<Link to="/" className={brandClass}>
-					<span className={brandMarkClass}>
-						<DatabaseZap size={17} aria-hidden="true" />
-					</span>
-					<span>LixRay</span>
-				</Link>
-				<div className="flex items-center gap-3 max-[800px]:w-full max-[800px]:flex-wrap max-[800px]:justify-start">
+			<AppTitlebar className="sticky top-0 z-10 bg-bg-app/90 backdrop-blur-[16px]">
+				<AppTitlebarBrand className="max-[560px]:[&_[data-app-titlebar-brand-label]]:sr-only" />
+				<AppTitlebarTitle
+					className={isDemoModeEnabled ? undefined : "max-[1280px]:hidden"}
+				>
+					SQL console
+				</AppTitlebarTitle>
+				<div className="ml-auto flex min-w-0 items-center gap-1.5">
 					{isDemoModeEnabled ? null : (
 						<>
 							<label className="sr-only" htmlFor="organization-switcher">
@@ -104,14 +102,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 							</select>
 						</>
 					)}
-					<Link
-						to="/sql"
-						className={iconButtonClass}
-						aria-label="SQL console"
-						title="SQL console"
-					>
-						<SquareTerminal size={16} aria-hidden="true" />
-					</Link>
 					{isDemoModeEnabled ? null : (
 						<>
 							<Link
@@ -134,7 +124,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 						</>
 					)}
 				</div>
-			</header>
+			</AppTitlebar>
 			<main className="mx-auto w-[min(1180px,calc(100%_-_40px))] pt-6 pb-12 max-[800px]:w-[min(1180px,calc(100%_-_24px))] max-[800px]:pt-[22px]">
 				{children}
 			</main>

@@ -302,7 +302,7 @@ export function WorkspaceAtelier({
 	}, [instance, namespace, pathname, workspaceSlug]);
 
 	return (
-		<main
+		<div
 			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
 			aria-busy={!instance && !error}
 		>
@@ -310,6 +310,10 @@ export function WorkspaceAtelier({
 				<WorkspaceAtelierContext.Provider value={instance}>
 					<Atelier
 						instance={instance}
+						topBarProps={{
+							"data-app-titlebar": true,
+							className: "border-b border-border-subtle bg-bg-app",
+						}}
 						slots={{
 							navbarStart: (
 								<Link
@@ -326,20 +330,22 @@ export function WorkspaceAtelier({
 				</WorkspaceAtelierContext.Provider>
 			) : null}
 			{!instance && !error ? (
-				<div className="absolute inset-0 grid place-content-center justify-items-center gap-2 bg-bg-app p-6 text-center text-text-secondary">
+				<main className="absolute inset-0 grid place-content-center justify-items-center gap-2 bg-bg-app p-6 text-center text-text-secondary">
 					Opening workspace…
-				</div>
+				</main>
 			) : null}
 			{error ? (
-				<div
-					className="absolute inset-0 grid place-content-center justify-items-center gap-2 bg-bg-app p-6 text-center text-text-secondary [&_span]:max-w-[640px] [&_span]:text-text-tertiary"
-					role="alert"
-				>
-					<strong>Unable to open Atelier</strong>
-					<span>{error}</span>
-				</div>
+				<main className="absolute inset-0 grid place-content-center bg-bg-app p-6 text-center text-text-secondary">
+					<div
+						className="grid justify-items-center gap-2 [&_span]:max-w-[640px] [&_span]:text-text-tertiary"
+						role="alert"
+					>
+						<strong>Unable to open Atelier</strong>
+						<span>{error}</span>
+					</div>
+				</main>
 			) : null}
-		</main>
+		</div>
 	);
 }
 
