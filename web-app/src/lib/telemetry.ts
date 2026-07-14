@@ -40,8 +40,6 @@ async function initializeTelemetryUncached(): Promise<PostHog | null> {
 		environment,
 		telemetry_environment: environment,
 	});
-	posthog.capture("$pageview");
-	posthog.startSessionRecording();
 	client = posthog;
 	return client;
 }
