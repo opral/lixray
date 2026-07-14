@@ -363,28 +363,15 @@ export class LixFileService {
 		branchId: string,
 		range: Record<string, unknown>,
 	): Promise<void> {
-		const key = "atelier_agent_turn_commit_range";
-		const current = await this.client.execute(workspaceId, {
-			branchId,
-			sql: "SELECT value FROM lix_key_value_by_branch WHERE key = $1 AND lixcol_branch_id = $2 LIMIT 1",
-			params: [text(key), text(branchId)],
-		});
-		const value = current.rows[0]?.[0];
-		const existingRanges =
-			value?.kind === "json" &&
-			value.value &&
-			typeof value.value === "object" &&
-			Array.isArray((value.value as { ranges?: unknown }).ranges)
-				? (value.value as { ranges: Array<unknown> }).ranges.filter(
-						isCurrentAgentReviewRange,
-					)
-				: [];
+		const rangeId = typeof range.id === "string" ? range.id : "";
+		if (!rangeId) throw new Error("Agent review ranges require an id");
+		const key = `atelier_agent_turn_commit_range:${encodeURIComponent(rangeId)}`;
 		await this.client.execute(workspaceId, {
 			branchId,
-			sql: "INSERT INTO lix_key_value_by_branch (key, value, lixcol_branch_id, lixcol_global, lixcol_untracked) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (key, lixcol_branch_id) DO UPDATE SET value = $2",
+			sql: "INSERT INTO lix_key_value_by_branch (key, value, lixcol_branch_id, lixcol_global, lixcol_untracked) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (key, lixcol_branch_id) DO NOTHING",
 			params: [
 				text(key),
-				{ kind: "json", value: { ranges: [...existingRanges, range] } },
+				{ kind: "json", value: range },
 				text(branchId),
 				{ kind: "bool", value: branchId === "global" },
 				{ kind: "bool", value: true },
@@ -730,17 +717,6 @@ function occurrenceCount(value: string, needle: string): number {
 		count += 1;
 		offset = index + needle.length;
 	}
-}
-
-function isCurrentAgentReviewRange(
-	value: unknown,
-): value is Record<string, unknown> {
-	return (
-		Boolean(value) &&
-		typeof value === "object" &&
-		!Array.isArray(value) &&
-		typeof (value as Record<string, unknown>).sourceId === "string"
-	);
 }
 
 function text(value: string): WireValue {

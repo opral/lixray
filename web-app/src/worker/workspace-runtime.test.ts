@@ -120,12 +120,15 @@ void test("finite operations serialize and select their requested branch", async
 	let activeExecutions = 0;
 	let maximumExecutions = 0;
 	const selected: string[] = [];
+	let activeBranchId = BRANCH;
 	const binding = fakeBinding({
+		activeBranchId: async () => activeBranchId,
 		switchBranch: async ({ branchId }: { branchId: string }) => {
-			selected.push(branchId);
+			activeBranchId = branchId;
 			return { branchId };
 		},
 		execute: async () => {
+			selected.push(activeBranchId);
 			activeExecutions += 1;
 			maximumExecutions = Math.max(maximumExecutions, activeExecutions);
 			await new Promise((resolve) => setTimeout(resolve, 5));
@@ -189,6 +192,7 @@ void test("filesystem conflicts roll back without applying a mutation", async ()
 
 void test("Lix errors preserve envelopes and HTTP status mapping", async () => {
 	const binding = fakeBinding({
+		activeBranchId: async () => WORKSPACE_A,
 		switchBranch: async () => {
 			throw Object.assign(new Error("branch missing"), {
 				code: "LIX_BRANCH_NOT_FOUND",
@@ -217,25 +221,13 @@ void test("Lix errors preserve envelopes and HTTP status mapping", async () => {
 void test("multiplex observations retain subscription ids and SSE framing", async () => {
 	let observation = 0;
 	const binding = fakeBinding({
-		observe: async () => {
+		execute: async () => {
 			const sequence = ++observation;
-			let emitted = false;
 			return {
-				close: () => undefined,
-				next: async () => {
-					if (emitted) return null;
-					emitted = true;
-					return {
-						sequence,
-						mutationSequence: sequence + 10,
-						rows: {
-							columns: ["value"],
-							rows: [[{ kind: "integer", value: sequence }]],
-							rowsAffected: 0,
-							notices: [],
-						},
-					};
-				},
+				columns: ["value"],
+				rows: [[{ kind: "integer", value: sequence }]],
+				rowsAffected: 0,
+				notices: [],
 			};
 		},
 	});
@@ -250,7 +242,10 @@ void test("multiplex observations retain subscription ids and SSE framing", asyn
 			],
 		}),
 	);
-	const body = await response.text();
+	const body = await readSseUntil(response, [
+		'"subscriptionId":"files"',
+		'"subscriptionId":"dirs"',
+	]);
 
 	assert.equal(response.status, 200);
 	assert.match(
@@ -259,13 +254,13 @@ void test("multiplex observations retain subscription ids and SSE framing", asyn
 	);
 	assert.match(body, /event: next\ndata: .*"subscriptionId":"files"/);
 	assert.match(body, /event: next\ndata: .*"subscriptionId":"dirs"/);
-	assert.match(body, /"mutationSequence":1[12]/);
+	assert.match(body, /"mutationSequence":0/);
 });
 
 function fakeBinding(
 	overrides: Record<string, unknown> = {},
 ): MemoryLixBinding {
-	return {
+	const binding = {
 		execute: async (sql: string) =>
 			sql.includes("FROM lix_branch") ? branchResult() : emptyResult(),
 		observe: async () => ({ close: () => undefined, next: async () => null }),
@@ -286,6 +281,7 @@ function fakeBinding(
 		close: async () => undefined,
 		...overrides,
 	} as MemoryLixBinding;
+	return binding;
 }
 
 function testRuntime(
@@ -409,4 +405,24 @@ function workspaceRequest(path: string, body?: unknown) {
 			body: body === undefined ? undefined : JSON.stringify(body),
 		},
 	);
+}
+
+async function readSseUntil(
+	response: Response,
+	patterns: readonly string[],
+): Promise<string> {
+	assert.ok(response.body);
+	const reader = response.body.getReader();
+	const decoder = new TextDecoder();
+	let body = "";
+	try {
+		while (!patterns.every((pattern) => body.includes(pattern))) {
+			const result = await reader.read();
+			if (result.done) break;
+			body += decoder.decode(result.value, { stream: true });
+		}
+		return body;
+	} finally {
+		await reader.cancel();
+	}
 }

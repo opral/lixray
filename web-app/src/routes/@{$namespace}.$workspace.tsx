@@ -10,15 +10,25 @@ import { findWorkspaceByRoute } from "~/lib/workspace-url";
 
 export const Route = createFileRoute("/@{$namespace}/$workspace")({
 	ssr: false,
-	validateSearch: (search: Record<string, unknown>): { dir?: string } => {
+	validateSearch: (
+		search: Record<string, unknown>,
+	): { dir?: string; branch?: string } => {
 		const dir = normalizeDirPath(search.dir);
-		return dir === "/" ? {} : { dir };
+		const branch =
+			typeof search.branch === "string" && search.branch.trim().length > 0
+				? search.branch.trim()
+				: undefined;
+		return {
+			...(dir === "/" ? {} : { dir }),
+			...(branch ? { branch } : {}),
+		};
 	},
 	component: WorkspaceRoutePage,
 });
 
 function WorkspaceRoutePage() {
 	const { namespace, workspace: workspaceSlug } = Route.useParams();
+	const { branch } = Route.useSearch();
 	const auth = useAuth();
 	const workspaceState = useWorkspace();
 	const resolved = findWorkspaceByRoute(
@@ -74,6 +84,7 @@ function WorkspaceRoutePage() {
 			workspaceId={resolved.workspace.id}
 			namespace={namespace}
 			workspaceSlug={workspaceSlug}
+			branchId={branch}
 		/>
 	);
 }

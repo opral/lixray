@@ -273,6 +273,101 @@ void test("failed API operations never overwrite the committed snapshot", async 
 	assert.deepEqual(storage.bytes(key), before);
 });
 
+void test("branch-scoped requests never persist the preview selector", async () => {
+	const storage = new FakeR2Bucket();
+	const service = runtime(snapshotBindingFactory());
+	const draftBranchId = "44444444-4444-4444-8444-444444444444";
+
+	await expectOk(
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/createBranch", {
+				branchId: MAIN_BRANCH,
+				id: draftBranchId,
+				name: "Draft",
+			}),
+		),
+	);
+
+	const [mainResponse, draftResponse] = await Promise.all(
+		[MAIN_BRANCH, draftBranchId].map((branchId) =>
+			service.fetch(
+				storage.bucket,
+				HOST_A,
+				WORKSPACE_A,
+				request(HOST_A, "/execute", {
+					branchId,
+					sql: "ACTIVE_BRANCH",
+					params: [],
+				}),
+			),
+		),
+	);
+	await expectOk(mainResponse);
+	await expectOk(draftResponse);
+	const mainBody: unknown = await mainResponse.json();
+	const draftBody: unknown = await draftResponse.json();
+	assert.ok(isRecord(mainBody) && Array.isArray(mainBody.rows));
+	assert.ok(isRecord(draftBody) && Array.isArray(draftBody.rows));
+	const mainRow: unknown = mainBody.rows[0];
+	const draftRow: unknown = draftBody.rows[0];
+	assert.ok(Array.isArray(mainRow));
+	assert.ok(Array.isArray(draftRow));
+	assert.equal(wireString(mainRow[0]), MAIN_BRANCH);
+	assert.equal(wireString(draftRow[0]), draftBranchId);
+
+	const snapshotBytes = storage.bytes(
+		`lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`,
+	);
+	assert.ok(snapshotBytes);
+	const persisted = JSON.parse(
+		new TextDecoder().decode(snapshotBytes),
+	) as FakeState;
+	assert.equal(persisted.activeBranchId, MAIN_BRANCH);
+});
+
+void test("legacy preview selectors are normalized before republishing", async () => {
+	const storage = new FakeR2Bucket();
+	const service = runtime(snapshotBindingFactory());
+	const draftBranchId = "44444444-4444-4444-8444-444444444445";
+	const key = `lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`;
+
+	await expectOk(
+		service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/createBranch", {
+				branchId: MAIN_BRANCH,
+				id: draftBranchId,
+				name: "Legacy Draft",
+			}),
+		),
+	);
+	const bytes = storage.bytes(key);
+	assert.ok(bytes);
+	const legacy = JSON.parse(new TextDecoder().decode(bytes)) as FakeState;
+	legacy.activeBranchId = draftBranchId;
+	await storage.putRaw(key, new TextEncoder().encode(JSON.stringify(legacy)));
+
+	await expectOk(
+		runtime(snapshotBindingFactory()).fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branches"),
+		),
+	);
+	const normalizedBytes = storage.bytes(key);
+	assert.ok(normalizedBytes);
+	const normalized = JSON.parse(
+		new TextDecoder().decode(normalizedBytes),
+	) as FakeState;
+	assert.equal(normalized.activeBranchId, MAIN_BRANCH);
+});
+
 void test("conditional reads reuse cached snapshots without redundant writes", async () => {
 	const storage = new FakeR2Bucket();
 	const openMemoryLix = snapshotBindingFactory();
@@ -863,6 +958,9 @@ function snapshotBindingFactory(): OpenMemoryLix {
 							? [[text(key), text(value.value), integer(value.revision)]]
 							: [],
 					);
+				}
+				if (sql === "ACTIVE_BRANCH") {
+					return result(["branch_id"], [[text(state.activeBranchId)]]);
 				}
 				if (sql === "FAIL") {
 					throw Object.assign(new Error("deliberate failure"), {

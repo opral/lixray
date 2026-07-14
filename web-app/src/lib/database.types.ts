@@ -3,6 +3,50 @@ export type OrganizationRole = "owner" | "member";
 export interface Database {
 	public: {
 		Tables: {
+			user_workspace_preferences: {
+				Row: {
+					user_id: string;
+					workspace_id: string;
+					atelier_layout: unknown;
+					updated_at: string;
+				};
+				Insert: {
+					user_id: string;
+					workspace_id: string;
+					atelier_layout: unknown;
+					updated_at?: string;
+				};
+				Update: {
+					atelier_layout?: unknown;
+					updated_at?: string;
+				};
+				Relationships: [];
+			};
+			user_workspace_review_resolutions: {
+				Row: {
+					user_id: string;
+					workspace_id: string;
+					branch_id: string;
+					review_id: string;
+					file_id: string;
+					outcome: "accepted" | "rejected" | "resolved";
+					resolved_at: string;
+				};
+				Insert: {
+					user_id: string;
+					workspace_id: string;
+					branch_id: string;
+					review_id: string;
+					file_id: string;
+					outcome: "accepted" | "rejected" | "resolved";
+					resolved_at?: string;
+				};
+				Update: {
+					outcome?: "accepted" | "rejected" | "resolved";
+					resolved_at?: string;
+				};
+				Relationships: [];
+			};
 			profiles: {
 				Row: {
 					id: string;
