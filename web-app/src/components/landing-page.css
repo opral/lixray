@@ -283,7 +283,6 @@
 .landing-avatar-stack {
 	display: flex;
 }
-.landing-avatar-stack > img,
 .landing-avatar-stack > span {
 	width: 22px;
 	height: 22px;
@@ -291,13 +290,7 @@
 	border: 2px solid var(--landing-hero-bg);
 	border-radius: 50%;
 }
-.landing-avatar-stack > img,
-.landing-window-people img,
-.landing-activity-identity > img,
-.landing-chat-head > span img {
-	object-fit: cover;
-}
-.landing-avatar-stack > img:first-child {
+.landing-avatar-stack > span:first-child {
 	margin-left: 0;
 }
 .landing-avatar-stack > span {
@@ -308,6 +301,25 @@
 .landing-avatar-stack > span img {
 	width: 12px;
 	height: 12px;
+}
+.landing-person-avatar {
+	display: inline-grid;
+	place-items: center;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	color: #3f3129;
+	font-size: 10px;
+	font-weight: 750;
+	line-height: 1;
+}
+.landing-person-avatar-mara {
+	background: #bfe3ef;
+}
+.landing-person-avatar-jonas {
+	background: #d8e9b9;
+}
+.landing-person-avatar-priya {
+	background: #d9c7f2;
 }
 
 .landing-visual-card,
@@ -432,14 +444,14 @@
 	display: flex;
 	margin-left: auto;
 }
-.landing-window-people img {
+.landing-window-people .landing-person-avatar {
 	width: 26px;
 	height: 26px;
 	margin-left: -8px;
 	border: 2px solid #fff;
-	border-radius: 50%;
+	font-size: 10px;
 }
-.landing-window-people img:first-child {
+.landing-window-people .landing-person-avatar:first-child {
 	margin-left: 0;
 }
 .landing-file-head,
@@ -539,10 +551,10 @@
 	align-items: center;
 	flex: 0 0 auto;
 }
-.landing-activity-identity > img {
+.landing-activity-identity > .landing-person-avatar {
 	width: 20px;
 	height: 20px;
-	border-radius: 50%;
+	font-size: 8px;
 }
 .landing-agent-mark {
 	width: 16px;
@@ -580,10 +592,10 @@
 	font-size: 12px;
 	font-weight: 600;
 }
-.landing-chat-head > span img {
+.landing-chat-head > span .landing-person-avatar {
 	width: 17px;
 	height: 17px;
-	border-radius: 50%;
+	font-size: 7px;
 }
 .landing-chat-title {
 	display: flex;
@@ -1473,7 +1485,7 @@
 	.landing-activity {
 		gap: 5px;
 	}
-	.landing-activity-identity > img {
+	.landing-activity-identity > .landing-person-avatar {
 		width: 17px;
 		height: 17px;
 	}

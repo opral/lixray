@@ -9,10 +9,12 @@ type FileEntry = {
 	name: string;
 	type: "markdown" | "csv" | "image" | "pdf";
 	activity: string;
-	avatar: string;
+	person: Person;
 	agent?: keyof typeof agentMarks;
 	hot?: boolean;
 };
+
+type Person = "mara" | "jonas" | "priya";
 
 const agentMarks = {
 	claude: "/landing/claude-official.png",
@@ -25,7 +27,7 @@ const files: readonly FileEntry[] = [
 		name: "launch-plan.md",
 		type: "markdown",
 		activity: "Mara's Claude · editing",
-		avatar: "/landing/avatar-mara.jpg",
+		person: "mara",
 		agent: "claude",
 		hot: true,
 	},
@@ -33,27 +35,27 @@ const files: readonly FileEntry[] = [
 		name: "announcement-post.md",
 		type: "markdown",
 		activity: "Jonas's ChatGPT · reading",
-		avatar: "/landing/avatar-jonas.jpg",
+		person: "jonas",
 		agent: "chatgpt",
 	},
 	{
 		name: "q3-metrics.csv",
 		type: "csv",
 		activity: "Priya's Codex · 2 min ago",
-		avatar: "/landing/avatar-priya.jpg",
+		person: "priya",
 		agent: "codex",
 	},
 	{
 		name: "hero-shot.png",
 		type: "image",
 		activity: "Mara · Jun 28",
-		avatar: "/landing/avatar-mara.jpg",
+		person: "mara",
 	},
 	{
 		name: "press-kit.pdf",
 		type: "pdf",
 		activity: "Jonas · Jun 27",
-		avatar: "/landing/avatar-jonas.jpg",
+		person: "jonas",
 	},
 ];
 
@@ -65,13 +67,13 @@ const heroFiles: readonly FileEntry[] = [
 		name: "pricing-page.md",
 		type: "markdown",
 		activity: "Mara · yesterday",
-		avatar: "/landing/avatar-mara.jpg",
+		person: "mara",
 	},
 	{
 		name: "AGENTS.md",
 		type: "markdown",
 		activity: "—",
-		avatar: "/landing/avatar-mara.jpg",
+		person: "mara",
 	},
 ];
 
@@ -328,6 +330,17 @@ function AgentMark({ agent }: { agent?: keyof typeof agentMarks }) {
 	) : null;
 }
 
+function PersonAvatar({ person }: { person: Person }) {
+	return (
+		<span
+			className={`landing-person-avatar landing-person-avatar-${person}`}
+			aria-hidden="true"
+		>
+			{person[0].toUpperCase()}
+		</span>
+	);
+}
+
 function FileMark({ type }: { type: (typeof files)[number]["type"] }) {
 	if (type === "markdown" || type === "csv") {
 		return (
@@ -362,9 +375,9 @@ function WorkspaceTable({ compact = false }: { compact?: boolean }) {
 					<img src="/lixray-mark.svg" alt="" /> acme / launch-q3
 				</div>
 				<div className="landing-window-people" aria-hidden="true">
-					<img src="/landing/avatar-mara.jpg" alt="" />
-					<img src="/landing/avatar-jonas.jpg" alt="" />
-					<img src="/landing/avatar-priya.jpg" alt="" />
+					<PersonAvatar person="mara" />
+					<PersonAvatar person="jonas" />
+					<PersonAvatar person="priya" />
 				</div>
 				<button type="button">Invite</button>
 			</div>
@@ -384,7 +397,7 @@ function WorkspaceTable({ compact = false }: { compact?: boolean }) {
 					</div>
 					<div className="landing-activity">
 						<span className="landing-activity-identity">
-							<img src={file.avatar} alt="" />
+							<PersonAvatar person={file.person} />
 							<AgentMark agent={file.agent} />
 						</span>
 						<span>{file.activity}</span>
@@ -417,7 +430,7 @@ function HeroVisual() {
 						<img src="/landing/claude-official.png" alt="" /> Claude
 					</div>
 					<span>
-						<img src="/landing/avatar-mara.jpg" alt="" /> Mara
+						<PersonAvatar person="mara" /> Mara
 					</span>
 				</div>
 				<div className="landing-chat-body">
@@ -441,7 +454,7 @@ function HeroVisual() {
 						<img src="/landing/chatgpt-mark-light.svg" alt="" /> ChatGPT
 					</div>
 					<span>
-						<img src="/landing/avatar-jonas.jpg" alt="" /> Jonas
+						<PersonAvatar person="jonas" /> Jonas
 					</span>
 				</div>
 				<div className="landing-chat-body">
