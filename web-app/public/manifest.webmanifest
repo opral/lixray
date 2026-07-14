@@ -5,6 +5,7 @@
 	"description": "Explore and manage Lix workspaces.",
 	"start_url": "/",
 	"scope": "/",
+	"display_override": ["window-controls-overlay"],
 	"display": "standalone",
 	"background_color": "#ffffff",
 	"theme_color": "#ffffff",

@@ -324,7 +324,10 @@ function DirectoryHeader() {
 	const initial = isDemoModeEnabled ? "M" : accountInitial(user?.user_metadata);
 
 	return (
-		<header className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4">
+		<header
+			data-app-titlebar
+			className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4"
+		>
 			<Link
 				className="inline-flex items-center gap-2.5 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline"
 				to="/"
@@ -657,7 +660,10 @@ function DirectoryStatus({ children }: { children: ReactNode }) {
 function SignedOutDirectory() {
 	return (
 		<div className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary">
-			<header className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4">
+			<header
+				data-app-titlebar
+				className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4"
+			>
 				<Link
 					className="inline-flex items-center gap-2.5 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline"
 					to="/"
