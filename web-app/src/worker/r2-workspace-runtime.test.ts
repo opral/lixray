@@ -585,22 +585,22 @@ void test("a disconnected observer cannot stop updates for live subscribers", as
 	const openMemoryLix = snapshotBindingFactory();
 	const observerRuntime = runtime(openMemoryLix, 20);
 	const writerRuntime = runtime(openMemoryLix);
-	const observe = () =>
-		observerRuntime.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/observe", {
-				branchId: MAIN_BRANCH,
-				sql: "GET",
-				params: [wireText("disconnect")],
-			}),
-		);
+	const observationRequest = () =>
+		request(HOST_A, "/observe", {
+			branchId: MAIN_BRANCH,
+			sql: "GET",
+			params: [wireText("disconnect")],
+		});
+	const observe = (observation: Request = observationRequest()) =>
+		observerRuntime.fetch(storage.bucket, HOST_A, WORKSPACE_A, observation);
 
+	// Construct the body stream before replacing ReadableStream so the test
+	// double can only intercept the SSE response stream.
+	const disconnectedRequest = observationRequest();
 	const restoreReadableStream = failNextStreamAfterFirstEnqueue();
 	let disconnected: SseReader | undefined;
 	try {
-		disconnected = new SseReader(await observe());
+		disconnected = new SseReader(await observe(disconnectedRequest));
 	} finally {
 		restoreReadableStream();
 	}
