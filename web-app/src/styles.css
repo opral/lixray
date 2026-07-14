@@ -3,7 +3,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 /*
- * Lixray reuses Atelier's semantic Tailwind tokens 1:1. Their role,
+ * LixRay reuses Atelier's semantic Tailwind tokens 1:1. Their role,
  * prominence, and interaction-state aliases are modeled after Subframe's
  * semantic color guidance:
  * https://www.subframe.com/blog/how-to-setup-semantic-tailwind-colors
@@ -77,5 +77,27 @@
 		background: var(--color-bg-app);
 		color: var(--color-text-primary);
 		font-family: var(--font-sans);
+	}
+}
+
+@media (display-mode: window-controls-overlay) {
+	.atelier-root > div > header,
+	[data-app-titlebar] {
+		box-sizing: border-box;
+		width: env(titlebar-area-width, 100%);
+		margin-left: env(titlebar-area-x, 0);
+		-webkit-app-region: drag;
+		app-region: drag;
+	}
+
+	.atelier-root > div > header {
+		height: env(titlebar-area-height, 36px);
+		min-height: env(titlebar-area-height, 36px);
+	}
+
+	.atelier-root > div > header :is(a, button, input, select),
+	[data-app-titlebar] :is(a, button, input, select) {
+		-webkit-app-region: no-drag;
+		app-region: no-drag;
 	}
 }

@@ -98,7 +98,7 @@ function LoadedWorkspace({
 
 function SignedOutHome() {
 	return (
-		<EmptyState eyebrow="Lixray" title="Sign in to continue.">
+		<EmptyState eyebrow="LixRay" title="Sign in to continue.">
 			<Link className={buttonClass} to="/sign-in">
 				Sign in
 			</Link>

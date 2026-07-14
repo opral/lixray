@@ -129,7 +129,7 @@ set search_path = ''
 as $$
 begin
   if private.is_lixray_mcp_session() then
-    raise exception 'Lixray MCP tokens cannot modify account or workspace metadata';
+    raise exception 'LixRay MCP tokens cannot modify account or workspace metadata';
   end if;
   return case when tg_op = 'DELETE' then old else new end;
 end;
@@ -168,7 +168,7 @@ declare
 begin
   if not private.is_interactive_session() then
     if private.is_lixray_mcp_session() then
-      raise exception 'Lixray MCP tokens cannot modify account or workspace metadata';
+      raise exception 'LixRay MCP tokens cannot modify account or workspace metadata';
     end if;
     raise exception 'Interactive session required';
   end if;

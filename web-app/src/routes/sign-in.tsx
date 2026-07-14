@@ -38,16 +38,16 @@ function SignInPage() {
 				<a
 					href="/"
 					className="inline-flex items-center gap-2.5 font-[750] tracking-normal no-underline"
-					aria-label="Lixray home"
+					aria-label="LixRay home"
 				>
 					<span className="grid size-7 place-items-center rounded-[7px] bg-[var(--color-bg-action-secondary)] text-[var(--color-text-on-action-secondary)]">
 						<DatabaseZap size={17} aria-hidden="true" />
 					</span>
-					<span>Lixray</span>
+					<span>LixRay</span>
 				</a>
 				<div className="grid gap-2 text-center">
 					<h1 className="m-0 text-2xl leading-[1.2] tracking-normal">
-						Sign in to Lixray
+						Sign in to LixRay
 					</h1>
 					<p className="m-0 text-[var(--color-text-tertiary)]">
 						{localDevCredentials
@@ -60,7 +60,7 @@ function SignInPage() {
 						className="inline-flex min-h-[38px] w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] no-underline transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] min-[801px]:w-auto"
 						to="/"
 					>
-						Continue to Lixray
+						Continue to LixRay
 					</Link>
 				) : (
 					<button

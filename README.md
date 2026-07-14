@@ -1,4 +1,4 @@
-# lixray
+# LixRay
 
 Cloudflare Worker + TanStack Start frontend + Durable Object Container exposing
 Lix over HTTP, backed by SlateDB on R2.

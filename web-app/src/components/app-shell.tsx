@@ -43,12 +43,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 	return (
 		<div className="min-h-screen">
-			<header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border-panel bg-bg-panel/86 px-7 py-5 backdrop-blur-[16px] max-[800px]:flex-col max-[800px]:items-start max-[800px]:px-[18px] max-[800px]:py-4">
+			<header
+				data-app-titlebar
+				className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border-panel bg-bg-panel/86 px-7 py-5 backdrop-blur-[16px] max-[800px]:flex-col max-[800px]:items-start max-[800px]:px-[18px] max-[800px]:py-4"
+			>
 				<Link to="/" className={brandClass}>
 					<span className={brandMarkClass}>
 						<DatabaseZap size={17} aria-hidden="true" />
 					</span>
-					<span>Lixray</span>
+					<span>LixRay</span>
 				</Link>
 				<div className="flex items-center gap-3 max-[800px]:w-full max-[800px]:flex-wrap max-[800px]:justify-start">
 					{isDemoModeEnabled ? null : (

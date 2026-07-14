@@ -16,7 +16,7 @@ select is(
     '{"claims":{"sub":"oauth-user","role":"authenticated","client_id":"chatgpt-client"}}'::jsonb
   ) #>> '{claims,resource}',
   'https://lixray.com',
-  'OAuth access tokens receive the fixed Lixray resource claim'
+  'OAuth access tokens receive the fixed LixRay resource claim'
 );
 
 select is(
@@ -24,7 +24,7 @@ select is(
     '{"claims":{"sub":"oauth-user","role":"authenticated","client_id":"chatgpt-client"}}'::jsonb
   ) #>> '{claims,lixray_mcp}',
   'true',
-  'OAuth access tokens are marked as Lixray MCP sessions'
+  'OAuth access tokens are marked as LixRay MCP sessions'
 );
 
 insert into auth.users (
@@ -103,7 +103,7 @@ select results_eq(
 select throws_ok(
   $$insert into public.workspaces (organization_id, name) values ('52000000-0000-0000-0000-000000000001', 'Forbidden MCP workspace')$$,
   'P0001',
-  'Lixray MCP tokens cannot modify account or workspace metadata',
+  'LixRay MCP tokens cannot modify account or workspace metadata',
   'MCP tokens cannot create workspace metadata'
 );
 
@@ -116,14 +116,14 @@ select results_eq(
 select throws_ok(
   $$select public.delete_workspace('53000000-0000-0000-0000-000000000001')$$,
   'P0001',
-  'Lixray MCP tokens cannot modify account or workspace metadata',
+  'LixRay MCP tokens cannot modify account or workspace metadata',
   'MCP tokens cannot soft-delete workspace metadata'
 );
 
 select throws_ok(
   $$select public.create_organization('Forbidden organization')$$,
   'P0001',
-  'Lixray MCP tokens cannot modify account or workspace metadata',
+  'LixRay MCP tokens cannot modify account or workspace metadata',
   'MCP tokens cannot use organization-management RPCs'
 );
 

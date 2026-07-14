@@ -49,7 +49,7 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 		timeout: 55_000,
 	});
 	await expect(
-		page.getByRole("link", { name: "Back to Lixray home" }),
+		page.getByRole("link", { name: "Back to LixRay home" }),
 	).toBeVisible();
 	await settlePageExecutes(page, pendingExecutes);
 });

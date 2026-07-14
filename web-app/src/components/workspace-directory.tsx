@@ -298,7 +298,7 @@ Open the workspace preview at ${workspaceUrl}. Do not create or edit any files y
 						Connect with Codex
 					</h2>
 					<p className="mt-1.5 mb-0 text-[13px] leading-relaxed text-text-tertiary">
-						Paste this prompt into Codex. It will connect Lixray, open your
+						Paste this prompt into Codex. It will connect LixRay, open your
 						workspace, and help you create your first document.
 					</p>
 				</div>
@@ -324,14 +324,17 @@ function DirectoryHeader() {
 	const initial = isDemoModeEnabled ? "M" : accountInitial(user?.user_metadata);
 
 	return (
-		<header className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4">
+		<header
+			data-app-titlebar
+			className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4"
+		>
 			<Link
 				className="inline-flex items-center gap-2.5 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline"
 				to="/"
-				aria-label="Lixray home"
+				aria-label="LixRay home"
 			>
 				<img className="size-[19px]" src="/lixray-mark.svg" alt="" />
-				<span>lixray</span>
+				<span>LixRay</span>
 			</Link>
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
@@ -657,13 +660,16 @@ function DirectoryStatus({ children }: { children: ReactNode }) {
 function SignedOutDirectory() {
 	return (
 		<div className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary">
-			<header className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4">
+			<header
+				data-app-titlebar
+				className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border-subtle bg-bg-app px-[22px] max-[560px]:px-4"
+			>
 				<Link
 					className="inline-flex items-center gap-2.5 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline"
 					to="/"
 				>
 					<img className="size-[19px]" src="/lixray-mark.svg" alt="" />
-					<span>lixray</span>
+					<span>LixRay</span>
 				</Link>
 			</header>
 			<DirectoryStatus>
