@@ -5,39 +5,77 @@ import {
 	SESSION_RECORDING_BLOCK_SELECTOR,
 	scrubPostHogEvent,
 } from "./telemetry-privacy";
+import { synchronizeTelemetryIdentity } from "./telemetry-identity";
 
 const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
 
 let client: PostHog | null = null;
 let initializationPromise: Promise<PostHog | null> | null = null;
+type TelemetryClient = Pick<
+	PostHog,
+	"get_property" | "identify" | "register" | "reset"
+>;
 
 export type TelemetryEnvironment = "dev" | "preview" | "production";
 
-export function initializeTelemetry(): Promise<PostHog | null> {
-	if (client) return Promise.resolve(client);
-	if (initializationPromise) return initializationPromise;
-	initializationPromise = initializeTelemetryUncached().finally(() => {
+export function initializeTelemetry(
+	userId?: string | null,
+): Promise<PostHog | null> {
+	if (client) {
+		if (userId !== undefined) synchronizeTelemetryClient(client, userId);
+		return Promise.resolve(client);
+	}
+	if (initializationPromise) {
+		return initializationPromise.then((posthog) => {
+			if (posthog && userId !== undefined) {
+				synchronizeTelemetryClient(posthog, userId);
+			}
+			return posthog;
+		});
+	}
+	initializationPromise = initializeTelemetryUncached(userId).finally(() => {
 		initializationPromise = null;
 	});
 	return initializationPromise;
 }
 
-async function initializeTelemetryUncached(): Promise<PostHog | null> {
+async function initializeTelemetryUncached(
+	userId?: string | null,
+): Promise<PostHog | null> {
 	if (typeof window === "undefined") return null;
 	const token = import.meta.env.VITE_PUBLIC_POSTHOG_TOKEN?.trim();
 	if (!token) return null;
 
 	const host =
 		import.meta.env.VITE_PUBLIC_POSTHOG_HOST?.trim() || DEFAULT_POSTHOG_HOST;
-	const environment = telemetryEnvironment(
-		import.meta.env.VITE_PUBLIC_TELEMETRY_ENVIRONMENT,
-		import.meta.env.PROD,
-	);
 	const { default: posthog } = await import("posthog-js");
-	posthog.init(token, buildPostHogConfig(host));
-	posthog.register({ environment });
+	const config = buildPostHogConfig(host);
+	if (userId !== undefined) {
+		config.loaded = (loadedPostHog) => {
+			synchronizeTelemetryClient(loadedPostHog, userId);
+		};
+	}
+	posthog.init(token, config);
+	registerTelemetryEnvironment(posthog);
 	client = posthog;
 	return client;
+}
+
+function synchronizeTelemetryClient(
+	posthog: TelemetryClient,
+	userId: string | null,
+): void {
+	synchronizeTelemetryIdentity(posthog, userId);
+	registerTelemetryEnvironment(posthog);
+}
+
+function registerTelemetryEnvironment(posthog: TelemetryClient): void {
+	posthog.register({
+		environment: telemetryEnvironment(
+			import.meta.env.VITE_PUBLIC_TELEMETRY_ENVIRONMENT,
+			import.meta.env.PROD,
+		),
+	});
 }
 
 export function buildPostHogConfig(

@@ -12,23 +12,17 @@ export function PostHogAnalytics() {
 	const { activeWorkspace, isLoaded: workspaceLoaded } = useWorkspace();
 
 	useEffect(() => {
-		void initializeTelemetry();
-	}, []);
-
-	useEffect(() => {
 		if (!authLoaded) return;
 		let disposed = false;
-		void initializeTelemetry().then((posthog) => {
+		void initializeTelemetry(user?.id ?? null).then((posthog) => {
 			if (!posthog || disposed) return;
 			if (!user) {
-				if (identifiedUserId) posthog.reset();
 				identifiedUserId = null;
 				groupedOrganizationId = null;
 				groupedWorkspaceId = null;
 				return;
 			}
 			if (identifiedUserId === user.id) return;
-			posthog.identify(user.id);
 			identifiedUserId = user.id;
 			posthog.capture("user_authenticated");
 		});
