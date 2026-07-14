@@ -33,6 +33,10 @@ async function initializeTelemetryUncached(): Promise<PostHog | null> {
 		import.meta.env.VITE_PUBLIC_TELEMETRY_ENVIRONMENT,
 		import.meta.env.PROD,
 	);
+	// Bundle the replay recorder with the application. Loading it dynamically from
+	// PostHog's asset host is more likely to be blocked by browser privacy tools,
+	// which leaves otherwise healthy analytics sessions stuck in `lazy_loading`.
+	await import("posthog-js/dist/posthog-recorder.js");
 	const { default: posthog } = await import("posthog-js");
 	posthog.init(token, buildPostHogConfig(host));
 	posthog.register({
