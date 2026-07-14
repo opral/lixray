@@ -7,5 +7,3 @@ interface ImportMetaEnv {
 interface ImportMeta {
 	readonly env: ImportMetaEnv;
 }
-
-declare module "posthog-js/dist/posthog-recorder.js";
