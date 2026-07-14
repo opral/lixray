@@ -1,6 +1,7 @@
 import { ArrowRight, ArrowUp, Check, Circle, Share2, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useAuth } from "~/components/auth-provider";
+import { GoogleAnalytics } from "~/components/google-analytics";
 import { useWorkspace } from "~/components/workspace-provider";
 import { cn } from "~/lib/utils";
 import { workspacePath } from "~/lib/workspace-url";
@@ -136,6 +137,7 @@ export function LandingPage() {
 
 	return (
 		<div className="min-h-screen bg-[#fbf6f0] font-sans text-[#1c1917] antialiased">
+			<GoogleAnalytics />
 			<header className="relative z-20 mx-auto flex h-[66px] w-full items-center justify-between bg-[#ffd9bc] px-5 pt-4 sm:px-10 xl:px-20">
 				<Brand />
 				<nav
