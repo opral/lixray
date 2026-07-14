@@ -291,15 +291,17 @@ export class LixFileService {
 					`An entry already exists at ${path}. Read it and provide its revision to replace it.`,
 				);
 			}
-			await this.backend.execute(workspaceId, {
-				branchId,
-				sql: "INSERT INTO lix_file (path, data, lixcol_metadata) VALUES ($1, $2, $3)",
-				params: [
-					text(path),
-					blob(bytes),
-					{ kind: "json", value: { size: bytes.length } },
-				],
-			});
+			await this.withAgentReview(workspaceId, branchId, () =>
+				this.backend.execute(workspaceId, {
+					branchId,
+					sql: "INSERT INTO lix_file (path, data, lixcol_metadata) VALUES ($1, $2, $3)",
+					params: [
+						text(path),
+						blob(bytes),
+						{ kind: "json", value: { size: bytes.length } },
+					],
+				}),
+			);
 		} else {
 			const outcome = await this.withAgentReview(workspaceId, branchId, () =>
 				this.backend.mutate(workspaceId, {

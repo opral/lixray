@@ -206,6 +206,37 @@ void test("agent-authenticated edits persist an Atelier review range", async () 
 	);
 });
 
+void test("agent-authenticated creates persist an Atelier review range", async () => {
+	const backend = new MemoryBackend();
+	const service = new LixFileService(backend, {
+		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
+	});
+
+	await service.writeFile(
+		WORKSPACE_ID,
+		BRANCH_ID,
+		"/created-by-agent.md",
+		"created",
+	);
+
+	const ranges = backend.agentReviewRanges();
+	assert.equal(ranges.length, 1);
+	assert.deepEqual(
+		{
+			sourceId: ranges[0]?.sourceId,
+			beforeCommitId: ranges[0]?.beforeCommitId,
+			afterCommitId: ranges[0]?.afterCommitId,
+			sessionId: ranges[0]?.sessionId,
+		},
+		{
+			sourceId: "codex",
+			beforeCommitId: "commit-0",
+			afterCommitId: "commit-1",
+			sessionId: "oauth-client-1",
+		},
+	);
+});
+
 void test("agent reviews discard legacy ranges after the Atelier hard cut", async () => {
 	const backend = new MemoryBackend();
 	backend.addFile("/review.md", new TextEncoder().encode("before"), "rev-3");
