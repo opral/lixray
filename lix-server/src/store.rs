@@ -1,10 +1,10 @@
 use crate::{Config, StorageConfig};
 use anyhow::{Context, Result};
-use lix_backends::{SlateDbBackend, SlateDbCacheOptions, SlateDbObjectStoreOptions};
 use lix_engine::{
     CreateBranchOptions, CreateBranchReceipt, Engine, ExecuteOptions, ExecuteResult, LixError,
     ObserveEvent, ObserveEvents, Value,
 };
+use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
 use object_store::{aws::AmazonS3Builder, memory::InMemory, ObjectStore};
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -14,7 +14,7 @@ use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct LixService {
-    engine: Engine<SlateDbBackend>,
+    engine: Engine<SlateDB>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -38,12 +38,11 @@ pub enum FilesystemMutationOutcome {
 }
 
 pub async fn open_lix_service(config: &Config) -> Result<Arc<LixService>> {
-    let backend = match &config.storage {
-        StorageConfig::Memory => SlateDbBackend::open_object_store(
-            config.slatedb_path.clone(),
-            Arc::new(InMemory::new()),
-        )
-        .context("open in-memory Lix SlateDB backend")?,
+    let storage = match &config.storage {
+        StorageConfig::Memory => {
+            SlateDB::open_object_store(config.slatedb_path.clone(), Arc::new(InMemory::new()))
+                .context("open in-memory Lix SlateDB storage")?
+        }
         StorageConfig::R2 {
             endpoint,
             bucket,
@@ -70,11 +69,11 @@ pub async fn open_lix_service(config: &Config) -> Result<Arc<LixService>> {
                 metadata_cache_bytes = cache.metadata_cache_bytes,
                 "opening R2-backed SlateDB with bounded local cache"
             );
-            let backend = SlateDbBackend::open_object_store_with_options(
+            let storage = SlateDB::open_object_store_with_options(
                 config.slatedb_path.clone(),
                 object_store,
-                SlateDbObjectStoreOptions {
-                    cache: Some(SlateDbCacheOptions {
+                SlateDBObjectStoreOptions {
+                    cache: Some(SlateDBCacheOptions {
                         root_folder: cache.root_folder.clone(),
                         max_disk_cache_bytes: cache.max_disk_cache_bytes,
                         block_cache_bytes: cache.block_cache_bytes,
@@ -82,15 +81,15 @@ pub async fn open_lix_service(config: &Config) -> Result<Arc<LixService>> {
                     }),
                 },
             )
-            .context("open cached Lix SlateDB backend")?;
+            .context("open cached Lix SlateDB storage")?;
             info!(
                 elapsed_ms = elapsed_millis(started),
                 "opened and preloaded R2-backed SlateDB"
             );
-            backend
+            storage
         }
     };
-    let engine = open_or_initialize_engine(backend).await?;
+    let engine = open_or_initialize_engine(storage).await?;
 
     Ok(Arc::new(LixService { engine }))
 }
@@ -259,7 +258,7 @@ impl LixService {
     ) -> Result<T, LixError>
     where
         T: Send + 'static,
-        F: FnOnce(Engine<SlateDbBackend>) -> Fut + Send + 'static,
+        F: FnOnce(Engine<SlateDB>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<T, LixError>> + 'static,
     {
         let started = Instant::now();
@@ -316,7 +315,7 @@ fn elapsed_millis(started: Instant) -> u64 {
 }
 
 async fn ensure_branch_exists(
-    engine: &Engine<SlateDbBackend>,
+    engine: &Engine<SlateDB>,
     branch_id: &str,
     operation: &str,
 ) -> Result<(), LixError> {
@@ -336,7 +335,7 @@ async fn ensure_branch_exists(
 }
 
 pub struct LixObserve {
-    events: Arc<Mutex<ObserveEvents<SlateDbBackend>>>,
+    events: Arc<Mutex<ObserveEvents<SlateDB>>>,
 }
 
 impl LixObserve {
@@ -383,14 +382,14 @@ impl LixObserve {
     }
 }
 
-async fn open_or_initialize_engine(backend: SlateDbBackend) -> Result<Engine<SlateDbBackend>> {
-    match Engine::new(backend.clone()).await {
+async fn open_or_initialize_engine(storage: SlateDB) -> Result<Engine<SlateDB>> {
+    match Engine::new(storage.clone()).await {
         Ok(engine) => Ok(engine),
         Err(error) if error.code == "LIX_ERROR_NOT_INITIALIZED" => {
-            Engine::initialize(backend.clone())
+            Engine::initialize(storage.clone())
                 .await
                 .context("initialize Lix engine")?;
-            Engine::new(backend)
+            Engine::new(storage)
                 .await
                 .context("open initialized Lix engine")
         }

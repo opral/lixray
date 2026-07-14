@@ -2,9 +2,9 @@ import { openMemoryLix } from "@lix-js/sdk/workerd";
 import startHandler from "@tanstack/react-start/server-entry";
 import { DEMO_MAIN_BRANCH_ID } from "./lib/demo-identity";
 import { handleRequest, type PreviewWorkerEnv } from "./worker/handler";
-import { createR2WorkspaceBackend } from "./worker/memory-backend";
+import { createR2WorkspaceRuntime } from "./worker/workspace-runtime";
 
-const workspaceBackend = createR2WorkspaceBackend(openMemoryLix, {
+const workspaceRuntime = createR2WorkspaceRuntime(openMemoryLix, {
 	mainBranchId: DEMO_MAIN_BRANCH_ID,
 });
 
@@ -19,7 +19,7 @@ export default {
 		return handleRequest(request, env, {
 			executionContext: ctx,
 			workspaceFetch: (workspaceId, workspaceRequest) =>
-				workspaceBackend.fetch(
+				workspaceRuntime.fetch(
 					env.PREVIEW_STATE,
 					previewHostname,
 					workspaceId,

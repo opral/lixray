@@ -2548,23 +2548,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
-name = "lix_backends"
-version = "0.7.0"
-source = "git+https://github.com/opral/lix.git?branch=main#a9e6f29b5f7add765945002002bf201e88302d9b"
-dependencies = [
- "bytes",
- "futures-util",
- "lix_engine",
- "object_store 0.14.0",
- "slatedb",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "lix_engine"
-version = "0.7.0"
-source = "git+https://github.com/opral/lix.git?branch=main#a9e6f29b5f7add765945002002bf201e88302d9b"
+version = "0.8.1"
+source = "git+https://github.com/opral/lix.git?branch=main#d782485b273a2ad7ac3f599ae3583f9b9acb858b"
 dependencies = [
  "ahash",
  "async-trait",
@@ -2579,6 +2565,7 @@ dependencies = [
  "globset",
  "jiff",
  "jsonschema",
+ "lru",
  "musli",
  "precis-profiles",
  "ruzstd",
@@ -2587,9 +2574,24 @@ dependencies = [
  "tokio",
  "unicode-normalization",
  "uuid",
+ "web-time",
  "xxhash-rust",
  "zip",
  "zstd",
+]
+
+[[package]]
+name = "lix_slatedb_storage"
+version = "0.8.1"
+source = "git+https://github.com/opral/lix.git?branch=main#d782485b273a2ad7ac3f599ae3583f9b9acb858b"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "lix_engine",
+ "object_store 0.14.0",
+ "slatedb",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -2602,8 +2604,8 @@ dependencies = [
  "futures-core",
  "http",
  "http-body-util",
- "lix_backends",
  "lix_engine",
+ "lix_slatedb_storage",
  "object_store 0.14.0",
  "serde",
  "serde_json",

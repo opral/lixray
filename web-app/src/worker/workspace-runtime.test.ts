@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-	createMemoryWorkspaceBackend,
+	createMemoryWorkspaceRuntime,
 	decodeWireValue,
 	encodeWireValue,
 	type MemoryLixBinding,
-} from "./memory-backend.ts";
+} from "./workspace-runtime.ts";
 
 const WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
@@ -28,7 +28,7 @@ void test("wire values round-trip through native Lix values", () => {
 
 void test("workspace initialization is lazy, shared, and isolated by id", async () => {
 	let opens = 0;
-	const backend = testBackend(async () => {
+	const runtime = testRuntime(async () => {
 		opens += 1;
 		await Promise.resolve();
 		return fakeBinding();
@@ -36,23 +36,23 @@ void test("workspace initialization is lazy, shared, and isolated by id", async 
 	assert.equal(opens, 0);
 
 	await Promise.all([
-		backend.fetch(WORKSPACE_A, workspaceRequest("/branches")),
-		backend.fetch(WORKSPACE_A, workspaceRequest("/branches")),
+		runtime.fetch(WORKSPACE_A, workspaceRequest("/branches")),
+		runtime.fetch(WORKSPACE_A, workspaceRequest("/branches")),
 	]);
 	assert.equal(opens, 1);
-	assert.equal(backend.workspaceCount(), 1);
+	assert.equal(runtime.workspaceCount(), 1);
 
-	await backend.fetch(WORKSPACE_B, workspaceRequest("/branches"));
+	await runtime.fetch(WORKSPACE_B, workspaceRequest("/branches"));
 	assert.equal(opens, 2);
-	assert.equal(backend.workspaceCount(), 2);
+	assert.equal(runtime.workspaceCount(), 2);
 });
 
 void test("canonical main branch ids work across independent isolates", async () => {
-	const first = testBackend(
+	const first = testRuntime(
 		async () => statefulBranchBinding(WORKSPACE_A),
 		BRANCH,
 	);
-	const second = testBackend(
+	const second = testRuntime(
 		async () => statefulBranchBinding(WORKSPACE_B),
 		BRANCH,
 	);
@@ -83,7 +83,7 @@ void test("canonical main branch ids work across independent isolates", async ()
 void test("failed canonical branch initialization closes and evicts the runtime", async () => {
 	let opens = 0;
 	let closes = 0;
-	const backend = testBackend(async () => {
+	const runtime = testRuntime(async () => {
 		opens += 1;
 		if (opens === 1) {
 			return fakeBinding({
@@ -99,15 +99,15 @@ void test("failed canonical branch initialization closes and evicts the runtime"
 		return statefulBranchBinding(WORKSPACE_B);
 	}, BRANCH);
 
-	const failed = await backend.fetch(
+	const failed = await runtime.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/branches"),
 	);
 	assert.equal(failed.status, 500);
 	assert.equal(closes, 1);
-	assert.equal(backend.workspaceCount(), 0);
+	assert.equal(runtime.workspaceCount(), 0);
 
-	const retried = await backend.fetch(
+	const retried = await runtime.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/branches"),
 	);
@@ -133,12 +133,12 @@ void test("finite operations serialize and select their requested branch", async
 			return emptyResult();
 		},
 	});
-	const backend = testBackend(async () => binding);
+	const runtime = testRuntime(async () => binding);
 	const branches = [BRANCH, WORKSPACE_B];
 
 	const responses = await Promise.all(
 		branches.map((branchId) =>
-			backend.fetch(
+			runtime.fetch(
 				WORKSPACE_A,
 				workspaceRequest("/execute", {
 					branchId,
@@ -169,8 +169,8 @@ void test("filesystem conflicts roll back without applying a mutation", async ()
 			},
 		}),
 	});
-	const backend = testBackend(async () => binding);
-	const response = await backend.fetch(
+	const runtime = testRuntime(async () => binding);
+	const response = await runtime.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/filesystem/mutate", {
 			branchId: BRANCH,
@@ -197,8 +197,8 @@ void test("Lix errors preserve envelopes and HTTP status mapping", async () => {
 			});
 		},
 	});
-	const backend = testBackend(async () => binding);
-	const response = await backend.fetch(
+	const runtime = testRuntime(async () => binding);
+	const response = await runtime.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/execute", { branchId: BRANCH, sql: "SELECT 1" }),
 	);
@@ -239,8 +239,8 @@ void test("multiplex observations retain subscription ids and SSE framing", asyn
 			};
 		},
 	});
-	const backend = testBackend(async () => binding);
-	const response = await backend.fetch(
+	const runtime = testRuntime(async () => binding);
+	const response = await runtime.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/observe/multiplex", {
 			branchId: BRANCH,
@@ -288,11 +288,11 @@ function fakeBinding(
 	} as MemoryLixBinding;
 }
 
-function testBackend(
+function testRuntime(
 	openMemoryLix: () => Promise<MemoryLixBinding>,
 	mainBranchId = BRANCH,
 ) {
-	return createMemoryWorkspaceBackend(openMemoryLix, { mainBranchId });
+	return createMemoryWorkspaceRuntime(openMemoryLix, { mainBranchId });
 }
 
 function statefulBranchBinding(initialBranchId: string): MemoryLixBinding {

@@ -7,7 +7,7 @@ import {
 	LixFileService,
 	type ExecuteRequest,
 	type ExecuteResponse,
-	type FileServiceBackend,
+	type LixRuntimeClient,
 } from "./file-service.ts";
 import {
 	MCP_AUTHORIZATION_SERVER,
@@ -64,8 +64,8 @@ void test("MCP documentation distinguishes browser and client authentication", a
 });
 
 void test("MCP initialize, tools/list, and tools/call expose the authenticated tool contract", async () => {
-	const backend = new ProtocolBackend();
-	const service = new LixFileService(backend);
+	const runtimeClient = new ProtocolLixRuntimeClient();
+	const service = new LixFileService(runtimeClient);
 	const server = createLixrayMcpServer(service);
 	const client = new Client({ name: "lixray-test", version: "1.0.0" });
 	const [clientTransport, serverTransport] =
@@ -163,7 +163,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			rowsAffected: 0,
 			notices: [],
 		});
-		assert.deepEqual(backend.executeRequests, [
+		assert.deepEqual(runtimeClient.executeRequests, [
 			{
 				workspaceId: WORKSPACE_ID,
 				request: {
@@ -198,7 +198,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 
 void test("authless MCP tools advertise noauth security", async () => {
 	const server = createLixrayMcpServer(
-		new LixFileService(new ProtocolBackend()),
+		new LixFileService(new ProtocolLixRuntimeClient()),
 		{ authMode: "none" },
 	);
 	const client = new Client({ name: "lixray-demo-test", version: "1.0.0" });
@@ -229,7 +229,7 @@ void test("authless MCP tools advertise noauth security", async () => {
 	}
 });
 
-class ProtocolBackend implements FileServiceBackend {
+class ProtocolLixRuntimeClient implements LixRuntimeClient {
 	readonly executeRequests: Array<{
 		workspaceId: string;
 		request: ExecuteRequest;

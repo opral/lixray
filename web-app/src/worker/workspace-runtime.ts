@@ -74,7 +74,7 @@ interface WorkspaceRuntime {
 	finiteQueue: Promise<void>;
 }
 
-interface MemoryWorkspaceBackendOptions {
+interface WorkspaceRuntimeOptions {
 	mainBranchId: string;
 }
 
@@ -129,9 +129,9 @@ const PREVIEW_SNAPSHOT_PREFIX = "lixray-preview/v1";
 const PREVIEW_POLL_INTERVAL_MS = 250;
 const PREVIEW_WRITE_ATTEMPTS = 5;
 
-export function createMemoryWorkspaceBackend(
+export function createMemoryWorkspaceRuntime(
 	openMemoryLix: OpenMemoryLix,
-	options: MemoryWorkspaceBackendOptions,
+	options: WorkspaceRuntimeOptions,
 ) {
 	const runtimes = new Map<string, Promise<WorkspaceRuntime>>();
 
@@ -155,9 +155,9 @@ export function createMemoryWorkspaceBackend(
 	};
 }
 
-export function createR2WorkspaceBackend(
+export function createR2WorkspaceRuntime(
 	openMemoryLix: OpenMemoryLix,
-	options: MemoryWorkspaceBackendOptions,
+	options: WorkspaceRuntimeOptions,
 ) {
 	const workspaces = new Map<string, PersistentWorkspaceState>();
 

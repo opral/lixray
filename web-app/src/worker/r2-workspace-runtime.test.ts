@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-	createR2WorkspaceBackend,
+	createR2WorkspaceRuntime,
 	type MemoryLixBinding,
 	type OpenMemoryLix,
-} from "./memory-backend.ts";
+} from "./workspace-runtime.ts";
 
 const WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
@@ -12,11 +12,11 @@ const MAIN_BRANCH = "33333333-3333-4333-8333-333333333333";
 const HOST_A = "branch-preview.example.workers.dev";
 const HOST_B = "version-preview.example.workers.dev";
 
-void test("independent backends share exact R2 state and revisions", async () => {
+void test("independent runtimes share exact R2 state and revisions", async () => {
 	const storage = new FakeR2Bucket();
 	const openMemoryLix = snapshotBindingFactory();
-	const first = backend(openMemoryLix);
-	const second = backend(openMemoryLix);
+	const first = runtime(openMemoryLix);
+	const second = runtime(openMemoryLix);
 
 	await expectOk(
 		first.fetch(
@@ -35,7 +35,7 @@ void test("independent backends share exact R2 state and revisions", async () =>
 
 void test("explicit preview hostname keeps synthetic MCP requests coherent and isolated", async () => {
 	const storage = new FakeR2Bucket();
-	const service = backend(snapshotBindingFactory());
+	const service = runtime(snapshotBindingFactory());
 
 	await expectOk(
 		execute(
@@ -66,7 +66,7 @@ void test("explicit preview hostname keeps synthetic MCP requests coherent and i
 
 void test("preview hostnames and workspace ids are isolated", async () => {
 	const storage = new FakeR2Bucket();
-	const service = backend(snapshotBindingFactory());
+	const service = runtime(snapshotBindingFactory());
 
 	await setValue(service, storage, HOST_A, WORKSPACE_A, "only", "host-a");
 	assert.equal(
@@ -82,8 +82,8 @@ void test("preview hostnames and workspace ids are isolated", async () => {
 void test("bootstrap and concurrent conditional writes converge without loss", async () => {
 	const storage = new FakeR2Bucket();
 	const openMemoryLix = snapshotBindingFactory();
-	const first = backend(openMemoryLix);
-	const second = backend(openMemoryLix);
+	const first = runtime(openMemoryLix);
+	const second = runtime(openMemoryLix);
 
 	await Promise.all([
 		expectOk(
@@ -108,7 +108,7 @@ void test("bootstrap and concurrent conditional writes converge without loss", a
 		setValue(second, storage, HOST_A, WORKSPACE_A, "right", "B"),
 	]);
 
-	const verifier = backend(openMemoryLix);
+	const verifier = runtime(openMemoryLix);
 	const left = await getValue(verifier, storage, HOST_A, WORKSPACE_A, "left");
 	const right = await getValue(verifier, storage, HOST_A, WORKSPACE_A, "right");
 	assert.ok(left && right);
@@ -125,7 +125,7 @@ void test("bootstrap and concurrent conditional writes converge without loss", a
 
 void test("retry exhaustion returns a retryable 503 and preserves state", async () => {
 	const storage = new FakeR2Bucket();
-	const service = backend(snapshotBindingFactory());
+	const service = runtime(snapshotBindingFactory());
 	await expectOk(
 		service.fetch(
 			storage.bucket,
@@ -145,7 +145,7 @@ void test("retry exhaustion returns a retryable 503 and preserves state", async 
 	assert.equal(await errorCode(response), "PREVIEW_STORAGE_CONFLICT");
 	assert.equal(
 		await getValue(
-			backend(snapshotBindingFactory()),
+			runtime(snapshotBindingFactory()),
 			storage,
 			HOST_A,
 			WORKSPACE_A,
@@ -158,7 +158,7 @@ void test("retry exhaustion returns a retryable 503 and preserves state", async 
 void test("R2 failures and corrupt snapshots return distinct 503 errors", async () => {
 	const unavailable = new FakeR2Bucket();
 	unavailable.failGets = true;
-	const service = backend(snapshotBindingFactory());
+	const service = runtime(snapshotBindingFactory());
 	const failed = await service.fetch(
 		unavailable.bucket,
 		HOST_A,
@@ -169,7 +169,7 @@ void test("R2 failures and corrupt snapshots return distinct 503 errors", async 
 	assert.equal(await errorCode(failed), "PREVIEW_STORAGE_UNAVAILABLE");
 
 	const failedPutStorage = new FakeR2Bucket();
-	const failedPutService = backend(snapshotBindingFactory());
+	const failedPutService = runtime(snapshotBindingFactory());
 	await expectOk(
 		failedPutService.fetch(
 			failedPutStorage.bucket,
@@ -205,7 +205,7 @@ void test("R2 failures and corrupt snapshots return distinct 503 errors", async 
 	const key = `lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`;
 	await corrupt.putRaw(key, new Uint8Array([1, 2, 3]));
 	const before = corrupt.bytes(key);
-	const invalid = await backend(snapshotBindingFactory()).fetch(
+	const invalid = await runtime(snapshotBindingFactory()).fetch(
 		corrupt.bucket,
 		HOST_A,
 		WORKSPACE_A,
@@ -218,7 +218,7 @@ void test("R2 failures and corrupt snapshots return distinct 503 errors", async 
 
 void test("failed API operations never overwrite the committed snapshot", async () => {
 	const storage = new FakeR2Bucket();
-	const service = backend(snapshotBindingFactory());
+	const service = runtime(snapshotBindingFactory());
 	await expectOk(
 		service.fetch(
 			storage.bucket,
@@ -246,10 +246,10 @@ void test("failed API operations never overwrite the committed snapshot", async 
 void test("single and multiplexed observers receive cross-isolate changes once", async () => {
 	const storage = new FakeR2Bucket();
 	const openMemoryLix = snapshotBindingFactory();
-	const observerBackend = backend(openMemoryLix);
-	const writerBackend = backend(openMemoryLix);
+	const observerRuntime = runtime(openMemoryLix);
+	const writerRuntime = runtime(openMemoryLix);
 
-	const singleResponse = await observerBackend.fetch(
+	const singleResponse = await observerRuntime.fetch(
 		storage.bucket,
 		HOST_A,
 		WORKSPACE_A,
@@ -261,17 +261,17 @@ void test("single and multiplexed observers receive cross-isolate changes once",
 	);
 	const single = new SseReader(singleResponse);
 	assert.equal((await single.next()).sequence, 0);
-	await setValue(writerBackend, storage, HOST_A, WORKSPACE_A, "single", "one");
+	await setValue(writerRuntime, storage, HOST_A, WORKSPACE_A, "single", "one");
 	const changed = await single.next();
 	assert.equal(changed.sequence, 1);
 	assert.equal(changed.result.rows[0][1].value, "one");
-	await setValue(writerBackend, storage, HOST_A, WORKSPACE_A, "single", "two");
+	await setValue(writerRuntime, storage, HOST_A, WORKSPACE_A, "single", "two");
 	const changedAgain = await single.next();
 	assert.equal(changedAgain.sequence, 2);
 	assert.equal(changedAgain.result.rows[0][1].value, "two");
 	await single.close();
 
-	const multiplexResponse = await observerBackend.fetch(
+	const multiplexResponse = await observerRuntime.fetch(
 		storage.bucket,
 		HOST_A,
 		WORKSPACE_A,
@@ -292,7 +292,7 @@ void test("single and multiplexed observers receive cross-isolate changes once",
 		new Set(["left", "right"]),
 	);
 	await setValue(
-		writerBackend,
+		writerRuntime,
 		storage,
 		HOST_A,
 		WORKSPACE_A,
@@ -301,7 +301,7 @@ void test("single and multiplexed observers receive cross-isolate changes once",
 	);
 	assert.equal((await multiplex.next()).subscriptionId, "left");
 	await setValue(
-		writerBackend,
+		writerRuntime,
 		storage,
 		HOST_A,
 		WORKSPACE_A,
@@ -312,12 +312,12 @@ void test("single and multiplexed observers receive cross-isolate changes once",
 	await multiplex.close();
 });
 
-function backend(openMemoryLix: OpenMemoryLix) {
-	return createR2WorkspaceBackend(openMemoryLix, { mainBranchId: MAIN_BRANCH });
+function runtime(openMemoryLix: OpenMemoryLix) {
+	return createR2WorkspaceRuntime(openMemoryLix, { mainBranchId: MAIN_BRANCH });
 }
 
 async function setValue(
-	service: ReturnType<typeof backend>,
+	service: ReturnType<typeof runtime>,
 	storage: FakeR2Bucket,
 	hostname: string,
 	workspaceId: string,
@@ -333,7 +333,7 @@ async function setValue(
 }
 
 async function getValue(
-	service: ReturnType<typeof backend>,
+	service: ReturnType<typeof runtime>,
 	storage: FakeR2Bucket,
 	hostname: string,
 	workspaceId: string,
@@ -362,7 +362,7 @@ async function getValue(
 }
 
 function execute(
-	service: ReturnType<typeof backend>,
+	service: ReturnType<typeof runtime>,
 	storage: FakeR2Bucket,
 	hostname: string,
 	workspaceId: string,

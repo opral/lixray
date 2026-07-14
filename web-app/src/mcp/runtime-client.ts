@@ -3,7 +3,7 @@ import {
 	type ExecuteRequest,
 	type ExecuteResponse,
 	FileServiceError,
-	type FileServiceBackend,
+	type LixRuntimeClient,
 	type FilesystemMutationOutcome,
 	type FilesystemMutationRequest,
 	type WorkspaceSummary,
@@ -22,7 +22,7 @@ interface ContainerStub {
 	fetch(request: Request): Promise<Response>;
 }
 
-export interface McpBackendEnv {
+export interface WorkerLixRuntimeEnv {
 	SLATEDB_CONTAINER?: { getByName(name: string): ContainerStub };
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
@@ -41,17 +41,17 @@ export interface McpBackendEnv {
 type AuthorizeWorkspace = (
 	workspaceId: string,
 	user: McpUser,
-	env: McpBackendEnv,
+	env: WorkerLixRuntimeEnv,
 ) => Promise<Response | null>;
 
-export interface WorkerFileServiceBackendOptions {
+export interface WorkerLixRuntimeClientOptions {
 	fetcher?: typeof fetch;
 	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
 	workspaceSummaries?: ReadonlyArray<WorkspaceSummary>;
 }
 
-export class WorkerFileServiceBackend implements FileServiceBackend {
-	private readonly env: McpBackendEnv;
+export class WorkerLixRuntimeClient implements LixRuntimeClient {
+	private readonly env: WorkerLixRuntimeEnv;
 	private readonly user: McpUser;
 	private readonly authorizeWorkspace: AuthorizeWorkspace;
 	private readonly fetcher: typeof fetch;
@@ -61,10 +61,10 @@ export class WorkerFileServiceBackend implements FileServiceBackend {
 		ReadonlyArray<WorkspaceSummary> | undefined;
 
 	constructor(
-		env: McpBackendEnv,
+		env: WorkerLixRuntimeEnv,
 		user: McpUser,
 		authorizeWorkspace: AuthorizeWorkspace,
-		options: WorkerFileServiceBackendOptions = {},
+		options: WorkerLixRuntimeClientOptions = {},
 	) {
 		this.env = env;
 		this.user = user;
@@ -111,13 +111,13 @@ export class WorkerFileServiceBackend implements FileServiceBackend {
 				error: errorDetails(caught),
 			});
 			throw new FileServiceError(
-				"backend_error",
+				"upstream_error",
 				"Workspace discovery is unavailable.",
 			);
 		}
 		if (!organizationsResponse.ok || !workspacesResponse.ok) {
 			throw new FileServiceError(
-				"backend_error",
+				"upstream_error",
 				"Workspace discovery is unavailable.",
 			);
 		}
@@ -158,7 +158,7 @@ export class WorkerFileServiceBackend implements FileServiceBackend {
 		);
 		if (!Array.isArray(body.branches)) {
 			throw new FileServiceError(
-				"backend_error",
+				"upstream_error",
 				"Lix returned an invalid branch list.",
 			);
 		}
@@ -211,7 +211,7 @@ export class WorkerFileServiceBackend implements FileServiceBackend {
 			body.outcome !== "already_exists"
 		) {
 			throw new FileServiceError(
-				"backend_error",
+				"upstream_error",
 				"Lix returned an invalid filesystem mutation outcome.",
 			);
 		}
@@ -231,22 +231,22 @@ export class WorkerFileServiceBackend implements FileServiceBackend {
 		if (authorizationFailure) {
 			const message = (await authorizationFailure.text()).trim();
 			throw new FileServiceError(
-				authorizationFailure.status === 403 ? "not_found" : "backend_error",
+				authorizationFailure.status === 403 ? "not_found" : "upstream_error",
 				message || "Workspace access denied.",
 			);
 		}
-		const backendRequest = new Request(
+		const workspaceRequest = new Request(
 			`https://lixray-container.invalid${path}`,
 			init,
 		);
 		let response: Response;
 		if (this.workspaceFetch) {
-			response = await this.workspaceFetch(workspaceId, backendRequest);
+			response = await this.workspaceFetch(workspaceId, workspaceRequest);
 		} else {
 			const containerNamespace = this.env.SLATEDB_CONTAINER;
 			if (!containerNamespace) {
 				throw new FileServiceError(
-					"backend_error",
+					"upstream_error",
 					"Workspace storage is not configured.",
 				);
 			}
@@ -255,12 +255,12 @@ export class WorkerFileServiceBackend implements FileServiceBackend {
 				ports: 8080,
 				startOptions: { envVars: containerEnv(this.env, workspaceId) },
 			});
-			response = await container.fetch(backendRequest);
+			response = await container.fetch(workspaceRequest);
 		}
 		const body = await parseResponse(response);
 		if (!response.ok) {
 			throw new FileServiceError(
-				"backend_error",
+				"upstream_error",
 				apiErrorMessage(body, response.status),
 				{ status: response.status },
 			);
@@ -270,7 +270,7 @@ export class WorkerFileServiceBackend implements FileServiceBackend {
 }
 
 function containerEnv(
-	env: McpBackendEnv,
+	env: WorkerLixRuntimeEnv,
 	workspaceId: string,
 ): Record<string, string> {
 	const vars: Record<string, string> = { SLATEDB_PATH: workspaceId };
@@ -317,7 +317,7 @@ function apiErrorMessage(body: unknown, status: number): string {
 
 function requiredEnv(value: string | undefined, name: string): string {
 	if (!value) {
-		throw new FileServiceError("backend_error", `${name} is not configured.`);
+		throw new FileServiceError("upstream_error", `${name} is not configured.`);
 	}
 	return value;
 }

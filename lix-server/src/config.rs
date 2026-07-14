@@ -23,12 +23,12 @@ pub enum StorageConfig {
         access_key_id: String,
         secret_access_key: String,
         region: String,
-        cache: SlateDbCacheConfig,
+        cache: SlateDBCacheConfig,
     },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SlateDbCacheConfig {
+pub struct SlateDBCacheConfig {
     pub root_folder: PathBuf,
     pub max_disk_cache_bytes: usize,
     pub block_cache_bytes: u64,
@@ -48,7 +48,7 @@ impl Config {
                 access_key_id: required_env("R2_ACCESS_KEY_ID")?,
                 secret_access_key: required_env("R2_SECRET_ACCESS_KEY")?,
                 region: env::var("R2_REGION").unwrap_or_else(|_| "auto".to_string()),
-                cache: SlateDbCacheConfig::from_env()?,
+                cache: SlateDBCacheConfig::from_env()?,
             },
             "memory" => StorageConfig::Memory,
             other => {
@@ -64,7 +64,7 @@ impl Config {
     }
 }
 
-impl SlateDbCacheConfig {
+impl SlateDBCacheConfig {
     fn from_env() -> Result<Self> {
         let root_folder =
             env::var("SLATEDB_CACHE_DIR").unwrap_or_else(|_| DEFAULT_CACHE_DIR.to_string());
@@ -183,7 +183,7 @@ mod tests {
 
         assert_eq!(
             cache,
-            SlateDbCacheConfig {
+            SlateDBCacheConfig {
                 root_folder: PathBuf::from("/tmp/test-cache"),
                 max_disk_cache_bytes: 1024,
                 block_cache_bytes: 256,

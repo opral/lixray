@@ -10,7 +10,7 @@ import {
 	type Branch,
 	type ExecuteRequest,
 	type ExecuteResponse,
-	type FileServiceBackend,
+	type LixRuntimeClient,
 	type FilesystemMutationOutcome,
 	type FilesystemMutationRequest,
 	type WireValue,
@@ -45,13 +45,13 @@ void test("canonical path validation rejects ambiguous and unsafe paths", () => 
 });
 
 void test("read_file validates UTF-8 and paginates by line with a revision", async () => {
-	const backend = new MemoryBackend();
-	backend.addFile(
+	const client = new MemoryLixRuntimeClient();
+	client.addFile(
 		"/notes.txt",
 		new TextEncoder().encode("one\ntwo\nthree"),
 		"rev-7",
 	);
-	const service = new LixFileService(backend);
+	const service = new LixFileService(client);
 
 	const page = await service.readFile(
 		WORKSPACE_ID,
@@ -72,7 +72,7 @@ void test("read_file validates UTF-8 and paginates by line with a revision", asy
 		hasMore: true,
 	});
 
-	backend.addFile("/binary.dat", new Uint8Array([0xc3, 0x28]), "rev-1");
+	client.addFile("/binary.dat", new Uint8Array([0xc3, 0x28]), "rev-1");
 	await assert.rejects(
 		service.readFile(WORKSPACE_ID, BRANCH_ID, "/binary.dat"),
 		hasCode("not_utf8"),
@@ -80,13 +80,13 @@ void test("read_file validates UTF-8 and paginates by line with a revision", asy
 });
 
 void test("text file reads and writes enforce the one MiB byte limit", async () => {
-	const backend = new MemoryBackend();
-	backend.addFile(
+	const client = new MemoryLixRuntimeClient();
+	client.addFile(
 		"/large.txt",
 		new Uint8Array(MAX_TEXT_FILE_BYTES + 1),
 		"rev-1",
 	);
-	const service = new LixFileService(backend);
+	const service = new LixFileService(client);
 
 	await assert.rejects(
 		service.readFile(WORKSPACE_ID, BRANCH_ID, "/large.txt"),
@@ -104,8 +104,8 @@ void test("text file reads and writes enforce the one MiB byte limit", async () 
 });
 
 void test("write_file is create-only without a revision and compare-and-swap with one", async () => {
-	const backend = new MemoryBackend();
-	const service = new LixFileService(backend);
+	const client = new MemoryLixRuntimeClient();
+	const service = new LixFileService(client);
 
 	const created = await service.writeFile(
 		WORKSPACE_ID,
@@ -138,17 +138,17 @@ void test("write_file is create-only without a revision and compare-and-swap wit
 		created.revision,
 	);
 	assert.equal(replaced.revision, "rev-2");
-	assert.equal(backend.fileText("/new.txt"), "second");
+	assert.equal(client.fileText("/new.txt"), "second");
 });
 
 void test("edit_file requires unique exact matches unless replace_all is explicit", async () => {
-	const backend = new MemoryBackend();
-	backend.addFile(
+	const client = new MemoryLixRuntimeClient();
+	client.addFile(
 		"/edit.txt",
 		new TextEncoder().encode("red red blue"),
 		"rev-3",
 	);
-	const service = new LixFileService(backend);
+	const service = new LixFileService(client);
 
 	await assert.rejects(
 		service.editFile(WORKSPACE_ID, BRANCH_ID, "/edit.txt", "rev-3", [
@@ -174,13 +174,13 @@ void test("edit_file requires unique exact matches unless replace_all is explici
 		],
 	);
 	assert.equal(edited.revision, "rev-4");
-	assert.equal(backend.fileText("/edit.txt"), "green green cyan");
+	assert.equal(client.fileText("/edit.txt"), "green green cyan");
 });
 
 void test("agent-authenticated edits persist an Atelier review range", async () => {
-	const backend = new MemoryBackend();
-	backend.addFile("/review.md", new TextEncoder().encode("before"), "rev-3");
-	const service = new LixFileService(backend, {
+	const client = new MemoryLixRuntimeClient();
+	client.addFile("/review.md", new TextEncoder().encode("before"), "rev-3");
+	const service = new LixFileService(client, {
 		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
 	});
 
@@ -188,7 +188,7 @@ void test("agent-authenticated edits persist an Atelier review range", async () 
 		{ oldText: "before", newText: "after" },
 	]);
 
-	const ranges = backend.agentReviewRanges();
+	const ranges = client.agentReviewRanges();
 	assert.equal(ranges.length, 1);
 	assert.deepEqual(
 		{
@@ -207,8 +207,8 @@ void test("agent-authenticated edits persist an Atelier review range", async () 
 });
 
 void test("agent-authenticated creates persist an Atelier review range", async () => {
-	const backend = new MemoryBackend();
-	const service = new LixFileService(backend, {
+	const client = new MemoryLixRuntimeClient();
+	const service = new LixFileService(client, {
 		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
 	});
 
@@ -219,7 +219,7 @@ void test("agent-authenticated creates persist an Atelier review range", async (
 		"created",
 	);
 
-	const ranges = backend.agentReviewRanges();
+	const ranges = client.agentReviewRanges();
 	assert.equal(ranges.length, 1);
 	assert.deepEqual(
 		{
@@ -238,9 +238,9 @@ void test("agent-authenticated creates persist an Atelier review range", async (
 });
 
 void test("agent reviews discard legacy ranges after the Atelier hard cut", async () => {
-	const backend = new MemoryBackend();
-	backend.addFile("/review.md", new TextEncoder().encode("before"), "rev-3");
-	backend.setAgentReviewRanges([
+	const client = new MemoryLixRuntimeClient();
+	client.addFile("/review.md", new TextEncoder().encode("before"), "rev-3");
+	client.setAgentReviewRanges([
 		{
 			id: "legacy-review",
 			agent: "codex",
@@ -250,7 +250,7 @@ void test("agent reviews discard legacy ranges after the Atelier hard cut", asyn
 			completedAt: 2,
 		},
 	]);
-	const service = new LixFileService(backend, {
+	const service = new LixFileService(client, {
 		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
 	});
 
@@ -258,17 +258,17 @@ void test("agent reviews discard legacy ranges after the Atelier hard cut", asyn
 		{ oldText: "before", newText: "after" },
 	]);
 
-	const ranges = backend.agentReviewRanges();
+	const ranges = client.agentReviewRanges();
 	assert.equal(ranges.length, 1);
 	assert.equal(ranges[0]?.sourceId, "codex");
 	assert.equal(ranges[0]?.agent, undefined);
 });
 
 void test("move_entry never overwrites and requires the source revision", async () => {
-	const backend = new MemoryBackend();
-	backend.addFile("/source.txt", new TextEncoder().encode("source"), "rev-4");
-	backend.addFile("/taken.txt", new TextEncoder().encode("taken"), "rev-2");
-	const service = new LixFileService(backend);
+	const client = new MemoryLixRuntimeClient();
+	client.addFile("/source.txt", new TextEncoder().encode("source"), "rev-4");
+	client.addFile("/taken.txt", new TextEncoder().encode("taken"), "rev-2");
+	const service = new LixFileService(client);
 
 	await assert.rejects(
 		service.moveEntry(
@@ -299,19 +299,15 @@ void test("move_entry never overwrites and requires the source revision", async 
 		"rev-4",
 	);
 	assert.equal(moved.path, "/renamed.txt");
-	assert.equal(backend.fileText("/renamed.txt"), "source");
-	assert.equal(backend.hasFile("/source.txt"), false);
+	assert.equal(client.fileText("/renamed.txt"), "source");
+	assert.equal(client.hasFile("/source.txt"), false);
 });
 
 void test("directory deletion requires explicit recursive confirmation and a current revision", async () => {
-	const backend = new MemoryBackend();
-	backend.addDirectory("/docs/", "rev-9");
-	backend.addFile(
-		"/docs/readme.md",
-		new TextEncoder().encode("hello"),
-		"rev-1",
-	);
-	const service = new LixFileService(backend);
+	const client = new MemoryLixRuntimeClient();
+	client.addDirectory("/docs/", "rev-9");
+	client.addFile("/docs/readme.md", new TextEncoder().encode("hello"), "rev-1");
+	const service = new LixFileService(client);
 
 	await assert.rejects(
 		service.deleteEntry(WORKSPACE_ID, BRANCH_ID, "/docs/", "rev-9"),
@@ -325,13 +321,13 @@ void test("directory deletion requires explicit recursive confirmation and a cur
 		await service.deleteEntry(WORKSPACE_ID, BRANCH_ID, "/docs/", "rev-9", true),
 		{ path: "/docs/", deleted: true },
 	);
-	assert.equal(backend.hasFile("/docs/readme.md"), false);
+	assert.equal(client.hasFile("/docs/readme.md"), false);
 });
 
 type StoredFile = { bytes: Uint8Array; revision: string };
 type StoredDirectory = { revision: string; id: string };
 
-class MemoryBackend implements FileServiceBackend {
+class MemoryLixRuntimeClient implements LixRuntimeClient {
 	private readonly files = new Map<string, StoredFile>();
 	private readonly directories = new Map<string, StoredDirectory>();
 	private revisionCounter = 0;
