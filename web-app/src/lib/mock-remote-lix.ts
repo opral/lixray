@@ -19,8 +19,15 @@ type TokenProvider = () => Promise<string | null>;
 export interface OpenMockRemoteLixOptions {
 	workspaceId: string;
 	getAccessToken: TokenProvider;
+	initialBranchId?: string | null;
 	fetch?: typeof fetch;
 }
+
+export type BrowserLix = Lix & {
+	activeBranchSnapshot(): string;
+	mainBranchSnapshot(): string;
+	subscribeActiveBranch(listener: () => void): () => void;
+};
 
 interface BranchesPayload {
 	branches: Branch[];
@@ -66,18 +73,21 @@ const OBSERVATION_RETRY_MAX_MS = 5_000;
  */
 export async function openMockRemoteLix(
 	options: OpenMockRemoteLixOptions,
-): Promise<Lix> {
+): Promise<BrowserLix> {
 	const client = new MockRemoteLix(options);
 	await client.initialize();
-	return client as unknown as Lix;
+	return client as unknown as BrowserLix;
 }
 
 class MockRemoteLix {
 	readonly #workspaceId: string;
 	readonly #getAccessToken: TokenProvider;
 	readonly #fetch: typeof fetch;
+	readonly #initialBranchId: string | null;
 	readonly #observers = new Set<MockRemoteObserveEvents>();
+	readonly #branchListeners = new Set<() => void>();
 	#activeBranchId = "";
+	#mainBranchId = "";
 	#nextObserverId = 0;
 	#observationController: AbortController | undefined;
 	#observationGeneration = 0;
@@ -92,21 +102,45 @@ class MockRemoteLix {
 		this.#workspaceId = options.workspaceId;
 		this.#getAccessToken = options.getAccessToken;
 		this.#fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
+		this.#initialBranchId = options.initialBranchId ?? null;
 	}
 
 	async initialize(): Promise<void> {
 		const branches = await this.#listBranches();
-		const initial =
+		const main =
 			branches.find((branch) => !branch.hidden && branch.name === "main") ??
 			branches.find((branch) => !branch.hidden) ??
 			branches[0];
+		const requested = this.#initialBranchId
+			? branches.find(
+					(branch) => !branch.hidden && branch.id === this.#initialBranchId,
+				)
+			: undefined;
+		const initial = requested ?? main;
 		if (!initial) {
 			throw new MockRemoteLixError(
 				"LIX_BRANCH_NOT_FOUND",
 				"The workspace does not contain a branch.",
 			);
 		}
+		this.#mainBranchId = main?.id ?? initial.id;
 		this.#activeBranchId = initial.id;
+	}
+
+	activeBranchSnapshot(): string {
+		this.#assertOpen();
+		return this.#activeBranchId;
+	}
+
+	mainBranchSnapshot(): string {
+		this.#assertOpen();
+		return this.#mainBranchId;
+	}
+
+	subscribeActiveBranch(listener: () => void): () => void {
+		this.#assertOpen();
+		this.#branchListeners.add(listener);
+		return () => this.#branchListeners.delete(listener);
 	}
 
 	async execute(
@@ -168,7 +202,7 @@ class MockRemoteLix {
 				}),
 			},
 		);
-		this.#activeBranchId = receipt.id;
+		this.#publishActiveBranch(receipt.id);
 		this.#restartObservers();
 		return receipt;
 	}
@@ -184,7 +218,7 @@ class MockRemoteLix {
 				`Branch not found: ${options.branchId}`,
 			);
 		}
-		this.#activeBranchId = options.branchId;
+		this.#publishActiveBranch(options.branchId);
 		this.#restartObservers();
 		return { branchId: options.branchId };
 	}
@@ -207,7 +241,14 @@ class MockRemoteLix {
 		this.#stopObservationHub();
 		for (const observer of [...this.#observers]) observer.close();
 		this.#observers.clear();
+		this.#branchListeners.clear();
 		return Promise.resolve();
+	}
+
+	#publishActiveBranch(branchId: string): void {
+		if (this.#activeBranchId === branchId) return;
+		this.#activeBranchId = branchId;
+		for (const listener of [...this.#branchListeners]) listener();
 	}
 
 	async #listBranches(): Promise<Branch[]> {

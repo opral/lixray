@@ -332,6 +332,10 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 	private readonly directories = new Map<string, StoredDirectory>();
 	private revisionCounter = 0;
 	private reviewStore: { ranges: Array<Record<string, unknown>> } | undefined;
+	private readonly normalizedReviewRanges = new Map<
+		string,
+		Record<string, unknown>
+	>();
 
 	addFile(path: string, bytes: Uint8Array, revision: string): void {
 		this.files.set(path, { bytes, revision });
@@ -354,7 +358,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	agentReviewRanges(): Array<Record<string, unknown>> {
-		return this.reviewStore?.ranges ?? [];
+		return [...this.normalizedReviewRanges.values()];
 	}
 
 	setAgentReviewRanges(ranges: Array<Record<string, unknown>>): void {
@@ -399,11 +403,16 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 			);
 		}
 		if (sql.startsWith("INSERT INTO lix_key_value_by_branch")) {
+			const key = textParam(params[0]);
 			const value = params[1];
 			assert.equal(value?.kind, "json");
-			this.reviewStore = value.value as {
-				ranges: Array<Record<string, unknown>>;
-			};
+			assert.match(key, /^atelier_agent_turn_commit_range:/);
+			if (!this.normalizedReviewRanges.has(key)) {
+				this.normalizedReviewRanges.set(
+					key,
+					value.value as Record<string, unknown>,
+				);
+			}
 			return result([], 1);
 		}
 

@@ -72,6 +72,14 @@ export type OpenMemoryLix = (options?: {
 interface WorkspaceRuntime {
 	lix: MemoryLixBinding;
 	finiteQueue: Promise<void>;
+	mainBranchId: string;
+}
+
+interface MemoryWorkspaceRuntime extends WorkspaceRuntime {
+	openMemoryLix: OpenMemoryLix;
+	snapshot: PersistentSnapshot;
+	generation: number;
+	subscribers: Set<(update: PersistentObserverUpdate) => void>;
 }
 
 interface WorkspaceRuntimeOptions {
@@ -87,13 +95,16 @@ interface PersistentSnapshot {
 type PersistentObserverUpdate =
 	{ snapshot: PersistentSnapshot } | { error: unknown };
 
-interface PersistentWorkspaceState {
+interface ObserverState {
+	generation: number;
+	subscribers: Set<(update: PersistentObserverUpdate) => void>;
+}
+
+interface PersistentWorkspaceState extends ObserverState {
 	key: string;
 	bucket: R2Bucket;
 	cache?: PersistentSnapshot;
 	observerSnapshot?: PersistentSnapshot;
-	generation: number;
-	subscribers: Set<(update: PersistentObserverUpdate) => void>;
 	poller?: ReturnType<typeof setTimeout>;
 	polling: boolean;
 	pollAgain: boolean;
@@ -143,20 +154,59 @@ export function createMemoryWorkspaceRuntime(
 	openMemoryLix: OpenMemoryLix,
 	options: WorkspaceRuntimeOptions,
 ) {
-	const runtimes = new Map<string, Promise<WorkspaceRuntime>>();
+	const runtimes = new Map<string, Promise<MemoryWorkspaceRuntime>>();
 
 	return {
 		fetch: async (workspaceId: string, request: Request): Promise<Response> => {
 			try {
-				return await routeRequest(
-					request,
-					await workspaceRuntime(
-						workspaceId,
-						openMemoryLix,
-						options.mainBranchId,
-						runtimes,
-					),
+				const runtime = await workspaceRuntime(
+					workspaceId,
+					openMemoryLix,
+					options.mainBranchId,
+					runtimes,
 				);
+				const { pathname } = new URL(request.url);
+				if (
+					pathname === "/v1/observe" ||
+					pathname === "/v1/observe/multiplex"
+				) {
+					if (request.method !== "POST") return methodNotAllowed();
+					const body = await requestBody(request);
+					const snapshot = await serialize(runtime, () =>
+						Promise.resolve(runtime.snapshot),
+					);
+					return snapshotObservationResponse(
+						runtime,
+						body,
+						pathname === "/v1/observe/multiplex",
+						snapshot,
+						runtime.openMemoryLix,
+						runtime.mainBranchId,
+						(subscriber) => subscribeMemoryObserver(runtime, subscriber),
+					);
+				}
+
+				return await serialize(runtime, async () => {
+					const response = await routeRequest(request, runtime);
+					if (
+						!response.ok ||
+						!(await shouldPersistMutation(pathname, response))
+					) {
+						return response;
+					}
+					const bytes = await runtime.lix.exportSnapshot();
+					if (!equalBytes(bytes, runtime.snapshot.bytes)) {
+						runtime.generation += 1;
+						runtime.snapshot = {
+							etag: `memory-${runtime.generation}`,
+							bytes,
+						};
+						notifyPersistentObservers(runtime, {
+							snapshot: runtime.snapshot,
+						});
+					}
+					return response;
+				});
 			} catch (error) {
 				return errorResponse(error);
 			}
@@ -213,14 +263,22 @@ export function createR2WorkspaceRuntime(
 						options.mainBranchId,
 					);
 					await closeQuietly(loaded.runtime.lix);
-					return persistentObservationResponse(
+					return snapshotObservationResponse(
 						state,
 						body,
 						pathname === "/v1/observe/multiplex",
 						loaded.snapshot,
 						openMemoryLix,
 						options.mainBranchId,
-						pollIntervalMs,
+						(subscriber) =>
+							subscribePersistentObserver(
+								state,
+								subscriber,
+								loaded.snapshot,
+								openMemoryLix,
+								options.mainBranchId,
+								pollIntervalMs,
+							),
 					);
 				}
 
@@ -233,9 +291,7 @@ export function createR2WorkspaceRuntime(
 					);
 					const { runtime } = loaded;
 					try {
-						const response = await routeRequest(replay(), runtime, {
-							skipRedundantBranchSwitch: true,
-						});
+						const response = await routeRequest(replay(), runtime);
 						if (
 							!response.ok ||
 							!(await shouldPersistMutation(pathname, response))
@@ -292,7 +348,11 @@ async function loadPersistentRuntime(
 		openMemoryLix,
 		mainBranchId,
 	);
-	const runtime = await openPersistentRuntime(openMemoryLix, snapshot.bytes);
+	const runtime = await openPersistentRuntime(
+		openMemoryLix,
+		snapshot.bytes,
+		mainBranchId,
+	);
 	if (state.cache === cached) state.cache = snapshot;
 	return { snapshot, runtime };
 }
@@ -368,6 +428,7 @@ async function bootstrapPersistentSnapshot(
 async function openPersistentRuntime(
 	openMemoryLix: OpenMemoryLix,
 	bytes: Uint8Array,
+	mainBranchId: string,
 ): Promise<WorkspaceRuntime> {
 	let winnerLix: MemoryLixBinding;
 	try {
@@ -379,7 +440,13 @@ async function openPersistentRuntime(
 			error,
 		);
 	}
-	return { lix: winnerLix, finiteQueue: Promise.resolve() };
+	try {
+		await restoreMainBranch(winnerLix, mainBranchId);
+	} catch (error) {
+		await closeQuietly(winnerLix);
+		throw error;
+	}
+	return { lix: winnerLix, finiteQueue: Promise.resolve(), mainBranchId };
 }
 
 function hasR2Body(object: R2Object): object is R2ObjectBody {
@@ -451,8 +518,8 @@ async function workspaceRuntime(
 	workspaceId: string,
 	openMemoryLix: OpenMemoryLix,
 	mainBranchId: string,
-	runtimes: Map<string, Promise<WorkspaceRuntime>>,
-): Promise<WorkspaceRuntime> {
+	runtimes: Map<string, Promise<MemoryWorkspaceRuntime>>,
+): Promise<MemoryWorkspaceRuntime> {
 	let runtime = runtimes.get(workspaceId);
 	if (!runtime) {
 		runtime = openWorkspaceRuntime(openMemoryLix, mainBranchId);
@@ -467,11 +534,22 @@ async function workspaceRuntime(
 async function openWorkspaceRuntime(
 	openMemoryLix: OpenMemoryLix,
 	mainBranchId: string,
-): Promise<WorkspaceRuntime> {
+): Promise<MemoryWorkspaceRuntime> {
 	const lix = await openMemoryLix();
 	try {
 		await ensureCanonicalMainBranch(lix, mainBranchId);
-		return { lix, finiteQueue: Promise.resolve() };
+		return {
+			lix,
+			finiteQueue: Promise.resolve(),
+			mainBranchId,
+			openMemoryLix,
+			snapshot: {
+				etag: "memory-0",
+				bytes: await lix.exportSnapshot(),
+			},
+			generation: 0,
+			subscribers: new Set(),
+		};
 	} catch (error) {
 		try {
 			await lix.close();
@@ -518,30 +596,9 @@ async function ensureCanonicalMainBranch(
 	}
 }
 
-async function switchBranchIfNeeded(
-	lix: MemoryLixBinding,
-	branchId: string,
-): Promise<void> {
-	if ((await lix.activeBranchId()) === branchId) return;
-	await lix.switchBranch({ branchId });
-}
-
-async function switchRequestBranch(
-	lix: MemoryLixBinding,
-	branchId: string,
-	options: { skipRedundantBranchSwitch?: boolean },
-): Promise<void> {
-	if (options.skipRedundantBranchSwitch) {
-		await switchBranchIfNeeded(lix, branchId);
-		return;
-	}
-	await lix.switchBranch({ branchId });
-}
-
 async function routeRequest(
 	request: Request,
 	runtime: WorkspaceRuntime,
-	options: { skipRedundantBranchSwitch?: boolean } = {},
 ): Promise<Response> {
 	const { pathname } = new URL(request.url);
 	if (pathname === "/v1/container-health") {
@@ -551,22 +608,18 @@ async function routeRequest(
 	}
 	if (pathname === "/v1/branches") {
 		if (request.method !== "GET") return methodNotAllowed();
-		return json(
-			await serialize(runtime, async () => {
-				const result = await runtime.lix.execute(
-					"SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id",
-					[],
-				);
-				return {
-					branches: result.rows.map((row) => ({
-						id: requiredNativeText(result, row, "id"),
-						name: requiredNativeText(result, row, "name"),
-						hidden: requiredNativeBoolean(result, row, "hidden"),
-						commitId: requiredNativeText(result, row, "commit_id"),
-					})),
-				};
-			}),
+		const result = await runtime.lix.execute(
+			"SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id",
+			[],
 		);
+		return json({
+			branches: result.rows.map((row) => ({
+				id: requiredNativeText(result, row, "id"),
+				name: requiredNativeText(result, row, "name"),
+				hidden: requiredNativeBoolean(result, row, "hidden"),
+				commitId: requiredNativeText(result, row, "commit_id"),
+			})),
+		});
 	}
 	if (pathname === "/v1/createBranch") {
 		if (request.method !== "POST") return methodNotAllowed();
@@ -576,14 +629,17 @@ async function routeRequest(
 		const id = optionalString(body, "id");
 		const fromCommitId = optionalString(body, "fromCommitId");
 		return json(
-			await serialize(runtime, async () => {
-				await switchRequestBranch(runtime.lix, branchId, options);
-				return runtime.lix.createBranch({
-					...(id ? { id } : {}),
-					name,
-					...(fromCommitId ? { fromCommitId } : {}),
-				});
-			}),
+			await withSelectedBranch(
+				runtime.lix,
+				branchId,
+				runtime.mainBranchId,
+				(selectedLix) =>
+					selectedLix.createBranch({
+						...(id ? { id } : {}),
+						name,
+						...(fromCommitId ? { fromCommitId } : {}),
+					}),
+			),
 		);
 	}
 	if (pathname === "/v1/execute") {
@@ -594,57 +650,24 @@ async function routeRequest(
 		const params = decodeParams(body.params);
 		const originKey = executeOriginKey(body.options);
 		return json(
-			await serialize(runtime, async () => {
-				await switchRequestBranch(runtime.lix, branchId, options);
-				return encodeExecuteResult(
-					await runtime.lix.execute(
-						sql,
-						params,
-						originKey ? { originKey } : undefined,
+			await withSelectedBranch(
+				runtime.lix,
+				branchId,
+				runtime.mainBranchId,
+				async (selectedLix) =>
+					encodeExecuteResult(
+						await selectedLix.execute(
+							sql,
+							params,
+							originKey ? { originKey } : undefined,
+						),
 					),
-				);
-			}),
+			),
 		);
 	}
 	if (pathname === "/v1/filesystem/mutate") {
 		if (request.method !== "POST") return methodNotAllowed();
-		return json(
-			await mutateFilesystem(runtime, await requestBody(request), options),
-		);
-	}
-	if (pathname === "/v1/observe") {
-		if (request.method !== "POST") return methodNotAllowed();
-		const body = await requestBody(request);
-		const observation = await openObservation(runtime, body);
-		return observationResponse([observation], false);
-	}
-	if (pathname === "/v1/observe/multiplex") {
-		if (request.method !== "POST") return methodNotAllowed();
-		const body = await requestBody(request);
-		const branchId = requiredString(body, "branchId");
-		if (!Array.isArray(body.subscriptions)) {
-			throw invalidArgument("subscriptions is required");
-		}
-		const subscriptions = body.subscriptions.map((subscription) => {
-			const value = requestObject(subscription, "subscriptions[]");
-			return {
-				id: requiredString(value, "id", "subscriptions[].id"),
-				sql: requiredString(value, "sql", "subscriptions[].sql"),
-				params: decodeParams(value.params),
-			};
-		});
-		const observations = await serialize(runtime, async () => {
-			await switchRequestBranch(runtime.lix, branchId, options);
-			const opened: Array<{ id: string; events: ObserveEvents }> = [];
-			for (const { id, sql, params } of subscriptions) {
-				opened.push({
-					id,
-					events: await runtime.lix.observe(sql, params),
-				});
-			}
-			return opened;
-		});
-		return observationResponse(observations, true);
+		return json(await mutateFilesystem(runtime, await requestBody(request)));
 	}
 	return new Response("Not found\n", { status: 404 });
 }
@@ -655,14 +678,16 @@ interface PersistentObservationQuery {
 	params: NativeValue[];
 }
 
-function persistentObservationResponse(
-	state: PersistentWorkspaceState,
+function snapshotObservationResponse(
+	state: ObserverState,
 	body: Record<string, unknown>,
 	multiplex: boolean,
 	initialSnapshot: PersistentSnapshot,
 	openMemoryLix: OpenMemoryLix,
 	mainBranchId: string,
-	pollIntervalMs: number,
+	subscribe: (
+		subscriber: (update: PersistentObserverUpdate) => void,
+	) => () => void,
 ): Response {
 	const branchId = requiredString(body, "branchId");
 	let queries: PersistentObservationQuery[];
@@ -755,20 +780,25 @@ function persistentObservationResponse(
 					const runtime = await openPersistentRuntime(
 						openMemoryLix,
 						snapshotToRead.bytes,
+						mainBranchId,
 					);
 					try {
-						return await serialize(runtime, async () => {
-							await switchBranchIfNeeded(runtime.lix, branchId);
-							const results = [];
-							for (const query of queries) {
-								results.push(
-									encodeExecuteResult(
-										await runtime.lix.execute(query.sql, query.params),
-									),
-								);
-							}
-							return results;
-						});
+						return await withSelectedBranch(
+							runtime.lix,
+							branchId,
+							mainBranchId,
+							async (selectedLix) => {
+								const results = [];
+								for (const query of queries) {
+									results.push(
+										encodeExecuteResult(
+											await selectedLix.execute(query.sql, query.params),
+										),
+									);
+								}
+								return results;
+							},
+						);
 					} finally {
 						await closeQuietly(runtime.lix);
 					}
@@ -806,18 +836,11 @@ function persistentObservationResponse(
 					});
 			};
 
-			unsubscribe = subscribePersistentObserver(
-				state,
-				schedule,
-				initialSnapshot,
-				openMemoryLix,
-				mainBranchId,
-				pollIntervalMs,
-			);
+			schedule({ snapshot: initialSnapshot });
+			unsubscribe = subscribe(schedule);
 			keepAlive = setInterval(() => {
 				enqueue(encoder.encode(": keep-alive\n\n"));
 			}, 15_000);
-			schedule({ snapshot: initialSnapshot });
 		},
 		cancel() {
 			cancelled = true;
@@ -938,7 +961,11 @@ async function pollPersistentObservers(
 		mainBranchId,
 	);
 	if (snapshot !== previous) {
-		const runtime = await openPersistentRuntime(openMemoryLix, snapshot.bytes);
+		const runtime = await openPersistentRuntime(
+			openMemoryLix,
+			snapshot.bytes,
+			mainBranchId,
+		);
 		await closeQuietly(runtime.lix);
 	}
 	if (generation !== state.pollGeneration || state.subscribers.size === 0) {
@@ -953,129 +980,24 @@ async function pollPersistentObservers(
 }
 
 function notifyPersistentObservers(
-	state: PersistentWorkspaceState,
+	state: ObserverState,
 	update: PersistentObserverUpdate,
 ): void {
 	for (const subscriber of state.subscribers) subscriber(update);
 }
 
-async function openObservation(
-	runtime: WorkspaceRuntime,
-	body: Record<string, unknown>,
-): Promise<{ id?: string; events: ObserveEvents }> {
-	const branchId = requiredString(body, "branchId");
-	const sql = requiredString(body, "sql");
-	const params = decodeParams(body.params);
-	return serialize(runtime, async () => {
-		await runtime.lix.switchBranch({ branchId });
-		return { events: await runtime.lix.observe(sql, params) };
-	});
-}
-
-function observationResponse(
-	observations: Array<{ id?: string; events: ObserveEvents }>,
-	multiplex: boolean,
-): Response {
-	const encoder = new TextEncoder();
-	let cancelled = false;
-	let keepAlive: ReturnType<typeof setInterval> | undefined;
-	const stream = new ReadableStream<Uint8Array>({
-		start(controller) {
-			keepAlive = setInterval(() => {
-				if (!cancelled) controller.enqueue(encoder.encode(": keep-alive\n\n"));
-			}, 15_000);
-			void pumpObservations(
-				observations,
-				multiplex,
-				controller,
-				encoder,
-				() => cancelled,
-			)
-				.catch((error) => {
-					if (!cancelled) {
-						controller.enqueue(
-							encoder.encode(sseFrame("error", errorEnvelope(error))),
-						);
-					}
-				})
-				.finally(() => {
-					if (keepAlive) clearInterval(keepAlive);
-					for (const observation of observations) observation.events.close();
-					if (!cancelled) controller.close();
-				});
-		},
-		cancel() {
-			cancelled = true;
-			if (keepAlive) clearInterval(keepAlive);
-			for (const observation of observations) observation.events.close();
-		},
-	});
-	return new Response(stream, { headers: SSE_HEADERS });
-}
-
-async function pumpObservations(
-	observations: Array<{ id?: string; events: ObserveEvents }>,
-	multiplex: boolean,
-	controller: ReadableStreamDefaultController<Uint8Array>,
-	encoder: TextEncoder,
-	isCancelled: () => boolean,
-): Promise<void> {
-	const pending = new Map<
-		number,
-		Promise<{ index: number; event?: ObserveEvent | null; error?: unknown }>
-	>();
-	const arm = (index: number) => {
-		pending.set(
-			index,
-			observations[index].events.next().then(
-				(event) => ({ index, event }),
-				(error: unknown) => ({ index, error }),
-			),
-		);
-	};
-	observations.forEach((_observation, index) => arm(index));
-
-	while (pending.size > 0) {
-		const settled = await Promise.race(pending.values());
-		if (isCancelled()) return;
-		pending.delete(settled.index);
-		const observation = observations[settled.index];
-		if (settled.error) {
-			controller.enqueue(
-				encoder.encode(
-					sseFrame(
-						"error",
-						multiplex
-							? {
-									subscriptionId: observation.id,
-									...errorEnvelope(settled.error),
-								}
-							: errorEnvelope(settled.error),
-					),
-				),
-			);
-			observation.events.close();
-			continue;
-		}
-		if (!settled.event) {
-			observation.events.close();
-			continue;
-		}
-		const payload = {
-			...(multiplex ? { subscriptionId: observation.id } : {}),
-			sequence: settled.event.sequence,
-			mutationSequence: settled.event.mutationSequence,
-			result: encodeExecuteResult(settled.event.rows),
-		};
-		controller.enqueue(encoder.encode(sseFrame("next", payload)));
-		arm(settled.index);
-	}
+function subscribeMemoryObserver(
+	runtime: MemoryWorkspaceRuntime,
+	subscriber: (update: PersistentObserverUpdate) => void,
+): () => void {
+	runtime.subscribers.add(subscriber);
+	subscriber({ snapshot: runtime.snapshot });
+	return () => runtime.subscribers.delete(subscriber);
 }
 
 async function mutateFilesystem(
 	runtime: WorkspaceRuntime,
 	body: Record<string, unknown>,
-	options: { skipRedundantBranchSwitch?: boolean } = {},
 ): Promise<{ outcome: "applied" | "conflict" | "already_exists" }> {
 	const branchId = requiredString(body, "branchId");
 	const path = requiredString(body, "path");
@@ -1094,85 +1016,89 @@ async function mutateFilesystem(
 		throw invalidArgument("mutation type is invalid");
 	}
 
-	return serialize(runtime, async () => {
-		await switchRequestBranch(runtime.lix, branchId, options);
-		const transaction = await runtime.lix.beginTransaction();
-		try {
-			const table = kind === "file" ? "lix_file" : "lix_directory";
-			const current = await transaction.execute(
-				`SELECT id, lixcol_change_id FROM ${table} WHERE path = $1`,
-				[{ kind: "text", value: path }],
-			);
-			if (!current.rows[0])
-				return await rollbackOutcome(transaction, "conflict");
-			const id = requiredNativeText(current, current.rows[0], "id");
-			const revision = requiredNativeText(
-				current,
-				current.rows[0],
-				"lixcol_change_id",
-			);
-			if (revision !== expectedRevision) {
-				return await rollbackOutcome(transaction, "conflict");
-			}
+	return withSelectedBranch(
+		runtime.lix,
+		branchId,
+		runtime.mainBranchId,
+		async (selectedLix) => {
+			const transaction = await selectedLix.beginTransaction();
+			try {
+				const table = kind === "file" ? "lix_file" : "lix_directory";
+				const current = await transaction.execute(
+					`SELECT id, lixcol_change_id FROM ${table} WHERE path = $1`,
+					[{ kind: "text", value: path }],
+				);
+				if (!current.rows[0])
+					return await rollbackOutcome(transaction, "conflict");
+				const id = requiredNativeText(current, current.rows[0], "id");
+				const revision = requiredNativeText(
+					current,
+					current.rows[0],
+					"lixcol_change_id",
+				);
+				if (revision !== expectedRevision) {
+					return await rollbackOutcome(transaction, "conflict");
+				}
 
-			let result: ExecuteResult;
-			if (mutationType === "replace_file") {
-				if (kind !== "file") {
-					throw lixError(
-						"LIX_INVALID_PARAM",
-						"replace_file requires a file entry",
+				let result: ExecuteResult;
+				if (mutationType === "replace_file") {
+					if (kind !== "file") {
+						throw lixError(
+							"LIX_INVALID_PARAM",
+							"replace_file requires a file entry",
+						);
+					}
+					result = await transaction.execute(
+						"UPDATE lix_file SET data = $1, lixcol_metadata = $2 WHERE id = $3",
+						[
+							decodeWireValue(mutation.data, 0),
+							decodeWireValue(mutation.metadata, 1),
+							{ kind: "text", value: id },
+						],
+					);
+				} else if (mutationType === "move") {
+					const destinationPath = requiredString(mutation, "destinationPath");
+					const filePath = destinationPath.replace(/\/+$/, "");
+					const directoryPath = `${filePath}/`;
+					const fileCollision = await transaction.execute(
+						"SELECT id FROM lix_file WHERE path = $1",
+						[{ kind: "text", value: filePath }],
+					);
+					const directoryCollision = await transaction.execute(
+						"SELECT id FROM lix_directory WHERE path = $1",
+						[{ kind: "text", value: directoryPath }],
+					);
+					if (fileCollision.rows.length || directoryCollision.rows.length) {
+						return await rollbackOutcome(transaction, "already_exists");
+					}
+					result = await transaction.execute(
+						`UPDATE ${table} SET path = $1 WHERE id = $2`,
+						[
+							{ kind: "text", value: destinationPath },
+							{ kind: "text", value: id },
+						],
+					);
+				} else {
+					result = await transaction.execute(
+						`DELETE FROM ${table} WHERE id = $1`,
+						[{ kind: "text", value: id }],
 					);
 				}
-				result = await transaction.execute(
-					"UPDATE lix_file SET data = $1, lixcol_metadata = $2 WHERE id = $3",
-					[
-						decodeWireValue(mutation.data, 0),
-						decodeWireValue(mutation.metadata, 1),
-						{ kind: "text", value: id },
-					],
-				);
-			} else if (mutationType === "move") {
-				const destinationPath = requiredString(mutation, "destinationPath");
-				const filePath = destinationPath.replace(/\/+$/, "");
-				const directoryPath = `${filePath}/`;
-				const fileCollision = await transaction.execute(
-					"SELECT id FROM lix_file WHERE path = $1",
-					[{ kind: "text", value: filePath }],
-				);
-				const directoryCollision = await transaction.execute(
-					"SELECT id FROM lix_directory WHERE path = $1",
-					[{ kind: "text", value: directoryPath }],
-				);
-				if (fileCollision.rows.length || directoryCollision.rows.length) {
-					return await rollbackOutcome(transaction, "already_exists");
+				if (result.rowsAffected !== 1) {
+					return await rollbackOutcome(transaction, "conflict");
 				}
-				result = await transaction.execute(
-					`UPDATE ${table} SET path = $1 WHERE id = $2`,
-					[
-						{ kind: "text", value: destinationPath },
-						{ kind: "text", value: id },
-					],
-				);
-			} else {
-				result = await transaction.execute(
-					`DELETE FROM ${table} WHERE id = $1`,
-					[{ kind: "text", value: id }],
-				);
+				await transaction.commit();
+				return { outcome: "applied" };
+			} catch (error) {
+				try {
+					await transaction.rollback();
+				} catch {
+					// Preserve the operation error if rollback also fails.
+				}
+				throw error;
 			}
-			if (result.rowsAffected !== 1) {
-				return await rollbackOutcome(transaction, "conflict");
-			}
-			await transaction.commit();
-			return { outcome: "applied" };
-		} catch (error) {
-			try {
-				await transaction.rollback();
-			} catch {
-				// Preserve the operation error if rollback also fails.
-			}
-			throw error;
-		}
-	});
+		},
+	);
 }
 
 async function rollbackOutcome(
@@ -1193,6 +1119,31 @@ function serialize<T>(
 		() => undefined,
 	);
 	return result;
+}
+
+async function withSelectedBranch<T>(
+	lix: MemoryLixBinding,
+	branchId: string,
+	mainBranchId: string,
+	operation: (selectedLix: MemoryLixBinding) => Promise<T>,
+): Promise<T> {
+	if ((await lix.activeBranchId()) !== branchId) {
+		await lix.switchBranch({ branchId });
+	}
+	try {
+		return await operation(lix);
+	} finally {
+		await restoreMainBranch(lix, mainBranchId);
+	}
+}
+
+async function restoreMainBranch(
+	lix: MemoryLixBinding,
+	mainBranchId: string,
+): Promise<void> {
+	if ((await lix.activeBranchId()) !== mainBranchId) {
+		await lix.switchBranch({ branchId: mainBranchId });
+	}
 }
 
 function encodeExecuteResult(result: ExecuteResult) {
