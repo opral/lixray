@@ -17,6 +17,7 @@ import {
 } from "~/lib/demo-identity";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import type { LixraySupabaseClient } from "~/lib/supabase";
+import { captureTelemetry } from "~/lib/telemetry";
 
 export type OrganizationRole = "owner" | "member";
 
@@ -207,6 +208,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			);
 			if (createError) throw createError;
 			await refresh({ organizationId: String(data) });
+			captureTelemetry("organization_created");
 		},
 		[client, refresh],
 	);
@@ -251,6 +253,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				organizationId: targetOrganization.id,
 				workspaceId: String(data.id),
 			});
+			captureTelemetry("workspace_created");
 		},
 		[client, organizations, refresh, selectedOrganization],
 	);

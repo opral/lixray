@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { AuthProvider } from "~/components/auth-provider";
+import { PostHogAnalytics } from "~/components/posthog-analytics";
 import { Toaster } from "~/components/ui/sonner";
 import { WorkspaceProvider } from "~/components/workspace-provider";
 import appCss from "../styles.css?url";
@@ -41,7 +42,10 @@ function RootDocument({ children }: { children: ReactNode }) {
 			</head>
 			<body>
 				<AuthProvider>
-					<WorkspaceProvider>{children}</WorkspaceProvider>
+					<WorkspaceProvider>
+						<PostHogAnalytics />
+						{children}
+					</WorkspaceProvider>
 				</AuthProvider>
 				<Toaster />
 				<Scripts />

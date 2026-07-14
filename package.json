@@ -3,6 +3,8 @@
   "private": true,
   "packageManager": "pnpm@10.13.1",
   "scripts": {
-    "dev": "node scripts/dev.mjs"
+    "dev": "node scripts/dev.mjs",
+    "dev:telemetry": "infisical run --env=dev -- pnpm dev",
+    "deploy:worker": "infisical run --env=prod -- pnpm --dir web-app deploy:worker"
   }
 }
