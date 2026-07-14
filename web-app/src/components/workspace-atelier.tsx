@@ -9,6 +9,7 @@ import {
 	Link,
 	Outlet,
 	useNavigate,
+	useParams,
 	useRouterState,
 } from "@tanstack/react-router";
 import {
@@ -53,10 +54,14 @@ export function WorkspaceAtelier({
 	const pathname = useRouterState({
 		select: (state) => state.location.pathname,
 	});
+	const routeParams = useParams({ strict: false });
+	const routeFilePath =
+		"_splat" in routeParams ? routeParams._splat : undefined;
 	const [instance, setInstance] = useState<AtelierInstance | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const activeLixRef = useRef<BrowserLix | null>(null);
 	const pathnameRef = useRef(pathname);
+	const routeFilePathRef = useRef(routeFilePath);
 	const branchIdRef = useRef(branchId);
 	const suppressBranchNavigationRef = useRef(false);
 	const eventHandlerRef = useRef<(event: AtelierEvent) => void>(
@@ -65,6 +70,9 @@ export function WorkspaceAtelier({
 	useEffect(() => {
 		pathnameRef.current = pathname;
 	}, [pathname]);
+	useEffect(() => {
+		routeFilePathRef.current = routeFilePath;
+	}, [routeFilePath]);
 	useEffect(() => {
 		branchIdRef.current = branchId;
 	}, [branchId]);
@@ -77,9 +85,8 @@ export function WorkspaceAtelier({
 	);
 	const navigateToCurrentPathBranch = useCallback(
 		async (nextBranchId: string, replace = false) => {
-			const filePrefix = `/@${namespace}/${workspaceSlug}/file/`;
-			if (pathnameRef.current.startsWith(filePrefix)) {
-				const filePath = pathnameRef.current.slice(filePrefix.length);
+			const filePath = routeFilePathRef.current;
+			if (filePath !== undefined) {
 				await navigate({
 					to: "/@{$namespace}/$workspace/file/$",
 					params: {
@@ -123,8 +130,7 @@ export function WorkspaceAtelier({
 				});
 				return;
 			}
-			const targetPath = `/@${namespace}/${workspaceSlug}/file/${filePath}`;
-			if (pathnameRef.current === targetPath) return;
+			if (routeFilePathRef.current === filePath) return;
 			void navigate({
 				to: "/@{$namespace}/$workspace/file/$",
 				params: {

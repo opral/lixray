@@ -53,6 +53,31 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 	await settlePageExecutes(page, pendingExecutes);
 });
 
+test("branch URL normalization preserves encoded file names", async ({
+	page,
+}) => {
+	const pendingExecutes = trackPageExecutes(page);
+	const filePath = "/encoded path % value.md";
+	const markdown = "# Encoded file route\n";
+	await seedMarkdownFile(page, filePath, markdown);
+	const encodedPath = `/@acme/launch-q3/file/${encodeURIComponent(
+		filePath.slice(1),
+	)}`;
+
+	await page.goto(encodedPath);
+
+	await expect(page).toHaveURL((url) => {
+		return (
+			url.pathname === encodedPath &&
+			url.searchParams.get("branch") === DEMO_MAIN_BRANCH_ID
+		);
+	});
+	await expect(
+		page.getByRole("heading", { name: "Encoded file route" }),
+	).toBeVisible({ timeout: 55_000 });
+	await settlePageExecutes(page, pendingExecutes);
+});
+
 function trackPageExecutes(page: Page): Set<Request> {
 	const requests = new Set<Request>();
 	page.on("request", (request) => {
@@ -78,7 +103,11 @@ async function settlePageExecutes(page: Page, requests: Set<Request>) {
 	await expect.poll(() => requests.size).toBe(0);
 }
 
-async function seedMarkdownFile(page: Page) {
+async function seedMarkdownFile(
+	page: Page,
+	filePath = FILE_PATH,
+	markdown = "# Hello from the SlateDB-backed Atelier\n",
+) {
 	const headers = { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` };
 	const branchesResponse = await page.request.get(
 		`/v1/workspaces/${WORKSPACE_ID}/branches`,
@@ -99,12 +128,10 @@ async function seedMarkdownFile(page: Page) {
 				branchId,
 				sql: "INSERT INTO lix_file (path, data) VALUES ($1, $2) ON CONFLICT (path) DO UPDATE SET data = excluded.data",
 				params: [
-					{ kind: "text", value: FILE_PATH },
+					{ kind: "text", value: filePath },
 					{
 						kind: "blob",
-						base64: Buffer.from(
-							"# Hello from the SlateDB-backed Atelier\n",
-						).toString("base64"),
+						base64: Buffer.from(markdown).toString("base64"),
 					},
 				],
 			},
