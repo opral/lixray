@@ -72,6 +72,12 @@ export function createWorkspaceBranchSession(args: {
 	return {
 		getSnapshot: args.lix.activeBranchSnapshot.bind(args.lix),
 		subscribe: args.lix.subscribeActiveBranch.bind(args.lix),
+		createBranch: async (name: string) => {
+			const branch = await args.lix.createBranch({ name });
+			persist();
+			await args.onSwitch(branch.id);
+			return branch.id;
+		},
 		switchBranch: async (branchId: string) => {
 			const receipt = await args.lix.switchBranch({ branchId });
 			persist();
@@ -87,7 +93,6 @@ export function createWorkspacePreferencesStore(args: {
 }): AtelierPreferencesStore {
 	const client = args.client;
 	if (!client) return createMemoryPreferencesStore();
-	let pendingSave: Promise<void> = Promise.resolve();
 	return {
 		load: async () => {
 			const { data, error } = await client
@@ -101,26 +106,18 @@ export function createWorkspacePreferencesStore(args: {
 				? coerceAtelierUserPreferences(data.atelier_layout)
 				: null;
 		},
-		save: (value: AtelierUserPreferencesV1) => {
+		save: async (value: AtelierUserPreferencesV1) => {
 			const preferences = coerceAtelierUserPreferences(value);
-			const save = pendingSave
-				.catch(() => undefined)
-				.then(async () => {
-					const { error } = await client
-						.from("user_workspace_preferences")
-						.upsert(
-							{
-								user_id: args.userId,
-								workspace_id: args.workspaceId,
-								atelier_layout: preferences,
-								updated_at: new Date().toISOString(),
-							},
-							{ onConflict: "user_id,workspace_id" },
-						);
-					if (error) throw error;
-				});
-			pendingSave = save;
-			return save;
+			const { error } = await client.from("user_workspace_preferences").upsert(
+				{
+					user_id: args.userId,
+					workspace_id: args.workspaceId,
+					atelier_layout: preferences,
+					updated_at: new Date().toISOString(),
+				},
+				{ onConflict: "user_id,workspace_id" },
+			);
+			if (error) throw error;
 		},
 	};
 }

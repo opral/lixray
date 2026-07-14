@@ -13,6 +13,7 @@ const OTHER_USER = "71000000-0000-0000-0000-000000000002";
 const WORKSPACE = "72000000-0000-4000-8000-000000000001";
 const MAIN = "73000000-0000-4000-8000-000000000001";
 const DRAFT = "73000000-0000-4000-8000-000000000002";
+const CREATED = "73000000-0000-4000-8000-000000000003";
 
 void test("shell state is isolated by browsing context, account, and workspace", () => {
 	const tabA = new MemoryStorage();
@@ -114,6 +115,19 @@ void test("branch selection is observable and private to one browsing context", 
 		}),
 		MAIN,
 	);
+
+	assert.equal(await branchA.createBranch("Review"), CREATED);
+	assert.equal(branchA.getSnapshot(), CREATED);
+	assert.equal(routedBranch, CREATED);
+	assert.equal(notifications, 2);
+	assert.equal(
+		readWorkspaceSessionBranch({
+			userId: USER,
+			workspaceId: WORKSPACE,
+			storage: tabA,
+		}),
+		CREATED,
+	);
 });
 
 void test("browser Lix validates the initial branch and pins each request explicitly", async () => {
@@ -175,6 +189,11 @@ function fakeBrowserLix(initialBranchId: string): BrowserLix {
 		subscribeActiveBranch: (listener: () => void) => {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
+		},
+		createBranch: async () => {
+			activeBranchId = CREATED;
+			for (const listener of [...listeners]) listener();
+			return { id: activeBranchId };
 		},
 		switchBranch: async (options: SwitchBranchOptions) => {
 			activeBranchId = options.branchId;
