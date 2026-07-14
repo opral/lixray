@@ -44,7 +44,7 @@ interface MultiplexObservePayload extends ObservePayload {
 }
 
 interface MultiplexObserveErrorPayload {
-	subscriptionId: string;
+	subscriptionId?: string;
 	error?: { code?: string; message?: string };
 }
 
@@ -359,12 +359,16 @@ class MockRemoteLix {
 					const payload = JSON.parse(
 						frame.data,
 					) as MultiplexObserveErrorPayload;
-					this.#observerById(payload.subscriptionId)?.fail(
-						new MockRemoteLixError(
-							payload.error?.code ?? "LIX_OBSERVE_FAILED",
-							payload.error?.message ?? "The observed query failed.",
-						),
+					const error = new MockRemoteLixError(
+						payload.error?.code ?? "LIX_OBSERVE_FAILED",
+						payload.error?.message ?? "The observed query failed.",
 					);
+					if (payload.subscriptionId) {
+						this.#observerById(payload.subscriptionId)?.fail(error);
+					} else {
+						shouldReconnect = true;
+						break;
+					}
 				}
 			}
 			if (this.#isCurrentObservationHub(generation, controller)) {
@@ -440,7 +444,7 @@ class MockRemoteObserveEvents {
 	readonly #sql: string;
 	readonly #params: WireValue[];
 	readonly #onClose: () => void;
-	#events: ObserveEvent[] = [];
+	#outcomes: ObserveEvent[] = [];
 	#waiters: ObserveWaiter[] = [];
 	#error: Error | undefined;
 	#closed = false;
@@ -462,7 +466,8 @@ class MockRemoteObserveEvents {
 	}
 
 	next(): Promise<ObserveEvent | undefined> {
-		if (this.#events.length > 0) return Promise.resolve(this.#events.shift());
+		const event = this.#outcomes.shift();
+		if (event) return Promise.resolve(event);
 		if (this.#error) return Promise.reject(this.#error);
 		if (this.#closed) return Promise.resolve(undefined);
 		return new Promise<ObserveEvent | undefined>((resolve, reject) => {
@@ -482,7 +487,7 @@ class MockRemoteObserveEvents {
 
 	restart(): void {
 		if (this.#closed) return;
-		this.#events = [];
+		this.#outcomes = [];
 		this.#error = undefined;
 	}
 
@@ -496,14 +501,14 @@ class MockRemoteObserveEvents {
 		if (this.#closed) return;
 		this.#closed = true;
 		for (const waiter of this.#waiters.splice(0)) waiter.resolve(undefined);
-		this.#events = [];
+		this.#outcomes = [];
 		this.#onClose();
 	}
 
 	#push(event: ObserveEvent): void {
 		const waiter = this.#waiters.shift();
 		if (waiter) waiter.resolve(event);
-		else this.#events.push(event);
+		else this.#outcomes.push(event);
 	}
 }
 

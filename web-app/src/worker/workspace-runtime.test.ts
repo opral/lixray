@@ -257,6 +257,74 @@ void test("multiplex observations retain subscription ids and SSE framing", asyn
 	assert.match(body, /"mutationSequence":0/);
 });
 
+void test("multiplex observations scope query errors to their subscription", async () => {
+	const binding = fakeBinding({
+		execute: async (sql: string) => {
+			if (sql === "FAIL") {
+				throw Object.assign(new Error("invalid observed query"), {
+					code: "LIX_PARSE_ERROR",
+				});
+			}
+			return {
+				columns: ["value"],
+				rows: [[{ kind: "text", value: "healthy" }]],
+				rowsAffected: 0,
+				notices: [],
+			};
+		},
+	});
+	const runtime = testRuntime(async () => binding);
+	const response = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/observe/multiplex", {
+			branchId: BRANCH,
+			subscriptions: [
+				{ id: "broken", sql: "FAIL", params: [] },
+				{ id: "healthy", sql: "SELECT 1", params: [] },
+			],
+		}),
+	);
+	const body = await readSseUntil(response, [
+		'"subscriptionId":"broken"',
+		'"subscriptionId":"healthy"',
+	]);
+
+	assert.match(
+		body,
+		/event: error\ndata: .*"subscriptionId":"broken".*"code":"LIX_PARSE_ERROR"/,
+	);
+	assert.match(
+		body,
+		/event: next\ndata: .*"subscriptionId":"healthy".*"value":"healthy"/,
+	);
+});
+
+void test("multiplex observations expose stream-wide snapshot errors", async () => {
+	let opens = 0;
+	const runtime = testRuntime(async () => {
+		opens += 1;
+		if (opens === 2) throw new Error("corrupt snapshot bytes");
+		return fakeBinding();
+	});
+	const response = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/observe/multiplex", {
+			branchId: BRANCH,
+			subscriptions: [
+				{ id: "files", sql: "SELECT * FROM lix_file", params: [] },
+				{ id: "dirs", sql: "SELECT * FROM lix_directory", params: [] },
+			],
+		}),
+	);
+	const body = await response.text();
+
+	assert.match(
+		body,
+		/event: error\ndata: .*"code":"PREVIEW_SNAPSHOT_INVALID".*"message":"stored preview snapshot is invalid"/,
+	);
+	assert.doesNotMatch(body, /"subscriptionId"/);
+});
+
 function fakeBinding(
 	overrides: Record<string, unknown> = {},
 ): MemoryLixBinding {

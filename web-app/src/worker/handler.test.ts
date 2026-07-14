@@ -174,8 +174,17 @@ void test("authenticated MCP initialize reaches the MCP transport before fallbac
 		env({}),
 		{
 			authenticateMcp: authenticatedMcp(),
-			mcpTransport: async () => {
+			mcpTransport: async (_request, service) => {
 				reachedTransport = true;
+				assert.equal(
+					(
+						service as unknown as {
+							agentReview?: { sessionId?: string };
+						}
+					).agentReview?.sessionId,
+					"user-123",
+					"review ranges are scoped to the authenticated account, not the OAuth client",
+				);
 				return Response.json({
 					jsonrpc: "2.0",
 					id: 1,

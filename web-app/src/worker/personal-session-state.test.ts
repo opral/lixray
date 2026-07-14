@@ -3,10 +3,12 @@ import test from "node:test";
 import type { SwitchBranchOptions } from "@lix-js/sdk";
 import {
 	createWorkspaceBranchSession,
+	createWorkspacePreferencesStore,
+	createWorkspaceReviewStatusStore,
 	createWorkspaceSessionStateStore,
-	readWorkspaceSessionBranch,
 } from "../lib/atelier-state.ts";
 import { openMockRemoteLix, type BrowserLix } from "../lib/mock-remote-lix.ts";
+import type { LixraySupabaseClient } from "../lib/supabase.ts";
 
 const USER = "71000000-0000-0000-0000-000000000001";
 const OTHER_USER = "71000000-0000-0000-0000-000000000002";
@@ -67,66 +69,211 @@ void test("shell state is isolated by browsing context, account, and workspace",
 	);
 });
 
-void test("branch selection is observable and private to one browsing context", async () => {
-	const tabA = new MemoryStorage();
-	const tabB = new MemoryStorage();
-	const lixA = fakeBrowserLix(MAIN);
-	const lixB = fakeBrowserLix(MAIN);
-	let routedBranch: string | null = null;
-	const branchA = createWorkspaceBranchSession({
-		lix: lixA,
-		userId: USER,
-		workspaceId: WORKSPACE,
-		storage: tabA,
+void test("branch selection is serialized and only the latest request is routed", async () => {
+	let activeBranchId = MAIN;
+	let releaseDraft: () => void = () => undefined;
+	let markDraftStarted: () => void = () => undefined;
+	const draftBlocked = new Promise<void>((resolve) => {
+		releaseDraft = resolve;
+	});
+	const draftStarted = new Promise<void>((resolve) => {
+		markDraftStarted = resolve;
+	});
+	const selected: string[] = [];
+	const routed: string[] = [];
+	const lix = {
+		activeBranchSnapshot: () => activeBranchId,
+		mainBranchSnapshot: () => MAIN,
+		subscribeActiveBranch: () => () => undefined,
+		switchBranch: async ({ branchId }: SwitchBranchOptions) => {
+			selected.push(branchId);
+			if (branchId === DRAFT) {
+				markDraftStarted();
+				await draftBlocked;
+			}
+			activeBranchId = branchId;
+			return { branchId };
+		},
+	} as unknown as BrowserLix;
+	const branch = createWorkspaceBranchSession({
+		lix,
 		onSwitch: (branchId) => {
-			routedBranch = branchId;
+			routed.push(branchId);
 		},
 	});
-	createWorkspaceBranchSession({
-		lix: lixB,
+
+	const selectDraft = branch.switchBranch(DRAFT);
+	await draftStarted;
+	const selectCreated = branch.switchBranch(CREATED);
+	assert.deepEqual(selected, [DRAFT], "the second switch waits for the first");
+
+	releaseDraft();
+	await Promise.all([selectDraft, selectCreated]);
+
+	assert.deepEqual(selected, [DRAFT, CREATED]);
+	assert.deepEqual(routed, [CREATED]);
+	assert.equal(branch.getSnapshot(), CREATED);
+});
+
+void test("a failed latest branch selection reconciles the last successful branch", async () => {
+	let activeBranchId = MAIN;
+	let releaseDraft: () => void = () => undefined;
+	let markDraftStarted: () => void = () => undefined;
+	const draftBlocked = new Promise<void>((resolve) => {
+		releaseDraft = resolve;
+	});
+	const draftStarted = new Promise<void>((resolve) => {
+		markDraftStarted = resolve;
+	});
+	const routed: string[] = [];
+	const lix = {
+		activeBranchSnapshot: () => activeBranchId,
+		mainBranchSnapshot: () => MAIN,
+		subscribeActiveBranch: () => () => undefined,
+		switchBranch: async ({ branchId }: SwitchBranchOptions) => {
+			if (branchId === DRAFT) {
+				markDraftStarted();
+				await draftBlocked;
+				activeBranchId = branchId;
+				return { branchId };
+			}
+			throw new Error(`Unable to switch to ${branchId}`);
+		},
+	} as unknown as BrowserLix;
+	const branch = createWorkspaceBranchSession({
+		lix,
+		onSwitch: (branchId) => {
+			routed.push(branchId);
+		},
+	});
+
+	const selectDraft = branch.switchBranch(DRAFT);
+	await draftStarted;
+	const selectCreated = branch.switchBranch(CREATED);
+	releaseDraft();
+
+	await selectDraft;
+	await assert.rejects(selectCreated, /Unable to switch/);
+	assert.equal(branch.getSnapshot(), DRAFT);
+	assert.deepEqual(
+		routed,
+		[DRAFT],
+		"the successfully selected branch becomes authoritative when its successor fails",
+	);
+});
+
+void test("demo preferences and review status survive a same-tab reload", async () => {
+	const storage = new MemoryStorage();
+	const preferences = createWorkspacePreferencesStore({
+		client: null,
 		userId: USER,
 		workspaceId: WORKSPACE,
-		storage: tabB,
-		onSwitch: () => undefined,
+		storage,
 	});
-	let notifications = 0;
-	branchA.subscribe(() => {
-		notifications += 1;
+	await preferences.save({
+		version: 1,
+		layout: { sizes: { left: 20, central: 50, right: 30 } },
 	});
-
-	await branchA.switchBranch(DRAFT);
-
-	assert.equal(branchA.getSnapshot(), DRAFT);
-	assert.equal(routedBranch, DRAFT);
-	assert.equal(notifications, 1);
-	assert.equal(
-		readWorkspaceSessionBranch({
+	assert.deepEqual(
+		await createWorkspacePreferencesStore({
+			client: null,
 			userId: USER,
 			workspaceId: WORKSPACE,
-			storage: tabA,
-		}),
-		DRAFT,
-	);
-	assert.equal(
-		readWorkspaceSessionBranch({
-			userId: USER,
-			workspaceId: WORKSPACE,
-			storage: tabB,
-		}),
-		MAIN,
+			storage,
+		}).load(),
+		{
+			version: 1,
+			layout: { sizes: { left: 20, central: 50, right: 30 } },
+		},
 	);
 
-	assert.equal(await branchA.createBranch("Review"), CREATED);
-	assert.equal(branchA.getSnapshot(), CREATED);
-	assert.equal(routedBranch, CREATED);
-	assert.equal(notifications, 2);
-	assert.equal(
-		readWorkspaceSessionBranch({
+	const reviews = createWorkspaceReviewStatusStore({
+		client: null,
+		userId: USER,
+		workspaceId: WORKSPACE,
+		storage,
+	});
+	await reviews.resolve({
+		branchId: DRAFT,
+		reviewId: "review-1",
+		fileId: "file-1",
+		outcome: "accepted",
+	});
+	assert.deepEqual(
+		await createWorkspaceReviewStatusStore({
+			client: null,
 			userId: USER,
 			workspaceId: WORKSPACE,
-			storage: tabA,
-		}),
-		CREATED,
+			storage,
+		}).loadResolvedReviewIds(DRAFT),
+		["review-1"],
+	);
+	assert.deepEqual(
+		await createWorkspaceReviewStatusStore({
+			client: null,
+			userId: OTHER_USER,
+			workspaceId: WORKSPACE,
+			storage,
+		}).loadResolvedReviewIds(DRAFT),
+		[],
+	);
+});
+
+void test("failed remote review persistence survives tab loss and retries idempotently", async () => {
+	const durableStorage = new MemoryStorage();
+	const remoteReviewIds = new Set<string>();
+	let upsertAttempts = 0;
+	const client = fakeReviewClient({
+		load: () => [...remoteReviewIds],
+		upsert: (row) => {
+			upsertAttempts += 1;
+			if (upsertAttempts === 1) return new Error("temporarily unavailable");
+			remoteReviewIds.add(row.review_id);
+			return null;
+		},
+	});
+	const reviews = createWorkspaceReviewStatusStore({
+		client,
+		userId: USER,
+		workspaceId: WORKSPACE,
+		durableStorage,
+	});
+
+	await reviews.resolve({
+		branchId: DRAFT,
+		reviewId: "review-outbox",
+		fileId: "file-outbox",
+		outcome: "rejected",
+	});
+	assert.equal(upsertAttempts, 1);
+	assert.deepEqual(
+		await createWorkspaceReviewStatusStore({
+			client: null,
+			userId: USER,
+			workspaceId: WORKSPACE,
+			storage: durableStorage,
+		}).loadResolvedReviewIds(DRAFT),
+		["review-outbox"],
+		"the local acknowledgement is durable before the remote write succeeds",
+	);
+
+	const freshTab = createWorkspaceReviewStatusStore({
+		client,
+		userId: USER,
+		workspaceId: WORKSPACE,
+		durableStorage,
+	});
+	assert.deepEqual(await freshTab.loadResolvedReviewIds(DRAFT), [
+		"review-outbox",
+	]);
+	assert.equal(upsertAttempts, 2);
+	assert.deepEqual(await freshTab.loadResolvedReviewIds(DRAFT), [
+		"review-outbox",
+	]);
+	assert.equal(
+		upsertAttempts,
+		2,
+		"a flushed outbox entry is not retried again",
 	);
 });
 
@@ -180,27 +327,58 @@ void test("browser Lix validates the initial branch and pins each request explic
 	await lix.close();
 });
 
-function fakeBrowserLix(initialBranchId: string): BrowserLix {
-	let activeBranchId = initialBranchId;
-	const listeners = new Set<() => void>();
+type RemoteReviewRow = {
+	review_id: string;
+};
+
+function fakeReviewClient(args: {
+	load: () => string[];
+	upsert: (row: RemoteReviewRow) => Error | null;
+}): LixraySupabaseClient {
 	return {
-		activeBranchSnapshot: () => activeBranchId,
-		mainBranchSnapshot: () => MAIN,
-		subscribeActiveBranch: (listener: () => void) => {
-			listeners.add(listener);
-			return () => listeners.delete(listener);
-		},
-		createBranch: async () => {
-			activeBranchId = CREATED;
-			for (const listener of [...listeners]) listener();
-			return { id: activeBranchId };
-		},
-		switchBranch: async (options: SwitchBranchOptions) => {
-			activeBranchId = options.branchId;
-			for (const listener of [...listeners]) listener();
-			return { branchId: activeBranchId };
-		},
-	} as unknown as BrowserLix;
+		from: () => new FakeReviewQuery(args),
+	} as unknown as LixraySupabaseClient;
+}
+
+class FakeReviewQuery {
+	readonly #args: {
+		load: () => string[];
+		upsert: (row: RemoteReviewRow) => Error | null;
+	};
+
+	constructor(args: {
+		load: () => string[];
+		upsert: (row: RemoteReviewRow) => Error | null;
+	}) {
+		this.#args = args;
+	}
+
+	select(): this {
+		return this;
+	}
+
+	eq(): this {
+		return this;
+	}
+
+	async upsert(row: RemoteReviewRow): Promise<{ error: Error | null }> {
+		return { error: this.#args.upsert(row) };
+	}
+
+	then<TResult1 = { data: RemoteReviewRow[]; error: null }, TResult2 = never>(
+		onfulfilled?:
+			| ((value: {
+					data: RemoteReviewRow[];
+					error: null;
+			  }) => TResult1 | PromiseLike<TResult1>)
+			| null,
+		onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+	): Promise<TResult1 | TResult2> {
+		return Promise.resolve({
+			data: this.#args.load().map((review_id) => ({ review_id })),
+			error: null,
+		}).then(onfulfilled, onrejected);
+	}
 }
 
 class MemoryStorage implements Storage {
