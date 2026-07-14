@@ -20,7 +20,7 @@ export const Route = createRootRoute({
 			{ name: "viewport", content: "width=device-width, initial-scale=1" },
 			{ title },
 			{ name: "description", content: description },
-			{ name: "theme-color", content: "#ffffff" },
+			{ name: "theme-color", content: "#f4f2ef" },
 		],
 		links: [
 			{ rel: "stylesheet", href: appCss },

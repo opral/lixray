@@ -10,6 +10,10 @@ import {
 
 test("sign-in route renders without runtime errors", async ({ page }) => {
 	await page.goto("/sign-in");
+	await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
+		"content",
+		"#f4f2ef",
+	);
 
 	await expect(
 		page.getByRole("heading", { name: "Sign in to LixRay" }),
