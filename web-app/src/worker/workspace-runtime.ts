@@ -254,13 +254,10 @@ export function createR2WorkspaceRuntime(
 						);
 						if (committed) {
 							const snapshot = { etag: committed.etag, bytes };
-							if (state.cache === cacheToken) state.cache = snapshot;
-							wakePersistentObservers(
-								state,
-								openMemoryLix,
-								options.mainBranchId,
-								pollIntervalMs,
-							);
+							if (state.cache === cacheToken) {
+								state.cache = snapshot;
+								publishPersistentSnapshot(state, snapshot);
+							}
 							return response;
 						}
 					} finally {
@@ -709,7 +706,25 @@ function persistentObservationResponse(
 				cancelled = true;
 				if (keepAlive) clearInterval(keepAlive);
 				unsubscribe?.();
-				if (close) controller.close();
+				if (close) {
+					try {
+						controller.close();
+					} catch {
+						// The client disconnected before the stream could close.
+					}
+				}
+			};
+			const enqueue = (chunk: Uint8Array): boolean => {
+				if (cancelled) return false;
+				try {
+					controller.enqueue(chunk);
+					return true;
+				} catch {
+					// A disconnected subscriber must not abort the shared poller or
+					// prevent other workspace observers from receiving this snapshot.
+					finish(false);
+					return false;
+				}
 			};
 			const schedule = (update: PersistentObserverUpdate) => {
 				if ("snapshot" in update) latestSnapshot = update.snapshot;
@@ -761,25 +776,26 @@ function persistentObservationResponse(
 					.then((results) => {
 						if (cancelled) return;
 						lastEvaluatedEtag = snapshotToRead.etag;
-						results.forEach((result, index) => {
+						for (const [index, result] of results.entries()) {
 							const serialized = JSON.stringify(result);
-							if (serialized === previous[index]) return;
-							previous[index] = serialized;
+							if (serialized === previous[index]) continue;
 							const payload = {
 								...(multiplex ? { subscriptionId: queries[index].id } : {}),
 								sequence: sequences[index]++,
 								mutationSequence: state.generation,
 								result,
 							};
-							controller.enqueue(encoder.encode(sseFrame("next", payload)));
-						});
+							if (!enqueue(encoder.encode(sseFrame("next", payload)))) break;
+							previous[index] = serialized;
+						}
 					})
 					.catch((error) => {
 						if (cancelled) return;
-						controller.enqueue(
-							encoder.encode(sseFrame("error", errorEnvelope(error))),
-						);
-						finish(true);
+						if (
+							enqueue(encoder.encode(sseFrame("error", errorEnvelope(error))))
+						) {
+							finish(true);
+						}
 					})
 					.finally(() => {
 						running = false;
@@ -799,7 +815,7 @@ function persistentObservationResponse(
 				pollIntervalMs,
 			);
 			keepAlive = setInterval(() => {
-				if (!cancelled) controller.enqueue(encoder.encode(": keep-alive\n\n"));
+				enqueue(encoder.encode(": keep-alive\n\n"));
 			}, 15_000);
 			schedule({ snapshot: initialSnapshot });
 		},
@@ -842,14 +858,14 @@ function subscribePersistentObserver(
 	};
 }
 
-function wakePersistentObservers(
+function publishPersistentSnapshot(
 	state: PersistentWorkspaceState,
-	openMemoryLix: OpenMemoryLix,
-	mainBranchId: string,
-	pollIntervalMs: number,
+	snapshot: PersistentSnapshot,
 ): void {
 	if (state.subscribers.size === 0) return;
-	schedulePersistentPoll(state, openMemoryLix, mainBranchId, pollIntervalMs, 0);
+	state.observerSnapshot = snapshot;
+	state.generation += 1;
+	notifyPersistentObservers(state, { snapshot });
 }
 
 function schedulePersistentPoll(

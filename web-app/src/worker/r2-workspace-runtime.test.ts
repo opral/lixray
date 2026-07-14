@@ -548,6 +548,93 @@ void test("observer polling is shared, single-flight, and never queues ticks", a
 	}
 });
 
+void test("local commits notify observers without an R2 wake poll", async () => {
+	const storage = new FakeR2Bucket();
+	const service = runtime(snapshotBindingFactory(), 60_000);
+	const observer = new SseReader(
+		await service.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/observe", {
+				branchId: MAIN_BRANCH,
+				sql: "GET",
+				params: [wireText("local")],
+			}),
+		),
+	);
+	try {
+		await observer.next();
+		storage.resetMetrics();
+
+		await setValue(service, storage, HOST_A, WORKSPACE_A, "local", "one");
+		assert.equal((await observer.next()).result.rows[0][1].value, "one");
+		assert.equal(storage.getCalls.length, 1);
+
+		storage.resetMetrics();
+		await setValue(service, storage, HOST_A, WORKSPACE_A, "local", "two");
+		assert.equal((await observer.next()).result.rows[0][1].value, "two");
+		assert.equal(storage.getCalls.length, 1);
+	} finally {
+		await observer.close();
+	}
+});
+
+void test("a disconnected observer cannot stop updates for live subscribers", async () => {
+	const storage = new FakeR2Bucket();
+	const openMemoryLix = snapshotBindingFactory();
+	const observerRuntime = runtime(openMemoryLix, 20);
+	const writerRuntime = runtime(openMemoryLix);
+	const observe = () =>
+		observerRuntime.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/observe", {
+				branchId: MAIN_BRANCH,
+				sql: "GET",
+				params: [wireText("disconnect")],
+			}),
+		);
+
+	const restoreReadableStream = failNextStreamAfterFirstEnqueue();
+	let disconnected: SseReader | undefined;
+	try {
+		disconnected = new SseReader(await observe());
+	} finally {
+		restoreReadableStream();
+	}
+	assert.ok(disconnected);
+	const healthy = new SseReader(await observe());
+	try {
+		await disconnected.next();
+		await healthy.next();
+
+		await setValue(
+			writerRuntime,
+			storage,
+			HOST_A,
+			WORKSPACE_A,
+			"disconnect",
+			"one",
+		);
+		assert.equal((await healthy.next()).result.rows[0][1].value, "one");
+
+		await setValue(
+			writerRuntime,
+			storage,
+			HOST_A,
+			WORKSPACE_A,
+			"disconnect",
+			"two",
+		);
+		assert.equal((await healthy.next()).result.rows[0][1].value, "two");
+	} finally {
+		await disconnected.close();
+		await healthy.close();
+	}
+});
+
 void test("reopened observers never replay a stale cursor", async () => {
 	const storage = new FakeR2Bucket();
 	const openMemoryLix = snapshotBindingFactory();
@@ -1075,6 +1162,57 @@ class SseReader {
 	async close() {
 		await this.#reader.cancel();
 	}
+}
+
+function failNextStreamAfterFirstEnqueue(): () => void {
+	const OriginalReadableStream = globalThis.ReadableStream;
+	let replaceNext = true;
+	const FailingReadableStream = function <R>(
+		source: UnderlyingDefaultSource<R> = {},
+		strategy?: QueuingStrategy<R>,
+	): ReadableStream<R> {
+		if (!replaceNext) return new OriginalReadableStream(source, strategy);
+		replaceNext = false;
+		let enqueueCount = 0;
+		return new OriginalReadableStream<R>(
+			{
+				start(controller) {
+					const wrapped: ReadableStreamDefaultController<R> = {
+						get desiredSize() {
+							return controller.desiredSize;
+						},
+						close: () => controller.close(),
+						enqueue: (chunk) => {
+							enqueueCount += 1;
+							if (enqueueCount > 1) {
+								throw new Error("Network connection lost.");
+							}
+							controller.enqueue(chunk);
+						},
+						error: (reason) => controller.error(reason),
+					};
+					source.start?.(wrapped);
+				},
+				cancel(reason) {
+					source.cancel?.(reason);
+				},
+			},
+			strategy,
+		);
+	} as unknown as typeof ReadableStream;
+
+	Object.defineProperty(globalThis, "ReadableStream", {
+		configurable: true,
+		writable: true,
+		value: FailingReadableStream,
+	});
+	return () => {
+		Object.defineProperty(globalThis, "ReadableStream", {
+			configurable: true,
+			writable: true,
+			value: OriginalReadableStream,
+		});
+	};
 }
 
 function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
