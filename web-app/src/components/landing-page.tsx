@@ -22,6 +22,7 @@ const agentMarks = {
 	claude: "/landing/claude-official.png",
 	chatgpt: "/landing/chatgpt-mark.svg",
 	codex: "/landing/codex-mark.svg",
+	gemini: "/landing/gemini-mark.svg",
 } as const;
 
 const files: readonly FileEntry[] = [
@@ -447,13 +448,13 @@ function ProblemVisual() {
 		<div className={cn(visualShell, "relative h-[360px] p-6 sm:h-[390px]")} aria-label="Agents working in separate private contexts">
 			<IsolatedCard className="top-10 left-[6%] bg-[#f7f0e3] text-stone-900" agent="claude" title="Mara's Claude" file="launch-plan-v3-final.md" note="only Mara can see this" />
 			<IsolatedCard className="top-8 right-[7%] bg-[#232323] text-white" agent="chatgpt" title="Jonas's ChatGPT" file="announcement (7).docx" note="downloaded to ~/Desktop" />
-			<IsolatedCard className="bottom-8 left-1/2 -translate-x-1/2 bg-[#191919] text-white" agent="codex" title="Priya's Codex" file="$ ~/repos/metrics.csv" note="on Priya's laptop" />
+			<IsolatedCard className="bottom-8 left-1/2 -translate-x-1/2 bg-[#eaf2ff] text-[#173b7a]" agent="gemini" title="Priya's Gemini" file="metrics.csv" fileType="csv" note="only Priya can see this" />
 		</div>
 	);
 }
 
-function IsolatedCard({ agent, className, file, note, title }: { agent: Agent; className: string; file: string; note: string; title: string }) {
-	return <div className={cn("absolute w-[min(290px,40%)] rounded-xl p-4 text-xs shadow-[0_22px_45px_rgba(66,35,17,.2)] max-sm:w-[72%]", className)}><div className="mb-3 flex items-center gap-2 font-bold"><AgentMark agent={agent} />{title}</div><strong className="flex items-center gap-2 rounded-lg border border-current/10 bg-white/6 px-3 py-2 font-mono"><FileMark type="markdown" />{file}</strong><span className="mt-2 block opacity-50">{note}</span></div>;
+function IsolatedCard({ agent, className, file, fileType = "markdown", note, title }: { agent: Agent; className: string; file: string; fileType?: FileType; note: string; title: string }) {
+	return <div className={cn("absolute w-[min(290px,40%)] rounded-xl p-4 text-xs shadow-[0_22px_45px_rgba(66,35,17,.2)] max-sm:w-[72%]", className)}><div className="mb-3 flex items-center gap-2 font-bold"><AgentMark agent={agent} />{title}</div><strong className="flex items-center gap-2 rounded-lg border border-current/10 bg-white/35 px-3 py-2 font-mono"><FileMark type={fileType} />{file}</strong><span className="mt-2 block opacity-50">{note}</span></div>;
 }
 
 function SolutionVisual() {
