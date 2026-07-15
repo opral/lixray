@@ -214,13 +214,9 @@ void test("edit_file treats replacement text literally", async () => {
 	const service = new LixFileService(client);
 	const replacement = "$$$ profits $& $` $' $1";
 
-	await service.editFile(
-		WORKSPACE_ID,
-		BRANCH_ID,
-		"/literal.txt",
-		"rev-1",
-		[{ oldText: "before", newText: replacement }],
-	);
+	await service.editFile(WORKSPACE_ID, BRANCH_ID, "/literal.txt", "rev-1", [
+		{ oldText: "before", newText: replacement },
+	]);
 
 	assert.equal(client.fileText("/literal.txt"), replacement);
 });
