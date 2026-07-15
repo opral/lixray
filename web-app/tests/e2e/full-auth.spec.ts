@@ -27,7 +27,7 @@ test("full-auth user can create and open a fresh workspace", async ({
 			await continueLink.click();
 		}
 
-		await expect(page).toHaveURL(/\/$/);
+		await expect(page).toHaveURL(/\/home$/);
 		await expect(
 			page.getByRole("heading", { name: "Workspaces" }),
 		).toBeVisible();
@@ -88,7 +88,7 @@ function readWorkspaceId(payload: unknown): string {
 }
 
 async function deleteWorkspaceThroughUi(page: Page, workspaceName: string) {
-	await page.goto("/?app=1");
+	await page.goto("/home");
 	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
 	const actions = page.getByRole("button", {
 		name: `Actions for ${workspaceName}`,

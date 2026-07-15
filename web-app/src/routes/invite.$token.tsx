@@ -71,8 +71,7 @@ function InvitationPage() {
 						<div className="mt-3 flex flex-col items-stretch justify-between gap-3 min-[801px]:flex-row min-[801px]:items-center">
 							<Link
 								className="inline-flex min-h-[38px] w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] no-underline transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] min-[801px]:w-auto"
-								to="/"
-								search={{ app: "1" }}
+								to="/home"
 							>
 								Open workspace
 							</Link>

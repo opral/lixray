@@ -63,7 +63,7 @@ test("landing page renders and the canonical workspace route opens", async ({
 		page.getByRole("link", { name: "Back to workspaces" }),
 	).toBeVisible();
 	await page.getByRole("link", { name: "Back to workspaces" }).click();
-	await expect(page).toHaveURL(/\/$/);
+	await expect(page).toHaveURL(/\/home$/);
 	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
 });
 

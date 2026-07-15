@@ -67,7 +67,7 @@ export function AppTitlebarBrand({
 				"inline-flex shrink-0 items-center gap-2 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline",
 				className,
 			)}
-			href="/?app=1"
+			href="/home"
 		>
 			<img className="size-[19px]" src="/lixray-mark.svg" alt="" />
 			<span data-app-titlebar-brand-label>LixRay</span>
