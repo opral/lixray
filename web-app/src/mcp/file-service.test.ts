@@ -208,6 +208,23 @@ void test("edit_file requires unique exact matches unless replace_all is explici
 	assert.equal(client.fileText("/edit.txt"), "green green blue");
 });
 
+void test("edit_file treats replacement text literally", async () => {
+	const client = new MemoryLixRuntimeClient();
+	client.addFile("/literal.txt", new TextEncoder().encode("before"), "rev-1");
+	const service = new LixFileService(client);
+	const replacement = "$$$ profits $& $` $' $1";
+
+	await service.editFile(
+		WORKSPACE_ID,
+		BRANCH_ID,
+		"/literal.txt",
+		"rev-1",
+		[{ oldText: "before", newText: replacement }],
+	);
+
+	assert.equal(client.fileText("/literal.txt"), replacement);
+});
+
 void test("agent-authenticated edits persist an Atelier review range", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addFile("/review.md", new TextEncoder().encode("before"), "rev-3");

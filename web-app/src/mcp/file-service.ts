@@ -441,7 +441,7 @@ export class LixFileService {
 			}
 			next = edit.replaceAll
 				? next.split(edit.oldText).join(edit.newText)
-				: next.replace(edit.oldText, edit.newText);
+				: next.replace(edit.oldText, () => edit.newText);
 		}
 		return this.writeFile(workspaceId, branchId, path, next, revision);
 	}
