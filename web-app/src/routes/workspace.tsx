@@ -162,7 +162,7 @@ function WorkspacePage() {
 		<div className="min-h-screen">
 			<AppTitlebar className="sticky top-0 z-10 bg-bg-app/90 backdrop-blur-[16px]">
 				<AppTitlebarBrand />
-				<Link to="/" className={`${buttonClass} ml-auto min-h-7 px-2.5`}>
+				<Link to="/home" className={`${buttonClass} ml-auto min-h-7 px-2.5`}>
 					Back to workspace
 				</Link>
 			</AppTitlebar>

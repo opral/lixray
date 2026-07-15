@@ -4,7 +4,7 @@
 	"private": true,
 	"packageManager": "pnpm@10.13.1",
 	"scripts": {
-		"start": "supabase start",
+		"start": "supabase start && supabase migration up --local",
 		"stop": "supabase stop",
 		"status": "supabase status",
 		"env": "supabase status -o env",

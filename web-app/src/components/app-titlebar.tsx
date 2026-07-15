@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router";
 import type { ComponentPropsWithRef } from "react";
 import { cn } from "~/lib/utils";
 
@@ -59,19 +58,19 @@ export function AppTitlebarTitle({
 export function AppTitlebarBrand({
 	className,
 	...props
-}: Omit<ComponentPropsWithRef<typeof Link>, "children" | "to">) {
+}: Omit<ComponentPropsWithRef<"a">, "children" | "href">) {
 	return (
-		<Link
+		<a
 			{...props}
 			aria-label={props["aria-label"] ?? "LixRay home"}
 			className={cn(
 				"inline-flex shrink-0 items-center gap-2 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline",
 				className,
 			)}
-			to="/"
+			href="/home"
 		>
 			<img className="size-[19px]" src="/lixray-mark.svg" alt="" />
 			<span data-app-titlebar-brand-label>LixRay</span>
-		</Link>
+		</a>
 	);
 }

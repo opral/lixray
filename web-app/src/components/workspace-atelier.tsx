@@ -326,8 +326,8 @@ export function WorkspaceAtelier({
 						slots={{
 							navbarStart: (
 								<Link
-									to="/"
-									aria-label="Back to LixRay home"
+									to="/home"
+									aria-label="Back to workspaces"
 									className="flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
 								>
 									<img src="/lixray-mark.svg" alt="" className="size-[18px]" />

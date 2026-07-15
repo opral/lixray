@@ -72,7 +72,7 @@ function WorkspaceRoutePage() {
 			<WorkspaceRouteStatus>
 				<strong>Workspace not found</strong>
 				<Button asChild variant="outline">
-					<Link to="/">Back to workspaces</Link>
+					<Link to="/home">Back to workspaces</Link>
 				</Button>
 			</WorkspaceRouteStatus>
 		);

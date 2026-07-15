@@ -66,10 +66,11 @@ and retroactive-confiscation risk; every pain story in the research (GitLab `/-/
 HF) was a bare-root retrofit. _`/x/{ns}` prefix_ (Reddit/PyPI-style): same guarantee but three
 opaque characters; prefixes fit resource types (packages, posts), sigils fit identities.
 
-**Consequences.** All UI/API output MUST emit only the `@` form. A courtesy 301 from bare
-`/{handle}` MAY exist when it matches a namespace and no product route; it is a typing
-convenience, never a stored form. Flipping canonical to bare root later is a breaking ecosystem
-migration and MUST be treated as impossible.
+**Consequences.** All UI/API output MUST emit only the `@` form. A bare `/{handle}` MUST NOT be
+interpreted as a namespace alias or looked up in the handle registry, even when it matches an
+active handle; non-product bare-root paths return 404. This keeps every non-`/@` path available to
+the product forever. Flipping canonical to bare root later is a breaking ecosystem migration and
+MUST be treated as impossible.
 
 ### D2 — Exactly two name levels, forever
 
@@ -436,5 +437,3 @@ alone.
 - Timing of the usercontent domain purchase + PSL submission (months of lead time; do well
   before raw ships).
 - Popularity threshold + metric for permanent name retirement (fetches? agent-syncs? stars?).
-- Courtesy bare-root 301: ship or skip (typing convenience vs. keeping the grammar surface
-  minimal).

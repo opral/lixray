@@ -24,7 +24,7 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 	await expect(page.getByRole("main")).toHaveCount(1);
 	const productHeader = productHeaders.first();
 	await expect(
-		productHeader.getByRole("link", { name: "Back to LixRay home" }),
+		productHeader.getByRole("link", { name: "Back to workspaces" }),
 	).toBeVisible();
 	await expect(
 		productHeader.getByRole("button", { name: "Toggle left panel" }),
@@ -65,7 +65,7 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 		timeout: 55_000,
 	});
 	await expect(
-		page.getByRole("link", { name: "Back to LixRay home" }),
+		page.getByRole("link", { name: "Back to workspaces" }),
 	).toBeVisible();
 	await settlePageExecutes(page, pendingExecutes);
 });
