@@ -147,6 +147,10 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			assert.deepEqual(tool.securitySchemes, [
 				{ type: "oauth2", scopes: ["openid", "email", "profile"] },
 			]);
+			assert.ok(
+				tool.outputSchema,
+				`${tool.name} should expose an output schema`,
+			);
 		}
 		for (const name of [
 			"write_file",
@@ -160,7 +164,11 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 						required?: Array<string>;
 						properties?: Record<
 							string,
-							{ format?: string; maxLength?: number }
+							{
+								format?: string;
+								maxLength?: number;
+								description?: string;
+							}
 						>;
 				  }
 				| undefined;
@@ -174,6 +182,11 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			assert.ok(revisionSchema, `${name} should expose expected_revision`);
 			assert.equal(revisionSchema.format, "uuid", name);
 			assert.equal(revisionSchema.maxLength, undefined, name);
+			assert.match(
+				revisionSchema.description ?? "",
+				/When omitted, .+ current revision; when provided, .+ only if it matches\./,
+				name,
+			);
 		}
 		for (const name of [
 			"list_directory",

@@ -64,6 +64,21 @@ const wireValue = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("blob"), base64: z.string() }).strict(),
 	z.object({ kind: z.literal("json"), value: z.unknown() }).strict(),
 ]);
+const workspaceSummaryOutput = z
+	.object({
+		id: uuid,
+		name: z.string(),
+		organization: z.object({ id: z.string(), name: z.string() }).strict(),
+	})
+	.strict();
+const branchSummaryOutput = z
+	.object({
+		id: branchId,
+		name: z.string(),
+		hidden: z.boolean(),
+		commitId: z.string(),
+	})
+	.strict();
 const entrySummaryOutput = z
 	.object({
 		kind: z.enum(["file", "directory"]),
@@ -85,6 +100,14 @@ const toolErrorOutput = z
 			.strict(),
 	})
 	.strict();
+const listWorkspacesOutput = z.union([
+	z.object({ workspaces: z.array(workspaceSummaryOutput) }).strict(),
+	toolErrorOutput,
+]);
+const listBranchesOutput = z.union([
+	z.object({ branches: z.array(branchSummaryOutput) }).strict(),
+	toolErrorOutput,
+]);
 const listDirectoryOutput = z.union([
 	z
 		.object({ path: absolutePath, entries: z.array(entrySummaryOutput) })
@@ -121,6 +144,21 @@ const directoryEntryOutput = z.union([
 ]);
 const movedEntryOutput = z.union([
 	z.object({ entry: entrySummaryOutput }).strict(),
+	toolErrorOutput,
+]);
+const deleteEntryOutput = z.union([
+	z.object({ path: absolutePath, deleted: z.literal(true) }).strict(),
+	toolErrorOutput,
+]);
+const executeOutput = z.union([
+	z
+		.object({
+			columns: z.array(z.string()),
+			rows: z.array(z.array(wireValue)),
+			rowsAffected: z.number().int().nonnegative(),
+			notices: z.array(z.unknown()),
+		})
+		.strict(),
 	toolErrorOutput,
 ]);
 
@@ -418,6 +456,7 @@ function buildTools(
 			z.object({}).strict(),
 			readAnnotations(),
 			async () => ({ workspaces: await service.listWorkspaces() }),
+			listWorkspacesOutput,
 		),
 		tool(
 			"list_branches",
@@ -430,6 +469,7 @@ function buildTools(
 					(branch) => !branch.hidden && branchId.safeParse(branch.id).success,
 				),
 			}),
+			listBranchesOutput,
 		),
 		tool(
 			"list_directory",
@@ -518,7 +558,11 @@ function buildTools(
 					branch_id: branchId,
 					path: absolutePath,
 					content: z.string(),
-					expected_revision: revisionId.optional(),
+					expected_revision: revisionId
+						.describe(
+							"Optional current file revision. When omitted, an existing file is replaced using its current revision; when provided, replacement succeeds only if it matches.",
+						)
+						.optional(),
 				})
 				.strict(),
 			writeAnnotations(false, false),
@@ -550,7 +594,11 @@ function buildTools(
 					workspace_id: uuid,
 					branch_id: branchId,
 					path: absolutePath,
-					expected_revision: revisionId.optional(),
+					expected_revision: revisionId
+						.describe(
+							"Optional current file revision. When omitted, edits apply using the file's current revision; when provided, editing succeeds only if it matches.",
+						)
+						.optional(),
 					edits: z
 						.array(
 							z
@@ -624,7 +672,11 @@ function buildTools(
 					destination_path: absolutePath.describe(
 						"Canonical absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not.",
 					),
-					expected_revision: revisionId.optional(),
+					expected_revision: revisionId
+						.describe(
+							"Optional current source revision. When omitted, the move uses the source's current revision; when provided, moving succeeds only if it matches.",
+						)
+						.optional(),
 				})
 				.strict(),
 			writeAnnotations(false, false),
@@ -658,7 +710,11 @@ function buildTools(
 					path: absolutePath.describe(
 						"Canonical absolute entry path. Directory paths must end in /; file paths must not.",
 					),
-					expected_revision: revisionId.optional(),
+					expected_revision: revisionId
+						.describe(
+							"Optional current entry revision. When omitted, deletion uses the entry's current revision; when provided, deletion succeeds only if it matches.",
+						)
+						.optional(),
 					recursive: z.boolean().optional().default(false),
 				})
 				.strict(),
@@ -673,6 +729,7 @@ function buildTools(
 						: String(expected_revision),
 					Boolean(recursive),
 				),
+			deleteEntryOutput,
 		),
 		tool(
 			"execute",
@@ -694,6 +751,7 @@ function buildTools(
 					String(sql),
 					params as Array<WireValue>,
 				),
+			executeOutput,
 		),
 	];
 }
