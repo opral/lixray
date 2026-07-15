@@ -20,6 +20,7 @@ export interface Env {
 	SLATEDB_METADATA_CACHE_BYTES?: string;
 	LIXRAY_DEMO?: string;
 	LIXRAY_DEMO_WORKSPACE_IDS?: string;
+	GOOGLE_ANALYTICS_ID?: string;
 }
 
 export class SlateDbContainer extends Container<Env> {
