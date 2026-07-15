@@ -22,6 +22,10 @@ interface ContainerStub {
 	fetch(request: Request): Promise<Response>;
 }
 
+type RetryDelay = (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+
+const TRANSIENT_CONTAINER_RETRY_DELAY_MS = 1_000;
+
 export interface WorkerLixRuntimeEnv {
 	SLATEDB_CONTAINER?: { getByName(name: string): ContainerStub };
 	SUPABASE_URL?: string;
@@ -46,6 +50,7 @@ type AuthorizeWorkspace = (
 
 export interface WorkerLixRuntimeClientOptions {
 	fetcher?: typeof fetch;
+	retryDelay?: RetryDelay;
 	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
 	workspaceSummaries?: ReadonlyArray<WorkspaceSummary>;
 }
@@ -55,6 +60,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	private readonly user: McpUser;
 	private readonly authorizeWorkspace: AuthorizeWorkspace;
 	private readonly fetcher: typeof fetch;
+	private readonly retryDelay: RetryDelay;
 	private readonly workspaceFetch:
 		| ((workspaceId: string, request: Request) => Promise<Response>)
 		| undefined;
@@ -72,6 +78,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		this.user = user;
 		this.authorizeWorkspace = authorizeWorkspace;
 		this.fetcher = options.fetcher ?? fetch;
+		this.retryDelay = options.retryDelay ?? delay;
 		this.workspaceFetch = options.workspaceFetch;
 		this.workspaceSummaries = options.workspaceSummaries;
 	}
@@ -237,28 +244,76 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				message || "Workspace access denied.",
 			);
 		}
-		const workspaceRequest = new Request(
-			`https://lixray-container.invalid${path}`,
-			init,
-		);
-		let response: Response;
+		const createWorkspaceRequest = () =>
+			new Request(`https://lixray-container.invalid${path}`, init);
 		if (this.workspaceFetch) {
-			response = await this.workspaceFetch(workspaceId, workspaceRequest);
-		} else {
-			const containerNamespace = this.env.SLATEDB_CONTAINER;
-			if (!containerNamespace) {
+			return this.responseJson<T>(
+				await this.workspaceFetch(workspaceId, createWorkspaceRequest()),
+			);
+		}
+
+		const containerNamespace = this.env.SLATEDB_CONTAINER;
+		if (!containerNamespace) {
+			throw new FileServiceError(
+				"upstream_error",
+				"Workspace storage is not configured.",
+			);
+		}
+		const container = containerNamespace.getByName(workspaceId);
+		let retryCount = 0;
+		for (;;) {
+			assertNotAborted(init.signal);
+			let response: Response;
+			try {
+				await container.startAndWaitForPorts?.({
+					ports: 8080,
+					startOptions: { envVars: containerEnv(this.env, workspaceId) },
+				});
+				response = await container.fetch(createWorkspaceRequest());
+			} catch (caught) {
+				if (!isTransientContainerError(caught)) {
+					console.error("LixRay container request failed", {
+						workspaceId,
+						path,
+						error: errorDetails(caught),
+					});
+					throw new FileServiceError(
+						"upstream_error",
+						"Workspace storage request failed.",
+					);
+				}
+				retryCount += 1;
+				logTransientContainerRetry(workspaceId, path, retryCount, caught);
+				await this.retryDelay(
+					TRANSIENT_CONTAINER_RETRY_DELAY_MS,
+					init.signal ?? undefined,
+				);
+				continue;
+			}
+
+			const body = await parseResponse(response);
+			if (response.ok) return body as T;
+			if (!isTransientContainerResponse(response, body)) {
 				throw new FileServiceError(
 					"upstream_error",
-					"Workspace storage is not configured.",
+					apiErrorMessage(body, response.status),
+					{ status: response.status },
 				);
 			}
-			const container = containerNamespace.getByName(workspaceId);
-			await container.startAndWaitForPorts?.({
-				ports: 8080,
-				startOptions: { envVars: containerEnv(this.env, workspaceId) },
+
+			retryCount += 1;
+			logTransientContainerRetry(workspaceId, path, retryCount, {
+				status: response.status,
+				message: apiErrorMessage(body, response.status),
 			});
-			response = await container.fetch(workspaceRequest);
+			await this.retryDelay(
+				TRANSIENT_CONTAINER_RETRY_DELAY_MS,
+				init.signal ?? undefined,
+			);
 		}
+	}
+
+	private async responseJson<T>(response: Response): Promise<T> {
 		const body = await parseResponse(response);
 		if (!response.ok) {
 			throw new FileServiceError(
@@ -315,6 +370,117 @@ function apiErrorMessage(body: unknown, status: number): string {
 	}
 	if (typeof body === "string" && body.trim()) return body.trim();
 	return `Lix request failed with status ${status}.`;
+}
+
+function isTransientContainerError(caught: unknown): boolean {
+	const message = errorMessageWithCauses(caught).toLowerCase();
+	if (message.includes("abort")) return false;
+	return [
+		"container is not running",
+		"there is no container instance",
+		"too many containers per second",
+		"container crashed",
+		"container exited before",
+		"failed to start container",
+		"failed to verify port",
+		"network connection lost",
+		"container suddenly disconnected",
+		"error proxying request to container",
+		"container is not listening",
+		"connection refused",
+		"connection reset",
+		"fetch failed",
+		"timed out",
+		"timeout",
+	].some((fragment) => message.includes(fragment));
+}
+
+function isTransientContainerResponse(
+	response: Response,
+	body: unknown,
+): boolean {
+	if ([429, 502, 503, 504].includes(response.status)) return true;
+	return (
+		response.status === 500 &&
+		isTransientContainerError(apiErrorMessage(body, response.status))
+	);
+}
+
+function errorMessageWithCauses(caught: unknown): string {
+	const messages: Array<string> = [];
+	const seen = new Set<unknown>();
+	let current = caught;
+	while (current !== undefined && current !== null && !seen.has(current)) {
+		seen.add(current);
+		if (current instanceof Error) {
+			messages.push(current.message);
+			current = current.cause;
+		} else if (
+			typeof current === "string" ||
+			typeof current === "number" ||
+			typeof current === "boolean" ||
+			typeof current === "bigint"
+		) {
+			messages.push(String(current));
+			break;
+		} else {
+			messages.push("Unknown container error");
+			break;
+		}
+	}
+	return messages.join(" ");
+}
+
+function logTransientContainerRetry(
+	workspaceId: string,
+	path: string,
+	retryCount: number,
+	error: unknown,
+): void {
+	if (retryCount !== 1 && retryCount % 30 !== 0) return;
+	console.warn("Transient LixRay container failure; retrying", {
+		workspaceId,
+		path,
+		retryCount,
+		retryDelayMs: TRANSIENT_CONTAINER_RETRY_DELAY_MS,
+		error: errorDetails(error),
+	});
+}
+
+function assertNotAborted(signal: AbortSignal | null | undefined): void {
+	if (!signal?.aborted) return;
+	throw new FileServiceError(
+		"upstream_error",
+		"Workspace storage request was cancelled.",
+	);
+}
+
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(
+				new FileServiceError(
+					"upstream_error",
+					"Workspace storage request was cancelled.",
+				),
+			);
+			return;
+		}
+		const onAbort = () => {
+			clearTimeout(timeout);
+			reject(
+				new FileServiceError(
+					"upstream_error",
+					"Workspace storage request was cancelled.",
+				),
+			);
+		};
+		const timeout = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, milliseconds);
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
 }
 
 function requiredEnv(value: string | undefined, name: string): string {

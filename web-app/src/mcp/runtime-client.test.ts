@@ -60,6 +60,127 @@ void test("container calls reauthorize every time and never forward the OAuth to
 	}
 });
 
+void test("transient container failures retry indefinitely with one-second delays", async () => {
+	let starts = 0;
+	let fetches = 0;
+	const delays: Array<number> = [];
+	const client = new WorkerLixRuntimeClient(
+		env({
+			getByName: () => ({
+				startAndWaitForPorts: async () => {
+					starts += 1;
+					if (starts <= 5) {
+						throw new Error(
+							"The container is not running, consider calling start()",
+						);
+					}
+				},
+				fetch: async () => {
+					fetches += 1;
+					return Response.json({
+						branches: [
+							{
+								id: "main",
+								name: "main",
+								hidden: false,
+								commitId: "commit-1",
+							},
+						],
+					});
+				},
+			}),
+		}),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{
+			retryDelay: async (milliseconds) => {
+				delays.push(milliseconds);
+			},
+		},
+	);
+
+	assert.equal((await client.listBranches(WORKSPACE_ID)).length, 1);
+	assert.equal(starts, 6);
+	assert.equal(fetches, 1);
+	assert.deepEqual(delays, [1_000, 1_000, 1_000, 1_000, 1_000]);
+});
+
+void test("transient HTTP responses retry and replay request bodies", async () => {
+	const bodies: Array<unknown> = [];
+	const delays: Array<number> = [];
+	const client = new WorkerLixRuntimeClient(
+		env({
+			getByName: () => ({
+				fetch: async (request) => {
+					bodies.push(await request.json());
+					if (bodies.length === 1) {
+						return new Response("Failed to start container: cold start", {
+							status: 500,
+						});
+					}
+					return Response.json({
+						columns: [],
+						rows: [],
+						rowsAffected: 0,
+						notices: [],
+					});
+				},
+			}),
+		}),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{
+			retryDelay: async (milliseconds) => {
+				delays.push(milliseconds);
+			},
+		},
+	);
+	const request = {
+		branchId: "main",
+		sql: "SELECT $1",
+		params: [{ kind: "text" as const, value: "ok" }],
+	};
+
+	assert.equal((await client.execute(WORKSPACE_ID, request)).rowsAffected, 0);
+	assert.deepEqual(bodies, [request, request]);
+	assert.deepEqual(delays, [1_000]);
+});
+
+void test("permanent container responses are not retried", async () => {
+	let fetches = 0;
+	let delays = 0;
+	const client = new WorkerLixRuntimeClient(
+		env({
+			getByName: () => ({
+				fetch: async () => {
+					fetches += 1;
+					return Response.json(
+						{ error: { message: "Invalid branch" } },
+						{ status: 400 },
+					);
+				},
+			}),
+		}),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{
+			retryDelay: async () => {
+				delays += 1;
+			},
+		},
+	);
+
+	await assert.rejects(client.listBranches(WORKSPACE_ID), (error: unknown) => {
+		return (
+			error instanceof FileServiceError &&
+			error.code === "upstream_error" &&
+			error.details?.status === 400
+		);
+	});
+	assert.equal(fetches, 1);
+	assert.equal(delays, 0);
+});
+
 void test("a denied workspace never starts or calls a container", async () => {
 	let touchedContainer = false;
 	const client = new WorkerLixRuntimeClient(
