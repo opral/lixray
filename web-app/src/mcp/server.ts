@@ -26,8 +26,20 @@ export const MCP_SCOPES = ["openid", "email", "profile"] as const;
 
 export type McpAuthMode = "oauth" | "none";
 
+export interface McpToolCallObservation {
+	toolName: string;
+	outcome: "success" | "error";
+	durationMs: number;
+	errorCode?: string;
+	workspaceId?: string;
+	sql?: string;
+}
+
+export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
+
 export interface McpServerOptions {
 	authMode?: McpAuthMode;
+	onToolCall?: McpToolCallObserver;
 }
 
 type McpSecurityScheme =
@@ -46,6 +58,7 @@ const branchId = z
 	.max(200)
 	.describe("Existing Lix branch ID");
 const absolutePath = z.string().min(1).max(1024);
+const executeSqlText = z.string().trim().min(1).max(100_000);
 const wireValue = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("null"), value: z.null().optional() }).strict(),
 	z.object({ kind: z.literal("bool"), value: z.boolean() }).strict(),
@@ -91,21 +104,48 @@ export function createLixrayMcpServer(
 		tools: tools.map((tool) => tool.descriptor),
 	}));
 	server.setRequestHandler(CallToolRequestSchema, async (request) => {
+		const startedAt = Date.now();
 		const tool = tools.find(
 			(candidate) => candidate.descriptor.name === request.params.name,
 		);
 		if (!tool) {
+			observeToolCall(options.onToolCall, startedAt, {
+				toolName: "unknown",
+				outcome: "error",
+				errorCode: "unknown_tool",
+			});
 			throw new McpError(
 				ErrorCode.InvalidParams,
 				`Unknown tool: ${request.params.name}`,
 			);
 		}
+		const sqlResult =
+			tool.descriptor.name === "execute"
+				? executeSqlText.safeParse(request.params.arguments?.sql)
+				: undefined;
+		const sql = sqlResult?.success ? sqlResult.data : undefined;
 		const parsed = tool.schema.safeParse(request.params.arguments ?? {});
 		if (!parsed.success) {
+			observeToolCall(options.onToolCall, startedAt, {
+				toolName: tool.descriptor.name,
+				outcome: "error",
+				errorCode: "invalid_arguments",
+				...(sql ? { sql } : {}),
+			});
 			return errorResult("invalid_arguments", z.prettifyError(parsed.error));
 		}
+		const workspaceId =
+			typeof parsed.data.workspace_id === "string"
+				? parsed.data.workspace_id
+				: undefined;
 		try {
 			const structuredContent = await tool.call(parsed.data);
+			observeToolCall(options.onToolCall, startedAt, {
+				toolName: tool.descriptor.name,
+				outcome: "success",
+				...(workspaceId ? { workspaceId } : {}),
+				...(sql ? { sql } : {}),
+			});
 			return {
 				structuredContent: asStructuredContent(structuredContent),
 				content: [
@@ -117,8 +157,22 @@ export function createLixrayMcpServer(
 			};
 		} catch (caught) {
 			if (caught instanceof FileServiceError) {
+				observeToolCall(options.onToolCall, startedAt, {
+					toolName: tool.descriptor.name,
+					outcome: "error",
+					errorCode: caught.code,
+					...(workspaceId ? { workspaceId } : {}),
+					...(sql ? { sql } : {}),
+				});
 				return errorResult(caught.code, caught.message, caught.details);
 			}
+			observeToolCall(options.onToolCall, startedAt, {
+				toolName: tool.descriptor.name,
+				outcome: "error",
+				errorCode: "internal_error",
+				...(workspaceId ? { workspaceId } : {}),
+				...(sql ? { sql } : {}),
+			});
 			console.error("LixRay MCP tool failed", {
 				tool: tool.descriptor.name,
 				error: errorDetails(caught),
@@ -128,6 +182,25 @@ export function createLixrayMcpServer(
 	});
 
 	return server;
+}
+
+function observeToolCall(
+	observer: McpToolCallObserver | undefined,
+	startedAt: number,
+	observation: Omit<McpToolCallObservation, "durationMs">,
+): void {
+	if (!observer) return;
+	try {
+		observer({
+			...observation,
+			durationMs: Math.max(0, Date.now() - startedAt),
+		});
+	} catch (caught) {
+		console.warn(
+			"Failed to observe LixRay MCP tool call",
+			errorDetails(caught),
+		);
+	}
 }
 
 export async function handleMcpTransport(
@@ -520,7 +593,7 @@ function buildTools(
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
-					sql: z.string().trim().min(1).max(100_000),
+					sql: executeSqlText,
 					params: z.array(wireValue).max(1000).optional().default([]),
 				})
 				.strict(),

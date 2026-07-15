@@ -25,6 +25,10 @@ import {
 	mcpUnauthorizedResponse,
 	protectedResourceMetadataResponse,
 } from "../mcp/server.ts";
+import {
+	createMcpTelemetrySession,
+	type McpTelemetrySession,
+} from "./mcp-telemetry.ts";
 
 export interface WorkerEnv {
 	ASSETS?: Fetcher;
@@ -44,6 +48,9 @@ export interface WorkerEnv {
 	SLATEDB_METADATA_CACHE_BYTES?: string;
 	LIXRAY_DEMO?: string;
 	LIXRAY_DEMO_WORKSPACE_IDS?: string;
+	POSTHOG_PROJECT_TOKEN?: string;
+	POSTHOG_HOST?: string;
+	POSTHOG_ENVIRONMENT?: string;
 }
 
 export interface PreviewWorkerEnv extends WorkerEnv {
@@ -75,6 +82,7 @@ export interface HandleRequestOptions {
 	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	executionContext?: ExecutionContext;
+	createMcpTelemetry?: typeof createMcpTelemetrySession;
 }
 
 export interface AuthenticatedUser {
@@ -176,17 +184,33 @@ export async function handleRequest(
 					: undefined,
 			},
 		);
-		return (options.mcpTransport ?? handleMcpTransport)(
-			request,
-			new LixFileService(client, {
-				agentReview: {
-					agent: "codex",
-					sessionId: authResult.auth.userId,
-				},
-			}),
-			options.executionContext ?? noopExecutionContext(),
-			{ authMode: isDemoMode(env) ? "none" : "oauth" },
+		const executionContext = options.executionContext ?? noopExecutionContext();
+		const telemetry = (options.createMcpTelemetry ?? createMcpTelemetrySession)(
+			env,
+			{
+				userId: authResult.auth.userId,
+				clientId: authResult.auth.clientId,
+				isDemo: authResult.auth.isDemo,
+			},
 		);
+		try {
+			return await (options.mcpTransport ?? handleMcpTransport)(
+				request,
+				new LixFileService(client, {
+					agentReview: {
+						agent: "codex",
+						sessionId: authResult.auth.userId,
+					},
+				}),
+				executionContext,
+				{
+					authMode: isDemoMode(env) ? "none" : "oauth",
+					onToolCall: telemetry?.onToolCall,
+				},
+			);
+		} finally {
+			scheduleMcpTelemetryFlush(executionContext, telemetry);
+		}
 	}
 
 	if (!url.pathname.startsWith("/v1/")) {
@@ -622,6 +646,21 @@ function noopExecutionContext(): ExecutionContext {
 		passThroughOnException: () => undefined,
 		props: {},
 	} as unknown as ExecutionContext;
+}
+
+function scheduleMcpTelemetryFlush(
+	executionContext: ExecutionContext,
+	telemetry: McpTelemetrySession | null,
+): void {
+	if (!telemetry) return;
+	try {
+		const flush = telemetry.flush().catch((caught: unknown) => {
+			console.warn("Failed to flush MCP telemetry", caught);
+		});
+		executionContext.waitUntil(flush);
+	} catch (caught) {
+		console.warn("Failed to start MCP telemetry flush", caught);
+	}
 }
 
 export function containerEnv(
