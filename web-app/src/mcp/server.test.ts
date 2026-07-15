@@ -198,6 +198,41 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				assert.equal(revisionSchema.maxLength, undefined, name);
 			}
 		}
+		const defaultedInputs = new Map([
+			["find_files", ["under_path"]],
+			["read_file", ["start_line", "line_count"]],
+			["delete_entry", ["recursive"]],
+			["execute", ["params"]],
+		]);
+		for (const [name, defaultedProperties] of defaultedInputs) {
+			const inputSchema = rawTools.find((tool) => tool.name === name)
+				?.inputSchema as { required?: Array<string> } | undefined;
+			assert.ok(inputSchema, `${name} should expose an input schema`);
+			for (const property of defaultedProperties) {
+				assert.equal(
+					inputSchema.required?.includes(property) ?? false,
+					false,
+					`${name}.${property} should use its default when omitted`,
+				);
+			}
+		}
+		const findFilesInput = rawTools.find((tool) => tool.name === "find_files")
+			?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+		assert.equal(findFilesInput?.properties?.limit, undefined);
+		const editFileInput = rawTools.find((tool) => tool.name === "edit_file")
+			?.inputSchema as
+			| {
+					properties?: {
+						edits?: { items?: { required?: Array<string> } };
+					};
+			  }
+			| undefined;
+		assert.equal(
+			editFileInput?.properties?.edits?.items?.required?.includes(
+				"replace_all",
+			) ?? false,
+			false,
+		);
 		for (const name of [
 			"list_directory",
 			"find_files",

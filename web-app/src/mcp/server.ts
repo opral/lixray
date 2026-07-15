@@ -463,17 +463,15 @@ function buildTools(
 					branch_id: branchId,
 					query: z.string().trim().min(1).max(100),
 					under_path: absolutePath.optional().default("/"),
-					limit: z.number().int().min(1).max(100).optional().default(50),
 				})
 				.strict(),
 			readAnnotations(),
-			async ({ workspace_id, branch_id, query, under_path, limit }) => ({
+			async ({ workspace_id, branch_id, query, under_path }) => ({
 				files: await service.findFiles(
 					String(workspace_id),
 					String(branch_id),
 					String(query),
 					String(under_path),
-					Number(limit),
 				),
 			}),
 			findFilesOutput,
@@ -513,7 +511,7 @@ function buildTools(
 		tool(
 			"write_file",
 			"Create or replace text file",
-			"Create a UTF-8 text file, or replace an existing file only when expected_revision matches.",
+			"Create or replace a UTF-8 text file. When expected_revision is omitted, an existing file is replaced using its current revision; when provided, replacement succeeds only if it matches.",
 			z
 				.object({
 					workspace_id: uuid,
@@ -620,8 +618,12 @@ function buildTools(
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
-					source_path: absolutePath,
-					destination_path: absolutePath,
+					source_path: absolutePath.describe(
+						"Canonical absolute source path. Directory paths must end in /; file paths must not.",
+					),
+					destination_path: absolutePath.describe(
+						"Canonical absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not.",
+					),
 					expected_revision: revisionId.optional(),
 				})
 				.strict(),
@@ -653,7 +655,9 @@ function buildTools(
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
-					path: absolutePath,
+					path: absolutePath.describe(
+						"Canonical absolute entry path. Directory paths must end in /; file paths must not.",
+					),
 					expected_revision: revisionId.optional(),
 					recursive: z.boolean().optional().default(false),
 				})
@@ -709,11 +713,11 @@ function createTool<T extends z.ZodType<Record<string, unknown>>>(
 			name,
 			title,
 			description,
-			inputSchema: mcpJsonSchema(schema),
+			inputSchema: mcpJsonSchema(schema, "input"),
 			...(outputSchema
 				? {
 						outputSchema: {
-							...mcpJsonSchema(outputSchema),
+							...mcpJsonSchema(outputSchema, "output"),
 							type: "object" as const,
 						},
 					}
@@ -730,8 +734,11 @@ function createTool<T extends z.ZodType<Record<string, unknown>>>(
 	};
 }
 
-function mcpJsonSchema(schema: z.ZodType): Record<string, unknown> {
-	const jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>;
+function mcpJsonSchema(
+	schema: z.ZodType,
+	io: "input" | "output",
+): Record<string, unknown> {
+	const jsonSchema = z.toJSONSchema(schema, { io }) as Record<string, unknown>;
 	removeUuidPatterns(jsonSchema);
 	return jsonSchema;
 }

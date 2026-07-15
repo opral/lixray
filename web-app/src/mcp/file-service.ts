@@ -210,7 +210,6 @@ export class LixFileService {
 		branchId: string,
 		query: string,
 		rawRoot = "/",
-		limit = 50,
 	): Promise<Array<EntrySummary>> {
 		const root = directoryPath(rawRoot, { allowRoot: true });
 		const normalizedQuery = query.trim().toLowerCase();
@@ -220,7 +219,6 @@ export class LixFileService {
 				"Search query must contain between 1 and 100 characters.",
 			);
 		}
-		const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
 		const prefixClause = root === "/" ? "" : "path >= $2 AND path < $3 AND ";
 		const params =
 			root === "/"
@@ -232,7 +230,7 @@ export class LixFileService {
 					];
 		const result = await this.client.execute(workspaceId, {
 			branchId,
-			sql: `SELECT path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE ${prefixClause}LOWER(path) LIKE $1 ORDER BY path LIMIT ${boundedLimit}`,
+			sql: `SELECT path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE ${prefixClause}LOWER(path) LIKE $1 ORDER BY path`,
 			params,
 		});
 		return result.rows.map(
@@ -289,13 +287,26 @@ export class LixFileService {
 		const bytes = utf8Bytes(content);
 		assertTextFileSize(bytes.length);
 
-		if (expectedRevision === undefined) {
-			if (await this.entryExists(workspaceId, branchId, path)) {
-				throw new FileServiceError(
-					"already_exists",
-					`An entry already exists at ${path}. Read it and provide its revision to replace it.`,
-				);
+		if (
+			expectedRevision === undefined &&
+			(await this.entryExists(workspaceId, branchId, path))
+		) {
+			try {
+				expectedRevision = (
+					await this.loadEntrySummary(workspaceId, branchId, path, "file")
+				).revision;
+			} catch (caught) {
+				if (caught instanceof FileServiceError && caught.code === "not_found") {
+					throw new FileServiceError(
+						"already_exists",
+						`A directory already exists at ${path}/.`,
+					);
+				}
+				throw caught;
 			}
+		}
+
+		if (expectedRevision === undefined) {
 			await this.withAgentReview(workspaceId, branchId, () =>
 				this.client.execute(workspaceId, {
 					branchId,

@@ -232,15 +232,9 @@
 					"type": "string",
 					"minLength": 1,
 					"maxLength": 1024
-				},
-				"limit": {
-					"default": 50,
-					"type": "integer",
-					"minimum": 1,
-					"maximum": 100
 				}
 			},
-			"required": ["workspace_id", "branch_id", "query", "under_path", "limit"],
+			"required": ["workspace_id", "branch_id", "query"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -383,13 +377,7 @@
 					"maximum": 1000
 				}
 			},
-			"required": [
-				"workspace_id",
-				"branch_id",
-				"path",
-				"start_line",
-				"line_count"
-			],
+			"required": ["workspace_id", "branch_id", "path"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -505,7 +493,7 @@
 	{
 		"name": "write_file",
 		"title": "Create or replace text file",
-		"description": "Create a UTF-8 text file, or replace an existing file only when expected_revision matches.",
+		"description": "Create or replace a UTF-8 text file. When expected_revision is omitted, an existing file is replaced using its current revision; when provided, replacement succeeds only if it matches.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -684,7 +672,7 @@
 								"type": "boolean"
 							}
 						},
-						"required": ["old_text", "new_text", "replace_all"],
+						"required": ["old_text", "new_text"],
 						"additionalProperties": false
 					}
 				}
@@ -940,12 +928,14 @@
 				"source_path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024
+					"maxLength": 1024,
+					"description": "Canonical absolute source path. Directory paths must end in /; file paths must not."
 				},
 				"destination_path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024
+					"maxLength": 1024,
+					"description": "Canonical absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not."
 				},
 				"expected_revision": {
 					"type": "string",
@@ -1082,7 +1072,8 @@
 				"path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024
+					"maxLength": 1024,
+					"description": "Canonical absolute entry path. Directory paths must end in /; file paths must not."
 				},
 				"expected_revision": {
 					"type": "string",
@@ -1094,7 +1085,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": ["workspace_id", "branch_id", "path", "recursive"],
+			"required": ["workspace_id", "branch_id", "path"],
 			"additionalProperties": false
 		},
 		"securitySchemes": [
@@ -1249,7 +1240,7 @@
 					}
 				}
 			},
-			"required": ["workspace_id", "branch_id", "sql", "params"],
+			"required": ["workspace_id", "branch_id", "sql"],
 			"additionalProperties": false
 		},
 		"securitySchemes": [
