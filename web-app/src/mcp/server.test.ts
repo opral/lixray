@@ -149,7 +149,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			]);
 			assert.ok(
 				tool.outputSchema,
-				`${tool.name} should expose an output schema`,
+				`${String(tool.name)} should expose an output schema`,
 			);
 		}
 		for (const name of [
