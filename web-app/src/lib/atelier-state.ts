@@ -21,12 +21,21 @@ export function createWorkspaceSessionStateStore(args: {
 	readonly workspaceId: string;
 	readonly storage?: Storage;
 }): AtelierSessionStateStore {
-	const storage = args.storage ?? window.sessionStorage;
-	const key = namespacedSessionKey("shell", SESSION_STATE_VERSION, args);
-	const value = readSessionJson(storage, key);
+	const storage = args.storage ?? window.localStorage;
+	const legacyStorage = args.storage ? null : window.sessionStorage;
+	const key = namespacedAtelierStateKey("shell", SESSION_STATE_VERSION, args);
+	const value = readStoredJson(storage, key);
 	let snapshot: AtelierSessionUiState | null = value
 		? coerceAtelierSessionUiState(value)
 		: null;
+	if (!snapshot && legacyStorage) {
+		const legacyValue = readStoredJson(legacyStorage, key);
+		if (legacyValue) {
+			snapshot = coerceAtelierSessionUiState(legacyValue);
+			storage.setItem(key, JSON.stringify(snapshot));
+		}
+	}
+	legacyStorage?.removeItem(key);
 	const listeners = new Set<() => void>();
 	return {
 		getSnapshot: () => snapshot,
@@ -120,14 +129,14 @@ export function createWorkspacePreferencesStore(args: {
 	const client = args.client;
 	if (!client) {
 		const storage = args.storage ?? window.sessionStorage;
-		const key = namespacedSessionKey(
+		const key = namespacedAtelierStateKey(
 			"preferences",
 			PREFERENCES_STATE_VERSION,
 			args,
 		);
 		return {
 			load: () => {
-				const value = readSessionJson(storage, key);
+				const value = readStoredJson(storage, key);
 				return Promise.resolve(
 					value ? coerceAtelierUserPreferences(value) : null,
 				);
@@ -183,7 +192,7 @@ export function createWorkspaceReviewStatusStore(args: {
 		(client
 			? (args.durableStorage ?? window.localStorage)
 			: window.sessionStorage);
-	const key = namespacedSessionKey("reviews", REVIEW_STATE_VERSION, args);
+	const key = namespacedAtelierStateKey("reviews", REVIEW_STATE_VERSION, args);
 	const localReviewIds = (branchId: string) =>
 		readReviewState(storage, key)
 			.resolutions.filter((review) => review.branchId === branchId)
@@ -271,7 +280,7 @@ type StoredReviewState = {
 };
 
 function readReviewState(storage: Storage, key: string): StoredReviewState {
-	const value = readSessionJson(storage, key);
+	const value = readStoredJson(storage, key);
 	if (!value || typeof value !== "object" || Array.isArray(value)) {
 		return { resolutions: [], pending: [] };
 	}
@@ -313,7 +322,7 @@ function reviewResolutionKey(review: AtelierReviewResolution): string {
 	return JSON.stringify([review.branchId, review.reviewId, review.fileId]);
 }
 
-function namespacedSessionKey(
+function namespacedAtelierStateKey(
 	family: "shell" | "preferences" | "reviews",
 	version: number,
 	args: { readonly userId: string; readonly workspaceId: string },
@@ -321,7 +330,7 @@ function namespacedSessionKey(
 	return `lixray.atelier.${family}.v${version}:${args.userId}:${args.workspaceId}`;
 }
 
-function readSessionJson(storage: Storage, key: string): unknown {
+function readStoredJson(storage: Storage, key: string): unknown {
 	const encoded = storage.getItem(key);
 	if (!encoded) return null;
 	try {
