@@ -51,12 +51,8 @@ const oauthSecuritySchemes: Array<McpSecurityScheme> = [
 ];
 
 const uuid = z.uuid().describe("Workspace UUID");
-const branchId = z
-	.string()
-	.trim()
-	.min(1)
-	.max(200)
-	.describe("Existing Lix branch ID");
+const branchId = z.uuid().describe("Lix branch UUID");
+const revisionId = z.uuid().describe("Lix revision UUID");
 const absolutePath = z.string().min(1).max(1024);
 const executeSqlText = z.string().trim().min(1).max(100_000);
 const wireValue = z.discriminatedUnion("kind", [
@@ -68,6 +64,65 @@ const wireValue = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("blob"), base64: z.string() }).strict(),
 	z.object({ kind: z.literal("json"), value: z.unknown() }).strict(),
 ]);
+const entrySummaryOutput = z
+	.object({
+		kind: z.enum(["file", "directory"]),
+		path: absolutePath,
+		name: z.string(),
+		revision: revisionId,
+		updatedAt: z.string(),
+		size: z.number().int().nonnegative().nullable().optional(),
+	})
+	.strict();
+const toolErrorOutput = z
+	.object({
+		error: z
+			.object({
+				code: z.string(),
+				message: z.string(),
+				details: z.record(z.string(), z.unknown()).optional(),
+			})
+			.strict(),
+	})
+	.strict();
+const listDirectoryOutput = z.union([
+	z
+		.object({ path: absolutePath, entries: z.array(entrySummaryOutput) })
+		.strict(),
+	toolErrorOutput,
+]);
+const findFilesOutput = z.union([
+	z.object({ files: z.array(entrySummaryOutput) }).strict(),
+	toolErrorOutput,
+]);
+const fileSnapshotOutput = z.union([
+	z
+		.object({
+			path: absolutePath,
+			content: z.string(),
+			size: z.number().int().nonnegative(),
+			revision: revisionId,
+			updatedAt: z.string(),
+			totalLines: z.number().int().nonnegative(),
+			startLine: z.number().int().nonnegative(),
+			endLine: z.number().int().nonnegative(),
+			hasMore: z.boolean(),
+		})
+		.strict(),
+	toolErrorOutput,
+]);
+const fileEntryOutput = z.union([
+	z.object({ file: entrySummaryOutput }).strict(),
+	toolErrorOutput,
+]);
+const directoryEntryOutput = z.union([
+	z.object({ directory: entrySummaryOutput }).strict(),
+	toolErrorOutput,
+]);
+const movedEntryOutput = z.union([
+	z.object({ entry: entrySummaryOutput }).strict(),
+	toolErrorOutput,
+]);
 
 interface ToolDefinition {
 	descriptor: {
@@ -75,11 +130,13 @@ interface ToolDefinition {
 		title: string;
 		description: string;
 		inputSchema: Record<string, unknown>;
+		outputSchema?: Record<string, unknown>;
 		securitySchemes: Array<McpSecurityScheme>;
 		annotations: ToolAnnotations;
 		_meta: Record<string, unknown>;
 	};
 	schema: z.ZodType<Record<string, unknown>>;
+	outputSchema?: z.ZodType<Record<string, unknown>>;
 	call(args: Record<string, unknown>): Promise<unknown>;
 }
 
@@ -92,7 +149,7 @@ export function createLixrayMcpServer(
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"Use LixRay tools to work with private workspace files. First list workspaces and branches. Always read an existing entry and use its revision before editing, moving, replacing, or deleting it. Never guess IDs or revisions. The execute tool runs raw Lix SQL and may bypass file safeguards; use it only when the user requests SQL or the file tools cannot perform the task.",
+				"Use LixRay tools to work with workspace files. Freely make changes, as the user can review all changes in the UI. Never guess UUIDs.",
 		},
 	);
 	const tools = buildTools(
@@ -139,7 +196,18 @@ export function createLixrayMcpServer(
 				? parsed.data.workspace_id
 				: undefined;
 		try {
-			const structuredContent = await tool.call(parsed.data);
+			const rawStructuredContent = asStructuredContent(
+				await tool.call(parsed.data),
+			);
+			const parsedOutput = tool.outputSchema?.safeParse(rawStructuredContent);
+			if (parsedOutput && !parsedOutput.success) {
+				throw new Error(
+					`${tool.descriptor.name} returned invalid structured output: ${z.prettifyError(parsedOutput.error)}`,
+				);
+			}
+			const structuredContent = parsedOutput?.success
+				? parsedOutput.data
+				: rawStructuredContent;
 			observeToolCall(options.onToolCall, startedAt, {
 				toolName: tool.descriptor.name,
 				outcome: "success",
@@ -147,7 +215,7 @@ export function createLixrayMcpServer(
 				...(sql ? { sql } : {}),
 			});
 			return {
-				structuredContent: asStructuredContent(structuredContent),
+				structuredContent,
 				content: [
 					{
 						type: "text" as const,
@@ -330,6 +398,7 @@ function buildTools(
 		schema: T,
 		annotations: ToolAnnotations,
 		call: (args: z.output<T>) => Promise<unknown>,
+		outputSchema?: z.ZodType<Record<string, unknown>>,
 	) =>
 		createTool(
 			name,
@@ -339,6 +408,7 @@ function buildTools(
 			annotations,
 			securitySchemes,
 			call,
+			outputSchema,
 		);
 	return [
 		tool(
@@ -352,11 +422,13 @@ function buildTools(
 		tool(
 			"list_branches",
 			"List branches",
-			"List existing Lix branches in one accessible workspace.",
+			"List visible, UUID-addressable Lix branches in one accessible workspace.",
 			z.object({ workspace_id: uuid }).strict(),
 			readAnnotations(),
 			async ({ workspace_id }) => ({
-				branches: await service.listBranches(String(workspace_id)),
+				branches: (await service.listBranches(String(workspace_id))).filter(
+					(branch) => !branch.hidden && branchId.safeParse(branch.id).success,
+				),
 			}),
 		),
 		tool(
@@ -379,6 +451,7 @@ function buildTools(
 					String(path),
 				),
 			}),
+			listDirectoryOutput,
 		),
 		tool(
 			"find_files",
@@ -403,6 +476,7 @@ function buildTools(
 					Number(limit),
 				),
 			}),
+			findFilesOutput,
 		),
 		tool(
 			"read_file",
@@ -434,6 +508,7 @@ function buildTools(
 					Number(start_line),
 					Number(line_count),
 				),
+			fileSnapshotOutput,
 		),
 		tool(
 			"write_file",
@@ -445,7 +520,7 @@ function buildTools(
 					branch_id: branchId,
 					path: absolutePath,
 					content: z.string(),
-					expected_revision: z.string().min(1).optional(),
+					expected_revision: revisionId.optional(),
 				})
 				.strict(),
 			writeAnnotations(false, false),
@@ -466,17 +541,18 @@ function buildTools(
 						: String(expected_revision),
 				),
 			}),
+			fileEntryOutput,
 		),
 		tool(
 			"edit_file",
 			"Edit text file",
-			"Apply exact text replacements to a UTF-8 file using its current revision.",
+			"Apply exact text replacements to a UTF-8 file.",
 			z
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
 					path: absolutePath,
-					expected_revision: z.string().min(1),
+					expected_revision: revisionId.optional(),
 					edits: z
 						.array(
 							z
@@ -497,7 +573,9 @@ function buildTools(
 					String(workspace_id),
 					String(branch_id),
 					String(path),
-					String(expected_revision),
+					expected_revision === undefined
+						? undefined
+						: String(expected_revision),
 					(
 						edits as Array<{
 							old_text: string;
@@ -511,6 +589,7 @@ function buildTools(
 					})),
 				),
 			}),
+			fileEntryOutput,
 		),
 		tool(
 			"create_directory",
@@ -531,18 +610,19 @@ function buildTools(
 					String(path),
 				),
 			}),
+			directoryEntryOutput,
 		),
 		tool(
 			"move_entry",
 			"Move file or directory",
-			"Move or rename an entry using its revision. Existing destinations are never overwritten.",
+			"Move or rename an entry. Existing destinations are never overwritten.",
 			z
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
 					source_path: absolutePath,
 					destination_path: absolutePath,
-					expected_revision: z.string().min(1),
+					expected_revision: revisionId.optional(),
 				})
 				.strict(),
 			writeAnnotations(false, false),
@@ -558,20 +638,23 @@ function buildTools(
 					String(branch_id),
 					String(source_path),
 					String(destination_path),
-					String(expected_revision),
+					expected_revision === undefined
+						? undefined
+						: String(expected_revision),
 				),
 			}),
+			movedEntryOutput,
 		),
 		tool(
 			"delete_entry",
 			"Delete file or directory",
-			"Permanently delete an entry at its current revision. Directories require recursive=true and remove their entire subtree.",
+			"Permanently delete an entry. Directories require recursive=true and remove their entire subtree.",
 			z
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
 					path: absolutePath,
-					expected_revision: z.string().min(1),
+					expected_revision: revisionId.optional(),
 					recursive: z.boolean().optional().default(false),
 				})
 				.strict(),
@@ -581,7 +664,9 @@ function buildTools(
 					String(workspace_id),
 					String(branch_id),
 					String(path),
-					String(expected_revision),
+					expected_revision === undefined
+						? undefined
+						: String(expected_revision),
 					Boolean(recursive),
 				),
 		),
@@ -617,13 +702,22 @@ function createTool<T extends z.ZodType<Record<string, unknown>>>(
 	annotations: ToolAnnotations,
 	securitySchemes: Array<McpSecurityScheme>,
 	call: (args: z.output<T>) => Promise<unknown>,
+	outputSchema?: z.ZodType<Record<string, unknown>>,
 ): ToolDefinition {
 	return {
 		descriptor: {
 			name,
 			title,
 			description,
-			inputSchema: z.toJSONSchema(schema),
+			inputSchema: mcpJsonSchema(schema),
+			...(outputSchema
+				? {
+						outputSchema: {
+							...mcpJsonSchema(outputSchema),
+							type: "object" as const,
+						},
+					}
+				: {}),
 			securitySchemes: securitySchemes.map(cloneSecurityScheme),
 			annotations,
 			_meta: {
@@ -631,8 +725,26 @@ function createTool<T extends z.ZodType<Record<string, unknown>>>(
 			},
 		},
 		schema,
+		...(outputSchema ? { outputSchema } : {}),
 		call: (args) => call(args as z.output<T>),
 	};
+}
+
+function mcpJsonSchema(schema: z.ZodType): Record<string, unknown> {
+	const jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>;
+	removeUuidPatterns(jsonSchema);
+	return jsonSchema;
+}
+
+function removeUuidPatterns(value: unknown): void {
+	if (!value || typeof value !== "object") return;
+	if (Array.isArray(value)) {
+		for (const item of value) removeUuidPatterns(item);
+		return;
+	}
+	const object = value as Record<string, unknown>;
+	if (object.format === "uuid") delete object.pattern;
+	for (const child of Object.values(object)) removeUuidPatterns(child);
 }
 
 function cloneSecurityScheme(scheme: McpSecurityScheme): McpSecurityScheme {

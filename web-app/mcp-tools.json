@@ -1,0 +1,1276 @@
+[
+	{
+		"name": "list_workspaces",
+		"title": "List workspaces",
+		"description": "List the LixRay workspaces the signed-in user can access.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {},
+			"additionalProperties": false
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"openWorldHint": false,
+			"idempotentHint": true
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	},
+	{
+		"name": "list_branches",
+		"title": "List branches",
+		"description": "List visible, UUID-addressable Lix branches in one accessible workspace.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"workspace_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Workspace UUID"
+				}
+			},
+			"required": ["workspace_id"],
+			"additionalProperties": false
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"openWorldHint": false,
+			"idempotentHint": true
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	},
+	{
+		"name": "list_directory",
+		"title": "List directory",
+		"description": "List the immediate files and directories at an absolute directory path.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"workspace_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Workspace UUID"
+				},
+				"branch_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix branch UUID"
+				},
+				"path": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 1024,
+					"description": "Absolute directory path ending in /"
+				}
+			},
+			"required": ["workspace_id", "branch_id", "path"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"path": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 1024
+						},
+						"entries": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"enum": ["file", "directory"]
+									},
+									"path": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 1024
+									},
+									"name": {
+										"type": "string"
+									},
+									"revision": {
+										"type": "string",
+										"format": "uuid",
+										"description": "Lix revision UUID"
+									},
+									"updatedAt": {
+										"type": "string"
+									},
+									"size": {
+										"anyOf": [
+											{
+												"type": "integer",
+												"minimum": 0,
+												"maximum": 9007199254740991
+											},
+											{
+												"type": "null"
+											}
+										]
+									}
+								},
+								"required": ["kind", "path", "name", "revision", "updatedAt"],
+								"additionalProperties": false
+							}
+						}
+					},
+					"required": ["path", "entries"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"error": {
+							"type": "object",
+							"properties": {
+								"code": {
+									"type": "string"
+								},
+								"message": {
+									"type": "string"
+								},
+								"details": {
+									"type": "object",
+									"propertyNames": {
+										"type": "string"
+									},
+									"additionalProperties": {}
+								}
+							},
+							"required": ["code", "message"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["error"],
+					"additionalProperties": false
+				}
+			],
+			"type": "object"
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"openWorldHint": false,
+			"idempotentHint": true
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	},
+	{
+		"name": "find_files",
+		"title": "Find files",
+		"description": "Find files by path or name. This does not search file contents.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"workspace_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Workspace UUID"
+				},
+				"branch_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix branch UUID"
+				},
+				"query": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 100
+				},
+				"under_path": {
+					"default": "/",
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 1024
+				},
+				"limit": {
+					"default": 50,
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 100
+				}
+			},
+			"required": ["workspace_id", "branch_id", "query", "under_path", "limit"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"files": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"enum": ["file", "directory"]
+									},
+									"path": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 1024
+									},
+									"name": {
+										"type": "string"
+									},
+									"revision": {
+										"type": "string",
+										"format": "uuid",
+										"description": "Lix revision UUID"
+									},
+									"updatedAt": {
+										"type": "string"
+									},
+									"size": {
+										"anyOf": [
+											{
+												"type": "integer",
+												"minimum": 0,
+												"maximum": 9007199254740991
+											},
+											{
+												"type": "null"
+											}
+										]
+									}
+								},
+								"required": ["kind", "path", "name", "revision", "updatedAt"],
+								"additionalProperties": false
+							}
+						}
+					},
+					"required": ["files"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"error": {
+							"type": "object",
+							"properties": {
+								"code": {
+									"type": "string"
+								},
+								"message": {
+									"type": "string"
+								},
+								"details": {
+									"type": "object",
+									"propertyNames": {
+										"type": "string"
+									},
+									"additionalProperties": {}
+								}
+							},
+							"required": ["code", "message"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["error"],
+					"additionalProperties": false
+				}
+			],
+			"type": "object"
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"openWorldHint": false,
+			"idempotentHint": true
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	},
+	{
+		"name": "read_file",
+		"title": "Read text file",
+		"description": "Read a page of a UTF-8 text file and return its current revision for safe edits.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"workspace_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Workspace UUID"
+				},
+				"branch_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix branch UUID"
+				},
+				"path": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 1024,
+					"description": "Absolute file path without a trailing /"
+				},
+				"start_line": {
+					"default": 1,
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 9007199254740991
+				},
+				"line_count": {
+					"default": 400,
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 1000
+				}
+			},
+			"required": [
+				"workspace_id",
+				"branch_id",
+				"path",
+				"start_line",
+				"line_count"
+			],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"path": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 1024
+						},
+						"content": {
+							"type": "string"
+						},
+						"size": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 9007199254740991
+						},
+						"revision": {
+							"type": "string",
+							"format": "uuid",
+							"description": "Lix revision UUID"
+						},
+						"updatedAt": {
+							"type": "string"
+						},
+						"totalLines": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 9007199254740991
+						},
+						"startLine": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 9007199254740991
+						},
+						"endLine": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 9007199254740991
+						},
+						"hasMore": {
+							"type": "boolean"
+						}
+					},
+					"required": [
+						"path",
+						"content",
+						"size",
+						"revision",
+						"updatedAt",
+						"totalLines",
+						"startLine",
+						"endLine",
+						"hasMore"
+					],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"error": {
+							"type": "object",
+							"properties": {
+								"code": {
+									"type": "string"
+								},
+								"message": {
+									"type": "string"
+								},
+								"details": {
+									"type": "object",
+									"propertyNames": {
+										"type": "string"
+									},
+									"additionalProperties": {}
+								}
+							},
+							"required": ["code", "message"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["error"],
+					"additionalProperties": false
+				}
+			],
+			"type": "object"
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"openWorldHint": false,
+			"idempotentHint": true
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	},
+	{
+		"name": "write_file",
+		"title": "Create or replace text file",
+		"description": "Create a UTF-8 text file, or replace an existing file only when expected_revision matches.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"workspace_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Workspace UUID"
+				},
+				"branch_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix branch UUID"
+				},
+				"path": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 1024
+				},
+				"content": {
+					"type": "string"
+				},
+				"expected_revision": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix revision UUID"
+				}
+			},
+			"required": ["workspace_id", "branch_id", "path", "content"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"file": {
+							"type": "object",
+							"properties": {
+								"kind": {
+									"type": "string",
+									"enum": ["file", "directory"]
+								},
+								"path": {
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 1024
+								},
+								"name": {
+									"type": "string"
+								},
+								"revision": {
+									"type": "string",
+									"format": "uuid",
+									"description": "Lix revision UUID"
+								},
+								"updatedAt": {
+									"type": "string"
+								},
+								"size": {
+									"anyOf": [
+										{
+											"type": "integer",
+											"minimum": 0,
+											"maximum": 9007199254740991
+										},
+										{
+											"type": "null"
+										}
+									]
+								}
+							},
+							"required": ["kind", "path", "name", "revision", "updatedAt"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["file"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"error": {
+							"type": "object",
+							"properties": {
+								"code": {
+									"type": "string"
+								},
+								"message": {
+									"type": "string"
+								},
+								"details": {
+									"type": "object",
+									"propertyNames": {
+										"type": "string"
+									},
+									"additionalProperties": {}
+								}
+							},
+							"required": ["code", "message"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["error"],
+					"additionalProperties": false
+				}
+			],
+			"type": "object"
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"openWorldHint": false,
+			"idempotentHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	},
+	{
+		"name": "edit_file",
+		"title": "Edit text file",
+		"description": "Apply exact text replacements to a UTF-8 file.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"workspace_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Workspace UUID"
+				},
+				"branch_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix branch UUID"
+				},
+				"path": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 1024
+				},
+				"expected_revision": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix revision UUID"
+				},
+				"edits": {
+					"minItems": 1,
+					"maxItems": 50,
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"old_text": {
+								"type": "string",
+								"minLength": 1
+							},
+							"new_text": {
+								"type": "string"
+							},
+							"replace_all": {
+								"default": false,
+								"type": "boolean"
+							}
+						},
+						"required": ["old_text", "new_text", "replace_all"],
+						"additionalProperties": false
+					}
+				}
+			},
+			"required": ["workspace_id", "branch_id", "path", "edits"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"file": {
+							"type": "object",
+							"properties": {
+								"kind": {
+									"type": "string",
+									"enum": ["file", "directory"]
+								},
+								"path": {
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 1024
+								},
+								"name": {
+									"type": "string"
+								},
+								"revision": {
+									"type": "string",
+									"format": "uuid",
+									"description": "Lix revision UUID"
+								},
+								"updatedAt": {
+									"type": "string"
+								},
+								"size": {
+									"anyOf": [
+										{
+											"type": "integer",
+											"minimum": 0,
+											"maximum": 9007199254740991
+										},
+										{
+											"type": "null"
+										}
+									]
+								}
+							},
+							"required": ["kind", "path", "name", "revision", "updatedAt"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["file"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"error": {
+							"type": "object",
+							"properties": {
+								"code": {
+									"type": "string"
+								},
+								"message": {
+									"type": "string"
+								},
+								"details": {
+									"type": "object",
+									"propertyNames": {
+										"type": "string"
+									},
+									"additionalProperties": {}
+								}
+							},
+							"required": ["code", "message"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["error"],
+					"additionalProperties": false
+				}
+			],
+			"type": "object"
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"openWorldHint": false,
+			"idempotentHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	},
+	{
+		"name": "create_directory",
+		"title": "Create directory",
+		"description": "Create a directory at a canonical absolute path ending in /.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"workspace_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Workspace UUID"
+				},
+				"branch_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix branch UUID"
+				},
+				"path": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 1024
+				}
+			},
+			"required": ["workspace_id", "branch_id", "path"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"directory": {
+							"type": "object",
+							"properties": {
+								"kind": {
+									"type": "string",
+									"enum": ["file", "directory"]
+								},
+								"path": {
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 1024
+								},
+								"name": {
+									"type": "string"
+								},
+								"revision": {
+									"type": "string",
+									"format": "uuid",
+									"description": "Lix revision UUID"
+								},
+								"updatedAt": {
+									"type": "string"
+								},
+								"size": {
+									"anyOf": [
+										{
+											"type": "integer",
+											"minimum": 0,
+											"maximum": 9007199254740991
+										},
+										{
+											"type": "null"
+										}
+									]
+								}
+							},
+							"required": ["kind", "path", "name", "revision", "updatedAt"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["directory"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"error": {
+							"type": "object",
+							"properties": {
+								"code": {
+									"type": "string"
+								},
+								"message": {
+									"type": "string"
+								},
+								"details": {
+									"type": "object",
+									"propertyNames": {
+										"type": "string"
+									},
+									"additionalProperties": {}
+								}
+							},
+							"required": ["code", "message"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["error"],
+					"additionalProperties": false
+				}
+			],
+			"type": "object"
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"openWorldHint": false,
+			"idempotentHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	},
+	{
+		"name": "move_entry",
+		"title": "Move file or directory",
+		"description": "Move or rename an entry. Existing destinations are never overwritten.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"workspace_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Workspace UUID"
+				},
+				"branch_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix branch UUID"
+				},
+				"source_path": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 1024
+				},
+				"destination_path": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 1024
+				},
+				"expected_revision": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix revision UUID"
+				}
+			},
+			"required": [
+				"workspace_id",
+				"branch_id",
+				"source_path",
+				"destination_path"
+			],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"entry": {
+							"type": "object",
+							"properties": {
+								"kind": {
+									"type": "string",
+									"enum": ["file", "directory"]
+								},
+								"path": {
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 1024
+								},
+								"name": {
+									"type": "string"
+								},
+								"revision": {
+									"type": "string",
+									"format": "uuid",
+									"description": "Lix revision UUID"
+								},
+								"updatedAt": {
+									"type": "string"
+								},
+								"size": {
+									"anyOf": [
+										{
+											"type": "integer",
+											"minimum": 0,
+											"maximum": 9007199254740991
+										},
+										{
+											"type": "null"
+										}
+									]
+								}
+							},
+							"required": ["kind", "path", "name", "revision", "updatedAt"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["entry"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"error": {
+							"type": "object",
+							"properties": {
+								"code": {
+									"type": "string"
+								},
+								"message": {
+									"type": "string"
+								},
+								"details": {
+									"type": "object",
+									"propertyNames": {
+										"type": "string"
+									},
+									"additionalProperties": {}
+								}
+							},
+							"required": ["code", "message"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["error"],
+					"additionalProperties": false
+				}
+			],
+			"type": "object"
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"openWorldHint": false,
+			"idempotentHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	},
+	{
+		"name": "delete_entry",
+		"title": "Delete file or directory",
+		"description": "Permanently delete an entry. Directories require recursive=true and remove their entire subtree.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"workspace_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Workspace UUID"
+				},
+				"branch_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix branch UUID"
+				},
+				"path": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 1024
+				},
+				"expected_revision": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix revision UUID"
+				},
+				"recursive": {
+					"default": false,
+					"type": "boolean"
+				}
+			},
+			"required": ["workspace_id", "branch_id", "path", "recursive"],
+			"additionalProperties": false
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"openWorldHint": false,
+			"idempotentHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	},
+	{
+		"name": "execute",
+		"title": "Execute raw Lix SQL",
+		"description": "Execute caller-provided Lix SQL against an authorized workspace branch. SQL can read or mutate any SQL-accessible branch data and bypasses file-tool safeguards.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"workspace_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Workspace UUID"
+				},
+				"branch_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Lix branch UUID"
+				},
+				"sql": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 100000
+				},
+				"params": {
+					"default": [],
+					"maxItems": 1000,
+					"type": "array",
+					"items": {
+						"oneOf": [
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"const": "null"
+									},
+									"value": {
+										"type": "null"
+									}
+								},
+								"required": ["kind"],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"const": "bool"
+									},
+									"value": {
+										"type": "boolean"
+									}
+								},
+								"required": ["kind", "value"],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"const": "int"
+									},
+									"value": {
+										"type": "integer",
+										"minimum": -9007199254740991,
+										"maximum": 9007199254740991
+									}
+								},
+								"required": ["kind", "value"],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"const": "float"
+									},
+									"value": {
+										"type": "number"
+									}
+								},
+								"required": ["kind", "value"],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"const": "text"
+									},
+									"value": {
+										"type": "string"
+									}
+								},
+								"required": ["kind", "value"],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"const": "blob"
+									},
+									"base64": {
+										"type": "string"
+									}
+								},
+								"required": ["kind", "base64"],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"const": "json"
+									},
+									"value": {}
+								},
+								"required": ["kind", "value"],
+								"additionalProperties": false
+							}
+						]
+					}
+				}
+			},
+			"required": ["workspace_id", "branch_id", "sql", "params"],
+			"additionalProperties": false
+		},
+		"securitySchemes": [
+			{
+				"type": "oauth2",
+				"scopes": ["openid", "email", "profile"]
+			}
+		],
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": true,
+			"openWorldHint": false,
+			"idempotentHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "oauth2",
+					"scopes": ["openid", "email", "profile"]
+				}
+			]
+		}
+	}
+]

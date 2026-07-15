@@ -391,7 +391,7 @@ export class LixFileService {
 		workspaceId: string,
 		branchId: string,
 		rawPath: string,
-		expectedRevision: string,
+		expectedRevision: string | undefined,
 		edits: Array<{ oldText: string; newText: string; replaceAll?: boolean }>,
 	): Promise<EntrySummary> {
 		const path = filePath(rawPath);
@@ -402,7 +402,10 @@ export class LixFileService {
 			);
 		}
 		const file = await this.loadFile(workspaceId, branchId, path);
-		if (file.revision !== expectedRevision) throw conflict(path);
+		if (expectedRevision !== undefined && file.revision !== expectedRevision) {
+			throw conflict(path);
+		}
+		const revision = expectedRevision ?? file.revision;
 		let next = file.content;
 		for (const edit of edits) {
 			if (!edit.oldText) {
@@ -429,7 +432,7 @@ export class LixFileService {
 				? next.split(edit.oldText).join(edit.newText)
 				: next.replace(edit.oldText, edit.newText);
 		}
-		return this.writeFile(workspaceId, branchId, path, next, expectedRevision);
+		return this.writeFile(workspaceId, branchId, path, next, revision);
 	}
 
 	async createDirectory(
@@ -457,7 +460,7 @@ export class LixFileService {
 		branchId: string,
 		rawSourcePath: string,
 		rawDestinationPath: string,
-		expectedRevision: string,
+		expectedRevision: string | undefined,
 	): Promise<EntrySummary> {
 		const kind: EntryKind = rawSourcePath.endsWith("/") ? "directory" : "file";
 		const source = entryPath(rawSourcePath, kind, false);
@@ -474,6 +477,10 @@ export class LixFileService {
 				"A directory cannot be moved inside itself.",
 			);
 		}
+		const revision =
+			expectedRevision ??
+			(await this.loadEntrySummary(workspaceId, branchId, source, kind))
+				.revision;
 		if (await this.entryExists(workspaceId, branchId, destination)) {
 			throw new FileServiceError(
 				"already_exists",
@@ -484,7 +491,7 @@ export class LixFileService {
 			branchId,
 			kind,
 			path: source,
-			expectedRevision,
+			expectedRevision: revision,
 			mutation: { type: "move", destinationPath: destination },
 		});
 		assertMutationApplied(source, outcome, destination);
@@ -495,7 +502,7 @@ export class LixFileService {
 		workspaceId: string,
 		branchId: string,
 		rawPath: string,
-		expectedRevision: string,
+		expectedRevision: string | undefined,
 		recursive = false,
 	): Promise<{ path: string; deleted: true }> {
 		const kind: EntryKind = rawPath.endsWith("/") ? "directory" : "file";
@@ -506,11 +513,14 @@ export class LixFileService {
 				"Directory deletion requires recursive=true because it removes the entire subtree.",
 			);
 		}
+		const revision =
+			expectedRevision ??
+			(await this.loadEntrySummary(workspaceId, branchId, path, kind)).revision;
 		const outcome = await this.client.mutate(workspaceId, {
 			branchId,
 			kind,
 			path,
-			expectedRevision,
+			expectedRevision: revision,
 			mutation: { type: "delete" },
 		});
 		assertMutationApplied(path, outcome);

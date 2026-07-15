@@ -19,7 +19,7 @@
 		"dev:demo": "LIXRAY_WORKER_TARGET=e2e VITE_LIXRAY_DEMO=1 LIXRAY_DEMO=1 LIXRAY_DEMO_WORKSPACE_IDS=00000000-0000-4000-8000-000000000002,00000000-0000-4000-8000-000000000003 pnpm dev",
 		"dev:authless": "pnpm dev:demo",
 		"dev:r2": "SLATEDB_STORAGE=r2 vite dev --port 8787",
-		"build": "pnpm run routes:generate && vite build",
+		"build": "pnpm run routes:generate && pnpm run mcp:tools:generate && vite build",
 		"build:preview": "LIXRAY_WORKER_TARGET=preview VITE_LIXRAY_DEMO=1 LIXRAY_DEMO=1 pnpm build && pnpm bundle:preview",
 		"bundle:preview": "node ./scripts/clean-preview-bundle.mjs && wrangler deploy --dry-run --config ./wrangler.preview-runtime.jsonc --outdir ./dist/preview-worker",
 		"preview": "vite preview",
@@ -32,6 +32,7 @@
 		"test:auth": "node --test --experimental-strip-types src/lib/auth-return-to.test.ts",
 		"test:worker": "node --test --experimental-strip-types src/worker/*.test.ts src/mcp/*.test.ts",
 		"check:mcp": "node scripts/check-mcp-connection.mjs",
+		"mcp:tools:generate": "node --experimental-strip-types scripts/generate-mcp-tools.mjs",
 		"typecheck": "pnpm run routes:generate && tsc --noEmit",
 		"cf-typegen": "wrangler types --config ./wrangler.jsonc"
 	},

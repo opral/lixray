@@ -58,12 +58,15 @@ The MCP server provides eleven data-only tools:
   `delete_entry`
 - raw SQL: `execute`
 
-Every operation names an existing workspace and branch. File-tool calls require
-canonical absolute paths and valid UTF-8 content of at most 1 MiB. Replacements,
-edits, moves, and deletes compare the supplied opaque revision with
-`lixcol_change_id`; stale operations fail without changing the file. Creates and
-moves never overwrite existing destinations, and directory deletion requires
-`recursive=true`. The `execute` tool accepts raw Lix SQL and wire-format
+Every branch-scoped operation names an existing workspace and branch by UUID.
+`list_branches` omits hidden branches and legacy non-UUID IDs, including the
+internal `global` branch. File-tool calls require canonical absolute paths and
+valid UTF-8 content of at most 1 MiB. Replacements, edits, moves, and deletes
+compare an opaque revision UUID with `lixcol_change_id`; stale operations fail
+without changing the file. For edits, moves, and deletes, the revision is
+optional: when omitted, LixRay reads and uses the entry's current revision.
+Creates and moves never overwrite existing destinations, and directory deletion
+requires `recursive=true`. The `execute` tool accepts raw Lix SQL and wire-format
 parameters, is marked destructive, and bypasses these file-tool safeguards.
 
 The `/oauth/consent` page preserves the Google sign-in return path and shows

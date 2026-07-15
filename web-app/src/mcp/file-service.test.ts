@@ -175,6 +175,16 @@ void test("edit_file requires unique exact matches unless replace_all is explici
 	);
 	assert.equal(edited.revision, "rev-4");
 	assert.equal(client.fileText("/edit.txt"), "green green cyan");
+
+	const editedWithoutRevision = await service.editFile(
+		WORKSPACE_ID,
+		BRANCH_ID,
+		"/edit.txt",
+		undefined,
+		[{ oldText: "cyan", newText: "blue" }],
+	);
+	assert.equal(editedWithoutRevision.revision, "rev-5");
+	assert.equal(client.fileText("/edit.txt"), "green green blue");
 });
 
 void test("agent-authenticated edits persist an Atelier review range", async () => {
@@ -264,7 +274,7 @@ void test("agent reviews discard legacy ranges after the Atelier hard cut", asyn
 	assert.equal(ranges[0]?.agent, undefined);
 });
 
-void test("move_entry never overwrites and requires the source revision", async () => {
+void test("move_entry never overwrites and accepts an omitted source revision", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addFile("/source.txt", new TextEncoder().encode("source"), "rev-4");
 	client.addFile("/taken.txt", new TextEncoder().encode("taken"), "rev-2");
@@ -296,14 +306,14 @@ void test("move_entry never overwrites and requires the source revision", async 
 		BRANCH_ID,
 		"/source.txt",
 		"/renamed.txt",
-		"rev-4",
+		undefined,
 	);
 	assert.equal(moved.path, "/renamed.txt");
 	assert.equal(client.fileText("/renamed.txt"), "source");
 	assert.equal(client.hasFile("/source.txt"), false);
 });
 
-void test("directory deletion requires explicit recursive confirmation and a current revision", async () => {
+void test("directory deletion requires recursive confirmation and accepts an omitted revision", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addDirectory("/docs/", "rev-9");
 	client.addFile("/docs/readme.md", new TextEncoder().encode("hello"), "rev-1");
@@ -318,7 +328,13 @@ void test("directory deletion requires explicit recursive confirmation and a cur
 		hasCode("conflict"),
 	);
 	assert.deepEqual(
-		await service.deleteEntry(WORKSPACE_ID, BRANCH_ID, "/docs/", "rev-9", true),
+		await service.deleteEntry(
+			WORKSPACE_ID,
+			BRANCH_ID,
+			"/docs/",
+			undefined,
+			true,
+		),
 		{ path: "/docs/", deleted: true },
 	);
 	assert.equal(client.hasFile("/docs/readme.md"), false);
