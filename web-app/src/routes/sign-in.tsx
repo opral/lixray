@@ -1,16 +1,24 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { DatabaseZap, LogIn } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "~/components/auth-provider";
+import { normalizeAuthReturnTo } from "~/lib/auth-return-to";
 import { localDevCredentials } from "~/lib/supabase";
 
+interface SignInSearch {
+	returnTo?: string;
+}
+
 export const Route = createFileRoute("/sign-in")({
+	validateSearch: (search: Record<string, unknown>): SignInSearch =>
+		typeof search.returnTo === "string" ? { returnTo: search.returnTo } : {},
 	component: SignInPage,
 });
 
 function SignInPage() {
 	const { isLoaded, signInAsLocalDev, signInWithGoogle, user } = useAuth();
-	const navigate = useNavigate();
+	const search = Route.useSearch();
+	const returnTo = normalizeAuthReturnTo(search.returnTo ?? "/");
 	const [error, setError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
 
@@ -20,9 +28,9 @@ function SignInPage() {
 		try {
 			if (localDevCredentials) {
 				await signInAsLocalDev();
-				await navigate({ to: "/" });
+				window.location.replace(returnTo);
 			} else {
-				await signInWithGoogle("/");
+				await signInWithGoogle(returnTo);
 			}
 		} catch (signInError) {
 			setError(
@@ -56,12 +64,12 @@ function SignInPage() {
 					</p>
 				</div>
 				{user && !localDevCredentials ? (
-					<Link
+					<a
 						className="inline-flex min-h-[38px] w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] no-underline transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] min-[801px]:w-auto"
-						to="/"
+						href={returnTo}
 					>
 						Continue to LixRay
-					</Link>
+					</a>
 				) : (
 					<button
 						className="inline-flex min-h-[38px] w-full max-w-[320px] cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] disabled:cursor-not-allowed disabled:opacity-55"

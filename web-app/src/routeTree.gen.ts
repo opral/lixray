@@ -13,6 +13,7 @@ import { Route as WorkspaceRouteImport } from './routes/workspace'
 import { Route as SqlRouteImport } from './routes/sql'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as OpenRouteImport } from './routes/open'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as OauthConsentRouteImport } from './routes/oauth.consent'
@@ -39,6 +40,11 @@ const SignUpRoute = SignUpRouteImport.update({
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OpenRoute = OpenRouteImport.update({
+  id: '/open',
+  path: '/open',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -81,6 +87,7 @@ const AtChar123namespaceChar125WorkspaceFileSplatRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/open': typeof OpenRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRouteWithChildren
   '/sql': typeof SqlRoute
@@ -94,6 +101,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/open': typeof OpenRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRouteWithChildren
   '/sql': typeof SqlRoute
@@ -108,6 +116,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/open': typeof OpenRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRouteWithChildren
   '/sql': typeof SqlRoute
@@ -123,6 +132,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/open'
     | '/sign-in'
     | '/sign-up'
     | '/sql'
@@ -136,6 +146,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/open'
     | '/sign-in'
     | '/sign-up'
     | '/sql'
@@ -149,6 +160,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/open'
     | '/sign-in'
     | '/sign-up'
     | '/sql'
@@ -163,6 +175,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  OpenRoute: typeof OpenRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRouteWithChildren
   SqlRoute: typeof SqlRoute
@@ -201,6 +214,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/open': {
+      id: '/open'
+      path: '/open'
+      fullPath: '/open'
+      preLoaderRoute: typeof OpenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -283,6 +303,7 @@ const AtChar123namespaceChar125WorkspaceRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  OpenRoute: OpenRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRouteWithChildren,
   SqlRoute: SqlRoute,

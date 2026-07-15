@@ -162,6 +162,7 @@ test("PWA manifest opts into the window controls overlay and serves its icons", 
 	const manifest = (await manifestResponse.json()) as {
 		display?: unknown;
 		display_override?: unknown;
+		start_url?: unknown;
 		icons?: Array<{
 			purpose?: unknown;
 			sizes?: unknown;
@@ -169,6 +170,7 @@ test("PWA manifest opts into the window controls overlay and serves its icons", 
 			type?: unknown;
 		}>;
 	};
+	expect(manifest.start_url).toBe("/open");
 	expect(manifest.display_override).toEqual(["window-controls-overlay"]);
 	expect(manifest.display).toBe("standalone");
 	expect(manifest.icons).toEqual([
@@ -203,6 +205,9 @@ test("PWA manifest opts into the window controls overlay and serves its icons", 
 		expect(iconResponse.headers()["content-type"]).toContain("image/png");
 		expect((await iconResponse.body()).byteLength).toBeGreaterThan(0);
 	}
+
+	await page.goto(String(manifest.start_url));
+	await expect(page).toHaveURL(/\/@acme\/launch-q3$/);
 });
 
 test("legacy sign-up routes redirect to Google sign-in", async ({ page }) => {
