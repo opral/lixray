@@ -3,7 +3,7 @@
 	"name": "LixRay",
 	"short_name": "LixRay",
 	"description": "Explore and manage Lix workspaces.",
-	"start_url": "/",
+	"start_url": "/open",
 	"scope": "/",
 	"display_override": ["window-controls-overlay"],
 	"display": "standalone",

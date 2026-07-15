@@ -12,6 +12,7 @@ import { getBrowserSupabaseClient, localDevCredentials } from "~/lib/supabase";
 import type { LixraySupabaseClient } from "~/lib/supabase";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import { isDemoModeEnabled } from "~/lib/demo-client";
+import { normalizeAuthReturnTo } from "~/lib/auth-return-to";
 import { resetTelemetry } from "~/lib/telemetry";
 
 const RETURN_TO_KEY = "lixray.auth.return-to";
@@ -98,7 +99,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 	const signInWithGoogle = useCallback(
 		async (returnTo = "/") => {
 			if (!client) throw new Error("Authentication is still loading");
-			const safeReturnTo = normalizeReturnTo(returnTo);
+			const safeReturnTo = normalizeAuthReturnTo(returnTo);
 			window.sessionStorage.setItem(RETURN_TO_KEY, safeReturnTo);
 			const { error } = await client.auth.signInWithOAuth({
 				provider: "google",
@@ -160,10 +161,5 @@ export function useAuth() {
 export function takeAuthReturnTo(): string {
 	const returnTo = window.sessionStorage.getItem(RETURN_TO_KEY) ?? "/";
 	window.sessionStorage.removeItem(RETURN_TO_KEY);
-	return normalizeReturnTo(returnTo);
-}
-
-function normalizeReturnTo(value: string): string {
-	if (!value.startsWith("/") || value.startsWith("//")) return "/";
-	return value;
+	return normalizeAuthReturnTo(returnTo);
 }
