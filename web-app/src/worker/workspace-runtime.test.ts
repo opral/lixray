@@ -80,6 +80,37 @@ void test("canonical main branch ids work across independent isolates", async ()
 	assert.equal(executeResponse.status, 200);
 });
 
+void test("branch creation rejects ids outside the MCP UUID contract", async () => {
+	let createCalls = 0;
+	const runtime = testRuntime(async () =>
+		fakeBinding({
+			createBranch: async () => {
+				createCalls += 1;
+				throw new Error("createBranch should not be called");
+			},
+		}),
+	);
+	for (const id of ["draft", "99999999-9999-9999-9999-999999999999"]) {
+		const response = await runtime.fetch(
+			WORKSPACE_A,
+			workspaceRequest("/createBranch", {
+				branchId: BRANCH,
+				id,
+				name: "Draft",
+			}),
+		);
+
+		assert.equal(response.status, 400);
+		assert.deepEqual(await response.json(), {
+			error: {
+				code: "LIX_INVALID_ARGUMENT",
+				message: "id must be a UUID",
+			},
+		});
+	}
+	assert.equal(createCalls, 0);
+});
+
 void test("failed canonical branch initialization closes and evicts the runtime", async () => {
 	let opens = 0;
 	let closes = 0;

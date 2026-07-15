@@ -1,5 +1,8 @@
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
 
+const UUID_PATTERN =
+	/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/i;
+
 type NativeValue =
 	| { kind: "null"; value?: null }
 	| { kind: "boolean"; value: boolean }
@@ -627,7 +630,7 @@ async function routeRequest(
 		const body = await requestBody(request);
 		const branchId = requiredString(body, "branchId");
 		const name = requiredString(body, "name");
-		const id = optionalString(body, "id");
+		const id = optionalUuid(body, "id");
 		const fromCommitId = optionalString(body, "fromCommitId");
 		return json(
 			await withSelectedBranch(
@@ -1317,6 +1320,18 @@ function optionalString(
 	if (typeof field !== "string")
 		throw invalidArgument(`${key} must be a string`);
 	return field;
+}
+
+function optionalUuid(
+	value: Record<string, unknown>,
+	key: string,
+): string | undefined {
+	const field = optionalString(value, key);
+	if (field === undefined) return undefined;
+	if (!UUID_PATTERN.test(field)) {
+		throw invalidArgument(`${key} must be a UUID`);
+	}
+	return field.toLowerCase();
 }
 
 function executeOriginKey(value: unknown): string | undefined {

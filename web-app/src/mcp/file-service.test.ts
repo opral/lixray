@@ -103,7 +103,7 @@ void test("text file reads and writes enforce the one MiB byte limit", async () 
 	);
 });
 
-void test("write_file is create-only without a revision and compare-and-swap with one", async () => {
+void test("write_file overwrites the current file without a revision and compare-and-swaps with one", async () => {
 	const client = new MemoryLixRuntimeClient();
 	const service = new LixFileService(client);
 
@@ -115,10 +115,14 @@ void test("write_file is create-only without a revision and compare-and-swap wit
 	);
 	assert.equal(created.path, "/new.txt");
 	assert.equal(created.revision, "rev-1");
-	await assert.rejects(
-		service.writeFile(WORKSPACE_ID, BRANCH_ID, "/new.txt", "overwrite"),
-		hasCode("already_exists"),
+	const overwritten = await service.writeFile(
+		WORKSPACE_ID,
+		BRANCH_ID,
+		"/new.txt",
+		"overwrite",
 	);
+	assert.equal(overwritten.revision, "rev-2");
+	assert.equal(client.fileText("/new.txt"), "overwrite");
 	await assert.rejects(
 		service.writeFile(
 			WORKSPACE_ID,
@@ -135,10 +139,27 @@ void test("write_file is create-only without a revision and compare-and-swap wit
 		BRANCH_ID,
 		"/new.txt",
 		"second",
-		created.revision,
+		overwritten.revision,
 	);
-	assert.equal(replaced.revision, "rev-2");
+	assert.equal(replaced.revision, "rev-3");
 	assert.equal(client.fileText("/new.txt"), "second");
+});
+
+void test("find_files returns every matching file without a result cap", async () => {
+	const client = new MemoryLixRuntimeClient();
+	for (let index = 0; index < 125; index += 1) {
+		client.addFile(
+			`/match-${index.toString().padStart(3, "0")}.txt`,
+			new TextEncoder().encode(String(index)),
+			`rev-${index + 1}`,
+		);
+	}
+	const service = new LixFileService(client);
+
+	const files = await service.findFiles(WORKSPACE_ID, BRANCH_ID, "match-");
+	assert.equal(files.length, 125);
+	assert.equal(files[0]?.path, "/match-000.txt");
+	assert.equal(files.at(-1)?.path, "/match-124.txt");
 });
 
 void test("edit_file requires unique exact matches unless replace_all is explicit", async () => {
@@ -175,6 +196,16 @@ void test("edit_file requires unique exact matches unless replace_all is explici
 	);
 	assert.equal(edited.revision, "rev-4");
 	assert.equal(client.fileText("/edit.txt"), "green green cyan");
+
+	const editedWithoutRevision = await service.editFile(
+		WORKSPACE_ID,
+		BRANCH_ID,
+		"/edit.txt",
+		undefined,
+		[{ oldText: "cyan", newText: "blue" }],
+	);
+	assert.equal(editedWithoutRevision.revision, "rev-5");
+	assert.equal(client.fileText("/edit.txt"), "green green blue");
 });
 
 void test("agent-authenticated edits persist an Atelier review range", async () => {
@@ -264,7 +295,7 @@ void test("agent reviews discard legacy ranges after the Atelier hard cut", asyn
 	assert.equal(ranges[0]?.agent, undefined);
 });
 
-void test("move_entry never overwrites and requires the source revision", async () => {
+void test("move_entry never overwrites and accepts an omitted source revision", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addFile("/source.txt", new TextEncoder().encode("source"), "rev-4");
 	client.addFile("/taken.txt", new TextEncoder().encode("taken"), "rev-2");
@@ -296,14 +327,14 @@ void test("move_entry never overwrites and requires the source revision", async 
 		BRANCH_ID,
 		"/source.txt",
 		"/renamed.txt",
-		"rev-4",
+		undefined,
 	);
 	assert.equal(moved.path, "/renamed.txt");
 	assert.equal(client.fileText("/renamed.txt"), "source");
 	assert.equal(client.hasFile("/source.txt"), false);
 });
 
-void test("directory deletion requires explicit recursive confirmation and a current revision", async () => {
+void test("directory deletion requires recursive confirmation and accepts an omitted revision", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addDirectory("/docs/", "rev-9");
 	client.addFile("/docs/readme.md", new TextEncoder().encode("hello"), "rev-1");
@@ -318,7 +349,13 @@ void test("directory deletion requires explicit recursive confirmation and a cur
 		hasCode("conflict"),
 	);
 	assert.deepEqual(
-		await service.deleteEntry(WORKSPACE_ID, BRANCH_ID, "/docs/", "rev-9", true),
+		await service.deleteEntry(
+			WORKSPACE_ID,
+			BRANCH_ID,
+			"/docs/",
+			undefined,
+			true,
+		),
 		{ path: "/docs/", deleted: true },
 	);
 	assert.equal(client.hasFile("/docs/readme.md"), false);
@@ -485,6 +522,32 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		}
 		if (sql.startsWith("DELETE FROM lix_directory WHERE path = $1")) {
 			return this.delete(this.directories, params, true);
+		}
+		if (
+			sql.startsWith(
+				"SELECT path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE",
+			)
+		) {
+			const pattern = textParam(params[0]);
+			const needle = pattern.slice(1, -1).toLowerCase();
+			const lowerBound = params[1] ? textParam(params[1]) : undefined;
+			const upperBound = params[2] ? textParam(params[2]) : undefined;
+			const rows = [...this.files.entries()]
+				.filter(
+					([path]) =>
+						path.toLowerCase().includes(needle) &&
+						(lowerBound === undefined || path >= lowerBound) &&
+						(upperBound === undefined || path < upperBound),
+				)
+				.sort(([left], [right]) => left.localeCompare(right))
+				.map(([path, file]) => [
+					textValue(path),
+					textValue(nameFromPath(path)),
+					{ kind: "json" as const, value: { size: file.bytes.length } },
+					textValue(file.revision),
+					textValue(UPDATED_AT),
+				]);
+			return result(rows);
 		}
 		if (
 			sql.startsWith(

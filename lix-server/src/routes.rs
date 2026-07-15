@@ -60,12 +60,13 @@ async fn create_branch(
 ) -> Result<Json<CreateBranchResponse>, ApiError> {
     let branch_id = required_non_empty(request.branch_id, "branchId")?;
     let name = required_non_empty(request.name, "name")?;
+    let id = optional_uuid(request.id, "id")?;
     let receipt = state
         .service
         .create_branch(
             branch_id,
             CreateBranchOptions {
-                id: request.id,
+                id,
                 name,
                 from_commit_id: request.from_commit_id,
             },
@@ -301,6 +302,23 @@ fn required_non_empty(value: Option<String>, field: &'static str) -> Result<Stri
         Some(value) if !value.trim().is_empty() => Ok(value),
         _ => Err(ApiError::bad_request(format!("{field} is required"))),
     }
+}
+
+fn optional_uuid(value: Option<String>, field: &'static str) -> Result<Option<String>, ApiError> {
+    value
+        .map(|value| {
+            let id = uuid::Uuid::parse_str(value.trim())
+                .map_err(|_| ApiError::bad_request(format!("{field} must be a UUID")))?;
+            let version = id.get_version_num();
+            if !id.is_nil()
+                && !id.is_max()
+                && (id.get_variant() != uuid::Variant::RFC4122 || !(1..=8).contains(&version))
+            {
+                return Err(ApiError::bad_request(format!("{field} must be a UUID")));
+            }
+            Ok(id.hyphenated().to_string())
+        })
+        .transpose()
 }
 
 fn branch_from_row(row: &Row) -> Result<BranchResponse, ApiError> {
@@ -758,6 +776,7 @@ mod tests {
     async fn create_branch_creates_from_supplied_branch() {
         let app = app().await;
         let branch_id = main_branch_id(app.clone()).await;
+        let draft_id = "44444444-4444-4444-8444-444444444444";
 
         let response = json_request(
             app,
@@ -765,29 +784,54 @@ mod tests {
             "/v1/createBranch",
             json!({
                 "branchId": branch_id,
-                "id": "http-draft",
+                "id": draft_id,
                 "name": "HTTP draft"
             }),
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
         let body: CreateBranchResponse = response_json(response).await;
-        assert_eq!(body.id, "http-draft");
+        assert_eq!(body.id, draft_id);
         assert_eq!(body.name, "HTTP draft");
         assert!(!body.commit_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_branch_rejects_ids_outside_the_mcp_uuid_contract() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+        for id in ["http-draft", "99999999-9999-9999-9999-999999999999"] {
+            let response = json_request(
+                app.clone(),
+                Method::POST,
+                "/v1/createBranch",
+                json!({
+                    "branchId": branch_id,
+                    "id": id,
+                    "name": "HTTP draft"
+                }),
+            )
+            .await;
+
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body: JsonValue = response_json(response).await;
+            assert_eq!(body["error"]["code"], "LIX_INVALID_ARGUMENT");
+            assert_eq!(body["error"]["message"], "id must be a UUID");
+        }
     }
 
     #[tokio::test]
     async fn execute_uses_supplied_branch_context() {
         let app = app().await;
         let main_branch_id = main_branch_id(app.clone()).await;
+        let draft_id = "55555555-5555-4555-8555-555555555555";
         let draft = json_request(
             app.clone(),
             Method::POST,
             "/v1/createBranch",
             json!({
                 "branchId": main_branch_id,
-                "id": "http-branch-context",
+                "id": draft_id,
                 "name": "HTTP branch context"
             }),
         )
@@ -830,7 +874,7 @@ mod tests {
             Method::POST,
             "/v1/execute",
             json!({
-                "branchId": "http-branch-context",
+                "branchId": draft_id,
                 "sql": "SELECT path FROM lix_file WHERE path = $1",
                 "params": [{ "kind": "text", "value": file_path }]
             }),
