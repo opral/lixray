@@ -18,6 +18,7 @@ import {
 	mcpDocumentationResponse,
 	mcpUnauthorizedResponse,
 	protectedResourceMetadataResponse,
+	type McpToolCallObservation,
 } from "./server.ts";
 
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
@@ -66,7 +67,10 @@ void test("MCP documentation distinguishes browser and client authentication", a
 void test("MCP initialize, tools/list, and tools/call expose the authenticated tool contract", async () => {
 	const runtimeClient = new ProtocolLixRuntimeClient();
 	const service = new LixFileService(runtimeClient);
-	const server = createLixrayMcpServer(service);
+	const observations: Array<McpToolCallObservation> = [];
+	const server = createLixrayMcpServer(service, {
+		onToolCall: (observation) => observations.push(observation),
+	});
 	const client = new Client({ name: "lixray-test", version: "1.0.0" });
 	const [clientTransport, serverTransport] =
 		InMemoryTransport.createLinkedPair();
@@ -191,6 +195,111 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			)?.error?.code,
 			"invalid_path",
 		);
+
+		const invalidArguments = await client.callTool({
+			name: "read_file",
+			arguments: {
+				workspace_id: WORKSPACE_ID,
+				branch_id: "main",
+			},
+		});
+		assert.equal(invalidArguments.isError, true);
+		assert.equal(
+			(
+				invalidArguments.structuredContent as
+					| { error?: { code?: string } }
+					| undefined
+			)?.error?.code,
+			"invalid_arguments",
+		);
+
+		const invalidExecuteArguments = await client.callTool({
+			name: "execute",
+			arguments: {
+				workspace_id: WORKSPACE_ID,
+				branch_id: "main",
+				sql: "  SELECT $1  ",
+				params: [{ kind: "text" }],
+			},
+		});
+		assert.equal(invalidExecuteArguments.isError, true);
+		assert.equal(
+			(
+				invalidExecuteArguments.structuredContent as
+					| { error?: { code?: string } }
+					| undefined
+			)?.error?.code,
+			"invalid_arguments",
+		);
+
+		const internalFailure = await client.callTool({
+			name: "execute",
+			arguments: {
+				workspace_id: WORKSPACE_ID,
+				branch_id: "throw-internal-error",
+				sql: "SELECT 1",
+			},
+		});
+		assert.equal(internalFailure.isError, true);
+		assert.equal(
+			(
+				internalFailure.structuredContent as
+					| { error?: { code?: string } }
+					| undefined
+			)?.error?.code,
+			"internal_error",
+		);
+
+		await assert.rejects(
+			client.callTool({ name: "untrusted-secret-tool-name", arguments: {} }),
+			/Unknown tool/,
+		);
+
+		assert.deepEqual(
+			observations.map(({ durationMs, ...observation }) => {
+				assert.ok(Number.isInteger(durationMs));
+				assert.ok(durationMs >= 0);
+				return observation;
+			}),
+			[
+				{ toolName: "list_workspaces", outcome: "success" },
+				{
+					toolName: "execute",
+					outcome: "success",
+					workspaceId: WORKSPACE_ID,
+					sql: "SELECT value FROM lix_key_value WHERE key = $1",
+				},
+				{
+					toolName: "read_file",
+					outcome: "error",
+					errorCode: "invalid_path",
+					workspaceId: WORKSPACE_ID,
+				},
+				{
+					toolName: "read_file",
+					outcome: "error",
+					errorCode: "invalid_arguments",
+				},
+				{
+					toolName: "execute",
+					outcome: "error",
+					errorCode: "invalid_arguments",
+					sql: "SELECT $1",
+				},
+				{
+					toolName: "execute",
+					outcome: "error",
+					errorCode: "internal_error",
+					workspaceId: WORKSPACE_ID,
+					sql: "SELECT 1",
+				},
+				{
+					toolName: "unknown",
+					outcome: "error",
+					errorCode: "unknown_tool",
+				},
+			],
+		);
 	} finally {
 		await client.close();
 		await server.close();
@@ -254,6 +363,9 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 		workspaceId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse> {
+		if (request.branchId === "throw-internal-error") {
+			throw new Error("Unexpected runtime failure");
+		}
 		this.executeRequests.push({ workspaceId, request });
 		return {
 			columns: ["value"],

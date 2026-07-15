@@ -211,6 +211,70 @@ void test("authenticated MCP initialize reaches the MCP transport before fallbac
 	assert.ok(payload.result.capabilities);
 });
 
+void test("authenticated MCP telemetry receives identity and flushes through waitUntil", async () => {
+	let waitedFor: Promise<unknown> | undefined;
+	let flushes = 0;
+	const observations: Array<unknown> = [];
+	const executionContext = {
+		waitUntil: (promise: Promise<unknown>) => {
+			waitedFor = promise;
+		},
+		passThroughOnException: () => undefined,
+		props: {},
+	} as unknown as ExecutionContext;
+	const testEnv = env({
+		extra: {
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_HOST: "https://posthog.example",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+	});
+
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		testEnv,
+		{
+			authenticateMcp: authenticatedMcp(),
+			executionContext,
+			createMcpTelemetry: (telemetryEnv, identity) => {
+				assert.equal(telemetryEnv.POSTHOG_PROJECT_TOKEN, "project-token");
+				assert.deepEqual(identity, {
+					userId: "user-123",
+					clientId: "chatgpt-client",
+					isDemo: undefined,
+				});
+				return {
+					onToolCall: (observation) => observations.push(observation),
+					flush: async () => {
+						flushes += 1;
+					},
+				};
+			},
+			mcpTransport: async (_request, _service, context, options) => {
+				assert.equal(context, executionContext);
+				options.onToolCall?.({
+					toolName: "list_workspaces",
+					outcome: "success",
+					durationMs: 2,
+				});
+				return new Response("mcp response");
+			},
+		},
+	);
+
+	assert.equal(await response.text(), "mcp response");
+	assert.deepEqual(observations, [
+		{
+			toolName: "list_workspaces",
+			outcome: "success",
+			durationMs: 2,
+		},
+	]);
+	assert.ok(waitedFor);
+	await waitedFor;
+	assert.equal(flushes, 1);
+});
+
 void test("MCP JWT claims require issuer, audience, expiry, OAuth client, and resource binding", () => {
 	const issuer = "https://project.supabase.co/auth/v1";
 	const now = 1_800_000_000;

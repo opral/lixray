@@ -21,6 +21,9 @@ export interface Env {
 	LIXRAY_DEMO?: string;
 	LIXRAY_DEMO_WORKSPACE_IDS?: string;
 	GOOGLE_ANALYTICS_ID?: string;
+	POSTHOG_PROJECT_TOKEN?: string;
+	POSTHOG_HOST?: string;
+	POSTHOG_ENVIRONMENT?: string;
 }
 
 export class SlateDbContainer extends Container<Env> {
