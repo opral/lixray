@@ -72,7 +72,9 @@ function WorkspaceRoutePage() {
 			<WorkspaceRouteStatus>
 				<strong>Workspace not found</strong>
 				<Button asChild variant="outline">
-					<Link to="/">Back to workspaces</Link>
+					<Link to="/" search={{ app: "1" }}>
+						Back to workspaces
+					</Link>
 				</Button>
 			</WorkspaceRouteStatus>
 		);

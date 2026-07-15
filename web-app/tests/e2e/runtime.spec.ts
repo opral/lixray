@@ -60,8 +60,11 @@ test("landing page renders and the canonical workspace route opens", async ({
 		timeout: 55_000,
 	});
 	await expect(
-		page.getByRole("link", { name: "Back to LixRay home" }),
+		page.getByRole("link", { name: "Back to workspaces" }),
 	).toBeVisible();
+	await page.getByRole("link", { name: "Back to workspaces" }).click();
+	await expect(page).toHaveURL(/\/$/);
+	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
 });
 
 test("sql console loads branches and executes a trivial query", async ({

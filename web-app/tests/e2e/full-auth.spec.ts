@@ -19,10 +19,12 @@ test("full-auth user can create and open a fresh workspace", async ({
 		const localSignIn = page.getByRole("button", {
 			name: "Continue as local developer",
 		});
+		const continueLink = page.getByRole("link", { name: "Continue to LixRay" });
+		await expect(localSignIn.or(continueLink)).toBeVisible();
 		if (await localSignIn.isVisible()) {
 			await localSignIn.click();
 		} else {
-			await page.getByRole("link", { name: "Continue to LixRay" }).click();
+			await continueLink.click();
 		}
 
 		await expect(page).toHaveURL(/\/$/);
@@ -53,9 +55,13 @@ test("full-auth user can create and open a fresh workspace", async ({
 			.toBe(200);
 		const workspaceLink = page.getByRole("link", { name: workspaceName });
 		await expect(workspaceLink).toContainText("0 files");
+		const workspaceHref = await workspaceLink.getAttribute("href");
+		expect(workspaceHref).toBeTruthy();
+		const workspacePath = new URL(workspaceHref ?? "/", page.url()).pathname;
+		expect(workspacePath).toMatch(new RegExp(`/@[^/]+/${workspaceSlug}$`));
 
 		await workspaceLink.click();
-		await expect(page).toHaveURL(new RegExp(`/@acme/${workspaceSlug}$`));
+		await expect(page).toHaveURL((url) => url.pathname === workspacePath);
 		await expect(
 			page.getByRole("button", { name: "Toggle left panel" }),
 		).toBeVisible({
@@ -82,7 +88,7 @@ function readWorkspaceId(payload: unknown): string {
 }
 
 async function deleteWorkspaceThroughUi(page: Page, workspaceName: string) {
-	await page.goto("/");
+	await page.goto("/?app=1");
 	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
 	const actions = page.getByRole("button", {
 		name: `Actions for ${workspaceName}`,

@@ -97,7 +97,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 	}, [client]);
 
 	const signInWithGoogle = useCallback(
-		async (returnTo = "/") => {
+		async (returnTo = "/?app=1") => {
 			if (!client) throw new Error("Authentication is still loading");
 			const safeReturnTo = normalizeAuthReturnTo(returnTo);
 			window.sessionStorage.setItem(RETURN_TO_KEY, safeReturnTo);
@@ -159,7 +159,7 @@ export function useAuth() {
 }
 
 export function takeAuthReturnTo(): string {
-	const returnTo = window.sessionStorage.getItem(RETURN_TO_KEY) ?? "/";
+	const returnTo = window.sessionStorage.getItem(RETURN_TO_KEY) ?? "/?app=1";
 	window.sessionStorage.removeItem(RETURN_TO_KEY);
 	return normalizeAuthReturnTo(returnTo);
 }
