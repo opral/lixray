@@ -53,8 +53,8 @@ const oauthSecuritySchemes: Array<McpSecurityScheme> = [
 const uuid = z.uuid().describe("Workspace UUID");
 const branchId = z.uuid().describe("Lix branch UUID");
 const revisionId = z.uuid().describe("Lix revision UUID");
-const absolutePath = z.string().min(1).max(1024);
-const executeSqlText = z.string().trim().min(1).max(100_000);
+const absolutePath = z.string().min(1);
+const executeSqlText = z.string().trim().min(1);
 const wireValue = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("null"), value: z.null().optional() }).strict(),
 	z.object({ kind: z.literal("bool"), value: z.boolean() }).strict(),
@@ -461,7 +461,7 @@ function buildTools(
 		tool(
 			"list_branches",
 			"List branches",
-			"List visible, UUID-addressable Lix branches in one accessible workspace.",
+			"List Lix branches in a workspace.",
 			z.object({ workspace_id: uuid }).strict(),
 			readAnnotations(),
 			async ({ workspace_id }) => ({
@@ -474,7 +474,7 @@ function buildTools(
 		tool(
 			"list_directory",
 			"List directory",
-			"List the immediate files and directories at an absolute directory path.",
+			"List the immediate files and directories in a directory.",
 			z
 				.object({
 					workspace_id: uuid,
@@ -496,12 +496,12 @@ function buildTools(
 		tool(
 			"find_files",
 			"Find files",
-			"Find files by path or name. This does not search file contents.",
+			"Find files by path or name (does not search file contents).",
 			z
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
-					query: z.string().trim().min(1).max(100),
+					query: z.string().trim().min(1),
 					under_path: absolutePath.optional().default("/"),
 				})
 				.strict(),
@@ -519,14 +519,12 @@ function buildTools(
 		tool(
 			"read_file",
 			"Read text file",
-			"Read a page of a UTF-8 text file and return its current revision for safe edits.",
+			"Read a UTF-8 text file.",
 			z
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
-					path: absolutePath.describe(
-						"Absolute file path without a trailing /",
-					),
+					path: absolutePath.describe("Absolute file path"),
 					start_line: z.number().int().min(1).optional().default(1),
 					line_count: z
 						.number()
@@ -551,16 +549,16 @@ function buildTools(
 		tool(
 			"write_file",
 			"Create or replace text file",
-			"Create or replace a UTF-8 text file. When expected_revision is omitted, an existing file is replaced using its current revision; when provided, replacement succeeds only if it matches.",
+			"Create or replace a UTF-8 text file.",
 			z
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
-					path: absolutePath,
+					path: absolutePath.describe("Absolute file path"),
 					content: z.string(),
 					expected_revision: revisionId
 						.describe(
-							"Optional current file revision. When omitted, an existing file is replaced using its current revision; when provided, replacement succeeds only if it matches.",
+							"Optional current file revision. Iff provided, replacement succeeds only if it matches.",
 						)
 						.optional(),
 				})
@@ -593,10 +591,10 @@ function buildTools(
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
-					path: absolutePath,
+					path: absolutePath.describe("Absolute file path"),
 					expected_revision: revisionId
 						.describe(
-							"Optional current file revision. When omitted, edits apply using the file's current revision; when provided, editing succeeds only if it matches.",
+							"Optional current file revision. Iff provided, replacement succeeds only if it matches.",
 						)
 						.optional(),
 					edits: z
@@ -640,12 +638,12 @@ function buildTools(
 		tool(
 			"create_directory",
 			"Create directory",
-			"Create a directory at a canonical absolute path ending in /.",
+			"Create a directory at an absolute path ending in /.",
 			z
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
-					path: absolutePath,
+					path: absolutePath.describe("Absolute directory path ending in /"),
 				})
 				.strict(),
 			writeAnnotations(false, false),
@@ -661,20 +659,20 @@ function buildTools(
 		tool(
 			"move_entry",
 			"Move file or directory",
-			"Move or rename an entry. Existing destinations are never overwritten.",
+			"Move or rename an entry. Existing destinations will return an error.",
 			z
 				.object({
 					workspace_id: uuid,
 					branch_id: branchId,
 					source_path: absolutePath.describe(
-						"Canonical absolute source path. Directory paths must end in /; file paths must not.",
+						"Absolute source path. Directory paths must end in /; file paths must not.",
 					),
 					destination_path: absolutePath.describe(
-						"Canonical absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not.",
+						"Absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not.",
 					),
 					expected_revision: revisionId
 						.describe(
-							"Optional current source revision. When omitted, the move uses the source's current revision; when provided, moving succeeds only if it matches.",
+							"Optional current file revision. Iff provided, replacement succeeds only if it matches.",
 						)
 						.optional(),
 				})
@@ -708,11 +706,11 @@ function buildTools(
 					workspace_id: uuid,
 					branch_id: branchId,
 					path: absolutePath.describe(
-						"Canonical absolute entry path. Directory paths must end in /; file paths must not.",
+						"Absolute entry path. Directory paths must end in /; file paths must not.",
 					),
 					expected_revision: revisionId
 						.describe(
-							"Optional current entry revision. When omitted, deletion uses the entry's current revision; when provided, deletion succeeds only if it matches.",
+							"Optional current entry revision. Iff provided, delete succeeds only if it matches.",
 						)
 						.optional(),
 					recursive: z.boolean().optional().default(false),

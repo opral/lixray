@@ -104,7 +104,7 @@
 	{
 		"name": "list_branches",
 		"title": "List branches",
-		"description": "List visible, UUID-addressable Lix branches in one accessible workspace.",
+		"description": "List Lix branches in a workspace.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -206,7 +206,7 @@
 	{
 		"name": "list_directory",
 		"title": "List directory",
-		"description": "List the immediate files and directories at an absolute directory path.",
+		"description": "List the immediate files and directories in a directory.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -224,7 +224,6 @@
 				"path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024,
 					"description": "Absolute directory path ending in /"
 				}
 			},
@@ -239,8 +238,7 @@
 					"properties": {
 						"path": {
 							"type": "string",
-							"minLength": 1,
-							"maxLength": 1024
+							"minLength": 1
 						},
 						"entries": {
 							"type": "array",
@@ -253,8 +251,7 @@
 									},
 									"path": {
 										"type": "string",
-										"minLength": 1,
-										"maxLength": 1024
+										"minLength": 1
 									},
 									"name": {
 										"type": "string"
@@ -342,7 +339,7 @@
 	{
 		"name": "find_files",
 		"title": "Find files",
-		"description": "Find files by path or name. This does not search file contents.",
+		"description": "Find files by path or name (does not search file contents).",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -359,14 +356,12 @@
 				},
 				"query": {
 					"type": "string",
-					"minLength": 1,
-					"maxLength": 100
+					"minLength": 1
 				},
 				"under_path": {
 					"default": "/",
 					"type": "string",
-					"minLength": 1,
-					"maxLength": 1024
+					"minLength": 1
 				}
 			},
 			"required": ["workspace_id", "branch_id", "query"],
@@ -389,8 +384,7 @@
 									},
 									"path": {
 										"type": "string",
-										"minLength": 1,
-										"maxLength": 1024
+										"minLength": 1
 									},
 									"name": {
 										"type": "string"
@@ -478,7 +472,7 @@
 	{
 		"name": "read_file",
 		"title": "Read text file",
-		"description": "Read a page of a UTF-8 text file and return its current revision for safe edits.",
+		"description": "Read a UTF-8 text file.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -496,8 +490,7 @@
 				"path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024,
-					"description": "Absolute file path without a trailing /"
+					"description": "Absolute file path"
 				},
 				"start_line": {
 					"default": 1,
@@ -523,8 +516,7 @@
 					"properties": {
 						"path": {
 							"type": "string",
-							"minLength": 1,
-							"maxLength": 1024
+							"minLength": 1
 						},
 						"content": {
 							"type": "string"
@@ -628,7 +620,7 @@
 	{
 		"name": "write_file",
 		"title": "Create or replace text file",
-		"description": "Create or replace a UTF-8 text file. When expected_revision is omitted, an existing file is replaced using its current revision; when provided, replacement succeeds only if it matches.",
+		"description": "Create or replace a UTF-8 text file.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -646,7 +638,7 @@
 				"path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024
+					"description": "Absolute file path"
 				},
 				"content": {
 					"type": "string"
@@ -654,7 +646,7 @@
 				"expected_revision": {
 					"type": "string",
 					"format": "uuid",
-					"description": "Optional current file revision. When omitted, an existing file is replaced using its current revision; when provided, replacement succeeds only if it matches."
+					"description": "Optional current file revision. Iff provided, replacement succeeds only if it matches."
 				}
 			},
 			"required": ["workspace_id", "branch_id", "path", "content"],
@@ -675,8 +667,7 @@
 								},
 								"path": {
 									"type": "string",
-									"minLength": 1,
-									"maxLength": 1024
+									"minLength": 1
 								},
 								"name": {
 									"type": "string"
@@ -781,12 +772,12 @@
 				"path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024
+					"description": "Absolute file path"
 				},
 				"expected_revision": {
 					"type": "string",
 					"format": "uuid",
-					"description": "Optional current file revision. When omitted, edits apply using the file's current revision; when provided, editing succeeds only if it matches."
+					"description": "Optional current file revision. Iff provided, replacement succeeds only if it matches."
 				},
 				"edits": {
 					"minItems": 1,
@@ -830,8 +821,7 @@
 								},
 								"path": {
 									"type": "string",
-									"minLength": 1,
-									"maxLength": 1024
+									"minLength": 1
 								},
 								"name": {
 									"type": "string"
@@ -918,7 +908,7 @@
 	{
 		"name": "create_directory",
 		"title": "Create directory",
-		"description": "Create a directory at a canonical absolute path ending in /.",
+		"description": "Create a directory at an absolute path ending in /.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -936,7 +926,7 @@
 				"path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024
+					"description": "Absolute directory path ending in /"
 				}
 			},
 			"required": ["workspace_id", "branch_id", "path"],
@@ -957,8 +947,7 @@
 								},
 								"path": {
 									"type": "string",
-									"minLength": 1,
-									"maxLength": 1024
+									"minLength": 1
 								},
 								"name": {
 									"type": "string"
@@ -1045,7 +1034,7 @@
 	{
 		"name": "move_entry",
 		"title": "Move file or directory",
-		"description": "Move or rename an entry. Existing destinations are never overwritten.",
+		"description": "Move or rename an entry. Existing destinations will return an error.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1063,19 +1052,17 @@
 				"source_path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024,
-					"description": "Canonical absolute source path. Directory paths must end in /; file paths must not."
+					"description": "Absolute source path. Directory paths must end in /; file paths must not."
 				},
 				"destination_path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024,
-					"description": "Canonical absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not."
+					"description": "Absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not."
 				},
 				"expected_revision": {
 					"type": "string",
 					"format": "uuid",
-					"description": "Optional current source revision. When omitted, the move uses the source's current revision; when provided, moving succeeds only if it matches."
+					"description": "Optional current file revision. Iff provided, replacement succeeds only if it matches."
 				}
 			},
 			"required": [
@@ -1101,8 +1088,7 @@
 								},
 								"path": {
 									"type": "string",
-									"minLength": 1,
-									"maxLength": 1024
+									"minLength": 1
 								},
 								"name": {
 									"type": "string"
@@ -1207,13 +1193,12 @@
 				"path": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 1024,
-					"description": "Canonical absolute entry path. Directory paths must end in /; file paths must not."
+					"description": "Absolute entry path. Directory paths must end in /; file paths must not."
 				},
 				"expected_revision": {
 					"type": "string",
 					"format": "uuid",
-					"description": "Optional current entry revision. When omitted, deletion uses the entry's current revision; when provided, deletion succeeds only if it matches."
+					"description": "Optional current entry revision. Iff provided, delete succeeds only if it matches."
 				},
 				"recursive": {
 					"default": false,
@@ -1231,8 +1216,7 @@
 					"properties": {
 						"path": {
 							"type": "string",
-							"minLength": 1,
-							"maxLength": 1024
+							"minLength": 1
 						},
 						"deleted": {
 							"type": "boolean",
@@ -1313,8 +1297,7 @@
 				},
 				"sql": {
 					"type": "string",
-					"minLength": 1,
-					"maxLength": 100000
+					"minLength": 1
 				},
 				"params": {
 					"default": [],

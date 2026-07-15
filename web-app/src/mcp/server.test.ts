@@ -184,7 +184,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			assert.equal(revisionSchema.maxLength, undefined, name);
 			assert.match(
 				revisionSchema.description ?? "",
-				/When omitted, .+ current revision; when provided, .+ only if it matches\./,
+				/Iff provided, .+ succeeds only if it matches\./,
 				name,
 			);
 		}
