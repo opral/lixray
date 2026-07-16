@@ -564,9 +564,14 @@ function demoWorkspaceSummaries(env: WorkerEnv): Array<WorkspaceSummary> {
 			workspaceId === DEMO_WORKSPACE_ID
 				? DEMO_WORKSPACE_NAME
 				: `demo-workspace-${index + 1}`,
+		slug:
+			workspaceId === DEMO_WORKSPACE_ID
+				? DEMO_WORKSPACE_NAME
+				: `demo-workspace-${index + 1}`,
 		organization: {
 			id: DEMO_ORGANIZATION_ID,
 			name: DEMO_ORGANIZATION_NAME,
+			handle: DEMO_ORGANIZATION_NAME,
 		},
 	}));
 }

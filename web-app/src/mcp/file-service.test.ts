@@ -12,13 +12,60 @@ import {
 	type ExecuteResponse,
 	type ExecuteScriptResponse,
 	type LixRuntimeClient,
+	type WorkspaceSummary,
 	type FilesystemMutationOutcome,
 	type FilesystemMutationRequest,
 	type WireValue,
 } from "./file-service.ts";
 
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
+const OTHER_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
+const UUID_SLUG_WORKSPACE_ID = "33333333-3333-4333-8333-333333333333";
 const BRANCH_ID = "main";
+
+void test("workspace refs resolve UUIDs, unique slugs, and qualified slugs", async () => {
+	const client = new MemoryLixRuntimeClient();
+	client.workspaceSummaries.push({
+		id: OTHER_WORKSPACE_ID,
+		name: "Other personal",
+		slug: "personal",
+		organization: { id: "org-2", name: "Other", handle: "other" },
+	});
+	client.workspaceSummaries.push({
+		id: UUID_SLUG_WORKSPACE_ID,
+		name: "UUID slug",
+		slug: WORKSPACE_ID,
+		organization: { id: "org-3", name: "UUID Slugs", handle: "uuid-slugs" },
+	});
+	const service = new LixFileService(client);
+
+	assert.equal(await service.resolveWorkspaceRef(WORKSPACE_ID), WORKSPACE_ID);
+	assert.equal(
+		await service.resolveWorkspaceRef(`@uuid-slugs/${WORKSPACE_ID}`),
+		UUID_SLUG_WORKSPACE_ID,
+	);
+	assert.equal(
+		await service.resolveWorkspaceRef("@example/personal"),
+		WORKSPACE_ID,
+	);
+	assert.equal(
+		await service.resolveWorkspaceRef("@other/personal"),
+		OTHER_WORKSPACE_ID,
+	);
+	await assert.rejects(
+		service.resolveWorkspaceRef("personal"),
+		hasCode("ambiguous_workspace_ref"),
+	);
+	await assert.rejects(
+		service.resolveWorkspaceRef("missing"),
+		hasCode("not_found"),
+	);
+});
+
+void test("unique bare workspace slugs resolve without discovery by the caller", async () => {
+	const service = new LixFileService(new MemoryLixRuntimeClient());
+	assert.equal(await service.resolveWorkspaceRef("personal"), WORKSPACE_ID);
+});
 
 void test("canonical path validation rejects ambiguous and unsafe paths", () => {
 	for (const path of [
@@ -379,6 +426,14 @@ type StoredFile = { bytes: Uint8Array; revision: string };
 type StoredDirectory = { revision: string; id: string };
 
 class MemoryLixRuntimeClient implements LixRuntimeClient {
+	readonly workspaceSummaries: Array<WorkspaceSummary> = [
+		{
+			id: WORKSPACE_ID,
+			name: "Personal",
+			slug: "personal",
+			organization: { id: "org-1", name: "Example", handle: "example" },
+		},
+	];
 	private readonly files = new Map<string, StoredFile>();
 	private readonly directories = new Map<string, StoredDirectory>();
 	private revisionCounter = 0;
@@ -417,13 +472,10 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	async listWorkspaces() {
-		return [
-			{
-				id: WORKSPACE_ID,
-				name: "Personal",
-				organization: { id: "org-1", name: "Example" },
-			},
-		];
+		return this.workspaceSummaries.map((workspace) => ({
+			...workspace,
+			organization: { ...workspace.organization },
+		}));
 	}
 
 	async listBranches(): Promise<BranchState> {

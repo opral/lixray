@@ -52,6 +52,11 @@ const oauthSecuritySchemes: Array<McpSecurityScheme> = [
 ];
 
 const uuid = z.uuid().describe("Workspace UUID");
+const workspaceRef = z
+	.string()
+	.describe(
+		"Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available.",
+	);
 const branchId = z.uuid().describe("Lix branch UUID");
 const optionalBranchId = branchId
 	.describe("Lix branch UUID. Omit to use the workspace default branch.")
@@ -75,7 +80,10 @@ const workspaceSummaryOutput = z
 	.object({
 		id: uuid,
 		name: z.string(),
-		organization: z.object({ id: z.string(), name: z.string() }).strict(),
+		slug: z.string(),
+		organization: z
+			.object({ id: z.string(), name: z.string(), handle: z.string() })
+			.strict(),
 	})
 	.strict();
 const branchSummaryOutput = z
@@ -242,13 +250,17 @@ export function createLixrayMcpServer(
 			});
 			return errorResult("invalid_arguments", z.prettifyError(parsed.error));
 		}
-		const workspaceId =
-			typeof parsed.data.workspace_id === "string"
-				? parsed.data.workspace_id
-				: undefined;
+		let workspaceId: string | undefined;
 		try {
+			const callArgs: Record<string, unknown> = { ...parsed.data };
+			if (typeof parsed.data.workspace_ref === "string") {
+				workspaceId = await service.resolveWorkspaceRef(
+					parsed.data.workspace_ref,
+				);
+				callArgs.workspace_ref = workspaceId;
+			}
 			const rawStructuredContent = asStructuredContent(
-				await tool.call(parsed.data),
+				await tool.call(callArgs),
 			);
 			const parsedOutput = tool.outputSchema?.safeParse(rawStructuredContent);
 			if (parsedOutput && !parsedOutput.success) {
@@ -393,7 +405,7 @@ export function mcpDocumentationResponse(
 			"",
 			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
-			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting UTF-8 text files up to 1 MiB, plus a destructive raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards. Execute accepts a single statement or an atomic semicolon-delimited script, optionally bounded by BEGIN and COMMIT. Scripts return one result per executable statement and use request-wide $n parameters or script-ordered ? parameters.",
+			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting files, plus a raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards. Execute accepts one or more semicolon-delimited statements, with request-wide $n parameters or query-ordered ? parameters. One result is returned per executable statement.",
 		].join("\n"),
 		{
 			headers: {
@@ -474,11 +486,11 @@ function buildTools(
 		tool(
 			"list_branches",
 			"List branches",
-			"List Lix branches in a workspace and identify its default branch.",
-			z.object({ workspace_id: uuid }).strict(),
+			"List Lix branches in a workspace.",
+			z.object({ workspace_ref: workspaceRef }).strict(),
 			readAnnotations(),
-			async ({ workspace_id }) => {
-				const state = await service.listBranches(String(workspace_id));
+			async ({ workspace_ref }) => {
+				const state = await service.listBranches(String(workspace_ref));
 				return {
 					branches: state.branches.filter(
 						(branch) => !branch.hidden && branchId.safeParse(branch.id).success,
@@ -494,18 +506,18 @@ function buildTools(
 			"List the immediate files and directories in a directory.",
 			z
 				.object({
-					workspace_id: uuid,
+					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
 					path: absolutePath.describe("Absolute directory path ending in /"),
 				})
 				.strict(),
 			readAnnotations(),
-			async ({ workspace_id, branch_id, path }) => ({
+			async ({ workspace_ref, branch_id, path }) => ({
 				path,
 				entries: await service.listDirectory(
-					String(workspace_id),
+					String(workspace_ref),
 					await service.resolveBranchId(
-						String(workspace_id),
+						String(workspace_ref),
 						branch_id === undefined ? undefined : String(branch_id),
 					),
 					String(path),
@@ -519,18 +531,18 @@ function buildTools(
 			"Find files by path or name (does not search file contents).",
 			z
 				.object({
-					workspace_id: uuid,
+					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
 					query: z.string().trim().min(1),
 					under_path: absolutePath.optional().default("/"),
 				})
 				.strict(),
 			readAnnotations(),
-			async ({ workspace_id, branch_id, query, under_path }) => ({
+			async ({ workspace_ref, branch_id, query, under_path }) => ({
 				files: await service.findFiles(
-					String(workspace_id),
+					String(workspace_ref),
 					await service.resolveBranchId(
-						String(workspace_id),
+						String(workspace_ref),
 						branch_id === undefined ? undefined : String(branch_id),
 					),
 					String(query),
@@ -545,7 +557,7 @@ function buildTools(
 			"Read a UTF-8 text file.",
 			z
 				.object({
-					workspace_id: uuid,
+					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
 					path: absolutePath.describe("Absolute file path"),
 					start_line: z.number().int().min(1).optional().default(1),
@@ -559,11 +571,11 @@ function buildTools(
 				})
 				.strict(),
 			readAnnotations(),
-			async ({ workspace_id, branch_id, path, start_line, line_count }) =>
+			async ({ workspace_ref, branch_id, path, start_line, line_count }) =>
 				service.readFile(
-					String(workspace_id),
+					String(workspace_ref),
 					await service.resolveBranchId(
-						String(workspace_id),
+						String(workspace_ref),
 						branch_id === undefined ? undefined : String(branch_id),
 					),
 					String(path),
@@ -578,7 +590,7 @@ function buildTools(
 			"Create or replace a UTF-8 text file.",
 			z
 				.object({
-					workspace_id: uuid,
+					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
 					path: absolutePath.describe("Absolute file path"),
 					content: z.string(),
@@ -591,16 +603,16 @@ function buildTools(
 				.strict(),
 			writeAnnotations(false, false),
 			async ({
-				workspace_id,
+				workspace_ref,
 				branch_id,
 				path,
 				content,
 				expected_revision,
 			}) => ({
 				file: await service.writeFile(
-					String(workspace_id),
+					String(workspace_ref),
 					await service.resolveBranchId(
-						String(workspace_id),
+						String(workspace_ref),
 						branch_id === undefined ? undefined : String(branch_id),
 					),
 					String(path),
@@ -618,7 +630,7 @@ function buildTools(
 			"Apply exact text replacements to a UTF-8 file.",
 			z
 				.object({
-					workspace_id: uuid,
+					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
 					path: absolutePath.describe("Absolute file path"),
 					expected_revision: revisionId
@@ -641,11 +653,11 @@ function buildTools(
 				})
 				.strict(),
 			writeAnnotations(false, false),
-			async ({ workspace_id, branch_id, path, expected_revision, edits }) => ({
+			async ({ workspace_ref, branch_id, path, expected_revision, edits }) => ({
 				file: await service.editFile(
-					String(workspace_id),
+					String(workspace_ref),
 					await service.resolveBranchId(
-						String(workspace_id),
+						String(workspace_ref),
 						branch_id === undefined ? undefined : String(branch_id),
 					),
 					String(path),
@@ -673,17 +685,17 @@ function buildTools(
 			"Create a directory at an absolute path ending in /.",
 			z
 				.object({
-					workspace_id: uuid,
+					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
 					path: absolutePath.describe("Absolute directory path ending in /"),
 				})
 				.strict(),
 			writeAnnotations(false, false),
-			async ({ workspace_id, branch_id, path }) => ({
+			async ({ workspace_ref, branch_id, path }) => ({
 				directory: await service.createDirectory(
-					String(workspace_id),
+					String(workspace_ref),
 					await service.resolveBranchId(
-						String(workspace_id),
+						String(workspace_ref),
 						branch_id === undefined ? undefined : String(branch_id),
 					),
 					String(path),
@@ -697,7 +709,7 @@ function buildTools(
 			"Move or rename an entry. Existing destinations will return an error.",
 			z
 				.object({
-					workspace_id: uuid,
+					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
 					source_path: absolutePath.describe(
 						"Absolute source path. Directory paths must end in /; file paths must not.",
@@ -714,16 +726,16 @@ function buildTools(
 				.strict(),
 			writeAnnotations(false, false),
 			async ({
-				workspace_id,
+				workspace_ref,
 				branch_id,
 				source_path,
 				destination_path,
 				expected_revision,
 			}) => ({
 				entry: await service.moveEntry(
-					String(workspace_id),
+					String(workspace_ref),
 					await service.resolveBranchId(
-						String(workspace_id),
+						String(workspace_ref),
 						branch_id === undefined ? undefined : String(branch_id),
 					),
 					String(source_path),
@@ -741,7 +753,7 @@ function buildTools(
 			"Permanently delete an entry. Directories require recursive=true and remove their entire subtree.",
 			z
 				.object({
-					workspace_id: uuid,
+					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
 					path: absolutePath.describe(
 						"Absolute entry path. Directory paths must end in /; file paths must not.",
@@ -755,11 +767,17 @@ function buildTools(
 				})
 				.strict(),
 			writeAnnotations(false, false),
-			async ({ workspace_id, branch_id, path, expected_revision, recursive }) =>
+			async ({
+				workspace_ref,
+				branch_id,
+				path,
+				expected_revision,
+				recursive,
+			}) =>
 				service.deleteEntry(
-					String(workspace_id),
+					String(workspace_ref),
 					await service.resolveBranchId(
-						String(workspace_id),
+						String(workspace_ref),
 						branch_id === undefined ? undefined : String(branch_id),
 					),
 					String(path),
@@ -776,18 +794,18 @@ function buildTools(
 			EXECUTE_TOOL_DESCRIPTION,
 			z
 				.object({
-					workspace_id: uuid,
+					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
 					sql: executeSqlText,
 					params: z.array(wireValue).max(1000).optional().default([]),
 				})
 				.strict(),
 			writeAnnotations(true, false),
-			async ({ workspace_id, branch_id, sql, params }) =>
+			async ({ workspace_ref, branch_id, sql, params }) =>
 				service.executeSql(
-					String(workspace_id),
+					String(workspace_ref),
 					await service.resolveBranchId(
-						String(workspace_id),
+						String(workspace_ref),
 						branch_id === undefined ? undefined : String(branch_id),
 					),
 					String(sql),
