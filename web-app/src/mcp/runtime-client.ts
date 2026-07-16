@@ -104,7 +104,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			Accept: "application/json",
 		};
 		const organizationsUrl = new URL("/rest/v1/organizations", supabaseUrl);
-		organizationsUrl.searchParams.set("select", "id,name");
+		organizationsUrl.searchParams.set("select", "id,name,handle");
 		organizationsUrl.searchParams.set("order", "created_at.asc");
 		const workspacesUrl = new URL("/rest/v1/workspaces", supabaseUrl);
 		workspacesUrl.searchParams.set("select", "id,organization_id,name,slug");
@@ -135,11 +135,12 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		}
 		const organizations = asRows(await organizationsResponse.json());
 		const workspaces = asRows(await workspacesResponse.json());
-		const organizationNames = new Map(
+		const organizationsById = new Map(
 			organizations.flatMap((row) => {
 				const id = stringField(row, "id");
 				const name = stringField(row, "name");
-				return id && name ? [[id, name] as const] : [];
+				const handle = stringField(row, "handle");
+				return id && name && handle ? [[id, { name, handle }] as const] : [];
 			}),
 		);
 
@@ -148,16 +149,16 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const name = stringField(row, "name");
 			const slug = stringField(row, "slug");
 			const organizationId = stringField(row, "organization_id");
-			const organizationName = organizationId
-				? organizationNames.get(organizationId)
+			const organization = organizationId
+				? organizationsById.get(organizationId)
 				: undefined;
-			return id && name && slug && organizationId && organizationName
+			return id && name && slug && organizationId && organization
 				? [
 						{
 							id,
 							name,
 							slug,
-							organization: { id: organizationId, name: organizationName },
+							organization: { id: organizationId, ...organization },
 						},
 					]
 				: [];

@@ -295,7 +295,7 @@ void test("injected workspaces and workspace fetch bypass Supabase and container
 			id: WORKSPACE_ID,
 			name: "Demo workspace",
 			slug: "demo-workspace",
-			organization: { id: "org-demo", name: "Demo" },
+			organization: { id: "org-demo", name: "Demo", handle: "demo" },
 		},
 	];
 	const client = new WorkerLixRuntimeClient(
@@ -391,7 +391,9 @@ void test("workspace discovery uses the OAuth token and only joins RLS-visible r
 				);
 				requests.push({ url, headers: new Headers(init?.headers) });
 				if (url.pathname.endsWith("/organizations")) {
-					return Response.json([{ id: "org-1", name: "Example" }]);
+					return Response.json([
+						{ id: "org-1", name: "Example", handle: "example" },
+					]);
 				}
 				return Response.json([
 					{
@@ -416,7 +418,7 @@ void test("workspace discovery uses the OAuth token and only joins RLS-visible r
 			id: WORKSPACE_ID,
 			name: "Personal",
 			slug: "personal",
-			organization: { id: "org-1", name: "Example" },
+			organization: { id: "org-1", name: "Example", handle: "example" },
 		},
 	]);
 	assert.equal(requests.length, 2);
@@ -428,9 +430,16 @@ void test("workspace discovery uses the OAuth token and only joins RLS-visible r
 		assert.equal(request.headers.get("apikey"), "publishable-key");
 	}
 	assert.equal(
-		requests.find(({ url }) => url.pathname.endsWith("/workspaces"))?.url
-			.searchParams.get("select"),
+		requests
+			.find(({ url }) => url.pathname.endsWith("/workspaces"))
+			?.url.searchParams.get("select"),
 		"id,organization_id,name,slug",
+	);
+	assert.equal(
+		requests
+			.find(({ url }) => url.pathname.endsWith("/organizations"))
+			?.url.searchParams.get("select"),
+		"id,name,handle",
 	);
 });
 
@@ -452,7 +461,7 @@ void test("workspace discovery invokes the Worker fetch function without a class
 		);
 		return Promise.resolve(
 			url.pathname.endsWith("/organizations")
-				? Response.json([{ id: "org-1", name: "Example" }])
+				? Response.json([{ id: "org-1", name: "Example", handle: "example" }])
 				: Response.json([
 						{
 							id: WORKSPACE_ID,

@@ -571,6 +571,7 @@ function demoWorkspaceSummaries(env: WorkerEnv): Array<WorkspaceSummary> {
 		organization: {
 			id: DEMO_ORGANIZATION_ID,
 			name: DEMO_ORGANIZATION_NAME,
+			handle: DEMO_ORGANIZATION_NAME,
 		},
 	}));
 }

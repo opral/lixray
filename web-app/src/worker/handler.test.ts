@@ -607,6 +607,7 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 						organization: {
 							id: DEMO_ORGANIZATION_ID,
 							name: DEMO_ORGANIZATION_NAME,
+							handle: DEMO_ORGANIZATION_NAME,
 						},
 					},
 					{
@@ -616,6 +617,7 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 						organization: {
 							id: DEMO_ORGANIZATION_ID,
 							name: DEMO_ORGANIZATION_NAME,
+							handle: DEMO_ORGANIZATION_NAME,
 						},
 					},
 				]);

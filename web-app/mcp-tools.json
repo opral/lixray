@@ -39,9 +39,12 @@
 											},
 											"name": {
 												"type": "string"
+											},
+											"handle": {
+												"type": "string"
 											}
 										},
-										"required": ["id", "name"],
+										"required": ["id", "name", "handle"],
 										"additionalProperties": false
 									}
 								},
@@ -112,13 +115,12 @@
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_id": {
+				"workspace_ref": {
 					"type": "string",
-					"format": "uuid",
-					"description": "Workspace UUID"
+					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
 				}
 			},
-			"required": ["workspace_id"],
+			"required": ["workspace_ref"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -219,10 +221,9 @@
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_id": {
+				"workspace_ref": {
 					"type": "string",
-					"format": "uuid",
-					"description": "Workspace UUID"
+					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
 				},
 				"branch_id": {
 					"type": "string",
@@ -235,7 +236,7 @@
 					"description": "Absolute directory path ending in /"
 				}
 			},
-			"required": ["workspace_id", "path"],
+			"required": ["workspace_ref", "path"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -352,10 +353,9 @@
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_id": {
+				"workspace_ref": {
 					"type": "string",
-					"format": "uuid",
-					"description": "Workspace UUID"
+					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
 				},
 				"branch_id": {
 					"type": "string",
@@ -372,7 +372,7 @@
 					"minLength": 1
 				}
 			},
-			"required": ["workspace_id", "query"],
+			"required": ["workspace_ref", "query"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -485,10 +485,9 @@
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_id": {
+				"workspace_ref": {
 					"type": "string",
-					"format": "uuid",
-					"description": "Workspace UUID"
+					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
 				},
 				"branch_id": {
 					"type": "string",
@@ -513,7 +512,7 @@
 					"maximum": 1000
 				}
 			},
-			"required": ["workspace_id", "path"],
+			"required": ["workspace_ref", "path"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -633,10 +632,9 @@
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_id": {
+				"workspace_ref": {
 					"type": "string",
-					"format": "uuid",
-					"description": "Workspace UUID"
+					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
 				},
 				"branch_id": {
 					"type": "string",
@@ -657,7 +655,7 @@
 					"description": "Optional current file revision. Iff provided, replacement succeeds only if it matches."
 				}
 			},
-			"required": ["workspace_id", "path", "content"],
+			"required": ["workspace_ref", "path", "content"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -767,10 +765,9 @@
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_id": {
+				"workspace_ref": {
 					"type": "string",
-					"format": "uuid",
-					"description": "Workspace UUID"
+					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
 				},
 				"branch_id": {
 					"type": "string",
@@ -811,7 +808,7 @@
 					}
 				}
 			},
-			"required": ["workspace_id", "path", "edits"],
+			"required": ["workspace_ref", "path", "edits"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -921,10 +918,9 @@
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_id": {
+				"workspace_ref": {
 					"type": "string",
-					"format": "uuid",
-					"description": "Workspace UUID"
+					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
 				},
 				"branch_id": {
 					"type": "string",
@@ -937,7 +933,7 @@
 					"description": "Absolute directory path ending in /"
 				}
 			},
-			"required": ["workspace_id", "path"],
+			"required": ["workspace_ref", "path"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -1047,10 +1043,9 @@
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_id": {
+				"workspace_ref": {
 					"type": "string",
-					"format": "uuid",
-					"description": "Workspace UUID"
+					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
 				},
 				"branch_id": {
 					"type": "string",
@@ -1073,7 +1068,7 @@
 					"description": "Optional current file revision. Iff provided, replacement succeeds only if it matches."
 				}
 			},
-			"required": ["workspace_id", "source_path", "destination_path"],
+			"required": ["workspace_ref", "source_path", "destination_path"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -1183,10 +1178,9 @@
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_id": {
+				"workspace_ref": {
 					"type": "string",
-					"format": "uuid",
-					"description": "Workspace UUID"
+					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
 				},
 				"branch_id": {
 					"type": "string",
@@ -1208,7 +1202,7 @@
 					"type": "boolean"
 				}
 			},
-			"required": ["workspace_id", "path"],
+			"required": ["workspace_ref", "path"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -1288,10 +1282,9 @@
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_id": {
+				"workspace_ref": {
 					"type": "string",
-					"format": "uuid",
-					"description": "Workspace UUID"
+					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
 				},
 				"branch_id": {
 					"type": "string",
@@ -1410,7 +1403,7 @@
 					}
 				}
 			},
-			"required": ["workspace_id", "sql"],
+			"required": ["workspace_ref", "sql"],
 			"additionalProperties": false
 		},
 		"outputSchema": {

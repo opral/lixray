@@ -5,6 +5,11 @@ export const DEFAULT_READ_LINE_COUNT = 400;
 export const MAX_READ_LINE_COUNT = 1000;
 export const MAX_PATH_LENGTH = 1024;
 
+const WORKSPACE_UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const QUALIFIED_WORKSPACE_REF_PATTERN =
+	/^@([a-z0-9](?:-?[a-z0-9]){0,38})\/([a-z0-9](?:-?[a-z0-9]){0,99})$/;
+
 export type WireValue =
 	| { kind: "null"; value?: null }
 	| { kind: "bool"; value: boolean }
@@ -48,7 +53,7 @@ export interface WorkspaceSummary {
 	id: string;
 	name: string;
 	slug: string;
-	organization: { id: string; name: string };
+	organization: { id: string; name: string; handle: string };
 }
 
 export interface LixRuntimeClient {
@@ -125,6 +130,7 @@ export type FileServiceErrorCode =
 	| "file_too_large"
 	| "invalid_edit"
 	| "recursive_required"
+	| "ambiguous_workspace_ref"
 	| "upstream_error"
 	| `LIX_${string}`;
 
@@ -155,6 +161,31 @@ export class LixFileService {
 
 	async listWorkspaces(): Promise<Array<WorkspaceSummary>> {
 		return this.client.listWorkspaces();
+	}
+
+	async resolveWorkspaceRef(workspaceRef: string): Promise<string> {
+		if (WORKSPACE_UUID_PATTERN.test(workspaceRef)) {
+			return workspaceRef.toLowerCase();
+		}
+
+		const qualified = QUALIFIED_WORKSPACE_REF_PATTERN.exec(workspaceRef);
+		const workspaces = await this.listWorkspaces();
+		const matches = qualified
+			? workspaces.filter(
+					(workspace) =>
+						workspace.organization.handle === qualified[1] &&
+						workspace.slug === qualified[2],
+				)
+			: workspaces.filter((workspace) => workspace.slug === workspaceRef);
+
+		if (matches.length === 1) return matches[0].id;
+		if (matches.length === 0) {
+			throw new FileServiceError("not_found", "Workspace not found.");
+		}
+		throw new FileServiceError(
+			"ambiguous_workspace_ref",
+			"Workspace slug is ambiguous; use an exact workspace UUID or @namespace/slug.",
+		);
 	}
 
 	async listBranches(workspaceId: string): Promise<BranchState> {

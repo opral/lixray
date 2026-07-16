@@ -53,7 +53,7 @@ test("an MCP-created file immediately opens in review mode", async ({
 		const result = await client.callTool({
 			name: "write_file",
 			arguments: {
-				workspace_id: DEMO_WORKSPACE_ID,
+				workspace_ref: "@acme/launch-q3",
 				path: `/${fileName}`,
 				content,
 			},
@@ -95,7 +95,7 @@ test("an MCP-created file immediately opens in review mode", async ({
 		const readBack = await client.callTool({
 			name: "read_file",
 			arguments: {
-				workspace_id: DEMO_WORKSPACE_ID,
+				workspace_ref: "@acme/launch-q3",
 				path: `/${fileName}`,
 			},
 		});
