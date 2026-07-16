@@ -90,11 +90,11 @@ export async function fetchContainerWithRetry(
 			// A Durable Object reset creates a new object incarnation. Reacquiring the
 			// stub on every attempt avoids retaining an RPC session from the reset one.
 			container = options.namespace.getByName(options.workspaceId);
-			await container.startAndWaitForPorts?.({
+			const startup = container.startAndWaitForPorts?.({
 				ports: 8080,
-				cancellationOptions: { abort: options.signal },
 				startOptions: { envVars: options.envVars },
 			});
+			if (startup) await waitForPromiseWithAbort(startup, options.signal);
 		} catch (caught) {
 			throwIfAborted(options.signal);
 			if (!isRetryableContainerError(caught)) throw caught;
@@ -113,7 +113,10 @@ export async function fetchContainerWithRetry(
 		const request = options.createRequest();
 		let response: Response;
 		try {
-			response = await container.fetch(request);
+			response = await waitForPromiseWithAbort(
+				container.fetch(request),
+				options.signal,
+			);
 		} catch (caught) {
 			throwIfAborted(options.signal);
 			const canReplay =
@@ -343,8 +346,7 @@ function containerExitCode(message: string): number | null {
 
 function throwIfAborted(signal: AbortSignal | null | undefined): void {
 	if (!signal?.aborted) return;
-	if (signal.reason instanceof Error) throw signal.reason;
-	throw new DOMException("Container request was cancelled.", "AbortError");
+	throw abortReason(signal);
 }
 
 async function cancelResponseBody(response: Response): Promise<void> {
@@ -373,21 +375,54 @@ async function waitBeforeContainerRetry(
 	await retryDelay(retryDelayMs, options.signal);
 }
 
+function waitForPromiseWithAbort<T>(
+	promise: Promise<T>,
+	signal?: AbortSignal,
+): Promise<T> {
+	if (!signal) return promise;
+	throwIfAborted(signal);
+	return new Promise<T>((resolve, reject) => {
+		let settled = false;
+		const cleanup = () => signal.removeEventListener("abort", onAbort);
+		const onFulfilled = (value: T) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			resolve(value);
+		};
+		const onRejected = (error: unknown) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			reject(
+				error instanceof Error
+					? error
+					: new Error("Container operation failed.", { cause: error }),
+			);
+		};
+		const onAbort = () => onRejected(abortReason(signal));
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(onFulfilled, onRejected);
+	});
+}
+
+function abortReason(signal: AbortSignal): Error {
+	return signal.reason instanceof Error
+		? signal.reason
+		: new DOMException("Container request was cancelled.", "AbortError");
+}
+
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) {
-			reject(
-				signal.reason instanceof Error
-					? signal.reason
-					: new DOMException("Container request was cancelled.", "AbortError"),
-			);
+			reject(abortReason(signal));
 			return;
 		}
 		const onAbort = () => {
 			clearTimeout(timeout);
 			reject(
-				signal?.reason instanceof Error
-					? signal.reason
+				signal
+					? abortReason(signal)
 					: new DOMException("Container request was cancelled.", "AbortError"),
 			);
 		};

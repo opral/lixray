@@ -4,12 +4,10 @@ import { fileURLToPath } from "node:url";
 import { unstable_readConfig, unstable_startWorker } from "wrangler";
 
 const WEB_APP_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const REQUIRED_ABORT_SIGNAL_FLAGS = [
-	"enable_request_signal",
-	"enable_abortsignal_rpc",
-];
+const REQUEST_SIGNAL_FLAG = "enable_request_signal";
+const EXPERIMENTAL_RPC_FLAG = "enable_abortsignal_rpc";
 
-void test("every Worker target enables request cancellation across Durable Object RPC", async () => {
+void test("every Worker target enables request cancellation without experimental RPC flags", async () => {
 	for (const filename of [
 		"wrangler.jsonc",
 		"wrangler.preview.jsonc",
@@ -17,16 +15,19 @@ void test("every Worker target enables request cancellation across Durable Objec
 		"wrangler.e2e.jsonc",
 	]) {
 		const config = readConfig(filename);
-		for (const flag of REQUIRED_ABORT_SIGNAL_FLAGS) {
-			assert.ok(
-				config.compatibility_flags.includes(flag),
-				`${filename} must enable ${flag}`,
-			);
-		}
+		assert.ok(
+			config.compatibility_flags.includes(REQUEST_SIGNAL_FLAG),
+			`${filename} must enable ${REQUEST_SIGNAL_FLAG}`,
+		);
+		assert.equal(
+			config.compatibility_flags.includes(EXPERIMENTAL_RPC_FLAG),
+			false,
+			`${filename} cannot deploy with ${EXPERIMENTAL_RPC_FLAG}`,
+		);
 	}
 });
 
-void test("Workerd can serialize an incoming request signal over Durable Object RPC", async () => {
+void test("Workerd keeps the request signal local to deployable Durable Object RPC", async () => {
 	const productionConfig = readConfig("wrangler.jsonc");
 	const fixtureConfig = fileURLToPath(
 		new URL("./fixtures/wrangler.abort-signal-rpc.jsonc", import.meta.url),

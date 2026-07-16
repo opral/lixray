@@ -3,11 +3,7 @@
 	"name": "lixray-abort-signal-rpc-test",
 	"main": "./abort-signal-rpc.ts",
 	"compatibility_date": "2026-07-07",
-	"compatibility_flags": [
-		"nodejs_compat",
-		"enable_request_signal",
-		"enable_abortsignal_rpc",
-	],
+	"compatibility_flags": ["nodejs_compat", "enable_request_signal"],
 	"durable_objects": {
 		"bindings": [
 			{

@@ -435,7 +435,7 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 		ports?: number | number[];
 		startOptions: { envVars: Record<string, string> };
 	};
-	assert.equal(capturedStartOptions.cancellationOptions?.abort, request.signal);
+	assert.equal(capturedStartOptions.cancellationOptions, undefined);
 	assert.deepEqual(
 		{
 			ports: capturedStartOptions.ports,

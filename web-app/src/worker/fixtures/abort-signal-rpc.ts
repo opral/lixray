@@ -5,21 +5,19 @@ interface Env {
 }
 
 export class SignalTarget extends DurableObject {
-	signalState(signal: AbortSignal): {
-		isAbortSignal: boolean;
-		aborted: boolean;
-	} {
-		return {
-			isAbortSignal: signal instanceof AbortSignal,
-			aborted: signal.aborted,
-		};
+	signalState(aborted: boolean): { aborted: boolean } {
+		return { aborted };
 	}
 }
 
 export default {
 	async fetch(request, env) {
-		return Response.json(
-			await env.SIGNAL_TARGET.getByName("test").signalState(request.signal),
+		const state = await env.SIGNAL_TARGET.getByName("test").signalState(
+			request.signal.aborted,
 		);
+		return Response.json({
+			isAbortSignal: request.signal instanceof AbortSignal,
+			aborted: state.aborted,
+		});
 	},
 } satisfies ExportedHandler<Env>;

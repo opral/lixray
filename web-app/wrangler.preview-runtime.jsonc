@@ -4,11 +4,7 @@
 	"account_id": "11a1a6f76d167248cc6987e978efb7e5",
 	"main": "src/preview-runtime.ts",
 	"compatibility_date": "2026-07-07",
-	"compatibility_flags": [
-		"nodejs_compat",
-		"enable_request_signal",
-		"enable_abortsignal_rpc",
-	],
+	"compatibility_flags": ["nodejs_compat", "enable_request_signal"],
 	"workers_dev": true,
 	"preview_urls": true,
 	"r2_buckets": [
