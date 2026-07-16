@@ -12,7 +12,12 @@ import type {
 	SwitchBranchReceipt,
 } from "@lix-js/sdk";
 import { base64ToBytes, bytesToBase64 } from "./base64.ts";
-import type { Branch, ExecuteResponse, WireValue } from "./lixray-api";
+import type {
+	Branch,
+	ExecuteResponse,
+	ExecuteScriptResponse,
+	WireValue,
+} from "./lixray-api";
 
 type TokenProvider = () => Promise<string | null>;
 
@@ -149,7 +154,7 @@ class MockRemoteLix {
 		options?: ExecuteOptions,
 	): Promise<ExecuteResult> {
 		this.#assertOpen();
-		const payload = await this.#requestJson<ExecuteResponse>("/execute", {
+		const payload = await this.#requestJson<ExecuteScriptResponse>("/execute", {
 			method: "POST",
 			body: JSON.stringify({
 				branchId: this.#activeBranchId,
@@ -160,7 +165,11 @@ class MockRemoteLix {
 					: {}),
 			}),
 		});
-		return executeResponseToResult(payload);
+		const [result] = payload.results;
+		if (!result || payload.results.length !== 1) {
+			throw new Error("Lix returned an invalid single-statement result");
+		}
+		return executeResponseToResult(result);
 	}
 
 	observe(sql: string, params: SqlParam[] = []): MockRemoteObserveEvents {

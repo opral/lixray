@@ -84,19 +84,22 @@ async fn create_branch(
 async fn execute(
     State(state): State<AppState>,
     Json(request): Json<ExecuteRequest>,
-) -> Result<Json<ExecuteResponse>, ApiError> {
+) -> Result<Json<ExecuteScriptResponse>, ApiError> {
     let branch_id = required_non_empty(request.branch_id, "branchId")?;
     let sql = required_non_empty(request.sql, "sql")?;
     let params = decode_params(request.params)?;
     let options = ExecuteOptions {
         origin_key: request.options.and_then(|options| options.origin_key),
     };
-    let result = state
+    let results = state
         .service
-        .execute(branch_id, sql, params, options)
-        .await?;
+        .execute_script(branch_id, sql, params, options)
+        .await?
+        .into_iter()
+        .map(ExecuteResponse::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(Json(ExecuteResponse::try_from(result)?))
+    Ok(Json(ExecuteScriptResponse { results }))
 }
 
 async fn mutate_filesystem(
@@ -471,6 +474,11 @@ struct ExecuteResponse {
     notices: Vec<lix_engine::LixNotice>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct ExecuteScriptResponse {
+    results: Vec<ExecuteResponse>,
+}
+
 impl TryFrom<ExecuteResult> for ExecuteResponse {
     type Error = LixError;
 
@@ -595,6 +603,13 @@ mod tests {
         serde_json::from_slice(&body).unwrap()
     }
 
+    async fn single_execute_response(response: http::Response<Body>) -> ExecuteResponse {
+        let response: ExecuteScriptResponse = response_json(response).await;
+        let [result] = <[ExecuteResponse; 1]>::try_from(response.results)
+            .expect("single statement returns one result");
+        result
+    }
+
     async fn main_branch_id(app: Router) -> String {
         let response = app
             .oneshot(
@@ -644,7 +659,7 @@ mod tests {
         )
         .await;
         assert_eq!(insert.status(), StatusCode::OK);
-        let insert_body: ExecuteResponse = response_json(insert).await;
+        let insert_body = single_execute_response(insert).await;
         assert_eq!(insert_body.rows_affected, 1);
 
         let select = json_request(
@@ -659,12 +674,201 @@ mod tests {
         )
         .await;
         assert_eq!(select.status(), StatusCode::OK);
-        let select_body: ExecuteResponse = response_json(select).await;
+        let select_body = single_execute_response(select).await;
         assert_eq!(
             select_body.rows,
             vec![vec![WireValue::Json {
                 value: json!("http-value")
             }]]
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_supports_explicit_transactions_and_ordered_results() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+        let response = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "BEGIN; INSERT INTO lix_key_value (key, value) VALUES ($1, $2); INSERT INTO lix_key_value (key, value) VALUES ($3, $4); SELECT key FROM lix_key_value WHERE key IN ($1, $3) ORDER BY key; COMMIT;",
+                "params": [
+                    { "kind": "text", "value": "batch-a" },
+                    { "kind": "text", "value": "value-a" },
+                    { "kind": "text", "value": "batch-b" },
+                    { "kind": "text", "value": "value-b" }
+                ],
+                "options": { "originKey": "http-transaction" }
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: ExecuteScriptResponse = response_json(response).await;
+        assert_eq!(body.results.len(), 3);
+        assert_eq!(body.results[0].rows_affected, 1);
+        assert_eq!(body.results[1].rows_affected, 1);
+        assert_eq!(
+            body.results[2].rows,
+            vec![
+                vec![WireValue::Text {
+                    value: "batch-a".to_string()
+                }],
+                vec![WireValue::Text {
+                    value: "batch-b".to_string()
+                }]
+            ]
+        );
+
+        let origin_response = json_request(
+            app,
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT origin_key FROM lix_change WHERE origin_key = $1",
+                "params": [{ "kind": "text", "value": "http-transaction" }]
+            }),
+        )
+        .await;
+        assert_eq!(origin_response.status(), StatusCode::OK);
+        let origin_body = single_execute_response(origin_response).await;
+        assert_eq!(origin_body.rows.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn execute_auto_wraps_anonymous_params_and_rolls_back_on_error() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+        let success = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "INSERT INTO lix_key_value (key, value) VALUES (?, ?); SELECT key FROM lix_key_value WHERE key = ?",
+                "params": [
+                    { "kind": "text", "value": "anonymous-batch" },
+                    { "kind": "text", "value": "value" },
+                    { "kind": "text", "value": "anonymous-batch" }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(success.status(), StatusCode::OK);
+        let success_body: ExecuteScriptResponse = response_json(success).await;
+        assert_eq!(success_body.results.len(), 2);
+        assert_eq!(success_body.results[1].rows.len(), 1);
+
+        let failed = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "INSERT INTO lix_key_value (key, value) VALUES ($1, $2); INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
+                "params": [
+                    { "kind": "text", "value": "rolled-back-batch" },
+                    { "kind": "text", "value": "value" }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(failed.status(), StatusCode::BAD_REQUEST);
+
+        let select = json_request(
+            app,
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT key FROM lix_key_value WHERE key = $1",
+                "params": [{ "kind": "text", "value": "rolled-back-batch" }]
+            }),
+        )
+        .await;
+        let select_body = single_execute_response(select).await;
+        assert!(select_body.rows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn execute_preserves_structured_script_parser_errors() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+
+        let unsupported = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "BEGIN WORK; SELECT 1; COMMIT"
+            }),
+        )
+        .await;
+        assert_eq!(unsupported.status(), StatusCode::BAD_REQUEST);
+        let unsupported_body: JsonValue = response_json(unsupported).await;
+        assert_eq!(
+            unsupported_body["error"]["code"],
+            LixError::CODE_UNSUPPORTED_SQL
+        );
+        assert!(unsupported_body["error"]["hint"].is_string());
+
+        let empty = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/execute",
+            json!({ "branchId": branch_id, "sql": "BEGIN; COMMIT" }),
+        )
+        .await;
+        assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+        let empty_body: JsonValue = response_json(empty).await;
+        assert_eq!(empty_body["error"]["code"], LixError::CODE_UNSUPPORTED_SQL);
+
+        let mixed = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT ?; SELECT $2",
+                "params": [
+                    { "kind": "text", "value": "one" },
+                    { "kind": "text", "value": "two" }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(mixed.status(), StatusCode::BAD_REQUEST);
+        let mixed_body: JsonValue = response_json(mixed).await;
+        assert_eq!(mixed_body["error"]["code"], LixError::CODE_PARSE_ERROR);
+
+        let mismatched = json_request(
+            app,
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT $1; SELECT $2",
+                "params": [{ "kind": "text", "value": "one" }]
+            }),
+        )
+        .await;
+        assert_eq!(mismatched.status(), StatusCode::BAD_REQUEST);
+        let mismatched_body: JsonValue = response_json(mismatched).await;
+        assert_eq!(
+            mismatched_body["error"]["code"],
+            LixError::CODE_INVALID_PARAM
+        );
+        assert_eq!(
+            mismatched_body["error"]["details"]["expected_param_count"],
+            2
+        );
+        assert_eq!(
+            mismatched_body["error"]["details"]["provided_param_count"],
+            1
         );
     }
 
@@ -701,7 +905,7 @@ mod tests {
             }),
         )
         .await;
-        let revision_body: ExecuteResponse = response_json(revision_response).await;
+        let revision_body = single_execute_response(revision_response).await;
         let revision = match &revision_body.rows[0][0] {
             WireValue::Text { value } => value.clone(),
             value => panic!("expected text revision, got {value:?}"),
@@ -768,7 +972,7 @@ mod tests {
             }),
         )
         .await;
-        let select_body: ExecuteResponse = response_json(select).await;
+        let select_body = single_execute_response(select).await;
         assert_eq!(select_body.rows.len(), 1);
     }
 
@@ -866,7 +1070,7 @@ mod tests {
             }),
         )
         .await;
-        let main_body: ExecuteResponse = response_json(main_select).await;
+        let main_body = single_execute_response(main_select).await;
         assert_eq!(main_body.rows.len(), 1);
 
         let draft_select = json_request(
@@ -880,7 +1084,7 @@ mod tests {
             }),
         )
         .await;
-        let draft_body: ExecuteResponse = response_json(draft_select).await;
+        let draft_body = single_execute_response(draft_select).await;
         assert_eq!(draft_body.rows.len(), 0);
     }
 

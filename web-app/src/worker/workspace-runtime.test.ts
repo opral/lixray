@@ -5,6 +5,7 @@ import {
 	decodeWireValue,
 	encodeWireValue,
 	type MemoryLixBinding,
+	type ParseSqlScript,
 } from "./workspace-runtime.ts";
 
 const WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
@@ -187,6 +188,202 @@ void test("finite operations serialize and select their requested branch", async
 	);
 	assert.equal(maximumExecutions, 1);
 	assert.deepEqual(selected, branches);
+});
+
+void test("execute keeps the single-statement fast path and wraps its result", async () => {
+	let directExecutions = 0;
+	let transactionStarts = 0;
+	const runtime = testRuntime(async () =>
+		fakeBinding({
+			execute: async () => {
+				directExecutions += 1;
+				return mutationResult(1);
+			},
+			beginTransaction: async () => {
+				transactionStarts += 1;
+				throw new Error("single statement should not open a transaction");
+			},
+		}),
+	);
+	const response = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/execute", { branchId: BRANCH, sql: "SELECT 1" }),
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), {
+		results: [{ columns: [], rows: [], rowsAffected: 1, notices: [] }],
+	});
+	assert.equal(directExecutions, 1);
+	assert.equal(transactionStarts, 0);
+});
+
+void test("execute runs scripts atomically and returns ordered results", async () => {
+	const executions: Array<{
+		sql: string;
+		params: Array<unknown>;
+		options: unknown;
+	}> = [];
+	let commits = 0;
+	let rollbacks = 0;
+	const binding = fakeBinding({
+		beginTransaction: async () => ({
+			execute: async (
+				sql: string,
+				params: Array<unknown>,
+				options: unknown,
+			) => {
+				executions.push({ sql, params, options });
+				return sql.startsWith("SELECT")
+					? {
+							columns: ["value"],
+							rows: [[{ kind: "text", value: "visible" }]],
+							rowsAffected: 0,
+							notices: [],
+						}
+					: mutationResult(1);
+			},
+			commit: async () => {
+				commits += 1;
+			},
+			rollback: async () => {
+				rollbacks += 1;
+			},
+		}),
+	});
+	const runtime = testRuntime(
+		async () => binding,
+		BRANCH,
+		(sql, paramCount) => {
+			assert.equal(
+				sql,
+				"BEGIN; INSERT INTO example VALUES ($1, $2); SELECT value FROM example WHERE id = $3; COMMIT",
+			);
+			assert.equal(paramCount, 3);
+			return {
+				statements: [
+					{
+						sql: "INSERT INTO example VALUES ($1, $2)",
+						paramStart: 0,
+						paramEnd: 2,
+					},
+					{
+						sql: "SELECT value FROM example WHERE id = $3",
+						paramStart: 0,
+						paramEnd: 3,
+					},
+				],
+			};
+		},
+	);
+	const response = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/execute", {
+			branchId: BRANCH,
+			sql: "BEGIN; INSERT INTO example VALUES ($1, $2); SELECT value FROM example WHERE id = $3; COMMIT",
+			params: [
+				{ kind: "text", value: "one" },
+				{ kind: "text", value: "two" },
+				{ kind: "text", value: "three" },
+			],
+			options: { originKey: "batch-origin" },
+		}),
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), {
+		results: [
+			{ columns: [], rows: [], rowsAffected: 1, notices: [] },
+			{
+				columns: ["value"],
+				rows: [[{ kind: "text", value: "visible" }]],
+				rowsAffected: 0,
+				notices: [],
+			},
+		],
+	});
+	assert.equal(commits, 1);
+	assert.equal(rollbacks, 0);
+	assert.deepEqual(
+		executions.map(({ sql, params, options }) => ({
+			sql,
+			params: params.map(nativeText),
+			options,
+		})),
+		[
+			{
+				sql: "INSERT INTO example VALUES ($1, $2)",
+				params: ["one", "two"],
+				options: { originKey: "batch-origin" },
+			},
+			{
+				sql: "SELECT value FROM example WHERE id = $3",
+				params: ["one", "two", "three"],
+				options: { originKey: "batch-origin" },
+			},
+		],
+	);
+});
+
+void test("execute rolls a script back when a later statement fails", async () => {
+	let executions = 0;
+	let commits = 0;
+	let rollbacks = 0;
+	const failure = Object.assign(new Error("duplicate key"), {
+		code: "LIX_UNIQUE",
+	});
+	const runtime = testRuntime(
+		async () =>
+			fakeBinding({
+				beginTransaction: async () => ({
+					execute: async () => {
+						executions += 1;
+						if (executions === 2) throw failure;
+						return mutationResult(1);
+					},
+					commit: async () => {
+						commits += 1;
+					},
+					rollback: async () => {
+						rollbacks += 1;
+					},
+				}),
+			}),
+		BRANCH,
+		() => ({
+			statements: [
+				{
+					sql: "INSERT INTO example VALUES (?)",
+					paramStart: 0,
+					paramEnd: 1,
+				},
+				{
+					sql: "INSERT INTO example VALUES (?)",
+					paramStart: 1,
+					paramEnd: 2,
+				},
+			],
+		}),
+	);
+	const response = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/execute", {
+			branchId: BRANCH,
+			sql: "INSERT INTO example VALUES (?); INSERT INTO example VALUES (?)",
+			params: [
+				{ kind: "text", value: "one" },
+				{ kind: "text", value: "two" },
+			],
+		}),
+	);
+
+	assert.equal(response.status, 400);
+	assert.deepEqual(await response.json(), {
+		error: { code: "LIX_UNIQUE", message: "duplicate key" },
+	});
+	assert.equal(executions, 2);
+	assert.equal(commits, 0);
+	assert.equal(rollbacks, 1);
 });
 
 void test("filesystem conflicts roll back without applying a mutation", async () => {
@@ -386,9 +583,23 @@ function fakeBinding(
 function testRuntime(
 	openMemoryLix: () => Promise<MemoryLixBinding>,
 	mainBranchId = BRANCH,
+	parseSqlScript: ParseSqlScript = singleStatementParser,
 ) {
-	return createMemoryWorkspaceRuntime(openMemoryLix, { mainBranchId });
+	return createMemoryWorkspaceRuntime(openMemoryLix, {
+		mainBranchId,
+		parseSqlScript,
+	});
 }
+
+const singleStatementParser: ParseSqlScript = (sql, providedParamCount) => ({
+	statements: [
+		{
+			sql,
+			paramStart: 0,
+			paramEnd: providedParamCount,
+		},
+	],
+});
 
 function statefulBranchBinding(initialBranchId: string): MemoryLixBinding {
 	let activeBranchId = initialBranchId;

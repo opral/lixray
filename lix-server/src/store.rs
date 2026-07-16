@@ -1,8 +1,8 @@
 use crate::{Config, StorageConfig};
 use anyhow::{Context, Result};
 use lix_engine::{
-    CreateBranchOptions, CreateBranchReceipt, Engine, ExecuteOptions, ExecuteResult, LixError,
-    ObserveEvent, ObserveEvents, Value,
+    parse_sql_script, CreateBranchOptions, CreateBranchReceipt, Engine, ExecuteOptions,
+    ExecuteResult, LixError, ObserveEvent, ObserveEvents, Value,
 };
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
 use object_store::{aws::AmazonS3Builder, memory::InMemory, ObjectStore};
@@ -121,20 +121,57 @@ impl LixService {
         .await
     }
 
-    pub async fn execute(
+    pub async fn execute_script(
         &self,
         branch_id: String,
         sql: String,
         params: Vec<Value>,
         options: ExecuteOptions,
-    ) -> Result<ExecuteResult, LixError> {
+    ) -> Result<Vec<ExecuteResult>, LixError> {
         self.run("execute", move |engine| async move {
             // A pinned session does not validate its branch until a branch-aware
             // operation runs. Keep this guard so branch-free SQL cannot succeed
             // against a missing branch.
             ensure_branch_exists(&engine, &branch_id, "execute").await?;
+            let plan = parse_sql_script(&sql, params.len())?;
             let session = engine.open_session(branch_id).await?;
-            session.execute_with_options(&sql, &params, options).await
+
+            if let [statement] = plan.statements.as_slice() {
+                let result = session
+                    .execute_with_options(
+                        &statement.sql,
+                        &params[statement.params.clone()],
+                        options,
+                    )
+                    .await?;
+                return Ok(vec![result]);
+            }
+
+            let mut transaction = session.begin_transaction().await?;
+            let mut results = Vec::with_capacity(plan.statements.len());
+            for statement in plan.statements {
+                match transaction
+                    .execute_with_options(
+                        &statement.sql,
+                        &params[statement.params],
+                        options.clone(),
+                    )
+                    .await
+                {
+                    Ok(result) => results.push(result),
+                    Err(error) => {
+                        if let Err(rollback_error) = transaction.rollback().await {
+                            warn!(
+                                error = ?rollback_error,
+                                "failed to roll back SQL transaction after statement error"
+                            );
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+            transaction.commit().await?;
+            Ok(results)
         })
         .await
     }

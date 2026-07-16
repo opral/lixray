@@ -46,20 +46,24 @@ void test("mock remote Lix maps execute params, rows, and explicit values", asyn
 		}
 		if (url.endsWith("/execute")) {
 			return jsonResponse({
-				columns: ["nil", "ok", "count", "ratio", "name", "meta", "bytes"],
-				rows: [
-					[
-						{ kind: "null", value: null },
-						{ kind: "bool", value: true },
-						{ kind: "int", value: 3 },
-						{ kind: "float", value: 1.5 },
-						{ kind: "text", value: "LixRay" },
-						{ kind: "json", value: { ready: true } },
-						{ kind: "blob", base64: "AQID" },
-					],
+				results: [
+					{
+						columns: ["nil", "ok", "count", "ratio", "name", "meta", "bytes"],
+						rows: [
+							[
+								{ kind: "null", value: null },
+								{ kind: "bool", value: true },
+								{ kind: "int", value: 3 },
+								{ kind: "float", value: 1.5 },
+								{ kind: "text", value: "LixRay" },
+								{ kind: "json", value: { ready: true } },
+								{ kind: "blob", base64: "AQID" },
+							],
+						],
+						rowsAffected: 1,
+						notices: [],
+					},
 				],
-				rowsAffected: 1,
-				notices: [],
 			});
 		}
 		throw new Error(`Unexpected request: ${url}`);
@@ -348,10 +352,7 @@ void test("branch switching restarts live observations and updates later execute
 			};
 			executeBranch = body.branchId;
 			return jsonResponse({
-				columns: [],
-				rows: [],
-				rowsAffected: 0,
-				notices: [],
+				results: [{ columns: [], rows: [], rowsAffected: 0, notices: [] }],
 			});
 		}
 		throw new Error(`Unexpected request: ${url}`);

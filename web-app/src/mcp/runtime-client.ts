@@ -2,7 +2,9 @@ import {
 	type Branch,
 	type ExecuteRequest,
 	type ExecuteResponse,
+	type ExecuteScriptResponse,
 	FileServiceError,
+	type FileServiceErrorCode,
 	type LixRuntimeClient,
 	type FilesystemMutationOutcome,
 	type FilesystemMutationRequest,
@@ -194,11 +196,30 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		workspaceId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse> {
-		return this.containerJson<ExecuteResponse>(workspaceId, "/v1/execute", {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(request),
-		});
+		const response = await this.executeScript(workspaceId, request);
+		const [result] = response.results;
+		if (!result || response.results.length !== 1) {
+			throw new FileServiceError(
+				"upstream_error",
+				"Lix returned an invalid single-statement result.",
+			);
+		}
+		return result;
+	}
+
+	async executeScript(
+		workspaceId: string,
+		request: ExecuteRequest,
+	): Promise<ExecuteScriptResponse> {
+		return this.containerJson<ExecuteScriptResponse>(
+			workspaceId,
+			"/v1/execute",
+			{
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(request),
+			},
+		);
 	}
 
 	async mutate(
@@ -295,9 +316,9 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			if (response.ok) return body as T;
 			if (!isTransientContainerResponse(response, body)) {
 				throw new FileServiceError(
-					"upstream_error",
+					apiErrorCode(body) ?? "upstream_error",
 					apiErrorMessage(body, response.status),
-					{ status: response.status },
+					apiErrorDetails(body, response.status),
 				);
 			}
 
@@ -317,9 +338,9 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		const body = await parseResponse(response);
 		if (!response.ok) {
 			throw new FileServiceError(
-				"upstream_error",
+				apiErrorCode(body) ?? "upstream_error",
 				apiErrorMessage(body, response.status),
-				{ status: response.status },
+				apiErrorDetails(body, response.status),
 			);
 		}
 		return body as T;
@@ -357,19 +378,43 @@ async function parseResponse(response: Response): Promise<unknown> {
 }
 
 function apiErrorMessage(body: unknown, status: number): string {
-	if (
-		body &&
-		typeof body === "object" &&
-		"error" in body &&
-		body.error &&
-		typeof body.error === "object" &&
-		"message" in body.error &&
-		typeof body.error.message === "string"
-	) {
-		return body.error.message;
-	}
+	const error = apiErrorBody(body);
+	if (typeof error?.message === "string") return error.message;
 	if (typeof body === "string" && body.trim()) return body.trim();
 	return `Lix request failed with status ${status}.`;
+}
+
+function apiErrorCode(body: unknown): FileServiceErrorCode | undefined {
+	const code = apiErrorBody(body)?.code;
+	return typeof code === "string" && code.startsWith("LIX_")
+		? (code as `LIX_${string}`)
+		: undefined;
+}
+
+function apiErrorDetails(
+	body: unknown,
+	status: number,
+): Record<string, unknown> {
+	const error = apiErrorBody(body);
+	const details =
+		error?.details &&
+		typeof error.details === "object" &&
+		!Array.isArray(error.details)
+			? (error.details as Record<string, unknown>)
+			: {};
+	return {
+		...details,
+		status,
+		...(typeof error?.hint === "string" ? { hint: error.hint } : {}),
+	};
+}
+
+function apiErrorBody(body: unknown): Record<string, unknown> | undefined {
+	if (!body || typeof body !== "object" || !("error" in body)) return undefined;
+	const error = body.error;
+	return error && typeof error === "object"
+		? (error as Record<string, unknown>)
+		: undefined;
 }
 
 function isTransientContainerError(caught: unknown): boolean {

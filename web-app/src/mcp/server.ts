@@ -150,15 +150,16 @@ const deleteEntryOutput = z.union([
 	z.object({ path: absolutePath, deleted: z.literal(true) }).strict(),
 	toolErrorOutput,
 ]);
+const executeStatementOutput = z
+	.object({
+		columns: z.array(z.string()),
+		rows: z.array(z.array(wireValue)),
+		rowsAffected: z.number().int().nonnegative(),
+		notices: z.array(z.unknown()),
+	})
+	.strict();
 const executeOutput = z.union([
-	z
-		.object({
-			columns: z.array(z.string()),
-			rows: z.array(z.array(wireValue)),
-			rowsAffected: z.number().int().nonnegative(),
-			notices: z.array(z.unknown()),
-		})
-		.strict(),
+	z.object({ results: z.array(executeStatementOutput) }).strict(),
 	toolErrorOutput,
 ]);
 
@@ -380,7 +381,7 @@ export function mcpDocumentationResponse(
 			"",
 			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
-			"The server exposes explicit-workspace, explicit-branch tools for listing, reading, creating, editing, moving, and deleting UTF-8 text files up to 1 MiB, plus a destructive raw Lix SQL execute tool. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards.",
+			"The server exposes explicit-workspace, explicit-branch tools for listing, reading, creating, editing, moving, and deleting UTF-8 text files up to 1 MiB, plus a destructive raw Lix SQL execute tool. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards. Execute accepts a single statement or an atomic semicolon-delimited script, optionally bounded by BEGIN and COMMIT. Scripts return one result per executable statement and use request-wide $n parameters or script-ordered ? parameters.",
 		].join("\n"),
 		{
 			headers: {
@@ -732,7 +733,7 @@ function buildTools(
 		tool(
 			"execute",
 			"Execute raw Lix SQL",
-			"Execute caller-provided Lix SQL against an authorized workspace branch. SQL can read or mutate any SQL-accessible branch data and bypasses file-tool safeguards.",
+			"Execute caller-provided Lix SQL against an authorized workspace branch. Multiple statements run atomically, either unwrapped or inside BEGIN ... COMMIT, and return one result per executable statement. SQL can read or mutate any SQL-accessible branch data and bypasses file-tool safeguards.",
 			z
 				.object({
 					workspace_id: uuid,

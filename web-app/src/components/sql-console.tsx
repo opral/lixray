@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	type Branch,
 	type ExecuteResponse,
+	type ExecuteScriptResponse,
 	formatWireValue,
 	parseParamsJson,
 	useLixrayApi,
@@ -34,7 +35,7 @@ export function SqlConsole({ workspaceName }: { workspaceName: string }) {
 	const [activeBranchId, setActiveBranchId] = useState("");
 	const [sql, setSql] = useState(defaultSql);
 	const [params, setParams] = useState(defaultParams);
-	const [result, setResult] = useState<ExecuteResponse | null>(null);
+	const [result, setResult] = useState<ExecuteScriptResponse | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loadingBranches, setLoadingBranches] = useState(false);
 	const [executing, setExecuting] = useState(false);
@@ -195,11 +196,26 @@ export function SqlConsole({ workspaceName }: { workspaceName: string }) {
 								{error}
 							</div>
 						) : null}
-						{result ? <ResultTable result={result} /> : null}
+						{result ? <ResultDisplay result={result} /> : null}
 					</div>
 				</section>
 			</div>
 		</>
+	);
+}
+
+function ResultDisplay({ result }: { result: ExecuteScriptResponse }) {
+	return (
+		<div data-testid="atomic-results">
+			{result.results.map((statement, index) => (
+				<div key={index}>
+					<p className="mt-[18px] text-[13px] font-[680] text-text-secondary">
+						Statement {index + 1}
+					</p>
+					<ResultTable result={statement} />
+				</div>
+			))}
+		</div>
 	);
 }
 

@@ -1,7 +1,7 @@
 import { expect, expectOk, test } from "./fixtures";
 import type {
 	BranchesResponse,
-	ExecuteResponse,
+	ExecuteScriptResponse,
 } from "../../src/lib/lixray-api";
 import { DEMO_MAIN_BRANCH_ID } from "../../src/lib/demo-identity";
 
@@ -67,7 +67,7 @@ test("landing page renders and the canonical workspace route opens", async ({
 	await expect(page.getByRole("heading", { name: "Workspaces" })).toBeVisible();
 });
 
-test("sql console loads branches and executes a trivial query", async ({
+test("sql console loads branches and executes a multi-statement script", async ({
 	page,
 }) => {
 	const branchesResponsePromise = page.waitForResponse(
@@ -116,7 +116,7 @@ test("sql console loads branches and executes a trivial query", async ({
 		page.locator('[data-testid="branch-button"][aria-pressed="true"]'),
 	).toBeVisible();
 
-	await page.getByLabel("Statement").fill("SELECT 1 AS one");
+	await page.getByLabel("Statement").fill("SELECT 1 AS one; SELECT 2 AS two");
 	await page.getByLabel("Params").fill("[]");
 	await expect(page.getByRole("button", { name: "Execute" })).toBeEnabled();
 	const executeResponsePromise = page.waitForResponse(
@@ -130,20 +130,40 @@ test("sql console loads branches and executes a trivial query", async ({
 	const executeResponse = await executeResponsePromise;
 
 	await expectOk(executeResponse);
-	const executeBody = (await executeResponse.json()) as ExecuteResponse;
-	expect(executeBody.columns, JSON.stringify(executeBody)).toEqual(["one"]);
-	expect(executeBody.rows, JSON.stringify(executeBody)).toEqual([
-		[{ kind: "int", value: 1 }],
+	const executeBody = (await executeResponse.json()) as ExecuteScriptResponse;
+	expect(executeBody.results, JSON.stringify(executeBody)).toEqual([
+		{
+			columns: ["one"],
+			rows: [[{ kind: "int", value: 1 }]],
+			rowsAffected: 0,
+			notices: [],
+		},
+		{
+			columns: ["two"],
+			rows: [[{ kind: "int", value: 2 }]],
+			rowsAffected: 0,
+			notices: [],
+		},
 	]);
-	const result = page.getByTestId("query-result");
-	await expect(result).toBeVisible({ timeout: 50_000 });
-	await expect(result.getByText("1 rows")).toBeVisible();
-	await expect(page.getByTestId("result-table")).toBeVisible();
+	await expect(page.getByText("Statement 1")).toBeVisible({ timeout: 50_000 });
+	await expect(page.getByText("Statement 2")).toBeVisible();
+	const results = page.getByTestId("query-result");
+	await expect(results).toHaveCount(2);
+	await expect(results.first().getByText("1 rows")).toBeVisible();
+	await expect(results.nth(1).getByText("1 rows")).toBeVisible();
+	const resultTables = page.getByTestId("result-table");
+	await expect(resultTables).toHaveCount(2);
 	await expect(
-		page.getByTestId("result-table").getByRole("columnheader", { name: "one" }),
+		resultTables.first().getByRole("columnheader", { name: "one" }),
 	).toBeVisible();
 	await expect(
-		page.getByTestId("result-table").getByRole("cell", { name: "1" }),
+		resultTables.first().getByRole("cell", { name: "1" }),
+	).toBeVisible();
+	await expect(
+		resultTables.nth(1).getByRole("columnheader", { name: "two" }),
+	).toBeVisible();
+	await expect(
+		resultTables.nth(1).getByRole("cell", { name: "2" }),
 	).toBeVisible();
 	await expect(page.getByRole("alert")).toHaveCount(0);
 });
