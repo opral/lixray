@@ -47,6 +47,7 @@ export interface BranchState {
 export interface WorkspaceSummary {
 	id: string;
 	name: string;
+	slug: string;
 	organization: { id: string; name: string };
 }
 

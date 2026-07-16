@@ -421,6 +421,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 			{
 				id: WORKSPACE_ID,
 				name: "Personal",
+				slug: "personal",
 				organization: { id: "org-1", name: "Example" },
 			},
 		];

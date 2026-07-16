@@ -294,6 +294,7 @@ void test("injected workspaces and workspace fetch bypass Supabase and container
 		{
 			id: WORKSPACE_ID,
 			name: "Demo workspace",
+			slug: "demo-workspace",
 			organization: { id: "org-demo", name: "Demo" },
 		},
 	];
@@ -393,8 +394,18 @@ void test("workspace discovery uses the OAuth token and only joins RLS-visible r
 					return Response.json([{ id: "org-1", name: "Example" }]);
 				}
 				return Response.json([
-					{ id: WORKSPACE_ID, organization_id: "org-1", name: "Personal" },
-					{ id: "hidden", organization_id: "not-visible", name: "Hidden" },
+					{
+						id: WORKSPACE_ID,
+						organization_id: "org-1",
+						name: "Personal",
+						slug: "personal",
+					},
+					{
+						id: "hidden",
+						organization_id: "not-visible",
+						name: "Hidden",
+						slug: "hidden",
+					},
 				]);
 			},
 		},
@@ -404,6 +415,7 @@ void test("workspace discovery uses the OAuth token and only joins RLS-visible r
 		{
 			id: WORKSPACE_ID,
 			name: "Personal",
+			slug: "personal",
 			organization: { id: "org-1", name: "Example" },
 		},
 	]);
@@ -415,6 +427,11 @@ void test("workspace discovery uses the OAuth token and only joins RLS-visible r
 		);
 		assert.equal(request.headers.get("apikey"), "publishable-key");
 	}
+	assert.equal(
+		requests.find(({ url }) => url.pathname.endsWith("/workspaces"))?.url
+			.searchParams.get("select"),
+		"id,organization_id,name,slug",
+	);
 });
 
 void test("workspace discovery invokes the Worker fetch function without a class receiver", async () => {
@@ -441,6 +458,7 @@ void test("workspace discovery invokes the Worker fetch function without a class
 							id: WORKSPACE_ID,
 							organization_id: "org-1",
 							name: "Personal",
+							slug: "personal",
 						},
 					]),
 		);

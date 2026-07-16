@@ -319,6 +319,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				{
 					id: WORKSPACE_ID,
 					name: "Personal",
+					slug: "personal",
 					organization: { id: "org-1", name: "Example" },
 				},
 			],
@@ -581,6 +582,7 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 			{
 				id: WORKSPACE_ID,
 				name: "Personal",
+				slug: "personal",
 				organization: { id: "org-1", name: "Example" },
 			},
 		];
