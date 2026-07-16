@@ -13,6 +13,7 @@ import {
 	LixFileService,
 	type WireValue,
 } from "./file-service.ts";
+import { EXECUTE_TOOL_DESCRIPTION } from "./execute-schema.ts";
 
 export const MCP_PATH = "/mcp";
 export const MCP_RESOURCE = "https://lixray.com";
@@ -733,7 +734,7 @@ function buildTools(
 		tool(
 			"execute",
 			"Execute raw Lix SQL",
-			"Execute caller-provided Lix SQL against an authorized workspace branch. Multiple statements run atomically, either unwrapped or inside BEGIN ... COMMIT, and return one result per executable statement. SQL can read or mutate any SQL-accessible branch data and bypasses file-tool safeguards.",
+			EXECUTE_TOOL_DESCRIPTION,
 			z
 				.object({
 					workspace_id: uuid,

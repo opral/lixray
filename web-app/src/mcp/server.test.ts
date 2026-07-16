@@ -12,6 +12,12 @@ import {
 	type LixRuntimeClient,
 } from "./file-service.ts";
 import {
+	EXECUTE_SQL_INTROSPECTION_QUERY,
+	EXECUTE_SQL_REFERENCE_DDL,
+	EXECUTE_SQL_SURFACES,
+	EXECUTE_TOOL_DESCRIPTION,
+} from "./execute-schema.ts";
+import {
 	MCP_AUTHORIZATION_SERVER,
 	MCP_PROTECTED_RESOURCE_URL,
 	MCP_RESOURCE,
@@ -132,6 +138,19 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			assert.equal(tool.annotations?.destructiveHint, false, tool.name);
 		}
 		const executeTool = listed.tools.find((tool) => tool.name === "execute");
+		assert.ok(executeTool);
+		assert.equal(executeTool.description, EXECUTE_TOOL_DESCRIPTION);
+		assert.ok(executeTool.description.includes(EXECUTE_SQL_REFERENCE_DDL));
+		assert.ok(
+			executeTool.description.includes(EXECUTE_SQL_INTROSPECTION_QUERY),
+		);
+		for (const sqlSurface of EXECUTE_SQL_SURFACES) {
+			assert.ok(
+				executeTool.description.includes(`CREATE TABLE ${sqlSurface.name} (`),
+				sqlSurface.name,
+			);
+		}
+		assert.deepEqual(runtimeClient.executeRequests, []);
 		assert.equal(executeTool?.annotations?.readOnlyHint, false);
 		assert.equal(executeTool?.annotations?.destructiveHint, true);
 		assert.equal(executeTool?.annotations?.idempotentHint, false);
