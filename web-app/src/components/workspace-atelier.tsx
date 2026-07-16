@@ -67,6 +67,9 @@ export function WorkspaceAtelier({
 	const routeFilePath =
 		"_splat" in routeParams ? routeParams._splat : undefined;
 	const [instance, setInstance] = useState<AtelierInstance | null>(null);
+	const [workspaceDefaultBranchId, setWorkspaceDefaultBranchId] = useState<
+		string | null
+	>(null);
 	const [error, setError] = useState<string | null>(null);
 	const activeLixRef = useRef<BrowserLix | null>(null);
 	const pathnameRef = useRef(pathname);
@@ -172,6 +175,7 @@ export function WorkspaceAtelier({
 		let disposed = false;
 		let activeLix: Lix | null = null;
 		setInstance(null);
+		setWorkspaceDefaultBranchId(null);
 		setError(null);
 
 		const userId = isDemoModeEnabled ? DEMO_AUTH_TOKEN : user?.id;
@@ -192,6 +196,7 @@ export function WorkspaceAtelier({
 				}
 				activeLix = lix;
 				activeLixRef.current = lix;
+				setWorkspaceDefaultBranchId(lix.defaultBranchSnapshot());
 				const branchSession = createWorkspaceBranchSession({
 					lix,
 					onSwitch: async (nextBranchId, context) => {
@@ -329,7 +334,7 @@ export function WorkspaceAtelier({
 		>
 			{instance ? (
 				<WorkspaceDefaultBranchContext.Provider
-					value={activeLixRef.current?.defaultBranchSnapshot() ?? null}
+					value={workspaceDefaultBranchId}
 				>
 					<WorkspaceAtelierContext.Provider value={instance}>
 						<Atelier
