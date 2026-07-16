@@ -29,6 +29,13 @@ import {
 	createMcpTelemetrySession,
 	type McpTelemetrySession,
 } from "./mcp-telemetry.ts";
+import {
+	fetchContainerWithRetry,
+	logContainerRetry,
+	type ContainerNamespace as RetryingContainerNamespace,
+	type ContainerRetryDelay,
+	type ContainerStub as RetryingContainerStub,
+} from "./container-retry.ts";
 
 export interface WorkerEnv {
 	ASSETS?: Fetcher;
@@ -57,22 +64,8 @@ export interface PreviewWorkerEnv extends WorkerEnv {
 	PREVIEW_STATE: R2Bucket;
 }
 
-export interface ContainerNamespace {
-	getByName(name: string): ContainerStub;
-}
-
-export interface ContainerStub {
-	startAndWaitForPorts?(options: {
-		ports?: number | number[];
-		cancellationOptions?: {
-			instanceGetTimeoutMS?: number;
-			portReadyTimeoutMS?: number;
-			waitInterval?: number;
-		};
-		startOptions: { envVars: Record<string, string> };
-	}): Promise<unknown>;
-	fetch(request: Request): Promise<Response>;
-}
+export type ContainerNamespace = RetryingContainerNamespace;
+export type ContainerStub = RetryingContainerStub;
 
 export interface HandleRequestOptions {
 	authenticate?: AuthenticateRequest;
@@ -83,6 +76,8 @@ export interface HandleRequestOptions {
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	executionContext?: ExecutionContext;
 	createMcpTelemetry?: typeof createMcpTelemetrySession;
+	containerRetryDelay?: ContainerRetryDelay;
+	containerRetryRandom?: () => number;
 }
 
 export interface AuthenticatedUser {
@@ -178,6 +173,9 @@ export async function handleRequest(
 			authResult.auth,
 			async (workspaceId, auth) => authorizeWorkspace(workspaceId, auth, env),
 			{
+				signal: request.signal,
+				retryDelay: options.containerRetryDelay,
+				retryRandom: options.containerRetryRandom,
 				workspaceFetch: options.workspaceFetch,
 				workspaceSummaries: isDemoMode(env)
 					? demoWorkspaceSummaries(env)
@@ -252,15 +250,20 @@ export async function handleRequest(
 			status: 500,
 		});
 	}
-	const container = env.SLATEDB_CONTAINER.getByName(workspaceId);
 	try {
-		await container.startAndWaitForPorts?.({
-			ports: 8080,
-			startOptions: {
-				envVars: containerEnv(env, workspaceId),
-			},
+		return await fetchContainerWithRetry({
+			namespace: env.SLATEDB_CONTAINER,
+			workspaceId,
+			operation: `${request.method} /v1${match[2]}`,
+			envVars: containerEnv(env, workspaceId),
+			createRequest: () => rewrittenRequest.clone() as unknown as Request,
+			signal: request.signal,
+			retryDelay: options.containerRetryDelay,
+			retryRandom: options.containerRetryRandom,
+			onRetry: logContainerRetry,
 		});
-	} catch {
+	} catch (caught) {
+		if (request.signal.aborted) throw caught;
 		return Response.json(
 			{
 				error: {
@@ -271,7 +274,6 @@ export async function handleRequest(
 			{ status: 503, headers: { "Retry-After": "1" } },
 		);
 	}
-	return container.fetch(rewrittenRequest);
 }
 
 export async function authenticateWithSupabase(
