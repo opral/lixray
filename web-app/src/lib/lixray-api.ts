@@ -26,6 +26,7 @@ export interface Branch {
 
 export interface BranchesResponse {
 	branches: Array<Branch>;
+	currentBranchId: string;
 }
 
 export interface ExecuteResponse {

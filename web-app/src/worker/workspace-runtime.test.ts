@@ -66,11 +66,15 @@ void test("canonical main branch ids work across independent isolates", async ()
 		WORKSPACE_A,
 		workspaceRequest("/branches"),
 	);
-	const firstMainBranch = mainBranch(await firstResponse.json());
-	const secondMainBranch = mainBranch(await secondResponse.json());
+	const firstBody = await firstResponse.json();
+	const secondBody = await secondResponse.json();
+	const firstMainBranch = mainBranch(firstBody);
+	const secondMainBranch = mainBranch(secondBody);
 
 	assert.equal(firstMainBranch.id, BRANCH);
 	assert.equal(secondMainBranch.id, BRANCH);
+	assert.equal(currentBranchId(firstBody), BRANCH);
+	assert.equal(currentBranchId(secondBody), BRANCH);
 	const executeResponse = await second.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/execute", {
@@ -667,6 +671,16 @@ function mainBranch(value: unknown): { id: string; name: string } {
 	const main = branches.find((branch) => branch.name === "main");
 	assert.ok(main);
 	return main;
+}
+
+function currentBranchId(value: unknown): string {
+	assert.ok(
+		typeof value === "object" &&
+			value !== null &&
+			"currentBranchId" in value &&
+			typeof value.currentBranchId === "string",
+	);
+	return value.currentBranchId;
 }
 
 function nativeText(value: unknown): string {

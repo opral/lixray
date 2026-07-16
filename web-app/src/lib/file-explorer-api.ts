@@ -81,7 +81,7 @@ export function useFileExplorerApi() {
 		};
 		const service = new LixFileService({
 			listWorkspaces: () => Promise.resolve([]),
-			listBranches: async () => (await api.listBranches()).branches,
+			listBranches: () => api.listBranches(),
 			execute: async (_workspaceId, request) => executeStatement(request),
 			executeScript: async (_workspaceId, request) => api.execute(request),
 			mutate: async (_workspaceId, request) => api.mutateFilesystem(request),
@@ -343,9 +343,7 @@ export function useFileExplorerApi() {
 		}
 
 		return {
-			listBranches: async () => ({
-				branches: await service.listBranches(workspaceId),
-			}),
+			listBranches: () => service.listBranches(workspaceId),
 			listDirectory,
 			createDirectory,
 			ensureDirectories,

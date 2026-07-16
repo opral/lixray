@@ -76,6 +76,7 @@ void test("MCP documentation distinguishes browser and client authentication", a
 	assert.match(documentation, /do not include access or refresh tokens/);
 	assert.match(documentation, /atomic semicolon-delimited script/);
 	assert.match(documentation, /request-wide \$n parameters/);
+	assert.match(documentation, /default to the workspace default branch/);
 });
 
 void test("MCP initialize, tools/list, and tools/call expose the authenticated tool contract", async () => {
@@ -282,9 +283,14 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			const inputSchema = rawTools.find((tool) => tool.name === name)
 				?.inputSchema as
 				| {
+						required?: Array<string>;
 						properties?: Record<
 							string,
-							{ format?: string; maxLength?: number }
+							{
+								format?: string;
+								maxLength?: number;
+								description?: string;
+							}
 						>;
 				  }
 				| undefined;
@@ -292,6 +298,15 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			assert.ok(branchSchema, `${name} should expose branch_id`);
 			assert.equal(branchSchema.format, "uuid", name);
 			assert.equal(branchSchema.maxLength, undefined, name);
+			assert.match(
+				branchSchema.description ?? "",
+				/Omit to use the workspace default branch/,
+			);
+			assert.equal(
+				inputSchema.required?.includes("branch_id") ?? false,
+				false,
+				`${name} should default branch_id`,
+			);
 		}
 
 		const workspaces = await client.callTool({
@@ -323,13 +338,13 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 					commitId: COMMIT_ID,
 				},
 			],
+			current_branch_id: BRANCH_ID,
 		});
 
 		const executed = await client.callTool({
 			name: "execute",
 			arguments: {
 				workspace_id: WORKSPACE_ID,
-				branch_id: BRANCH_ID,
 				sql: "SELECT value FROM lix_key_value WHERE key = $1",
 				params: [{ kind: "text", value: "example" }],
 			},
@@ -572,32 +587,35 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	async listBranches() {
-		return [
-			{
-				id: BRANCH_ID,
-				name: "main",
-				hidden: false,
-				commitId: COMMIT_ID,
-			},
-			{
-				id: HIDDEN_BRANCH_ID,
-				name: "hidden",
-				hidden: true,
-				commitId: COMMIT_ID,
-			},
-			{
-				id: "global",
-				name: "global",
-				hidden: true,
-				commitId: COMMIT_ID,
-			},
-			{
-				id: "legacy-custom-id",
-				name: "legacy",
-				hidden: false,
-				commitId: COMMIT_ID,
-			},
-		];
+		return {
+			branches: [
+				{
+					id: BRANCH_ID,
+					name: "main",
+					hidden: false,
+					commitId: COMMIT_ID,
+				},
+				{
+					id: HIDDEN_BRANCH_ID,
+					name: "hidden",
+					hidden: true,
+					commitId: COMMIT_ID,
+				},
+				{
+					id: "global",
+					name: "global",
+					hidden: true,
+					commitId: COMMIT_ID,
+				},
+				{
+					id: "legacy-custom-id",
+					name: "legacy",
+					hidden: false,
+					commitId: COMMIT_ID,
+				},
+			],
+			currentBranchId: BRANCH_ID,
+		};
 	}
 
 	async execute(

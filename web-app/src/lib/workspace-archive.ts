@@ -16,7 +16,7 @@ export async function fetchWorkspaceFileCount(
 	workspaceId: string,
 	getAccessToken: AccessTokenGetter,
 ): Promise<number> {
-	const branchId = await getMainBranchId(workspaceId, getAccessToken);
+	const branchId = await getCurrentBranchId(workspaceId, getAccessToken);
 	const response = await workspaceRequest<ExecuteScriptResponse>(
 		workspaceId,
 		getAccessToken,
@@ -39,7 +39,7 @@ export async function buildWorkspaceArchive(
 	workspaceId: string,
 	getAccessToken: AccessTokenGetter,
 ): Promise<Uint8Array<ArrayBuffer>> {
-	const branchId = await getMainBranchId(workspaceId, getAccessToken);
+	const branchId = await getCurrentBranchId(workspaceId, getAccessToken);
 	const response = await workspaceRequest<ExecuteScriptResponse>(
 		workspaceId,
 		getAccessToken,
@@ -71,7 +71,7 @@ function singleResult(response: ExecuteScriptResponse): ExecuteResponse {
 	return result;
 }
 
-async function getMainBranchId(
+async function getCurrentBranchId(
 	workspaceId: string,
 	getAccessToken: AccessTokenGetter,
 ): Promise<string> {
@@ -80,9 +80,9 @@ async function getMainBranchId(
 		getAccessToken,
 		"/branches",
 	);
-	const branch =
-		result.branches.find((candidate) => candidate.name === "main") ??
-		result.branches[0];
+	const branch = result.branches.find(
+		(candidate) => candidate.id === result.currentBranchId,
+	);
 	if (!branch)
 		throw new Error("This workspace does not have a branch to archive.");
 	return branch.id;

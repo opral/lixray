@@ -151,7 +151,7 @@ void test("branch selection is serialized and only the latest request is routed"
 	const routed: string[] = [];
 	const lix = {
 		activeBranchSnapshot: () => activeBranchId,
-		mainBranchSnapshot: () => MAIN,
+		defaultBranchSnapshot: () => MAIN,
 		subscribeActiveBranch: () => () => undefined,
 		switchBranch: async ({ branchId }: SwitchBranchOptions) => {
 			selected.push(branchId);
@@ -196,7 +196,7 @@ void test("a failed latest branch selection reconciles the last successful branc
 	const routed: string[] = [];
 	const lix = {
 		activeBranchSnapshot: () => activeBranchId,
-		mainBranchSnapshot: () => MAIN,
+		defaultBranchSnapshot: () => MAIN,
 		subscribeActiveBranch: () => () => undefined,
 		switchBranch: async ({ branchId }: SwitchBranchOptions) => {
 			if (branchId === DRAFT) {
@@ -354,6 +354,7 @@ void test("browser Lix validates the initial branch and pins each request explic
 		).pathname;
 		if (pathname.endsWith("/branches")) {
 			return Response.json({
+				currentBranchId: MAIN,
 				branches: [
 					{ id: MAIN, name: "main", hidden: false, commitId: "commit-main" },
 					{

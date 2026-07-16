@@ -100,9 +100,7 @@ test("sql console loads branches and executes a multi-statement script", async (
 		branchesBody.branches.length,
 		JSON.stringify(branchesBody),
 	).toBeGreaterThan(0);
-	expect(
-		branchesBody.branches.find((branch) => branch.name === "main")?.id,
-	).toBe(DEMO_MAIN_BRANCH_ID);
+	expect(branchesBody.currentBranchId).toBe(DEMO_MAIN_BRANCH_ID);
 	await expect(page.getByText("Loading branches...")).toBeHidden({
 		timeout: 50_000,
 	});
