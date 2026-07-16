@@ -430,24 +430,36 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 	);
 
 	assert.equal(response.headers.get("content-type"), "text/event-stream");
-	assert.deepEqual(startOptions, {
-		ports: 8080,
-		startOptions: {
-			envVars: {
-				R2_ENDPOINT: "https://r2.example",
-				R2_BUCKET: "lixray",
-				R2_ACCESS_KEY_ID: "access-key",
-				R2_SECRET_ACCESS_KEY: "secret-key",
-				R2_REGION: "auto",
-				SLATEDB_PATH: WORKSPACE_A,
-				SLATEDB_STORAGE: "r2",
-				SLATEDB_CACHE_DIR: "/tmp/lixray-slatedb-cache",
-				SLATEDB_CACHE_MAX_BYTES: "2147483648",
-				SLATEDB_BLOCK_CACHE_BYTES: "134217728",
-				SLATEDB_METADATA_CACHE_BYTES: "33554432",
+	const capturedStartOptions = startOptions as {
+		cancellationOptions?: { abort?: AbortSignal };
+		ports?: number | number[];
+		startOptions: { envVars: Record<string, string> };
+	};
+	assert.equal(capturedStartOptions.cancellationOptions?.abort, request.signal);
+	assert.deepEqual(
+		{
+			ports: capturedStartOptions.ports,
+			startOptions: capturedStartOptions.startOptions,
+		},
+		{
+			ports: 8080,
+			startOptions: {
+				envVars: {
+					R2_ENDPOINT: "https://r2.example",
+					R2_BUCKET: "lixray",
+					R2_ACCESS_KEY_ID: "access-key",
+					R2_SECRET_ACCESS_KEY: "secret-key",
+					R2_REGION: "auto",
+					SLATEDB_PATH: WORKSPACE_A,
+					SLATEDB_STORAGE: "r2",
+					SLATEDB_CACHE_DIR: "/tmp/lixray-slatedb-cache",
+					SLATEDB_CACHE_MAX_BYTES: "2147483648",
+					SLATEDB_BLOCK_CACHE_BYTES: "134217728",
+					SLATEDB_METADATA_CACHE_BYTES: "33554432",
+				},
 			},
 		},
-	});
+	);
 	assert.ok(proxiedRequest);
 	assert.equal(new URL(proxiedRequest.url).pathname, "/v1/execute");
 	assert.equal(new URL(proxiedRequest.url).search, "?mode=test");
@@ -456,14 +468,94 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 	assert.deepEqual(await proxiedRequest.json(), { sql: "SELECT 1" });
 });
 
-void test("container startup failures return a controlled 503 response", async () => {
+void test("transient container resets retry with a reacquired stub", async () => {
+	let acquisitions = 0;
+	let starts = 0;
+	let fetches = 0;
+	const response = await handleRequest(
+		workspaceRequest(WORKSPACE_A, "/branches"),
+		env({
+			getByName: () => {
+				acquisitions += 1;
+				return {
+					startAndWaitForPorts: async () => {
+						starts += 1;
+						if (acquisitions === 1) {
+							throw new Error(
+								"Internal error in Durable Object storage caused object to be reset; reference = retry-me",
+							);
+						}
+					},
+					fetch: async () => {
+						fetches += 1;
+						return new Response("ok");
+					},
+				};
+			},
+		}),
+		{
+			authenticate: authenticated(),
+			authorizeWorkspace: allowed(),
+			containerRetryDelay: async () => undefined,
+			containerRetryRandom: () => 1,
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(await response.text(), "ok");
+	assert.equal(acquisitions, 2);
+	assert.equal(starts, 2);
+	assert.equal(fetches, 1);
+});
+
+void test("direct request bodies replay across transient proxy failures", async () => {
+	let acquisitions = 0;
+	const bodies: Array<unknown> = [];
+	const request = workspaceRequest(WORKSPACE_A, "/execute", {
+		method: "POST",
+		headers: {
+			Authorization: "Bearer user-token",
+			"content-type": "application/json",
+		},
+		body: JSON.stringify({ sql: "SELECT 1" }),
+	});
+	const response = await handleRequest(
+		request,
+		env({
+			getByName: () => {
+				acquisitions += 1;
+				return {
+					fetch: async (incoming) => {
+						assert.equal(incoming.headers.get("authorization"), null);
+						bodies.push(await incoming.json());
+						if (acquisitions === 1) {
+							throw new Error("Error proxying request to container");
+						}
+						return new Response("ok");
+					},
+				};
+			},
+		}),
+		{
+			authenticate: authenticated(),
+			authorizeWorkspace: allowed(),
+			containerRetryDelay: async () => undefined,
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(acquisitions, 2);
+	assert.deepEqual(bodies, [{ sql: "SELECT 1" }, { sql: "SELECT 1" }]);
+});
+
+void test("permanent container startup failures return a controlled 503 response", async () => {
 	let fetched = false;
 	const response = await handleRequest(
 		workspaceRequest(WORKSPACE_A, "/branches"),
 		env({
 			getByName: () => ({
 				startAndWaitForPorts: async () => {
-					throw new Error("Container failed to start");
+					throw new Error("R2_ACCESS_KEY_ID is required");
 				},
 				fetch: async () => {
 					fetched = true;

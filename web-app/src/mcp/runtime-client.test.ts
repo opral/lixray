@@ -61,40 +61,45 @@ void test("container calls reauthorize every time and never forward the OAuth to
 	}
 });
 
-void test("transient container failures retry indefinitely with one-second delays", async () => {
+void test("transient container failures retry indefinitely with capped jitter and reacquired stubs", async () => {
+	let acquisitions = 0;
 	let starts = 0;
 	let fetches = 0;
 	const delays: Array<number> = [];
 	const client = new WorkerLixRuntimeClient(
 		env({
-			getByName: () => ({
-				startAndWaitForPorts: async () => {
-					starts += 1;
-					if (starts <= 5) {
-						throw new Error(
-							"The container is not running, consider calling start()",
-						);
-					}
-				},
-				fetch: async () => {
-					fetches += 1;
-					return Response.json({
-						currentBranchId: "main",
-						branches: [
-							{
-								id: "main",
-								name: "main",
-								hidden: false,
-								commitId: "commit-1",
-							},
-						],
-					});
-				},
-			}),
+			getByName: () => {
+				acquisitions += 1;
+				return {
+					startAndWaitForPorts: async () => {
+						starts += 1;
+						if (starts <= 5) {
+							throw new Error(
+								"The container is not running, consider calling start()",
+							);
+						}
+					},
+					fetch: async () => {
+						fetches += 1;
+						return Response.json({
+							currentBranchId: "main",
+							branches: [
+								{
+									id: "main",
+									name: "main",
+									hidden: false,
+									commitId: "commit-1",
+								},
+							],
+						});
+					},
+				};
+			},
 		}),
 		{ userId: "user-1", token: "secret-oauth-token" },
 		async () => null,
 		{
+			retryRandom: () => 1,
 			retryDelay: async (milliseconds) => {
 				delays.push(milliseconds);
 			},
@@ -102,40 +107,84 @@ void test("transient container failures retry indefinitely with one-second delay
 	);
 
 	assert.equal((await client.listBranches(WORKSPACE_ID)).branches.length, 1);
+	assert.equal(acquisitions, 6);
 	assert.equal(starts, 6);
 	assert.equal(fetches, 1);
-	assert.deepEqual(delays, [1_000, 1_000, 1_000, 1_000, 1_000]);
+	assert.deepEqual(delays, [1_000, 2_000, 4_000, 5_000, 5_000]);
+});
+
+void test("Durable Object storage resets are retried", async () => {
+	let acquisitions = 0;
+	const client = new WorkerLixRuntimeClient(
+		env({
+			getByName: () => {
+				acquisitions += 1;
+				return {
+					startAndWaitForPorts: async () => {
+						if (acquisitions === 1) {
+							throw new Error(
+								"Internal error in Durable Object storage caused object to be reset; reference = retry-me",
+							);
+						}
+					},
+					fetch: async () =>
+						Response.json({
+							currentBranchId: "main",
+							branches: [
+								{
+									id: "main",
+									name: "main",
+									hidden: false,
+									commitId: "commit-1",
+								},
+							],
+						}),
+				};
+			},
+		}),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{ retryDelay: async () => undefined },
+	);
+
+	assert.equal((await client.listBranches(WORKSPACE_ID)).branches.length, 1);
+	assert.equal(acquisitions, 2);
 });
 
 void test("transient HTTP responses retry and replay request bodies", async () => {
+	let acquisitions = 0;
 	const bodies: Array<unknown> = [];
 	const delays: Array<number> = [];
 	const client = new WorkerLixRuntimeClient(
 		env({
-			getByName: () => ({
-				fetch: async (request) => {
-					bodies.push(await request.json());
-					if (bodies.length === 1) {
-						return new Response("Failed to start container: cold start", {
-							status: 500,
+			getByName: () => {
+				acquisitions += 1;
+				return {
+					fetch: async (request) => {
+						bodies.push(await request.json());
+						if (bodies.length === 1) {
+							return new Response("Failed to start container: cold start", {
+								status: 500,
+							});
+						}
+						return Response.json({
+							results: [
+								{
+									columns: [],
+									rows: [],
+									rowsAffected: 0,
+									notices: [],
+								},
+							],
 						});
-					}
-					return Response.json({
-						results: [
-							{
-								columns: [],
-								rows: [],
-								rowsAffected: 0,
-								notices: [],
-							},
-						],
-					});
-				},
-			}),
+					},
+				};
+			},
 		}),
 		{ userId: "user-1", token: "secret-oauth-token" },
 		async () => null,
 		{
+			retryRandom: () => 1,
 			retryDelay: async (milliseconds) => {
 				delays.push(milliseconds);
 			},
@@ -148,8 +197,82 @@ void test("transient HTTP responses retry and replay request bodies", async () =
 	};
 
 	assert.equal((await client.execute(WORKSPACE_ID, request)).rowsAffected, 0);
+	assert.equal(acquisitions, 2);
 	assert.deepEqual(bodies, [request, request]);
 	assert.deepEqual(delays, [1_000]);
+});
+
+void test("caller cancellation stops otherwise retryable container work", async () => {
+	const controller = new AbortController();
+	let acquisitions = 0;
+	let observedSignal: AbortSignal | undefined;
+	let delays = 0;
+	const client = new WorkerLixRuntimeClient(
+		env({
+			getByName: () => {
+				acquisitions += 1;
+				return {
+					startAndWaitForPorts: async (options) => {
+						observedSignal = options.cancellationOptions?.abort;
+						controller.abort();
+						throw new Error("The container is not running");
+					},
+					fetch: async () => new Response("unreachable"),
+				};
+			},
+		}),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{
+			signal: controller.signal,
+			retryDelay: async () => {
+				delays += 1;
+			},
+		},
+	);
+
+	await assert.rejects(client.listBranches(WORKSPACE_ID), (error: unknown) => {
+		return (
+			error instanceof FileServiceError &&
+			error.message === "Workspace storage request was cancelled."
+		);
+	});
+	assert.equal(observedSignal, controller.signal);
+	assert.equal(acquisitions, 1);
+	assert.equal(delays, 0);
+});
+
+void test("non-zero container exits are not retried indefinitely", async () => {
+	let acquisitions = 0;
+	let delays = 0;
+	const client = new WorkerLixRuntimeClient(
+		env({
+			getByName: () => {
+				acquisitions += 1;
+				return {
+					startAndWaitForPorts: async () => {
+						throw new Error(
+							"Container exited before we could determine health, exit code: 1",
+						);
+					},
+					fetch: async () => new Response("unreachable"),
+				};
+			},
+		}),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{
+			retryDelay: async () => {
+				delays += 1;
+			},
+		},
+	);
+
+	await assert.rejects(client.listBranches(WORKSPACE_ID), (error: unknown) => {
+		return error instanceof FileServiceError && error.code === "upstream_error";
+	});
+	assert.equal(acquisitions, 1);
+	assert.equal(delays, 0);
 });
 
 void test("permanent container responses are not retried", async () => {
