@@ -3,7 +3,11 @@
 	"name": "lixray-e2e",
 	"main": "src/preview-server.ts",
 	"compatibility_date": "2026-07-07",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": [
+		"nodejs_compat",
+		"enable_request_signal",
+		"enable_abortsignal_rpc",
+	],
 	"r2_buckets": [
 		{
 			"binding": "PREVIEW_STATE",

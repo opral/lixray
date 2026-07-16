@@ -30,6 +30,7 @@ import {
 	type McpTelemetrySession,
 } from "./mcp-telemetry.ts";
 import {
+	containerErrorDetails,
 	fetchContainerWithRetry,
 	logContainerRetry,
 	type ContainerNamespace as RetryingContainerNamespace,
@@ -257,6 +258,7 @@ export async function handleRequest(
 			operation: `${request.method} /v1${match[2]}`,
 			envVars: containerEnv(env, workspaceId),
 			createRequest: () => rewrittenRequest.clone() as unknown as Request,
+			requestReplay: containerRequestReplay(request.method, match[2]),
 			signal: request.signal,
 			retryDelay: options.containerRetryDelay,
 			retryRandom: options.containerRetryRandom,
@@ -264,6 +266,11 @@ export async function handleRequest(
 		});
 	} catch (caught) {
 		if (request.signal.aborted) throw caught;
+		console.error("LixRay container request failed", {
+			workspaceId,
+			operation: `${request.method} /v1${match[2]}`,
+			error: containerErrorDetails(caught),
+		});
 		return Response.json(
 			{
 				error: {
@@ -274,6 +281,16 @@ export async function handleRequest(
 			{ status: 503, headers: { "Retry-After": "1" } },
 		);
 	}
+}
+
+function containerRequestReplay(
+	method: string,
+	path: string,
+): "safe" | "unsafe" {
+	if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return "safe";
+	return path === "/observe" || path === "/observe/multiplex"
+		? "safe"
+		: "unsafe";
 }
 
 export async function authenticateWithSupabase(

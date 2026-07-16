@@ -12,6 +12,7 @@ import {
 	type WorkspaceSummary,
 } from "./file-service.ts";
 import {
+	containerErrorDetails,
 	fetchContainerWithRetry,
 	type ContainerNamespace,
 	type ContainerRetryDelay,
@@ -308,6 +309,11 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				operation: path,
 				envVars: containerEnv(this.env, workspaceId),
 				createRequest: createWorkspaceRequest,
+				requestReplay: ["GET", "HEAD"].includes(
+					(init.method ?? "GET").toUpperCase(),
+				)
+					? "safe"
+					: "unsafe",
 				signal: signal ?? undefined,
 				retryDelay: this.retryDelay,
 				retryRandom: this.retryRandom,
@@ -323,7 +329,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			console.error("LixRay container request failed", {
 				workspaceId,
 				path,
-				error: errorDetails(caught),
+				error: containerErrorDetails(caught),
 			});
 			throw new FileServiceError(
 				"upstream_error",

@@ -508,9 +508,13 @@ void test("transient container resets retry with a reacquired stub", async () =>
 	assert.equal(fetches, 1);
 });
 
-void test("direct request bodies replay across transient proxy failures", async () => {
+void test("direct mutation bodies are not replayed after ambiguous proxy failures", async () => {
 	let acquisitions = 0;
 	const bodies: Array<unknown> = [];
+	const terminalLogs: Array<Array<unknown>> = [];
+	const originalConsoleError = console.error;
+	console.error = (...arguments_: Array<unknown>) =>
+		terminalLogs.push(arguments_);
 	const request = workspaceRequest(WORKSPACE_A, "/execute", {
 		method: "POST",
 		headers: {
@@ -519,33 +523,41 @@ void test("direct request bodies replay across transient proxy failures", async 
 		},
 		body: JSON.stringify({ sql: "SELECT 1" }),
 	});
-	const response = await handleRequest(
-		request,
-		env({
-			getByName: () => {
-				acquisitions += 1;
-				return {
-					fetch: async (incoming) => {
-						assert.equal(incoming.headers.get("authorization"), null);
-						bodies.push(await incoming.json());
-						if (acquisitions === 1) {
+	let response: Response;
+	try {
+		response = await handleRequest(
+			request,
+			env({
+				getByName: () => {
+					acquisitions += 1;
+					return {
+						fetch: async (incoming) => {
+							assert.equal(incoming.headers.get("authorization"), null);
+							bodies.push(await incoming.json());
 							throw new Error("Error proxying request to container");
-						}
-						return new Response("ok");
-					},
-				};
+						},
+					};
+				},
+			}),
+			{
+				authenticate: authenticated(),
+				authorizeWorkspace: allowed(),
+				containerRetryDelay: async () => undefined,
 			},
-		}),
-		{
-			authenticate: authenticated(),
-			authorizeWorkspace: allowed(),
-			containerRetryDelay: async () => undefined,
-		},
-	);
+		);
+	} finally {
+		console.error = originalConsoleError;
+	}
 
-	assert.equal(response.status, 200);
-	assert.equal(acquisitions, 2);
-	assert.deepEqual(bodies, [{ sql: "SELECT 1" }, { sql: "SELECT 1" }]);
+	assert.equal(response.status, 503);
+	assert.equal(acquisitions, 1);
+	assert.deepEqual(bodies, [{ sql: "SELECT 1" }]);
+	assert.equal(terminalLogs.length, 1);
+	assert.equal(terminalLogs[0]?.[0], "LixRay container request failed");
+	assert.deepEqual(
+		(terminalLogs[0]?.[1] as { error?: { message?: string } }).error?.message,
+		"Error proxying request to container",
+	);
 });
 
 void test("permanent container startup failures return a controlled 503 response", async () => {
