@@ -2,7 +2,12 @@ import { useMemo } from "react";
 import { zipSync } from "fflate";
 import { LixFileService, type LixRuntimeClient } from "../mcp/file-service";
 import { base64ToBytes, bytesToBase64 } from "./base64";
-import { type WireValue, useLixrayApi } from "./lixray-api";
+import {
+	type ExecuteRequest,
+	type ExecuteResponse,
+	type WireValue,
+	useLixrayApi,
+} from "./lixray-api";
 
 export interface DirEntry {
 	kind: "dir";
@@ -64,10 +69,21 @@ export function useFileExplorerApi() {
 
 	return useMemo(() => {
 		const workspaceId = api.workspaceId ?? "";
+		const executeStatement = async (
+			request: ExecuteRequest,
+		): Promise<ExecuteResponse> => {
+			const response = await api.execute(request);
+			const [result] = response.results;
+			if (!result || response.results.length !== 1) {
+				throw new Error("A single SQL statement did not return one result");
+			}
+			return result;
+		};
 		const service = new LixFileService({
 			listWorkspaces: () => Promise.resolve([]),
 			listBranches: async () => (await api.listBranches()).branches,
-			execute: async (_workspaceId, request) => api.execute(request),
+			execute: async (_workspaceId, request) => executeStatement(request),
+			executeScript: async (_workspaceId, request) => api.execute(request),
 			mutate: async (_workspaceId, request) => api.mutateFilesystem(request),
 		} satisfies LixRuntimeClient);
 
@@ -121,7 +137,7 @@ export function useFileExplorerApi() {
 			dirPaths: Array<string>,
 		): Promise<void> {
 			for (const dirPath of dirPaths) {
-				await api.execute({
+				await executeStatement({
 					branchId,
 					sql: "INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (path) DO NOTHING",
 					params: [text(dirPath)],
@@ -182,7 +198,7 @@ export function useFileExplorerApi() {
 					],
 				);
 				try {
-					await api.execute({
+					await executeStatement({
 						branchId,
 						sql:
 							`INSERT INTO lix_file (path, data, lixcol_metadata) VALUES ${placeholders} ` +
@@ -200,7 +216,7 @@ export function useFileExplorerApi() {
 			branchId: string,
 			filePath: string,
 		): Promise<Uint8Array<ArrayBuffer>> {
-			const result = await api.execute({
+			const result = await executeStatement({
 				branchId,
 				sql: "SELECT data FROM lix_file WHERE path = $1",
 				params: [text(filePath)],
@@ -216,7 +232,7 @@ export function useFileExplorerApi() {
 			branchId: string,
 			fileId: string,
 		): Promise<Uint8Array<ArrayBuffer>> {
-			const result = await api.execute({
+			const result = await executeStatement({
 				branchId,
 				sql: "SELECT data FROM lix_file WHERE id = $1",
 				params: [text(fileId)],
@@ -232,7 +248,7 @@ export function useFileExplorerApi() {
 			branchId: string,
 			dirPath: string,
 		): Promise<Array<{ id: string; path: string }>> {
-			const result = await api.execute({
+			const result = await executeStatement({
 				branchId,
 				// Lexicographic prefix range: dir paths end in "/" (0x2F), so the
 				// exclusive upper bound replaces it with "0" (0x30).
@@ -249,7 +265,7 @@ export function useFileExplorerApi() {
 			branchId: string,
 			dirPath: string,
 		): Promise<Array<string>> {
-			const result = await api.execute({
+			const result = await executeStatement({
 				branchId,
 				sql: "SELECT path FROM lix_directory WHERE path >= $1 AND path < $2 ORDER BY path",
 				params: [text(dirPath), text(`${dirPath.slice(0, -1)}0`)],

@@ -309,10 +309,8 @@ void test("branch-scoped requests never persist the preview selector", async () 
 	await expectOk(draftResponse);
 	const mainBody: unknown = await mainResponse.json();
 	const draftBody: unknown = await draftResponse.json();
-	assert.ok(isRecord(mainBody) && Array.isArray(mainBody.rows));
-	assert.ok(isRecord(draftBody) && Array.isArray(draftBody.rows));
-	const mainRow: unknown = mainBody.rows[0];
-	const draftRow: unknown = draftBody.rows[0];
+	const mainRow: unknown = singleExecuteRows(mainBody)[0];
+	const draftRow: unknown = singleExecuteRows(draftBody)[0];
 	assert.ok(Array.isArray(mainRow));
 	assert.ok(Array.isArray(draftRow));
 	assert.equal(wireString(mainRow[0]), MAIN_BRANCH);
@@ -774,6 +772,9 @@ function runtime(openMemoryLix: OpenMemoryLix, previewPollIntervalMs?: number) {
 	return createR2WorkspaceRuntime(openMemoryLix, {
 		mainBranchId: MAIN_BRANCH,
 		previewPollIntervalMs,
+		parseSqlScript: (sql, providedParamCount) => ({
+			statements: [{ sql, paramStart: 0, paramEnd: providedParamCount }],
+		}),
 	});
 }
 
@@ -810,8 +811,7 @@ async function getValue(
 	);
 	await expectOk(response);
 	const body: unknown = await response.json();
-	assert.ok(isRecord(body) && Array.isArray(body.rows));
-	const rows: unknown[] = body.rows;
+	const rows = singleExecuteRows(body);
 	const row: unknown = rows[0];
 	if (row === undefined) return null;
 	assert.ok(Array.isArray(row) && row.length === 3);
@@ -820,6 +820,14 @@ async function getValue(
 		value: wireString(row[1]),
 		revision: wireNumber(row[2]),
 	};
+}
+
+function singleExecuteRows(body: unknown): unknown[] {
+	assert.ok(isRecord(body) && Array.isArray(body.results));
+	assert.equal(body.results.length, 1);
+	const result: unknown = body.results[0];
+	assert.ok(isRecord(result) && Array.isArray(result.rows));
+	return result.rows;
 }
 
 function execute(

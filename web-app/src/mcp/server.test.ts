@@ -8,6 +8,7 @@ import {
 	LixFileService,
 	type ExecuteRequest,
 	type ExecuteResponse,
+	type ExecuteScriptResponse,
 	type LixRuntimeClient,
 } from "./file-service.ts";
 import {
@@ -67,6 +68,8 @@ void test("MCP documentation distinguishes browser and client authentication", a
 	assert.match(documentation, /initialize, tools\/list, and list_workspaces/);
 	assert.match(documentation, /no refresh token is available/);
 	assert.match(documentation, /do not include access or refresh tokens/);
+	assert.match(documentation, /atomic semicolon-delimited script/);
+	assert.match(documentation, /request-wide \$n parameters/);
 });
 
 void test("MCP initialize, tools/list, and tools/call expose the authenticated tool contract", async () => {
@@ -314,10 +317,14 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		});
 		assert.equal(executed.isError, undefined);
 		assert.deepEqual(executed.structuredContent, {
-			columns: ["value"],
-			rows: [[{ kind: "text", value: "result" }]],
-			rowsAffected: 0,
-			notices: [],
+			results: [
+				{
+					columns: ["value"],
+					rows: [[{ kind: "text", value: "result" }]],
+					rowsAffected: 0,
+					notices: [],
+				},
+			],
 		});
 		assert.deepEqual(runtimeClient.executeRequests, [
 			{
@@ -329,6 +336,33 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				},
 			},
 		]);
+
+		const transactionSql =
+			"BEGIN; INSERT INTO lix_key_value (key, value) VALUES ($1, $2); SELECT value FROM lix_key_value WHERE key = $1; COMMIT";
+		const transaction = await client.callTool({
+			name: "execute",
+			arguments: {
+				workspace_id: WORKSPACE_ID,
+				branch_id: BRANCH_ID,
+				sql: transactionSql,
+				params: [
+					{ kind: "text", value: "example" },
+					{ kind: "text", value: "result" },
+				],
+			},
+		});
+		assert.equal(transaction.isError, undefined);
+		assert.deepEqual(transaction.structuredContent, {
+			results: [
+				{ columns: [], rows: [], rowsAffected: 1, notices: [] },
+				{
+					columns: ["value"],
+					rows: [[{ kind: "text", value: "result" }]],
+					rowsAffected: 0,
+					notices: [],
+				},
+			],
+		});
 
 		const invalidRead = await client.callTool({
 			name: "read_file",
@@ -425,6 +459,12 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 					outcome: "success",
 					workspaceId: WORKSPACE_ID,
 					sql: "SELECT value FROM lix_key_value WHERE key = $1",
+				},
+				{
+					toolName: "execute",
+					outcome: "success",
+					workspaceId: WORKSPACE_ID,
+					sql: transactionSql,
 				},
 				{
 					toolName: "read_file",
@@ -555,6 +595,27 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 			rowsAffected: 0,
 			notices: [],
 		};
+	}
+
+	async executeScript(
+		workspaceId: string,
+		request: ExecuteRequest,
+	): Promise<ExecuteScriptResponse> {
+		if (request.sql.includes("BEGIN;")) {
+			this.executeRequests.push({ workspaceId, request });
+			return {
+				results: [
+					{ columns: [], rows: [], rowsAffected: 1, notices: [] },
+					{
+						columns: ["value"],
+						rows: [[{ kind: "text", value: "result" }]],
+						rowsAffected: 0,
+						notices: [],
+					},
+				],
+			};
+		}
+		return { results: [await this.execute(workspaceId, request)] };
 	}
 
 	async mutate(): Promise<never> {

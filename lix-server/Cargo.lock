@@ -2549,8 +2549,8 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "lix_engine"
-version = "0.8.2"
-source = "git+https://github.com/opral/lix.git?branch=main#ec1066233e99d27a6e6a558ef9503e14e67f560b"
+version = "0.8.4"
+source = "git+https://github.com/opral/lix.git?branch=main#ae24b2a657f76d01db61876d9a52a5e1739938e1"
 dependencies = [
  "ahash",
  "async-trait",
@@ -2582,8 +2582,8 @@ dependencies = [
 
 [[package]]
 name = "lix_slatedb_storage"
-version = "0.8.2"
-source = "git+https://github.com/opral/lix.git?branch=main#ec1066233e99d27a6e6a558ef9503e14e67f560b"
+version = "0.8.4"
+source = "git+https://github.com/opral/lix.git?branch=main#ae24b2a657f76d01db61876d9a52a5e1739938e1"
 dependencies = [
  "bytes",
  "futures-util",

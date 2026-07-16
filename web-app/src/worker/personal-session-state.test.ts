@@ -370,10 +370,7 @@ void test("browser Lix validates the initial branch and pins each request explic
 			if (typeof body !== "string") throw new Error("Expected a JSON body");
 			executeBodies.push(JSON.parse(body) as unknown);
 			return Response.json({
-				columns: [],
-				rows: [],
-				rowsAffected: 0,
-				notices: [],
+				results: [{ columns: [], rows: [], rowsAffected: 0, notices: [] }],
 			});
 		}
 		return new Response("Not found", { status: 404 });

@@ -28,6 +28,10 @@ export interface ExecuteResponse {
 	notices: Array<unknown>;
 }
 
+export interface ExecuteScriptResponse {
+	results: Array<ExecuteResponse>;
+}
+
 export interface Branch {
 	id: string;
 	name: string;
@@ -48,6 +52,10 @@ export interface LixRuntimeClient {
 		workspaceId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse>;
+	executeScript(
+		workspaceId: string,
+		request: ExecuteRequest,
+	): Promise<ExecuteScriptResponse>;
 	mutate(
 		workspaceId: string,
 		request: FilesystemMutationRequest,
@@ -111,7 +119,8 @@ export type FileServiceErrorCode =
 	| "file_too_large"
 	| "invalid_edit"
 	| "recursive_required"
-	| "upstream_error";
+	| "upstream_error"
+	| `LIX_${string}`;
 
 export class FileServiceError extends Error {
 	readonly code: FileServiceErrorCode;
@@ -151,8 +160,8 @@ export class LixFileService {
 		branchId: string,
 		sql: string,
 		params: Array<WireValue> = [],
-	): Promise<ExecuteResponse> {
-		return this.client.execute(workspaceId, { branchId, sql, params });
+	): Promise<ExecuteScriptResponse> {
+		return this.client.executeScript(workspaceId, { branchId, sql, params });
 	}
 
 	async listDirectory(

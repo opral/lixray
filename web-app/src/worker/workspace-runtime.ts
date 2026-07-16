@@ -88,7 +88,23 @@ interface MemoryWorkspaceRuntime extends WorkspaceRuntime {
 interface WorkspaceRuntimeOptions {
 	mainBranchId: string;
 	previewPollIntervalMs?: number;
+	parseSqlScript: ParseSqlScript;
 }
+
+export interface SqlScriptPlan {
+	statements: Array<SqlScriptStatement>;
+}
+
+export interface SqlScriptStatement {
+	sql: string;
+	paramStart: number;
+	paramEnd: number;
+}
+
+export type ParseSqlScript = (
+	sql: string,
+	providedParamCount: number,
+) => SqlScriptPlan;
 
 interface PersistentSnapshot {
 	etag: string;
@@ -191,7 +207,11 @@ export function createMemoryWorkspaceRuntime(
 				}
 
 				return await serialize(runtime, async () => {
-					const response = await routeRequest(request, runtime);
+					const response = await routeRequest(
+						request,
+						runtime,
+						options.parseSqlScript,
+					);
 					if (
 						!response.ok ||
 						!(await shouldPersistMutation(pathname, response))
@@ -295,7 +315,11 @@ export function createR2WorkspaceRuntime(
 					);
 					const { runtime } = loaded;
 					try {
-						const response = await routeRequest(replay(), runtime);
+						const response = await routeRequest(
+							replay(),
+							runtime,
+							options.parseSqlScript,
+						);
 						if (
 							!response.ok ||
 							!(await shouldPersistMutation(pathname, response))
@@ -603,6 +627,7 @@ async function ensureCanonicalMainBranch(
 async function routeRequest(
 	request: Request,
 	runtime: WorkspaceRuntime,
+	parseSqlScript: ParseSqlScript,
 ): Promise<Response> {
 	const { pathname } = new URL(request.url);
 	if (pathname === "/v1/container-health") {
@@ -658,14 +683,49 @@ async function routeRequest(
 				runtime.lix,
 				branchId,
 				runtime.mainBranchId,
-				async (selectedLix) =>
-					encodeExecuteResult(
-						await selectedLix.execute(
-							sql,
-							params,
-							originKey ? { originKey } : undefined,
-						),
-					),
+				async (selectedLix) => {
+					const plan = parseSqlScript(sql, params.length);
+					const options = originKey ? { originKey } : undefined;
+					const [statement] = plan.statements;
+					if (statement && plan.statements.length === 1) {
+						return {
+							results: [
+								encodeExecuteResult(
+									await selectedLix.execute(
+										statement.sql,
+										params.slice(statement.paramStart, statement.paramEnd),
+										options,
+									),
+								),
+							],
+						};
+					}
+
+					const transaction = await selectedLix.beginTransaction();
+					try {
+						const results = [];
+						for (const statement of plan.statements) {
+							results.push(
+								encodeExecuteResult(
+									await transaction.execute(
+										statement.sql,
+										params.slice(statement.paramStart, statement.paramEnd),
+										options,
+									),
+								),
+							);
+						}
+						await transaction.commit();
+						return { results };
+					} catch (error) {
+						try {
+							await transaction.rollback();
+						} catch {
+							// Preserve the statement or commit error if rollback also fails.
+						}
+						throw error;
+					}
+				},
 			),
 		);
 	}

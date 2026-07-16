@@ -35,6 +35,10 @@ export interface ExecuteResponse {
 	notices: Array<unknown>;
 }
 
+export interface ExecuteScriptResponse {
+	results: Array<ExecuteResponse>;
+}
+
 export interface ExecuteRequest {
 	branchId: string;
 	sql: string;
@@ -115,7 +119,7 @@ export function useLixrayApi() {
 			workspaceId,
 			listBranches: () => request<BranchesResponse>("/branches"),
 			execute: (body: ExecuteRequest) =>
-				request<ExecuteResponse>("/execute", {
+				request<ExecuteScriptResponse>("/execute", {
 					method: "POST",
 					body: JSON.stringify(body),
 				}),

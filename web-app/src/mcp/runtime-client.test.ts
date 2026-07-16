@@ -119,10 +119,14 @@ void test("transient HTTP responses retry and replay request bodies", async () =
 						});
 					}
 					return Response.json({
-						columns: [],
-						rows: [],
-						rowsAffected: 0,
-						notices: [],
+						results: [
+							{
+								columns: [],
+								rows: [],
+								rowsAffected: 0,
+								notices: [],
+							},
+						],
 					});
 				},
 			}),
@@ -209,10 +213,14 @@ void test("raw execute reauthorizes and strips the OAuth token", async () => {
 				fetch: async (request) => {
 					received = request;
 					return Response.json({
-						columns: ["value"],
-						rows: [[{ kind: "text", value: "ok" }]],
-						rowsAffected: 0,
-						notices: [],
+						results: [
+							{
+								columns: ["value"],
+								rows: [[{ kind: "text", value: "ok" }]],
+								rowsAffected: 0,
+								notices: [],
+							},
+						],
 					});
 				},
 			}),
@@ -224,12 +232,12 @@ void test("raw execute reauthorizes and strips the OAuth token", async () => {
 		},
 	);
 
-	const response = await client.execute(WORKSPACE_ID, {
+	const response = await client.executeScript(WORKSPACE_ID, {
 		branchId: "main",
 		sql: "SELECT $1 AS value",
 		params: [{ kind: "text", value: "ok" }],
 	});
-	assert.equal(response.rowsAffected, 0);
+	assert.equal(response.results[0]?.rowsAffected, 0);
 	assert.equal(authorizationChecks, 1);
 	assert.ok(received);
 	assert.equal(new URL(received.url).pathname, "/v1/execute");
@@ -239,6 +247,42 @@ void test("raw execute reauthorizes and strips the OAuth token", async () => {
 		sql: "SELECT $1 AS value",
 		params: [{ kind: "text", value: "ok" }],
 	});
+});
+
+void test("raw execute preserves structured Lix script errors", async () => {
+	const client = new WorkerLixRuntimeClient(
+		env({
+			getByName: () => ({
+				fetch: async () =>
+					Response.json(
+						{
+							error: {
+								code: "LIX_UNSUPPORTED_SQL",
+								message: "Unsupported transaction control",
+								hint: "Use BEGIN ... COMMIT.",
+								details: { operation: "execute" },
+							},
+						},
+						{ status: 400 },
+					),
+			}),
+		}),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+	);
+
+	await assert.rejects(
+		client.executeScript(WORKSPACE_ID, {
+			branchId: "main",
+			sql: "BEGIN; COMMIT",
+		}),
+		(error: unknown) =>
+			error instanceof FileServiceError &&
+			error.code === "LIX_UNSUPPORTED_SQL" &&
+			error.details?.status === 400 &&
+			error.details?.hint === "Use BEGIN ... COMMIT." &&
+			error.details?.operation === "execute",
+	);
 });
 
 void test("injected workspaces and workspace fetch bypass Supabase and containers", async () => {

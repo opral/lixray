@@ -68,6 +68,13 @@ and uses the entry's current revision before applying the mutation. Creates and
 moves never overwrite existing destinations, and directory deletion requires
 `recursive=true`. The `execute` tool accepts raw Lix SQL and wire-format
 parameters, is marked destructive, and bypasses these file-tool safeguards.
+Single statements and semicolon-delimited scripts both execute atomically,
+either unwrapped or bounded by `BEGIN`/`BEGIN TRANSACTION` and `COMMIT`.
+Every execute call returns `{ "results": [...] }` with one result per
+executable statement. Numbered `$n` parameters refer to the request-wide
+parameter array, while anonymous `?` parameters consume it in script order.
+Both the container and preview runtime use Lix's SQL-script parser rather than
+splitting SQL in application code.
 
 The `/oauth/consent` page preserves the Google sign-in return path and shows
 the requesting client, scopes, and file permissions before allowing approval
@@ -81,7 +88,8 @@ or denial.
   container.
 - `GET /v1/workspaces/:workspaceId/branches` lists Lix branches.
 - `POST /v1/workspaces/:workspaceId/createBranch` creates a branch.
-- `POST /v1/workspaces/:workspaceId/execute` executes one Lix SQL statement.
+- `POST /v1/workspaces/:workspaceId/execute` executes one Lix SQL statement or
+  an atomic multi-statement script.
 - `POST /v1/workspaces/:workspaceId/observe` streams Lix observe events as POST
   SSE.
 

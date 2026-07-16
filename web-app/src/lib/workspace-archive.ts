@@ -4,6 +4,7 @@ import { DEMO_AUTH_TOKEN } from "./demo-identity";
 import type {
 	BranchesResponse,
 	ExecuteResponse,
+	ExecuteScriptResponse,
 	WireValue,
 } from "./lixray-api";
 import { workspaceApiPath } from "./lixray-api";
@@ -16,7 +17,7 @@ export async function fetchWorkspaceFileCount(
 	getAccessToken: AccessTokenGetter,
 ): Promise<number> {
 	const branchId = await getMainBranchId(workspaceId, getAccessToken);
-	const result = await workspaceRequest<ExecuteResponse>(
+	const response = await workspaceRequest<ExecuteScriptResponse>(
 		workspaceId,
 		getAccessToken,
 		"/execute",
@@ -29,6 +30,7 @@ export async function fetchWorkspaceFileCount(
 			}),
 		},
 	);
+	const result = singleResult(response);
 	const value = result.rows[0]?.[0];
 	return value?.kind === "int" ? value.value : 0;
 }
@@ -38,7 +40,7 @@ export async function buildWorkspaceArchive(
 	getAccessToken: AccessTokenGetter,
 ): Promise<Uint8Array<ArrayBuffer>> {
 	const branchId = await getMainBranchId(workspaceId, getAccessToken);
-	const result = await workspaceRequest<ExecuteResponse>(
+	const response = await workspaceRequest<ExecuteScriptResponse>(
 		workspaceId,
 		getAccessToken,
 		"/execute",
@@ -51,6 +53,7 @@ export async function buildWorkspaceArchive(
 			}),
 		},
 	);
+	const result = singleResult(response);
 	const entries: Record<string, Uint8Array> = {};
 	for (const row of result.rows) {
 		const path = asText(row[0]).replace(/^\/+/, "");
@@ -58,6 +61,14 @@ export async function buildWorkspaceArchive(
 		if (path) entries[path] = data;
 	}
 	return zipSync(entries);
+}
+
+function singleResult(response: ExecuteScriptResponse): ExecuteResponse {
+	const [result] = response.results;
+	if (!result || response.results.length !== 1) {
+		throw new Error("Lix returned an invalid single-statement result");
+	}
+	return result;
 }
 
 async function getMainBranchId(
