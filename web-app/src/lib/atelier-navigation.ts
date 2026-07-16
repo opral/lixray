@@ -32,18 +32,28 @@ export function shouldNormalizeInitialBranch(args: {
 	readonly openingBranchId: string | null;
 	readonly currentBranchId: string | null;
 	readonly actualBranchId: string;
+	readonly defaultBranchId: string;
 }): boolean {
 	return (
 		args.currentBranchId === args.openingBranchId &&
-		args.currentBranchId !== args.actualBranchId
+		(args.currentBranchId !== args.actualBranchId ||
+			(args.currentBranchId !== null &&
+				args.currentBranchId === args.defaultBranchId))
 	);
+}
+
+export function atelierBranchSearch(
+	branchId: string,
+	defaultBranchId: string,
+): { branch?: string } {
+	return branchId === defaultBranchId ? {} : { branch: branchId };
 }
 
 export function resolveAtelierRouteBranchId(
 	branchId: string | undefined,
-	mainBranchId: string,
+	defaultBranchId: string,
 ): string {
-	return branchId ?? mainBranchId;
+	return branchId ?? defaultBranchId;
 }
 
 function normalizeAtelierFilePath(filePath: string): string | null {

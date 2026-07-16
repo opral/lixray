@@ -95,6 +95,14 @@ pub async fn open_lix_service(config: &Config) -> Result<Arc<LixService>> {
 }
 
 impl LixService {
+    pub async fn current_branch_id(&self) -> Result<String, LixError> {
+        self.run("current_branch_id", |engine| async move {
+            let session = engine.open_workspace_session().await?;
+            session.active_branch_id().await
+        })
+        .await
+    }
+
     pub async fn list_branches(&self) -> Result<ExecuteResult, LixError> {
         self.run("list_branches", |engine| async move {
             let session = engine.open_workspace_session().await?;

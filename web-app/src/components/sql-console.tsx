@@ -58,11 +58,11 @@ export function SqlConsole({ workspaceName }: { workspaceName: string }) {
 				) {
 					return current;
 				}
-				return (
-					response.branches.find((branch) => branch.name === "main")?.id ??
-					response.branches[0]?.id ??
-					""
-				);
+				return response.branches.some(
+					(branch) => branch.id === response.currentBranchId,
+				)
+					? response.currentBranchId
+					: "";
 			});
 		} catch (caught) {
 			setError(formatCaughtError(caught));

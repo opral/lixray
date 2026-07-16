@@ -7,7 +7,7 @@ import {
 	MAX_TEXT_FILE_BYTES,
 	directoryPath,
 	filePath,
-	type Branch,
+	type BranchState,
 	type ExecuteRequest,
 	type ExecuteResponse,
 	type ExecuteScriptResponse,
@@ -426,15 +426,18 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		];
 	}
 
-	async listBranches(): Promise<Array<Branch>> {
-		return [
-			{
-				id: BRANCH_ID,
-				name: "main",
-				hidden: false,
-				commitId: `commit-${this.revisionCounter}`,
-			},
-		];
+	async listBranches(): Promise<BranchState> {
+		return {
+			branches: [
+				{
+					id: BRANCH_ID,
+					name: "main",
+					hidden: false,
+					commitId: `commit-${this.revisionCounter}`,
+				},
+			],
+			currentBranchId: BRANCH_ID,
+		};
 	}
 
 	async execute(

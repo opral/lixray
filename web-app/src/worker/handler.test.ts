@@ -586,6 +586,7 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 				assert.equal(new URL(request.url).pathname, "/v1/branches");
 				assert.equal(request.headers.get("authorization"), null);
 				return Response.json({
+					currentBranchId: "main",
 					branches: [
 						{
 							id: "main",
@@ -616,14 +617,17 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 						},
 					},
 				]);
-				assert.deepEqual(await service.listBranches(DEMO_WORKSPACE_ID), [
-					{
-						id: "main",
-						name: "main",
-						hidden: false,
-						commitId: "commit-1",
-					},
-				]);
+				assert.deepEqual(await service.listBranches(DEMO_WORKSPACE_ID), {
+					branches: [
+						{
+							id: "main",
+							name: "main",
+							hidden: false,
+							commitId: "commit-1",
+						},
+					],
+					currentBranchId: "main",
+				});
 				await assert.rejects(
 					service.listBranches(WORKSPACE_B),
 					(error: unknown) =>

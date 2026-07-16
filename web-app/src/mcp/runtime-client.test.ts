@@ -23,6 +23,7 @@ void test("container calls reauthorize every time and never forward the OAuth to
 					fetch: async (request) => {
 						requests.push(request);
 						return Response.json({
+							currentBranchId: "main",
 							branches: [
 								{
 									id: "main",
@@ -78,6 +79,7 @@ void test("transient container failures retry indefinitely with one-second delay
 				fetch: async () => {
 					fetches += 1;
 					return Response.json({
+						currentBranchId: "main",
 						branches: [
 							{
 								id: "main",
@@ -99,7 +101,7 @@ void test("transient container failures retry indefinitely with one-second delay
 		},
 	);
 
-	assert.equal((await client.listBranches(WORKSPACE_ID)).length, 1);
+	assert.equal((await client.listBranches(WORKSPACE_ID)).branches.length, 1);
 	assert.equal(starts, 6);
 	assert.equal(fetches, 1);
 	assert.deepEqual(delays, [1_000, 1_000, 1_000, 1_000, 1_000]);
@@ -309,6 +311,7 @@ void test("injected workspaces and workspace fetch bypass Supabase and container
 				assert.equal(workspaceId, WORKSPACE_ID);
 				received = request;
 				return Response.json({
+					currentBranchId: "main",
 					branches: [
 						{
 							id: "main",
@@ -323,9 +326,12 @@ void test("injected workspaces and workspace fetch bypass Supabase and container
 	);
 
 	assert.deepEqual(await client.listWorkspaces(), workspaceSummaries);
-	assert.deepEqual(await client.listBranches(WORKSPACE_ID), [
-		{ id: "main", name: "main", hidden: false, commitId: "commit-1" },
-	]);
+	assert.deepEqual(await client.listBranches(WORKSPACE_ID), {
+		branches: [
+			{ id: "main", name: "main", hidden: false, commitId: "commit-1" },
+		],
+		currentBranchId: "main",
+	});
 	assert.equal(authorizationChecks, 1);
 	assert.ok(received);
 	assert.equal(new URL(received.url).pathname, "/v1/branches");

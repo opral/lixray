@@ -39,6 +39,11 @@ export interface Branch {
 	commitId: string;
 }
 
+export interface BranchState {
+	branches: Array<Branch>;
+	currentBranchId: string;
+}
+
 export interface WorkspaceSummary {
 	id: string;
 	name: string;
@@ -47,7 +52,7 @@ export interface WorkspaceSummary {
 
 export interface LixRuntimeClient {
 	listWorkspaces(): Promise<Array<WorkspaceSummary>>;
-	listBranches(workspaceId: string): Promise<Array<Branch>>;
+	listBranches(workspaceId: string): Promise<BranchState>;
 	execute(
 		workspaceId: string,
 		request: ExecuteRequest,
@@ -151,8 +156,16 @@ export class LixFileService {
 		return this.client.listWorkspaces();
 	}
 
-	async listBranches(workspaceId: string): Promise<Array<Branch>> {
+	async listBranches(workspaceId: string): Promise<BranchState> {
 		return this.client.listBranches(workspaceId);
+	}
+
+	async resolveBranchId(
+		workspaceId: string,
+		branchId: string | undefined,
+	): Promise<string> {
+		if (branchId !== undefined) return branchId;
+		return (await this.client.listBranches(workspaceId)).currentBranchId;
 	}
 
 	async executeSql(
@@ -377,7 +390,7 @@ export class LixFileService {
 		workspaceId: string,
 		branchId: string,
 	): Promise<string> {
-		const branch = (await this.client.listBranches(workspaceId)).find(
+		const branch = (await this.client.listBranches(workspaceId)).branches.find(
 			(candidate) => candidate.id === branchId,
 		);
 		if (!branch) {

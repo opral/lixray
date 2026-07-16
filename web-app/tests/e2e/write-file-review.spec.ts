@@ -10,10 +10,7 @@ import type { Page, Request } from "@playwright/test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { expect, test } from "./fixtures";
-import {
-	DEMO_MAIN_BRANCH_ID,
-	DEMO_WORKSPACE_ID,
-} from "../../src/lib/demo-identity";
+import { DEMO_WORKSPACE_ID } from "../../src/lib/demo-identity";
 
 const WORKSPACE_ROUTE = "/@acme/launch-q3";
 const PREVIEW_HOST = "127.0.0.1";
@@ -57,7 +54,6 @@ test("an MCP-created file immediately opens in review mode", async ({
 			name: "write_file",
 			arguments: {
 				workspace_id: DEMO_WORKSPACE_ID,
-				branch_id: DEMO_MAIN_BRANCH_ID,
 				path: `/${fileName}`,
 				content,
 			},
@@ -65,7 +61,6 @@ test("an MCP-created file immediately opens in review mode", async ({
 		expect(result.isError, JSON.stringify(result)).not.toBe(true);
 
 		const fileURL = new URL(`${WORKSPACE_ROUTE}/file/${fileName}`, appBaseURL);
-		fileURL.searchParams.set("branch", DEMO_MAIN_BRANCH_ID);
 		await expect(page).toHaveURL(fileURL.toString(), { timeout: 30_000 });
 		await expect(
 			page.getByRole("heading", { name: "Created through MCP" }),
@@ -101,7 +96,6 @@ test("an MCP-created file immediately opens in review mode", async ({
 			name: "read_file",
 			arguments: {
 				workspace_id: DEMO_WORKSPACE_ID,
-				branch_id: DEMO_MAIN_BRANCH_ID,
 				path: `/${fileName}`,
 			},
 		});

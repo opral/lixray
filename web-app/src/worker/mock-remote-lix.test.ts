@@ -41,7 +41,8 @@ void test("mock remote Lix maps execute params, rows, and explicit values", asyn
 		requests.push({ url, init });
 		if (url.endsWith("/branches")) {
 			return jsonResponse({
-				branches: [branch("main-branch", "main")],
+				branches: [branch("main-branch", "trunk")],
+				currentBranchId: "main-branch",
 			});
 		}
 		if (url.endsWith("/execute")) {
@@ -109,7 +110,10 @@ void test("mock remote Lix parses multiplexed chunked POST-SSE observations", as
 	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = requestUrl(input);
 		if (url.endsWith("/branches")) {
-			return jsonResponse({ branches: [branch("main-branch", "main")] });
+			return jsonResponse({
+				branches: [branch("main-branch", "main")],
+				currentBranchId: "main-branch",
+			});
 		}
 		if (url.endsWith("/observe/multiplex")) {
 			observeBody = parseJsonBody(init?.body);
@@ -153,7 +157,10 @@ void test("multiplexed observation errors reject the identified observer", async
 	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = requestUrl(input);
 		if (url.endsWith("/branches")) {
-			return jsonResponse({ branches: [branch("main-branch", "main")] });
+			return jsonResponse({
+				branches: [branch("main-branch", "main")],
+				currentBranchId: "main-branch",
+			});
 		}
 		if (url.endsWith("/observe/multiplex")) {
 			const subscription = firstSubscription(parseJsonBody(init?.body));
@@ -201,7 +208,10 @@ void test("observers wait through stream-wide errors and recover after reconnect
 	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = requestUrl(input);
 		if (url.endsWith("/branches")) {
-			return jsonResponse({ branches: [branch("main-branch", "main")] });
+			return jsonResponse({
+				branches: [branch("main-branch", "main")],
+				currentBranchId: "main-branch",
+			});
 		}
 		if (url.endsWith("/observe/multiplex")) {
 			observeRequests += 1;
@@ -273,7 +283,10 @@ void test("unexpected SSE closure reconnects the forwarded observation", async (
 	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = requestUrl(input);
 		if (url.endsWith("/branches")) {
-			return jsonResponse({ branches: [branch("main-branch", "main")] });
+			return jsonResponse({
+				branches: [branch("main-branch", "main")],
+				currentBranchId: "main-branch",
+			});
 		}
 		if (url.endsWith("/observe/multiplex")) {
 			observeRequests += 1;
@@ -323,6 +336,7 @@ void test("branch switching restarts live observations and updates later execute
 					branch("main-branch", "main"),
 					branch("draft-branch", "Draft"),
 				],
+				currentBranchId: "main-branch",
 			});
 		}
 		if (url.endsWith("/observe/multiplex")) {
@@ -382,7 +396,10 @@ void test("many observe queries share one multiplexed stream", async () => {
 	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = requestUrl(input);
 		if (url.endsWith("/branches")) {
-			return jsonResponse({ branches: [branch("main-branch", "main")] });
+			return jsonResponse({
+				branches: [branch("main-branch", "main")],
+				currentBranchId: "main-branch",
+			});
 		}
 		if (url.endsWith("/observe/multiplex")) {
 			observeRequests += 1;
@@ -431,7 +448,10 @@ void test("observation network errors racing with close stay non-fatal", async (
 	const fetchMock = (async (input: RequestInfo | URL) => {
 		const url = requestUrl(input);
 		if (url.endsWith("/branches")) {
-			return jsonResponse({ branches: [branch("main-branch", "main")] });
+			return jsonResponse({
+				branches: [branch("main-branch", "main")],
+				currentBranchId: "main-branch",
+			});
 		}
 		if (url.endsWith("/observe/multiplex")) {
 			await observationFailed;
@@ -455,7 +475,10 @@ void test("createBranch switches the mocked client and unsupported operations fa
 	const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = requestUrl(input);
 		if (url.endsWith("/branches")) {
-			return jsonResponse({ branches: [branch("main-branch", "main")] });
+			return jsonResponse({
+				branches: [branch("main-branch", "main")],
+				currentBranchId: "main-branch",
+			});
 		}
 		if (url.endsWith("/createBranch")) {
 			createBody = parseJsonBody(init?.body);

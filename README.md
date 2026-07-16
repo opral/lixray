@@ -58,16 +58,19 @@ The MCP server provides eleven data-only tools:
   `delete_entry`
 - raw SQL: `execute`
 
-Every branch-scoped operation names an existing workspace and branch by UUID.
-`list_branches` omits hidden branches and legacy non-UUID IDs, including the
-internal `global` branch. File-tool calls require canonical absolute paths and
-valid UTF-8 content of at most 1 MiB. Replacements, edits, moves, and deletes
-compare an opaque revision UUID with `lixcol_change_id`; stale operations fail
-without changing the file. The revision is optional: when omitted, LixRay reads
-and uses the entry's current revision before applying the mutation. Creates and
-moves never overwrite existing destinations, and directory deletion requires
-`recursive=true`. The `execute` tool accepts raw Lix SQL and wire-format
-parameters, is marked destructive, and bypasses these file-tool safeguards.
+Every branch-scoped operation names an existing workspace. Its `branch_id` is
+optional: omitting it resolves the workspace's current branch, analogous to
+Git's `origin/HEAD`, at the start of the tool call. `list_branches` returns that
+pointer as `current_branch_id` and omits hidden branches and legacy non-UUID
+IDs, including the internal `global` branch. File-tool calls require canonical
+absolute paths and valid UTF-8 content of at most 1 MiB. Replacements, edits,
+moves, and deletes compare an opaque revision UUID with `lixcol_change_id`;
+stale operations fail without changing the file. The revision is optional:
+when omitted, LixRay reads and uses the entry's current revision before applying
+the mutation. Creates and moves never overwrite existing destinations, and
+directory deletion requires `recursive=true`. The `execute` tool accepts raw
+Lix SQL and wire-format parameters, is marked destructive, and bypasses these
+file-tool safeguards.
 Single statements and semicolon-delimited scripts both execute atomically,
 either unwrapped or bounded by `BEGIN`/`BEGIN TRANSACTION` and `COMMIT`.
 Every execute call returns `{ "results": [...] }` with one result per
@@ -86,7 +89,8 @@ or denial.
   startup.
 - `GET /v1/workspaces/:workspaceId/container-health` checks the workspace
   container.
-- `GET /v1/workspaces/:workspaceId/branches` lists Lix branches.
+- `GET /v1/workspaces/:workspaceId/branches` lists Lix branches and the
+  workspace's `currentBranchId`.
 - `POST /v1/workspaces/:workspaceId/createBranch` creates a branch.
 - `POST /v1/workspaces/:workspaceId/execute` executes one Lix SQL statement or
   an atomic multi-statement script.

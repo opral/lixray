@@ -1,5 +1,6 @@
 import {
 	type Branch,
+	type BranchState,
 	type ExecuteRequest,
 	type ExecuteResponse,
 	type ExecuteScriptResponse,
@@ -161,19 +162,24 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		});
 	}
 
-	async listBranches(workspaceId: string): Promise<Array<Branch>> {
-		const body = await this.containerJson<{ branches?: unknown }>(
-			workspaceId,
-			"/v1/branches",
-			{ method: "GET" },
-		);
+	async listBranches(workspaceId: string): Promise<BranchState> {
+		const body = await this.containerJson<{
+			branches?: unknown;
+			currentBranchId?: unknown;
+		}>(workspaceId, "/v1/branches", { method: "GET" });
 		if (!Array.isArray(body.branches)) {
 			throw new FileServiceError(
 				"upstream_error",
 				"Lix returned an invalid branch list.",
 			);
 		}
-		return body.branches.flatMap((value): Array<Branch> => {
+		if (typeof body.currentBranchId !== "string" || !body.currentBranchId) {
+			throw new FileServiceError(
+				"upstream_error",
+				"Lix returned an invalid current branch.",
+			);
+		}
+		const branches = body.branches.flatMap((value): Array<Branch> => {
 			if (!value || typeof value !== "object") return [];
 			const row = value as Record<string, unknown>;
 			return typeof row.id === "string" &&
@@ -190,6 +196,13 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 					]
 				: [];
 		});
+		if (!branches.some((branch) => branch.id === body.currentBranchId)) {
+			throw new FileServiceError(
+				"upstream_error",
+				"Lix current branch is missing from the branch list.",
+			);
+		}
+		return { branches, currentBranchId: body.currentBranchId };
 	}
 
 	async execute(

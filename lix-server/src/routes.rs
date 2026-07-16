@@ -44,6 +44,7 @@ async fn container_health() -> impl IntoResponse {
 }
 
 async fn list_branches(State(state): State<AppState>) -> Result<Json<BranchesResponse>, ApiError> {
+    let current_branch_id = state.service.current_branch_id().await?;
     let result = state.service.list_branches().await?;
     let branches = result
         .rows()
@@ -51,7 +52,10 @@ async fn list_branches(State(state): State<AppState>) -> Result<Json<BranchesRes
         .map(branch_from_row)
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(Json(BranchesResponse { branches }))
+    Ok(Json(BranchesResponse {
+        branches,
+        current_branch_id,
+    }))
 }
 
 async fn create_branch(
@@ -360,6 +364,8 @@ struct HealthBody {
 #[derive(Debug, Serialize, Deserialize)]
 struct BranchesResponse {
     branches: Vec<BranchResponse>,
+    #[serde(rename = "currentBranchId")]
+    current_branch_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -634,9 +640,26 @@ mod tests {
     #[tokio::test]
     async fn branches_returns_main_branch() {
         let app = app().await;
-        let main = main_branch_id(app).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/v1/branches")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let branches: BranchesResponse = response_json(response).await;
+        let main = branches
+            .branches
+            .iter()
+            .find(|branch| branch.name == "main")
+            .expect("main branch exists");
 
-        assert!(!main.is_empty());
+        assert!(!main.id.is_empty());
+        assert_eq!(branches.current_branch_id, main.id);
     }
 
     #[tokio::test]

@@ -637,11 +637,13 @@ async function routeRequest(
 	}
 	if (pathname === "/v1/branches") {
 		if (request.method !== "GET") return methodNotAllowed();
+		const currentBranchId = await runtime.lix.activeBranchId();
 		const result = await runtime.lix.execute(
 			"SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id",
 			[],
 		);
 		return json({
+			currentBranchId,
 			branches: result.rows.map((row) => ({
 				id: requiredNativeText(result, row, "id"),
 				name: requiredNativeText(result, row, "name"),

@@ -1,7 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useSyncExternalStore } from "react";
-import { useWorkspaceAtelierInstance } from "~/components/workspace-atelier";
-import { isAtelierFileNotFoundError } from "~/lib/atelier-navigation";
+import {
+	useWorkspaceAtelierInstance,
+	useWorkspaceDefaultBranchId,
+} from "~/components/workspace-atelier";
+import {
+	atelierBranchSearch,
+	isAtelierFileNotFoundError,
+} from "~/lib/atelier-navigation";
 
 const NO_BRANCH_SUBSCRIBE = () => () => undefined;
 const NO_BRANCH_SNAPSHOT = () => null;
@@ -12,6 +18,7 @@ export const Route = createFileRoute("/@{$namespace}/$workspace/file/$")({
 
 function WorkspaceFileRoute() {
 	const atelier = useWorkspaceAtelierInstance();
+	const defaultBranchId = useWorkspaceDefaultBranchId();
 	const navigate = useNavigate();
 	const { namespace, workspace, _splat: filePath } = Route.useParams();
 	const { branch } = Route.useSearch();
@@ -38,7 +45,10 @@ function WorkspaceFileRoute() {
 			void navigate({
 				to: "/@{$namespace}/$workspace",
 				params: { namespace, workspace },
-				search: routedBranch ? { branch: routedBranch } : {},
+				search:
+					routedBranch && defaultBranchId
+						? atelierBranchSearch(routedBranch, defaultBranchId)
+						: {},
 				replace: true,
 			});
 		});
@@ -49,6 +59,7 @@ function WorkspaceFileRoute() {
 		activeBranchId,
 		atelier,
 		branch,
+		defaultBranchId,
 		filePath,
 		namespace,
 		navigate,

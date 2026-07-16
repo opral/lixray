@@ -30,12 +30,13 @@ export interface OpenMockRemoteLixOptions {
 
 export type BrowserLix = Lix & {
 	activeBranchSnapshot(): string;
-	mainBranchSnapshot(): string;
+	defaultBranchSnapshot(): string;
 	subscribeActiveBranch(listener: () => void): () => void;
 };
 
 interface BranchesPayload {
 	branches: Branch[];
+	currentBranchId: string;
 }
 
 interface ObservePayload {
@@ -92,7 +93,7 @@ class MockRemoteLix {
 	readonly #observers = new Set<MockRemoteObserveEvents>();
 	readonly #branchListeners = new Set<() => void>();
 	#activeBranchId = "";
-	#mainBranchId = "";
+	#defaultBranchId = "";
 	#nextObserverId = 0;
 	#observationController: AbortController | undefined;
 	#observationGeneration = 0;
@@ -111,24 +112,23 @@ class MockRemoteLix {
 	}
 
 	async initialize(): Promise<void> {
-		const branches = await this.#listBranches();
-		const main =
-			branches.find((branch) => !branch.hidden && branch.name === "main") ??
-			branches.find((branch) => !branch.hidden) ??
-			branches[0];
+		const { branches, currentBranchId } = await this.#listBranches();
+		const current = branches.find(
+			(branch) => !branch.hidden && branch.id === currentBranchId,
+		);
 		const requested = this.#initialBranchId
 			? branches.find(
 					(branch) => !branch.hidden && branch.id === this.#initialBranchId,
 				)
 			: undefined;
-		const initial = requested ?? main;
-		if (!initial) {
+		const initial = requested ?? current;
+		if (!current || !initial) {
 			throw new MockRemoteLixError(
 				"LIX_BRANCH_NOT_FOUND",
-				"The workspace does not contain a branch.",
+				"The workspace does not contain its current branch.",
 			);
 		}
-		this.#mainBranchId = main?.id ?? initial.id;
+		this.#defaultBranchId = current.id;
 		this.#activeBranchId = initial.id;
 	}
 
@@ -137,9 +137,9 @@ class MockRemoteLix {
 		return this.#activeBranchId;
 	}
 
-	mainBranchSnapshot(): string {
+	defaultBranchSnapshot(): string {
 		this.#assertOpen();
-		return this.#mainBranchId;
+		return this.#defaultBranchId;
 	}
 
 	subscribeActiveBranch(listener: () => void): () => void {
@@ -220,7 +220,7 @@ class MockRemoteLix {
 		options: SwitchBranchOptions,
 	): Promise<SwitchBranchReceipt> {
 		this.#assertOpen();
-		const branches = await this.#listBranches();
+		const { branches } = await this.#listBranches();
 		if (!branches.some((branch) => branch.id === options.branchId)) {
 			throw new MockRemoteLixError(
 				"LIX_BRANCH_NOT_FOUND",
@@ -260,9 +260,8 @@ class MockRemoteLix {
 		for (const listener of [...this.#branchListeners]) listener();
 	}
 
-	async #listBranches(): Promise<Branch[]> {
-		const payload = await this.#requestJson<BranchesPayload>("/branches");
-		return payload.branches;
+	async #listBranches(): Promise<BranchesPayload> {
+		return this.#requestJson<BranchesPayload>("/branches");
 	}
 
 	async #requestJson<T>(

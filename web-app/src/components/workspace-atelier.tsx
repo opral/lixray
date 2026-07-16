@@ -28,6 +28,7 @@ import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import { openMockRemoteLix } from "~/lib/mock-remote-lix";
 import {
+	atelierBranchSearch,
 	isLixBranchNotFoundError,
 	resolveAtelierRouteBranchId,
 	shouldNormalizeInitialBranch,
@@ -49,6 +50,7 @@ interface WorkspaceAtelierProps {
 }
 
 const WorkspaceAtelierContext = createContext<AtelierInstance | null>(null);
+const WorkspaceDefaultBranchContext = createContext<string | null>(null);
 
 export function WorkspaceAtelier({
 	workspaceId,
@@ -65,6 +67,9 @@ export function WorkspaceAtelier({
 	const routeFilePath =
 		"_splat" in routeParams ? routeParams._splat : undefined;
 	const [instance, setInstance] = useState<AtelierInstance | null>(null);
+	const [workspaceDefaultBranchId, setWorkspaceDefaultBranchId] = useState<
+		string | null
+	>(null);
 	const [error, setError] = useState<string | null>(null);
 	const activeLixRef = useRef<BrowserLix | null>(null);
 	const pathnameRef = useRef(pathname);
@@ -98,6 +103,10 @@ export function WorkspaceAtelier({
 	);
 	const navigateToCurrentPathBranch = useCallback(
 		async (nextBranchId: string, replace = false) => {
+			const defaultBranchId = activeLixRef.current?.defaultBranchSnapshot();
+			const search = defaultBranchId
+				? atelierBranchSearch(nextBranchId, defaultBranchId)
+				: { branch: nextBranchId };
 			const filePath = routeFilePathRef.current;
 			if (filePath !== undefined) {
 				await navigate({
@@ -107,7 +116,7 @@ export function WorkspaceAtelier({
 						workspace: workspaceSlug,
 						_splat: filePath,
 					},
-					search: { branch: nextBranchId },
+					search,
 					replace,
 				});
 				return;
@@ -115,7 +124,7 @@ export function WorkspaceAtelier({
 			await navigate({
 				to: "/@{$namespace}/$workspace",
 				params: { namespace, workspace: workspaceSlug },
-				search: { branch: nextBranchId },
+				search,
 				replace,
 			});
 		},
@@ -134,13 +143,18 @@ export function WorkspaceAtelier({
 			if (nextFilePath === undefined) return;
 			const filePath = nextFilePath?.replace(/^\/+/, "") ?? "";
 			const activeBranchId = activeLixRef.current?.activeBranchSnapshot();
+			const defaultBranchId = activeLixRef.current?.defaultBranchSnapshot();
+			const search =
+				activeBranchId && defaultBranchId
+					? atelierBranchSearch(activeBranchId, defaultBranchId)
+					: {};
 			if (!filePath) {
 				const targetPath = `/@${namespace}/${workspaceSlug}`;
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
 					to: "/@{$namespace}/$workspace",
 					params: { namespace, workspace: workspaceSlug },
-					search: activeBranchId ? { branch: activeBranchId } : {},
+					search,
 				});
 				return;
 			}
@@ -152,7 +166,7 @@ export function WorkspaceAtelier({
 					workspace: workspaceSlug,
 					_splat: filePath,
 				},
-				search: activeBranchId ? { branch: activeBranchId } : {},
+				search,
 			});
 		};
 	}, [namespace, navigate, workspaceSlug]);
@@ -161,6 +175,7 @@ export function WorkspaceAtelier({
 		let disposed = false;
 		let activeLix: Lix | null = null;
 		setInstance(null);
+		setWorkspaceDefaultBranchId(null);
 		setError(null);
 
 		const userId = isDemoModeEnabled ? DEMO_AUTH_TOKEN : user?.id;
@@ -181,12 +196,13 @@ export function WorkspaceAtelier({
 				}
 				activeLix = lix;
 				activeLixRef.current = lix;
+				setWorkspaceDefaultBranchId(lix.defaultBranchSnapshot());
 				const branchSession = createWorkspaceBranchSession({
 					lix,
 					onSwitch: async (nextBranchId, context) => {
 						const routedBranchId = resolveAtelierRouteBranchId(
 							branchIdRef.current,
-							lix.mainBranchSnapshot(),
+							lix.defaultBranchSnapshot(),
 						);
 						if (
 							suppressBranchNavigationRef.current ||
@@ -228,6 +244,7 @@ export function WorkspaceAtelier({
 						openingBranchId,
 						currentBranchId: branchIdRef.current ?? null,
 						actualBranchId,
+						defaultBranchId: lix.defaultBranchSnapshot(),
 					})
 				) {
 					await navigateToCurrentPathBranch(actualBranchId, true);
@@ -259,7 +276,7 @@ export function WorkspaceAtelier({
 		if (!instance || !lix) return;
 		const requestedBranchId = resolveAtelierRouteBranchId(
 			branchId,
-			lix.mainBranchSnapshot(),
+			lix.defaultBranchSnapshot(),
 		);
 		const routeSwitch = ++routeBranchSwitchRef.current;
 		void (async () => {
@@ -274,18 +291,18 @@ export function WorkspaceAtelier({
 					);
 					return;
 				}
-				const mainBranchId = lix.mainBranchSnapshot();
+				const defaultBranchId = lix.defaultBranchSnapshot();
 				try {
-					if (instance.branches.activeId() !== mainBranchId) {
+					if (instance.branches.activeId() !== defaultBranchId) {
 						suppressBranchNavigationRef.current = true;
 						try {
-							await instance.branches.switch(mainBranchId);
+							await instance.branches.switch(defaultBranchId);
 						} finally {
 							suppressBranchNavigationRef.current = false;
 						}
 					}
 					if (routeSwitch !== routeBranchSwitchRef.current) return;
-					await navigateToCurrentPathBranch(mainBranchId, true);
+					await navigateToCurrentPathBranch(defaultBranchId, true);
 				} catch (fallbackError) {
 					if (routeSwitch === routeBranchSwitchRef.current) {
 						console.error(
@@ -316,27 +333,35 @@ export function WorkspaceAtelier({
 			aria-busy={!instance && !error}
 		>
 			{instance ? (
-				<WorkspaceAtelierContext.Provider value={instance}>
-					<Atelier
-						instance={instance}
-						topBarProps={{
-							"data-app-titlebar": true,
-							className: "border-b border-border-subtle bg-bg-app",
-						}}
-						slots={{
-							navbarStart: (
-								<Link
-									to="/home"
-									aria-label="Back to workspaces"
-									className="flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
-								>
-									<img src="/lixray-mark.svg" alt="" className="size-[18px]" />
-								</Link>
-							),
-						}}
-					/>
-					<Outlet />
-				</WorkspaceAtelierContext.Provider>
+				<WorkspaceDefaultBranchContext.Provider
+					value={workspaceDefaultBranchId}
+				>
+					<WorkspaceAtelierContext.Provider value={instance}>
+						<Atelier
+							instance={instance}
+							topBarProps={{
+								"data-app-titlebar": true,
+								className: "border-b border-border-subtle bg-bg-app",
+							}}
+							slots={{
+								navbarStart: (
+									<Link
+										to="/home"
+										aria-label="Back to workspaces"
+										className="flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+									>
+										<img
+											src="/lixray-mark.svg"
+											alt=""
+											className="size-[18px]"
+										/>
+									</Link>
+								),
+							}}
+						/>
+						<Outlet />
+					</WorkspaceAtelierContext.Provider>
+				</WorkspaceDefaultBranchContext.Provider>
 			) : null}
 			{!instance && !error ? (
 				<main className="absolute inset-0 grid place-content-center justify-items-center gap-2 bg-bg-app p-6 text-center text-text-secondary">
@@ -360,4 +385,8 @@ export function WorkspaceAtelier({
 
 export function useWorkspaceAtelierInstance(): AtelierInstance | null {
 	return useContext(WorkspaceAtelierContext);
+}
+
+export function useWorkspaceDefaultBranchId(): string | null {
+	return useContext(WorkspaceDefaultBranchContext);
 }

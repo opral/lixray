@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	atelierBranchSearch,
 	isAtelierFileNotFoundError,
 	isLixBranchNotFoundError,
 	resolveAtelierRouteBranchId,
@@ -71,6 +72,7 @@ void test("initial branch normalization never overwrites a newer route", () => {
 			openingBranchId: "branch-a",
 			currentBranchId: "branch-b",
 			actualBranchId: "branch-a",
+			defaultBranchId: "main",
 		}),
 		false,
 	);
@@ -79,6 +81,7 @@ void test("initial branch normalization never overwrites a newer route", () => {
 			openingBranchId: "branch-a",
 			currentBranchId: null,
 			actualBranchId: "branch-a",
+			defaultBranchId: "main",
 		}),
 		false,
 		"a branchless route reached while initialization is pending remains authoritative",
@@ -88,12 +91,25 @@ void test("initial branch normalization never overwrites a newer route", () => {
 			openingBranchId: "missing",
 			currentBranchId: "missing",
 			actualBranchId: "main",
+			defaultBranchId: "main",
 		}),
 		true,
 	);
+	assert.equal(
+		shouldNormalizeInitialBranch({
+			openingBranchId: "main",
+			currentBranchId: "main",
+			actualBranchId: "main",
+			defaultBranchId: "main",
+		}),
+		true,
+		"an explicit current branch is canonicalized to a branchless URL",
+	);
 });
 
-void test("a branch-to-branchless route transition targets main without rewriting the URL", () => {
+void test("a branch-to-branchless route transition targets the default without rewriting the URL", () => {
 	assert.equal(resolveAtelierRouteBranchId("draft", "main"), "draft");
 	assert.equal(resolveAtelierRouteBranchId(undefined, "main"), "main");
+	assert.deepEqual(atelierBranchSearch("main", "main"), {});
+	assert.deepEqual(atelierBranchSearch("draft", "main"), { branch: "draft" });
 });

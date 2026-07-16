@@ -2,10 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Page, Request } from "@playwright/test";
 import { expect, expectOk, test } from "./fixtures";
 import type { BranchesResponse } from "../../src/lib/lixray-api";
-import {
-	DEMO_AUTH_TOKEN,
-	DEMO_MAIN_BRANCH_ID,
-} from "../../src/lib/demo-identity";
+import { DEMO_AUTH_TOKEN } from "../../src/lib/demo-identity";
 
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
 const FILE_PATH = "/atelier-first-slice.md";
@@ -42,7 +39,7 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 	await expect(page).toHaveURL((url) => {
 		return (
 			url.pathname === "/@acme/launch-q3/file/atelier-first-slice.md" &&
-			url.searchParams.get("branch") === DEMO_MAIN_BRANCH_ID
+			!url.searchParams.has("branch")
 		);
 	});
 	await expect(
@@ -56,7 +53,7 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 	await expect(page).toHaveURL((url) => {
 		return (
 			url.pathname === "/@acme/launch-q3/file/atelier-first-slice.md" &&
-			url.searchParams.get("branch") === DEMO_MAIN_BRANCH_ID
+			!url.searchParams.has("branch")
 		);
 	});
 	await expect(
@@ -84,10 +81,7 @@ test("branch URL normalization preserves encoded file names", async ({
 	await page.goto(encodedPath);
 
 	await expect(page).toHaveURL((url) => {
-		return (
-			url.pathname === encodedPath &&
-			url.searchParams.get("branch") === DEMO_MAIN_BRANCH_ID
-		);
+		return url.pathname === encodedPath && !url.searchParams.has("branch");
 	});
 	await expect(
 		page.getByRole("heading", { name: "Encoded file route" }),
@@ -123,8 +117,7 @@ test("a branch-only file survives reload and falls back to the workspace root on
 	await page.goto(`${encodedPath}?branch=${encodeURIComponent(mainBranchId)}`);
 	await expect(page).toHaveURL(
 		(url) =>
-			url.pathname === "/@acme/launch-q3" &&
-			url.searchParams.get("branch") === mainBranchId,
+			url.pathname === "/@acme/launch-q3" && !url.searchParams.has("branch"),
 		{ timeout: 55_000 },
 	);
 	await settlePageExecutes(page, pendingExecutes);
@@ -167,9 +160,7 @@ async function seedMarkdownFile(
 	);
 	await expectOk(branchesResponse);
 	const branches = (await branchesResponse.json()) as BranchesResponse;
-	const branchId =
-		branches.branches.find((branch) => branch.name === "main")?.id ??
-		branches.branches[0]?.id;
+	const branchId = branches.currentBranchId;
 	expect(branchId).toBeTruthy();
 
 	const executeResponse = await page.request.post(
@@ -204,9 +195,7 @@ async function seedBranchOnlyMarkdownFile(page: Page): Promise<{
 	);
 	await expectOk(branchesResponse);
 	const branches = (await branchesResponse.json()) as BranchesResponse;
-	const mainBranchId =
-		branches.branches.find((branch) => branch.name === "main")?.id ??
-		branches.branches[0]?.id;
+	const mainBranchId = branches.currentBranchId;
 	expect(mainBranchId).toBeTruthy();
 	const draftBranchId = randomUUID();
 	const createBranchResponse = await page.request.post(
