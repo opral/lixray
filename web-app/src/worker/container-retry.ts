@@ -35,6 +35,7 @@ export interface FetchContainerWithRetryOptions {
 	operation: string;
 	envVars: Record<string, string>;
 	createRequest: () => Request;
+	requestReplay: "safe" | "unsafe";
 	signal?: AbortSignal;
 	retryDelay?: ContainerRetryDelay;
 	retryRandom?: () => number;
@@ -66,6 +67,15 @@ const RETRYABLE_CONTAINER_ERROR_FRAGMENTS = [
 	"runtime signalled the container to exit due to a new version rollout",
 ];
 
+const CONTAINER_NOT_READY_ERROR_FRAGMENTS = [
+	"container is not running",
+	"there is no container instance",
+	"too many containers per second",
+	"failed to start container",
+	"failed to verify port",
+	"container is not listening",
+];
+
 export async function fetchContainerWithRetry(
 	options: FetchContainerWithRetryOptions,
 ): Promise<Response> {
@@ -75,50 +85,116 @@ export async function fetchContainerWithRetry(
 
 	for (;;) {
 		throwIfAborted(options.signal);
-		let retryError: unknown;
+		let container: ContainerStub;
 		try {
 			// A Durable Object reset creates a new object incarnation. Reacquiring the
 			// stub on every attempt avoids retaining an RPC session from the reset one.
-			const container = options.namespace.getByName(options.workspaceId);
-			await container.startAndWaitForPorts?.({
+			container = options.namespace.getByName(options.workspaceId);
+			const startup = container.startAndWaitForPorts?.({
 				ports: 8080,
-				cancellationOptions: { abort: options.signal },
 				startOptions: { envVars: options.envVars },
 			});
-			const response = await container.fetch(options.createRequest());
-			const responseFailure = await retryableResponseFailure(response);
-			if (!responseFailure) return response;
-			await cancelResponseBody(response);
-			retryError = responseFailure;
+			if (startup) await waitForPromiseWithAbort(startup, options.signal);
 		} catch (caught) {
 			throwIfAborted(options.signal);
 			if (!isRetryableContainerError(caught)) throw caught;
-			retryError = caught;
+			await waitBeforeContainerRetry(
+				options,
+				caught,
+				++retryCount,
+				retryDelay,
+				retryRandom,
+			);
+			continue;
 		}
 
-		retryCount += 1;
-		const retryDelayMs = containerRetryDelayMs(retryCount, retryRandom);
-		options.onRetry?.({
-			workspaceId: options.workspaceId,
-			operation: options.operation,
-			retryCount,
-			retryDelayMs,
-			error: retryError,
-		});
-		await retryDelay(retryDelayMs, options.signal);
+		// Constructing the request happens after startup and outside a retry catch so
+		// local serialization/programming failures are never mistaken for churn.
+		const request = options.createRequest();
+		let response: Response;
+		try {
+			response = await waitForPromiseWithAbort(
+				container.fetch(request),
+				options.signal,
+			);
+		} catch (caught) {
+			throwIfAborted(options.signal);
+			const canReplay =
+				options.requestReplay === "safe" || isContainerNotReadyError(caught);
+			if (!canReplay || !isRetryableContainerError(caught)) throw caught;
+			await waitBeforeContainerRetry(
+				options,
+				caught,
+				++retryCount,
+				retryDelay,
+				retryRandom,
+			);
+			continue;
+		}
+
+		const responseFailure = await retryableResponseFailure(
+			response,
+			options.requestReplay,
+		);
+		if (!responseFailure) return response;
+		await cancelResponseBody(response);
+		await waitBeforeContainerRetry(
+			options,
+			responseFailure,
+			++retryCount,
+			retryDelay,
+			retryRandom,
+		);
 	}
 }
 
 export function isRetryableContainerError(caught: unknown): boolean {
 	const message = errorMessageWithCauses(caught).toLowerCase();
-	if (message.includes("abort")) return false;
+	if (isDataCloneError(caught) || message.includes("abort")) return false;
 
 	const exitCode = containerExitCode(message);
 	if (exitCode !== null && exitCode !== 0) return false;
+	if (hasErrorFlag(caught, "overloaded", true)) return false;
+	if (hasErrorFlag(caught, "retryable", true)) return true;
+	if (hasErrorFlag(caught, "retryable", false)) return false;
 
 	return RETRYABLE_CONTAINER_ERROR_FRAGMENTS.some((fragment) =>
 		message.includes(fragment),
 	);
+}
+
+export function containerErrorDetails(
+	caught: unknown,
+): Record<string, unknown> {
+	return containerErrorDetailsWithSeen(caught, new Set());
+}
+
+function containerErrorDetailsWithSeen(
+	caught: unknown,
+	seen: Set<unknown>,
+): Record<string, unknown> {
+	if (!isObject(caught)) return { value: String(caught) };
+	if (seen.has(caught)) return { value: "Circular error cause" };
+	seen.add(caught);
+
+	const details: Record<string, unknown> = {};
+	for (const property of [
+		"name",
+		"message",
+		"stack",
+		"retryable",
+		"overloaded",
+	] as const) {
+		const value = errorProperty(caught, property);
+		if (value !== undefined) details[property] = value;
+	}
+	const cause = errorProperty(caught, "cause");
+	if (cause !== undefined) {
+		details.cause = containerErrorDetailsWithSeen(cause, seen);
+	}
+	return Object.keys(details).length > 0
+		? details
+		: { value: "Unknown container error" };
 }
 
 export function containerRetryDelayMs(
@@ -144,29 +220,29 @@ export function logContainerRetry(
 		operation: observation.operation,
 		retryCount: observation.retryCount,
 		retryDelayMs: observation.retryDelayMs,
-		error:
-			observation.error instanceof Error
-				? {
-						name: observation.error.name,
-						message: observation.error.message,
-						stack: observation.error.stack,
-					}
-				: observation.error,
+		error: containerErrorDetails(observation.error),
 	});
 }
 
 async function retryableResponseFailure(
 	response: Response,
+	requestReplay: "safe" | "unsafe",
 ): Promise<Record<string, unknown> | null> {
-	if ([429, 502, 503, 504].includes(response.status)) {
-		return { status: response.status };
-	}
-	if (response.status !== 500) return null;
+	if (![429, 500, 502, 503, 504].includes(response.status)) return null;
 
-	const body = await parseResponse(response.clone());
-	const message = responseErrorMessage(body, response.status);
-	return isRetryableContainerError(message)
-		? { status: response.status, message }
+	let body: unknown;
+	try {
+		body = await parseResponse(response.clone());
+	} catch {
+		return null;
+	}
+	const error = responseError(body, response.status);
+	const canReplay =
+		requestReplay === "safe"
+			? isRetryableContainerError(error)
+			: isContainerNotReadyError(error);
+	return canReplay
+		? { status: response.status, error: containerErrorDetails(error) }
 		: null;
 }
 
@@ -177,18 +253,12 @@ async function parseResponse(response: Response): Promise<unknown> {
 		: response.text();
 }
 
-function responseErrorMessage(body: unknown, status: number): string {
+function responseError(body: unknown, status: number): unknown {
 	if (body && typeof body === "object" && "error" in body) {
 		const error = body.error;
-		if (
-			error &&
-			typeof error === "object" &&
-			"message" in error &&
-			typeof error.message === "string"
-		) {
-			return error.message;
-		}
+		if (error !== undefined) return error;
 	}
+	if (body && typeof body === "object") return body;
 	if (typeof body === "string" && body.trim()) return body.trim();
 	return `Container request failed with status ${status}.`;
 }
@@ -199,9 +269,12 @@ function errorMessageWithCauses(caught: unknown): string {
 	let current = caught;
 	while (current !== undefined && current !== null && !seen.has(current)) {
 		seen.add(current);
-		if (current instanceof Error) {
-			messages.push(current.message);
-			current = current.cause;
+		if (isObject(current)) {
+			const message = errorProperty(current, "message");
+			messages.push(
+				typeof message === "string" ? message : "Unknown container error",
+			);
+			current = errorProperty(current, "cause");
 		} else if (
 			typeof current === "string" ||
 			typeof current === "number" ||
@@ -218,6 +291,54 @@ function errorMessageWithCauses(caught: unknown): string {
 	return messages.join(" ");
 }
 
+function isContainerNotReadyError(caught: unknown): boolean {
+	if (!isRetryableContainerError(caught)) return false;
+	const message = errorMessageWithCauses(caught).toLowerCase();
+	return CONTAINER_NOT_READY_ERROR_FRAGMENTS.some((fragment) =>
+		message.includes(fragment),
+	);
+}
+
+function isDataCloneError(caught: unknown): boolean {
+	let current = caught;
+	const seen = new Set<unknown>();
+	while (isObject(current) && !seen.has(current)) {
+		seen.add(current);
+		if (errorProperty(current, "name") === "DataCloneError") return true;
+		current = errorProperty(current, "cause");
+	}
+	return false;
+}
+
+function hasErrorFlag(
+	caught: unknown,
+	property: "retryable" | "overloaded",
+	expected: boolean,
+): boolean {
+	let current = caught;
+	const seen = new Set<unknown>();
+	while (isObject(current) && !seen.has(current)) {
+		seen.add(current);
+		if (errorProperty(current, property) === expected) return true;
+		current = errorProperty(current, "cause");
+	}
+	return false;
+}
+
+function isObject(value: unknown): value is object {
+	return (
+		(typeof value === "object" && value !== null) || typeof value === "function"
+	);
+}
+
+function errorProperty(value: object, property: string): unknown {
+	try {
+		return Reflect.get(value, property);
+	} catch {
+		return undefined;
+	}
+}
+
 function containerExitCode(message: string): number | null {
 	const match = /exit code:\s*(-?\d+)/.exec(message);
 	return match ? Number(match[1]) : null;
@@ -225,8 +346,7 @@ function containerExitCode(message: string): number | null {
 
 function throwIfAborted(signal: AbortSignal | null | undefined): void {
 	if (!signal?.aborted) return;
-	if (signal.reason instanceof Error) throw signal.reason;
-	throw new DOMException("Container request was cancelled.", "AbortError");
+	throw abortReason(signal);
 }
 
 async function cancelResponseBody(response: Response): Promise<void> {
@@ -237,21 +357,72 @@ async function cancelResponseBody(response: Response): Promise<void> {
 	}
 }
 
+async function waitBeforeContainerRetry(
+	options: FetchContainerWithRetryOptions,
+	error: unknown,
+	retryCount: number,
+	retryDelay: ContainerRetryDelay,
+	retryRandom: () => number,
+): Promise<void> {
+	const retryDelayMs = containerRetryDelayMs(retryCount, retryRandom);
+	options.onRetry?.({
+		workspaceId: options.workspaceId,
+		operation: options.operation,
+		retryCount,
+		retryDelayMs,
+		error,
+	});
+	await retryDelay(retryDelayMs, options.signal);
+}
+
+function waitForPromiseWithAbort<T>(
+	promise: Promise<T>,
+	signal?: AbortSignal,
+): Promise<T> {
+	if (!signal) return promise;
+	throwIfAborted(signal);
+	return new Promise<T>((resolve, reject) => {
+		let settled = false;
+		const cleanup = () => signal.removeEventListener("abort", onAbort);
+		const onFulfilled = (value: T) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			resolve(value);
+		};
+		const onRejected = (error: unknown) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			reject(
+				error instanceof Error
+					? error
+					: new Error("Container operation failed.", { cause: error }),
+			);
+		};
+		const onAbort = () => onRejected(abortReason(signal));
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(onFulfilled, onRejected);
+	});
+}
+
+function abortReason(signal: AbortSignal): Error {
+	return signal.reason instanceof Error
+		? signal.reason
+		: new DOMException("Container request was cancelled.", "AbortError");
+}
+
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) {
-			reject(
-				signal.reason instanceof Error
-					? signal.reason
-					: new DOMException("Container request was cancelled.", "AbortError"),
-			);
+			reject(abortReason(signal));
 			return;
 		}
 		const onAbort = () => {
 			clearTimeout(timeout);
 			reject(
-				signal?.reason instanceof Error
-					? signal.reason
+				signal
+					? abortReason(signal)
 					: new DOMException("Container request was cancelled.", "AbortError"),
 			);
 		};

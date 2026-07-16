@@ -205,7 +205,7 @@ void test("transient HTTP responses retry and replay request bodies", async () =
 void test("caller cancellation stops otherwise retryable container work", async () => {
 	const controller = new AbortController();
 	let acquisitions = 0;
-	let observedSignal: AbortSignal | undefined;
+	let observedCancellationOptions: unknown;
 	let delays = 0;
 	const client = new WorkerLixRuntimeClient(
 		env({
@@ -213,9 +213,9 @@ void test("caller cancellation stops otherwise retryable container work", async 
 				acquisitions += 1;
 				return {
 					startAndWaitForPorts: async (options) => {
-						observedSignal = options.cancellationOptions?.abort;
-						controller.abort();
-						throw new Error("The container is not running");
+						observedCancellationOptions = options.cancellationOptions;
+						queueMicrotask(() => controller.abort());
+						return new Promise(() => undefined);
 					},
 					fetch: async () => new Response("unreachable"),
 				};
@@ -237,7 +237,7 @@ void test("caller cancellation stops otherwise retryable container work", async 
 			error.message === "Workspace storage request was cancelled."
 		);
 	});
-	assert.equal(observedSignal, controller.signal);
+	assert.equal(observedCancellationOptions, undefined);
 	assert.equal(acquisitions, 1);
 	assert.equal(delays, 0);
 });

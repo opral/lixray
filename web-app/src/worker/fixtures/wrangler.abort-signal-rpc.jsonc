@@ -1,0 +1,21 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "lixray-abort-signal-rpc-test",
+	"main": "./abort-signal-rpc.ts",
+	"compatibility_date": "2026-07-07",
+	"compatibility_flags": ["nodejs_compat", "enable_request_signal"],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "SIGNAL_TARGET",
+				"class_name": "SignalTarget",
+			},
+		],
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["SignalTarget"],
+		},
+	],
+}
