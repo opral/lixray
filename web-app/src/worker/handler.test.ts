@@ -353,6 +353,162 @@ void test("legacy unscoped /v1 routes return 404 before auth", async () => {
 	assert.equal(response.status, 404);
 });
 
+void test("canonical remote Lix handshake resolves the workspace and reuses its runtime", async () => {
+	let proxiedRequest: Request | undefined;
+	const response = await handleRequest(
+		new Request("https://example.test/@Acme/Launch-Q3/.lix/v1/", {
+			headers: { Authorization: "Bearer user-token" },
+		}),
+		env({}),
+		{
+			authenticate: authenticated(),
+			resolveWorkspace: async (namespace, workspaceSlug, auth) => {
+				assert.equal(namespace, "acme");
+				assert.equal(workspaceSlug, "launch-q3");
+				assert.equal(auth.userId, "user-123");
+				return { ok: true, workspaceId: WORKSPACE_A };
+			},
+			workspaceFetch: async (workspaceId, request) => {
+				assert.equal(workspaceId, WORKSPACE_A);
+				proxiedRequest = request;
+				return Response.json({
+					currentBranchId: "main-id",
+					branches: [],
+				});
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), {
+		protocolVersion: 1,
+		activeBranchId: "main-id",
+	});
+	assert.ok(proxiedRequest);
+	assert.equal(new URL(proxiedRequest.url).pathname, "/v1/branches");
+	assert.equal(proxiedRequest.headers.get("authorization"), null);
+});
+
+void test("canonical remote Lix execute preserves the request and returns a direct result", async () => {
+	const result = { columns: [], rows: [], rowsAffected: 1, notices: [] };
+	const requestBody = {
+		branchId: "main-id",
+		sql: "SELECT $1",
+		params: [{ kind: "text", value: "value" }],
+	};
+	const response = await handleRequest(
+		new Request("https://example.test/@acme/launch-q3/.lix/v1/execute", {
+			method: "POST",
+			headers: {
+				Authorization: "Bearer user-token",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify(requestBody),
+		}),
+		env({}),
+		{
+			authenticate: authenticated(),
+			resolveWorkspace: async () => ({
+				ok: true,
+				workspaceId: WORKSPACE_A,
+			}),
+			workspaceFetch: async (_workspaceId, request) => {
+				assert.equal(new URL(request.url).pathname, "/v1/execute");
+				assert.deepEqual(await request.json(), requestBody);
+				return Response.json({ results: [result] });
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), result);
+});
+
+void test("canonical remote Lix execute rejects invalid result cardinality", async () => {
+	const result = { columns: [], rows: [], rowsAffected: 0, notices: [] };
+	for (const results of [[], [result, result]]) {
+		const response = await handleRequest(
+			new Request("https://example.test/@acme/launch-q3/.lix/v1/execute", {
+				method: "POST",
+			}),
+			env({}),
+			{
+				authenticate: authenticated(),
+				resolveWorkspace: async () => ({
+					ok: true,
+					workspaceId: WORKSPACE_A,
+				}),
+				workspaceFetch: async () => Response.json({ results }),
+			},
+		);
+		assert.equal(response.status, 502);
+		assert.deepEqual(await response.json(), {
+			error: {
+				code: "LIX_REMOTE_PROTOCOL_ERROR",
+				message:
+					"Workspace runtime returned an invalid single-statement result.",
+			},
+		});
+	}
+});
+
+void test("canonical remote Lix pass-through routes map to existing workspace operations", async () => {
+	const cases = [
+		["observe", "/v1/observe"],
+		["branch/create", "/v1/createBranch"],
+		["branch/switch", "/v1/switchBranch"],
+	] as const;
+	for (const [endpoint, expectedPath] of cases) {
+		const upstream =
+			endpoint === "observe"
+				? new Response("event: next\ndata: {}\n\n", {
+						headers: { "content-type": "text/event-stream" },
+					})
+				: Response.json({ ok: true });
+		const response = await handleRequest(
+			new Request(`https://example.test/@acme/launch-q3/.lix/v1/${endpoint}`, {
+				method: "POST",
+				headers: { Authorization: "Bearer user-token" },
+			}),
+			env({}),
+			{
+				authenticate: authenticated(),
+				resolveWorkspace: async () => ({
+					ok: true,
+					workspaceId: WORKSPACE_A,
+				}),
+				workspaceFetch: async (_workspaceId, request) => {
+					assert.equal(new URL(request.url).pathname, expectedPath);
+					return upstream;
+				},
+			},
+		);
+		assert.equal(response, upstream);
+	}
+});
+
+void test("unknown canonical remote Lix endpoints do not authenticate or fall through", async () => {
+	let authenticatedRequest = false;
+	let fellBack = false;
+	const response = await handleRequest(
+		new Request("https://example.test/@acme/launch-q3/.lix/v1/unknown"),
+		env({}),
+		{
+			authenticate: async () => {
+				authenticatedRequest = true;
+				return authenticated()(new Request("https://example.test"), {});
+			},
+			fallback: async () => {
+				fellBack = true;
+				return new Response("frontend");
+			},
+		},
+	);
+	assert.equal(response.status, 404);
+	assert.equal(authenticatedRequest, false);
+	assert.equal(fellBack, false);
+});
+
 void test("malformed workspace ids return 400 before auth", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/v1/workspaces/not-a-uuid/branches"),
@@ -749,6 +905,115 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
 	assert.equal(workspaceFetches, 1);
+});
+
+void test("canonical remote Lix resolves demo workspace paths without Supabase", async () => {
+	let workspaceFetches = 0;
+	const testEnv = env({
+		extra: {
+			LIXRAY_DEMO: "1",
+			LIXRAY_DEMO_WORKSPACE_IDS: `${DEMO_WORKSPACE_ID},${WORKSPACE_A}`,
+		},
+	});
+	for (const [path, expectedWorkspaceId] of [
+		[`/@acme/${DEMO_WORKSPACE_NAME}/.lix/v1/`, DEMO_WORKSPACE_ID],
+		["/@acme/demo-workspace-2/.lix/v1/", WORKSPACE_A],
+	] as const) {
+		const response = await handleRequest(
+			new Request(`https://preview.example${path}`, {
+				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
+			}),
+			testEnv,
+			{
+				workspaceFetch: async (workspaceId, request) => {
+					workspaceFetches += 1;
+					assert.equal(workspaceId, expectedWorkspaceId);
+					assert.equal(new URL(request.url).pathname, "/v1/branches");
+					return Response.json({
+						currentBranchId: "main-id",
+						branches: [],
+					});
+				},
+			},
+		);
+		assert.equal(response.status, 200);
+	}
+
+	const missing = await handleRequest(
+		new Request("https://preview.example/@acme/missing/.lix/v1/", {
+			headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
+		}),
+		testEnv,
+		{
+			workspaceFetch: async () => {
+				workspaceFetches += 1;
+				return new Response();
+			},
+		},
+	);
+	assert.equal(missing.status, 404);
+	assert.equal(workspaceFetches, 2);
+});
+
+void test("canonical remote Lix resolves RLS-visible namespace and slug rows", async () => {
+	const originalFetch = globalThis.fetch;
+	const lookups: Array<{ url: URL; headers: Headers }> = [];
+	globalThis.fetch = async (input, init) => {
+		const requestUrl =
+			typeof input === "string"
+				? input
+				: input instanceof URL
+					? input.href
+					: input.url;
+		const url = new URL(requestUrl);
+		lookups.push({ url, headers: new Headers(init?.headers) });
+		return url.pathname.endsWith("/organizations")
+			? Response.json([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }])
+			: Response.json([{ id: WORKSPACE_A }]);
+	};
+	try {
+		const response = await handleRequest(
+			new Request("https://example.test/@acme/launch-q3/.lix/v1/", {
+				headers: { Authorization: "Bearer verified-user-token" },
+			}),
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+			{
+				authenticate: async () => ({
+					ok: true,
+					auth: {
+						userId: "user-123",
+						token: "verified-user-token",
+					},
+				}),
+				workspaceFetch: async (workspaceId) => {
+					assert.equal(workspaceId, WORKSPACE_A);
+					return Response.json({
+						currentBranchId: "main-id",
+						branches: [],
+					});
+				},
+			},
+		);
+
+		assert.equal(response.status, 200);
+		assert.equal(lookups.length, 2);
+		assert.equal(lookups[0]?.url.pathname, "/rest/v1/organizations");
+		assert.equal(lookups[0]?.url.searchParams.get("handle"), "eq.acme");
+		assert.equal(lookups[1]?.url.pathname, "/rest/v1/workspaces");
+		assert.equal(lookups[1]?.url.searchParams.get("slug"), "eq.launch-q3");
+		assert.equal(
+			lookups[0]?.headers.get("authorization"),
+			"Bearer verified-user-token",
+		);
+		assert.equal(lookups[0]?.headers.get("apikey"), "publishable-key");
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
 });
 
 void test("Supabase workspace authorization uses the user token and RLS-visible row", async () => {

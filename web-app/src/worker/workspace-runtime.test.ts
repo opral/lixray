@@ -116,6 +116,49 @@ void test("branch creation rejects ids outside the MCP UUID contract", async () 
 	assert.equal(createCalls, 0);
 });
 
+void test("branch switch validates the target and restores the runtime main branch", async () => {
+	let activeBranchId = BRANCH;
+	const switched: string[] = [];
+	const branches = new Set([BRANCH, WORKSPACE_B]);
+	const runtime = testRuntime(async () =>
+		fakeBinding({
+			activeBranchId: async () => activeBranchId,
+			switchBranch: async ({ branchId }: { branchId: string }) => {
+				if (!branches.has(branchId)) {
+					throw Object.assign(new Error(`branch missing: ${branchId}`), {
+						code: "LIX_BRANCH_NOT_FOUND",
+					});
+				}
+				activeBranchId = branchId;
+				switched.push(branchId);
+				return { branchId };
+			},
+		}),
+	);
+
+	const response = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/switchBranch", { branchId: WORKSPACE_B }),
+	);
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), { branchId: WORKSPACE_B });
+	assert.deepEqual(switched, [WORKSPACE_B, BRANCH]);
+	assert.equal(activeBranchId, BRANCH);
+
+	const missing = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/switchBranch", { branchId: WORKSPACE_A }),
+	);
+	assert.equal(missing.status, 404);
+	assert.deepEqual(await missing.json(), {
+		error: {
+			code: "LIX_BRANCH_NOT_FOUND",
+			message: `branch missing: ${WORKSPACE_A}`,
+		},
+	});
+	assert.equal(activeBranchId, BRANCH);
+});
+
 void test("failed canonical branch initialization closes and evicts the runtime", async () => {
 	let opens = 0;
 	let closes = 0;

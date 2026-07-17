@@ -673,6 +673,19 @@ async function routeRequest(
 			),
 		);
 	}
+	if (pathname === "/v1/switchBranch") {
+		if (request.method !== "POST") return methodNotAllowed();
+		const body = await requestBody(request);
+		const branchId = requiredString(body, "branchId");
+		return json(
+			await withSelectedBranch(
+				runtime.lix,
+				branchId,
+				runtime.mainBranchId,
+				() => Promise.resolve({ branchId }),
+			),
+		);
+	}
 	if (pathname === "/v1/execute") {
 		if (request.method !== "POST") return methodNotAllowed();
 		const body = await requestBody(request);
