@@ -12,6 +12,7 @@ import {
 	authenticateWithSupabase,
 	authorizeWorkspaceWithSupabase,
 	handleRequest,
+	resolveWorkspaceWithSupabase,
 	validateBrowserJwtClaims,
 	validateMcpJwtClaims,
 	type AuthenticateRequest,
@@ -351,6 +352,47 @@ void test("legacy unscoped /v1 routes return 404 before auth", async () => {
 		},
 	);
 	assert.equal(response.status, 404);
+});
+
+void test("canonical Lix protocol is authenticated, resolved, and forwarded unchanged", async () => {
+	const body = {
+		statements: [{ sql: "SELECT $1", params: [{ kind: "int", value: 1 }] }],
+	};
+	let proxiedRequest: Request | undefined;
+	const upstream = Response.json([
+		{ columns: ["value"], rows: [], rowsAffected: 0, notices: [] },
+	]);
+	const response = await handleRequest(
+		new Request("https://example.test/@Acme/Launch-Q3/lix/v1/execute-batch", {
+			method: "POST",
+			headers: {
+				Authorization: "Bearer user-token",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify(body),
+		}),
+		env({}),
+		{
+			authenticate: authenticated(),
+			resolveWorkspace: async (namespace, workspaceSlug, auth) => {
+				assert.equal(namespace, "acme");
+				assert.equal(workspaceSlug, "launch-q3");
+				assert.equal(auth.userId, "user-123");
+				return { ok: true, workspaceId: WORKSPACE_A };
+			},
+			workspaceFetch: async (workspaceId, request) => {
+				assert.equal(workspaceId, WORKSPACE_A);
+				proxiedRequest = request;
+				return upstream;
+			},
+		},
+	);
+
+	assert.equal(response, upstream);
+	assert.ok(proxiedRequest);
+	assert.equal(new URL(proxiedRequest.url).pathname, "/lix/v1/execute-batch");
+	assert.equal(proxiedRequest.headers.get("authorization"), null);
+	assert.deepEqual(await proxiedRequest.json(), body);
 });
 
 void test("malformed workspace ids return 400 before auth", async () => {
@@ -806,6 +848,52 @@ void test("Supabase workspace authorization hides absent or RLS-invisible rows",
 		);
 		assert.equal(failure?.status, 403);
 		assert.equal(await failure?.text(), "Workspace access denied\n");
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+void test("Supabase canonical workspace resolution joins RLS-visible organization and workspace rows", async () => {
+	const originalFetch = globalThis.fetch;
+	const lookups: URL[] = [];
+	globalThis.fetch = async (input, init) => {
+		const requestUrl =
+			typeof input === "string"
+				? input
+				: input instanceof URL
+					? input.href
+					: input.url;
+		const url = new URL(requestUrl);
+		lookups.push(url);
+		assert.equal(
+			new Headers(init?.headers).get("authorization"),
+			"Bearer verified-user-token",
+		);
+		return url.pathname.endsWith("/organizations")
+			? Response.json([{ id: DEMO_ORGANIZATION_ID }])
+			: Response.json([{ id: WORKSPACE_A }]);
+	};
+	try {
+		const resolution = await resolveWorkspaceWithSupabase(
+			"acme",
+			"launch-q3",
+			{ userId: "user-123", token: "verified-user-token" },
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+		);
+		assert.deepEqual(resolution, { ok: true, workspaceId: WORKSPACE_A });
+		assert.equal(lookups.length, 2);
+		assert.equal(lookups[0]?.searchParams.get("handle"), "eq.acme");
+		assert.equal(
+			lookups[1]?.searchParams.get("organization_id"),
+			`eq.${DEMO_ORGANIZATION_ID}`,
+		);
+		assert.equal(lookups[1]?.searchParams.get("slug"), "eq.launch-q3");
+		assert.equal(lookups[1]?.searchParams.get("deleted_at"), "is.null");
 	} finally {
 		globalThis.fetch = originalFetch;
 	}

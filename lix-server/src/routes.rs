@@ -25,6 +25,7 @@ pub struct AppState {
 }
 
 pub fn router(service: Arc<LixService>) -> Router {
+    let protocol = lix_server_protocol::handler(service.protocol_lix());
     Router::new()
         .route("/v1/container-health", get(container_health))
         .route("/v1/branches", get(list_branches))
@@ -34,6 +35,7 @@ pub fn router(service: Arc<LixService>) -> Router {
         .route("/v1/observe", post(observe))
         .route("/v1/observe/multiplex", post(observe_multiplex))
         .with_state(AppState { service })
+        .merge(protocol)
 }
 
 async fn container_health() -> impl IntoResponse {
@@ -635,6 +637,42 @@ mod tests {
             .find(|branch| branch.name == "main")
             .expect("main branch exists")
             .id
+    }
+
+    #[tokio::test]
+    async fn mounts_the_canonical_lix_protocol_handler() {
+        let app = app().await;
+        let handshake = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/lix/v1/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(handshake.status(), StatusCode::OK);
+        let handshake: JsonValue = response_json(handshake).await;
+        assert_eq!(handshake["protocolVersion"], 1);
+        assert!(handshake["activeBranchId"].as_str().is_some());
+
+        let batch = json_request(
+            app,
+            Method::POST,
+            "/lix/v1/execute-batch",
+            json!({
+                "statements": [
+                    { "sql": "SELECT 1 AS value", "params": [] },
+                    { "sql": "SELECT 2 AS value", "params": [] }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(batch.status(), StatusCode::OK);
+        let batch: JsonValue = response_json(batch).await;
+        assert_eq!(batch.as_array().map(Vec::len), Some(2));
     }
 
     #[tokio::test]
