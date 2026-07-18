@@ -73,19 +73,23 @@ export function WorkspaceDirectory() {
 	useEffect(() => {
 		let cancelled = false;
 		setFileCounts({});
-		for (const workspace of organizations.flatMap(
-			(organization) => organization.workspaces,
-		)) {
-			void fetchWorkspaceFileCount(workspace.id, auth.getAccessToken)
-				.then((count) => {
-					if (!cancelled) {
-						setFileCounts((current) => ({
-							...current,
-							[workspace.id]: count,
-						}));
-					}
+		for (const organization of organizations) {
+			for (const workspace of organization.workspaces) {
+				void fetchWorkspaceFileCount({
+					namespace: organization.handle,
+					workspaceSlug: workspace.slug,
+					getAccessToken: auth.getAccessToken,
 				})
-				.catch(() => undefined);
+					.then((count) => {
+						if (!cancelled) {
+							setFileCounts((current) => ({
+								...current,
+								[workspace.id]: count,
+							}));
+						}
+					})
+					.catch(() => undefined);
+			}
 		}
 		return () => {
 			cancelled = true;
@@ -393,7 +397,11 @@ function WorkspaceRow({
 	const download = async () => {
 		setDownloading(true);
 		try {
-			const archive = await buildWorkspaceArchive(workspace.id, getAccessToken);
+			const archive = await buildWorkspaceArchive({
+				namespace: organization.handle,
+				workspaceSlug: workspace.slug,
+				getAccessToken,
+			});
 			triggerBrowserDownload(
 				`${workspace.slug}.zip`,
 				new Blob([archive], { type: "application/zip" }),

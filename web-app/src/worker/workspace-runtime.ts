@@ -442,12 +442,6 @@ async function openPersistentRuntime(
 			error,
 		);
 	}
-	try {
-		await restoreMainBranch(winnerLix, mainBranchId);
-	} catch (error) {
-		await closeQuietly(winnerLix);
-		throw error;
-	}
 	return { lix: winnerLix, finiteQueue: Promise.resolve(), mainBranchId };
 }
 
@@ -497,8 +491,7 @@ async function shouldPersistMutation(
 
 function isObservePath(pathname: string): boolean {
 	return (
-		pathname === "/lix/v1/observe" ||
-		pathname === "/lix/v1/observe/multiplex"
+		pathname === "/lix/v1/observe" || pathname === "/lix/v1/observe/multiplex"
 	);
 }
 
@@ -1058,89 +1051,84 @@ async function mutateFilesystem(
 		throw invalidArgument("mutation type is invalid");
 	}
 
-	return withSelectedBranch(
-		runtime.lix,
-		branchId,
-		runtime.mainBranchId,
-		async (selectedLix) => {
-			const transaction = await selectedLix.beginTransaction();
-			try {
-				const table = kind === "file" ? "lix_file" : "lix_directory";
-				const current = await transaction.execute(
-					`SELECT id, lixcol_change_id FROM ${table} WHERE path = $1`,
-					[{ kind: "text", value: path }],
-				);
-				if (!current.rows[0])
-					return await rollbackOutcome(transaction, "conflict");
-				const id = requiredNativeText(current, current.rows[0], "id");
-				const revision = requiredNativeText(
-					current,
-					current.rows[0],
-					"lixcol_change_id",
-				);
-				if (revision !== expectedRevision) {
-					return await rollbackOutcome(transaction, "conflict");
-				}
-
-				let result: ExecuteResult;
-				if (mutationType === "replace_file") {
-					if (kind !== "file") {
-						throw lixError(
-							"LIX_INVALID_PARAM",
-							"replace_file requires a file entry",
-						);
-					}
-					result = await transaction.execute(
-						"UPDATE lix_file SET data = $1, lixcol_metadata = $2 WHERE id = $3",
-						[
-							decodeWireValue(mutation.data, 0),
-							decodeWireValue(mutation.metadata, 1),
-							{ kind: "text", value: id },
-						],
-					);
-				} else if (mutationType === "move") {
-					const destinationPath = requiredString(mutation, "destinationPath");
-					const filePath = destinationPath.replace(/\/+$/, "");
-					const directoryPath = `${filePath}/`;
-					const fileCollision = await transaction.execute(
-						"SELECT id FROM lix_file WHERE path = $1",
-						[{ kind: "text", value: filePath }],
-					);
-					const directoryCollision = await transaction.execute(
-						"SELECT id FROM lix_directory WHERE path = $1",
-						[{ kind: "text", value: directoryPath }],
-					);
-					if (fileCollision.rows.length || directoryCollision.rows.length) {
-						return await rollbackOutcome(transaction, "already_exists");
-					}
-					result = await transaction.execute(
-						`UPDATE ${table} SET path = $1 WHERE id = $2`,
-						[
-							{ kind: "text", value: destinationPath },
-							{ kind: "text", value: id },
-						],
-					);
-				} else {
-					result = await transaction.execute(
-						`DELETE FROM ${table} WHERE id = $1`,
-						[{ kind: "text", value: id }],
-					);
-				}
-				if (result.rowsAffected !== 1) {
-					return await rollbackOutcome(transaction, "conflict");
-				}
-				await transaction.commit();
-				return { outcome: "applied" };
-			} catch (error) {
-				try {
-					await transaction.rollback();
-				} catch {
-					// Preserve the operation error if rollback also fails.
-				}
-				throw error;
+	return withSelectedBranch(runtime.lix, branchId, async (selectedLix) => {
+		const transaction = await selectedLix.beginTransaction();
+		try {
+			const table = kind === "file" ? "lix_file" : "lix_directory";
+			const current = await transaction.execute(
+				`SELECT id, lixcol_change_id FROM ${table} WHERE path = $1`,
+				[{ kind: "text", value: path }],
+			);
+			if (!current.rows[0])
+				return await rollbackOutcome(transaction, "conflict");
+			const id = requiredNativeText(current, current.rows[0], "id");
+			const revision = requiredNativeText(
+				current,
+				current.rows[0],
+				"lixcol_change_id",
+			);
+			if (revision !== expectedRevision) {
+				return await rollbackOutcome(transaction, "conflict");
 			}
-		},
-	);
+
+			let result: ExecuteResult;
+			if (mutationType === "replace_file") {
+				if (kind !== "file") {
+					throw lixError(
+						"LIX_INVALID_PARAM",
+						"replace_file requires a file entry",
+					);
+				}
+				result = await transaction.execute(
+					"UPDATE lix_file SET data = $1, lixcol_metadata = $2 WHERE id = $3",
+					[
+						decodeWireValue(mutation.data, 0),
+						decodeWireValue(mutation.metadata, 1),
+						{ kind: "text", value: id },
+					],
+				);
+			} else if (mutationType === "move") {
+				const destinationPath = requiredString(mutation, "destinationPath");
+				const filePath = destinationPath.replace(/\/+$/, "");
+				const directoryPath = `${filePath}/`;
+				const fileCollision = await transaction.execute(
+					"SELECT id FROM lix_file WHERE path = $1",
+					[{ kind: "text", value: filePath }],
+				);
+				const directoryCollision = await transaction.execute(
+					"SELECT id FROM lix_directory WHERE path = $1",
+					[{ kind: "text", value: directoryPath }],
+				);
+				if (fileCollision.rows.length || directoryCollision.rows.length) {
+					return await rollbackOutcome(transaction, "already_exists");
+				}
+				result = await transaction.execute(
+					`UPDATE ${table} SET path = $1 WHERE id = $2`,
+					[
+						{ kind: "text", value: destinationPath },
+						{ kind: "text", value: id },
+					],
+				);
+			} else {
+				result = await transaction.execute(
+					`DELETE FROM ${table} WHERE id = $1`,
+					[{ kind: "text", value: id }],
+				);
+			}
+			if (result.rowsAffected !== 1) {
+				return await rollbackOutcome(transaction, "conflict");
+			}
+			await transaction.commit();
+			return { outcome: "applied" };
+		} catch (error) {
+			try {
+				await transaction.rollback();
+			} catch {
+				// Preserve the operation error if rollback also fails.
+			}
+			throw error;
+		}
+	});
 }
 
 async function rollbackOutcome(
@@ -1166,25 +1154,18 @@ function serialize<T>(
 async function withSelectedBranch<T>(
 	lix: MemoryLixBinding,
 	branchId: string,
-	mainBranchId: string,
 	operation: (selectedLix: MemoryLixBinding) => Promise<T>,
 ): Promise<T> {
-	if ((await lix.activeBranchId()) !== branchId) {
+	const previousBranchId = await lix.activeBranchId();
+	if (previousBranchId !== branchId) {
 		await lix.switchBranch({ branchId });
 	}
 	try {
 		return await operation(lix);
 	} finally {
-		await restoreMainBranch(lix, mainBranchId);
-	}
-}
-
-async function restoreMainBranch(
-	lix: MemoryLixBinding,
-	mainBranchId: string,
-): Promise<void> {
-	if ((await lix.activeBranchId()) !== mainBranchId) {
-		await lix.switchBranch({ branchId: mainBranchId });
+		if ((await lix.activeBranchId()) !== previousBranchId) {
+			await lix.switchBranch({ branchId: previousBranchId });
+		}
 	}
 }
 
@@ -1274,18 +1255,6 @@ function requiredNativeText(
 	const value = row[result.columns.indexOf(column)];
 	if (value?.kind !== "text") {
 		throw lixError("LIX_TYPE_MISMATCH", `expected text column ${column}`);
-	}
-	return value.value;
-}
-
-function requiredNativeBoolean(
-	result: ExecuteResult,
-	row: NativeValue[],
-	column: string,
-): boolean {
-	const value = row[result.columns.indexOf(column)];
-	if (value?.kind !== "boolean") {
-		throw lixError("LIX_TYPE_MISMATCH", `expected bool column ${column}`);
 	}
 	return value.value;
 }

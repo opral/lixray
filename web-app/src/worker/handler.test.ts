@@ -397,7 +397,9 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 
 void test("malformed workspace ids return 400 before auth", async () => {
 	const response = await handleRequest(
-		new Request("https://example.test/v1/workspaces/not-a-uuid/branches"),
+		new Request(
+			"https://example.test/v1/workspaces/not-a-uuid/filesystem/mutate",
+		),
 		env({}),
 		{
 			authenticate: async () => {
@@ -411,7 +413,7 @@ void test("malformed workspace ids return 400 before auth", async () => {
 
 void test("workspace routes return authentication failures", async () => {
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches"),
+		workspaceRequest(WORKSPACE_A, "/filesystem/mutate"),
 		env({}),
 		{
 			authenticate: rejected(401, "Unauthorized\n"),
@@ -424,7 +426,7 @@ void test("workspace routes return authentication failures", async () => {
 void test("inaccessible workspaces return 403 without starting a container", async () => {
 	let started = false;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches"),
+		workspaceRequest(WORKSPACE_A, "/filesystem/mutate"),
 		env({
 			fetch: async () => {
 				started = true;
@@ -440,15 +442,19 @@ void test("inaccessible workspaces return 403 without starting a container", asy
 void test("authorized requests route by workspace, rewrite paths, preserve bodies and strip auth", async () => {
 	let startOptions: unknown;
 	let proxiedRequest: Request | undefined;
-	const request = workspaceRequest(WORKSPACE_A, "/execute?mode=test", {
-		method: "POST",
-		headers: {
-			Authorization: "Bearer user-token",
-			"content-type": "application/json",
-			"x-client-header": "kept",
+	const request = workspaceRequest(
+		WORKSPACE_A,
+		"/filesystem/mutate?mode=test",
+		{
+			method: "POST",
+			headers: {
+				Authorization: "Bearer user-token",
+				"content-type": "application/json",
+				"x-client-header": "kept",
+			},
+			body: JSON.stringify({ sql: "SELECT 1" }),
 		},
-		body: JSON.stringify({ sql: "SELECT 1" }),
-	});
+	);
 	const response = await handleRequest(
 		request,
 		env({
@@ -503,7 +509,7 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 		},
 	);
 	assert.ok(proxiedRequest);
-	assert.equal(new URL(proxiedRequest.url).pathname, "/v1/execute");
+	assert.equal(new URL(proxiedRequest.url).pathname, "/v1/filesystem/mutate");
 	assert.equal(new URL(proxiedRequest.url).search, "?mode=test");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
 	assert.equal(proxiedRequest.headers.get("x-client-header"), "kept");
@@ -515,7 +521,7 @@ void test("transient container resets retry with a reacquired stub", async () =>
 	let starts = 0;
 	let fetches = 0;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches"),
+		workspaceRequest(WORKSPACE_A, "/filesystem/mutate"),
 		env({
 			getByName: () => {
 				acquisitions += 1;
@@ -557,7 +563,7 @@ void test("direct mutation bodies are not replayed after ambiguous proxy failure
 	const originalConsoleError = console.error;
 	console.error = (...arguments_: Array<unknown>) =>
 		terminalLogs.push(arguments_);
-	const request = workspaceRequest(WORKSPACE_A, "/execute", {
+	const request = workspaceRequest(WORKSPACE_A, "/filesystem/mutate", {
 		method: "POST",
 		headers: {
 			Authorization: "Bearer user-token",
@@ -605,7 +611,7 @@ void test("direct mutation bodies are not replayed after ambiguous proxy failure
 void test("permanent container startup failures return a controlled 503 response", async () => {
 	let fetched = false;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches"),
+		workspaceRequest(WORKSPACE_A, "/filesystem/mutate"),
 		env({
 			getByName: () => ({
 				startAndWaitForPorts: async () => {
@@ -641,7 +647,7 @@ void test("two workspaces route to distinct containers", async () => {
 	});
 	for (const workspaceId of [WORKSPACE_A, WORKSPACE_B]) {
 		const response = await handleRequest(
-			workspaceRequest(workspaceId, "/branches"),
+			workspaceRequest(workspaceId, "/filesystem/mutate"),
 			testEnv,
 			{
 				authenticate: authenticated(),
@@ -662,7 +668,7 @@ void test("demo auth on workers.dev only authorizes configured workspaces", asyn
 	});
 	const accepted = await handleRequest(
 		new Request(
-			`https://pr-42-lixray-preview.example.workers.dev/v1/workspaces/${DEMO_WORKSPACE_ID}/branches`,
+			`https://pr-42-lixray-preview.example.workers.dev/v1/workspaces/${DEMO_WORKSPACE_ID}/filesystem/mutate`,
 			{
 				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
 			},
@@ -673,7 +679,7 @@ void test("demo auth on workers.dev only authorizes configured workspaces", asyn
 
 	const deniedResponse = await handleRequest(
 		new Request(
-			`https://pr-42-lixray-preview.example.workers.dev/v1/workspaces/${WORKSPACE_A}/branches`,
+			`https://pr-42-lixray-preview.example.workers.dev/v1/workspaces/${WORKSPACE_A}/filesystem/mutate`,
 			{
 				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
 			},
@@ -685,7 +691,7 @@ void test("demo auth on workers.dev only authorizes configured workspaces", asyn
 
 void test("demo auth rejects an incorrect bearer token without Supabase", async () => {
 	const response = await authenticateWithSupabase(
-		workspaceRequest(DEMO_WORKSPACE_ID, "/branches", {
+		workspaceRequest(DEMO_WORKSPACE_ID, "/filesystem/mutate", {
 			headers: { Authorization: "Bearer incorrect" },
 		}),
 		env({

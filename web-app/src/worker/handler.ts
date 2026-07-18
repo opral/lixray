@@ -271,6 +271,9 @@ export async function handleRequest(
 	if (!match) {
 		return new Response("Not found\n", { status: 404 });
 	}
+	if (match[2] !== "/filesystem/mutate") {
+		return new Response("Not found\n", { status: 404 });
+	}
 
 	const workspaceId = safeDecodeURIComponent(match[1]);
 	if (!workspaceId || !UUID_PATTERN.test(workspaceId)) {

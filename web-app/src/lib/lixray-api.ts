@@ -1,6 +1,13 @@
+import {
+	openLix,
+	type ExecuteResult as LixExecuteResult,
+	type Lix,
+	type SqlParam,
+} from "@lix-js/sdk/remote";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
+import { base64ToBytes, bytesToBase64 } from "./base64";
 import { isDemoModeEnabled } from "./demo-client";
 import { DEMO_AUTH_TOKEN } from "./demo-identity";
 import type {
@@ -65,14 +72,81 @@ export function useLixrayApi() {
 	const { getAccessToken } = useAuth();
 	const { activeWorkspace } = useWorkspace();
 	const getTokenRef = useRef(getAccessToken);
+	const clientRef = useRef<{ key: string; promise: Promise<Lix> } | null>(null);
+	const queueRef = useRef(Promise.resolve());
 
 	useEffect(() => {
 		getTokenRef.current = getAccessToken;
 	}, [getAccessToken]);
 
 	const workspaceId = activeWorkspace?.workspace.id ?? null;
+	const workspaceKey = activeWorkspace
+		? `${activeWorkspace.organization.handle}/${activeWorkspace.workspace.slug}`
+		: null;
 
-	const request = useCallback(
+	useEffect(() => {
+		return () => {
+			const client = clientRef.current;
+			clientRef.current = null;
+			if (client) void client.promise.then((lix) => lix.close());
+		};
+	}, [workspaceKey]);
+
+	const getLix = useCallback(async (): Promise<Lix> => {
+		if (!activeWorkspace || !workspaceKey) {
+			throw new LixrayApiError(400, {
+				error: { message: "No active workspace is available" },
+			});
+		}
+		if (clientRef.current?.key === workspaceKey) {
+			return clientRef.current.promise;
+		}
+		const previous = clientRef.current;
+		if (previous) void previous.promise.then((lix) => lix.close());
+		const url = new URL(
+			`/@${encodeURIComponent(activeWorkspace.organization.handle)}/${encodeURIComponent(activeWorkspace.workspace.slug)}`,
+			globalThis.location.origin,
+		);
+		const promise = openLix({
+			server: {
+				url,
+				mode: "remote",
+				headers: async () => {
+					const token = isDemoModeEnabled
+						? DEMO_AUTH_TOKEN
+						: await getTokenRef.current();
+					if (!token) {
+						throw new LixrayApiError(401, {
+							error: { message: "No Supabase access token is available" },
+						});
+					}
+					return { Authorization: `Bearer ${token}` };
+				},
+			},
+		});
+		const client = { key: workspaceKey, promise };
+		clientRef.current = client;
+		void promise.catch(() => {
+			if (clientRef.current === client) clientRef.current = null;
+		});
+		return promise;
+	}, [activeWorkspace, workspaceKey]);
+
+	const serialized = useCallback(
+		async <T>(operation: (lix: Lix) => Promise<T>): Promise<T> => {
+			const result = queueRef.current.then(async () =>
+				operation(await getLix()),
+			);
+			queueRef.current = result.then(
+				() => undefined,
+				() => undefined,
+			);
+			return result;
+		},
+		[getLix],
+	);
+
+	const sidecarRequest = useCallback(
 		async <T>(path: string, init: RequestInit = {}): Promise<T> => {
 			const token = isDemoModeEnabled
 				? DEMO_AUTH_TOKEN
@@ -118,25 +192,118 @@ export function useLixrayApi() {
 	return useMemo(
 		() => ({
 			workspaceId,
-			listBranches: () => request<BranchesResponse>("/branches"),
+			listBranches: () =>
+				serialized(async (lix) => {
+					const result = await lix.execute(
+						"SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id",
+					);
+					const currentBranchId = await lix.activeBranchId();
+					return {
+						branches: result.rows.map((row) => ({
+							id: requiredRowString(row.toObject(), "id"),
+							name: requiredRowString(row.toObject(), "name"),
+							hidden: requiredRowBoolean(row.toObject(), "hidden"),
+							commitId: requiredRowString(row.toObject(), "commit_id"),
+						})),
+						currentBranchId,
+					} satisfies BranchesResponse;
+				}),
 			execute: (body: ExecuteRequest) =>
-				request<ExecuteScriptResponse>("/execute", {
-					method: "POST",
-					body: JSON.stringify(body),
+				serialized(async (lix) => {
+					if ((await lix.activeBranchId()) !== body.branchId) {
+						await lix.switchBranch({ branchId: body.branchId });
+					}
+					return {
+						results: [
+							toWireResult(
+								await lix.execute(
+									body.sql,
+									(body.params ?? []).map(toSqlParam),
+									body.options,
+								),
+							),
+						],
+					};
 				}),
 			mutateFilesystem: async (body: FilesystemMutationRequest) => {
-				const response = await request<{ outcome: FilesystemMutationOutcome }>(
-					"/filesystem/mutate",
-					{
-						method: "POST",
-						body: JSON.stringify(body),
-					},
-				);
+				const response = await sidecarRequest<{
+					outcome: FilesystemMutationOutcome;
+				}>("/filesystem/mutate", {
+					method: "POST",
+					body: JSON.stringify(body),
+				});
 				return response.outcome;
 			},
 		}),
-		[request, workspaceId],
+		[serialized, sidecarRequest, workspaceId],
 	);
+}
+
+function toSqlParam(value: WireValue): SqlParam {
+	switch (value.kind) {
+		case "null":
+			return null;
+		case "bool":
+		case "int":
+		case "float":
+		case "text":
+			return value.value;
+		case "json":
+			return value.value as SqlParam;
+		case "blob":
+			return base64ToBytes(value.base64);
+	}
+}
+
+function toWireResult(result: LixExecuteResult): ExecuteResponse {
+	return {
+		columns: result.columns,
+		rows: result.rows.map((row) =>
+			result.columns.map((column) => {
+				const value = row.value(column);
+				const js = value.toJS();
+				switch (value.kind) {
+					case "null":
+						return { kind: "null", value: null };
+					case "boolean":
+						return { kind: "bool", value: Boolean(js) };
+					case "integer":
+						return { kind: "int", value: Number(js) };
+					case "real":
+						return { kind: "float", value: Number(js) };
+					case "text":
+						return { kind: "text", value: String(js) };
+					case "blob":
+						return { kind: "blob", base64: bytesToBase64(value.asBytes()!) };
+					case "json":
+						return { kind: "json", value: js };
+				}
+			}),
+		),
+		rowsAffected: result.rowsAffected,
+		notices: result.notices,
+	};
+}
+
+function requiredRowString(
+	row: Record<string, unknown>,
+	column: string,
+): string {
+	const value = row[column];
+	if (typeof value !== "string")
+		throw new Error(`Expected text column ${column}`);
+	return value;
+}
+
+function requiredRowBoolean(
+	row: Record<string, unknown>,
+	column: string,
+): boolean {
+	const value = row[column];
+	if (typeof value !== "boolean") {
+		throw new Error(`Expected boolean column ${column}`);
+	}
+	return value;
 }
 
 const UUID_PATTERN =
