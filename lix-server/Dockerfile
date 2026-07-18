@@ -1,19 +1,23 @@
 # syntax=docker/dockerfile:1
 
-ARG LIXRAY_IMAGE_VARIANT=preview
+ARG LIXRAY_IMAGE_VARIANT=production
 
 FROM rust:1-bookworm AS builder
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock ./
-COPY src ./src
+# This Dockerfile uses the repository root as its build context so the server
+# and its exact vendored Lix revision are built together.
+COPY vendor/lix ./vendor/lix
+COPY lix-server/Cargo.toml lix-server/Cargo.lock ./lix-server/
+COPY lix-server/src ./lix-server/src
 
+WORKDIR /app/lix-server
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
 	--mount=type=cache,target=/usr/local/cargo/git \
-	--mount=type=cache,target=/app/target \
+	--mount=type=cache,target=/app/lix-server/target \
 	cargo build --release --locked \
 	&& mkdir -p /app/dist \
-	&& cp /app/target/release/lixray /app/dist/lixray
+	&& cp /app/lix-server/target/release/lixray /app/dist/lixray
 
 FROM debian:bookworm-slim AS runtime
 ARG LIXRAY_IMAGE_VARIANT

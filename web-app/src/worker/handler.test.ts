@@ -490,7 +490,6 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 					R2_ACCESS_KEY_ID: "access-key",
 					R2_SECRET_ACCESS_KEY: "secret-key",
 					R2_REGION: "auto",
-					SLATEDB_PATH: WORKSPACE_A,
 					SLATEDB_STORAGE: "r2",
 					SLATEDB_CACHE_DIR: "/tmp/lixray-slatedb-cache",
 					SLATEDB_CACHE_MAX_BYTES: "2147483648",
@@ -501,7 +500,10 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 		},
 	);
 	assert.ok(proxiedRequest);
-	assert.equal(new URL(proxiedRequest.url).pathname, "/lix/v1/observe");
+	assert.equal(
+		new URL(proxiedRequest.url).pathname,
+		`/workspaces/${WORKSPACE_A}/lix/v1/observe`,
+	);
 	assert.equal(new URL(proxiedRequest.url).search, "?mode=test");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
 	assert.equal(proxiedRequest.headers.get("x-client-header"), "kept");

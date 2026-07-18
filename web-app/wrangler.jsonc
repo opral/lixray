@@ -36,6 +36,7 @@
 		{
 			"class_name": "SlateDbContainer",
 			"image": "../lix-server/Dockerfile",
+			"image_build_context": "..",
 			"max_instances": 1000,
 			"instance_type": "basic",
 		},

@@ -9,7 +9,7 @@ import { FileServiceError } from "./file-service.ts";
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 
 async function branchProtocolResponse(request: Request): Promise<Response> {
-	const pathname = new URL(request.url).pathname;
+	const pathname = testProtocolPath(request);
 	if (pathname === "/lix/v1/") {
 		return Response.json({ protocolVersion: 1, activeBranchId: "main" });
 	}
@@ -33,6 +33,10 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 		return Response.json({ branchId: body.branchId });
 	}
 	return new Response("Not found", { status: 404 });
+}
+
+function testProtocolPath(request: Request): string {
+	return new URL(request.url).pathname.replace(/^\/workspaces\/[^/]+/, "");
 }
 
 void test("container calls reauthorize every time and never forward the OAuth token", async () => {
@@ -70,7 +74,13 @@ void test("container calls reauthorize every time and never forward the OAuth to
 	assert.equal(requests.length, 5);
 	assert.deepEqual(
 		requests.map((request) => new URL(request.url).pathname),
-		["/lix/v1/", "/lix/v1/", "/lix/v1/execute", "/lix/v1/", "/lix/v1/execute"],
+		[
+			`/workspaces/${WORKSPACE_ID}/lix/v1/`,
+			`/workspaces/${WORKSPACE_ID}/lix/v1/`,
+			`/workspaces/${WORKSPACE_ID}/lix/v1/execute`,
+			`/workspaces/${WORKSPACE_ID}/lix/v1/`,
+			`/workspaces/${WORKSPACE_ID}/lix/v1/execute`,
+		],
 	);
 	for (const request of requests) {
 		assert.equal(request.headers.get("authorization"), null);
@@ -160,7 +170,7 @@ void test("transient HTTP responses retry and replay request bodies", async () =
 				acquisitions += 1;
 				return {
 					fetch: async (request) => {
-						const pathname = new URL(request.url).pathname;
+						const pathname = testProtocolPath(request);
 						if (
 							pathname === "/lix/v1/" ||
 							pathname === "/lix/v1/branch/switch"
@@ -341,7 +351,7 @@ void test("unified Lix execute reauthorizes and strips the OAuth token", async (
 		env({
 			getByName: () => ({
 				fetch: async (request) => {
-					const pathname = new URL(request.url).pathname;
+					const pathname = testProtocolPath(request);
 					if (pathname === "/lix/v1/" || pathname === "/lix/v1/branch/switch") {
 						return branchProtocolResponse(request);
 					}
@@ -370,7 +380,10 @@ void test("unified Lix execute reauthorizes and strips the OAuth token", async (
 	assert.equal(response.rowsAffected, 0);
 	assert.equal(authorizationChecks, 3);
 	assert.ok(received);
-	assert.equal(new URL(received.url).pathname, "/lix/v1/execute");
+	assert.equal(
+		new URL(received.url).pathname,
+		`/workspaces/${WORKSPACE_ID}/lix/v1/execute`,
+	);
 	assert.equal(received.headers.get("authorization"), null);
 	assert.deepEqual(await received.json(), {
 		sql: "SELECT $1 AS value",
@@ -533,7 +546,7 @@ void test("unified Lix execute preserves structured Lix errors", async () => {
 		env({
 			getByName: () => ({
 				fetch: async (request) => {
-					const pathname = new URL(request.url).pathname;
+					const pathname = testProtocolPath(request);
 					if (pathname === "/lix/v1/" || pathname === "/lix/v1/branch/switch") {
 						return branchProtocolResponse(request);
 					}

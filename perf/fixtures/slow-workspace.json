@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "workspaceId": "perf-slow-workspace",
+  "fileCount": 1000,
+  "contentBytes": 1024,
+  "batchSize": 50
+}

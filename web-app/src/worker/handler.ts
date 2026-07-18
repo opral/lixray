@@ -280,13 +280,18 @@ async function fetchWorkspaceRequest(
 			status: 500,
 		});
 	}
+	const workspacePath = workspaceServicePath(workspaceId, containerPath);
+	const containerRequest = rewriteWorkspaceRequest(
+		rewrittenRequest.clone() as unknown as Request,
+		workspacePath,
+	);
 	try {
 		return await fetchContainerWithRetry({
 			namespace: env.SLATEDB_CONTAINER,
 			workspaceId,
-			operation: `${request.method} ${containerPath}`,
-			envVars: containerEnv(env, workspaceId),
-			createRequest: () => rewrittenRequest.clone() as unknown as Request,
+			operation: `${request.method} ${workspacePath}`,
+			envVars: containerEnv(env),
+			createRequest: () => containerRequest.clone() as unknown as Request,
 			requestReplay: containerRequestReplay(request.method, containerPath),
 			signal: request.signal,
 			retryDelay: options.containerRetryDelay,
@@ -781,11 +786,8 @@ function scheduleMcpTelemetryFlush(
 	}
 }
 
-export function containerEnv(
-	env: WorkerEnv,
-	workspaceId: string,
-): Record<string, string> {
-	const vars = { SLATEDB_PATH: workspaceId };
+export function containerEnv(env: WorkerEnv): Record<string, string> {
+	const vars: Record<string, string> = {};
 	addOptionalEnv(vars, "R2_ENDPOINT", env.R2_ENDPOINT);
 	addOptionalEnv(vars, "R2_BUCKET", env.R2_BUCKET);
 	addOptionalEnv(vars, "R2_ACCESS_KEY_ID", env.R2_ACCESS_KEY_ID);
@@ -805,6 +807,13 @@ export function containerEnv(
 		env.SLATEDB_METADATA_CACHE_BYTES,
 	);
 	return vars;
+}
+
+function workspaceServicePath(
+	workspaceId: string,
+	protocolPath: string,
+): string {
+	return `/workspaces/${encodeURIComponent(workspaceId)}${protocolPath}`;
 }
 
 function json(value: unknown, init?: ResponseInit): Response {
