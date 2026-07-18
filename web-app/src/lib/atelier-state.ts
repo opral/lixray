@@ -9,8 +9,8 @@ import {
 	type AtelierSessionUiState,
 	type AtelierUserPreferencesV1,
 } from "@opral/atelier/state-adapters";
-import type { BrowserLix } from "./mock-remote-lix";
 import type { LixraySupabaseClient } from "./supabase";
+import type { WorkspaceLixSession } from "./workspace-lix-session";
 
 const SESSION_STATE_VERSION = 1;
 const PREFERENCES_STATE_VERSION = 1;
@@ -54,7 +54,7 @@ export function createWorkspaceSessionStateStore(args: {
 }
 
 export function createWorkspaceBranchSession(args: {
-	readonly lix: BrowserLix;
+	readonly session: WorkspaceLixSession;
 	readonly onSwitch: (
 		branchId: string,
 		context?: { readonly failedBranchId?: string },
@@ -76,7 +76,7 @@ export function createWorkspaceBranchSession(args: {
 				if (selection === latestSelection) {
 					try {
 						await args.onSwitch(
-							args.lix.activeBranchSnapshot(),
+							args.session.activeBranchSnapshot(),
 							failedBranchId ? { failedBranchId } : undefined,
 						);
 					} catch {
@@ -98,22 +98,21 @@ export function createWorkspaceBranchSession(args: {
 		return result;
 	};
 	return {
-		getSnapshot: args.lix.activeBranchSnapshot.bind(args.lix),
-		subscribe: args.lix.subscribeActiveBranch.bind(args.lix),
+		getSnapshot: args.session.activeBranchSnapshot.bind(args.session),
+		subscribe: args.session.subscribeActiveBranch.bind(args.session),
 		createBranch: async (name: string) => {
-			const branch = await select(
-				() => args.lix.createBranch({ name }),
-				(receipt) => receipt.id,
+			return select(
+				() => args.session.createBranch(name),
+				(branchId) => branchId,
 			);
-			return branch.id;
 		},
 		switchBranch: async (branchId: string) => {
 			await select(
 				() =>
-					args.lix.activeBranchSnapshot() === branchId
-						? Promise.resolve({ branchId })
-						: args.lix.switchBranch({ branchId }),
-				(receipt) => receipt.branchId,
+					args.session.activeBranchSnapshot() === branchId
+						? Promise.resolve(branchId)
+						: args.session.switchBranch(branchId),
+				(selectedBranchId) => selectedBranchId,
 				branchId,
 			);
 		},

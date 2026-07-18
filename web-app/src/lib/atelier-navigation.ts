@@ -1,5 +1,3 @@
-import { MockRemoteLixError } from "./mock-remote-lix.ts";
-
 const FILE_NOT_FOUND_PREFIX = "File not found in the opened workspace: ";
 
 export function isAtelierFileNotFoundError(
@@ -22,9 +20,11 @@ export function isAtelierFileNotFoundError(
 
 export function isLixBranchNotFoundError(
 	error: unknown,
-): error is MockRemoteLixError {
+): error is Error & { code: "LIX_BRANCH_NOT_FOUND" } {
 	return (
-		error instanceof MockRemoteLixError && error.code === "LIX_BRANCH_NOT_FOUND"
+		error instanceof Error &&
+		"code" in error &&
+		error.code === "LIX_BRANCH_NOT_FOUND"
 	);
 }
 
