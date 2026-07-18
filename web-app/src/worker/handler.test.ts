@@ -731,20 +731,13 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 				assert.equal(workspaceId, DEMO_WORKSPACE_ID);
 				assert.equal(request.headers.get("authorization"), null);
 				const pathname = new URL(request.url).pathname;
-				if (pathname === "/v1/branches") {
+				if (pathname === "/lix/v1/") {
 					return Response.json({
-						currentBranchId: "main",
-						branches: [
-							{
-								id: "main",
-								name: "main",
-								hidden: false,
-								commitId: "commit-1",
-							},
-						],
+						protocolVersion: 1,
+						activeBranchId: "main",
 					});
 				}
-				assert.equal(pathname, "/v1/executeStatement");
+				assert.equal(pathname, "/lix/v1/execute");
 				return Response.json({
 					columns: ["id", "name", "hidden", "commit_id"],
 					rows: [
@@ -806,7 +799,7 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
-	assert.equal(workspaceFetches, 2);
+	assert.equal(workspaceFetches, 3);
 });
 
 void test("Supabase workspace authorization uses the user token and RLS-visible row", async () => {

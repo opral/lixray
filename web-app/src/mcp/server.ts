@@ -11,7 +11,6 @@ import {
 	DEFAULT_READ_LINE_COUNT,
 	FileServiceError,
 	LixFileService,
-	type WireValue,
 } from "./file-service.ts";
 import { EXECUTE_TOOL_DESCRIPTION } from "./execute-schema.ts";
 
@@ -410,7 +409,7 @@ export function mcpDocumentationResponse(
 			"",
 			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
-			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting files, plus a raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards. Execute accepts exactly one statement with $n or ? parameters. Its compatibility results array contains exactly one result.",
+			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting files, plus a raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards. Execute accepts an ordered batch of statements with $n or ? parameters. Lix executes the batch atomically and returns one ordered result per statement.",
 		].join("\n"),
 		{
 			headers: {
@@ -814,7 +813,7 @@ function buildTools(
 					),
 					statements.map((statement) => ({
 						sql: statement.sql,
-						params: statement.params as Array<WireValue>,
+						params: statement.params,
 					})),
 				),
 			executeOutput,

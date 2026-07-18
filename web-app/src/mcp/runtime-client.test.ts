@@ -10,20 +10,10 @@ const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 
 async function branchProtocolResponse(request: Request): Promise<Response> {
 	const pathname = new URL(request.url).pathname;
-	if (pathname === "/v1/branches") {
-		return Response.json({
-			currentBranchId: "main",
-			branches: [
-				{
-					id: "main",
-					name: "main",
-					hidden: false,
-					commitId: "commit-1",
-				},
-			],
-		});
+	if (pathname === "/lix/v1/") {
+		return Response.json({ protocolVersion: 1, activeBranchId: "main" });
 	}
-	if (pathname === "/v1/executeStatement") {
+	if (pathname === "/lix/v1/execute") {
 		return Response.json({
 			columns: ["id", "name", "hidden", "commit_id"],
 			rows: [
@@ -38,7 +28,7 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 			notices: [],
 		});
 	}
-	if (pathname === "/v1/switchBranch") {
+	if (pathname === "/lix/v1/branch/switch") {
 		const body: { branchId: string } = await request.json();
 		return Response.json({ branchId: body.branchId });
 	}
@@ -75,12 +65,12 @@ void test("container calls reauthorize every time and never forward the OAuth to
 
 	await client.listBranches(WORKSPACE_ID);
 	await client.listBranches(WORKSPACE_ID);
-	assert.equal(authorizationChecks, 3);
-	assert.equal(starts, 3);
-	assert.equal(requests.length, 3);
+	assert.equal(authorizationChecks, 5);
+	assert.equal(starts, 5);
+	assert.equal(requests.length, 5);
 	assert.deepEqual(
 		requests.map((request) => new URL(request.url).pathname),
-		["/v1/branches", "/v1/executeStatement", "/v1/executeStatement"],
+		["/lix/v1/", "/lix/v1/", "/lix/v1/execute", "/lix/v1/", "/lix/v1/execute"],
 	);
 	for (const request of requests) {
 		assert.equal(request.headers.get("authorization"), null);
@@ -127,9 +117,9 @@ void test("transient container failures retry indefinitely with capped jitter an
 	);
 
 	assert.equal((await client.listBranches(WORKSPACE_ID)).branches.length, 1);
-	assert.equal(acquisitions, 7);
-	assert.equal(starts, 7);
-	assert.equal(fetches, 2);
+	assert.equal(acquisitions, 8);
+	assert.equal(starts, 8);
+	assert.equal(fetches, 3);
 	assert.deepEqual(delays, [1_000, 2_000, 4_000, 5_000, 5_000]);
 });
 
@@ -157,7 +147,7 @@ void test("Durable Object storage resets are retried", async () => {
 	);
 
 	assert.equal((await client.listBranches(WORKSPACE_ID)).branches.length, 1);
-	assert.equal(acquisitions, 3);
+	assert.equal(acquisitions, 4);
 });
 
 void test("transient HTTP responses retry and replay request bodies", async () => {
@@ -170,7 +160,11 @@ void test("transient HTTP responses retry and replay request bodies", async () =
 				acquisitions += 1;
 				return {
 					fetch: async (request) => {
-						if (new URL(request.url).pathname === "/v1/branches") {
+						const pathname = new URL(request.url).pathname;
+						if (
+							pathname === "/lix/v1/" ||
+							pathname === "/lix/v1/branch/switch"
+						) {
 							return branchProtocolResponse(request);
 						}
 						bodies.push(await request.json());
@@ -205,8 +199,11 @@ void test("transient HTTP responses retry and replay request bodies", async () =
 	};
 
 	assert.equal((await client.execute(WORKSPACE_ID, request)).rowsAffected, 0);
-	assert.equal(acquisitions, 3);
-	assert.deepEqual(bodies, [request, request]);
+	assert.equal(acquisitions, 4);
+	assert.deepEqual(bodies, [
+		{ sql: request.sql, params: request.params },
+		{ sql: request.sql, params: request.params },
+	]);
 	assert.deepEqual(delays, [1_000]);
 });
 
@@ -344,7 +341,8 @@ void test("unified Lix execute reauthorizes and strips the OAuth token", async (
 		env({
 			getByName: () => ({
 				fetch: async (request) => {
-					if (new URL(request.url).pathname === "/v1/branches") {
+					const pathname = new URL(request.url).pathname;
+					if (pathname === "/lix/v1/" || pathname === "/lix/v1/branch/switch") {
 						return branchProtocolResponse(request);
 					}
 					received = request;
@@ -370,14 +368,71 @@ void test("unified Lix execute reauthorizes and strips the OAuth token", async (
 		params: [{ kind: "text", value: "ok" }],
 	});
 	assert.equal(response.rowsAffected, 0);
-	assert.equal(authorizationChecks, 2);
+	assert.equal(authorizationChecks, 3);
 	assert.ok(received);
-	assert.equal(new URL(received.url).pathname, "/v1/executeStatement");
+	assert.equal(new URL(received.url).pathname, "/lix/v1/execute");
 	assert.equal(received.headers.get("authorization"), null);
 	assert.deepEqual(await received.json(), {
-		branchId: "main",
 		sql: "SELECT $1 AS value",
 		params: [{ kind: "text", value: "ok" }],
+	});
+});
+
+void test("unified Lix executeBatch uses the canonical atomic batch endpoint", async () => {
+	let received: Request | undefined;
+	const client = new WorkerLixRuntimeClient(
+		{},
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{
+			workspaceFetch: async (_workspaceId, request) => {
+				const pathname = new URL(request.url).pathname;
+				if (pathname === "/lix/v1/" || pathname === "/lix/v1/branch/switch") {
+					return branchProtocolResponse(request);
+				}
+				received = request;
+				return Response.json([
+					{
+						columns: ["value"],
+						rows: [[{ kind: "int", value: 1 }]],
+						rowsAffected: 0,
+						notices: [],
+					},
+					{
+						columns: ["value"],
+						rows: [[{ kind: "text", value: "two" }]],
+						rowsAffected: 0,
+						notices: [],
+					},
+				]);
+			},
+		},
+	);
+
+	const response = await client.executeBatch(WORKSPACE_ID, {
+		branchId: "main",
+		statements: [
+			{ sql: "SELECT $1 AS value", params: [{ kind: "int", value: 1 }] },
+			{
+				sql: "SELECT $1 AS value",
+				params: [{ kind: "text", value: "two" }],
+			},
+		],
+		options: { originKey: "mcp-batch" },
+	});
+
+	assert.equal(response.results.length, 2);
+	assert.ok(received);
+	assert.equal(new URL(received.url).pathname, "/lix/v1/execute-batch");
+	assert.deepEqual(await received.json(), {
+		statements: [
+			{ sql: "SELECT $1 AS value", params: [{ kind: "int", value: 1 }] },
+			{
+				sql: "SELECT $1 AS value",
+				params: [{ kind: "text", value: "two" }],
+			},
+		],
+		options: { originKey: "mcp-batch" },
 	});
 });
 
@@ -390,19 +445,21 @@ void test("unified Lix sessions serialize branch selection with execution", asyn
 		{
 			workspaceFetch: async (_workspaceId, request) => {
 				const pathname = new URL(request.url).pathname;
-				if (pathname === "/v1/branches") {
+				if (pathname === "/lix/v1/") {
 					operations.push("handshake");
 					return branchProtocolResponse(request);
 				}
-				const body: { branchId: string } = await request.json();
-				if (pathname === "/v1/switchBranch") {
+				if (pathname === "/lix/v1/branch/switch") {
+					const body: { branchId: string } = await request.json();
 					operations.push(`switch:${body.branchId}`);
 					return Response.json({ branchId: body.branchId });
 				}
-				operations.push(`execute:${body.branchId}`);
+				const body: { sql: string } = await request.json();
+				const branchId = body.sql.endsWith("1") ? "branch-a" : "branch-b";
+				operations.push(`execute:${branchId}`);
 				return Response.json({
 					columns: ["branch_id"],
-					rows: [[{ kind: "text", value: body.branchId }]],
+					rows: [[{ kind: "text", value: branchId }]],
 					rowsAffected: 0,
 					notices: [],
 				});
@@ -445,7 +502,8 @@ void test("unified Lix execute preserves every wire value kind", async () => {
 		async () => null,
 		{
 			workspaceFetch: async (_workspaceId, request) => {
-				if (new URL(request.url).pathname === "/v1/branches") {
+				const pathname = new URL(request.url).pathname;
+				if (pathname === "/lix/v1/" || pathname === "/lix/v1/branch/switch") {
 					return branchProtocolResponse(request);
 				}
 				const body: { params: typeof params } = await request.json();
@@ -474,20 +532,23 @@ void test("unified Lix execute preserves structured Lix errors", async () => {
 	const client = new WorkerLixRuntimeClient(
 		env({
 			getByName: () => ({
-				fetch: async (request) =>
-					new URL(request.url).pathname === "/v1/branches"
-						? branchProtocolResponse(request)
-						: Response.json(
-								{
-									error: {
-										code: "LIX_UNSUPPORTED_SQL",
-										message: "Unsupported transaction control",
-										hint: "Use BEGIN ... COMMIT.",
-										details: { operation: "execute" },
-									},
-								},
-								{ status: 400 },
-							),
+				fetch: async (request) => {
+					const pathname = new URL(request.url).pathname;
+					if (pathname === "/lix/v1/" || pathname === "/lix/v1/branch/switch") {
+						return branchProtocolResponse(request);
+					}
+					return Response.json(
+						{
+							error: {
+								code: "LIX_UNSUPPORTED_SQL",
+								message: "Unsupported transaction control",
+								hint: "Use BEGIN ... COMMIT.",
+								details: { operation: "execute" },
+							},
+						},
+						{ status: 400 },
+					);
+				},
 			}),
 		}),
 		{ userId: "user-1", token: "secret-oauth-token" },
@@ -544,10 +605,10 @@ void test("injected workspaces and workspace fetch bypass Supabase and container
 		],
 		currentBranchId: "main",
 	});
-	assert.equal(authorizationChecks, 2);
+	assert.equal(authorizationChecks, 3);
 	assert.deepEqual(
 		received.map((request) => new URL(request.url).pathname),
-		["/v1/branches", "/v1/executeStatement"],
+		["/lix/v1/", "/lix/v1/", "/lix/v1/execute"],
 	);
 	for (const request of received) {
 		assert.equal(request.headers.get("authorization"), null);
