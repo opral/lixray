@@ -63,10 +63,6 @@ export interface LixRuntimeClient {
 		workspaceId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse>;
-	executeScript(
-		workspaceId: string,
-		request: ExecuteRequest,
-	): Promise<ExecuteScriptResponse>;
 	mutate(
 		workspaceId: string,
 		request: FilesystemMutationRequest,
@@ -206,7 +202,11 @@ export class LixFileService {
 		sql: string,
 		params: Array<WireValue> = [],
 	): Promise<ExecuteScriptResponse> {
-		return this.client.executeScript(workspaceId, { branchId, sql, params });
+		return {
+			results: [
+				await this.client.execute(workspaceId, { branchId, sql, params }),
+			],
+		};
 	}
 
 	async listDirectory(

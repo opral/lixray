@@ -405,7 +405,7 @@ export function mcpDocumentationResponse(
 			"",
 			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
-			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting files, plus a raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards. Execute accepts one or more semicolon-delimited statements, with request-wide $n parameters or query-ordered ? parameters. One result is returned per executable statement.",
+			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting files, plus a raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards. Execute accepts exactly one statement with $n or ? parameters. Its compatibility results array contains exactly one result.",
 		].join("\n"),
 		{
 			headers: {

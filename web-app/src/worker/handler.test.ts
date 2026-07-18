@@ -413,9 +413,9 @@ void test("canonical remote Lix execute preserves the request and returns a dire
 				workspaceId: WORKSPACE_A,
 			}),
 			workspaceFetch: async (_workspaceId, request) => {
-				assert.equal(new URL(request.url).pathname, "/v1/execute");
+				assert.equal(new URL(request.url).pathname, "/v1/executeStatement");
 				assert.deepEqual(await request.json(), requestBody);
-				return Response.json({ results: [result] });
+				return Response.json(result);
 			},
 		},
 	);
@@ -424,32 +424,32 @@ void test("canonical remote Lix execute preserves the request and returns a dire
 	assert.deepEqual(await response.json(), result);
 });
 
-void test("canonical remote Lix execute rejects invalid result cardinality", async () => {
-	const result = { columns: [], rows: [], rowsAffected: 0, notices: [] };
-	for (const results of [[], [result, result]]) {
-		const response = await handleRequest(
-			new Request("https://example.test/@acme/launch-q3/.lix/v1/execute", {
-				method: "POST",
+void test("canonical remote Lix execute passes through statement errors", async () => {
+	const error = {
+		error: {
+			code: "LIX_PARSE_ERROR",
+			message: "The statement is invalid.",
+		},
+	};
+	const response = await handleRequest(
+		new Request("https://example.test/@acme/launch-q3/.lix/v1/execute", {
+			method: "POST",
+		}),
+		env({}),
+		{
+			authenticate: authenticated(),
+			resolveWorkspace: async () => ({
+				ok: true,
+				workspaceId: WORKSPACE_A,
 			}),
-			env({}),
-			{
-				authenticate: authenticated(),
-				resolveWorkspace: async () => ({
-					ok: true,
-					workspaceId: WORKSPACE_A,
-				}),
-				workspaceFetch: async () => Response.json({ results }),
+			workspaceFetch: async (_workspaceId, request) => {
+				assert.equal(new URL(request.url).pathname, "/v1/executeStatement");
+				return Response.json(error, { status: 400 });
 			},
-		);
-		assert.equal(response.status, 502);
-		assert.deepEqual(await response.json(), {
-			error: {
-				code: "LIX_REMOTE_PROTOCOL_ERROR",
-				message:
-					"Workspace runtime returned an invalid single-statement result.",
-			},
-		});
-	}
+		},
+	);
+	assert.equal(response.status, 400);
+	assert.deepEqual(await response.json(), error);
 });
 
 void test("canonical remote Lix pass-through routes map to existing workspace operations", async () => {
@@ -843,18 +843,34 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 			workspaceFetch: async (workspaceId, request) => {
 				workspaceFetches += 1;
 				assert.equal(workspaceId, DEMO_WORKSPACE_ID);
-				assert.equal(new URL(request.url).pathname, "/v1/branches");
 				assert.equal(request.headers.get("authorization"), null);
+				const pathname = new URL(request.url).pathname;
+				if (pathname === "/v1/branches") {
+					return Response.json({
+						currentBranchId: "main",
+						branches: [
+							{
+								id: "main",
+								name: "main",
+								hidden: false,
+								commitId: "commit-1",
+							},
+						],
+					});
+				}
+				assert.equal(pathname, "/v1/executeStatement");
 				return Response.json({
-					currentBranchId: "main",
-					branches: [
-						{
-							id: "main",
-							name: "main",
-							hidden: false,
-							commitId: "commit-1",
-						},
+					columns: ["id", "name", "hidden", "commit_id"],
+					rows: [
+						[
+							{ kind: "text", value: "main" },
+							{ kind: "text", value: "main" },
+							{ kind: "bool", value: false },
+							{ kind: "text", value: "commit-1" },
+						],
 					],
+					rowsAffected: 0,
+					notices: [],
 				});
 			},
 			mcpTransport: async (_request, service, _context, options) => {
@@ -904,7 +920,7 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
-	assert.equal(workspaceFetches, 1);
+	assert.equal(workspaceFetches, 2);
 });
 
 void test("canonical remote Lix resolves demo workspace paths without Supabase", async () => {

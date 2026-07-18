@@ -265,6 +265,53 @@ void test("execute keeps the single-statement fast path and wraps its result", a
 	assert.equal(transactionStarts, 0);
 });
 
+void test("executeStatement bypasses script planning and returns a direct result", async () => {
+	let directExecutions = 0;
+	const runtime = testRuntime(
+		async () =>
+			fakeBinding({
+				execute: async (
+					sql: string,
+					params: Array<unknown>,
+					options: unknown,
+				) => {
+					directExecutions += 1;
+					assert.equal(sql, "SELECT $1 AS value");
+					assert.deepEqual(params.map(nativeText), ["visible"]);
+					assert.deepEqual(options, { originKey: "remote-client" });
+					return {
+						columns: ["value"],
+						rows: [[{ kind: "text", value: "visible" }]],
+						rowsAffected: 0,
+						notices: [],
+					};
+				},
+			}),
+		BRANCH,
+		() => {
+			throw new Error("canonical statements must not use script planning");
+		},
+	);
+	const response = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/executeStatement", {
+			branchId: BRANCH,
+			sql: "SELECT $1 AS value",
+			params: [{ kind: "text", value: "visible" }],
+			options: { originKey: "remote-client" },
+		}),
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), {
+		columns: ["value"],
+		rows: [[{ kind: "text", value: "visible" }]],
+		rowsAffected: 0,
+		notices: [],
+	});
+	assert.equal(directExecutions, 1);
+});
+
 void test("execute runs scripts atomically and returns ordered results", async () => {
 	const executions: Array<{
 		sql: string;

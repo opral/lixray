@@ -30,6 +30,7 @@ pub fn router(service: Arc<LixService>) -> Router {
         .route("/v1/branches", get(list_branches))
         .route("/v1/createBranch", post(create_branch))
         .route("/v1/switchBranch", post(switch_branch))
+        .route("/v1/executeStatement", post(execute_statement))
         .route("/v1/execute", post(execute))
         .route("/v1/filesystem/mutate", post(mutate_filesystem))
         .route("/v1/observe", post(observe))
@@ -115,6 +116,24 @@ async fn execute(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Json(ExecuteScriptResponse { results }))
+}
+
+async fn execute_statement(
+    State(state): State<AppState>,
+    Json(request): Json<ExecuteRequest>,
+) -> Result<Json<ExecuteResponse>, ApiError> {
+    let branch_id = required_non_empty(request.branch_id, "branchId")?;
+    let sql = required_non_empty(request.sql, "sql")?;
+    let params = decode_params(request.params)?;
+    let options = ExecuteOptions {
+        origin_key: request.options.and_then(|options| options.origin_key),
+    };
+    let result = state
+        .service
+        .execute_statement(branch_id, sql, params, options)
+        .await?;
+
+    Ok(Json(ExecuteResponse::try_from(result)?))
 }
 
 async fn mutate_filesystem(
@@ -765,6 +784,54 @@ mod tests {
                 value: json!("http-value")
             }]]
         );
+    }
+
+    #[tokio::test]
+    async fn execute_statement_returns_a_direct_result() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+        let response = json_request(
+            app,
+            Method::POST,
+            "/v1/executeStatement",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT $1 AS value",
+                "params": [{ "kind": "text", "value": "direct" }]
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: ExecuteResponse = response_json(response).await;
+        assert_eq!(body.columns, vec!["value"]);
+        assert_eq!(
+            body.rows,
+            vec![vec![WireValue::Text {
+                value: "direct".to_string()
+            }]]
+        );
+        assert_eq!(body.rows_affected, 0);
+    }
+
+    #[tokio::test]
+    async fn execute_statement_does_not_plan_sql_scripts() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+        let response = json_request(
+            app,
+            Method::POST,
+            "/v1/executeStatement",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT 1; SELECT 2"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: JsonValue = response_json(response).await;
+        assert_eq!(body["error"]["code"], LixError::CODE_UNSUPPORTED_SQL);
     }
 
     #[tokio::test]

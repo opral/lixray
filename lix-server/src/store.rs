@@ -204,6 +204,24 @@ impl LixService {
         .await
     }
 
+    pub async fn execute_statement(
+        &self,
+        branch_id: String,
+        sql: String,
+        params: Vec<Value>,
+        options: ExecuteOptions,
+    ) -> Result<ExecuteResult, LixError> {
+        self.run("execute_statement", move |engine| async move {
+            // A pinned session does not validate its branch until a branch-aware
+            // operation runs. Keep this guard so branch-free SQL cannot succeed
+            // against a missing branch.
+            ensure_branch_exists(&engine, &branch_id, "execute").await?;
+            let session = engine.open_session(branch_id).await?;
+            session.execute_with_options(&sql, &params, options).await
+        })
+        .await
+    }
+
     pub async fn mutate_filesystem(
         &self,
         branch_id: String,

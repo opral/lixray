@@ -228,6 +228,7 @@ export async function handleRequest(
 			);
 		} finally {
 			scheduleMcpTelemetryFlush(executionContext, telemetry);
+			await client.close();
 		}
 	}
 

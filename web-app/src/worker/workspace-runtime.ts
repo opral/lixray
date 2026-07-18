@@ -686,6 +686,29 @@ async function routeRequest(
 			),
 		);
 	}
+	if (pathname === "/v1/executeStatement") {
+		if (request.method !== "POST") return methodNotAllowed();
+		const body = await requestBody(request);
+		const branchId = requiredString(body, "branchId");
+		const sql = requiredString(body, "sql");
+		const params = decodeParams(body.params);
+		const originKey = executeOriginKey(body.options);
+		return json(
+			await withSelectedBranch(
+				runtime.lix,
+				branchId,
+				runtime.mainBranchId,
+				async (selectedLix) =>
+					encodeExecuteResult(
+						await selectedLix.execute(
+							sql,
+							params,
+							originKey ? { originKey } : undefined,
+						),
+					),
+			),
+		);
+	}
 	if (pathname === "/v1/execute") {
 		if (request.method !== "POST") return methodNotAllowed();
 		const body = await requestBody(request);

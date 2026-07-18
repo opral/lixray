@@ -6,7 +6,7 @@ export type RemoteLixWorkspaceFetch = (
 type RemoteLixProtocolRoute = {
 	method: "GET" | "POST";
 	internalPath: string;
-	response: "handshake" | "execute" | "passthrough";
+	response: "handshake" | "passthrough";
 };
 
 const REMOTE_LIX_PROTOCOL_ROUTES: Record<string, RemoteLixProtocolRoute> = {
@@ -17,8 +17,8 @@ const REMOTE_LIX_PROTOCOL_ROUTES: Record<string, RemoteLixProtocolRoute> = {
 	},
 	execute: {
 		method: "POST",
-		internalPath: "/execute",
-		response: "execute",
+		internalPath: "/executeStatement",
+		response: "passthrough",
 	},
 	observe: {
 		method: "POST",
@@ -76,17 +76,7 @@ export async function handleRemoteLixProtocolRequest(
 			: protocolError("Workspace runtime returned an invalid current branch.");
 	}
 
-	const results = recordField(body, "results");
-	if (
-		!Array.isArray(results) ||
-		results.length !== 1 ||
-		!isRecord(results[0])
-	) {
-		return protocolError(
-			"Workspace runtime returned an invalid single-statement result.",
-		);
-	}
-	return Response.json(results[0]);
+	return response;
 }
 
 function recordString(value: unknown, key: string): string | null {
