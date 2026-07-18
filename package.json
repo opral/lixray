@@ -1,10 +1,19 @@
 {
   "name": "lixray-workspace",
   "private": true,
-  "packageManager": "pnpm@10.13.1",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:telemetry": "infisical run --env=dev -- pnpm dev",
-    "deploy:worker": "infisical run --env=prod -- pnpm --dir web-app deploy:worker"
-  }
+    "deploy:worker": "infisical run --env=prod -- pnpm --dir web-app deploy:worker",
+    "postinstall": "pnpm --dir web-app lix:build"
+  },
+  "devDependencies": {
+    "@lix-js/sdk-release": "https://registry.npmjs.org/@lix-js/sdk/-/sdk-0.8.4.tgz"
+  },
+  "pnpm": {
+    "overrides": {
+      "@lix-js/sdk@^0.8.2": "link:vendor/lix/packages/js-sdk"
+    }
+  },
+  "packageManager": "pnpm@10.13.1"
 }

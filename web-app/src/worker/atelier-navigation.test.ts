@@ -7,7 +7,6 @@ import {
 	resolveAtelierRouteBranchId,
 	shouldNormalizeInitialBranch,
 } from "../lib/atelier-navigation.ts";
-import { MockRemoteLixError } from "../lib/mock-remote-lix.ts";
 
 void test("only the requested normalized Atelier not-found path redirects", () => {
 	const requestedPath = "/notes/branch-only.md";
@@ -44,25 +43,23 @@ void test("only the requested normalized Atelier not-found path redirects", () =
 	);
 });
 
-void test("only typed branch-not-found failures qualify for URL fallback", () => {
+void test("only Lix branch-not-found errors qualify for URL fallback", () => {
 	assert.equal(
 		isLixBranchNotFoundError(
-			new MockRemoteLixError("LIX_BRANCH_NOT_FOUND", "missing"),
+			Object.assign(new Error("missing"), { code: "LIX_BRANCH_NOT_FOUND" }),
 		),
 		true,
 	);
 	assert.equal(
 		isLixBranchNotFoundError(
-			new MockRemoteLixError("LIX_UNAUTHORIZED", "expired"),
+			Object.assign(new Error("expired"), { code: "LIX_UNAUTHORIZED" }),
 		),
 		false,
 	);
 	assert.equal(
-		isLixBranchNotFoundError(
-			Object.assign(new Error("missing"), { code: "LIX_BRANCH_NOT_FOUND" }),
-		),
+		isLixBranchNotFoundError({ code: "LIX_BRANCH_NOT_FOUND" }),
 		false,
-		"an unrelated coded error cannot trigger destructive URL normalization",
+		"an unthrown response body cannot trigger URL normalization",
 	);
 });
 

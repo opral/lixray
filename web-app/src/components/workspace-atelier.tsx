@@ -21,12 +21,10 @@ import {
 	useRef,
 	useState,
 } from "react";
-import type { Lix } from "@lix-js/sdk";
 import { useAuth } from "~/components/auth-provider";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
-import { openMockRemoteLix } from "~/lib/mock-remote-lix";
 import {
 	atelierBranchSearch,
 	isLixBranchNotFoundError,
@@ -39,8 +37,11 @@ import {
 	createWorkspaceReviewStatusStore,
 	createWorkspaceSessionStateStore,
 } from "~/lib/atelier-state";
-import type { BrowserLix } from "~/lib/mock-remote-lix";
 import { captureTelemetry } from "~/lib/telemetry";
+import {
+	openWorkspaceLixSession,
+	type WorkspaceLixSession,
+} from "~/lib/workspace-lix-session";
 
 interface WorkspaceAtelierProps {
 	workspaceId: string;
@@ -71,7 +72,7 @@ export function WorkspaceAtelier({
 		string | null
 	>(null);
 	const [error, setError] = useState<string | null>(null);
-	const activeLixRef = useRef<BrowserLix | null>(null);
+	const activeLixRef = useRef<WorkspaceLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeFilePathRef = useRef(routeFilePath);
 	const branchIdRef = useRef(branchId);
@@ -173,7 +174,7 @@ export function WorkspaceAtelier({
 
 	useEffect(() => {
 		let disposed = false;
-		let activeLix: Lix | null = null;
+		let activeLix: WorkspaceLixSession | null = null;
 		setInstance(null);
 		setWorkspaceDefaultBranchId(null);
 		setError(null);
@@ -184,25 +185,26 @@ export function WorkspaceAtelier({
 			return;
 		}
 		const openingBranchId = branchIdRef.current ?? null;
-		void openMockRemoteLix({
-			workspaceId,
+		void openWorkspaceLixSession({
+			namespace,
+			workspaceSlug,
 			getAccessToken,
 			initialBranchId: openingBranchId,
 		})
-			.then(async (lix) => {
+			.then(async (session) => {
 				if (disposed) {
-					await lix.close();
+					await session.close();
 					return;
 				}
-				activeLix = lix;
-				activeLixRef.current = lix;
-				setWorkspaceDefaultBranchId(lix.defaultBranchSnapshot());
+				activeLix = session;
+				activeLixRef.current = session;
+				setWorkspaceDefaultBranchId(session.defaultBranchSnapshot());
 				const branchSession = createWorkspaceBranchSession({
-					lix,
+					session,
 					onSwitch: async (nextBranchId, context) => {
 						const routedBranchId = resolveAtelierRouteBranchId(
 							branchIdRef.current,
-							lix.defaultBranchSnapshot(),
+							session.defaultBranchSnapshot(),
 						);
 						if (
 							suppressBranchNavigationRef.current ||
@@ -217,7 +219,7 @@ export function WorkspaceAtelier({
 				});
 				setInstance(
 					createAtelier({
-						lix,
+						lix: session.lix,
 						branchSession,
 						reviewRangeSessionId: userId,
 						sessionStateStore: createWorkspaceSessionStateStore({
@@ -238,13 +240,13 @@ export function WorkspaceAtelier({
 					}),
 				);
 				captureTelemetry("workspace_opened");
-				const actualBranchId = lix.activeBranchSnapshot();
+				const actualBranchId = session.activeBranchSnapshot();
 				if (
 					shouldNormalizeInitialBranch({
 						openingBranchId,
 						currentBranchId: branchIdRef.current ?? null,
 						actualBranchId,
-						defaultBranchId: lix.defaultBranchSnapshot(),
+						defaultBranchId: session.defaultBranchSnapshot(),
 					})
 				) {
 					await navigateToCurrentPathBranch(actualBranchId, true);
@@ -258,17 +260,19 @@ export function WorkspaceAtelier({
 
 		return () => {
 			disposed = true;
-			const lix = activeLix;
+			const session = activeLix;
 			activeLix = null;
 			activeLixRef.current = null;
-			if (lix) void lix.close();
+			if (session) void session.close();
 		};
 	}, [
 		client,
 		getAccessToken,
 		navigateToCurrentPathBranch,
+		namespace,
 		user?.id,
 		workspaceId,
+		workspaceSlug,
 	]);
 
 	useEffect(() => {
