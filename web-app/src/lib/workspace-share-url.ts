@@ -29,7 +29,9 @@ export function appendWorkspaceShareToken(
 	return `${beforeHash}${separator}invite=${encodeURIComponent(token)}${hash}`;
 }
 
-export function canonicalPathFromLocation(location: Pick<Location, "hash" | "pathname" | "search">): string {
+export function canonicalPathFromLocation(
+	location: Pick<Location, "hash" | "pathname" | "search">,
+): string {
 	return `${location.pathname}${stripInviteFromUrl(location.search)}${location.hash}`;
 }
 

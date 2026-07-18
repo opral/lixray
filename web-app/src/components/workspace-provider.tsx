@@ -257,7 +257,9 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				throw new Error("Create or select an organization first");
 			}
 			if (targetOrganization.role === null) {
-				throw new Error("Workspace membership does not grant organization access");
+				throw new Error(
+					"Workspace membership does not grant organization access",
+				);
 			}
 			const { data, error: createError } = await client
 				.from("workspaces")
@@ -285,7 +287,9 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			);
 			if (!organization) throw new Error("Workspace not found");
 			if (organization.role === null) {
-				throw new Error("Workspace membership does not grant organization access");
+				throw new Error(
+					"Workspace membership does not grant organization access",
+				);
 			}
 			const { error: renameError } = await client
 				.from("workspaces")
@@ -308,7 +312,9 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			);
 			if (!organization) throw new Error("Workspace not found");
 			if (organization.role === null) {
-				throw new Error("Workspace membership does not grant organization access");
+				throw new Error(
+					"Workspace membership does not grant organization access",
+				);
 			}
 			const { error: deleteError } = await client.rpc("delete_workspace", {
 				p_workspace_id: workspaceId,

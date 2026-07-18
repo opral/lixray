@@ -166,7 +166,9 @@ export function WorkspaceShareDialog({
 						>
 							{linkParts.token ? (
 								<div className="grid min-w-0 gap-0.5">
-									<span className="block truncate">{linkParts.beforeToken}</span>
+									<span className="block truncate">
+										{linkParts.beforeToken}
+									</span>
 									<span className="block break-all">
 										<mark className="rounded-sm bg-bg-selection-current px-0.5 text-inherit">
 											{linkParts.token}

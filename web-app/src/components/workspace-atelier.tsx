@@ -303,10 +303,7 @@ export function WorkspaceAtelier({
 				});
 				setInstance(
 					createAtelier({
-						// The workspace SDK and Atelier expose the same Lix runtime
-						// contract, but pnpm keeps their private SDK fields nominally
-						// distinct in this workspace.
-						lix: lix as unknown as Parameters<typeof createAtelier>[0]["lix"],
+						lix,
 						branchSession,
 						reviewRangeSessionId: userId,
 						sessionStateStore: createWorkspaceSessionStateStore({
@@ -540,10 +537,9 @@ function WorkspaceShareControl({
 		if (minting) return;
 		setMinting(true);
 		try {
-			const { data, error } = await client.rpc(
-				"create_workspace_share_token",
-				{ p_workspace_id: workspaceId },
-			);
+			const { data, error } = await client.rpc("create_workspace_share_token", {
+				p_workspace_id: workspaceId,
+			});
 			if (error) throw error;
 			const token = data?.[0]?.token;
 			if (!isWorkspaceShareToken(token)) {
@@ -598,7 +594,10 @@ function ReadOnlyShareStrip({ sharedByName }: { sharedByName: string | null }) {
 			<span className="font-medium text-text-primary">Read-only</span>
 			<span aria-hidden="true">·</span>
 			<span>
-				shared by <strong className="font-medium text-text-primary">{sharedByName ?? "a workspace member"}</strong>
+				shared by{" "}
+				<strong className="font-medium text-text-primary">
+					{sharedByName ?? "a workspace member"}
+				</strong>
 			</span>
 		</div>
 	);

@@ -53,7 +53,11 @@ function WorkspacePage() {
 	const [notice, setNotice] = useState<string | null>(null);
 
 	const loadSettings = useCallback(async () => {
-		if (!client || !selectedOrganization || selectedOrganization.role === null) {
+		if (
+			!client ||
+			!selectedOrganization ||
+			selectedOrganization.role === null
+		) {
 			setMembers([]);
 			return;
 		}
@@ -94,7 +98,6 @@ function WorkspacePage() {
 					};
 				}),
 			);
-
 		} catch (loadError) {
 			setError(errorMessage(loadError));
 		} finally {

@@ -64,11 +64,7 @@ export const Route = createFileRoute("/@{$namespace}/$workspace")({
 function WorkspaceRoutePage() {
 	const { namespace, workspace: workspaceSlug } = Route.useParams();
 	const { branch, invite } = Route.useSearch();
-	const {
-		client: authClient,
-		signInWithGoogle,
-		user: authUser,
-	} = useAuth();
+	const { client: authClient, signInWithGoogle, user: authUser } = useAuth();
 	const workspaceState = useWorkspace();
 	const navigate = useNavigate();
 	const demoResolved = useMemo(
@@ -88,9 +84,7 @@ function WorkspaceRoutePage() {
 		useState<PendingWorkspaceShareCapability | null>(null);
 	const [joining, setJoining] = useState(false);
 	const [accessRevision, setAccessRevision] = useState(0);
-	const [settledInviteKey, setSettledInviteKey] = useState<string | null>(
-		null,
-	);
+	const [settledInviteKey, setSettledInviteKey] = useState<string | null>(null);
 	const automaticJoinAttempt = useRef<string | null>(null);
 	const inviteResolutionKey =
 		resolved && invite ? `${resolved.workspaceId}:${invite}` : null;
@@ -110,14 +104,14 @@ function WorkspaceRoutePage() {
 			setResolved(
 				demoResolved
 					? {
-						organizationId: demoResolved.organization.id,
-						organizationName: demoResolved.organization.name,
-						organizationHandle: demoResolved.organization.handle,
-						workspaceId: demoResolved.workspace.id,
-						workspaceName: demoResolved.workspace.name,
-						workspaceSlug: demoResolved.workspace.slug,
-						canEdit: true,
-					}
+							organizationId: demoResolved.organization.id,
+							organizationName: demoResolved.organization.name,
+							organizationHandle: demoResolved.organization.handle,
+							workspaceId: demoResolved.workspace.id,
+							workspaceName: demoResolved.workspace.name,
+							workspaceSlug: demoResolved.workspace.slug,
+							canEdit: true,
+						}
 					: null,
 			);
 			return;
@@ -131,7 +125,9 @@ function WorkspaceRoutePage() {
 			.catch((caught: unknown) => {
 				if (disposed) return;
 				setResolveError(
-					caught instanceof Error ? caught.message : "Unable to open workspace.",
+					caught instanceof Error
+						? caught.message
+						: "Unable to open workspace.",
 				);
 				setResolved(null);
 			});
@@ -344,7 +340,9 @@ function WorkspaceRoutePage() {
 		takeWorkspaceShareJoinIntent();
 		void joinToEdit().catch((caught: unknown) => {
 			toast.error(
-				caught instanceof Error ? caught.message : "Unable to join this workspace.",
+				caught instanceof Error
+					? caught.message
+					: "Unable to join this workspace.",
 			);
 		});
 	}, [authUser, joinToEdit, resolved?.canEdit, shareCapability]);
@@ -365,7 +363,9 @@ function WorkspaceRoutePage() {
 		return <WorkspaceRouteStatus>Opening workspace…</WorkspaceRouteStatus>;
 	}
 	if (shouldWaitForInviteResolution) {
-		return <WorkspaceRouteStatus>Opening shared workspace…</WorkspaceRouteStatus>;
+		return (
+			<WorkspaceRouteStatus>Opening shared workspace…</WorkspaceRouteStatus>
+		);
 	}
 	if (resolveError) {
 		return <WorkspaceRouteStatus>{resolveError}</WorkspaceRouteStatus>;
@@ -393,10 +393,10 @@ function WorkspaceRoutePage() {
 			shareAccess={
 				shareCapability && !resolved.canEdit
 					? {
-						sharedByName: shareCapability.sharerName,
-						onJoinToEdit: joinToEdit,
-						joining,
-					}
+							sharedByName: shareCapability.sharerName,
+							onJoinToEdit: joinToEdit,
+							joining,
+						}
 					: undefined
 			}
 		/>

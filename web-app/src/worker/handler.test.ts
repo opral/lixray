@@ -746,7 +746,9 @@ void test("demo auth on workers.dev only authorizes configured workspaces", asyn
 		),
 		testEnv,
 	);
-	assert.equal(deniedResponse.status, 403);
+	// Public routes now resolve globally. An unconfigured demo workspace falls
+	// through to the same public resolver and is indistinguishable from missing.
+	assert.equal(deniedResponse.status, 404);
 });
 
 void test("demo auth rejects an incorrect bearer token without Supabase", async () => {

@@ -251,21 +251,13 @@ void test("read-only transport permits reads and rejects every mutation route", 
 
 	const select = await runtime.fetch(
 		WORKSPACE_A,
-		workspaceRequest(
-			"/execute",
-			{ branchId: BRANCH, sql: "SELECT 1" },
-			true,
-		),
+		workspaceRequest("/execute", { branchId: BRANCH, sql: "SELECT 1" }, true),
 	);
 	assert.equal(select.status, 200);
 
 	const observe = await runtime.fetch(
 		WORKSPACE_A,
-		workspaceRequest(
-			"/observe",
-			{ branchId: BRANCH, sql: "SELECT 1" },
-			true,
-		),
+		workspaceRequest("/observe", { branchId: BRANCH, sql: "SELECT 1" }, true),
 	);
 	assert.equal(observe.status, 200);
 	await observe.body?.cancel();
@@ -288,11 +280,7 @@ void test("read-only transport permits reads and rejects every mutation route", 
 
 	const branch = await runtime.fetch(
 		WORKSPACE_A,
-		workspaceRequest(
-			"/createBranch",
-			{ branchId: BRANCH, name: "Nope" },
-			true,
-		),
+		workspaceRequest("/createBranch", { branchId: BRANCH, name: "Nope" }, true),
 	);
 	assert.equal(branch.status, 400);
 	assert.deepEqual(await branch.json(), {
@@ -333,7 +321,9 @@ void test("read-only transport permits reads and rejects every mutation route", 
 
 	assert.equal(createdBranches, 0);
 	assert.equal(transactions, 0);
-	assert.ok(executed.every((sql) => !/\b(?:insert|update|delete)\b/i.test(sql)));
+	assert.ok(
+		executed.every((sql) => !/\b(?:insert|update|delete)\b/i.test(sql)),
+	);
 });
 
 void test("execute runs scripts atomically and returns ordered results", async () => {
