@@ -21,6 +21,12 @@ await requireDirectory(
 await rm(sdkDist, { recursive: true, force: true });
 await cp(releaseDist, sdkDist, { recursive: true });
 
+const wasm = spawnSync(process.execPath, [join(sdkRoot, "scripts", "build-wasm.js")], {
+  stdio: "inherit",
+});
+if (wasm.error) throw wasm.error;
+if (wasm.status !== 0) process.exit(wasm.status ?? 1);
+
 const compiled = spawnSync(process.execPath, [tsc, "-p", join(sdkRoot, "tsconfig.json")], {
   stdio: "inherit",
 });

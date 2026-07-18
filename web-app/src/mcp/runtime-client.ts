@@ -16,8 +16,6 @@ import {
 	FileServiceError,
 	type FileServiceErrorCode,
 	type LixRuntimeClient,
-	type FilesystemMutationOutcome,
-	type FilesystemMutationRequest,
 	type WorkspaceSummary,
 } from "./file-service.ts";
 import {
@@ -289,32 +287,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		return this.closePromise;
 	}
 
-	async mutate(
-		workspaceId: string,
-		request: FilesystemMutationRequest,
-	): Promise<FilesystemMutationOutcome> {
-		const body = await this.containerJson<{ outcome?: unknown }>(
-			workspaceId,
-			"/v1/filesystem/mutate",
-			{
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(request),
-			},
-		);
-		if (
-			body.outcome !== "applied" &&
-			body.outcome !== "conflict" &&
-			body.outcome !== "already_exists"
-		) {
-			throw new FileServiceError(
-				"upstream_error",
-				"Lix returned an invalid filesystem mutation outcome.",
-			);
-		}
-		return body.outcome;
-	}
-
 	private session(workspaceId: string): Promise<WorkspaceLixSession> {
 		if (this.closed) {
 			throw new FileServiceError("upstream_error", "Lix client is closed.");
@@ -436,99 +408,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			});
 			throw caught;
 		}
-	}
-
-	private async containerJson<T>(
-		workspaceId: string,
-		path: string,
-		init: RequestInit,
-	): Promise<T> {
-		const authorizationFailure = await this.authorizeWorkspace(
-			workspaceId,
-			this.user,
-			this.env,
-		);
-		if (authorizationFailure) {
-			const message = (await authorizationFailure.text()).trim();
-			throw new FileServiceError(
-				authorizationFailure.status === 403 ? "not_found" : "upstream_error",
-				message || "Workspace access denied.",
-			);
-		}
-		const signal = init.signal ?? this.signal;
-		const createWorkspaceRequest = () =>
-			new Request(`https://lixray-container.invalid${path}`, {
-				...init,
-				signal,
-			});
-		if (this.workspaceFetch) {
-			return this.responseJson<T>(
-				await this.workspaceFetch(workspaceId, createWorkspaceRequest()),
-			);
-		}
-
-		const containerNamespace = this.env.SLATEDB_CONTAINER;
-		if (!containerNamespace) {
-			throw new FileServiceError(
-				"upstream_error",
-				"Workspace storage is not configured.",
-			);
-		}
-		let response: Response;
-		try {
-			response = await fetchContainerWithRetry({
-				namespace: containerNamespace,
-				workspaceId,
-				operation: path,
-				envVars: containerEnv(this.env, workspaceId),
-				createRequest: createWorkspaceRequest,
-				requestReplay: ["GET", "HEAD"].includes(
-					(init.method ?? "GET").toUpperCase(),
-				)
-					? "safe"
-					: "unsafe",
-				signal: signal ?? undefined,
-				retryDelay: this.retryDelay,
-				retryRandom: this.retryRandom,
-				onRetry: logTransientContainerRetry,
-			});
-		} catch (caught) {
-			if (signal?.aborted) {
-				throw new FileServiceError(
-					"upstream_error",
-					"Workspace storage request was cancelled.",
-				);
-			}
-			console.error("LixRay container request failed", {
-				workspaceId,
-				path,
-				error: containerErrorDetails(caught),
-			});
-			throw new FileServiceError(
-				"upstream_error",
-				"Workspace storage request failed.",
-			);
-		}
-
-		const body = await parseResponse(response);
-		if (response.ok) return body as T;
-		throw new FileServiceError(
-			apiErrorCode(body) ?? "upstream_error",
-			apiErrorMessage(body, response.status),
-			apiErrorDetails(body, response.status),
-		);
-	}
-
-	private async responseJson<T>(response: Response): Promise<T> {
-		const body = await parseResponse(response);
-		if (!response.ok) {
-			throw new FileServiceError(
-				apiErrorCode(body) ?? "upstream_error",
-				apiErrorMessage(body, response.status),
-				apiErrorDetails(body, response.status),
-			);
-		}
-		return body as T;
 	}
 }
 
@@ -668,53 +547,6 @@ function containerEnv(
 		if (value !== undefined) vars[name] = value;
 	}
 	return vars;
-}
-
-async function parseResponse(response: Response): Promise<unknown> {
-	const contentType = response.headers.get("content-type") ?? "";
-	return contentType.includes("application/json")
-		? response.json()
-		: response.text();
-}
-
-function apiErrorMessage(body: unknown, status: number): string {
-	const error = apiErrorBody(body);
-	if (typeof error?.message === "string") return error.message;
-	if (typeof body === "string" && body.trim()) return body.trim();
-	return `Lix request failed with status ${status}.`;
-}
-
-function apiErrorCode(body: unknown): FileServiceErrorCode | undefined {
-	const code = apiErrorBody(body)?.code;
-	return typeof code === "string" && code.startsWith("LIX_")
-		? (code as `LIX_${string}`)
-		: undefined;
-}
-
-function apiErrorDetails(
-	body: unknown,
-	status: number,
-): Record<string, unknown> {
-	const error = apiErrorBody(body);
-	const details =
-		error?.details &&
-		typeof error.details === "object" &&
-		!Array.isArray(error.details)
-			? (error.details as Record<string, unknown>)
-			: {};
-	return {
-		...details,
-		status,
-		...(typeof error?.hint === "string" ? { hint: error.hint } : {}),
-	};
-}
-
-function apiErrorBody(body: unknown): Record<string, unknown> | undefined {
-	if (!body || typeof body !== "object" || !("error" in body)) return undefined;
-	const error = body.error;
-	return error && typeof error === "object"
-		? (error as Record<string, unknown>)
-		: undefined;
 }
 
 function logTransientContainerRetry(

@@ -17,7 +17,7 @@ import {
 	validateMcpJwtClaims,
 	type AuthenticateRequest,
 	type AuthenticateMcpRequest,
-	type AuthorizeWorkspace,
+	type ResolveWorkspace,
 	type ContainerNamespace,
 	type WorkerEnv,
 } from "./handler.ts";
@@ -395,7 +395,7 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 	assert.deepEqual(await proxiedRequest.json(), body);
 });
 
-void test("malformed workspace ids return 400 before auth", async () => {
+void test("removed workspace sidecar routes return 404 before auth", async () => {
 	const response = await handleRequest(
 		new Request(
 			"https://example.test/v1/workspaces/not-a-uuid/filesystem/mutate",
@@ -407,18 +407,14 @@ void test("malformed workspace ids return 400 before auth", async () => {
 			},
 		},
 	);
-	assert.equal(response.status, 400);
-	assert.equal(await response.text(), "Invalid workspace id\n");
+	assert.equal(response.status, 404);
+	assert.equal(await response.text(), "Not found\n");
 });
 
-void test("workspace routes return authentication failures", async () => {
-	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/filesystem/mutate"),
-		env({}),
-		{
-			authenticate: rejected(401, "Unauthorized\n"),
-		},
-	);
+void test("canonical workspace routes return authentication failures", async () => {
+	const response = await handleRequest(remoteLixRequest("/execute"), env({}), {
+		authenticate: rejected(401, "Unauthorized\n"),
+	});
 	assert.equal(response.status, 401);
 	assert.equal(await response.text(), "Unauthorized\n");
 });
@@ -426,14 +422,14 @@ void test("workspace routes return authentication failures", async () => {
 void test("inaccessible workspaces return 403 without starting a container", async () => {
 	let started = false;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/filesystem/mutate"),
+		remoteLixRequest("/execute"),
 		env({
 			fetch: async () => {
 				started = true;
 				return new Response();
 			},
 		}),
-		{ authenticate: authenticated(), authorizeWorkspace: denied() },
+		{ authenticate: authenticated(), resolveWorkspace: unresolved(403) },
 	);
 	assert.equal(response.status, 403);
 	assert.equal(started, false);
@@ -442,19 +438,15 @@ void test("inaccessible workspaces return 403 without starting a container", asy
 void test("authorized requests route by workspace, rewrite paths, preserve bodies and strip auth", async () => {
 	let startOptions: unknown;
 	let proxiedRequest: Request | undefined;
-	const request = workspaceRequest(
-		WORKSPACE_A,
-		"/filesystem/mutate?mode=test",
-		{
-			method: "POST",
-			headers: {
-				Authorization: "Bearer user-token",
-				"content-type": "application/json",
-				"x-client-header": "kept",
-			},
-			body: JSON.stringify({ sql: "SELECT 1" }),
+	const request = remoteLixRequest("/observe?mode=test", {
+		method: "POST",
+		headers: {
+			Authorization: "Bearer user-token",
+			"content-type": "application/json",
+			"x-client-header": "kept",
 		},
-	);
+		body: JSON.stringify({ sql: "SELECT 1" }),
+	});
 	const response = await handleRequest(
 		request,
 		env({
@@ -474,7 +466,7 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 				};
 			},
 		}),
-		{ authenticate: authenticated(), authorizeWorkspace: allowed() },
+		{ authenticate: authenticated(), resolveWorkspace: resolved(WORKSPACE_A) },
 	);
 
 	assert.equal(response.headers.get("content-type"), "text/event-stream");
@@ -509,7 +501,7 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 		},
 	);
 	assert.ok(proxiedRequest);
-	assert.equal(new URL(proxiedRequest.url).pathname, "/v1/filesystem/mutate");
+	assert.equal(new URL(proxiedRequest.url).pathname, "/lix/v1/observe");
 	assert.equal(new URL(proxiedRequest.url).search, "?mode=test");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
 	assert.equal(proxiedRequest.headers.get("x-client-header"), "kept");
@@ -521,7 +513,7 @@ void test("transient container resets retry with a reacquired stub", async () =>
 	let starts = 0;
 	let fetches = 0;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/filesystem/mutate"),
+		remoteLixRequest("/"),
 		env({
 			getByName: () => {
 				acquisitions += 1;
@@ -543,7 +535,7 @@ void test("transient container resets retry with a reacquired stub", async () =>
 		}),
 		{
 			authenticate: authenticated(),
-			authorizeWorkspace: allowed(),
+			resolveWorkspace: resolved(WORKSPACE_A),
 			containerRetryDelay: async () => undefined,
 			containerRetryRandom: () => 1,
 		},
@@ -556,14 +548,14 @@ void test("transient container resets retry with a reacquired stub", async () =>
 	assert.equal(fetches, 1);
 });
 
-void test("direct mutation bodies are not replayed after ambiguous proxy failures", async () => {
+void test("canonical mutation bodies are not replayed after ambiguous proxy failures", async () => {
 	let acquisitions = 0;
 	const bodies: Array<unknown> = [];
 	const terminalLogs: Array<Array<unknown>> = [];
 	const originalConsoleError = console.error;
 	console.error = (...arguments_: Array<unknown>) =>
 		terminalLogs.push(arguments_);
-	const request = workspaceRequest(WORKSPACE_A, "/filesystem/mutate", {
+	const request = remoteLixRequest("/execute", {
 		method: "POST",
 		headers: {
 			Authorization: "Bearer user-token",
@@ -589,7 +581,7 @@ void test("direct mutation bodies are not replayed after ambiguous proxy failure
 			}),
 			{
 				authenticate: authenticated(),
-				authorizeWorkspace: allowed(),
+				resolveWorkspace: resolved(WORKSPACE_A),
 				containerRetryDelay: async () => undefined,
 			},
 		);
@@ -611,7 +603,7 @@ void test("direct mutation bodies are not replayed after ambiguous proxy failure
 void test("permanent container startup failures return a controlled 503 response", async () => {
 	let fetched = false;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/filesystem/mutate"),
+		remoteLixRequest("/"),
 		env({
 			getByName: () => ({
 				startAndWaitForPorts: async () => {
@@ -623,7 +615,7 @@ void test("permanent container startup failures return a controlled 503 response
 				},
 			}),
 		}),
-		{ authenticate: authenticated(), authorizeWorkspace: allowed() },
+		{ authenticate: authenticated(), resolveWorkspace: resolved(WORKSPACE_A) },
 	);
 
 	assert.equal(response.status, 503);
@@ -646,20 +638,16 @@ void test("two workspaces route to distinct containers", async () => {
 		},
 	});
 	for (const workspaceId of [WORKSPACE_A, WORKSPACE_B]) {
-		const response = await handleRequest(
-			workspaceRequest(workspaceId, "/filesystem/mutate"),
-			testEnv,
-			{
-				authenticate: authenticated(),
-				authorizeWorkspace: allowed(),
-			},
-		);
+		const response = await handleRequest(remoteLixRequest("/"), testEnv, {
+			authenticate: authenticated(),
+			resolveWorkspace: resolved(workspaceId),
+		});
 		assert.equal(response.status, 200);
 	}
 	assert.deepEqual(names, [WORKSPACE_A, WORKSPACE_B]);
 });
 
-void test("demo auth on workers.dev only authorizes configured workspaces", async () => {
+void test("demo auth on workers.dev only resolves configured workspaces", async () => {
 	const testEnv = env({
 		extra: {
 			LIXRAY_DEMO: "1",
@@ -668,7 +656,7 @@ void test("demo auth on workers.dev only authorizes configured workspaces", asyn
 	});
 	const accepted = await handleRequest(
 		new Request(
-			`https://pr-42-lixray-preview.example.workers.dev/v1/workspaces/${DEMO_WORKSPACE_ID}/filesystem/mutate`,
+			"https://pr-42-lixray-preview.example.workers.dev/@acme/launch-q3/lix/v1/",
 			{
 				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
 			},
@@ -679,19 +667,19 @@ void test("demo auth on workers.dev only authorizes configured workspaces", asyn
 
 	const deniedResponse = await handleRequest(
 		new Request(
-			`https://pr-42-lixray-preview.example.workers.dev/v1/workspaces/${WORKSPACE_A}/filesystem/mutate`,
+			"https://pr-42-lixray-preview.example.workers.dev/@acme/missing/lix/v1/",
 			{
 				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
 			},
 		),
 		testEnv,
 	);
-	assert.equal(deniedResponse.status, 403);
+	assert.equal(deniedResponse.status, 404);
 });
 
 void test("demo auth rejects an incorrect bearer token without Supabase", async () => {
 	const response = await authenticateWithSupabase(
-		workspaceRequest(DEMO_WORKSPACE_ID, "/filesystem/mutate", {
+		remoteLixRequest("/", {
 			headers: { Authorization: "Bearer incorrect" },
 		}),
 		env({
@@ -914,13 +902,9 @@ void test("Supabase canonical workspace resolution joins RLS-visible organizatio
 	}
 });
 
-function workspaceRequest(
-	workspaceId: string,
-	endpoint: string,
-	init?: RequestInit,
-) {
+function remoteLixRequest(endpoint: string, init?: RequestInit) {
 	return new Request(
-		`https://example.test/v1/workspaces/${workspaceId}${endpoint}`,
+		`https://example.test/@acme/launch-q3/lix/v1${endpoint}`,
 		init,
 	);
 }
@@ -947,12 +931,15 @@ function rejected(status: number, body: string): AuthenticateRequest {
 	return async () => ({ ok: false, response: new Response(body, { status }) });
 }
 
-function allowed(): AuthorizeWorkspace {
-	return async () => null;
+function resolved(workspaceId: string): ResolveWorkspace {
+	return async () => ({ ok: true, workspaceId });
 }
 
-function denied(): AuthorizeWorkspace {
-	return async () => new Response("Workspace access denied\n", { status: 403 });
+function unresolved(status: number): ResolveWorkspace {
+	return async () => ({
+		ok: false,
+		response: new Response("Workspace access denied\n", { status }),
+	});
 }
 
 function env(options: {

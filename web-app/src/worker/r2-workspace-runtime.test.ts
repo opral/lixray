@@ -300,49 +300,18 @@ void test("active branch is shared and persisted across remote clients", async (
 	assert.equal(persisted.activeBranchId, draftBranchId);
 });
 
-void test("filesystem sidecar restores the shared active branch", async () => {
+void test("persistent runtime rejects removed noncanonical routes", async () => {
 	const storage = new FakeR2Bucket();
 	const service = runtime(snapshotBindingFactory());
-	const draftBranchId = "44444444-4444-4444-8444-444444444445";
-
-	await expectOk(
-		service.fetch(
+	for (const path of ["/v1/filesystem/mutate", "/v1/container-health"]) {
+		const response = await service.fetch(
 			storage.bucket,
 			HOST_A,
 			WORKSPACE_A,
-			request(HOST_A, "/branch/create", {
-				id: draftBranchId,
-				name: "Draft",
-			}),
-		),
-	);
-	await expectOk(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branch/switch", { branchId: draftBranchId }),
-		),
-	);
-	const mutation = await service.fetch(
-		storage.bucket,
-		HOST_A,
-		WORKSPACE_A,
-		request(HOST_A, "/filesystem/mutate", {
-			branchId: MAIN_BRANCH,
-			kind: "file",
-			path: "/missing.md",
-			expectedRevision: "missing-revision",
-			mutation: { type: "delete" },
-		}),
-	);
-	assert.deepEqual(await mutation.json(), { outcome: "conflict" });
-	const handshake = await expectOk(
-		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
-	);
-	const handshakeBody: unknown = await handshake.json();
-	assert.ok(isRecord(handshakeBody));
-	assert.equal(handshakeBody.activeBranchId, draftBranchId);
+			new Request(`https://${HOST_A}${path}`),
+		);
+		assert.equal(response.status, 404, path);
+	}
 });
 
 void test("conditional reads reuse cached snapshots without redundant writes", async () => {
@@ -782,11 +751,7 @@ function execute(
 }
 
 function request(hostname: string, path: string, body?: unknown) {
-	const pathname =
-		path === "/filesystem/mutate" || path === "/container-health"
-			? `/v1${path}`
-			: `/lix/v1${path}`;
-	return new Request(`https://${hostname}${pathname}`, {
+	return new Request(`https://${hostname}/lix/v1${path}`, {
 		method: body === undefined ? "GET" : "POST",
 		headers:
 			body === undefined ? undefined : { "content-type": "application/json" },
@@ -921,11 +886,6 @@ function snapshotBindingFactory(): OpenMemoryLix {
 				return results;
 			},
 			observe: async () => ({ close: () => undefined, next: async () => null }),
-			beginTransaction: async () => ({
-				execute: async () => result([], []),
-				commit: async () => undefined,
-				rollback: async () => undefined,
-			}),
 			activeBranchId: async () => state.activeBranchId,
 			createBranch: async ({ id = `branch-${++generated}`, name }) => {
 				if (state.branches[id]) {

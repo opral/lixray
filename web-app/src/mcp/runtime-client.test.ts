@@ -615,41 +615,6 @@ void test("injected workspaces and workspace fetch bypass Supabase and container
 	}
 });
 
-void test("filesystem mutations use the typed container endpoint without forwarding auth", async () => {
-	let received: Request | undefined;
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => ({
-				fetch: async (request) => {
-					received = request;
-					return Response.json({ outcome: "applied" });
-				},
-			}),
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-	);
-
-	const outcome = await client.mutate(WORKSPACE_ID, {
-		branchId: "main",
-		kind: "file",
-		path: "/old.txt",
-		expectedRevision: "revision-1",
-		mutation: { type: "move", destinationPath: "/new.txt" },
-	});
-	assert.equal(outcome, "applied");
-	assert.ok(received);
-	assert.equal(new URL(received.url).pathname, "/v1/filesystem/mutate");
-	assert.equal(received.headers.get("authorization"), null);
-	assert.deepEqual(await received.json(), {
-		branchId: "main",
-		kind: "file",
-		path: "/old.txt",
-		expectedRevision: "revision-1",
-		mutation: { type: "move", destinationPath: "/new.txt" },
-	});
-});
-
 void test("workspace discovery uses the OAuth token and only joins RLS-visible rows", async () => {
 	const requests: Array<{ url: URL; headers: Headers }> = [];
 	const client = new WorkerLixRuntimeClient(

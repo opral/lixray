@@ -14,8 +14,6 @@ import {
 	type ExecuteScriptResponse,
 	type LixRuntimeClient,
 	type WorkspaceSummary,
-	type FilesystemMutationOutcome,
-	type FilesystemMutationRequest,
 	type WireValue,
 } from "./file-service.ts";
 
@@ -639,73 +637,17 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		workspaceId: string,
 		request: ExecuteBatchRequest,
 	): Promise<ExecuteScriptResponse> {
-		return {
-			results: await Promise.all(
-				request.statements.map((statement) =>
-					this.execute(workspaceId, {
-						branchId: request.branchId,
-						...statement,
-						options: request.options,
-					}),
-				),
-			),
-		};
-	}
-
-	async mutate(
-		_workspaceId: string,
-		request: FilesystemMutationRequest,
-	): Promise<FilesystemMutationOutcome> {
-		assert.equal(request.branchId, BRANCH_ID);
-		const entries = request.kind === "file" ? this.files : this.directories;
-		const entry = entries.get(request.path);
-		if (!entry || entry.revision !== request.expectedRevision) {
-			return "conflict";
+		const results: Array<ExecuteResponse> = [];
+		for (const statement of request.statements) {
+			results.push(
+				await this.execute(workspaceId, {
+					branchId: request.branchId,
+					...statement,
+					options: request.options,
+				}),
+			);
 		}
-
-		switch (request.mutation.type) {
-			case "replace_file": {
-				assert.equal(request.kind, "file");
-				const file = entry as StoredFile;
-				file.bytes = blobParam(request.mutation.data);
-				file.revision = this.nextRevision();
-				return "applied";
-			}
-			case "move": {
-				if (this.entryExists(request.mutation.destinationPath)) {
-					return "already_exists";
-				}
-				entries.delete(request.path);
-				const moved = { ...entry, revision: this.nextRevision() };
-				if (request.kind === "file") {
-					this.files.set(request.mutation.destinationPath, moved as StoredFile);
-				} else {
-					this.directories.set(
-						request.mutation.destinationPath,
-						moved as StoredDirectory,
-					);
-				}
-				return "applied";
-			}
-			case "delete":
-				entries.delete(request.path);
-				if (request.kind === "directory") {
-					for (const filePath of this.files.keys()) {
-						if (filePath.startsWith(request.path)) this.files.delete(filePath);
-					}
-					for (const directoryPath of this.directories.keys()) {
-						if (directoryPath.startsWith(request.path)) {
-							this.directories.delete(directoryPath);
-						}
-					}
-				}
-				return "applied";
-		}
-	}
-
-	private entryExists(path: string): boolean {
-		const filePath = path.endsWith("/") ? path.slice(0, -1) : path;
-		return this.files.has(filePath) || this.directories.has(`${filePath}/`);
+		return { results };
 	}
 
 	private entrySummary(
@@ -739,6 +681,12 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		const expected = textParam(params[2]);
 		const entry = entries.get(source);
 		if (!entry || entry.revision !== expected) return result([], 0);
+		if (
+			(params[3] && this.files.has(textParam(params[3]))) ||
+			(params[4] && this.directories.has(textParam(params[4])))
+		) {
+			return result([], 0);
+		}
 		entries.delete(source);
 		entries.set(destination, { ...entry, revision: this.nextRevision() });
 		return result([], 1);

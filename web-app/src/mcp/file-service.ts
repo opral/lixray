@@ -76,10 +76,6 @@ export interface LixRuntimeClient {
 		workspaceId: string,
 		request: ExecuteBatchRequest,
 	): Promise<ExecuteScriptResponse>;
-	mutate(
-		workspaceId: string,
-		request: FilesystemMutationRequest,
-	): Promise<FilesystemMutationOutcome>;
 }
 
 export interface AgentReviewSource {
@@ -92,22 +88,6 @@ export interface LixFileServiceOptions {
 }
 
 export type EntryKind = "file" | "directory";
-
-export type FilesystemMutationOutcome =
-	| "applied"
-	| "conflict"
-	| "already_exists";
-
-export interface FilesystemMutationRequest {
-	branchId: string;
-	kind: EntryKind;
-	path: string;
-	expectedRevision: string;
-	mutation:
-		| { type: "replace_file"; data: WireValue; metadata: WireValue }
-		| { type: "move"; destinationPath: string }
-		| { type: "delete" };
-}
 
 export interface EntrySummary {
 	kind: EntryKind;
@@ -381,20 +361,23 @@ export class LixFileService {
 				}),
 			);
 		} else {
-			const outcome = await this.withAgentReview(workspaceId, branchId, () =>
-				this.client.mutate(workspaceId, {
+			await this.withAgentReview(workspaceId, branchId, async () => {
+				const response = await this.client.executeBatch(workspaceId, {
 					branchId,
-					kind: "file",
-					path,
-					expectedRevision,
-					mutation: {
-						type: "replace_file",
-						data: blob(bytes),
-						metadata: { kind: "json", value: { size: bytes.length } },
-					},
-				}),
-			);
-			assertMutationApplied(path, outcome);
+					statements: [
+						{
+							sql: "UPDATE lix_file SET data = $1, lixcol_metadata = $2 WHERE path = $3 AND lixcol_change_id = $4",
+							params: [
+								blob(bytes),
+								{ kind: "json", value: { size: bytes.length } },
+								text(path),
+								text(expectedRevision),
+							],
+						},
+					],
+				});
+				assertGuardedMutationApplied(path, response);
+			});
 		}
 
 		return this.loadEntrySummary(workspaceId, branchId, path, "file");
@@ -550,24 +533,27 @@ export class LixFileService {
 				"A directory cannot be moved inside itself.",
 			);
 		}
-		const revision =
-			expectedRevision ??
-			(await this.loadEntrySummary(workspaceId, branchId, source, kind))
-				.revision;
 		if (await this.entryExists(workspaceId, branchId, destination)) {
 			throw new FileServiceError(
 				"already_exists",
 				`An entry already exists at ${destination}.`,
 			);
 		}
-		const outcome = await this.client.mutate(workspaceId, {
+		const revision =
+			expectedRevision ??
+			(await this.loadEntrySummary(workspaceId, branchId, source, kind))
+				.revision;
+		const table = kind === "file" ? "lix_file" : "lix_directory";
+		const response = await this.client.executeBatch(workspaceId, {
 			branchId,
-			kind,
-			path: source,
-			expectedRevision: revision,
-			mutation: { type: "move", destinationPath: destination },
+			statements: [
+				{
+					sql: `UPDATE ${table} SET path = $1 WHERE path = $2 AND lixcol_change_id = $3`,
+					params: [text(destination), text(source), text(revision)],
+				},
+			],
 		});
-		assertMutationApplied(source, outcome, destination);
+		assertGuardedMutationApplied(source, response);
 		return this.loadEntrySummary(workspaceId, branchId, destination, kind);
 	}
 
@@ -589,14 +575,17 @@ export class LixFileService {
 		const revision =
 			expectedRevision ??
 			(await this.loadEntrySummary(workspaceId, branchId, path, kind)).revision;
-		const outcome = await this.client.mutate(workspaceId, {
+		const table = kind === "file" ? "lix_file" : "lix_directory";
+		const response = await this.client.executeBatch(workspaceId, {
 			branchId,
-			kind,
-			path,
-			expectedRevision: revision,
-			mutation: { type: "delete" },
+			statements: [
+				{
+					sql: `DELETE FROM ${table} WHERE path = $1 AND lixcol_change_id = $2`,
+					params: [text(path), text(revision)],
+				},
+			],
 		});
-		assertMutationApplied(path, outcome);
+		assertGuardedMutationApplied(path, response);
 		return { path, deleted: true };
 	}
 
@@ -770,18 +759,17 @@ function conflict(path: string): FileServiceError {
 	);
 }
 
-function assertMutationApplied(
+function assertGuardedMutationApplied(
 	path: string,
-	outcome: FilesystemMutationOutcome,
-	destination?: string,
+	response: ExecuteScriptResponse,
 ): void {
-	if (outcome === "applied") return;
-	if (outcome === "already_exists") {
+	if (response.results.length !== 1) {
 		throw new FileServiceError(
-			"already_exists",
-			`An entry already exists at ${destination ?? path}.`,
+			"upstream_error",
+			"Lix returned an invalid guarded mutation result.",
 		);
 	}
+	if (response.results[0]?.rowsAffected === 1) return;
 	throw conflict(path);
 }
 

@@ -24,7 +24,8 @@ The repository is split into three product modules:
 
 The Worker serves the TanStack Start application and handles `/healthz`, the
 authenticated `/mcp` endpoint, OAuth protected-resource discovery, and
-workspace-scoped `/v1/*` requests before delegating all other routes to Start.
+workspace-scoped `/@namespace/workspace/lix/v1/*` requests before delegating
+all other routes to Start.
 
 Pull requests use a separate `lixray-preview` Worker. It runs the precompiled
 Lix Wasm module directly in each Cloudflare isolate and keeps a lazily opened
@@ -84,15 +85,12 @@ or denial.
 
 - `GET /healthz` returns Worker health without authentication or container
   startup.
-- `GET /v1/workspaces/:workspaceId/container-health` checks the workspace
-  container.
-- `GET /v1/workspaces/:workspaceId/branches` lists Lix branches and the
-  workspace's `currentBranchId`.
-- `POST /v1/workspaces/:workspaceId/createBranch` creates a branch.
-- `POST /v1/workspaces/:workspaceId/execute` executes one Lix SQL statement or
-  an atomic multi-statement script.
-- `POST /v1/workspaces/:workspaceId/observe` streams Lix observe events as POST
-  SSE.
+- `/@namespace/workspace/lix/v1/*` exposes the canonical Lix server protocol,
+  including branch operations, `execute`, atomic `execute-batch`, and
+  multiplexed `observe`.
+
+The workspace runtime exposes no LixRay-specific sidecar routes. Browser and
+MCP consumers perform every Lix operation through the normal remote Lix client.
 
 All production workspace routes require a Supabase access token:
 
@@ -100,16 +98,14 @@ All production workspace routes require a Supabase access token:
 Authorization: Bearer <Supabase access token>
 ```
 
-The Worker verifies the ES256 JWT against Supabase JWKS, then looks up the URL's
-workspace UUID through the Supabase Data API with the same user token. Row Level
-Security proves membership. The Worker strips the workspace prefix and
-`Authorization` header before forwarding the request to the Rust container, so
-the container continues to expose its internal `/v1/branches`, `/v1/execute`,
-and related routes without receiving user credentials.
+The Worker verifies the ES256 JWT against Supabase JWKS, then resolves the
+namespace and workspace slug through the Supabase Data API with the same user
+token. Row Level Security proves membership. The Worker strips the public
+workspace prefix and `Authorization` header before forwarding the canonical
+`/lix/v1/*` request to the Rust container.
 
-Invalid authentication returns `401`, malformed workspace UUIDs return `400`,
-and missing/inaccessible workspaces return `403` without revealing whether the
-workspace exists.
+Invalid authentication returns `401`; missing or inaccessible workspaces return
+`404` without revealing whether the workspace exists.
 
 ## Workspace storage
 

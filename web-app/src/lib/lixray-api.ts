@@ -10,10 +10,6 @@ import { useWorkspace } from "~/components/workspace-provider";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 import { isDemoModeEnabled } from "./demo-client";
 import { DEMO_AUTH_TOKEN } from "./demo-identity";
-import type {
-	FilesystemMutationOutcome,
-	FilesystemMutationRequest,
-} from "../mcp/file-service";
 
 export type WireValue =
 	| { kind: "null"; value?: null }
@@ -51,6 +47,17 @@ export interface ExecuteRequest {
 	branchId: string;
 	sql: string;
 	params?: Array<WireValue>;
+	options?: {
+		originKey?: string;
+	};
+}
+
+export interface ExecuteBatchRequest {
+	branchId: string;
+	statements: Array<{
+		sql: string;
+		params?: Array<WireValue>;
+	}>;
 	options?: {
 		originKey?: string;
 	};
@@ -146,49 +153,6 @@ export function useLixrayApi() {
 		[getLix],
 	);
 
-	const sidecarRequest = useCallback(
-		async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-			const token = isDemoModeEnabled
-				? DEMO_AUTH_TOKEN
-				: await getTokenRef.current();
-			if (!token) {
-				throw new LixrayApiError(401, {
-					error: { message: "No Supabase access token is available" },
-				});
-			}
-			if (!workspaceId) {
-				throw new LixrayApiError(400, {
-					error: { message: "No active workspace is available" },
-				});
-			}
-
-			const headers = new Headers(init.headers);
-			headers.set("Authorization", `Bearer ${token}`);
-			if (init.body && !headers.has("content-type")) {
-				headers.set("content-type", "application/json");
-			}
-
-			const { signal, cleanup } = requestSignal(init.signal);
-			try {
-				const response = await fetch(workspaceApiPath(workspaceId, path), {
-					...init,
-					headers,
-					signal,
-				});
-				const body = await parseResponseBody(response);
-
-				if (!response.ok) {
-					throw new LixrayApiError(response.status, body);
-				}
-
-				return body as T;
-			} finally {
-				cleanup();
-			}
-		},
-		[workspaceId],
-	);
-
 	return useMemo(
 		() => ({
 			workspaceId,
@@ -225,17 +189,25 @@ export function useLixrayApi() {
 						],
 					};
 				}),
-			mutateFilesystem: async (body: FilesystemMutationRequest) => {
-				const response = await sidecarRequest<{
-					outcome: FilesystemMutationOutcome;
-				}>("/filesystem/mutate", {
-					method: "POST",
-					body: JSON.stringify(body),
-				});
-				return response.outcome;
-			},
+			executeBatch: (body: ExecuteBatchRequest) =>
+				serialized(async (lix) => {
+					if ((await lix.activeBranchId()) !== body.branchId) {
+						await lix.switchBranch({ branchId: body.branchId });
+					}
+					return {
+						results: (
+							await lix.executeBatch(
+								body.statements.map((statement) => ({
+									sql: statement.sql,
+									params: (statement.params ?? []).map(toSqlParam),
+								})),
+								body.options,
+							)
+						).map(toWireResult),
+					};
+				}),
 		}),
-		[serialized, sidecarRequest, workspaceId],
+		[serialized, workspaceId],
 	);
 }
 
@@ -304,57 +276,6 @@ function requiredRowBoolean(
 		throw new Error(`Expected boolean column ${column}`);
 	}
 	return value;
-}
-
-const UUID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export function workspaceApiPath(
-	workspaceId: string,
-	endpoint: string,
-): string {
-	if (!UUID_PATTERN.test(workspaceId)) {
-		throw new Error("A valid workspace UUID is required");
-	}
-	if (!endpoint.startsWith("/") || endpoint.startsWith("//")) {
-		throw new Error("Workspace API endpoints must be absolute paths");
-	}
-	return `/v1/workspaces/${encodeURIComponent(workspaceId)}${endpoint}`;
-}
-
-function requestSignal(parentSignal: AbortSignal | null | undefined): {
-	signal: AbortSignal;
-	cleanup: () => void;
-} {
-	const controller = new AbortController();
-	const timeout = setTimeout(() => {
-		controller.abort(new Error("LixRay request timed out."));
-	}, 45_000);
-	const abortFromParent = () => controller.abort(parentSignal?.reason);
-
-	if (parentSignal) {
-		if (parentSignal.aborted) {
-			abortFromParent();
-		} else {
-			parentSignal.addEventListener("abort", abortFromParent, { once: true });
-		}
-	}
-
-	return {
-		signal: controller.signal,
-		cleanup: () => {
-			clearTimeout(timeout);
-			parentSignal?.removeEventListener("abort", abortFromParent);
-		},
-	};
-}
-
-async function parseResponseBody(response: Response): Promise<unknown> {
-	const contentType = response.headers.get("content-type") ?? "";
-	if (contentType.includes("application/json")) {
-		return response.json();
-	}
-	return response.text();
 }
 
 function formatApiError(status: number, body: unknown): string {

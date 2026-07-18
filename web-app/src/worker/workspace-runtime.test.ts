@@ -182,16 +182,11 @@ void test("finite operations serialize against the shared active branch", async 
 
 void test("execute returns one direct canonical result", async () => {
 	let directExecutions = 0;
-	let transactionStarts = 0;
 	const runtime = testRuntime(async () =>
 		fakeBinding({
 			execute: async () => {
 				directExecutions += 1;
 				return mutationResult(1);
-			},
-			beginTransaction: async () => {
-				transactionStarts += 1;
-				throw new Error("single statement should not open a transaction");
 			},
 		}),
 	);
@@ -208,7 +203,6 @@ void test("execute returns one direct canonical result", async () => {
 		notices: [],
 	});
 	assert.equal(directExecutions, 1);
-	assert.equal(transactionStarts, 0);
 });
 
 void test("execute-batch delegates atomic execution to Lix", async () => {
@@ -309,36 +303,15 @@ void test("execute-batch preserves Lix atomic failures", async () => {
 	});
 });
 
-void test("filesystem conflicts roll back without applying a mutation", async () => {
-	let rollbacks = 0;
-	let commits = 0;
-	const binding = fakeBinding({
-		beginTransaction: async () => ({
-			execute: async () => emptyResult(),
-			commit: async () => {
-				commits += 1;
-			},
-			rollback: async () => {
-				rollbacks += 1;
-			},
-		}),
-	});
-	const runtime = testRuntime(async () => binding);
-	const response = await runtime.fetch(
-		WORKSPACE_A,
-		workspaceRequest("/filesystem/mutate", {
-			branchId: BRANCH,
-			kind: "file",
-			path: "/missing.md",
-			expectedRevision: "revision-1",
-			mutation: { type: "delete" },
-		}),
-	);
-
-	assert.equal(response.status, 200);
-	assert.deepEqual(await response.json(), { outcome: "conflict" });
-	assert.equal(rollbacks, 1);
-	assert.equal(commits, 0);
+void test("workspace runtime rejects removed noncanonical routes", async () => {
+	const runtime = testRuntime(async () => fakeBinding());
+	for (const path of ["/v1/filesystem/mutate", "/v1/container-health"]) {
+		const response = await runtime.fetch(
+			WORKSPACE_A,
+			new Request(`https://preview.example${path}`),
+		);
+		assert.equal(response.status, 404, path);
+	}
 });
 
 void test("Lix errors preserve envelopes and HTTP status mapping", async () => {
@@ -481,11 +454,6 @@ function fakeBinding(
 			sql.includes("FROM lix_branch") ? branchResult() : emptyResult(),
 		executeBatch: async () => [],
 		observe: async () => ({ close: () => undefined, next: async () => null }),
-		beginTransaction: async () => ({
-			execute: async () => emptyResult(),
-			commit: async () => undefined,
-			rollback: async () => undefined,
-		}),
 		activeBranchId: async () => BRANCH,
 		createBranch: async ({ id, name }) => ({
 			id: id ?? BRANCH,
@@ -606,11 +574,7 @@ function emptyResult() {
 }
 
 function workspaceRequest(path: string, body?: unknown) {
-	const pathname =
-		path === "/filesystem/mutate" || path === "/container-health"
-			? `/v1${path}`
-			: `/lix/v1${path}`;
-	return new Request(`https://preview.example${pathname}`, {
+	return new Request(`https://preview.example/lix/v1${path}`, {
 		method: body === undefined ? "GET" : "POST",
 		headers:
 			body === undefined ? undefined : { "content-type": "application/json" },

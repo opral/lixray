@@ -39,16 +39,6 @@ interface ObserveEvents {
 	close(): void;
 }
 
-interface LixTransaction {
-	execute(
-		sql: string,
-		params: NativeValue[],
-		options?: { originKey?: string },
-	): Promise<ExecuteResult>;
-	commit(): Promise<void>;
-	rollback(): Promise<void>;
-}
-
 export interface MemoryLixBinding {
 	execute(
 		sql: string,
@@ -60,7 +50,6 @@ export interface MemoryLixBinding {
 		options?: { originKey?: string },
 	): Promise<Array<ExecuteResult>>;
 	observe(sql: string, params: NativeValue[]): Promise<ObserveEvents>;
-	beginTransaction(): Promise<LixTransaction>;
 	activeBranchId(): Promise<string>;
 	createBranch(options: {
 		id?: string;
@@ -193,10 +182,7 @@ export function createMemoryWorkspaceRuntime(
 
 				return await serialize(runtime, async () => {
 					const response = await routeRequest(request, runtime);
-					if (
-						!response.ok ||
-						!(await shouldPersistMutation(pathname, response))
-					) {
+					if (!response.ok) {
 						return response;
 					}
 					const bytes = await runtime.lix.exportSnapshot();
@@ -236,11 +222,6 @@ export function createR2WorkspaceRuntime(
 			request: Request,
 		): Promise<Response> => {
 			const { pathname } = new URL(request.url);
-			if (pathname === "/v1/container-health") {
-				return request.method === "GET"
-					? json({ ok: true, service: "lixray-container" })
-					: methodNotAllowed();
-			}
 			const key = `${PREVIEW_SNAPSHOT_PREFIX}/${previewHostname.toLowerCase()}/${workspaceId}.snapshot`;
 			let state = workspaces.get(key);
 			if (!state) {
@@ -294,10 +275,7 @@ export function createR2WorkspaceRuntime(
 					const { runtime } = loaded;
 					try {
 						const response = await routeRequest(replay(), runtime);
-						if (
-							!response.ok ||
-							!(await shouldPersistMutation(pathname, response))
-						) {
+						if (!response.ok) {
 							return response;
 						}
 
@@ -475,20 +453,6 @@ async function storageCall<T>(operation: () => Promise<T>): Promise<T> {
 	}
 }
 
-async function shouldPersistMutation(
-	pathname: string,
-	response: Response,
-): Promise<boolean> {
-	if (pathname !== "/v1/filesystem/mutate") return true;
-	const body: unknown = await response.clone().json();
-	return (
-		typeof body === "object" &&
-		body !== null &&
-		"outcome" in body &&
-		body.outcome === "applied"
-	);
-}
-
 function isObservePath(pathname: string): boolean {
 	return (
 		pathname === "/lix/v1/observe" || pathname === "/lix/v1/observe/multiplex"
@@ -607,11 +571,6 @@ async function routeRequest(
 	runtime: WorkspaceRuntime,
 ): Promise<Response> {
 	const { pathname } = new URL(request.url);
-	if (pathname === "/v1/container-health") {
-		return request.method === "GET"
-			? json({ ok: true, service: "lixray-container" })
-			: methodNotAllowed();
-	}
 	if (pathname === "/lix/v1" || pathname === "/lix/v1/") {
 		if (request.method !== "GET") return methodNotAllowed();
 		return json({
@@ -684,10 +643,6 @@ async function routeRequest(
 				)
 			).map(encodeExecuteResult),
 		);
-	}
-	if (pathname === "/v1/filesystem/mutate") {
-		if (request.method !== "POST") return methodNotAllowed();
-		return json(await mutateFilesystem(runtime, await requestBody(request)));
 	}
 	return new Response("Not found\n", { status: 404 });
 }
@@ -1030,115 +985,6 @@ function subscribeMemoryObserver(
 	return () => runtime.subscribers.delete(subscriber);
 }
 
-async function mutateFilesystem(
-	runtime: WorkspaceRuntime,
-	body: Record<string, unknown>,
-): Promise<{ outcome: "applied" | "conflict" | "already_exists" }> {
-	const branchId = requiredString(body, "branchId");
-	const path = requiredString(body, "path");
-	const expectedRevision = requiredString(body, "expectedRevision");
-	const kind = body.kind;
-	if (kind !== "file" && kind !== "directory") {
-		throw invalidArgument("kind must be file or directory");
-	}
-	const mutation = requestObject(body.mutation, "mutation");
-	const mutationType = mutation.type;
-	if (
-		mutationType !== "replace_file" &&
-		mutationType !== "move" &&
-		mutationType !== "delete"
-	) {
-		throw invalidArgument("mutation type is invalid");
-	}
-
-	return withSelectedBranch(runtime.lix, branchId, async (selectedLix) => {
-		const transaction = await selectedLix.beginTransaction();
-		try {
-			const table = kind === "file" ? "lix_file" : "lix_directory";
-			const current = await transaction.execute(
-				`SELECT id, lixcol_change_id FROM ${table} WHERE path = $1`,
-				[{ kind: "text", value: path }],
-			);
-			if (!current.rows[0])
-				return await rollbackOutcome(transaction, "conflict");
-			const id = requiredNativeText(current, current.rows[0], "id");
-			const revision = requiredNativeText(
-				current,
-				current.rows[0],
-				"lixcol_change_id",
-			);
-			if (revision !== expectedRevision) {
-				return await rollbackOutcome(transaction, "conflict");
-			}
-
-			let result: ExecuteResult;
-			if (mutationType === "replace_file") {
-				if (kind !== "file") {
-					throw lixError(
-						"LIX_INVALID_PARAM",
-						"replace_file requires a file entry",
-					);
-				}
-				result = await transaction.execute(
-					"UPDATE lix_file SET data = $1, lixcol_metadata = $2 WHERE id = $3",
-					[
-						decodeWireValue(mutation.data, 0),
-						decodeWireValue(mutation.metadata, 1),
-						{ kind: "text", value: id },
-					],
-				);
-			} else if (mutationType === "move") {
-				const destinationPath = requiredString(mutation, "destinationPath");
-				const filePath = destinationPath.replace(/\/+$/, "");
-				const directoryPath = `${filePath}/`;
-				const fileCollision = await transaction.execute(
-					"SELECT id FROM lix_file WHERE path = $1",
-					[{ kind: "text", value: filePath }],
-				);
-				const directoryCollision = await transaction.execute(
-					"SELECT id FROM lix_directory WHERE path = $1",
-					[{ kind: "text", value: directoryPath }],
-				);
-				if (fileCollision.rows.length || directoryCollision.rows.length) {
-					return await rollbackOutcome(transaction, "already_exists");
-				}
-				result = await transaction.execute(
-					`UPDATE ${table} SET path = $1 WHERE id = $2`,
-					[
-						{ kind: "text", value: destinationPath },
-						{ kind: "text", value: id },
-					],
-				);
-			} else {
-				result = await transaction.execute(
-					`DELETE FROM ${table} WHERE id = $1`,
-					[{ kind: "text", value: id }],
-				);
-			}
-			if (result.rowsAffected !== 1) {
-				return await rollbackOutcome(transaction, "conflict");
-			}
-			await transaction.commit();
-			return { outcome: "applied" };
-		} catch (error) {
-			try {
-				await transaction.rollback();
-			} catch {
-				// Preserve the operation error if rollback also fails.
-			}
-			throw error;
-		}
-	});
-}
-
-async function rollbackOutcome(
-	transaction: LixTransaction,
-	outcome: "conflict" | "already_exists",
-) {
-	await transaction.rollback();
-	return { outcome };
-}
-
 function serialize<T>(
 	runtime: WorkspaceRuntime,
 	operation: () => Promise<T>,
@@ -1149,24 +995,6 @@ function serialize<T>(
 		() => undefined,
 	);
 	return result;
-}
-
-async function withSelectedBranch<T>(
-	lix: MemoryLixBinding,
-	branchId: string,
-	operation: (selectedLix: MemoryLixBinding) => Promise<T>,
-): Promise<T> {
-	const previousBranchId = await lix.activeBranchId();
-	if (previousBranchId !== branchId) {
-		await lix.switchBranch({ branchId });
-	}
-	try {
-		return await operation(lix);
-	} finally {
-		if ((await lix.activeBranchId()) !== previousBranchId) {
-			await lix.switchBranch({ branchId: previousBranchId });
-		}
-	}
 }
 
 function encodeExecuteResult(result: ExecuteResult) {
@@ -1245,18 +1073,6 @@ export function decodeWireValue(value: unknown, index = 0): NativeValue {
 			{ parameter_index: index, source_code: "LIX_INVALID_PARAM" },
 		);
 	}
-}
-
-function requiredNativeText(
-	result: ExecuteResult,
-	row: NativeValue[],
-	column: string,
-): string {
-	const value = row[result.columns.indexOf(column)];
-	if (value?.kind !== "text") {
-		throw lixError("LIX_TYPE_MISMATCH", `expected text column ${column}`);
-	}
-	return value.value;
 }
 
 async function requestBody(request: Request): Promise<Record<string, unknown>> {

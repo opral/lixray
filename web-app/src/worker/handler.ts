@@ -135,7 +135,6 @@ export type McpClaimsValidation =
 			description: string;
 	  };
 
-const WORKSPACE_API_PATH = /^\/v1\/workspaces\/([^/]+)(\/.*)$/;
 const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const WORKSPACE_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
@@ -260,45 +259,9 @@ export async function handleRequest(
 		);
 	}
 
-	if (!url.pathname.startsWith("/v1/")) {
-		return (
-			options.fallback?.(request, env) ??
-			new Response("Not found\n", { status: 404 })
-		);
-	}
-
-	const match = WORKSPACE_API_PATH.exec(url.pathname);
-	if (!match) {
-		return new Response("Not found\n", { status: 404 });
-	}
-	if (match[2] !== "/filesystem/mutate") {
-		return new Response("Not found\n", { status: 404 });
-	}
-
-	const workspaceId = safeDecodeURIComponent(match[1]);
-	if (!workspaceId || !UUID_PATTERN.test(workspaceId)) {
-		return new Response("Invalid workspace id\n", { status: 400 });
-	}
-
-	const authenticate = options.authenticate ?? authenticateWithSupabase;
-	const authResult = await authenticate(request, env);
-	if (!authResult.ok) return authResult.response;
-
-	const authorizeWorkspace =
-		options.authorizeWorkspace ?? authorizeWorkspaceWithSupabase;
-	const authorizationFailure = await authorizeWorkspace(
-		workspaceId,
-		authResult.auth,
-		env,
-	);
-	if (authorizationFailure) return authorizationFailure;
-
-	return fetchWorkspaceRequest(
-		workspaceId,
-		request,
-		`/v1${match[2]}`,
-		env,
-		options,
+	return (
+		options.fallback?.(request, env) ??
+		new Response("Not found\n", { status: 404 })
 	);
 }
 
