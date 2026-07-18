@@ -347,26 +347,48 @@ void test("failed remote review persistence survives tab loss and retries idempo
 	);
 });
 
-void test("workspace sessions use unified remote Lix execute, observe, and explicit branch selection", async (t) => {
-	const executeBodies: unknown[] = [];
+void test("workspace sessions use unified remote Lix with shared branch state and one observation stream", async (t) => {
+	const executeBranches: string[] = [];
 	const createBodies: unknown[] = [];
 	const requestPaths: string[] = [];
+	let activeBranchId = MAIN;
+	let observeOpenCount = 0;
+	let observationSequence = 0;
+	let observationController:
+		| ReadableStreamDefaultController<Uint8Array>
+		| undefined;
+	let observationSubscriptionId: string | undefined;
+	const emitObservation = () => {
+		if (!observationController || !observationSubscriptionId) return;
+		const frame = `event: next\ndata: ${JSON.stringify({
+			subscriptionId: observationSubscriptionId,
+			sequence: observationSequence++,
+			mutationSequence: observationSequence,
+			result: {
+				columns: ["branch"],
+				rows: [[{ kind: "text", value: activeBranchId }]],
+				rowsAffected: 0,
+				notices: [],
+			},
+		})}\n\n`;
+		observationController.enqueue(new TextEncoder().encode(frame));
+	};
 	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-		const pathname = new URL(
-			typeof input === "string" || input instanceof URL ? input : input.url,
-			"https://lixray.test",
-		).pathname;
+		const request =
+			input instanceof Request
+				? input
+				: new Request(new URL(input, "https://lixray.test"), init);
+		const pathname = new URL(request.url).pathname;
 		requestPaths.push(pathname);
-		if (pathname.endsWith("/.lix/v1/")) {
+		if (pathname.endsWith("/lix/v1/")) {
 			return Response.json({
 				protocolVersion: 1,
-				activeBranchId: MAIN,
+				activeBranchId,
 			});
 		}
-		const body =
-			typeof init?.body === "string"
-				? (JSON.parse(init.body) as Record<string, unknown>)
-				: {};
+		const body: Record<string, unknown> = request.body
+			? await request.clone().json()
+			: {};
 		if (pathname.endsWith("/branch/switch")) {
 			const branchId = body.branchId;
 			if (branchId === "invalid-branch") {
@@ -380,6 +402,8 @@ void test("workspace sessions use unified remote Lix execute, observe, and expli
 					{ status: 404 },
 				);
 			}
+			activeBranchId = String(branchId);
+			emitObservation();
 			return Response.json({ branchId });
 		}
 		if (pathname.endsWith("/branch/create")) {
@@ -392,7 +416,7 @@ void test("workspace sessions use unified remote Lix execute, observe, and expli
 			});
 		}
 		if (pathname.endsWith("/execute")) {
-			executeBodies.push(body);
+			executeBranches.push(activeBranchId);
 			return Response.json({
 				columns: [],
 				rows: [],
@@ -401,29 +425,25 @@ void test("workspace sessions use unified remote Lix execute, observe, and expli
 			});
 		}
 		if (pathname.endsWith("/observe/multiplex")) {
-			const branchId = String(body.branchId);
+			observeOpenCount += 1;
 			const subscriptions = body.subscriptions as Array<{ id: string }>;
-			const frame = `event: next\ndata: ${JSON.stringify({
-				subscriptionId: subscriptions[0]?.id,
-				sequence: 0,
-				mutationSequence: branchId === MAIN ? 1 : 2,
-				result: {
-					columns: ["branch"],
-					rows: [[{ kind: "text", value: branchId }]],
-					rowsAffected: 0,
-					notices: [],
-				},
-			})}\n\n`;
-			const signal = init?.signal;
+			observationSubscriptionId = subscriptions[0]?.id;
+			const signal = request.signal;
 			return new Response(
 				new ReadableStream<Uint8Array>({
 					start(controller) {
-						controller.enqueue(new TextEncoder().encode(frame));
+						observationController = controller;
+						emitObservation();
 						if (signal?.aborted) controller.close();
 						else {
-							signal?.addEventListener("abort", () => controller.close(), {
-								once: true,
-							});
+							signal?.addEventListener(
+								"abort",
+								() => {
+									observationController = undefined;
+									controller.close();
+								},
+								{ once: true },
+							);
 						}
 					},
 				}),
@@ -452,15 +472,11 @@ void test("workspace sessions use unified remote Lix execute, observe, and expli
 	assert.equal(await session.createBranch("Created"), CREATED);
 	assert.equal(session.activeBranchSnapshot(), CREATED);
 	assert.equal((await events.next())?.result.rows[0]?.get("branch"), CREATED);
-	assert.deepEqual(
-		executeBodies.map((body) => (body as { branchId: string }).branchId),
-		[MAIN, DRAFT],
-	);
-	assert.deepEqual(createBodies, [{ branchId: DRAFT, name: "Created" }]);
-	assert.equal(requestPaths[0], "/@acme/launch-q3/.lix/v1/");
-	assert.ok(
-		requestPaths.includes("/@acme/launch-q3/.lix/v1/observe/multiplex"),
-	);
+	assert.deepEqual(executeBranches, [MAIN, DRAFT]);
+	assert.deepEqual(createBodies, [{ name: "Created" }]);
+	assert.equal(observeOpenCount, 1);
+	assert.equal(requestPaths[0], "/@acme/launch-q3/lix/v1/");
+	assert.ok(requestPaths.includes("/@acme/launch-q3/lix/v1/observe/multiplex"));
 });
 
 type RemoteReviewRow = {

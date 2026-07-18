@@ -5,4 +5,4 @@
 [submodule "vendor/lix"]
 	path = vendor/lix
 	url = https://github.com/opral/lix.git
-	branch = codex/remote-lix-observe-multiplex
+	branch = codex/unified-remote-lix-protocol-v2
