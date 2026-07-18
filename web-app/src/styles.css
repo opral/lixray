@@ -137,8 +137,7 @@
 		[data-attr="diff-reject"],
 		[data-attr="review-change-undo"],
 		[data-attr="review-change-keep"],
-		[data-attr="review-change-keep-all"],
-		[data-attr="markdown-format-toolbar"]
+		[data-attr="review-change-keep-all"]
 	) {
 	display: none;
 }

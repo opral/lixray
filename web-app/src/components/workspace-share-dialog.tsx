@@ -1,6 +1,6 @@
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import { Check, Copy } from "lucide-react";
-import { type ReactElement, useEffect, useMemo, useState } from "react";
+import { type ReactElement, useEffect, useState } from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
@@ -27,32 +27,6 @@ export interface WorkspaceShareDialogProps {
 	className?: string;
 }
 
-interface InviteUrlParts {
-	beforeToken: string;
-	token: string | null;
-	afterToken: string;
-}
-
-/**
- * Keeps the supplied URL byte-for-byte intact while visually calling out the
- * capability value. The share service owns URL generation; this component
- * deliberately never adds or changes query parameters itself.
- */
-function splitInviteUrl(url: string): InviteUrlParts {
-	const match = /([?&]invite=)([^&#]*)/.exec(url);
-	if (!match || match.index === undefined) {
-		return { beforeToken: url, token: null, afterToken: "" };
-	}
-
-	const tokenStart = match.index + match[1].length;
-	const tokenEnd = tokenStart + match[2].length;
-	return {
-		beforeToken: url.slice(0, tokenStart),
-		token: match[2],
-		afterToken: url.slice(tokenEnd),
-	};
-}
-
 async function copyText(value: string) {
 	if (!navigator.clipboard?.writeText) {
 		throw new Error("Clipboard access is unavailable.");
@@ -74,7 +48,6 @@ export function WorkspaceShareDialog({
 	const [shareMode, setShareMode] = useState<ShareMode>("edit");
 	const [copyState, setCopyState] = useState<CopyState>("idle");
 	const copiedUrl = shareMode === "edit" ? editableUrl : canonicalUrl;
-	const linkParts = useMemo(() => splitInviteUrl(copiedUrl), [copiedUrl]);
 	const isEditableLink = shareMode === "edit";
 	const documentIconUrl = fileIconUrl(documentName);
 
@@ -145,19 +118,7 @@ export function WorkspaceShareDialog({
 								}
 							}}
 						>
-							{linkParts.token ? (
-								<div className="flex min-w-0 items-center overflow-hidden whitespace-nowrap">
-									<span className="min-w-0 truncate">
-										{linkParts.beforeToken}
-									</span>
-									<mark className="max-w-[45%] shrink-0 truncate rounded-sm bg-bg-selection-current px-0.5 text-inherit">
-										{linkParts.token}
-									</mark>
-									<span>{linkParts.afterToken}</span>
-								</div>
-							) : (
-								<span className="block truncate">{copiedUrl}</span>
-							)}
+							<span className="block truncate">{copiedUrl}</span>
 						</div>
 						<Button
 							type="button"

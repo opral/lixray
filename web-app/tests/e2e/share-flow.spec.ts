@@ -31,10 +31,13 @@ test("a preview test account can share an edit link and a fresh recipient can jo
 	});
 	await expect(editableLink).toBeVisible();
 	const sharedUrl = await editableUrl(editableLink);
+	await expect(editableLink.locator("mark")).toHaveCount(0);
 	await owner.getByRole("button", { name: "Copy link" }).click();
 	await expect(owner.getByRole("button", { name: "Copied" })).toBeVisible();
 
-	const recipientContext = await browser.newContext();
+	const recipientContext = await browser.newContext({
+		viewport: { width: 390, height: 844 },
+	});
 	const recipient = await recipientContext.newPage();
 	try {
 		await recipient.goto(sharedUrl);
@@ -59,10 +62,15 @@ test("a preview test account can share an edit link and a fresh recipient can jo
 		);
 		await expect(
 			recipient.getByRole("button", { name: "Sign in" }),
-		).toBeVisible();
+		).toHaveAttribute("data-size", "xs");
 		await expect(
 			recipient.getByRole("button", { name: "Join to edit" }),
-		).toBeVisible();
+		).toHaveAttribute("data-size", "xs");
+		const readOnlyToolbar = recipient.getByRole("toolbar", {
+			name: "Formatting toolbar",
+		});
+		await expect(readOnlyToolbar).toBeVisible();
+		await expect(readOnlyToolbar).toHaveAttribute("data-disabled", "true");
 		await recipient.getByRole("button", { name: "Join to edit" }).click();
 		await expect(recipient).toHaveURL(/\/sign-in\?returnTo=/);
 		await recipient

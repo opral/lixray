@@ -176,7 +176,7 @@ export function WorkspaceAtelier({
 				<Button
 					type="button"
 					variant="outline"
-					size="sm"
+					size="xs"
 					disabled={!isAuthLoaded}
 					onClick={() => void signInToCurrentWorkspace()}
 				>
@@ -187,7 +187,7 @@ export function WorkspaceAtelier({
 				<Button
 					type="button"
 					variant="featured"
-					size="sm"
+					size="xs"
 					disabled={shareAccess.joining}
 					onClick={() =>
 						void shareAccess.onJoinToEdit().catch((caught: unknown) => {
@@ -326,6 +326,7 @@ export function WorkspaceAtelier({
 				setInstance(
 					createAtelier({
 						lix,
+						readOnly: !canEdit,
 						branchSession,
 						reviewRangeSessionId: userId,
 						sessionStateStore: createWorkspaceSessionStateStore({
