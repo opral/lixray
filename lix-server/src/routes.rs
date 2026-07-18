@@ -196,17 +196,40 @@ async fn observe_multiplex(
     Json(request): Json<MultiplexObserveRequest>,
 ) -> Result<Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let branch_id = required_non_empty(request.branch_id, "branchId")?;
+    state
+        .service
+        .validate_branch(branch_id.clone(), "observe")
+        .await?;
+    let subscriptions = request
+        .subscriptions
+        .into_iter()
+        .map(|subscription| -> Result<_, ApiError> {
+            Ok((
+                required_non_empty(subscription.id, "subscriptions[].id")?,
+                required_non_empty(subscription.sql, "subscriptions[].sql")?,
+                decode_params(subscription.params)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let (sender, mut receiver) = mpsc::channel::<MultiplexObserveMessage>(64);
-    let mut tasks = Vec::with_capacity(request.subscriptions.len());
+    let mut tasks = Vec::with_capacity(subscriptions.len());
+    let mut initial_messages = Vec::new();
 
-    for subscription in request.subscriptions {
-        let subscription_id = required_non_empty(subscription.id, "subscriptions[].id")?;
-        let sql = required_non_empty(subscription.sql, "subscriptions[].sql")?;
-        let params = decode_params(subscription.params)?;
-        let mut events = state
+    for (subscription_id, sql, params) in subscriptions {
+        let events = state
             .service
-            .observe(branch_id.clone(), sql, params)
-            .await?;
+            .observe_validated(branch_id.clone(), sql, params)
+            .await;
+        let mut events = match events {
+            Ok(events) => events,
+            Err(error) => {
+                initial_messages.push(MultiplexObserveMessage::Error {
+                    subscription_id,
+                    error: ErrorEnvelope::from_lix_error(&error),
+                });
+                continue;
+            }
+        };
         let sender = sender.clone();
         tasks.push(tokio::spawn(async move {
             loop {
@@ -238,23 +261,11 @@ async fn observe_multiplex(
 
     let stream = async_stream::stream! {
         let _task_guard = ObserveTaskGuard(tasks);
+        for message in initial_messages {
+            yield Ok(multiplex_sse_event(message));
+        }
         while let Some(message) = receiver.recv().await {
-            match message {
-                MultiplexObserveMessage::Next { subscription_id, payload } => {
-                    yield Ok(sse_json_event("next", &MultiplexObserveEventResponse {
-                        subscription_id,
-                        sequence: payload.sequence,
-                        mutation_sequence: payload.mutation_sequence,
-                        result: payload.result,
-                    }));
-                }
-                MultiplexObserveMessage::Error { subscription_id, error } => {
-                    yield Ok(sse_json_event("error", &MultiplexObserveErrorResponse {
-                        subscription_id,
-                        error,
-                    }));
-                }
-            }
+            yield Ok(multiplex_sse_event(message));
         }
     };
 
@@ -263,6 +274,33 @@ async fn observe_multiplex(
             .interval(Duration::from_secs(15))
             .text("keep-alive"),
     ))
+}
+
+fn multiplex_sse_event(message: MultiplexObserveMessage) -> Event {
+    match message {
+        MultiplexObserveMessage::Next {
+            subscription_id,
+            payload,
+        } => sse_json_event(
+            "next",
+            &MultiplexObserveEventResponse {
+                subscription_id,
+                sequence: payload.sequence,
+                mutation_sequence: payload.mutation_sequence,
+                result: payload.result,
+            },
+        ),
+        MultiplexObserveMessage::Error {
+            subscription_id,
+            error,
+        } => sse_json_event(
+            "error",
+            &MultiplexObserveErrorResponse {
+                subscription_id,
+                error,
+            },
+        ),
+    }
 }
 
 struct ObserveTaskGuard(Vec<JoinHandle<()>>);
@@ -1284,6 +1322,65 @@ mod tests {
         assert!(update.contains("event: next"));
         assert!(update.contains("\"sequence\":1"));
         assert!(update.contains("observe-http"));
+    }
+
+    #[tokio::test]
+    async fn observe_multiplex_scopes_setup_errors_and_keeps_healthy_queries_live() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+        let response = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/observe/multiplex",
+            json!({
+                "branchId": branch_id,
+                "subscriptions": [
+                    {
+                        "id": "invalid",
+                        "sql": "INSERT INTO lix_key_value (key, value) VALUES ('bad', 'bad')"
+                    },
+                    {
+                        "id": "healthy",
+                        "sql": "SELECT key FROM lix_key_value WHERE key = $1",
+                        "params": [{ "kind": "text", "value": "multiplex-http" }]
+                    }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let mut body = response.into_body();
+        let invalid = next_sse_frame(&mut body).await;
+        assert!(invalid.contains("event: error"));
+        assert!(invalid.contains("\"subscriptionId\":\"invalid\""));
+        assert!(invalid.contains(LixError::CODE_INVALID_PARAM));
+
+        let initial = next_sse_frame(&mut body).await;
+        assert!(initial.contains("event: next"));
+        assert!(initial.contains("\"subscriptionId\":\"healthy\""));
+        assert!(initial.contains("\"sequence\":0"));
+
+        let insert = json_request(
+            app,
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
+                "params": [
+                    { "kind": "text", "value": "multiplex-http" },
+                    { "kind": "text", "value": "updated" }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(insert.status(), StatusCode::OK);
+
+        let update = next_sse_frame(&mut body).await;
+        assert!(update.contains("event: next"));
+        assert!(update.contains("\"subscriptionId\":\"healthy\""));
+        assert!(update.contains("multiplex-http"));
     }
 
     #[tokio::test]

@@ -130,12 +130,21 @@ impl LixService {
     }
 
     pub async fn switch_branch(&self, branch_id: String) -> Result<String, LixError> {
-        self.run("switch_branch", move |engine| async move {
-            // Remote clients keep their active branch locally and include it on
-            // every operation. The server-side switch therefore validates the
-            // branch before acknowledging the client's local state change.
-            ensure_branch_exists(&engine, &branch_id, "switchBranch").await?;
-            Ok(branch_id)
+        // Remote clients keep their active branch locally and include it on
+        // every operation. The server-side switch therefore validates the
+        // branch before acknowledging the client's local state change.
+        self.validate_branch(branch_id.clone(), "switchBranch")
+            .await?;
+        Ok(branch_id)
+    }
+
+    pub async fn validate_branch(
+        &self,
+        branch_id: String,
+        operation: &'static str,
+    ) -> Result<(), LixError> {
+        self.run(operation, move |engine| async move {
+            ensure_branch_exists(&engine, &branch_id, operation).await
         })
         .await
     }
@@ -296,8 +305,29 @@ impl LixService {
         sql: String,
         params: Vec<Value>,
     ) -> Result<LixObserve, LixError> {
+        self.open_observe(branch_id, sql, params, true).await
+    }
+
+    pub async fn observe_validated(
+        &self,
+        branch_id: String,
+        sql: String,
+        params: Vec<Value>,
+    ) -> Result<LixObserve, LixError> {
+        self.open_observe(branch_id, sql, params, false).await
+    }
+
+    async fn open_observe(
+        &self,
+        branch_id: String,
+        sql: String,
+        params: Vec<Value>,
+        validate_branch: bool,
+    ) -> Result<LixObserve, LixError> {
         self.run("observe", move |engine| async move {
-            ensure_branch_exists(&engine, &branch_id, "observe").await?;
+            if validate_branch {
+                ensure_branch_exists(&engine, &branch_id, "observe").await?;
+            }
             let session = engine.open_session(branch_id).await?;
             let events = session.observe(&sql, &params)?;
             Ok(LixObserve {
