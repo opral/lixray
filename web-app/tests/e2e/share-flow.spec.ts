@@ -1,9 +1,10 @@
 import type { Locator, Page } from "@playwright/test";
-import type { BranchesResponse } from "../../src/lib/lixray-api";
-import { DEMO_AUTH_TOKEN } from "../../src/lib/demo-identity";
+import {
+	DEMO_AUTH_TOKEN,
+	DEMO_MAIN_BRANCH_ID,
+} from "../../src/lib/demo-identity";
 import { expect, expectOk, test } from "./fixtures";
 
-const WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
 const WORKSPACE_ROOT = "/@acme/launch-q3";
 const WORKSPACE_PATH = "/@acme/launch-q3/file/hello.md";
 
@@ -88,21 +89,17 @@ test("a preview test account can share an edit link and a fresh recipient can jo
 
 async function seedMarkdownFile(page: Page) {
 	const headers = { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` };
-	const branchesResponse = await page.request.get(
-		`/v1/workspaces/${WORKSPACE_ID}/branches`,
-		{ headers },
+	await expectOk(
+		await page.request.post(`${WORKSPACE_ROOT}/lix/v1/branch/switch`, {
+			headers,
+			data: { branchId: DEMO_MAIN_BRANCH_ID },
+		}),
 	);
-	await expectOk(branchesResponse);
-	const branches = (await branchesResponse.json()) as BranchesResponse;
-	const branchId = branches.currentBranchId;
-	expect(branchId).toBeTruthy();
-
 	const executeResponse = await page.request.post(
-		`/v1/workspaces/${WORKSPACE_ID}/execute`,
+		`${WORKSPACE_ROOT}/lix/v1/execute`,
 		{
 			headers,
 			data: {
-				branchId,
 				sql: "INSERT INTO lix_file (path, data) VALUES ($1, $2) ON CONFLICT (path) DO UPDATE SET data = excluded.data",
 				params: [
 					{ kind: "text", value: "/hello.md" },
