@@ -102,8 +102,9 @@ function WorkspaceRoutePage() {
 	const [accessRevision, setAccessRevision] = useState(0);
 	const [settledInviteKey, setSettledInviteKey] = useState<string | null>(null);
 	const automaticJoinAttempt = useRef<string | null>(null);
+	const resolvedWorkspaceId = resolved?.workspaceId;
 	const inviteResolutionKey =
-		resolved && invite ? `${resolved.workspaceId}:${invite}` : null;
+		resolvedWorkspaceId && invite ? `${resolvedWorkspaceId}:${invite}` : null;
 	const shouldWaitForInviteResolution =
 		!isDemoModeEnabled &&
 		inviteResolutionKey !== null &&
@@ -181,7 +182,7 @@ function WorkspaceRoutePage() {
 	// funnel. This is intentionally separate from the production Supabase/RLS
 	// implementation, but retains the same URL cleanup and session hand-off.
 	useEffect(() => {
-		if (!isDemoModeEnabled || !invite || !resolved) return;
+		if (!isDemoModeEnabled || !invite || !resolvedWorkspaceId) return;
 		let disposed = false;
 		void resolvePreviewWorkspaceShareToken(invite)
 			.then((candidate) => {
@@ -189,7 +190,7 @@ function WorkspaceRoutePage() {
 				if (
 					candidate &&
 					candidate.grantsEdit &&
-					candidate.workspaceId === resolved.workspaceId
+					candidate.workspaceId === resolvedWorkspaceId
 				) {
 					const capability = {
 						token: invite,
@@ -218,13 +219,14 @@ function WorkspaceRoutePage() {
 		return () => {
 			disposed = true;
 		};
-	}, [cleanInviteFromAddressBar, invite, resolved]);
+	}, [cleanInviteFromAddressBar, invite, resolvedWorkspaceId]);
 
 	// A capability is resolved once, held only for this browser session, then
 	// removed from router state and the address bar. Invalid/revoked links clean
 	// to the same public read page instead of becoming a dead end.
 	useEffect(() => {
-		if (isDemoModeEnabled || !resolved || !authClient || !invite) return;
+		if (isDemoModeEnabled || !resolvedWorkspaceId || !authClient || !invite)
+			return;
 		let disposed = false;
 		void resolveWorkspaceShareToken(authClient, invite)
 			.then((candidate) => {
@@ -232,7 +234,7 @@ function WorkspaceRoutePage() {
 				if (
 					candidate &&
 					candidate.grantsEdit &&
-					candidate.workspaceId === resolved.workspaceId
+					candidate.workspaceId === resolvedWorkspaceId
 				) {
 					const capability = {
 						token: invite,
@@ -256,14 +258,14 @@ function WorkspaceRoutePage() {
 			})
 			.finally(() => {
 				if (!disposed) {
-					setSettledInviteKey(`${resolved.workspaceId}:${invite}`);
+					setSettledInviteKey(`${resolvedWorkspaceId}:${invite}`);
 					cleanInviteFromAddressBar();
 				}
 			});
 		return () => {
 			disposed = true;
 		};
-	}, [authClient, cleanInviteFromAddressBar, invite, resolved]);
+	}, [authClient, cleanInviteFromAddressBar, invite, resolvedWorkspaceId]);
 
 	// Validation deliberately drops malformed tokens from router search. Clean a
 	// raw malformed `invite` parameter too, so it cannot survive in history or
@@ -272,7 +274,8 @@ function WorkspaceRoutePage() {
 		if (resolved === undefined || invite || typeof window === "undefined") {
 			return;
 		}
-		if (!new URLSearchParams(window.location.search).has("invite")) return;
+		const rawInvite = new URLSearchParams(window.location.search).get("invite");
+		if (!rawInvite || isWorkspaceShareToken(rawInvite)) return;
 		clearWorkspaceShareCapability();
 		setShareCapability(null);
 		cleanInviteFromAddressBar();

@@ -75,6 +75,7 @@ export function WorkspaceShareDialog({
 	const copiedUrl = shareMode === "edit" ? editableUrl : canonicalUrl;
 	const linkParts = useMemo(() => splitInviteUrl(copiedUrl), [copiedUrl]);
 	const isEditableLink = shareMode === "edit";
+	const isMarkdownDocument = /\.(?:md|markdown)$/i.test(documentName);
 
 	useEffect(() => {
 		setCopyState("idle");
@@ -121,12 +122,65 @@ export function WorkspaceShareDialog({
 					)}
 				>
 					<div className="flex items-center gap-2.5">
-						<span className="grid size-7 shrink-0 place-items-center rounded-md bg-bg-selection-current text-icon-selection-current">
-							<FileText className="size-4" aria-hidden="true" />
-						</span>
+						{isMarkdownDocument ? (
+							<img
+								src="/landing/file-markdown.svg"
+								alt=""
+								className="size-7 shrink-0"
+							/>
+						) : (
+							<span className="grid size-7 shrink-0 place-items-center rounded-md bg-bg-selection-current text-icon-selection-current">
+								<FileText className="size-4" aria-hidden="true" />
+							</span>
+						)}
 						<h2 className="min-w-0 truncate text-sm font-semibold">
 							Share {documentName}
 						</h2>
+					</div>
+
+					<div className="flex min-w-0 items-stretch gap-2 max-[420px]:flex-col">
+						<div
+							className="flex h-9 min-w-0 grow cursor-text select-all items-center overflow-hidden rounded-lg border border-border-panel bg-bg-panel px-3 font-mono text-xs text-text-secondary focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring-focus-visible"
+							tabIndex={0}
+							role="textbox"
+							aria-readonly="true"
+							aria-label={`${isEditableLink ? "Editable" : "Read-only"} link: ${copiedUrl}`}
+							title={copiedUrl}
+							onClick={(event) => selectLinkText(event.currentTarget)}
+							onKeyDown={(event) => {
+								if (event.key === "Enter" || event.key === " ") {
+									event.preventDefault();
+									selectLinkText(event.currentTarget);
+								}
+							}}
+						>
+							{linkParts.token ? (
+								<div className="flex min-w-0 items-center overflow-hidden whitespace-nowrap">
+									<span className="min-w-0 truncate">
+										{linkParts.beforeToken}
+									</span>
+									<mark className="max-w-[45%] shrink-0 truncate rounded-sm bg-bg-selection-current px-0.5 text-inherit">
+										{linkParts.token}
+									</mark>
+									<span>{linkParts.afterToken}</span>
+								</div>
+							) : (
+								<span className="block truncate">{copiedUrl}</span>
+							)}
+						</div>
+						<Button
+							type="button"
+							variant="featured"
+							onClick={() => void handleCopy()}
+							className="shrink-0 max-[420px]:w-full"
+						>
+							{copyState === "copied" ? (
+								<Check aria-hidden="true" />
+							) : (
+								<Copy aria-hidden="true" />
+							)}
+							{copyState === "copied" ? "Copied" : "Copy link"}
+						</Button>
 					</div>
 
 					<div
@@ -146,52 +200,6 @@ export function WorkspaceShareDialog({
 						>
 							Read only
 						</ShareModeButton>
-					</div>
-
-					<div className="flex min-w-0 items-stretch gap-2 max-[420px]:flex-col">
-						<div
-							className="min-w-0 grow cursor-text select-all rounded-lg border border-border-panel bg-bg-panel px-3 py-2 font-mono text-xs leading-5 text-text-secondary focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring-focus-visible"
-							tabIndex={0}
-							role="textbox"
-							aria-readonly="true"
-							aria-label={`${isEditableLink ? "Editable" : "Read-only"} link: ${copiedUrl}`}
-							title={copiedUrl}
-							onClick={(event) => selectLinkText(event.currentTarget)}
-							onKeyDown={(event) => {
-								if (event.key === "Enter" || event.key === " ") {
-									event.preventDefault();
-									selectLinkText(event.currentTarget);
-								}
-							}}
-						>
-							{linkParts.token ? (
-								<div className="grid min-w-0 gap-0.5">
-									<span className="block truncate">
-										{linkParts.beforeToken}
-									</span>
-									<span className="block break-all">
-										<mark className="rounded-sm bg-bg-selection-current px-0.5 text-inherit">
-											{linkParts.token}
-										</mark>
-										{linkParts.afterToken}
-									</span>
-								</div>
-							) : (
-								<span className="block break-all">{copiedUrl}</span>
-							)}
-						</div>
-						<Button
-							type="button"
-							onClick={() => void handleCopy()}
-							className="shrink-0 max-[420px]:w-full"
-						>
-							{copyState === "copied" ? (
-								<Check aria-hidden="true" />
-							) : (
-								<Copy aria-hidden="true" />
-							)}
-							{copyState === "copied" ? "Copied" : "Copy link"}
-						</Button>
 					</div>
 
 					<p

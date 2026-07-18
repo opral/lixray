@@ -56,7 +56,7 @@ export default tseslint.config(
 						"src/worker/*.test.ts",
 						"tests/e2e/*.ts",
 					],
-					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 16,
+					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 32,
 					defaultProject: "tsconfig.eslint.json",
 				},
 				tsconfigRootDir: import.meta.dirname,

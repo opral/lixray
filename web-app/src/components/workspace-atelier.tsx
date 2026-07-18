@@ -21,6 +21,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
 import { WorkspaceShareDialog } from "~/components/workspace-share-dialog";
@@ -93,8 +94,11 @@ export function WorkspaceAtelier({
 	const routeParams = useParams({ strict: false });
 	const routeFilePath =
 		"_splat" in routeParams ? routeParams._splat : undefined;
-	const documentName =
-		routeFilePath?.split("/").filter(Boolean).at(-1) ?? workspaceName;
+	const documentName = activeDocumentName({
+		pathname,
+		routeFilePath,
+		workspaceName,
+	});
 	const isReadOnly = !canEdit;
 	const [instance, setInstance] = useState<AtelierInstance | null>(null);
 	const [workspaceDefaultBranchId, setWorkspaceDefaultBranchId] = useState<
@@ -182,6 +186,7 @@ export function WorkspaceAtelier({
 			{shareAccess ? (
 				<Button
 					type="button"
+					variant="featured"
 					size="sm"
 					disabled={shareAccess.joining}
 					onClick={() =>
@@ -194,6 +199,7 @@ export function WorkspaceAtelier({
 						})
 					}
 				>
+					<PencilLine aria-hidden="true" />
 					{shareAccess.joining ? "Joining…" : "Join to edit"}
 				</Button>
 			) : null}
@@ -584,12 +590,31 @@ function WorkspaceShareControl({
 				void mintShareLink();
 			}}
 			trigger={
-				<Button type="button" size="sm" variant="outline" disabled={minting}>
+				<Button type="button" size="xs" variant="outline" disabled={minting}>
 					{minting ? "Creating…" : "Share"}
 				</Button>
 			}
 		/>
 	);
+}
+
+function activeDocumentName({
+	pathname,
+	routeFilePath,
+	workspaceName,
+}: {
+	pathname: string;
+	routeFilePath: string | undefined;
+	workspaceName: string;
+}) {
+	const encodedPath = routeFilePath || pathname.split("/file/", 2)[1];
+	const encodedName = encodedPath?.split("/").filter(Boolean).at(-1);
+	if (!encodedName) return workspaceName;
+	try {
+		return decodeURIComponent(encodedName);
+	} catch {
+		return encodedName;
+	}
 }
 
 function ReadOnlyShareStrip({ sharedByName }: { sharedByName: string | null }) {
