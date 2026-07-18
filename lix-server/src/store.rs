@@ -184,6 +184,39 @@ impl LixService {
         .await
     }
 
+    /// Executes a SQL script through Lix's read-only execution path.
+    ///
+    /// `execute_coherent_read_batch` parses and classifies every statement
+    /// before it opens a read scope. In particular, it rejects writes instead
+    /// of relying on a transport-level keyword check. Public workspace
+    /// requests use this path so a future SQL surface cannot accidentally
+    /// become mutable merely because it has a new spelling.
+    pub async fn execute_read_script(
+        &self,
+        branch_id: String,
+        sql: String,
+        params: Vec<Value>,
+    ) -> Result<Vec<ExecuteResult>, LixError> {
+        self.run("execute_read", move |engine| async move {
+            // Match execute_script's branch guard. A pinned session only
+            // validates its branch once a branch-aware operation runs.
+            ensure_branch_exists(&engine, &branch_id, "execute").await?;
+            let plan = parse_sql_script(&sql, params.len())?;
+            let session = engine.open_session(branch_id).await?;
+            let statements = plan
+                .statements
+                .iter()
+                .map(|statement| (statement.sql.as_str(), &params[statement.params.clone()]))
+                .collect::<Vec<_>>();
+            let batch = session
+                .execute_coherent_read_batch(&statements)
+                .await
+                .map_err(normalize_public_read_error)?;
+            Ok(batch.results)
+        })
+        .await
+    }
+
     pub async fn mutate_filesystem(
         &self,
         branch_id: String,
@@ -343,6 +376,22 @@ impl LixService {
         }
         result?
     }
+}
+
+/// Lix's coherent read executor uses INVALID_PARAM for its two capability
+/// rejections. Translate only those static engine errors to the transport's
+/// public read-only contract while retaining parser and query errors verbatim.
+fn normalize_public_read_error(error: LixError) -> LixError {
+    if error.code == LixError::CODE_INVALID_PARAM
+        && matches!(
+            error.message.as_str(),
+            "execute_coherent_read_batch only accepts read statements"
+                | "execute_coherent_read_batch does not support durable runtime functions"
+        )
+    {
+        return LixError::new(LixError::CODE_READ_ONLY, "workspace is read-only");
+    }
+    error
 }
 
 fn required_row_text(row: &lix_engine::Row, column: &str) -> Result<String, LixError> {

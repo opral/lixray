@@ -148,6 +148,7 @@ const BAD_REQUEST_CODES = new Set([
 	"LIX_UNSUPPORTED_SQL",
 	"LIX_UNSUPPORTED_SQL_RUNTIME_PLAN",
 	"LIX_CONSTRAINT_VIOLATION",
+	"LIX_ERROR_READ_ONLY",
 	"LIX_READ_ONLY",
 	"LIX_SCHEMA_VALIDATION",
 	"LIX_FOREIGN_KEY",
@@ -169,6 +170,7 @@ const MAIN_BRANCH_BOOTSTRAP_NAME = "lixray-demo-main-bootstrap";
 const PREVIEW_SNAPSHOT_PREFIX = "lixray-preview/v1";
 const PREVIEW_POLL_INTERVAL_MS = 1_000;
 const PREVIEW_WRITE_ATTEMPTS = 5;
+const READ_ONLY_HEADER = "X-Lixray-Read-Only";
 
 export function createMemoryWorkspaceRuntime(
 	openMemoryLix: OpenMemoryLix,
@@ -179,6 +181,7 @@ export function createMemoryWorkspaceRuntime(
 	return {
 		fetch: async (workspaceId: string, request: Request): Promise<Response> => {
 			try {
+				const readOnly = isReadOnlyRequest(request);
 				const runtime = await workspaceRuntime(
 					workspaceId,
 					openMemoryLix,
@@ -202,11 +205,20 @@ export function createMemoryWorkspaceRuntime(
 						snapshot,
 						runtime.openMemoryLix,
 						runtime.mainBranchId,
+						options.parseSqlScript,
+						readOnly,
 						(subscriber) => subscribeMemoryObserver(runtime, subscriber),
 					);
 				}
 
 				return await serialize(runtime, async () => {
+					if (readOnly) {
+						return routeReadOnlyMemoryRequest(
+							runtime,
+							request,
+							options.parseSqlScript,
+						);
+					}
 					const response = await routeRequest(
 						request,
 						runtime,
@@ -255,6 +267,7 @@ export function createR2WorkspaceRuntime(
 			request: Request,
 		): Promise<Response> => {
 			const { pathname } = new URL(request.url);
+			const readOnly = isReadOnlyRequest(request);
 			if (pathname === "/v1/container-health") {
 				return request.method === "GET"
 					? json({ ok: true, service: "lixray-container" })
@@ -294,6 +307,8 @@ export function createR2WorkspaceRuntime(
 						loaded.snapshot,
 						openMemoryLix,
 						options.mainBranchId,
+						options.parseSqlScript,
+						readOnly,
 						(subscriber) =>
 							subscribePersistentObserver(
 								state,
@@ -319,11 +334,16 @@ export function createR2WorkspaceRuntime(
 							replay(),
 							runtime,
 							options.parseSqlScript,
+							readOnly,
 						);
-						if (
-							!response.ok ||
-							!(await shouldPersistMutation(pathname, response))
-						) {
+						if (!response.ok) return response;
+						if (readOnly) {
+							const bytes = await runtime.lix.exportSnapshot();
+							return equalBytes(bytes, loaded.snapshot.bytes)
+								? response
+								: errorResponse(readOnlyError());
+						}
+						if (!(await shouldPersistMutation(pathname, response))) {
 							return response;
 						}
 
@@ -588,6 +608,39 @@ async function openWorkspaceRuntime(
 	}
 }
 
+/**
+ * Runs a public request against a disposable snapshot. The query gate below
+ * rejects normal SQL writes before they execute; this second boundary also
+ * protects the long-lived in-memory runtime if a future read-shaped SQL
+ * feature has a side effect that the preview binding can perform.
+ */
+async function routeReadOnlyMemoryRequest(
+	runtime: MemoryWorkspaceRuntime,
+	request: Request,
+	parseSqlScript: ParseSqlScript,
+): Promise<Response> {
+	const lix = await runtime.openMemoryLix({ snapshot: runtime.snapshot.bytes });
+	try {
+		const response = await routeRequest(
+			request,
+			{
+				lix,
+				finiteQueue: Promise.resolve(),
+				mainBranchId: runtime.mainBranchId,
+			},
+			parseSqlScript,
+			true,
+		);
+		if (!response.ok) return response;
+		const bytes = await lix.exportSnapshot();
+		return equalBytes(bytes, runtime.snapshot.bytes)
+			? response
+			: errorResponse(readOnlyError());
+	} finally {
+		await closeQuietly(lix);
+	}
+}
+
 async function ensureCanonicalMainBranch(
 	lix: MemoryLixBinding,
 	mainBranchId: string,
@@ -628,6 +681,7 @@ async function routeRequest(
 	request: Request,
 	runtime: WorkspaceRuntime,
 	parseSqlScript: ParseSqlScript,
+	readOnly = false,
 ): Promise<Response> {
 	const { pathname } = new URL(request.url);
 	if (pathname === "/v1/container-health") {
@@ -654,6 +708,7 @@ async function routeRequest(
 	}
 	if (pathname === "/v1/createBranch") {
 		if (request.method !== "POST") return methodNotAllowed();
+		if (readOnly) throw readOnlyError();
 		const body = await requestBody(request);
 		const branchId = requiredString(body, "branchId");
 		const name = requiredString(body, "name");
@@ -680,13 +735,17 @@ async function routeRequest(
 		const sql = requiredString(body, "sql");
 		const params = decodeParams(body.params);
 		const originKey = executeOriginKey(body.options);
+		const readOnlyPlan = readOnly
+			? parseSqlScript(sql, params.length)
+			: undefined;
+		if (readOnlyPlan) assertReadOnlySqlPlan(readOnlyPlan);
 		return json(
 			await withSelectedBranch(
 				runtime.lix,
 				branchId,
 				runtime.mainBranchId,
 				async (selectedLix) => {
-					const plan = parseSqlScript(sql, params.length);
+					const plan = readOnlyPlan ?? parseSqlScript(sql, params.length);
 					const options = originKey ? { originKey } : undefined;
 					const [statement] = plan.statements;
 					if (statement && plan.statements.length === 1) {
@@ -733,9 +792,35 @@ async function routeRequest(
 	}
 	if (pathname === "/v1/filesystem/mutate") {
 		if (request.method !== "POST") return methodNotAllowed();
+		if (readOnly) throw readOnlyError();
 		return json(await mutateFilesystem(runtime, await requestBody(request)));
 	}
 	return new Response("Not found\n", { status: 404 });
+}
+
+function isReadOnlyRequest(request: Request): boolean {
+	return request.headers.get(READ_ONLY_HEADER) === "1";
+}
+
+/**
+ * The Worker binding does not expose Lix's Rust read-batch API, so public
+ * preview requests use a deliberately narrow allowlist after the same Lix SQL
+ * script parser has canonicalized the statement. Every other statement shape
+ * fails closed. The request-local/isolated snapshot boundaries above ensure a
+ * future read-shaped side effect still cannot become durable state.
+ */
+function assertReadOnlySqlPlan(plan: SqlScriptPlan): void {
+	if (
+		plan.statements.length === 0 ||
+		!plan.statements.every((statement) => isClearlyReadOnlySql(statement.sql))
+	) {
+		throw readOnlyError();
+	}
+}
+
+function isClearlyReadOnlySql(sql: string): boolean {
+	const keyword = /^\s*([a-z]+)/i.exec(sql)?.[1]?.toUpperCase();
+	return keyword === "SELECT" || keyword === "VALUES";
 }
 
 interface PersistentObservationQuery {
@@ -755,6 +840,8 @@ function snapshotObservationResponse(
 	initialSnapshot: PersistentSnapshot,
 	openMemoryLix: OpenMemoryLix,
 	mainBranchId: string,
+	parseSqlScript: ParseSqlScript,
+	readOnly: boolean,
 	subscribe: (
 		subscriber: (update: PersistentObserverUpdate) => void,
 	) => () => void,
@@ -780,6 +867,16 @@ function snapshotObservationResponse(
 				params: decodeParams(body.params),
 			},
 		];
+	}
+	if (readOnly) {
+		for (const query of queries) {
+			const plan = parseSqlScript(query.sql, query.params.length);
+			// Observers represent one live query. Requiring exactly one parsed
+			// statement also prevents a read followed by a mutation from hiding
+			// behind the SSE endpoint.
+			if (plan.statements.length !== 1) throw readOnlyError();
+			assertReadOnlySqlPlan(plan);
+		}
 	}
 
 	const encoder = new TextEncoder();
@@ -1415,6 +1512,10 @@ function sseFrame(event: string, value: unknown) {
 
 function invalidArgument(message: string) {
 	return lixError("LIX_INVALID_ARGUMENT", message);
+}
+
+function readOnlyError() {
+	return lixError("LIX_ERROR_READ_ONLY", "workspace is read-only");
 }
 
 function lixError(

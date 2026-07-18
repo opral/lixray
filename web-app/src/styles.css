@@ -117,3 +117,33 @@
 		app-region: no-drag;
 	}
 }
+
+/* Public workspace pages retain the full shell, but no edit affordances. The
+ * worker and runtime enforce this boundary; these rules make the happy path
+ * read as read-only before a mutation can even be attempted. */
+[data-workspace-read-only="true"]
+	:is(
+		[data-attr="file-new-wide"],
+		[data-attr="file-new"],
+		[data-attr="file-new-icon"],
+		[data-attr="file-tree-menu-new-file-icon"],
+		[data-attr="file-tree-menu-new-folder-icon"],
+		[data-attr="file-tree-menu-delete-icon"],
+		[data-attr="central-empty-new-document"],
+		[data-attr="checkpoint-create"],
+		[data-attr="branch-rename"],
+		[data-attr="branch-delete"],
+		[data-attr="diff-accept"],
+		[data-attr="diff-reject"],
+		[data-attr="review-change-undo"],
+		[data-attr="review-change-keep"],
+		[data-attr="review-change-keep-all"],
+		[data-attr="markdown-format-toolbar"]
+	) {
+	display: none;
+}
+
+[data-workspace-read-only="true"]
+	:is(.ProseMirror, .atelier-text-editor-host, .cm-editor) {
+	cursor: default;
+}

@@ -21,8 +21,10 @@ import {
 	useRef,
 	useState,
 } from "react";
-import type { Lix } from "@lix-js/sdk";
+import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
+import { WorkspaceShareDialog } from "~/components/workspace-share-dialog";
+import { Button } from "~/components/ui/button";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
@@ -40,13 +42,29 @@ import {
 	createWorkspaceSessionStateStore,
 } from "~/lib/atelier-state";
 import type { BrowserLix } from "~/lib/mock-remote-lix";
+import type { LixraySupabaseClient } from "~/lib/supabase";
 import { captureTelemetry } from "~/lib/telemetry";
+import {
+	appendWorkspaceShareToken,
+	canonicalPathFromLocation,
+	stripInviteFromUrl,
+} from "~/lib/workspace-share-url";
+import { isWorkspaceShareToken } from "~/lib/workspace-share-capability";
 
 interface WorkspaceAtelierProps {
 	workspaceId: string;
 	namespace: string;
 	workspaceSlug: string;
+	workspaceName: string;
 	branchId?: string;
+	/** The only mode allowed to make workspace mutations in this view. */
+	canEdit: boolean;
+	/** Present only for a valid, session-held share capability. */
+	shareAccess?: {
+		sharedByName: string | null;
+		onJoinToEdit: () => Promise<void>;
+		joining: boolean;
+	};
 }
 
 const WorkspaceAtelierContext = createContext<AtelierInstance | null>(null);
@@ -56,9 +74,18 @@ export function WorkspaceAtelier({
 	workspaceId,
 	namespace,
 	workspaceSlug,
+	workspaceName,
 	branchId,
+	canEdit,
+	shareAccess,
 }: WorkspaceAtelierProps) {
-	const { client, getAccessToken: getSessionAccessToken, user } = useAuth();
+	const {
+		client,
+		getAccessToken: getSessionAccessToken,
+		isLoaded: isAuthLoaded,
+		signInWithGoogle,
+		user,
+	} = useAuth();
 	const navigate = useNavigate();
 	const pathname = useRouterState({
 		select: (state) => state.location.pathname,
@@ -66,11 +93,15 @@ export function WorkspaceAtelier({
 	const routeParams = useParams({ strict: false });
 	const routeFilePath =
 		"_splat" in routeParams ? routeParams._splat : undefined;
+	const documentName =
+		routeFilePath?.split("/").filter(Boolean).at(-1) ?? workspaceName;
+	const isReadOnly = !canEdit;
 	const [instance, setInstance] = useState<AtelierInstance | null>(null);
 	const [workspaceDefaultBranchId, setWorkspaceDefaultBranchId] = useState<
 		string | null
 	>(null);
 	const [error, setError] = useState<string | null>(null);
+	const workspaceRootRef = useRef<HTMLDivElement | null>(null);
 	const activeLixRef = useRef<BrowserLix | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeFilePathRef = useRef(routeFilePath);
@@ -100,6 +131,57 @@ export function WorkspaceAtelier({
 				? Promise.resolve(DEMO_AUTH_TOKEN)
 				: getSessionAccessToken(),
 		[getSessionAccessToken],
+	);
+	const signInToCurrentWorkspace = useCallback(async () => {
+		try {
+			await signInWithGoogle(canonicalPathFromLocation(window.location));
+		} catch (caught) {
+			toast.error(
+				caught instanceof Error ? caught.message : "Unable to start sign-in.",
+			);
+		}
+	}, [signInWithGoogle]);
+	const headerActions = canEdit ? (
+		client ? (
+			<WorkspaceShareControl
+				client={client}
+				workspaceId={workspaceId}
+				workspaceName={workspaceName}
+				documentName={documentName}
+			/>
+		) : null
+	) : (
+		<div className="flex items-center gap-2">
+			{!user ? (
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					disabled={!isAuthLoaded}
+					onClick={() => void signInToCurrentWorkspace()}
+				>
+					Sign in
+				</Button>
+			) : null}
+			{shareAccess ? (
+				<Button
+					type="button"
+					size="sm"
+					disabled={shareAccess.joining}
+					onClick={() =>
+						void shareAccess.onJoinToEdit().catch((caught: unknown) => {
+							toast.error(
+								caught instanceof Error
+									? caught.message
+									: "Unable to join this workspace.",
+							);
+						})
+					}
+				>
+					{shareAccess.joining ? "Joining…" : "Join to edit"}
+				</Button>
+			) : null}
+		</div>
 	);
 	const navigateToCurrentPathBranch = useCallback(
 		async (nextBranchId: string, replace = false) => {
@@ -173,12 +255,16 @@ export function WorkspaceAtelier({
 
 	useEffect(() => {
 		let disposed = false;
-		let activeLix: Lix | null = null;
+		let activeLix: BrowserLix | null = null;
 		setInstance(null);
 		setWorkspaceDefaultBranchId(null);
 		setError(null);
 
-		const userId = isDemoModeEnabled ? DEMO_AUTH_TOKEN : user?.id;
+		const userId = isDemoModeEnabled
+			? DEMO_AUTH_TOKEN
+			: canEdit
+				? user?.id
+				: `public:${workspaceId}`;
 		if (!userId) {
 			setError("Unable to identify the current Atelier account.");
 			return;
@@ -217,7 +303,10 @@ export function WorkspaceAtelier({
 				});
 				setInstance(
 					createAtelier({
-						lix,
+						// The workspace SDK and Atelier expose the same Lix runtime
+						// contract, but pnpm keeps their private SDK fields nominally
+						// distinct in this workspace.
+						lix: lix as unknown as Parameters<typeof createAtelier>[0]["lix"],
 						branchSession,
 						reviewRangeSessionId: userId,
 						sessionStateStore: createWorkspaceSessionStateStore({
@@ -225,12 +314,12 @@ export function WorkspaceAtelier({
 							workspaceId,
 						}),
 						preferencesStore: createWorkspacePreferencesStore({
-							client,
+							client: canEdit ? client : null,
 							userId,
 							workspaceId,
 						}),
 						reviewStatusStore: createWorkspaceReviewStatusStore({
-							client,
+							client: canEdit ? client : null,
 							userId,
 							workspaceId,
 						}),
@@ -265,6 +354,7 @@ export function WorkspaceAtelier({
 		};
 	}, [
 		client,
+		canEdit,
 		getAccessToken,
 		navigateToCurrentPathBranch,
 		user?.id,
@@ -327,10 +417,46 @@ export function WorkspaceAtelier({
 		void instance.documents.closeAll();
 	}, [instance, namespace, pathname, workspaceSlug]);
 
+	useEffect(() => {
+		const root = workspaceRootRef.current;
+		if (!isReadOnly || !root) return;
+		const lockEditorSurfaces = () => {
+			for (const surface of root.querySelectorAll<HTMLElement>(
+				'[contenteditable="true"]',
+			)) {
+				surface.setAttribute("contenteditable", "false");
+				surface.setAttribute("aria-readonly", "true");
+			}
+			for (const input of root.querySelectorAll<HTMLTextAreaElement>(
+				'[data-attr="markdown-editor"] textarea, .atelier-text-editor-host textarea',
+			)) {
+				input.readOnly = true;
+			}
+		};
+		lockEditorSurfaces();
+		const observer = new MutationObserver(lockEditorSurfaces);
+		observer.observe(root, {
+			attributes: true,
+			attributeFilter: ["contenteditable"],
+			childList: true,
+			subtree: true,
+		});
+		return () => observer.disconnect();
+	}, [instance, isReadOnly]);
+
 	return (
 		<div
+			ref={workspaceRootRef}
 			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
+			data-workspace-read-only={isReadOnly || undefined}
 			aria-busy={!instance && !error}
+			onBeforeInputCapture={
+				isReadOnly ? preventReadOnlyEditorMutation : undefined
+			}
+			onDropCapture={isReadOnly ? preventReadOnlyEditorMutation : undefined}
+			onCutCapture={isReadOnly ? preventReadOnlyEditorMutation : undefined}
+			onPasteCapture={isReadOnly ? preventReadOnlyEditorMutation : undefined}
+			onKeyDownCapture={isReadOnly ? preventReadOnlyEditorKeys : undefined}
 		>
 			{instance ? (
 				<WorkspaceDefaultBranchContext.Provider
@@ -357,8 +483,12 @@ export function WorkspaceAtelier({
 										/>
 									</Link>
 								),
+								navbarEnd: headerActions,
 							}}
 						/>
+						{isReadOnly && shareAccess ? (
+							<ReadOnlyShareStrip sharedByName={shareAccess.sharedByName} />
+						) : null}
 						<Outlet />
 					</WorkspaceAtelierContext.Provider>
 				</WorkspaceDefaultBranchContext.Provider>
@@ -389,4 +519,128 @@ export function useWorkspaceAtelierInstance(): AtelierInstance | null {
 
 export function useWorkspaceDefaultBranchId(): string | null {
 	return useContext(WorkspaceDefaultBranchContext);
+}
+
+function WorkspaceShareControl({
+	client,
+	workspaceId,
+	workspaceName,
+	documentName,
+}: {
+	client: LixraySupabaseClient;
+	workspaceId: string;
+	workspaceName: string;
+	documentName: string;
+}) {
+	const [open, setOpen] = useState(false);
+	const [minting, setMinting] = useState(false);
+	const [urls, setUrls] = useState({ canonicalUrl: "", editableUrl: "" });
+
+	const mintShareLink = async () => {
+		if (minting) return;
+		setMinting(true);
+		try {
+			const { data, error } = await client.rpc(
+				"create_workspace_share_token",
+				{ p_workspace_id: workspaceId },
+			);
+			if (error) throw error;
+			const token = data?.[0]?.token;
+			if (!isWorkspaceShareToken(token)) {
+				throw new Error("The share service returned an invalid link.");
+			}
+			const canonicalUrl = stripInviteFromUrl(window.location.href);
+			setUrls({
+				canonicalUrl,
+				editableUrl: appendWorkspaceShareToken(canonicalUrl, token),
+			});
+			setOpen(true);
+		} catch (caught) {
+			toast.error(
+				caught instanceof Error
+					? caught.message
+					: "Unable to create a share link.",
+			);
+		} finally {
+			setMinting(false);
+		}
+	};
+
+	return (
+		<WorkspaceShareDialog
+			canonicalUrl={urls.canonicalUrl}
+			editableUrl={urls.editableUrl}
+			documentName={documentName}
+			workspaceName={workspaceName}
+			open={open}
+			onOpenChange={(nextOpen) => {
+				if (!nextOpen) {
+					setOpen(false);
+					return;
+				}
+				void mintShareLink();
+			}}
+			trigger={
+				<Button type="button" size="sm" variant="outline" disabled={minting}>
+					{minting ? "Creating…" : "Share"}
+				</Button>
+			}
+		/>
+	);
+}
+
+function ReadOnlyShareStrip({ sharedByName }: { sharedByName: string | null }) {
+	return (
+		<div
+			className="pointer-events-none absolute inset-x-0 top-9 z-20 flex h-8 items-center gap-2 border-b border-border-subtle bg-bg-panel/95 px-4 text-xs text-text-secondary shadow-sm backdrop-blur"
+			role="status"
+		>
+			<span className="font-medium text-text-primary">Read-only</span>
+			<span aria-hidden="true">·</span>
+			<span>
+				shared by <strong className="font-medium text-text-primary">{sharedByName ?? "a workspace member"}</strong>
+			</span>
+		</div>
+	);
+}
+
+type ReadOnlyMutationEvent = {
+	target: EventTarget | null;
+	preventDefault: () => void;
+};
+
+function preventReadOnlyEditorMutation(event: ReadOnlyMutationEvent) {
+	if (isWorkspaceEditorTarget(event.target)) event.preventDefault();
+}
+
+function preventReadOnlyEditorKeys(
+	event: ReadOnlyMutationEvent & {
+		key: string;
+		altKey: boolean;
+		ctrlKey: boolean;
+		metaKey: boolean;
+	},
+) {
+	if (!isWorkspaceEditorTarget(event.target)) return;
+	if (event.altKey) return;
+	if (event.ctrlKey || event.metaKey) {
+		if (["a", "c", "f"].includes(event.key.toLowerCase())) return;
+		event.preventDefault();
+		return;
+	}
+	if (
+		event.key.length === 1 ||
+		["Backspace", "Delete", "Enter", "Tab"].includes(event.key)
+	) {
+		event.preventDefault();
+	}
+}
+
+function isWorkspaceEditorTarget(target: EventTarget | null): boolean {
+	return (
+		target instanceof Element &&
+		target.closest(
+			'[data-attr="markdown-editor"], .atelier-text-editor-host, .ProseMirror, .cm-editor',
+		) !== null
+	);
 }

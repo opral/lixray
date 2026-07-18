@@ -222,6 +222,120 @@ void test("execute keeps the single-statement fast path and wraps its result", a
 	assert.equal(transactionStarts, 0);
 });
 
+void test("read-only transport permits reads and rejects every mutation route", async () => {
+	const executed: string[] = [];
+	let createdBranches = 0;
+	let transactions = 0;
+	const runtime = testRuntime(async () =>
+		fakeBinding({
+			execute: async (sql: string) => {
+				executed.push(sql);
+				return sql.includes("FROM lix_branch") ? branchResult() : emptyResult();
+			},
+			createBranch: async () => {
+				createdBranches += 1;
+				throw new Error("read-only createBranch must not reach Lix");
+			},
+			beginTransaction: async () => {
+				transactions += 1;
+				throw new Error("read-only mutation must not open a transaction");
+			},
+		}),
+	);
+
+	const branches = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest("/branches", undefined, true),
+	);
+	assert.equal(branches.status, 200);
+
+	const select = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest(
+			"/execute",
+			{ branchId: BRANCH, sql: "SELECT 1" },
+			true,
+		),
+	);
+	assert.equal(select.status, 200);
+
+	const observe = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest(
+			"/observe",
+			{ branchId: BRANCH, sql: "SELECT 1" },
+			true,
+		),
+	);
+	assert.equal(observe.status, 200);
+	await observe.body?.cancel();
+
+	const write = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest(
+			"/execute",
+			{
+				branchId: BRANCH,
+				sql: "/* comments do not bypass the Lix parser */ INSERT INTO example VALUES (1)",
+			},
+			true,
+		),
+	);
+	assert.equal(write.status, 400);
+	assert.deepEqual(await write.json(), {
+		error: { code: "LIX_ERROR_READ_ONLY", message: "workspace is read-only" },
+	});
+
+	const branch = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest(
+			"/createBranch",
+			{ branchId: BRANCH, name: "Nope" },
+			true,
+		),
+	);
+	assert.equal(branch.status, 400);
+	assert.deepEqual(await branch.json(), {
+		error: { code: "LIX_ERROR_READ_ONLY", message: "workspace is read-only" },
+	});
+
+	const filesystem = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest(
+			"/filesystem/mutate",
+			{
+				branchId: BRANCH,
+				kind: "file",
+				path: "/document.md",
+				expectedRevision: "revision-1",
+				mutation: { type: "delete" },
+			},
+			true,
+		),
+	);
+	assert.equal(filesystem.status, 400);
+	assert.deepEqual(await filesystem.json(), {
+		error: { code: "LIX_ERROR_READ_ONLY", message: "workspace is read-only" },
+	});
+
+	const observedWrite = await runtime.fetch(
+		WORKSPACE_A,
+		workspaceRequest(
+			"/observe",
+			{ branchId: BRANCH, sql: "DELETE FROM example" },
+			true,
+		),
+	);
+	assert.equal(observedWrite.status, 400);
+	assert.deepEqual(await observedWrite.json(), {
+		error: { code: "LIX_ERROR_READ_ONLY", message: "workspace is read-only" },
+	});
+
+	assert.equal(createdBranches, 0);
+	assert.equal(transactions, 0);
+	assert.ok(executed.every((sql) => !/\b(?:insert|update|delete)\b/i.test(sql)));
+});
+
 void test("execute runs scripts atomically and returns ordered results", async () => {
 	const executions: Array<{
 		sql: string;
@@ -719,13 +833,16 @@ function emptyResult() {
 	return { columns: [], rows: [], rowsAffected: 0, notices: [] };
 }
 
-function workspaceRequest(path: string, body?: unknown) {
+function workspaceRequest(path: string, body?: unknown, readOnly = false) {
+	const headers = new Headers(
+		body === undefined ? undefined : { "content-type": "application/json" },
+	);
+	if (readOnly) headers.set("X-Lixray-Read-Only", "1");
 	return new Request(
 		`https://preview.example${path.startsWith("/v1") ? path : `/v1${path}`}`,
 		{
 			method: body === undefined ? "GET" : "POST",
-			headers:
-				body === undefined ? undefined : { "content-type": "application/json" },
+			headers,
 			body: body === undefined ? undefined : JSON.stringify(body),
 		},
 	);

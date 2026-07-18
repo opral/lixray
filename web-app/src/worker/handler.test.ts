@@ -367,9 +367,12 @@ void test("malformed workspace ids return 400 before auth", async () => {
 	assert.equal(await response.text(), "Invalid workspace id\n");
 });
 
-void test("workspace routes return authentication failures", async () => {
+void test("unsafe workspace routes return authentication failures", async () => {
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches"),
+		workspaceRequest(WORKSPACE_A, "/branches", {
+			method: "POST",
+			headers: { Authorization: "Bearer invalid-user-token" },
+		}),
 		env({}),
 		{
 			authenticate: rejected(401, "Unauthorized\n"),
@@ -382,7 +385,10 @@ void test("workspace routes return authentication failures", async () => {
 void test("inaccessible workspaces return 403 without starting a container", async () => {
 	let started = false;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches"),
+		workspaceRequest(WORKSPACE_A, "/branches", {
+			method: "POST",
+			headers: { Authorization: "Bearer user-token" },
+		}),
 		env({
 			fetch: async () => {
 				started = true;
@@ -395,6 +401,100 @@ void test("inaccessible workspaces return 403 without starting a container", asy
 	assert.equal(started, false);
 });
 
+void test("anonymous public reads reach the runtime with a worker-owned read-only marker", async () => {
+	let proxiedRequest: Request | undefined;
+	let publicWorkspaceLookups = 0;
+	const response = await handleRequest(
+		workspaceRequest(WORKSPACE_A, "/branches", {
+			headers: { "X-Lixray-Read-Only": "0" },
+		}),
+		env({}),
+		{
+			authenticate: async () => {
+				throw new Error("anonymous reads must not authenticate first");
+			},
+			authorizePublicWorkspace: async (workspaceId) => {
+				publicWorkspaceLookups += 1;
+				assert.equal(workspaceId, WORKSPACE_A);
+				return null;
+			},
+			workspaceFetch: async (workspaceId, request) => {
+				assert.equal(workspaceId, WORKSPACE_A);
+				proxiedRequest = request;
+				return new Response("public read");
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(await response.text(), "public read");
+	assert.equal(publicWorkspaceLookups, 1);
+	assert.ok(proxiedRequest);
+	assert.equal(proxiedRequest.headers.get("authorization"), null);
+	assert.equal(proxiedRequest.headers.get("x-lixray-read-only"), "1");
+});
+
+void test("unsafe anonymous workspace routes remain unauthorized", async () => {
+	let publicWorkspaceLookedUp = false;
+	let proxied = false;
+	const response = await handleRequest(
+		workspaceRequest(WORKSPACE_A, "/branches", { method: "POST" }),
+		env({}),
+		{
+			authenticate: async () => {
+				throw new Error("anonymous unsafe requests must not authenticate");
+			},
+			authorizePublicWorkspace: async () => {
+				publicWorkspaceLookedUp = true;
+				return null;
+			},
+			workspaceFetch: async () => {
+				proxied = true;
+				return new Response("unexpected");
+			},
+		},
+	);
+
+	assert.equal(response.status, 401);
+	assert.equal(await response.text(), "Unauthorized\n");
+	assert.equal(publicWorkspaceLookedUp, false);
+	assert.equal(proxied, false);
+});
+
+void test("authenticated non-members are downgraded to the public read transport", async () => {
+	let proxiedRequest: Request | undefined;
+	let publicWorkspaceLookups = 0;
+	const response = await handleRequest(
+		workspaceRequest(WORKSPACE_A, "/branches", {
+			headers: {
+				Authorization: "Bearer non-member-token",
+				"X-Lixray-Read-Only": "0",
+			},
+		}),
+		env({}),
+		{
+			authenticate: authenticated(),
+			authorizeWorkspace: denied(),
+			authorizePublicWorkspace: async (workspaceId) => {
+				publicWorkspaceLookups += 1;
+				assert.equal(workspaceId, WORKSPACE_A);
+				return null;
+			},
+			workspaceFetch: async (_workspaceId, request) => {
+				proxiedRequest = request;
+				return new Response("downgraded");
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(await response.text(), "downgraded");
+	assert.equal(publicWorkspaceLookups, 1);
+	assert.ok(proxiedRequest);
+	assert.equal(proxiedRequest.headers.get("authorization"), null);
+	assert.equal(proxiedRequest.headers.get("x-lixray-read-only"), "1");
+});
+
 void test("authorized requests route by workspace, rewrite paths, preserve bodies and strip auth", async () => {
 	let startOptions: unknown;
 	let proxiedRequest: Request | undefined;
@@ -404,6 +504,7 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 			Authorization: "Bearer user-token",
 			"content-type": "application/json",
 			"x-client-header": "kept",
+			"X-Lixray-Read-Only": "1",
 		},
 		body: JSON.stringify({ sql: "SELECT 1" }),
 	});
@@ -464,6 +565,7 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 	assert.equal(new URL(proxiedRequest.url).pathname, "/v1/execute");
 	assert.equal(new URL(proxiedRequest.url).search, "?mode=test");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
+	assert.equal(proxiedRequest.headers.get("x-lixray-read-only"), null);
 	assert.equal(proxiedRequest.headers.get("x-client-header"), "kept");
 	assert.deepEqual(await proxiedRequest.json(), { sql: "SELECT 1" });
 });
@@ -473,7 +575,9 @@ void test("transient container resets retry with a reacquired stub", async () =>
 	let starts = 0;
 	let fetches = 0;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches"),
+		workspaceRequest(WORKSPACE_A, "/branches", {
+			headers: { Authorization: "Bearer user-token" },
+		}),
 		env({
 			getByName: () => {
 				acquisitions += 1;
@@ -563,7 +667,9 @@ void test("direct mutation bodies are not replayed after ambiguous proxy failure
 void test("permanent container startup failures return a controlled 503 response", async () => {
 	let fetched = false;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches"),
+		workspaceRequest(WORKSPACE_A, "/branches", {
+			headers: { Authorization: "Bearer user-token" },
+		}),
 		env({
 			getByName: () => ({
 				startAndWaitForPorts: async () => {
@@ -599,7 +705,9 @@ void test("two workspaces route to distinct containers", async () => {
 	});
 	for (const workspaceId of [WORKSPACE_A, WORKSPACE_B]) {
 		const response = await handleRequest(
-			workspaceRequest(workspaceId, "/branches"),
+			workspaceRequest(workspaceId, "/branches", {
+				headers: { Authorization: "Bearer user-token" },
+			}),
 			testEnv,
 			{
 				authenticate: authenticated(),

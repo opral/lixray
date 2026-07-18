@@ -1,6 +1,7 @@
 import { openMemoryLix, parseSqlScript } from "@lix-js/sdk/workerd";
 import startHandler from "@tanstack/react-start/server-entry";
 import { DEMO_MAIN_BRANCH_ID } from "./lib/demo-identity";
+import { withShareSecurityHeaders } from "./lib/share-security";
 import { handleRequest, type PreviewWorkerEnv } from "./worker/handler";
 import { createR2WorkspaceRuntime } from "./worker/workspace-runtime";
 
@@ -27,7 +28,7 @@ export default {
 					workspaceRequest,
 				),
 			fallback: async (fallbackRequest) =>
-				await startHandler.fetch(fallbackRequest),
+				withShareSecurityHeaders(await startHandler.fetch(fallbackRequest)),
 		});
 	},
 };

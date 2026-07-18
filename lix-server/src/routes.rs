@@ -4,6 +4,7 @@ use crate::store::{
 };
 use axum::{
     extract::{Json, State},
+    http::HeaderMap,
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse,
@@ -23,6 +24,14 @@ use tokio::{sync::mpsc, task::JoinHandle};
 pub struct AppState {
     service: Arc<LixService>,
 }
+
+/// Internal Worker-to-runtime capability marker.
+///
+/// The Worker removes any browser-supplied value and only stamps this header
+/// after it has authorized the public workspace transport. Containers are not
+/// internet-facing, so this is intentionally a transport contract rather than
+/// a client-controlled permission signal.
+const READ_ONLY_HEADER: &str = "x-lixray-read-only";
 
 pub fn router(service: Arc<LixService>) -> Router {
     Router::new()
@@ -59,9 +68,11 @@ async fn list_branches(State(state): State<AppState>) -> Result<Json<BranchesRes
 }
 
 async fn create_branch(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(request): Json<CreateBranchRequest>,
 ) -> Result<Json<CreateBranchResponse>, ApiError> {
+    reject_read_only(&headers)?;
     let branch_id = required_non_empty(request.branch_id, "branchId")?;
     let name = required_non_empty(request.name, "name")?;
     let id = optional_uuid(request.id, "id")?;
@@ -86,6 +97,7 @@ async fn create_branch(
 }
 
 async fn execute(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(request): Json<ExecuteRequest>,
 ) -> Result<Json<ExecuteScriptResponse>, ApiError> {
@@ -95,21 +107,34 @@ async fn execute(
     let options = ExecuteOptions {
         origin_key: request.options.and_then(|options| options.origin_key),
     };
-    let results = state
-        .service
-        .execute_script(branch_id, sql, params, options)
-        .await?
-        .into_iter()
-        .map(ExecuteResponse::try_from)
-        .collect::<Result<Vec<_>, _>>()?;
+    let results = (if is_read_only(&headers) {
+        // This deliberately delegates classification to Lix's coherent read
+        // executor. It parses every statement before running any of them and
+        // rejects writes, including multi-statement scripts and EXPLAIN
+        // wrappers, without a fragile SQL keyword filter.
+        state
+            .service
+            .execute_read_script(branch_id, sql, params)
+            .await?
+    } else {
+        state
+            .service
+            .execute_script(branch_id, sql, params, options)
+            .await?
+    })
+    .into_iter()
+    .map(ExecuteResponse::try_from)
+    .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Json(ExecuteScriptResponse { results }))
 }
 
 async fn mutate_filesystem(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(request): Json<FilesystemMutationRequest>,
 ) -> Result<Json<FilesystemMutationResponse>, ApiError> {
+    reject_read_only(&headers)?;
     let branch_id = required_non_empty(request.branch_id, "branchId")?;
     let path = required_non_empty(request.path, "path")?;
     let expected_revision = required_non_empty(request.expected_revision, "expectedRevision")?;
@@ -281,6 +306,23 @@ where
             }),
         ),
     }
+}
+
+fn is_read_only(headers: &HeaderMap) -> bool {
+    headers
+        .get(READ_ONLY_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == "1")
+}
+
+fn reject_read_only(headers: &HeaderMap) -> Result<(), ApiError> {
+    if is_read_only(headers) {
+        return Err(ApiError::from(LixError::new(
+            LixError::CODE_READ_ONLY,
+            "workspace is read-only",
+        )));
+    }
+    Ok(())
 }
 
 fn decode_params(params: Vec<WireValue>) -> Result<Vec<Value>, ApiError> {
@@ -599,6 +641,25 @@ mod tests {
         .unwrap()
     }
 
+    async fn read_only_json_request(
+        app: Router,
+        method: Method,
+        uri: &str,
+        body: JsonValue,
+    ) -> http::Response<Body> {
+        app.oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("content-type", "application/json")
+                .header(READ_ONLY_HEADER, "1")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
     async fn response_json<T>(response: http::Response<Body>) -> T
     where
         T: serde::de::DeserializeOwned,
@@ -660,6 +721,119 @@ mod tests {
 
         assert!(!main.id.is_empty());
         assert_eq!(branches.current_branch_id, main.id);
+    }
+
+    #[tokio::test]
+    async fn read_only_transport_allows_reads_and_rejects_mutations() {
+        let app = app().await;
+        let branch_id = main_branch_id(app.clone()).await;
+
+        let branches = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/v1/branches")
+                    .header(READ_ONLY_HEADER, "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(branches.status(), StatusCode::OK);
+
+        let select = read_only_json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT 1"
+            }),
+        )
+        .await;
+        assert_eq!(select.status(), StatusCode::OK);
+
+        let observe = read_only_json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/observe",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT 1"
+            }),
+        )
+        .await;
+        assert_eq!(observe.status(), StatusCode::OK);
+
+        let sql_write = read_only_json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "/* comments do not bypass Lix's parser */ INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
+                "params": [
+                    { "kind": "text", "value": "read-only-key" },
+                    { "kind": "text", "value": "read-only-value" }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(sql_write.status(), StatusCode::BAD_REQUEST);
+        let sql_write_body: JsonValue = response_json(sql_write).await;
+        assert_eq!(sql_write_body["error"]["code"], LixError::CODE_READ_ONLY);
+
+        let branch_write = read_only_json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/createBranch",
+            json!({
+                "branchId": branch_id,
+                "name": "read-only branch"
+            }),
+        )
+        .await;
+        assert_eq!(branch_write.status(), StatusCode::BAD_REQUEST);
+        let branch_write_body: JsonValue = response_json(branch_write).await;
+        assert_eq!(branch_write_body["error"]["code"], LixError::CODE_READ_ONLY);
+
+        let filesystem_write = read_only_json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/filesystem/mutate",
+            json!({
+                "branchId": branch_id,
+                "kind": "file",
+                "path": "/read-only.md",
+                "expectedRevision": "revision-1",
+                "mutation": { "type": "delete" }
+            }),
+        )
+        .await;
+        assert_eq!(filesystem_write.status(), StatusCode::BAD_REQUEST);
+        let filesystem_write_body: JsonValue = response_json(filesystem_write).await;
+        assert_eq!(
+            filesystem_write_body["error"]["code"],
+            LixError::CODE_READ_ONLY
+        );
+
+        let no_write_landed = json_request(
+            app,
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": branch_id,
+                "sql": "SELECT value FROM lix_key_value WHERE key = $1",
+                "params": [{ "kind": "text", "value": "read-only-key" }]
+            }),
+        )
+        .await;
+        assert_eq!(no_write_landed.status(), StatusCode::OK);
+        assert!(single_execute_response(no_write_landed)
+            .await
+            .rows
+            .is_empty());
     }
 
     #[tokio::test]

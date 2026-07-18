@@ -1,5 +1,6 @@
 import { openMemoryLix, parseSqlScript } from "@lix-js/sdk/workerd";
 import { DEMO_MAIN_BRANCH_ID } from "./lib/demo-identity";
+import { withShareSecurityHeaders } from "./lib/share-security";
 import { handleRequest, type PreviewWorkerEnv } from "./worker/handler";
 import { createR2WorkspaceRuntime } from "./worker/workspace-runtime";
 
@@ -27,7 +28,9 @@ export default {
 				),
 			fallback: async (fallbackRequest, fallbackEnv) => {
 				if (!fallbackEnv.ASSETS) {
-					return new Response("Not found\n", { status: 404 });
+					return withShareSecurityHeaders(
+						new Response("Not found\n", { status: 404 }),
+					);
 				}
 				if (
 					fallbackRequest.method === "GET" &&
@@ -35,11 +38,15 @@ export default {
 				) {
 					const shellUrl = new URL(fallbackRequest.url);
 					shellUrl.pathname = "/";
-					return fallbackEnv.ASSETS.fetch(
-						new Request(shellUrl, fallbackRequest),
+					return withShareSecurityHeaders(
+						await fallbackEnv.ASSETS.fetch(
+							new Request(shellUrl, fallbackRequest),
+						),
 					);
 				}
-				return fallbackEnv.ASSETS.fetch(fallbackRequest);
+				return withShareSecurityHeaders(
+					await fallbackEnv.ASSETS.fetch(fallbackRequest),
+				);
 			},
 		});
 	},

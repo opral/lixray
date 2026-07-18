@@ -33,6 +33,49 @@ void test("independent runtimes share exact R2 state and revisions", async () =>
 	assert.ok(storage.has(`lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`));
 });
 
+void test("read-only preview requests can read but never persist a mutation", async () => {
+	const storage = new FakeR2Bucket();
+	const service = runtime(snapshotBindingFactory());
+	await setValue(service, storage, HOST_A, WORKSPACE_A, "shared", "before");
+	storage.resetMetrics();
+
+	const select = await service.fetch(
+		storage.bucket,
+		HOST_A,
+		WORKSPACE_A,
+		request(
+			HOST_A,
+			"/execute",
+			{ branchId: MAIN_BRANCH, sql: "SELECT 1" },
+			true,
+		),
+	);
+	assert.equal(select.status, 200);
+
+	const mutation = await service.fetch(
+		storage.bucket,
+		HOST_A,
+		WORKSPACE_A,
+		request(
+			HOST_A,
+			"/execute",
+			{
+				branchId: MAIN_BRANCH,
+				sql: "SET",
+				params: [nativeToWire(text("shared")), nativeToWire(text("after"))],
+			},
+			true,
+		),
+	);
+	assert.equal(mutation.status, 400);
+	assert.equal(await errorCode(mutation), "LIX_ERROR_READ_ONLY");
+	assert.equal(storage.putCalls.length, 0);
+	assert.deepEqual(
+		await getValue(service, storage, HOST_A, WORKSPACE_A, "shared"),
+		{ key: "shared", value: "before", revision: 1 },
+	);
+});
+
 void test("explicit preview hostname keeps synthetic MCP requests coherent and isolated", async () => {
 	const storage = new FakeR2Bucket();
 	const service = runtime(snapshotBindingFactory());
@@ -851,11 +894,19 @@ function execute(
 	);
 }
 
-function request(hostname: string, path: string, body?: unknown) {
+function request(
+	hostname: string,
+	path: string,
+	body?: unknown,
+	readOnly = false,
+) {
+	const headers = new Headers(
+		body === undefined ? undefined : { "content-type": "application/json" },
+	);
+	if (readOnly) headers.set("X-Lixray-Read-Only", "1");
 	return new Request(`https://${hostname}/v1${path}`, {
 		method: body === undefined ? "GET" : "POST",
-		headers:
-			body === undefined ? undefined : { "content-type": "application/json" },
+		headers,
 		body: body === undefined ? undefined : JSON.stringify(body),
 	});
 }

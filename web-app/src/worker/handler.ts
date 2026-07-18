@@ -72,6 +72,7 @@ export interface HandleRequestOptions {
 	authenticate?: AuthenticateRequest;
 	authenticateMcp?: AuthenticateMcpRequest;
 	authorizeWorkspace?: AuthorizeWorkspace;
+	authorizePublicWorkspace?: AuthorizePublicWorkspace;
 	mcpTransport?: typeof handleMcpTransport;
 	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
@@ -104,6 +105,16 @@ export type AuthenticateMcpRequest = (
 export type AuthorizeWorkspace = (
 	workspaceId: string,
 	auth: AuthenticatedUser,
+	env: WorkerEnv,
+) => Promise<Response | null>;
+
+/**
+ * Confirms that a live workspace may be opened through the public read
+ * transport. This deliberately does not use the member-scoped workspace RLS
+ * lookup: an authenticated non-member must remain read-only.
+ */
+export type AuthorizePublicWorkspace = (
+	workspaceId: string,
 	env: WorkerEnv,
 ) => Promise<Response | null>;
 
@@ -229,20 +240,69 @@ export async function handleRequest(
 		return new Response("Invalid workspace id\n", { status: 400 });
 	}
 
+	const publicReadRequest = isPublicReadWorkspaceRequest(request, match[2]);
 	const authenticate = options.authenticate ?? authenticateWithSupabase;
-	const authResult = await authenticate(request, env);
-	if (!authResult.ok) return authResult.response;
-
 	const authorizeWorkspace =
 		options.authorizeWorkspace ?? authorizeWorkspaceWithSupabase;
-	const authorizationFailure = await authorizeWorkspace(
+	const authorizePublicWorkspace =
+		options.authorizePublicWorkspace ?? authorizePublicWorkspaceWithSupabase;
+	const token = bearerToken(request);
+
+	if (token) {
+		const authResult = await authenticate(request, env);
+		if (authResult.ok) {
+			const authorizationFailure = await authorizeWorkspace(
+				workspaceId,
+				authResult.auth,
+				env,
+			);
+			if (!authorizationFailure) {
+				return forwardWorkspaceRequest(
+					request,
+					env,
+					options,
+					workspaceId,
+					match[2],
+					false,
+				);
+			}
+			if (!publicReadRequest) return authorizationFailure;
+		} else if (!publicReadRequest) {
+			return authResult.response;
+		}
+	} else if (!publicReadRequest) {
+		return unauthorized().response;
+	}
+
+	const publicAuthorizationFailure = await authorizePublicWorkspace(
 		workspaceId,
-		authResult.auth,
 		env,
 	);
-	if (authorizationFailure) return authorizationFailure;
+	if (publicAuthorizationFailure) return publicAuthorizationFailure;
 
-	const rewrittenRequest = rewriteWorkspaceRequest(request, match[2]);
+	return forwardWorkspaceRequest(
+		request,
+		env,
+		options,
+		workspaceId,
+		match[2],
+		true,
+	);
+}
+
+async function forwardWorkspaceRequest(
+	request: Request,
+	env: WorkerEnv,
+	options: HandleRequestOptions,
+	workspaceId: string,
+	containerPath: string,
+	readOnly: boolean,
+): Promise<Response> {
+	const rewrittenRequest = rewriteWorkspaceRequest(
+		request,
+		containerPath,
+		readOnly,
+	);
 	if (options.workspaceFetch) {
 		return options.workspaceFetch(workspaceId, rewrittenRequest);
 	}
@@ -255,10 +315,10 @@ export async function handleRequest(
 		return await fetchContainerWithRetry({
 			namespace: env.SLATEDB_CONTAINER,
 			workspaceId,
-			operation: `${request.method} /v1${match[2]}`,
+			operation: `${request.method} /v1${containerPath}`,
 			envVars: containerEnv(env, workspaceId),
 			createRequest: () => rewrittenRequest.clone() as unknown as Request,
-			requestReplay: containerRequestReplay(request.method, match[2]),
+			requestReplay: containerRequestReplay(request.method, containerPath),
 			signal: request.signal,
 			retryDelay: options.containerRetryDelay,
 			retryRandom: options.containerRetryRandom,
@@ -268,7 +328,7 @@ export async function handleRequest(
 		if (request.signal.aborted) throw caught;
 		console.error("LixRay container request failed", {
 			workspaceId,
-			operation: `${request.method} /v1${match[2]}`,
+			operation: `${request.method} /v1${containerPath}`,
 			error: containerErrorDetails(caught),
 		});
 		return Response.json(
@@ -552,8 +612,85 @@ export async function authorizeWorkspaceWithSupabase(
 	}
 }
 
+/**
+ * The public route resolver is deliberately separate from member
+ * authorization. A valid browser JWT alone must never turn a public reader
+ * into an editor.
+ */
+export async function authorizePublicWorkspaceWithSupabase(
+	workspaceId: string,
+	env: WorkerEnv,
+): Promise<Response | null> {
+	if (isDemoMode(env)) {
+		return demoWorkspaceIds(env).has(workspaceId)
+			? null
+			: new Response("Workspace not found\n", { status: 404 });
+	}
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return new Response("Supabase Data API is not configured\n", {
+			status: 500,
+		});
+	}
+
+	const lookupUrl = new URL(
+		"/rest/v1/rpc/resolve_public_workspace",
+		env.SUPABASE_URL,
+	);
+	let response: Response;
+	try {
+		response = await fetch(lookupUrl, {
+			method: "POST",
+			headers: {
+				apikey: env.SUPABASE_PUBLISHABLE_KEY,
+				Accept: "application/json",
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ p_workspace_id: workspaceId }),
+		});
+	} catch {
+		return new Response("Public workspace lookup is unavailable\n", {
+			status: 502,
+		});
+	}
+	if (!response.ok) {
+		return new Response("Public workspace lookup is unavailable\n", {
+			status: 502,
+		});
+	}
+	try {
+		const rows: unknown = await response.json();
+		return Array.isArray(rows) &&
+			rows.length === 1 &&
+			workspaceRowId(rows[0]) === workspaceId
+			? null
+			: new Response("Workspace not found\n", { status: 404 });
+	} catch {
+		return new Response("Public workspace lookup is unavailable\n", {
+			status: 502,
+		});
+	}
+}
+
 function workspaceRowId(value: unknown): unknown {
-	return value && typeof value === "object" && "id" in value ? value.id : null;
+	if (!value || typeof value !== "object") return null;
+	if ("id" in value) return value.id;
+	return "workspace_id" in value ? value.workspace_id : null;
+}
+
+/**
+ * The browser's public transport only receives declarative Lix reads. This
+ * gate is defense in depth for the anonymous shell: UI read-only state is not
+ * an authorization boundary, and `/execute` also accepts mutations.
+ */
+function isPublicReadWorkspaceRequest(
+	request: Request,
+	containerPath: string,
+): boolean {
+	if (request.method === "GET" && containerPath === "/branches") return true;
+	return (
+		request.method === "POST" &&
+		["/execute", "/observe", "/observe/multiplex"].includes(containerPath)
+	);
 }
 
 function authenticateDemo(request: Request, env: WorkerEnv): AuthResult | null {
@@ -615,7 +752,7 @@ function bearerToken(request: Request): string | null {
 	return token || null;
 }
 
-function unauthorized(): AuthResult {
+function unauthorized(): Extract<AuthResult, { ok: false }> {
 	return {
 		ok: false,
 		response: new Response("Unauthorized\n", {
@@ -634,12 +771,21 @@ function remoteJwks(url: string): JWTVerifyGetKey {
 	return jwks;
 }
 
-function rewriteWorkspaceRequest(request: Request, containerPath: string) {
+function rewriteWorkspaceRequest(
+	request: Request,
+	containerPath: string,
+	readOnly = false,
+) {
 	const url = new URL(request.url);
 	url.pathname = `/v1${containerPath}`;
 	const rewritten = new Request(url, request);
 	const headers = new Headers(rewritten.headers);
 	headers.delete("Authorization");
+	// This header is only meaningful within the Worker-to-runtime hop. Always
+	// overwrite a browser-supplied value so a member request cannot be
+	// accidentally downgraded and a public request cannot be upgraded.
+	headers.delete("X-Lixray-Read-Only");
+	if (readOnly) headers.set("X-Lixray-Read-Only", "1");
 	return new Request(rewritten, { headers });
 }
 

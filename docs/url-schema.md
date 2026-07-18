@@ -14,7 +14,7 @@ Figma-class ecosystem migration.
 ## 1. Grammar
 
 ```
-url          = "https://lixray.com" path
+url          = "https://lixray.com" path [ query ] [ fragment ]
 path         = "/@" handle                          ; namespace profile
              | "/@" handle "/" slug [pin] sub       ; workspace + sub-resources
              | "/" product-route                    ; app-owned, unlimited, forever
@@ -27,6 +27,10 @@ sub          = ""                                   ; workspace overview
              | "/" verb …                           ; future closed-set verbs (RESERVED)
 
 pin          = "@" changeset-id                     ; immutable permalink (RESERVED)
+query        = "?" query-param *( "&" query-param )
+query-param  = invite-param | future-query-param
+invite-param = "invite=" opaque-token               ; edit capability (RESERVED)
+opaque-token = 32*256( ALPHA / DIGIT / "_" / "-" )  ; implementation currently emits 64 hex chars
 
 handle       = lowercase [a-z0-9], internal hyphens (never consecutive, never at edges),
                max 39 chars: ^[a-z0-9](?:-?[a-z0-9]){0,38}$ AND char_length ≤ 39
@@ -155,6 +159,32 @@ Rails/Reddit ban dots in slugs. `?raw=true` — citation-fragile; GitHub itself 
 GitHub OG output is byte-identical for any `#L` anchor), so if a selection must change the Slack
 card, use `?line=10-20` — Slack caches per exact URL, so variants get distinct unfurls. Additive;
 nothing to reserve beyond convention.
+
+### D6a — `?invite=` is the reserved workspace edit-capability parameter
+
+**Decision.** `invite` is reserved in the published query grammar. A Share action mints one
+opaque, reusable token and appends it to the otherwise byte-identical canonical URL:
+`/@{ns}/{ws}/file/{path}?invite={token}`. The token maps only to its sharer, this workspace, and
+an edit grant. It never identifies a person, grants organization membership, or changes the
+resource identity in the path.
+
+The plain canonical URL is public read-only. Therefore the Share toggle is not a second
+permission model: **Can edit** copies the capability URL; **Read only** copies the canonical URL.
+No recipient email, ACL, or invitation-acceptance resource is modeled in v1.
+Joining creates a personal namespace if needed, but MUST NOT infer or add organization membership
+from the recipient's email domain.
+
+**Canonicalization.** A browser that opens a valid capability MUST resolve it, retain it only in
+browser session state, and replace the address-bar URL with the canonical URL before normal
+in-app navigation continues. Re-sharing from the bar therefore shares public read access, not an
+edit grant. A malformed, revoked, or expired token MUST likewise clean to the canonical public
+read view without a dead end. Implementations MUST send `Referrer-Policy: no-referrer` while this
+flow exists.
+
+**Why query, not path.** An edit grant is state rather than resource identity. The query slot keeps
+the D3 verb set closed and composes mechanically with every existing and future resource URL,
+including pins. Query stripping by shorteners degrades safely to the already-public read page;
+it does not make the URL unresolvable.
 
 ### D7 — Canonicalization and path hygiene
 
@@ -424,11 +454,14 @@ alone.
    handles; agent handles come from reserved space only.
 8. User bytes are never echoed verbatim from lixray.com; raw serving (when it ships) 302s to a
    separate registrable, PSL-listed domain.
-9. Private resources are indistinguishable from nonexistent to anonymous requests — including
-   through redirects and tombstones (resolve → visibility check → only then 301/410; else
-   uniform 404) and through the Data API (RLS on every table).
+9. v1 workspace URLs resolve globally for public read. If private resources are introduced later,
+   they MUST be indistinguishable from nonexistent to anonymous requests — including through
+   redirects and tombstones (resolve → visibility check → only then 301/410; else uniform 404)
+   and through the Data API (RLS on every table).
 10. Public pages are server-rendered; the URL grammar is published as a parsing contract and
-    treated as a breaking-change surface (like an API signature).
+   treated as a breaking-change surface (like an API signature).
+11. `invite` is a reserved query parameter for a workspace-scoped edit capability; the canonical
+    URL never includes it and public read never requires it.
 
 ## 6. Open questions
 

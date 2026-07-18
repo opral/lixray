@@ -34,7 +34,8 @@ export interface Organization {
 	id: string;
 	name: string;
 	handle: string;
-	role: OrganizationRole;
+	/** Null means direct workspace membership, not organization membership. */
+	role: OrganizationRole | null;
 	createdAt: string;
 	updatedAt: string;
 	workspaces: Array<Workspace>;
@@ -101,14 +102,25 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			setError(null);
 			try {
 				const { error: provisioningError } = await client.rpc(
-					"ensure_personal_workspace",
+					"ensure_personal_workspace_only",
 				);
 				if (provisioningError) throw provisioningError;
-				const nextOrganizations = await loadOrganizations(client, userId);
+				const nextOrganizations = await loadOrganizations(client);
 				const storedOrganizationId = window.localStorage.getItem(
 					organizationStorageKey(userId),
 				);
+				const requestedWorkspace = options.workspaceId
+					? nextOrganizations
+							.flatMap((organization) =>
+								organization.workspaces.map((workspace) => ({
+									organization,
+									workspace,
+								})),
+							)
+							.find(({ workspace }) => workspace.id === options.workspaceId)
+					: null;
 				const nextOrganization =
+					requestedWorkspace?.organization ??
 					nextOrganizations.find(
 						(organization) =>
 							organization.id ===
@@ -121,6 +133,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 					workspaceStorageKey(userId),
 				);
 				const nextWorkspace =
+					requestedWorkspace?.workspace ??
 					nextOrganization?.workspaces.find(
 						(workspace) =>
 							workspace.id === (options.workspaceId ?? storedWorkspaceId),
@@ -218,6 +231,9 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			if (!client || !selectedOrganization) {
 				throw new Error("No organization is selected");
 			}
+			if (selectedOrganization.role !== "owner") {
+				throw new Error("Only organization owners can rename an organization");
+			}
 			const { error: renameError } = await client.rpc("rename_organization", {
 				p_organization_id: selectedOrganization.id,
 				p_name: normalizeName(name, "Organization"),
@@ -239,6 +255,9 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			);
 			if (!client || !targetOrganization) {
 				throw new Error("Create or select an organization first");
+			}
+			if (targetOrganization.role === null) {
+				throw new Error("Workspace membership does not grant organization access");
 			}
 			const { data, error: createError } = await client
 				.from("workspaces")
@@ -265,6 +284,9 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				candidate.workspaces.some((workspace) => workspace.id === workspaceId),
 			);
 			if (!organization) throw new Error("Workspace not found");
+			if (organization.role === null) {
+				throw new Error("Workspace membership does not grant organization access");
+			}
 			const { error: renameError } = await client
 				.from("workspaces")
 				.update({ name: normalizeName(name, "Workspace") })
@@ -281,13 +303,20 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 	const deleteWorkspace = useCallback(
 		async (workspaceId: string) => {
 			if (!client) throw new Error("Authentication is still loading");
+			const organization = organizations.find((candidate) =>
+				candidate.workspaces.some((workspace) => workspace.id === workspaceId),
+			);
+			if (!organization) throw new Error("Workspace not found");
+			if (organization.role === null) {
+				throw new Error("Workspace membership does not grant organization access");
+			}
 			const { error: deleteError } = await client.rpc("delete_workspace", {
 				p_workspace_id: workspaceId,
 			});
 			if (deleteError) throw deleteError;
 			await refresh();
 		},
-		[client, refresh],
+		[client, organizations, refresh],
 	);
 
 	const value = useMemo<WorkspaceContextValue>(
@@ -332,62 +361,42 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 
 async function loadOrganizations(
 	client: LixraySupabaseClient,
-	userId: string,
 ): Promise<Array<Organization>> {
-	const { data: membershipRows, error: membershipError } = await client
-		.from("organization_members")
-		.select("organization_id, role")
-		.eq("user_id", userId);
-	if (membershipError) throw membershipError;
-	if (!membershipRows || membershipRows.length === 0) return [];
+	const { data, error } = await client.rpc("list_accessible_workspaces");
+	if (error) throw error;
 
-	const membershipByOrganization = new Map(
-		membershipRows.map((row) => [row.organization_id, row.role]),
-	);
-	const organizationIds = membershipRows.map((row) => row.organization_id);
-	const { data: organizationRows, error: organizationError } = await client
-		.from("organizations")
-		.select("id, name, handle, created_at, updated_at")
-		.in("id", organizationIds);
-	if (organizationError) throw organizationError;
-
-	const baseOrganizations = (organizationRows ?? []).map((row) => ({
-		id: row.id,
-		name: row.name,
-		handle: row.handle,
-		role: membershipByOrganization.get(row.id) ?? "member",
-		createdAt: row.created_at,
-		updatedAt: row.updated_at,
-		workspaces: [] as Array<Workspace>,
-	}));
-
-	const { data: workspaceRows, error: workspaceError } = await client
-		.from("workspaces")
-		.select("id, organization_id, name, slug, created_at, updated_at")
-		.in("organization_id", organizationIds)
-		.is("deleted_at", null)
-		.order("created_at", { ascending: true });
-	if (workspaceError) throw workspaceError;
-
-	const workspaceByOrganization = new Map<string, Array<Workspace>>();
-	for (const row of workspaceRows ?? []) {
+	const organizations = new Map<string, Organization>();
+	for (const row of data ?? []) {
 		const organizationId = String(row.organization_id);
-		const list = workspaceByOrganization.get(organizationId) ?? [];
-		list.push({
-			id: String(row.id),
+		let organization = organizations.get(organizationId);
+		if (!organization) {
+			organization = {
+				id: organizationId,
+				name: String(row.organization_name),
+				handle: String(row.organization_handle),
+				role: row.organization_role,
+				createdAt: String(row.organization_created_at),
+				updatedAt: String(row.organization_updated_at),
+				workspaces: [],
+			};
+			organizations.set(organizationId, organization);
+		}
+		organization.workspaces.push({
+			id: String(row.workspace_id),
 			organizationId,
-			name: String(row.name),
-			slug: String(row.slug),
-			createdAt: String(row.created_at),
-			updatedAt: String(row.updated_at),
+			name: String(row.workspace_name),
+			slug: String(row.workspace_slug),
+			createdAt: String(row.workspace_created_at),
+			updatedAt: String(row.workspace_updated_at),
 		});
-		workspaceByOrganization.set(organizationId, list);
 	}
 
-	return baseOrganizations
+	return [...organizations.values()]
 		.map((organization) => ({
 			...organization,
-			workspaces: workspaceByOrganization.get(organization.id) ?? [],
+			workspaces: [...organization.workspaces].sort((left, right) =>
+				left.createdAt.localeCompare(right.createdAt),
+			),
 		}))
 		.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }

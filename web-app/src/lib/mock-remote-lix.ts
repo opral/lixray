@@ -280,14 +280,10 @@ class MockRemoteLix {
 		signal?: AbortSignal,
 	): Promise<Response> {
 		const token = await this.#getAccessToken();
-		if (!token) {
-			throw new MockRemoteLixError(
-				"LIX_UNAUTHORIZED",
-				"No access token is available for this workspace.",
-			);
-		}
 		const headers = new Headers(init.headers);
-		headers.set("Authorization", `Bearer ${token}`);
+		// No token intentionally selects the server's public, read-only
+		// workspace transport. Mutations remain rejected at that boundary.
+		if (token) headers.set("Authorization", `Bearer ${token}`);
 		if (init.body) headers.set("content-type", "application/json");
 
 		const response = await this.#fetch(
