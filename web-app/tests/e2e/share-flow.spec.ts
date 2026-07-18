@@ -50,16 +50,12 @@ test("a preview test account can share an edit link and a fresh recipient can jo
 				),
 			)
 			.not.toBeNull();
+		// Atelier renders its own read-only chip in the top bar.
 		await expect(recipient.getByText("Read-only", { exact: true })).toBeVisible(
 			{
 				timeout: 55_000,
 			},
 		);
-		const readOnlyStrip = recipient.getByRole("status").filter({
-			hasText: "shared by",
-		});
-		await expect(readOnlyStrip).toBeVisible();
-		await expect(readOnlyStrip).toContainText("Preview test account");
 		await expect(recipient.getByRole("button", { name: "Share" })).toHaveCount(
 			0,
 		);

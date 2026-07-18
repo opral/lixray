@@ -490,11 +490,7 @@ function WorkspaceRoutePage() {
 			canEdit={resolved.canEdit}
 			shareAccess={
 				shareCapability && !resolved.canEdit
-					? {
-							sharedByName: shareCapability.sharerName,
-							onJoinToEdit: joinToEdit,
-							joining,
-						}
+					? { onJoinToEdit: joinToEdit, joining }
 					: undefined
 			}
 		/>

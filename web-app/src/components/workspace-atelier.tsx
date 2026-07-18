@@ -21,7 +21,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { Eye, PencilLine } from "lucide-react";
+import { PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
 import { WorkspaceShareDialog } from "~/components/workspace-share-dialog";
@@ -64,7 +64,6 @@ interface WorkspaceAtelierProps {
 	canEdit: boolean;
 	/** Present only for a valid, session-held share capability. */
 	shareAccess?: {
-		sharedByName: string | null;
 		onJoinToEdit: () => Promise<void>;
 		joining: boolean;
 	};
@@ -107,7 +106,6 @@ export function WorkspaceAtelier({
 		string | null
 	>(null);
 	const [error, setError] = useState<string | null>(null);
-	const workspaceRootRef = useRef<HTMLDivElement | null>(null);
 	const activeLixRef = useRef<WorkspaceLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeFilePathRef = useRef(routeFilePath);
@@ -300,7 +298,7 @@ export function WorkspaceAtelier({
 			namespace,
 			workspaceSlug,
 			getAccessToken,
-			allowAnonymous: !canEdit,
+			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
 		})
 			.then(async (session) => {
@@ -332,7 +330,7 @@ export function WorkspaceAtelier({
 				setInstance(
 					createAtelier({
 						lix: session.lix,
-						readOnly: !canEdit,
+						readOnly: isReadOnly,
 						branchSession,
 						reviewRangeSessionId: userId,
 						sessionStateStore: createWorkspaceSessionStateStore({
@@ -381,6 +379,7 @@ export function WorkspaceAtelier({
 	}, [
 		client,
 		canEdit,
+		isReadOnly,
 		getAccessToken,
 		navigateToCurrentPathBranch,
 		namespace,
@@ -445,46 +444,10 @@ export function WorkspaceAtelier({
 		void instance.documents.closeAll();
 	}, [instance, namespace, pathname, workspaceSlug]);
 
-	useEffect(() => {
-		const root = workspaceRootRef.current;
-		if (!isReadOnly || !root) return;
-		const lockEditorSurfaces = () => {
-			for (const surface of root.querySelectorAll<HTMLElement>(
-				'[contenteditable="true"]',
-			)) {
-				surface.setAttribute("contenteditable", "false");
-				surface.setAttribute("aria-readonly", "true");
-			}
-			for (const input of root.querySelectorAll<HTMLTextAreaElement>(
-				'[data-attr="markdown-editor"] textarea, .atelier-text-editor-host textarea',
-			)) {
-				input.readOnly = true;
-			}
-		};
-		lockEditorSurfaces();
-		const observer = new MutationObserver(lockEditorSurfaces);
-		observer.observe(root, {
-			attributes: true,
-			attributeFilter: ["contenteditable"],
-			childList: true,
-			subtree: true,
-		});
-		return () => observer.disconnect();
-	}, [instance, isReadOnly]);
-
 	return (
 		<div
-			ref={workspaceRootRef}
 			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
-			data-workspace-read-only={isReadOnly || undefined}
 			aria-busy={!instance && !error}
-			onBeforeInputCapture={
-				isReadOnly ? preventReadOnlyEditorMutation : undefined
-			}
-			onDropCapture={isReadOnly ? preventReadOnlyEditorMutation : undefined}
-			onCutCapture={isReadOnly ? preventReadOnlyEditorMutation : undefined}
-			onPasteCapture={isReadOnly ? preventReadOnlyEditorMutation : undefined}
-			onKeyDownCapture={isReadOnly ? preventReadOnlyEditorKeys : undefined}
 		>
 			{instance ? (
 				<WorkspaceDefaultBranchContext.Provider
@@ -512,12 +475,6 @@ export function WorkspaceAtelier({
 									</Link>
 								),
 								navbarEnd: headerActions,
-								belowTopBar:
-									isReadOnly && shareAccess ? (
-										<ReadOnlyShareStrip
-											sharedByName={shareAccess.sharedByName}
-										/>
-									) : undefined,
 							}}
 						/>
 						<Outlet />
@@ -633,74 +590,4 @@ function activeDocumentName({
 	} catch {
 		return encodedName;
 	}
-}
-
-function ReadOnlyShareStrip({ sharedByName }: { sharedByName: string | null }) {
-	const displayName = sharedByName ?? "a workspace member";
-	const initial = sharedByName?.trim().charAt(0).toUpperCase();
-	return (
-		<div
-			className="flex h-9 shrink-0 items-center gap-2 border-b border-border-panel bg-bg-app px-4 text-xs text-neutral-400"
-			role="status"
-		>
-			<Eye aria-hidden="true" className="size-[13px]" strokeWidth={2} />
-			<span className="font-semibold text-neutral-500">Read-only</span>
-			<span aria-hidden="true">·</span>
-			<span className="inline-flex min-w-0 items-center gap-1.5 truncate">
-				shared by{" "}
-				{initial ? (
-					<span
-						aria-hidden="true"
-						className="grid size-4 shrink-0 place-items-center rounded-full bg-neutral-200 text-[9px] font-semibold leading-none text-neutral-600"
-					>
-						{initial}
-					</span>
-				) : null}
-				<strong className="truncate font-semibold text-neutral-500">
-					{displayName}
-				</strong>
-			</span>
-		</div>
-	);
-}
-
-type ReadOnlyMutationEvent = {
-	target: EventTarget | null;
-	preventDefault: () => void;
-};
-
-function preventReadOnlyEditorMutation(event: ReadOnlyMutationEvent) {
-	if (isWorkspaceEditorTarget(event.target)) event.preventDefault();
-}
-
-function preventReadOnlyEditorKeys(
-	event: ReadOnlyMutationEvent & {
-		key: string;
-		altKey: boolean;
-		ctrlKey: boolean;
-		metaKey: boolean;
-	},
-) {
-	if (!isWorkspaceEditorTarget(event.target)) return;
-	if (event.altKey) return;
-	if (event.ctrlKey || event.metaKey) {
-		if (["a", "c", "f"].includes(event.key.toLowerCase())) return;
-		event.preventDefault();
-		return;
-	}
-	if (
-		event.key.length === 1 ||
-		["Backspace", "Delete", "Enter", "Tab"].includes(event.key)
-	) {
-		event.preventDefault();
-	}
-}
-
-function isWorkspaceEditorTarget(target: EventTarget | null): boolean {
-	return (
-		target instanceof Element &&
-		target.closest(
-			'[data-attr="markdown-editor"], .atelier-text-editor-host, .ProseMirror, .cm-editor',
-		) !== null
-	);
 }
