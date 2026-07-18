@@ -72,6 +72,7 @@ export interface HandleRequestOptions {
 	authenticate?: AuthenticateRequest;
 	authenticateMcp?: AuthenticateMcpRequest;
 	authorizeWorkspace?: AuthorizeWorkspace;
+	resolveWorkspace?: ResolveWorkspace;
 	mcpTransport?: typeof handleMcpTransport;
 	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
@@ -107,6 +108,17 @@ export type AuthorizeWorkspace = (
 	env: WorkerEnv,
 ) => Promise<Response | null>;
 
+export type ResolveWorkspace = (
+	namespace: string,
+	workspaceSlug: string,
+	auth: AuthenticatedUser,
+	env: WorkerEnv,
+) => Promise<WorkspaceResolution>;
+
+export type WorkspaceResolution =
+	| { ok: true; workspaceId: string }
+	| { ok: false; response: Response };
+
 export type AuthResult =
 	| { ok: true; auth: AuthenticatedUser }
 	| { ok: false; response: Response };
@@ -124,6 +136,9 @@ export type McpClaimsValidation =
 	  };
 
 const WORKSPACE_API_PATH = /^\/v1\/workspaces\/([^/]+)(\/.*)$/;
+const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
+const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
+const WORKSPACE_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const jwksByUrl = new Map<string, JWTVerifyGetKey>();
@@ -212,6 +227,38 @@ export async function handleRequest(
 		}
 	}
 
+	const remoteLixMatch = REMOTE_LIX_API_PATH.exec(url.pathname);
+	if (remoteLixMatch) {
+		const namespace = normalizedRouteSegment(remoteLixMatch[1]);
+		const workspaceSlug = normalizedRouteSegment(remoteLixMatch[2]);
+		if (
+			!namespace ||
+			!workspaceSlug ||
+			!ORGANIZATION_HANDLE_PATTERN.test(namespace) ||
+			!WORKSPACE_SLUG_PATTERN.test(workspaceSlug)
+		) {
+			return new Response("Invalid workspace path\n", { status: 400 });
+		}
+
+		const authenticate = options.authenticate ?? authenticateWithSupabase;
+		const authResult = await authenticate(request, env);
+		if (!authResult.ok) return authResult.response;
+		const resolution = await (
+			options.resolveWorkspace ?? resolveWorkspaceWithSupabase
+		)(namespace, workspaceSlug, authResult.auth, env);
+		if (!resolution.ok) return resolution.response;
+
+		const endpoint = remoteLixMatch[3];
+		const containerPath = `/lix/v1${endpoint ? `/${endpoint}` : "/"}`;
+		return fetchWorkspaceRequest(
+			resolution.workspaceId,
+			request,
+			containerPath,
+			env,
+			options,
+		);
+	}
+
 	if (!url.pathname.startsWith("/v1/")) {
 		return (
 			options.fallback?.(request, env) ??
@@ -242,7 +289,23 @@ export async function handleRequest(
 	);
 	if (authorizationFailure) return authorizationFailure;
 
-	const rewrittenRequest = rewriteWorkspaceRequest(request, match[2]);
+	return fetchWorkspaceRequest(
+		workspaceId,
+		request,
+		`/v1${match[2]}`,
+		env,
+		options,
+	);
+}
+
+async function fetchWorkspaceRequest(
+	workspaceId: string,
+	request: Request,
+	containerPath: string,
+	env: WorkerEnv,
+	options: HandleRequestOptions,
+): Promise<Response> {
+	const rewrittenRequest = rewriteWorkspaceRequest(request, containerPath);
 	if (options.workspaceFetch) {
 		return options.workspaceFetch(workspaceId, rewrittenRequest);
 	}
@@ -255,10 +318,10 @@ export async function handleRequest(
 		return await fetchContainerWithRetry({
 			namespace: env.SLATEDB_CONTAINER,
 			workspaceId,
-			operation: `${request.method} /v1${match[2]}`,
+			operation: `${request.method} ${containerPath}`,
 			envVars: containerEnv(env, workspaceId),
 			createRequest: () => rewrittenRequest.clone() as unknown as Request,
-			requestReplay: containerRequestReplay(request.method, match[2]),
+			requestReplay: containerRequestReplay(request.method, containerPath),
 			signal: request.signal,
 			retryDelay: options.containerRetryDelay,
 			retryRandom: options.containerRetryRandom,
@@ -268,7 +331,7 @@ export async function handleRequest(
 		if (request.signal.aborted) throw caught;
 		console.error("LixRay container request failed", {
 			workspaceId,
-			operation: `${request.method} /v1${match[2]}`,
+			operation: `${request.method} ${containerPath}`,
 			error: containerErrorDetails(caught),
 		});
 		return Response.json(
@@ -288,7 +351,7 @@ function containerRequestReplay(
 	path: string,
 ): "safe" | "unsafe" {
 	if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return "safe";
-	return path === "/observe" || path === "/observe/multiplex"
+	return path.endsWith("/observe") || path.endsWith("/observe/multiplex")
 		? "safe"
 		: "unsafe";
 }
@@ -552,6 +615,111 @@ export async function authorizeWorkspaceWithSupabase(
 	}
 }
 
+export async function resolveWorkspaceWithSupabase(
+	namespace: string,
+	workspaceSlug: string,
+	auth: AuthenticatedUser,
+	env: WorkerEnv,
+): Promise<WorkspaceResolution> {
+	if (auth.isDemo) {
+		const workspace = demoWorkspaceSummaries(env).find(
+			(candidate) =>
+				candidate.organization.handle === namespace &&
+				candidate.slug === workspaceSlug,
+		);
+		return workspace
+			? { ok: true, workspaceId: workspace.id }
+			: workspaceNotFound();
+	}
+
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return {
+			ok: false,
+			response: new Response("Supabase Data API is not configured\n", {
+				status: 500,
+			}),
+		};
+	}
+
+	const headers = {
+		apikey: env.SUPABASE_PUBLISHABLE_KEY,
+		Authorization: `Bearer ${auth.token}`,
+		Accept: "application/json",
+	};
+	const organizationsUrl = new URL("/rest/v1/organizations", env.SUPABASE_URL);
+	organizationsUrl.searchParams.set("select", "id");
+	organizationsUrl.searchParams.set("handle", `eq.${namespace}`);
+	organizationsUrl.searchParams.set("limit", "1");
+	const organizations = await visibleRows(organizationsUrl, headers);
+	if (!organizations.ok) return organizations;
+	const organizationId = singleUuid(organizations.rows);
+	if (!organizationId) return workspaceNotFound();
+
+	const workspacesUrl = new URL("/rest/v1/workspaces", env.SUPABASE_URL);
+	workspacesUrl.searchParams.set("select", "id");
+	workspacesUrl.searchParams.set("organization_id", `eq.${organizationId}`);
+	workspacesUrl.searchParams.set("slug", `eq.${workspaceSlug}`);
+	workspacesUrl.searchParams.set("deleted_at", "is.null");
+	workspacesUrl.searchParams.set("limit", "1");
+	const workspaces = await visibleRows(workspacesUrl, headers);
+	if (!workspaces.ok) return workspaces;
+	const workspaceId = singleUuid(workspaces.rows);
+	return workspaceId ? { ok: true, workspaceId } : workspaceNotFound();
+}
+
+async function visibleRows(
+	url: URL,
+	headers: Record<string, string>,
+): Promise<
+	| { ok: true; rows: Array<Record<string, unknown>> }
+	| { ok: false; response: Response }
+> {
+	let response: Response;
+	try {
+		response = await fetch(url, { headers });
+	} catch {
+		return workspaceResolutionUnavailable();
+	}
+	if (!response.ok) return workspaceResolutionUnavailable();
+	try {
+		const body: unknown = await response.json();
+		if (!Array.isArray(body)) return workspaceResolutionUnavailable();
+		return {
+			ok: true,
+			rows: body.filter(
+				(row): row is Record<string, unknown> =>
+					Boolean(row) && typeof row === "object" && !Array.isArray(row),
+			),
+		};
+	} catch {
+		return workspaceResolutionUnavailable();
+	}
+}
+
+function singleUuid(rows: Array<Record<string, unknown>>): string | null {
+	const id = rows.length === 1 ? rows[0]?.id : null;
+	return typeof id === "string" && UUID_PATTERN.test(id) ? id : null;
+}
+
+function workspaceNotFound(): WorkspaceResolution {
+	return {
+		ok: false,
+		response: new Response("Workspace not found\n", { status: 404 }),
+	};
+}
+
+function workspaceResolutionUnavailable(): {
+	ok: false;
+	response: Response;
+} {
+	return {
+		ok: false,
+		response: new Response("Workspace resolution is unavailable\n", {
+			status: 502,
+		}),
+	};
+}
+
 function workspaceRowId(value: unknown): unknown {
 	return value && typeof value === "object" && "id" in value ? value.id : null;
 }
@@ -636,11 +804,16 @@ function remoteJwks(url: string): JWTVerifyGetKey {
 
 function rewriteWorkspaceRequest(request: Request, containerPath: string) {
 	const url = new URL(request.url);
-	url.pathname = `/v1${containerPath}`;
+	url.pathname = containerPath;
 	const rewritten = new Request(url, request);
 	const headers = new Headers(rewritten.headers);
 	headers.delete("Authorization");
 	return new Request(rewritten, { headers });
+}
+
+function normalizedRouteSegment(value: string | undefined): string | null {
+	if (value === undefined) return null;
+	return safeDecodeURIComponent(value)?.toLowerCase() ?? null;
 }
 
 function safeDecodeURIComponent(value: string): string | null {

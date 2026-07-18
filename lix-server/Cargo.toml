@@ -9,8 +9,10 @@ async-stream = "0.3.6"
 axum = "0.8.9"
 futures-core = "0.3.32"
 http = "1.4.0"
-lix_engine = { git = "https://github.com/opral/lix.git", branch = "main", package = "lix_engine" }
-lix_slatedb_storage = { git = "https://github.com/opral/lix.git", branch = "main", package = "lix_slatedb_storage" }
+lix_engine = { git = "https://github.com/opral/lix.git", rev = "d6667988d", package = "lix_engine" }
+lix_sdk = { git = "https://github.com/opral/lix.git", rev = "d6667988d", package = "lix_sdk", default-features = false }
+lix_server_protocol = { git = "https://github.com/opral/lix.git", rev = "d6667988d", package = "lix_server_protocol" }
+lix_slatedb_storage = { git = "https://github.com/opral/lix.git", rev = "d6667988d", package = "lix_slatedb_storage" }
 object_store = { version = "0.14.0", default-features = false, features = ["aws"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"

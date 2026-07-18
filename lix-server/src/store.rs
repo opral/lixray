@@ -15,6 +15,7 @@ use tracing::{info, warn};
 #[derive(Clone)]
 pub struct LixService {
     engine: Engine<SlateDB>,
+    protocol_lix: Arc<lix_sdk::Lix<SlateDB>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -89,12 +90,24 @@ pub async fn open_lix_service(config: &Config) -> Result<Arc<LixService>> {
             storage
         }
     };
-    let engine = open_or_initialize_engine(storage).await?;
+    let engine = open_or_initialize_engine(storage.clone()).await?;
+    let protocol_lix = Arc::new(
+        lix_sdk::open_lix_with_storage(storage)
+            .await
+            .context("open Lix workspace session for the canonical server protocol")?,
+    );
 
-    Ok(Arc::new(LixService { engine }))
+    Ok(Arc::new(LixService {
+        engine,
+        protocol_lix,
+    }))
 }
 
 impl LixService {
+    pub fn protocol_lix(&self) -> Arc<lix_sdk::Lix<SlateDB>> {
+        Arc::clone(&self.protocol_lix)
+    }
+
     pub async fn current_branch_id(&self) -> Result<String, LixError> {
         self.run("current_branch_id", |engine| async move {
             let session = engine.open_workspace_session().await?;
