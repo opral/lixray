@@ -340,7 +340,7 @@ JOIN information_schema.columns AS c
 WHERE t.table_schema = 'public'
 ORDER BY t.table_name, c.ordinal_position;`;
 
-export const EXECUTE_TOOL_DESCRIPTION = `Execute caller-provided Lix SQL against an authorized workspace branch. Omit branch_id to use the workspace default branch. Multiple statements run atomically, either unwrapped or inside BEGIN ... COMMIT, and return one result per executable statement. SQL can read or mutate any SQL-accessible branch data and bypasses file-tool safeguards.
+export const EXECUTE_TOOL_DESCRIPTION = `Execute an ordered batch of caller-provided Lix SQL statements atomically against an authorized workspace branch. Omit branch_id to use the workspace's active branch. Each statement has its own parameters and produces one ordered result; if any statement fails, the complete batch rolls back. SQL can read or mutate any SQL-accessible branch data and bypasses file-tool safeguards.
 
 The following reference DDL describes every SQL surface initialized in a fresh workspace. Lix SQL does not support DDL statements; use these CREATE TABLE signatures only to understand column names, semantic SQL types, and nullability. Signatures labeled as views are read-only engine views even though CREATE TABLE syntax is used to retain their typed schema.
 

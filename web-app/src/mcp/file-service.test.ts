@@ -10,7 +10,6 @@ import {
 	type BranchState,
 	type ExecuteRequest,
 	type ExecuteResponse,
-	type ExecuteScriptResponse,
 	type LixRuntimeClient,
 	type WorkspaceSummary,
 	type FilesystemMutationOutcome,
@@ -632,13 +631,6 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		}
 
 		throw new Error(`Unsupported test SQL: ${sql}`);
-	}
-
-	async executeScript(
-		workspaceId: string,
-		request: ExecuteRequest,
-	): Promise<ExecuteScriptResponse> {
-		return { results: [await this.execute(workspaceId, request)] };
 	}
 
 	async mutate(

@@ -68,16 +68,13 @@ moves, and deletes compare an opaque revision UUID with `lixcol_change_id`;
 stale operations fail without changing the file. The revision is optional:
 when omitted, LixRay reads and uses the entry's current revision before applying
 the mutation. Creates and moves never overwrite existing destinations, and
-directory deletion requires `recursive=true`. The `execute` tool accepts raw
-Lix SQL and wire-format parameters, is marked destructive, and bypasses these
-file-tool safeguards.
-Single statements and semicolon-delimited scripts both execute atomically,
-either unwrapped or bounded by `BEGIN`/`BEGIN TRANSACTION` and `COMMIT`.
-Every execute call returns `{ "results": [...] }` with one result per
-executable statement. Numbered `$n` parameters refer to the request-wide
-parameter array, while anonymous `?` parameters consume it in script order.
-Both the container and preview runtime use Lix's SQL-script parser rather than
-splitting SQL in application code.
+directory deletion requires `recursive=true`. The `execute` tool accepts an
+ordered array of raw Lix SQL statements and per-statement wire-format
+parameters, is marked destructive, and bypasses these file-tool safeguards.
+The normal remote Lix client sends the array through `executeBatch`, so every
+statement commits atomically and returns one ordered result; a failure rolls
+back the complete batch. Numbered `$n` and anonymous `?` parameters refer to
+their statement's parameter array.
 
 The `/oauth/consent` page preserves the Google sign-in return path and shows
 the requesting client, scopes, and file permissions before allowing approval

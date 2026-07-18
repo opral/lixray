@@ -729,18 +729,34 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 			workspaceFetch: async (workspaceId, request) => {
 				workspaceFetches += 1;
 				assert.equal(workspaceId, DEMO_WORKSPACE_ID);
-				assert.equal(new URL(request.url).pathname, "/v1/branches");
 				assert.equal(request.headers.get("authorization"), null);
+				const pathname = new URL(request.url).pathname;
+				if (pathname === "/v1/branches") {
+					return Response.json({
+						currentBranchId: "main",
+						branches: [
+							{
+								id: "main",
+								name: "main",
+								hidden: false,
+								commitId: "commit-1",
+							},
+						],
+					});
+				}
+				assert.equal(pathname, "/v1/executeStatement");
 				return Response.json({
-					currentBranchId: "main",
-					branches: [
-						{
-							id: "main",
-							name: "main",
-							hidden: false,
-							commitId: "commit-1",
-						},
+					columns: ["id", "name", "hidden", "commit_id"],
+					rows: [
+						[
+							{ kind: "text", value: "main" },
+							{ kind: "text", value: "main" },
+							{ kind: "bool", value: false },
+							{ kind: "text", value: "commit-1" },
+						],
 					],
+					rowsAffected: 0,
+					notices: [],
 				});
 			},
 			mcpTransport: async (_request, service, _context, options) => {
@@ -790,7 +806,7 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
-	assert.equal(workspaceFetches, 1);
+	assert.equal(workspaceFetches, 2);
 });
 
 void test("Supabase workspace authorization uses the user token and RLS-visible row", async () => {

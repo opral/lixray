@@ -83,7 +83,6 @@ export function useFileExplorerApi() {
 			listWorkspaces: () => Promise.resolve([]),
 			listBranches: () => api.listBranches(),
 			execute: async (_workspaceId, request) => executeStatement(request),
-			executeScript: async (_workspaceId, request) => api.execute(request),
 			mutate: async (_workspaceId, request) => api.mutateFilesystem(request),
 		} satisfies LixRuntimeClient);
 

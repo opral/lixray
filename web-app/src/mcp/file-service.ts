@@ -37,6 +37,15 @@ export interface ExecuteScriptResponse {
 	results: Array<ExecuteResponse>;
 }
 
+export interface ExecuteBatchRequest {
+	branchId: string;
+	statements: Array<{
+		sql: string;
+		params?: Array<WireValue>;
+	}>;
+	options?: { originKey?: string };
+}
+
 export interface Branch {
 	id: string;
 	name: string;
@@ -63,9 +72,9 @@ export interface LixRuntimeClient {
 		workspaceId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse>;
-	executeScript(
+	executeBatch(
 		workspaceId: string,
-		request: ExecuteRequest,
+		request: ExecuteBatchRequest,
 	): Promise<ExecuteScriptResponse>;
 	mutate(
 		workspaceId: string,
@@ -203,10 +212,9 @@ export class LixFileService {
 	async executeSql(
 		workspaceId: string,
 		branchId: string,
-		sql: string,
-		params: Array<WireValue> = [],
+		statements: ExecuteBatchRequest["statements"],
 	): Promise<ExecuteScriptResponse> {
-		return this.client.executeScript(workspaceId, { branchId, sql, params });
+		return this.client.executeBatch(workspaceId, { branchId, statements });
 	}
 
 	async listDirectory(
