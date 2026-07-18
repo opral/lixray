@@ -5,7 +5,6 @@ import {
 	decodeWireValue,
 	encodeWireValue,
 	type MemoryLixBinding,
-	type ParseSqlScript,
 } from "./workspace-runtime.ts";
 
 const WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
@@ -37,13 +36,13 @@ void test("workspace initialization is lazy, shared, and isolated by id", async 
 	assert.equal(opens, 0);
 
 	await Promise.all([
-		runtime.fetch(WORKSPACE_A, workspaceRequest("/branches")),
-		runtime.fetch(WORKSPACE_A, workspaceRequest("/branches")),
+		runtime.fetch(WORKSPACE_A, workspaceRequest("/")),
+		runtime.fetch(WORKSPACE_A, workspaceRequest("/")),
 	]);
 	assert.equal(opens, 1);
 	assert.equal(runtime.workspaceCount(), 1);
 
-	await runtime.fetch(WORKSPACE_B, workspaceRequest("/branches"));
+	await runtime.fetch(WORKSPACE_B, workspaceRequest("/"));
 	assert.equal(opens, 2);
 	assert.equal(runtime.workspaceCount(), 2);
 });
@@ -58,28 +57,21 @@ void test("canonical main branch ids work across independent isolates", async ()
 		BRANCH,
 	);
 
-	const firstResponse = await first.fetch(
-		WORKSPACE_A,
-		workspaceRequest("/branches"),
-	);
-	const secondResponse = await second.fetch(
-		WORKSPACE_A,
-		workspaceRequest("/branches"),
-	);
-	const firstBody = await firstResponse.json();
-	const secondBody = await secondResponse.json();
-	const firstMainBranch = mainBranch(firstBody);
-	const secondMainBranch = mainBranch(secondBody);
-
-	assert.equal(firstMainBranch.id, BRANCH);
-	assert.equal(secondMainBranch.id, BRANCH);
-	assert.equal(currentBranchId(firstBody), BRANCH);
-	assert.equal(currentBranchId(secondBody), BRANCH);
+	const firstResponse = await first.fetch(WORKSPACE_A, workspaceRequest("/"));
+	const secondResponse = await second.fetch(WORKSPACE_A, workspaceRequest("/"));
+	assert.deepEqual(await firstResponse.json(), {
+		protocolVersion: 1,
+		activeBranchId: BRANCH,
+	});
+	assert.deepEqual(await secondResponse.json(), {
+		protocolVersion: 1,
+		activeBranchId: BRANCH,
+	});
 	const executeResponse = await second.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/execute", {
-			branchId: firstMainBranch.id,
 			sql: "SELECT 1",
+			params: [],
 		}),
 	);
 	assert.equal(executeResponse.status, 200);
@@ -98,8 +90,7 @@ void test("branch creation rejects ids outside the MCP UUID contract", async () 
 	for (const id of ["draft", "99999999-9999-9999-9999-999999999999"]) {
 		const response = await runtime.fetch(
 			WORKSPACE_A,
-			workspaceRequest("/createBranch", {
-				branchId: BRANCH,
+			workspaceRequest("/branch/create", {
 				id,
 				name: "Draft",
 			}),
@@ -135,24 +126,21 @@ void test("failed canonical branch initialization closes and evicts the runtime"
 		return statefulBranchBinding(WORKSPACE_B);
 	}, BRANCH);
 
-	const failed = await runtime.fetch(
-		WORKSPACE_A,
-		workspaceRequest("/branches"),
-	);
+	const failed = await runtime.fetch(WORKSPACE_A, workspaceRequest("/"));
 	assert.equal(failed.status, 500);
 	assert.equal(closes, 1);
 	assert.equal(runtime.workspaceCount(), 0);
 
-	const retried = await runtime.fetch(
-		WORKSPACE_A,
-		workspaceRequest("/branches"),
-	);
+	const retried = await runtime.fetch(WORKSPACE_A, workspaceRequest("/"));
 	assert.equal(retried.status, 200);
 	assert.equal(opens, 2);
-	assert.equal(mainBranch(await retried.json()).id, BRANCH);
+	assert.deepEqual(await retried.json(), {
+		protocolVersion: 1,
+		activeBranchId: BRANCH,
+	});
 });
 
-void test("finite operations serialize and select their requested branch", async () => {
+void test("finite operations serialize against the shared active branch", async () => {
 	let activeExecutions = 0;
 	let maximumExecutions = 0;
 	const selected: string[] = [];
@@ -173,15 +161,13 @@ void test("finite operations serialize and select their requested branch", async
 		},
 	});
 	const runtime = testRuntime(async () => binding);
-	const branches = [BRANCH, WORKSPACE_B];
-
 	const responses = await Promise.all(
-		branches.map((branchId) =>
+		["SELECT 1", "SELECT 2"].map((sql) =>
 			runtime.fetch(
 				WORKSPACE_A,
 				workspaceRequest("/execute", {
-					branchId,
-					sql: "SELECT 1",
+					sql,
+					params: [],
 				}),
 			),
 		),
@@ -191,192 +177,122 @@ void test("finite operations serialize and select their requested branch", async
 		[200, 200],
 	);
 	assert.equal(maximumExecutions, 1);
-	assert.deepEqual(selected, branches);
+	assert.deepEqual(selected, [BRANCH, BRANCH]);
 });
 
-void test("execute keeps the single-statement fast path and wraps its result", async () => {
+void test("execute returns one direct canonical result", async () => {
 	let directExecutions = 0;
-	let transactionStarts = 0;
 	const runtime = testRuntime(async () =>
 		fakeBinding({
 			execute: async () => {
 				directExecutions += 1;
 				return mutationResult(1);
 			},
-			beginTransaction: async () => {
-				transactionStarts += 1;
-				throw new Error("single statement should not open a transaction");
-			},
 		}),
 	);
 	const response = await runtime.fetch(
 		WORKSPACE_A,
-		workspaceRequest("/execute", { branchId: BRANCH, sql: "SELECT 1" }),
+		workspaceRequest("/execute", { sql: "SELECT 1", params: [] }),
 	);
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), {
-		results: [{ columns: [], rows: [], rowsAffected: 1, notices: [] }],
+		columns: [],
+		rows: [],
+		rowsAffected: 1,
+		notices: [],
 	});
 	assert.equal(directExecutions, 1);
-	assert.equal(transactionStarts, 0);
 });
 
-void test("execute runs scripts atomically and returns ordered results", async () => {
-	const executions: Array<{
-		sql: string;
-		params: Array<unknown>;
-		options: unknown;
-	}> = [];
-	let commits = 0;
-	let rollbacks = 0;
+void test("execute-batch delegates atomic execution to Lix", async () => {
+	let execution:
+		| {
+				statements: Array<{ sql: string; params: Array<unknown> }>;
+				options: unknown;
+		  }
+		| undefined;
 	const binding = fakeBinding({
-		beginTransaction: async () => ({
-			execute: async (
-				sql: string,
-				params: Array<unknown>,
-				options: unknown,
-			) => {
-				executions.push({ sql, params, options });
-				return sql.startsWith("SELECT")
-					? {
-							columns: ["value"],
-							rows: [[{ kind: "text", value: "visible" }]],
-							rowsAffected: 0,
-							notices: [],
-						}
-					: mutationResult(1);
-			},
-			commit: async () => {
-				commits += 1;
-			},
-			rollback: async () => {
-				rollbacks += 1;
-			},
-		}),
-	});
-	const runtime = testRuntime(
-		async () => binding,
-		BRANCH,
-		(sql, paramCount) => {
-			assert.equal(
-				sql,
-				"BEGIN; INSERT INTO example VALUES ($1, $2); SELECT value FROM example WHERE id = $3; COMMIT",
-			);
-			assert.equal(paramCount, 3);
-			return {
-				statements: [
-					{
-						sql: "INSERT INTO example VALUES ($1, $2)",
-						paramStart: 0,
-						paramEnd: 2,
-					},
-					{
-						sql: "SELECT value FROM example WHERE id = $3",
-						paramStart: 0,
-						paramEnd: 3,
-					},
-				],
-			};
+		executeBatch: async (
+			statements: Array<{ sql: string; params: Array<unknown> }>,
+			options: unknown,
+		) => {
+			execution = { statements, options };
+			return [
+				mutationResult(1),
+				{
+					columns: ["value"],
+					rows: [[{ kind: "text", value: "visible" }]],
+					rowsAffected: 0,
+					notices: [],
+				},
+			];
 		},
-	);
+	});
+	const runtime = testRuntime(async () => binding);
 	const response = await runtime.fetch(
 		WORKSPACE_A,
-		workspaceRequest("/execute", {
-			branchId: BRANCH,
-			sql: "BEGIN; INSERT INTO example VALUES ($1, $2); SELECT value FROM example WHERE id = $3; COMMIT",
-			params: [
-				{ kind: "text", value: "one" },
-				{ kind: "text", value: "two" },
-				{ kind: "text", value: "three" },
+		workspaceRequest("/execute-batch", {
+			statements: [
+				{
+					sql: "INSERT INTO example VALUES ($1, $2)",
+					params: [
+						{ kind: "text", value: "one" },
+						{ kind: "text", value: "two" },
+					],
+				},
+				{
+					sql: "SELECT value FROM example WHERE id = $1",
+					params: [{ kind: "text", value: "three" }],
+				},
 			],
 			options: { originKey: "batch-origin" },
 		}),
 	);
 
 	assert.equal(response.status, 200);
-	assert.deepEqual(await response.json(), {
-		results: [
-			{ columns: [], rows: [], rowsAffected: 1, notices: [] },
-			{
-				columns: ["value"],
-				rows: [[{ kind: "text", value: "visible" }]],
-				rowsAffected: 0,
-				notices: [],
-			},
-		],
-	});
-	assert.equal(commits, 1);
-	assert.equal(rollbacks, 0);
+	assert.deepEqual(await response.json(), [
+		{ columns: [], rows: [], rowsAffected: 1, notices: [] },
+		{
+			columns: ["value"],
+			rows: [[{ kind: "text", value: "visible" }]],
+			rowsAffected: 0,
+			notices: [],
+		},
+	]);
+	assert.ok(execution);
 	assert.deepEqual(
-		executions.map(({ sql, params, options }) => ({
+		execution.statements.map(({ sql, params }) => ({
 			sql,
 			params: params.map(nativeText),
-			options,
 		})),
 		[
 			{
 				sql: "INSERT INTO example VALUES ($1, $2)",
 				params: ["one", "two"],
-				options: { originKey: "batch-origin" },
 			},
 			{
-				sql: "SELECT value FROM example WHERE id = $3",
-				params: ["one", "two", "three"],
-				options: { originKey: "batch-origin" },
+				sql: "SELECT value FROM example WHERE id = $1",
+				params: ["three"],
 			},
 		],
 	);
+	assert.deepEqual(execution.options, { originKey: "batch-origin" });
 });
 
-void test("execute rolls a script back when a later statement fails", async () => {
-	let executions = 0;
-	let commits = 0;
-	let rollbacks = 0;
+void test("execute-batch preserves Lix atomic failures", async () => {
 	const failure = Object.assign(new Error("duplicate key"), {
 		code: "LIX_UNIQUE",
 	});
-	const runtime = testRuntime(
-		async () =>
-			fakeBinding({
-				beginTransaction: async () => ({
-					execute: async () => {
-						executions += 1;
-						if (executions === 2) throw failure;
-						return mutationResult(1);
-					},
-					commit: async () => {
-						commits += 1;
-					},
-					rollback: async () => {
-						rollbacks += 1;
-					},
-				}),
-			}),
-		BRANCH,
-		() => ({
-			statements: [
-				{
-					sql: "INSERT INTO example VALUES (?)",
-					paramStart: 0,
-					paramEnd: 1,
-				},
-				{
-					sql: "INSERT INTO example VALUES (?)",
-					paramStart: 1,
-					paramEnd: 2,
-				},
-			],
-		}),
+	const runtime = testRuntime(async () =>
+		fakeBinding({ executeBatch: async () => Promise.reject(failure) }),
 	);
 	const response = await runtime.fetch(
 		WORKSPACE_A,
-		workspaceRequest("/execute", {
-			branchId: BRANCH,
-			sql: "INSERT INTO example VALUES (?); INSERT INTO example VALUES (?)",
-			params: [
-				{ kind: "text", value: "one" },
-				{ kind: "text", value: "two" },
+		workspaceRequest("/execute-batch", {
+			statements: [
+				{ sql: "INSERT INTO example VALUES (?)", params: [] },
+				{ sql: "INSERT INTO example VALUES (?)", params: [] },
 			],
 		}),
 	);
@@ -385,41 +301,17 @@ void test("execute rolls a script back when a later statement fails", async () =
 	assert.deepEqual(await response.json(), {
 		error: { code: "LIX_UNIQUE", message: "duplicate key" },
 	});
-	assert.equal(executions, 2);
-	assert.equal(commits, 0);
-	assert.equal(rollbacks, 1);
 });
 
-void test("filesystem conflicts roll back without applying a mutation", async () => {
-	let rollbacks = 0;
-	let commits = 0;
-	const binding = fakeBinding({
-		beginTransaction: async () => ({
-			execute: async () => emptyResult(),
-			commit: async () => {
-				commits += 1;
-			},
-			rollback: async () => {
-				rollbacks += 1;
-			},
-		}),
-	});
-	const runtime = testRuntime(async () => binding);
-	const response = await runtime.fetch(
-		WORKSPACE_A,
-		workspaceRequest("/filesystem/mutate", {
-			branchId: BRANCH,
-			kind: "file",
-			path: "/missing.md",
-			expectedRevision: "revision-1",
-			mutation: { type: "delete" },
-		}),
-	);
-
-	assert.equal(response.status, 200);
-	assert.deepEqual(await response.json(), { outcome: "conflict" });
-	assert.equal(rollbacks, 1);
-	assert.equal(commits, 0);
+void test("workspace runtime rejects removed noncanonical routes", async () => {
+	const runtime = testRuntime(async () => fakeBinding());
+	for (const path of ["/v1/filesystem/mutate", "/v1/container-health"]) {
+		const response = await runtime.fetch(
+			WORKSPACE_A,
+			new Request(`https://preview.example${path}`),
+		);
+		assert.equal(response.status, 404, path);
+	}
 });
 
 void test("Lix errors preserve envelopes and HTTP status mapping", async () => {
@@ -436,7 +328,7 @@ void test("Lix errors preserve envelopes and HTTP status mapping", async () => {
 	const runtime = testRuntime(async () => binding);
 	const response = await runtime.fetch(
 		WORKSPACE_A,
-		workspaceRequest("/execute", { branchId: BRANCH, sql: "SELECT 1" }),
+		workspaceRequest("/branch/switch", { branchId: BRANCH }),
 	);
 
 	assert.equal(response.status, 404);
@@ -467,7 +359,6 @@ void test("multiplex observations retain subscription ids and SSE framing", asyn
 	const response = await runtime.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/observe/multiplex", {
-			branchId: BRANCH,
 			subscriptions: [
 				{ id: "files", sql: "SELECT * FROM lix_file", params: [] },
 				{ id: "dirs", sql: "SELECT * FROM lix_directory", params: [] },
@@ -509,7 +400,6 @@ void test("multiplex observations scope query errors to their subscription", asy
 	const response = await runtime.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/observe/multiplex", {
-			branchId: BRANCH,
 			subscriptions: [
 				{ id: "broken", sql: "FAIL", params: [] },
 				{ id: "healthy", sql: "SELECT 1", params: [] },
@@ -541,7 +431,6 @@ void test("multiplex observations expose stream-wide snapshot errors", async () 
 	const response = await runtime.fetch(
 		WORKSPACE_A,
 		workspaceRequest("/observe/multiplex", {
-			branchId: BRANCH,
 			subscriptions: [
 				{ id: "files", sql: "SELECT * FROM lix_file", params: [] },
 				{ id: "dirs", sql: "SELECT * FROM lix_directory", params: [] },
@@ -563,12 +452,8 @@ function fakeBinding(
 	const binding = {
 		execute: async (sql: string) =>
 			sql.includes("FROM lix_branch") ? branchResult() : emptyResult(),
+		executeBatch: async () => [],
 		observe: async () => ({ close: () => undefined, next: async () => null }),
-		beginTransaction: async () => ({
-			execute: async () => emptyResult(),
-			commit: async () => undefined,
-			rollback: async () => undefined,
-		}),
 		activeBranchId: async () => BRANCH,
 		createBranch: async ({ id, name }) => ({
 			id: id ?? BRANCH,
@@ -587,23 +472,11 @@ function fakeBinding(
 function testRuntime(
 	openMemoryLix: () => Promise<MemoryLixBinding>,
 	mainBranchId = BRANCH,
-	parseSqlScript: ParseSqlScript = singleStatementParser,
 ) {
 	return createMemoryWorkspaceRuntime(openMemoryLix, {
 		mainBranchId,
-		parseSqlScript,
 	});
 }
-
-const singleStatementParser: ParseSqlScript = (sql, providedParamCount) => ({
-	statements: [
-		{
-			sql,
-			paramStart: 0,
-			paramEnd: providedParamCount,
-		},
-	],
-});
 
 function statefulBranchBinding(initialBranchId: string): MemoryLixBinding {
 	let activeBranchId = initialBranchId;
@@ -664,25 +537,6 @@ function branchesResult(
 	};
 }
 
-function mainBranch(value: unknown): { id: string; name: string } {
-	assert.ok(typeof value === "object" && value !== null && "branches" in value);
-	const branches = (value as { branches: Array<{ id: string; name: string }> })
-		.branches;
-	const main = branches.find((branch) => branch.name === "main");
-	assert.ok(main);
-	return main;
-}
-
-function currentBranchId(value: unknown): string {
-	assert.ok(
-		typeof value === "object" &&
-			value !== null &&
-			"currentBranchId" in value &&
-			typeof value.currentBranchId === "string",
-	);
-	return value.currentBranchId;
-}
-
 function nativeText(value: unknown): string {
 	assert.ok(
 		typeof value === "object" &&
@@ -720,15 +574,12 @@ function emptyResult() {
 }
 
 function workspaceRequest(path: string, body?: unknown) {
-	return new Request(
-		`https://preview.example${path.startsWith("/v1") ? path : `/v1${path}`}`,
-		{
-			method: body === undefined ? "GET" : "POST",
-			headers:
-				body === undefined ? undefined : { "content-type": "application/json" },
-			body: body === undefined ? undefined : JSON.stringify(body),
-		},
-	);
+	return new Request(`https://preview.example/lix/v1${path}`, {
+		method: body === undefined ? "GET" : "POST",
+		headers:
+			body === undefined ? undefined : { "content-type": "application/json" },
+		body: body === undefined ? undefined : JSON.stringify(body),
+	});
 }
 
 async function readSseUntil(

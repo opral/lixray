@@ -1,0 +1,134 @@
+import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk/remote";
+
+type TokenProvider = () => Promise<string | null>;
+
+export interface OpenWorkspaceLixSessionOptions {
+	namespace: string;
+	workspaceSlug: string;
+	getAccessToken: TokenProvider;
+	initialBranchId?: string | null;
+	origin?: string | URL;
+	fetch?: RemoteLixFetch;
+}
+
+export interface WorkspaceLixSession {
+	readonly lix: Lix;
+	activeBranchSnapshot(): string;
+	defaultBranchSnapshot(): string;
+	subscribeActiveBranch(listener: () => void): () => void;
+	createBranch(name: string): Promise<string>;
+	switchBranch(branchId: string): Promise<string>;
+	close(): Promise<void>;
+}
+
+export async function openWorkspaceLixSession(
+	options: OpenWorkspaceLixSessionOptions,
+): Promise<WorkspaceLixSession> {
+	const lix = await openLix({
+		server: {
+			mode: "remote",
+			url: workspaceUrl(options),
+			headers: async () => {
+				const token = await options.getAccessToken();
+				if (!token) throw new Error("A workspace access token is required.");
+				return { Authorization: `Bearer ${token}` };
+			},
+			...(options.fetch ? { fetch: options.fetch } : {}),
+		},
+	});
+
+	try {
+		const defaultBranchId = await lix.activeBranchId();
+		const session = new RemoteWorkspaceLixSession(lix, defaultBranchId);
+		if (
+			options.initialBranchId &&
+			options.initialBranchId !== defaultBranchId
+		) {
+			try {
+				await session.switchBranch(options.initialBranchId);
+			} catch (error) {
+				if (!isBranchNotFoundError(error)) throw error;
+			}
+		}
+		return session;
+	} catch (error) {
+		await lix.close().catch(() => undefined);
+		throw error;
+	}
+}
+
+class RemoteWorkspaceLixSession implements WorkspaceLixSession {
+	readonly lix: Lix;
+	readonly #listeners = new Set<() => void>();
+	readonly #defaultBranchId: string;
+	#activeBranchId: string;
+	#closed = false;
+
+	constructor(lix: Lix, defaultBranchId: string) {
+		this.lix = lix;
+		this.#defaultBranchId = defaultBranchId;
+		this.#activeBranchId = defaultBranchId;
+	}
+
+	activeBranchSnapshot(): string {
+		this.#assertOpen();
+		return this.#activeBranchId;
+	}
+
+	defaultBranchSnapshot(): string {
+		this.#assertOpen();
+		return this.#defaultBranchId;
+	}
+
+	subscribeActiveBranch(listener: () => void): () => void {
+		this.#assertOpen();
+		this.#listeners.add(listener);
+		return () => this.#listeners.delete(listener);
+	}
+
+	async createBranch(name: string): Promise<string> {
+		this.#assertOpen();
+		const branch = await this.lix.createBranch({ name });
+		await this.switchBranch(branch.id);
+		return branch.id;
+	}
+
+	async switchBranch(branchId: string): Promise<string> {
+		this.#assertOpen();
+		if (branchId === this.#activeBranchId) return branchId;
+		const switched = await this.lix.switchBranch({ branchId });
+		this.#activeBranchId = switched.branchId;
+		for (const listener of [...this.#listeners]) listener();
+		return switched.branchId;
+	}
+
+	async close(): Promise<void> {
+		if (this.#closed) return;
+		this.#closed = true;
+		this.#listeners.clear();
+		await this.lix.close();
+	}
+
+	#assertOpen(): void {
+		if (this.#closed) throw new Error("The workspace Lix session is closed.");
+	}
+}
+
+function workspaceUrl(options: OpenWorkspaceLixSessionOptions): URL {
+	const origin = options.origin ?? globalThis.location?.origin;
+	if (!origin) throw new Error("A workspace server origin is required.");
+	return new URL(
+		`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.workspaceSlug)}`,
+		origin,
+	);
+}
+
+function isBranchNotFoundError(
+	error: unknown,
+): error is Error & { code: "LIX_BRANCH_NOT_FOUND" } {
+	return (
+		error instanceof Error &&
+		"code" in error &&
+		error.code === "LIX_BRANCH_NOT_FOUND"
+	);
+}

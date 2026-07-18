@@ -2683,9 +2683,7 @@ name = "lixray"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-stream",
  "axum",
- "futures-core",
  "http",
  "http-body-util",
  "lix_engine",
@@ -2699,7 +2697,6 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

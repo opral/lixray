@@ -5,7 +5,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import {
+	FileServiceError,
 	LixFileService,
+	type ExecuteBatchRequest,
 	type ExecuteRequest,
 	type ExecuteResponse,
 	type ExecuteScriptResponse,
@@ -74,8 +76,8 @@ void test("MCP documentation distinguishes browser and client authentication", a
 	assert.match(documentation, /initialize, tools\/list, and list_workspaces/);
 	assert.match(documentation, /no refresh token is available/);
 	assert.match(documentation, /do not include access or refresh tokens/);
-	assert.match(documentation, /one or more semicolon-delimited statements/);
-	assert.match(documentation, /request-wide \$n parameters/);
+	assert.match(documentation, /ordered batch of statements/);
+	assert.match(documentation, /executes the batch atomically/);
 	assert.match(documentation, /default to the workspace default branch/);
 });
 
@@ -283,7 +285,6 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			["find_files", ["under_path"]],
 			["read_file", ["start_line", "line_count"]],
 			["delete_entry", ["recursive"]],
-			["execute", ["params"]],
 		]);
 		for (const [name, defaultedProperties] of defaultedInputs) {
 			const inputSchema = rawTools.find((tool) => tool.name === name)
@@ -297,6 +298,24 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				);
 			}
 		}
+		const executeInput = rawTools.find((tool) => tool.name === "execute")
+			?.inputSchema as
+			| {
+					properties?: {
+						statements?: {
+							items?: {
+								required?: Array<string>;
+							};
+						};
+					};
+			  }
+			| undefined;
+		assert.equal(
+			executeInput?.properties?.statements?.items?.required?.includes(
+				"params",
+			) ?? false,
+			false,
+		);
 		const findFilesInput = rawTools.find((tool) => tool.name === "find_files")
 			?.inputSchema as { properties?: Record<string, unknown> } | undefined;
 		assert.equal(findFilesInput?.properties?.limit, undefined);
@@ -422,8 +441,12 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			name: "execute",
 			arguments: {
 				workspace_ref: WORKSPACE_ID,
-				sql: "SELECT value FROM lix_key_value WHERE key = $1",
-				params: [{ kind: "text", value: "example" }],
+				statements: [
+					{
+						sql: "SELECT value FROM lix_key_value WHERE key = $1",
+						params: [{ kind: "text", value: "example" }],
+					},
+				],
 			},
 		});
 		assert.equal(executed.isError, undefined);
@@ -444,36 +467,36 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 					branchId: BRANCH_ID,
 					sql: "SELECT value FROM lix_key_value WHERE key = $1",
 					params: [{ kind: "text", value: "example" }],
+					options: undefined,
 				},
 			},
 		]);
 
-		const transactionSql =
-			"BEGIN; INSERT INTO lix_key_value (key, value) VALUES ($1, $2); SELECT value FROM lix_key_value WHERE key = $1; COMMIT";
-		const transaction = await client.callTool({
+		const batch = await client.callTool({
 			name: "execute",
 			arguments: {
 				workspace_ref: WORKSPACE_ID,
 				branch_id: BRANCH_ID,
-				sql: transactionSql,
-				params: [
-					{ kind: "text", value: "example" },
-					{ kind: "text", value: "result" },
+				statements: [
+					{
+						sql: "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
+						params: [
+							{ kind: "text", value: "example" },
+							{ kind: "text", value: "result" },
+						],
+					},
+					{
+						sql: "SELECT value FROM lix_key_value WHERE key = $1",
+						params: [{ kind: "text", value: "example" }],
+					},
 				],
 			},
 		});
-		assert.equal(transaction.isError, undefined);
-		assert.deepEqual(transaction.structuredContent, {
-			results: [
-				{ columns: [], rows: [], rowsAffected: 1, notices: [] },
-				{
-					columns: ["value"],
-					rows: [[{ kind: "text", value: "result" }]],
-					rowsAffected: 0,
-					notices: [],
-				},
-			],
-		});
+		assert.equal(batch.isError, undefined);
+		assert.equal(
+			(batch.structuredContent as { results: Array<unknown> }).results.length,
+			2,
+		);
 
 		const invalidRead = await client.callTool({
 			name: "read_file",
@@ -551,8 +574,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			arguments: {
 				workspace_ref: WORKSPACE_ID,
 				branch_id: BRANCH_ID,
-				sql: "  SELECT $1  ",
-				params: [{ kind: "text" }],
+				statements: [{ sql: "  SELECT $1  ", params: [{ kind: "text" }] }],
 			},
 		});
 		assert.equal(invalidExecuteArguments.isError, true);
@@ -570,7 +592,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			arguments: {
 				workspace_ref: WORKSPACE_ID,
 				branch_id: THROW_BRANCH_ID,
-				sql: "SELECT 1",
+				statements: [{ sql: "SELECT 1" }],
 			},
 		});
 		assert.equal(internalFailure.isError, true);
@@ -616,7 +638,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 					toolName: "execute",
 					outcome: "success",
 					workspaceId: WORKSPACE_ID,
-					sql: transactionSql,
+					sql: "INSERT INTO lix_key_value (key, value) VALUES ($1, $2);\nSELECT value FROM lix_key_value WHERE key = $1",
 				},
 				{
 					toolName: "read_file",
@@ -752,6 +774,12 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 		workspaceId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse> {
+		if (request.sql.includes("BEGIN;")) {
+			throw new FileServiceError(
+				"LIX_UNSUPPORTED_SQL",
+				"Execute accepts exactly one SQL statement.",
+			);
+		}
 		if (
 			request.sql ===
 			"SELECT data, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE path = $1"
@@ -784,25 +812,21 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 		};
 	}
 
-	async executeScript(
+	async executeBatch(
 		workspaceId: string,
-		request: ExecuteRequest,
+		request: ExecuteBatchRequest,
 	): Promise<ExecuteScriptResponse> {
-		if (request.sql.includes("BEGIN;")) {
-			this.executeRequests.push({ workspaceId, request });
-			return {
-				results: [
-					{ columns: [], rows: [], rowsAffected: 1, notices: [] },
-					{
-						columns: ["value"],
-						rows: [[{ kind: "text", value: "result" }]],
-						rowsAffected: 0,
-						notices: [],
-					},
-				],
-			};
-		}
-		return { results: [await this.execute(workspaceId, request)] };
+		return {
+			results: await Promise.all(
+				request.statements.map((statement) =>
+					this.execute(workspaceId, {
+						branchId: request.branchId,
+						...statement,
+						options: request.options,
+					}),
+				),
+			),
+		};
 	}
 
 	async mutate(): Promise<never> {

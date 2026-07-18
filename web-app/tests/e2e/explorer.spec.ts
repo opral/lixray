@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { Page, Request } from "@playwright/test";
 import { expect, expectOk, test } from "./fixtures";
-import type { BranchesResponse } from "../../src/lib/lixray-api";
-import { DEMO_AUTH_TOKEN } from "../../src/lib/demo-identity";
+import {
+	DEMO_AUTH_TOKEN,
+	DEMO_MAIN_BRANCH_ID,
+} from "../../src/lib/demo-identity";
 
-const WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
 const FILE_PATH = "/atelier-first-slice.md";
 
 test("Atelier renders the remote workspace and keeps file navigation in its host", async ({
@@ -105,10 +106,7 @@ test("a branch-only file survives reload and falls back to the workspace root on
 	).toBeVisible({ timeout: 55_000 });
 	await page.reload();
 	await expect(page).toHaveURL((url) => {
-		return (
-			url.pathname === encodedPath &&
-			url.searchParams.get("branch") === draftBranchId
-		);
+		return url.pathname === encodedPath && !url.searchParams.has("branch");
 	});
 	await expect(
 		page.getByRole("heading", { name: "Draft-only file" }),
@@ -117,7 +115,8 @@ test("a branch-only file survives reload and falls back to the workspace root on
 	await page.goto(`${encodedPath}?branch=${encodeURIComponent(mainBranchId)}`);
 	await expect(page).toHaveURL(
 		(url) =>
-			url.pathname === "/@acme/launch-q3" && !url.searchParams.has("branch"),
+			url.pathname === "/@acme/launch-q3" &&
+			url.searchParams.get("branch") === mainBranchId,
 		{ timeout: 55_000 },
 	);
 	await settlePageExecutes(page, pendingExecutes);
@@ -154,21 +153,17 @@ async function seedMarkdownFile(
 	markdown = "# Hello from the SlateDB-backed Atelier\n",
 ) {
 	const headers = { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` };
-	const branchesResponse = await page.request.get(
-		`/v1/workspaces/${WORKSPACE_ID}/branches`,
-		{ headers },
+	await expectOk(
+		await page.request.post("/@acme/launch-q3/lix/v1/branch/switch", {
+			headers,
+			data: { branchId: DEMO_MAIN_BRANCH_ID },
+		}),
 	);
-	await expectOk(branchesResponse);
-	const branches = (await branchesResponse.json()) as BranchesResponse;
-	const branchId = branches.currentBranchId;
-	expect(branchId).toBeTruthy();
-
 	const executeResponse = await page.request.post(
-		`/v1/workspaces/${WORKSPACE_ID}/execute`,
+		"/@acme/launch-q3/lix/v1/execute",
 		{
 			headers,
 			data: {
-				branchId,
 				sql: "INSERT INTO lix_file (path, data) VALUES ($1, $2) ON CONFLICT (path) DO UPDATE SET data = excluded.data",
 				params: [
 					{ kind: "text", value: filePath },
@@ -189,34 +184,37 @@ async function seedBranchOnlyMarkdownFile(page: Page): Promise<{
 	filePath: string;
 }> {
 	const headers = { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` };
-	const branchesResponse = await page.request.get(
-		`/v1/workspaces/${WORKSPACE_ID}/branches`,
-		{ headers },
+	await expectOk(
+		await page.request.post("/@acme/launch-q3/lix/v1/branch/switch", {
+			headers,
+			data: { branchId: DEMO_MAIN_BRANCH_ID },
+		}),
 	);
-	await expectOk(branchesResponse);
-	const branches = (await branchesResponse.json()) as BranchesResponse;
-	const mainBranchId = branches.currentBranchId;
-	expect(mainBranchId).toBeTruthy();
+	const mainBranchId = DEMO_MAIN_BRANCH_ID;
 	const draftBranchId = randomUUID();
 	const createBranchResponse = await page.request.post(
-		`/v1/workspaces/${WORKSPACE_ID}/createBranch`,
+		"/@acme/launch-q3/lix/v1/branch/create",
 		{
 			headers,
 			data: {
-				branchId: mainBranchId,
 				id: draftBranchId,
 				name: `Draft ${draftBranchId.slice(0, 8)}`,
 			},
 		},
 	);
 	await expectOk(createBranchResponse);
+	await expectOk(
+		await page.request.post("/@acme/launch-q3/lix/v1/branch/switch", {
+			headers,
+			data: { branchId: draftBranchId },
+		}),
+	);
 	const filePath = `/draft-only-${randomUUID()}.md`;
 	const executeResponse = await page.request.post(
-		`/v1/workspaces/${WORKSPACE_ID}/execute`,
+		"/@acme/launch-q3/lix/v1/execute",
 		{
 			headers,
 			data: {
-				branchId: draftBranchId,
 				sql: "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
 				params: [
 					{ kind: "text", value: filePath },

@@ -1,14 +1,21 @@
 import {
+	openLix,
+	type ExecuteResult as LixExecuteResult,
+	type JsonValue,
+	type Lix,
+	type SqlParam,
+	Value,
+} from "@lix-js/sdk/remote";
+import {
 	type Branch,
 	type BranchState,
+	type ExecuteBatchRequest,
 	type ExecuteRequest,
 	type ExecuteResponse,
 	type ExecuteScriptResponse,
 	FileServiceError,
 	type FileServiceErrorCode,
 	type LixRuntimeClient,
-	type FilesystemMutationOutcome,
-	type FilesystemMutationRequest,
 	type WorkspaceSummary,
 } from "./file-service.ts";
 import {
@@ -18,6 +25,7 @@ import {
 	type ContainerRetryDelay,
 	type ContainerRetryObservation,
 } from "../worker/container-retry.ts";
+import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
 
 interface McpUser {
 	userId: string;
@@ -55,6 +63,11 @@ export interface WorkerLixRuntimeClientOptions {
 	workspaceSummaries?: ReadonlyArray<WorkspaceSummary>;
 }
 
+interface WorkspaceLixSession {
+	lix: Lix;
+	queue: Promise<void>;
+}
+
 export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	private readonly env: WorkerLixRuntimeEnv;
 	private readonly user: McpUser;
@@ -69,6 +82,9 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	private readonly workspaceSummaries:
 		| ReadonlyArray<WorkspaceSummary>
 		| undefined;
+	private readonly sessions = new Map<string, Promise<WorkspaceLixSession>>();
+	private closePromise: Promise<void> | undefined;
+	private closed = false;
 
 	constructor(
 		env: WorkerLixRuntimeEnv,
@@ -167,163 +183,222 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	async listBranches(workspaceId: string): Promise<BranchState> {
-		const body = await this.containerJson<{
-			branches?: unknown;
-			currentBranchId?: unknown;
-		}>(workspaceId, "/v1/branches", { method: "GET" });
-		if (!Array.isArray(body.branches)) {
-			throw new FileServiceError(
-				"upstream_error",
-				"Lix returned an invalid branch list.",
-			);
+		try {
+			const session = await this.session(workspaceId);
+			return await this.enqueueSession(session, async () => {
+				const currentBranchId = await session.lix.activeBranchId();
+				const result = await session.lix.execute(
+					"SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id",
+				);
+				const branches = result.rows.map((row): Branch => {
+					const id = row.get("id");
+					const name = row.get("name");
+					const hidden = row.get("hidden");
+					const commitId = row.get("commit_id");
+					if (
+						typeof id !== "string" ||
+						typeof name !== "string" ||
+						typeof hidden !== "boolean" ||
+						typeof commitId !== "string"
+					) {
+						throw new FileServiceError(
+							"upstream_error",
+							"Lix returned an invalid branch list.",
+						);
+					}
+					return { id, name, hidden, commitId };
+				});
+				if (!branches.some((branch) => branch.id === currentBranchId)) {
+					throw new FileServiceError(
+						"upstream_error",
+						"Lix current branch is missing from the branch list.",
+					);
+				}
+				return {
+					branches,
+					currentBranchId,
+				};
+			});
+		} catch (caught) {
+			throw asFileServiceError(caught);
 		}
-		if (typeof body.currentBranchId !== "string" || !body.currentBranchId) {
-			throw new FileServiceError(
-				"upstream_error",
-				"Lix returned an invalid current branch.",
-			);
-		}
-		const branches = body.branches.flatMap((value): Array<Branch> => {
-			if (!value || typeof value !== "object") return [];
-			const row = value as Record<string, unknown>;
-			return typeof row.id === "string" &&
-				typeof row.name === "string" &&
-				typeof row.hidden === "boolean" &&
-				typeof row.commitId === "string"
-				? [
-						{
-							id: row.id,
-							name: row.name,
-							hidden: row.hidden,
-							commitId: row.commitId,
-						},
-					]
-				: [];
-		});
-		if (!branches.some((branch) => branch.id === body.currentBranchId)) {
-			throw new FileServiceError(
-				"upstream_error",
-				"Lix current branch is missing from the branch list.",
-			);
-		}
-		return { branches, currentBranchId: body.currentBranchId };
 	}
 
 	async execute(
 		workspaceId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse> {
-		const response = await this.executeScript(workspaceId, request);
-		const [result] = response.results;
-		if (!result || response.results.length !== 1) {
-			throw new FileServiceError(
-				"upstream_error",
-				"Lix returned an invalid single-statement result.",
-			);
+		try {
+			const session = await this.session(workspaceId);
+			return await this.enqueueSession(session, async () => {
+				await this.selectBranch(session, request.branchId);
+				return encodeExecuteResult(
+					await session.lix.execute(
+						request.sql,
+						(request.params ?? []).map(decodeWireParam),
+						request.options,
+					),
+				);
+			});
+		} catch (caught) {
+			throw asFileServiceError(caught);
 		}
+	}
+
+	async executeBatch(
+		workspaceId: string,
+		request: ExecuteBatchRequest,
+	): Promise<ExecuteScriptResponse> {
+		try {
+			const session = await this.session(workspaceId);
+			return await this.enqueueSession(session, async () => {
+				await this.selectBranch(session, request.branchId);
+				const results = await session.lix.executeBatch(
+					request.statements.map((statement) => ({
+						sql: statement.sql,
+						params: (statement.params ?? []).map(decodeWireParam),
+					})),
+					request.options,
+				);
+				return { results: results.map(encodeExecuteResult) };
+			});
+		} catch (caught) {
+			throw asFileServiceError(caught);
+		}
+	}
+
+	async close(): Promise<void> {
+		this.closePromise ??= (async () => {
+			this.closed = true;
+			const sessions = [...this.sessions.values()];
+			this.sessions.clear();
+			await Promise.all(
+				sessions.map(async (pending) => {
+					try {
+						const session = await pending;
+						await session.queue;
+						await session.lix.close();
+					} catch {
+						// A failed open or operation has no live session to close.
+					}
+				}),
+			);
+		})();
+		return this.closePromise;
+	}
+
+	private session(workspaceId: string): Promise<WorkspaceLixSession> {
+		if (this.closed) {
+			throw new FileServiceError("upstream_error", "Lix client is closed.");
+		}
+		let pending = this.sessions.get(workspaceId);
+		if (pending) return pending;
+		pending = this.openSession(workspaceId).catch((error) => {
+			this.sessions.delete(workspaceId);
+			throw error;
+		});
+		this.sessions.set(workspaceId, pending);
+		return pending;
+	}
+
+	private async openSession(workspaceId: string): Promise<WorkspaceLixSession> {
+		const lix = await openLix({
+			server: {
+				mode: "remote",
+				url: "https://mcp.lixray.invalid",
+				fetch: (input, init) => this.protocolFetch(workspaceId, input, init),
+			},
+		});
+		return {
+			lix,
+			queue: Promise.resolve(),
+		};
+	}
+
+	private async enqueueSession<T>(
+		session: WorkspaceLixSession,
+		operation: () => Promise<T>,
+	): Promise<T> {
+		const result = session.queue.then(operation, operation);
+		session.queue = result.then(
+			() => undefined,
+			() => undefined,
+		);
 		return result;
 	}
 
-	async executeScript(
-		workspaceId: string,
-		request: ExecuteRequest,
-	): Promise<ExecuteScriptResponse> {
-		return this.containerJson<ExecuteScriptResponse>(
-			workspaceId,
-			"/v1/execute",
-			{
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(request),
-			},
-		);
+	private async selectBranch(
+		session: WorkspaceLixSession,
+		branchId: string,
+	): Promise<void> {
+		await session.lix.switchBranch({ branchId });
 	}
 
-	async mutate(
+	private async protocolFetch(
 		workspaceId: string,
-		request: FilesystemMutationRequest,
-	): Promise<FilesystemMutationOutcome> {
-		const body = await this.containerJson<{ outcome?: unknown }>(
-			workspaceId,
-			"/v1/filesystem/mutate",
-			{
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(request),
-			},
-		);
-		if (
-			body.outcome !== "applied" &&
-			body.outcome !== "conflict" &&
-			body.outcome !== "already_exists"
-		) {
-			throw new FileServiceError(
-				"upstream_error",
-				"Lix returned an invalid filesystem mutation outcome.",
-			);
-		}
-		return body.outcome;
+		input: RequestInfo | URL,
+		init?: RequestInit,
+	): Promise<Response> {
+		const request = new Request(input, {
+			...init,
+			signal: init?.signal ?? this.signal,
+		});
+		const path = canonicalProtocolPath(new URL(request.url));
+		if (path === null) return new Response("Not found\n", { status: 404 });
+		return this.workspaceResponse(workspaceId, path, request);
 	}
 
-	private async containerJson<T>(
+	private async workspaceResponse(
 		workspaceId: string,
 		path: string,
-		init: RequestInit,
-	): Promise<T> {
+		request: Request,
+	): Promise<Response> {
 		const authorizationFailure = await this.authorizeWorkspace(
 			workspaceId,
 			this.user,
 			this.env,
 		);
-		if (authorizationFailure) {
-			const message = (await authorizationFailure.text()).trim();
-			throw new FileServiceError(
-				authorizationFailure.status === 403 ? "not_found" : "upstream_error",
-				message || "Workspace access denied.",
-			);
-		}
-		const signal = init.signal ?? this.signal;
-		const createWorkspaceRequest = () =>
-			new Request(`https://lixray-container.invalid${path}`, {
-				...init,
-				signal,
-			});
+		if (authorizationFailure) return authorizationFailure;
+
+		const url = new URL(request.url);
+		url.pathname = path;
+		const rewritten = new Request(url, request);
+		const headers = new Headers(rewritten.headers);
+		headers.delete("authorization");
+		const template = new Request(rewritten, { headers });
 		if (this.workspaceFetch) {
-			return this.responseJson<T>(
-				await this.workspaceFetch(workspaceId, createWorkspaceRequest()),
-			);
+			return this.workspaceFetch(workspaceId, template);
 		}
 
 		const containerNamespace = this.env.SLATEDB_CONTAINER;
 		if (!containerNamespace) {
-			throw new FileServiceError(
-				"upstream_error",
-				"Workspace storage is not configured.",
-			);
+			return new Response("Workspace storage is not configured.\n", {
+				status: 500,
+			});
 		}
-		let response: Response;
 		try {
-			response = await fetchContainerWithRetry({
+			return await fetchContainerWithRetry({
 				namespace: containerNamespace,
 				workspaceId,
-				operation: path,
+				operation: `${request.method} ${path}`,
 				envVars: containerEnv(this.env, workspaceId),
-				createRequest: createWorkspaceRequest,
-				requestReplay: ["GET", "HEAD"].includes(
-					(init.method ?? "GET").toUpperCase(),
-				)
-					? "safe"
-					: "unsafe",
-				signal: signal ?? undefined,
+				createRequest: () => template.clone() as unknown as Request,
+				requestReplay: workspaceRequestReplay(request.method, path),
+				signal: request.signal,
 				retryDelay: this.retryDelay,
 				retryRandom: this.retryRandom,
 				onRetry: logTransientContainerRetry,
 			});
 		} catch (caught) {
-			if (signal?.aborted) {
-				throw new FileServiceError(
-					"upstream_error",
-					"Workspace storage request was cancelled.",
+			if (request.signal.aborted) {
+				return Response.json(
+					{
+						error: {
+							code: "LIX_REMOTE_CANCELLED",
+							message: "Workspace storage request was cancelled.",
+						},
+					},
+					{ status: 499 },
 				);
 			}
 			console.error("LixRay container request failed", {
@@ -331,32 +406,124 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				path,
 				error: containerErrorDetails(caught),
 			});
-			throw new FileServiceError(
-				"upstream_error",
-				"Workspace storage request failed.",
-			);
+			throw caught;
 		}
-
-		const body = await parseResponse(response);
-		if (response.ok) return body as T;
-		throw new FileServiceError(
-			apiErrorCode(body) ?? "upstream_error",
-			apiErrorMessage(body, response.status),
-			apiErrorDetails(body, response.status),
-		);
 	}
+}
 
-	private async responseJson<T>(response: Response): Promise<T> {
-		const body = await parseResponse(response);
-		if (!response.ok) {
-			throw new FileServiceError(
-				apiErrorCode(body) ?? "upstream_error",
-				apiErrorMessage(body, response.status),
-				apiErrorDetails(body, response.status),
-			);
+function canonicalProtocolPath(url: URL): string | null {
+	const marker = "/lix/v1/";
+	const markerIndex = url.pathname.indexOf(marker);
+	if (markerIndex === -1) return null;
+	return url.pathname.slice(markerIndex);
+}
+
+function workspaceRequestReplay(
+	method: string,
+	path: string,
+): "safe" | "unsafe" {
+	if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return "safe";
+	return path.endsWith("/observe") || path.endsWith("/observe/multiplex")
+		? "safe"
+		: "unsafe";
+}
+
+function decodeWireParam(
+	value: NonNullable<ExecuteRequest["params"]>[number],
+): SqlParam {
+	switch (value.kind) {
+		case "null":
+			return Value.null();
+		case "bool":
+			return Value.boolean(value.value);
+		case "int":
+			return Value.integer(value.value);
+		case "float":
+			return Value.real(value.value);
+		case "text":
+			return Value.text(value.value);
+		case "json":
+			return Value.json(value.value as JsonValue);
+		case "blob":
+			return Value.blob(base64ToBytes(value.base64));
+	}
+}
+
+function encodeExecuteResult(result: LixExecuteResult): ExecuteResponse {
+	return {
+		columns: [...result.columns],
+		rows: result.rows.map((row) =>
+			result.columns.map((column) => encodeLixValue(row.value(column))),
+		),
+		rowsAffected: result.rowsAffected,
+		notices: result.notices.map((notice) => ({ ...notice })),
+	};
+}
+
+type LixResultValue = ReturnType<LixExecuteResult["rows"][number]["value"]>;
+
+function encodeLixValue(
+	value: LixResultValue,
+): ExecuteResponse["rows"][number][number] {
+	const jsValue = value.toJS();
+	switch (value.kind) {
+		case "null":
+			return { kind: "null", value: null };
+		case "boolean":
+			return { kind: "bool", value: jsValue as boolean };
+		case "integer":
+			return { kind: "int", value: jsValue as number };
+		case "real":
+			return { kind: "float", value: jsValue as number };
+		case "text":
+			return { kind: "text", value: jsValue as string };
+		case "json":
+			return { kind: "json", value: jsValue };
+		case "blob": {
+			const bytes = value.asBytes();
+			if (!bytes) {
+				throw new FileServiceError(
+					"upstream_error",
+					"Lix returned an invalid blob value.",
+				);
+			}
+			return { kind: "blob", base64: bytesToBase64(bytes) };
 		}
-		return body as T;
 	}
+}
+
+function asFileServiceError(caught: unknown): FileServiceError {
+	if (caught instanceof FileServiceError) return caught;
+	const error =
+		caught && typeof caught === "object"
+			? (caught as Record<string, unknown>)
+			: undefined;
+	const status = typeof error?.status === "number" ? error.status : undefined;
+	const rawCode = typeof error?.code === "string" ? error.code : undefined;
+	const transportError =
+		rawCode === "LIX_REMOTE_CANCELLED" ||
+		rawCode === "LIX_REMOTE_PROTOCOL_ERROR" ||
+		rawCode === "LIX_REMOTE_REQUEST_FAILED" ||
+		rawCode === "LIX_REMOTE_UNAVAILABLE";
+	const details =
+		error?.details &&
+		typeof error.details === "object" &&
+		!Array.isArray(error.details)
+			? { ...(error.details as Record<string, unknown>) }
+			: {};
+	if (status !== undefined) details.status = status;
+	if (typeof error?.hint === "string") details.hint = error.hint;
+	const code: FileServiceErrorCode =
+		status === 403 || status === 404
+			? "not_found"
+			: rawCode?.startsWith("LIX_") && !transportError
+				? (rawCode as `LIX_${string}`)
+				: "upstream_error";
+	return new FileServiceError(
+		code,
+		caught instanceof Error ? caught.message : "Lix request failed.",
+		Object.keys(details).length === 0 ? undefined : details,
+	);
 }
 
 function containerEnv(
@@ -380,53 +547,6 @@ function containerEnv(
 		if (value !== undefined) vars[name] = value;
 	}
 	return vars;
-}
-
-async function parseResponse(response: Response): Promise<unknown> {
-	const contentType = response.headers.get("content-type") ?? "";
-	return contentType.includes("application/json")
-		? response.json()
-		: response.text();
-}
-
-function apiErrorMessage(body: unknown, status: number): string {
-	const error = apiErrorBody(body);
-	if (typeof error?.message === "string") return error.message;
-	if (typeof body === "string" && body.trim()) return body.trim();
-	return `Lix request failed with status ${status}.`;
-}
-
-function apiErrorCode(body: unknown): FileServiceErrorCode | undefined {
-	const code = apiErrorBody(body)?.code;
-	return typeof code === "string" && code.startsWith("LIX_")
-		? (code as `LIX_${string}`)
-		: undefined;
-}
-
-function apiErrorDetails(
-	body: unknown,
-	status: number,
-): Record<string, unknown> {
-	const error = apiErrorBody(body);
-	const details =
-		error?.details &&
-		typeof error.details === "object" &&
-		!Array.isArray(error.details)
-			? (error.details as Record<string, unknown>)
-			: {};
-	return {
-		...details,
-		status,
-		...(typeof error?.hint === "string" ? { hint: error.hint } : {}),
-	};
-}
-
-function apiErrorBody(body: unknown): Record<string, unknown> | undefined {
-	if (!body || typeof body !== "object" || !("error" in body)) return undefined;
-	const error = body.error;
-	return error && typeof error === "object"
-		? (error as Record<string, unknown>)
-		: undefined;
 }
 
 function logTransientContainerRetry(
