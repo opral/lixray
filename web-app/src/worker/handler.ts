@@ -37,6 +37,7 @@ import {
 	type ContainerRetryDelay,
 	type ContainerStub as RetryingContainerStub,
 } from "./container-retry.ts";
+import { resolveSupabaseWorkspaceId } from "./workspace-resolver.ts";
 
 export interface WorkerEnv {
 	ASSETS?: Fetcher;
@@ -138,8 +139,6 @@ export type McpClaimsValidation =
 const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const WORKSPACE_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
-const UUID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const jwksByUrl = new Map<string, JWTVerifyGetKey>();
 
 export async function handleRequest(
@@ -608,64 +607,19 @@ export async function resolveWorkspaceWithSupabase(
 		};
 	}
 
-	const headers = {
-		apikey: env.SUPABASE_PUBLISHABLE_KEY,
-		Authorization: `Bearer ${auth.token}`,
-		Accept: "application/json",
-	};
-	const organizationsUrl = new URL("/rest/v1/organizations", env.SUPABASE_URL);
-	organizationsUrl.searchParams.set("select", "id");
-	organizationsUrl.searchParams.set("handle", `eq.${namespace}`);
-	organizationsUrl.searchParams.set("limit", "1");
-	const organizations = await visibleRows(organizationsUrl, headers);
-	if (!organizations.ok) return organizations;
-	const organizationId = singleUuid(organizations.rows);
-	if (!organizationId) return workspaceNotFound();
-
-	const workspacesUrl = new URL("/rest/v1/workspaces", env.SUPABASE_URL);
-	workspacesUrl.searchParams.set("select", "id");
-	workspacesUrl.searchParams.set("organization_id", `eq.${organizationId}`);
-	workspacesUrl.searchParams.set("slug", `eq.${workspaceSlug}`);
-	workspacesUrl.searchParams.set("deleted_at", "is.null");
-	workspacesUrl.searchParams.set("limit", "1");
-	const workspaces = await visibleRows(workspacesUrl, headers);
-	if (!workspaces.ok) return workspaces;
-	const workspaceId = singleUuid(workspaces.rows);
-	return workspaceId ? { ok: true, workspaceId } : workspaceNotFound();
-}
-
-async function visibleRows(
-	url: URL,
-	headers: Record<string, string>,
-): Promise<
-	| { ok: true; rows: Array<Record<string, unknown>> }
-	| { ok: false; response: Response }
-> {
-	let response: Response;
-	try {
-		response = await fetch(url, { headers });
-	} catch {
-		return workspaceResolutionUnavailable();
+	const result = await resolveSupabaseWorkspaceId({
+		supabaseUrl: env.SUPABASE_URL,
+		publishableKey: env.SUPABASE_PUBLISHABLE_KEY,
+		accessToken: auth.token,
+		namespace,
+		workspaceSlug,
+	});
+	if (!result.ok) {
+		return result.reason === "not_found"
+			? workspaceNotFound()
+			: workspaceResolutionUnavailable();
 	}
-	if (!response.ok) return workspaceResolutionUnavailable();
-	try {
-		const body: unknown = await response.json();
-		if (!Array.isArray(body)) return workspaceResolutionUnavailable();
-		return {
-			ok: true,
-			rows: body.filter(
-				(row): row is Record<string, unknown> =>
-					Boolean(row) && typeof row === "object" && !Array.isArray(row),
-			),
-		};
-	} catch {
-		return workspaceResolutionUnavailable();
-	}
-}
-
-function singleUuid(rows: Array<Record<string, unknown>>): string | null {
-	const id = rows.length === 1 ? rows[0]?.id : null;
-	return typeof id === "string" && UUID_PATTERN.test(id) ? id : null;
+	return { ok: true, workspaceId: result.workspaceId };
 }
 
 function workspaceNotFound(): WorkspaceResolution {

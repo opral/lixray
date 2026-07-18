@@ -872,9 +872,9 @@ void test("Supabase canonical workspace resolution joins RLS-visible organizatio
 			new Headers(init?.headers).get("authorization"),
 			"Bearer verified-user-token",
 		);
-		return url.pathname.endsWith("/organizations")
-			? Response.json([{ id: DEMO_ORGANIZATION_ID }])
-			: Response.json([{ id: WORKSPACE_A }]);
+		return Response.json([
+			{ id: WORKSPACE_A, organizations: { id: DEMO_ORGANIZATION_ID } },
+		]);
 	};
 	try {
 		const resolution = await resolveWorkspaceWithSupabase(
@@ -889,14 +889,18 @@ void test("Supabase canonical workspace resolution joins RLS-visible organizatio
 			}),
 		);
 		assert.deepEqual(resolution, { ok: true, workspaceId: WORKSPACE_A });
-		assert.equal(lookups.length, 2);
-		assert.equal(lookups[0]?.searchParams.get("handle"), "eq.acme");
+		assert.equal(lookups.length, 1);
+		assert.equal(lookups[0]?.pathname, "/rest/v1/workspaces");
 		assert.equal(
-			lookups[1]?.searchParams.get("organization_id"),
-			`eq.${DEMO_ORGANIZATION_ID}`,
+			lookups[0]?.searchParams.get("select"),
+			"id,organizations!inner(id)",
 		);
-		assert.equal(lookups[1]?.searchParams.get("slug"), "eq.launch-q3");
-		assert.equal(lookups[1]?.searchParams.get("deleted_at"), "is.null");
+		assert.equal(
+			lookups[0]?.searchParams.get("organizations.handle"),
+			"eq.acme",
+		);
+		assert.equal(lookups[0]?.searchParams.get("slug"), "eq.launch-q3");
+		assert.equal(lookups[0]?.searchParams.get("deleted_at"), "is.null");
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
