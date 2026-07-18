@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DatabaseZap, LogIn } from "lucide-react";
+import { LogIn, PencilLine } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "~/components/auth-provider";
+import { Button } from "~/components/ui/button";
 import { normalizeAuthReturnTo } from "~/lib/auth-return-to";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { localDevCredentials } from "~/lib/supabase";
@@ -27,6 +28,7 @@ function SignInPage() {
 	const usesLocalAccount = Boolean(localDevCredentials) || usesPreviewAccount;
 	const joiningSharedWorkspace =
 		usesPreviewAccount && peekWorkspaceShareJoinIntent() !== null;
+	const usesGoogle = !usesLocalAccount;
 
 	const signIn = async () => {
 		setSubmitting(true);
@@ -47,47 +49,51 @@ function SignInPage() {
 	};
 
 	return (
-		<main className="grid min-h-screen place-items-center bg-[var(--color-bg-app)] px-5 py-8 text-[var(--color-text-primary)]">
-			<div className="grid w-full max-w-[620px] justify-items-center gap-5 rounded-[8px] border border-[var(--color-border-panel)] bg-[var(--color-bg-panel)] p-7 shadow-[var(--shadow-md)]">
+		<main className="grid min-h-screen place-items-center bg-bg-app px-5 py-8 text-text-primary">
+			<div className="grid w-full max-w-[400px] justify-items-center gap-6 rounded-xl border border-border-panel bg-bg-panel px-7 py-9 shadow-[0_18px_50px_rgba(28,25,23,0.1),0_2px_8px_rgba(28,25,23,0.05)]">
 				<a
 					href="/"
-					className="inline-flex items-center gap-2.5 font-[750] tracking-normal no-underline"
+					className="inline-flex items-center gap-2 font-[750] no-underline"
 					aria-label="LixRay home"
 				>
-					<span className="grid size-7 place-items-center rounded-[7px] bg-[var(--color-bg-action-secondary)] text-[var(--color-text-on-action-secondary)]">
-						<DatabaseZap size={17} aria-hidden="true" />
-					</span>
+					<img src="/lixray-mark.svg" alt="" className="size-6" />
 					<span>LixRay</span>
 				</a>
 				<div className="grid gap-2 text-center">
-					<h1 className="m-0 text-2xl leading-[1.2] tracking-normal">
-						Sign in to LixRay
+					<h1 className="m-0 text-xl font-bold leading-tight">
+						{joiningSharedWorkspace ? "Join to edit" : "Sign in to LixRay"}
 					</h1>
-					<p className="m-0 text-[var(--color-text-tertiary)]">
+					<p className="m-0 text-sm leading-normal text-text-tertiary">
 						{usesPreviewAccount
 							? joiningSharedWorkspace
-								? "Use the preview test account to join this workspace."
+								? "Sign in with the preview test account and you’ll land back on the shared file, ready to edit."
 								: "Use the preview test account to continue."
 							: localDevCredentials
 								? "Use the seeded local development account."
-								: "Use your Google account to continue."}
+								: joiningSharedWorkspace
+									? "Sign in with Google and you’ll land back on the shared file, ready to edit."
+									: "Use your Google account to continue."}
 					</p>
 				</div>
 				{user && !usesLocalAccount ? (
-					<a
-						className="inline-flex min-h-[38px] w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] no-underline transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] min-[801px]:w-auto"
-						href={returnTo}
-					>
-						Continue to LixRay
-					</a>
+					<Button asChild variant="featured" className="w-full font-semibold">
+						<a href={returnTo}>Continue to LixRay</a>
+					</Button>
 				) : (
-					<button
-						className="inline-flex min-h-[38px] w-full max-w-[320px] cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] disabled:cursor-not-allowed disabled:opacity-55"
+					<Button
 						type="button"
+						variant="featured"
+						className="w-full font-semibold"
 						disabled={!isLoaded || submitting}
 						onClick={() => void signIn()}
 					>
-						<LogIn size={17} aria-hidden="true" />
+						{usesGoogle ? (
+							<GoogleMark />
+						) : joiningSharedWorkspace ? (
+							<PencilLine aria-hidden="true" />
+						) : (
+							<LogIn aria-hidden="true" />
+						)}
 						{submitting
 							? usesLocalAccount
 								? "Signing in..."
@@ -99,14 +105,43 @@ function SignInPage() {
 								: localDevCredentials
 									? "Continue as local developer"
 									: "Continue with Google"}
-					</button>
+					</Button>
 				)}
 				{error ? (
-					<p className="mt-3.5 whitespace-pre-wrap rounded-[8px] border border-[var(--color-error-200)] bg-[var(--color-error-50)] px-3.5 py-3 text-[var(--color-error-800)]">
+					<p className="whitespace-pre-wrap rounded-lg border border-error-200 bg-error-50 px-3.5 py-3 text-sm text-error-800">
 						{error}
 					</p>
 				) : null}
 			</div>
 		</main>
+	);
+}
+
+/** Google’s four-color “G”, rendered on a white coin for contrast. */
+function GoogleMark() {
+	return (
+		<span
+			aria-hidden="true"
+			className="grid size-[18px] shrink-0 place-items-center rounded-full bg-white"
+		>
+			<svg viewBox="0 0 24 24" className="size-3">
+				<path
+					fill="#4285F4"
+					d="M23.52 12.27c0-.85-.08-1.67-.22-2.45H12v4.64h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.58-5.17 3.58-8.81Z"
+				/>
+				<path
+					fill="#34A853"
+					d="M12 24c3.24 0 5.96-1.07 7.94-2.91l-3.88-3.01c-1.07.72-2.45 1.15-4.06 1.15-3.13 0-5.78-2.11-6.72-4.95H1.27v3.11A12 12 0 0 0 12 24Z"
+				/>
+				<path
+					fill="#FBBC05"
+					d="M5.28 14.28a7.21 7.21 0 0 1 0-4.56V6.61H1.27a12 12 0 0 0 0 10.78l4.01-3.11Z"
+				/>
+				<path
+					fill="#EA4335"
+					d="M12 4.77c1.76 0 3.35.61 4.6 1.8l3.44-3.44A11.98 11.98 0 0 0 1.27 6.6l4.01 3.11C6.22 6.88 8.87 4.77 12 4.77Z"
+				/>
+			</svg>
+		</span>
 	);
 }

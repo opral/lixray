@@ -21,7 +21,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { PencilLine } from "lucide-react";
+import { Eye, PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
 import { WorkspaceShareDialog } from "~/components/workspace-share-dialog";
@@ -177,6 +177,7 @@ export function WorkspaceAtelier({
 					type="button"
 					variant="outline"
 					size="xs"
+					className="h-7 gap-1.5 px-3"
 					disabled={!isAuthLoaded}
 					onClick={() => void signInToCurrentWorkspace()}
 				>
@@ -188,6 +189,7 @@ export function WorkspaceAtelier({
 					type="button"
 					variant="featured"
 					size="xs"
+					className="h-7 gap-1.5 px-3 font-semibold"
 					disabled={shareAccess.joining}
 					onClick={() =>
 						void shareAccess.onJoinToEdit().catch((caught: unknown) => {
@@ -504,11 +506,14 @@ export function WorkspaceAtelier({
 									</Link>
 								),
 								navbarEnd: headerActions,
+								belowTopBar:
+									isReadOnly && shareAccess ? (
+										<ReadOnlyShareStrip
+											sharedByName={shareAccess.sharedByName}
+										/>
+									) : undefined,
 							}}
 						/>
-						{isReadOnly && shareAccess ? (
-							<ReadOnlyShareStrip sharedByName={shareAccess.sharedByName} />
-						) : null}
 						<Outlet />
 					</WorkspaceAtelierContext.Provider>
 				</WorkspaceDefaultBranchContext.Provider>
@@ -591,7 +596,13 @@ function WorkspaceShareControl({
 				void mintShareLink();
 			}}
 			trigger={
-				<Button type="button" size="xs" variant="outline" disabled={minting}>
+				<Button
+					type="button"
+					size="xs"
+					variant="outline"
+					className="h-7 px-3"
+					disabled={minting}
+				>
 					{minting ? "Creating…" : "Share"}
 				</Button>
 			}
@@ -619,17 +630,28 @@ function activeDocumentName({
 }
 
 function ReadOnlyShareStrip({ sharedByName }: { sharedByName: string | null }) {
+	const displayName = sharedByName ?? "a workspace member";
+	const initial = sharedByName?.trim().charAt(0).toUpperCase();
 	return (
 		<div
-			className="pointer-events-none absolute inset-x-0 top-9 z-20 flex h-8 items-center gap-2 border-b border-border-subtle bg-bg-panel/95 px-4 text-xs text-text-secondary shadow-sm backdrop-blur"
+			className="flex h-9 shrink-0 items-center gap-2 border-b border-border-panel bg-bg-app px-4 text-xs text-neutral-400"
 			role="status"
 		>
-			<span className="font-medium text-text-primary">Read-only</span>
+			<Eye aria-hidden="true" className="size-[13px]" strokeWidth={2} />
+			<span className="font-semibold text-neutral-500">Read-only</span>
 			<span aria-hidden="true">·</span>
-			<span>
+			<span className="inline-flex min-w-0 items-center gap-1.5 truncate">
 				shared by{" "}
-				<strong className="font-medium text-text-primary">
-					{sharedByName ?? "a workspace member"}
+				{initial ? (
+					<span
+						aria-hidden="true"
+						className="grid size-4 shrink-0 place-items-center rounded-full bg-neutral-200 text-[9px] font-semibold leading-none text-neutral-600"
+					>
+						{initial}
+					</span>
+				) : null}
+				<strong className="truncate font-semibold text-neutral-500">
+					{displayName}
 				</strong>
 			</span>
 		</div>

@@ -54,9 +54,11 @@ test("a preview test account can share an edit link and a fresh recipient can jo
 				timeout: 55_000,
 			},
 		);
-		await expect(
-			recipient.getByText("shared by Preview test account", { exact: false }),
-		).toBeVisible();
+		const readOnlyStrip = recipient.getByRole("status").filter({
+			hasText: "shared by",
+		});
+		await expect(readOnlyStrip).toBeVisible();
+		await expect(readOnlyStrip).toContainText("Preview test account");
 		await expect(recipient.getByRole("button", { name: "Share" })).toHaveCount(
 			0,
 		);
@@ -66,11 +68,10 @@ test("a preview test account can share an edit link and a fresh recipient can jo
 		await expect(
 			recipient.getByRole("button", { name: "Join to edit" }),
 		).toHaveAttribute("data-size", "xs");
-		const readOnlyToolbar = recipient.getByRole("toolbar", {
-			name: "Formatting toolbar",
-		});
-		await expect(readOnlyToolbar).toBeVisible();
-		await expect(readOnlyToolbar).toHaveAttribute("data-disabled", "true");
+		// The read view stays pristine: no formatting toolbar for readers.
+		await expect(
+			recipient.getByRole("toolbar", { name: "Formatting toolbar" }),
+		).toHaveCount(0);
 		await recipient.getByRole("button", { name: "Join to edit" }).click();
 		await expect(recipient).toHaveURL(/\/sign-in\?returnTo=/);
 		await recipient

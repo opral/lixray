@@ -90,21 +90,26 @@ export function WorkspaceShareDialog({
 					align="end"
 					sideOffset={8}
 					aria-label={`Share ${documentName}`}
+					onOpenAutoFocus={(event) => event.preventDefault()}
 					className={cn(
-						"z-50 grid w-[min(420px,calc(100vw-2rem))] gap-4 rounded-xl border border-border-panel bg-bg-panel p-4 text-text-primary shadow-xl outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+						"z-50 grid w-[min(384px,calc(100vw-2rem))] gap-3.5 rounded-xl border border-border-panel bg-bg-panel p-[18px] text-text-primary shadow-[0_18px_50px_rgba(28,25,23,0.18),0_2px_8px_rgba(28,25,23,0.08)] outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
 						className,
 					)}
 				>
 					<div className="flex items-center gap-2.5">
-						<img src={documentIconUrl} alt="" className="size-7 shrink-0" />
-						<h2 className="min-w-0 truncate text-sm font-semibold">
+						<img
+							src={documentIconUrl}
+							alt=""
+							className="size-[22px] shrink-0"
+						/>
+						<h2 className="min-w-0 truncate text-sm font-bold">
 							Share {documentName}
 						</h2>
 					</div>
 
 					<div className="flex min-w-0 items-stretch gap-2 max-[420px]:flex-col">
 						<div
-							className="flex h-9 min-w-0 grow cursor-text select-all items-center overflow-hidden rounded-lg border border-border-panel bg-bg-panel px-3 font-mono text-xs text-text-secondary focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring-focus-visible"
+							className="flex h-9 min-w-0 grow cursor-text select-all items-center overflow-hidden rounded-lg border border-border-panel bg-bg-panel px-3 font-mono text-[11px] text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
 							tabIndex={0}
 							role="textbox"
 							aria-readonly="true"
@@ -118,13 +123,13 @@ export function WorkspaceShareDialog({
 								}
 							}}
 						>
-							<span className="block truncate">{copiedUrl}</span>
+							<ShareLinkText url={copiedUrl} />
 						</div>
 						<Button
 							type="button"
 							variant="featured"
 							onClick={() => void handleCopy()}
-							className="shrink-0 max-[420px]:w-full"
+							className="shrink-0 font-semibold max-[420px]:w-full"
 						>
 							{copyState === "copied" ? (
 								<Check aria-hidden="true" />
@@ -136,7 +141,7 @@ export function WorkspaceShareDialog({
 					</div>
 
 					<div
-						className="inline-flex w-fit overflow-hidden rounded-lg border border-border-panel bg-bg-panel-muted p-0.5"
+						className="inline-flex w-fit rounded-lg bg-bg-hover p-[3px]"
 						role="radiogroup"
 						aria-label="Link access"
 					>
@@ -155,27 +160,58 @@ export function WorkspaceShareDialog({
 					</div>
 
 					<p
-						className="text-xs leading-5 text-text-secondary"
+						className="text-xs leading-5 text-text-tertiary"
 						aria-live="polite"
 					>
 						{copyState === "error" ? (
 							<span className="text-error-700" role="alert">
 								Couldn’t copy the link. Select it above and copy it manually.
 							</span>
-						) : copyState === "copied" ? (
-							<>Link copied to clipboard.</>
 						) : isEditableLink ? (
 							<>
-								Anyone with this link can read {documentName} and join{" "}
-								{workspaceName} as an editor.
+								Anyone who opens your link can read{" "}
+								<b className="font-semibold text-text-secondary">
+									{documentName}
+								</b>{" "}
+								and join{" "}
+								<b className="font-semibold text-text-secondary">
+									{workspaceName}
+								</b>{" "}
+								as an editor. Read only copies the plain link.
 							</>
 						) : (
-							<>Anyone with this link can read {documentName}.</>
+							<>
+								Anyone who opens your link can read{" "}
+								<b className="font-semibold text-text-secondary">
+									{documentName}
+								</b>
+								. The plain link carries no join grant.
+							</>
 						)}
 					</p>
 				</PopoverPrimitive.Content>
 			</PopoverPrimitive.Portal>
 		</PopoverPrimitive.Root>
+	);
+}
+
+/**
+ * Renders the share URL with the invite capability emphasized, so the sender
+ * sees which part of the link makes it special. Plain spans keep the text
+ * selectable and clipboard-safe.
+ */
+function ShareLinkText({ url }: { url: string }) {
+	const tokenStart = url.indexOf("?invite=");
+	if (tokenStart === -1) {
+		return <span className="block truncate">{url}</span>;
+	}
+	return (
+		<span className="block truncate">
+			{url.slice(0, tokenStart)}
+			<span className="font-medium text-text-primary">
+				{url.slice(tokenStart)}
+			</span>
+		</span>
 	);
 }
 
@@ -195,8 +231,8 @@ function ShareModeButton({
 			aria-checked={active}
 			onClick={onClick}
 			className={cn(
-				"rounded-md px-3 py-1.5 text-xs font-semibold text-text-secondary transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible",
-				active && "bg-bg-panel text-text-primary shadow-sm",
+				"rounded-md px-3 py-[5px] text-xs font-semibold text-text-tertiary transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible",
+				active && "bg-bg-panel font-bold text-text-primary shadow-sm",
 			)}
 		>
 			{children}
