@@ -15,6 +15,10 @@ import { useWorkspace } from "~/components/workspace-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { normalizeDirPath } from "~/lib/file-explorer-api";
 import {
+	acceptPreviewWorkspaceShareToken,
+	resolvePreviewWorkspaceShareToken,
+} from "~/lib/preview-workspace-share";
+import {
 	resolvePublicWorkspaceByRoute,
 	resolveWorkspaceShareToken,
 	type PublicWorkspaceRoute,
@@ -64,7 +68,14 @@ export const Route = createFileRoute("/@{$namespace}/$workspace")({
 function WorkspaceRoutePage() {
 	const { namespace, workspace: workspaceSlug } = Route.useParams();
 	const { branch, invite } = Route.useSearch();
-	const { client: authClient, signInWithGoogle, user: authUser } = useAuth();
+	const {
+		client: authClient,
+		hasPreviewWorkspaceMembership,
+		isLoaded: authIsLoaded,
+		refreshSession,
+		signInWithGoogle,
+		user: authUser,
+	} = useAuth();
 	const workspaceState = useWorkspace();
 	const navigate = useNavigate();
 	const demoResolved = useMemo(
@@ -76,6 +87,11 @@ function WorkspaceRoutePage() {
 			),
 		[namespace, workspaceSlug, workspaceState.organizations],
 	);
+	const demoCanEdit =
+		isDemoModeEnabled &&
+		demoResolved !== null &&
+		authUser !== null &&
+		hasPreviewWorkspaceMembership(demoResolved.workspace.id);
 	const [resolved, setResolved] = useState<
 		PublicWorkspaceRoute | null | undefined
 	>(undefined);
@@ -101,6 +117,7 @@ function WorkspaceRoutePage() {
 		setResolved(undefined);
 
 		if (isDemoModeEnabled) {
+			if (!authIsLoaded) return;
 			setResolved(
 				demoResolved
 					? {
@@ -110,7 +127,7 @@ function WorkspaceRoutePage() {
 							workspaceId: demoResolved.workspace.id,
 							workspaceName: demoResolved.workspace.name,
 							workspaceSlug: demoResolved.workspace.slug,
-							canEdit: true,
+							canEdit: demoCanEdit,
 						}
 					: null,
 			);
@@ -138,7 +155,9 @@ function WorkspaceRoutePage() {
 	}, [
 		accessRevision,
 		authClient,
+		authIsLoaded,
 		authUser?.id,
+		demoCanEdit,
 		demoResolved,
 		namespace,
 		workspaceSlug,
@@ -158,21 +177,54 @@ function WorkspaceRoutePage() {
 		});
 	}, [navigate]);
 
-	// Demo mode has no share-token database. Keep its existing editing demo
-	// usable if a copied capability URL is pasted into it, but never pretend the
-	// opaque token was accepted there.
+	// PR previews use their isolated R2 bucket to demonstrate the capability
+	// funnel. This is intentionally separate from the production Supabase/RLS
+	// implementation, but retains the same URL cleanup and session hand-off.
 	useEffect(() => {
-		if (!isDemoModeEnabled || !invite) return;
-		clearWorkspaceShareCapability();
-		setShareCapability(null);
-		cleanInviteFromAddressBar();
-	}, [cleanInviteFromAddressBar, invite]);
+		if (!isDemoModeEnabled || !invite || !resolved) return;
+		let disposed = false;
+		void resolvePreviewWorkspaceShareToken(invite)
+			.then((candidate) => {
+				if (disposed) return;
+				if (
+					candidate &&
+					candidate.grantsEdit &&
+					candidate.workspaceId === resolved.workspaceId
+				) {
+					const capability = {
+						token: invite,
+						workspaceId: candidate.workspaceId,
+						sharerName: candidate.sharedByName,
+					};
+					stageWorkspaceShareCapability(capability);
+					// Keep the resolved capability in React state as the URL is
+					// canonicalized. The session-storage recheck below remains a
+					// resilience path, rather than the only way to show Join to edit.
+					setShareCapability(capability);
+					return;
+				}
+				clearWorkspaceShareCapability();
+				setShareCapability(null);
+			})
+			.catch(() => {
+				if (disposed) return;
+				clearWorkspaceShareCapability();
+				setShareCapability(null);
+				toast.error("Unable to validate this share link.");
+			})
+			.finally(() => {
+				if (!disposed) cleanInviteFromAddressBar();
+			});
+		return () => {
+			disposed = true;
+		};
+	}, [cleanInviteFromAddressBar, invite, resolved]);
 
 	// A capability is resolved once, held only for this browser session, then
 	// removed from router state and the address bar. Invalid/revoked links clean
 	// to the same public read page instead of becoming a dead end.
 	useEffect(() => {
-		if (!resolved || !authClient || !invite) return;
+		if (isDemoModeEnabled || !resolved || !authClient || !invite) return;
 		let disposed = false;
 		void resolveWorkspaceShareToken(authClient, invite)
 			.then((candidate) => {
@@ -229,7 +281,22 @@ function WorkspaceRoutePage() {
 	// After canonicalization, re-check the session-held capability. This keeps a
 	// revoked link on the plain public page even after its token left the URL.
 	useEffect(() => {
-		if (!resolved || invite || !authClient) return;
+		if (!resolved || invite) return;
+		if (isDemoModeEnabled) {
+			const staged = peekWorkspaceShareCapability();
+			if (
+				!staged ||
+				staged.workspaceId !== resolved.workspaceId ||
+				resolved.canEdit
+			) {
+				if (resolved.canEdit) clearWorkspaceShareCapability();
+				setShareCapability(null);
+				return;
+			}
+			setShareCapability(staged);
+			return;
+		}
+		if (!authClient) return;
 		const staged = peekWorkspaceShareCapability();
 		if (
 			!staged ||
@@ -294,6 +361,32 @@ function WorkspaceRoutePage() {
 			await signInWithGoogle(canonicalPathFromLocation(window.location));
 			return;
 		}
+		if (isDemoModeEnabled) {
+			setJoining(true);
+			try {
+				const accepted = await acceptPreviewWorkspaceShareToken(
+					shareCapability.token,
+				);
+				if (
+					!accepted ||
+					!accepted.grantsEdit ||
+					accepted.workspaceId !== resolved.workspaceId
+				) {
+					throw new Error("This share link is no longer available.");
+				}
+				takeWorkspaceShareCapability();
+				setShareCapability(null);
+				await refreshSession();
+				setAccessRevision((current) => current + 1);
+				await workspaceState.refresh({ workspaceId: resolved.workspaceId });
+				toast.success(
+					`You joined ${resolved.workspaceName} — you can edit now.`,
+				);
+			} finally {
+				setJoining(false);
+			}
+			return;
+		}
 		if (!authClient) throw new Error("Authentication is still loading.");
 
 		setJoining(true);
@@ -318,6 +411,7 @@ function WorkspaceRoutePage() {
 	}, [
 		authClient,
 		authUser,
+		refreshSession,
 		resolved,
 		shareCapability,
 		signInWithGoogle,

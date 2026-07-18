@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Page, Request } from "@playwright/test";
-import { expect, expectOk, test } from "./fixtures";
+import { expect, expectOk, signInAsPreviewOwner, test } from "./fixtures";
 import type { BranchesResponse } from "../../src/lib/lixray-api";
 import { DEMO_AUTH_TOKEN } from "../../src/lib/demo-identity";
 
@@ -11,6 +11,7 @@ test("Atelier renders the remote workspace and keeps file navigation in its host
 	page,
 }) => {
 	const pendingExecutes = trackPageExecutes(page);
+	await signInAsPreviewOwner(page);
 	await seedMarkdownFile(page);
 	await page.goto("/@acme/launch-q3");
 
@@ -71,6 +72,7 @@ test("branch URL normalization preserves encoded file names", async ({
 	page,
 }) => {
 	const pendingExecutes = trackPageExecutes(page);
+	await signInAsPreviewOwner(page);
 	const filePath = "/encoded path % value.md";
 	const markdown = "# Encoded file route\n";
 	await seedMarkdownFile(page, filePath, markdown);
@@ -93,6 +95,7 @@ test("a branch-only file survives reload and falls back to the workspace root on
 	page,
 }) => {
 	const pendingExecutes = trackPageExecutes(page);
+	await signInAsPreviewOwner(page);
 	const { draftBranchId, filePath, mainBranchId } =
 		await seedBranchOnlyMarkdownFile(page);
 	const encodedPath = `/@acme/launch-q3/file/${encodeURIComponent(

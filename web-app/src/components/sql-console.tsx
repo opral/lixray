@@ -9,6 +9,7 @@ import {
 	useLixrayApi,
 } from "~/lib/lixray-api";
 import { formatCaughtError } from "~/lib/format";
+import { useAuth } from "~/components/auth-provider";
 
 const defaultSql =
 	"SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id";
@@ -30,6 +31,7 @@ const errorClass =
 	"mt-3.5 whitespace-pre-wrap rounded-[8px] border border-error-200 bg-error-50 px-3.5 py-3 text-error-800";
 
 export function SqlConsole({ workspaceName }: { workspaceName: string }) {
+	const { isLoaded: authLoaded, user } = useAuth();
 	const api = useLixrayApi();
 	const [branches, setBranches] = useState<Array<Branch>>([]);
 	const [activeBranchId, setActiveBranchId] = useState("");
@@ -72,8 +74,9 @@ export function SqlConsole({ workspaceName }: { workspaceName: string }) {
 	}, [api]);
 
 	useEffect(() => {
+		if (!authLoaded || !user) return;
 		void loadBranches();
-	}, [loadBranches]);
+	}, [authLoaded, loadBranches, user]);
 
 	const executeSql = async () => {
 		setExecuting(true);

@@ -29,6 +29,7 @@ import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import { openMockRemoteLix } from "~/lib/mock-remote-lix";
+import { createPreviewWorkspaceShareToken } from "~/lib/preview-workspace-share";
 import {
 	atelierBranchSearch,
 	isLixBranchNotFoundError,
@@ -42,7 +43,6 @@ import {
 	createWorkspaceSessionStateStore,
 } from "~/lib/atelier-state";
 import type { BrowserLix } from "~/lib/mock-remote-lix";
-import type { LixraySupabaseClient } from "~/lib/supabase";
 import { captureTelemetry } from "~/lib/telemetry";
 import {
 	appendWorkspaceShareToken,
@@ -128,9 +128,9 @@ export function WorkspaceAtelier({
 	const getAccessToken = useCallback(
 		() =>
 			isDemoModeEnabled
-				? Promise.resolve(DEMO_AUTH_TOKEN)
+				? Promise.resolve(canEdit ? DEMO_AUTH_TOKEN : null)
 				: getSessionAccessToken(),
-		[getSessionAccessToken],
+		[canEdit, getSessionAccessToken],
 	);
 	const signInToCurrentWorkspace = useCallback(async () => {
 		try {
@@ -144,8 +144,24 @@ export function WorkspaceAtelier({
 	const headerActions = canEdit ? (
 		client ? (
 			<WorkspaceShareControl
-				client={client}
-				workspaceId={workspaceId}
+				createShareToken={async () => {
+					const { data, error } = await client.rpc(
+						"create_workspace_share_token",
+						{ p_workspace_id: workspaceId },
+					);
+					if (error) throw error;
+					const token = data?.[0]?.token;
+					if (!isWorkspaceShareToken(token)) {
+						throw new Error("The share service returned an invalid link.");
+					}
+					return token;
+				}}
+				workspaceName={workspaceName}
+				documentName={documentName}
+			/>
+		) : isDemoModeEnabled ? (
+			<WorkspaceShareControl
+				createShareToken={() => createPreviewWorkspaceShareToken(workspaceId)}
 				workspaceName={workspaceName}
 				documentName={documentName}
 			/>
@@ -519,13 +535,11 @@ export function useWorkspaceDefaultBranchId(): string | null {
 }
 
 function WorkspaceShareControl({
-	client,
-	workspaceId,
+	createShareToken,
 	workspaceName,
 	documentName,
 }: {
-	client: LixraySupabaseClient;
-	workspaceId: string;
+	createShareToken: () => Promise<string>;
 	workspaceName: string;
 	documentName: string;
 }) {
@@ -537,14 +551,7 @@ function WorkspaceShareControl({
 		if (minting) return;
 		setMinting(true);
 		try {
-			const { data, error } = await client.rpc("create_workspace_share_token", {
-				p_workspace_id: workspaceId,
-			});
-			if (error) throw error;
-			const token = data?.[0]?.token;
-			if (!isWorkspaceShareToken(token)) {
-				throw new Error("The share service returned an invalid link.");
-			}
+			const token = await createShareToken();
 			const canonicalUrl = stripInviteFromUrl(window.location.href);
 			setUrls({
 				canonicalUrl,

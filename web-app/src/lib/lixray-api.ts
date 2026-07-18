@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
-import { isDemoModeEnabled } from "./demo-client";
-import { DEMO_AUTH_TOKEN } from "./demo-identity";
 import type {
 	FilesystemMutationOutcome,
 	FilesystemMutationRequest,
@@ -64,19 +62,12 @@ export class LixrayApiError extends Error {
 export function useLixrayApi() {
 	const { getAccessToken } = useAuth();
 	const { activeWorkspace } = useWorkspace();
-	const getTokenRef = useRef(getAccessToken);
-
-	useEffect(() => {
-		getTokenRef.current = getAccessToken;
-	}, [getAccessToken]);
 
 	const workspaceId = activeWorkspace?.workspace.id ?? null;
 
 	const request = useCallback(
 		async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-			const token = isDemoModeEnabled
-				? DEMO_AUTH_TOKEN
-				: await getTokenRef.current();
+			const token = await getAccessToken();
 			if (!token) {
 				throw new LixrayApiError(401, {
 					error: { message: "No Supabase access token is available" },
@@ -112,7 +103,7 @@ export function useLixrayApi() {
 				cleanup();
 			}
 		},
-		[workspaceId],
+		[getAccessToken, workspaceId],
 	);
 
 	return useMemo(

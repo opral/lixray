@@ -86,6 +86,11 @@ export interface AuthenticatedUser {
 	userId: string;
 	token: string;
 	isDemo?: boolean;
+	/**
+	 * Preview-only membership snapshot, populated after validating the
+	 * server-side demo-session cookie for this request.
+	 */
+	previewWorkspaceIds?: ReadonlyArray<string>;
 }
 
 export interface AuthenticatedMcpUser extends AuthenticatedUser {

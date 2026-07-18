@@ -3,7 +3,9 @@ import { DatabaseZap, LogIn } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { normalizeAuthReturnTo } from "~/lib/auth-return-to";
+import { isDemoModeEnabled } from "~/lib/demo-client";
 import { localDevCredentials } from "~/lib/supabase";
+import { peekWorkspaceShareJoinIntent } from "~/lib/workspace-share-capability";
 
 interface SignInSearch {
 	returnTo?: string;
@@ -21,13 +23,17 @@ function SignInPage() {
 	const returnTo = normalizeAuthReturnTo(search.returnTo ?? "/home");
 	const [error, setError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
+	const usesPreviewAccount = isDemoModeEnabled;
+	const usesLocalAccount = Boolean(localDevCredentials) || usesPreviewAccount;
+	const joiningSharedWorkspace =
+		usesPreviewAccount && peekWorkspaceShareJoinIntent() !== null;
 
 	const signIn = async () => {
 		setSubmitting(true);
 		setError(null);
 		try {
-			if (localDevCredentials) {
-				await signInAsLocalDev();
+			if (usesLocalAccount) {
+				await signInAsLocalDev(joiningSharedWorkspace ? "recipient" : "owner");
 				window.location.replace(returnTo);
 			} else {
 				await signInWithGoogle(returnTo);
@@ -58,12 +64,16 @@ function SignInPage() {
 						Sign in to LixRay
 					</h1>
 					<p className="m-0 text-[var(--color-text-tertiary)]">
-						{localDevCredentials
-							? "Use the seeded local development account."
-							: "Use your Google account to continue."}
+						{usesPreviewAccount
+							? joiningSharedWorkspace
+								? "Use the preview test account to join this workspace."
+								: "Use the preview test account to continue."
+							: localDevCredentials
+								? "Use the seeded local development account."
+								: "Use your Google account to continue."}
 					</p>
 				</div>
-				{user && !localDevCredentials ? (
+				{user && !usesLocalAccount ? (
 					<a
 						className="inline-flex min-h-[38px] w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] no-underline transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] min-[801px]:w-auto"
 						href={returnTo}
@@ -79,12 +89,16 @@ function SignInPage() {
 					>
 						<LogIn size={17} aria-hidden="true" />
 						{submitting
-							? localDevCredentials
+							? usesLocalAccount
 								? "Signing in..."
 								: "Redirecting..."
-							: localDevCredentials
-								? "Continue as local developer"
-								: "Continue with Google"}
+							: usesPreviewAccount
+								? joiningSharedWorkspace
+									? "Join as preview user"
+									: "Continue as preview user"
+								: localDevCredentials
+									? "Continue as local developer"
+									: "Continue with Google"}
 					</button>
 				)}
 				{error ? (

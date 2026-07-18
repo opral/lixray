@@ -218,7 +218,7 @@ export function WorkspaceDirectory() {
 						)
 					)}
 
-					{firstWorkspace ? (
+					{firstWorkspace && !isDemoModeEnabled ? (
 						<McpQuickstart
 							organization={firstWorkspace.organization}
 							workspace={firstWorkspace.workspace}
