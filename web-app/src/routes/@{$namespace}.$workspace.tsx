@@ -102,6 +102,7 @@ function WorkspaceRoutePage() {
 	const [accessRevision, setAccessRevision] = useState(0);
 	const [settledInviteKey, setSettledInviteKey] = useState<string | null>(null);
 	const automaticJoinAttempt = useRef<string | null>(null);
+	const demoWorkspaceId = demoResolved?.workspace.id;
 	const resolvedWorkspaceId = resolved?.workspaceId;
 	const inviteResolutionKey =
 		resolvedWorkspaceId && invite ? `${resolvedWorkspaceId}:${invite}` : null;
@@ -182,7 +183,7 @@ function WorkspaceRoutePage() {
 	// funnel. This is intentionally separate from the production Supabase/RLS
 	// implementation, but retains the same URL cleanup and session hand-off.
 	useEffect(() => {
-		if (!isDemoModeEnabled || !invite || !resolvedWorkspaceId) return;
+		if (!isDemoModeEnabled || !invite || !demoWorkspaceId) return;
 		let disposed = false;
 		void resolvePreviewWorkspaceShareToken(invite)
 			.then((candidate) => {
@@ -190,7 +191,7 @@ function WorkspaceRoutePage() {
 				if (
 					candidate &&
 					candidate.grantsEdit &&
-					candidate.workspaceId === resolvedWorkspaceId
+					candidate.workspaceId === demoWorkspaceId
 				) {
 					const capability = {
 						token: invite,
@@ -219,7 +220,7 @@ function WorkspaceRoutePage() {
 		return () => {
 			disposed = true;
 		};
-	}, [cleanInviteFromAddressBar, invite, resolvedWorkspaceId]);
+	}, [cleanInviteFromAddressBar, demoWorkspaceId, invite]);
 
 	// A capability is resolved once, held only for this browser session, then
 	// removed from router state and the address bar. Invalid/revoked links clean

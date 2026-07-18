@@ -1,4 +1,5 @@
-import { Check, Copy, FileText } from "lucide-react";
+import { fileIconUrl } from "@opral/atelier/file-icons";
+import { Check, Copy } from "lucide-react";
 import { type ReactElement, useEffect, useMemo, useState } from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Button } from "~/components/ui/button";
@@ -75,7 +76,7 @@ export function WorkspaceShareDialog({
 	const copiedUrl = shareMode === "edit" ? editableUrl : canonicalUrl;
 	const linkParts = useMemo(() => splitInviteUrl(copiedUrl), [copiedUrl]);
 	const isEditableLink = shareMode === "edit";
-	const isMarkdownDocument = /\.(?:md|markdown)$/i.test(documentName);
+	const documentIconUrl = fileIconUrl(documentName);
 
 	useEffect(() => {
 		setCopyState("idle");
@@ -122,17 +123,7 @@ export function WorkspaceShareDialog({
 					)}
 				>
 					<div className="flex items-center gap-2.5">
-						{isMarkdownDocument ? (
-							<img
-								src="/landing/file-markdown.svg"
-								alt=""
-								className="size-7 shrink-0"
-							/>
-						) : (
-							<span className="grid size-7 shrink-0 place-items-center rounded-md bg-bg-selection-current text-icon-selection-current">
-								<FileText className="size-4" aria-hidden="true" />
-							</span>
-						)}
+						<img src={documentIconUrl} alt="" className="size-7 shrink-0" />
 						<h2 className="min-w-0 truncate text-sm font-semibold">
 							Share {documentName}
 						</h2>
