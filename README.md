@@ -101,8 +101,8 @@ Authorization: Bearer <Supabase access token>
 The Worker verifies the ES256 JWT against Supabase JWKS, then resolves the
 namespace and workspace slug through the Supabase Data API with the same user
 token. Row Level Security proves membership. The Worker strips the public
-workspace prefix and `Authorization` header before forwarding the canonical
-`/lix/v1/*` request to the Rust container.
+workspace prefix and `Authorization` header, then forwards the request to the
+Rust workspace service at `/workspaces/<workspace-id>/lix/v1/*`.
 
 Invalid authentication returns `401`; missing or inaccessible workspaces return
 `404` without revealing whether the workspace exists.
@@ -112,10 +112,13 @@ Invalid authentication returns `401`; missing or inaccessible workspaces return
 Each workspace routes to isolated runtime and storage state:
 
 ```text
-container name = <workspace UUID>
-SLATEDB_PATH = <workspace UUID>
-R2 object prefix = lixray/<workspace UUID>/
+workspace runtime key = <workspace UUID>
+R2 object prefix = <workspace UUID>/
 ```
+
+One `lix-server` process can host multiple workspaces. It opens runtimes lazily,
+coalesces concurrent opens, and evicts idle runtimes from a bounded warm cache.
+`LIXRAY_MAX_OPEN_WORKSPACES` controls that bound and defaults to `32`.
 
 There is no fallback to `lixray/default`. The Supabase cutover is a fresh start;
 old Clerk organization prefixes are not mapped into new workspaces. Leave them
@@ -282,7 +285,7 @@ pnpm --dir database test
 pnpm --dir web-app test:e2e
 pnpm --dir web-app build
 cargo test --manifest-path lix-server/Cargo.toml
-docker build lix-server
+docker build -f lix-server/Dockerfile .
 pnpm --dir web-app deploy:worker --dry-run
 ```
 
@@ -302,6 +305,26 @@ Run the demo Worker directly with:
 ```sh
 pnpm --dir web-app dev:demo
 ```
+
+## Performance loop
+
+The performance loop uses the production `lix-server` image and an isolated
+in-memory workspace:
+
+```sh
+pnpm perf:up
+pnpm perf:seed
+pnpm perf:run -- --output perf/results/baseline.json
+# edit vendor/lix or lix-server
+pnpm perf:up
+pnpm perf:seed
+pnpm perf:run -- --compare perf/results/baseline.json
+pnpm perf:down
+```
+
+The runner warms each named query, reports p50/p95/mean latency, and writes the
+raw samples as JSON. Override the service with `LIXRAY_PERF_URL` or select other
+fixture/workload files with `--fixture` and `--workload`.
 
 ## Deployment
 

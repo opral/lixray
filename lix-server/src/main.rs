@@ -1,5 +1,5 @@
 use anyhow::Context;
-use lixray::{open_lix_service, router, Config};
+use lixray::{router, Config, WorkspaceRuntimeManager};
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -14,14 +14,13 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(&config.bind_addr)
         .await
         .with_context(|| format!("bind {}", config.bind_addr))?;
-    tracing::info!(addr = %config.bind_addr, "lixray container port ready");
-
-    // Bind before opening SlateDB so the container runtime can observe port
-    // readiness immediately. Requests received while storage is opening wait
-    // in the listener backlog until Axum starts accepting connections.
-    let service = open_lix_service(&config).await?;
-    tracing::info!(addr = %config.bind_addr, "lixray container service ready");
-    axum::serve(listener, router(service))
+    let manager = WorkspaceRuntimeManager::new(&config)?;
+    tracing::info!(
+        addr = %config.bind_addr,
+        max_open_workspaces = config.max_open_workspaces,
+        "lix workspace service ready"
+    );
+    axum::serve(listener, router(manager))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("serve HTTP")

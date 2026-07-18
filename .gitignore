@@ -26,3 +26,4 @@
 # Playwright local artifacts
 /playwright-report/
 /test-results/
+perf/results/

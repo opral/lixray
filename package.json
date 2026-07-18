@@ -5,6 +5,11 @@
     "dev": "node scripts/dev.mjs",
     "dev:telemetry": "infisical run --env=dev -- pnpm dev",
     "deploy:worker": "infisical run --env=prod -- pnpm --dir web-app deploy:worker",
+    "perf:build": "docker build -f lix-server/Dockerfile -t lixray-perf .",
+    "perf:up": "docker compose up --build -d lix-server",
+    "perf:down": "docker compose down",
+    "perf:seed": "node perf/runner.mjs seed",
+    "perf:run": "node perf/runner.mjs run",
     "postinstall": "pnpm --dir web-app lix:build"
   },
   "devDependencies": {

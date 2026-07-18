@@ -1,0 +1,14 @@
+services:
+  lix-server:
+    build:
+      context: .
+      dockerfile: lix-server/Dockerfile
+      args:
+        LIXRAY_IMAGE_VARIANT: perf
+    environment:
+      BIND_ADDR: 0.0.0.0:8080
+      LIXRAY_MAX_OPEN_WORKSPACES: 4
+      RUST_LOG: lixray=info
+      SLATEDB_STORAGE: memory
+    ports:
+      - "127.0.0.1:8080:8080"

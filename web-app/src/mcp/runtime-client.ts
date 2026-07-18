@@ -376,13 +376,16 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				status: 500,
 			});
 		}
+		const workspacePath = `/workspaces/${encodeURIComponent(workspaceId)}${path}`;
+		url.pathname = workspacePath;
+		const containerTemplate = new Request(url, template);
 		try {
 			return await fetchContainerWithRetry({
 				namespace: containerNamespace,
 				workspaceId,
-				operation: `${request.method} ${path}`,
-				envVars: containerEnv(this.env, workspaceId),
-				createRequest: () => template.clone() as unknown as Request,
+				operation: `${request.method} ${workspacePath}`,
+				envVars: containerEnv(this.env),
+				createRequest: () => containerTemplate.clone() as unknown as Request,
 				requestReplay: workspaceRequestReplay(request.method, path),
 				signal: request.signal,
 				retryDelay: this.retryDelay,
@@ -526,11 +529,8 @@ function asFileServiceError(caught: unknown): FileServiceError {
 	);
 }
 
-function containerEnv(
-	env: WorkerLixRuntimeEnv,
-	workspaceId: string,
-): Record<string, string> {
-	const vars: Record<string, string> = { SLATEDB_PATH: workspaceId };
+function containerEnv(env: WorkerLixRuntimeEnv): Record<string, string> {
+	const vars: Record<string, string> = {};
 	for (const name of [
 		"R2_ENDPOINT",
 		"R2_BUCKET",
