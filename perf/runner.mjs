@@ -9,6 +9,7 @@ const baseUrl = (process.env.LIXRAY_PERF_URL ?? "http://127.0.0.1:8080").replace
   /\/$/,
   "",
 );
+const internalToken = process.env.LIXRAY_INTERNAL_TOKEN?.trim();
 
 const [command, ...args] = process.argv.slice(2);
 
@@ -158,6 +159,7 @@ async function waitForServer(workspaceId) {
     try {
       const response = await fetch(
         `${baseUrl}/workspaces/${encodeURIComponent(workspaceId)}/lix/v1/`,
+        { headers: requestHeaders() },
       );
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}: ${await response.text()}`);
@@ -178,7 +180,7 @@ async function protocolRequest(workspaceId, operation, body) {
     `${baseUrl}/workspaces/${encodeURIComponent(workspaceId)}/lix/v1/${operation}`,
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: requestHeaders({ "content-type": "application/json" }),
       body: JSON.stringify(body),
     },
   );
@@ -186,6 +188,12 @@ async function protocolRequest(workspaceId, operation, body) {
     fail(`${operation} failed with HTTP ${response.status}: ${await response.text()}`);
   }
   return response.json();
+}
+
+function requestHeaders(headers = {}) {
+  return internalToken
+    ? { ...headers, authorization: `Bearer ${internalToken}` }
+    : headers;
 }
 
 function summarize(samples) {

@@ -1,7 +1,7 @@
 # LixRay
 
-Cloudflare Worker + TanStack Start frontend + Durable Object Container exposing
-Lix over HTTP, backed by SlateDB on R2.
+TanStack Start control plane plus a multi-workspace Rust Lix service, backed by
+Supabase identity and SlateDB object storage.
 
 Production is deployed at `https://lixray.com`.
 
@@ -19,8 +19,9 @@ The repository is split into three product modules:
   invitations, and workspaces.
 - One organization can contain many workspaces. Every organization member can
   use and create workspaces; owners additionally administer the organization.
-- Every workspace UUID selects one Durable Object Container and one SlateDB R2
-  prefix.
+- Every workspace UUID selects an isolated SlateDB object prefix. The target
+  architecture routes all workspace IDs through one bounded, multi-workspace
+  `lix-server` process.
 
 The Worker serves the TanStack Start application and handles `/healthz`, the
 authenticated `/mcp` endpoint, OAuth protected-resource discovery, and
@@ -34,7 +35,8 @@ canonical demo `main` branch UUID, so a follow-up request can use a branch ID
 returned by another isolate. Preview state still has no external binding:
 different isolates may see fresh independent workspace contents, and eviction
 or a new deployment can erase everything. Production continues to use its
-Durable Object Container and R2 architecture.
+Durable Object Container and R2 architecture until the Railway workspace
+service has passed the PR-preview deployment spike.
 
 ## ChatGPT MCP app
 
@@ -324,9 +326,67 @@ pnpm perf:down
 
 The runner warms each named query, reports p50/p95/mean latency, and writes the
 raw samples as JSON. Override the service with `LIXRAY_PERF_URL` or select other
-fixture/workload files with `--fixture` and `--workload`.
+fixture/workload files with `--fixture` and `--workload`. A hosted service that
+sets `LIXRAY_INTERNAL_TOKEN` can be exercised by setting the same variable on
+the runner.
 
 ## Deployment
+
+### Railway workspace-service previews
+
+[`railway.json`](./railway.json) defines the deployable `lix-server` service.
+Railway builds [`lix-server/Dockerfile`](./lix-server/Dockerfile) with the
+repository root as its context, so the image contains the PR-pinned
+`vendor/lix` submodule. It uses Railway's injected `PORT`, checks `/healthz`
+without opening a workspace, enables Serverless sleeping, runs one replica, and
+removes the old deployment without an intentional overlap.
+
+The first Railway project is a deployment and preview spike, not the production
+cutover. Leave its `production` environment undeployed. Use a persistent
+`preview-base` environment as the PR template and configure it with disposable
+in-memory storage:
+
+```text
+SLATEDB_STORAGE=memory
+LIXRAY_MAX_OPEN_WORKSPACES=4
+LIXRAY_INTERNAL_TOKEN=<random secret>
+RUST_LOG=lixray=info
+```
+
+Do not add production R2 credentials to this environment. Generate a Railway
+domain for the service. Railway currently sleeps a Serverless service after it
+sends no outbound packets for more than ten minutes and wakes it on public or
+private inbound traffic. The memory-backed preview has no external storage
+traffic while idle, but this must still be verified in Railway metrics after
+deployment. Do not attach an uptime monitor to the preview because inbound
+traffic prevents it from sleeping.
+
+Enable PR Environments and Focused PR Environments, keep bot PR environments
+disabled, and use `preview-base` as the PR base. Railway then creates a unique
+domain for matching PRs and deletes the environment when the PR closes or
+merges. The watch patterns limit preview builds to changes in `lix-server`,
+`vendor/lix`, `.gitmodules`, or `railway.json`.
+
+Exercise a preview directly with:
+
+```sh
+LIXRAY_PERF_URL=https://<pr-domain> \
+LIXRAY_INTERNAL_TOKEN=<preview-token> \
+pnpm perf:seed
+
+LIXRAY_PERF_URL=https://<pr-domain> \
+LIXRAY_INTERNAL_TOKEN=<preview-token> \
+pnpm perf:run
+```
+
+Before treating the spike as successful, verify that Railway checked out the
+`vendor/lix` submodule, the first request wakes a sleeping service, the service
+returns to sleep after the idle window, and closing a PR removes its environment.
+Set a workspace compute hard limit as a final cost guardrail. Railway's Hobby
+plan currently has a $5 monthly minimum that includes $5 of resource usage;
+running PR environments consume normal metered resources while awake.
+
+### Cloudflare control plane
 
 ```sh
 pnpm --dir web-app deploy:worker

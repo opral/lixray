@@ -11,6 +11,7 @@ const DEFAULT_MAX_OPEN_WORKSPACES: u64 = 32;
 #[derive(Clone, Debug)]
 pub struct Config {
     pub bind_addr: String,
+    pub internal_token: Option<String>,
     pub max_open_workspaces: usize,
     pub storage: StorageConfig,
 }
@@ -39,7 +40,14 @@ pub struct SlateDBCacheConfig {
 impl Config {
     pub fn from_env() -> Result<Self> {
         let storage_kind = env::var("SLATEDB_STORAGE").unwrap_or_else(|_| "r2".to_string());
-        let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+        let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| {
+            let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+            format!("0.0.0.0:{port}")
+        });
+        let internal_token = optional_nonempty_env("LIXRAY_INTERNAL_TOKEN")?;
+        if env::var_os("RAILWAY_PROJECT_ID").is_some() && internal_token.is_none() {
+            bail!("LIXRAY_INTERNAL_TOKEN is required on Railway");
+        }
         let max_open_workspaces = usize::try_from(positive_u64_env(
             "LIXRAY_MAX_OPEN_WORKSPACES",
             DEFAULT_MAX_OPEN_WORKSPACES,
@@ -63,6 +71,7 @@ impl Config {
 
         Ok(Self {
             bind_addr,
+            internal_token,
             max_open_workspaces,
             storage,
         })
@@ -118,6 +127,15 @@ fn required_env(name: &str) -> Result<String> {
     Ok(value)
 }
 
+fn optional_nonempty_env(name: &str) -> Result<Option<String>> {
+    match env::var(name) {
+        Ok(value) if value.is_empty() => bail!("{name} must not be empty when set"),
+        Ok(value) => Ok(Some(value)),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("read {name}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,7 +155,50 @@ mod tests {
         let config = Config::from_env().unwrap();
 
         assert_eq!(config.max_open_workspaces, 32);
+        assert_eq!(config.bind_addr, "0.0.0.0:8080");
+        assert_eq!(config.internal_token, None);
         assert!(matches!(config.storage, StorageConfig::Memory));
+        clear_lixray_env();
+    }
+
+    #[test]
+    fn from_env_uses_platform_port_and_internal_token() {
+        let _guard = env_lock().lock().unwrap();
+        clear_lixray_env();
+        env::set_var("PORT", "4567");
+        env::set_var("LIXRAY_INTERNAL_TOKEN", "test-token");
+        env::set_var("SLATEDB_STORAGE", "memory");
+
+        let config = Config::from_env().unwrap();
+
+        assert_eq!(config.bind_addr, "0.0.0.0:4567");
+        assert_eq!(config.internal_token.as_deref(), Some("test-token"));
+        clear_lixray_env();
+    }
+
+    #[test]
+    fn from_env_rejects_empty_internal_token() {
+        let _guard = env_lock().lock().unwrap();
+        clear_lixray_env();
+        env::set_var("LIXRAY_INTERNAL_TOKEN", "");
+        env::set_var("SLATEDB_STORAGE", "memory");
+
+        let error = Config::from_env().unwrap_err();
+
+        assert!(format!("{error:#}").contains("LIXRAY_INTERNAL_TOKEN must not be empty"));
+        clear_lixray_env();
+    }
+
+    #[test]
+    fn from_env_requires_internal_token_on_railway() {
+        let _guard = env_lock().lock().unwrap();
+        clear_lixray_env();
+        env::set_var("RAILWAY_PROJECT_ID", "project-id");
+        env::set_var("SLATEDB_STORAGE", "memory");
+
+        let error = Config::from_env().unwrap_err();
+
+        assert!(format!("{error:#}").contains("LIXRAY_INTERNAL_TOKEN is required on Railway"));
         clear_lixray_env();
     }
 
@@ -218,6 +279,9 @@ mod tests {
     fn clear_lixray_env() {
         for name in [
             "BIND_ADDR",
+            "PORT",
+            "LIXRAY_INTERNAL_TOKEN",
+            "RAILWAY_PROJECT_ID",
             "SLATEDB_STORAGE",
             "LIXRAY_MAX_OPEN_WORKSPACES",
             "R2_ENDPOINT",

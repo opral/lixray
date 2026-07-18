@@ -304,6 +304,7 @@ mod tests {
     fn memory_manager(max_open_workspaces: usize) -> Arc<WorkspaceRuntimeManager> {
         WorkspaceRuntimeManager::new(&Config {
             bind_addr: "127.0.0.1:0".to_string(),
+            internal_token: None,
             max_open_workspaces,
             storage: StorageConfig::Memory,
         })
