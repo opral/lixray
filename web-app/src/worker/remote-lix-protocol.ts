@@ -25,6 +25,11 @@ const REMOTE_LIX_PROTOCOL_ROUTES: Record<string, RemoteLixProtocolRoute> = {
 		internalPath: "/observe",
 		response: "passthrough",
 	},
+	"observe/multiplex": {
+		method: "POST",
+		internalPath: "/observe/multiplex",
+		response: "passthrough",
+	},
 	"branch/create": {
 		method: "POST",
 		internalPath: "/createBranch",

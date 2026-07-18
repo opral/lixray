@@ -129,6 +129,17 @@ impl LixService {
         .await
     }
 
+    pub async fn switch_branch(&self, branch_id: String) -> Result<String, LixError> {
+        self.run("switch_branch", move |engine| async move {
+            // Remote clients keep their active branch locally and include it on
+            // every operation. The server-side switch therefore validates the
+            // branch before acknowledging the client's local state change.
+            ensure_branch_exists(&engine, &branch_id, "switchBranch").await?;
+            Ok(branch_id)
+        })
+        .await
+    }
+
     pub async fn execute_script(
         &self,
         branch_id: String,

@@ -455,16 +455,16 @@ void test("canonical remote Lix execute rejects invalid result cardinality", asy
 void test("canonical remote Lix pass-through routes map to existing workspace operations", async () => {
 	const cases = [
 		["observe", "/v1/observe"],
+		["observe/multiplex", "/v1/observe/multiplex"],
 		["branch/create", "/v1/createBranch"],
 		["branch/switch", "/v1/switchBranch"],
 	] as const;
 	for (const [endpoint, expectedPath] of cases) {
-		const upstream =
-			endpoint === "observe"
-				? new Response("event: next\ndata: {}\n\n", {
-						headers: { "content-type": "text/event-stream" },
-					})
-				: Response.json({ ok: true });
+		const upstream = endpoint.startsWith("observe")
+			? new Response("event: next\ndata: {}\n\n", {
+					headers: { "content-type": "text/event-stream" },
+				})
+			: Response.json({ ok: true });
 		const response = await handleRequest(
 			new Request(`https://example.test/@acme/launch-q3/.lix/v1/${endpoint}`, {
 				method: "POST",

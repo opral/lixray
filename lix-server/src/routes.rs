@@ -29,6 +29,7 @@ pub fn router(service: Arc<LixService>) -> Router {
         .route("/v1/container-health", get(container_health))
         .route("/v1/branches", get(list_branches))
         .route("/v1/createBranch", post(create_branch))
+        .route("/v1/switchBranch", post(switch_branch))
         .route("/v1/execute", post(execute))
         .route("/v1/filesystem/mutate", post(mutate_filesystem))
         .route("/v1/observe", post(observe))
@@ -83,6 +84,16 @@ async fn create_branch(
         hidden: receipt.hidden,
         commit_id: receipt.commit_id,
     }))
+}
+
+async fn switch_branch(
+    State(state): State<AppState>,
+    Json(request): Json<SwitchBranchRequest>,
+) -> Result<Json<SwitchBranchResponse>, ApiError> {
+    let branch_id = required_non_empty(request.branch_id, "branchId")?;
+    let branch_id = state.service.switch_branch(branch_id).await?;
+
+    Ok(Json(SwitchBranchResponse { branch_id }))
 }
 
 async fn execute(
@@ -393,6 +404,18 @@ struct CreateBranchResponse {
     name: String,
     hidden: bool,
     commit_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SwitchBranchRequest {
+    branch_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SwitchBranchResponse {
+    branch_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1109,6 +1132,99 @@ mod tests {
         .await;
         let draft_body = single_execute_response(draft_select).await;
         assert_eq!(draft_body.rows.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn switch_branch_supports_non_main_execute_and_observe() {
+        let app = app().await;
+        let main_branch_id = main_branch_id(app.clone()).await;
+        let draft_id = "66666666-6666-4666-8666-666666666666";
+        let draft = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/createBranch",
+            json!({
+                "branchId": main_branch_id,
+                "id": draft_id,
+                "name": "Remote client draft"
+            }),
+        )
+        .await;
+        assert_eq!(draft.status(), StatusCode::OK);
+
+        let switched = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/switchBranch",
+            json!({ "branchId": draft_id }),
+        )
+        .await;
+        assert_eq!(switched.status(), StatusCode::OK);
+        let switched: SwitchBranchResponse = response_json(switched).await;
+        assert_eq!(switched.branch_id, draft_id);
+
+        let insert = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": draft_id,
+                "sql": "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
+                "params": [
+                    { "kind": "text", "value": "draft-only" },
+                    { "kind": "text", "value": "visible" }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(insert.status(), StatusCode::OK);
+
+        let observed = json_request(
+            app.clone(),
+            Method::POST,
+            "/v1/observe",
+            json!({
+                "branchId": draft_id,
+                "sql": "SELECT value FROM lix_key_value WHERE key = $1",
+                "params": [{ "kind": "text", "value": "draft-only" }]
+            }),
+        )
+        .await;
+        assert_eq!(observed.status(), StatusCode::OK);
+        let mut observed_body = observed.into_body();
+        let initial = next_sse_frame(&mut observed_body).await;
+        assert!(initial.contains("event: next"));
+        assert!(initial.contains("visible"));
+
+        let main_select = json_request(
+            app,
+            Method::POST,
+            "/v1/execute",
+            json!({
+                "branchId": main_branch_id,
+                "sql": "SELECT value FROM lix_key_value WHERE key = $1",
+                "params": [{ "kind": "text", "value": "draft-only" }]
+            }),
+        )
+        .await;
+        assert_eq!(main_select.status(), StatusCode::OK);
+        let main_body = single_execute_response(main_select).await;
+        assert!(main_body.rows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn switch_branch_rejects_an_unknown_branch() {
+        let response = json_request(
+            app().await,
+            Method::POST,
+            "/v1/switchBranch",
+            json!({ "branchId": "missing-branch" }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body: JsonValue = response_json(response).await;
+        assert_eq!(body["error"]["code"], LixError::CODE_BRANCH_NOT_FOUND);
     }
 
     async fn next_sse_frame(body: &mut Body) -> String {
