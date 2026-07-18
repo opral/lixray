@@ -400,19 +400,33 @@ void test("workspace sessions use unified remote Lix execute, observe, and expli
 				notices: [],
 			});
 		}
-		if (pathname.endsWith("/observe")) {
+		if (pathname.endsWith("/observe/multiplex")) {
 			const branchId = String(body.branchId);
+			const subscriptions = body.subscriptions as Array<{ id: string }>;
+			const frame = `event: next\ndata: ${JSON.stringify({
+				subscriptionId: subscriptions[0]?.id,
+				sequence: 0,
+				mutationSequence: branchId === MAIN ? 1 : 2,
+				result: {
+					columns: ["branch"],
+					rows: [[{ kind: "text", value: branchId }]],
+					rowsAffected: 0,
+					notices: [],
+				},
+			})}\n\n`;
+			const signal = init?.signal;
 			return new Response(
-				`event: next\ndata: ${JSON.stringify({
-					sequence: 0,
-					mutationSequence: branchId === MAIN ? 1 : 2,
-					result: {
-						columns: ["branch"],
-						rows: [[{ kind: "text", value: branchId }]],
-						rowsAffected: 0,
-						notices: [],
+				new ReadableStream<Uint8Array>({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode(frame));
+						if (signal?.aborted) controller.close();
+						else {
+							signal?.addEventListener("abort", () => controller.close(), {
+								once: true,
+							});
+						}
 					},
-				})}\n\n`,
+				}),
 				{ headers: { "content-type": "text/event-stream" } },
 			);
 		}
@@ -444,6 +458,9 @@ void test("workspace sessions use unified remote Lix execute, observe, and expli
 	);
 	assert.deepEqual(createBodies, [{ branchId: DRAFT, name: "Created" }]);
 	assert.equal(requestPaths[0], "/@acme/launch-q3/.lix/v1/");
+	assert.ok(
+		requestPaths.includes("/@acme/launch-q3/.lix/v1/observe/multiplex"),
+	);
 });
 
 type RemoteReviewRow = {
