@@ -8,8 +8,10 @@ import {
 	directoryPath,
 	filePath,
 	type BranchState,
+	type ExecuteBatchRequest,
 	type ExecuteRequest,
 	type ExecuteResponse,
+	type ExecuteScriptResponse,
 	type LixRuntimeClient,
 	type WorkspaceSummary,
 	type FilesystemMutationOutcome,
@@ -631,6 +633,23 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		}
 
 		throw new Error(`Unsupported test SQL: ${sql}`);
+	}
+
+	async executeBatch(
+		workspaceId: string,
+		request: ExecuteBatchRequest,
+	): Promise<ExecuteScriptResponse> {
+		return {
+			results: await Promise.all(
+				request.statements.map((statement) =>
+					this.execute(workspaceId, {
+						branchId: request.branchId,
+						...statement,
+						options: request.options,
+					}),
+				),
+			),
+		};
 	}
 
 	async mutate(

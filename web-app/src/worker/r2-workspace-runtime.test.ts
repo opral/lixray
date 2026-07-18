@@ -772,9 +772,6 @@ function runtime(openMemoryLix: OpenMemoryLix, previewPollIntervalMs?: number) {
 	return createR2WorkspaceRuntime(openMemoryLix, {
 		mainBranchId: MAIN_BRANCH,
 		previewPollIntervalMs,
-		parseSqlScript: (sql, providedParamCount) => ({
-			statements: [{ sql, paramStart: 0, paramEnd: providedParamCount }],
-		}),
 	});
 }
 
@@ -976,6 +973,13 @@ function snapshotBindingFactory(): OpenMemoryLix {
 					});
 				}
 				return result([], []);
+			},
+			executeBatch: async (statements, options) => {
+				const results = [];
+				for (const statement of statements) {
+					results.push(await binding.execute(statement.sql, statement.params, options));
+				}
+				return results;
 			},
 			observe: async () => ({ close: () => undefined, next: async () => null }),
 			beginTransaction: async () => ({

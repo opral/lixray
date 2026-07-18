@@ -83,6 +83,10 @@ export function useFileExplorerApi() {
 			listWorkspaces: () => Promise.resolve([]),
 			listBranches: () => api.listBranches(),
 			execute: async (_workspaceId, request) => executeStatement(request),
+			executeBatch: () =>
+				Promise.reject(
+					new Error("Batch execution is not used by the file explorer client"),
+				),
 			mutate: async (_workspaceId, request) => api.mutateFilesystem(request),
 		} satisfies LixRuntimeClient);
 

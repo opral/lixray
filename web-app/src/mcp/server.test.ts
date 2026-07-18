@@ -7,8 +7,10 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import {
 	FileServiceError,
 	LixFileService,
+	type ExecuteBatchRequest,
 	type ExecuteRequest,
 	type ExecuteResponse,
+	type ExecuteScriptResponse,
 	type LixRuntimeClient,
 } from "./file-service.ts";
 import {
@@ -785,6 +787,23 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 			rows: [[{ kind: "text", value: "result" }]],
 			rowsAffected: 0,
 			notices: [],
+		};
+	}
+
+	async executeBatch(
+		workspaceId: string,
+		request: ExecuteBatchRequest,
+	): Promise<ExecuteScriptResponse> {
+		return {
+			results: await Promise.all(
+				request.statements.map((statement) =>
+					this.execute(workspaceId, {
+						branchId: request.branchId,
+						...statement,
+						options: request.options,
+					}),
+				),
+			),
 		};
 	}
 

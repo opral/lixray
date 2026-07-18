@@ -55,6 +55,10 @@ export interface MemoryLixBinding {
 		params: NativeValue[],
 		options?: { originKey?: string },
 	): Promise<ExecuteResult>;
+	executeBatch(
+		statements: Array<{ sql: string; params: NativeValue[] }>,
+		options?: { originKey?: string },
+	): Promise<Array<ExecuteResult>>;
 	observe(sql: string, params: NativeValue[]): Promise<ObserveEvents>;
 	beginTransaction(): Promise<LixTransaction>;
 	activeBranchId(): Promise<string>;
@@ -88,23 +92,7 @@ interface MemoryWorkspaceRuntime extends WorkspaceRuntime {
 interface WorkspaceRuntimeOptions {
 	mainBranchId: string;
 	previewPollIntervalMs?: number;
-	parseSqlScript: ParseSqlScript;
 }
-
-export interface SqlScriptPlan {
-	statements: Array<SqlScriptStatement>;
-}
-
-export interface SqlScriptStatement {
-	sql: string;
-	paramStart: number;
-	paramEnd: number;
-}
-
-export type ParseSqlScript = (
-	sql: string,
-	providedParamCount: number,
-) => SqlScriptPlan;
 
 interface PersistentSnapshot {
 	etag: string;
@@ -186,10 +174,7 @@ export function createMemoryWorkspaceRuntime(
 					runtimes,
 				);
 				const { pathname } = new URL(request.url);
-				if (
-					pathname === "/v1/observe" ||
-					pathname === "/v1/observe/multiplex"
-				) {
+				if (isObservePath(pathname)) {
 					if (request.method !== "POST") return methodNotAllowed();
 					const body = await requestBody(request);
 					const snapshot = await serialize(runtime, () =>
@@ -198,7 +183,7 @@ export function createMemoryWorkspaceRuntime(
 					return snapshotObservationResponse(
 						runtime,
 						body,
-						pathname === "/v1/observe/multiplex",
+						isMultiplexObservePath(pathname),
 						snapshot,
 						runtime.openMemoryLix,
 						runtime.mainBranchId,
@@ -207,11 +192,7 @@ export function createMemoryWorkspaceRuntime(
 				}
 
 				return await serialize(runtime, async () => {
-					const response = await routeRequest(
-						request,
-						runtime,
-						options.parseSqlScript,
-					);
+					const response = await routeRequest(request, runtime);
 					if (
 						!response.ok ||
 						!(await shouldPersistMutation(pathname, response))
@@ -275,10 +256,7 @@ export function createR2WorkspaceRuntime(
 				workspaces.set(key, state);
 			}
 			try {
-				if (
-					pathname === "/v1/observe" ||
-					pathname === "/v1/observe/multiplex"
-				) {
+				if (isObservePath(pathname)) {
 					if (request.method !== "POST") return methodNotAllowed();
 					const body = await requestBody(request);
 					const loaded = await loadPersistentRuntime(
@@ -290,7 +268,7 @@ export function createR2WorkspaceRuntime(
 					return snapshotObservationResponse(
 						state,
 						body,
-						pathname === "/v1/observe/multiplex",
+						isMultiplexObservePath(pathname),
 						loaded.snapshot,
 						openMemoryLix,
 						options.mainBranchId,
@@ -315,11 +293,7 @@ export function createR2WorkspaceRuntime(
 					);
 					const { runtime } = loaded;
 					try {
-						const response = await routeRequest(
-							replay(),
-							runtime,
-							options.parseSqlScript,
-						);
+						const response = await routeRequest(replay(), runtime);
 						if (
 							!response.ok ||
 							!(await shouldPersistMutation(pathname, response))
@@ -521,6 +495,17 @@ async function shouldPersistMutation(
 	);
 }
 
+function isObservePath(pathname: string): boolean {
+	return (
+		pathname === "/lix/v1/observe" ||
+		pathname === "/lix/v1/observe/multiplex"
+	);
+}
+
+function isMultiplexObservePath(pathname: string): boolean {
+	return pathname === "/lix/v1/observe/multiplex";
+}
+
 async function replayableRequest(request: Request): Promise<() => Request> {
 	const body =
 		request.method === "GET" || request.method === "HEAD"
@@ -627,7 +612,6 @@ async function ensureCanonicalMainBranch(
 async function routeRequest(
 	request: Request,
 	runtime: WorkspaceRuntime,
-	parseSqlScript: ParseSqlScript,
 ): Promise<Response> {
 	const { pathname } = new URL(request.url);
 	if (pathname === "/v1/container-health") {
@@ -635,100 +619,77 @@ async function routeRequest(
 			? json({ ok: true, service: "lixray-container" })
 			: methodNotAllowed();
 	}
-	if (pathname === "/v1/branches") {
+	if (pathname === "/lix/v1" || pathname === "/lix/v1/") {
 		if (request.method !== "GET") return methodNotAllowed();
-		const currentBranchId = await runtime.lix.activeBranchId();
-		const result = await runtime.lix.execute(
-			"SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id",
-			[],
-		);
 		return json({
-			currentBranchId,
-			branches: result.rows.map((row) => ({
-				id: requiredNativeText(result, row, "id"),
-				name: requiredNativeText(result, row, "name"),
-				hidden: requiredNativeBoolean(result, row, "hidden"),
-				commitId: requiredNativeText(result, row, "commit_id"),
-			})),
+			protocolVersion: 1,
+			activeBranchId: await runtime.lix.activeBranchId(),
 		});
 	}
-	if (pathname === "/v1/createBranch") {
+	if (pathname === "/lix/v1/branch/create") {
 		if (request.method !== "POST") return methodNotAllowed();
 		const body = await requestBody(request);
-		const branchId = requiredString(body, "branchId");
 		const name = requiredString(body, "name");
 		const id = optionalUuid(body, "id");
 		const fromCommitId = optionalString(body, "fromCommitId");
 		return json(
-			await withSelectedBranch(
-				runtime.lix,
-				branchId,
-				runtime.mainBranchId,
-				(selectedLix) =>
-					selectedLix.createBranch({
-						...(id ? { id } : {}),
-						name,
-						...(fromCommitId ? { fromCommitId } : {}),
-					}),
-			),
+			await runtime.lix.createBranch({
+				...(id ? { id } : {}),
+				name,
+				...(fromCommitId ? { fromCommitId } : {}),
+			}),
 		);
 	}
-	if (pathname === "/v1/execute") {
+	if (pathname === "/lix/v1/branch/switch") {
 		if (request.method !== "POST") return methodNotAllowed();
 		const body = await requestBody(request);
-		const branchId = requiredString(body, "branchId");
+		return json(
+			await runtime.lix.switchBranch({
+				branchId: requiredString(body, "branchId"),
+			}),
+		);
+	}
+	if (pathname === "/lix/v1/execute") {
+		if (request.method !== "POST") return methodNotAllowed();
+		const body = await requestBody(request);
 		const sql = requiredString(body, "sql");
 		const params = decodeParams(body.params);
 		const originKey = executeOriginKey(body.options);
 		return json(
-			await withSelectedBranch(
-				runtime.lix,
-				branchId,
-				runtime.mainBranchId,
-				async (selectedLix) => {
-					const plan = parseSqlScript(sql, params.length);
-					const options = originKey ? { originKey } : undefined;
-					const [statement] = plan.statements;
-					if (statement && plan.statements.length === 1) {
-						return {
-							results: [
-								encodeExecuteResult(
-									await selectedLix.execute(
-										statement.sql,
-										params.slice(statement.paramStart, statement.paramEnd),
-										options,
-									),
-								),
-							],
-						};
-					}
-
-					const transaction = await selectedLix.beginTransaction();
-					try {
-						const results = [];
-						for (const statement of plan.statements) {
-							results.push(
-								encodeExecuteResult(
-									await transaction.execute(
-										statement.sql,
-										params.slice(statement.paramStart, statement.paramEnd),
-										options,
-									),
-								),
-							);
-						}
-						await transaction.commit();
-						return { results };
-					} catch (error) {
-						try {
-							await transaction.rollback();
-						} catch {
-							// Preserve the statement or commit error if rollback also fails.
-						}
-						throw error;
-					}
-				},
+			encodeExecuteResult(
+				await runtime.lix.execute(
+					sql,
+					params,
+					originKey ? { originKey } : undefined,
+				),
 			),
+		);
+	}
+	if (pathname === "/lix/v1/execute-batch") {
+		if (request.method !== "POST") return methodNotAllowed();
+		const body = await requestBody(request);
+		if (!Array.isArray(body.statements) || body.statements.length === 0) {
+			throw invalidArgument("statements is required");
+		}
+		const statements = body.statements.map((value) => {
+			const statement = requestObject(value, "statements[]");
+			return {
+				sql: requiredString(statement, "sql", "statements[].sql"),
+				params: decodeParams(statement.params),
+			};
+		});
+		const originKey = executeOriginKey(body.options);
+		const options = originKey ? { originKey } : undefined;
+		return json(
+			(
+				await runtime.lix.executeBatch(
+					statements.map((statement) => ({
+						sql: statement.sql,
+						params: statement.params,
+					})),
+					options,
+				)
+			).map(encodeExecuteResult),
 		);
 	}
 	if (pathname === "/v1/filesystem/mutate") {
@@ -759,7 +720,6 @@ function snapshotObservationResponse(
 		subscriber: (update: PersistentObserverUpdate) => void,
 	) => () => void,
 ): Response {
-	const branchId = requiredString(body, "branchId");
 	let queries: PersistentObservationQuery[];
 	if (multiplex) {
 		if (!Array.isArray(body.subscriptions)) {
@@ -853,28 +813,21 @@ function snapshotObservationResponse(
 						mainBranchId,
 					);
 					try {
-						return await withSelectedBranch(
-							runtime.lix,
-							branchId,
-							mainBranchId,
-							async (selectedLix) => {
-								const evaluations: PersistentObservationEvaluation[] = [];
-								for (const query of queries) {
-									try {
-										evaluations.push({
-											status: "success",
-											result: encodeExecuteResult(
-												await selectedLix.execute(query.sql, query.params),
-											),
-										});
-									} catch (error) {
-										if (!multiplex) throw error;
-										evaluations.push({ status: "error", error });
-									}
-								}
-								return evaluations;
-							},
-						);
+						const evaluations: PersistentObservationEvaluation[] = [];
+						for (const query of queries) {
+							try {
+								evaluations.push({
+									status: "success",
+									result: encodeExecuteResult(
+										await runtime.lix.execute(query.sql, query.params),
+									),
+								});
+							} catch (error) {
+								if (!multiplex) throw error;
+								evaluations.push({ status: "error", error });
+							}
+						}
+						return evaluations;
 					} finally {
 						await closeQuietly(runtime.lix);
 					}

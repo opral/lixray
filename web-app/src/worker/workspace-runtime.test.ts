@@ -5,7 +5,6 @@ import {
 	decodeWireValue,
 	encodeWireValue,
 	type MemoryLixBinding,
-	type ParseSqlScript,
 } from "./workspace-runtime.ts";
 
 const WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
@@ -563,6 +562,7 @@ function fakeBinding(
 	const binding = {
 		execute: async (sql: string) =>
 			sql.includes("FROM lix_branch") ? branchResult() : emptyResult(),
+		executeBatch: async () => [],
 		observe: async () => ({ close: () => undefined, next: async () => null }),
 		beginTransaction: async () => ({
 			execute: async () => emptyResult(),
@@ -587,23 +587,11 @@ function fakeBinding(
 function testRuntime(
 	openMemoryLix: () => Promise<MemoryLixBinding>,
 	mainBranchId = BRANCH,
-	parseSqlScript: ParseSqlScript = singleStatementParser,
 ) {
 	return createMemoryWorkspaceRuntime(openMemoryLix, {
 		mainBranchId,
-		parseSqlScript,
 	});
 }
-
-const singleStatementParser: ParseSqlScript = (sql, providedParamCount) => ({
-	statements: [
-		{
-			sql,
-			paramStart: 0,
-			paramEnd: providedParamCount,
-		},
-	],
-});
 
 function statefulBranchBinding(initialBranchId: string): MemoryLixBinding {
 	let activeBranchId = initialBranchId;
