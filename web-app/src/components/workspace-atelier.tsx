@@ -29,7 +29,6 @@ import { Button } from "~/components/ui/button";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
-import { openMockRemoteLix } from "~/lib/mock-remote-lix";
 import { createPreviewWorkspaceShareToken } from "~/lib/preview-workspace-share";
 import {
 	atelierBranchSearch,
@@ -43,7 +42,6 @@ import {
 	createWorkspaceReviewStatusStore,
 	createWorkspaceSessionStateStore,
 } from "~/lib/atelier-state";
-import type { BrowserLix } from "~/lib/mock-remote-lix";
 import { captureTelemetry } from "~/lib/telemetry";
 import {
 	appendWorkspaceShareToken,
@@ -51,6 +49,10 @@ import {
 	stripInviteFromUrl,
 } from "~/lib/workspace-share-url";
 import { isWorkspaceShareToken } from "~/lib/workspace-share-capability";
+import {
+	openWorkspaceLixSession,
+	type WorkspaceLixSession,
+} from "~/lib/workspace-lix-session";
 
 interface WorkspaceAtelierProps {
 	workspaceId: string;
@@ -106,7 +108,7 @@ export function WorkspaceAtelier({
 	>(null);
 	const [error, setError] = useState<string | null>(null);
 	const workspaceRootRef = useRef<HTMLDivElement | null>(null);
-	const activeLixRef = useRef<BrowserLix | null>(null);
+	const activeLixRef = useRef<WorkspaceLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeFilePathRef = useRef(routeFilePath);
 	const branchIdRef = useRef(branchId);
@@ -279,7 +281,7 @@ export function WorkspaceAtelier({
 
 	useEffect(() => {
 		let disposed = false;
-		let activeLix: BrowserLix | null = null;
+		let activeLix: WorkspaceLixSession | null = null;
 		setInstance(null);
 		setWorkspaceDefaultBranchId(null);
 		setError(null);
@@ -294,25 +296,27 @@ export function WorkspaceAtelier({
 			return;
 		}
 		const openingBranchId = branchIdRef.current ?? null;
-		void openMockRemoteLix({
-			workspaceId,
+		void openWorkspaceLixSession({
+			namespace,
+			workspaceSlug,
 			getAccessToken,
+			allowAnonymous: !canEdit,
 			initialBranchId: openingBranchId,
 		})
-			.then(async (lix) => {
+			.then(async (session) => {
 				if (disposed) {
-					await lix.close();
+					await session.close();
 					return;
 				}
-				activeLix = lix;
-				activeLixRef.current = lix;
-				setWorkspaceDefaultBranchId(lix.defaultBranchSnapshot());
+				activeLix = session;
+				activeLixRef.current = session;
+				setWorkspaceDefaultBranchId(session.defaultBranchSnapshot());
 				const branchSession = createWorkspaceBranchSession({
-					lix,
+					session,
 					onSwitch: async (nextBranchId, context) => {
 						const routedBranchId = resolveAtelierRouteBranchId(
 							branchIdRef.current,
-							lix.defaultBranchSnapshot(),
+							session.defaultBranchSnapshot(),
 						);
 						if (
 							suppressBranchNavigationRef.current ||
@@ -327,7 +331,7 @@ export function WorkspaceAtelier({
 				});
 				setInstance(
 					createAtelier({
-						lix,
+						lix: session.lix,
 						readOnly: !canEdit,
 						branchSession,
 						reviewRangeSessionId: userId,
@@ -349,13 +353,13 @@ export function WorkspaceAtelier({
 					}),
 				);
 				captureTelemetry("workspace_opened");
-				const actualBranchId = lix.activeBranchSnapshot();
+				const actualBranchId = session.activeBranchSnapshot();
 				if (
 					shouldNormalizeInitialBranch({
 						openingBranchId,
 						currentBranchId: branchIdRef.current ?? null,
 						actualBranchId,
-						defaultBranchId: lix.defaultBranchSnapshot(),
+						defaultBranchId: session.defaultBranchSnapshot(),
 					})
 				) {
 					await navigateToCurrentPathBranch(actualBranchId, true);
@@ -369,18 +373,20 @@ export function WorkspaceAtelier({
 
 		return () => {
 			disposed = true;
-			const lix = activeLix;
+			const session = activeLix;
 			activeLix = null;
 			activeLixRef.current = null;
-			if (lix) void lix.close();
+			if (session) void session.close();
 		};
 	}, [
 		client,
 		canEdit,
 		getAccessToken,
 		navigateToCurrentPathBranch,
+		namespace,
 		user?.id,
 		workspaceId,
+		workspaceSlug,
 	]);
 
 	useEffect(() => {

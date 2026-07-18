@@ -350,14 +350,14 @@ void test("preview workspace writes require both the demo bearer and a server se
 	assert.equal(mcpWithSession.ok, true);
 });
 
-void test("anonymous preview requests are forwarded only through the read-only transport", async () => {
+void test("session-less preview requests are forwarded only through the public read transport", async () => {
 	const storage = new FakeR2Bucket();
 	const env = {
 		LIXRAY_DEMO: "1",
 		LIXRAY_DEMO_WORKSPACE_IDS: WORKSPACE_A,
 		PREVIEW_STATE: storage.bucket,
 	};
-	const forwarded: Array<{ method: string; readOnly: string | null }> = [];
+	const forwarded: Array<{ method: string; workspaceId: string }> = [];
 	const options = {
 		authenticate: (request: Request) =>
 			authenticatePreviewDemoBrowser(request, env),
@@ -365,45 +365,47 @@ void test("anonymous preview requests are forwarded only through the read-only t
 			workspaceId: string,
 			auth: Parameters<typeof authorizePreviewDemoWorkspace>[1],
 		) => authorizePreviewDemoWorkspace(workspaceId, auth, env),
-		workspaceFetch: async (_workspaceId: string, request: Request) => {
-			forwarded.push({
-				method: request.method,
-				readOnly: request.headers.get("X-Lixray-Read-Only"),
-			});
-			return request.method === "POST" &&
-				request.headers.get("X-Lixray-Read-Only") === "1"
-				? Response.json({ error: "Read-only" }, { status: 403 })
-				: Response.json({ ok: true });
+		parseSqlScript: (sql: string) => ({ statements: [{ sql }] }),
+		workspaceFetch: async (workspaceId: string, request: Request) => {
+			forwarded.push({ method: request.method, workspaceId });
+			return Response.json({ ok: true });
 		},
 	};
 
+	// The demo bearer without a server-side session cookie is not a member;
+	// mutations must be rejected before they reach the workspace runtime.
 	const blockedWrite = await handleRequest(
-		new Request(`https://${HOST_A}/v1/workspaces/${WORKSPACE_A}/execute`, {
+		new Request(`https://${HOST_A}/@acme/launch-q3/lix/v1/execute`, {
 			method: "POST",
-			headers: { Authorization: "Bearer lixray-demo" },
-			body: JSON.stringify({
-				branchId: "main",
-				sql: "INSERT INTO lix_file VALUES (1)",
-			}),
+			headers: {
+				Authorization: "Bearer lixray-demo",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sql: "INSERT INTO lix_file VALUES (1)" }),
 		}),
 		env,
 		options,
 	);
-	assert.equal(blockedWrite.status, 403);
-	assert.deepEqual(forwarded, [{ method: "POST", readOnly: "1" }]);
+	assert.equal(blockedWrite.status, 400);
+	assert.deepEqual(await blockedWrite.json(), {
+		error: { code: "LIX_READ_ONLY", message: "workspace is read-only" },
+	});
+	assert.deepEqual(forwarded, []);
 
 	const publicRead = await handleRequest(
-		new Request(`https://${HOST_A}/v1/workspaces/${WORKSPACE_A}/branches`, {
-			headers: { Authorization: "Bearer lixray-demo" },
+		new Request(`https://${HOST_A}/@acme/launch-q3/lix/v1/execute`, {
+			method: "POST",
+			headers: {
+				Authorization: "Bearer lixray-demo",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sql: "SELECT path FROM lix_file" }),
 		}),
 		env,
 		options,
 	);
 	assert.equal(publicRead.status, 200);
-	assert.deepEqual(forwarded, [
-		{ method: "POST", readOnly: "1" },
-		{ method: "GET", readOnly: "1" },
-	]);
+	assert.deepEqual(forwarded, [{ method: "POST", workspaceId: WORKSPACE_A }]);
 });
 
 function previewService(

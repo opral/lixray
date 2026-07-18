@@ -19,61 +19,13 @@ void test("independent runtimes share exact R2 state and revisions", async () =>
 	const second = runtime(openMemoryLix);
 
 	await expectOk(
-		first.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		first.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 	);
 	await setValue(first, storage, HOST_A, WORKSPACE_A, "shared", "first");
 
 	const result = await getValue(second, storage, HOST_A, WORKSPACE_A, "shared");
 	assert.deepEqual(result, { key: "shared", value: "first", revision: 1 });
 	assert.ok(storage.has(`lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`));
-});
-
-void test("read-only preview requests can read but never persist a mutation", async () => {
-	const storage = new FakeR2Bucket();
-	const service = runtime(snapshotBindingFactory());
-	await setValue(service, storage, HOST_A, WORKSPACE_A, "shared", "before");
-	storage.resetMetrics();
-
-	const select = await service.fetch(
-		storage.bucket,
-		HOST_A,
-		WORKSPACE_A,
-		request(
-			HOST_A,
-			"/execute",
-			{ branchId: MAIN_BRANCH, sql: "SELECT 1" },
-			true,
-		),
-	);
-	assert.equal(select.status, 200);
-
-	const mutation = await service.fetch(
-		storage.bucket,
-		HOST_A,
-		WORKSPACE_A,
-		request(
-			HOST_A,
-			"/execute",
-			{
-				branchId: MAIN_BRANCH,
-				sql: "SET",
-				params: [nativeToWire(text("shared")), nativeToWire(text("after"))],
-			},
-			true,
-		),
-	);
-	assert.equal(mutation.status, 400);
-	assert.equal(await errorCode(mutation), "LIX_ERROR_READ_ONLY");
-	assert.equal(storage.putCalls.length, 0);
-	assert.deepEqual(
-		await getValue(service, storage, HOST_A, WORKSPACE_A, "shared"),
-		{ key: "shared", value: "before", revision: 1 },
-	);
 });
 
 void test("explicit preview hostname keeps synthetic MCP requests coherent and isolated", async () => {
@@ -130,20 +82,10 @@ void test("bootstrap and concurrent conditional writes converge without loss", a
 
 	await Promise.all([
 		expectOk(
-			first.fetch(
-				storage.bucket,
-				HOST_A,
-				WORKSPACE_A,
-				request(HOST_A, "/branches"),
-			),
+			first.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 		),
 		expectOk(
-			second.fetch(
-				storage.bucket,
-				HOST_A,
-				WORKSPACE_A,
-				request(HOST_A, "/branches"),
-			),
+			second.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 		),
 	]);
 	await Promise.all([
@@ -171,12 +113,7 @@ void test("concurrent writes in one isolate replay the losing mutation", async (
 	const openMemoryLix = snapshotBindingFactory();
 	const service = runtime(openMemoryLix);
 	await expectOk(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 	);
 	storage.resetMetrics();
 
@@ -200,12 +137,7 @@ void test("retry exhaustion returns a retryable 503 and preserves state", async 
 	const storage = new FakeR2Bucket();
 	const service = runtime(snapshotBindingFactory());
 	await expectOk(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 	);
 	storage.conflictsRemaining = 5;
 
@@ -236,7 +168,7 @@ void test("R2 failures and corrupt snapshots return distinct 503 errors", async 
 		unavailable.bucket,
 		HOST_A,
 		WORKSPACE_A,
-		request(HOST_A, "/branches"),
+		request(HOST_A, "/"),
 	);
 	assert.equal(failed.status, 503);
 	assert.equal(await errorCode(failed), "PREVIEW_STORAGE_UNAVAILABLE");
@@ -248,7 +180,7 @@ void test("R2 failures and corrupt snapshots return distinct 503 errors", async 
 			failedPutStorage.bucket,
 			HOST_A,
 			WORKSPACE_A,
-			request(HOST_A, "/branches"),
+			request(HOST_A, "/"),
 		),
 	);
 	failedPutStorage.failPuts = true;
@@ -282,7 +214,7 @@ void test("R2 failures and corrupt snapshots return distinct 503 errors", async 
 		corrupt.bucket,
 		HOST_A,
 		WORKSPACE_A,
-		request(HOST_A, "/branches"),
+		request(HOST_A, "/"),
 	);
 	assert.equal(invalid.status, 503);
 	assert.equal(await errorCode(invalid), "PREVIEW_SNAPSHOT_INVALID");
@@ -293,12 +225,7 @@ void test("failed API operations never overwrite the committed snapshot", async 
 	const storage = new FakeR2Bucket();
 	const service = runtime(snapshotBindingFactory());
 	await expectOk(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 	);
 	const key = `lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`;
 	const before = storage.bytes(key);
@@ -316,48 +243,52 @@ void test("failed API operations never overwrite the committed snapshot", async 
 	assert.deepEqual(storage.bytes(key), before);
 });
 
-void test("branch-scoped requests never persist the preview selector", async () => {
+void test("active branch is shared and persisted across remote clients", async () => {
 	const storage = new FakeR2Bucket();
-	const service = runtime(snapshotBindingFactory());
+	const openMemoryLix = snapshotBindingFactory();
+	const first = runtime(openMemoryLix);
 	const draftBranchId = "44444444-4444-4444-8444-444444444444";
 
 	await expectOk(
-		service.fetch(
+		first.fetch(
 			storage.bucket,
 			HOST_A,
 			WORKSPACE_A,
-			request(HOST_A, "/createBranch", {
-				branchId: MAIN_BRANCH,
+			request(HOST_A, "/branch/create", {
 				id: draftBranchId,
 				name: "Draft",
 			}),
 		),
 	);
-
-	const [mainResponse, draftResponse] = await Promise.all(
-		[MAIN_BRANCH, draftBranchId].map((branchId) =>
-			service.fetch(
-				storage.bucket,
-				HOST_A,
-				WORKSPACE_A,
-				request(HOST_A, "/execute", {
-					branchId,
-					sql: "ACTIVE_BRANCH",
-					params: [],
-				}),
-			),
+	await expectOk(
+		first.fetch(
+			storage.bucket,
+			HOST_A,
+			WORKSPACE_A,
+			request(HOST_A, "/branch/switch", { branchId: draftBranchId }),
 		),
 	);
-	await expectOk(mainResponse);
-	await expectOk(draftResponse);
-	const mainBody: unknown = await mainResponse.json();
-	const draftBody: unknown = await draftResponse.json();
-	const mainRow: unknown = singleExecuteRows(mainBody)[0];
-	const draftRow: unknown = singleExecuteRows(draftBody)[0];
-	assert.ok(Array.isArray(mainRow));
-	assert.ok(Array.isArray(draftRow));
-	assert.equal(wireString(mainRow[0]), MAIN_BRANCH);
-	assert.equal(wireString(draftRow[0]), draftBranchId);
+
+	const second = runtime(openMemoryLix);
+	const handshake = await expectOk(
+		second.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
+	);
+	assert.deepEqual(await handshake.json(), {
+		protocolVersion: 1,
+		activeBranchId: draftBranchId,
+	});
+	const active = await execute(
+		second,
+		storage,
+		HOST_A,
+		WORKSPACE_A,
+		"ACTIVE_BRANCH",
+		[],
+	);
+	await expectOk(active);
+	const activeRows = singleExecuteRows(await active.json());
+	assert.ok(Array.isArray(activeRows[0]));
+	assert.equal(wireString(activeRows[0][0]), draftBranchId);
 
 	const snapshotBytes = storage.bytes(
 		`lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`,
@@ -366,47 +297,21 @@ void test("branch-scoped requests never persist the preview selector", async () 
 	const persisted = JSON.parse(
 		new TextDecoder().decode(snapshotBytes),
 	) as FakeState;
-	assert.equal(persisted.activeBranchId, MAIN_BRANCH);
+	assert.equal(persisted.activeBranchId, draftBranchId);
 });
 
-void test("legacy preview selectors are normalized before republishing", async () => {
+void test("persistent runtime rejects removed noncanonical routes", async () => {
 	const storage = new FakeR2Bucket();
 	const service = runtime(snapshotBindingFactory());
-	const draftBranchId = "44444444-4444-4444-8444-444444444445";
-	const key = `lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`;
-
-	await expectOk(
-		service.fetch(
+	for (const path of ["/v1/filesystem/mutate", "/v1/container-health"]) {
+		const response = await service.fetch(
 			storage.bucket,
 			HOST_A,
 			WORKSPACE_A,
-			request(HOST_A, "/createBranch", {
-				branchId: MAIN_BRANCH,
-				id: draftBranchId,
-				name: "Legacy Draft",
-			}),
-		),
-	);
-	const bytes = storage.bytes(key);
-	assert.ok(bytes);
-	const legacy = JSON.parse(new TextDecoder().decode(bytes)) as FakeState;
-	legacy.activeBranchId = draftBranchId;
-	await storage.putRaw(key, new TextEncoder().encode(JSON.stringify(legacy)));
-
-	await expectOk(
-		runtime(snapshotBindingFactory()).fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
-	);
-	const normalizedBytes = storage.bytes(key);
-	assert.ok(normalizedBytes);
-	const normalized = JSON.parse(
-		new TextDecoder().decode(normalizedBytes),
-	) as FakeState;
-	assert.equal(normalized.activeBranchId, MAIN_BRANCH);
+			new Request(`https://${HOST_A}${path}`),
+		);
+		assert.equal(response.status, 404, path);
+	}
 });
 
 void test("conditional reads reuse cached snapshots without redundant writes", async () => {
@@ -416,12 +321,7 @@ void test("conditional reads reuse cached snapshots without redundant writes", a
 	const key = `lixray-preview/v1/${HOST_A}/${WORKSPACE_A}.snapshot`;
 
 	await expectOk(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 	);
 	const initialEtag = storage.etag(key);
 	storage.resetMetrics();
@@ -462,12 +362,7 @@ void test("a stalled snapshot read does not block another request", async () => 
 	const storage = new FakeR2Bucket();
 	const service = runtime(snapshotBindingFactory());
 	await expectOk(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 	);
 	storage.resetMetrics();
 	const gate = storage.blockNextGet();
@@ -476,16 +371,11 @@ void test("a stalled snapshot read does not block another request", async () => 
 		storage.bucket,
 		HOST_A,
 		WORKSPACE_A,
-		request(HOST_A, "/branches"),
+		request(HOST_A, "/"),
 	);
 	await withTimeout(gate.started, 250);
 	const concurrent = await withTimeout(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 		250,
 	);
 	assert.equal(concurrent.status, 200);
@@ -499,19 +389,14 @@ void test("an old snapshot response cannot regress the isolate cache", async () 
 	const storage = new FakeR2Bucket();
 	const service = runtime(snapshotBindingFactory());
 	await expectOk(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 	);
 	const gate = storage.blockNextGet();
 	const staleRead = service.fetch(
 		storage.bucket,
 		HOST_A,
 		WORKSPACE_A,
-		request(HOST_A, "/branches"),
+		request(HOST_A, "/"),
 	);
 	await withTimeout(gate.started, 250);
 	await setValue(service, storage, HOST_A, WORKSPACE_A, "newer", "state");
@@ -523,12 +408,7 @@ void test("an old snapshot response cannot regress the isolate cache", async () 
 	await expectOk(staleRead);
 	storage.resetMetrics();
 	await expectOk(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 	);
 	assert.equal(storage.getCalls[0].etagDoesNotMatch, latestEtag);
 });
@@ -537,12 +417,7 @@ void test("a stalled snapshot write does not block concurrent reads", async () =
 	const storage = new FakeR2Bucket();
 	const service = runtime(snapshotBindingFactory());
 	await expectOk(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 	);
 	storage.resetMetrics();
 	const gate = storage.blockNextPut();
@@ -553,12 +428,7 @@ void test("a stalled snapshot write does not block concurrent reads", async () =
 	await withTimeout(gate.started, 250);
 
 	const concurrent = await withTimeout(
-		service.fetch(
-			storage.bucket,
-			HOST_A,
-			WORKSPACE_A,
-			request(HOST_A, "/branches"),
-		),
+		service.fetch(storage.bucket, HOST_A, WORKSPACE_A, request(HOST_A, "/")),
 		250,
 	);
 	assert.equal(concurrent.status, 200);
@@ -578,7 +448,6 @@ void test("single and multiplexed observers receive cross-isolate changes once",
 		HOST_A,
 		WORKSPACE_A,
 		request(HOST_A, "/observe", {
-			branchId: MAIN_BRANCH,
 			sql: "GET",
 			params: [wireText("single")],
 		}),
@@ -600,7 +469,6 @@ void test("single and multiplexed observers receive cross-isolate changes once",
 		HOST_A,
 		WORKSPACE_A,
 		request(HOST_A, "/observe/multiplex", {
-			branchId: MAIN_BRANCH,
 			subscriptions: [
 				{ id: "left", sql: "GET", params: [wireText("left-watch")] },
 				{ id: "right", sql: "GET", params: [wireText("right-watch")] },
@@ -645,7 +513,6 @@ void test("observer polling is shared, single-flight, and never queues ticks", a
 			HOST_A,
 			WORKSPACE_A,
 			request(HOST_A, "/observe", {
-				branchId: MAIN_BRANCH,
 				sql: "GET",
 				params: [wireText("watch")],
 			}),
@@ -657,7 +524,6 @@ void test("observer polling is shared, single-flight, and never queues ticks", a
 			HOST_A,
 			WORKSPACE_A,
 			request(HOST_A, "/observe", {
-				branchId: MAIN_BRANCH,
 				sql: "GET",
 				params: [wireText("watch")],
 			}),
@@ -693,7 +559,6 @@ void test("local commits notify observers without an R2 wake poll", async () => 
 			HOST_A,
 			WORKSPACE_A,
 			request(HOST_A, "/observe", {
-				branchId: MAIN_BRANCH,
 				sql: "GET",
 				params: [wireText("local")],
 			}),
@@ -723,7 +588,6 @@ void test("a disconnected observer cannot stop updates for live subscribers", as
 	const writerRuntime = runtime(openMemoryLix);
 	const observationRequest = () =>
 		request(HOST_A, "/observe", {
-			branchId: MAIN_BRANCH,
 			sql: "GET",
 			params: [wireText("disconnect")],
 		});
@@ -782,7 +646,6 @@ void test("reopened observers never replay a stale cursor", async () => {
 			HOST_A,
 			WORKSPACE_A,
 			request(HOST_A, "/observe", {
-				branchId: MAIN_BRANCH,
 				sql: "GET",
 				params: [wireText("reopen")],
 			}),
@@ -815,9 +678,6 @@ function runtime(openMemoryLix: OpenMemoryLix, previewPollIntervalMs?: number) {
 	return createR2WorkspaceRuntime(openMemoryLix, {
 		mainBranchId: MAIN_BRANCH,
 		previewPollIntervalMs,
-		parseSqlScript: (sql, providedParamCount) => ({
-			statements: [{ sql, paramStart: 0, paramEnd: providedParamCount }],
-		}),
 	});
 }
 
@@ -866,11 +726,8 @@ async function getValue(
 }
 
 function singleExecuteRows(body: unknown): unknown[] {
-	assert.ok(isRecord(body) && Array.isArray(body.results));
-	assert.equal(body.results.length, 1);
-	const result: unknown = body.results[0];
-	assert.ok(isRecord(result) && Array.isArray(result.rows));
-	return result.rows;
+	assert.ok(isRecord(body) && Array.isArray(body.rows));
+	return body.rows;
 }
 
 function execute(
@@ -887,26 +744,17 @@ function execute(
 		hostname,
 		workspaceId,
 		request(requestHostname, "/execute", {
-			branchId: MAIN_BRANCH,
 			sql,
 			params: params.map(nativeToWire),
 		}),
 	);
 }
 
-function request(
-	hostname: string,
-	path: string,
-	body?: unknown,
-	readOnly = false,
-) {
-	const headers = new Headers(
-		body === undefined ? undefined : { "content-type": "application/json" },
-	);
-	if (readOnly) headers.set("X-Lixray-Read-Only", "1");
-	return new Request(`https://${hostname}/v1${path}`, {
+function request(hostname: string, path: string, body?: unknown) {
+	return new Request(`https://${hostname}/lix/v1${path}`, {
 		method: body === undefined ? "GET" : "POST",
-		headers,
+		headers:
+			body === undefined ? undefined : { "content-type": "application/json" },
 		body: body === undefined ? undefined : JSON.stringify(body),
 	});
 }
@@ -1028,12 +876,16 @@ function snapshotBindingFactory(): OpenMemoryLix {
 				}
 				return result([], []);
 			},
+			executeBatch: async (statements, options) => {
+				const results = [];
+				for (const statement of statements) {
+					results.push(
+						await binding.execute(statement.sql, statement.params, options),
+					);
+				}
+				return results;
+			},
 			observe: async () => ({ close: () => undefined, next: async () => null }),
-			beginTransaction: async () => ({
-				execute: async () => result([], []),
-				commit: async () => undefined,
-				rollback: async () => undefined,
-			}),
 			activeBranchId: async () => state.activeBranchId,
 			createBranch: async ({ id = `branch-${++generated}`, name }) => {
 				if (state.branches[id]) {

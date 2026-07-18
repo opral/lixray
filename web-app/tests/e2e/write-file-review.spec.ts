@@ -106,6 +106,49 @@ test("an MCP-created file immediately opens in review mode", async ({
 		expect(readBack.structuredContent).toEqual(
 			expect.objectContaining({ path: `/${fileName}`, content }),
 		);
+		const readRevision = requiredRevision(readBack.structuredContent);
+		const edited = await client.callTool({
+			name: "edit_file",
+			arguments: {
+				workspace_ref: "@acme/launch-q3",
+				path: `/${fileName}`,
+				expected_revision: readRevision,
+				edits: [
+					{ old_text: "Created through MCP", new_text: "Edited through MCP" },
+				],
+			},
+		});
+		expect(edited.isError, JSON.stringify(edited)).not.toBe(true);
+		const editedRevision = requiredRevision(
+			requiredRecord(edited.structuredContent).file,
+		);
+		const movedPath = `/moved-${fileName}`;
+		const moved = await client.callTool({
+			name: "move_entry",
+			arguments: {
+				workspace_ref: "@acme/launch-q3",
+				source_path: `/${fileName}`,
+				destination_path: movedPath,
+				expected_revision: editedRevision,
+			},
+		});
+		expect(moved.isError, JSON.stringify(moved)).not.toBe(true);
+		const movedRevision = requiredRevision(
+			requiredRecord(moved.structuredContent).entry,
+		);
+		const deleted = await client.callTool({
+			name: "delete_entry",
+			arguments: {
+				workspace_ref: "@acme/launch-q3",
+				path: movedPath,
+				expected_revision: movedRevision,
+			},
+		});
+		expect(deleted.isError, JSON.stringify(deleted)).not.toBe(true);
+		expect(deleted.structuredContent).toEqual({
+			path: movedPath,
+			deleted: true,
+		});
 	} finally {
 		try {
 			if (!page.isClosed()) await page.goto("about:blank");
@@ -154,6 +197,21 @@ async function installPreviewSessionCookie(
 			secure: url.protocol === "https:",
 		},
 	]);
+}
+
+function requiredRecord(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		throw new Error("Expected structured MCP output");
+	}
+	return value as Record<string, unknown>;
+}
+
+function requiredRevision(value: unknown): string {
+	const revision = requiredRecord(value).revision;
+	if (typeof revision !== "string") {
+		throw new Error("Expected a file revision");
+	}
+	return revision;
 }
 
 async function startIsolatedPreview(): Promise<{

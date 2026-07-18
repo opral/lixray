@@ -24,7 +24,8 @@ The repository is split into three product modules:
 
 The Worker serves the TanStack Start application and handles `/healthz`, the
 authenticated `/mcp` endpoint, OAuth protected-resource discovery, and
-workspace-scoped `/v1/*` requests before delegating all other routes to Start.
+workspace-scoped `/@namespace/workspace/lix/v1/*` requests before delegating
+all other routes to Start.
 
 Pull requests use a separate `lixray-preview` Worker. It runs the precompiled
 Lix Wasm module directly in each Cloudflare isolate and keeps a lazily opened
@@ -68,16 +69,13 @@ moves, and deletes compare an opaque revision UUID with `lixcol_change_id`;
 stale operations fail without changing the file. The revision is optional:
 when omitted, LixRay reads and uses the entry's current revision before applying
 the mutation. Creates and moves never overwrite existing destinations, and
-directory deletion requires `recursive=true`. The `execute` tool accepts raw
-Lix SQL and wire-format parameters, is marked destructive, and bypasses these
-file-tool safeguards.
-Single statements and semicolon-delimited scripts both execute atomically,
-either unwrapped or bounded by `BEGIN`/`BEGIN TRANSACTION` and `COMMIT`.
-Every execute call returns `{ "results": [...] }` with one result per
-executable statement. Numbered `$n` parameters refer to the request-wide
-parameter array, while anonymous `?` parameters consume it in script order.
-Both the container and preview runtime use Lix's SQL-script parser rather than
-splitting SQL in application code.
+directory deletion requires `recursive=true`. The `execute` tool accepts an
+ordered array of raw Lix SQL statements and per-statement wire-format
+parameters, is marked destructive, and bypasses these file-tool safeguards.
+The normal remote Lix client sends the array through `executeBatch`, so every
+statement commits atomically and returns one ordered result; a failure rolls
+back the complete batch. Numbered `$n` and anonymous `?` parameters refer to
+their statement's parameter array.
 
 The `/oauth/consent` page preserves the Google sign-in return path and shows
 the requesting client, scopes, and file permissions before allowing approval
@@ -87,15 +85,12 @@ or denial.
 
 - `GET /healthz` returns Worker health without authentication or container
   startup.
-- `GET /v1/workspaces/:workspaceId/container-health` checks the workspace
-  container.
-- `GET /v1/workspaces/:workspaceId/branches` lists Lix branches and the
-  workspace's `currentBranchId`.
-- `POST /v1/workspaces/:workspaceId/createBranch` creates a branch.
-- `POST /v1/workspaces/:workspaceId/execute` executes one Lix SQL statement or
-  an atomic multi-statement script.
-- `POST /v1/workspaces/:workspaceId/observe` streams Lix observe events as POST
-  SSE.
+- `/@namespace/workspace/lix/v1/*` exposes the canonical Lix server protocol,
+  including branch operations, `execute`, atomic `execute-batch`, and
+  multiplexed `observe`.
+
+The workspace runtime exposes no LixRay-specific sidecar routes. Browser and
+MCP consumers perform every Lix operation through the normal remote Lix client.
 
 All production workspace routes require a Supabase access token:
 
@@ -103,16 +98,14 @@ All production workspace routes require a Supabase access token:
 Authorization: Bearer <Supabase access token>
 ```
 
-The Worker verifies the ES256 JWT against Supabase JWKS, then looks up the URL's
-workspace UUID through the Supabase Data API with the same user token. Row Level
-Security proves membership. The Worker strips the workspace prefix and
-`Authorization` header before forwarding the request to the Rust container, so
-the container continues to expose its internal `/v1/branches`, `/v1/execute`,
-and related routes without receiving user credentials.
+The Worker verifies the ES256 JWT against Supabase JWKS, then resolves the
+namespace and workspace slug through the Supabase Data API with the same user
+token. Row Level Security proves membership. The Worker strips the public
+workspace prefix and `Authorization` header before forwarding the canonical
+`/lix/v1/*` request to the Rust container.
 
-Invalid authentication returns `401`, malformed workspace UUIDs return `400`,
-and missing/inaccessible workspaces return `403` without revealing whether the
-workspace exists.
+Invalid authentication returns `401`; missing or inaccessible workspaces return
+`404` without revealing whether the workspace exists.
 
 ## Workspace storage
 

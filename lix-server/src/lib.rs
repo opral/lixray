@@ -1,5 +1,4 @@
 mod config;
-mod error;
 mod routes;
 mod store;
 

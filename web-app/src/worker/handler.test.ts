@@ -12,11 +12,12 @@ import {
 	authenticateWithSupabase,
 	authorizeWorkspaceWithSupabase,
 	handleRequest,
+	resolveWorkspaceWithSupabase,
 	validateBrowserJwtClaims,
 	validateMcpJwtClaims,
 	type AuthenticateRequest,
 	type AuthenticateMcpRequest,
-	type AuthorizeWorkspace,
+	type ResolveWorkspace,
 	type ContainerNamespace,
 	type WorkerEnv,
 } from "./handler.ts";
@@ -353,9 +354,52 @@ void test("legacy unscoped /v1 routes return 404 before auth", async () => {
 	assert.equal(response.status, 404);
 });
 
-void test("malformed workspace ids return 400 before auth", async () => {
+void test("canonical Lix protocol is authenticated, resolved, and forwarded unchanged", async () => {
+	const body = {
+		statements: [{ sql: "SELECT $1", params: [{ kind: "int", value: 1 }] }],
+	};
+	let proxiedRequest: Request | undefined;
+	const upstream = Response.json([
+		{ columns: ["value"], rows: [], rowsAffected: 0, notices: [] },
+	]);
 	const response = await handleRequest(
-		new Request("https://example.test/v1/workspaces/not-a-uuid/branches"),
+		new Request("https://example.test/@Acme/Launch-Q3/lix/v1/execute-batch", {
+			method: "POST",
+			headers: {
+				Authorization: "Bearer user-token",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify(body),
+		}),
+		env({}),
+		{
+			authenticate: authenticated(),
+			resolveWorkspace: async (namespace, workspaceSlug, auth) => {
+				assert.equal(namespace, "acme");
+				assert.equal(workspaceSlug, "launch-q3");
+				assert.equal(auth.userId, "user-123");
+				return { ok: true, workspaceId: WORKSPACE_A };
+			},
+			workspaceFetch: async (workspaceId, request) => {
+				assert.equal(workspaceId, WORKSPACE_A);
+				proxiedRequest = request;
+				return upstream;
+			},
+		},
+	);
+
+	assert.equal(response, upstream);
+	assert.ok(proxiedRequest);
+	assert.equal(new URL(proxiedRequest.url).pathname, "/lix/v1/execute-batch");
+	assert.equal(proxiedRequest.headers.get("authorization"), null);
+	assert.deepEqual(await proxiedRequest.json(), body);
+});
+
+void test("removed workspace sidecar routes return 404 before auth", async () => {
+	const response = await handleRequest(
+		new Request(
+			"https://example.test/v1/workspaces/not-a-uuid/filesystem/mutate",
+		),
 		env({}),
 		{
 			authenticate: async () => {
@@ -363,13 +407,13 @@ void test("malformed workspace ids return 400 before auth", async () => {
 			},
 		},
 	);
-	assert.equal(response.status, 400);
-	assert.equal(await response.text(), "Invalid workspace id\n");
+	assert.equal(response.status, 404);
+	assert.equal(await response.text(), "Not found\n");
 });
 
-void test("unsafe workspace routes return authentication failures", async () => {
+void test("canonical mutation routes return authentication failures", async () => {
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches", {
+		remoteLixRequest("/branch/switch", {
 			method: "POST",
 			headers: { Authorization: "Bearer invalid-user-token" },
 		}),
@@ -382,10 +426,10 @@ void test("unsafe workspace routes return authentication failures", async () => 
 	assert.equal(await response.text(), "Unauthorized\n");
 });
 
-void test("inaccessible workspaces return 403 without starting a container", async () => {
+void test("inaccessible workspaces return 403 from mutation routes without starting a container", async () => {
 	let started = false;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches", {
+		remoteLixRequest("/branch/switch", {
 			method: "POST",
 			headers: { Authorization: "Bearer user-token" },
 		}),
@@ -395,29 +439,33 @@ void test("inaccessible workspaces return 403 without starting a container", asy
 				return new Response();
 			},
 		}),
-		{ authenticate: authenticated(), authorizeWorkspace: denied() },
+		{ authenticate: authenticated(), resolveWorkspace: unresolved(403) },
 	);
 	assert.equal(response.status, 403);
 	assert.equal(started, false);
 });
 
-void test("anonymous public reads reach the runtime with a worker-owned read-only marker", async () => {
+void test("anonymous public reads resolve publicly and forward without auth", async () => {
 	let proxiedRequest: Request | undefined;
 	let publicWorkspaceLookups = 0;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches", {
-			headers: { "X-Lixray-Read-Only": "0" },
+		remoteLixRequest("/execute", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ sql: "SELECT path FROM lix_file" }),
 		}),
 		env({}),
 		{
 			authenticate: async () => {
 				throw new Error("anonymous reads must not authenticate first");
 			},
-			authorizePublicWorkspace: async (workspaceId) => {
+			resolvePublicWorkspace: async (namespace, workspaceSlug) => {
 				publicWorkspaceLookups += 1;
-				assert.equal(workspaceId, WORKSPACE_A);
-				return null;
+				assert.equal(namespace, "acme");
+				assert.equal(workspaceSlug, "launch-q3");
+				return { ok: true, workspaceId: WORKSPACE_A };
 			},
+			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
 			workspaceFetch: async (workspaceId, request) => {
 				assert.equal(workspaceId, WORKSPACE_A);
 				proxiedRequest = request;
@@ -431,22 +479,24 @@ void test("anonymous public reads reach the runtime with a worker-owned read-onl
 	assert.equal(publicWorkspaceLookups, 1);
 	assert.ok(proxiedRequest);
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
-	assert.equal(proxiedRequest.headers.get("x-lixray-read-only"), "1");
+	assert.deepEqual(await proxiedRequest.json(), {
+		sql: "SELECT path FROM lix_file",
+	});
 });
 
-void test("unsafe anonymous workspace routes remain unauthorized", async () => {
+void test("anonymous branch mutations remain unauthorized", async () => {
 	let publicWorkspaceLookedUp = false;
 	let proxied = false;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches", { method: "POST" }),
+		remoteLixRequest("/branch/switch", { method: "POST" }),
 		env({}),
 		{
 			authenticate: async () => {
 				throw new Error("anonymous unsafe requests must not authenticate");
 			},
-			authorizePublicWorkspace: async () => {
+			resolvePublicWorkspace: async () => {
 				publicWorkspaceLookedUp = true;
-				return null;
+				return { ok: true, workspaceId: WORKSPACE_A };
 			},
 			workspaceFetch: async () => {
 				proxied = true;
@@ -461,25 +511,106 @@ void test("unsafe anonymous workspace routes remain unauthorized", async () => {
 	assert.equal(proxied, false);
 });
 
+void test("public write SQL is rejected before it reaches the workspace", async () => {
+	let proxied = false;
+	const response = await handleRequest(
+		remoteLixRequest("/execute", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ sql: "DELETE FROM lix_file" }),
+		}),
+		env({}),
+		{
+			resolvePublicWorkspace: async () => ({
+				ok: true,
+				workspaceId: WORKSPACE_A,
+			}),
+			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
+			workspaceFetch: async () => {
+				proxied = true;
+				return new Response("unexpected");
+			},
+		},
+	);
+
+	assert.equal(response.status, 400);
+	assert.deepEqual(await response.json(), {
+		error: { code: "LIX_READ_ONLY", message: "workspace is read-only" },
+	});
+	assert.equal(proxied, false);
+});
+
+void test("a mutation cannot hide behind a multi-statement public script", async () => {
+	let proxied = false;
+	const response = await handleRequest(
+		remoteLixRequest("/execute", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ sql: "SELECT 1; DELETE FROM lix_file" }),
+		}),
+		env({}),
+		{
+			resolvePublicWorkspace: async () => ({
+				ok: true,
+				workspaceId: WORKSPACE_A,
+			}),
+			parseSqlScript: (sql) => ({
+				statements: sql
+					.split(";")
+					.map((statement) => ({ sql: statement.trim() })),
+			}),
+			workspaceFetch: async () => {
+				proxied = true;
+				return new Response("unexpected");
+			},
+		},
+	);
+
+	assert.equal(response.status, 400);
+	assert.equal(proxied, false);
+});
+
+void test("public reads fail closed when no SQL parser is configured", async () => {
+	const response = await handleRequest(
+		remoteLixRequest("/execute", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ sql: "SELECT 1" }),
+		}),
+		env({}),
+		{
+			resolvePublicWorkspace: async () => ({
+				ok: true,
+				workspaceId: WORKSPACE_A,
+			}),
+			workspaceFetch: async () => new Response("unexpected"),
+		},
+	);
+
+	assert.equal(response.status, 400);
+});
+
 void test("authenticated non-members are downgraded to the public read transport", async () => {
 	let proxiedRequest: Request | undefined;
 	let publicWorkspaceLookups = 0;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches", {
+		remoteLixRequest("/execute", {
+			method: "POST",
 			headers: {
 				Authorization: "Bearer non-member-token",
-				"X-Lixray-Read-Only": "0",
+				"content-type": "application/json",
 			},
+			body: JSON.stringify({ sql: "SELECT 1" }),
 		}),
 		env({}),
 		{
 			authenticate: authenticated(),
-			authorizeWorkspace: denied(),
-			authorizePublicWorkspace: async (workspaceId) => {
+			resolveWorkspace: unresolved(403),
+			resolvePublicWorkspace: async () => {
 				publicWorkspaceLookups += 1;
-				assert.equal(workspaceId, WORKSPACE_A);
-				return null;
+				return { ok: true, workspaceId: WORKSPACE_A };
 			},
+			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
 			workspaceFetch: async (_workspaceId, request) => {
 				proxiedRequest = request;
 				return new Response("downgraded");
@@ -492,19 +623,17 @@ void test("authenticated non-members are downgraded to the public read transport
 	assert.equal(publicWorkspaceLookups, 1);
 	assert.ok(proxiedRequest);
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
-	assert.equal(proxiedRequest.headers.get("x-lixray-read-only"), "1");
 });
 
 void test("authorized requests route by workspace, rewrite paths, preserve bodies and strip auth", async () => {
 	let startOptions: unknown;
 	let proxiedRequest: Request | undefined;
-	const request = workspaceRequest(WORKSPACE_A, "/execute?mode=test", {
+	const request = remoteLixRequest("/observe?mode=test", {
 		method: "POST",
 		headers: {
 			Authorization: "Bearer user-token",
 			"content-type": "application/json",
 			"x-client-header": "kept",
-			"X-Lixray-Read-Only": "1",
 		},
 		body: JSON.stringify({ sql: "SELECT 1" }),
 	});
@@ -527,7 +656,7 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 				};
 			},
 		}),
-		{ authenticate: authenticated(), authorizeWorkspace: allowed() },
+		{ authenticate: authenticated(), resolveWorkspace: resolved(WORKSPACE_A) },
 	);
 
 	assert.equal(response.headers.get("content-type"), "text/event-stream");
@@ -562,10 +691,9 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 		},
 	);
 	assert.ok(proxiedRequest);
-	assert.equal(new URL(proxiedRequest.url).pathname, "/v1/execute");
+	assert.equal(new URL(proxiedRequest.url).pathname, "/lix/v1/observe");
 	assert.equal(new URL(proxiedRequest.url).search, "?mode=test");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
-	assert.equal(proxiedRequest.headers.get("x-lixray-read-only"), null);
 	assert.equal(proxiedRequest.headers.get("x-client-header"), "kept");
 	assert.deepEqual(await proxiedRequest.json(), { sql: "SELECT 1" });
 });
@@ -575,7 +703,7 @@ void test("transient container resets retry with a reacquired stub", async () =>
 	let starts = 0;
 	let fetches = 0;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches", {
+		remoteLixRequest("/", {
 			headers: { Authorization: "Bearer user-token" },
 		}),
 		env({
@@ -599,7 +727,7 @@ void test("transient container resets retry with a reacquired stub", async () =>
 		}),
 		{
 			authenticate: authenticated(),
-			authorizeWorkspace: allowed(),
+			resolveWorkspace: resolved(WORKSPACE_A),
 			containerRetryDelay: async () => undefined,
 			containerRetryRandom: () => 1,
 		},
@@ -612,14 +740,14 @@ void test("transient container resets retry with a reacquired stub", async () =>
 	assert.equal(fetches, 1);
 });
 
-void test("direct mutation bodies are not replayed after ambiguous proxy failures", async () => {
+void test("canonical mutation bodies are not replayed after ambiguous proxy failures", async () => {
 	let acquisitions = 0;
 	const bodies: Array<unknown> = [];
 	const terminalLogs: Array<Array<unknown>> = [];
 	const originalConsoleError = console.error;
 	console.error = (...arguments_: Array<unknown>) =>
 		terminalLogs.push(arguments_);
-	const request = workspaceRequest(WORKSPACE_A, "/execute", {
+	const request = remoteLixRequest("/execute", {
 		method: "POST",
 		headers: {
 			Authorization: "Bearer user-token",
@@ -645,7 +773,7 @@ void test("direct mutation bodies are not replayed after ambiguous proxy failure
 			}),
 			{
 				authenticate: authenticated(),
-				authorizeWorkspace: allowed(),
+				resolveWorkspace: resolved(WORKSPACE_A),
 				containerRetryDelay: async () => undefined,
 			},
 		);
@@ -667,7 +795,7 @@ void test("direct mutation bodies are not replayed after ambiguous proxy failure
 void test("permanent container startup failures return a controlled 503 response", async () => {
 	let fetched = false;
 	const response = await handleRequest(
-		workspaceRequest(WORKSPACE_A, "/branches", {
+		remoteLixRequest("/", {
 			headers: { Authorization: "Bearer user-token" },
 		}),
 		env({
@@ -681,7 +809,7 @@ void test("permanent container startup failures return a controlled 503 response
 				},
 			}),
 		}),
-		{ authenticate: authenticated(), authorizeWorkspace: allowed() },
+		{ authenticate: authenticated(), resolveWorkspace: resolved(WORKSPACE_A) },
 	);
 
 	assert.equal(response.status, 503);
@@ -705,13 +833,13 @@ void test("two workspaces route to distinct containers", async () => {
 	});
 	for (const workspaceId of [WORKSPACE_A, WORKSPACE_B]) {
 		const response = await handleRequest(
-			workspaceRequest(workspaceId, "/branches", {
+			remoteLixRequest("/", {
 				headers: { Authorization: "Bearer user-token" },
 			}),
 			testEnv,
 			{
 				authenticate: authenticated(),
-				authorizeWorkspace: allowed(),
+				resolveWorkspace: resolved(workspaceId),
 			},
 		);
 		assert.equal(response.status, 200);
@@ -719,7 +847,7 @@ void test("two workspaces route to distinct containers", async () => {
 	assert.deepEqual(names, [WORKSPACE_A, WORKSPACE_B]);
 });
 
-void test("demo auth on workers.dev only authorizes configured workspaces", async () => {
+void test("demo auth on workers.dev only resolves configured workspaces", async () => {
 	const testEnv = env({
 		extra: {
 			LIXRAY_DEMO: "1",
@@ -728,7 +856,7 @@ void test("demo auth on workers.dev only authorizes configured workspaces", asyn
 	});
 	const accepted = await handleRequest(
 		new Request(
-			`https://pr-42-lixray-preview.example.workers.dev/v1/workspaces/${DEMO_WORKSPACE_ID}/branches`,
+			"https://pr-42-lixray-preview.example.workers.dev/@acme/launch-q3/lix/v1/",
 			{
 				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
 			},
@@ -739,21 +867,21 @@ void test("demo auth on workers.dev only authorizes configured workspaces", asyn
 
 	const deniedResponse = await handleRequest(
 		new Request(
-			`https://pr-42-lixray-preview.example.workers.dev/v1/workspaces/${WORKSPACE_A}/branches`,
+			"https://pr-42-lixray-preview.example.workers.dev/@acme/missing/lix/v1/",
 			{
 				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
 			},
 		),
 		testEnv,
 	);
-	// Public routes now resolve globally. An unconfigured demo workspace falls
+	// Public routes resolve globally. An unconfigured demo workspace falls
 	// through to the same public resolver and is indistinguishable from missing.
 	assert.equal(deniedResponse.status, 404);
 });
 
 void test("demo auth rejects an incorrect bearer token without Supabase", async () => {
 	const response = await authenticateWithSupabase(
-		workspaceRequest(DEMO_WORKSPACE_ID, "/branches", {
+		remoteLixRequest("/", {
 			headers: { Authorization: "Bearer incorrect" },
 		}),
 		env({
@@ -797,18 +925,27 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 			workspaceFetch: async (workspaceId, request) => {
 				workspaceFetches += 1;
 				assert.equal(workspaceId, DEMO_WORKSPACE_ID);
-				assert.equal(new URL(request.url).pathname, "/v1/branches");
 				assert.equal(request.headers.get("authorization"), null);
+				const pathname = new URL(request.url).pathname;
+				if (pathname === "/lix/v1/") {
+					return Response.json({
+						protocolVersion: 1,
+						activeBranchId: "main",
+					});
+				}
+				assert.equal(pathname, "/lix/v1/execute");
 				return Response.json({
-					currentBranchId: "main",
-					branches: [
-						{
-							id: "main",
-							name: "main",
-							hidden: false,
-							commitId: "commit-1",
-						},
+					columns: ["id", "name", "hidden", "commit_id"],
+					rows: [
+						[
+							{ kind: "text", value: "main" },
+							{ kind: "text", value: "main" },
+							{ kind: "bool", value: false },
+							{ kind: "text", value: "commit-1" },
+						],
 					],
+					rowsAffected: 0,
+					notices: [],
 				});
 			},
 			mcpTransport: async (_request, service, _context, options) => {
@@ -858,7 +995,7 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
-	assert.equal(workspaceFetches, 1);
+	assert.equal(workspaceFetches, 3);
 });
 
 void test("Supabase workspace authorization uses the user token and RLS-visible row", async () => {
@@ -921,13 +1058,59 @@ void test("Supabase workspace authorization hides absent or RLS-invisible rows",
 	}
 });
 
-function workspaceRequest(
-	workspaceId: string,
-	endpoint: string,
-	init?: RequestInit,
-) {
+void test("Supabase canonical workspace resolution joins RLS-visible organization and workspace rows", async () => {
+	const originalFetch = globalThis.fetch;
+	const lookups: URL[] = [];
+	globalThis.fetch = async (input, init) => {
+		const requestUrl =
+			typeof input === "string"
+				? input
+				: input instanceof URL
+					? input.href
+					: input.url;
+		const url = new URL(requestUrl);
+		lookups.push(url);
+		assert.equal(
+			new Headers(init?.headers).get("authorization"),
+			"Bearer verified-user-token",
+		);
+		return Response.json([
+			{ id: WORKSPACE_A, organizations: { id: DEMO_ORGANIZATION_ID } },
+		]);
+	};
+	try {
+		const resolution = await resolveWorkspaceWithSupabase(
+			"acme",
+			"launch-q3",
+			{ userId: "user-123", token: "verified-user-token" },
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+		);
+		assert.deepEqual(resolution, { ok: true, workspaceId: WORKSPACE_A });
+		assert.equal(lookups.length, 1);
+		assert.equal(lookups[0]?.pathname, "/rest/v1/workspaces");
+		assert.equal(
+			lookups[0]?.searchParams.get("select"),
+			"id,organizations!inner(id)",
+		);
+		assert.equal(
+			lookups[0]?.searchParams.get("organizations.handle"),
+			"eq.acme",
+		);
+		assert.equal(lookups[0]?.searchParams.get("slug"), "eq.launch-q3");
+		assert.equal(lookups[0]?.searchParams.get("deleted_at"), "is.null");
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+function remoteLixRequest(endpoint: string, init?: RequestInit) {
 	return new Request(
-		`https://example.test/v1/workspaces/${workspaceId}${endpoint}`,
+		`https://example.test/@acme/launch-q3/lix/v1${endpoint}`,
 		init,
 	);
 }
@@ -954,12 +1137,15 @@ function rejected(status: number, body: string): AuthenticateRequest {
 	return async () => ({ ok: false, response: new Response(body, { status }) });
 }
 
-function allowed(): AuthorizeWorkspace {
-	return async () => null;
+function resolved(workspaceId: string): ResolveWorkspace {
+	return async () => ({ ok: true, workspaceId });
 }
 
-function denied(): AuthorizeWorkspace {
-	return async () => new Response("Workspace access denied\n", { status: 403 });
+function unresolved(status: number): ResolveWorkspace {
+	return async () => ({
+		ok: false,
+		response: new Response("Workspace access denied\n", { status }),
+	});
 }
 
 function env(options: {

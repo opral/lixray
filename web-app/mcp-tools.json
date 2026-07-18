@@ -1277,7 +1277,7 @@
 	{
 		"name": "execute",
 		"title": "Execute raw Lix SQL",
-		"description": "Execute caller-provided Lix SQL against an authorized workspace branch. Omit branch_id to use the workspace default branch. Multiple statements run atomically, either unwrapped or inside BEGIN ... COMMIT, and return one result per executable statement. SQL can read or mutate any SQL-accessible branch data and bypasses file-tool safeguards.\n\nThe following reference DDL describes every SQL surface initialized in a fresh workspace. Lix SQL does not support DDL statements; use these CREATE TABLE signatures only to understand column names, semantic SQL types, and nullability. Signatures labeled as views are read-only engine views even though CREATE TABLE syntax is used to retain their typed schema.\n\n```sql\nCREATE TABLE lix_state (\n  entity_pk JSON NOT NULL,\n  schema_key TEXT NOT NULL,\n  file_id TEXT,\n  snapshot_content JSON,\n  metadata JSON,\n  created_at TEXT,\n  updated_at TEXT,\n  global BOOLEAN,\n  change_id TEXT,\n  commit_id TEXT,\n  untracked BOOLEAN\n);\n\nCREATE TABLE lix_state_by_branch (\n  entity_pk JSON NOT NULL,\n  schema_key TEXT NOT NULL,\n  file_id TEXT,\n  snapshot_content JSON,\n  metadata JSON,\n  created_at TEXT,\n  updated_at TEXT,\n  global BOOLEAN,\n  change_id TEXT,\n  commit_id TEXT,\n  untracked BOOLEAN,\n  branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_state_history (\n  entity_pk JSON NOT NULL,\n  schema_key TEXT NOT NULL,\n  file_id TEXT,\n  snapshot_content JSON,\n  metadata JSON,\n  change_id TEXT NOT NULL,\n  origin_key TEXT,\n  observed_commit_id TEXT NOT NULL,\n  commit_created_at TEXT NOT NULL,\n  start_commit_id TEXT NOT NULL,\n  depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_file (\n  id TEXT,\n  path TEXT NOT NULL,\n  directory_id TEXT,\n  name TEXT NOT NULL,\n  data BLOB NOT NULL,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_metadata JSON\n);\n\nCREATE TABLE lix_file_by_branch (\n  id TEXT,\n  path TEXT NOT NULL,\n  directory_id TEXT,\n  name TEXT NOT NULL,\n  data BLOB NOT NULL,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_metadata JSON,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_file_history (\n  id TEXT NOT NULL,\n  path TEXT,\n  directory_id TEXT,\n  name TEXT,\n  data BLOB,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_metadata JSON,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_directory (\n  id TEXT,\n  path TEXT,\n  parent_id TEXT,\n  name TEXT NOT NULL,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_metadata JSON\n);\n\nCREATE TABLE lix_directory_by_branch (\n  id TEXT,\n  path TEXT,\n  parent_id TEXT,\n  name TEXT NOT NULL,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_metadata JSON,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_directory_history (\n  id TEXT NOT NULL,\n  path TEXT,\n  parent_id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_metadata JSON,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_branch (\n  id TEXT NOT NULL,\n  name TEXT NOT NULL,\n  hidden BOOLEAN NOT NULL,\n  commit_id TEXT NOT NULL\n);\n\nCREATE TABLE lix_change (\n  id TEXT NOT NULL,\n  entity_pk JSON NOT NULL,\n  schema_key TEXT NOT NULL,\n  file_id TEXT,\n  metadata JSON,\n  created_at TEXT NOT NULL,\n  origin_key TEXT,\n  snapshot_content JSON\n);\n\nCREATE TABLE lix_account (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_account_by_branch (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_account_history (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_binary_blob_ref (\n  blob_hash TEXT,\n  id TEXT,\n  size_bytes BIGINT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_binary_blob_ref_by_branch (\n  blob_hash TEXT,\n  id TEXT,\n  size_bytes BIGINT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_binary_blob_ref_history (\n  blob_hash TEXT,\n  id TEXT,\n  size_bytes BIGINT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_branch_descriptor (\n  hidden BOOLEAN,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_branch_descriptor_by_branch (\n  hidden BOOLEAN,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_branch_descriptor_history (\n  hidden BOOLEAN,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_branch_ref (\n  commit_id TEXT,\n  id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_branch_ref_by_branch (\n  commit_id TEXT,\n  id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_branch_ref_history (\n  commit_id TEXT,\n  id TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_change_author (\n  account_id TEXT,\n  change_id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_change_author_by_branch (\n  account_id TEXT,\n  change_id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_change_author_history (\n  account_id TEXT,\n  change_id TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_commit (\n  id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_commit_by_branch (\n  id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\nCREATE TABLE lix_commit_edge (\n  child_id TEXT,\n  parent_id TEXT,\n  parent_order BIGINT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_commit_edge_by_branch (\n  child_id TEXT,\n  parent_id TEXT,\n  parent_order BIGINT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\nCREATE TABLE lix_directory_descriptor (\n  id TEXT,\n  name TEXT,\n  parent_id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_directory_descriptor_by_branch (\n  id TEXT,\n  name TEXT,\n  parent_id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_directory_descriptor_history (\n  id TEXT,\n  name TEXT,\n  parent_id TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_file_descriptor (\n  directory_id TEXT,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_file_descriptor_by_branch (\n  directory_id TEXT,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_file_descriptor_history (\n  directory_id TEXT,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_key_value (\n  key TEXT,\n  value JSON,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_key_value_by_branch (\n  key TEXT,\n  value JSON,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_key_value_history (\n  key TEXT,\n  value JSON,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_label (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_label_by_branch (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_label_history (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_label_assignment (\n  id TEXT,\n  label_id TEXT,\n  target_entity_pk JSON,\n  target_file_id TEXT,\n  target_schema_key TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_label_assignment_by_branch (\n  id TEXT,\n  label_id TEXT,\n  target_entity_pk JSON,\n  target_file_id TEXT,\n  target_schema_key TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_label_assignment_history (\n  id TEXT,\n  label_id TEXT,\n  target_entity_pk JSON,\n  target_file_id TEXT,\n  target_schema_key TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_registered_schema (\n  value JSON,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_registered_schema_by_branch (\n  value JSON,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_registered_schema_history (\n  value JSON,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n```\n\nWorkspaces can register additional schema-derived surfaces after initialization. Discover the complete runtime schema for the selected workspace and branch with:\n\n```sql\nSELECT\n  t.table_name,\n  t.table_type,\n  c.column_name,\n  c.data_type,\n  c.is_nullable,\n  c.ordinal_position\nFROM information_schema.tables AS t\nJOIN information_schema.columns AS c\n  ON t.table_catalog = c.table_catalog\n AND t.table_schema = c.table_schema\n AND t.table_name = c.table_name\nWHERE t.table_schema = 'public'\nORDER BY t.table_name, c.ordinal_position;\n```",
+		"description": "Execute an ordered batch of caller-provided Lix SQL statements atomically against an authorized workspace branch. Omit branch_id to use the workspace's active branch. Each statement has its own parameters and produces one ordered result; if any statement fails, the complete batch rolls back. SQL can read or mutate any SQL-accessible branch data and bypasses file-tool safeguards.\n\nThe following reference DDL describes every SQL surface initialized in a fresh workspace. Lix SQL does not support DDL statements; use these CREATE TABLE signatures only to understand column names, semantic SQL types, and nullability. Signatures labeled as views are read-only engine views even though CREATE TABLE syntax is used to retain their typed schema.\n\n```sql\nCREATE TABLE lix_state (\n  entity_pk JSON NOT NULL,\n  schema_key TEXT NOT NULL,\n  file_id TEXT,\n  snapshot_content JSON,\n  metadata JSON,\n  created_at TEXT,\n  updated_at TEXT,\n  global BOOLEAN,\n  change_id TEXT,\n  commit_id TEXT,\n  untracked BOOLEAN\n);\n\nCREATE TABLE lix_state_by_branch (\n  entity_pk JSON NOT NULL,\n  schema_key TEXT NOT NULL,\n  file_id TEXT,\n  snapshot_content JSON,\n  metadata JSON,\n  created_at TEXT,\n  updated_at TEXT,\n  global BOOLEAN,\n  change_id TEXT,\n  commit_id TEXT,\n  untracked BOOLEAN,\n  branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_state_history (\n  entity_pk JSON NOT NULL,\n  schema_key TEXT NOT NULL,\n  file_id TEXT,\n  snapshot_content JSON,\n  metadata JSON,\n  change_id TEXT NOT NULL,\n  origin_key TEXT,\n  observed_commit_id TEXT NOT NULL,\n  commit_created_at TEXT NOT NULL,\n  start_commit_id TEXT NOT NULL,\n  depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_file (\n  id TEXT,\n  path TEXT NOT NULL,\n  directory_id TEXT,\n  name TEXT NOT NULL,\n  data BLOB NOT NULL,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_metadata JSON\n);\n\nCREATE TABLE lix_file_by_branch (\n  id TEXT,\n  path TEXT NOT NULL,\n  directory_id TEXT,\n  name TEXT NOT NULL,\n  data BLOB NOT NULL,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_metadata JSON,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_file_history (\n  id TEXT NOT NULL,\n  path TEXT,\n  directory_id TEXT,\n  name TEXT,\n  data BLOB,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_metadata JSON,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_directory (\n  id TEXT,\n  path TEXT,\n  parent_id TEXT,\n  name TEXT NOT NULL,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_metadata JSON\n);\n\nCREATE TABLE lix_directory_by_branch (\n  id TEXT,\n  path TEXT,\n  parent_id TEXT,\n  name TEXT NOT NULL,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_metadata JSON,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_directory_history (\n  id TEXT NOT NULL,\n  path TEXT,\n  parent_id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_metadata JSON,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_branch (\n  id TEXT NOT NULL,\n  name TEXT NOT NULL,\n  hidden BOOLEAN NOT NULL,\n  commit_id TEXT NOT NULL\n);\n\nCREATE TABLE lix_change (\n  id TEXT NOT NULL,\n  entity_pk JSON NOT NULL,\n  schema_key TEXT NOT NULL,\n  file_id TEXT,\n  metadata JSON,\n  created_at TEXT NOT NULL,\n  origin_key TEXT,\n  snapshot_content JSON\n);\n\nCREATE TABLE lix_account (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_account_by_branch (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_account_history (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_binary_blob_ref (\n  blob_hash TEXT,\n  id TEXT,\n  size_bytes BIGINT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_binary_blob_ref_by_branch (\n  blob_hash TEXT,\n  id TEXT,\n  size_bytes BIGINT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_binary_blob_ref_history (\n  blob_hash TEXT,\n  id TEXT,\n  size_bytes BIGINT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_branch_descriptor (\n  hidden BOOLEAN,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_branch_descriptor_by_branch (\n  hidden BOOLEAN,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_branch_descriptor_history (\n  hidden BOOLEAN,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_branch_ref (\n  commit_id TEXT,\n  id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_branch_ref_by_branch (\n  commit_id TEXT,\n  id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_branch_ref_history (\n  commit_id TEXT,\n  id TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_change_author (\n  account_id TEXT,\n  change_id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_change_author_by_branch (\n  account_id TEXT,\n  change_id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_change_author_history (\n  account_id TEXT,\n  change_id TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_commit (\n  id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_commit_by_branch (\n  id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\nCREATE TABLE lix_commit_edge (\n  child_id TEXT,\n  parent_id TEXT,\n  parent_order BIGINT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_commit_edge_by_branch (\n  child_id TEXT,\n  parent_id TEXT,\n  parent_order BIGINT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\nCREATE TABLE lix_directory_descriptor (\n  id TEXT,\n  name TEXT,\n  parent_id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_directory_descriptor_by_branch (\n  id TEXT,\n  name TEXT,\n  parent_id TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_directory_descriptor_history (\n  id TEXT,\n  name TEXT,\n  parent_id TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_file_descriptor (\n  directory_id TEXT,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_file_descriptor_by_branch (\n  directory_id TEXT,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_file_descriptor_history (\n  directory_id TEXT,\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_key_value (\n  key TEXT,\n  value JSON,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_key_value_by_branch (\n  key TEXT,\n  value JSON,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_key_value_history (\n  key TEXT,\n  value JSON,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_label (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_label_by_branch (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_label_history (\n  id TEXT,\n  name TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_label_assignment (\n  id TEXT,\n  label_id TEXT,\n  target_entity_pk JSON,\n  target_file_id TEXT,\n  target_schema_key TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_label_assignment_by_branch (\n  id TEXT,\n  label_id TEXT,\n  target_entity_pk JSON,\n  target_file_id TEXT,\n  target_schema_key TEXT,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_label_assignment_history (\n  id TEXT,\n  label_id TEXT,\n  target_entity_pk JSON,\n  target_file_id TEXT,\n  target_schema_key TEXT,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n\nCREATE TABLE lix_registered_schema (\n  value JSON,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN\n);\n\nCREATE TABLE lix_registered_schema_by_branch (\n  value JSON,\n  lixcol_entity_pk JSON,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_created_at TEXT,\n  lixcol_updated_at TEXT,\n  lixcol_global BOOLEAN,\n  lixcol_change_id TEXT,\n  lixcol_commit_id TEXT,\n  lixcol_untracked BOOLEAN,\n  lixcol_branch_id TEXT NOT NULL\n);\n\n-- Actual object: read-only VIEW.\nCREATE TABLE lix_registered_schema_history (\n  value JSON,\n  lixcol_entity_pk JSON NOT NULL,\n  lixcol_schema_key TEXT NOT NULL,\n  lixcol_file_id TEXT,\n  lixcol_snapshot_content JSON,\n  lixcol_metadata JSON,\n  lixcol_change_id TEXT NOT NULL,\n  lixcol_origin_key TEXT,\n  lixcol_observed_commit_id TEXT NOT NULL,\n  lixcol_commit_created_at TEXT NOT NULL,\n  lixcol_start_commit_id TEXT NOT NULL,\n  lixcol_depth BIGINT NOT NULL\n);\n```\n\nWorkspaces can register additional schema-derived surfaces after initialization. Discover the complete runtime schema for the selected workspace and branch with:\n\n```sql\nSELECT\n  t.table_name,\n  t.table_type,\n  c.column_name,\n  c.data_type,\n  c.is_nullable,\n  c.ordinal_position\nFROM information_schema.tables AS t\nJOIN information_schema.columns AS c\n  ON t.table_catalog = c.table_catalog\n AND t.table_schema = c.table_schema\n AND t.table_name = c.table_name\nWHERE t.table_schema = 'public'\nORDER BY t.table_name, c.ordinal_position;\n```",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1291,119 +1291,131 @@
 					"format": "uuid",
 					"description": "Lix branch UUID. Omit to use the workspace default branch."
 				},
-				"sql": {
-					"type": "string",
-					"minLength": 1
-				},
-				"params": {
-					"default": [],
-					"maxItems": 1000,
+				"statements": {
+					"minItems": 1,
+					"maxItems": 100,
 					"type": "array",
 					"items": {
-						"oneOf": [
-							{
-								"type": "object",
-								"properties": {
-									"kind": {
-										"type": "string",
-										"const": "null"
-									},
-									"value": {
-										"type": "null"
-									}
-								},
-								"required": ["kind"],
-								"additionalProperties": false
+						"type": "object",
+						"properties": {
+							"sql": {
+								"type": "string",
+								"minLength": 1
 							},
-							{
-								"type": "object",
-								"properties": {
-									"kind": {
-										"type": "string",
-										"const": "bool"
-									},
-									"value": {
-										"type": "boolean"
-									}
-								},
-								"required": ["kind", "value"],
-								"additionalProperties": false
-							},
-							{
-								"type": "object",
-								"properties": {
-									"kind": {
-										"type": "string",
-										"const": "int"
-									},
-									"value": {
-										"type": "integer",
-										"minimum": -9007199254740991,
-										"maximum": 9007199254740991
-									}
-								},
-								"required": ["kind", "value"],
-								"additionalProperties": false
-							},
-							{
-								"type": "object",
-								"properties": {
-									"kind": {
-										"type": "string",
-										"const": "float"
-									},
-									"value": {
-										"type": "number"
-									}
-								},
-								"required": ["kind", "value"],
-								"additionalProperties": false
-							},
-							{
-								"type": "object",
-								"properties": {
-									"kind": {
-										"type": "string",
-										"const": "text"
-									},
-									"value": {
-										"type": "string"
-									}
-								},
-								"required": ["kind", "value"],
-								"additionalProperties": false
-							},
-							{
-								"type": "object",
-								"properties": {
-									"kind": {
-										"type": "string",
-										"const": "blob"
-									},
-									"base64": {
-										"type": "string"
-									}
-								},
-								"required": ["kind", "base64"],
-								"additionalProperties": false
-							},
-							{
-								"type": "object",
-								"properties": {
-									"kind": {
-										"type": "string",
-										"const": "json"
-									},
-									"value": {}
-								},
-								"required": ["kind", "value"],
-								"additionalProperties": false
+							"params": {
+								"default": [],
+								"maxItems": 1000,
+								"type": "array",
+								"items": {
+									"oneOf": [
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "null"
+												},
+												"value": {
+													"type": "null"
+												}
+											},
+											"required": ["kind"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "bool"
+												},
+												"value": {
+													"type": "boolean"
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "int"
+												},
+												"value": {
+													"type": "integer",
+													"minimum": -9007199254740991,
+													"maximum": 9007199254740991
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "float"
+												},
+												"value": {
+													"type": "number"
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "text"
+												},
+												"value": {
+													"type": "string"
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "blob"
+												},
+												"base64": {
+													"type": "string"
+												}
+											},
+											"required": ["kind", "base64"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "json"
+												},
+												"value": {}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										}
+									]
+								}
 							}
-						]
+						},
+						"required": ["sql"],
+						"additionalProperties": false
 					}
 				}
 			},
-			"required": ["workspace_ref", "sql"],
+			"required": ["workspace_ref", "statements"],
 			"additionalProperties": false
 		},
 		"outputSchema": {

@@ -37,6 +37,7 @@ import {
 	type ContainerRetryDelay,
 	type ContainerStub as RetryingContainerStub,
 } from "./container-retry.ts";
+import { resolveSupabaseWorkspaceId } from "./workspace-resolver.ts";
 
 export interface WorkerEnv {
 	ASSETS?: Fetcher;
@@ -72,7 +73,9 @@ export interface HandleRequestOptions {
 	authenticate?: AuthenticateRequest;
 	authenticateMcp?: AuthenticateMcpRequest;
 	authorizeWorkspace?: AuthorizeWorkspace;
-	authorizePublicWorkspace?: AuthorizePublicWorkspace;
+	resolveWorkspace?: ResolveWorkspace;
+	resolvePublicWorkspace?: ResolvePublicWorkspace;
+	parseSqlScript?: ParseSqlScript;
 	mcpTransport?: typeof handleMcpTransport;
 	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
@@ -113,15 +116,37 @@ export type AuthorizeWorkspace = (
 	env: WorkerEnv,
 ) => Promise<Response | null>;
 
-/**
- * Confirms that a live workspace may be opened through the public read
- * transport. This deliberately does not use the member-scoped workspace RLS
- * lookup: an authenticated non-member must remain read-only.
- */
-export type AuthorizePublicWorkspace = (
-	workspaceId: string,
+export type ResolveWorkspace = (
+	namespace: string,
+	workspaceSlug: string,
+	auth: AuthenticatedUser,
 	env: WorkerEnv,
-) => Promise<Response | null>;
+) => Promise<WorkspaceResolution>;
+
+export type WorkspaceResolution =
+	| { ok: true; workspaceId: string }
+	| { ok: false; response: Response };
+
+/**
+ * Resolves a live workspace for the public read transport. This deliberately
+ * does not use the member-scoped workspace lookup: a valid browser JWT alone
+ * must never turn a public reader into an editor.
+ */
+export type ResolvePublicWorkspace = (
+	namespace: string,
+	workspaceSlug: string,
+	env: WorkerEnv,
+) => Promise<WorkspaceResolution>;
+
+/**
+ * Lix's SQL script parser, injected by the worker entry so the public read
+ * gate classifies statements with the same grammar the engine executes —
+ * not a transport-level keyword check.
+ */
+export type ParseSqlScript = (
+	sql: string,
+	providedParamCount: number,
+) => { statements: ReadonlyArray<{ sql: string }> };
 
 export type AuthResult =
 	| { ok: true; auth: AuthenticatedUser }
@@ -139,9 +164,9 @@ export type McpClaimsValidation =
 			description: string;
 	  };
 
-const WORKSPACE_API_PATH = /^\/v1\/workspaces\/([^/]+)(\/.*)$/;
-const UUID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
+const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
+const WORKSPACE_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
 const jwksByUrl = new Map<string, JWTVerifyGetKey>();
 
 export async function handleRequest(
@@ -225,89 +250,86 @@ export async function handleRequest(
 			);
 		} finally {
 			scheduleMcpTelemetryFlush(executionContext, telemetry);
+			await client.close();
 		}
 	}
 
-	if (!url.pathname.startsWith("/v1/")) {
-		return (
-			options.fallback?.(request, env) ??
-			new Response("Not found\n", { status: 404 })
+	const remoteLixMatch = REMOTE_LIX_API_PATH.exec(url.pathname);
+	if (remoteLixMatch) {
+		const namespace = normalizedRouteSegment(remoteLixMatch[1]);
+		const workspaceSlug = normalizedRouteSegment(remoteLixMatch[2]);
+		if (
+			!namespace ||
+			!workspaceSlug ||
+			!ORGANIZATION_HANDLE_PATTERN.test(namespace) ||
+			!WORKSPACE_SLUG_PATTERN.test(workspaceSlug)
+		) {
+			return new Response("Invalid workspace path\n", { status: 400 });
+		}
+
+		const endpoint = remoteLixMatch[3]?.replace(/\/+$/, "") ?? "";
+		const containerPath = `/lix/v1${endpoint ? `/${endpoint}` : "/"}`;
+		const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
+
+		const authenticate = options.authenticate ?? authenticateWithSupabase;
+		if (bearerToken(request)) {
+			const authResult = await authenticate(request, env);
+			if (authResult.ok) {
+				const resolution = await (
+					options.resolveWorkspace ?? resolveWorkspaceWithSupabase
+				)(namespace, workspaceSlug, authResult.auth, env);
+				if (resolution.ok) {
+					return fetchWorkspaceRequest(
+						resolution.workspaceId,
+						request,
+						containerPath,
+						env,
+						options,
+					);
+				}
+				// A signed-in non-member falls through to the public read
+				// transport instead of a dead end.
+				if (!publicReadRequest) return resolution.response;
+			} else if (!publicReadRequest) {
+				return authResult.response;
+			}
+		} else if (!publicReadRequest) {
+			return unauthorized().response;
+		}
+
+		const publicResolution = await (
+			options.resolvePublicWorkspace ?? resolvePublicWorkspaceWithSupabase
+		)(namespace, workspaceSlug, env);
+		if (!publicResolution.ok) return publicResolution.response;
+		const mutationRejection = await rejectPublicMutation(
+			request,
+			endpoint,
+			options.parseSqlScript,
+		);
+		if (mutationRejection) return mutationRejection;
+		return fetchWorkspaceRequest(
+			publicResolution.workspaceId,
+			request,
+			containerPath,
+			env,
+			options,
 		);
 	}
 
-	const match = WORKSPACE_API_PATH.exec(url.pathname);
-	if (!match) {
-		return new Response("Not found\n", { status: 404 });
-	}
-
-	const workspaceId = safeDecodeURIComponent(match[1]);
-	if (!workspaceId || !UUID_PATTERN.test(workspaceId)) {
-		return new Response("Invalid workspace id\n", { status: 400 });
-	}
-
-	const publicReadRequest = isPublicReadWorkspaceRequest(request, match[2]);
-	const authenticate = options.authenticate ?? authenticateWithSupabase;
-	const authorizeWorkspace =
-		options.authorizeWorkspace ?? authorizeWorkspaceWithSupabase;
-	const authorizePublicWorkspace =
-		options.authorizePublicWorkspace ?? authorizePublicWorkspaceWithSupabase;
-	const token = bearerToken(request);
-
-	if (token) {
-		const authResult = await authenticate(request, env);
-		if (authResult.ok) {
-			const authorizationFailure = await authorizeWorkspace(
-				workspaceId,
-				authResult.auth,
-				env,
-			);
-			if (!authorizationFailure) {
-				return forwardWorkspaceRequest(
-					request,
-					env,
-					options,
-					workspaceId,
-					match[2],
-					false,
-				);
-			}
-			if (!publicReadRequest) return authorizationFailure;
-		} else if (!publicReadRequest) {
-			return authResult.response;
-		}
-	} else if (!publicReadRequest) {
-		return unauthorized().response;
-	}
-
-	const publicAuthorizationFailure = await authorizePublicWorkspace(
-		workspaceId,
-		env,
-	);
-	if (publicAuthorizationFailure) return publicAuthorizationFailure;
-
-	return forwardWorkspaceRequest(
-		request,
-		env,
-		options,
-		workspaceId,
-		match[2],
-		true,
+	return (
+		options.fallback?.(request, env) ??
+		new Response("Not found\n", { status: 404 })
 	);
 }
 
-async function forwardWorkspaceRequest(
+async function fetchWorkspaceRequest(
+	workspaceId: string,
 	request: Request,
+	containerPath: string,
 	env: WorkerEnv,
 	options: HandleRequestOptions,
-	workspaceId: string,
-	containerPath: string,
-	readOnly: boolean,
 ): Promise<Response> {
-	const rewrittenRequest = rewriteWorkspaceRequest(
-		request,
-		containerPath,
-		readOnly,
-	);
+	const rewrittenRequest = rewriteWorkspaceRequest(request, containerPath);
 	if (options.workspaceFetch) {
 		return options.workspaceFetch(workspaceId, rewrittenRequest);
 	}
@@ -320,7 +342,7 @@ async function forwardWorkspaceRequest(
 		return await fetchContainerWithRetry({
 			namespace: env.SLATEDB_CONTAINER,
 			workspaceId,
-			operation: `${request.method} /v1${containerPath}`,
+			operation: `${request.method} ${containerPath}`,
 			envVars: containerEnv(env, workspaceId),
 			createRequest: () => rewrittenRequest.clone() as unknown as Request,
 			requestReplay: containerRequestReplay(request.method, containerPath),
@@ -333,7 +355,7 @@ async function forwardWorkspaceRequest(
 		if (request.signal.aborted) throw caught;
 		console.error("LixRay container request failed", {
 			workspaceId,
-			operation: `${request.method} /v1${containerPath}`,
+			operation: `${request.method} ${containerPath}`,
 			error: containerErrorDetails(caught),
 		});
 		return Response.json(
@@ -353,7 +375,7 @@ function containerRequestReplay(
 	path: string,
 ): "safe" | "unsafe" {
 	if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return "safe";
-	return path === "/observe" || path === "/observe/multiplex"
+	return path.endsWith("/observe") || path.endsWith("/observe/multiplex")
 		? "safe"
 		: "unsafe";
 }
@@ -617,28 +639,97 @@ export async function authorizeWorkspaceWithSupabase(
 	}
 }
 
-/**
- * The public route resolver is deliberately separate from member
- * authorization. A valid browser JWT alone must never turn a public reader
- * into an editor.
- */
-export async function authorizePublicWorkspaceWithSupabase(
-	workspaceId: string,
+export async function resolveWorkspaceWithSupabase(
+	namespace: string,
+	workspaceSlug: string,
+	auth: AuthenticatedUser,
 	env: WorkerEnv,
-): Promise<Response | null> {
+): Promise<WorkspaceResolution> {
+	if (auth.isDemo) {
+		const workspace = demoWorkspaceSummaries(env).find(
+			(candidate) =>
+				candidate.organization.handle === namespace &&
+				candidate.slug === workspaceSlug,
+		);
+		return workspace
+			? { ok: true, workspaceId: workspace.id }
+			: workspaceNotFound();
+	}
+
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return {
+			ok: false,
+			response: new Response("Supabase Data API is not configured\n", {
+				status: 500,
+			}),
+		};
+	}
+
+	const result = await resolveSupabaseWorkspaceId({
+		supabaseUrl: env.SUPABASE_URL,
+		publishableKey: env.SUPABASE_PUBLISHABLE_KEY,
+		accessToken: auth.token,
+		namespace,
+		workspaceSlug,
+	});
+	if (!result.ok) {
+		return result.reason === "not_found"
+			? workspaceNotFound()
+			: workspaceResolutionUnavailable();
+	}
+	return { ok: true, workspaceId: result.workspaceId };
+}
+
+function workspaceNotFound(): WorkspaceResolution {
+	return {
+		ok: false,
+		response: new Response("Workspace not found\n", { status: 404 }),
+	};
+}
+
+function workspaceResolutionUnavailable(): {
+	ok: false;
+	response: Response;
+} {
+	return {
+		ok: false,
+		response: new Response("Workspace resolution is unavailable\n", {
+			status: 502,
+		}),
+	};
+}
+
+/**
+ * The public route resolver is deliberately separate from member resolution.
+ * It exposes only live route metadata through a security-definer RPC that is
+ * callable anonymously.
+ */
+export async function resolvePublicWorkspaceWithSupabase(
+	namespace: string,
+	workspaceSlug: string,
+	env: WorkerEnv,
+): Promise<WorkspaceResolution> {
 	if (isDemoMode(env)) {
-		return demoWorkspaceIds(env).has(workspaceId)
-			? null
-			: new Response("Workspace not found\n", { status: 404 });
+		const workspace = demoWorkspaceSummaries(env).find(
+			(candidate) =>
+				candidate.organization.handle === namespace &&
+				candidate.slug === workspaceSlug,
+		);
+		return workspace
+			? { ok: true, workspaceId: workspace.id }
+			: workspaceNotFound();
 	}
 	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
-		return new Response("Supabase Data API is not configured\n", {
-			status: 500,
-		});
+		return {
+			ok: false,
+			response: new Response("Supabase Data API is not configured\n", {
+				status: 500,
+			}),
+		};
 	}
 
 	const lookupUrl = new URL(
-		"/rest/v1/rpc/resolve_public_workspace",
+		"/rest/v1/rpc/resolve_public_workspace_by_route",
 		env.SUPABASE_URL,
 	);
 	let response: Response;
@@ -650,29 +741,26 @@ export async function authorizePublicWorkspaceWithSupabase(
 				Accept: "application/json",
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ p_workspace_id: workspaceId }),
+			body: JSON.stringify({
+				p_organization_handle: namespace,
+				p_workspace_slug: workspaceSlug,
+			}),
 		});
 	} catch {
-		return new Response("Public workspace lookup is unavailable\n", {
-			status: 502,
-		});
+		return workspaceResolutionUnavailable();
 	}
 	if (!response.ok) {
-		return new Response("Public workspace lookup is unavailable\n", {
-			status: 502,
-		});
+		return workspaceResolutionUnavailable();
 	}
 	try {
 		const rows: unknown = await response.json();
-		return Array.isArray(rows) &&
-			rows.length === 1 &&
-			workspaceRowId(rows[0]) === workspaceId
-			? null
-			: new Response("Workspace not found\n", { status: 404 });
+		const workspaceId =
+			Array.isArray(rows) && rows.length === 1 ? workspaceRowId(rows[0]) : null;
+		return typeof workspaceId === "string" && workspaceId
+			? { ok: true, workspaceId }
+			: workspaceNotFound();
 	} catch {
-		return new Response("Public workspace lookup is unavailable\n", {
-			status: 502,
-		});
+		return workspaceResolutionUnavailable();
 	}
 }
 
@@ -683,18 +771,102 @@ function workspaceRowId(value: unknown): unknown {
 }
 
 /**
- * The browser's public transport only receives declarative Lix reads. This
- * gate is defense in depth for the anonymous shell: UI read-only state is not
- * an authorization boundary, and `/execute` also accepts mutations.
+ * The public transport only exposes the protocol handshake and the four
+ * SQL-carrying endpoints. Branch mutations (`branch/create`, `branch/switch`)
+ * change shared workspace state and are never public.
  */
-function isPublicReadWorkspaceRequest(
+function isPublicReadRemoteLixRequest(
 	request: Request,
-	containerPath: string,
+	endpoint: string,
 ): boolean {
-	if (request.method === "GET" && containerPath === "/branches") return true;
+	if (!endpoint) return request.method === "GET";
 	return (
 		request.method === "POST" &&
-		["/execute", "/observe", "/observe/multiplex"].includes(containerPath)
+		["execute", "execute-batch", "observe", "observe/multiplex"].includes(
+			endpoint,
+		)
+	);
+}
+
+/**
+ * The container's canonical Lix protocol has no read-only mode, so the Worker
+ * is the authorization boundary for public readers: every SQL statement in a
+ * public request must classify as a read. Statements are split by Lix's own
+ * script parser (injected as `options.parseSqlScript`) before the keyword
+ * check, so a mutation cannot hide behind a multi-statement script. Without a
+ * parser the gate fails closed.
+ */
+async function rejectPublicMutation(
+	request: Request,
+	endpoint: string,
+	parseSqlScript: ParseSqlScript | undefined,
+): Promise<Response | null> {
+	if (!endpoint) return null;
+	let statements: Array<{ sql: string; paramCount: number }>;
+	try {
+		statements = await publicSqlStatements(request, endpoint);
+	} catch {
+		return publicReadOnlyResponse();
+	}
+	if (statements.length === 0 || !parseSqlScript) {
+		return publicReadOnlyResponse();
+	}
+	for (const statement of statements) {
+		let plan: ReturnType<ParseSqlScript>;
+		try {
+			plan = parseSqlScript(statement.sql, statement.paramCount);
+		} catch {
+			return publicReadOnlyResponse();
+		}
+		if (plan.statements.length === 0) return publicReadOnlyResponse();
+		// Observers represent one live query; requiring exactly one parsed
+		// statement prevents a read followed by a mutation from hiding behind
+		// the SSE endpoint.
+		if (endpoint.startsWith("observe") && plan.statements.length !== 1) {
+			return publicReadOnlyResponse();
+		}
+		if (!plan.statements.every((parsed) => isClearlyReadOnlySql(parsed.sql))) {
+			return publicReadOnlyResponse();
+		}
+	}
+	return null;
+}
+
+async function publicSqlStatements(
+	request: Request,
+	endpoint: string,
+): Promise<Array<{ sql: string; paramCount: number }>> {
+	const body: unknown = await request.clone().json();
+	if (!body || typeof body !== "object") return [];
+	const record = body as Record<string, unknown>;
+	const entries =
+		endpoint === "execute-batch"
+			? record.statements
+			: endpoint === "observe/multiplex"
+				? record.subscriptions
+				: [record];
+	if (!Array.isArray(entries)) return [];
+	return entries.map((entry) => {
+		if (!entry || typeof entry !== "object") {
+			throw new Error("Malformed public statement");
+		}
+		const { sql, params } = entry as Record<string, unknown>;
+		if (typeof sql !== "string" || sql.length === 0) {
+			throw new Error("Malformed public statement");
+		}
+		return { sql, paramCount: Array.isArray(params) ? params.length : 0 };
+	});
+}
+
+function isClearlyReadOnlySql(sql: string): boolean {
+	const keyword = /^\s*([a-z]+)/i.exec(sql)?.[1]?.toUpperCase();
+	return keyword === "SELECT" || keyword === "VALUES";
+}
+
+function publicReadOnlyResponse(): Response {
+	return Response.json(
+		{ error: { code: "LIX_READ_ONLY", message: "workspace is read-only" } },
+		{ status: 400 },
 	);
 }
 
@@ -776,22 +948,18 @@ function remoteJwks(url: string): JWTVerifyGetKey {
 	return jwks;
 }
 
-function rewriteWorkspaceRequest(
-	request: Request,
-	containerPath: string,
-	readOnly = false,
-) {
+function rewriteWorkspaceRequest(request: Request, containerPath: string) {
 	const url = new URL(request.url);
-	url.pathname = `/v1${containerPath}`;
+	url.pathname = containerPath;
 	const rewritten = new Request(url, request);
 	const headers = new Headers(rewritten.headers);
 	headers.delete("Authorization");
-	// This header is only meaningful within the Worker-to-runtime hop. Always
-	// overwrite a browser-supplied value so a member request cannot be
-	// accidentally downgraded and a public request cannot be upgraded.
-	headers.delete("X-Lixray-Read-Only");
-	if (readOnly) headers.set("X-Lixray-Read-Only", "1");
 	return new Request(rewritten, { headers });
+}
+
+function normalizedRouteSegment(value: string | undefined): string | null {
+	if (value === undefined) return null;
+	return safeDecodeURIComponent(value)?.toLowerCase() ?? null;
 }
 
 function safeDecodeURIComponent(value: string): string | null {

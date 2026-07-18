@@ -11,7 +11,6 @@ import {
 	DEFAULT_READ_LINE_COUNT,
 	FileServiceError,
 	LixFileService,
-	type WireValue,
 } from "./file-service.ts";
 import { EXECUTE_TOOL_DESCRIPTION } from "./execute-schema.ts";
 
@@ -76,6 +75,12 @@ const wireValue = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("blob"), base64: z.string() }).strict(),
 	z.object({ kind: z.literal("json"), value: z.unknown() }).strict(),
 ]);
+const executeStatement = z
+	.object({
+		sql: executeSqlText,
+		params: z.array(wireValue).max(1000).optional().default([]),
+	})
+	.strict();
 const workspaceSummaryOutput = z
 	.object({
 		id: uuid,
@@ -235,11 +240,10 @@ export function createLixrayMcpServer(
 				`Unknown tool: ${request.params.name}`,
 			);
 		}
-		const sqlResult =
+		const sql =
 			tool.descriptor.name === "execute"
-				? executeSqlText.safeParse(request.params.arguments?.sql)
+				? executeTelemetrySql(request.params.arguments?.statements)
 				: undefined;
-		const sql = sqlResult?.success ? sqlResult.data : undefined;
 		const parsed = tool.schema.safeParse(request.params.arguments ?? {});
 		if (!parsed.success) {
 			observeToolCall(options.onToolCall, startedAt, {
@@ -405,7 +409,7 @@ export function mcpDocumentationResponse(
 			"",
 			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
-			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting files, plus a raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards. Execute accepts one or more semicolon-delimited statements, with request-wide $n parameters or query-ordered ? parameters. One result is returned per executable statement.",
+			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting files, plus a raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. Existing file-tool content is protected by opaque revisions; raw SQL bypasses those file safeguards. Execute accepts an ordered batch of statements with $n or ? parameters. Lix executes the batch atomically and returns one ordered result per statement.",
 		].join("\n"),
 		{
 			headers: {
@@ -796,24 +800,37 @@ function buildTools(
 				.object({
 					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
-					sql: executeSqlText,
-					params: z.array(wireValue).max(1000).optional().default([]),
+					statements: z.array(executeStatement).min(1).max(100),
 				})
 				.strict(),
 			writeAnnotations(true, false),
-			async ({ workspace_ref, branch_id, sql, params }) =>
+			async ({ workspace_ref, branch_id, statements }) =>
 				service.executeSql(
 					String(workspace_ref),
 					await service.resolveBranchId(
 						String(workspace_ref),
 						branch_id === undefined ? undefined : String(branch_id),
 					),
-					String(sql),
-					params as Array<WireValue>,
+					statements.map((statement) => ({
+						sql: statement.sql,
+						params: statement.params,
+					})),
 				),
 			executeOutput,
 		),
 	];
+}
+
+function executeTelemetrySql(value: unknown): string | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const statements = value.flatMap((candidate): string[] => {
+		if (!candidate || typeof candidate !== "object") return [];
+		const parsed = executeSqlText.safeParse(
+			(candidate as Record<string, unknown>).sql,
+		);
+		return parsed.success ? [parsed.data] : [];
+	});
+	return statements.length > 0 ? statements.join(";\n") : undefined;
 }
 
 function createTool<T extends z.ZodType<Record<string, unknown>>>(

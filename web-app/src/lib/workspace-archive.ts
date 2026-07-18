@@ -1,132 +1,66 @@
+import { openLix, type Lix } from "@lix-js/sdk/remote";
 import { zipSync } from "fflate";
-import { base64ToBytes } from "./base64";
-import type {
-	BranchesResponse,
-	ExecuteResponse,
-	ExecuteScriptResponse,
-	WireValue,
-} from "./lixray-api";
-import { workspaceApiPath } from "./lixray-api";
 
 type AccessTokenGetter = () => Promise<string | null>;
 
+interface WorkspaceRemote {
+	namespace: string;
+	workspaceSlug: string;
+	getAccessToken: AccessTokenGetter;
+}
+
 export async function fetchWorkspaceFileCount(
-	workspaceId: string,
-	getAccessToken: AccessTokenGetter,
+	options: WorkspaceRemote,
 ): Promise<number> {
-	const branchId = await getCurrentBranchId(workspaceId, getAccessToken);
-	const response = await workspaceRequest<ExecuteScriptResponse>(
-		workspaceId,
-		getAccessToken,
-		"/execute",
-		{
-			method: "POST",
-			body: JSON.stringify({
-				branchId,
-				sql: "SELECT COUNT(*) FROM lix_file",
-				params: [],
-			}),
-		},
-	);
-	const result = singleResult(response);
-	const value = result.rows[0]?.[0];
-	return value?.kind === "int" ? value.value : 0;
+	return withWorkspaceLix(options, async (lix) => {
+		const result = await lix.execute("SELECT COUNT(*) AS count FROM lix_file");
+		const count = result.rows[0]?.toObject().count;
+		return typeof count === "number" ? count : 0;
+	});
 }
 
 export async function buildWorkspaceArchive(
-	workspaceId: string,
-	getAccessToken: AccessTokenGetter,
+	options: WorkspaceRemote,
 ): Promise<Uint8Array<ArrayBuffer>> {
-	const branchId = await getCurrentBranchId(workspaceId, getAccessToken);
-	const response = await workspaceRequest<ExecuteScriptResponse>(
-		workspaceId,
-		getAccessToken,
-		"/execute",
-		{
-			method: "POST",
-			body: JSON.stringify({
-				branchId,
-				sql: "SELECT path, data FROM lix_file ORDER BY path",
-				params: [],
-			}),
-		},
-	);
-	const result = singleResult(response);
-	const entries: Record<string, Uint8Array> = {};
-	for (const row of result.rows) {
-		const path = asText(row[0]).replace(/^\/+/, "");
-		const data = asBlob(row[1]);
-		if (path) entries[path] = data;
-	}
-	return zipSync(entries);
-}
-
-function singleResult(response: ExecuteScriptResponse): ExecuteResponse {
-	const [result] = response.results;
-	if (!result || response.results.length !== 1) {
-		throw new Error("Lix returned an invalid single-statement result");
-	}
-	return result;
-}
-
-async function getCurrentBranchId(
-	workspaceId: string,
-	getAccessToken: AccessTokenGetter,
-): Promise<string> {
-	const result = await workspaceRequest<BranchesResponse>(
-		workspaceId,
-		getAccessToken,
-		"/branches",
-	);
-	const branch = result.branches.find(
-		(candidate) => candidate.id === result.currentBranchId,
-	);
-	if (!branch)
-		throw new Error("This workspace does not have a branch to archive.");
-	return branch.id;
-}
-
-async function workspaceRequest<T>(
-	workspaceId: string,
-	getAccessToken: AccessTokenGetter,
-	path: string,
-	init: RequestInit = {},
-): Promise<T> {
-	const token = await getAccessToken();
-	if (!token) throw new Error("Sign in to access this workspace.");
-	const headers = new Headers(init.headers);
-	headers.set("Authorization", `Bearer ${token}`);
-	if (init.body) headers.set("content-type", "application/json");
-	const response = await fetch(workspaceApiPath(workspaceId, path), {
-		...init,
-		headers,
-	});
-	const body: unknown = await response.json();
-	if (!response.ok) {
-		throw new Error(
-			readErrorMessage(body) ?? `Request failed (${response.status})`,
+	return withWorkspaceLix(options, async (lix) => {
+		const result = await lix.execute(
+			"SELECT path, data FROM lix_file ORDER BY path",
 		);
-	}
-	return body as T;
+		const entries: Record<string, Uint8Array> = {};
+		for (const row of result.rows) {
+			const path = row.value("path").toJS();
+			const data = row.value("data").asBytes();
+			if (typeof path !== "string" || !data) {
+				throw new Error("Workspace archive returned invalid file data.");
+			}
+			const archivePath = path.replace(/^\/+/, "");
+			if (archivePath) entries[archivePath] = data;
+		}
+		return zipSync(entries);
+	});
 }
 
-function asText(value: WireValue | undefined): string {
-	if (!value || value.kind !== "text") {
-		throw new Error("Workspace archive returned an invalid file path.");
+async function withWorkspaceLix<T>(
+	options: WorkspaceRemote,
+	operation: (lix: Lix) => Promise<T>,
+): Promise<T> {
+	const lix = await openLix({
+		server: {
+			mode: "remote",
+			url: new URL(
+				`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.workspaceSlug)}`,
+				globalThis.location.origin,
+			),
+			headers: async () => {
+				const token = await options.getAccessToken();
+				if (!token) throw new Error("Sign in to access this workspace.");
+				return { Authorization: `Bearer ${token}` };
+			},
+		},
+	});
+	try {
+		return await operation(lix);
+	} finally {
+		await lix.close();
 	}
-	return value.value;
-}
-
-function asBlob(value: WireValue | undefined): Uint8Array<ArrayBuffer> {
-	if (!value || value.kind !== "blob") {
-		throw new Error("Workspace archive returned invalid file data.");
-	}
-	return base64ToBytes(value.base64);
-}
-
-function readErrorMessage(body: unknown): string | null {
-	if (!body || typeof body !== "object" || !("error" in body)) return null;
-	const error = body.error;
-	if (!error || typeof error !== "object" || !("message" in error)) return null;
-	return typeof error.message === "string" ? error.message : null;
 }

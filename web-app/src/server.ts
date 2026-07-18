@@ -1,3 +1,4 @@
+import { parseSqlScript } from "@lix-js/sdk/workerd";
 import startHandler from "@tanstack/react-start/server-entry";
 import { addGoogleAnalytics } from "./lib/google-analytics";
 import { withShareSecurityHeaders } from "./lib/share-security";
@@ -15,6 +16,7 @@ export default {
 		ctx.passThroughOnException();
 		return handleRequest(request, env, {
 			executionContext: ctx,
+			parseSqlScript,
 			fallback: async (fallbackRequest) => {
 				const response = await startHandler.fetch(fallbackRequest);
 				return withShareSecurityHeaders(
