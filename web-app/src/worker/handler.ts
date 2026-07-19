@@ -45,6 +45,12 @@ export interface WorkerEnv {
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
 	SUPABASE_JWKS_URL?: string;
+	/**
+	 * Public Supabase URL used as the JWT issuer. This can differ from
+	 * `SUPABASE_URL` when the web service reaches a locally hosted Supabase
+	 * instance through Docker's host gateway.
+	 */
+	SUPABASE_JWT_ISSUER_URL?: string;
 	R2_ENDPOINT?: string;
 	R2_BUCKET?: string;
 	R2_ACCESS_KEY_ID?: string;
@@ -63,10 +69,6 @@ export interface WorkerEnv {
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
-}
-
-export interface PreviewWorkerEnv extends WorkerEnv {
-	PREVIEW_STATE: R2Bucket;
 }
 
 export type ContainerNamespace = RetryingContainerNamespace;
@@ -92,11 +94,6 @@ export interface AuthenticatedUser {
 	userId: string;
 	token: string;
 	isDemo?: boolean;
-	/**
-	 * Preview-only membership snapshot, populated after validating the
-	 * server-side demo-session cookie for this request.
-	 */
-	previewWorkspaceIds?: ReadonlyArray<string>;
 }
 
 export interface AuthenticatedMcpUser extends AuthenticatedUser {
@@ -411,13 +408,13 @@ export async function authenticateWithSupabase(
 	if (!token) return unauthorized();
 
 	try {
-		const supabaseUrl = env.SUPABASE_URL?.replace(/\/$/, "") ?? "";
+		const issuer = supabaseJwtIssuer(env);
 		const { payload } = await jwtVerify(
 			token,
 			remoteJwks(env.SUPABASE_JWKS_URL ?? ""),
 			{
 				algorithms: ["ES256"],
-				issuer: `${supabaseUrl}/auth/v1`,
+				issuer,
 				audience: "authenticated",
 			},
 		);
@@ -429,6 +426,17 @@ export async function authenticateWithSupabase(
 	} catch {
 		return unauthorized();
 	}
+}
+
+export function supabaseJwtIssuer(
+	env: Pick<WorkerEnv, "SUPABASE_URL" | "SUPABASE_JWT_ISSUER_URL">,
+): string {
+	const baseUrl = (
+		env.SUPABASE_JWT_ISSUER_URL?.trim() ||
+		env.SUPABASE_URL ||
+		""
+	).replace(/\/$/, "");
+	return `${baseUrl}/auth/v1`;
 }
 
 export function validateBrowserJwtClaims(payload: JWTPayload): boolean {
@@ -478,17 +486,17 @@ export async function authenticateMcpWithSupabase(
 	}
 
 	try {
-		const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
+		const issuer = supabaseJwtIssuer(env);
 		const { payload } = await jwtVerify(
 			token,
 			remoteJwks(env.SUPABASE_JWKS_URL),
 			{
 				algorithms: ["ES256"],
-				issuer: `${supabaseUrl}/auth/v1`,
+				issuer,
 				audience: "authenticated",
 			},
 		);
-		const claims = validateMcpJwtClaims(payload, `${supabaseUrl}/auth/v1`);
+		const claims = validateMcpJwtClaims(payload, issuer);
 		if (!claims.ok) {
 			return {
 				ok: false,

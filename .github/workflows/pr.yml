@@ -179,5 +179,5 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium
 
-      - name: Run e2e tests
-        run: pnpm --dir web-app test:e2e
+      - name: Run Compose e2e tests
+        run: pnpm test:e2e

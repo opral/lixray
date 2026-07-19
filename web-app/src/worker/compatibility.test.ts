@@ -7,24 +7,18 @@ const WEB_APP_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const REQUEST_SIGNAL_FLAG = "enable_request_signal";
 const EXPERIMENTAL_RPC_FLAG = "enable_abortsignal_rpc";
 
-void test("every Worker target enables request cancellation without experimental RPC flags", async () => {
-	for (const filename of [
-		"wrangler.jsonc",
-		"wrangler.preview.jsonc",
-		"wrangler.preview-runtime.jsonc",
-		"wrangler.e2e.jsonc",
-	]) {
-		const config = readConfig(filename);
-		assert.ok(
-			config.compatibility_flags.includes(REQUEST_SIGNAL_FLAG),
-			`${filename} must enable ${REQUEST_SIGNAL_FLAG}`,
-		);
-		assert.equal(
-			config.compatibility_flags.includes(EXPERIMENTAL_RPC_FLAG),
-			false,
-			`${filename} cannot deploy with ${EXPERIMENTAL_RPC_FLAG}`,
-		);
-	}
+void test("the production Worker enables request cancellation without experimental RPC flags", async () => {
+	const filename = "wrangler.jsonc";
+	const config = readConfig(filename);
+	assert.ok(
+		config.compatibility_flags.includes(REQUEST_SIGNAL_FLAG),
+		`${filename} must enable ${REQUEST_SIGNAL_FLAG}`,
+	);
+	assert.equal(
+		config.compatibility_flags.includes(EXPERIMENTAL_RPC_FLAG),
+		false,
+		`${filename} cannot deploy with ${EXPERIMENTAL_RPC_FLAG}`,
+	);
 });
 
 void test("Workerd keeps the request signal local to deployable Durable Object RPC", async () => {

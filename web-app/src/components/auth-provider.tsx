@@ -13,13 +13,6 @@ import type { LixraySupabaseClient } from "~/lib/supabase";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { normalizeAuthReturnTo } from "~/lib/auth-return-to";
-import {
-	endPreviewDemoSession,
-	readPreviewDemoSession,
-	startPreviewDemoSession,
-	type PreviewDemoSession,
-	type PreviewSessionMode,
-} from "~/lib/preview-workspace-share";
 import { resetTelemetry } from "~/lib/telemetry";
 
 const RETURN_TO_KEY = "lixray.auth.return-to";
@@ -30,12 +23,10 @@ interface AuthContextValue {
 	user: User | null;
 	client: LixraySupabaseClient | null;
 	getAccessToken: () => Promise<string | null>;
-	/** Test-session mode is used only by the isolated PR preview. */
-	signInAsLocalDev: (mode?: PreviewSessionMode) => Promise<void>;
+	signInAsLocalDev: () => Promise<void>;
 	signInWithGoogle: (returnTo?: string) => Promise<void>;
 	signOut: () => Promise<void>;
 	refreshSession: () => Promise<void>;
-	hasPreviewWorkspaceMembership: (workspaceId: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -59,31 +50,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 function DemoAuthProvider({ children }: { children: ReactNode }) {
-	const [previewSession, setPreviewSession] =
-		useState<PreviewDemoSession | null>(null);
-	const [isLoaded, setIsLoaded] = useState(false);
-	const loadPreviewSession = useCallback(async () => {
-		try {
-			const nextSession = await readPreviewDemoSession();
-			setPreviewSession(nextSession.signedIn ? nextSession : null);
-		} catch {
-			// A missing or expired preview cookie is the normal signed-out state.
-			setPreviewSession(null);
-		} finally {
-			setIsLoaded(true);
-		}
-	}, []);
-	useEffect(() => {
-		void loadPreviewSession();
-	}, [loadPreviewSession]);
-	const signInAsPreviewUser = useCallback(
-		async (mode: PreviewSessionMode = "owner") => {
-			const nextSession = await startPreviewDemoSession(mode);
-			setPreviewSession(nextSession);
-			setIsLoaded(true);
-		},
-		[],
-	);
 	const beginPreviewSignIn = useCallback((returnTo = "/home") => {
 		const safeReturnTo = normalizeAuthReturnTo(returnTo);
 		window.location.assign(
@@ -91,39 +57,23 @@ function DemoAuthProvider({ children }: { children: ReactNode }) {
 		);
 		return Promise.resolve();
 	}, []);
-	const signOut = useCallback(async () => {
-		await endPreviewDemoSession();
-		setPreviewSession(null);
+	const signOut = useCallback(() => {
 		resetTelemetry();
+		return Promise.resolve();
 	}, []);
-	const hasPreviewWorkspaceMembership = useCallback(
-		(workspaceId: string) =>
-			previewSession?.workspaceIds.includes(workspaceId) ?? false,
-		[previewSession],
-	);
-	const user = previewSession ? PREVIEW_DEMO_USER : null;
 	const value = useMemo<AuthContextValue>(
 		() => ({
-			isLoaded,
+			isLoaded: true,
 			session: null,
-			user,
+			user: PREVIEW_DEMO_USER,
 			client: null,
-			getAccessToken: () => Promise.resolve(user ? DEMO_AUTH_TOKEN : null),
-			signInAsLocalDev: signInAsPreviewUser,
+			getAccessToken: () => Promise.resolve(DEMO_AUTH_TOKEN),
+			signInAsLocalDev: () => Promise.resolve(),
 			signInWithGoogle: beginPreviewSignIn,
 			signOut,
-			refreshSession: loadPreviewSession,
-			hasPreviewWorkspaceMembership,
+			refreshSession: () => Promise.resolve(),
 		}),
-		[
-			beginPreviewSignIn,
-			hasPreviewWorkspaceMembership,
-			isLoaded,
-			loadPreviewSession,
-			signInAsPreviewUser,
-			signOut,
-			user,
-		],
+		[beginPreviewSignIn, signOut],
 	);
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -198,8 +148,6 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 		setSession(data.session);
 		setIsLoaded(true);
 	}, [client]);
-	const hasPreviewWorkspaceMembership = useCallback(() => false, []);
-
 	const signOut = useCallback(async () => {
 		if (!client) return;
 		const { error } = await client.auth.signOut();
@@ -218,7 +166,6 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			signInWithGoogle,
 			signOut,
 			refreshSession,
-			hasPreviewWorkspaceMembership,
 		}),
 		[
 			client,
@@ -229,7 +176,6 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			signInWithGoogle,
 			signOut,
 			refreshSession,
-			hasPreviewWorkspaceMembership,
 		],
 	);
 

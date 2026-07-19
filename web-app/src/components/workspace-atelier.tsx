@@ -29,7 +29,6 @@ import { Button } from "~/components/ui/button";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
-import { createPreviewWorkspaceShareToken } from "~/lib/preview-workspace-share";
 import {
 	atelierBranchSearch,
 	isLixBranchNotFoundError,
@@ -160,12 +159,6 @@ export function WorkspaceAtelier({
 					}
 					return token;
 				}}
-				workspaceName={workspaceName}
-				documentName={documentName}
-			/>
-		) : isDemoModeEnabled ? (
-			<WorkspaceShareControl
-				createShareToken={() => createPreviewWorkspaceShareToken(workspaceId)}
 				workspaceName={workspaceName}
 				documentName={documentName}
 			/>

@@ -23,10 +23,12 @@ The repository is split into three product modules:
   architecture routes all workspace IDs through one bounded, multi-workspace
   `lix-server` process.
 
-The Worker serves the TanStack Start application and handles `/healthz`, the
-authenticated `/mcp` endpoint, OAuth protected-resource discovery, and
-workspace-scoped `/@namespace/workspace/lix/v1/*` requests before delegating
-all other routes to Start.
+The LixRay web service serves the TanStack Start application and handles
+`/healthz`, the authenticated `/mcp` endpoint, OAuth protected-resource
+discovery, and workspace-scoped `/@namespace/workspace/lix/v1/*` requests
+before delegating all other routes to Start. The temporary Cloudflare Worker
+production deployment invokes this same application handler during the Railway
+cutover.
 
 Pull requests use Railway environments containing the real web and
 `lix-server` images. Preview workspace data uses the same S3-compatible SlateDB
@@ -240,35 +242,30 @@ In ChatGPT, enable developer mode, create a developer-mode app named
 
 ## Local development
 
-The root package is dependency-free and exposes one repository-level command:
+There is one production-shaped local loop:
 
 ```sh
 pnpm dev
 ```
 
-It starts MinIO, the local Supabase stack, provisions a deterministic local
-developer account, and starts the web app with the local URL and keys.
-Cloudflare's local runtime builds and manages the Lix container, which uses the
-same S3-compatible storage path as production. Open
-`http://localhost:8787`, choose **Continue as local developer**, and use the
-normal authenticated organization and workspace flows. Stopping the command
-also stops MinIO and Supabase without deleting their data.
+It starts local Supabase and its migrations, waits for Auth, creates the
+deterministic local developer account, then starts Docker Compose:
 
-Each module also works independently:
-
-```sh
-pnpm --dir database start
-pnpm --dir web-app dev
-docker compose up --build lix-server
+```text
+browser -> lixray-web -> lix-server -> MinIO
+             |              |
+             `---- Supabase-'
 ```
 
-The standalone web app uses the configured hosted Supabase project from
-`web-app/.env.development` and `web-app/wrangler.jsonc`; it does not provision
-the local developer account.
+`lixray-web` reaches `lix-server` only on the Compose network; `lix-server`
+uses MinIO through the same S3 API that targets R2 outside local development.
+Open `http://127.0.0.1:8787`, choose **Continue as local developer**, and use
+the normal organization and workspace flows. Ctrl-C stops the web service,
+workspace service, MinIO, and local Supabase without deleting their volumes.
 
-The app is served at `http://localhost:8787`. The standalone web-app command
-expects an S3-compatible endpoint configured as shown in
-`web-app/.dev.vars.example`; the root command supplies the local MinIO values.
+Use `LIXRAY_DEV_PORT` to choose another public web port. There is intentionally
+no standalone `web-app` dev command: local development and E2E exercise the
+Compose web service rather than Cloudflare's local container runtime.
 
 ## Verification
 
@@ -278,7 +275,7 @@ pnpm --dir web-app lint
 pnpm --dir web-app test:worker
 pnpm --dir database start
 pnpm --dir database test
-pnpm --dir web-app test:e2e
+pnpm test:e2e
 pnpm --dir web-app build
 cargo test --manifest-path lix-server/Cargo.toml
 docker build -f lix-server/Dockerfile .
@@ -291,16 +288,10 @@ Install Playwright Chromium once with:
 pnpm --dir web-app exec playwright install chromium
 ```
 
-Playwright starts a deterministic development server on port `8790` using the
-same Workerd/Wasm entry, local R2 binding, and demo identity as PR previews. It
-does not start Docker, a Durable Object, or a container. Use `E2E_PORT` to
-override the port.
-
-Run the demo Worker directly with:
-
-```sh
-pnpm --dir web-app dev:demo
-```
+`pnpm test:e2e` starts the same local Supabase plus Compose topology on port
+`8790` by default. The browser signs in as the local developer, creates a real
+Supabase workspace, verifies the normal Lix handshake through `lixray-web` and
+`lix-server`, then runs a query. Set `E2E_PORT` to override the port.
 
 ## Performance loop
 
@@ -387,23 +378,16 @@ Set a workspace compute hard limit as a final cost guardrail. Railway's Hobby
 plan currently has a $5 monthly minimum that includes $5 of resource usage;
 running PR environments consume normal metered resources while awake.
 
-### Cloudflare control plane
+### Temporary Cloudflare production control plane
 
 ```sh
 pnpm --dir web-app deploy:worker
 ```
 
-For same-repository pull requests, `.github/workflows/pr.yml` builds demo mode,
-uploads a Worker version with stable alias `pr-<number>`, smoke-tests the API
-and editor. Fork pull requests never receive Cloudflare credentials or a
-deployment. Preview mode exposes only the shared demo bearer identity and the
-two deterministic workspace UUIDs. Its MCP endpoint is authless. Preview Lix
-snapshots are stored only in the dedicated `lixray-preview` R2 bucket under
-`lixray-preview/v1/<preview-hostname>/<workspace-id>.snapshot`; an aliased PR
-hostname therefore persists across pushes, while versioned preview hostnames
-remain isolated. Supabase, OAuth, Durable Objects, containers, D1, KV, service
-bindings, and production storage are absent. Deleting a hostname prefix resets
-that preview; automatic retention cleanup is not currently enabled.
+Until the Railway production cutover, this remains the current production
+control-plane deployment. It is not a local development, CI E2E, or Railway PR
+preview path; those use the portable `lixray-web -> lix-server -> S3` topology.
+Do not recreate the removed Workerd/Wasm preview simulator.
 
 Workers Builds should use:
 

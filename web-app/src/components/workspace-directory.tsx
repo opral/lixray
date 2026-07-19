@@ -507,10 +507,9 @@ function WorkspaceDialog({
 	onClose: () => void;
 }) {
 	const { createWorkspace, deleteWorkspace, renameWorkspace } = useWorkspace();
+	const defaultOrganizationId = organizations[0]?.id ?? "";
 	const [name, setName] = useState("");
-	const [organizationId, setOrganizationId] = useState(
-		organizations[0]?.id ?? "",
-	);
+	const [organizationId, setOrganizationId] = useState(defaultOrganizationId);
 	const [confirmation, setConfirmation] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -520,12 +519,12 @@ function WorkspaceDialog({
 		setOrganizationId(
 			dialog && dialog.type !== "create"
 				? dialog.organization.id
-				: (organizations[0]?.id ?? ""),
+				: defaultOrganizationId,
 		);
 		setConfirmation("");
 		setError(null);
 		setBusy(false);
-	}, [dialog, organizations]);
+	}, [defaultOrganizationId, dialog]);
 
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();

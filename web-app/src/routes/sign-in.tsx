@@ -35,7 +35,7 @@ function SignInPage() {
 		setError(null);
 		try {
 			if (usesLocalAccount) {
-				await signInAsLocalDev(joiningSharedWorkspace ? "recipient" : "owner");
+				await signInAsLocalDev();
 				window.location.replace(returnTo);
 			} else {
 				await signInWithGoogle(returnTo);

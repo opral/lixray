@@ -1,4 +1,7 @@
 .git
+.agents
+.claude
+.codex
 .github
 **/.DS_Store
 **/dist
