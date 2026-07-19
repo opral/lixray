@@ -84,7 +84,7 @@ export default defineConfig(({ command }) => ({
 		tailwindcss(),
 		tanstackStart({
 			spa: {
-				enabled: workerTarget !== "production",
+				enabled: workerTarget === "preview" || workerTarget === "e2e",
 				prerender: { outputPath: "/index.html" },
 			},
 		}),

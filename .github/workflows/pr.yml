@@ -97,6 +97,9 @@ jobs:
       - name: Build
         run: pnpm --dir web-app build
 
+      - name: Build Railway target
+        run: pnpm --dir web-app build:railway
+
       - name: Verify generated files are committed
         run: git diff --exit-code
 
