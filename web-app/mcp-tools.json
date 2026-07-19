@@ -265,6 +265,11 @@
 									"name": {
 										"type": "string"
 									},
+									"changeId": {
+										"type": "string",
+										"format": "uuid",
+										"description": "Lix change UUID"
+									},
 									"updatedAt": {
 										"type": "string"
 									},
@@ -281,7 +286,7 @@
 										]
 									}
 								},
-								"required": ["kind", "path", "name", "updatedAt"],
+								"required": ["kind", "path", "name", "changeId", "updatedAt"],
 								"additionalProperties": false
 							}
 						}
@@ -392,6 +397,11 @@
 									"name": {
 										"type": "string"
 									},
+									"changeId": {
+										"type": "string",
+										"format": "uuid",
+										"description": "Lix change UUID"
+									},
 									"updatedAt": {
 										"type": "string"
 									},
@@ -408,7 +418,7 @@
 										]
 									}
 								},
-								"required": ["kind", "path", "name", "updatedAt"],
+								"required": ["kind", "path", "name", "changeId", "updatedAt"],
 								"additionalProperties": false
 							}
 						}
@@ -523,6 +533,11 @@
 							"minimum": 0,
 							"maximum": 9007199254740991
 						},
+						"changeId": {
+							"type": "string",
+							"format": "uuid",
+							"description": "Lix change UUID"
+						},
 						"updatedAt": {
 							"type": "string"
 						},
@@ -549,6 +564,7 @@
 						"path",
 						"content",
 						"size",
+						"changeId",
 						"updatedAt",
 						"totalLines",
 						"startLine",
@@ -632,6 +648,11 @@
 				},
 				"content": {
 					"type": "string"
+				},
+				"expected_change_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Optional current file change ID. If provided, replacement succeeds only if it matches."
 				}
 			},
 			"required": ["workspace_ref", "path", "content"],
@@ -657,6 +678,11 @@
 								"name": {
 									"type": "string"
 								},
+								"changeId": {
+									"type": "string",
+									"format": "uuid",
+									"description": "Lix change UUID"
+								},
 								"updatedAt": {
 									"type": "string"
 								},
@@ -673,7 +699,7 @@
 									]
 								}
 							},
-							"required": ["kind", "path", "name", "updatedAt"],
+							"required": ["kind", "path", "name", "changeId", "updatedAt"],
 							"additionalProperties": false
 						}
 					},
@@ -753,6 +779,11 @@
 					"minLength": 1,
 					"description": "Absolute file path"
 				},
+				"expected_change_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Optional current file change ID. If provided, edit succeeds only if it matches."
+				},
 				"edits": {
 					"minItems": 1,
 					"maxItems": 50,
@@ -800,6 +831,11 @@
 								"name": {
 									"type": "string"
 								},
+								"changeId": {
+									"type": "string",
+									"format": "uuid",
+									"description": "Lix change UUID"
+								},
 								"updatedAt": {
 									"type": "string"
 								},
@@ -816,7 +852,7 @@
 									]
 								}
 							},
-							"required": ["kind", "path", "name", "updatedAt"],
+							"required": ["kind", "path", "name", "changeId", "updatedAt"],
 							"additionalProperties": false
 						}
 					},
@@ -920,6 +956,11 @@
 								"name": {
 									"type": "string"
 								},
+								"changeId": {
+									"type": "string",
+									"format": "uuid",
+									"description": "Lix change UUID"
+								},
 								"updatedAt": {
 									"type": "string"
 								},
@@ -936,7 +977,7 @@
 									]
 								}
 							},
-							"required": ["kind", "path", "name", "updatedAt"],
+							"required": ["kind", "path", "name", "changeId", "updatedAt"],
 							"additionalProperties": false
 						}
 					},
@@ -1020,6 +1061,11 @@
 					"type": "string",
 					"minLength": 1,
 					"description": "Absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not."
+				},
+				"expected_change_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Optional current entry change ID. If provided, move succeeds only if it matches."
 				}
 			},
 			"required": ["workspace_ref", "source_path", "destination_path"],
@@ -1045,6 +1091,11 @@
 								"name": {
 									"type": "string"
 								},
+								"changeId": {
+									"type": "string",
+									"format": "uuid",
+									"description": "Lix change UUID"
+								},
 								"updatedAt": {
 									"type": "string"
 								},
@@ -1061,7 +1112,7 @@
 									]
 								}
 							},
-							"required": ["kind", "path", "name", "updatedAt"],
+							"required": ["kind", "path", "name", "changeId", "updatedAt"],
 							"additionalProperties": false
 						}
 					},
@@ -1140,6 +1191,11 @@
 					"type": "string",
 					"minLength": 1,
 					"description": "Absolute entry path. Directory paths must end in /; file paths must not."
+				},
+				"expected_change_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Optional current entry change ID. If provided, deletion succeeds only if it matches."
 				},
 				"recursive": {
 					"default": false,

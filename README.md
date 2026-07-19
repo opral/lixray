@@ -63,11 +63,13 @@ optional: omitting it resolves the workspace's current branch, analogous to
 Git's `origin/HEAD`, at the start of the tool call. `list_branches` returns that
 pointer as `current_branch_id` and omits hidden branches and legacy non-UUID
 IDs, including the internal `global` branch. File-tool calls require canonical
-absolute paths and valid UTF-8 content of at most 1 MiB. File mutations use
-`lixcol_change_id` internally to detect concurrent changes during an operation;
-the implementation detail is not exposed through the MCP contract. Creates and
-moves never overwrite existing destinations, and directory deletion requires
-`recursive=true`. The `execute` tool accepts an
+absolute paths and valid UTF-8 content of at most 1 MiB. File tools return the
+entry's public Lix `changeId`. Replacements, edits, moves, and deletes accept it
+as `expected_change_id`; stale operations fail without changing the entry. The
+input is optional, in which case LixRay reads the current change ID immediately
+before applying the mutation. Creates and moves never overwrite existing
+destinations, and directory deletion requires `recursive=true`. The `execute`
+tool accepts an
 ordered array of raw Lix SQL statements and per-statement wire-format
 parameters, is marked destructive, and bypasses these file-tool safeguards.
 The normal remote Lix client sends the array through `executeBatch`, so every

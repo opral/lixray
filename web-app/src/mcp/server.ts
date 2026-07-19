@@ -63,6 +63,7 @@ const optionalBranchId = branchId
 const currentBranchId = z
 	.uuid()
 	.describe("Lix default aka current branch UUID");
+const changeId = z.uuid().describe("Lix change UUID");
 const absolutePath = z.string().min(1);
 const executeSqlText = z.string().trim().min(1);
 const wireValue = z.discriminatedUnion("kind", [
@@ -103,6 +104,7 @@ const entrySummaryOutput = z
 		kind: z.enum(["file", "directory"]),
 		path: absolutePath,
 		name: z.string(),
+		changeId,
 		updatedAt: z.string(),
 		size: z.number().int().nonnegative().nullable().optional(),
 	})
@@ -147,6 +149,7 @@ const fileSnapshotOutput = z.union([
 			path: absolutePath,
 			content: z.string(),
 			size: z.number().int().nonnegative(),
+			changeId,
 			updatedAt: z.string(),
 			totalLines: z.number().int().nonnegative(),
 			startLine: z.number().int().nonnegative(),
@@ -406,7 +409,7 @@ export function mcpDocumentationResponse(
 			"",
 			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
-			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting files, plus a raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. File mutations use internal conflict detection; raw SQL bypasses those file safeguards. Execute accepts an ordered batch of statements with $n or ? parameters. Lix executes the batch atomically and returns one ordered result per statement.",
+			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting files, plus a raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. File tools expose Lix change IDs for conflict detection; raw SQL bypasses those file safeguards. Execute accepts an ordered batch of statements with $n or ? parameters. Lix executes the batch atomically and returns one ordered result per statement.",
 		].join("\n"),
 		{
 			headers: {
@@ -515,16 +518,14 @@ function buildTools(
 			readAnnotations(),
 			async ({ workspace_ref, branch_id, path }) => ({
 				path,
-				entries: (
-					await service.listDirectory(
+				entries: await service.listDirectory(
+					String(workspace_ref),
+					await service.resolveBranchId(
 						String(workspace_ref),
-						await service.resolveBranchId(
-							String(workspace_ref),
-							branch_id === undefined ? undefined : String(branch_id),
-						),
-						String(path),
-					)
-				).map(withoutChangeId),
+						branch_id === undefined ? undefined : String(branch_id),
+					),
+					String(path),
+				),
 			}),
 			listDirectoryOutput,
 		),
@@ -542,17 +543,15 @@ function buildTools(
 				.strict(),
 			readAnnotations(),
 			async ({ workspace_ref, branch_id, query, under_path }) => ({
-				files: (
-					await service.findFiles(
+				files: await service.findFiles(
+					String(workspace_ref),
+					await service.resolveBranchId(
 						String(workspace_ref),
-						await service.resolveBranchId(
-							String(workspace_ref),
-							branch_id === undefined ? undefined : String(branch_id),
-						),
-						String(query),
-						String(under_path),
-					)
-				).map(withoutChangeId),
+						branch_id === undefined ? undefined : String(branch_id),
+					),
+					String(query),
+					String(under_path),
+				),
 			}),
 			findFilesOutput,
 		),
@@ -577,17 +576,15 @@ function buildTools(
 				.strict(),
 			readAnnotations(),
 			async ({ workspace_ref, branch_id, path, start_line, line_count }) =>
-				withoutChangeId(
-					await service.readFile(
+				service.readFile(
+					String(workspace_ref),
+					await service.resolveBranchId(
 						String(workspace_ref),
-						await service.resolveBranchId(
-							String(workspace_ref),
-							branch_id === undefined ? undefined : String(branch_id),
-						),
-						String(path),
-						Number(start_line),
-						Number(line_count),
+						branch_id === undefined ? undefined : String(branch_id),
 					),
+					String(path),
+					Number(start_line),
+					Number(line_count),
 				),
 			fileSnapshotOutput,
 		),
@@ -601,20 +598,32 @@ function buildTools(
 					branch_id: optionalBranchId,
 					path: absolutePath.describe("Absolute file path"),
 					content: z.string(),
+					expected_change_id: changeId
+						.describe(
+							"Optional current file change ID. If provided, replacement succeeds only if it matches.",
+						)
+						.optional(),
 				})
 				.strict(),
 			writeAnnotations(false, false),
-			async ({ workspace_ref, branch_id, path, content }) => ({
-				file: withoutChangeId(
-					await service.writeFile(
+			async ({
+				workspace_ref,
+				branch_id,
+				path,
+				content,
+				expected_change_id,
+			}) => ({
+				file: await service.writeFile(
+					String(workspace_ref),
+					await service.resolveBranchId(
 						String(workspace_ref),
-						await service.resolveBranchId(
-							String(workspace_ref),
-							branch_id === undefined ? undefined : String(branch_id),
-						),
-						String(path),
-						String(content),
+						branch_id === undefined ? undefined : String(branch_id),
 					),
+					String(path),
+					String(content),
+					expected_change_id === undefined
+						? undefined
+						: String(expected_change_id),
 				),
 			}),
 			fileEntryOutput,
@@ -628,6 +637,11 @@ function buildTools(
 					workspace_ref: workspaceRef,
 					branch_id: optionalBranchId,
 					path: absolutePath.describe("Absolute file path"),
+					expected_change_id: changeId
+						.describe(
+							"Optional current file change ID. If provided, edit succeeds only if it matches.",
+						)
+						.optional(),
 					edits: z
 						.array(
 							z
@@ -643,28 +657,34 @@ function buildTools(
 				})
 				.strict(),
 			writeAnnotations(false, false),
-			async ({ workspace_ref, branch_id, path, edits }) => ({
-				file: withoutChangeId(
-					await service.editFile(
+			async ({
+				workspace_ref,
+				branch_id,
+				path,
+				expected_change_id,
+				edits,
+			}) => ({
+				file: await service.editFile(
+					String(workspace_ref),
+					await service.resolveBranchId(
 						String(workspace_ref),
-						await service.resolveBranchId(
-							String(workspace_ref),
-							branch_id === undefined ? undefined : String(branch_id),
-						),
-						String(path),
-						undefined,
-						(
-							edits as Array<{
-								old_text: string;
-								new_text: string;
-								replace_all?: boolean;
-							}>
-						).map((edit) => ({
-							oldText: edit.old_text,
-							newText: edit.new_text,
-							replaceAll: edit.replace_all,
-						})),
+						branch_id === undefined ? undefined : String(branch_id),
 					),
+					String(path),
+					expected_change_id === undefined
+						? undefined
+						: String(expected_change_id),
+					(
+						edits as Array<{
+							old_text: string;
+							new_text: string;
+							replace_all?: boolean;
+						}>
+					).map((edit) => ({
+						oldText: edit.old_text,
+						newText: edit.new_text,
+						replaceAll: edit.replace_all,
+					})),
 				),
 			}),
 			fileEntryOutput,
@@ -682,15 +702,13 @@ function buildTools(
 				.strict(),
 			writeAnnotations(false, false),
 			async ({ workspace_ref, branch_id, path }) => ({
-				directory: withoutChangeId(
-					await service.createDirectory(
+				directory: await service.createDirectory(
+					String(workspace_ref),
+					await service.resolveBranchId(
 						String(workspace_ref),
-						await service.resolveBranchId(
-							String(workspace_ref),
-							branch_id === undefined ? undefined : String(branch_id),
-						),
-						String(path),
+						branch_id === undefined ? undefined : String(branch_id),
 					),
+					String(path),
 				),
 			}),
 			directoryEntryOutput,
@@ -709,21 +727,32 @@ function buildTools(
 					destination_path: absolutePath.describe(
 						"Absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not.",
 					),
+					expected_change_id: changeId
+						.describe(
+							"Optional current entry change ID. If provided, move succeeds only if it matches.",
+						)
+						.optional(),
 				})
 				.strict(),
 			writeAnnotations(false, false),
-			async ({ workspace_ref, branch_id, source_path, destination_path }) => ({
-				entry: withoutChangeId(
-					await service.moveEntry(
+			async ({
+				workspace_ref,
+				branch_id,
+				source_path,
+				destination_path,
+				expected_change_id,
+			}) => ({
+				entry: await service.moveEntry(
+					String(workspace_ref),
+					await service.resolveBranchId(
 						String(workspace_ref),
-						await service.resolveBranchId(
-							String(workspace_ref),
-							branch_id === undefined ? undefined : String(branch_id),
-						),
-						String(source_path),
-						String(destination_path),
-						undefined,
+						branch_id === undefined ? undefined : String(branch_id),
 					),
+					String(source_path),
+					String(destination_path),
+					expected_change_id === undefined
+						? undefined
+						: String(expected_change_id),
 				),
 			}),
 			movedEntryOutput,
@@ -739,11 +768,22 @@ function buildTools(
 					path: absolutePath.describe(
 						"Absolute entry path. Directory paths must end in /; file paths must not.",
 					),
+					expected_change_id: changeId
+						.describe(
+							"Optional current entry change ID. If provided, deletion succeeds only if it matches.",
+						)
+						.optional(),
 					recursive: z.boolean().optional().default(false),
 				})
 				.strict(),
 			writeAnnotations(false, false),
-			async ({ workspace_ref, branch_id, path, recursive }) =>
+			async ({
+				workspace_ref,
+				branch_id,
+				path,
+				expected_change_id,
+				recursive,
+			}) =>
 				service.deleteEntry(
 					String(workspace_ref),
 					await service.resolveBranchId(
@@ -751,7 +791,9 @@ function buildTools(
 						branch_id === undefined ? undefined : String(branch_id),
 					),
 					String(path),
-					undefined,
+					expected_change_id === undefined
+						? undefined
+						: String(expected_change_id),
 					Boolean(recursive),
 				),
 			deleteEntryOutput,
@@ -896,14 +938,6 @@ function asStructuredContent(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object"
 		? (value as Record<string, unknown>)
 		: { result: value };
-}
-
-function withoutChangeId<T extends { changeId: string }>(
-	value: T,
-): Omit<T, "changeId"> {
-	const publicValue = { ...value };
-	Reflect.deleteProperty(publicValue, "changeId");
-	return publicValue;
 }
 
 function successSummary(toolName: string, value: unknown): string {

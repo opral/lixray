@@ -243,10 +243,15 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				  }
 				| undefined;
 			assert.ok(inputSchema, `${name} should expose an input schema`);
+			assert.equal(inputSchema.properties?.expected_revision, undefined);
+			const changeIdSchema = inputSchema.properties?.expected_change_id;
+			assert.ok(changeIdSchema, `${name} should expose expected_change_id`);
+			assert.equal(changeIdSchema.format, "uuid", name);
+			assert.match(changeIdSchema.description ?? "", /change ID/);
 			assert.equal(
-				inputSchema.properties?.expected_revision,
-				undefined,
-				`${name} should not expose expected_revision`,
+				inputSchema.required?.includes("expected_change_id") ?? false,
+				false,
+				`${name} should not require expected_change_id`,
 			);
 		}
 		for (const name of [
@@ -267,6 +272,11 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				[],
 				`${name} should not return a revision`,
 			);
+			const changeIdSchemas = findPropertySchemas(outputSchema, "changeId");
+			assert.ok(changeIdSchemas.length > 0, `${name} should return a changeId`);
+			for (const changeIdSchema of changeIdSchemas) {
+				assert.equal(changeIdSchema.format, "uuid", name);
+			}
 		}
 		const defaultedInputs = new Map([
 			["find_files", ["under_path"]],
@@ -393,6 +403,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			path: "/scratch/samuel's-todos.md",
 			content: "todo",
 			size: 4,
+			changeId: COMMIT_ID,
 			updatedAt: "2026-07-16T12:00:00.000Z",
 			totalLines: 1,
 			startLine: 1,
