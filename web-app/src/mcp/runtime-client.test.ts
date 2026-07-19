@@ -42,14 +42,21 @@ function testProtocolPath(request: Request): string {
 void test("container calls reauthorize every time and never forward the OAuth token", async () => {
 	let authorizationChecks = 0;
 	let starts = 0;
+	const containerEnvironments: Array<Record<string, string>> = [];
 	const requests: Array<Request> = [];
 	const client = new WorkerLixRuntimeClient(
 		env({
+			extra: {
+				POSTHOG_PROJECT_TOKEN: "project-token",
+				POSTHOG_HOST: "https://posthog.example",
+				POSTHOG_ENVIRONMENT: "production",
+			},
 			getByName: (name) => {
 				assert.equal(name, WORKSPACE_ID);
 				return {
-					startAndWaitForPorts: async () => {
+					startAndWaitForPorts: async (options) => {
 						starts += 1;
+						containerEnvironments.push(options.startOptions.envVars);
 					},
 					fetch: async (request) => {
 						requests.push(request);
@@ -71,6 +78,11 @@ void test("container calls reauthorize every time and never forward the OAuth to
 	await client.listBranches(WORKSPACE_ID);
 	assert.equal(authorizationChecks, 5);
 	assert.equal(starts, 5);
+	assert.deepEqual(containerEnvironments[0], {
+		POSTHOG_PROJECT_TOKEN: "project-token",
+		POSTHOG_HOST: "https://posthog.example",
+		POSTHOG_ENVIRONMENT: "production",
+	});
 	assert.equal(requests.length, 5);
 	assert.deepEqual(
 		requests.map((request) => new URL(request.url).pathname),
@@ -743,6 +755,7 @@ function env(options: {
 	getByName?: NonNullable<
 		WorkerLixRuntimeEnv["SLATEDB_CONTAINER"]
 	>["getByName"];
+	extra?: Partial<WorkerLixRuntimeEnv>;
 }): WorkerLixRuntimeEnv {
 	return {
 		SUPABASE_URL: "https://project.supabase.co",
@@ -752,5 +765,6 @@ function env(options: {
 				options.getByName ??
 				(() => ({ fetch: async () => new Response("not used") })),
 		},
+		...options.extra,
 	};
 }

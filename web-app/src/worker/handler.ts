@@ -1043,6 +1043,9 @@ export function containerEnv(env: WorkerEnv): Record<string, string> {
 		"SLATEDB_METADATA_CACHE_BYTES",
 		env.SLATEDB_METADATA_CACHE_BYTES,
 	);
+	addOptionalEnv(vars, "POSTHOG_PROJECT_TOKEN", env.POSTHOG_PROJECT_TOKEN);
+	addOptionalEnv(vars, "POSTHOG_HOST", env.POSTHOG_HOST);
+	addOptionalEnv(vars, "POSTHOG_ENVIRONMENT", env.POSTHOG_ENVIRONMENT);
 	return vars;
 }
 

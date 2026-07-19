@@ -8,13 +8,45 @@ use axum::{
     Json, Router,
 };
 use serde_json::json;
-use std::sync::Arc;
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 use tower::ServiceExt;
+use tracing::Instrument as _;
 
 #[derive(Clone)]
 struct AppState {
     manager: Arc<WorkspaceRuntimeManager>,
     internal_token: Option<Arc<str>>,
+}
+
+struct TracedBody {
+    inner: Body,
+    span: tracing::Span,
+}
+
+impl http_body::Body for TracedBody {
+    type Data = <Body as http_body::Body>::Data;
+    type Error = <Body as http_body::Body>::Error;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        let span = self.span.clone();
+        let _entered = span.enter();
+        Pin::new(&mut self.inner).poll_frame(context)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
 }
 
 pub fn router(manager: Arc<WorkspaceRuntimeManager>, internal_token: Option<String>) -> Router {
@@ -37,6 +69,30 @@ async fn healthz() -> Json<serde_json::Value> {
 async fn workspace_protocol(
     State(state): State<AppState>,
     Path((workspace_id, protocol_path)): Path<(String, String)>,
+    request: Request<Body>,
+) -> Response {
+    let span = tracing::info_span!(
+        "lix.protocol.request",
+        "otel.name" = "Lix protocol request",
+        "otel.kind" = "server",
+        "http.request.method" = %request.method(),
+        "http.route" = "/workspaces/{workspace_id}/{*protocol_path}",
+        "lix.workspace.id" = %workspace_id,
+        "lix.protocol.path" = %protocol_path,
+        "http.response.status_code" = tracing::field::Empty,
+    );
+    let response = workspace_protocol_inner(state, workspace_id, protocol_path, request)
+        .instrument(span.clone())
+        .await;
+    span.record("http.response.status_code", response.status().as_u16());
+    let (parts, body) = response.into_parts();
+    Response::from_parts(parts, Body::new(TracedBody { inner: body, span }))
+}
+
+async fn workspace_protocol_inner(
+    state: AppState,
+    workspace_id: String,
+    protocol_path: String,
     mut request: Request<Body>,
 ) -> Response {
     if !authorized(request.headers(), state.internal_token.as_deref()) {
