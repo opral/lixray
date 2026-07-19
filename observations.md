@@ -43,6 +43,27 @@ session or read-batch design while preserving observer and cancellation tests.
 
 **Status:** observing; not changed by this PR.
 
+## Checkpoint diff materializes every file snapshot — observing
+
+**Evidence.** Atelier's `loadFileSnapshotsAtCommit()` in
+`src/shell/checkpoint-diff.ts` intentionally runs
+`lix_file_history` with only `lixcol_start_commit_id`, then chooses the
+shallowest historical row for each file in JavaScript. At a 2,500-file commit,
+the query therefore asks for every file snapshot; the bounded exact-ID history
+pushdown cannot safely narrow this result.
+
+**Architectural direction.** A likely >50% solution is a maintained
+commit-level file-set/diff surface with explicit rebuild and invalidation rules,
+not a broader point-lookup filter. It crosses the history provider, storage and
+index lifecycle, engine correctness tests, SDK/Atelier query migration, and
+end-to-end benchmarks—well beyond a bounded patch.
+
+**Next measurement.** Benchmark the full checkpoint query at 2,500, 10k, and
+100k files before choosing snapshot materialization versus a dedicated diff
+surface.
+
+**Status:** observing; no bounded code change proposed.
+
 ## Root substring path search remains an O(files) scan — observing
 
 **Evidence.** Root `find_files` emits `LOWER(path) LIKE '%q%' ORDER BY path`.
