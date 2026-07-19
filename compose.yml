@@ -6,8 +6,8 @@ services:
       MINIO_ROOT_USER: lixray
       MINIO_ROOT_PASSWORD: lixray-local-secret
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "127.0.0.1:${LIXRAY_MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${LIXRAY_MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
 
@@ -31,6 +31,7 @@ services:
     environment:
       BIND_ADDR: 0.0.0.0:8080
       LIXRAY_MAX_OPEN_WORKSPACES: 4
+      LIXRAY_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
       RUST_LOG: lixray=info
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: lixray
@@ -43,7 +44,37 @@ services:
       minio-init:
         condition: service_completed_successfully
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${LIXRAY_SERVER_PORT:-8080}:8080"
+
+  lixray-web:
+    build:
+      context: .
+      dockerfile: web-app/Dockerfile
+      args:
+        LIXRAY_DEMO: ${LIXRAY_DEMO:-}
+        VITE_LIXRAY_DEMO: ${VITE_LIXRAY_DEMO:-}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://127.0.0.1:54321}
+        VITE_SUPABASE_KEY: ${VITE_SUPABASE_KEY:-}
+        VITE_LIXRAY_LOCAL_DEV: ${VITE_LIXRAY_LOCAL_DEV:-}
+        VITE_LIXRAY_LOCAL_DEV_EMAIL: ${VITE_LIXRAY_LOCAL_DEV_EMAIL:-}
+        VITE_LIXRAY_LOCAL_DEV_PASSWORD: ${VITE_LIXRAY_LOCAL_DEV_PASSWORD:-}
+    environment:
+      PORT: 8080
+      LIXRAY_DEMO: ${LIXRAY_DEMO:-}
+      LIXRAY_DEMO_WORKSPACE_IDS: ${LIXRAY_DEMO_WORKSPACE_IDS:-}
+      LIXRAY_WORKSPACE_SERVICE_URL: http://lix-server:8080
+      LIXRAY_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
+      SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-http://host.docker.internal:54321/auth/v1/.well-known/jwks.json}
+      SUPABASE_JWT_ISSUER_URL: ${SUPABASE_JWT_ISSUER_URL:-http://127.0.0.1:54321}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+    depends_on:
+      lix-server:
+        condition: service_started
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "127.0.0.1:${LIXRAY_DEV_PORT:-8787}:8080"
 
   storage-reset:
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z

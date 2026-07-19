@@ -7,13 +7,7 @@ import { defineConfig } from "vite";
 
 const workerTarget = process.env.LIXRAY_WORKER_TARGET ?? "production";
 const workerConfigPath =
-	workerTarget === "preview"
-		? "./wrangler.preview.jsonc"
-		: workerTarget === "railway"
-			? "./wrangler.railway.jsonc"
-			: workerTarget === "e2e"
-				? "./wrangler.e2e.jsonc"
-				: "./wrangler.jsonc";
+	workerTarget === "railway" ? "./wrangler.railway.jsonc" : "./wrangler.jsonc";
 
 export default defineConfig(({ command }) => ({
 	resolve: {
@@ -66,6 +60,9 @@ export default defineConfig(({ command }) => ({
 							process.env.S3_ALLOW_HTTP ?? config.vars?.S3_ALLOW_HTTP,
 						SUPABASE_JWKS_URL:
 							process.env.SUPABASE_JWKS_URL ?? config.vars?.SUPABASE_JWKS_URL,
+						SUPABASE_JWT_ISSUER_URL:
+							process.env.SUPABASE_JWT_ISSUER_URL ??
+							config.vars?.SUPABASE_JWT_ISSUER_URL,
 						SUPABASE_PUBLISHABLE_KEY:
 							process.env.SUPABASE_PUBLISHABLE_KEY ??
 							config.vars?.SUPABASE_PUBLISHABLE_KEY,
@@ -82,12 +79,7 @@ export default defineConfig(({ command }) => ({
 			},
 		}),
 		tailwindcss(),
-		tanstackStart({
-			spa: {
-				enabled: workerTarget === "preview" || workerTarget === "e2e",
-				prerender: { outputPath: "/index.html" },
-			},
-		}),
+		tanstackStart(),
 		react(),
 	],
 }));

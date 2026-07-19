@@ -261,19 +261,12 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 					"Workspace membership does not grant organization access",
 				);
 			}
-			const { data, error: createError } = await client
-				.from("workspaces")
-				.insert({
-					organization_id: targetOrganization.id,
-					name: normalizeName(name, "Workspace"),
-				})
-				.select("id")
-				.single();
-			if (createError) throw createError;
-			await refresh({
-				organizationId: targetOrganization.id,
-				workspaceId: String(data.id),
+			const { error: createError } = await client.from("workspaces").insert({
+				organization_id: targetOrganization.id,
+				name: normalizeName(name, "Workspace"),
 			});
+			if (createError) throw createError;
+			await refresh({ organizationId: targetOrganization.id });
 			captureTelemetry("workspace_created");
 		},
 		[client, organizations, refresh, selectedOrganization],

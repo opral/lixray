@@ -4,6 +4,7 @@
   "scripts": {
     "check:docker-submodule-pins": "node scripts/check-docker-submodule-pins.mjs",
     "dev": "node scripts/dev.mjs",
+    "test:e2e": "pnpm --dir web-app test:e2e",
     "dev:telemetry": "infisical run --env=dev -- pnpm dev",
     "deploy:worker": "infisical run --env=prod -- pnpm --dir web-app deploy:worker",
     "perf:build": "docker build -f lix-server/Dockerfile -t lixray-perf .",

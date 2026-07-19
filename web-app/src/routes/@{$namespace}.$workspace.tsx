@@ -15,10 +15,6 @@ import { useWorkspace } from "~/components/workspace-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { normalizeDirPath } from "~/lib/file-explorer-api";
 import {
-	acceptPreviewWorkspaceShareToken,
-	resolvePreviewWorkspaceShareToken,
-} from "~/lib/preview-workspace-share";
-import {
 	resolvePublicWorkspaceByRoute,
 	resolveWorkspaceShareToken,
 	type PublicWorkspaceRoute,
@@ -70,9 +66,7 @@ function WorkspaceRoutePage() {
 	const { branch, invite } = Route.useSearch();
 	const {
 		client: authClient,
-		hasPreviewWorkspaceMembership,
 		isLoaded: authIsLoaded,
-		refreshSession,
 		signInWithGoogle,
 		user: authUser,
 	} = useAuth();
@@ -87,11 +81,7 @@ function WorkspaceRoutePage() {
 			),
 		[namespace, workspaceSlug, workspaceState.organizations],
 	);
-	const demoCanEdit =
-		isDemoModeEnabled &&
-		demoResolved !== null &&
-		authUser !== null &&
-		hasPreviewWorkspaceMembership(demoResolved.workspace.id);
+	const demoCanEdit = isDemoModeEnabled && demoResolved !== null;
 	const [resolved, setResolved] = useState<
 		PublicWorkspaceRoute | null | undefined
 	>(undefined);
@@ -102,7 +92,6 @@ function WorkspaceRoutePage() {
 	const [accessRevision, setAccessRevision] = useState(0);
 	const [settledInviteKey, setSettledInviteKey] = useState<string | null>(null);
 	const automaticJoinAttempt = useRef<string | null>(null);
-	const demoWorkspaceId = demoResolved?.workspace.id;
 	const resolvedWorkspaceId = resolved?.workspaceId;
 	const inviteResolutionKey =
 		resolvedWorkspaceId && invite ? `${resolvedWorkspaceId}:${invite}` : null;
@@ -179,49 +168,6 @@ function WorkspaceRoutePage() {
 		});
 	}, [navigate]);
 
-	// PR previews use their isolated R2 bucket to demonstrate the capability
-	// funnel. This is intentionally separate from the production Supabase/RLS
-	// implementation, but retains the same URL cleanup and session hand-off.
-	useEffect(() => {
-		if (!isDemoModeEnabled || !invite || !demoWorkspaceId) return;
-		let disposed = false;
-		void resolvePreviewWorkspaceShareToken(invite)
-			.then((candidate) => {
-				if (disposed) return;
-				if (
-					candidate &&
-					candidate.grantsEdit &&
-					candidate.workspaceId === demoWorkspaceId
-				) {
-					const capability = {
-						token: invite,
-						workspaceId: candidate.workspaceId,
-						sharerName: candidate.sharedByName,
-					};
-					stageWorkspaceShareCapability(capability);
-					// Keep the resolved capability in React state as the URL is
-					// canonicalized. The session-storage recheck below remains a
-					// resilience path, rather than the only way to show Join to edit.
-					setShareCapability(capability);
-					return;
-				}
-				clearWorkspaceShareCapability();
-				setShareCapability(null);
-			})
-			.catch(() => {
-				if (disposed) return;
-				clearWorkspaceShareCapability();
-				setShareCapability(null);
-				toast.error("Unable to validate this share link.");
-			})
-			.finally(() => {
-				if (!disposed) cleanInviteFromAddressBar();
-			});
-		return () => {
-			disposed = true;
-		};
-	}, [cleanInviteFromAddressBar, demoWorkspaceId, invite]);
-
 	// A capability is resolved once, held only for this browser session, then
 	// removed from router state and the address bar. Invalid/revoked links clean
 	// to the same public read page instead of becoming a dead end.
@@ -287,17 +233,8 @@ function WorkspaceRoutePage() {
 	useEffect(() => {
 		if (!resolved || invite) return;
 		if (isDemoModeEnabled) {
-			const staged = peekWorkspaceShareCapability();
-			if (
-				!staged ||
-				staged.workspaceId !== resolved.workspaceId ||
-				resolved.canEdit
-			) {
-				if (resolved.canEdit) clearWorkspaceShareCapability();
-				setShareCapability(null);
-				return;
-			}
-			setShareCapability(staged);
+			clearWorkspaceShareCapability();
+			setShareCapability(null);
 			return;
 		}
 		if (!authClient) return;
@@ -365,32 +302,6 @@ function WorkspaceRoutePage() {
 			await signInWithGoogle(canonicalPathFromLocation(window.location));
 			return;
 		}
-		if (isDemoModeEnabled) {
-			setJoining(true);
-			try {
-				const accepted = await acceptPreviewWorkspaceShareToken(
-					shareCapability.token,
-				);
-				if (
-					!accepted ||
-					!accepted.grantsEdit ||
-					accepted.workspaceId !== resolved.workspaceId
-				) {
-					throw new Error("This share link is no longer available.");
-				}
-				takeWorkspaceShareCapability();
-				setShareCapability(null);
-				await refreshSession();
-				setAccessRevision((current) => current + 1);
-				await workspaceState.refresh({ workspaceId: resolved.workspaceId });
-				toast.success(
-					`You joined ${resolved.workspaceName} — you can edit now.`,
-				);
-			} finally {
-				setJoining(false);
-			}
-			return;
-		}
 		if (!authClient) throw new Error("Authentication is still loading.");
 
 		setJoining(true);
@@ -415,7 +326,6 @@ function WorkspaceRoutePage() {
 	}, [
 		authClient,
 		authUser,
-		refreshSession,
 		resolved,
 		shareCapability,
 		signInWithGoogle,

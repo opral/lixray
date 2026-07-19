@@ -9,6 +9,7 @@ export interface Env {
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
 	SUPABASE_JWKS_URL?: string;
+	SUPABASE_JWT_ISSUER_URL?: string;
 	R2_ENDPOINT?: string;
 	R2_BUCKET?: string;
 	R2_ACCESS_KEY_ID?: string;

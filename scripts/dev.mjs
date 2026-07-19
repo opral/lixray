@@ -14,29 +14,20 @@ const signalExitCodes = {
 
 let databaseStartAttempted = false;
 let databaseStopped = false;
-let storageStartAttempted = false;
-let storageStopped = false;
+let databaseWasAlreadyRunning = false;
+let composeStartAttempted = false;
+let composeStopped = false;
 let shuttingDown = false;
 let webApp;
+let composeEnv;
 
 process.on("exit", stopDatabase);
-process.on("exit", stopStorage);
+process.on("exit", stopCompose);
 for (const signal of Object.keys(signalExitCodes)) {
 	process.on(signal, () => handleSignal(signal));
 }
 
-storageStartAttempted = true;
-const storage = spawnSync(
-	"docker",
-	["compose", "up", "-d", "minio", "minio-init"],
-	{
-		cwd: repositoryRoot,
-		stdio: "inherit",
-	},
-);
-if (storage.error) throw storage.error;
-if (storage.status !== 0) process.exit(storage.status ?? 1);
-
+databaseWasAlreadyRunning = localSupabaseStatus() !== null;
 databaseStartAttempted = true;
 const database = spawnSync(pnpm, ["--dir", "database", "start"], {
 	cwd: repositoryRoot,
@@ -49,13 +40,12 @@ if (database.error) {
 if (database.status !== 0) {
 	process.exit(database.status ?? 1);
 }
-const localSupabase = parseEnv(
-	execFileSync(
-		pnpm,
-		["--dir", "database", "exec", "supabase", "status", "-o", "env"],
-		{ cwd: repositoryRoot, encoding: "utf8" },
-	),
-);
+const localSupabase = localSupabaseStatus();
+if (!localSupabase) {
+	throw new Error(
+		"Local Supabase did not report its URL, publishable key, and secret key.",
+	);
+}
 const supabaseUrl = localSupabase.API_URL;
 const supabaseKey = localSupabase.PUBLISHABLE_KEY ?? localSupabase.ANON_KEY;
 const supabaseSecretKey =
@@ -69,6 +59,8 @@ if (!supabaseUrl || !supabaseKey || !supabaseSecretKey) {
 	);
 }
 
+await waitForSupabaseAuth(supabaseUrl);
+
 await ensureLocalDevUser({
 	email: localDevEmail,
 	password: localDevPassword,
@@ -76,56 +68,57 @@ await ensureLocalDevUser({
 	supabaseUrl,
 });
 
-const atelierBuild = spawnSync(
-	pnpm,
-	["--dir", "web-app", "run", "atelier:build"],
+const devPort = process.env.LIXRAY_DEV_PORT ?? "8787";
+const devHost = process.env.LIXRAY_DEV_HOST ?? "127.0.0.1";
+const composeSupabaseUrl =
+	process.env.LIXRAY_COMPOSE_SUPABASE_URL ?? dockerReachableUrl(supabaseUrl);
+const internalToken =
+	process.env.LIXRAY_INTERNAL_TOKEN ?? "lixray-local-internal-token";
+
+composeEnv = {
+	...process.env,
+	LIXRAY_DEV_HOST: devHost,
+	LIXRAY_DEV_PORT: devPort,
+	LIXRAY_SERVER_PORT: process.env.LIXRAY_SERVER_PORT ?? "18080",
+	LIXRAY_MINIO_PORT: process.env.LIXRAY_MINIO_PORT ?? "19000",
+	LIXRAY_MINIO_CONSOLE_PORT: process.env.LIXRAY_MINIO_CONSOLE_PORT ?? "19001",
+	LIXRAY_WORKSPACE_SERVICE_URL:
+		process.env.LIXRAY_WORKSPACE_SERVICE_URL ?? "http://lix-server:8080",
+	LIXRAY_INTERNAL_TOKEN: internalToken,
+	LIXRAY_DEMO: "",
+	LIXRAY_DEMO_WORKSPACE_IDS: "",
+	SUPABASE_URL: composeSupabaseUrl,
+	SUPABASE_JWKS_URL: `${composeSupabaseUrl}/auth/v1/.well-known/jwks.json`,
+	SUPABASE_JWT_ISSUER_URL: supabaseUrl,
+	SUPABASE_PUBLISHABLE_KEY: supabaseKey,
+	VITE_LIXRAY_DEMO: "",
+	VITE_LIXRAY_LOCAL_DEV: "1",
+	VITE_LIXRAY_LOCAL_DEV_EMAIL: localDevEmail,
+	VITE_LIXRAY_LOCAL_DEV_PASSWORD: localDevPassword,
+	VITE_SUPABASE_KEY: supabaseKey,
+	VITE_SUPABASE_URL: supabaseUrl,
+};
+
+composeStartAttempted = true;
+const stack = spawnSync(
+	"docker",
+	["compose", "up", "--build", "-d", "lixray-web"],
 	{
 		cwd: repositoryRoot,
 		stdio: "inherit",
+		env: composeEnv,
 	},
 );
-if (atelierBuild.error) throw atelierBuild.error;
-if (atelierBuild.status !== 0) process.exit(atelierBuild.status ?? 1);
-
-const devPort = process.env.LIXRAY_DEV_PORT ?? "8787";
-const devHost = process.env.LIXRAY_DEV_HOST ?? "localhost";
+if (stack.error) throw stack.error;
+if (stack.status !== 0) process.exit(stack.status ?? 1);
 
 webApp = spawn(
-	pnpm,
-	[
-		"--dir",
-		"web-app",
-		"exec",
-		"vite",
-		"dev",
-		"--host",
-		devHost,
-		"--port",
-		devPort,
-	],
+	"docker",
+	["compose", "logs", "--follow", "lixray-web", "lix-server", "minio"],
 	{
 		cwd: repositoryRoot,
 		stdio: "inherit",
-		env: {
-			...process.env,
-			R2_ENDPOINT:
-				process.env.R2_ENDPOINT ?? "http://host.docker.internal:9000",
-			R2_BUCKET: process.env.R2_BUCKET ?? "lixray",
-			R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID ?? "lixray",
-			R2_SECRET_ACCESS_KEY:
-				process.env.R2_SECRET_ACCESS_KEY ?? "lixray-local-secret",
-			R2_REGION: process.env.R2_REGION ?? "us-east-1",
-			S3_PREFIX: process.env.S3_PREFIX ?? "local",
-			S3_ALLOW_HTTP: process.env.S3_ALLOW_HTTP ?? "true",
-			SUPABASE_JWKS_URL: `${supabaseUrl.replace(/\/$/, "")}/auth/v1/.well-known/jwks.json`,
-			SUPABASE_PUBLISHABLE_KEY: supabaseKey,
-			SUPABASE_URL: supabaseUrl,
-			VITE_LIXRAY_LOCAL_DEV: "1",
-			VITE_LIXRAY_LOCAL_DEV_EMAIL: localDevEmail,
-			VITE_LIXRAY_LOCAL_DEV_PASSWORD: localDevPassword,
-			VITE_SUPABASE_KEY: supabaseKey,
-			VITE_SUPABASE_URL: supabaseUrl,
-		},
+		env: composeEnv,
 	},
 );
 
@@ -141,20 +134,16 @@ function handleSignal(signal) {
 	if (shuttingDown) return;
 	shuttingDown = true;
 
-	if (
-		webApp &&
-		webApp.exitCode === null &&
-		webApp.signalCode === null &&
-		webApp.kill(signal)
-	) {
-		return;
+	if (webApp && webApp.exitCode === null && webApp.signalCode === null) {
+		webApp.kill(signal);
 	}
 
 	process.exit(signalExitCodes[signal] ?? 1);
 }
 
 function stopDatabase() {
-	if (!databaseStartAttempted || databaseStopped) return;
+	if (!databaseStartAttempted || databaseWasAlreadyRunning || databaseStopped)
+		return;
 	databaseStopped = true;
 	spawnSync(pnpm, ["--dir", "database", "stop"], {
 		cwd: repositoryRoot,
@@ -162,13 +151,67 @@ function stopDatabase() {
 	});
 }
 
-function stopStorage() {
-	if (!storageStartAttempted || storageStopped) return;
-	storageStopped = true;
-	spawnSync("docker", ["compose", "stop", "minio"], {
-		cwd: repositoryRoot,
-		stdio: "inherit",
-	});
+function stopCompose() {
+	if (!composeStartAttempted || composeStopped) return;
+	composeStopped = true;
+	spawnSync(
+		"docker",
+		["compose", "stop", "lixray-web", "lix-server", "minio"],
+		{
+			cwd: repositoryRoot,
+			stdio: "inherit",
+			env: composeEnv,
+		},
+	);
+}
+
+function dockerReachableUrl(value) {
+	const url = new URL(value);
+	if (["localhost", "127.0.0.1", "[::1]", "::1"].includes(url.hostname)) {
+		url.hostname = "host.docker.internal";
+	}
+	return url.toString().replace(/\/$/, "");
+}
+
+async function waitForSupabaseAuth(supabaseUrl) {
+	const healthUrl = new URL("/auth/v1/health", supabaseUrl);
+	const timeoutMs = 120_000;
+	const deadline = Date.now() + timeoutMs;
+
+	console.log(`Waiting for local Supabase auth at ${healthUrl.origin}...`);
+	while (Date.now() < deadline) {
+		try {
+			const response = await fetch(healthUrl, {
+				signal: AbortSignal.timeout(1_000),
+			});
+			if (response.ok) return;
+		} catch {
+			// Supabase has not accepted connections yet.
+		}
+		await new Promise((resolve) => setTimeout(resolve, 250));
+	}
+
+	throw new Error(
+		`Local Supabase auth did not become ready within ${timeoutMs / 1_000} seconds.`,
+	);
+}
+
+function localSupabaseStatus() {
+	try {
+		return parseEnv(
+			execFileSync(
+				pnpm,
+				["--dir", "database", "exec", "supabase", "status", "-o", "env"],
+				{
+					cwd: repositoryRoot,
+					encoding: "utf8",
+					stdio: ["ignore", "pipe", "ignore"],
+				},
+			),
+		);
+	} catch {
+		return null;
+	}
 }
 
 async function ensureLocalDevUser({ email, password, secretKey, supabaseUrl }) {

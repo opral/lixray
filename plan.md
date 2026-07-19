@@ -6,9 +6,11 @@ Create a fast, trustworthy loop for reproducing a slow workspace, measuring its
 queries, improving Lix or `lix-server`, and proving the improvement before
 merge.
 
-The local, CI, preview, and production paths should use the same application
-and Lix server binaries. Environment-specific configuration may differ, but we
-should not maintain an alternate Lix runtime for tests or previews.
+Local development and CI use the same Compose `lixray-web -> lix-server ->
+MinIO` path. Railway previews use the portable web and server images with R2.
+The current Cloudflare production deployment is a temporary cutover exception,
+not a local, CI, or preview runtime. We should not maintain an alternate Lix
+runtime for tests or previews.
 
 ## Target architecture
 
@@ -99,8 +101,19 @@ remote SDK, Atelier, and LixRay.
 
 ## Local and CI loop
 
-Docker Compose is the canonical local topology. It starts the same web and Rust
-services that are deployed in production.
+Docker Compose is the canonical local topology. `pnpm dev` starts local
+Supabase, waits for Auth, provisions the deterministic local developer, then
+starts the real web service, `lix-server`, and MinIO:
+
+```text
+browser -> lixray-web (Compose) -> lix-server (private Compose network) -> MinIO
+                  |
+                  `-> local Supabase
+```
+
+`pnpm test:e2e` starts that same topology on an isolated port. Its one browser
+test signs in through local Supabase, creates a workspace, verifies the Lix
+handshake, and executes a query through the web service and `lix-server`.
 
 The fast performance loop talks directly to the real `lix-server` workspace
 service:
@@ -127,8 +140,8 @@ Initially, wall-clock latency with warmup and repeated runs is sufficient. More
 detailed profiling and regression thresholds can be added after the loop is
 reliable.
 
-Every PR runs production-image Docker Compose E2E in CI. One outer browser test
-proves the full path:
+Every PR runs `pnpm test:e2e` in CI. One outer browser test proves the full
+path:
 
 ```text
 browser -> web service -> WorkspaceFetch -> lix-server
@@ -150,6 +163,10 @@ volumes so the services remain portable.
 Railway is the current preferred deployment target because mostly idle PR
 environments can use usage-based billing and Serverless/App Sleeping. Production
 services remain awake initially.
+
+Cloudflare remains the temporary production control plane until this topology
+has been smoke-tested in a Railway production environment. That exception must
+not reintroduce a Workerd/Wasm path for local development, CI, or previews.
 
 Before committing to Railway, run a small deployment spike that verifies:
 
@@ -175,28 +192,22 @@ PR environment
 `- lix-server workspace service (private, sleeping, S3 storage)
 ```
 
-Previews use demo authentication, deterministic seed data, and a dedicated
-preview bucket. Railway environment IDs prefix every workspace, and bucket
-lifecycle rules expire abandoned preview data. Previews must not receive
-production data or production bucket credentials.
+Previews use their configured Supabase control plane and dedicated preview R2
+credentials supplied through Infisical. Railway environment IDs prefix every
+workspace, and bucket lifecycle rules expire abandoned preview data. Previews
+must not receive production bucket credentials.
 
-The current Workerd/Wasm snapshot preview path and its preview-specific storage
-can be removed once the full-stack preview works.
+There is no Workerd/Wasm snapshot preview path. The current Cloudflare
+production deployment remains only until the Railway production cutover.
 
-## Implementation sequence
+## Next milestones
 
-1. Make `vendor/lix` the Rust and JavaScript source of truth and update the
-   production Docker build context.
-2. Add workspace-addressed routing and a minimal multi-workspace manager to
-   `lix-server`.
-3. Add the deterministic fixture and query workload runner.
-4. Add Docker Compose and make local/CI E2E use the real workspace service.
-5. Route browser and MCP traffic through one HTTP `WorkspaceFetch`.
-6. Validate Railway with the deployment spike.
-7. Add production and PR-environment deployment configuration.
-8. Remove Durable Object, Cloudflare Container, and alternate preview-runtime
-   code after the replacement path is verified.
-9. Establish the first slow-workspace baseline and begin optimizing queries.
+1. Keep the Compose browser E2E green as the one local/CI acceptance path.
+2. Establish a slow-workspace baseline and begin comparing performance changes.
+3. Create the Railway production web and `lix-server` services, sync production
+   R2 configuration through Infisical, and smoke-test them.
+4. Attach `lixray.com`, cut traffic to Railway, and then remove the temporary
+   Cloudflare Worker, Durable Object Container, and remaining Worker-only code.
 
 ## MVP success criteria
 

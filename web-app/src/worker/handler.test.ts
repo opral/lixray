@@ -13,6 +13,7 @@ import {
 	authorizeWorkspaceWithSupabase,
 	handleRequest,
 	resolveWorkspaceWithSupabase,
+	supabaseJwtIssuer,
 	validateBrowserJwtClaims,
 	validateMcpJwtClaims,
 	type AuthenticateRequest,
@@ -317,6 +318,22 @@ void test("MCP JWT claims require issuer, audience, expiry, OAuth client, and re
 		assert.equal(result.ok, false);
 		if (!result.ok) assert.equal(result.error, "insufficient_scope");
 	}
+});
+
+void test("JWT validation can use a public Supabase issuer separate from its private API URL", () => {
+	assert.equal(
+		supabaseJwtIssuer({
+			SUPABASE_URL: "http://host.docker.internal:54321",
+			SUPABASE_JWT_ISSUER_URL: "http://127.0.0.1:54321/",
+		}),
+		"http://127.0.0.1:54321/auth/v1",
+	);
+	assert.equal(
+		supabaseJwtIssuer({
+			SUPABASE_URL: "https://project.supabase.co/",
+		}),
+		"https://project.supabase.co/auth/v1",
+	);
 });
 
 void test("browser /v1 claims reject OAuth clients while normal sessions are unchanged", () => {

@@ -4,7 +4,6 @@ import type { Database } from "./database.types";
 export type LixraySupabaseClient = SupabaseClient<Database>;
 
 const env = import.meta.env as {
-	readonly DEV?: boolean;
 	readonly VITE_LIXRAY_DEMO?: string;
 	readonly VITE_LIXRAY_LOCAL_DEV?: string;
 	readonly VITE_LIXRAY_LOCAL_DEV_EMAIL?: string;
@@ -16,7 +15,6 @@ const env = import.meta.env as {
 export const supabaseUrl = env.VITE_SUPABASE_URL;
 export const supabasePublishableKey = env.VITE_SUPABASE_KEY;
 export const localDevCredentials =
-	env.DEV === true &&
 	env.VITE_LIXRAY_LOCAL_DEV === "1" &&
 	env.VITE_LIXRAY_LOCAL_DEV_EMAIL &&
 	env.VITE_LIXRAY_LOCAL_DEV_PASSWORD
