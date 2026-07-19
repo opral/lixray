@@ -42,9 +42,23 @@ async function seed(args) {
     );
     return;
   }
+  if (existingCount > fixture.fileCount) {
+    fail(
+      `fixture contains ${existingCount} files, more than the expected ${fixture.fileCount}`,
+    );
+  }
+  if (existingCount > 0) {
+    console.log(
+      `resuming fixture seed: ${fixture.workspaceId} (${existingCount}/${fixture.fileCount} files)`,
+    );
+  }
 
   const content = Buffer.alloc(fixture.contentBytes, "x").toString("base64");
-  for (let offset = 0; offset < fixture.fileCount; offset += fixture.batchSize) {
+  for (
+    let offset = existingCount;
+    offset < fixture.fileCount;
+    offset += fixture.batchSize
+  ) {
     const end = Math.min(offset + fixture.batchSize, fixture.fileCount);
     const statements = [];
     for (let index = offset; index < end; index += 1) {
