@@ -265,11 +265,6 @@
 									"name": {
 										"type": "string"
 									},
-									"revision": {
-										"type": "string",
-										"format": "uuid",
-										"description": "Lix revision UUID"
-									},
 									"updatedAt": {
 										"type": "string"
 									},
@@ -286,7 +281,7 @@
 										]
 									}
 								},
-								"required": ["kind", "path", "name", "revision", "updatedAt"],
+								"required": ["kind", "path", "name", "updatedAt"],
 								"additionalProperties": false
 							}
 						}
@@ -397,11 +392,6 @@
 									"name": {
 										"type": "string"
 									},
-									"revision": {
-										"type": "string",
-										"format": "uuid",
-										"description": "Lix revision UUID"
-									},
 									"updatedAt": {
 										"type": "string"
 									},
@@ -418,7 +408,7 @@
 										]
 									}
 								},
-								"required": ["kind", "path", "name", "revision", "updatedAt"],
+								"required": ["kind", "path", "name", "updatedAt"],
 								"additionalProperties": false
 							}
 						}
@@ -533,11 +523,6 @@
 							"minimum": 0,
 							"maximum": 9007199254740991
 						},
-						"revision": {
-							"type": "string",
-							"format": "uuid",
-							"description": "Lix revision UUID"
-						},
 						"updatedAt": {
 							"type": "string"
 						},
@@ -564,7 +549,6 @@
 						"path",
 						"content",
 						"size",
-						"revision",
 						"updatedAt",
 						"totalLines",
 						"startLine",
@@ -648,11 +632,6 @@
 				},
 				"content": {
 					"type": "string"
-				},
-				"expected_revision": {
-					"type": "string",
-					"format": "uuid",
-					"description": "Optional current file revision. Iff provided, replacement succeeds only if it matches."
 				}
 			},
 			"required": ["workspace_ref", "path", "content"],
@@ -678,11 +657,6 @@
 								"name": {
 									"type": "string"
 								},
-								"revision": {
-									"type": "string",
-									"format": "uuid",
-									"description": "Lix revision UUID"
-								},
 								"updatedAt": {
 									"type": "string"
 								},
@@ -699,7 +673,7 @@
 									]
 								}
 							},
-							"required": ["kind", "path", "name", "revision", "updatedAt"],
+							"required": ["kind", "path", "name", "updatedAt"],
 							"additionalProperties": false
 						}
 					},
@@ -779,11 +753,6 @@
 					"minLength": 1,
 					"description": "Absolute file path"
 				},
-				"expected_revision": {
-					"type": "string",
-					"format": "uuid",
-					"description": "Optional current file revision. Iff provided, replacement succeeds only if it matches."
-				},
 				"edits": {
 					"minItems": 1,
 					"maxItems": 50,
@@ -831,11 +800,6 @@
 								"name": {
 									"type": "string"
 								},
-								"revision": {
-									"type": "string",
-									"format": "uuid",
-									"description": "Lix revision UUID"
-								},
 								"updatedAt": {
 									"type": "string"
 								},
@@ -852,7 +816,7 @@
 									]
 								}
 							},
-							"required": ["kind", "path", "name", "revision", "updatedAt"],
+							"required": ["kind", "path", "name", "updatedAt"],
 							"additionalProperties": false
 						}
 					},
@@ -956,11 +920,6 @@
 								"name": {
 									"type": "string"
 								},
-								"revision": {
-									"type": "string",
-									"format": "uuid",
-									"description": "Lix revision UUID"
-								},
 								"updatedAt": {
 									"type": "string"
 								},
@@ -977,7 +936,7 @@
 									]
 								}
 							},
-							"required": ["kind", "path", "name", "revision", "updatedAt"],
+							"required": ["kind", "path", "name", "updatedAt"],
 							"additionalProperties": false
 						}
 					},
@@ -1061,11 +1020,6 @@
 					"type": "string",
 					"minLength": 1,
 					"description": "Absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not."
-				},
-				"expected_revision": {
-					"type": "string",
-					"format": "uuid",
-					"description": "Optional current file revision. Iff provided, replacement succeeds only if it matches."
 				}
 			},
 			"required": ["workspace_ref", "source_path", "destination_path"],
@@ -1091,11 +1045,6 @@
 								"name": {
 									"type": "string"
 								},
-								"revision": {
-									"type": "string",
-									"format": "uuid",
-									"description": "Lix revision UUID"
-								},
 								"updatedAt": {
 									"type": "string"
 								},
@@ -1112,7 +1061,7 @@
 									]
 								}
 							},
-							"required": ["kind", "path", "name", "revision", "updatedAt"],
+							"required": ["kind", "path", "name", "updatedAt"],
 							"additionalProperties": false
 						}
 					},
@@ -1191,11 +1140,6 @@
 					"type": "string",
 					"minLength": 1,
 					"description": "Absolute entry path. Directory paths must end in /; file paths must not."
-				},
-				"expected_revision": {
-					"type": "string",
-					"format": "uuid",
-					"description": "Optional current entry revision. Iff provided, delete succeeds only if it matches."
 				},
 				"recursive": {
 					"default": false,

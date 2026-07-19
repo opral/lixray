@@ -18,7 +18,7 @@ export interface DirEntry {
 	id: string;
 	path: string;
 	name: string;
-	revision: string;
+	changeId: string;
 	updatedAt: string;
 }
 
@@ -27,7 +27,7 @@ export interface FileEntry {
 	id: string;
 	path: string;
 	name: string;
-	revision: string;
+	changeId: string;
 	size: number | null;
 	updatedAt: string;
 }
@@ -106,7 +106,7 @@ export function useFileExplorerApi() {
 								id: entry.path,
 								path: entry.path,
 								name: entry.name,
-								revision: entry.revision,
+								changeId: entry.changeId,
 								updatedAt: entry.updatedAt,
 							}
 						: {
@@ -114,7 +114,7 @@ export function useFileExplorerApi() {
 								id: entry.path,
 								path: entry.path,
 								name: entry.name,
-								revision: entry.revision,
+								changeId: entry.changeId,
 								size: entry.size ?? null,
 								updatedAt: entry.updatedAt,
 							},
@@ -334,7 +334,7 @@ export function useFileExplorerApi() {
 				branchId,
 				entry.path,
 				destination,
-				entry.revision,
+				entry.changeId,
 			);
 		}
 
@@ -348,7 +348,7 @@ export function useFileExplorerApi() {
 					workspaceId,
 					branchId,
 					entry.path,
-					entry.revision,
+					entry.changeId,
 					entry.kind === "dir",
 				);
 			}

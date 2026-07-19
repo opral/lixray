@@ -284,7 +284,7 @@ Use this exact workspace:
 
 Call list_workspaces through "${mcpServerName}" and confirm that it returns the exact workspace ID ${workspace.id}. Do not use a workspace ID remembered from another task or conversation. If this ID is unavailable, stop, reconnect "${mcpServerName}" at ${mcpUrl}, and run list_workspaces again before continuing.
 
-Open the workspace preview at ${workspaceUrl}. Do not create or edit any files yet. When everything is ready, tell me the workspace is connected and ask what document I would like you to create. After any future write, read the same file back from workspace ${workspace.id} and confirm its returned revision before reporting that the write succeeded.`;
+Open the workspace preview at ${workspaceUrl}. Do not create or edit any files yet. When everything is ready, tell me the workspace is connected and ask what document I would like you to create. After any future write, read the same file back from workspace ${workspace.id} and confirm its content before reporting that the write succeeded.`;
 
 	const copyInstructions = async () => {
 		await navigator.clipboard.writeText(instructions);
