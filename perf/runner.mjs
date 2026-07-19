@@ -10,6 +10,7 @@ const baseUrl = (process.env.LIXRAY_PERF_URL ?? "http://127.0.0.1:8080").replace
   "",
 );
 const internalToken = process.env.LIXRAY_INTERNAL_TOKEN?.trim();
+const storageBackend = process.env.LIXRAY_PERF_STORAGE ?? "s3-minio";
 
 const [command, ...args] = process.argv.slice(2);
 
@@ -123,6 +124,7 @@ async function run(args) {
     version: 1,
     measuredAt: new Date().toISOString(),
     baseUrl,
+    storageBackend,
     workspaceId: workload.workspaceId,
     workload: workloadPath.replace(`${root}/`, ""),
     warmupRuns: workload.warmupRuns,

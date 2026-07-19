@@ -13,20 +13,19 @@ pub struct Config {
     pub bind_addr: String,
     pub internal_token: Option<String>,
     pub max_open_workspaces: usize,
-    pub storage: StorageConfig,
+    pub storage: S3StorageConfig,
 }
 
 #[derive(Clone, Debug)]
-pub enum StorageConfig {
-    Memory,
-    R2 {
-        endpoint: String,
-        bucket: String,
-        access_key_id: String,
-        secret_access_key: String,
-        region: String,
-        cache: SlateDBCacheConfig,
-    },
+pub struct S3StorageConfig {
+    pub endpoint: String,
+    pub bucket: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub region: String,
+    pub prefix: String,
+    pub allow_http: bool,
+    pub cache: SlateDBCacheConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,7 +38,6 @@ pub struct SlateDBCacheConfig {
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let storage_kind = env::var("SLATEDB_STORAGE").unwrap_or_else(|_| "r2".to_string());
         let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| {
             let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
             format!("0.0.0.0:{port}")
@@ -54,19 +52,15 @@ impl Config {
         )?)
         .context("LIXRAY_MAX_OPEN_WORKSPACES does not fit this platform")?;
 
-        let storage = match storage_kind.as_str() {
-            "" | "r2" => StorageConfig::R2 {
-                endpoint: required_env("R2_ENDPOINT")?,
-                bucket: required_env("R2_BUCKET")?,
-                access_key_id: required_env("R2_ACCESS_KEY_ID")?,
-                secret_access_key: required_env("R2_SECRET_ACCESS_KEY")?,
-                region: env::var("R2_REGION").unwrap_or_else(|_| "auto".to_string()),
-                cache: SlateDBCacheConfig::from_env()?,
-            },
-            "memory" => StorageConfig::Memory,
-            other => {
-                bail!("unsupported SLATEDB_STORAGE value `{other}`; expected `r2` or `memory`")
-            }
+        let storage = S3StorageConfig {
+            endpoint: required_env("S3_ENDPOINT")?,
+            bucket: required_env("S3_BUCKET")?,
+            access_key_id: required_env("S3_ACCESS_KEY_ID")?,
+            secret_access_key: required_env("S3_SECRET_ACCESS_KEY")?,
+            region: env::var("S3_REGION").unwrap_or_else(|_| "auto".to_string()),
+            prefix: storage_prefix()?,
+            allow_http: boolean_env("S3_ALLOW_HTTP", false)?,
+            cache: SlateDBCacheConfig::from_env()?,
         };
 
         Ok(Self {
@@ -75,6 +69,43 @@ impl Config {
             max_open_workspaces,
             storage,
         })
+    }
+}
+
+fn storage_prefix() -> Result<String> {
+    let value = match optional_nonempty_env("S3_PREFIX")? {
+        Some(value) => value,
+        None => match optional_nonempty_env("RAILWAY_ENVIRONMENT_ID")? {
+            Some(environment_id) => format!("railway/{environment_id}"),
+            None => String::new(),
+        },
+    };
+    let normalized = value.trim_matches('/');
+    if normalized.is_empty() {
+        return Ok(String::new());
+    }
+    if normalized.split('/').any(|segment| {
+        segment.is_empty()
+            || segment == "."
+            || segment == ".."
+            || !segment
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    }) {
+        bail!(
+            "S3_PREFIX must contain slash-separated alphanumeric, hyphen, or underscore segments"
+        );
+    }
+    Ok(normalized.to_string())
+}
+
+fn boolean_env(name: &str, default: bool) -> Result<bool> {
+    match env::var(name) {
+        Ok(value) if value == "true" => Ok(true),
+        Ok(value) if value == "false" => Ok(false),
+        Ok(_) => bail!("{name} must be `true` or `false`"),
+        Err(env::VarError::NotPresent) => Ok(default),
+        Err(error) => Err(error).with_context(|| format!("read {name}")),
     }
 }
 
@@ -147,17 +178,21 @@ mod tests {
     }
 
     #[test]
-    fn from_env_does_not_require_a_workspace_path() {
+    fn from_env_configures_s3_without_a_workspace_path() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
-        env::set_var("SLATEDB_STORAGE", "memory");
+        set_s3_env();
 
         let config = Config::from_env().unwrap();
 
         assert_eq!(config.max_open_workspaces, 32);
         assert_eq!(config.bind_addr, "0.0.0.0:8080");
         assert_eq!(config.internal_token, None);
-        assert!(matches!(config.storage, StorageConfig::Memory));
+        assert_eq!(config.storage.endpoint, "https://s3.example");
+        assert_eq!(config.storage.bucket, "lixray");
+        assert_eq!(config.storage.region, "auto");
+        assert_eq!(config.storage.prefix, "");
+        assert!(!config.storage.allow_http);
         clear_lixray_env();
     }
 
@@ -165,9 +200,9 @@ mod tests {
     fn from_env_uses_platform_port_and_internal_token() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
+        set_s3_env();
         env::set_var("PORT", "4567");
         env::set_var("LIXRAY_INTERNAL_TOKEN", "test-token");
-        env::set_var("SLATEDB_STORAGE", "memory");
 
         let config = Config::from_env().unwrap();
 
@@ -181,7 +216,6 @@ mod tests {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
         env::set_var("LIXRAY_INTERNAL_TOKEN", "");
-        env::set_var("SLATEDB_STORAGE", "memory");
 
         let error = Config::from_env().unwrap_err();
 
@@ -194,7 +228,6 @@ mod tests {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
         env::set_var("RAILWAY_PROJECT_ID", "project-id");
-        env::set_var("SLATEDB_STORAGE", "memory");
 
         let error = Config::from_env().unwrap_err();
 
@@ -206,7 +239,7 @@ mod tests {
     fn from_env_configures_workspace_capacity() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
-        env::set_var("SLATEDB_STORAGE", "memory");
+        set_s3_env();
         env::set_var("LIXRAY_MAX_OPEN_WORKSPACES", "7");
 
         let config = Config::from_env().unwrap();
@@ -219,7 +252,6 @@ mod tests {
     fn from_env_rejects_zero_workspace_capacity() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
-        env::set_var("SLATEDB_STORAGE", "memory");
         env::set_var("LIXRAY_MAX_OPEN_WORKSPACES", "0");
 
         let error = Config::from_env().unwrap_err();
@@ -231,25 +263,23 @@ mod tests {
     }
 
     #[test]
-    fn from_env_configures_bounded_r2_cache() {
+    fn from_env_configures_bounded_s3_cache_and_prefix() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
-        env::set_var("R2_ENDPOINT", "https://r2.example");
-        env::set_var("R2_BUCKET", "lixray");
-        env::set_var("R2_ACCESS_KEY_ID", "access-key");
-        env::set_var("R2_SECRET_ACCESS_KEY", "secret-key");
+        set_s3_env();
+        env::set_var("S3_PREFIX", "/preview/pr_123/");
+        env::set_var("S3_ALLOW_HTTP", "true");
         env::set_var("SLATEDB_CACHE_DIR", "/tmp/test-cache");
         env::set_var("SLATEDB_CACHE_MAX_BYTES", "1024");
         env::set_var("SLATEDB_BLOCK_CACHE_BYTES", "256");
         env::set_var("SLATEDB_METADATA_CACHE_BYTES", "64");
 
         let config = Config::from_env().unwrap();
-        let StorageConfig::R2 { cache, .. } = config.storage else {
-            panic!("expected R2 storage");
-        };
 
+        assert_eq!(config.storage.prefix, "preview/pr_123");
+        assert!(config.storage.allow_http);
         assert_eq!(
-            cache,
+            config.storage.cache,
             SlateDBCacheConfig {
                 root_folder: PathBuf::from("/tmp/test-cache"),
                 max_disk_cache_bytes: 1024,
@@ -264,10 +294,7 @@ mod tests {
     fn from_env_rejects_zero_cache_sizes() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
-        env::set_var("R2_ENDPOINT", "https://r2.example");
-        env::set_var("R2_BUCKET", "lixray");
-        env::set_var("R2_ACCESS_KEY_ID", "access-key");
-        env::set_var("R2_SECRET_ACCESS_KEY", "secret-key");
+        set_s3_env();
         env::set_var("SLATEDB_CACHE_MAX_BYTES", "0");
 
         let error = Config::from_env().unwrap_err();
@@ -276,19 +303,54 @@ mod tests {
         clear_lixray_env();
     }
 
+    #[test]
+    fn from_env_uses_railway_environment_as_default_prefix() {
+        let _guard = env_lock().lock().unwrap();
+        clear_lixray_env();
+        set_s3_env();
+        env::set_var("RAILWAY_ENVIRONMENT_ID", "preview-123");
+
+        let config = Config::from_env().unwrap();
+
+        assert_eq!(config.storage.prefix, "railway/preview-123");
+        clear_lixray_env();
+    }
+
+    #[test]
+    fn from_env_rejects_unsafe_s3_prefix() {
+        let _guard = env_lock().lock().unwrap();
+        clear_lixray_env();
+        set_s3_env();
+        env::set_var("S3_PREFIX", "preview/../production");
+
+        let error = Config::from_env().unwrap_err();
+
+        assert!(format!("{error:#}").contains("S3_PREFIX"));
+        clear_lixray_env();
+    }
+
+    fn set_s3_env() {
+        env::set_var("S3_ENDPOINT", "https://s3.example");
+        env::set_var("S3_BUCKET", "lixray");
+        env::set_var("S3_ACCESS_KEY_ID", "access-key");
+        env::set_var("S3_SECRET_ACCESS_KEY", "secret-key");
+    }
+
     fn clear_lixray_env() {
         for name in [
             "BIND_ADDR",
             "PORT",
             "LIXRAY_INTERNAL_TOKEN",
             "RAILWAY_PROJECT_ID",
-            "SLATEDB_STORAGE",
+            "RAILWAY_ENVIRONMENT_ID",
             "LIXRAY_MAX_OPEN_WORKSPACES",
-            "R2_ENDPOINT",
-            "R2_BUCKET",
-            "R2_ACCESS_KEY_ID",
-            "R2_SECRET_ACCESS_KEY",
-            "R2_REGION",
+            "S3_ENDPOINT",
+            "S3_BUCKET",
+            "S3_ACCESS_KEY_ID",
+            "S3_SECRET_ACCESS_KEY",
+            "S3_REGION",
+            "S3_PREFIX",
+            "S3_ALLOW_HTTP",
             "SLATEDB_CACHE_DIR",
             "SLATEDB_CACHE_MAX_BYTES",
             "SLATEDB_BLOCK_CACHE_BYTES",

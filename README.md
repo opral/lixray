@@ -28,15 +28,12 @@ authenticated `/mcp` endpoint, OAuth protected-resource discovery, and
 workspace-scoped `/@namespace/workspace/lix/v1/*` requests before delegating
 all other routes to Start.
 
-Pull requests use a separate `lixray-preview` Worker. It runs the precompiled
-Lix Wasm module directly in each Cloudflare isolate and keeps a lazily opened
-in-memory Lix per demo workspace UUID. Every fresh workspace uses the same
-canonical demo `main` branch UUID, so a follow-up request can use a branch ID
-returned by another isolate. Preview state still has no external binding:
-different isolates may see fresh independent workspace contents, and eviction
-or a new deployment can erase everything. Production continues to use its
-Durable Object Container and R2 architecture until the Railway workspace
-service has passed the PR-preview deployment spike.
+Pull requests use Railway environments containing the real web and
+`lix-server` images. Preview workspace data uses the same S3-compatible SlateDB
+path as production, isolated by Railway environment ID. Local development uses
+MinIO; previews and production can use R2. Production continues to use its
+Durable Object Container and R2 architecture until the Railway production
+cutover.
 
 ## ChatGPT MCP app
 
@@ -248,33 +245,29 @@ The root package is dependency-free and exposes one repository-level command:
 pnpm dev
 ```
 
-It starts the local Supabase stack, provisions a deterministic local developer
-account, and starts the web app with the local URL and keys. Cloudflare's local
-runtime builds and manages the in-memory Lix container. Open
+It starts MinIO, the local Supabase stack, provisions a deterministic local
+developer account, and starts the web app with the local URL and keys.
+Cloudflare's local runtime builds and manages the Lix container, which uses the
+same S3-compatible storage path as production. Open
 `http://localhost:8787`, choose **Continue as local developer**, and use the
 normal authenticated organization and workspace flows. Stopping the command
-also stops Supabase.
+also stops MinIO and Supabase without deleting their data.
 
 Each module also works independently:
 
 ```sh
 pnpm --dir database start
 pnpm --dir web-app dev
-cargo run --manifest-path lix-server/Cargo.toml
+docker compose up --build lix-server
 ```
 
 The standalone web app uses the configured hosted Supabase project from
 `web-app/.env.development` and `web-app/wrangler.jsonc`; it does not provision
 the local developer account.
 
-The app is served at `http://localhost:8787`. Run against R2 explicitly with:
-
-```sh
-pnpm --dir web-app dev:r2
-```
-
-Restart the dev server after changing storage mode so existing containers do
-not retain old startup environment.
+The app is served at `http://localhost:8787`. The standalone web-app command
+expects an S3-compatible endpoint configured as shown in
+`web-app/.dev.vars.example`; the root command supplies the local MinIO values.
 
 ## Verification
 
@@ -310,14 +303,16 @@ pnpm --dir web-app dev:demo
 
 ## Performance loop
 
-The performance loop uses the production `lix-server` image and an isolated
-in-memory workspace:
+The performance loop uses the production `lix-server` image and persistent
+MinIO object storage through the same S3 API used for R2:
 
 ```sh
+pnpm perf:reset
 pnpm perf:up
 pnpm perf:seed
 pnpm perf:run -- --output perf/results/baseline.json
 # edit vendor/lix or lix-server
+pnpm perf:reset
 pnpm perf:up
 pnpm perf:seed
 pnpm perf:run -- --compare perf/results/baseline.json
@@ -343,23 +338,28 @@ removes the old deployment without an intentional overlap.
 
 The first Railway project is a deployment and preview spike, not the production
 cutover. Leave its `production` environment undeployed. Use a persistent
-`preview-base` environment as the PR template and configure it with disposable
-in-memory storage:
+`preview-base` environment as the PR template and configure `lix-server` with a
+dedicated preview S3 bucket:
 
 ```text
-SLATEDB_STORAGE=memory
+S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+S3_BUCKET=lixray-preview
+S3_ACCESS_KEY_ID=<preview-bucket-access-key>
+S3_SECRET_ACCESS_KEY=<preview-bucket-secret-key>
+S3_REGION=auto
 LIXRAY_MAX_OPEN_WORKSPACES=4
 LIXRAY_INTERNAL_TOKEN=<random secret>
 RUST_LOG=lixray=info
 ```
 
-Do not add production R2 credentials to this environment. Generate a Railway
-domain for the service. Railway currently sleeps a Serverless service after it
-sends no outbound packets for more than ten minutes and wakes it on public or
-private inbound traffic. The memory-backed preview has no external storage
-traffic while idle, but this must still be verified in Railway metrics after
-deployment. Do not attach an uptime monitor to the preview because inbound
-traffic prevents it from sleeping.
+Do not add production bucket credentials to this environment. When `S3_PREFIX`
+is unset, `lix-server` automatically uses
+`railway/<RAILWAY_ENVIRONMENT_ID>`, so PR environments can share the preview
+bucket without sharing workspace data. Configure lifecycle expiration for the
+preview bucket so deleted PR environments do not leave data indefinitely.
+Generate a Railway domain for the service and verify sleeping behavior in
+Railway metrics. Do not attach an uptime monitor because inbound traffic
+prevents sleeping.
 
 Enable PR Environments and Focused PR Environments, keep bot PR environments
 disabled, and use `preview-base` as the PR base. Railway then creates a unique
@@ -429,7 +429,8 @@ SUPABASE_JWKS_URL
 R2_ENDPOINT
 R2_BUCKET
 R2_REGION
-SLATEDB_STORAGE
+S3_PREFIX
+S3_ALLOW_HTTP
 SLATEDB_CACHE_DIR
 SLATEDB_CACHE_MAX_BYTES
 SLATEDB_BLOCK_CACHE_BYTES

@@ -1,10 +1,10 @@
-SLATEDB_STORAGE=memory
-
-R2_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
-R2_BUCKET=<bucket-name>
-R2_ACCESS_KEY_ID=<access-key-id>
-R2_SECRET_ACCESS_KEY=<secret-access-key>
-R2_REGION=auto
+R2_ENDPOINT=http://host.docker.internal:9000
+R2_BUCKET=lixray
+R2_ACCESS_KEY_ID=lixray
+R2_SECRET_ACCESS_KEY=lixray-local-secret
+R2_REGION=us-east-1
+S3_PREFIX=local
+S3_ALLOW_HTTP=true
 
 # Optional R2-backed SlateDB cache overrides.
 SLATEDB_CACHE_DIR=/tmp/lixray-slatedb-cache

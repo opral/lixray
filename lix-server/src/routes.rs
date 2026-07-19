@@ -96,19 +96,12 @@ fn workspace_error(error: WorkspaceRuntimeError) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Config, StorageConfig};
     use axum::http::Request;
     use http_body_util::BodyExt;
     use serde_json::{json, Value as JsonValue};
 
     fn test_router() -> Router {
-        let manager = WorkspaceRuntimeManager::new(&Config {
-            bind_addr: "127.0.0.1:0".to_string(),
-            internal_token: None,
-            max_open_workspaces: 4,
-            storage: StorageConfig::Memory,
-        })
-        .expect("create test workspace manager");
+        let manager = WorkspaceRuntimeManager::new_in_memory(4);
         router(manager, None)
     }
 
@@ -170,13 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn internal_token_protects_workspace_routes() {
-        let manager = WorkspaceRuntimeManager::new(&Config {
-            bind_addr: "127.0.0.1:0".to_string(),
-            internal_token: None,
-            max_open_workspaces: 4,
-            storage: StorageConfig::Memory,
-        })
-        .expect("create test workspace manager");
+        let manager = WorkspaceRuntimeManager::new_in_memory(4);
         let app = router(manager, Some("secret".to_string()));
 
         let unauthorized = app

@@ -1,8 +1,10 @@
-use crate::{Config, StorageConfig};
+use crate::Config;
 use anyhow::{Context, Result};
 use lix_engine::Engine;
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
-use object_store::{aws::AmazonS3Builder, memory::InMemory, ObjectStore};
+#[cfg(test)]
+use object_store::memory::InMemory;
+use object_store::{aws::AmazonS3Builder, ObjectStore};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -25,11 +27,11 @@ pub struct WorkspaceRuntimeManager {
 
 #[derive(Clone)]
 enum StorageBackend {
-    Memory {
+    #[cfg(test)]
+    Memory { object_store: Arc<dyn ObjectStore> },
+    S3 {
         object_store: Arc<dyn ObjectStore>,
-    },
-    R2 {
-        object_store: Arc<dyn ObjectStore>,
+        prefix: String,
         cache: SlateDBCacheOptions,
     },
 }
@@ -54,48 +56,37 @@ pub enum WorkspaceRuntimeError {
 
 impl WorkspaceRuntimeManager {
     pub fn new(config: &Config) -> Result<Arc<Self>> {
-        let backend = match &config.storage {
-            StorageConfig::Memory => StorageBackend::Memory {
-                object_store: Arc::new(InMemory::new()),
+        let storage = &config.storage;
+        let object_store: Arc<dyn ObjectStore> = Arc::new(
+            AmazonS3Builder::new()
+                .with_endpoint(&storage.endpoint)
+                .with_bucket_name(&storage.bucket)
+                .with_access_key_id(&storage.access_key_id)
+                .with_secret_access_key(&storage.secret_access_key)
+                .with_region(&storage.region)
+                .with_allow_http(storage.allow_http)
+                .with_virtual_hosted_style_request(false)
+                .build()
+                .context("build S3 object store")?,
+        );
+        let backend = StorageBackend::S3 {
+            object_store,
+            prefix: storage.prefix.clone(),
+            cache: SlateDBCacheOptions {
+                root_folder: storage.cache.root_folder.clone(),
+                max_disk_cache_bytes: per_workspace_usize(
+                    storage.cache.max_disk_cache_bytes,
+                    config.max_open_workspaces,
+                ),
+                block_cache_bytes: per_workspace_u64(
+                    storage.cache.block_cache_bytes,
+                    config.max_open_workspaces,
+                ),
+                metadata_cache_bytes: per_workspace_u64(
+                    storage.cache.metadata_cache_bytes,
+                    config.max_open_workspaces,
+                ),
             },
-            StorageConfig::R2 {
-                endpoint,
-                bucket,
-                access_key_id,
-                secret_access_key,
-                region,
-                cache,
-            } => {
-                let object_store: Arc<dyn ObjectStore> = Arc::new(
-                    AmazonS3Builder::new()
-                        .with_endpoint(endpoint)
-                        .with_bucket_name(bucket)
-                        .with_access_key_id(access_key_id)
-                        .with_secret_access_key(secret_access_key)
-                        .with_region(region)
-                        .with_virtual_hosted_style_request(false)
-                        .build()
-                        .context("build R2 object store")?,
-                );
-                StorageBackend::R2 {
-                    object_store,
-                    cache: SlateDBCacheOptions {
-                        root_folder: cache.root_folder.clone(),
-                        max_disk_cache_bytes: per_workspace_usize(
-                            cache.max_disk_cache_bytes,
-                            config.max_open_workspaces,
-                        ),
-                        block_cache_bytes: per_workspace_u64(
-                            cache.block_cache_bytes,
-                            config.max_open_workspaces,
-                        ),
-                        metadata_cache_bytes: per_workspace_u64(
-                            cache.metadata_cache_bytes,
-                            config.max_open_workspaces,
-                        ),
-                    },
-                }
-            }
         };
 
         Ok(Arc::new(Self {
@@ -103,6 +94,17 @@ impl WorkspaceRuntimeManager {
             max_open_workspaces: config.max_open_workspaces,
             state: Mutex::new(ManagerState::default()),
         }))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_in_memory(max_open_workspaces: usize) -> Arc<Self> {
+        Arc::new(Self {
+            backend: StorageBackend::Memory {
+                object_store: Arc::new(InMemory::new()),
+            },
+            max_open_workspaces,
+            state: Mutex::new(ManagerState::default()),
+        })
     }
 
     pub async fn get(
@@ -176,24 +178,31 @@ impl WorkspaceRuntimeManager {
     async fn open_workspace(&self, workspace_id: &str) -> Result<Arc<LixService>> {
         let started = Instant::now();
         let storage = match &self.backend {
+            #[cfg(test)]
             StorageBackend::Memory { object_store } => {
                 SlateDB::open_object_store(workspace_id, Arc::clone(object_store))
                     .context("open in-memory Lix SlateDB storage")?
             }
-            StorageBackend::R2 {
+            StorageBackend::S3 {
                 object_store,
+                prefix,
                 cache,
             } => {
+                let storage_prefix = if prefix.is_empty() {
+                    workspace_id.to_string()
+                } else {
+                    format!("{prefix}/{workspace_id}")
+                };
                 let mut workspace_cache = cache.clone();
                 workspace_cache.root_folder = workspace_cache.root_folder.join(workspace_id);
                 SlateDB::open_object_store_with_options(
-                    workspace_id,
+                    storage_prefix,
                     Arc::clone(object_store),
                     SlateDBObjectStoreOptions {
                         cache: Some(workspace_cache),
                     },
                 )
-                .context("open cached Lix SlateDB storage")?
+                .context("open cached S3-backed Lix SlateDB storage")?
             }
         };
 
@@ -302,13 +311,7 @@ mod tests {
     use super::*;
 
     fn memory_manager(max_open_workspaces: usize) -> Arc<WorkspaceRuntimeManager> {
-        WorkspaceRuntimeManager::new(&Config {
-            bind_addr: "127.0.0.1:0".to_string(),
-            internal_token: None,
-            max_open_workspaces,
-            storage: StorageConfig::Memory,
-        })
-        .expect("create workspace manager")
+        WorkspaceRuntimeManager::new_in_memory(max_open_workspaces)
     }
 
     #[tokio::test]

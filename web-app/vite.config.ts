@@ -53,6 +53,17 @@ export default defineConfig(({ command }) => ({
 				return {
 					vars: {
 						...config.vars,
+						R2_ENDPOINT: process.env.R2_ENDPOINT ?? config.vars?.R2_ENDPOINT,
+						R2_BUCKET: process.env.R2_BUCKET ?? config.vars?.R2_BUCKET,
+						R2_ACCESS_KEY_ID:
+							process.env.R2_ACCESS_KEY_ID ?? config.vars?.R2_ACCESS_KEY_ID,
+						R2_SECRET_ACCESS_KEY:
+							process.env.R2_SECRET_ACCESS_KEY ??
+							config.vars?.R2_SECRET_ACCESS_KEY,
+						R2_REGION: process.env.R2_REGION ?? config.vars?.R2_REGION,
+						S3_PREFIX: process.env.S3_PREFIX ?? config.vars?.S3_PREFIX,
+						S3_ALLOW_HTTP:
+							process.env.S3_ALLOW_HTTP ?? config.vars?.S3_ALLOW_HTTP,
 						SUPABASE_JWKS_URL:
 							process.env.SUPABASE_JWKS_URL ?? config.vars?.SUPABASE_JWKS_URL,
 						SUPABASE_PUBLISHABLE_KEY:
@@ -65,12 +76,6 @@ export default defineConfig(({ command }) => ({
 							process.env.LIXRAY_DEMO_WORKSPACE_IDS ??
 							config.vars?.LIXRAY_DEMO_WORKSPACE_IDS ??
 							"",
-						...((process.env.SLATEDB_STORAGE ?? config.vars?.SLATEDB_STORAGE)
-							? {
-									SLATEDB_STORAGE:
-										process.env.SLATEDB_STORAGE ?? config.vars?.SLATEDB_STORAGE,
-								}
-							: {}),
 						...posthogVars,
 					},
 				};

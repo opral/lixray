@@ -41,7 +41,8 @@ export interface WorkerLixRuntimeEnv {
 	R2_ACCESS_KEY_ID?: string;
 	R2_SECRET_ACCESS_KEY?: string;
 	R2_REGION?: string;
-	SLATEDB_STORAGE?: string;
+	S3_PREFIX?: string;
+	S3_ALLOW_HTTP?: string;
 	SLATEDB_CACHE_DIR?: string;
 	SLATEDB_CACHE_MAX_BYTES?: string;
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
@@ -531,20 +532,21 @@ function asFileServiceError(caught: unknown): FileServiceError {
 
 function containerEnv(env: WorkerLixRuntimeEnv): Record<string, string> {
 	const vars: Record<string, string> = {};
-	for (const name of [
-		"R2_ENDPOINT",
-		"R2_BUCKET",
-		"R2_ACCESS_KEY_ID",
-		"R2_SECRET_ACCESS_KEY",
-		"R2_REGION",
-		"SLATEDB_STORAGE",
-		"SLATEDB_CACHE_DIR",
-		"SLATEDB_CACHE_MAX_BYTES",
-		"SLATEDB_BLOCK_CACHE_BYTES",
-		"SLATEDB_METADATA_CACHE_BYTES",
+	for (const [target, source] of [
+		["S3_ENDPOINT", "R2_ENDPOINT"],
+		["S3_BUCKET", "R2_BUCKET"],
+		["S3_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID"],
+		["S3_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY"],
+		["S3_REGION", "R2_REGION"],
+		["S3_PREFIX", "S3_PREFIX"],
+		["S3_ALLOW_HTTP", "S3_ALLOW_HTTP"],
+		["SLATEDB_CACHE_DIR", "SLATEDB_CACHE_DIR"],
+		["SLATEDB_CACHE_MAX_BYTES", "SLATEDB_CACHE_MAX_BYTES"],
+		["SLATEDB_BLOCK_CACHE_BYTES", "SLATEDB_BLOCK_CACHE_BYTES"],
+		["SLATEDB_METADATA_CACHE_BYTES", "SLATEDB_METADATA_CACHE_BYTES"],
 	] as const) {
-		const value = env[name];
-		if (value !== undefined) vars[name] = value;
+		const value = env[source];
+		if (value !== undefined) vars[target] = value;
 	}
 	return vars;
 }

@@ -14,13 +14,28 @@ const signalExitCodes = {
 
 let databaseStartAttempted = false;
 let databaseStopped = false;
+let storageStartAttempted = false;
+let storageStopped = false;
 let shuttingDown = false;
 let webApp;
 
 process.on("exit", stopDatabase);
+process.on("exit", stopStorage);
 for (const signal of Object.keys(signalExitCodes)) {
 	process.on(signal, () => handleSignal(signal));
 }
+
+storageStartAttempted = true;
+const storage = spawnSync(
+	"docker",
+	["compose", "up", "-d", "minio", "minio-init"],
+	{
+		cwd: repositoryRoot,
+		stdio: "inherit",
+	},
+);
+if (storage.error) throw storage.error;
+if (storage.status !== 0) process.exit(storage.status ?? 1);
 
 databaseStartAttempted = true;
 const database = spawnSync(pnpm, ["--dir", "database", "start"], {
@@ -93,7 +108,15 @@ webApp = spawn(
 		stdio: "inherit",
 		env: {
 			...process.env,
-			SLATEDB_STORAGE: process.env.SLATEDB_STORAGE ?? "memory",
+			R2_ENDPOINT:
+				process.env.R2_ENDPOINT ?? "http://host.docker.internal:9000",
+			R2_BUCKET: process.env.R2_BUCKET ?? "lixray",
+			R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID ?? "lixray",
+			R2_SECRET_ACCESS_KEY:
+				process.env.R2_SECRET_ACCESS_KEY ?? "lixray-local-secret",
+			R2_REGION: process.env.R2_REGION ?? "us-east-1",
+			S3_PREFIX: process.env.S3_PREFIX ?? "local",
+			S3_ALLOW_HTTP: process.env.S3_ALLOW_HTTP ?? "true",
 			SUPABASE_JWKS_URL: `${supabaseUrl.replace(/\/$/, "")}/auth/v1/.well-known/jwks.json`,
 			SUPABASE_PUBLISHABLE_KEY: supabaseKey,
 			SUPABASE_URL: supabaseUrl,
@@ -134,6 +157,15 @@ function stopDatabase() {
 	if (!databaseStartAttempted || databaseStopped) return;
 	databaseStopped = true;
 	spawnSync(pnpm, ["--dir", "database", "stop"], {
+		cwd: repositoryRoot,
+		stdio: "inherit",
+	});
+}
+
+function stopStorage() {
+	if (!storageStartAttempted || storageStopped) return;
+	storageStopped = true;
+	spawnSync("docker", ["compose", "stop", "minio"], {
 		cwd: repositoryRoot,
 		stdio: "inherit",
 	});
