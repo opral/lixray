@@ -189,13 +189,6 @@ async function installPreviewSessionCookie(
 	]);
 }
 
-function requiredRecord(value: unknown): Record<string, unknown> {
-	if (!value || typeof value !== "object" || Array.isArray(value)) {
-		throw new Error("Expected structured MCP output");
-	}
-	return value as Record<string, unknown>;
-}
-
 async function startIsolatedPreview(): Promise<{
 	baseURL: string;
 	close: () => Promise<void>;

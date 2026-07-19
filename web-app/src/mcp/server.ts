@@ -901,7 +901,8 @@ function asStructuredContent(value: unknown): Record<string, unknown> {
 function withoutChangeId<T extends { changeId: string }>(
 	value: T,
 ): Omit<T, "changeId"> {
-	const { changeId: _, ...publicValue } = value;
+	const publicValue = { ...value };
+	Reflect.deleteProperty(publicValue, "changeId");
 	return publicValue;
 }
 
