@@ -30,3 +30,21 @@ read workflows on a warm and switched branch, then compare a branch-stable
 session or read-batch design while preserving observer and cancellation tests.
 
 **Status:** observing; not changed by this PR.
+
+## Root substring path search remains an O(files) scan — observing
+
+**Evidence.** Root `find_files` emits `LOWER(path) LIKE '%q%' ORDER BY path`.
+`EXPLAIN` shows a `Sort` over `TableScan: lix_file` with the `lower(path) LIKE`
+filter and a physical `SortExec → SpecScanExec(lix_file)`: there is no path
+range or indexable prefix, so every file path must be examined for a root
+substring search.
+
+An FTS or trigram index might help at large workspace sizes, but it crosses
+Lix's schema and write-maintenance path, stored-index space/lifecycle, path
+case and substring/token semantics, branch/version behavior, and MCP/client
+contracts. No workload threshold or actual speedup has been measured yet.
+
+**Next measurement.** Measure p50/p95 and `EXPLAIN` for representative root
+searches at 10k and 100k files before choosing a path-search index design.
+
+**Status:** observing; no code change proposed.
