@@ -47,6 +47,9 @@ export interface WorkerLixRuntimeEnv {
 	SLATEDB_CACHE_MAX_BYTES?: string;
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
 	SLATEDB_METADATA_CACHE_BYTES?: string;
+	POSTHOG_PROJECT_TOKEN?: string;
+	POSTHOG_HOST?: string;
+	POSTHOG_ENVIRONMENT?: string;
 }
 
 type AuthorizeWorkspace = (
@@ -544,6 +547,9 @@ function containerEnv(env: WorkerLixRuntimeEnv): Record<string, string> {
 		["SLATEDB_CACHE_MAX_BYTES", "SLATEDB_CACHE_MAX_BYTES"],
 		["SLATEDB_BLOCK_CACHE_BYTES", "SLATEDB_BLOCK_CACHE_BYTES"],
 		["SLATEDB_METADATA_CACHE_BYTES", "SLATEDB_METADATA_CACHE_BYTES"],
+		["POSTHOG_PROJECT_TOKEN", "POSTHOG_PROJECT_TOKEN"],
+		["POSTHOG_HOST", "POSTHOG_HOST"],
+		["POSTHOG_ENVIRONMENT", "POSTHOG_ENVIRONMENT"],
 	] as const) {
 		const value = env[source];
 		if (value !== undefined) vars[target] = value;

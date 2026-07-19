@@ -1,14 +1,12 @@
 use anyhow::Context;
 use lixray::{router, Config, WorkspaceRuntimeManager};
 use tokio::net::TcpListener;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+mod telemetry;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    let trace_provider = telemetry::init();
 
     let config = Config::from_env()?;
     let listener = TcpListener::bind(&config.bind_addr)
@@ -22,10 +20,16 @@ async fn main() -> anyhow::Result<()> {
         internal_auth = internal_token.is_some(),
         "lix workspace service ready"
     );
-    axum::serve(listener, router(manager, internal_token))
+    let result = axum::serve(listener, router(manager, internal_token))
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .context("serve HTTP")
+        .context("serve HTTP");
+    if let Some(provider) = trace_provider {
+        if let Err(error) = provider.shutdown() {
+            tracing::warn!(%error, "failed to flush traces during shutdown");
+        }
+    }
+    result
 }
 
 async fn shutdown_signal() {

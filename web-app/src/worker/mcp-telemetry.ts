@@ -76,9 +76,6 @@ export function createMcpTelemetrySession(
 		if (observation.workspaceId) {
 			properties.workspace_id = observation.workspaceId;
 		}
-		if (observation.toolName === "execute" && observation.sql) {
-			properties.sql = observation.sql;
-		}
 
 		try {
 			const capture = client

@@ -1,6 +1,5 @@
 use crate::Config;
 use anyhow::{Context, Result};
-use lix_engine::Engine;
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
 #[cfg(test)]
 use object_store::memory::InMemory;
@@ -206,11 +205,13 @@ impl WorkspaceRuntimeManager {
             }
         };
 
-        open_or_initialize_engine(storage.clone()).await?;
         let protocol_lix = Arc::new(
-            lix_sdk::open_lix_with_storage(storage)
-                .await
-                .context("open Lix workspace session for the canonical server protocol")?,
+            lix_sdk::open_lix_with_telemetry(
+                lix_sdk::OpenLixOptions::new(storage),
+                Arc::new(lix_sdk::TracingTelemetrySink::new()),
+            )
+            .await
+            .context("open Lix workspace session for the canonical server protocol")?,
         );
         info!(
             workspace_id,
@@ -289,21 +290,6 @@ fn per_workspace_u64(total: u64, workspaces: usize) -> u64 {
 
 fn elapsed_millis(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
-}
-
-async fn open_or_initialize_engine(storage: SlateDB) -> Result<Engine<SlateDB>> {
-    match Engine::new(storage.clone()).await {
-        Ok(engine) => Ok(engine),
-        Err(error) if error.code == "LIX_ERROR_NOT_INITIALIZED" => {
-            Engine::initialize(storage.clone())
-                .await
-                .context("initialize Lix engine")?;
-            Engine::new(storage)
-                .await
-                .context("open initialized Lix engine")
-        }
-        Err(error) => Err(error).context("open Lix engine"),
-    }
 }
 
 #[cfg(test)]

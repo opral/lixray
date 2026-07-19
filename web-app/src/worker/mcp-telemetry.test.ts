@@ -107,7 +107,7 @@ void test("MCP telemetry records error codes without workspace grouping", async 
 	assert.equal(captured[0]?.groups, undefined);
 });
 
-void test("MCP telemetry captures execute SQL without bound parameters", async () => {
+void test("MCP telemetry leaves SQL details to centralized server traces", async () => {
 	const captured: Array<EventMessage> = [];
 	const session = createMcpTelemetrySession(
 		{
@@ -143,9 +143,11 @@ void test("MCP telemetry captures execute SQL without bound parameters", async (
 		oauth_client_id: "oauth-client-456",
 		environment: "production",
 		workspace_id: "11111111-1111-4111-8111-111111111111",
-		sql: "SELECT value FROM lix_key_value WHERE key = $1",
 	});
-	assert.doesNotMatch(JSON.stringify(captured), /private-bound-value|params/);
+	assert.doesNotMatch(
+		JSON.stringify(captured),
+		/private-bound-value|SELECT value|sql|params/,
+	);
 });
 
 void test("MCP telemetry is disabled without production configuration", () => {

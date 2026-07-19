@@ -657,6 +657,11 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 	const response = await handleRequest(
 		request,
 		env({
+			extra: {
+				POSTHOG_PROJECT_TOKEN: "project-token",
+				POSTHOG_HOST: "https://posthog.example",
+				POSTHOG_ENVIRONMENT: "production",
+			},
 			getByName: (name) => {
 				assert.equal(name, WORKSPACE_A);
 				return {
@@ -701,6 +706,9 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 					SLATEDB_CACHE_MAX_BYTES: "2147483648",
 					SLATEDB_BLOCK_CACHE_BYTES: "134217728",
 					SLATEDB_METADATA_CACHE_BYTES: "33554432",
+					POSTHOG_PROJECT_TOKEN: "project-token",
+					POSTHOG_HOST: "https://posthog.example",
+					POSTHOG_ENVIRONMENT: "production",
 				},
 			},
 		},
