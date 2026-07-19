@@ -211,40 +211,37 @@ export class LixFileService {
 		const directoryFilter =
 			directoryId === null ? "parent_id IS NULL" : "parent_id = $1";
 		const params = directoryId === null ? [] : [text(directoryId)];
-		const [directories, files] = await Promise.all([
-			this.client.execute(workspaceId, {
-				branchId,
-				sql: `SELECT path, name, lixcol_change_id, lixcol_updated_at FROM lix_directory WHERE ${directoryFilter} ORDER BY name`,
-				params,
-			}),
-			this.client.execute(workspaceId, {
-				branchId,
-				sql: `SELECT path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE ${directoryId === null ? "directory_id IS NULL" : "directory_id = $1"} ORDER BY name`,
-				params,
-			}),
-		]);
+		const fileFilter =
+			directoryId === null ? "directory_id IS NULL" : "directory_id = $1";
+		const result = await this.client.execute(workspaceId, {
+			branchId,
+			sql: `SELECT entry_kind, path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM (
+				SELECT 0 AS entry_kind, path, name, lix_json('null') AS lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_directory WHERE ${directoryFilter}
+				UNION ALL
+				SELECT 1 AS entry_kind, path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE ${fileFilter}
+			) ORDER BY entry_kind, name`,
+			params,
+		});
 
-		return [
-			...directories.rows.map(
-				(row): EntrySummary => ({
-					kind: "directory",
-					path: asText(row[0]),
-					name: asText(row[1]),
-					revision: asText(row[2]),
-					updatedAt: asText(row[3]),
-				}),
-			),
-			...files.rows.map(
-				(row): EntrySummary => ({
-					kind: "file",
-					path: asText(row[0]),
-					name: asText(row[1]),
-					size: sizeFromMetadata(row[2]),
-					revision: asText(row[3]),
-					updatedAt: asText(row[4]),
-				}),
-			),
-		];
+		return result.rows.map((row): EntrySummary => {
+			const kind = asEntryKind(row[0]);
+			return kind === "directory"
+				? {
+						kind,
+						path: asText(row[1]),
+						name: asText(row[2]),
+						revision: asText(row[4]),
+						updatedAt: asText(row[5]),
+					}
+				: {
+						kind,
+						path: asText(row[1]),
+						name: asText(row[2]),
+						size: sizeFromMetadata(row[3]),
+						revision: asText(row[4]),
+						updatedAt: asText(row[5]),
+					};
+		});
 	}
 
 	async findFiles(
@@ -814,6 +811,17 @@ function asText(value: WireValue | undefined): string {
 		);
 	}
 	return value.value;
+}
+
+function asEntryKind(value: WireValue | undefined): EntryKind {
+	if (value?.kind === "int") {
+		if (value.value === 0) return "directory";
+		if (value.value === 1) return "file";
+	}
+	throw new FileServiceError(
+		"upstream_error",
+		"Expected a directory or file entry kind from Lix.",
+	);
 }
 
 function asBlob(value: WireValue | undefined): Uint8Array {
