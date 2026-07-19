@@ -12,9 +12,9 @@ COPY lix-server/Cargo.toml lix-server/Cargo.lock ./lix-server/
 COPY lix-server/src ./lix-server/src
 
 WORKDIR /app/lix-server
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-	--mount=type=cache,target=/usr/local/cargo/git \
-	--mount=type=cache,target=/app/lix-server/target \
+RUN --mount=type=cache,id=lixray-cargo-registry,target=/usr/local/cargo/registry \
+	--mount=type=cache,id=lixray-cargo-git,target=/usr/local/cargo/git \
+	--mount=type=cache,id=lixray-cargo-target,target=/app/lix-server/target \
 	cargo build --release --locked \
 	&& mkdir -p /app/dist \
 	&& cp /app/lix-server/target/release/lixray /app/dist/lixray
