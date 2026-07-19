@@ -44,17 +44,19 @@ await requireDirectory(
 await rm(sdkDist, { recursive: true, force: true });
 await cp(releaseDist, sdkDist, { recursive: true });
 
-const toolchainEnv = await vendoredLixToolchainEnv();
-const wasm = spawnSync(
-	process.execPath,
-	[join(sdkRoot, "scripts", "build-wasm.js")],
-	{
-		env: toolchainEnv,
-		stdio: "inherit",
-	},
-);
-if (wasm.error) throw wasm.error;
-if (wasm.status !== 0) process.exit(wasm.status ?? 1);
+if (process.env.LIXRAY_SKIP_VENDORED_LIX_WASM !== "1") {
+	const toolchainEnv = await vendoredLixToolchainEnv();
+	const wasm = spawnSync(
+		process.execPath,
+		[join(sdkRoot, "scripts", "build-wasm.js")],
+		{
+			env: toolchainEnv,
+			stdio: "inherit",
+		},
+	);
+	if (wasm.error) throw wasm.error;
+	if (wasm.status !== 0) process.exit(wasm.status ?? 1);
+}
 
 const compiled = spawnSync(
 	process.execPath,
