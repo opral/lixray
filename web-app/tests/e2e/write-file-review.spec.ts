@@ -106,17 +106,22 @@ test("an MCP-created file immediately opens in review mode", async ({
 		expect(readBack.structuredContent).toEqual(
 			expect.objectContaining({ path: `/${fileName}`, content }),
 		);
+		const readChangeId = requiredChangeId(readBack.structuredContent);
 		const edited = await client.callTool({
 			name: "edit_file",
 			arguments: {
 				workspace_ref: "@acme/launch-q3",
 				path: `/${fileName}`,
+				expected_change_id: readChangeId,
 				edits: [
 					{ old_text: "Created through MCP", new_text: "Edited through MCP" },
 				],
 			},
 		});
 		expect(edited.isError, JSON.stringify(edited)).not.toBe(true);
+		const editedChangeId = requiredChangeId(
+			requiredRecord(edited.structuredContent).file,
+		);
 		const movedPath = `/moved-${fileName}`;
 		const moved = await client.callTool({
 			name: "move_entry",
@@ -124,14 +129,19 @@ test("an MCP-created file immediately opens in review mode", async ({
 				workspace_ref: "@acme/launch-q3",
 				source_path: `/${fileName}`,
 				destination_path: movedPath,
+				expected_change_id: editedChangeId,
 			},
 		});
 		expect(moved.isError, JSON.stringify(moved)).not.toBe(true);
+		const movedChangeId = requiredChangeId(
+			requiredRecord(moved.structuredContent).entry,
+		);
 		const deleted = await client.callTool({
 			name: "delete_entry",
 			arguments: {
 				workspace_ref: "@acme/launch-q3",
 				path: movedPath,
+				expected_change_id: movedChangeId,
 			},
 		});
 		expect(deleted.isError, JSON.stringify(deleted)).not.toBe(true);
@@ -187,6 +197,21 @@ async function installPreviewSessionCookie(
 			secure: url.protocol === "https:",
 		},
 	]);
+}
+
+function requiredRecord(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		throw new Error("Expected structured MCP output");
+	}
+	return value as Record<string, unknown>;
+}
+
+function requiredChangeId(value: unknown): string {
+	const changeId = requiredRecord(value).changeId;
+	if (typeof changeId !== "string") {
+		throw new Error("Expected a file changeId");
+	}
+	return changeId;
 }
 
 async function startIsolatedPreview(): Promise<{
