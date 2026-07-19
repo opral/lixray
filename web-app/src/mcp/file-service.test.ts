@@ -205,6 +205,44 @@ void test("list_directory reuses the resolved directory id in one ordered read",
 	assert.match(request.sql, /ORDER BY entry_kind, name$/);
 });
 
+void test("entry existence checks use one selective union read", async () => {
+	const requests: Array<ExecuteRequest> = [];
+	const service = new LixFileService(
+		testRuntimeClient((request) => {
+			requests.push(request);
+			return result([[textValue("file:/taken")]]);
+		}),
+	);
+
+	await assert.rejects(
+		service.createDirectory(WORKSPACE_ID, BRANCH_ID, "/taken/"),
+		hasCode("already_exists"),
+	);
+
+	assert.equal(requests.length, 1);
+	const [request] = requests;
+	assert.ok(request);
+	assert.equal(
+		request.sql,
+		"SELECT id FROM lix_file WHERE path = $1 UNION ALL SELECT id FROM lix_directory WHERE path = $2",
+	);
+	assert.deepEqual(request.params, [
+		{ kind: "text", value: "/taken" },
+		{ kind: "text", value: "/taken/" },
+	]);
+});
+
+void test("entry existence detects a directory at a file path", async () => {
+	const client = new MemoryLixRuntimeClient();
+	client.addDirectory("/taken/", "rev-1");
+	const service = new LixFileService(client);
+
+	await assert.rejects(
+		service.writeFile(WORKSPACE_ID, BRANCH_ID, "/taken", "content"),
+		hasCode("already_exists"),
+	);
+});
+
 void test("read_file validates UTF-8 and paginates by line with a revision", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addFile(
@@ -671,13 +709,16 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 					: [],
 			);
 		}
-		if (sql === "SELECT id FROM lix_file WHERE path = $1") {
+		if (
+			sql ===
+			"SELECT id FROM lix_file WHERE path = $1 UNION ALL SELECT id FROM lix_directory WHERE path = $2"
+		) {
 			const path = textParam(params[0]);
-			return result(this.files.has(path) ? [[textValue(`file:${path}`)]] : []);
-		}
-		if (sql === "SELECT id FROM lix_directory WHERE path = $1") {
-			const directory = this.directories.get(textParam(params[0]));
-			return result(directory ? [[textValue(directory.id)]] : []);
+			const directory = this.directories.get(textParam(params[1]));
+			return result([
+				...(this.files.has(path) ? [[textValue(`file:${path}`)]] : []),
+				...(directory ? [[textValue(directory.id)]] : []),
+			]);
 		}
 		if (
 			sql ===
