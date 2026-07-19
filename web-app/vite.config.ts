@@ -9,9 +9,11 @@ const workerTarget = process.env.LIXRAY_WORKER_TARGET ?? "production";
 const workerConfigPath =
 	workerTarget === "preview"
 		? "./wrangler.preview.jsonc"
-		: workerTarget === "e2e"
-			? "./wrangler.e2e.jsonc"
-			: "./wrangler.jsonc";
+		: workerTarget === "railway"
+			? "./wrangler.railway.jsonc"
+			: workerTarget === "e2e"
+				? "./wrangler.e2e.jsonc"
+				: "./wrangler.jsonc";
 
 export default defineConfig(({ command }) => ({
 	resolve: {

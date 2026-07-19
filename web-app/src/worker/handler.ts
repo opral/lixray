@@ -57,6 +57,8 @@ export interface WorkerEnv {
 	SLATEDB_METADATA_CACHE_BYTES?: string;
 	LIXRAY_DEMO?: string;
 	LIXRAY_DEMO_WORKSPACE_IDS?: string;
+	LIXRAY_WORKSPACE_SERVICE_URL?: string;
+	LIXRAY_INTERNAL_TOKEN?: string;
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
