@@ -93,7 +93,7 @@ export interface EntrySummary {
 	kind: EntryKind;
 	path: string;
 	name: string;
-	revision: string;
+	changeId: string;
 	updatedAt: string;
 	size?: number | null;
 }
@@ -102,7 +102,7 @@ export interface FileSnapshot {
 	path: string;
 	content: string;
 	size: number;
-	revision: string;
+	changeId: string;
 	updatedAt: string;
 	totalLines: number;
 	startLine: number;
@@ -230,7 +230,7 @@ export class LixFileService {
 						kind,
 						path: asText(row[1]),
 						name: asText(row[2]),
-						revision: asText(row[4]),
+						changeId: asText(row[4]),
 						updatedAt: asText(row[5]),
 					}
 				: {
@@ -238,7 +238,7 @@ export class LixFileService {
 						path: asText(row[1]),
 						name: asText(row[2]),
 						size: sizeFromMetadata(row[3]),
-						revision: asText(row[4]),
+						changeId: asText(row[4]),
 						updatedAt: asText(row[5]),
 					};
 		});
@@ -278,7 +278,7 @@ export class LixFileService {
 				path: asText(row[0]),
 				name: asText(row[1]),
 				size: sizeFromMetadata(row[2]),
-				revision: asText(row[3]),
+				changeId: asText(row[3]),
 				updatedAt: asText(row[4]),
 			}),
 		);
@@ -306,7 +306,7 @@ export class LixFileService {
 			path,
 			content: selected.join("\n"),
 			size: file.size,
-			revision: file.revision,
+			changeId: file.changeId,
 			updatedAt: file.updatedAt,
 			totalLines: lines.length,
 			startLine: selected.length === 0 ? 0 : startIndex + 1,
@@ -320,20 +320,20 @@ export class LixFileService {
 		branchId: string,
 		rawPath: string,
 		content: string,
-		expectedRevision?: string,
+		expectedChangeId?: string,
 	): Promise<EntrySummary> {
 		const path = filePath(rawPath);
 		const bytes = utf8Bytes(content);
 		assertTextFileSize(bytes.length);
 
 		if (
-			expectedRevision === undefined &&
+			expectedChangeId === undefined &&
 			(await this.entryExists(workspaceId, branchId, path))
 		) {
 			try {
-				expectedRevision = (
+				expectedChangeId = (
 					await this.loadEntrySummary(workspaceId, branchId, path, "file")
-				).revision;
+				).changeId;
 			} catch (caught) {
 				if (caught instanceof FileServiceError && caught.code === "not_found") {
 					throw new FileServiceError(
@@ -345,7 +345,7 @@ export class LixFileService {
 			}
 		}
 
-		if (expectedRevision === undefined) {
+		if (expectedChangeId === undefined) {
 			await this.withAgentReview(workspaceId, branchId, () =>
 				this.client.execute(workspaceId, {
 					branchId,
@@ -368,7 +368,7 @@ export class LixFileService {
 								blob(bytes),
 								{ kind: "json", value: { size: bytes.length } },
 								text(path),
-								text(expectedRevision),
+								text(expectedChangeId),
 							],
 						},
 					],
@@ -444,7 +444,7 @@ export class LixFileService {
 		workspaceId: string,
 		branchId: string,
 		rawPath: string,
-		expectedRevision: string | undefined,
+		expectedChangeId: string | undefined,
 		edits: Array<{ oldText: string; newText: string; replaceAll?: boolean }>,
 	): Promise<EntrySummary> {
 		const path = filePath(rawPath);
@@ -455,10 +455,10 @@ export class LixFileService {
 			);
 		}
 		const file = await this.loadFile(workspaceId, branchId, path);
-		if (expectedRevision !== undefined && file.revision !== expectedRevision) {
+		if (expectedChangeId !== undefined && file.changeId !== expectedChangeId) {
 			throw conflict(path);
 		}
-		const revision = expectedRevision ?? file.revision;
+		const changeId = expectedChangeId ?? file.changeId;
 		let next = file.content;
 		for (const edit of edits) {
 			if (!edit.oldText) {
@@ -485,7 +485,7 @@ export class LixFileService {
 				? next.split(edit.oldText).join(edit.newText)
 				: next.replace(edit.oldText, () => edit.newText);
 		}
-		return this.writeFile(workspaceId, branchId, path, next, revision);
+		return this.writeFile(workspaceId, branchId, path, next, changeId);
 	}
 
 	async createDirectory(
@@ -513,7 +513,7 @@ export class LixFileService {
 		branchId: string,
 		rawSourcePath: string,
 		rawDestinationPath: string,
-		expectedRevision: string | undefined,
+		expectedChangeId: string | undefined,
 	): Promise<EntrySummary> {
 		const kind: EntryKind = rawSourcePath.endsWith("/") ? "directory" : "file";
 		const source = entryPath(rawSourcePath, kind, false);
@@ -536,17 +536,17 @@ export class LixFileService {
 				`An entry already exists at ${destination}.`,
 			);
 		}
-		const revision =
-			expectedRevision ??
+		const changeId =
+			expectedChangeId ??
 			(await this.loadEntrySummary(workspaceId, branchId, source, kind))
-				.revision;
+				.changeId;
 		const table = kind === "file" ? "lix_file" : "lix_directory";
 		const response = await this.client.executeBatch(workspaceId, {
 			branchId,
 			statements: [
 				{
 					sql: `UPDATE ${table} SET path = $1 WHERE path = $2 AND lixcol_change_id = $3`,
-					params: [text(destination), text(source), text(revision)],
+					params: [text(destination), text(source), text(changeId)],
 				},
 			],
 		});
@@ -558,7 +558,7 @@ export class LixFileService {
 		workspaceId: string,
 		branchId: string,
 		rawPath: string,
-		expectedRevision: string | undefined,
+		expectedChangeId: string | undefined,
 		recursive = false,
 	): Promise<{ path: string; deleted: true }> {
 		const kind: EntryKind = rawPath.endsWith("/") ? "directory" : "file";
@@ -569,16 +569,16 @@ export class LixFileService {
 				"Directory deletion requires recursive=true because it removes the entire subtree.",
 			);
 		}
-		const revision =
-			expectedRevision ??
-			(await this.loadEntrySummary(workspaceId, branchId, path, kind)).revision;
+		const changeId =
+			expectedChangeId ??
+			(await this.loadEntrySummary(workspaceId, branchId, path, kind)).changeId;
 		const table = kind === "file" ? "lix_file" : "lix_directory";
 		const response = await this.client.executeBatch(workspaceId, {
 			branchId,
 			statements: [
 				{
 					sql: `DELETE FROM ${table} WHERE path = $1 AND lixcol_change_id = $2`,
-					params: [text(path), text(revision)],
+					params: [text(path), text(changeId)],
 				},
 			],
 		});
@@ -611,7 +611,7 @@ export class LixFileService {
 	): Promise<{
 		content: string;
 		size: number;
-		revision: string;
+		changeId: string;
 		updatedAt: string;
 	}> {
 		const result = await this.client.execute(workspaceId, {
@@ -637,7 +637,7 @@ export class LixFileService {
 		return {
 			content,
 			size: bytes.length,
-			revision: asText(row[1]),
+			changeId: asText(row[1]),
 			updatedAt: asText(row[2]),
 		};
 	}
@@ -663,7 +663,7 @@ export class LixFileService {
 			kind,
 			path: asText(row[0]),
 			name: asText(row[1]),
-			revision: asText(row[2]),
+			changeId: asText(row[2]),
 			updatedAt: asText(row[3]),
 			...(kind === "file" ? { size: sizeFromMetadata(row[4]) } : {}),
 		};

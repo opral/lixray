@@ -243,19 +243,15 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				  }
 				| undefined;
 			assert.ok(inputSchema, `${name} should expose an input schema`);
+			assert.equal(inputSchema.properties?.expected_revision, undefined);
+			const changeIdSchema = inputSchema.properties?.expected_change_id;
+			assert.ok(changeIdSchema, `${name} should expose expected_change_id`);
+			assert.equal(changeIdSchema.format, "uuid", name);
+			assert.match(changeIdSchema.description ?? "", /change ID/);
 			assert.equal(
-				inputSchema.required?.includes("expected_revision") ?? false,
+				inputSchema.required?.includes("expected_change_id") ?? false,
 				false,
-				`${name} should not require expected_revision`,
-			);
-			const revisionSchema = inputSchema.properties?.expected_revision;
-			assert.ok(revisionSchema, `${name} should expose expected_revision`);
-			assert.equal(revisionSchema.format, "uuid", name);
-			assert.equal(revisionSchema.maxLength, undefined, name);
-			assert.match(
-				revisionSchema.description ?? "",
-				/Iff provided, .+ succeeds only if it matches\./,
-				name,
+				`${name} should not require expected_change_id`,
 			);
 		}
 		for (const name of [
@@ -271,14 +267,15 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				(tool) => tool.name === name,
 			)?.outputSchema;
 			assert.ok(outputSchema, `${name} should expose an output schema`);
-			const revisionSchemas = findPropertySchemas(outputSchema, "revision");
-			assert.ok(
-				revisionSchemas.length > 0,
-				`${name} should describe its returned revision`,
+			assert.deepEqual(
+				findPropertySchemas(outputSchema, "revision"),
+				[],
+				`${name} should not return a revision`,
 			);
-			for (const revisionSchema of revisionSchemas) {
-				assert.equal(revisionSchema.format, "uuid", name);
-				assert.equal(revisionSchema.maxLength, undefined, name);
+			const changeIdSchemas = findPropertySchemas(outputSchema, "changeId");
+			assert.ok(changeIdSchemas.length > 0, `${name} should return a changeId`);
+			for (const changeIdSchema of changeIdSchemas) {
+				assert.equal(changeIdSchema.format, "uuid", name);
 			}
 		}
 		const defaultedInputs = new Map([
@@ -406,7 +403,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			path: "/scratch/samuel's-todos.md",
 			content: "todo",
 			size: 4,
-			revision: COMMIT_ID,
+			changeId: COMMIT_ID,
 			updatedAt: "2026-07-16T12:00:00.000Z",
 			totalLines: 1,
 			startLine: 1,

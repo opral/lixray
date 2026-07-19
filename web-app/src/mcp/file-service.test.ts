@@ -122,7 +122,7 @@ void test("list_directory maps one ordered root read", async () => {
 			kind: "directory",
 			path: "/docs/",
 			name: "docs",
-			revision: "dir-rev",
+			changeId: "dir-rev",
 			updatedAt: UPDATED_AT,
 		},
 		{
@@ -130,7 +130,7 @@ void test("list_directory maps one ordered root read", async () => {
 			path: "/README.md",
 			name: "README.md",
 			size: 42,
-			revision: "file-rev",
+			changeId: "file-rev",
 			updatedAt: UPDATED_AT,
 		},
 	]);
@@ -182,7 +182,7 @@ void test("list_directory reuses the resolved directory id in one ordered read",
 				kind: "directory",
 				path: "/docs/guides/",
 				name: "guides",
-				revision: "guides-rev",
+				changeId: "guides-rev",
 				updatedAt: UPDATED_AT,
 			},
 			{
@@ -190,7 +190,7 @@ void test("list_directory reuses the resolved directory id in one ordered read",
 				path: "/docs/readme.md",
 				name: "readme.md",
 				size: 7,
-				revision: "readme-rev",
+				changeId: "readme-rev",
 				updatedAt: UPDATED_AT,
 			},
 		],
@@ -243,7 +243,7 @@ void test("entry existence detects a directory at a file path", async () => {
 	);
 });
 
-void test("read_file validates UTF-8 and paginates by line with a revision", async () => {
+void test("read_file validates UTF-8 and paginates by line with a change ID", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addFile(
 		"/notes.txt",
@@ -263,7 +263,7 @@ void test("read_file validates UTF-8 and paginates by line with a revision", asy
 		path: "/notes.txt",
 		content: "two",
 		size: 13,
-		revision: "rev-7",
+		changeId: "rev-7",
 		updatedAt: "2026-07-10T12:00:00.000Z",
 		totalLines: 3,
 		startLine: 2,
@@ -302,7 +302,7 @@ void test("text file reads and writes enforce the one MiB byte limit", async () 
 	);
 });
 
-void test("write_file overwrites the current file without a revision and compare-and-swaps with one", async () => {
+void test("write_file overwrites the current file and supports internal compare-and-swap", async () => {
 	const client = new MemoryLixRuntimeClient();
 	const service = new LixFileService(client);
 
@@ -313,14 +313,14 @@ void test("write_file overwrites the current file without a revision and compare
 		"first",
 	);
 	assert.equal(created.path, "/new.txt");
-	assert.equal(created.revision, "rev-1");
+	assert.equal(created.changeId, "rev-1");
 	const overwritten = await service.writeFile(
 		WORKSPACE_ID,
 		BRANCH_ID,
 		"/new.txt",
 		"overwrite",
 	);
-	assert.equal(overwritten.revision, "rev-2");
+	assert.equal(overwritten.changeId, "rev-2");
 	assert.equal(client.fileText("/new.txt"), "overwrite");
 	await assert.rejects(
 		service.writeFile(
@@ -338,9 +338,9 @@ void test("write_file overwrites the current file without a revision and compare
 		BRANCH_ID,
 		"/new.txt",
 		"second",
-		overwritten.revision,
+		overwritten.changeId,
 	);
-	assert.equal(replaced.revision, "rev-3");
+	assert.equal(replaced.changeId, "rev-3");
 	assert.equal(client.fileText("/new.txt"), "second");
 });
 
@@ -393,17 +393,17 @@ void test("edit_file requires unique exact matches unless replace_all is explici
 			{ oldText: "blue", newText: "cyan" },
 		],
 	);
-	assert.equal(edited.revision, "rev-4");
+	assert.equal(edited.changeId, "rev-4");
 	assert.equal(client.fileText("/edit.txt"), "green green cyan");
 
-	const editedWithoutRevision = await service.editFile(
+	const editedWithoutChangeId = await service.editFile(
 		WORKSPACE_ID,
 		BRANCH_ID,
 		"/edit.txt",
 		undefined,
 		[{ oldText: "cyan", newText: "blue" }],
 	);
-	assert.equal(editedWithoutRevision.revision, "rev-5");
+	assert.equal(editedWithoutChangeId.changeId, "rev-5");
 	assert.equal(client.fileText("/edit.txt"), "green green blue");
 });
 
@@ -507,7 +507,7 @@ void test("agent reviews discard legacy ranges after the Atelier hard cut", asyn
 	assert.equal(ranges[0]?.agent, undefined);
 });
 
-void test("move_entry never overwrites and accepts an omitted source revision", async () => {
+void test("move_entry never overwrites and accepts an omitted source change ID", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addFile("/source.txt", new TextEncoder().encode("source"), "rev-4");
 	client.addFile("/taken.txt", new TextEncoder().encode("taken"), "rev-2");
@@ -546,7 +546,7 @@ void test("move_entry never overwrites and accepts an omitted source revision", 
 	assert.equal(client.hasFile("/source.txt"), false);
 });
 
-void test("directory deletion requires recursive confirmation and accepts an omitted revision", async () => {
+void test("directory deletion requires recursive confirmation and accepts an omitted change ID", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addDirectory("/docs/", "rev-9");
 	client.addFile("/docs/readme.md", new TextEncoder().encode("hello"), "rev-1");
@@ -573,8 +573,8 @@ void test("directory deletion requires recursive confirmation and accepts an omi
 	assert.equal(client.hasFile("/docs/readme.md"), false);
 });
 
-type StoredFile = { bytes: Uint8Array; revision: string };
-type StoredDirectory = { revision: string; id: string };
+type StoredFile = { bytes: Uint8Array; changeId: string };
+type StoredDirectory = { changeId: string; id: string };
 
 function testRuntimeClient(
 	execute: (
@@ -605,21 +605,21 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 	];
 	private readonly files = new Map<string, StoredFile>();
 	private readonly directories = new Map<string, StoredDirectory>();
-	private revisionCounter = 0;
+	private changeCounter = 0;
 	private reviewStore: { ranges: Array<Record<string, unknown>> } | undefined;
 	private readonly normalizedReviewRanges = new Map<
 		string,
 		Record<string, unknown>
 	>();
 
-	addFile(path: string, bytes: Uint8Array, revision: string): void {
-		this.files.set(path, { bytes, revision });
-		this.observeRevision(revision);
+	addFile(path: string, bytes: Uint8Array, changeId: string): void {
+		this.files.set(path, { bytes, changeId });
+		this.observeChangeId(changeId);
 	}
 
-	addDirectory(path: string, revision: string): void {
-		this.directories.set(path, { revision, id: `dir:${path}` });
-		this.observeRevision(revision);
+	addDirectory(path: string, changeId: string): void {
+		this.directories.set(path, { changeId, id: `dir:${path}` });
+		this.observeChangeId(changeId);
 	}
 
 	hasFile(path: string): boolean {
@@ -654,7 +654,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 					id: BRANCH_ID,
 					name: "main",
 					hidden: false,
-					commitId: `commit-${this.revisionCounter}`,
+					commitId: `commit-${this.changeCounter}`,
 				},
 			],
 			currentBranchId: BRANCH_ID,
@@ -702,7 +702,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 					? [
 							[
 								blobValue(file.bytes),
-								textValue(file.revision),
+								textValue(file.changeId),
 								textValue(UPDATED_AT),
 							],
 						]
@@ -728,7 +728,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 			if (this.files.has(path)) throw new Error("duplicate path");
 			this.files.set(path, {
 				bytes: blobParam(params[1]),
-				revision: this.nextRevision(),
+				changeId: this.nextChangeId(),
 			});
 			return result([], 1);
 		}
@@ -739,16 +739,16 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 			const path = textParam(params[2]);
 			const expected = textParam(params[3]);
 			const file = this.files.get(path);
-			if (!file || file.revision !== expected) return result([], 0);
+			if (!file || file.changeId !== expected) return result([], 0);
 			file.bytes = blobParam(params[0]);
-			file.revision = this.nextRevision();
+			file.changeId = this.nextChangeId();
 			return result([], 1);
 		}
 		if (sql === "INSERT INTO lix_directory (path) VALUES ($1)") {
 			const path = textParam(params[0]);
 			this.directories.set(path, {
 				id: `dir:${path}`,
-				revision: this.nextRevision(),
+				changeId: this.nextChangeId(),
 			});
 			return result([], 1);
 		}
@@ -785,7 +785,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 					textValue(path),
 					textValue(nameFromPath(path)),
 					{ kind: "json" as const, value: { size: file.bytes.length } },
-					textValue(file.revision),
+					textValue(file.changeId),
 					textValue(UPDATED_AT),
 				]);
 			return result(rows);
@@ -833,7 +833,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		const row: Array<WireValue> = [
 			textValue(path),
 			textValue(nameFromPath(path)),
-			textValue(entry.revision),
+			textValue(entry.changeId),
 			textValue(UPDATED_AT),
 		];
 		if (includeMetadata) {
@@ -853,7 +853,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		const source = textParam(params[1]);
 		const expected = textParam(params[2]);
 		const entry = entries.get(source);
-		if (!entry || entry.revision !== expected) return result([], 0);
+		if (!entry || entry.changeId !== expected) return result([], 0);
 		if (
 			(params[3] && this.files.has(textParam(params[3]))) ||
 			(params[4] && this.directories.has(textParam(params[4])))
@@ -861,7 +861,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 			return result([], 0);
 		}
 		entries.delete(source);
-		entries.set(destination, { ...entry, revision: this.nextRevision() });
+		entries.set(destination, { ...entry, changeId: this.nextChangeId() });
 		return result([], 1);
 	}
 
@@ -873,7 +873,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		const path = textParam(params[0]);
 		const expected = textParam(params[1]);
 		const entry = entries.get(path);
-		if (!entry || entry.revision !== expected) return result([], 0);
+		if (!entry || entry.changeId !== expected) return result([], 0);
 		entries.delete(path);
 		if (recursive) {
 			for (const filePath of this.files.keys()) {
@@ -887,15 +887,15 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		return result([], 1);
 	}
 
-	private observeRevision(revision: string): void {
-		const match = /^rev-(\d+)$/.exec(revision);
+	private observeChangeId(changeId: string): void {
+		const match = /^rev-(\d+)$/.exec(changeId);
 		if (match)
-			this.revisionCounter = Math.max(this.revisionCounter, Number(match[1]));
+			this.changeCounter = Math.max(this.changeCounter, Number(match[1]));
 	}
 
-	private nextRevision(): string {
-		this.revisionCounter += 1;
-		return `rev-${this.revisionCounter}`;
+	private nextChangeId(): string {
+		this.changeCounter += 1;
+		return `rev-${this.changeCounter}`;
 	}
 }
 

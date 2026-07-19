@@ -106,20 +106,20 @@ test("an MCP-created file immediately opens in review mode", async ({
 		expect(readBack.structuredContent).toEqual(
 			expect.objectContaining({ path: `/${fileName}`, content }),
 		);
-		const readRevision = requiredRevision(readBack.structuredContent);
+		const readChangeId = requiredChangeId(readBack.structuredContent);
 		const edited = await client.callTool({
 			name: "edit_file",
 			arguments: {
 				workspace_ref: "@acme/launch-q3",
 				path: `/${fileName}`,
-				expected_revision: readRevision,
+				expected_change_id: readChangeId,
 				edits: [
 					{ old_text: "Created through MCP", new_text: "Edited through MCP" },
 				],
 			},
 		});
 		expect(edited.isError, JSON.stringify(edited)).not.toBe(true);
-		const editedRevision = requiredRevision(
+		const editedChangeId = requiredChangeId(
 			requiredRecord(edited.structuredContent).file,
 		);
 		const movedPath = `/moved-${fileName}`;
@@ -129,11 +129,11 @@ test("an MCP-created file immediately opens in review mode", async ({
 				workspace_ref: "@acme/launch-q3",
 				source_path: `/${fileName}`,
 				destination_path: movedPath,
-				expected_revision: editedRevision,
+				expected_change_id: editedChangeId,
 			},
 		});
 		expect(moved.isError, JSON.stringify(moved)).not.toBe(true);
-		const movedRevision = requiredRevision(
+		const movedChangeId = requiredChangeId(
 			requiredRecord(moved.structuredContent).entry,
 		);
 		const deleted = await client.callTool({
@@ -141,7 +141,7 @@ test("an MCP-created file immediately opens in review mode", async ({
 			arguments: {
 				workspace_ref: "@acme/launch-q3",
 				path: movedPath,
-				expected_revision: movedRevision,
+				expected_change_id: movedChangeId,
 			},
 		});
 		expect(deleted.isError, JSON.stringify(deleted)).not.toBe(true);
@@ -206,12 +206,12 @@ function requiredRecord(value: unknown): Record<string, unknown> {
 	return value as Record<string, unknown>;
 }
 
-function requiredRevision(value: unknown): string {
-	const revision = requiredRecord(value).revision;
-	if (typeof revision !== "string") {
-		throw new Error("Expected a file revision");
+function requiredChangeId(value: unknown): string {
+	const changeId = requiredRecord(value).changeId;
+	if (typeof changeId !== "string") {
+		throw new Error("Expected a file changeId");
 	}
-	return revision;
+	return changeId;
 }
 
 async function startIsolatedPreview(): Promise<{
