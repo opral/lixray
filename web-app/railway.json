@@ -1,0 +1,29 @@
+{
+	"$schema": "https://railway.com/railway.schema.json",
+	"build": {
+		"builder": "DOCKERFILE",
+		"dockerfilePath": "web-app/Dockerfile",
+		"watchPatterns": [
+			"web-app/**",
+			"vendor/atelier",
+			"vendor/atelier/**",
+			"vendor/lix",
+			"vendor/lix/**",
+			"package.json",
+			"pnpm-lock.yaml",
+			"pnpm-workspace.yaml",
+			"scripts/**",
+			".gitmodules"
+		]
+	},
+	"deploy": {
+		"numReplicas": 1,
+		"sleepApplication": true,
+		"healthcheckPath": "/healthz",
+		"healthcheckTimeout": 300,
+		"restartPolicyType": "ON_FAILURE",
+		"restartPolicyMaxRetries": 10,
+		"overlapSeconds": 0,
+		"drainingSeconds": 30
+	}
+}

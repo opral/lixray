@@ -9,6 +9,7 @@ const baseUrl = (process.env.LIXRAY_PERF_URL ?? "http://127.0.0.1:8080").replace
   /\/$/,
   "",
 );
+const internalToken = process.env.LIXRAY_INTERNAL_TOKEN?.trim();
 
 const [command, ...args] = process.argv.slice(2);
 
@@ -41,9 +42,23 @@ async function seed(args) {
     );
     return;
   }
+  if (existingCount > fixture.fileCount) {
+    fail(
+      `fixture contains ${existingCount} files, more than the expected ${fixture.fileCount}`,
+    );
+  }
+  if (existingCount > 0) {
+    console.log(
+      `resuming fixture seed: ${fixture.workspaceId} (${existingCount}/${fixture.fileCount} files)`,
+    );
+  }
 
   const content = Buffer.alloc(fixture.contentBytes, "x").toString("base64");
-  for (let offset = 0; offset < fixture.fileCount; offset += fixture.batchSize) {
+  for (
+    let offset = existingCount;
+    offset < fixture.fileCount;
+    offset += fixture.batchSize
+  ) {
     const end = Math.min(offset + fixture.batchSize, fixture.fileCount);
     const statements = [];
     for (let index = offset; index < end; index += 1) {
@@ -158,6 +173,7 @@ async function waitForServer(workspaceId) {
     try {
       const response = await fetch(
         `${baseUrl}/workspaces/${encodeURIComponent(workspaceId)}/lix/v1/`,
+        { headers: requestHeaders() },
       );
       if (response.ok) return;
       lastError = new Error(`HTTP ${response.status}: ${await response.text()}`);
@@ -178,7 +194,7 @@ async function protocolRequest(workspaceId, operation, body) {
     `${baseUrl}/workspaces/${encodeURIComponent(workspaceId)}/lix/v1/${operation}`,
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: requestHeaders({ "content-type": "application/json" }),
       body: JSON.stringify(body),
     },
   );
@@ -186,6 +202,12 @@ async function protocolRequest(workspaceId, operation, body) {
     fail(`${operation} failed with HTTP ${response.status}: ${await response.text()}`);
   }
   return response.json();
+}
+
+function requestHeaders(headers = {}) {
+  return internalToken
+    ? { ...headers, authorization: `Bearer ${internalToken}` }
+    : headers;
 }
 
 function summarize(samples) {

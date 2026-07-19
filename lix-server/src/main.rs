@@ -15,12 +15,14 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("bind {}", config.bind_addr))?;
     let manager = WorkspaceRuntimeManager::new(&config)?;
+    let internal_token = config.internal_token.clone();
     tracing::info!(
         addr = %config.bind_addr,
         max_open_workspaces = config.max_open_workspaces,
+        internal_auth = internal_token.is_some(),
         "lix workspace service ready"
     );
-    axum::serve(listener, router(manager))
+    axum::serve(listener, router(manager, internal_token))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("serve HTTP")
