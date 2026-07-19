@@ -15,7 +15,7 @@ export interface PendingWorkspaceShareCapability {
 }
 
 export function isWorkspaceShareToken(value: unknown): value is string {
-	return typeof value === "string" && /^[A-Za-z0-9_-]{32,256}$/.test(value);
+	return typeof value === "string" && /^[A-Za-z0-9_-]{21,256}$/.test(value);
 }
 
 export function stageWorkspaceShareCapability(

@@ -319,11 +319,21 @@ set search_path = ''
 as $$
 declare
   current_user_id uuid := auth.uid();
-  raw_token text := encode(extensions.gen_random_bytes(32), 'hex');
+  -- Nano-ID-style token: 21 chars from a 64-symbol URL alphabet (~126 bits
+  -- of entropy) keeps share links friendly. 256 % 64 = 0, so masking each
+  -- random byte introduces no modulo bias.
+  token_alphabet constant text :=
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  token_bytes bytea := extensions.gen_random_bytes(21);
+  raw_token text := '';
 begin
   if current_user_id is null then
     raise exception 'Authentication required';
   end if;
+  for i in 0..20 loop
+    raw_token := raw_token
+      || substr(token_alphabet, (get_byte(token_bytes, i) & 63) + 1, 1);
+  end loop;
   if not private.is_interactive_session() then
     raise exception 'Interactive session required';
   end if;

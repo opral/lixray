@@ -27,7 +27,7 @@ void test("preview share service mints an opaque R2-backed capability", async ()
 		sharedByName: "Mara",
 	});
 
-	assert.match(minted.token, /^[A-Za-z0-9_-]{43}$/);
+	assert.match(minted.token, /^[A-Za-z0-9_-]{21}$/);
 	assert.deepEqual(minted, {
 		token: minted.token,
 		workspaceId: WORKSPACE_A,
@@ -179,7 +179,7 @@ void test("the preview HTTP adapter requires a test session for minting and acce
 		workspaceIds: [WORKSPACE_A, WORKSPACE_B],
 	});
 	const ownerCookie = sessionCookie(ownerSessionResponse);
-	assert.match(ownerCookie, /^lixray_preview_session=[A-Za-z0-9_-]{43}$/);
+	assert.match(ownerCookie, /^lixray_preview_session=[A-Za-z0-9_-]{21}$/);
 	const ownerSetCookie = ownerSessionResponse.headers.get("Set-Cookie") ?? "";
 	assert.match(ownerSetCookie, /HttpOnly/);
 	assert.match(ownerSetCookie, /SameSite=Lax/);

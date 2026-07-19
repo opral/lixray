@@ -75,8 +75,8 @@ select set_config(
 
 select is(
   char_length(current_setting('test.workspace_share_token')),
-  64,
-  'Share mints one opaque 32-byte token'
+  21,
+  'Share mints one friendly Nano-ID-style token'
 );
 
 reset role;
@@ -243,7 +243,7 @@ select set_config(
 
 select is(
   char_length(current_setting('test.direct_workspace_share_token')),
-  64,
+  21,
   'a joined member can become a sender'
 );
 

@@ -19,9 +19,11 @@ const PREVIEW_SHARE_PREFIX = "lixray-preview/v1";
 const PREVIEW_SHARE_ENDPOINT = "/_preview/workspace-share-capabilities";
 const PREVIEW_SESSION_ENDPOINT = "/_preview/demo-session";
 const PREVIEW_SESSION_COOKIE = "lixray_preview_session";
-const TOKEN_BYTES = 32;
+const TOKEN_LENGTH = 21;
+const TOKEN_ALPHABET =
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const MAX_MINT_ATTEMPTS = 4;
-const SHARE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,256}$/;
+const SHARE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{21,256}$/;
 const PREVIEW_SESSION_MAX_AGE_SECONDS = 60 * 60 * 12;
 
 export type PreviewSessionMode = "owner" | "recipient";
@@ -269,13 +271,13 @@ export async function handlePreviewShareRequest(
 			return previewJson({ token: share.token });
 		}
 
-		const resolveMatch = /^\/([A-Za-z0-9_-]{32,256})$/.exec(suffix);
+		const resolveMatch = /^\/([A-Za-z0-9_-]{21,256})$/.exec(suffix);
 		if (resolveMatch) {
 			if (request.method !== "GET") return methodNotAllowed();
 			return shareResponse(await service.resolve(resolveMatch[1]));
 		}
 
-		const acceptMatch = /^\/([A-Za-z0-9_-]{32,256})\/accept$/.exec(suffix);
+		const acceptMatch = /^\/([A-Za-z0-9_-]{21,256})\/accept$/.exec(suffix);
 		if (acceptMatch) {
 			if (request.method !== "POST") return methodNotAllowed();
 			const session = await previewSessionFromRequest(
@@ -729,14 +731,16 @@ function hasInvalidHostnameCharacter(hostname: string): boolean {
 	return false;
 }
 
+/**
+ * Nano-ID-style token: 21 chars from a 64-symbol URL alphabet (~126 bits of
+ * entropy) keeps share links friendly. 256 % 64 = 0, so masking each random
+ * byte introduces no modulo bias.
+ */
 function createOpaqueToken(): string {
-	const bytes = crypto.getRandomValues(new Uint8Array(TOKEN_BYTES));
-	let binary = "";
-	for (const byte of bytes) binary += String.fromCharCode(byte);
-	return btoa(binary)
-		.replaceAll("+", "-")
-		.replaceAll("/", "_")
-		.replaceAll("=", "");
+	const bytes = crypto.getRandomValues(new Uint8Array(TOKEN_LENGTH));
+	let token = "";
+	for (const byte of bytes) token += TOKEN_ALPHABET[byte & 63];
+	return token;
 }
 
 async function readStoredToken(
