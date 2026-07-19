@@ -57,8 +57,9 @@ function DemoAuthProvider({ children }: { children: ReactNode }) {
 		);
 		return Promise.resolve();
 	}, []);
-	const signOut = useCallback(async () => {
+	const signOut = useCallback(() => {
 		resetTelemetry();
+		return Promise.resolve();
 	}, []);
 	const value = useMemo<AuthContextValue>(
 		() => ({
