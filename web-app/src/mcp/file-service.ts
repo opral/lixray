@@ -676,19 +676,12 @@ export class LixFileService {
 	): Promise<boolean> {
 		const fileCandidate = path.endsWith("/") ? path.slice(0, -1) : path;
 		const directoryCandidate = `${fileCandidate}/`;
-		const [file, directory] = await Promise.all([
-			this.client.execute(workspaceId, {
-				branchId,
-				sql: "SELECT id FROM lix_file WHERE path = $1",
-				params: [text(fileCandidate)],
-			}),
-			this.client.execute(workspaceId, {
-				branchId,
-				sql: "SELECT id FROM lix_directory WHERE path = $1",
-				params: [text(directoryCandidate)],
-			}),
-		]);
-		return file.rows.length > 0 || directory.rows.length > 0;
+		const result = await this.client.execute(workspaceId, {
+			branchId,
+			sql: "SELECT id FROM lix_file WHERE path = $1 UNION ALL SELECT id FROM lix_directory WHERE path = $2",
+			params: [text(fileCandidate), text(directoryCandidate)],
+		});
+		return result.rows.length > 0;
 	}
 }
 
