@@ -14,7 +14,8 @@ export interface Env {
 	R2_ACCESS_KEY_ID?: string;
 	R2_SECRET_ACCESS_KEY?: string;
 	R2_REGION?: string;
-	SLATEDB_STORAGE?: string;
+	S3_PREFIX?: string;
+	S3_ALLOW_HTTP?: string;
 	SLATEDB_CACHE_DIR?: string;
 	SLATEDB_CACHE_MAX_BYTES?: string;
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
@@ -33,7 +34,6 @@ export class SlateDbContainer extends Container<Env> {
 
 	constructor(ctx: DurableObjectState<ContainerProps>, env: Env) {
 		super(ctx, env);
-		this.sleepAfter = env.SLATEDB_STORAGE === "memory" ? "10m" : "336h";
 		this.envVars = baseContainerEnv(env);
 	}
 }
@@ -53,12 +53,13 @@ export default {
 
 function baseContainerEnv(env: Env): Record<string, string> {
 	const vars: Record<string, string> = {};
-	addOptionalEnv(vars, "R2_ENDPOINT", env.R2_ENDPOINT);
-	addOptionalEnv(vars, "R2_BUCKET", env.R2_BUCKET);
-	addOptionalEnv(vars, "R2_ACCESS_KEY_ID", env.R2_ACCESS_KEY_ID);
-	addOptionalEnv(vars, "R2_SECRET_ACCESS_KEY", env.R2_SECRET_ACCESS_KEY);
-	addOptionalEnv(vars, "R2_REGION", env.R2_REGION);
-	addOptionalEnv(vars, "SLATEDB_STORAGE", env.SLATEDB_STORAGE);
+	addOptionalEnv(vars, "S3_ENDPOINT", env.R2_ENDPOINT);
+	addOptionalEnv(vars, "S3_BUCKET", env.R2_BUCKET);
+	addOptionalEnv(vars, "S3_ACCESS_KEY_ID", env.R2_ACCESS_KEY_ID);
+	addOptionalEnv(vars, "S3_SECRET_ACCESS_KEY", env.R2_SECRET_ACCESS_KEY);
+	addOptionalEnv(vars, "S3_REGION", env.R2_REGION);
+	addOptionalEnv(vars, "S3_PREFIX", env.S3_PREFIX);
+	addOptionalEnv(vars, "S3_ALLOW_HTTP", env.S3_ALLOW_HTTP);
 	addOptionalEnv(vars, "SLATEDB_CACHE_DIR", env.SLATEDB_CACHE_DIR);
 	addOptionalEnv(vars, "SLATEDB_CACHE_MAX_BYTES", env.SLATEDB_CACHE_MAX_BYTES);
 	addOptionalEnv(

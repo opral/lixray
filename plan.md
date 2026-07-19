@@ -32,8 +32,8 @@ lix-server workspace service
       |
       v
 SlateDB object storage
-- memory for the fastest local/CI path
-- R2/S3 for production
+- MinIO through S3 for local development and performance tests
+- R2 through the same S3 interface for previews and production
 ```
 
 The public Lix protocol remains stable. Browser and MCP traffic share one
@@ -172,12 +172,13 @@ alternate Workerd/Wasm Lix implementation:
 ```text
 PR environment
 |- LixRay web service (public, sleeping)
-`- lix-server workspace service (private, sleeping, memory storage)
+`- lix-server workspace service (private, sleeping, S3 storage)
 ```
 
-Previews use demo authentication, deterministic seed data, and memory storage.
-They must not receive production data or production storage credentials. A
-restart may reset preview data in the MVP.
+Previews use demo authentication, deterministic seed data, and a dedicated
+preview bucket. Railway environment IDs prefix every workspace, and bucket
+lifecycle rules expire abandoned preview data. Previews must not receive
+production data or production bucket credentials.
 
 The current Workerd/Wasm snapshot preview path and its preview-specific storage
 can be removed once the full-stack preview works.

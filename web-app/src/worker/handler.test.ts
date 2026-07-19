@@ -675,12 +675,11 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 			ports: 8080,
 			startOptions: {
 				envVars: {
-					R2_ENDPOINT: "https://r2.example",
-					R2_BUCKET: "lixray",
-					R2_ACCESS_KEY_ID: "access-key",
-					R2_SECRET_ACCESS_KEY: "secret-key",
-					R2_REGION: "auto",
-					SLATEDB_STORAGE: "r2",
+					S3_ENDPOINT: "https://r2.example",
+					S3_BUCKET: "lixray",
+					S3_ACCESS_KEY_ID: "access-key",
+					S3_SECRET_ACCESS_KEY: "secret-key",
+					S3_REGION: "auto",
 					SLATEDB_CACHE_DIR: "/tmp/lixray-slatedb-cache",
 					SLATEDB_CACHE_MAX_BYTES: "2147483648",
 					SLATEDB_BLOCK_CACHE_BYTES: "134217728",
@@ -803,7 +802,7 @@ void test("permanent container startup failures return a controlled 503 response
 		env({
 			getByName: () => ({
 				startAndWaitForPorts: async () => {
-					throw new Error("R2_ACCESS_KEY_ID is required");
+					throw new Error("S3_ACCESS_KEY_ID is required");
 				},
 				fetch: async () => {
 					fetched = true;
@@ -1161,7 +1160,6 @@ function env(options: {
 		R2_ACCESS_KEY_ID: "access-key",
 		R2_SECRET_ACCESS_KEY: "secret-key",
 		R2_REGION: "auto",
-		SLATEDB_STORAGE: "r2",
 		SLATEDB_CACHE_DIR: "/tmp/lixray-slatedb-cache",
 		SLATEDB_CACHE_MAX_BYTES: "2147483648",
 		SLATEDB_BLOCK_CACHE_BYTES: "134217728",
