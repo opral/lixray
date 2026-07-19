@@ -21,6 +21,18 @@ file-data requests did not overlap. It measured 8.315 s p50 as serialized point
 reads versus 0.618 s for 50-path reads; the bounded batching patch addresses
 that caller only, not the shared-session behavior for other read workflows.
 
+**Constraint discovered.** A per-client active-branch cache is not a safe
+bounded fix. Lix resolves `lix_workspace_branch_id` from shared untracked global
+state and `switch_branch` writes that same selector; LixRay explicitly tests
+that the active branch is shared and persists across remote clients. Another
+client can switch after a cached client's last check, so skipping its next
+switch can execute a requested branch against the wrong branch. A tempting
+current-stack `read_file` sequence measured 9.656→6.641 ms p50 (−31.2%) and
+11.288→7.716 ms p95, but is rejected for correctness. A safe >50% solution
+needs branch-scoped execute/session semantics and crosses Lix session storage,
+server protocol, browser/MCP clients, observer/retry/cancellation behavior, and
+runtime tests.
+
 This crosses browser and MCP clients, remote binding queues, branch switching,
 server protocol, coherent-read execution, cancellation/retry, and observer
 ordering semantics—well beyond a bounded local patch.
@@ -39,6 +51,14 @@ filter and a physical `SortExec → SpecScanExec(lix_file)`: there is no path
 range or indexable prefix, so every file path must be examined for a root
 substring search.
 
+A bounded Lix fast path in [Lix #625](https://github.com/opral/lix/pull/625)
+uses the existing cached descriptor index to avoid hydrating blob-reference rows
+for simple lowercase ASCII literal searches. On the 2,500-file Docker fixture,
+the real MCP projection fell from 31.57 ms to 5.07 ms p50 for a root hit. It
+deliberately remains an O(files) descriptor scan and adds no persistent storage;
+it is not a substitute for an index that can make root substring search
+sublinear at much larger workspace sizes.
+
 An FTS or trigram index might help at large workspace sizes, but it crosses
 Lix's schema and write-maintenance path, stored-index space/lifecycle, path
 case and substring/token semantics, branch/version behavior, and MCP/client
@@ -47,4 +67,6 @@ contracts. No workload threshold or actual speedup has been measured yet.
 **Next measurement.** Measure p50/p95 and `EXPLAIN` for representative root
 searches at 10k and 100k files before choosing a path-search index design.
 
-**Status:** observing; no code change proposed.
+**Status:** observing; the bounded blob-hydration avoidance is supplied by the
+dependent Lix #625 stack, while a persistent root-substring index remains out
+of scope.
