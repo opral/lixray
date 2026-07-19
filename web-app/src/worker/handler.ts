@@ -76,6 +76,8 @@ export interface HandleRequestOptions {
 	authenticateMcp?: AuthenticateMcpRequest;
 	authorizeWorkspace?: AuthorizeWorkspace;
 	resolveWorkspace?: ResolveWorkspace;
+	resolvePublicWorkspace?: ResolvePublicWorkspace;
+	parseSqlScript?: ParseSqlScript;
 	mcpTransport?: typeof handleMcpTransport;
 	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
@@ -89,6 +91,11 @@ export interface AuthenticatedUser {
 	userId: string;
 	token: string;
 	isDemo?: boolean;
+	/**
+	 * Preview-only membership snapshot, populated after validating the
+	 * server-side demo-session cookie for this request.
+	 */
+	previewWorkspaceIds?: ReadonlyArray<string>;
 }
 
 export interface AuthenticatedMcpUser extends AuthenticatedUser {
@@ -121,6 +128,27 @@ export type ResolveWorkspace = (
 export type WorkspaceResolution =
 	| { ok: true; workspaceId: string }
 	| { ok: false; response: Response };
+
+/**
+ * Resolves a live workspace for the public read transport. This deliberately
+ * does not use the member-scoped workspace lookup: a valid browser JWT alone
+ * must never turn a public reader into an editor.
+ */
+export type ResolvePublicWorkspace = (
+	namespace: string,
+	workspaceSlug: string,
+	env: WorkerEnv,
+) => Promise<WorkspaceResolution>;
+
+/**
+ * Lix's SQL script parser, injected by the worker entry so the public read
+ * gate classifies statements with the same grammar the engine executes —
+ * not a transport-level keyword check.
+ */
+export type ParseSqlScript = (
+	sql: string,
+	providedParamCount: number,
+) => { statements: ReadonlyArray<{ sql: string }> };
 
 export type AuthResult =
 	| { ok: true; auth: AuthenticatedUser }
@@ -241,18 +269,48 @@ export async function handleRequest(
 			return new Response("Invalid workspace path\n", { status: 400 });
 		}
 
-		const authenticate = options.authenticate ?? authenticateWithSupabase;
-		const authResult = await authenticate(request, env);
-		if (!authResult.ok) return authResult.response;
-		const resolution = await (
-			options.resolveWorkspace ?? resolveWorkspaceWithSupabase
-		)(namespace, workspaceSlug, authResult.auth, env);
-		if (!resolution.ok) return resolution.response;
-
-		const endpoint = remoteLixMatch[3];
+		const endpoint = remoteLixMatch[3]?.replace(/\/+$/, "") ?? "";
 		const containerPath = `/lix/v1${endpoint ? `/${endpoint}` : "/"}`;
+		const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
+
+		const authenticate = options.authenticate ?? authenticateWithSupabase;
+		if (bearerToken(request)) {
+			const authResult = await authenticate(request, env);
+			if (authResult.ok) {
+				const resolution = await (
+					options.resolveWorkspace ?? resolveWorkspaceWithSupabase
+				)(namespace, workspaceSlug, authResult.auth, env);
+				if (resolution.ok) {
+					return fetchWorkspaceRequest(
+						resolution.workspaceId,
+						request,
+						containerPath,
+						env,
+						options,
+					);
+				}
+				// A signed-in non-member falls through to the public read
+				// transport instead of a dead end.
+				if (!publicReadRequest) return resolution.response;
+			} else if (!publicReadRequest) {
+				return authResult.response;
+			}
+		} else if (!publicReadRequest) {
+			return unauthorized().response;
+		}
+
+		const publicResolution = await (
+			options.resolvePublicWorkspace ?? resolvePublicWorkspaceWithSupabase
+		)(namespace, workspaceSlug, env);
+		if (!publicResolution.ok) return publicResolution.response;
+		const mutationRejection = await rejectPublicMutation(
+			request,
+			endpoint,
+			options.parseSqlScript,
+		);
+		if (mutationRejection) return mutationRejection;
 		return fetchWorkspaceRequest(
-			resolution.workspaceId,
+			publicResolution.workspaceId,
 			request,
 			containerPath,
 			env,
@@ -648,8 +706,175 @@ function workspaceResolutionUnavailable(): {
 	};
 }
 
+/**
+ * The public route resolver is deliberately separate from member resolution.
+ * It exposes only live route metadata through a security-definer RPC that is
+ * callable anonymously.
+ */
+export async function resolvePublicWorkspaceWithSupabase(
+	namespace: string,
+	workspaceSlug: string,
+	env: WorkerEnv,
+): Promise<WorkspaceResolution> {
+	if (isDemoMode(env)) {
+		const workspace = demoWorkspaceSummaries(env).find(
+			(candidate) =>
+				candidate.organization.handle === namespace &&
+				candidate.slug === workspaceSlug,
+		);
+		return workspace
+			? { ok: true, workspaceId: workspace.id }
+			: workspaceNotFound();
+	}
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return {
+			ok: false,
+			response: new Response("Supabase Data API is not configured\n", {
+				status: 500,
+			}),
+		};
+	}
+
+	const lookupUrl = new URL(
+		"/rest/v1/rpc/resolve_public_workspace_by_route",
+		env.SUPABASE_URL,
+	);
+	let response: Response;
+	try {
+		response = await fetch(lookupUrl, {
+			method: "POST",
+			headers: {
+				apikey: env.SUPABASE_PUBLISHABLE_KEY,
+				Accept: "application/json",
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				p_organization_handle: namespace,
+				p_workspace_slug: workspaceSlug,
+			}),
+		});
+	} catch {
+		return workspaceResolutionUnavailable();
+	}
+	if (!response.ok) {
+		return workspaceResolutionUnavailable();
+	}
+	try {
+		const rows: unknown = await response.json();
+		const workspaceId =
+			Array.isArray(rows) && rows.length === 1 ? workspaceRowId(rows[0]) : null;
+		return typeof workspaceId === "string" && workspaceId
+			? { ok: true, workspaceId }
+			: workspaceNotFound();
+	} catch {
+		return workspaceResolutionUnavailable();
+	}
+}
+
 function workspaceRowId(value: unknown): unknown {
-	return value && typeof value === "object" && "id" in value ? value.id : null;
+	if (!value || typeof value !== "object") return null;
+	if ("id" in value) return value.id;
+	return "workspace_id" in value ? value.workspace_id : null;
+}
+
+/**
+ * The public transport only exposes the protocol handshake and the four
+ * SQL-carrying endpoints. Branch mutations (`branch/create`, `branch/switch`)
+ * change shared workspace state and are never public.
+ */
+function isPublicReadRemoteLixRequest(
+	request: Request,
+	endpoint: string,
+): boolean {
+	if (!endpoint) return request.method === "GET";
+	return (
+		request.method === "POST" &&
+		["execute", "execute-batch", "observe", "observe/multiplex"].includes(
+			endpoint,
+		)
+	);
+}
+
+/**
+ * The container's canonical Lix protocol has no read-only mode, so the Worker
+ * is the authorization boundary for public readers: every SQL statement in a
+ * public request must classify as a read. Statements are split by Lix's own
+ * script parser (injected as `options.parseSqlScript`) before the keyword
+ * check, so a mutation cannot hide behind a multi-statement script. Without a
+ * parser the gate fails closed.
+ */
+async function rejectPublicMutation(
+	request: Request,
+	endpoint: string,
+	parseSqlScript: ParseSqlScript | undefined,
+): Promise<Response | null> {
+	if (!endpoint) return null;
+	let statements: Array<{ sql: string; paramCount: number }>;
+	try {
+		statements = await publicSqlStatements(request, endpoint);
+	} catch {
+		return publicReadOnlyResponse();
+	}
+	if (statements.length === 0 || !parseSqlScript) {
+		return publicReadOnlyResponse();
+	}
+	for (const statement of statements) {
+		let plan: ReturnType<ParseSqlScript>;
+		try {
+			plan = parseSqlScript(statement.sql, statement.paramCount);
+		} catch {
+			return publicReadOnlyResponse();
+		}
+		if (plan.statements.length === 0) return publicReadOnlyResponse();
+		// Observers represent one live query; requiring exactly one parsed
+		// statement prevents a read followed by a mutation from hiding behind
+		// the SSE endpoint.
+		if (endpoint.startsWith("observe") && plan.statements.length !== 1) {
+			return publicReadOnlyResponse();
+		}
+		if (!plan.statements.every((parsed) => isClearlyReadOnlySql(parsed.sql))) {
+			return publicReadOnlyResponse();
+		}
+	}
+	return null;
+}
+
+async function publicSqlStatements(
+	request: Request,
+	endpoint: string,
+): Promise<Array<{ sql: string; paramCount: number }>> {
+	const body: unknown = await request.clone().json();
+	if (!body || typeof body !== "object") return [];
+	const record = body as Record<string, unknown>;
+	const entries =
+		endpoint === "execute-batch"
+			? record.statements
+			: endpoint === "observe/multiplex"
+				? record.subscriptions
+				: [record];
+	if (!Array.isArray(entries)) return [];
+	return entries.map((entry) => {
+		if (!entry || typeof entry !== "object") {
+			throw new Error("Malformed public statement");
+		}
+		const { sql, params } = entry as Record<string, unknown>;
+		if (typeof sql !== "string" || sql.length === 0) {
+			throw new Error("Malformed public statement");
+		}
+		return { sql, paramCount: Array.isArray(params) ? params.length : 0 };
+	});
+}
+
+function isClearlyReadOnlySql(sql: string): boolean {
+	const keyword = /^\s*([a-z]+)/i.exec(sql)?.[1]?.toUpperCase();
+	return keyword === "SELECT" || keyword === "VALUES";
+}
+
+function publicReadOnlyResponse(): Response {
+	return Response.json(
+		{ error: { code: "LIX_READ_ONLY", message: "workspace is read-only" } },
+		{ status: 400 },
+	);
 }
 
 function authenticateDemo(request: Request, env: WorkerEnv): AuthResult | null {
@@ -711,7 +936,7 @@ function bearerToken(request: Request): string | null {
 	return token || null;
 }
 
-function unauthorized(): AuthResult {
+function unauthorized(): Extract<AuthResult, { ok: false }> {
 	return {
 		ok: false,
 		response: new Response("Unauthorized\n", {

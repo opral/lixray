@@ -69,6 +69,9 @@ export function WorkspaceDirectory() {
 	const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
 	const signedIn = isDemoModeEnabled || Boolean(auth.user);
 	const organizations = workspaceState.organizations;
+	const writableOrganizations = organizations.filter(
+		(organization) => organization.role !== null,
+	);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -149,7 +152,7 @@ export function WorkspaceDirectory() {
 							className="ml-auto max-[560px]:ml-0 max-[560px]:self-start"
 							data-testid="new-workspace-button"
 							type="button"
-							disabled={organizations.length === 0}
+							disabled={writableOrganizations.length === 0}
 							onClick={() => setDialog({ type: "create" })}
 						>
 							<Plus aria-hidden="true" />
@@ -204,6 +207,7 @@ export function WorkspaceDirectory() {
 												workspace={workspace}
 												fileCount={fileCounts[workspace.id]}
 												paletteIndex={paletteOrder.get(workspace.id) ?? 0}
+												canManage={organization.role !== null}
 												onRename={() =>
 													setDialog({ type: "rename", organization, workspace })
 												}
@@ -218,7 +222,7 @@ export function WorkspaceDirectory() {
 						)
 					)}
 
-					{firstWorkspace ? (
+					{firstWorkspace && !isDemoModeEnabled ? (
 						<McpQuickstart
 							organization={firstWorkspace.organization}
 							workspace={firstWorkspace.workspace}
@@ -229,7 +233,7 @@ export function WorkspaceDirectory() {
 
 			<WorkspaceDialog
 				dialog={dialog}
-				organizations={organizations}
+				organizations={writableOrganizations}
 				onClose={() => setDialog(null)}
 			/>
 		</div>
@@ -371,6 +375,7 @@ function WorkspaceRow({
 	workspace,
 	fileCount,
 	paletteIndex,
+	canManage,
 	onRename,
 	onDelete,
 }: {
@@ -378,6 +383,7 @@ function WorkspaceRow({
 	workspace: Workspace;
 	fileCount?: number;
 	paletteIndex: number;
+	canManage: boolean;
 	onRename: () => void;
 	onDelete: () => void;
 }) {
@@ -459,10 +465,12 @@ function WorkspaceRow({
 					sideOffset={4}
 					className="w-[210px] min-w-[210px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2.5 [&_[data-slot=dropdown-menu-item]]:py-2 [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:leading-tight [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-item]_svg]:size-3.5 [&_[data-slot=dropdown-menu-item]_svg]:text-icon-tertiary [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle [&_[data-variant=destructive]]:text-error-700 [&_[data-variant=destructive]:focus]:bg-error-50 [&_[data-variant=destructive]:focus]:text-error-700"
 				>
-					<DropdownMenuItem onSelect={onRename}>
-						<Pencil aria-hidden="true" />
-						Rename
-					</DropdownMenuItem>
+					{canManage ? (
+						<DropdownMenuItem onSelect={onRename}>
+							<Pencil aria-hidden="true" />
+							Rename
+						</DropdownMenuItem>
+					) : null}
 					<DropdownMenuItem onSelect={() => void copyUrl()}>
 						<Link2 aria-hidden="true" />
 						Copy URL
@@ -474,11 +482,15 @@ function WorkspaceRow({
 						<Download aria-hidden="true" />
 						{downloading ? "Preparing archive…" : "Download archive"}
 					</DropdownMenuItem>
-					<DropdownMenuSeparator />
-					<DropdownMenuItem variant="destructive" onSelect={onDelete}>
-						<Trash2 aria-hidden="true" />
-						Delete workspace…
-					</DropdownMenuItem>
+					{canManage ? (
+						<>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem variant="destructive" onSelect={onDelete}>
+								<Trash2 aria-hidden="true" />
+								Delete workspace…
+							</DropdownMenuItem>
+						</>
+					) : null}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</div>

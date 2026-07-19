@@ -29,6 +29,14 @@ export const test = base.extend<{ runtimeErrors: Array<string> }>({
 
 export { expect };
 
+/** Create an owner session in the isolated preview before exercising writes. */
+export async function signInAsPreviewOwner(page: Page) {
+	const response = await page.request.post("/_preview/demo-session", {
+		data: { mode: "owner" },
+	});
+	await expectOk(response);
+}
+
 export async function expectOk(response: Response) {
 	const summary = response.ok() ? "" : await responseSummary(response);
 	expect(response.ok(), summary).toBe(true);

@@ -1,7 +1,5 @@
 import { openLix, type Lix } from "@lix-js/sdk/remote";
 import { zipSync } from "fflate";
-import { DEMO_AUTH_TOKEN } from "./demo-identity";
-import { isDemoModeEnabled } from "./demo-client";
 
 type AccessTokenGetter = () => Promise<string | null>;
 
@@ -54,9 +52,7 @@ async function withWorkspaceLix<T>(
 				globalThis.location.origin,
 			),
 			headers: async () => {
-				const token = isDemoModeEnabled
-					? DEMO_AUTH_TOKEN
-					: await options.getAccessToken();
+				const token = await options.getAccessToken();
 				if (!token) throw new Error("Sign in to access this workspace.");
 				return { Authorization: `Bearer ${token}` };
 			},

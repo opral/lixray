@@ -2,6 +2,13 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { takeAuthReturnTo } from "~/components/auth-provider";
 import { getBrowserSupabaseClient } from "~/lib/supabase";
+import {
+	markWorkspaceShareJoined,
+	peekWorkspaceShareCapability,
+	stageWorkspaceShareJoinError,
+	takeWorkspaceShareJoinIntent,
+	takeWorkspaceShareCapability,
+} from "~/lib/workspace-share-capability";
 
 interface CallbackSearch {
 	code?: string;
@@ -38,13 +45,45 @@ function AuthCallbackPage() {
 		let disposed = false;
 		void getBrowserSupabaseClient()
 			.auth.exchangeCodeForSession(search.code)
-			.then(({ error: exchangeError }) => {
+			.then(async ({ error: exchangeError }) => {
 				if (disposed) return;
 				if (exchangeError) {
 					setError(exchangeError.message);
 					return;
 				}
+				const capability = peekWorkspaceShareCapability();
+				const joinWorkspaceId = takeWorkspaceShareJoinIntent();
+				if (capability && joinWorkspaceId === capability.workspaceId) {
+					try {
+						const { error: acceptError } = await getBrowserSupabaseClient().rpc(
+							"accept_workspace_share_token",
+							{ p_token: capability.token },
+						);
+						if (acceptError) {
+							stageWorkspaceShareJoinError(
+								`${acceptError.message} Select Join to edit to try again.`,
+							);
+						} else {
+							takeWorkspaceShareCapability();
+							markWorkspaceShareJoined(capability.workspaceId);
+						}
+					} catch (caught) {
+						stageWorkspaceShareJoinError(
+							`${caught instanceof Error ? caught.message : "Unable to join this workspace."} Select Join to edit to try again.`,
+						);
+					}
+				}
+				if (disposed) return;
 				window.location.replace(takeAuthReturnTo());
+			})
+			.catch((caught: unknown) => {
+				if (!disposed) {
+					setError(
+						caught instanceof Error
+							? caught.message
+							: "Unable to complete sign-in.",
+					);
+				}
 			});
 
 		return () => {

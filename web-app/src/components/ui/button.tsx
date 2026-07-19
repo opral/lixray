@@ -11,6 +11,8 @@ const buttonVariants = cva(
 			variant: {
 				default:
 					"bg-bg-action-primary text-text-on-action-primary hover:bg-bg-action-primary-hover",
+				featured:
+					"bg-[linear-gradient(180deg,var(--color-bg-action-primary-start)_0%,var(--color-bg-action-primary-end)_100%)] text-text-on-action-primary shadow-[var(--shadow-action-primary)] hover:brightness-105 active:translate-y-px",
 				destructive:
 					"bg-error-700 text-text-on-action-primary hover:bg-error-800 focus-visible:ring-error-700/20 dark:focus-visible:ring-error-700/40",
 				outline:

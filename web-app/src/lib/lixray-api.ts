@@ -8,8 +8,6 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
 import { base64ToBytes, bytesToBase64 } from "./base64";
-import { isDemoModeEnabled } from "./demo-client";
-import { DEMO_AUTH_TOKEN } from "./demo-identity";
 
 export type WireValue =
 	| { kind: "null"; value?: null }
@@ -119,9 +117,7 @@ export function useLixrayApi() {
 				url,
 				mode: "remote",
 				headers: async () => {
-					const token = isDemoModeEnabled
-						? DEMO_AUTH_TOKEN
-						: await getTokenRef.current();
+					const token = await getTokenRef.current();
 					if (!token) {
 						throw new LixrayApiError(401, {
 							error: { message: "No Supabase access token is available" },

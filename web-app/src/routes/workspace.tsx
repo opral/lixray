@@ -43,27 +43,22 @@ interface Member {
 	email: string;
 }
 
-interface Invitation {
-	id: string;
-	email: string;
-	expiresAt: string;
-}
-
 function WorkspacePage() {
 	const { client, isLoaded: authLoaded, user } = useAuth();
 	const workspaceState = useWorkspace();
 	const { selectedOrganization } = workspaceState;
 	const [members, setMembers] = useState<Array<Member>>([]);
-	const [invitations, setInvitations] = useState<Array<Invitation>>([]);
 	const [loadingSettings, setLoadingSettings] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
-	const [inviteLink, setInviteLink] = useState<string | null>(null);
 
 	const loadSettings = useCallback(async () => {
-		if (!client || !selectedOrganization) {
+		if (
+			!client ||
+			!selectedOrganization ||
+			selectedOrganization.role === null
+		) {
 			setMembers([]);
-			setInvitations([]);
 			return;
 		}
 		setLoadingSettings(true);
@@ -103,26 +98,6 @@ function WorkspacePage() {
 					};
 				}),
 			);
-
-			if (selectedOrganization.role === "owner") {
-				const { data: invitationRows, error: invitationError } = await client
-					.from("organization_invitations")
-					.select("id, email, expires_at")
-					.eq("organization_id", selectedOrganization.id)
-					.is("accepted_at", null)
-					.is("revoked_at", null)
-					.order("created_at", { ascending: false });
-				if (invitationError) throw invitationError;
-				setInvitations(
-					(invitationRows ?? []).map((row) => ({
-						id: String(row.id),
-						email: String(row.email),
-						expiresAt: String(row.expires_at),
-					})),
-				);
-			} else {
-				setInvitations([]);
-			}
 		} catch (loadError) {
 			setError(errorMessage(loadError));
 		} finally {
@@ -185,7 +160,7 @@ function WorkspacePage() {
 
 				<OrganizationPanel workspaceState={workspaceState} />
 
-				{selectedOrganization ? (
+				{selectedOrganization && selectedOrganization.role !== null ? (
 					<>
 						<WorkspacePanel workspaceState={workspaceState} />
 						<MemberPanel
@@ -235,42 +210,6 @@ function WorkspacePage() {
 								}, "You left the organization")
 							}
 						/>
-						{selectedOrganization.role === "owner" ? (
-							<InvitationPanel
-								invitations={invitations}
-								inviteLink={inviteLink}
-								onInvite={(email) =>
-									void runAction(async () => {
-										if (!client) return;
-										const { data, error: inviteError } = await client.rpc(
-											"create_organization_invitation",
-											{
-												p_organization_id: selectedOrganization.id,
-												p_email: email,
-											},
-										);
-										if (inviteError) throw inviteError;
-										const row = Array.isArray(data) ? data[0] : data;
-										if (!row || typeof row.token !== "string") {
-											throw new Error("Invitation token was not returned");
-										}
-										setInviteLink(
-											`${window.location.origin}/invite/${row.token}`,
-										);
-									}, "Invitation link created")
-								}
-								onRevoke={(invitation) =>
-									void runAction(async () => {
-										if (!client) return;
-										const { error: revokeError } = await client.rpc(
-											"revoke_organization_invitation",
-											{ p_invitation_id: invitation.id },
-										);
-										if (revokeError) throw revokeError;
-									}, "Invitation revoked")
-								}
-							/>
-						) : null}
 					</>
 				) : null}
 			</main>
@@ -502,80 +441,6 @@ function MemberPanel({
 						</div>
 					))
 				)}
-			</div>
-		</section>
-	);
-}
-
-function InvitationPanel({
-	invitations,
-	inviteLink,
-	onInvite,
-	onRevoke,
-}: {
-	invitations: Array<Invitation>;
-	inviteLink: string | null;
-	onInvite: (email: string) => void;
-	onRevoke: (invitation: Invitation) => void;
-}) {
-	const [email, setEmail] = useState("");
-	const submit = (event: FormEvent) => {
-		event.preventDefault();
-		onInvite(email);
-	};
-	return (
-		<section className={panelClass}>
-			<div className={panelHeaderClass}>
-				<h2 className={panelTitleClass}>Invitations</h2>
-			</div>
-			<div className={panelBodyStackClass}>
-				<form className={inlineFormClass} onSubmit={submit}>
-					<div className={`${fieldClass} grow`}>
-						<label htmlFor="invite-email">Google account email</label>
-						<input
-							id="invite-email"
-							className={inputClass}
-							type="email"
-							value={email}
-							onChange={(event) => setEmail(event.target.value)}
-							required
-						/>
-					</div>
-					<button className={`${primaryButtonClass} max-[800px]:w-full`}>
-						Create invite link
-					</button>
-				</form>
-				{inviteLink ? (
-					<div className="flex items-center gap-2.5 max-[800px]:w-full">
-						<input
-							className={`${inputClass} font-mono text-xs`}
-							readOnly
-							value={inviteLink}
-						/>
-						<button
-							className={buttonClass}
-							onClick={() => void navigator.clipboard.writeText(inviteLink)}
-						>
-							Copy
-						</button>
-					</div>
-				) : null}
-				{invitations.map((invitation) => (
-					<div className={settingsRowClass} key={invitation.id}>
-						<div>
-							<strong>{invitation.email}</strong>
-							<div className="text-text-tertiary">
-								Expires {new Date(invitation.expiresAt).toLocaleString()}
-							</div>
-						</div>
-						<button
-							className={`${buttonClass} max-[800px]:w-full`}
-							onClick={() => onRevoke(invitation)}
-						>
-							Revoke
-						</button>
-					</div>
-				))}
 			</div>
 		</section>
 	);

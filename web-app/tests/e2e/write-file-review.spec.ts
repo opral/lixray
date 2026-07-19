@@ -32,6 +32,8 @@ test("an MCP-created file immediately opens in review mode", async ({
 		: await startIsolatedPreview();
 	const pendingExecutes = trackPageExecutes(page);
 	const appBaseURL = preview.baseURL;
+	const previewSessionCookie = await createPreviewOwnerSession(appBaseURL);
+	await installPreviewSessionCookie(page, appBaseURL, previewSessionCookie);
 	const fileName = `mcp-created-review-${randomUUID()}.md`;
 	const content = "# Created through MCP\n";
 	let client: Client | undefined;
@@ -48,6 +50,7 @@ test("an MCP-created file immediately opens in review mode", async ({
 		client = new Client({ name: "lixray-e2e", version: "1.0.0" });
 		const transport = new StreamableHTTPClientTransport(
 			new URL("/mcp", appBaseURL),
+			{ requestInit: { headers: { Cookie: previewSessionCookie } } },
 		);
 		await client.connect(transport);
 		const result = await client.callTool({
@@ -158,6 +161,43 @@ test("an MCP-created file immediately opens in review mode", async ({
 		}
 	}
 });
+
+async function createPreviewOwnerSession(baseURL: string): Promise<string> {
+	const response = await fetch(new URL("/_preview/demo-session", baseURL), {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ mode: "owner" }),
+	});
+	if (!response.ok) {
+		throw new Error(
+			`Unable to create the preview test session (${response.status}).`,
+		);
+	}
+	const setCookie = response.headers.get("set-cookie");
+	if (!setCookie) throw new Error("Preview test session did not set a cookie.");
+	return setCookie.split(";", 1)[0];
+}
+
+async function installPreviewSessionCookie(
+	page: Page,
+	baseURL: string,
+	cookie: string,
+) {
+	const separator = cookie.indexOf("=");
+	if (separator <= 0)
+		throw new Error("Preview test session returned a bad cookie.");
+	const url = new URL(baseURL);
+	await page.context().addCookies([
+		{
+			name: cookie.slice(0, separator),
+			value: cookie.slice(separator + 1),
+			url: url.origin,
+			httpOnly: true,
+			sameSite: "Lax",
+			secure: url.protocol === "https:",
+		},
+	]);
+}
 
 function requiredRecord(value: unknown): Record<string, unknown> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) {

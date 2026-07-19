@@ -23,6 +23,7 @@ export const Route = createRootRoute({
 			{ title },
 			{ name: "description", content: description },
 			{ name: "theme-color", content: "#f4f2ef" },
+			{ name: "referrer", content: "no-referrer" },
 		],
 		links: [
 			{ rel: "stylesheet", href: appCss },

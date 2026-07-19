@@ -1,4 +1,4 @@
-import { expect, expectOk, test } from "./fixtures";
+import { expect, expectOk, signInAsPreviewOwner, test } from "./fixtures";
 import type { ExecuteResponse } from "../../src/lib/lixray-api";
 
 test("sign-in route renders without runtime errors", async ({ page }) => {
@@ -12,7 +12,7 @@ test("sign-in route renders without runtime errors", async ({ page }) => {
 		page.getByRole("heading", { name: "Sign in to LixRay" }),
 	).toBeVisible();
 	await expect(
-		page.getByRole("button", { name: "Continue with Google" }),
+		page.getByRole("button", { name: "Continue as preview user" }),
 	).toBeVisible();
 	await expect(page.getByRole("textbox")).toHaveCount(0);
 	await expect(page.getByText(/Microsoft/i)).toHaveCount(0);
@@ -66,6 +66,7 @@ test("landing page renders and the canonical workspace route opens", async ({
 test("sql console loads branches and executes through canonical Lix", async ({
 	page,
 }) => {
+	await signInAsPreviewOwner(page);
 	const branchesResponsePromise = page.waitForResponse(
 		(response) =>
 			response.url().includes("/@acme/launch-q3/lix/v1/") &&
@@ -214,6 +215,6 @@ test("legacy sign-up routes redirect to Google sign-in", async ({ page }) => {
 	expect(response?.status()).not.toBe(404);
 	await expect(page).toHaveURL(/\/sign-in$/);
 	await expect(
-		page.getByRole("button", { name: "Continue with Google" }),
+		page.getByRole("button", { name: "Continue as preview user" }),
 	).toBeVisible();
 });

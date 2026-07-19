@@ -21,10 +21,15 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { PencilLine } from "lucide-react";
+import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
+import { WorkspaceShareDialog } from "~/components/workspace-share-dialog";
+import { Button } from "~/components/ui/button";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
+import { createPreviewWorkspaceShareToken } from "~/lib/preview-workspace-share";
 import {
 	atelierBranchSearch,
 	isLixBranchNotFoundError,
@@ -39,6 +44,12 @@ import {
 } from "~/lib/atelier-state";
 import { captureTelemetry } from "~/lib/telemetry";
 import {
+	appendWorkspaceShareToken,
+	canonicalPathFromLocation,
+	stripInviteFromUrl,
+} from "~/lib/workspace-share-url";
+import { isWorkspaceShareToken } from "~/lib/workspace-share-capability";
+import {
 	openWorkspaceLixSession,
 	type WorkspaceLixSession,
 } from "~/lib/workspace-lix-session";
@@ -47,7 +58,15 @@ interface WorkspaceAtelierProps {
 	workspaceId: string;
 	namespace: string;
 	workspaceSlug: string;
+	workspaceName: string;
 	branchId?: string;
+	/** The only mode allowed to make workspace mutations in this view. */
+	canEdit: boolean;
+	/** Present only for a valid, session-held share capability. */
+	shareAccess?: {
+		onJoinToEdit: () => Promise<void>;
+		joining: boolean;
+	};
 }
 
 const WorkspaceAtelierContext = createContext<AtelierInstance | null>(null);
@@ -57,9 +76,18 @@ export function WorkspaceAtelier({
 	workspaceId,
 	namespace,
 	workspaceSlug,
+	workspaceName,
 	branchId,
+	canEdit,
+	shareAccess,
 }: WorkspaceAtelierProps) {
-	const { client, getAccessToken: getSessionAccessToken, user } = useAuth();
+	const {
+		client,
+		getAccessToken: getSessionAccessToken,
+		isLoaded: isAuthLoaded,
+		signInWithGoogle,
+		user,
+	} = useAuth();
 	const navigate = useNavigate();
 	const pathname = useRouterState({
 		select: (state) => state.location.pathname,
@@ -67,6 +95,12 @@ export function WorkspaceAtelier({
 	const routeParams = useParams({ strict: false });
 	const routeFilePath =
 		"_splat" in routeParams ? routeParams._splat : undefined;
+	const documentName = activeDocumentName({
+		pathname,
+		routeFilePath,
+		workspaceName,
+	});
+	const isReadOnly = !canEdit;
 	const [instance, setInstance] = useState<AtelierInstance | null>(null);
 	const [workspaceDefaultBranchId, setWorkspaceDefaultBranchId] = useState<
 		string | null
@@ -98,9 +132,80 @@ export function WorkspaceAtelier({
 	const getAccessToken = useCallback(
 		() =>
 			isDemoModeEnabled
-				? Promise.resolve(DEMO_AUTH_TOKEN)
+				? Promise.resolve(canEdit ? DEMO_AUTH_TOKEN : null)
 				: getSessionAccessToken(),
-		[getSessionAccessToken],
+		[canEdit, getSessionAccessToken],
+	);
+	const signInToCurrentWorkspace = useCallback(async () => {
+		try {
+			await signInWithGoogle(canonicalPathFromLocation(window.location));
+		} catch (caught) {
+			toast.error(
+				caught instanceof Error ? caught.message : "Unable to start sign-in.",
+			);
+		}
+	}, [signInWithGoogle]);
+	const headerActions = canEdit ? (
+		client ? (
+			<WorkspaceShareControl
+				createShareToken={async () => {
+					const { data, error } = await client.rpc(
+						"create_workspace_share_token",
+						{ p_workspace_id: workspaceId },
+					);
+					if (error) throw error;
+					const token = data?.[0]?.token;
+					if (!isWorkspaceShareToken(token)) {
+						throw new Error("The share service returned an invalid link.");
+					}
+					return token;
+				}}
+				workspaceName={workspaceName}
+				documentName={documentName}
+			/>
+		) : isDemoModeEnabled ? (
+			<WorkspaceShareControl
+				createShareToken={() => createPreviewWorkspaceShareToken(workspaceId)}
+				workspaceName={workspaceName}
+				documentName={documentName}
+			/>
+		) : null
+	) : (
+		<div className="flex items-center gap-2">
+			{!user ? (
+				<Button
+					type="button"
+					variant="outline"
+					size="xs"
+					className="h-7 gap-1.5 px-3"
+					disabled={!isAuthLoaded}
+					onClick={() => void signInToCurrentWorkspace()}
+				>
+					Sign in
+				</Button>
+			) : null}
+			{shareAccess ? (
+				<Button
+					type="button"
+					variant="featured"
+					size="xs"
+					className="h-7 gap-1.5 px-3 font-semibold"
+					disabled={shareAccess.joining}
+					onClick={() =>
+						void shareAccess.onJoinToEdit().catch((caught: unknown) => {
+							toast.error(
+								caught instanceof Error
+									? caught.message
+									: "Unable to join this workspace.",
+							);
+						})
+					}
+				>
+					<PencilLine aria-hidden="true" />
+					{shareAccess.joining ? "Joining…" : "Join to edit"}
+				</Button>
+			) : null}
+		</div>
 	);
 	const navigateToCurrentPathBranch = useCallback(
 		async (nextBranchId: string, replace = false) => {
@@ -179,7 +284,11 @@ export function WorkspaceAtelier({
 		setWorkspaceDefaultBranchId(null);
 		setError(null);
 
-		const userId = isDemoModeEnabled ? DEMO_AUTH_TOKEN : user?.id;
+		const userId = isDemoModeEnabled
+			? DEMO_AUTH_TOKEN
+			: canEdit
+				? user?.id
+				: `public:${workspaceId}`;
 		if (!userId) {
 			setError("Unable to identify the current Atelier account.");
 			return;
@@ -189,6 +298,7 @@ export function WorkspaceAtelier({
 			namespace,
 			workspaceSlug,
 			getAccessToken,
+			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
 		})
 			.then(async (session) => {
@@ -220,6 +330,7 @@ export function WorkspaceAtelier({
 				setInstance(
 					createAtelier({
 						lix: session.lix,
+						readOnly: isReadOnly,
 						branchSession,
 						reviewRangeSessionId: userId,
 						sessionStateStore: createWorkspaceSessionStateStore({
@@ -227,12 +338,12 @@ export function WorkspaceAtelier({
 							workspaceId,
 						}),
 						preferencesStore: createWorkspacePreferencesStore({
-							client,
+							client: canEdit ? client : null,
 							userId,
 							workspaceId,
 						}),
 						reviewStatusStore: createWorkspaceReviewStatusStore({
-							client,
+							client: canEdit ? client : null,
 							userId,
 							workspaceId,
 						}),
@@ -267,6 +378,8 @@ export function WorkspaceAtelier({
 		};
 	}, [
 		client,
+		canEdit,
+		isReadOnly,
 		getAccessToken,
 		navigateToCurrentPathBranch,
 		namespace,
@@ -361,6 +474,7 @@ export function WorkspaceAtelier({
 										/>
 									</Link>
 								),
+								navbarEnd: headerActions,
 							}}
 						/>
 						<Outlet />
@@ -393,4 +507,87 @@ export function useWorkspaceAtelierInstance(): AtelierInstance | null {
 
 export function useWorkspaceDefaultBranchId(): string | null {
 	return useContext(WorkspaceDefaultBranchContext);
+}
+
+function WorkspaceShareControl({
+	createShareToken,
+	workspaceName,
+	documentName,
+}: {
+	createShareToken: () => Promise<string>;
+	workspaceName: string;
+	documentName: string;
+}) {
+	const [open, setOpen] = useState(false);
+	const [minting, setMinting] = useState(false);
+	const [urls, setUrls] = useState({ canonicalUrl: "", editableUrl: "" });
+
+	const mintShareLink = async () => {
+		if (minting) return;
+		setMinting(true);
+		try {
+			const token = await createShareToken();
+			const canonicalUrl = stripInviteFromUrl(window.location.href);
+			setUrls({
+				canonicalUrl,
+				editableUrl: appendWorkspaceShareToken(canonicalUrl, token),
+			});
+			setOpen(true);
+		} catch (caught) {
+			toast.error(
+				caught instanceof Error
+					? caught.message
+					: "Unable to create a share link.",
+			);
+		} finally {
+			setMinting(false);
+		}
+	};
+
+	return (
+		<WorkspaceShareDialog
+			canonicalUrl={urls.canonicalUrl}
+			editableUrl={urls.editableUrl}
+			documentName={documentName}
+			workspaceName={workspaceName}
+			open={open}
+			onOpenChange={(nextOpen) => {
+				if (!nextOpen) {
+					setOpen(false);
+					return;
+				}
+				void mintShareLink();
+			}}
+			trigger={
+				<Button
+					type="button"
+					size="xs"
+					variant="outline"
+					className="h-7 px-3"
+					disabled={minting}
+				>
+					{minting ? "Creating…" : "Share"}
+				</Button>
+			}
+		/>
+	);
+}
+
+function activeDocumentName({
+	pathname,
+	routeFilePath,
+	workspaceName,
+}: {
+	pathname: string;
+	routeFilePath: string | undefined;
+	workspaceName: string;
+}) {
+	const encodedPath = routeFilePath || pathname.split("/file/", 2)[1];
+	const encodedName = encodedPath?.split("/").filter(Boolean).at(-1);
+	if (!encodedName) return workspaceName;
+	try {
+		return decodeURIComponent(encodedName);
+	} catch {
+		return encodedName;
+	}
 }

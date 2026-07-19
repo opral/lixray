@@ -1,3 +1,4 @@
+import { parseSqlScript } from "@lix-js/sdk/workerd";
 import { Container } from "@cloudflare/containers";
 import { handleRequest } from "./handler";
 
@@ -43,7 +44,10 @@ export default {
 		env: Env,
 		ctx: ExecutionContext,
 	): Promise<Response> {
-		return handleRequest(request, env, { executionContext: ctx });
+		return handleRequest(request, env, {
+			executionContext: ctx,
+			parseSqlScript,
+		});
 	},
 };
 

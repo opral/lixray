@@ -6,6 +6,12 @@ export interface OpenWorkspaceLixSessionOptions {
 	namespace: string;
 	workspaceSlug: string;
 	getAccessToken: TokenProvider;
+	/**
+	 * Opens the session without an Authorization header when no access token
+	 * is available. The worker only serves such requests through its public,
+	 * read-only workspace transport.
+	 */
+	allowAnonymous?: boolean;
 	initialBranchId?: string | null;
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
@@ -28,10 +34,11 @@ export async function openWorkspaceLixSession(
 		server: {
 			mode: "remote",
 			url: workspaceUrl(options),
-			headers: async () => {
+			headers: async (): Promise<Record<string, string>> => {
 				const token = await options.getAccessToken();
-				if (!token) throw new Error("A workspace access token is required.");
-				return { Authorization: `Bearer ${token}` };
+				if (token) return { Authorization: `Bearer ${token}` };
+				if (options.allowAnonymous) return {};
+				throw new Error("A workspace access token is required.");
 			},
 			...(options.fetch ? { fetch: options.fetch } : {}),
 		},

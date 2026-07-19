@@ -1,6 +1,17 @@
-import { openMemoryLix } from "@lix-js/sdk/workerd";
+import { openMemoryLix, parseSqlScript } from "@lix-js/sdk/workerd";
 import { DEMO_MAIN_BRANCH_ID } from "./lib/demo-identity";
-import { handleRequest, type PreviewWorkerEnv } from "./worker/handler";
+import { withShareSecurityHeaders } from "./lib/share-security";
+import {
+	handleRequest,
+	resolveWorkspaceWithSupabase,
+	type PreviewWorkerEnv,
+} from "./worker/handler";
+import {
+	authenticatePreviewDemoBrowser,
+	authenticatePreviewDemoMcp,
+	authorizePreviewDemoWorkspace,
+	handlePreviewShareRequest,
+} from "./worker/preview-share-service";
 import { createR2WorkspaceRuntime } from "./worker/workspace-runtime";
 
 const workspaceRuntime = createR2WorkspaceRuntime(openMemoryLix, {
@@ -14,9 +25,37 @@ export default {
 		ctx: ExecutionContext,
 	): Promise<Response> {
 		ctx.passThroughOnException();
+		const previewShareResponse = await handlePreviewShareRequest(request, env);
+		if (previewShareResponse) {
+			return withShareSecurityHeaders(previewShareResponse);
+		}
 		const previewHostname = new URL(request.url).hostname;
 		return handleRequest(request, env, {
 			executionContext: ctx,
+			authenticate: (workspaceRequest) =>
+				authenticatePreviewDemoBrowser(workspaceRequest, env),
+			authenticateMcp: (mcpRequest) =>
+				authenticatePreviewDemoMcp(mcpRequest, env),
+			authorizeWorkspace: (workspaceId, auth) =>
+				authorizePreviewDemoWorkspace(workspaceId, auth, env),
+			// Preview membership lives in the R2-backed capability simulator, so
+			// route resolution must also pass the per-session membership check.
+			resolveWorkspace: async (namespace, workspaceSlug, auth) => {
+				const resolution = await resolveWorkspaceWithSupabase(
+					namespace,
+					workspaceSlug,
+					auth,
+					env,
+				);
+				if (!resolution.ok) return resolution;
+				const failure = await authorizePreviewDemoWorkspace(
+					resolution.workspaceId,
+					auth,
+					env,
+				);
+				return failure ? { ok: false, response: failure } : resolution;
+			},
+			parseSqlScript,
 			workspaceFetch: (workspaceId, workspaceRequest) =>
 				workspaceRuntime.fetch(
 					env.PREVIEW_STATE,
@@ -26,7 +65,9 @@ export default {
 				),
 			fallback: async (fallbackRequest, fallbackEnv) => {
 				if (!fallbackEnv.ASSETS) {
-					return new Response("Not found\n", { status: 404 });
+					return withShareSecurityHeaders(
+						new Response("Not found\n", { status: 404 }),
+					);
 				}
 				if (
 					fallbackRequest.method === "GET" &&
@@ -34,11 +75,15 @@ export default {
 				) {
 					const shellUrl = new URL(fallbackRequest.url);
 					shellUrl.pathname = "/";
-					return fallbackEnv.ASSETS.fetch(
-						new Request(shellUrl, fallbackRequest),
+					return withShareSecurityHeaders(
+						await fallbackEnv.ASSETS.fetch(
+							new Request(shellUrl, fallbackRequest),
+						),
 					);
 				}
-				return fallbackEnv.ASSETS.fetch(fallbackRequest);
+				return withShareSecurityHeaders(
+					await fallbackEnv.ASSETS.fetch(fallbackRequest),
+				);
 			},
 		});
 	},
