@@ -91,6 +91,120 @@ void test("canonical path validation rejects ambiguous and unsafe paths", () => 
 	assert.equal(directoryPath("/", { allowRoot: true }), "/");
 });
 
+void test("list_directory maps one ordered root read", async () => {
+	const requests: Array<ExecuteRequest> = [];
+	const service = new LixFileService(
+		testRuntimeClient((request) => {
+			requests.push(request);
+			return result([
+				[
+					{ kind: "int", value: 0 },
+					textValue("/docs/"),
+					textValue("docs"),
+					{ kind: "json", value: null },
+					textValue("dir-rev"),
+					textValue(UPDATED_AT),
+				],
+				[
+					{ kind: "int", value: 1 },
+					textValue("/README.md"),
+					textValue("README.md"),
+					{ kind: "json", value: { size: 42 } },
+					textValue("file-rev"),
+					textValue(UPDATED_AT),
+				],
+			]);
+		}),
+	);
+
+	assert.deepEqual(await service.listDirectory(WORKSPACE_ID, BRANCH_ID, "/"), [
+		{
+			kind: "directory",
+			path: "/docs/",
+			name: "docs",
+			revision: "dir-rev",
+			updatedAt: UPDATED_AT,
+		},
+		{
+			kind: "file",
+			path: "/README.md",
+			name: "README.md",
+			size: 42,
+			revision: "file-rev",
+			updatedAt: UPDATED_AT,
+		},
+	]);
+
+	assert.equal(requests.length, 1);
+	const [request] = requests;
+	assert.ok(request);
+	assert.deepEqual(request.params, []);
+	assert.match(request.sql, /lix_json\('null'\) AS lixcol_metadata/);
+	assert.match(request.sql, /lix_directory WHERE parent_id IS NULL/);
+	assert.match(request.sql, /lix_file WHERE directory_id IS NULL/);
+	assert.match(request.sql, /UNION ALL/);
+	assert.match(request.sql, /ORDER BY entry_kind, name$/);
+});
+
+void test("list_directory reuses the resolved directory id in one ordered read", async () => {
+	const requests: Array<ExecuteRequest> = [];
+	const service = new LixFileService(
+		testRuntimeClient((request) => {
+			requests.push(request);
+			if (request.sql === "SELECT id FROM lix_directory WHERE path = $1") {
+				return result([[textValue("docs-id")]]);
+			}
+			return result([
+				[
+					{ kind: "int", value: 0 },
+					textValue("/docs/guides/"),
+					textValue("guides"),
+					{ kind: "json", value: null },
+					textValue("guides-rev"),
+					textValue(UPDATED_AT),
+				],
+				[
+					{ kind: "int", value: 1 },
+					textValue("/docs/readme.md"),
+					textValue("readme.md"),
+					{ kind: "json", value: { size: 7 } },
+					textValue("readme-rev"),
+					textValue(UPDATED_AT),
+				],
+			]);
+		}),
+	);
+
+	assert.deepEqual(
+		await service.listDirectory(WORKSPACE_ID, BRANCH_ID, "/docs/"),
+		[
+			{
+				kind: "directory",
+				path: "/docs/guides/",
+				name: "guides",
+				revision: "guides-rev",
+				updatedAt: UPDATED_AT,
+			},
+			{
+				kind: "file",
+				path: "/docs/readme.md",
+				name: "readme.md",
+				size: 7,
+				revision: "readme-rev",
+				updatedAt: UPDATED_AT,
+			},
+		],
+	);
+
+	assert.equal(requests.length, 2);
+	const request = requests[1];
+	assert.ok(request);
+	assert.deepEqual(request.params, [{ kind: "text", value: "docs-id" }]);
+	assert.match(request.sql, /lix_directory WHERE parent_id = \$1/);
+	assert.match(request.sql, /lix_file WHERE directory_id = \$1/);
+	assert.match(request.sql, /ORDER BY entry_kind, name$/);
+});
+
 void test("read_file validates UTF-8 and paginates by line with a revision", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addFile(
@@ -423,6 +537,24 @@ void test("directory deletion requires recursive confirmation and accepts an omi
 
 type StoredFile = { bytes: Uint8Array; revision: string };
 type StoredDirectory = { revision: string; id: string };
+
+function testRuntimeClient(
+	execute: (
+		request: ExecuteRequest,
+	) => ExecuteResponse | Promise<ExecuteResponse>,
+): LixRuntimeClient {
+	return {
+		listWorkspaces: async () => [],
+		listBranches: async () => ({
+			branches: [],
+			currentBranchId: BRANCH_ID,
+		}),
+		execute: async (_workspaceId, request) => execute(request),
+		executeBatch: async () => {
+			throw new Error("listDirectory must use execute, not executeBatch");
+		},
+	};
+}
 
 class MemoryLixRuntimeClient implements LixRuntimeClient {
 	readonly workspaceSummaries: Array<WorkspaceSummary> = [
