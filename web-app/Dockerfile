@@ -42,7 +42,9 @@ RUN if [ ! -f vendor/lix/packages/js-sdk/package.json ]; then \
 		rm /tmp/atelier.tar.gz; \
 	fi
 
-RUN --mount=type=cache,id=lixray-pnpm-store,target=/root/.local/share/pnpm/store \
+# Railway cache mounts must be namespaced by this service's ID. Docker treats
+# the ID as opaque, so the same cache works for local Compose builds.
+RUN --mount=type=cache,id=s/c745bcb2-fef1-4ba6-9ebf-a6d112d94d05-/root/.local/share/pnpm/store,target=/root/.local/share/pnpm/store \
 	pnpm install --frozen-lockfile
 RUN pnpm --dir web-app build:node
 
