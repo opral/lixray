@@ -13,7 +13,7 @@ the Rust tracing adapter when it opens Lix through `lix_sdk`.
 ## SDK exposure
 
 The Rust SDK accepts an `Arc<dyn TelemetrySink>` through
-`OpenLixOptions::with_telemetry`. The engine calls `enabled` before building
+`open_lix_with_telemetry`. The engine calls `enabled` before building
 attributes, then uses the returned start/finish handle to preserve async span
 parentage. `TracingTelemetrySink` is the explicit adapter for hosts that use
 the Rust `tracing` ecosystem; Lix never installs a global subscriber or

@@ -206,9 +206,9 @@ impl WorkspaceRuntimeManager {
         };
 
         let protocol_lix = Arc::new(
-            lix_sdk::open_lix(
-                lix_sdk::OpenLixOptions::new(storage)
-                    .with_telemetry(Arc::new(lix_sdk::TracingTelemetrySink::new())),
+            lix_sdk::open_lix_with_telemetry(
+                lix_sdk::OpenLixOptions::new(storage),
+                Arc::new(lix_sdk::TracingTelemetrySink::new()),
             )
             .await
             .context("open Lix workspace session for the canonical server protocol")?,
