@@ -3,6 +3,10 @@ import { zipSync } from "fflate";
 import { LixFileService, type LixRuntimeClient } from "../mcp/file-service";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 import {
+	fetchZipEntriesInBatches,
+	type ZipFileFetch,
+} from "./file-download-batches";
+import {
 	type ExecuteRequest,
 	type ExecuteResponse,
 	type WireValue,
@@ -62,7 +66,6 @@ export function parentDirPath(dirPath: string): string {
 
 const UPLOAD_BATCH_MAX_FILES = 10;
 const UPLOAD_BATCH_MAX_BASE64_CHARS = 2 * 1024 * 1024;
-const DOWNLOAD_CONCURRENCY = 4;
 
 export function useFileExplorerApi() {
 	const api = useLixrayApi();
@@ -227,20 +230,27 @@ export function useFileExplorerApi() {
 			return base64ToBytes(value.base64);
 		}
 
-		async function fetchFileBytesById(
+		async function fetchFileBytesByPathBatch(
 			branchId: string,
-			fileId: string,
-		): Promise<Uint8Array<ArrayBuffer>> {
+			paths: Array<string>,
+		): Promise<Map<string, Uint8Array>> {
+			if (paths.length === 0) return new Map();
+			const placeholders = paths.map((_, index) => `$${index + 1}`).join(", ");
 			const result = await executeStatement({
 				branchId,
-				sql: "SELECT data FROM lix_file WHERE id = $1",
-				params: [text(fileId)],
+				sql: `SELECT path, data FROM lix_file WHERE path IN (${placeholders})`,
+				params: paths.map(text),
 			});
-			const value = result.rows[0]?.[0];
-			if (!value || value.kind !== "blob") {
-				throw new Error("File data not found.");
+			const bytesByPath = new Map<string, Uint8Array>();
+			for (const row of result.rows) {
+				const path = asText(row[0]);
+				const value = row[1];
+				if (!value || value.kind !== "blob") {
+					throw new Error("File data not found.");
+				}
+				bytesByPath.set(path, base64ToBytes(value.base64));
 			}
-			return base64ToBytes(value.base64);
+			return bytesByPath;
 		}
 
 		async function listSubtreeFiles(
@@ -281,11 +291,11 @@ export function useFileExplorerApi() {
 			entries: Array<ExplorerEntry>,
 		): Promise<Uint8Array<ArrayBuffer>> {
 			const zipEntries: Record<string, Uint8Array> = {};
-			const filesToFetch: Array<{ id: string; zipPath: string }> = [];
+			const filesToFetch: Array<ZipFileFetch> = [];
 
 			for (const entry of entries) {
 				if (entry.kind === "file") {
-					filesToFetch.push({ id: entry.id, zipPath: entry.name });
+					filesToFetch.push({ path: entry.path, zipPath: entry.name });
 				} else {
 					const basePrefix = parentDirPath(entry.path);
 					for (const subDirPath of await listSubtreeDirs(
@@ -296,16 +306,19 @@ export function useFileExplorerApi() {
 					}
 					for (const file of await listSubtreeFiles(branchId, entry.path)) {
 						filesToFetch.push({
-							id: file.id,
+							path: file.path,
 							zipPath: file.path.slice(basePrefix.length),
 						});
 					}
 				}
 			}
 
-			await mapLimit(filesToFetch, DOWNLOAD_CONCURRENCY, async (file) => {
-				zipEntries[file.zipPath] = await fetchFileBytesById(branchId, file.id);
-			});
+			Object.assign(
+				zipEntries,
+				await fetchZipEntriesInBatches(filesToFetch, (paths) =>
+					fetchFileBytesByPathBatch(branchId, paths),
+				),
+			);
 
 			return zipSync(zipEntries);
 		}
@@ -387,23 +400,4 @@ function asText(value: WireValue | undefined): string {
 		throw new Error("Expected a text value in the query result.");
 	}
 	return value.value;
-}
-
-async function mapLimit<T>(
-	items: Array<T>,
-	limit: number,
-	task: (item: T) => Promise<void>,
-): Promise<void> {
-	let nextIndex = 0;
-	const workers = Array.from(
-		{ length: Math.min(limit, items.length) },
-		async () => {
-			while (nextIndex < items.length) {
-				const index = nextIndex;
-				nextIndex += 1;
-				await task(items[index]);
-			}
-		},
-	);
-	await Promise.all(workers);
 }

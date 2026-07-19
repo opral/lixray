@@ -15,6 +15,12 @@ protocol that eliminates repeated branch selection can plausibly exceed 50% for
 three-or-more network-bound reads, but needs end-to-end measurement before any
 design is chosen.
 
+The ZIP workflow provides a concrete large fan-out instance: its former
+four-worker fetch pool still queued each read through `useLixrayApi`, so 2,500
+file-data requests did not overlap. It measured 8.315 s p50 as serialized point
+reads versus 0.618 s for 50-path reads; the bounded batching patch addresses
+that caller only, not the shared-session behavior for other read workflows.
+
 This crosses browser and MCP clients, remote binding queues, branch switching,
 server protocol, coherent-read execution, cancellation/retry, and observer
 ordering semantics—well beyond a bounded local patch.
