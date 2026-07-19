@@ -67,6 +67,6 @@ contracts. No workload threshold or actual speedup has been measured yet.
 **Next measurement.** Measure p50/p95 and `EXPLAIN` for representative root
 searches at 10k and 100k files before choosing a path-search index design.
 
-**Status:** observing; the bounded blob-hydration avoidance is supplied by the
-dependent Lix #625 stack, while a persistent root-substring index remains out
-of scope.
+**Status:** observing; the bounded blob-hydration avoidance merged in
+[Lix #625](https://github.com/opral/lix/pull/625), while a persistent
+root-substring index remains out of scope.
