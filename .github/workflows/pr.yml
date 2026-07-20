@@ -1,4 +1,4 @@
-name: PR checks
+name: CI
 
 on:
   pull_request:
@@ -35,32 +35,10 @@ env:
   PNPM_VERSION: "10.13.1"
 
 jobs:
-  database:
-    name: Supabase database tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v1
-        with:
-          version: 2.109.1
-
-      - name: Start Supabase
-        working-directory: database
-        run: supabase start
-
-      - name: Test database policies and functions
-        working-directory: database
-        run: supabase test db
-
-  frontend:
-    name: Frontend checks
+  ci:
+    name: CI
     runs-on: blacksmith-32vcpu-ubuntu-2404
-    timeout-minutes: 10
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
@@ -79,11 +57,30 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lix-server
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1
+
       - name: Validate Docker submodule fallbacks
         run: pnpm check:docker-submodule-pins --verify-archives
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Test database policies and functions
+        working-directory: database
+        run: supabase start && supabase test db
 
       - name: Check formatting
         run: pnpm --dir web-app format:check
@@ -91,10 +88,10 @@ jobs:
       - name: Lint
         run: pnpm --dir web-app lint
 
-      - name: Typecheck and worker tests
+      - name: Typecheck and test frontend
         run: pnpm --dir web-app check:cloudflare
 
-      - name: Build
+      - name: Build frontend
         run: pnpm --dir web-app build
 
       - name: Build Railway target
@@ -102,6 +99,12 @@ jobs:
           VITE_SUPABASE_URL: https://example.invalid
           VITE_SUPABASE_KEY: ci-public-placeholder
         run: pnpm --dir web-app build:node
+
+      - name: Check Rust
+        run: |
+          cargo fmt --manifest-path lix-server/Cargo.toml --check
+          cargo clippy --manifest-path lix-server/Cargo.toml --locked --all-targets --all-features -- -D warnings
+          cargo test --manifest-path lix-server/Cargo.toml --locked
 
       - name: Verify generated files are committed
         run: git diff --exit-code
@@ -123,61 +126,6 @@ jobs:
               exit 1
             }
           '
-
-  rust:
-    name: Rust checks
-    runs-on: blacksmith-32vcpu-ubuntu-2404
-    timeout-minutes: 20
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: lix-server
-
-      - name: Check formatting
-        run: cargo fmt --manifest-path lix-server/Cargo.toml --check
-
-      - name: Lint
-        run: cargo clippy --manifest-path lix-server/Cargo.toml --locked --all-targets --all-features -- -D warnings
-
-      - name: Test
-        run: cargo test --manifest-path lix-server/Cargo.toml --locked
-
-  e2e:
-    name: End-to-end tests
-    runs-on: blacksmith-32vcpu-ubuntu-2404
-    timeout-minutes: 20
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium
