@@ -64,12 +64,12 @@ void test("execute tool documents only the compact core schema", () => {
 	);
 	assert.match(
 		EXECUTE_TOOL_DESCRIPTION,
-		/do not inspect \`information_schema\` for them/,
+		/do not inspect `information_schema` for them/,
 	);
 	assert.match(EXECUTE_TOOL_DESCRIPTION, /lix_active_branch_commit_id\(\)/);
 	assert.match(EXECUTE_TOOL_DESCRIPTION, /LIX_HISTORY_NON_IDENTITY_FILTER/);
 	assert.doesNotMatch(EXECUTE_TOOL_DESCRIPTION, /file-tool safeguards/);
-	assert.match(EXECUTE_TOOL_DESCRIPTION, /current item's \`lixcol_change_id\`/);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /current item's `lixcol_change_id`/);
 	assert.ok(EXECUTE_TOOL_DESCRIPTION.length < 4_000);
 	assert.match(EXECUTE_SQL_TABLES_QUERY, /information_schema\.tables/);
 	assert.match(EXECUTE_SQL_COLUMNS_QUERY, /information_schema\.columns/);

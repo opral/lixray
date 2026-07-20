@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { EventMessage } from "posthog-node";
-import type { McpToolCallObservation } from "../mcp/server.ts";
 import {
 	observeExecuteInput,
 	observeExecuteOutput,
@@ -279,10 +278,8 @@ const UUID_PATTERN =
 function omitIds(
 	properties: EventMessage["properties"],
 ): Record<string, unknown> {
-	const {
-		$ai_trace_id: _traceId,
-		$ai_span_id: _spanId,
-		...rest
-	} = properties ?? {};
+	const rest = { ...(properties ?? {}) };
+	delete rest.$ai_trace_id;
+	delete rest.$ai_span_id;
 	return rest;
 }
