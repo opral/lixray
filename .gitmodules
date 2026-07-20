@@ -1,7 +1,9 @@
 [submodule "vendor/atelier"]
 	path = vendor/atelier
 	url = https://github.com/opral/atelier.git
-	branch = main
+	# TEMPORARY: tracks the opral/atelier#60 feature branch; restore to
+	# main (and bump the gitlink + Dockerfile pin) once that PR merges.
+	branch = central-panel-embedding
 [submodule "vendor/lix"]
 	path = vendor/lix
 	url = https://github.com/opral/lix.git
