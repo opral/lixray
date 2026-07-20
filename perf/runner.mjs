@@ -30,6 +30,7 @@ async function seed(args) {
   const fixture = JSON.parse(await readFile(fixturePath, "utf8"));
   validateFixture(fixture);
   await waitForServer(fixture.workspaceId);
+  const started = performance.now();
 
   const countResult = await execute(
     fixture.workspaceId,
@@ -61,20 +62,9 @@ async function seed(args) {
     offset += fixture.batchSize
   ) {
     const end = Math.min(offset + fixture.batchSize, fixture.fileCount);
-    const statements = [];
-    for (let index = offset; index < end; index += 1) {
-      statements.push({
-        sql: "INSERT INTO lix_file (path, data) VALUES ($1, $2) ON CONFLICT (path) DO UPDATE SET data = excluded.data",
-        params: [
-          {
-            kind: "text",
-            value: `/perf/${String(index).padStart(4, "0")}.json`,
-          },
-          { kind: "blob", base64: content },
-        ],
-      });
-    }
-    await protocolRequest(fixture.workspaceId, "execute-batch", { statements });
+    const batch = fileUpsertBatch(offset, end, content);
+    const result = await execute(fixture.workspaceId, batch.sql, batch.params);
+    assertRowsAffected(result, end - offset, "fixture file upsert");
     process.stdout.write(`\rseeded ${end}/${fixture.fileCount} files`);
   }
   process.stdout.write("\n");
@@ -88,7 +78,9 @@ async function seed(args) {
   if (finalCount !== fixture.fileCount) {
     fail(`seed verification failed: expected ${fixture.fileCount}, got ${finalCount}`);
   }
-  console.log(`fixture ready: ${fixture.workspaceId} (${finalCount} files)`);
+  console.log(
+    `fixture ready: ${fixture.workspaceId} (${finalCount} files) in ${Math.round(performance.now() - started)}ms`,
+  );
 }
 
 async function run(args) {
@@ -189,6 +181,33 @@ async function waitForServer(workspaceId) {
 
 async function execute(workspaceId, sql, params) {
   return protocolRequest(workspaceId, "execute", { sql, params });
+}
+
+function fileUpsertBatch(offset, end, content) {
+  const values = [];
+  const params = [];
+  for (let index = offset; index < end; index += 1) {
+    const firstParameter = params.length + 1;
+    values.push(`($${firstParameter}, $${firstParameter + 1})`);
+    params.push(
+      {
+        kind: "text",
+        value: `/perf/${String(index).padStart(4, "0")}.json`,
+      },
+      { kind: "blob", base64: content },
+    );
+  }
+  return {
+    sql: `INSERT INTO lix_file (path, data) VALUES ${values.join(", ")} ON CONFLICT (path) DO UPDATE SET data = excluded.data`,
+    params,
+  };
+}
+
+function assertRowsAffected(result, expected, operation) {
+  const actual = Number(result.rowsAffected);
+  if (actual !== expected) {
+    fail(`${operation} affected ${actual} rows, expected ${expected}`);
+  }
 }
 
 async function protocolRequest(workspaceId, operation, body) {
