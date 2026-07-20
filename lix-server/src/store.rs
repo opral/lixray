@@ -3,15 +3,38 @@ use anyhow::{Context, Result};
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
 #[cfg(test)]
 use object_store::memory::InMemory;
-use object_store::{aws::AmazonS3Builder, ObjectStore};
+use object_store::{aws::AmazonS3Builder, ClientOptions, ObjectStore, RetryConfig};
+#[cfg(test)]
+use object_store::{path::Path as ObjectPath, ClientConfigKey, ObjectStoreExt};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, OnceCell};
 use tracing::info;
+
+// SlateDB's disk cache fetches object-store data in 4 MiB parts. A 15 second
+// request timeout still permits a part to arrive at roughly 270 KiB/s, while a
+// single stalled request can no longer occupy a workspace runtime for the
+// object_store default three-minute retry budget. One retry preserves recovery
+// from a transient slow path without turning an interactive request into a
+// multi-minute wait.
+const S3_REQUEST_BUDGET: S3RequestBudget = S3RequestBudget {
+    request_timeout: Duration::from_secs(15),
+    connect_timeout: Duration::from_secs(3),
+    retry_timeout: Duration::from_secs(30),
+    max_retries: 1,
+};
+
+#[derive(Clone, Copy)]
+struct S3RequestBudget {
+    request_timeout: Duration,
+    connect_timeout: Duration,
+    retry_timeout: Duration,
+    max_retries: usize,
+}
 
 #[derive(Clone)]
 pub struct LixService {
@@ -56,6 +79,7 @@ pub enum WorkspaceRuntimeError {
 impl WorkspaceRuntimeManager {
     pub fn new(config: &Config) -> Result<Arc<Self>> {
         let storage = &config.storage;
+        let request_budget = S3_REQUEST_BUDGET;
         let object_store: Arc<dyn ObjectStore> = Arc::new(
             AmazonS3Builder::new()
                 .with_endpoint(&storage.endpoint)
@@ -63,8 +87,10 @@ impl WorkspaceRuntimeManager {
                 .with_access_key_id(&storage.access_key_id)
                 .with_secret_access_key(&storage.secret_access_key)
                 .with_region(&storage.region)
-                .with_allow_http(storage.allow_http)
                 .with_virtual_hosted_style_request(false)
+                .with_client_options(s3_client_options(request_budget))
+                .with_retry(s3_retry_config(request_budget))
+                .with_allow_http(storage.allow_http)
                 .build()
                 .context("build S3 object store")?,
         );
@@ -292,6 +318,20 @@ fn elapsed_millis(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
+fn s3_client_options(budget: S3RequestBudget) -> ClientOptions {
+    ClientOptions::new()
+        .with_timeout(budget.request_timeout)
+        .with_connect_timeout(budget.connect_timeout)
+}
+
+fn s3_retry_config(budget: S3RequestBudget) -> RetryConfig {
+    RetryConfig {
+        max_retries: budget.max_retries,
+        retry_timeout: budget.retry_timeout,
+        ..RetryConfig::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,5 +382,90 @@ mod tests {
                 Err(WorkspaceRuntimeError::InvalidId)
             ));
         }
+    }
+
+    #[test]
+    fn s3_request_policy_is_bounded() {
+        let options = s3_client_options(S3_REQUEST_BUDGET);
+        assert_eq!(
+            options
+                .get_config_value(&ClientConfigKey::Timeout)
+                .as_deref(),
+            Some("15s")
+        );
+        assert_eq!(
+            options
+                .get_config_value(&ClientConfigKey::ConnectTimeout)
+                .as_deref(),
+            Some("3s")
+        );
+
+        let retry = s3_retry_config(S3_REQUEST_BUDGET);
+        assert_eq!(retry.max_retries, 1);
+        assert_eq!(retry.retry_timeout, Duration::from_secs(30));
+    }
+
+    #[tokio::test]
+    async fn s3_request_policy_times_out_a_blackholed_head_request() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind blackhole listener");
+        let endpoint = format!(
+            "http://{}",
+            listener.local_addr().expect("blackhole listener address")
+        );
+        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+        let blackhole = tokio::spawn(async move {
+            let (connection, _) = listener
+                .accept()
+                .await
+                .expect("accept object-store request");
+            let _ = accepted_tx.send(());
+            std::future::pending::<()>().await;
+            drop(connection);
+        });
+        let test_budget = S3RequestBudget {
+            request_timeout: Duration::from_millis(100),
+            connect_timeout: Duration::from_millis(50),
+            retry_timeout: Duration::from_millis(100),
+            max_retries: 0,
+        };
+        let object_store = AmazonS3Builder::new()
+            .with_endpoint(endpoint)
+            .with_bucket_name("test-bucket")
+            .with_access_key_id("test-access-key")
+            .with_secret_access_key("test-secret-key")
+            .with_region("auto")
+            .with_client_options(s3_client_options(test_budget))
+            .with_retry(s3_retry_config(test_budget))
+            .with_allow_http(true)
+            .build()
+            .expect("build blackhole object store");
+
+        let started = Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            object_store.head(&ObjectPath::from("blackholed-head")),
+        )
+        .await;
+        let acceptance = tokio::time::timeout(Duration::from_secs(1), accepted_rx).await;
+        blackhole.abort();
+        let _ = blackhole.await;
+        assert!(
+            matches!(acceptance, Ok(Ok(()))),
+            "the object-store request never reached the blackhole"
+        );
+
+        assert!(
+            matches!(result, Ok(Err(_))),
+            "unexpected result: {result:?}"
+        );
+        let elapsed = started.elapsed();
+        eprintln!("blackholed S3 HEAD returned after {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_millis(750),
+            "blackholed request exceeded the configured budget: {:?}",
+            elapsed
+        );
     }
 }
