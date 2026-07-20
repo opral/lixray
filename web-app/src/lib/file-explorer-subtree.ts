@@ -43,6 +43,18 @@ export function parseSubtreeListResults(
 	};
 }
 
+export function parseSubtreeListBatchResults(
+	results: Array<ExecuteResponse>,
+	directoryCount: number,
+): Array<SubtreeEntries> {
+	if (results.length !== directoryCount * 2) {
+		throw new Error("Subtree listing did not return every result set.");
+	}
+	return Array.from({ length: directoryCount }, (_, index) =>
+		parseSubtreeListResults(results.slice(index * 2, index * 2 + 2)),
+	);
+}
+
 function text(value: string): WireValue {
 	return { kind: "text", value };
 }

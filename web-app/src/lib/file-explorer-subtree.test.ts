@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	parseSubtreeListBatchResults,
 	parseSubtreeListResults,
 	subtreeListStatements,
 } from "./file-explorer-subtree.ts";
@@ -59,5 +60,55 @@ void test("subtree listing parses the two ordered result sets", () => {
 void test("subtree listing rejects an incomplete batch response", () => {
 	assert.throws(() => parseSubtreeListResults([]), {
 		message: "Subtree listing did not return both result sets.",
+	});
+});
+
+void test("subtree listing groups multiple directories from one batch", () => {
+	const results = [
+		{
+			columns: ["path"],
+			rows: [[{ kind: "text" as const, value: "/assets/icons/" }]],
+			rowsAffected: 0,
+			notices: [],
+		},
+		{
+			columns: ["id", "path"],
+			rows: [],
+			rowsAffected: 0,
+			notices: [],
+		},
+		{
+			columns: ["path"],
+			rows: [],
+			rowsAffected: 0,
+			notices: [],
+		},
+		{
+			columns: ["id", "path"],
+			rows: [
+				[
+					{ kind: "text" as const, value: "file-doc" },
+					{ kind: "text" as const, value: "/docs/readme.md" },
+				],
+			],
+			rowsAffected: 0,
+			notices: [],
+		},
+	];
+	assert.deepEqual(parseSubtreeListBatchResults(results, 2), [
+		{
+			directoryPaths: ["/assets/icons/"],
+			files: [],
+		},
+		{
+			directoryPaths: [],
+			files: [{ id: "file-doc", path: "/docs/readme.md" }],
+		},
+	]);
+});
+
+void test("subtree listing rejects a partial multi-directory batch", () => {
+	assert.throws(() => parseSubtreeListBatchResults([], 1), {
+		message: "Subtree listing did not return every result set.",
 	});
 });

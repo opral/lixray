@@ -7,8 +7,9 @@ import {
 	type ZipFileFetch,
 } from "./file-download-batches";
 import {
-	parseSubtreeListResults,
+	parseSubtreeListBatchResults,
 	subtreeListStatements,
+	type SubtreeEntries,
 } from "./file-explorer-subtree";
 import {
 	type ExecuteRequest,
@@ -70,6 +71,7 @@ export function parentDirPath(dirPath: string): string {
 
 const UPLOAD_BATCH_MAX_FILES = 10;
 const UPLOAD_BATCH_MAX_BASE64_CHARS = 2 * 1024 * 1024;
+const SUBTREE_LIST_BATCH_MAX_DIRECTORIES = 20;
 
 export function useFileExplorerApi() {
 	const api = useLixrayApi();
@@ -260,16 +262,27 @@ export function useFileExplorerApi() {
 
 		async function listSubtreeEntries(
 			branchId: string,
-			dirPath: string,
-		): Promise<{
-			directoryPaths: Array<string>;
-			files: Array<{ id: string; path: string }>;
-		}> {
-			const response = await api.executeBatch({
-				branchId,
-				statements: subtreeListStatements(dirPath),
-			});
-			return parseSubtreeListResults(response.results);
+			dirPaths: Array<string>,
+		): Promise<Array<SubtreeEntries>> {
+			const subtrees: Array<SubtreeEntries> = [];
+			for (
+				let offset = 0;
+				offset < dirPaths.length;
+				offset += SUBTREE_LIST_BATCH_MAX_DIRECTORIES
+			) {
+				const paths = dirPaths.slice(
+					offset,
+					offset + SUBTREE_LIST_BATCH_MAX_DIRECTORIES,
+				);
+				const response = await api.executeBatch({
+					branchId,
+					statements: paths.flatMap(subtreeListStatements),
+				});
+				subtrees.push(
+					...parseSubtreeListBatchResults(response.results, paths.length),
+				);
+			}
+			return subtrees;
 		}
 
 		/**
@@ -282,13 +295,20 @@ export function useFileExplorerApi() {
 		): Promise<Uint8Array<ArrayBuffer>> {
 			const zipEntries: Record<string, Uint8Array> = {};
 			const filesToFetch: Array<ZipFileFetch> = [];
+			const directoryPaths = entries.flatMap((entry) =>
+				entry.kind === "dir" ? [entry.path] : [],
+			);
+			const subtrees = await listSubtreeEntries(branchId, directoryPaths);
+			let subtreeIndex = 0;
 
 			for (const entry of entries) {
 				if (entry.kind === "file") {
 					filesToFetch.push({ path: entry.path, zipPath: entry.name });
 				} else {
 					const basePrefix = parentDirPath(entry.path);
-					const subtree = await listSubtreeEntries(branchId, entry.path);
+					const subtree = subtrees[subtreeIndex];
+					subtreeIndex += 1;
+					if (!subtree) throw new Error("Subtree listing result is missing.");
 					for (const subDirPath of subtree.directoryPaths) {
 						zipEntries[subDirPath.slice(basePrefix.length)] = new Uint8Array(0);
 					}
