@@ -24,4 +24,7 @@ tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 [dev-dependencies]
+async-trait = "0.1.89"
+bytes = "1.10.1"
+futures-util = "0.3.31"
 http-body-util = "0.1.3"
