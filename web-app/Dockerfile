@@ -17,6 +17,7 @@ ARG VITE_PUBLIC_TELEMETRY_ENVIRONMENT
 ARG VITE_LIXRAY_LOCAL_DEV
 ARG VITE_LIXRAY_LOCAL_DEV_EMAIL
 ARG VITE_LIXRAY_LOCAL_DEV_PASSWORD
+ARG RAILWAY_ENVIRONMENT_NAME
 
 WORKDIR /app
 ENV LIXRAY_SKIP_VENDORED_LIX_WASM=1 \
@@ -30,7 +31,8 @@ ENV LIXRAY_SKIP_VENDORED_LIX_WASM=1 \
 	VITE_PUBLIC_TELEMETRY_ENVIRONMENT=${VITE_PUBLIC_TELEMETRY_ENVIRONMENT} \
 	VITE_LIXRAY_LOCAL_DEV=${VITE_LIXRAY_LOCAL_DEV} \
 	VITE_LIXRAY_LOCAL_DEV_EMAIL=${VITE_LIXRAY_LOCAL_DEV_EMAIL} \
-	VITE_LIXRAY_LOCAL_DEV_PASSWORD=${VITE_LIXRAY_LOCAL_DEV_PASSWORD}
+	VITE_LIXRAY_LOCAL_DEV_PASSWORD=${VITE_LIXRAY_LOCAL_DEV_PASSWORD} \
+	RAILWAY_ENVIRONMENT_NAME=${RAILWAY_ENVIRONMENT_NAME}
 RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
 COPY . .
 
@@ -54,8 +56,14 @@ RUN if [ ! -f vendor/lix/packages/js-sdk/package.json ]; then \
 # the ID as opaque, so the same cache works for local Compose builds.
 RUN --mount=type=cache,id=s/c745bcb2-fef1-4ba6-9ebf-a6d112d94d05-/root/.local/share/pnpm/store,target=/root/.local/share/pnpm/store \
 	pnpm install --frozen-lockfile
-RUN test -n "$VITE_SUPABASE_URL" \
-	&& test -n "$VITE_SUPABASE_KEY" \
+RUN if echo "$RAILWAY_ENVIRONMENT_NAME" | grep -Eq '^lixray-pr-[0-9]+$'; then \
+		export LIXRAY_DEMO=1; \
+		export LIXRAY_DEMO_WORKSPACE_IDS=00000000-0000-4000-8000-000000000002; \
+		export VITE_LIXRAY_DEMO=1; \
+	else \
+		test -n "$VITE_SUPABASE_URL"; \
+		test -n "$VITE_SUPABASE_KEY"; \
+	fi \
 	&& pnpm --dir web-app build:node
 
 FROM node:22-bookworm-slim AS runtime

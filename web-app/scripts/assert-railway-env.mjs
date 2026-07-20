@@ -8,8 +8,12 @@ const configuredDemoVariables = forbiddenDemoVariables.filter((name) =>
 	process.env[name]?.trim(),
 );
 
-if (configuredDemoVariables.length > 0) {
+const isPullRequestEnvironment = /^lixray-pr-\d+$/.test(
+	process.env.RAILWAY_ENVIRONMENT_NAME ?? "",
+);
+
+if (configuredDemoVariables.length > 0 && !isPullRequestEnvironment) {
 	throw new Error(
-		`Demo configuration is not supported by the Railway runtime: ${configuredDemoVariables.join(", ")}`,
+		`Demo configuration is only supported in Railway PR environments: ${configuredDemoVariables.join(", ")}`,
 	);
 }

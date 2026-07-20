@@ -70,6 +70,7 @@ export interface WorkerEnv {
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
 	LIXRAY_RELEASE_ID?: string;
+	RAILWAY_ENVIRONMENT_NAME?: string;
 	RAILWAY_GIT_COMMIT_SHA?: string;
 	CF_VERSION_METADATA?: WorkerVersionMetadata;
 }
@@ -904,12 +905,16 @@ function authenticateDemo(request: Request, env: WorkerEnv): AuthResult | null {
 }
 
 function demoWorkspaceIds(env: WorkerEnv): Set<string> {
-	return new Set(
+	const workspaceIds = new Set(
 		(env.LIXRAY_DEMO_WORKSPACE_IDS ?? "")
 			.split(",")
 			.map((workspaceId) => workspaceId.trim())
 			.filter(Boolean),
 	);
+	if (workspaceIds.size === 0 && isDemoMode(env)) {
+		workspaceIds.add(DEMO_WORKSPACE_ID);
+	}
+	return workspaceIds;
 }
 
 function demoWorkspaceSummaries(env: WorkerEnv): Array<WorkspaceSummary> {
@@ -932,7 +937,10 @@ function demoWorkspaceSummaries(env: WorkerEnv): Array<WorkspaceSummary> {
 }
 
 export function isDemoMode(env: WorkerEnv): boolean {
-	return env.LIXRAY_DEMO === "1";
+	return (
+		env.LIXRAY_DEMO === "1" ||
+		/^lixray-pr-\d+$/.test(env.RAILWAY_ENVIRONMENT_NAME ?? "")
+	);
 }
 
 function isProductionOnlyPath(pathname: string): boolean {

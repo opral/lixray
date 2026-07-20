@@ -10,7 +10,8 @@ WORKDIR /app
 # This Dockerfile uses the repository root as its build context so the server
 # and its vendored Lix checkout are built together. Railway's GitHub builder
 # does not populate submodules, so an empty checkout falls back to the exact
-# pinned revision rather than silently building a different version.
+# pinned revision rather than silently building a different version. Web-app
+# changes also deploy this service so focused PR environments remain usable.
 COPY vendor/lix ./vendor/lix
 RUN if [ ! -f vendor/lix/packages/engine/Cargo.toml ]; then \
 		curl -fsSL "https://github.com/opral/lix/archive/${LIX_REV}.tar.gz" -o /tmp/lix.tar.gz; \
