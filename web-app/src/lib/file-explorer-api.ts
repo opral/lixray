@@ -88,20 +88,24 @@ export function useFileExplorerApi() {
 		};
 		const service = new LixFileService({
 			listWorkspaces: () => Promise.resolve([]),
-			listBranches: () => api.listBranches(),
-			execute: async (_workspaceId, request) => executeStatement(request),
-			executeBatch: async (_workspaceId, request) => api.executeBatch(request),
+			activeBranchId: () => api.activeBranchId(),
+			switchBranch: async (_workspaceId, branchId) =>
+				api.switchBranch(branchId),
+			execute: async (_workspaceId, request) => {
+				const [result] = (await api.executeActive(request)).results;
+				if (!result) throw new Error("Lix did not return a SQL result");
+				return result;
+			},
+			executeBatch: async (_workspaceId, request) =>
+				api.executeBatchActive(request),
 		} satisfies LixRuntimeClient);
 
 		async function listDirectory(
 			branchId: string,
 			dirPath: string,
 		): Promise<Array<ExplorerEntry>> {
-			const entries = await service.listDirectory(
-				workspaceId,
-				branchId,
-				dirPath,
-			);
+			await api.switchBranch(branchId);
+			const entries = await service.listDirectory(workspaceId, dirPath);
 			return entries.map(
 				(entry): ExplorerEntry =>
 					entry.kind === "directory"
@@ -130,11 +134,8 @@ export function useFileExplorerApi() {
 			dirPath: string,
 			name: string,
 		): Promise<void> {
-			await service.createDirectory(
-				workspaceId,
-				branchId,
-				`${dirPath}${name}/`,
-			);
+			await api.switchBranch(branchId);
+			await service.createDirectory(workspaceId, `${dirPath}${name}/`);
 		}
 
 		/** Creates directories if missing (used for empty dirs in folder uploads). */
@@ -316,9 +317,9 @@ export function useFileExplorerApi() {
 			newName: string,
 		): Promise<void> {
 			const destination = `${entryParentPath(entry.path)}${newName}${entry.kind === "dir" ? "/" : ""}`;
+			await api.switchBranch(branchId);
 			await service.moveEntry(
 				workspaceId,
-				branchId,
 				entry.path,
 				destination,
 				entry.changeId,
@@ -330,10 +331,10 @@ export function useFileExplorerApi() {
 			branchId: string,
 			entries: Array<ExplorerEntry>,
 		): Promise<void> {
+			await api.switchBranch(branchId);
 			for (const entry of entries) {
 				await service.deleteEntry(
 					workspaceId,
-					branchId,
 					entry.path,
 					entry.changeId,
 					entry.kind === "dir",
@@ -342,7 +343,7 @@ export function useFileExplorerApi() {
 		}
 
 		return {
-			listBranches: () => service.listBranches(workspaceId),
+			listBranches: () => api.listBranches(),
 			listDirectory,
 			createDirectory,
 			ensureDirectories,

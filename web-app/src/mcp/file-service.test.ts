@@ -7,7 +7,6 @@ import {
 	MAX_TEXT_FILE_BYTES,
 	directoryPath,
 	filePath,
-	type BranchState,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
 	type ExecuteResponse,
@@ -91,53 +90,32 @@ void test("canonical path validation rejects ambiguous and unsafe paths", () => 
 	assert.equal(directoryPath("/", { allowRoot: true }), "/");
 });
 
-void test("omitted branch resolution uses the active-branch primitive when available", async () => {
+void test("active branch methods delegate directly to the Lix client", async () => {
 	let activeBranchCalls = 0;
-	let branchListCalls = 0;
+	const switches: Array<{ workspaceId: string; branchId: string }> = [];
 	const service = new LixFileService({
 		listWorkspaces: async () => [],
-		listBranches: async () => {
-			branchListCalls += 1;
-			return { branches: [], currentBranchId: "listed-branch" };
-		},
 		activeBranchId: async (workspaceId) => {
 			activeBranchCalls += 1;
 			assert.equal(workspaceId, WORKSPACE_ID);
 			return "active-branch";
 		},
-		execute: async () => result([]),
-		executeBatch: async () => ({ results: [] }),
-	});
-
-	assert.equal(
-		await service.resolveBranchId(WORKSPACE_ID, undefined),
-		"active-branch",
-	);
-	assert.equal(
-		await service.resolveBranchId(WORKSPACE_ID, "explicit-branch"),
-		"explicit-branch",
-	);
-	assert.equal(activeBranchCalls, 1);
-	assert.equal(branchListCalls, 0);
-});
-
-void test("branch resolution preserves the browser-adapter list fallback", async () => {
-	let branchListCalls = 0;
-	const service = new LixFileService({
-		listWorkspaces: async () => [],
-		listBranches: async () => {
-			branchListCalls += 1;
-			return { branches: [], currentBranchId: "listed-branch" };
+		switchBranch: async (workspaceId, branchId) => {
+			switches.push({ workspaceId, branchId });
+			return { branchId };
 		},
 		execute: async () => result([]),
 		executeBatch: async () => ({ results: [] }),
 	});
 
-	assert.equal(
-		await service.resolveBranchId(WORKSPACE_ID, undefined),
-		"listed-branch",
-	);
-	assert.equal(branchListCalls, 1);
+	assert.equal(await service.activeBranchId(WORKSPACE_ID), "active-branch");
+	assert.deepEqual(await service.switchBranch(WORKSPACE_ID, "draft"), {
+		branchId: "draft",
+	});
+	assert.equal(activeBranchCalls, 1);
+	assert.deepEqual(switches, [
+		{ workspaceId: WORKSPACE_ID, branchId: "draft" },
+	]);
 });
 
 void test("list_directory maps one ordered root read", async () => {
@@ -166,7 +144,7 @@ void test("list_directory maps one ordered root read", async () => {
 		}),
 	);
 
-	assert.deepEqual(await service.listDirectory(WORKSPACE_ID, BRANCH_ID, "/"), [
+	assert.deepEqual(await service.listDirectory(WORKSPACE_ID, "/"), [
 		{
 			kind: "directory",
 			path: "/docs/",
@@ -224,26 +202,23 @@ void test("list_directory reuses the resolved directory id in one ordered read",
 		}),
 	);
 
-	assert.deepEqual(
-		await service.listDirectory(WORKSPACE_ID, BRANCH_ID, "/docs/"),
-		[
-			{
-				kind: "directory",
-				path: "/docs/guides/",
-				name: "guides",
-				changeId: "guides-rev",
-				updatedAt: UPDATED_AT,
-			},
-			{
-				kind: "file",
-				path: "/docs/readme.md",
-				name: "readme.md",
-				size: 7,
-				changeId: "readme-rev",
-				updatedAt: UPDATED_AT,
-			},
-		],
-	);
+	assert.deepEqual(await service.listDirectory(WORKSPACE_ID, "/docs/"), [
+		{
+			kind: "directory",
+			path: "/docs/guides/",
+			name: "guides",
+			changeId: "guides-rev",
+			updatedAt: UPDATED_AT,
+		},
+		{
+			kind: "file",
+			path: "/docs/readme.md",
+			name: "readme.md",
+			size: 7,
+			changeId: "readme-rev",
+			updatedAt: UPDATED_AT,
+		},
+	]);
 
 	assert.equal(requests.length, 2);
 	const request = requests[1];
@@ -264,7 +239,7 @@ void test("entry existence checks use one selective union read", async () => {
 	);
 
 	await assert.rejects(
-		service.createDirectory(WORKSPACE_ID, BRANCH_ID, "/taken/"),
+		service.createDirectory(WORKSPACE_ID, "/taken/"),
 		hasCode("already_exists"),
 	);
 
@@ -287,7 +262,7 @@ void test("entry existence detects a directory at a file path", async () => {
 	const service = new LixFileService(client);
 
 	await assert.rejects(
-		service.writeFile(WORKSPACE_ID, BRANCH_ID, "/taken", "content"),
+		service.writeFile(WORKSPACE_ID, "/taken", "content"),
 		hasCode("already_exists"),
 	);
 });
@@ -301,13 +276,7 @@ void test("read_file validates UTF-8 and paginates by line with a change ID", as
 	);
 	const service = new LixFileService(client);
 
-	const page = await service.readFile(
-		WORKSPACE_ID,
-		BRANCH_ID,
-		"/notes.txt",
-		2,
-		1,
-	);
+	const page = await service.readFile(WORKSPACE_ID, "/notes.txt", 2, 1);
 	assert.deepEqual(page, {
 		path: "/notes.txt",
 		content: "two",
@@ -322,7 +291,7 @@ void test("read_file validates UTF-8 and paginates by line with a change ID", as
 
 	client.addFile("/binary.dat", new Uint8Array([0xc3, 0x28]), "rev-1");
 	await assert.rejects(
-		service.readFile(WORKSPACE_ID, BRANCH_ID, "/binary.dat"),
+		service.readFile(WORKSPACE_ID, "/binary.dat"),
 		hasCode("not_utf8"),
 	);
 });
@@ -337,13 +306,12 @@ void test("text file reads and writes enforce the one MiB byte limit", async () 
 	const service = new LixFileService(client);
 
 	await assert.rejects(
-		service.readFile(WORKSPACE_ID, BRANCH_ID, "/large.txt"),
+		service.readFile(WORKSPACE_ID, "/large.txt"),
 		hasCode("file_too_large"),
 	);
 	await assert.rejects(
 		service.writeFile(
 			WORKSPACE_ID,
-			BRANCH_ID,
 			"/too-large.txt",
 			"x".repeat(MAX_TEXT_FILE_BYTES + 1),
 		),
@@ -355,36 +323,23 @@ void test("write_file overwrites the current file and supports internal compare-
 	const client = new MemoryLixRuntimeClient();
 	const service = new LixFileService(client);
 
-	const created = await service.writeFile(
-		WORKSPACE_ID,
-		BRANCH_ID,
-		"/new.txt",
-		"first",
-	);
+	const created = await service.writeFile(WORKSPACE_ID, "/new.txt", "first");
 	assert.equal(created.path, "/new.txt");
 	assert.equal(created.changeId, "rev-1");
 	const overwritten = await service.writeFile(
 		WORKSPACE_ID,
-		BRANCH_ID,
 		"/new.txt",
 		"overwrite",
 	);
 	assert.equal(overwritten.changeId, "rev-2");
 	assert.equal(client.fileText("/new.txt"), "overwrite");
 	await assert.rejects(
-		service.writeFile(
-			WORKSPACE_ID,
-			BRANCH_ID,
-			"/new.txt",
-			"overwrite",
-			"stale",
-		),
+		service.writeFile(WORKSPACE_ID, "/new.txt", "overwrite", "stale"),
 		hasCode("conflict"),
 	);
 
 	const replaced = await service.writeFile(
 		WORKSPACE_ID,
-		BRANCH_ID,
 		"/new.txt",
 		"second",
 		overwritten.changeId,
@@ -404,7 +359,7 @@ void test("find_files returns every matching file without a result cap", async (
 	}
 	const service = new LixFileService(client);
 
-	const files = await service.findFiles(WORKSPACE_ID, BRANCH_ID, "match-");
+	const files = await service.findFiles(WORKSPACE_ID, "match-");
 	assert.equal(files.length, 125);
 	assert.equal(files[0]?.path, "/match-000.txt");
 	assert.equal(files.at(-1)?.path, "/match-124.txt");
@@ -420,34 +375,27 @@ void test("edit_file requires unique exact matches unless replace_all is explici
 	const service = new LixFileService(client);
 
 	await assert.rejects(
-		service.editFile(WORKSPACE_ID, BRANCH_ID, "/edit.txt", "rev-3", [
+		service.editFile(WORKSPACE_ID, "/edit.txt", "rev-3", [
 			{ oldText: "red", newText: "green" },
 		]),
 		hasCode("invalid_edit"),
 	);
 	await assert.rejects(
-		service.editFile(WORKSPACE_ID, BRANCH_ID, "/edit.txt", "stale", [
+		service.editFile(WORKSPACE_ID, "/edit.txt", "stale", [
 			{ oldText: "blue", newText: "cyan" },
 		]),
 		hasCode("conflict"),
 	);
 
-	const edited = await service.editFile(
-		WORKSPACE_ID,
-		BRANCH_ID,
-		"/edit.txt",
-		"rev-3",
-		[
-			{ oldText: "red", newText: "green", replaceAll: true },
-			{ oldText: "blue", newText: "cyan" },
-		],
-	);
+	const edited = await service.editFile(WORKSPACE_ID, "/edit.txt", "rev-3", [
+		{ oldText: "red", newText: "green", replaceAll: true },
+		{ oldText: "blue", newText: "cyan" },
+	]);
 	assert.equal(edited.changeId, "rev-4");
 	assert.equal(client.fileText("/edit.txt"), "green green cyan");
 
 	const editedWithoutChangeId = await service.editFile(
 		WORKSPACE_ID,
-		BRANCH_ID,
 		"/edit.txt",
 		undefined,
 		[{ oldText: "cyan", newText: "blue" }],
@@ -462,7 +410,7 @@ void test("edit_file treats replacement text literally", async () => {
 	const service = new LixFileService(client);
 	const replacement = "$$$ profits $& $` $' $1";
 
-	await service.editFile(WORKSPACE_ID, BRANCH_ID, "/literal.txt", "rev-1", [
+	await service.editFile(WORKSPACE_ID, "/literal.txt", "rev-1", [
 		{ oldText: "before", newText: replacement },
 	]);
 
@@ -476,7 +424,7 @@ void test("agent-authenticated edits persist an Atelier review range", async () 
 		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
 	});
 
-	await service.editFile(WORKSPACE_ID, BRANCH_ID, "/review.md", "rev-3", [
+	await service.editFile(WORKSPACE_ID, "/review.md", "rev-3", [
 		{ oldText: "before", newText: "after" },
 	]);
 
@@ -504,12 +452,7 @@ void test("agent-authenticated creates persist an Atelier review range", async (
 		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
 	});
 
-	await service.writeFile(
-		WORKSPACE_ID,
-		BRANCH_ID,
-		"/created-by-agent.md",
-		"created",
-	);
+	await service.writeFile(WORKSPACE_ID, "/created-by-agent.md", "created");
 
 	const ranges = client.agentReviewRanges();
 	assert.equal(ranges.length, 1);
@@ -546,7 +489,7 @@ void test("agent reviews discard legacy ranges after the Atelier hard cut", asyn
 		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
 	});
 
-	await service.editFile(WORKSPACE_ID, BRANCH_ID, "/review.md", "rev-3", [
+	await service.editFile(WORKSPACE_ID, "/review.md", "rev-3", [
 		{ oldText: "before", newText: "after" },
 	]);
 
@@ -563,29 +506,16 @@ void test("move_entry never overwrites and accepts an omitted source change ID",
 	const service = new LixFileService(client);
 
 	await assert.rejects(
-		service.moveEntry(
-			WORKSPACE_ID,
-			BRANCH_ID,
-			"/source.txt",
-			"/taken.txt",
-			"rev-4",
-		),
+		service.moveEntry(WORKSPACE_ID, "/source.txt", "/taken.txt", "rev-4"),
 		hasCode("already_exists"),
 	);
 	await assert.rejects(
-		service.moveEntry(
-			WORKSPACE_ID,
-			BRANCH_ID,
-			"/source.txt",
-			"/renamed.txt",
-			"stale",
-		),
+		service.moveEntry(WORKSPACE_ID, "/source.txt", "/renamed.txt", "stale"),
 		hasCode("conflict"),
 	);
 
 	const moved = await service.moveEntry(
 		WORKSPACE_ID,
-		BRANCH_ID,
 		"/source.txt",
 		"/renamed.txt",
 		undefined,
@@ -602,21 +532,15 @@ void test("directory deletion requires recursive confirmation and accepts an omi
 	const service = new LixFileService(client);
 
 	await assert.rejects(
-		service.deleteEntry(WORKSPACE_ID, BRANCH_ID, "/docs/", "rev-9"),
+		service.deleteEntry(WORKSPACE_ID, "/docs/", "rev-9"),
 		hasCode("recursive_required"),
 	);
 	await assert.rejects(
-		service.deleteEntry(WORKSPACE_ID, BRANCH_ID, "/docs/", "stale", true),
+		service.deleteEntry(WORKSPACE_ID, "/docs/", "stale", true),
 		hasCode("conflict"),
 	);
 	assert.deepEqual(
-		await service.deleteEntry(
-			WORKSPACE_ID,
-			BRANCH_ID,
-			"/docs/",
-			undefined,
-			true,
-		),
+		await service.deleteEntry(WORKSPACE_ID, "/docs/", undefined, true),
 		{ path: "/docs/", deleted: true },
 	);
 	assert.equal(client.hasFile("/docs/readme.md"), false);
@@ -632,10 +556,8 @@ function testRuntimeClient(
 ): LixRuntimeClient {
 	return {
 		listWorkspaces: async () => [],
-		listBranches: async () => ({
-			branches: [],
-			currentBranchId: BRANCH_ID,
-		}),
+		activeBranchId: async () => BRANCH_ID,
+		switchBranch: async (_workspaceId, branchId) => ({ branchId }),
 		execute: async (_workspaceId, request) => execute(request),
 		executeBatch: async () => {
 			throw new Error("listDirectory must use execute, not executeBatch");
@@ -655,6 +577,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 	private readonly files = new Map<string, StoredFile>();
 	private readonly directories = new Map<string, StoredDirectory>();
 	private changeCounter = 0;
+	private activeBranch = BRANCH_ID;
 	private reviewStore: { ranges: Array<Record<string, unknown>> } | undefined;
 	private readonly normalizedReviewRanges = new Map<
 		string,
@@ -696,27 +619,28 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		}));
 	}
 
-	async listBranches(): Promise<BranchState> {
-		return {
-			branches: [
-				{
-					id: BRANCH_ID,
-					name: "main",
-					hidden: false,
-					commitId: `commit-${this.changeCounter}`,
-				},
-			],
-			currentBranchId: BRANCH_ID,
-		};
+	async activeBranchId(): Promise<string> {
+		return this.activeBranch;
+	}
+
+	async switchBranch(
+		_workspaceId: string,
+		branchId: string,
+	): Promise<{ branchId: string }> {
+		this.activeBranch = branchId;
+		return { branchId };
 	}
 
 	async execute(
 		_workspaceId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse> {
-		assert.equal(request.branchId, BRANCH_ID);
 		const sql = request.sql;
 		const params = request.params ?? [];
+
+		if (sql === "SELECT lix_active_branch_commit_id()") {
+			return result([[textValue(`commit-${this.changeCounter}`)]]);
+		}
 
 		if (
 			sql ===
@@ -863,7 +787,6 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		for (const statement of request.statements) {
 			results.push(
 				await this.execute(workspaceId, {
-					branchId: request.branchId,
 					...statement,
 					options: request.options,
 				}),

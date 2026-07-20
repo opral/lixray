@@ -69,6 +69,9 @@ export interface WorkerEnv {
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
+	LIXRAY_RELEASE_ID?: string;
+	RAILWAY_GIT_COMMIT_SHA?: string;
+	CF_VERSION_METADATA?: WorkerVersionMetadata;
 }
 
 export type ContainerNamespace = RetryingContainerNamespace;

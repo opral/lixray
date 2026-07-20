@@ -7,12 +7,15 @@ import {
 	type ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import {
-	DEFAULT_READ_LINE_COUNT,
-	FileServiceError,
-	LixFileService,
-} from "./file-service.ts";
+import { FileServiceError, LixFileService } from "./file-service.ts";
 import { EXECUTE_TOOL_DESCRIPTION } from "./execute-schema.ts";
+import {
+	mcpSurfaceVersion,
+	observeExecuteInput,
+	observeExecuteOutput,
+	type McpExecuteInputObservation,
+	type McpExecuteOutputObservation,
+} from "./tool-observation.ts";
 
 export const MCP_PATH = "/mcp";
 export const MCP_RESOURCE = "https://lixray.com";
@@ -28,9 +31,11 @@ export interface McpToolCallObservation {
 	toolName: string;
 	outcome: "success" | "error";
 	durationMs: number;
+	surfaceVersion: string;
 	errorCode?: string;
 	workspaceId?: string;
-	sql?: string;
+	executeInput?: McpExecuteInputObservation;
+	executeOutput?: McpExecuteOutputObservation;
 }
 
 export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
@@ -54,15 +59,9 @@ const workspaceRef = z
 	.describe(
 		"Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available.",
 	);
-const branchId = z.uuid().describe("Lix branch UUID");
-const optionalBranchId = branchId
-	.describe("Lix branch UUID. Omit to use the workspace default branch.")
-	.optional();
-const currentBranchId = z
-	.uuid()
-	.describe("Lix default aka current branch UUID");
-const changeId = z.uuid().describe("Lix change UUID");
-const absolutePath = z.string().min(1);
+// Lix accepts non-UUID branch identifiers such as the built-in `global`
+// branch. Keep the MCP contract as broad as the Lix client contract.
+const branchId = z.string().min(1).describe("Lix branch ID");
 const executeSqlText = z.string().trim().min(1);
 const wireValue = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("null"), value: z.null().optional() }).strict(),
@@ -89,24 +88,6 @@ const workspaceSummaryOutput = z
 			.strict(),
 	})
 	.strict();
-const branchSummaryOutput = z
-	.object({
-		id: branchId,
-		name: z.string(),
-		hidden: z.boolean(),
-		commitId: z.string(),
-	})
-	.strict();
-const entrySummaryOutput = z
-	.object({
-		kind: z.enum(["file", "directory"]),
-		path: absolutePath,
-		name: z.string(),
-		changeId,
-		updatedAt: z.string(),
-		size: z.number().int().nonnegative().nullable().optional(),
-	})
-	.strict();
 const toolErrorOutput = z
 	.object({
 		error: z
@@ -122,55 +103,8 @@ const listWorkspacesOutput = z.union([
 	z.object({ workspaces: z.array(workspaceSummaryOutput) }).strict(),
 	toolErrorOutput,
 ]);
-const listBranchesOutput = z.union([
-	z
-		.object({
-			branches: z.array(branchSummaryOutput),
-			current_branch_id: currentBranchId,
-		})
-		.strict(),
-	toolErrorOutput,
-]);
-const listDirectoryOutput = z.union([
-	z
-		.object({ path: absolutePath, entries: z.array(entrySummaryOutput) })
-		.strict(),
-	toolErrorOutput,
-]);
-const findFilesOutput = z.union([
-	z.object({ files: z.array(entrySummaryOutput) }).strict(),
-	toolErrorOutput,
-]);
-const fileSnapshotOutput = z.union([
-	z
-		.object({
-			path: absolutePath,
-			content: z.string(),
-			size: z.number().int().nonnegative(),
-			changeId,
-			updatedAt: z.string(),
-			totalLines: z.number().int().nonnegative(),
-			startLine: z.number().int().nonnegative(),
-			endLine: z.number().int().nonnegative(),
-			hasMore: z.boolean(),
-		})
-		.strict(),
-	toolErrorOutput,
-]);
-const fileEntryOutput = z.union([
-	z.object({ file: entrySummaryOutput }).strict(),
-	toolErrorOutput,
-]);
-const directoryEntryOutput = z.union([
-	z.object({ directory: entrySummaryOutput }).strict(),
-	toolErrorOutput,
-]);
-const movedEntryOutput = z.union([
-	z.object({ entry: entrySummaryOutput }).strict(),
-	toolErrorOutput,
-]);
-const deleteEntryOutput = z.union([
-	z.object({ path: absolutePath, deleted: z.literal(true) }).strict(),
+const activeBranchOutput = z.union([
+	z.object({ branch_id: branchId }).strict(),
 	toolErrorOutput,
 ]);
 const executeStatementOutput = z
@@ -211,13 +145,24 @@ export function createLixrayMcpServer(
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"Use LixRay tools to work with workspace files. Freely make changes, as the user can review all changes in the UI. Never guess UUIDs.",
+				"Use LixRay's execute tool for workspace inspection and changes. SQL and branch controls use the workspace's active Lix branch, just like the Lix client. Use active_branch_id to inspect it and switch_branch to change it. Query lix_branch with execute when you need the branch catalog. Freely make changes, as the user can review all changes in the UI. Never guess workspace or branch IDs.",
 		},
 	);
 	const tools = buildTools(
 		service,
 		options.authMode === "none" ? [{ type: "noauth" }] : oauthSecuritySchemes,
 	);
+	const surfaceVersion = mcpSurfaceVersion(
+		tools.map((tool) => tool.descriptor),
+	);
+	const observe = (
+		startedAt: number,
+		observation: Omit<McpToolCallObservation, "durationMs" | "surfaceVersion">,
+	) =>
+		observeToolCall(options.onToolCall, startedAt, {
+			...observation,
+			surfaceVersion,
+		});
 
 	server.setRequestHandler(ListToolsRequestSchema, () => ({
 		tools: tools.map((tool) => tool.descriptor),
@@ -228,7 +173,7 @@ export function createLixrayMcpServer(
 			(candidate) => candidate.descriptor.name === request.params.name,
 		);
 		if (!tool) {
-			observeToolCall(options.onToolCall, startedAt, {
+			observe(startedAt, {
 				toolName: "unknown",
 				outcome: "error",
 				errorCode: "unknown_tool",
@@ -238,17 +183,17 @@ export function createLixrayMcpServer(
 				`Unknown tool: ${request.params.name}`,
 			);
 		}
-		const sql =
+		const executeInput =
 			tool.descriptor.name === "execute"
-				? executeTelemetrySql(request.params.arguments?.statements)
+				? observeExecuteInput(request.params.arguments?.statements)
 				: undefined;
 		const parsed = tool.schema.safeParse(request.params.arguments ?? {});
 		if (!parsed.success) {
-			observeToolCall(options.onToolCall, startedAt, {
+			observe(startedAt, {
 				toolName: tool.descriptor.name,
 				outcome: "error",
 				errorCode: "invalid_arguments",
-				...(sql ? { sql } : {}),
+				...(executeInput ? { executeInput } : {}),
 			});
 			return errorResult("invalid_arguments", z.prettifyError(parsed.error));
 		}
@@ -273,38 +218,43 @@ export function createLixrayMcpServer(
 			const structuredContent = parsedOutput?.success
 				? parsedOutput.data
 				: rawStructuredContent;
-			observeToolCall(options.onToolCall, startedAt, {
+			const executeOutput =
+				tool.descriptor.name === "execute"
+					? observeExecuteOutput(structuredContent)
+					: undefined;
+			observe(startedAt, {
 				toolName: tool.descriptor.name,
 				outcome: "success",
 				...(workspaceId ? { workspaceId } : {}),
-				...(sql ? { sql } : {}),
+				...(executeInput ? { executeInput } : {}),
+				...(executeOutput ? { executeOutput } : {}),
 			});
 			return {
 				structuredContent,
 				content: [
 					{
 						type: "text" as const,
-						text: successSummary(tool.descriptor.name, structuredContent),
+						text: successSummary(tool.descriptor.name),
 					},
 				],
 			};
 		} catch (caught) {
 			if (caught instanceof FileServiceError) {
-				observeToolCall(options.onToolCall, startedAt, {
+				observe(startedAt, {
 					toolName: tool.descriptor.name,
 					outcome: "error",
 					errorCode: caught.code,
 					...(workspaceId ? { workspaceId } : {}),
-					...(sql ? { sql } : {}),
+					...(executeInput ? { executeInput } : {}),
 				});
 				return errorResult(caught.code, caught.message, caught.details);
 			}
-			observeToolCall(options.onToolCall, startedAt, {
+			observe(startedAt, {
 				toolName: tool.descriptor.name,
 				outcome: "error",
 				errorCode: "internal_error",
 				...(workspaceId ? { workspaceId } : {}),
-				...(sql ? { sql } : {}),
+				...(executeInput ? { executeInput } : {}),
 			});
 			console.error("LixRay MCP tool failed", {
 				tool: tool.descriptor.name,
@@ -410,7 +360,7 @@ export function mcpDocumentationResponse(
 			"",
 			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
-			"The server exposes explicit-workspace tools for listing, reading, creating, editing, moving, and deleting files, plus a raw Lix SQL execute tool. Branch IDs are optional and default to the workspace default branch. File tools expose Lix change IDs for conflict detection; raw SQL bypasses those file safeguards. Execute accepts an ordered batch of statements with $n or ? parameters. Lix executes the batch atomically and returns one ordered result per statement.",
+			"The server exposes list_workspaces, active_branch_id, switch_branch, and raw Lix SQL execute. SQL and branch controls use the workspace's active Lix branch, matching the Lix client. Use active_branch_id to inspect it, switch_branch to change it, and SQL against lix_branch to discover branches. Execute accepts an ordered batch of statements with $n or ? parameters. Lix executes the batch atomically and returns one ordered result per statement.",
 		].join("\n"),
 		{
 			headers: {
@@ -489,315 +439,33 @@ function buildTools(
 			listWorkspacesOutput,
 		),
 		tool(
-			"list_branches",
-			"List branches",
-			"List Lix branches in a workspace.",
+			"active_branch_id",
+			"Get active branch ID",
+			"Return the workspace's active Lix branch ID.",
 			z.object({ workspace_ref: workspaceRef }).strict(),
 			readAnnotations(),
-			async ({ workspace_ref }) => {
-				const state = await service.listBranches(String(workspace_ref));
-				return {
-					branches: state.branches.filter(
-						(branch) => !branch.hidden && branchId.safeParse(branch.id).success,
-					),
-					current_branch_id: state.currentBranchId,
-				};
-			},
-			listBranchesOutput,
-		),
-		tool(
-			"list_directory",
-			"List directory",
-			"List the immediate files and directories in a directory.",
-			z
-				.object({
-					workspace_ref: workspaceRef,
-					branch_id: optionalBranchId,
-					path: absolutePath.describe("Absolute directory path ending in /"),
-				})
-				.strict(),
-			readAnnotations(),
-			async ({ workspace_ref, branch_id, path }) => ({
-				path,
-				entries: await service.listDirectory(
-					String(workspace_ref),
-					await service.resolveBranchId(
-						String(workspace_ref),
-						branch_id === undefined ? undefined : String(branch_id),
-					),
-					String(path),
-				),
+			async ({ workspace_ref }) => ({
+				branch_id: await service.activeBranchId(String(workspace_ref)),
 			}),
-			listDirectoryOutput,
+			activeBranchOutput,
 		),
 		tool(
-			"find_files",
-			"Find files",
-			"Find files by path or name (does not search file contents).",
+			"switch_branch",
+			"Switch active branch",
+			"Switch the workspace's active Lix branch. This shared workspace state affects subsequent SQL operations.",
 			z
 				.object({
 					workspace_ref: workspaceRef,
-					branch_id: optionalBranchId,
-					query: z.string().trim().min(1),
-					under_path: absolutePath.optional().default("/"),
-				})
-				.strict(),
-			readAnnotations(),
-			async ({ workspace_ref, branch_id, query, under_path }) => ({
-				files: await service.findFiles(
-					String(workspace_ref),
-					await service.resolveBranchId(
-						String(workspace_ref),
-						branch_id === undefined ? undefined : String(branch_id),
-					),
-					String(query),
-					String(under_path),
-				),
-			}),
-			findFilesOutput,
-		),
-		tool(
-			"read_file",
-			"Read text file",
-			"Read a UTF-8 text file.",
-			z
-				.object({
-					workspace_ref: workspaceRef,
-					branch_id: optionalBranchId,
-					path: absolutePath.describe("Absolute file path"),
-					start_line: z.number().int().min(1).optional().default(1),
-					line_count: z
-						.number()
-						.int()
-						.min(1)
-						.max(1000)
-						.optional()
-						.default(DEFAULT_READ_LINE_COUNT),
-				})
-				.strict(),
-			readAnnotations(),
-			async ({ workspace_ref, branch_id, path, start_line, line_count }) =>
-				service.readFile(
-					String(workspace_ref),
-					await service.resolveBranchId(
-						String(workspace_ref),
-						branch_id === undefined ? undefined : String(branch_id),
-					),
-					String(path),
-					Number(start_line),
-					Number(line_count),
-				),
-			fileSnapshotOutput,
-		),
-		tool(
-			"write_file",
-			"Create or replace text file",
-			"Create or replace a UTF-8 text file.",
-			z
-				.object({
-					workspace_ref: workspaceRef,
-					branch_id: optionalBranchId,
-					path: absolutePath.describe("Absolute file path"),
-					content: z.string(),
-					expected_change_id: changeId
-						.describe(
-							"Optional current file change ID. If provided, replacement succeeds only if it matches.",
-						)
-						.optional(),
+					branch_id: branchId,
 				})
 				.strict(),
 			writeAnnotations(false, false),
-			async ({
-				workspace_ref,
-				branch_id,
-				path,
-				content,
-				expected_change_id,
-			}) => ({
-				file: await service.writeFile(
-					String(workspace_ref),
-					await service.resolveBranchId(
-						String(workspace_ref),
-						branch_id === undefined ? undefined : String(branch_id),
-					),
-					String(path),
-					String(content),
-					expected_change_id === undefined
-						? undefined
-						: String(expected_change_id),
-				),
+			async ({ workspace_ref, branch_id }) => ({
+				branch_id: (
+					await service.switchBranch(String(workspace_ref), String(branch_id))
+				).branchId,
 			}),
-			fileEntryOutput,
-		),
-		tool(
-			"edit_file",
-			"Edit text file",
-			"Apply exact text replacements to a UTF-8 file.",
-			z
-				.object({
-					workspace_ref: workspaceRef,
-					branch_id: optionalBranchId,
-					path: absolutePath.describe("Absolute file path"),
-					expected_change_id: changeId
-						.describe(
-							"Optional current file change ID. If provided, edit succeeds only if it matches.",
-						)
-						.optional(),
-					edits: z
-						.array(
-							z
-								.object({
-									old_text: z.string().min(1),
-									new_text: z.string(),
-									replace_all: z.boolean().optional().default(false),
-								})
-								.strict(),
-						)
-						.min(1)
-						.max(50),
-				})
-				.strict(),
-			writeAnnotations(false, false),
-			async ({
-				workspace_ref,
-				branch_id,
-				path,
-				expected_change_id,
-				edits,
-			}) => ({
-				file: await service.editFile(
-					String(workspace_ref),
-					await service.resolveBranchId(
-						String(workspace_ref),
-						branch_id === undefined ? undefined : String(branch_id),
-					),
-					String(path),
-					expected_change_id === undefined
-						? undefined
-						: String(expected_change_id),
-					(
-						edits as Array<{
-							old_text: string;
-							new_text: string;
-							replace_all?: boolean;
-						}>
-					).map((edit) => ({
-						oldText: edit.old_text,
-						newText: edit.new_text,
-						replaceAll: edit.replace_all,
-					})),
-				),
-			}),
-			fileEntryOutput,
-		),
-		tool(
-			"create_directory",
-			"Create directory",
-			"Create a directory at an absolute path ending in /.",
-			z
-				.object({
-					workspace_ref: workspaceRef,
-					branch_id: optionalBranchId,
-					path: absolutePath.describe("Absolute directory path ending in /"),
-				})
-				.strict(),
-			writeAnnotations(false, false),
-			async ({ workspace_ref, branch_id, path }) => ({
-				directory: await service.createDirectory(
-					String(workspace_ref),
-					await service.resolveBranchId(
-						String(workspace_ref),
-						branch_id === undefined ? undefined : String(branch_id),
-					),
-					String(path),
-				),
-			}),
-			directoryEntryOutput,
-		),
-		tool(
-			"move_entry",
-			"Move file or directory",
-			"Move or rename an entry. Existing destinations will return an error.",
-			z
-				.object({
-					workspace_ref: workspaceRef,
-					branch_id: optionalBranchId,
-					source_path: absolutePath.describe(
-						"Absolute source path. Directory paths must end in /; file paths must not.",
-					),
-					destination_path: absolutePath.describe(
-						"Absolute destination path with the same kind as source_path. Directory paths must end in /; file paths must not.",
-					),
-					expected_change_id: changeId
-						.describe(
-							"Optional current entry change ID. If provided, move succeeds only if it matches.",
-						)
-						.optional(),
-				})
-				.strict(),
-			writeAnnotations(false, false),
-			async ({
-				workspace_ref,
-				branch_id,
-				source_path,
-				destination_path,
-				expected_change_id,
-			}) => ({
-				entry: await service.moveEntry(
-					String(workspace_ref),
-					await service.resolveBranchId(
-						String(workspace_ref),
-						branch_id === undefined ? undefined : String(branch_id),
-					),
-					String(source_path),
-					String(destination_path),
-					expected_change_id === undefined
-						? undefined
-						: String(expected_change_id),
-				),
-			}),
-			movedEntryOutput,
-		),
-		tool(
-			"delete_entry",
-			"Delete file or directory",
-			"Permanently delete an entry. Directories require recursive=true and remove their entire subtree.",
-			z
-				.object({
-					workspace_ref: workspaceRef,
-					branch_id: optionalBranchId,
-					path: absolutePath.describe(
-						"Absolute entry path. Directory paths must end in /; file paths must not.",
-					),
-					expected_change_id: changeId
-						.describe(
-							"Optional current entry change ID. If provided, deletion succeeds only if it matches.",
-						)
-						.optional(),
-					recursive: z.boolean().optional().default(false),
-				})
-				.strict(),
-			writeAnnotations(false, false),
-			async ({
-				workspace_ref,
-				branch_id,
-				path,
-				expected_change_id,
-				recursive,
-			}) =>
-				service.deleteEntry(
-					String(workspace_ref),
-					await service.resolveBranchId(
-						String(workspace_ref),
-						branch_id === undefined ? undefined : String(branch_id),
-					),
-					String(path),
-					expected_change_id === undefined
-						? undefined
-						: String(expected_change_id),
-					Boolean(recursive),
-				),
-			deleteEntryOutput,
+			activeBranchOutput,
 		),
 		tool(
 			"execute",
@@ -806,18 +474,13 @@ function buildTools(
 			z
 				.object({
 					workspace_ref: workspaceRef,
-					branch_id: optionalBranchId,
 					statements: z.array(executeStatement).min(1).max(100),
 				})
 				.strict(),
-			writeAnnotations(true, false),
-			async ({ workspace_ref, branch_id, statements }) =>
+			writeAnnotations(false, false),
+			async ({ workspace_ref, statements }) =>
 				service.executeSql(
 					String(workspace_ref),
-					await service.resolveBranchId(
-						String(workspace_ref),
-						branch_id === undefined ? undefined : String(branch_id),
-					),
 					statements.map((statement) => ({
 						sql: statement.sql,
 						params: statement.params,
@@ -826,18 +489,6 @@ function buildTools(
 			executeOutput,
 		),
 	];
-}
-
-function executeTelemetrySql(value: unknown): string | undefined {
-	if (!Array.isArray(value)) return undefined;
-	const statements = value.flatMap((candidate): string[] => {
-		if (!candidate || typeof candidate !== "object") return [];
-		const parsed = executeSqlText.safeParse(
-			(candidate as Record<string, unknown>).sql,
-		);
-		return parsed.success ? [parsed.data] : [];
-	});
-	return statements.length > 0 ? statements.join(";\n") : undefined;
 }
 
 function createTool<T extends z.ZodType<Record<string, unknown>>>(
@@ -941,12 +592,7 @@ function asStructuredContent(value: unknown): Record<string, unknown> {
 		: { result: value };
 }
 
-function successSummary(toolName: string, value: unknown): string {
-	if (toolName === "read_file" && value && typeof value === "object") {
-		const result = value as Record<string, unknown>;
-		const path = typeof result.path === "string" ? result.path : "file";
-		return `Read ${path}.`;
-	}
+function successSummary(toolName: string): string {
 	return `${toolName} completed successfully.`;
 }
 

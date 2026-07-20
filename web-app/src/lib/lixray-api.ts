@@ -152,6 +152,9 @@ export function useLixrayApi() {
 	return useMemo(
 		() => ({
 			workspaceId,
+			activeBranchId: () => serialized((lix) => lix.activeBranchId()),
+			switchBranch: (branchId: string) =>
+				serialized((lix) => lix.switchBranch({ branchId })),
 			listBranches: () =>
 				serialized(async (lix) => {
 					const result = await lix.execute(
@@ -202,6 +205,30 @@ export function useLixrayApi() {
 						).map(toWireResult),
 					};
 				}),
+			executeActive: (body: Omit<ExecuteRequest, "branchId">) =>
+				serialized(async (lix) => ({
+					results: [
+						toWireResult(
+							await lix.execute(
+								body.sql,
+								(body.params ?? []).map(toSqlParam),
+								body.options,
+							),
+						),
+					],
+				})),
+			executeBatchActive: (body: Omit<ExecuteBatchRequest, "branchId">) =>
+				serialized(async (lix) => ({
+					results: (
+						await lix.executeBatch(
+							body.statements.map((statement) => ({
+								sql: statement.sql,
+								params: (statement.params ?? []).map(toSqlParam),
+							})),
+							body.options,
+						)
+					).map(toWireResult),
+				})),
 		}),
 		[serialized, workspaceId],
 	);

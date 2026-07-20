@@ -999,19 +999,9 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 						},
 					},
 				]);
-				assert.deepEqual(await service.listBranches(DEMO_WORKSPACE_ID), {
-					branches: [
-						{
-							id: "main",
-							name: "main",
-							hidden: false,
-							commitId: "commit-1",
-						},
-					],
-					currentBranchId: "main",
-				});
+				assert.equal(await service.activeBranchId(DEMO_WORKSPACE_ID), "main");
 				await assert.rejects(
-					service.listBranches(WORKSPACE_B),
+					service.activeBranchId(WORKSPACE_B),
 					(error: unknown) =>
 						error instanceof FileServiceError && error.code === "not_found",
 				);
@@ -1022,7 +1012,7 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
-	assert.equal(workspaceFetches, 3);
+	assert.equal(workspaceFetches, 2);
 });
 
 void test("Supabase workspace authorization uses the user token and RLS-visible row", async () => {
