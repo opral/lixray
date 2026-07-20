@@ -940,6 +940,19 @@ void test("demo mode keeps OAuth endpoints disabled", async () => {
 	}
 });
 
+void test("Railway PR environments enable the built-in demo workspace", async () => {
+	const testEnv = env({
+		extra: { RAILWAY_ENVIRONMENT_NAME: "lixray-pr-91" },
+	});
+	const response = await handleRequest(
+		new Request("https://preview.example/@acme/launch-q3/lix/v1/", {
+			headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
+		}),
+		testEnv,
+	);
+	assert.equal(response.status, 200);
+});
+
 void test("demo mode exposes authless MCP through the in-memory workspace fetcher", async () => {
 	let workspaceFetches = 0;
 	const response = await handleRequest(

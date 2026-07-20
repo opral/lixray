@@ -127,38 +127,33 @@ are cancelled.
 
 Railway handles deployment outside GitHub Actions:
 
-- pull requests create an isolated preview environment;
-- Supabase creates a data-less branch for every pull request;
-- `.github/workflows/supabase-preview.yml` injects that branch's URL and
-  publishable key into the matching Railway environment before redeploying it;
+- pull requests immediately create an isolated Railway demo environment with a
+  built-in preview user;
 - merging to `main` deploys both services to production;
 - `railway.json` and `web-app/railway.json` define the two services;
 - Infisical syncs runtime configuration to Railway;
-- GitHub Actions authenticates to Infisical with OIDC and receives only
-  narrowly scoped preview-provisioning secrets, never production runtime
-  credentials or stored GitHub Actions secrets.
+- GitHub Actions receives no runtime secrets.
 
 Both services share `LIXRAY_INTERNAL_TOKEN`. The web service reaches the Rust
 service through Railway's private network. Production and preview environments
 use separate S3 storage configuration; when `S3_PREFIX` is unset, the server
 namespaces data by Railway environment ID. Preview environments never inherit
-production Supabase credentials: they fail closed until the per-PR Supabase
-branch is ready. The workflow seeds a branch-local preview account and builds
-the web app with that account instead of Google OAuth, because every Supabase
-branch has a unique provider callback URL. Its random password exists only for
-the lifetime of that workflow run and the matching Railway preview.
+production Supabase credentials.
 
-Infisical is the source of truth for preview provisioning. Its production
-environment contains these secrets under `/preview-automation`:
+### Fast pull request previews
 
-- `SUPABASE_ACCESS_TOKEN` — access to read preview-branch credentials;
-- `RAILWAY_API_TOKEN` — workspace-scoped access to update ephemeral PR
-  environments (Railway project tokens cannot access derived environments).
+Railway environments named `lixray-pr-*` automatically build and run in demo
+mode. The sign-in screen offers **Continue as preview user** and the server
+accepts the matching fixed demo token for the built-in `acme/launch-q3`
+workspace. No Supabase URL, key, branch, password, seed job, or provisioning
+workflow is involved.
 
-The `lixray-github-preview` machine identity trusts the exact GitHub OIDC
-subject `repo:opral/lixray:environment:preview`. Dynamic per-PR Supabase
-credentials are derived from Supabase Branching and written only to the
-matching Railway preview environment.
+Railway GitHub autodeploy stays enabled and **Wait for CI stays disabled**, so
+each push produces one preview build immediately. Preview data is disposable
+and isolated by the Railway environment. The `lix-server` service deploys in
+parallel for every web preview so the built-in workspace is usable without
+external infrastructure. Database-sensitive changes continue to use local
+Compose or an explicitly requested integration environment.
 
 ## Performance loop
 

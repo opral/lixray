@@ -71,6 +71,7 @@ export function requestWorkspaceShareJoin(workspaceId: string): void {
 }
 
 export function peekWorkspaceShareJoinIntent(): string | null {
+	if (typeof window === "undefined") return null;
 	return window.sessionStorage.getItem(SHARE_JOIN_INTENT_KEY) || null;
 }
 

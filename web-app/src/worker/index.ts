@@ -28,6 +28,7 @@ export interface Env {
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
 	LIXRAY_RELEASE_ID?: string;
+	RAILWAY_ENVIRONMENT_NAME?: string;
 	CF_VERSION_METADATA?: WorkerVersionMetadata;
 }
 
