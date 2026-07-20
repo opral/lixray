@@ -91,6 +91,55 @@ void test("canonical path validation rejects ambiguous and unsafe paths", () => 
 	assert.equal(directoryPath("/", { allowRoot: true }), "/");
 });
 
+void test("omitted branch resolution uses the active-branch primitive when available", async () => {
+	let activeBranchCalls = 0;
+	let branchListCalls = 0;
+	const service = new LixFileService({
+		listWorkspaces: async () => [],
+		listBranches: async () => {
+			branchListCalls += 1;
+			return { branches: [], currentBranchId: "listed-branch" };
+		},
+		activeBranchId: async (workspaceId) => {
+			activeBranchCalls += 1;
+			assert.equal(workspaceId, WORKSPACE_ID);
+			return "active-branch";
+		},
+		execute: async () => result([]),
+		executeBatch: async () => ({ results: [] }),
+	});
+
+	assert.equal(
+		await service.resolveBranchId(WORKSPACE_ID, undefined),
+		"active-branch",
+	);
+	assert.equal(
+		await service.resolveBranchId(WORKSPACE_ID, "explicit-branch"),
+		"explicit-branch",
+	);
+	assert.equal(activeBranchCalls, 1);
+	assert.equal(branchListCalls, 0);
+});
+
+void test("branch resolution preserves the browser-adapter list fallback", async () => {
+	let branchListCalls = 0;
+	const service = new LixFileService({
+		listWorkspaces: async () => [],
+		listBranches: async () => {
+			branchListCalls += 1;
+			return { branches: [], currentBranchId: "listed-branch" };
+		},
+		execute: async () => result([]),
+		executeBatch: async () => ({ results: [] }),
+	});
+
+	assert.equal(
+		await service.resolveBranchId(WORKSPACE_ID, undefined),
+		"listed-branch",
+	);
+	assert.equal(branchListCalls, 1);
+});
+
 void test("list_directory maps one ordered root read", async () => {
 	const requests: Array<ExecuteRequest> = [];
 	const service = new LixFileService(

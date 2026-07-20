@@ -103,6 +103,81 @@ void test("container calls reauthorize every time and never forward the OAuth to
 	}
 });
 
+void test("active-branch lookup reauthorizes each protocol request without listing branches", async () => {
+	let authorizationChecks = 0;
+	const requests: Array<Request> = [];
+	const client = new WorkerLixRuntimeClient(
+		env({
+			getByName: (name) => {
+				assert.equal(name, WORKSPACE_ID);
+				return {
+					fetch: async (request) => {
+						requests.push(request);
+						return branchProtocolResponse(request);
+					},
+				};
+			},
+		}),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => {
+			authorizationChecks += 1;
+			return null;
+		},
+	);
+
+	assert.equal(await client.activeBranchId(WORKSPACE_ID), "main");
+	assert.equal(authorizationChecks, 2);
+	assert.deepEqual(
+		requests.map((request) => new URL(request.url).pathname),
+		[
+			`/workspaces/${WORKSPACE_ID}/lix/v1/`,
+			`/workspaces/${WORKSPACE_ID}/lix/v1/`,
+		],
+	);
+	for (const request of requests) {
+		assert.equal(request.headers.get("authorization"), null);
+	}
+});
+
+void test("active-branch lookup is queued before a guarded branch switch and execution", async () => {
+	const operations: string[] = [];
+	const client = new WorkerLixRuntimeClient(
+		{},
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{
+			workspaceFetch: async (_workspaceId, request) => {
+				const pathname = new URL(request.url).pathname;
+				if (pathname === "/lix/v1/") {
+					operations.push("active-branch");
+					return branchProtocolResponse(request);
+				}
+				if (pathname === "/lix/v1/branch/switch") {
+					const body: { branchId: string } = await request.json();
+					operations.push(`switch:${body.branchId}`);
+					return Response.json({ branchId: body.branchId });
+				}
+				operations.push("execute");
+				return Response.json({
+					columns: [],
+					rows: [],
+					rowsAffected: 0,
+					notices: [],
+				});
+			},
+		},
+	);
+
+	const branchId = await client.activeBranchId(WORKSPACE_ID);
+	await client.execute(WORKSPACE_ID, { branchId, sql: "SELECT 1" });
+	assert.deepEqual(operations, [
+		"active-branch",
+		"active-branch",
+		"switch:main",
+		"execute",
+	]);
+});
+
 void test("transient container failures retry indefinitely with capped jitter and reacquired stubs", async () => {
 	let acquisitions = 0;
 	let starts = 0;
@@ -353,6 +428,28 @@ void test("a denied workspace never starts or calls a container", async () => {
 	await assert.rejects(client.listBranches(WORKSPACE_ID), (error: unknown) => {
 		return error instanceof FileServiceError && error.code === "not_found";
 	});
+	assert.equal(touchedContainer, false);
+});
+
+void test("active-branch lookup preserves denied-workspace errors", async () => {
+	let touchedContainer = false;
+	const client = new WorkerLixRuntimeClient(
+		env({
+			getByName: () => {
+				touchedContainer = true;
+				throw new Error("container should not be reached");
+			},
+		}),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => new Response("Workspace access denied", { status: 403 }),
+	);
+
+	await assert.rejects(
+		client.activeBranchId(WORKSPACE_ID),
+		(error: unknown) => {
+			return error instanceof FileServiceError && error.code === "not_found";
+		},
+	);
 	assert.equal(touchedContainer, false);
 });
 

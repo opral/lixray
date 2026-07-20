@@ -228,6 +228,17 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		}
 	}
 
+	async activeBranchId(workspaceId: string): Promise<string> {
+		try {
+			const session = await this.session(workspaceId);
+			return await this.enqueueSession(session, () =>
+				session.lix.activeBranchId(),
+			);
+		} catch (caught) {
+			throw asFileServiceError(caught);
+		}
+	}
+
 	async execute(
 		workspaceId: string,
 		request: ExecuteRequest,

@@ -68,6 +68,12 @@ export interface WorkspaceSummary {
 export interface LixRuntimeClient {
 	listWorkspaces(): Promise<Array<WorkspaceSummary>>;
 	listBranches(workspaceId: string): Promise<BranchState>;
+	/**
+	 * Returns the workspace's current branch without enumerating its branch
+	 * catalog. Browser adapters that do not expose this protocol primitive keep
+	 * using `listBranches()` below.
+	 */
+	activeBranchId?(workspaceId: string): Promise<string>;
 	execute(
 		workspaceId: string,
 		request: ExecuteRequest,
@@ -186,6 +192,9 @@ export class LixFileService {
 		branchId: string | undefined,
 	): Promise<string> {
 		if (branchId !== undefined) return branchId;
+		if (this.client.activeBranchId) {
+			return this.client.activeBranchId(workspaceId);
+		}
 		return (await this.client.listBranches(workspaceId)).currentBranchId;
 	}
 
