@@ -1,14 +1,7 @@
 import type { Lix } from "@lix-js/sdk";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import DOMPurify from "dompurify";
-import {
-	ChevronDown,
-	Folder,
-	FolderPlus,
-	Link2,
-	Plus,
-	Sparkles,
-} from "lucide-react";
+import { ChevronDown, Link2, Plus, Sparkles } from "lucide-react";
 import { marked } from "marked";
 import {
 	useCallback,
@@ -83,6 +76,22 @@ export function DirectoryView({
 		},
 		[dirPath, lix, onOpenFile],
 	);
+
+	useEffect(() => {
+		if (!isHome || readOnly) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.metaKey && event.shiftKey && event.key === ".") {
+				event.preventDefault();
+				setActionError(null);
+				void createWorkspaceFolder(lix, dirPath).catch((error: unknown) => {
+					console.error("workspace-home: new folder failed", error);
+					setActionError("Unable to create the folder. Try again.");
+				});
+			}
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [dirPath, isHome, lix, readOnly]);
 
 	const handleDrop = useCallback(
 		(event: ReactDragEvent) => {
@@ -198,9 +207,10 @@ export function DirectoryView({
 							<EntryRow
 								key={dir.path}
 								icon={
-									<Folder
-										className="size-[19px] text-text-tertiary"
-										aria-hidden="true"
+									<img
+										src="/icon-sq-folder.svg"
+										alt=""
+										className="size-[19px]"
 									/>
 								}
 								name={dir.name}
@@ -346,21 +356,20 @@ function NewMenu({
 				<ChevronDown className="size-3 opacity-80" aria-hidden="true" />
 			</Button>
 			{open ? (
-				<div className="absolute top-11 right-0 z-20 flex w-60 flex-col rounded-xl border border-border-panel bg-bg-panel p-1.5 shadow-lg">
+				<div className="absolute top-11 right-0 z-20 flex w-[248px] flex-col rounded-xl border border-border-panel bg-bg-panel p-1.5 shadow-[0_18px_44px_rgba(28,25,23,0.16)]">
 					<MenuItem
-						icon={
-							<img src={fileIconUrl("file.md")} alt="" className="size-4" />
-						}
+						icon={<img src="/icon-sq-new.svg" alt="" className="size-4" />}
 						label="New file"
-						hint="⌘ ."
+						shortcut="⌘ ."
 						onClick={() => {
 							setOpen(false);
 							onCreateFile("md");
 						}}
 					/>
 					<MenuItem
-						icon={<FolderPlus className="size-4" aria-hidden="true" />}
+						icon={<img src="/icon-sq-folder.svg" alt="" className="size-4" />}
 						label="New folder"
+						shortcut="⇧⌘ ."
 						onClick={() => {
 							setOpen(false);
 							onCreateFolder();
@@ -395,29 +404,28 @@ function MenuItem({
 	icon,
 	label,
 	hint,
+	shortcut,
 	onClick,
 }: {
 	readonly icon: ReactNode;
 	readonly label: string;
 	readonly hint?: string;
+	readonly shortcut?: string;
 	readonly onClick: () => void;
 }) {
-	const isShortcut = hint !== undefined && /[⌘⇧]/.test(hint);
 	return (
 		<button
 			type="button"
 			onClick={onClick}
-			className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-text-primary hover:bg-bg-hover"
+			className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] leading-none font-medium text-text-primary hover:bg-bg-hover"
 		>
 			{icon}
 			<span className="flex-1">
 				{label}
-				{hint && !isShortcut ? (
-					<span className="text-text-tertiary"> {hint}</span>
-				) : null}
+				{hint ? <span className="text-text-tertiary"> {hint}</span> : null}
 			</span>
-			{isShortcut ? (
-				<span className="text-[11.5px] text-text-tertiary/70">{hint}</span>
+			{shortcut ? (
+				<span className="text-[11.5px] text-text-tertiary/60">{shortcut}</span>
 			) : null}
 		</button>
 	);
