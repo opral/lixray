@@ -59,7 +59,7 @@ jobs:
 
   frontend:
     name: Frontend checks
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -126,7 +126,7 @@ jobs:
 
   rust:
     name: Rust checks
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
@@ -156,7 +156,7 @@ jobs:
 
   e2e:
     name: End-to-end tests
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
