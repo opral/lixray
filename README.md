@@ -137,12 +137,12 @@ pnpm --dir database start
 pnpm --dir database test
 ```
 
-Link and apply migrations to the configured development project from an
+Link and apply migrations to the intended Supabase project from an
 authenticated Supabase CLI session:
 
 ```sh
 pnpm --dir database exec supabase login
-pnpm --dir database exec supabase link --project-ref xpkokrinmkjqcnjzbmpe
+pnpm --dir database exec supabase link --project-ref <project-ref>
 pnpm --dir database exec supabase db push
 ```
 
@@ -279,7 +279,6 @@ pnpm test:e2e
 pnpm --dir web-app build
 cargo test --manifest-path lix-server/Cargo.toml
 docker build -f lix-server/Dockerfile .
-pnpm --dir web-app deploy:worker --dry-run
 ```
 
 Install Playwright Chromium once with:
@@ -319,47 +318,74 @@ the runner.
 
 ## Deployment
 
-### Railway workspace-service previews
+### Railway
 
-[`railway.json`](./railway.json) defines the deployable `lix-server` service.
-Railway builds [`lix-server/Dockerfile`](./lix-server/Dockerfile) with the
-repository root as its context, so the image contains the PR-pinned
-`vendor/lix` submodule. It uses Railway's injected `PORT`, checks `/healthz`
-without opening a workspace, enables Serverless sleeping, runs one replica, and
-removes the old deployment without an intentional overlap.
+Railway is the deploy target for the portable two-service topology:
 
-The first Railway project is a deployment and preview spike, not the production
-cutover. Leave its `production` environment undeployed. Use a persistent
-`preview-base` environment as the PR template and configure `lix-server` with a
-dedicated preview S3 bucket:
+```text
+browser -> lixray-web -> lix-server -> R2
+```
+
+The deployment rule is intentionally simple:
+
+- merging to `main` deploys both services to Railway production;
+- opening or updating a pull request creates an isolated Railway preview;
+- pull-request environments sleep when idle; production stays awake.
+
+[`railway.json`](./railway.json) defines `lix-server`;
+[`web-app/railway.json`](./web-app/railway.json) defines `lixray-web`.
+Each service builds from the repository root, includes the PR-pinned
+`vendor/lix` checkout, exposes `/healthz`, and has no provider-specific
+workspace runtime.
+
+Infisical is the source of truth for runtime configuration. Its Railway syncs
+are pinned to the target environment and service:
+
+```text
+Production  /railway/lix-server  -> Railway production / lix-server
+Production  /railway/lixray-web  -> Railway production / lixray-web
+Development /railway/lix-server  -> Railway preview-base / lix-server
+Development /railway/lixray-web  -> Railway preview-base / lixray-web
+```
+
+The production `lix-server` service receives:
 
 ```text
 S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-S3_BUCKET=lixray-preview
-S3_ACCESS_KEY_ID=<preview-bucket-access-key>
-S3_SECRET_ACCESS_KEY=<preview-bucket-secret-key>
+S3_BUCKET=<production-bucket>
+S3_ACCESS_KEY_ID=<production-access-key>
+S3_SECRET_ACCESS_KEY=<production-secret-key>
 S3_REGION=auto
 LIXRAY_MAX_OPEN_WORKSPACES=4
 LIXRAY_INTERNAL_TOKEN=<random secret>
 RUST_LOG=lixray=info
 ```
 
-Do not add production bucket credentials to this environment. When `S3_PREFIX`
-is unset, `lix-server` automatically uses
-`railway/<RAILWAY_ENVIRONMENT_ID>`, so PR environments can share the preview
-bucket without sharing workspace data. Configure lifecycle expiration for the
-preview bucket so deleted PR environments do not leave data indefinitely.
-Generate a Railway domain for the service and verify sleeping behavior in
-Railway metrics. Do not attach an uptime monitor because inbound traffic
-prevents sleeping.
+The production `lixray-web` service receives the same
+`LIXRAY_INTERNAL_TOKEN`, a private
+`LIXRAY_WORKSPACE_SERVICE_URL=http://lix-server.railway.internal:8080`, and
+the production Supabase URL, JWKS URL, and publishable key. It also needs
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_KEY` at build time; these public browser
+values are baked into the Vite bundle.
 
-Enable PR Environments and Focused PR Environments, keep bot PR environments
-disabled, and use `preview-base` as the PR base. Railway then creates a unique
-domain for matching PRs and deletes the environment when the PR closes or
-merges. The watch patterns limit preview builds to changes in `lix-server`,
-`vendor/lix`, `.gitmodules`, or `railway.json`.
+Use a dedicated preview R2 bucket in the Railway PR base environment. Leave
+`S3_PREFIX` unset: `lix-server` then namespaces storage under the Railway
+environment ID, so previews share credentials without sharing workspace data.
+Preview web deployments use the same real Supabase configuration until we add
+isolated Supabase preview projects; they do not have a demo-only runtime path.
 
-Exercise a preview directly with:
+GitHub Actions receives no runtime secrets: it only runs CI, while Railway
+deploys from the connected GitHub branch. Supabase project settings, auth
+provider credentials, and migrations remain provider-native; this app has no
+Supabase Edge Functions to sync.
+
+Before treating the deployment as healthy, smoke-test the generated Railway web
+domain with sign-in, workspace creation, a Lix handshake, and a query. Attach
+`lixray.com` only after that succeeds. The legacy Cloudflare Worker and its old
+R2/Supabase data remain untouched until this traffic switch; then remove the
+Worker/DO runtime and destroy the retired resources as one hard cut.
+
+Exercise a hosted service directly with:
 
 ```sh
 LIXRAY_PERF_URL=https://<pr-domain> \
@@ -371,71 +397,7 @@ LIXRAY_INTERNAL_TOKEN=<preview-token> \
 pnpm perf:run
 ```
 
-Before treating the spike as successful, verify that Railway checked out the
-`vendor/lix` submodule, the first request wakes a sleeping service, the service
-returns to sleep after the idle window, and closing a PR removes its environment.
-Set a workspace compute hard limit as a final cost guardrail. Railway's Hobby
-plan currently has a $5 monthly minimum that includes $5 of resource usage;
-running PR environments consume normal metered resources while awake.
-
-### Temporary Cloudflare production control plane
-
-```sh
-pnpm --dir web-app deploy:worker
-```
-
-Until the Railway production cutover, this remains the current production
-control-plane deployment. It is not a local development, CI E2E, or Railway PR
-preview path; those use the portable `lixray-web -> lix-server -> S3` topology.
-Do not recreate the removed Workerd/Wasm preview simulator.
-
-Workers Builds should use:
-
-- Project root: `/`
-- Production branch: `main`
-- Build command: `pnpm --dir web-app check:cloudflare && pnpm --dir web-app build`
-- Deploy command: `pnpm --dir web-app deploy:worker`
-- Worker name: `lixray`
-
-Enable Workers Builds build caching. `lix-server/Dockerfile` uses BuildKit cache
-mounts for the Cargo registry, git checkouts, and target directory. Do not run
-`cargo test` in the Workers Builds build command: `wrangler deploy` already
-builds the container image and Rust release binary, and duplicating the Rust
-compile can exceed the build timeout.
-
-Public Worker variables are checked into `web-app/wrangler.jsonc`:
-
-```text
-VITE_SUPABASE_URL
-VITE_SUPABASE_KEY
-SUPABASE_URL
-SUPABASE_PUBLISHABLE_KEY
-SUPABASE_JWKS_URL
-R2_ENDPOINT
-R2_BUCKET
-R2_REGION
-S3_PREFIX
-S3_ALLOW_HTTP
-SLATEDB_CACHE_DIR
-SLATEDB_CACHE_MAX_BYTES
-SLATEDB_BLOCK_CACHE_BYTES
-SLATEDB_METADATA_CACHE_BYTES
-```
-
-Only the R2 credentials are Worker secrets:
-
-```sh
-pnpm --dir web-app exec wrangler secret put R2_ACCESS_KEY_ID --config ./wrangler.jsonc
-pnpm --dir web-app exec wrangler secret put R2_SECRET_ACCESS_KEY --config ./wrangler.jsonc
-```
-
-No Supabase `wrangler secret put` command is needed. After a Clerk-free
-deployment has been verified, remove the obsolete secret:
-
-```sh
-pnpm --dir web-app exec wrangler secret delete CLERK_SECRET_KEY --config ./wrangler.jsonc
-```
-
-Before production cutover, replace the public development Supabase values with
-the production project's values, apply the same migrations, and configure its
-Google provider and redirect URLs.
+Before treating the deployment as successful, verify that Railway checked out
+the `vendor/lix` submodule, the first preview request wakes a sleeping service,
+and closing the PR removes its environment. Set a workspace compute hard limit
+as a final cost guardrail.

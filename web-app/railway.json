@@ -25,5 +25,17 @@
 		"restartPolicyMaxRetries": 10,
 		"overlapSeconds": 0,
 		"drainingSeconds": 30
+	},
+	"environments": {
+		"production": {
+			"deploy": {
+				"sleepApplication": false
+			}
+		},
+		"pr": {
+			"deploy": {
+				"sleepApplication": true
+			}
+		}
 	}
 }

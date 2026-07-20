@@ -7,4 +7,8 @@
 **/dist
 **/node_modules
 **/target
+**/.env
+**/.env.*
+**/.dev.vars
+**/.dev.vars.*
 perf/results

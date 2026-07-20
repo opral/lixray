@@ -1,4 +1,7 @@
 import startHandler from "@tanstack/react-start/server-entry";
+import { addGoogleAnalytics } from "./lib/google-analytics";
+import { parseSqlScript } from "./lib/node-lix-sql-parser";
+import { withShareSecurityHeaders } from "./lib/share-security";
 import { handleRequest, type WorkerEnv } from "./worker/handler";
 
 export default {
@@ -10,10 +13,19 @@ export default {
 		ctx.passThroughOnException();
 		return handleRequest(request, env, {
 			executionContext: ctx,
+			parseSqlScript,
 			workspaceFetch: (workspaceId, workspaceRequest) =>
 				fetchWorkspaceService(env, workspaceId, workspaceRequest),
-			fallback: async (fallbackRequest) =>
-				await startHandler.fetch(fallbackRequest),
+			fallback: async (fallbackRequest) => {
+				const response = await startHandler.fetch(fallbackRequest);
+				return withShareSecurityHeaders(
+					await addGoogleAnalytics(
+						fallbackRequest,
+						response,
+						env.GOOGLE_ANALYTICS_ID,
+					),
+				);
+			},
 		});
 	},
 };

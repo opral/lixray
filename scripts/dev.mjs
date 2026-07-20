@@ -85,13 +85,10 @@ composeEnv = {
 	LIXRAY_WORKSPACE_SERVICE_URL:
 		process.env.LIXRAY_WORKSPACE_SERVICE_URL ?? "http://lix-server:8080",
 	LIXRAY_INTERNAL_TOKEN: internalToken,
-	LIXRAY_DEMO: "",
-	LIXRAY_DEMO_WORKSPACE_IDS: "",
 	SUPABASE_URL: composeSupabaseUrl,
 	SUPABASE_JWKS_URL: `${composeSupabaseUrl}/auth/v1/.well-known/jwks.json`,
 	SUPABASE_JWT_ISSUER_URL: supabaseUrl,
 	SUPABASE_PUBLISHABLE_KEY: supabaseKey,
-	VITE_LIXRAY_DEMO: "",
 	VITE_LIXRAY_LOCAL_DEV: "1",
 	VITE_LIXRAY_LOCAL_DEV_EMAIL: localDevEmail,
 	VITE_LIXRAY_LOCAL_DEV_PASSWORD: localDevPassword,

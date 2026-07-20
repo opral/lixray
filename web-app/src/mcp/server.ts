@@ -16,8 +16,6 @@ import { EXECUTE_TOOL_DESCRIPTION } from "./execute-schema.ts";
 
 export const MCP_PATH = "/mcp";
 export const MCP_RESOURCE = "https://lixray.com";
-export const MCP_AUTHORIZATION_SERVER =
-	"https://xpkokrinmkjqcnjzbmpe.supabase.co/auth/v1";
 export const MCP_PROTECTED_RESOURCE_PATH =
 	"/.well-known/oauth-protected-resource";
 export const MCP_DOCUMENTATION_PATH = "/docs/mcp";
@@ -370,12 +368,15 @@ export interface McpDiscoveryOptions {
 export function protectedResourceMetadataResponse(
 	options: McpDiscoveryOptions = {},
 ): Response {
+	if (!options.authorizationServer) {
+		return new Response("MCP authorization is not configured\n", {
+			status: 500,
+		});
+	}
 	return Response.json(
 		{
 			resource: MCP_RESOURCE,
-			authorization_servers: [
-				options.authorizationServer ?? MCP_AUTHORIZATION_SERVER,
-			],
+			authorization_servers: [options.authorizationServer],
 			scopes_supported: [...MCP_SCOPES],
 			resource_documentation:
 				options.resourceDocumentationUrl ??

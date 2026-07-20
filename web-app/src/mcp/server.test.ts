@@ -20,7 +20,6 @@ import {
 	EXECUTE_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 import {
-	MCP_AUTHORIZATION_SERVER,
 	MCP_PROTECTED_RESOURCE_URL,
 	MCP_RESOURCE,
 	createLixrayMcpServer,
@@ -36,14 +35,17 @@ const BRANCH_ID = "22222222-2222-4222-8222-222222222222";
 const THROW_BRANCH_ID = "33333333-3333-4333-8333-333333333333";
 const COMMIT_ID = "44444444-4444-4444-8444-444444444444";
 const HIDDEN_BRANCH_ID = "55555555-5555-4555-8555-555555555555";
+const AUTHORIZATION_SERVER = "https://supabase.example.test/auth/v1";
 
 void test("protected resource discovery advertises the Supabase authorization server", async () => {
-	const response = protectedResourceMetadataResponse();
+	const response = protectedResourceMetadataResponse({
+		authorizationServer: AUTHORIZATION_SERVER,
+	});
 	assert.equal(response.status, 200);
 	assert.equal(response.headers.get("access-control-allow-origin"), "*");
 	assert.deepEqual(await response.json(), {
 		resource: MCP_RESOURCE,
-		authorization_servers: [MCP_AUTHORIZATION_SERVER],
+		authorization_servers: [AUTHORIZATION_SERVER],
 		scopes_supported: ["openid", "email", "profile"],
 		resource_documentation: "https://lixray.com/docs/mcp",
 	});
