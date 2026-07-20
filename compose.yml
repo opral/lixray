@@ -51,8 +51,6 @@ services:
       context: .
       dockerfile: web-app/Dockerfile
       args:
-        LIXRAY_DEMO: ${LIXRAY_DEMO:-}
-        VITE_LIXRAY_DEMO: ${VITE_LIXRAY_DEMO:-}
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://127.0.0.1:54321}
         VITE_SUPABASE_KEY: ${VITE_SUPABASE_KEY:-}
         VITE_LIXRAY_LOCAL_DEV: ${VITE_LIXRAY_LOCAL_DEV:-}
@@ -60,8 +58,6 @@ services:
         VITE_LIXRAY_LOCAL_DEV_PASSWORD: ${VITE_LIXRAY_LOCAL_DEV_PASSWORD:-}
     environment:
       PORT: 8080
-      LIXRAY_DEMO: ${LIXRAY_DEMO:-}
-      LIXRAY_DEMO_WORKSPACE_IDS: ${LIXRAY_DEMO_WORKSPACE_IDS:-}
       LIXRAY_WORKSPACE_SERVICE_URL: http://lix-server:8080
       LIXRAY_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
       SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}

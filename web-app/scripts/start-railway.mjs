@@ -5,6 +5,7 @@ import { dirname, extname, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import app from "../dist/server/index.js";
+import "./assert-railway-env.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const clientRoot = resolve(root, "dist/client");

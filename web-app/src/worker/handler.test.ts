@@ -23,7 +23,6 @@ import {
 	type WorkerEnv,
 } from "./handler.ts";
 import {
-	MCP_AUTHORIZATION_SERVER,
 	MCP_DOCUMENTATION_PATH,
 	MCP_PROTECTED_RESOURCE_PATH,
 	MCP_RESOURCE,
@@ -67,7 +66,9 @@ void test("protected resource discovery is public and precedes the frontend fall
 	let fellBack = false;
 	const response = await handleRequest(
 		new Request(`https://example.test${MCP_PROTECTED_RESOURCE_PATH}`),
-		env({}),
+		env({
+			extra: { SUPABASE_URL: "https://supabase.example.test" },
+		}),
 		{
 			fallback: async () => {
 				fellBack = true;
@@ -79,7 +80,7 @@ void test("protected resource discovery is public and precedes the frontend fall
 	assert.equal(fellBack, false);
 	assert.deepEqual(await response.json(), {
 		resource: MCP_RESOURCE,
-		authorization_servers: [MCP_AUTHORIZATION_SERVER],
+		authorization_servers: ["https://supabase.example.test/auth/v1"],
 		scopes_supported: ["openid", "email", "profile"],
 		resource_documentation: "https://lixray.com/docs/mcp",
 	});

@@ -98,7 +98,10 @@ jobs:
         run: pnpm --dir web-app build
 
       - name: Build Railway target
-        run: pnpm --dir web-app build:railway
+        env:
+          VITE_SUPABASE_URL: https://example.invalid
+          VITE_SUPABASE_KEY: ci-public-placeholder
+        run: pnpm --dir web-app build:node
 
       - name: Verify generated files are committed
         run: git diff --exit-code

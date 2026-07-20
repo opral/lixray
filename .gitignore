@@ -16,12 +16,14 @@
 /.output/
 /supabase/.branches/
 /database/supabase/.temp/
-/.dev.vars
-/.dev.vars.*
-/!.dev.vars.example
-/web-app/.dev.vars
-/web-app/.dev.vars.*
-!/web-app/.dev.vars.example
+# Runtime configuration is supplied by Infisical. Keep local overrides out of
+# Git at every level of the repository; explicit example templates stay trackable.
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 
 # Playwright local artifacts
 /playwright-report/

@@ -16,7 +16,6 @@ import { LixFileService, type WorkspaceSummary } from "../mcp/file-service.ts";
 import {
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
-	MCP_AUTHORIZATION_SERVER,
 	MCP_PATH,
 	MCP_PROTECTED_RESOURCE_PATH,
 	MCP_PROTECTED_RESOURCE_URL,
@@ -66,6 +65,7 @@ export interface WorkerEnv {
 	LIXRAY_DEMO_WORKSPACE_IDS?: string;
 	LIXRAY_WORKSPACE_SERVICE_URL?: string;
 	LIXRAY_INTERNAL_TOKEN?: string;
+	GOOGLE_ANALYTICS_ID?: string;
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
@@ -186,9 +186,10 @@ export async function handleRequest(
 
 	if (url.pathname === MCP_PROTECTED_RESOURCE_PATH) {
 		if (request.method === "OPTIONS") return corsPreflight();
-		return request.method === "GET"
-			? protectedResourceMetadataResponse(mcpDiscoveryOptions(url, env))
-			: new Response("Method not allowed\n", { status: 405 });
+		if (request.method !== "GET") {
+			return new Response("Method not allowed\n", { status: 405 });
+		}
+		return protectedResourceMetadataResponse(mcpDiscoveryOptions(url, env));
 	}
 
 	if (url.pathname === MCP_DOCUMENTATION_PATH) {
@@ -528,13 +529,15 @@ export async function authenticateMcpWithSupabase(
 }
 
 function mcpDiscoveryOptions(url: URL, env: WorkerEnv) {
-	if (!isLocalDevelopmentUrl(url)) return {};
 	const supabaseUrl = env.SUPABASE_URL?.replace(/\/$/, "");
+	if (!isLocalDevelopmentUrl(url)) {
+		return {
+			authorizationServer: supabaseUrl ? `${supabaseUrl}/auth/v1` : undefined,
+		};
+	}
 	return {
 		protectedResourceUrl: mcpProtectedResourceUrl(url),
-		authorizationServer: supabaseUrl
-			? `${supabaseUrl}/auth/v1`
-			: MCP_AUTHORIZATION_SERVER,
+		authorizationServer: supabaseUrl ? `${supabaseUrl}/auth/v1` : undefined,
 		resourceDocumentationUrl: `${url.origin}${MCP_DOCUMENTATION_PATH}`,
 		endpointUrl: `${url.origin}${MCP_PATH}`,
 	};
