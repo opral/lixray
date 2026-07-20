@@ -235,10 +235,7 @@ export function LandingPage() {
 					</div>
 				</section>
 
-				<section
-					className="border-t border-[#1c1917]/7"
-					aria-label="Features"
-				>
+				<section className="border-t border-[#1c1917]/7" aria-label="Features">
 					<div className="mx-auto flex max-w-[1040px] flex-col gap-24 px-5 py-24 sm:gap-[130px] sm:px-14 sm:py-[130px]">
 						<FeatureRow
 							title="Agents read and write like teammates"
@@ -379,14 +376,10 @@ function FeatureRow({
 		<article
 			className={cn(
 				"grid items-center gap-10 lg:gap-[90px]",
-				reverse
-					? "lg:grid-cols-[1fr_400px]"
-					: "lg:grid-cols-[400px_1fr]",
+				reverse ? "lg:grid-cols-[1fr_400px]" : "lg:grid-cols-[400px_1fr]",
 			)}
 		>
-			<div
-				className={cn("flex flex-col gap-4", reverse && "lg:order-2")}
-			>
+			<div className={cn("flex flex-col gap-4", reverse && "lg:order-2")}>
 				<h2 className="m-0 text-[34px] leading-[1.15] font-bold tracking-[-.025em]">
 					{title}
 				</h2>
