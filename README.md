@@ -152,7 +152,8 @@ Infisical is the source of truth for preview provisioning. Its production
 environment contains these secrets under `/preview-automation`:
 
 - `SUPABASE_ACCESS_TOKEN` — access to read preview-branch credentials;
-- `RAILWAY_TOKEN` — project-scoped access to update the PR environment.
+- `RAILWAY_API_TOKEN` — workspace-scoped access to update ephemeral PR
+  environments (Railway project tokens cannot access derived environments).
 
 The `lixray-github-preview` machine identity can read the project via GitHub
 OIDC for `opral/lixray`'s `main` workflow context. Dynamic per-PR Supabase
