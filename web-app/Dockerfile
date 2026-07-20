@@ -56,7 +56,10 @@ RUN if [ ! -f vendor/lix/packages/js-sdk/package.json ]; then \
 # the ID as opaque, so the same cache works for local Compose builds.
 RUN --mount=type=cache,id=s/c745bcb2-fef1-4ba6-9ebf-a6d112d94d05-/root/.local/share/pnpm/store,target=/root/.local/share/pnpm/store \
 	pnpm install --frozen-lockfile
-RUN if echo "$RAILWAY_ENVIRONMENT_NAME" | grep -Eq '^lixray-pr-[0-9]+$'; then \
+# Railway names PR environments "lixray-pr-<n>" when configured, but
+# recreated ones get the default "pr-<hash>-<n>" — accept both. Keep in
+# sync with assert-railway-env.mjs and worker/handler.ts isDemoMode.
+RUN if echo "$RAILWAY_ENVIRONMENT_NAME" | grep -Eq '^(lixray-pr-[0-9]+|pr-[a-z0-9]+-[0-9]+)$'; then \
 		export LIXRAY_DEMO=1; \
 		export LIXRAY_DEMO_WORKSPACE_IDS=00000000-0000-4000-8000-000000000002; \
 		export VITE_LIXRAY_DEMO=1; \

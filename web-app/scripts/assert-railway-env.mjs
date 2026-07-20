@@ -8,7 +8,8 @@ const configuredDemoVariables = forbiddenDemoVariables.filter((name) =>
 	process.env[name]?.trim(),
 );
 
-const isPullRequestEnvironment = /^lixray-pr-\d+$/.test(
+// Keep in sync with web-app/Dockerfile and worker/handler.ts isDemoMode.
+const isPullRequestEnvironment = /^(lixray-pr-\d+|pr-[a-z0-9]+-\d+)$/.test(
 	process.env.RAILWAY_ENVIRONMENT_NAME ?? "",
 );
 
