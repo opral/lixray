@@ -32,10 +32,20 @@ export const lixrayDirViewState = (dirPath: string) => {
 function openFileFromView(
 	atelier: AtelierExtensionRuntime,
 	path: string,
-	options: { newTab: boolean },
+	options: { newTab: boolean; created?: boolean },
 ) {
 	void atelier.documents
-		.open(path, options.newTab ? { newTab: true } : {})
+		.open(path, {
+			...(options.newTab ? { newTab: true } : {}),
+			// A just-created file opens focused with its draft affordances,
+			// matching Atelier's own new-file flow.
+			...(options.created
+				? {
+						documentOrigin: "new" as const,
+						state: { focusOnLoad: true, defaultBlock: "heading1" },
+					}
+				: {}),
+		})
 		.catch((error: unknown) => {
 			console.error("workspace-home: unable to open file", error);
 		});

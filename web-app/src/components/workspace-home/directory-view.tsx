@@ -1,7 +1,7 @@
 import type { Lix } from "@lix-js/sdk";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import DOMPurify from "dompurify";
-import { ChevronDown, Link2, Plus, Sparkles } from "lucide-react";
+import { ChevronDown, Link2, PencilLine, Plus, Sparkles } from "lucide-react";
 import { marked } from "marked";
 import {
 	useCallback,
@@ -36,7 +36,10 @@ export type DirectoryViewProps = {
 	readonly connectHref: string;
 	/** Only the active view binds shortcuts (several stay mounted hidden). */
 	readonly isActive?: boolean;
-	readonly onOpenFile: (path: string, options: { newTab: boolean }) => void;
+	readonly onOpenFile: (
+		path: string,
+		options: { newTab: boolean; created?: boolean },
+	) => void;
 	readonly onOpenDir: (dirPath: string, options: { newTab: boolean }) => void;
 };
 
@@ -73,7 +76,7 @@ export function DirectoryView({
 			try {
 				setActionError(null);
 				const path = await createWorkspaceFile(lix, dirPath, extension);
-				onOpenFile(path, { newTab: false });
+				onOpenFile(path, { newTab: false, created: true });
 			} catch (error) {
 				console.error("workspace-home: unable to create file", error);
 				setActionError("Unable to create the file. Try again.");
@@ -103,7 +106,7 @@ export function DirectoryView({
 				return;
 			}
 			void createWorkspaceFile(lix, dirPath, "md")
-				.then((path) => onOpenFile(path, { newTab: false }))
+				.then((path) => onOpenFile(path, { newTab: false, created: true }))
 				.catch((error: unknown) => {
 					console.error("workspace-home: new file failed", error);
 					setActionError("Unable to create the file. Try again.");
@@ -338,7 +341,7 @@ function ReadmePreview({
 	);
 	return (
 		<>
-			<div className="flex items-center gap-2.5 px-3 pt-8 pb-3.5">
+			<div className="flex items-center gap-1.5 px-3 pt-8 pb-3.5">
 				<button
 					type="button"
 					onClick={onOpen}
@@ -346,7 +349,16 @@ function ReadmePreview({
 				>
 					{fileName}
 				</button>
-				<span className="h-px flex-1 bg-border-subtle" />
+				<button
+					type="button"
+					aria-label={`Edit ${fileName}`}
+					title={`Edit ${fileName}`}
+					onClick={onOpen}
+					className="grid size-6 shrink-0 place-content-center rounded-md text-icon-tertiary hover:bg-bg-hover hover:text-icon-secondary"
+				>
+					<PencilLine aria-hidden="true" className="size-3" />
+				</button>
+				<span className="ml-1 h-px flex-1 bg-border-subtle" />
 			</div>
 			{/* Relative README links navigate the tab in place (rule 3) instead
 			    of escaping to a full page load. */}
