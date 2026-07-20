@@ -52,6 +52,12 @@ import {
 	openWorkspaceLixSession,
 	type WorkspaceLixSession,
 } from "~/lib/workspace-lix-session";
+import {
+	LIXRAY_DIR_EXTENSION_ID,
+	LIXRAY_HOME_EXTENSION_ID,
+	lixrayWorkspaceExtensions,
+} from "~/components/workspace-home/host-extensions";
+import { normalizeHomeDirPath } from "~/components/workspace-home/lix-data";
 
 interface WorkspaceAtelierProps {
 	workspaceId: string;
@@ -70,6 +76,7 @@ interface WorkspaceAtelierProps {
 
 const WorkspaceAtelierContext = createContext<AtelierInstance | null>(null);
 const WorkspaceDefaultBranchContext = createContext<string | null>(null);
+const WorkspaceRouteSyncContext = createContext<(() => void) | null>(null);
 
 export function WorkspaceAtelier({
 	workspaceId,
@@ -230,24 +237,26 @@ export function WorkspaceAtelier({
 		[namespace, navigate, workspaceSlug],
 	);
 
+	// URL ⇄ tabs: the URL always names the ACTIVE central view. Atelier
+	// reports activations (open, tab click, close, restore); the routes below
+	// drive the reverse direction. Suppressed until the initial route has been
+	// applied so a restored session cannot clobber a deep link.
+	const routeSyncedRef = useRef(false);
+	const markRouteSynced = useCallback(() => {
+		routeSyncedRef.current = true;
+	}, []);
 	useEffect(() => {
 		eventHandlerRef.current = (event) => {
 			atelierTelemetryHandlerRef.current?.(event);
-			const nextFilePath =
-				event.type === "document_viewed"
-					? event.filePath
-					: event.type === "document_closed"
-						? event.nextFilePath
-						: undefined;
-			if (nextFilePath === undefined) return;
-			const filePath = nextFilePath?.replace(/^\/+/, "") ?? "";
+			if (event.type !== "central_view_activated") return;
+			if (!routeSyncedRef.current) return;
 			const activeBranchId = activeLixRef.current?.activeBranchSnapshot();
 			const defaultBranchId = activeLixRef.current?.defaultBranchSnapshot();
 			const search =
 				activeBranchId && defaultBranchId
 					? atelierBranchSearch(activeBranchId, defaultBranchId)
 					: {};
-			if (!filePath) {
+			if (event.viewKind === LIXRAY_HOME_EXTENSION_ID) {
 				const targetPath = `/@${namespace}/${workspaceSlug}`;
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
@@ -257,7 +266,21 @@ export function WorkspaceAtelier({
 				});
 				return;
 			}
-			if (routeFilePathRef.current === filePath) return;
+			if (event.viewKind === LIXRAY_DIR_EXTENSION_ID) {
+				const dirPath = normalizeHomeDirPath(event.state?.path);
+				const splat = dirPath.split("/").filter(Boolean).join("/");
+				if (!splat) return;
+				const targetPath = `/@${namespace}/${workspaceSlug}/dir/${splat}`;
+				if (pathnameRef.current === targetPath) return;
+				void navigate({
+					to: "/@{$namespace}/$workspace/dir/$",
+					params: { namespace, workspace: workspaceSlug, _splat: splat },
+					search,
+				});
+				return;
+			}
+			const filePath = event.filePath?.replace(/^\/+/, "") ?? "";
+			if (!filePath || routeFilePathRef.current === filePath) return;
 			void navigate({
 				to: "/@{$namespace}/$workspace/file/$",
 				params: {
@@ -276,6 +299,7 @@ export function WorkspaceAtelier({
 		setInstance(null);
 		setWorkspaceDefaultBranchId(null);
 		setError(null);
+		routeSyncedRef.current = false;
 
 		const userId = isDemoModeEnabled
 			? DEMO_AUTH_TOKEN
@@ -326,6 +350,12 @@ export function WorkspaceAtelier({
 						readOnly: isReadOnly,
 						branchSession,
 						reviewRangeSessionId: userId,
+						extensions: lixrayWorkspaceExtensions,
+						filesViewMode: "sidebar",
+						centralPanel: {
+							tabs: true,
+							home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
+						},
 						sessionStateStore: createWorkspaceSessionStateStore({
 							userId,
 							workspaceId,
@@ -430,12 +460,19 @@ export function WorkspaceAtelier({
 		};
 	}, [branchId, instance, navigateToCurrentPathBranch, pathname]);
 
+	// The workspace root URL means "the pinned Home tab is active" — content
+	// tabs stay open (rule 1 of the tab model: Home never navigates or closes).
 	useEffect(() => {
 		if (!instance) return;
 		const workspaceRoot = `/@${namespace}/${workspaceSlug}`;
 		if (pathname !== workspaceRoot) return;
-		void instance.documents.closeAll();
-	}, [instance, namespace, pathname, workspaceSlug]);
+		void instance.views
+			.open(LIXRAY_HOME_EXTENSION_ID)
+			.catch((error: unknown) => {
+				console.error("Unable to activate the workspace home", error);
+			})
+			.finally(markRouteSynced);
+	}, [instance, markRouteSynced, namespace, pathname, workspaceSlug]);
 
 	return (
 		<div
@@ -446,6 +483,7 @@ export function WorkspaceAtelier({
 				<WorkspaceDefaultBranchContext.Provider
 					value={workspaceDefaultBranchId}
 				>
+					<WorkspaceRouteSyncContext.Provider value={markRouteSynced}>
 					<WorkspaceAtelierContext.Provider value={instance}>
 						<Atelier
 							instance={instance}
@@ -472,6 +510,7 @@ export function WorkspaceAtelier({
 						/>
 						<Outlet />
 					</WorkspaceAtelierContext.Provider>
+					</WorkspaceRouteSyncContext.Provider>
 				</WorkspaceDefaultBranchContext.Provider>
 			) : null}
 			{!instance && !error ? (
@@ -500,6 +539,15 @@ export function useWorkspaceAtelierInstance(): AtelierInstance | null {
 
 export function useWorkspaceDefaultBranchId(): string | null {
 	return useContext(WorkspaceDefaultBranchContext);
+}
+
+/**
+ * Child routes call this after applying their URL to the Atelier tabs;
+ * until then, tab-activation events do not navigate (deep links win).
+ */
+export function useMarkWorkspaceRouteSynced(): () => void {
+	const markRouteSynced = useContext(WorkspaceRouteSyncContext);
+	return markRouteSynced ?? (() => undefined);
 }
 
 function WorkspaceShareControl({
