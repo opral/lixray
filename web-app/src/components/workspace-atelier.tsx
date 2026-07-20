@@ -63,8 +63,6 @@ import {
 } from "~/components/workspace-home/host-extensions";
 import { LixrayCentralTabStrip } from "~/components/workspace-home/central-tab-strip";
 import {
-	createWorkspaceFile,
-	createWorkspaceFolder,
 	normalizeHomeDirPath,
 	useWorkspaceIsEmpty,
 } from "~/components/workspace-home/lix-data";
@@ -143,6 +141,7 @@ export function WorkspaceAtelier({
 	const routeFilePathRef = useRef(routeFilePath);
 	const branchIdRef = useRef(branchId);
 	const routeBranchSwitchRef = useRef(0);
+	const newTabSeqRef = useRef(0);
 	const suppressBranchNavigationRef = useRef(false);
 	const eventHandlerRef = useRef<(event: AtelierEvent) => void>(
 		() => undefined,
@@ -594,36 +593,21 @@ export function WorkspaceAtelier({
 														? { label: "Getting started", icon: Sparkles }
 														: undefined
 												}
-												onCreateFile={async (extension) => {
+												onNewTab={async () => {
+													// A fresh tab opens the workspace root listing —
+													// in-place navigation takes it from there.
+													newTabSeqRef.current += 1;
 													try {
-														const path = await createWorkspaceFile(
-															instance.lix,
-															"/",
-															extension,
-														);
-														await instance.documents.open(path, {
-															documentOrigin: "new",
-														});
-													} catch (caught) {
-														console.error("Unable to create the file", caught);
-													}
-												}}
-												onCreateFolder={async () => {
-													try {
-														const dirPath = await createWorkspaceFolder(
-															instance.lix,
-															"/",
-														);
 														await instance.views.open(LIXRAY_DIR_EXTENSION_ID, {
-															state: lixrayDirViewState(dirPath),
-															instanceId: lixrayDirInstanceId(dirPath),
+															state: {
+																...lixrayDirViewState("/"),
+																atelier: { label: "New tab" },
+															},
+															instanceId: `${lixrayDirInstanceId("/")}#${newTabSeqRef.current}`,
 															newTab: true,
 														});
 													} catch (caught) {
-														console.error(
-															"Unable to create the folder",
-															caught,
-														);
+														console.error("Unable to open a new tab", caught);
 													}
 												}}
 											/>

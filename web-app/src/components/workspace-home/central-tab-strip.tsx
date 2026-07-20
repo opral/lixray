@@ -4,7 +4,7 @@ import type {
 } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import { X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 /**
  * The central tab strip rendered to the home comp's spec (15a/12b): white
@@ -13,22 +13,19 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
  */
 export function LixrayCentralTabStrip({
 	context,
-	onCreateFile,
-	onCreateFolder,
+	onNewTab,
 	pinnedTab,
 }: {
 	readonly context: AtelierTabStripContext;
-	readonly onCreateFile?: (
-		extension: "md" | "csv" | "excalidraw",
-	) => void | Promise<void>;
-	readonly onCreateFolder?: () => void | Promise<void>;
+	/** ＋ opens a new tab (a view) — rule 5's second door, next to ⌘-click. */
+	readonly onNewTab?: () => void | Promise<void>;
 	/** Overrides the pinned tab's presentation (e.g. "Getting started"). */
 	readonly pinnedTab?: {
 		readonly label: string;
 		readonly icon: AtelierTabStripTab["icon"];
 	};
 }) {
-	const canAdd = onCreateFile !== undefined || context.newTab !== undefined;
+	const newTab = onNewTab ?? context.newTab;
 	return (
 		<div className="flex h-[var(--atelier-panel-header-height)] items-center gap-1">
 			{context.tabs.map((tab) => (
@@ -41,150 +38,18 @@ export function LixrayCentralTabStrip({
 					}
 				/>
 			))}
-			{canAdd ? (
-				<NewTabMenu
-					onCreateFile={onCreateFile}
-					onCreateFolder={onCreateFolder}
-					fallbackNewTab={context.newTab}
-				/>
+			{newTab ? (
+				<button
+					type="button"
+					aria-label="New tab"
+					data-testid="lixray-new-tab"
+					onClick={() => void newTab()}
+					className="grid size-[26px] shrink-0 place-content-center rounded-md text-[15px] leading-none text-text-tertiary hover:bg-bg-hover"
+				>
+					＋
+				</button>
 			) : null}
 		</div>
-	);
-}
-
-/**
- * The strip's ＋ opens the add-view menu (same vocabulary as the sidebar ＋):
- * pick what the new tab should be rather than instantly creating a file.
- */
-function NewTabMenu({
-	onCreateFile,
-	onCreateFolder,
-	fallbackNewTab,
-}: {
-	readonly onCreateFile?: (
-		extension: "md" | "csv" | "excalidraw",
-	) => void | Promise<void>;
-	readonly onCreateFolder?: () => void | Promise<void>;
-	readonly fallbackNewTab?: () => void;
-}) {
-	const [open, setOpen] = useState(false);
-	const containerRef = useRef<HTMLDivElement | null>(null);
-	useEffect(() => {
-		if (!open) return;
-		const onPointerDown = (event: PointerEvent) => {
-			if (!containerRef.current?.contains(event.target as Node)) {
-				setOpen(false);
-			}
-		};
-		window.addEventListener("pointerdown", onPointerDown);
-		return () => window.removeEventListener("pointerdown", onPointerDown);
-	}, [open]);
-	if (!onCreateFile) {
-		return (
-			<button
-				type="button"
-				aria-label="New tab"
-				data-testid="lixray-new-tab"
-				onClick={fallbackNewTab}
-				className="grid size-[26px] shrink-0 place-content-center rounded-md text-[15px] leading-none text-text-tertiary hover:bg-bg-hover"
-			>
-				＋
-			</button>
-		);
-	}
-	return (
-		<div ref={containerRef} className="relative">
-			<button
-				type="button"
-				aria-label="New tab"
-				aria-expanded={open}
-				data-testid="lixray-new-tab"
-				onClick={() => setOpen((current) => !current)}
-				className="grid size-[26px] shrink-0 place-content-center rounded-md text-[15px] leading-none text-text-tertiary hover:bg-bg-hover"
-			>
-				＋
-			</button>
-			{open ? (
-				<div className="absolute top-8 left-0 z-20 flex w-[248px] flex-col rounded-xl border border-border-panel bg-bg-panel p-1.5 shadow-[0_18px_44px_rgba(28,25,23,0.16)]">
-					<StripMenuItem
-						icon={<img src="/icon-sq-new.svg" alt="" className="size-4" />}
-						label="New file"
-						shortcut="⌘ ."
-						onClick={() => {
-							setOpen(false);
-							void onCreateFile("md");
-						}}
-					/>
-					{onCreateFolder ? (
-						<StripMenuItem
-							icon={<img src="/icon-sq-folder.svg" alt="" className="size-4" />}
-							label="New folder"
-							shortcut="⇧⌘ ."
-							onClick={() => {
-								setOpen(false);
-								void onCreateFolder();
-							}}
-						/>
-					) : null}
-					<span className="mx-1 my-1.5 h-px bg-border-subtle" />
-					{(
-						[
-							["md", "New Markdown", "(.md)"],
-							["csv", "New CSV", "(.csv)"],
-							["excalidraw", "New Drawing", "(.excalidraw)"],
-						] as const
-					).map(([extension, label, hint]) => (
-						<StripMenuItem
-							key={extension}
-							icon={
-								<img
-									src={fileIconUrl(`file.${extension}`)}
-									alt=""
-									className="size-4"
-								/>
-							}
-							label={label}
-							hint={hint}
-							onClick={() => {
-								setOpen(false);
-								void onCreateFile(extension);
-							}}
-						/>
-					))}
-				</div>
-			) : null}
-		</div>
-	);
-}
-
-function StripMenuItem({
-	icon,
-	label,
-	hint,
-	shortcut,
-	onClick,
-}: {
-	readonly icon: ReactNode;
-	readonly label: string;
-	readonly hint?: string;
-	readonly shortcut?: string;
-	readonly onClick: () => void;
-}) {
-	return (
-		<button
-			type="button"
-			onClick={onClick}
-			className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] leading-none font-medium text-text-primary hover:bg-bg-hover"
-		>
-			{icon}
-			<span className="flex-1">
-				{label}
-				{hint ? <span className="text-text-tertiary"> {hint}</span> : null}
-			</span>
-			{shortcut ? (
-				<span className="text-[11.5px] text-text-tertiary/60">{shortcut}</span>
-			) : null}
-		</button>
 	);
 }
 
