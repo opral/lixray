@@ -34,6 +34,8 @@ type ObservedRow = {
 	value(column: string): { asBytes(): Uint8Array | undefined };
 };
 
+const OBSERVE_MAX_RESUBSCRIBES = 5;
+
 function useObservedRows(
 	lix: Lix,
 	sql: string,
@@ -43,24 +45,42 @@ function useObservedRows(
 	const paramsKey = JSON.stringify(params);
 	useEffect(() => {
 		let disposed = false;
+		let events: ReturnType<Lix["observe"]> | null = null;
 		setRows(null);
-		const events = lix.observe(sql, JSON.parse(paramsKey) as string[]);
 		void (async () => {
-			try {
-				while (!disposed) {
-					const event = await events.next();
-					if (!event) break;
-					if (!disposed) setRows(event.result.rows);
+			// A transport hiccup ends the observe stream without an error;
+			// resubscribe with backoff so the listing doesn't silently freeze.
+			for (
+				let attempt = 0;
+				!disposed && attempt <= OBSERVE_MAX_RESUBSCRIBES;
+				attempt += 1
+			) {
+				const stream = lix.observe(sql, JSON.parse(paramsKey) as string[]);
+				events = stream;
+				try {
+					while (!disposed) {
+						const event = await stream.next();
+						if (!event) break;
+						attempt = 0;
+						if (!disposed) setRows(event.result.rows);
+					}
+				} catch (error) {
+					if (!disposed) {
+						console.error("workspace-home: lix observe failed", error);
+					}
+				} finally {
+					stream.close();
 				}
-			} catch (error) {
-				if (!disposed) {
-					console.error("workspace-home: lix observe failed", error);
+				if (!disposed && attempt < OBSERVE_MAX_RESUBSCRIBES) {
+					await new Promise((resolve) =>
+						setTimeout(resolve, 1_000 * (attempt + 1)),
+					);
 				}
 			}
 		})();
 		return () => {
 			disposed = true;
-			events.close();
+			events?.close();
 		};
 	}, [lix, sql, paramsKey]);
 	return rows;
