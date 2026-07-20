@@ -59,6 +59,7 @@ import {
 	LIXRAY_HOME_EXTENSION_ID,
 	lixrayWorkspaceExtensions,
 } from "~/components/workspace-home/host-extensions";
+import { LixrayCentralTabStrip } from "~/components/workspace-home/central-tab-strip";
 import { normalizeHomeDirPath } from "~/components/workspace-home/lix-data";
 
 interface WorkspaceAtelierProps {
@@ -172,6 +173,15 @@ export function WorkspaceAtelier({
 			);
 		}
 	}, [signInWithGoogle]);
+	const disabledShareButton = (
+		<span
+			aria-disabled="true"
+			title="Nothing to share yet"
+			className="inline-flex h-7 cursor-default items-center rounded-[7px] border border-border-panel px-3 text-xs font-semibold text-text-tertiary/70"
+		>
+			Share
+		</span>
+	);
 	const headerActions = canEdit ? (
 		client ? (
 			<WorkspaceShareControl
@@ -190,7 +200,9 @@ export function WorkspaceAtelier({
 				workspaceName={workspaceName}
 				documentName={documentName}
 			/>
-		) : null
+		) : (
+			disabledShareButton
+		)
 	) : (
 		<div className="flex items-center gap-2">
 			{!user ? (
@@ -548,6 +560,25 @@ export function WorkspaceAtelier({
 													className="size-[18px]"
 												/>
 											</Link>
+										),
+										// The two homes chain here: the namespace links up
+										// to the hosted home, the workspace names itself.
+										navbarCenter: (
+											<span className="flex items-center gap-2 text-[13px]">
+												<Link
+													to="/home"
+													className="font-medium text-text-secondary hover:text-text-primary"
+												>
+													{namespace}
+												</Link>
+												<span className="text-text-tertiary/60">/</span>
+												<span className="font-semibold text-text-primary">
+													{workspaceSlug}
+												</span>
+											</span>
+										),
+										centralTabStrip: (context) => (
+											<LixrayCentralTabStrip context={context} />
 										),
 										navbarEnd: headerActions,
 									}}

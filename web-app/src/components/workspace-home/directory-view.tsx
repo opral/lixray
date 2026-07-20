@@ -346,7 +346,18 @@ function NewMenu({
 				<ChevronDown className="size-3 opacity-80" aria-hidden="true" />
 			</Button>
 			{open ? (
-				<div className="absolute top-11 right-0 z-20 flex w-56 flex-col rounded-xl border border-border-panel bg-bg-panel p-1.5 shadow-lg">
+				<div className="absolute top-11 right-0 z-20 flex w-60 flex-col rounded-xl border border-border-panel bg-bg-panel p-1.5 shadow-lg">
+					<MenuItem
+						icon={
+							<img src={fileIconUrl("file.md")} alt="" className="size-4" />
+						}
+						label="New file"
+						hint="⌘ ."
+						onClick={() => {
+							setOpen(false);
+							onCreateFile("md");
+						}}
+					/>
 					<MenuItem
 						icon={<FolderPlus className="size-4" aria-hidden="true" />}
 						label="New folder"
@@ -391,6 +402,7 @@ function MenuItem({
 	readonly hint?: string;
 	readonly onClick: () => void;
 }) {
+	const isShortcut = hint !== undefined && /[⌘⇧]/.test(hint);
 	return (
 		<button
 			type="button"
@@ -398,10 +410,15 @@ function MenuItem({
 			className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-text-primary hover:bg-bg-hover"
 		>
 			{icon}
-			<span>
+			<span className="flex-1">
 				{label}
-				{hint ? <span className="text-text-tertiary"> {hint}</span> : null}
+				{hint && !isShortcut ? (
+					<span className="text-text-tertiary"> {hint}</span>
+				) : null}
 			</span>
+			{isShortcut ? (
+				<span className="text-[11.5px] text-text-tertiary/70">{hint}</span>
+			) : null}
 		</button>
 	);
 }

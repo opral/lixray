@@ -172,13 +172,20 @@ export function listDirectory(
 			name: dir.name,
 			itemCount: countItemsIn(dir.path),
 		}));
+	// Per the home comp: README pinned first, then most recently updated.
 	const files = tree.files
 		.filter((file) => isDirectChildFile(file.path))
 		.map((file) => ({
 			path: file.path,
 			name: file.name,
 			updatedAt: file.updatedAt,
-		}));
+		}))
+		.sort((left, right) => {
+			const leftReadme = left.name.toLowerCase() === "readme.md" ? 1 : 0;
+			const rightReadme = right.name.toLowerCase() === "readme.md" ? 1 : 0;
+			if (leftReadme !== rightReadme) return rightReadme - leftReadme;
+			return right.updatedAt.localeCompare(left.updatedAt);
+		});
 	const readmePath =
 		files.find((file) => file.name.toLowerCase() === "readme.md")?.path ?? null;
 	return { dirs, files, readmePath };
