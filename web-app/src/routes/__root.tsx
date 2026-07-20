@@ -27,7 +27,7 @@ export const Route = createRootRoute({
 		],
 		links: [
 			{ rel: "stylesheet", href: appCss },
-			{ rel: "icon", href: "/lixray-mark.svg", type: "image/svg+xml" },
+			{ rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
 			{
 				rel: "icon",
 				href: "/favicon-32.png",
