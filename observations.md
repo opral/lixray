@@ -1,5 +1,74 @@
 # Performance observations
 
+## Workspace runtime can remain poisoned after an object-store failure — observing
+
+**Evidence.** During replay, MinIO marked its `/data` drive offline after a
+42.969-second write/read probe. A single workspace open then fanned out through
+LixRay's shared `OnceCell`, blocking requests for 62–303 seconds. [LixRay
+#83](https://github.com/opral/lixray/pull/83) bounds an individual S3 request
+and its retry budget, so a failed cold open is removed from the `OnceCell` and
+can be retried. A post-open SlateDB WAL write or flush failure is different: it
+sets a terminal durability-failure state while the workspace manager retains
+its already-successful runtime.
+
+**Architectural direction.** Expose that terminal state and introduce a
+per-workspace `Active → Recovering` lifecycle. New requests should receive 503
+while a background reaper closes and fully releases the old Lix/SlateDB service;
+only then should a single fresh service open.
+
+**Correctness constraint.** Do not simply clear the `OnceCell` or open a
+second service. A failed commit continues holding Lix's visibility lock and
+SlateDB's sole-writer permit until its durable outcome is known, and dropping
+SlateDB joins its manager thread. Recovery must drain the old service before
+reopening, otherwise it can create concurrent writers or expose a write whose
+durability has failed.
+
+This spans Lix's storage-health signal, LixRay's workspace lifecycle and route
+mapping, orderly session shutdown, nonblocking destruction, and fault-injection
+coverage across both repositories—well beyond a bounded patch.
+
+**Next measurement.** Blackhole or delay object-store open and WAL PUT/flush;
+measure time to 503, queued-request fan-out, cleanup/reopen time, and confirm a
+reopened store exposes only the last durable state.
+
+**Status:** observing; #83 bounds cold-open request time, while terminal
+runtime recovery remains separate cross-cutting work.
+
+## Staged filesystem writes rebuild the complete path index — observing
+
+**Evidence.** Committed-state readers share a revision-keyed
+`FilesystemPathIndexCache`. Transaction readers can use that cache only before
+they stage a filesystem descriptor. Once
+`has_staged_filesystem_descriptors()` becomes true, every subsequent
+`filesystem_path_index()` request scans the transaction's complete visible file
+and directory descriptor state and rebuilds `FilesystemPathIndex` from scratch.
+Repeated path-based statements in one transaction therefore turn workspace
+size into repeated write latency. Lix #637 removes an unnecessary topology
+resolver for payload/metadata-only updates, but required path-conflict and
+resolver lookups still cannot reuse an index after staged topology changes.
+
+**Architectural direction.** Give each transaction a path-index view keyed by
+branch scope and staged-write generation. Start from the immutable committed
+index, then maintain an overlay of staged descriptor inserts, updates, and
+deletes—or incrementally update a transaction-owned index—so later statements
+preserve read-your-writes without rescanning the complete workspace.
+
+**Correctness constraint.** The overlay must preserve branch/global/untracked
+lanes, path uniqueness, statement failure and transaction rollback semantics,
+and directory reachability. Directory moves and deletes change derived paths
+for whole subtrees, so overlaying only the directly written path would leave
+stale descendants and is not safe.
+
+This crosses transaction staging/generation tracking, file and directory DML,
+path derivation, conflict handling, rollback behavior, and cache accounting in
+Lix—well beyond a bounded provider patch.
+
+**Next measurement.** Count full path-index builds and descriptor rows scanned
+for repeated path upserts/moves in one transaction at 1k, 10k, and 100k files;
+then compare an overlay prototype for latency, memory, and rollback cost.
+
+**Status:** observing; no transaction-local overlay implemented.
+
 ## Workspace session requests repeatedly select the active branch — observing
 
 **Evidence.** Browser calls queue through `useLixrayApi`, probe
