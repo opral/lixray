@@ -1,85 +1,18 @@
-import { ArrowRight, ArrowUp, Check, Circle, Share2, X } from "lucide-react";
+import { ArrowRight, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
 import { cn } from "~/lib/utils";
 import { workspacePath } from "~/lib/workspace-url";
 
-type Person = "mara" | "jonas" | "priya";
-type FileType = "markdown" | "csv" | "image" | "pdf";
-type Agent = keyof typeof agentMarks;
-
-type FileEntry = {
-	name: string;
-	type: FileType;
-	activity: string;
-	person: Person;
-	agent?: Agent;
-	hot?: boolean;
-};
-
-const agentMarks = {
-	claude: "/landing/claude-official.png",
-	chatgpt: "/landing/chatgpt-mark.svg",
-	codex: "/landing/codex-mark.svg",
-	gemini: "/landing/gemini-mark.svg",
-} as const;
-
-const files: readonly FileEntry[] = [
-	{
-		name: "launch-plan.md",
-		type: "markdown",
-		activity: "Mara's Claude · editing",
-		person: "mara",
-		agent: "claude",
-		hot: true,
-	},
-	{
-		name: "announcement-post.md",
-		type: "markdown",
-		activity: "Jonas's ChatGPT · reading",
-		person: "jonas",
-		agent: "chatgpt",
-	},
-	{
-		name: "q3-metrics.csv",
-		type: "csv",
-		activity: "Priya's Codex · 2 min ago",
-		person: "priya",
-		agent: "codex",
-	},
-	{
-		name: "hero-shot.png",
-		type: "image",
-		activity: "Mara · Jun 28",
-		person: "mara",
-	},
-	{
-		name: "press-kit.pdf",
-		type: "pdf",
-		activity: "Jonas · Jun 27",
-		person: "jonas",
-	},
-];
-
-const heroFiles: readonly FileEntry[] = [
-	files[0],
-	files[1],
-	files[2],
-	{
-		name: "pricing-page.md",
-		type: "markdown",
-		activity: "Mara · yesterday",
-		person: "mara",
-	},
-];
-
 const primaryButton =
-	"inline-flex items-center justify-center gap-2 rounded-xl bg-[#f35a0a] px-6 py-3.5 text-sm font-bold text-white no-underline shadow-[0_12px_28px_rgba(226,73,7,.28),0_0_24px_rgba(249,115,22,.2),inset_0_1px_0_rgba(255,255,255,.3)] transition hover:-translate-y-0.5 hover:bg-[#e95005]";
-const visualShell =
-	"relative overflow-hidden rounded-3xl border border-[#e9d8ca] bg-[#fbeee3] [background-image:radial-gradient(circle,rgba(249,115,22,.16)_1px,transparent_1.4px)] [background-size:15px_15px]";
-const windowShell =
-	"overflow-hidden rounded-2xl border border-black/8 bg-white shadow-[0_20px_50px_rgba(83,49,27,.13)]";
+	"inline-flex items-center justify-center rounded-xl bg-[linear-gradient(180deg,#F97316_0%,#E8590C_100%)] px-7 py-3.5 text-[17px] font-bold whitespace-nowrap text-white no-underline shadow-[0_10px_26px_rgba(232,89,12,.35),inset_0_1px_0_rgba(255,255,255,.28)] transition hover:brightness-105";
+const secondaryButton =
+	"inline-flex items-center justify-center rounded-xl border border-[#1c1917]/12 bg-white px-6 py-3.5 text-base font-semibold whitespace-nowrap text-[#1c1917] no-underline transition hover:border-[#1c1917]/25";
+const cardShell =
+	"overflow-hidden rounded-2xl border border-[#1c1917]/8 bg-white shadow-[0_24px_60px_rgba(28,25,23,.08)]";
+const monoChip =
+	"rounded-[7px] bg-[#f7f3ed] px-2.5 py-1.5 font-mono text-[12.5px] text-[#44403c]";
 
 export function LandingPage() {
 	const { isLoaded: authLoaded, signOut, user } = useAuth();
@@ -94,7 +27,7 @@ export function LandingPage() {
 			: "/workspace"
 		: "/sign-in";
 	const workspaceLabel = user ? "Open LixRay" : "Get started";
-	const heroWorkspaceLabel = user ? "Open LixRay" : "Create workspace free";
+	const heroWorkspaceLabel = user ? "Open LixRay" : "Get started — it's free";
 
 	useEffect(() => {
 		if (!authLoaded) return;
@@ -136,31 +69,27 @@ export function LandingPage() {
 
 	return (
 		<div className="min-h-screen bg-[#fbf6f0] font-sans text-[#1c1917] antialiased">
-			<header className="relative z-20 mx-auto flex h-[66px] w-full items-center justify-between bg-[#ffd9bc] px-5 pt-4 sm:px-10 xl:px-20">
+			<header className="relative z-20 flex items-center justify-between px-5 py-6 sm:px-14">
 				<Brand />
 				<nav
-					className="flex items-center gap-3 text-sm font-semibold sm:gap-5"
+					className="flex items-center gap-6 text-[15px] font-semibold"
 					aria-label="Primary navigation"
 				>
-					<a
-						className="hidden text-[#514a45] no-underline hover:text-black sm:inline"
-						href="https://github.com/opral"
-						target="_blank"
-						rel="noreferrer"
-					>
-						GitHub <span aria-hidden="true">↗</span>
-					</a>
 					{user ? (
 						<button
-							className="cursor-pointer border-0 bg-transparent p-0 text-[#514a45] hover:text-black"
+							className="cursor-pointer border-0 bg-transparent p-0 text-[#1c1917] hover:text-[#e8590c]"
 							type="button"
 							onClick={() => void signOut()}
 						>
 							Log out
 						</button>
-					) : null}
+					) : (
+						<a className="text-[#1c1917] no-underline" href="/sign-in">
+							Sign in
+						</a>
+					)}
 					<a
-						className="rounded-lg bg-[#f35a0a] px-4 py-2.5 text-white no-underline shadow-[0_8px_20px_rgba(226,73,7,.25)] transition hover:-translate-y-px"
+						className="rounded-[10px] bg-[linear-gradient(180deg,#F97316_0%,#E8590C_100%)] px-[18px] py-2.5 font-bold text-white no-underline shadow-[0_6px_16px_rgba(232,89,12,.3),inset_0_1px_0_rgba(255,255,255,.25)] transition hover:brightness-105"
 						href={workspaceTo}
 					>
 						{workspaceLabel}
@@ -172,7 +101,7 @@ export function LandingPage() {
 				!autoOpenEnabled &&
 				!openPromptDismissed ? (
 					<div
-						className="absolute top-[78px] right-5 grid w-[min(330px,calc(100vw-40px))] gap-2.5 rounded-[18px] border border-black/8 bg-white py-5 pr-12 pl-6 text-base shadow-[0_18px_48px_rgba(74,40,19,.18)] sm:right-10"
+						className="absolute top-[78px] right-5 grid w-[min(330px,calc(100vw-40px))] gap-2.5 rounded-[18px] border border-black/8 bg-white py-5 pr-12 pl-6 text-base shadow-[0_18px_48px_rgba(74,40,19,.18)] sm:right-14"
 						role="status"
 					>
 						<button
@@ -198,139 +127,161 @@ export function LandingPage() {
 
 			<main>
 				<section
-					className="flex w-full flex-col items-center bg-[linear-gradient(180deg,#ffd9bc_0%,#ffe3cc_28%,#fff1e5_62%,#fbf6f0_100%)] px-4 pt-16 pb-24 sm:px-10 sm:pt-20 sm:pb-28"
+					className="flex flex-col items-center gap-6 px-5 pt-20 text-center sm:pt-28"
 					aria-labelledby="landing-title"
 				>
-					<div className="relative z-10 flex max-w-4xl flex-col items-center text-center">
-						<h1
-							className="m-0 text-[clamp(2.5rem,6vw,4.75rem)] leading-[.98] font-[780] tracking-[-.055em] text-balance"
-							id="landing-title"
-						>
-							The shared workspace
-							<br />
-							for your team and AI agents
-						</h1>
-						<div className="mt-9 flex flex-wrap justify-center gap-3">
-							<a className={primaryButton} href={workspaceTo}>
-								{heroWorkspaceLabel}{" "}
-								<ArrowRight className="size-4" aria-hidden="true" />
+					<h1
+						className="m-0 max-w-[820px] text-[clamp(2.5rem,6vw,4rem)] leading-[1.08] font-bold tracking-[-.035em] text-balance"
+						id="landing-title"
+					>
+						One workspace for your team and AI agents
+					</h1>
+					<p className="m-0 max-w-[560px] text-[21px] leading-[1.55] text-[#57534e] text-pretty">
+						Plain files in the browser that people and agents read and write
+						together.
+					</p>
+					<div className="mt-3 flex flex-wrap items-center justify-center gap-3">
+						<a className={primaryButton} href={workspaceTo}>
+							{heroWorkspaceLabel}
+						</a>
+						{user ? null : (
+							<a className={secondaryButton} href="/sign-in">
+								Sign in
 							</a>
-							<a
-								className="inline-flex items-center justify-center rounded-xl border border-stone-300 bg-white/80 px-6 py-3.5 text-sm font-bold text-stone-900 no-underline transition hover:-translate-y-0.5 hover:bg-white"
-								href="https://cal.com/samuelstroschein/lixray-demo"
-								target="_blank"
-								rel="noreferrer"
-							>
-								Book a demo
-							</a>
-						</div>
-						<div className="mt-6 flex flex-wrap items-center justify-center gap-3 text-sm text-stone-500">
-							<span>Works with</span>
-							<div
-								className="flex items-center gap-2"
-								aria-label="Works with Claude, ChatGPT, Gemini, and Codex"
-							>
-								<img
-									className="size-5 object-contain"
-									src="/landing/claude-official.png"
-									alt="Claude"
-								/>
-								<img
-									className="size-5 object-contain"
-									src="/landing/chatgpt-mark.svg"
-									alt="ChatGPT"
-								/>
-								<img
-									className="size-5 object-contain"
-									src="/landing/gemini-mark.svg"
-									alt="Gemini"
-								/>
-								<img
-									className="size-5 object-contain"
-									src="/landing/codex-mark.svg"
-									alt="Codex"
-								/>
-							</div>
-							<span>and more</span>
-						</div>
+						)}
 					</div>
-					<HeroVisual />
+					<div className="mt-1.5 flex flex-wrap items-center justify-center gap-2.5 text-sm text-[#8a8178]">
+						<span>Works with</span>
+						<span
+							className="inline-flex items-center gap-2"
+							aria-label="Claude, ChatGPT, Gemini, and Codex"
+						>
+							<img
+								className="size-[17px]"
+								src="/landing/claude-spark.svg"
+								alt="Claude"
+							/>
+							<img
+								className="size-[17px] object-contain"
+								src="/landing/brand-openai.svg"
+								alt="ChatGPT"
+							/>
+							<img
+								className="size-[17px] object-contain"
+								src="/landing/brand-gemini.svg"
+								alt="Gemini"
+							/>
+							<img
+								className="size-4"
+								src="/landing/codex-icon.svg"
+								alt="Codex"
+							/>
+						</span>
+						<span>and any MCP or CLI agent</span>
+					</div>
 				</section>
 
-				<section
-					className="mx-auto flex max-w-7xl flex-col gap-24 px-4 py-16 sm:px-10 sm:py-24"
-					id="why"
-					aria-label="Problem and solution"
-				>
-					<StoryBlock
-						tone="problem"
-						title="Your team's agents work in isolation"
-					>
-						<ProblemVisual />
-					</StoryBlock>
-					<StoryBlock
-						tone="solution"
-						title="A collaborative workspace for your team's agents"
-					>
-						<SolutionVisual />
-					</StoryBlock>
-				</section>
+				<div className="flex justify-center px-5 pt-16 sm:pt-[72px]">
+					<HeroPreview />
+				</div>
 
 				<section
-					className="mx-auto max-w-7xl px-4 py-20 sm:px-10 sm:py-28"
-					id="features"
-					aria-labelledby="features-title"
+					className="border-t border-[#1c1917]/7 bg-white"
+					aria-label="How it works"
 				>
-					<h2
-						className="mb-16 text-center text-4xl font-[760] tracking-[-.04em] sm:text-5xl"
-						id="features-title"
-					>
-						How it works
-					</h2>
-					<div className="flex flex-col gap-16 sm:gap-20">
-						<FeatureRow
+					<div className="mx-auto grid max-w-[1040px] gap-12 px-5 py-20 sm:grid-cols-3 sm:gap-14 sm:px-14 sm:py-[110px]">
+						<Step
+							number="01"
+							title="Create a workspace"
+							body="Your team's files live at one URL. Markdown, CSV, anything — open and edit them in the browser."
+						>
+							<span className="mt-1 self-start rounded-[7px] bg-[#f7f3ed] px-2.5 py-1.5 font-mono text-[12.5px] text-[#8a8178]">
+								lixray.com/@acme/launch-q3
+							</span>
+						</Step>
+						<Step
+							number="02"
 							title="Connect your agents"
-							body="Claude, ChatGPT, and Gemini connect in one click. CLI agents such as Codex use the shared folder directly. Your team keeps the tools it already likes."
-							visual={<AgentsVisual />}
+							body="Claude, ChatGPT, and Gemini connect in one click. Everyone keeps the agent they already use."
+						>
+							<span className="mt-1 inline-flex items-center gap-2">
+								<img
+									className="size-4"
+									src="/landing/claude-spark.svg"
+									alt=""
+								/>
+								<img
+									className="size-4 object-contain"
+									src="/landing/brand-openai.svg"
+									alt=""
+								/>
+								<img
+									className="size-4 object-contain"
+									src="/landing/brand-gemini.svg"
+									alt=""
+								/>
+								<img
+									className="size-[15px]"
+									src="/landing/codex-icon.svg"
+									alt=""
+								/>
+							</span>
+						</Step>
+						<Step
+							number="03"
+							title="Work in the same files"
+							body="People and agents read and write the same context. Work carries cleanly from one to the next."
+						/>
+					</div>
+				</section>
+
+				<section className="border-t border-[#1c1917]/7" aria-label="Features">
+					<div className="mx-auto flex max-w-[1040px] flex-col gap-24 px-5 py-24 sm:gap-[130px] sm:px-14 sm:py-[130px]">
+						<FeatureRow
+							title="Agents read and write like teammates"
+							body="LixRay is an MCP server. Agents list, read, edit, and query workspace files with the same permissions you grant a person — nothing pasted, nothing stale."
+							visual={<McpVisual />}
 						/>
 						<FeatureRow
 							reverse
-							title="Let them edit"
-							body="Ask an agent to create a plan, update a document, or work through data. Everyone reads and writes the same context, so work carries cleanly from one agent to the next."
-							visual={<ContextVisual />}
+							title="Every change is a diff you review"
+							body="Agent or teammate, prose or data — each edit lands as a tracked change with full history behind it. Nothing merges without a human signing off."
+							visual={<DiffVisual />}
 						/>
 						<FeatureRow
-							title="Every change is tracked and reviewable"
-							body="Agent or teammate, prose or data — each change lands as a diff you can accept or reject, with complete history behind it. Nothing merges without a human signing off."
-							visual={<ChangesVisual />}
-						/>
-						<FeatureRow
-							reverse
-							title="Share with your team and customers."
-							body="Invite teammates or customers straight from the workspace. They see the files, their context, and the activity behind them."
+							title="Share with a link"
+							body="Every file has a URL. Send a read-only link to anyone, or an editable invite that brings teammates — and their agents — into the workspace."
 							visual={<ShareVisual />}
 						/>
 					</div>
 				</section>
 
-				<section className="mx-auto flex max-w-4xl justify-center px-5 py-20 text-center">
-					<a className={primaryButton} href={workspaceTo}>
-						{workspaceLabel}{" "}
-						<ArrowRight className="size-4" aria-hidden="true" />
+				<section className="flex flex-col items-center gap-[22px] border-t border-[#1c1917]/7 px-5 py-24 text-center sm:py-[120px]">
+					<h2 className="m-0 max-w-[620px] text-[clamp(2rem,4.5vw,2.625rem)] leading-[1.1] font-bold tracking-[-.03em] text-balance">
+						Give your team and their agents one place to work
+					</h2>
+					<a className={cn(primaryButton, "mt-1")} href={workspaceTo}>
+						{heroWorkspaceLabel}
 					</a>
+					<span className="text-sm text-[#8a8178]">
+						Free while in beta · no credit card
+					</span>
 				</section>
 			</main>
 
-			<footer className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-5 border-t border-stone-200 px-5 py-8 text-sm text-stone-950 sm:px-10">
-				<Brand />
+			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-[#1c1917]/7 px-5 py-6 text-sm text-[#8a8178] sm:px-14">
+				<span className="inline-flex items-center gap-2">
+					<img className="size-4" src="/lixray-mark.svg" alt="" />
+					<span className="font-semibold text-[#57534e]">LixRay</span>
+				</span>
 				<span>© 2026 Opral</span>
 				<a
-					className="font-semibold text-black no-underline"
+					className="font-semibold text-[#57534e] no-underline"
 					href="https://github.com/opral"
 					target="_blank"
 					rel="noreferrer"
 				>
-					GitHub
+					GitHub ↗
 				</a>
 			</footer>
 		</div>
@@ -344,7 +295,7 @@ function autoOpenStorageKey(userId: string) {
 function Brand() {
 	return (
 		<a
-			className="inline-flex items-center gap-2 text-lg font-[780] tracking-[-.02em] text-black no-underline"
+			className="inline-flex items-center gap-[9px] text-lg font-bold tracking-[-.01em] text-[#1c1917] no-underline"
 			href="/"
 			aria-label="LixRay home"
 		>
@@ -354,357 +305,58 @@ function Brand() {
 	);
 }
 
-function StoryBlock({
+function HeroPreview() {
+	return (
+		<div
+			className="w-full max-w-[920px] rounded-t-[20px] border border-b-0 border-[#1c1917]/7 bg-[#f4f0ea] px-3.5 shadow-[0_-20px_60px_rgba(28,25,23,.05)] sm:px-[26px]"
+			aria-label="Preview of a LixRay workspace"
+		>
+			<div className="flex items-center justify-center gap-[7px] py-[15px] text-[13px]">
+				<span className="text-[#8a8178]">acme</span>
+				<span className="text-[#c6bdb1]">/</span>
+				<span className="font-semibold text-[#1c1917]">launch-q3</span>
+			</div>
+			<div className="relative flex h-[300px] flex-col gap-[17px] overflow-hidden rounded-t-xl border border-b-0 border-[#1c1917]/7 bg-white px-6 pt-10 sm:px-11">
+				<span className="h-[18px] w-[35%] rounded-md bg-[#ede7de]" />
+				<span className="h-1.5 w-0" />
+				<span className="h-2.5 w-[78%] rounded-[5px] bg-[#f0ebe3]" />
+				<span className="h-2.5 w-[72%] rounded-[5px] bg-[#f0ebe3]" />
+				<span className="h-2.5 w-[75%] rounded-[5px] bg-[#f0ebe3]" />
+				<span className="h-2.5 w-[48%] rounded-[5px] bg-[#f0ebe3]" />
+				<span className="h-2.5 w-[63%] rounded-[5px] border border-[#f6d4ac] bg-[#fbe7cf]" />
+				<span className="h-2.5 w-[58%] rounded-[5px] border border-[#f6d4ac] bg-[#fbe7cf]" />
+				<span className="absolute top-9 right-4 inline-flex items-center gap-[7px] rounded-full border border-[#f2d9bc] bg-white py-[7px] pr-[13px] pl-[9px] text-[12.5px] font-semibold text-[#c2410c] shadow-[0_6px_18px_rgba(28,25,23,.07)] sm:right-10">
+					<img className="size-3.5" src="/landing/claude-spark.svg" alt="" />
+					<span
+						className="size-1.5 rounded-full bg-[#f97316]"
+						aria-hidden="true"
+					/>
+					Mara&apos;s Claude is editing
+				</span>
+			</div>
+		</div>
+	);
+}
+
+function Step({
+	number,
+	title,
+	body,
 	children,
-	title,
-	tone,
 }: {
-	children: ReactNode;
+	number: string;
 	title: string;
-	tone: "problem" | "solution";
+	body: string;
+	children?: ReactNode;
 }) {
 	return (
-		<div>
-			<div className="mx-auto mb-9 max-w-4xl text-center">
-				<div
-					className={cn(
-						"mb-3 text-xs font-extrabold tracking-[.16em] uppercase",
-						tone === "problem" ? "text-[#d9480f]" : "text-[#15803d]",
-					)}
-				>
-					{tone}
-				</div>
-				<h2 className="m-0 text-[clamp(2rem,4vw,3.4rem)] leading-[1.05] font-[760] tracking-[-.045em] text-balance">
-					{title}
-				</h2>
-			</div>
+		<div className="flex flex-col gap-2.5">
+			<span className="font-mono text-[13px] text-[#c2410c]">{number}</span>
+			<h3 className="m-0 text-[19px] font-bold tracking-[-.01em]">{title}</h3>
+			<p className="m-0 text-[15px] leading-[1.6] text-[#57534e] text-pretty">
+				{body}
+			</p>
 			{children}
-		</div>
-	);
-}
-
-function BrowserDots() {
-	return (
-		<div className="flex items-center gap-2" aria-hidden="true">
-			<Circle className="size-3 fill-[#ff6259] text-[#ff6259]" />
-			<Circle className="size-3 fill-[#ffbd2e] text-[#ffbd2e]" />
-			<Circle className="size-3 fill-[#28c840] text-[#28c840]" />
-		</div>
-	);
-}
-
-function AgentMark({
-	agent,
-	className,
-}: {
-	agent?: Agent;
-	className?: string;
-}) {
-	return agent ? (
-		<img
-			className={cn("size-4 object-contain", className)}
-			src={agentMarks[agent]}
-			alt=""
-		/>
-	) : null;
-}
-
-function PersonAvatar({
-	person,
-	className,
-}: {
-	person: Person;
-	className?: string;
-}) {
-	return (
-		<span
-			className={cn(
-				"inline-grid size-5 shrink-0 place-items-center rounded-full text-[8px] leading-none font-extrabold text-[#3f3129]",
-				person === "mara" && "bg-[#bfe3ef]",
-				person === "jonas" && "bg-[#d8e9b9]",
-				person === "priya" && "bg-[#d9c7f2]",
-				className,
-			)}
-			aria-hidden="true"
-		>
-			{person[0].toUpperCase()}
-		</span>
-	);
-}
-
-function FileMark({ type }: { type: FileType }) {
-	if (type === "markdown" || type === "csv") {
-		return (
-			<img
-				className="size-5 shrink-0 object-contain"
-				src={
-					type === "markdown"
-						? "/landing/file-markdown.svg"
-						: "/landing/file-csv.svg"
-				}
-				alt=""
-			/>
-		);
-	}
-	return (
-		<span
-			className={cn(
-				"grid size-5 shrink-0 place-items-center rounded text-[6px] font-extrabold text-white",
-				type === "image" ? "bg-violet-500" : "bg-red-600",
-			)}
-		>
-			{type === "image" ? "PNG" : "PDF"}
-		</span>
-	);
-}
-
-function WindowBar({ children }: { children?: ReactNode }) {
-	return (
-		<div className="flex h-12 items-center gap-4 border-b border-stone-200 px-4">
-			<BrowserDots />
-			{children}
-		</div>
-	);
-}
-
-function WorkspaceTable({ compact = false }: { compact?: boolean }) {
-	const visibleFiles = compact ? heroFiles : files;
-	return (
-		<div className={cn(windowShell, "w-full")}>
-			<WindowBar>
-				<div className="flex items-center gap-2 text-sm font-bold">
-					<img className="size-4" src="/lixray-mark.svg" alt="" /> acme /
-					launch-q3
-				</div>
-				<div className="ml-auto flex" aria-hidden="true">
-					<PersonAvatar
-						className="size-6 border-2 border-white text-[9px]"
-						person="mara"
-					/>
-					<PersonAvatar
-						className="-ml-2 size-6 border-2 border-white text-[9px]"
-						person="jonas"
-					/>
-					<PersonAvatar
-						className="-ml-2 size-6 border-2 border-white text-[9px]"
-						person="priya"
-					/>
-				</div>
-				<button
-					className="rounded-lg border-0 bg-[#f35a0a] px-3 py-2 text-xs font-bold text-white"
-					type="button"
-				>
-					Invite
-				</button>
-			</WindowBar>
-			<div
-				className={cn(
-					"grid h-9 items-center border-b border-stone-100 px-5 text-[10px] font-bold tracking-wider text-stone-400 uppercase",
-					compact
-						? "grid-cols-[minmax(170px,1fr)_minmax(170px,.72fr)_70px]"
-						: "grid-cols-[minmax(180px,1fr)_minmax(190px,.8fr)]",
-				)}
-			>
-				<span>Name</span>
-				<span>Activity</span>
-				{compact ? <span>Changes</span> : null}
-			</div>
-			{visibleFiles.map((file) => (
-				<div
-					className={cn(
-						"grid min-h-14 items-center border-b border-stone-100 px-5 text-sm last:border-0",
-						compact
-							? "grid-cols-[minmax(170px,1fr)_minmax(170px,.72fr)_70px]"
-							: "grid-cols-[minmax(180px,1fr)_minmax(190px,.8fr)]",
-						file.hot && "bg-orange-50/40",
-					)}
-					key={file.name}
-				>
-					<div className="flex items-center gap-3 font-semibold">
-						<FileMark type={file.type} />
-						<span>{file.name}</span>
-					</div>
-					<div
-						className={cn(
-							"flex items-center gap-2 text-xs text-stone-500",
-							file.hot && "font-semibold text-[#d9480f]",
-						)}
-					>
-						<span className="flex items-center">
-							<PersonAvatar person={file.person} />
-							<AgentMark
-								className="-ml-1 size-3.5 rounded-full border border-white bg-white"
-								agent={file.agent}
-							/>
-						</span>
-						<span>{file.activity}</span>
-					</div>
-					{compact ? (
-						<span className="text-xs">
-							<b className="text-green-700">
-								{file.type === "csv" ? "+6" : ""}
-							</b>{" "}
-							<i className="not-italic text-red-600">
-								{file.type === "csv" ? "−2" : ""}
-							</i>
-						</span>
-					) : null}
-				</div>
-			))}
-		</div>
-	);
-}
-
-function HeroVisual() {
-	return (
-		<div
-			className="relative mt-14 h-[460px] w-full max-w-6xl px-[8%] pt-8 max-md:h-[360px] max-md:px-3 max-md:pt-4"
-			aria-label="A shared LixRay workspace used by multiple agents"
-		>
-			<div className="max-md:origin-top max-md:scale-[.72]">
-				<WorkspaceTable compact />
-			</div>
-			<div className="absolute bottom-[-12px] left-[-2%] w-[330px] rounded-2xl border border-[#dfd2b6] bg-[#f8f1e4] shadow-[0_24px_60px_rgba(72,38,17,.3)] max-md:hidden">
-				<div className="flex h-11 items-center border-b border-[#e5dac4] px-4 text-xs font-bold">
-					<img
-						className="mr-2 size-4"
-						src="/landing/claude-official.png"
-						alt=""
-					/>
-					Claude
-					<span className="ml-auto flex items-center gap-1.5 text-stone-500">
-						<PersonAvatar person="mara" />
-						Mara
-					</span>
-				</div>
-				<div className="space-y-2.5 p-4 text-xs">
-					<p className="ml-auto w-fit rounded-xl bg-[#ece4d3] px-3 py-2">
-						move the beta launch to October 19
-					</p>
-					<div className="rounded-lg border border-[#dfd2b6] bg-white/70 px-3 py-2">
-						<span className="text-orange-500">●</span> Editing{" "}
-						<strong>launch-plan.md</strong>…
-					</div>
-					<div className="flex items-center gap-2 rounded-lg border border-[#dfd2b6] bg-white px-3 py-2 text-stone-400">
-						<img className="size-4" src="/lixray-mark.svg" alt="" />
-						Reply to Claude…
-						<ArrowUp className="ml-auto size-4" />
-					</div>
-				</div>
-			</div>
-			<div className="absolute right-[-2%] bottom-[-30px] w-[380px] rounded-2xl bg-[#212121] text-white shadow-[0_32px_80px_rgba(40,20,5,.42)] max-md:hidden">
-				<div className="flex h-11 items-center px-4 text-xs font-bold">
-					<img
-						className="mr-2 size-4"
-						src="/landing/chatgpt-mark-light.svg"
-						alt=""
-					/>
-					ChatGPT
-					<span className="ml-auto flex items-center gap-1.5 text-stone-400">
-						<PersonAvatar person="jonas" />
-						Jonas
-					</span>
-				</div>
-				<div className="space-y-2.5 p-4 text-xs">
-					<p className="ml-auto w-fit rounded-xl bg-[#303030] px-3 py-2">
-						when do we ship the beta?
-					</p>
-					<div className="rounded-lg border border-white/10 bg-[#2b2b2b] px-3 py-2">
-						<Check className="mr-1 inline size-3 text-emerald-400" /> Read{" "}
-						<strong>launch-plan.md</strong>
-					</div>
-					<p className="leading-relaxed">
-						October 19 — Mara&apos;s Claude updated the plan a minute ago.
-						Invites go to the waitlist first.
-					</p>
-					<div className="flex items-center gap-2 rounded-xl bg-[#303030] px-3 py-2 text-stone-400">
-						<img className="size-4" src="/lixray-mark.svg" alt="" />
-						Ask anything
-						<ArrowUp className="ml-auto size-4" />
-					</div>
-				</div>
-			</div>
-		</div>
-	);
-}
-
-function ProblemVisual() {
-	return (
-		<div
-			className={cn(visualShell, "relative h-[360px] p-6 sm:h-[390px]")}
-			aria-label="Agents working in separate private contexts"
-		>
-			<IsolatedCard
-				className="top-10 left-[6%] bg-[#f7f0e3] text-stone-900"
-				agent="claude"
-				title="Mara's Claude"
-				file="launch-plan-v3-final.md"
-				note="only Mara can see this"
-			/>
-			<IsolatedCard
-				className="top-8 right-[7%] bg-[#232323] text-white"
-				agent="chatgpt"
-				title="Jonas's ChatGPT"
-				file="announcement (7).docx"
-				note="downloaded to ~/Desktop"
-			/>
-			<IsolatedCard
-				className="bottom-8 left-1/2 -translate-x-1/2 bg-[#eaf2ff] text-[#173b7a]"
-				agent="gemini"
-				title="Priya's Gemini"
-				file="metrics.csv"
-				fileType="csv"
-				note="only Priya can see this"
-			/>
-		</div>
-	);
-}
-
-function IsolatedCard({
-	agent,
-	className,
-	file,
-	fileType = "markdown",
-	note,
-	title,
-}: {
-	agent: Agent;
-	className: string;
-	file: string;
-	fileType?: FileType;
-	note: string;
-	title: string;
-}) {
-	return (
-		<div
-			className={cn(
-				"absolute w-[min(290px,40%)] rounded-xl p-4 text-xs shadow-[0_22px_45px_rgba(66,35,17,.2)] max-sm:w-[72%]",
-				className,
-			)}
-		>
-			<div className="mb-3 flex items-center gap-2 font-bold">
-				<AgentMark
-					className={agent === "chatgpt" ? "brightness-0 invert" : undefined}
-					agent={agent}
-				/>
-				{title}
-			</div>
-			<strong className="flex items-center gap-2 rounded-lg border border-current/10 bg-white/35 px-3 py-2 font-mono">
-				<FileMark type={fileType} />
-				{file}
-			</strong>
-			<span className="mt-2 block opacity-50">{note}</span>
-		</div>
-	);
-}
-
-function SolutionVisual() {
-	return (
-		<div
-			className={cn(visualShell, "px-[12%] pt-10 max-md:px-3")}
-			aria-label="A collaborative workspace shared by the team"
-		>
-			<WorkspaceTable />
 		</div>
 	);
 }
@@ -721,204 +373,90 @@ function FeatureRow({
 	reverse?: boolean;
 }) {
 	return (
-		<article className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
-			<div className={cn("max-w-lg", reverse && "lg:order-2")}>
-				<h3 className="m-0 text-3xl leading-tight font-[750] tracking-[-.035em] sm:text-4xl">
+		<article
+			className={cn(
+				"grid items-center gap-10 lg:gap-[90px]",
+				reverse ? "lg:grid-cols-[1fr_400px]" : "lg:grid-cols-[400px_1fr]",
+			)}
+		>
+			<div className={cn("flex flex-col gap-4", reverse && "lg:order-2")}>
+				<h2 className="m-0 text-[34px] leading-[1.15] font-bold tracking-[-.025em]">
 					{title}
-				</h3>
-				<p className="mt-5 text-base leading-7 text-stone-600 sm:text-lg">
+				</h2>
+				<p className="m-0 text-[16.5px] leading-[1.6] text-[#57534e] text-pretty">
 					{body}
 				</p>
 			</div>
-			<div
-				className={cn(
-					visualShell,
-					"min-h-[350px] p-7 sm:min-h-[400px] sm:p-10",
-					reverse && "lg:order-1",
-				)}
-			>
-				{visual}
-			</div>
+			<div className={cn(reverse && "lg:order-1")}>{visual}</div>
 		</article>
 	);
 }
 
-function AgentsVisual() {
-	const agents = [
-		["Claude", "/landing/claude-official.png", "Connected", "writing now"],
-		["ChatGPT", "/landing/chatgpt-mark.svg", "Connected", "10:15"],
-		["Gemini", "/landing/gemini-mark.svg", "Connect", ""],
-		["Codex", "/landing/codex-mark.svg", "via folder", "10:31"],
-	] as const;
-	return (
-		<div className={cn(windowShell, "mx-auto max-w-xl")}>
-			<WindowBar>
-				<button
-					className="ml-auto rounded-lg border-0 bg-[#f35a0a] px-3 py-2 text-xs font-bold text-white"
-					type="button"
-				>
-					Connect agent
-				</button>
-			</WindowBar>
-			<h4 className="m-0 border-b border-stone-100 px-5 py-4 text-lg">
-				Connected agents
-			</h4>
-			{agents.map(([name, mark, state, meta]) => (
-				<div
-					className="grid grid-cols-[28px_1fr_auto_75px] items-center gap-3 border-b border-stone-100 px-5 py-4 last:border-0"
-					key={name}
-				>
-					<img className="size-6 object-contain" src={mark} alt="" />
-					<strong>{name}</strong>
-					<span
-						className={cn(
-							"rounded-full bg-stone-100 px-3 py-1 text-xs font-bold text-stone-600",
-							state === "Connected" && "bg-green-50 text-green-700",
-						)}
-					>
-						{state === "Connected" ? "✓ " : ""}
-						{state}
-					</span>
-					<small className="text-right text-stone-400">{meta}</small>
-				</div>
-			))}
-		</div>
-	);
-}
-
-function ContextVisual() {
-	return (
-		<div className={cn(windowShell, "mx-auto max-w-xl")}>
-			<WindowBar>
-				<div className="flex items-center gap-2 text-sm font-bold">
-					<FileMark type="markdown" />
-					launch-plan.md
-				</div>
-			</WindowBar>
-			<div className="grid min-h-[290px] grid-cols-[1fr_145px]">
-				<div className="p-6">
-					<h4 className="mt-0 text-2xl">Launch plan</h4>
-					<p className="text-sm leading-6 text-stone-600">
-						We ship the beta on October 19 with invites going to the waitlist
-						first. Docs, pricing, and the announcement reference the same launch
-						date.
-					</p>
-					<p className="text-sm leading-6 text-stone-600">
-						The demo script pulls its numbers from{" "}
-						<span className="font-semibold text-orange-600">
-							q3-metrics.csv
-						</span>
-						.
-					</p>
-				</div>
-				<div className="border-l border-stone-100 p-4">
-					<strong className="text-[10px] tracking-wider text-stone-400 uppercase">
-						Activity
-					</strong>
-					<ActivityItem
-						agent="claude"
-						label="Edited launch date"
-						detail="now"
-					/>
-					<ActivityItem agent="chatgpt" label="Read the plan" detail="10:15" />
-					<ActivityItem agent="codex" label="Read metrics" detail="10:02" />
-				</div>
-			</div>
-		</div>
-	);
-}
-
-function ActivityItem({
-	agent,
-	label,
-	detail,
-}: {
-	agent: Agent;
-	label: string;
-	detail: string;
-}) {
-	return (
-		<div className="mt-4 flex gap-2 text-xs">
-			<AgentMark className="mt-0.5" agent={agent} />
-			<div>
-				<span className="block font-semibold">{label}</span>
-				<small className="text-stone-400">{detail}</small>
-			</div>
-		</div>
-	);
-}
-
-function ChangesVisual() {
-	const rows = [
-		["2026-05", "1,046", "$15,300", "2.2%"],
-		["2026-06", "1,204", "$18,400", "2.1%"],
-		["2026-07", "1,688", "$24,150", "1.8%"],
-		["2026-08", "2,102", "$33,900", "1.6%"],
+function McpVisual() {
+	const tools = [
+		"read_file",
+		"write_file",
+		"edit_file",
+		"find_files",
+		"list_directory",
+		"execute",
 	];
 	return (
-		<div className={cn(windowShell, "mx-auto max-w-xl")}>
-			<WindowBar>
-				<div className="flex items-center gap-2 text-sm font-bold">
-					<FileMark type="csv" />
-					q3-metrics.csv
-				</div>
-			</WindowBar>
-			<div>
-				{rows.map((row, index) => (
-					<div
-						className={cn(
-							"grid grid-cols-4 border-b border-stone-100 text-xs",
-							index === 0 && "bg-stone-50 font-bold text-stone-500",
-							index > 1 && "bg-red-50/40",
-						)}
-						key={row[0]}
-					>
-						{row.map((cell, cellIndex) => (
-							<span
-								className="border-r border-stone-100 px-3 py-3 last:border-0"
-								key={`${row[0]}-${cellIndex}`}
-							>
-								{index === 2 && cellIndex === 1 ? (
-									<>
-										<s className="mr-1 rounded bg-red-100 px-1 text-red-700">
-											1,590
-										</s>
-										<b className="rounded bg-green-100 px-1 text-green-700">
-											1,688
-										</b>
-									</>
-								) : index === 3 && cellIndex === 2 ? (
-									<>
-										<s className="mr-1 rounded bg-red-100 px-1 text-red-700">
-											$27,300
-										</s>
-										<b className="rounded bg-green-100 px-1 text-green-700">
-											$33,900
-										</b>
-									</>
-								) : (
-									cell
-								)}
-							</span>
-						))}
-					</div>
+		<div className={cardShell}>
+			<div className="flex items-center gap-2 border-b border-[#f3eee7] px-5 py-3.5 text-[13px] text-[#8a8178]">
+				<img className="size-[15px]" src="/lixray-mark.svg" alt="" />
+				<span className="font-mono">lixray.com/mcp</span>
+				<span className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold text-[#15803d]">
+					<span
+						className="size-1.5 rounded-full bg-[#22c55e]"
+						aria-hidden="true"
+					/>
+					Connected
+				</span>
+			</div>
+			<div className="flex flex-wrap gap-2 px-5 py-[18px]">
+				{tools.map((tool) => (
+					<span className={monoChip} key={tool}>
+						{tool}
+					</span>
 				))}
 			</div>
-			<div className="flex items-center gap-2 p-3 text-xs">
-				<span className="mr-auto font-semibold">3 changes</span>
-				<button
-					className="inline-flex items-center gap-1 rounded-lg border-0 bg-green-700 px-3 py-2 font-bold text-white"
-					type="button"
-				>
-					<Check className="size-3" />
+			<div className="px-5 pb-[18px] text-[13px] text-[#8a8178]">
+				Scoped by OAuth — agents only see workspaces their person can access.
+			</div>
+		</div>
+	);
+}
+
+function DiffVisual() {
+	return (
+		<div className={cardShell}>
+			<div className="flex items-center gap-[9px] border-b border-[#f3eee7] px-5 py-3.5">
+				<img className="size-[19px]" src="/landing/icon-sq-md.svg" alt="" />
+				<span className="text-[13.5px] font-semibold">launch-plan.md</span>
+				<span className="ml-auto font-mono text-[12.5px]">
+					<span className="text-[#15803d]">+6</span>{" "}
+					<span className="text-[#b91c1c]">−2</span>
+				</span>
+			</div>
+			<div className="flex flex-col gap-2.5 px-5 py-[18px]">
+				<span className="h-[9px] w-[78%] rounded-[5px] bg-[#f0ebe3]" />
+				<span className="h-[9px] w-[84%] rounded-[5px] border border-[#bbe7c9] bg-[#dcfce7]" />
+				<span className="h-[9px] w-[62%] rounded-[5px] border border-[#bbe7c9] bg-[#dcfce7]" />
+				<span className="h-[9px] w-[70%] rounded-[5px] border border-[#f3c4c4] bg-[#fee2e2] opacity-70" />
+				<span className="h-[9px] w-[74%] rounded-[5px] bg-[#f0ebe3]" />
+			</div>
+			<div className="flex items-center gap-2.5 border-t border-[#f3eee7] px-5 py-3.5">
+				<span className="inline-flex items-center gap-1.5 text-[12.5px] whitespace-nowrap text-[#8a8178]">
+					<img className="size-3.5" src="/landing/claude-spark.svg" alt="" />
+					Proposed by Mara&apos;s Claude
+				</span>
+				<span className="ml-auto rounded-lg bg-[#1c1917] px-3.5 py-[7px] text-[13px] font-bold text-white">
 					Accept
-				</button>
-				<button
-					className="rounded-lg border border-stone-300 bg-white px-3 py-2 font-bold"
-					type="button"
-				>
+				</span>
+				<span className="rounded-lg border border-[#1c1917]/12 px-3.5 py-[7px] text-[13px] font-semibold text-[#57534e]">
 					Reject
-				</button>
+				</span>
 			</div>
 		</div>
 	);
@@ -926,44 +464,27 @@ function ChangesVisual() {
 
 function ShareVisual() {
 	return (
-		<div className={cn(windowShell, "relative mx-auto min-h-[310px] max-w-xl")}>
-			<WindowBar>
-				<div className="flex items-center gap-2 text-sm font-bold">
-					<img className="size-4" src="/lixray-mark.svg" alt="" />
-					acme / launch-q3
+		<div className="flex justify-center">
+			<div className="flex w-full max-w-[400px] flex-col gap-3.5 rounded-2xl border border-[#1c1917]/8 bg-white p-5 shadow-[0_24px_60px_rgba(28,25,23,.08)]">
+				<div className="flex items-center gap-[9px]">
+					<img className="size-[19px]" src="/landing/icon-sq-md.svg" alt="" />
+					<span className="text-sm font-bold">Share launch-plan.md</span>
 				</div>
-				<button
-					className="ml-auto inline-flex items-center gap-1 rounded-lg border-0 bg-[#f35a0a] px-3 py-2 text-xs font-bold text-white"
-					type="button"
-				>
-					<Share2 className="size-3" />
-					Share
-				</button>
-			</WindowBar>
-			<div className="p-6">
-				<h4 className="mt-0 text-2xl">Launch plan</h4>
-				<p className="max-w-sm text-sm leading-6 text-stone-600">
-					We ship the beta on October 19. Everyone on the team and their agents
-					work from this plan.
-				</p>
-			</div>
-			<div className="absolute right-5 bottom-5 left-5 rounded-xl border border-stone-200 bg-white p-4 shadow-xl">
-				<strong>Share launch-q3</strong>
-				<p className="my-2 text-xs text-stone-500">
-					Invite a teammate to the workspace and its full context.
-				</p>
-				<div className="flex gap-2">
-					<input
-						className="min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm"
-						aria-label="Teammate email"
-						defaultValue="jonas@acme.com"
-					/>
-					<button
-						className="rounded-lg border-0 bg-[#f35a0a] px-3 py-2 text-xs font-bold text-white"
-						type="button"
-					>
-						Invite
-					</button>
+				<div className="flex items-stretch gap-2">
+					<span className="flex h-[38px] min-w-0 flex-1 items-center overflow-hidden rounded-[9px] border border-[#1c1917]/7 bg-[#f7f3ed] px-3 font-mono text-[11.5px] whitespace-nowrap text-[#57534e]">
+						lixray.com/@acme/launch-q3/launch-plan.md
+					</span>
+					<span className="inline-flex items-center rounded-[9px] bg-[linear-gradient(180deg,#F97316_0%,#E8590C_100%)] px-4 text-[13px] font-bold text-white">
+						Copy
+					</span>
+				</div>
+				<div className="flex gap-1.5 rounded-[10px] bg-[#f7f3ed] p-1">
+					<span className="flex-1 rounded-[7px] bg-white py-[7px] text-center text-[13px] font-semibold shadow-[0_2px_6px_rgba(28,25,23,.08)]">
+						Can edit
+					</span>
+					<span className="flex-1 py-[7px] text-center text-[13px] font-semibold text-[#8a8178]">
+						Read only
+					</span>
 				</div>
 			</div>
 		</div>

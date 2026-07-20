@@ -1,8 +1,7 @@
-<svg role="img" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-	<rect width="100" height="100" fill="#E8590C" />
-	<path
-		fill="#F4F2EF"
-		fill-rule="evenodd"
-		d="M32.6 23.4 L76.6 67.4 L67.4 76.6 L23.4 32.6 Z M76.6 32.6 L32.6 76.6 L23.4 67.4 L67.4 23.4 Z"
-	/>
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="100" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FB8A3C"/><stop offset="1" stop-color="#E04E06"/></linearGradient></defs>
+  <rect width="100" height="100" fill="url(#g)"/>
+  <svg x="20" y="21.13" width="60" height="57.74" viewBox="22 22 53 51">
+    <path fill="#FFFFFF" fill-rule="evenodd" d="M31 72 H69 Q74 72 74 67 V34 Q74 27 69 33 L56 44.5 L26 23.8 A2.75 2.75 0 0 0 23.8 26 L49 51 L31 67 Q26 72 31 72 Z M55.5 60 a4.5 4.5 0 1 0 9 0 a4.5 4.5 0 1 0 -9 0 Z"/>
+  </svg>
 </svg>
