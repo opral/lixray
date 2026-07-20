@@ -10,6 +10,9 @@ export interface McpTelemetryEnvironment {
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
+	LIXRAY_RELEASE_ID?: string;
+	RAILWAY_GIT_COMMIT_SHA?: string;
+	CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string };
 }
 
 export interface McpTelemetryIdentity {
@@ -63,25 +66,62 @@ export function createMcpTelemetrySession(
 
 	const pendingCaptures: Array<Promise<void>> = [];
 	const onToolCall = (observation: McpToolCallObservation): void => {
-		const properties: Record<string, string | number> = {
-			tool_name: observation.toolName,
+		const traceId = crypto.randomUUID();
+		const spanId = crypto.randomUUID();
+		const releaseId =
+			env.LIXRAY_RELEASE_ID?.trim() ||
+			env.CF_VERSION_METADATA?.id?.trim() ||
+			env.RAILWAY_GIT_COMMIT_SHA?.trim() ||
+			"unknown";
+		const properties: Record<string, unknown> = {
+			$ai_trace_id: traceId,
+			$ai_span_id: spanId,
+			$ai_span_name: `mcp.${observation.toolName}`,
+			$ai_latency: observation.durationMs / 1000,
+			$ai_is_error: observation.outcome === "error",
+			mcp_server: "lixray",
+			mcp_tool: observation.toolName,
 			outcome: observation.outcome,
 			duration_ms: observation.durationMs,
 			oauth_client_id: identity.clientId,
 			environment: "production",
+			release_id: releaseId,
+			mcp_surface_version: observation.surfaceVersion,
 		};
 		if (observation.errorCode) {
 			properties.error_code = observation.errorCode;
+			properties.$ai_error = { code: observation.errorCode };
 		}
 		if (observation.workspaceId) {
 			properties.workspace_id = observation.workspaceId;
+		}
+		if (observation.executeInput) {
+			properties.$ai_input_state = observation.executeInput;
+			properties.statement_count = observation.executeInput.statementCount;
+			properties.sql_operations = observation.executeInput.statements.map(
+				(statement) => statement.operation,
+			);
+			properties.sql_shape_ids = observation.executeInput.statements.map(
+				(statement) => statement.shapeId,
+			);
+		}
+		if (observation.executeOutput) {
+			properties.$ai_output_state = observation.executeOutput;
+			properties.result_count = observation.executeOutput.resultCount;
+			properties.row_count = observation.executeOutput.rowCount;
+			properties.rows_affected = observation.executeOutput.rowsAffected;
+			properties.notice_codes = observation.executeOutput.noticeCodes;
+			properties.notice_count = observation.executeOutput.results.reduce(
+				(sum, result) => sum + result.noticeCodes.length,
+				0,
+			);
 		}
 
 		try {
 			const capture = client
 				.captureImmediate({
 					distinctId: identity.userId,
-					event: "mcp_tool_called",
+					event: "$ai_span",
 					properties,
 					...(observation.workspaceId
 						? { groups: { workspace: observation.workspaceId } }

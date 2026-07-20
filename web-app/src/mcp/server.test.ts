@@ -5,7 +5,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import {
-	FileServiceError,
 	LixFileService,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
@@ -14,9 +13,9 @@ import {
 	type LixRuntimeClient,
 } from "./file-service.ts";
 import {
-	EXECUTE_SQL_INTROSPECTION_QUERY,
-	EXECUTE_SQL_REFERENCE_DDL,
-	EXECUTE_SQL_SURFACES,
+	EXECUTE_SQL_COLUMNS_QUERY,
+	EXECUTE_SQL_CORE_SCHEMA,
+	EXECUTE_SQL_TABLES_QUERY,
 	EXECUTE_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 import {
@@ -33,8 +32,6 @@ import {
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 const BRANCH_ID = "22222222-2222-4222-8222-222222222222";
 const THROW_BRANCH_ID = "33333333-3333-4333-8333-333333333333";
-const COMMIT_ID = "44444444-4444-4444-8444-444444444444";
-const HIDDEN_BRANCH_ID = "55555555-5555-4555-8555-555555555555";
 const AUTHORIZATION_SERVER = "https://supabase.example.test/auth/v1";
 
 void test("protected resource discovery advertises the Supabase authorization server", async () => {
@@ -80,7 +77,12 @@ void test("MCP documentation distinguishes browser and client authentication", a
 	assert.match(documentation, /do not include access or refresh tokens/);
 	assert.match(documentation, /ordered batch of statements/);
 	assert.match(documentation, /executes the batch atomically/);
-	assert.match(documentation, /default to the workspace default branch/);
+	assert.match(documentation, /active Lix branch/);
+	assert.match(documentation, /active_branch_id/);
+	assert.match(documentation, /switch_branch/);
+	assert.match(documentation, /lix_branch/);
+	assert.match(documentation, /raw Lix SQL execute/);
+	assert.doesNotMatch(documentation, /file tools|reading, creating, editing/i);
 });
 
 void test("MCP initialize, tools/list, and tools/call expose the authenticated tool contract", async () => {
@@ -106,19 +108,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		const listed = await client.listTools();
 		assert.deepEqual(
 			listed.tools.map((tool) => tool.name),
-			[
-				"list_workspaces",
-				"list_branches",
-				"list_directory",
-				"find_files",
-				"read_file",
-				"write_file",
-				"edit_file",
-				"create_directory",
-				"move_entry",
-				"delete_entry",
-				"execute",
-			],
+			["list_workspaces", "active_branch_id", "switch_branch", "execute"],
 		);
 		for (const tool of listed.tools) {
 			assert.deepEqual(tool._meta?.securitySchemes, [
@@ -126,13 +116,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			]);
 			assert.equal(tool.annotations?.openWorldHint, false);
 		}
-		for (const name of [
-			"list_workspaces",
-			"list_branches",
-			"list_directory",
-			"find_files",
-			"read_file",
-		]) {
+		for (const name of ["list_workspaces", "active_branch_id"]) {
 			assert.equal(
 				listed.tools.find((tool) => tool.name === name)?.annotations
 					?.readOnlyHint,
@@ -144,24 +128,20 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		}
 		const executeTool = listed.tools.find((tool) => tool.name === "execute");
 		assert.ok(executeTool);
-		assert.equal(executeTool.description, EXECUTE_TOOL_DESCRIPTION);
-		assert.ok(executeTool.description.includes(EXECUTE_SQL_REFERENCE_DDL));
-		assert.ok(
-			executeTool.description.includes(EXECUTE_SQL_INTROSPECTION_QUERY),
-		);
-		for (const sqlSurface of EXECUTE_SQL_SURFACES) {
-			assert.ok(
-				executeTool.description.includes(`CREATE TABLE ${sqlSurface.name} (`),
-				sqlSurface.name,
-			);
-		}
+		const executeDescription = executeTool.description;
+		assert.ok(executeDescription);
+		assert.ok(executeDescription.startsWith(EXECUTE_TOOL_DESCRIPTION));
+		assert.ok(executeDescription.includes(EXECUTE_SQL_CORE_SCHEMA));
+		assert.ok(executeDescription.includes(EXECUTE_SQL_TABLES_QUERY));
+		assert.ok(executeDescription.includes(EXECUTE_SQL_COLUMNS_QUERY));
+		assert.match(executeDescription, /active Lix branch/);
 		assert.deepEqual(runtimeClient.executeRequests, []);
 		assert.equal(executeTool?.annotations?.readOnlyHint, false);
-		assert.equal(executeTool?.annotations?.destructiveHint, true);
+		assert.equal(executeTool?.annotations?.destructiveHint, false);
 		assert.equal(executeTool?.annotations?.idempotentHint, false);
 
 		const rawTools = findRawTools(rawMessages);
-		assert.equal(rawTools.length, 11);
+		assert.equal(rawTools.length, 4);
 		const checkedInTools: unknown = JSON.parse(
 			await readFile(new URL("../../mcp-tools.json", import.meta.url), "utf8"),
 		);
@@ -224,79 +204,6 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				name,
 			);
 		}
-		for (const name of [
-			"write_file",
-			"edit_file",
-			"move_entry",
-			"delete_entry",
-		]) {
-			const inputSchema = rawTools.find((tool) => tool.name === name)
-				?.inputSchema as
-				| {
-						required?: Array<string>;
-						properties?: Record<
-							string,
-							{
-								format?: string;
-								maxLength?: number;
-								description?: string;
-							}
-						>;
-				  }
-				| undefined;
-			assert.ok(inputSchema, `${name} should expose an input schema`);
-			assert.equal(inputSchema.properties?.expected_revision, undefined);
-			const changeIdSchema = inputSchema.properties?.expected_change_id;
-			assert.ok(changeIdSchema, `${name} should expose expected_change_id`);
-			assert.equal(changeIdSchema.format, "uuid", name);
-			assert.match(changeIdSchema.description ?? "", /change ID/);
-			assert.equal(
-				inputSchema.required?.includes("expected_change_id") ?? false,
-				false,
-				`${name} should not require expected_change_id`,
-			);
-		}
-		for (const name of [
-			"list_directory",
-			"find_files",
-			"read_file",
-			"write_file",
-			"edit_file",
-			"create_directory",
-			"move_entry",
-		]) {
-			const outputSchema = rawTools.find(
-				(tool) => tool.name === name,
-			)?.outputSchema;
-			assert.ok(outputSchema, `${name} should expose an output schema`);
-			assert.deepEqual(
-				findPropertySchemas(outputSchema, "revision"),
-				[],
-				`${name} should not return a revision`,
-			);
-			const changeIdSchemas = findPropertySchemas(outputSchema, "changeId");
-			assert.ok(changeIdSchemas.length > 0, `${name} should return a changeId`);
-			for (const changeIdSchema of changeIdSchemas) {
-				assert.equal(changeIdSchema.format, "uuid", name);
-			}
-		}
-		const defaultedInputs = new Map([
-			["find_files", ["under_path"]],
-			["read_file", ["start_line", "line_count"]],
-			["delete_entry", ["recursive"]],
-		]);
-		for (const [name, defaultedProperties] of defaultedInputs) {
-			const inputSchema = rawTools.find((tool) => tool.name === name)
-				?.inputSchema as { required?: Array<string> } | undefined;
-			assert.ok(inputSchema, `${name} should expose an input schema`);
-			for (const property of defaultedProperties) {
-				assert.equal(
-					inputSchema.required?.includes(property) ?? false,
-					false,
-					`${name}.${property} should use its default when omitted`,
-				);
-			}
-		}
 		const executeInput = rawTools.find((tool) => tool.name === "execute")
 			?.inputSchema as
 			| {
@@ -315,34 +222,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			) ?? false,
 			false,
 		);
-		const findFilesInput = rawTools.find((tool) => tool.name === "find_files")
-			?.inputSchema as { properties?: Record<string, unknown> } | undefined;
-		assert.equal(findFilesInput?.properties?.limit, undefined);
-		const editFileInput = rawTools.find((tool) => tool.name === "edit_file")
-			?.inputSchema as
-			| {
-					properties?: {
-						edits?: { items?: { required?: Array<string> } };
-					};
-			  }
-			| undefined;
-		assert.equal(
-			editFileInput?.properties?.edits?.items?.required?.includes(
-				"replace_all",
-			) ?? false,
-			false,
-		);
-		for (const name of [
-			"list_directory",
-			"find_files",
-			"read_file",
-			"write_file",
-			"edit_file",
-			"create_directory",
-			"move_entry",
-			"delete_entry",
-			"execute",
-		]) {
+		for (const name of ["execute"]) {
 			const inputSchema = rawTools.find((tool) => tool.name === name)
 				?.inputSchema as
 				| {
@@ -357,20 +237,34 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 						>;
 				  }
 				| undefined;
-			const branchSchema = inputSchema?.properties?.branch_id;
-			assert.ok(branchSchema, `${name} should expose branch_id`);
-			assert.equal(branchSchema.format, "uuid", name);
-			assert.equal(branchSchema.maxLength, undefined, name);
-			assert.match(
-				branchSchema.description ?? "",
-				/Omit to use the workspace default branch/,
-			);
 			assert.equal(
-				inputSchema.required?.includes("branch_id") ?? false,
-				false,
-				`${name} should default branch_id`,
+				inputSchema?.properties?.branch_id,
+				undefined,
+				`${name} should use the active branch without a branch_id input`,
 			);
 		}
+		const switchBranchInput = rawTools.find(
+			(tool) => tool.name === "switch_branch",
+		)?.inputSchema as
+			| {
+					required?: Array<string>;
+					properties?: Record<
+						string,
+						{ format?: string; minLength?: number; description?: string }
+					>;
+			  }
+			| undefined;
+		assert.ok(switchBranchInput);
+		const switchBranchId = switchBranchInput.properties?.branch_id;
+		assert.ok(switchBranchId);
+		assert.equal(switchBranchId.format, undefined);
+		assert.equal(switchBranchId.minLength, 1);
+		assert.equal(switchBranchId.description, "Lix branch ID");
+		assert.equal(
+			switchBranchInput.required?.includes("branch_id"),
+			true,
+			"switch_branch should require an explicit branch ID",
+		);
 
 		const workspaces = await client.callTool({
 			name: "list_workspaces",
@@ -392,48 +286,27 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			],
 		});
 
-		const urlRead = await client.callTool({
-			name: "read_file",
-			arguments: {
-				workspace_ref: "@example/personal",
-				branch_id: BRANCH_ID,
-				path: "/scratch/samuel's-todos.md",
-			},
-		});
-		assert.equal(urlRead.isError, undefined);
-		assert.deepEqual(urlRead.structuredContent, {
-			path: "/scratch/samuel's-todos.md",
-			content: "todo",
-			size: 4,
-			changeId: COMMIT_ID,
-			updatedAt: "2026-07-16T12:00:00.000Z",
-			totalLines: 1,
-			startLine: 1,
-			endLine: 1,
-			hasMore: false,
-		});
-		assert.deepEqual(runtimeClient.fileReadRequests, [
-			{
-				workspaceId: WORKSPACE_ID,
-				path: "/scratch/samuel's-todos.md",
-			},
-		]);
-
-		const branches = await client.callTool({
-			name: "list_branches",
+		const activeBranch = await client.callTool({
+			name: "active_branch_id",
 			arguments: { workspace_ref: "personal" },
 		});
-		assert.equal(branches.isError, undefined);
-		assert.deepEqual(branches.structuredContent, {
-			branches: [
-				{
-					id: BRANCH_ID,
-					name: "main",
-					hidden: false,
-					commitId: COMMIT_ID,
-				},
-			],
-			current_branch_id: BRANCH_ID,
+		assert.equal(activeBranch.isError, undefined);
+		assert.deepEqual(activeBranch.structuredContent, { branch_id: BRANCH_ID });
+
+		const switchedBranch = await client.callTool({
+			name: "switch_branch",
+			arguments: { workspace_ref: "personal", branch_id: "global" },
+		});
+		assert.equal(switchedBranch.isError, undefined);
+		assert.deepEqual(switchedBranch.structuredContent, { branch_id: "global" });
+
+		const activeGlobalBranch = await client.callTool({
+			name: "active_branch_id",
+			arguments: { workspace_ref: "personal" },
+		});
+		assert.equal(activeGlobalBranch.isError, undefined);
+		assert.deepEqual(activeGlobalBranch.structuredContent, {
+			branch_id: "global",
 		});
 
 		const executed = await client.callTool({
@@ -463,19 +336,18 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			{
 				workspaceId: WORKSPACE_ID,
 				request: {
-					branchId: BRANCH_ID,
 					sql: "SELECT value FROM lix_key_value WHERE key = $1",
 					params: [{ kind: "text", value: "example" }],
 					options: undefined,
 				},
 			},
 		]);
+		assert.deepEqual(runtimeClient.executeActiveBranchIds, ["global"]);
 
 		const batch = await client.callTool({
 			name: "execute",
 			arguments: {
 				workspace_ref: WORKSPACE_ID,
-				branch_id: BRANCH_ID,
 				statements: [
 					{
 						sql: "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
@@ -497,82 +369,10 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			2,
 		);
 
-		const invalidRead = await client.callTool({
-			name: "read_file",
-			arguments: {
-				workspace_ref: WORKSPACE_ID,
-				branch_id: BRANCH_ID,
-				path: "/../secret.txt",
-			},
-		});
-		assert.equal(invalidRead.isError, true);
-		assert.equal(
-			(
-				invalidRead.structuredContent as
-					| { error?: { code?: string } }
-					| undefined
-			)?.error?.code,
-			"invalid_path",
-		);
-
-		const invalidArguments = await client.callTool({
-			name: "read_file",
-			arguments: {
-				workspace_ref: WORKSPACE_ID,
-				branch_id: BRANCH_ID,
-			},
-		});
-		assert.equal(invalidArguments.isError, true);
-		assert.equal(
-			(
-				invalidArguments.structuredContent as
-					| { error?: { code?: string } }
-					| undefined
-			)?.error?.code,
-			"invalid_arguments",
-		);
-
-		const legacyWorkspaceId = await client.callTool({
-			name: "read_file",
-			arguments: {
-				workspace_id: WORKSPACE_ID,
-				branch_id: BRANCH_ID,
-				path: "/legacy.txt",
-			},
-		});
-		assert.equal(legacyWorkspaceId.isError, true);
-		assert.equal(
-			(
-				legacyWorkspaceId.structuredContent as
-					| { error?: { code?: string } }
-					| undefined
-			)?.error?.code,
-			"invalid_arguments",
-		);
-
-		const malformedWorkspaceRef = await client.callTool({
-			name: "read_file",
-			arguments: {
-				workspace_ref: "https://lixray.com/@example/personal/file/legacy.txt",
-				branch_id: BRANCH_ID,
-				path: "/legacy.txt",
-			},
-		});
-		assert.equal(malformedWorkspaceRef.isError, true);
-		assert.equal(
-			(
-				malformedWorkspaceRef.structuredContent as
-					| { error?: { code?: string } }
-					| undefined
-			)?.error?.code,
-			"not_found",
-		);
-
 		const invalidExecuteArguments = await client.callTool({
 			name: "execute",
 			arguments: {
 				workspace_ref: WORKSPACE_ID,
-				branch_id: BRANCH_ID,
 				statements: [{ sql: "  SELECT $1  ", params: [{ kind: "text" }] }],
 			},
 		});
@@ -586,11 +386,37 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			"invalid_arguments",
 		);
 
+		const rejectedBranchOverride = await client.callTool({
+			name: "execute",
+			arguments: {
+				workspace_ref: WORKSPACE_ID,
+				branch_id: BRANCH_ID,
+				statements: [{ sql: "SELECT 1" }],
+			},
+		});
+		assert.equal(rejectedBranchOverride.isError, true);
+		assert.equal(
+			(
+				rejectedBranchOverride.structuredContent as
+					| { error?: { code?: string } }
+					| undefined
+			)?.error?.code,
+			"invalid_arguments",
+		);
+
+		const switchedToFailingBranch = await client.callTool({
+			name: "switch_branch",
+			arguments: { workspace_ref: WORKSPACE_ID, branch_id: THROW_BRANCH_ID },
+		});
+		assert.equal(switchedToFailingBranch.isError, undefined);
+		assert.deepEqual(switchedToFailingBranch.structuredContent, {
+			branch_id: THROW_BRANCH_ID,
+		});
+
 		const internalFailure = await client.callTool({
 			name: "execute",
 			arguments: {
 				workspace_ref: WORKSPACE_ID,
-				branch_id: THROW_BRANCH_ID,
 				statements: [{ sql: "SELECT 1" }],
 			},
 		});
@@ -610,20 +436,42 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		);
 
 		assert.deepEqual(
-			observations.map(({ durationMs, ...observation }) => {
-				assert.ok(Number.isInteger(durationMs));
-				assert.ok(durationMs >= 0);
-				return observation;
-			}),
+			observations.map(
+				({
+					durationMs,
+					surfaceVersion,
+					executeInput,
+					executeOutput,
+					...observation
+				}) => {
+					assert.ok(Number.isInteger(durationMs));
+					assert.ok(durationMs >= 0);
+					assert.match(surfaceVersion, /^fnv1a32:[0-9a-f]{8}$/);
+					return {
+						...observation,
+						...(executeInput
+							? { statementCount: executeInput.statementCount }
+							: {}),
+						...(executeOutput
+							? { resultCount: executeOutput.resultCount }
+							: {}),
+					};
+				},
+			),
 			[
 				{ toolName: "list_workspaces", outcome: "success" },
 				{
-					toolName: "read_file",
+					toolName: "active_branch_id",
 					outcome: "success",
 					workspaceId: WORKSPACE_ID,
 				},
 				{
-					toolName: "list_branches",
+					toolName: "switch_branch",
+					outcome: "success",
+					workspaceId: WORKSPACE_ID,
+				},
+				{
+					toolName: "active_branch_id",
 					outcome: "success",
 					workspaceId: WORKSPACE_ID,
 				},
@@ -631,47 +479,39 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 					toolName: "execute",
 					outcome: "success",
 					workspaceId: WORKSPACE_ID,
-					sql: "SELECT value FROM lix_key_value WHERE key = $1",
+					statementCount: 1,
+					resultCount: 1,
 				},
 				{
 					toolName: "execute",
 					outcome: "success",
 					workspaceId: WORKSPACE_ID,
-					sql: "INSERT INTO lix_key_value (key, value) VALUES ($1, $2);\nSELECT value FROM lix_key_value WHERE key = $1",
-				},
-				{
-					toolName: "read_file",
-					outcome: "error",
-					errorCode: "invalid_path",
-					workspaceId: WORKSPACE_ID,
-				},
-				{
-					toolName: "read_file",
-					outcome: "error",
-					errorCode: "invalid_arguments",
-				},
-				{
-					toolName: "read_file",
-					outcome: "error",
-					errorCode: "invalid_arguments",
-				},
-				{
-					toolName: "read_file",
-					outcome: "error",
-					errorCode: "not_found",
+					statementCount: 2,
+					resultCount: 2,
 				},
 				{
 					toolName: "execute",
 					outcome: "error",
 					errorCode: "invalid_arguments",
-					sql: "SELECT $1",
+					statementCount: 1,
+				},
+				{
+					toolName: "execute",
+					outcome: "error",
+					errorCode: "invalid_arguments",
+					statementCount: 1,
+				},
+				{
+					toolName: "switch_branch",
+					outcome: "success",
+					workspaceId: WORKSPACE_ID,
 				},
 				{
 					toolName: "execute",
 					outcome: "error",
 					errorCode: "internal_error",
 					workspaceId: WORKSPACE_ID,
-					sql: "SELECT 1",
+					statementCount: 1,
 				},
 				{
 					toolName: "unknown",
@@ -680,6 +520,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				},
 			],
 		);
+		assert.doesNotMatch(JSON.stringify(observations), /"example"|"result"/);
 	} finally {
 		await client.close();
 		await server.close();
@@ -709,7 +550,7 @@ void test("authless MCP tools advertise noauth security", async () => {
 			assert.deepEqual(tool._meta?.securitySchemes, [{ type: "noauth" }]);
 		}
 		const rawTools = findRawTools(rawMessages);
-		assert.equal(rawTools.length, 11);
+		assert.equal(rawTools.length, 4);
 		for (const tool of rawTools) {
 			assert.deepEqual(tool.securitySchemes, [{ type: "noauth" }]);
 		}
@@ -720,11 +561,12 @@ void test("authless MCP tools advertise noauth security", async () => {
 });
 
 class ProtocolLixRuntimeClient implements LixRuntimeClient {
+	private currentBranchId = BRANCH_ID;
 	readonly executeRequests: Array<{
 		workspaceId: string;
 		request: ExecuteRequest;
 	}> = [];
-	readonly fileReadRequests: Array<{ workspaceId: string; path: string }> = [];
+	readonly executeActiveBranchIds: Array<string> = [];
 
 	async listWorkspaces() {
 		return [
@@ -737,71 +579,23 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 		];
 	}
 
-	async listBranches() {
-		return {
-			branches: [
-				{
-					id: BRANCH_ID,
-					name: "main",
-					hidden: false,
-					commitId: COMMIT_ID,
-				},
-				{
-					id: HIDDEN_BRANCH_ID,
-					name: "hidden",
-					hidden: true,
-					commitId: COMMIT_ID,
-				},
-				{
-					id: "global",
-					name: "global",
-					hidden: true,
-					commitId: COMMIT_ID,
-				},
-				{
-					id: "legacy-custom-id",
-					name: "legacy",
-					hidden: false,
-					commitId: COMMIT_ID,
-				},
-			],
-			currentBranchId: BRANCH_ID,
-		};
+	async activeBranchId() {
+		return this.currentBranchId;
+	}
+
+	async switchBranch(_workspaceId: string, branchId: string) {
+		this.currentBranchId = branchId;
+		return { branchId };
 	}
 
 	async execute(
 		workspaceId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse> {
-		if (request.sql.includes("BEGIN;")) {
-			throw new FileServiceError(
-				"LIX_UNSUPPORTED_SQL",
-				"Execute accepts exactly one SQL statement.",
-			);
-		}
-		if (
-			request.sql ===
-			"SELECT data, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE path = $1"
-		) {
-			const path = request.params?.[0];
-			assert.equal(path?.kind, "text");
-			this.fileReadRequests.push({ workspaceId, path: path.value });
-			return {
-				columns: ["data", "lixcol_change_id", "lixcol_updated_at"],
-				rows: [
-					[
-						{ kind: "blob", base64: "dG9kbw==" },
-						{ kind: "text", value: COMMIT_ID },
-						{ kind: "text", value: "2026-07-16T12:00:00.000Z" },
-					],
-				],
-				rowsAffected: 0,
-				notices: [],
-			};
-		}
-		if (request.branchId === THROW_BRANCH_ID) {
+		if (this.currentBranchId === THROW_BRANCH_ID) {
 			throw new Error("Unexpected runtime failure");
 		}
+		this.executeActiveBranchIds.push(this.currentBranchId);
 		this.executeRequests.push({ workspaceId, request });
 		return {
 			columns: ["value"],
@@ -819,7 +613,6 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 			results: await Promise.all(
 				request.statements.map((statement) =>
 					this.execute(workspaceId, {
-						branchId: request.branchId,
 						...statement,
 						options: request.options,
 					}),
@@ -848,27 +641,6 @@ function findRawTools(
 		}
 	}
 	return [];
-}
-
-function findPropertySchemas(
-	value: unknown,
-	propertyName: string,
-): Array<Record<string, unknown>> {
-	if (!value || typeof value !== "object") return [];
-	const object = value as Record<string, unknown>;
-	const properties = object.properties;
-	const direct =
-		properties && typeof properties === "object"
-			? (properties as Record<string, unknown>)[propertyName]
-			: undefined;
-	return [
-		...(direct && typeof direct === "object"
-			? [direct as Record<string, unknown>]
-			: []),
-		...Object.values(object).flatMap((child) =>
-			findPropertySchemas(child, propertyName),
-		),
-	];
 }
 
 function escapeRegExp(value: string): string {

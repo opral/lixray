@@ -74,23 +74,21 @@ void test("container calls reauthorize every time and never forward the OAuth to
 		},
 	);
 
-	await client.listBranches(WORKSPACE_ID);
-	await client.listBranches(WORKSPACE_ID);
-	assert.equal(authorizationChecks, 5);
-	assert.equal(starts, 5);
+	await client.execute(WORKSPACE_ID, { sql: "SELECT 1" });
+	await client.execute(WORKSPACE_ID, { sql: "SELECT 2" });
+	assert.equal(authorizationChecks, 3);
+	assert.equal(starts, 3);
 	assert.deepEqual(containerEnvironments[0], {
 		POSTHOG_PROJECT_TOKEN: "project-token",
 		POSTHOG_HOST: "https://posthog.example",
 		POSTHOG_ENVIRONMENT: "production",
 	});
-	assert.equal(requests.length, 5);
+	assert.equal(requests.length, 3);
 	assert.deepEqual(
 		requests.map((request) => new URL(request.url).pathname),
 		[
 			`/workspaces/${WORKSPACE_ID}/lix/v1/`,
-			`/workspaces/${WORKSPACE_ID}/lix/v1/`,
 			`/workspaces/${WORKSPACE_ID}/lix/v1/execute`,
-			`/workspaces/${WORKSPACE_ID}/lix/v1/`,
 			`/workspaces/${WORKSPACE_ID}/lix/v1/execute`,
 		],
 	);
@@ -139,7 +137,7 @@ void test("active-branch lookup reauthorizes each protocol request without listi
 	}
 });
 
-void test("active-branch lookup is queued before a guarded branch switch and execution", async () => {
+void test("active-branch lookup, branch switch, and execution are queued", async () => {
 	const operations: string[] = [];
 	const client = new WorkerLixRuntimeClient(
 		{},
@@ -169,7 +167,10 @@ void test("active-branch lookup is queued before a guarded branch switch and exe
 	);
 
 	const branchId = await client.activeBranchId(WORKSPACE_ID);
-	await client.execute(WORKSPACE_ID, { branchId, sql: "SELECT 1" });
+	assert.deepEqual(await client.switchBranch(WORKSPACE_ID, branchId), {
+		branchId,
+	});
+	await client.execute(WORKSPACE_ID, { sql: "SELECT 1" });
 	assert.deepEqual(operations, [
 		"active-branch",
 		"active-branch",
@@ -213,10 +214,10 @@ void test("transient container failures retry indefinitely with capped jitter an
 		},
 	);
 
-	assert.equal((await client.listBranches(WORKSPACE_ID)).branches.length, 1);
-	assert.equal(acquisitions, 8);
-	assert.equal(starts, 8);
-	assert.equal(fetches, 3);
+	assert.equal(await client.activeBranchId(WORKSPACE_ID), "main");
+	assert.equal(acquisitions, 7);
+	assert.equal(starts, 7);
+	assert.equal(fetches, 2);
 	assert.deepEqual(delays, [1_000, 2_000, 4_000, 5_000, 5_000]);
 });
 
@@ -243,8 +244,8 @@ void test("Durable Object storage resets are retried", async () => {
 		{ retryDelay: async () => undefined },
 	);
 
-	assert.equal((await client.listBranches(WORKSPACE_ID)).branches.length, 1);
-	assert.equal(acquisitions, 4);
+	assert.equal(await client.activeBranchId(WORKSPACE_ID), "main");
+	assert.equal(acquisitions, 3);
 });
 
 void test("transient HTTP responses retry and replay request bodies", async () => {
@@ -290,13 +291,12 @@ void test("transient HTTP responses retry and replay request bodies", async () =
 		},
 	);
 	const request = {
-		branchId: "main",
 		sql: "SELECT $1",
 		params: [{ kind: "text" as const, value: "ok" }],
 	};
 
 	assert.equal((await client.execute(WORKSPACE_ID, request)).rowsAffected, 0);
-	assert.equal(acquisitions, 4);
+	assert.equal(acquisitions, 3);
 	assert.deepEqual(bodies, [
 		{ sql: request.sql, params: request.params },
 		{ sql: request.sql, params: request.params },
@@ -333,12 +333,15 @@ void test("caller cancellation stops otherwise retryable container work", async 
 		},
 	);
 
-	await assert.rejects(client.listBranches(WORKSPACE_ID), (error: unknown) => {
-		return (
-			error instanceof FileServiceError &&
-			error.message === "Workspace storage request was cancelled."
-		);
-	});
+	await assert.rejects(
+		client.activeBranchId(WORKSPACE_ID),
+		(error: unknown) => {
+			return (
+				error instanceof FileServiceError &&
+				error.message === "Workspace storage request was cancelled."
+			);
+		},
+	);
 	assert.equal(observedCancellationOptions, undefined);
 	assert.equal(acquisitions, 1);
 	assert.equal(delays, 0);
@@ -370,9 +373,14 @@ void test("non-zero container exits are not retried indefinitely", async () => {
 		},
 	);
 
-	await assert.rejects(client.listBranches(WORKSPACE_ID), (error: unknown) => {
-		return error instanceof FileServiceError && error.code === "upstream_error";
-	});
+	await assert.rejects(
+		client.activeBranchId(WORKSPACE_ID),
+		(error: unknown) => {
+			return (
+				error instanceof FileServiceError && error.code === "upstream_error"
+			);
+		},
+	);
 	assert.equal(acquisitions, 1);
 	assert.equal(delays, 0);
 });
@@ -401,13 +409,16 @@ void test("permanent container responses are not retried", async () => {
 		},
 	);
 
-	await assert.rejects(client.listBranches(WORKSPACE_ID), (error: unknown) => {
-		return (
-			error instanceof FileServiceError &&
-			error.code === "upstream_error" &&
-			error.details?.status === 400
-		);
-	});
+	await assert.rejects(
+		client.activeBranchId(WORKSPACE_ID),
+		(error: unknown) => {
+			return (
+				error instanceof FileServiceError &&
+				error.code === "upstream_error" &&
+				error.details?.status === 400
+			);
+		},
+	);
 	assert.equal(fetches, 1);
 	assert.equal(delays, 0);
 });
@@ -425,9 +436,12 @@ void test("a denied workspace never starts or calls a container", async () => {
 		async () => new Response("Workspace access denied", { status: 403 }),
 	);
 
-	await assert.rejects(client.listBranches(WORKSPACE_ID), (error: unknown) => {
-		return error instanceof FileServiceError && error.code === "not_found";
-	});
+	await assert.rejects(
+		client.activeBranchId(WORKSPACE_ID),
+		(error: unknown) => {
+			return error instanceof FileServiceError && error.code === "not_found";
+		},
+	);
 	assert.equal(touchedContainer, false);
 });
 
@@ -482,12 +496,11 @@ void test("unified Lix execute reauthorizes and strips the OAuth token", async (
 	);
 
 	const response = await client.execute(WORKSPACE_ID, {
-		branchId: "main",
 		sql: "SELECT $1 AS value",
 		params: [{ kind: "text", value: "ok" }],
 	});
 	assert.equal(response.rowsAffected, 0);
-	assert.equal(authorizationChecks, 3);
+	assert.equal(authorizationChecks, 2);
 	assert.ok(received);
 	assert.equal(
 		new URL(received.url).pathname,
@@ -532,7 +545,6 @@ void test("unified Lix executeBatch uses the canonical atomic batch endpoint", a
 	);
 
 	const response = await client.executeBatch(WORKSPACE_ID, {
-		branchId: "main",
 		statements: [
 			{ sql: "SELECT $1 AS value", params: [{ kind: "int", value: 1 }] },
 			{
@@ -558,7 +570,7 @@ void test("unified Lix executeBatch uses the canonical atomic batch endpoint", a
 	});
 });
 
-void test("unified Lix sessions serialize branch selection with execution", async () => {
+void test("unified Lix sessions serialize execution without selecting a branch", async () => {
 	const operations: string[] = [];
 	const client = new WorkerLixRuntimeClient(
 		{},
@@ -571,17 +583,12 @@ void test("unified Lix sessions serialize branch selection with execution", asyn
 					operations.push("handshake");
 					return branchProtocolResponse(request);
 				}
-				if (pathname === "/lix/v1/branch/switch") {
-					const body: { branchId: string } = await request.json();
-					operations.push(`switch:${body.branchId}`);
-					return Response.json({ branchId: body.branchId });
-				}
 				const body: { sql: string } = await request.json();
-				const branchId = body.sql.endsWith("1") ? "branch-a" : "branch-b";
-				operations.push(`execute:${branchId}`);
+				const statement = body.sql.endsWith("1") ? "one" : "two";
+				operations.push(`execute:${statement}`);
 				return Response.json({
-					columns: ["branch_id"],
-					rows: [[{ kind: "text", value: branchId }]],
+					columns: ["statement"],
+					rows: [[{ kind: "text", value: statement }]],
 					rowsAffected: 0,
 					notices: [],
 				});
@@ -590,19 +597,13 @@ void test("unified Lix sessions serialize branch selection with execution", asyn
 	);
 
 	const [first, second] = await Promise.all([
-		client.execute(WORKSPACE_ID, { branchId: "branch-a", sql: "SELECT 1" }),
-		client.execute(WORKSPACE_ID, { branchId: "branch-b", sql: "SELECT 2" }),
+		client.execute(WORKSPACE_ID, { sql: "SELECT 1" }),
+		client.execute(WORKSPACE_ID, { sql: "SELECT 2" }),
 	]);
 
 	assert.equal(first.rows[0]?.[0]?.kind, "text");
 	assert.equal(second.rows[0]?.[0]?.kind, "text");
-	assert.deepEqual(operations, [
-		"handshake",
-		"switch:branch-a",
-		"execute:branch-a",
-		"switch:branch-b",
-		"execute:branch-b",
-	]);
+	assert.deepEqual(operations, ["handshake", "execute:one", "execute:two"]);
 });
 
 void test("unified Lix execute preserves every wire value kind", async () => {
@@ -641,7 +642,6 @@ void test("unified Lix execute preserves every wire value kind", async () => {
 	);
 
 	const result = await client.execute(WORKSPACE_ID, {
-		branchId: "main",
 		sql: "SELECT values",
 		params,
 	});
@@ -679,7 +679,6 @@ void test("unified Lix execute preserves structured Lix errors", async () => {
 
 	await assert.rejects(
 		client.execute(WORKSPACE_ID, {
-			branchId: "main",
 			sql: "BEGIN; COMMIT",
 		}),
 		(error: unknown) =>
@@ -721,16 +720,11 @@ void test("injected workspaces and workspace fetch bypass Supabase and container
 	);
 
 	assert.deepEqual(await client.listWorkspaces(), workspaceSummaries);
-	assert.deepEqual(await client.listBranches(WORKSPACE_ID), {
-		branches: [
-			{ id: "main", name: "main", hidden: false, commitId: "commit-1" },
-		],
-		currentBranchId: "main",
-	});
-	assert.equal(authorizationChecks, 3);
+	assert.equal(await client.activeBranchId(WORKSPACE_ID), "main");
+	assert.equal(authorizationChecks, 2);
 	assert.deepEqual(
 		received.map((request) => new URL(request.url).pathname),
-		["/lix/v1/", "/lix/v1/", "/lix/v1/execute"],
+		["/lix/v1/", "/lix/v1/"],
 	);
 	for (const request of received) {
 		assert.equal(request.headers.get("authorization"), null);

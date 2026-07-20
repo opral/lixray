@@ -2,82 +2,75 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { openLix } from "@lix-js/sdk";
 import {
-	EXECUTE_SQL_INTROSPECTION_QUERY,
-	EXECUTE_SQL_REFERENCE_DDL,
-	EXECUTE_SQL_SURFACES,
-	type ExecuteSqlType,
+	EXECUTE_SQL_COLUMNS_QUERY,
+	EXECUTE_SQL_CORE_SCHEMA,
+	EXECUTE_SQL_CORE_TABLES,
+	EXECUTE_SQL_TABLES_QUERY,
+	EXECUTE_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 
-void test("execute reference DDL matches a fresh Lix public schema", async (t) => {
-	assert.equal(EXECUTE_SQL_SURFACES.length, 48);
-	assert.equal(
-		EXECUTE_SQL_SURFACES.filter(
-			(sqlSurface) => sqlSurface.objectKind === "BASE TABLE",
-		).length,
-		34,
-	);
-	assert.equal(
-		EXECUTE_SQL_SURFACES.filter(
-			(sqlSurface) => sqlSurface.objectKind === "VIEW",
-		).length,
-		14,
-	);
-
+void test("execute core schema guide matches fresh Lix surfaces", async (t) => {
 	const lix = await openLix();
 	t.after(async () => lix.close());
-	const result = await lix.execute(EXECUTE_SQL_INTROSPECTION_QUERY);
-	const actual = result.rows.map((row) => row.toObject());
-	const expected = [...EXECUTE_SQL_SURFACES]
-		.sort((left, right) => left.name.localeCompare(right.name))
-		.flatMap((sqlSurface) =>
-			sqlSurface.columns.map((sqlColumn, ordinalPosition) => ({
-				table_name: sqlSurface.name,
-				table_type: sqlSurface.objectKind,
-				column_name: sqlColumn.name,
-				data_type: dataFusionType(sqlColumn.type),
-				is_nullable: sqlColumn.nullable ? "YES" : "NO",
-				ordinal_position: ordinalPosition,
-			})),
-		);
+	const result = await lix.execute(`SELECT table_name, column_name
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name IN ('lix_file', 'lix_directory', 'lix_branch', 'lix_change')
+ORDER BY table_name, ordinal_position;`);
+	const columnsByTable = new Map<string, Set<string>>();
 
-	assert.deepEqual(actual, expected);
-});
+	for (const row of result.rows) {
+		const { table_name, column_name } = row.toObject() as {
+			table_name: string;
+			column_name: string;
+		};
+		const columns = columnsByTable.get(table_name) ?? new Set<string>();
+		columns.add(column_name);
+		columnsByTable.set(table_name, columns);
+	}
 
-void test("execute reference DDL enumerates every surface and labels views", () => {
-	const declaredNames = Array.from(
-		EXECUTE_SQL_REFERENCE_DDL.matchAll(/^CREATE TABLE (\w+) \(/gm),
-		(match) => match[1],
-	);
-	assert.deepEqual(
-		declaredNames,
-		EXECUTE_SQL_SURFACES.map((sqlSurface) => sqlSurface.name),
-	);
-	for (const sqlSurface of EXECUTE_SQL_SURFACES) {
-		const declaration = `CREATE TABLE ${sqlSurface.name} (`;
-		assert.ok(EXECUTE_SQL_REFERENCE_DDL.includes(declaration));
-		if (sqlSurface.objectKind === "VIEW") {
+	for (const table of EXECUTE_SQL_CORE_TABLES) {
+		const actualColumns = columnsByTable.get(table.name);
+		assert.ok(actualColumns, `${table.name} should exist in a fresh workspace`);
+		for (const documentedColumn of table.columns) {
+			const columnName = documentedColumn.split(" ")[0];
 			assert.ok(
-				EXECUTE_SQL_REFERENCE_DDL.includes(
-					`-- Actual object: read-only VIEW.\n${declaration}`,
-				),
+				actualColumns.has(columnName),
+				`${table.name}.${columnName} should exist in a fresh workspace`,
 			);
 		}
 	}
-	assert.doesNotMatch(EXECUTE_SQL_REFERENCE_DDL, /information_schema/);
-	assert.match(EXECUTE_SQL_REFERENCE_DDL, /entity_pk JSON NOT NULL/);
-	assert.match(EXECUTE_SQL_REFERENCE_DDL, /data BLOB NOT NULL/);
 });
 
-function dataFusionType(sqlType: ExecuteSqlType): string {
-	switch (sqlType) {
-		case "TEXT":
-		case "JSON":
-			return "Utf8";
-		case "BOOLEAN":
-			return "Boolean";
-		case "BIGINT":
-			return "Int64";
-		case "BLOB":
-			return "LargeBinary";
+void test("execute tool documents only the compact core schema", () => {
+	for (const table of EXECUTE_SQL_CORE_TABLES) {
+		assert.ok(EXECUTE_SQL_CORE_SCHEMA.includes(`\`${table.name}\``));
 	}
-}
+	assert.doesNotMatch(
+		EXECUTE_SQL_CORE_SCHEMA,
+		/lix_state|_by_branch|_history|lixcol_/,
+	);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /Entity tables are workspace-dynamic/);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /information_schema/);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /lix_file\.path.*never ends/);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /lix_directory\.path.*always does/);
+	assert.match(
+		EXECUTE_TOOL_DESCRIPTION,
+		/lix_file\.directory_id.*lix_directory\.id/,
+	);
+	assert.match(
+		EXECUTE_TOOL_DESCRIPTION,
+		/lix_directory\.parent_id.*lix_directory\.id/,
+	);
+	assert.match(
+		EXECUTE_TOOL_DESCRIPTION,
+		/do not inspect \`information_schema\` for them/,
+	);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /lix_active_branch_commit_id\(\)/);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /LIX_HISTORY_NON_IDENTITY_FILTER/);
+	assert.doesNotMatch(EXECUTE_TOOL_DESCRIPTION, /file-tool safeguards/);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /current item's \`lixcol_change_id\`/);
+	assert.ok(EXECUTE_TOOL_DESCRIPTION.length < 4_000);
+	assert.match(EXECUTE_SQL_TABLES_QUERY, /information_schema\.tables/);
+	assert.match(EXECUTE_SQL_COLUMNS_QUERY, /information_schema\.columns/);
+});

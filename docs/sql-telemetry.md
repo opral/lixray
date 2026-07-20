@@ -52,9 +52,11 @@ Statement attributes:
 | `lix.rows_affected` | Rows changed on success |
 | `error.type` | Stable Lix error code on failure |
 
-Bound parameter values and SQL literal values are never captured. The MCP
-`mcp_tool_called` event remains the source for tool-level product usage and
-end-to-end latency, but intentionally contains no SQL text.
+Bound parameter values and SQL literal values are never captured. MCP
+AI Observability spans remain the source for tool-level usability and
+end-to-end latency. Their SQL input state contains independently sanitized
+statement shapes, never bound values or returned rows; see
+[mcp-telemetry.md](./mcp-telemetry.md).
 
 ## Export configuration
 

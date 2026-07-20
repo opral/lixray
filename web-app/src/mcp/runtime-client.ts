@@ -7,8 +7,6 @@ import {
 	Value,
 } from "@lix-js/sdk/remote";
 import {
-	type Branch,
-	type BranchState,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
 	type ExecuteResponse,
@@ -186,53 +184,25 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		});
 	}
 
-	async listBranches(workspaceId: string): Promise<BranchState> {
-		try {
-			const session = await this.session(workspaceId);
-			return await this.enqueueSession(session, async () => {
-				const currentBranchId = await session.lix.activeBranchId();
-				const result = await session.lix.execute(
-					"SELECT id, name, hidden, commit_id FROM lix_branch ORDER BY name, id",
-				);
-				const branches = result.rows.map((row): Branch => {
-					const id = row.get("id");
-					const name = row.get("name");
-					const hidden = row.get("hidden");
-					const commitId = row.get("commit_id");
-					if (
-						typeof id !== "string" ||
-						typeof name !== "string" ||
-						typeof hidden !== "boolean" ||
-						typeof commitId !== "string"
-					) {
-						throw new FileServiceError(
-							"upstream_error",
-							"Lix returned an invalid branch list.",
-						);
-					}
-					return { id, name, hidden, commitId };
-				});
-				if (!branches.some((branch) => branch.id === currentBranchId)) {
-					throw new FileServiceError(
-						"upstream_error",
-						"Lix current branch is missing from the branch list.",
-					);
-				}
-				return {
-					branches,
-					currentBranchId,
-				};
-			});
-		} catch (caught) {
-			throw asFileServiceError(caught);
-		}
-	}
-
 	async activeBranchId(workspaceId: string): Promise<string> {
 		try {
 			const session = await this.session(workspaceId);
 			return await this.enqueueSession(session, () =>
 				session.lix.activeBranchId(),
+			);
+		} catch (caught) {
+			throw asFileServiceError(caught);
+		}
+	}
+
+	async switchBranch(
+		workspaceId: string,
+		branchId: string,
+	): Promise<{ branchId: string }> {
+		try {
+			const session = await this.session(workspaceId);
+			return await this.enqueueSession(session, () =>
+				session.lix.switchBranch({ branchId }),
 			);
 		} catch (caught) {
 			throw asFileServiceError(caught);
@@ -246,7 +216,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		try {
 			const session = await this.session(workspaceId);
 			return await this.enqueueSession(session, async () => {
-				await this.selectBranch(session, request.branchId);
 				return encodeExecuteResult(
 					await session.lix.execute(
 						request.sql,
@@ -267,7 +236,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		try {
 			const session = await this.session(workspaceId);
 			return await this.enqueueSession(session, async () => {
-				await this.selectBranch(session, request.branchId);
 				const results = await session.lix.executeBatch(
 					request.statements.map((statement) => ({
 						sql: statement.sql,
@@ -340,13 +308,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			() => undefined,
 		);
 		return result;
-	}
-
-	private async selectBranch(
-		session: WorkspaceLixSession,
-		branchId: string,
-	): Promise<void> {
-		await session.lix.switchBranch({ branchId });
 	}
 
 	private async protocolFetch(
