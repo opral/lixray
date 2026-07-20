@@ -119,6 +119,73 @@ export function useWorkspaceTree(lix: Lix): WorkspaceTree | null {
 	}, [dirRows, fileRows]);
 }
 
+/** Whether the workspace has zero files (null while loading / no lix). */
+export function useWorkspaceIsEmpty(lix: Lix | null): boolean | null {
+	const [isEmpty, setIsEmpty] = useState<boolean | null>(null);
+	useEffect(() => {
+		if (!lix) {
+			setIsEmpty(null);
+			return;
+		}
+		let disposed = false;
+		setIsEmpty(null);
+		const events = lix.observe("SELECT count(*) AS n FROM lix_file", []);
+		void (async () => {
+			try {
+				while (!disposed) {
+					const event = await events.next();
+					if (!event) break;
+					const row = event.result.rows[0] as
+						| { get(column: string): unknown }
+						| undefined;
+					const count = Number(row?.get("n") ?? 0);
+					if (!disposed) setIsEmpty(count === 0);
+				}
+			} catch (error) {
+				if (!disposed) {
+					console.error("workspace-home: emptiness observe failed", error);
+				}
+			}
+		})();
+		return () => {
+			disposed = true;
+			events.close();
+		};
+	}, [lix]);
+	return isEmpty;
+}
+
+/**
+ * Resolves a README-relative link against a directory. Returns null for
+ * absolute/external/fragment hrefs (which keep default browser behavior).
+ */
+export function resolveWorkspaceHref(
+	baseDir: string,
+	href: string,
+): string | null {
+	if (
+		!href ||
+		href.startsWith("#") ||
+		href.startsWith("//") ||
+		/^[a-z][a-z0-9+.-]*:/i.test(href)
+	) {
+		return null;
+	}
+	const raw = href.startsWith("/") ? href : `${baseDir}${href}`;
+	const segments: string[] = [];
+	for (const segment of raw.split("/")) {
+		if (!segment || segment === ".") continue;
+		if (segment === "..") {
+			if (segments.length === 0) return null;
+			segments.pop();
+			continue;
+		}
+		segments.push(segment);
+	}
+	if (segments.length === 0) return null;
+	return `/${segments.map((segment) => decodeURIComponent(segment)).join("/")}`;
+}
+
 export type DirectoryListing = {
 	readonly dirs: ReadonlyArray<{
 		readonly path: string;

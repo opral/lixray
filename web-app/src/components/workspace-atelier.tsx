@@ -22,7 +22,7 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
-import { PencilLine } from "lucide-react";
+import { PencilLine, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
 import { WorkspaceShareDialog } from "~/components/workspace-share-dialog";
@@ -57,10 +57,17 @@ import {
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
+	lixrayDirInstanceId,
+	lixrayDirViewState,
 	lixrayWorkspaceExtensions,
 } from "~/components/workspace-home/host-extensions";
 import { LixrayCentralTabStrip } from "~/components/workspace-home/central-tab-strip";
-import { normalizeHomeDirPath } from "~/components/workspace-home/lix-data";
+import {
+	createWorkspaceFile,
+	createWorkspaceFolder,
+	normalizeHomeDirPath,
+	useWorkspaceIsEmpty,
+} from "~/components/workspace-home/lix-data";
 
 interface WorkspaceAtelierProps {
 	workspaceId: string;
@@ -173,6 +180,7 @@ export function WorkspaceAtelier({
 			);
 		}
 	}, [signInWithGoogle]);
+	const workspaceIsEmpty = useWorkspaceIsEmpty(instance?.lix ?? null);
 	const disabledShareButton = (
 		<span
 			aria-disabled="true"
@@ -182,8 +190,9 @@ export function WorkspaceAtelier({
 			Share
 		</span>
 	);
+	// Share stays inert until the workspace has content to share (12b/12c).
 	const headerActions = canEdit ? (
-		client ? (
+		client && workspaceIsEmpty === false ? (
 			<WorkspaceShareControl
 				createShareToken={async () => {
 					const { data, error } = await client.rpc(
@@ -578,7 +587,46 @@ export function WorkspaceAtelier({
 											</span>
 										),
 										centralTabStrip: (context) => (
-											<LixrayCentralTabStrip context={context} />
+											<LixrayCentralTabStrip
+												context={context}
+												pinnedTab={
+													workspaceIsEmpty
+														? { label: "Getting started", icon: Sparkles }
+														: undefined
+												}
+												onCreateFile={async (extension) => {
+													try {
+														const path = await createWorkspaceFile(
+															instance.lix,
+															"/",
+															extension,
+														);
+														await instance.documents.open(path, {
+															documentOrigin: "new",
+														});
+													} catch (caught) {
+														console.error("Unable to create the file", caught);
+													}
+												}}
+												onCreateFolder={async () => {
+													try {
+														const dirPath = await createWorkspaceFolder(
+															instance.lix,
+															"/",
+														);
+														await instance.views.open(LIXRAY_DIR_EXTENSION_ID, {
+															state: lixrayDirViewState(dirPath),
+															instanceId: lixrayDirInstanceId(dirPath),
+															newTab: true,
+														});
+													} catch (caught) {
+														console.error(
+															"Unable to create the folder",
+															caught,
+														);
+													}
+												}}
+											/>
 										),
 										navbarEnd: headerActions,
 									}}

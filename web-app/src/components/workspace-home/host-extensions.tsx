@@ -60,29 +60,38 @@ function openDirFromView(
 function mountDirectoryView({
 	element,
 	atelier,
+	view,
 	dirPath,
 	isHome,
 }: {
 	element: HTMLElement;
 	atelier: AtelierExtensionRuntime;
-	dirPath: string;
+	view: AtelierExtensionView;
+	dirPath: (candidate: AtelierExtensionView) => string;
 	isHome: boolean;
-}): Root {
+}): { root: Root; render: (candidate: AtelierExtensionView) => void } {
 	const root = createRoot(element);
-	root.render(
-		<StrictMode>
-			<DirectoryView
-				lix={atelier.lix}
-				dirPath={dirPath}
-				isHome={isHome}
-				readOnly={atelier.readOnly}
-				connectHref={MCP_DOCUMENTATION_PATH}
-				onOpenFile={(path, options) => openFileFromView(atelier, path, options)}
-				onOpenDir={(path, options) => openDirFromView(atelier, path, options)}
-			/>
-		</StrictMode>,
-	);
-	return root;
+	// Re-rendered on view updates so shortcut bindings track isActive.
+	const render = (candidate: AtelierExtensionView) => {
+		root.render(
+			<StrictMode>
+				<DirectoryView
+					lix={atelier.lix}
+					dirPath={dirPath(candidate)}
+					isHome={isHome}
+					readOnly={atelier.readOnly}
+					connectHref={MCP_DOCUMENTATION_PATH}
+					isActive={candidate.isActive}
+					onOpenFile={(path, options) =>
+						openFileFromView(atelier, path, options)
+					}
+					onOpenDir={(path, options) => openDirFromView(atelier, path, options)}
+				/>
+			</StrictMode>,
+		);
+	};
+	render(view);
+	return { root, render };
 }
 
 /**
@@ -100,14 +109,16 @@ export const lixrayHomeExtension: AtelierExtensionRegistration = {
 	},
 	entry: {
 		icon: Home,
-		mount: ({ element, atelier }) => {
-			const root = mountDirectoryView({
+		mount: ({ element, atelier, view }) => {
+			const { root, render } = mountDirectoryView({
 				element,
 				atelier,
-				dirPath: "/",
+				view,
+				dirPath: () => "/",
 				isHome: true,
 			});
 			return {
+				update: ({ view: nextView }) => render(nextView),
 				dispose: () => {
 					queueMicrotask(() => root.unmount());
 				},
@@ -137,13 +148,15 @@ export const lixrayDirExtension: AtelierExtensionRegistration = {
 				normalizeHomeDirPath(
 					typeof candidate.state.path === "string" ? candidate.state.path : "/",
 				);
-			const root = mountDirectoryView({
+			const { root, render } = mountDirectoryView({
 				element,
 				atelier,
-				dirPath: dirPathFromView(view),
+				view,
+				dirPath: dirPathFromView,
 				isHome: false,
 			});
 			return {
+				update: ({ view: nextView }) => render(nextView),
 				dispose: () => {
 					queueMicrotask(() => root.unmount());
 				},

@@ -20,6 +20,8 @@ import {
 	formatUpdatedAt,
 	importDroppedFiles,
 	listDirectory,
+	normalizeHomeDirPath,
+	resolveWorkspaceHref,
 	useFileMarkdown,
 	useWorkspaceTree,
 } from "./lix-data";
@@ -32,6 +34,8 @@ export type DirectoryViewProps = {
 	readonly isHome: boolean;
 	readonly readOnly: boolean;
 	readonly connectHref: string;
+	/** Only the active view binds shortcuts (several stay mounted hidden). */
+	readonly isActive?: boolean;
 	readonly onOpenFile: (path: string, options: { newTab: boolean }) => void;
 	readonly onOpenDir: (dirPath: string, options: { newTab: boolean }) => void;
 };
@@ -50,6 +54,7 @@ export function DirectoryView({
 	isHome,
 	readOnly,
 	connectHref,
+	isActive = true,
 	onOpenFile,
 	onOpenDir,
 }: DirectoryViewProps) {
@@ -78,20 +83,35 @@ export function DirectoryView({
 	);
 
 	useEffect(() => {
-		if (!isHome || readOnly) return;
+		if (!isActive || readOnly) return;
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.metaKey && event.shiftKey && event.key === ".") {
-				event.preventDefault();
-				setActionError(null);
+			if (
+				!event.metaKey ||
+				event.key !== "." ||
+				event.altKey ||
+				event.ctrlKey
+			) {
+				return;
+			}
+			event.preventDefault();
+			setActionError(null);
+			if (event.shiftKey) {
 				void createWorkspaceFolder(lix, dirPath).catch((error: unknown) => {
 					console.error("workspace-home: new folder failed", error);
 					setActionError("Unable to create the folder. Try again.");
 				});
+				return;
 			}
+			void createWorkspaceFile(lix, dirPath, "md")
+				.then((path) => onOpenFile(path, { newTab: false }))
+				.catch((error: unknown) => {
+					console.error("workspace-home: new file failed", error);
+					setActionError("Unable to create the file. Try again.");
+				});
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [dirPath, isHome, lix, readOnly]);
+	}, [dirPath, isActive, lix, onOpenFile, readOnly]);
 
 	const handleDrop = useCallback(
 		(event: ReactDragEvent) => {
@@ -249,6 +269,24 @@ export function DirectoryView({
 									newTab: newTabFromMouseEvent(event),
 								})
 							}
+							onNavigate={(href, event) => {
+								const resolved = resolveWorkspaceHref(dirPath, href);
+								if (!resolved) return false;
+								const asDir = normalizeHomeDirPath(resolved);
+								const isDir =
+									href.endsWith("/") ||
+									tree.dirs.some((dir) => dir.path === asDir);
+								if (isDir) {
+									onOpenDir(asDir, {
+										newTab: newTabFromMouseEvent(event),
+									});
+								} else {
+									onOpenFile(resolved, {
+										newTab: newTabFromMouseEvent(event),
+									});
+								}
+								return true;
+							}}
 						/>
 					) : null}
 				</div>
@@ -286,10 +324,13 @@ function ReadmePreview({
 	fileName,
 	markdown,
 	onOpen,
+	onNavigate,
 }: {
 	readonly fileName: string;
 	readonly markdown: string;
 	readonly onOpen: (event: ReactMouseEvent) => void;
+	/** Returns true when the link was handled inside the tab model. */
+	readonly onNavigate: (href: string, event: ReactMouseEvent) => boolean;
 }) {
 	const html = useMemo(
 		() => DOMPurify.sanitize(marked.parse(markdown, { async: false })),
@@ -307,8 +348,20 @@ function ReadmePreview({
 				</button>
 				<span className="h-px flex-1 bg-border-subtle" />
 			</div>
+			{/* Relative README links navigate the tab in place (rule 3) instead
+			    of escaping to a full page load. */}
+			{/* Click delegation only augments the anchors inside, which stay
+			    keyboard-accessible on their own. */}
 			<div
 				data-testid="home-readme"
+				onClick={(event) => {
+					const anchor = (event.target as HTMLElement).closest("a");
+					if (!anchor) return;
+					const href = anchor.getAttribute("href") ?? "";
+					if (onNavigate(href, event)) {
+						event.preventDefault();
+					}
+				}}
 				className="px-3 pb-5 text-[15px] leading-[1.7] text-text-primary [&_a]:font-semibold [&_a]:text-text-link [&_code]:rounded [&_code]:bg-bg-hover [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[13px] [&_h1]:mb-3 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-[-0.02em] [&_h2]:mt-6 [&_h2]:mb-2 [&_h2]:text-xl [&_h2]:font-bold [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-base [&_h3]:font-bold [&_li]:my-1 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
 				dangerouslySetInnerHTML={{ __html: html }}
 			/>
