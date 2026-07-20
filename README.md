@@ -155,8 +155,8 @@ environment contains these secrets under `/preview-automation`:
 - `RAILWAY_API_TOKEN` — workspace-scoped access to update ephemeral PR
   environments (Railway project tokens cannot access derived environments).
 
-The `lixray-github-preview` machine identity can read the project via GitHub
-OIDC for `opral/lixray`'s `main` workflow context. Dynamic per-PR Supabase
+The `lixray-github-preview` machine identity trusts the exact GitHub OIDC
+subject `repo:opral/lixray:environment:preview`. Dynamic per-PR Supabase
 credentials are derived from Supabase Branching and written only to the
 matching Railway preview environment.
 
