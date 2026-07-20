@@ -313,7 +313,19 @@ export function WorkspaceAtelier({
 			if (event.viewKind === LIXRAY_DIR_EXTENSION_ID) {
 				const dirPath = normalizeHomeDirPath(event.state?.path);
 				const splat = dirPath.split("/").filter(Boolean).join("/");
-				if (!splat) return;
+				if (!splat) {
+					// A root-listing tab (e.g. the strip's New tab) is the
+					// workspace root as a URL.
+					if (pathnameRef.current === `/@${namespace}/${workspaceSlug}`) {
+						return;
+					}
+					void navigate({
+						to: "/@{$namespace}/$workspace",
+						params: { namespace, workspace: workspaceSlug },
+						search,
+					});
+					return;
+				}
 				const targetPath = `/@${namespace}/${workspaceSlug}/dir/${splat}`;
 				const currentPath = (() => {
 					try {
