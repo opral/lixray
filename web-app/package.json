@@ -22,7 +22,7 @@
 		"test:e2e": "playwright test",
 		"test:analytics": "node --test --experimental-strip-types src/lib/*telemetry*.test.ts",
 		"test:auth": "node --test --experimental-strip-types src/lib/auth-return-to.test.ts",
-		"test:file-explorer": "node --test --experimental-strip-types src/lib/file-download-batches.test.ts",
+		"test:file-explorer": "node --test --experimental-strip-types src/lib/file-download-batches.test.ts src/lib/file-explorer-subtree.test.ts",
 		"test:worker": "node --test --experimental-strip-types src/worker/*.test.ts src/mcp/*.test.ts",
 		"check:mcp": "node scripts/check-mcp-connection.mjs",
 		"mcp:tools:generate": "node --experimental-strip-types scripts/generate-mcp-tools.mjs",
