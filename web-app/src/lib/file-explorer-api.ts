@@ -7,6 +7,10 @@ import {
 	type ZipFileFetch,
 } from "./file-download-batches";
 import {
+	parseSubtreeListResults,
+	subtreeListStatements,
+} from "./file-explorer-subtree";
+import {
 	type ExecuteRequest,
 	type ExecuteResponse,
 	type WireValue,
@@ -253,33 +257,18 @@ export function useFileExplorerApi() {
 			return bytesByPath;
 		}
 
-		async function listSubtreeFiles(
+		async function listSubtreeEntries(
 			branchId: string,
 			dirPath: string,
-		): Promise<Array<{ id: string; path: string }>> {
-			const result = await executeStatement({
+		): Promise<{
+			directoryPaths: Array<string>;
+			files: Array<{ id: string; path: string }>;
+		}> {
+			const response = await api.executeBatch({
 				branchId,
-				// Lexicographic prefix range: dir paths end in "/" (0x2F), so the
-				// exclusive upper bound replaces it with "0" (0x30).
-				sql: "SELECT id, path FROM lix_file WHERE path >= $1 AND path < $2 ORDER BY path",
-				params: [text(dirPath), text(`${dirPath.slice(0, -1)}0`)],
+				statements: subtreeListStatements(dirPath),
 			});
-			return result.rows.map((row) => ({
-				id: asText(row[0]),
-				path: asText(row[1]),
-			}));
-		}
-
-		async function listSubtreeDirs(
-			branchId: string,
-			dirPath: string,
-		): Promise<Array<string>> {
-			const result = await executeStatement({
-				branchId,
-				sql: "SELECT path FROM lix_directory WHERE path >= $1 AND path < $2 ORDER BY path",
-				params: [text(dirPath), text(`${dirPath.slice(0, -1)}0`)],
-			});
-			return result.rows.map((row) => asText(row[0]));
+			return parseSubtreeListResults(response.results);
 		}
 
 		/**
@@ -298,13 +287,11 @@ export function useFileExplorerApi() {
 					filesToFetch.push({ path: entry.path, zipPath: entry.name });
 				} else {
 					const basePrefix = parentDirPath(entry.path);
-					for (const subDirPath of await listSubtreeDirs(
-						branchId,
-						entry.path,
-					)) {
+					const subtree = await listSubtreeEntries(branchId, entry.path);
+					for (const subDirPath of subtree.directoryPaths) {
 						zipEntries[subDirPath.slice(basePrefix.length)] = new Uint8Array(0);
 					}
-					for (const file of await listSubtreeFiles(branchId, entry.path)) {
+					for (const file of subtree.files) {
 						filesToFetch.push({
 							path: file.path,
 							zipPath: file.path.slice(basePrefix.length),
