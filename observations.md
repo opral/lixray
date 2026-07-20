@@ -1,5 +1,39 @@
 # Performance observations
 
+## Workspace runtime can remain poisoned after an object-store failure — observing
+
+**Evidence.** During replay, MinIO marked its `/data` drive offline after a
+42.969-second write/read probe. A single workspace open then fanned out through
+LixRay's shared `OnceCell`, blocking requests for 62–303 seconds. [LixRay
+#83](https://github.com/opral/lixray/pull/83) bounds an individual S3 request
+and its retry budget, so a failed cold open is removed from the `OnceCell` and
+can be retried. A post-open SlateDB WAL write or flush failure is different: it
+sets a terminal durability-failure state while the workspace manager retains
+its already-successful runtime.
+
+**Architectural direction.** Expose that terminal state and introduce a
+per-workspace `Active → Recovering` lifecycle. New requests should receive 503
+while a background reaper closes and fully releases the old Lix/SlateDB service;
+only then should a single fresh service open.
+
+**Correctness constraint.** Do not simply clear the `OnceCell` or open a
+second service. A failed commit continues holding Lix's visibility lock and
+SlateDB's sole-writer permit until its durable outcome is known, and dropping
+SlateDB joins its manager thread. Recovery must drain the old service before
+reopening, otherwise it can create concurrent writers or expose a write whose
+durability has failed.
+
+This spans Lix's storage-health signal, LixRay's workspace lifecycle and route
+mapping, orderly session shutdown, nonblocking destruction, and fault-injection
+coverage across both repositories—well beyond a bounded patch.
+
+**Next measurement.** Blackhole or delay object-store open and WAL PUT/flush;
+measure time to 503, queued-request fan-out, cleanup/reopen time, and confirm a
+reopened store exposes only the last durable state.
+
+**Status:** observing; #83 bounds cold-open request time, while terminal
+runtime recovery remains separate cross-cutting work.
+
 ## Workspace session requests repeatedly select the active branch — observing
 
 **Evidence.** Browser calls queue through `useLixrayApi`, probe
