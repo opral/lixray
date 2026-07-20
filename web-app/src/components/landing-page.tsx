@@ -305,34 +305,86 @@ function Brand() {
 	);
 }
 
+const previewFiles = [
+	{ name: "launch-plan.md", icon: "icon-sq-md", active: true },
+	{ name: "announcement-post.md", icon: "icon-sq-md" },
+	{ name: "pricing-page.md", icon: "icon-sq-md" },
+	{ name: "q3-metrics.csv", icon: "icon-sq-csv" },
+	{ name: "hero-shot.png", icon: "icon-sq-png" },
+	{ name: "press-kit.pdf", icon: "icon-sq-pdf" },
+	{ name: "AGENTS.md", icon: "icon-sq-md" },
+];
+
 function HeroPreview() {
 	return (
 		<div
-			className="w-full max-w-[920px] rounded-t-[20px] border border-b-0 border-[#1c1917]/7 bg-[#f4f0ea] px-3.5 shadow-[0_-20px_60px_rgba(28,25,23,.05)] sm:px-[26px]"
-			aria-label="Preview of a LixRay workspace"
+			className="w-full max-w-[920px] overflow-hidden rounded-t-[20px] border border-b-0 border-[#1c1917]/10 bg-[#f4f2ef] shadow-[0_-20px_60px_rgba(28,25,23,.05)]"
+			aria-label="Preview of a LixRay workspace with launch-plan.md open"
 		>
-			<div className="flex items-center justify-center gap-[7px] py-[15px] text-[13px]">
-				<span className="text-[#8a8178]">acme</span>
-				<span className="text-[#c6bdb1]">/</span>
-				<span className="font-semibold text-[#1c1917]">launch-q3</span>
-			</div>
-			<div className="relative flex h-[300px] flex-col gap-[17px] overflow-hidden rounded-t-xl border border-b-0 border-[#1c1917]/7 bg-white px-6 pt-10 sm:px-11">
-				<span className="h-[18px] w-[35%] rounded-md bg-[#ede7de]" />
-				<span className="h-1.5 w-0" />
-				<span className="h-2.5 w-[78%] rounded-[5px] bg-[#f0ebe3]" />
-				<span className="h-2.5 w-[72%] rounded-[5px] bg-[#f0ebe3]" />
-				<span className="h-2.5 w-[75%] rounded-[5px] bg-[#f0ebe3]" />
-				<span className="h-2.5 w-[48%] rounded-[5px] bg-[#f0ebe3]" />
-				<span className="h-2.5 w-[63%] rounded-[5px] border border-[#f6d4ac] bg-[#fbe7cf]" />
-				<span className="h-2.5 w-[58%] rounded-[5px] border border-[#f6d4ac] bg-[#fbe7cf]" />
-				<span className="absolute top-9 right-4 inline-flex items-center gap-[7px] rounded-full border border-[#f2d9bc] bg-white py-[7px] pr-[13px] pl-[9px] text-[12.5px] font-semibold text-[#c2410c] shadow-[0_6px_18px_rgba(28,25,23,.07)] sm:right-10">
-					<img className="size-3.5" src="/landing/claude-spark.svg" alt="" />
-					<span
-						className="size-1.5 rounded-full bg-[#f97316]"
-						aria-hidden="true"
-					/>
-					Mara&apos;s Claude is editing
+			<div className="relative flex h-[46px] items-center gap-2 px-3">
+				<img className="size-[18px]" src="/lixray-mark.svg" alt="" />
+				<div className="pointer-events-none absolute inset-0 hidden items-center justify-center gap-2 text-[13px] sm:flex">
+					<span className="font-medium text-[#8c8580]">acme</span>
+					<span className="text-[#c9c2b8]">/</span>
+					<span className="font-medium text-[#8c8580]">launch-q3</span>
+					<span className="text-[#c9c2b8]">/</span>
+					<span className="font-semibold text-[#1c1917]">launch-plan.md</span>
+				</div>
+				<span className="flex-1" />
+				<span className="inline-flex h-7 items-center rounded-[7px] border border-[#ddd6cb] bg-white px-[13px] text-xs font-semibold text-[#44403c] shadow-[0_1px_2px_rgba(28,25,23,.05)]">
+					Share
 				</span>
+			</div>
+			<div className="flex h-[330px] gap-[7px] px-2">
+				<div className="hidden w-[212px] shrink-0 flex-col overflow-hidden rounded-[10px] border border-[#ece8e2] bg-white p-2 sm:flex">
+					{previewFiles.map((file) => (
+						<span
+							className={cn(
+								"flex items-center gap-2 rounded-[7px] px-[9px] py-1.5 text-[13px] text-[#57534e]",
+								file.active && "bg-[#fbefe4] font-semibold text-[#1c1917]",
+							)}
+							key={file.name}
+						>
+							<img
+								className="size-4"
+								src={`/landing/${file.icon}.svg`}
+								alt=""
+							/>
+							{file.name}
+						</span>
+					))}
+				</div>
+				<div className="relative flex-1 overflow-hidden rounded-[10px] border border-[#ece8e2] bg-white">
+					<div className="mx-auto max-w-[520px] px-6 pt-9 leading-[1.7] sm:px-4">
+						<h3 className="m-0 mb-3.5 text-[24px] leading-[1.25] font-bold tracking-[-.02em] text-[#1c1917]">
+							Launch plan
+						</h3>
+						<p className="m-0 mb-3 text-[13.5px] text-[#292524]">
+							We ship the beta on <strong>October 19</strong>. Invites go to the
+							waitlist first, and the announcement post goes live the same
+							morning.
+						</p>
+						<p className="m-0 text-[13.5px] text-[#292524]">
+							The demo pulls its numbers from q3-metrics.csv.{" "}
+							<span className="rounded-[3px] bg-[#fbe7cf] box-decoration-clone px-0.5">
+								Pricing moves to $12 per seat at launch — pricing-page.md and
+								the announcement are updated to match.
+							</span>
+							<span
+								className="ml-0.5 inline-block h-[15px] w-0.5 translate-y-[3px] rounded-full bg-[#f97316]"
+								aria-hidden="true"
+							/>
+						</p>
+					</div>
+					<span className="absolute top-3 right-3 inline-flex items-center gap-[7px] rounded-full border border-[#f2d9bc] bg-white py-1.5 pr-3 pl-2 text-xs font-semibold text-[#c2410c] shadow-[0_6px_18px_rgba(28,25,23,.07)]">
+						<img className="size-3.5" src="/landing/claude-spark.svg" alt="" />
+						<span
+							className="size-1.5 rounded-full bg-[#f97316]"
+							aria-hidden="true"
+						/>
+						Mara&apos;s Claude is editing
+					</span>
+				</div>
 			</div>
 		</div>
 	);
