@@ -156,13 +156,8 @@ export function DirectoryView({
 									setActionError(null);
 									void createWorkspaceFolder(lix, dirPath).catch(
 										(error: unknown) => {
-											console.error(
-												"workspace-home: new folder failed",
-												error,
-											);
-											setActionError(
-												"Unable to create the folder. Try again.",
-											);
+											console.error("workspace-home: new folder failed", error);
+											setActionError("Unable to create the folder. Try again.");
 										},
 									);
 								}}

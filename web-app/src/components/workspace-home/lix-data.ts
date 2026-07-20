@@ -218,7 +218,10 @@ export async function createWorkspaceFile(
 	dirPath: string,
 	extension: "md" | "csv" | "excalidraw",
 ): Promise<string> {
-	const template = NEW_FILE_TEMPLATES[extension] ?? { base: "untitled", data: "" };
+	const template = NEW_FILE_TEMPLATES[extension] ?? {
+		base: "untitled",
+		data: "",
+	};
 	const path = await firstFreePath(lix, (suffix) =>
 		suffix === null
 			? `${dirPath}${template.base}.${extension}`

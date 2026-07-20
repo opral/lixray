@@ -77,9 +77,7 @@ function mountDirectoryView({
 				isHome={isHome}
 				readOnly={atelier.readOnly}
 				connectHref={MCP_DOCUMENTATION_PATH}
-				onOpenFile={(path, options) =>
-					openFileFromView(atelier, path, options)
-				}
+				onOpenFile={(path, options) => openFileFromView(atelier, path, options)}
 				onOpenDir={(path, options) => openDirFromView(atelier, path, options)}
 			/>
 		</StrictMode>,

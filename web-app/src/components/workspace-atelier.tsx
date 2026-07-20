@@ -527,35 +527,35 @@ export function WorkspaceAtelier({
 					value={workspaceDefaultBranchId}
 				>
 					<WorkspaceBranchSessionContext.Provider value={branchSession}>
-					<WorkspaceRouteSyncContext.Provider value={markRouteSynced}>
-					<WorkspaceAtelierContext.Provider value={instance}>
-						<Atelier
-							instance={instance}
-							topBarProps={{
-								"data-app-titlebar": true,
-								className: "border-b border-border-subtle bg-bg-app",
-							}}
-							slots={{
-								navbarStart: (
-									<Link
-										to="/home"
-										aria-label="Back to workspaces"
-										className="flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
-									>
-										<img
-											src="/lixray-mark.svg"
-											alt=""
-											className="size-[18px]"
-										/>
-									</Link>
-								),
-								navbarEnd: headerActions,
-							}}
-						/>
-						<Outlet />
-					</WorkspaceAtelierContext.Provider>
-					</WorkspaceRouteSyncContext.Provider>
-				</WorkspaceBranchSessionContext.Provider>
+						<WorkspaceRouteSyncContext.Provider value={markRouteSynced}>
+							<WorkspaceAtelierContext.Provider value={instance}>
+								<Atelier
+									instance={instance}
+									topBarProps={{
+										"data-app-titlebar": true,
+										className: "border-b border-border-subtle bg-bg-app",
+									}}
+									slots={{
+										navbarStart: (
+											<Link
+												to="/home"
+												aria-label="Back to workspaces"
+												className="flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+											>
+												<img
+													src="/lixray-mark.svg"
+													alt=""
+													className="size-[18px]"
+												/>
+											</Link>
+										),
+										navbarEnd: headerActions,
+									}}
+								/>
+								<Outlet />
+							</WorkspaceAtelierContext.Provider>
+						</WorkspaceRouteSyncContext.Provider>
+					</WorkspaceBranchSessionContext.Provider>
 				</WorkspaceDefaultBranchContext.Provider>
 			) : null}
 			{!instance && !error ? (
