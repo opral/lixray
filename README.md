@@ -128,15 +128,36 @@ are cancelled.
 Railway handles deployment outside GitHub Actions:
 
 - pull requests create an isolated preview environment;
+- Supabase creates a data-less branch for every pull request;
+- `.github/workflows/supabase-preview.yml` injects that branch's URL and
+  publishable key into the matching Railway environment before redeploying it;
 - merging to `main` deploys both services to production;
 - `railway.json` and `web-app/railway.json` define the two services;
 - Infisical syncs runtime configuration to Railway;
-- GitHub Actions receives no runtime secrets.
+- GitHub Actions authenticates to Infisical with OIDC and receives only
+  narrowly scoped preview-provisioning secrets, never production runtime
+  credentials or stored GitHub Actions secrets.
 
 Both services share `LIXRAY_INTERNAL_TOKEN`. The web service reaches the Rust
 service through Railway's private network. Production and preview environments
 use separate S3 storage configuration; when `S3_PREFIX` is unset, the server
-namespaces data by Railway environment ID.
+namespaces data by Railway environment ID. Preview environments never inherit
+production Supabase credentials: they fail closed until the per-PR Supabase
+branch is ready. The workflow seeds a branch-local preview account and builds
+the web app with that account instead of Google OAuth, because every Supabase
+branch has a unique provider callback URL. Its random password exists only for
+the lifetime of that workflow run and the matching Railway preview.
+
+Infisical is the source of truth for preview provisioning. Its production
+environment contains these secrets under `/preview-automation`:
+
+- `SUPABASE_ACCESS_TOKEN` — access to read preview-branch credentials;
+- `RAILWAY_TOKEN` — project-scoped access to update the PR environment.
+
+The `lixray-github-preview` machine identity can read the project via GitHub
+OIDC for `opral/lixray`'s `main` workflow context. Dynamic per-PR Supabase
+credentials are derived from Supabase Branching and written only to the
+matching Railway preview environment.
 
 ## Performance loop
 
