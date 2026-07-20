@@ -17,7 +17,7 @@ export function LixrayCentralTabStrip({
 	readonly context: AtelierTabStripContext;
 }) {
 	return (
-		<div className="flex items-center gap-1 pt-0.5 pb-1.5">
+		<div className="flex h-[var(--atelier-panel-header-height)] items-center gap-1">
 			{context.tabs.map((tab) => (
 				<TabChip key={tab.instanceId} tab={tab} />
 			))}
