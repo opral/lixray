@@ -2,7 +2,14 @@ use anyhow::{Context, Result};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::{Protocol, WithExportConfig, WithHttpConfig};
-use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
+use opentelemetry_sdk::{
+    runtime,
+    trace::{
+        span_processor_with_async_runtime::BatchSpanProcessor, BatchConfigBuilder,
+        SdkTracerProvider, SpanExporter,
+    },
+    Resource,
+};
 use std::{collections::HashMap, env, time::Duration};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -60,11 +67,24 @@ fn posthog_provider_from_env() -> Result<Option<SdkTracerProvider>> {
             KeyValue::new("deployment.environment.name", "production"),
         ])
         .build();
-    let provider = SdkTracerProvider::builder()
-        .with_resource(resource)
-        .with_batch_exporter(exporter)
+    Ok(Some(provider_with_tokio_batch_exporter(exporter, resource)))
+}
+
+fn provider_with_tokio_batch_exporter<T>(exporter: T, resource: Resource) -> SdkTracerProvider
+where
+    T: SpanExporter + 'static,
+{
+    let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio)
+        .with_batch_config(
+            BatchConfigBuilder::default()
+                .with_max_export_timeout(Duration::from_secs(5))
+                .build(),
+        )
         .build();
-    Ok(Some(provider))
+    SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_span_processor(processor)
+        .build()
 }
 
 fn optional_nonempty_env(name: &str) -> Result<Option<String>> {
@@ -79,7 +99,15 @@ fn optional_nonempty_env(name: &str) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
+    use opentelemetry::trace::{Span as _, Tracer as _};
+    use opentelemetry_sdk::{
+        error::{OTelSdkError, OTelSdkResult},
+        trace::SpanData,
+    };
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    };
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -102,5 +130,59 @@ mod tests {
         env::remove_var("POSTHOG_PROJECT_TOKEN");
         assert!(posthog_provider_from_env().unwrap().is_none());
         env::remove_var("POSTHOG_ENVIRONMENT");
+    }
+
+    #[derive(Debug)]
+    struct TokioRuntimeExporter {
+        exported: Arc<AtomicBool>,
+    }
+
+    impl SpanExporter for TokioRuntimeExporter {
+        fn export(
+            &self,
+            _batch: Vec<SpanData>,
+        ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+            let exported = Arc::clone(&self.exported);
+            async move {
+                if tokio::runtime::Handle::try_current().is_err() {
+                    return Err(OTelSdkError::InternalFailure(
+                        "span export ran outside Tokio".to_string(),
+                    ));
+                }
+                exported.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn exporter_runs_on_the_tokio_runtime() {
+        let exported = Arc::new(AtomicBool::new(false));
+        let provider = provider_with_tokio_batch_exporter(
+            TokioRuntimeExporter {
+                exported: Arc::clone(&exported),
+            },
+            Resource::builder().build(),
+        );
+        let span_provider = provider.clone();
+        tokio::task::spawn_blocking(move || {
+            let tracer = span_provider.tracer("telemetry-test");
+            let mut span = tracer.start("runtime-regression");
+            span.end();
+        })
+        .await
+        .unwrap();
+
+        let flush_provider = provider.clone();
+        let flush_result = tokio::task::spawn_blocking(move || flush_provider.force_flush())
+            .await
+            .unwrap();
+        let shutdown_result = tokio::task::spawn_blocking(move || provider.shutdown())
+            .await
+            .unwrap();
+
+        assert!(flush_result.is_ok());
+        assert!(exported.load(Ordering::SeqCst));
+        assert!(shutdown_result.is_ok());
     }
 }

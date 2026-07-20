@@ -25,8 +25,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("serve HTTP");
     if let Some(provider) = trace_provider {
-        if let Err(error) = provider.shutdown() {
-            tracing::warn!(%error, "failed to flush traces during shutdown");
+        match tokio::task::spawn_blocking(move || provider.shutdown()).await {
+            Ok(Err(error)) => tracing::warn!(%error, "failed to flush traces during shutdown"),
+            Err(error) => tracing::warn!(%error, "failed to join trace shutdown task"),
+            Ok(Ok(())) => {}
         }
     }
     result

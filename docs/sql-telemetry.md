@@ -58,8 +58,8 @@ end-to-end latency, but intentionally contains no SQL text.
 
 ## Export configuration
 
-The Cloudflare worker forwards these existing production variables into the
-workspace container:
+Infisical supplies these production variables directly to the Railway
+`/railway/lix-server` service:
 
 - `POSTHOG_PROJECT_TOKEN`
 - `POSTHOG_HOST`
@@ -67,6 +67,9 @@ workspace container:
 
 The server exports OTLP HTTP/protobuf to `<POSTHOG_HOST>/i/v1/traces`. Missing
 or invalid telemetry configuration never prevents the server from starting.
+
+Set `RUST_LOG=lixray=info,lix_sql=info` too: Lix SQL spans use the separate
+`lix_sql` tracing target and are otherwise filtered out.
 
 ## Daily sweeper query
 
