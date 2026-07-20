@@ -127,7 +127,7 @@ export function LandingPage() {
 
 			<main>
 				<section
-					className="flex flex-col items-center gap-6 px-5 pt-20 text-center sm:pt-28"
+					className="flex flex-col items-center gap-6 px-5 pt-8 text-center sm:pt-12"
 					aria-labelledby="landing-title"
 				>
 					<h1
@@ -181,7 +181,7 @@ export function LandingPage() {
 					</div>
 				</section>
 
-				<div className="flex justify-center px-5 pt-16 sm:pt-[72px]">
+				<div className="flex justify-center px-5 pt-12 pb-16 sm:pt-14 sm:pb-20">
 					<HeroPreview />
 				</div>
 
@@ -318,7 +318,7 @@ const previewFiles = [
 function HeroPreview() {
 	return (
 		<div
-			className="w-full max-w-[920px] overflow-hidden rounded-t-[20px] border border-b-0 border-[#1c1917]/10 bg-[#f4f2ef] shadow-[0_-20px_60px_rgba(28,25,23,.05)]"
+			className="w-full max-w-[920px] overflow-hidden rounded-[20px] border border-[#1c1917]/10 bg-[#f4f2ef] shadow-[0_30px_80px_rgba(28,25,23,.12)]"
 			aria-label="Preview of a LixRay workspace with launch-plan.md open"
 		>
 			<div className="relative flex h-[46px] items-center gap-2 px-3">
@@ -335,7 +335,7 @@ function HeroPreview() {
 					Share
 				</span>
 			</div>
-			<div className="flex h-[330px] gap-[7px] px-2">
+			<div className="flex gap-[7px] px-2 pb-2 sm:h-[260px]">
 				<div className="hidden w-[212px] shrink-0 flex-col overflow-hidden rounded-[10px] border border-[#ece8e2] bg-white p-2 sm:flex">
 					{previewFiles.map((file) => (
 						<span
@@ -355,7 +355,7 @@ function HeroPreview() {
 					))}
 				</div>
 				<div className="relative flex-1 overflow-hidden rounded-[10px] border border-[#ece8e2] bg-white">
-					<div className="mx-auto max-w-[520px] px-6 pt-9 leading-[1.7] sm:px-4">
+					<div className="mx-auto max-w-[520px] px-6 pt-9 pb-8 leading-[1.7] sm:px-4 sm:pb-0">
 						<h3 className="m-0 mb-3.5 text-[24px] leading-[1.25] font-bold tracking-[-.02em] text-[#1c1917]">
 							Launch plan
 						</h3>
