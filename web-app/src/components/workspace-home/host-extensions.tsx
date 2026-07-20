@@ -17,7 +17,7 @@ export const LIXRAY_DIR_EXTENSION_ID = "lixray_dir";
 const MCP_DOCUMENTATION_PATH = "/docs/mcp";
 
 /** Stable central-tab identity for the folder view at dirPath. */
-export const lixrayDirInstanceKey = (dirPath: string): string =>
+export const lixrayDirInstanceId = (dirPath: string): string =>
 	`${LIXRAY_DIR_EXTENSION_ID}:${normalizeHomeDirPath(dirPath)}`;
 
 /** Central-tab state for a folder view; the tab label is the folder name. */
@@ -49,7 +49,7 @@ function openDirFromView(
 	void atelier.views
 		.open(LIXRAY_DIR_EXTENSION_ID, {
 			state: lixrayDirViewState(dirPath),
-			instanceKey: lixrayDirInstanceKey(dirPath),
+			instanceId: lixrayDirInstanceId(dirPath),
 			...(options.newTab ? { newTab: true } : {}),
 		})
 		.catch((error: unknown) => {

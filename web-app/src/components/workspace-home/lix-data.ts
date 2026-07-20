@@ -198,11 +198,13 @@ async function firstFreePath(
 	for (let suffix = null as number | null, i = 0; i < 1000; i += 1) {
 		const path = candidate(suffix);
 		const [dirHit, fileHit] = await Promise.all([
-			lix.execute("SELECT 1 FROM lix_directory WHERE path = $1 OR path = $2", [
+			lix.execute(
+				"SELECT 1 FROM lix_directory WHERE lower(path) = lower($1) OR lower(path) = lower($2)",
+				[path, `${path}/`],
+			),
+			lix.execute("SELECT 1 FROM lix_file WHERE lower(path) = lower($1)", [
 				path,
-				`${path}/`,
 			]),
-			lix.execute("SELECT 1 FROM lix_file WHERE path = $1", [path]),
 		]);
 		if (dirHit.rows.length === 0 && fileHit.rows.length === 0) return path;
 		suffix = (suffix ?? 1) + 1;
@@ -243,24 +245,33 @@ export async function createWorkspaceFolder(
 	return `${path}/`;
 }
 
-/** Imports dropped files into dirPath, overwriting same-path files. */
+/**
+ * Imports dropped files into dirPath, overwriting same-path files. Failures
+ * (e.g. a name colliding with a folder) skip that file and continue.
+ */
 export async function importDroppedFiles(
 	lix: Lix,
 	dirPath: string,
 	files: ReadonlyArray<File>,
-): Promise<number> {
+): Promise<{ imported: number; failed: string[] }> {
 	let imported = 0;
+	const failed: string[] = [];
 	for (const file of files) {
 		const name = file.name.split("/").filter(Boolean).at(-1);
 		if (!name) continue;
-		const bytes = new Uint8Array(await file.arrayBuffer());
-		await lix.execute(
-			"INSERT INTO lix_file (path, data) VALUES ($1, $2) ON CONFLICT (path) DO UPDATE SET data = excluded.data",
-			[`${dirPath}${name}`, bytes],
-		);
-		imported += 1;
+		try {
+			const bytes = new Uint8Array(await file.arrayBuffer());
+			await lix.execute(
+				"INSERT INTO lix_file (path, data) VALUES ($1, $2) ON CONFLICT (path) DO UPDATE SET data = excluded.data",
+				[`${dirPath}${name}`, bytes],
+			);
+			imported += 1;
+		} catch (error) {
+			console.error(`workspace-home: unable to import ${name}`, error);
+			failed.push(name);
+		}
 	}
-	return imported;
+	return { imported, failed };
 }
 
 /** "2 min ago", "today", "yesterday", or "Jun 25" — matches the home comp. */

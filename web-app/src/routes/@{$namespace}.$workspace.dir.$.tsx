@@ -1,17 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect } from "react";
 import {
 	useMarkWorkspaceRouteSynced,
+	useWorkspaceActiveBranchId,
 	useWorkspaceAtelierInstance,
 } from "~/components/workspace-atelier";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
-	lixrayDirInstanceKey,
+	lixrayDirInstanceId,
 	lixrayDirViewState,
 } from "~/components/workspace-home/host-extensions";
-
-const NO_BRANCH_SUBSCRIBE = () => () => undefined;
-const NO_BRANCH_SNAPSHOT = () => null;
 
 export const Route = createFileRoute("/@{$namespace}/$workspace/dir/$")({
 	component: WorkspaceDirRoute,
@@ -26,11 +24,7 @@ function WorkspaceDirRoute() {
 	const markRouteSynced = useMarkWorkspaceRouteSynced();
 	const { _splat: dirSplat } = Route.useParams();
 	const { branch } = Route.useSearch();
-	const activeBranchId = useSyncExternalStore(
-		atelier?.branches.subscribe ?? NO_BRANCH_SUBSCRIBE,
-		atelier?.branches.activeId ?? NO_BRANCH_SNAPSHOT,
-		atelier?.branches.activeId ?? NO_BRANCH_SNAPSHOT,
-	);
+	const activeBranchId = useWorkspaceActiveBranchId();
 
 	useEffect(() => {
 		if (!atelier || !dirSplat) return;
@@ -39,12 +33,14 @@ function WorkspaceDirRoute() {
 		void atelier.views
 			.open(LIXRAY_DIR_EXTENSION_ID, {
 				state: lixrayDirViewState(dirPath),
-				instanceKey: lixrayDirInstanceKey(dirPath),
+				instanceId: lixrayDirInstanceId(dirPath),
 			})
-			.then(markRouteSynced)
 			.catch((error: unknown) => {
 				console.error("Unable to open the requested workspace folder", error);
-			});
+			})
+			// Synced even on failure: tab activations should drive the URL
+			// again rather than staying frozen at a dead deep link.
+			.finally(markRouteSynced);
 	}, [activeBranchId, atelier, branch, dirSplat, markRouteSynced]);
 
 	return null;

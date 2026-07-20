@@ -67,12 +67,19 @@ export function DirectoryView({
 	);
 	const readme = useFileMarkdown(lix, listing?.readmePath ?? null);
 	const [isDropTarget, setIsDropTarget] = useState(false);
+	const [actionError, setActionError] = useState<string | null>(null);
 	const dragDepthRef = useRef(0);
 
 	const createFile = useCallback(
 		async (extension: "md" | "csv" | "excalidraw") => {
-			const path = await createWorkspaceFile(lix, dirPath, extension);
-			onOpenFile(path, { newTab: false });
+			try {
+				setActionError(null);
+				const path = await createWorkspaceFile(lix, dirPath, extension);
+				onOpenFile(path, { newTab: false });
+			} catch (error) {
+				console.error("workspace-home: unable to create file", error);
+				setActionError("Unable to create the file. Try again.");
+			}
 		},
 		[dirPath, lix, onOpenFile],
 	);
@@ -85,9 +92,19 @@ export function DirectoryView({
 			if (readOnly) return;
 			const files = Array.from(event.dataTransfer?.files ?? []);
 			if (files.length === 0) return;
-			void importDroppedFiles(lix, dirPath, files).catch((error: unknown) => {
-				console.error("workspace-home: import failed", error);
-			});
+			setActionError(null);
+			void importDroppedFiles(lix, dirPath, files)
+				.then(({ failed }) => {
+					if (failed.length > 0) {
+						setActionError(
+							`Could not import ${failed.length} ${failed.length === 1 ? "file" : "files"} (${failed.join(", ")}).`,
+						);
+					}
+				})
+				.catch((error: unknown) => {
+					console.error("workspace-home: import failed", error);
+					setActionError("Unable to import the dropped files.");
+				});
 		},
 		[dirPath, lix, readOnly],
 	);
@@ -103,13 +120,12 @@ export function DirectoryView({
 		<div
 			className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
 			onDragEnter={(event) => {
-				if (readOnly) return;
 				event.preventDefault();
+				if (readOnly) return;
 				dragDepthRef.current += 1;
 				setIsDropTarget(true);
 			}}
 			onDragOver={(event) => {
-				if (readOnly) return;
 				event.preventDefault();
 			}}
 			onDragLeave={() => {
@@ -136,15 +152,31 @@ export function DirectoryView({
 							<span className="flex-1" />
 							<NewMenu
 								onCreateFile={(extension) => void createFile(extension)}
-								onCreateFolder={() =>
+								onCreateFolder={() => {
+									setActionError(null);
 									void createWorkspaceFolder(lix, dirPath).catch(
-										(error: unknown) =>
-											console.error("workspace-home: new folder failed", error),
-									)
-								}
+										(error: unknown) => {
+											console.error(
+												"workspace-home: new folder failed",
+												error,
+											);
+											setActionError(
+												"Unable to create the folder. Try again.",
+											);
+										},
+									);
+								}}
 							/>
 						</div>
 					)}
+					{actionError ? (
+						<p
+							role="alert"
+							className="mb-3 rounded-lg bg-error-700/10 px-3 py-2 text-[13px] text-error-700"
+						>
+							{actionError}
+						</p>
+					) : null}
 					{isHome ? (
 						<div className="mb-4 flex items-center gap-3 rounded-[10px] border border-dashed border-border-panel px-4 py-3">
 							<Link2

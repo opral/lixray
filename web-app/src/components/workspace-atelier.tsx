@@ -20,6 +20,7 @@ import {
 	useLayoutEffect,
 	useRef,
 	useState,
+	useSyncExternalStore,
 } from "react";
 import { PencilLine } from "lucide-react";
 import { toast } from "sonner";
@@ -40,6 +41,7 @@ import {
 	createWorkspacePreferencesStore,
 	createWorkspaceReviewStatusStore,
 	createWorkspaceSessionStateStore,
+	type WorkspaceBranchSession,
 } from "~/lib/atelier-state";
 import { captureTelemetry } from "~/lib/telemetry";
 import {
@@ -77,6 +79,8 @@ interface WorkspaceAtelierProps {
 const WorkspaceAtelierContext = createContext<AtelierInstance | null>(null);
 const WorkspaceDefaultBranchContext = createContext<string | null>(null);
 const WorkspaceRouteSyncContext = createContext<(() => void) | null>(null);
+const WorkspaceBranchSessionContext =
+	createContext<WorkspaceBranchSession | null>(null);
 
 export function WorkspaceAtelier({
 	workspaceId,
@@ -99,8 +103,16 @@ export function WorkspaceAtelier({
 		select: (state) => state.location.pathname,
 	});
 	const routeParams = useParams({ strict: false });
-	const routeFilePath =
-		"_splat" in routeParams ? routeParams._splat : undefined;
+	const routeSplat = "_splat" in routeParams ? routeParams._splat : undefined;
+	const workspaceRootPath = `/@${namespace}/${workspaceSlug}`;
+	const routeChildKind: "file" | "dir" | null = pathname.startsWith(
+		`${workspaceRootPath}/file/`,
+	)
+		? "file"
+		: pathname.startsWith(`${workspaceRootPath}/dir/`)
+			? "dir"
+			: null;
+	const routeFilePath = routeChildKind === "file" ? routeSplat : undefined;
 	const documentName = activeDocumentName({
 		pathname,
 		routeFilePath,
@@ -108,12 +120,18 @@ export function WorkspaceAtelier({
 	});
 	const isReadOnly = !canEdit;
 	const [instance, setInstance] = useState<AtelierInstance | null>(null);
+	const [branchSession, setBranchSession] =
+		useState<WorkspaceBranchSession | null>(null);
 	const [workspaceDefaultBranchId, setWorkspaceDefaultBranchId] = useState<
 		string | null
 	>(null);
 	const [error, setError] = useState<string | null>(null);
 	const activeLixRef = useRef<WorkspaceLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
+	const routeChildRef = useRef<{
+		kind: "file" | "dir" | null;
+		splat: string | undefined;
+	}>({ kind: routeChildKind, splat: routeSplat });
 	const routeFilePathRef = useRef(routeFilePath);
 	const branchIdRef = useRef(branchId);
 	const routeBranchSwitchRef = useRef(0);
@@ -132,6 +150,9 @@ export function WorkspaceAtelier({
 	useEffect(() => {
 		routeFilePathRef.current = routeFilePath;
 	}, [routeFilePath]);
+	useEffect(() => {
+		routeChildRef.current = { kind: routeChildKind, splat: routeSplat };
+	}, [routeChildKind, routeSplat]);
 	useLayoutEffect(() => {
 		branchIdRef.current = branchId;
 	}, [branchId]);
@@ -213,14 +234,17 @@ export function WorkspaceAtelier({
 			const search = defaultBranchId
 				? atelierBranchSearch(nextBranchId, defaultBranchId)
 				: { branch: nextBranchId };
-			const filePath = routeFilePathRef.current;
-			if (filePath !== undefined) {
+			const routeChild = routeChildRef.current;
+			if (routeChild.kind && routeChild.splat !== undefined) {
 				await navigate({
-					to: "/@{$namespace}/$workspace/file/$",
+					to:
+						routeChild.kind === "dir"
+							? "/@{$namespace}/$workspace/dir/$"
+							: "/@{$namespace}/$workspace/file/$",
 					params: {
 						namespace,
 						workspace: workspaceSlug,
-						_splat: filePath,
+						_splat: routeChild.splat,
 					},
 					search,
 					replace,
@@ -271,7 +295,14 @@ export function WorkspaceAtelier({
 				const splat = dirPath.split("/").filter(Boolean).join("/");
 				if (!splat) return;
 				const targetPath = `/@${namespace}/${workspaceSlug}/dir/${splat}`;
-				if (pathnameRef.current === targetPath) return;
+				const currentPath = (() => {
+					try {
+						return decodeURIComponent(pathnameRef.current);
+					} catch {
+						return pathnameRef.current;
+					}
+				})();
+				if (currentPath === targetPath) return;
 				void navigate({
 					to: "/@{$namespace}/$workspace/dir/$",
 					params: { namespace, workspace: workspaceSlug, _splat: splat },
@@ -297,6 +328,7 @@ export function WorkspaceAtelier({
 		let disposed = false;
 		let activeLix: WorkspaceLixSession | null = null;
 		setInstance(null);
+		setBranchSession(null);
 		setWorkspaceDefaultBranchId(null);
 		setError(null);
 		routeSyncedRef.current = false;
@@ -326,7 +358,7 @@ export function WorkspaceAtelier({
 				activeLix = session;
 				activeLixRef.current = session;
 				setWorkspaceDefaultBranchId(session.defaultBranchSnapshot());
-				const branchSession = createWorkspaceBranchSession({
+				const workspaceBranchSession = createWorkspaceBranchSession({
 					session,
 					onSwitch: async (nextBranchId, context) => {
 						const routedBranchId = resolveAtelierRouteBranchId(
@@ -344,16 +376,17 @@ export function WorkspaceAtelier({
 						await navigateToCurrentPathBranch(nextBranchId);
 					},
 				});
+				setBranchSession(workspaceBranchSession);
 				setInstance(
 					createAtelier({
 						lix: session.lix,
 						readOnly: isReadOnly,
-						branchSession,
+						branchSession: workspaceBranchSession,
 						reviewRangeSessionId: userId,
 						extensions: lixrayWorkspaceExtensions,
 						filesViewMode: "sidebar",
 						centralPanel: {
-							tabs: true,
+							mode: "tabs",
 							home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
 						},
 						sessionStateStore: createWorkspaceSessionStateStore({
@@ -413,7 +446,7 @@ export function WorkspaceAtelier({
 
 	useEffect(() => {
 		const lix = activeLixRef.current;
-		if (!instance || !lix) return;
+		if (!branchSession || !lix) return;
 		const requestedBranchId = resolveAtelierRouteBranchId(
 			branchId,
 			lix.defaultBranchSnapshot(),
@@ -421,7 +454,7 @@ export function WorkspaceAtelier({
 		const routeSwitch = ++routeBranchSwitchRef.current;
 		void (async () => {
 			try {
-				await instance.branches.switch(requestedBranchId);
+				await branchSession.switchBranch(requestedBranchId);
 			} catch (caught) {
 				if (routeSwitch !== routeBranchSwitchRef.current) return;
 				if (!isLixBranchNotFoundError(caught)) {
@@ -429,14 +462,17 @@ export function WorkspaceAtelier({
 						"Unable to switch to the requested Atelier branch",
 						caught,
 					);
+					// The route cannot converge on this branch; let tab
+					// activations drive the URL again rather than freezing it.
+					markRouteSynced();
 					return;
 				}
 				const defaultBranchId = lix.defaultBranchSnapshot();
 				try {
-					if (instance.branches.activeId() !== defaultBranchId) {
+					if (branchSession.getSnapshot() !== defaultBranchId) {
 						suppressBranchNavigationRef.current = true;
 						try {
-							await instance.branches.switch(defaultBranchId);
+							await branchSession.switchBranch(defaultBranchId);
 						} finally {
 							suppressBranchNavigationRef.current = false;
 						}
@@ -449,6 +485,7 @@ export function WorkspaceAtelier({
 							"Unable to recover from a missing Atelier branch",
 							fallbackError,
 						);
+						markRouteSynced();
 					}
 				}
 			}
@@ -458,7 +495,13 @@ export function WorkspaceAtelier({
 				routeBranchSwitchRef.current += 1;
 			}
 		};
-	}, [branchId, instance, navigateToCurrentPathBranch, pathname]);
+	}, [
+		branchId,
+		branchSession,
+		markRouteSynced,
+		navigateToCurrentPathBranch,
+		pathname,
+	]);
 
 	// The workspace root URL means "the pinned Home tab is active" — content
 	// tabs stay open (rule 1 of the tab model: Home never navigates or closes).
@@ -483,6 +526,7 @@ export function WorkspaceAtelier({
 				<WorkspaceDefaultBranchContext.Provider
 					value={workspaceDefaultBranchId}
 				>
+					<WorkspaceBranchSessionContext.Provider value={branchSession}>
 					<WorkspaceRouteSyncContext.Provider value={markRouteSynced}>
 					<WorkspaceAtelierContext.Provider value={instance}>
 						<Atelier
@@ -511,6 +555,7 @@ export function WorkspaceAtelier({
 						<Outlet />
 					</WorkspaceAtelierContext.Provider>
 					</WorkspaceRouteSyncContext.Provider>
+				</WorkspaceBranchSessionContext.Provider>
 				</WorkspaceDefaultBranchContext.Provider>
 			) : null}
 			{!instance && !error ? (
@@ -548,6 +593,19 @@ export function useWorkspaceDefaultBranchId(): string | null {
 export function useMarkWorkspaceRouteSynced(): () => void {
 	const markRouteSynced = useContext(WorkspaceRouteSyncContext);
 	return markRouteSynced ?? (() => undefined);
+}
+
+const NO_BRANCH_SUBSCRIBE = () => () => undefined;
+const NO_BRANCH_SNAPSHOT = () => null;
+
+/** The active workspace branch id, live (null before the session opens). */
+export function useWorkspaceActiveBranchId(): string | null {
+	const branchSession = useContext(WorkspaceBranchSessionContext);
+	return useSyncExternalStore(
+		branchSession?.subscribe.bind(branchSession) ?? NO_BRANCH_SUBSCRIBE,
+		branchSession?.getSnapshot.bind(branchSession) ?? NO_BRANCH_SNAPSHOT,
+		branchSession?.getSnapshot.bind(branchSession) ?? NO_BRANCH_SNAPSHOT,
+	);
 }
 
 function WorkspaceShareControl({
