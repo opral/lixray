@@ -313,19 +313,11 @@ export function WorkspaceAtelier({
 			if (event.viewKind === LIXRAY_DIR_EXTENSION_ID) {
 				const dirPath = normalizeHomeDirPath(event.state?.path);
 				const splat = dirPath.split("/").filter(Boolean).join("/");
-				if (!splat) {
-					// A root-listing tab (e.g. the strip's New tab) is the
-					// workspace root as a URL.
-					if (pathnameRef.current === `/@${namespace}/${workspaceSlug}`) {
-						return;
-					}
-					void navigate({
-						to: "/@{$namespace}/$workspace",
-						params: { namespace, workspace: workspaceSlug },
-						search,
-					});
-					return;
-				}
+				// A root-listing tab (the strip's New tab) stays URL-less: the
+				// workspace root URL means "Home is active" (rule 1), so syncing
+				// here would bounce the selection back to Home. The tab claims a
+				// URL on its first in-place navigation instead.
+				if (!splat) return;
 				const targetPath = `/@${namespace}/${workspaceSlug}/dir/${splat}`;
 				const currentPath = (() => {
 					try {
