@@ -1,5 +1,9 @@
 use crate::Config;
 use anyhow::{Context, Result};
+use lix_sdk::{
+    CommitResult, GetManyResult, GetOptions, Key, KeyRange, PutBatch, ReadOptions, ScanChunk,
+    ScanOptions, SpaceId, Storage, StorageError, StorageRead, StorageWrite, WriteOptions,
+};
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
 #[cfg(test)]
 use object_store::memory::InMemory;
@@ -9,7 +13,11 @@ use object_store::{path::Path as ObjectPath, ClientConfigKey, ObjectStoreExt};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::sync::Arc;
+use std::future::Future;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, OnceCell};
@@ -36,9 +44,38 @@ struct S3RequestBudget {
     max_retries: usize,
 }
 
-#[derive(Clone)]
 pub struct LixService {
-    protocol_lix: Arc<lix_sdk::Lix<SlateDB>>,
+    protocol_lix: Arc<lix_sdk::Lix<MonitoredSlateDB>>,
+    storage: MonitoredSlateDB,
+}
+
+#[derive(Clone)]
+pub(crate) struct MonitoredSlateDB {
+    inner: SlateDB,
+    // SlateDB keeps this state private. Its commit implementation sets its own
+    // terminal bit before returning a commit error, so mirroring that boundary
+    // lets the service retire the exact writer that observed the failed WAL
+    // durability operation.
+    terminal_durability_failure: Arc<AtomicBool>,
+}
+
+pub(crate) struct MonitoredSlateDBRead {
+    inner: lix_slatedb_storage::SlateDBRead,
+    terminal_durability_failure: Arc<AtomicBool>,
+}
+
+pub(crate) struct MonitoredSlateDBWrite {
+    inner: lix_slatedb_storage::SlateDBWrite,
+    terminal_durability_failure: Arc<AtomicBool>,
+}
+
+struct WorkspaceRuntime {
+    state: Mutex<WorkspaceRuntimeState>,
+}
+
+enum WorkspaceRuntimeState {
+    Active(Arc<LixService>),
+    Recovering,
 }
 
 pub struct WorkspaceRuntimeManager {
@@ -65,7 +102,7 @@ struct ManagerState {
 }
 
 struct RuntimeEntry {
-    runtime: Arc<OnceCell<Arc<LixService>>>,
+    runtime: Arc<OnceCell<Arc<WorkspaceRuntime>>>,
     last_used: u64,
 }
 
@@ -73,6 +110,7 @@ struct RuntimeEntry {
 pub enum WorkspaceRuntimeError {
     InvalidId,
     AtCapacity { max: usize },
+    Recovering,
     Open(anyhow::Error),
 }
 
@@ -132,6 +170,18 @@ impl WorkspaceRuntimeManager {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_with_test_object_store(
+        max_open_workspaces: usize,
+        object_store: Arc<dyn ObjectStore>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            backend: StorageBackend::Memory { object_store },
+            max_open_workspaces,
+            state: Mutex::new(ManagerState::default()),
+        })
+    }
+
     pub async fn get(
         self: &Arc<Self>,
         workspace_id: &str,
@@ -174,7 +224,17 @@ impl WorkspaceRuntimeManager {
             .get_or_try_init(|| self.open_workspace_for_handler(workspace_id.to_string()))
             .await;
         match result {
-            Ok(runtime) => Ok(Arc::clone(runtime)),
+            Ok(runtime) => {
+                let runtime = Arc::clone(runtime);
+                match runtime.acquire().await {
+                    Some(service) if service.has_terminal_durability_failure() => {
+                        self.recover(workspace_id, &service).await;
+                        Err(WorkspaceRuntimeError::Recovering)
+                    }
+                    Some(service) => Ok(service),
+                    None => Err(WorkspaceRuntimeError::Recovering),
+                }
+            }
             Err(error) => {
                 let mut state = self.state.lock().await;
                 if state
@@ -192,7 +252,7 @@ impl WorkspaceRuntimeManager {
     async fn open_workspace_for_handler(
         self: &Arc<Self>,
         workspace_id: String,
-    ) -> Result<Arc<LixService>> {
+    ) -> Result<Arc<WorkspaceRuntime>> {
         let manager = Arc::clone(self);
         let runtime = Handle::current();
         tokio::task::spawn_blocking(move || runtime.block_on(manager.open_workspace(&workspace_id)))
@@ -200,7 +260,7 @@ impl WorkspaceRuntimeManager {
             .context("join workspace runtime initialization")?
     }
 
-    async fn open_workspace(&self, workspace_id: &str) -> Result<Arc<LixService>> {
+    async fn open_workspace(&self, workspace_id: &str) -> Result<Arc<WorkspaceRuntime>> {
         let started = Instant::now();
         let storage = match &self.backend {
             #[cfg(test)]
@@ -231,9 +291,10 @@ impl WorkspaceRuntimeManager {
             }
         };
 
+        let storage = MonitoredSlateDB::new(storage);
         let protocol_lix = Arc::new(
             lix_sdk::open_lix_with_telemetry(
-                lix_sdk::OpenLixOptions::new(storage),
+                lix_sdk::OpenLixOptions::new(storage.clone()),
                 Arc::new(lix_sdk::TracingTelemetrySink::new()),
             )
             .await
@@ -244,7 +305,72 @@ impl WorkspaceRuntimeManager {
             elapsed_ms = elapsed_millis(started),
             "opened workspace runtime"
         );
-        Ok(Arc::new(LixService { protocol_lix }))
+        Ok(Arc::new(WorkspaceRuntime::new(LixService {
+            protocol_lix,
+            storage,
+        })))
+    }
+
+    pub(crate) async fn recover(self: &Arc<Self>, workspace_id: &str, service: &Arc<LixService>) {
+        let runtime = {
+            let state = self.state.lock().await;
+            state
+                .entries
+                .get(workspace_id)
+                .and_then(|entry| entry.runtime.get())
+                .cloned()
+        };
+        let Some(runtime) = runtime else {
+            return;
+        };
+        let Some(draining_service) = runtime.begin_recovery(service).await else {
+            return;
+        };
+
+        info!(workspace_id, "workspace runtime entering recovery");
+        let manager = Arc::clone(self);
+        let workspace_id = workspace_id.to_string();
+        tokio::spawn(async move {
+            let started = Instant::now();
+            while Arc::strong_count(&draining_service) > 1 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+
+            let close_result = close_drained_service(draining_service).await;
+            match close_result {
+                Ok(()) => info!(
+                    workspace_id,
+                    elapsed_ms = elapsed_millis(started),
+                    "closed recovered workspace runtime"
+                ),
+                Err(error) => tracing::warn!(
+                    workspace_id,
+                    elapsed_ms = elapsed_millis(started),
+                    error = %error,
+                    "released recovered workspace runtime after close error"
+                ),
+            }
+            manager
+                .remove_recovered_runtime(&workspace_id, &runtime)
+                .await;
+        });
+    }
+
+    async fn remove_recovered_runtime(
+        &self,
+        workspace_id: &str,
+        expected_runtime: &Arc<WorkspaceRuntime>,
+    ) {
+        let mut state = self.state.lock().await;
+        if state.entries.get(workspace_id).is_some_and(|entry| {
+            entry
+                .runtime
+                .get()
+                .is_some_and(|runtime| Arc::ptr_eq(runtime, expected_runtime))
+        }) {
+            state.entries.remove(workspace_id);
+            info!(workspace_id, "removed recovered workspace runtime");
+        }
     }
 
     #[cfg(test)]
@@ -254,9 +380,255 @@ impl WorkspaceRuntimeManager {
 }
 
 impl LixService {
-    pub fn protocol_lix(&self) -> Arc<lix_sdk::Lix<SlateDB>> {
+    pub(crate) fn protocol_lix(&self) -> Arc<lix_sdk::Lix<MonitoredSlateDB>> {
         Arc::clone(&self.protocol_lix)
     }
+
+    pub(crate) fn has_terminal_durability_failure(&self) -> bool {
+        self.storage.has_terminal_durability_failure()
+    }
+
+    async fn close(&self) -> Result<()> {
+        self.protocol_lix
+            .close()
+            .await
+            .context("close Lix workspace session")
+    }
+}
+
+impl MonitoredSlateDB {
+    fn new(inner: SlateDB) -> Self {
+        Self {
+            inner,
+            terminal_durability_failure: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn has_terminal_durability_failure(&self) -> bool {
+        self.terminal_durability_failure.load(Ordering::Acquire)
+    }
+
+    fn observe_storage_error(&self, error: &StorageError) {
+        mark_terminal_on_durability_error(&self.terminal_durability_failure, error);
+    }
+}
+
+#[allow(
+    clippy::manual_async_fn,
+    reason = "the Storage traits use explicit Send futures, which keeps the wrapper signatures aligned with SlateDB"
+)]
+impl Storage for MonitoredSlateDB {
+    type Read<'a>
+        = MonitoredSlateDBRead
+    where
+        Self: 'a;
+    type Write<'a>
+        = MonitoredSlateDBWrite
+    where
+        Self: 'a;
+
+    fn begin_read(
+        &self,
+        options: ReadOptions,
+    ) -> impl Future<Output = std::result::Result<Self::Read<'_>, StorageError>> + Send {
+        async move {
+            match self.inner.begin_read(options).await {
+                Ok(inner) => Ok(MonitoredSlateDBRead {
+                    inner,
+                    terminal_durability_failure: Arc::clone(&self.terminal_durability_failure),
+                }),
+                Err(error) => {
+                    self.observe_storage_error(&error);
+                    Err(error)
+                }
+            }
+        }
+    }
+
+    fn begin_write(
+        &self,
+        options: WriteOptions,
+    ) -> impl Future<Output = std::result::Result<Self::Write<'_>, StorageError>> + Send {
+        async move {
+            match self.inner.begin_write(options).await {
+                Ok(inner) => Ok(MonitoredSlateDBWrite {
+                    inner,
+                    terminal_durability_failure: Arc::clone(&self.terminal_durability_failure),
+                }),
+                Err(error) => {
+                    self.observe_storage_error(&error);
+                    Err(error)
+                }
+            }
+        }
+    }
+}
+
+#[allow(
+    clippy::manual_async_fn,
+    reason = "the Storage traits use explicit Send futures, which keeps the wrapper signatures aligned with SlateDB"
+)]
+impl StorageRead for MonitoredSlateDBRead {
+    fn get_many(
+        &self,
+        space: SpaceId,
+        keys: &[Key],
+        options: GetOptions,
+    ) -> impl Future<Output = std::result::Result<GetManyResult, StorageError>> + Send {
+        async move {
+            let result = self.inner.get_many(space, keys, options).await;
+            observe_durability_result(&self.terminal_durability_failure, &result);
+            result
+        }
+    }
+
+    fn scan(
+        &self,
+        space: SpaceId,
+        range: KeyRange,
+        options: ScanOptions,
+    ) -> impl Future<Output = std::result::Result<ScanChunk, StorageError>> + Send {
+        async move {
+            let result = self.inner.scan(space, range, options).await;
+            observe_durability_result(&self.terminal_durability_failure, &result);
+            result
+        }
+    }
+}
+
+#[allow(
+    clippy::manual_async_fn,
+    reason = "the Storage traits use explicit Send futures, which keeps the wrapper signatures aligned with SlateDB"
+)]
+impl StorageWrite for MonitoredSlateDBWrite {
+    fn put_many(
+        &mut self,
+        space: SpaceId,
+        entries: PutBatch,
+    ) -> impl Future<Output = std::result::Result<(), StorageError>> + Send {
+        let terminal_durability_failure = Arc::clone(&self.terminal_durability_failure);
+        async move {
+            let result = self.inner.put_many(space, entries).await;
+            observe_durability_result(&terminal_durability_failure, &result);
+            result
+        }
+    }
+
+    fn delete_many(
+        &mut self,
+        space: SpaceId,
+        keys: &[Key],
+    ) -> impl Future<Output = std::result::Result<(), StorageError>> + Send {
+        let terminal_durability_failure = Arc::clone(&self.terminal_durability_failure);
+        async move {
+            let result = self.inner.delete_many(space, keys).await;
+            observe_durability_result(&terminal_durability_failure, &result);
+            result
+        }
+    }
+
+    fn delete_range(
+        &mut self,
+        space: SpaceId,
+        range: KeyRange,
+    ) -> impl Future<Output = std::result::Result<(), StorageError>> + Send {
+        let terminal_durability_failure = Arc::clone(&self.terminal_durability_failure);
+        async move {
+            let result = self.inner.delete_range(space, range).await;
+            observe_durability_result(&terminal_durability_failure, &result);
+            result
+        }
+    }
+
+    fn commit(
+        self,
+    ) -> impl Future<Output = std::result::Result<CommitResult, StorageError>> + Send {
+        async move {
+            let Self {
+                inner,
+                terminal_durability_failure,
+            } = self;
+            let result = inner.commit().await;
+            // SlateDB's commit path marks its internal health terminal before
+            // returning any write or flush error.
+            if result.is_err() {
+                terminal_durability_failure.store(true, Ordering::Release);
+            }
+            result
+        }
+    }
+
+    fn rollback(self) -> impl Future<Output = std::result::Result<(), StorageError>> + Send {
+        let Self {
+            inner,
+            terminal_durability_failure,
+        } = self;
+        async move {
+            let result = inner.rollback().await;
+            observe_durability_result(&terminal_durability_failure, &result);
+            result
+        }
+    }
+}
+
+fn observe_durability_result<T>(
+    terminal_durability_failure: &AtomicBool,
+    result: &std::result::Result<T, StorageError>,
+) {
+    if let Err(error) = result {
+        mark_terminal_on_durability_error(terminal_durability_failure, error);
+    }
+}
+
+fn mark_terminal_on_durability_error(
+    terminal_durability_failure: &AtomicBool,
+    error: &StorageError,
+) {
+    if matches!(error, StorageError::Durability) {
+        terminal_durability_failure.store(true, Ordering::Release);
+    }
+}
+
+impl WorkspaceRuntime {
+    fn new(service: LixService) -> Self {
+        Self {
+            state: Mutex::new(WorkspaceRuntimeState::Active(Arc::new(service))),
+        }
+    }
+
+    async fn acquire(&self) -> Option<Arc<LixService>> {
+        let state = self.state.lock().await;
+        match &*state {
+            WorkspaceRuntimeState::Active(service) => Some(Arc::clone(service)),
+            WorkspaceRuntimeState::Recovering => None,
+        }
+    }
+
+    async fn begin_recovery(&self, expected_service: &Arc<LixService>) -> Option<Arc<LixService>> {
+        let mut state = self.state.lock().await;
+        match &*state {
+            WorkspaceRuntimeState::Active(service) if Arc::ptr_eq(service, expected_service) => {
+                let WorkspaceRuntimeState::Active(service) =
+                    std::mem::replace(&mut *state, WorkspaceRuntimeState::Recovering)
+                else {
+                    unreachable!("matched active runtime state")
+                };
+                Some(service)
+            }
+            WorkspaceRuntimeState::Active(_) | WorkspaceRuntimeState::Recovering => None,
+        }
+    }
+}
+
+async fn close_drained_service(service: Arc<LixService>) -> Result<()> {
+    let runtime = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let result = runtime.block_on(service.close());
+        drop(service);
+        result
+    })
+    .await
+    .context("join recovered workspace runtime close")?
 }
 
 impl fmt::Display for WorkspaceRuntimeError {
@@ -267,6 +639,7 @@ impl fmt::Display for WorkspaceRuntimeError {
                 formatter,
                 "workspace service is at its capacity of {max} active runtimes"
             ),
+            Self::Recovering => write!(formatter, "workspace runtime is recovering"),
             Self::Open(error) => write!(formatter, "open workspace runtime: {error:#}"),
         }
     }

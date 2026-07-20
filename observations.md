@@ -1,6 +1,6 @@
 # Performance observations
 
-## Workspace runtime can remain poisoned after an object-store failure — observing
+## Workspace runtime can remain poisoned after an object-store failure — measured and recovered
 
 **Evidence.** During replay, MinIO marked its `/data` drive offline after a
 42.969-second write/read probe. A single workspace open then fanned out through
@@ -11,10 +11,26 @@ can be retried. A post-open SlateDB WAL write or flush failure is different: it
 sets a terminal durability-failure state while the workspace manager retains
 its already-successful runtime.
 
-**Architectural direction.** Expose that terminal state and introduce a
-per-workspace `Active → Recovering` lifecycle. New requests should receive 503
-while a background reaper closes and fully releases the old Lix/SlateDB service;
-only then should a single fresh service open.
+**Fault-injection baseline.** The real LixRay router now has a deterministic
+post-open WAL-failure scenario: it holds the first SlateDB WAL PUT, starts one
+write plus eight workspace protocol reads, then fails the PUT. With the legacy
+retained runtime, the failed write returned after **305 ms**, all **8** queued
+requests inherited the terminal storage error, no request reached **503**, and
+no fresh open occurred until an explicit manager teardown. That teardown took
+under 1 ms and the intentional fresh open took **26 ms**; the rejected row was
+not durable (`0` rows after reopening).
+
+**Implemented lifecycle.** LixRay monitors SlateDB's public storage boundary:
+a failed commit or an observed `Durability` error marks the service terminal.
+It then transitions a workspace from `Active` to `Recovering` exactly once.
+The triggering request and all queued requests receive **503** while a reaper
+waits for existing Lix service leases, calls `Lix::close`, and drops the old
+service on a blocking task so SlateDB can join its manager thread. Only after
+that drain finishes does the manager remove the entry and permit a fresh shared
+open. Warm reruns of the same fault injection reach 503 in **86–93 ms** (about
+**70%** faster than the 305 ms legacy failure response), return 503 to all
+**8** queued requests, drain and reopen in **6–8 ms** after the final old lease,
+share one fresh runtime, and still expose `0` rejected rows.
 
 **Correctness constraint.** Do not simply clear the `OnceCell` or open a
 second service. A failed commit continues holding Lix's visibility lock and
@@ -23,16 +39,16 @@ SlateDB joins its manager thread. Recovery must drain the old service before
 reopening, otherwise it can create concurrent writers or expose a write whose
 durability has failed.
 
-This spans Lix's storage-health signal, LixRay's workspace lifecycle and route
-mapping, orderly session shutdown, nonblocking destruction, and fault-injection
-coverage across both repositories—well beyond a bounded patch.
+**Remaining cross-cutting work.** Recovery deliberately has no forced close
+deadline: while SlateDB drains or joins its manager thread, the workspace stays
+at 503 rather than risking a second writer. Production should add lifecycle
+metrics/alerts for prolonged recovery and validate the same single-writer
+boundary across multiple LixRay instances before introducing horizontal
+failover.
 
-**Next measurement.** Blackhole or delay object-store open and WAL PUT/flush;
-measure time to 503, queued-request fan-out, cleanup/reopen time, and confirm a
-reopened store exposes only the last durable state.
-
-**Status:** observing; #83 bounds cold-open request time, while terminal
-runtime recovery remains separate cross-cutting work.
+**Status:** #83 bounds cold-open request time; terminal post-open recovery is
+now covered by a real router/object-store fault injection and drains before a
+fresh runtime opens.
 
 ## Staged filesystem writes rebuild the complete path index — observing
 
