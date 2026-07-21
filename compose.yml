@@ -23,6 +23,9 @@ services:
         mc mb --ignore-existing local/lixray
 
   lix-server:
+    # Give graceful shutdown room to drain and close workspace stores; a
+    # 10s SIGKILL mid-write leaves store state whose next open hangs.
+    stop_grace_period: 30s
     build:
       context: .
       dockerfile: lix-server/Dockerfile
