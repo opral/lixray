@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+// The stack outlives dev.mjs on purpose: stopping stateful services on every
+// iteration (each Ctrl-C or script kill) SIGKILLed lix-server mid-write and
+// left workspace stores in a state whose next open hangs. `--down` is the
+// explicit teardown.
+const teardownRequested = process.argv.includes("--down");
 const signalExitCodes = {
 	SIGHUP: 129,
 	SIGINT: 130,
@@ -12,23 +17,21 @@ const signalExitCodes = {
 	SIGTERM: 143,
 };
 
-let databaseStartAttempted = false;
 let databaseStopped = false;
-let databaseWasAlreadyRunning = false;
-let composeStartAttempted = false;
 let composeStopped = false;
 let shuttingDown = false;
 let webApp;
 let composeEnv;
 
-process.on("exit", stopDatabase);
-process.on("exit", stopCompose);
+if (teardownRequested) {
+	stopCompose();
+	stopDatabase();
+	process.exit(0);
+}
 for (const signal of Object.keys(signalExitCodes)) {
 	process.on(signal, () => handleSignal(signal));
 }
 
-databaseWasAlreadyRunning = localSupabaseStatus() !== null;
-databaseStartAttempted = true;
 const database = spawnSync(pnpm, ["--dir", "database", "start"], {
 	cwd: repositoryRoot,
 	stdio: "inherit",
@@ -96,7 +99,6 @@ composeEnv = {
 	VITE_SUPABASE_URL: supabaseUrl,
 };
 
-composeStartAttempted = true;
 const stack = spawnSync(
 	"docker",
 	["compose", "up", "--build", "-d", "lixray-web"],
@@ -139,8 +141,7 @@ function handleSignal(signal) {
 }
 
 function stopDatabase() {
-	if (!databaseStartAttempted || databaseWasAlreadyRunning || databaseStopped)
-		return;
+	if (databaseStopped) return;
 	databaseStopped = true;
 	spawnSync(pnpm, ["--dir", "database", "stop"], {
 		cwd: repositoryRoot,
@@ -149,7 +150,7 @@ function stopDatabase() {
 }
 
 function stopCompose() {
-	if (!composeStartAttempted || composeStopped) return;
+	if (composeStopped) return;
 	composeStopped = true;
 	spawnSync(
 		"docker",
