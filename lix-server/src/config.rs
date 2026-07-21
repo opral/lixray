@@ -1,18 +1,21 @@
 use anyhow::{bail, Context, Result};
 use std::env;
 use std::path::PathBuf;
+use std::time::Duration;
 
 const DEFAULT_CACHE_DIR: &str = "/tmp/lixray-slatedb-cache";
 const DEFAULT_DISK_CACHE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const DEFAULT_BLOCK_CACHE_BYTES: u64 = 128 * 1024 * 1024;
 const DEFAULT_METADATA_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_MAX_OPEN_WORKSPACES: u64 = 32;
+const DEFAULT_PROTOCOL_TIMEOUT_SECS: u64 = 60;
 
 #[derive(Clone, Debug)]
 pub struct Config {
     pub bind_addr: String,
     pub internal_token: Option<String>,
     pub max_open_workspaces: usize,
+    pub protocol_timeout: Duration,
     pub storage: S3StorageConfig,
 }
 
@@ -51,6 +54,10 @@ impl Config {
             DEFAULT_MAX_OPEN_WORKSPACES,
         )?)
         .context("LIXRAY_MAX_OPEN_WORKSPACES does not fit this platform")?;
+        let protocol_timeout = Duration::from_secs(positive_u64_env(
+            "LIXRAY_PROTOCOL_TIMEOUT_SECS",
+            DEFAULT_PROTOCOL_TIMEOUT_SECS,
+        )?);
 
         let storage = S3StorageConfig {
             endpoint: required_env("S3_ENDPOINT")?,
@@ -67,6 +74,7 @@ impl Config {
             bind_addr,
             internal_token,
             max_open_workspaces,
+            protocol_timeout,
             storage,
         })
     }
