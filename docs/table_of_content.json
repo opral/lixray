@@ -1,0 +1,6 @@
+{
+	"Platform": [
+		{ "path": "getting-started.md", "label": "Getting Started" },
+		{ "path": "mcp.md", "label": "MCP" }
+	]
+}

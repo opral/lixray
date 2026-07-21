@@ -82,7 +82,7 @@ void test("protected resource discovery is public and precedes the frontend fall
 		resource: MCP_RESOURCE,
 		authorization_servers: ["https://supabase.example.test/auth/v1"],
 		scopes_supported: ["openid", "email", "profile"],
-		resource_documentation: "https://lixray.com/docs/mcp",
+		resource_documentation: "https://lixray.com/mcp/docs",
 	});
 });
 
@@ -98,7 +98,7 @@ void test("localhost discovery advertises local OAuth without changing the stabl
 		resource: MCP_RESOURCE,
 		authorization_servers: ["http://127.0.0.1:54321/auth/v1"],
 		scopes_supported: ["openid", "email", "profile"],
-		resource_documentation: "http://localhost:8787/docs/mcp",
+		resource_documentation: "http://localhost:8787/mcp/docs",
 	});
 });
 

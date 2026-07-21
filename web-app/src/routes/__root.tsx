@@ -11,9 +11,9 @@ import { Toaster } from "~/components/ui/sonner";
 import { WorkspaceProvider } from "~/components/workspace-provider";
 import appCss from "../styles.css?url";
 
-const title = "LixRay — One workspace for your team and AI agents";
+const title = "LixRay — The shared workspace for your team and AI agents";
 const description =
-	"A shared workspace where your team and AI agents work from the same files, context, and change history.";
+	"An AI workspace your whole team and every agent share — file-based, version controlled, one source of truth.";
 
 export const Route = createRootRoute({
 	head: () => ({
