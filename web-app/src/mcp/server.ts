@@ -21,7 +21,9 @@ export const MCP_PATH = "/mcp";
 export const MCP_RESOURCE = "https://lixray.com";
 export const MCP_PROTECTED_RESOURCE_PATH =
 	"/.well-known/oauth-protected-resource";
-export const MCP_DOCUMENTATION_PATH = "/docs/mcp";
+// Not under /docs — that prefix belongs to the human docs site; this is the
+// plain-text page MCP clients are pointed at via resource_documentation.
+export const MCP_DOCUMENTATION_PATH = "/mcp/docs";
 export const MCP_PROTECTED_RESOURCE_URL = `${MCP_RESOURCE}${MCP_PROTECTED_RESOURCE_PATH}`;
 export const MCP_SCOPES = ["openid", "email", "profile"] as const;
 

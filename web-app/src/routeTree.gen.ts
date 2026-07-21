@@ -16,9 +16,11 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as OpenRouteImport } from './routes/open'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DocsIndexRouteImport } from './routes/docs.index'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as OauthConsentRouteImport } from './routes/oauth.consent'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
+import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as AtChar123namespaceChar125WorkspaceRouteImport } from './routes/@{$namespace}.$workspace'
 import { Route as AtChar123namespaceChar125WorkspaceFileSplatRouteImport } from './routes/@{$namespace}.$workspace.file.$'
@@ -58,6 +60,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsIndexRoute = DocsIndexRouteImport.update({
+  id: '/docs/',
+  path: '/docs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignUpSplatRoute = SignUpSplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -71,6 +78,11 @@ const OauthConsentRoute = OauthConsentRouteImport.update({
 const InviteTokenRoute = InviteTokenRouteImport.update({
   id: '/invite/$token',
   path: '/invite/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsSlugRoute = DocsSlugRouteImport.update({
+  id: '/docs/$slug',
+  path: '/docs/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
@@ -101,9 +113,11 @@ export interface FileRoutesByFullPath {
   '/workspace': typeof WorkspaceRoute
   '/@{$namespace}/$workspace': typeof AtChar123namespaceChar125WorkspaceRouteWithChildren
   '/auth/callback': typeof AuthCallbackRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/invite/$token': typeof InviteTokenRoute
   '/oauth/consent': typeof OauthConsentRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/docs/': typeof DocsIndexRoute
   '/@{$namespace}/$workspace/file/$': typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
 }
 export interface FileRoutesByTo {
@@ -116,9 +130,11 @@ export interface FileRoutesByTo {
   '/workspace': typeof WorkspaceRoute
   '/@{$namespace}/$workspace': typeof AtChar123namespaceChar125WorkspaceRouteWithChildren
   '/auth/callback': typeof AuthCallbackRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/invite/$token': typeof InviteTokenRoute
   '/oauth/consent': typeof OauthConsentRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/docs': typeof DocsIndexRoute
   '/@{$namespace}/$workspace/file/$': typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
 }
 export interface FileRoutesById {
@@ -132,9 +148,11 @@ export interface FileRoutesById {
   '/workspace': typeof WorkspaceRoute
   '/@{$namespace}/$workspace': typeof AtChar123namespaceChar125WorkspaceRouteWithChildren
   '/auth/callback': typeof AuthCallbackRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/invite/$token': typeof InviteTokenRoute
   '/oauth/consent': typeof OauthConsentRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/docs/': typeof DocsIndexRoute
   '/@{$namespace}/$workspace/file/$': typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
 }
 export interface FileRouteTypes {
@@ -149,9 +167,11 @@ export interface FileRouteTypes {
     | '/workspace'
     | '/@{$namespace}/$workspace'
     | '/auth/callback'
+    | '/docs/$slug'
     | '/invite/$token'
     | '/oauth/consent'
     | '/sign-up/$'
+    | '/docs/'
     | '/@{$namespace}/$workspace/file/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -164,9 +184,11 @@ export interface FileRouteTypes {
     | '/workspace'
     | '/@{$namespace}/$workspace'
     | '/auth/callback'
+    | '/docs/$slug'
     | '/invite/$token'
     | '/oauth/consent'
     | '/sign-up/$'
+    | '/docs'
     | '/@{$namespace}/$workspace/file/$'
   id:
     | '__root__'
@@ -179,9 +201,11 @@ export interface FileRouteTypes {
     | '/workspace'
     | '/@{$namespace}/$workspace'
     | '/auth/callback'
+    | '/docs/$slug'
     | '/invite/$token'
     | '/oauth/consent'
     | '/sign-up/$'
+    | '/docs/'
     | '/@{$namespace}/$workspace/file/$'
   fileRoutesById: FileRoutesById
 }
@@ -195,8 +219,10 @@ export interface RootRouteChildren {
   WorkspaceRoute: typeof WorkspaceRoute
   AtChar123namespaceChar125WorkspaceRoute: typeof AtChar123namespaceChar125WorkspaceRouteWithChildren
   AuthCallbackRoute: typeof AuthCallbackRoute
+  DocsSlugRoute: typeof DocsSlugRoute
   InviteTokenRoute: typeof InviteTokenRoute
   OauthConsentRoute: typeof OauthConsentRoute
+  DocsIndexRoute: typeof DocsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -250,6 +276,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docs/': {
+      id: '/docs/'
+      path: '/docs'
+      fullPath: '/docs/'
+      preLoaderRoute: typeof DocsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-up/$': {
       id: '/sign-up/$'
       path: '/$'
@@ -269,6 +302,13 @@ declare module '@tanstack/react-router' {
       path: '/invite/$token'
       fullPath: '/invite/$token'
       preLoaderRoute: typeof InviteTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/$slug': {
+      id: '/docs/$slug'
+      path: '/docs/$slug'
+      fullPath: '/docs/$slug'
+      preLoaderRoute: typeof DocsSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/callback': {
@@ -332,8 +372,10 @@ const rootRouteChildren: RootRouteChildren = {
   AtChar123namespaceChar125WorkspaceRoute:
     AtChar123namespaceChar125WorkspaceRouteWithChildren,
   AuthCallbackRoute: AuthCallbackRoute,
+  DocsSlugRoute: DocsSlugRoute,
   InviteTokenRoute: InviteTokenRoute,
   OauthConsentRoute: OauthConsentRoute,
+  DocsIndexRoute: DocsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

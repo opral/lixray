@@ -44,7 +44,7 @@ void test("protected resource discovery advertises the Supabase authorization se
 		resource: MCP_RESOURCE,
 		authorization_servers: [AUTHORIZATION_SERVER],
 		scopes_supported: ["openid", "email", "profile"],
-		resource_documentation: "https://lixray.com/docs/mcp",
+		resource_documentation: "https://lixray.com/mcp/docs",
 	});
 	assert.match(
 		mcpAuthenticateChallenge(),
