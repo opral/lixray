@@ -2,6 +2,7 @@ import type {
 	AtelierTabStripContext,
 	AtelierTabStripTab,
 } from "@opral/atelier";
+import { LIXRAY_DIR_EXTENSION_ID } from "./host-extensions";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import { X } from "lucide-react";
 import { type ReactNode } from "react";
@@ -44,7 +45,7 @@ export function LixrayCentralTabStrip({
 					aria-label="New tab"
 					data-testid="lixray-new-tab"
 					onClick={() => void newTab()}
-					className="grid size-[26px] shrink-0 place-content-center rounded-md text-[15px] leading-none text-text-tertiary hover:bg-bg-hover"
+					className="grid size-[26px] shrink-0 place-content-center rounded-md text-[15px] leading-none text-text-quaternary hover:bg-bg-hover-canvas hover:text-text-secondary"
 				>
 					＋
 				</button>
@@ -83,7 +84,7 @@ function TabChip({ tab }: { readonly tab: AtelierTabStripTab }) {
 			{tab.close ? (
 				<X
 					aria-hidden="true"
-					className="ml-1 size-[11px] text-text-tertiary/70 hover:text-text-secondary"
+					className="ml-1 size-[11px] text-icon-quaternary hover:text-icon-secondary"
 					onClick={(event) => {
 						event.stopPropagation();
 						tab.close?.();
@@ -95,13 +96,23 @@ function TabChip({ tab }: { readonly tab: AtelierTabStripTab }) {
 }
 
 function TabIcon({ tab }: { readonly tab: AtelierTabStripTab }): ReactNode {
-	// File tabs get their file-type icon (comp 15a); other views use the
-	// extension's own icon.
+	// File tabs get their file-type icon and folder tabs the colored square
+	// folder (comp 15a/12d); other views use the extension's own icon in the
+	// quiet secondary tint.
+	if (tab.kind === LIXRAY_DIR_EXTENSION_ID) {
+		return (
+			<img src="/icon-sq-folder.svg" alt="" className="size-3.5 shrink-0" />
+		);
+	}
 	const hasFileExtension = /\.[a-z0-9]+$/i.test(tab.label);
 	if (!tab.isPinned && hasFileExtension) {
 		return (
 			<img src={fileIconUrl(tab.label)} alt="" className="size-3.5 shrink-0" />
 		);
 	}
-	return <tab.icon className="size-3.5 shrink-0" />;
+	return (
+		<span className="text-icon-secondary">
+			<tab.icon className="size-3.5 shrink-0" />
+		</span>
+	);
 }

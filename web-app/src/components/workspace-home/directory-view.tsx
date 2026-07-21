@@ -205,7 +205,7 @@ export function DirectoryView({
 						</p>
 					) : null}
 					{isHome ? (
-						<div className="mb-4 flex items-center gap-3 rounded-[10px] border border-dashed border-border-panel px-4 py-3">
+						<div className="mb-4 flex items-center gap-3 rounded-[10px] border border-dashed border-border-action-secondary px-4 py-3">
 							<Link2
 								className="size-4 shrink-0 text-text-tertiary"
 								aria-hidden="true"
@@ -219,7 +219,7 @@ export function DirectoryView({
 								href={connectHref}
 								target="_blank"
 								rel="noreferrer"
-								className="inline-flex h-7 shrink-0 items-center rounded-[7px] border border-border-panel bg-bg-panel px-3 text-xs font-semibold whitespace-nowrap text-text-secondary hover:bg-bg-hover"
+								className="inline-flex h-7 shrink-0 items-center rounded-[7px] border border-border-action-secondary bg-bg-panel px-3 text-xs font-semibold whitespace-nowrap text-text-secondary shadow-action-secondary hover:bg-bg-hover"
 							>
 								Connect an agent
 							</a>
@@ -318,7 +318,7 @@ function EntryRow({
 			{icon}
 			<span className="text-sm font-medium text-text-primary">{name}</span>
 			<span className="flex-1" />
-			<span className="text-[12.5px] text-text-tertiary">{meta}</span>
+			<span className="text-[12.5px] text-text-quaternary">{meta}</span>
 		</button>
 	);
 }
@@ -515,7 +515,7 @@ function GettingStarted({
 			data-testid="home-getting-started"
 		>
 			<div className="flex w-[min(560px,calc(100%-48px))] flex-col items-center">
-				<span className="mb-4 grid size-9 place-content-center rounded-[9px] border border-border-panel bg-bg-hover">
+				<span className="mb-[18px] grid size-8 place-content-center rounded-[9px] bg-[#FAF4EC] shadow-[inset_0_0_0_1px_#EDE2D2]">
 					<Sparkles
 						className="size-4.5 text-text-secondary"
 						aria-hidden="true"
@@ -535,7 +535,7 @@ function GettingStarted({
 				</a>
 				{readOnly ? null : (
 					<>
-						<div className="mb-3.5 text-[11.5px] font-bold tracking-[0.06em] text-text-tertiary uppercase">
+						<div className="mb-3.5 text-[11.5px] font-bold tracking-[0.06em] text-text-quaternary uppercase">
 							or start yourself
 						</div>
 						<div className="flex justify-center gap-2.5">
@@ -555,7 +555,7 @@ function GettingStarted({
 								</button>
 							))}
 						</div>
-						<div className="mt-4.5 text-xs text-text-tertiary">
+						<div className="mt-4.5 text-xs text-text-quaternary">
 							…or drop files anywhere in this window to import
 						</div>
 					</>

@@ -579,7 +579,7 @@ export function WorkspaceAtelier({
 											<span className="flex items-center gap-2 text-[13px]">
 												<Link
 													to="/home"
-													className="font-medium text-text-secondary hover:text-text-primary"
+													className="font-medium text-text-tertiary hover:text-text-primary"
 												>
 													{namespace}
 												</Link>
