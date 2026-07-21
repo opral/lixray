@@ -1,7 +1,6 @@
 [submodule "vendor/atelier"]
 	path = vendor/atelier
 	url = https://github.com/opral/atelier.git
-	# main (and bump the gitlink + Dockerfile pin) once that PR merges.
 	branch = main
 [submodule "vendor/lix"]
 	path = vendor/lix
