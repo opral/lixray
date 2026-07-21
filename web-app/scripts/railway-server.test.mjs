@@ -1,0 +1,74 @@
+import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { createRailwayServer } from "./railway-server.mjs";
+
+async function withServer(appFetch, run) {
+	const clientRoot = await mkdtemp(join(tmpdir(), "railway-server-"));
+	const server = createRailwayServer({
+		app: { fetch: appFetch },
+		clientRoot,
+		env: {},
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const { port } = server.address();
+	try {
+		return await run(`http://127.0.0.1:${port}`);
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+}
+
+test("proxies a streaming response through", async () => {
+	const response = await withServer(
+		async () => new Response("hello from the app\n", { status: 200 }),
+		(origin) => fetch(`${origin}/anything`),
+	);
+	assert.equal(response.status, 200);
+	assert.equal(await response.text(), "hello from the app\n");
+});
+
+test("answers 502 when the upstream fetch fails", async () => {
+	const response = await withServer(
+		async () => {
+			throw new TypeError("fetch failed", {
+				cause: new Error("Headers Timeout Error"),
+			});
+		},
+		(origin) => fetch(`${origin}/lix/v1/`),
+	);
+	assert.equal(response.status, 502);
+	assert.match(await response.text(), /Upstream service unavailable/);
+});
+
+test("a response body erroring mid-stream does not crash the process", async () => {
+	const result = await withServer(
+		async () =>
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode("partial"));
+					},
+					pull(controller) {
+						controller.error(new Error("upstream connection wedged"));
+					},
+				}),
+				{ status: 200 },
+			),
+		// The request may fail at fetch time or while reading the body,
+		// depending on how far the stream got before the abort — both mean
+		// the connection ended instead of hanging, and the 'error' listener
+		// kept the event from killing the process (an uncaught stream error
+		// would take down this whole test run).
+		(origin) =>
+			fetch(`${origin}/lix/v1/`)
+				.then((response) => response.text())
+				.then(
+					() => "completed",
+					() => "aborted",
+				),
+	);
+	assert.ok(result === "aborted" || result === "completed");
+});
