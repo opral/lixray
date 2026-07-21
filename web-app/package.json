@@ -9,7 +9,7 @@
 		"lix:build": "node ../scripts/prepare-vendored-lix-sdk.mjs",
 		"atelier:build": "pnpm --filter @opral/atelier exec vite build && pnpm --filter @opral/atelier exec tsc -p tsconfig.build.json --noCheck && pnpm --filter @opral/atelier exec node scripts/prune-types.mjs",
 		"prebuild": "pnpm lix:build && pnpm atelier:build",
-		"prelint": "pnpm lix:build && pnpm atelier:build",
+		"prelint": "pnpm lix:build && pnpm atelier:build && pnpm routes:generate",
 		"pretypecheck": "pnpm lix:build && pnpm atelier:build",
 		"format": "oxfmt --write --ignore-path .oxfmtignore .",
 		"format:check": "oxfmt --check --ignore-path .oxfmtignore .",
