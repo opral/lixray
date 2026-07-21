@@ -1,0 +1,47 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect } from "react";
+import {
+	useMarkWorkspaceRouteSynced,
+	useWorkspaceActiveBranchId,
+	useWorkspaceAtelierInstance,
+} from "~/components/workspace-atelier";
+import {
+	LIXRAY_DIR_EXTENSION_ID,
+	lixrayDirInstanceId,
+	lixrayDirViewState,
+} from "~/components/workspace-home/host-extensions";
+
+export const Route = createFileRoute("/@{$namespace}/$workspace/dir/$")({
+	component: WorkspaceDirRoute,
+});
+
+/**
+ * A folder opened as a central content tab (rule 3 of the tab model: the URL
+ * names the active tab's location; opening navigates the tab in place).
+ */
+function WorkspaceDirRoute() {
+	const atelier = useWorkspaceAtelierInstance();
+	const markRouteSynced = useMarkWorkspaceRouteSynced();
+	const { _splat: dirSplat } = Route.useParams();
+	const { branch } = Route.useSearch();
+	const activeBranchId = useWorkspaceActiveBranchId();
+
+	useEffect(() => {
+		if (!atelier || !dirSplat) return;
+		if (branch && activeBranchId !== branch) return;
+		const dirPath = `/${dirSplat}/`;
+		void atelier.views
+			.open(LIXRAY_DIR_EXTENSION_ID, {
+				state: lixrayDirViewState(dirPath),
+				instanceId: lixrayDirInstanceId(dirPath),
+			})
+			.catch((error: unknown) => {
+				console.error("Unable to open the requested workspace folder", error);
+			})
+			// Synced even on failure: tab activations should drive the URL
+			// again rather than staying frozen at a dead deep link.
+			.finally(markRouteSynced);
+	}, [activeBranchId, atelier, branch, dirSplat, markRouteSynced]);
+
+	return null;
+}

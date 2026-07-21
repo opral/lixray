@@ -222,6 +222,8 @@ export function WorkspaceDirectory() {
 						)
 					)}
 
+					{workspaceCount > 0 ? <ConnectAgentRow /> : null}
+
 					{firstWorkspace && !isDemoModeEnabled ? (
 						<McpQuickstart
 							organization={firstWorkspace.organization}
@@ -236,6 +238,28 @@ export function WorkspaceDirectory() {
 				organizations={writableOrganizations}
 				onClose={() => setDialog(null)}
 			/>
+		</div>
+	);
+}
+
+function ConnectAgentRow() {
+	return (
+		<div className="mx-3.5 mt-10 flex items-center gap-3 rounded-[10px] border border-dashed border-[#DDD3C4] px-4 py-[13px] max-[560px]:mx-2">
+			<Link2
+				aria-hidden="true"
+				className="size-4 shrink-0 text-text-tertiary"
+			/>
+			<span className="text-[13px] text-text-tertiary">
+				Working from Claude, Codex, or another agent? Connect it to your
+				workspaces.
+			</span>
+			<span className="flex-1" />
+			<a
+				href="/docs/mcp"
+				className="inline-flex h-7 shrink-0 items-center rounded-[7px] border border-border-panel bg-bg-panel px-[13px] text-xs font-semibold whitespace-nowrap text-text-secondary shadow-xs hover:bg-bg-hover"
+			>
+				Connect an agent
+			</a>
 		</div>
 	);
 }

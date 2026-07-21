@@ -20,8 +20,9 @@ import {
 	useLayoutEffect,
 	useRef,
 	useState,
+	useSyncExternalStore,
 } from "react";
-import { PencilLine } from "lucide-react";
+import { PencilLine, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
 import { WorkspaceShareDialog } from "~/components/workspace-share-dialog";
@@ -40,6 +41,7 @@ import {
 	createWorkspacePreferencesStore,
 	createWorkspaceReviewStatusStore,
 	createWorkspaceSessionStateStore,
+	type WorkspaceBranchSession,
 } from "~/lib/atelier-state";
 import { captureTelemetry } from "~/lib/telemetry";
 import {
@@ -52,6 +54,16 @@ import {
 	openWorkspaceLixSession,
 	type WorkspaceLixSession,
 } from "~/lib/workspace-lix-session";
+import {
+	LIXRAY_DIR_EXTENSION_ID,
+	LIXRAY_HOME_EXTENSION_ID,
+	lixrayWorkspaceExtensions,
+} from "~/components/workspace-home/host-extensions";
+import { LixrayCentralTabStrip } from "~/components/workspace-home/central-tab-strip";
+import {
+	normalizeHomeDirPath,
+	useWorkspaceIsEmpty,
+} from "~/components/workspace-home/lix-data";
 
 interface WorkspaceAtelierProps {
 	workspaceId: string;
@@ -70,6 +82,9 @@ interface WorkspaceAtelierProps {
 
 const WorkspaceAtelierContext = createContext<AtelierInstance | null>(null);
 const WorkspaceDefaultBranchContext = createContext<string | null>(null);
+const WorkspaceRouteSyncContext = createContext<(() => void) | null>(null);
+const WorkspaceBranchSessionContext =
+	createContext<WorkspaceBranchSession | null>(null);
 
 export function WorkspaceAtelier({
 	workspaceId,
@@ -92,8 +107,16 @@ export function WorkspaceAtelier({
 		select: (state) => state.location.pathname,
 	});
 	const routeParams = useParams({ strict: false });
-	const routeFilePath =
-		"_splat" in routeParams ? routeParams._splat : undefined;
+	const routeSplat = "_splat" in routeParams ? routeParams._splat : undefined;
+	const workspaceRootPath = `/@${namespace}/${workspaceSlug}`;
+	const routeChildKind: "file" | "dir" | null = pathname.startsWith(
+		`${workspaceRootPath}/file/`,
+	)
+		? "file"
+		: pathname.startsWith(`${workspaceRootPath}/dir/`)
+			? "dir"
+			: null;
+	const routeFilePath = routeChildKind === "file" ? routeSplat : undefined;
 	const documentName = activeDocumentName({
 		pathname,
 		routeFilePath,
@@ -101,12 +124,18 @@ export function WorkspaceAtelier({
 	});
 	const isReadOnly = !canEdit;
 	const [instance, setInstance] = useState<AtelierInstance | null>(null);
+	const [branchSession, setBranchSession] =
+		useState<WorkspaceBranchSession | null>(null);
 	const [workspaceDefaultBranchId, setWorkspaceDefaultBranchId] = useState<
 		string | null
 	>(null);
 	const [error, setError] = useState<string | null>(null);
 	const activeLixRef = useRef<WorkspaceLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
+	const routeChildRef = useRef<{
+		kind: "file" | "dir" | null;
+		splat: string | undefined;
+	}>({ kind: routeChildKind, splat: routeSplat });
 	const routeFilePathRef = useRef(routeFilePath);
 	const branchIdRef = useRef(branchId);
 	const routeBranchSwitchRef = useRef(0);
@@ -125,6 +154,9 @@ export function WorkspaceAtelier({
 	useEffect(() => {
 		routeFilePathRef.current = routeFilePath;
 	}, [routeFilePath]);
+	useEffect(() => {
+		routeChildRef.current = { kind: routeChildKind, splat: routeSplat };
+	}, [routeChildKind, routeSplat]);
 	useLayoutEffect(() => {
 		branchIdRef.current = branchId;
 	}, [branchId]);
@@ -144,8 +176,19 @@ export function WorkspaceAtelier({
 			);
 		}
 	}, [signInWithGoogle]);
+	const workspaceIsEmpty = useWorkspaceIsEmpty(instance?.lix ?? null);
+	const disabledShareButton = (
+		<span
+			aria-disabled="true"
+			title="Nothing to share yet"
+			className="inline-flex h-7 cursor-default items-center rounded-[7px] border border-border-panel px-3 text-xs font-semibold text-text-tertiary/70"
+		>
+			Share
+		</span>
+	);
+	// Share stays inert until the workspace has content to share (12b/12c).
 	const headerActions = canEdit ? (
-		client ? (
+		client && workspaceIsEmpty === false ? (
 			<WorkspaceShareControl
 				createShareToken={async () => {
 					const { data, error } = await client.rpc(
@@ -162,7 +205,9 @@ export function WorkspaceAtelier({
 				workspaceName={workspaceName}
 				documentName={documentName}
 			/>
-		) : null
+		) : (
+			disabledShareButton
+		)
 	) : (
 		<div className="flex items-center gap-2">
 			{!user ? (
@@ -206,14 +251,17 @@ export function WorkspaceAtelier({
 			const search = defaultBranchId
 				? atelierBranchSearch(nextBranchId, defaultBranchId)
 				: { branch: nextBranchId };
-			const filePath = routeFilePathRef.current;
-			if (filePath !== undefined) {
+			const routeChild = routeChildRef.current;
+			if (routeChild.kind && routeChild.splat !== undefined) {
 				await navigate({
-					to: "/@{$namespace}/$workspace/file/$",
+					to:
+						routeChild.kind === "dir"
+							? "/@{$namespace}/$workspace/dir/$"
+							: "/@{$namespace}/$workspace/file/$",
 					params: {
 						namespace,
 						workspace: workspaceSlug,
-						_splat: filePath,
+						_splat: routeChild.splat,
 					},
 					search,
 					replace,
@@ -230,24 +278,26 @@ export function WorkspaceAtelier({
 		[namespace, navigate, workspaceSlug],
 	);
 
+	// URL ⇄ tabs: the URL always names the ACTIVE central view. Atelier
+	// reports activations (open, tab click, close, restore); the routes below
+	// drive the reverse direction. Suppressed until the initial route has been
+	// applied so a restored session cannot clobber a deep link.
+	const routeSyncedRef = useRef(false);
+	const markRouteSynced = useCallback(() => {
+		routeSyncedRef.current = true;
+	}, []);
 	useEffect(() => {
 		eventHandlerRef.current = (event) => {
 			atelierTelemetryHandlerRef.current?.(event);
-			const nextFilePath =
-				event.type === "document_viewed"
-					? event.filePath
-					: event.type === "document_closed"
-						? event.nextFilePath
-						: undefined;
-			if (nextFilePath === undefined) return;
-			const filePath = nextFilePath?.replace(/^\/+/, "") ?? "";
+			if (event.type !== "central_view_activated") return;
+			if (!routeSyncedRef.current) return;
 			const activeBranchId = activeLixRef.current?.activeBranchSnapshot();
 			const defaultBranchId = activeLixRef.current?.defaultBranchSnapshot();
 			const search =
 				activeBranchId && defaultBranchId
 					? atelierBranchSearch(activeBranchId, defaultBranchId)
 					: {};
-			if (!filePath) {
+			if (event.viewKind === LIXRAY_HOME_EXTENSION_ID) {
 				const targetPath = `/@${namespace}/${workspaceSlug}`;
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
@@ -257,7 +307,32 @@ export function WorkspaceAtelier({
 				});
 				return;
 			}
-			if (routeFilePathRef.current === filePath) return;
+			if (event.viewKind === LIXRAY_DIR_EXTENSION_ID) {
+				const dirPath = normalizeHomeDirPath(event.state?.path);
+				const splat = dirPath.split("/").filter(Boolean).join("/");
+				// A root-listing tab (the strip's New tab) stays URL-less: the
+				// workspace root URL means "Home is active" (rule 1), so syncing
+				// here would bounce the selection back to Home. The tab claims a
+				// URL on its first in-place navigation instead.
+				if (!splat) return;
+				const targetPath = `/@${namespace}/${workspaceSlug}/dir/${splat}`;
+				const currentPath = (() => {
+					try {
+						return decodeURIComponent(pathnameRef.current);
+					} catch {
+						return pathnameRef.current;
+					}
+				})();
+				if (currentPath === targetPath) return;
+				void navigate({
+					to: "/@{$namespace}/$workspace/dir/$",
+					params: { namespace, workspace: workspaceSlug, _splat: splat },
+					search,
+				});
+				return;
+			}
+			const filePath = event.filePath?.replace(/^\/+/, "") ?? "";
+			if (!filePath || routeFilePathRef.current === filePath) return;
 			void navigate({
 				to: "/@{$namespace}/$workspace/file/$",
 				params: {
@@ -274,8 +349,10 @@ export function WorkspaceAtelier({
 		let disposed = false;
 		let activeLix: WorkspaceLixSession | null = null;
 		setInstance(null);
+		setBranchSession(null);
 		setWorkspaceDefaultBranchId(null);
 		setError(null);
+		routeSyncedRef.current = false;
 
 		const userId = isDemoModeEnabled
 			? DEMO_AUTH_TOKEN
@@ -302,7 +379,7 @@ export function WorkspaceAtelier({
 				activeLix = session;
 				activeLixRef.current = session;
 				setWorkspaceDefaultBranchId(session.defaultBranchSnapshot());
-				const branchSession = createWorkspaceBranchSession({
+				const workspaceBranchSession = createWorkspaceBranchSession({
 					session,
 					onSwitch: async (nextBranchId, context) => {
 						const routedBranchId = resolveAtelierRouteBranchId(
@@ -320,12 +397,18 @@ export function WorkspaceAtelier({
 						await navigateToCurrentPathBranch(nextBranchId);
 					},
 				});
+				setBranchSession(workspaceBranchSession);
 				setInstance(
 					createAtelier({
 						lix: session.lix,
 						readOnly: isReadOnly,
-						branchSession,
+						branchSession: workspaceBranchSession,
 						reviewRangeSessionId: userId,
+						extensions: lixrayWorkspaceExtensions,
+						filesViewMode: "sidebar",
+						centralPanel: {
+							home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
+						},
 						sessionStateStore: createWorkspaceSessionStateStore({
 							userId,
 							workspaceId,
@@ -383,7 +466,7 @@ export function WorkspaceAtelier({
 
 	useEffect(() => {
 		const lix = activeLixRef.current;
-		if (!instance || !lix) return;
+		if (!branchSession || !lix) return;
 		const requestedBranchId = resolveAtelierRouteBranchId(
 			branchId,
 			lix.defaultBranchSnapshot(),
@@ -391,7 +474,7 @@ export function WorkspaceAtelier({
 		const routeSwitch = ++routeBranchSwitchRef.current;
 		void (async () => {
 			try {
-				await instance.branches.switch(requestedBranchId);
+				await branchSession.switchBranch(requestedBranchId);
 			} catch (caught) {
 				if (routeSwitch !== routeBranchSwitchRef.current) return;
 				if (!isLixBranchNotFoundError(caught)) {
@@ -399,14 +482,17 @@ export function WorkspaceAtelier({
 						"Unable to switch to the requested Atelier branch",
 						caught,
 					);
+					// The route cannot converge on this branch; let tab
+					// activations drive the URL again rather than freezing it.
+					markRouteSynced();
 					return;
 				}
 				const defaultBranchId = lix.defaultBranchSnapshot();
 				try {
-					if (instance.branches.activeId() !== defaultBranchId) {
+					if (branchSession.getSnapshot() !== defaultBranchId) {
 						suppressBranchNavigationRef.current = true;
 						try {
-							await instance.branches.switch(defaultBranchId);
+							await branchSession.switchBranch(defaultBranchId);
 						} finally {
 							suppressBranchNavigationRef.current = false;
 						}
@@ -419,6 +505,7 @@ export function WorkspaceAtelier({
 							"Unable to recover from a missing Atelier branch",
 							fallbackError,
 						);
+						markRouteSynced();
 					}
 				}
 			}
@@ -428,14 +515,27 @@ export function WorkspaceAtelier({
 				routeBranchSwitchRef.current += 1;
 			}
 		};
-	}, [branchId, instance, navigateToCurrentPathBranch, pathname]);
+	}, [
+		branchId,
+		branchSession,
+		markRouteSynced,
+		navigateToCurrentPathBranch,
+		pathname,
+	]);
 
+	// The workspace root URL means "the pinned Home tab is active" — content
+	// tabs stay open (rule 1 of the tab model: Home never navigates or closes).
 	useEffect(() => {
 		if (!instance) return;
 		const workspaceRoot = `/@${namespace}/${workspaceSlug}`;
 		if (pathname !== workspaceRoot) return;
-		void instance.documents.closeAll();
-	}, [instance, namespace, pathname, workspaceSlug]);
+		void instance.views
+			.open(LIXRAY_HOME_EXTENSION_ID)
+			.catch((error: unknown) => {
+				console.error("Unable to activate the workspace home", error);
+			})
+			.finally(markRouteSynced);
+	}, [instance, markRouteSynced, namespace, pathname, workspaceSlug]);
 
 	return (
 		<div
@@ -446,32 +546,62 @@ export function WorkspaceAtelier({
 				<WorkspaceDefaultBranchContext.Provider
 					value={workspaceDefaultBranchId}
 				>
-					<WorkspaceAtelierContext.Provider value={instance}>
-						<Atelier
-							instance={instance}
-							topBarProps={{
-								"data-app-titlebar": true,
-								className: "border-b border-border-subtle bg-bg-app",
-							}}
-							slots={{
-								navbarStart: (
-									<Link
-										to="/home"
-										aria-label="Back to workspaces"
-										className="flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
-									>
-										<img
-											src="/lixray-mark.svg"
-											alt=""
-											className="size-[18px]"
-										/>
-									</Link>
-								),
-								navbarEnd: headerActions,
-							}}
-						/>
-						<Outlet />
-					</WorkspaceAtelierContext.Provider>
+					<WorkspaceBranchSessionContext.Provider value={branchSession}>
+						<WorkspaceRouteSyncContext.Provider value={markRouteSynced}>
+							<WorkspaceAtelierContext.Provider value={instance}>
+								<Atelier
+									instance={instance}
+									topBarProps={{
+										"data-app-titlebar": true,
+										className: "border-b border-border-subtle bg-bg-app",
+									}}
+									slots={{
+										navbarStart: (
+											<Link
+												to="/home"
+												aria-label="Back to workspaces"
+												className="flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+											>
+												<img
+													src="/lixray-mark.svg"
+													alt=""
+													className="size-[18px]"
+												/>
+											</Link>
+										),
+										// The two homes chain here: the namespace links up
+										// to the hosted home, the workspace names itself.
+										navbarCenter: (
+											<span className="flex items-center gap-2 text-[13px]">
+												<Link
+													to="/home"
+													className="font-medium text-text-tertiary hover:text-text-primary"
+												>
+													{namespace}
+												</Link>
+												<span className="text-text-tertiary/60">/</span>
+												<span className="font-semibold text-text-primary">
+													{workspaceSlug}
+												</span>
+											</span>
+										),
+										centralTabStrip: (context) => (
+											<LixrayCentralTabStrip
+												context={context}
+												pinnedTab={
+													workspaceIsEmpty
+														? { label: "Getting started", icon: Sparkles }
+														: undefined
+												}
+											/>
+										),
+										navbarEnd: headerActions,
+									}}
+								/>
+								<Outlet />
+							</WorkspaceAtelierContext.Provider>
+						</WorkspaceRouteSyncContext.Provider>
+					</WorkspaceBranchSessionContext.Provider>
 				</WorkspaceDefaultBranchContext.Provider>
 			) : null}
 			{!instance && !error ? (
@@ -500,6 +630,28 @@ export function useWorkspaceAtelierInstance(): AtelierInstance | null {
 
 export function useWorkspaceDefaultBranchId(): string | null {
 	return useContext(WorkspaceDefaultBranchContext);
+}
+
+/**
+ * Child routes call this after applying their URL to the Atelier tabs;
+ * until then, tab-activation events do not navigate (deep links win).
+ */
+export function useMarkWorkspaceRouteSynced(): () => void {
+	const markRouteSynced = useContext(WorkspaceRouteSyncContext);
+	return markRouteSynced ?? (() => undefined);
+}
+
+const NO_BRANCH_SUBSCRIBE = () => () => undefined;
+const NO_BRANCH_SNAPSHOT = () => null;
+
+/** The active workspace branch id, live (null before the session opens). */
+export function useWorkspaceActiveBranchId(): string | null {
+	const branchSession = useContext(WorkspaceBranchSessionContext);
+	return useSyncExternalStore(
+		branchSession?.subscribe.bind(branchSession) ?? NO_BRANCH_SUBSCRIBE,
+		branchSession?.getSnapshot.bind(branchSession) ?? NO_BRANCH_SNAPSHOT,
+		branchSession?.getSnapshot.bind(branchSession) ?? NO_BRANCH_SNAPSHOT,
+	);
 }
 
 function WorkspaceShareControl({

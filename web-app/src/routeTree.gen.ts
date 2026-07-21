@@ -22,6 +22,7 @@ import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as AtChar123namespaceChar125WorkspaceRouteImport } from './routes/@{$namespace}.$workspace'
 import { Route as AtChar123namespaceChar125WorkspaceFileSplatRouteImport } from './routes/@{$namespace}.$workspace.file.$'
+import { Route as AtChar123namespaceChar125WorkspaceDirSplatRouteImport } from './routes/@{$namespace}.$workspace.dir.$'
 
 const WorkspaceRoute = WorkspaceRouteImport.update({
   id: '/workspace',
@@ -90,6 +91,12 @@ const AtChar123namespaceChar125WorkspaceFileSplatRoute =
     path: '/file/$',
     getParentRoute: () => AtChar123namespaceChar125WorkspaceRoute,
   } as any)
+const AtChar123namespaceChar125WorkspaceDirSplatRoute =
+  AtChar123namespaceChar125WorkspaceDirSplatRouteImport.update({
+    id: '/dir/$',
+    path: '/dir/$',
+    getParentRoute: () => AtChar123namespaceChar125WorkspaceRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -104,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/invite/$token': typeof InviteTokenRoute
   '/oauth/consent': typeof OauthConsentRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/@{$namespace}/$workspace/dir/$': typeof AtChar123namespaceChar125WorkspaceDirSplatRoute
   '/@{$namespace}/$workspace/file/$': typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
 }
 export interface FileRoutesByTo {
@@ -119,6 +127,7 @@ export interface FileRoutesByTo {
   '/invite/$token': typeof InviteTokenRoute
   '/oauth/consent': typeof OauthConsentRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/@{$namespace}/$workspace/dir/$': typeof AtChar123namespaceChar125WorkspaceDirSplatRoute
   '/@{$namespace}/$workspace/file/$': typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
 }
 export interface FileRoutesById {
@@ -135,6 +144,7 @@ export interface FileRoutesById {
   '/invite/$token': typeof InviteTokenRoute
   '/oauth/consent': typeof OauthConsentRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/@{$namespace}/$workspace/dir/$': typeof AtChar123namespaceChar125WorkspaceDirSplatRoute
   '/@{$namespace}/$workspace/file/$': typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
 }
 export interface FileRouteTypes {
@@ -152,6 +162,7 @@ export interface FileRouteTypes {
     | '/invite/$token'
     | '/oauth/consent'
     | '/sign-up/$'
+    | '/@{$namespace}/$workspace/dir/$'
     | '/@{$namespace}/$workspace/file/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -167,6 +178,7 @@ export interface FileRouteTypes {
     | '/invite/$token'
     | '/oauth/consent'
     | '/sign-up/$'
+    | '/@{$namespace}/$workspace/dir/$'
     | '/@{$namespace}/$workspace/file/$'
   id:
     | '__root__'
@@ -182,6 +194,7 @@ export interface FileRouteTypes {
     | '/invite/$token'
     | '/oauth/consent'
     | '/sign-up/$'
+    | '/@{$namespace}/$workspace/dir/$'
     | '/@{$namespace}/$workspace/file/$'
   fileRoutesById: FileRoutesById
 }
@@ -292,6 +305,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123namespaceChar125WorkspaceFileSplatRouteImport
       parentRoute: typeof AtChar123namespaceChar125WorkspaceRoute
     }
+    '/@{$namespace}/$workspace/dir/$': {
+      id: '/@{$namespace}/$workspace/dir/$'
+      path: '/dir/$'
+      fullPath: '/@{$namespace}/$workspace/dir/$'
+      preLoaderRoute: typeof AtChar123namespaceChar125WorkspaceDirSplatRouteImport
+      parentRoute: typeof AtChar123namespaceChar125WorkspaceRoute
+    }
   }
 }
 
@@ -307,11 +327,14 @@ const SignUpRouteWithChildren =
   SignUpRoute._addFileChildren(SignUpRouteChildren)
 
 interface AtChar123namespaceChar125WorkspaceRouteChildren {
+  AtChar123namespaceChar125WorkspaceDirSplatRoute: typeof AtChar123namespaceChar125WorkspaceDirSplatRoute
   AtChar123namespaceChar125WorkspaceFileSplatRoute: typeof AtChar123namespaceChar125WorkspaceFileSplatRoute
 }
 
 const AtChar123namespaceChar125WorkspaceRouteChildren: AtChar123namespaceChar125WorkspaceRouteChildren =
   {
+    AtChar123namespaceChar125WorkspaceDirSplatRoute:
+      AtChar123namespaceChar125WorkspaceDirSplatRoute,
     AtChar123namespaceChar125WorkspaceFileSplatRoute:
       AtChar123namespaceChar125WorkspaceFileSplatRoute,
   }
