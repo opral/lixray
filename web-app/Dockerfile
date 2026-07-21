@@ -4,8 +4,8 @@ FROM node:22-bookworm AS builder
 
 ARG LIX_REV=a101736982eaea077cee65bb440afd8995d26650
 ARG LIX_ARCHIVE_SHA256=64a5f0c84781d9ce645f947bcbce1d7b66c7905e982a1dffcd656ce28c036bb3
-ARG ATELIER_REV=1ff102f2d2659e5f4e01bff4d8cbe9ae0f6f687f
-ARG ATELIER_ARCHIVE_SHA256=493572f99c719670eaf42866ad2c784cd481219b8cf53d6898b8c704f5aaea2e
+ARG ATELIER_REV=29e5e4a3f915c1c1b02bd9602b976e174f234033
+ARG ATELIER_ARCHIVE_SHA256=d17448e82e90b0147bed8c83cbb46541b584eafe54c259a8da75628e031e7048
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_KEY
 ARG LIXRAY_DEMO
@@ -56,7 +56,10 @@ RUN if [ ! -f vendor/lix/packages/js-sdk/package.json ]; then \
 # the ID as opaque, so the same cache works for local Compose builds.
 RUN --mount=type=cache,id=s/c745bcb2-fef1-4ba6-9ebf-a6d112d94d05-/root/.local/share/pnpm/store,target=/root/.local/share/pnpm/store \
 	pnpm install --frozen-lockfile
-RUN if echo "$RAILWAY_ENVIRONMENT_NAME" | grep -Eq '^lixray-pr-[0-9]+$'; then \
+# Railway names PR environments "lixray-pr-<n>" when configured, but
+# recreated ones get the default "pr-<hash>-<n>" — accept both. Keep in
+# sync with assert-railway-env.mjs and worker/handler.ts isDemoMode.
+RUN if echo "$RAILWAY_ENVIRONMENT_NAME" | grep -Eq '^(lixray-pr-[0-9]+|pr-[a-z0-9]+-[0-9]+)$'; then \
 		export LIXRAY_DEMO=1; \
 		export LIXRAY_DEMO_WORKSPACE_IDS=00000000-0000-4000-8000-000000000002; \
 		export VITE_LIXRAY_DEMO=1; \

@@ -53,13 +53,22 @@ export function createWorkspaceSessionStateStore(args: {
 	};
 }
 
+/**
+ * Atelier only observes the active branch; LixRay keeps the mutation
+ * surface (create/switch) for its own routing and UI.
+ */
+export type WorkspaceBranchSession = AtelierBranchSession & {
+	createBranch(name: string): Promise<string>;
+	switchBranch(branchId: string): Promise<void>;
+};
+
 export function createWorkspaceBranchSession(args: {
 	readonly session: WorkspaceLixSession;
 	readonly onSwitch: (
 		branchId: string,
 		context?: { readonly failedBranchId?: string },
 	) => Promise<void> | void;
-}): AtelierBranchSession {
+}): WorkspaceBranchSession {
 	let latestSelection = 0;
 	let pendingSelection = Promise.resolve();
 	const select = <T>(

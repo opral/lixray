@@ -937,9 +937,14 @@ function demoWorkspaceSummaries(env: WorkerEnv): Array<WorkspaceSummary> {
 }
 
 export function isDemoMode(env: WorkerEnv): boolean {
+	// Railway names PR environments "lixray-pr-<n>" when configured, but
+	// recreated ones get the default "pr-<hash>-<n>" — accept both. Keep in
+	// sync with web-app/Dockerfile and scripts/assert-railway-env.mjs.
 	return (
 		env.LIXRAY_DEMO === "1" ||
-		/^lixray-pr-\d+$/.test(env.RAILWAY_ENVIRONMENT_NAME ?? "")
+		/^(lixray-pr-\d+|pr-[a-z0-9]+-\d+)$/.test(
+			env.RAILWAY_ENVIRONMENT_NAME ?? "",
+		)
 	);
 }
 
