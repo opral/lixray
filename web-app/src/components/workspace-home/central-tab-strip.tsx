@@ -5,7 +5,7 @@ import type {
 import { LIXRAY_DIR_EXTENSION_ID } from "./host-extensions";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import { X } from "lucide-react";
-import { type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 /**
  * The central tab strip rendered to the home comp's spec (15a/12b): white
@@ -28,7 +28,7 @@ export function LixrayCentralTabStrip({
 }) {
 	const newTab = onNewTab ?? context.newTab;
 	return (
-		<div className="flex h-[var(--atelier-panel-header-height)] items-center gap-1">
+		<div className="flex h-[var(--atelier-panel-header-height)] min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 			{context.tabs.map((tab) => (
 				<TabChip
 					key={tab.instanceId}
@@ -58,6 +58,13 @@ function TabChip({ tab }: { readonly tab: AtelierTabStripTab }) {
 	// The pinned Home compacts to its icon while a content tab is active —
 	// "the house is always one click" — and the collapse/expand animates.
 	const showLabel = !tab.isPinned || tab.isActive;
+	const chipRef = useRef<HTMLButtonElement | null>(null);
+	// Keep the active chip in view when the strip overflows (browser tabs).
+	useEffect(() => {
+		if (tab.isActive) {
+			chipRef.current?.scrollIntoView({ inline: "nearest", block: "nearest" });
+		}
+	}, [tab.isActive]);
 	const stateClasses = tab.isActive
 		? "border-border-panel bg-bg-panel px-3 font-semibold text-text-primary"
 		: tab.isPinned
@@ -65,12 +72,15 @@ function TabChip({ tab }: { readonly tab: AtelierTabStripTab }) {
 			: "border-transparent px-3 font-medium text-text-tertiary hover:bg-bg-hover hover:text-text-primary";
 	return (
 		<button
+			ref={chipRef}
 			type="button"
 			aria-label={tab.label}
 			title={showLabel ? undefined : tab.label}
 			onClick={tab.select}
 			data-active={tab.isActive ? "true" : undefined}
-			className={`flex h-7 shrink-0 items-center rounded-[7px] border text-[12.5px] transition-all duration-200 ease-out ${stateClasses}`}
+			className={`flex h-7 items-center rounded-[7px] border text-[12.5px] transition-all duration-200 ease-out ${
+				tab.isPinned ? "shrink-0" : "min-w-9 shrink"
+			} ${stateClasses}`}
 		>
 			<TabIcon tab={tab} />
 			<span
