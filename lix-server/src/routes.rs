@@ -111,9 +111,30 @@ async fn workspace_protocol_inner(
             .into_response();
     }
 
-    let runtime = match state.manager.get(&workspace_id).await {
-        Ok(runtime) => runtime,
-        Err(error) => return workspace_error(error),
+    // The open path gets the same deadline as the protocol call: a wedged
+    // store can hang the runtime open before anything is logged, and every
+    // caller for that workspace then queues behind it.
+    let runtime = match tokio::time::timeout(
+        state.protocol_timeout,
+        state.manager.get(&workspace_id),
+    )
+    .await
+    {
+        Ok(Ok(runtime)) => runtime,
+        Ok(Err(error)) => return workspace_error(error),
+        Err(_elapsed) => {
+            tracing::warn!(
+                workspace_id,
+                timeout_secs = state.protocol_timeout.as_secs(),
+                "workspace open exceeded its deadline; abandoning pending open"
+            );
+            state.manager.abandon_uninitialized(&workspace_id).await;
+            return (
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(json!({"error": "workspace open timed out"})),
+            )
+                .into_response();
+        }
     };
 
     let path_and_query = match request.uri().query() {
@@ -507,6 +528,39 @@ mod tests {
         let after =
             protocol_request(app, workspace_id, "SELECT COUNT(*) AS count FROM lix_file").await;
         assert_eq!(after.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn wedged_workspace_open_times_out_and_allows_retry() {
+        let inner = Arc::new(InMemory::new());
+        let store = Arc::new(BlockingStore::new(Arc::clone(&inner)));
+        let manager = WorkspaceRuntimeManager::new_with_test_object_store(4, store.clone());
+        let app = router(Arc::clone(&manager), None, Duration::from_millis(250));
+        let workspace_id = "never-opened-workspace";
+
+        // Wedge the store before the workspace has ever opened: the open
+        // itself hangs, before any runtime exists to recover.
+        let blocked_write = store.block_next_write();
+        let wedged_started = Instant::now();
+        let wedged = protocol_request(
+            app.clone(),
+            workspace_id,
+            "SELECT COUNT(*) AS count FROM lix_file",
+        )
+        .await;
+        assert_eq!(wedged.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert!(
+            wedged_started.elapsed() < Duration::from_secs(5),
+            "the deadline must bound the open instead of the store's hang"
+        );
+        assert_eq!(json_body(wedged).await["error"], "workspace open timed out");
+
+        // With the store healthy again, a retry gets a fresh open — the
+        // abandoned pending open must not leave the workspace stuck.
+        drop(blocked_write);
+        let retried =
+            protocol_request(app, workspace_id, "SELECT COUNT(*) AS count FROM lix_file").await;
+        assert_eq!(retried.status(), StatusCode::OK);
     }
 
     async fn protocol_request(app: Router, workspace_id: &str, sql: &str) -> Response {

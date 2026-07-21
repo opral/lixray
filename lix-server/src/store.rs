@@ -311,6 +311,24 @@ impl WorkspaceRuntimeManager {
         })))
     }
 
+    /// Drops a workspace entry whose runtime never finished opening, so the
+    /// next request starts a fresh open instead of queueing behind a wedged
+    /// one. A no-op once the runtime initialized (recovery handles that case).
+    pub(crate) async fn abandon_uninitialized(self: &Arc<Self>, workspace_id: &str) {
+        let mut state = self.state.lock().await;
+        let uninitialized = state
+            .entries
+            .get(workspace_id)
+            .is_some_and(|entry| entry.runtime.get().is_none());
+        if uninitialized {
+            state.entries.remove(workspace_id);
+            info!(
+                workspace_id,
+                "abandoned workspace runtime that never opened"
+            );
+        }
+    }
+
     pub(crate) async fn recover(self: &Arc<Self>, workspace_id: &str, service: &Arc<LixService>) {
         let runtime = {
             let state = self.state.lock().await;
