@@ -410,7 +410,6 @@ export function WorkspaceAtelier({
 						extensions: lixrayWorkspaceExtensions,
 						filesViewMode: "sidebar",
 						centralPanel: {
-							mode: "tabs",
 							home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
 						},
 						sessionStateStore: createWorkspaceSessionStateStore({
