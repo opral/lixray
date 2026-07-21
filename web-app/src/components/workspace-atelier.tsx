@@ -57,8 +57,6 @@ import {
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
-	lixrayDirInstanceId,
-	lixrayDirViewState,
 	lixrayWorkspaceExtensions,
 } from "~/components/workspace-home/host-extensions";
 import { LixrayCentralTabStrip } from "~/components/workspace-home/central-tab-strip";
@@ -141,7 +139,6 @@ export function WorkspaceAtelier({
 	const routeFilePathRef = useRef(routeFilePath);
 	const branchIdRef = useRef(branchId);
 	const routeBranchSwitchRef = useRef(0);
-	const newTabSeqRef = useRef(0);
 	const suppressBranchNavigationRef = useRef(false);
 	const eventHandlerRef = useRef<(event: AtelierEvent) => void>(
 		() => undefined,
@@ -596,23 +593,6 @@ export function WorkspaceAtelier({
 														? { label: "Getting started", icon: Sparkles }
 														: undefined
 												}
-												onNewTab={async () => {
-													// A fresh tab opens the workspace root listing —
-													// in-place navigation takes it from there.
-													newTabSeqRef.current += 1;
-													try {
-														await instance.views.open(LIXRAY_DIR_EXTENSION_ID, {
-															state: {
-																...lixrayDirViewState("/"),
-																atelier: { label: "New tab" },
-															},
-															instanceId: `${lixrayDirInstanceId("/")}#${newTabSeqRef.current}`,
-															newTab: true,
-														});
-													} catch (caught) {
-														console.error("Unable to open a new tab", caught);
-													}
-												}}
 											/>
 										),
 										navbarEnd: headerActions,

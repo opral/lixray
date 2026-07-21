@@ -14,19 +14,15 @@ import { useEffect, useRef, type ReactNode } from "react";
  */
 export function LixrayCentralTabStrip({
 	context,
-	onNewTab,
 	pinnedTab,
 }: {
 	readonly context: AtelierTabStripContext;
-	/** ＋ opens a new tab (a view) — rule 5's second door, next to ⌘-click. */
-	readonly onNewTab?: () => void | Promise<void>;
 	/** Overrides the pinned tab's presentation (e.g. "Getting started"). */
 	readonly pinnedTab?: {
 		readonly label: string;
 		readonly icon: AtelierTabStripTab["icon"];
 	};
 }) {
-	const newTab = onNewTab ?? context.newTab;
 	return (
 		<div className="flex h-[var(--atelier-panel-header-height)] min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 			{context.tabs.map((tab) => (
@@ -39,17 +35,6 @@ export function LixrayCentralTabStrip({
 					}
 				/>
 			))}
-			{newTab ? (
-				<button
-					type="button"
-					aria-label="New tab"
-					data-testid="lixray-new-tab"
-					onClick={() => void newTab()}
-					className="grid size-[26px] shrink-0 place-content-center rounded-md text-[15px] leading-none text-text-quaternary hover:bg-bg-hover-canvas hover:text-text-secondary"
-				>
-					＋
-				</button>
-			) : null}
 		</div>
 	);
 }
