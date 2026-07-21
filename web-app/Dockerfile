@@ -70,6 +70,7 @@ FROM node:22-bookworm-slim AS runtime
 WORKDIR /app/web-app
 COPY --from=builder /app/web-app/dist ./dist
 COPY --from=builder /app/web-app/scripts/assert-railway-env.mjs ./scripts/assert-railway-env.mjs
+COPY --from=builder /app/web-app/scripts/railway-server.mjs ./scripts/railway-server.mjs
 COPY --from=builder /app/web-app/scripts/start-railway.mjs ./scripts/start-railway.mjs
 
 ENV PORT=8080
