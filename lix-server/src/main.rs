@@ -20,10 +20,13 @@ async fn main() -> anyhow::Result<()> {
         internal_auth = internal_token.is_some(),
         "lix workspace service ready"
     );
-    let result = axum::serve(listener, router(manager, internal_token))
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("serve HTTP");
+    let result = axum::serve(
+        listener,
+        router(manager, internal_token, config.protocol_timeout),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("serve HTTP");
     if let Some(provider) = trace_provider {
         match tokio::task::spawn_blocking(move || provider.shutdown()).await {
             Ok(Err(error)) => tracing::warn!(%error, "failed to flush traces during shutdown"),

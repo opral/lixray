@@ -12,6 +12,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 use tower::ServiceExt;
 use tracing::Instrument as _;
@@ -20,6 +21,7 @@ use tracing::Instrument as _;
 struct AppState {
     manager: Arc<WorkspaceRuntimeManager>,
     internal_token: Option<Arc<str>>,
+    protocol_timeout: Duration,
 }
 
 struct TracedBody {
@@ -49,7 +51,11 @@ impl http_body::Body for TracedBody {
     }
 }
 
-pub fn router(manager: Arc<WorkspaceRuntimeManager>, internal_token: Option<String>) -> Router {
+pub fn router(
+    manager: Arc<WorkspaceRuntimeManager>,
+    internal_token: Option<String>,
+    protocol_timeout: Duration,
+) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route(
@@ -59,6 +65,7 @@ pub fn router(manager: Arc<WorkspaceRuntimeManager>, internal_token: Option<Stri
         .with_state(AppState {
             manager,
             internal_token: internal_token.map(Arc::from),
+            protocol_timeout,
         })
 }
 
@@ -122,10 +129,27 @@ async fn workspace_protocol_inner(
     };
     *request.uri_mut() = uri;
 
-    let response = lix_server_protocol::handler(runtime.protocol_lix())
-        .oneshot(request)
-        .await
-        .expect("canonical Lix protocol router is infallible");
+    // A deadline on the whole protocol call: the object-store client has its
+    // own request budget, but a wedged connection (e.g. after a host sleep)
+    // can still hang past it — without this bound the request never answers
+    // and the runtime stays wedged for every caller after it.
+    let handler_future = lix_server_protocol::handler(runtime.protocol_lix()).oneshot(request);
+    let response = match tokio::time::timeout(state.protocol_timeout, handler_future).await {
+        Ok(response) => response.expect("canonical Lix protocol router is infallible"),
+        Err(_elapsed) => {
+            tracing::warn!(
+                workspace_id,
+                timeout_secs = state.protocol_timeout.as_secs(),
+                "protocol request exceeded its deadline; recovering runtime"
+            );
+            state.manager.recover(&workspace_id, &runtime).await;
+            return (
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(json!({"error": "workspace request timed out"})),
+            )
+                .into_response();
+        }
+    };
     if runtime.has_terminal_durability_failure() {
         state.manager.recover(&workspace_id, &runtime).await;
         return workspace_error(WorkspaceRuntimeError::Recovering);
@@ -179,9 +203,11 @@ mod tests {
     };
     use tokio::task::JoinSet;
 
+    const TEST_PROTOCOL_TIMEOUT: Duration = Duration::from_secs(60);
+
     fn test_router() -> Router {
         let manager = WorkspaceRuntimeManager::new_in_memory(4);
-        router(manager, None)
+        router(manager, None, TEST_PROTOCOL_TIMEOUT)
     }
 
     async fn json_body(response: Response) -> JsonValue {
@@ -243,7 +269,7 @@ mod tests {
     #[tokio::test]
     async fn internal_token_protects_workspace_routes() {
         let manager = WorkspaceRuntimeManager::new_in_memory(4);
-        let app = router(manager, Some("secret".to_string()));
+        let app = router(manager, Some("secret".to_string()), TEST_PROTOCOL_TIMEOUT);
 
         let unauthorized = app
             .clone()
@@ -336,7 +362,7 @@ mod tests {
         let inner = Arc::new(InMemory::new());
         let store = Arc::new(BlockingStore::new(Arc::clone(&inner)));
         let manager = WorkspaceRuntimeManager::new_with_test_object_store(4, store.clone());
-        let app = router(Arc::clone(&manager), None);
+        let app = router(Arc::clone(&manager), None, TEST_PROTOCOL_TIMEOUT);
         let workspace_id = "poisoned-workspace";
 
         let opened = protocol_request(
@@ -438,6 +464,49 @@ mod tests {
             QUEUED_REQUESTS,
             recovery_reopen_latency.as_millis(),
         );
+    }
+
+    #[tokio::test]
+    async fn wedged_protocol_request_times_out_and_recovers() {
+        let inner = Arc::new(InMemory::new());
+        let store = Arc::new(BlockingStore::new(Arc::clone(&inner)));
+        let manager = WorkspaceRuntimeManager::new_with_test_object_store(4, store.clone());
+        let app = router(Arc::clone(&manager), None, Duration::from_millis(250));
+        let workspace_id = "wedged-workspace";
+
+        let opened = protocol_request(
+            app.clone(),
+            workspace_id,
+            "SELECT COUNT(*) AS count FROM lix_file",
+        )
+        .await;
+        assert_eq!(opened.status(), StatusCode::OK);
+
+        let blocked_write = store.block_next_write();
+        let wedged_started = Instant::now();
+        let wedged = protocol_request(
+            app.clone(),
+            workspace_id,
+            "INSERT INTO lix_file (path, data) VALUES ('/wedged.txt', X'41')",
+        )
+        .await;
+        assert_eq!(wedged.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert!(
+            wedged_started.elapsed() < Duration::from_secs(5),
+            "the deadline must bound the request instead of the store's hang"
+        );
+        assert_eq!(
+            json_body(wedged).await["error"],
+            "workspace request timed out"
+        );
+
+        // Unblock the store; the recovered runtime reopens for new requests.
+        drop(blocked_write);
+        let reopened = wait_for_reopened_runtime(&manager, workspace_id).await;
+        drop(reopened);
+        let after =
+            protocol_request(app, workspace_id, "SELECT COUNT(*) AS count FROM lix_file").await;
+        assert_eq!(after.status(), StatusCode::OK);
     }
 
     async fn protocol_request(app: Router, workspace_id: &str, sql: &str) -> Response {
