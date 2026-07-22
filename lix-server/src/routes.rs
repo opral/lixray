@@ -1,4 +1,4 @@
-use crate::{WorkspaceRuntimeError, WorkspaceRuntimeManager};
+use crate::{LixService, WorkspaceRuntimeError, WorkspaceRuntimeManager};
 use axum::{
     body::Body,
     extract::{Path, State},
@@ -29,6 +29,15 @@ struct TracedBody {
     span: tracing::Span,
 }
 
+/// Keeps the workspace's one shared Engine alive until the HTTP body is
+/// finished. This matters for SSE: dropping the request-scoped service lease
+/// as soon as headers are returned would let workspace LRU eviction open a
+/// second Engine while an observation from the first Engine is still active.
+struct WorkspaceLeaseBody {
+    inner: Body,
+    _workspace: Arc<LixService>,
+}
+
 impl http_body::Body for TracedBody {
     type Data = <Body as http_body::Body>::Data;
     type Error = <Body as http_body::Body>::Error;
@@ -39,6 +48,26 @@ impl http_body::Body for TracedBody {
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
         let span = self.span.clone();
         let _entered = span.enter();
+        Pin::new(&mut self.inner).poll_frame(context)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+impl http_body::Body for WorkspaceLeaseBody {
+    type Data = <Body as http_body::Body>::Data;
+    type Error = <Body as http_body::Body>::Error;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
         Pin::new(&mut self.inner).poll_frame(context)
     }
 
@@ -133,7 +162,7 @@ async fn workspace_protocol_inner(
     // own request budget, but a wedged connection (e.g. after a host sleep)
     // can still hang past it — without this bound the request never answers
     // and the runtime stays wedged for every caller after it.
-    let handler_future = lix_server_protocol::handler(runtime.protocol_lix()).oneshot(request);
+    let handler_future = lix_server_protocol::handler(runtime.protocol()).oneshot(request);
     let response = match tokio::time::timeout(state.protocol_timeout, handler_future).await {
         Ok(response) => response.expect("canonical Lix protocol router is infallible"),
         Err(_elapsed) => {
@@ -154,7 +183,14 @@ async fn workspace_protocol_inner(
         state.manager.recover(&workspace_id, &runtime).await;
         return workspace_error(WorkspaceRuntimeError::Recovering);
     }
-    response
+    let (parts, body) = response.into_parts();
+    Response::from_parts(
+        parts,
+        Body::new(WorkspaceLeaseBody {
+            inner: body,
+            _workspace: runtime,
+        }),
+    )
 }
 
 fn authorized(headers: &HeaderMap, internal_token: Option<&str>) -> bool {
@@ -185,6 +221,7 @@ mod tests {
     use axum::http::Request;
     use futures_util::stream::BoxStream;
     use http_body_util::BodyExt;
+    use lix_sdk::{Value as LixValue, WireValue};
     use object_store::memory::InMemory;
     use object_store::path::Path as ObjectPath;
     use object_store::{
@@ -195,6 +232,7 @@ mod tests {
     use serde_json::{json, Value as JsonValue};
     use std::{
         ops::Range,
+        path::PathBuf,
         sync::{
             atomic::{AtomicBool, Ordering},
             Condvar, Mutex,
@@ -222,6 +260,12 @@ mod tests {
         .expect("response JSON")
     }
 
+    async fn buffered_response(response: Response) -> Response {
+        let (parts, body) = response.into_parts();
+        let bytes = body.collect().await.expect("response body").to_bytes();
+        Response::from_parts(parts, Body::from(bytes))
+    }
+
     #[tokio::test]
     async fn exposes_only_the_workspace_addressed_protocol() {
         let app = test_router();
@@ -247,7 +291,9 @@ mod tests {
             .await
             .expect("handshake response");
         assert_eq!(handshake.status(), StatusCode::OK);
-        assert_eq!(json_body(handshake).await["protocolVersion"], json!(1));
+        let handshake = json_body(handshake).await;
+        assert_eq!(handshake["protocolVersion"], json!(1));
+        assert!(handshake["sessionId"].as_str().is_some());
     }
 
     #[tokio::test]
@@ -299,12 +345,17 @@ mod tests {
     #[tokio::test]
     async fn isolates_workspace_data() {
         let app = test_router();
+        let workspace_a_session = open_protocol_session(app.clone(), "workspace-a").await;
         let insert = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/workspaces/workspace-a/lix/v1/execute")
+                    .header(
+                        lix_server_protocol::SESSION_ID_HEADER,
+                        &workspace_a_session,
+                    )
                     .header("content-type", "application/json")
                     .body(Body::from(
                         r#"{"sql":"INSERT INTO lix_file (path, data) VALUES ('/only-a.txt', X'41')"}"#,
@@ -321,6 +372,11 @@ mod tests {
         );
 
         for (workspace_id, expected) in [("workspace-a", 1), ("workspace-b", 0)] {
+            let session_id = if workspace_id == "workspace-a" {
+                workspace_a_session.clone()
+            } else {
+                open_protocol_session(app.clone(), workspace_id).await
+            };
             let response = app
                 .clone()
                 .oneshot(
@@ -329,6 +385,7 @@ mod tests {
                         .uri(format!(
                             "/workspaces/{workspace_id}/lix/v1/execute"
                         ))
+                        .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
                         .header("content-type", "application/json")
                         .body(Body::from(
                             r#"{"sql":"SELECT COUNT(*) AS count FROM lix_file WHERE path = '/only-a.txt'"}"#,
@@ -340,6 +397,119 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK);
             assert_eq!(json_body(response).await["rows"][0][0]["value"], expected);
         }
+    }
+
+    #[tokio::test]
+    async fn strict_remote_sessions_merge_disjoint_markdown_blob_edits() {
+        let archive_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../vendor/lix/packages/js-sdk/dist/bundled-plugins/plugin_md_v2.lixplugin");
+        let Ok(markdown_plugin) = std::fs::read(&archive_path) else {
+            // The root pnpm install supplies bundled plugins. Keep standalone
+            // Rust development usable before that generated artifact exists.
+            eprintln!(
+                "skipping native Markdown protocol test; build {} first",
+                archive_path.display()
+            );
+            return;
+        };
+
+        let app = test_router();
+        let workspace_id = "markdown-collaboration";
+        let installer = open_protocol_session(app.clone(), workspace_id).await;
+        expect_protocol_ok(
+            protocol_execute(
+                app.clone(),
+                workspace_id,
+                &installer,
+                "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+                vec![
+                    wire_value(LixValue::Text(
+                        "/.lix/plugins/plugin_md_v2.lixplugin".to_string(),
+                    )),
+                    wire_value(LixValue::Blob(markdown_plugin)),
+                ],
+            )
+            .await,
+        )
+        .await;
+
+        let session_a = open_protocol_session(app.clone(), workspace_id).await;
+        let session_b = open_protocol_session(app.clone(), workspace_id).await;
+        let path = "/shared.md";
+        let seed = b"# Shared\n\nLeft: 0\n\nRight: 0\n".to_vec();
+        expect_protocol_ok(
+            protocol_execute(
+                app.clone(),
+                workspace_id,
+                &session_a,
+                "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+                vec![
+                    wire_value(LixValue::Text(path.to_string())),
+                    wire_value(LixValue::Blob(seed.clone())),
+                ],
+            )
+            .await,
+        )
+        .await;
+
+        for session_id in [&session_a, &session_b] {
+            let delivered = expect_protocol_ok(
+                protocol_execute(
+                    app.clone(),
+                    workspace_id,
+                    session_id,
+                    "SELECT data FROM lix_file WHERE path = $1",
+                    vec![wire_value(LixValue::Text(path.to_string()))],
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(wire_blob(&delivered), seed);
+        }
+
+        let write_a = protocol_execute(
+            app.clone(),
+            workspace_id,
+            &session_a,
+            "UPDATE lix_file SET data = $1 WHERE path = $2",
+            vec![
+                wire_value(LixValue::Blob(
+                    b"# Shared\n\nLeft: A\n\nRight: 0\n".to_vec(),
+                )),
+                wire_value(LixValue::Text(path.to_string())),
+            ],
+        );
+        let write_b = protocol_execute(
+            app.clone(),
+            workspace_id,
+            &session_b,
+            "UPDATE lix_file SET data = $1 WHERE path = $2",
+            vec![
+                wire_value(LixValue::Blob(
+                    b"# Shared\n\nLeft: 0\n\nRight: B\n".to_vec(),
+                )),
+                wire_value(LixValue::Text(path.to_string())),
+            ],
+        );
+        let (write_a, write_b) = tokio::join!(write_a, write_b);
+        expect_protocol_ok(write_a).await;
+        expect_protocol_ok(write_b).await;
+
+        let merged = expect_protocol_ok(
+            protocol_execute(
+                app.clone(),
+                workspace_id,
+                &session_a,
+                "SELECT data FROM lix_file WHERE path = $1",
+                vec![wire_value(LixValue::Text(path.to_string()))],
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(
+            String::from_utf8(wire_blob(&merged)).expect("merged Markdown should be UTF-8"),
+            "# Shared\n\nLeft: A\n\nRight: B\n"
+        );
     }
 
     #[tokio::test]
@@ -510,16 +680,105 @@ mod tests {
     }
 
     async fn protocol_request(app: Router, workspace_id: &str, sql: &str) -> Response {
+        let handshake = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/workspaces/{workspace_id}/lix/v1/"))
+                    .body(Body::empty())
+                    .expect("protocol handshake request"),
+            )
+            .await
+            .expect("protocol handshake response");
+        if handshake.status() != StatusCode::OK {
+            return buffered_response(handshake).await;
+        }
+        let session_id = json_body(handshake).await["sessionId"]
+            .as_str()
+            .expect("handshake session id")
+            .to_string();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/workspaces/{workspace_id}/lix/v1/execute"))
+                    .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                    .header("content-type", "application/json")
+                    .body(Body::from(json!({ "sql": sql }).to_string()))
+                    .expect("protocol request"),
+            )
+            .await
+            .expect("protocol response");
+        // Axum normally consumes the response body on the socket, which drops
+        // the workspace lease held for streaming responses. Buffering here
+        // gives these in-process recovery tests the same lifecycle while still
+        // returning an inspectable response to the caller.
+        buffered_response(response).await
+    }
+
+    async fn protocol_execute(
+        app: Router,
+        workspace_id: &str,
+        session_id: &str,
+        sql: &str,
+        params: Vec<JsonValue>,
+    ) -> Response {
         app.oneshot(
             Request::builder()
                 .method("POST")
                 .uri(format!("/workspaces/{workspace_id}/lix/v1/execute"))
+                .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
                 .header("content-type", "application/json")
-                .body(Body::from(json!({ "sql": sql }).to_string()))
-                .expect("protocol request"),
+                .body(Body::from(
+                    json!({ "sql": sql, "params": params }).to_string(),
+                ))
+                .expect("protocol execute request"),
         )
         .await
-        .expect("protocol response")
+        .expect("protocol execute response")
+    }
+
+    async fn expect_protocol_ok(response: Response) -> JsonValue {
+        let status = response.status();
+        let body = json_body(response).await;
+        assert_eq!(status, StatusCode::OK, "protocol response: {body}");
+        body
+    }
+
+    fn wire_value(value: LixValue) -> JsonValue {
+        serde_json::to_value(
+            WireValue::try_from_engine(&value).expect("test value should encode to wire format"),
+        )
+        .expect("wire value should serialize")
+    }
+
+    fn wire_blob(response: &JsonValue) -> Vec<u8> {
+        let wire: WireValue = serde_json::from_value(response["rows"][0][0].clone())
+            .expect("execute response should contain a wire value");
+        let LixValue::Blob(bytes) = wire
+            .try_into_engine()
+            .expect("wire blob should decode into an engine value")
+        else {
+            panic!("execute response should contain a blob");
+        };
+        bytes
+    }
+
+    async fn open_protocol_session(app: Router, workspace_id: &str) -> String {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/workspaces/{workspace_id}/lix/v1/"))
+                    .body(Body::empty())
+                    .expect("protocol handshake request"),
+            )
+            .await
+            .expect("protocol handshake response");
+        assert_eq!(response.status(), StatusCode::OK);
+        json_body(response).await["sessionId"]
+            .as_str()
+            .expect("handshake session id")
+            .to_string()
     }
 
     async fn wait_for_reopened_runtime(

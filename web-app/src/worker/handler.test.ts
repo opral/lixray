@@ -386,6 +386,7 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 			headers: {
 				Authorization: "Bearer user-token",
 				"content-type": "application/json",
+				"Lix-Session-Id": "server-issued-session",
 			},
 			body: JSON.stringify(body),
 		}),
@@ -410,6 +411,10 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 	assert.ok(proxiedRequest);
 	assert.equal(new URL(proxiedRequest.url).pathname, "/lix/v1/execute-batch");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
+	assert.equal(
+		proxiedRequest.headers.get("lix-session-id"),
+		"server-issued-session",
+	);
 	assert.deepEqual(await proxiedRequest.json(), body);
 });
 
@@ -500,6 +505,35 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 	assert.deepEqual(await proxiedRequest.json(), {
 		sql: "SELECT path FROM lix_file",
 	});
+});
+
+void test("anonymous public readers can release their opaque remote session", async () => {
+	let proxiedRequest: Request | undefined;
+	const response = await handleRequest(
+		remoteLixRequest("/session", {
+			method: "DELETE",
+			headers: { "Lix-Session-Id": "public-reader-session" },
+		}),
+		env({}),
+		{
+			resolvePublicWorkspace: async () => ({
+				ok: true,
+				workspaceId: WORKSPACE_A,
+			}),
+			workspaceFetch: async (_workspaceId, request) => {
+				proxiedRequest = request;
+				return new Response(null, { status: 204 });
+			},
+		},
+	);
+
+	assert.equal(response.status, 204);
+	assert.ok(proxiedRequest);
+	assert.equal(proxiedRequest.method, "DELETE");
+	assert.equal(
+		proxiedRequest.headers.get("lix-session-id"),
+		"public-reader-session",
+	);
 });
 
 void test("anonymous branch mutations remain unauthorized", async () => {
@@ -975,7 +1009,11 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 					return Response.json({
 						protocolVersion: 1,
 						activeBranchId: "main",
+						sessionId: "demo-mcp-session",
 					});
+				}
+				if (pathname === "/lix/v1/session" && request.method === "DELETE") {
+					return new Response(null, { status: 204 });
 				}
 				assert.equal(pathname, "/lix/v1/execute");
 				return Response.json({
@@ -1029,7 +1067,7 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
-	assert.equal(workspaceFetches, 2);
+	assert.equal(workspaceFetches, 3);
 });
 
 void test("Supabase workspace authorization uses the user token and RLS-visible row", async () => {
