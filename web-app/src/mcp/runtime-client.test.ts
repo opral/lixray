@@ -11,7 +11,14 @@ const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 async function branchProtocolResponse(request: Request): Promise<Response> {
 	const pathname = testProtocolPath(request);
 	if (pathname === "/lix/v1/") {
-		return Response.json({ protocolVersion: 1, activeBranchId: "main" });
+		return Response.json({
+			protocolVersion: 1,
+			activeBranchId: "main",
+			sessionId: "runtime-client-session",
+		});
+	}
+	if (pathname === "/lix/v1/session" && request.method === "DELETE") {
+		return new Response(null, { status: 204 });
 	}
 	if (pathname === "/lix/v1/execute") {
 		return Response.json({
@@ -302,6 +309,34 @@ void test("transient HTTP responses retry and replay request bodies", async () =
 		{ sql: request.sql, params: request.params },
 	]);
 	assert.deepEqual(delays, [1_000]);
+});
+
+void test("session release retries an ambiguous container disconnect", async () => {
+	let deleteAttempts = 0;
+	const client = new WorkerLixRuntimeClient(
+		env({
+			getByName: () => ({
+				fetch: async (request) => {
+					const pathname = testProtocolPath(request);
+					if (pathname === "/lix/v1/session") {
+						deleteAttempts += 1;
+						if (deleteAttempts === 1) {
+							throw new Error("network connection lost after session release");
+						}
+					}
+					return branchProtocolResponse(request);
+				},
+			}),
+		}),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{ retryDelay: async () => undefined },
+	);
+
+	await client.execute(WORKSPACE_ID, { sql: "SELECT 1" });
+	await client.close();
+
+	assert.equal(deleteAttempts, 2);
 });
 
 void test("caller cancellation stops otherwise retryable container work", async () => {

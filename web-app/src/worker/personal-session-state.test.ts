@@ -384,7 +384,11 @@ void test("workspace sessions use unified remote Lix with shared branch state an
 			return Response.json({
 				protocolVersion: 1,
 				activeBranchId,
+				sessionId: "workspace-session",
 			});
+		}
+		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
+			return new Response(null, { status: 204 });
 		}
 		const body: Record<string, unknown> = request.body
 			? await request.clone().json()

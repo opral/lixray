@@ -45,7 +45,7 @@ struct S3RequestBudget {
 }
 
 pub struct LixService {
-    protocol_lix: Arc<lix_sdk::Lix<MonitoredSlateDB>>,
+    protocol: lix_server_protocol::LixProtocolServer<MonitoredSlateDB>,
     storage: MonitoredSlateDB,
 }
 
@@ -292,7 +292,7 @@ impl WorkspaceRuntimeManager {
         };
 
         let storage = MonitoredSlateDB::new(storage);
-        let protocol_lix = Arc::new(
+        let protocol_root = Arc::new(
             lix_sdk::open_lix_with_telemetry(
                 lix_sdk::OpenLixOptions::new(storage.clone()),
                 Arc::new(lix_sdk::TracingTelemetrySink::new()),
@@ -300,13 +300,14 @@ impl WorkspaceRuntimeManager {
             .await
             .context("open Lix workspace session for the canonical server protocol")?,
         );
+        let protocol = lix_server_protocol::LixProtocolServer::new(protocol_root);
         info!(
             workspace_id,
             elapsed_ms = elapsed_millis(started),
             "opened workspace runtime"
         );
         Ok(Arc::new(WorkspaceRuntime::new(LixService {
-            protocol_lix,
+            protocol,
             storage,
         })))
     }
@@ -380,8 +381,8 @@ impl WorkspaceRuntimeManager {
 }
 
 impl LixService {
-    pub(crate) fn protocol_lix(&self) -> Arc<lix_sdk::Lix<MonitoredSlateDB>> {
-        Arc::clone(&self.protocol_lix)
+    pub(crate) fn protocol(&self) -> lix_server_protocol::LixProtocolServer<MonitoredSlateDB> {
+        self.protocol.clone()
     }
 
     pub(crate) fn has_terminal_durability_failure(&self) -> bool {
@@ -389,10 +390,10 @@ impl LixService {
     }
 
     async fn close(&self) -> Result<()> {
-        self.protocol_lix
+        self.protocol
             .close()
             .await
-            .context("close Lix workspace session")
+            .context("close Lix protocol sessions")
     }
 }
 
@@ -618,6 +619,17 @@ impl WorkspaceRuntime {
             WorkspaceRuntimeState::Active(_) | WorkspaceRuntimeState::Recovering => None,
         }
     }
+
+    fn is_idle(&self) -> bool {
+        let Ok(state) = self.state.try_lock() else {
+            return false;
+        };
+        matches!(
+            &*state,
+            WorkspaceRuntimeState::Active(service)
+                if Arc::strong_count(service) == 1 && service.protocol.is_idle()
+        )
+    }
 }
 
 async fn close_drained_service(service: Arc<LixService>) -> Result<()> {
@@ -670,7 +682,7 @@ fn idle_lru_workspace(entries: &HashMap<String, RuntimeEntry>) -> Option<String>
                 && entry
                     .runtime
                     .get()
-                    .is_some_and(|runtime| Arc::strong_count(runtime) == 1)
+                    .is_some_and(|runtime| Arc::strong_count(runtime) == 1 && runtime.is_idle())
         })
         .min_by_key(|(_, entry)| entry.last_used)
         .map(|(workspace_id, _)| workspace_id.clone())
@@ -744,6 +756,55 @@ mod tests {
             .expect("reopen first runtime");
         assert_eq!(manager.cached_workspace_count().await, 1);
         drop(reopened);
+    }
+
+    #[tokio::test]
+    async fn active_service_lease_prevents_runtime_eviction() {
+        let manager = memory_manager(1);
+        let active = manager
+            .get("workspace-a")
+            .await
+            .expect("open active runtime");
+
+        assert!(matches!(
+            manager.get("workspace-b").await,
+            Err(WorkspaceRuntimeError::AtCapacity { max: 1 })
+        ));
+
+        drop(active);
+        manager
+            .get("workspace-b")
+            .await
+            .expect("evict runtime after its final service lease is released");
+    }
+
+    #[tokio::test]
+    async fn live_protocol_session_prevents_runtime_eviction_between_requests() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt as _;
+
+        let manager = memory_manager(1);
+        let service = manager
+            .get("workspace-a")
+            .await
+            .expect("open workspace runtime");
+        let handshake = lix_server_protocol::handler(service.protocol())
+            .oneshot(
+                Request::builder()
+                    .uri("/lix/v1/")
+                    .body(Body::empty())
+                    .expect("handshake request"),
+            )
+            .await
+            .expect("handshake response");
+        assert_eq!(handshake.status(), axum::http::StatusCode::OK);
+        drop(handshake);
+        drop(service);
+
+        assert!(matches!(
+            manager.get("workspace-b").await,
+            Err(WorkspaceRuntimeError::AtCapacity { max: 1 })
+        ));
     }
 
     #[tokio::test]

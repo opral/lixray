@@ -402,7 +402,9 @@ function workspaceRequestReplay(
 	path: string,
 ): "safe" | "unsafe" {
 	if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return "safe";
-	return path.endsWith("/observe") || path.endsWith("/observe/multiplex")
+	return path.endsWith("/observe") ||
+		path.endsWith("/observe/multiplex") ||
+		(method.toUpperCase() === "DELETE" && path.endsWith("/lix/v1/session"))
 		? "safe"
 		: "unsafe";
 }

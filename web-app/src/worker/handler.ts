@@ -385,7 +385,9 @@ function containerRequestReplay(
 	path: string,
 ): "safe" | "unsafe" {
 	if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return "safe";
-	return path.endsWith("/observe") || path.endsWith("/observe/multiplex")
+	return path.endsWith("/observe") ||
+		path.endsWith("/observe/multiplex") ||
+		(method.toUpperCase() === "DELETE" && path.endsWith("/lix/v1/session"))
 		? "safe"
 		: "unsafe";
 }
@@ -794,15 +796,16 @@ function workspaceRowId(value: unknown): unknown {
 }
 
 /**
- * The public transport only exposes the protocol handshake and the four
- * SQL-carrying endpoints. Branch mutations (`branch/create`, `branch/switch`)
- * change shared workspace state and are never public.
+ * The public transport exposes the protocol handshake, the four SQL-carrying
+ * read endpoints, and session release. Branch mutations (`branch/create`,
+ * `branch/switch`) change shared workspace state and are never public.
  */
 function isPublicReadRemoteLixRequest(
 	request: Request,
 	endpoint: string,
 ): boolean {
 	if (!endpoint) return request.method === "GET";
+	if (endpoint === "session") return request.method === "DELETE";
 	return (
 		request.method === "POST" &&
 		["execute", "execute-batch", "observe", "observe/multiplex"].includes(
@@ -824,7 +827,7 @@ async function rejectPublicMutation(
 	endpoint: string,
 	parseSqlScript: ParseSqlScript | undefined,
 ): Promise<Response | null> {
-	if (!endpoint) return null;
+	if (!endpoint || endpoint === "session") return null;
 	let statements: Array<{ sql: string; paramCount: number }>;
 	try {
 		statements = await publicSqlStatements(request, endpoint);
@@ -1012,7 +1015,7 @@ function corsPreflight(): Response {
 			"access-control-allow-origin": "*",
 			"access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
 			"access-control-allow-headers":
-				"Authorization, Content-Type, MCP-Protocol-Version",
+				"Authorization, Content-Type, Lix-Session-Id, MCP-Protocol-Version",
 			"access-control-max-age": "86400",
 		},
 	});
