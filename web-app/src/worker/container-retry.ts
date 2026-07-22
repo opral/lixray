@@ -29,7 +29,7 @@ export interface ContainerRetryObservation {
 	error: unknown;
 }
 
-export interface FetchContainerWithRetryOptions {
+interface FetchContainerWithRetryOptions {
 	namespace: ContainerNamespace;
 	workspaceId: string;
 	operation: string;
@@ -197,7 +197,7 @@ function containerErrorDetailsWithSeen(
 		: { value: "Unknown container error" };
 }
 
-export function containerRetryDelayMs(
+function containerRetryDelayMs(
 	retryCount: number,
 	random: () => number = Math.random,
 ): number {

@@ -13,7 +13,6 @@ import { Button } from "~/components/ui/button";
 import { WorkspaceAtelier } from "~/components/workspace-atelier";
 import { useWorkspace } from "~/components/workspace-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
-import { normalizeDirPath } from "~/lib/file-explorer-api";
 import {
 	resolvePublicWorkspaceByRoute,
 	resolveWorkspaceShareToken,
@@ -33,7 +32,7 @@ import {
 	type PendingWorkspaceShareCapability,
 } from "~/lib/workspace-share-capability";
 import { canonicalPathFromLocation } from "~/lib/workspace-share-url";
-import { findWorkspaceByRoute } from "~/lib/workspace-url";
+import { findWorkspaceByRoute, normalizeDirPath } from "~/lib/workspace-url";
 
 interface WorkspaceSearch {
 	dir?: string;

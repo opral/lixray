@@ -8,7 +8,7 @@ import { cn } from "~/lib/utils";
 type ShareMode = "edit" | "read";
 type CopyState = "idle" | "copied" | "error";
 
-export interface WorkspaceShareDialogProps {
+interface WorkspaceShareDialogProps {
 	/** The public, canonical resource URL. */
 	canonicalUrl: string;
 	/** The canonical resource URL with its opaque `invite` capability token. */

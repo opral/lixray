@@ -56,7 +56,7 @@ type AuthorizeWorkspace = (
 	env: WorkerLixRuntimeEnv,
 ) => Promise<Response | null>;
 
-export interface WorkerLixRuntimeClientOptions {
+interface WorkerLixRuntimeClientOptions {
 	fetcher?: typeof fetch;
 	retryDelay?: ContainerRetryDelay;
 	retryRandom?: () => number;

@@ -15,7 +15,7 @@ export function dirNameFromPath(dirPath: string): string {
 	return dirPath.split("/").filter(Boolean).at(-1) ?? "";
 }
 
-export type WorkspaceTree = {
+type WorkspaceTree = {
 	readonly dirs: ReadonlyArray<{
 		readonly path: string;
 		readonly name: string;
@@ -186,7 +186,7 @@ export function resolveWorkspaceHref(
 	return `/${segments.map((segment) => decodeURIComponent(segment)).join("/")}`;
 }
 
-export type DirectoryListing = {
+type DirectoryListing = {
 	readonly dirs: ReadonlyArray<{
 		readonly path: string;
 		readonly name: string;

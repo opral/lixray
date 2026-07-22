@@ -12,7 +12,7 @@ const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
 let client: PostHog | null = null;
 let initializationPromise: Promise<PostHog | null> | null = null;
 
-export type TelemetryEnvironment = "dev" | "preview" | "production";
+type TelemetryEnvironment = "dev" | "preview" | "production";
 
 export function initializeTelemetry(): Promise<PostHog | null> {
 	if (client) return Promise.resolve(client);
@@ -54,7 +54,7 @@ function registerTelemetryEnvironment(
 	});
 }
 
-export function buildPostHogConfig(
+function buildPostHogConfig(
 	host = DEFAULT_POSTHOG_HOST,
 ): Partial<PostHogConfig> {
 	return {

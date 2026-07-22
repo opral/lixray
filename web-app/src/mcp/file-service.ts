@@ -1,8 +1,8 @@
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
 
 export const MAX_TEXT_FILE_BYTES = 1024 * 1024;
-export const DEFAULT_READ_LINE_COUNT = 400;
-export const MAX_READ_LINE_COUNT = 1000;
+const DEFAULT_READ_LINE_COUNT = 400;
+const MAX_READ_LINE_COUNT = 1000;
 export const MAX_PATH_LENGTH = 1024;
 
 const WORKSPACE_UUID_PATTERN =
@@ -70,18 +70,18 @@ export interface LixRuntimeClient {
 	): Promise<ExecuteScriptResponse>;
 }
 
-export interface AgentReviewSource {
+interface AgentReviewSource {
 	agent: "claude" | "codex";
 	sessionId?: string;
 }
 
-export interface LixFileServiceOptions {
+interface LixFileServiceOptions {
 	agentReview?: AgentReviewSource;
 }
 
-export type EntryKind = "file" | "directory";
+type EntryKind = "file" | "directory";
 
-export interface EntrySummary {
+interface EntrySummary {
 	kind: EntryKind;
 	path: string;
 	name: string;
@@ -90,7 +90,7 @@ export interface EntrySummary {
 	size?: number | null;
 }
 
-export interface FileSnapshot {
+interface FileSnapshot {
 	path: string;
 	content: string;
 	size: number;

@@ -34,7 +34,6 @@ import {
 	logContainerRetry,
 	type ContainerNamespace as RetryingContainerNamespace,
 	type ContainerRetryDelay,
-	type ContainerStub as RetryingContainerStub,
 } from "./container-retry.ts";
 import { resolveSupabaseWorkspaceId } from "./workspace-resolver.ts";
 
@@ -76,9 +75,8 @@ export interface WorkerEnv {
 }
 
 export type ContainerNamespace = RetryingContainerNamespace;
-export type ContainerStub = RetryingContainerStub;
 
-export interface HandleRequestOptions {
+interface HandleRequestOptions {
 	authenticate?: AuthenticateRequest;
 	authenticateMcp?: AuthenticateMcpRequest;
 	authorizeWorkspace?: AuthorizeWorkspace;
@@ -94,13 +92,13 @@ export interface HandleRequestOptions {
 	containerRetryRandom?: () => number;
 }
 
-export interface AuthenticatedUser {
+interface AuthenticatedUser {
 	userId: string;
 	token: string;
 	isDemo?: boolean;
 }
 
-export interface AuthenticatedMcpUser extends AuthenticatedUser {
+interface AuthenticatedMcpUser extends AuthenticatedUser {
 	clientId: string;
 }
 
@@ -114,7 +112,7 @@ export type AuthenticateMcpRequest = (
 	env: WorkerEnv,
 ) => Promise<McpAuthResult>;
 
-export type AuthorizeWorkspace = (
+type AuthorizeWorkspace = (
 	workspaceId: string,
 	auth: AuthenticatedUser,
 	env: WorkerEnv,
@@ -127,7 +125,7 @@ export type ResolveWorkspace = (
 	env: WorkerEnv,
 ) => Promise<WorkspaceResolution>;
 
-export type WorkspaceResolution =
+type WorkspaceResolution =
 	| { ok: true; workspaceId: string }
 	| { ok: false; response: Response };
 
@@ -136,7 +134,7 @@ export type WorkspaceResolution =
  * does not use the member-scoped workspace lookup: a valid browser JWT alone
  * must never turn a public reader into an editor.
  */
-export type ResolvePublicWorkspace = (
+type ResolvePublicWorkspace = (
 	namespace: string,
 	workspaceSlug: string,
 	env: WorkerEnv,
@@ -152,15 +150,15 @@ export type ParseSqlScript = (
 	providedParamCount: number,
 ) => { statements: ReadonlyArray<{ sql: string }> };
 
-export type AuthResult =
+type AuthResult =
 	| { ok: true; auth: AuthenticatedUser }
 	| { ok: false; response: Response };
 
-export type McpAuthResult =
+type McpAuthResult =
 	| { ok: true; auth: AuthenticatedMcpUser }
 	| { ok: false; response: Response };
 
-export type McpClaimsValidation =
+type McpClaimsValidation =
 	| { ok: true; userId: string; clientId: string }
 	| {
 			ok: false;
@@ -456,7 +454,7 @@ export function validateBrowserJwtClaims(payload: JWTPayload): boolean {
 	);
 }
 
-export async function authenticateMcpWithSupabase(
+async function authenticateMcpWithSupabase(
 	request: Request,
 	env: WorkerEnv,
 ): Promise<McpAuthResult> {
@@ -729,7 +727,7 @@ function workspaceResolutionUnavailable(): {
  * It exposes only live route metadata through a security-definer RPC that is
  * callable anonymously.
  */
-export async function resolvePublicWorkspaceWithSupabase(
+async function resolvePublicWorkspaceWithSupabase(
 	namespace: string,
 	workspaceSlug: string,
 	env: WorkerEnv,
@@ -939,7 +937,7 @@ function demoWorkspaceSummaries(env: WorkerEnv): Array<WorkspaceSummary> {
 	}));
 }
 
-export function isDemoMode(env: WorkerEnv): boolean {
+function isDemoMode(env: WorkerEnv): boolean {
 	// Railway names PR environments "lixray-pr-<n>" when configured, but
 	// recreated ones get the default "pr-<hash>-<n>" — accept both. Keep in
 	// sync with web-app/Dockerfile and scripts/assert-railway-env.mjs.
@@ -1044,7 +1042,7 @@ function scheduleMcpTelemetryFlush(
 	}
 }
 
-export function containerEnv(env: WorkerEnv): Record<string, string> {
+function containerEnv(env: WorkerEnv): Record<string, string> {
 	const vars: Record<string, string> = {};
 	addOptionalEnv(vars, "S3_ENDPOINT", env.R2_ENDPOINT);
 	addOptionalEnv(vars, "S3_BUCKET", env.R2_BUCKET);

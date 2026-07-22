@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(17);
+select plan(16);
 
 select is(
   private.custom_access_token_hook(
@@ -48,17 +48,6 @@ insert into public.workspaces (id, organization_id, name) values
   ('53000000-0000-0000-0000-000000000001', '52000000-0000-0000-0000-000000000001', 'Visible workspace'),
   ('53000000-0000-0000-0000-000000000002', '52000000-0000-0000-0000-000000000002', 'Other workspace');
 
-insert into public.organization_invitations (
-  id, organization_id, email, token_hash, invited_by, expires_at
-) values (
-  '54000000-0000-0000-0000-000000000001',
-  '52000000-0000-0000-0000-000000000001',
-  'invitee@example.com',
-  encode(extensions.digest('mcp-invite', 'sha256'), 'hex'),
-  '51000000-0000-0000-0000-000000000001',
-  now() + interval '1 day'
-);
-
 set local role authenticated;
 set local request.jwt.claim.sub = '51000000-0000-0000-0000-000000000001';
 set local request.jwt.claims = '{
@@ -92,12 +81,6 @@ select results_eq(
   'select count(*) from public.organization_members',
   array[0::bigint],
   'MCP tokens cannot read membership rosters'
-);
-
-select results_eq(
-  'select count(*) from public.organization_invitations',
-  array[0::bigint],
-  'MCP tokens cannot read invitations'
 );
 
 select throws_ok(

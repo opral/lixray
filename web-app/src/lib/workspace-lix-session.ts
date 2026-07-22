@@ -2,7 +2,7 @@ import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk/remote";
 
 type TokenProvider = () => Promise<string | null>;
 
-export interface OpenWorkspaceLixSessionOptions {
+interface OpenWorkspaceLixSessionOptions {
 	namespace: string;
 	workspaceSlug: string;
 	getAccessToken: TokenProvider;

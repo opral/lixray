@@ -12,8 +12,8 @@ const env = import.meta.env as {
 	readonly VITE_SUPABASE_KEY?: string;
 };
 
-export const supabaseUrl = env.VITE_SUPABASE_URL;
-export const supabasePublishableKey = env.VITE_SUPABASE_KEY;
+const supabaseUrl = env.VITE_SUPABASE_URL;
+const supabasePublishableKey = env.VITE_SUPABASE_KEY;
 export const localDevCredentials =
 	env.VITE_LIXRAY_LOCAL_DEV === "1" &&
 	env.VITE_LIXRAY_LOCAL_DEV_EMAIL &&

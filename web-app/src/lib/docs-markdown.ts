@@ -5,13 +5,13 @@
  * links. Relative *.md links resolve to their /docs/<slug> route.
  */
 
-export interface DocsHeading {
+interface DocsHeading {
 	level: number;
 	text: string;
 	id: string;
 }
 
-export interface RenderedDocs {
+interface RenderedDocs {
 	html: string;
 	headings: DocsHeading[];
 }

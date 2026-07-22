@@ -213,47 +213,6 @@ export interface Database {
 					},
 				];
 			};
-			organization_invitations: {
-				Row: {
-					id: string;
-					organization_id: string;
-					email: string;
-					token_hash: string;
-					invited_by: string;
-					expires_at: string;
-					accepted_at: string | null;
-					accepted_by: string | null;
-					revoked_at: string | null;
-					created_at: string;
-				};
-				Insert: {
-					id?: string;
-					organization_id: string;
-					email: string;
-					token_hash: string;
-					invited_by: string;
-					expires_at: string;
-					accepted_at?: string | null;
-					accepted_by?: string | null;
-					revoked_at?: string | null;
-					created_at?: string;
-				};
-				Update: {
-					expires_at?: string;
-					accepted_at?: string | null;
-					accepted_by?: string | null;
-					revoked_at?: string | null;
-				};
-				Relationships: [
-					{
-						foreignKeyName: "organization_invitations_organization_id_fkey";
-						columns: ["organization_id"];
-						isOneToOne: false;
-						referencedRelation: "organizations";
-						referencedColumns: ["id"];
-					},
-				];
-			};
 		};
 		Views: Record<never, never>;
 		Functions: {
@@ -329,18 +288,6 @@ export interface Database {
 			rename_organization: {
 				Args: { p_organization_id: string; p_name: string };
 				Returns: undefined;
-			};
-			create_organization_invitation: {
-				Args: { p_organization_id: string; p_email: string };
-				Returns: Array<{ token: string; expires_at: string }>;
-			};
-			revoke_organization_invitation: {
-				Args: { p_invitation_id: string };
-				Returns: undefined;
-			};
-			accept_organization_invitation: {
-				Args: { p_token: string };
-				Returns: string;
 			};
 			set_organization_member_role: {
 				Args: {

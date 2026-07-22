@@ -405,7 +405,6 @@ export function WorkspaceAtelier({
 						branchSession: workspaceBranchSession,
 						reviewRangeSessionId: userId,
 						extensions: lixrayWorkspaceExtensions,
-						filesViewMode: "sidebar",
 						centralPanel: {
 							home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
 						},

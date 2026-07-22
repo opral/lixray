@@ -15,10 +15,6 @@ void test("canonicalizes private Lixray routes for Web Analytics", () => {
 		sanitizeLixrayPathname("/@samuel/customer-roadmap?branch=secret"),
 		"/workspace/:workspace",
 	);
-	assert.equal(
-		sanitizeLixrayPathname("/invite/sensitive-token"),
-		"/invite/:token",
-	);
 	assert.equal(sanitizeLixrayPathname("/sign-in"), "/sign-in");
 });
 

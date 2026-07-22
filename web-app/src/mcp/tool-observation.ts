@@ -1,6 +1,6 @@
 const MAX_SANITIZED_SQL_LENGTH = 4096;
 
-export interface McpSqlStatementObservation {
+interface McpSqlStatementObservation {
 	index: number;
 	operation: string;
 	sanitizedSql: string;
@@ -15,7 +15,7 @@ export interface McpExecuteInputObservation {
 	statements: Array<McpSqlStatementObservation>;
 }
 
-export interface McpExecuteResultObservation {
+interface McpExecuteResultObservation {
 	index: number;
 	columnCount: number;
 	rowCount: number;

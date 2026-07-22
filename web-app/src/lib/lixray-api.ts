@@ -9,7 +9,7 @@ import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 
-export type WireValue =
+type WireValue =
 	| { kind: "null"; value?: null }
 	| { kind: "bool"; value: boolean }
 	| { kind: "int"; value: number }
@@ -25,7 +25,7 @@ export interface Branch {
 	commitId: string;
 }
 
-export interface BranchesResponse {
+interface BranchesResponse {
 	branches: Array<Branch>;
 	currentBranchId: string;
 }
@@ -41,7 +41,7 @@ export interface ExecuteScriptResponse {
 	results: Array<ExecuteResponse>;
 }
 
-export interface ExecuteRequest {
+interface ExecuteRequest {
 	branchId: string;
 	sql: string;
 	params?: Array<WireValue>;
@@ -50,7 +50,7 @@ export interface ExecuteRequest {
 	};
 }
 
-export interface ExecuteBatchRequest {
+interface ExecuteBatchRequest {
 	branchId: string;
 	statements: Array<{
 		sql: string;

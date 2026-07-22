@@ -26,7 +26,7 @@ import {
 	useWorkspaceTree,
 } from "./lix-data";
 
-export type DirectoryViewProps = {
+type DirectoryViewProps = {
 	readonly lix: Lix;
 	/** Normalized trailing-slash directory path; "/" is the workspace home. */
 	readonly dirPath: string;

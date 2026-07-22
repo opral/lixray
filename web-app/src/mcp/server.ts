@@ -25,9 +25,9 @@ export const MCP_PROTECTED_RESOURCE_PATH =
 // plain-text page MCP clients are pointed at via resource_documentation.
 export const MCP_DOCUMENTATION_PATH = "/mcp/docs";
 export const MCP_PROTECTED_RESOURCE_URL = `${MCP_RESOURCE}${MCP_PROTECTED_RESOURCE_PATH}`;
-export const MCP_SCOPES = ["openid", "email", "profile"] as const;
+const MCP_SCOPES = ["openid", "email", "profile"] as const;
 
-export type McpAuthMode = "oauth" | "none";
+type McpAuthMode = "oauth" | "none";
 
 export interface McpToolCallObservation {
 	toolName: string;
@@ -42,7 +42,7 @@ export interface McpToolCallObservation {
 
 export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
 
-export interface McpServerOptions {
+interface McpServerOptions {
 	authMode?: McpAuthMode;
 	onToolCall?: McpToolCallObserver;
 }
@@ -310,7 +310,7 @@ export async function handleMcpTransport(
 	})(request, undefined, ctx);
 }
 
-export interface McpDiscoveryOptions {
+interface McpDiscoveryOptions {
 	protectedResourceUrl?: string;
 	authorizationServer?: string;
 	resourceDocumentationUrl?: string;
