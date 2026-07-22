@@ -3,11 +3,12 @@ use crate::WorkspaceRuntimeManager;
 use axum::{
     body::Body,
     extract::{Path, State},
-    http::{header, HeaderMap, Request, StatusCode, Uri},
+    http::{header, HeaderMap, HeaderValue, Request, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{any, get},
     Json, Router,
 };
+use serde::Serialize;
 use serde_json::json;
 use std::{
     pin::Pin,
@@ -117,11 +118,16 @@ async fn workspace_protocol(
         "lix.workspace.id" = %workspace_id,
         "lix.protocol.path" = %protocol_path,
         "http.response.status_code" = tracing::field::Empty,
+        "lix.error.code" = tracing::field::Empty,
+        "otel.status_code" = tracing::field::Empty,
     );
     let response = workspace_protocol_inner(state, workspace_id, protocol_path, request)
         .instrument(span.clone())
         .await;
     span.record("http.response.status_code", response.status().as_u16());
+    if response.status().is_server_error() {
+        span.record("otel.status_code", "ERROR");
+    }
     let (parts, body) = response.into_parts();
     Response::from_parts(parts, Body::new(TracedBody { inner: body, span }))
 }
@@ -133,12 +139,17 @@ async fn workspace_protocol_inner(
     mut request: Request<Body>,
 ) -> Response {
     if !authorized(request.headers(), state.internal_token.as_deref()) {
-        return (
+        let mut response = protocol_error(
             StatusCode::UNAUTHORIZED,
-            [(header::WWW_AUTHENTICATE, "Bearer")],
-            Json(json!({"error": "invalid internal service token"})),
-        )
-            .into_response();
+            "LIX_ERROR_UNAUTHENTICATED",
+            "Invalid internal service token.",
+            None,
+            None,
+        );
+        response
+            .headers_mut()
+            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        return response;
     }
 
     let runtime = match state.manager.get(&workspace_id).await {
@@ -151,11 +162,13 @@ async fn workspace_protocol_inner(
         None => format!("/{protocol_path}"),
     };
     let Ok(uri) = path_and_query.parse::<Uri>() else {
-        return (
+        return protocol_error(
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "invalid protocol path"})),
-        )
-            .into_response();
+            "LIX_INVALID_ARGUMENT",
+            "Invalid protocol path.",
+            None,
+            None,
+        );
     };
     *request.uri_mut() = uri;
 
@@ -173,11 +186,17 @@ async fn workspace_protocol_inner(
                 "protocol request exceeded its deadline; recovering runtime"
             );
             state.manager.recover(&workspace_id, &runtime).await;
-            return (
+            return protocol_error(
                 StatusCode::GATEWAY_TIMEOUT,
-                Json(json!({"error": "workspace request timed out"})),
+                "LIX_ERROR_WORKSPACE_TIMEOUT",
+                "The workspace request timed out.",
+                Some("Retry the request.".to_string()),
+                Some(json!({
+                    "operation": "workspace_request",
+                    "retryable": true,
+                })),
             )
-                .into_response();
+            .with_retry_after();
         }
     };
     let (parts, body) = response.into_parts();
@@ -202,13 +221,134 @@ fn authorized(headers: &HeaderMap, internal_token: Option<&str>) -> bool {
 }
 
 fn workspace_error(error: WorkspaceRuntimeError) -> Response {
-    let status = match error {
-        WorkspaceRuntimeError::InvalidId => StatusCode::BAD_REQUEST,
-        WorkspaceRuntimeError::AtCapacity { .. }
-        | WorkspaceRuntimeError::Recovering
-        | WorkspaceRuntimeError::Open(_) => StatusCode::SERVICE_UNAVAILABLE,
-    };
-    (status, Json(json!({"error": error.to_string()}))).into_response()
+    match error {
+        WorkspaceRuntimeError::InvalidId => protocol_error(
+            StatusCode::BAD_REQUEST,
+            "LIX_INVALID_ARGUMENT",
+            "Invalid workspace ID.",
+            None,
+            Some(json!({
+                "operation": "workspace_open",
+                "retryable": false,
+            })),
+        ),
+        WorkspaceRuntimeError::AtCapacity { max } => protocol_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "LIX_ERROR_WORKSPACE_CAPACITY",
+            "The workspace service is at capacity.",
+            Some("Retry after an active workspace closes.".to_string()),
+            Some(json!({
+                "maxOpenWorkspaces": max,
+                "operation": "workspace_open",
+                "retryable": true,
+            })),
+        )
+        .with_retry_after(),
+        WorkspaceRuntimeError::Recovering => protocol_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "LIX_ERROR_WORKSPACE_RECOVERING",
+            "The workspace is recovering.",
+            Some("Retry the request.".to_string()),
+            Some(json!({
+                "operation": "workspace_open",
+                "retryable": true,
+            })),
+        )
+        .with_retry_after(),
+        WorkspaceRuntimeError::Open(error) if is_unsupported_storage_format(&error) => {
+            tracing::warn!(
+                error = %error,
+                error_code = "LIX_ERROR_STORAGE_FORMAT_UNSUPPORTED",
+                "workspace uses an unsupported storage format"
+            );
+            protocol_error(
+                StatusCode::CONFLICT,
+                "LIX_ERROR_STORAGE_FORMAT_UNSUPPORTED",
+                "This workspace uses an unsupported storage format.",
+                Some("Create a new workspace.".to_string()),
+                Some(json!({
+                    "operation": "workspace_open",
+                    "retryable": false,
+                })),
+            )
+        }
+        WorkspaceRuntimeError::Open(error) => {
+            tracing::error!(error = %error, "failed to open workspace runtime");
+            protocol_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                lix_sdk::LixError::CODE_INTERNAL_ERROR,
+                "Unable to open workspace.",
+                None,
+                Some(json!({
+                    "operation": "workspace_open",
+                    "retryable": false,
+                })),
+            )
+        }
+    }
+}
+
+fn is_unsupported_storage_format(error: &anyhow::Error) -> bool {
+    error.chain().any(|source| {
+        source
+            .downcast_ref::<lix_sdk::LixError>()
+            .is_some_and(|error| {
+                error.code == lix_sdk::LixError::CODE_INTERNAL_ERROR
+                    && error
+                        .message
+                        .contains("tracked_state commit_root has an unsupported format")
+            })
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorEnvelope {
+    error: ErrorBody,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorBody {
+    code: String,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<serde_json::Value>,
+}
+
+fn protocol_error(
+    status: StatusCode,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    hint: Option<String>,
+    details: Option<serde_json::Value>,
+) -> Response {
+    let code = code.into();
+    tracing::Span::current().record("lix.error.code", code.as_str());
+    (
+        status,
+        Json(ErrorEnvelope {
+            error: ErrorBody {
+                code,
+                message: message.into(),
+                hint,
+                details,
+            },
+        }),
+    )
+        .into_response()
+}
+
+trait RetryAfterResponse {
+    fn with_retry_after(self) -> Self;
+}
+
+impl RetryAfterResponse for Response {
+    fn with_retry_after(mut self) -> Self {
+        self.headers_mut()
+            .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+        self
+    }
 }
 
 #[cfg(test)]
@@ -301,6 +441,13 @@ mod tests {
             .await
             .expect("unauthorized response");
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            json_body(unauthorized).await["error"],
+            json!({
+                "code": "LIX_ERROR_UNAUTHENTICATED",
+                "message": "Invalid internal service token.",
+            })
+        );
 
         let authorized = app
             .oneshot(
@@ -497,6 +644,78 @@ mod tests {
             .await
             .expect("unsafe response");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            json_body(response).await["error"],
+            json!({
+                "code": "LIX_INVALID_ARGUMENT",
+                "message": "Invalid workspace ID.",
+                "details": {
+                    "operation": "workspace_open",
+                    "retryable": false,
+                },
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn unsupported_storage_format_is_a_terminal_structured_error() {
+        let response = workspace_error(WorkspaceRuntimeError::Open(anyhow::Error::new(
+            lix_sdk::LixError::new(
+                lix_sdk::LixError::CODE_INTERNAL_ERROR,
+                "tracked_state commit_root has an unsupported format; recreate the repository",
+            ),
+        )));
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert!(response.headers().get(header::RETRY_AFTER).is_none());
+        assert_eq!(
+            json_body(response).await["error"],
+            json!({
+                "code": "LIX_ERROR_STORAGE_FORMAT_UNSUPPORTED",
+                "message": "This workspace uses an unsupported storage format.",
+                "hint": "Create a new workspace.",
+                "details": {
+                    "operation": "workspace_open",
+                    "retryable": false,
+                },
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn unexpected_workspace_open_errors_are_redacted() {
+        let response = workspace_error(WorkspaceRuntimeError::Open(anyhow::anyhow!(
+            "secret object-store failure"
+        )));
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            json_body(response).await["error"],
+            json!({
+                "code": "LIX_INTERNAL_ERROR",
+                "message": "Unable to open workspace.",
+                "details": {
+                    "operation": "workspace_open",
+                    "retryable": false,
+                },
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn retryable_workspace_errors_include_retry_after() {
+        for error in [
+            WorkspaceRuntimeError::AtCapacity { max: 4 },
+            WorkspaceRuntimeError::Recovering,
+        ] {
+            let response = workspace_error(error);
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+            assert_eq!(
+                json_body(response).await["error"]["details"]["retryable"],
+                true
+            );
+        }
     }
 
     async fn protocol_execute(

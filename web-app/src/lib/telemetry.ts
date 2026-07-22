@@ -5,6 +5,7 @@ import {
 	SESSION_RECORDING_BLOCK_SELECTOR,
 	scrubPostHogEvent,
 } from "./telemetry-privacy";
+import { BROWSER_EXCEPTION_CAPTURE_CONFIG } from "./telemetry-exceptions";
 
 const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
 
@@ -65,6 +66,7 @@ function buildPostHogConfig(
 			capture_copied_text: false,
 		},
 		before_send: scrubPostHogEvent,
+		capture_exceptions: BROWSER_EXCEPTION_CAPTURE_CONFIG,
 		capture_pageview: "history_change",
 		capture_pageleave: true,
 		disable_session_recording: false,
@@ -91,7 +93,20 @@ export function captureTelemetry(
 		});
 }
 
-function telemetryEnvironment(
+export function captureExceptionTelemetry(
+	error: unknown,
+	properties: Properties = {},
+): void {
+	void initializeTelemetry()
+		.then((posthog) => {
+			posthog?.captureException(error, properties);
+		})
+		.catch((telemetryError: unknown) => {
+			console.warn("Failed to capture browser exception", telemetryError);
+		});
+}
+
+export function telemetryEnvironment(
 	configuredValue: string | undefined,
 	isProduction: boolean,
 ): TelemetryEnvironment {
