@@ -1,4 +1,5 @@
 import { cloudflare } from "@cloudflare/vite-plugin";
+import posthogRollupPlugin from "@posthog/rollup-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
@@ -8,6 +9,43 @@ import { defineConfig } from "vite";
 const workerTarget = process.env.LIXRAY_WORKER_TARGET ?? "production";
 const workerConfigPath =
 	workerTarget === "railway" ? "./wrangler.railway.jsonc" : "./wrangler.jsonc";
+
+function requiredProductionSourceMapVariable(
+	name: "POSTHOG_API_KEY" | "POSTHOG_PROJECT_ID",
+): string {
+	const value = process.env[name]?.trim();
+	if (!value) {
+		throw new Error(
+			`${name} is required to upload PostHog source maps in production`,
+		);
+	}
+	return value;
+}
+
+function posthogSourceMapPlugins(command: string) {
+	const uploadPostHogSourceMaps =
+		command === "build" &&
+		workerTarget === "railway" &&
+		process.env.RAILWAY_ENVIRONMENT_NAME?.trim() === "production";
+	if (!uploadPostHogSourceMaps) return [];
+
+	return [
+		posthogRollupPlugin({
+			personalApiKey: requiredProductionSourceMapVariable("POSTHOG_API_KEY"),
+			projectId: requiredProductionSourceMapVariable("POSTHOG_PROJECT_ID"),
+			host:
+				process.env.POSTHOG_HOST?.trim() ||
+				process.env.VITE_PUBLIC_POSTHOG_HOST?.trim() ||
+				"https://us.i.posthog.com",
+			sourcemaps: {
+				enabled: true,
+				releaseName: "lixray-web",
+				releaseVersion: process.env.RAILWAY_GIT_COMMIT_SHA?.trim() || undefined,
+				deleteAfterUpload: true,
+			},
+		}),
+	];
+}
 
 export default defineConfig(({ command }) => ({
 	resolve: {
@@ -81,5 +119,6 @@ export default defineConfig(({ command }) => ({
 		tailwindcss(),
 		tanstackStart(),
 		react(),
+		...posthogSourceMapPlugins(command),
 	],
 }));

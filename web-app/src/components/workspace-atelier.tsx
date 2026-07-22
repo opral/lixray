@@ -43,7 +43,7 @@ import {
 	createWorkspaceSessionStateStore,
 	type WorkspaceBranchSession,
 } from "~/lib/atelier-state";
-import { captureTelemetry } from "~/lib/telemetry";
+import { captureExceptionTelemetry, captureTelemetry } from "~/lib/telemetry";
 import {
 	appendWorkspaceShareToken,
 	canonicalPathFromLocation,
@@ -441,6 +441,9 @@ export function WorkspaceAtelier({
 			})
 			.catch((caught: unknown) => {
 				if (!disposed) {
+					captureExceptionTelemetry(caught, {
+						operation: "workspace_open",
+					});
 					setError(caught instanceof Error ? caught.message : String(caught));
 				}
 			});
