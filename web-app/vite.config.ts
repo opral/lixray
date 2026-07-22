@@ -3,8 +3,14 @@ import posthogRollupPlugin from "@posthog/rollup-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
+import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+
+const webAppDir = path.dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = path.resolve(webAppDir, "..");
+const atelierSourceDir = path.resolve(repositoryRoot, "vendor/atelier/src");
 
 const workerTarget = process.env.LIXRAY_WORKER_TARGET ?? "production";
 const workerConfigPath =
@@ -50,6 +56,37 @@ function posthogSourceMapPlugins(command: string) {
 export default defineConfig(({ command }) => ({
 	resolve: {
 		tsconfigPaths: true,
+		alias:
+			command === "serve"
+				? [
+						{
+							find: "@opral/atelier/style.css",
+							replacement: path.resolve(atelierSourceDir, "index.css"),
+						},
+						{
+							find: "@opral/atelier/file-icons",
+							replacement: path.resolve(atelierSourceDir, "file-icons.ts"),
+						},
+						{
+							find: "@opral/atelier/state-adapters",
+							replacement: path.resolve(atelierSourceDir, "state-adapters.ts"),
+						},
+						{
+							find: "@opral/atelier",
+							replacement: path.resolve(atelierSourceDir, "index.ts"),
+						},
+						{
+							find: "@",
+							replacement: atelierSourceDir,
+						},
+					]
+				: undefined,
+	},
+	server: {
+		fs: { allow: [repositoryRoot] },
+	},
+	optimizeDeps: {
+		exclude: command === "serve" ? ["@opral/atelier"] : [],
 	},
 	plugins: [
 		cloudflare({
@@ -85,6 +122,12 @@ export default defineConfig(({ command }) => ({
 				return {
 					vars: {
 						...config.vars,
+						LIXRAY_WORKSPACE_SERVICE_URL:
+							process.env.LIXRAY_WORKSPACE_SERVICE_URL ??
+							config.vars?.LIXRAY_WORKSPACE_SERVICE_URL,
+						LIXRAY_INTERNAL_TOKEN:
+							process.env.LIXRAY_INTERNAL_TOKEN ??
+							config.vars?.LIXRAY_INTERNAL_TOKEN,
 						R2_ENDPOINT: process.env.R2_ENDPOINT ?? config.vars?.R2_ENDPOINT,
 						R2_BUCKET: process.env.R2_BUCKET ?? config.vars?.R2_BUCKET,
 						R2_ACCESS_KEY_ID:

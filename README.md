@@ -42,9 +42,11 @@ pnpm dev
 ```
 
 Open `http://127.0.0.1:8787` and choose **Continue as local developer**.
-`pnpm dev` starts Supabase, applies migrations, creates the local account, and
-starts the Compose services. Ctrl-C stops the services without deleting their
-volumes. Set `LIXRAY_DEV_PORT` to use another port.
+`pnpm dev` starts Supabase, applies migrations, creates the local account, runs
+the stateful backend services with Compose, and serves the web app with Vite.
+Edits in `web-app` and `vendor/atelier` update through HMR. Ctrl-C stops Vite;
+the backend services remain available for the next run. Use `pnpm dev --down`
+to stop the services, or set `LIXRAY_DEV_PORT` to use another port.
 
 For a hosted Supabase project, link the CLI and apply migrations:
 

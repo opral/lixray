@@ -99,9 +99,23 @@ composeEnv = {
 	VITE_SUPABASE_URL: supabaseUrl,
 };
 
+const staleWebContainer = spawnSync(
+	"docker",
+	["compose", "stop", "lixray-web"],
+	{
+		cwd: repositoryRoot,
+		stdio: "inherit",
+		env: composeEnv,
+	},
+);
+if (staleWebContainer.error) throw staleWebContainer.error;
+if (staleWebContainer.status !== 0) {
+	process.exit(staleWebContainer.status ?? 1);
+}
+
 const stack = spawnSync(
 	"docker",
-	["compose", "up", "--build", "-d", "lixray-web"],
+	["compose", "up", "--build", "-d", "lix-server"],
 	{
 		cwd: repositoryRoot,
 		stdio: "inherit",
@@ -112,12 +126,20 @@ if (stack.error) throw stack.error;
 if (stack.status !== 0) process.exit(stack.status ?? 1);
 
 webApp = spawn(
-	"docker",
-	["compose", "logs", "--follow", "lixray-web", "lix-server", "minio"],
+	pnpm,
+	["--dir", "web-app", "dev", "--host", devHost, "--port", devPort],
 	{
 		cwd: repositoryRoot,
 		stdio: "inherit",
-		env: composeEnv,
+		env: {
+			...composeEnv,
+			LIXRAY_WORKER_TARGET: "railway",
+			LIXRAY_WORKSPACE_SERVICE_URL:
+				process.env.LIXRAY_WORKSPACE_SERVICE_URL ??
+				`http://127.0.0.1:${composeEnv.LIXRAY_SERVER_PORT}`,
+			SUPABASE_URL: supabaseUrl,
+			SUPABASE_JWKS_URL: `${supabaseUrl}/auth/v1/.well-known/jwks.json`,
+		},
 	},
 );
 
@@ -220,7 +242,9 @@ async function ensureLocalDevUser({ email, password, secretKey, supabaseUrl }) {
 	};
 	const usersResponse = await fetch(
 		`${supabaseUrl}/auth/v1/admin/users?page=1&per_page=1000`,
-		{ headers },
+		{
+			headers,
+		},
 	);
 	if (!usersResponse.ok) {
 		throw new Error(
