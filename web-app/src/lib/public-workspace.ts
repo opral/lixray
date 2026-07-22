@@ -10,10 +10,7 @@ export interface PublicWorkspaceRoute {
 	readonly canEdit: boolean;
 }
 
-export interface ResolvedWorkspaceShare extends Omit<
-	PublicWorkspaceRoute,
-	"canEdit"
-> {
+interface ResolvedWorkspaceShare extends Omit<PublicWorkspaceRoute, "canEdit"> {
 	readonly sharedByName: string | null;
 	readonly sharedByAvatarUrl: string | null;
 	/** The token's grant, not the current viewer's edit membership. */

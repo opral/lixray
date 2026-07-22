@@ -6,7 +6,7 @@ import type {
 
 const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
 
-export interface McpTelemetryEnvironment {
+interface McpTelemetryEnvironment {
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
@@ -15,7 +15,7 @@ export interface McpTelemetryEnvironment {
 	CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string };
 }
 
-export interface McpTelemetryIdentity {
+interface McpTelemetryIdentity {
 	userId: string;
 	clientId: string;
 	isDemo?: boolean;

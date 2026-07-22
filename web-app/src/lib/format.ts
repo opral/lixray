@@ -42,34 +42,3 @@ export function formatRelativeTime(iso: string): string {
 	}
 	return "just now";
 }
-
-const SIZE_UNITS = ["B", "KB", "MB", "GB", "TB"];
-
-export function formatSize(bytes: number | null): string {
-	if (bytes === null || !Number.isFinite(bytes) || bytes < 0) {
-		return "—";
-	}
-	let value = bytes;
-	let unitIndex = 0;
-	while (value >= 1000 && unitIndex < SIZE_UNITS.length - 1) {
-		value /= 1000;
-		unitIndex += 1;
-	}
-	const rounded =
-		unitIndex === 0 ? String(value) : value.toFixed(value < 10 ? 1 : 0);
-	return `${rounded} ${SIZE_UNITS[unitIndex]}`;
-}
-
-export function validateEntryName(name: string): string | null {
-	const trimmed = name.trim();
-	if (!trimmed) {
-		return "Name cannot be empty.";
-	}
-	if (trimmed.includes("/")) {
-		return "Name cannot contain “/”.";
-	}
-	if (trimmed === "." || trimmed === "..") {
-		return "Name cannot be “.” or “..”.";
-	}
-	return null;
-}

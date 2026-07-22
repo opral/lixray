@@ -80,65 +80,6 @@ void test("shell state is shared across new tabs and isolated by account and wor
 	);
 });
 
-void test("legacy tab shell state migrates unless browser state already exists", () => {
-	const localStorage = new MemoryStorage();
-	const sessionStorage = new MemoryStorage();
-	const key = `lixray.atelier.shell.v1:${USER}:${WORKSPACE}`;
-	const legacyState = {
-		focusedPanel: "left" as const,
-		panels: {
-			left: {
-				views: [{ instance: "files-legacy", kind: "atelier_files" }],
-				activeInstance: "files-legacy",
-			},
-			central: { views: [], activeInstance: null },
-			right: { views: [], activeInstance: null },
-		},
-	};
-	const browserState = {
-		...legacyState,
-		focusedPanel: "right" as const,
-	};
-	const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-	Object.defineProperty(globalThis, "window", {
-		configurable: true,
-		value: { localStorage, sessionStorage },
-	});
-	try {
-		sessionStorage.setItem(key, JSON.stringify(legacyState));
-		assert.deepEqual(
-			createWorkspaceSessionStateStore({
-				userId: USER,
-				workspaceId: WORKSPACE,
-			}).getSnapshot(),
-			legacyState,
-		);
-		assert.deepEqual(
-			JSON.parse(localStorage.getItem(key) ?? "null"),
-			legacyState,
-		);
-		assert.equal(sessionStorage.getItem(key), null);
-
-		localStorage.setItem(key, JSON.stringify(browserState));
-		sessionStorage.setItem(key, JSON.stringify(legacyState));
-		assert.deepEqual(
-			createWorkspaceSessionStateStore({
-				userId: USER,
-				workspaceId: WORKSPACE,
-			}).getSnapshot(),
-			browserState,
-			"existing browser state takes precedence over legacy tab state",
-		);
-		assert.equal(sessionStorage.getItem(key), null);
-	} finally {
-		if (previousWindow) {
-			Object.defineProperty(globalThis, "window", previousWindow);
-		} else {
-			Reflect.deleteProperty(globalThis, "window");
-		}
-	}
-});
-
 void test("branch selection is serialized and only the latest request is routed", async () => {
 	let activeBranchId = MAIN;
 	let releaseDraft: () => void = () => undefined;

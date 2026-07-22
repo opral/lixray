@@ -8,11 +8,11 @@ const workspaceLookupRows = z
 	)
 	.max(1);
 
-export type WorkspaceLookupResult =
+type WorkspaceLookupResult =
 	| { ok: true; workspaceId: string }
 	| { ok: false; reason: "not_found" | "unavailable" };
 
-export interface ResolveSupabaseWorkspaceOptions {
+interface ResolveSupabaseWorkspaceOptions {
 	supabaseUrl: string;
 	publishableKey: string;
 	accessToken: string;

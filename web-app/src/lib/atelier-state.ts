@@ -22,20 +22,11 @@ export function createWorkspaceSessionStateStore(args: {
 	readonly storage?: Storage;
 }): AtelierSessionStateStore {
 	const storage = args.storage ?? window.localStorage;
-	const legacyStorage = args.storage ? null : window.sessionStorage;
 	const key = namespacedAtelierStateKey("shell", SESSION_STATE_VERSION, args);
 	const value = readStoredJson(storage, key);
 	let snapshot: AtelierSessionUiState | null = value
 		? coerceAtelierSessionUiState(value)
 		: null;
-	if (!snapshot && legacyStorage) {
-		const legacyValue = readStoredJson(legacyStorage, key);
-		if (legacyValue) {
-			snapshot = coerceAtelierSessionUiState(legacyValue);
-			storage.setItem(key, JSON.stringify(snapshot));
-		}
-	}
-	legacyStorage?.removeItem(key);
 	const listeners = new Set<() => void>();
 	return {
 		getSnapshot: () => snapshot,

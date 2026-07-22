@@ -1,9 +1,5 @@
 use crate::Config;
 use anyhow::{Context, Result};
-use lix_sdk::{
-    CommitResult, GetManyResult, GetOptions, Key, KeyRange, PutBatch, ReadOptions, ScanChunk,
-    ScanOptions, SpaceId, Storage, StorageError, StorageRead, StorageWrite, WriteOptions,
-};
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
 #[cfg(test)]
 use object_store::memory::InMemory;
@@ -13,11 +9,7 @@ use object_store::{path::Path as ObjectPath, ClientConfigKey, ObjectStoreExt};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::future::Future;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, OnceCell};
@@ -44,29 +36,8 @@ struct S3RequestBudget {
     max_retries: usize,
 }
 
-pub struct LixService {
-    protocol: lix_server_protocol::LixProtocolServer<MonitoredSlateDB>,
-    storage: MonitoredSlateDB,
-}
-
-#[derive(Clone)]
-pub(crate) struct MonitoredSlateDB {
-    inner: SlateDB,
-    // SlateDB keeps this state private. Its commit implementation sets its own
-    // terminal bit before returning a commit error, so mirroring that boundary
-    // lets the service retire the exact writer that observed the failed WAL
-    // durability operation.
-    terminal_durability_failure: Arc<AtomicBool>,
-}
-
-pub(crate) struct MonitoredSlateDBRead {
-    inner: lix_slatedb_storage::SlateDBRead,
-    terminal_durability_failure: Arc<AtomicBool>,
-}
-
-pub(crate) struct MonitoredSlateDBWrite {
-    inner: lix_slatedb_storage::SlateDBWrite,
-    terminal_durability_failure: Arc<AtomicBool>,
+pub(crate) struct LixService {
+    protocol: lix_server_protocol::LixProtocolServer<SlateDB>,
 }
 
 struct WorkspaceRuntime {
@@ -107,7 +78,7 @@ struct RuntimeEntry {
 }
 
 #[derive(Debug)]
-pub enum WorkspaceRuntimeError {
+pub(crate) enum WorkspaceRuntimeError {
     InvalidId,
     AtCapacity { max: usize },
     Recovering,
@@ -170,19 +141,7 @@ impl WorkspaceRuntimeManager {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn new_with_test_object_store(
-        max_open_workspaces: usize,
-        object_store: Arc<dyn ObjectStore>,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            backend: StorageBackend::Memory { object_store },
-            max_open_workspaces,
-            state: Mutex::new(ManagerState::default()),
-        })
-    }
-
-    pub async fn get(
+    pub(crate) async fn get(
         self: &Arc<Self>,
         workspace_id: &str,
     ) -> std::result::Result<Arc<LixService>, WorkspaceRuntimeError> {
@@ -227,10 +186,6 @@ impl WorkspaceRuntimeManager {
             Ok(runtime) => {
                 let runtime = Arc::clone(runtime);
                 match runtime.acquire().await {
-                    Some(service) if service.has_terminal_durability_failure() => {
-                        self.recover(workspace_id, &service).await;
-                        Err(WorkspaceRuntimeError::Recovering)
-                    }
                     Some(service) => Ok(service),
                     None => Err(WorkspaceRuntimeError::Recovering),
                 }
@@ -264,10 +219,12 @@ impl WorkspaceRuntimeManager {
         let started = Instant::now();
         let storage = match &self.backend {
             #[cfg(test)]
-            StorageBackend::Memory { object_store } => {
-                SlateDB::open_object_store(workspace_id, Arc::clone(object_store))
-                    .context("open in-memory Lix SlateDB storage")?
-            }
+            StorageBackend::Memory { object_store } => SlateDB::open_object_store_with_options(
+                workspace_id,
+                Arc::clone(object_store),
+                SlateDBObjectStoreOptions::default(),
+            )
+            .context("open in-memory Lix SlateDB storage")?,
             StorageBackend::S3 {
                 object_store,
                 prefix,
@@ -291,10 +248,9 @@ impl WorkspaceRuntimeManager {
             }
         };
 
-        let storage = MonitoredSlateDB::new(storage);
         let protocol_root = Arc::new(
             lix_sdk::open_lix_with_telemetry(
-                lix_sdk::OpenLixOptions::new(storage.clone()),
+                lix_sdk::OpenLixOptions::new(storage),
                 Arc::new(lix_sdk::TracingTelemetrySink::new()),
             )
             .await
@@ -306,10 +262,7 @@ impl WorkspaceRuntimeManager {
             elapsed_ms = elapsed_millis(started),
             "opened workspace runtime"
         );
-        Ok(Arc::new(WorkspaceRuntime::new(LixService {
-            protocol,
-            storage,
-        })))
+        Ok(Arc::new(WorkspaceRuntime::new(LixService { protocol })))
     }
 
     pub(crate) async fn recover(self: &Arc<Self>, workspace_id: &str, service: &Arc<LixService>) {
@@ -381,12 +334,8 @@ impl WorkspaceRuntimeManager {
 }
 
 impl LixService {
-    pub(crate) fn protocol(&self) -> lix_server_protocol::LixProtocolServer<MonitoredSlateDB> {
+    pub(crate) fn protocol(&self) -> lix_server_protocol::LixProtocolServer<SlateDB> {
         self.protocol.clone()
-    }
-
-    pub(crate) fn has_terminal_durability_failure(&self) -> bool {
-        self.storage.has_terminal_durability_failure()
     }
 
     async fn close(&self) -> Result<()> {
@@ -394,199 +343,6 @@ impl LixService {
             .close()
             .await
             .context("close Lix protocol sessions")
-    }
-}
-
-impl MonitoredSlateDB {
-    fn new(inner: SlateDB) -> Self {
-        Self {
-            inner,
-            terminal_durability_failure: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    fn has_terminal_durability_failure(&self) -> bool {
-        self.terminal_durability_failure.load(Ordering::Acquire)
-    }
-
-    fn observe_storage_error(&self, error: &StorageError) {
-        mark_terminal_on_durability_error(&self.terminal_durability_failure, error);
-    }
-}
-
-#[allow(
-    clippy::manual_async_fn,
-    reason = "the Storage traits use explicit Send futures, which keeps the wrapper signatures aligned with SlateDB"
-)]
-impl Storage for MonitoredSlateDB {
-    type Read<'a>
-        = MonitoredSlateDBRead
-    where
-        Self: 'a;
-    type Write<'a>
-        = MonitoredSlateDBWrite
-    where
-        Self: 'a;
-
-    fn begin_read(
-        &self,
-        options: ReadOptions,
-    ) -> impl Future<Output = std::result::Result<Self::Read<'_>, StorageError>> + Send {
-        async move {
-            match self.inner.begin_read(options).await {
-                Ok(inner) => Ok(MonitoredSlateDBRead {
-                    inner,
-                    terminal_durability_failure: Arc::clone(&self.terminal_durability_failure),
-                }),
-                Err(error) => {
-                    self.observe_storage_error(&error);
-                    Err(error)
-                }
-            }
-        }
-    }
-
-    fn begin_write(
-        &self,
-        options: WriteOptions,
-    ) -> impl Future<Output = std::result::Result<Self::Write<'_>, StorageError>> + Send {
-        async move {
-            match self.inner.begin_write(options).await {
-                Ok(inner) => Ok(MonitoredSlateDBWrite {
-                    inner,
-                    terminal_durability_failure: Arc::clone(&self.terminal_durability_failure),
-                }),
-                Err(error) => {
-                    self.observe_storage_error(&error);
-                    Err(error)
-                }
-            }
-        }
-    }
-}
-
-#[allow(
-    clippy::manual_async_fn,
-    reason = "the Storage traits use explicit Send futures, which keeps the wrapper signatures aligned with SlateDB"
-)]
-impl StorageRead for MonitoredSlateDBRead {
-    fn get_many(
-        &self,
-        space: SpaceId,
-        keys: &[Key],
-        options: GetOptions,
-    ) -> impl Future<Output = std::result::Result<GetManyResult, StorageError>> + Send {
-        async move {
-            let result = self.inner.get_many(space, keys, options).await;
-            observe_durability_result(&self.terminal_durability_failure, &result);
-            result
-        }
-    }
-
-    fn scan(
-        &self,
-        space: SpaceId,
-        range: KeyRange,
-        options: ScanOptions,
-    ) -> impl Future<Output = std::result::Result<ScanChunk, StorageError>> + Send {
-        async move {
-            let result = self.inner.scan(space, range, options).await;
-            observe_durability_result(&self.terminal_durability_failure, &result);
-            result
-        }
-    }
-}
-
-#[allow(
-    clippy::manual_async_fn,
-    reason = "the Storage traits use explicit Send futures, which keeps the wrapper signatures aligned with SlateDB"
-)]
-impl StorageWrite for MonitoredSlateDBWrite {
-    fn put_many(
-        &mut self,
-        space: SpaceId,
-        entries: PutBatch,
-    ) -> impl Future<Output = std::result::Result<(), StorageError>> + Send {
-        let terminal_durability_failure = Arc::clone(&self.terminal_durability_failure);
-        async move {
-            let result = self.inner.put_many(space, entries).await;
-            observe_durability_result(&terminal_durability_failure, &result);
-            result
-        }
-    }
-
-    fn delete_many(
-        &mut self,
-        space: SpaceId,
-        keys: &[Key],
-    ) -> impl Future<Output = std::result::Result<(), StorageError>> + Send {
-        let terminal_durability_failure = Arc::clone(&self.terminal_durability_failure);
-        async move {
-            let result = self.inner.delete_many(space, keys).await;
-            observe_durability_result(&terminal_durability_failure, &result);
-            result
-        }
-    }
-
-    fn delete_range(
-        &mut self,
-        space: SpaceId,
-        range: KeyRange,
-    ) -> impl Future<Output = std::result::Result<(), StorageError>> + Send {
-        let terminal_durability_failure = Arc::clone(&self.terminal_durability_failure);
-        async move {
-            let result = self.inner.delete_range(space, range).await;
-            observe_durability_result(&terminal_durability_failure, &result);
-            result
-        }
-    }
-
-    fn commit(
-        self,
-    ) -> impl Future<Output = std::result::Result<CommitResult, StorageError>> + Send {
-        async move {
-            let Self {
-                inner,
-                terminal_durability_failure,
-            } = self;
-            let result = inner.commit().await;
-            // SlateDB's commit path marks its internal health terminal before
-            // returning any write or flush error.
-            if result.is_err() {
-                terminal_durability_failure.store(true, Ordering::Release);
-            }
-            result
-        }
-    }
-
-    fn rollback(self) -> impl Future<Output = std::result::Result<(), StorageError>> + Send {
-        let Self {
-            inner,
-            terminal_durability_failure,
-        } = self;
-        async move {
-            let result = inner.rollback().await;
-            observe_durability_result(&terminal_durability_failure, &result);
-            result
-        }
-    }
-}
-
-fn observe_durability_result<T>(
-    terminal_durability_failure: &AtomicBool,
-    result: &std::result::Result<T, StorageError>,
-) {
-    if let Err(error) = result {
-        mark_terminal_on_durability_error(terminal_durability_failure, error);
-    }
-}
-
-fn mark_terminal_on_durability_error(
-    terminal_durability_failure: &AtomicBool,
-    error: &StorageError,
-) {
-    if matches!(error, StorageError::Durability) {
-        terminal_durability_failure.store(true, Ordering::Release);
     }
 }
 

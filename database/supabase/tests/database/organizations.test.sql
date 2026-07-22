@@ -1,7 +1,31 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(27);
+select plan(26);
+
+select is(
+  to_regclass('public.organization_invitations')::text,
+  null::text,
+  'organization invitations are not part of the current schema'
+);
+
+select is(
+  to_regprocedure('public.create_organization_invitation(uuid,text)')::text,
+  null::text,
+  'organization invitation creation is not exposed'
+);
+
+select is(
+  to_regprocedure('public.revoke_organization_invitation(uuid)')::text,
+  null::text,
+  'organization invitation revocation is not exposed'
+);
+
+select is(
+  to_regprocedure('public.accept_organization_invitation(text)')::text,
+  null::text,
+  'organization invitation acceptance is not exposed'
+);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password,
@@ -9,10 +33,7 @@ insert into auth.users (
 ) values
   ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'owner@example.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Owner"}', now(), now()),
   ('10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'member@example.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Member"}', now(), now()),
-  ('10000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'outsider@example.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Outsider"}', now(), now()),
-  ('10000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'invited@example.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Invited"}', now(), now()),
-  ('10000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'wrong@example.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Wrong account"}', now(), now()),
-  ('10000000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'expired@example.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Expired invite"}', now(), now());
+  ('10000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'outsider@example.com', '', now(), '{"provider":"google","providers":["google"]}', '{"full_name":"Outsider"}', now(), now());
 
 insert into public.organizations (id, name) values
   ('20000000-0000-0000-0000-000000000001', 'Test organization'),
@@ -26,12 +47,6 @@ insert into public.organization_members (organization_id, user_id, role) values
 insert into public.workspaces (id, organization_id, name) values
   ('30000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', 'First workspace'),
   ('30000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000002', 'Hidden workspace');
-
-insert into public.organization_invitations (
-  id, organization_id, email, token_hash, invited_by, expires_at
-) values
-  ('40000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', 'invited@example.com', encode(extensions.digest('valid-token', 'sha256'), 'hex'), '10000000-0000-0000-0000-000000000001', now() + interval '1 day'),
-  ('40000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000001', 'expired@example.com', encode(extensions.digest('expired-token', 'sha256'), 'hex'), '10000000-0000-0000-0000-000000000001', now() - interval '1 day');
 
 set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
@@ -166,45 +181,6 @@ select throws_ok(
   'An organization must have at least one owner',
   'the last owner cannot be removed'
 );
-
-select lives_ok(
-  $$select token from public.create_organization_invitation('20000000-0000-0000-0000-000000000001', 'new-member@example.com')$$,
-  'owners can create invitations'
-);
-
-set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000005';
-
-select throws_ok(
-  $$select public.accept_organization_invitation('valid-token')$$,
-  'P0001',
-  'Sign in with the Google account that was invited',
-  'an invitation rejects a different Google email'
-);
-
-set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000006';
-
-select throws_ok(
-  $$select public.accept_organization_invitation('expired-token')$$,
-  'P0001',
-  'Invitation is invalid or expired',
-  'expired invitations are rejected'
-);
-
-set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000004';
-
-select lives_ok(
-  $$select public.accept_organization_invitation('valid-token')$$,
-  'the invited Google account can accept an invitation'
-);
-
-select throws_ok(
-  $$select public.accept_organization_invitation('valid-token')$$,
-  'P0001',
-  'Invitation is invalid or expired',
-  'an accepted invitation cannot be reused'
-);
-
-set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000001';
 
 select lives_ok(
   $$select public.delete_workspace('30000000-0000-0000-0000-000000000001')$$,

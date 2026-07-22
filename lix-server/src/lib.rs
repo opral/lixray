@@ -2,6 +2,6 @@ mod config;
 mod routes;
 mod store;
 
-pub use config::{Config, S3StorageConfig};
+pub use config::Config;
 pub use routes::router;
-pub use store::{LixService, WorkspaceRuntimeError, WorkspaceRuntimeManager};
+pub use store::WorkspaceRuntimeManager;

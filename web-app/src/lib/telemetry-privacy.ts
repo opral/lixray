@@ -93,7 +93,7 @@ export function scrubPostHogEvent(
 	} as CaptureResult;
 }
 
-export function scrubAutocaptureProperties(value: unknown): unknown {
+function scrubAutocaptureProperties(value: unknown): unknown {
 	if (Array.isArray(value)) {
 		return value.map((item) => scrubAutocaptureProperties(item));
 	}
@@ -108,7 +108,7 @@ export function scrubAutocaptureProperties(value: unknown): unknown {
 	return scrubbed;
 }
 
-export function scrubPostHogValue(
+function scrubPostHogValue(
 	value: unknown,
 	depth = 0,
 	propertyKey?: string,
@@ -145,8 +145,6 @@ export function sanitizeLixrayPathname(value: string): string {
 	if (/^\/@[^/]+\/[^/]+(?:\/|$)/.test(pathname)) {
 		return "/workspace/:workspace";
 	}
-	if (/^\/invite\/[^/]+/.test(pathname)) return "/invite/:token";
-	if (/^\/sign-up\/.+/.test(pathname)) return "/sign-up/:path";
 	return pathname;
 }
 
@@ -172,8 +170,7 @@ function scrubPostHogString(value: string, propertyKey?: string): string {
 		.replaceAll(
 			/\/@[^/\s]+\/[^/\s]+\/file(?:\/[^\s)"'<>[\]{}]*)?/g,
 			"/workspace/:workspace/file/:file",
-		)
-		.replaceAll(/\/invite\/[A-Za-z0-9._~-]+/g, "/invite/:token");
+		);
 }
 
 function sanitizeUrlOrPath(value: string): string {

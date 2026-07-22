@@ -472,33 +472,6 @@ void test("agent-authenticated creates persist an Atelier review range", async (
 	);
 });
 
-void test("agent reviews discard legacy ranges after the Atelier hard cut", async () => {
-	const client = new MemoryLixRuntimeClient();
-	client.addFile("/review.md", new TextEncoder().encode("before"), "rev-3");
-	client.setAgentReviewRanges([
-		{
-			id: "legacy-review",
-			agent: "codex",
-			beforeCommitId: "commit-1",
-			afterCommitId: "commit-2",
-			startedAt: 1,
-			completedAt: 2,
-		},
-	]);
-	const service = new LixFileService(client, {
-		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
-	});
-
-	await service.editFile(WORKSPACE_ID, "/review.md", "rev-3", [
-		{ oldText: "before", newText: "after" },
-	]);
-
-	const ranges = client.agentReviewRanges();
-	assert.equal(ranges.length, 1);
-	assert.equal(ranges[0]?.sourceId, "codex");
-	assert.equal(ranges[0]?.agent, undefined);
-});
-
 void test("move_entry never overwrites and accepts an omitted source change ID", async () => {
 	const client = new MemoryLixRuntimeClient();
 	client.addFile("/source.txt", new TextEncoder().encode("source"), "rev-4");
@@ -578,7 +551,6 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 	private readonly directories = new Map<string, StoredDirectory>();
 	private changeCounter = 0;
 	private activeBranch = BRANCH_ID;
-	private reviewStore: { ranges: Array<Record<string, unknown>> } | undefined;
 	private readonly normalizedReviewRanges = new Map<
 		string,
 		Record<string, unknown>
@@ -606,10 +578,6 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 
 	agentReviewRanges(): Array<Record<string, unknown>> {
 		return [...this.normalizedReviewRanges.values()];
-	}
-
-	setAgentReviewRanges(ranges: Array<Record<string, unknown>>): void {
-		this.reviewStore = { ranges };
 	}
 
 	async listWorkspaces() {
@@ -642,14 +610,6 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 			return result([[textValue(`commit-${this.changeCounter}`)]]);
 		}
 
-		if (
-			sql ===
-			"SELECT value FROM lix_key_value_by_branch WHERE key = $1 AND lixcol_branch_id = $2 LIMIT 1"
-		) {
-			return result(
-				this.reviewStore ? [[{ kind: "json", value: this.reviewStore }]] : [],
-			);
-		}
 		if (sql.startsWith("INSERT INTO lix_key_value_by_branch")) {
 			const key = textParam(params[0]);
 			const value = params[1];

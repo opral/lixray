@@ -1,4 +1,4 @@
-export interface ExecuteSqlCoreTable {
+interface ExecuteSqlCoreTable {
 	name: string;
 	purpose: string;
 	columns: ReadonlyArray<string>;

@@ -2,7 +2,7 @@ import type { AtelierEvent } from "@opral/atelier";
 
 const DOCUMENT_MODIFIED_THROTTLE_MS = 30_000;
 
-export type TelemetryCapture = (
+type TelemetryCapture = (
 	event: string,
 	properties: Record<string, unknown>,
 ) => void;

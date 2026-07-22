@@ -108,7 +108,7 @@ function mountDirectoryView({
  * The workspace home — the pinned, never-closing first tab of the central
  * panel (12b/12f in the home comp).
  */
-export const lixrayHomeExtension: AtelierExtensionRegistration = {
+const lixrayHomeExtension: AtelierExtensionRegistration = {
 	manifest: {
 		apiVersion: 1,
 		id: LIXRAY_HOME_EXTENSION_ID,
@@ -141,7 +141,7 @@ export const lixrayHomeExtension: AtelierExtensionRegistration = {
  * A folder opened as its own content tab (12d): same listing as home minus
  * the connect row, navigating in place by the browser-like tab rules.
  */
-export const lixrayDirExtension: AtelierExtensionRegistration = {
+const lixrayDirExtension: AtelierExtensionRegistration = {
 	manifest: {
 		apiVersion: 1,
 		id: LIXRAY_DIR_EXTENSION_ID,

@@ -6,8 +6,8 @@ void test("accepts same-origin app paths", () => {
 	assert.equal(normalizeAuthReturnTo("/open"), "/open");
 	assert.equal(normalizeAuthReturnTo("/home"), "/home");
 	assert.equal(
-		normalizeAuthReturnTo("/invite/token?source=pwa#continue"),
-		"/invite/token?source=pwa#continue",
+		normalizeAuthReturnTo("/@acme/launch-q3?invite=token#continue"),
+		"/@acme/launch-q3?invite=token#continue",
 	);
 });
 

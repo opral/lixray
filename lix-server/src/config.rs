@@ -16,27 +16,27 @@ pub struct Config {
     pub internal_token: Option<String>,
     pub max_open_workspaces: usize,
     pub protocol_timeout: Duration,
-    pub storage: S3StorageConfig,
+    pub(crate) storage: S3StorageConfig,
 }
 
 #[derive(Clone, Debug)]
-pub struct S3StorageConfig {
-    pub endpoint: String,
-    pub bucket: String,
-    pub access_key_id: String,
-    pub secret_access_key: String,
-    pub region: String,
-    pub prefix: String,
-    pub allow_http: bool,
-    pub cache: SlateDBCacheConfig,
+pub(crate) struct S3StorageConfig {
+    pub(crate) endpoint: String,
+    pub(crate) bucket: String,
+    pub(crate) access_key_id: String,
+    pub(crate) secret_access_key: String,
+    pub(crate) region: String,
+    pub(crate) prefix: String,
+    pub(crate) allow_http: bool,
+    pub(crate) cache: SlateDBCacheConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SlateDBCacheConfig {
-    pub root_folder: PathBuf,
-    pub max_disk_cache_bytes: usize,
-    pub block_cache_bytes: u64,
-    pub metadata_cache_bytes: u64,
+pub(crate) struct SlateDBCacheConfig {
+    pub(crate) root_folder: PathBuf,
+    pub(crate) max_disk_cache_bytes: usize,
+    pub(crate) block_cache_bytes: u64,
+    pub(crate) metadata_cache_bytes: u64,
 }
 
 impl Config {
