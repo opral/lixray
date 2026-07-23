@@ -211,6 +211,8 @@ export async function handleRequest(
 		const authResult = await authenticateMcp(request, env);
 		if (!authResult.ok) return authResult.response;
 		const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
+		// This positive cache is recreated for every MCP HTTP request.
+		const authorizedLixIds = new Set<string>();
 		if (!env.SLATEDB_CONTAINER && !options.lixFetch) {
 			return new Response("Lix storage is not configured\n", {
 				status: 500,
@@ -219,7 +221,12 @@ export async function handleRequest(
 		const client = new WorkerLixRuntimeClient(
 			env,
 			authResult.auth,
-			async (lixId, auth) => authorizeLix(lixId, auth, env),
+			async (lixId, auth) => {
+				if (authorizedLixIds.has(lixId)) return null;
+				const failure = await authorizeLix(lixId, auth, env);
+				if (failure === null) authorizedLixIds.add(lixId);
+				return failure;
+			},
 			{
 				signal: request.signal,
 				retryDelay: options.containerRetryDelay,

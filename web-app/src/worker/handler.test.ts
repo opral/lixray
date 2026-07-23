@@ -214,6 +214,81 @@ void test("authenticated MCP initialize reaches the MCP transport before fallbac
 	assert.ok(payload.result.capabilities);
 });
 
+void test("MCP reuses successful lix authorization only within one HTTP request", async () => {
+	let authorizationChecks = 0;
+	const protocolPaths: string[] = [];
+
+	for (let request = 0; request < 2; request += 1) {
+		const response = await handleRequest(
+			new Request("https://example.test/mcp", { method: "POST" }),
+			env({}),
+			{
+				authenticateMcp: authenticatedMcp(),
+				authorizeLix: async (lixId) => {
+					authorizationChecks += 1;
+					assert.equal(lixId, LIX_A);
+					return null;
+				},
+				lixFetch: mcpLixFetch(protocolPaths, "request-scoped-authorization"),
+				mcpTransport: async (_request, service) => {
+					await service.executeSql(LIX_A, [{ sql: "SELECT 1" }]);
+					await service.executeSql(LIX_A, [{ sql: "SELECT 2" }]);
+					return Response.json({ ok: true });
+				},
+			},
+		);
+		assert.equal(response.status, 200);
+	}
+
+	assert.equal(authorizationChecks, 2);
+	assert.deepEqual(protocolPaths, [
+		"/lix/v1/",
+		"/lix/v1/execute-batch",
+		"/lix/v1/execute-batch",
+		"/lix/v1/session",
+		"/lix/v1/",
+		"/lix/v1/execute-batch",
+		"/lix/v1/execute-batch",
+		"/lix/v1/session",
+	]);
+});
+
+void test("MCP retries lix authorization after a denial", async () => {
+	let authorizationChecks = 0;
+	const protocolPaths: string[] = [];
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			authorizeLix: async () => {
+				authorizationChecks += 1;
+				return authorizationChecks === 1
+					? new Response("Lix access denied", { status: 403 })
+					: null;
+			},
+			lixFetch: mcpLixFetch(protocolPaths, "authorization-retry"),
+			mcpTransport: async (_request, service) => {
+				await assert.rejects(
+					service.executeSql(LIX_A, [{ sql: "SELECT 1" }]),
+					(error: unknown) =>
+						error instanceof FileServiceError && error.code === "not_found",
+				);
+				await service.executeSql(LIX_A, [{ sql: "SELECT 1" }]);
+				return Response.json({ ok: true });
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(authorizationChecks, 2);
+	assert.deepEqual(protocolPaths, [
+		"/lix/v1/",
+		"/lix/v1/execute-batch",
+		"/lix/v1/session",
+	]);
+});
+
 void test("authenticated MCP telemetry receives identity and flushes through waitUntil", async () => {
 	let waitedFor: Promise<unknown> | undefined;
 	let flushes = 0;
@@ -1174,6 +1249,33 @@ function remoteLixRequest(endpoint: string, init?: RequestInit) {
 		`https://example.test/@acme/launch-q3/lix/v1${endpoint}`,
 		init,
 	);
+}
+
+function mcpLixFetch(protocolPaths: string[], sessionId: string) {
+	return async (lixId: string, request: Request): Promise<Response> => {
+		assert.equal(lixId, LIX_A);
+		const path = new URL(request.url).pathname;
+		protocolPaths.push(path);
+		if (path === "/lix/v1/") {
+			return Response.json({
+				protocolVersion: 1,
+				activeBranchId: "main",
+				sessionId,
+			});
+		}
+		if (path === "/lix/v1/session" && request.method === "DELETE") {
+			return new Response(null, { status: 204 });
+		}
+		assert.equal(path, "/lix/v1/execute-batch");
+		return Response.json([
+			{
+				columns: ["value"],
+				rows: [[{ kind: "int", value: 1 }]],
+				rowsAffected: 0,
+				notices: [],
+			},
+		]);
+	};
 }
 
 function authenticated(): AuthenticateRequest {
