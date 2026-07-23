@@ -22,6 +22,7 @@ import {
 	MCP_PROTECTED_RESOURCE_URL,
 	MCP_RESOURCE,
 	createLixrayMcpServer,
+	mcpServerNameForUrl,
 	mcpAuthenticateChallenge,
 	mcpDocumentationResponse,
 	mcpUnauthorizedResponse,
@@ -29,7 +30,7 @@ import {
 	type McpToolCallObservation,
 } from "./server.ts";
 
-const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
+const LIX_ID = "11111111-1111-4111-8111-111111111111";
 const BRANCH_ID = "22222222-2222-4222-8222-222222222222";
 const THROW_BRANCH_ID = "33333333-3333-4333-8333-333333333333";
 const AUTHORIZATION_SERVER = "https://supabase.example.test/auth/v1";
@@ -72,7 +73,7 @@ void test("MCP documentation distinguishes browser and client authentication", a
 		documentation,
 		/browser session and your MCP client authorization are separate/,
 	);
-	assert.match(documentation, /initialize, tools\/list, and list_workspaces/);
+	assert.match(documentation, /initialize, tools\/list, and list_lixes/);
 	assert.match(documentation, /no refresh token is available/);
 	assert.match(documentation, /do not include access or refresh tokens/);
 	assert.match(documentation, /ordered batch of statements/);
@@ -83,6 +84,12 @@ void test("MCP documentation distinguishes browser and client authentication", a
 	assert.match(documentation, /lix_branch/);
 	assert.match(documentation, /raw Lix SQL execute/);
 	assert.doesNotMatch(documentation, /file tools|reading, creating, editing/i);
+});
+
+void test("local MCP URLs advertise an isolated development server name", () => {
+	assert.equal(mcpServerNameForUrl("http://127.0.0.1:8787/mcp"), "LixRay Dev");
+	assert.equal(mcpServerNameForUrl("http://localhost:8787/mcp"), "LixRay Dev");
+	assert.equal(mcpServerNameForUrl("https://lixray.com/mcp"), "LixRay");
 });
 
 void test("MCP initialize, tools/list, and tools/call expose the authenticated tool contract", async () => {
@@ -108,7 +115,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		const listed = await client.listTools();
 		assert.deepEqual(
 			listed.tools.map((tool) => tool.name),
-			["list_workspaces", "active_branch_id", "switch_branch", "execute"],
+			["list_lixes", "active_branch_id", "switch_branch", "execute"],
 		);
 		for (const tool of listed.tools) {
 			assert.deepEqual(tool._meta?.securitySchemes, [
@@ -116,7 +123,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			]);
 			assert.equal(tool.annotations?.openWorldHint, false);
 		}
-		for (const name of ["list_workspaces", "active_branch_id"]) {
+		for (const name of ["list_lixes", "active_branch_id"]) {
 			assert.equal(
 				listed.tools.find((tool) => tool.name === name)?.annotations
 					?.readOnlyHint,
@@ -161,7 +168,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		}
 		for (const name of rawTools
 			.map((tool) => String(tool.name))
-			.filter((name) => name !== "list_workspaces")) {
+			.filter((name) => name !== "list_lixes")) {
 			const inputSchema = rawTools.find((tool) => tool.name === name)
 				?.inputSchema as
 				| {
@@ -179,28 +186,16 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				  }
 				| undefined;
 			assert.ok(inputSchema, `${name} should expose an input schema`);
-			assert.equal(inputSchema.properties?.workspace_id, undefined, name);
-			assert.ok(inputSchema.properties?.workspace_ref, name);
-			assert.equal(inputSchema.required?.includes("workspace_ref"), true, name);
-			assert.equal(inputSchema.properties?.workspace_ref?.type, "string", name);
-			assert.equal(
-				inputSchema.properties?.workspace_ref?.anyOf,
-				undefined,
-				name,
-			);
-			assert.equal(
-				inputSchema.properties?.workspace_ref?.format,
-				undefined,
-				name,
-			);
-			assert.equal(
-				inputSchema.properties?.workspace_ref?.pattern,
-				undefined,
-				name,
-			);
+			assert.equal(inputSchema.properties?.lix_id, undefined, name);
+			assert.ok(inputSchema.properties?.lix_ref, name);
+			assert.equal(inputSchema.required?.includes("lix_ref"), true, name);
+			assert.equal(inputSchema.properties?.lix_ref?.type, "string", name);
+			assert.equal(inputSchema.properties?.lix_ref?.anyOf, undefined, name);
+			assert.equal(inputSchema.properties?.lix_ref?.format, undefined, name);
+			assert.equal(inputSchema.properties?.lix_ref?.pattern, undefined, name);
 			assert.match(
-				inputSchema.properties?.workspace_ref?.description ?? "",
-				/Exact workspace UUID, exact workspace slug, or exact @namespace\/slug\. Use the workspace UUID when available\./,
+				inputSchema.properties?.lix_ref?.description ?? "",
+				/Exact lix UUID, exact lix slug, or exact @namespace\/slug\. Use the lix UUID when available\./,
 				name,
 			);
 		}
@@ -266,18 +261,18 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			"switch_branch should require an explicit branch ID",
 		);
 
-		const workspaces = await client.callTool({
-			name: "list_workspaces",
+		const lixes = await client.callTool({
+			name: "list_lixes",
 			arguments: {},
 		});
-		assert.equal(workspaces.isError, undefined);
-		assert.deepEqual(workspaces.structuredContent, {
-			workspaces: [
+		assert.equal(lixes.isError, undefined);
+		assert.deepEqual(lixes.structuredContent, {
+			lixes: [
 				{
-					id: WORKSPACE_ID,
+					id: LIX_ID,
 					name: "Personal",
 					slug: "personal",
-					organization: {
+					namespace: {
 						id: "org-1",
 						name: "Example",
 						handle: "example",
@@ -288,21 +283,21 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 
 		const activeBranch = await client.callTool({
 			name: "active_branch_id",
-			arguments: { workspace_ref: "personal" },
+			arguments: { lix_ref: "personal" },
 		});
 		assert.equal(activeBranch.isError, undefined);
 		assert.deepEqual(activeBranch.structuredContent, { branch_id: BRANCH_ID });
 
 		const switchedBranch = await client.callTool({
 			name: "switch_branch",
-			arguments: { workspace_ref: "personal", branch_id: "global" },
+			arguments: { lix_ref: "personal", branch_id: "global" },
 		});
 		assert.equal(switchedBranch.isError, undefined);
 		assert.deepEqual(switchedBranch.structuredContent, { branch_id: "global" });
 
 		const activeGlobalBranch = await client.callTool({
 			name: "active_branch_id",
-			arguments: { workspace_ref: "personal" },
+			arguments: { lix_ref: "personal" },
 		});
 		assert.equal(activeGlobalBranch.isError, undefined);
 		assert.deepEqual(activeGlobalBranch.structuredContent, {
@@ -312,7 +307,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		const executed = await client.callTool({
 			name: "execute",
 			arguments: {
-				workspace_ref: WORKSPACE_ID,
+				lix_ref: LIX_ID,
 				statements: [
 					{
 						sql: "SELECT value FROM lix_key_value WHERE key = $1",
@@ -334,7 +329,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		});
 		assert.deepEqual(runtimeClient.executeRequests, [
 			{
-				workspaceId: WORKSPACE_ID,
+				lixId: LIX_ID,
 				request: {
 					sql: "SELECT value FROM lix_key_value WHERE key = $1",
 					params: [{ kind: "text", value: "example" }],
@@ -347,7 +342,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		const batch = await client.callTool({
 			name: "execute",
 			arguments: {
-				workspace_ref: WORKSPACE_ID,
+				lix_ref: LIX_ID,
 				statements: [
 					{
 						sql: "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
@@ -372,7 +367,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		const invalidExecuteArguments = await client.callTool({
 			name: "execute",
 			arguments: {
-				workspace_ref: WORKSPACE_ID,
+				lix_ref: LIX_ID,
 				statements: [{ sql: "  SELECT $1  ", params: [{ kind: "text" }] }],
 			},
 		});
@@ -389,7 +384,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		const rejectedBranchOverride = await client.callTool({
 			name: "execute",
 			arguments: {
-				workspace_ref: WORKSPACE_ID,
+				lix_ref: LIX_ID,
 				branch_id: BRANCH_ID,
 				statements: [{ sql: "SELECT 1" }],
 			},
@@ -406,7 +401,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 
 		const switchedToFailingBranch = await client.callTool({
 			name: "switch_branch",
-			arguments: { workspace_ref: WORKSPACE_ID, branch_id: THROW_BRANCH_ID },
+			arguments: { lix_ref: LIX_ID, branch_id: THROW_BRANCH_ID },
 		});
 		assert.equal(switchedToFailingBranch.isError, undefined);
 		assert.deepEqual(switchedToFailingBranch.structuredContent, {
@@ -416,7 +411,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		const internalFailure = await client.callTool({
 			name: "execute",
 			arguments: {
-				workspace_ref: WORKSPACE_ID,
+				lix_ref: LIX_ID,
 				statements: [{ sql: "SELECT 1" }],
 			},
 		});
@@ -459,33 +454,33 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				},
 			),
 			[
-				{ toolName: "list_workspaces", outcome: "success" },
+				{ toolName: "list_lixes", outcome: "success" },
 				{
 					toolName: "active_branch_id",
 					outcome: "success",
-					workspaceId: WORKSPACE_ID,
+					lixId: LIX_ID,
 				},
 				{
 					toolName: "switch_branch",
 					outcome: "success",
-					workspaceId: WORKSPACE_ID,
+					lixId: LIX_ID,
 				},
 				{
 					toolName: "active_branch_id",
 					outcome: "success",
-					workspaceId: WORKSPACE_ID,
+					lixId: LIX_ID,
 				},
 				{
 					toolName: "execute",
 					outcome: "success",
-					workspaceId: WORKSPACE_ID,
+					lixId: LIX_ID,
 					statementCount: 1,
 					resultCount: 1,
 				},
 				{
 					toolName: "execute",
 					outcome: "success",
-					workspaceId: WORKSPACE_ID,
+					lixId: LIX_ID,
 					statementCount: 2,
 					resultCount: 2,
 				},
@@ -504,13 +499,13 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				{
 					toolName: "switch_branch",
 					outcome: "success",
-					workspaceId: WORKSPACE_ID,
+					lixId: LIX_ID,
 				},
 				{
 					toolName: "execute",
 					outcome: "error",
 					errorCode: "internal_error",
-					workspaceId: WORKSPACE_ID,
+					lixId: LIX_ID,
 					statementCount: 1,
 				},
 				{
@@ -563,18 +558,18 @@ void test("authless MCP tools advertise noauth security", async () => {
 class ProtocolLixRuntimeClient implements LixRuntimeClient {
 	private currentBranchId = BRANCH_ID;
 	readonly executeRequests: Array<{
-		workspaceId: string;
+		lixId: string;
 		request: ExecuteRequest;
 	}> = [];
 	readonly executeActiveBranchIds: Array<string> = [];
 
-	async listWorkspaces() {
+	async listLixes() {
 		return [
 			{
-				id: WORKSPACE_ID,
+				id: LIX_ID,
 				name: "Personal",
 				slug: "personal",
-				organization: { id: "org-1", name: "Example", handle: "example" },
+				namespace: { id: "org-1", name: "Example", handle: "example" },
 			},
 		];
 	}
@@ -583,20 +578,20 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 		return this.currentBranchId;
 	}
 
-	async switchBranch(_workspaceId: string, branchId: string) {
+	async switchBranch(_lixId: string, branchId: string) {
 		this.currentBranchId = branchId;
 		return { branchId };
 	}
 
 	async execute(
-		workspaceId: string,
+		lixId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse> {
 		if (this.currentBranchId === THROW_BRANCH_ID) {
 			throw new Error("Unexpected runtime failure");
 		}
 		this.executeActiveBranchIds.push(this.currentBranchId);
-		this.executeRequests.push({ workspaceId, request });
+		this.executeRequests.push({ lixId, request });
 		return {
 			columns: ["value"],
 			rows: [[{ kind: "text", value: "result" }]],
@@ -606,13 +601,13 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	async executeBatch(
-		workspaceId: string,
+		lixId: string,
 		request: ExecuteBatchRequest,
 	): Promise<ExecuteScriptResponse> {
 		return {
 			results: await Promise.all(
 				request.statements.map((statement) =>
-					this.execute(workspaceId, {
+					this.execute(lixId, {
 						...statement,
 						options: request.options,
 					}),

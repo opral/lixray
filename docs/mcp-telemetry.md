@@ -16,7 +16,7 @@ Every tool call includes:
 
 - `$ai_trace_id`, `$ai_span_id`, `$ai_span_name`, `$ai_latency`, and
   `$ai_is_error`
-- `mcp_server`, `mcp_tool`, `oauth_client_id`, `workspace_id`, and `outcome`
+- `mcp_server`, `mcp_tool`, `oauth_client_id`, `lix_id`, and `outcome`
 - `release_id` from `LIXRAY_RELEASE_ID`, Cloudflare Worker version metadata, or
   Railway's commit SHA
 - `mcp_surface_version`, a content hash of the advertised MCP tool descriptors

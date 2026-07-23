@@ -22,7 +22,7 @@ export type ContainerRetryDelay = (
 ) => Promise<void>;
 
 export interface ContainerRetryObservation {
-	workspaceId: string;
+	lixId: string;
 	operation: string;
 	retryCount: number;
 	retryDelayMs: number;
@@ -31,7 +31,7 @@ export interface ContainerRetryObservation {
 
 interface FetchContainerWithRetryOptions {
 	namespace: ContainerNamespace;
-	workspaceId: string;
+	lixId: string;
 	operation: string;
 	envVars: Record<string, string>;
 	createRequest: () => Request;
@@ -89,7 +89,7 @@ export async function fetchContainerWithRetry(
 		try {
 			// A Durable Object reset creates a new object incarnation. Reacquiring the
 			// stub on every attempt avoids retaining an RPC session from the reset one.
-			container = options.namespace.getByName(options.workspaceId);
+			container = options.namespace.getByName(options.lixId);
 			const startup = container.startAndWaitForPorts?.({
 				ports: 8080,
 				startOptions: { envVars: options.envVars },
@@ -216,7 +216,7 @@ export function logContainerRetry(
 ): void {
 	if (observation.retryCount !== 1 && observation.retryCount % 30 !== 0) return;
 	console.warn("Transient LixRay container failure; retrying", {
-		workspaceId: observation.workspaceId,
+		lixId: observation.lixId,
 		operation: observation.operation,
 		retryCount: observation.retryCount,
 		retryDelayMs: observation.retryDelayMs,
@@ -366,7 +366,7 @@ async function waitBeforeContainerRetry(
 ): Promise<void> {
 	const retryDelayMs = containerRetryDelayMs(retryCount, retryRandom);
 	options.onRetry?.({
-		workspaceId: options.workspaceId,
+		lixId: options.lixId,
 		operation: options.operation,
 		retryCount,
 		retryDelayMs,

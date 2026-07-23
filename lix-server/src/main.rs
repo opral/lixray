@@ -1,5 +1,5 @@
 use anyhow::Context;
-use lixray::{router, Config, WorkspaceRuntimeManager};
+use lixray::{router, Config, LixRuntimeManager};
 use tokio::net::TcpListener;
 
 mod telemetry;
@@ -12,13 +12,13 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(&config.bind_addr)
         .await
         .with_context(|| format!("bind {}", config.bind_addr))?;
-    let manager = WorkspaceRuntimeManager::new(&config)?;
+    let manager = LixRuntimeManager::new(&config)?;
     let internal_token = config.internal_token.clone();
     tracing::info!(
         addr = %config.bind_addr,
-        max_open_workspaces = config.max_open_workspaces,
+        max_open_lixes = config.max_open_lixes,
         internal_auth = internal_token.is_some(),
-        "lix workspace service ready"
+        "lix lix service ready"
     );
     let result = axum::serve(
         listener,

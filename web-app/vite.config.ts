@@ -138,9 +138,9 @@ export default defineConfig(({ command }) => ({
 				return {
 					vars: {
 						...config.vars,
-						LIXRAY_WORKSPACE_SERVICE_URL:
-							process.env.LIXRAY_WORKSPACE_SERVICE_URL ??
-							config.vars?.LIXRAY_WORKSPACE_SERVICE_URL,
+						LIXRAY_LIX_SERVICE_URL:
+							process.env.LIXRAY_LIX_SERVICE_URL ??
+							config.vars?.LIXRAY_LIX_SERVICE_URL,
 						LIXRAY_INTERNAL_TOKEN:
 							process.env.LIXRAY_INTERNAL_TOKEN ??
 							config.vars?.LIXRAY_INTERNAL_TOKEN,
@@ -166,9 +166,9 @@ export default defineConfig(({ command }) => ({
 						SUPABASE_URL: process.env.SUPABASE_URL ?? config.vars?.SUPABASE_URL,
 						LIXRAY_DEMO:
 							process.env.LIXRAY_DEMO ?? config.vars?.LIXRAY_DEMO ?? "",
-						LIXRAY_DEMO_WORKSPACE_IDS:
-							process.env.LIXRAY_DEMO_WORKSPACE_IDS ??
-							config.vars?.LIXRAY_DEMO_WORKSPACE_IDS ??
+						LIXRAY_DEMO_LIX_IDS:
+							process.env.LIXRAY_DEMO_LIX_IDS ??
+							config.vars?.LIXRAY_DEMO_LIX_IDS ??
 							"",
 						...posthogVars,
 					},

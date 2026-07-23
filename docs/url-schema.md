@@ -1,6 +1,12 @@
 # LixRay URL Schema Specification
 
-Status: **draft** · Decisions as of 2026-07-10 · Normative keywords per RFC 2119 (MUST/SHOULD/MAY)
+Status: **design reference** · Updated 2026-07-22
+
+Implementation note: the current hard-cut schema uses one `namespaces` model for
+personal and organization ownership, one global `handles` pool, and internal
+`lixes` records rendered as “workspaces” in the UI. Handle and slug redirects,
+tombstones, renames, and transfer semantics described later in this document are
+future design material and are explicitly out of scope for the current release.
 
 Scope: the public URL grammar of lixray.com, the identity model behind it (handles, namespaces,
 workspaces), and the Postgres schema that implements it. v1 ships latest-only URLs, no raw-bytes

@@ -1,316 +1,574 @@
-export type OrganizationRole = "owner" | "member";
+export type Json =
+	| string
+	| number
+	| boolean
+	| null
+	| { [key: string]: Json | undefined }
+	| Json[];
 
-export interface Database {
+export type Database = {
+	graphql_public: {
+		Tables: {
+			[_ in never]: never;
+		};
+		Views: {
+			[_ in never]: never;
+		};
+		Functions: {
+			graphql: {
+				Args: {
+					extensions?: Json;
+					operationName?: string;
+					query?: string;
+					variables?: Json;
+				};
+				Returns: Json;
+			};
+		};
+		Enums: {
+			[_ in never]: never;
+		};
+		CompositeTypes: {
+			[_ in never]: never;
+		};
+	};
 	public: {
 		Tables: {
-			workspace_members: {
+			handles: {
 				Row: {
-					workspace_id: string;
-					user_id: string;
 					created_at: string;
+					handle: string;
+					namespace_id: string;
+					squat_key: string | null;
 				};
 				Insert: {
-					workspace_id: string;
-					user_id: string;
 					created_at?: string;
-				};
-				Update: Record<never, never>;
-				Relationships: [
-					{
-						foreignKeyName: "workspace_members_workspace_id_fkey";
-						columns: ["workspace_id"];
-						isOneToOne: false;
-						referencedRelation: "workspaces";
-						referencedColumns: ["id"];
-					},
-				];
-			};
-			workspace_share_tokens: {
-				Row: {
-					id: string;
-					workspace_id: string;
-					token_hash: string;
-					shared_by: string;
-					can_edit: boolean;
-					revoked_at: string | null;
-					created_at: string;
-				};
-				Insert: {
-					id?: string;
-					workspace_id: string;
-					token_hash: string;
-					shared_by: string;
-					can_edit?: boolean;
-					revoked_at?: string | null;
-					created_at?: string;
+					handle: string;
+					namespace_id: string;
+					squat_key?: string | null;
 				};
 				Update: {
-					revoked_at?: string | null;
+					created_at?: string;
+					handle?: string;
+					namespace_id?: string;
+					squat_key?: string | null;
 				};
 				Relationships: [
 					{
-						foreignKeyName: "workspace_share_tokens_workspace_id_fkey";
-						columns: ["workspace_id"];
-						isOneToOne: false;
-						referencedRelation: "workspaces";
+						foreignKeyName: "handles_namespace_id_fkey";
+						columns: ["namespace_id"];
+						isOneToOne: true;
+						referencedRelation: "namespaces";
 						referencedColumns: ["id"];
 					},
 				];
 			};
-			user_workspace_preferences: {
+			lix_members: {
 				Row: {
+					created_at: string;
+					lix_id: string;
+					role: Database["public"]["Enums"]["namespace_role"];
 					user_id: string;
-					workspace_id: string;
-					atelier_layout: unknown;
+				};
+				Insert: {
+					created_at?: string;
+					lix_id: string;
+					role?: Database["public"]["Enums"]["namespace_role"];
+					user_id: string;
+				};
+				Update: {
+					created_at?: string;
+					lix_id?: string;
+					role?: Database["public"]["Enums"]["namespace_role"];
+					user_id?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "lix_members_lix_id_fkey";
+						columns: ["lix_id"];
+						isOneToOne: false;
+						referencedRelation: "lixes";
+						referencedColumns: ["id"];
+					},
+				];
+			};
+			lix_share_tokens: {
+				Row: {
+					can_edit: boolean;
+					created_at: string;
+					id: string;
+					lix_id: string;
+					revoked_at: string | null;
+					shared_by: string;
+					token_hash: string;
+				};
+				Insert: {
+					can_edit?: boolean;
+					created_at?: string;
+					id?: string;
+					lix_id: string;
+					revoked_at?: string | null;
+					shared_by: string;
+					token_hash: string;
+				};
+				Update: {
+					can_edit?: boolean;
+					created_at?: string;
+					id?: string;
+					lix_id?: string;
+					revoked_at?: string | null;
+					shared_by?: string;
+					token_hash?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "lix_share_tokens_lix_id_fkey";
+						columns: ["lix_id"];
+						isOneToOne: false;
+						referencedRelation: "lixes";
+						referencedColumns: ["id"];
+					},
+				];
+			};
+			lixes: {
+				Row: {
+					created_at: string;
+					deleted_at: string | null;
+					id: string;
+					name: string;
+					namespace_id: string;
+					slug: string;
+					slug_squat_key: string | null;
 					updated_at: string;
 				};
 				Insert: {
-					user_id: string;
-					workspace_id: string;
-					atelier_layout: unknown;
+					created_at?: string;
+					deleted_at?: string | null;
+					id?: string;
+					name: string;
+					namespace_id: string;
+					slug: string;
+					slug_squat_key?: string | null;
 					updated_at?: string;
 				};
 				Update: {
-					atelier_layout?: unknown;
+					created_at?: string;
+					deleted_at?: string | null;
+					id?: string;
+					name?: string;
+					namespace_id?: string;
+					slug?: string;
+					slug_squat_key?: string | null;
 					updated_at?: string;
 				};
-				Relationships: [];
+				Relationships: [
+					{
+						foreignKeyName: "lixes_namespace_id_fkey";
+						columns: ["namespace_id"];
+						isOneToOne: false;
+						referencedRelation: "namespaces";
+						referencedColumns: ["id"];
+					},
+				];
 			};
-			user_workspace_review_resolutions: {
+			namespace_members: {
 				Row: {
+					created_at: string;
+					namespace_id: string;
+					role: Database["public"]["Enums"]["namespace_role"];
 					user_id: string;
-					workspace_id: string;
-					branch_id: string;
-					review_id: string;
-					file_id: string;
-					outcome: "accepted" | "rejected" | "resolved";
-					resolved_at: string;
 				};
 				Insert: {
+					created_at?: string;
+					namespace_id: string;
+					role?: Database["public"]["Enums"]["namespace_role"];
 					user_id: string;
-					workspace_id: string;
-					branch_id: string;
-					review_id: string;
-					file_id: string;
-					outcome: "accepted" | "rejected" | "resolved";
-					resolved_at?: string;
 				};
 				Update: {
-					outcome?: "accepted" | "rejected" | "resolved";
-					resolved_at?: string;
+					created_at?: string;
+					namespace_id?: string;
+					role?: Database["public"]["Enums"]["namespace_role"];
+					user_id?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "namespace_members_namespace_id_fkey";
+						columns: ["namespace_id"];
+						isOneToOne: false;
+						referencedRelation: "namespaces";
+						referencedColumns: ["id"];
+					},
+				];
+			};
+			namespaces: {
+				Row: {
+					created_at: string;
+					id: string;
+					kind: Database["public"]["Enums"]["namespace_kind"];
+					name: string;
+					updated_at: string;
+				};
+				Insert: {
+					created_at?: string;
+					id?: string;
+					kind: Database["public"]["Enums"]["namespace_kind"];
+					name: string;
+					updated_at?: string;
+				};
+				Update: {
+					created_at?: string;
+					id?: string;
+					kind?: Database["public"]["Enums"]["namespace_kind"];
+					name?: string;
+					updated_at?: string;
 				};
 				Relationships: [];
 			};
 			profiles: {
 				Row: {
-					id: string;
-					email: string;
-					name: string;
 					avatar_url: string | null;
 					created_at: string;
-					updated_at: string;
-				};
-				Insert: {
-					id: string;
 					email: string;
+					id: string;
 					name: string;
+					updated_at: string;
+				};
+				Insert: {
 					avatar_url?: string | null;
 					created_at?: string;
+					email: string;
+					id: string;
+					name: string;
 					updated_at?: string;
 				};
 				Update: {
+					avatar_url?: string | null;
+					created_at?: string;
 					email?: string;
+					id?: string;
 					name?: string;
-					avatar_url?: string | null;
 					updated_at?: string;
 				};
 				Relationships: [];
 			};
-			organizations: {
+			user_lix_preferences: {
 				Row: {
-					id: string;
-					name: string;
-					handle: string;
-					email_domain: string | null;
-					personal_owner_id: string | null;
-					created_at: string;
+					atelier_layout: Json;
+					lix_id: string;
 					updated_at: string;
+					user_id: string;
 				};
 				Insert: {
-					id?: string;
-					name: string;
-					handle?: string;
-					email_domain?: string | null;
-					personal_owner_id?: string | null;
-					created_at?: string;
+					atelier_layout: Json;
+					lix_id: string;
 					updated_at?: string;
+					user_id: string;
 				};
 				Update: {
-					name?: string;
-					handle?: string;
-					email_domain?: string | null;
-					personal_owner_id?: string | null;
+					atelier_layout?: Json;
+					lix_id?: string;
 					updated_at?: string;
+					user_id?: string;
 				};
-				Relationships: [];
-			};
-			organization_members: {
-				Row: {
-					organization_id: string;
-					user_id: string;
-					role: OrganizationRole;
-					created_at: string;
-				};
-				Insert: {
-					organization_id: string;
-					user_id: string;
-					role?: OrganizationRole;
-					created_at?: string;
-				};
-				Update: { role?: OrganizationRole };
 				Relationships: [
 					{
-						foreignKeyName: "organization_members_organization_id_fkey";
-						columns: ["organization_id"];
+						foreignKeyName: "user_lix_preferences_lix_id_fkey";
+						columns: ["lix_id"];
 						isOneToOne: false;
-						referencedRelation: "organizations";
+						referencedRelation: "lixes";
 						referencedColumns: ["id"];
 					},
 				];
 			};
-			workspaces: {
+			user_lix_review_resolutions: {
 				Row: {
-					id: string;
-					organization_id: string;
-					name: string;
-					slug: string;
-					created_at: string;
-					updated_at: string;
-					deleted_at: string | null;
+					branch_id: string;
+					file_id: string;
+					lix_id: string;
+					outcome: string;
+					resolved_at: string;
+					review_id: string;
+					user_id: string;
 				};
 				Insert: {
-					id?: string;
-					organization_id: string;
-					name: string;
-					slug?: string;
-					created_at?: string;
-					updated_at?: string;
-					deleted_at?: string | null;
+					branch_id: string;
+					file_id: string;
+					lix_id: string;
+					outcome: string;
+					resolved_at?: string;
+					review_id: string;
+					user_id: string;
 				};
 				Update: {
-					name?: string;
-					slug?: string;
-					updated_at?: string;
-					deleted_at?: string | null;
+					branch_id?: string;
+					file_id?: string;
+					lix_id?: string;
+					outcome?: string;
+					resolved_at?: string;
+					review_id?: string;
+					user_id?: string;
 				};
 				Relationships: [
 					{
-						foreignKeyName: "workspaces_organization_id_fkey";
-						columns: ["organization_id"];
+						foreignKeyName: "user_lix_review_resolutions_lix_id_fkey";
+						columns: ["lix_id"];
 						isOneToOne: false;
-						referencedRelation: "organizations";
+						referencedRelation: "lixes";
+						referencedColumns: ["id"];
+					},
+				];
+			};
+			user_primary_namespaces: {
+				Row: {
+					created_at: string;
+					namespace_id: string;
+					user_id: string;
+				};
+				Insert: {
+					created_at?: string;
+					namespace_id: string;
+					user_id: string;
+				};
+				Update: {
+					created_at?: string;
+					namespace_id?: string;
+					user_id?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "user_primary_namespaces_namespace_id_fkey";
+						columns: ["namespace_id"];
+						isOneToOne: true;
+						referencedRelation: "namespaces";
 						referencedColumns: ["id"];
 					},
 				];
 			};
 		};
-		Views: Record<never, never>;
+		Views: {
+			[_ in never]: never;
+		};
 		Functions: {
-			list_accessible_workspaces: {
+			accept_lix_share_token: { Args: { p_token: string }; Returns: string };
+			bootstrap_personal_namespace: {
 				Args: never;
-				Returns: Array<{
-					organization_id: string;
-					organization_name: string;
-					organization_handle: string;
-					organization_created_at: string;
-					organization_updated_at: string;
-					organization_role: OrganizationRole | null;
-					workspace_id: string;
-					workspace_name: string;
-					workspace_slug: string;
-					workspace_created_at: string;
-					workspace_updated_at: string;
-				}>;
+				Returns: {
+					created: boolean;
+					lix_id: string;
+					lix_name: string;
+					lix_slug: string;
+					namespace_handle: string;
+					namespace_id: string;
+					namespace_name: string;
+				}[];
 			};
-			resolve_public_workspace: {
-				Args: { p_workspace_id: string };
-				Returns: Array<{
-					organization_id: string;
-					organization_name: string;
-					organization_handle: string;
-					workspace_id: string;
-					workspace_name: string;
-					workspace_slug: string;
-					can_edit: boolean;
-				}>;
+			create_lix_share_token: {
+				Args: { p_lix_id: string };
+				Returns: {
+					token: string;
+				}[];
 			};
-			resolve_public_workspace_by_route: {
-				Args: { p_organization_handle: string; p_workspace_slug: string };
-				Returns: Array<{
-					organization_id: string;
-					organization_name: string;
-					organization_handle: string;
-					workspace_id: string;
-					workspace_name: string;
-					workspace_slug: string;
-					can_edit: boolean;
-				}>;
+			create_namespace: { Args: { p_name: string }; Returns: string };
+			delete_lix: { Args: { p_lix_id: string }; Returns: undefined };
+			list_accessible_lixes: {
+				Args: never;
+				Returns: {
+					lix_created_at: string;
+					lix_id: string;
+					lix_name: string;
+					lix_slug: string;
+					lix_updated_at: string;
+					namespace_created_at: string;
+					namespace_handle: string;
+					namespace_id: string;
+					namespace_kind: Database["public"]["Enums"]["namespace_kind"];
+					namespace_name: string;
+					namespace_role: Database["public"]["Enums"]["namespace_role"];
+					namespace_updated_at: string;
+				}[];
 			};
-			resolve_workspace_share_token: {
+			rename_namespace: {
+				Args: { p_name: string; p_namespace_id: string };
+				Returns: undefined;
+			};
+			resolve_lix_share_token: {
 				Args: { p_token: string };
-				Returns: Array<{
-					organization_id: string;
-					organization_name: string;
-					organization_handle: string;
-					workspace_id: string;
-					workspace_name: string;
-					workspace_slug: string;
-					shared_by_name: string | null;
-					shared_by_avatar_url: string | null;
+				Returns: {
 					can_edit: boolean;
-				}>;
+					lix_id: string;
+					lix_name: string;
+					lix_slug: string;
+					namespace_handle: string;
+					namespace_id: string;
+					namespace_name: string;
+					shared_by_avatar_url: string;
+					shared_by_name: string;
+				}[];
 			};
-			create_workspace_share_token: {
-				Args: { p_workspace_id: string };
-				Returns: Array<{ token: string }>;
+			resolve_public_lix: {
+				Args: { p_lix_id: string };
+				Returns: {
+					can_edit: boolean;
+					lix_id: string;
+					lix_name: string;
+					lix_slug: string;
+					namespace_handle: string;
+					namespace_id: string;
+					namespace_name: string;
+				}[];
 			};
-			accept_workspace_share_token: {
-				Args: { p_token: string };
-				Returns: string;
+			resolve_public_lix_by_route: {
+				Args: { p_lix_slug: string; p_namespace_handle: string };
+				Returns: {
+					can_edit: boolean;
+					lix_id: string;
+					lix_name: string;
+					lix_slug: string;
+					namespace_handle: string;
+					namespace_id: string;
+					namespace_name: string;
+				}[];
 			};
-			revoke_workspace_share_token: {
-				Args: { p_token: string };
-				Returns: undefined;
-			};
-			create_organization: { Args: { p_name: string }; Returns: string };
-			ensure_personal_workspace: { Args: never; Returns: boolean };
-			ensure_personal_workspace_only: { Args: never; Returns: boolean };
-			rename_organization: {
-				Args: { p_organization_id: string; p_name: string };
-				Returns: undefined;
-			};
-			set_organization_member_role: {
-				Args: {
-					p_organization_id: string;
-					p_user_id: string;
-					p_role: OrganizationRole;
-				};
-				Returns: undefined;
-			};
-			remove_organization_member: {
-				Args: { p_organization_id: string; p_user_id: string };
-				Returns: undefined;
-			};
-			leave_organization: {
-				Args: { p_organization_id: string };
-				Returns: undefined;
-			};
-			delete_workspace: {
-				Args: { p_workspace_id: string };
-				Returns: undefined;
-			};
+			revoke_lix_share_token: { Args: { p_token: string }; Returns: undefined };
 		};
-		Enums: { organization_role: OrganizationRole };
-		CompositeTypes: Record<never, never>;
+		Enums: {
+			namespace_kind: "personal" | "organization";
+			namespace_role: "owner" | "member";
+		};
+		CompositeTypes: {
+			[_ in never]: never;
+		};
 	};
+};
+
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">;
+
+type DefaultSchema = DatabaseWithoutInternals[Extract<
+	keyof Database,
+	"public"
+>];
+
+export type Tables<
+	DefaultSchemaTableNameOrOptions extends
+		| keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+		| { schema: keyof DatabaseWithoutInternals },
+	TableName extends DefaultSchemaTableNameOrOptions extends {
+		schema: keyof DatabaseWithoutInternals;
+	}
+		? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+				DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+		: never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+	schema: keyof DatabaseWithoutInternals;
 }
+	? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+			DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+			Row: infer R;
+		}
+		? R
+		: never
+	: DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
+				DefaultSchema["Views"])
+		? (DefaultSchema["Tables"] &
+				DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+				Row: infer R;
+			}
+			? R
+			: never
+		: never;
+
+export type TablesInsert<
+	DefaultSchemaTableNameOrOptions extends
+		| keyof DefaultSchema["Tables"]
+		| { schema: keyof DatabaseWithoutInternals },
+	TableName extends DefaultSchemaTableNameOrOptions extends {
+		schema: keyof DatabaseWithoutInternals;
+	}
+		? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+		: never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+	schema: keyof DatabaseWithoutInternals;
+}
+	? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+			Insert: infer I;
+		}
+		? I
+		: never
+	: DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+		? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+				Insert: infer I;
+			}
+			? I
+			: never
+		: never;
+
+export type TablesUpdate<
+	DefaultSchemaTableNameOrOptions extends
+		| keyof DefaultSchema["Tables"]
+		| { schema: keyof DatabaseWithoutInternals },
+	TableName extends DefaultSchemaTableNameOrOptions extends {
+		schema: keyof DatabaseWithoutInternals;
+	}
+		? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+		: never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+	schema: keyof DatabaseWithoutInternals;
+}
+	? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+			Update: infer U;
+		}
+		? U
+		: never
+	: DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+		? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+				Update: infer U;
+			}
+			? U
+			: never
+		: never;
+
+export type Enums<
+	DefaultSchemaEnumNameOrOptions extends
+		| keyof DefaultSchema["Enums"]
+		| { schema: keyof DatabaseWithoutInternals },
+	EnumName extends DefaultSchemaEnumNameOrOptions extends {
+		schema: keyof DatabaseWithoutInternals;
+	}
+		? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+		: never = never,
+> = DefaultSchemaEnumNameOrOptions extends {
+	schema: keyof DatabaseWithoutInternals;
+}
+	? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+	: DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
+		? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+		: never;
+
+export type CompositeTypes<
+	PublicCompositeTypeNameOrOptions extends {
+		schema: keyof DatabaseWithoutInternals;
+	},
+	CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+		schema: keyof DatabaseWithoutInternals;
+	}
+		? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+		: never = never,
+> = PublicCompositeTypeNameOrOptions extends {
+	schema: keyof DatabaseWithoutInternals;
+}
+	? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+	: PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+		? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+		: never;
+
+export const Constants = {
+	graphql_public: {
+		Enums: {},
+	},
+	public: {
+		Enums: {
+			namespace_kind: ["personal", "organization"],
+			namespace_role: ["owner", "member"],
+		},
+	},
+} as const;

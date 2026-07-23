@@ -61,7 +61,7 @@ void test("startup retries structured retryable errors and reacquires the stub",
 				},
 			};
 		}),
-		workspaceId: "workspace",
+		lixId: "lix",
 		operation: "POST /lix/v1/execute",
 		envVars: {},
 		createRequest: () => new Request("https://container.test/lix/v1/execute"),
@@ -89,7 +89,7 @@ void test("overloaded startup errors return backpressure without retrying", asyn
 					fetch: async () => new Response("unreachable"),
 				};
 			}),
-			workspaceId: "workspace",
+			lixId: "lix",
 			operation: "GET /lix/v1/",
 			envVars: {},
 			createRequest: () => new Request("https://container.test/lix/v1/"),
@@ -117,7 +117,7 @@ void test("safe requests retry ambiguous transport failures", async () => {
 				},
 			};
 		}),
-		workspaceId: "workspace",
+		lixId: "lix",
 		operation: "GET /lix/v1/",
 		envVars: {},
 		createRequest: () => new Request("https://container.test/lix/v1/"),
@@ -140,7 +140,7 @@ void test("unsafe requests do not replay after ambiguous dispatch failures", asy
 				acquisitions += 1;
 				return { fetch: async () => Promise.reject(failure) };
 			}),
-			workspaceId: "workspace",
+			lixId: "lix",
 			operation: "POST /lix/v1/execute",
 			envVars: {},
 			createRequest: () => new Request("https://container.test/lix/v1/execute"),
@@ -166,7 +166,7 @@ void test("unsafe requests retry only when dispatch proves the container was not
 				},
 			};
 		}),
-		workspaceId: "workspace",
+		lixId: "lix",
 		operation: "POST /lix/v1/execute",
 		envVars: {},
 		createRequest: () => new Request("https://container.test/lix/v1/execute"),
@@ -188,7 +188,7 @@ void test("generic retryable HTTP statuses are returned without blind replay", a
 					new Response("Application unavailable", { status: 503 }),
 			};
 		}),
-		workspaceId: "workspace",
+		lixId: "lix",
 		operation: "GET /lix/v1/",
 		envVars: {},
 		createRequest: () => new Request("https://container.test/lix/v1/"),

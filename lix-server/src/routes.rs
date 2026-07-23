@@ -1,5 +1,5 @@
-use crate::store::{LixService, WorkspaceRuntimeError};
-use crate::WorkspaceRuntimeManager;
+use crate::store::{LixRuntimeError, LixService};
+use crate::LixRuntimeManager;
 use axum::{
     body::Body,
     extract::{Path, State},
@@ -21,7 +21,7 @@ use tracing::Instrument as _;
 
 #[derive(Clone)]
 struct AppState {
-    manager: Arc<WorkspaceRuntimeManager>,
+    manager: Arc<LixRuntimeManager>,
     internal_token: Option<Arc<str>>,
     protocol_timeout: Duration,
 }
@@ -31,13 +31,13 @@ struct TracedBody {
     span: tracing::Span,
 }
 
-/// Keeps the workspace's one shared Engine alive until the HTTP body is
+/// Keeps the lix's one shared Engine alive until the HTTP body is
 /// finished. This matters for SSE: dropping the request-scoped service lease
-/// as soon as headers are returned would let workspace LRU eviction open a
+/// as soon as headers are returned would let lix LRU eviction open a
 /// second Engine while an observation from the first Engine is still active.
-struct WorkspaceLeaseBody {
+struct LixLeaseBody {
     inner: Body,
-    _workspace: Arc<LixService>,
+    _lix: Arc<LixService>,
 }
 
 impl http_body::Body for TracedBody {
@@ -62,7 +62,7 @@ impl http_body::Body for TracedBody {
     }
 }
 
-impl http_body::Body for WorkspaceLeaseBody {
+impl http_body::Body for LixLeaseBody {
     type Data = <Body as http_body::Body>::Data;
     type Error = <Body as http_body::Body>::Error;
 
@@ -83,16 +83,13 @@ impl http_body::Body for WorkspaceLeaseBody {
 }
 
 pub fn router(
-    manager: Arc<WorkspaceRuntimeManager>,
+    manager: Arc<LixRuntimeManager>,
     internal_token: Option<String>,
     protocol_timeout: Duration,
 ) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
-        .route(
-            "/workspaces/{workspace_id}/{*protocol_path}",
-            any(workspace_protocol),
-        )
+        .route("/lixes/{lix_id}/{*protocol_path}", any(lix_protocol))
         .with_state(AppState {
             manager,
             internal_token: internal_token.map(Arc::from),
@@ -104,9 +101,9 @@ async fn healthz() -> Json<serde_json::Value> {
     Json(json!({"ok": true, "service": "lix-server"}))
 }
 
-async fn workspace_protocol(
+async fn lix_protocol(
     State(state): State<AppState>,
-    Path((workspace_id, protocol_path)): Path<(String, String)>,
+    Path((lix_id, protocol_path)): Path<(String, String)>,
     request: Request<Body>,
 ) -> Response {
     let span = tracing::info_span!(
@@ -114,14 +111,14 @@ async fn workspace_protocol(
         "otel.name" = "Lix protocol request",
         "otel.kind" = "server",
         "http.request.method" = %request.method(),
-        "http.route" = "/workspaces/{workspace_id}/{*protocol_path}",
-        "lix.workspace.id" = %workspace_id,
+        "http.route" = "/lixes/{lix_id}/{*protocol_path}",
+        "lix.lix.id" = %lix_id,
         "lix.protocol.path" = %protocol_path,
         "http.response.status_code" = tracing::field::Empty,
         "lix.error.code" = tracing::field::Empty,
         "otel.status_code" = tracing::field::Empty,
     );
-    let response = workspace_protocol_inner(state, workspace_id, protocol_path, request)
+    let response = lix_protocol_inner(state, lix_id, protocol_path, request)
         .instrument(span.clone())
         .await;
     span.record("http.response.status_code", response.status().as_u16());
@@ -132,9 +129,9 @@ async fn workspace_protocol(
     Response::from_parts(parts, Body::new(TracedBody { inner: body, span }))
 }
 
-async fn workspace_protocol_inner(
+async fn lix_protocol_inner(
     state: AppState,
-    workspace_id: String,
+    lix_id: String,
     protocol_path: String,
     mut request: Request<Body>,
 ) -> Response {
@@ -152,9 +149,9 @@ async fn workspace_protocol_inner(
         return response;
     }
 
-    let runtime = match state.manager.get(&workspace_id).await {
+    let runtime = match state.manager.get(&lix_id).await {
         Ok(runtime) => runtime,
-        Err(error) => return workspace_error(error),
+        Err(error) => return lix_error(error),
     };
 
     let path_and_query = match request.uri().query() {
@@ -181,18 +178,18 @@ async fn workspace_protocol_inner(
         Ok(response) => response.expect("canonical Lix protocol router is infallible"),
         Err(_elapsed) => {
             tracing::warn!(
-                workspace_id,
+                lix_id,
                 timeout_secs = state.protocol_timeout.as_secs(),
                 "protocol request exceeded its deadline; recovering runtime"
             );
-            state.manager.recover(&workspace_id, &runtime).await;
+            state.manager.recover(&lix_id, &runtime).await;
             return protocol_error(
                 StatusCode::GATEWAY_TIMEOUT,
-                "LIX_ERROR_WORKSPACE_TIMEOUT",
-                "The workspace request timed out.",
+                "LIX_ERROR_LIX_TIMEOUT",
+                "The lix request timed out.",
                 Some("Retry the request.".to_string()),
                 Some(json!({
-                    "operation": "workspace_request",
+                    "operation": "lix_request",
                     "retryable": true,
                 })),
             )
@@ -202,9 +199,9 @@ async fn workspace_protocol_inner(
     let (parts, body) = response.into_parts();
     Response::from_parts(
         parts,
-        Body::new(WorkspaceLeaseBody {
+        Body::new(LixLeaseBody {
             inner: body,
-            _workspace: runtime,
+            _lix: runtime,
         }),
     )
 }
@@ -220,67 +217,67 @@ fn authorized(headers: &HeaderMap, internal_token: Option<&str>) -> bool {
         .is_some_and(|value| value == internal_token)
 }
 
-fn workspace_error(error: WorkspaceRuntimeError) -> Response {
+fn lix_error(error: LixRuntimeError) -> Response {
     match error {
-        WorkspaceRuntimeError::InvalidId => protocol_error(
+        LixRuntimeError::InvalidId => protocol_error(
             StatusCode::BAD_REQUEST,
             "LIX_INVALID_ARGUMENT",
-            "Invalid workspace ID.",
+            "Invalid lix ID.",
             None,
             Some(json!({
-                "operation": "workspace_open",
+                "operation": "lix_open",
                 "retryable": false,
             })),
         ),
-        WorkspaceRuntimeError::AtCapacity { max } => protocol_error(
+        LixRuntimeError::AtCapacity { max } => protocol_error(
             StatusCode::SERVICE_UNAVAILABLE,
-            "LIX_ERROR_WORKSPACE_CAPACITY",
-            "The workspace service is at capacity.",
-            Some("Retry after an active workspace closes.".to_string()),
+            "LIX_ERROR_LIX_CAPACITY",
+            "The lix service is at capacity.",
+            Some("Retry after an active lix closes.".to_string()),
             Some(json!({
-                "maxOpenWorkspaces": max,
-                "operation": "workspace_open",
+                "maxOpenLixes": max,
+                "operation": "lix_open",
                 "retryable": true,
             })),
         )
         .with_retry_after(),
-        WorkspaceRuntimeError::Recovering => protocol_error(
+        LixRuntimeError::Recovering => protocol_error(
             StatusCode::SERVICE_UNAVAILABLE,
-            "LIX_ERROR_WORKSPACE_RECOVERING",
-            "The workspace is recovering.",
+            "LIX_ERROR_LIX_RECOVERING",
+            "The lix is recovering.",
             Some("Retry the request.".to_string()),
             Some(json!({
-                "operation": "workspace_open",
+                "operation": "lix_open",
                 "retryable": true,
             })),
         )
         .with_retry_after(),
-        WorkspaceRuntimeError::Open(error) if is_unsupported_storage_format(&error) => {
+        LixRuntimeError::Open(error) if is_unsupported_storage_format(&error) => {
             tracing::warn!(
                 error = %error,
                 error_code = "LIX_ERROR_STORAGE_FORMAT_UNSUPPORTED",
-                "workspace uses an unsupported storage format"
+                "lix uses an unsupported storage format"
             );
             protocol_error(
                 StatusCode::CONFLICT,
                 "LIX_ERROR_STORAGE_FORMAT_UNSUPPORTED",
-                "This workspace uses an unsupported storage format.",
-                Some("Create a new workspace.".to_string()),
+                "This lix uses an unsupported storage format.",
+                Some("Create a new lix.".to_string()),
                 Some(json!({
-                    "operation": "workspace_open",
+                    "operation": "lix_open",
                     "retryable": false,
                 })),
             )
         }
-        WorkspaceRuntimeError::Open(error) => {
-            tracing::error!(error = %error, "failed to open workspace runtime");
+        LixRuntimeError::Open(error) => {
+            tracing::error!(error = %error, "failed to open lix runtime");
             protocol_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 lix_sdk::LixError::CODE_INTERNAL_ERROR,
-                "Unable to open workspace.",
+                "Unable to open lix.",
                 None,
                 Some(json!({
-                    "operation": "workspace_open",
+                    "operation": "lix_open",
                     "retryable": false,
                 })),
             )
@@ -363,7 +360,7 @@ mod tests {
     const TEST_PROTOCOL_TIMEOUT: Duration = Duration::from_secs(60);
 
     fn test_router() -> Router {
-        let manager = WorkspaceRuntimeManager::new_in_memory(4);
+        let manager = LixRuntimeManager::new_in_memory(4);
         router(manager, None, TEST_PROTOCOL_TIMEOUT)
     }
 
@@ -380,7 +377,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exposes_only_the_workspace_addressed_protocol() {
+    async fn exposes_only_the_lix_addressed_protocol() {
         let app = test_router();
         let unscoped = app
             .clone()
@@ -397,7 +394,7 @@ mod tests {
         let handshake = app
             .oneshot(
                 Request::builder()
-                    .uri("/workspaces/workspace-a/lix/v1/")
+                    .uri("/lixes/lix-a/lix/v1/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -410,7 +407,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn health_does_not_open_a_workspace_or_require_authentication() {
+    async fn health_does_not_open_a_lix_or_require_authentication() {
         let response = test_router()
             .oneshot(
                 Request::builder()
@@ -426,15 +423,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn internal_token_protects_workspace_routes() {
-        let manager = WorkspaceRuntimeManager::new_in_memory(4);
+    async fn internal_token_protects_lix_routes() {
+        let manager = LixRuntimeManager::new_in_memory(4);
         let app = router(manager, Some("secret".to_string()), TEST_PROTOCOL_TIMEOUT);
 
         let unauthorized = app
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/workspaces/workspace-a/lix/v1/")
+                    .uri("/lixes/lix-a/lix/v1/")
                     .body(Body::empty())
                     .expect("unauthorized request"),
             )
@@ -452,7 +449,7 @@ mod tests {
         let authorized = app
             .oneshot(
                 Request::builder()
-                    .uri("/workspaces/workspace-a/lix/v1/")
+                    .uri("/lixes/lix-a/lix/v1/")
                     .header(header::AUTHORIZATION, "Bearer secret")
                     .body(Body::empty())
                     .expect("authorized request"),
@@ -463,18 +460,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn isolates_workspace_data() {
+    async fn isolates_lix_data() {
         let app = test_router();
-        let workspace_a_session = open_protocol_session(app.clone(), "workspace-a").await;
+        let lix_a_session = open_protocol_session(app.clone(), "lix-a").await;
         let insert = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/workspaces/workspace-a/lix/v1/execute")
+                    .uri("/lixes/lix-a/lix/v1/execute")
                     .header(
                         lix_server_protocol::SESSION_ID_HEADER,
-                        &workspace_a_session,
+                        &lix_a_session,
                     )
                     .header("content-type", "application/json")
                     .body(Body::from(
@@ -491,11 +488,11 @@ mod tests {
             json_body(insert).await
         );
 
-        for (workspace_id, expected) in [("workspace-a", 1), ("workspace-b", 0)] {
-            let session_id = if workspace_id == "workspace-a" {
-                workspace_a_session.clone()
+        for (lix_id, expected) in [("lix-a", 1), ("lix-b", 0)] {
+            let session_id = if lix_id == "lix-a" {
+                lix_a_session.clone()
             } else {
-                open_protocol_session(app.clone(), workspace_id).await
+                open_protocol_session(app.clone(), lix_id).await
             };
             let response = app
                 .clone()
@@ -503,7 +500,7 @@ mod tests {
                     Request::builder()
                         .method("POST")
                         .uri(format!(
-                            "/workspaces/{workspace_id}/lix/v1/execute"
+                            "/lixes/{lix_id}/lix/v1/execute"
                         ))
                         .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
                         .header("content-type", "application/json")
@@ -534,12 +531,12 @@ mod tests {
         };
 
         let app = test_router();
-        let workspace_id = "markdown-collaboration";
-        let installer = open_protocol_session(app.clone(), workspace_id).await;
+        let lix_id = "markdown-collaboration";
+        let installer = open_protocol_session(app.clone(), lix_id).await;
         expect_protocol_ok(
             protocol_execute(
                 app.clone(),
-                workspace_id,
+                lix_id,
                 &installer,
                 "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
                 vec![
@@ -553,14 +550,14 @@ mod tests {
         )
         .await;
 
-        let session_a = open_protocol_session(app.clone(), workspace_id).await;
-        let session_b = open_protocol_session(app.clone(), workspace_id).await;
+        let session_a = open_protocol_session(app.clone(), lix_id).await;
+        let session_b = open_protocol_session(app.clone(), lix_id).await;
         let path = "/shared.md";
         let seed = b"# Shared\n\nLeft: 0\n\nRight: 0\n".to_vec();
         expect_protocol_ok(
             protocol_execute(
                 app.clone(),
-                workspace_id,
+                lix_id,
                 &session_a,
                 "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
                 vec![
@@ -576,7 +573,7 @@ mod tests {
             let delivered = expect_protocol_ok(
                 protocol_execute(
                     app.clone(),
-                    workspace_id,
+                    lix_id,
                     session_id,
                     "SELECT data FROM lix_file WHERE path = $1",
                     vec![wire_value(LixValue::Text(path.to_string()))],
@@ -589,7 +586,7 @@ mod tests {
 
         let write_a = protocol_execute(
             app.clone(),
-            workspace_id,
+            lix_id,
             &session_a,
             "UPDATE lix_file SET data = $1 WHERE path = $2",
             vec![
@@ -601,7 +598,7 @@ mod tests {
         );
         let write_b = protocol_execute(
             app.clone(),
-            workspace_id,
+            lix_id,
             &session_b,
             "UPDATE lix_file SET data = $1 WHERE path = $2",
             vec![
@@ -618,7 +615,7 @@ mod tests {
         let merged = expect_protocol_ok(
             protocol_execute(
                 app.clone(),
-                workspace_id,
+                lix_id,
                 &session_a,
                 "SELECT data FROM lix_file WHERE path = $1",
                 vec![wire_value(LixValue::Text(path.to_string()))],
@@ -633,11 +630,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_unsafe_workspace_ids() {
+    async fn rejects_unsafe_lix_ids() {
         let response = test_router()
             .oneshot(
                 Request::builder()
-                    .uri("/workspaces/contains%20space/lix/v1/")
+                    .uri("/lixes/contains%20space/lix/v1/")
                     .body(Body::empty())
                     .expect("unsafe request"),
             )
@@ -648,9 +645,9 @@ mod tests {
             json_body(response).await["error"],
             json!({
                 "code": "LIX_INVALID_ARGUMENT",
-                "message": "Invalid workspace ID.",
+                "message": "Invalid lix ID.",
                 "details": {
-                    "operation": "workspace_open",
+                    "operation": "lix_open",
                     "retryable": false,
                 },
             })
@@ -659,7 +656,7 @@ mod tests {
 
     #[tokio::test]
     async fn unsupported_storage_format_is_a_terminal_structured_error() {
-        let response = workspace_error(WorkspaceRuntimeError::Open(anyhow::Error::new(
+        let response = lix_error(LixRuntimeError::Open(anyhow::Error::new(
             lix_sdk::LixError::new(
                 lix_sdk::LixError::CODE_INTERNAL_ERROR,
                 "tracked_state commit_root has an unsupported format; recreate the repository",
@@ -672,10 +669,10 @@ mod tests {
             json_body(response).await["error"],
             json!({
                 "code": "LIX_ERROR_STORAGE_FORMAT_UNSUPPORTED",
-                "message": "This workspace uses an unsupported storage format.",
-                "hint": "Create a new workspace.",
+                "message": "This lix uses an unsupported storage format.",
+                "hint": "Create a new lix.",
                 "details": {
-                    "operation": "workspace_open",
+                    "operation": "lix_open",
                     "retryable": false,
                 },
             })
@@ -683,8 +680,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unexpected_workspace_open_errors_are_redacted() {
-        let response = workspace_error(WorkspaceRuntimeError::Open(anyhow::anyhow!(
+    async fn unexpected_lix_open_errors_are_redacted() {
+        let response = lix_error(LixRuntimeError::Open(anyhow::anyhow!(
             "secret object-store failure"
         )));
 
@@ -693,9 +690,9 @@ mod tests {
             json_body(response).await["error"],
             json!({
                 "code": "LIX_INTERNAL_ERROR",
-                "message": "Unable to open workspace.",
+                "message": "Unable to open lix.",
                 "details": {
-                    "operation": "workspace_open",
+                    "operation": "lix_open",
                     "retryable": false,
                 },
             })
@@ -703,12 +700,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retryable_workspace_errors_include_retry_after() {
+    async fn retryable_lix_errors_include_retry_after() {
         for error in [
-            WorkspaceRuntimeError::AtCapacity { max: 4 },
-            WorkspaceRuntimeError::Recovering,
+            LixRuntimeError::AtCapacity { max: 4 },
+            LixRuntimeError::Recovering,
         ] {
-            let response = workspace_error(error);
+            let response = lix_error(error);
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
             assert_eq!(response.headers()[header::RETRY_AFTER], "1");
             assert_eq!(
@@ -720,7 +717,7 @@ mod tests {
 
     async fn protocol_execute(
         app: Router,
-        workspace_id: &str,
+        lix_id: &str,
         session_id: &str,
         sql: &str,
         params: Vec<JsonValue>,
@@ -728,7 +725,7 @@ mod tests {
         app.oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/workspaces/{workspace_id}/lix/v1/execute"))
+                .uri(format!("/lixes/{lix_id}/lix/v1/execute"))
                 .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -766,11 +763,11 @@ mod tests {
         bytes
     }
 
-    async fn open_protocol_session(app: Router, workspace_id: &str) -> String {
+    async fn open_protocol_session(app: Router, lix_id: &str) -> String {
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri(format!("/workspaces/{workspace_id}/lix/v1/"))
+                    .uri(format!("/lixes/{lix_id}/lix/v1/"))
                     .body(Body::empty())
                     .expect("protocol handshake request"),
             )

@@ -305,7 +305,7 @@ function WorkspaceRoutePage() {
 
 		setJoining(true);
 		try {
-			const { error } = await authClient.rpc("accept_workspace_share_token", {
+			const { error } = await authClient.rpc("accept_lix_share_token", {
 				p_token: shareCapability.token,
 			});
 			if (error) throw error;

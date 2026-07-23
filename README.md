@@ -23,7 +23,7 @@ browser / MCP client -> lixray-web -> lix-server -> R2
 ```
 
 Every workspace maps to an isolated SlateDB object prefix. One bounded
-`lix-server` process hosts multiple workspaces, opens them lazily, and evicts
+`lix-server` process hosts multiple lixes, opens them lazily, and evicts
 idle runtimes. Local development uses the same topology with MinIO in place of
 R2.
 

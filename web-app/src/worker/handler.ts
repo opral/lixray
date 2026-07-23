@@ -8,11 +8,11 @@ import {
 	DEMO_AUTH_TOKEN,
 	DEMO_ORGANIZATION_ID,
 	DEMO_ORGANIZATION_NAME,
-	DEMO_WORKSPACE_ID,
-	DEMO_WORKSPACE_NAME,
+	DEMO_LIX_ID,
+	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
-import { LixFileService, type WorkspaceSummary } from "../mcp/file-service.ts";
+import { LixFileService, type LixSummary } from "../mcp/file-service.ts";
 import {
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
@@ -35,7 +35,7 @@ import {
 	type ContainerNamespace as RetryingContainerNamespace,
 	type ContainerRetryDelay,
 } from "./container-retry.ts";
-import { resolveSupabaseWorkspaceId } from "./workspace-resolver.ts";
+import { resolveSupabaseLixId } from "./lix-resolver.ts";
 
 export interface WorkerEnv {
 	ASSETS?: Fetcher;
@@ -61,7 +61,11 @@ export interface WorkerEnv {
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
 	SLATEDB_METADATA_CACHE_BYTES?: string;
 	LIXRAY_DEMO?: string;
+	LIXRAY_DEMO_LIX_IDS?: string;
+	LIXRAY_LIX_SERVICE_URL?: string;
+	/** Temporary deployment fallback; remove after production variables migrate. */
 	LIXRAY_DEMO_WORKSPACE_IDS?: string;
+	/** Temporary deployment fallback; remove after production variables migrate. */
 	LIXRAY_WORKSPACE_SERVICE_URL?: string;
 	LIXRAY_INTERNAL_TOKEN?: string;
 	GOOGLE_ANALYTICS_ID?: string;
@@ -79,12 +83,12 @@ export type ContainerNamespace = RetryingContainerNamespace;
 interface HandleRequestOptions {
 	authenticate?: AuthenticateRequest;
 	authenticateMcp?: AuthenticateMcpRequest;
-	authorizeWorkspace?: AuthorizeWorkspace;
-	resolveWorkspace?: ResolveWorkspace;
-	resolvePublicWorkspace?: ResolvePublicWorkspace;
+	authorizeLix?: AuthorizeLix;
+	resolveLix?: ResolveLix;
+	resolvePublicLix?: ResolvePublicLix;
 	parseSqlScript?: ParseSqlScript;
 	mcpTransport?: typeof handleMcpTransport;
-	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
+	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	executionContext?: ExecutionContext;
 	createMcpTelemetry?: typeof createMcpTelemetrySession;
@@ -112,33 +116,33 @@ export type AuthenticateMcpRequest = (
 	env: WorkerEnv,
 ) => Promise<McpAuthResult>;
 
-type AuthorizeWorkspace = (
-	workspaceId: string,
+type AuthorizeLix = (
+	lixId: string,
 	auth: AuthenticatedUser,
 	env: WorkerEnv,
 ) => Promise<Response | null>;
 
-export type ResolveWorkspace = (
+export type ResolveLix = (
 	namespace: string,
-	workspaceSlug: string,
+	lixSlug: string,
 	auth: AuthenticatedUser,
 	env: WorkerEnv,
-) => Promise<WorkspaceResolution>;
+) => Promise<LixResolution>;
 
-type WorkspaceResolution =
-	| { ok: true; workspaceId: string }
+type LixResolution =
+	| { ok: true; lixId: string }
 	| { ok: false; response: Response };
 
 /**
- * Resolves a live workspace for the public read transport. This deliberately
- * does not use the member-scoped workspace lookup: a valid browser JWT alone
+ * Resolves a live lix for the public read transport. This deliberately
+ * does not use the member-scoped lix lookup: a valid browser JWT alone
  * must never turn a public reader into an editor.
  */
-type ResolvePublicWorkspace = (
+type ResolvePublicLix = (
 	namespace: string,
-	workspaceSlug: string,
+	lixSlug: string,
 	env: WorkerEnv,
-) => Promise<WorkspaceResolution>;
+) => Promise<LixResolution>;
 
 /**
  * Lix's SQL script parser, injected by the worker entry so the public read
@@ -168,7 +172,7 @@ type McpClaimsValidation =
 
 const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
-const WORKSPACE_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
+const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
 const jwksByUrl = new Map<string, JWTVerifyGetKey>();
 
 export async function handleRequest(
@@ -206,25 +210,22 @@ export async function handleRequest(
 			options.authenticateMcp ?? authenticateMcpWithSupabase;
 		const authResult = await authenticateMcp(request, env);
 		if (!authResult.ok) return authResult.response;
-		const authorizeWorkspace =
-			options.authorizeWorkspace ?? authorizeWorkspaceWithSupabase;
-		if (!env.SLATEDB_CONTAINER && !options.workspaceFetch) {
-			return new Response("Workspace storage is not configured\n", {
+		const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
+		if (!env.SLATEDB_CONTAINER && !options.lixFetch) {
+			return new Response("Lix storage is not configured\n", {
 				status: 500,
 			});
 		}
 		const client = new WorkerLixRuntimeClient(
 			env,
 			authResult.auth,
-			async (workspaceId, auth) => authorizeWorkspace(workspaceId, auth, env),
+			async (lixId, auth) => authorizeLix(lixId, auth, env),
 			{
 				signal: request.signal,
 				retryDelay: options.containerRetryDelay,
 				retryRandom: options.containerRetryRandom,
-				workspaceFetch: options.workspaceFetch,
-				workspaceSummaries: isDemoMode(env)
-					? demoWorkspaceSummaries(env)
-					: undefined,
+				lixFetch: options.lixFetch,
+				lixSummaries: isDemoMode(env) ? demoLixSummaries(env) : undefined,
 			},
 		);
 		const executionContext = options.executionContext ?? noopExecutionContext();
@@ -260,14 +261,14 @@ export async function handleRequest(
 	const remoteLixMatch = REMOTE_LIX_API_PATH.exec(url.pathname);
 	if (remoteLixMatch) {
 		const namespace = normalizedRouteSegment(remoteLixMatch[1]);
-		const workspaceSlug = normalizedRouteSegment(remoteLixMatch[2]);
+		const lixSlug = normalizedRouteSegment(remoteLixMatch[2]);
 		if (
 			!namespace ||
-			!workspaceSlug ||
+			!lixSlug ||
 			!ORGANIZATION_HANDLE_PATTERN.test(namespace) ||
-			!WORKSPACE_SLUG_PATTERN.test(workspaceSlug)
+			!LIX_SLUG_PATTERN.test(lixSlug)
 		) {
-			return new Response("Invalid workspace path\n", { status: 400 });
+			return new Response("Invalid lix path\n", { status: 400 });
 		}
 
 		const endpoint = remoteLixMatch[3]?.replace(/\/+$/, "") ?? "";
@@ -278,12 +279,15 @@ export async function handleRequest(
 		if (bearerToken(request)) {
 			const authResult = await authenticate(request, env);
 			if (authResult.ok) {
-				const resolution = await (
-					options.resolveWorkspace ?? resolveWorkspaceWithSupabase
-				)(namespace, workspaceSlug, authResult.auth, env);
+				const resolution = await (options.resolveLix ?? resolveLixWithSupabase)(
+					namespace,
+					lixSlug,
+					authResult.auth,
+					env,
+				);
 				if (resolution.ok) {
-					return fetchWorkspaceRequest(
-						resolution.workspaceId,
+					return fetchLixRequest(
+						resolution.lixId,
 						request,
 						containerPath,
 						env,
@@ -301,8 +305,8 @@ export async function handleRequest(
 		}
 
 		const publicResolution = await (
-			options.resolvePublicWorkspace ?? resolvePublicWorkspaceWithSupabase
-		)(namespace, workspaceSlug, env);
+			options.resolvePublicLix ?? resolvePublicLixWithSupabase
+		)(namespace, lixSlug, env);
 		if (!publicResolution.ok) return publicResolution.response;
 		const mutationRejection = await rejectPublicMutation(
 			request,
@@ -310,8 +314,8 @@ export async function handleRequest(
 			options.parseSqlScript,
 		);
 		if (mutationRejection) return mutationRejection;
-		return fetchWorkspaceRequest(
-			publicResolution.workspaceId,
+		return fetchLixRequest(
+			publicResolution.lixId,
 			request,
 			containerPath,
 			env,
@@ -325,32 +329,32 @@ export async function handleRequest(
 	);
 }
 
-async function fetchWorkspaceRequest(
-	workspaceId: string,
+async function fetchLixRequest(
+	lixId: string,
 	request: Request,
 	containerPath: string,
 	env: WorkerEnv,
 	options: HandleRequestOptions,
 ): Promise<Response> {
-	const rewrittenRequest = rewriteWorkspaceRequest(request, containerPath);
-	if (options.workspaceFetch) {
-		return options.workspaceFetch(workspaceId, rewrittenRequest);
+	const rewrittenRequest = rewriteLixRequest(request, containerPath);
+	if (options.lixFetch) {
+		return options.lixFetch(lixId, rewrittenRequest);
 	}
 	if (!env.SLATEDB_CONTAINER) {
-		return new Response("Workspace storage is not configured\n", {
+		return new Response("Lix storage is not configured\n", {
 			status: 500,
 		});
 	}
-	const workspacePath = workspaceServicePath(workspaceId, containerPath);
-	const containerRequest = rewriteWorkspaceRequest(
+	const lixPath = lixServicePath(lixId, containerPath);
+	const containerRequest = rewriteLixRequest(
 		rewrittenRequest.clone() as unknown as Request,
-		workspacePath,
+		lixPath,
 	);
 	try {
 		return await fetchContainerWithRetry({
 			namespace: env.SLATEDB_CONTAINER,
-			workspaceId,
-			operation: `${request.method} ${workspacePath}`,
+			lixId,
+			operation: `${request.method} ${lixPath}`,
 			envVars: containerEnv(env),
 			createRequest: () => containerRequest.clone() as unknown as Request,
 			requestReplay: containerRequestReplay(request.method, containerPath),
@@ -362,7 +366,7 @@ async function fetchWorkspaceRequest(
 	} catch (caught) {
 		if (request.signal.aborted) throw caught;
 		console.error("LixRay container request failed", {
-			workspaceId,
+			lixId,
 			operation: `${request.method} ${containerPath}`,
 			error: containerErrorDetails(caught),
 		});
@@ -370,7 +374,7 @@ async function fetchWorkspaceRequest(
 			{
 				error: {
 					code: "CONTAINER_UNAVAILABLE",
-					message: "Workspace storage is temporarily unavailable.",
+					message: "Lix storage is temporarily unavailable.",
 				},
 			},
 			{ status: 503, headers: { "Retry-After": "1" } },
@@ -605,15 +609,15 @@ export function validateMcpJwtClaims(
 	};
 }
 
-export async function authorizeWorkspaceWithSupabase(
-	workspaceId: string,
+export async function authorizeLixWithSupabase(
+	lixId: string,
 	auth: AuthenticatedUser,
 	env: WorkerEnv,
 ): Promise<Response | null> {
 	if (auth.isDemo) {
-		return demoWorkspaceIds(env).has(workspaceId)
+		return demoLixIds(env).has(lixId)
 			? null
-			: new Response("Workspace access denied\n", { status: 403 });
+			: new Response("Lix access denied\n", { status: 403 });
 	}
 
 	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
@@ -622,9 +626,9 @@ export async function authorizeWorkspaceWithSupabase(
 		});
 	}
 
-	const lookupUrl = new URL("/rest/v1/workspaces", env.SUPABASE_URL);
+	const lookupUrl = new URL("/rest/v1/lixes", env.SUPABASE_URL);
 	lookupUrl.searchParams.set("select", "id");
-	lookupUrl.searchParams.set("id", `eq.${workspaceId}`);
+	lookupUrl.searchParams.set("id", `eq.${lixId}`);
 	lookupUrl.searchParams.set("limit", "1");
 
 	let response: Response;
@@ -637,13 +641,13 @@ export async function authorizeWorkspaceWithSupabase(
 			},
 		});
 	} catch {
-		return new Response("Workspace authorization is unavailable\n", {
+		return new Response("Lix authorization is unavailable\n", {
 			status: 502,
 		});
 	}
 
 	if (!response.ok) {
-		return new Response("Workspace authorization is unavailable\n", {
+		return new Response("Lix authorization is unavailable\n", {
 			status: 502,
 		});
 	}
@@ -652,31 +656,28 @@ export async function authorizeWorkspaceWithSupabase(
 		const rows: unknown = await response.json();
 		return Array.isArray(rows) &&
 			rows.length === 1 &&
-			workspaceRowId(rows[0]) === workspaceId
+			lixRowId(rows[0]) === lixId
 			? null
-			: new Response("Workspace access denied\n", { status: 403 });
+			: new Response("Lix access denied\n", { status: 403 });
 	} catch {
-		return new Response("Workspace authorization is unavailable\n", {
+		return new Response("Lix authorization is unavailable\n", {
 			status: 502,
 		});
 	}
 }
 
-export async function resolveWorkspaceWithSupabase(
+export async function resolveLixWithSupabase(
 	namespace: string,
-	workspaceSlug: string,
+	lixSlug: string,
 	auth: AuthenticatedUser,
 	env: WorkerEnv,
-): Promise<WorkspaceResolution> {
+): Promise<LixResolution> {
 	if (auth.isDemo) {
-		const workspace = demoWorkspaceSummaries(env).find(
+		const lix = demoLixSummaries(env).find(
 			(candidate) =>
-				candidate.organization.handle === namespace &&
-				candidate.slug === workspaceSlug,
+				candidate.namespace.handle === namespace && candidate.slug === lixSlug,
 		);
-		return workspace
-			? { ok: true, workspaceId: workspace.id }
-			: workspaceNotFound();
+		return lix ? { ok: true, lixId: lix.id } : lixNotFound();
 	}
 
 	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
@@ -688,35 +689,35 @@ export async function resolveWorkspaceWithSupabase(
 		};
 	}
 
-	const result = await resolveSupabaseWorkspaceId({
+	const result = await resolveSupabaseLixId({
 		supabaseUrl: env.SUPABASE_URL,
 		publishableKey: env.SUPABASE_PUBLISHABLE_KEY,
 		accessToken: auth.token,
 		namespace,
-		workspaceSlug,
+		lixSlug,
 	});
 	if (!result.ok) {
 		return result.reason === "not_found"
-			? workspaceNotFound()
-			: workspaceResolutionUnavailable();
+			? lixNotFound()
+			: lixResolutionUnavailable();
 	}
-	return { ok: true, workspaceId: result.workspaceId };
+	return { ok: true, lixId: result.lixId };
 }
 
-function workspaceNotFound(): WorkspaceResolution {
+function lixNotFound(): LixResolution {
 	return {
 		ok: false,
-		response: new Response("Workspace not found\n", { status: 404 }),
+		response: new Response("Lix not found\n", { status: 404 }),
 	};
 }
 
-function workspaceResolutionUnavailable(): {
+function lixResolutionUnavailable(): {
 	ok: false;
 	response: Response;
 } {
 	return {
 		ok: false,
-		response: new Response("Workspace resolution is unavailable\n", {
+		response: new Response("Lix resolution is unavailable\n", {
 			status: 502,
 		}),
 	};
@@ -727,20 +728,17 @@ function workspaceResolutionUnavailable(): {
  * It exposes only live route metadata through a security-definer RPC that is
  * callable anonymously.
  */
-async function resolvePublicWorkspaceWithSupabase(
+async function resolvePublicLixWithSupabase(
 	namespace: string,
-	workspaceSlug: string,
+	lixSlug: string,
 	env: WorkerEnv,
-): Promise<WorkspaceResolution> {
+): Promise<LixResolution> {
 	if (isDemoMode(env)) {
-		const workspace = demoWorkspaceSummaries(env).find(
+		const lix = demoLixSummaries(env).find(
 			(candidate) =>
-				candidate.organization.handle === namespace &&
-				candidate.slug === workspaceSlug,
+				candidate.namespace.handle === namespace && candidate.slug === lixSlug,
 		);
-		return workspace
-			? { ok: true, workspaceId: workspace.id }
-			: workspaceNotFound();
+		return lix ? { ok: true, lixId: lix.id } : lixNotFound();
 	}
 	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
 		return {
@@ -752,7 +750,7 @@ async function resolvePublicWorkspaceWithSupabase(
 	}
 
 	const lookupUrl = new URL(
-		"/rest/v1/rpc/resolve_public_workspace_by_route",
+		"/rest/v1/rpc/resolve_public_lix_by_route",
 		env.SUPABASE_URL,
 	);
 	let response: Response;
@@ -765,38 +763,38 @@ async function resolvePublicWorkspaceWithSupabase(
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({
-				p_organization_handle: namespace,
-				p_workspace_slug: workspaceSlug,
+				p_namespace_handle: namespace,
+				p_lix_slug: lixSlug,
 			}),
 		});
 	} catch {
-		return workspaceResolutionUnavailable();
+		return lixResolutionUnavailable();
 	}
 	if (!response.ok) {
-		return workspaceResolutionUnavailable();
+		return lixResolutionUnavailable();
 	}
 	try {
 		const rows: unknown = await response.json();
-		const workspaceId =
-			Array.isArray(rows) && rows.length === 1 ? workspaceRowId(rows[0]) : null;
-		return typeof workspaceId === "string" && workspaceId
-			? { ok: true, workspaceId }
-			: workspaceNotFound();
+		const lixId =
+			Array.isArray(rows) && rows.length === 1 ? lixRowId(rows[0]) : null;
+		return typeof lixId === "string" && lixId
+			? { ok: true, lixId }
+			: lixNotFound();
 	} catch {
-		return workspaceResolutionUnavailable();
+		return lixResolutionUnavailable();
 	}
 }
 
-function workspaceRowId(value: unknown): unknown {
+function lixRowId(value: unknown): unknown {
 	if (!value || typeof value !== "object") return null;
 	if ("id" in value) return value.id;
-	return "workspace_id" in value ? value.workspace_id : null;
+	return "lix_id" in value ? value.lix_id : null;
 }
 
 /**
  * The public transport exposes the protocol handshake, the four SQL-carrying
  * read endpoints, and session release. Branch mutations (`branch/create`,
- * `branch/switch`) change shared workspace state and are never public.
+ * `branch/switch`) change shared lix state and are never public.
  */
 function isPublicReadRemoteLixRequest(
 	request: Request,
@@ -889,7 +887,7 @@ function isClearlyReadOnlySql(sql: string): boolean {
 
 function publicReadOnlyResponse(): Response {
 	return Response.json(
-		{ error: { code: "LIX_READ_ONLY", message: "workspace is read-only" } },
+		{ error: { code: "LIX_READ_ONLY", message: "lix is read-only" } },
 		{ status: 400 },
 	);
 }
@@ -905,31 +903,25 @@ function authenticateDemo(request: Request, env: WorkerEnv): AuthResult | null {
 	};
 }
 
-function demoWorkspaceIds(env: WorkerEnv): Set<string> {
-	const workspaceIds = new Set(
-		(env.LIXRAY_DEMO_WORKSPACE_IDS ?? "")
+function demoLixIds(env: WorkerEnv): Set<string> {
+	const lixIds = new Set(
+		(env.LIXRAY_DEMO_LIX_IDS ?? env.LIXRAY_DEMO_WORKSPACE_IDS ?? "")
 			.split(",")
-			.map((workspaceId) => workspaceId.trim())
+			.map((lixId) => lixId.trim())
 			.filter(Boolean),
 	);
-	if (workspaceIds.size === 0 && isDemoMode(env)) {
-		workspaceIds.add(DEMO_WORKSPACE_ID);
+	if (lixIds.size === 0 && isDemoMode(env)) {
+		lixIds.add(DEMO_LIX_ID);
 	}
-	return workspaceIds;
+	return lixIds;
 }
 
-function demoWorkspaceSummaries(env: WorkerEnv): Array<WorkspaceSummary> {
-	return [...demoWorkspaceIds(env)].map((workspaceId, index) => ({
-		id: workspaceId,
-		name:
-			workspaceId === DEMO_WORKSPACE_ID
-				? DEMO_WORKSPACE_NAME
-				: `demo-workspace-${index + 1}`,
-		slug:
-			workspaceId === DEMO_WORKSPACE_ID
-				? DEMO_WORKSPACE_NAME
-				: `demo-workspace-${index + 1}`,
-		organization: {
+function demoLixSummaries(env: WorkerEnv): Array<LixSummary> {
+	return [...demoLixIds(env)].map((lixId, index) => ({
+		id: lixId,
+		name: lixId === DEMO_LIX_ID ? DEMO_LIX_NAME : `demo-lix-${index + 1}`,
+		slug: lixId === DEMO_LIX_ID ? DEMO_LIX_NAME : `demo-lix-${index + 1}`,
+		namespace: {
 			id: DEMO_ORGANIZATION_ID,
 			name: DEMO_ORGANIZATION_NAME,
 			handle: DEMO_ORGANIZATION_NAME,
@@ -984,7 +976,7 @@ function remoteJwks(url: string): JWTVerifyGetKey {
 	return jwks;
 }
 
-function rewriteWorkspaceRequest(request: Request, containerPath: string) {
+function rewriteLixRequest(request: Request, containerPath: string) {
 	const url = new URL(request.url);
 	url.pathname = containerPath;
 	const rewritten = new Request(url, request);
@@ -1069,11 +1061,8 @@ function containerEnv(env: WorkerEnv): Record<string, string> {
 	return vars;
 }
 
-function workspaceServicePath(
-	workspaceId: string,
-	protocolPath: string,
-): string {
-	return `/workspaces/${encodeURIComponent(workspaceId)}${protocolPath}`;
+function lixServicePath(lixId: string, protocolPath: string): string {
+	return `/lixes/${encodeURIComponent(lixId)}${protocolPath}`;
 }
 
 function json(value: unknown, init?: ResponseInit): Response {

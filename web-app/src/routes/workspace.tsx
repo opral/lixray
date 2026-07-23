@@ -1,11 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";
 import { useAuth } from "~/components/auth-provider";
-import {
-	type OrganizationRole,
-	useWorkspace,
-} from "~/components/workspace-provider";
+import { useWorkspace } from "~/components/workspace-provider";
 
 const workspaceEmptyClass =
 	"grid min-h-[calc(100vh_-_44px)] place-items-center px-5 py-10";
@@ -22,8 +19,6 @@ const fieldClass =
 	"grid gap-2 [&_label]:text-[13px] [&_label]:font-[680] [&_label]:text-text-secondary";
 const inputClass =
 	"h-[42px] w-full rounded-[7px] border border-border-panel bg-bg-panel px-3 text-text-primary outline-none focus:border-border-panel focus:outline-2 focus:outline-offset-1 focus:outline-ring-focus-visible";
-const compactSelectClass =
-	"h-[38px] max-w-[210px] rounded-[7px] border border-border-panel bg-bg-panel py-0 pr-[30px] pl-2.5 text-text-primary max-[800px]:w-full max-[800px]:max-w-none";
 const settingsRowClass =
 	"flex items-center justify-between gap-4 border-b border-border-subtle py-3 last:border-b-0 max-[800px]:flex-col max-[800px]:items-stretch";
 const inlineActionsClass = "flex items-center gap-2.5 max-[800px]:w-full";
@@ -36,90 +31,10 @@ export const Route = createFileRoute("/workspace")({
 	component: WorkspacePage,
 });
 
-interface Member {
-	userId: string;
-	role: OrganizationRole;
-	name: string;
-	email: string;
-}
-
 function WorkspacePage() {
-	const { client, isLoaded: authLoaded, user } = useAuth();
+	const { isLoaded: authLoaded, user } = useAuth();
 	const workspaceState = useWorkspace();
 	const { selectedOrganization } = workspaceState;
-	const [members, setMembers] = useState<Array<Member>>([]);
-	const [loadingSettings, setLoadingSettings] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-	const [notice, setNotice] = useState<string | null>(null);
-
-	const loadSettings = useCallback(async () => {
-		if (
-			!client ||
-			!selectedOrganization ||
-			selectedOrganization.role === null
-		) {
-			setMembers([]);
-			return;
-		}
-		setLoadingSettings(true);
-		setError(null);
-		try {
-			const { data: memberRows, error: memberError } = await client
-				.from("organization_members")
-				.select("user_id, role")
-				.eq("organization_id", selectedOrganization.id)
-				.order("created_at");
-			if (memberError) throw memberError;
-
-			const userIds = (memberRows ?? []).map((row) => String(row.user_id));
-			const profileById = new Map<string, { name: string; email: string }>();
-			if (userIds.length > 0) {
-				const { data: profileRows, error: profileError } = await client
-					.from("profiles")
-					.select("id, name, email")
-					.in("id", userIds);
-				if (profileError) throw profileError;
-				for (const profile of profileRows ?? []) {
-					profileById.set(String(profile.id), {
-						name: String(profile.name),
-						email: String(profile.email),
-					});
-				}
-			}
-			setMembers(
-				(memberRows ?? []).map((row) => {
-					const userId = String(row.user_id);
-					const profile = profileById.get(userId);
-					return {
-						userId,
-						role: row.role,
-						name: profile?.name ?? "Unknown member",
-						email: profile?.email ?? "",
-					};
-				}),
-			);
-		} catch (loadError) {
-			setError(errorMessage(loadError));
-		} finally {
-			setLoadingSettings(false);
-		}
-	}, [client, selectedOrganization]);
-
-	useEffect(() => {
-		void loadSettings();
-	}, [loadSettings]);
-
-	const runAction = async (action: () => Promise<void>, success: string) => {
-		setError(null);
-		setNotice(null);
-		try {
-			await action();
-			setNotice(success);
-			await loadSettings();
-		} catch (actionError) {
-			setError(errorMessage(actionError));
-		}
-	};
 
 	if (!authLoaded || !workspaceState.isLoaded) {
 		return (
@@ -147,70 +62,14 @@ function WorkspacePage() {
 						Workspace settings
 					</p>
 					<h1 className="m-0 text-2xl leading-[1.2] tracking-normal">
-						Organizations, workspaces, and members
+						Namespaces and workspaces
 					</h1>
 				</section>
-
-				{error ? <div className={errorClass}>{error}</div> : null}
-				{notice ? (
-					<div className="rounded-[8px] border border-success-200 bg-success-50 px-3.5 py-3 text-success-800">
-						{notice}
-					</div>
-				) : null}
 
 				<OrganizationPanel workspaceState={workspaceState} />
 
 				{selectedOrganization && selectedOrganization.role !== null ? (
-					<>
-						<WorkspacePanel workspaceState={workspaceState} />
-						<MemberPanel
-							members={members}
-							currentUserId={user.id}
-							isOwner={selectedOrganization.role === "owner"}
-							loading={loadingSettings}
-							onRoleChange={(member, role) =>
-								void runAction(async () => {
-									if (!client) return;
-									const { error: roleError } = await client.rpc(
-										"set_organization_member_role",
-										{
-											p_organization_id: selectedOrganization.id,
-											p_user_id: member.userId,
-											p_role: role,
-										},
-									);
-									if (roleError) throw roleError;
-									await workspaceState.refresh({
-										organizationId: selectedOrganization.id,
-									});
-								}, "Member role updated")
-							}
-							onRemove={(member) =>
-								void runAction(async () => {
-									if (!client) return;
-									const { error: removeError } = await client.rpc(
-										"remove_organization_member",
-										{
-											p_organization_id: selectedOrganization.id,
-											p_user_id: member.userId,
-										},
-									);
-									if (removeError) throw removeError;
-								}, "Member removed")
-							}
-							onLeave={() =>
-								void runAction(async () => {
-									if (!client) return;
-									const { error: leaveError } = await client.rpc(
-										"leave_organization",
-										{ p_organization_id: selectedOrganization.id },
-									);
-									if (leaveError) throw leaveError;
-									await workspaceState.refresh();
-								}, "You left the organization")
-							}
-						/>
-					</>
+					<WorkspacePanel workspaceState={workspaceState} />
 				) : null}
 			</main>
 		</div>
@@ -229,11 +88,11 @@ function OrganizationPanel({
 	return (
 		<section className={panelClass}>
 			<div className={panelHeaderClass}>
-				<h2 className={panelTitleClass}>Organizations</h2>
+				<h2 className={panelTitleClass}>Namespaces</h2>
 			</div>
 			<div className={panelBodyStackClass}>
 				<div className={fieldClass}>
-					<label htmlFor="settings-organization">Selected organization</label>
+					<label htmlFor="settings-organization">Selected namespace</label>
 					<select
 						id="settings-organization"
 						className={inputClass}
@@ -243,7 +102,7 @@ function OrganizationPanel({
 						}
 					>
 						<option value="" disabled>
-							Select an organization
+							Select a namespace
 						</option>
 						{workspaceState.organizations.map((organization) => (
 							<option key={organization.id} value={organization.id}>
@@ -253,7 +112,7 @@ function OrganizationPanel({
 					</select>
 				</div>
 				<InlineNameForm
-					label="New organization"
+					label="New organization namespace"
 					value={newName}
 					onChange={setNewName}
 					button="Create"
@@ -269,7 +128,7 @@ function OrganizationPanel({
 				/>
 				{workspaceState.selectedOrganization?.role === "owner" ? (
 					<InlineNameForm
-						label="Rename selected organization"
+						label="Rename selected namespace"
 						value={rename}
 						onChange={setRename}
 						button="Rename"
@@ -367,80 +226,6 @@ function WorkspacePanel({
 					}}
 				/>
 				{error ? <p className={errorClass}>{error}</p> : null}
-			</div>
-		</section>
-	);
-}
-
-function MemberPanel({
-	members,
-	currentUserId,
-	isOwner,
-	loading,
-	onRoleChange,
-	onRemove,
-	onLeave,
-}: {
-	members: Array<Member>;
-	currentUserId: string;
-	isOwner: boolean;
-	loading: boolean;
-	onRoleChange: (member: Member, role: OrganizationRole) => void;
-	onRemove: (member: Member) => void;
-	onLeave: () => void;
-}) {
-	return (
-		<section className={panelClass}>
-			<div className={panelHeaderClass}>
-				<h2 className={panelTitleClass}>Members</h2>
-				<button className={buttonClass} onClick={onLeave}>
-					Leave organization
-				</button>
-			</div>
-			<div className={panelBodyStackClass}>
-				{loading ? (
-					<p className="text-sm text-text-tertiary">Loading members...</p>
-				) : (
-					members.map((member) => (
-						<div className={settingsRowClass} key={member.userId}>
-							<div>
-								<strong>
-									{member.name}
-									{member.userId === currentUserId ? " (you)" : ""}
-								</strong>
-								<div className="text-text-tertiary">{member.email}</div>
-							</div>
-							<div className={inlineActionsClass}>
-								{isOwner ? (
-									<select
-										className={compactSelectClass}
-										aria-label={`Role for ${member.name}`}
-										value={member.role}
-										onChange={(event) =>
-											onRoleChange(
-												member,
-												event.target.value as OrganizationRole,
-											)
-										}
-									>
-										<option value="member">Member</option>
-										<option value="owner">Owner</option>
-									</select>
-								) : (
-									<span className="text-text-tertiary">{member.role}</span>
-								)}
-								{isOwner && member.userId !== currentUserId ? (
-									<button
-										className={buttonClass}
-										onClick={() => onRemove(member)}
-									>
-										Remove
-									</button>
-								) : null}
-							</div>
-						</div>
-					))
-				)}
 			</div>
 		</section>
 	);

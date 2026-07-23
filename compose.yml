@@ -61,7 +61,7 @@ services:
         VITE_LIXRAY_LOCAL_DEV_PASSWORD: ${VITE_LIXRAY_LOCAL_DEV_PASSWORD:-}
     environment:
       PORT: 8080
-      LIXRAY_WORKSPACE_SERVICE_URL: http://lix-server:8080
+      LIXRAY_LIX_SERVICE_URL: http://lix-server:8080
       LIXRAY_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
       SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
       SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-http://host.docker.internal:54321/auth/v1/.well-known/jwks.json}

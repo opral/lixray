@@ -92,8 +92,8 @@ export function createMcpTelemetrySession(
 			properties.error_code = observation.errorCode;
 			properties.$ai_error = { code: observation.errorCode };
 		}
-		if (observation.workspaceId) {
-			properties.workspace_id = observation.workspaceId;
+		if (observation.lixId) {
+			properties.lix_id = observation.lixId;
 		}
 		if (observation.executeInput) {
 			properties.$ai_input_state = observation.executeInput;
@@ -123,9 +123,7 @@ export function createMcpTelemetrySession(
 					distinctId: identity.userId,
 					event: "$ai_span",
 					properties,
-					...(observation.workspaceId
-						? { groups: { workspace: observation.workspaceId } }
-						: {}),
+					...(observation.lixId ? { groups: { lix: observation.lixId } } : {}),
 				})
 				.catch((caught: unknown) => {
 					warn("Failed to capture MCP telemetry", caught);
