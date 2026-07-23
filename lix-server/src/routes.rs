@@ -173,7 +173,7 @@ async fn lix_protocol_inner(
     // own request budget, but a wedged connection (e.g. after a host sleep)
     // can still hang past it — without this bound the request never answers
     // and the runtime stays wedged for every caller after it.
-    let handler_future = lix_server_protocol::handler(runtime.protocol()).oneshot(request);
+    let handler_future = runtime.protocol_router().oneshot(request);
     let response = match tokio::time::timeout(state.protocol_timeout, handler_future).await {
         Ok(response) => response.expect("canonical Lix protocol router is infallible"),
         Err(_elapsed) => {
