@@ -1,5 +1,6 @@
 use crate::Config;
 use anyhow::{Context, Result};
+use axum::Router;
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
 #[cfg(test)]
 use object_store::memory::InMemory;
@@ -38,6 +39,7 @@ struct S3RequestBudget {
 
 pub(crate) struct LixService {
     protocol: lix_server_protocol::LixProtocolServer<SlateDB>,
+    protocol_router: Router,
 }
 
 struct LixRuntime {
@@ -254,12 +256,16 @@ impl LixRuntimeManager {
             .context("open Lix lix session for the canonical server protocol")?,
         );
         let protocol = lix_server_protocol::LixProtocolServer::new(protocol_root);
+        let protocol_router = protocol.router();
         info!(
             lix_id,
             elapsed_ms = elapsed_millis(started),
             "opened lix runtime"
         );
-        Ok(Arc::new(LixRuntime::new(LixService { protocol })))
+        Ok(Arc::new(LixRuntime::new(LixService {
+            protocol,
+            protocol_router,
+        })))
     }
 
     pub(crate) async fn recover(self: &Arc<Self>, lix_id: &str, service: &Arc<LixService>) {
@@ -325,8 +331,8 @@ impl LixRuntimeManager {
 }
 
 impl LixService {
-    pub(crate) fn protocol(&self) -> lix_server_protocol::LixProtocolServer<SlateDB> {
-        self.protocol.clone()
+    pub(crate) fn protocol_router(&self) -> Router {
+        self.protocol_router.clone()
     }
 
     async fn close(&self) -> Result<()> {
@@ -520,7 +526,8 @@ mod tests {
 
         let manager = memory_manager(1);
         let service = manager.get("lix-a").await.expect("open lix runtime");
-        let handshake = lix_server_protocol::handler(service.protocol())
+        let handshake = service
+            .protocol_router()
             .oneshot(
                 Request::builder()
                     .uri("/lix/v1/")
