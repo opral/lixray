@@ -86,7 +86,12 @@ export default defineConfig(({ command }) => ({
 		fs: { allow: [repositoryRoot] },
 	},
 	optimizeDeps: {
-		exclude: command === "serve" ? ["@opral/atelier"] : [],
+		// The Lix worker is lazy-loaded after workspace navigation. Keep its
+		// ESM shims out of the optimizer so first use cannot reload the page.
+		exclude:
+			command === "serve"
+				? ["@opral/atelier", "@bytecodealliance/preview2-shim"]
+				: [],
 	},
 	plugins: [
 		cloudflare({
