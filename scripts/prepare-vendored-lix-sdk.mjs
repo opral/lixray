@@ -2,6 +2,7 @@ import {
 	chmod,
 	cp,
 	mkdir,
+	mkdtemp,
 	readFile,
 	rm,
 	stat,
@@ -9,8 +10,8 @@ import {
 } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { delimiter } from "node:path";
-import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const workspaceRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -41,10 +42,35 @@ await requireDirectory(
 	"Initialize the vendor/lix submodule before installing dependencies.",
 );
 
-await rm(sdkDist, { recursive: true, force: true });
-await cp(releaseDist, sdkDist, { recursive: true });
+const skipWasmBuild = process.env.LIXRAY_SKIP_VENDORED_LIX_WASM === "1";
+let preservedWasmRoot;
+try {
+	if (skipWasmBuild) {
+		const wasmDir = join(sdkDist, "wasm");
+		await requireDirectory(
+			wasmDir,
+			"LIXRAY_SKIP_VENDORED_LIX_WASM=1 requires an existing vendored WASM build. Run the build once without this flag first.",
+		);
+		preservedWasmRoot = await mkdtemp(join(tmpdir(), "lixray-vendored-wasm-"));
+		await cp(wasmDir, join(preservedWasmRoot, "wasm"), { recursive: true });
+	}
 
-if (process.env.LIXRAY_SKIP_VENDORED_LIX_WASM !== "1") {
+	await rm(sdkDist, { recursive: true, force: true });
+	await cp(releaseDist, sdkDist, { recursive: true });
+
+	if (preservedWasmRoot) {
+		await rm(join(sdkDist, "wasm"), { recursive: true, force: true });
+		await cp(join(preservedWasmRoot, "wasm"), join(sdkDist, "wasm"), {
+			recursive: true,
+		});
+	}
+} finally {
+	if (preservedWasmRoot) {
+		await rm(preservedWasmRoot, { recursive: true, force: true });
+	}
+}
+
+if (!skipWasmBuild) {
 	const toolchainEnv = await vendoredLixToolchainEnv();
 	const wasm = spawnSync(
 		process.execPath,
