@@ -3031,6 +3031,7 @@ dependencies = [
  "lix_engine",
  "lru",
  "notify-debouncer-full",
+ "serde_json",
  "tokio",
  "wasmtime",
  "wasmtime-wasi",

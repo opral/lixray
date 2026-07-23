@@ -370,6 +370,7 @@ export function WorkspaceAtelier({
 			getAccessToken,
 			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
+			clientStoragePrefix: `lixray.client.v1:${userId}`,
 		})
 			.then(async (session) => {
 				if (disposed) {
@@ -411,11 +412,13 @@ export function WorkspaceAtelier({
 						sessionStateStore: createWorkspaceSessionStateStore({
 							userId,
 							workspaceId,
+							clientState: session.lix.clientState,
 						}),
 						preferencesStore: createWorkspacePreferencesStore({
 							client: canEdit ? client : null,
 							userId,
 							workspaceId,
+							clientState: session.lix.clientState,
 						}),
 						reviewStatusStore: createWorkspaceReviewStatusStore({
 							client: canEdit ? client : null,

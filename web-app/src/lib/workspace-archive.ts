@@ -1,4 +1,4 @@
-import { openLix, type Lix } from "@lix-js/sdk/remote";
+import { openLix, type Lix } from "@lix-js/sdk";
 import { zipSync } from "fflate";
 
 type AccessTokenGetter = () => Promise<string | null>;

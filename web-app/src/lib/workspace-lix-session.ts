@@ -1,4 +1,10 @@
-import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk/remote";
+import {
+	openLix,
+	type Lix,
+	type LixSnapshotStorage,
+	type RemoteLixFetch,
+} from "@lix-js/sdk";
+import { LocalStorage } from "@lix-js/sdk/local-storage-adapter";
 
 type TokenProvider = () => Promise<string | null>;
 
@@ -13,6 +19,9 @@ interface OpenWorkspaceLixSessionOptions {
 	 */
 	allowAnonymous?: boolean;
 	initialBranchId?: string | null;
+	/** Prefixes this browser client's private Lix snapshot (for account isolation). */
+	clientStoragePrefix?: string;
+	clientStorage?: LixSnapshotStorage;
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
 }
@@ -30,6 +39,15 @@ export interface WorkspaceLixSession {
 export async function openWorkspaceLixSession(
 	options: OpenWorkspaceLixSessionOptions,
 ): Promise<WorkspaceLixSession> {
+	const clientStorage =
+		options.clientStorage ??
+		(typeof globalThis.localStorage === "undefined"
+			? undefined
+			: new LocalStorage({
+					...(options.clientStoragePrefix
+						? { prefix: options.clientStoragePrefix }
+						: {}),
+				}));
 	const lix = await openLix({
 		server: {
 			mode: "remote",
@@ -42,6 +60,7 @@ export async function openWorkspaceLixSession(
 			},
 			...(options.fetch ? { fetch: options.fetch } : {}),
 		},
+		...(clientStorage ? { storage: clientStorage } : {}),
 	});
 
 	try {
