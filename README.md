@@ -27,6 +27,13 @@ Every workspace maps to an isolated SlateDB object prefix. One bounded
 idle runtimes. Local development uses the same topology with MinIO in place of
 R2.
 
+`LIXRAY_MAX_SESSIONS_PER_WORKSPACE` bounds live protocol clients per workspace.
+The server default remains 64; Compose uses 256 to leave headroom for the
+128-agent happy path. Each session can retain up to 2 MiB of request-blob bases,
+so a 256-session limit has a theoretical 512 MiB cache envelope per workspace.
+Set the limit from the expected agent count and memory budget.
+`LIXRAY_MAX_OPEN_WORKSPACES` independently bounds cached workspace runtimes.
+
 The web service owns authentication, organization and workspace resolution,
 `/healthz`, `/mcp`, and the workspace-scoped Lix protocol. Supabase row-level
 security proves workspace access before a request reaches `lix-server`.

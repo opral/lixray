@@ -8,6 +8,7 @@ const DEFAULT_DISK_CACHE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const DEFAULT_BLOCK_CACHE_BYTES: u64 = 128 * 1024 * 1024;
 const DEFAULT_METADATA_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_MAX_OPEN_WORKSPACES: u64 = 32;
+const DEFAULT_MAX_SESSIONS_PER_WORKSPACE: u64 = 64;
 const DEFAULT_PROTOCOL_TIMEOUT_SECS: u64 = 60;
 
 #[derive(Clone, Debug)]
@@ -15,6 +16,7 @@ pub struct Config {
     pub bind_addr: String,
     pub internal_token: Option<String>,
     pub max_open_workspaces: usize,
+    pub max_sessions_per_workspace: usize,
     pub protocol_timeout: Duration,
     pub(crate) storage: S3StorageConfig,
 }
@@ -54,6 +56,11 @@ impl Config {
             DEFAULT_MAX_OPEN_WORKSPACES,
         )?)
         .context("LIXRAY_MAX_OPEN_WORKSPACES does not fit this platform")?;
+        let max_sessions_per_workspace = usize::try_from(positive_u64_env(
+            "LIXRAY_MAX_SESSIONS_PER_WORKSPACE",
+            DEFAULT_MAX_SESSIONS_PER_WORKSPACE,
+        )?)
+        .context("LIXRAY_MAX_SESSIONS_PER_WORKSPACE does not fit this platform")?;
         let protocol_timeout = Duration::from_secs(positive_u64_env(
             "LIXRAY_PROTOCOL_TIMEOUT_SECS",
             DEFAULT_PROTOCOL_TIMEOUT_SECS,
@@ -74,6 +81,7 @@ impl Config {
             bind_addr,
             internal_token,
             max_open_workspaces,
+            max_sessions_per_workspace,
             protocol_timeout,
             storage,
         })
@@ -194,6 +202,7 @@ mod tests {
         let config = Config::from_env().unwrap();
 
         assert_eq!(config.max_open_workspaces, 32);
+        assert_eq!(config.max_sessions_per_workspace, 64);
         assert_eq!(config.bind_addr, "0.0.0.0:8080");
         assert_eq!(config.internal_token, None);
         assert_eq!(config.storage.endpoint, "https://s3.example");
@@ -267,6 +276,32 @@ mod tests {
         assert!(
             format!("{error:#}").contains("LIXRAY_MAX_OPEN_WORKSPACES must be greater than zero")
         );
+        clear_lixray_env();
+    }
+
+    #[test]
+    fn from_env_configures_protocol_session_capacity() {
+        let _guard = env_lock().lock().unwrap();
+        clear_lixray_env();
+        set_s3_env();
+        env::set_var("LIXRAY_MAX_SESSIONS_PER_WORKSPACE", "384");
+
+        let config = Config::from_env().unwrap();
+
+        assert_eq!(config.max_sessions_per_workspace, 384);
+        clear_lixray_env();
+    }
+
+    #[test]
+    fn from_env_rejects_zero_protocol_session_capacity() {
+        let _guard = env_lock().lock().unwrap();
+        clear_lixray_env();
+        env::set_var("LIXRAY_MAX_SESSIONS_PER_WORKSPACE", "0");
+
+        let error = Config::from_env().unwrap_err();
+
+        assert!(format!("{error:#}")
+            .contains("LIXRAY_MAX_SESSIONS_PER_WORKSPACE must be greater than zero"));
         clear_lixray_env();
     }
 
@@ -352,6 +387,7 @@ mod tests {
             "RAILWAY_PROJECT_ID",
             "RAILWAY_ENVIRONMENT_ID",
             "LIXRAY_MAX_OPEN_WORKSPACES",
+            "LIXRAY_MAX_SESSIONS_PER_WORKSPACE",
             "S3_ENDPOINT",
             "S3_BUCKET",
             "S3_ACCESS_KEY_ID",

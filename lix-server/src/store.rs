@@ -52,6 +52,7 @@ enum WorkspaceRuntimeState {
 pub struct WorkspaceRuntimeManager {
     backend: StorageBackend,
     max_open_workspaces: usize,
+    max_sessions_per_workspace: usize,
     state: Mutex<ManagerState>,
 }
 
@@ -126,17 +127,27 @@ impl WorkspaceRuntimeManager {
         Ok(Arc::new(Self {
             backend,
             max_open_workspaces: config.max_open_workspaces,
+            max_sessions_per_workspace: config.max_sessions_per_workspace,
             state: Mutex::new(ManagerState::default()),
         }))
     }
 
     #[cfg(test)]
     pub(crate) fn new_in_memory(max_open_workspaces: usize) -> Arc<Self> {
+        Self::new_in_memory_with_session_capacity(max_open_workspaces, 64)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_in_memory_with_session_capacity(
+        max_open_workspaces: usize,
+        max_sessions_per_workspace: usize,
+    ) -> Arc<Self> {
         Arc::new(Self {
             backend: StorageBackend::Memory {
                 object_store: Arc::new(InMemory::new()),
             },
             max_open_workspaces,
+            max_sessions_per_workspace,
             state: Mutex::new(ManagerState::default()),
         })
     }
@@ -256,7 +267,14 @@ impl WorkspaceRuntimeManager {
             .await
             .context("open Lix workspace session for the canonical server protocol")?,
         );
-        let protocol = lix_server_protocol::LixProtocolServer::new(protocol_root);
+        let protocol = lix_server_protocol::LixProtocolServer::with_options(
+            protocol_root,
+            lix_server_protocol::ProtocolServerOptions {
+                max_sessions: self.max_sessions_per_workspace,
+                ..lix_server_protocol::ProtocolServerOptions::default()
+            },
+        )
+        .context("configure canonical server protocol session capacity")?;
         info!(
             workspace_id,
             elapsed_ms = elapsed_millis(started),
@@ -561,6 +579,61 @@ mod tests {
             manager.get("workspace-b").await,
             Err(WorkspaceRuntimeError::AtCapacity { max: 1 })
         ));
+    }
+
+    #[tokio::test]
+    async fn configured_protocol_capacity_keeps_128_agent_sessions_live() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt as _;
+
+        const AGENTS: usize = 128;
+        let manager = WorkspaceRuntimeManager::new_in_memory_with_session_capacity(1, AGENTS);
+        let service = manager
+            .get("workspace-a")
+            .await
+            .expect("open workspace runtime");
+        let protocol = lix_server_protocol::handler(service.protocol());
+        let mut session_ids = Vec::with_capacity(AGENTS);
+
+        for _ in 0..AGENTS {
+            let response = protocol
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/lix/v1/")
+                        .body(Body::empty())
+                        .expect("handshake request"),
+                )
+                .await
+                .expect("handshake response");
+            assert_eq!(response.status(), axum::http::StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("handshake body");
+            let handshake: serde_json::Value =
+                serde_json::from_slice(&body).expect("handshake JSON");
+            session_ids.push(
+                handshake["sessionId"]
+                    .as_str()
+                    .expect("session ID")
+                    .to_string(),
+            );
+        }
+
+        for session_id in &session_ids {
+            let response = protocol
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/lix/v1/")
+                        .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                        .body(Body::empty())
+                        .expect("resume request"),
+                )
+                .await
+                .expect("resume response");
+            assert_eq!(response.status(), axum::http::StatusCode::OK);
+        }
     }
 
     #[tokio::test]

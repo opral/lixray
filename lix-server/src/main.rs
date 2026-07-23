@@ -17,6 +17,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(
         addr = %config.bind_addr,
         max_open_workspaces = config.max_open_workspaces,
+        max_sessions_per_workspace = config.max_sessions_per_workspace,
         internal_auth = internal_token.is_some(),
         "lix workspace service ready"
     );

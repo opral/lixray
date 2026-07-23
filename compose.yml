@@ -34,6 +34,7 @@ services:
     environment:
       BIND_ADDR: 0.0.0.0:8080
       LIXRAY_MAX_OPEN_WORKSPACES: 4
+      LIXRAY_MAX_SESSIONS_PER_WORKSPACE: ${LIXRAY_MAX_SESSIONS_PER_WORKSPACE:-256}
       LIXRAY_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
       RUST_LOG: lixray=info
       S3_ENDPOINT: http://minio:9000
