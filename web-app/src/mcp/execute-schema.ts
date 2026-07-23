@@ -13,22 +13,22 @@ interface ExecuteSqlCoreTable {
 export const EXECUTE_SQL_CORE_TABLES: ReadonlyArray<ExecuteSqlCoreTable> = [
 	{
 		name: "lix_file",
-		purpose: "Current files in the active branch.",
+		purpose: "Active files.",
 		columns: ["id", "path", "directory_id", "name", "data (BLOB)"],
 	},
 	{
 		name: "lix_directory",
-		purpose: "Current directories in the active branch.",
+		purpose: "Active directories.",
 		columns: ["id", "path", "parent_id", "name"],
 	},
 	{
 		name: "lix_branch",
-		purpose: "Workspace branches and their current commits.",
+		purpose: "Branches.",
 		columns: ["id", "name", "hidden", "commit_id"],
 	},
 	{
 		name: "lix_change",
-		purpose: "Global immutable change ledger; use it for activity and audit.",
+		purpose: "Global activity.",
 		columns: [
 			"id",
 			"entity_pk",
@@ -42,39 +42,31 @@ export const EXECUTE_SQL_CORE_TABLES: ReadonlyArray<ExecuteSqlCoreTable> = [
 	},
 ];
 
-export const EXECUTE_SQL_CORE_SCHEMA = EXECUTE_SQL_CORE_TABLES.map(
-	(table) =>
-		`- \`${table.name}\` — ${table.purpose} Columns: \`${table.columns.join(", ")}\`.`,
-).join("\n");
+export const EXECUTE_SQL_CORE_SCHEMA = `- \`lix_file\` — active files: \`id, path, directory_id, name, data\` (BLOB).
+- \`lix_directory\` — active directories: \`id, path, parent_id, name\`.
+- \`lix_branch\` — branches: \`id, name, hidden, commit_id\`.
+- \`lix_change\` — global activity: \`id, entity_pk, schema_key, file_id, snapshot_content, metadata, created_at, origin_key\`. Use \`WHERE NOT starts_with(schema_key,'lix_')\` for application-only activity.`;
 
-export const EXECUTE_SQL_TABLES_QUERY = `SELECT table_name, table_type
-FROM information_schema.tables
-WHERE table_schema = 'public'
-ORDER BY table_name;`;
+export const EXECUTE_SQL_TABLES_QUERY = `SELECT lix_json_get_text(value,'x-lix-key') AS table_name, value AS json_schema
+FROM lix_registered_schema
+WHERE NOT starts_with(lix_json_get_text(value,'x-lix-key'),'lix_')
+ORDER BY table_name`;
 
-export const EXECUTE_SQL_COLUMNS_QUERY = `SELECT column_name, data_type, is_nullable, ordinal_position
-FROM information_schema.columns
-WHERE table_schema = 'public'
-  AND table_name = $1
-ORDER BY ordinal_position;`;
+export const EXECUTE_TOOL_DESCRIPTION = `Execute 1–100 Lix SQL statements atomically and in order; any failure rolls back all. Active tables use the active branch; use \`_by_branch\` across branches or \`switch_branch\` to change it. SQL dialect: Apache DataFusion, not SQLite. DDL and recursive CTEs are unsupported.
 
-export const EXECUTE_TOOL_DESCRIPTION = `Execute an ordered batch of caller-provided Lix SQL statements atomically against the workspace's active Lix branch. To change branches, call switch_branch first. Each statement has its own parameters and produces one ordered result; if any statement fails, the complete batch rolls back. SQL can read or mutate any SQL-accessible branch data. Lix SQL does not support DDL statements.
-
-Core tables:
+Core:
 ${EXECUTE_SQL_CORE_SCHEMA}
 
-Path rules: \`lix_file.path\` never ends in \`/\`; \`lix_directory.path\` always does. \`lix_file.directory_id\` references \`lix_directory.id\`; \`lix_directory.parent_id\` references \`lix_directory.id\`. Use those IDs for hierarchy queries.
+File paths never end in \`/\`; directory paths always do. \`directory_id\` references \`lix_directory.id\`. Top-level directories have \`parent_id IS NULL\`; other \`parent_id\` values reference \`id\`. For descendants: \`lix_directory d LEFT JOIN lix_file f ON starts_with(f.path,d.path)\`.
 
-Use the core tables above, plus their \`_by_branch\` / \`_history\` companions, directly; do not inspect \`information_schema\` for them.
+Files, directories, and entity tables have \`_by_branch\` (\`lixcol_branch_id\`) and read-only \`_history\` companions; branch/change do not.
 
-Entity tables are workspace-dynamic: do not assume a fixed entity-table list or column shape. Only when a task needs an entity table, discover its table name, then inspect only that table:
-
+Discover workspace-specific application schemas only when needed:
 \`\`\`sql
 ${EXECUTE_SQL_TABLES_QUERY}
 \`\`\`
 
-\`\`\`sql
-${EXECUTE_SQL_COLUMNS_QUERY}
-\`\`\`
+Cast \`data AS TEXT\` only for known UTF-8 files. To return matching lines, put \`UNNEST(string_to_array(CAST(data AS TEXT), chr(10))) AS line\` in a derived \`SELECT\`, then filter \`line\` outside it.
 
-System \`lixcol_*\` metadata is intentionally omitted from the core guide. Where present, \`<table>_by_branch\` adds \`lixcol_branch_id\` for cross-branch reads and writes. \`<table>_history\` is read-only: scope every history query with \`WHERE lixcol_start_commit_id = lix_active_branch_commit_id()\`, then constrain it by stable identity (\`id = $n\` for files/directories or \`lixcol_entity_pk = $n\` for entities) resolved from the active table. That avoids \`LIX_HISTORY_NON_IDENTITY_FILTER\` and preserves renamed/tombstoned history. Read a current item's \`lixcol_change_id\` from its active table, not an historical row; use \`lixcol_depth\` / \`lixcol_observed_commit_id\` for prior revisions.`;
+Typed \`_history\` queries require \`lixcol_start_commit_id=lix_active_branch_commit_id()\`. For complete entity history also filter its user primary-key column(s) (\`id\` for files/directories), or tombstones and renames may be omitted. Resolve IDs/keys from active rows; for a deleted or old path, use a bounded path lookup in the same history, then query by ID. Metadata: \`lixcol_depth\` (graph distance; low is close; gaps are normal), \`lixcol_observed_commit_id\`, and \`lixcol_commit_created_at\` (chronology); no \`lixcol_commit_id\`.
+`;

@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__deleted-file-history__20260723T142709Z-2315661-92ad9308__repetition-002",
+  "invocationId": "20260723T142709Z-2315661-92ad9308",
+  "repetition": 2,
+  "repetitions": 3,
+  "kind": "holdout",
+  "round": "production-hard-cut-v5",
+  "taskId": "deleted-file-history",
+  "fixtureProfile": "holdout",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 19,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": false,
+    "reason": "The successful LixRay history query recovered the stable file ID and exactly three correct states in newest-to-oldest order, without using the active lix_file table. However, the final answer described the newest state only as “Deleted” and did not return the required tombstone fields explicitly showing both path and data/content as null.",
+    "failure_mode": "incomplete_answer"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/holdout/production-hard-cut-v5/invocations/20260723T142709Z-2315661-92ad9308/repetition-002/deleted-file-history.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/holdout/production-hard-cut-v5/invocations/20260723T142709Z-2315661-92ad9308/repetition-002/deleted-file-history.json"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "kind": "holdout",
+  "round": "ideal-primitive-v4",
+  "taskId": "datafusion-calendar",
+  "fixtureProfile": "holdout",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 12.5,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent discovered the acme_event schema and occurred_on field, then successfully executed DataFusion-compatible SQL using CAST(... AS DATE) and EXTRACT(YEAR/MONTH). The query returned exactly [2026, 7, 2] followed by [2026, 8, 2], ordered chronologically, and the final answer accurately reported those rows.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

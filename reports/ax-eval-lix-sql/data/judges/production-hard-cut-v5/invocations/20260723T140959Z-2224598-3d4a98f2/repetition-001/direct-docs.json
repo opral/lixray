@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__direct-docs__20260723T140959Z-2224598-3d4a98f2__repetition-001",
+  "invocationId": "20260723T140959Z-2224598-3d4a98f2",
+  "repetition": 1,
+  "repetitions": 10,
+  "kind": "scored",
+  "round": "production-hard-cut-v5",
+  "taskId": "direct-docs",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 12.4,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The successful LixRay execute call returned api.md followed by guide.md, and the final answer listed those files in that order without including /docs/archive/old.md.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-001/direct-docs.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-001/direct-docs.json"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "round": "lean-tagged-v2",
+  "taskId": "dynamic-tasks",
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 9.9,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent discovered the dynamic acme_task table through the registered schema, queried high-priority tasks where done = false, ordered by due_at ascending, and returned exactly Approve pricing page — Jules — 2026-07-23 followed by Finalize launch brief — Mina — 2026-07-24.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

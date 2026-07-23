@@ -1,0 +1,15 @@
+{
+  "round": "baseline-clean",
+  "taskId": "branch-compare",
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 11.6,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent queried all branches, excluded the hidden `global` branch, read `/status.txt` on both visible branches, and correctly reported `main` as `main: stable` and `Release candidate` as `release-candidate: awaiting approval`. All SQL was read-only, and the active branch was restored to `main` before completion.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

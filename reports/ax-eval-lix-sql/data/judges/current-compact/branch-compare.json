@@ -1,0 +1,15 @@
+{
+  "round": "current-compact",
+  "taskId": "branch-compare",
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 12.4,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used read-only LixRay SQL to enumerate all visible branches and query /status.txt across them. It correctly reported `main` → `main: stable` and `Release candidate` → `release-candidate: awaiting approval`. All SQL statements were SELECT queries, with no data or branch-state changes.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

@@ -1,0 +1,18 @@
+{
+  "kind": "scored",
+  "round": "ideal-primitive-v4",
+  "taskId": "blob-text-search",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 12.5,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The successful LixRay SQL query casts file BLOB data to TEXT, searches Markdown files line-by-line for TODO, and returns exactly /README.md — TODO: invite final review. and /docs/api.md — TODO: add auth example. The final answer reports only those matches.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

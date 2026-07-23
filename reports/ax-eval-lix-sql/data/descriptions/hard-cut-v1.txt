@@ -1,0 +1,46 @@
+Execute 1–100 caller-provided Lix SQL statements as one ordered atomic batch. Any failure rolls back the whole batch. Active surfaces read and write the workspace's active Lix branch; call switch_branch first to change it. Lix SQL uses Apache DataFusion SQL, not SQLite SQL. DDL statements and recursive CTEs are unsupported.
+
+Core tables:
+- `lix_file` — Current files in the active branch. Columns: `id, path, directory_id, name, data (BLOB)`.
+- `lix_directory` — Current directories in the active branch. Columns: `id, path, parent_id, name`.
+- `lix_branch` — Workspace branches and their current commits. Columns: `id, name, hidden, commit_id`.
+- `lix_change` — Global change ledger; use it for activity and audit. Columns: `id, entity_pk, schema_key, file_id, snapshot_content, metadata, created_at, origin_key`.
+
+Path rules: `lix_file.path` never ends in `/`; `lix_directory.path` always does. `lix_file.directory_id` references `lix_directory.id`; `lix_directory.parent_id` references `lix_directory.id`. Use those IDs for hierarchy queries.
+
+Known companions: `lix_file` and `lix_directory` have `_by_branch` and read-only `_history` variants; `lix_branch` and `lix_change` do not. Registered entity tables also have both variants.
+
+Entity tables are workspace-dynamic. Only when a task needs one, discover registered application tables with their JSON Schemas; inspect `information_schema.columns` only if exact SQL or system columns are needed:
+
+```sql
+SELECT
+  lix_json_get_text(value, 'x-lix-key') AS table_name,
+  value AS json_schema
+FROM lix_registered_schema
+WHERE NOT starts_with(lix_json_get_text(value, 'x-lix-key'), 'lix_')
+ORDER BY table_name;
+```
+
+```sql
+SELECT column_name, data_type, is_nullable, ordinal_position
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = $1
+ORDER BY ordinal_position;
+```
+
+Filesystem recipes: use `CAST(data AS TEXT)` only for file bytes known to be UTF-8. For recursive directory totals, join files with `starts_with(file.path, directory.path)` instead of walking the directory tree.
+
+History: scope every `<table>_history` query with `lixcol_start_commit_id = lix_active_branch_commit_id()` and stable identity (`id = $n` for files/directories or `lixcol_entity_pk = $n` for entities) resolved from the active table. This preserves identity through renames. Use `lixcol_depth` (graph distance from the start commit) and `lixcol_observed_commit_id` for prior revisions.
+
+Batch envelope: parameters and result cells are tagged. `results[n]` corresponds to `statements[n]`; each result row is positional against `columns`.
+
+Request:
+```json
+{"workspace_ref":"WORKSPACE_UUID","statements":[{"sql":"SELECT path FROM lix_file WHERE path = $1","params":[{"kind":"text","value":"/README.md"}]},{"sql":"SELECT name FROM lix_branch WHERE hidden = FALSE ORDER BY name"}]}
+```
+
+Response:
+```json
+{"results":[{"columns":["path"],"rows":[[{"kind":"text","value":"/README.md"}]],"rowsAffected":0,"notices":[]},{"columns":["name"],"rows":[[{"kind":"text","value":"main"}]],"rowsAffected":0,"notices":[]}]}
+```

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { Value, openLix } from "@lix-js/sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
@@ -13,7 +14,6 @@ import {
 	type LixRuntimeClient,
 } from "./file-service.ts";
 import {
-	EXECUTE_SQL_COLUMNS_QUERY,
 	EXECUTE_SQL_CORE_SCHEMA,
 	EXECUTE_SQL_TABLES_QUERY,
 	EXECUTE_TOOL_DESCRIPTION,
@@ -33,6 +33,19 @@ const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 const BRANCH_ID = "22222222-2222-4222-8222-222222222222";
 const THROW_BRANCH_ID = "33333333-3333-4333-8333-333333333333";
 const AUTHORIZATION_SERVER = "https://supabase.example.test/auth/v1";
+
+void test("integral SQL REAL parameters preserve distinct DataFusion semantics", async (t) => {
+	const lix = await openLix();
+	t.after(async () => lix.close());
+
+	const integer = await lix.execute("SELECT $1 / 2 AS value", [
+		Value.integer(1),
+	]);
+	const real = await lix.execute("SELECT $1 / 2 AS value", [Value.real(1)]);
+
+	assert.equal(integer.rows[0]?.value("value").toJS(), 0);
+	assert.equal(real.rows[0]?.value("value").toJS(), 0.5);
+});
 
 void test("protected resource discovery advertises the Supabase authorization server", async () => {
 	const response = protectedResourceMetadataResponse({
@@ -82,6 +95,13 @@ void test("MCP documentation distinguishes browser and client authentication", a
 	assert.match(documentation, /switch_branch/);
 	assert.match(documentation, /lix_branch/);
 	assert.match(documentation, /raw Lix SQL execute/);
+	assert.match(documentation, /native JSON values/);
+	assert.match(documentation, /BLOB and SQL JSON/);
+	assert.match(
+		documentation,
+		/float wrapper preserves integral or large SQL REAL/,
+	);
+	assert.match(documentation, /positional against their columns/);
 	assert.doesNotMatch(documentation, /file tools|reading, creating, editing/i);
 });
 
@@ -133,11 +153,10 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		assert.ok(executeDescription.startsWith(EXECUTE_TOOL_DESCRIPTION));
 		assert.ok(executeDescription.includes(EXECUTE_SQL_CORE_SCHEMA));
 		assert.ok(executeDescription.includes(EXECUTE_SQL_TABLES_QUERY));
-		assert.ok(executeDescription.includes(EXECUTE_SQL_COLUMNS_QUERY));
-		assert.match(executeDescription, /active Lix branch/);
+		assert.match(executeDescription, /active branch/);
 		assert.deepEqual(runtimeClient.executeRequests, []);
 		assert.equal(executeTool?.annotations?.readOnlyHint, false);
-		assert.equal(executeTool?.annotations?.destructiveHint, false);
+		assert.equal(executeTool?.annotations?.destructiveHint, true);
 		assert.equal(executeTool?.annotations?.idempotentHint, false);
 
 		const rawTools = findRawTools(rawMessages);
@@ -211,6 +230,28 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 						statements?: {
 							items?: {
 								required?: Array<string>;
+								properties?: {
+									params?: {
+										items?: {
+											anyOf?: Array<{
+												type?: string;
+												minimum?: number;
+												maximum?: number;
+												properties?: Record<
+													string,
+													{
+														const?: string;
+														type?: string;
+														minimum?: number;
+														maximum?: number;
+														contentEncoding?: string;
+														allOf?: Array<{ pattern?: string }>;
+													}
+												>;
+											}>;
+										};
+									};
+								};
 							};
 						};
 					};
@@ -221,6 +262,61 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				"params",
 			) ?? false,
 			false,
+		);
+		const executeParamAlternatives =
+			executeInput?.properties?.statements?.items?.properties?.params?.items
+				?.anyOf ?? [];
+		const nativeNumberSchema = executeParamAlternatives.find(
+			(schema) => schema.type === "number",
+		);
+		assert.deepEqual(nativeNumberSchema, {
+			type: "number",
+			minimum: Number.MIN_SAFE_INTEGER,
+			maximum: Number.MAX_SAFE_INTEGER,
+		});
+		const floatParamSchema = executeParamAlternatives.find(
+			(schema) => schema.properties?.kind?.const === "float",
+		);
+		assert.equal(floatParamSchema?.properties?.value?.type, "number");
+		assert.equal(floatParamSchema?.properties?.value?.minimum, undefined);
+		assert.equal(floatParamSchema?.properties?.value?.maximum, undefined);
+		const blobParamSchema = executeParamAlternatives.find(
+			(schema) => schema.properties?.kind?.const === "blob",
+		);
+		assert.equal(
+			blobParamSchema?.properties?.base64?.contentEncoding,
+			"base64",
+		);
+		assert.ok(
+			blobParamSchema?.properties?.base64?.allOf?.some(({ pattern }) =>
+				pattern?.includes("AQgw"),
+			),
+		);
+		const rawExecuteTool = rawTools.find((tool) => tool.name === "execute");
+		const executeInputContract = JSON.stringify(rawExecuteTool?.inputSchema);
+		const executeOutputContract = JSON.stringify(rawExecuteTool?.outputSchema);
+		for (const primitiveType of ["null", "boolean", "number", "string"]) {
+			assert.match(
+				executeInputContract,
+				new RegExp(`"type":"${primitiveType}"`),
+			);
+			assert.match(
+				executeOutputContract,
+				new RegExp(`"type":"${primitiveType}"`),
+			);
+		}
+		assert.match(executeInputContract, /"const":"blob"/);
+		assert.match(executeInputContract, /"const":"json"/);
+		assert.match(executeInputContract, /"const":"float"/);
+		assert.match(executeOutputContract, /"const":"blob"/);
+		assert.match(executeOutputContract, /"const":"json"/);
+		assert.doesNotMatch(
+			executeInputContract,
+			/"const":"(?:null|bool|int|text)"/,
+		);
+		assert.doesNotMatch(
+			executeOutputContract,
+			/"const":"(?:null|bool|int|float|text)"/,
 		);
 		for (const name of ["execute"]) {
 			const inputSchema = rawTools.find((tool) => tool.name === name)
@@ -316,7 +412,7 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				statements: [
 					{
 						sql: "SELECT value FROM lix_key_value WHERE key = $1",
-						params: [{ kind: "text", value: "example" }],
+						params: ["example"],
 					},
 				],
 			},
@@ -326,23 +422,108 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			results: [
 				{
 					columns: ["value"],
-					rows: [[{ kind: "text", value: "result" }]],
+					rows: [["result"]],
 					rowsAffected: 0,
 					notices: [],
 				},
 			],
 		});
-		assert.deepEqual(runtimeClient.executeRequests, [
-			{
-				workspaceId: WORKSPACE_ID,
-				request: {
-					sql: "SELECT value FROM lix_key_value WHERE key = $1",
-					params: [{ kind: "text", value: "example" }],
-					options: undefined,
+		assert.deepEqual(
+			[...runtimeClient.executeRequests],
+			[
+				{
+					workspaceId: WORKSPACE_ID,
+					request: {
+						sql: "SELECT value FROM lix_key_value WHERE key = $1",
+						params: [{ kind: "text", value: "example" }],
+						options: undefined,
+					},
 				},
+			],
+		);
+		assert.deepEqual(runtimeClient.executeActiveBranchIds, ["global"]);
+
+		const primitiveBoundary = await client.callTool({
+			name: "execute",
+			arguments: {
+				workspace_ref: WORKSPACE_ID,
+				statements: [
+					{
+						sql: "SELECT primitive_boundary",
+						params: [
+							null,
+							true,
+							7,
+							1.5,
+							"x",
+							{ kind: "float", value: 1 },
+							{ kind: "float", value: 1e100 },
+							{ kind: "blob", base64: "AA==" },
+							{
+								kind: "json",
+								value: { kind: "blob", base64: "still JSON" },
+							},
+						],
+					},
+				],
+			},
+		});
+		assert.equal(primitiveBoundary.isError, undefined);
+		assert.deepEqual(primitiveBoundary.structuredContent, {
+			results: [
+				{
+					columns: [
+						"null",
+						"bool",
+						"int",
+						"float",
+						"text",
+						"integral_real",
+						"large_real",
+						"blob",
+						"json",
+					],
+					rows: [
+						[
+							null,
+							true,
+							7,
+							1.5,
+							"result",
+							1,
+							1e100,
+							{ kind: "blob", base64: "AA==" },
+							{
+								kind: "json",
+								value: { kind: "blob", base64: "still JSON" },
+							},
+						],
+					],
+					rowsAffected: 4,
+					notices: [{ code: "boundary_notice" }],
+				},
+			],
+		});
+		const boundaryRequest = (
+			runtimeClient.executeRequests as Array<{
+				workspaceId: string;
+				request: ExecuteRequest;
+			}>
+		).at(-1);
+		assert.deepEqual(boundaryRequest?.request.params, [
+			{ kind: "null", value: null },
+			{ kind: "bool", value: true },
+			{ kind: "int", value: 7 },
+			{ kind: "float", value: 1.5 },
+			{ kind: "text", value: "x" },
+			{ kind: "float", value: 1 },
+			{ kind: "float", value: 1e100 },
+			{ kind: "blob", base64: "AA==" },
+			{
+				kind: "json",
+				value: { kind: "blob", base64: "still JSON" },
 			},
 		]);
-		assert.deepEqual(runtimeClient.executeActiveBranchIds, ["global"]);
 
 		const batch = await client.callTool({
 			name: "execute",
@@ -351,14 +532,11 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				statements: [
 					{
 						sql: "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
-						params: [
-							{ kind: "text", value: "example" },
-							{ kind: "text", value: "result" },
-						],
+						params: ["example", "result"],
 					},
 					{
 						sql: "SELECT value FROM lix_key_value WHERE key = $1",
-						params: [{ kind: "text", value: "example" }],
+						params: ["example"],
 					},
 				],
 			},
@@ -385,6 +563,33 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 			)?.error?.code,
 			"invalid_arguments",
 		);
+
+		for (const params of [
+			[{ kind: "null", value: null }],
+			[{ kind: "bool", value: true }],
+			[{ kind: "int", value: 1 }],
+			[{ kind: "text", value: "x" }],
+			[Number.MAX_SAFE_INTEGER + 1],
+			[{ kind: "blob", base64: "not base64" }],
+			[{ kind: "blob", base64: "AB==" }],
+		]) {
+			const invalidPrimitiveParams = await client.callTool({
+				name: "execute",
+				arguments: {
+					workspace_ref: WORKSPACE_ID,
+					statements: [{ sql: "SELECT $1", params }],
+				},
+			});
+			assert.equal(invalidPrimitiveParams.isError, true);
+			assert.equal(
+				(
+					invalidPrimitiveParams.structuredContent as
+						| { error?: { code?: string } }
+						| undefined
+				)?.error?.code,
+				"invalid_arguments",
+			);
+		}
 
 		const rejectedBranchOverride = await client.callTool({
 			name: "execute",
@@ -486,21 +691,22 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 					toolName: "execute",
 					outcome: "success",
 					workspaceId: WORKSPACE_ID,
+					statementCount: 1,
+					resultCount: 1,
+				},
+				{
+					toolName: "execute",
+					outcome: "success",
+					workspaceId: WORKSPACE_ID,
 					statementCount: 2,
 					resultCount: 2,
 				},
-				{
+				...Array.from({ length: 9 }, () => ({
 					toolName: "execute",
 					outcome: "error",
 					errorCode: "invalid_arguments",
 					statementCount: 1,
-				},
-				{
-					toolName: "execute",
-					outcome: "error",
-					errorCode: "invalid_arguments",
-					statementCount: 1,
-				},
+				})),
 				{
 					toolName: "switch_branch",
 					outcome: "success",
@@ -597,6 +803,39 @@ class ProtocolLixRuntimeClient implements LixRuntimeClient {
 		}
 		this.executeActiveBranchIds.push(this.currentBranchId);
 		this.executeRequests.push({ workspaceId, request });
+		if (request.sql === "SELECT primitive_boundary") {
+			return {
+				columns: [
+					"null",
+					"bool",
+					"int",
+					"float",
+					"text",
+					"integral_real",
+					"large_real",
+					"blob",
+					"json",
+				],
+				rows: [
+					[
+						{ kind: "null", value: null },
+						{ kind: "bool", value: true },
+						{ kind: "int", value: 7 },
+						{ kind: "float", value: 1.5 },
+						{ kind: "text", value: "result" },
+						{ kind: "float", value: 1 },
+						{ kind: "float", value: 1e100 },
+						{ kind: "blob", base64: "AA==" },
+						{
+							kind: "json",
+							value: { kind: "blob", base64: "still JSON" },
+						},
+					],
+				],
+				rowsAffected: 4,
+				notices: [{ code: "boundary_notice" }],
+			};
+		}
 		return {
 			columns: ["value"],
 			rows: [[{ kind: "text", value: "result" }]],

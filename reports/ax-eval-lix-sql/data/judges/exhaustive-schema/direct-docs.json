@@ -1,0 +1,15 @@
+{
+  "round": "exhaustive-schema",
+  "taskId": "direct-docs",
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 10,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "A successful LixRay execute call returned /docs/api.md followed by /docs/guide.md. The final answer listed api.md then guide.md and excluded /docs/archive/old.md.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

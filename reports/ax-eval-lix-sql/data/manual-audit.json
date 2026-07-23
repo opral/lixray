@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "overrides": [
+    {
+      "round": "minimal-pre-schema",
+      "task_id": "atomic-multi-read",
+      "success": false,
+      "failure_mode": "wrong_answer",
+      "reason": "The run satisfied the one-call/two-statement batch constraint and returned the correct file count, but it omitted `WHERE hidden = FALSE`, returned the hidden `global` branch, and labeled it visible. The seeded fixture's branch catalog establishes `global.hidden = true`, and the task criterion explicitly requires non-hidden branches."
+    }
+  ],
+  "contaminated_comparisons": [
+    {
+      "round": "minimal-pre-schema",
+      "task_id": "atomic-multi-read",
+      "reason": "The run performed the panel's only external web search before executing. It still omitted the required hidden-branch filter. Treat it as externally documented as well as incorrect."
+    },
+    {
+      "round": "minimal-pre-schema",
+      "task_id": "file-history",
+      "reason": "An unrestricted `/tmp` source search exposed the current compact history recipe. Exclude this cell from guidance-delta claims."
+    },
+    {
+      "round": "exhaustive-schema",
+      "task_id": "file-history",
+      "reason": "An unrestricted `/tmp` source search exposed current LixRay source. Exclude this cell from guidance-delta claims."
+    },
+    {
+      "round": "exhaustive-schema",
+      "task_id": "direct-docs",
+      "reason": "An unrestricted `/tmp` source search exposed current LixRay source. Treat this timing as environmentally confounded."
+    }
+  ]
+}

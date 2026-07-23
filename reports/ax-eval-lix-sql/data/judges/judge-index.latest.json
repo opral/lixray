@@ -1,0 +1,249 @@
+{
+  "schema": 2,
+  "sourceInvocationId": "20260723T143940Z-2342037-8ac8f954",
+  "sourceRunIndex": "data/raw/run-index.scored.production-hard-cut-v5.20260723T143940Z-2342037-8ac8f954.json",
+  "generatedAt": "2026-07-23T14:41:51.109Z",
+  "kind": "scored",
+  "roundIds": [
+    "production-hard-cut-v5"
+  ],
+  "model": "gpt-5.6-sol",
+  "repetitions": 1,
+  "totalJudgments": 9,
+  "judgments": [
+    {
+      "runId": "production-hard-cut-v5__atomic-multi-read__20260723T143940Z-2342037-8ac8f954__repetition-001",
+      "invocationId": "20260723T143940Z-2342037-8ac8f954",
+      "repetition": 1,
+      "repetitions": 1,
+      "kind": "scored",
+      "round": "production-hard-cut-v5",
+      "taskId": "atomic-multi-read",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 1,
+      "durationSec": 14.9,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The session made exactly one LixRay execute call containing two ordered SQL statements. It successfully returned an active-branch file count of 7, followed by all visible branches filtered with hidden = false and sorted by name ascending: Release candidate, main. The final answer accurately reported both results.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n",
+      "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/atomic-multi-read.jsonl",
+      "artifactPaths": {
+        "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/atomic-multi-read.json"
+      }
+    },
+    {
+      "runId": "production-hard-cut-v5__blob-text-search__20260723T143940Z-2342037-8ac8f954__repetition-001",
+      "invocationId": "20260723T143940Z-2342037-8ac8f954",
+      "repetition": 1,
+      "repetitions": 1,
+      "kind": "scored",
+      "round": "production-hard-cut-v5",
+      "taskId": "blob-text-search",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 2,
+      "durationSec": 17.3,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent successfully used the LixRay SQL API, cast file BLOB data to text, filtered Markdown files, split content into lines, and returned exactly the two required path/TODO-line matches.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n",
+      "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/blob-text-search.jsonl",
+      "artifactPaths": {
+        "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/blob-text-search.json"
+      }
+    },
+    {
+      "runId": "production-hard-cut-v5__branch-compare__20260723T143940Z-2342037-8ac8f954__repetition-001",
+      "invocationId": "20260723T143940Z-2342037-8ac8f954",
+      "repetition": 1,
+      "repetitions": 1,
+      "kind": "scored",
+      "round": "production-hard-cut-v5",
+      "taskId": "branch-compare",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 3,
+      "durationSec": 11.9,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent used the LixRay SQL API with read-only SELECT statements, identified both visible branches, and correctly reported `main` as `main: stable` and `Release candidate` as `release-candidate: awaiting approval`. The log shows no SQL mutations or other data changes.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n",
+      "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/branch-compare.jsonl",
+      "artifactPaths": {
+        "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/branch-compare.json"
+      }
+    },
+    {
+      "runId": "production-hard-cut-v5__branch-only-files__20260723T143940Z-2342037-8ac8f954__repetition-001",
+      "invocationId": "20260723T143940Z-2342037-8ac8f954",
+      "repetition": 1,
+      "repetitions": 1,
+      "kind": "scored",
+      "round": "production-hard-cut-v5",
+      "taskId": "branch-only-files",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 3,
+      "durationSec": 12.4,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent used the LixRay SQL API to run a read-only cross-branch NOT EXISTS query comparing the Release candidate branch against the active branch. The query returned only /release-checklist.md, which the final answer reported exactly. No switch_branch call or data mutation occurred.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n",
+      "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/branch-only-files.jsonl",
+      "artifactPaths": {
+        "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/branch-only-files.json"
+      }
+    },
+    {
+      "runId": "production-hard-cut-v5__direct-docs__20260723T143940Z-2342037-8ac8f954__repetition-001",
+      "invocationId": "20260723T143940Z-2342037-8ac8f954",
+      "repetition": 1,
+      "repetitions": 1,
+      "kind": "scored",
+      "round": "production-hard-cut-v5",
+      "taskId": "direct-docs",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 1,
+      "durationSec": 11.6,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The successful LixRay execute call returned api.md and guide.md in name-sorted order from the /docs directory. The final answer listed both in that order and excluded /docs/archive/old.md.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n",
+      "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/direct-docs.jsonl",
+      "artifactPaths": {
+        "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/direct-docs.json"
+      }
+    },
+    {
+      "runId": "production-hard-cut-v5__directory-aggregate__20260723T143940Z-2342037-8ac8f954__repetition-001",
+      "invocationId": "20260723T143940Z-2342037-8ac8f954",
+      "repetition": 1,
+      "repetitions": 1,
+      "kind": "scored",
+      "round": "production-hard-cut-v5",
+      "taskId": "directory-aggregate",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 2,
+      "durationSec": 11.4,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent used the LixRay SQL API, filtered to top-level directories with `d.parent_id IS NULL`, recursively counted files by directory-path prefix, and correctly reported `/data/` = 1, `/docs/` = 3, and `/notes/` = 1.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n",
+      "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/directory-aggregate.jsonl",
+      "artifactPaths": {
+        "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/directory-aggregate.json"
+      }
+    },
+    {
+      "runId": "production-hard-cut-v5__dynamic-tasks__20260723T143940Z-2342037-8ac8f954__repetition-001",
+      "invocationId": "20260723T143940Z-2342037-8ac8f954",
+      "repetition": 1,
+      "repetitions": 1,
+      "kind": "scored",
+      "round": "production-hard-cut-v5",
+      "taskId": "dynamic-tasks",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 3,
+      "durationSec": 18.1,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent discovered the dynamic acme_task entity table, queried high-priority tasks where done = false, ordered them by due_at ascending, and returned exactly the two required tasks in the correct order.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n",
+      "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/dynamic-tasks.jsonl",
+      "artifactPaths": {
+        "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/dynamic-tasks.json"
+      }
+    },
+    {
+      "runId": "production-hard-cut-v5__file-history__20260723T143940Z-2342037-8ac8f954__repetition-001",
+      "invocationId": "20260723T143940Z-2342037-8ac8f954",
+      "repetition": 1,
+      "repetitions": 1,
+      "kind": "scored",
+      "round": "production-hard-cut-v5",
+      "taskId": "file-history",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 1,
+      "durationSec": 18.1,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent used successful LixRay SQL history queries, including an identity-filtered lix_file_history query, and the final answer showed all three retained contents in correct newest-to-oldest order: alpha+beta+launch, alpha+beta, then alpha.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n",
+      "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/file-history.jsonl",
+      "artifactPaths": {
+        "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/file-history.json"
+      }
+    },
+    {
+      "runId": "production-hard-cut-v5__recent-app-activity__20260723T143940Z-2342037-8ac8f954__repetition-001",
+      "invocationId": "20260723T143940Z-2342037-8ac8f954",
+      "repetition": 1,
+      "repetitions": 1,
+      "kind": "scored",
+      "round": "production-hard-cut-v5",
+      "taskId": "recent-app-activity",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 2,
+      "durationSec": 12.2,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent successfully queried lix_change through the LixRay SQL API, filtered out schema keys beginning with lix_, ordered by descending created_at, limited the result to five rows, and presented all five with timestamp, schema, and entity identity.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n",
+      "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/recent-app-activity.jsonl",
+      "artifactPaths": {
+        "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/recent-app-activity.json"
+      }
+    }
+  ]
+}

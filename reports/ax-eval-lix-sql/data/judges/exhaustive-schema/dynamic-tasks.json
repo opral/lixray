@@ -1,0 +1,15 @@
+{
+  "round": "exhaustive-schema",
+  "taskId": "dynamic-tasks",
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 9.8,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent discovered the dynamic acme_task table through information_schema, queried it via the LixRay SQL API for high-priority tasks with done = FALSE, ordered by due_at ascending, and returned exactly Approve pricing page — Jules — 2026-07-23 followed by Finalize launch brief — Mina — 2026-07-24.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

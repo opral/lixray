@@ -1,0 +1,19 @@
+{
+  "runId": "minimal-pre-schema__branch-compare",
+  "kind": "scored",
+  "round": "minimal-pre-schema",
+  "descriptionRevision": "8bf41c0^",
+  "taskId": "branch-compare",
+  "prompt": "Compare /status.txt on every visible branch and report each branch name and decoded text, without changing any data, using the LixRay SQL API",
+  "expectation": "The answer must report the active/main branch text 'main: stable' and Release candidate text 'release-candidate: awaiting approval', tied to the correct visible branches, without mutating SQL data. Calling switch_branch is acceptable if the original active branch is restored before finishing, because the prompt forbids data changes rather than temporary branch-state changes.",
+  "model": "gpt-5.6-sol",
+  "modelReasoningEffort": "medium",
+  "lixSdkEntry": "/tmp/lixray-lix-8649/packages/js-sdk/dist/index.js",
+  "nativeBatch": true,
+  "workerId": 3,
+  "startedAt": "2026-07-22T22:58:19.689Z",
+  "completedAt": "2026-07-22T22:58:49.534Z",
+  "durationSec": 29.8,
+  "exitCode": 0,
+  "timedOut": false
+}

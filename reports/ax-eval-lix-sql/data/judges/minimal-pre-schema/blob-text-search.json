@@ -1,0 +1,15 @@
+{
+  "round": "minimal-pre-schema",
+  "taskId": "blob-text-search",
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 9.7,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The final answer returned exactly /README.md with “TODO: invite final review.” and /docs/api.md with “TODO: add auth example.” A successful LixRay SQL query filtered Markdown paths and used CAST(data AS VARCHAR) to search the LargeBinary file data as text.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

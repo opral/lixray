@@ -1,0 +1,18 @@
+{
+  "kind": "holdout",
+  "round": "ideal-primitive-v4",
+  "taskId": "deleted-file-history",
+  "fixtureProfile": "holdout",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 13,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent successfully used LixRay history SQL to recover the stable file ID without querying the active lix_file table, then queried by that identity and obtained exactly three states newest to oldest: a tombstone with null path/content, '# Deleted\\nsecond\\n', and '# Deleted\\nfirst\\n'. The final answer accurately reported the deletion followed by both retained content versions and the stable ID.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

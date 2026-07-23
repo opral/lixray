@@ -1,0 +1,169 @@
+{
+  "generatedAt": "2026-07-23T05:29:47.407Z",
+  "model": "gpt-5.6-sol",
+  "totalJudgments": 9,
+  "judgments": [
+    {
+      "kind": "scored",
+      "round": "ideal-primitive-v4",
+      "taskId": "atomic-multi-read",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 3,
+      "durationSec": 9.5,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The session used exactly one successful LixRay execute call containing two ordered SQL statements. It returned an active-branch file count of 7, followed by all non-hidden branches in alphabetical order: Release candidate, main. The final answer accurately reported those results.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n"
+    },
+    {
+      "kind": "scored",
+      "round": "ideal-primitive-v4",
+      "taskId": "blob-text-search",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 2,
+      "durationSec": 12.5,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The successful LixRay SQL query casts file BLOB data to TEXT, searches Markdown files line-by-line for TODO, and returns exactly /README.md — TODO: invite final review. and /docs/api.md — TODO: add auth example. The final answer reports only those matches.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n"
+    },
+    {
+      "kind": "scored",
+      "round": "ideal-primitive-v4",
+      "taskId": "branch-compare",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 1,
+      "durationSec": 9.7,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent queried all branches, filtered to visible branches, and correctly reported `main` as `main: stable` and `Release candidate` as `release-candidate: awaiting approval`. All SQL statements were read-only SELECT queries, so no data was mutated.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n"
+    },
+    {
+      "kind": "scored",
+      "round": "ideal-primitive-v4",
+      "taskId": "branch-only-files",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 2,
+      "durationSec": 12.5,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent used the LixRay SQL API to perform a cross-branch comparison between “Release candidate” and the active branch. The query returned only /release-checklist.md, which the final answer reported exactly. It did not call switch_branch or mutate data.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n"
+    },
+    {
+      "kind": "scored",
+      "round": "ideal-primitive-v4",
+      "taskId": "direct-docs",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 1,
+      "durationSec": 8.2,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The successful LixRay execute result returned /docs/api.md followed by /docs/guide.md, and the final answer listed exactly those files in that order while excluding /docs/archive/old.md.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n"
+    },
+    {
+      "kind": "scored",
+      "round": "ideal-primitive-v4",
+      "taskId": "directory-aggregate",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 1,
+      "durationSec": 13,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent used the LixRay SQL API, selected only top-level directories with `d.parent_id IS NULL`, recursively counted files by matching file paths under each directory, and correctly reported `/data/` = 1, `/docs/` = 3, and `/notes/` = 1.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n"
+    },
+    {
+      "kind": "scored",
+      "round": "ideal-primitive-v4",
+      "taskId": "dynamic-tasks",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 2,
+      "durationSec": 8.4,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent discovered the dynamic acme_task entity via lix_registered_schema, queried high-priority tasks with done = false, ordered them by due date, and returned exactly the two required tasks in the correct order with title, owner, and due date.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n"
+    },
+    {
+      "kind": "scored",
+      "round": "ideal-primitive-v4",
+      "taskId": "file-history",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 3,
+      "durationSec": 9,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent used a successful LixRay SQL API query against lix_file_history and returned all three retained contents in the required newest-to-oldest order: alpha+beta+launch, alpha+beta, then alpha. The final answer accurately reflects the query results.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n"
+    },
+    {
+      "kind": "scored",
+      "round": "ideal-primitive-v4",
+      "taskId": "recent-app-activity",
+      "fixtureProfile": "default",
+      "expectedError": false,
+      "model": "gpt-5.6-sol",
+      "workerId": 3,
+      "durationSec": 11.2,
+      "exitCode": 0,
+      "timedOut": false,
+      "verdict": {
+        "success": true,
+        "reason": "The agent successfully queried lix_change through the LixRay SQL API, filtered out schema keys beginning with lix_, ordered changes by descending created_at, limited the result to five rows, and presented all five with timestamp, schema, and entity identity.",
+        "failure_mode": "none"
+      },
+      "stderr": "Reading additional input from stdin...\n"
+    }
+  ]
+}

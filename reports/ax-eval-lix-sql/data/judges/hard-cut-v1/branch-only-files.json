@@ -1,0 +1,15 @@
+{
+  "round": "hard-cut-v1",
+  "taskId": "branch-only-files",
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 10.3,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used a read-only cross-branch SQL query against lix_file_by_branch, comparing the Release candidate branch with the active branch. The query returned only /release-checklist.md, and the final answer reported that exact path. No switch_branch call or data mutation occurred.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

@@ -1,0 +1,18 @@
+{
+  "kind": "holdout",
+  "round": "ideal-primitive-v4",
+  "taskId": "composite-entity-history",
+  "fixtureProfile": "holdout",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 9.4,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent discovered the dynamic acme_issue schema and its composite primary key, queried acme_issue_history for project_id='launch' and issue_number='7', and returned exactly closed — Nia, in_review — Nia, open — Nia in newest-to-oldest order.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

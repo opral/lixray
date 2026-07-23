@@ -1,0 +1,18 @@
+{
+  "kind": "holdout",
+  "round": "ideal-primitive-v4",
+  "taskId": "literal-path-aggregate",
+  "fixtureProfile": "holdout",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 12.8,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The LixRay SQL selected only top-level directories with names beginning with literal `data`, recursively counted descendant files via path prefixes, sorted by path, and returned exactly: /data/ = 1, /dataX100pct/ = 1, /data_100%/ = 2, /database/ = 1. The nested raw directory was excluded as a result, while its a.md file was included.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

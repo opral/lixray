@@ -1,0 +1,18 @@
+{
+  "kind": "scored",
+  "round": "ideal-primitive-v4",
+  "taskId": "branch-only-files",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 12.5,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used the LixRay SQL API to perform a cross-branch comparison between “Release candidate” and the active branch. The query returned only /release-checklist.md, which the final answer reported exactly. It did not call switch_branch or mutate data.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

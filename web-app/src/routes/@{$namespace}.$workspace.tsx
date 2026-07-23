@@ -156,8 +156,8 @@ function WorkspaceRoutePage() {
 	const cleanInviteFromAddressBar = useCallback(() => {
 		void navigate({
 			to: ".",
-			search: (previous) => {
-				const canonicalSearch = { ...(previous as WorkspaceSearch) };
+			search: (previous: WorkspaceSearch) => {
+				const canonicalSearch = { ...previous };
 				delete canonicalSearch.invite;
 				return canonicalSearch;
 			},

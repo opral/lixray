@@ -90,8 +90,15 @@ The Streamable HTTP MCP endpoint is:
 https://lixray.com/mcp
 ```
 
-It exposes workspace and branch discovery, file operations, and atomic raw Lix
-SQL execution. OAuth protected-resource metadata is served from
+It exposes four tools for workspace discovery, active-branch control, and
+atomic raw Lix SQL execution. The SQL dialect is Apache DataFusion. Ordinary
+parameter and result scalars are native JSON values; BLOB and SQL JSON values
+use explicit wrappers, with a narrow parameter wrapper for REAL values whose
+integral shape would otherwise bind as SQL integer. See the
+[MCP reference](docs/mcp.md) for the complete contract and tagged-scalar
+migration.
+
+OAuth protected-resource metadata is served from
 `/.well-known/oauth-protected-resource`; MCP access tokens are Supabase ES256
 tokens bound to `https://lixray.com`.
 

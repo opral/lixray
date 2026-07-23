@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__blob-text-search__20260723T140959Z-2224598-3d4a98f2__repetition-007",
+  "invocationId": "20260723T140959Z-2224598-3d4a98f2",
+  "repetition": 7,
+  "repetitions": 10,
+  "kind": "scored",
+  "round": "production-hard-cut-v5",
+  "taskId": "blob-text-search",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 11.6,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The session used the LixRay SQL API successfully, cast file BLOB data to TEXT, filtered Markdown paths, extracted matching TODO lines, and returned exactly /README.md with 'TODO: invite final review.' and /docs/api.md with 'TODO: add auth example.'.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-007/blob-text-search.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-007/blob-text-search.json"
+  }
+}

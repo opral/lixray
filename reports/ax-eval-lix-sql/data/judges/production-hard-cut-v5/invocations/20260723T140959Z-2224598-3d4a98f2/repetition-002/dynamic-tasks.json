@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__dynamic-tasks__20260723T140959Z-2224598-3d4a98f2__repetition-002",
+  "invocationId": "20260723T140959Z-2224598-3d4a98f2",
+  "repetition": 2,
+  "repetitions": 10,
+  "kind": "scored",
+  "round": "production-hard-cut-v5",
+  "taskId": "dynamic-tasks",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 11.5,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent discovered the dynamic acme_task table and its schema, queried all tasks where done = false and priority = high, ordered them by due date, and returned exactly: Approve pricing page — Jules — 2026-07-23; Finalize launch brief — Mina — 2026-07-24.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-002/dynamic-tasks.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-002/dynamic-tasks.json"
+  }
+}

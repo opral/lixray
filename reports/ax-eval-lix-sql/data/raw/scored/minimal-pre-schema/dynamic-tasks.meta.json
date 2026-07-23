@@ -1,0 +1,19 @@
+{
+  "runId": "minimal-pre-schema__dynamic-tasks",
+  "kind": "scored",
+  "round": "minimal-pre-schema",
+  "descriptionRevision": "8bf41c0^",
+  "taskId": "dynamic-tasks",
+  "prompt": "Find every high-priority task that is not done. Return title, owner, and due date ordered by due date, using the LixRay SQL API",
+  "expectation": "The answer must return only Approve pricing page — Jules — 2026-07-23 and Finalize launch brief — Mina — 2026-07-24, in that order, after discovering/querying the dynamic acme_task entity table.",
+  "model": "gpt-5.6-sol",
+  "modelReasoningEffort": "medium",
+  "lixSdkEntry": "/tmp/lixray-lix-8649/packages/js-sdk/dist/index.js",
+  "nativeBatch": true,
+  "workerId": 2,
+  "startedAt": "2026-07-22T22:57:53.014Z",
+  "completedAt": "2026-07-22T22:58:32.338Z",
+  "durationSec": 39.3,
+  "exitCode": 0,
+  "timedOut": false
+}

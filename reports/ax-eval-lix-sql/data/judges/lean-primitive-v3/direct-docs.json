@@ -1,0 +1,15 @@
+{
+  "round": "lean-primitive-v3",
+  "taskId": "direct-docs",
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 10.8,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The successful LixRay execute result returned api.md and guide.md in name-sorted order, and the final answer listed both in that order while excluding /docs/archive/old.md.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

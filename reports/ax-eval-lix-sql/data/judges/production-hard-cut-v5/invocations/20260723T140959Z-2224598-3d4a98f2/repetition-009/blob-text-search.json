@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__blob-text-search__20260723T140959Z-2224598-3d4a98f2__repetition-009",
+  "invocationId": "20260723T140959Z-2224598-3d4a98f2",
+  "repetition": 9,
+  "repetitions": 10,
+  "kind": "scored",
+  "round": "production-hard-cut-v5",
+  "taskId": "blob-text-search",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 12.8,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent successfully used the LixRay SQL API and cast file BLOB data to text with CAST(data AS TEXT). The query returned exactly /README.md — TODO: invite final review. and /docs/api.md — TODO: add auth example., and the final answer reported only those matches.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-009/blob-text-search.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-009/blob-text-search.json"
+  }
+}

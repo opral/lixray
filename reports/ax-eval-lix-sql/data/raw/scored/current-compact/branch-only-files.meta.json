@@ -1,0 +1,19 @@
+{
+  "runId": "current-compact__branch-only-files",
+  "kind": "scored",
+  "round": "current-compact",
+  "descriptionRevision": "a97ae97",
+  "taskId": "branch-only-files",
+  "prompt": "Which files exist on the Release candidate branch but not the active branch? Return their paths without switching branches or changing data, using the LixRay SQL API",
+  "expectation": "The answer must identify only /release-checklist.md, using a cross-branch query and without calling switch_branch or mutating data.",
+  "model": "gpt-5.6-sol",
+  "modelReasoningEffort": "medium",
+  "lixSdkEntry": "/tmp/lixray-lix-8649/packages/js-sdk/dist/index.js",
+  "nativeBatch": true,
+  "workerId": 1,
+  "startedAt": "2026-07-22T23:01:12.147Z",
+  "completedAt": "2026-07-22T23:01:30.318Z",
+  "durationSec": 18.2,
+  "exitCode": 0,
+  "timedOut": false
+}

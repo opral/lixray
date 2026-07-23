@@ -1,0 +1,15 @@
+{
+  "round": "baseline-clean",
+  "taskId": "dynamic-tasks",
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 10.3,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent discovered the dynamic acme_task table, inspected its schema, queried high-priority tasks with done = FALSE, ordered them by due date, and returned exactly the two required tasks in the correct order with title, owner, and due date.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

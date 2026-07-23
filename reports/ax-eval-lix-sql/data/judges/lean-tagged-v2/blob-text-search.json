@@ -1,0 +1,15 @@
+{
+  "round": "lean-tagged-v2",
+  "taskId": "blob-text-search",
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 11.7,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The session successfully used the LixRay SQL API, cast file BLOB data to TEXT, filtered Markdown paths, split content into lines, and returned exactly /README.md with 'TODO: invite final review.' and /docs/api.md with 'TODO: add auth example.'.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

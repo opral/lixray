@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "generated_at": "2026-07-22",
+  "lixray_commit": "a97ae971024090385098f716d524c331f55689cb",
+  "lix_commit": "8649dad564589d69848b933453493eee8a634b71",
+  "atelier_commit": "8e18c02d5858db98adde51220f128a0451418471",
+  "lix_sdk_entry": "/tmp/lixray-lix-8649/packages/js-sdk/dist/index.js",
+  "native_batch": true,
+  "native_addon": {
+    "path": "/tmp/lixray-lix-8649/packages/js-sdk/lix_js_sdk.node",
+    "sha256": "87dfcf27339fa8589f925908e7d7b2df84903fb98756ce6d1985261dd536c3ce",
+    "gnu_build_id": "8892003579f7349fabf62ac08d6cde66bcb76600",
+    "build_profile": "release"
+  },
+  "environment": {
+    "node": "22.22.1",
+    "npm": "9.2.0",
+    "cargo": "1.97.0-nightly (4d1f98451 2026-05-15)",
+    "rustc": "1.97.0-nightly (b954122bb 2026-05-20)",
+    "codex_cli": "0.144.6",
+    "agent_model": "gpt-5.6-sol",
+    "agent_reasoning_effort": "medium",
+    "judge_model": "gpt-5.6-sol",
+    "judge_reasoning_effort": "low"
+  },
+  "notes": [
+    "The SDK was built from a clean detached worktree at the root-pinned Lix commit.",
+    "The adjacent locally built native addon was loaded instead of the registry fallback.",
+    "The build worktree and native addon are ephemeral; reproduce them from lix_commit and verify sha256."
+  ]
+}

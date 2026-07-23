@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__branch-only-files__20260723T140959Z-2224598-3d4a98f2__repetition-005",
+  "invocationId": "20260723T140959Z-2224598-3d4a98f2",
+  "repetition": 5,
+  "repetitions": 10,
+  "kind": "scored",
+  "round": "production-hard-cut-v5",
+  "taskId": "branch-only-files",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 21.9,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used a read-only cross-branch SQL query comparing “Release candidate” with the active branch. The query returned only /release-checklist.md, which the final answer reported exactly. It did not call switch_branch or mutate data.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-005/branch-only-files.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-005/branch-only-files.json"
+  }
+}

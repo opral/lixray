@@ -1,0 +1,18 @@
+{
+  "kind": "scored",
+  "round": "ideal-primitive-v4",
+  "taskId": "direct-docs",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 8.2,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The successful LixRay execute result returned /docs/api.md followed by /docs/guide.md, and the final answer listed exactly those files in that order while excluding /docs/archive/old.md.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

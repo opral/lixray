@@ -1,0 +1,19 @@
+{
+  "runId": "current-compact__directory-aggregate",
+  "kind": "scored",
+  "round": "current-compact",
+  "descriptionRevision": "a97ae97",
+  "taskId": "directory-aggregate",
+  "prompt": "For each top-level directory, count all files recursively and report the directory path and count, using the LixRay SQL API",
+  "expectation": "The answer must report /data/ = 1, /docs/ = 3, and /notes/ = 1, counting /docs/archive/old.md under /docs/ and not treating nested /docs/archive/ as a top-level directory.",
+  "model": "gpt-5.6-sol",
+  "modelReasoningEffort": "medium",
+  "lixSdkEntry": "/tmp/lixray-lix-8649/packages/js-sdk/dist/index.js",
+  "nativeBatch": true,
+  "workerId": 1,
+  "startedAt": "2026-07-22T23:01:30.320Z",
+  "completedAt": "2026-07-22T23:02:04.852Z",
+  "durationSec": 34.5,
+  "exitCode": 0,
+  "timedOut": false
+}

@@ -1,0 +1,15 @@
+{
+  "round": "hard-cut-v1",
+  "taskId": "branch-compare",
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 13.7,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent queried all branches, filtered to visible branches, decoded `/status.txt`, and correctly reported `main` as `main: stable` and `Release candidate` as `release-candidate: awaiting approval`. All SQL statements were read-only SELECT queries, so no data was changed.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

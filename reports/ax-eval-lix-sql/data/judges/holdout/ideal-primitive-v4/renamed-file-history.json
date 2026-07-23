@@ -1,0 +1,18 @@
+{
+  "kind": "holdout",
+  "round": "ideal-primitive-v4",
+  "taskId": "renamed-file-history",
+  "fixtureProfile": "holdout",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 16.4,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent successfully resolved the current path to the file’s stable ID, queried lix_file_history by that ID, and returned exactly three revisions newest to oldest with the required paths and decoded contents, including both pre-rename revisions. All relevant LixRay queries succeeded, and the final answer matches the query results.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

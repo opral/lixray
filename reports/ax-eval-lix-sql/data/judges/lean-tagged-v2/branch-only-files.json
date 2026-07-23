@@ -1,0 +1,15 @@
+{
+  "round": "lean-tagged-v2",
+  "taskId": "branch-only-files",
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 11,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used a read-only cross-branch SQL query comparing `lix_file_by_branch` for the Release candidate branch against the active branch. The query returned only `/release-checklist.md`, which the final answer reported exactly. It did not call `switch_branch` or mutate data.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

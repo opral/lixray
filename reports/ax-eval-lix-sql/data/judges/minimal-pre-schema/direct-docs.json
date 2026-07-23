@@ -1,0 +1,15 @@
+{
+  "round": "minimal-pre-schema",
+  "taskId": "direct-docs",
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 9.2,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The final answer lists api.md followed by guide.md, excludes /docs/archive/old.md, and is supported by a successful LixRay execute result returning exactly those two rows in ascending order.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

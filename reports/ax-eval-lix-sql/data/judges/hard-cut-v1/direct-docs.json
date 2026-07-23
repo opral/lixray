@@ -1,0 +1,15 @@
+{
+  "round": "hard-cut-v1",
+  "taskId": "direct-docs",
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 11.1,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used the LixRay SQL API successfully. The completed execute result returned api.md followed by guide.md, and the final answer listed exactly those files in that order, excluding /docs/archive/old.md.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

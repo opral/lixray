@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__literal-path-aggregate__20260723T142709Z-2315661-92ad9308__repetition-002",
+  "invocationId": "20260723T142709Z-2315661-92ad9308",
+  "repetition": 2,
+  "repetitions": 3,
+  "kind": "holdout",
+  "round": "production-hard-cut-v5",
+  "taskId": "literal-path-aggregate",
+  "fixtureProfile": "holdout",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 13.9,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used LixRay SQL and returned exactly the required sorted results: /data/ = 1, /dataX100pct/ = 1, /data_100%/ = 2, and /database/ = 1. The query restricted results to top-level directories with d.parent_id IS NULL, counted descendant files recursively by path prefix, and used starts_with rather than SQL LIKE, so '_' and '%' were treated literally.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/holdout/production-hard-cut-v5/invocations/20260723T142709Z-2315661-92ad9308/repetition-002/literal-path-aggregate.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/holdout/production-hard-cut-v5/invocations/20260723T142709Z-2315661-92ad9308/repetition-002/literal-path-aggregate.json"
+  }
+}

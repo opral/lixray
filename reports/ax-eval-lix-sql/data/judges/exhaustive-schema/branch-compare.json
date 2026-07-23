@@ -1,0 +1,15 @@
+{
+  "round": "exhaustive-schema",
+  "taskId": "branch-compare",
+  "model": "gpt-5.6-sol",
+  "workerId": 1,
+  "durationSec": 12.5,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used the LixRay SQL API to query every non-hidden branch read-only, correctly reported `main` as `main: stable` and `Release candidate` as `release-candidate: awaiting approval`, and made no data changes.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

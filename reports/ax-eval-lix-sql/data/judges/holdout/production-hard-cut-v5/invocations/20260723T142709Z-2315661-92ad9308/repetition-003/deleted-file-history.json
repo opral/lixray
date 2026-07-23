@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__deleted-file-history__20260723T142709Z-2315661-92ad9308__repetition-003",
+  "invocationId": "20260723T142709Z-2315661-92ad9308",
+  "repetition": 3,
+  "repetitions": 3,
+  "kind": "holdout",
+  "round": "production-hard-cut-v5",
+  "taskId": "deleted-file-history",
+  "fixtureProfile": "holdout",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 22.8,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": false,
+    "reason": "The LixRay SQL queries successfully recovered the stable ID from history without using the active lix_file table, and the identity query returned the correct three rows in newest-to-oldest order. However, the final answer omitted the required `/notes/deleted.md` path from both retained content states, so it did not fully return the fixture-specified states.",
+    "failure_mode": "incomplete_answer"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/holdout/production-hard-cut-v5/invocations/20260723T142709Z-2315661-92ad9308/repetition-003/deleted-file-history.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/holdout/production-hard-cut-v5/invocations/20260723T142709Z-2315661-92ad9308/repetition-003/deleted-file-history.json"
+  }
+}

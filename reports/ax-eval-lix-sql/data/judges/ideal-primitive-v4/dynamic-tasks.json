@@ -1,0 +1,18 @@
+{
+  "kind": "scored",
+  "round": "ideal-primitive-v4",
+  "taskId": "dynamic-tasks",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 8.4,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent discovered the dynamic acme_task entity via lix_registered_schema, queried high-priority tasks with done = false, ordered them by due date, and returned exactly the two required tasks in the correct order with title, owner, and due date.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

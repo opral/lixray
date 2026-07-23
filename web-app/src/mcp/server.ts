@@ -7,7 +7,13 @@ import {
 	type ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { FileServiceError, LixFileService } from "./file-service.ts";
+import {
+	FileServiceError,
+	LixFileService,
+	type ExecuteResponse,
+	type ExecuteScriptResponse,
+	type WireValue,
+} from "./file-service.ts";
 import { EXECUTE_TOOL_DESCRIPTION } from "./execute-schema.ts";
 import {
 	mcpSurfaceVersion,
@@ -65,19 +71,64 @@ const workspaceRef = z
 // branch. Keep the MCP contract as broad as the Lix client contract.
 const branchId = z.string().min(1).describe("Lix branch ID");
 const executeSqlText = z.string().trim().min(1);
-const wireValue = z.discriminatedUnion("kind", [
-	z.object({ kind: z.literal("null"), value: z.null().optional() }).strict(),
-	z.object({ kind: z.literal("bool"), value: z.boolean() }).strict(),
-	z.object({ kind: z.literal("int"), value: z.number().int().safe() }).strict(),
-	z.object({ kind: z.literal("float"), value: z.number().finite() }).strict(),
-	z.object({ kind: z.literal("text"), value: z.string() }).strict(),
-	z.object({ kind: z.literal("blob"), base64: z.string() }).strict(),
-	z.object({ kind: z.literal("json"), value: z.unknown() }).strict(),
+const CANONICAL_BASE64_PATTERN =
+	/^$|^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$/;
+const blobWireValue = z
+	.object({
+		kind: z.literal("blob"),
+		base64: z
+			.base64("BLOB payload must use standard base64.")
+			.regex(
+				CANONICAL_BASE64_PATTERN,
+				"BLOB payload must use canonical standard base64.",
+			),
+	})
+	.strict();
+const jsonWireValue = z
+	.object({ kind: z.literal("json"), value: z.unknown() })
+	.strict();
+const primitiveParamNumber = z
+	.number()
+	.finite()
+	.min(
+		Number.MIN_SAFE_INTEGER,
+		"Native numeric parameters must be within the safe-integer magnitude.",
+	)
+	.max(
+		Number.MAX_SAFE_INTEGER,
+		"Native numeric parameters must be within the safe-integer magnitude.",
+	);
+const floatParamValue = z
+	.object({ kind: z.literal("float"), value: z.number().finite() })
+	.strict()
+	.describe(
+		"Explicit SQL REAL parameter. Use when an integral value must remain REAL or a finite REAL exceeds the native numeric range.",
+	);
+const executeParam = z
+	.union([
+		z.null(),
+		z.boolean(),
+		primitiveParamNumber,
+		z.string(),
+		blobWireValue,
+		jsonWireValue,
+		floatParamValue,
+	])
+	.describe(
+		"Use JSON null, Boolean, safe-magnitude number, or string directly. Use tagged values only for BLOB, SQL JSON, or the explicit REAL escape.",
+	);
+const executeResultCell = z.union([
+	z.null(),
+	z.boolean(),
+	z.number().finite(),
+	z.string(),
+	blobWireValue,
+	jsonWireValue,
 ]);
 const executeStatement = z
 	.object({
 		sql: executeSqlText,
-		params: z.array(wireValue).max(1000).optional().default([]),
+		params: z.array(executeParam).max(1000).optional().default([]),
 	})
 	.strict();
 const workspaceSummaryOutput = z
@@ -112,7 +163,7 @@ const activeBranchOutput = z.union([
 const executeStatementOutput = z
 	.object({
 		columns: z.array(z.string()),
-		rows: z.array(z.array(wireValue)),
+		rows: z.array(z.array(executeResultCell)),
 		rowsAffected: z.number().int().nonnegative(),
 		notices: z.array(z.unknown()),
 	})
@@ -363,6 +414,7 @@ export function mcpDocumentationResponse(
 			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
 			"The server exposes list_workspaces, active_branch_id, switch_branch, and raw Lix SQL execute. SQL and branch controls use the workspace's active Lix branch, matching the Lix client. Use active_branch_id to inspect it, switch_branch to change it, and SQL against lix_branch to discover branches. Execute accepts an ordered batch of statements with $n or ? parameters. Lix executes the batch atomically and returns one ordered result per statement.",
+			"Execute parameters and ordinary NULL, Boolean, numeric, and text result cells use native JSON values. BLOB and SQL JSON values retain explicit tagged wrappers; an explicit float wrapper preserves integral or large SQL REAL parameters. Result rows are positional against their columns array.",
 		].join("\n"),
 		{
 			headers: {
@@ -479,18 +531,74 @@ function buildTools(
 					statements: z.array(executeStatement).min(1).max(100),
 				})
 				.strict(),
-			writeAnnotations(false, false),
+			writeAnnotations(true, false),
 			async ({ workspace_ref, statements }) =>
-				service.executeSql(
-					String(workspace_ref),
-					statements.map((statement) => ({
-						sql: statement.sql,
-						params: statement.params,
-					})),
+				toPrimitiveExecuteResults(
+					await service.executeSql(
+						String(workspace_ref),
+						statements.map((statement) => ({
+							sql: statement.sql,
+							params: statement.params.map(toTaggedParam),
+						})),
+					),
 				),
 			executeOutput,
 		),
 	];
+}
+
+type ExecuteParam = z.output<typeof executeParam>;
+type PrimitiveWireValue =
+	| null
+	| boolean
+	| number
+	| string
+	| Extract<WireValue, { kind: "blob" }>
+	| Extract<WireValue, { kind: "json" }>;
+type PrimitiveExecuteResponse = Omit<ExecuteResponse, "rows"> & {
+	rows: Array<Array<PrimitiveWireValue>>;
+};
+
+function toTaggedParam(value: ExecuteParam): WireValue {
+	if (value === null) return { kind: "null", value: null };
+	switch (typeof value) {
+		case "boolean":
+			return { kind: "bool", value };
+		case "number":
+			return Number.isSafeInteger(value)
+				? { kind: "int", value }
+				: { kind: "float", value };
+		case "string":
+			return { kind: "text", value };
+		default:
+			return value;
+	}
+}
+
+function toPrimitiveCell(value: WireValue): PrimitiveWireValue {
+	switch (value.kind) {
+		case "null":
+			return null;
+		case "bool":
+		case "int":
+		case "float":
+		case "text":
+			return value.value;
+		case "blob":
+		case "json":
+			return value;
+	}
+}
+
+function toPrimitiveExecuteResults(response: ExecuteScriptResponse): {
+	results: Array<PrimitiveExecuteResponse>;
+} {
+	return {
+		results: response.results.map((result) => ({
+			...result,
+			rows: result.rows.map((row) => row.map(toPrimitiveCell)),
+		})),
+	};
 }
 
 function createTool<T extends z.ZodType<Record<string, unknown>>>(

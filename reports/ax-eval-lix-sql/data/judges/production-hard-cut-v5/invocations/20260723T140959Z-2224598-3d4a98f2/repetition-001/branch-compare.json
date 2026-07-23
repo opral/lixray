@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__branch-compare__20260723T140959Z-2224598-3d4a98f2__repetition-001",
+  "invocationId": "20260723T140959Z-2224598-3d4a98f2",
+  "repetition": 1,
+  "repetitions": 10,
+  "kind": "scored",
+  "round": "production-hard-cut-v5",
+  "taskId": "branch-compare",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 12.6,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used the LixRay SQL API to query every non-hidden branch in one read-only SELECT. Results correctly tied `Release candidate` to `release-candidate: awaiting approval` and `main` to `main: stable`, and the final answer reported both. No SQL data was mutated.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-001/branch-compare.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-001/branch-compare.json"
+  }
+}

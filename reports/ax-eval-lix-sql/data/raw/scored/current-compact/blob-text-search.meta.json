@@ -1,0 +1,19 @@
+{
+  "runId": "current-compact__blob-text-search",
+  "kind": "scored",
+  "round": "current-compact",
+  "descriptionRevision": "a97ae97",
+  "taskId": "blob-text-search",
+  "prompt": "Find every Markdown file containing TODO and return its path plus the matching TODO line, using the LixRay SQL API",
+  "expectation": "The answer must return only /README.md with 'TODO: invite final review.' and /docs/api.md with 'TODO: add auth example.', backed by successful SQL that handles file BLOB data as text.",
+  "model": "gpt-5.6-sol",
+  "modelReasoningEffort": "medium",
+  "lixSdkEntry": "/tmp/lixray-lix-8649/packages/js-sdk/dist/index.js",
+  "nativeBatch": true,
+  "workerId": 3,
+  "startedAt": "2026-07-22T23:01:35.406Z",
+  "completedAt": "2026-07-22T23:02:02.203Z",
+  "durationSec": 26.8,
+  "exitCode": 0,
+  "timedOut": false
+}

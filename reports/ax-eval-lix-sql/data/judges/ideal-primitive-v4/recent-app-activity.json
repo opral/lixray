@@ -1,0 +1,18 @@
+{
+  "kind": "scored",
+  "round": "ideal-primitive-v4",
+  "taskId": "recent-app-activity",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 11.2,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent successfully queried lix_change through the LixRay SQL API, filtered out schema keys beginning with lix_, ordered changes by descending created_at, limited the result to five rows, and presented all five with timestamp, schema, and entity identity.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

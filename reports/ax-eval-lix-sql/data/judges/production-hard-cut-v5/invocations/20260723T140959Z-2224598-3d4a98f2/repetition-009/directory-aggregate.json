@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__directory-aggregate__20260723T140959Z-2224598-3d4a98f2__repetition-009",
+  "invocationId": "20260723T140959Z-2224598-3d4a98f2",
+  "repetition": 9,
+  "repetitions": 10,
+  "kind": "scored",
+  "round": "production-hard-cut-v5",
+  "taskId": "directory-aggregate",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 11.1,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used the LixRay SQL API and correctly reported all top-level directories with recursive file counts: /data/ = 1, /docs/ = 3, and /notes/ = 1. The nested /docs/archive/ directory was not listed separately, and its file was included in /docs/.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-009/directory-aggregate.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T140959Z-2224598-3d4a98f2/repetition-009/directory-aggregate.json"
+  }
+}

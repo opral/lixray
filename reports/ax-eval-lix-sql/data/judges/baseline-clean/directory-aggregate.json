@@ -1,0 +1,15 @@
+{
+  "round": "baseline-clean",
+  "taskId": "directory-aggregate",
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 10.3,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used the LixRay SQL API, selected only top-level directories with `d.parent_id IS NULL`, recursively matched files by directory-path prefix, and correctly reported `/data/` = 1, `/docs/` = 3, and `/notes/` = 1. The nested `/docs/archive/` was included under `/docs/` and not reported separately.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

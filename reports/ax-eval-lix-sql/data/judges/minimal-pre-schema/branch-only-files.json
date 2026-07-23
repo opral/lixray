@@ -1,0 +1,15 @@
+{
+  "round": "minimal-pre-schema",
+  "taskId": "branch-only-files",
+  "model": "gpt-5.6-sol",
+  "workerId": 2,
+  "durationSec": 9.8,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used the LixRay SQL API to perform a read-only cross-branch EXCEPT query on lix_file_by_branch. It returned only /release-checklist.md, which the final answer reported exactly. No switch_branch call or data mutation occurred; the earlier failed schema query was harmless and recovered.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n"
+}

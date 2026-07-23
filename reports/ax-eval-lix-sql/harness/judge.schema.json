@@ -1,0 +1,21 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["success", "reason", "failure_mode"],
+	"properties": {
+		"success": { "type": "boolean" },
+		"reason": { "type": "string" },
+		"failure_mode": {
+			"type": "string",
+			"enum": [
+				"none",
+				"wrong_answer",
+				"incomplete_answer",
+				"unsupported_claim",
+				"tool_failure",
+				"constraint_violation"
+			]
+		}
+	}
+}

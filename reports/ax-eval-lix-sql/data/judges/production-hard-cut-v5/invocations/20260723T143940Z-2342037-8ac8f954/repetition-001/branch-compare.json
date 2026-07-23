@@ -1,0 +1,26 @@
+{
+  "runId": "production-hard-cut-v5__branch-compare__20260723T143940Z-2342037-8ac8f954__repetition-001",
+  "invocationId": "20260723T143940Z-2342037-8ac8f954",
+  "repetition": 1,
+  "repetitions": 1,
+  "kind": "scored",
+  "round": "production-hard-cut-v5",
+  "taskId": "branch-compare",
+  "fixtureProfile": "default",
+  "expectedError": false,
+  "model": "gpt-5.6-sol",
+  "workerId": 3,
+  "durationSec": 11.9,
+  "exitCode": 0,
+  "timedOut": false,
+  "verdict": {
+    "success": true,
+    "reason": "The agent used the LixRay SQL API with read-only SELECT statements, identified both visible branches, and correctly reported `main` as `main: stable` and `Release candidate` as `release-candidate: awaiting approval`. The log shows no SQL mutations or other data changes.",
+    "failure_mode": "none"
+  },
+  "stderr": "Reading additional input from stdin...\n",
+  "sourceLog": "data/raw/scored/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/branch-compare.jsonl",
+  "artifactPaths": {
+    "judgment": "data/judges/production-hard-cut-v5/invocations/20260723T143940Z-2342037-8ac8f954/repetition-001/branch-compare.json"
+  }
+}

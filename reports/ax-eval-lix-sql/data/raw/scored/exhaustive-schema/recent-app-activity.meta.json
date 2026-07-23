@@ -1,0 +1,19 @@
+{
+  "runId": "exhaustive-schema__recent-app-activity",
+  "kind": "scored",
+  "round": "exhaustive-schema",
+  "descriptionRevision": "8bf41c0",
+  "taskId": "recent-app-activity",
+  "prompt": "Show the five most recent application-level changes, excluding Lix internal bookkeeping, with timestamp, schema, and entity identity, using the LixRay SQL API",
+  "expectation": "The answer must be based on a successful lix_change query, return five rows with timestamp/schema/entity identity, and exclude schema keys beginning lix_. Exact row order may tie because the fixture is seeded quickly.",
+  "model": "gpt-5.6-sol",
+  "modelReasoningEffort": "medium",
+  "lixSdkEntry": "/tmp/lixray-lix-8649/packages/js-sdk/dist/index.js",
+  "nativeBatch": true,
+  "workerId": 2,
+  "startedAt": "2026-07-22T23:00:08.491Z",
+  "completedAt": "2026-07-22T23:00:41.507Z",
+  "durationSec": 33,
+  "exitCode": 0,
+  "timedOut": false
+}
