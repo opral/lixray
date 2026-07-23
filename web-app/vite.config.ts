@@ -86,6 +86,13 @@ export default defineConfig(({ command }) => ({
 		fs: { allow: [repositoryRoot] },
 	},
 	optimizeDeps: {
+		// Atelier is linked source and first reached through a lazy workspace
+		// route. Pre-bundle its DnD runtime before that route loads so Vite does
+		// not invalidate the page with an "Outdated Optimize Dep" reload.
+		include:
+			command === "serve"
+				? ["@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities"]
+				: [],
 		// The Lix worker is lazy-loaded after workspace navigation. Keep its
 		// ESM shims out of the optimizer so first use cannot reload the page.
 		exclude:
