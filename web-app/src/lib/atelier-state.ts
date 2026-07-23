@@ -1,6 +1,9 @@
 import {
 	coerceAtelierSessionUiState,
 	coerceAtelierUserPreferences,
+	createLixPreferencesStore,
+	createLixSessionStateStore,
+	type AtelierClientState,
 	type AtelierBranchSession,
 	type AtelierPreferencesStore,
 	type AtelierReviewStatusStore,
@@ -19,10 +22,14 @@ const REVIEW_STATE_VERSION = 1;
 export function createWorkspaceSessionStateStore(args: {
 	readonly userId: string;
 	readonly workspaceId: string;
+	readonly clientState?: AtelierClientState;
 	readonly storage?: Storage;
 }): AtelierSessionStateStore {
-	const storage = args.storage ?? window.localStorage;
+	if (args.clientState) {
+		return createLixSessionStateStore(args.clientState);
+	}
 	const key = namespacedAtelierStateKey("shell", SESSION_STATE_VERSION, args);
+	const storage = args.storage ?? window.localStorage;
 	const value = readStoredJson(storage, key);
 	let snapshot: AtelierSessionUiState | null = value
 		? coerceAtelierSessionUiState(value)
@@ -123,8 +130,12 @@ export function createWorkspacePreferencesStore(args: {
 	readonly client: LixraySupabaseClient | null;
 	readonly userId: string;
 	readonly workspaceId: string;
+	readonly clientState?: AtelierClientState;
 	readonly storage?: Storage;
 }): AtelierPreferencesStore {
+	if (args.clientState) {
+		return createLixPreferencesStore(args.clientState);
+	}
 	const client = args.client;
 	if (!client) {
 		const storage = args.storage ?? window.sessionStorage;

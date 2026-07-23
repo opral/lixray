@@ -53,7 +53,7 @@ export interface WorkspaceSummary {
 
 export interface LixRuntimeClient {
 	listWorkspaces(): Promise<Array<WorkspaceSummary>>;
-	/** Mirrors `lix.activeBranchId()`. The remote active branch is workspace state. */
+	/** Mirrors `lix.activeBranchId()`. The remote active branch is session-local. */
 	activeBranchId(workspaceId: string): Promise<string>;
 	/** Mirrors `lix.switchBranch({ branchId })`. */
 	switchBranch(

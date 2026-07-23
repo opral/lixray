@@ -5,7 +5,7 @@ import {
 	type Lix,
 	type SqlParam,
 	Value,
-} from "@lix-js/sdk/remote";
+} from "@lix-js/sdk";
 import {
 	type ExecuteBatchRequest,
 	type ExecuteRequest,

@@ -3,7 +3,7 @@ import {
 	type ExecuteResult as LixExecuteResult,
 	type Lix,
 	type SqlParam,
-} from "@lix-js/sdk/remote";
+} from "@lix-js/sdk";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useWorkspace } from "~/components/workspace-provider";

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	ATELIER_SESSION_UI_STATE_KEY,
+	ATELIER_USER_PREFERENCES_KEY,
+	type AtelierClientState,
+} from "@opral/atelier/state-adapters";
+import {
 	createWorkspaceBranchSession,
 	createWorkspacePreferencesStore,
 	createWorkspaceReviewStatusStore,
@@ -77,6 +82,96 @@ void test("shell state is shared across new tabs and isolated by account and wor
 		}).getSnapshot(),
 		null,
 		"another workspace cannot inherit the previous workspace's state",
+	);
+});
+
+void test("Atelier shell and layout state use the client Lix without remote or browser fallback writes", async () => {
+	const values = new Map<string, unknown>();
+	const listeners = new Set<() => void>();
+	const clientState: AtelierClientState = {
+		get: (key) => values.get(key) as never,
+		set: async (key, value) => {
+			values.set(key, value);
+			for (const listener of listeners) listener();
+		},
+		subscribe: (listener) => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+	};
+	const fallbackStorage = new MemoryStorage();
+	const rejectingRemote = {
+		from: () => {
+			throw new Error("Atelier UI state must not reach Supabase");
+		},
+	} as unknown as LixraySupabaseClient;
+	const shell = createWorkspaceSessionStateStore({
+		userId: USER,
+		workspaceId: WORKSPACE,
+		clientState,
+		storage: fallbackStorage,
+	});
+	const preferences = createWorkspacePreferencesStore({
+		client: rejectingRemote,
+		userId: USER,
+		workspaceId: WORKSPACE,
+		clientState,
+		storage: fallbackStorage,
+	});
+	const shellState = {
+		focusedPanel: "right" as const,
+		panels: {
+			left: { views: [], activeInstance: null },
+			central: { views: [], activeInstance: null },
+			right: {
+				views: [{ instance: "files-client", kind: "atelier_files" }],
+				activeInstance: "files-client",
+			},
+		},
+	};
+
+	shell.setSnapshot(shellState);
+	await preferences.save({
+		version: 1,
+		layout: { sizes: { left: 10, central: 65, right: 25 } },
+	});
+
+	assert.deepEqual(values.get(ATELIER_SESSION_UI_STATE_KEY), shellState);
+	assert.deepEqual(values.get(ATELIER_USER_PREFERENCES_KEY), {
+		version: 1,
+		layout: { sizes: { left: 10, central: 65, right: 25 } },
+	});
+	assert.equal(fallbackStorage.length, 0);
+	assert.deepEqual(
+		createWorkspaceSessionStateStore({
+			userId: USER,
+			workspaceId: WORKSPACE,
+			clientState,
+		}).getSnapshot(),
+		shellState,
+		"a second consumer of this client Lix can restore shell state",
+	);
+	assert.deepEqual(
+		await createWorkspacePreferencesStore({
+			client: rejectingRemote,
+			userId: USER,
+			workspaceId: WORKSPACE,
+			clientState,
+		}).load(),
+		{
+			version: 1,
+			layout: { sizes: { left: 10, central: 65, right: 25 } },
+		},
+		"a second consumer of this client Lix can restore layout state",
+	);
+	assert.equal(
+		createWorkspaceSessionStateStore({
+			userId: OTHER_USER,
+			workspaceId: WORKSPACE,
+			clientState: memoryClientState(),
+		}).getSnapshot(),
+		null,
+		"another client-state namespace does not inherit this UI state",
 	);
 });
 
@@ -288,7 +383,7 @@ void test("failed remote review persistence survives tab loss and retries idempo
 	);
 });
 
-void test("workspace sessions use unified remote Lix with shared branch state and one observation stream", async (t) => {
+void test("workspace sessions use unified remote Lix with session-local branch state and rebound observations", async (t) => {
 	const executeBranches: string[] = [];
 	const createBodies: unknown[] = [];
 	const requestPaths: string[] = [];
@@ -417,9 +512,14 @@ void test("workspace sessions use unified remote Lix with shared branch state an
 	assert.equal(await session.createBranch("Created"), CREATED);
 	assert.equal(session.activeBranchSnapshot(), CREATED);
 	assert.equal((await events.next())?.result.rows[0]?.get("branch"), CREATED);
+	await waitFor(() => observeOpenCount === 3);
 	assert.deepEqual(executeBranches, [MAIN, DRAFT]);
 	assert.deepEqual(createBodies, [{ name: "Created" }]);
-	assert.equal(observeOpenCount, 1);
+	assert.equal(
+		observeOpenCount,
+		3,
+		"the initial observation is rebound after each successful branch switch",
+	);
 	assert.equal(requestPaths[0], "/@acme/launch-q3/lix/v1/");
 	assert.ok(requestPaths.includes("/@acme/launch-q3/lix/v1/observe/multiplex"));
 });
@@ -504,4 +604,23 @@ class MemoryStorage implements Storage {
 	setItem(key: string, value: string): void {
 		this.#values.set(key, value);
 	}
+}
+
+function memoryClientState(): AtelierClientState {
+	const values = new Map<string, never>();
+	return {
+		get: (key) => values.get(key),
+		set: async (key, value) => {
+			values.set(key, value as never);
+		},
+		subscribe: () => () => undefined,
+	};
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+	for (let attempt = 0; attempt < 100; attempt += 1) {
+		if (predicate()) return;
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+	}
+	assert.fail("Timed out waiting for asynchronous session state");
 }
