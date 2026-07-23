@@ -33,8 +33,8 @@ export function PostHogAnalytics() {
 		void initializeTelemetry().then((posthog) => {
 			if (!posthog || disposed) return;
 			if (!user || !activeWorkspace) {
-				posthog.unregister("organization_id");
-				posthog.unregister("workspace_id");
+				posthog.unregister("namespace_id");
+				posthog.unregister("lix_id");
 				groupedOrganizationId = null;
 				groupedWorkspaceId = null;
 				return;
@@ -44,19 +44,19 @@ export function PostHogAnalytics() {
 			const workspaceId = activeWorkspace.workspace.id;
 			if (groupedOrganizationId !== organizationId) {
 				posthog.group("organization", organizationId, {
-					organization_id: organizationId,
+					namespace_id: organizationId,
 				});
 				groupedOrganizationId = organizationId;
 			}
 			if (groupedWorkspaceId !== workspaceId) {
 				posthog.group("workspace", workspaceId, {
-					workspace_id: workspaceId,
+					lix_id: workspaceId,
 				});
 				groupedWorkspaceId = workspaceId;
 			}
 			posthog.register({
-				organization_id: organizationId,
-				workspace_id: workspaceId,
+				namespace_id: organizationId,
+				lix_id: workspaceId,
 			});
 		});
 		return () => {

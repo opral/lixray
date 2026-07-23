@@ -50,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 function DemoAuthProvider({ children }: { children: ReactNode }) {
-	const beginPreviewSignIn = useCallback((returnTo = "/home") => {
+	const beginPreviewSignIn = useCallback((returnTo = "/open") => {
 		const safeReturnTo = normalizeAuthReturnTo(returnTo);
 		window.location.assign(
 			`/sign-in?returnTo=${encodeURIComponent(safeReturnTo)}`,
@@ -116,7 +116,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 	}, [client]);
 
 	const signInWithGoogle = useCallback(
-		async (returnTo = "/home") => {
+		async (returnTo = "/open") => {
 			if (!client) throw new Error("Authentication is still loading");
 			const safeReturnTo = normalizeAuthReturnTo(returnTo);
 			window.sessionStorage.setItem(RETURN_TO_KEY, safeReturnTo);
@@ -189,7 +189,7 @@ export function useAuth() {
 }
 
 export function takeAuthReturnTo(): string {
-	const returnTo = window.sessionStorage.getItem(RETURN_TO_KEY) ?? "/home";
+	const returnTo = window.sessionStorage.getItem(RETURN_TO_KEY) ?? "/open";
 	window.sessionStorage.removeItem(RETURN_TO_KEY);
 	return normalizeAuthReturnTo(returnTo);
 }

@@ -1,6 +1,9 @@
 import {
 	coerceAtelierSessionUiState,
 	coerceAtelierUserPreferences,
+	createLixPreferencesStore,
+	createLixSessionStateStore,
+	type AtelierClientState,
 	type AtelierBranchSession,
 	type AtelierPreferencesStore,
 	type AtelierReviewStatusStore,
@@ -19,14 +22,35 @@ const REVIEW_STATE_VERSION = 1;
 export function createWorkspaceSessionStateStore(args: {
 	readonly userId: string;
 	readonly workspaceId: string;
+	readonly clientState?: AtelierClientState;
 	readonly storage?: Storage;
+	/**
+	 * Adjusts the snapshot once at store creation, receiving the persisted
+	 * state (null on a first visit) — e.g. the empty-workspace
+	 * getting-started seed. The result is not persisted until the shell's
+	 * first own write.
+	 */
+	readonly initializeSnapshot?: (
+		persisted: AtelierSessionUiState | null,
+	) => AtelierSessionUiState | null;
 }): AtelierSessionStateStore {
-	const storage = args.storage ?? window.localStorage;
+	if (args.clientState) {
+		const store = createLixSessionStateStore(args.clientState);
+		if (args.initializeSnapshot) {
+			const initialized = args.initializeSnapshot(store.getSnapshot());
+			if (initialized) store.setSnapshot(initialized);
+		}
+		return store;
+	}
 	const key = namespacedAtelierStateKey("shell", SESSION_STATE_VERSION, args);
+	const storage = args.storage ?? window.localStorage;
 	const value = readStoredJson(storage, key);
-	let snapshot: AtelierSessionUiState | null = value
+	const persisted: AtelierSessionUiState | null = value
 		? coerceAtelierSessionUiState(value)
 		: null;
+	let snapshot: AtelierSessionUiState | null = args.initializeSnapshot
+		? args.initializeSnapshot(persisted)
+		: persisted;
 	const listeners = new Set<() => void>();
 	return {
 		getSnapshot: () => snapshot,
@@ -123,8 +147,12 @@ export function createWorkspacePreferencesStore(args: {
 	readonly client: LixraySupabaseClient | null;
 	readonly userId: string;
 	readonly workspaceId: string;
+	readonly clientState?: AtelierClientState;
 	readonly storage?: Storage;
 }): AtelierPreferencesStore {
+	if (args.clientState) {
+		return createLixPreferencesStore(args.clientState);
+	}
 	const client = args.client;
 	if (!client) {
 		const storage = args.storage ?? window.sessionStorage;
@@ -152,10 +180,10 @@ export function createWorkspacePreferencesStore(args: {
 	return {
 		load: async () => {
 			const { data, error } = await client
-				.from("user_workspace_preferences")
+				.from("user_lix_preferences")
 				.select("atelier_layout")
 				.eq("user_id", args.userId)
-				.eq("workspace_id", args.workspaceId)
+				.eq("lix_id", args.workspaceId)
 				.maybeSingle();
 			if (error) throw error;
 			return data?.atelier_layout
@@ -164,14 +192,14 @@ export function createWorkspacePreferencesStore(args: {
 		},
 		save: async (value: AtelierUserPreferencesV1) => {
 			const preferences = coerceAtelierUserPreferences(value);
-			const { error } = await client.from("user_workspace_preferences").upsert(
+			const { error } = await client.from("user_lix_preferences").upsert(
 				{
 					user_id: args.userId,
-					workspace_id: args.workspaceId,
+					lix_id: args.workspaceId,
 					atelier_layout: preferences,
 					updated_at: new Date().toISOString(),
 				},
-				{ onConflict: "user_id,workspace_id" },
+				{ onConflict: "user_id,lix_id" },
 			);
 			if (error) throw error;
 		},
@@ -198,22 +226,20 @@ export function createWorkspaceReviewStatusStore(args: {
 			.map((review) => review.reviewId);
 	const persistRemote = async (review: AtelierReviewResolution) => {
 		if (!client) return;
-		const { error } = await client
-			.from("user_workspace_review_resolutions")
-			.upsert(
-				{
-					user_id: args.userId,
-					workspace_id: args.workspaceId,
-					branch_id: review.branchId,
-					review_id: review.reviewId,
-					file_id: review.fileId,
-					outcome: review.outcome,
-					resolved_at: new Date().toISOString(),
-				},
-				{
-					onConflict: "user_id,workspace_id,branch_id,review_id,file_id",
-				},
-			);
+		const { error } = await client.from("user_lix_review_resolutions").upsert(
+			{
+				user_id: args.userId,
+				lix_id: args.workspaceId,
+				branch_id: review.branchId,
+				review_id: review.reviewId,
+				file_id: review.fileId,
+				outcome: review.outcome,
+				resolved_at: new Date().toISOString(),
+			},
+			{
+				onConflict: "user_id,lix_id,branch_id,review_id,file_id",
+			},
+		);
 		if (error) throw error;
 	};
 	const flushPending = async () => {
@@ -246,10 +272,10 @@ export function createWorkspaceReviewStatusStore(args: {
 			const localIds = localReviewIds(branchId);
 			if (!client) return [...new Set(localIds)];
 			const { data, error } = await client
-				.from("user_workspace_review_resolutions")
+				.from("user_lix_review_resolutions")
 				.select("review_id")
 				.eq("user_id", args.userId)
-				.eq("workspace_id", args.workspaceId)
+				.eq("lix_id", args.workspaceId)
 				.eq("branch_id", branchId);
 			if (error) {
 				if (localIds.length > 0) return [...new Set(localIds)];

@@ -5,9 +5,9 @@ interface ExecuteSqlCoreTable {
 }
 
 /**
- * The stable, agent-facing part of a Lix workspace schema.
+ * The stable, agent-facing part of a Lix lix schema.
  *
- * Entity tables deliberately do not appear here: a workspace can register its
+ * Entity tables deliberately do not appear here: a lix can register its
  * own entity schemas, so their names and columns must be discovered at runtime.
  */
 export const EXECUTE_SQL_CORE_TABLES: ReadonlyArray<ExecuteSqlCoreTable> = [
@@ -23,7 +23,7 @@ export const EXECUTE_SQL_CORE_TABLES: ReadonlyArray<ExecuteSqlCoreTable> = [
 	},
 	{
 		name: "lix_branch",
-		purpose: "Workspace branches and their current commits.",
+		purpose: "Lix branches and their current commits.",
 		columns: ["id", "name", "hidden", "commit_id"],
 	},
 	{
@@ -58,7 +58,7 @@ WHERE table_schema = 'public'
   AND table_name = $1
 ORDER BY ordinal_position;`;
 
-export const EXECUTE_TOOL_DESCRIPTION = `Execute an ordered batch of caller-provided Lix SQL statements atomically against the workspace's active Lix branch. To change branches, call switch_branch first. Each statement has its own parameters and produces one ordered result; if any statement fails, the complete batch rolls back. SQL can read or mutate any SQL-accessible branch data. Lix SQL does not support DDL statements.
+export const EXECUTE_TOOL_DESCRIPTION = `Execute an ordered batch of caller-provided Lix SQL statements atomically against the lix's active Lix branch. To change branches, call switch_branch first. Each statement has its own parameters and produces one ordered result; if any statement fails, the complete batch rolls back. SQL can read or mutate any SQL-accessible branch data. Lix SQL does not support DDL statements.
 
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}
@@ -67,7 +67,7 @@ Path rules: \`lix_file.path\` never ends in \`/\`; \`lix_directory.path\` always
 
 Use the core tables above, plus their \`_by_branch\` / \`_history\` companions, directly; do not inspect \`information_schema\` for them.
 
-Entity tables are workspace-dynamic: do not assume a fixed entity-table list or column shape. Only when a task needs an entity table, discover its table name, then inspect only that table:
+Entity tables are lix-dynamic: do not assume a fixed entity-table list or column shape. Only when a task needs an entity table, discover its table name, then inspect only that table:
 
 \`\`\`sql
 ${EXECUTE_SQL_TABLES_QUERY}

@@ -54,23 +54,19 @@ try {
 	await client.connect(transport);
 	const { tools } = await client.listTools();
 	assert.ok(
-		tools.some((tool) => tool.name === "list_workspaces"),
-		"tools/list did not include list_workspaces",
+		tools.some((tool) => tool.name === "list_lixes"),
+		"tools/list did not include list_lixes",
 	);
 	const result = await client.callTool({
-		name: "list_workspaces",
+		name: "list_lixes",
 		arguments: {},
 	});
-	assert.notEqual(
-		result.isError,
-		true,
-		"list_workspaces returned an MCP error",
-	);
-	const workspaceCount = Array.isArray(result.structuredContent?.workspaces)
-		? result.structuredContent.workspaces.length
+	assert.notEqual(result.isError, true, "list_lixes returned an MCP error");
+	const lixCount = Array.isArray(result.structuredContent?.lixes)
+		? result.structuredContent.lixes.length
 		: undefined;
 	process.stdout.write(
-		`${JSON.stringify({ ok: true, server: mcpUrl.origin, toolCount: tools.length, workspaceCount }, null, 2)}\n`,
+		`${JSON.stringify({ ok: true, server: mcpUrl.origin, toolCount: tools.length, lixCount }, null, 2)}\n`,
 	);
 } finally {
 	await client.close();

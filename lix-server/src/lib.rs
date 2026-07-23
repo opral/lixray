@@ -4,4 +4,4 @@ mod store;
 
 pub use config::Config;
 pub use routes::router;
-pub use store::WorkspaceRuntimeManager;
+pub use store::LixRuntimeManager;

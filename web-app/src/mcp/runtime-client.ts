@@ -5,7 +5,7 @@ import {
 	type Lix,
 	type SqlParam,
 	Value,
-} from "@lix-js/sdk/remote";
+} from "@lix-js/sdk";
 import {
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
@@ -14,7 +14,7 @@ import {
 	FileServiceError,
 	type FileServiceErrorCode,
 	type LixRuntimeClient,
-	type WorkspaceSummary,
+	type LixSummary,
 } from "./file-service.ts";
 import {
 	containerErrorDetails,
@@ -50,8 +50,8 @@ export interface WorkerLixRuntimeEnv {
 	POSTHOG_ENVIRONMENT?: string;
 }
 
-type AuthorizeWorkspace = (
-	workspaceId: string,
+type AuthorizeLix = (
+	lixId: string,
 	user: McpUser,
 	env: WorkerLixRuntimeEnv,
 ) => Promise<Response | null>;
@@ -61,11 +61,11 @@ interface WorkerLixRuntimeClientOptions {
 	retryDelay?: ContainerRetryDelay;
 	retryRandom?: () => number;
 	signal?: AbortSignal;
-	workspaceFetch?: (workspaceId: string, request: Request) => Promise<Response>;
-	workspaceSummaries?: ReadonlyArray<WorkspaceSummary>;
+	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
+	lixSummaries?: ReadonlyArray<LixSummary>;
 }
 
-interface WorkspaceLixSession {
+interface LixSession {
 	lix: Lix;
 	queue: Promise<void>;
 }
@@ -73,43 +73,41 @@ interface WorkspaceLixSession {
 export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	private readonly env: WorkerLixRuntimeEnv;
 	private readonly user: McpUser;
-	private readonly authorizeWorkspace: AuthorizeWorkspace;
+	private readonly authorizeLix: AuthorizeLix;
 	private readonly fetcher: typeof fetch;
 	private readonly retryDelay: ContainerRetryDelay | undefined;
 	private readonly retryRandom: (() => number) | undefined;
 	private readonly signal: AbortSignal | undefined;
-	private readonly workspaceFetch:
-		| ((workspaceId: string, request: Request) => Promise<Response>)
+	private readonly lixFetch:
+		| ((lixId: string, request: Request) => Promise<Response>)
 		| undefined;
-	private readonly workspaceSummaries:
-		| ReadonlyArray<WorkspaceSummary>
-		| undefined;
-	private readonly sessions = new Map<string, Promise<WorkspaceLixSession>>();
+	private readonly lixSummaries: ReadonlyArray<LixSummary> | undefined;
+	private readonly sessions = new Map<string, Promise<LixSession>>();
 	private closePromise: Promise<void> | undefined;
 	private closed = false;
 
 	constructor(
 		env: WorkerLixRuntimeEnv,
 		user: McpUser,
-		authorizeWorkspace: AuthorizeWorkspace,
+		authorizeLix: AuthorizeLix,
 		options: WorkerLixRuntimeClientOptions = {},
 	) {
 		this.env = env;
 		this.user = user;
-		this.authorizeWorkspace = authorizeWorkspace;
+		this.authorizeLix = authorizeLix;
 		this.fetcher = options.fetcher ?? fetch;
 		this.retryDelay = options.retryDelay;
 		this.retryRandom = options.retryRandom;
 		this.signal = options.signal;
-		this.workspaceFetch = options.workspaceFetch;
-		this.workspaceSummaries = options.workspaceSummaries;
+		this.lixFetch = options.lixFetch;
+		this.lixSummaries = options.lixSummaries;
 	}
 
-	async listWorkspaces(): Promise<Array<WorkspaceSummary>> {
-		if (this.workspaceSummaries) {
-			return this.workspaceSummaries.map((workspace) => ({
-				...workspace,
-				organization: { ...workspace.organization },
+	async listLixes(): Promise<Array<LixSummary>> {
+		if (this.lixSummaries) {
+			return this.lixSummaries.map((lix) => ({
+				...lix,
+				namespace: { ...lix.namespace },
 			}));
 		}
 		const supabaseUrl = requiredEnv(this.env.SUPABASE_URL, "SUPABASE_URL");
@@ -121,72 +119,67 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			apikey: publishableKey,
 			Authorization: `Bearer ${this.user.token}`,
 			Accept: "application/json",
+			"Content-Type": "application/json",
 		};
-		const organizationsUrl = new URL("/rest/v1/organizations", supabaseUrl);
-		organizationsUrl.searchParams.set("select", "id,name,handle");
-		organizationsUrl.searchParams.set("order", "created_at.asc");
-		const workspacesUrl = new URL("/rest/v1/workspaces", supabaseUrl);
-		workspacesUrl.searchParams.set("select", "id,organization_id,name,slug");
-		workspacesUrl.searchParams.set("order", "created_at.asc");
+		const lixesUrl = new URL("/rest/v1/rpc/list_accessible_lixes", supabaseUrl);
 
 		const fetcher = this.fetcher;
-		let organizationsResponse: Response;
-		let workspacesResponse: Response;
+		let lixesResponse: Response;
 		try {
-			[organizationsResponse, workspacesResponse] = await Promise.all([
-				fetcher(organizationsUrl, { headers }),
-				fetcher(workspacesUrl, { headers }),
-			]);
+			lixesResponse = await fetcher(lixesUrl, {
+				method: "POST",
+				headers,
+				body: "{}",
+			});
 		} catch (caught) {
-			console.error("LixRay workspace discovery fetch failed", {
+			console.error("LixRay lix discovery fetch failed", {
 				error: errorDetails(caught),
 			});
 			throw new FileServiceError(
 				"upstream_error",
-				"Workspace discovery is unavailable.",
+				"Lix discovery is unavailable.",
 			);
 		}
-		if (!organizationsResponse.ok || !workspacesResponse.ok) {
+		if (!lixesResponse.ok) {
 			throw new FileServiceError(
 				"upstream_error",
-				"Workspace discovery is unavailable.",
+				"Lix discovery is unavailable.",
 			);
 		}
-		const organizations = asRows(await organizationsResponse.json());
-		const workspaces = asRows(await workspacesResponse.json());
-		const organizationsById = new Map(
-			organizations.flatMap((row) => {
-				const id = stringField(row, "id");
-				const name = stringField(row, "name");
-				const handle = stringField(row, "handle");
-				return id && name && handle ? [[id, { name, handle }] as const] : [];
-			}),
-		);
+		const lixes = asRows(await lixesResponse.json());
 
-		return workspaces.flatMap((row): Array<WorkspaceSummary> => {
-			const id = stringField(row, "id");
-			const name = stringField(row, "name");
-			const slug = stringField(row, "slug");
-			const organizationId = stringField(row, "organization_id");
-			const organization = organizationId
-				? organizationsById.get(organizationId)
-				: undefined;
-			return id && name && slug && organizationId && organization
+		return lixes.flatMap((row): Array<LixSummary> => {
+			const id = stringField(row, "lix_id");
+			const name = stringField(row, "lix_name");
+			const slug = stringField(row, "lix_slug");
+			const namespaceId = stringField(row, "namespace_id");
+			const namespaceName = stringField(row, "namespace_name");
+			const namespaceHandle = stringField(row, "namespace_handle");
+			return id &&
+				name &&
+				slug &&
+				namespaceId &&
+				namespaceName &&
+				namespaceHandle
 				? [
 						{
 							id,
 							name,
 							slug,
-							organization: { id: organizationId, ...organization },
+							namespace: {
+								id: namespaceId,
+								name: namespaceName,
+								handle: namespaceHandle,
+							},
 						},
 					]
 				: [];
 		});
 	}
 
-	async activeBranchId(workspaceId: string): Promise<string> {
+	async activeBranchId(lixId: string): Promise<string> {
 		try {
-			const session = await this.session(workspaceId);
+			const session = await this.session(lixId);
 			return await this.enqueueSession(session, () =>
 				session.lix.activeBranchId(),
 			);
@@ -196,11 +189,11 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	async switchBranch(
-		workspaceId: string,
+		lixId: string,
 		branchId: string,
 	): Promise<{ branchId: string }> {
 		try {
-			const session = await this.session(workspaceId);
+			const session = await this.session(lixId);
 			return await this.enqueueSession(session, () =>
 				session.lix.switchBranch({ branchId }),
 			);
@@ -210,11 +203,11 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	async execute(
-		workspaceId: string,
+		lixId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse> {
 		try {
-			const session = await this.session(workspaceId);
+			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				return encodeExecuteResult(
 					await session.lix.execute(
@@ -230,11 +223,11 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	async executeBatch(
-		workspaceId: string,
+		lixId: string,
 		request: ExecuteBatchRequest,
 	): Promise<ExecuteScriptResponse> {
 		try {
-			const session = await this.session(workspaceId);
+			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				const results = await session.lix.executeBatch(
 					request.statements.map((statement) => ({
@@ -270,26 +263,26 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		return this.closePromise;
 	}
 
-	private session(workspaceId: string): Promise<WorkspaceLixSession> {
+	private session(lixId: string): Promise<LixSession> {
 		if (this.closed) {
 			throw new FileServiceError("upstream_error", "Lix client is closed.");
 		}
-		let pending = this.sessions.get(workspaceId);
+		let pending = this.sessions.get(lixId);
 		if (pending) return pending;
-		pending = this.openSession(workspaceId).catch((error) => {
-			this.sessions.delete(workspaceId);
+		pending = this.openSession(lixId).catch((error) => {
+			this.sessions.delete(lixId);
 			throw error;
 		});
-		this.sessions.set(workspaceId, pending);
+		this.sessions.set(lixId, pending);
 		return pending;
 	}
 
-	private async openSession(workspaceId: string): Promise<WorkspaceLixSession> {
+	private async openSession(lixId: string): Promise<LixSession> {
 		const lix = await openLix({
 			server: {
 				mode: "remote",
 				url: "https://mcp.lixray.invalid",
-				fetch: (input, init) => this.protocolFetch(workspaceId, input, init),
+				fetch: (input, init) => this.protocolFetch(lixId, input, init),
 			},
 		});
 		return {
@@ -299,7 +292,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	private async enqueueSession<T>(
-		session: WorkspaceLixSession,
+		session: LixSession,
 		operation: () => Promise<T>,
 	): Promise<T> {
 		const result = session.queue.then(operation, operation);
@@ -311,7 +304,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	private async protocolFetch(
-		workspaceId: string,
+		lixId: string,
 		input: RequestInfo | URL,
 		init?: RequestInit,
 	): Promise<Response> {
@@ -321,16 +314,16 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		});
 		const path = canonicalProtocolPath(new URL(request.url));
 		if (path === null) return new Response("Not found\n", { status: 404 });
-		return this.workspaceResponse(workspaceId, path, request);
+		return this.lixResponse(lixId, path, request);
 	}
 
-	private async workspaceResponse(
-		workspaceId: string,
+	private async lixResponse(
+		lixId: string,
 		path: string,
 		request: Request,
 	): Promise<Response> {
-		const authorizationFailure = await this.authorizeWorkspace(
-			workspaceId,
+		const authorizationFailure = await this.authorizeLix(
+			lixId,
 			this.user,
 			this.env,
 		);
@@ -342,27 +335,27 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		const headers = new Headers(rewritten.headers);
 		headers.delete("authorization");
 		const template = new Request(rewritten, { headers });
-		if (this.workspaceFetch) {
-			return this.workspaceFetch(workspaceId, template);
+		if (this.lixFetch) {
+			return this.lixFetch(lixId, template);
 		}
 
 		const containerNamespace = this.env.SLATEDB_CONTAINER;
 		if (!containerNamespace) {
-			return new Response("Workspace storage is not configured.\n", {
+			return new Response("Lix storage is not configured.\n", {
 				status: 500,
 			});
 		}
-		const workspacePath = `/workspaces/${encodeURIComponent(workspaceId)}${path}`;
-		url.pathname = workspacePath;
+		const lixPath = `/lixes/${encodeURIComponent(lixId)}${path}`;
+		url.pathname = lixPath;
 		const containerTemplate = new Request(url, template);
 		try {
 			return await fetchContainerWithRetry({
 				namespace: containerNamespace,
-				workspaceId,
-				operation: `${request.method} ${workspacePath}`,
+				lixId,
+				operation: `${request.method} ${lixPath}`,
 				envVars: containerEnv(this.env),
 				createRequest: () => containerTemplate.clone() as unknown as Request,
-				requestReplay: workspaceRequestReplay(request.method, path),
+				requestReplay: lixRequestReplay(request.method, path),
 				signal: request.signal,
 				retryDelay: this.retryDelay,
 				retryRandom: this.retryRandom,
@@ -374,14 +367,14 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 					{
 						error: {
 							code: "LIX_REMOTE_CANCELLED",
-							message: "Workspace storage request was cancelled.",
+							message: "Lix storage request was cancelled.",
 						},
 					},
 					{ status: 499 },
 				);
 			}
 			console.error("LixRay container request failed", {
-				workspaceId,
+				lixId,
 				path,
 				error: containerErrorDetails(caught),
 			});
@@ -397,10 +390,7 @@ function canonicalProtocolPath(url: URL): string | null {
 	return url.pathname.slice(markerIndex);
 }
 
-function workspaceRequestReplay(
-	method: string,
-	path: string,
-): "safe" | "unsafe" {
+function lixRequestReplay(method: string, path: string): "safe" | "unsafe" {
 	if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return "safe";
 	return path.endsWith("/observe") ||
 		path.endsWith("/observe/multiplex") ||
@@ -536,7 +526,7 @@ function logTransientContainerRetry(
 ): void {
 	if (observation.retryCount !== 1 && observation.retryCount % 30 !== 0) return;
 	console.warn("Transient LixRay container failure; retrying", {
-		workspaceId: observation.workspaceId,
+		lixId: observation.lixId,
 		path: observation.operation,
 		retryCount: observation.retryCount,
 		retryDelayMs: observation.retryDelayMs,

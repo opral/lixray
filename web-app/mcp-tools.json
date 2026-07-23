@@ -1,8 +1,8 @@
 [
 	{
-		"name": "list_workspaces",
-		"title": "List workspaces",
-		"description": "List the LixRay workspaces the signed-in user can access.",
+		"name": "list_lixes",
+		"title": "List lixes",
+		"description": "List the LixRay lixes the signed-in user can access.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -15,7 +15,7 @@
 				{
 					"type": "object",
 					"properties": {
-						"workspaces": {
+						"lixes": {
 							"type": "array",
 							"items": {
 								"type": "object",
@@ -23,7 +23,7 @@
 									"id": {
 										"type": "string",
 										"format": "uuid",
-										"description": "Workspace UUID"
+										"description": "Lix UUID"
 									},
 									"name": {
 										"type": "string"
@@ -31,7 +31,7 @@
 									"slug": {
 										"type": "string"
 									},
-									"organization": {
+									"namespace": {
 										"type": "object",
 										"properties": {
 											"id": {
@@ -48,12 +48,12 @@
 										"additionalProperties": false
 									}
 								},
-								"required": ["id", "name", "slug", "organization"],
+								"required": ["id", "name", "slug", "namespace"],
 								"additionalProperties": false
 							}
 						}
 					},
-					"required": ["workspaces"],
+					"required": ["lixes"],
 					"additionalProperties": false
 				},
 				{
@@ -110,17 +110,17 @@
 	{
 		"name": "active_branch_id",
 		"title": "Get active branch ID",
-		"description": "Return the workspace's active Lix branch ID.",
+		"description": "Return the lix's active Lix branch ID.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_ref": {
+				"lix_ref": {
 					"type": "string",
-					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
+					"description": "Exact lix UUID, exact lix slug, or exact @namespace/slug. Use the lix UUID when available."
 				}
 			},
-			"required": ["workspace_ref"],
+			"required": ["lix_ref"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -192,14 +192,14 @@
 	{
 		"name": "switch_branch",
 		"title": "Switch active branch",
-		"description": "Switch the workspace's active Lix branch. This shared workspace state affects subsequent SQL operations.",
+		"description": "Switch the lix's active Lix branch. This shared lix state affects subsequent SQL operations.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_ref": {
+				"lix_ref": {
 					"type": "string",
-					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
+					"description": "Exact lix UUID, exact lix slug, or exact @namespace/slug. Use the lix UUID when available."
 				},
 				"branch_id": {
 					"type": "string",
@@ -207,7 +207,7 @@
 					"description": "Lix branch ID"
 				}
 			},
-			"required": ["workspace_ref", "branch_id"],
+			"required": ["lix_ref", "branch_id"],
 			"additionalProperties": false
 		},
 		"outputSchema": {
@@ -279,14 +279,14 @@
 	{
 		"name": "execute",
 		"title": "Execute raw Lix SQL",
-		"description": "Execute an ordered batch of caller-provided Lix SQL statements atomically against the workspace's active Lix branch. To change branches, call switch_branch first. Each statement has its own parameters and produces one ordered result; if any statement fails, the complete batch rolls back. SQL can read or mutate any SQL-accessible branch data. Lix SQL does not support DDL statements.\n\nCore tables:\n- `lix_file` — Current files in the active branch. Columns: `id, path, directory_id, name, data (BLOB)`.\n- `lix_directory` — Current directories in the active branch. Columns: `id, path, parent_id, name`.\n- `lix_branch` — Workspace branches and their current commits. Columns: `id, name, hidden, commit_id`.\n- `lix_change` — Global immutable change ledger; use it for activity and audit. Columns: `id, entity_pk, schema_key, file_id, snapshot_content, metadata, created_at, origin_key`.\n\nPath rules: `lix_file.path` never ends in `/`; `lix_directory.path` always does. `lix_file.directory_id` references `lix_directory.id`; `lix_directory.parent_id` references `lix_directory.id`. Use those IDs for hierarchy queries.\n\nUse the core tables above, plus their `_by_branch` / `_history` companions, directly; do not inspect `information_schema` for them.\n\nEntity tables are workspace-dynamic: do not assume a fixed entity-table list or column shape. Only when a task needs an entity table, discover its table name, then inspect only that table:\n\n```sql\nSELECT table_name, table_type\nFROM information_schema.tables\nWHERE table_schema = 'public'\nORDER BY table_name;\n```\n\n```sql\nSELECT column_name, data_type, is_nullable, ordinal_position\nFROM information_schema.columns\nWHERE table_schema = 'public'\n  AND table_name = $1\nORDER BY ordinal_position;\n```\n\nSystem `lixcol_*` metadata is intentionally omitted from the core guide. Where present, `<table>_by_branch` adds `lixcol_branch_id` for cross-branch reads and writes. `<table>_history` is read-only: scope every history query with `WHERE lixcol_start_commit_id = lix_active_branch_commit_id()`, then constrain it by stable identity (`id = $n` for files/directories or `lixcol_entity_pk = $n` for entities) resolved from the active table. That avoids `LIX_HISTORY_NON_IDENTITY_FILTER` and preserves renamed/tombstoned history. Read a current item's `lixcol_change_id` from its active table, not an historical row; use `lixcol_depth` / `lixcol_observed_commit_id` for prior revisions.",
+		"description": "Execute an ordered batch of caller-provided Lix SQL statements atomically against the lix's active Lix branch. To change branches, call switch_branch first. Each statement has its own parameters and produces one ordered result; if any statement fails, the complete batch rolls back. SQL can read or mutate any SQL-accessible branch data. Lix SQL does not support DDL statements.\n\nCore tables:\n- `lix_file` — Current files in the active branch. Columns: `id, path, directory_id, name, data (BLOB)`.\n- `lix_directory` — Current directories in the active branch. Columns: `id, path, parent_id, name`.\n- `lix_branch` — Lix branches and their current commits. Columns: `id, name, hidden, commit_id`.\n- `lix_change` — Global immutable change ledger; use it for activity and audit. Columns: `id, entity_pk, schema_key, file_id, snapshot_content, metadata, created_at, origin_key`.\n\nPath rules: `lix_file.path` never ends in `/`; `lix_directory.path` always does. `lix_file.directory_id` references `lix_directory.id`; `lix_directory.parent_id` references `lix_directory.id`. Use those IDs for hierarchy queries.\n\nUse the core tables above, plus their `_by_branch` / `_history` companions, directly; do not inspect `information_schema` for them.\n\nEntity tables are lix-dynamic: do not assume a fixed entity-table list or column shape. Only when a task needs an entity table, discover its table name, then inspect only that table:\n\n```sql\nSELECT table_name, table_type\nFROM information_schema.tables\nWHERE table_schema = 'public'\nORDER BY table_name;\n```\n\n```sql\nSELECT column_name, data_type, is_nullable, ordinal_position\nFROM information_schema.columns\nWHERE table_schema = 'public'\n  AND table_name = $1\nORDER BY ordinal_position;\n```\n\nSystem `lixcol_*` metadata is intentionally omitted from the core guide. Where present, `<table>_by_branch` adds `lixcol_branch_id` for cross-branch reads and writes. `<table>_history` is read-only: scope every history query with `WHERE lixcol_start_commit_id = lix_active_branch_commit_id()`, then constrain it by stable identity (`id = $n` for files/directories or `lixcol_entity_pk = $n` for entities) resolved from the active table. That avoids `LIX_HISTORY_NON_IDENTITY_FILTER` and preserves renamed/tombstoned history. Read a current item's `lixcol_change_id` from its active table, not an historical row; use `lixcol_depth` / `lixcol_observed_commit_id` for prior revisions.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
 			"properties": {
-				"workspace_ref": {
+				"lix_ref": {
 					"type": "string",
-					"description": "Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available."
+					"description": "Exact lix UUID, exact lix slug, or exact @namespace/slug. Use the lix UUID when available."
 				},
 				"statements": {
 					"minItems": 1,
@@ -412,7 +412,7 @@
 					}
 				}
 			},
-			"required": ["workspace_ref", "statements"],
+			"required": ["lix_ref", "statements"],
 			"additionalProperties": false
 		},
 		"outputSchema": {

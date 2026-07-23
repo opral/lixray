@@ -7,16 +7,16 @@ const DEFAULT_CACHE_DIR: &str = "/tmp/lixray-slatedb-cache";
 const DEFAULT_DISK_CACHE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const DEFAULT_BLOCK_CACHE_BYTES: u64 = 128 * 1024 * 1024;
 const DEFAULT_METADATA_CACHE_BYTES: u64 = 32 * 1024 * 1024;
-const DEFAULT_MAX_OPEN_WORKSPACES: u64 = 32;
-const DEFAULT_MAX_SESSIONS_PER_WORKSPACE: u64 = 64;
+const DEFAULT_MAX_OPEN_LIXS: u64 = 32;
+const DEFAULT_MAX_SESSIONS_PER_LIX: u64 = 64;
 const DEFAULT_PROTOCOL_TIMEOUT_SECS: u64 = 60;
 
 #[derive(Clone, Debug)]
 pub struct Config {
     pub bind_addr: String,
     pub internal_token: Option<String>,
-    pub max_open_workspaces: usize,
-    pub max_sessions_per_workspace: usize,
+    pub max_open_lixes: usize,
+    pub max_sessions_per_lix: usize,
     pub protocol_timeout: Duration,
     pub(crate) storage: S3StorageConfig,
 }
@@ -51,16 +51,16 @@ impl Config {
         if env::var_os("RAILWAY_PROJECT_ID").is_some() && internal_token.is_none() {
             bail!("LIXRAY_INTERNAL_TOKEN is required on Railway");
         }
-        let max_open_workspaces = usize::try_from(positive_u64_env(
-            "LIXRAY_MAX_OPEN_WORKSPACES",
-            DEFAULT_MAX_OPEN_WORKSPACES,
+        let max_open_lixes = usize::try_from(positive_u64_env(
+            "LIXRAY_MAX_OPEN_LIXS",
+            DEFAULT_MAX_OPEN_LIXS,
         )?)
-        .context("LIXRAY_MAX_OPEN_WORKSPACES does not fit this platform")?;
-        let max_sessions_per_workspace = usize::try_from(positive_u64_env(
-            "LIXRAY_MAX_SESSIONS_PER_WORKSPACE",
-            DEFAULT_MAX_SESSIONS_PER_WORKSPACE,
+        .context("LIXRAY_MAX_OPEN_LIXS does not fit this platform")?;
+        let max_sessions_per_lix = usize::try_from(positive_u64_env(
+            "LIXRAY_MAX_SESSIONS_PER_LIX",
+            DEFAULT_MAX_SESSIONS_PER_LIX,
         )?)
-        .context("LIXRAY_MAX_SESSIONS_PER_WORKSPACE does not fit this platform")?;
+        .context("LIXRAY_MAX_SESSIONS_PER_LIX does not fit this platform")?;
         let protocol_timeout = Duration::from_secs(positive_u64_env(
             "LIXRAY_PROTOCOL_TIMEOUT_SECS",
             DEFAULT_PROTOCOL_TIMEOUT_SECS,
@@ -80,8 +80,8 @@ impl Config {
         Ok(Self {
             bind_addr,
             internal_token,
-            max_open_workspaces,
-            max_sessions_per_workspace,
+            max_open_lixes,
+            max_sessions_per_lix,
             protocol_timeout,
             storage,
         })
@@ -194,15 +194,15 @@ mod tests {
     }
 
     #[test]
-    fn from_env_configures_s3_without_a_workspace_path() {
+    fn from_env_configures_s3_without_a_lix_path() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
         set_s3_env();
 
         let config = Config::from_env().unwrap();
 
-        assert_eq!(config.max_open_workspaces, 32);
-        assert_eq!(config.max_sessions_per_workspace, 64);
+        assert_eq!(config.max_open_lixes, 32);
+        assert_eq!(config.max_sessions_per_lix, 64);
         assert_eq!(config.bind_addr, "0.0.0.0:8080");
         assert_eq!(config.internal_token, None);
         assert_eq!(config.storage.endpoint, "https://s3.example");
@@ -253,29 +253,27 @@ mod tests {
     }
 
     #[test]
-    fn from_env_configures_workspace_capacity() {
+    fn from_env_configures_lix_capacity() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
         set_s3_env();
-        env::set_var("LIXRAY_MAX_OPEN_WORKSPACES", "7");
+        env::set_var("LIXRAY_MAX_OPEN_LIXS", "7");
 
         let config = Config::from_env().unwrap();
 
-        assert_eq!(config.max_open_workspaces, 7);
+        assert_eq!(config.max_open_lixes, 7);
         clear_lixray_env();
     }
 
     #[test]
-    fn from_env_rejects_zero_workspace_capacity() {
+    fn from_env_rejects_zero_lix_capacity() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
-        env::set_var("LIXRAY_MAX_OPEN_WORKSPACES", "0");
+        env::set_var("LIXRAY_MAX_OPEN_LIXS", "0");
 
         let error = Config::from_env().unwrap_err();
 
-        assert!(
-            format!("{error:#}").contains("LIXRAY_MAX_OPEN_WORKSPACES must be greater than zero")
-        );
+        assert!(format!("{error:#}").contains("LIXRAY_MAX_OPEN_LIXS must be greater than zero"));
         clear_lixray_env();
     }
 
@@ -284,11 +282,11 @@ mod tests {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
         set_s3_env();
-        env::set_var("LIXRAY_MAX_SESSIONS_PER_WORKSPACE", "384");
+        env::set_var("LIXRAY_MAX_SESSIONS_PER_LIX", "384");
 
         let config = Config::from_env().unwrap();
 
-        assert_eq!(config.max_sessions_per_workspace, 384);
+        assert_eq!(config.max_sessions_per_lix, 384);
         clear_lixray_env();
     }
 
@@ -296,12 +294,13 @@ mod tests {
     fn from_env_rejects_zero_protocol_session_capacity() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
-        env::set_var("LIXRAY_MAX_SESSIONS_PER_WORKSPACE", "0");
+        env::set_var("LIXRAY_MAX_SESSIONS_PER_LIX", "0");
 
         let error = Config::from_env().unwrap_err();
 
-        assert!(format!("{error:#}")
-            .contains("LIXRAY_MAX_SESSIONS_PER_WORKSPACE must be greater than zero"));
+        assert!(
+            format!("{error:#}").contains("LIXRAY_MAX_SESSIONS_PER_LIX must be greater than zero")
+        );
         clear_lixray_env();
     }
 
@@ -386,8 +385,8 @@ mod tests {
             "LIXRAY_INTERNAL_TOKEN",
             "RAILWAY_PROJECT_ID",
             "RAILWAY_ENVIRONMENT_ID",
-            "LIXRAY_MAX_OPEN_WORKSPACES",
-            "LIXRAY_MAX_SESSIONS_PER_WORKSPACE",
+            "LIXRAY_MAX_OPEN_LIXS",
+            "LIXRAY_MAX_SESSIONS_PER_LIX",
             "S3_ENDPOINT",
             "S3_BUCKET",
             "S3_ACCESS_KEY_ID",

@@ -56,7 +56,7 @@ function AuthCallbackPage() {
 				if (capability && joinWorkspaceId === capability.workspaceId) {
 					try {
 						const { error: acceptError } = await getBrowserSupabaseClient().rpc(
-							"accept_workspace_share_token",
+							"accept_lix_share_token",
 							{ p_token: capability.token },
 						);
 						if (acceptError) {

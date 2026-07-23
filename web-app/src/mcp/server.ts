@@ -35,7 +35,7 @@ export interface McpToolCallObservation {
 	durationMs: number;
 	surfaceVersion: string;
 	errorCode?: string;
-	workspaceId?: string;
+	lixId?: string;
 	executeInput?: McpExecuteInputObservation;
 	executeOutput?: McpExecuteOutputObservation;
 }
@@ -45,6 +45,15 @@ export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
 interface McpServerOptions {
 	authMode?: McpAuthMode;
 	onToolCall?: McpToolCallObserver;
+	serverName?: "LixRay" | "LixRay Dev";
+}
+
+const LOCAL_MCP_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
+
+export function mcpServerNameForUrl(url: string): "LixRay" | "LixRay Dev" {
+	return LOCAL_MCP_HOSTNAMES.has(new URL(url).hostname)
+		? "LixRay Dev"
+		: "LixRay";
 }
 
 type McpSecurityScheme =
@@ -55,11 +64,11 @@ const oauthSecuritySchemes: Array<McpSecurityScheme> = [
 	{ type: "oauth2", scopes: [...MCP_SCOPES] },
 ];
 
-const uuid = z.uuid().describe("Workspace UUID");
-const workspaceRef = z
+const uuid = z.uuid().describe("Lix UUID");
+const lixRef = z
 	.string()
 	.describe(
-		"Exact workspace UUID, exact workspace slug, or exact @namespace/slug. Use the workspace UUID when available.",
+		"Exact lix UUID, exact lix slug, or exact @namespace/slug. Use the lix UUID when available.",
 	);
 // Lix accepts non-UUID branch identifiers such as the built-in `global`
 // branch. Keep the MCP contract as broad as the Lix client contract.
@@ -80,12 +89,12 @@ const executeStatement = z
 		params: z.array(wireValue).max(1000).optional().default([]),
 	})
 	.strict();
-const workspaceSummaryOutput = z
+const lixSummaryOutput = z
 	.object({
 		id: uuid,
 		name: z.string(),
 		slug: z.string(),
-		organization: z
+		namespace: z
 			.object({ id: z.string(), name: z.string(), handle: z.string() })
 			.strict(),
 	})
@@ -101,8 +110,8 @@ const toolErrorOutput = z
 			.strict(),
 	})
 	.strict();
-const listWorkspacesOutput = z.union([
-	z.object({ workspaces: z.array(workspaceSummaryOutput) }).strict(),
+const listLixesOutput = z.union([
+	z.object({ lixes: z.array(lixSummaryOutput) }).strict(),
 	toolErrorOutput,
 ]);
 const activeBranchOutput = z.union([
@@ -143,11 +152,11 @@ export function createLixrayMcpServer(
 	options: McpServerOptions = {},
 ): Server {
 	const server = new Server(
-		{ name: "LixRay", version: "0.1.0" },
+		{ name: options.serverName ?? "LixRay", version: "0.1.0" },
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"Use LixRay's execute tool for workspace inspection and changes. SQL and branch controls use the workspace's active Lix branch, just like the Lix client. Use active_branch_id to inspect it and switch_branch to change it. Query lix_branch with execute when you need the branch catalog. Freely make changes, as the user can review all changes in the UI. Never guess workspace or branch IDs.",
+				"Use LixRay's execute tool for lix inspection and changes. SQL and branch controls use the lix's active Lix branch, just like the Lix client. Use active_branch_id to inspect it and switch_branch to change it. Query lix_branch with execute when you need the branch catalog. Freely make changes, as the user can review all changes in the UI. Never guess lix or branch IDs.",
 		},
 	);
 	const tools = buildTools(
@@ -199,14 +208,12 @@ export function createLixrayMcpServer(
 			});
 			return errorResult("invalid_arguments", z.prettifyError(parsed.error));
 		}
-		let workspaceId: string | undefined;
+		let lixId: string | undefined;
 		try {
 			const callArgs: Record<string, unknown> = { ...parsed.data };
-			if (typeof parsed.data.workspace_ref === "string") {
-				workspaceId = await service.resolveWorkspaceRef(
-					parsed.data.workspace_ref,
-				);
-				callArgs.workspace_ref = workspaceId;
+			if (typeof parsed.data.lix_ref === "string") {
+				lixId = await service.resolveLixRef(parsed.data.lix_ref);
+				callArgs.lix_ref = lixId;
 			}
 			const rawStructuredContent = asStructuredContent(
 				await tool.call(callArgs),
@@ -227,7 +234,7 @@ export function createLixrayMcpServer(
 			observe(startedAt, {
 				toolName: tool.descriptor.name,
 				outcome: "success",
-				...(workspaceId ? { workspaceId } : {}),
+				...(lixId ? { lixId } : {}),
 				...(executeInput ? { executeInput } : {}),
 				...(executeOutput ? { executeOutput } : {}),
 			});
@@ -246,7 +253,7 @@ export function createLixrayMcpServer(
 					toolName: tool.descriptor.name,
 					outcome: "error",
 					errorCode: caught.code,
-					...(workspaceId ? { workspaceId } : {}),
+					...(lixId ? { lixId } : {}),
 					...(executeInput ? { executeInput } : {}),
 				});
 				return errorResult(caught.code, caught.message, caught.details);
@@ -255,7 +262,7 @@ export function createLixrayMcpServer(
 				toolName: tool.descriptor.name,
 				outcome: "error",
 				errorCode: "internal_error",
-				...(workspaceId ? { workspaceId } : {}),
+				...(lixId ? { lixId } : {}),
 				...(executeInput ? { executeInput } : {}),
 			});
 			console.error("LixRay MCP tool failed", {
@@ -297,17 +304,23 @@ export async function handleMcpTransport(
 	// Keep the Worker-only module out of Node's strip-types test loader. The
 	// production Worker resolves this Cloudflare module when the MCP route runs.
 	const { createMcpHandler } = await import("agents/mcp");
-	return createMcpHandler(createLixrayMcpServer(service, options), {
-		route: MCP_PATH,
-		enableJsonResponse: true,
-		sessionIdGenerator: undefined,
-		corsOptions: {
-			origin: "*",
-			methods: "GET, POST, DELETE, OPTIONS",
-			headers: "Authorization, Content-Type, MCP-Protocol-Version",
-			exposeHeaders: "MCP-Session-Id, MCP-Protocol-Version",
+	return createMcpHandler(
+		createLixrayMcpServer(service, {
+			...options,
+			serverName: options.serverName ?? mcpServerNameForUrl(request.url),
+		}),
+		{
+			route: MCP_PATH,
+			enableJsonResponse: true,
+			sessionIdGenerator: undefined,
+			corsOptions: {
+				origin: "*",
+				methods: "GET, POST, DELETE, OPTIONS",
+				headers: "Authorization, Content-Type, MCP-Protocol-Version",
+				exposeHeaders: "MCP-Session-Id, MCP-Protocol-Version",
+			},
 		},
-	})(request, undefined, ctx);
+	)(request, undefined, ctx);
 }
 
 interface McpDiscoveryOptions {
@@ -358,11 +371,11 @@ export function mcpDocumentationResponse(
 			"Connection check:",
 			"1. Confirm this endpoint is registered exactly once for the environment you intend to use.",
 			"2. Revoke or log out the MCP connection, then authorize it again.",
-			"3. Verify that initialize, tools/list, and list_workspaces all succeed in a fresh client process.",
+			"3. Verify that initialize, tools/list, and list_lixes all succeed in a fresh client process.",
 			"",
 			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
-			"The server exposes list_workspaces, active_branch_id, switch_branch, and raw Lix SQL execute. SQL and branch controls use the workspace's active Lix branch, matching the Lix client. Use active_branch_id to inspect it, switch_branch to change it, and SQL against lix_branch to discover branches. Execute accepts an ordered batch of statements with $n or ? parameters. Lix executes the batch atomically and returns one ordered result per statement.",
+			"The server exposes list_lixes, active_branch_id, switch_branch, and raw Lix SQL execute. SQL and branch controls use the lix's active Lix branch, matching the Lix client. Use active_branch_id to inspect it, switch_branch to change it, and SQL against lix_branch to discover branches. Execute accepts an ordered batch of statements with $n or ? parameters. Lix executes the batch atomically and returns one ordered result per statement.",
 		].join("\n"),
 		{
 			headers: {
@@ -432,39 +445,39 @@ function buildTools(
 		);
 	return [
 		tool(
-			"list_workspaces",
-			"List workspaces",
-			"List the LixRay workspaces the signed-in user can access.",
+			"list_lixes",
+			"List lixes",
+			"List the LixRay lixes the signed-in user can access.",
 			z.object({}).strict(),
 			readAnnotations(),
-			async () => ({ workspaces: await service.listWorkspaces() }),
-			listWorkspacesOutput,
+			async () => ({ lixes: await service.listLixes() }),
+			listLixesOutput,
 		),
 		tool(
 			"active_branch_id",
 			"Get active branch ID",
-			"Return the workspace's active Lix branch ID.",
-			z.object({ workspace_ref: workspaceRef }).strict(),
+			"Return the lix's active Lix branch ID.",
+			z.object({ lix_ref: lixRef }).strict(),
 			readAnnotations(),
-			async ({ workspace_ref }) => ({
-				branch_id: await service.activeBranchId(String(workspace_ref)),
+			async ({ lix_ref }) => ({
+				branch_id: await service.activeBranchId(String(lix_ref)),
 			}),
 			activeBranchOutput,
 		),
 		tool(
 			"switch_branch",
 			"Switch active branch",
-			"Switch the workspace's active Lix branch. This shared workspace state affects subsequent SQL operations.",
+			"Switch the lix's active Lix branch. This shared lix state affects subsequent SQL operations.",
 			z
 				.object({
-					workspace_ref: workspaceRef,
+					lix_ref: lixRef,
 					branch_id: branchId,
 				})
 				.strict(),
 			writeAnnotations(false, false),
-			async ({ workspace_ref, branch_id }) => ({
+			async ({ lix_ref, branch_id }) => ({
 				branch_id: (
-					await service.switchBranch(String(workspace_ref), String(branch_id))
+					await service.switchBranch(String(lix_ref), String(branch_id))
 				).branchId,
 			}),
 			activeBranchOutput,
@@ -475,14 +488,14 @@ function buildTools(
 			EXECUTE_TOOL_DESCRIPTION,
 			z
 				.object({
-					workspace_ref: workspaceRef,
+					lix_ref: lixRef,
 					statements: z.array(executeStatement).min(1).max(100),
 				})
 				.strict(),
 			writeAnnotations(false, false),
-			async ({ workspace_ref, statements }) =>
+			async ({ lix_ref, statements }) =>
 				service.executeSql(
-					String(workspace_ref),
+					String(lix_ref),
 					statements.map((statement) => ({
 						sql: statement.sql,
 						params: statement.params,

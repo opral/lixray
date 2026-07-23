@@ -33,8 +33,8 @@ services:
         LIXRAY_IMAGE_VARIANT: perf
     environment:
       BIND_ADDR: 0.0.0.0:8080
-      LIXRAY_MAX_OPEN_WORKSPACES: 4
-      LIXRAY_MAX_SESSIONS_PER_WORKSPACE: ${LIXRAY_MAX_SESSIONS_PER_WORKSPACE:-256}
+      LIXRAY_MAX_OPEN_LIXS: 4
+      LIXRAY_MAX_SESSIONS_PER_LIX: ${LIXRAY_MAX_SESSIONS_PER_LIX:-256}
       LIXRAY_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
       RUST_LOG: lixray=info
       S3_ENDPOINT: http://minio:9000
@@ -62,7 +62,7 @@ services:
         VITE_LIXRAY_LOCAL_DEV_PASSWORD: ${VITE_LIXRAY_LOCAL_DEV_PASSWORD:-}
     environment:
       PORT: 8080
-      LIXRAY_WORKSPACE_SERVICE_URL: http://lix-server:8080
+      LIXRAY_LIX_SERVICE_URL: http://lix-server:8080
       LIXRAY_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
       SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
       SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-http://host.docker.internal:54321/auth/v1/.well-known/jwks.json}

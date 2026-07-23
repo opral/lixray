@@ -86,7 +86,23 @@ export default defineConfig(({ command }) => ({
 		fs: { allow: [repositoryRoot] },
 	},
 	optimizeDeps: {
-		exclude: command === "serve" ? ["@opral/atelier"] : [],
+		// Atelier is linked source and first reached through a lazy workspace
+		// route. Pre-bundle its DnD runtime before that route loads so Vite does
+		// not invalidate the page with an "Outdated Optimize Dep" reload.
+		include:
+			command === "serve"
+				? [
+						"@opral/atelier > @dnd-kit/core",
+						"@opral/atelier > @dnd-kit/sortable",
+						"@opral/atelier > @dnd-kit/utilities",
+					]
+				: [],
+		// The Lix worker is lazy-loaded after workspace navigation. Keep its
+		// ESM shims out of the optimizer so first use cannot reload the page.
+		exclude:
+			command === "serve"
+				? ["@opral/atelier", "@bytecodealliance/preview2-shim"]
+				: [],
 	},
 	plugins: [
 		cloudflare({
@@ -122,9 +138,9 @@ export default defineConfig(({ command }) => ({
 				return {
 					vars: {
 						...config.vars,
-						LIXRAY_WORKSPACE_SERVICE_URL:
-							process.env.LIXRAY_WORKSPACE_SERVICE_URL ??
-							config.vars?.LIXRAY_WORKSPACE_SERVICE_URL,
+						LIXRAY_LIX_SERVICE_URL:
+							process.env.LIXRAY_LIX_SERVICE_URL ??
+							config.vars?.LIXRAY_LIX_SERVICE_URL,
 						LIXRAY_INTERNAL_TOKEN:
 							process.env.LIXRAY_INTERNAL_TOKEN ??
 							config.vars?.LIXRAY_INTERNAL_TOKEN,
@@ -150,9 +166,9 @@ export default defineConfig(({ command }) => ({
 						SUPABASE_URL: process.env.SUPABASE_URL ?? config.vars?.SUPABASE_URL,
 						LIXRAY_DEMO:
 							process.env.LIXRAY_DEMO ?? config.vars?.LIXRAY_DEMO ?? "",
-						LIXRAY_DEMO_WORKSPACE_IDS:
-							process.env.LIXRAY_DEMO_WORKSPACE_IDS ??
-							config.vars?.LIXRAY_DEMO_WORKSPACE_IDS ??
+						LIXRAY_DEMO_LIX_IDS:
+							process.env.LIXRAY_DEMO_LIX_IDS ??
+							config.vars?.LIXRAY_DEMO_LIX_IDS ??
 							"",
 						...posthogVars,
 					},

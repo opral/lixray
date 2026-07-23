@@ -17,7 +17,7 @@ use tracing::info;
 
 // SlateDB's disk cache fetches object-store data in 4 MiB parts. A 15 second
 // request timeout still permits a part to arrive at roughly 270 KiB/s, while a
-// single stalled request can no longer occupy a workspace runtime for the
+// single stalled request can no longer occupy a lix runtime for the
 // object_store default three-minute retry budget. One retry preserves recovery
 // from a transient slow path without turning an interactive request into a
 // multi-minute wait.
@@ -40,19 +40,19 @@ pub(crate) struct LixService {
     protocol: lix_server_protocol::LixProtocolServer<SlateDB>,
 }
 
-struct WorkspaceRuntime {
-    state: Mutex<WorkspaceRuntimeState>,
+struct LixRuntime {
+    state: Mutex<LixRuntimeState>,
 }
 
-enum WorkspaceRuntimeState {
+enum LixRuntimeState {
     Active(Arc<LixService>),
     Recovering,
 }
 
-pub struct WorkspaceRuntimeManager {
+pub struct LixRuntimeManager {
     backend: StorageBackend,
-    max_open_workspaces: usize,
-    max_sessions_per_workspace: usize,
+    max_open_lixes: usize,
+    max_sessions_per_lix: usize,
     state: Mutex<ManagerState>,
 }
 
@@ -74,19 +74,19 @@ struct ManagerState {
 }
 
 struct RuntimeEntry {
-    runtime: Arc<OnceCell<Arc<WorkspaceRuntime>>>,
+    runtime: Arc<OnceCell<Arc<LixRuntime>>>,
     last_used: u64,
 }
 
 #[derive(Debug)]
-pub(crate) enum WorkspaceRuntimeError {
+pub(crate) enum LixRuntimeError {
     InvalidId,
     AtCapacity { max: usize },
     Recovering,
     Open(anyhow::Error),
 }
 
-impl WorkspaceRuntimeManager {
+impl LixRuntimeManager {
     pub fn new(config: &Config) -> Result<Arc<Self>> {
         let storage = &config.storage;
         let request_budget = S3_REQUEST_BUDGET;
@@ -109,78 +109,78 @@ impl WorkspaceRuntimeManager {
             prefix: storage.prefix.clone(),
             cache: SlateDBCacheOptions {
                 root_folder: storage.cache.root_folder.clone(),
-                max_disk_cache_bytes: per_workspace_usize(
+                max_disk_cache_bytes: per_lix_usize(
                     storage.cache.max_disk_cache_bytes,
-                    config.max_open_workspaces,
+                    config.max_open_lixes,
                 ),
-                block_cache_bytes: per_workspace_u64(
+                block_cache_bytes: per_lix_u64(
                     storage.cache.block_cache_bytes,
-                    config.max_open_workspaces,
+                    config.max_open_lixes,
                 ),
-                metadata_cache_bytes: per_workspace_u64(
+                metadata_cache_bytes: per_lix_u64(
                     storage.cache.metadata_cache_bytes,
-                    config.max_open_workspaces,
+                    config.max_open_lixes,
                 ),
             },
         };
 
         Ok(Arc::new(Self {
             backend,
-            max_open_workspaces: config.max_open_workspaces,
-            max_sessions_per_workspace: config.max_sessions_per_workspace,
+            max_open_lixes: config.max_open_lixes,
+            max_sessions_per_lix: config.max_sessions_per_lix,
             state: Mutex::new(ManagerState::default()),
         }))
     }
 
     #[cfg(test)]
-    pub(crate) fn new_in_memory(max_open_workspaces: usize) -> Arc<Self> {
-        Self::new_in_memory_with_session_capacity(max_open_workspaces, 64)
+    pub(crate) fn new_in_memory(max_open_lixes: usize) -> Arc<Self> {
+        Self::new_in_memory_with_session_capacity(max_open_lixes, 64)
     }
 
     #[cfg(test)]
     pub(crate) fn new_in_memory_with_session_capacity(
-        max_open_workspaces: usize,
-        max_sessions_per_workspace: usize,
+        max_open_lixes: usize,
+        max_sessions_per_lix: usize,
     ) -> Arc<Self> {
         Arc::new(Self {
             backend: StorageBackend::Memory {
                 object_store: Arc::new(InMemory::new()),
             },
-            max_open_workspaces,
-            max_sessions_per_workspace,
+            max_open_lixes,
+            max_sessions_per_lix,
             state: Mutex::new(ManagerState::default()),
         })
     }
 
     pub(crate) async fn get(
         self: &Arc<Self>,
-        workspace_id: &str,
-    ) -> std::result::Result<Arc<LixService>, WorkspaceRuntimeError> {
-        if !valid_workspace_id(workspace_id) {
-            return Err(WorkspaceRuntimeError::InvalidId);
+        lix_id: &str,
+    ) -> std::result::Result<Arc<LixService>, LixRuntimeError> {
+        if !valid_lix_id(lix_id) {
+            return Err(LixRuntimeError::InvalidId);
         }
 
         let runtime_cell = {
             let mut state = self.state.lock().await;
             state.clock = state.clock.wrapping_add(1);
             let now = state.clock;
-            if let Some(entry) = state.entries.get_mut(workspace_id) {
+            if let Some(entry) = state.entries.get_mut(lix_id) {
                 entry.last_used = now;
                 Arc::clone(&entry.runtime)
             } else {
-                while state.entries.len() >= self.max_open_workspaces {
-                    let Some(eviction_id) = idle_lru_workspace(&state.entries) else {
-                        return Err(WorkspaceRuntimeError::AtCapacity {
-                            max: self.max_open_workspaces,
+                while state.entries.len() >= self.max_open_lixes {
+                    let Some(eviction_id) = idle_lru_lix(&state.entries) else {
+                        return Err(LixRuntimeError::AtCapacity {
+                            max: self.max_open_lixes,
                         });
                     };
                     state.entries.remove(&eviction_id);
-                    info!(workspace_id = %eviction_id, "evicted idle workspace runtime");
+                    info!(lix_id = %eviction_id, "evicted idle lix runtime");
                 }
 
                 let runtime = Arc::new(OnceCell::new());
                 state.entries.insert(
-                    workspace_id.to_string(),
+                    lix_id.to_string(),
                     RuntimeEntry {
                         runtime: Arc::clone(&runtime),
                         last_used: now,
@@ -191,47 +191,44 @@ impl WorkspaceRuntimeManager {
         };
 
         let result = runtime_cell
-            .get_or_try_init(|| self.open_workspace_for_handler(workspace_id.to_string()))
+            .get_or_try_init(|| self.open_lix_for_handler(lix_id.to_string()))
             .await;
         match result {
             Ok(runtime) => {
                 let runtime = Arc::clone(runtime);
                 match runtime.acquire().await {
                     Some(service) => Ok(service),
-                    None => Err(WorkspaceRuntimeError::Recovering),
+                    None => Err(LixRuntimeError::Recovering),
                 }
             }
             Err(error) => {
                 let mut state = self.state.lock().await;
                 if state
                     .entries
-                    .get(workspace_id)
+                    .get(lix_id)
                     .is_some_and(|entry| Arc::ptr_eq(&entry.runtime, &runtime_cell))
                 {
-                    state.entries.remove(workspace_id);
+                    state.entries.remove(lix_id);
                 }
-                Err(WorkspaceRuntimeError::Open(error))
+                Err(LixRuntimeError::Open(error))
             }
         }
     }
 
-    async fn open_workspace_for_handler(
-        self: &Arc<Self>,
-        workspace_id: String,
-    ) -> Result<Arc<WorkspaceRuntime>> {
+    async fn open_lix_for_handler(self: &Arc<Self>, lix_id: String) -> Result<Arc<LixRuntime>> {
         let manager = Arc::clone(self);
         let runtime = Handle::current();
-        tokio::task::spawn_blocking(move || runtime.block_on(manager.open_workspace(&workspace_id)))
+        tokio::task::spawn_blocking(move || runtime.block_on(manager.open_lix(&lix_id)))
             .await
-            .context("join workspace runtime initialization")?
+            .context("join lix runtime initialization")?
     }
 
-    async fn open_workspace(&self, workspace_id: &str) -> Result<Arc<WorkspaceRuntime>> {
+    async fn open_lix(&self, lix_id: &str) -> Result<Arc<LixRuntime>> {
         let started = Instant::now();
         let storage = match &self.backend {
             #[cfg(test)]
             StorageBackend::Memory { object_store } => SlateDB::open_object_store_with_options(
-                workspace_id,
+                lix_id,
                 Arc::clone(object_store),
                 SlateDBObjectStoreOptions::default(),
             )
@@ -242,17 +239,17 @@ impl WorkspaceRuntimeManager {
                 cache,
             } => {
                 let storage_prefix = if prefix.is_empty() {
-                    workspace_id.to_string()
+                    lix_id.to_string()
                 } else {
-                    format!("{prefix}/{workspace_id}")
+                    format!("{prefix}/{lix_id}")
                 };
-                let mut workspace_cache = cache.clone();
-                workspace_cache.root_folder = workspace_cache.root_folder.join(workspace_id);
+                let mut lix_cache = cache.clone();
+                lix_cache.root_folder = lix_cache.root_folder.join(lix_id);
                 SlateDB::open_object_store_with_options(
                     storage_prefix,
                     Arc::clone(object_store),
                     SlateDBObjectStoreOptions {
-                        cache: Some(workspace_cache),
+                        cache: Some(lix_cache),
                     },
                 )
                 .context("open cached S3-backed Lix SlateDB storage")?
@@ -265,30 +262,30 @@ impl WorkspaceRuntimeManager {
                 Arc::new(lix_sdk::TracingTelemetrySink::new()),
             )
             .await
-            .context("open Lix workspace session for the canonical server protocol")?,
+            .context("open Lix lix session for the canonical server protocol")?,
         );
         let protocol = lix_server_protocol::LixProtocolServer::with_options(
             protocol_root,
             lix_server_protocol::ProtocolServerOptions {
-                max_sessions: self.max_sessions_per_workspace,
+                max_sessions: self.max_sessions_per_lix,
                 ..lix_server_protocol::ProtocolServerOptions::default()
             },
         )
         .context("configure canonical server protocol session capacity")?;
         info!(
-            workspace_id,
+            lix_id,
             elapsed_ms = elapsed_millis(started),
-            "opened workspace runtime"
+            "opened lix runtime"
         );
-        Ok(Arc::new(WorkspaceRuntime::new(LixService { protocol })))
+        Ok(Arc::new(LixRuntime::new(LixService { protocol })))
     }
 
-    pub(crate) async fn recover(self: &Arc<Self>, workspace_id: &str, service: &Arc<LixService>) {
+    pub(crate) async fn recover(self: &Arc<Self>, lix_id: &str, service: &Arc<LixService>) {
         let runtime = {
             let state = self.state.lock().await;
             state
                 .entries
-                .get(workspace_id)
+                .get(lix_id)
                 .and_then(|entry| entry.runtime.get())
                 .cloned()
         };
@@ -299,9 +296,9 @@ impl WorkspaceRuntimeManager {
             return;
         };
 
-        info!(workspace_id, "workspace runtime entering recovery");
+        info!(lix_id, "lix runtime entering recovery");
         let manager = Arc::clone(self);
-        let workspace_id = workspace_id.to_string();
+        let lix_id = lix_id.to_string();
         tokio::spawn(async move {
             let started = Instant::now();
             while Arc::strong_count(&draining_service) > 1 {
@@ -311,42 +308,36 @@ impl WorkspaceRuntimeManager {
             let close_result = close_drained_service(draining_service).await;
             match close_result {
                 Ok(()) => info!(
-                    workspace_id,
+                    lix_id,
                     elapsed_ms = elapsed_millis(started),
-                    "closed recovered workspace runtime"
+                    "closed recovered lix runtime"
                 ),
                 Err(error) => tracing::warn!(
-                    workspace_id,
+                    lix_id,
                     elapsed_ms = elapsed_millis(started),
                     error = %error,
-                    "released recovered workspace runtime after close error"
+                    "released recovered lix runtime after close error"
                 ),
             }
-            manager
-                .remove_recovered_runtime(&workspace_id, &runtime)
-                .await;
+            manager.remove_recovered_runtime(&lix_id, &runtime).await;
         });
     }
 
-    async fn remove_recovered_runtime(
-        &self,
-        workspace_id: &str,
-        expected_runtime: &Arc<WorkspaceRuntime>,
-    ) {
+    async fn remove_recovered_runtime(&self, lix_id: &str, expected_runtime: &Arc<LixRuntime>) {
         let mut state = self.state.lock().await;
-        if state.entries.get(workspace_id).is_some_and(|entry| {
+        if state.entries.get(lix_id).is_some_and(|entry| {
             entry
                 .runtime
                 .get()
                 .is_some_and(|runtime| Arc::ptr_eq(runtime, expected_runtime))
         }) {
-            state.entries.remove(workspace_id);
-            info!(workspace_id, "removed recovered workspace runtime");
+            state.entries.remove(lix_id);
+            info!(lix_id, "removed recovered lix runtime");
         }
     }
 
     #[cfg(test)]
-    async fn cached_workspace_count(&self) -> usize {
+    async fn cached_lix_count(&self) -> usize {
         self.state.lock().await.entries.len()
     }
 }
@@ -364,33 +355,33 @@ impl LixService {
     }
 }
 
-impl WorkspaceRuntime {
+impl LixRuntime {
     fn new(service: LixService) -> Self {
         Self {
-            state: Mutex::new(WorkspaceRuntimeState::Active(Arc::new(service))),
+            state: Mutex::new(LixRuntimeState::Active(Arc::new(service))),
         }
     }
 
     async fn acquire(&self) -> Option<Arc<LixService>> {
         let state = self.state.lock().await;
         match &*state {
-            WorkspaceRuntimeState::Active(service) => Some(Arc::clone(service)),
-            WorkspaceRuntimeState::Recovering => None,
+            LixRuntimeState::Active(service) => Some(Arc::clone(service)),
+            LixRuntimeState::Recovering => None,
         }
     }
 
     async fn begin_recovery(&self, expected_service: &Arc<LixService>) -> Option<Arc<LixService>> {
         let mut state = self.state.lock().await;
         match &*state {
-            WorkspaceRuntimeState::Active(service) if Arc::ptr_eq(service, expected_service) => {
-                let WorkspaceRuntimeState::Active(service) =
-                    std::mem::replace(&mut *state, WorkspaceRuntimeState::Recovering)
+            LixRuntimeState::Active(service) if Arc::ptr_eq(service, expected_service) => {
+                let LixRuntimeState::Active(service) =
+                    std::mem::replace(&mut *state, LixRuntimeState::Recovering)
                 else {
                     unreachable!("matched active runtime state")
                 };
                 Some(service)
             }
-            WorkspaceRuntimeState::Active(_) | WorkspaceRuntimeState::Recovering => None,
+            LixRuntimeState::Active(_) | LixRuntimeState::Recovering => None,
         }
     }
 
@@ -400,7 +391,7 @@ impl WorkspaceRuntime {
         };
         matches!(
             &*state,
-            WorkspaceRuntimeState::Active(service)
+            LixRuntimeState::Active(service)
                 if Arc::strong_count(service) == 1 && service.protocol.is_idle()
         )
     }
@@ -414,24 +405,24 @@ async fn close_drained_service(service: Arc<LixService>) -> Result<()> {
         result
     })
     .await
-    .context("join recovered workspace runtime close")?
+    .context("join recovered lix runtime close")?
 }
 
-impl fmt::Display for WorkspaceRuntimeError {
+impl fmt::Display for LixRuntimeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidId => write!(formatter, "invalid workspace ID"),
+            Self::InvalidId => write!(formatter, "invalid lix ID"),
             Self::AtCapacity { max } => write!(
                 formatter,
-                "workspace service is at its capacity of {max} active runtimes"
+                "lix service is at its capacity of {max} active runtimes"
             ),
-            Self::Recovering => write!(formatter, "workspace runtime is recovering"),
-            Self::Open(error) => write!(formatter, "open workspace runtime: {error:#}"),
+            Self::Recovering => write!(formatter, "lix runtime is recovering"),
+            Self::Open(error) => write!(formatter, "open lix runtime: {error:#}"),
         }
     }
 }
 
-impl Error for WorkspaceRuntimeError {
+impl Error for LixRuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Open(error) => Some(error.as_ref()),
@@ -440,15 +431,15 @@ impl Error for WorkspaceRuntimeError {
     }
 }
 
-fn valid_workspace_id(workspace_id: &str) -> bool {
-    !workspace_id.is_empty()
-        && workspace_id.len() <= 128
-        && workspace_id
+fn valid_lix_id(lix_id: &str) -> bool {
+    !lix_id.is_empty()
+        && lix_id.len() <= 128
+        && lix_id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
-fn idle_lru_workspace(entries: &HashMap<String, RuntimeEntry>) -> Option<String> {
+fn idle_lru_lix(entries: &HashMap<String, RuntimeEntry>) -> Option<String> {
     entries
         .iter()
         .filter(|(_, entry)| {
@@ -459,16 +450,16 @@ fn idle_lru_workspace(entries: &HashMap<String, RuntimeEntry>) -> Option<String>
                     .is_some_and(|runtime| Arc::strong_count(runtime) == 1 && runtime.is_idle())
         })
         .min_by_key(|(_, entry)| entry.last_used)
-        .map(|(workspace_id, _)| workspace_id.clone())
+        .map(|(lix_id, _)| lix_id.clone())
 }
 
-fn per_workspace_usize(total: usize, workspaces: usize) -> usize {
-    total.checked_div(workspaces).unwrap_or(0).max(1)
+fn per_lix_usize(total: usize, lixes: usize) -> usize {
+    total.checked_div(lixes).unwrap_or(0).max(1)
 }
 
-fn per_workspace_u64(total: u64, workspaces: usize) -> u64 {
+fn per_lix_u64(total: u64, lixes: usize) -> u64 {
     total
-        .checked_div(u64::try_from(workspaces).unwrap_or(u64::MAX))
+        .checked_div(u64::try_from(lixes).unwrap_or(u64::MAX))
         .unwrap_or(0)
         .max(1)
 }
@@ -495,14 +486,14 @@ fn s3_retry_config(budget: S3RequestBudget) -> RetryConfig {
 mod tests {
     use super::*;
 
-    fn memory_manager(max_open_workspaces: usize) -> Arc<WorkspaceRuntimeManager> {
-        WorkspaceRuntimeManager::new_in_memory(max_open_workspaces)
+    fn memory_manager(max_open_lixes: usize) -> Arc<LixRuntimeManager> {
+        LixRuntimeManager::new_in_memory(max_open_lixes)
     }
 
     #[tokio::test]
     async fn concurrent_gets_share_one_runtime() {
         let manager = memory_manager(2);
-        let (left, right) = tokio::join!(manager.get("workspace-a"), manager.get("workspace-a"));
+        let (left, right) = tokio::join!(manager.get("lix-a"), manager.get("lix-a"));
         let left = left.expect("open left runtime");
         let right = right.expect("open right runtime");
 
@@ -512,42 +503,30 @@ mod tests {
     #[tokio::test]
     async fn evicts_the_least_recently_used_idle_runtime() {
         let manager = memory_manager(1);
-        let first = manager
-            .get("workspace-a")
-            .await
-            .expect("open first runtime");
+        let first = manager.get("lix-a").await.expect("open first runtime");
         drop(first);
-        let second = manager
-            .get("workspace-b")
-            .await
-            .expect("open second runtime");
+        let second = manager.get("lix-b").await.expect("open second runtime");
 
-        assert_eq!(manager.cached_workspace_count().await, 1);
+        assert_eq!(manager.cached_lix_count().await, 1);
         drop(second);
-        let reopened = manager
-            .get("workspace-a")
-            .await
-            .expect("reopen first runtime");
-        assert_eq!(manager.cached_workspace_count().await, 1);
+        let reopened = manager.get("lix-a").await.expect("reopen first runtime");
+        assert_eq!(manager.cached_lix_count().await, 1);
         drop(reopened);
     }
 
     #[tokio::test]
     async fn active_service_lease_prevents_runtime_eviction() {
         let manager = memory_manager(1);
-        let active = manager
-            .get("workspace-a")
-            .await
-            .expect("open active runtime");
+        let active = manager.get("lix-a").await.expect("open active runtime");
 
         assert!(matches!(
-            manager.get("workspace-b").await,
-            Err(WorkspaceRuntimeError::AtCapacity { max: 1 })
+            manager.get("lix-b").await,
+            Err(LixRuntimeError::AtCapacity { max: 1 })
         ));
 
         drop(active);
         manager
-            .get("workspace-b")
+            .get("lix-b")
             .await
             .expect("evict runtime after its final service lease is released");
     }
@@ -558,10 +537,7 @@ mod tests {
         use tower::ServiceExt as _;
 
         let manager = memory_manager(1);
-        let service = manager
-            .get("workspace-a")
-            .await
-            .expect("open workspace runtime");
+        let service = manager.get("lix-a").await.expect("open lix runtime");
         let handshake = lix_server_protocol::handler(service.protocol())
             .oneshot(
                 Request::builder()
@@ -576,8 +552,8 @@ mod tests {
         drop(service);
 
         assert!(matches!(
-            manager.get("workspace-b").await,
-            Err(WorkspaceRuntimeError::AtCapacity { max: 1 })
+            manager.get("lix-b").await,
+            Err(LixRuntimeError::AtCapacity { max: 1 })
         ));
     }
 
@@ -587,11 +563,8 @@ mod tests {
         use tower::ServiceExt as _;
 
         const AGENTS: usize = 128;
-        let manager = WorkspaceRuntimeManager::new_in_memory_with_session_capacity(1, AGENTS);
-        let service = manager
-            .get("workspace-a")
-            .await
-            .expect("open workspace runtime");
+        let manager = LixRuntimeManager::new_in_memory_with_session_capacity(1, AGENTS);
+        let service = manager.get("lix-a").await.expect("open lix runtime");
         let protocol = lix_server_protocol::handler(service.protocol());
         let mut session_ids = Vec::with_capacity(AGENTS);
 
@@ -637,12 +610,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_unsafe_workspace_ids() {
+    async fn rejects_unsafe_lix_ids() {
         let manager = memory_manager(1);
-        for workspace_id in ["", "../escape", "contains/slash", "contains space"] {
+        for lix_id in ["", "../escape", "contains/slash", "contains space"] {
             assert!(matches!(
-                manager.get(workspace_id).await,
-                Err(WorkspaceRuntimeError::InvalidId)
+                manager.get(lix_id).await,
+                Err(LixRuntimeError::InvalidId)
             ));
         }
     }

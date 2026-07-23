@@ -51,7 +51,7 @@ type WorkspaceFetch = (
 Its normal implementation forwards HTTP to the workspace service, for example:
 
 ```text
-/workspaces/{workspaceId}/lix/v1/...
+/lixes/{lixId}/lix/v1/...
 ```
 
 For each request, `lix-server` validates the workspace ID, finds or lazily opens

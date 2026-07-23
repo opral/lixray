@@ -167,10 +167,10 @@ function OAuthConsentPage() {
 								This connection will be able to:
 							</h2>
 							<ul className="mb-3 mt-0 pl-5 leading-[1.55] text-[var(--color-text-secondary)]">
+								<li>List your accessible Lix workspaces and branches.</li>
 								<li>
-									List your accessible organizations, workspaces, and branches.
+									Inspect and change data in the Lix workspaces you select.
 								</li>
-								<li>Create and edit files and directories.</li>
 							</ul>
 							<p className="m-0 text-[var(--color-text-tertiary)]">
 								Requested OAuth scopes: {details.scopes.join(", ") || "none"}

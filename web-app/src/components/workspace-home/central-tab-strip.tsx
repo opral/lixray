@@ -14,26 +14,13 @@ import { useEffect, useRef, type ReactNode } from "react";
  */
 export function LixrayCentralTabStrip({
 	context,
-	pinnedTab,
 }: {
 	readonly context: AtelierTabStripContext;
-	/** Overrides the pinned tab's presentation (e.g. "Getting started"). */
-	readonly pinnedTab?: {
-		readonly label: string;
-		readonly icon: AtelierTabStripTab["icon"];
-	};
 }) {
 	return (
 		<div className="flex h-[var(--atelier-panel-header-height)] min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 			{context.tabs.map((tab) => (
-				<TabChip
-					key={tab.instanceId}
-					tab={
-						tab.isPinned && pinnedTab
-							? { ...tab, label: pinnedTab.label, icon: pinnedTab.icon }
-							: tab
-					}
-				/>
+				<TabChip key={tab.instanceId} tab={tab} />
 			))}
 		</div>
 	);

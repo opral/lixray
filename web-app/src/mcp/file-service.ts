@@ -5,9 +5,9 @@ const DEFAULT_READ_LINE_COUNT = 400;
 const MAX_READ_LINE_COUNT = 1000;
 export const MAX_PATH_LENGTH = 1024;
 
-const WORKSPACE_UUID_PATTERN =
+const LIX_UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const QUALIFIED_WORKSPACE_REF_PATTERN =
+const QUALIFIED_LIX_REF_PATTERN =
 	/^@([a-z0-9](?:-?[a-z0-9]){0,38})\/([a-z0-9](?:-?[a-z0-9]){0,99})$/;
 
 export type WireValue =
@@ -44,28 +44,22 @@ export interface ExecuteBatchRequest {
 	options?: { originKey?: string };
 }
 
-export interface WorkspaceSummary {
+export interface LixSummary {
 	id: string;
 	name: string;
 	slug: string;
-	organization: { id: string; name: string; handle: string };
+	namespace: { id: string; name: string; handle: string };
 }
 
 export interface LixRuntimeClient {
-	listWorkspaces(): Promise<Array<WorkspaceSummary>>;
-	/** Mirrors `lix.activeBranchId()`. The remote active branch is workspace state. */
-	activeBranchId(workspaceId: string): Promise<string>;
+	listLixes(): Promise<Array<LixSummary>>;
+	/** Mirrors `lix.activeBranchId()`. The remote active branch is session-local. */
+	activeBranchId(lixId: string): Promise<string>;
 	/** Mirrors `lix.switchBranch({ branchId })`. */
-	switchBranch(
-		workspaceId: string,
-		branchId: string,
-	): Promise<{ branchId: string }>;
-	execute(
-		workspaceId: string,
-		request: ExecuteRequest,
-	): Promise<ExecuteResponse>;
+	switchBranch(lixId: string, branchId: string): Promise<{ branchId: string }>;
+	execute(lixId: string, request: ExecuteRequest): Promise<ExecuteResponse>;
 	executeBatch(
-		workspaceId: string,
+		lixId: string,
 		request: ExecuteBatchRequest,
 	): Promise<ExecuteScriptResponse>;
 }
@@ -111,7 +105,7 @@ export type FileServiceErrorCode =
 	| "file_too_large"
 	| "invalid_edit"
 	| "recursive_required"
-	| "ambiguous_workspace_ref"
+	| "ambiguous_lix_ref"
 	| "upstream_error"
 	| `LIX_${string}`;
 
@@ -140,65 +134,64 @@ export class LixFileService {
 		this.agentReview = options.agentReview;
 	}
 
-	async listWorkspaces(): Promise<Array<WorkspaceSummary>> {
-		return this.client.listWorkspaces();
+	async listLixes(): Promise<Array<LixSummary>> {
+		return this.client.listLixes();
 	}
 
-	async resolveWorkspaceRef(workspaceRef: string): Promise<string> {
-		if (WORKSPACE_UUID_PATTERN.test(workspaceRef)) {
-			return workspaceRef.toLowerCase();
+	async resolveLixRef(lixRef: string): Promise<string> {
+		if (LIX_UUID_PATTERN.test(lixRef)) {
+			return lixRef.toLowerCase();
 		}
 
-		const qualified = QUALIFIED_WORKSPACE_REF_PATTERN.exec(workspaceRef);
-		const workspaces = await this.listWorkspaces();
+		const qualified = QUALIFIED_LIX_REF_PATTERN.exec(lixRef);
+		const lixes = await this.listLixes();
 		const matches = qualified
-			? workspaces.filter(
-					(workspace) =>
-						workspace.organization.handle === qualified[1] &&
-						workspace.slug === qualified[2],
+			? lixes.filter(
+					(lix) =>
+						lix.namespace.handle === qualified[1] && lix.slug === qualified[2],
 				)
-			: workspaces.filter((workspace) => workspace.slug === workspaceRef);
+			: lixes.filter((lix) => lix.slug === lixRef);
 
 		if (matches.length === 1) return matches[0].id;
 		if (matches.length === 0) {
-			throw new FileServiceError("not_found", "Workspace not found.");
+			throw new FileServiceError("not_found", "Lix not found.");
 		}
 		throw new FileServiceError(
-			"ambiguous_workspace_ref",
-			"Workspace slug is ambiguous; use an exact workspace UUID or @namespace/slug.",
+			"ambiguous_lix_ref",
+			"Lix slug is ambiguous; use an exact lix UUID or @namespace/slug.",
 		);
 	}
 
 	async executeSql(
-		workspaceId: string,
+		lixId: string,
 		statements: ExecuteBatchRequest["statements"],
 	): Promise<ExecuteScriptResponse> {
-		return this.client.executeBatch(workspaceId, { statements });
+		return this.client.executeBatch(lixId, { statements });
 	}
 
-	async activeBranchId(workspaceId: string): Promise<string> {
-		return this.client.activeBranchId(workspaceId);
+	async activeBranchId(lixId: string): Promise<string> {
+		return this.client.activeBranchId(lixId);
 	}
 
 	async switchBranch(
-		workspaceId: string,
+		lixId: string,
 		branchId: string,
 	): Promise<{ branchId: string }> {
-		return this.client.switchBranch(workspaceId, branchId);
+		return this.client.switchBranch(lixId, branchId);
 	}
 
 	async listDirectory(
-		workspaceId: string,
+		lixId: string,
 		rawPath: string,
 	): Promise<Array<EntrySummary>> {
 		const path = directoryPath(rawPath, { allowRoot: true });
-		const directoryId = await this.resolveDirectoryId(workspaceId, path);
+		const directoryId = await this.resolveDirectoryId(lixId, path);
 		const directoryFilter =
 			directoryId === null ? "parent_id IS NULL" : "parent_id = $1";
 		const params = directoryId === null ? [] : [text(directoryId)];
 		const fileFilter =
 			directoryId === null ? "directory_id IS NULL" : "directory_id = $1";
-		const result = await this.client.execute(workspaceId, {
+		const result = await this.client.execute(lixId, {
 			sql: `SELECT entry_kind, path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM (
 				SELECT 0 AS entry_kind, path, name, lix_json('null') AS lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_directory WHERE ${directoryFilter}
 				UNION ALL
@@ -229,7 +222,7 @@ export class LixFileService {
 	}
 
 	async findFiles(
-		workspaceId: string,
+		lixId: string,
 		query: string,
 		rawRoot = "/",
 	): Promise<Array<EntrySummary>> {
@@ -250,7 +243,7 @@ export class LixFileService {
 						text(root),
 						text(prefixUpperBound(root)),
 					];
-		const result = await this.client.execute(workspaceId, {
+		const result = await this.client.execute(lixId, {
 			sql: `SELECT path, name, lixcol_metadata, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE ${prefixClause}LOWER(path) LIKE $1 ORDER BY path`,
 			params,
 		});
@@ -267,13 +260,13 @@ export class LixFileService {
 	}
 
 	async readFile(
-		workspaceId: string,
+		lixId: string,
 		rawPath: string,
 		startLine = 1,
 		lineCount = DEFAULT_READ_LINE_COUNT,
 	): Promise<FileSnapshot> {
 		const path = filePath(rawPath);
-		const file = await this.loadFile(workspaceId, path);
+		const file = await this.loadFile(lixId, path);
 		const boundedStart = Math.max(Math.trunc(startLine), 1);
 		const boundedCount = Math.min(
 			Math.max(Math.trunc(lineCount), 1),
@@ -297,7 +290,7 @@ export class LixFileService {
 	}
 
 	async writeFile(
-		workspaceId: string,
+		lixId: string,
 		rawPath: string,
 		content: string,
 		expectedChangeId?: string,
@@ -308,12 +301,11 @@ export class LixFileService {
 
 		if (
 			expectedChangeId === undefined &&
-			(await this.entryExists(workspaceId, path))
+			(await this.entryExists(lixId, path))
 		) {
 			try {
-				expectedChangeId = (
-					await this.loadEntrySummary(workspaceId, path, "file")
-				).changeId;
+				expectedChangeId = (await this.loadEntrySummary(lixId, path, "file"))
+					.changeId;
 			} catch (caught) {
 				if (caught instanceof FileServiceError && caught.code === "not_found") {
 					throw new FileServiceError(
@@ -326,8 +318,8 @@ export class LixFileService {
 		}
 
 		if (expectedChangeId === undefined) {
-			await this.withAgentReview(workspaceId, () =>
-				this.client.execute(workspaceId, {
+			await this.withAgentReview(lixId, () =>
+				this.client.execute(lixId, {
 					sql: "INSERT INTO lix_file (path, data, lixcol_metadata) VALUES ($1, $2, $3)",
 					params: [
 						text(path),
@@ -337,8 +329,8 @@ export class LixFileService {
 				}),
 			);
 		} else {
-			await this.withAgentReview(workspaceId, async () => {
-				const response = await this.client.executeBatch(workspaceId, {
+			await this.withAgentReview(lixId, async () => {
+				const response = await this.client.executeBatch(lixId, {
 					statements: [
 						{
 							sql: "UPDATE lix_file SET data = $1, lixcol_metadata = $2 WHERE path = $3 AND lixcol_change_id = $4",
@@ -355,22 +347,22 @@ export class LixFileService {
 			});
 		}
 
-		return this.loadEntrySummary(workspaceId, path, "file");
+		return this.loadEntrySummary(lixId, path, "file");
 	}
 
 	private async withAgentReview<T>(
-		workspaceId: string,
+		lixId: string,
 		mutation: () => Promise<T>,
 	): Promise<T> {
 		if (!this.agentReview) return mutation();
-		const beforeBranchId = await this.client.activeBranchId(workspaceId);
-		const beforeCommitId = await this.activeBranchCommitId(workspaceId);
+		const beforeBranchId = await this.client.activeBranchId(lixId);
+		const beforeCommitId = await this.activeBranchCommitId(lixId);
 		const startedAt = Date.now();
 		const result = await mutation();
-		const afterBranchId = await this.client.activeBranchId(workspaceId);
-		const afterCommitId = await this.activeBranchCommitId(workspaceId);
+		const afterBranchId = await this.client.activeBranchId(lixId);
+		const afterCommitId = await this.activeBranchCommitId(lixId);
 		if (beforeCommitId !== afterCommitId) {
-			await this.appendAgentReview(workspaceId, {
+			await this.appendAgentReview(lixId, {
 				id: `mcp-${crypto.randomUUID()}`,
 				sourceId: this.agentReview.agent,
 				...(beforeBranchId === afterBranchId
@@ -388,8 +380,8 @@ export class LixFileService {
 		return result;
 	}
 
-	private async activeBranchCommitId(workspaceId: string): Promise<string> {
-		const result = await this.client.execute(workspaceId, {
+	private async activeBranchCommitId(lixId: string): Promise<string> {
+		const result = await this.client.execute(lixId, {
 			sql: "SELECT lix_active_branch_commit_id()",
 		});
 		const commitId = result.rows[0]?.[0];
@@ -403,14 +395,14 @@ export class LixFileService {
 	}
 
 	private async appendAgentReview(
-		workspaceId: string,
+		lixId: string,
 		range: Record<string, unknown>,
 	): Promise<void> {
 		const rangeId = typeof range.id === "string" ? range.id : "";
 		if (!rangeId) throw new Error("Agent review ranges require an id");
 		const key = `atelier_agent_turn_commit_range:${encodeURIComponent(rangeId)}`;
-		const branchId = await this.client.activeBranchId(workspaceId);
-		await this.client.execute(workspaceId, {
+		const branchId = await this.client.activeBranchId(lixId);
+		await this.client.execute(lixId, {
 			sql: "INSERT INTO lix_key_value_by_branch (key, value, lixcol_branch_id, lixcol_global, lixcol_untracked) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (key, lixcol_branch_id) DO NOTHING",
 			params: [
 				text(key),
@@ -423,7 +415,7 @@ export class LixFileService {
 	}
 
 	async editFile(
-		workspaceId: string,
+		lixId: string,
 		rawPath: string,
 		expectedChangeId: string | undefined,
 		edits: Array<{ oldText: string; newText: string; replaceAll?: boolean }>,
@@ -435,7 +427,7 @@ export class LixFileService {
 				"Provide between 1 and 50 exact text edits.",
 			);
 		}
-		const file = await this.loadFile(workspaceId, path);
+		const file = await this.loadFile(lixId, path);
 		if (expectedChangeId !== undefined && file.changeId !== expectedChangeId) {
 			throw conflict(path);
 		}
@@ -466,29 +458,26 @@ export class LixFileService {
 				? next.split(edit.oldText).join(edit.newText)
 				: next.replace(edit.oldText, () => edit.newText);
 		}
-		return this.writeFile(workspaceId, path, next, changeId);
+		return this.writeFile(lixId, path, next, changeId);
 	}
 
-	async createDirectory(
-		workspaceId: string,
-		rawPath: string,
-	): Promise<EntrySummary> {
+	async createDirectory(lixId: string, rawPath: string): Promise<EntrySummary> {
 		const path = directoryPath(rawPath, { allowRoot: false });
-		if (await this.entryExists(workspaceId, path)) {
+		if (await this.entryExists(lixId, path)) {
 			throw new FileServiceError(
 				"already_exists",
 				`An entry already exists at ${path}.`,
 			);
 		}
-		await this.client.execute(workspaceId, {
+		await this.client.execute(lixId, {
 			sql: "INSERT INTO lix_directory (path) VALUES ($1)",
 			params: [text(path)],
 		});
-		return this.loadEntrySummary(workspaceId, path, "directory");
+		return this.loadEntrySummary(lixId, path, "directory");
 	}
 
 	async moveEntry(
-		workspaceId: string,
+		lixId: string,
 		rawSourcePath: string,
 		rawDestinationPath: string,
 		expectedChangeId: string | undefined,
@@ -508,7 +497,7 @@ export class LixFileService {
 				"A directory cannot be moved inside itself.",
 			);
 		}
-		if (await this.entryExists(workspaceId, destination)) {
+		if (await this.entryExists(lixId, destination)) {
 			throw new FileServiceError(
 				"already_exists",
 				`An entry already exists at ${destination}.`,
@@ -516,9 +505,9 @@ export class LixFileService {
 		}
 		const changeId =
 			expectedChangeId ??
-			(await this.loadEntrySummary(workspaceId, source, kind)).changeId;
+			(await this.loadEntrySummary(lixId, source, kind)).changeId;
 		const table = kind === "file" ? "lix_file" : "lix_directory";
-		const response = await this.client.executeBatch(workspaceId, {
+		const response = await this.client.executeBatch(lixId, {
 			statements: [
 				{
 					sql: `UPDATE ${table} SET path = $1 WHERE path = $2 AND lixcol_change_id = $3`,
@@ -527,11 +516,11 @@ export class LixFileService {
 			],
 		});
 		assertGuardedMutationApplied(source, response);
-		return this.loadEntrySummary(workspaceId, destination, kind);
+		return this.loadEntrySummary(lixId, destination, kind);
 	}
 
 	async deleteEntry(
-		workspaceId: string,
+		lixId: string,
 		rawPath: string,
 		expectedChangeId: string | undefined,
 		recursive = false,
@@ -546,9 +535,9 @@ export class LixFileService {
 		}
 		const changeId =
 			expectedChangeId ??
-			(await this.loadEntrySummary(workspaceId, path, kind)).changeId;
+			(await this.loadEntrySummary(lixId, path, kind)).changeId;
 		const table = kind === "file" ? "lix_file" : "lix_directory";
-		const response = await this.client.executeBatch(workspaceId, {
+		const response = await this.client.executeBatch(lixId, {
 			statements: [
 				{
 					sql: `DELETE FROM ${table} WHERE path = $1 AND lixcol_change_id = $2`,
@@ -561,11 +550,11 @@ export class LixFileService {
 	}
 
 	private async resolveDirectoryId(
-		workspaceId: string,
+		lixId: string,
 		path: string,
 	): Promise<string | null> {
 		if (path === "/") return null;
-		const result = await this.client.execute(workspaceId, {
+		const result = await this.client.execute(lixId, {
 			sql: "SELECT id FROM lix_directory WHERE path = $1",
 			params: [text(path)],
 		});
@@ -577,7 +566,7 @@ export class LixFileService {
 	}
 
 	private async loadFile(
-		workspaceId: string,
+		lixId: string,
 		path: string,
 	): Promise<{
 		content: string;
@@ -585,7 +574,7 @@ export class LixFileService {
 		changeId: string;
 		updatedAt: string;
 	}> {
-		const result = await this.client.execute(workspaceId, {
+		const result = await this.client.execute(lixId, {
 			sql: "SELECT data, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE path = $1",
 			params: [text(path)],
 		});
@@ -613,13 +602,13 @@ export class LixFileService {
 	}
 
 	private async loadEntrySummary(
-		workspaceId: string,
+		lixId: string,
 		path: string,
 		kind: EntryKind,
 	): Promise<EntrySummary> {
 		const table = kind === "file" ? "lix_file" : "lix_directory";
 		const metadata = kind === "file" ? ", lixcol_metadata" : "";
-		const result = await this.client.execute(workspaceId, {
+		const result = await this.client.execute(lixId, {
 			sql: `SELECT path, name, lixcol_change_id, lixcol_updated_at${metadata} FROM ${table} WHERE path = $1`,
 			params: [text(path)],
 		});
@@ -637,13 +626,10 @@ export class LixFileService {
 		};
 	}
 
-	private async entryExists(
-		workspaceId: string,
-		path: string,
-	): Promise<boolean> {
+	private async entryExists(lixId: string, path: string): Promise<boolean> {
 		const fileCandidate = path.endsWith("/") ? path.slice(0, -1) : path;
 		const directoryCandidate = `${fileCandidate}/`;
-		const result = await this.client.execute(workspaceId, {
+		const result = await this.client.execute(lixId, {
 			sql: "SELECT id FROM lix_file WHERE path = $1 UNION ALL SELECT id FROM lix_directory WHERE path = $2",
 			params: [text(fileCandidate), text(directoryCandidate)],
 		});
