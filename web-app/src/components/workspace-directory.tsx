@@ -1,7 +1,5 @@
 import { Link } from "@tanstack/react-router";
 import {
-	Check,
-	Copy,
 	Download,
 	Ellipsis,
 	Link2,
@@ -107,7 +105,13 @@ export function WorkspaceDirectory() {
 		return (
 			<DirectoryStatus>
 				<span>{workspaceState.error}</span>
-				<Button onClick={() => void workspaceState.refresh()}>Try again</Button>
+				<Button
+					variant="featured"
+					className="font-bold"
+					onClick={() => void workspaceState.refresh()}
+				>
+					Try again
+				</Button>
 			</DirectoryStatus>
 		);
 	}
@@ -124,12 +128,6 @@ export function WorkspaceDirectory() {
 			.flatMap((organization) => organization.workspaces)
 			.map((workspace, index) => [workspace.id, index] as const),
 	);
-	const firstWorkspace = organizations
-		.flatMap((organization) =>
-			organization.workspaces.map((workspace) => ({ organization, workspace })),
-		)
-		.at(0);
-
 	return (
 		<div
 			className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary"
@@ -149,13 +147,14 @@ export function WorkspaceDirectory() {
 							Workspaces
 						</h1>
 						<Button
-							className="ml-auto max-[560px]:ml-0 max-[560px]:self-start"
+							variant="featured"
+							className="ml-auto h-9 gap-1.5 px-3.5 text-[13.5px] font-bold max-[560px]:ml-0 max-[560px]:self-start"
 							data-testid="new-workspace-button"
 							type="button"
 							disabled={writableOrganizations.length === 0}
 							onClick={() => setDialog({ type: "create" })}
 						>
-							<Plus aria-hidden="true" />
+							<Plus className="size-3.5" aria-hidden="true" />
 							New workspace
 						</Button>
 					</div>
@@ -221,15 +220,6 @@ export function WorkspaceDirectory() {
 							) : null,
 						)
 					)}
-
-					{workspaceCount > 0 ? <ConnectAgentRow /> : null}
-
-					{firstWorkspace && !isDemoModeEnabled ? (
-						<McpQuickstart
-							organization={firstWorkspace.organization}
-							workspace={firstWorkspace.workspace}
-						/>
-					) : null}
 				</section>
 			</main>
 
@@ -239,116 +229,6 @@ export function WorkspaceDirectory() {
 				onClose={() => setDialog(null)}
 			/>
 		</div>
-	);
-}
-
-function ConnectAgentRow() {
-	return (
-		<div className="mx-3.5 mt-10 flex items-center gap-3 rounded-[10px] border border-dashed border-[#DDD3C4] px-4 py-[13px] max-[560px]:mx-2">
-			<Link2
-				aria-hidden="true"
-				className="size-4 shrink-0 text-text-tertiary"
-			/>
-			<span className="text-[13px] text-text-tertiary">
-				Working from Claude, Codex, or another agent? Connect it to your
-				workspaces.
-			</span>
-			<span className="flex-1" />
-			<a
-				href="/docs/mcp"
-				className="inline-flex h-7 shrink-0 items-center rounded-[7px] border border-border-panel bg-bg-panel px-[13px] text-xs font-semibold whitespace-nowrap text-text-secondary shadow-xs hover:bg-bg-hover"
-			>
-				Connect an agent
-			</a>
-		</div>
-	);
-}
-
-function McpQuickstart({
-	organization,
-	workspace,
-}: {
-	organization: Organization;
-	workspace: Workspace;
-}) {
-	const [origin, setOrigin] = useState("");
-	const [copied, setCopied] = useState(false);
-
-	useEffect(() => setOrigin(window.location.origin), []);
-
-	const mcpUrl = `${origin || "http://localhost:8787"}/mcp`;
-	const isLocalhost = (() => {
-		try {
-			return ["localhost", "127.0.0.1", "::1"].includes(
-				new URL(origin || "http://localhost:8787").hostname,
-			);
-		} catch {
-			return false;
-		}
-	})();
-	const mcpServerName = isDemoModeEnabled
-		? "LixRay-Demo"
-		: isLocalhost
-			? "LixRay-Localhost"
-			: "LixRay";
-	const connectionInstructions = isDemoModeEnabled
-		? `If it is missing or points to another URL, create or replace that registration using ${mcpUrl}. This demo MCP server is authless, so do not run MCP login and do not reuse or replace a production LixRay connection.`
-		: `If it is missing or points to another URL, create or replace that registration using ${mcpUrl} and complete its OAuth connection.${isLocalhost ? " Do not reuse a production LixRay connection for this localhost workspace." : ""} Ask me only when an authorization approval must be clicked.`;
-	const workspaceUrl = `${origin || "http://localhost:8787"}${workspacePath(
-		organization,
-		workspace,
-	)}`;
-	const instructions = `Set up LixRay for me end to end in Codex. Use a global MCP server named "${mcpServerName}" with the exact URL ${mcpUrl}. First inspect the existing MCP configuration. Reuse it only if both its name and URL match exactly. ${connectionInstructions} If a newly connected MCP server requires a fresh Codex task, create that task and continue the setup there.
-
-Use this exact workspace:
-- Name: ${workspace.name}
-- Namespace: ${organization.handle}
-- Workspace ID: ${workspace.id}
-- Preview: ${workspaceUrl}
-
-Call list_workspaces through "${mcpServerName}" and confirm that it returns the exact workspace ID ${workspace.id}. Do not use a workspace ID remembered from another task or conversation. If this ID is unavailable, stop, reconnect "${mcpServerName}" at ${mcpUrl}, and run list_workspaces again before continuing.
-
-Open the workspace preview at ${workspaceUrl}. Do not create or edit any files yet. When everything is ready, tell me the workspace is connected and ask what document I would like you to create. After any future write, read the same file back from workspace ${workspace.id} and confirm its returned changeId and content before reporting that the write succeeded.`;
-
-	const copyInstructions = async () => {
-		await navigator.clipboard.writeText(instructions);
-		setCopied(true);
-		toast.success("Codex setup prompt copied");
-		window.setTimeout(() => setCopied(false), 1800);
-	};
-
-	return (
-		<section
-			className="mx-3.5 mt-10 rounded-xl border border-border-panel bg-bg-panel p-5 max-[560px]:mx-2"
-			aria-labelledby="mcp-quickstart-title"
-		>
-			<div className="flex items-start gap-4">
-				<div className="min-w-0 flex-1">
-					<h2
-						className="m-0 text-[16px] font-semibold tracking-[-0.01em]"
-						id="mcp-quickstart-title"
-					>
-						Connect with Codex
-					</h2>
-					<p className="mt-1.5 mb-0 text-[13px] leading-relaxed text-text-tertiary">
-						Paste this prompt into Codex. It will connect LixRay, open your
-						workspace, and help you create your first document.
-					</p>
-				</div>
-				<Button
-					variant="outline"
-					size="sm"
-					type="button"
-					onClick={() => void copyInstructions()}
-				>
-					{copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-					{copied ? "Copied" : "Copy prompt"}
-				</Button>
-			</div>
-			<pre className="mt-4 mb-0 overflow-x-auto whitespace-pre-wrap rounded-lg border border-border-subtle bg-bg-app p-4 font-mono text-[12px] leading-[1.6] text-text-secondary">
-				{instructions}
-			</pre>
-		</section>
 	);
 }
 
@@ -660,7 +540,8 @@ function WorkspaceDialog({
 						</Button>
 						<Button
 							type="submit"
-							variant={isDelete ? "destructive" : "default"}
+							variant={isDelete ? "destructive" : "featured"}
+							className={isDelete ? undefined : "font-bold"}
 							disabled={
 								busy ||
 								(isDelete

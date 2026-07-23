@@ -22,7 +22,7 @@ export interface Env {
 	SLATEDB_BLOCK_CACHE_BYTES?: string;
 	SLATEDB_METADATA_CACHE_BYTES?: string;
 	LIXRAY_DEMO?: string;
-	LIXRAY_DEMO_WORKSPACE_IDS?: string;
+	LIXRAY_DEMO_LIX_IDS?: string;
 	GOOGLE_ANALYTICS_ID?: string;
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;

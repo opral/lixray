@@ -12,8 +12,8 @@ import {
 	DEMO_CREATED_WORKSPACE_ID,
 	DEMO_ORGANIZATION_ID,
 	DEMO_ORGANIZATION_NAME,
-	DEMO_WORKSPACE_ID,
-	DEMO_WORKSPACE_NAME,
+	DEMO_LIX_ID,
+	DEMO_LIX_NAME,
 } from "~/lib/demo-identity";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import type { LixraySupabaseClient } from "~/lib/supabase";
@@ -102,7 +102,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			setError(null);
 			try {
 				const { error: provisioningError } = await client.rpc(
-					"ensure_personal_workspace_only",
+					"bootstrap_personal_namespace",
 				);
 				if (provisioningError) throw provisioningError;
 				const nextOrganizations = await loadOrganizations(client);
@@ -216,7 +216,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 		async (name: string) => {
 			if (!client) throw new Error("Authentication is still loading");
 			const { data, error: createError } = await client.rpc(
-				"create_organization",
+				"create_namespace",
 				{ p_name: normalizeName(name, "Organization") },
 			);
 			if (createError) throw createError;
@@ -234,8 +234,8 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			if (selectedOrganization.role !== "owner") {
 				throw new Error("Only organization owners can rename an organization");
 			}
-			const { error: renameError } = await client.rpc("rename_organization", {
-				p_organization_id: selectedOrganization.id,
+			const { error: renameError } = await client.rpc("rename_namespace", {
+				p_namespace_id: selectedOrganization.id,
 				p_name: normalizeName(name, "Organization"),
 			});
 			if (renameError) throw renameError;
@@ -261,12 +261,21 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 					"Workspace membership does not grant organization access",
 				);
 			}
-			const { error: createError } = await client.from("workspaces").insert({
-				organization_id: targetOrganization.id,
-				name: normalizeName(name, "Workspace"),
-			});
+			const normalizedName = normalizeName(name, "Workspace");
+			const { data: createdLix, error: createError } = await client
+				.from("lixes")
+				.insert({
+					namespace_id: targetOrganization.id,
+					name: normalizedName,
+					slug: workspaceSlug(normalizedName),
+				})
+				.select("id")
+				.single();
 			if (createError) throw createError;
-			await refresh({ organizationId: targetOrganization.id });
+			await refresh({
+				organizationId: targetOrganization.id,
+				workspaceId: createdLix.id,
+			});
 			captureTelemetry("workspace_created");
 		},
 		[client, organizations, refresh, selectedOrganization],
@@ -285,7 +294,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				);
 			}
 			const { error: renameError } = await client
-				.from("workspaces")
+				.from("lixes")
 				.update({ name: normalizeName(name, "Workspace") })
 				.eq("id", workspaceId);
 			if (renameError) throw renameError;
@@ -309,8 +318,8 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 					"Workspace membership does not grant organization access",
 				);
 			}
-			const { error: deleteError } = await client.rpc("delete_workspace", {
-				p_workspace_id: workspaceId,
+			const { error: deleteError } = await client.rpc("delete_lix", {
+				p_lix_id: workspaceId,
 			});
 			if (deleteError) throw deleteError;
 			await refresh();
@@ -361,33 +370,35 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 async function loadOrganizations(
 	client: LixraySupabaseClient,
 ): Promise<Array<Organization>> {
-	const { data, error } = await client.rpc("list_accessible_workspaces");
+	const { data, error } = await client.rpc("list_accessible_lixes");
 	if (error) throw error;
 
 	const organizations = new Map<string, Organization>();
 	for (const row of data ?? []) {
-		const organizationId = String(row.organization_id);
+		const organizationId = String(row.namespace_id);
 		let organization = organizations.get(organizationId);
 		if (!organization) {
 			organization = {
 				id: organizationId,
-				name: String(row.organization_name),
-				handle: String(row.organization_handle),
-				role: row.organization_role,
-				createdAt: String(row.organization_created_at),
-				updatedAt: String(row.organization_updated_at),
+				name: String(row.namespace_name),
+				handle: String(row.namespace_handle),
+				role: row.namespace_role,
+				createdAt: String(row.namespace_created_at),
+				updatedAt: String(row.namespace_updated_at),
 				workspaces: [],
 			};
 			organizations.set(organizationId, organization);
 		}
-		organization.workspaces.push({
-			id: String(row.workspace_id),
-			organizationId,
-			name: String(row.workspace_name),
-			slug: String(row.workspace_slug),
-			createdAt: String(row.workspace_created_at),
-			updatedAt: String(row.workspace_updated_at),
-		});
+		if (row.lix_id) {
+			organization.workspaces.push({
+				id: String(row.lix_id),
+				organizationId,
+				name: String(row.lix_name),
+				slug: String(row.lix_slug),
+				createdAt: String(row.lix_created_at),
+				updatedAt: String(row.lix_updated_at),
+			});
+		}
 	}
 
 	return [...organizations.values()]
@@ -410,17 +421,16 @@ function DemoWorkspaceProvider({ children }: { children: ReactNode }) {
 		updatedAt: "2026-07-12T18:58:00.000Z",
 		workspaces: [
 			{
-				id: DEMO_WORKSPACE_ID,
+				id: DEMO_LIX_ID,
 				organizationId: DEMO_ORGANIZATION_ID,
-				name: DEMO_WORKSPACE_NAME,
-				slug: DEMO_WORKSPACE_NAME,
+				name: DEMO_LIX_NAME,
+				slug: DEMO_LIX_NAME,
 				createdAt: "2026-07-01T12:00:00.000Z",
 				updatedAt: "2026-07-12T18:58:00.000Z",
 			},
 		],
 	}));
-	const [selectedWorkspaceId, setSelectedWorkspaceId] =
-		useState(DEMO_WORKSPACE_ID);
+	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(DEMO_LIX_ID);
 	const selectedWorkspace =
 		organization.workspaces.find(
 			(workspace) => workspace.id === selectedWorkspaceId,

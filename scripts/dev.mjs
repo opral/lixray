@@ -85,8 +85,8 @@ composeEnv = {
 	LIXRAY_SERVER_PORT: process.env.LIXRAY_SERVER_PORT ?? "18080",
 	LIXRAY_MINIO_PORT: process.env.LIXRAY_MINIO_PORT ?? "19000",
 	LIXRAY_MINIO_CONSOLE_PORT: process.env.LIXRAY_MINIO_CONSOLE_PORT ?? "19001",
-	LIXRAY_WORKSPACE_SERVICE_URL:
-		process.env.LIXRAY_WORKSPACE_SERVICE_URL ?? "http://lix-server:8080",
+	LIXRAY_LIX_SERVICE_URL:
+		process.env.LIXRAY_LIX_SERVICE_URL ?? "http://lix-server:8080",
 	LIXRAY_INTERNAL_TOKEN: internalToken,
 	SUPABASE_URL: composeSupabaseUrl,
 	SUPABASE_JWKS_URL: `${composeSupabaseUrl}/auth/v1/.well-known/jwks.json`,
@@ -134,8 +134,8 @@ webApp = spawn(
 		env: {
 			...composeEnv,
 			LIXRAY_WORKER_TARGET: "railway",
-			LIXRAY_WORKSPACE_SERVICE_URL:
-				process.env.LIXRAY_WORKSPACE_SERVICE_URL ??
+			LIXRAY_LIX_SERVICE_URL:
+				process.env.LIXRAY_LIX_SERVICE_URL ??
 				`http://127.0.0.1:${composeEnv.LIXRAY_SERVER_PORT}`,
 			SUPABASE_URL: supabaseUrl,
 			SUPABASE_JWKS_URL: `${supabaseUrl}/auth/v1/.well-known/jwks.json`,

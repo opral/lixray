@@ -21,7 +21,7 @@ export const Route = createFileRoute("/sign-in")({
 function SignInPage() {
 	const { isLoaded, signInAsLocalDev, signInWithGoogle, user } = useAuth();
 	const search = Route.useSearch();
-	const returnTo = normalizeAuthReturnTo(search.returnTo ?? "/home");
+	const returnTo = normalizeAuthReturnTo(search.returnTo ?? "/open");
 	const [error, setError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
 	const usesPreviewAccount = isDemoModeEnabled;

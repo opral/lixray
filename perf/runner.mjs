@@ -166,7 +166,7 @@ async function waitForServer(workspaceId) {
   while (Date.now() < deadline) {
     try {
       const response = await fetch(
-        `${baseUrl}/workspaces/${encodeURIComponent(workspaceId)}/lix/v1/`,
+        `${baseUrl}/lixes/${encodeURIComponent(workspaceId)}/lix/v1/`,
         { headers: requestHeaders() },
       );
       if (response.ok) return;
@@ -212,7 +212,7 @@ function assertRowsAffected(result, expected, operation) {
 
 async function protocolRequest(workspaceId, operation, body) {
   const response = await fetch(
-    `${baseUrl}/workspaces/${encodeURIComponent(workspaceId)}/lix/v1/${operation}`,
+    `${baseUrl}/lixes/${encodeURIComponent(workspaceId)}/lix/v1/${operation}`,
     {
       method: "POST",
       headers: requestHeaders({ "content-type": "application/json" }),

@@ -8,7 +8,7 @@ import {
 import { createMcpTelemetrySession } from "./mcp-telemetry.ts";
 
 const SURFACE_VERSION = "fnv1a32:1234abcd";
-const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
+const LIX_ID = "11111111-1111-4111-8111-111111111111";
 
 void test("MCP telemetry captures a PostHog AI span for production tool usage", async () => {
 	const captured: Array<EventMessage> = [];
@@ -43,11 +43,11 @@ void test("MCP telemetry captures a PostHog AI span for production tool usage", 
 	assert.ok(session);
 
 	session.onToolCall({
-		toolName: "list_workspaces",
+		toolName: "list_lixes",
 		outcome: "success",
 		durationMs: 12,
 		surfaceVersion: SURFACE_VERSION,
-		workspaceId: WORKSPACE_ID,
+		lixId: LIX_ID,
 	});
 	await session.flush();
 
@@ -56,26 +56,26 @@ void test("MCP telemetry captures a PostHog AI span for production tool usage", 
 	const event = captured[0];
 	assert.equal(event?.distinctId, "user-123");
 	assert.equal(event?.event, "$ai_span");
-	assert.deepEqual(event?.groups, { workspace: WORKSPACE_ID });
+	assert.deepEqual(event?.groups, { lix: LIX_ID });
 	assert.match(String(event?.properties?.$ai_trace_id), UUID_PATTERN);
 	assert.match(String(event?.properties?.$ai_span_id), UUID_PATTERN);
 	assert.deepEqual(omitIds(event?.properties), {
-		$ai_span_name: "mcp.list_workspaces",
+		$ai_span_name: "mcp.list_lixes",
 		$ai_latency: 0.012,
 		$ai_is_error: false,
 		mcp_server: "lixray",
-		mcp_tool: "list_workspaces",
+		mcp_tool: "list_lixes",
 		outcome: "success",
 		duration_ms: 12,
 		oauth_client_id: "oauth-client-456",
 		environment: "production",
 		release_id: "worker-version-123",
 		mcp_surface_version: SURFACE_VERSION,
-		workspace_id: WORKSPACE_ID,
+		lix_id: LIX_ID,
 	});
 });
 
-void test("MCP telemetry records trace errors without workspace grouping", async () => {
+void test("MCP telemetry records trace errors without lix grouping", async () => {
 	const captured: Array<EventMessage> = [];
 	const session = createMcpTelemetrySession(
 		{
@@ -117,7 +117,7 @@ void test("MCP telemetry records trace errors without workspace grouping", async
 	assert.equal(captured[0]?.groups, undefined);
 });
 
-void test("MCP traces expose SQL friction without workspace values or result rows", async () => {
+void test("MCP traces expose SQL friction without lix values or result rows", async () => {
 	const captured: Array<EventMessage> = [];
 	const session = createMcpTelemetrySession(
 		{
@@ -164,7 +164,7 @@ void test("MCP traces expose SQL friction without workspace values or result row
 		outcome: "success",
 		durationMs: 4,
 		surfaceVersion: SURFACE_VERSION,
-		workspaceId: WORKSPACE_ID,
+		lixId: LIX_ID,
 		executeInput,
 		executeOutput,
 	});
@@ -259,7 +259,7 @@ void test("PostHog delivery failures do not escape the telemetry session", async
 
 	assert.doesNotThrow(() =>
 		session.onToolCall({
-			toolName: "list_workspaces",
+			toolName: "list_lixes",
 			outcome: "success",
 			durationMs: 1,
 			surfaceVersion: SURFACE_VERSION,

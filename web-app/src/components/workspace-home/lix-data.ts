@@ -119,6 +119,16 @@ export function useWorkspaceTree(lix: Lix): WorkspaceTree | null {
 	}, [dirRows, fileRows]);
 }
 
+/**
+ * One-shot check whether the workspace has zero files — used before the
+ * Atelier shell mounts (e.g. to seed the getting-started tab); the hook
+ * below is the live variant.
+ */
+export async function workspaceHasNoFiles(lix: Lix): Promise<boolean> {
+	const result = await lix.execute("SELECT 1 FROM lix_file LIMIT 1", []);
+	return result.rows.length === 0;
+}
+
 /** Whether the workspace has zero files (null while loading / no lix). */
 export function useWorkspaceIsEmpty(lix: Lix | null): boolean | null {
 	const [isEmpty, setIsEmpty] = useState<boolean | null>(null);

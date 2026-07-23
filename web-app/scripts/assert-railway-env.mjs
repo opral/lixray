@@ -1,6 +1,6 @@
 const forbiddenDemoVariables = [
 	"LIXRAY_DEMO",
-	"LIXRAY_DEMO_WORKSPACE_IDS",
+	"LIXRAY_DEMO_LIX_IDS",
 	"VITE_LIXRAY_DEMO",
 ];
 

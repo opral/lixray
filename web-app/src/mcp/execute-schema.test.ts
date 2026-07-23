@@ -31,12 +31,12 @@ ORDER BY table_name, ordinal_position;`);
 
 	for (const table of EXECUTE_SQL_CORE_TABLES) {
 		const actualColumns = columnsByTable.get(table.name);
-		assert.ok(actualColumns, `${table.name} should exist in a fresh workspace`);
+		assert.ok(actualColumns, `${table.name} should exist in a fresh lix`);
 		for (const documentedColumn of table.columns) {
 			const columnName = documentedColumn.split(" ")[0];
 			assert.ok(
 				actualColumns.has(columnName),
-				`${table.name}.${columnName} should exist in a fresh workspace`,
+				`${table.name}.${columnName} should exist in a fresh lix`,
 			);
 		}
 	}
@@ -50,7 +50,7 @@ void test("execute tool documents only the compact core schema", () => {
 		EXECUTE_SQL_CORE_SCHEMA,
 		/lix_state|_by_branch|_history|lixcol_/,
 	);
-	assert.match(EXECUTE_TOOL_DESCRIPTION, /Entity tables are workspace-dynamic/);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /Entity tables are lix-dynamic/);
 	assert.match(EXECUTE_TOOL_DESCRIPTION, /information_schema/);
 	assert.match(EXECUTE_TOOL_DESCRIPTION, /lix_file\.path.*never ends/);
 	assert.match(EXECUTE_TOOL_DESCRIPTION, /lix_directory\.path.*always does/);

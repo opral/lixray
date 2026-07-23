@@ -14,8 +14,7 @@ export default {
 		return handleRequest(request, env, {
 			executionContext: ctx,
 			parseSqlScript,
-			workspaceFetch: (workspaceId, workspaceRequest) =>
-				fetchWorkspaceService(env, workspaceId, workspaceRequest),
+			lixFetch: (lixId, lixRequest) => fetchLixService(env, lixId, lixRequest),
 			fallback: async (fallbackRequest) => {
 				const response = await startHandler.fetch(fallbackRequest);
 				return withShareSecurityHeaders(
@@ -30,13 +29,15 @@ export default {
 	},
 };
 
-export async function fetchWorkspaceService(
+export async function fetchLixService(
 	env: WorkerEnv,
-	workspaceId: string,
+	lixId: string,
 	request: Request,
 ): Promise<Response> {
-	if (!env.LIXRAY_WORKSPACE_SERVICE_URL) {
-		return new Response("LIXRAY_WORKSPACE_SERVICE_URL is not configured\n", {
+	const serviceUrl =
+		env.LIXRAY_LIX_SERVICE_URL ?? env.LIXRAY_WORKSPACE_SERVICE_URL;
+	if (!serviceUrl) {
+		return new Response("LIXRAY_LIX_SERVICE_URL is not configured\n", {
 			status: 500,
 		});
 	}
@@ -47,8 +48,8 @@ export async function fetchWorkspaceService(
 	}
 
 	const sourceUrl = new URL(request.url);
-	const targetUrl = new URL(env.LIXRAY_WORKSPACE_SERVICE_URL);
-	targetUrl.pathname = `/workspaces/${encodeURIComponent(workspaceId)}${sourceUrl.pathname}`;
+	const targetUrl = new URL(serviceUrl);
+	targetUrl.pathname = `/lixes/${encodeURIComponent(lixId)}${sourceUrl.pathname}`;
 	targetUrl.search = sourceUrl.search;
 
 	const headers = new Headers(request.headers);

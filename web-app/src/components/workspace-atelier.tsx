@@ -22,7 +22,7 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
-import { PencilLine, Sparkles } from "lucide-react";
+import { PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
 import { WorkspaceShareDialog } from "~/components/workspace-share-dialog";
@@ -57,12 +57,14 @@ import {
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
-	lixrayWorkspaceExtensions,
+	createLixrayWorkspaceExtensions,
+	emptyWorkspaceOpeningUiState,
 } from "~/components/workspace-home/host-extensions";
 import { LixrayCentralTabStrip } from "~/components/workspace-home/central-tab-strip";
 import {
 	normalizeHomeDirPath,
 	useWorkspaceIsEmpty,
+	workspaceHasNoFiles,
 } from "~/components/workspace-home/lix-data";
 
 interface WorkspaceAtelierProps {
@@ -140,6 +142,9 @@ export function WorkspaceAtelier({
 	const branchIdRef = useRef(branchId);
 	const routeBranchSwitchRef = useRef(0);
 	const suppressBranchNavigationRef = useRef(false);
+	// Instance whose session state was seeded with the Getting started tab;
+	// the first root-URL sync must not clobber that seed by forcing Home.
+	const emptyWorkspaceSeededRef = useRef<AtelierInstance | null>(null);
 	const eventHandlerRef = useRef<(event: AtelierEvent) => void>(
 		() => undefined,
 	);
@@ -191,10 +196,9 @@ export function WorkspaceAtelier({
 		client && workspaceIsEmpty === false ? (
 			<WorkspaceShareControl
 				createShareToken={async () => {
-					const { data, error } = await client.rpc(
-						"create_workspace_share_token",
-						{ p_workspace_id: workspaceId },
-					);
+					const { data, error } = await client.rpc("create_lix_share_token", {
+						p_lix_id: workspaceId,
+					});
 					if (error) throw error;
 					const token = data?.[0]?.token;
 					if (!isWorkspaceShareToken(token)) {
@@ -399,35 +403,52 @@ export function WorkspaceAtelier({
 					},
 				});
 				setBranchSession(workspaceBranchSession);
-				setInstance(
-					createAtelier({
-						lix: session.lix,
-						readOnly: isReadOnly,
-						branchSession: workspaceBranchSession,
-						reviewRangeSessionId: userId,
-						extensions: lixrayWorkspaceExtensions,
-						centralPanel: {
-							home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
-						},
-						sessionStateStore: createWorkspaceSessionStateStore({
-							userId,
-							workspaceId,
-							clientState: session.lix.clientState,
-						}),
-						preferencesStore: createWorkspacePreferencesStore({
-							client: canEdit ? client : null,
-							userId,
-							workspaceId,
-							clientState: session.lix.clientState,
-						}),
-						reviewStatusStore: createWorkspaceReviewStatusStore({
-							client: canEdit ? client : null,
-							userId,
-							workspaceId,
-						}),
-						onEvent: (event) => eventHandlerRef.current(event),
-					}),
+				// An empty workspace defaults to the Getting started tab (12f),
+				// seeded into the first-visit session state rather than opened
+				// imperatively — views.open() races the shell's mount/restore.
+				const startsEmpty = await workspaceHasNoFiles(session.lix).catch(
+					() => false,
 				);
+				if (disposed) return;
+				const atelierInstance = createAtelier({
+					lix: session.lix,
+					readOnly: isReadOnly,
+					branchSession: workspaceBranchSession,
+					reviewRangeSessionId: userId,
+					extensions: createLixrayWorkspaceExtensions({
+						lixId: workspaceId,
+						namespace,
+						lixSlug: workspaceSlug,
+						lixName: workspaceName,
+					}),
+					centralPanel: {
+						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
+					},
+					sessionStateStore: createWorkspaceSessionStateStore({
+						userId,
+						workspaceId,
+						clientState: session.lix.clientState,
+						...(startsEmpty
+							? { initializeSnapshot: emptyWorkspaceOpeningUiState }
+							: {}),
+					}),
+					preferencesStore: createWorkspacePreferencesStore({
+						client: canEdit ? client : null,
+						userId,
+						workspaceId,
+						clientState: session.lix.clientState,
+					}),
+					reviewStatusStore: createWorkspaceReviewStatusStore({
+						client: canEdit ? client : null,
+						userId,
+						workspaceId,
+					}),
+					onEvent: (event) => eventHandlerRef.current(event),
+				});
+				if (startsEmpty) {
+					emptyWorkspaceSeededRef.current = atelierInstance;
+				}
+				setInstance(atelierInstance);
 				captureTelemetry("workspace_opened");
 				const actualBranchId = session.activeBranchSnapshot();
 				if (
@@ -466,6 +487,7 @@ export function WorkspaceAtelier({
 		namespace,
 		user?.id,
 		workspaceId,
+		workspaceName,
 		workspaceSlug,
 	]);
 
@@ -534,6 +556,14 @@ export function WorkspaceAtelier({
 		if (!instance) return;
 		const workspaceRoot = `/@${namespace}/${workspaceSlug}`;
 		if (pathname !== workspaceRoot) return;
+		// The first sync of a seeded empty workspace keeps the Getting started
+		// tab active instead of forcing Home over it (12f). Later returns to
+		// the root URL activate Home as usual.
+		if (emptyWorkspaceSeededRef.current === instance) {
+			emptyWorkspaceSeededRef.current = null;
+			markRouteSynced();
+			return;
+		}
 		void instance.views
 			.open(LIXRAY_HOME_EXTENSION_ID)
 			.catch((error: unknown) => {
@@ -591,14 +621,7 @@ export function WorkspaceAtelier({
 											</span>
 										),
 										centralTabStrip: (context) => (
-											<LixrayCentralTabStrip
-												context={context}
-												pinnedTab={
-													workspaceIsEmpty
-														? { label: "Getting started", icon: Sparkles }
-														: undefined
-												}
-											/>
+											<LixrayCentralTabStrip context={context} />
 										),
 										navbarEnd: headerActions,
 									}}

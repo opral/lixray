@@ -1,7 +1,14 @@
 import type { Lix } from "@lix-js/sdk";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import DOMPurify from "dompurify";
-import { ChevronDown, Link2, PencilLine, Plus, Sparkles } from "lucide-react";
+import {
+	Check,
+	ChevronDown,
+	Copy,
+	Link2,
+	PencilLine,
+	Plus,
+} from "lucide-react";
 import { marked } from "marked";
 import {
 	useCallback,
@@ -14,6 +21,10 @@ import {
 	type ReactNode,
 } from "react";
 import { Button } from "~/components/ui/button";
+import {
+	createLixConnectionDetails,
+	type LixConnectionPromptInput,
+} from "~/lib/lix-connection-prompt";
 import {
 	createWorkspaceFile,
 	createWorkspaceFolder,
@@ -30,10 +41,10 @@ type DirectoryViewProps = {
 	readonly lix: Lix;
 	/** Normalized trailing-slash directory path; "/" is the workspace home. */
 	readonly dirPath: string;
-	/** The pinned home shows the connect row and the getting-started state. */
+	/** The pinned home shows the connect row. */
 	readonly isHome: boolean;
 	readonly readOnly: boolean;
-	readonly connectHref: string;
+	readonly connection: Omit<LixConnectionPromptInput, "origin">;
 	/** Only the active view binds shortcuts (several stay mounted hidden). */
 	readonly isActive?: boolean;
 	readonly onOpenFile: (
@@ -56,7 +67,7 @@ export function DirectoryView({
 	dirPath,
 	isHome,
 	readOnly,
-	connectHref,
+	connection,
 	isActive = true,
 	onOpenFile,
 	onOpenDir,
@@ -67,9 +78,13 @@ export function DirectoryView({
 		[tree, dirPath],
 	);
 	const readme = useFileMarkdown(lix, listing?.readmePath ?? null);
-	const [isDropTarget, setIsDropTarget] = useState(false);
 	const [actionError, setActionError] = useState<string | null>(null);
-	const dragDepthRef = useRef(0);
+	const { isDropTarget, dragHandlers } = useImportDrop({
+		lix,
+		dirPath,
+		readOnly,
+		onError: setActionError,
+	});
 
 	const createFile = useCallback(
 		async (extension: "md" | "csv" | "excalidraw") => {
@@ -116,6 +131,198 @@ export function DirectoryView({
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [dirPath, isActive, lix, onOpenFile, readOnly]);
 
+	if (!tree || !listing) {
+		return <div className="h-full w-full" aria-busy="true" />;
+	}
+
+	return (
+		<div
+			className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
+			{...dragHandlers}
+		>
+			{isDropTarget ? <DropImportOverlay /> : null}
+			<div className="mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10">
+				{readOnly ? null : (
+					<div className="flex items-center pb-5">
+						<span className="flex-1" />
+						<NewMenu
+							onCreateFile={(extension) => void createFile(extension)}
+							onCreateFolder={() => {
+								setActionError(null);
+								void createWorkspaceFolder(lix, dirPath).catch(
+									(error: unknown) => {
+										console.error("workspace-home: new folder failed", error);
+										setActionError("Unable to create the folder. Try again.");
+									},
+								);
+							}}
+						/>
+					</div>
+				)}
+				{actionError ? (
+					<p
+						role="alert"
+						className="mb-3 rounded-lg bg-error-700/10 px-3 py-2 text-[13px] text-error-700"
+					>
+						{actionError}
+					</p>
+				) : null}
+				{isHome ? (
+					<div className="mb-4 flex items-center gap-3 rounded-[10px] border border-dashed border-border-action-secondary px-4 py-3">
+						<Link2
+							className="size-4 shrink-0 text-text-tertiary"
+							aria-hidden="true"
+						/>
+						<span className="text-[13px] text-text-secondary">
+							Connect this agent to my Lix workspace. LixRay hosts it.
+						</span>
+						<span className="flex-1" />
+						<AgentConnectionActions connection={connection} compact />
+					</div>
+				) : null}
+				<div className="flex flex-col gap-px" data-testid="home-entry-list">
+					{listing.dirs.map((dir) => (
+						<EntryRow
+							key={dir.path}
+							icon={
+								<img src="/icon-sq-folder.svg" alt="" className="size-[19px]" />
+							}
+							name={dir.name}
+							meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
+							onClick={(event) =>
+								onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
+							}
+						/>
+					))}
+					{listing.files.map((file) => (
+						<EntryRow
+							key={file.path}
+							icon={
+								<img
+									src={fileIconUrl(file.name)}
+									alt=""
+									className="size-[19px]"
+								/>
+							}
+							name={file.name}
+							meta={formatUpdatedAt(file.updatedAt)}
+							onClick={(event) =>
+								onOpenFile(file.path, { newTab: newTabFromMouseEvent(event) })
+							}
+						/>
+					))}
+				</div>
+				{listing.readmePath && readme !== null ? (
+					<ReadmePreview
+						fileName={
+							listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
+						}
+						markdown={readme}
+						onOpen={(event) =>
+							onOpenFile(listing.readmePath as string, {
+								newTab: newTabFromMouseEvent(event),
+							})
+						}
+						onNavigate={(href, event) => {
+							const resolved = resolveWorkspaceHref(dirPath, href);
+							if (!resolved) return false;
+							const asDir = normalizeHomeDirPath(resolved);
+							const isDir =
+								href.endsWith("/") ||
+								tree.dirs.some((dir) => dir.path === asDir);
+							if (isDir) {
+								onOpenDir(asDir, {
+									newTab: newTabFromMouseEvent(event),
+								});
+							} else {
+								onOpenFile(resolved, {
+									newTab: newTabFromMouseEvent(event),
+								});
+							}
+							return true;
+						}}
+					/>
+				) : null}
+			</div>
+		</div>
+	);
+}
+
+/**
+ * The standalone Getting started tab: the default active tab while the
+ * workspace is empty, opened next to — never replacing — the pinned Home.
+ */
+export function GettingStartedView({
+	lix,
+	readOnly,
+	connection,
+	onOpenFile,
+}: {
+	readonly lix: Lix;
+	readonly readOnly: boolean;
+	readonly connection: Omit<LixConnectionPromptInput, "origin">;
+	readonly onOpenFile: (
+		path: string,
+		options: { newTab: boolean; created?: boolean },
+	) => void;
+}) {
+	const [actionError, setActionError] = useState<string | null>(null);
+	const { isDropTarget, dragHandlers } = useImportDrop({
+		lix,
+		dirPath: "/",
+		readOnly,
+		onError: setActionError,
+	});
+	const createFile = async (extension: "md" | "csv" | "excalidraw") => {
+		try {
+			setActionError(null);
+			const path = await createWorkspaceFile(lix, "/", extension);
+			onOpenFile(path, { newTab: false, created: true });
+		} catch (error) {
+			console.error("workspace-home: unable to create file", error);
+			setActionError("Unable to create the file. Try again.");
+		}
+	};
+	return (
+		<div
+			className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
+			{...dragHandlers}
+		>
+			{isDropTarget ? <DropImportOverlay /> : null}
+			{actionError ? (
+				<p
+					role="alert"
+					className="absolute inset-x-6 top-4 z-10 mx-auto max-w-[440px] rounded-lg bg-error-700/10 px-3 py-2 text-center text-[13px] text-error-700"
+				>
+					{actionError}
+				</p>
+			) : null}
+			<GettingStarted
+				readOnly={readOnly}
+				connection={connection}
+				onCreateFile={(extension) => void createFile(extension)}
+			/>
+		</div>
+	);
+}
+
+/**
+ * Drag-and-drop file import shared by the directory and getting-started
+ * views; the caller renders {@link DropImportOverlay} and surfaces errors.
+ */
+function useImportDrop({
+	lix,
+	dirPath,
+	readOnly,
+	onError,
+}: {
+	readonly lix: Lix;
+	readonly dirPath: string;
+	readonly readOnly: boolean;
+	readonly onError: (message: string | null) => void;
+}) {
+	const [isDropTarget, setIsDropTarget] = useState(false);
+	const dragDepthRef = useRef(0);
 	const handleDrop = useCallback(
 		(event: ReactDragEvent) => {
 			event.preventDefault();
@@ -124,176 +331,47 @@ export function DirectoryView({
 			if (readOnly) return;
 			const files = Array.from(event.dataTransfer?.files ?? []);
 			if (files.length === 0) return;
-			setActionError(null);
+			onError(null);
 			void importDroppedFiles(lix, dirPath, files)
 				.then(({ failed }) => {
 					if (failed.length > 0) {
-						setActionError(
+						onError(
 							`Could not import ${failed.length} ${failed.length === 1 ? "file" : "files"} (${failed.join(", ")}).`,
 						);
 					}
 				})
 				.catch((error: unknown) => {
 					console.error("workspace-home: import failed", error);
-					setActionError("Unable to import the dropped files.");
+					onError("Unable to import the dropped files.");
 				});
 		},
-		[dirPath, lix, readOnly],
+		[dirPath, lix, onError, readOnly],
 	);
-
-	if (!tree || !listing) {
-		return <div className="h-full w-full" aria-busy="true" />;
-	}
-
-	const isWorkspaceEmpty =
-		isHome && tree.dirs.length === 0 && tree.files.length === 0;
-
-	return (
-		<div
-			className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
-			onDragEnter={(event) => {
+	return {
+		isDropTarget,
+		dragHandlers: {
+			onDragEnter: (event: ReactDragEvent) => {
 				event.preventDefault();
 				if (readOnly) return;
 				dragDepthRef.current += 1;
 				setIsDropTarget(true);
-			}}
-			onDragOver={(event) => {
+			},
+			onDragOver: (event: ReactDragEvent) => {
 				event.preventDefault();
-			}}
-			onDragLeave={() => {
+			},
+			onDragLeave: () => {
 				dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
 				if (dragDepthRef.current === 0) setIsDropTarget(false);
-			}}
-			onDrop={handleDrop}
-		>
-			{isDropTarget ? (
-				<div className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-xl border-2 border-dashed border-bg-action-primary bg-bg-panel/85 text-sm font-semibold text-text-secondary">
-					Drop files to import
-				</div>
-			) : null}
-			{isWorkspaceEmpty ? (
-				<GettingStarted
-					readOnly={readOnly}
-					connectHref={connectHref}
-					onCreateFile={(extension) => void createFile(extension)}
-				/>
-			) : (
-				<div className="mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10">
-					{readOnly ? null : (
-						<div className="flex items-center pb-5">
-							<span className="flex-1" />
-							<NewMenu
-								onCreateFile={(extension) => void createFile(extension)}
-								onCreateFolder={() => {
-									setActionError(null);
-									void createWorkspaceFolder(lix, dirPath).catch(
-										(error: unknown) => {
-											console.error("workspace-home: new folder failed", error);
-											setActionError("Unable to create the folder. Try again.");
-										},
-									);
-								}}
-							/>
-						</div>
-					)}
-					{actionError ? (
-						<p
-							role="alert"
-							className="mb-3 rounded-lg bg-error-700/10 px-3 py-2 text-[13px] text-error-700"
-						>
-							{actionError}
-						</p>
-					) : null}
-					{isHome ? (
-						<div className="mb-4 flex items-center gap-3 rounded-[10px] border border-dashed border-border-action-secondary px-4 py-3">
-							<Link2
-								className="size-4 shrink-0 text-text-tertiary"
-								aria-hidden="true"
-							/>
-							<span className="text-[13px] text-text-secondary">
-								Working from Claude, Codex, or another agent? Connect it to this
-								workspace.
-							</span>
-							<span className="flex-1" />
-							<a
-								href={connectHref}
-								target="_blank"
-								rel="noreferrer"
-								className="inline-flex h-7 shrink-0 items-center rounded-[7px] border border-border-action-secondary bg-bg-panel px-3 text-xs font-semibold whitespace-nowrap text-text-secondary shadow-action-secondary hover:bg-bg-hover"
-							>
-								Connect an agent
-							</a>
-						</div>
-					) : null}
-					<div className="flex flex-col gap-px" data-testid="home-entry-list">
-						{listing.dirs.map((dir) => (
-							<EntryRow
-								key={dir.path}
-								icon={
-									<img
-										src="/icon-sq-folder.svg"
-										alt=""
-										className="size-[19px]"
-									/>
-								}
-								name={dir.name}
-								meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
-								onClick={(event) =>
-									onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
-								}
-							/>
-						))}
-						{listing.files.map((file) => (
-							<EntryRow
-								key={file.path}
-								icon={
-									<img
-										src={fileIconUrl(file.name)}
-										alt=""
-										className="size-[19px]"
-									/>
-								}
-								name={file.name}
-								meta={formatUpdatedAt(file.updatedAt)}
-								onClick={(event) =>
-									onOpenFile(file.path, { newTab: newTabFromMouseEvent(event) })
-								}
-							/>
-						))}
-					</div>
-					{listing.readmePath && readme !== null ? (
-						<ReadmePreview
-							fileName={
-								listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
-							}
-							markdown={readme}
-							onOpen={(event) =>
-								onOpenFile(listing.readmePath as string, {
-									newTab: newTabFromMouseEvent(event),
-								})
-							}
-							onNavigate={(href, event) => {
-								const resolved = resolveWorkspaceHref(dirPath, href);
-								if (!resolved) return false;
-								const asDir = normalizeHomeDirPath(resolved);
-								const isDir =
-									href.endsWith("/") ||
-									tree.dirs.some((dir) => dir.path === asDir);
-								if (isDir) {
-									onOpenDir(asDir, {
-										newTab: newTabFromMouseEvent(event),
-									});
-								} else {
-									onOpenFile(resolved, {
-										newTab: newTabFromMouseEvent(event),
-									});
-								}
-								return true;
-							}}
-						/>
-					) : null}
-				</div>
-			)}
+			},
+			onDrop: handleDrop,
+		},
+	};
+}
+
+function DropImportOverlay() {
+	return (
+		<div className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-xl border-2 border-dashed border-bg-action-primary bg-bg-panel/85 text-sm font-semibold text-text-secondary">
+			Drop files to import
 		</div>
 	);
 }
@@ -497,16 +575,87 @@ function MenuItem({
 }
 
 /**
- * Shown only while the workspace has zero files: connect an agent, start a
- * document yourself, or drop files anywhere to import (12f in the comp).
+ * Illustration for the getting-started state: a sketched document card with
+ * agent icons feeding into it along dashed paths (12f in the comp).
+ */
+function GettingStartedIllustration() {
+	return (
+		<div aria-hidden="true" className="relative mb-6 h-[118px] w-[300px]">
+			<div className="absolute top-0 left-1/2 flex w-[230px] -translate-x-1/2 rotate-[-1.5deg] flex-col gap-[7px] rounded-[10px] border border-border-panel bg-bg-panel px-3.5 py-3 shadow-[0_10px_26px_rgba(28,25,23,0.09)]">
+				<div className="flex items-center gap-[7px]">
+					<img src={fileIconUrl("file.md")} alt="" className="size-[13px]" />
+					<span className="h-[7px] w-24 rounded bg-[#E4DDD1]" />
+					<span className="flex-1" />
+					<span className="inline-flex size-[15px] items-center justify-center rounded-[4.5px] bg-[#FAF4EC] shadow-[inset_0_0_0_1px_#EDE2D2]">
+						<img
+							src="/landing/claude-spark.svg"
+							alt=""
+							className="size-[9px]"
+						/>
+					</span>
+				</div>
+				<div className="flex items-center gap-[7px]">
+					<img src={fileIconUrl("file.csv")} alt="" className="size-[13px]" />
+					<span className="h-[7px] w-[68px] rounded bg-[#ECE8E2]" />
+					<span className="flex-1" />
+					<img src="/landing/codex-icon.svg" alt="" className="size-[15px]" />
+				</div>
+				<div className="flex items-center gap-[7px]">
+					<img
+						src={fileIconUrl("file.excalidraw")}
+						alt=""
+						className="size-[13px]"
+					/>
+					<span className="h-[7px] w-[118px] rounded bg-[#ECE8E2]" />
+				</div>
+			</div>
+			<span className="absolute bottom-3.5 left-2 inline-flex size-[34px] rotate-[-6deg] items-center justify-center rounded-[10px] bg-[#FAF4EC] shadow-[inset_0_0_0_1px_#EDE2D2,0_6px_14px_rgba(28,25,23,0.08)]">
+				<img src="/landing/claude-spark.svg" alt="" className="size-[19px]" />
+			</span>
+			<img
+				src="/landing/codex-icon.svg"
+				alt=""
+				className="absolute right-2.5 bottom-3 size-[34px] rotate-[5deg] drop-shadow-[0_6px_14px_rgba(28,25,23,0.12)]"
+			/>
+			<svg
+				width="46"
+				height="30"
+				viewBox="0 0 46 30"
+				fill="none"
+				stroke="#D8CFC2"
+				strokeWidth="1.8"
+				strokeLinecap="round"
+				className="absolute bottom-[26px] left-11"
+			>
+				<path d="M4 24 C 14 18, 26 10, 40 5" strokeDasharray="1 6" />
+			</svg>
+			<svg
+				width="46"
+				height="30"
+				viewBox="0 0 46 30"
+				fill="none"
+				stroke="#D8CFC2"
+				strokeWidth="1.8"
+				strokeLinecap="round"
+				className="absolute right-[46px] bottom-6"
+			>
+				<path d="M42 24 C 32 18, 20 10, 6 5" strokeDasharray="1 6" />
+			</svg>
+		</div>
+	);
+}
+
+/**
+ * The empty-workspace pitch (12f in the comp): connect an agent, start a
+ * document yourself, or drop files anywhere to import.
  */
 function GettingStarted({
 	readOnly,
-	connectHref,
+	connection,
 	onCreateFile,
 }: {
 	readonly readOnly: boolean;
-	readonly connectHref: string;
+	readonly connection: Omit<LixConnectionPromptInput, "origin">;
 	readonly onCreateFile: (extension: "md" | "csv" | "excalidraw") => void;
 }) {
 	return (
@@ -514,25 +663,18 @@ function GettingStarted({
 			className="flex h-full min-h-0 flex-col items-center justify-center text-center"
 			data-testid="home-getting-started"
 		>
-			<div className="flex w-[min(560px,calc(100%-48px))] flex-col items-center">
-				<span className="mb-[18px] grid size-8 place-content-center rounded-[9px] bg-[#FAF4EC] shadow-[inset_0_0_0_1px_#EDE2D2]">
-					<Sparkles
-						className="size-4.5 text-text-secondary"
-						aria-hidden="true"
-					/>
-				</span>
+			<div className="-mt-5 flex w-[min(560px,calc(100%-48px))] flex-col items-center">
+				<GettingStartedIllustration />
 				<h1 className="m-0 text-2xl font-bold tracking-[-0.02em]">
-					Let your agent write the first document
+					Connect this agent to my Lix workspace
 				</h1>
-				<a
-					href={connectHref}
-					target="_blank"
-					rel="noreferrer"
-					className="mt-5 mb-10 inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--color-bg-action-primary-start)_0%,var(--color-bg-action-primary-end)_100%)] px-4.5 py-2.75 text-sm font-bold text-text-on-action-primary shadow-[var(--shadow-action-primary)] hover:brightness-105"
-				>
-					<Link2 className="size-3.5" aria-hidden="true" />
-					Connect an agent
-				</a>
+				<p className="mt-3 mb-0 max-w-[440px] text-[14.5px] leading-[1.6] text-text-secondary">
+					LixRay hosts your Lix workspace. Copy the prompt into Claude, Codex,
+					Cursor, or another agent to connect it and choose what to ingest.
+				</p>
+				<div className="mt-5.5 mb-10.5">
+					<AgentConnectionActions connection={connection} />
+				</div>
 				{readOnly ? null : (
 					<>
 						<div className="mb-3.5 text-[11.5px] font-bold tracking-[0.06em] text-text-quaternary uppercase">
@@ -563,4 +705,121 @@ function GettingStarted({
 			</div>
 		</div>
 	);
+}
+
+function AgentConnectionActions({
+	connection,
+	compact = false,
+}: {
+	readonly connection: Omit<LixConnectionPromptInput, "origin">;
+	readonly compact?: boolean;
+}) {
+	const { lixId, lixName, lixSlug, namespace } = connection;
+	const details = useMemo(
+		() =>
+			createLixConnectionDetails({
+				lixId,
+				lixName,
+				lixSlug,
+				namespace,
+				origin: window.location.origin,
+			}),
+		[lixId, lixName, lixSlug, namespace],
+	);
+	const [copyState, setCopyState] = useState<
+		"idle" | "copying" | "copied" | "error"
+	>("idle");
+
+	const copyPrompt = async () => {
+		setCopyState("copying");
+		try {
+			await copyText(details.prompt);
+			setCopyState("copied");
+			window.setTimeout(() => setCopyState("idle"), 2_000);
+		} catch (error) {
+			console.error("workspace-home: unable to copy agent prompt", error);
+			setCopyState("error");
+		}
+	};
+
+	return (
+		<div
+			className={
+				compact
+					? "flex shrink-0 items-center gap-2"
+					: "flex flex-col items-center gap-2"
+			}
+		>
+			<button
+				type="button"
+				onClick={() => void copyPrompt()}
+				className={
+					compact
+						? "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] border border-border-action-secondary bg-bg-panel px-3 text-xs font-semibold whitespace-nowrap text-text-secondary shadow-action-secondary hover:bg-bg-hover"
+						: "inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--color-bg-action-primary-start)_0%,var(--color-bg-action-primary-end)_100%)] px-4.5 py-2.75 text-sm font-bold text-text-on-action-primary shadow-[var(--shadow-action-primary)] hover:brightness-105"
+				}
+			>
+				{copyState === "copied" ? (
+					<Check className="size-3.5" aria-hidden="true" />
+				) : (
+					<Copy className="size-3.5" aria-hidden="true" />
+				)}
+				{copyState === "copied"
+					? "Prompt copied"
+					: copyState === "copying"
+						? "Copying…"
+						: copyState === "error"
+							? "Copy failed"
+							: "Copy setup prompt"}
+			</button>
+			{compact ? null : (
+				<a
+					href={details.documentationUrl}
+					target="_blank"
+					rel="noreferrer"
+					className="text-xs font-medium text-text-tertiary hover:text-text-secondary hover:underline"
+				>
+					MCP setup docs
+				</a>
+			)}
+		</div>
+	);
+}
+
+async function copyText(text: string): Promise<void> {
+	if (navigator.clipboard?.writeText) {
+		try {
+			await new Promise<void>((resolve, reject) => {
+				const timeout = window.setTimeout(
+					() => reject(new Error("Clipboard write timed out")),
+					750,
+				);
+				void navigator.clipboard.writeText(text).then(
+					() => {
+						window.clearTimeout(timeout);
+						resolve();
+					},
+					(error: unknown) => {
+						window.clearTimeout(timeout);
+						reject(error instanceof Error ? error : new Error(String(error)));
+					},
+				);
+			});
+			return;
+		} catch {
+			// Fall back for embedded browsers that expose Clipboard but do not
+			// settle its permission request.
+		}
+	}
+
+	const textarea = document.createElement("textarea");
+	textarea.value = text;
+	textarea.setAttribute("readonly", "");
+	textarea.style.position = "fixed";
+	textarea.style.opacity = "0";
+	document.body.appendChild(textarea);
+	textarea.select();
+	const copied = document.execCommand("copy");
+	textarea.remove();
+	if (!copied) throw new Error("Clipboard copy is unavailable");
 }

@@ -12,57 +12,48 @@ import {
 	type ExecuteResponse,
 	type ExecuteScriptResponse,
 	type LixRuntimeClient,
-	type WorkspaceSummary,
+	type LixSummary,
 	type WireValue,
 } from "./file-service.ts";
 
-const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
-const OTHER_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
-const UUID_SLUG_WORKSPACE_ID = "33333333-3333-4333-8333-333333333333";
+const LIX_ID = "11111111-1111-4111-8111-111111111111";
+const OTHER_LIX_ID = "22222222-2222-4222-8222-222222222222";
+const UUID_SLUG_LIX_ID = "33333333-3333-4333-8333-333333333333";
 const BRANCH_ID = "main";
 
-void test("workspace refs resolve UUIDs, unique slugs, and qualified slugs", async () => {
+void test("lix refs resolve UUIDs, unique slugs, and qualified slugs", async () => {
 	const client = new MemoryLixRuntimeClient();
-	client.workspaceSummaries.push({
-		id: OTHER_WORKSPACE_ID,
+	client.lixSummaries.push({
+		id: OTHER_LIX_ID,
 		name: "Other personal",
 		slug: "personal",
-		organization: { id: "org-2", name: "Other", handle: "other" },
+		namespace: { id: "org-2", name: "Other", handle: "other" },
 	});
-	client.workspaceSummaries.push({
-		id: UUID_SLUG_WORKSPACE_ID,
+	client.lixSummaries.push({
+		id: UUID_SLUG_LIX_ID,
 		name: "UUID slug",
-		slug: WORKSPACE_ID,
-		organization: { id: "org-3", name: "UUID Slugs", handle: "uuid-slugs" },
+		slug: LIX_ID,
+		namespace: { id: "org-3", name: "UUID Slugs", handle: "uuid-slugs" },
 	});
 	const service = new LixFileService(client);
 
-	assert.equal(await service.resolveWorkspaceRef(WORKSPACE_ID), WORKSPACE_ID);
+	assert.equal(await service.resolveLixRef(LIX_ID), LIX_ID);
 	assert.equal(
-		await service.resolveWorkspaceRef(`@uuid-slugs/${WORKSPACE_ID}`),
-		UUID_SLUG_WORKSPACE_ID,
+		await service.resolveLixRef(`@uuid-slugs/${LIX_ID}`),
+		UUID_SLUG_LIX_ID,
 	);
-	assert.equal(
-		await service.resolveWorkspaceRef("@example/personal"),
-		WORKSPACE_ID,
-	);
-	assert.equal(
-		await service.resolveWorkspaceRef("@other/personal"),
-		OTHER_WORKSPACE_ID,
-	);
+	assert.equal(await service.resolveLixRef("@example/personal"), LIX_ID);
+	assert.equal(await service.resolveLixRef("@other/personal"), OTHER_LIX_ID);
 	await assert.rejects(
-		service.resolveWorkspaceRef("personal"),
-		hasCode("ambiguous_workspace_ref"),
+		service.resolveLixRef("personal"),
+		hasCode("ambiguous_lix_ref"),
 	);
-	await assert.rejects(
-		service.resolveWorkspaceRef("missing"),
-		hasCode("not_found"),
-	);
+	await assert.rejects(service.resolveLixRef("missing"), hasCode("not_found"));
 });
 
-void test("unique bare workspace slugs resolve without discovery by the caller", async () => {
+void test("unique bare lix slugs resolve without discovery by the caller", async () => {
 	const service = new LixFileService(new MemoryLixRuntimeClient());
-	assert.equal(await service.resolveWorkspaceRef("personal"), WORKSPACE_ID);
+	assert.equal(await service.resolveLixRef("personal"), LIX_ID);
 });
 
 void test("canonical path validation rejects ambiguous and unsafe paths", () => {
@@ -92,30 +83,28 @@ void test("canonical path validation rejects ambiguous and unsafe paths", () => 
 
 void test("active branch methods delegate directly to the Lix client", async () => {
 	let activeBranchCalls = 0;
-	const switches: Array<{ workspaceId: string; branchId: string }> = [];
+	const switches: Array<{ lixId: string; branchId: string }> = [];
 	const service = new LixFileService({
-		listWorkspaces: async () => [],
-		activeBranchId: async (workspaceId) => {
+		listLixes: async () => [],
+		activeBranchId: async (lixId) => {
 			activeBranchCalls += 1;
-			assert.equal(workspaceId, WORKSPACE_ID);
+			assert.equal(lixId, LIX_ID);
 			return "active-branch";
 		},
-		switchBranch: async (workspaceId, branchId) => {
-			switches.push({ workspaceId, branchId });
+		switchBranch: async (lixId, branchId) => {
+			switches.push({ lixId, branchId });
 			return { branchId };
 		},
 		execute: async () => result([]),
 		executeBatch: async () => ({ results: [] }),
 	});
 
-	assert.equal(await service.activeBranchId(WORKSPACE_ID), "active-branch");
-	assert.deepEqual(await service.switchBranch(WORKSPACE_ID, "draft"), {
+	assert.equal(await service.activeBranchId(LIX_ID), "active-branch");
+	assert.deepEqual(await service.switchBranch(LIX_ID, "draft"), {
 		branchId: "draft",
 	});
 	assert.equal(activeBranchCalls, 1);
-	assert.deepEqual(switches, [
-		{ workspaceId: WORKSPACE_ID, branchId: "draft" },
-	]);
+	assert.deepEqual(switches, [{ lixId: LIX_ID, branchId: "draft" }]);
 });
 
 void test("list_directory maps one ordered root read", async () => {
@@ -144,7 +133,7 @@ void test("list_directory maps one ordered root read", async () => {
 		}),
 	);
 
-	assert.deepEqual(await service.listDirectory(WORKSPACE_ID, "/"), [
+	assert.deepEqual(await service.listDirectory(LIX_ID, "/"), [
 		{
 			kind: "directory",
 			path: "/docs/",
@@ -202,7 +191,7 @@ void test("list_directory reuses the resolved directory id in one ordered read",
 		}),
 	);
 
-	assert.deepEqual(await service.listDirectory(WORKSPACE_ID, "/docs/"), [
+	assert.deepEqual(await service.listDirectory(LIX_ID, "/docs/"), [
 		{
 			kind: "directory",
 			path: "/docs/guides/",
@@ -239,7 +228,7 @@ void test("entry existence checks use one selective union read", async () => {
 	);
 
 	await assert.rejects(
-		service.createDirectory(WORKSPACE_ID, "/taken/"),
+		service.createDirectory(LIX_ID, "/taken/"),
 		hasCode("already_exists"),
 	);
 
@@ -262,7 +251,7 @@ void test("entry existence detects a directory at a file path", async () => {
 	const service = new LixFileService(client);
 
 	await assert.rejects(
-		service.writeFile(WORKSPACE_ID, "/taken", "content"),
+		service.writeFile(LIX_ID, "/taken", "content"),
 		hasCode("already_exists"),
 	);
 });
@@ -276,7 +265,7 @@ void test("read_file validates UTF-8 and paginates by line with a change ID", as
 	);
 	const service = new LixFileService(client);
 
-	const page = await service.readFile(WORKSPACE_ID, "/notes.txt", 2, 1);
+	const page = await service.readFile(LIX_ID, "/notes.txt", 2, 1);
 	assert.deepEqual(page, {
 		path: "/notes.txt",
 		content: "two",
@@ -291,7 +280,7 @@ void test("read_file validates UTF-8 and paginates by line with a change ID", as
 
 	client.addFile("/binary.dat", new Uint8Array([0xc3, 0x28]), "rev-1");
 	await assert.rejects(
-		service.readFile(WORKSPACE_ID, "/binary.dat"),
+		service.readFile(LIX_ID, "/binary.dat"),
 		hasCode("not_utf8"),
 	);
 });
@@ -306,12 +295,12 @@ void test("text file reads and writes enforce the one MiB byte limit", async () 
 	const service = new LixFileService(client);
 
 	await assert.rejects(
-		service.readFile(WORKSPACE_ID, "/large.txt"),
+		service.readFile(LIX_ID, "/large.txt"),
 		hasCode("file_too_large"),
 	);
 	await assert.rejects(
 		service.writeFile(
-			WORKSPACE_ID,
+			LIX_ID,
 			"/too-large.txt",
 			"x".repeat(MAX_TEXT_FILE_BYTES + 1),
 		),
@@ -323,23 +312,19 @@ void test("write_file overwrites the current file and supports internal compare-
 	const client = new MemoryLixRuntimeClient();
 	const service = new LixFileService(client);
 
-	const created = await service.writeFile(WORKSPACE_ID, "/new.txt", "first");
+	const created = await service.writeFile(LIX_ID, "/new.txt", "first");
 	assert.equal(created.path, "/new.txt");
 	assert.equal(created.changeId, "rev-1");
-	const overwritten = await service.writeFile(
-		WORKSPACE_ID,
-		"/new.txt",
-		"overwrite",
-	);
+	const overwritten = await service.writeFile(LIX_ID, "/new.txt", "overwrite");
 	assert.equal(overwritten.changeId, "rev-2");
 	assert.equal(client.fileText("/new.txt"), "overwrite");
 	await assert.rejects(
-		service.writeFile(WORKSPACE_ID, "/new.txt", "overwrite", "stale"),
+		service.writeFile(LIX_ID, "/new.txt", "overwrite", "stale"),
 		hasCode("conflict"),
 	);
 
 	const replaced = await service.writeFile(
-		WORKSPACE_ID,
+		LIX_ID,
 		"/new.txt",
 		"second",
 		overwritten.changeId,
@@ -359,7 +344,7 @@ void test("find_files returns every matching file without a result cap", async (
 	}
 	const service = new LixFileService(client);
 
-	const files = await service.findFiles(WORKSPACE_ID, "match-");
+	const files = await service.findFiles(LIX_ID, "match-");
 	assert.equal(files.length, 125);
 	assert.equal(files[0]?.path, "/match-000.txt");
 	assert.equal(files.at(-1)?.path, "/match-124.txt");
@@ -375,19 +360,19 @@ void test("edit_file requires unique exact matches unless replace_all is explici
 	const service = new LixFileService(client);
 
 	await assert.rejects(
-		service.editFile(WORKSPACE_ID, "/edit.txt", "rev-3", [
+		service.editFile(LIX_ID, "/edit.txt", "rev-3", [
 			{ oldText: "red", newText: "green" },
 		]),
 		hasCode("invalid_edit"),
 	);
 	await assert.rejects(
-		service.editFile(WORKSPACE_ID, "/edit.txt", "stale", [
+		service.editFile(LIX_ID, "/edit.txt", "stale", [
 			{ oldText: "blue", newText: "cyan" },
 		]),
 		hasCode("conflict"),
 	);
 
-	const edited = await service.editFile(WORKSPACE_ID, "/edit.txt", "rev-3", [
+	const edited = await service.editFile(LIX_ID, "/edit.txt", "rev-3", [
 		{ oldText: "red", newText: "green", replaceAll: true },
 		{ oldText: "blue", newText: "cyan" },
 	]);
@@ -395,7 +380,7 @@ void test("edit_file requires unique exact matches unless replace_all is explici
 	assert.equal(client.fileText("/edit.txt"), "green green cyan");
 
 	const editedWithoutChangeId = await service.editFile(
-		WORKSPACE_ID,
+		LIX_ID,
 		"/edit.txt",
 		undefined,
 		[{ oldText: "cyan", newText: "blue" }],
@@ -410,7 +395,7 @@ void test("edit_file treats replacement text literally", async () => {
 	const service = new LixFileService(client);
 	const replacement = "$$$ profits $& $` $' $1";
 
-	await service.editFile(WORKSPACE_ID, "/literal.txt", "rev-1", [
+	await service.editFile(LIX_ID, "/literal.txt", "rev-1", [
 		{ oldText: "before", newText: replacement },
 	]);
 
@@ -424,7 +409,7 @@ void test("agent-authenticated edits persist an Atelier review range", async () 
 		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
 	});
 
-	await service.editFile(WORKSPACE_ID, "/review.md", "rev-3", [
+	await service.editFile(LIX_ID, "/review.md", "rev-3", [
 		{ oldText: "before", newText: "after" },
 	]);
 
@@ -452,7 +437,7 @@ void test("agent-authenticated creates persist an Atelier review range", async (
 		agentReview: { agent: "codex", sessionId: "oauth-client-1" },
 	});
 
-	await service.writeFile(WORKSPACE_ID, "/created-by-agent.md", "created");
+	await service.writeFile(LIX_ID, "/created-by-agent.md", "created");
 
 	const ranges = client.agentReviewRanges();
 	assert.equal(ranges.length, 1);
@@ -479,16 +464,16 @@ void test("move_entry never overwrites and accepts an omitted source change ID",
 	const service = new LixFileService(client);
 
 	await assert.rejects(
-		service.moveEntry(WORKSPACE_ID, "/source.txt", "/taken.txt", "rev-4"),
+		service.moveEntry(LIX_ID, "/source.txt", "/taken.txt", "rev-4"),
 		hasCode("already_exists"),
 	);
 	await assert.rejects(
-		service.moveEntry(WORKSPACE_ID, "/source.txt", "/renamed.txt", "stale"),
+		service.moveEntry(LIX_ID, "/source.txt", "/renamed.txt", "stale"),
 		hasCode("conflict"),
 	);
 
 	const moved = await service.moveEntry(
-		WORKSPACE_ID,
+		LIX_ID,
 		"/source.txt",
 		"/renamed.txt",
 		undefined,
@@ -505,15 +490,15 @@ void test("directory deletion requires recursive confirmation and accepts an omi
 	const service = new LixFileService(client);
 
 	await assert.rejects(
-		service.deleteEntry(WORKSPACE_ID, "/docs/", "rev-9"),
+		service.deleteEntry(LIX_ID, "/docs/", "rev-9"),
 		hasCode("recursive_required"),
 	);
 	await assert.rejects(
-		service.deleteEntry(WORKSPACE_ID, "/docs/", "stale", true),
+		service.deleteEntry(LIX_ID, "/docs/", "stale", true),
 		hasCode("conflict"),
 	);
 	assert.deepEqual(
-		await service.deleteEntry(WORKSPACE_ID, "/docs/", undefined, true),
+		await service.deleteEntry(LIX_ID, "/docs/", undefined, true),
 		{ path: "/docs/", deleted: true },
 	);
 	assert.equal(client.hasFile("/docs/readme.md"), false);
@@ -528,10 +513,10 @@ function testRuntimeClient(
 	) => ExecuteResponse | Promise<ExecuteResponse>,
 ): LixRuntimeClient {
 	return {
-		listWorkspaces: async () => [],
+		listLixes: async () => [],
 		activeBranchId: async () => BRANCH_ID,
-		switchBranch: async (_workspaceId, branchId) => ({ branchId }),
-		execute: async (_workspaceId, request) => execute(request),
+		switchBranch: async (_lixId, branchId) => ({ branchId }),
+		execute: async (_lixId, request) => execute(request),
 		executeBatch: async () => {
 			throw new Error("listDirectory must use execute, not executeBatch");
 		},
@@ -539,12 +524,12 @@ function testRuntimeClient(
 }
 
 class MemoryLixRuntimeClient implements LixRuntimeClient {
-	readonly workspaceSummaries: Array<WorkspaceSummary> = [
+	readonly lixSummaries: Array<LixSummary> = [
 		{
-			id: WORKSPACE_ID,
+			id: LIX_ID,
 			name: "Personal",
 			slug: "personal",
-			organization: { id: "org-1", name: "Example", handle: "example" },
+			namespace: { id: "org-1", name: "Example", handle: "example" },
 		},
 	];
 	private readonly files = new Map<string, StoredFile>();
@@ -580,10 +565,10 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		return [...this.normalizedReviewRanges.values()];
 	}
 
-	async listWorkspaces() {
-		return this.workspaceSummaries.map((workspace) => ({
-			...workspace,
-			organization: { ...workspace.organization },
+	async listLixes() {
+		return this.lixSummaries.map((lix) => ({
+			...lix,
+			namespace: { ...lix.namespace },
 		}));
 	}
 
@@ -592,7 +577,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	async switchBranch(
-		_workspaceId: string,
+		_lixId: string,
 		branchId: string,
 	): Promise<{ branchId: string }> {
 		this.activeBranch = branchId;
@@ -600,7 +585,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	async execute(
-		_workspaceId: string,
+		_lixId: string,
 		request: ExecuteRequest,
 	): Promise<ExecuteResponse> {
 		const sql = request.sql;
@@ -740,13 +725,13 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	async executeBatch(
-		workspaceId: string,
+		lixId: string,
 		request: ExecuteBatchRequest,
 	): Promise<ExecuteScriptResponse> {
 		const results: Array<ExecuteResponse> = [];
 		for (const statement of request.statements) {
 			results.push(
-				await this.execute(workspaceId, {
+				await this.execute(lixId, {
 					...statement,
 					options: request.options,
 				}),

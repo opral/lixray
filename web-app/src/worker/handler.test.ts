@@ -4,21 +4,21 @@ import {
 	DEMO_AUTH_TOKEN,
 	DEMO_ORGANIZATION_ID,
 	DEMO_ORGANIZATION_NAME,
-	DEMO_WORKSPACE_ID,
-	DEMO_WORKSPACE_NAME,
+	DEMO_LIX_ID,
+	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import { FileServiceError } from "../mcp/file-service.ts";
 import {
 	authenticateWithSupabase,
-	authorizeWorkspaceWithSupabase,
+	authorizeLixWithSupabase,
 	handleRequest,
-	resolveWorkspaceWithSupabase,
+	resolveLixWithSupabase,
 	supabaseJwtIssuer,
 	validateBrowserJwtClaims,
 	validateMcpJwtClaims,
 	type AuthenticateRequest,
 	type AuthenticateMcpRequest,
-	type ResolveWorkspace,
+	type ResolveLix,
 	type ContainerNamespace,
 	type WorkerEnv,
 } from "./handler.ts";
@@ -28,8 +28,8 @@ import {
 	MCP_RESOURCE,
 } from "../mcp/server.ts";
 
-const WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
-const WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
+const LIX_A = "11111111-1111-4111-8111-111111111111";
+const LIX_B = "22222222-2222-4222-8222-222222222222";
 
 void test("GET /healthz returns Worker health without auth or proxying", async () => {
 	let proxied = false;
@@ -256,7 +256,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 			mcpTransport: async (_request, _service, context, options) => {
 				assert.equal(context, executionContext);
 				options.onToolCall?.({
-					toolName: "list_workspaces",
+					toolName: "list_lixes",
 					outcome: "success",
 					durationMs: 2,
 				});
@@ -268,7 +268,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	assert.equal(await response.text(), "mcp response");
 	assert.deepEqual(observations, [
 		{
-			toolName: "list_workspaces",
+			toolName: "list_lixes",
 			outcome: "success",
 			durationMs: 2,
 		},
@@ -393,14 +393,14 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 		env({}),
 		{
 			authenticate: authenticated(),
-			resolveWorkspace: async (namespace, workspaceSlug, auth) => {
+			resolveLix: async (namespace, lixSlug, auth) => {
 				assert.equal(namespace, "acme");
-				assert.equal(workspaceSlug, "launch-q3");
+				assert.equal(lixSlug, "launch-q3");
 				assert.equal(auth.userId, "user-123");
-				return { ok: true, workspaceId: WORKSPACE_A };
+				return { ok: true, lixId: LIX_A };
 			},
-			workspaceFetch: async (workspaceId, request) => {
-				assert.equal(workspaceId, WORKSPACE_A);
+			lixFetch: async (lixId, request) => {
+				assert.equal(lixId, LIX_A);
 				proxiedRequest = request;
 				return upstream;
 			},
@@ -418,11 +418,9 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 	assert.deepEqual(await proxiedRequest.json(), body);
 });
 
-void test("removed workspace sidecar routes return 404 before auth", async () => {
+void test("removed lix sidecar routes return 404 before auth", async () => {
 	const response = await handleRequest(
-		new Request(
-			"https://example.test/v1/workspaces/not-a-uuid/filesystem/mutate",
-		),
+		new Request("https://example.test/v1/lixes/not-a-uuid/filesystem/mutate"),
 		env({}),
 		{
 			authenticate: async () => {
@@ -449,7 +447,7 @@ void test("canonical mutation routes return authentication failures", async () =
 	assert.equal(await response.text(), "Unauthorized\n");
 });
 
-void test("inaccessible workspaces return 403 from mutation routes without starting a container", async () => {
+void test("inaccessible lixes return 403 from mutation routes without starting a container", async () => {
 	let started = false;
 	const response = await handleRequest(
 		remoteLixRequest("/branch/switch", {
@@ -462,7 +460,7 @@ void test("inaccessible workspaces return 403 from mutation routes without start
 				return new Response();
 			},
 		}),
-		{ authenticate: authenticated(), resolveWorkspace: unresolved(403) },
+		{ authenticate: authenticated(), resolveLix: unresolved(403) },
 	);
 	assert.equal(response.status, 403);
 	assert.equal(started, false);
@@ -470,7 +468,7 @@ void test("inaccessible workspaces return 403 from mutation routes without start
 
 void test("anonymous public reads resolve publicly and forward without auth", async () => {
 	let proxiedRequest: Request | undefined;
-	let publicWorkspaceLookups = 0;
+	let publicLixLookups = 0;
 	const response = await handleRequest(
 		remoteLixRequest("/execute", {
 			method: "POST",
@@ -482,15 +480,15 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 			authenticate: async () => {
 				throw new Error("anonymous reads must not authenticate first");
 			},
-			resolvePublicWorkspace: async (namespace, workspaceSlug) => {
-				publicWorkspaceLookups += 1;
+			resolvePublicLix: async (namespace, lixSlug) => {
+				publicLixLookups += 1;
 				assert.equal(namespace, "acme");
-				assert.equal(workspaceSlug, "launch-q3");
-				return { ok: true, workspaceId: WORKSPACE_A };
+				assert.equal(lixSlug, "launch-q3");
+				return { ok: true, lixId: LIX_A };
 			},
 			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
-			workspaceFetch: async (workspaceId, request) => {
-				assert.equal(workspaceId, WORKSPACE_A);
+			lixFetch: async (lixId, request) => {
+				assert.equal(lixId, LIX_A);
 				proxiedRequest = request;
 				return new Response("public read");
 			},
@@ -499,7 +497,7 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 
 	assert.equal(response.status, 200);
 	assert.equal(await response.text(), "public read");
-	assert.equal(publicWorkspaceLookups, 1);
+	assert.equal(publicLixLookups, 1);
 	assert.ok(proxiedRequest);
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
 	assert.deepEqual(await proxiedRequest.json(), {
@@ -516,11 +514,11 @@ void test("anonymous public readers can release their opaque remote session", as
 		}),
 		env({}),
 		{
-			resolvePublicWorkspace: async () => ({
+			resolvePublicLix: async () => ({
 				ok: true,
-				workspaceId: WORKSPACE_A,
+				lixId: LIX_A,
 			}),
-			workspaceFetch: async (_workspaceId, request) => {
+			lixFetch: async (_lixId, request) => {
 				proxiedRequest = request;
 				return new Response(null, { status: 204 });
 			},
@@ -537,7 +535,7 @@ void test("anonymous public readers can release their opaque remote session", as
 });
 
 void test("anonymous branch mutations remain unauthorized", async () => {
-	let publicWorkspaceLookedUp = false;
+	let publicLixLookedUp = false;
 	let proxied = false;
 	const response = await handleRequest(
 		remoteLixRequest("/branch/switch", { method: "POST" }),
@@ -546,11 +544,11 @@ void test("anonymous branch mutations remain unauthorized", async () => {
 			authenticate: async () => {
 				throw new Error("anonymous unsafe requests must not authenticate");
 			},
-			resolvePublicWorkspace: async () => {
-				publicWorkspaceLookedUp = true;
-				return { ok: true, workspaceId: WORKSPACE_A };
+			resolvePublicLix: async () => {
+				publicLixLookedUp = true;
+				return { ok: true, lixId: LIX_A };
 			},
-			workspaceFetch: async () => {
+			lixFetch: async () => {
 				proxied = true;
 				return new Response("unexpected");
 			},
@@ -559,11 +557,11 @@ void test("anonymous branch mutations remain unauthorized", async () => {
 
 	assert.equal(response.status, 401);
 	assert.equal(await response.text(), "Unauthorized\n");
-	assert.equal(publicWorkspaceLookedUp, false);
+	assert.equal(publicLixLookedUp, false);
 	assert.equal(proxied, false);
 });
 
-void test("public write SQL is rejected before it reaches the workspace", async () => {
+void test("public write SQL is rejected before it reaches the lix", async () => {
 	let proxied = false;
 	const response = await handleRequest(
 		remoteLixRequest("/execute", {
@@ -573,12 +571,12 @@ void test("public write SQL is rejected before it reaches the workspace", async 
 		}),
 		env({}),
 		{
-			resolvePublicWorkspace: async () => ({
+			resolvePublicLix: async () => ({
 				ok: true,
-				workspaceId: WORKSPACE_A,
+				lixId: LIX_A,
 			}),
 			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
-			workspaceFetch: async () => {
+			lixFetch: async () => {
 				proxied = true;
 				return new Response("unexpected");
 			},
@@ -587,7 +585,7 @@ void test("public write SQL is rejected before it reaches the workspace", async 
 
 	assert.equal(response.status, 400);
 	assert.deepEqual(await response.json(), {
-		error: { code: "LIX_READ_ONLY", message: "workspace is read-only" },
+		error: { code: "LIX_READ_ONLY", message: "lix is read-only" },
 	});
 	assert.equal(proxied, false);
 });
@@ -602,16 +600,16 @@ void test("a mutation cannot hide behind a multi-statement public script", async
 		}),
 		env({}),
 		{
-			resolvePublicWorkspace: async () => ({
+			resolvePublicLix: async () => ({
 				ok: true,
-				workspaceId: WORKSPACE_A,
+				lixId: LIX_A,
 			}),
 			parseSqlScript: (sql) => ({
 				statements: sql
 					.split(";")
 					.map((statement) => ({ sql: statement.trim() })),
 			}),
-			workspaceFetch: async () => {
+			lixFetch: async () => {
 				proxied = true;
 				return new Response("unexpected");
 			},
@@ -631,11 +629,11 @@ void test("public reads fail closed when no SQL parser is configured", async () 
 		}),
 		env({}),
 		{
-			resolvePublicWorkspace: async () => ({
+			resolvePublicLix: async () => ({
 				ok: true,
-				workspaceId: WORKSPACE_A,
+				lixId: LIX_A,
 			}),
-			workspaceFetch: async () => new Response("unexpected"),
+			lixFetch: async () => new Response("unexpected"),
 		},
 	);
 
@@ -644,7 +642,7 @@ void test("public reads fail closed when no SQL parser is configured", async () 
 
 void test("authenticated non-members are downgraded to the public read transport", async () => {
 	let proxiedRequest: Request | undefined;
-	let publicWorkspaceLookups = 0;
+	let publicLixLookups = 0;
 	const response = await handleRequest(
 		remoteLixRequest("/execute", {
 			method: "POST",
@@ -657,13 +655,13 @@ void test("authenticated non-members are downgraded to the public read transport
 		env({}),
 		{
 			authenticate: authenticated(),
-			resolveWorkspace: unresolved(403),
-			resolvePublicWorkspace: async () => {
-				publicWorkspaceLookups += 1;
-				return { ok: true, workspaceId: WORKSPACE_A };
+			resolveLix: unresolved(403),
+			resolvePublicLix: async () => {
+				publicLixLookups += 1;
+				return { ok: true, lixId: LIX_A };
 			},
 			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
-			workspaceFetch: async (_workspaceId, request) => {
+			lixFetch: async (_lixId, request) => {
 				proxiedRequest = request;
 				return new Response("downgraded");
 			},
@@ -672,12 +670,12 @@ void test("authenticated non-members are downgraded to the public read transport
 
 	assert.equal(response.status, 200);
 	assert.equal(await response.text(), "downgraded");
-	assert.equal(publicWorkspaceLookups, 1);
+	assert.equal(publicLixLookups, 1);
 	assert.ok(proxiedRequest);
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
 });
 
-void test("authorized requests route by workspace, rewrite paths, preserve bodies and strip auth", async () => {
+void test("authorized requests route by lix, rewrite paths, preserve bodies and strip auth", async () => {
 	let startOptions: unknown;
 	let proxiedRequest: Request | undefined;
 	const request = remoteLixRequest("/observe?mode=test", {
@@ -698,7 +696,7 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 				POSTHOG_ENVIRONMENT: "production",
 			},
 			getByName: (name) => {
-				assert.equal(name, WORKSPACE_A);
+				assert.equal(name, LIX_A);
 				return {
 					startAndWaitForPorts: async (options) => {
 						startOptions = options;
@@ -713,7 +711,7 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 				};
 			},
 		}),
-		{ authenticate: authenticated(), resolveWorkspace: resolved(WORKSPACE_A) },
+		{ authenticate: authenticated(), resolveLix: resolved(LIX_A) },
 	);
 
 	assert.equal(response.headers.get("content-type"), "text/event-stream");
@@ -751,7 +749,7 @@ void test("authorized requests route by workspace, rewrite paths, preserve bodie
 	assert.ok(proxiedRequest);
 	assert.equal(
 		new URL(proxiedRequest.url).pathname,
-		`/workspaces/${WORKSPACE_A}/lix/v1/observe`,
+		`/lixes/${LIX_A}/lix/v1/observe`,
 	);
 	assert.equal(new URL(proxiedRequest.url).search, "?mode=test");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
@@ -788,7 +786,7 @@ void test("transient container resets retry with a reacquired stub", async () =>
 		}),
 		{
 			authenticate: authenticated(),
-			resolveWorkspace: resolved(WORKSPACE_A),
+			resolveLix: resolved(LIX_A),
 			containerRetryDelay: async () => undefined,
 			containerRetryRandom: () => 1,
 		},
@@ -834,7 +832,7 @@ void test("canonical mutation bodies are not replayed after ambiguous proxy fail
 			}),
 			{
 				authenticate: authenticated(),
-				resolveWorkspace: resolved(WORKSPACE_A),
+				resolveLix: resolved(LIX_A),
 				containerRetryDelay: async () => undefined,
 			},
 		);
@@ -870,7 +868,7 @@ void test("permanent container startup failures return a controlled 503 response
 				},
 			}),
 		}),
-		{ authenticate: authenticated(), resolveWorkspace: resolved(WORKSPACE_A) },
+		{ authenticate: authenticated(), resolveLix: resolved(LIX_A) },
 	);
 
 	assert.equal(response.status, 503);
@@ -879,12 +877,12 @@ void test("permanent container startup failures return a controlled 503 response
 	assert.deepEqual(await response.json(), {
 		error: {
 			code: "CONTAINER_UNAVAILABLE",
-			message: "Workspace storage is temporarily unavailable.",
+			message: "Lix storage is temporarily unavailable.",
 		},
 	});
 });
 
-void test("two workspaces route to distinct containers", async () => {
+void test("two lixes route to distinct containers", async () => {
 	const names: Array<string> = [];
 	const testEnv = env({
 		getByName: (name) => {
@@ -892,7 +890,7 @@ void test("two workspaces route to distinct containers", async () => {
 			return { fetch: async () => new Response("ok") };
 		},
 	});
-	for (const workspaceId of [WORKSPACE_A, WORKSPACE_B]) {
+	for (const lixId of [LIX_A, LIX_B]) {
 		const response = await handleRequest(
 			remoteLixRequest("/", {
 				headers: { Authorization: "Bearer user-token" },
@@ -900,19 +898,19 @@ void test("two workspaces route to distinct containers", async () => {
 			testEnv,
 			{
 				authenticate: authenticated(),
-				resolveWorkspace: resolved(workspaceId),
+				resolveLix: resolved(lixId),
 			},
 		);
 		assert.equal(response.status, 200);
 	}
-	assert.deepEqual(names, [WORKSPACE_A, WORKSPACE_B]);
+	assert.deepEqual(names, [LIX_A, LIX_B]);
 });
 
-void test("demo auth on workers.dev only resolves configured workspaces", async () => {
+void test("demo auth on workers.dev only resolves configured lixes", async () => {
 	const testEnv = env({
 		extra: {
 			LIXRAY_DEMO: "1",
-			LIXRAY_DEMO_WORKSPACE_IDS: DEMO_WORKSPACE_ID,
+			LIXRAY_DEMO_LIX_IDS: DEMO_LIX_ID,
 		},
 	});
 	const accepted = await handleRequest(
@@ -935,7 +933,7 @@ void test("demo auth on workers.dev only resolves configured workspaces", async 
 		),
 		testEnv,
 	);
-	// Public routes resolve globally. An unconfigured demo workspace falls
+	// Public routes resolve globally. An unconfigured demo lix falls
 	// through to the same public resolver and is indistinguishable from missing.
 	assert.equal(deniedResponse.status, 404);
 });
@@ -948,7 +946,7 @@ void test("demo auth rejects an incorrect bearer token without Supabase", async 
 		env({
 			extra: {
 				LIXRAY_DEMO: "1",
-				LIXRAY_DEMO_WORKSPACE_IDS: DEMO_WORKSPACE_ID,
+				LIXRAY_DEMO_LIX_IDS: DEMO_LIX_ID,
 			},
 		}),
 	);
@@ -974,7 +972,7 @@ void test("demo mode keeps OAuth endpoints disabled", async () => {
 	}
 });
 
-void test("Railway PR environments enable the built-in demo workspace", async () => {
+void test("Railway PR environments enable the built-in demo lix", async () => {
 	// Both naming schemes: configured "lixray-pr-<n>" and Railway's default
 	// "pr-<hash>-<n>" used for recreated PR environments.
 	for (const name of ["lixray-pr-91", "pr-11b179-85"]) {
@@ -991,18 +989,18 @@ void test("Railway PR environments enable the built-in demo workspace", async ()
 	}
 });
 
-void test("demo mode exposes authless MCP through the in-memory workspace fetcher", async () => {
-	let workspaceFetches = 0;
+void test("demo mode exposes authless MCP through the in-memory lix fetcher", async () => {
+	let lixFetches = 0;
 	const response = await handleRequest(
 		new Request("https://preview.example/mcp", { method: "POST" }),
 		{
 			LIXRAY_DEMO: "1",
-			LIXRAY_DEMO_WORKSPACE_IDS: `${DEMO_WORKSPACE_ID},${WORKSPACE_A}`,
+			LIXRAY_DEMO_LIX_IDS: `${DEMO_LIX_ID},${LIX_A}`,
 		},
 		{
-			workspaceFetch: async (workspaceId, request) => {
-				workspaceFetches += 1;
-				assert.equal(workspaceId, DEMO_WORKSPACE_ID);
+			lixFetch: async (lixId, request) => {
+				lixFetches += 1;
+				assert.equal(lixId, DEMO_LIX_ID);
 				assert.equal(request.headers.get("authorization"), null);
 				const pathname = new URL(request.url).pathname;
 				if (pathname === "/lix/v1/") {
@@ -1032,31 +1030,31 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 			},
 			mcpTransport: async (_request, service, _context, options) => {
 				assert.equal(options.authMode, "none");
-				assert.deepEqual(await service.listWorkspaces(), [
+				assert.deepEqual(await service.listLixes(), [
 					{
-						id: DEMO_WORKSPACE_ID,
-						name: DEMO_WORKSPACE_NAME,
-						slug: DEMO_WORKSPACE_NAME,
-						organization: {
+						id: DEMO_LIX_ID,
+						name: DEMO_LIX_NAME,
+						slug: DEMO_LIX_NAME,
+						namespace: {
 							id: DEMO_ORGANIZATION_ID,
 							name: DEMO_ORGANIZATION_NAME,
 							handle: DEMO_ORGANIZATION_NAME,
 						},
 					},
 					{
-						id: WORKSPACE_A,
-						name: "demo-workspace-2",
-						slug: "demo-workspace-2",
-						organization: {
+						id: LIX_A,
+						name: "demo-lix-2",
+						slug: "demo-lix-2",
+						namespace: {
 							id: DEMO_ORGANIZATION_ID,
 							name: DEMO_ORGANIZATION_NAME,
 							handle: DEMO_ORGANIZATION_NAME,
 						},
 					},
 				]);
-				assert.equal(await service.activeBranchId(DEMO_WORKSPACE_ID), "main");
+				assert.equal(await service.activeBranchId(DEMO_LIX_ID), "main");
 				await assert.rejects(
-					service.activeBranchId(WORKSPACE_B),
+					service.activeBranchId(LIX_B),
 					(error: unknown) =>
 						error instanceof FileServiceError && error.code === "not_found",
 				);
@@ -1067,10 +1065,10 @@ void test("demo mode exposes authless MCP through the in-memory workspace fetche
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
-	assert.equal(workspaceFetches, 3);
+	assert.equal(lixFetches, 3);
 });
 
-void test("Supabase workspace authorization uses the user token and RLS-visible row", async () => {
+void test("Supabase lix authorization uses the user token and RLS-visible row", async () => {
 	const originalFetch = globalThis.fetch;
 	let lookupUrl: URL | undefined;
 	let lookupHeaders: Headers | undefined;
@@ -1083,11 +1081,11 @@ void test("Supabase workspace authorization uses the user token and RLS-visible 
 					: input.url;
 		lookupUrl = new URL(requestUrl);
 		lookupHeaders = new Headers(init?.headers);
-		return Response.json([{ id: WORKSPACE_A }]);
+		return Response.json([{ id: LIX_A }]);
 	};
 	try {
-		const failure = await authorizeWorkspaceWithSupabase(
-			WORKSPACE_A,
+		const failure = await authorizeLixWithSupabase(
+			LIX_A,
 			{ userId: "user-123", token: "verified-user-token" },
 			env({
 				extra: {
@@ -1097,8 +1095,8 @@ void test("Supabase workspace authorization uses the user token and RLS-visible 
 			}),
 		);
 		assert.equal(failure, null);
-		assert.equal(lookupUrl?.pathname, "/rest/v1/workspaces");
-		assert.equal(lookupUrl?.searchParams.get("id"), `eq.${WORKSPACE_A}`);
+		assert.equal(lookupUrl?.pathname, "/rest/v1/lixes");
+		assert.equal(lookupUrl?.searchParams.get("id"), `eq.${LIX_A}`);
 		assert.equal(lookupHeaders?.get("apikey"), "publishable-key");
 		assert.equal(
 			lookupHeaders?.get("authorization"),
@@ -1109,12 +1107,12 @@ void test("Supabase workspace authorization uses the user token and RLS-visible 
 	}
 });
 
-void test("Supabase workspace authorization hides absent or RLS-invisible rows", async () => {
+void test("Supabase lix authorization hides absent or RLS-invisible rows", async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = async () => Response.json([]);
 	try {
-		const failure = await authorizeWorkspaceWithSupabase(
-			WORKSPACE_A,
+		const failure = await authorizeLixWithSupabase(
+			LIX_A,
 			{ userId: "user-123", token: "verified-user-token" },
 			env({
 				extra: {
@@ -1124,13 +1122,13 @@ void test("Supabase workspace authorization hides absent or RLS-invisible rows",
 			}),
 		);
 		assert.equal(failure?.status, 403);
-		assert.equal(await failure?.text(), "Workspace access denied\n");
+		assert.equal(await failure?.text(), "Lix access denied\n");
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
 });
 
-void test("Supabase canonical workspace resolution joins RLS-visible organization and workspace rows", async () => {
+void test("Supabase canonical lix resolution joins RLS-visible organization and lix rows", async () => {
 	const originalFetch = globalThis.fetch;
 	const lookups: URL[] = [];
 	globalThis.fetch = async (input, init) => {
@@ -1146,12 +1144,10 @@ void test("Supabase canonical workspace resolution joins RLS-visible organizatio
 			new Headers(init?.headers).get("authorization"),
 			"Bearer verified-user-token",
 		);
-		return Response.json([
-			{ id: WORKSPACE_A, organizations: { id: DEMO_ORGANIZATION_ID } },
-		]);
+		return Response.json([{ lix_id: LIX_A }]);
 	};
 	try {
-		const resolution = await resolveWorkspaceWithSupabase(
+		const resolution = await resolveLixWithSupabase(
 			"acme",
 			"launch-q3",
 			{ userId: "user-123", token: "verified-user-token" },
@@ -1162,19 +1158,12 @@ void test("Supabase canonical workspace resolution joins RLS-visible organizatio
 				},
 			}),
 		);
-		assert.deepEqual(resolution, { ok: true, workspaceId: WORKSPACE_A });
+		assert.deepEqual(resolution, { ok: true, lixId: LIX_A });
 		assert.equal(lookups.length, 1);
-		assert.equal(lookups[0]?.pathname, "/rest/v1/workspaces");
 		assert.equal(
-			lookups[0]?.searchParams.get("select"),
-			"id,organizations!inner(id)",
+			lookups[0]?.pathname,
+			"/rest/v1/rpc/resolve_public_lix_by_route",
 		);
-		assert.equal(
-			lookups[0]?.searchParams.get("organizations.handle"),
-			"eq.acme",
-		);
-		assert.equal(lookups[0]?.searchParams.get("slug"), "eq.launch-q3");
-		assert.equal(lookups[0]?.searchParams.get("deleted_at"), "is.null");
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
@@ -1209,14 +1198,14 @@ function rejected(status: number, body: string): AuthenticateRequest {
 	return async () => ({ ok: false, response: new Response(body, { status }) });
 }
 
-function resolved(workspaceId: string): ResolveWorkspace {
-	return async () => ({ ok: true, workspaceId });
+function resolved(lixId: string): ResolveLix {
+	return async () => ({ ok: true, lixId });
 }
 
-function unresolved(status: number): ResolveWorkspace {
+function unresolved(status: number): ResolveLix {
 	return async () => ({
 		ok: false,
-		response: new Response("Workspace access denied\n", { status }),
+		response: new Response("Lix access denied\n", { status }),
 	});
 }
 

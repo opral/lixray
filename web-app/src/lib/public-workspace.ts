@@ -22,13 +22,10 @@ export async function resolvePublicWorkspaceByRoute(
 	organizationHandle: string,
 	workspaceSlug: string,
 ): Promise<PublicWorkspaceRoute | null> {
-	const { data, error } = await client.rpc(
-		"resolve_public_workspace_by_route",
-		{
-			p_organization_handle: organizationHandle,
-			p_workspace_slug: workspaceSlug,
-		},
-	);
+	const { data, error } = await client.rpc("resolve_public_lix_by_route", {
+		p_namespace_handle: organizationHandle,
+		p_lix_slug: workspaceSlug,
+	});
 	if (error) throw error;
 	return data?.[0] ? publicWorkspaceRoute(data[0]) : null;
 }
@@ -37,7 +34,7 @@ export async function resolveWorkspaceShareToken(
 	client: LixraySupabaseClient,
 	token: string,
 ): Promise<ResolvedWorkspaceShare | null> {
-	const { data, error } = await client.rpc("resolve_workspace_share_token", {
+	const { data, error } = await client.rpc("resolve_lix_share_token", {
 		p_token: token,
 	});
 	if (error) throw error;
@@ -53,21 +50,21 @@ export async function resolveWorkspaceShareToken(
 }
 
 function publicWorkspaceRoute(row: {
-	organization_id: string;
-	organization_name: string;
-	organization_handle: string;
-	workspace_id: string;
-	workspace_name: string;
-	workspace_slug: string;
+	namespace_id: string;
+	namespace_name: string;
+	namespace_handle: string;
+	lix_id: string;
+	lix_name: string;
+	lix_slug: string;
 	can_edit: boolean;
 }): PublicWorkspaceRoute {
 	return {
-		organizationId: row.organization_id,
-		organizationName: row.organization_name,
-		organizationHandle: row.organization_handle,
-		workspaceId: row.workspace_id,
-		workspaceName: row.workspace_name,
-		workspaceSlug: row.workspace_slug,
+		organizationId: row.namespace_id,
+		organizationName: row.namespace_name,
+		organizationHandle: row.namespace_handle,
+		workspaceId: row.lix_id,
+		workspaceName: row.lix_name,
+		workspaceSlug: row.lix_slug,
 		canEdit: row.can_edit,
 	};
 }

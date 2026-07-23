@@ -19,22 +19,22 @@ import {
 
 const USER = "71000000-0000-0000-0000-000000000001";
 const OTHER_USER = "71000000-0000-0000-0000-000000000002";
-const WORKSPACE = "72000000-0000-4000-8000-000000000001";
-const OTHER_WORKSPACE = "72000000-0000-4000-8000-000000000002";
+const LIX = "72000000-0000-4000-8000-000000000001";
+const OTHER_LIX = "72000000-0000-4000-8000-000000000002";
 const MAIN = "73000000-0000-4000-8000-000000000001";
 const DRAFT = "73000000-0000-4000-8000-000000000002";
 const CREATED = "73000000-0000-4000-8000-000000000003";
 
-void test("shell state is shared across new tabs and isolated by account and workspace", () => {
+void test("shell state is shared across new tabs and isolated by account and lix", () => {
 	const browserStorage = new MemoryStorage();
 	const storeA = createWorkspaceSessionStateStore({
 		userId: USER,
-		workspaceId: WORKSPACE,
+		workspaceId: LIX,
 		storage: browserStorage,
 	});
 	const alreadyOpenStore = createWorkspaceSessionStateStore({
 		userId: USER,
-		workspaceId: WORKSPACE,
+		workspaceId: LIX,
 		storage: browserStorage,
 	});
 	let alreadyOpenNotifications = 0;
@@ -59,7 +59,7 @@ void test("shell state is shared across new tabs and isolated by account and wor
 	assert.deepEqual(
 		createWorkspaceSessionStateStore({
 			userId: USER,
-			workspaceId: WORKSPACE,
+			workspaceId: LIX,
 			storage: browserStorage,
 		}).getSnapshot(),
 		storeA.getSnapshot(),
@@ -68,7 +68,7 @@ void test("shell state is shared across new tabs and isolated by account and wor
 	assert.equal(
 		createWorkspaceSessionStateStore({
 			userId: OTHER_USER,
-			workspaceId: WORKSPACE,
+			workspaceId: LIX,
 			storage: browserStorage,
 		}).getSnapshot(),
 		null,
@@ -77,11 +77,11 @@ void test("shell state is shared across new tabs and isolated by account and wor
 	assert.equal(
 		createWorkspaceSessionStateStore({
 			userId: USER,
-			workspaceId: OTHER_WORKSPACE,
+			workspaceId: OTHER_LIX,
 			storage: browserStorage,
 		}).getSnapshot(),
 		null,
-		"another workspace cannot inherit the previous workspace's state",
+		"another lix cannot inherit the previous lix's state",
 	);
 });
 
@@ -107,14 +107,14 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 	} as unknown as LixraySupabaseClient;
 	const shell = createWorkspaceSessionStateStore({
 		userId: USER,
-		workspaceId: WORKSPACE,
+		workspaceId: LIX,
 		clientState,
 		storage: fallbackStorage,
 	});
 	const preferences = createWorkspacePreferencesStore({
 		client: rejectingRemote,
 		userId: USER,
-		workspaceId: WORKSPACE,
+		workspaceId: LIX,
 		clientState,
 		storage: fallbackStorage,
 	});
@@ -145,7 +145,7 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 	assert.deepEqual(
 		createWorkspaceSessionStateStore({
 			userId: USER,
-			workspaceId: WORKSPACE,
+			workspaceId: LIX,
 			clientState,
 		}).getSnapshot(),
 		shellState,
@@ -155,7 +155,7 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 		await createWorkspacePreferencesStore({
 			client: rejectingRemote,
 			userId: USER,
-			workspaceId: WORKSPACE,
+			workspaceId: LIX,
 			clientState,
 		}).load(),
 		{
@@ -167,12 +167,36 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 	assert.equal(
 		createWorkspaceSessionStateStore({
 			userId: OTHER_USER,
-			workspaceId: WORKSPACE,
+			workspaceId: LIX,
 			clientState: memoryClientState(),
 		}).getSnapshot(),
 		null,
 		"another client-state namespace does not inherit this UI state",
 	);
+});
+
+void test("client Lix shell state applies the first-visit initializer", () => {
+	const seededState = {
+		focusedPanel: "central" as const,
+		panels: {
+			left: { views: [], activeInstance: null },
+			central: {
+				views: [
+					{ instance: "getting-started", kind: "lixray_getting_started" },
+				],
+				activeInstance: "getting-started",
+			},
+			right: { views: [], activeInstance: null },
+		},
+	};
+	const store = createWorkspaceSessionStateStore({
+		userId: USER,
+		workspaceId: LIX,
+		clientState: memoryClientState(),
+		initializeSnapshot: (persisted) => persisted ?? seededState,
+	});
+
+	assert.deepEqual(store.getSnapshot(), seededState);
 });
 
 void test("branch selection is serialized and only the latest request is routed", async () => {
@@ -273,7 +297,7 @@ void test("demo preferences and review status survive a same-tab reload", async 
 	const preferences = createWorkspacePreferencesStore({
 		client: null,
 		userId: USER,
-		workspaceId: WORKSPACE,
+		workspaceId: LIX,
 		storage,
 	});
 	await preferences.save({
@@ -284,7 +308,7 @@ void test("demo preferences and review status survive a same-tab reload", async 
 		await createWorkspacePreferencesStore({
 			client: null,
 			userId: USER,
-			workspaceId: WORKSPACE,
+			workspaceId: LIX,
 			storage,
 		}).load(),
 		{
@@ -296,7 +320,7 @@ void test("demo preferences and review status survive a same-tab reload", async 
 	const reviews = createWorkspaceReviewStatusStore({
 		client: null,
 		userId: USER,
-		workspaceId: WORKSPACE,
+		workspaceId: LIX,
 		storage,
 	});
 	await reviews.resolve({
@@ -309,7 +333,7 @@ void test("demo preferences and review status survive a same-tab reload", async 
 		await createWorkspaceReviewStatusStore({
 			client: null,
 			userId: USER,
-			workspaceId: WORKSPACE,
+			workspaceId: LIX,
 			storage,
 		}).loadResolvedReviewIds(DRAFT),
 		["review-1"],
@@ -318,7 +342,7 @@ void test("demo preferences and review status survive a same-tab reload", async 
 		await createWorkspaceReviewStatusStore({
 			client: null,
 			userId: OTHER_USER,
-			workspaceId: WORKSPACE,
+			workspaceId: LIX,
 			storage,
 		}).loadResolvedReviewIds(DRAFT),
 		[],
@@ -341,7 +365,7 @@ void test("failed remote review persistence survives tab loss and retries idempo
 	const reviews = createWorkspaceReviewStatusStore({
 		client,
 		userId: USER,
-		workspaceId: WORKSPACE,
+		workspaceId: LIX,
 		durableStorage,
 	});
 
@@ -356,7 +380,7 @@ void test("failed remote review persistence survives tab loss and retries idempo
 		await createWorkspaceReviewStatusStore({
 			client: null,
 			userId: USER,
-			workspaceId: WORKSPACE,
+			workspaceId: LIX,
 			storage: durableStorage,
 		}).loadResolvedReviewIds(DRAFT),
 		["review-outbox"],
@@ -366,7 +390,7 @@ void test("failed remote review persistence survives tab loss and retries idempo
 	const freshTab = createWorkspaceReviewStatusStore({
 		client,
 		userId: USER,
-		workspaceId: WORKSPACE,
+		workspaceId: LIX,
 		durableStorage,
 	});
 	assert.deepEqual(await freshTab.loadResolvedReviewIds(DRAFT), [
@@ -383,7 +407,7 @@ void test("failed remote review persistence survives tab loss and retries idempo
 	);
 });
 
-void test("workspace sessions use unified remote Lix with session-local branch state and rebound observations", async (t) => {
+void test("lix sessions use unified remote Lix with session-local branch state and rebound observations", async (t) => {
 	const executeBranches: string[] = [];
 	const createBodies: unknown[] = [];
 	const requestPaths: string[] = [];
@@ -420,7 +444,7 @@ void test("workspace sessions use unified remote Lix with session-local branch s
 			return Response.json({
 				protocolVersion: 1,
 				activeBranchId,
-				sessionId: "workspace-session",
+				sessionId: "lix-session",
 			});
 		}
 		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
