@@ -165,6 +165,83 @@ test("upsertFileData sends an authenticated raw octet-stream request", async () 
   assert.deepEqual(calls[1].body, payload);
 });
 
+test("upsertFileDataBatch frames raw entries after its advertised capability", async () => {
+  const calls = [];
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    internalToken: "internal-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, ...options });
+      if (options.method === "GET") {
+        return Response.json({
+          sessionId: "session-file-upsert-batch",
+          capabilities: { binaryFileUpsertBatch: true },
+        });
+      }
+      const entries = decodeFileUpsertBatch(options.body);
+      return Response.json({
+        columns: [],
+        rows: [],
+        rowsAffected: entries.length,
+        notices: [],
+      });
+    },
+  });
+
+  await client.open();
+  const entries = [
+    { path: "/nested/\u00e5.json", data: Buffer.from([0, 1, 2, 255]) },
+    { path: "/nested/data.csv", data: Buffer.from("a,b\n1,2\n") },
+  ];
+  const result = await client.upsertFileDataBatch(entries);
+
+  assert.equal(result.value.rowsAffected, 2);
+  assert.equal(result.requestBytes, 4 + entries.reduce(
+    (total, { path, data }) => total + 8 + Buffer.byteLength(path) + data.byteLength,
+    0,
+  ));
+  assert.equal(
+    calls[1].url,
+    "http://example.test/lixes/workspace/lix/v1/file/upsert-batch",
+  );
+  assert.equal(calls[1].method, "POST");
+  assert.equal(calls[1].headers.authorization, "Bearer internal-token");
+  assert.equal(calls[1].headers["lix-session-id"], "session-file-upsert-batch");
+  assert.equal(calls[1].headers["content-type"], "application/octet-stream");
+  assert.deepEqual(decodeFileUpsertBatch(calls[1].body), entries);
+});
+
+test("upsertFileDataBatch rejects more than 1,024 entries to preserve atomicity", async () => {
+  const calls = [];
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    fetchImpl: async (_url, options) => {
+      calls.push(options);
+      if (options.method === "GET") {
+        return Response.json({
+          sessionId: "session-file-upsert-batch-limit",
+          capabilities: { binaryFileUpsertBatch: true },
+        });
+      }
+      throw new Error("an oversized batch must not issue an upsert request");
+    },
+  });
+  await client.open();
+
+  await assert.rejects(
+    client.upsertFileDataBatch(
+      Array.from({ length: 1_025 }, (_, index) => ({
+        path: `/files/${index}`,
+        data: Buffer.from([index % 256]),
+      })),
+    ),
+    /at most 1024 entries so one call remains atomic/,
+  );
+  assert.equal(calls.length, 1);
+});
+
 test("executeFileData keeps JSON/base64 work inside the timed protocol request", async () => {
   const calls = [];
   const client = new ProtocolClient({
@@ -224,6 +301,41 @@ test("upsertFileData validates its local call shape", () => {
   );
 });
 
+test("upsertFileDataBatch validates capability and every entry before requests", async () => {
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    fetchImpl: async () => {
+      throw new Error("fetch should not run");
+    },
+  });
+
+  client.sessionId = "session-file-upsert-batch";
+  await assert.rejects(
+    client.upsertFileDataBatch([{ path: "/a", data: Buffer.alloc(0) }]),
+    /does not advertise the binaryFileUpsertBatch capability/,
+  );
+  client.capabilities = { binaryFileUpsertBatch: true };
+  await assert.rejects(
+    client.upsertFileDataBatch([]),
+    /must be a non-empty array/,
+  );
+  await assert.rejects(
+    client.upsertFileDataBatch([
+      { path: "/a", data: Buffer.alloc(0) },
+      { path: "/a", data: Buffer.alloc(0) },
+    ]),
+    /duplicates \/a/,
+  );
+  await assert.rejects(
+    client.upsertFileDataBatch([
+      { path: "/a", data: Buffer.alloc(0) },
+      { path: "/b", data: new Uint8Array([1]) },
+    ]),
+    /data must be a Buffer/,
+  );
+});
+
 test("branch methods use the authenticated protocol endpoints", async () => {
   const calls = [];
   let getCalls = 0;
@@ -277,3 +389,22 @@ test("branch methods use the authenticated protocol endpoints", async () => {
   });
   assert.equal(calls[3].headers["lix-session-id"], "session-branch");
 });
+
+function decodeFileUpsertBatch(frame) {
+  const entries = [];
+  const count = frame.readUInt32BE(0);
+  let offset = 4;
+  for (let index = 0; index < count; index += 1) {
+    const pathLength = frame.readUInt32BE(offset);
+    offset += 4;
+    const dataLength = frame.readUInt32BE(offset);
+    offset += 4;
+    const path = frame.toString("utf8", offset, offset + pathLength);
+    offset += pathLength;
+    const data = Buffer.from(frame.subarray(offset, offset + dataLength));
+    offset += dataLength;
+    entries.push({ path, data });
+  }
+  assert.equal(offset, frame.byteLength);
+  return entries;
+}

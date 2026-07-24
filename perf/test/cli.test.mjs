@@ -147,6 +147,51 @@ test("requires full deterministic cycles for mixed hot writes", () => {
   assert.match(result.stderr, /requires --samples to be a multiple of 10/);
 });
 
+test("requires raw transport for the native mixed comparison", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      runner,
+      "--",
+      "--workspace",
+      "perf-cli-check",
+      "--operation",
+      "update-mixed-native-batch",
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stderr,
+    /require --file-write-transport binary/,
+  );
+});
+
+test("rejects hot sessions for the native mixed comparison", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      runner,
+      "--",
+      "--workspace",
+      "perf-cli-check",
+      "--operation",
+      "update-mixed-native-batch",
+      "--file-write-transport",
+      "binary",
+      "--samples",
+      "2",
+      "--hot-session",
+      "--preseeded",
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /require isolated one-sample workspaces/);
+});
+
 test("rejects corpus sizes outside the reproducible matrix", () => {
   const result = spawnSync(
     process.execPath,

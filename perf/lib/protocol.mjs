@@ -1,5 +1,8 @@
 import { performance } from "node:perf_hooks";
 
+const MAX_BINARY_FILE_UPSERT_BATCH_ENTRIES = 1_024;
+const MAX_U32 = 0xffff_ffff;
+
 export class ProtocolError extends Error {
   constructor(method, path, status, body) {
     super(`${method} ${path} failed with HTTP ${status}: ${body}`);
@@ -84,6 +87,7 @@ export class ProtocolClient {
     this.internalToken = internalToken;
     this.fetchImpl = fetchImpl;
     this.sessionId = undefined;
+    this.capabilities = undefined;
   }
 
   get hasSession() {
@@ -100,6 +104,7 @@ export class ProtocolClient {
       throw new Error("handshake response did not contain a sessionId");
     }
     this.sessionId = sessionId;
+    this.capabilities = sample.value.capabilities;
     return {
       elapsedMs: sample.elapsedMs,
       protocolVersion: sample.value.protocolVersion,
@@ -168,6 +173,35 @@ export class ProtocolClient {
     );
   }
 
+  async upsertFileDataBatch(entries) {
+    // Match a caller's sequential single-upsert control: its logical timer
+    // includes each local validation before transport begins.
+    const started = performance.now();
+    this.requireSession();
+    this.requireBinaryFileUpsertBatchCapability();
+    const normalizedEntries = normalizeFileUpsertBatchEntries(entries);
+    if (normalizedEntries.length > MAX_BINARY_FILE_UPSERT_BATCH_ENTRIES) {
+      throw new RangeError(
+        `upsertFileDataBatch accepts at most ${MAX_BINARY_FILE_UPSERT_BATCH_ENTRIES} entries so one call remains atomic`,
+      );
+    }
+    const response = await this.requestLazyBinary(
+      "file/upsert-batch",
+      "POST",
+      () => encodeFileUpsertBatch(normalizedEntries),
+    );
+    const elapsedMs = performance.now() - started;
+
+    return {
+      value: response.value,
+      // Include batch frame construction and transport in the logical timer.
+      // Byte accounting remains outside the timer, like requestEncoded.
+      elapsedMs,
+      requestBytes: response.requestBytes,
+      responseBytes: response.responseBytes,
+    };
+  }
+
   createBranch({ id, name, fromCommitId } = {}) {
     this.requireSession();
     return this.request("branch/create", "POST", { id, name, fromCommitId });
@@ -191,6 +225,7 @@ export class ProtocolClient {
       return await this.request("session", "DELETE");
     } finally {
       this.sessionId = undefined;
+      this.capabilities = undefined;
     }
   }
 
@@ -225,6 +260,18 @@ export class ProtocolClient {
       method,
       encoded,
       "application/json",
+      started,
+    );
+  }
+
+  async requestLazyBinary(path, method, makeBody) {
+    const started = performance.now();
+    const encoded = makeBody();
+    return this.requestEncoded(
+      path,
+      method,
+      encoded,
+      "application/octet-stream",
       started,
     );
   }
@@ -278,6 +325,83 @@ export class ProtocolClient {
       throw new Error("protocol session is not open");
     }
   }
+
+  requireBinaryFileUpsertBatchCapability() {
+    if (this.capabilities?.binaryFileUpsertBatch !== true) {
+      throw new Error(
+        "server does not advertise the binaryFileUpsertBatch capability",
+      );
+    }
+  }
+}
+
+function normalizeFileUpsertBatchEntries(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new TypeError(
+      "upsertFileDataBatch entries must be a non-empty array",
+    );
+  }
+
+  const paths = new Set();
+  return entries.map((entry, index) => {
+    if (!entry || typeof entry !== "object") {
+      throw new TypeError(
+        `upsertFileDataBatch entry ${index} must be an object with path and data`,
+      );
+    }
+    const { path, data } = entry;
+    if (typeof path !== "string" || path.length === 0) {
+      throw new TypeError(
+        `upsertFileDataBatch entry ${index} path must be a non-empty string`,
+      );
+    }
+    if (!Buffer.isBuffer(data)) {
+      throw new TypeError(
+        `upsertFileDataBatch entry ${index} data must be a Buffer`,
+      );
+    }
+    if (Buffer.byteLength(path) > MAX_U32) {
+      throw new RangeError(
+        `upsertFileDataBatch entry ${index} path exceeds the u32 wire limit`,
+      );
+    }
+    if (data.byteLength > MAX_U32) {
+      throw new RangeError(
+        `upsertFileDataBatch entry ${index} data exceeds the u32 wire limit`,
+      );
+    }
+    if (paths.has(path)) {
+      throw new TypeError(`upsertFileDataBatch entry ${index} duplicates ${path}`);
+    }
+    paths.add(path);
+    return { path, data };
+  });
+}
+
+function encodeFileUpsertBatch(entries) {
+  let byteLength = 4;
+  for (const { path, data } of entries) {
+    byteLength += 8 + Buffer.byteLength(path) + data.byteLength;
+    if (!Number.isSafeInteger(byteLength)) {
+      throw new RangeError("upsertFileDataBatch frame exceeds safe allocation size");
+    }
+  }
+
+  const frame = Buffer.allocUnsafe(byteLength);
+  frame.writeUInt32BE(entries.length, 0);
+  let offset = 4;
+  for (const { path, data } of entries) {
+    const pathLength = Buffer.byteLength(path);
+    frame.writeUInt32BE(pathLength, offset);
+    offset += 4;
+    frame.writeUInt32BE(data.byteLength, offset);
+    offset += 4;
+    frame.write(path, offset, pathLength, "utf8");
+    offset += pathLength;
+    data.copy(frame, offset);
+    offset += data.byteLength;
+  }
+  return frame;
 }
 
 function requestBodyBytes(body) {
