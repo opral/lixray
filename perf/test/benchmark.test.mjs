@@ -123,6 +123,12 @@ test("read preconditioning is asserted and reported outside measurement", async 
   });
 
   assert.equal(protocol.pointReads, 6);
+  const preconditionedPaths = protocol.readPaths.slice(0, 5);
+  const measuredPaths = new Set(protocol.readPaths.slice(5));
+  assert.ok(
+    preconditionedPaths.every((path) => !measuredPaths.has(path)),
+    "preconditions must exclude every later timed point-read path",
+  );
   assert.equal(result.methodology.preconditionReadRuns, 5);
   assert.match(result.methodology.precondition, /unrelated exact-path reads/);
   assert.equal(typeof result.setup.preconditionReadMs, "number");
@@ -237,6 +243,152 @@ test("rows-affected assertions reject semantic failures", () => {
   );
 });
 
+test("file-write transport is explicit and defaults to JSON for reproducible A/Bs", async () => {
+  const binaryProtocol = new FileWriteProtocol(10);
+  const binary = await runBenchmark(binaryProtocol, {
+    operation: "update-4k",
+    targetTotalCommits: 10,
+    warmupRuns: 0,
+    measuredRuns: 1,
+    fileWriteTransport: "binary",
+    preseeded: true,
+  });
+  assert.equal(binaryProtocol.binaryWrites.length, 1);
+  assert.equal(binaryProtocol.jsonWrites.length, 0);
+  assert.equal(binary.methodology.fileWriteTransport, "binary");
+  assert.equal(binary.methodology.fileWriteShape, "upsert");
+  assert.match(binary.methodology.timingBoundary, /octet-stream/);
+  assert.equal(binary.measurement.sample[1], 4 * 1024);
+
+  const jsonProtocol = new FileWriteProtocol(10);
+  const json = await runBenchmark(jsonProtocol, {
+    operation: "update-4k",
+    targetTotalCommits: 10,
+    warmupRuns: 0,
+    measuredRuns: 1,
+    preseeded: true,
+  });
+  assert.equal(jsonProtocol.binaryWrites.length, 0);
+  assert.equal(jsonProtocol.jsonWrites.length, 1);
+  assert.equal(json.methodology.fileWriteTransport, "json");
+  assert.equal(json.methodology.fileWriteShape, "update");
+  assert.match(json.methodology.timingBoundary, /JSON serialization/);
+  assert.ok(json.measurement.sample[1] > 4 * 1024);
+
+  const upsertProtocol = new FileWriteProtocol(10);
+  const upsert = await runBenchmark(upsertProtocol, {
+    operation: "update-4k",
+    targetTotalCommits: 10,
+    warmupRuns: 0,
+    measuredRuns: 1,
+    fileWriteTransport: "json",
+    fileWriteShape: "upsert",
+    preseeded: true,
+  });
+  assert.equal(upsertProtocol.jsonWrites.length, 1);
+  assert.equal(upsertProtocol.jsonWrites[0].shape, "upsert");
+  assert.equal(upsert.methodology.fileWriteShape, "upsert");
+});
+
+test("hot-session mutation distributions retain accounting and session semantics", async () => {
+  const protocol = new FileWriteProtocol(10);
+  const result = await runBenchmark(protocol, {
+    operation: "update-4k",
+    targetTotalCommits: 10,
+    warmupRuns: 0,
+    measuredRuns: 3,
+    fileWriteTransport: "binary",
+    hotSession: true,
+    preseeded: true,
+  });
+
+  assert.equal(protocol.binaryWrites.length, 3);
+  assert.equal(result.methodology.hotSession, true);
+  assert.match(result.methodology.mutationSampleIsolation, /live protocol session/);
+  assert.equal(result.measurement.kind, "hot-mutation-distribution");
+  assert.equal(result.measurement.samples.length, 3);
+  assert.equal(result.postTimingAccounting.totalCommits, 13);
+  assert.equal(result.postTimingAccounting.corpusFiles, 1_000);
+});
+
+test("hot-session preconditioning excludes every timed mutation path", async () => {
+  const protocol = new FileWriteProtocol(10);
+  await runBenchmark(protocol, {
+    operation: "update-mixed",
+    targetTotalCommits: 10,
+    preconditionReadRuns: 10,
+    warmupRuns: 0,
+    measuredRuns: 10,
+    fileWriteTransport: "binary",
+    hotSession: true,
+    preseeded: true,
+  });
+
+  const mutationPaths = new Set(
+    protocol.binaryWrites.map((write) => write.path),
+  );
+  assert.equal(protocol.preconditionReadPaths.length, 10);
+  assert.ok(
+    protocol.preconditionReadPaths.every((path) => !mutationPaths.has(path)),
+  );
+});
+
+test("hot-session mutation distributions require an externally preseeded clone", async () => {
+  await assert.rejects(
+    runBenchmark(new FileWriteProtocol(10), {
+      operation: "update-4k",
+      targetTotalCommits: 10,
+      warmupRuns: 0,
+      measuredRuns: 2,
+      hotSession: true,
+      preseeded: false,
+    }),
+    /require preseeded: true/,
+  );
+});
+
+test("mixed hot writes use the fixed happy-path payload distribution", async () => {
+  const protocol = new FileWriteProtocol(10);
+  const result = await runBenchmark(protocol, {
+    operation: "update-mixed",
+    targetTotalCommits: 10,
+    warmupRuns: 0,
+    measuredRuns: 10,
+    fileWriteTransport: "binary",
+    hotSession: true,
+    preseeded: true,
+  });
+
+  assert.deepEqual(
+    protocol.binaryWrites.map((write) => write.data.byteLength),
+    [
+      4 * 1024,
+      4 * 1024,
+      4 * 1024,
+      4 * 1024,
+      4 * 1024,
+      4 * 1024,
+      4 * 1024,
+      64 * 1024,
+      64 * 1024,
+      256 * 1024,
+    ],
+  );
+  assert.equal(result.measurement.kind, "hot-mutation-distribution");
+  assert.equal(result.postTimingAccounting.totalCommits, 20);
+
+  await assert.rejects(
+    runBenchmark(new FileWriteProtocol(10), {
+      operation: "update-mixed",
+      targetTotalCommits: 10,
+      warmupRuns: 0,
+      measuredRuns: 1,
+      preseeded: true,
+    }),
+    /requires hotSession and a multiple of 10 samples/,
+  );
+});
+
 test("sample summaries use nearest-rank percentiles", () => {
   const summary = summarizeSamples(
     [1, 2, 3, 4, 100].map((elapsedMs) => ({
@@ -301,6 +453,7 @@ function seedFixture(files) {
 
 class PreconditionProtocol {
   pointReads = 0;
+  readPaths = [];
 
   constructor(targetTotalCommits) {
     this.targetTotalCommits = targetTotalCommits;
@@ -326,6 +479,7 @@ class PreconditionProtocol {
 
     this.pointReads += 1;
     const path = params[0].value;
+    this.readPaths.push(path);
     return {
       value: {
         rows: [
@@ -342,6 +496,102 @@ class PreconditionProtocol {
       requestBytes: 2,
       responseBytes: 3,
     };
+  }
+}
+
+class FileWriteProtocol {
+  binaryWrites = [];
+  jsonWrites = [];
+  preconditionReadPaths = [];
+
+  constructor(targetTotalCommits) {
+    this.targetTotalCommits = targetTotalCommits;
+    this.state = expectedCorpusLookup(
+      buildCorpusIndex(),
+      targetTotalCommits,
+    );
+    this.written = new Map();
+  }
+
+  async upsertFileData(path, data) {
+    this.binaryWrites.push({ path, data });
+    this.written.set(path, data);
+    return {
+      value: { rowsAffected: 1 },
+      elapsedMs: 1,
+      requestBytes: data.byteLength,
+      responseBytes: 3,
+    };
+  }
+
+  async executeFileData(path, data, { shape }) {
+    this.jsonWrites.push({ path, data, shape });
+    this.written.set(path, data);
+    const blob = { kind: "blob", base64: data.toString("base64") };
+    const text = { kind: "text", value: path };
+    const body =
+      shape === "update"
+        ? {
+            sql: "UPDATE lix_file SET data = $1 WHERE path = $2",
+            params: [blob, text],
+          }
+        : {
+            sql:
+              shape === "insert"
+                ? "INSERT INTO lix_file (path, data) VALUES ($1, $2)"
+                : "INSERT INTO lix_file (path, data) VALUES ($1, $2) " +
+                  "ON CONFLICT (path) DO UPDATE SET data = excluded.data",
+            params: [text, blob],
+          };
+    return {
+      value: { rowsAffected: 1 },
+      elapsedMs: 1,
+      requestBytes: Buffer.byteLength(JSON.stringify(body)),
+      responseBytes: 3,
+    };
+  }
+
+  async execute(sql, params) {
+    if (sql.includes("COUNT(*) FROM lix_file")) {
+      return {
+        value: {
+          rows: [
+            [
+              { kind: "int", value: 1_000 },
+              {
+                kind: "int",
+                value:
+                  this.targetTotalCommits +
+                  this.binaryWrites.length +
+                  this.jsonWrites.length,
+              },
+            ],
+          ],
+        },
+      };
+    }
+    if (sql.startsWith("SELECT path, data FROM lix_file WHERE path")) {
+      const path = params[0].value;
+      if (this.binaryWrites.length === 0 && this.jsonWrites.length === 0) {
+        this.preconditionReadPaths.push(path);
+      }
+      return {
+        value: {
+          rows: [
+            [
+              { kind: "text", value: path },
+              {
+                kind: "blob",
+                base64: (this.written.get(path) ?? this.state.get(path)).toString(
+                  "base64",
+                ),
+              },
+            ],
+          ],
+        },
+      };
+    }
+    throw new Error(`unexpected SQL: ${sql}`);
   }
 }
 

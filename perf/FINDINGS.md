@@ -29,6 +29,37 @@ At 5,000 commits it produces qualifying end-to-end update and delete wins on
 the SlateDB-backed server; the native benchmark records the same causal cut on
 both SlateDB and RocksDB.
 
+## Native binary file transfer follow-on
+
+An explicit, capability-gated binary file-upsert endpoint removes JSON base64
+encoding from the large-file transfer path without changing the underlying
+SlateDB or RocksDB layout. This is deliberately an opt-in `UPSERT` operation,
+not a transparent rewrite of arbitrary SQL `UPDATE` semantics.
+
+On three fresh, closed-template SlateDB clones with 5,000 mixed-format files
+and exactly 5,000 starting commits, matched SQL
+`INSERT ... ON CONFLICT(path) DO UPDATE` controls were compared with the raw
+`application/octet-stream` endpoint. The template and all measurements ran on
+Lix `010363f64210f2de277b54f753025ec8a71efa91`; each run used five unrelated
+point-read preconditions, a one-second settle window, and one timed 2 MiB
+binary write.
+
+| Metric | JSON upsert | Raw binary upsert | Change |
+| --- | ---: | ---: | ---: |
+| Median end-to-end latency | 91.178 ms | 54.060 ms | **41.6% faster** paired median |
+| Request body | 2,796,399 B | 2,097,152 B | **25.0% smaller** |
+
+The counterbalanced JSON/binary, binary/JSON, and JSON/binary pairs reduced
+latency by 41.6%, 39.5%, and 44.9%; every run verified 5,001 commits and 5,000
+files after the mutation. The JSON series was 91.178/90.130/98.032 ms and the
+binary series was 53.287/54.513/54.060 ms. This is a transport win: a direct
+production-backend screen showed native and matched SQL upserts near parity on
+both SlateDB and RocksDB. A deterministic hot mixed-write gate (4 KiB
+JSON/CSV, 64 KiB PDF, and 256 KiB binary payloads) regressed for raw transport,
+so it is retained as a non-qualifying control rather than promoted as a general
+CRUD optimization. One fresh-process memory pair was also inconclusive because
+startup baselines differed; no memory reduction is claimed.
+
 ## Workload and timing
 
 The checked-in runner builds 1,000 deterministic files: 100 each of JSON, CSV,
@@ -39,10 +70,9 @@ Markdown, text, XML, YAML, PDF, PNG, binary, and log. Sizes range from 1 KiB to
 `--commits` includes genesis. Every depth gets one atomic 1,000-file insertion
 commit followed by deterministic single-file update commits. A mutation run
 times exactly one request on a fresh workspace. A read run reports a
-distribution. The timer starts before JSON serialization and ends after the
-complete response body has been read and decoded. Payload construction,
-including blob-to-base64 conversion, plus assertions and accounting are
-outside it.
+distribution. The current file-write timer starts before client base64/JSON
+encoding or raw-body transfer and ends after the complete response body has
+been read and decoded. Assertions and accounting are outside it.
 
 For the controlled active-runtime validation comparison:
 

@@ -38,6 +38,49 @@ test("rejects mutating warmups before opening a server connection", () => {
   );
 });
 
+test("requires a preseeded clone for hot-session mutation distributions", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      runner,
+      "--",
+      "--workspace",
+      "perf-cli-check",
+      "--operation",
+      "update-4k",
+      "--samples",
+      "2",
+      "--hot-session",
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--hot-session requires --preseeded/);
+});
+
+test("requires full deterministic cycles for mixed hot writes", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      runner,
+      "--",
+      "--workspace",
+      "perf-cli-check",
+      "--operation",
+      "update-mixed",
+      "--samples",
+      "2",
+      "--hot-session",
+      "--preseeded",
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /requires --samples to be a multiple of 10/);
+});
+
 test("rejects corpus sizes outside the reproducible matrix", () => {
   const result = spawnSync(
     process.execPath,
