@@ -58,6 +58,21 @@ export class ProtocolClient {
     return this.request("execute-batch", "POST", { statements });
   }
 
+  createBranch({ id, name, fromCommitId } = {}) {
+    this.requireSession();
+    return this.request("branch/create", "POST", { id, name, fromCommitId });
+  }
+
+  switchBranch(branchId) {
+    this.requireSession();
+    return this.request("branch/switch", "POST", { branchId });
+  }
+
+  sessionInfo() {
+    this.requireSession();
+    return this.request("", "GET");
+  }
+
   async close() {
     if (!this.hasSession) {
       return undefined;

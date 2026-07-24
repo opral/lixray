@@ -3,29 +3,41 @@
 This worker measures one request at a time through the full
 `lix-server -> Lix server protocol -> Lix engine -> configured storage` path.
 It is intentionally opinionated: every invocation uses a fresh workspace,
-seeds the same 1,000- or 5,000-file corpus, creates an exact history depth, and
-measures one operation family. There is no resume mode because reusing setup
-state makes write comparisons ambiguous.
+seeds one of the fixed 1,000-, 5,000-, or 10,000-file corpora, creates an
+exact history depth, and measures one operation family. There is no resume
+mode because reusing setup state makes write comparisons ambiguous.
 
 The measured bottlenecks, controlled A/B results, memory/storage accounting,
 tradeoffs, and external design references are in [FINDINGS.md](FINDINGS.md).
 
 ## Corpus and history
 
-The `--files` axis accepts exactly 1,000 or 5,000 files: respectively 100 or
-500 files in each of ten formats (JSON, CSV, Markdown, text, XML, YAML, PDF,
-PNG, binary, and log). Structured formats and containers are valid, sizes are
-fixed from 1 KiB through 32 KiB, binary payloads are deterministic, and the
-report records the corpus SHA-256.
+`--files` is deliberately restricted to `1000`, `5000`, or `10000`. Each
+corpus has an even mix of JSON, CSV, Markdown, text, XML, YAML, PDF, PNG,
+binary, and log files (100, 500, or 1,000 files of each type respectively).
+Structured formats and containers are valid, sizes are fixed from 1 KiB
+through 32 KiB, binary payloads are deterministic, and the report records the
+corpus SHA-256.
 
 `--commits` is the total history depth at the start of the operation family
-and **includes the genesis commit**. Seeding therefore creates
-`--commits - 1` mutation commits. The 1,000-file cohort inserts its corpus in
-one bounded `execute-batch`; the 5,000-file cohort uses five 1,000-file seed
-commits so every request remains below the production 64 MiB expanded-body
-limit. Deterministic single-file updates create the remaining commits. This
-keeps file count and insertion batching constant when commit depth changes
-within a cohort; 5,000 files require `--commits >= 6`.
+and **includes the genesis commit**. The seed commit count is
+`ceil(--files / 1000)`, so `--commits` must be at least one genesis commit plus
+that many seed commits. Every seed commit is one atomic `execute-batch` of
+exactly 1,000 files; the 1,000-file request is 14.276 MiB on the wire, safely
+below the 64 MiB protocol ceiling. The runner then creates exactly
+`--commits - 1 - seedCommitCount` deterministic single-file history mutations.
+This makes the requested start depth exact without sending an oversized 5,000-
+or 10,000-file request.
+
+| `--files` | seed commits | minimum `--commits` (genesis included) |
+| ---: | ---: | ---: |
+| 1,000 | 1 | 2 |
+| 5,000 | 5 | 6 |
+| 10,000 | 10 | 11 |
+
+The report and runner summary record `seedFilesPerCommit`, `seedCommitCount`,
+and `historyMutationCommits`, so preseeded templates can be checked against
+the same setup plan.
 
 The runner performs no pre-timing current-state or history accounting scan:
 such a scan would prime the same blocks used by CRUD validation. It derives
@@ -65,16 +77,32 @@ Supported operation families are:
 - `read-point-4k`: exact-path read of a valid 4 KiB JSON file
 - `read-point-32k`: exact-path read of a valid 32 KiB PDF
 - `list-paths-100`: ordered listing of 100 corpus paths
+- `diff-file-history`: history-backed diff projection of one changed 4 KiB file's current and prior logical revisions
+- `branch-create`: create one named branch from the active head through `POST /lix/v1/branch/create`
+- `branch-switch`: switch the live session between two sibling branches; their creation is setup outside the timed switch primitive
 - `create-4k`: create a unique valid 4 KiB JSON file in the existing `/corpus` directory
 - `update-4k`: replace an existing JSON file with 4 KiB
 - `update-2m`: replace an existing binary file with 2 MiB of high-entropy data
 - `delete-1k`: delete a unique existing 1 KiB text file
 
-Mutation operations require `--warmups 0 --samples 1` (their defaults), so the
-single timed request starts at exactly the requested commit depth. Repeat a
-mutation with fresh workspace IDs to obtain independent samples. Read
-operations default to three warmups and 30 timed requests. The report states
-both the requested start count and the expected/verified final count.
+`diff-file-history` is deliberately a history-backed diff projection, not a
+generic textual diff: it reads `lix_file_history` at the session's pinned
+active-branch head, asserts at least two ordered revisions, and verifies that
+the current and prior payloads differ. It requires at least one post-seed
+history mutation, so choose `--commits` above the seed minimum.
+
+Mutation operations, including `branch-create`, require `--warmups 0 --samples
+1` (their defaults), so the single timed request starts at exactly the
+requested commit depth. `branch-create` uses the protocol endpoint instead of
+writing internal branch tables, verifies its `lix_branch` row after timing, and
+adds its tracked branch-descriptor commit to the verified final count.
+`branch-switch` is a distribution: it first creates two sibling branches outside
+the timer and then alternates the live session between them. The report records
+those two setup commits separately, so its expected final count remains
+auditable. Repeat a mutation with fresh workspace IDs to obtain independent
+samples. Read operations default to three warmups and 30 timed requests. The
+report states both the requested start count and the expected/verified final
+count.
 
 Use `--precondition-reads 5` when the target is the common already-active
 runtime path. It performs five asserted exact-path reads of rows unrelated to
@@ -96,11 +124,13 @@ storage backend or deployed revision.
 ## Scaling and comparison method
 
 Use fresh workspace IDs for every point and run at least five independent
-repetitions per candidate. A useful history matrix is 2, 10, 100, 1,000, and
-5,000 total commits for each file-count cohort. Counterbalance baseline and candidate runs (for example
-A/B/B/A) instead of running every baseline first. For mutations, aggregate the
-one-request reports across workspaces; for reads, compare each report's median
-and p95.
+repetitions per candidate. The canonical scaling matrix crosses
+`--files 1000|5000|10000` with `--commits 1000|5000` total commits. (The
+smaller 2/10/100 depths remain useful diagnosis points when they satisfy the
+seed minimum shown above.) Counterbalance baseline and candidate runs (for
+example A/B/B/A) instead of running every baseline first. For mutations,
+aggregate the one-request reports across workspaces; for reads, compare each
+report's median and p95.
 
 By default, setup and timing share a session, so the result is explicitly
 reported as a post-ingest operational profile: cache heat and compaction
@@ -128,6 +158,7 @@ LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
   --workspace perf-template-c1000 \
   --operation read-point-4k \
+  --files 1000 \
   --commits 1000 \
   --warmups 0 \
   --samples 1
@@ -142,6 +173,7 @@ LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
   --workspace perf-candidate-c1000-r1 \
   --operation create-4k \
+  --files 1000 \
   --commits 1000 \
   --precondition-reads 5 \
   --settle-ms 1000 \

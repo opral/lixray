@@ -2,10 +2,13 @@ import { performance } from "node:perf_hooks";
 import {
   buildCorpus,
   buildCorpusIndex,
-  CORPUS_FILE_COUNT,
   contentFor,
+  CORPUS_FILE_COUNT,
   corpusManifest,
   extensionOf,
+  minimumTotalCommitsForFiles,
+  SEED_FILES_PER_COMMIT,
+  seedCommitCountForFiles,
 } from "./corpus.mjs";
 import { summarizeSamples } from "./statistics.mjs";
 
@@ -13,25 +16,23 @@ export const operationNames = Object.freeze([
   "read-point-4k",
   "read-point-32k",
   "list-paths-100",
+  "diff-file-history",
+  "branch-create",
+  "branch-switch",
   "create-4k",
   "update-4k",
   "update-2m",
   "delete-1k",
 ]);
 
-// A 1,000-file mixed chunk is about 14 MiB on the JSON/base64 wire, leaving
-// room beneath the protocol's 64 MiB expanded-body limit without changing that
-// production safety boundary merely to seed a benchmark corpus.
-const MAX_FILES_PER_SEED_REQUEST = 1_000;
-
 export function isMutationOperation(operation) {
-  return ["create-4k", "update-4k", "update-2m", "delete-1k"].includes(
-    operation,
-  );
-}
-
-export function initialCorpusInsertCommits(corpusFileCount) {
-  return Math.ceil(corpusFileCount / MAX_FILES_PER_SEED_REQUEST);
+  return [
+    "branch-create",
+    "create-4k",
+    "update-4k",
+    "update-2m",
+    "delete-1k",
+  ].includes(operation);
 }
 
 export async function runBenchmark(
@@ -39,7 +40,7 @@ export async function runBenchmark(
   {
     operation,
     targetTotalCommits,
-    corpusFileCount = CORPUS_FILE_COUNT,
+    corpusFiles,
     preconditionReadRuns = 0,
     settleMs = 0,
     warmupRuns,
@@ -51,15 +52,11 @@ export async function runBenchmark(
   if (!operationNames.includes(operation)) {
     throw new Error(`unsupported operation: ${operation}`);
   }
-  const initialInsertCommits = initialCorpusInsertCommits(corpusFileCount);
-  if (
-    !Number.isSafeInteger(targetTotalCommits) ||
-    targetTotalCommits < initialInsertCommits + 1
-  ) {
-    throw new Error(
-      `targetTotalCommits must include genesis and be at least ${initialInsertCommits + 1} for this corpus`,
-    );
-  }
+  const requestedCorpusFiles = corpusFiles ?? CORPUS_FILE_COUNT;
+  const commitPlan = commitPlanForCorpus(
+    requestedCorpusFiles,
+    targetTotalCommits,
+  );
   if (!Number.isSafeInteger(warmupRuns) || warmupRuns < 0) {
     throw new Error("warmupRuns must be a non-negative integer");
   }
@@ -84,8 +81,8 @@ export async function runBenchmark(
   }
 
   const corpus = preseeded
-    ? buildCorpusIndex(corpusFileCount)
-    : buildCorpus(corpusFileCount);
+    ? buildCorpusIndex(requestedCorpusFiles)
+    : buildCorpus(requestedCorpusFiles);
   let state;
   let seedMs;
   if (preseeded) {
@@ -98,6 +95,20 @@ export async function runBenchmark(
     });
     seedMs = performance.now() - seedStarted;
   }
+
+  const totalOperations = warmupRuns + measuredRuns;
+  const prepared = prepareOperation(
+    operation,
+    corpus,
+    state,
+    totalOperations,
+    commitPlan,
+  );
+  const preTimingOperationSetupStarted = performance.now();
+  await prepared.setup?.(protocol);
+  const preTimingOperationSetupMs = prepared.setup
+    ? performance.now() - preTimingOperationSetupStarted
+    : null;
 
   const preconditionStarted = performance.now();
   await preconditionPointReads(
@@ -112,8 +123,6 @@ export async function runBenchmark(
     await new Promise((resolve) => setTimeout(resolve, settleMs));
   }
 
-  const totalOperations = warmupRuns + measuredRuns;
-  const prepared = prepareOperation(operation, corpus, state, totalOperations);
   for (let index = 0; index < warmupRuns; index += 1) {
     const sample = await prepared.execute(protocol, index);
     prepared.assert(sample.value, index);
@@ -134,7 +143,9 @@ export async function runBenchmark(
   await prepared.verify(protocol);
   const postTimingAccounting = await readPostTimingAccounting(protocol);
   const expectedFinalCommits =
-    targetTotalCommits + (prepared.mutates ? totalOperations : 0);
+    targetTotalCommits +
+    (prepared.preTimingMutationCommits ?? 0) +
+    (prepared.mutates ? totalOperations : 0);
   const expectedCorpusFiles = corpus.length + prepared.corpusFileDelta;
   if (postTimingAccounting.totalCommits !== expectedFinalCommits) {
     throw new Error(
@@ -153,8 +164,6 @@ export async function runBenchmark(
       operation,
       operationDescription: prepared.description,
       targetTotalCommits,
-      targetCorpusFiles: corpus.length,
-      initialCorpusInsertCommits: initialInsertCommits,
       genesisIncludedInTarget: true,
       expectedStartTotalCommits: targetTotalCommits,
       knownStartTotalCommits: preseeded ? null : targetTotalCommits,
@@ -163,6 +172,8 @@ export async function runBenchmark(
       historyPreparation: preseeded
         ? "externally-preseeded"
         : "same-session-post-ingest",
+      preTimingOperationSetup:
+        prepared.preTimingSetupDescription ?? "none",
       backgroundCompactionQuiescence: preseeded
         ? "caller-managed"
         : "not-quiesced",
@@ -195,14 +206,19 @@ export async function runBenchmark(
     // A preseeded run keeps corpus payload generation out of the timing
     // prelude. Build the reproducibility manifest only after measurement.
     corpus: corpusManifest(
-      preseeded ? buildCorpus(corpusFileCount) : corpus,
+      preseeded ? buildCorpus(requestedCorpusFiles) : corpus,
     ),
     setup: {
       seedMs,
+      preTimingOperationSetupMs,
+      preTimingOperationMutationCommits:
+        prepared.preTimingMutationCommits ?? 0,
       preconditionReadMs,
       settleMs,
+      seedFilesPerCommit: SEED_FILES_PER_COMMIT,
+      seedCommitCount: commitPlan.seedCommitCount,
+      historyMutationCommits: commitPlan.historyMutationCommits,
       mutationCommitsCreated: preseeded ? 0 : targetTotalCommits - 1,
-      initialCorpusInsertCommits: preseeded ? null : initialInsertCommits,
       expectedTotalCommitsBeforeTiming: targetTotalCommits,
       knownTotalCommitsAfterSeed: preseeded ? null : targetTotalCommits,
       preTimingChecks: {
@@ -251,17 +267,14 @@ function compactSample(sample) {
 }
 
 export function expectedCorpusLookup(corpus, targetTotalCommits) {
-  const targetMutationCommits = targetTotalCommits - 1;
-  const initialInsertCommits = initialCorpusInsertCommits(corpus.length);
-  if (targetMutationCommits < initialInsertCommits) {
-    throw new Error(
-      `at least ${initialInsertCommits} mutation commits are required to seed this corpus`,
-    );
-  }
+  const { seedCommitCount, targetMutationCommits } = commitPlanForCorpus(
+    corpus.length,
+    targetTotalCommits,
+  );
   const latestMutationByFile = new Int32Array(corpus.length);
   latestMutationByFile.fill(-1);
   for (
-    let mutation = initialInsertCommits;
+    let mutation = seedCommitCount;
     mutation < targetMutationCommits;
     mutation += 1
   ) {
@@ -300,44 +313,50 @@ export async function seedCorpus(
   targetTotalCommits,
   { onProgress } = {},
 ) {
-  const targetMutationCommits = targetTotalCommits - 1;
-  const initialInsertCommits = initialCorpusInsertCommits(corpus.length);
-  if (targetMutationCommits < initialInsertCommits) {
-    throw new Error(
-      `at least ${initialInsertCommits} mutation commits are required to seed this corpus`,
-    );
-  }
+  const {
+    seedCommitCount,
+    historyMutationCommits,
+    targetMutationCommits,
+  } = commitPlanForCorpus(corpus.length, targetTotalCommits);
   const state = new Map();
-  // Keep history shape independent of requested depth inside each file-count
-  // cohort. The 1k corpus fits one bounded request; the 5k corpus uses five
-  // 1k-file transactions so the benchmark does not relax the real protocol
-  // request ceiling just to construct its fixture.
-  const insertBatches = chunks(corpus, MAX_FILES_PER_SEED_REQUEST);
-  for (let batchIndex = 0; batchIndex < insertBatches.length; batchIndex += 1) {
-    const files = insertBatches[batchIndex];
-    const statements = chunks(files, 100).map(fileInsertStatement);
+  // A 1,000-file execute-batch is one atomic Lix commit and is small enough
+  // to remain under the protocol's 64 MiB JSON request ceiling. Keep this
+  // fixed across the file-count matrix: a 5k/10k corpus is several identical
+  // seed commits, not one oversized request or one differently-shaped commit.
+  for (const [seedIndex, seedFiles] of chunks(
+    corpus,
+    SEED_FILES_PER_COMMIT,
+  ).entries()) {
+    // Keep individual SQL statements bounded while execute-batch preserves
+    // atomicity for all 1,000 files in this seed commit.
+    const statements = chunks(seedFiles, 100).map(fileInsertStatement);
     const result = await protocol.executeBatch(statements);
     assertBatchRowsAffected(
       result.value,
       statements.map((statement) => statement.params.length / 2),
       "corpus insert",
     );
+    for (const file of seedFiles) {
+      state.set(file.path, file.data);
+    }
     onProgress?.({
       phase: "insert",
-      filesSeeded: (batchIndex + 1) * MAX_FILES_PER_SEED_REQUEST,
-      completedMutationCommits: batchIndex + 1,
+      filesSeeded: state.size,
+      totalFiles: corpus.length,
+      seedCommitCount,
+      seedFilesPerCommit: SEED_FILES_PER_COMMIT,
+      completedSeedCommits: seedIndex + 1,
+      completedMutationCommits: seedIndex + 1,
       targetMutationCommits,
     });
   }
-  for (const file of corpus) {
-    state.set(file.path, file.data);
-  }
 
   for (
-    let mutation = initialInsertCommits;
-    mutation < targetMutationCommits;
-    mutation += 1
+    let historyMutationIndex = 0;
+    historyMutationIndex < historyMutationCommits;
+    historyMutationIndex += 1
   ) {
+    const mutation = seedCommitCount + historyMutationIndex;
     const { file, data } = historyMutation(corpus, mutation);
     // Keep history seeding distinct from the timed update in the SQL plan
     // cache without relying on DML target aliases, which Lix does not support.
@@ -350,13 +369,36 @@ export async function seedCorpus(
     onProgress?.({
       phase: "history",
       filesSeeded: corpus.length,
-      historyCommits: mutation,
-      completedMutationCommits: mutation + 1,
+      totalFiles: corpus.length,
+      seedCommitCount,
+      seedFilesPerCommit: SEED_FILES_PER_COMMIT,
+      historyMutationCommits,
+      completedHistoryMutationCommits: historyMutationIndex + 1,
+      completedMutationCommits: seedCommitCount + historyMutationIndex + 1,
       targetMutationCommits,
     });
   }
 
   return state;
+}
+
+function commitPlanForCorpus(fileCount, targetTotalCommits) {
+  const seedCommitCount = seedCommitCountForFiles(fileCount);
+  const minimumTotalCommits = minimumTotalCommitsForFiles(fileCount);
+  if (
+    !Number.isSafeInteger(targetTotalCommits) ||
+    targetTotalCommits < minimumTotalCommits
+  ) {
+    throw new Error(
+      `targetTotalCommits must include genesis and be at least ${minimumTotalCommits} for ${fileCount} files (${seedCommitCount} seed commits)`,
+    );
+  }
+  return {
+    seedCommitCount,
+    historyMutationCommits:
+      targetTotalCommits - minimumTotalCommits,
+    targetMutationCommits: targetTotalCommits - 1,
+  };
 }
 
 function historyMutation(corpus, mutation) {
@@ -371,7 +413,13 @@ function historyMutation(corpus, mutation) {
   };
 }
 
-function prepareOperation(name, corpus, state, totalOperations) {
+function prepareOperation(
+  name,
+  corpus,
+  state,
+  totalOperations,
+  commitPlan,
+) {
   const byExtension = (extension) =>
     corpus.filter((file) => extensionOf(file.path) === extension);
 
@@ -428,6 +476,104 @@ function prepareOperation(name, corpus, state, totalOperations) {
         ),
       assert: (result) => assertPathRows(result, expectedPaths),
       verify: async () => {},
+    };
+  }
+
+  if (name === "diff-file-history") {
+    const cases = historyDiffCases(corpus, state, commitPlan, totalOperations);
+    return {
+      description:
+        "read the current and prior logical revisions of one changed 4 KiB file through lix_file_history",
+      mutates: false,
+      corpusFileDelta: 0,
+      execute: (protocol, index) =>
+        protocol.execute(
+          `SELECT path, data, lixcol_depth, lixcol_observed_commit_id
+             FROM lix_file_history
+            WHERE path = $1
+            ORDER BY lixcol_depth`,
+          [wireText(cases[index].path)],
+        ),
+      assert: (result, index) => assertHistoryDiffRows(result, cases[index]),
+      verify: async () => {},
+    };
+  }
+
+  if (name === "branch-create") {
+    const cases = Array.from({ length: totalOperations }, (_, index) => {
+      const suffix = String(index).padStart(4, "0");
+      return {
+        id: `perf-branch-${suffix}`,
+        name: `Lixray perf branch ${suffix}`,
+        commitId: undefined,
+      };
+    });
+    return {
+      description:
+        "create one named branch at the active branch head through the protocol branch endpoint",
+      mutates: true,
+      corpusFileDelta: 0,
+      execute: (protocol, index) => protocol.createBranch(cases[index]),
+      assert: (result, index) =>
+        assertBranchCreateResponse(result, cases[index]),
+      verify: async (protocol) => {
+        for (const expected of cases) {
+          const result = await protocol.execute(
+            "SELECT id, name, hidden, commit_id FROM lix_branch WHERE id = $1",
+            [wireText(expected.id)],
+          );
+          assertBranchRow(result.value, expected);
+        }
+      },
+    };
+  }
+
+  if (name === "branch-switch") {
+    // Branch creation is intentionally outside the timer. A switch is a
+    // distinct lifecycle primitive: it changes the pinned branch for a live
+    // protocol session but does not write a new workspace commit.
+    const branches = [
+      {
+        id: "perf-switch-a",
+        name: "Lixray perf switch branch A",
+        commitId: undefined,
+      },
+      {
+        id: "perf-switch-b",
+        name: "Lixray perf switch branch B",
+        commitId: undefined,
+      },
+    ];
+    const cases = Array.from(
+      { length: totalOperations },
+      (_, index) => branches[index % branches.length],
+    );
+    return {
+      description:
+        "switch the live protocol session between two pre-created sibling branches",
+      mutates: false,
+      corpusFileDelta: 0,
+      preTimingMutationCommits: branches.length,
+      preTimingSetupDescription:
+        "created two sibling branches through the protocol endpoint before timing branch switches",
+      setup: async (protocol) => {
+        for (const branch of branches) {
+          const result = await protocol.createBranch(branch);
+          assertBranchCreateResponse(result.value, branch);
+        }
+      },
+      execute: (protocol, index) => protocol.switchBranch(cases[index].id),
+      assert: (result, index) =>
+        assertBranchSwitchResponse(result, cases[index].id),
+      verify: async (protocol) => {
+        const result = await protocol.sessionInfo();
+        const expected = cases.at(-1).id;
+        if (result.value?.activeBranchId !== expected) {
+          throw new Error(
+            `branch-switch left the session on ${result.value?.activeBranchId}; expected ${expected}`,
+          );
+        }
+      },
     };
   }
 
@@ -530,6 +676,62 @@ function prepareOperation(name, corpus, state, totalOperations) {
   throw new Error(`unsupported operation: ${name}`);
 }
 
+function historyDiffCases(corpus, state, commitPlan, totalOperations) {
+  if (commitPlan.historyMutationCommits < 1) {
+    throw new Error(
+      "diff-file-history requires at least one post-seed history mutation",
+    );
+  }
+  const latestMutationByFile = new Int32Array(corpus.length);
+  const previousMutationByFile = new Int32Array(corpus.length);
+  latestMutationByFile.fill(-1);
+  previousMutationByFile.fill(-1);
+  for (
+    let mutation = commitPlan.seedCommitCount;
+    mutation < commitPlan.targetMutationCommits;
+    mutation += 1
+  ) {
+    const fileIndex = (mutation * 131) % corpus.length;
+    previousMutationByFile[fileIndex] = latestMutationByFile[fileIndex];
+    latestMutationByFile[fileIndex] = mutation;
+  }
+
+  const candidates = [];
+  for (let index = 0; index < corpus.length; index += 1) {
+    const latestMutation = latestMutationByFile[index];
+    if (latestMutation < 0) {
+      continue;
+    }
+    const file = corpus[index];
+    const extension = file.extension ?? extensionOf(file.path);
+    const bytes = file.bytes ?? file.data.length;
+    if (bytes !== 4 * 1024) {
+      continue;
+    }
+    const priorMutation = previousMutationByFile[index];
+    const currentData = state.get(file.path);
+    if (!currentData) {
+      throw new Error(`history diff state was missing ${file.path}`);
+    }
+    candidates.push({
+      path: file.path,
+      data: currentData,
+      previousData: contentFor(
+        extension,
+        bytes,
+        priorMutation < 0 ? file.seed ?? index : 1_000_000 + priorMutation,
+      ),
+    });
+  }
+  if (candidates.length === 0) {
+    throw new Error("diff-file-history did not find a changed corpus file");
+  }
+  return Array.from(
+    { length: totalOperations },
+    (_, index) => candidates[(index * 17) % candidates.length],
+  );
+}
+
 async function readPostTimingAccounting(protocol) {
   const result = await protocol.execute(
     `SELECT
@@ -610,6 +812,122 @@ function assertFileRow(result, expected) {
   if (!Buffer.from(data.base64, "base64").equals(expected.data)) {
     throw new Error(`point read returned the wrong data for ${expected.path}`);
   }
+}
+
+function assertHistoryDiffRows(result, expected) {
+  const rows = result?.rows;
+  if (!Array.isArray(rows) || rows.length < 2) {
+    throw new Error(
+      `history-backed diff for ${expected.path} did not return two revisions`,
+    );
+  }
+  const [current, previous] = rows;
+  if (current.length !== 4 || previous.length !== 4) {
+    throw new Error(`history-backed diff for ${expected.path} had malformed rows`);
+  }
+  const [currentPath, currentData, currentDepth, currentCommit] = current;
+  const [previousPath, previousData, previousDepth, previousCommit] = previous;
+  if (
+    currentPath?.kind !== "text" ||
+    currentPath.value !== expected.path ||
+    previousPath?.kind !== "text" ||
+    previousPath.value !== expected.path
+  ) {
+    throw new Error(`history-backed diff returned the wrong path for ${expected.path}`);
+  }
+  const currentBytes = blobWireValue(currentData, "current history revision");
+  const previousBytes = blobWireValue(previousData, "prior history revision");
+  if (!currentBytes.equals(expected.data)) {
+    throw new Error(
+      `history-backed diff returned the wrong current data for ${expected.path}`,
+    );
+  }
+  if (!previousBytes.equals(expected.previousData)) {
+    throw new Error(
+      `history-backed diff returned the wrong prior data for ${expected.path}`,
+    );
+  }
+  const currentDepthValue = integerWireValue(
+    currentDepth,
+    "current history revision depth",
+  );
+  const previousDepthValue = integerWireValue(
+    previousDepth,
+    "prior history revision depth",
+  );
+  // A file can have been last changed many commits before the pinned branch
+  // head. `lixcol_depth` is that distance, so the current revision need not
+  // have depth zero; ascending depth still places it ahead of its prior
+  // revision.
+  if (previousDepthValue <= currentDepthValue) {
+    throw new Error(
+      `history-backed diff did not return ordered current and prior revisions for ${expected.path}`,
+    );
+  }
+  if (currentBytes.equals(previousBytes)) {
+    throw new Error(
+      `history-backed diff did not return distinct payloads for ${expected.path}`,
+    );
+  }
+  if (
+    currentCommit?.kind !== "text" ||
+    currentCommit.value.length === 0 ||
+    previousCommit?.kind !== "text" ||
+    previousCommit.value.length === 0
+  ) {
+    throw new Error(
+      `history-backed diff did not return observed commit ids for ${expected.path}`,
+    );
+  }
+}
+
+function assertBranchCreateResponse(result, expected) {
+  if (
+    !result ||
+    result.id !== expected.id ||
+    result.name !== expected.name ||
+    result.hidden !== false ||
+    typeof result.commitId !== "string" ||
+    result.commitId.length === 0
+  ) {
+    throw new Error(`branch-create returned an invalid receipt for ${expected.id}`);
+  }
+  expected.commitId = result.commitId;
+}
+
+function assertBranchSwitchResponse(result, expectedBranchId) {
+  if (result?.branchId !== expectedBranchId) {
+    throw new Error(
+      `branch-switch returned ${result?.branchId}; expected ${expectedBranchId}`,
+    );
+  }
+}
+
+function assertBranchRow(result, expected) {
+  const rows = result?.rows;
+  if (!Array.isArray(rows) || rows.length !== 1 || rows[0].length !== 4) {
+    throw new Error(`branch-create did not persist ${expected.id}`);
+  }
+  const [id, name, hidden, commitId] = rows[0];
+  if (
+    id?.kind !== "text" ||
+    id.value !== expected.id ||
+    name?.kind !== "text" ||
+    name.value !== expected.name ||
+    hidden?.kind !== "bool" ||
+    hidden.value !== false ||
+    commitId?.kind !== "text" ||
+    commitId.value !== expected.commitId
+  ) {
+    throw new Error(`branch-create persisted an unexpected branch row for ${expected.id}`);
+  }
+}
+
+function blobWireValue(value, description) {
+  if (value?.kind !== "blob" || typeof value.base64 !== "string") {
+    throw new Error(`${description} was not a blob wire value`);
+  }
+  return Buffer.from(value.base64, "base64");
 }
 
 function assertPathRows(result, expectedPaths) {

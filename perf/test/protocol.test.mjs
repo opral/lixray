@@ -82,3 +82,57 @@ test("execute requires an established session", async () => {
 
   assert.throws(() => client.execute("SELECT 1"), /session is not open/);
 });
+
+test("branch methods use the authenticated protocol endpoints", async () => {
+  const calls = [];
+  let getCalls = 0;
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, ...options });
+      if (options.method === "GET") {
+        getCalls += 1;
+        return Response.json({
+          sessionId: "session-branch",
+          activeBranchId:
+            getCalls === 1 ? "main" : "perf-branch-0000",
+        });
+      }
+      if (url.endsWith("/branch/create")) {
+        return Response.json({
+          id: "perf-branch-0000",
+          name: "Perf branch 0000",
+          hidden: false,
+          commitId: "commit-123",
+        });
+      }
+      if (url.endsWith("/branch/switch")) {
+        return Response.json({ branchId: "perf-branch-0000" });
+      }
+      throw new Error(`unexpected request ${options.method} ${url}`);
+    },
+  });
+
+  await client.open();
+  const created = await client.createBranch({
+    id: "perf-branch-0000",
+    name: "Perf branch 0000",
+  });
+  const switched = await client.switchBranch("perf-branch-0000");
+  const session = await client.sessionInfo();
+
+  assert.equal(created.value.id, "perf-branch-0000");
+  assert.equal(created.value.commitId, "commit-123");
+  assert.equal(switched.value.branchId, "perf-branch-0000");
+  assert.equal(session.value.activeBranchId, "perf-branch-0000");
+  assert.equal(calls[1].headers["lix-session-id"], "session-branch");
+  assert.deepEqual(JSON.parse(calls[1].body), {
+    id: "perf-branch-0000",
+    name: "Perf branch 0000",
+  });
+  assert.deepEqual(JSON.parse(calls[2].body), {
+    branchId: "perf-branch-0000",
+  });
+  assert.equal(calls[3].headers["lix-session-id"], "session-branch");
+});

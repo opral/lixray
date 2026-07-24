@@ -2,8 +2,16 @@ import { createHash } from "node:crypto";
 import { deflateSync } from "node:zlib";
 
 export const CORPUS_VERSION = 1;
+// Keep the file-count dimension deliberately small and explicit. These are
+// the comparable namespace sizes in the end-to-end storage matrix, rather
+// than an open-ended workload generator whose results cannot be reproduced.
 export const CORPUS_FILE_COUNT = 1_000;
-export const SUPPORTED_CORPUS_FILE_COUNTS = Object.freeze([1_000, 5_000]);
+export const SUPPORTED_CORPUS_FILE_COUNTS = Object.freeze([
+  1_000,
+  5_000,
+  10_000,
+]);
+export const SEED_FILES_PER_COMMIT = 1_000;
 
 export const formatSpecifications = Object.freeze([
   Object.freeze({ extension: "json", bytes: 4 * 1024 }),
@@ -40,7 +48,16 @@ export function buildCorpusIndex(fileCount = CORPUS_FILE_COUNT) {
   });
 }
 
-function assertSupportedCorpusFileCount(fileCount) {
+export function seedCommitCountForFiles(fileCount) {
+  assertSupportedCorpusFileCount(fileCount);
+  return Math.ceil(fileCount / SEED_FILES_PER_COMMIT);
+}
+
+export function minimumTotalCommitsForFiles(fileCount) {
+  return 1 + seedCommitCountForFiles(fileCount);
+}
+
+export function assertSupportedCorpusFileCount(fileCount) {
   if (!SUPPORTED_CORPUS_FILE_COUNTS.includes(fileCount)) {
     throw new Error(
       `corpus file count must be one of: ${SUPPORTED_CORPUS_FILE_COUNTS.join(", ")}`,
