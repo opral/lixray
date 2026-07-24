@@ -21,6 +21,14 @@ The corrected server open-workspace cap also materially bounds retained
 resources: in a same-binary 32-workspace comparison it reduced process RSS
 29.3%, anonymous memory 35.6%, and the Docker working set 35.0%.
 
+A follow-on changelog-append profile found a separate history-proportional
+operation. It is not ordinary current-state CRUD enumeration: append-time
+duplicate `derived_change_id` validation scanned every commit record. A small,
+atomically maintained reverse index removes that scan for new repositories.
+At 5,000 commits it produces qualifying end-to-end update and delete wins on
+the SlateDB-backed server; the native benchmark records the same causal cut on
+both SlateDB and RocksDB.
+
 ## Workload and timing
 
 The checked-in runner builds 1,000 deterministic files: 100 each of JSON, CSV,
@@ -110,6 +118,62 @@ Code-path inspection and targeted traces also falsified the hypothesis that
 ordinary current-state CRUD enumerates every commit: those paths return before
 commit enumeration. Caching `all_commits` would have optimized an appealing
 story, not the measured bottleneck.
+
+## Changelog append follow-on
+
+The preceding conclusion applies to the filesystem validator and ordinary
+current-state CRUD. A separate path runs once a filesystem mutation has already
+produced a changelog commit: the old duplicate `derived_change_id` check
+paginated through `COMMIT_SPACE` and decoded every existing commit. Its work was
+therefore linear in history even though the required answer is a point lookup.
+
+The hard cut adds `changelog.commit_change_id`: raw 16-byte `ChangeId` UUID keys
+map to raw 16-byte `CommitId` UUID values. The entry and a `format-v1` marker are
+staged in the same native write set as the commit, so uniqueness stays atomic
+across writers. An existing nonempty repository without the marker cannot append
+commits; it must be recreated. This intentionally avoids a compatibility shim
+or a migration scan on the 90% new-repository path.
+
+The native append harness uses production RocksDB and SlateDB adapters only (no
+SQLite workload), five warmups, and 31 samples per case. `Unique` measures a
+new change ID; `duplicate` measures rejection of an existing one. Values are
+median microseconds for the validation-plus-append operation:
+
+| History | Backend | Case | Scan baseline | Indexed | Change |
+| ---: | --- | --- | ---: | ---: | ---: |
+| 1,000 | RocksDB | Unique | 536 | 13 | **97.6% faster** |
+| 1,000 | RocksDB | Duplicate | 262 | 6 | **97.7% faster** |
+| 1,000 | SlateDB | Unique | 2,589 | 402 | **84.5% faster** |
+| 1,000 | SlateDB | Duplicate | 2,285 | 264 | **88.4% faster** |
+| 5,000 | RocksDB | Unique | 4,536 | 14 | **99.7% faster** |
+| 5,000 | RocksDB | Duplicate | 3,484 | 9 | **99.7% faster** |
+| 5,000 | SlateDB | Unique | 4,066 | 376 | **90.8% faster** |
+| 5,000 | SlateDB | Duplicate | 6,953 | 283 | **95.9% faster** |
+
+At 1,000 commits the old path read one 1,024-row page and about 43 KiB of
+values per append. At 5,000 it read five pages and about 215 KiB. The index
+performs no commit scans; the 5,000-commit benchmark uses four batched gets for
+five keys. This follows the same point-lookup/read-batch and atomic-write-batch
+pattern documented by RocksDB rather than attempting a cache of the full
+history.
+
+The end-to-end server comparison used fresh, isolated 1,000-mixed-file clones
+at each depth, five precondition reads, and a fresh process per mutation. The
+timer covers the HTTP request through decoded response. At 1,000 commits the
+4 KiB update moved only 7.4%, while the history-dependent benefit becomes clear
+at 5,000 commits:
+
+| 5,000-commit SlateDB start state | Baseline median | Indexed median | Median paired change |
+| --- | ---: | ---: | ---: |
+| Create 4 KiB | 144.374 ms | 126.060 ms | 14.9% faster |
+| Update 4 KiB | 58.535 ms | 35.425 ms | **36.5% faster** |
+| Delete 1 KiB | 66.293 ms | 47.696 ms | **28.2% faster** |
+
+The create result is retained as a non-qualifying control rather than rounded
+up into a claim. A 30-sample point-read control was effectively neutral
+(baseline p50 6.189 ms; indexed p50 5.700 ms). One reopened-clone RSS pair was
+also effectively neutral (39.95 MiB versus 40.24 MiB); that is not enough data
+to characterize memory tails, but the index adds no process-wide history cache.
 
 ## Engine cuts
 
@@ -221,6 +285,22 @@ so WAL flush and background work cannot move the target during accounting. A
 storage-layout candidate must use a template created natively by that
 candidate; copying the baseline's physical store would measure old-layout
 compatibility instead.
+
+The changelog reverse index has a fixed logical cost of 36 bytes per commit: a
+20-byte key including the space prefix and a 16-byte value, plus a 14-byte
+format marker per repository. It accounted for 36,014 bytes at 1,000 commits
+and 180,014 bytes at 5,000. Closed native SlateDB prefix observations were:
+
+| Template | Logical commits | Closed size | Objects |
+| --- | ---: | ---: | ---: |
+| Scan baseline | 1,000 | 38 MiB | 121 |
+| Indexed layout | 1,000 | 38 MiB | 103 |
+| Scan baseline | 5,000 | 130 MiB | 923 |
+| Indexed layout | 5,000 | 135 MiB | 504 |
+
+The physical figures are one closed-store observation each, not an amplification
+claim: SlateDB compaction timing and object layout differ between independently
+created stores. The logical row accounting above is the stable storage cost.
 
 ## External design checks
 
