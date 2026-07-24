@@ -3,12 +3,14 @@ import test from "node:test";
 import {
   assertRowsAffected,
   expectedCorpusLookup,
+  minimumTotalCommitsForOperation,
   runBenchmark,
   seedCorpus,
 } from "../lib/benchmark.mjs";
 import {
   buildCorpus,
   buildCorpusIndex,
+  buildReadPoint2mFixture,
   contentFor,
   SEED_FILES_PER_COMMIT,
 } from "../lib/corpus.mjs";
@@ -84,6 +86,19 @@ test("the requested total must accommodate every seed commit", async () => {
     ),
     /at least 11 for 10000 files \(10 seed commits\)/,
   );
+  assert.equal(minimumTotalCommitsForOperation("read-point-2m", 1_000), 3);
+  await assert.rejects(
+    runBenchmark(
+      {},
+      {
+        operation: "read-point-2m",
+        targetTotalCommits: 2,
+        warmupRuns: 0,
+        measuredRuns: 1,
+      },
+    ),
+    /at least 3 for 1000 files \(1 seed commits plus 1 targeted fixture seed commit\)/,
+  );
 });
 
 test("metadata-only corpus lookup reproduces seeded state lazily", () => {
@@ -136,9 +151,51 @@ test("read preconditioning is asserted and reported outside measurement", async 
   assert.equal(result.setup.settleMs, 1);
   assert.equal(result.setup.seedFilesPerCommit, 1_000);
   assert.equal(result.setup.seedCommitCount, 1);
+  assert.equal(result.methodology.targetedFixture, undefined);
+  assert.equal(result.setup.targetedFixtureSeedCommitCount, undefined);
   assert.equal(result.setup.historyMutationCommits, 8);
   assert.equal(result.measurement.kind, "distribution");
   assert.equal(result.measurement.samples.length, 1);
+});
+
+test("read-point-2m reads its explicit deterministic fixture", async () => {
+  const protocol = new LargeReadProtocol(10);
+  const result = await runBenchmark(protocol, {
+    operation: "read-point-2m",
+    targetTotalCommits: 10,
+    preconditionReadRuns: 2,
+    warmupRuns: 0,
+    measuredRuns: 1,
+    preseeded: true,
+  });
+
+  assert.equal(protocol.largeFixtureReads, 1);
+  assert.equal(protocol.pointReads, 3);
+  assert.equal(
+    result.methodology.targetedFixture.id,
+    "read-point-2m-binary-v1",
+  );
+  assert.equal(result.methodology.targetedFixture.bytes, 2 * 1024 * 1024);
+  assert.equal(result.setup.targetedFixtureSeedCommitCount, 1);
+  assert.equal(result.setup.historyMutationCommits, 7);
+  assert.equal(result.measurement.kind, "distribution");
+  assert.equal(result.postTimingAccounting.totalCommits, 10);
+  assert.equal(result.postTimingAccounting.corpusFiles, 1_000);
+});
+
+test("the targeted large fixture has its own seed commit before history", async () => {
+  const protocol = new SeedProtocol();
+  const fixture = buildReadPoint2mFixture();
+  await seedCorpus(protocol, seedFixture(1_000), 4, { fixture });
+
+  assert.equal(protocol.mutationRequests, 3);
+  assert.equal(protocol.insertBatchRequests, 1);
+  assert.equal(protocol.fixtureInsertRequests, 1);
+  assert.equal(protocol.updateRequests, 1);
+  assert.deepEqual(protocol.mutationKinds, ["corpus", "fixture", "history"]);
+  assert.deepEqual(protocol.fixtureInserts, [
+    { path: fixture.path, bytes: fixture.data.length },
+  ]);
 });
 
 test("branch-create measures the protocol endpoint and verifies the persisted branch", async () => {
@@ -409,6 +466,9 @@ class SeedProtocol {
   insertBatchRequests = 0;
   insertedFiles = 0;
   updateRequests = 0;
+  fixtureInsertRequests = 0;
+  fixtureInserts = [];
+  mutationKinds = [];
   maximumStatementsPerBatch = 0;
   maximumFilesPerStatement = 0;
   filesPerInsertBatch = [];
@@ -416,6 +476,7 @@ class SeedProtocol {
   async executeBatch(statements) {
     this.mutationRequests += 1;
     this.insertBatchRequests += 1;
+    this.mutationKinds.push("corpus");
     this.maximumStatementsPerBatch = Math.max(
       this.maximumStatementsPerBatch,
       statements.length,
@@ -437,9 +498,19 @@ class SeedProtocol {
     };
   }
 
-  async execute() {
+  async execute(sql, params) {
     this.mutationRequests += 1;
+    if (sql.startsWith("INSERT INTO lix_file")) {
+      this.fixtureInsertRequests += 1;
+      this.mutationKinds.push("fixture");
+      this.fixtureInserts.push({
+        path: params[0].value,
+        bytes: Buffer.from(params[1].base64, "base64").length,
+      });
+      return { value: { rowsAffected: 1 } };
+    }
     this.updateRequests += 1;
+    this.mutationKinds.push("history");
     return { value: { rowsAffected: 1 } };
   }
 }
@@ -495,6 +566,46 @@ class PreconditionProtocol {
       elapsedMs: 1,
       requestBytes: 2,
       responseBytes: 3,
+    };
+  }
+}
+
+class LargeReadProtocol extends PreconditionProtocol {
+  largeFixtureReads = 0;
+
+  constructor(targetTotalCommits) {
+    super(targetTotalCommits);
+    this.fixture = buildReadPoint2mFixture();
+    this.state = expectedCorpusLookup(buildCorpusIndex(), targetTotalCommits, {
+      fixture: this.fixture,
+    });
+  }
+
+  async execute(sql, params) {
+    if (sql.includes("COUNT(*) FROM lix_file")) {
+      return super.execute(sql, params);
+    }
+    const path = params[0].value;
+    if (path !== this.fixture.path) {
+      return super.execute(sql, params);
+    }
+    this.pointReads += 1;
+    this.largeFixtureReads += 1;
+    return {
+      value: {
+        rows: [
+          [
+            { kind: "text", value: path },
+            {
+              kind: "blob",
+              base64: this.fixture.data.toString("base64"),
+            },
+          ],
+        ],
+      },
+      elapsedMs: 1,
+      requestBytes: 2,
+      responseBytes: this.fixture.data.length,
     };
   }
 }

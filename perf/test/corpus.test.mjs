@@ -3,11 +3,13 @@ import test from "node:test";
 import {
   buildCorpus,
   buildCorpusIndex,
+  buildReadPoint2mFixture,
   corpusManifest,
   formatSpecifications,
   minimumTotalCommitsForFiles,
   SEED_FILES_PER_COMMIT,
   seedCommitCountForFiles,
+  sha256,
   SUPPORTED_CORPUS_FILE_COUNTS,
 } from "../lib/corpus.mjs";
 
@@ -68,6 +70,28 @@ test("the corpus matrix has fixed 1,000-file seed commit accounting", () => {
 
   assert.throws(() => buildCorpusIndex(2_000), /must be one of/);
   assert.throws(() => seedCommitCountForFiles(2_000), /must be one of/);
+});
+
+test("the targeted 2 MiB read fixture is deterministic and outside the corpus", () => {
+  const first = buildReadPoint2mFixture();
+  const second = buildReadPoint2mFixture();
+
+  assert.equal(first.id, "read-point-2m-binary-v1");
+  assert.equal(first.path, "/__lixray_perf_read_point_2m_v1.bin");
+  assert.equal(first.data.length, 2 * 1024 * 1024);
+  assert.equal(
+    sha256(first.data),
+    "6cf8a846c4686bc5a017c6097d5135770e88cf0cd87ac39ba1cf9f9f6cf6acaf",
+  );
+  assert.deepEqual(first, second);
+  assert.equal(
+    corpusManifest([{ path: first.path, data: first.data }]).sha256,
+    "19f9bf700f0638f704da01c712441eaec3fa4d3c974ae18b17720cd5499b458b",
+  );
+  assert.equal(
+    buildCorpus().some((file) => file.path === first.path),
+    false,
+  );
 });
 
 test("structured corpus members are parseable and binary containers are valid", () => {

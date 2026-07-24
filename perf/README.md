@@ -24,10 +24,19 @@ and **includes the genesis commit**. The seed commit count is
 `ceil(--files / 1000)`, so `--commits` must be at least one genesis commit plus
 that many seed commits. Every seed commit is one atomic `execute-batch` of
 exactly 1,000 files; the 1,000-file request is 14.276 MiB on the wire, safely
-below the 64 MiB protocol ceiling. The runner then creates exactly
-`--commits - 1 - seedCommitCount` deterministic single-file history mutations.
-This makes the requested start depth exact without sending an oversized 5,000-
-or 10,000-file request.
+below the 64 MiB protocol ceiling. For the standard operation families, the
+runner then creates exactly `--commits - 1 - seedCommitCount` deterministic
+single-file history mutations. This makes the requested start depth exact
+without sending an oversized 5,000- or 10,000-file request.
+
+`read-point-2m` is an explicit targeted-fixture workload. It inserts one
+deterministic, high-entropy 2 MiB binary file at a root-level fixture path in
+one additional seed commit, then creates one fewer history mutation so the
+requested total depth remains exact. The fixture is outside `/corpus`, so
+`--files`, the normal corpus SHA-256, and all other operation families remain
+unchanged. Its ID, path, digest, byte count, and extra seed commit are recorded
+in the report. A `read-point-2m` target therefore needs one more minimum commit
+than the table below; create preseeded templates with `read-point-2m` as well.
 
 | `--files` | seed commits | minimum `--commits` (genesis included) |
 | ---: | ---: | ---: |
@@ -76,6 +85,7 @@ Supported operation families are:
 
 - `read-point-4k`: exact-path read of a valid 4 KiB JSON file
 - `read-point-32k`: exact-path read of a valid 32 KiB PDF
+- `read-point-2m`: exact-path read of the explicitly seeded deterministic 2 MiB binary fixture
 - `list-paths-100`: ordered listing of 100 corpus paths
 - `diff-file-history`: history-backed diff projection of one changed 4 KiB file's current and prior logical revisions
 - `branch-create`: create one named branch from the active head through `POST /lix/v1/branch/create`
@@ -159,9 +169,10 @@ clone was not at the requested exact depth.
 
 Create a separate closed template for every revision, storage backend, and
 storage configuration. Clone only within that cohort. Keep the logical corpus
-hash and history depth identical across cohorts; copying a baseline's physical
-store into a storage-layout candidate would test compatibility with the old
-layout instead of the candidate's native layout.
+hash, history depth, and (when present) targeted-fixture identity identical
+across cohorts; copying a baseline's physical store into a storage-layout
+candidate would test compatibility with the old layout instead of the
+candidate's native layout.
 
 For the local Compose MinIO stack, a stopped template can be copied with `mc`
 (replace both IDs for every repetition):

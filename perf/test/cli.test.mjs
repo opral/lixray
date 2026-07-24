@@ -192,6 +192,31 @@ test("requires enough commits to cover all fixed-size seed commits", () => {
   );
 });
 
+test("requires the extra targeted seed commit for read-point-2m", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      runner,
+      "--",
+      "--workspace",
+      "perf-cli-check",
+      "--operation",
+      "read-point-2m",
+      "--files",
+      "1000",
+      "--commits",
+      "2",
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stderr,
+    /--commits must be at least 3 for --files 1000: genesis plus 2 seed commits including 1 targeted fixture seed commit/,
+  );
+});
+
 function runRunner(args) {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(process.execPath, [runner, "--", ...args]);

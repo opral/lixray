@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import {
   buildCorpus,
   buildCorpusIndex,
+  buildReadPoint2mFixture,
   contentFor,
   CORPUS_FILE_COUNT,
   corpusManifest,
@@ -9,12 +10,14 @@ import {
   minimumTotalCommitsForFiles,
   SEED_FILES_PER_COMMIT,
   seedCommitCountForFiles,
+  sha256,
 } from "./corpus.mjs";
 import { summarizeSamples } from "./statistics.mjs";
 
 export const operationNames = Object.freeze([
   "read-point-4k",
   "read-point-32k",
+  "read-point-2m",
   "list-paths-100",
   "diff-file-history",
   "branch-create",
@@ -50,6 +53,37 @@ export function isMutationOperation(operation) {
   ].includes(operation);
 }
 
+export function minimumTotalCommitsForOperation(operation, corpusFiles) {
+  return (
+    minimumTotalCommitsForFiles(corpusFiles) +
+    fixtureSeedCommitCountForOperation(operation)
+  );
+}
+
+function fixtureForOperation(operation) {
+  return operation === "read-point-2m" ? buildReadPoint2mFixture() : null;
+}
+
+function fixtureSeedCommitCountForOperation(operation) {
+  return operation === "read-point-2m" ? 1 : 0;
+}
+
+function fixtureSeedCommitCountForFixture(fixture) {
+  return fixture === null ? 0 : 1;
+}
+
+function fixtureMetadata(fixture) {
+  return {
+    id: fixture.id,
+    path: fixture.path,
+    bytes: fixture.data.length,
+    sha256: sha256(fixture.data),
+    seedCommitCount: fixtureSeedCommitCountForFixture(fixture),
+    placement:
+      "separate targeted seed commit outside the canonical /corpus namespace",
+  };
+}
+
 export async function runBenchmark(
   protocol,
   {
@@ -71,9 +105,11 @@ export async function runBenchmark(
     throw new Error(`unsupported operation: ${operation}`);
   }
   const requestedCorpusFiles = corpusFiles ?? CORPUS_FILE_COUNT;
+  const fixture = fixtureForOperation(operation);
   const commitPlan = commitPlanForCorpus(
     requestedCorpusFiles,
     targetTotalCommits,
+    fixture,
   );
   if (!Number.isSafeInteger(warmupRuns) || warmupRuns < 0) {
     throw new Error("warmupRuns must be a non-negative integer");
@@ -136,12 +172,13 @@ export async function runBenchmark(
   let state;
   let seedMs;
   if (preseeded) {
-    state = expectedCorpusLookup(corpus, targetTotalCommits);
+    state = expectedCorpusLookup(corpus, targetTotalCommits, { fixture });
     seedMs = null;
   } else {
     const seedStarted = performance.now();
     state = await seedCorpus(protocol, corpus, targetTotalCommits, {
       onProgress,
+      fixture,
     });
     seedMs = performance.now() - seedStarted;
   }
@@ -155,6 +192,7 @@ export async function runBenchmark(
     commitPlan,
     fileWriteTransport,
     fileWriteShape,
+    fixture,
   );
   const preTimingOperationSetupStarted = performance.now();
   await prepared.setup?.(protocol);
@@ -216,6 +254,11 @@ export async function runBenchmark(
       version: 2,
       operation,
       operationDescription: prepared.description,
+      ...(fixture
+        ? {
+            targetedFixture: fixtureMetadata(fixture),
+          }
+        : {}),
       targetTotalCommits,
       genesisIncludedInTarget: true,
       expectedStartTotalCommits: targetTotalCommits,
@@ -279,6 +322,11 @@ export async function runBenchmark(
       settleMs,
       seedFilesPerCommit: SEED_FILES_PER_COMMIT,
       seedCommitCount: commitPlan.seedCommitCount,
+      ...(fixture
+        ? {
+            targetedFixtureSeedCommitCount: commitPlan.fixtureSeedCommitCount,
+          }
+        : {}),
       historyMutationCommits: commitPlan.historyMutationCommits,
       mutationCommitsCreated: preseeded ? 0 : targetTotalCommits - 1,
       expectedTotalCommitsBeforeTiming: targetTotalCommits,
@@ -340,15 +388,20 @@ function compactSample(sample) {
   return [sample.elapsedMs, sample.requestBytes, sample.responseBytes];
 }
 
-export function expectedCorpusLookup(corpus, targetTotalCommits) {
+export function expectedCorpusLookup(
+  corpus,
+  targetTotalCommits,
+  { fixture = null } = {},
+) {
   const { seedCommitCount, targetMutationCommits } = commitPlanForCorpus(
     corpus.length,
     targetTotalCommits,
+    fixture,
   );
   const latestMutationByFile = new Int32Array(corpus.length);
   latestMutationByFile.fill(-1);
   for (
-    let mutation = seedCommitCount;
+    let mutation = seedCommitCount + fixtureSeedCommitCountForFixture(fixture);
     mutation < targetMutationCommits;
     mutation += 1
   ) {
@@ -385,13 +438,14 @@ export async function seedCorpus(
   protocol,
   corpus,
   targetTotalCommits,
-  { onProgress } = {},
+  { onProgress, fixture = null } = {},
 ) {
   const {
     seedCommitCount,
+    fixtureSeedCommitCount,
     historyMutationCommits,
     targetMutationCommits,
-  } = commitPlanForCorpus(corpus.length, targetTotalCommits);
+  } = commitPlanForCorpus(corpus.length, targetTotalCommits, fixture);
   const state = new Map();
   // A 1,000-file execute-batch is one atomic Lix commit and is small enough
   // to remain under the protocol's 64 MiB JSON request ceiling. Keep this
@@ -425,12 +479,29 @@ export async function seedCorpus(
     });
   }
 
+  if (fixture) {
+    const result = await protocol.execute(
+      "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+      [wireText(fixture.path), wireBlob(fixture.data)],
+    );
+    assertRowsAffected(result.value, 1, "targeted fixture insert");
+    state.set(fixture.path, fixture.data);
+    onProgress?.({
+      phase: "fixture",
+      fixtureId: fixture.id,
+      fixtureBytes: fixture.data.length,
+      completedMutationCommits: seedCommitCount + fixtureSeedCommitCount,
+      targetMutationCommits,
+    });
+  }
+
   for (
     let historyMutationIndex = 0;
     historyMutationIndex < historyMutationCommits;
     historyMutationIndex += 1
   ) {
-    const mutation = seedCommitCount + historyMutationIndex;
+    const mutation =
+      seedCommitCount + fixtureSeedCommitCount + historyMutationIndex;
     const { file, data } = historyMutation(corpus, mutation);
     // Keep history seeding distinct from the timed update in the SQL plan
     // cache without relying on DML target aliases, which Lix does not support.
@@ -448,7 +519,8 @@ export async function seedCorpus(
       seedFilesPerCommit: SEED_FILES_PER_COMMIT,
       historyMutationCommits,
       completedHistoryMutationCommits: historyMutationIndex + 1,
-      completedMutationCommits: seedCommitCount + historyMutationIndex + 1,
+      completedMutationCommits:
+        seedCommitCount + fixtureSeedCommitCount + historyMutationIndex + 1,
       targetMutationCommits,
     });
   }
@@ -456,21 +528,27 @@ export async function seedCorpus(
   return state;
 }
 
-function commitPlanForCorpus(fileCount, targetTotalCommits) {
+function commitPlanForCorpus(fileCount, targetTotalCommits, fixture = null) {
   const seedCommitCount = seedCommitCountForFiles(fileCount);
-  const minimumTotalCommits = minimumTotalCommitsForFiles(fileCount);
+  const fixtureSeedCommitCount = fixtureSeedCommitCountForFixture(fixture);
+  const minimumTotalCommits =
+    minimumTotalCommitsForFiles(fileCount) + fixtureSeedCommitCount;
   if (
     !Number.isSafeInteger(targetTotalCommits) ||
     targetTotalCommits < minimumTotalCommits
   ) {
     throw new Error(
-      `targetTotalCommits must include genesis and be at least ${minimumTotalCommits} for ${fileCount} files (${seedCommitCount} seed commits)`,
+      `targetTotalCommits must include genesis and be at least ${minimumTotalCommits} for ${fileCount} files (${seedCommitCount} seed commits${
+        fixtureSeedCommitCount === 0
+          ? ""
+          : ` plus ${fixtureSeedCommitCount} targeted fixture seed commit`
+      })`,
     );
   }
   return {
     seedCommitCount,
-    historyMutationCommits:
-      targetTotalCommits - minimumTotalCommits,
+    fixtureSeedCommitCount,
+    historyMutationCommits: targetTotalCommits - minimumTotalCommits,
     targetMutationCommits: targetTotalCommits - 1,
   };
 }
@@ -495,6 +573,7 @@ function prepareOperation(
   commitPlan,
   fileWriteTransport,
   fileWriteShape,
+  fixture,
 ) {
   const byExtension = (extension) =>
     corpus.filter((file) => extensionOf(file.path) === extension);
@@ -528,6 +607,30 @@ function prepareOperation(
     });
     return {
       description: "point-read one 32 KiB PDF file by exact path",
+      mutates: false,
+      corpusFileDelta: 0,
+      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
+      execute: (protocol, index) =>
+        protocol.execute(
+          "SELECT path, data FROM lix_file WHERE path = $1",
+          [wireText(cases[index].path)],
+        ),
+      assert: (result, index) => assertFileRow(result, cases[index]),
+      verify: async () => {},
+    };
+  }
+
+  if (name === "read-point-2m") {
+    if (!fixture) {
+      throw new Error("read-point-2m requires its targeted binary fixture");
+    }
+    const cases = Array.from({ length: totalOperations }, () => ({
+      path: fixture.path,
+      data: fixture.data,
+    }));
+    return {
+      description:
+        "point-read one deterministic 2 MiB binary fixture by exact path",
       mutates: false,
       corpusFileDelta: 0,
       preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
