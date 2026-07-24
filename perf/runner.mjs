@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   isMutationOperation,
+  isPointFileReadOperation,
   minimumTotalCommitsForOperation,
   operationNames,
   runBenchmark,
@@ -70,6 +71,14 @@ async function main(args) {
       );
     }
     const handshake = await openWhenReady(client, config.readyTimeoutMs);
+    if (
+      config.fileReadTransport === "binary" &&
+      handshake.capabilities?.binaryFileRead !== true
+    ) {
+      throw new Error(
+        "server does not advertise the binaryFileRead capability",
+      );
+    }
     const benchmark = await runBenchmark(client, {
       operation: config.operation,
       targetTotalCommits: config.targetTotalCommits,
@@ -80,6 +89,7 @@ async function main(args) {
       measuredRuns: config.measuredRuns,
       fileWriteTransport: config.fileWriteTransport,
       fileWriteShape: config.fileWriteShape,
+      fileReadTransport: config.fileReadTransport,
       hotSession: config.hotSession,
       preseeded: config.preseeded,
       onProgress: config.quiet ? undefined : showProgress,
@@ -157,6 +167,7 @@ function parseArgs(args) {
     "--samples",
     "--file-write-transport",
     "--file-write-shape",
+    "--file-read-transport",
     "--output",
     "--ready-timeout-ms",
     "--target-revision",
@@ -184,9 +195,7 @@ function parseArgs(args) {
 
   const operation = required(values, "--operation");
   if (!operationNames.includes(operation)) {
-    throw new Error(
-      `--operation must be one of: ${operationNames.join(", ")}`,
-    );
+    throw new Error(`--operation must be one of: ${operationNames.join(", ")}`);
   }
 
   const workspaceId = required(values, "--workspace");
@@ -215,12 +224,7 @@ function parseArgs(args) {
       }`,
     );
   }
-  const preconditionReadRuns = integer(
-    values,
-    "--precondition-reads",
-    0,
-    0,
-  );
+  const preconditionReadRuns = integer(values, "--precondition-reads", 0, 0);
   const settleMs = integer(values, "--settle-ms", 0, 0);
   const fileWriteTransport = values.get("--file-write-transport") ?? "json";
   if (!["binary", "json"].includes(fileWriteTransport)) {
@@ -240,13 +244,17 @@ function parseArgs(args) {
   if (!["update", "upsert"].includes(fileWriteShape)) {
     throw new Error('--file-write-shape must be either "update" or "upsert"');
   }
+  const fileReadTransport = values.get("--file-read-transport") ?? "json";
+  if (!["binary", "json"].includes(fileReadTransport)) {
+    throw new Error('--file-read-transport must be either "binary" or "json"');
+  }
+  if (fileReadTransport === "binary" && !isPointFileReadOperation(operation)) {
+    throw new Error(
+      "--file-read-transport binary is only valid for exact point-read operations",
+    );
+  }
   const mutationOperation = isMutationOperation(operation);
-  const warmupRuns = integer(
-    values,
-    "--warmups",
-    mutationOperation ? 0 : 3,
-    0,
-  );
+  const warmupRuns = integer(values, "--warmups", mutationOperation ? 0 : 3, 0);
   const measuredRuns = integer(
     values,
     "--samples",
@@ -285,12 +293,7 @@ function parseArgs(args) {
       "mutation operations require --warmups 0 and --samples 1; use --hot-session for a same-session mutation distribution",
     );
   }
-  const readyTimeoutMs = integer(
-    values,
-    "--ready-timeout-ms",
-    60_000,
-    1,
-  );
+  const readyTimeoutMs = integer(values, "--ready-timeout-ms", 60_000, 1);
   const baseUrl = (
     values.get("--url") ??
     process.env.LIXRAY_PERF_URL ??
@@ -298,8 +301,7 @@ function parseArgs(args) {
   ).replace(/\/+$/, "");
   const outputPath = resolve(
     root,
-    values.get("--output") ??
-      `perf/results/${workspaceId}-${operation}.json`,
+    values.get("--output") ?? `perf/results/${workspaceId}-${operation}.json`,
   );
   const declaredStorageBackend = optionalStorageBackend(
     values,
@@ -317,6 +319,7 @@ function parseArgs(args) {
     settleMs,
     fileWriteTransport,
     fileWriteShape,
+    fileReadTransport,
     hotSession,
     warmupRuns,
     measuredRuns,
@@ -509,7 +512,9 @@ function integer(values, name, fallback, minimum) {
   const raw = values.get(name);
   const value = raw === undefined ? fallback : Number(raw);
   if (!Number.isSafeInteger(value) || value < minimum) {
-    throw new Error(`${name} must be an integer greater than or equal to ${minimum}`);
+    throw new Error(
+      `${name} must be an integer greater than or equal to ${minimum}`,
+    );
   }
   return value;
 }
@@ -526,6 +531,7 @@ function usage() {
     [--warmups <count>] [--samples <count>] \\
     [--file-write-transport <json|binary>] \\
     [--file-write-shape <update|upsert>] \\
+    [--file-read-transport <json|binary>] \\
     [--hot-session] \\
     [--url <lix-server-url>] [--output <path>] \\
     [--target-revision <deployed-revision>] \\
@@ -533,8 +539,8 @@ function usage() {
     [--preseeded] [--quiet]
 
 Each invocation seeds a new deterministic workspace with ${SUPPORTED_CORPUS_FILE_COUNTS.join(
-  ", ",
-)} files and measures one operation family. The runner commits exactly
+    ", ",
+  )} files and measures one operation family. The runner commits exactly
 ${SEED_FILES_PER_COMMIT} files per atomic execute-batch seed request, so a
 target must include genesis plus every seed commit. Mutations default to one
 timed request with no mutating warmup; reads default to three warmups and 30 samples. Use
@@ -544,6 +550,8 @@ of an active-path measurement. Pass --preseeded only for an exact, externally
 cloned workspace at the requested commit depth. File create/update operations
 use JSON by default so an unchanged baseline remains runnable; pass
 --file-write-transport binary to measure the raw octet-stream transfer path.
+Point reads use the JSON SQL path by default; pass --file-read-transport binary
+to measure the raw exact-file response path advertised by the server.
 JSON updates use SQL UPDATE by default; pass --file-write-shape upsert for
 the matched INSERT ON CONFLICT(path) DO UPDATE control. Mutation benchmarks
 normally require one request per fresh workspace. Pass --hot-session with two

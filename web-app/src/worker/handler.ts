@@ -799,9 +799,10 @@ function lixRowId(value: unknown): unknown {
 }
 
 /**
- * The public transport exposes the protocol handshake, the four SQL-carrying
- * read endpoints, and session release. Branch mutations (`branch/create`,
- * `branch/switch`) change shared lix state and are never public.
+ * The public transport exposes the protocol handshake, one exact binary file
+ * read, the SQL-carrying read endpoints, and session release. Branch mutations
+ * (`branch/create`, `branch/switch`) change shared lix state and are never
+ * public.
  */
 function isPublicReadRemoteLixRequest(
 	request: Request,
@@ -809,6 +810,7 @@ function isPublicReadRemoteLixRequest(
 ): boolean {
 	if (!endpoint) return request.method === "GET";
 	if (endpoint === "session") return request.method === "DELETE";
+	if (endpoint === "file") return request.method === "GET";
 	return (
 		request.method === "POST" &&
 		["execute", "execute-batch", "observe", "observe/multiplex"].includes(
@@ -830,7 +832,13 @@ async function rejectPublicMutation(
 	endpoint: string,
 	parseSqlScript: ParseSqlScript | undefined,
 ): Promise<Response | null> {
-	if (!endpoint || endpoint === "session") return null;
+	if (
+		!endpoint ||
+		endpoint === "session" ||
+		(endpoint === "file" && request.method === "GET")
+	) {
+		return null;
+	}
 	let statements: Array<{ sql: string; paramCount: number }>;
 	try {
 		statements = await publicSqlStatements(request, endpoint);

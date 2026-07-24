@@ -15,6 +15,7 @@ test("accepts the separator forwarded by pnpm scripts", () => {
   assert.match(result.stdout, /^Usage:/m);
   assert.match(result.stdout, /--files <1000\|5000\|10000>/);
   assert.match(result.stdout, /--storage-backend <slatedb\|rocksdb>/);
+  assert.match(result.stdout, /--file-read-transport <json\|binary>/);
 });
 
 test("rejects a declared backend that disagrees with health before handshake", async (t) => {
@@ -43,7 +44,9 @@ test("rejects a declared backend that disagrees with health before handshake", a
     response.statusCode = 500;
     response.end("protocol must not be opened after an identity mismatch");
   });
-  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  await new Promise((resolveListen) =>
+    server.listen(0, "127.0.0.1", resolveListen),
+  );
   t.after(
     () =>
       new Promise((resolveClose, rejectClose) =>
@@ -162,9 +165,29 @@ test("requires raw transport for the native mixed comparison", () => {
   );
 
   assert.equal(result.status, 1);
+  assert.match(result.stderr, /require --file-write-transport binary/);
+});
+
+test("rejects binary file reads for operations without an exact-file endpoint", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      runner,
+      "--",
+      "--workspace",
+      "perf-cli-check",
+      "--operation",
+      "list-paths-100",
+      "--file-read-transport",
+      "binary",
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
   assert.match(
     result.stderr,
-    /require --file-write-transport binary/,
+    /--file-read-transport binary is only valid for exact point-read operations/,
   );
 });
 

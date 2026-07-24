@@ -27,10 +27,9 @@ export async function readServerStorageIdentity({
     throw new Error("a fetch implementation is required");
   }
 
-  const response = await fetchImpl(
-    `${baseUrl.replace(/\/+$/, "")}/healthz`,
-    { method: "GET" },
-  );
+  const response = await fetchImpl(`${baseUrl.replace(/\/+$/, "")}/healthz`, {
+    method: "GET",
+  });
   const body = await response.text();
   if (!response.ok) {
     throw new ServerIdentityError(
@@ -54,16 +53,16 @@ export async function readServerStorageIdentity({
   }
 
   return {
-    storageBackend: storageIdentityField(value.storageBackend, "storageBackend"),
+    storageBackend: storageIdentityField(
+      value.storageBackend,
+      "storageBackend",
+    ),
     storageLayout: storageIdentityField(value.storageLayout, "storageLayout"),
   };
 }
 
 function storageIdentityField(value, name) {
-  if (
-    typeof value !== "string" ||
-    !/^[a-z0-9][a-z0-9-]{0,127}$/.test(value)
-  ) {
+  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9-]{0,127}$/.test(value)) {
     throw new ServerIdentityError(
       `GET /healthz returned an invalid ${name} attestation`,
     );
@@ -132,7 +131,9 @@ export class ProtocolClient {
       throw new TypeError("executeFileData data must be a Buffer");
     }
     if (!["insert", "update", "upsert"].includes(shape)) {
-      throw new TypeError("executeFileData shape must be insert, update, or upsert");
+      throw new TypeError(
+        "executeFileData shape must be insert, update, or upsert",
+      );
     }
     return this.requestLazyJson("execute", "POST", () => {
       const blob = { kind: "blob", base64: data.toString("base64") };
@@ -199,6 +200,79 @@ export class ProtocolClient {
       elapsedMs,
       requestBytes: response.requestBytes,
       responseBytes: response.responseBytes,
+    };
+  }
+
+  async readFileData(path) {
+    // Match execute(): invariant validation is not useful transport work, but
+    // URI construction, request dispatch, and body materialization are.
+    this.requireSession();
+    this.requireBinaryFileReadCapability();
+    if (typeof path !== "string" || path.length === 0) {
+      throw new TypeError("readFileData path must be a non-empty string");
+    }
+    const started = performance.now();
+    return this.requestRawFile(
+      `file?path=${encodeURIComponent(path)}`,
+      "GET",
+      started,
+    );
+  }
+
+  async readFileDataJson(path) {
+    // This is the matched SQL control for `readFileData`: both logical timers
+    // include request construction, body consumption, and decoding usable
+    // bytes rather than putting Base64 materialization in a later assertion.
+    this.requireSession();
+    if (typeof path !== "string" || path.length === 0) {
+      throw new TypeError("readFileDataJson path must be a non-empty string");
+    }
+    const started = performance.now();
+    const body = JSON.stringify({
+      sql: "SELECT path, data FROM lix_file WHERE path = $1",
+      params: [{ kind: "text", value: path }],
+    });
+    const response = await this.fetchImpl(`${this.endpoint}/execute`, {
+      method: "POST",
+      headers: this.requestHeaders("application/json"),
+      body,
+    });
+    const text = await response.text();
+    let value = null;
+    let parseError;
+    if (text.length > 0) {
+      try {
+        value = JSON.parse(text);
+      } catch (error) {
+        parseError = error;
+      }
+    }
+    const base64 = value?.rows?.[0]?.[1]?.base64;
+    const data =
+      typeof base64 === "string" ? Buffer.from(base64, "base64") : null;
+    const elapsedMs = performance.now() - started;
+
+    // Keep protocol-envelope validation outside the timed usable-byte path.
+    // The benchmark's semantic assertion verifies the row path and payload.
+    if (!response.ok) {
+      throw new ProtocolError("POST", "execute", response.status, text);
+    }
+    if (parseError) {
+      throw new Error(
+        `POST execute returned invalid JSON: ${parseError.message}`,
+      );
+    }
+    if (data === null) {
+      throw new Error(`POST execute did not return binary data for ${path}`);
+    }
+    return {
+      value: {
+        response: value,
+        data,
+      },
+      elapsedMs,
+      requestBytes: Buffer.byteLength(body),
+      responseBytes: Buffer.byteLength(text),
     };
   }
 
@@ -276,22 +350,51 @@ export class ProtocolClient {
     );
   }
 
-  async requestEncoded(path, method, body, contentType, started) {
-    const headers = {};
-    if (contentType !== undefined) {
-      headers["content-type"] = contentType;
-    }
-    if (this.internalToken) {
-      headers.authorization = `Bearer ${this.internalToken}`;
-    }
-    if (this.sessionId) {
-      headers["lix-session-id"] = this.sessionId;
-    }
+  async requestRawFile(path, method, started) {
+    const response = await this.fetchImpl(`${this.endpoint}/${path}`, {
+      method,
+      headers: this.requestHeaders(),
+    });
+    const data = Buffer.from(await response.arrayBuffer());
+    const elapsedMs = performance.now() - started;
 
+    // Response-envelope validation is deliberately after the timer. This
+    // keeps the binary arm aligned with the JSON control, whose row/path
+    // checks are benchmark assertions rather than measured work.
+    if (!response.ok) {
+      throw new ProtocolError(
+        method,
+        path,
+        response.status,
+        data.toString("utf8"),
+      );
+    }
+    if (response.headers.get("content-type") !== "application/octet-stream") {
+      throw new Error(`${method} ${path} returned an unexpected content type`);
+    }
+    const foundHeader = response.headers.get("lix-file-found");
+    if (foundHeader !== "true" && foundHeader !== "false") {
+      throw new Error(
+        `${method} ${path} returned an invalid Lix-File-Found header`,
+      );
+    }
+    const found = foundHeader === "true";
+    if (!found && data.byteLength !== 0) {
+      throw new Error(`${method} ${path} returned bytes for a missing file`);
+    }
+    return {
+      value: { found, data },
+      elapsedMs,
+      requestBytes: 0,
+      responseBytes: data.byteLength,
+    };
+  }
+
+  async requestEncoded(path, method, body, contentType, started) {
     const url = path ? `${this.endpoint}/${path}` : `${this.endpoint}/`;
     const response = await this.fetchImpl(url, {
       method,
-      headers,
+      headers: this.requestHeaders(contentType),
       body,
     });
     const text = await response.text();
@@ -320,6 +423,20 @@ export class ProtocolClient {
     };
   }
 
+  requestHeaders(contentType) {
+    const headers = {};
+    if (contentType !== undefined) {
+      headers["content-type"] = contentType;
+    }
+    if (this.internalToken) {
+      headers.authorization = `Bearer ${this.internalToken}`;
+    }
+    if (this.sessionId) {
+      headers["lix-session-id"] = this.sessionId;
+    }
+    return headers;
+  }
+
   requireSession() {
     if (!this.hasSession) {
       throw new Error("protocol session is not open");
@@ -330,6 +447,14 @@ export class ProtocolClient {
     if (this.capabilities?.binaryFileUpsertBatch !== true) {
       throw new Error(
         "server does not advertise the binaryFileUpsertBatch capability",
+      );
+    }
+  }
+
+  requireBinaryFileReadCapability() {
+    if (this.capabilities?.binaryFileRead !== true) {
+      throw new Error(
+        "server does not advertise the binaryFileRead capability",
       );
     }
   }
@@ -371,7 +496,9 @@ function normalizeFileUpsertBatchEntries(entries) {
       );
     }
     if (paths.has(path)) {
-      throw new TypeError(`upsertFileDataBatch entry ${index} duplicates ${path}`);
+      throw new TypeError(
+        `upsertFileDataBatch entry ${index} duplicates ${path}`,
+      );
     }
     paths.add(path);
     return { path, data };
@@ -383,7 +510,9 @@ function encodeFileUpsertBatch(entries) {
   for (const { path, data } of entries) {
     byteLength += 8 + Buffer.byteLength(path) + data.byteLength;
     if (!Number.isSafeInteger(byteLength)) {
-      throw new RangeError("upsertFileDataBatch frame exceeds safe allocation size");
+      throw new RangeError(
+        "upsertFileDataBatch frame exceeds safe allocation size",
+      );
     }
   }
 

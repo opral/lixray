@@ -580,6 +580,76 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 	});
 });
 
+void test("anonymous public binary file reads forward without SQL parsing", async () => {
+	let proxiedRequest: Request | undefined;
+	const response = await handleRequest(
+		remoteLixRequest("/file?path=%2Fassets%2Freport.pdf", {
+			method: "GET",
+			headers: { "Lix-Session-Id": "public-reader-session" },
+		}),
+		env({}),
+		{
+			authenticate: async () => {
+				throw new Error("anonymous reads must not authenticate first");
+			},
+			resolvePublicLix: async () => ({ ok: true, lixId: LIX_A }),
+			lixFetch: async (_lixId, request) => {
+				proxiedRequest = request;
+				return new Response(new Uint8Array([0, 1, 2, 255]), {
+					headers: {
+						"cache-control": "no-store",
+						"content-type": "application/octet-stream",
+						"lix-file-found": "true",
+					},
+				});
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(
+		[...new Uint8Array(await response.arrayBuffer())],
+		[0, 1, 2, 255],
+	);
+	assert.equal(response.headers.get("cache-control"), "no-store");
+	assert.ok(proxiedRequest);
+	const proxiedUrl = new URL(proxiedRequest.url);
+	assert.equal(proxiedUrl.pathname, "/lix/v1/file");
+	assert.equal(proxiedUrl.search, "?path=%2Fassets%2Freport.pdf");
+	assert.equal(proxiedRequest.headers.get("authorization"), null);
+	assert.equal(
+		proxiedRequest.headers.get("lix-session-id"),
+		"public-reader-session",
+	);
+});
+
+void test("anonymous binary file writes remain unauthorized", async () => {
+	let publicLixLookedUp = false;
+	let proxied = false;
+	const response = await handleRequest(
+		remoteLixRequest("/file/upsert", {
+			method: "POST",
+			headers: { "Content-Type": "application/octet-stream" },
+			body: "not-a-public-write",
+		}),
+		env({}),
+		{
+			resolvePublicLix: async () => {
+				publicLixLookedUp = true;
+				return { ok: true, lixId: LIX_A };
+			},
+			lixFetch: async () => {
+				proxied = true;
+				return new Response("unexpected");
+			},
+		},
+	);
+
+	assert.equal(response.status, 401);
+	assert.equal(publicLixLookedUp, false);
+	assert.equal(proxied, false);
+});
+
 void test("anonymous public readers can release their opaque remote session", async () => {
 	let proxiedRequest: Request | undefined;
 	const response = await handleRequest(
