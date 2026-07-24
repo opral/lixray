@@ -22,7 +22,21 @@ export const operationNames = Object.freeze([
   "create-4k",
   "update-4k",
   "update-2m",
+  "update-mixed",
   "delete-1k",
+]);
+
+const mixedUpdateShapes = Object.freeze([
+  { extension: "json", bytes: 4 * 1024 },
+  { extension: "json", bytes: 4 * 1024 },
+  { extension: "json", bytes: 4 * 1024 },
+  { extension: "json", bytes: 4 * 1024 },
+  { extension: "csv", bytes: 4 * 1024 },
+  { extension: "csv", bytes: 4 * 1024 },
+  { extension: "csv", bytes: 4 * 1024 },
+  { extension: "pdf", bytes: 64 * 1024 },
+  { extension: "pdf", bytes: 64 * 1024 },
+  { extension: "bin", bytes: 256 * 1024 },
 ]);
 
 export function isMutationOperation(operation) {
@@ -31,6 +45,7 @@ export function isMutationOperation(operation) {
     "create-4k",
     "update-4k",
     "update-2m",
+    "update-mixed",
     "delete-1k",
   ].includes(operation);
 }
@@ -45,6 +60,9 @@ export async function runBenchmark(
     settleMs = 0,
     warmupRuns,
     measuredRuns,
+    fileWriteTransport = "json",
+    fileWriteShape = "update",
+    hotSession = false,
     preseeded = false,
     onProgress,
   },
@@ -69,14 +87,46 @@ export async function runBenchmark(
   if (!Number.isSafeInteger(settleMs) || settleMs < 0) {
     throw new Error("settleMs must be a non-negative integer");
   }
+  if (typeof hotSession !== "boolean") {
+    throw new Error("hotSession must be a boolean");
+  }
+  if (!["binary", "json"].includes(fileWriteTransport)) {
+    throw new Error('fileWriteTransport must be either "binary" or "json"');
+  }
+  if (!["update", "upsert"].includes(fileWriteShape)) {
+    throw new Error('fileWriteShape must be either "update" or "upsert"');
+  }
   if (isMutationOperation(operation) && warmupRuns !== 0) {
     throw new Error(
       "mutation benchmarks require zero warmups so timing starts at the requested commit depth",
     );
   }
-  if (isMutationOperation(operation) && measuredRuns !== 1) {
+  if (hotSession && !isMutationOperation(operation)) {
+    throw new Error("hotSession is only valid for mutation benchmarks");
+  }
+  if (hotSession && measuredRuns < 2) {
+    throw new Error("hotSession mutation benchmarks require at least two samples");
+  }
+  if (hotSession && !preseeded) {
+    throw new Error("hotSession mutation benchmarks require preseeded: true");
+  }
+  if (
+    operation === "update-mixed" &&
+    (!hotSession || measuredRuns % mixedUpdateShapes.length !== 0)
+  ) {
     throw new Error(
-      "mutation benchmarks require one measured request per fresh workspace",
+      "update-mixed requires hotSession and a multiple of " +
+        mixedUpdateShapes.length +
+        " samples",
+    );
+  }
+  if (
+    isMutationOperation(operation) &&
+    measuredRuns !== 1 &&
+    !hotSession
+  ) {
+    throw new Error(
+      "mutation benchmarks require one measured request per fresh workspace unless hotSession is enabled",
     );
   }
 
@@ -103,6 +153,8 @@ export async function runBenchmark(
     state,
     totalOperations,
     commitPlan,
+    fileWriteTransport,
+    fileWriteShape,
   );
   const preTimingOperationSetupStarted = performance.now();
   await prepared.setup?.(protocol);
@@ -116,6 +168,7 @@ export async function runBenchmark(
     corpus,
     state,
     preconditionReadRuns,
+    prepared.preconditionExcludedPaths,
   );
   const preconditionReadMs =
     preconditionReadRuns === 0 ? null : performance.now() - preconditionStarted;
@@ -183,6 +236,14 @@ export async function runBenchmark(
       oneOperationFamilyPerInvocation: true,
       execution: "sequential",
       concurrency: 1,
+      hotSession: prepared.mutates ? hotSession : false,
+      mutationSampleIsolation: prepared.mutates
+        ? hotSession
+          ? "one fresh workspace and one live protocol session; sequential writes form a hot-session distribution"
+          : "one mutation per fresh workspace"
+        : "not applicable",
+      fileWriteTransport: prepared.fileWriteTransport ?? null,
+      fileWriteShape: prepared.fileWriteShape ?? null,
       preconditionReadRuns,
       precondition:
         preconditionReadRuns === 0
@@ -197,6 +258,7 @@ export async function runBenchmark(
       measuredRuns,
       timer: "node:perf_hooks.performance.now",
       timingBoundary:
+        prepared.timingBoundary ??
         "request JSON serialization through response body read and JSON decoding",
       assertionsInsideTiming: false,
       preTimingHistoryAccounting: false,
@@ -227,13 +289,16 @@ export async function runBenchmark(
         historyTablesRead: false,
       },
     },
-    measurement: prepared.mutates
+    measurement: prepared.mutates && !hotSession
       ? {
           kind: "single-mutation",
           sample: compactSample(samples[0]),
         }
       : {
-          kind: "distribution",
+          kind:
+            prepared.mutates && hotSession
+              ? "hot-mutation-distribution"
+              : "distribution",
           summary: summarizeSamples(samples),
           samples: samples.map(compactSample),
         },
@@ -245,12 +310,21 @@ export async function runBenchmark(
   };
 }
 
-async function preconditionPointReads(protocol, corpus, state, count) {
+async function preconditionPointReads(
+  protocol,
+  corpus,
+  state,
+  count,
+  excludedPaths = new Set(),
+) {
+  const candidates = corpus.filter((file) => !excludedPaths.has(file.path));
+  if (count > 0 && candidates.length === 0) {
+    throw new Error("precondition reads excluded every corpus path");
+  }
   for (let index = 0; index < count; index += 1) {
-    // Stay away from the first member of each format, which the mutation
-    // cases target. These reads warm the server/runtime/storage path without
-    // priming the exact row used by the timed operation or changing history.
-    const file = corpus[(517 + index * 131) % corpus.length];
+    // Every timed file path is excluded, so these reads warm the
+    // server/runtime/storage path without priming any measured row.
+    const file = candidates[(517 + index * 131) % candidates.length];
     const result = await protocol.execute(
       "SELECT path, data FROM lix_file WHERE path = $1",
       [wireText(file.path)],
@@ -419,6 +493,8 @@ function prepareOperation(
   state,
   totalOperations,
   commitPlan,
+  fileWriteTransport,
+  fileWriteShape,
 ) {
   const byExtension = (extension) =>
     corpus.filter((file) => extensionOf(file.path) === extension);
@@ -433,6 +509,7 @@ function prepareOperation(
       description: "point-read one 4 KiB JSON file by exact path",
       mutates: false,
       corpusFileDelta: 0,
+      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
       execute: (protocol, index) =>
         protocol.execute(
           "SELECT path, data FROM lix_file WHERE path = $1",
@@ -453,6 +530,7 @@ function prepareOperation(
       description: "point-read one 32 KiB PDF file by exact path",
       mutates: false,
       corpusFileDelta: 0,
+      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
       execute: (protocol, index) =>
         protocol.execute(
           "SELECT path, data FROM lix_file WHERE path = $1",
@@ -469,6 +547,7 @@ function prepareOperation(
       description: "list the first 100 corpus paths in lexical order",
       mutates: false,
       corpusFileDelta: 0,
+      preconditionExcludedPaths: new Set(expectedPaths),
       execute: (protocol) =>
         protocol.execute(
           "SELECT path FROM lix_file WHERE path LIKE '/corpus/%' ORDER BY path LIMIT 100",
@@ -486,6 +565,7 @@ function prepareOperation(
         "read the current and prior logical revisions of one changed 4 KiB file through lix_file_history",
       mutates: false,
       corpusFileDelta: 0,
+      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
       execute: (protocol, index) =>
         protocol.execute(
           `SELECT path, data, lixcol_depth, lixcol_observed_commit_id
@@ -590,10 +670,17 @@ function prepareOperation(
         "create one unique 4 KiB JSON file in an existing directory per request",
       mutates: true,
       corpusFileDelta: totalOperations,
+      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
+      fileWriteTransport,
+      fileWriteShape: fileWriteTransport === "binary" ? "upsert" : "insert",
+      timingBoundary: fileWriteTimingBoundary(fileWriteTransport),
       execute: (protocol, index) =>
-        protocol.execute(
-          "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
-          [wireText(cases[index].path), wireBlob(cases[index].data)],
+        executeFileWrite(
+          protocol,
+          fileWriteTransport,
+          cases[index],
+          "create",
+          "insert",
         ),
       assert: (result) => assertRowsAffected(result, 1, "create-4k"),
       verify: (protocol) => verifyFile(protocol, cases.at(-1)),
@@ -610,10 +697,17 @@ function prepareOperation(
       description: "replace one existing JSON file with 4 KiB per request",
       mutates: true,
       corpusFileDelta: 0,
+      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
+      fileWriteTransport,
+      fileWriteShape: fileWriteTransport === "binary" ? "upsert" : fileWriteShape,
+      timingBoundary: fileWriteTimingBoundary(fileWriteTransport),
       execute: (protocol, index) =>
-        protocol.execute(
-          "UPDATE lix_file SET data = $1 WHERE path = $2",
-          [wireBlob(cases[index].data), wireText(cases[index].path)],
+        executeFileWrite(
+          protocol,
+          fileWriteTransport,
+          cases[index],
+          "update",
+          fileWriteShape,
         ),
       assert: (result) => assertRowsAffected(result, 1, "update-4k"),
       verify: (protocol) => verifyFinalCases(protocol, cases),
@@ -631,12 +725,50 @@ function prepareOperation(
         "replace one existing binary file with 2 MiB of deterministic high-entropy data per request",
       mutates: true,
       corpusFileDelta: 0,
+      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
+      fileWriteTransport,
+      fileWriteShape: fileWriteTransport === "binary" ? "upsert" : fileWriteShape,
+      timingBoundary: fileWriteTimingBoundary(fileWriteTransport),
       execute: (protocol, index) =>
-        protocol.execute(
-          "UPDATE lix_file SET data = $1 WHERE path = $2",
-          [wireBlob(cases[index].data), wireText(cases[index].path)],
+        executeFileWrite(
+          protocol,
+          fileWriteTransport,
+          cases[index],
+          "update",
+          fileWriteShape,
         ),
       assert: (result) => assertRowsAffected(result, 1, "update-2m"),
+      verify: (protocol) => verifyFinalCases(protocol, cases),
+    };
+  }
+
+  if (name === "update-mixed") {
+    const cases = Array.from({ length: totalOperations }, (_, index) => {
+      const shape = mixedUpdateShapes[index % mixedUpdateShapes.length];
+      const candidates = byExtension(shape.extension);
+      return {
+        path: candidates[(index * 17) % candidates.length].path,
+        data: contentFor(shape.extension, shape.bytes, 5_000_000 + index),
+      };
+    });
+    return {
+      description:
+        "deterministic 10-write mix: 4x 4 KiB JSON, 3x 4 KiB CSV, 2x 64 KiB PDF, and 1x 256 KiB binary replacement",
+      mutates: true,
+      corpusFileDelta: 0,
+      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
+      fileWriteTransport,
+      fileWriteShape: fileWriteTransport === "binary" ? "upsert" : fileWriteShape,
+      timingBoundary: fileWriteTimingBoundary(fileWriteTransport),
+      execute: (protocol, index) =>
+        executeFileWrite(
+          protocol,
+          fileWriteTransport,
+          cases[index],
+          "update",
+          fileWriteShape,
+        ),
+      assert: (result) => assertRowsAffected(result, 1, "update-mixed"),
       verify: (protocol) => verifyFinalCases(protocol, cases),
     };
   }
@@ -653,6 +785,7 @@ function prepareOperation(
       description: "delete one unique existing 1 KiB text file per request",
       mutates: true,
       corpusFileDelta: -totalOperations,
+      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
       execute: (protocol, index) =>
         protocol.execute(
           "DELETE FROM lix_file WHERE path = $1",
@@ -959,6 +1092,21 @@ function integerWireValue(value, description) {
     throw new Error(`${description} was not an integer wire value`);
   }
   return Number(value.value);
+}
+
+function executeFileWrite(protocol, transport, file, operation, shape) {
+  if (transport === "binary") {
+    return protocol.upsertFileData(file.path, file.data);
+  }
+  return protocol.executeFileData(file.path, file.data, {
+    shape: operation === "create" ? "insert" : shape,
+  });
+}
+
+function fileWriteTimingBoundary(transport) {
+  return transport === "binary"
+    ? "raw octet-stream request transfer through response body read and JSON decoding"
+    : "client base64 and JSON serialization through response body read and JSON decoding";
 }
 
 function wireText(value) {

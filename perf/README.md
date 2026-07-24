@@ -83,7 +83,11 @@ Supported operation families are:
 - `create-4k`: create a unique valid 4 KiB JSON file in the existing `/corpus` directory
 - `update-4k`: replace an existing JSON file with 4 KiB
 - `update-2m`: replace an existing binary file with 2 MiB of high-entropy data
+- `update-mixed`: hot-session-only deterministic mix of 4x 4 KiB JSON, 3x 4 KiB CSV, 2x 64 KiB PDF, and 1x 256 KiB binary per 10 writes
 - `delete-1k`: delete a unique existing 1 KiB text file
+
+`update-mixed` requires `--hot-session --preseeded` and a `--samples` count
+that is a multiple of 10, preserving its stated deterministic weights.
 
 `diff-file-history` is deliberately a history-backed diff projection, not a
 generic textual diff: it reads `lix_file_history` at the session's pinned
@@ -100,7 +104,10 @@ adds its tracked branch-descriptor commit to the verified final count.
 the timer and then alternates the live session between them. The report records
 those two setup commits separately, so its expected final count remains
 auditable. Repeat a mutation with fresh workspace IDs to obtain independent
-samples. Read operations default to three warmups and 30 timed requests. The
+samples. For a hot-session mutation distribution, pass `--hot-session` with
+`--preseeded` and `--samples` of at least two: it keeps one fresh clone and one
+live protocol session, records each sequential write, and verifies the expected final commit
+count. Read operations default to three warmups and 30 timed requests. The
 report states both the requested start count and the expected/verified final
 count.
 
@@ -180,12 +187,21 @@ LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   --preseeded
 ```
 
-The sample timer starts before JSON serialization and ends after the complete
-response body has been read and decoded. Preconditioning and semantic
+The sample timer starts before client base64/JSON encoding or raw body transfer and ends after
+the complete response body has been read and decoded. `create-4k`, `update-4k`, and
+`update-2m` default to the JSON transport so an unchanged baseline remains
+directly runnable. Pass `--file-write-transport binary` to send the file body
+as `application/octet-stream` through the native file-upsert endpoint; its
+timer starts before body transfer and ends after response decoding. The report
+records the chosen transport and write shape. JSON updates use SQL `UPDATE` by
+default; use `--file-write-shape upsert` for the matched
+`INSERT ... ON CONFLICT(path) DO UPDATE` control when comparing the native
+endpoint's explicit upsert semantics. Preconditioning and semantic
 assertions are outside that timer. Read distributions and the single mutation
 sample are stored compactly as `[elapsedMs, requestBytes, responseBytes]`;
 mutation reports deliberately do not label one observation as p50/p95. Request
-bytes are JSON payload bytes and do not include HTTP framing.
+bytes are encoded request-body bytes: JSON payload bytes for the JSON path and
+raw octet-stream bytes for the binary path; neither includes HTTP framing.
 
 Storage size, server RSS, object-store requests, and cache size are properties
 outside the protocol response. For memory, sample the lix-server container

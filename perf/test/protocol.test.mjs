@@ -83,6 +83,102 @@ test("execute requires an established session", async () => {
   assert.throws(() => client.execute("SELECT 1"), /session is not open/);
 });
 
+test("upsertFileData sends an authenticated raw octet-stream request", async () => {
+  const calls = [];
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    internalToken: "internal-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, ...options });
+      if (options.method === "GET") {
+        return Response.json({ sessionId: "session-file-upsert" });
+      }
+      return Response.json({
+        columns: [],
+        rows: [],
+        rowsAffected: 1,
+        notices: [],
+      });
+    },
+  });
+
+  await client.open();
+  const payload = Buffer.from([0, 1, 2, 255]);
+  const result = await client.upsertFileData("/nested/payload.bin", payload);
+
+  assert.equal(result.value.rowsAffected, 1);
+  assert.equal(result.requestBytes, payload.byteLength);
+  assert.equal(
+    calls[1].url,
+    "http://example.test/lixes/workspace/lix/v1/file/upsert?path=%2Fnested%2Fpayload.bin",
+  );
+  assert.equal(calls[1].method, "POST");
+  assert.equal(calls[1].headers.authorization, "Bearer internal-token");
+  assert.equal(calls[1].headers["lix-session-id"], "session-file-upsert");
+  assert.equal(calls[1].headers["content-type"], "application/octet-stream");
+  assert.deepEqual(calls[1].body, payload);
+});
+
+test("executeFileData keeps JSON/base64 work inside the timed protocol request", async () => {
+  const calls = [];
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, ...options });
+      if (options.method === "GET") {
+        return Response.json({ sessionId: "session-file-json" });
+      }
+      return Response.json({
+        columns: [],
+        rows: [],
+        rowsAffected: 1,
+        notices: [],
+      });
+    },
+  });
+
+  await client.open();
+  const payload = Buffer.from([0, 1, 2, 255]);
+  const result = await client.executeFileData("/payload.bin", payload, {
+    shape: "upsert",
+  });
+
+  const body = JSON.parse(calls[1].body);
+  assert.match(body.sql, /ON CONFLICT \(path\) DO UPDATE/);
+  assert.deepEqual(body.params, [
+    { kind: "text", value: "/payload.bin" },
+    { kind: "blob", base64: payload.toString("base64") },
+  ]);
+  assert.equal(result.requestBytes, Buffer.byteLength(calls[1].body));
+  assert.equal(calls[1].headers["content-type"], "application/json");
+});
+
+test("upsertFileData validates its local call shape", () => {
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    fetchImpl: async () => {
+      throw new Error("fetch should not run");
+    },
+  });
+
+  assert.throws(
+    () => client.upsertFileData("/payload.bin", Buffer.alloc(0)),
+    /session is not open/,
+  );
+  client.sessionId = "session-file-upsert";
+  assert.throws(
+    () => client.upsertFileData("", Buffer.alloc(0)),
+    /non-empty string/,
+  );
+  assert.throws(
+    () => client.upsertFileData("/payload.bin", new Uint8Array([1])),
+    /must be a Buffer/,
+  );
+});
+
 test("branch methods use the authenticated protocol endpoints", async () => {
   const calls = [];
   let getCalls = 0;

@@ -61,6 +61,9 @@ async function main(args) {
       settleMs: config.settleMs,
       warmupRuns: config.warmupRuns,
       measuredRuns: config.measuredRuns,
+      fileWriteTransport: config.fileWriteTransport,
+      fileWriteShape: config.fileWriteShape,
+      hotSession: config.hotSession,
       preseeded: config.preseeded,
       onProgress: config.quiet ? undefined : showProgress,
     });
@@ -121,7 +124,7 @@ async function main(args) {
 
 function parseArgs(args) {
   const values = new Map();
-  const booleanFlags = new Set(["--preseeded", "--quiet"]);
+  const booleanFlags = new Set(["--hot-session", "--preseeded", "--quiet"]);
   const allowed = new Set([
     "--url",
     "--workspace",
@@ -132,6 +135,8 @@ function parseArgs(args) {
     "--settle-ms",
     "--warmups",
     "--samples",
+    "--file-write-transport",
+    "--file-write-shape",
     "--output",
     "--ready-timeout-ms",
     "--target-revision",
@@ -189,6 +194,14 @@ function parseArgs(args) {
     0,
   );
   const settleMs = integer(values, "--settle-ms", 0, 0);
+  const fileWriteTransport = values.get("--file-write-transport") ?? "json";
+  if (!["binary", "json"].includes(fileWriteTransport)) {
+    throw new Error('--file-write-transport must be either "binary" or "json"');
+  }
+  const fileWriteShape = values.get("--file-write-shape") ?? "update";
+  if (!["update", "upsert"].includes(fileWriteShape)) {
+    throw new Error('--file-write-shape must be either "update" or "upsert"');
+  }
   const mutationOperation = isMutationOperation(operation);
   const warmupRuns = integer(
     values,
@@ -202,9 +215,26 @@ function parseArgs(args) {
     mutationOperation ? 1 : 30,
     1,
   );
-  if (mutationOperation && (warmupRuns !== 0 || measuredRuns !== 1)) {
+  const hotSession = values.has("--hot-session");
+  const preseeded = values.has("--preseeded");
+  if (hotSession && !mutationOperation) {
+    throw new Error("--hot-session is only valid for mutation operations");
+  }
+  if (hotSession && measuredRuns < 2) {
+    throw new Error("--hot-session requires --samples of at least 2");
+  }
+  if (hotSession && !preseeded) {
+    throw new Error("--hot-session requires --preseeded");
+  }
+  if (operation === "update-mixed" && measuredRuns % 10 !== 0) {
+    throw new Error("update-mixed requires --samples to be a multiple of 10");
+  }
+  if (
+    mutationOperation &&
+    (warmupRuns !== 0 || (measuredRuns !== 1 && !hotSession))
+  ) {
     throw new Error(
-      "mutation operations require --warmups 0 and --samples 1; repeat with fresh workspace IDs",
+      "mutation operations require --warmups 0 and --samples 1; use --hot-session for a same-session mutation distribution",
     );
   }
   const readyTimeoutMs = integer(
@@ -232,12 +262,15 @@ function parseArgs(args) {
     targetTotalCommits,
     preconditionReadRuns,
     settleMs,
+    fileWriteTransport,
+    fileWriteShape,
+    hotSession,
     warmupRuns,
     measuredRuns,
     readyTimeoutMs,
     outputPath,
     targetRevision: values.get("--target-revision"),
-    preseeded: values.has("--preseeded"),
+    preseeded,
     quiet: values.has("--quiet"),
   };
 }
@@ -380,6 +413,9 @@ function usage() {
     [--precondition-reads <count>] \\
     [--settle-ms <milliseconds>] \\
     [--warmups <count>] [--samples <count>] \\
+    [--file-write-transport <json|binary>] \\
+    [--file-write-shape <update|upsert>] \\
+    [--hot-session] \\
     [--url <lix-server-url>] [--output <path>] \\
     [--target-revision <deployed-revision>] [--preseeded] [--quiet]
 
@@ -392,5 +428,13 @@ timed request with no mutating warmup; reads default to three warmups and 30 sam
 --precondition-reads to warm unrelated point-read infrastructure without
 changing commit depth. Use --settle-ms to keep runtime-open background work out
 of an active-path measurement. Pass --preseeded only for an exact, externally
-cloned workspace at the requested commit depth.`;
+cloned workspace at the requested commit depth. File create/update operations
+use JSON by default so an unchanged baseline remains runnable; pass
+--file-write-transport binary to measure the raw octet-stream transfer path.
+JSON updates use SQL UPDATE by default; pass --file-write-shape upsert for
+the matched INSERT ON CONFLICT(path) DO UPDATE control. Mutation benchmarks
+normally require one request per fresh workspace. Pass --hot-session with two
+or more samples to measure sequential mutations in one fresh workspace and
+one live protocol session; --hot-session requires --preseeded. update-mixed
+also requires --samples to be a multiple of 10.`;
 }

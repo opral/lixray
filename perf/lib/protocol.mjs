@@ -58,6 +58,56 @@ export class ProtocolClient {
     return this.request("execute-batch", "POST", { statements });
   }
 
+  executeFileData(path, data, { shape = "update" } = {}) {
+    this.requireSession();
+    if (typeof path !== "string" || path.length === 0) {
+      throw new TypeError("executeFileData path must be a non-empty string");
+    }
+    if (!Buffer.isBuffer(data)) {
+      throw new TypeError("executeFileData data must be a Buffer");
+    }
+    if (!["insert", "update", "upsert"].includes(shape)) {
+      throw new TypeError("executeFileData shape must be insert, update, or upsert");
+    }
+    return this.requestLazyJson("execute", "POST", () => {
+      const blob = { kind: "blob", base64: data.toString("base64") };
+      const text = { kind: "text", value: path };
+      if (shape === "insert") {
+        return {
+          sql: "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+          params: [text, blob],
+        };
+      }
+      if (shape === "upsert") {
+        return {
+          sql:
+            "INSERT INTO lix_file (path, data) VALUES ($1, $2) " +
+            "ON CONFLICT (path) DO UPDATE SET data = excluded.data",
+          params: [text, blob],
+        };
+      }
+      return {
+        sql: "UPDATE lix_file SET data = $1 WHERE path = $2",
+        params: [blob, text],
+      };
+    });
+  }
+
+  upsertFileData(path, data) {
+    this.requireSession();
+    if (typeof path !== "string" || path.length === 0) {
+      throw new TypeError("upsertFileData path must be a non-empty string");
+    }
+    if (!Buffer.isBuffer(data)) {
+      throw new TypeError("upsertFileData data must be a Buffer");
+    }
+    return this.requestBinary(
+      `file/upsert?path=${encodeURIComponent(path)}`,
+      "POST",
+      data,
+    );
+  }
+
   createBranch({ id, name, fromCommitId } = {}) {
     this.requireSession();
     return this.request("branch/create", "POST", { id, name, fromCommitId });
@@ -87,9 +137,42 @@ export class ProtocolClient {
   async request(path, method, body) {
     const started = performance.now();
     const encoded = body === undefined ? undefined : JSON.stringify(body);
+    return this.requestEncoded(
+      path,
+      method,
+      encoded,
+      encoded === undefined ? undefined : "application/json",
+      started,
+    );
+  }
+
+  async requestBinary(path, method, body) {
+    const started = performance.now();
+    return this.requestEncoded(
+      path,
+      method,
+      body,
+      "application/octet-stream",
+      started,
+    );
+  }
+
+  async requestLazyJson(path, method, makeBody) {
+    const started = performance.now();
+    const encoded = JSON.stringify(makeBody());
+    return this.requestEncoded(
+      path,
+      method,
+      encoded,
+      "application/json",
+      started,
+    );
+  }
+
+  async requestEncoded(path, method, body, contentType, started) {
     const headers = {};
-    if (encoded !== undefined) {
-      headers["content-type"] = "application/json";
+    if (contentType !== undefined) {
+      headers["content-type"] = contentType;
     }
     if (this.internalToken) {
       headers.authorization = `Bearer ${this.internalToken}`;
@@ -102,7 +185,7 @@ export class ProtocolClient {
     const response = await this.fetchImpl(url, {
       method,
       headers,
-      body: encoded,
+      body,
     });
     const text = await response.text();
     if (!response.ok) {
@@ -122,7 +205,10 @@ export class ProtocolClient {
     return {
       value,
       elapsedMs,
-      requestBytes: encoded === undefined ? 0 : Buffer.byteLength(encoded),
+      // Account for encoded bytes only after stopping the timer. JSON
+      // serialization belongs in the measured path; byte bookkeeping does
+      // not, especially for multi-megabyte controls.
+      requestBytes: requestBodyBytes(body),
       responseBytes: Buffer.byteLength(text),
     };
   }
@@ -132,4 +218,14 @@ export class ProtocolClient {
       throw new Error("protocol session is not open");
     }
   }
+}
+
+function requestBodyBytes(body) {
+  if (body === undefined) {
+    return 0;
+  }
+  if (typeof body === "string") {
+    return Buffer.byteLength(body);
+  }
+  return body.byteLength;
 }
