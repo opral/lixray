@@ -543,7 +543,7 @@ mod tests {
                     wire_value(LixValue::Text(
                         "/.lix/plugins/plugin_md_v2.lixplugin".to_string(),
                     )),
-                    wire_value(LixValue::Blob(markdown_plugin)),
+                    wire_value(LixValue::Blob(markdown_plugin.into())),
                 ],
             )
             .await,
@@ -562,7 +562,7 @@ mod tests {
                 "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
                 vec![
                     wire_value(LixValue::Text(path.to_string())),
-                    wire_value(LixValue::Blob(seed.clone())),
+                    wire_value(LixValue::Blob(seed.clone().into())),
                 ],
             )
             .await,
@@ -591,7 +591,7 @@ mod tests {
             "UPDATE lix_file SET data = $1 WHERE path = $2",
             vec![
                 wire_value(LixValue::Blob(
-                    b"# Shared\n\nLeft: A\n\nRight: 0\n".to_vec(),
+                    b"# Shared\n\nLeft: A\n\nRight: 0\n".to_vec().into(),
                 )),
                 wire_value(LixValue::Text(path.to_string())),
             ],
@@ -603,7 +603,7 @@ mod tests {
             "UPDATE lix_file SET data = $1 WHERE path = $2",
             vec![
                 wire_value(LixValue::Blob(
-                    b"# Shared\n\nLeft: 0\n\nRight: B\n".to_vec(),
+                    b"# Shared\n\nLeft: 0\n\nRight: B\n".to_vec().into(),
                 )),
                 wire_value(LixValue::Text(path.to_string())),
             ],
@@ -760,7 +760,7 @@ mod tests {
         else {
             panic!("execute response should contain a blob");
         };
-        bytes
+        bytes.to_vec()
     }
 
     async fn open_protocol_session(app: Router, lix_id: &str) -> String {

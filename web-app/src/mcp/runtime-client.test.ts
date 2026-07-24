@@ -108,7 +108,7 @@ void test("container calls reauthorize every time and never forward the OAuth to
 	}
 });
 
-void test("active-branch lookup reauthorizes each protocol request without listing branches", async () => {
+void test("active-branch lookup reuses the authorized handshake without listing branches", async () => {
 	let authorizationChecks = 0;
 	const requests: Array<Request> = [];
 	const client = new WorkerLixRuntimeClient(
@@ -131,10 +131,10 @@ void test("active-branch lookup reauthorizes each protocol request without listi
 	);
 
 	assert.equal(await client.activeBranchId(LIX_ID), "main");
-	assert.equal(authorizationChecks, 2);
+	assert.equal(authorizationChecks, 1);
 	assert.deepEqual(
 		requests.map((request) => new URL(request.url).pathname),
-		[`/lixes/${LIX_ID}/lix/v1/`, `/lixes/${LIX_ID}/lix/v1/`],
+		[`/lixes/${LIX_ID}/lix/v1/`],
 	);
 	for (const request of requests) {
 		assert.equal(request.headers.get("authorization"), null);
@@ -175,12 +175,7 @@ void test("active-branch lookup, branch switch, and execution are queued", async
 		branchId,
 	});
 	await client.execute(LIX_ID, { sql: "SELECT 1" });
-	assert.deepEqual(operations, [
-		"active-branch",
-		"active-branch",
-		"switch:main",
-		"execute",
-	]);
+	assert.deepEqual(operations, ["active-branch", "switch:main", "execute"]);
 });
 
 void test("transient container failures retry indefinitely with capped jitter and reacquired stubs", async () => {
@@ -219,9 +214,9 @@ void test("transient container failures retry indefinitely with capped jitter an
 	);
 
 	assert.equal(await client.activeBranchId(LIX_ID), "main");
-	assert.equal(acquisitions, 7);
-	assert.equal(starts, 7);
-	assert.equal(fetches, 2);
+	assert.equal(acquisitions, 6);
+	assert.equal(starts, 6);
+	assert.equal(fetches, 1);
 	assert.deepEqual(delays, [1_000, 2_000, 4_000, 5_000, 5_000]);
 });
 
@@ -249,7 +244,7 @@ void test("Durable Object storage resets are retried", async () => {
 	);
 
 	assert.equal(await client.activeBranchId(LIX_ID), "main");
-	assert.equal(acquisitions, 3);
+	assert.equal(acquisitions, 2);
 });
 
 void test("transient HTTP responses retry and replay request bodies", async () => {
@@ -736,10 +731,10 @@ void test("injected lixes and lix fetch bypass Supabase and containers", async (
 
 	assert.deepEqual(await client.listLixes(), lixSummaries);
 	assert.equal(await client.activeBranchId(LIX_ID), "main");
-	assert.equal(authorizationChecks, 2);
+	assert.equal(authorizationChecks, 1);
 	assert.deepEqual(
 		received.map((request) => new URL(request.url).pathname),
-		["/lix/v1/", "/lix/v1/"],
+		["/lix/v1/"],
 	);
 	for (const request of received) {
 		assert.equal(request.headers.get("authorization"), null);

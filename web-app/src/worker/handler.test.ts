@@ -1140,7 +1140,7 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
-	assert.equal(lixFetches, 3);
+	assert.equal(lixFetches, 2);
 });
 
 void test("Supabase lix authorization uses the user token and RLS-visible row", async () => {
