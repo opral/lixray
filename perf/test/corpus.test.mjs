@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildCorpus,
+  buildCorpusIndex,
   corpusManifest,
   formatSpecifications,
+  minimumTotalCommitsForFiles,
+  SEED_FILES_PER_COMMIT,
+  seedCommitCountForFiles,
+  SUPPORTED_CORPUS_FILE_COUNTS,
 } from "../lib/corpus.mjs";
 
 test("the corpus is deterministic and has 100 valid files per format", () => {
@@ -33,19 +38,36 @@ test("the corpus is deterministic and has 100 valid files per format", () => {
   }
 });
 
-test("the 5,000-file corpus preserves deterministic mixed-format proportions", () => {
-  const first = buildCorpus(5_000);
-  const second = buildCorpus(5_000);
-  const manifest = corpusManifest(first);
+test("the corpus matrix has fixed 1,000-file seed commit accounting", () => {
+  for (const fileCount of SUPPORTED_CORPUS_FILE_COUNTS) {
+    const index = buildCorpusIndex(fileCount);
+    assert.equal(index.length, fileCount);
+    assert.equal(
+      seedCommitCountForFiles(fileCount),
+      fileCount / SEED_FILES_PER_COMMIT,
+    );
+    assert.equal(
+      minimumTotalCommitsForFiles(fileCount),
+      1 + fileCount / SEED_FILES_PER_COMMIT,
+    );
+    assert.deepEqual(
+      Object.fromEntries(
+        formatSpecifications.map(({ extension }) => [
+          extension,
+          index.filter((file) => file.extension === extension).length,
+        ]),
+      ),
+      Object.fromEntries(
+        formatSpecifications.map(({ extension }) => [
+          extension,
+          fileCount / formatSpecifications.length,
+        ]),
+      ),
+    );
+  }
 
-  assert.equal(first.length, 5_000);
-  assert.deepEqual(manifest, corpusManifest(second));
-  assert.deepEqual(
-    manifest.extensionCounts,
-    Object.fromEntries(
-      formatSpecifications.map(({ extension }) => [extension, 500]),
-    ),
-  );
+  assert.throws(() => buildCorpusIndex(2_000), /must be one of/);
+  assert.throws(() => seedCommitCountForFiles(2_000), /must be one of/);
 });
 
 test("structured corpus members are parseable and binary containers are valid", () => {

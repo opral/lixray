@@ -5,12 +5,16 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
-  initialCorpusInsertCommits,
   isMutationOperation,
   operationNames,
   runBenchmark,
 } from "./lib/benchmark.mjs";
-import { SUPPORTED_CORPUS_FILE_COUNTS } from "./lib/corpus.mjs";
+import {
+  CORPUS_FILE_COUNT,
+  minimumTotalCommitsForFiles,
+  SEED_FILES_PER_COMMIT,
+  SUPPORTED_CORPUS_FILE_COUNTS,
+} from "./lib/corpus.mjs";
 import { ProtocolClient, ProtocolError } from "./lib/protocol.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -52,7 +56,7 @@ async function main(args) {
     const benchmark = await runBenchmark(client, {
       operation: config.operation,
       targetTotalCommits: config.targetTotalCommits,
-      corpusFileCount: config.corpusFileCount,
+      corpusFiles: config.corpusFiles,
       preconditionReadRuns: config.preconditionReadRuns,
       settleMs: config.settleMs,
       warmupRuns: config.warmupRuns,
@@ -61,7 +65,7 @@ async function main(args) {
       onProgress: config.quiet ? undefined : showProgress,
     });
     const report = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       benchmark: "lixray-e2e-crud",
       startedAt,
       finishedAt: new Date().toISOString(),
@@ -165,17 +169,17 @@ function parseArgs(args) {
     );
   }
 
-  const targetTotalCommits = integer(values, "--commits", 1_000, 2);
-  const corpusFileCount = integer(values, "--files", 1_000, 1);
-  if (!SUPPORTED_CORPUS_FILE_COUNTS.includes(corpusFileCount)) {
+  const corpusFiles = integer(values, "--files", CORPUS_FILE_COUNT, 1);
+  if (!SUPPORTED_CORPUS_FILE_COUNTS.includes(corpusFiles)) {
     throw new Error(
       `--files must be one of: ${SUPPORTED_CORPUS_FILE_COUNTS.join(", ")}`,
     );
   }
-  const minimumTotalCommits = initialCorpusInsertCommits(corpusFileCount) + 1;
+  const minimumTotalCommits = minimumTotalCommitsForFiles(corpusFiles);
+  const targetTotalCommits = integer(values, "--commits", 1_000, 1);
   if (targetTotalCommits < minimumTotalCommits) {
     throw new Error(
-      `--commits must be at least ${minimumTotalCommits} for --files ${corpusFileCount}`,
+      `--commits must be at least ${minimumTotalCommits} for --files ${corpusFiles}: genesis plus ${minimumTotalCommits - 1} seed commits`,
     );
   }
   const preconditionReadRuns = integer(
@@ -224,8 +228,8 @@ function parseArgs(args) {
     baseUrl,
     workspaceId,
     operation,
+    corpusFiles,
     targetTotalCommits,
-    corpusFileCount,
     preconditionReadRuns,
     settleMs,
     warmupRuns,
@@ -290,15 +294,15 @@ async function readGitRevision(cwd) {
 function showProgress(progress) {
   if (
     progress.phase === "history" &&
-    progress.historyCommits % 100 !== 0 &&
-    progress.completedMutationCommits !== progress.targetMutationCommits
+    progress.completedHistoryMutationCommits % 100 !== 0 &&
+    progress.completedHistoryMutationCommits !== progress.historyMutationCommits
   ) {
     return;
   }
   const label =
     progress.phase === "insert"
-      ? `${progress.filesSeeded} files`
-      : `${progress.historyCommits}/${progress.targetMutationCommits} mutations`;
+      ? `${progress.filesSeeded}/${progress.totalFiles} files (${progress.completedSeedCommits}/${progress.seedCommitCount} seed commits)`
+      : `${progress.completedHistoryMutationCommits}/${progress.historyMutationCommits} history mutations`;
   process.stdout.write(
     `\rsetup ${progress.completedMutationCommits}/${progress.targetMutationCommits} commits (${label})`,
   );
@@ -335,8 +339,11 @@ function printResult(report, outputPath) {
     JSON.stringify(
       {
         workspaceId: report.target.workspaceId,
+        corpusFiles: report.corpus.files,
         targetTotalCommits: report.methodology.targetTotalCommits,
-        targetCorpusFiles: report.methodology.targetCorpusFiles,
+        seedFilesPerCommit: report.setup.seedFilesPerCommit,
+        seedCommitCount: report.setup.seedCommitCount,
+        historyMutationCommits: report.setup.historyMutationCommits,
         verifiedFinalCommits: report.postTimingAccounting.totalCommits,
         output: outputPath,
       },
@@ -368,7 +375,7 @@ function usage() {
   node perf/runner.mjs \\
     --workspace <fresh-workspace-id> \\
     --operation <${operationNames.join("|")}> \\
-    [--files <1000|5000>] \\
+    [--files <${SUPPORTED_CORPUS_FILE_COUNTS.join("|")}>] \\
     [--commits <total-including-genesis>] \\
     [--precondition-reads <count>] \\
     [--settle-ms <milliseconds>] \\
@@ -376,9 +383,12 @@ function usage() {
     [--url <lix-server-url>] [--output <path>] \\
     [--target-revision <deployed-revision>] [--preseeded] [--quiet]
 
-Each invocation seeds a new deterministic 1,000- or 5,000-file workspace and
-measures one operation family. Mutations default to one timed request with no mutating
-warmup; reads default to three warmups and 30 samples. Use
+Each invocation seeds a new deterministic workspace with ${SUPPORTED_CORPUS_FILE_COUNTS.join(
+  ", ",
+)} files and measures one operation family. The runner commits exactly
+${SEED_FILES_PER_COMMIT} files per atomic execute-batch seed request, so a
+target must include genesis plus every seed commit. Mutations default to one
+timed request with no mutating warmup; reads default to three warmups and 30 samples. Use
 --precondition-reads to warm unrelated point-read infrastructure without
 changing commit depth. Use --settle-ms to keep runtime-open background work out
 of an active-path measurement. Pass --preseeded only for an exact, externally

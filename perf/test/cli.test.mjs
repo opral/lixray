@@ -12,6 +12,7 @@ test("accepts the separator forwarded by pnpm scripts", () => {
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^Usage:/m);
+  assert.match(result.stdout, /--files <1000\|5000\|10000>/);
 });
 
 test("rejects mutating warmups before opening a server connection", () => {
@@ -37,14 +38,14 @@ test("rejects mutating warmups before opening a server connection", () => {
   );
 });
 
-test("rejects unsupported corpus sizes before opening a server connection", () => {
+test("rejects corpus sizes outside the reproducible matrix", () => {
   const result = spawnSync(
     process.execPath,
     [
       runner,
       "--",
       "--workspace",
-      "perf-cli-files-check",
+      "perf-cli-check",
       "--operation",
       "read-point-4k",
       "--files",
@@ -54,27 +55,30 @@ test("rejects unsupported corpus sizes before opening a server connection", () =
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /--files must be one of: 1000, 5000/);
+  assert.match(result.stderr, /--files must be one of: 1000, 5000, 10000/);
 });
 
-test("requires enough commits for the transport-bounded 5,000-file seed", () => {
+test("requires enough commits to cover all fixed-size seed commits", () => {
   const result = spawnSync(
     process.execPath,
     [
       runner,
       "--",
       "--workspace",
-      "perf-cli-commits-check",
+      "perf-cli-check",
       "--operation",
       "read-point-4k",
       "--files",
       "5000",
       "--commits",
-      "2",
+      "5",
     ],
     { encoding: "utf8" },
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /--commits must be at least 6 for --files 5000/);
+  assert.match(
+    result.stderr,
+    /--commits must be at least 6 for --files 5000: genesis plus 5 seed commits/,
+  );
 });
