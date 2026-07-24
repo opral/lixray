@@ -78,6 +78,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test performance harness
+        run: pnpm perf:test
+
       - name: Test database policies and functions
         working-directory: database
         run: supabase start && supabase test db

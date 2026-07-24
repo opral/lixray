@@ -160,17 +160,29 @@ Compose or an explicitly requested integration environment.
 ## Performance loop
 
 ```sh
-pnpm perf:reset
-pnpm perf:up
-pnpm perf:seed
-pnpm perf:run -- --output perf/results/baseline.json
+LIXRAY_PERF_WORKSPACE=perf-baseline-c1000-read4k-r1 pnpm perf:reset
+LIXRAY_PERF_SPANS=true \
+  RUST_LOG=lixray=info,lix_perf=debug \
+  pnpm perf:up
+LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
+  pnpm perf:run -- \
+  --workspace perf-baseline-c1000-read4k-r1 \
+  --operation read-point-4k \
+  --commits 1000 \
+  --output perf/results/baseline.json
 # edit vendor/lix or lix-server
-pnpm perf:reset
+LIXRAY_PERF_WORKSPACE=perf-candidate-c1000-read4k-r1 pnpm perf:reset
 pnpm perf:up
-pnpm perf:seed
-pnpm perf:run -- --compare perf/results/baseline.json
+LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
+  pnpm perf:run -- \
+  --workspace perf-candidate-c1000-read4k-r1 \
+  --operation read-point-4k \
+  --commits 1000 \
+  --output perf/results/candidate.json
 pnpm perf:down
 ```
 
 Set `LIXRAY_PERF_URL` and `LIXRAY_INTERNAL_TOKEN` to exercise a hosted service.
-Use `--fixture` and `--workload` to select other performance inputs.
+Every invocation seeds a fresh deterministic 1,000-file workspace and measures
+one CRUD operation family. See [`perf/README.md`](perf/README.md) for the
+operation matrix, exact commit semantics, repetition method, and result schema.
