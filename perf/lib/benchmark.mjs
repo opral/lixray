@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import {
   buildCorpus,
   buildCorpusIndex,
+  CORPUS_FILE_COUNT,
   contentFor,
   corpusManifest,
   extensionOf,
@@ -18,10 +19,19 @@ export const operationNames = Object.freeze([
   "delete-1k",
 ]);
 
+// A 1,000-file mixed chunk is about 14 MiB on the JSON/base64 wire, leaving
+// room beneath the protocol's 64 MiB expanded-body limit without changing that
+// production safety boundary merely to seed a benchmark corpus.
+const MAX_FILES_PER_SEED_REQUEST = 1_000;
+
 export function isMutationOperation(operation) {
   return ["create-4k", "update-4k", "update-2m", "delete-1k"].includes(
     operation,
   );
+}
+
+export function initialCorpusInsertCommits(corpusFileCount) {
+  return Math.ceil(corpusFileCount / MAX_FILES_PER_SEED_REQUEST);
 }
 
 export async function runBenchmark(
@@ -29,6 +39,7 @@ export async function runBenchmark(
   {
     operation,
     targetTotalCommits,
+    corpusFileCount = CORPUS_FILE_COUNT,
     preconditionReadRuns = 0,
     settleMs = 0,
     warmupRuns,
@@ -40,8 +51,14 @@ export async function runBenchmark(
   if (!operationNames.includes(operation)) {
     throw new Error(`unsupported operation: ${operation}`);
   }
-  if (!Number.isSafeInteger(targetTotalCommits) || targetTotalCommits < 2) {
-    throw new Error("targetTotalCommits must include genesis and be at least 2");
+  const initialInsertCommits = initialCorpusInsertCommits(corpusFileCount);
+  if (
+    !Number.isSafeInteger(targetTotalCommits) ||
+    targetTotalCommits < initialInsertCommits + 1
+  ) {
+    throw new Error(
+      `targetTotalCommits must include genesis and be at least ${initialInsertCommits + 1} for this corpus`,
+    );
   }
   if (!Number.isSafeInteger(warmupRuns) || warmupRuns < 0) {
     throw new Error("warmupRuns must be a non-negative integer");
@@ -66,7 +83,9 @@ export async function runBenchmark(
     );
   }
 
-  const corpus = preseeded ? buildCorpusIndex() : buildCorpus();
+  const corpus = preseeded
+    ? buildCorpusIndex(corpusFileCount)
+    : buildCorpus(corpusFileCount);
   let state;
   let seedMs;
   if (preseeded) {
@@ -134,6 +153,8 @@ export async function runBenchmark(
       operation,
       operationDescription: prepared.description,
       targetTotalCommits,
+      targetCorpusFiles: corpus.length,
+      initialCorpusInsertCommits: initialInsertCommits,
       genesisIncludedInTarget: true,
       expectedStartTotalCommits: targetTotalCommits,
       knownStartTotalCommits: preseeded ? null : targetTotalCommits,
@@ -173,12 +194,15 @@ export async function runBenchmark(
     },
     // A preseeded run keeps corpus payload generation out of the timing
     // prelude. Build the reproducibility manifest only after measurement.
-    corpus: corpusManifest(preseeded ? buildCorpus() : corpus),
+    corpus: corpusManifest(
+      preseeded ? buildCorpus(corpusFileCount) : corpus,
+    ),
     setup: {
       seedMs,
       preconditionReadMs,
       settleMs,
       mutationCommitsCreated: preseeded ? 0 : targetTotalCommits - 1,
+      initialCorpusInsertCommits: preseeded ? null : initialInsertCommits,
       expectedTotalCommitsBeforeTiming: targetTotalCommits,
       knownTotalCommitsAfterSeed: preseeded ? null : targetTotalCommits,
       preTimingChecks: {
@@ -228,12 +252,19 @@ function compactSample(sample) {
 
 export function expectedCorpusLookup(corpus, targetTotalCommits) {
   const targetMutationCommits = targetTotalCommits - 1;
-  if (targetMutationCommits < 1) {
-    throw new Error("at least one mutation commit is required to seed the corpus");
+  const initialInsertCommits = initialCorpusInsertCommits(corpus.length);
+  if (targetMutationCommits < initialInsertCommits) {
+    throw new Error(
+      `at least ${initialInsertCommits} mutation commits are required to seed this corpus`,
+    );
   }
   const latestMutationByFile = new Int32Array(corpus.length);
   latestMutationByFile.fill(-1);
-  for (let mutation = 1; mutation < targetMutationCommits; mutation += 1) {
+  for (
+    let mutation = initialInsertCommits;
+    mutation < targetMutationCommits;
+    mutation += 1
+  ) {
     latestMutationByFile[(mutation * 131) % corpus.length] = mutation;
   }
   const fileIndexByPath = new Map(
@@ -270,34 +301,43 @@ export async function seedCorpus(
   { onProgress } = {},
 ) {
   const targetMutationCommits = targetTotalCommits - 1;
-  if (targetMutationCommits < 1) {
-    throw new Error("at least one mutation commit is required to seed the corpus");
+  const initialInsertCommits = initialCorpusInsertCommits(corpus.length);
+  if (targetMutationCommits < initialInsertCommits) {
+    throw new Error(
+      `at least ${initialInsertCommits} mutation commits are required to seed this corpus`,
+    );
   }
   const state = new Map();
-  // Keep history shape independent of the requested depth: every workspace
-  // gets the same one-commit corpus insert, then deterministic single-file
-  // updates extend history. Otherwise c2, c10, and c1000 would use radically
-  // different file counts per insertion commit and confound scaling.
-  const statements = chunks(corpus, 100).map(fileInsertStatement);
-  const result = await protocol.executeBatch(statements);
-  assertBatchRowsAffected(
-    result.value,
-    statements.map((_, index) =>
-      Math.min(100, corpus.length - index * 100),
-    ),
-    "corpus insert",
-  );
+  // Keep history shape independent of requested depth inside each file-count
+  // cohort. The 1k corpus fits one bounded request; the 5k corpus uses five
+  // 1k-file transactions so the benchmark does not relax the real protocol
+  // request ceiling just to construct its fixture.
+  const insertBatches = chunks(corpus, MAX_FILES_PER_SEED_REQUEST);
+  for (let batchIndex = 0; batchIndex < insertBatches.length; batchIndex += 1) {
+    const files = insertBatches[batchIndex];
+    const statements = chunks(files, 100).map(fileInsertStatement);
+    const result = await protocol.executeBatch(statements);
+    assertBatchRowsAffected(
+      result.value,
+      statements.map((statement) => statement.params.length / 2),
+      "corpus insert",
+    );
+    onProgress?.({
+      phase: "insert",
+      filesSeeded: (batchIndex + 1) * MAX_FILES_PER_SEED_REQUEST,
+      completedMutationCommits: batchIndex + 1,
+      targetMutationCommits,
+    });
+  }
   for (const file of corpus) {
     state.set(file.path, file.data);
   }
-  onProgress?.({
-    phase: "insert",
-    filesSeeded: corpus.length,
-    completedMutationCommits: 1,
-    targetMutationCommits,
-  });
 
-  for (let mutation = 1; mutation < targetMutationCommits; mutation += 1) {
+  for (
+    let mutation = initialInsertCommits;
+    mutation < targetMutationCommits;
+    mutation += 1
+  ) {
     const { file, data } = historyMutation(corpus, mutation);
     // Keep history seeding distinct from the timed update in the SQL plan
     // cache without relying on DML target aliases, which Lix does not support.

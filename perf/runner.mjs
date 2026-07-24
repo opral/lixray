@@ -5,10 +5,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
+  initialCorpusInsertCommits,
   isMutationOperation,
   operationNames,
   runBenchmark,
 } from "./lib/benchmark.mjs";
+import { SUPPORTED_CORPUS_FILE_COUNTS } from "./lib/corpus.mjs";
 import { ProtocolClient, ProtocolError } from "./lib/protocol.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -50,6 +52,7 @@ async function main(args) {
     const benchmark = await runBenchmark(client, {
       operation: config.operation,
       targetTotalCommits: config.targetTotalCommits,
+      corpusFileCount: config.corpusFileCount,
       preconditionReadRuns: config.preconditionReadRuns,
       settleMs: config.settleMs,
       warmupRuns: config.warmupRuns,
@@ -119,6 +122,7 @@ function parseArgs(args) {
     "--url",
     "--workspace",
     "--operation",
+    "--files",
     "--commits",
     "--precondition-reads",
     "--settle-ms",
@@ -162,6 +166,18 @@ function parseArgs(args) {
   }
 
   const targetTotalCommits = integer(values, "--commits", 1_000, 2);
+  const corpusFileCount = integer(values, "--files", 1_000, 1);
+  if (!SUPPORTED_CORPUS_FILE_COUNTS.includes(corpusFileCount)) {
+    throw new Error(
+      `--files must be one of: ${SUPPORTED_CORPUS_FILE_COUNTS.join(", ")}`,
+    );
+  }
+  const minimumTotalCommits = initialCorpusInsertCommits(corpusFileCount) + 1;
+  if (targetTotalCommits < minimumTotalCommits) {
+    throw new Error(
+      `--commits must be at least ${minimumTotalCommits} for --files ${corpusFileCount}`,
+    );
+  }
   const preconditionReadRuns = integer(
     values,
     "--precondition-reads",
@@ -209,6 +225,7 @@ function parseArgs(args) {
     workspaceId,
     operation,
     targetTotalCommits,
+    corpusFileCount,
     preconditionReadRuns,
     settleMs,
     warmupRuns,
@@ -280,7 +297,7 @@ function showProgress(progress) {
   }
   const label =
     progress.phase === "insert"
-      ? `${progress.filesSeeded}/1000 files`
+      ? `${progress.filesSeeded} files`
       : `${progress.historyCommits}/${progress.targetMutationCommits} mutations`;
   process.stdout.write(
     `\rsetup ${progress.completedMutationCommits}/${progress.targetMutationCommits} commits (${label})`,
@@ -319,6 +336,7 @@ function printResult(report, outputPath) {
       {
         workspaceId: report.target.workspaceId,
         targetTotalCommits: report.methodology.targetTotalCommits,
+        targetCorpusFiles: report.methodology.targetCorpusFiles,
         verifiedFinalCommits: report.postTimingAccounting.totalCommits,
         output: outputPath,
       },
@@ -350,6 +368,7 @@ function usage() {
   node perf/runner.mjs \\
     --workspace <fresh-workspace-id> \\
     --operation <${operationNames.join("|")}> \\
+    [--files <1000|5000>] \\
     [--commits <total-including-genesis>] \\
     [--precondition-reads <count>] \\
     [--settle-ms <milliseconds>] \\
@@ -357,8 +376,8 @@ function usage() {
     [--url <lix-server-url>] [--output <path>] \\
     [--target-revision <deployed-revision>] [--preseeded] [--quiet]
 
-Each invocation seeds a new deterministic 1,000-file workspace and measures
-one operation family. Mutations default to one timed request with no mutating
+Each invocation seeds a new deterministic 1,000- or 5,000-file workspace and
+measures one operation family. Mutations default to one timed request with no mutating
 warmup; reads default to three warmups and 30 samples. Use
 --precondition-reads to warm unrelated point-read infrastructure without
 changing commit depth. Use --settle-ms to keep runtime-open background work out

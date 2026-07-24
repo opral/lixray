@@ -44,6 +44,17 @@ test("seed insert statements stay bounded while one batch remains one commit", a
   assert.equal(protocol.maximumFilesPerStatement, 100);
 });
 
+test("the 5,000-file corpus uses five transport-bounded seed commits", async () => {
+  const protocol = new SeedProtocol();
+  await seedCorpus(protocol, buildCorpus(5_000), 6);
+
+  assert.equal(protocol.mutationRequests, 5);
+  assert.equal(protocol.insertedFiles, 5_000);
+  assert.equal(protocol.insertBatchRequests, 5);
+  assert.equal(protocol.maximumStatementsPerBatch, 10);
+  assert.equal(protocol.maximumFilesPerStatement, 100);
+});
+
 test("metadata-only corpus lookup reproduces seeded state lazily", () => {
   const fullCorpus = buildCorpus();
   const indexedCorpus = buildCorpusIndex();
@@ -153,10 +164,11 @@ class SeedProtocol {
 class PreconditionProtocol {
   pointReads = 0;
 
-  constructor(targetTotalCommits) {
+  constructor(targetTotalCommits, corpusFileCount = 1_000) {
     this.targetTotalCommits = targetTotalCommits;
+    this.corpusFileCount = corpusFileCount;
     this.state = expectedCorpusLookup(
-      buildCorpusIndex(),
+      buildCorpusIndex(corpusFileCount),
       targetTotalCommits,
     );
   }
@@ -167,7 +179,7 @@ class PreconditionProtocol {
         value: {
           rows: [
             [
-              { kind: "int", value: 1_000 },
+              { kind: "int", value: this.corpusFileCount },
               { kind: "int", value: this.targetTotalCommits },
             ],
           ],

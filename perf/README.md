@@ -3,26 +3,29 @@
 This worker measures one request at a time through the full
 `lix-server -> Lix server protocol -> Lix engine -> configured storage` path.
 It is intentionally opinionated: every invocation uses a fresh workspace,
-seeds the same 1,000-file corpus, creates an exact history depth, and measures
-one operation family. There is no resume mode because reusing setup state
-makes write comparisons ambiguous.
+seeds the same 1,000- or 5,000-file corpus, creates an exact history depth, and
+measures one operation family. There is no resume mode because reusing setup
+state makes write comparisons ambiguous.
 
 The measured bottlenecks, controlled A/B results, memory/storage accounting,
 tradeoffs, and external design references are in [FINDINGS.md](FINDINGS.md).
 
 ## Corpus and history
 
-The corpus has 100 files in each of ten formats: JSON, CSV, Markdown, text,
-XML, YAML, PDF, PNG, binary, and log. Structured formats and containers are
-valid, sizes are fixed from 1 KiB through 32 KiB, binary payloads are
-deterministic, and the report records the corpus SHA-256.
+The `--files` axis accepts exactly 1,000 or 5,000 files: respectively 100 or
+500 files in each of ten formats (JSON, CSV, Markdown, text, XML, YAML, PDF,
+PNG, binary, and log). Structured formats and containers are valid, sizes are
+fixed from 1 KiB through 32 KiB, binary payloads are deterministic, and the
+report records the corpus SHA-256.
 
 `--commits` is the total history depth at the start of the operation family
 and **includes the genesis commit**. Seeding therefore creates
-`--commits - 1` mutation commits. Every history depth uses the same shape:
-one atomic `execute-batch` inserts all 1,000 files, then deterministic
-single-file updates extend history. This keeps file count and insertion
-batching constant when commit depth changes.
+`--commits - 1` mutation commits. The 1,000-file cohort inserts its corpus in
+one bounded `execute-batch`; the 5,000-file cohort uses five 1,000-file seed
+commits so every request remains below the production 64 MiB expanded-body
+limit. Deterministic single-file updates create the remaining commits. This
+keeps file count and insertion batching constant when commit depth changes
+within a cohort; 5,000 files require `--commits >= 6`.
 
 The runner performs no pre-timing current-state or history accounting scan:
 such a scan would prime the same blocks used by CRUD validation. It derives
@@ -41,6 +44,7 @@ LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
   --workspace perf-main-c1000-read4k-r1 \
   --operation read-point-4k \
+  --files 1000 \
   --commits 1000 \
   --warmups 3 \
   --samples 30 \
@@ -93,7 +97,7 @@ storage backend or deployed revision.
 
 Use fresh workspace IDs for every point and run at least five independent
 repetitions per candidate. A useful history matrix is 2, 10, 100, 1,000, and
-5,000 total commits. Counterbalance baseline and candidate runs (for example
+5,000 total commits for each file-count cohort. Counterbalance baseline and candidate runs (for example
 A/B/B/A) instead of running every baseline first. For mutations, aggregate the
 one-request reports across workspaces; for reads, compare each report's median
 and p95.
