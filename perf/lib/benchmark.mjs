@@ -26,6 +26,8 @@ export const operationNames = Object.freeze([
   "update-4k",
   "update-2m",
   "update-mixed",
+  "update-mixed-native-single",
+  "update-mixed-native-batch",
   "delete-1k",
 ]);
 
@@ -49,6 +51,8 @@ export function isMutationOperation(operation) {
     "update-4k",
     "update-2m",
     "update-mixed",
+    "update-mixed-native-single",
+    "update-mixed-native-batch",
     "delete-1k",
   ].includes(operation);
 }
@@ -131,6 +135,30 @@ export async function runBenchmark(
   }
   if (!["update", "upsert"].includes(fileWriteShape)) {
     throw new Error('fileWriteShape must be either "update" or "upsert"');
+  }
+  if (
+    ["update-mixed-native-single", "update-mixed-native-batch"].includes(
+      operation,
+    ) &&
+    fileWriteTransport !== "binary"
+  ) {
+    throw new Error(
+      "native mixed file-update comparisons require fileWriteTransport: binary",
+    );
+  }
+  if (
+    hotSession &&
+    ["update-mixed-native-single", "update-mixed-native-batch"].includes(
+      operation,
+    )
+  ) {
+    // These two arms create different numbers of commits per logical
+    // operation (ten versus one). Keeping several samples in one clone would
+    // therefore compare systematically different history depths. The useful
+    // comparison is one operation from each independently cloned template.
+    throw new Error(
+      "native mixed file-update comparisons require isolated one-sample workspaces; hotSession is not supported",
+    );
   }
   if (isMutationOperation(operation) && warmupRuns !== 0) {
     throw new Error(
@@ -233,10 +261,12 @@ export async function runBenchmark(
 
   await prepared.verify(protocol);
   const postTimingAccounting = await readPostTimingAccounting(protocol);
+  const mutationCommitsPerOperation =
+    prepared.mutationCommitsPerOperation ?? (prepared.mutates ? 1 : 0);
   const expectedFinalCommits =
     targetTotalCommits +
     (prepared.preTimingMutationCommits ?? 0) +
-    (prepared.mutates ? totalOperations : 0);
+    mutationCommitsPerOperation * totalOperations;
   const expectedCorpusFiles = corpus.length + prepared.corpusFileDelta;
   if (postTimingAccounting.totalCommits !== expectedFinalCommits) {
     throw new Error(
@@ -280,10 +310,11 @@ export async function runBenchmark(
       execution: "sequential",
       concurrency: 1,
       hotSession: prepared.mutates ? hotSession : false,
+      mutationCommitsPerOperation,
       mutationSampleIsolation: prepared.mutates
         ? hotSession
           ? "one fresh workspace and one live protocol session; sequential writes form a hot-session distribution"
-          : "one mutation per fresh workspace"
+          : `one timed mutation operation per fresh workspace (${mutationCommitsPerOperation} commit${mutationCommitsPerOperation === 1 ? "" : "s"})`
         : "not applicable",
       fileWriteTransport: prepared.fileWriteTransport ?? null,
       fileWriteShape: prepared.fileWriteShape ?? null,
@@ -328,6 +359,7 @@ export async function runBenchmark(
           }
         : {}),
       historyMutationCommits: commitPlan.historyMutationCommits,
+      timedMutationCommitsPerOperation: mutationCommitsPerOperation,
       mutationCommitsCreated: preseeded ? 0 : targetTotalCommits - 1,
       expectedTotalCommitsBeforeTiming: targetTotalCommits,
       knownTotalCommitsAfterSeed: preseeded ? null : targetTotalCommits,
@@ -876,6 +908,57 @@ function prepareOperation(
     };
   }
 
+  if (
+    name === "update-mixed-native-single" ||
+    name === "update-mixed-native-batch"
+  ) {
+    const cases = Array.from({ length: totalOperations }, (_, operationIndex) =>
+      mixedUpdateShapes.map((shape, shapeIndex) => {
+        const candidates = byExtension(shape.extension);
+        const extensionOffset = mixedUpdateShapes
+          .slice(0, shapeIndex)
+          .filter((candidate) => candidate.extension === shape.extension).length;
+        return {
+          // Keep all ten paths distinct inside a logical operation. Reuse the
+          // same deterministic paths and bytes for the sequential control and
+          // the one-frame batch treatment.
+          path: candidates[
+            (operationIndex * 31 + extensionOffset * 17) % candidates.length
+          ].path,
+          data: contentFor(
+            shape.extension,
+            shape.bytes,
+            6_000_000 + operationIndex * mixedUpdateShapes.length + shapeIndex,
+          ),
+        };
+      }),
+    );
+    const isBatch = name === "update-mixed-native-batch";
+    return {
+      description: isBatch
+        ? "replace a deterministic 10-file mixed payload through one raw binary batch request and one commit"
+        : "replace the same deterministic 10-file mixed payload through ten sequential raw binary requests and ten commits",
+      mutates: true,
+      mutationCommitsPerOperation: isBatch ? 1 : mixedUpdateShapes.length,
+      corpusFileDelta: 0,
+      preconditionExcludedPaths: new Set(
+        cases.flatMap((files) => files.map(({ path }) => path)),
+      ),
+      fileWriteTransport: "binary",
+      fileWriteShape: "upsert",
+      timingBoundary: isBatch
+        ? "client u32 batch-frame encoding, one raw octet-stream request, response body read, and JSON decoding"
+        : "ten sequential raw octet-stream requests through response body reads and JSON decoding",
+      execute: (protocol, index) =>
+        isBatch
+          ? protocol.upsertFileDataBatch(cases[index])
+          : executeSequentialNativeFileUpserts(protocol, cases[index]),
+      assert: (result) =>
+        assertRowsAffected(result, mixedUpdateShapes.length, name),
+      verify: (protocol) => verifyFinalCases(protocol, cases.flat()),
+    };
+  }
+
   if (name === "delete-1k") {
     const candidates = byExtension("txt");
     if (totalOperations > candidates.length) {
@@ -1204,6 +1287,40 @@ function executeFileWrite(protocol, transport, file, operation, shape) {
   return protocol.executeFileData(file.path, file.data, {
     shape: operation === "create" ? "insert" : shape,
   });
+}
+
+async function executeSequentialNativeFileUpserts(protocol, files) {
+  const started = performance.now();
+  const responses = [];
+  for (const file of files) {
+    responses.push(await protocol.upsertFileData(file.path, file.data));
+  }
+  const elapsedMs = performance.now() - started;
+
+  return {
+    value: {
+      rowsAffected: responses.reduce((total, response) => {
+        const rows = response.value?.rowsAffected;
+        if (!Number.isSafeInteger(rows)) {
+          throw new Error(
+            "native single-file upsert response did not contain an integer rowsAffected",
+          );
+        }
+        return total + rows;
+      }, 0),
+    },
+    elapsedMs,
+    // Match ProtocolClient: response aggregation and byte accounting happen
+    // after the logical request sequence has stopped the timer.
+    requestBytes: responses.reduce(
+      (total, response) => total + response.requestBytes,
+      0,
+    ),
+    responseBytes: responses.reduce(
+      (total, response) => total + response.responseBytes,
+      0,
+    ),
+  };
 }
 
 function fileWriteTimingBoundary(transport) {

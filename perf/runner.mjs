@@ -226,6 +226,16 @@ function parseArgs(args) {
   if (!["binary", "json"].includes(fileWriteTransport)) {
     throw new Error('--file-write-transport must be either "binary" or "json"');
   }
+  if (
+    ["update-mixed-native-single", "update-mixed-native-batch"].includes(
+      operation,
+    ) &&
+    fileWriteTransport !== "binary"
+  ) {
+    throw new Error(
+      "native mixed file-update comparisons require --file-write-transport binary",
+    );
+  }
   const fileWriteShape = values.get("--file-write-shape") ?? "update";
   if (!["update", "upsert"].includes(fileWriteShape)) {
     throw new Error('--file-write-shape must be either "update" or "upsert"');
@@ -245,6 +255,16 @@ function parseArgs(args) {
   );
   const hotSession = values.has("--hot-session");
   const preseeded = values.has("--preseeded");
+  if (
+    hotSession &&
+    ["update-mixed-native-single", "update-mixed-native-batch"].includes(
+      operation,
+    )
+  ) {
+    throw new Error(
+      "native mixed file-update comparisons require isolated one-sample workspaces; --hot-session is not supported",
+    );
+  }
   if (hotSession && !mutationOperation) {
     throw new Error("--hot-session is only valid for mutation operations");
   }
@@ -531,5 +551,10 @@ or more samples to measure sequential mutations in one fresh workspace and
 one live protocol session; --hot-session requires --preseeded. update-mixed
 also requires --samples to be a multiple of 10. read-point-2m explicitly adds
 one deterministic 2 MiB binary fixture in its own seed commit outside
-/corpus; use the same operation when creating a preseeded template.`;
+/corpus; use the same operation when creating a preseeded template.
+update-mixed-native-single
+and update-mixed-native-batch require --file-write-transport binary; they use
+the same 10-file mixed payload, with ten sequential commits versus one atomic
+raw batch commit, and require one isolated sample per externally cloned
+workspace (they reject --hot-session).`;
 }

@@ -94,10 +94,21 @@ Supported operation families are:
 - `update-4k`: replace an existing JSON file with 4 KiB
 - `update-2m`: replace an existing binary file with 2 MiB of high-entropy data
 - `update-mixed`: hot-session-only deterministic mix of 4x 4 KiB JSON, 3x 4 KiB CSV, 2x 64 KiB PDF, and 1x 256 KiB binary per 10 writes
+- `update-mixed-native-single`: the fixed mixed payload through 10 sequential native raw upserts and 10 commits
+- `update-mixed-native-batch`: the same paths and bytes through one native raw batch frame and one commit
 - `delete-1k`: delete a unique existing 1 KiB text file
 
 `update-mixed` requires `--hot-session --preseeded` and a `--samples` count
 that is a multiple of 10, preserving its stated deterministic weights.
+`update-mixed-native-single` and `update-mixed-native-batch` require
+`--file-write-transport binary`. For a fair one-logical-operation comparison,
+repeat each command on independently cloned workspaces, counterbalance the two
+operation families, and compare the report's explicit
+`mutationCommitsPerOperation` (10 versus 1). A native batch frame is limited
+to 1,024 files; the client rejects larger calls rather than silently creating
+multiple commits, preserving the one-call atomicity contract. These operations
+also reject `--hot-session`: their arms advance history by different amounts,
+so a multi-sample live session would confound the comparison.
 
 `diff-file-history` is deliberately a history-backed diff projection, not a
 generic textual diff: it reads `lix_file_history` at the session's pinned
@@ -106,8 +117,8 @@ the current and prior payloads differ. It requires at least one post-seed
 history mutation, so choose `--commits` above the seed minimum.
 
 Mutation operations, including `branch-create`, require `--warmups 0 --samples
-1` (their defaults), so the single timed request starts at exactly the
-requested commit depth. `branch-create` uses the protocol endpoint instead of
+1` (their defaults), so the single timed mutation operation starts at exactly
+the requested commit depth. `branch-create` uses the protocol endpoint instead of
 writing internal branch tables, verifies its `lix_branch` row after timing, and
 adds its tracked branch-descriptor commit to the verified final count.
 `branch-switch` is a distribution: it first creates two sibling branches outside
@@ -209,8 +220,9 @@ the complete response body has been read and decoded. `create-4k`, `update-4k`, 
 `update-2m` default to the JSON transport so an unchanged baseline remains
 directly runnable. Pass `--file-write-transport binary` to send the file body
 as `application/octet-stream` through the native file-upsert endpoint; its
-timer starts before body transfer and ends after response decoding. The report
-records the chosen transport and write shape. JSON updates use SQL `UPDATE` by
+timer starts before body transfer and ends after response decoding. The native
+batch operation additionally starts before client entry validation and u32
+frame encoding. The report records the chosen transport and write shape. JSON updates use SQL `UPDATE` by
 default; use `--file-write-shape upsert` for the matched
 `INSERT ... ON CONFLICT(path) DO UPDATE` control when comparing the native
 endpoint's explicit upsert semantics. Preconditioning and semantic

@@ -446,6 +446,73 @@ test("mixed hot writes use the fixed happy-path payload distribution", async () 
   );
 });
 
+test("native mixed comparison preserves payloads and accounts for ten commits versus one", async () => {
+  const singleProtocol = new FileWriteProtocol(10);
+  const single = await runBenchmark(singleProtocol, {
+    operation: "update-mixed-native-single",
+    targetTotalCommits: 10,
+    preconditionReadRuns: 10,
+    warmupRuns: 0,
+    measuredRuns: 1,
+    fileWriteTransport: "binary",
+    preseeded: true,
+  });
+
+  const batchProtocol = new FileWriteProtocol(10);
+  const batch = await runBenchmark(batchProtocol, {
+    operation: "update-mixed-native-batch",
+    targetTotalCommits: 10,
+    preconditionReadRuns: 10,
+    warmupRuns: 0,
+    measuredRuns: 1,
+    fileWriteTransport: "binary",
+    preseeded: true,
+  });
+
+  assert.equal(singleProtocol.binaryWrites.length, 10);
+  assert.equal(singleProtocol.binaryBatchWrites.length, 0);
+  assert.equal(batchProtocol.binaryWrites.length, 0);
+  assert.equal(batchProtocol.binaryBatchWrites.length, 1);
+  assert.deepEqual(
+    batchProtocol.binaryBatchWrites[0],
+    singleProtocol.binaryWrites,
+  );
+  assert.equal(single.methodology.mutationCommitsPerOperation, 10);
+  assert.equal(batch.methodology.mutationCommitsPerOperation, 1);
+  assert.equal(single.postTimingAccounting.totalCommits, 20);
+  assert.equal(single.postTimingAccounting.expectedTotalCommits, 20);
+  assert.equal(batch.postTimingAccounting.totalCommits, 11);
+  assert.equal(batch.postTimingAccounting.expectedTotalCommits, 11);
+  assert.match(single.methodology.timingBoundary, /ten sequential raw/);
+  assert.match(batch.methodology.timingBoundary, /u32 batch-frame encoding/);
+  assert.ok(
+    batch.measurement.sample[1] > single.measurement.sample[1],
+    "batch bytes include its u32 frame headers and paths",
+  );
+
+  const mutationPaths = new Set(singleProtocol.binaryWrites.map(({ path }) => path));
+  assert.ok(
+    singleProtocol.preconditionReadPaths.every(
+      (path) => !mutationPaths.has(path),
+    ),
+  );
+});
+
+test("native mixed comparison rejects hot sessions that would drift commit depth", async () => {
+  await assert.rejects(
+    runBenchmark(new FileWriteProtocol(10), {
+      operation: "update-mixed-native-batch",
+      targetTotalCommits: 10,
+      warmupRuns: 0,
+      measuredRuns: 2,
+      fileWriteTransport: "binary",
+      hotSession: true,
+      preseeded: true,
+    }),
+    /require isolated one-sample workspaces; hotSession is not supported/,
+  );
+});
+
 test("sample summaries use nearest-rank percentiles", () => {
   const summary = summarizeSamples(
     [1, 2, 3, 4, 100].map((elapsedMs) => ({
@@ -612,6 +679,7 @@ class LargeReadProtocol extends PreconditionProtocol {
 
 class FileWriteProtocol {
   binaryWrites = [];
+  binaryBatchWrites = [];
   jsonWrites = [];
   preconditionReadPaths = [];
 
@@ -631,6 +699,25 @@ class FileWriteProtocol {
       value: { rowsAffected: 1 },
       elapsedMs: 1,
       requestBytes: data.byteLength,
+      responseBytes: 3,
+    };
+  }
+
+  async upsertFileDataBatch(entries) {
+    this.binaryBatchWrites.push(entries);
+    for (const { path, data } of entries) {
+      this.written.set(path, data);
+    }
+    return {
+      value: { rowsAffected: entries.length },
+      elapsedMs: 1,
+      requestBytes:
+        4 +
+        entries.reduce(
+          (total, { path, data }) =>
+            total + 8 + Buffer.byteLength(path) + data.byteLength,
+          0,
+        ),
       responseBytes: 3,
     };
   }
@@ -674,6 +761,7 @@ class FileWriteProtocol {
                 value:
                   this.targetTotalCommits +
                   this.binaryWrites.length +
+                  this.binaryBatchWrites.length +
                   this.jsonWrites.length,
               },
             ],
@@ -683,7 +771,11 @@ class FileWriteProtocol {
     }
     if (sql.startsWith("SELECT path, data FROM lix_file WHERE path")) {
       const path = params[0].value;
-      if (this.binaryWrites.length === 0 && this.jsonWrites.length === 0) {
+      if (
+        this.binaryWrites.length === 0 &&
+        this.binaryBatchWrites.length === 0 &&
+        this.jsonWrites.length === 0
+      ) {
         this.preconditionReadPaths.push(path);
       }
       return {
