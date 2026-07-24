@@ -149,10 +149,21 @@ async fn lix_protocol_inner(
         return response;
     }
 
-    let runtime = match state.manager.get(&lix_id).await {
-        Ok(runtime) => runtime,
-        Err(error) => return lix_error(error),
-    };
+    let runtime =
+        match tokio::time::timeout(state.protocol_timeout, state.manager.get(&lix_id)).await {
+            Ok(Ok(runtime)) => runtime,
+            Ok(Err(error)) => return lix_error(error),
+            Err(_elapsed) => {
+                tracing::warn!(
+                    lix_id,
+                    timeout_secs = state.protocol_timeout.as_secs(),
+                    "lix runtime admission exceeded its deadline"
+                );
+                return lix_error(LixRuntimeError::AtCapacity {
+                    max: state.manager.max_open_lixes(),
+                });
+            }
+        };
 
     let path_and_query = match request.uri().query() {
         Some(query) => format!("/{protocol_path}?{query}"),
@@ -169,10 +180,10 @@ async fn lix_protocol_inner(
     };
     *request.uri_mut() = uri;
 
-    // A deadline on the whole protocol call: the object-store client has its
-    // own request budget, but a wedged connection (e.g. after a host sleep)
-    // can still hang past it — without this bound the request never answers
-    // and the runtime stays wedged for every caller after it.
+    // Acquisition above and this protocol call are both bounded. The
+    // object-store client has its own request budget, but a wedged connection
+    // (e.g. after a host sleep) can still hang past it — without these bounds
+    // requests never answer and a runtime can remain wedged for later calls.
     let handler_future = runtime.protocol_router().oneshot(request);
     let response = match tokio::time::timeout(state.protocol_timeout, handler_future).await {
         Ok(response) => response.expect("canonical Lix protocol router is infallible"),
@@ -252,6 +263,22 @@ fn lix_error(error: LixRuntimeError) -> Response {
             })),
         )
         .with_retry_after(),
+        LixRuntimeError::Cleanup(error) => {
+            tracing::error!(error = %error, "lix cache cleanup could not complete");
+            protocol_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "LIX_ERROR_LIX_CACHE_CLEANUP",
+                "The lix service cache needs operator repair.",
+                Some(
+                    "Contact the service operator to repair the cache and restart the server."
+                        .to_string(),
+                ),
+                Some(json!({
+                    "operation": "lix_open",
+                    "retryable": false,
+                })),
+            )
+        }
         LixRuntimeError::Open(error) if is_unsupported_storage_format(&error) => {
             tracing::warn!(
                 error = %error,
@@ -355,7 +382,7 @@ mod tests {
     use http_body_util::BodyExt;
     use lix_sdk::{Value as LixValue, WireValue};
     use serde_json::{json, Value as JsonValue};
-    use std::{path::PathBuf, time::Duration};
+    use std::{path::PathBuf, sync::Arc, time::Duration};
 
     const TEST_PROTOCOL_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -697,6 +724,30 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[tokio::test]
+    async fn cache_cleanup_errors_require_operator_repair_and_are_redacted() {
+        let response = lix_error(LixRuntimeError::Cleanup(Arc::from(
+            "delete /cache/tenant-a/secret-object failed",
+        )));
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(!response.headers().contains_key(header::RETRY_AFTER));
+        let body = json_body(response).await;
+        assert_eq!(
+            body["error"],
+            json!({
+                "code": "LIX_ERROR_LIX_CACHE_CLEANUP",
+                "message": "The lix service cache needs operator repair.",
+                "hint": "Contact the service operator to repair the cache and restart the server.",
+                "details": {
+                    "operation": "lix_open",
+                    "retryable": false,
+                },
+            })
+        );
+        assert!(!body.to_string().contains("tenant-a"));
     }
 
     #[tokio::test]

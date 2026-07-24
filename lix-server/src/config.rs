@@ -7,7 +7,11 @@ const DEFAULT_CACHE_DIR: &str = "/tmp/lixray-slatedb-cache";
 const DEFAULT_DISK_CACHE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const DEFAULT_BLOCK_CACHE_BYTES: u64 = 128 * 1024 * 1024;
 const DEFAULT_METADATA_CACHE_BYTES: u64 = 32 * 1024 * 1024;
-const DEFAULT_MAX_OPEN_LIXS: u64 = 32;
+// Each retained Lix owns an independent SlateDB runtime and in-memory cache
+// allocation.
+// Four is the production-shaped working-set cap; deployments that prioritize
+// more simultaneously active Lixes can opt in with LIXRAY_MAX_OPEN_LIXS.
+const DEFAULT_MAX_OPEN_LIXS: u64 = 4;
 const DEFAULT_PROTOCOL_TIMEOUT_SECS: u64 = 60;
 
 #[derive(Clone, Debug)]
@@ -193,7 +197,7 @@ mod tests {
 
         let config = Config::from_env().unwrap();
 
-        assert_eq!(config.max_open_lixes, 32);
+        assert_eq!(config.max_open_lixes, 4);
         assert_eq!(config.bind_addr, "0.0.0.0:8080");
         assert_eq!(config.internal_token, None);
         assert_eq!(config.storage.endpoint, "https://s3.example");
