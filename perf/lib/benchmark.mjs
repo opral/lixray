@@ -347,6 +347,7 @@ export async function runBenchmark(
     setup: {
       seedMs,
       preTimingOperationSetupMs,
+      preTimingOperationSetupQueries: prepared.preTimingSetupQueries ?? 0,
       preTimingOperationMutationCommits:
         prepared.preTimingMutationCommits ?? 0,
       preconditionReadMs,
@@ -695,19 +696,35 @@ function prepareOperation(
 
   if (name === "diff-file-history") {
     const cases = historyDiffCases(corpus, state, commitPlan, totalOperations);
+    // Lix's optimized history route is keyed by a file's stable identity, not
+    // its path. Resolve the identity before timing so the measured request is
+    // the intended history lookup rather than a path-filtered materialization.
+    const casesByPath = new Map(cases.map((value) => [value.path, value]));
     return {
       description:
         "read the current and prior logical revisions of one changed 4 KiB file through lix_file_history",
       mutates: false,
       corpusFileDelta: 0,
       preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
+      preTimingSetupDescription:
+        "resolved each history target's stable lix_file.id by exact path before timing",
+      preTimingSetupQueries: casesByPath.size,
+      setup: async (protocol) => {
+        for (const expected of casesByPath.values()) {
+          const result = await protocol.execute(
+            "SELECT id FROM lix_file WHERE path = $1",
+            [wireText(expected.path)],
+          );
+          expected.id = assertFileIdRow(result.value, expected.path);
+        }
+      },
       execute: (protocol, index) =>
         protocol.execute(
           `SELECT path, data, lixcol_depth, lixcol_observed_commit_id
              FROM lix_file_history
-            WHERE path = $1
+            WHERE id = $1
             ORDER BY lixcol_depth`,
-          [wireText(cases[index].path)],
+          [wireText(historyCaseId(cases[index]))],
         ),
       assert: (result, index) => assertHistoryDiffRows(result, cases[index]),
       verify: async () => {},
@@ -1131,6 +1148,27 @@ function assertFileRow(result, expected) {
   if (!Buffer.from(data.base64, "base64").equals(expected.data)) {
     throw new Error(`point read returned the wrong data for ${expected.path}`);
   }
+}
+
+function assertFileIdRow(result, path) {
+  const rows = result?.rows;
+  if (!Array.isArray(rows) || rows.length !== 1 || rows[0].length !== 1) {
+    throw new Error(`stable id lookup for ${path} did not return one file id`);
+  }
+  const id = rows[0][0];
+  if (id?.kind !== "text" || typeof id.value !== "string" || id.value.length === 0) {
+    throw new Error(`stable id lookup for ${path} did not return a text id`);
+  }
+  return id.value;
+}
+
+function historyCaseId(value) {
+  if (typeof value.id !== "string" || value.id.length === 0) {
+    throw new Error(
+      `history diff target ${value.path} did not resolve a stable lix_file.id before timing`,
+    );
+  }
+  return value.id;
 }
 
 function assertHistoryDiffRows(result, expected) {

@@ -111,10 +111,14 @@ also reject `--hot-session`: their arms advance history by different amounts,
 so a multi-sample live session would confound the comparison.
 
 `diff-file-history` is deliberately a history-backed diff projection, not a
-generic textual diff: it reads `lix_file_history` at the session's pinned
-active-branch head, asserts at least two ordered revisions, and verifies that
-the current and prior payloads differ. It requires at least one post-seed
-history mutation, so choose `--commits` above the seed minimum.
+generic textual diff. Before its timer starts, the runner resolves each chosen
+file's stable `lix_file.id` by exact path and records that identity resolution
+as pre-timing operation setup. The timed query then reads
+`lix_file_history WHERE id = $1` at the session's pinned active-branch head,
+asserts at least two ordered revisions, and verifies that the current and prior
+payloads differ. This leaves the seeded corpus and its physical layout
+unchanged. It requires at least one post-seed history mutation, so choose
+`--commits` above the seed minimum.
 
 Mutation operations, including `branch-create`, require `--warmups 0 --samples
 1` (their defaults), so the single timed mutation operation starts at exactly
