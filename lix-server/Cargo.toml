@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.100"
 axum = "0.8.9"
+blake3 = "1.8.2"
 http = "1.4.0"
 http-body = "1.0.1"
 lix_sdk = { path = "../vendor/lix/packages/rs-sdk", default-features = false, features = ["default_wasm_runtime"] }
