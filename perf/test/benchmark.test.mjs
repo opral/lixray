@@ -250,8 +250,23 @@ test("diff-file-history reads distinct current and prior file revisions", async 
   });
 
   assert.equal(protocol.historyQueries, 1);
+  assert.equal(protocol.historyIdLookups, 1);
+  assert.equal(
+    protocol.lastHistoryIdLookupSql,
+    "SELECT id FROM lix_file WHERE path = $1",
+  );
+  assert.equal(protocol.lastHistoryIdLookupParams[0].kind, "text");
+  assert.equal(protocol.lastHistoryParams[0].kind, "text");
+  assert.equal(
+    protocol.lastHistoryParams[0].value,
+    protocol.lastResolvedHistoryId,
+  );
   assert.match(protocol.lastHistorySql, /FROM lix_file_history/);
+  assert.match(protocol.lastHistorySql, /WHERE id = \$1/);
+  assert.doesNotMatch(protocol.lastHistorySql, /WHERE path = \$1/);
   assert.doesNotMatch(protocol.lastHistorySql, /lixcol_as_of_commit_id/);
+  assert.match(result.methodology.preTimingOperationSetup, /stable lix_file\.id/);
+  assert.equal(result.setup.preTimingOperationSetupQueries, 1);
   assert.equal(result.measurement.kind, "distribution");
   assert.equal(result.postTimingAccounting.totalCommits, 3);
 });
@@ -792,7 +807,12 @@ class BranchSwitchProtocol extends BranchProtocol {
 
 class HistoryDiffProtocol {
   historyQueries = 0;
+  historyIdLookups = 0;
+  lastHistoryIdLookupSql = "";
+  lastHistoryIdLookupParams = [];
   lastHistorySql = "";
+  lastHistoryParams = [];
+  lastResolvedHistoryId = "";
 
   constructor(targetTotalCommits, corpusFiles = 1_000, { currentDepth = 0 } = {}) {
     this.targetTotalCommits = targetTotalCommits;
@@ -800,16 +820,41 @@ class HistoryDiffProtocol {
     this.currentDepth = currentDepth;
     this.corpus = buildCorpusIndex(corpusFiles);
     this.byPath = new Map(this.corpus.map((file, index) => [file.path, index]));
+    this.idByPath = new Map(
+      this.corpus.map((file, index) => [file.path, `file-id-${index}`]),
+    );
+    this.byId = new Map(
+      this.corpus.map((file, index) => [`file-id-${index}`, index]),
+    );
     this.state = expectedCorpusLookup(this.corpus, targetTotalCommits);
   }
 
   async execute(sql, params) {
+    if (sql === "SELECT id FROM lix_file WHERE path = $1") {
+      this.historyIdLookups += 1;
+      this.lastHistoryIdLookupSql = sql;
+      this.lastHistoryIdLookupParams = params;
+      const id = this.idByPath.get(params[0].value);
+      if (id === undefined) {
+        throw new Error(`unknown history path: ${params[0].value}`);
+      }
+      this.lastResolvedHistoryId = id;
+      return {
+        value: {
+          rows: [[{ kind: "text", value: id }]],
+        },
+      };
+    }
     if (sql.includes("FROM lix_file_history")) {
       this.historyQueries += 1;
       this.lastHistorySql = sql;
-      const path = params[0].value;
-      const index = this.byPath.get(path);
+      this.lastHistoryParams = params;
+      const index = this.byId.get(params[0].value);
+      if (index === undefined) {
+        throw new Error(`unknown history id: ${params[0].value}`);
+      }
       const file = this.corpus[index];
+      const path = file.path;
       const current = this.state.get(path);
       const previous = contentFor(file.extension, file.bytes, file.seed);
       return {
