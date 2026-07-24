@@ -1,7 +1,8 @@
-use crate::Config;
+use crate::{config::SlateDBCacheConfig, Config};
 use anyhow::{Context, Result};
 use axum::Router;
 use blake3::Hasher;
+use fs2::FileExt as _;
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
 #[cfg(test)]
 use object_store::memory::InMemory;
@@ -11,17 +12,20 @@ use object_store::{path::Path as ObjectPath, ClientConfigKey, ObjectStoreExt};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::runtime::Handle;
-use tokio::sync::{Mutex, OnceCell};
+#[cfg(test)]
+use tokio::sync::Notify;
+use tokio::sync::{watch, Mutex, OnceCell};
 use tracing::info;
 
-// SlateDB's disk cache fetches object-store data in 4 MiB parts. A 15 second
-// request timeout still permits a part to arrive at roughly 270 KiB/s, while a
-// single stalled request can no longer occupy a lix runtime for the
-// object_store default three-minute retry budget. One retry preserves recovery
+// The Lix SlateDB adapter fetches object-store cache parts in 2 MiB chunks.
+// A 15 second request timeout still permits a part to arrive at roughly 140
+// KiB/s, while a single stalled request can no longer occupy a lix runtime
+// for the object_store default three-minute retry budget. One retry preserves recovery
 // from a transient slow path without turning an interactive request into a
 // multi-minute wait.
 const S3_REQUEST_BUDGET: S3RequestBudget = S3RequestBudget {
@@ -55,12 +59,19 @@ struct LixRuntime {
 enum LixRuntimeState {
     Active(Arc<LixService>),
     Recovering,
+    Evicting,
 }
 
 pub struct LixRuntimeManager {
     backend: StorageBackend,
     max_open_lixes: usize,
     state: Mutex<ManagerState>,
+    #[cfg(test)]
+    open_gate: Option<TestOpenGate>,
+    // Keep this last: struct fields drop in declaration order. The exclusive
+    // cache-root lease must outlive every retained Lix runtime and its
+    // SlateDB workers during manager teardown.
+    _cache_root_lease: Option<CacheRootLease>,
 }
 
 #[derive(Clone)]
@@ -77,12 +88,92 @@ enum StorageBackend {
 #[derive(Default)]
 struct ManagerState {
     entries: HashMap<String, RuntimeEntry>,
+    cleaning: HashMap<String, CleanupTombstone>,
     clock: u64,
+    cleanup_sequence: u64,
+    #[cfg(test)]
+    state_drop_probe: Option<CacheRootLeaseDropProbe>,
+}
+
+#[cfg(test)]
+struct CacheRootLeaseDropProbe {
+    root: PathBuf,
+    observed_lease_held: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(test)]
+impl Drop for CacheRootLeaseDropProbe {
+    fn drop(&mut self) {
+        self.observed_lease_held.store(
+            CacheRootLease::acquire(&self.root).is_err(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    }
 }
 
 struct RuntimeEntry {
     runtime: Arc<OnceCell<Arc<LixRuntime>>>,
+    opened: watch::Receiver<RuntimeOpenState>,
     last_used: u64,
+}
+
+#[derive(Debug)]
+struct CacheRootLease {
+    _owner_lock: File,
+}
+
+struct CleanupTombstone {
+    sequence: u64,
+    done: watch::Receiver<CleanupState>,
+}
+
+struct EvictedRuntime {
+    lix_id: String,
+    runtime: Arc<LixRuntime>,
+    service: Arc<LixService>,
+    sequence: u64,
+    done: watch::Sender<CleanupState>,
+}
+
+#[derive(Clone)]
+enum CleanupState {
+    Running,
+    Complete,
+    Failed(Arc<str>),
+}
+
+#[derive(Clone)]
+enum RuntimeOpenState {
+    Opening,
+    Ready,
+    Failed(Arc<str>),
+}
+
+struct PendingRuntimeOpen {
+    lix_id: String,
+    runtime: Arc<OnceCell<Arc<LixRuntime>>>,
+    done: watch::Sender<RuntimeOpenState>,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct TestOpenGate {
+    started: Arc<Notify>,
+    release: Arc<Notify>,
+    starts: Arc<std::sync::atomic::AtomicUsize>,
+    fail_next: Arc<std::sync::atomic::AtomicBool>,
+}
+
+enum GetRuntimeAction {
+    WaitForCleanup(watch::Receiver<CleanupState>),
+    EvictAndWait {
+        evicted: EvictedRuntime,
+        cleanup: watch::Receiver<CleanupState>,
+    },
+    WaitForOpen {
+        runtime: Arc<OnceCell<Arc<LixRuntime>>>,
+        opened: watch::Receiver<RuntimeOpenState>,
+    },
 }
 
 #[derive(Debug)]
@@ -90,6 +181,7 @@ pub(crate) enum LixRuntimeError {
     InvalidId,
     AtCapacity { max: usize },
     Recovering,
+    Cleanup(Arc<str>),
     Open(anyhow::Error),
 }
 
@@ -97,14 +189,22 @@ impl LixRuntimeManager {
     pub fn new(config: &Config) -> Result<Arc<Self>> {
         let storage = &config.storage;
         let request_budget = S3_REQUEST_BUDGET;
-        let cache_root = cache_namespace_root(
-            &storage.cache.root_folder,
+        // The configured root is the single-process ownership boundary. The
+        // derived namespace is only where this backend's cached bytes live.
+        // Keeping these paths distinct prevents a backend change from
+        // bypassing cache ownership or consuming stale cached object data.
+        let owner_root = &storage.cache.root_folder;
+        let cache_root_lease = CacheRootLease::acquire(owner_root)?;
+        let namespace_root = cache_namespace_root(
+            owner_root,
             &storage.endpoint,
             &storage.bucket,
             &storage.region,
             &storage.prefix,
             &storage.access_key_id,
         );
+        prepare_cache_namespace(owner_root, &namespace_root)?;
+        let cache = cache_options(&storage.cache, config.max_open_lixes, namespace_root);
         let object_store: Arc<dyn ObjectStore> = Arc::new(
             AmazonS3Builder::new()
                 .with_endpoint(&storage.endpoint)
@@ -122,31 +222,16 @@ impl LixRuntimeManager {
         let backend = StorageBackend::S3 {
             object_store,
             prefix: storage.prefix.clone(),
-            cache: SlateDBCacheOptions {
-                // SlateDB's persisted cache keys do not include the S3
-                // endpoint or bucket. Namespace the physical root so a
-                // restart pointed at a different backend cannot reuse bytes
-                // cached for the same Lix ID and object path.
-                root_folder: cache_root,
-                max_disk_cache_bytes: per_lix_usize(
-                    storage.cache.max_disk_cache_bytes,
-                    config.max_open_lixes,
-                ),
-                block_cache_bytes: per_lix_u64(
-                    storage.cache.block_cache_bytes,
-                    config.max_open_lixes,
-                ),
-                metadata_cache_bytes: per_lix_u64(
-                    storage.cache.metadata_cache_bytes,
-                    config.max_open_lixes,
-                ),
-            },
+            cache,
         };
 
         Ok(Arc::new(Self {
             backend,
             max_open_lixes: config.max_open_lixes,
             state: Mutex::new(ManagerState::default()),
+            #[cfg(test)]
+            open_gate: None,
+            _cache_root_lease: Some(cache_root_lease),
         }))
     }
 
@@ -158,6 +243,8 @@ impl LixRuntimeManager {
             },
             max_open_lixes,
             state: Mutex::new(ManagerState::default()),
+            open_gate: None,
+            _cache_root_lease: None,
         })
     }
 
@@ -169,62 +256,179 @@ impl LixRuntimeManager {
             return Err(LixRuntimeError::InvalidId);
         }
 
-        let runtime_cell = {
-            let mut state = self.state.lock().await;
-            state.clock = state.clock.wrapping_add(1);
-            let now = state.clock;
-            if let Some(entry) = state.entries.get_mut(lix_id) {
-                entry.last_used = now;
-                Arc::clone(&entry.runtime)
-            } else {
-                while state.entries.len() >= self.max_open_lixes {
-                    let Some(eviction_id) = idle_lru_lix(&state.entries) else {
-                        return Err(LixRuntimeError::AtCapacity {
-                            max: self.max_open_lixes,
-                        });
-                    };
-                    state.entries.remove(&eviction_id);
-                    info!(lix_id = %eviction_id, "evicted idle lix runtime");
-                }
-
-                let runtime = Arc::new(OnceCell::new());
-                state.entries.insert(
-                    lix_id.to_string(),
-                    RuntimeEntry {
+        let runtime_cell = 'select_runtime: loop {
+            let action = {
+                let mut state = self.state.lock().await;
+                if let Some(cleanup) = state.cleaning.get(lix_id) {
+                    GetRuntimeAction::WaitForCleanup(cleanup.done.clone())
+                } else if state.entries.contains_key(lix_id) {
+                    state.clock = state.clock.wrapping_add(1);
+                    let now = state.clock;
+                    let entry = state
+                        .entries
+                        .get_mut(lix_id)
+                        .expect("entry was present when updating Lix recency");
+                    entry.last_used = now;
+                    GetRuntimeAction::WaitForOpen {
+                        runtime: Arc::clone(&entry.runtime),
+                        opened: entry.opened.clone(),
+                    }
+                } else if state.entries.len() + state.cleaning.len() >= self.max_open_lixes {
+                    // An eviction remains a live SlateDB runtime until its
+                    // protocol has closed and its cache child is retired.
+                    // Count it against the same cap so churn cannot bypass
+                    // the server-wide resource bound with closing runtimes.
+                    if let Some(cleanup) = state
+                        .cleaning
+                        .values()
+                        .min_by_key(|cleanup| cleanup.sequence)
+                    {
+                        GetRuntimeAction::WaitForCleanup(cleanup.done.clone())
+                    } else {
+                        let Some((eviction_id, runtime, service)) =
+                            take_idle_lru_runtime(&mut state.entries)
+                        else {
+                            return Err(LixRuntimeError::AtCapacity {
+                                max: self.max_open_lixes,
+                            });
+                        };
+                        let (sequence, done) = start_cleanup(&mut state, eviction_id.clone())
+                            .expect("an active runtime cannot already be cleaning");
+                        let cleanup = state
+                            .cleaning
+                            .get(&eviction_id)
+                            .expect("started cleanup must retain a waiter")
+                            .done
+                            .clone();
+                        GetRuntimeAction::EvictAndWait {
+                            evicted: EvictedRuntime {
+                                lix_id: eviction_id,
+                                runtime,
+                                service,
+                                sequence,
+                                done,
+                            },
+                            cleanup,
+                        }
+                    }
+                } else {
+                    state.clock = state.clock.wrapping_add(1);
+                    let now = state.clock;
+                    let runtime = Arc::new(OnceCell::new());
+                    let (done, opened) = watch::channel(RuntimeOpenState::Opening);
+                    state.entries.insert(
+                        lix_id.to_string(),
+                        RuntimeEntry {
+                            runtime: Arc::clone(&runtime),
+                            opened: opened.clone(),
+                            last_used: now,
+                        },
+                    );
+                    // The manager, rather than this request, owns opening.
+                    // `get` callers may be cancelled without leaving an
+                    // empty entry or detaching a second same-ID opener.
+                    self.spawn_runtime_open(PendingRuntimeOpen {
+                        lix_id: lix_id.to_string(),
                         runtime: Arc::clone(&runtime),
-                        last_used: now,
-                    },
-                );
-                runtime
+                        done,
+                    });
+                    GetRuntimeAction::WaitForOpen { runtime, opened }
+                }
+            };
+
+            match action {
+                GetRuntimeAction::WaitForCleanup(mut cleanup) => {
+                    // The sender is dropped after the old runtime has closed
+                    // and its cache child has been retired and deleted.
+                    // `watch` makes this wait immune to a completion racing
+                    // with receiver registration.
+                    self.wait_for_cleanup(&mut cleanup).await?;
+                }
+                GetRuntimeAction::EvictAndWait {
+                    evicted,
+                    mut cleanup,
+                } => {
+                    self.spawn_eviction_cleanup(evicted);
+                    self.wait_for_cleanup(&mut cleanup).await?;
+                }
+                GetRuntimeAction::WaitForOpen {
+                    runtime,
+                    mut opened,
+                } => loop {
+                    let open_state = opened.borrow().clone();
+                    match open_state {
+                        RuntimeOpenState::Ready => break 'select_runtime runtime,
+                        RuntimeOpenState::Failed(error) => {
+                            return Err(LixRuntimeError::Open(anyhow::anyhow!(
+                                "open lix runtime: {error}"
+                            )));
+                        }
+                        RuntimeOpenState::Opening => {
+                            if opened.changed().await.is_err() {
+                                return Err(LixRuntimeError::Open(anyhow::anyhow!(
+                                    "lix runtime opener stopped before completing"
+                                )));
+                            }
+                        }
+                    }
+                },
             }
         };
 
-        let result = runtime_cell
-            .get_or_try_init(|| self.open_lix_for_handler(lix_id.to_string()))
-            .await;
-        match result {
-            Ok(runtime) => {
-                let runtime = Arc::clone(runtime);
-                match runtime.acquire().await {
-                    Some(service) => Ok(service),
-                    None => Err(LixRuntimeError::Recovering),
-                }
-            }
-            Err(error) => {
-                let mut state = self.state.lock().await;
-                if state
-                    .entries
-                    .get(lix_id)
-                    .is_some_and(|entry| Arc::ptr_eq(&entry.runtime, &runtime_cell))
-                {
-                    state.entries.remove(lix_id);
-                }
-                Err(LixRuntimeError::Open(error))
-            }
+        let runtime = runtime_cell
+            .get()
+            .expect("runtime opener reported success before storing its runtime");
+        match runtime.acquire().await {
+            Some(service) => Ok(service),
+            None => Err(LixRuntimeError::Recovering),
         }
     }
 
+    fn spawn_runtime_open(self: &Arc<Self>, opener: PendingRuntimeOpen) {
+        let manager = Arc::clone(self);
+        tokio::spawn(async move {
+            let opened = manager.open_lix_for_handler(opener.lix_id.clone()).await;
+            match opened {
+                Ok(runtime) => {
+                    assert!(
+                        opener.runtime.set(runtime).is_ok(),
+                        "managed opener is the sole OnceCell initializer"
+                    );
+                    opener.done.send_replace(RuntimeOpenState::Ready);
+                }
+                Err(error) => {
+                    let error = Arc::<str>::from(format!("{error:#}"));
+                    if let Some((sequence, done)) = manager
+                        .begin_failed_open_cleanup(&opener.lix_id, &opener.runtime)
+                        .await
+                    {
+                        let cleanup = manager
+                            .retire_and_delete_cache_child(&opener.lix_id, sequence)
+                            .await;
+                        manager
+                            .finish_cleanup(&opener.lix_id, sequence, done, cleanup)
+                            .await;
+                    }
+                    opener.done.send_replace(RuntimeOpenState::Failed(error));
+                }
+            }
+        });
+    }
+
     async fn open_lix_for_handler(self: &Arc<Self>, lix_id: String) -> Result<Arc<LixRuntime>> {
+        #[cfg(test)]
+        if let Some(gate) = &self.open_gate {
+            gate.starts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            gate.started.notify_one();
+            gate.release.notified().await;
+            if gate
+                .fail_next
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(anyhow::anyhow!("test-controlled Lix open failure"));
+            }
+        }
         let manager = Arc::clone(self);
         let runtime = Handle::current();
         tokio::task::spawn_blocking(move || runtime.block_on(manager.open_lix(&lix_id)))
@@ -253,7 +457,8 @@ impl LixRuntimeManager {
                     format!("{prefix}/{lix_id}")
                 };
                 let mut lix_cache = cache.clone();
-                lix_cache.root_folder = lix_cache.root_folder.join(lix_id);
+                lix_cache.root_folder = cache_child_path(&cache.root_folder, lix_id)
+                    .expect("Lix IDs are validated before opening cached storage");
                 SlateDB::open_object_store_with_options(
                     storage_prefix,
                     Arc::clone(object_store),
@@ -284,6 +489,158 @@ impl LixRuntimeManager {
             protocol,
             protocol_router,
         })))
+    }
+
+    fn spawn_eviction_cleanup(self: &Arc<Self>, evicted: EvictedRuntime) {
+        let manager = Arc::clone(self);
+        tokio::spawn(async move {
+            let EvictedRuntime {
+                lix_id,
+                runtime,
+                service,
+                sequence,
+                done,
+            } = evicted;
+            let started = Instant::now();
+
+            match close_drained_service(service).await {
+                Ok(()) => info!(
+                    lix_id,
+                    elapsed_ms = elapsed_millis(started),
+                    "closed evicted lix runtime"
+                ),
+                Err(error) => tracing::warn!(
+                    lix_id,
+                    elapsed_ms = elapsed_millis(started),
+                    error = %error,
+                    "released evicted lix runtime after close error"
+                ),
+            }
+            // The protocol owns the Lix root and its SlateDB storage. Drop
+            // both before moving this Lix's disk-cache child out of the
+            // active cache tree.
+            drop(runtime);
+            let cleanup = manager
+                .retire_and_delete_cache_child(&lix_id, sequence)
+                .await;
+
+            // The next cold open waits on this tombstone. Releasing it only
+            // after deletion prevents eviction churn from retaining an
+            // unbounded number of workers, cache directories, or delete
+            // tasks outside the server-wide cap.
+            manager
+                .finish_cleanup(&lix_id, sequence, done, cleanup)
+                .await;
+        });
+    }
+
+    fn cache_root(&self) -> Option<PathBuf> {
+        // Cache retirement moves per-Lix children under this root. It must be
+        // owned exclusively by this server process; construction holds the
+        // cache-root lock for the manager's lifetime.
+        match &self.backend {
+            #[cfg(test)]
+            StorageBackend::Memory { .. } => None,
+            StorageBackend::S3 { cache, .. } => Some(cache.root_folder.clone()),
+        }
+    }
+
+    async fn wait_for_cleanup(
+        &self,
+        cleanup: &mut watch::Receiver<CleanupState>,
+    ) -> std::result::Result<(), LixRuntimeError> {
+        loop {
+            let cleanup_state = cleanup.borrow().clone();
+            match cleanup_state {
+                CleanupState::Complete => return Ok(()),
+                CleanupState::Failed(error) => return Err(LixRuntimeError::Cleanup(error)),
+                CleanupState::Running => {
+                    if cleanup.changed().await.is_err() {
+                        return Err(LixRuntimeError::Cleanup(Arc::from(
+                            "lix runtime cleanup stopped before completing",
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
+    async fn finish_cleanup(
+        &self,
+        lix_id: &str,
+        sequence: u64,
+        done: watch::Sender<CleanupState>,
+        result: Result<()>,
+    ) {
+        let mut state = self.state.lock().await;
+        let matches_cleanup = state
+            .cleaning
+            .get(lix_id)
+            .is_some_and(|cleanup| cleanup.sequence == sequence);
+        if !matches_cleanup {
+            done.send_replace(CleanupState::Failed(Arc::from(
+                "lix runtime cleanup lost its manager state",
+            )));
+            return;
+        }
+        match result {
+            Ok(()) => {
+                state.cleaning.remove(lix_id);
+                done.send_replace(CleanupState::Complete);
+            }
+            Err(error) => {
+                let error = Arc::<str>::from(format!("{error:#}"));
+                tracing::error!(
+                    lix_id,
+                    sequence,
+                    error = %error,
+                    "retaining failed Lix cleanup slot to preserve cache bounds"
+                );
+                done.send_replace(CleanupState::Failed(error));
+            }
+        }
+    }
+
+    async fn retire_and_delete_cache_child(&self, lix_id: &str, sequence: u64) -> Result<()> {
+        let Some(cache_root) = self.cache_root() else {
+            return Ok(());
+        };
+        let cleanup_lix_id = lix_id.to_string();
+        let retired = tokio::task::spawn_blocking(move || {
+            retire_cache_child(&cache_root, &cleanup_lix_id, sequence)
+        })
+        .await
+        .context("join disk-cache retirement task")??;
+
+        let Some(retired) = retired else {
+            return Ok(());
+        };
+        let display_path = retired.display().to_string();
+        tokio::task::spawn_blocking(move || delete_retired_cache_child(&retired))
+            .await
+            .context("join retired disk-cache deletion task")??;
+        info!(lix_id, path = %display_path, "deleted retired Lix disk cache");
+        Ok(())
+    }
+
+    async fn begin_failed_open_cleanup(
+        &self,
+        lix_id: &str,
+        expected_runtime: &Arc<OnceCell<Arc<LixRuntime>>>,
+    ) -> Option<(u64, watch::Sender<CleanupState>)> {
+        let mut state = self.state.lock().await;
+        if !state
+            .entries
+            .get(lix_id)
+            .is_some_and(|entry| Arc::ptr_eq(&entry.runtime, expected_runtime))
+        {
+            return None;
+        }
+        state.entries.remove(lix_id);
+        let cleanup = start_cleanup(&mut state, lix_id.to_string())
+            .expect("an active opening cannot already be cleaning");
+        info!(lix_id, "removed failed lix runtime opening");
+        Some(cleanup)
     }
 
     pub(crate) async fn recover(self: &Arc<Self>, lix_id: &str, service: &Arc<LixService>) {
@@ -325,26 +682,61 @@ impl LixRuntimeManager {
                     "released recovered lix runtime after close error"
                 ),
             }
-            manager.remove_recovered_runtime(&lix_id, &runtime).await;
+            if let Some((sequence, done)) = manager
+                .begin_recovered_runtime_cleanup(&lix_id, &runtime)
+                .await
+            {
+                // `draining_service` was closed above. Dropping the last
+                // retained runtime before touching its cache path keeps
+                // SlateDB workers from observing a renamed directory.
+                drop(runtime);
+                let cleanup = manager
+                    .retire_and_delete_cache_child(&lix_id, sequence)
+                    .await;
+                manager
+                    .finish_cleanup(&lix_id, sequence, done, cleanup)
+                    .await;
+            }
         });
     }
 
-    async fn remove_recovered_runtime(&self, lix_id: &str, expected_runtime: &Arc<LixRuntime>) {
+    async fn begin_recovered_runtime_cleanup(
+        &self,
+        lix_id: &str,
+        expected_runtime: &Arc<LixRuntime>,
+    ) -> Option<(u64, watch::Sender<CleanupState>)> {
         let mut state = self.state.lock().await;
-        if state.entries.get(lix_id).is_some_and(|entry| {
+        if !state.entries.get(lix_id).is_some_and(|entry| {
             entry
                 .runtime
                 .get()
                 .is_some_and(|runtime| Arc::ptr_eq(runtime, expected_runtime))
         }) {
-            state.entries.remove(lix_id);
-            info!(lix_id, "removed recovered lix runtime");
+            return None;
         }
+        state.entries.remove(lix_id);
+        let cleanup = start_cleanup(&mut state, lix_id.to_string())
+            .expect("an active recovered runtime cannot already be cleaning");
+        info!(lix_id, "removed recovered lix runtime");
+        Some(cleanup)
+    }
+
+    pub(crate) fn max_open_lixes(&self) -> usize {
+        self.max_open_lixes
     }
 
     #[cfg(test)]
     async fn cached_lix_count(&self) -> usize {
         self.state.lock().await.entries.len()
+    }
+
+    #[cfg(test)]
+    fn has_state_drop_probe(&self) -> bool {
+        self.state
+            .try_lock()
+            .expect("inspect idle manager state")
+            .state_drop_probe
+            .is_some()
     }
 }
 
@@ -372,7 +764,7 @@ impl LixRuntime {
         let state = self.state.lock().await;
         match &*state {
             LixRuntimeState::Active(service) => Some(Arc::clone(service)),
-            LixRuntimeState::Recovering => None,
+            LixRuntimeState::Recovering | LixRuntimeState::Evicting => None,
         }
     }
 
@@ -387,7 +779,28 @@ impl LixRuntime {
                 };
                 Some(service)
             }
-            LixRuntimeState::Active(_) | LixRuntimeState::Recovering => None,
+            LixRuntimeState::Active(_)
+            | LixRuntimeState::Recovering
+            | LixRuntimeState::Evicting => None,
+        }
+    }
+
+    fn try_begin_eviction(&self) -> Option<Arc<LixService>> {
+        let mut state = self.state.try_lock().ok()?;
+        match &*state {
+            LixRuntimeState::Active(service)
+                if Arc::strong_count(service) == 1 && service.protocol.is_idle() =>
+            {
+                let LixRuntimeState::Active(service) =
+                    std::mem::replace(&mut *state, LixRuntimeState::Evicting)
+                else {
+                    unreachable!("matched active runtime state")
+                };
+                Some(service)
+            }
+            LixRuntimeState::Active(_)
+            | LixRuntimeState::Recovering
+            | LixRuntimeState::Evicting => None,
         }
     }
 
@@ -423,6 +836,7 @@ impl fmt::Display for LixRuntimeError {
                 "lix service is at its capacity of {max} active runtimes"
             ),
             Self::Recovering => write!(formatter, "lix runtime is recovering"),
+            Self::Cleanup(error) => write!(formatter, "lix runtime cleanup: {error}"),
             Self::Open(error) => write!(formatter, "open lix runtime: {error:#}"),
         }
     }
@@ -437,12 +851,120 @@ impl Error for LixRuntimeError {
     }
 }
 
-fn valid_lix_id(lix_id: &str) -> bool {
-    !lix_id.is_empty()
-        && lix_id.len() <= 128
-        && lix_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+impl CacheRootLease {
+    const OWNER_LOCK_NAME: &'static str = ".lixray-cache-owner.lock";
+
+    fn acquire(root_folder: &Path) -> Result<Self> {
+        ensure_real_directory(root_folder, "SlateDB cache root")?;
+
+        let lock_path = root_folder.join(Self::OWNER_LOCK_NAME);
+        let owner_lock = open_cache_owner_lock(&lock_path)?;
+        owner_lock.try_lock_exclusive().map_err(|error| {
+            anyhow::anyhow!(
+                "SlateDB cache root {} is already owned by another lixray process; configure a distinct SLATEDB_CACHE_DIR",
+                root_folder.display()
+            )
+            .context(error)
+        })?;
+
+        Ok(Self {
+            _owner_lock: owner_lock,
+        })
+    }
+}
+
+fn ensure_real_directory(path: &Path, label: &str) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => require_real_directory(path, label, &metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(path)
+                .with_context(|| format!("create {label} {}", path.display()))?;
+            let metadata = fs::symlink_metadata(path)
+                .with_context(|| format!("inspect {label} {}", path.display()))?;
+            require_real_directory(path, label, &metadata)
+        }
+        Err(error) => Err(error).with_context(|| format!("inspect {label} {}", path.display())),
+    }
+}
+
+fn ensure_direct_child_directory(parent: &Path, name: &str, label: &str) -> Result<PathBuf> {
+    let child = parent.join(name);
+    match fs::symlink_metadata(&child) {
+        Ok(metadata) => require_real_directory(&child, label, &metadata)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match fs::create_dir(&child) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("create {label} {}", child.display()));
+                }
+            }
+            let metadata = fs::symlink_metadata(&child)
+                .with_context(|| format!("inspect {label} {}", child.display()))?;
+            require_real_directory(&child, label, &metadata)?;
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("inspect {label} {}", child.display()));
+        }
+    }
+    Ok(child)
+}
+
+fn require_real_directory(path: &Path, label: &str, metadata: &fs::Metadata) -> Result<()> {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        anyhow::bail!("{label} must be a real directory: {}", path.display());
+    }
+    Ok(())
+}
+
+fn open_cache_owner_lock(lock_path: &Path) -> Result<File> {
+    // Avoid following a pre-existing symlink. If another creator races our
+    // create_new call, inspect its finished entry before opening it instead.
+    for _ in 0..2 {
+        match fs::symlink_metadata(lock_path) {
+            Ok(metadata) => {
+                if !metadata.is_file() || metadata.file_type().is_symlink() {
+                    anyhow::bail!(
+                        "SlateDB cache-root lock must be a regular file: {}",
+                        lock_path.display()
+                    );
+                }
+                return OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(lock_path)
+                    .with_context(|| {
+                        format!("open SlateDB cache-root lock {}", lock_path.display())
+                    });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create_new(true)
+                    .open(lock_path)
+                {
+                    Ok(lock) => return Ok(lock),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => {
+                        return Err(error).with_context(|| {
+                            format!("create SlateDB cache-root lock {}", lock_path.display())
+                        });
+                    }
+                }
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("inspect SlateDB cache-root lock {}", lock_path.display())
+                });
+            }
+        }
+    }
+    anyhow::bail!(
+        "SlateDB cache-root lock changed while opening: {}",
+        lock_path.display()
+    )
 }
 
 fn cache_namespace_root(
@@ -455,9 +977,8 @@ fn cache_namespace_root(
 ) -> PathBuf {
     let mut hasher = Hasher::new();
     hasher.update(CACHE_NAMESPACE_LAYOUT);
-    // Access-key IDs are part of the identity for S3-compatible stores that
-    // route an identically named bucket to different tenants. Hash it with the
-    // public location fields, but never put credential material in a path.
+    // Access-key IDs distinguish S3-compatible multi-tenant endpoints. Hash
+    // it with public location fields, but never put credentials in a path.
     for component in [endpoint, bucket, region, prefix, access_key_id] {
         let bytes = component.as_bytes();
         hasher.update(&u64::try_from(bytes.len()).unwrap_or(u64::MAX).to_be_bytes());
@@ -468,8 +989,134 @@ fn cache_namespace_root(
         .join(hasher.finalize().to_hex().to_string())
 }
 
-fn idle_lru_lix(entries: &HashMap<String, RuntimeEntry>) -> Option<String> {
-    entries
+fn prepare_cache_namespace(owner_root: &Path, namespace_root: &Path) -> Result<()> {
+    let namespace_parent = ensure_direct_child_directory(
+        owner_root,
+        CACHE_NAMESPACE_PARENT,
+        "SlateDB cache namespace parent",
+    )?;
+    let namespace_name = namespace_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("SlateDB cache namespace name must be valid UTF-8")?;
+    if !valid_cache_namespace_name(namespace_name)
+        || namespace_root != namespace_parent.join(namespace_name)
+    {
+        anyhow::bail!(
+            "refuse to use invalid SlateDB cache namespace {}",
+            namespace_root.display()
+        );
+    }
+
+    reap_inactive_cache_namespaces(&namespace_parent, namespace_name)?;
+    let current_namespace = ensure_direct_child_directory(
+        &namespace_parent,
+        namespace_name,
+        "SlateDB cache namespace",
+    )?;
+    reap_retired_cache_children(&current_namespace)?;
+    // Every direct Lix child belongs to a predecessor process because the
+    // base-root lease is held before this startup reaches SlateDB. Removing
+    // them deliberately cold-starts the cache after a process restart and
+    // keeps the aggregate disk budget from growing with successive working
+    // sets.
+    reap_stale_cache_children(&current_namespace)
+}
+
+fn valid_cache_namespace_name(name: &str) -> bool {
+    name.len() == 64
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn reap_inactive_cache_namespaces(namespace_parent: &Path, current_name: &str) -> Result<()> {
+    for entry in fs::read_dir(namespace_parent).with_context(|| {
+        format!(
+            "list SlateDB cache namespace parent {}",
+            namespace_parent.display()
+        )
+    })? {
+        let entry = entry.with_context(|| {
+            format!(
+                "read SlateDB cache namespace parent {}",
+                namespace_parent.display()
+            )
+        })?;
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if name == current_name {
+            continue;
+        }
+        if !valid_cache_namespace_name(name) {
+            // Only the namespaced layout is ours. Leave legacy or operator
+            // content untouched rather than recursively deleting it.
+            continue;
+        }
+        delete_cache_directory(&entry.path(), "inactive SlateDB cache namespace")?;
+    }
+    Ok(())
+}
+
+fn reap_stale_cache_children(namespace_root: &Path) -> Result<()> {
+    for entry in fs::read_dir(namespace_root).with_context(|| {
+        format!(
+            "list active SlateDB cache namespace {}",
+            namespace_root.display()
+        )
+    })? {
+        let entry = entry.with_context(|| {
+            format!(
+                "read active SlateDB cache namespace {}",
+                namespace_root.display()
+            )
+        })?;
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if name == ".trash" || !valid_lix_id(name) {
+            continue;
+        }
+        delete_cache_directory(&entry.path(), "stale Lix cache child")?;
+    }
+    Ok(())
+}
+
+fn valid_lix_id(lix_id: &str) -> bool {
+    !lix_id.is_empty()
+        && lix_id.len() <= 128
+        && lix_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+fn start_cleanup(
+    state: &mut ManagerState,
+    lix_id: String,
+) -> Option<(u64, watch::Sender<CleanupState>)> {
+    if state.cleaning.contains_key(&lix_id) {
+        return None;
+    }
+    state.cleanup_sequence = state.cleanup_sequence.wrapping_add(1);
+    let sequence = state.cleanup_sequence;
+    let (done, waiter) = watch::channel(CleanupState::Running);
+    state.cleaning.insert(
+        lix_id,
+        CleanupTombstone {
+            sequence,
+            done: waiter,
+        },
+    );
+    Some((sequence, done))
+}
+
+fn take_idle_lru_runtime(
+    entries: &mut HashMap<String, RuntimeEntry>,
+) -> Option<(String, Arc<LixRuntime>, Arc<LixService>)> {
+    let mut candidates = entries
         .iter()
         .filter(|(_, entry)| {
             Arc::strong_count(&entry.runtime) == 1
@@ -478,8 +1125,190 @@ fn idle_lru_lix(entries: &HashMap<String, RuntimeEntry>) -> Option<String> {
                     .get()
                     .is_some_and(|runtime| Arc::strong_count(runtime) == 1 && runtime.is_idle())
         })
-        .min_by_key(|(_, entry)| entry.last_used)
-        .map(|(lix_id, _)| lix_id.clone())
+        .map(|(lix_id, entry)| (lix_id.clone(), entry.last_used))
+        .collect::<Vec<_>>();
+    candidates.sort_unstable_by_key(|(_, last_used)| *last_used);
+
+    for (lix_id, _) in candidates {
+        let runtime = entries
+            .get(&lix_id)
+            .and_then(|entry| entry.runtime.get())
+            .cloned()?;
+        let Some(service) = runtime.try_begin_eviction() else {
+            continue;
+        };
+        entries.remove(&lix_id);
+        info!(lix_id = %lix_id, "evicted idle lix runtime");
+        return Some((lix_id, runtime, service));
+    }
+    None
+}
+
+fn cache_options(
+    cache: &SlateDBCacheConfig,
+    max_open_lixes: usize,
+    root_folder: PathBuf,
+) -> SlateDBCacheOptions {
+    SlateDBCacheOptions {
+        root_folder,
+        // Each active Lix has its own SlateDB cache root and evictor. Split
+        // all cache budgets across the bounded live-runtime set.
+        max_disk_cache_bytes: per_lix_usize(cache.max_disk_cache_bytes, max_open_lixes),
+        block_cache_bytes: per_lix_u64(cache.block_cache_bytes, max_open_lixes),
+        metadata_cache_bytes: per_lix_u64(cache.metadata_cache_bytes, max_open_lixes),
+    }
+}
+
+fn cache_child_path(root_folder: &Path, lix_id: &str) -> Option<PathBuf> {
+    valid_lix_id(lix_id).then(|| root_folder.join(lix_id))
+}
+
+fn retired_cache_path(root_folder: &Path, lix_id: &str, sequence: u64) -> Option<PathBuf> {
+    valid_lix_id(lix_id).then(|| {
+        root_folder
+            .join(".trash")
+            .join(format!("{lix_id}-{}-{sequence}", std::process::id()))
+    })
+}
+
+fn valid_retired_cache_child_name(name: &str) -> bool {
+    let mut components = name.rsplitn(3, '-');
+    let Some(sequence) = components.next() else {
+        return false;
+    };
+    let Some(pid) = components.next() else {
+        return false;
+    };
+    let Some(lix_id) = components.next() else {
+        return false;
+    };
+    valid_lix_id(lix_id)
+        && pid.parse::<u32>().is_ok_and(|pid| pid > 0)
+        && sequence.parse::<u64>().is_ok()
+}
+
+fn retire_cache_child(root_folder: &Path, lix_id: &str, sequence: u64) -> Result<Option<PathBuf>> {
+    let cache_child =
+        cache_child_path(root_folder, lix_id).context("validate evicted Lix cache child path")?;
+    let metadata = match std::fs::symlink_metadata(&cache_child) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("inspect cache child {}", cache_child.display()));
+        }
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        anyhow::bail!(
+            "refuse to retire non-directory cache child {}",
+            cache_child.display()
+        );
+    }
+
+    ensure_direct_child_directory(root_folder, ".trash", "disk-cache trash root")?;
+
+    let retired = retired_cache_path(root_folder, lix_id, sequence)
+        .context("validate retired Lix cache path")?;
+    match std::fs::symlink_metadata(&retired) {
+        Ok(_) => anyhow::bail!(
+            "refuse to overwrite existing retired cache child {}",
+            retired.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("inspect retired cache child {}", retired.display()));
+        }
+    }
+    match std::fs::rename(&cache_child, &retired) {
+        Ok(()) => Ok(Some(retired)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "move evicted Lix cache child {} to {}",
+                cache_child.display(),
+                retired.display()
+            )
+        }),
+    }
+}
+
+fn delete_retired_cache_child(retired: &Path) -> Result<()> {
+    delete_cache_directory(retired, "retired cache child")
+}
+
+fn delete_cache_directory(path: &Path, label: &str) -> Result<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("inspect {label} {}", path.display()))
+        }
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        anyhow::bail!("refuse to delete non-directory {label} {}", path.display());
+    }
+    for entry in fs::read_dir(path).with_context(|| format!("list {label} {}", path.display()))? {
+        let entry = entry.with_context(|| format!("read {label} {}", path.display()))?;
+        let child = entry.path();
+        let child_metadata = fs::symlink_metadata(&child)
+            .with_context(|| format!("inspect {label} entry {}", child.display()))?;
+        if child_metadata.file_type().is_symlink() {
+            anyhow::bail!(
+                "refuse to recurse through symlink in {label} {}",
+                child.display()
+            );
+        }
+        if child_metadata.is_dir() {
+            delete_cache_directory(&child, label)?;
+        } else if child_metadata.is_file() {
+            fs::remove_file(&child)
+                .with_context(|| format!("delete {label} file {}", child.display()))?;
+        } else {
+            anyhow::bail!(
+                "refuse to delete non-file entry in {label} {}",
+                child.display()
+            );
+        }
+    }
+    fs::remove_dir(path).with_context(|| format!("delete {label} {}", path.display()))
+}
+
+fn reap_retired_cache_children(root_folder: &Path) -> Result<()> {
+    let trash_root = root_folder.join(".trash");
+    let metadata = match std::fs::symlink_metadata(&trash_root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("inspect disk-cache trash root {}", trash_root.display()))
+        }
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        anyhow::bail!(
+            "refuse to reap non-directory disk-cache trash root {}",
+            trash_root.display()
+        );
+    }
+
+    for entry in std::fs::read_dir(&trash_root)
+        .with_context(|| format!("list disk-cache trash root {}", trash_root.display()))?
+    {
+        let entry = entry
+            .with_context(|| format!("read disk-cache trash root {}", trash_root.display()))?;
+        let file_name = entry.file_name();
+        let name = file_name
+            .to_str()
+            .context("retired disk-cache child name must be valid UTF-8")?;
+        if !valid_retired_cache_child_name(name) {
+            anyhow::bail!(
+                "refuse to reap unexpected retired cache child {}",
+                entry.path().display()
+            );
+        }
+        delete_retired_cache_child(&entry.path())?;
+    }
+    Ok(())
 }
 
 fn per_lix_usize(total: usize, lixes: usize) -> usize {
@@ -514,9 +1343,39 @@ fn s3_retry_config(budget: S3RequestBudget) -> RetryConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-    fn memory_manager(max_open_lixes: usize) -> Arc<LixRuntimeManager> {
-        LixRuntimeManager::new_in_memory(max_open_lixes)
+    struct TestCacheRoot(PathBuf);
+
+    impl TestCacheRoot {
+        fn new(name: &str) -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let root = std::env::temp_dir().join(format!(
+                "lixray-store-{name}-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&root).expect("create test cache root");
+            Self(root)
+        }
+    }
+
+    impl Drop for TestCacheRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn namespace_root(base_root: &Path, endpoint: &str) -> PathBuf {
+        cache_namespace_root(
+            base_root,
+            endpoint,
+            "tenant-a",
+            "us-east-1",
+            "production/lix",
+            "AKIA-TENANT-A",
+        )
     }
 
     #[test]
@@ -543,6 +1402,7 @@ mod tests {
             )
         );
         assert!(primary.starts_with(base_root.join(CACHE_NAMESPACE_PARENT)));
+        assert!(!valid_lix_id(CACHE_NAMESPACE_PARENT));
         let digest = primary
             .file_name()
             .and_then(|name| name.to_str())
@@ -598,8 +1458,6 @@ mod tests {
                 "production/lix",
                 "AKIA-TENANT-B",
             ),
-            // Length-prefix every input to prevent concatenation ambiguity.
-            cache_namespace_root(base_root, "ab", "c", "", "", "key"),
         ] {
             assert_ne!(primary, changed_backend);
         }
@@ -612,24 +1470,8 @@ mod tests {
     #[test]
     fn cache_namespace_separates_same_lix_id_across_backends() {
         let base_root = Path::new("/var/cache/lixray");
-        let first = cache_namespace_root(
-            base_root,
-            "https://first.example",
-            "shared-name",
-            "auto",
-            "workspace",
-            "AKIA-SHARED",
-        )
-        .join("lix-123");
-        let second = cache_namespace_root(
-            base_root,
-            "https://second.example",
-            "shared-name",
-            "auto",
-            "workspace",
-            "AKIA-SHARED",
-        )
-        .join("lix-123");
+        let first = namespace_root(base_root, "https://first.example").join("lix-123");
+        let second = namespace_root(base_root, "https://second.example").join("lix-123");
 
         assert_ne!(first, second);
         assert!(first.starts_with(base_root.join(CACHE_NAMESPACE_PARENT)));
@@ -644,6 +1486,25 @@ mod tests {
         );
     }
 
+    fn memory_manager(max_open_lixes: usize) -> Arc<LixRuntimeManager> {
+        LixRuntimeManager::new_in_memory(max_open_lixes)
+    }
+
+    fn memory_manager_with_open_gate(
+        max_open_lixes: usize,
+        open_gate: TestOpenGate,
+    ) -> Arc<LixRuntimeManager> {
+        Arc::new(LixRuntimeManager {
+            backend: StorageBackend::Memory {
+                object_store: Arc::new(InMemory::new()),
+            },
+            max_open_lixes,
+            state: Mutex::new(ManagerState::default()),
+            _cache_root_lease: None,
+            open_gate: Some(open_gate),
+        })
+    }
+
     #[tokio::test]
     async fn concurrent_gets_share_one_runtime() {
         let manager = memory_manager(2);
@@ -652,6 +1513,76 @@ mod tests {
         let right = right.expect("open right runtime");
 
         assert!(Arc::ptr_eq(&left, &right));
+    }
+
+    #[tokio::test]
+    async fn cancelled_get_does_not_cancel_the_manager_owned_open() {
+        let gate = TestOpenGate {
+            started: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+            starts: Arc::new(AtomicUsize::new(0)),
+            fail_next: Arc::new(AtomicBool::new(false)),
+        };
+        let manager = memory_manager_with_open_gate(1, gate.clone());
+        let started = gate.started.notified();
+        let opening_manager = Arc::clone(&manager);
+        let opening = tokio::spawn(async move { opening_manager.get("lix-a").await });
+        started.await;
+        opening.abort();
+        let _ = opening.await;
+
+        let waiting_manager = Arc::clone(&manager);
+        let mut later_get = tokio::spawn(async move { waiting_manager.get("lix-a").await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut later_get)
+                .await
+                .is_err(),
+            "a later caller must wait on the original managed opener"
+        );
+        assert_eq!(gate.starts.load(Ordering::SeqCst), 1);
+
+        gate.release.notify_one();
+        let service = tokio::time::timeout(Duration::from_secs(10), later_get)
+            .await
+            .expect("managed opener should finish")
+            .expect("later get task")
+            .expect("open in-memory Lix");
+        assert_eq!(gate.starts.load(Ordering::SeqCst), 1);
+        assert_eq!(manager.cached_lix_count().await, 1);
+        drop(service);
+    }
+
+    #[tokio::test]
+    async fn failed_managed_open_removes_its_entry_before_a_retry() {
+        let gate = TestOpenGate {
+            started: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+            starts: Arc::new(AtomicUsize::new(0)),
+            fail_next: Arc::new(AtomicBool::new(true)),
+        };
+        let manager = memory_manager_with_open_gate(1, gate.clone());
+        let first_started = gate.started.notified();
+        let first_manager = Arc::clone(&manager);
+        let first = tokio::spawn(async move { first_manager.get("lix-a").await });
+        first_started.await;
+        gate.release.notify_one();
+        assert!(matches!(
+            first.await.expect("first get task"),
+            Err(LixRuntimeError::Open(_))
+        ));
+        assert_eq!(manager.cached_lix_count().await, 0);
+
+        let retry_started = gate.started.notified();
+        let retry_manager = Arc::clone(&manager);
+        let retry = tokio::spawn(async move { retry_manager.get("lix-a").await });
+        retry_started.await;
+        gate.release.notify_one();
+        let service = retry
+            .await
+            .expect("retry get task")
+            .expect("retry opens after failed opener cleanup");
+        assert_eq!(gate.starts.load(Ordering::SeqCst), 2);
+        drop(service);
     }
 
     #[tokio::test]
@@ -742,6 +1673,406 @@ mod tests {
         let retry = s3_retry_config(S3_REQUEST_BUDGET);
         assert_eq!(retry.max_retries, 1);
         assert_eq!(retry.retry_timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn partitions_all_cache_budgets_per_active_lix() {
+        let cache = SlateDBCacheConfig {
+            root_folder: PathBuf::from("/tmp/lixray-cache"),
+            max_disk_cache_bytes: 2_048,
+            block_cache_bytes: 128,
+            metadata_cache_bytes: 32,
+        };
+
+        let namespace = namespace_root(&cache.root_folder, "https://s3.example");
+        let options = cache_options(&cache, 4, namespace.clone());
+
+        assert_eq!(options.root_folder, namespace);
+        assert_eq!(options.max_disk_cache_bytes, 512);
+        assert_eq!(options.block_cache_bytes, 32);
+        assert_eq!(options.metadata_cache_bytes, 8);
+        assert_eq!(
+            cache_child_path(&options.root_folder, "lix-a"),
+            Some(options.root_folder.join("lix-a"))
+        );
+    }
+
+    #[test]
+    fn retires_only_the_validated_lix_cache_child() {
+        let root = TestCacheRoot::new("retire-cache-child");
+        let namespace = namespace_root(&root.0, "https://s3.example");
+        let lix_cache = namespace.join("lix-a");
+        let untouched = namespace.join("lix-b");
+        std::fs::create_dir_all(lix_cache.join("nested")).expect("create Lix cache child");
+        std::fs::write(lix_cache.join("nested/cache-part"), b"cached bytes")
+            .expect("write cache part");
+        std::fs::create_dir_all(&untouched).expect("create untouched cache child");
+
+        let retired = retire_cache_child(&namespace, "lix-a", 7)
+            .expect("retire cache child")
+            .expect("cache child is present");
+
+        assert!(!lix_cache.exists());
+        assert!(retired.starts_with(namespace.join(".trash")));
+        assert!(retired.is_dir());
+        assert!(untouched.is_dir());
+        assert!(namespace.is_dir());
+
+        delete_retired_cache_child(&retired).expect("delete retired cache child");
+        assert!(!retired.exists());
+        assert!(untouched.is_dir());
+        assert!(namespace.is_dir());
+    }
+
+    #[test]
+    fn cache_cleanup_rejects_unsafe_lix_ids() {
+        let root = TestCacheRoot::new("invalid-cache-child");
+
+        assert_eq!(cache_child_path(&root.0, "../escape"), None);
+        assert!(retire_cache_child(&root.0, "../escape", 1).is_err());
+        assert!(root.0.is_dir());
+    }
+
+    #[test]
+    fn cache_base_lease_excludes_a_second_backend_namespace_owner() {
+        let root = TestCacheRoot::new("cache-root-lease");
+        let first_namespace = namespace_root(&root.0, "https://first.example");
+        let second_namespace = namespace_root(&root.0, "https://second.example");
+        assert_ne!(first_namespace, second_namespace);
+        let first = CacheRootLease::acquire(&root.0).expect("acquire first cache-root lease");
+        prepare_cache_namespace(&root.0, &first_namespace)
+            .expect("prepare first backend namespace");
+        let error = CacheRootLease::acquire(&root.0).expect_err("reject second cache-root lease");
+        assert!(
+            format!("{error:#}").contains("already owned by another lixray process"),
+            "unexpected cache-root lease error: {error:#}"
+        );
+        drop(first);
+        CacheRootLease::acquire(&root.0).expect("acquire cache-root lease after release");
+    }
+
+    #[test]
+    fn cache_root_lease_outlives_manager_state_on_drop() {
+        let root = TestCacheRoot::new("cache-root-drop-order");
+        let observed_lease_held = Arc::new(AtomicBool::new(false));
+        let manager = Arc::new(LixRuntimeManager {
+            backend: StorageBackend::Memory {
+                object_store: Arc::new(InMemory::new()),
+            },
+            max_open_lixes: 1,
+            state: Mutex::new(ManagerState {
+                state_drop_probe: Some(CacheRootLeaseDropProbe {
+                    root: root.0.clone(),
+                    observed_lease_held: Arc::clone(&observed_lease_held),
+                }),
+                ..ManagerState::default()
+            }),
+            _cache_root_lease: Some(
+                CacheRootLease::acquire(&root.0).expect("acquire cache-root lease"),
+            ),
+            open_gate: None,
+        });
+        assert!(manager.has_state_drop_probe());
+
+        drop(manager);
+
+        assert!(
+            observed_lease_held.load(Ordering::SeqCst),
+            "manager state must drop before releasing the cache-root lease"
+        );
+        CacheRootLease::acquire(&root.0).expect("lease is released after manager state drops");
+    }
+
+    #[test]
+    fn cache_namespace_setup_reaps_only_managed_current_and_inactive_entries() {
+        let root = TestCacheRoot::new("cache-root-reap");
+        let current = namespace_root(&root.0, "https://current.example");
+        let inactive = namespace_root(&root.0, "https://inactive.example");
+        let retired = retired_cache_path(&current, "lix-a", 7).expect("valid retired path");
+        std::fs::create_dir_all(retired.join("nested")).expect("create retired cache child");
+        std::fs::write(retired.join("nested/cache-part"), b"cached bytes")
+            .expect("write retired cache part");
+        let stale_current_lix = current.join("lix-stale");
+        let current_unknown = current.join(".operator-notes");
+        std::fs::create_dir_all(stale_current_lix.join("nested"))
+            .expect("create stale current Lix cache");
+        std::fs::write(stale_current_lix.join("nested/cache-part"), b"cached bytes")
+            .expect("write stale current Lix cache part");
+        std::fs::create_dir_all(&current_unknown).expect("create current unknown entry");
+        std::fs::create_dir_all(inactive.join("lix-old")).expect("create inactive namespace");
+        std::fs::write(inactive.join("lix-old/cache-part"), b"cached bytes")
+            .expect("write inactive namespace part");
+        let legacy_trash = root.0.join(".trash/legacy");
+        let legacy_v1_lix = root.0.join("v1/legacy");
+        std::fs::create_dir_all(&legacy_trash).expect("create legacy trash");
+        std::fs::create_dir_all(&legacy_v1_lix).expect("create legacy Lix cache");
+
+        let _lease = CacheRootLease::acquire(&root.0).expect("acquire base cache lease");
+        prepare_cache_namespace(&root.0, &current)
+            .expect("reap active trash and inactive namespace");
+
+        assert!(!retired.exists());
+        assert!(!inactive.exists());
+        assert!(!stale_current_lix.exists());
+        assert!(current.is_dir());
+        assert!(current_unknown.is_dir());
+        assert!(legacy_trash.is_dir());
+        assert!(legacy_v1_lix.is_dir());
+        assert!(root.0.is_dir());
+    }
+
+    #[test]
+    fn cache_namespace_setup_leaves_unknown_parent_entries_untouched() {
+        let root = TestCacheRoot::new("cache-root-unknown-namespace");
+        let current = namespace_root(&root.0, "https://current.example");
+        let unknown = root.0.join(CACHE_NAMESPACE_PARENT).join("operator-notes");
+        std::fs::create_dir_all(&unknown).expect("create unknown namespace entry");
+
+        let _lease = CacheRootLease::acquire(&root.0).expect("acquire base cache lease");
+        prepare_cache_namespace(&root.0, &current)
+            .expect("leave unknown namespace entry untouched");
+
+        assert!(unknown.is_dir());
+        assert!(current.is_dir());
+    }
+
+    #[test]
+    fn cache_namespace_setup_refuses_unexpected_active_trash_children() {
+        let root = TestCacheRoot::new("cache-root-reap-unexpected");
+        let current = namespace_root(&root.0, "https://current.example");
+        std::fs::create_dir_all(current.join(".trash/unmanaged"))
+            .expect("create unexpected retired cache child");
+
+        let _lease = CacheRootLease::acquire(&root.0).expect("acquire base cache lease");
+        let error = prepare_cache_namespace(&root.0, &current)
+            .expect_err("refuse an unexpected retired cache child");
+
+        assert!(format!("{error:#}").contains("unexpected retired cache child"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_namespace_setup_rejects_symlinked_namespace_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = TestCacheRoot::new("cache-root-symlinked-parent");
+        let outside = root.0.join("outside");
+        std::fs::create_dir_all(&outside).expect("create symlink target");
+        symlink(&outside, root.0.join(CACHE_NAMESPACE_PARENT))
+            .expect("create namespace parent symlink");
+        let current = namespace_root(&root.0, "https://current.example");
+
+        let _lease = CacheRootLease::acquire(&root.0).expect("acquire base cache lease");
+        let error = prepare_cache_namespace(&root.0, &current)
+            .expect_err("reject symlinked namespace parent");
+
+        assert!(format!("{error:#}").contains("must be a real directory"));
+        assert!(outside.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_namespace_setup_rejects_symlinked_current_namespace() {
+        use std::os::unix::fs::symlink;
+
+        let root = TestCacheRoot::new("cache-root-symlinked-current");
+        let current = namespace_root(&root.0, "https://current.example");
+        let outside = root.0.join("outside");
+        std::fs::create_dir_all(current.parent().expect("namespace parent"))
+            .expect("create namespace parent");
+        std::fs::create_dir_all(&outside).expect("create symlink target");
+        symlink(&outside, &current).expect("create current namespace symlink");
+
+        let _lease = CacheRootLease::acquire(&root.0).expect("acquire base cache lease");
+        let error = prepare_cache_namespace(&root.0, &current)
+            .expect_err("reject symlinked current namespace");
+
+        assert!(format!("{error:#}").contains("must be a real directory"));
+        assert!(outside.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_namespace_setup_rejects_symlinked_inactive_namespace() {
+        use std::os::unix::fs::symlink;
+
+        let root = TestCacheRoot::new("cache-root-symlinked-inactive");
+        let current = namespace_root(&root.0, "https://current.example");
+        let inactive = namespace_root(&root.0, "https://inactive.example");
+        let outside = root.0.join("outside");
+        std::fs::create_dir_all(inactive.parent().expect("namespace parent"))
+            .expect("create namespace parent");
+        std::fs::create_dir_all(&outside).expect("create symlink target");
+        symlink(&outside, &inactive).expect("create inactive namespace symlink");
+
+        let _lease = CacheRootLease::acquire(&root.0).expect("acquire base cache lease");
+        let error = prepare_cache_namespace(&root.0, &current)
+            .expect_err("refuse to remove a symlinked inactive namespace");
+
+        assert!(format!("{error:#}").contains("refuse to delete non-directory"));
+        assert!(outside.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_base_lease_rejects_a_symlinked_lock() {
+        use std::os::unix::fs::symlink;
+
+        let root = TestCacheRoot::new("cache-root-symlinked-lock");
+        let outside = root.0.join("outside-lock");
+        std::fs::write(&outside, b"not a lock").expect("write lock target");
+        symlink(&outside, root.0.join(CacheRootLease::OWNER_LOCK_NAME))
+            .expect("create cache lock symlink");
+
+        let error = CacheRootLease::acquire(&root.0).expect_err("reject cache lock symlink");
+
+        assert!(format!("{error:#}").contains("must be a regular file"));
+        assert_eq!(
+            std::fs::read(&outside).expect("read lock target"),
+            b"not a lock"
+        );
+    }
+
+    #[test]
+    fn cache_namespace_setup_rejects_malformed_namespace_paths() {
+        let root = TestCacheRoot::new("cache-root-malformed-namespace");
+        let malformed = root
+            .0
+            .join(CACHE_NAMESPACE_PARENT)
+            .join("not-a-digest")
+            .join("unexpected-child");
+
+        let _lease = CacheRootLease::acquire(&root.0).expect("acquire base cache lease");
+        let error = prepare_cache_namespace(&root.0, &malformed)
+            .expect_err("reject malformed namespace path");
+
+        assert!(format!("{error:#}").contains("invalid SlateDB cache namespace"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_deletion_refuses_nested_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let root = TestCacheRoot::new("cache-delete-symlink");
+        let cache = root.0.join("retired-cache");
+        let outside = root.0.join("outside");
+        std::fs::create_dir_all(&cache).expect("create retired cache");
+        std::fs::create_dir_all(&outside).expect("create symlink target");
+        std::fs::write(outside.join("keep"), b"outside").expect("write symlink target file");
+        symlink(&outside, cache.join("escape")).expect("create nested cache symlink");
+
+        let error = delete_cache_directory(&cache, "test cache")
+            .expect_err("refuse to recurse through nested cache symlink");
+
+        assert!(format!("{error:#}").contains("refuse to recurse through symlink"));
+        assert!(outside.join("keep").is_file());
+    }
+
+    #[tokio::test]
+    async fn same_lix_open_waits_for_eviction_cleanup() {
+        let manager = memory_manager(1);
+        let (done, cleanup_waiter) = watch::channel(CleanupState::Running);
+        {
+            let mut state = manager.state.lock().await;
+            state.cleaning.insert(
+                "lix-a".to_string(),
+                CleanupTombstone {
+                    sequence: 1,
+                    done: cleanup_waiter,
+                },
+            );
+        }
+
+        let waiting_manager = Arc::clone(&manager);
+        let mut opening = tokio::spawn(async move { waiting_manager.get("lix-a").await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut opening)
+                .await
+                .is_err(),
+            "same-ID open must wait until cache retirement has finished"
+        );
+
+        manager.finish_cleanup("lix-a", 1, done, Ok(())).await;
+        let service = tokio::time::timeout(Duration::from_secs(10), opening)
+            .await
+            .expect("same-ID open should resume after cleanup")
+            .expect("same-ID open task")
+            .expect("open in-memory Lix");
+        drop(service);
+    }
+
+    #[tokio::test]
+    async fn new_lix_open_waits_for_inflight_cleanup_capacity() {
+        let manager = memory_manager(1);
+        let (sequence, done) = {
+            let mut state = manager.state.lock().await;
+            start_cleanup(&mut state, "lix-a".to_string()).expect("start test cleanup")
+        };
+
+        let waiting_manager = Arc::clone(&manager);
+        let mut opening = tokio::spawn(async move { waiting_manager.get("lix-b").await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut opening)
+                .await
+                .is_err(),
+            "an evicting runtime must retain its capacity slot"
+        );
+
+        manager
+            .finish_cleanup("lix-a", sequence, done, Ok(()))
+            .await;
+        let service = tokio::time::timeout(Duration::from_secs(10), opening)
+            .await
+            .expect("new Lix should open after cleanup")
+            .expect("new Lix open task")
+            .expect("open in-memory Lix");
+        drop(service);
+    }
+
+    #[tokio::test]
+    async fn failed_cleanup_keeps_cold_admission_closed() {
+        let manager = memory_manager(1);
+        let (sequence, done) = {
+            let mut state = manager.state.lock().await;
+            start_cleanup(&mut state, "lix-a".to_string()).expect("start test cleanup")
+        };
+        manager
+            .finish_cleanup(
+                "lix-a",
+                sequence,
+                done,
+                Err(anyhow::anyhow!("test-controlled cache delete failure")),
+            )
+            .await;
+
+        assert!(matches!(
+            manager.get("lix-b").await,
+            Err(LixRuntimeError::Cleanup(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn recovery_removes_the_runtime_before_a_same_id_reopen() {
+        let manager = memory_manager(1);
+        let service = manager.get("lix-a").await.expect("open Lix to recover");
+        manager.recover("lix-a", &service).await;
+        drop(service);
+
+        let reopened = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                match manager.get("lix-a").await {
+                    Ok(service) => break service,
+                    Err(LixRuntimeError::Recovering) => {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                    Err(error) => panic!("unexpected recovery result: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("recovery must release the runtime");
+        drop(reopened);
     }
 
     #[tokio::test]
