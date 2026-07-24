@@ -1,6 +1,7 @@
 use crate::Config;
 use anyhow::{Context, Result};
 use axum::Router;
+use blake3::Hasher;
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
 #[cfg(test)]
 use object_store::memory::InMemory;
@@ -10,6 +11,7 @@ use object_store::{path::Path as ObjectPath, ClientConfigKey, ObjectStoreExt};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::runtime::Handle;
@@ -28,6 +30,10 @@ const S3_REQUEST_BUDGET: S3RequestBudget = S3RequestBudget {
     retry_timeout: Duration::from_secs(30),
     max_retries: 1,
 };
+
+const CACHE_NAMESPACE_LAYOUT: &[u8] = b"lixray-slatedb-cache\0v1";
+// This cannot be a legacy Lix cache child: Lix IDs do not permit dots.
+const CACHE_NAMESPACE_PARENT: &str = ".lixray-cache-v1";
 
 #[derive(Clone, Copy)]
 struct S3RequestBudget {
@@ -91,6 +97,14 @@ impl LixRuntimeManager {
     pub fn new(config: &Config) -> Result<Arc<Self>> {
         let storage = &config.storage;
         let request_budget = S3_REQUEST_BUDGET;
+        let cache_root = cache_namespace_root(
+            &storage.cache.root_folder,
+            &storage.endpoint,
+            &storage.bucket,
+            &storage.region,
+            &storage.prefix,
+            &storage.access_key_id,
+        );
         let object_store: Arc<dyn ObjectStore> = Arc::new(
             AmazonS3Builder::new()
                 .with_endpoint(&storage.endpoint)
@@ -109,7 +123,11 @@ impl LixRuntimeManager {
             object_store,
             prefix: storage.prefix.clone(),
             cache: SlateDBCacheOptions {
-                root_folder: storage.cache.root_folder.clone(),
+                // SlateDB's persisted cache keys do not include the S3
+                // endpoint or bucket. Namespace the physical root so a
+                // restart pointed at a different backend cannot reuse bytes
+                // cached for the same Lix ID and object path.
+                root_folder: cache_root,
                 max_disk_cache_bytes: per_lix_usize(
                     storage.cache.max_disk_cache_bytes,
                     config.max_open_lixes,
@@ -427,6 +445,29 @@ fn valid_lix_id(lix_id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
+fn cache_namespace_root(
+    base_root: &Path,
+    endpoint: &str,
+    bucket: &str,
+    region: &str,
+    prefix: &str,
+    access_key_id: &str,
+) -> PathBuf {
+    let mut hasher = Hasher::new();
+    hasher.update(CACHE_NAMESPACE_LAYOUT);
+    // Access-key IDs are part of the identity for S3-compatible stores that
+    // route an identically named bucket to different tenants. Hash it with the
+    // public location fields, but never put credential material in a path.
+    for component in [endpoint, bucket, region, prefix, access_key_id] {
+        let bytes = component.as_bytes();
+        hasher.update(&u64::try_from(bytes.len()).unwrap_or(u64::MAX).to_be_bytes());
+        hasher.update(bytes);
+    }
+    base_root
+        .join(CACHE_NAMESPACE_PARENT)
+        .join(hasher.finalize().to_hex().to_string())
+}
+
 fn idle_lru_lix(entries: &HashMap<String, RuntimeEntry>) -> Option<String> {
     entries
         .iter()
@@ -476,6 +517,131 @@ mod tests {
 
     fn memory_manager(max_open_lixes: usize) -> Arc<LixRuntimeManager> {
         LixRuntimeManager::new_in_memory(max_open_lixes)
+    }
+
+    #[test]
+    fn cache_namespace_is_stable_backend_scoped_and_hides_identity() {
+        let base_root = Path::new("/var/cache/lixray");
+        let primary = cache_namespace_root(
+            base_root,
+            "https://s3.us-east-1.example",
+            "tenant-a",
+            "us-east-1",
+            "production/lix",
+            "AKIA-TENANT-A",
+        );
+
+        assert_eq!(
+            primary,
+            cache_namespace_root(
+                base_root,
+                "https://s3.us-east-1.example",
+                "tenant-a",
+                "us-east-1",
+                "production/lix",
+                "AKIA-TENANT-A",
+            )
+        );
+        assert!(primary.starts_with(base_root.join(CACHE_NAMESPACE_PARENT)));
+        let digest = primary
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("namespace digest is UTF-8");
+        assert_eq!(digest.len(), 64);
+        assert!(digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+        let rendered = primary.to_string_lossy();
+        assert!(!rendered.contains("s3.us-east-1.example"));
+        assert!(!rendered.contains("tenant-a"));
+        assert!(!rendered.contains("production/lix"));
+        assert!(!rendered.contains("AKIA-TENANT-A"));
+
+        for changed_backend in [
+            cache_namespace_root(
+                base_root,
+                "https://s3.us-west-2.example",
+                "tenant-a",
+                "us-east-1",
+                "production/lix",
+                "AKIA-TENANT-A",
+            ),
+            cache_namespace_root(
+                base_root,
+                "https://s3.us-east-1.example",
+                "tenant-b",
+                "us-east-1",
+                "production/lix",
+                "AKIA-TENANT-A",
+            ),
+            cache_namespace_root(
+                base_root,
+                "https://s3.us-east-1.example",
+                "tenant-a",
+                "us-west-2",
+                "production/lix",
+                "AKIA-TENANT-A",
+            ),
+            cache_namespace_root(
+                base_root,
+                "https://s3.us-east-1.example",
+                "tenant-a",
+                "us-east-1",
+                "staging/lix",
+                "AKIA-TENANT-A",
+            ),
+            cache_namespace_root(
+                base_root,
+                "https://s3.us-east-1.example",
+                "tenant-a",
+                "us-east-1",
+                "production/lix",
+                "AKIA-TENANT-B",
+            ),
+            // Length-prefix every input to prevent concatenation ambiguity.
+            cache_namespace_root(base_root, "ab", "c", "", "", "key"),
+        ] {
+            assert_ne!(primary, changed_backend);
+        }
+        assert_ne!(
+            cache_namespace_root(base_root, "a", "bc", "", "", "key"),
+            cache_namespace_root(base_root, "ab", "c", "", "", "key")
+        );
+    }
+
+    #[test]
+    fn cache_namespace_separates_same_lix_id_across_backends() {
+        let base_root = Path::new("/var/cache/lixray");
+        let first = cache_namespace_root(
+            base_root,
+            "https://first.example",
+            "shared-name",
+            "auto",
+            "workspace",
+            "AKIA-SHARED",
+        )
+        .join("lix-123");
+        let second = cache_namespace_root(
+            base_root,
+            "https://second.example",
+            "shared-name",
+            "auto",
+            "workspace",
+            "AKIA-SHARED",
+        )
+        .join("lix-123");
+
+        assert_ne!(first, second);
+        assert!(first.starts_with(base_root.join(CACHE_NAMESPACE_PARENT)));
+        assert!(second.starts_with(base_root.join(CACHE_NAMESPACE_PARENT)));
+        assert_eq!(
+            first.file_name().and_then(|name| name.to_str()),
+            Some("lix-123")
+        );
+        assert_eq!(
+            second.file_name().and_then(|name| name.to_str()),
+            Some("lix-123")
+        );
     }
 
     #[tokio::test]
