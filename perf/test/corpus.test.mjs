@@ -33,6 +33,21 @@ test("the corpus is deterministic and has 100 valid files per format", () => {
   }
 });
 
+test("the 5,000-file corpus preserves deterministic mixed-format proportions", () => {
+  const first = buildCorpus(5_000);
+  const second = buildCorpus(5_000);
+  const manifest = corpusManifest(first);
+
+  assert.equal(first.length, 5_000);
+  assert.deepEqual(manifest, corpusManifest(second));
+  assert.deepEqual(
+    manifest.extensionCounts,
+    Object.fromEntries(
+      formatSpecifications.map(({ extension }) => [extension, 500]),
+    ),
+  );
+});
+
 test("structured corpus members are parseable and binary containers are valid", () => {
   const corpus = buildCorpus();
   const find = (extension) =>

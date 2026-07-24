@@ -3,6 +3,7 @@ import { deflateSync } from "node:zlib";
 
 export const CORPUS_VERSION = 1;
 export const CORPUS_FILE_COUNT = 1_000;
+export const SUPPORTED_CORPUS_FILE_COUNTS = Object.freeze([1_000, 5_000]);
 
 export const formatSpecifications = Object.freeze([
   Object.freeze({ extension: "json", bytes: 4 * 1024 }),
@@ -17,15 +18,16 @@ export const formatSpecifications = Object.freeze([
   Object.freeze({ extension: "log", bytes: 8 * 1024 }),
 ]);
 
-export function buildCorpus() {
-  return buildCorpusIndex().map((file) => ({
+export function buildCorpus(fileCount = CORPUS_FILE_COUNT) {
+  return buildCorpusIndex(fileCount).map((file) => ({
     path: file.path,
     data: contentFor(file.extension, file.bytes, file.seed),
   }));
 }
 
-export function buildCorpusIndex() {
-  return Array.from({ length: CORPUS_FILE_COUNT }, (_, index) => {
+export function buildCorpusIndex(fileCount = CORPUS_FILE_COUNT) {
+  assertSupportedCorpusFileCount(fileCount);
+  return Array.from({ length: fileCount }, (_, index) => {
     const specification = formatSpecifications[index % formatSpecifications.length];
     return {
       path: `/corpus/${String(index).padStart(4, "0")}.${
@@ -36,6 +38,14 @@ export function buildCorpusIndex() {
       seed: index,
     };
   });
+}
+
+function assertSupportedCorpusFileCount(fileCount) {
+  if (!SUPPORTED_CORPUS_FILE_COUNTS.includes(fileCount)) {
+    throw new Error(
+      `corpus file count must be one of: ${SUPPORTED_CORPUS_FILE_COUNTS.join(", ")}`,
+    );
+  }
 }
 
 export function contentFor(extension, bytes, seed) {
