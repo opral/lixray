@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { resolve } from "node:path";
 import test from "node:test";
 
@@ -13,6 +14,71 @@ test("accepts the separator forwarded by pnpm scripts", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^Usage:/m);
   assert.match(result.stdout, /--files <1000\|5000\|10000>/);
+  assert.match(result.stdout, /--storage-backend <slatedb\|rocksdb>/);
+});
+
+test("rejects a declared backend that disagrees with health before handshake", async (t) => {
+  let healthRequests = 0;
+  let protocolRequests = 0;
+  const server = createServer((request, response) => {
+    if (request.url === "/healthz") {
+      healthRequests += 1;
+      if (healthRequests === 1) {
+        response.statusCode = 503;
+        response.end("starting");
+        return;
+      }
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({
+          ok: true,
+          service: "lix-server",
+          storageBackend: "slatedb",
+          storageLayout: "lix-slatedb-lz4-v1",
+        }),
+      );
+      return;
+    }
+    protocolRequests += 1;
+    response.statusCode = 500;
+    response.end("protocol must not be opened after an identity mismatch");
+  });
+  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  t.after(
+    () =>
+      new Promise((resolveClose, rejectClose) =>
+        server.close((error) => (error ? rejectClose(error) : resolveClose())),
+      ),
+  );
+  const address = server.address();
+  assert.notEqual(typeof address, "string");
+
+  const result = await runRunner([
+    "--workspace",
+    "perf-attestation-mismatch",
+    "--operation",
+    "read-point-4k",
+    "--files",
+    "1000",
+    "--commits",
+    "2",
+    "--warmups",
+    "0",
+    "--samples",
+    "1",
+    "--url",
+    `http://127.0.0.1:${address.port}`,
+    "--storage-backend",
+    "rocksdb",
+  ]);
+
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(
+    result.stderr,
+    /declared storage backend rocksdb does not match server attestation slatedb/,
+  );
+  assert.equal(healthRequests, 2);
+  assert.equal(protocolRequests, 0);
 });
 
 test("rejects mutating warmups before opening a server connection", () => {
@@ -125,3 +191,23 @@ test("requires enough commits to cover all fixed-size seed commits", () => {
     /--commits must be at least 6 for --files 5000: genesis plus 5 seed commits/,
   );
 });
+
+function runRunner(args) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(process.execPath, [runner, "--", ...args]);
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.once("error", rejectRun);
+    child.once("close", (status, signal) => {
+      resolveRun({ status, signal, stdout, stderr });
+    });
+  });
+}

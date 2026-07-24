@@ -39,6 +39,12 @@ const CACHE_NAMESPACE_LAYOUT: &[u8] = b"lixray-slatedb-cache\0v1";
 // This cannot be a legacy Lix cache child: Lix IDs do not permit dots.
 const CACHE_NAMESPACE_PARENT: &str = ".lixray-cache-v1";
 
+// These identifiers describe the physical store opened by this manager, not a
+// benchmark caller's requested cohort. Keep them alongside the adapter so a
+// future backend or layout change must update the server attestation too.
+const STORAGE_BACKEND: &str = "slatedb";
+const STORAGE_LAYOUT: &str = "lix-slatedb-lz4-v1";
+
 #[derive(Clone, Copy)]
 struct S3RequestBudget {
     request_timeout: Duration,
@@ -246,6 +252,14 @@ impl LixRuntimeManager {
             open_gate: None,
             _cache_root_lease: None,
         })
+    }
+
+    pub(crate) fn storage_backend(&self) -> &'static str {
+        STORAGE_BACKEND
+    }
+
+    pub(crate) fn storage_layout(&self) -> &'static str {
+        STORAGE_LAYOUT
     }
 
     pub(crate) async fn get(

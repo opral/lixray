@@ -97,8 +97,25 @@ pub fn router(
         })
 }
 
-async fn healthz() -> Json<serde_json::Value> {
-    Json(json!({"ok": true, "service": "lix-server"}))
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthResponse {
+    ok: bool,
+    service: &'static str,
+    storage_backend: &'static str,
+    storage_layout: &'static str,
+}
+
+async fn healthz(State(state): State<AppState>) -> Json<HealthResponse> {
+    // The storage identity belongs to the runtime manager. Do not accept it
+    // from a request or a benchmark invocation: reports must describe the
+    // backend the server actually opened.
+    Json(HealthResponse {
+        ok: true,
+        service: "lix-server",
+        storage_backend: state.manager.storage_backend(),
+        storage_layout: state.manager.storage_layout(),
+    })
 }
 
 async fn lix_protocol(
@@ -446,7 +463,15 @@ mod tests {
             .expect("health response");
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(json_body(response).await["service"], "lix-server");
+        assert_eq!(
+            json_body(response).await,
+            json!({
+                "ok": true,
+                "service": "lix-server",
+                "storageBackend": "slatedb",
+                "storageLayout": "lix-slatedb-lz4-v1",
+            })
+        );
     }
 
     #[tokio::test]

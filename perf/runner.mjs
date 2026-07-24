@@ -15,7 +15,12 @@ import {
   SEED_FILES_PER_COMMIT,
   SUPPORTED_CORPUS_FILE_COUNTS,
 } from "./lib/corpus.mjs";
-import { ProtocolClient, ProtocolError } from "./lib/protocol.mjs";
+import {
+  ProtocolClient,
+  ProtocolError,
+  readServerStorageIdentity,
+  ServerIdentityError,
+} from "./lib/protocol.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
@@ -52,6 +57,18 @@ async function main(args) {
   const revisions = await readRevisions(config.targetRevision);
 
   try {
+    const storageIdentity = await readStorageIdentityWhenReady(
+      config.baseUrl,
+      config.readyTimeoutMs,
+    );
+    if (
+      config.declaredStorageBackend !== null &&
+      config.declaredStorageBackend !== storageIdentity.storageBackend
+    ) {
+      throw new Error(
+        `declared storage backend ${config.declaredStorageBackend} does not match server attestation ${storageIdentity.storageBackend}`,
+      );
+    }
     const handshake = await openWhenReady(client, config.readyTimeoutMs);
     const benchmark = await runBenchmark(client, {
       operation: config.operation,
@@ -68,7 +85,7 @@ async function main(args) {
       onProgress: config.quiet ? undefined : showProgress,
     });
     const report = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       benchmark: "lixray-e2e-crud",
       startedAt,
       finishedAt: new Date().toISOString(),
@@ -76,6 +93,9 @@ async function main(args) {
       target: {
         baseUrl: config.baseUrl,
         workspaceId: config.workspaceId,
+        storageBackend: storageIdentity.storageBackend,
+        storageLayout: storageIdentity.storageLayout,
+        storageCohort: config.storageCohort,
       },
       methodology: benchmark.methodology,
       corpus: benchmark.corpus,
@@ -140,6 +160,8 @@ function parseArgs(args) {
     "--output",
     "--ready-timeout-ms",
     "--target-revision",
+    "--storage-backend",
+    "--storage-cohort",
     ...booleanFlags,
   ]);
 
@@ -253,6 +275,11 @@ function parseArgs(args) {
     values.get("--output") ??
       `perf/results/${workspaceId}-${operation}.json`,
   );
+  const declaredStorageBackend = optionalStorageBackend(
+    values,
+    "--storage-backend",
+  );
+  const storageCohort = optionalStorageCohort(values, "--storage-cohort");
 
   return {
     baseUrl,
@@ -270,9 +297,58 @@ function parseArgs(args) {
     readyTimeoutMs,
     outputPath,
     targetRevision: values.get("--target-revision"),
+    declaredStorageBackend,
+    storageCohort,
     preseeded,
     quiet: values.has("--quiet"),
   };
+}
+
+function optionalStorageBackend(values, name) {
+  const value = values.get(name);
+  if (value === undefined) {
+    return null;
+  }
+  if (!["slatedb", "rocksdb"].includes(value)) {
+    throw new Error(`${name} must be either "slatedb" or "rocksdb"`);
+  }
+  return value;
+}
+
+function optionalStorageCohort(values, name) {
+  const value = values.get(name);
+  if (value === undefined) {
+    return null;
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
+    throw new Error(
+      `${name} must start with a letter or digit and use at most 128 letters, digits, '.', '_' or '-'`,
+    );
+  }
+  return value;
+}
+
+async function readStorageIdentityWhenReady(baseUrl, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+
+  while (Date.now() < deadline) {
+    try {
+      return await readServerStorageIdentity({ baseUrl });
+    } catch (error) {
+      lastError = error;
+      if (error instanceof ServerIdentityError && !error.retryable) {
+        throw error;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+    }
+  }
+
+  throw new Error(
+    `lix-server storage identity was not ready after ${timeoutMs}ms: ${
+      lastError instanceof Error ? lastError.message : lastError
+    }`,
+  );
 }
 
 async function openWhenReady(client, timeoutMs) {
@@ -417,7 +493,9 @@ function usage() {
     [--file-write-shape <update|upsert>] \\
     [--hot-session] \\
     [--url <lix-server-url>] [--output <path>] \\
-    [--target-revision <deployed-revision>] [--preseeded] [--quiet]
+    [--target-revision <deployed-revision>] \\
+    [--storage-backend <slatedb|rocksdb>] [--storage-cohort <label>] \\
+    [--preseeded] [--quiet]
 
 Each invocation seeds a new deterministic workspace with ${SUPPORTED_CORPUS_FILE_COUNTS.join(
   ", ",
