@@ -11,8 +11,8 @@
     "perf:up": "docker compose up --build -d lix-server",
     "perf:down": "docker compose down",
     "perf:reset": "docker compose rm --stop --force lix-server && docker compose run --rm storage-reset",
-    "perf:seed": "node perf/runner.mjs seed",
-    "perf:run": "node perf/runner.mjs run",
+    "perf:run": "node perf/runner.mjs",
+    "perf:test": "node --test perf/test/*.test.mjs",
     "postinstall": "pnpm --dir web-app lix:build"
   },
   "devDependencies": {

@@ -11,9 +11,12 @@ use opentelemetry_sdk::{
     Resource,
 };
 use std::{collections::HashMap, env, time::Duration};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{
+    fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter,
+};
 
 const DEFAULT_POSTHOG_HOST: &str = "https://us.i.posthog.com";
+const PERF_SPAN_EVENTS_ENV: &str = "LIXRAY_PERF_SPANS";
 
 pub(crate) fn init() -> Option<SdkTracerProvider> {
     let provider = match posthog_provider_from_env() {
@@ -29,14 +32,25 @@ pub(crate) fn init() -> Option<SdkTracerProvider> {
         let tracer = provider.tracer("lix-server");
         tracing_opentelemetry::layer().with_tracer(tracer)
     });
+    let span_events = if perf_span_events_enabled() {
+        FmtSpan::CLOSE
+    } else {
+        FmtSpan::NONE
+    };
 
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_span_events(span_events))
         .with(telemetry_layer)
         .init();
 
     provider
+}
+
+fn perf_span_events_enabled() -> bool {
+    env::var(PERF_SPAN_EVENTS_ENV)
+        .ok()
+        .is_some_and(|value| matches!(value.trim(), "1" | "true"))
 }
 
 fn posthog_provider_from_env() -> Result<Option<SdkTracerProvider>> {
@@ -145,6 +159,20 @@ mod tests {
         env::remove_var("POSTHOG_PROJECT_TOKEN");
         assert!(posthog_provider_from_env().unwrap().is_none());
         env::remove_var("POSTHOG_ENVIRONMENT");
+    }
+
+    #[test]
+    fn performance_span_close_events_are_opt_in() {
+        let _guard = env_lock().lock().unwrap();
+        env::remove_var(PERF_SPAN_EVENTS_ENV);
+        assert!(!perf_span_events_enabled());
+        env::set_var(PERF_SPAN_EVENTS_ENV, "0");
+        assert!(!perf_span_events_enabled());
+        env::set_var(PERF_SPAN_EVENTS_ENV, "1");
+        assert!(perf_span_events_enabled());
+        env::set_var(PERF_SPAN_EVENTS_ENV, "true");
+        assert!(perf_span_events_enabled());
+        env::remove_var(PERF_SPAN_EVENTS_ENV);
     }
 
     #[test]

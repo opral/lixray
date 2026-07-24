@@ -119,26 +119,27 @@ The fast performance loop talks directly to the real `lix-server` workspace
 service:
 
 ```text
+perf:reset
+-> delete one explicitly named perf-* workspace prefix
+
 perf:up
 -> build and start lix-server
 
-perf:seed
--> load a deterministic slow-workspace fixture
-
 perf:run
--> warm up
--> replay named queries
--> report per-query latency
--> write a machine-readable result
-
-perf:run --compare <baseline>
--> show the before/after result
+-> create 1,000 deterministic mixed-format files
+-> extend history to an exact requested total commit count
+-> warm or settle only when explicitly requested
+-> measure one asserted CRUD operation family
+-> verify final file and commit accounting after timing
+-> write a machine-readable result with revision and methodology metadata
 ```
 
-Fixtures, workloads, and representative baselines live in the repository.
-Initially, wall-clock latency with warmup and repeated runs is sufficient. More
-detailed profiling and regression thresholds can be added after the loop is
-reliable.
+Controlled mutation comparisons clone a gracefully closed, revision-native
+template into fresh workspaces and start a fresh server process for each
+single timed request. Read comparisons use repeated distributions. The corpus,
+operation matrix, isolation rules, and result schema live in
+`perf/README.md`; measured findings and raw sample summaries live in
+`perf/FINDINGS.md`.
 
 Every PR runs `pnpm test:e2e` in CI. One outer browser test proves the full
 path:

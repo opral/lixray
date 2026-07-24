@@ -1,285 +1,367 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { performance } from "node:perf_hooks";
+import { promisify } from "node:util";
+import {
+  isMutationOperation,
+  operationNames,
+  runBenchmark,
+} from "./lib/benchmark.mjs";
+import { ProtocolClient, ProtocolError } from "./lib/protocol.mjs";
 
+const execFileAsync = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
-const baseUrl = (process.env.LIXRAY_PERF_URL ?? "http://127.0.0.1:8080").replace(
-  /\/$/,
-  "",
-);
-const internalToken = process.env.LIXRAY_INTERNAL_TOKEN?.trim();
-const storageBackend = process.env.LIXRAY_PERF_STORAGE ?? "s3-minio";
 
-const [command, ...args] = process.argv.slice(2);
-
-if (command === "seed") {
-  await seed(args);
-} else if (command === "run") {
-  await run(args);
-} else {
-  fail("usage: node perf/runner.mjs <seed|run> [options]");
+try {
+  await main(process.argv.slice(2));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
 }
 
-async function seed(args) {
-  const fixturePath = resolve(
-    root,
-    option(args, "--fixture") ?? "perf/fixtures/slow-workspace.json",
-  );
-  const fixture = JSON.parse(await readFile(fixturePath, "utf8"));
-  validateFixture(fixture);
-  await waitForServer(fixture.workspaceId);
-  const started = performance.now();
+async function main(args) {
+  // pnpm 10 forwards the conventional script/argument separator to the
+  // script itself. Accept exactly one leading separator so the documented
+  // `pnpm perf:run -- --workspace ...` form reaches the real option parser.
+  args = args[0] === "--" ? args.slice(1) : args;
 
-  const countResult = await execute(
-    fixture.workspaceId,
-    "SELECT COUNT(*) AS file_count FROM lix_file WHERE path LIKE '/perf/%'",
-    [],
-  );
-  const existingCount = Number(countResult.rows?.[0]?.[0]?.value ?? 0);
-  if (existingCount === fixture.fileCount) {
-    console.log(
-      `fixture already seeded: ${fixture.workspaceId} (${existingCount} files)`,
-    );
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(usage());
     return;
   }
-  if (existingCount > fixture.fileCount) {
-    fail(
-      `fixture contains ${existingCount} files, more than the expected ${fixture.fileCount}`,
-    );
-  }
-  if (existingCount > 0) {
-    console.log(
-      `resuming fixture seed: ${fixture.workspaceId} (${existingCount}/${fixture.fileCount} files)`,
-    );
-  }
 
-  const content = Buffer.alloc(fixture.contentBytes, "x").toString("base64");
-  for (
-    let offset = existingCount;
-    offset < fixture.fileCount;
-    offset += fixture.batchSize
-  ) {
-    const end = Math.min(offset + fixture.batchSize, fixture.fileCount);
-    const batch = fileUpsertBatch(offset, end, content);
-    const result = await execute(fixture.workspaceId, batch.sql, batch.params);
-    assertRowsAffected(result, end - offset, "fixture file upsert");
-    process.stdout.write(`\rseeded ${end}/${fixture.fileCount} files`);
-  }
-  process.stdout.write("\n");
+  const config = parseArgs(args);
+  const client = new ProtocolClient({
+    baseUrl: config.baseUrl,
+    workspaceId: config.workspaceId,
+    internalToken: process.env.LIXRAY_INTERNAL_TOKEN?.trim(),
+  });
 
-  const finalResult = await execute(
-    fixture.workspaceId,
-    "SELECT COUNT(*) AS file_count FROM lix_file WHERE path LIKE '/perf/%'",
-    [],
-  );
-  const finalCount = Number(finalResult.rows?.[0]?.[0]?.value ?? 0);
-  if (finalCount !== fixture.fileCount) {
-    fail(`seed verification failed: expected ${fixture.fileCount}, got ${finalCount}`);
+  let primaryError;
+  const startedAt = new Date().toISOString();
+  // Revision discovery runs git subprocesses. Finish it before opening the
+  // runtime so cold/preseeded measurements cannot overlap repository I/O.
+  const revisions = await readRevisions(config.targetRevision);
+
+  try {
+    const handshake = await openWhenReady(client, config.readyTimeoutMs);
+    const benchmark = await runBenchmark(client, {
+      operation: config.operation,
+      targetTotalCommits: config.targetTotalCommits,
+      preconditionReadRuns: config.preconditionReadRuns,
+      settleMs: config.settleMs,
+      warmupRuns: config.warmupRuns,
+      measuredRuns: config.measuredRuns,
+      preseeded: config.preseeded,
+      onProgress: config.quiet ? undefined : showProgress,
+    });
+    const report = {
+      schemaVersion: 2,
+      benchmark: "lixray-e2e-crud",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      revisions,
+      target: {
+        baseUrl: config.baseUrl,
+        workspaceId: config.workspaceId,
+      },
+      methodology: benchmark.methodology,
+      corpus: benchmark.corpus,
+      setup: {
+        handshake: {
+          elapsedMs: handshake.elapsedMs,
+          protocolVersion: handshake.protocolVersion,
+          activeBranchId: handshake.activeBranchId,
+          capabilities: handshake.capabilities,
+        },
+        ...benchmark.setup,
+      },
+      measurement: benchmark.measurement,
+      postTimingAccounting: benchmark.postTimingAccounting,
+      environment: {
+        node: process.version,
+        platform: process.platform,
+        architecture: process.arch,
+      },
+    };
+
+    await mkdir(dirname(config.outputPath), { recursive: true });
+    await writeFile(config.outputPath, `${JSON.stringify(report, null, 2)}\n`);
+    printResult(report, config.outputPath);
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    if (client.hasSession) {
+      try {
+        await client.close();
+      } catch (closeError) {
+        if (primaryError) {
+          console.error(
+            `session close also failed: ${
+              closeError instanceof Error ? closeError.message : closeError
+            }`,
+          );
+        } else {
+          throw closeError;
+        }
+      }
+    }
   }
-  console.log(
-    `fixture ready: ${fixture.workspaceId} (${finalCount} files) in ${Math.round(performance.now() - started)}ms`,
-  );
 }
 
-async function run(args) {
-  const workloadPath = resolve(
-    root,
-    option(args, "--workload") ?? "perf/workloads/slow-queries.json",
+function parseArgs(args) {
+  const values = new Map();
+  const booleanFlags = new Set(["--preseeded", "--quiet"]);
+  const allowed = new Set([
+    "--url",
+    "--workspace",
+    "--operation",
+    "--commits",
+    "--precondition-reads",
+    "--settle-ms",
+    "--warmups",
+    "--samples",
+    "--output",
+    "--ready-timeout-ms",
+    "--target-revision",
+    ...booleanFlags,
+  ]);
+
+  for (let index = 0; index < args.length; index += 1) {
+    const name = args[index];
+    if (!allowed.has(name)) {
+      throw new Error(`unknown option ${name}\n\n${usage()}`);
+    }
+    if (booleanFlags.has(name)) {
+      values.set(name, true);
+      continue;
+    }
+    const value = args[index + 1];
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`${name} requires a value`);
+    }
+    values.set(name, value);
+    index += 1;
+  }
+
+  const operation = required(values, "--operation");
+  if (!operationNames.includes(operation)) {
+    throw new Error(
+      `--operation must be one of: ${operationNames.join(", ")}`,
+    );
+  }
+
+  const workspaceId = required(values, "--workspace");
+  if (!/^perf-[A-Za-z0-9][A-Za-z0-9._-]{0,122}$/.test(workspaceId)) {
+    throw new Error(
+      "--workspace must start with 'perf-' and use at most 128 letters, digits, '.', '_' or '-'",
+    );
+  }
+
+  const targetTotalCommits = integer(values, "--commits", 1_000, 2);
+  const preconditionReadRuns = integer(
+    values,
+    "--precondition-reads",
+    0,
+    0,
   );
+  const settleMs = integer(values, "--settle-ms", 0, 0);
+  const mutationOperation = isMutationOperation(operation);
+  const warmupRuns = integer(
+    values,
+    "--warmups",
+    mutationOperation ? 0 : 3,
+    0,
+  );
+  const measuredRuns = integer(
+    values,
+    "--samples",
+    mutationOperation ? 1 : 30,
+    1,
+  );
+  if (mutationOperation && (warmupRuns !== 0 || measuredRuns !== 1)) {
+    throw new Error(
+      "mutation operations require --warmups 0 and --samples 1; repeat with fresh workspace IDs",
+    );
+  }
+  const readyTimeoutMs = integer(
+    values,
+    "--ready-timeout-ms",
+    60_000,
+    1,
+  );
+  const baseUrl = (
+    values.get("--url") ??
+    process.env.LIXRAY_PERF_URL ??
+    "http://127.0.0.1:8080"
+  ).replace(/\/+$/, "");
   const outputPath = resolve(
     root,
-    option(args, "--output") ?? "perf/results/latest.json",
+    values.get("--output") ??
+      `perf/results/${workspaceId}-${operation}.json`,
   );
-  const comparePath = option(args, "--compare");
-  const workload = JSON.parse(await readFile(workloadPath, "utf8"));
-  validateWorkload(workload);
-  await waitForServer(workload.workspaceId);
 
-  const queries = [];
-  for (const query of workload.queries) {
-    for (let index = 0; index < workload.warmupRuns; index += 1) {
-      await execute(workload.workspaceId, query.sql, query.params);
-    }
-
-    const samplesMs = [];
-    for (let index = 0; index < workload.measuredRuns; index += 1) {
-      const started = performance.now();
-      await execute(workload.workspaceId, query.sql, query.params);
-      samplesMs.push(performance.now() - started);
-    }
-    queries.push({ name: query.name, ...summarize(samplesMs), samplesMs });
-  }
-
-  const result = {
-    version: 1,
-    measuredAt: new Date().toISOString(),
+  return {
     baseUrl,
-    storageBackend,
-    workspaceId: workload.workspaceId,
-    workload: workloadPath.replace(`${root}/`, ""),
-    warmupRuns: workload.warmupRuns,
-    measuredRuns: workload.measuredRuns,
-    queries,
+    workspaceId,
+    operation,
+    targetTotalCommits,
+    preconditionReadRuns,
+    settleMs,
+    warmupRuns,
+    measuredRuns,
+    readyTimeoutMs,
+    outputPath,
+    targetRevision: values.get("--target-revision"),
+    preseeded: values.has("--preseeded"),
+    quiet: values.has("--quiet"),
   };
-
-  await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, `${JSON.stringify(result, null, 2)}\n`);
-
-  let rows = queries.map((query) => ({
-    query: query.name,
-    "p50 ms": query.p50Ms.toFixed(2),
-    "p95 ms": query.p95Ms.toFixed(2),
-    "mean ms": query.meanMs.toFixed(2),
-  }));
-
-  if (comparePath) {
-    const baseline = JSON.parse(
-      await readFile(resolve(root, comparePath), "utf8"),
-    );
-    const baselineByName = new Map(
-      baseline.queries.map((query) => [query.name, query]),
-    );
-    rows = rows.map((row, index) => {
-      const current = queries[index];
-      const previous = baselineByName.get(current.name);
-      return {
-        ...row,
-        "p50 delta": previous
-          ? percentageDelta(current.p50Ms, previous.p50Ms)
-          : "n/a",
-        "p95 delta": previous
-          ? percentageDelta(current.p95Ms, previous.p95Ms)
-          : "n/a",
-      };
-    });
-  }
-
-  console.table(rows);
-  console.log(`wrote ${outputPath.replace(`${root}/`, "")}`);
 }
 
-async function waitForServer(workspaceId) {
-  const deadline = Date.now() + 60_000;
+async function openWhenReady(client, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
   let lastError;
+
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(
-        `${baseUrl}/lixes/${encodeURIComponent(workspaceId)}/lix/v1/`,
-        { headers: requestHeaders() },
-      );
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}: ${await response.text()}`);
+      return await client.open();
     } catch (error) {
       lastError = error;
+      if (
+        error instanceof ProtocolError &&
+        error.status >= 400 &&
+        error.status < 500
+      ) {
+        throw error;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250));
     }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 500));
   }
-  fail(`lix-server was not ready after 60s: ${lastError}`);
-}
 
-async function execute(workspaceId, sql, params) {
-  return protocolRequest(workspaceId, "execute", { sql, params });
-}
-
-function fileUpsertBatch(offset, end, content) {
-  const values = [];
-  const params = [];
-  for (let index = offset; index < end; index += 1) {
-    const firstParameter = params.length + 1;
-    values.push(`($${firstParameter}, $${firstParameter + 1})`);
-    params.push(
-      {
-        kind: "text",
-        value: `/perf/${String(index).padStart(4, "0")}.json`,
-      },
-      { kind: "blob", base64: content },
-    );
-  }
-  return {
-    sql: `INSERT INTO lix_file (path, data) VALUES ${values.join(", ")} ON CONFLICT (path) DO UPDATE SET data = excluded.data`,
-    params,
-  };
-}
-
-function assertRowsAffected(result, expected, operation) {
-  const actual = Number(result.rowsAffected);
-  if (actual !== expected) {
-    fail(`${operation} affected ${actual} rows, expected ${expected}`);
-  }
-}
-
-async function protocolRequest(workspaceId, operation, body) {
-  const response = await fetch(
-    `${baseUrl}/lixes/${encodeURIComponent(workspaceId)}/lix/v1/${operation}`,
-    {
-      method: "POST",
-      headers: requestHeaders({ "content-type": "application/json" }),
-      body: JSON.stringify(body),
-    },
+  throw new Error(
+    `lix-server was not ready after ${timeoutMs}ms: ${
+      lastError instanceof Error ? lastError.message : lastError
+    }`,
   );
-  if (!response.ok) {
-    fail(`${operation} failed with HTTP ${response.status}: ${await response.text()}`);
-  }
-  return response.json();
 }
 
-function requestHeaders(headers = {}) {
-  return internalToken
-    ? { ...headers, authorization: `Bearer ${internalToken}` }
-    : headers;
-}
-
-function summarize(samples) {
-  const sorted = [...samples].sort((left, right) => left - right);
-  const sum = sorted.reduce((total, value) => total + value, 0);
+async function readRevisions(targetRevision) {
+  const [lixray, lix] = await Promise.all([
+    readGitRevision(root),
+    readGitRevision(resolve(root, "vendor/lix")),
+  ]);
   return {
-    minMs: sorted[0],
-    p50Ms: percentile(sorted, 0.5),
-    p95Ms: percentile(sorted, 0.95),
-    maxMs: sorted.at(-1),
-    meanMs: sum / sorted.length,
+    target: targetRevision ?? null,
+    clientCheckout: { lixray, lix },
   };
 }
 
-function percentile(sorted, fraction) {
-  return sorted[Math.ceil(sorted.length * fraction) - 1];
+async function readGitRevision(cwd) {
+  const [{ stdout: commit }, { stdout: status }] = await Promise.all([
+    execFileAsync("git", ["rev-parse", "HEAD"], { cwd }),
+    execFileAsync("git", ["status", "--porcelain"], { cwd }),
+  ]);
+  return {
+    commit: commit.trim(),
+    dirty: status.trim().length > 0,
+  };
 }
 
-function percentageDelta(current, previous) {
-  const delta = ((current - previous) / previous) * 100;
-  return `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`;
-}
-
-function option(args, name) {
-  const index = args.indexOf(name);
-  if (index === -1) return undefined;
-  if (!args[index + 1]) fail(`${name} requires a value`);
-  return args[index + 1];
-}
-
-function validateFixture(fixture) {
-  for (const key of ["workspaceId", "fileCount", "contentBytes", "batchSize"]) {
-    if (!fixture[key]) fail(`fixture is missing ${key}`);
+function showProgress(progress) {
+  if (
+    progress.phase === "history" &&
+    progress.historyCommits % 100 !== 0 &&
+    progress.completedMutationCommits !== progress.targetMutationCommits
+  ) {
+    return;
+  }
+  const label =
+    progress.phase === "insert"
+      ? `${progress.filesSeeded}/1000 files`
+      : `${progress.historyCommits}/${progress.targetMutationCommits} mutations`;
+  process.stdout.write(
+    `\rsetup ${progress.completedMutationCommits}/${progress.targetMutationCommits} commits (${label})`,
+  );
+  if (progress.completedMutationCommits === progress.targetMutationCommits) {
+    process.stdout.write("\n");
   }
 }
 
-function validateWorkload(workload) {
-  if (!workload.workspaceId || !Array.isArray(workload.queries)) {
-    fail("workload requires workspaceId and queries");
+function printResult(report, outputPath) {
+  if (report.measurement.kind === "single-mutation") {
+    const [elapsedMs, requestBytes, responseBytes] = report.measurement.sample;
+    console.table([
+      {
+        operation: report.methodology.operation,
+        "latency ms": elapsedMs.toFixed(3),
+        "request KiB": (requestBytes / 1024).toFixed(1),
+        "response KiB": (responseBytes / 1024).toFixed(1),
+      },
+    ]);
+  } else {
+    const summary = report.measurement.summary;
+    console.table([
+      {
+        operation: report.methodology.operation,
+        "p50 ms": summary.p50Ms.toFixed(3),
+        "p95 ms": summary.p95Ms.toFixed(3),
+        "mean ms": summary.meanMs.toFixed(3),
+        "request KiB": (summary.meanRequestBytes / 1024).toFixed(1),
+        "response KiB": (summary.meanResponseBytes / 1024).toFixed(1),
+      },
+    ]);
   }
-  if (workload.warmupRuns < 0 || workload.measuredRuns < 1) {
-    fail("workload run counts are invalid");
-  }
-  for (const query of workload.queries) {
-    if (!query.name || !query.sql || !Array.isArray(query.params)) {
-      fail("each workload query requires name, sql, and params");
-    }
-  }
+  console.log(
+    JSON.stringify(
+      {
+        workspaceId: report.target.workspaceId,
+        targetTotalCommits: report.methodology.targetTotalCommits,
+        verifiedFinalCommits: report.postTimingAccounting.totalCommits,
+        output: outputPath,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
-function fail(message) {
-  console.error(message);
-  process.exit(1);
+function required(values, name) {
+  const value = values.get(name);
+  if (!value) {
+    throw new Error(`${name} is required\n\n${usage()}`);
+  }
+  return value;
+}
+
+function integer(values, name, fallback, minimum) {
+  const raw = values.get(name);
+  const value = raw === undefined ? fallback : Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum) {
+    throw new Error(`${name} must be an integer greater than or equal to ${minimum}`);
+  }
+  return value;
+}
+
+function usage() {
+  return `Usage:
+  node perf/runner.mjs \\
+    --workspace <fresh-workspace-id> \\
+    --operation <${operationNames.join("|")}> \\
+    [--commits <total-including-genesis>] \\
+    [--precondition-reads <count>] \\
+    [--settle-ms <milliseconds>] \\
+    [--warmups <count>] [--samples <count>] \\
+    [--url <lix-server-url>] [--output <path>] \\
+    [--target-revision <deployed-revision>] [--preseeded] [--quiet]
+
+Each invocation seeds a new deterministic 1,000-file workspace and measures
+one operation family. Mutations default to one timed request with no mutating
+warmup; reads default to three warmups and 30 samples. Use
+--precondition-reads to warm unrelated point-read infrastructure without
+changing commit depth. Use --settle-ms to keep runtime-open background work out
+of an active-path measurement. Pass --preseeded only for an exact, externally
+cloned workspace at the requested commit depth.`;
 }
