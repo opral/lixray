@@ -29,8 +29,7 @@ test("seeding creates fixed 1,000-file commits and the exact total depth", async
     const protocol = new SeedProtocol();
     const state = await seedCorpus(protocol, corpus, targetTotalCommits);
     const seedCommitCount = files / SEED_FILES_PER_COMMIT;
-    const historyMutationCommits =
-      targetTotalCommits - 1 - seedCommitCount;
+    const historyMutationCommits = targetTotalCommits - 1 - seedCommitCount;
 
     assert.equal(
       protocol.mutationRequests,
@@ -183,6 +182,68 @@ test("read-point-2m reads its explicit deterministic fixture", async () => {
   assert.equal(result.postTimingAccounting.corpusFiles, 1_000);
 });
 
+test("point reads use matched JSON and raw-binary paths with usable-byte decoding", async () => {
+  const cases = [
+    { operation: "read-point-4k", payloadBytes: 4 * 1024 },
+    { operation: "read-point-32k", payloadBytes: 32 * 1024 },
+    { operation: "read-point-2m", payloadBytes: 2 * 1024 * 1024 },
+  ];
+
+  for (const { operation, payloadBytes } of cases) {
+    for (const fileReadTransport of ["json", "binary"]) {
+      const protocol = new NativeReadProtocol(10, {
+        fixture: operation === "read-point-2m",
+      });
+      const result = await runBenchmark(protocol, {
+        operation,
+        targetTotalCommits: 10,
+        preconditionReadRuns: 2,
+        warmupRuns: 1,
+        measuredRuns: 2,
+        fileReadTransport,
+        preseeded: true,
+      });
+      const selectedPaths =
+        fileReadTransport === "binary"
+          ? protocol.binaryReadPaths
+          : protocol.jsonReadPaths;
+      const unselectedPaths =
+        fileReadTransport === "binary"
+          ? protocol.jsonReadPaths
+          : protocol.binaryReadPaths;
+
+      assert.equal(
+        selectedPaths.length,
+        5,
+        `${operation} ${fileReadTransport}`,
+      );
+      assert.equal(
+        unselectedPaths.length,
+        0,
+        `${operation} ${fileReadTransport}`,
+      );
+      const preconditionedPaths = selectedPaths.slice(0, 2);
+      const timedPaths = new Set(selectedPaths.slice(2));
+      assert.ok(
+        preconditionedPaths.every((path) => !timedPaths.has(path)),
+        `${operation} ${fileReadTransport} preconditions must use unrelated paths`,
+      );
+      assert.equal(result.methodology.fileReadTransport, fileReadTransport);
+      assert.equal(result.methodology.fileReadPayloadBytes, payloadBytes);
+      assert.match(
+        result.methodology.timingBoundary,
+        fileReadTransport === "binary" ? /raw GET/ : /Base64-to-buffer/,
+      );
+      assert.match(
+        result.methodology.precondition,
+        fileReadTransport === "binary" ? /raw binary/ : /SQL JSON/,
+      );
+      assert.equal(result.postTimingAccounting.totalCommits, 10);
+      assert.equal(result.postTimingAccounting.corpusFiles, 1_000);
+    }
+  }
+});
+
 test("the targeted large fixture has its own seed commit before history", async () => {
   const protocol = new SeedProtocol();
   const fixture = buildReadPoint2mFixture();
@@ -234,7 +295,10 @@ test("branch-switch times session switching after explicit branch setup", async 
   assert.equal(result.measurement.kind, "distribution");
   assert.equal(result.measurement.samples.length, 2);
   assert.equal(result.setup.preTimingOperationMutationCommits, 2);
-  assert.match(result.methodology.preTimingOperationSetup, /two sibling branches/);
+  assert.match(
+    result.methodology.preTimingOperationSetup,
+    /two sibling branches/,
+  );
   assert.equal(result.postTimingAccounting.totalCommits, 12);
   assert.equal(result.postTimingAccounting.corpusFiles, 1_000);
 });
@@ -376,7 +440,10 @@ test("hot-session mutation distributions retain accounting and session semantics
 
   assert.equal(protocol.binaryWrites.length, 3);
   assert.equal(result.methodology.hotSession, true);
-  assert.match(result.methodology.mutationSampleIsolation, /live protocol session/);
+  assert.match(
+    result.methodology.mutationSampleIsolation,
+    /live protocol session/,
+  );
   assert.equal(result.measurement.kind, "hot-mutation-distribution");
   assert.equal(result.measurement.samples.length, 3);
   assert.equal(result.postTimingAccounting.totalCommits, 13);
@@ -505,7 +572,9 @@ test("native mixed comparison preserves payloads and accounts for ten commits ve
     "batch bytes include its u32 frame headers and paths",
   );
 
-  const mutationPaths = new Set(singleProtocol.binaryWrites.map(({ path }) => path));
+  const mutationPaths = new Set(
+    singleProtocol.binaryWrites.map(({ path }) => path),
+  );
   assert.ok(
     singleProtocol.preconditionReadPaths.every(
       (path) => !mutationPaths.has(path),
@@ -610,10 +679,7 @@ class PreconditionProtocol {
 
   constructor(targetTotalCommits) {
     this.targetTotalCommits = targetTotalCommits;
-    this.state = expectedCorpusLookup(
-      buildCorpusIndex(),
-      targetTotalCommits,
-    );
+    this.state = expectedCorpusLookup(buildCorpusIndex(), targetTotalCommits);
   }
 
   async execute(sql, params) {
@@ -692,6 +758,69 @@ class LargeReadProtocol extends PreconditionProtocol {
   }
 }
 
+class NativeReadProtocol extends PreconditionProtocol {
+  binaryReadPaths = [];
+  jsonReadPaths = [];
+
+  constructor(targetTotalCommits, { fixture = false } = {}) {
+    super(targetTotalCommits);
+    if (fixture) {
+      this.fixture = buildReadPoint2mFixture();
+      this.state = expectedCorpusLookup(
+        buildCorpusIndex(),
+        targetTotalCommits,
+        {
+          fixture: this.fixture,
+        },
+      );
+    }
+  }
+
+  async readFileData(path) {
+    const data = this.readData(path, this.binaryReadPaths);
+    return {
+      value: { found: true, data },
+      elapsedMs: 1,
+      requestBytes: 0,
+      responseBytes: data.byteLength,
+    };
+  }
+
+  async readFileDataJson(path) {
+    const data = this.readData(path, this.jsonReadPaths);
+    const response = {
+      rows: [
+        [
+          { kind: "text", value: path },
+          { kind: "blob", base64: data.toString("base64") },
+        ],
+      ],
+    };
+    return {
+      value: { response, data },
+      elapsedMs: 1,
+      requestBytes: Buffer.byteLength(
+        JSON.stringify({
+          sql: "SELECT path, data FROM lix_file WHERE path = $1",
+          params: [{ kind: "text", value: path }],
+        }),
+      ),
+      responseBytes: Buffer.byteLength(JSON.stringify(response)),
+    };
+  }
+
+  readData(path, paths) {
+    const data =
+      path === this.fixture?.path ? this.fixture.data : this.state.get(path);
+    if (!data) {
+      throw new Error(`missing fake point-read payload for ${path}`);
+    }
+    this.pointReads += 1;
+    paths.push(path);
+    return Buffer.from(data);
+  }
+}
+
 class FileWriteProtocol {
   binaryWrites = [];
   binaryBatchWrites = [];
@@ -700,10 +829,7 @@ class FileWriteProtocol {
 
   constructor(targetTotalCommits) {
     this.targetTotalCommits = targetTotalCommits;
-    this.state = expectedCorpusLookup(
-      buildCorpusIndex(),
-      targetTotalCommits,
-    );
+    this.state = expectedCorpusLookup(buildCorpusIndex(), targetTotalCommits);
     this.written = new Map();
   }
 
@@ -800,9 +926,9 @@ class FileWriteProtocol {
               { kind: "text", value: path },
               {
                 kind: "blob",
-                base64: (this.written.get(path) ?? this.state.get(path)).toString(
-                  "base64",
-                ),
+                base64: (
+                  this.written.get(path) ?? this.state.get(path)
+                ).toString("base64"),
               },
             ],
           ],
@@ -906,7 +1032,11 @@ class HistoryDiffProtocol {
   lastHistoryParams = [];
   lastResolvedHistoryId = "";
 
-  constructor(targetTotalCommits, corpusFiles = 1_000, { currentDepth = 0 } = {}) {
+  constructor(
+    targetTotalCommits,
+    corpusFiles = 1_000,
+    { currentDepth = 0 } = {},
+  ) {
     this.targetTotalCommits = targetTotalCommits;
     this.corpusFiles = corpusFiles;
     this.currentDepth = currentDepth;

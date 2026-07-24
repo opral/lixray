@@ -197,10 +197,15 @@ test("upsertFileDataBatch frames raw entries after its advertised capability", a
   const result = await client.upsertFileDataBatch(entries);
 
   assert.equal(result.value.rowsAffected, 2);
-  assert.equal(result.requestBytes, 4 + entries.reduce(
-    (total, { path, data }) => total + 8 + Buffer.byteLength(path) + data.byteLength,
-    0,
-  ));
+  assert.equal(
+    result.requestBytes,
+    4 +
+      entries.reduce(
+        (total, { path, data }) =>
+          total + 8 + Buffer.byteLength(path) + data.byteLength,
+        0,
+      ),
+  );
   assert.equal(
     calls[1].url,
     "http://example.test/lixes/workspace/lix/v1/file/upsert-batch",
@@ -240,6 +245,161 @@ test("upsertFileDataBatch rejects more than 1,024 entries to preserve atomicity"
     /at most 1024 entries so one call remains atomic/,
   );
   assert.equal(calls.length, 1);
+});
+
+test("readFileData sends an authenticated raw GET and preserves binary bytes", async () => {
+  const calls = [];
+  const payload = Buffer.from([0, 1, 2, 255]);
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    internalToken: "internal-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, ...options });
+      if (calls.length === 1) {
+        return Response.json({
+          sessionId: "session-file-read",
+          capabilities: { binaryFileRead: true },
+        });
+      }
+      return new Response(payload, {
+        headers: {
+          "content-type": "application/octet-stream",
+          "lix-file-found": "true",
+        },
+      });
+    },
+  });
+
+  await client.open();
+  const result = await client.readFileData("/nested/payload.bin");
+
+  assert.equal(result.value.found, true);
+  assert.deepEqual(result.value.data, payload);
+  assert.equal(result.requestBytes, 0);
+  assert.equal(result.responseBytes, payload.byteLength);
+  assert.equal(
+    calls[1].url,
+    "http://example.test/lixes/workspace/lix/v1/file?path=%2Fnested%2Fpayload.bin",
+  );
+  assert.equal(calls[1].method, "GET");
+  assert.equal(calls[1].headers.authorization, "Bearer internal-token");
+  assert.equal(calls[1].headers["lix-session-id"], "session-file-read");
+  assert.equal(calls[1].headers["content-type"], undefined);
+  assert.equal(calls[1].body, undefined);
+});
+
+test("readFileData validates its session, capability, and path before dispatch", async () => {
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    fetchImpl: async () => {
+      throw new Error("fetch should not run");
+    },
+  });
+
+  await assert.rejects(
+    client.readFileData("/payload.bin"),
+    /session is not open/,
+  );
+  client.sessionId = "session-file-read";
+  await assert.rejects(
+    client.readFileData("/payload.bin"),
+    /does not advertise the binaryFileRead capability/,
+  );
+  client.capabilities = { binaryFileRead: true };
+  await assert.rejects(
+    client.readFileData(""),
+    /path must be a non-empty string/,
+  );
+});
+
+test("readFileData distinguishes present empty files from missing files", async () => {
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    fetchImpl: async (_url, options) => {
+      if (options.method === "GET" && !options.headers["lix-session-id"]) {
+        return Response.json({
+          sessionId: "session-file-empty",
+          capabilities: { binaryFileRead: true },
+        });
+      }
+      const path = new URL(_url).searchParams.get("path");
+      if (path === "/empty.bin") {
+        return new Response(Buffer.alloc(0), {
+          headers: {
+            "content-type": "application/octet-stream",
+            "lix-file-found": "true",
+          },
+        });
+      }
+      if (path === "/missing.bin") {
+        return new Response(Buffer.alloc(0), {
+          headers: {
+            "content-type": "application/octet-stream",
+            "lix-file-found": "false",
+          },
+        });
+      }
+      return new Response(Buffer.from([1]), {
+        headers: {
+          "content-type": "application/octet-stream",
+          "lix-file-found": "false",
+        },
+      });
+    },
+  });
+
+  await client.open();
+  const empty = await client.readFileData("/empty.bin");
+  const missing = await client.readFileData("/missing.bin");
+  assert.deepEqual(empty.value, { found: true, data: Buffer.alloc(0) });
+  assert.deepEqual(missing.value, { found: false, data: Buffer.alloc(0) });
+  await assert.rejects(
+    client.readFileData("/invalid-missing.bin"),
+    /returned bytes for a missing file/,
+  );
+});
+
+test("readFileDataJson decodes the matched SQL/base64 response before timing stops", async () => {
+  const calls = [];
+  const payload = Buffer.from([0, 1, 2, 255]);
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    internalToken: "internal-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, ...options });
+      if (options.method === "GET") {
+        return Response.json({ sessionId: "session-file-json" });
+      }
+      return Response.json({
+        columns: [],
+        rows: [
+          [
+            { kind: "text", value: "/nested/payload.bin" },
+            { kind: "blob", base64: payload.toString("base64") },
+          ],
+        ],
+        rowsAffected: 0,
+        notices: [],
+      });
+    },
+  });
+
+  await client.open();
+  const result = await client.readFileDataJson("/nested/payload.bin");
+
+  assert.deepEqual(result.value.data, payload);
+  assert.equal(result.value.response.rows.length, 1);
+  const body = JSON.parse(calls[1].body);
+  assert.equal(body.sql, "SELECT path, data FROM lix_file WHERE path = $1");
+  assert.deepEqual(body.params, [
+    { kind: "text", value: "/nested/payload.bin" },
+  ]);
+  assert.equal(result.requestBytes, Buffer.byteLength(calls[1].body));
+  assert.equal(calls[1].headers["content-type"], "application/json");
 });
 
 test("executeFileData keeps JSON/base64 work inside the timed protocol request", async () => {
@@ -348,8 +508,7 @@ test("branch methods use the authenticated protocol endpoints", async () => {
         getCalls += 1;
         return Response.json({
           sessionId: "session-branch",
-          activeBranchId:
-            getCalls === 1 ? "main" : "perf-branch-0000",
+          activeBranchId: getCalls === 1 ? "main" : "perf-branch-0000",
         });
       }
       if (url.endsWith("/branch/create")) {

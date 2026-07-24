@@ -39,10 +39,10 @@ in the report. A `read-point-2m` target therefore needs one more minimum commit
 than the table below; create preseeded templates with `read-point-2m` as well.
 
 | `--files` | seed commits | minimum `--commits` (genesis included) |
-| ---: | ---: | ---: |
-| 1,000 | 1 | 2 |
-| 5,000 | 5 | 6 |
-| 10,000 | 10 | 11 |
+| --------: | -----------: | -------------------------------------: |
+|     1,000 |            1 |                                      2 |
+|     5,000 |            5 |                                      6 |
+|    10,000 |           10 |                                     11 |
 
 The report and runner summary record `seedFilesPerCommit`, `seedCommitCount`,
 and `historyMutationCommits`, so preseeded templates can be checked against
@@ -97,6 +97,15 @@ Supported operation families are:
 - `update-mixed-native-single`: the fixed mixed payload through 10 sequential native raw upserts and 10 commits
 - `update-mixed-native-batch`: the same paths and bytes through one native raw batch frame and one commit
 - `delete-1k`: delete a unique existing 1 KiB text file
+
+The three exact point-read operations accept `--file-read-transport json|binary`
+and default to `json`. The JSON control sends the exact `SELECT path, data`
+query and times JSON parsing plus Base64-to-`Buffer` decoding. The binary arm
+sends `GET /lix/v1/file?path=…` and times raw response-body materialization.
+Both arms return and assert the same usable bytes; semantic envelope and row
+checks are outside the timer. Binary is deliberately rejected for non-point
+operations. Preconditioning uses the selected arm, so raw reads do not warm
+the SQL route (and vice versa).
 
 `update-mixed` requires `--hot-session --preseeded` and a `--samples` count
 that is a multiple of 10, preserving its stated deterministic weights.
@@ -220,7 +229,11 @@ LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
 ```
 
 The sample timer starts before client base64/JSON encoding or raw body transfer and ends after
-the complete response body has been read and decoded. `create-4k`, `update-4k`, and
+the complete response body has been read and decoded into usable bytes. For
+point-read JSON controls that includes response JSON parsing and Base64-to-`Buffer`
+materialization; for binary point reads it includes raw body materialization.
+Protocol-envelope and semantic result assertions occur after the timer.
+`create-4k`, `update-4k`, and
 `update-2m` default to the JSON transport so an unchanged baseline remains
 directly runnable. Pass `--file-write-transport binary` to send the file body
 as `application/octet-stream` through the native file-upsert endpoint; its

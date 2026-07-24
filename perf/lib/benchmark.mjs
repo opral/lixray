@@ -57,6 +57,12 @@ export function isMutationOperation(operation) {
   ].includes(operation);
 }
 
+export function isPointFileReadOperation(operation) {
+  return ["read-point-4k", "read-point-32k", "read-point-2m"].includes(
+    operation,
+  );
+}
+
 export function minimumTotalCommitsForOperation(operation, corpusFiles) {
   return (
     minimumTotalCommitsForFiles(corpusFiles) +
@@ -100,6 +106,7 @@ export async function runBenchmark(
     measuredRuns,
     fileWriteTransport = "json",
     fileWriteShape = "update",
+    fileReadTransport = "json",
     hotSession = false,
     preseeded = false,
     onProgress,
@@ -136,6 +143,14 @@ export async function runBenchmark(
   if (!["update", "upsert"].includes(fileWriteShape)) {
     throw new Error('fileWriteShape must be either "update" or "upsert"');
   }
+  if (!["binary", "json"].includes(fileReadTransport)) {
+    throw new Error('fileReadTransport must be either "binary" or "json"');
+  }
+  if (fileReadTransport === "binary" && !isPointFileReadOperation(operation)) {
+    throw new Error(
+      "fileReadTransport: binary is only valid for exact point-read operations",
+    );
+  }
   if (
     ["update-mixed-native-single", "update-mixed-native-batch"].includes(
       operation,
@@ -169,7 +184,9 @@ export async function runBenchmark(
     throw new Error("hotSession is only valid for mutation benchmarks");
   }
   if (hotSession && measuredRuns < 2) {
-    throw new Error("hotSession mutation benchmarks require at least two samples");
+    throw new Error(
+      "hotSession mutation benchmarks require at least two samples",
+    );
   }
   if (hotSession && !preseeded) {
     throw new Error("hotSession mutation benchmarks require preseeded: true");
@@ -184,11 +201,7 @@ export async function runBenchmark(
         " samples",
     );
   }
-  if (
-    isMutationOperation(operation) &&
-    measuredRuns !== 1 &&
-    !hotSession
-  ) {
+  if (isMutationOperation(operation) && measuredRuns !== 1 && !hotSession) {
     throw new Error(
       "mutation benchmarks require one measured request per fresh workspace unless hotSession is enabled",
     );
@@ -220,6 +233,7 @@ export async function runBenchmark(
     commitPlan,
     fileWriteTransport,
     fileWriteShape,
+    fileReadTransport,
     fixture,
   );
   const preTimingOperationSetupStarted = performance.now();
@@ -235,6 +249,8 @@ export async function runBenchmark(
     state,
     preconditionReadRuns,
     prepared.preconditionExcludedPaths,
+    prepared.preconditionRead,
+    prepared.preconditionAssert,
   );
   const preconditionReadMs =
     preconditionReadRuns === 0 ? null : performance.now() - preconditionStarted;
@@ -298,8 +314,7 @@ export async function runBenchmark(
       historyPreparation: preseeded
         ? "externally-preseeded"
         : "same-session-post-ingest",
-      preTimingOperationSetup:
-        prepared.preTimingSetupDescription ?? "none",
+      preTimingOperationSetup: prepared.preTimingSetupDescription ?? "none",
       backgroundCompactionQuiescence: preseeded
         ? "caller-managed"
         : "not-quiesced",
@@ -318,11 +333,14 @@ export async function runBenchmark(
         : "not applicable",
       fileWriteTransport: prepared.fileWriteTransport ?? null,
       fileWriteShape: prepared.fileWriteShape ?? null,
+      fileReadTransport: prepared.fileReadTransport ?? null,
+      fileReadPayloadBytes: prepared.fileReadPayloadBytes ?? null,
       preconditionReadRuns,
       precondition:
         preconditionReadRuns === 0
           ? "none"
-          : "unrelated exact-path reads before the timed operation",
+          : (prepared.preconditionDescription ??
+            "unrelated exact-path SQL reads before the timed operation"),
       settleMs,
       settling:
         settleMs === 0
@@ -370,19 +388,20 @@ export async function runBenchmark(
         historyTablesRead: false,
       },
     },
-    measurement: prepared.mutates && !hotSession
-      ? {
-          kind: "single-mutation",
-          sample: compactSample(samples[0]),
-        }
-      : {
-          kind:
-            prepared.mutates && hotSession
-              ? "hot-mutation-distribution"
-              : "distribution",
-          summary: summarizeSamples(samples),
-          samples: samples.map(compactSample),
-        },
+    measurement:
+      prepared.mutates && !hotSession
+        ? {
+            kind: "single-mutation",
+            sample: compactSample(samples[0]),
+          }
+        : {
+            kind:
+              prepared.mutates && hotSession
+                ? "hot-mutation-distribution"
+                : "distribution",
+            summary: summarizeSamples(samples),
+            samples: samples.map(compactSample),
+          },
     postTimingAccounting: {
       ...postTimingAccounting,
       expectedTotalCommits: expectedFinalCommits,
@@ -397,6 +416,8 @@ async function preconditionPointReads(
   state,
   count,
   excludedPaths = new Set(),
+  read = readPointFileJson,
+  assert = assertJsonFileRead,
 ) {
   const candidates = corpus.filter((file) => !excludedPaths.has(file.path));
   if (count > 0 && candidates.length === 0) {
@@ -406,14 +427,12 @@ async function preconditionPointReads(
     // Every timed file path is excluded, so these reads warm the
     // server/runtime/storage path without priming any measured row.
     const file = candidates[(517 + index * 131) % candidates.length];
-    const result = await protocol.execute(
-      "SELECT path, data FROM lix_file WHERE path = $1",
-      [wireText(file.path)],
-    );
-    assertFileRow(result.value, {
+    const expected = {
       path: file.path,
       data: state.get(file.path),
-    });
+    };
+    const result = await read(protocol, expected);
+    assert(result.value, expected);
   }
 }
 
@@ -458,7 +477,7 @@ export function expectedCorpusLookup(
           contentFor(
             file.extension ?? extensionOf(file.path),
             file.bytes ?? file.data.length,
-            mutation < 0 ? file.seed ?? index : 1_000_000 + mutation,
+            mutation < 0 ? (file.seed ?? index) : 1_000_000 + mutation,
           ),
         );
       }
@@ -606,6 +625,7 @@ function prepareOperation(
   commitPlan,
   fileWriteTransport,
   fileWriteShape,
+  fileReadTransport,
   fixture,
 ) {
   const byExtension = (extension) =>
@@ -617,19 +637,11 @@ function prepareOperation(
       const file = candidates[(index * 17) % candidates.length];
       return { path: file.path, data: state.get(file.path) };
     });
-    return {
-      description: "point-read one 4 KiB JSON file by exact path",
-      mutates: false,
-      corpusFileDelta: 0,
-      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
-      execute: (protocol, index) =>
-        protocol.execute(
-          "SELECT path, data FROM lix_file WHERE path = $1",
-          [wireText(cases[index].path)],
-        ),
-      assert: (result, index) => assertFileRow(result, cases[index]),
-      verify: async () => {},
-    };
+    return preparePointFileRead(
+      "point-read one 4 KiB JSON file by exact path",
+      cases,
+      fileReadTransport,
+    );
   }
 
   if (name === "read-point-32k") {
@@ -638,19 +650,11 @@ function prepareOperation(
       const file = candidates[(index * 17) % candidates.length];
       return { path: file.path, data: state.get(file.path) };
     });
-    return {
-      description: "point-read one 32 KiB PDF file by exact path",
-      mutates: false,
-      corpusFileDelta: 0,
-      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
-      execute: (protocol, index) =>
-        protocol.execute(
-          "SELECT path, data FROM lix_file WHERE path = $1",
-          [wireText(cases[index].path)],
-        ),
-      assert: (result, index) => assertFileRow(result, cases[index]),
-      verify: async () => {},
-    };
+    return preparePointFileRead(
+      "point-read one 32 KiB PDF file by exact path",
+      cases,
+      fileReadTransport,
+    );
   }
 
   if (name === "read-point-2m") {
@@ -661,20 +665,11 @@ function prepareOperation(
       path: fixture.path,
       data: fixture.data,
     }));
-    return {
-      description:
-        "point-read one deterministic 2 MiB binary fixture by exact path",
-      mutates: false,
-      corpusFileDelta: 0,
-      preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
-      execute: (protocol, index) =>
-        protocol.execute(
-          "SELECT path, data FROM lix_file WHERE path = $1",
-          [wireText(cases[index].path)],
-        ),
-      assert: (result, index) => assertFileRow(result, cases[index]),
-      verify: async () => {},
-    };
+    return preparePointFileRead(
+      "point-read one deterministic 2 MiB binary fixture by exact path",
+      cases,
+      fileReadTransport,
+    );
   }
 
   if (name === "list-paths-100") {
@@ -851,7 +846,8 @@ function prepareOperation(
       corpusFileDelta: 0,
       preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
       fileWriteTransport,
-      fileWriteShape: fileWriteTransport === "binary" ? "upsert" : fileWriteShape,
+      fileWriteShape:
+        fileWriteTransport === "binary" ? "upsert" : fileWriteShape,
       timingBoundary: fileWriteTimingBoundary(fileWriteTransport),
       execute: (protocol, index) =>
         executeFileWrite(
@@ -879,7 +875,8 @@ function prepareOperation(
       corpusFileDelta: 0,
       preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
       fileWriteTransport,
-      fileWriteShape: fileWriteTransport === "binary" ? "upsert" : fileWriteShape,
+      fileWriteShape:
+        fileWriteTransport === "binary" ? "upsert" : fileWriteShape,
       timingBoundary: fileWriteTimingBoundary(fileWriteTransport),
       execute: (protocol, index) =>
         executeFileWrite(
@@ -910,7 +907,8 @@ function prepareOperation(
       corpusFileDelta: 0,
       preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
       fileWriteTransport,
-      fileWriteShape: fileWriteTransport === "binary" ? "upsert" : fileWriteShape,
+      fileWriteShape:
+        fileWriteTransport === "binary" ? "upsert" : fileWriteShape,
       timingBoundary: fileWriteTimingBoundary(fileWriteTransport),
       execute: (protocol, index) =>
         executeFileWrite(
@@ -934,7 +932,9 @@ function prepareOperation(
         const candidates = byExtension(shape.extension);
         const extensionOffset = mixedUpdateShapes
           .slice(0, shapeIndex)
-          .filter((candidate) => candidate.extension === shape.extension).length;
+          .filter(
+            (candidate) => candidate.extension === shape.extension,
+          ).length;
         return {
           // Keep all ten paths distinct inside a logical operation. Reuse the
           // same deterministic paths and bytes for the sequential control and
@@ -990,10 +990,9 @@ function prepareOperation(
       corpusFileDelta: -totalOperations,
       preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
       execute: (protocol, index) =>
-        protocol.execute(
-          "DELETE FROM lix_file WHERE path = $1",
-          [wireText(cases[index].path)],
-        ),
+        protocol.execute("DELETE FROM lix_file WHERE path = $1", [
+          wireText(cases[index].path),
+        ]),
       assert: (result) => assertRowsAffected(result, 1, "delete-1k"),
       verify: async (protocol) => {
         const result = await protocol.execute(
@@ -1010,6 +1009,57 @@ function prepareOperation(
   }
 
   throw new Error(`unsupported operation: ${name}`);
+}
+
+function preparePointFileRead(description, cases, fileReadTransport) {
+  const binary = fileReadTransport === "binary";
+  return {
+    description: binary
+      ? `${description} through the raw binary file-read endpoint`
+      : `${description} through the SQL JSON response`,
+    mutates: false,
+    corpusFileDelta: 0,
+    fileReadTransport,
+    fileReadPayloadBytes: cases[0].data.byteLength,
+    timingBoundary: binary
+      ? "raw GET construction through response-body materialization"
+      : "SQL JSON request serialization through response body read, JSON decoding, and Base64-to-buffer decoding",
+    preconditionDescription: binary
+      ? "unrelated exact-path reads through the raw binary endpoint before the timed operation"
+      : "unrelated exact-path reads through the SQL JSON path before the timed operation",
+    preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
+    preconditionRead: binary ? readPointFileBinary : readPointFileJson,
+    preconditionAssert: binary ? assertNativeFileRead : assertJsonFileRead,
+    execute: binary
+      ? (protocol, index) => readPointFileBinary(protocol, cases[index])
+      : (protocol, index) => readPointFileJson(protocol, cases[index]),
+    assert: binary
+      ? (result, index) => assertNativeFileRead(result, cases[index])
+      : (result, index) => assertJsonFileRead(result, cases[index]),
+    verify: async () => {},
+  };
+}
+
+async function readPointFileJson(protocol, expected) {
+  if (typeof protocol.readFileDataJson === "function") {
+    return protocol.readFileDataJson(expected.path);
+  }
+  const response = await protocol.execute(
+    "SELECT path, data FROM lix_file WHERE path = $1",
+    [wireText(expected.path)],
+  );
+  const base64 = response.value?.rows?.[0]?.[1]?.base64;
+  return {
+    ...response,
+    value: {
+      response: response.value,
+      data: typeof base64 === "string" ? Buffer.from(base64, "base64") : null,
+    },
+  };
+}
+
+function readPointFileBinary(protocol, expected) {
+  return protocol.readFileData(expected.path);
 }
 
 function historyDiffCases(corpus, state, commitPlan, totalOperations) {
@@ -1055,7 +1105,7 @@ function historyDiffCases(corpus, state, commitPlan, totalOperations) {
       previousData: contentFor(
         extension,
         bytes,
-        priorMutation < 0 ? file.seed ?? index : 1_000_000 + priorMutation,
+        priorMutation < 0 ? (file.seed ?? index) : 1_000_000 + priorMutation,
       ),
     });
   }
@@ -1121,14 +1171,20 @@ function assertBatchRowsAffected(result, expected, operation) {
     );
   }
   result.forEach((entry, index) =>
-    assertRowsAffected(entry, expected[index], `${operation} statement ${index}`),
+    assertRowsAffected(
+      entry,
+      expected[index],
+      `${operation} statement ${index}`,
+    ),
   );
 }
 
 export function assertRowsAffected(result, expected, operation) {
   const actual = Number(result?.rowsAffected);
   if (actual !== expected) {
-    throw new Error(`${operation} affected ${actual} rows; expected ${expected}`);
+    throw new Error(
+      `${operation} affected ${actual} rows; expected ${expected}`,
+    );
   }
 }
 
@@ -1171,6 +1227,34 @@ function historyCaseId(value) {
   return value.id;
 }
 
+function assertNativeFileRead(result, expected) {
+  if (result?.found !== true) {
+    throw new Error(`native point read did not find ${expected.path}`);
+  }
+  if (!Buffer.isBuffer(result.data)) {
+    throw new Error(
+      `native point read did not return bytes for ${expected.path}`,
+    );
+  }
+  if (!result.data.equals(expected.data)) {
+    throw new Error(
+      `native point read returned the wrong data for ${expected.path}`,
+    );
+  }
+}
+
+function assertJsonFileRead(result, expected) {
+  if (!Buffer.isBuffer(result?.data)) {
+    throw new Error(`point read did not decode bytes for ${expected.path}`);
+  }
+  assertFileRow(result.response, expected);
+  if (!result.data.equals(expected.data)) {
+    throw new Error(
+      `point read returned the wrong decoded data for ${expected.path}`,
+    );
+  }
+}
+
 function assertHistoryDiffRows(result, expected) {
   const rows = result?.rows;
   if (!Array.isArray(rows) || rows.length < 2) {
@@ -1180,7 +1264,9 @@ function assertHistoryDiffRows(result, expected) {
   }
   const [current, previous] = rows;
   if (current.length !== 4 || previous.length !== 4) {
-    throw new Error(`history-backed diff for ${expected.path} had malformed rows`);
+    throw new Error(
+      `history-backed diff for ${expected.path} had malformed rows`,
+    );
   }
   const [currentPath, currentData, currentDepth, currentCommit] = current;
   const [previousPath, previousData, previousDepth, previousCommit] = previous;
@@ -1190,7 +1276,9 @@ function assertHistoryDiffRows(result, expected) {
     previousPath?.kind !== "text" ||
     previousPath.value !== expected.path
   ) {
-    throw new Error(`history-backed diff returned the wrong path for ${expected.path}`);
+    throw new Error(
+      `history-backed diff returned the wrong path for ${expected.path}`,
+    );
   }
   const currentBytes = blobWireValue(currentData, "current history revision");
   const previousBytes = blobWireValue(previousData, "prior history revision");
@@ -1247,7 +1335,9 @@ function assertBranchCreateResponse(result, expected) {
     typeof result.commitId !== "string" ||
     result.commitId.length === 0
   ) {
-    throw new Error(`branch-create returned an invalid receipt for ${expected.id}`);
+    throw new Error(
+      `branch-create returned an invalid receipt for ${expected.id}`,
+    );
   }
   expected.commitId = result.commitId;
 }
@@ -1276,7 +1366,9 @@ function assertBranchRow(result, expected) {
     commitId?.kind !== "text" ||
     commitId.value !== expected.commitId
   ) {
-    throw new Error(`branch-create persisted an unexpected branch row for ${expected.id}`);
+    throw new Error(
+      `branch-create persisted an unexpected branch row for ${expected.id}`,
+    );
   }
 }
 
