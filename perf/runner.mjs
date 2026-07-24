@@ -6,12 +6,12 @@ import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   isMutationOperation,
+  minimumTotalCommitsForOperation,
   operationNames,
   runBenchmark,
 } from "./lib/benchmark.mjs";
 import {
   CORPUS_FILE_COUNT,
-  minimumTotalCommitsForFiles,
   SEED_FILES_PER_COMMIT,
   SUPPORTED_CORPUS_FILE_COUNTS,
 } from "./lib/corpus.mjs";
@@ -202,11 +202,17 @@ function parseArgs(args) {
       `--files must be one of: ${SUPPORTED_CORPUS_FILE_COUNTS.join(", ")}`,
     );
   }
-  const minimumTotalCommits = minimumTotalCommitsForFiles(corpusFiles);
+  const minimumTotalCommits = minimumTotalCommitsForOperation(
+    operation,
+    corpusFiles,
+  );
   const targetTotalCommits = integer(values, "--commits", 1_000, 1);
   if (targetTotalCommits < minimumTotalCommits) {
+    const targetedFixture = operation === "read-point-2m";
     throw new Error(
-      `--commits must be at least ${minimumTotalCommits} for --files ${corpusFiles}: genesis plus ${minimumTotalCommits - 1} seed commits`,
+      `--commits must be at least ${minimumTotalCommits} for --files ${corpusFiles}: genesis plus ${minimumTotalCommits - 1} seed commits${
+        targetedFixture ? " including 1 targeted fixture seed commit" : ""
+      }`,
     );
   }
   const preconditionReadRuns = integer(
@@ -411,7 +417,9 @@ function showProgress(progress) {
   const label =
     progress.phase === "insert"
       ? `${progress.filesSeeded}/${progress.totalFiles} files (${progress.completedSeedCommits}/${progress.seedCommitCount} seed commits)`
-      : `${progress.completedHistoryMutationCommits}/${progress.historyMutationCommits} history mutations`;
+      : progress.phase === "fixture"
+        ? `${progress.fixtureId} (${(progress.fixtureBytes / (1024 * 1024)).toFixed(1)} MiB fixture)`
+        : `${progress.completedHistoryMutationCommits}/${progress.historyMutationCommits} history mutations`;
   process.stdout.write(
     `\rsetup ${progress.completedMutationCommits}/${progress.targetMutationCommits} commits (${label})`,
   );
@@ -452,6 +460,13 @@ function printResult(report, outputPath) {
         targetTotalCommits: report.methodology.targetTotalCommits,
         seedFilesPerCommit: report.setup.seedFilesPerCommit,
         seedCommitCount: report.setup.seedCommitCount,
+        ...(report.methodology.targetedFixture
+          ? {
+              targetedFixture: report.methodology.targetedFixture.id,
+              targetedFixtureSeedCommitCount:
+                report.setup.targetedFixtureSeedCommitCount,
+            }
+          : {}),
         historyMutationCommits: report.setup.historyMutationCommits,
         verifiedFinalCommits: report.postTimingAccounting.totalCommits,
         output: outputPath,
@@ -514,5 +529,7 @@ the matched INSERT ON CONFLICT(path) DO UPDATE control. Mutation benchmarks
 normally require one request per fresh workspace. Pass --hot-session with two
 or more samples to measure sequential mutations in one fresh workspace and
 one live protocol session; --hot-session requires --preseeded. update-mixed
-also requires --samples to be a multiple of 10.`;
+also requires --samples to be a multiple of 10. read-point-2m explicitly adds
+one deterministic 2 MiB binary fixture in its own seed commit outside
+/corpus; use the same operation when creating a preseeded template.`;
 }

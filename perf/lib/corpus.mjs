@@ -13,6 +13,17 @@ export const SUPPORTED_CORPUS_FILE_COUNTS = Object.freeze([
 ]);
 export const SEED_FILES_PER_COMMIT = 1_000;
 
+// This is deliberately not part of the default corpus. The large-read
+// operation opts into it as a separately accounted seed commit so the normal
+// 1k/5k/10k namespace and corpus digest stay unchanged.
+export const READ_POINT_2M_FIXTURE = Object.freeze({
+  id: "read-point-2m-binary-v1",
+  path: "/__lixray_perf_read_point_2m_v1.bin",
+  extension: "bin",
+  bytes: 2 * 1024 * 1024,
+  seed: 6_000_000,
+});
+
 export const formatSpecifications = Object.freeze([
   Object.freeze({ extension: "json", bytes: 4 * 1024 }),
   Object.freeze({ extension: "csv", bytes: 4 * 1024 }),
@@ -46,6 +57,17 @@ export function buildCorpusIndex(fileCount = CORPUS_FILE_COUNT) {
       seed: index,
     };
   });
+}
+
+export function buildReadPoint2mFixture() {
+  return {
+    ...READ_POINT_2M_FIXTURE,
+    data: contentFor(
+      READ_POINT_2M_FIXTURE.extension,
+      READ_POINT_2M_FIXTURE.bytes,
+      READ_POINT_2M_FIXTURE.seed,
+    ),
+  };
 }
 
 export function seedCommitCountForFiles(fileCount) {
