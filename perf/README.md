@@ -124,9 +124,15 @@ it at zero for a first-operation profile. The wait is outside the timer and is
 recorded in the report. Use the same value for both sides of a comparison.
 
 Generated reports go to `perf/results/` by default and are gitignored. They
-contain local checkout revisions and dirty flags. When the server is built
-from another revision, pass `--target-revision`; the runner never guesses a
-storage backend or deployed revision.
+contain local checkout revisions and dirty flags. Before opening a protocol
+session, the runner retries `/healthz` and records the server-attested
+`storageBackend` and `storageLayout`; these fields are authoritative, not
+caller labels. Pass `--storage-backend slatedb` or `--storage-backend rocksdb`
+as an optional assertion and the run fails if it disagrees with the server.
+`--storage-cohort <label>` records a human-defined comparison cohort but cannot
+override either attested field. When the server is built from another revision,
+pass `--target-revision`; the runner never guesses a storage backend or
+deployed revision.
 
 ## Scaling and comparison method
 

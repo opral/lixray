@@ -1,6 +1,51 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ProtocolClient, ProtocolError } from "../lib/protocol.mjs";
+import {
+  ProtocolClient,
+  ProtocolError,
+  readServerStorageIdentity,
+  ServerIdentityError,
+} from "../lib/protocol.mjs";
+
+test("reads the storage identity attested by server health", async () => {
+  let request;
+  const identity = await readServerStorageIdentity({
+    baseUrl: "http://example.test/",
+    fetchImpl: async (url, options) => {
+      request = { url, ...options };
+      return Response.json({
+        ok: true,
+        service: "lix-server",
+        storageBackend: "slatedb",
+        storageLayout: "lix-slatedb-lz4-v1",
+      });
+    },
+  });
+
+  assert.deepEqual(identity, {
+    storageBackend: "slatedb",
+    storageLayout: "lix-slatedb-lz4-v1",
+  });
+  assert.equal(request.url, "http://example.test/healthz");
+  assert.equal(request.method, "GET");
+});
+
+test("rejects a health response without a storage layout attestation", async () => {
+  await assert.rejects(
+    readServerStorageIdentity({
+      baseUrl: "http://example.test",
+      fetchImpl: async () =>
+        Response.json({
+          ok: true,
+          service: "lix-server",
+          storageBackend: "slatedb",
+        }),
+    }),
+    (error) =>
+      error instanceof ServerIdentityError &&
+      /invalid storageLayout attestation/.test(error.message),
+  );
+});
 
 test("handshake establishes a session used by execute and close", async () => {
   const calls = [];

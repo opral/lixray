@@ -8,6 +8,66 @@ export class ProtocolError extends Error {
   }
 }
 
+export class ServerIdentityError extends Error {
+  constructor(message, { retryable = false } = {}) {
+    super(message);
+    this.name = "ServerIdentityError";
+    this.retryable = retryable;
+  }
+}
+
+export async function readServerStorageIdentity({
+  baseUrl,
+  fetchImpl = globalThis.fetch,
+}) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("a fetch implementation is required");
+  }
+
+  const response = await fetchImpl(
+    `${baseUrl.replace(/\/+$/, "")}/healthz`,
+    { method: "GET" },
+  );
+  const body = await response.text();
+  if (!response.ok) {
+    throw new ServerIdentityError(
+      `GET /healthz failed with HTTP ${response.status}: ${body}`,
+      { retryable: response.status >= 500 },
+    );
+  }
+
+  let value;
+  try {
+    value = JSON.parse(body);
+  } catch (error) {
+    throw new ServerIdentityError(
+      `GET /healthz returned invalid JSON: ${error.message}`,
+    );
+  }
+  if (value?.ok !== true || value.service !== "lix-server") {
+    throw new ServerIdentityError(
+      "GET /healthz did not return the lix-server health response",
+    );
+  }
+
+  return {
+    storageBackend: storageIdentityField(value.storageBackend, "storageBackend"),
+    storageLayout: storageIdentityField(value.storageLayout, "storageLayout"),
+  };
+}
+
+function storageIdentityField(value, name) {
+  if (
+    typeof value !== "string" ||
+    !/^[a-z0-9][a-z0-9-]{0,127}$/.test(value)
+  ) {
+    throw new ServerIdentityError(
+      `GET /healthz returned an invalid ${name} attestation`,
+    );
+  }
+  return value;
+}
+
 export class ProtocolClient {
   constructor({
     baseUrl,
