@@ -14,6 +14,15 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("bind {}", config.bind_addr))?;
     let manager = LixRuntimeManager::new(&config)?;
     let internal_token = config.internal_token.clone();
+    let shutdown_manager = manager.clone();
+    let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
+    let shutdown_task = tokio::spawn(async move {
+        if shutdown_receiver.await.is_ok() {
+            shutdown_manager.shutdown().await
+        } else {
+            Ok(())
+        }
+    });
     tracing::info!(
         addr = %config.bind_addr,
         max_open_lixes = config.max_open_lixes,
@@ -24,9 +33,18 @@ async fn main() -> anyhow::Result<()> {
         listener,
         router(manager, internal_token, config.protocol_timeout),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(async move {
+        shutdown_signal().await;
+        if shutdown_sender.send(()).is_err() {
+            tracing::error!("Lix protocol shutdown task stopped before the shutdown signal");
+        }
+    })
     .await
     .context("serve HTTP");
+    let shutdown_result = shutdown_task
+        .await
+        .context("join Lix protocol shutdown task")
+        .and_then(|result| result.context("close Lix protocols during shutdown"));
     if let Some(provider) = trace_provider {
         match tokio::task::spawn_blocking(move || provider.shutdown()).await {
             Ok(Err(error)) => tracing::warn!(%error, "failed to flush traces during shutdown"),
@@ -34,7 +52,8 @@ async fn main() -> anyhow::Result<()> {
             Ok(Ok(())) => {}
         }
     }
-    result
+    result?;
+    shutdown_result
 }
 
 async fn shutdown_signal() {

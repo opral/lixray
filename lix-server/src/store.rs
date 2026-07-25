@@ -20,6 +20,7 @@ use tokio::runtime::Handle;
 #[cfg(test)]
 use tokio::sync::Notify;
 use tokio::sync::{watch, Mutex, OnceCell};
+use tokio::task::JoinSet;
 use tracing::info;
 
 // The Lix SlateDB adapter fetches object-store cache parts in 2 MiB chunks.
@@ -517,7 +518,7 @@ impl LixRuntimeManager {
             } = evicted;
             let started = Instant::now();
 
-            match close_drained_service(service).await {
+            match close_lix_service(service).await {
                 Ok(()) => info!(
                     lix_id,
                     elapsed_ms = elapsed_millis(started),
@@ -682,7 +683,7 @@ impl LixRuntimeManager {
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
 
-            let close_result = close_drained_service(draining_service).await;
+            let close_result = close_lix_service(draining_service).await;
             match close_result {
                 Ok(()) => info!(
                     lix_id,
@@ -733,6 +734,56 @@ impl LixRuntimeManager {
             .expect("an active recovered runtime cannot already be cleaning");
         info!(lix_id, "removed recovered lix runtime");
         Some(cleanup)
+    }
+
+    /// Closes ready protocol servers so their live streams cannot keep HTTP
+    /// graceful shutdown from reaching the storage owners.
+    pub async fn shutdown(&self) -> Result<()> {
+        let runtimes = {
+            let state = self.state.lock().await;
+            state
+                .entries
+                .iter()
+                .filter_map(|(lix_id, entry)| {
+                    entry
+                        .runtime
+                        .get()
+                        .map(|runtime| (lix_id.clone(), Arc::clone(runtime)))
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let mut closers = JoinSet::new();
+        for (lix_id, runtime) in runtimes {
+            // Recovering and evicting runtimes already have a dedicated close
+            // task. Closing an active protocol makes its SSE bodies finish,
+            // which lets Axum complete its graceful connection drain.
+            if let Some(service) = runtime.acquire().await {
+                closers.spawn(async move { (lix_id, close_lix_service(service).await) });
+            }
+        }
+
+        let mut first_error = None;
+        while let Some(closed) = closers.join_next().await {
+            match closed {
+                Ok((lix_id, Ok(()))) => info!(lix_id, "closed Lix protocol for shutdown"),
+                Ok((lix_id, Err(error))) => {
+                    tracing::error!(lix_id, error = %error, "failed to close Lix protocol during shutdown");
+                    if first_error.is_none() {
+                        first_error = Some(error.context(format!("close Lix runtime {lix_id}")));
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(%error, "failed to join Lix protocol shutdown task");
+                    if first_error.is_none() {
+                        first_error =
+                            Some(anyhow::anyhow!("join Lix protocol shutdown task: {error}"));
+                    }
+                }
+            }
+        }
+
+        first_error.map_or(Ok(()), Err)
     }
 
     pub(crate) fn max_open_lixes(&self) -> usize {
@@ -830,7 +881,7 @@ impl LixRuntime {
     }
 }
 
-async fn close_drained_service(service: Arc<LixService>) -> Result<()> {
+async fn close_lix_service(service: Arc<LixService>) -> Result<()> {
     let runtime = Handle::current();
     tokio::task::spawn_blocking(move || {
         let result = runtime.block_on(service.close());
@@ -838,7 +889,7 @@ async fn close_drained_service(service: Arc<LixService>) -> Result<()> {
         result
     })
     .await
-    .context("join recovered lix runtime close")?
+    .context("join Lix protocol close")?
 }
 
 impl fmt::Display for LixRuntimeError {
@@ -1655,6 +1706,75 @@ mod tests {
             manager.get("lix-b").await,
             Err(LixRuntimeError::AtCapacity { max: 1 })
         ));
+    }
+
+    #[tokio::test]
+    async fn shutdown_closes_active_observation_streams() {
+        use axum::{
+            body::Body,
+            http::{header, Request},
+        };
+        use http_body_util::BodyExt as _;
+        use tower::ServiceExt as _;
+
+        let manager = memory_manager(1);
+        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let protocol_router = service.protocol_router();
+        let handshake = protocol_router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/lix/v1/")
+                    .body(Body::empty())
+                    .expect("handshake request"),
+            )
+            .await
+            .expect("handshake response");
+        assert_eq!(handshake.status(), axum::http::StatusCode::OK);
+        let handshake = serde_json::from_slice::<serde_json::Value>(
+            &handshake
+                .into_body()
+                .collect()
+                .await
+                .expect("handshake body")
+                .to_bytes(),
+        )
+        .expect("handshake JSON");
+        let session_id = handshake["sessionId"]
+            .as_str()
+            .expect("handshake session ID")
+            .to_string();
+
+        let observation = protocol_router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/lix/v1/observe")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("Lix-Session-Id", session_id)
+                    .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
+                    .expect("observation request"),
+            )
+            .await
+            .expect("observation response");
+        assert_eq!(observation.status(), axum::http::StatusCode::OK);
+        let mut body = observation.into_body();
+        let first_frame = tokio::time::timeout(Duration::from_secs(1), body.frame())
+            .await
+            .expect("observation should produce an initial frame")
+            .expect("observation body should remain open")
+            .expect("valid observation frame");
+        assert!(first_frame.is_data());
+
+        manager.shutdown().await.expect("close active protocols");
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(frame) = body.frame().await {
+                frame.expect("valid observation frame while closing");
+            }
+        })
+        .await
+        .expect("shutdown should end the observation stream");
     }
 
     #[tokio::test]
