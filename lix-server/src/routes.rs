@@ -211,17 +211,7 @@ async fn lix_protocol_inner(
                 "protocol request exceeded its deadline; recovering runtime"
             );
             state.manager.recover(&lix_id, &runtime).await;
-            return protocol_error(
-                StatusCode::GATEWAY_TIMEOUT,
-                "LIX_ERROR_LIX_TIMEOUT",
-                "The lix request timed out.",
-                Some("Retry the request.".to_string()),
-                Some(json!({
-                    "operation": "lix_request",
-                    "retryable": true,
-                })),
-            )
-            .with_retry_after();
+            return protocol_timeout_response();
         }
     };
     let (parts, body) = response.into_parts();
@@ -231,6 +221,23 @@ async fn lix_protocol_inner(
             inner: body,
             _lix: runtime,
         }),
+    )
+}
+
+fn protocol_timeout_response() -> Response {
+    // Lix deliberately lets durable protocol work outlive the cancelled HTTP
+    // future. Without an idempotency key, the deadline leaves a mutation's
+    // result unknown rather than making it safe to replay.
+    protocol_error(
+        StatusCode::GATEWAY_TIMEOUT,
+        "LIX_ERROR_LIX_TIMEOUT",
+        "The lix request timed out before its outcome was known.",
+        Some("Do not automatically retry this request; a mutation may still complete.".to_string()),
+        Some(json!({
+            "operation": "lix_request",
+            "retryable": false,
+            "outcome": "unknown",
+        })),
     )
 }
 
@@ -773,6 +780,19 @@ mod tests {
             })
         );
         assert!(!body.to_string().contains("tenant-a"));
+    }
+
+    #[tokio::test]
+    async fn timed_out_protocol_requests_are_not_advertised_as_retryable() {
+        let response = protocol_timeout_response();
+
+        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert!(response.headers().get(header::RETRY_AFTER).is_none());
+        let error = json_body(response).await["error"].clone();
+        assert_eq!(error["code"], "LIX_ERROR_LIX_TIMEOUT");
+        assert_eq!(error["details"]["operation"], "lix_request");
+        assert_eq!(error["details"]["retryable"], false);
+        assert_eq!(error["details"]["outcome"], "unknown");
     }
 
     #[tokio::test]
