@@ -56,6 +56,16 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Cache vendored Lix SDK build
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/lix/target
+            node_modules/.cache/lix-rust-toolchain
+          key: ${{ runner.os }}-${{ runner.arch }}-lix-sdk-${{ hashFiles('vendor/lix/Cargo.lock', 'vendor/lix/rust-toolchain.toml', 'vendor/lix/packages/js-sdk/**', 'scripts/prepare-vendored-lix-sdk.mjs') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-lix-sdk-
+
       - name: Validate Docker submodule fallbacks
         run: pnpm check:docker-submodule-pins --verify-archives
 
@@ -176,8 +186,18 @@ jobs:
         with:
           version: 2.109.1
 
-      - name: Install Playwright dependencies
-        run: pnpm --filter @lixray/web-app install --frozen-lockfile --ignore-scripts
+      - name: Cache vendored Lix SDK build
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/lix/target
+            node_modules/.cache/lix-rust-toolchain
+          key: ${{ runner.os }}-${{ runner.arch }}-lix-sdk-${{ hashFiles('vendor/lix/Cargo.lock', 'vendor/lix/rust-toolchain.toml', 'vendor/lix/packages/js-sdk/**', 'scripts/prepare-vendored-lix-sdk.mjs') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-lix-sdk-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium
