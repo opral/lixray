@@ -714,6 +714,13 @@ impl LixRuntimeManager {
                 .begin_recovered_runtime_cleanup(&lix_id, &runtime)
                 .await
             {
+                // Installing the tombstone above prevents new `get` calls
+                // from retaining the runtime. An in-flight caller can still
+                // own the runtime cell, whose initialized value retains this
+                // Arc even though it does not add a direct service Arc.
+                while Arc::strong_count(&runtime) > 1 {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
                 // `draining_service` was closed above. Dropping every
                 // retained runtime before touching its cache path keeps
                 // SlateDB workers from observing a renamed directory.
@@ -2553,6 +2560,62 @@ mod tests {
         .await
         .expect("recovery must release the runtime");
         drop(reopened);
+    }
+
+    #[tokio::test]
+    async fn recovery_waits_for_inflight_runtime_cell_before_releasing_capacity() {
+        let manager = memory_manager(1);
+        let service = manager.get("lix-a").await.expect("open Lix to recover");
+        let held_runtime_cell = {
+            let state = manager.state.lock().await;
+            Arc::clone(
+                &state
+                    .entries
+                    .get("lix-a")
+                    .expect("opened Lix must have a runtime entry")
+                    .runtime,
+            )
+        };
+
+        manager.recover("lix-a", &service).await;
+        drop(service);
+
+        let cleanup_started = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let state = manager.state.lock().await;
+                if state.cleaning.contains_key("lix-a") {
+                    return true;
+                }
+                if !state.entries.contains_key("lix-a") {
+                    return false;
+                }
+                drop(state);
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("recovery should either start cleanup or remove the runtime");
+        assert!(
+            cleanup_started,
+            "recovery completed while an in-flight runtime cell still retained the closed service"
+        );
+
+        let replacement_manager = Arc::clone(&manager);
+        let mut replacement = tokio::spawn(async move { replacement_manager.get("lix-b").await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut replacement)
+                .await
+                .is_err(),
+            "the retained runtime cell must keep recovery capacity occupied"
+        );
+
+        drop(held_runtime_cell);
+        let replacement = tokio::time::timeout(Duration::from_secs(1), replacement)
+            .await
+            .expect("replacement should resume after the runtime cell is released")
+            .expect("join replacement open")
+            .expect("open replacement Lix");
+        drop(replacement);
     }
 
     #[tokio::test]

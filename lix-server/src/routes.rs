@@ -42,14 +42,14 @@ struct LixLeaseBody {
 }
 
 enum CancellationRecoveryMode {
-    WaitForDurableTerminal(lix_server_protocol::DurableTerminalStorageSignal),
+    WaitForTerminalStorage(lix_server_protocol::DurableTerminalStorageSignal),
     RecoverOnDrop,
     Disarmed,
 }
 
 /// Recovers the exact runtime if an HTTP future is cancelled after it has
-/// started durable protocol work. Cancellable reads finish without a terminal
-/// signal, so they retain their existing cancellation behavior.
+/// started protocol work. Terminal storage results are reported from both
+/// durable work and cancellable reads; cancellation itself remains nonterminal.
 struct CancellationRecovery {
     mode: CancellationRecoveryMode,
     manager: Arc<LixRuntimeManager>,
@@ -65,7 +65,7 @@ impl CancellationRecovery {
         service: Arc<LixService>,
     ) -> Self {
         Self {
-            mode: CancellationRecoveryMode::WaitForDurableTerminal(signal),
+            mode: CancellationRecoveryMode::WaitForTerminalStorage(signal),
             manager,
             lix_id,
             service,
@@ -88,12 +88,12 @@ impl Drop for CancellationRecovery {
         let lix_id = self.lix_id.clone();
         let service = Arc::clone(&self.service);
         match mode {
-            CancellationRecoveryMode::WaitForDurableTerminal(signal) => {
+            CancellationRecoveryMode::WaitForTerminalStorage(signal) => {
                 tokio::spawn(async move {
                     if signal.wait_for_terminal_storage().await {
                         tracing::warn!(
                             lix_id = lix_id.as_str(),
-                            "cancelled durable protocol operation hit a terminal storage error; recovering runtime"
+                            "cancelled protocol request hit a terminal storage error; recovering runtime"
                         );
                         manager.recover(&lix_id, &service).await;
                     }
@@ -953,7 +953,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelled_terminal_response_still_starts_runtime_recovery() {
+    async fn cancellation_during_terminal_response_recovery_still_starts_runtime_recovery() {
         let manager = LixRuntimeManager::new_in_memory(1);
         let service = manager.get("lix-a").await.expect("open lix runtime");
         let (notifier, signal) = lix_server_protocol::durable_terminal_storage_signal();
