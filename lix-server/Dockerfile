@@ -3,8 +3,8 @@
 ARG LIXRAY_IMAGE_VARIANT=production
 
 FROM rust:1-bookworm AS builder
-ARG LIX_REV=e7e8eaece1f1e77f4638c732ba7fa0b21a61bb28
-ARG LIX_ARCHIVE_SHA256=d4e8e9d8bd215a9a0f8b9410eb5c267dfdfa38274adc7a99be62922b2fae02a7
+ARG LIX_REV=ac3532a8256df05183769d2536fec2b41e0aa8c7
+ARG LIX_ARCHIVE_SHA256=113c1c549810e290829d164d86ad495ffd647eea43c85de56aa0e34fd20a2946
 WORKDIR /app
 
 # This Dockerfile uses the repository root as its build context so the server
@@ -18,7 +18,8 @@ RUN if [ ! -f vendor/lix/packages/engine/Cargo.toml ]; then \
 		echo "${LIX_ARCHIVE_SHA256}  /tmp/lix.tar.gz" | sha256sum -c -; \
 		tar -xzf /tmp/lix.tar.gz -C vendor/lix --strip-components=1; \
 		rm /tmp/lix.tar.gz; \
-	fi
+	fi \
+	&& cp vendor/lix/rust-toolchain.toml ./rust-toolchain.toml
 COPY lix-server/Cargo.toml lix-server/Cargo.lock ./lix-server/
 COPY lix-server/src ./lix-server/src
 
@@ -28,8 +29,8 @@ WORKDIR /app/lix-server
 RUN --mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/usr/local/cargo/registry,target=/usr/local/cargo/registry \
 	--mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/usr/local/cargo/git,target=/usr/local/cargo/git \
 	--mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/app/lix-server/target,target=/app/lix-server/target \
-	cargo clean --release --package lixray \
-	&& cargo build --release --locked \
+	cargo -Z bindeps clean --release --package lixray \
+	&& cargo -Z bindeps build --release --locked \
 	&& mkdir -p /app/dist \
 	&& cp /app/lix-server/target/release/lixray /app/dist/lixray
 
