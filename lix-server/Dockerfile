@@ -3,8 +3,8 @@
 ARG LIXRAY_IMAGE_VARIANT=production
 
 FROM rust:1-bookworm AS builder
-ARG LIX_REV=febaa31ffd2ab61e3c0abeb0e6da5ca02365fe55
-ARG LIX_ARCHIVE_SHA256=9a95cd0f2a1ee39a0e2cdb63c37b25a44b9a9a2664880b251be62e86d190ac50
+ARG LIX_REV=b390bdcc029d97489f3201d758f7312aca9b4e98
+ARG LIX_ARCHIVE_SHA256=e40ceb61fbba4aafe359283740dcd3e06341e7d8cec55123609df12eb5c08118
 WORKDIR /app
 
 # This Dockerfile uses the repository root as its build context so the server
