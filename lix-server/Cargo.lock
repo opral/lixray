@@ -865,6 +865,8 @@ dependencies = [
  "compression-core",
  "flate2",
  "memchr",
+ "zstd",
+ "zstd-safe",
 ]
 
 [[package]]
@@ -3068,6 +3070,7 @@ dependencies = [
 name = "lix_slatedb_storage"
 version = "0.8.4"
 dependencies = [
+ "blake3",
  "bytes",
  "futures-util",
  "lix_engine",
