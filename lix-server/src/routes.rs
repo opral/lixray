@@ -287,6 +287,17 @@ fn lix_error(error: LixRuntimeError) -> Response {
             })),
         )
         .with_retry_after(),
+        LixRuntimeError::ShuttingDown => protocol_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "LIX_ERROR_LIX_SHUTTING_DOWN",
+            "The lix server is shutting down.",
+            Some("Retry the request on a healthy server.".to_string()),
+            Some(json!({
+                "operation": "lix_open",
+                "retryable": true,
+            })),
+        )
+        .with_retry_after(),
         LixRuntimeError::Cleanup(error) => {
             tracing::error!(error = %error, "lix cache cleanup could not complete");
             protocol_error(
@@ -800,6 +811,7 @@ mod tests {
         for error in [
             LixRuntimeError::AtCapacity { max: 4 },
             LixRuntimeError::Recovering,
+            LixRuntimeError::ShuttingDown,
         ] {
             let response = lix_error(error);
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
