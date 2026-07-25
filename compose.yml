@@ -30,6 +30,7 @@ services:
       context: .
       dockerfile: lix-server/Dockerfile
       args:
+        CARGO_BUILD_JOBS: 32
         LIXRAY_IMAGE_VARIANT: perf
     environment:
       BIND_ADDR: 0.0.0.0:8080

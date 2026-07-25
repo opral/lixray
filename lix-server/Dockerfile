@@ -3,8 +3,9 @@
 ARG LIXRAY_IMAGE_VARIANT=production
 
 FROM rust:1-bookworm AS builder
-ARG LIX_REV=776c25b6399e5d1afd669726eae0e32df5a0da0b
-ARG LIX_ARCHIVE_SHA256=692a211ea18929317144318c580cfb8382471d15305046d280dd079939b0d32d
+ARG CARGO_BUILD_JOBS=2
+ARG LIX_REV=095d3db72b4afcfcc6e56e23dfbb13ae46d66c01
+ARG LIX_ARCHIVE_SHA256=d136c3ec8de96a3832e3b940189a9dd8903c126efeb97dd1eb80c1e83ab4b087
 WORKDIR /app
 
 # This Dockerfile uses the repository root as its build context so the server
@@ -26,11 +27,14 @@ COPY lix-server/src ./lix-server/src
 WORKDIR /app/lix-server
 # Railway requires cache IDs to be namespaced by the service ID. Docker treats
 # these as opaque cache keys, so the same mounts also work for local builds.
+# The default two compile jobs keep the Wasmtime release build inside
+# Railway's memory envelope. Compose overrides it for its high-memory CI
+# builder so the local stack is ready within Playwright's startup budget.
 RUN --mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/usr/local/cargo/registry,target=/usr/local/cargo/registry \
 	--mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/usr/local/cargo/git,target=/usr/local/cargo/git \
 	--mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/app/lix-server/target,target=/app/lix-server/target \
 	cargo -Z bindeps clean --release --package lixray \
-	&& cargo -Z bindeps build --release --locked \
+	&& CARGO_BUILD_JOBS="$CARGO_BUILD_JOBS" cargo -Z bindeps build --release --locked \
 	&& mkdir -p /app/dist \
 	&& cp /app/lix-server/target/release/lixray /app/dist/lixray
 
