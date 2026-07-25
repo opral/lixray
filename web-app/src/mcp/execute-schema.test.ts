@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { openLix } from "@lix-js/sdk";
+import {
+	initSync,
+	openMemory,
+} from "../../../vendor/lix/packages/js-sdk/dist/wasm/lix_js_sdk.js";
+import type { LixBinding } from "../../../vendor/lix/packages/js-sdk/dist/binding-types.js";
 import {
 	EXECUTE_SQL_COLUMNS_QUERY,
 	EXECUTE_SQL_CORE_SCHEMA,
@@ -9,24 +14,48 @@ import {
 	EXECUTE_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 
-void test("execute core schema guide matches fresh Lix surfaces", async (t) => {
-	const lix = await openLix();
+initSync({
+	module: await readFile(
+		new URL(
+			"../../../vendor/lix/packages/js-sdk/dist/wasm/lix_js_sdk_bg.wasm",
+			import.meta.url,
+		),
+	),
+});
+
+// Keep this contract on the source-matched binding used by the Worker.
+async function openFreshLix(): Promise<LixBinding> {
+	return (await openMemory()) as unknown as LixBinding;
+}
+
+void test("opens fresh Lix through the vendored WASM binding", async (t) => {
+	const lix = await openFreshLix();
 	t.after(async () => lix.close());
-	const result = await lix.execute(`SELECT table_name, column_name
+});
+
+void test("execute core schema guide matches fresh Lix surfaces", async (t) => {
+	const lix = await openFreshLix();
+	t.after(async () => lix.close());
+	const result = await lix.execute(
+		`SELECT table_name, column_name
 FROM information_schema.columns
 WHERE table_schema = 'public'
   AND table_name IN ('lix_file', 'lix_directory', 'lix_branch', 'lix_change')
-ORDER BY table_name, ordinal_position;`);
+ORDER BY table_name, ordinal_position;`,
+		[],
+	);
 	const columnsByTable = new Map<string, Set<string>>();
 
 	for (const row of result.rows) {
-		const { table_name, column_name } = row.toObject() as {
-			table_name: string;
-			column_name: string;
-		};
-		const columns = columnsByTable.get(table_name) ?? new Set<string>();
-		columns.add(column_name);
-		columnsByTable.set(table_name, columns);
+		const [tableName, columnName] = row;
+		if (tableName?.kind !== "text" || columnName?.kind !== "text") {
+			throw new TypeError(
+				"information_schema returned non-text column metadata",
+			);
+		}
+		const columns = columnsByTable.get(tableName.value) ?? new Set<string>();
+		columns.add(columnName.value);
+		columnsByTable.set(tableName.value, columns);
 	}
 
 	for (const table of EXECUTE_SQL_CORE_TABLES) {
