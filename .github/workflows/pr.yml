@@ -148,6 +148,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: nightly-2026-05-21
           components: clippy, rustfmt
 
       - name: Cache Cargo artifacts
@@ -157,9 +158,9 @@ jobs:
 
       - name: Check Rust
         run: |
-          cargo fmt --manifest-path lix-server/Cargo.toml --check
-          cargo clippy --manifest-path lix-server/Cargo.toml --locked --all-targets --all-features -- -D warnings
-          cargo test --manifest-path lix-server/Cargo.toml --locked
+          cargo -Z bindeps fmt --manifest-path lix-server/Cargo.toml --check
+          cargo clippy --manifest-path lix-server/Cargo.toml -Z bindeps --locked --all-targets --all-features -- -D warnings
+          cargo -Z bindeps test --manifest-path lix-server/Cargo.toml --locked
 
   e2e:
     name: E2E

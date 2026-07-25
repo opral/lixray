@@ -686,14 +686,11 @@ impl LixRuntimeManager {
         let lix_id = lix_id.to_string();
         tokio::spawn(async move {
             let started = Instant::now();
-            // The task and the recovering runtime each retain one reference.
-            // Wait for request bodies before the normal recovery close, while
-            // leaving shutdown able to clone and close the retained service.
-            while Arc::strong_count(&draining_service) > 2 {
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-
-            let close_result = close_lix_service(draining_service).await;
+            // Close first: an SSE body holds a service lease, but close() is
+            // what ends that stream. Waiting for leases before close would
+            // leave a recovering runtime permanently stuck behind its own
+            // observation response.
+            let close_result = close_lix_service(Arc::clone(&draining_service)).await;
             match close_result {
                 Ok(()) => info!(
                     lix_id,
@@ -707,13 +704,27 @@ impl LixRuntimeManager {
                     "released recovered lix runtime after close error"
                 ),
             }
+            // The task and the recovering runtime each retain one reference.
+            // Closing above has ended protocol streams; wait for their HTTP
+            // bodies to release the remaining leases before retiring storage.
+            while Arc::strong_count(&draining_service) > 2 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
             if let Some((sequence, done)) = manager
                 .begin_recovered_runtime_cleanup(&lix_id, &runtime)
                 .await
             {
-                // `draining_service` was closed above. Dropping the last
+                // Installing the tombstone above prevents new `get` calls
+                // from retaining the runtime. An in-flight caller can still
+                // own the runtime cell, whose initialized value retains this
+                // Arc even though it does not add a direct service Arc.
+                while Arc::strong_count(&runtime) > 1 {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                // `draining_service` was closed above. Dropping every
                 // retained runtime before touching its cache path keeps
                 // SlateDB workers from observing a renamed directory.
+                drop(draining_service);
                 drop(runtime);
                 let cleanup = manager
                     .retire_and_delete_cache_child(&lix_id, sequence)
@@ -1455,8 +1466,15 @@ fn s3_retry_config(budget: S3RequestBudget) -> RetryConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::{header, Request},
+    };
+    use http_body_util::BodyExt as _;
+    use serde_json::{json, Value as JsonValue};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+    use tower::ServiceExt as _;
 
     struct TestCacheRoot(PathBuf);
 
@@ -1898,6 +1916,127 @@ mod tests {
         // after the last handler lease is released.
         drop(service);
         stream_closed.expect("shutdown should end a recovering observation stream");
+    }
+
+    #[tokio::test]
+    async fn recovery_closes_observation_streams_before_waiting_for_response_leases() {
+        let manager = memory_manager(1);
+        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let protocol_router = service.protocol_router();
+        let handshake = protocol_router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/lix/v1/")
+                    .body(Body::empty())
+                    .expect("handshake request"),
+            )
+            .await
+            .expect("handshake response");
+        assert_eq!(handshake.status(), axum::http::StatusCode::OK);
+        let handshake = serde_json::from_slice::<serde_json::Value>(
+            &handshake
+                .into_body()
+                .collect()
+                .await
+                .expect("handshake body")
+                .to_bytes(),
+        )
+        .expect("handshake JSON");
+        let session_id = handshake["sessionId"]
+            .as_str()
+            .expect("handshake session ID")
+            .to_string();
+
+        let observation = protocol_router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/lix/v1/observe")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("Lix-Session-Id", session_id)
+                    .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
+                    .expect("observation request"),
+            )
+            .await
+            .expect("observation response");
+        assert_eq!(observation.status(), axum::http::StatusCode::OK);
+        let mut body = observation.into_body();
+        let first_frame = tokio::time::timeout(Duration::from_secs(1), body.frame())
+            .await
+            .expect("observation should produce an initial frame")
+            .expect("observation body should remain open")
+            .expect("valid observation frame");
+        assert!(first_frame.is_data());
+
+        manager.recover("lix-a", &service).await;
+
+        let stream_closed = tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(frame) = body.frame().await {
+                frame.expect("valid observation frame while recovering");
+            }
+        })
+        .await;
+        drop(service);
+        stream_closed.expect("recovery should end an observation stream");
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while manager.cached_lix_count().await != 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("recovery should retire the closed runtime");
+    }
+
+    #[tokio::test]
+    async fn recovery_releases_an_eof_drained_observation_body_lease() {
+        let manager = memory_manager(1);
+        let app = crate::router(Arc::clone(&manager), None, Duration::from_secs(60));
+        let session = open_protocol_session(&app, "lix-a").await;
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/lixes/lix-a/lix/v1/observe")
+                    .header(lix_server_protocol::SESSION_ID_HEADER, session)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
+                    .expect("observation request"),
+            )
+            .await
+            .expect("observation response");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let mut body = response.into_body();
+        let first_frame = tokio::time::timeout(Duration::from_secs(1), body.frame())
+            .await
+            .expect("observation should produce an initial frame")
+            .expect("observation body should remain open")
+            .expect("valid observation frame");
+        assert!(first_frame.is_data());
+
+        let service = manager.get("lix-a").await.expect("get active service");
+        manager.recover("lix-a", &service).await;
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(frame) = body.frame().await {
+                frame.expect("valid observation frame while recovering");
+            }
+        })
+        .await
+        .expect("recovery should end the observation stream");
+        drop(service);
+
+        // Keep the completed Body alive: EOF must release its lease so this
+        // response object cannot hold the terminal runtime in recovery.
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while manager.cached_lix_count().await != 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("EOF-drained observation body must not delay retirement");
+        drop(body);
     }
 
     #[tokio::test]
@@ -2421,6 +2560,192 @@ mod tests {
         .await
         .expect("recovery must release the runtime");
         drop(reopened);
+    }
+
+    #[tokio::test]
+    async fn recovery_waits_for_inflight_runtime_cell_before_releasing_capacity() {
+        let manager = memory_manager(1);
+        let service = manager.get("lix-a").await.expect("open Lix to recover");
+        let held_runtime_cell = {
+            let state = manager.state.lock().await;
+            Arc::clone(
+                &state
+                    .entries
+                    .get("lix-a")
+                    .expect("opened Lix must have a runtime entry")
+                    .runtime,
+            )
+        };
+
+        manager.recover("lix-a", &service).await;
+        drop(service);
+
+        let cleanup_started = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let state = manager.state.lock().await;
+                if state.cleaning.contains_key("lix-a") {
+                    return true;
+                }
+                if !state.entries.contains_key("lix-a") {
+                    return false;
+                }
+                drop(state);
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("recovery should either start cleanup or remove the runtime");
+        assert!(
+            cleanup_started,
+            "recovery completed while an in-flight runtime cell still retained the closed service"
+        );
+
+        let replacement_manager = Arc::clone(&manager);
+        let mut replacement = tokio::spawn(async move { replacement_manager.get("lix-b").await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut replacement)
+                .await
+                .is_err(),
+            "the retained runtime cell must keep recovery capacity occupied"
+        );
+
+        drop(held_runtime_cell);
+        let replacement = tokio::time::timeout(Duration::from_secs(1), replacement)
+            .await
+            .expect("replacement should resume after the runtime cell is released")
+            .expect("join replacement open")
+            .expect("open replacement Lix");
+        drop(replacement);
+    }
+
+    #[tokio::test]
+    async fn fenced_protocol_runtime_retires_without_waiting_for_finite_error_body() {
+        let manager = memory_manager(1);
+        let app = crate::router(Arc::clone(&manager), None, Duration::from_secs(60));
+        let session = open_protocol_session(&app, "lix-a").await;
+        let object_store = match &manager.backend {
+            StorageBackend::Memory { object_store } => Arc::clone(object_store),
+            StorageBackend::S3 { .. } => unreachable!("memory manager must use in-memory storage"),
+        };
+        let fencer = SlateDB::open_object_store_with_options(
+            "lix-a",
+            object_store,
+            SlateDBObjectStoreOptions::default(),
+        )
+        .expect("open newer SlateDB writer");
+
+        // A completed second open fences the old SlateDB client, but the old
+        // client's asynchronous manifest poll is what surfaces that terminal
+        // state. Probe with an idempotent read rather than falsely assuming a
+        // just-fenced non-durable mutation will fail synchronously.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let response = loop {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/lixes/lix-a/lix/v1/execute")
+                        .header(lix_server_protocol::SESSION_ID_HEADER, &session)
+                        .header("content-type", "application/json")
+                        .body(Body::from(r#"{"sql":"SELECT 1"}"#))
+                        .expect("fence probe request"),
+                )
+                .await
+                .expect("fence probe response");
+            if response.status() == axum::http::StatusCode::CONFLICT {
+                break response;
+            }
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::OK,
+                "fence probe must either succeed before SlateDB closes the old writer or report its terminal error"
+            );
+            drop(response);
+            assert!(
+                Instant::now() < deadline,
+                "SlateDB did not report the fenced writer within the test deadline"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+        assert!(response.headers().get(header::RETRY_AFTER).is_none());
+        assert!(matches!(
+            manager.get("lix-a").await,
+            Err(LixRuntimeError::Recovering)
+        ));
+
+        // A finite JSON error is already serialized. Holding its body must
+        // not keep the fenced runtime (and its capacity slot) alive forever.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while manager.cached_lix_count().await != 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("fenced runtime must retire without waiting for its finite response body");
+
+        let error: JsonValue = serde_json::from_slice(
+            &response
+                .into_body()
+                .collect()
+                .await
+                .expect("fenced response body")
+                .to_bytes(),
+        )
+        .expect("fenced response JSON");
+        assert_eq!(error["error"]["code"], "LIX_STORAGE_FENCED");
+        assert_eq!(
+            error["error"]["details"],
+            json!({
+                "retryable": false,
+                "outcome": "unknown",
+            })
+        );
+
+        drop(fencer);
+        let reopened_session = open_protocol_session(&app, "lix-a").await;
+        let reopened = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/lixes/lix-a/lix/v1/execute")
+                    .header(lix_server_protocol::SESSION_ID_HEADER, reopened_session)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"SELECT 1"}"#))
+                    .expect("reopened query request"),
+            )
+            .await
+            .expect("reopened query response");
+        assert_eq!(reopened.status(), axum::http::StatusCode::OK);
+    }
+
+    async fn open_protocol_session(app: &axum::Router, lix_id: &str) -> String {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/lixes/{lix_id}/lix/v1/"))
+                    .body(Body::empty())
+                    .expect("protocol handshake request"),
+            )
+            .await
+            .expect("protocol handshake response");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body: JsonValue = serde_json::from_slice(
+            &response
+                .into_body()
+                .collect()
+                .await
+                .expect("protocol handshake body")
+                .to_bytes(),
+        )
+        .expect("protocol handshake JSON");
+        body["sessionId"]
+            .as_str()
+            .expect("protocol handshake session id")
+            .to_string()
     }
 
     #[tokio::test]

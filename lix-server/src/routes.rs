@@ -31,13 +31,82 @@ struct TracedBody {
     span: tracing::Span,
 }
 
-/// Keeps the lix's one shared Engine alive until the HTTP body is
-/// finished. This matters for SSE: dropping the request-scoped service lease
-/// as soon as headers are returned would let lix LRU eviction open a
-/// second Engine while an observation from the first Engine is still active.
+/// Keeps the lix's one shared Engine alive until an SSE body is finished.
+/// Dropping the request-scoped service lease as soon as headers are returned
+/// would let Lix LRU eviction open a second Engine while an observation from
+/// the first Engine is still active. Finite protocol bodies are already
+/// serialized and must not delay terminal-runtime recovery.
 struct LixLeaseBody {
     inner: Body,
-    _lix: Arc<LixService>,
+    lix: Option<Arc<LixService>>,
+}
+
+enum CancellationRecoveryMode {
+    WaitForTerminalStorage(lix_server_protocol::DurableTerminalStorageSignal),
+    RecoverOnDrop,
+    Disarmed,
+}
+
+/// Recovers the exact runtime if an HTTP future is cancelled after it has
+/// started protocol work. Terminal storage results are reported from both
+/// durable work and cancellable reads; cancellation itself remains nonterminal.
+struct CancellationRecovery {
+    mode: CancellationRecoveryMode,
+    manager: Arc<LixRuntimeManager>,
+    lix_id: String,
+    service: Arc<LixService>,
+}
+
+impl CancellationRecovery {
+    fn new(
+        signal: lix_server_protocol::DurableTerminalStorageSignal,
+        manager: Arc<LixRuntimeManager>,
+        lix_id: String,
+        service: Arc<LixService>,
+    ) -> Self {
+        Self {
+            mode: CancellationRecoveryMode::WaitForTerminalStorage(signal),
+            manager,
+            lix_id,
+            service,
+        }
+    }
+
+    fn recover_on_drop(&mut self) {
+        self.mode = CancellationRecoveryMode::RecoverOnDrop;
+    }
+
+    fn disarm(&mut self) {
+        self.mode = CancellationRecoveryMode::Disarmed;
+    }
+}
+
+impl Drop for CancellationRecovery {
+    fn drop(&mut self) {
+        let mode = std::mem::replace(&mut self.mode, CancellationRecoveryMode::Disarmed);
+        let manager = Arc::clone(&self.manager);
+        let lix_id = self.lix_id.clone();
+        let service = Arc::clone(&self.service);
+        match mode {
+            CancellationRecoveryMode::WaitForTerminalStorage(signal) => {
+                tokio::spawn(async move {
+                    if signal.wait_for_terminal_storage().await {
+                        tracing::warn!(
+                            lix_id = lix_id.as_str(),
+                            "cancelled protocol request hit a terminal storage error; recovering runtime"
+                        );
+                        manager.recover(&lix_id, &service).await;
+                    }
+                });
+            }
+            CancellationRecoveryMode::RecoverOnDrop => {
+                tokio::spawn(async move {
+                    manager.recover(&lix_id, &service).await;
+                });
+            }
+            CancellationRecoveryMode::Disarmed => {}
+        }
+    }
 }
 
 impl http_body::Body for TracedBody {
@@ -70,7 +139,14 @@ impl http_body::Body for LixLeaseBody {
         mut self: Pin<&mut Self>,
         context: &mut Context<'_>,
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-        Pin::new(&mut self.inner).poll_frame(context)
+        let frame = Pin::new(&mut self.inner).poll_frame(context);
+        if matches!(&frame, Poll::Ready(None)) {
+            // A completed SSE no longer needs to prevent LRU eviction or
+            // terminal-runtime cleanup, even when its response object remains
+            // retained by an in-process caller.
+            self.lix.take();
+        }
+        frame
     }
 
     fn is_end_stream(&self) -> bool {
@@ -197,6 +273,15 @@ async fn lix_protocol_inner(
     };
     *request.uri_mut() = uri;
 
+    let (notifier, signal) = lix_server_protocol::durable_terminal_storage_signal();
+    request.extensions_mut().insert(notifier);
+    let mut cancellation_recovery = CancellationRecovery::new(
+        signal,
+        Arc::clone(&state.manager),
+        lix_id.clone(),
+        Arc::clone(&runtime),
+    );
+
     // Acquisition above and this protocol call are both bounded. The
     // object-store client has its own request budget, but a wedged connection
     // (e.g. after a host sleep) can still hang past it — without these bounds
@@ -210,18 +295,59 @@ async fn lix_protocol_inner(
                 timeout_secs = state.protocol_timeout.as_secs(),
                 "protocol request exceeded its deadline; recovering runtime"
             );
+            cancellation_recovery.recover_on_drop();
             state.manager.recover(&lix_id, &runtime).await;
+            cancellation_recovery.disarm();
             return protocol_timeout_response();
         }
     };
+    if lix_server_protocol::is_terminal_storage_response(&response) {
+        tracing::warn!(
+            lix_id = lix_id.as_str(),
+            "protocol request hit a terminal storage error; recovering runtime"
+        );
+        // The failed operation is deliberately not replayed: SlateDB reports
+        // a terminal storage failure, but a mutation's outcome can still be
+        // unknown to the caller. The protocol response marks that explicitly.
+        cancellation_recovery.recover_on_drop();
+        state.manager.recover(&lix_id, &runtime).await;
+    }
+    if let Some(terminal_signal) = lix_server_protocol::terminal_storage_stream_signal(&response) {
+        let manager = Arc::clone(&state.manager);
+        let recovery_runtime = Arc::clone(&runtime);
+        let recovery_lix_id = lix_id.clone();
+        // SSE sends its HTTP status before an observation can hit storage.
+        // Keep the terminal signal in-process rather than parsing framed
+        // bytes, and do not retain this runtime after a normal stream end.
+        tokio::spawn(async move {
+            if terminal_signal.wait_for_terminal_storage().await {
+                tracing::warn!(
+                    lix_id = recovery_lix_id.as_str(),
+                    "observation hit a terminal storage error; recovering runtime"
+                );
+                manager.recover(&recovery_lix_id, &recovery_runtime).await;
+            }
+        });
+    }
+    cancellation_recovery.disarm();
+    let holds_lix_lease = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|content_type| content_type.split(';').next())
+        .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("text/event-stream"));
     let (parts, body) = response.into_parts();
-    Response::from_parts(
-        parts,
-        Body::new(LixLeaseBody {
-            inner: body,
-            _lix: runtime,
-        }),
-    )
+    if holds_lix_lease {
+        Response::from_parts(
+            parts,
+            Body::new(LixLeaseBody {
+                inner: body,
+                lix: Some(runtime),
+            }),
+        )
+    } else {
+        Response::from_parts(parts, body)
+    }
 }
 
 fn protocol_timeout_response() -> Response {
@@ -804,6 +930,56 @@ mod tests {
         assert_eq!(error["details"]["operation"], "lix_request");
         assert_eq!(error["details"]["retryable"], false);
         assert_eq!(error["details"]["outcome"], "unknown");
+    }
+
+    #[tokio::test]
+    async fn cancelled_nonterminal_request_does_not_recover_its_runtime() {
+        let manager = LixRuntimeManager::new_in_memory(1);
+        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let (notifier, signal) = lix_server_protocol::durable_terminal_storage_signal();
+        let cancellation_recovery = CancellationRecovery::new(
+            signal,
+            Arc::clone(&manager),
+            "lix-a".to_string(),
+            Arc::clone(&service),
+        );
+
+        drop(notifier);
+        drop(cancellation_recovery);
+        tokio::task::yield_now().await;
+
+        let still_active = manager.get("lix-a").await.expect("active lix runtime");
+        assert!(Arc::ptr_eq(&service, &still_active));
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_terminal_response_recovery_still_starts_runtime_recovery() {
+        let manager = LixRuntimeManager::new_in_memory(1);
+        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let (notifier, signal) = lix_server_protocol::durable_terminal_storage_signal();
+        let mut cancellation_recovery = CancellationRecovery::new(
+            signal,
+            Arc::clone(&manager),
+            "lix-a".to_string(),
+            Arc::clone(&service),
+        );
+
+        drop(notifier);
+        cancellation_recovery.recover_on_drop();
+        drop(cancellation_recovery);
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match manager.get("lix-a").await {
+                    Err(LixRuntimeError::Recovering) => return,
+                    Ok(_) => tokio::time::sleep(Duration::from_millis(1)).await,
+                    Err(error) => panic!("unexpected runtime state: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("cancellation recovery should start runtime recovery");
+        drop(service);
     }
 
     #[tokio::test]
