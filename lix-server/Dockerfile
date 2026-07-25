@@ -26,11 +26,13 @@ COPY lix-server/src ./lix-server/src
 WORKDIR /app/lix-server
 # Railway requires cache IDs to be namespaced by the service ID. Docker treats
 # these as opaque cache keys, so the same mounts also work for local builds.
+# Two compile jobs keep the Wasmtime release build inside Railway's memory
+# envelope.
 RUN --mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/usr/local/cargo/registry,target=/usr/local/cargo/registry \
 	--mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/usr/local/cargo/git,target=/usr/local/cargo/git \
 	--mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/app/lix-server/target,target=/app/lix-server/target \
 	cargo -Z bindeps clean --release --package lixray \
-	&& cargo -Z bindeps build --release --locked \
+	&& CARGO_BUILD_JOBS=2 cargo -Z bindeps build --release --locked \
 	&& mkdir -p /app/dist \
 	&& cp /app/lix-server/target/release/lixray /app/dist/lixray
 
