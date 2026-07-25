@@ -77,10 +77,10 @@ try {
 		await rm(preservedWasmRoot, { recursive: true, force: true });
 	}
 }
+const toolchainEnv = await vendoredLixToolchainEnv({
+	requireWasmBindgen: true,
+});
 if (!skipWasmBuild) {
-	const toolchainEnv = await vendoredLixToolchainEnv({
-		requireWasmBindgen: true,
-	});
 	run(
 		process.execPath,
 		[join(sdkRoot, "scripts", "build-wasm.js")],
@@ -97,6 +97,13 @@ const compiled = spawnSync(
 );
 if (compiled.error) throw compiled.error;
 if (compiled.status !== 0) process.exit(compiled.status ?? 1);
+
+await rm(join(sdkDist, "bundled-plugins"), { recursive: true, force: true });
+run(
+	process.execPath,
+	[join(sdkRoot, "scripts", "build-bundled-plugins.js")],
+	toolchainEnv,
+);
 
 if (buildNative) {
 	const toolchainEnv = {
@@ -140,7 +147,11 @@ async function vendoredLixToolchainEnv({ requireWasmBindgen }) {
 	const cargoBin = join(cargoHome, "bin");
 	const toolsBin = join(toolsRoot, "bin");
 	let path = process.env.PATH ?? "";
-	let env = { ...process.env, RUSTUP_TOOLCHAIN: channel };
+	let env = {
+		...process.env,
+		CARGO_UNSTABLE_BINDEPS: "true",
+		RUSTUP_TOOLCHAIN: channel,
+	};
 
 	if (!commandSucceeds("rustup", ["run", channel, "cargo", "--version"], env)) {
 		({ env, path } = await useCachedRustup({
@@ -160,15 +171,11 @@ async function vendoredLixToolchainEnv({ requireWasmBindgen }) {
 		);
 	}
 
-	if (
-		requireWasmBindgen &&
-		!rustTargetInstalled("wasm32-unknown-unknown", channel, env)
-	) {
-		run(
-			"rustup",
-			["target", "add", "wasm32-unknown-unknown", "--toolchain", channel],
-			env,
-		);
+	if (requireWasmBindgen) {
+		for (const target of ["wasm32-unknown-unknown", "wasm32-wasip2"]) {
+			if (rustTargetInstalled(target, channel, env)) continue;
+			run("rustup", ["target", "add", target, "--toolchain", channel], env);
+		}
 	}
 
 	if (!requireWasmBindgen) return env;
