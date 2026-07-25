@@ -130,7 +130,9 @@ jobs:
 
       - name: Test database policies and functions
         working-directory: database
-        run: supabase start && supabase test db
+        run: |
+          supabase start --exclude edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector
+          supabase test db
 
   rust:
     name: Rust

@@ -32,7 +32,8 @@ for (const signal of Object.keys(signalExitCodes)) {
 	process.on(signal, () => handleSignal(signal));
 }
 
-const database = spawnSync(pnpm, ["--dir", "database", "start"], {
+const databaseScript = process.env.CI ? "start:ci" : "start";
+const database = spawnSync(pnpm, ["--dir", "database", databaseScript], {
 	cwd: repositoryRoot,
 	stdio: "inherit",
 });
