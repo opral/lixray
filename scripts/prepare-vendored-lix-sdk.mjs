@@ -139,44 +139,36 @@ async function vendoredLixToolchainEnv({ requireWasmBindgen }) {
 	const toolsRoot = join(cacheRoot, "tools");
 	const cargoBin = join(cargoHome, "bin");
 	const toolsBin = join(toolsRoot, "bin");
-	const cargoExecutable = join(
-		cargoBin,
-		process.platform === "win32" ? "cargo.exe" : "cargo",
-	);
 	let path = process.env.PATH ?? "";
 	let env = { ...process.env, RUSTUP_TOOLCHAIN: channel };
 
-	if (!commandSucceeds("cargo", ["--version"], env)) {
-		if (process.platform !== "linux" || process.arch !== "x64") {
-			throw new Error(
-				"Building the vendored Lix SDK requires Rust. Install rustup and retry.",
-			);
-		}
-		env = { ...env, CARGO_HOME: cargoHome, RUSTUP_HOME: rustupHome };
-		path = `${cargoBin}${delimiter}${path}`;
-		env = { ...env, PATH: path };
-		if (!commandSucceeds(cargoExecutable, ["--version"], env)) {
-			await mkdir(cacheRoot, { recursive: true });
-			const rustupInit = join(cacheRoot, "rustup-init");
-			const rustupUrl =
-				"https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init";
-			await downloadVerified(rustupUrl, `${rustupUrl}.sha256`, rustupInit);
-			await chmod(rustupInit, 0o755);
-			run(
-				rustupInit,
-				[
-					"-y",
-					"--no-modify-path",
-					"--profile",
-					"minimal",
-					"--default-toolchain",
-					channel,
-					"--target",
-					"wasm32-unknown-unknown",
-				],
-				env,
-			);
-		}
+	if (!commandSucceeds("rustup", ["run", channel, "cargo", "--version"], env)) {
+		({ env, path } = await useCachedRustup({
+			cacheRoot,
+			cargoBin,
+			cargoHome,
+			channel,
+			env,
+			path,
+			requireWasmBindgen,
+			rustupHome,
+		}));
+	}
+	if (!commandSucceeds("rustup", ["run", channel, "cargo", "--version"], env)) {
+		throw new Error(
+			`Rust toolchain ${channel} is unavailable after provisioning.`,
+		);
+	}
+
+	if (
+		requireWasmBindgen &&
+		!rustTargetInstalled("wasm32-unknown-unknown", channel, env)
+	) {
+		run(
+			"rustup",
+			["target", "add", "wasm32-unknown-unknown", "--toolchain", channel],
+			env,
+		);
 	}
 
 	if (!requireWasmBindgen) return env;
@@ -209,6 +201,76 @@ async function vendoredLixToolchainEnv({ requireWasmBindgen }) {
 	}
 
 	return env;
+}
+
+async function useCachedRustup({
+	cacheRoot,
+	cargoBin,
+	cargoHome,
+	channel,
+	env,
+	path,
+	requireWasmBindgen,
+	rustupHome,
+}) {
+	if (process.platform !== "linux" || process.arch !== "x64") {
+		throw new Error(
+			"Building the vendored Lix SDK requires Rust. Install rustup and retry.",
+		);
+	}
+	const cachedPath = `${cargoBin}${delimiter}${path}`;
+	const cachedEnv = {
+		...env,
+		CARGO_HOME: cargoHome,
+		PATH: cachedPath,
+		RUSTUP_HOME: rustupHome,
+	};
+	if (!commandSucceeds("rustup", ["--version"], cachedEnv)) {
+		await mkdir(cacheRoot, { recursive: true });
+		const rustupInit = join(cacheRoot, "rustup-init");
+		const rustupUrl =
+			"https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init";
+		await downloadVerified(rustupUrl, `${rustupUrl}.sha256`, rustupInit);
+		await chmod(rustupInit, 0o755);
+		const rustupInitArgs = [
+			"-y",
+			"--no-modify-path",
+			"--profile",
+			"minimal",
+			"--default-toolchain",
+			channel,
+		];
+		if (requireWasmBindgen) {
+			rustupInitArgs.push("--target", "wasm32-unknown-unknown");
+		}
+		run(rustupInit, rustupInitArgs, cachedEnv);
+	}
+	if (
+		!commandSucceeds(
+			"rustup",
+			["run", channel, "cargo", "--version"],
+			cachedEnv,
+		)
+	) {
+		run(
+			"rustup",
+			["toolchain", "install", channel, "--profile", "minimal"],
+			cachedEnv,
+		);
+	}
+	return { env: cachedEnv, path: cachedPath };
+}
+
+function rustTargetInstalled(target, channel, env) {
+	return (
+		commandOutput(
+			"rustup",
+			["target", "list", "--installed", "--toolchain", channel],
+			env,
+		)
+			?.split(/\r?\n/)
+			.includes(target) ?? false
+	);
 }
 
 function commandSucceeds(command, args, env) {
