@@ -91,9 +91,50 @@ test("handshake establishes a session used by execute and close", async () => {
   assert.equal(calls[0].headers["lix-session-id"], undefined);
   assert.equal(calls[0].headers.authorization, "Bearer internal-token");
   assert.equal(calls[1].headers["lix-session-id"], "session-capability");
+  assert.match(
+    calls[1].headers["idempotency-key"],
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+  );
   assert.equal(calls[2].headers["lix-session-id"], "session-capability");
   assert.equal(calls[2].method, "DELETE");
   assert.match(calls[1].body, /"sql":"SELECT 1"/);
+});
+
+test("SQL write requests preserve their caller-provided idempotency keys", async () => {
+  const calls = [];
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, ...options });
+      if (options.method === "GET") {
+        return Response.json({ sessionId: "session-idempotency" });
+      }
+      return Response.json({
+        columns: [],
+        rows: [],
+        rowsAffected: 1,
+        notices: [],
+      });
+    },
+  });
+
+  await client.open();
+  await client.execute("UPDATE lix_file SET path = path", [], {
+    idempotencyKey: "perf-execute-key",
+  });
+  await client.executeBatch(
+    [{ sql: "UPDATE lix_file SET path = path", params: [] }],
+    { idempotencyKey: "perf-batch-key" },
+  );
+  await client.executeFileData("/payload.bin", Buffer.from([1]), {
+    idempotencyKey: "perf-file-key",
+  });
+
+  assert.deepEqual(
+    calls.slice(1).map((call) => call.headers["idempotency-key"]),
+    ["perf-execute-key", "perf-batch-key", "perf-file-key"],
+  );
 });
 
 test("close clears the session even when the request fails", async () => {

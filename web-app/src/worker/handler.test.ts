@@ -462,6 +462,8 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 				Authorization: "Bearer user-token",
 				"content-type": "application/json",
 				"Lix-Session-Id": "server-issued-session",
+				"Idempotency-Key": "client-retry-key",
+				"X-Lixray-Idempotency-Principal": "forged-client-principal",
 			},
 			body: JSON.stringify(body),
 		}),
@@ -489,6 +491,14 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 	assert.equal(
 		proxiedRequest.headers.get("lix-session-id"),
 		"server-issued-session",
+	);
+	assert.equal(
+		proxiedRequest.headers.get("idempotency-key"),
+		"client-retry-key",
+	);
+	assert.equal(
+		proxiedRequest.headers.get("x-lixray-idempotency-principal"),
+		"user-123",
 	);
 	assert.deepEqual(await proxiedRequest.json(), body);
 });
@@ -575,6 +585,10 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 	assert.equal(publicLixLookups, 1);
 	assert.ok(proxiedRequest);
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
+	assert.equal(
+		proxiedRequest.headers.get("x-lixray-idempotency-principal"),
+		null,
+	);
 	assert.deepEqual(await proxiedRequest.json(), {
 		sql: "SELECT path FROM lix_file",
 	});
@@ -956,6 +970,7 @@ void test("canonical mutation bodies are not replayed after ambiguous proxy fail
 		headers: {
 			Authorization: "Bearer user-token",
 			"content-type": "application/json",
+			"Idempotency-Key": "opaque-proxy-key",
 		},
 		body: JSON.stringify({ sql: "SELECT 1" }),
 	});

@@ -171,6 +171,7 @@ type McpClaimsValidation =
 	  };
 
 const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
+const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
 const jwksByUrl = new Map<string, JWTVerifyGetKey>();
@@ -299,6 +300,7 @@ export async function handleRequest(
 						containerPath,
 						env,
 						options,
+						authResult.auth.userId,
 					);
 				}
 				// A signed-in non-member falls through to the public read
@@ -342,8 +344,13 @@ async function fetchLixRequest(
 	containerPath: string,
 	env: WorkerEnv,
 	options: HandleRequestOptions,
+	trustedPrincipal?: string,
 ): Promise<Response> {
-	const rewrittenRequest = rewriteLixRequest(request, containerPath);
+	const rewrittenRequest = rewriteLixRequest(
+		request,
+		containerPath,
+		trustedPrincipal,
+	);
 	if (options.lixFetch) {
 		return options.lixFetch(lixId, rewrittenRequest);
 	}
@@ -356,6 +363,7 @@ async function fetchLixRequest(
 	const containerRequest = rewriteLixRequest(
 		rewrittenRequest.clone() as unknown as Request,
 		lixPath,
+		trustedPrincipal,
 	);
 	try {
 		return await fetchContainerWithRetry({
@@ -991,12 +999,20 @@ function remoteJwks(url: string): JWTVerifyGetKey {
 	return jwks;
 }
 
-function rewriteLixRequest(request: Request, containerPath: string) {
+function rewriteLixRequest(
+	request: Request,
+	containerPath: string,
+	trustedPrincipal?: string,
+) {
 	const url = new URL(request.url);
 	url.pathname = containerPath;
 	const rewritten = new Request(url, request);
 	const headers = new Headers(rewritten.headers);
 	headers.delete("Authorization");
+	headers.delete(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER);
+	if (trustedPrincipal !== undefined) {
+		headers.set(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, trustedPrincipal);
+	}
 	return new Request(rewritten, { headers });
 }
 

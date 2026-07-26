@@ -25,6 +25,8 @@ import {
 } from "../worker/container-retry.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
 
+const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
+
 interface McpUser {
 	userId: string;
 	token: string;
@@ -334,6 +336,8 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		const rewritten = new Request(url, request);
 		const headers = new Headers(rewritten.headers);
 		headers.delete("authorization");
+		headers.delete(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER);
+		headers.set(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, this.user.userId);
 		const template = new Request(rewritten, { headers });
 		if (this.lixFetch) {
 			return this.lixFetch(lixId, template);
