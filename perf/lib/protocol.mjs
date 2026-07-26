@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 const MAX_BINARY_FILE_UPSERT_BATCH_ENTRIES = 1_024;
@@ -112,17 +113,21 @@ export class ProtocolClient {
     };
   }
 
-  execute(sql, params = []) {
+  execute(sql, params = [], { idempotencyKey } = {}) {
     this.requireSession();
-    return this.request("execute", "POST", { sql, params });
+    return this.request("execute", "POST", { sql, params }, {
+      idempotencyKey: idempotencyKeyFor(idempotencyKey),
+    });
   }
 
-  executeBatch(statements) {
+  executeBatch(statements, { idempotencyKey } = {}) {
     this.requireSession();
-    return this.request("execute-batch", "POST", { statements });
+    return this.request("execute-batch", "POST", { statements }, {
+      idempotencyKey: idempotencyKeyFor(idempotencyKey),
+    });
   }
 
-  executeFileData(path, data, { shape = "update" } = {}) {
+  executeFileData(path, data, { shape = "update", idempotencyKey } = {}) {
     this.requireSession();
     if (typeof path !== "string" || path.length === 0) {
       throw new TypeError("executeFileData path must be a non-empty string");
@@ -156,7 +161,7 @@ export class ProtocolClient {
         sql: "UPDATE lix_file SET data = $1 WHERE path = $2",
         params: [blob, text],
       };
-    });
+    }, { idempotencyKey: idempotencyKeyFor(idempotencyKey) });
   }
 
   upsertFileData(path, data) {
@@ -303,7 +308,7 @@ export class ProtocolClient {
     }
   }
 
-  async request(path, method, body) {
+  async request(path, method, body, { idempotencyKey } = {}) {
     const started = performance.now();
     const encoded = body === undefined ? undefined : JSON.stringify(body);
     return this.requestEncoded(
@@ -312,6 +317,7 @@ export class ProtocolClient {
       encoded,
       encoded === undefined ? undefined : "application/json",
       started,
+      idempotencyKey,
     );
   }
 
@@ -326,7 +332,7 @@ export class ProtocolClient {
     );
   }
 
-  async requestLazyJson(path, method, makeBody) {
+  async requestLazyJson(path, method, makeBody, { idempotencyKey } = {}) {
     const started = performance.now();
     const encoded = JSON.stringify(makeBody());
     return this.requestEncoded(
@@ -335,6 +341,7 @@ export class ProtocolClient {
       encoded,
       "application/json",
       started,
+      idempotencyKey,
     );
   }
 
@@ -390,11 +397,18 @@ export class ProtocolClient {
     };
   }
 
-  async requestEncoded(path, method, body, contentType, started) {
+  async requestEncoded(
+    path,
+    method,
+    body,
+    contentType,
+    started,
+    idempotencyKey,
+  ) {
     const url = path ? `${this.endpoint}/${path}` : `${this.endpoint}/`;
     const response = await this.fetchImpl(url, {
       method,
-      headers: this.requestHeaders(contentType),
+      headers: this.requestHeaders(contentType, idempotencyKey),
       body,
     });
     const text = await response.text();
@@ -423,7 +437,7 @@ export class ProtocolClient {
     };
   }
 
-  requestHeaders(contentType) {
+  requestHeaders(contentType, idempotencyKey) {
     const headers = {};
     if (contentType !== undefined) {
       headers["content-type"] = contentType;
@@ -433,6 +447,9 @@ export class ProtocolClient {
     }
     if (this.sessionId) {
       headers["lix-session-id"] = this.sessionId;
+    }
+    if (idempotencyKey !== undefined) {
+      headers["idempotency-key"] = idempotencyKey;
     }
     return headers;
   }
@@ -541,4 +558,26 @@ function requestBodyBytes(body) {
     return Buffer.byteLength(body);
   }
   return body.byteLength;
+}
+
+function idempotencyKeyFor(provided) {
+  if (provided !== undefined && typeof provided !== "string") {
+    throw new TypeError("idempotencyKey must be a string");
+  }
+  const key = provided ?? randomUUID();
+  if (
+    key.length === 0 ||
+    key.length > 255 ||
+    ![...key].every(
+      (character) =>
+        character.length === 1 &&
+        character.charCodeAt(0) >= 0x21 &&
+        character.charCodeAt(0) <= 0x7e,
+    )
+  ) {
+    throw new TypeError(
+      "idempotencyKey must contain 1 to 255 visible ASCII characters",
+    );
+  }
+  return key;
 }

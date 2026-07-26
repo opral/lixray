@@ -19,6 +19,9 @@ use std::{
 use tower::ServiceExt;
 use tracing::Instrument as _;
 
+const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER: &str = "x-lixray-idempotency-principal";
+const MAX_TRUSTED_IDEMPOTENCY_PRINCIPAL_BYTES: usize = 255;
+
 #[derive(Clone)]
 struct AppState {
     manager: Arc<LixRuntimeManager>,
@@ -242,6 +245,21 @@ async fn lix_protocol_inner(
         return response;
     }
 
+    let trusted_idempotency_scope = match take_trusted_idempotency_scope(&mut request) {
+        Ok(scope) => scope,
+        Err(message) => {
+            return protocol_error(
+                StatusCode::BAD_REQUEST,
+                "LIX_INVALID_ARGUMENT",
+                message,
+                None,
+                None,
+            );
+        }
+    };
+    if let Some(scope) = trusted_idempotency_scope {
+        request.extensions_mut().insert(scope);
+    }
     let runtime =
         match tokio::time::timeout(state.protocol_timeout, state.manager.get(&lix_id)).await {
             Ok(Ok(runtime)) => runtime,
@@ -350,19 +368,59 @@ async fn lix_protocol_inner(
     }
 }
 
+fn take_trusted_idempotency_scope(
+    request: &mut Request<Body>,
+) -> Result<Option<lix_server_protocol::TrustedIdempotencyScope>, &'static str> {
+    let value = {
+        let mut values = request
+            .headers()
+            .get_all(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER)
+            .iter();
+        let value = values.next().cloned();
+        if values.next().is_some() {
+            return Err("Trusted idempotency principal must be sent at most once.");
+        }
+        value
+    };
+    // The raw header never reaches the canonical protocol. It is only a
+    // Worker-to-service transport for the authenticated subject.
+    request
+        .headers_mut()
+        .remove(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER);
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value
+        .to_str()
+        .map_err(|_| "Trusted idempotency principal must contain visible ASCII characters.")?;
+    if value.is_empty()
+        || value.len() > MAX_TRUSTED_IDEMPOTENCY_PRINCIPAL_BYTES
+        || !value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+    {
+        return Err(
+            "Trusted idempotency principal must contain 1 to 255 visible ASCII characters.",
+        );
+    }
+    Ok(Some(lix_server_protocol::TrustedIdempotencyScope::new(
+        value.to_string(),
+    )))
+}
+
 fn protocol_timeout_response() -> Response {
     // Lix deliberately lets durable protocol work outlive the cancelled HTTP
-    // future. Without an idempotency key, the deadline leaves a mutation's
-    // result unknown rather than making it safe to replay.
+    // future. This outer layer cannot distinguish an idempotent SQL write
+    // from a read-shaped operation that persists runtime state, so it must
+    // preserve an unknown outcome rather than infer replay safety from a URL
+    // or header alone.
     protocol_error(
         StatusCode::GATEWAY_TIMEOUT,
         "LIX_ERROR_LIX_TIMEOUT",
         "The lix request timed out before its outcome was known.",
         Some("Do not automatically retry this request; a mutation may still complete.".to_string()),
         Some(json!({
-            "operation": "lix_request",
-            "retryable": false,
-            "outcome": "unknown",
+        "operation": "lix_request",
+        "retryable": false,
+        "outcome": "unknown",
         })),
     )
 }
@@ -543,9 +601,17 @@ mod tests {
     use http_body_util::BodyExt;
     use lix_sdk::{Value as LixValue, WireValue};
     use serde_json::{json, Value as JsonValue};
-    use std::{path::PathBuf, sync::Arc, time::Duration};
+    use std::{
+        path::PathBuf,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
 
     const TEST_PROTOCOL_TIMEOUT: Duration = Duration::from_secs(60);
+    static TEST_IDEMPOTENCY_KEY_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
     fn test_router() -> Router {
         let manager = LixRuntimeManager::new_in_memory(4);
@@ -669,6 +735,7 @@ mod tests {
                         lix_server_protocol::SESSION_ID_HEADER,
                         &lix_a_session,
                     )
+                    .header(lix_server_protocol::IDEMPOTENCY_KEY_HEADER, "isolate-lix-a")
                     .header("content-type", "application/json")
                     .body(Body::from(
                         r#"{"sql":"INSERT INTO lix_file (path, data) VALUES ('/only-a.txt', X'41')"}"#,
@@ -934,6 +1001,28 @@ mod tests {
         assert_eq!(error["details"]["outcome"], "unknown");
     }
 
+    #[test]
+    fn trusted_idempotency_scope_is_removed_from_headers_before_protocol_dispatch() {
+        let mut request = Request::builder()
+            .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, "user-123")
+            .body(Body::empty())
+            .expect("trusted scope request");
+
+        let scope = take_trusted_idempotency_scope(&mut request)
+            .expect("valid trusted scope")
+            .expect("trusted scope should be present");
+        request.extensions_mut().insert(scope);
+
+        assert!(request
+            .headers()
+            .get(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER)
+            .is_none());
+        assert!(request
+            .extensions()
+            .get::<lix_server_protocol::TrustedIdempotencyScope>()
+            .is_some());
+    }
+
     #[tokio::test]
     async fn cancelled_nonterminal_request_does_not_recover_its_runtime() {
         let manager = LixRuntimeManager::new_in_memory(1);
@@ -1013,6 +1102,13 @@ mod tests {
                 .method("POST")
                 .uri(format!("/lixes/{lix_id}/lix/v1/execute"))
                 .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                .header(
+                    lix_server_protocol::IDEMPOTENCY_KEY_HEADER,
+                    format!(
+                        "lix-server-test-{}",
+                        TEST_IDEMPOTENCY_KEY_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+                    ),
+                )
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({ "sql": sql, "params": params }).to_string(),

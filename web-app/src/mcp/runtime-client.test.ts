@@ -102,6 +102,10 @@ void test("container calls reauthorize every time and never forward the OAuth to
 	for (const request of requests) {
 		assert.equal(request.headers.get("authorization"), null);
 		assert.equal(
+			request.headers.get("x-lixray-idempotency-principal"),
+			"user-1",
+		);
+		assert.equal(
 			(await request.clone().text()).includes("secret-oauth-token"),
 			false,
 		);
