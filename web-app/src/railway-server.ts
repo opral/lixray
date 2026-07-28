@@ -1,13 +1,8 @@
 import startHandler from "@tanstack/react-start/server-entry";
-import { parseSqlScript as parseWorkerdSqlScript } from "@lix-js/sdk/workerd";
 import { addGoogleAnalytics } from "./lib/google-analytics";
 import { parseSqlScript as parseNodeSqlScript } from "./lib/node-lix-sql-parser";
 import { withShareSecurityHeaders } from "./lib/share-security";
 import { handleRequest, type WorkerEnv } from "./worker/handler";
-
-const parseSqlScript = import.meta.env.DEV
-	? parseWorkerdSqlScript
-	: parseNodeSqlScript;
 
 export default {
 	async fetch(
@@ -18,7 +13,7 @@ export default {
 		ctx.passThroughOnException();
 		return handleRequest(request, env, {
 			executionContext: ctx,
-			parseSqlScript,
+			parseSqlScript: parseNodeSqlScript,
 			lixFetch: (lixId, lixRequest) => fetchLixService(env, lixId, lixRequest),
 			fallback: async (fallbackRequest) => {
 				const response = await startHandler.fetch(fallbackRequest);
