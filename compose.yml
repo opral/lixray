@@ -111,5 +111,17 @@ services:
         mc alias set local http://minio:9000 lixray lixray-local-secret
         mc rm --recursive --force "local/lixray/local/$${LIXRAY_PERF_WORKSPACE}/"
 
+  onboarding-storage-reset:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    profiles:
+      - tools
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - mc alias set local http://minio:9000 lixray lixray-local-secret && mc rm --recursive --force local/lixray/local
+
 volumes:
   minio-data:

@@ -12,7 +12,11 @@ import {
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
-import { LixFileService, type LixSummary } from "../mcp/file-service.ts";
+import {
+	LixFileService,
+	type LixRuntimeClient,
+	type LixSummary,
+} from "../mcp/file-service.ts";
 import {
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
@@ -23,6 +27,7 @@ import {
 	mcpDocumentationResponse,
 	mcpUnauthorizedResponse,
 	protectedResourceMetadataResponse,
+	type McpToolCallObservation,
 } from "../mcp/server.ts";
 import {
 	createMcpTelemetrySession,
@@ -92,6 +97,7 @@ interface HandleRequestOptions {
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	executionContext?: ExecutionContext;
 	createMcpTelemetry?: typeof createMcpTelemetrySession;
+	recordMcpLixConnection?: RecordMcpLixConnection;
 	containerRetryDelay?: ContainerRetryDelay;
 	containerRetryRandom?: () => number;
 }
@@ -105,6 +111,12 @@ interface AuthenticatedUser {
 interface AuthenticatedMcpUser extends AuthenticatedUser {
 	clientId: string;
 }
+
+type RecordMcpLixConnection = (
+	observation: McpToolCallObservation,
+	auth: AuthenticatedMcpUser,
+	env: WorkerEnv,
+) => Promise<void>;
 
 export type AuthenticateRequest = (
 	request: Request,
@@ -174,6 +186,12 @@ const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
+const PUBLIC_MCP_METHODS = new Set([
+	"initialize",
+	"notifications/initialized",
+	"ping",
+	"tools/list",
+]);
 const jwksByUrl = new Map<string, JWTVerifyGetKey>();
 
 export async function handleRequest(
@@ -207,6 +225,15 @@ export async function handleRequest(
 
 	if (url.pathname === MCP_PATH) {
 		if (request.method === "OPTIONS") return corsPreflight();
+		const executionContext = options.executionContext ?? noopExecutionContext();
+		if (await isPublicMcpDiscoveryRequest(request)) {
+			return (options.mcpTransport ?? handleMcpTransport)(
+				request,
+				mcpDiscoveryService(),
+				executionContext,
+				{ authMode: isDemoMode(env) ? "none" : "oauth" },
+			);
+		}
 		const authenticateMcp =
 			options.authenticateMcp ?? authenticateMcpWithSupabase;
 		const authResult = await authenticateMcp(request, env);
@@ -236,7 +263,6 @@ export async function handleRequest(
 				lixSummaries: isDemoMode(env) ? demoLixSummaries(env) : undefined,
 			},
 		);
-		const executionContext = options.executionContext ?? noopExecutionContext();
 		const telemetry = (options.createMcpTelemetry ?? createMcpTelemetrySession)(
 			env,
 			{
@@ -245,6 +271,30 @@ export async function handleRequest(
 				isDemo: authResult.auth.isDemo,
 			},
 		);
+		const pendingConnectionRecords: Array<Promise<void>> = [];
+		const recordMcpLixConnection =
+			options.recordMcpLixConnection ?? recordMcpLixConnectionWithSupabase;
+		const onToolCall = (observation: McpToolCallObservation): void => {
+			telemetry?.onToolCall(observation);
+			if (
+				authResult.auth.isDemo ||
+				observation.outcome !== "success" ||
+				!observation.lixId
+			) {
+				return;
+			}
+			pendingConnectionRecords.push(
+				recordMcpLixConnection(observation, authResult.auth, env).catch(
+					(error: unknown) => {
+						console.warn("Failed to record MCP Lix connection", {
+							lixId: observation.lixId,
+							toolName: observation.toolName,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					},
+				),
+			);
+		};
 		try {
 			return await (options.mcpTransport ?? handleMcpTransport)(
 				request,
@@ -257,10 +307,11 @@ export async function handleRequest(
 				executionContext,
 				{
 					authMode: isDemoMode(env) ? "none" : "oauth",
-					onToolCall: telemetry?.onToolCall,
+					onToolCall,
 				},
 			);
 		} finally {
+			await Promise.all(pendingConnectionRecords);
 			scheduleMcpTelemetryFlush(executionContext, telemetry);
 			await client.close();
 		}
@@ -520,7 +571,12 @@ async function authenticateMcpWithSupabase(
 				audience: "authenticated",
 			},
 		);
-		const claims = validateMcpJwtClaims(payload, issuer);
+		const claims = validateMcpJwtClaims(
+			payload,
+			issuer,
+			Math.floor(Date.now() / 1000),
+			mcpResourceUrl(new URL(request.url)),
+		);
 		if (!claims.ok) {
 			return {
 				ok: false,
@@ -555,15 +611,21 @@ function mcpDiscoveryOptions(url: URL, env: WorkerEnv) {
 	const supabaseUrl = env.SUPABASE_URL?.replace(/\/$/, "");
 	if (!isLocalDevelopmentUrl(url)) {
 		return {
+			resource: MCP_RESOURCE,
 			authorizationServer: supabaseUrl ? `${supabaseUrl}/auth/v1` : undefined,
 		};
 	}
 	return {
+		resource: mcpResourceUrl(url),
 		protectedResourceUrl: mcpProtectedResourceUrl(url),
 		authorizationServer: supabaseUrl ? `${supabaseUrl}/auth/v1` : undefined,
 		resourceDocumentationUrl: `${url.origin}${MCP_DOCUMENTATION_PATH}`,
 		endpointUrl: `${url.origin}${MCP_PATH}`,
 	};
+}
+
+function mcpResourceUrl(url: URL): string {
+	return isLocalDevelopmentUrl(url) ? url.origin : MCP_RESOURCE;
 }
 
 function mcpProtectedResourceUrl(url: URL): string {
@@ -580,6 +642,7 @@ export function validateMcpJwtClaims(
 	payload: JWTPayload,
 	expectedIssuer: string,
 	nowSeconds = Math.floor(Date.now() / 1000),
+	expectedResource = MCP_RESOURCE,
 ): McpClaimsValidation {
 	const audiences = Array.isArray(payload.aud)
 		? payload.aud
@@ -606,7 +669,7 @@ export function validateMcpJwtClaims(
 	if (
 		typeof payload.client_id !== "string" ||
 		!payload.client_id ||
-		payload.resource !== MCP_RESOURCE ||
+		payload.resource !== expectedResource ||
 		payload.lixray_mcp !== true ||
 		!scopes.includes("openid")
 	) {
@@ -678,6 +741,39 @@ export async function authorizeLixWithSupabase(
 		return new Response("Lix authorization is unavailable\n", {
 			status: 502,
 		});
+	}
+}
+
+async function recordMcpLixConnectionWithSupabase(
+	observation: McpToolCallObservation,
+	auth: AuthenticatedMcpUser,
+	env: WorkerEnv,
+): Promise<void> {
+	if (!observation.lixId) return;
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		throw new Error("Supabase Data API is not configured");
+	}
+
+	const recordUrl = new URL(
+		"/rest/v1/rpc/record_mcp_lix_connection",
+		env.SUPABASE_URL,
+	);
+	const response = await fetch(recordUrl, {
+		method: "POST",
+		headers: {
+			apikey: env.SUPABASE_PUBLISHABLE_KEY,
+			Authorization: `Bearer ${auth.token}`,
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify({
+			p_lix_id: observation.lixId,
+			p_tool_name: observation.toolName,
+		}),
+	});
+	if (!response.ok) {
+		throw new Error(
+			`Supabase rejected the MCP Lix connection (${response.status})`,
+		);
 	}
 }
 
@@ -798,6 +894,39 @@ async function resolvePublicLixWithSupabase(
 	} catch {
 		return lixResolutionUnavailable();
 	}
+}
+
+async function isPublicMcpDiscoveryRequest(request: Request): Promise<boolean> {
+	if (request.method !== "POST") return false;
+	let payload: unknown;
+	try {
+		payload = await request.clone().json();
+	} catch {
+		return false;
+	}
+	const messages: unknown[] = Array.isArray(payload) ? payload : [payload];
+	return (
+		messages.length > 0 &&
+		messages.every((message) => {
+			if (message === null || typeof message !== "object") return false;
+			if (!("method" in message)) return false;
+			const method: unknown = message.method;
+			return typeof method === "string" && PUBLIC_MCP_METHODS.has(method);
+		})
+	);
+}
+
+function mcpDiscoveryService(): LixFileService {
+	const unavailable = () =>
+		Promise.reject(new Error("MCP tool calls require authentication."));
+	const client: LixRuntimeClient = {
+		listLixes: unavailable,
+		activeBranchId: unavailable,
+		switchBranch: unavailable,
+		execute: unavailable,
+		executeBatch: unavailable,
+	};
+	return new LixFileService(client);
 }
 
 function lixRowId(value: unknown): unknown {

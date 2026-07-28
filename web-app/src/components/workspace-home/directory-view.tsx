@@ -2,6 +2,7 @@ import type { Lix } from "@lix-js/sdk";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import DOMPurify from "dompurify";
 import {
+	ArrowUp,
 	Check,
 	ChevronDown,
 	Copy,
@@ -21,6 +22,13 @@ import {
 	type ReactNode,
 } from "react";
 import { Button } from "~/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "~/components/ui/dialog";
 import {
 	createLixConnectionDetails,
 	type LixConnectionPromptInput,
@@ -174,7 +182,7 @@ export function DirectoryView({
 							aria-hidden="true"
 						/>
 						<span className="text-[13px] text-text-secondary">
-							Connect this agent to my Lix workspace. LixRay hosts it.
+							Connect this agent to your Lix workspace. LixRay hosts it.
 						</span>
 						<span className="flex-1" />
 						<AgentConnectionActions connection={connection} compact />
@@ -256,29 +264,45 @@ export function GettingStartedView({
 	lix,
 	readOnly,
 	connection,
+	hasAgentConnected,
 	onOpenFile,
 }: {
 	readonly lix: Lix;
 	readonly readOnly: boolean;
 	readonly connection: Omit<LixConnectionPromptInput, "origin">;
+	readonly hasAgentConnected: () => Promise<boolean>;
 	readonly onOpenFile: (
 		path: string,
 		options: { newTab: boolean; created?: boolean },
 	) => void;
 }) {
 	const [actionError, setActionError] = useState<string | null>(null);
+	const tree = useWorkspaceTree(lix);
+	const firstFileOpenedRef = useRef(false);
 	const { isDropTarget, dragHandlers } = useImportDrop({
 		lix,
 		dirPath: "/",
 		readOnly,
 		onError: setActionError,
 	});
+	useEffect(() => {
+		if (!tree || tree.files.length === 0 || firstFileOpenedRef.current) return;
+		firstFileOpenedRef.current = true;
+		const firstFile = [...tree.files].sort(
+			(left, right) =>
+				right.updatedAt.localeCompare(left.updatedAt) ||
+				left.path.localeCompare(right.path),
+		)[0];
+		if (firstFile) onOpenFile(firstFile.path, { newTab: false });
+	}, [onOpenFile, tree]);
 	const createFile = async (extension: "md" | "csv" | "excalidraw") => {
+		firstFileOpenedRef.current = true;
 		try {
 			setActionError(null);
 			const path = await createWorkspaceFile(lix, "/", extension);
 			onOpenFile(path, { newTab: false, created: true });
 		} catch (error) {
+			firstFileOpenedRef.current = false;
 			console.error("workspace-home: unable to create file", error);
 			setActionError("Unable to create the file. Try again.");
 		}
@@ -300,6 +324,7 @@ export function GettingStartedView({
 			<GettingStarted
 				readOnly={readOnly}
 				connection={connection}
+				hasAgentConnected={hasAgentConnected}
 				onCreateFile={(extension) => void createFile(extension)}
 			/>
 		</div>
@@ -652,68 +677,382 @@ function GettingStartedIllustration() {
 function GettingStarted({
 	readOnly,
 	connection,
+	hasAgentConnected,
 	onCreateFile,
 }: {
 	readonly readOnly: boolean;
 	readonly connection: Omit<LixConnectionPromptInput, "origin">;
+	readonly hasAgentConnected: () => Promise<boolean>;
 	readonly onCreateFile: (extension: "md" | "csv" | "excalidraw") => void;
 }) {
+	const [connectDialogOpen, setConnectDialogOpen] = useState(false);
 	return (
-		<div
-			className="flex h-full min-h-0 flex-col items-center justify-center text-center"
-			data-testid="home-getting-started"
-		>
-			<div className="-mt-5 flex w-[min(560px,calc(100%-48px))] flex-col items-center">
-				<GettingStartedIllustration />
-				<h1 className="m-0 text-2xl font-bold tracking-[-0.02em]">
-					Connect this agent to my Lix workspace
-				</h1>
-				<p className="mt-3 mb-0 max-w-[440px] text-[14.5px] leading-[1.6] text-text-secondary">
-					LixRay hosts your Lix workspace. Copy the prompt into Claude, Codex,
-					Cursor, or another agent to connect it and choose what to ingest.
-				</p>
-				<div className="mt-5.5 mb-10.5">
-					<AgentConnectionActions connection={connection} />
+		<>
+			<div
+				className="flex h-full min-h-0 flex-col items-center justify-center text-center"
+				data-testid="home-getting-started"
+			>
+				<div className="-mt-5 flex w-[min(560px,calc(100%-48px))] flex-col items-center">
+					<GettingStartedIllustration />
+					<h1 className="m-0 text-2xl font-bold tracking-[-0.02em]">
+						Welcome to your Lix workspace
+					</h1>
+					<p className="mt-3 mb-0 max-w-[470px] text-[14.5px] leading-[1.6] text-text-secondary">
+						A shared folder for you and your AI agents. Connect Claude, Codex,
+						or Cursor — everything it writes lands here, with full change
+						history.
+					</p>
+					<button
+						type="button"
+						onClick={() => setConnectDialogOpen(true)}
+						className="mt-5.5 mb-10.5 inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--color-bg-action-primary-start)_0%,var(--color-bg-action-primary-end)_100%)] px-4.5 py-2.75 text-sm font-bold text-text-on-action-primary shadow-[var(--shadow-action-primary)] hover:brightness-105"
+					>
+						<Link2 className="size-3.5" aria-hidden="true" />
+						Connect an agent
+					</button>
+					{readOnly ? null : (
+						<>
+							<div className="mb-3.5 text-[11.5px] font-bold tracking-[0.06em] text-text-quaternary uppercase">
+								or start yourself
+							</div>
+							<div className="flex justify-center gap-2.5">
+								{NEW_FILE_KINDS.map((kind) => (
+									<button
+										key={kind.extension}
+										type="button"
+										onClick={() => onCreateFile(kind.extension)}
+										className="inline-flex items-center gap-2 rounded-[9px] bg-bg-hover px-3.5 py-2.5 text-[13px] font-semibold text-text-secondary hover:bg-bg-active"
+									>
+										<img
+											src={fileIconUrl(`file.${kind.extension}`)}
+											alt=""
+											className="size-4"
+										/>
+										{kind.label.replace("New ", "")}
+									</button>
+								))}
+							</div>
+							<div className="mt-4.5 text-xs text-text-quaternary">
+								…or drop files anywhere in this window to import
+							</div>
+						</>
+					)}
 				</div>
-				{readOnly ? null : (
-					<>
-						<div className="mb-3.5 text-[11.5px] font-bold tracking-[0.06em] text-text-quaternary uppercase">
-							or start yourself
-						</div>
-						<div className="flex justify-center gap-2.5">
-							{NEW_FILE_KINDS.map((kind) => (
-								<button
-									key={kind.extension}
-									type="button"
-									onClick={() => onCreateFile(kind.extension)}
-									className="inline-flex items-center gap-2 rounded-[9px] bg-bg-hover px-3.5 py-2.5 text-[13px] font-semibold text-text-secondary hover:bg-bg-active"
-								>
-									<img
-										src={fileIconUrl(`file.${kind.extension}`)}
-										alt=""
-										className="size-4"
-									/>
-									{kind.label.replace("New ", "")}
-								</button>
-							))}
-						</div>
-						<div className="mt-4.5 text-xs text-text-quaternary">
-							…or drop files anywhere in this window to import
-						</div>
-					</>
-				)}
 			</div>
+			<AgentConnectionDialog
+				connection={connection}
+				hasAgentConnected={hasAgentConnected}
+				open={connectDialogOpen}
+				onOpenChange={setConnectDialogOpen}
+			/>
+		</>
+	);
+}
+
+function AgentConnectionDialog({
+	connection,
+	hasAgentConnected,
+	open,
+	onOpenChange,
+}: {
+	readonly connection: Omit<LixConnectionPromptInput, "origin">;
+	readonly hasAgentConnected: () => Promise<boolean>;
+	readonly open: boolean;
+	readonly onOpenChange: (open: boolean) => void;
+}) {
+	const { details, copyPrompt, copyState } =
+		useAgentConnectionPrompt(connection);
+	const connectionStatus = useMcpConnectionStatus(open, hasAgentConnected);
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent className="max-h-[calc(100vh-2rem)] w-[min(520px,calc(100vw-2rem))] max-w-none gap-0 overflow-y-auto rounded-2xl border-border-panel bg-bg-panel p-0 text-text-primary shadow-[0_30px_90px_rgba(28,25,23,0.3)] sm:max-w-none">
+				<DialogHeader className="gap-1.5 px-8 pt-8 pr-14 text-left">
+					<DialogTitle className="text-lg leading-tight font-bold tracking-[-0.01em]">
+						Connect an agent
+					</DialogTitle>
+					<DialogDescription className="text-[13.5px] leading-[1.55] text-text-secondary">
+						Copy the prompt into Claude, ChatGPT, or Gemini. It handles the
+						rest.
+					</DialogDescription>
+				</DialogHeader>
+
+				<div className="px-8">
+					<ConnectionStep number={1} label="Copy the prompt" active />
+					<button
+						type="button"
+						onClick={() => void copyPrompt()}
+						className="inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--color-bg-action-primary-start)_0%,var(--color-bg-action-primary-end)_100%)] px-4.5 py-2.75 text-sm font-bold text-text-on-action-primary shadow-[var(--shadow-action-primary)] hover:brightness-105"
+					>
+						{/* Icon crossfade per Atelier's copy-markdown button: the Copy
+						    glyph gives way to a green check, then swaps back so the
+						    prompt can be re-copied. */}
+						<span className="relative inline-flex size-[18px] items-center justify-center">
+							<Copy
+								className={`size-3.5 transition-all duration-150 ${
+									copyState === "copied"
+										? "scale-75 opacity-0"
+										: "scale-100 opacity-100"
+								}`}
+								aria-hidden="true"
+							/>
+							<span
+								className={`absolute inset-0 grid place-items-center rounded-full bg-white transition-all duration-150 ${
+									copyState === "copied"
+										? "scale-100 opacity-100"
+										: "scale-75 opacity-0"
+								}`}
+							>
+								<Check
+									className="size-3 text-[var(--color-text-status-success)]"
+									strokeWidth={3}
+									aria-hidden="true"
+								/>
+							</span>
+						</span>
+						{copyState === "copied"
+							? "Copied prompt"
+							: copyState === "copying"
+								? "Copying…"
+								: copyState === "error"
+									? "Copy failed"
+									: "Copy prompt"}
+					</button>
+
+					<ConnectionStep number={2} label="Paste it into your AI chat" />
+					{/* A looping 7s mock of the copy-paste-send moment (12g), staged
+					    inside a fake browser window (traffic-light navbar, page area)
+					    so the chat reads as the user's own browser tab — not a real
+					    input. The cursor presses Copy prompt, carries it down, pastes,
+					    and sends. Reduced motion shows the pasted end state statically. */}
+					<div className="rounded-[14px] shadow-[0_10px_28px_rgba(28,25,23,0.18)]">
+						<div
+							aria-hidden="true"
+							className="flex items-center gap-2.5 rounded-t-[14px] border-b border-white/10 bg-[#2C2C2C] px-3 py-2"
+						>
+							<span className="flex items-center gap-1.5">
+								<span className="size-2.5 rounded-full bg-[#FF5F57]" />
+								<span className="size-2.5 rounded-full bg-[#FEBC2E]" />
+								<span className="size-2.5 rounded-full bg-[#28C840]" />
+							</span>
+							<span className="flex items-center gap-1 text-[#8A8A8A]">
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									strokeWidth="2.4"
+									strokeLinecap="round"
+									strokeLinejoin="round"
+								>
+									<path d="M15 18l-6-6 6-6" />
+								</svg>
+								<svg
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									strokeWidth="2.4"
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									className="opacity-40"
+								>
+									<path d="M9 6l6 6-6 6" />
+								</svg>
+							</span>
+							<span className="flex flex-1 items-center gap-1.5 rounded-[7px] bg-[#1F1F1F] px-2.5 py-1.5 text-[11px] font-medium text-[#9A9A9A]">
+								<svg
+									width="9"
+									height="10"
+									viewBox="0 0 10 11"
+									fill="none"
+									stroke="currentColor"
+									strokeWidth="1.4"
+									strokeLinecap="round"
+								>
+									<rect x="1" y="4.5" width="8" height="5.5" rx="1.5" />
+									<path d="M3 4.5V3a2 2 0 0 1 4 0v1.5" />
+								</svg>
+								chatgpt.com
+							</span>
+							<span className="flex items-center gap-2">
+								<img
+									src="/landing/claude-spark.svg"
+									alt="Claude"
+									className="size-3.5"
+								/>
+								<img
+									src="/landing/brand-openai.svg"
+									alt="ChatGPT"
+									className="size-3.5 object-contain invert"
+								/>
+								<img
+									src="/landing/brand-gemini.svg"
+									alt="Gemini"
+									className="size-3.5 object-contain"
+								/>
+							</span>
+						</div>
+						<div className="rounded-b-[14px] bg-[#141414] p-4">
+							<div className="relative rounded-[14px] bg-[#212121] px-4 pt-3.5 pb-3 text-left shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]">
+								<div className="relative h-[21px] text-[13.5px]">
+									<span
+										aria-hidden="true"
+										className="absolute top-0 left-0 text-[#6B6B6B] animate-connect-placeholder motion-reduce:hidden"
+									>
+										<span className="mr-[3px] inline-block h-[15px] w-[1.5px] bg-[#E5E5E5] align-text-bottom animate-connect-caret" />
+										Do anything
+									</span>
+									<span className="absolute top-0 left-0 inline-flex rounded-[5px] bg-[rgba(232,89,12,0.16)] px-[7px] py-0.5 font-mono text-xs text-[#F0A47C] opacity-0 animate-connect-chip motion-reduce:opacity-100 motion-reduce:animate-none">
+										[prompt]
+									</span>
+								</div>
+								<div className="mt-4 flex items-center gap-3">
+									<span className="text-base leading-none text-[#8A8A8A]">
+										＋
+									</span>
+									<span className="flex-1" />
+									<span className="relative inline-flex size-[26px] items-center justify-center rounded-full bg-[#3A3A3A] animate-connect-send motion-reduce:animate-none">
+										<ArrowUp
+											className="size-3.5 text-[#E5E5E5] animate-connect-send-arrow motion-reduce:animate-none"
+											aria-hidden="true"
+										/>
+										<span className="absolute inset-0 flex items-center justify-center opacity-0 animate-connect-spinner-show motion-reduce:hidden">
+											<span className="box-border size-[13px] rounded-full border-2 border-white/25 border-t-white animate-connect-spin" />
+										</span>
+									</span>
+								</div>
+								<div
+									aria-hidden="true"
+									className="absolute top-4 right-4 h-0 w-0 opacity-0 animate-connect-cursor motion-reduce:hidden"
+								>
+									<svg
+										width="17"
+										height="20"
+										viewBox="0 0 17 20"
+										className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
+									>
+										<path
+											d="M1 1l0 14.5 3.9-3.4 2.5 6 2.7-1.1-2.5-5.9 5.4-.4z"
+											fill="#FFFFFF"
+											stroke="#1C1917"
+											strokeWidth="1.3"
+											strokeLinejoin="round"
+										/>
+									</svg>
+									<span className="absolute top-4 left-4 inline-flex gap-1 opacity-0 animate-connect-keys">
+										<span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md bg-[#FBF6F0] px-[5px] text-[11px] font-bold text-[#1C1917] shadow-[0_2px_0_#C9C2B8,0_4px_10px_rgba(0,0,0,0.4)]">
+											⌘
+										</span>
+										<span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md bg-[#FBF6F0] text-[11px] font-bold text-[#1C1917] shadow-[0_2px_0_#C9C2B8,0_4px_10px_rgba(0,0,0,0.4)]">
+											V
+										</span>
+									</span>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div
+					className="mt-7 flex items-center justify-end border-t border-border-subtle px-8 py-5"
+					aria-live="polite"
+				>
+					<div
+						className="inline-flex items-center gap-2.5 rounded-[10px] bg-bg-hover px-4.5 py-2.75 text-[13.5px] font-semibold text-text-secondary"
+						data-testid="agent-connection-status"
+					>
+						{connectionStatus === "connected" ? (
+							<>
+								<span className="inline-flex size-4 items-center justify-center rounded-full bg-success-600 text-white">
+									<Check className="size-2.5" aria-hidden="true" />
+								</span>
+								Agent connected
+							</>
+						) : (
+							<>
+								<span className="size-2 rounded-full bg-bg-action-primary animate-connect-dot-pulse motion-reduce:animate-none" />
+								Waiting for agent…
+							</>
+						)}
+					</div>
+				</div>
+				<span className="sr-only">
+					The copied prompt connects {details.serverName} at {details.mcpUrl}.
+				</span>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+function useMcpConnectionStatus(
+	open: boolean,
+	hasAgentConnected: () => Promise<boolean>,
+): "waiting" | "connected" {
+	const [status, setStatus] = useState<"waiting" | "connected">("waiting");
+
+	useEffect(() => {
+		if (!open) return;
+		let disposed = false;
+		let timeout: number | undefined;
+		setStatus("waiting");
+
+		const poll = async (): Promise<void> => {
+			let connected = false;
+			try {
+				connected = await hasAgentConnected();
+			} catch (error) {
+				console.warn("workspace-home: unable to check agent connection", error);
+			}
+			if (disposed) return;
+			if (connected) {
+				setStatus("connected");
+				return;
+			}
+			timeout = window.setTimeout(() => void poll(), 1_000);
+		};
+
+		void poll();
+		return () => {
+			disposed = true;
+			if (timeout !== undefined) window.clearTimeout(timeout);
+		};
+	}, [hasAgentConnected, open]);
+
+	return status;
+}
+
+function ConnectionStep({
+	number,
+	label,
+	active = false,
+}: {
+	readonly number: number;
+	readonly label: string;
+	readonly active?: boolean;
+}) {
+	return (
+		<div className="mt-[30px] mb-3 flex items-center gap-2">
+			<span
+				className={
+					active
+						? "inline-flex size-[18px] items-center justify-center rounded-full bg-text-primary text-[10.5px] font-bold text-bg-panel"
+						: "inline-flex size-[18px] items-center justify-center rounded-full bg-bg-hover text-[10.5px] font-bold text-text-secondary"
+				}
+			>
+				{number}
+			</span>
+			<span className="text-xs font-bold tracking-[0.05em] text-text-secondary uppercase">
+				{label}
+			</span>
 		</div>
 	);
 }
 
-function AgentConnectionActions({
-	connection,
-	compact = false,
-}: {
-	readonly connection: Omit<LixConnectionPromptInput, "origin">;
-	readonly compact?: boolean;
-}) {
+function useAgentConnectionPrompt(
+	connection: Omit<LixConnectionPromptInput, "origin">,
+) {
 	const { lixId, lixName, lixSlug, namespace } = connection;
 	const details = useMemo(
 		() =>
@@ -729,18 +1068,31 @@ function AgentConnectionActions({
 	const [copyState, setCopyState] = useState<
 		"idle" | "copying" | "copied" | "error"
 	>("idle");
-
 	const copyPrompt = async () => {
 		setCopyState("copying");
 		try {
 			await copyText(details.prompt);
 			setCopyState("copied");
-			window.setTimeout(() => setCopyState("idle"), 2_000);
+			// Long enough to register the success, then back to Copy prompt so
+			// the user can re-copy.
+			window.setTimeout(() => setCopyState("idle"), 2_500);
 		} catch (error) {
 			console.error("workspace-home: unable to copy agent prompt", error);
 			setCopyState("error");
 		}
 	};
+	return { details, copyPrompt, copyState };
+}
+
+function AgentConnectionActions({
+	connection,
+	compact = false,
+}: {
+	readonly connection: Omit<LixConnectionPromptInput, "origin">;
+	readonly compact?: boolean;
+}) {
+	const { details, copyPrompt, copyState } =
+		useAgentConnectionPrompt(connection);
 
 	return (
 		<div
@@ -759,13 +1111,27 @@ function AgentConnectionActions({
 						: "inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--color-bg-action-primary-start)_0%,var(--color-bg-action-primary-end)_100%)] px-4.5 py-2.75 text-sm font-bold text-text-on-action-primary shadow-[var(--shadow-action-primary)] hover:brightness-105"
 				}
 			>
-				{copyState === "copied" ? (
-					<Check className="size-3.5" aria-hidden="true" />
-				) : (
-					<Copy className="size-3.5" aria-hidden="true" />
-				)}
+				{/* Same icon crossfade as Atelier's copy-markdown button. */}
+				<span className="relative inline-flex size-3.5 items-center justify-center">
+					<Copy
+						className={`size-3.5 transition-all duration-150 ${
+							copyState === "copied"
+								? "scale-75 opacity-0"
+								: "scale-100 opacity-100"
+						}`}
+						aria-hidden="true"
+					/>
+					<Check
+						className={`absolute size-3.5 text-[var(--color-text-status-success)] transition-all duration-150 ${
+							copyState === "copied"
+								? "scale-100 opacity-100"
+								: "scale-75 opacity-0"
+						}`}
+						aria-hidden="true"
+					/>
+				</span>
 				{copyState === "copied"
-					? "Prompt copied"
+					? "Copied prompt"
 					: copyState === "copying"
 						? "Copying…"
 						: copyState === "error"

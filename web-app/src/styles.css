@@ -264,3 +264,179 @@
 .docs-prose td code {
 	white-space: nowrap;
 }
+
+/* ── Product animations, registered as Tailwind animate-* utilities ── */
+@theme {
+	/* Connect-an-agent dialog composer loop (12g in the comp). One shared 7s
+	   timeline across every animated element: placeholder with blinking caret
+	   → cursor flies in → ⌘V keycaps → [prompt] chip pastes at ~42% → cursor
+	   travels to the send button and clicks it at ~63% → spinner until ~92%
+	   → reset. */
+	--animate-connect-placeholder: connect-agent-placeholder 7s linear infinite;
+	--animate-connect-caret: connect-agent-caret 1.1s step-end infinite;
+	--animate-connect-chip: connect-agent-chip 7s linear infinite;
+	--animate-connect-cursor: connect-agent-cursor 7s ease-in-out infinite;
+	--animate-connect-keys: connect-agent-keys 7s linear infinite;
+	--animate-connect-send: connect-agent-send 7s linear infinite;
+	--animate-connect-send-arrow: connect-agent-send-arrow 7s linear infinite;
+	--animate-connect-spinner-show: connect-agent-spinner-show 7s linear infinite;
+	--animate-connect-spin: connect-agent-spin 0.7s linear infinite;
+	--animate-connect-dot-pulse: connect-agent-dot-pulse 1.8s ease-out infinite;
+	/* Auth callback progress shimmer (1c): the segment sweeps the track. */
+	--animate-auth-progress: auth-progress-sweep 1.2s ease-in-out infinite;
+
+	@keyframes connect-agent-placeholder {
+		0%,
+		41% {
+			opacity: 1;
+		}
+		44%,
+		100% {
+			opacity: 0;
+		}
+	}
+	@keyframes connect-agent-caret {
+		50% {
+			opacity: 0;
+		}
+	}
+	@keyframes connect-agent-chip {
+		0%,
+		41% {
+			opacity: 0;
+		}
+		44%,
+		90% {
+			opacity: 1;
+		}
+		96%,
+		100% {
+			opacity: 0;
+		}
+	}
+	/* The cursor's story inside the chat: fly in, ⌘V at the input, then
+	   click send. */
+	@keyframes connect-agent-cursor {
+		0%,
+		6% {
+			transform: translate(-96px, 58px) scale(1);
+			opacity: 0;
+		}
+		12% {
+			opacity: 1;
+		}
+		26%,
+		46% {
+			transform: translate(-302px, 2px) scale(1);
+			opacity: 1;
+		}
+		/* Travel to the send button, press it (the button lights up at
+		   61–64%), release, then get out of the spinner's way. */
+		56%,
+		61% {
+			transform: translate(-19px, 38px) scale(1);
+			opacity: 1;
+		}
+		63% {
+			transform: translate(-19px, 38px) scale(0.85);
+			opacity: 1;
+		}
+		66% {
+			transform: translate(-19px, 38px) scale(1);
+			opacity: 1;
+		}
+		71%,
+		100% {
+			transform: translate(-19px, 38px) scale(1);
+			opacity: 0;
+		}
+	}
+	@keyframes connect-agent-keys {
+		0%,
+		27% {
+			opacity: 0;
+			transform: scale(0.85);
+		}
+		32%,
+		43% {
+			opacity: 1;
+			transform: scale(1);
+		}
+		49%,
+		100% {
+			opacity: 0;
+			transform: scale(0.85);
+		}
+	}
+	@keyframes connect-agent-send {
+		0%,
+		61% {
+			background-color: #3a3a3a;
+			transform: scale(1);
+		}
+		64% {
+			background-color: #e8590c;
+			transform: scale(1.12);
+		}
+		67%,
+		92% {
+			background-color: #e8590c;
+			transform: scale(1);
+		}
+		97%,
+		100% {
+			background-color: #3a3a3a;
+			transform: scale(1);
+		}
+	}
+	@keyframes connect-agent-send-arrow {
+		0%,
+		64% {
+			opacity: 1;
+		}
+		66%,
+		94% {
+			opacity: 0;
+		}
+		98%,
+		100% {
+			opacity: 1;
+		}
+	}
+	@keyframes connect-agent-spinner-show {
+		0%,
+		64% {
+			opacity: 0;
+		}
+		66%,
+		92% {
+			opacity: 1;
+		}
+		96%,
+		100% {
+			opacity: 0;
+		}
+	}
+	@keyframes connect-agent-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	@keyframes connect-agent-dot-pulse {
+		0% {
+			box-shadow: 0 0 0 0 rgba(232, 89, 12, 0.45);
+		}
+		70%,
+		100% {
+			box-shadow: 0 0 0 9px rgba(232, 89, 12, 0);
+		}
+	}
+	@keyframes auth-progress-sweep {
+		0% {
+			transform: translateX(-56px);
+		}
+		100% {
+			transform: translateX(120px);
+		}
+	}
+}

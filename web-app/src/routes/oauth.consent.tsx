@@ -1,7 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DatabaseZap, LogIn, ShieldCheck } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, LogIn, Plug, X } from "lucide-react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	type ReactNode,
+} from "react";
 import { useAuth } from "~/components/auth-provider";
+import { GoogleMark } from "~/components/google-mark";
+import { Button } from "~/components/ui/button";
+import { localDevCredentials } from "~/lib/supabase";
 
 interface ConsentSearch {
 	authorization_id?: string;
@@ -27,10 +37,14 @@ export const Route = createFileRoute("/oauth/consent")({
 
 function OAuthConsentPage() {
 	const { authorization_id: authorizationId } = Route.useSearch();
-	const { client, isLoaded, signInWithGoogle, user } = useAuth();
+	const { client, isLoaded, signInAsLocalDev, signInWithGoogle, user } =
+		useAuth();
 	const [details, setDetails] = useState<ConsentDetails | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState<"approve" | "deny" | null>(null);
+	const [localSignInPending, setLocalSignInPending] = useState(false);
+	const localSignInAttempted = useRef(false);
+	const usesLocalAccount = Boolean(localDevCredentials);
 	const returnTo = useMemo(
 		() =>
 			authorizationId
@@ -38,6 +52,33 @@ function OAuthConsentPage() {
 				: "/oauth/consent",
 		[authorizationId],
 	);
+	const signInLocally = useCallback(async () => {
+		setLocalSignInPending(true);
+		setError(null);
+		try {
+			await signInAsLocalDev();
+		} catch (signInError) {
+			setError(
+				signInError instanceof Error
+					? signInError.message
+					: "Local development sign-in failed.",
+			);
+			setLocalSignInPending(false);
+		}
+	}, [signInAsLocalDev]);
+
+	useEffect(() => {
+		if (
+			!isLoaded ||
+			user ||
+			!usesLocalAccount ||
+			localSignInAttempted.current
+		) {
+			return;
+		}
+		localSignInAttempted.current = true;
+		void signInLocally();
+	}, [isLoaded, signInLocally, user, usesLocalAccount]);
 
 	useEffect(() => {
 		if (!isLoaded || !user || !client) return;
@@ -89,126 +130,187 @@ function OAuthConsentPage() {
 		window.location.replace(result.data.redirect_url);
 	};
 
+	const clientName = details?.clientName ?? "your agent";
+	const signedOut = isLoaded && !user;
+
+	// The client-to-LixRay handshake is the headline (1g): agent glyph →
+	// LixRay mark, scopes as three plain sentences, raw scopes behind a
+	// title attribute. Signed-out keeps the same card and swaps the body
+	// for one sign-in button that returns to this consent URL.
 	return (
-		<main className="grid min-h-screen place-items-center bg-[var(--color-bg-app)] px-5 py-8 text-[var(--color-text-primary)]">
-			<div className="grid w-full max-w-[620px] justify-items-stretch gap-5 rounded-[8px] border border-[var(--color-border-panel)] bg-[var(--color-bg-panel)] p-7 shadow-[var(--shadow-md)]">
-				<a
-					href="/"
-					className="inline-flex items-center gap-2.5 justify-self-center font-[750] tracking-normal no-underline"
-					aria-label="LixRay home"
-				>
-					<span className="grid size-7 place-items-center rounded-[7px] bg-[var(--color-bg-action-secondary)] text-[var(--color-text-on-action-secondary)]">
-						<DatabaseZap size={17} aria-hidden="true" />
-					</span>
-					<span>LixRay</span>
-				</a>
-				<div className="grid justify-self-center gap-2 text-center">
-					<ShieldCheck
-						size={28}
-						className="justify-self-center text-[var(--color-icon-brand)]"
-						aria-hidden="true"
-					/>
-					<h1 className="m-0 text-2xl leading-[1.2] tracking-normal">
-						Connect LixRay to ChatGPT
-					</h1>
-					<p className="m-0 text-[var(--color-text-tertiary)]">
-						Authorize a private MCP connection using your existing LixRay
-						account.
-					</p>
-					<p className="m-0 max-w-[480px] text-sm text-[var(--color-text-tertiary)]">
-						This authorization is separate from your LixRay browser session.
-						Being signed in to the website does not automatically connect your
-						MCP client.
-					</p>
+		<main className="grid min-h-screen place-items-center bg-bg-app px-5 py-8 text-text-primary">
+			<div className="flex w-full max-w-[420px] flex-col gap-5 rounded-[14px] border border-border-panel bg-bg-panel px-7 pt-8 pb-6 shadow-[0_18px_50px_rgba(28,25,23,0.1),0_2px_8px_rgba(28,25,23,0.05)]">
+				<div className="flex flex-col items-center gap-4">
+					<div className="flex items-center gap-3.5" aria-hidden="true">
+						<span className="inline-flex size-11 items-center justify-center rounded-xl bg-[#FAF4EC] shadow-[inset_0_0_0_1px_#EDE2D2]">
+							<Plug className="size-6 text-text-secondary" />
+						</span>
+						<svg
+							width="26"
+							height="12"
+							viewBox="0 0 26 12"
+							fill="none"
+							stroke="#C9C2B8"
+							strokeWidth="2"
+							strokeLinecap="round"
+						>
+							<path d="M2 6h22M20 2l4 4-4 4" />
+						</svg>
+						<img src="/lixray-mark.svg" alt="" className="size-10" />
+					</div>
+					<div className="flex flex-col gap-1.5 text-center">
+						<h1 className="m-0 text-xl leading-tight font-bold tracking-[-0.01em]">
+							Connect {clientName} to LixRay
+						</h1>
+						{signedOut ? (
+							<p className="m-0 text-[12.5px] leading-normal text-text-quaternary">
+								Sign in first — you’ll come right back to approve the
+								connection.
+							</p>
+						) : details ? (
+							<p className="m-0 text-[13.5px] leading-[1.55] text-text-secondary">
+								<strong className="font-bold text-text-primary">
+									{details.clientName}
+								</strong>{" "}
+								is asking to use your LixRay account.
+								{details.clientUri ? (
+									<>
+										<br />
+										<a
+											href={details.clientUri}
+											className="text-[12.5px] font-semibold text-text-link hover:text-text-link-hover"
+											target="_blank"
+											rel="noreferrer"
+										>
+											{displayHost(details.clientUri)}
+										</a>
+									</>
+								) : null}
+							</p>
+						) : error ? null : (
+							<p className="m-0 text-[13.5px] text-text-quaternary">
+								Loading the authorization request…
+							</p>
+						)}
+					</div>
 				</div>
 
-				{!isLoaded ? (
-					<p className="text-sm text-[var(--color-text-tertiary)]">
-						Loading account…
-					</p>
-				) : null}
-				{isLoaded && !user ? (
-					<button
-						className="inline-flex min-h-[38px] w-full max-w-[320px] cursor-pointer items-center justify-center justify-self-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)]"
-						type="button"
-						onClick={() => void signInWithGoogle(returnTo)}
-					>
-						<LogIn size={17} aria-hidden="true" />
-						Continue with Google
-					</button>
+				{signedOut ? (
+					usesLocalAccount ? (
+						<div className="flex flex-col items-center gap-3">
+							<p className="m-0 text-[12.5px] text-text-quaternary">
+								{localSignInPending
+									? "Signing in with the local development account…"
+									: "Local development sign-in needs to be retried."}
+							</p>
+							{localSignInPending ? null : (
+								<Button
+									type="button"
+									variant="featured"
+									className="h-auto w-full gap-2.5 rounded-[9px] py-2.5 text-[13px] font-bold"
+									onClick={() => void signInLocally()}
+								>
+									<LogIn aria-hidden="true" />
+									Retry local sign-in
+								</Button>
+							)}
+						</div>
+					) : (
+						<Button
+							type="button"
+							variant="featured"
+							className="h-auto w-full gap-2.5 rounded-[9px] py-2.5 text-[13px] font-bold"
+							onClick={() => void signInWithGoogle(returnTo)}
+						>
+							<GoogleMark />
+							Continue with Google
+						</Button>
+					)
 				) : null}
 
 				{details ? (
 					<>
-						<section
-							className="rounded-[8px] border border-[var(--color-border-panel)] p-4"
-							aria-label="Connection request"
-						>
-							<p className="m-0">
-								<strong>{details.clientName}</strong> is requesting access to
-								your LixRay account.
-							</p>
-							{details.clientUri ? (
-								<a
-									href={details.clientUri}
-									className="mt-1.5 inline-block text-[13px] text-[var(--color-text-link)] hover:text-[var(--color-text-link-hover)]"
-									target="_blank"
-									rel="noreferrer"
-								>
-									{details.clientUri}
-								</a>
-							) : null}
-						</section>
-						<section
-							className="rounded-[8px] border border-[var(--color-border-panel)] p-4"
+						<div
+							title={`Requested OAuth scopes: ${details.scopes.join(" ") || "none"}`}
+							className="flex flex-col gap-[11px] rounded-[11px] border border-[#F0EBE3] bg-[#FAF8F5] px-[17px] py-[15px]"
 							aria-label="Permissions"
 						>
-							<h2 className="mb-2.5 mt-0 text-base">
-								This connection will be able to:
-							</h2>
-							<ul className="mb-3 mt-0 pl-5 leading-[1.55] text-[var(--color-text-secondary)]">
-								<li>List your accessible Lix workspaces and branches.</li>
-								<li>
-									Inspect and change data in the Lix workspaces you select.
-								</li>
-							</ul>
-							<p className="m-0 text-[var(--color-text-tertiary)]">
-								Requested OAuth scopes: {details.scopes.join(", ") || "none"}
-							</p>
-						</section>
-						<div className="flex justify-end gap-2.5">
-							<button
-								className="inline-flex min-h-[38px] w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-border-panel)] bg-[var(--color-bg-panel)] px-3.5 font-[680] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] disabled:cursor-not-allowed disabled:opacity-55 min-[801px]:w-auto"
+							<ScopeLine allowed>See your workspaces and branches</ScopeLine>
+							<ScopeLine allowed>
+								Read and write files in workspaces you open
+							</ScopeLine>
+							<ScopeLine>
+								It can’t manage members or delete workspaces
+							</ScopeLine>
+						</div>
+						<div className="flex gap-2.5">
+							<Button
 								type="button"
+								variant="outline"
+								className="h-auto flex-1 rounded-[10px] py-2.75 text-[13.5px] font-semibold"
 								disabled={submitting !== null}
 								onClick={() => void decide("deny")}
 							>
 								{submitting === "deny" ? "Denying…" : "Deny"}
-							</button>
-							<button
-								className="inline-flex min-h-[38px] w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[var(--color-bg-action-primary)] bg-[var(--color-bg-action-primary)] px-3.5 font-[680] text-[var(--color-text-on-action-primary)] transition-colors hover:border-[var(--color-bg-action-primary-hover)] hover:bg-[var(--color-bg-action-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring-focus-visible)] disabled:cursor-not-allowed disabled:opacity-55 min-[801px]:w-auto"
+							</Button>
+							<Button
 								type="button"
+								variant="featured"
+								className="h-auto flex-[1.6] rounded-[10px] py-2.75 text-[13.5px] font-bold"
 								disabled={submitting !== null}
 								onClick={() => void decide("approve")}
 							>
 								{submitting === "approve" ? "Connecting…" : "Allow and connect"}
-							</button>
+							</Button>
 						</div>
-						<p className="text-center text-xs text-[var(--color-text-tertiary)]">
-							After approval you will return to{" "}
-							{displayOrigin(details.redirectUri)}. The client must finish
-							saving its MCP credentials before the connection is ready.
-						</p>
 					</>
 				) : null}
 
 				{error ? (
-					<p className="mt-3.5 whitespace-pre-wrap rounded-[8px] border border-[var(--color-error-200)] bg-[var(--color-error-50)] px-3.5 py-3 text-[var(--color-error-800)]">
+					<p className="m-0 w-full whitespace-pre-wrap rounded-[9px] border border-error-200 bg-error-50 px-3.5 py-3 text-left text-[12.5px] leading-[1.55] text-error-800">
 						{error}
+					</p>
+				) : null}
+
+				{details ? (
+					<p className="m-0 text-center text-[11.5px] leading-normal text-text-quaternary">
+						You’ll be sent back to {displayOrigin(details.redirectUri)} to
+						finish.
 					</p>
 				) : null}
 			</div>
 		</main>
+	);
+}
+
+function ScopeLine({
+	allowed = false,
+	children,
+}: {
+	readonly allowed?: boolean;
+	readonly children: ReactNode;
+}) {
+	return (
+		<span
+			className={`flex items-start gap-2.5 text-[13px] leading-normal ${
+				allowed ? "text-text-secondary" : "text-text-tertiary"
+			}`}
+		>
+			{allowed ? (
+				<Check
+					aria-hidden="true"
+					strokeWidth={2.4}
+					className="mt-0.5 size-3.5 shrink-0 text-[#5A7052]"
+				/>
+			) : (
+				<X
+					aria-hidden="true"
+					strokeWidth={2.4}
+					className="mt-0.5 size-3.5 shrink-0 text-icon-tertiary"
+				/>
+			)}
+			{children}
+		</span>
 	);
 }
 
@@ -221,9 +323,17 @@ function safeHttpsUrl(value: string): string | null {
 	}
 }
 
+function displayHost(value: string): string {
+	try {
+		return new URL(value).host;
+	} catch {
+		return value;
+	}
+}
+
 function displayOrigin(value: string): string {
 	try {
-		return new URL(value).origin;
+		return new URL(value).host;
 	} catch {
 		return "the requesting app";
 	}

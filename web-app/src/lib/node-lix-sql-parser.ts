@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	initSync,
 	parseSqlScript as parseSqlScriptBinding,
@@ -14,14 +14,7 @@ export const parseSqlScript: ParseSqlScript = (sql, providedParamCount) => {
 		// Vite records emitted SSR assets as web-root paths; Node resolves them
 		// relative to the built server entry instead.
 		initSync({
-			module: readFileSync(
-				fileURLToPath(
-					new URL(
-						wasmUrl.startsWith("/") ? `.${wasmUrl}` : wasmUrl,
-						import.meta.url,
-					),
-				),
-			),
+			module: readFileSync(fileURLToPath(resolveWasmUrl(wasmUrl))),
 		});
 		initialized = true;
 	}
@@ -30,3 +23,12 @@ export const parseSqlScript: ParseSqlScript = (sql, providedParamCount) => {
 		providedParamCount,
 	) as ReturnType<ParseSqlScript>;
 };
+
+function resolveWasmUrl(url: string): URL {
+	// Vite serves source dependencies as /@fs/<absolute path> in development.
+	// Treating that value as module-relative produces .../src/lib/@fs/... .
+	if (url.startsWith("/@fs/")) {
+		return pathToFileURL(decodeURIComponent(url.slice("/@fs".length)));
+	}
+	return new URL(url.startsWith("/") ? `.${url}` : url, import.meta.url);
+}

@@ -22,7 +22,11 @@ assert.equal(
 	"protected-resource discovery failed",
 );
 const resource = await resourceResponse.json();
-assert.equal(resource.resource, "https://lixray.com");
+assert.equal(
+	resource.resource,
+	mcpUrl.origin,
+	"OAuth resource must be isolated to the MCP environment",
+);
 assert.ok(Array.isArray(resource.authorization_servers));
 assert.ok(resource.authorization_servers.length > 0);
 

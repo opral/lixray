@@ -17,6 +17,7 @@ export const LIXRAY_DIR_EXTENSION_ID = "lixray_dir";
 export const LIXRAY_GETTING_STARTED_EXTENSION_ID = "lixray_getting_started";
 
 export type LixWorkspaceConnection = Omit<LixConnectionPromptInput, "origin">;
+export type AgentConnectionProbe = () => Promise<boolean>;
 
 /** Stable central-tab identity for the folder view at dirPath. */
 export const lixrayDirInstanceId = (dirPath: string): string =>
@@ -192,6 +193,7 @@ const createLixrayDirExtension = (
  */
 const createLixrayGettingStartedExtension = (
 	connection: LixWorkspaceConnection,
+	hasAgentConnected: AgentConnectionProbe,
 ): AtelierExtensionRegistration => ({
 	manifest: {
 		apiVersion: 1,
@@ -211,6 +213,7 @@ const createLixrayGettingStartedExtension = (
 						lix={atelier.lix}
 						readOnly={atelier.readOnly}
 						connection={connection}
+						hasAgentConnected={hasAgentConnected}
 						onOpenFile={(path, options) =>
 							openFileFromView(atelier, path, options)
 						}
@@ -228,10 +231,11 @@ const createLixrayGettingStartedExtension = (
 
 export const createLixrayWorkspaceExtensions = (
 	connection: LixWorkspaceConnection,
+	hasAgentConnected: AgentConnectionProbe,
 ): readonly AtelierExtensionRegistration[] => [
 	createLixrayHomeExtension(connection),
 	createLixrayDirExtension(connection),
-	createLixrayGettingStartedExtension(connection),
+	createLixrayGettingStartedExtension(connection, hasAgentConnected),
 ];
 
 /**

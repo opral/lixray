@@ -63,6 +63,41 @@ export type Database = {
 					},
 				];
 			};
+			mcp_lix_connections: {
+				Row: {
+					connected_at: string;
+					last_seen_at: string;
+					last_tool: string;
+					lix_id: string;
+					oauth_client_id: string;
+					user_id: string;
+				};
+				Insert: {
+					connected_at?: string;
+					last_seen_at?: string;
+					last_tool: string;
+					lix_id: string;
+					oauth_client_id: string;
+					user_id: string;
+				};
+				Update: {
+					connected_at?: string;
+					last_seen_at?: string;
+					last_tool?: string;
+					lix_id?: string;
+					oauth_client_id?: string;
+					user_id?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "mcp_lix_connections_lix_id_fkey";
+						columns: ["lix_id"];
+						isOneToOne: false;
+						referencedRelation: "lixes";
+						referencedColumns: ["id"];
+					},
+				];
+			};
 			lix_members: {
 				Row: {
 					created_at: string;
@@ -389,6 +424,10 @@ export type Database = {
 			};
 			rename_namespace: {
 				Args: { p_name: string; p_namespace_id: string };
+				Returns: undefined;
+			};
+			record_mcp_lix_connection: {
+				Args: { p_lix_id: string; p_tool_name: string };
 				Returns: undefined;
 			};
 			resolve_lix_share_token: {

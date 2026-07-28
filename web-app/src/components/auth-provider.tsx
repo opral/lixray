@@ -193,3 +193,13 @@ export function takeAuthReturnTo(): string {
 	window.sessionStorage.removeItem(RETURN_TO_KEY);
 	return normalizeAuthReturnTo(returnTo);
 }
+
+/**
+ * The staged returnTo without consuming it — the callback error card uses it
+ * so "Try again" restarts /sign-in with the original destination (1c).
+ */
+export function peekAuthReturnTo(): string {
+	return normalizeAuthReturnTo(
+		window.sessionStorage.getItem(RETURN_TO_KEY) ?? "/open",
+	);
+}

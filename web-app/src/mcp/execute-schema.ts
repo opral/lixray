@@ -65,6 +65,8 @@ ${EXECUTE_SQL_CORE_SCHEMA}
 
 Path rules: \`lix_file.path\` never ends in \`/\`; \`lix_directory.path\` always does. \`lix_file.directory_id\` references \`lix_directory.id\`; \`lix_directory.parent_id\` references \`lix_directory.id\`. Use those IDs for hierarchy queries.
 
+To create or replace a file, pass one statement with SQL \`INSERT OR REPLACE INTO lix_file (path, data) VALUES ($1, $2)\`. Encode \`$1\` as \`{"kind":"text","value":"/example.md"}\` and the file bytes in \`$2\` as \`{"kind":"blob","base64":"..."}\`. To verify a write, read that exact path with \`SELECT path, data FROM lix_file WHERE path = $1\` and the same text parameter.
+
 Use the core tables above, plus their \`_by_branch\` / \`_history\` companions, directly; do not inspect \`information_schema\` for them.
 
 Entity tables are lix-dynamic: do not assume a fixed entity-table list or column shape. Only when a task needs an entity table, discover its table name, then inspect only that table:
