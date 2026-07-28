@@ -20,7 +20,7 @@ function OpenAppPage() {
 		const destination = activeWorkspace
 			? workspacePath(activeWorkspace.organization, activeWorkspace.workspace)
 			: user
-				? "/workspace"
+				? "/home"
 				: "/sign-in?returnTo=%2Fopen";
 		window.location.replace(destination);
 	}, [

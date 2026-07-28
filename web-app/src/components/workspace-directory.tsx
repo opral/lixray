@@ -6,7 +6,6 @@ import {
 	LogOut,
 	Pencil,
 	Plus,
-	Settings,
 	Trash2,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
@@ -136,7 +135,7 @@ export function WorkspaceDirectory() {
 			<DirectoryHeader />
 			<main className="flex min-h-0 flex-1 justify-center overflow-auto">
 				<section
-					className="w-[min(720px,calc(100%-32px))] pt-14 pb-[60px] max-[560px]:w-[min(100%-20px,720px)] max-[560px]:pt-[34px]"
+					className="w-[min(920px,calc(100%-32px))] pt-14 pb-[60px] max-[560px]:w-[min(100%-20px,920px)] max-[560px]:pt-[34px]"
 					aria-labelledby="workspaces-title"
 				>
 					<div className="flex items-center gap-4 px-3.5 pb-1.5 max-[560px]:flex-col max-[560px]:items-stretch max-[560px]:px-2">
@@ -158,31 +157,15 @@ export function WorkspaceDirectory() {
 							New workspace
 						</Button>
 					</div>
-					<p className="m-0 px-3.5 pb-[30px] text-[13.5px] leading-normal text-text-tertiary max-[560px]:px-2 max-[560px]:pt-1 max-[560px]:pb-6">
-						{workspaceCount} {pluralize(workspaceCount, "workspace")} across{" "}
-						{namespaceCount} {pluralize(namespaceCount, "namespace")}
-					</p>
+					{workspaceCount > 0 ? (
+						<p className="m-0 px-3.5 pb-[30px] text-[13.5px] leading-normal text-text-tertiary max-[560px]:px-2 max-[560px]:pt-1 max-[560px]:pb-6">
+							{workspaceCount} {pluralize(workspaceCount, "workspace")} across{" "}
+							{namespaceCount} {pluralize(namespaceCount, "namespace")}
+						</p>
+					) : null}
 
-					{organizations.length === 0 ? (
-						<div className="mx-3.5 mt-3 rounded-xl border border-border-panel bg-bg-panel/45 p-[34px] text-center">
-							<h2 className="m-0 text-[17px]">Create a namespace first</h2>
-							<p className="mt-[7px] mb-0 text-[13px] text-text-tertiary">
-								Workspaces live inside a namespace.
-							</p>
-							<Link
-								className="mt-4 inline-block text-[13px] font-semibold text-text-link hover:text-text-link-hover"
-								to="/workspace"
-							>
-								Open workspace settings
-							</Link>
-						</div>
-					) : workspaceCount === 0 ? (
-						<div className="mx-3.5 mt-3 rounded-xl border border-border-panel bg-bg-panel/45 p-[34px] text-center">
-							<h2 className="m-0 text-[17px]">No workspaces yet</h2>
-							<p className="mt-[7px] mb-0 text-[13px] text-text-tertiary">
-								Create one to start working with files.
-							</p>
-						</div>
+					{workspaceCount === 0 ? (
+						<WorkspaceEmptyState />
 					) : (
 						organizations.map((organization, groupIndex) =>
 							organization.workspaces.length > 0 ? (
@@ -253,24 +236,81 @@ function DirectoryHeader() {
 					align="end"
 					className="min-w-[190px] border-border-panel bg-bg-panel"
 				>
-					<DropdownMenuItem asChild>
-						<Link to="/workspace">
-							<Settings aria-hidden="true" />
-							Workspace settings
-						</Link>
-					</DropdownMenuItem>
 					{isDemoModeEnabled ? null : (
-						<>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem onSelect={() => void signOut()}>
-								<LogOut aria-hidden="true" />
-								Sign out
-							</DropdownMenuItem>
-						</>
+						<DropdownMenuItem onSelect={() => void signOut()}>
+							<LogOut aria-hidden="true" />
+							Sign out
+						</DropdownMenuItem>
 					)}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</AppTitlebar>
+	);
+}
+
+function WorkspaceEmptyState() {
+	return (
+		<div
+			className="grid min-h-[480px] place-content-center justify-items-center px-4 pb-16 text-center max-[560px]:min-h-[400px] max-[560px]:pb-8"
+			data-testid="workspace-empty-state"
+		>
+			<div
+				className="relative mb-8 h-[176px] w-[360px] max-w-full"
+				aria-hidden="true"
+			>
+				<div className="absolute top-[86px] left-[28px] h-px w-[95px] -rotate-[28deg] border-t-2 border-dashed border-border-panel" />
+				<div className="absolute top-[64px] right-[32px] h-px w-[92px] rotate-[24deg] border-t-2 border-dashed border-border-panel" />
+				<div className="absolute top-[28px] right-[58px] h-px w-[74px] -rotate-[20deg] border-t-2 border-dashed border-border-panel" />
+
+				<div className="absolute top-8 left-1/2 w-[230px] -translate-x-1/2 overflow-hidden rounded-xl border border-border-panel bg-bg-panel shadow-[0_18px_40px_rgba(28,25,23,0.08)]">
+					<div className="flex h-10 items-center gap-2 border-b border-border-subtle px-3">
+						<img className="size-4" src="/landing/icon-folder.svg" alt="" />
+						<span className="h-2 w-20 rounded-full bg-bg-action-secondary/20" />
+					</div>
+					<div className="grid gap-3 p-3">
+						<div className="flex items-center gap-2">
+							<span className="size-3 rounded-[3px] bg-[#25211f]" />
+							<span className="h-2 w-24 rounded-full bg-bg-action-secondary/20" />
+							<img
+								className="ml-auto size-4"
+								src="/landing/brand-openai.svg"
+								alt=""
+							/>
+						</div>
+						<div className="flex items-center gap-2">
+							<span className="size-3 rounded-[3px] bg-[#3b82f6]" />
+							<span className="h-2 w-16 rounded-full bg-bg-action-secondary/20" />
+							<img
+								className="ml-auto size-4"
+								src="/landing/claude-spark.svg"
+								alt=""
+							/>
+						</div>
+						<div className="flex items-center gap-2">
+							<span className="size-3 rounded-[3px] bg-[#8b5cf6]" />
+							<span className="h-2 w-28 rounded-full bg-bg-action-secondary/20" />
+						</div>
+					</div>
+				</div>
+
+				<div className="absolute bottom-0 left-4 grid size-11 place-items-center rounded-xl border border-[#eadfce] bg-[#fff9ef] shadow-sm">
+					<img className="size-6" src="/landing/claude-spark.svg" alt="" />
+				</div>
+				<div className="absolute top-2 right-5 grid size-11 place-items-center rounded-xl border border-border-panel bg-bg-panel shadow-sm">
+					<img className="size-5" src="/landing/brand-openai.svg" alt="" />
+				</div>
+				<div className="absolute right-1 bottom-1 grid size-11 place-items-center rounded-xl border border-border-panel bg-bg-panel shadow-sm">
+					<img className="size-5" src="/landing/brand-gemini.svg" alt="" />
+				</div>
+			</div>
+			<h2 className="m-0 text-[20px] leading-tight font-bold tracking-[-0.015em]">
+				No workspaces yet
+			</h2>
+			<p className="mt-2 mb-0 max-w-[480px] text-[14px] leading-[1.5] text-text-tertiary">
+				Create one to get going — a workspace is a shared folder where you and
+				agents like Claude, ChatGPT, and Gemini work in the same files.
+			</p>
+		</div>
 	);
 }
 

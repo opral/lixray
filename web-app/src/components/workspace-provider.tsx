@@ -262,19 +262,17 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				);
 			}
 			const normalizedName = normalizeName(name, "Workspace");
-			const { data: createdLix, error: createError } = await client
-				.from("lixes")
-				.insert({
-					namespace_id: targetOrganization.id,
-					name: normalizedName,
-					slug: workspaceSlug(normalizedName),
-				})
-				.select("id")
-				.single();
+			const workspaceId = crypto.randomUUID();
+			const { error: createError } = await client.from("lixes").insert({
+				id: workspaceId,
+				namespace_id: targetOrganization.id,
+				name: normalizedName,
+				slug: workspaceSlug(normalizedName),
+			});
 			if (createError) throw createError;
 			await refresh({
 				organizationId: targetOrganization.id,
-				workspaceId: createdLix.id,
+				workspaceId,
 			});
 			captureTelemetry("workspace_created");
 		},

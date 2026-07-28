@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(11);
+select plan(12);
 
 insert into auth.users (
 	id, instance_id, aud, role, email, encrypted_password,
@@ -52,10 +52,20 @@ select set_config(
 	true
 );
 
-select is(
-	(select lix_id is not null from public.bootstrap_personal_namespace()),
-	true,
-	'the owner has a Lix to connect'
+select lives_ok(
+	$$select * from public.bootstrap_personal_namespace()$$,
+	'the owner bootstraps an empty personal namespace'
+);
+
+select lives_ok(
+	$$insert into public.lixes (id, namespace_id, name, slug)
+	values (
+		'40000000-0000-0000-0000-000000000001',
+		(select namespace_id from public.list_accessible_lixes() limit 1),
+		'MCP Workspace',
+		'mcp-workspace'
+	)$$,
+	'the owner explicitly creates a Lix to connect'
 );
 
 select throws_ok(

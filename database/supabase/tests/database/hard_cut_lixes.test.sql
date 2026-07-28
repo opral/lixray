@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(13);
+select plan(14);
 
 select is(to_regclass('public.organizations')::text, null::text, 'legacy organizations are gone');
 select is(to_regclass('public.workspaces')::text, null::text, 'legacy workspaces are gone');
@@ -23,10 +23,10 @@ set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000001';
 
 select results_eq(
-  $$select namespace_handle, lix_name, lix_slug, created
+  $$select namespace_handle, lix_id, lix_name, lix_slug, created
     from public.bootstrap_personal_namespace()$$,
-  $$values ('samuel'::text, 'Workspace'::text, 'workspace'::text, true)$$,
-  'first bootstrap derives the handle and creates /@samuel/workspace'
+  $$values ('samuel'::text, null::uuid, null::text, null::text, true)$$,
+  'first bootstrap derives the handle without creating a workspace'
 );
 
 select is(
@@ -37,8 +37,8 @@ select is(
 
 select is(
   (select count(*) from public.lixes where deleted_at is null),
-  1::bigint,
-  'bootstrap creates exactly one live lix'
+  0::bigint,
+  'bootstrap leaves the workspace directory empty'
 );
 
 select results_eq(
@@ -48,8 +48,19 @@ select results_eq(
 );
 
 select lives_ok(
-  $$select public.delete_lix((select id from public.lixes where deleted_at is null))$$,
-  'the default lix can be deleted'
+  $$insert into public.lixes (id, namespace_id, name, slug)
+    values (
+      '20000000-0000-0000-0000-000000000001',
+      (select namespace_id from public.list_accessible_lixes() limit 1),
+      'Workspace',
+      'workspace'
+    )$$,
+  'a workspace can be explicitly created in the personal namespace'
+);
+
+select lives_ok(
+  $$select public.delete_lix('20000000-0000-0000-0000-000000000001')$$,
+  'an explicitly created workspace can be deleted'
 );
 
 select results_eq(
