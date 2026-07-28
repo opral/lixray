@@ -22,6 +22,7 @@ import {
 	MCP_PROTECTED_RESOURCE_URL,
 	MCP_RESOURCE,
 	createLixrayMcpServer,
+	handleMcpTransport,
 	mcpServerNameForUrl,
 	mcpAuthenticateChallenge,
 	mcpDocumentationResponse,
@@ -97,6 +98,36 @@ void test("local MCP URLs advertise an isolated development server name", () => 
 	assert.equal(mcpServerNameForUrl("http://127.0.0.1:8787/mcp"), "LixRay_Dev");
 	assert.equal(mcpServerNameForUrl("http://localhost:8787/mcp"), "LixRay_Dev");
 	assert.equal(mcpServerNameForUrl("https://lixray.com/mcp"), "LixRay");
+});
+
+void test("web-standard MCP transport initializes in the Node runtime", async () => {
+	const response = await handleMcpTransport(
+		new Request("https://lixray.com/mcp", {
+			method: "POST",
+			headers: {
+				accept: "application/json, text/event-stream",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "node-runtime-test", version: "1.0.0" },
+				},
+			}),
+		}),
+		new LixFileService(new ProtocolLixRuntimeClient()),
+	);
+	assert.equal(response.status, 200);
+	assert.equal(response.headers.get("access-control-allow-origin"), "*");
+	const payload: unknown = await response.json();
+	assert.ok(isRecord(payload));
+	assert.ok(isRecord(payload.result));
+	assert.ok(isRecord(payload.result.serverInfo));
+	assert.equal(payload.result.serverInfo.name, "LixRay");
 });
 
 void test("MCP initialize, tools/list, and tools/call expose the authenticated tool contract", async () => {
@@ -649,4 +680,8 @@ function findRawTools(
 
 function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object";
 }

@@ -432,8 +432,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 					},
 				};
 			},
-			mcpTransport: async (_request, _service, context, options) => {
-				assert.equal(context, executionContext);
+			mcpTransport: async (_request, _service, options) => {
 				options.onToolCall?.({
 					toolName: "list_lixes",
 					outcome: "success",
@@ -483,7 +482,7 @@ void test("successful exact-Lix MCP activity is persisted before the response co
 				});
 				await recordBlocked;
 			},
-			mcpTransport: async (_request, _service, _context, options) => {
+			mcpTransport: async (_request, _service, options) => {
 				options.onToolCall?.({
 					toolName: "active_branch_id",
 					outcome: "success",
@@ -1366,7 +1365,7 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 					notices: [],
 				});
 			},
-			mcpTransport: async (_request, service, _context, options) => {
+			mcpTransport: async (_request, service, options) => {
 				assert.equal(options.authMode, "none");
 				assert.deepEqual(await service.listLixes(), [
 					{
