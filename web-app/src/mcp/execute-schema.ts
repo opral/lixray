@@ -14,7 +14,7 @@ export const EXECUTE_SQL_CORE_TABLES: ReadonlyArray<ExecuteSqlCoreTable> = [
 	{
 		name: "lix_file",
 		purpose: "Current files in the active branch.",
-		columns: ["id", "path", "directory_id", "name", "data (binary)"],
+		columns: ["id", "path", "directory_id", "name", "data BYTEA"],
 	},
 	{
 		name: "lix_directory",
@@ -65,7 +65,7 @@ ${EXECUTE_SQL_CORE_SCHEMA}
 
 Path rules: \`lix_file.path\` never ends in \`/\`; \`lix_directory.path\` always does. \`lix_file.directory_id\` references \`lix_directory.id\`; \`lix_directory.parent_id\` references \`lix_directory.id\`. Use those IDs for hierarchy queries.
 
-\`lix_file.data\` is binary. Pass binary values as \`{"kind":"blob","base64":"..."}\`. Never use \`CAST(... AS BLOB)\`; if a SQL cast is unavoidable, use \`BYTEA\`.
+\`lix_file.data\` has SQL type \`BYTEA\`. Bind binary values as \`{"kind":"blob","base64":"..."}\`. Do not cast blob parameters. If a cast is unavoidable, use \`BYTEA\`, never \`BLOB\`.
 
 To create or replace a file, pass one statement with SQL \`INSERT OR REPLACE INTO lix_file (path, data) VALUES ($1, $2)\`. Encode \`$1\` as \`{"kind":"text","value":"/example.md"}\` and the file bytes in \`$2\` with the blob parameter above. To verify a write, read that exact path with \`SELECT path, data FROM lix_file WHERE path = $1\` and the same text parameter.
 

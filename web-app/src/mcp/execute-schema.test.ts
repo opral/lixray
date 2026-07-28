@@ -95,15 +95,21 @@ void test("execute tool documents only the compact core schema", () => {
 		EXECUTE_TOOL_DESCRIPTION,
 		/do not inspect `information_schema` for them/,
 	);
-	assert.match(EXECUTE_SQL_CORE_SCHEMA, /data \(binary\)/);
-	assert.doesNotMatch(EXECUTE_SQL_CORE_SCHEMA, /data \(BLOB\)/);
-	assert.match(EXECUTE_TOOL_DESCRIPTION, /`lix_file\.data` is binary/);
+	assert.match(EXECUTE_SQL_CORE_SCHEMA, /data BYTEA/);
+	assert.doesNotMatch(EXECUTE_SQL_CORE_SCHEMA, /data (?:\(BLOB\)|\(binary\))/);
 	assert.match(
 		EXECUTE_TOOL_DESCRIPTION,
-		/Pass binary values as `\{"kind":"blob","base64":"\.\.\."\}`/,
+		/`lix_file\.data` has SQL type `BYTEA`/,
 	);
-	assert.match(EXECUTE_TOOL_DESCRIPTION, /Never use `CAST\(\.\.\. AS BLOB\)`/);
-	assert.match(EXECUTE_TOOL_DESCRIPTION, /use `BYTEA`/);
+	assert.match(
+		EXECUTE_TOOL_DESCRIPTION,
+		/Bind binary values as `\{"kind":"blob","base64":"\.\.\."\}`/,
+	);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /Do not cast blob parameters/);
+	assert.match(
+		EXECUTE_TOOL_DESCRIPTION,
+		/If a cast is unavoidable, use `BYTEA`, never `BLOB`/,
+	);
 	assert.match(EXECUTE_TOOL_DESCRIPTION, /lix_active_branch_commit_id\(\)/);
 	assert.match(EXECUTE_TOOL_DESCRIPTION, /LIX_HISTORY_NON_IDENTITY_FILTER/);
 	assert.doesNotMatch(EXECUTE_TOOL_DESCRIPTION, /file-tool safeguards/);
