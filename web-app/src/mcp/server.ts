@@ -1,4 +1,5 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
 	CallToolRequestSchema,
 	ErrorCode,
@@ -298,29 +299,32 @@ function observeToolCall(
 export async function handleMcpTransport(
 	request: Request,
 	service: LixFileService,
-	ctx: ExecutionContext,
 	options: McpServerOptions = {},
 ): Promise<Response> {
-	// Keep the Worker-only module out of Node's strip-types test loader. The
-	// production Worker resolves this Cloudflare module when the MCP route runs.
-	const { createMcpHandler } = await import("agents/mcp");
-	return createMcpHandler(
-		createLixrayMcpServer(service, {
-			...options,
-			serverName: options.serverName ?? mcpServerNameForUrl(request.url),
-		}),
-		{
-			route: MCP_PATH,
-			enableJsonResponse: true,
-			sessionIdGenerator: undefined,
-			corsOptions: {
-				origin: "*",
-				methods: "GET, POST, DELETE, OPTIONS",
-				headers: "Authorization, Content-Type, MCP-Protocol-Version",
-				exposeHeaders: "MCP-Session-Id, MCP-Protocol-Version",
-			},
-		},
-	)(request, undefined, ctx);
+	if (new URL(request.url).pathname !== MCP_PATH) {
+		return new Response("Not found\n", { status: 404 });
+	}
+	const transport = new WebStandardStreamableHTTPServerTransport({
+		enableJsonResponse: true,
+		sessionIdGenerator: undefined,
+	});
+	const server = createLixrayMcpServer(service, {
+		...options,
+		serverName: options.serverName ?? mcpServerNameForUrl(request.url),
+	});
+	await server.connect(transport);
+	const response = await transport.handleRequest(request);
+	const headers = new Headers(response.headers);
+	headers.set("access-control-allow-origin", "*");
+	headers.set(
+		"access-control-expose-headers",
+		"MCP-Session-Id, MCP-Protocol-Version",
+	);
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
+	});
 }
 
 interface McpDiscoveryOptions {

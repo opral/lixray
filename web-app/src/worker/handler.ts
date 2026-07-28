@@ -286,7 +286,6 @@ export async function handleRequest(
 						sessionId: authResult.auth.userId,
 					},
 				}),
-				executionContext,
 				{
 					authMode: isDemoMode(env) ? "none" : "oauth",
 					onToolCall,
