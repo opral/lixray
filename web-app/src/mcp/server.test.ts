@@ -101,6 +101,7 @@ void test("local MCP URLs advertise an isolated development server name", () => 
 });
 
 void test("web-standard MCP transport initializes in the Node runtime", async () => {
+	const serializationDurations: Array<number> = [];
 	const response = await handleMcpTransport(
 		new Request("https://lixray.com/mcp", {
 			method: "POST",
@@ -120,8 +121,14 @@ void test("web-standard MCP transport initializes in the Node runtime", async ()
 			}),
 		}),
 		new LixFileService(new ProtocolLixRuntimeClient()),
+		{
+			onResponseSerialized: (durationMs) =>
+				serializationDurations.push(durationMs),
+		},
 	);
 	assert.equal(response.status, 200);
+	assert.equal(serializationDurations.length, 1);
+	assert.ok((serializationDurations[0] ?? -1) >= 0);
 	assert.equal(response.headers.get("access-control-allow-origin"), "*");
 	const payload: unknown = await response.json();
 	assert.ok(isRecord(payload));
@@ -475,12 +482,16 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 				({
 					durationMs,
 					surfaceVersion,
+					lixResolutionDurationMs,
+					storageExecutionDurationMs,
 					executeInput,
 					executeOutput,
 					...observation
 				}) => {
 					assert.ok(Number.isInteger(durationMs));
 					assert.ok(durationMs >= 0);
+					assert.ok((lixResolutionDurationMs ?? 0) >= 0);
+					assert.ok((storageExecutionDurationMs ?? 0) >= 0);
 					assert.match(surfaceVersion, /^fnv1a32:[0-9a-f]{8}$/);
 					return {
 						...observation,

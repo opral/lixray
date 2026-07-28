@@ -27,9 +27,12 @@ import {
 	MCP_PROTECTED_RESOURCE_PATH,
 	MCP_RESOURCE,
 } from "../mcp/server.ts";
+import type { McpRequestObservation } from "./mcp-telemetry.ts";
 
 const LIX_A = "11111111-1111-4111-8111-111111111111";
 const LIX_B = "22222222-2222-4222-8222-222222222222";
+const UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 void test("GET /healthz returns Worker health without auth or proxying", async () => {
 	let proxied = false;
@@ -178,6 +181,12 @@ void test("unauthenticated MCP tools/list returns an OAuth challenge", async () 
 	assert.match(
 		response.headers.get("www-authenticate") ?? "",
 		/resource_metadata="https:\/\/lixray\.com\/\.well-known\/oauth-protected-resource"/,
+	);
+	assert.match(response.headers.get("server-timing") ?? "", /auth;dur=/);
+	assert.match(response.headers.get("x-lixray-trace-id") ?? "", UUID_PATTERN);
+	assert.doesNotMatch(
+		response.headers.get("server-timing") ?? "",
+		/Bearer|oauth-user-token|arguments/,
 	);
 });
 
@@ -397,6 +406,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	let waitedFor: Promise<unknown> | undefined;
 	let flushes = 0;
 	const observations: Array<unknown> = [];
+	const completedRequests: Array<McpRequestObservation> = [];
 	const executionContext = {
 		waitUntil: (promise: Promise<unknown>) => {
 			waitedFor = promise;
@@ -413,7 +423,19 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	});
 
 	const response = await handleRequest(
-		new Request("https://example.test/mcp", { method: "POST" }),
+		new Request("https://example.test/mcp", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					clientInfo: { name: "Codex", version: "1.2.3" },
+				},
+			}),
+		}),
 		testEnv,
 		{
 			authenticateMcp: authenticatedMcp(),
@@ -427,6 +449,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 				});
 				return {
 					onToolCall: (observation) => observations.push(observation),
+					completeRequest: (observation) => completedRequests.push(observation),
 					flush: async () => {
 						flushes += 1;
 					},
@@ -437,7 +460,11 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 					toolName: "list_lixes",
 					outcome: "success",
 					durationMs: 2,
+					surfaceVersion: "test",
+					lixResolutionDurationMs: 3,
+					storageExecutionDurationMs: 4,
 				});
+				options.onResponseSerialized?.(1.25);
 				return new Response("mcp response");
 			},
 		},
@@ -449,8 +476,31 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 			toolName: "list_lixes",
 			outcome: "success",
 			durationMs: 2,
+			surfaceVersion: "test",
+			lixResolutionDurationMs: 3,
+			storageExecutionDurationMs: 4,
 		},
 	]);
+	assert.equal(completedRequests.length, 1);
+	assert.match(completedRequests[0]?.traceId ?? "", UUID_PATTERN);
+	assert.equal(completedRequests[0]?.jsonRpcMethod, "initialize");
+	assert.equal(completedRequests[0]?.clientName, "Codex");
+	assert.equal(completedRequests[0]?.clientVersion, "1.2.3");
+	assert.equal(completedRequests[0]?.protocolVersion, "2025-06-18");
+	assert.equal(completedRequests[0]?.responseSerializationDurationMs, 1.25);
+	assert.equal(completedRequests[0]?.responseStatus, 200);
+	assert.match(
+		response.headers.get("server-timing") ?? "",
+		/auth;dur=.*lix-resolve;dur=3.*storage;dur=4.*serialize;dur=1\.25.*total;dur=/,
+	);
+	assert.equal(
+		response.headers.get("x-lixray-trace-id"),
+		completedRequests[0]?.traceId,
+	);
+	assert.match(
+		response.headers.get("access-control-expose-headers") ?? "",
+		/Server-Timing/,
+	);
 	assert.ok(waitedFor);
 	await waitedFor;
 	assert.equal(flushes, 1);

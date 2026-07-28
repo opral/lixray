@@ -5,10 +5,15 @@ import {
 	observeExecuteInput,
 	observeExecuteOutput,
 } from "../mcp/tool-observation.ts";
-import { createMcpTelemetrySession } from "./mcp-telemetry.ts";
+import {
+	createMcpTelemetrySession,
+	type McpRequestObservation,
+	type McpTelemetrySession,
+} from "./mcp-telemetry.ts";
 
 const SURFACE_VERSION = "fnv1a32:1234abcd";
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
+const TRACE_ID = "22222222-2222-4222-8222-222222222222";
 
 void test("MCP telemetry captures a PostHog AI span for production tool usage", async () => {
 	const captured: Array<EventMessage> = [];
@@ -47,8 +52,11 @@ void test("MCP telemetry captures a PostHog AI span for production tool usage", 
 		outcome: "success",
 		durationMs: 12,
 		surfaceVersion: SURFACE_VERSION,
+		lixResolutionDurationMs: 4,
+		storageExecutionDurationMs: 5,
 		lixId: LIX_ID,
 	});
+	completeRequest(session);
 	await session.flush();
 
 	assert.equal(shutdowns, 1);
@@ -57,16 +65,29 @@ void test("MCP telemetry captures a PostHog AI span for production tool usage", 
 	assert.equal(event?.distinctId, "user-123");
 	assert.equal(event?.event, "$ai_span");
 	assert.deepEqual(event?.groups, { lix: LIX_ID });
-	assert.match(String(event?.properties?.$ai_trace_id), UUID_PATTERN);
+	assert.equal(event?.properties?.$ai_trace_id, TRACE_ID);
 	assert.match(String(event?.properties?.$ai_span_id), UUID_PATTERN);
-	assert.deepEqual(omitIds(event?.properties), {
+	assert.deepEqual(omitSpanId(event?.properties), {
+		$ai_trace_id: TRACE_ID,
 		$ai_span_name: "mcp.list_lixes",
-		$ai_latency: 0.012,
+		$ai_latency: 0.02,
 		$ai_is_error: false,
 		mcp_server: "lixray",
+		mcp_trace_id: TRACE_ID,
+		jsonrpc_method: "tools/call",
+		mcp_client_name: "Codex",
+		mcp_client_version: "1.2.3",
+		mcp_protocol_version: "2025-06-18",
+		authentication_duration_ms: 3,
+		lix_resolution_duration_ms: 4,
+		storage_execution_duration_ms: 5,
+		response_serialization_duration_ms: 2,
+		request_duration_ms: 20,
+		response_status: 200,
 		mcp_tool: "list_lixes",
 		outcome: "success",
 		duration_ms: 12,
+		tool_duration_ms: 12,
 		oauth_client_id: "oauth-client-456",
 		environment: "production",
 		release_id: "worker-version-123",
@@ -105,6 +126,7 @@ void test("MCP telemetry records trace errors without lix grouping", async () =>
 		durationMs: 0,
 		surfaceVersion: SURFACE_VERSION,
 	});
+	completeRequest(session, { responseStatus: 500 });
 	await session.flush();
 
 	assert.equal(captured[0]?.event, "$ai_span");
@@ -115,6 +137,44 @@ void test("MCP telemetry records trace errors without lix grouping", async () =>
 	assert.equal(captured[0]?.properties?.error_code, "invalid_arguments");
 	assert.equal(captured[0]?.properties?.release_id, "release-456");
 	assert.equal(captured[0]?.groups, undefined);
+});
+
+void test("MCP telemetry captures safe lifecycle request metadata without tool arguments", async () => {
+	const captured: Array<EventMessage> = [];
+	const session = createMcpTelemetrySession(
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		{ userId: "user-123", clientId: "oauth-client-456" },
+		{
+			createClient: () => ({
+				captureImmediate: async (event) => {
+					captured.push(structuredClone(event));
+				},
+				shutdown: async () => undefined,
+			}),
+		},
+	);
+	assert.ok(session);
+
+	completeRequest(session, {
+		jsonRpcMethod: "initialize",
+		clientName: "Claude Desktop",
+		clientVersion: "2.0.0",
+	});
+	await session.flush();
+
+	assert.equal(captured.length, 1);
+	assert.equal(captured[0]?.properties?.$ai_span_name, "mcp.initialize");
+	assert.equal(captured[0]?.properties?.mcp_tool, undefined);
+	assert.equal(captured[0]?.properties?.mcp_client_name, "Claude Desktop");
+	assert.equal(captured[0]?.properties?.mcp_client_version, "2.0.0");
+	assert.equal(captured[0]?.properties?.jsonrpc_method, "initialize");
+	assert.doesNotMatch(
+		JSON.stringify(captured),
+		/Bearer|access_token|arguments|params/,
+	);
 });
 
 void test("MCP traces expose SQL friction without lix values or result rows", async () => {
@@ -168,6 +228,7 @@ void test("MCP traces expose SQL friction without lix values or result rows", as
 		executeInput,
 		executeOutput,
 	});
+	completeRequest(session);
 	await session.flush();
 
 	const properties = captured[0]?.properties;
@@ -265,6 +326,7 @@ void test("PostHog delivery failures do not escape the telemetry session", async
 			surfaceVersion: SURFACE_VERSION,
 		}),
 	);
+	completeRequest(session);
 	await assert.doesNotReject(session.flush());
 	assert.deepEqual(warnings, [
 		"Failed to capture MCP telemetry",
@@ -275,11 +337,29 @@ void test("PostHog delivery failures do not escape the telemetry session", async
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function omitIds(
+function completeRequest(
+	session: McpTelemetrySession,
+	overrides: Partial<McpRequestObservation> = {},
+): void {
+	assert.ok(session.completeRequest);
+	session.completeRequest({
+		traceId: TRACE_ID,
+		jsonRpcMethod: "tools/call",
+		clientName: "Codex",
+		clientVersion: "1.2.3",
+		protocolVersion: "2025-06-18",
+		authenticationDurationMs: 3,
+		responseSerializationDurationMs: 2,
+		requestDurationMs: 20,
+		responseStatus: 200,
+		...overrides,
+	});
+}
+
+function omitSpanId(
 	properties: EventMessage["properties"],
 ): Record<string, unknown> {
 	const rest = { ...(properties ?? {}) };
-	delete rest.$ai_trace_id;
 	delete rest.$ai_span_id;
 	return rest;
 }

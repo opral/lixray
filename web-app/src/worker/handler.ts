@@ -5,6 +5,11 @@ import {
 	type JWTVerifyGetKey,
 } from "jose";
 import {
+	DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
+	LATEST_PROTOCOL_VERSION,
+	SUPPORTED_PROTOCOL_VERSIONS,
+} from "@modelcontextprotocol/sdk/types.js";
+import {
 	DEMO_AUTH_TOKEN,
 	DEMO_ORGANIZATION_ID,
 	DEMO_ORGANIZATION_NAME,
@@ -27,6 +32,7 @@ import {
 } from "../mcp/server.ts";
 import {
 	createMcpTelemetrySession,
+	type McpRequestObservation,
 	type McpTelemetrySession,
 } from "./mcp-telemetry.ts";
 import {
@@ -183,6 +189,11 @@ const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
 const jwksByUrl = new Map<string, JWTVerifyGetKey>();
+const mcpClientInfoByOauthClientId = new Map<
+	string,
+	{ name: string; version: string }
+>();
+const MAX_CACHED_MCP_CLIENTS = 1024;
 
 export async function handleRequest(
 	request: Request,
@@ -215,11 +226,25 @@ export async function handleRequest(
 
 	if (url.pathname === MCP_PATH) {
 		if (request.method === "OPTIONS") return corsPreflight();
+		const requestStartedAt = performance.now();
+		const traceId = crypto.randomUUID();
 		const executionContext = options.executionContext ?? noopExecutionContext();
 		const authenticateMcp =
 			options.authenticateMcp ?? authenticateMcpWithSupabase;
+		const authenticationStartedAt = performance.now();
 		const authResult = await authenticateMcp(request, env);
-		if (!authResult.ok) return authResult.response;
+		const authenticationDurationMs = elapsedMilliseconds(
+			authenticationStartedAt,
+		);
+		if (!authResult.ok) {
+			return mcpTraceResponse(authResult.response, {
+				traceId,
+				authenticationDurationMs,
+				requestDurationMs: elapsedMilliseconds(requestStartedAt),
+			});
+		}
+		const requestMetadata = await readMcpRequestMetadata(request);
+		const clientInfo = mcpClientInfo(authResult.auth.clientId, requestMetadata);
 		const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
 		// This positive cache is recreated for every MCP HTTP request.
 		const authorizedLixIds = new Set<string>();
@@ -254,9 +279,14 @@ export async function handleRequest(
 			},
 		);
 		const pendingConnectionRecords: Array<Promise<void>> = [];
+		let lixResolutionDurationMs = 0;
+		let storageExecutionDurationMs = 0;
+		let responseSerializationDurationMs = 0;
 		const recordMcpLixConnection =
 			options.recordMcpLixConnection ?? recordMcpLixConnectionWithSupabase;
 		const onToolCall = (observation: McpToolCallObservation): void => {
+			lixResolutionDurationMs += observation.lixResolutionDurationMs ?? 0;
+			storageExecutionDurationMs += observation.storageExecutionDurationMs ?? 0;
 			telemetry?.onToolCall(observation);
 			if (
 				authResult.auth.isDemo ||
@@ -278,7 +308,7 @@ export async function handleRequest(
 			);
 		};
 		try {
-			return await (options.mcpTransport ?? handleMcpTransport)(
+			const response = await (options.mcpTransport ?? handleMcpTransport)(
 				request,
 				new LixFileService(client, {
 					agentReview: {
@@ -289,8 +319,48 @@ export async function handleRequest(
 				{
 					authMode: isDemoMode(env) ? "none" : "oauth",
 					onToolCall,
+					onResponseSerialized: (durationMs) => {
+						responseSerializationDurationMs += durationMs;
+					},
 				},
 			);
+			const requestDurationMs = elapsedMilliseconds(requestStartedAt);
+			telemetry?.completeRequest?.({
+				traceId,
+				jsonRpcMethod: requestMetadata.jsonRpcMethod,
+				...(clientInfo?.name ? { clientName: clientInfo.name } : {}),
+				...(clientInfo?.version ? { clientVersion: clientInfo.version } : {}),
+				...(requestMetadata.protocolVersion
+					? { protocolVersion: requestMetadata.protocolVersion }
+					: {}),
+				authenticationDurationMs,
+				responseSerializationDurationMs,
+				requestDurationMs,
+				responseStatus: response.status,
+			});
+			return mcpTraceResponse(response, {
+				traceId,
+				authenticationDurationMs,
+				lixResolutionDurationMs,
+				storageExecutionDurationMs,
+				responseSerializationDurationMs,
+				requestDurationMs,
+			});
+		} catch (caught) {
+			telemetry?.completeRequest?.({
+				traceId,
+				jsonRpcMethod: requestMetadata.jsonRpcMethod,
+				...(clientInfo?.name ? { clientName: clientInfo.name } : {}),
+				...(clientInfo?.version ? { clientVersion: clientInfo.version } : {}),
+				...(requestMetadata.protocolVersion
+					? { protocolVersion: requestMetadata.protocolVersion }
+					: {}),
+				authenticationDurationMs,
+				responseSerializationDurationMs,
+				requestDurationMs: elapsedMilliseconds(requestStartedAt),
+				responseStatus: 500,
+			});
+			throw caught;
 		} finally {
 			await Promise.all(pendingConnectionRecords);
 			scheduleMcpTelemetryFlush(executionContext, telemetry);
@@ -1104,6 +1174,155 @@ function safeDecodeURIComponent(value: string): string | null {
 	} catch {
 		return null;
 	}
+}
+
+interface McpRequestMetadata {
+	jsonRpcMethod: string;
+	clientName?: string;
+	clientVersion?: string;
+	protocolVersion?: string;
+}
+
+interface McpTraceResponseTimings extends Pick<
+	McpRequestObservation,
+	"traceId" | "authenticationDurationMs" | "requestDurationMs"
+> {
+	lixResolutionDurationMs?: number;
+	storageExecutionDurationMs?: number;
+	responseSerializationDurationMs?: number;
+}
+
+async function readMcpRequestMetadata(
+	request: Request,
+): Promise<McpRequestMetadata> {
+	let body: unknown;
+	try {
+		body = await request.clone().json();
+	} catch {
+		return {
+			jsonRpcMethod: "unknown",
+			protocolVersion:
+				safeMcpMetadata(request.headers.get("MCP-Protocol-Version")) ??
+				undefined,
+		};
+	}
+	const message = Array.isArray(body) ? (body as Array<unknown>)[0] : body;
+	if (!message || typeof message !== "object") {
+		return { jsonRpcMethod: "unknown" };
+	}
+	const record = message as Record<string, unknown>;
+	const jsonRpcMethod = safeMcpMetadata(record.method) ?? "unknown";
+	const params =
+		record.params && typeof record.params === "object"
+			? (record.params as Record<string, unknown>)
+			: undefined;
+	const clientInfo =
+		params?.clientInfo && typeof params.clientInfo === "object"
+			? (params.clientInfo as Record<string, unknown>)
+			: undefined;
+	const requestedProtocolVersion = safeMcpMetadata(params?.protocolVersion);
+	const headerProtocolVersion = safeMcpMetadata(
+		request.headers.get("MCP-Protocol-Version"),
+	);
+	const clientName = safeMcpMetadata(clientInfo?.name);
+	const clientVersion = safeMcpMetadata(clientInfo?.version);
+	const protocolVersion =
+		jsonRpcMethod === "initialize" && requestedProtocolVersion
+			? SUPPORTED_PROTOCOL_VERSIONS.includes(requestedProtocolVersion)
+				? requestedProtocolVersion
+				: LATEST_PROTOCOL_VERSION
+			: (headerProtocolVersion ?? DEFAULT_NEGOTIATED_PROTOCOL_VERSION);
+	return {
+		jsonRpcMethod,
+		...(clientName ? { clientName } : {}),
+		...(clientVersion ? { clientVersion } : {}),
+		protocolVersion,
+	};
+}
+
+function safeMcpMetadata(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const normalized = value.trim();
+	if (
+		normalized.length === 0 ||
+		normalized.length > 128 ||
+		[...normalized].some((character) => {
+			const codePoint = character.codePointAt(0) ?? 0;
+			return codePoint <= 31 || codePoint === 127;
+		})
+	) {
+		return null;
+	}
+	return normalized;
+}
+
+function mcpClientInfo(
+	oauthClientId: string,
+	metadata: McpRequestMetadata,
+): { name: string; version: string } | undefined {
+	if (metadata.clientName && metadata.clientVersion) {
+		if (
+			!mcpClientInfoByOauthClientId.has(oauthClientId) &&
+			mcpClientInfoByOauthClientId.size >= MAX_CACHED_MCP_CLIENTS
+		) {
+			const oldestClientId = mcpClientInfoByOauthClientId.keys().next().value;
+			if (oldestClientId) mcpClientInfoByOauthClientId.delete(oldestClientId);
+		}
+		const clientInfo = {
+			name: metadata.clientName,
+			version: metadata.clientVersion,
+		};
+		mcpClientInfoByOauthClientId.set(oauthClientId, clientInfo);
+		return clientInfo;
+	}
+	return mcpClientInfoByOauthClientId.get(oauthClientId);
+}
+
+function mcpTraceResponse(
+	response: Response,
+	timings: McpTraceResponseTimings,
+): Response {
+	const headers = new Headers(response.headers);
+	const serverTiming = [
+		{ name: "auth", duration: timings.authenticationDurationMs },
+		{ name: "lix-resolve", duration: timings.lixResolutionDurationMs ?? 0 },
+		{ name: "storage", duration: timings.storageExecutionDurationMs ?? 0 },
+		{
+			name: "serialize",
+			duration: timings.responseSerializationDurationMs ?? 0,
+		},
+		{ name: "total", duration: timings.requestDurationMs },
+	]
+		.map(
+			({ name, duration }) => `${name};dur=${serverTimingDuration(duration)}`,
+		)
+		.join(", ");
+	headers.set("server-timing", serverTiming);
+	headers.set("x-lixray-trace-id", timings.traceId);
+	const exposedHeaders = new Set(
+		(headers.get("access-control-expose-headers") ?? "")
+			.split(",")
+			.map((header) => header.trim())
+			.filter(Boolean),
+	);
+	exposedHeaders.add("Server-Timing");
+	exposedHeaders.add("X-Lixray-Trace-Id");
+	headers.set("access-control-expose-headers", [...exposedHeaders].join(", "));
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
+	});
+}
+
+function elapsedMilliseconds(startedAt: number): number {
+	return Math.max(0, Math.round((performance.now() - startedAt) * 1000) / 1000);
+}
+
+function serverTimingDuration(value: number): string {
+	return Math.max(0, value)
+		.toFixed(3)
+		.replace(/\.?0+$/, "");
 }
 
 function corsPreflight(): Response {

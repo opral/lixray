@@ -35,6 +35,8 @@ export interface McpToolCallObservation {
 	outcome: "success" | "error";
 	durationMs: number;
 	surfaceVersion: string;
+	lixResolutionDurationMs?: number;
+	storageExecutionDurationMs?: number;
 	errorCode?: string;
 	lixId?: string;
 	executeInput?: McpExecuteInputObservation;
@@ -46,6 +48,7 @@ export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
 interface McpServerOptions {
 	authMode?: McpAuthMode;
 	onToolCall?: McpToolCallObserver;
+	onResponseSerialized?: (durationMs: number) => void;
 	serverName?: "LixRay" | "LixRay_Dev";
 }
 
@@ -210,15 +213,27 @@ export function createLixrayMcpServer(
 			return errorResult("invalid_arguments", z.prettifyError(parsed.error));
 		}
 		let lixId: string | undefined;
+		let lixResolutionDurationMs = 0;
+		let storageExecutionDurationMs = 0;
 		try {
 			const callArgs: Record<string, unknown> = { ...parsed.data };
 			if (typeof parsed.data.lix_ref === "string") {
-				lixId = await service.resolveLixRef(parsed.data.lix_ref);
+				const resolutionStartedAt = performance.now();
+				try {
+					lixId = await service.resolveLixRef(parsed.data.lix_ref);
+				} finally {
+					lixResolutionDurationMs = elapsedMilliseconds(resolutionStartedAt);
+				}
 				callArgs.lix_ref = lixId;
 			}
-			const rawStructuredContent = asStructuredContent(
-				await tool.call(callArgs),
-			);
+			const storageStartedAt = performance.now();
+			let rawToolOutput: unknown;
+			try {
+				rawToolOutput = await tool.call(callArgs);
+			} finally {
+				storageExecutionDurationMs = elapsedMilliseconds(storageStartedAt);
+			}
+			const rawStructuredContent = asStructuredContent(rawToolOutput);
 			const parsedOutput = tool.outputSchema?.safeParse(rawStructuredContent);
 			if (parsedOutput && !parsedOutput.success) {
 				throw new Error(
@@ -235,6 +250,8 @@ export function createLixrayMcpServer(
 			observe(startedAt, {
 				toolName: tool.descriptor.name,
 				outcome: "success",
+				lixResolutionDurationMs,
+				storageExecutionDurationMs,
 				...(lixId ? { lixId } : {}),
 				...(executeInput ? { executeInput } : {}),
 				...(executeOutput ? { executeOutput } : {}),
@@ -254,6 +271,8 @@ export function createLixrayMcpServer(
 					toolName: tool.descriptor.name,
 					outcome: "error",
 					errorCode: caught.code,
+					lixResolutionDurationMs,
+					storageExecutionDurationMs,
 					...(lixId ? { lixId } : {}),
 					...(executeInput ? { executeInput } : {}),
 				});
@@ -263,6 +282,8 @@ export function createLixrayMcpServer(
 				toolName: tool.descriptor.name,
 				outcome: "error",
 				errorCode: "internal_error",
+				lixResolutionDurationMs,
+				storageExecutionDurationMs,
 				...(lixId ? { lixId } : {}),
 				...(executeInput ? { executeInput } : {}),
 			});
@@ -308,6 +329,15 @@ export async function handleMcpTransport(
 		enableJsonResponse: true,
 		sessionIdGenerator: undefined,
 	});
+	const send = transport.send.bind(transport);
+	transport.send = async (message, sendOptions) => {
+		const startedAt = performance.now();
+		try {
+			await send(message, sendOptions);
+		} finally {
+			options.onResponseSerialized?.(elapsedMilliseconds(startedAt));
+		}
+	};
 	const server = createLixrayMcpServer(service, {
 		...options,
 		serverName: options.serverName ?? mcpServerNameForUrl(request.url),
@@ -325,6 +355,10 @@ export async function handleMcpTransport(
 		statusText: response.statusText,
 		headers,
 	});
+}
+
+function elapsedMilliseconds(startedAt: number): number {
+	return Math.max(0, Math.round((performance.now() - startedAt) * 1000) / 1000);
 }
 
 interface McpDiscoveryOptions {
