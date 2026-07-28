@@ -73,11 +73,11 @@ void test("MCP documentation distinguishes browser and client authentication", a
 		documentation,
 		/browser session and your MCP client authorization are separate/,
 	);
-	assert.match(documentation, /Tool discovery is public/);
-	assert.match(documentation, /Every tools\/call request still requires/);
+	assert.match(documentation, /challenges unauthenticated requests/);
+	assert.match(documentation, /Complete authorization before initialize/);
 	assert.match(
 		documentation,
-		/initialize and tools\/list succeed, then authorize the connection and call list_lixes/,
+		/authorization prompt, then confirm initialize, tools\/list, and list_lixes succeed/,
 	);
 	assert.match(documentation, /use LixRay_Dev for local development/);
 	assert.match(documentation, /Do not launch a nested agent or Codex process/);

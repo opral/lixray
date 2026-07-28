@@ -146,8 +146,7 @@ void test("unauthenticated localhost MCP requests challenge with local discovery
 	);
 });
 
-void test("unauthenticated MCP tools/list reaches discovery before fallback", async () => {
-	let fellBack = false;
+void test("unauthenticated MCP tools/list returns an OAuth challenge", async () => {
 	let reachedTransport = false;
 	const response = await handleRequest(
 		new Request("https://example.test/mcp", {
@@ -160,33 +159,26 @@ void test("unauthenticated MCP tools/list reaches discovery before fallback", as
 				params: {},
 			}),
 		}),
-		env({}),
+		env({
+			extra: {
+				SUPABASE_URL: "https://project.supabase.co",
+				SUPABASE_JWKS_URL:
+					"https://project.supabase.co/auth/v1/.well-known/jwks.json",
+			},
+		}),
 		{
-			authenticateMcp: async () => {
-				throw new Error("public discovery must not authenticate");
-			},
-			mcpTransport: async (_request, service, _context, options) => {
+			mcpTransport: async () => {
 				reachedTransport = true;
-				assert.equal(options.authMode, "oauth");
-				await assert.rejects(
-					service.listLixes(),
-					/MCP tool calls require authentication/,
-				);
-				return Response.json({
-					jsonrpc: "2.0",
-					id: 1,
-					result: { tools: [] },
-				});
-			},
-			fallback: async () => {
-				fellBack = true;
-				return new Response("frontend");
+				return new Response("unexpected");
 			},
 		},
 	);
-	assert.equal(response.status, 200);
-	assert.equal(reachedTransport, true);
-	assert.equal(fellBack, false);
+	assert.equal(response.status, 401);
+	assert.equal(reachedTransport, false);
+	assert.match(
+		response.headers.get("www-authenticate") ?? "",
+		/resource_metadata="https:\/\/lixray\.com\/\.well-known\/oauth-protected-resource"/,
+	);
 });
 
 void test("unauthenticated MCP tools/call still returns an OAuth challenge", async () => {
@@ -231,7 +223,49 @@ void test("unauthenticated MCP tools/call still returns an OAuth challenge", asy
 	);
 });
 
-void test("unauthenticated MCP initialize reaches the MCP transport before fallback", async () => {
+void test("unauthenticated MCP initialize returns an OAuth challenge", async () => {
+	let reachedTransport = false;
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", {
+			method: "POST",
+			headers: {
+				Accept: "application/json, text/event-stream",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "handler-test", version: "1.0.0" },
+				},
+			}),
+		}),
+		env({
+			extra: {
+				SUPABASE_URL: "https://project.supabase.co",
+				SUPABASE_JWKS_URL:
+					"https://project.supabase.co/auth/v1/.well-known/jwks.json",
+			},
+		}),
+		{
+			mcpTransport: async () => {
+				reachedTransport = true;
+				return new Response("unexpected");
+			},
+		},
+	);
+	assert.equal(response.status, 401);
+	assert.equal(reachedTransport, false);
+	assert.match(
+		response.headers.get("www-authenticate") ?? "",
+		/resource_metadata="https:\/\/lixray\.com\/\.well-known\/oauth-protected-resource"/,
+	);
+});
+
+void test("authenticated MCP initialize reaches the MCP transport before fallback", async () => {
 	let fellBack = false;
 	let reachedTransport = false;
 	const response = await handleRequest(
@@ -255,9 +289,7 @@ void test("unauthenticated MCP initialize reaches the MCP transport before fallb
 		}),
 		env({}),
 		{
-			authenticateMcp: async () => {
-				throw new Error("public initialize must not authenticate");
-			},
+			authenticateMcp: authenticatedMcp(),
 			mcpTransport: async () => {
 				reachedTransport = true;
 				return Response.json({
