@@ -12,11 +12,7 @@ import {
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
-import {
-	LixFileService,
-	type LixRuntimeClient,
-	type LixSummary,
-} from "../mcp/file-service.ts";
+import { LixFileService, type LixSummary } from "../mcp/file-service.ts";
 import {
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
@@ -186,12 +182,6 @@ const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
-const PUBLIC_MCP_METHODS = new Set([
-	"initialize",
-	"notifications/initialized",
-	"ping",
-	"tools/list",
-]);
 const jwksByUrl = new Map<string, JWTVerifyGetKey>();
 
 export async function handleRequest(
@@ -226,14 +216,6 @@ export async function handleRequest(
 	if (url.pathname === MCP_PATH) {
 		if (request.method === "OPTIONS") return corsPreflight();
 		const executionContext = options.executionContext ?? noopExecutionContext();
-		if (await isPublicMcpDiscoveryRequest(request)) {
-			return (options.mcpTransport ?? handleMcpTransport)(
-				request,
-				mcpDiscoveryService(),
-				executionContext,
-				{ authMode: isDemoMode(env) ? "none" : "oauth" },
-			);
-		}
 		const authenticateMcp =
 			options.authenticateMcp ?? authenticateMcpWithSupabase;
 		const authResult = await authenticateMcp(request, env);
@@ -894,39 +876,6 @@ async function resolvePublicLixWithSupabase(
 	} catch {
 		return lixResolutionUnavailable();
 	}
-}
-
-async function isPublicMcpDiscoveryRequest(request: Request): Promise<boolean> {
-	if (request.method !== "POST") return false;
-	let payload: unknown;
-	try {
-		payload = await request.clone().json();
-	} catch {
-		return false;
-	}
-	const messages: unknown[] = Array.isArray(payload) ? payload : [payload];
-	return (
-		messages.length > 0 &&
-		messages.every((message) => {
-			if (message === null || typeof message !== "object") return false;
-			if (!("method" in message)) return false;
-			const method: unknown = message.method;
-			return typeof method === "string" && PUBLIC_MCP_METHODS.has(method);
-		})
-	);
-}
-
-function mcpDiscoveryService(): LixFileService {
-	const unavailable = () =>
-		Promise.reject(new Error("MCP tool calls require authentication."));
-	const client: LixRuntimeClient = {
-		listLixes: unavailable,
-		activeBranchId: unavailable,
-		switchBranch: unavailable,
-		execute: unavailable,
-		executeBatch: unavailable,
-	};
-	return new LixFileService(client);
 }
 
 function lixRowId(value: unknown): unknown {
