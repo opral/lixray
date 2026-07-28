@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { formatWorkspaceOpenError } from "./workspace-open-error.ts";
 
-test("explains how to recover from an unsupported repository protocol", () => {
+void test("explains how to recover from an unsupported repository protocol", () => {
 	assert.equal(
 		formatWorkspaceOpenError(
 			new Error(
@@ -13,7 +13,7 @@ test("explains how to recover from an unsupported repository protocol", () => {
 	);
 });
 
-test("preserves unrelated workspace opening errors", () => {
+void test("preserves unrelated workspace opening errors", () => {
 	assert.equal(
 		formatWorkspaceOpenError(
 			new Error("A workspace access token is required."),
