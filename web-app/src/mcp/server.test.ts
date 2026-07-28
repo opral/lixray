@@ -73,7 +73,14 @@ void test("MCP documentation distinguishes browser and client authentication", a
 		documentation,
 		/browser session and your MCP client authorization are separate/,
 	);
-	assert.match(documentation, /initialize, tools\/list, and list_lixes/);
+	assert.match(documentation, /Tool discovery is public/);
+	assert.match(documentation, /Every tools\/call request still requires/);
+	assert.match(
+		documentation,
+		/initialize and tools\/list succeed, then authorize the connection and call list_lixes/,
+	);
+	assert.match(documentation, /use LixRay_Dev for local development/);
+	assert.match(documentation, /Do not launch a nested agent or Codex process/);
 	assert.match(documentation, /no refresh token is available/);
 	assert.match(documentation, /do not include access or refresh tokens/);
 	assert.match(documentation, /ordered batch of statements/);
@@ -87,8 +94,8 @@ void test("MCP documentation distinguishes browser and client authentication", a
 });
 
 void test("local MCP URLs advertise an isolated development server name", () => {
-	assert.equal(mcpServerNameForUrl("http://127.0.0.1:8787/mcp"), "LixRay Dev");
-	assert.equal(mcpServerNameForUrl("http://localhost:8787/mcp"), "LixRay Dev");
+	assert.equal(mcpServerNameForUrl("http://127.0.0.1:8787/mcp"), "LixRay_Dev");
+	assert.equal(mcpServerNameForUrl("http://localhost:8787/mcp"), "LixRay_Dev");
 	assert.equal(mcpServerNameForUrl("https://lixray.com/mcp"), "LixRay");
 });
 
@@ -138,6 +145,8 @@ void test("MCP initialize, tools/list, and tools/call expose the authenticated t
 		const executeDescription = executeTool.description;
 		assert.ok(executeDescription);
 		assert.ok(executeDescription.startsWith(EXECUTE_TOOL_DESCRIPTION));
+		assert.match(executeDescription, /INSERT OR REPLACE INTO lix_file/);
+		assert.match(executeDescription, /"kind":"blob","base64":/);
 		assert.ok(executeDescription.includes(EXECUTE_SQL_CORE_SCHEMA));
 		assert.ok(executeDescription.includes(EXECUTE_SQL_TABLES_QUERY));
 		assert.ok(executeDescription.includes(EXECUTE_SQL_COLUMNS_QUERY));

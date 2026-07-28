@@ -123,7 +123,7 @@ function WorkspaceRoutePage() {
 			);
 			return;
 		}
-		if (!authClient) return;
+		if (!authIsLoaded || !authClient) return;
 
 		void resolvePublicWorkspaceByRoute(authClient, namespace, workspaceSlug)
 			.then((nextResolved) => {

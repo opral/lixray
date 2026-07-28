@@ -86,7 +86,7 @@ void test("protected resource discovery is public and precedes the frontend fall
 	});
 });
 
-void test("localhost discovery advertises local OAuth without changing the stable resource", async () => {
+void test("localhost discovery isolates its OAuth resource from production", async () => {
 	const response = await handleRequest(
 		new Request(`http://localhost:8787${MCP_PROTECTED_RESOURCE_PATH}`),
 		env({
@@ -95,11 +95,37 @@ void test("localhost discovery advertises local OAuth without changing the stabl
 	);
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), {
-		resource: MCP_RESOURCE,
+		resource: "http://localhost:8787",
 		authorization_servers: ["http://127.0.0.1:54321/auth/v1"],
 		scopes_supported: ["openid", "email", "profile"],
 		resource_documentation: "http://localhost:8787/mcp/docs",
 	});
+});
+
+void test("local MCP tokens cannot be replayed against production or another local origin", () => {
+	const now = 1_700_000_000;
+	const issuer = "http://127.0.0.1:54321/auth/v1";
+	const localClaims = {
+		sub: "user-123",
+		role: "authenticated",
+		aud: "authenticated",
+		iss: issuer,
+		exp: now + 300,
+		client_id: "codex-local",
+		resource: "http://127.0.0.1:8787",
+		lixray_mcp: true,
+		scope: "openid email profile",
+	};
+
+	assert.equal(
+		validateMcpJwtClaims(localClaims, issuer, now, "http://127.0.0.1:8787").ok,
+		true,
+	);
+	assert.equal(validateMcpJwtClaims(localClaims, issuer, now).ok, false);
+	assert.equal(
+		validateMcpJwtClaims(localClaims, issuer, now, "http://localhost:8787").ok,
+		false,
+	);
 });
 
 void test("unauthenticated localhost MCP requests challenge with local discovery", async () => {
@@ -120,11 +146,64 @@ void test("unauthenticated localhost MCP requests challenge with local discovery
 	);
 });
 
-void test("unauthenticated MCP discovery returns an OAuth resource challenge before fallback", async () => {
+void test("unauthenticated MCP tools/list reaches discovery before fallback", async () => {
 	let fellBack = false;
+	let reachedTransport = false;
 	const response = await handleRequest(
 		new Request("https://example.test/mcp", {
+			method: "POST",
 			headers: { Accept: "application/json, text/event-stream" },
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/list",
+				params: {},
+			}),
+		}),
+		env({}),
+		{
+			authenticateMcp: async () => {
+				throw new Error("public discovery must not authenticate");
+			},
+			mcpTransport: async (_request, service, _context, options) => {
+				reachedTransport = true;
+				assert.equal(options.authMode, "oauth");
+				await assert.rejects(
+					service.listLixes(),
+					/MCP tool calls require authentication/,
+				);
+				return Response.json({
+					jsonrpc: "2.0",
+					id: 1,
+					result: { tools: [] },
+				});
+			},
+			fallback: async () => {
+				fellBack = true;
+				return new Response("frontend");
+			},
+		},
+	);
+	assert.equal(response.status, 200);
+	assert.equal(reachedTransport, true);
+	assert.equal(fellBack, false);
+});
+
+void test("unauthenticated MCP tools/call still returns an OAuth challenge", async () => {
+	let reachedTransport = false;
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", {
+			method: "POST",
+			headers: {
+				Accept: "application/json, text/event-stream",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "list_lixes", arguments: {} },
+			}),
 		}),
 		env({}),
 		{
@@ -138,21 +217,21 @@ void test("unauthenticated MCP discovery returns an OAuth resource challenge bef
 					},
 				}),
 			}),
-			fallback: async () => {
-				fellBack = true;
-				return new Response("frontend");
+			mcpTransport: async () => {
+				reachedTransport = true;
+				return new Response("unexpected");
 			},
 		},
 	);
 	assert.equal(response.status, 401);
+	assert.equal(reachedTransport, false);
 	assert.match(
 		response.headers.get("www-authenticate") ?? "",
 		/resource_metadata="https:\/\/lixray\.com\/\.well-known\/oauth-protected-resource"/,
 	);
-	assert.equal(fellBack, false);
 });
 
-void test("authenticated MCP initialize reaches the MCP transport before fallback", async () => {
+void test("unauthenticated MCP initialize reaches the MCP transport before fallback", async () => {
 	let fellBack = false;
 	let reachedTransport = false;
 	const response = await handleRequest(
@@ -176,18 +255,11 @@ void test("authenticated MCP initialize reaches the MCP transport before fallbac
 		}),
 		env({}),
 		{
-			authenticateMcp: authenticatedMcp(),
-			mcpTransport: async (_request, service) => {
+			authenticateMcp: async () => {
+				throw new Error("public initialize must not authenticate");
+			},
+			mcpTransport: async () => {
 				reachedTransport = true;
-				assert.equal(
-					(
-						service as unknown as {
-							agentReview?: { sessionId?: string };
-						}
-					).agentReview?.sessionId,
-					"user-123",
-					"review ranges are scoped to the authenticated account, not the OAuth client",
-				);
 				return Response.json({
 					jsonrpc: "2.0",
 					id: 1,
@@ -351,6 +423,80 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	assert.ok(waitedFor);
 	await waitedFor;
 	assert.equal(flushes, 1);
+});
+
+void test("successful exact-Lix MCP activity is persisted before the response completes", async () => {
+	const records: Array<{
+		lixId: string | undefined;
+		toolName: string;
+		userId: string;
+		clientId: string;
+	}> = [];
+	let releaseRecord: (() => void) | undefined;
+	const recordBlocked = new Promise<void>((resolve) => {
+		releaseRecord = resolve;
+	});
+
+	const responsePromise = handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			recordMcpLixConnection: async (observation, auth) => {
+				records.push({
+					lixId: observation.lixId,
+					toolName: observation.toolName,
+					userId: auth.userId,
+					clientId: auth.clientId,
+				});
+				await recordBlocked;
+			},
+			mcpTransport: async (_request, _service, _context, options) => {
+				options.onToolCall?.({
+					toolName: "active_branch_id",
+					outcome: "success",
+					durationMs: 2,
+					surfaceVersion: "test",
+					lixId: LIX_A,
+				});
+				options.onToolCall?.({
+					toolName: "list_lixes",
+					outcome: "success",
+					durationMs: 1,
+					surfaceVersion: "test",
+				});
+				options.onToolCall?.({
+					toolName: "execute",
+					outcome: "error",
+					durationMs: 1,
+					surfaceVersion: "test",
+					lixId: LIX_A,
+				});
+				return new Response("connected");
+			},
+		},
+	);
+
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.deepEqual(records, [
+		{
+			lixId: LIX_A,
+			toolName: "active_branch_id",
+			userId: "user-123",
+			clientId: "chatgpt-client",
+		},
+	]);
+
+	let responseSettled = false;
+	void responsePromise.then(() => {
+		responseSettled = true;
+	});
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.equal(responseSettled, false);
+
+	releaseRecord?.();
+	const response = await responsePromise;
+	assert.equal(await response.text(), "connected");
 });
 
 void test("MCP JWT claims require issuer, audience, expiry, OAuth client, and resource binding", () => {

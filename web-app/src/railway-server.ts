@@ -1,8 +1,13 @@
 import startHandler from "@tanstack/react-start/server-entry";
+import { parseSqlScript as parseWorkerdSqlScript } from "@lix-js/sdk/workerd";
 import { addGoogleAnalytics } from "./lib/google-analytics";
-import { parseSqlScript } from "./lib/node-lix-sql-parser";
+import { parseSqlScript as parseNodeSqlScript } from "./lib/node-lix-sql-parser";
 import { withShareSecurityHeaders } from "./lib/share-security";
 import { handleRequest, type WorkerEnv } from "./worker/handler";
+
+const parseSqlScript = import.meta.env.DEV
+	? parseWorkerdSqlScript
+	: parseNodeSqlScript;
 
 export default {
 	async fetch(

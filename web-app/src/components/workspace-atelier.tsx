@@ -415,12 +415,26 @@ export function WorkspaceAtelier({
 					readOnly: isReadOnly,
 					branchSession: workspaceBranchSession,
 					reviewRangeSessionId: userId,
-					extensions: createLixrayWorkspaceExtensions({
-						lixId: workspaceId,
-						namespace,
-						lixSlug: workspaceSlug,
-						lixName: workspaceName,
-					}),
+					extensions: createLixrayWorkspaceExtensions(
+						{
+							lixId: workspaceId,
+							namespace,
+							lixSlug: workspaceSlug,
+							lixName: workspaceName,
+						},
+						async () => {
+							if (!client || !canEdit || !user) return false;
+							if (!(await getAccessToken())) return false;
+							const { data, error } = await client
+								.from("mcp_lix_connections")
+								.select("last_seen_at")
+								.eq("lix_id", workspaceId)
+								.order("last_seen_at", { ascending: false })
+								.limit(1);
+							if (error) throw error;
+							return data.length > 0;
+						},
+					),
 					centralPanel: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
 					},
@@ -485,7 +499,7 @@ export function WorkspaceAtelier({
 		getAccessToken,
 		navigateToCurrentPathBranch,
 		namespace,
-		user?.id,
+		user,
 		workspaceId,
 		workspaceName,
 		workspaceSlug,

@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { takeAuthReturnTo } from "~/components/auth-provider";
+import { peekAuthReturnTo, takeAuthReturnTo } from "~/components/auth-provider";
+import { Button } from "~/components/ui/button";
 import { getBrowserSupabaseClient } from "~/lib/supabase";
 import {
 	markWorkspaceShareJoined,
@@ -91,21 +92,55 @@ function AuthCallbackPage() {
 		};
 	}, [search.code, search.error, search.error_description]);
 
+	// The success state is chrome-free — the user sees it for a beat before
+	// the redirect; errors are terminal here, so they get a real card (1c).
 	return (
-		<main className="grid min-h-[calc(100vh-80px)] place-items-center bg-[var(--color-bg-app)] px-5 py-10 text-[var(--color-text-primary)]">
-			<div className="w-full max-w-[620px] rounded-[8px] border border-[var(--color-border-panel)] bg-[var(--color-bg-panel)] p-7 shadow-[var(--shadow-md)]">
-				<p className="mb-2 mt-0 text-[13px] font-[760] uppercase tracking-[0.08em] text-[var(--color-text-link)]">
-					Authentication
-				</p>
-				<h1 className="m-0 text-[clamp(30px,5vw,42px)] leading-[1.08] tracking-normal">
-					{error ? "Unable to sign in" : "Completing sign-in..."}
-				</h1>
-				{error ? (
-					<p className="mt-3.5 whitespace-pre-wrap rounded-[8px] border border-[var(--color-error-200)] bg-[var(--color-error-50)] px-3.5 py-3 text-[var(--color-error-800)]">
+		<main className="grid min-h-screen place-items-center bg-bg-app px-5 py-8 text-text-primary">
+			{error ? (
+				<div className="grid w-full max-w-[400px] justify-items-center gap-[18px] rounded-[14px] border border-border-panel bg-bg-panel px-7 py-8 text-center shadow-[0_18px_50px_rgba(28,25,23,0.1)]">
+					<img src="/lixray-mark.svg" alt="" className="size-6" />
+					<h1 className="m-0 text-[19px] leading-tight font-bold">
+						Unable to sign in
+					</h1>
+					<p className="m-0 w-full whitespace-pre-wrap rounded-[9px] border border-error-200 bg-error-50 px-3.5 py-3 text-left text-[12.5px] leading-[1.55] text-error-800">
 						{error}
 					</p>
-				) : null}
-			</div>
+					<Button
+						asChild
+						variant="featured"
+						className="h-auto w-full rounded-[9px] py-2.75 text-[13.5px] font-bold"
+					>
+						<a
+							href={`/sign-in?returnTo=${encodeURIComponent(peekAuthReturnTo())}`}
+						>
+							Try again
+						</a>
+					</Button>
+					<a
+						href="/"
+						className="text-[12.5px] font-semibold text-text-link hover:text-text-link-hover"
+					>
+						Back to lixray.com
+					</a>
+				</div>
+			) : (
+				<div className="flex flex-col items-center gap-[18px]">
+					<img
+						src="/lixray-mark.svg"
+						alt=""
+						className="size-[34px] opacity-90"
+					/>
+					<h1 className="m-0 text-sm font-semibold text-text-secondary">
+						Completing sign-in…
+					</h1>
+					<span
+						aria-hidden="true"
+						className="relative h-[3px] w-[120px] overflow-hidden rounded-[2px] bg-[#E4DDD1]"
+					>
+						<span className="absolute inset-y-0 left-0 w-14 rounded-[2px] bg-bg-action-primary opacity-70 animate-auth-progress motion-reduce:animate-none" />
+					</span>
+				</div>
+			)}
 		</main>
 	);
 }

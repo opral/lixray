@@ -4,6 +4,7 @@
   "scripts": {
     "check:docker-submodule-pins": "node scripts/check-docker-submodule-pins.mjs",
     "dev": "node scripts/dev.mjs",
+    "dev:reset-onboarding": "node scripts/reset-onboarding.mjs",
     "test:e2e": "pnpm --dir web-app test:e2e",
     "dev:telemetry": "infisical run --env=dev -- pnpm dev",
     "deploy:worker": "infisical run --env=prod -- pnpm --dir web-app deploy:worker",
@@ -18,10 +19,10 @@
   "devDependencies": {
     "@lix-js/sdk-release": "https://registry.npmjs.org/@lix-js/sdk/-/sdk-0.8.4.tgz"
   },
+  "packageManager": "pnpm@10.13.1",
   "pnpm": {
     "overrides": {
       "@lix-js/sdk@^0.8.2": "link:vendor/lix/packages/js-sdk"
     }
-  },
-  "packageManager": "pnpm@10.13.1"
+  }
 }

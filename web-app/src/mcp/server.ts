@@ -45,14 +45,14 @@ export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
 interface McpServerOptions {
 	authMode?: McpAuthMode;
 	onToolCall?: McpToolCallObserver;
-	serverName?: "LixRay" | "LixRay Dev";
+	serverName?: "LixRay" | "LixRay_Dev";
 }
 
 const LOCAL_MCP_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
 
-export function mcpServerNameForUrl(url: string): "LixRay" | "LixRay Dev" {
+export function mcpServerNameForUrl(url: string): "LixRay" | "LixRay_Dev" {
 	return LOCAL_MCP_HOSTNAMES.has(new URL(url).hostname)
-		? "LixRay Dev"
+		? "LixRay_Dev"
 		: "LixRay";
 }
 
@@ -324,6 +324,7 @@ export async function handleMcpTransport(
 }
 
 interface McpDiscoveryOptions {
+	resource?: string;
 	protectedResourceUrl?: string;
 	authorizationServer?: string;
 	resourceDocumentationUrl?: string;
@@ -340,7 +341,7 @@ export function protectedResourceMetadataResponse(
 	}
 	return Response.json(
 		{
-			resource: MCP_RESOURCE,
+			resource: options.resource ?? MCP_RESOURCE,
 			authorization_servers: [options.authorizationServer],
 			scopes_supported: [...MCP_SCOPES],
 			resource_documentation:
@@ -367,11 +368,13 @@ export function mcpDocumentationResponse(
 			"Authentication: Supabase OAuth 2.1 with PKCE and dynamic client registration.",
 			"",
 			"Your LixRay browser session and your MCP client authorization are separate. Being signed in at lixray.com does not mean that Codex or another MCP client has a usable access and refresh token.",
+			"Tool discovery is public: initialize and tools/list work before authorization so clients can show the available tools. Every tools/call request still requires authorization.",
 			"",
 			"Connection check:",
-			"1. Confirm this endpoint is registered exactly once for the environment you intend to use.",
+			"1. Confirm this endpoint is registered exactly once for the environment you intend to use. MCP registration names must contain only letters, numbers, hyphens, or underscores; use LixRay_Dev for local development.",
 			"2. Revoke or log out the MCP connection, then authorize it again.",
-			"3. Verify that initialize, tools/list, and list_lixes all succeed in a fresh client process.",
+			"3. If a task does not refresh its MCP tool catalog after setup, stop and start a fresh user task. Do not launch a nested agent or Codex process.",
+			"4. Verify that initialize and tools/list succeed, then authorize the connection and call list_lixes.",
 			"",
 			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
 			"",
