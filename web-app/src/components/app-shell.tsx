@@ -1,5 +1,5 @@
-import { Link, useNavigate } from "@tanstack/react-router";
-import { LogOut, Settings } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 import {
 	AppTitlebar,
@@ -103,25 +103,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 						</>
 					)}
 					{isDemoModeEnabled ? null : (
-						<>
-							<Link
-								to="/workspace"
-								className={iconButtonClass}
-								aria-label="Workspace settings"
-								title="Workspace settings"
-							>
-								<Settings size={16} aria-hidden="true" />
-							</Link>
-							<button
-								className={iconButtonClass}
-								type="button"
-								aria-label="Sign out"
-								title="Sign out"
-								onClick={() => void signOut()}
-							>
-								<LogOut size={16} aria-hidden="true" />
-							</button>
-						</>
+						<button
+							className={iconButtonClass}
+							type="button"
+							aria-label="Sign out"
+							title="Sign out"
+							onClick={() => void signOut()}
+						>
+							<LogOut size={16} aria-hidden="true" />
+						</button>
 					)}
 				</div>
 			</AppTitlebar>

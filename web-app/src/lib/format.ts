@@ -7,6 +7,14 @@ export function formatCaughtError(caught: unknown): string {
 	if (caught instanceof Error) {
 		return caught.message;
 	}
+	if (
+		typeof caught === "object" &&
+		caught !== null &&
+		"message" in caught &&
+		typeof caught.message === "string"
+	) {
+		return caught.message;
+	}
 	return "Unexpected error";
 }
 

@@ -54,6 +54,7 @@ import {
 	openWorkspaceLixSession,
 	type WorkspaceLixSession,
 } from "~/lib/workspace-lix-session";
+import { formatWorkspaceOpenError } from "~/lib/workspace-open-error";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
@@ -374,7 +375,7 @@ export function WorkspaceAtelier({
 			getAccessToken,
 			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
-			clientStoragePrefix: `lixray.client.v1:${userId}`,
+			clientStoragePrefix: `lixray.client.v2:${userId}`,
 		})
 			.then(async (session) => {
 				if (disposed) {
@@ -481,7 +482,7 @@ export function WorkspaceAtelier({
 					captureExceptionTelemetry(caught, {
 						operation: "workspace_open",
 					});
-					setError(caught instanceof Error ? caught.message : String(caught));
+					setError(formatWorkspaceOpenError(caught));
 				}
 			});
 

@@ -13,7 +13,7 @@ export function useWorkspaceCta() {
 	const workspaceTo = user
 		? activeWorkspace
 			? workspacePath(activeWorkspace.organization, activeWorkspace.workspace)
-			: "/workspace"
+			: "/home"
 		: "/sign-in";
 	return { authLoaded, signOut, user, workspaceState, workspaceTo };
 }
