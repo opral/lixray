@@ -128,6 +128,8 @@ browser flow against its immutable GHCR digest, and promotes that same digest
 to Railway. Trees with identical `lix-server`, vendored Lix, Dockerfile, and
 Docker-ignore inputs reuse the image without compiling Rust again. In-progress
 pull request runs for the same ref are cancelled.
+`server-*` tags identify reusable build inputs; `tree-*` tags record the exact
+repository states that passed E2E.
 
 Pushes to `main` are promotion-only: they require the pull request's tested
 tree image to exist, publish stable aliases, apply database migrations, and
