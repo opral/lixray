@@ -128,6 +128,11 @@ GHCR digest, and promotes that same digest to Railway. A rerun or merge whose
 tree was already built reuses the image instead of compiling Rust again.
 In-progress pull request runs for the same ref are cancelled.
 
+Pushes to `main` are promotion-only: they require the pull request's tested
+tree image to exist, publish stable aliases, apply database migrations, and
+deploy that digest. CI refuses to rebuild an untested server image on `main`;
+the full validation suite runs on pull requests and remains the merge gate.
+
 Railway still creates the environments and builds the web service:
 
 - pull requests create an isolated Railway demo environment with a built-in

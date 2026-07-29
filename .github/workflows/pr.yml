@@ -88,7 +88,7 @@ jobs:
 
       - name: Build and push server image
         id: build
-        if: steps.existing.outputs.found != 'true'
+        if: github.event_name == 'pull_request' && steps.existing.outputs.found != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -102,6 +102,16 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Require the tested image on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.existing.outputs.found != 'true'
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          echo "Refusing to rebuild untested source on main." >&2
+          echo "The pull request must publish $IMAGE_TAG before merge." >&2
+          exit 1
 
       - name: Resolve immutable image
         id: resolve
@@ -130,6 +140,7 @@ jobs:
 
   frontend:
     name: Frontend
+    if: github.event_name == 'pull_request'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -210,6 +221,7 @@ jobs:
 
   database:
     name: Database
+    if: github.event_name == 'pull_request'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -230,6 +242,7 @@ jobs:
 
   rust:
     name: Rust
+    if: github.event_name == 'pull_request'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -258,6 +271,7 @@ jobs:
 
   e2e:
     name: E2E
+    if: github.event_name == 'pull_request'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
@@ -352,7 +366,7 @@ jobs:
 
   ci:
     name: CI
-    if: always()
+    if: ${{ github.event_name == 'pull_request' && always() }}
     needs:
       - frontend
       - database
@@ -375,7 +389,7 @@ jobs:
     name: Deploy production database
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs:
-      - ci
+      - server-image
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production
@@ -564,7 +578,6 @@ jobs:
     name: Deploy server production
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs:
-      - ci
       - deploy-database
       - server-image
     runs-on: ubuntu-latest
