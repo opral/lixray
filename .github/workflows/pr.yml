@@ -408,30 +408,49 @@ jobs:
       - server-image
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-      RAILWAY_PRODUCTION_ENVIRONMENT: ${{ secrets.RAILWAY_PRODUCTION_ENVIRONMENT }}
-      RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVER_SERVICE }}
-      GHCR_READ_USERNAME: ${{ secrets.GHCR_READ_USERNAME }}
-      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
+      - name: Check Infisical configuration
+        id: infisical
+        shell: bash
+        env:
+          INFISICAL_IDENTITY_ID: ${{ vars.INFISICAL_PREVIEW_IDENTITY_ID }}
+          INFISICAL_PROJECT_SLUG: ${{ vars.INFISICAL_PROJECT_SLUG }}
+        run: |
+          if test -n "$INFISICAL_IDENTITY_ID" &&
+             test -n "$INFISICAL_PROJECT_SLUG"; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping Railway preview promotion; configure the Infisical Actions variables documented in README.md."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch deployment secrets from Infisical
+        if: steps.infisical.outputs.available == 'true'
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PREVIEW_IDENTITY_ID }}
+          oidc-audience: https://github.com/opral
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: /ci
+
       - name: Check deployment credentials
+        if: steps.infisical.outputs.available == 'true'
         id: credentials
         shell: bash
         run: |
-          if test -n "$RAILWAY_TOKEN" &&
-             test -n "$RAILWAY_PROJECT_ID" &&
-             test -n "$RAILWAY_PRODUCTION_ENVIRONMENT" &&
-             test -n "$RAILWAY_SERVICE" &&
-             test -n "$GHCR_READ_USERNAME" &&
-             test -n "$GHCR_READ_TOKEN"; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Skipping Railway preview promotion; configure the deployment secrets documented in README.md."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
+          test -n "$RAILWAY_API_TOKEN"
+          test -n "$RAILWAY_PROJECT_ID"
+          test -n "$RAILWAY_PRODUCTION_ENVIRONMENT"
+          test -n "$RAILWAY_SERVER_SERVICE"
+          test -n "$GHCR_READ_USERNAME"
+          test -n "$GHCR_READ_TOKEN"
+          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - name: Set up Railway CLI
         if: steps.credentials.outputs.available == 'true'
@@ -474,7 +493,7 @@ jobs:
             railway deployment list \
               --project "$RAILWAY_PROJECT_ID" \
               --environment "$ENVIRONMENT_ID" \
-              --service "$RAILWAY_SERVICE" \
+              --service "$RAILWAY_SERVER_SERVICE" \
               --limit 1 \
               --json |
               jq -r '.[0].id // empty'
@@ -483,17 +502,17 @@ jobs:
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$ENVIRONMENT_ID" \
             --message "Deploy tested server image for PR #${{ github.event.pull_request.number }}" \
-            --service-config "$RAILWAY_SERVICE" source.image "$IMAGE" \
-            --service-config "$RAILWAY_SERVICE" source.repo null \
-            --service-config "$RAILWAY_SERVICE" source.branch null \
-            --service-config "$RAILWAY_SERVICE" deploy.registryCredentials.username "$GHCR_READ_USERNAME" \
-            --service-config "$RAILWAY_SERVICE" deploy.registryCredentials.password "$GHCR_READ_TOKEN"
+            --service-config "$RAILWAY_SERVER_SERVICE" source.image "$IMAGE" \
+            --service-config "$RAILWAY_SERVER_SERVICE" source.repo null \
+            --service-config "$RAILWAY_SERVER_SERVICE" source.branch null \
+            --service-config "$RAILWAY_SERVER_SERVICE" deploy.registryCredentials.username "$GHCR_READ_USERNAME" \
+            --service-config "$RAILWAY_SERVER_SERVICE" deploy.registryCredentials.password "$GHCR_READ_TOKEN"
           for attempt in $(seq 1 30); do
             deployment="$(
               railway deployment list \
                 --project "$RAILWAY_PROJECT_ID" \
                 --environment "$ENVIRONMENT_ID" \
-                --service "$RAILWAY_SERVICE" \
+                --service "$RAILWAY_SERVER_SERVICE" \
                 --limit 1 \
                 --json
             )"
@@ -526,30 +545,49 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production
-    env:
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-      RAILWAY_PRODUCTION_ENVIRONMENT: ${{ secrets.RAILWAY_PRODUCTION_ENVIRONMENT }}
-      RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVER_SERVICE }}
-      GHCR_READ_USERNAME: ${{ secrets.GHCR_READ_USERNAME }}
-      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
+      - name: Check Infisical configuration
+        id: infisical
+        shell: bash
+        env:
+          INFISICAL_IDENTITY_ID: ${{ vars.INFISICAL_PRODUCTION_IDENTITY_ID }}
+          INFISICAL_PROJECT_SLUG: ${{ vars.INFISICAL_PROJECT_SLUG }}
+        run: |
+          if test -n "$INFISICAL_IDENTITY_ID" &&
+             test -n "$INFISICAL_PROJECT_SLUG"; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping Railway production promotion; configure the Infisical Actions variables documented in README.md."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch deployment secrets from Infisical
+        if: steps.infisical.outputs.available == 'true'
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PRODUCTION_IDENTITY_ID }}
+          oidc-audience: https://github.com/opral
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: /ci
+
       - name: Check deployment credentials
+        if: steps.infisical.outputs.available == 'true'
         id: credentials
         shell: bash
         run: |
-          if test -n "$RAILWAY_TOKEN" &&
-             test -n "$RAILWAY_PROJECT_ID" &&
-             test -n "$RAILWAY_PRODUCTION_ENVIRONMENT" &&
-             test -n "$RAILWAY_SERVICE" &&
-             test -n "$GHCR_READ_USERNAME" &&
-             test -n "$GHCR_READ_TOKEN"; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Skipping Railway production promotion; configure the deployment secrets documented in README.md."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
+          test -n "$RAILWAY_API_TOKEN"
+          test -n "$RAILWAY_PROJECT_ID"
+          test -n "$RAILWAY_PRODUCTION_ENVIRONMENT"
+          test -n "$RAILWAY_SERVER_SERVICE"
+          test -n "$GHCR_READ_USERNAME"
+          test -n "$GHCR_READ_TOKEN"
+          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - name: Set up Railway CLI
         if: steps.credentials.outputs.available == 'true'
@@ -565,7 +603,7 @@ jobs:
             railway deployment list \
               --project "$RAILWAY_PROJECT_ID" \
               --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
-              --service "$RAILWAY_SERVICE" \
+              --service "$RAILWAY_SERVER_SERVICE" \
               --limit 1 \
               --json |
               jq -r '.[0].id // empty'
@@ -574,17 +612,17 @@ jobs:
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
             --message "Deploy tested server image for ${GITHUB_SHA}" \
-            --service-config "$RAILWAY_SERVICE" source.image "$IMAGE" \
-            --service-config "$RAILWAY_SERVICE" source.repo null \
-            --service-config "$RAILWAY_SERVICE" source.branch null \
-            --service-config "$RAILWAY_SERVICE" deploy.registryCredentials.username "$GHCR_READ_USERNAME" \
-            --service-config "$RAILWAY_SERVICE" deploy.registryCredentials.password "$GHCR_READ_TOKEN"
+            --service-config "$RAILWAY_SERVER_SERVICE" source.image "$IMAGE" \
+            --service-config "$RAILWAY_SERVER_SERVICE" source.repo null \
+            --service-config "$RAILWAY_SERVER_SERVICE" source.branch null \
+            --service-config "$RAILWAY_SERVER_SERVICE" deploy.registryCredentials.username "$GHCR_READ_USERNAME" \
+            --service-config "$RAILWAY_SERVER_SERVICE" deploy.registryCredentials.password "$GHCR_READ_TOKEN"
           for attempt in $(seq 1 30); do
             deployment="$(
               railway deployment list \
                 --project "$RAILWAY_PROJECT_ID" \
                 --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
-                --service "$RAILWAY_SERVICE" \
+                --service "$RAILWAY_SERVER_SERVICE" \
                 --limit 1 \
                 --json
             )"

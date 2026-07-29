@@ -136,21 +136,33 @@ Railway still creates the environments and builds the web service:
   server at the same image digest while Railway builds the web service;
 - `railway.json` and `web-app/railway.json` define the two services;
 - Infisical syncs runtime configuration to Railway;
-- GitHub Actions receives only deployment and registry credentials.
+- deployment and registry credentials come from Infisical via short-lived
+  GitHub OIDC authentication.
 
-Configure these GitHub Actions secrets before enabling image promotion:
+Put these secrets in the Infisical `prod` environment under `/ci`:
 
-- `RAILWAY_TOKEN`: a Railway project token;
+- `RAILWAY_API_TOKEN`: a Railway workspace token, which can discover and
+  update both production and ephemeral environments;
 - `RAILWAY_PROJECT_ID`: the Railway project ID;
 - `RAILWAY_SERVER_SERVICE`: the `lix-server` service name or ID;
 - `RAILWAY_PRODUCTION_ENVIRONMENT`: the production environment name or ID;
 - `GHCR_READ_USERNAME`: the GitHub user owning a classic PAT;
 - `GHCR_READ_TOKEN`: that PAT with `read:packages`.
 
-These must be repository secrets because pull request jobs need them. The
-production deployment itself remains protected by the GitHub `production`
-environment. Until the secrets are configured, CI builds and tests the image
-but prints a warning and skips Railway promotion.
+Create separate Infisical OIDC machine identities for pull requests and the
+GitHub `production` environment. Give both read access only to `/ci`, bind
+their subjects to `repo:opral/lixray:pull_request` and
+`repo:opral/lixray:environment:production`, and use
+`https://github.com/opral` as the audience. Configure their public identifiers
+as GitHub Actions variables:
+
+- `INFISICAL_PROJECT_SLUG`;
+- `INFISICAL_PREVIEW_IDENTITY_ID`;
+- `INFISICAL_PRODUCTION_IDENTITY_ID`.
+
+No deployment secret is stored in GitHub. Until the Actions variables and
+Infisical identities are configured, CI builds and tests the image but prints
+a warning and skips Railway promotion.
 
 Both services share `LIXRAY_INTERNAL_TOKEN`. The web service reaches the Rust
 service through Railway's private network. Production and preview environments
