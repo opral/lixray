@@ -58,10 +58,18 @@ jobs:
         shell: bash
         run: |
           tree="$(git rev-parse 'HEAD^{tree}')"
+          server_inputs="$(
+            {
+              git ls-tree HEAD -- .dockerignore .gitmodules vendor/lix
+              git ls-tree -r HEAD -- lix-server
+            } | git hash-object --stdin
+          )"
           repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server"
           echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          echo "server_inputs=$server_inputs" >> "$GITHUB_OUTPUT"
           echo "repository=$repository" >> "$GITHUB_OUTPUT"
-          echo "tag=$repository:tree-$tree" >> "$GITHUB_OUTPUT"
+          echo "content_tag=$repository:server-$server_inputs" >> "$GITHUB_OUTPUT"
+          echo "tree_tag=$repository:tree-$tree" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -77,13 +85,26 @@ jobs:
         id: existing
         shell: bash
         env:
-          IMAGE_TAG: ${{ steps.identity.outputs.tag }}
+          CONTENT_TAG: ${{ steps.identity.outputs.content_tag }}
+          TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
         run: |
-          if digest="$(docker buildx imagetools inspect "$IMAGE_TAG" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"')" && test -n "$digest"; then
+          inspect_digest() {
+            docker buildx imagetools inspect "$1" \
+              --format '{{json .Manifest.Digest}}' 2>/dev/null |
+              tr -d '"'
+          }
+
+          if digest="$(inspect_digest "$TREE_TAG")" && test -n "$digest"; then
             echo "digest=$digest" >> "$GITHUB_OUTPUT"
             echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "tree_found=true" >> "$GITHUB_OUTPUT"
+          elif digest="$(inspect_digest "$CONTENT_TAG")" && test -n "$digest"; then
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "tree_found=false" >> "$GITHUB_OUTPUT"
           else
             echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "tree_found=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build and push server image
@@ -94,7 +115,9 @@ jobs:
           context: .
           file: lix-server/Dockerfile
           push: true
-          tags: ${{ steps.identity.outputs.tag }}
+          tags: |
+            ${{ steps.identity.outputs.content_tag }}
+            ${{ steps.identity.outputs.tree_tag }}
           build-args: |
             CARGO_BUILD_JOBS=32
           cache-from: type=gha,scope=lix-server-release
@@ -104,10 +127,10 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       - name: Require the tested image on main
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.existing.outputs.found != 'true'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.existing.outputs.tree_found != 'true'
         shell: bash
         env:
-          IMAGE_TAG: ${{ steps.identity.outputs.tag }}
+          IMAGE_TAG: ${{ steps.identity.outputs.tree_tag }}
         run: |
           echo "Refusing to rebuild untested source on main." >&2
           echo "The pull request must publish $IMAGE_TAG before merge." >&2
@@ -125,6 +148,14 @@ jobs:
           test -n "$digest"
           echo "image=$REPOSITORY@$digest" >> "$GITHUB_OUTPUT"
           echo "Using $REPOSITORY@$digest"
+
+      - name: Associate reused image with this Git tree
+        if: github.event_name == 'pull_request' && steps.existing.outputs.found == 'true' && steps.existing.outputs.tree_found != 'true'
+        shell: bash
+        env:
+          IMAGE: ${{ steps.resolve.outputs.image }}
+          TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
+        run: docker buildx imagetools create --tag "$TREE_TAG" "$IMAGE"
 
       - name: Publish main aliases without rebuilding
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
