@@ -36,6 +36,98 @@ env:
   PNPM_VERSION: "10.13.1"
 
 jobs:
+  server-image:
+    name: Server image
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+      tree: ${{ steps.identity.outputs.tree }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compute content-addressed image name
+        id: identity
+        shell: bash
+        run: |
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server"
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "tag=$repository:tree-$tree" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check for an existing image
+        id: existing
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          if digest="$(docker buildx imagetools inspect "$IMAGE_TAG" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"')" && test -n "$digest"; then
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push server image
+        id: build
+        if: steps.existing.outputs.found != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: lix-server/Dockerfile
+          push: true
+          tags: ${{ steps.identity.outputs.tag }}
+          build-args: |
+            CARGO_BUILD_JOBS=32
+          cache-from: type=gha,scope=lix-server-release
+          cache-to: type=gha,mode=max,scope=lix-server-release
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Resolve immutable image
+        id: resolve
+        shell: bash
+        env:
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+          REPOSITORY: ${{ steps.identity.outputs.repository }}
+        run: |
+          digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
+          test -n "$digest"
+          echo "image=$REPOSITORY@$digest" >> "$GITHUB_OUTPUT"
+          echo "Using $REPOSITORY@$digest"
+
+      - name: Publish main aliases without rebuilding
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          IMAGE: ${{ steps.resolve.outputs.image }}
+          REPOSITORY: ${{ steps.identity.outputs.repository }}
+        run: |
+          docker buildx imagetools create \
+            --tag "$REPOSITORY:main" \
+            --tag "$REPOSITORY:sha-${GITHUB_SHA}" \
+            "$IMAGE"
+
   frontend:
     name: Frontend
     runs-on: blacksmith-32vcpu-ubuntu-2404
@@ -166,8 +258,13 @@ jobs:
 
   e2e:
     name: E2E
+    needs:
+      - server-image
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Check out repository
@@ -207,7 +304,16 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run Compose e2e tests
+        env:
+          LIXRAY_SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
         run: pnpm test:e2e
 
       - name: Upload Playwright failure artifacts
@@ -227,6 +333,7 @@ jobs:
       - database
       - rust
       - e2e
+      - server-image
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 5
 
@@ -292,3 +399,210 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase db push --linked --dry-run
+
+  deploy-server-preview:
+    name: Deploy server preview
+    if: github.event_name == 'pull_request'
+    needs:
+      - ci
+      - server-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_PRODUCTION_ENVIRONMENT: ${{ secrets.RAILWAY_PRODUCTION_ENVIRONMENT }}
+      RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVER_SERVICE }}
+      GHCR_READ_USERNAME: ${{ secrets.GHCR_READ_USERNAME }}
+      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+
+    steps:
+      - name: Check deployment credentials
+        id: credentials
+        shell: bash
+        run: |
+          if test -n "$RAILWAY_TOKEN" &&
+             test -n "$RAILWAY_PROJECT_ID" &&
+             test -n "$RAILWAY_PRODUCTION_ENVIRONMENT" &&
+             test -n "$RAILWAY_SERVICE" &&
+             test -n "$GHCR_READ_USERNAME" &&
+             test -n "$GHCR_READ_TOKEN"; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping Railway preview promotion; configure the deployment secrets documented in README.md."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Railway CLI
+        if: steps.credentials.outputs.available == 'true'
+        run: npm install --global @railway/cli@4.65.0
+
+      - name: Find Railway PR environment
+        if: steps.credentials.outputs.available == 'true'
+        id: environment
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          railway link \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_PRODUCTION_ENVIRONMENT"
+          for attempt in $(seq 1 30); do
+            environment_id="$(
+              railway environment list --ephemeral --json |
+                jq -r --argjson pr "$PR_NUMBER" \
+                  '.environments[] | select(.meta.prNumber == $pr) | .id' |
+                head -n 1
+            )"
+            if test -n "$environment_id"; then
+              echo "id=$environment_id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Railway did not create an environment for PR #$PR_NUMBER within 5 minutes." >&2
+          exit 1
+
+      - name: Promote tested image to preview
+        if: steps.credentials.outputs.available == 'true'
+        shell: bash
+        env:
+          IMAGE: ${{ needs.server-image.outputs.image }}
+          ENVIRONMENT_ID: ${{ steps.environment.outputs.id }}
+        run: |
+          previous_deployment="$(
+            railway deployment list \
+              --project "$RAILWAY_PROJECT_ID" \
+              --environment "$ENVIRONMENT_ID" \
+              --service "$RAILWAY_SERVICE" \
+              --limit 1 \
+              --json |
+              jq -r '.[0].id // empty'
+          )"
+          railway environment edit \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$ENVIRONMENT_ID" \
+            --message "Deploy tested server image for PR #${{ github.event.pull_request.number }}" \
+            --service-config "$RAILWAY_SERVICE" source.image "$IMAGE" \
+            --service-config "$RAILWAY_SERVICE" source.repo null \
+            --service-config "$RAILWAY_SERVICE" source.branch null \
+            --service-config "$RAILWAY_SERVICE" deploy.registryCredentials.username "$GHCR_READ_USERNAME" \
+            --service-config "$RAILWAY_SERVICE" deploy.registryCredentials.password "$GHCR_READ_TOKEN"
+          for attempt in $(seq 1 30); do
+            deployment="$(
+              railway deployment list \
+                --project "$RAILWAY_PROJECT_ID" \
+                --environment "$ENVIRONMENT_ID" \
+                --service "$RAILWAY_SERVICE" \
+                --limit 1 \
+                --json
+            )"
+            deployment_id="$(jq -r '.[0].id // empty' <<<"$deployment")"
+            status="$(jq -r '.[0].status // empty' <<<"$deployment")"
+            if test -n "$deployment_id" && test "$deployment_id" != "$previous_deployment"; then
+              case "$status" in
+                SUCCESS)
+                  echo "Railway preview is running $IMAGE"
+                  exit 0
+                  ;;
+                FAILED|CRASHED|REMOVED)
+                  echo "Railway preview deployment $deployment_id ended with $status." >&2
+                  exit 1
+                  ;;
+              esac
+            fi
+            sleep 10
+          done
+          echo "Railway preview did not become healthy within 5 minutes." >&2
+          exit 1
+
+  deploy-server-production:
+    name: Deploy server production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - ci
+      - deploy-database
+      - server-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_PRODUCTION_ENVIRONMENT: ${{ secrets.RAILWAY_PRODUCTION_ENVIRONMENT }}
+      RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVER_SERVICE }}
+      GHCR_READ_USERNAME: ${{ secrets.GHCR_READ_USERNAME }}
+      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+
+    steps:
+      - name: Check deployment credentials
+        id: credentials
+        shell: bash
+        run: |
+          if test -n "$RAILWAY_TOKEN" &&
+             test -n "$RAILWAY_PROJECT_ID" &&
+             test -n "$RAILWAY_PRODUCTION_ENVIRONMENT" &&
+             test -n "$RAILWAY_SERVICE" &&
+             test -n "$GHCR_READ_USERNAME" &&
+             test -n "$GHCR_READ_TOKEN"; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping Railway production promotion; configure the deployment secrets documented in README.md."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Railway CLI
+        if: steps.credentials.outputs.available == 'true'
+        run: npm install --global @railway/cli@4.65.0
+
+      - name: Promote tested image to production
+        if: steps.credentials.outputs.available == 'true'
+        shell: bash
+        env:
+          IMAGE: ${{ needs.server-image.outputs.image }}
+        run: |
+          previous_deployment="$(
+            railway deployment list \
+              --project "$RAILWAY_PROJECT_ID" \
+              --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
+              --service "$RAILWAY_SERVICE" \
+              --limit 1 \
+              --json |
+              jq -r '.[0].id // empty'
+          )"
+          railway environment edit \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
+            --message "Deploy tested server image for ${GITHUB_SHA}" \
+            --service-config "$RAILWAY_SERVICE" source.image "$IMAGE" \
+            --service-config "$RAILWAY_SERVICE" source.repo null \
+            --service-config "$RAILWAY_SERVICE" source.branch null \
+            --service-config "$RAILWAY_SERVICE" deploy.registryCredentials.username "$GHCR_READ_USERNAME" \
+            --service-config "$RAILWAY_SERVICE" deploy.registryCredentials.password "$GHCR_READ_TOKEN"
+          for attempt in $(seq 1 30); do
+            deployment="$(
+              railway deployment list \
+                --project "$RAILWAY_PROJECT_ID" \
+                --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
+                --service "$RAILWAY_SERVICE" \
+                --limit 1 \
+                --json
+            )"
+            deployment_id="$(jq -r '.[0].id // empty' <<<"$deployment")"
+            status="$(jq -r '.[0].status // empty' <<<"$deployment")"
+            if test -n "$deployment_id" && test "$deployment_id" != "$previous_deployment"; then
+              case "$status" in
+                SUCCESS)
+                  echo "Railway production is running $IMAGE"
+                  exit 0
+                  ;;
+                FAILED|CRASHED|REMOVED)
+                  echo "Railway production deployment $deployment_id ended with $status." >&2
+                  exit 1
+                  ;;
+              esac
+            fi
+            sleep 10
+          done
+          echo "Railway production did not become healthy within 5 minutes." >&2
+          exit 1
