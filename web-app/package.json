@@ -21,7 +21,7 @@
 		"start:railway": "node scripts/start-railway.mjs",
 		"deploy:worker": "pnpm run build && wrangler deploy --config ./dist/server/wrangler.json",
 		"routes:generate": "node scripts/generate-routes.mjs",
-		"pretest:e2e": "pnpm lix:build:native",
+		"pretest:e2e": "pnpm lix:build",
 		"test:e2e": "playwright test",
 		"test:analytics": "node --test --experimental-strip-types src/lib/*telemetry*.test.ts",
 		"test:auth": "node --test --experimental-strip-types src/lib/auth-return-to.test.ts src/lib/lix-connection-prompt.test.ts src/lib/workspace-share-capability.test.ts",
