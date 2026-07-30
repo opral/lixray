@@ -524,7 +524,7 @@ jobs:
 
       - name: Set up Railway CLI
         if: steps.credentials.outputs.available == 'true'
-        run: npm install --global @railway/cli@4.65.0
+        run: npm install --global @railway/cli@5.30.1
 
       - name: Find Railway PR environment
         if: steps.credentials.outputs.available == 'true'
@@ -533,14 +533,28 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          railway link \
-            --project "$RAILWAY_PROJECT_ID" \
-            --environment "$RAILWAY_PRODUCTION_ENVIRONMENT"
           for attempt in $(seq 1 30); do
+            response="$(
+              jq -n \
+                --arg query 'query($id: String!) { project(id: $id) { environments { edges { node { id isEphemeral meta { prNumber } } } } } }' \
+                --arg project_id "$RAILWAY_PROJECT_ID" \
+                '{query: $query, variables: {id: $project_id}}' |
+                curl --fail --silent --show-error \
+                  --request POST \
+                  --url https://backboard.railway.com/graphql/v2 \
+                  --header "Authorization: Bearer $RAILWAY_API_TOKEN" \
+                  --header "Content-Type: application/json" \
+                  --data-binary @-
+            )"
+            if jq -e '.errors | length > 0' <<<"$response" >/dev/null; then
+              jq -r '.errors[].message' <<<"$response" >&2
+              exit 1
+            fi
             environment_id="$(
-              railway environment list --ephemeral --json |
-                jq -r --argjson pr "$PR_NUMBER" \
-                  '.environments[] | select(.meta.prNumber == $pr) | .id' |
+              jq -r --argjson pr "$PR_NUMBER" \
+                '.data.project.environments.edges[].node |
+                  select(.isEphemeral and .meta.prNumber == $pr) |
+                  .id' <<<"$response" |
                 head -n 1
             )"
             if test -n "$environment_id"; then
@@ -660,7 +674,7 @@ jobs:
 
       - name: Set up Railway CLI
         if: steps.credentials.outputs.available == 'true'
-        run: npm install --global @railway/cli@4.65.0
+        run: npm install --global @railway/cli@5.30.1
 
       - name: Promote tested image to production
         if: steps.credentials.outputs.available == 'true'
