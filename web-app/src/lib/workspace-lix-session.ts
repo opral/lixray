@@ -26,6 +26,8 @@ interface OpenWorkspaceLixSessionOptions {
 	fetch?: RemoteLixFetch;
 }
 
+const RECOVERING_OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
+
 export interface WorkspaceLixSession {
 	readonly lix: Lix;
 	activeBranchSnapshot(): string;
@@ -37,6 +39,22 @@ export interface WorkspaceLixSession {
 }
 
 export async function openWorkspaceLixSession(
+	options: OpenWorkspaceLixSessionOptions,
+): Promise<WorkspaceLixSession> {
+	for (let attempt = 0; ; attempt += 1) {
+		try {
+			return await openWorkspaceLixSessionOnce(options);
+		} catch (error) {
+			const retryDelay = RECOVERING_OPEN_RETRY_DELAYS_MS[attempt];
+			if (!isLixRecoveringError(error) || retryDelay === undefined) {
+				throw error;
+			}
+			await delay(retryDelay);
+		}
+	}
+}
+
+async function openWorkspaceLixSessionOnce(
 	options: OpenWorkspaceLixSessionOptions,
 ): Promise<WorkspaceLixSession> {
 	const clientStorage =
@@ -81,6 +99,20 @@ export async function openWorkspaceLixSession(
 		await lix.close().catch(() => undefined);
 		throw error;
 	}
+}
+
+function isLixRecoveringError(
+	error: unknown,
+): error is Error & { code: "LIX_ERROR_LIX_RECOVERING" } {
+	return (
+		error instanceof Error &&
+		"code" in error &&
+		error.code === "LIX_ERROR_LIX_RECOVERING"
+	);
+}
+
+function delay(milliseconds: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 class RemoteWorkspaceLixSession implements WorkspaceLixSession {
