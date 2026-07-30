@@ -105,6 +105,13 @@ export function WorkspaceAtelier({
 		signInWithGoogle,
 		user,
 	} = useAuth();
+	// Supabase may replace the Session/User objects when a background tab resumes.
+	// Keep the open Lix session keyed to identity so token refreshes do not reopen it.
+	const atelierUserId = isDemoModeEnabled
+		? DEMO_AUTH_TOKEN
+		: canEdit
+			? user?.id
+			: `public:${workspaceId}`;
 	const navigate = useNavigate();
 	const pathname = useRouterState({
 		select: (state) => state.location.pathname,
@@ -359,12 +366,7 @@ export function WorkspaceAtelier({
 		setError(null);
 		routeSyncedRef.current = false;
 
-		const userId = isDemoModeEnabled
-			? DEMO_AUTH_TOKEN
-			: canEdit
-				? user?.id
-				: `public:${workspaceId}`;
-		if (!userId) {
+		if (!atelierUserId) {
 			setError("Unable to identify the current Atelier account.");
 			return;
 		}
@@ -375,7 +377,7 @@ export function WorkspaceAtelier({
 			getAccessToken,
 			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
-			clientStoragePrefix: `lixray.client.v2:${userId}`,
+			clientStoragePrefix: `lixray.client.v2:${atelierUserId}`,
 		})
 			.then(async (session) => {
 				if (disposed) {
@@ -415,7 +417,7 @@ export function WorkspaceAtelier({
 					lix: session.lix,
 					readOnly: isReadOnly,
 					branchSession: workspaceBranchSession,
-					reviewRangeSessionId: userId,
+					reviewRangeSessionId: atelierUserId,
 					extensions: createLixrayWorkspaceExtensions(
 						{
 							lixId: workspaceId,
@@ -424,7 +426,7 @@ export function WorkspaceAtelier({
 							lixName: workspaceName,
 						},
 						async () => {
-							if (!client || !canEdit || !user) return false;
+							if (!client || !canEdit || !atelierUserId) return false;
 							if (!(await getAccessToken())) return false;
 							const { data, error } = await client
 								.from("mcp_lix_connections")
@@ -440,7 +442,7 @@ export function WorkspaceAtelier({
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
 					},
 					sessionStateStore: createWorkspaceSessionStateStore({
-						userId,
+						userId: atelierUserId,
 						workspaceId,
 						clientState: session.lix.clientState,
 						...(startsEmpty
@@ -449,13 +451,13 @@ export function WorkspaceAtelier({
 					}),
 					preferencesStore: createWorkspacePreferencesStore({
 						client: canEdit ? client : null,
-						userId,
+						userId: atelierUserId,
 						workspaceId,
 						clientState: session.lix.clientState,
 					}),
 					reviewStatusStore: createWorkspaceReviewStatusStore({
 						client: canEdit ? client : null,
-						userId,
+						userId: atelierUserId,
 						workspaceId,
 					}),
 					onEvent: (event) => eventHandlerRef.current(event),
@@ -495,12 +497,12 @@ export function WorkspaceAtelier({
 		};
 	}, [
 		client,
+		atelierUserId,
 		canEdit,
 		isReadOnly,
 		getAccessToken,
 		navigateToCurrentPathBranch,
 		namespace,
-		user,
 		workspaceId,
 		workspaceName,
 		workspaceSlug,
