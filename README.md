@@ -123,10 +123,18 @@ LIXRAY_MCP_ACCESS_TOKEN='<token>' pnpm --dir web-app check:mcp
 ## CI and deployment
 
 GitHub Actions builds the Rust server image once on a 32-core runner, tags it
-with the Git tree hash, runs the Compose browser flow against its immutable
-GHCR digest, and promotes that same digest to Railway. A rerun or merge whose
-tree was already built reuses the image instead of compiling Rust again.
-In-progress pull request runs for the same ref are cancelled.
+by its server inputs, associates it with the Git tree hash, runs the Compose
+browser flow against its immutable GHCR digest, and promotes that same digest
+to Railway. Trees with identical `lix-server`, vendored Lix, Dockerfile, and
+Docker-ignore inputs reuse the image without compiling Rust again. In-progress
+pull request runs for the same ref are cancelled.
+`server-*` tags identify reusable build inputs; `tree-*` tags record the exact
+repository states that passed E2E.
+
+Pushes to `main` are promotion-only: they require the pull request's tested
+tree image to exist, publish stable aliases, apply database migrations, and
+deploy that digest. CI refuses to rebuild an untested server image on `main`;
+the full validation suite runs on pull requests and remains the merge gate.
 
 Railway still creates the environments and builds the web service:
 
