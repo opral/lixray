@@ -122,19 +122,55 @@ LIXRAY_MCP_ACCESS_TOKEN='<token>' pnpm --dir web-app check:mcp
 
 ## CI and deployment
 
-GitHub Actions runs one `CI` job for pull requests and pushes to `main`. It
-checks the database, frontend, Railway build, Rust service, generated files,
-submodule pins, and the Compose browser flow. In-progress runs for the same ref
-are cancelled.
+GitHub Actions builds the Rust server image once on a 32-core runner, tags it
+by its server inputs, associates it with the Git tree hash, runs the Compose
+browser flow against its immutable GHCR digest, and promotes that same digest
+to Railway. Trees with identical `lix-server`, vendored Lix, Dockerfile, and
+Docker-ignore inputs reuse the image without compiling Rust again. In-progress
+pull request runs for the same ref are cancelled.
+`server-*` tags identify reusable build inputs; `tree-*` tags record the exact
+repository states that passed E2E.
 
-Railway handles deployment outside GitHub Actions:
+Pushes to `main` are promotion-only: they require the pull request's tested
+tree image to exist, publish stable aliases, apply database migrations, and
+deploy that digest. CI refuses to rebuild an untested server image on `main`;
+the full validation suite runs on pull requests and remains the merge gate.
 
-- pull requests immediately create an isolated Railway demo environment with a
-  built-in preview user;
-- merging to `main` deploys both services to production;
+Railway still creates the environments and builds the web service:
+
+- pull requests create an isolated Railway demo environment with a built-in
+  preview user, then CI points its server service at the tested image;
+- merging to `main` applies database migrations and points the production
+  server at the same image digest while Railway builds the web service;
 - `railway.json` and `web-app/railway.json` define the two services;
 - Infisical syncs runtime configuration to Railway;
-- GitHub Actions receives no runtime secrets.
+- deployment and registry credentials come from Infisical via short-lived
+  GitHub OIDC authentication.
+
+Put these secrets in the Infisical `prod` environment under `/ci`:
+
+- `RAILWAY_API_TOKEN`: a Railway workspace token, which can discover and
+  update both production and ephemeral environments;
+- `RAILWAY_PROJECT_ID`: the Railway project ID;
+- `RAILWAY_SERVER_SERVICE`: the `lix-server` service name or ID;
+- `RAILWAY_PRODUCTION_ENVIRONMENT`: the production environment name or ID;
+- `GHCR_READ_USERNAME`: the GitHub user owning a classic PAT;
+- `GHCR_READ_TOKEN`: that PAT with `read:packages`.
+
+Create separate Infisical OIDC machine identities for pull requests and the
+GitHub `production` environment. Give both read access only to `/ci`, bind
+their subjects to `repo:opral/lixray:pull_request` and
+`repo:opral/lixray:environment:production`, and use
+`https://github.com/opral` as the audience. Configure their public identifiers
+as GitHub Actions variables:
+
+- `INFISICAL_PROJECT_SLUG`;
+- `INFISICAL_PREVIEW_IDENTITY_ID`;
+- `INFISICAL_PRODUCTION_IDENTITY_ID`.
+
+No deployment secret is stored in GitHub. Until the Actions variables and
+Infisical identities are configured, CI builds and tests the image but prints
+a warning and skips Railway promotion.
 
 Both services share `LIXRAY_INTERNAL_TOKEN`. The web service reaches the Rust
 service through Railway's private network. Production and preview environments
@@ -150,12 +186,11 @@ accepts the matching fixed demo token for the built-in `acme/launch-q3`
 workspace. No Supabase URL, key, branch, password, seed job, or provisioning
 workflow is involved.
 
-Railway GitHub autodeploy stays enabled and **Wait for CI stays disabled**, so
-each push produces one preview build immediately. Preview data is disposable
-and isolated by the Railway environment. The `lix-server` service deploys in
-parallel for every web preview so the built-in workspace is usable without
-external infrastructure. Database-sensitive changes continue to use local
-Compose or an explicitly requested integration environment.
+Railway GitHub autodeploy stays enabled for `lixray-web` and **Wait for CI stays
+disabled**. The `lix-server` service source is managed by CI as an immutable
+Docker image. Preview data is disposable and isolated by the Railway
+environment. Database-sensitive changes continue to use local Compose or an
+explicitly requested integration environment.
 
 ## Performance loop
 
