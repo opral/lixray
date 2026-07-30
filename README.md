@@ -133,15 +133,18 @@ repository states that passed E2E.
 
 Pushes to `main` are promotion-only: they require the pull request's tested
 tree image to exist, publish stable aliases, apply database migrations, and
-deploy that digest. CI refuses to rebuild an untested server image on `main`;
-the full validation suite runs on pull requests and remains the merge gate.
+deploy that digest. The production release waits for the matching Railway web
+deployment to finish building, starts the server promotion as the web service
+begins deploying, and stays pending until both services are healthy. CI refuses
+to rebuild an untested server image on `main`; the full validation suite runs
+on pull requests and remains the merge gate.
 
 Railway still creates the environments and builds the web service:
 
 - pull requests create an isolated Railway demo environment with a built-in
   preview user, then CI points its server service at the tested image;
 - merging to `main` applies database migrations and points the production
-  server at the same image digest while Railway builds the web service;
+  server at the same image digest as the matching web deployment goes live;
 - `railway.json` and `web-app/railway.json` define the two services;
 - Infisical syncs runtime configuration to Railway;
 - deployment and registry credentials come from Infisical via short-lived
@@ -153,6 +156,7 @@ Put these secrets in the Infisical `prod` environment under `/ci`:
   update both production and ephemeral environments;
 - `RAILWAY_PROJECT_ID`: the Railway project ID;
 - `RAILWAY_SERVER_SERVICE`: the `lix-server` service name or ID;
+- `RAILWAY_WEB_SERVICE`: the `lixray-web` service name or ID;
 - `RAILWAY_PRODUCTION_ENVIRONMENT`: the production environment name or ID;
 - `GHCR_READ_USERNAME`: the GitHub user owning a classic PAT;
 - `GHCR_READ_TOKEN`: that PAT with `read:packages`.

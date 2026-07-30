@@ -677,19 +677,22 @@ jobs:
           exit 1
 
   deploy-server-production:
-    name: Deploy server production
+    name: Deploy production release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs:
       - deploy-database
       - server-image
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     environment: production
     permissions:
       contents: read
       id-token: write
 
     steps:
+      - name: Check out release coordinator
+        uses: actions/checkout@v4
+
       - name: Check Infisical configuration
         id: infisical
         shell: bash
@@ -725,6 +728,7 @@ jobs:
           test -n "$RAILWAY_PROJECT_ID"
           test -n "$RAILWAY_PRODUCTION_ENVIRONMENT"
           test -n "$RAILWAY_SERVER_SERVICE"
+          test -n "$RAILWAY_WEB_SERVICE"
           test -n "$GHCR_READ_USERNAME"
           test -n "$GHCR_READ_TOKEN"
           echo "available=true" >> "$GITHUB_OUTPUT"
@@ -733,111 +737,9 @@ jobs:
         if: steps.credentials.outputs.available == 'true'
         run: npm install --global @railway/cli@5.30.1
 
-      - name: Promote tested image to production
+      - name: Coordinate web and server production deployment
         if: steps.credentials.outputs.available == 'true'
         shell: bash
         env:
           IMAGE: ${{ needs.server-image.outputs.image }}
-        run: |
-          previous_deployment=""
-          if deployment="$(
-            railway deployment list \
-              --project "$RAILWAY_PROJECT_ID" \
-              --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
-              --service "$RAILWAY_SERVER_SERVICE" \
-              --limit 1 \
-              --json
-          )"; then
-            previous_deployment="$(jq -r '.[0].id // empty' <<<"$deployment")"
-          else
-            echo "::warning::Could not read the previous Railway deployment; continuing with promotion."
-          fi
-          update_response="$(
-            jq -n \
-              --arg query 'mutation($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input) }' \
-              --arg service_id "$RAILWAY_SERVER_SERVICE" \
-              --arg environment_id "$RAILWAY_PRODUCTION_ENVIRONMENT" \
-              --arg image "$IMAGE" \
-              --arg username "$GHCR_READ_USERNAME" \
-              --arg password "$GHCR_READ_TOKEN" \
-              '{
-                query: $query,
-                variables: {
-                  serviceId: $service_id,
-                  environmentId: $environment_id,
-                  input: {
-                    source: {image: $image},
-                    registryCredentials: {
-                      username: $username,
-                      password: $password
-                    }
-                  }
-                }
-              }' |
-              curl --fail --silent --show-error \
-                --request POST \
-                --url https://backboard.railway.com/graphql/v2 \
-                --header "Authorization: Bearer $RAILWAY_API_TOKEN" \
-                --header "Content-Type: application/json" \
-                --data-binary @-
-          )"
-          if jq -e '.errors | length > 0' <<<"$update_response" >/dev/null; then
-            jq -r '.errors[].message' <<<"$update_response" >&2
-            exit 1
-          fi
-          test "$(jq -r '.data.serviceInstanceUpdate' <<<"$update_response")" = true
-          deploy_response="$(
-            jq -n \
-              --arg query 'mutation($serviceId: String!, $environmentId: String!) { serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId) }' \
-              --arg service_id "$RAILWAY_SERVER_SERVICE" \
-              --arg environment_id "$RAILWAY_PRODUCTION_ENVIRONMENT" \
-              '{
-                query: $query,
-                variables: {
-                  serviceId: $service_id,
-                  environmentId: $environment_id
-                }
-              }' |
-              curl --fail --silent --show-error \
-                --request POST \
-                --url https://backboard.railway.com/graphql/v2 \
-                --header "Authorization: Bearer $RAILWAY_API_TOKEN" \
-                --header "Content-Type: application/json" \
-                --data-binary @-
-          )"
-          if jq -e '.errors | length > 0' <<<"$deploy_response" >/dev/null; then
-            jq -r '.errors[].message' <<<"$deploy_response" >&2
-            exit 1
-          fi
-          test "$(jq -r '.data.serviceInstanceDeploy' <<<"$deploy_response")" = true
-          for attempt in $(seq 1 30); do
-            if ! deployment="$(
-              railway deployment list \
-                --project "$RAILWAY_PROJECT_ID" \
-                --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
-                --service "$RAILWAY_SERVER_SERVICE" \
-                --limit 1 \
-                --json
-            )"; then
-              echo "::warning::Railway deployment lookup failed on attempt $attempt; retrying."
-              sleep 10
-              continue
-            fi
-            deployment_id="$(jq -r '.[0].id // empty' <<<"$deployment")"
-            status="$(jq -r '.[0].status // empty' <<<"$deployment")"
-            if test -n "$deployment_id" && test "$deployment_id" != "$previous_deployment"; then
-              case "$status" in
-                SUCCESS)
-                  echo "Railway production is running $IMAGE"
-                  exit 0
-                  ;;
-                FAILED|CRASHED|REMOVED)
-                  echo "Railway production deployment $deployment_id ended with $status." >&2
-                  exit 1
-                  ;;
-              esac
-            fi
-            sleep 10
-          done
-          echo "Railway production did not become healthy within 5 minutes." >&2
-          exit 1
+        run: .github/scripts/promote-production.sh
