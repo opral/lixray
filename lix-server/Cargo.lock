@@ -3048,6 +3048,7 @@ dependencies = [
  "globset",
  "jiff",
  "jsonschema",
+ "lix_plugin_arena",
  "lru",
  "memchr",
  "musli",
@@ -3066,10 +3067,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lix_plugin_arena"
+version = "0.9.0"
+dependencies = [
+ "blake3",
+ "parking_lot",
+]
+
+[[package]]
 name = "lix_sdk"
 version = "0.9.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "blake3",
  "bytes",
  "lix_engine",
@@ -3078,6 +3088,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uuid",
  "wasmtime",
  "wasmtime-wasi",
 ]
