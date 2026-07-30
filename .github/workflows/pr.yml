@@ -534,7 +534,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           for attempt in $(seq 1 30); do
-            response="$(
+            if ! response="$(
               jq -n \
                 --arg query 'query($id: String!) { project(id: $id) { environments { edges { node { id isEphemeral meta { prNumber } } } } } }' \
                 --arg project_id "$RAILWAY_PROJECT_ID" \
@@ -545,7 +545,11 @@ jobs:
                   --header "Authorization: Bearer $RAILWAY_API_TOKEN" \
                   --header "Content-Type: application/json" \
                   --data-binary @-
-            )"
+            )"; then
+              echo "::warning::Railway environment lookup failed on attempt $attempt; retrying."
+              sleep 10
+              continue
+            fi
             if jq -e '.errors | length > 0' <<<"$response" >/dev/null; then
               jq -r '.errors[].message' <<<"$response" >&2
               exit 1
