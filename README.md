@@ -191,10 +191,11 @@ workspace. No Supabase URL, key, branch, password, seed job, or provisioning
 workflow is involved.
 
 Railway GitHub autodeploy stays enabled for `lixray-web` and **Wait for CI stays
-disabled**. The `lix-server` service source is managed by CI as an immutable
-Docker image. Preview data is disposable and isolated by the Railway
-environment. Database-sensitive changes continue to use local Compose or an
-explicitly requested integration environment.
+disabled**. GitHub autodeploy is disabled for `lix-server`; CI exclusively
+manages its service source as an immutable Docker image. Its Railway watch
+patterns therefore omit `web-app/**`. Preview data is disposable and isolated
+by the Railway environment. Database-sensitive changes continue to use local
+Compose or an explicitly requested integration environment.
 
 ## Performance loop
 
