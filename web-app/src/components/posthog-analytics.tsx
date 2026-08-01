@@ -16,16 +16,22 @@ export function PostHogAnalytics() {
 	}, []);
 
 	useEffect(() => {
-		if (!authLoaded || !userId) return;
+		if (!authLoaded || !user || !userId) return;
 		let disposed = false;
 		void initializeTelemetry().then((posthog) => {
 			if (!posthog || disposed) return;
-			posthog.identify(userId);
+			posthog.identify(userId, {
+				email: user.email,
+				name:
+					typeof user.user_metadata.full_name === "string"
+						? user.user_metadata.full_name
+						: undefined,
+			});
 		});
 		return () => {
 			disposed = true;
 		};
-	}, [authLoaded, userId]);
+	}, [authLoaded, user, userId]);
 
 	useEffect(() => {
 		if (!authLoaded || !workspaceLoaded) return;

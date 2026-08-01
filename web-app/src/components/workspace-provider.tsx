@@ -243,6 +243,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				organizationId: selectedOrganization.id,
 				workspaceId: selectedWorkspaceId ?? undefined,
 			});
+			captureTelemetry("organization_renamed");
 		},
 		[client, refresh, selectedOrganization, selectedWorkspaceId],
 	);
@@ -300,6 +301,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				organizationId: organization.id,
 				workspaceId,
 			});
+			captureTelemetry("workspace_renamed");
 		},
 		[client, organizations, refresh],
 	);
@@ -321,6 +323,7 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			});
 			if (deleteError) throw deleteError;
 			await refresh();
+			captureTelemetry("workspace_deleted");
 		},
 		[client, organizations, refresh],
 	);

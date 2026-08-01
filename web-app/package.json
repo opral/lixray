@@ -37,6 +37,7 @@
 		"@lix-js/sdk": "workspace:*",
 		"@modelcontextprotocol/sdk": "1.29.0",
 		"@opral/atelier": "workspace:*",
+		"@posthog/mcp": "0.10.2",
 		"@supabase/supabase-js": "^2.110.2",
 		"@tanstack/react-router": "^1.170.17",
 		"@tanstack/react-start": "^1.168.27",

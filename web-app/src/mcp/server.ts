@@ -1,3 +1,4 @@
+import { instrument } from "@posthog/mcp";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -7,6 +8,7 @@ import {
 	McpError,
 	type ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
+import { PostHog } from "posthog-node";
 import { z } from "zod";
 import { FileServiceError, LixFileService } from "./file-service.ts";
 import { EXECUTE_TOOL_DESCRIPTION } from "./execute-schema.ts";
@@ -47,9 +49,30 @@ interface McpServerOptions {
 	authMode?: McpAuthMode;
 	onToolCall?: McpToolCallObserver;
 	serverName?: "LixRay" | "LixRay_Dev";
+	posthogToken?: string;
+	posthogHost?: string;
+	posthogDistinctId?: string;
+	posthogClientId?: string;
+	onPosthogFlush?: (flush: () => Promise<void>) => void;
 }
 
 const LOCAL_MCP_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
+const PRIVATE_MCP_ANALYTICS_PROPERTIES = [
+	"$mcp_parameters",
+	"$mcp_response",
+	"$mcp_error_message",
+	"$exception_list",
+] as const;
+
+export function redactMcpAnalyticsEvent<
+	T extends { properties: Record<string, unknown> },
+>(event: T): T {
+	const properties = { ...event.properties };
+	for (const property of PRIVATE_MCP_ANALYTICS_PROPERTIES) {
+		delete properties[property];
+	}
+	return { ...event, properties };
+}
 
 export function mcpServerNameForUrl(url: string): "LixRay" | "LixRay_Dev" {
 	return LOCAL_MCP_HOSTNAMES.has(new URL(url).hostname)
@@ -312,19 +335,56 @@ export async function handleMcpTransport(
 		...options,
 		serverName: options.serverName ?? mcpServerNameForUrl(request.url),
 	});
-	await server.connect(transport);
-	const response = await transport.handleRequest(request);
-	const headers = new Headers(response.headers);
-	headers.set("access-control-allow-origin", "*");
-	headers.set(
-		"access-control-expose-headers",
-		"MCP-Session-Id, MCP-Protocol-Version",
-	);
-	return new Response(response.body, {
-		status: response.status,
-		statusText: response.statusText,
-		headers,
-	});
+	let shutdownPosthog: (() => Promise<void>) | undefined;
+	if (options.posthogToken) {
+		const posthog = new PostHog(options.posthogToken, {
+			host: options.posthogHost ?? "https://us.i.posthog.com",
+			flushAt: 1,
+			flushInterval: 0,
+		});
+		instrument(server, posthog, {
+			context: false,
+			enableExceptionAutocapture: false,
+			identify: options.posthogDistinctId
+				? { distinctId: options.posthogDistinctId }
+				: null,
+			eventProperties: () => ({
+				environment: "production",
+				mcp_server: "lixray",
+				oauth_client_id: options.posthogClientId,
+			}),
+			beforeSend: redactMcpAnalyticsEvent,
+		});
+		shutdownPosthog = async () => {
+			// @posthog/mcp publishes through an internal async redaction pipeline.
+			// Let that pipeline enqueue its captures before draining the client.
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			await posthog.shutdown();
+		};
+	}
+	try {
+		await server.connect(transport);
+		const response = await transport.handleRequest(request);
+		const headers = new Headers(response.headers);
+		headers.set("access-control-allow-origin", "*");
+		headers.set(
+			"access-control-expose-headers",
+			"MCP-Session-Id, MCP-Protocol-Version",
+		);
+		return new Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers,
+		});
+	} finally {
+		if (shutdownPosthog) {
+			if (options.onPosthogFlush) {
+				options.onPosthogFlush(shutdownPosthog);
+			} else {
+				await shutdownPosthog();
+			}
+		}
+	}
 }
 
 interface McpDiscoveryOptions {

@@ -277,6 +277,15 @@ export async function handleRequest(
 				),
 			);
 		};
+		const posthogToken = telemetry ? env.POSTHOG_PROJECT_TOKEN : undefined;
+		const onPosthogFlush = posthogToken
+			? (flush: () => Promise<void>): void => {
+					const work = flush().catch((caught: unknown) => {
+						console.warn("Failed to flush PostHog MCP analytics", caught);
+					});
+					executionContext.waitUntil(work);
+				}
+			: undefined;
 		try {
 			return await (options.mcpTransport ?? handleMcpTransport)(
 				request,
@@ -289,6 +298,11 @@ export async function handleRequest(
 				{
 					authMode: isDemoMode(env) ? "none" : "oauth",
 					onToolCall,
+					posthogToken,
+					posthogHost: env.POSTHOG_HOST,
+					posthogDistinctId: authResult.auth.userId,
+					posthogClientId: authResult.auth.clientId,
+					onPosthogFlush,
 				},
 			);
 		} finally {
