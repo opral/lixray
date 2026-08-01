@@ -32,6 +32,11 @@ workspace and run each segment exactly once. The runner retries an acknowledged
 16 MiB media part in place and writes one JSON report per segment under
 `perf/results/`.
 
+The manual GitHub workflow first promotes the immutable `sha-*` image produced
+by the merge's server-image job and waits for its health check. This keeps the
+qualification independent of the separately coordinated web release and
+guarantees every segment runs the tested engine revision.
+
 ## API hard cut
 
 Keep one file resource. Do not add separate multipart, range, media, and

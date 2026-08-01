@@ -86,6 +86,12 @@ jobs:
           fi
           echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
 
+      - name: Promote the exact tested server image
+        shell: bash
+        env:
+          IMAGE: ghcr.io/opral/lixray-server:sha-${{ github.sha }}
+        run: .github/scripts/promote-benchmark-server.sh
+
       - name: Materialize and verify segment
         shell: bash
         run: |
