@@ -206,6 +206,35 @@ export type Database = {
 					},
 				];
 			};
+			namespace_invite_links: {
+				Row: {
+					created_at: string;
+					created_by: string | null;
+					namespace_id: string;
+					token: string;
+				};
+				Insert: {
+					created_at?: string;
+					created_by?: string | null;
+					namespace_id: string;
+					token: string;
+				};
+				Update: {
+					created_at?: string;
+					created_by?: string | null;
+					namespace_id?: string;
+					token?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "namespace_invite_links_namespace_id_fkey";
+						columns: ["namespace_id"];
+						isOneToOne: true;
+						referencedRelation: "namespaces";
+						referencedColumns: ["id"];
+					},
+				];
+			};
 			namespace_members: {
 				Row: {
 					created_at: string;
@@ -385,6 +414,14 @@ export type Database = {
 		};
 		Functions: {
 			accept_lix_share_token: { Args: { p_token: string }; Returns: string };
+			accept_namespace_invite: {
+				Args: { p_token: string };
+				Returns: {
+					namespace_handle: string;
+					namespace_id: string;
+					namespace_name: string;
+				}[];
+			};
 			bootstrap_personal_namespace: {
 				Args: never;
 				Returns: {
@@ -405,6 +442,10 @@ export type Database = {
 			};
 			create_namespace: { Args: { p_name: string }; Returns: string };
 			delete_lix: { Args: { p_lix_id: string }; Returns: undefined };
+			get_namespace_invite_link: {
+				Args: { p_namespace_id: string };
+				Returns: string;
+			};
 			list_accessible_lixes: {
 				Args: never;
 				Returns: {
@@ -422,9 +463,28 @@ export type Database = {
 					namespace_updated_at: string;
 				}[];
 			};
+			list_namespace_members: {
+				Args: { p_namespace_id: string };
+				Returns: {
+					avatar_url: string | null;
+					email: string;
+					joined_at: string;
+					name: string;
+					role: Database["public"]["Enums"]["namespace_role"];
+					user_id: string;
+				}[];
+			};
+			remove_namespace_member: {
+				Args: { p_namespace_id: string; p_user_id: string };
+				Returns: undefined;
+			};
 			rename_namespace: {
 				Args: { p_name: string; p_namespace_id: string };
 				Returns: undefined;
+			};
+			reset_namespace_invite_link: {
+				Args: { p_namespace_id: string };
+				Returns: string;
 			};
 			record_mcp_lix_connection: {
 				Args: { p_lix_id: string; p_tool_name: string };

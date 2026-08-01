@@ -9,6 +9,7 @@ import {
 	Link2,
 	PencilLine,
 	Plus,
+	UserRoundPlus,
 } from "lucide-react";
 import { marked } from "marked";
 import {
@@ -44,6 +45,11 @@ import {
 	useFileMarkdown,
 	useWorkspaceTree,
 } from "./lix-data";
+import {
+	MemberAvatar,
+	type TeamMember,
+	type WorkspaceTeamApi,
+} from "./people-view";
 
 type DirectoryViewProps = {
 	readonly lix: Lix;
@@ -53,6 +59,10 @@ type DirectoryViewProps = {
 	readonly isHome: boolean;
 	readonly readOnly: boolean;
 	readonly connection: Omit<LixConnectionPromptInput, "origin">;
+	/** Present on the home of an editable workspace; drives the Invite control. */
+	readonly teamApi?: WorkspaceTeamApi | null;
+	/** Present on the home tab; drives the Connect agent button. */
+	readonly hasAgentConnected?: (() => Promise<boolean>) | null;
 	/** Only the active view binds shortcuts (several stay mounted hidden). */
 	readonly isActive?: boolean;
 	readonly onOpenFile: (
@@ -60,6 +70,7 @@ type DirectoryViewProps = {
 		options: { newTab: boolean; created?: boolean },
 	) => void;
 	readonly onOpenDir: (dirPath: string, options: { newTab: boolean }) => void;
+	readonly onOpenPeople?: () => void;
 };
 
 const newTabFromMouseEvent = (event: ReactMouseEvent): boolean =>
@@ -76,9 +87,12 @@ export function DirectoryView({
 	isHome,
 	readOnly,
 	connection,
+	teamApi = null,
+	hasAgentConnected = null,
 	isActive = true,
 	onOpenFile,
 	onOpenDir,
+	onOpenPeople,
 }: DirectoryViewProps) {
 	const tree = useWorkspaceTree(lix);
 	const listing = useMemo(
@@ -151,8 +165,22 @@ export function DirectoryView({
 			{isDropTarget ? <DropImportOverlay /> : null}
 			<div className="mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10">
 				{readOnly ? null : (
-					<div className="flex items-center pb-5">
+					<div className="flex items-center gap-2 pb-5">
+						{isHome ? (
+							<span className="px-3 text-[11.5px] font-bold tracking-[0.06em] text-text-quaternary uppercase">
+								Files
+							</span>
+						) : null}
 						<span className="flex-1" />
+						{isHome && hasAgentConnected ? (
+							<ConnectAgentButton
+								connection={connection}
+								hasAgentConnected={hasAgentConnected}
+							/>
+						) : null}
+						{isHome && teamApi && onOpenPeople ? (
+							<InviteControl teamApi={teamApi} onOpenPeople={onOpenPeople} />
+						) : null}
 						<NewMenu
 							onCreateFile={(extension) => void createFile(extension)}
 							onCreateFolder={() => {
@@ -174,19 +202,6 @@ export function DirectoryView({
 					>
 						{actionError}
 					</p>
-				) : null}
-				{isHome ? (
-					<div className="mb-4 flex items-center gap-3 rounded-[10px] border border-dashed border-border-action-secondary px-4 py-3">
-						<Link2
-							className="size-4 shrink-0 text-text-tertiary"
-							aria-hidden="true"
-						/>
-						<span className="text-[13px] text-text-secondary">
-							Connect this agent to your Lix workspace. LixRay hosts it.
-						</span>
-						<span className="flex-1" />
-						<AgentConnectionActions connection={connection} compact />
-					</div>
 				) : null}
 				<div className="flex flex-col gap-px" data-testid="home-entry-list">
 					{listing.dirs.map((dir) => (
@@ -252,6 +267,113 @@ export function DirectoryView({
 					/>
 				) : null}
 			</div>
+		</div>
+	);
+}
+
+/**
+ * Connect agent (6a): the brand glyphs ride inside the button so the row
+ * needs no banner. Opens the same connection dialog as Getting started.
+ */
+function ConnectAgentButton({
+	connection,
+	hasAgentConnected,
+}: {
+	readonly connection: Omit<LixConnectionPromptInput, "origin">;
+	readonly hasAgentConnected: () => Promise<boolean>;
+}) {
+	const [dialogOpen, setDialogOpen] = useState(false);
+	return (
+		<>
+			<Button
+				type="button"
+				variant="outline"
+				className="h-9 gap-2 px-3.5 text-[13px]"
+				onClick={() => setDialogOpen(true)}
+			>
+				<span className="flex items-center gap-1" aria-hidden="true">
+					<img src="/landing/claude-spark.svg" alt="" className="size-3.5" />
+					<img src="/landing/brand-openai.svg" alt="" className="size-3.5" />
+					<img src="/landing/brand-gemini.svg" alt="" className="size-3.5" />
+				</span>
+				Connect agent
+			</Button>
+			<AgentConnectionDialog
+				connection={connection}
+				hasAgentConnected={hasAgentConnected}
+				open={dialogOpen}
+				onOpenChange={setDialogOpen}
+			/>
+		</>
+	);
+}
+
+/**
+ * Invite (6a): the People entry point folded into one button. Once there's a
+ * team, the member avatars accumulate beside it (stack of 3, then "+N") —
+ * both open the People tab.
+ */
+function InviteControl({
+	teamApi,
+	onOpenPeople,
+}: {
+	teamApi: WorkspaceTeamApi;
+	onOpenPeople: () => void;
+}) {
+	const [members, setMembers] = useState<readonly TeamMember[] | null>(null);
+
+	useEffect(() => {
+		let disposed = false;
+		teamApi
+			.listMembers()
+			.then((next) => {
+				if (!disposed) setMembers(next);
+			})
+			.catch((error: unknown) => {
+				console.error("workspace-home: unable to list the team", error);
+			});
+		return () => {
+			disposed = true;
+		};
+	}, [teamApi]);
+
+	const team = members ?? [];
+	const overflow = Math.max(0, team.length - 3);
+
+	return (
+		<div className="flex items-center gap-2">
+			{team.length > 1 ? (
+				<button
+					type="button"
+					onClick={onOpenPeople}
+					aria-label={`${team.length} people — open People`}
+					className="flex cursor-pointer items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+				>
+					<span className="flex -space-x-1.5">
+						{team.slice(0, 3).map((member) => (
+							<MemberAvatar
+								key={member.userId}
+								member={member}
+								className="size-6 text-[11px] ring-2 ring-bg-panel"
+							/>
+						))}
+						{overflow > 0 ? (
+							<span className="flex size-6 items-center justify-center rounded-full bg-bg-hover text-[10px] font-semibold text-text-secondary ring-2 ring-bg-panel">
+								+{overflow}
+							</span>
+						) : null}
+					</span>
+				</button>
+			) : null}
+			<Button
+				type="button"
+				variant="outline"
+				className="h-9 gap-1.5 px-3.5 text-[13px]"
+				onClick={onOpenPeople}
+			>
+				<UserRoundPlus className="size-3.5" aria-hidden="true" />
+				Invite
+			</Button>
 		</div>
 	);
 }
@@ -1082,74 +1204,6 @@ function useAgentConnectionPrompt(
 		}
 	};
 	return { details, copyPrompt, copyState };
-}
-
-function AgentConnectionActions({
-	connection,
-	compact = false,
-}: {
-	readonly connection: Omit<LixConnectionPromptInput, "origin">;
-	readonly compact?: boolean;
-}) {
-	const { details, copyPrompt, copyState } =
-		useAgentConnectionPrompt(connection);
-
-	return (
-		<div
-			className={
-				compact
-					? "flex shrink-0 items-center gap-2"
-					: "flex flex-col items-center gap-2"
-			}
-		>
-			<button
-				type="button"
-				onClick={() => void copyPrompt()}
-				className={
-					compact
-						? "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] border border-border-action-secondary bg-bg-panel px-3 text-xs font-semibold whitespace-nowrap text-text-secondary shadow-action-secondary hover:bg-bg-hover"
-						: "inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--color-bg-action-primary-start)_0%,var(--color-bg-action-primary-end)_100%)] px-4.5 py-2.75 text-sm font-bold text-text-on-action-primary shadow-[var(--shadow-action-primary)] hover:brightness-105"
-				}
-			>
-				{/* Same icon crossfade as Atelier's copy-markdown button. */}
-				<span className="relative inline-flex size-3.5 items-center justify-center">
-					<Copy
-						className={`size-3.5 transition-all duration-150 ${
-							copyState === "copied"
-								? "scale-75 opacity-0"
-								: "scale-100 opacity-100"
-						}`}
-						aria-hidden="true"
-					/>
-					<Check
-						className={`absolute size-3.5 text-[var(--color-text-status-success)] transition-all duration-150 ${
-							copyState === "copied"
-								? "scale-100 opacity-100"
-								: "scale-75 opacity-0"
-						}`}
-						aria-hidden="true"
-					/>
-				</span>
-				{copyState === "copied"
-					? "Copied prompt"
-					: copyState === "copying"
-						? "Copying…"
-						: copyState === "error"
-							? "Copy failed"
-							: "Copy setup prompt"}
-			</button>
-			{compact ? null : (
-				<a
-					href={details.documentationUrl}
-					target="_blank"
-					rel="noreferrer"
-					className="text-xs font-medium text-text-tertiary hover:text-text-secondary hover:underline"
-				>
-					MCP setup docs
-				</a>
-			)}
-		</div>
-	);
 }
 
 async function copyText(text: string): Promise<void> {

@@ -58,9 +58,15 @@ import { formatWorkspaceOpenError } from "~/lib/workspace-open-error";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
+	LIXRAY_PEOPLE_EXTENSION_ID,
 	createLixrayWorkspaceExtensions,
 	emptyWorkspaceOpeningUiState,
 } from "~/components/workspace-home/host-extensions";
+import type {
+	TeamMember,
+	WorkspaceTeamApi,
+} from "~/components/workspace-home/people-view";
+import { isTeamInviteToken } from "~/lib/team-invite";
 import { LixrayCentralTabStrip } from "~/components/workspace-home/central-tab-strip";
 import {
 	normalizeHomeDirPath,
@@ -70,6 +76,7 @@ import {
 
 interface WorkspaceAtelierProps {
 	workspaceId: string;
+	namespaceId: string;
 	namespace: string;
 	workspaceSlug: string;
 	workspaceName: string;
@@ -91,6 +98,7 @@ const WorkspaceBranchSessionContext =
 
 export function WorkspaceAtelier({
 	workspaceId,
+	namespaceId,
 	namespace,
 	workspaceSlug,
 	workspaceName,
@@ -119,13 +127,15 @@ export function WorkspaceAtelier({
 	const routeParams = useParams({ strict: false });
 	const routeSplat = "_splat" in routeParams ? routeParams._splat : undefined;
 	const workspaceRootPath = `/@${namespace}/${workspaceSlug}`;
-	const routeChildKind: "file" | "dir" | null = pathname.startsWith(
+	const routeChildKind: "file" | "dir" | "team" | null = pathname.startsWith(
 		`${workspaceRootPath}/file/`,
 	)
 		? "file"
 		: pathname.startsWith(`${workspaceRootPath}/dir/`)
 			? "dir"
-			: null;
+			: pathname === `${workspaceRootPath}/team`
+				? "team"
+				: null;
 	const routeFilePath = routeChildKind === "file" ? routeSplat : undefined;
 	const documentName = activeDocumentName({
 		pathname,
@@ -143,7 +153,7 @@ export function WorkspaceAtelier({
 	const activeLixRef = useRef<WorkspaceLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeChildRef = useRef<{
-		kind: "file" | "dir" | null;
+		kind: "file" | "dir" | "team" | null;
 		splat: string | undefined;
 	}>({ kind: routeChildKind, splat: routeSplat });
 	const routeFilePathRef = useRef(routeFilePath);
@@ -190,6 +200,77 @@ export function WorkspaceAtelier({
 		}
 	}, [signInWithGoogle]);
 	const workspaceIsEmpty = useWorkspaceIsEmpty(instance?.lix ?? null);
+	// The raw team api is rebuilt after every render so its closures always see
+	// the current Supabase client and user; the stable facade below is what the
+	// long-lived Atelier extension mounts capture.
+	const teamApiRef = useRef<WorkspaceTeamApi | null>(null);
+	useEffect(() => {
+		teamApiRef.current =
+			client && canEdit && !isDemoModeEnabled
+				? {
+						namespaceHandle: () => namespace,
+						listMembers: async (): Promise<readonly TeamMember[]> => {
+							const { data, error } = await client.rpc(
+								"list_namespace_members",
+								{
+									p_namespace_id: namespaceId,
+								},
+							);
+							if (error) throw new Error(error.message);
+							return data.map((row) => ({
+								userId: row.user_id,
+								name: row.name,
+								email: row.email,
+								avatarUrl: row.avatar_url,
+								isSelf: row.user_id === user?.id,
+							}));
+						},
+						inviteUrl: async () => {
+							const { data, error } = await client.rpc(
+								"get_namespace_invite_link",
+								{ p_namespace_id: namespaceId },
+							);
+							if (error) throw new Error(error.message);
+							if (!isTeamInviteToken(data)) {
+								throw new Error("The invite service returned an invalid link.");
+							}
+							return appendWorkspaceShareToken(
+								`${window.location.origin}/@${namespace}/${workspaceSlug}`,
+								data,
+							);
+						},
+						resetInviteUrl: async () => {
+							const { data, error } = await client.rpc(
+								"reset_namespace_invite_link",
+								{ p_namespace_id: namespaceId },
+							);
+							if (error) throw new Error(error.message);
+							if (!isTeamInviteToken(data)) {
+								throw new Error("The invite service returned an invalid link.");
+							}
+							return appendWorkspaceShareToken(
+								`${window.location.origin}/@${namespace}/${workspaceSlug}`,
+								data,
+							);
+						},
+						removeMember: async (userId: string) => {
+							const { error } = await client.rpc("remove_namespace_member", {
+								p_namespace_id: namespaceId,
+								p_user_id: userId,
+							});
+							if (error) throw new Error(error.message);
+						},
+					}
+				: null;
+	});
+	const stableTeamApiRef = useRef<WorkspaceTeamApi>({
+		namespaceHandle: () => teamApiRef.current?.namespaceHandle() ?? "",
+		listMembers: () => requireTeamApi(teamApiRef.current).listMembers(),
+		inviteUrl: () => requireTeamApi(teamApiRef.current).inviteUrl(),
+		resetInviteUrl: () => requireTeamApi(teamApiRef.current).resetInviteUrl(),
+		removeMember: (userId) =>
+			requireTeamApi(teamApiRef.current).removeMember(userId),
+	});
 	const disabledShareButton = (
 		<span
 			aria-disabled="true"
@@ -216,6 +297,13 @@ export function WorkspaceAtelier({
 				}}
 				workspaceName={workspaceName}
 				documentName={documentName}
+				onOpenTeam={() => {
+					void instance?.views
+						.open(LIXRAY_PEOPLE_EXTENSION_ID)
+						.catch((error: unknown) => {
+							console.error("Unable to open the People tab", error);
+						});
+				}}
 			/>
 		) : (
 			disabledShareButton
@@ -264,6 +352,15 @@ export function WorkspaceAtelier({
 				? atelierBranchSearch(nextBranchId, defaultBranchId)
 				: { branch: nextBranchId };
 			const routeChild = routeChildRef.current;
+			if (routeChild.kind === "team") {
+				await navigate({
+					to: "/@{$namespace}/$workspace/team",
+					params: { namespace, workspace: workspaceSlug },
+					search,
+					replace,
+				});
+				return;
+			}
 			if (routeChild.kind && routeChild.splat !== undefined) {
 				await navigate({
 					to:
@@ -314,6 +411,16 @@ export function WorkspaceAtelier({
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
 					to: "/@{$namespace}/$workspace",
+					params: { namespace, workspace: workspaceSlug },
+					search,
+				});
+				return;
+			}
+			if (event.viewKind === LIXRAY_PEOPLE_EXTENSION_ID) {
+				const targetPath = `/@${namespace}/${workspaceSlug}/team`;
+				if (pathnameRef.current === targetPath) return;
+				void navigate({
+					to: "/@{$namespace}/$workspace/team",
 					params: { namespace, workspace: workspaceSlug },
 					search,
 				});
@@ -437,6 +544,7 @@ export function WorkspaceAtelier({
 							if (error) throw error;
 							return data.length > 0;
 						},
+						canEdit && !isDemoModeEnabled ? stableTeamApiRef.current : null,
 					),
 					centralPanel: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
@@ -699,14 +807,21 @@ export function useWorkspaceActiveBranchId(): string | null {
 	);
 }
 
+function requireTeamApi(api: WorkspaceTeamApi | null): WorkspaceTeamApi {
+	if (!api) throw new Error("Team access requires an editable session.");
+	return api;
+}
+
 function WorkspaceShareControl({
 	createShareToken,
 	workspaceName,
 	documentName,
+	onOpenTeam,
 }: {
 	createShareToken: () => Promise<string>;
 	workspaceName: string;
 	documentName: string;
+	onOpenTeam?: () => void;
 }) {
 	const [open, setOpen] = useState(false);
 	const [minting, setMinting] = useState(false);
@@ -740,6 +855,14 @@ function WorkspaceShareControl({
 			editableUrl={urls.editableUrl}
 			documentName={documentName}
 			workspaceName={workspaceName}
+			onOpenTeam={
+				onOpenTeam
+					? () => {
+							setOpen(false);
+							onOpenTeam();
+						}
+					: undefined
+			}
 			open={open}
 			onOpenChange={(nextOpen) => {
 				if (!nextOpen) {
