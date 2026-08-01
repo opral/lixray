@@ -13,6 +13,7 @@
     "perf:down": "docker compose down",
     "perf:reset": "docker compose rm --stop --force lix-server && docker compose run --rm storage-reset",
     "perf:run": "node perf/runner.mjs",
+    "perf:movie:remote": "node perf/movie/remote-qualification.mjs",
     "perf:test": "node --test perf/test/*.test.mjs",
     "postinstall": "pnpm --dir web-app lix:build"
   },

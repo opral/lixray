@@ -1,0 +1,106 @@
+name: Remote 1 TiB movie benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      segment-index:
+        description: Zero-based byte-balanced segment
+        required: true
+        type: number
+      segment-count:
+        description: Total sequential segments
+        required: true
+        default: 4
+        type: number
+      workspace:
+        description: Shared fresh workspace ID (blank uses the current revision)
+        required: false
+        type: string
+      finalize-history:
+        description: Verify all files and extend history to exactly 5,000 commits
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: remote-movie-${{ inputs.workspace || github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  qualify:
+    name: Segment ${{ inputs.segment-index }} of ${{ inputs.segment-count }}
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 360
+    environment: production
+
+    steps:
+      - name: Check out qualification revision
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Fetch deployment credentials from Infisical
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PRODUCTION_IDENTITY_ID }}
+          oidc-audience: https://github.com/opral
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: /ci
+
+      - name: Set up Railway CLI
+        run: npm install --global @railway/cli@5.30.1
+
+      - name: Resolve production target without exposing credentials
+        id: target
+        shell: bash
+        env:
+          REQUESTED_WORKSPACE: ${{ inputs.workspace }}
+        run: |
+          variables="$(
+            railway variables \
+              --project "$RAILWAY_PROJECT_ID" \
+              --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
+              --service "$RAILWAY_SERVER_SERVICE" \
+              --json
+          )"
+          internal_token="$(jq -r '.LIXRAY_INTERNAL_TOKEN // empty' <<<"$variables")"
+          public_domain="$(jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' <<<"$variables")"
+          test -n "$internal_token"
+          test -n "$public_domain"
+          echo "::add-mask::$internal_token"
+          echo "LIXRAY_INTERNAL_TOKEN=$internal_token" >> "$GITHUB_ENV"
+          echo "base-url=https://$public_domain" >> "$GITHUB_OUTPUT"
+          if test -n "$REQUESTED_WORKSPACE"; then
+            workspace="$REQUESTED_WORKSPACE"
+          else
+            workspace="perf-movie-1tib-${GITHUB_SHA:0:12}"
+          fi
+          echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
+
+      - name: Materialize and verify segment
+        shell: bash
+        run: |
+          node perf/movie/remote-qualification.mjs \
+            --url '${{ steps.target.outputs.base-url }}' \
+            --workspace '${{ steps.target.outputs.workspace }}' \
+            --segment-index '${{ inputs.segment-index }}' \
+            --segment-count '${{ inputs.segment-count }}' \
+            --finalize-history '${{ inputs.finalize-history }}' \
+            --output 'perf/results/movie-segment-${{ inputs.segment-index }}.json'
+
+      - name: Upload qualification report
+        uses: actions/upload-artifact@v4
+        with:
+          name: movie-${{ steps.target.outputs.workspace }}-segment-${{ inputs.segment-index }}
+          path: perf/results/movie-segment-${{ inputs.segment-index }}.json
+          if-no-files-found: error
+          retention-days: 30
