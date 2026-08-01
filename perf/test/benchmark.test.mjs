@@ -182,6 +182,27 @@ test("read-point-2m reads its explicit deterministic fixture", async () => {
   assert.equal(result.postTimingAccounting.corpusFiles, 1_000);
 });
 
+test("read-range-256k-2m measures only the selected media bytes", async () => {
+  const protocol = new NativeReadProtocol(10, { fixture: true });
+  const result = await runBenchmark(protocol, {
+    operation: "read-range-256k-2m",
+    targetTotalCommits: 10,
+    preconditionReadRuns: 0,
+    warmupRuns: 1,
+    measuredRuns: 2,
+    fileReadTransport: "binary",
+    preseeded: true,
+  });
+
+  assert.deepEqual(protocol.binaryReadRanges, [
+    { start: 768 * 1024, endExclusive: 1024 * 1024 },
+    { start: 768 * 1024, endExclusive: 1024 * 1024 },
+    { start: 768 * 1024, endExclusive: 1024 * 1024 },
+  ]);
+  assert.equal(result.methodology.fileReadPayloadBytes, 256 * 1024);
+  assert.match(result.methodology.timingBoundary, /ranged raw GET/);
+});
+
 test("point reads use matched JSON and raw-binary paths with usable-byte decoding", async () => {
   const cases = [
     { operation: "read-point-4k", payloadBytes: 4 * 1024 },
@@ -760,6 +781,7 @@ class LargeReadProtocol extends PreconditionProtocol {
 
 class NativeReadProtocol extends PreconditionProtocol {
   binaryReadPaths = [];
+  binaryReadRanges = [];
   jsonReadPaths = [];
 
   constructor(targetTotalCommits, { fixture = false } = {}) {
@@ -776,13 +798,23 @@ class NativeReadProtocol extends PreconditionProtocol {
     }
   }
 
-  async readFileData(path) {
+  async readFileData(path, range = undefined) {
     const data = this.readData(path, this.binaryReadPaths);
+    this.binaryReadRanges.push(range);
+    const selected = range
+      ? data.subarray(range.start, range.endExclusive)
+      : data;
     return {
-      value: { found: true, data },
+      value: {
+        found: true,
+        data: selected,
+        contentRange: range
+          ? `bytes ${range.start}-${range.endExclusive - 1}/${data.length}`
+          : null,
+      },
       elapsedMs: 1,
       requestBytes: 0,
-      responseBytes: data.byteLength,
+      responseBytes: selected.byteLength,
     };
   }
 
