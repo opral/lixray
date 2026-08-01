@@ -73,9 +73,30 @@ jobs:
               --json
           )"
           internal_token="$(jq -r '.LIXRAY_INTERNAL_TOKEN // empty' <<<"$variables")"
-          public_domain="$(jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' <<<"$variables")"
-          test -n "$internal_token"
-          test -n "$public_domain"
+          if test -z "$internal_token"; then
+            echo "Production lix-server has no LIXRAY_INTERNAL_TOKEN." >&2
+            exit 1
+          fi
+          domains="$(
+            railway domain list \
+              --project "$RAILWAY_PROJECT_ID" \
+              --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
+              --service "$RAILWAY_SERVER_SERVICE" \
+              --json
+          )"
+          public_domain="$(
+            jq -r '
+              if type == "array" then
+                [.[] | (.domain // .hostname // .name) | select(type == "string")][0] // empty
+              else
+                .domain // .hostname // .name // empty
+              end
+            ' <<<"$domains"
+          )"
+          if test -z "$public_domain"; then
+            echo "Production lix-server has no public Railway domain." >&2
+            exit 1
+          fi
           echo "::add-mask::$internal_token"
           echo "LIXRAY_INTERNAL_TOKEN=$internal_token" >> "$GITHUB_ENV"
           echo "base-url=https://$public_domain" >> "$GITHUB_OUTPUT"
@@ -88,9 +109,10 @@ jobs:
 
       - name: Promote the exact tested server image
         shell: bash
-        env:
-          IMAGE: ghcr.io/opral/lixray-server:sha-${{ github.sha }}
-        run: .github/scripts/promote-benchmark-server.sh
+        run: |
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          IMAGE="ghcr.io/opral/lixray-server:tree-$tree" \
+            .github/scripts/promote-benchmark-server.sh
 
       - name: Materialize and verify segment
         shell: bash

@@ -14,7 +14,8 @@ come from `perf/movie/payload.mjs`, which can reproduce an arbitrary range
 without materializing the file or a second fixture tree.
 
 The remote qualification runner materializes that manifest in byte-balanced
-segments so each invocation remains inside CI's execution ceiling. Segments
+segments so each invocation remains inside CI's execution ceiling. Each media
+file uses a bounded window of four concurrent 16 MiB parts. Segments
 must run sequentially against one fresh workspace; the last segment extends
 the resulting history to exactly 5,000 commits and verifies the final count:
 
@@ -48,11 +49,11 @@ POST /lix/v1/file/upsert?path=...       # complete small file or one media part
 ```
 
 For a media part, `POST` carries a client-generated `Lix-Upload-Id` and
-`Content-Range: bytes start-end/total`. Parts are sequential and fixed at 16
-MiB except the last. An incomplete write returns `308` plus the acknowledged
-contiguous `Range`; the final part atomically publishes one new file version
-and returns the ordinary mutation receipt. Replaying the last acknowledged
-part is idempotent. Parallel and out-of-order parts, multipart responses,
+`Content-Range: bytes start-end/total`. Parts are fixed at 16 MiB except the
+last, with up to four aligned parts in flight. An incomplete write returns
+`308` plus the acknowledged contiguous `Range`; the final contiguous window
+atomically publishes one new file version and returns the ordinary mutation
+receipt. Replaying an acknowledged part is idempotent. Multipart responses,
 suffix reads, unknown final lengths, and server-side composition are outside
 the 90% path.
 
@@ -71,9 +72,9 @@ offset:
   complete file.
 - Complete fixed-size CAS chunks are durable before the upload offset is
   acknowledged.
-- Durable upload state records path, total length, next offset, and chunk
-  count; ordered chunk receipts append as separate fixed rows. Restart resumes
-  from that state without quadratically rewriting a growing receipt vector.
+- Durable upload state records the path and total length. One manifest leaf
+  stores all chunk receipts for each completed 16 MiB part. Restart derives
+  contiguous progress from those leaves without per-chunk journal rows.
 - The final part durably completes the immutable manifest, then the ordinary
   file transaction publishes its blob reference, filesystem rows, history,
   and commit atomically. Staged CAS objects have no logical file path and are

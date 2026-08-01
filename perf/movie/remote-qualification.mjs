@@ -17,6 +17,7 @@ import { MOVIE_STREAM_CHUNK_BYTES, moviePayloadChunk } from "./payload.mjs";
 const MAX_BATCH_BYTES = 48 * 1024 * 1024;
 const MAX_BATCH_FILES = 1_024;
 const TARGET_COMMITS = 5_000;
+const UPLOAD_PART_CONCURRENCY = 4;
 
 if (import.meta.url === pathToFileURL(resolve(process.argv[1] ?? "")).href) {
   try {
@@ -149,21 +150,33 @@ export function partitionByLogicalBytes(files, count) {
 async function uploadMediaFile(client, file, onProgress) {
   const uploadId = `movie-v1-${file.seed}`;
   let transferred = 0;
-  for (let offset = 0; offset < file.bytes; offset += MOVIE_STREAM_CHUNK_BYTES) {
-    const length = Math.min(MOVIE_STREAM_CHUNK_BYTES, file.bytes - offset);
-    const data = moviePayloadChunk(file, offset, length);
-    const result = await retry(() =>
-      client.upsertFileData(file.path, data, {
-        uploadId,
-        start: offset,
-        totalSize: file.bytes,
-      }),
-    );
-    const expected = offset + length;
-    if (result.value?.nextOffset !== expected) {
-      throw new Error(`${file.path} acknowledged ${result.value?.nextOffset}; expected ${expected}`);
+  const windowBytes = UPLOAD_PART_CONCURRENCY * MOVIE_STREAM_CHUNK_BYTES;
+  for (let windowStart = 0; windowStart < file.bytes; windowStart += windowBytes) {
+    const parts = [];
+    for (
+      let offset = windowStart;
+      offset < Math.min(file.bytes, windowStart + windowBytes);
+      offset += MOVIE_STREAM_CHUNK_BYTES
+    ) {
+      const length = Math.min(MOVIE_STREAM_CHUNK_BYTES, file.bytes - offset);
+      const data = moviePayloadChunk(file, offset, length);
+      parts.push(
+        retry(() =>
+          client.upsertFileData(file.path, data, {
+            uploadId,
+            start: offset,
+            totalSize: file.bytes,
+          }),
+        ),
+      );
+      transferred += length;
     }
-    transferred += length;
+    const results = await Promise.all(parts);
+    const expected = Math.min(file.bytes, windowStart + windowBytes);
+    const acknowledged = Math.max(...results.map((result) => result.value?.nextOffset ?? -1));
+    if (acknowledged !== expected) {
+      throw new Error(`${file.path} acknowledged ${acknowledged}; expected ${expected}`);
+    }
   }
   onProgress(`uploaded ${file.path} (${(file.bytes / 1024 ** 3).toFixed(2)} GiB)`);
   return transferred;
