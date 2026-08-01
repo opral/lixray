@@ -281,6 +281,9 @@ importers:
       '@opral/atelier':
         specifier: workspace:*
         version: link:../vendor/atelier
+      '@posthog/mcp':
+        specifier: 0.10.2
+        version: 0.10.2(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(posthog-node@5.42.0)
       '@supabase/supabase-js':
         specifier: ^2.110.2
         version: 2.110.2
@@ -1854,6 +1857,16 @@ packages:
   '@posthog/core@1.41.1':
     resolution: {integrity: sha512-lKjPdeawDSvRhHnP14RwTSI5CofuyluhG3ISHRa+Kj6PyfSrEUyIkoVOpYWicFGgWikeaJCZzFQpo7ngHt9BcA==}
 
+  '@posthog/core@1.46.1':
+    resolution: {integrity: sha512-EoCFduRkvrg9E5ylMi4QnZCjlAdRJCq6tJouWfngBVR79XSI4iPvIWYA+CdzokAjk+TfSVBFVJ++4Im3r+T0Dg==}
+
+  '@posthog/mcp@0.10.2':
+    resolution: {integrity: sha512-hjAnu0cQamaUWyz9CYQ1Z6Xah9dg7lnoYEq0FUpyzpCb3BP/RBziL635wa9kiJJ4L5Ch5ItXlVOG6ZcU0rg4xw==}
+    engines: {node: ^20.20.0 || >=22.22.0}
+    peerDependencies:
+      '@modelcontextprotocol/sdk': '>=1.26.0'
+      posthog-node: ^5.0.0
+
   '@posthog/plugin-utils@1.1.2':
     resolution: {integrity: sha512-CS/14cMmny9NN/LHAb4QZdW3TfxhbKzsfyVYMCjsRdE0IKMTrXMr0cPRZxwczsN6VnWvVoy2Dd5wcG6RrIjlYA==}
 
@@ -1864,6 +1877,9 @@ packages:
 
   '@posthog/types@1.394.0':
     resolution: {integrity: sha512-ifQ7p8o8hoHErlJmpzCFzHQcuRam0vXk8LBVhBu4BlPYP6S0tog4FSAFItnI/nwN6cHZI0WFQilr7sIqQa7Flg==}
+
+  '@posthog/types@1.399.0':
+    resolution: {integrity: sha512-/WDwBzqIPko8VJ1B+0rlso2XQEz9+2sqtsY9Tqy3p1GhgTqsFakcz/PmMpAnA321LTEZVRcO6x5hAwABV4yrDw==}
 
   '@radix-ui/number@1.1.2':
     resolution: {integrity: sha512-ceTwaxc4I5IOi97DgCotl3pqiyRGvffcc0oOsE2dQYaJOFIDsDt4VWG6xEbg1QePv9QWausCEIppud/tJ1wNig==}
@@ -7561,6 +7577,16 @@ snapshots:
     dependencies:
       '@posthog/types': 1.394.0
 
+  '@posthog/core@1.46.1':
+    dependencies:
+      '@posthog/types': 1.399.0
+
+  '@posthog/mcp@0.10.2(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3))(posthog-node@5.42.0)':
+    dependencies:
+      '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
+      '@posthog/core': 1.46.1
+      posthog-node: 5.42.0
+
   '@posthog/plugin-utils@1.1.2':
     dependencies:
       cross-spawn: 7.0.6
@@ -7572,6 +7598,8 @@ snapshots:
       rollup: 4.62.2
 
   '@posthog/types@1.394.0': {}
+
+  '@posthog/types@1.399.0': {}
 
   '@radix-ui/number@1.1.2': {}
 
