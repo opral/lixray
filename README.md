@@ -194,6 +194,8 @@ Railway GitHub autodeploy stays enabled for `lixray-web` and **Wait for CI stays
 disabled**. GitHub autodeploy is disabled for `lix-server` in production and
 the preview base environment; CI exclusively manages its service source as an
 immutable Docker image. Its Railway watch patterns therefore omit `web-app/**`.
+CI verifies that the server remains image-managed before each preview promotion
+and retries one failed or timed-out Railway deployment before failing the check.
 Preview data is disposable and isolated by the Railway environment.
 Database-sensitive changes continue to use local Compose or an explicitly
 requested integration environment.
