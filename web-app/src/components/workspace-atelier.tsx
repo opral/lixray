@@ -878,6 +878,7 @@ function WorkspaceShareControl({
 				canonicalUrl,
 				editableUrl: appendWorkspaceShareToken(canonicalUrl, token),
 			});
+			captureTelemetry("share_link_created");
 			setOpen(true);
 		} catch (caught) {
 			toast.error(
@@ -911,6 +912,9 @@ function WorkspaceShareControl({
 					return;
 				}
 				void mintShareLink();
+			}}
+			onCopied={(_url, mode) => {
+				captureTelemetry("share_link_copied", { share_mode: mode });
 			}}
 			trigger={
 				<Button

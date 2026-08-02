@@ -433,6 +433,10 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 				};
 			},
 			mcpTransport: async (_request, _service, options) => {
+				assert.equal(options.posthogToken, "project-token");
+				assert.equal(options.posthogHost, "https://posthog.example");
+				assert.equal(options.posthogDistinctId, "user-123");
+				assert.equal(options.posthogClientId, "chatgpt-client");
 				options.onToolCall?.({
 					toolName: "list_lixes",
 					outcome: "success",
@@ -454,6 +458,29 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	assert.ok(waitedFor);
 	await waitedFor;
 	assert.equal(flushes, 1);
+});
+
+void test("PostHog MCP SDK instrumentation is disabled outside production", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({
+			extra: {
+				POSTHOG_PROJECT_TOKEN: "project-token",
+				POSTHOG_ENVIRONMENT: "preview",
+			},
+		}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			createMcpTelemetry: () => null,
+			mcpTransport: async (_request, _service, options) => {
+				assert.equal(options.posthogToken, undefined);
+				assert.equal(options.onPosthogFlush, undefined);
+				return new Response("mcp response");
+			},
+		},
+	);
+
+	assert.equal(await response.text(), "mcp response");
 });
 
 void test("successful exact-Lix MCP activity is persisted before the response completes", async () => {

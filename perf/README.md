@@ -110,6 +110,7 @@ Supported operation families are:
 - `read-point-4k`: exact-path read of a valid 4 KiB JSON file
 - `read-point-32k`: exact-path read of a valid 32 KiB PDF
 - `read-point-2m`: exact-path read of the explicitly seeded deterministic 2 MiB binary fixture
+- `read-range-256k-2m`: one 256 KiB byte range from the 2 MiB binary fixture, recording selected transfer bytes through the bounded CAS range reader
 - `list-paths-100`: ordered listing of 100 corpus paths
 - `diff-file-history`: history-backed diff projection of one changed 4 KiB file's current and prior logical revisions
 - `branch-create`: create one named branch from the active head through `POST /lix/v1/branch/create`
@@ -130,6 +131,12 @@ Both arms return and assert the same usable bytes; semantic envelope and row
 checks are outside the timer. Binary is deliberately rejected for non-point
 operations. Preconditioning uses the selected arm, so raw reads do not warm
 the SQL route (and vice versa).
+
+`read-range-256k-2m` requires `--file-read-transport binary`. It sends one
+forward `Range` request and verifies both the selected bytes and
+`Content-Range`. The ordinary chunked CAS path reads only intersecting chunks;
+use a pre-range revision as the whole-materialization control when making a
+causal comparison.
 
 `update-mixed` requires `--hot-session --preseeded` and a `--samples` count
 that is a multiple of 10, preserving its stated deterministic weights.

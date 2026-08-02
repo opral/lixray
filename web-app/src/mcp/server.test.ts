@@ -28,6 +28,7 @@ import {
 	mcpDocumentationResponse,
 	mcpUnauthorizedResponse,
 	protectedResourceMetadataResponse,
+	redactMcpAnalyticsEvent,
 	type McpToolCallObservation,
 } from "./server.ts";
 
@@ -98,6 +99,28 @@ void test("local MCP URLs advertise an isolated development server name", () => 
 	assert.equal(mcpServerNameForUrl("http://127.0.0.1:8787/mcp"), "LixRay_Dev");
 	assert.equal(mcpServerNameForUrl("http://localhost:8787/mcp"), "LixRay_Dev");
 	assert.equal(mcpServerNameForUrl("https://lixray.com/mcp"), "LixRay");
+});
+
+void test("MCP analytics strips request, response, and error content", () => {
+	const event = redactMcpAnalyticsEvent({
+		event: "$mcp_tool_call",
+		properties: {
+			$mcp_tool_name: "execute",
+			$mcp_is_error: true,
+			$mcp_parameters: { sql: "SELECT private_document FROM lix_file" },
+			$mcp_response: { rows: [["private value"]] },
+			$mcp_error_message: "private SQL error",
+			$exception_list: [{ value: "private stack" }],
+		},
+	});
+
+	assert.deepEqual(event, {
+		event: "$mcp_tool_call",
+		properties: {
+			$mcp_tool_name: "execute",
+			$mcp_is_error: true,
+		},
+	});
 });
 
 void test("web-standard MCP transport initializes in the Node runtime", async () => {
