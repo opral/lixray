@@ -203,6 +203,19 @@ export function DirectoryView({
 						{actionError}
 					</p>
 				) : null}
+				{listing.dirs.length === 0 && listing.files.length === 0 ? (
+					<div className="rounded-[10px] border border-dashed border-border-panel px-6 py-12 text-center text-[13px] leading-6 text-text-tertiary">
+						{readOnly ? (
+							"No files yet."
+						) : (
+							<>
+								No files yet — create one with{" "}
+								<b className="font-semibold text-text-secondary">New</b>, or
+								drop files anywhere to import.
+							</>
+						)}
+					</div>
+				) : null}
 				<div className="flex flex-col gap-px" data-testid="home-entry-list">
 					{listing.dirs.map((dir) => (
 						<EntryRow

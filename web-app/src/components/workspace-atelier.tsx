@@ -66,7 +66,7 @@ import type {
 	TeamMember,
 	WorkspaceTeamApi,
 } from "~/components/workspace-home/people-view";
-import { isTeamInviteToken } from "~/lib/team-invite";
+import { isTeamInviteToken, randomTeamInviteToken } from "~/lib/team-invite";
 import { LixrayCentralTabStrip } from "~/components/workspace-home/central-tab-strip";
 import {
 	normalizeHomeDirPath,
@@ -202,12 +202,54 @@ export function WorkspaceAtelier({
 	const workspaceIsEmpty = useWorkspaceIsEmpty(instance?.lix ?? null);
 	// The raw team api is rebuilt after every render so its closures always see
 	// the current Supabase client and user; the stable facade below is what the
-	// long-lived Atelier extension mounts capture.
+	// long-lived Atelier extension mounts capture. The demo deployment has no
+	// Supabase, so it gets an in-memory stand-in and the same UI.
 	const teamApiRef = useRef<WorkspaceTeamApi | null>(null);
+	const demoTeamStateRef = useRef<{
+		members: TeamMember[];
+		token: string;
+	} | null>(null);
 	useEffect(() => {
-		teamApiRef.current =
-			client && canEdit && !isDemoModeEnabled
+		const demoTeamState = () =>
+			(demoTeamStateRef.current ??= {
+				members: [
+					{
+						userId: user?.id ?? "demo-user",
+						name:
+							(user?.user_metadata as { full_name?: string } | undefined)
+								?.full_name ?? "Preview user",
+						email: user?.email ?? "preview-user@lixray.invalid",
+						avatarUrl: null,
+						isSelf: true,
+					},
+				],
+				token: "tm_preview-demo-invite",
+			});
+		const demoInviteUrl = () =>
+			appendWorkspaceShareToken(
+				`${window.location.origin}/@${namespace}/${workspaceSlug}`,
+				demoTeamState().token,
+			);
+		teamApiRef.current = !canEdit
+			? null
+			: isDemoModeEnabled || !client
 				? {
+						namespaceHandle: () => namespace,
+						listMembers: () => Promise.resolve([...demoTeamState().members]),
+						inviteUrl: () => Promise.resolve(demoInviteUrl()),
+						resetInviteUrl: () => {
+							demoTeamState().token = randomTeamInviteToken();
+							return Promise.resolve(demoInviteUrl());
+						},
+						removeMember: (userId) => {
+							const state = demoTeamState();
+							state.members = state.members.filter(
+								(member) => member.userId !== userId || member.isSelf,
+							);
+							return Promise.resolve();
+						},
+					}
+				: {
 						namespaceHandle: () => namespace,
 						listMembers: async (): Promise<readonly TeamMember[]> => {
 							const { data, error } = await client.rpc(
@@ -260,8 +302,7 @@ export function WorkspaceAtelier({
 							});
 							if (error) throw new Error(error.message);
 						},
-					}
-				: null;
+					};
 	});
 	const stableTeamApiRef = useRef<WorkspaceTeamApi>({
 		namespaceHandle: () => teamApiRef.current?.namespaceHandle() ?? "",
@@ -544,7 +585,7 @@ export function WorkspaceAtelier({
 							if (error) throw error;
 							return data.length > 0;
 						},
-						canEdit && !isDemoModeEnabled ? stableTeamApiRef.current : null,
+						canEdit ? stableTeamApiRef.current : null,
 					),
 					centralPanel: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
