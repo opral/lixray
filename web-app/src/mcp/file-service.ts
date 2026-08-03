@@ -320,7 +320,7 @@ export class LixFileService {
 		if (expectedChangeId === undefined) {
 			await this.withAgentReview(lixId, () =>
 				this.client.execute(lixId, {
-					sql: "INSERT INTO lix_file (path, data, lixcol_metadata) VALUES ($1, $2, $3)",
+					sql: "INSERT INTO lix_file (path, content, lixcol_metadata) VALUES ($1, $2, $3)",
 					params: [
 						text(path),
 						blob(bytes),
@@ -333,7 +333,7 @@ export class LixFileService {
 				const response = await this.client.executeBatch(lixId, {
 					statements: [
 						{
-							sql: "UPDATE lix_file SET data = $1, lixcol_metadata = $2 WHERE path = $3 AND lixcol_change_id = $4",
+							sql: "UPDATE lix_file SET content = $1, lixcol_metadata = $2 WHERE path = $3 AND lixcol_change_id = $4",
 							params: [
 								blob(bytes),
 								{ kind: "json", value: { size: bytes.length } },
@@ -575,7 +575,7 @@ export class LixFileService {
 		updatedAt: string;
 	}> {
 		const result = await this.client.execute(lixId, {
-			sql: "SELECT data, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE path = $1",
+			sql: "SELECT content, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE path = $1",
 			params: [text(path)],
 		});
 		const row = result.rows[0];

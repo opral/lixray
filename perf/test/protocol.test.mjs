@@ -78,7 +78,7 @@ test("handshake establishes a session used by execute and close", async () => {
   });
 
   const handshake = await client.open();
-  assert.equal(handshake.protocolVersion, 1);
+  assert.equal(handshake.protocolVersion, 2);
   assert.equal(handshake.sessionId, undefined);
   assert.equal(client.hasSession, true);
   await client.execute("SELECT 1");
@@ -511,7 +511,7 @@ test("readFileDataJson decodes the matched SQL/base64 response before timing sto
   assert.deepEqual(result.value.data, payload);
   assert.equal(result.value.response.rows.length, 1);
   const body = JSON.parse(calls[1].body);
-  assert.equal(body.sql, "SELECT path, data FROM lix_file WHERE path = $1");
+  assert.equal(body.sql, "SELECT path, content FROM lix_file WHERE path = $1");
   assert.deepEqual(body.params, [
     { kind: "text", value: "/nested/payload.bin" },
   ]);

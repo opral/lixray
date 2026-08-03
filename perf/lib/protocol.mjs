@@ -145,20 +145,20 @@ export class ProtocolClient {
       const text = { kind: "text", value: path };
       if (shape === "insert") {
         return {
-          sql: "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+          sql: "INSERT INTO lix_file (path, content) VALUES ($1, $2)",
           params: [text, blob],
         };
       }
       if (shape === "upsert") {
         return {
           sql:
-            "INSERT INTO lix_file (path, data) VALUES ($1, $2) " +
-            "ON CONFLICT (path) DO UPDATE SET data = excluded.data",
+            "INSERT INTO lix_file (path, content) VALUES ($1, $2) " +
+            "ON CONFLICT (path) DO UPDATE SET content = excluded.content",
           params: [text, blob],
         };
       }
       return {
-        sql: "UPDATE lix_file SET data = $1 WHERE path = $2",
+        sql: "UPDATE lix_file SET content = $1 WHERE path = $2",
         params: [blob, text],
       };
     }, { idempotencyKey: idempotencyKeyFor(idempotencyKey) });
@@ -295,7 +295,7 @@ export class ProtocolClient {
     }
     const started = performance.now();
     const body = JSON.stringify({
-      sql: "SELECT path, data FROM lix_file WHERE path = $1",
+      sql: "SELECT path, content FROM lix_file WHERE path = $1",
       params: [{ kind: "text", value: path }],
     });
     const response = await this.fetchImpl(`${this.endpoint}/execute`, {

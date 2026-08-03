@@ -137,7 +137,7 @@ void test("MCP traces expose SQL friction without lix values or result rows", as
 	assert.ok(session);
 	const executeInput = observeExecuteInput([
 		{
-			sql: "SELECT data FROM lix_file WHERE path = '/private.txt' AND id = $1",
+			sql: "SELECT content FROM lix_file WHERE path = '/private.txt' AND id = $1",
 			params: [{ kind: "text", value: "private-bound-value" }],
 		},
 	]);

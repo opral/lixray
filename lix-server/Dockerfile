@@ -4,19 +4,16 @@ ARG LIXRAY_IMAGE_VARIANT=production
 
 FROM rust:1-bookworm AS builder
 ARG CARGO_BUILD_JOBS=2
-ARG LIX_REV=86e565abe849dc1cb2daf7668a968945af295e67
-ARG LIX_ARCHIVE_SHA256=9af21c03a2cfa82c4d2fee0c104eeaf88c2c5bebffd491b185e9525911f74d5b
 WORKDIR /app
 
 # This Dockerfile uses the repository root as its build context so the server
 # and its vendored Lix checkout are built together. Railway's GitHub builder
-# does not populate submodules, so an empty checkout falls back to the exact
-# pinned revision rather than silently building a different version. Web-app
-# changes also deploy this service so focused PR environments remain usable.
+# does not populate submodules, so an empty checkout falls back to the current
+# main branch. Web-app changes also deploy this service so focused PR
+# environments remain usable.
 COPY vendor/lix ./vendor/lix
 RUN if [ ! -f vendor/lix/packages/engine/Cargo.toml ]; then \
-		curl -fsSL "https://github.com/opral/lix/archive/${LIX_REV}.tar.gz" -o /tmp/lix.tar.gz; \
-		echo "${LIX_ARCHIVE_SHA256}  /tmp/lix.tar.gz" | sha256sum -c -; \
+		curl -fsSL "https://github.com/opral/lix/archive/refs/heads/main.tar.gz" -o /tmp/lix.tar.gz; \
 		tar -xzf /tmp/lix.tar.gz -C vendor/lix --strip-components=1; \
 		rm /tmp/lix.tar.gz; \
 	fi \
