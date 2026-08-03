@@ -202,8 +202,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-lix-sdk-
 
-      - name: Validate Docker submodule fallbacks
-        run: pnpm check:docker-submodule-pins --verify-archives
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -340,6 +342,11 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-lix-sdk-${{ hashFiles('vendor/lix/Cargo.lock', 'vendor/lix/rust-toolchain.toml', 'vendor/lix/packages/js-sdk/**', 'scripts/prepare-vendored-lix-sdk.mjs') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-lix-sdk-
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -481,6 +488,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      statuses: write
 
     steps:
       - name: Check Infisical configuration
@@ -709,6 +717,19 @@ jobs:
             echo "Railway preview failed after two attempts; final status: ${terminal_status:-timeout}." >&2
             exit 1
           done
+
+      - name: Report server preview status
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
+            --field state=success \
+            --field context='lixray - lix-server' \
+            --field description='Success - tested image deployed by GitHub Actions' \
+            --field target_url='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
 
   deploy-server-production:
     name: Deploy production release

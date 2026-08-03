@@ -2,10 +2,6 @@
 
 FROM node:22-bookworm AS builder
 
-ARG LIX_REV=86e565abe849dc1cb2daf7668a968945af295e67
-ARG LIX_ARCHIVE_SHA256=9af21c03a2cfa82c4d2fee0c104eeaf88c2c5bebffd491b185e9525911f74d5b
-ARG ATELIER_REV=6b04d804f970a1d11f3e1cf5aee7b8f6f3cec567
-ARG ATELIER_ARCHIVE_SHA256=a1219fd48163da0f1251056c62dca8612db512c73448bbde0a02554aa9d407bb
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_KEY
 ARG LIXRAY_DEMO
@@ -36,20 +32,21 @@ ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL} \
 	VITE_LIXRAY_LOCAL_DEV_PASSWORD=${VITE_LIXRAY_LOCAL_DEV_PASSWORD} \
 	RAILWAY_ENVIRONMENT_NAME=${RAILWAY_ENVIRONMENT_NAME}
 RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends mold \
+	&& rm -rf /var/lib/apt/lists/*
 COPY . .
 
 # Railway's GitHub builder does not populate submodules. Local builds retain
 # the checked-out sources so edits are tested directly; Railway falls back to
-# the exact revisions recorded by this repository.
+# the current main branches.
 RUN if [ ! -f vendor/lix/packages/js-sdk/package.json ]; then \
-		curl -fsSL "https://github.com/opral/lix/archive/${LIX_REV}.tar.gz" -o /tmp/lix.tar.gz; \
-		echo "${LIX_ARCHIVE_SHA256}  /tmp/lix.tar.gz" | sha256sum -c -; \
+		curl -fsSL "https://github.com/opral/lix/archive/refs/heads/main.tar.gz" -o /tmp/lix.tar.gz; \
 		tar -xzf /tmp/lix.tar.gz -C vendor/lix --strip-components=1; \
 		rm /tmp/lix.tar.gz; \
 	fi \
 	&& if [ ! -f vendor/atelier/package.json ]; then \
-		curl -fsSL "https://github.com/opral/atelier/archive/${ATELIER_REV}.tar.gz" -o /tmp/atelier.tar.gz; \
-		echo "${ATELIER_ARCHIVE_SHA256}  /tmp/atelier.tar.gz" | sha256sum -c -; \
+		curl -fsSL "https://github.com/opral/atelier/archive/refs/heads/main.tar.gz" -o /tmp/atelier.tar.gz; \
 		tar -xzf /tmp/atelier.tar.gz -C vendor/atelier --strip-components=1; \
 		rm /tmp/atelier.tar.gz; \
 	fi

@@ -833,7 +833,7 @@ class NativeReadProtocol extends PreconditionProtocol {
       elapsedMs: 1,
       requestBytes: Buffer.byteLength(
         JSON.stringify({
-          sql: "SELECT path, data FROM lix_file WHERE path = $1",
+          sql: "SELECT path, content FROM lix_file WHERE path = $1",
           params: [{ kind: "text", value: path }],
         }),
       ),
@@ -903,15 +903,15 @@ class FileWriteProtocol {
     const body =
       shape === "update"
         ? {
-            sql: "UPDATE lix_file SET data = $1 WHERE path = $2",
+            sql: "UPDATE lix_file SET content = $1 WHERE path = $2",
             params: [blob, text],
           }
         : {
             sql:
               shape === "insert"
-                ? "INSERT INTO lix_file (path, data) VALUES ($1, $2)"
-                : "INSERT INTO lix_file (path, data) VALUES ($1, $2) " +
-                  "ON CONFLICT (path) DO UPDATE SET data = excluded.data",
+                ? "INSERT INTO lix_file (path, content) VALUES ($1, $2)"
+                : "INSERT INTO lix_file (path, content) VALUES ($1, $2) " +
+                  "ON CONFLICT (path) DO UPDATE SET content = excluded.content",
             params: [text, blob],
           };
     return {
@@ -942,7 +942,7 @@ class FileWriteProtocol {
         },
       };
     }
-    if (sql.startsWith("SELECT path, data FROM lix_file WHERE path")) {
+    if (sql.startsWith("SELECT path, content FROM lix_file WHERE path")) {
       const path = params[0].value;
       if (
         this.binaryWrites.length === 0 &&

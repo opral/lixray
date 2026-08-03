@@ -542,7 +542,7 @@ export async function seedCorpus(
 
   if (fixture) {
     const result = await protocol.execute(
-      "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+      "INSERT INTO lix_file (path, content) VALUES ($1, $2)",
       [wireText(fixture.path), wireBlob(fixture.data)],
     );
     assertRowsAffected(result.value, 1, "targeted fixture insert");
@@ -567,7 +567,7 @@ export async function seedCorpus(
     // Keep history seeding distinct from the timed update in the SQL plan
     // cache without relying on DML target aliases, which Lix does not support.
     const result = await protocol.execute(
-      "UPDATE lix_file SET data = $2 WHERE path = $1",
+      "UPDATE lix_file SET content = $2 WHERE path = $1",
       [wireText(file.path), wireBlob(data)],
     );
     assertRowsAffected(result.value, 1, "history extension");
@@ -1085,7 +1085,7 @@ async function readPointFileJson(protocol, expected) {
     return protocol.readFileDataJson(expected.path);
   }
   const response = await protocol.execute(
-    "SELECT path, data FROM lix_file WHERE path = $1",
+    "SELECT path, content FROM lix_file WHERE path = $1",
     [wireText(expected.path)],
   );
   const base64 = response.value?.rows?.[0]?.[1]?.base64;
@@ -1174,7 +1174,7 @@ async function readPostTimingAccounting(protocol) {
 
 async function verifyFile(protocol, expected) {
   const result = await protocol.execute(
-    "SELECT path, data FROM lix_file WHERE path = $1",
+    "SELECT path, content FROM lix_file WHERE path = $1",
     [wireText(expected.path)],
   );
   assertFileRow(result.value, expected);
@@ -1199,7 +1199,7 @@ function fileInsertStatement(files) {
     params.push(wireText(file.path), wireBlob(file.data));
   }
   return {
-    sql: `INSERT INTO lix_file (path, data) VALUES ${values.join(", ")}`,
+    sql: `INSERT INTO lix_file (path, content) VALUES ${values.join(", ")}`,
     params,
   };
 }

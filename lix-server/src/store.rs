@@ -55,6 +55,7 @@ struct S3RequestBudget {
 }
 
 pub(crate) struct LixService {
+    root: Arc<lix_sdk::Lix<SlateDB>>,
     protocol: lix_server_protocol::LixProtocolServer<SlateDB>,
     protocol_router: Router,
 }
@@ -500,7 +501,7 @@ impl LixRuntimeManager {
             .await
             .context("open Lix lix session for the canonical server protocol")?,
         );
-        let protocol = lix_server_protocol::LixProtocolServer::new(protocol_root);
+        let protocol = lix_server_protocol::LixProtocolServer::new(Arc::clone(&protocol_root));
         let protocol_router = protocol.router();
         info!(
             lix_id,
@@ -508,6 +509,7 @@ impl LixRuntimeManager {
             "opened lix runtime"
         );
         Ok(Arc::new(LixRuntime::new(LixService {
+            root: protocol_root,
             protocol,
             protocol_router,
         })))
@@ -829,6 +831,12 @@ impl LixRuntimeManager {
 impl LixService {
     pub(crate) fn protocol_router(&self) -> Router {
         self.protocol_router.clone()
+    }
+
+    pub(crate) async fn ensure_human_account(&self, account_id: &str) -> Result<()> {
+        Box::pin(self.root.ensure_account(account_id, account_id, "human"))
+            .await
+            .context("ensure authenticated Lix account")
     }
 
     async fn close(&self) -> Result<()> {

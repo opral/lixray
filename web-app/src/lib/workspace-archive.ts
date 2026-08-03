@@ -24,12 +24,12 @@ export async function buildWorkspaceArchive(
 ): Promise<Uint8Array<ArrayBuffer>> {
 	return withWorkspaceLix(options, async (lix) => {
 		const result = await lix.execute(
-			"SELECT path, data FROM lix_file ORDER BY path",
+			"SELECT path, content FROM lix_file ORDER BY path",
 		);
 		const entries: Record<string, Uint8Array> = {};
 		for (const row of result.rows) {
 			const path = row.value("path").toJS();
-			const data = row.value("data").asBytes();
+			const data = row.value("content").asBytes();
 			if (typeof path !== "string" || !data) {
 				throw new Error("Workspace archive returned invalid file data.");
 			}
