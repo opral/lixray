@@ -725,7 +725,7 @@ jobs:
         run: |
           gh api \
             --method POST \
-            "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
             --field state=success \
             --field context='lixray - lix-server' \
             --field description='Success - tested image deployed by GitHub Actions' \
