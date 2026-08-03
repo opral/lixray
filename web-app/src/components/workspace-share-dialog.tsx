@@ -1,5 +1,5 @@
 import { fileIconUrl } from "@opral/atelier/file-icons";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Users } from "lucide-react";
 import { type ReactElement, useEffect, useState } from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Button } from "~/components/ui/button";
@@ -24,6 +24,8 @@ interface WorkspaceShareDialogProps {
 	onOpenChange?: (open: boolean) => void;
 	/** Called after the link has been written to the clipboard. */
 	onCopied?: (url: string, mode: ShareMode) => void;
+	/** When set, the popover offers the People tab as its team entry (1c). */
+	onOpenTeam?: () => void;
 	className?: string;
 }
 
@@ -43,9 +45,10 @@ export function WorkspaceShareDialog({
 	open,
 	onOpenChange,
 	onCopied,
+	onOpenTeam,
 	className,
 }: WorkspaceShareDialogProps) {
-	const [shareMode, setShareMode] = useState<ShareMode>("edit");
+	const [shareMode, setShareMode] = useState<ShareMode>("read");
 	const [copyState, setCopyState] = useState<CopyState>("idle");
 	const copiedUrl = shareMode === "edit" ? editableUrl : canonicalUrl;
 	const isEditableLink = shareMode === "edit";
@@ -189,6 +192,20 @@ export function WorkspaceShareDialog({
 							</>
 						)}
 					</p>
+
+					{onOpenTeam ? (
+						<button
+							type="button"
+							onClick={onOpenTeam}
+							className="-mx-1.5 flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-semibold text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+						>
+							<Users
+								className="size-3.5 shrink-0 text-text-tertiary"
+								aria-hidden="true"
+							/>
+							Invite your team — open People
+						</button>
+					) : null}
 				</PopoverPrimitive.Content>
 			</PopoverPrimitive.Portal>
 		</PopoverPrimitive.Root>
