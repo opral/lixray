@@ -3059,6 +3059,8 @@ dependencies = [
  "jiff",
  "jsonschema",
  "lix_plugin_arena",
+ "lix_plugin_layout",
+ "lix_plugin_wire",
  "lru",
  "memchr",
  "musli",
@@ -3085,14 +3087,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "lix_plugin_layout"
+version = "0.9.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lix_plugin_wire"
+version = "0.9.0"
+
+[[package]]
 name = "lix_sdk"
 version = "0.9.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
  "blake3",
  "bytes",
  "lix_engine",
+ "lix_plugin_layout",
+ "lix_plugin_wire",
  "lru",
  "notify-debouncer-full",
  "serde_json",
@@ -3164,6 +3180,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

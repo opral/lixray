@@ -1369,8 +1369,9 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 				const pathname = new URL(request.url).pathname;
 				if (pathname === "/lix/v1/") {
 					return Response.json({
-						protocolVersion: 1,
+						protocolVersion: 2,
 						activeBranchId: "main",
+						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "demo-mcp-session",
 					});
 				}
@@ -1547,8 +1548,9 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 		protocolPaths.push(path);
 		if (path === "/lix/v1/") {
 			return Response.json({
-				protocolVersion: 1,
+				protocolVersion: 2,
 				activeBranchId: "main",
+				activeAccountId: "00000000-0000-7000-8000-000000000002",
 				sessionId,
 			});
 		}

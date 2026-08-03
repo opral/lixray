@@ -24,8 +24,9 @@ void test("retries a recovering workspace until its handshake succeeds", async (
 				);
 			}
 			return Response.json({
-				protocolVersion: 1,
+				protocolVersion: 2,
 				activeBranchId: "main",
+				activeAccountId: "00000000-0000-7000-8000-000000000002",
 				sessionId: "recovered-session",
 			});
 		}

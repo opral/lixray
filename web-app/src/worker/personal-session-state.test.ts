@@ -445,8 +445,9 @@ void test("lix sessions use unified remote Lix with session-local branch state a
 		requestPaths.push(pathname);
 		if (pathname.endsWith("/lix/v1/")) {
 			return Response.json({
-				protocolVersion: 1,
+				protocolVersion: 2,
 				activeBranchId,
+				activeAccountId: "00000000-0000-7000-8000-000000000002",
 				sessionId: "lix-session",
 			});
 		}

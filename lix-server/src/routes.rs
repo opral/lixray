@@ -22,6 +22,11 @@ use tracing::Instrument as _;
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER: &str = "x-lixray-idempotency-principal";
 const MAX_TRUSTED_IDEMPOTENCY_PRINCIPAL_BYTES: usize = 255;
 
+struct TrustedRequestPrincipal {
+    account_id: String,
+    idempotency_scope: lix_server_protocol::TrustedIdempotencyScope,
+}
+
 #[derive(Clone)]
 struct AppState {
     manager: Arc<LixRuntimeManager>,
@@ -245,8 +250,8 @@ async fn lix_protocol_inner(
         return response;
     }
 
-    let trusted_idempotency_scope = match take_trusted_idempotency_scope(&mut request) {
-        Ok(scope) => scope,
+    let trusted_principal = match take_trusted_principal(&mut request) {
+        Ok(principal) => principal,
         Err(message) => {
             return protocol_error(
                 StatusCode::BAD_REQUEST,
@@ -257,8 +262,18 @@ async fn lix_protocol_inner(
             );
         }
     };
-    if let Some(scope) = trusted_idempotency_scope {
-        request.extensions_mut().insert(scope);
+    let active_account_id = trusted_principal
+        .as_ref()
+        // Demo authentication is not a durable Supabase identity. Keep demo
+        // writes attributable to the built-in anonymous account while still
+        // retaining its principal for idempotency isolation.
+        .filter(|principal| principal.account_id != "lixray-demo")
+        .map(|principal| principal.account_id.clone());
+    let expected_account_id = active_account_id
+        .clone()
+        .unwrap_or_else(|| lix_sdk::ANONYMOUS_ACCOUNT_ID.to_string());
+    if let Some(principal) = trusted_principal {
+        request.extensions_mut().insert(principal.idempotency_scope);
     }
     let runtime =
         match tokio::time::timeout(state.protocol_timeout, state.manager.get(&lix_id)).await {
@@ -276,10 +291,37 @@ async fn lix_protocol_inner(
             }
         };
 
-    let path_and_query = match request.uri().query() {
-        Some(query) => format!("/{protocol_path}?{query}"),
-        None => format!("/{protocol_path}"),
-    };
+    let creates_session = request.method() == axum::http::Method::GET
+        && protocol_path.trim_end_matches('/') == "lix/v1"
+        && !request.headers().contains_key("lix-session-id");
+    if creates_session {
+        if let Some(account_id) = active_account_id.as_deref() {
+            if let Err(error) = runtime.ensure_human_account(account_id).await {
+                tracing::error!(
+                    lix_id,
+                    account_id,
+                    error = %error,
+                    "failed to provision authenticated Lix account"
+                );
+                return protocol_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "LIX_ACCOUNT_PROVISION_FAILED",
+                    "Could not provision the authenticated account.",
+                    None,
+                    None,
+                );
+            }
+        }
+    }
+
+    let query = protocol_query(
+        request.uri().query(),
+        creates_session.then_some(active_account_id).flatten(),
+    );
+    let path_and_query = query.map_or_else(
+        || format!("/{protocol_path}"),
+        |query| format!("/{protocol_path}?{query}"),
+    );
     let Ok(uri) = path_and_query.parse::<Uri>() else {
         return protocol_error(
             StatusCode::BAD_REQUEST,
@@ -293,6 +335,11 @@ async fn lix_protocol_inner(
 
     let (notifier, signal) = lix_server_protocol::durable_terminal_storage_signal();
     request.extensions_mut().insert(notifier);
+    request
+        .extensions_mut()
+        .insert(lix_server_protocol::TrustedActiveAccountId::new(
+            expected_account_id,
+        ));
     let mut cancellation_recovery = CancellationRecovery::new(
         signal,
         Arc::clone(&state.manager),
@@ -368,9 +415,9 @@ async fn lix_protocol_inner(
     }
 }
 
-fn take_trusted_idempotency_scope(
+fn take_trusted_principal(
     request: &mut Request<Body>,
-) -> Result<Option<lix_server_protocol::TrustedIdempotencyScope>, &'static str> {
+) -> Result<Option<TrustedRequestPrincipal>, &'static str> {
     let value = {
         let mut values = request
             .headers()
@@ -401,9 +448,27 @@ fn take_trusted_idempotency_scope(
             "Trusted idempotency principal must contain 1 to 255 visible ASCII characters.",
         );
     }
-    Ok(Some(lix_server_protocol::TrustedIdempotencyScope::new(
-        value.to_string(),
-    )))
+    let account_id = value.to_string();
+    Ok(Some(TrustedRequestPrincipal {
+        idempotency_scope: lix_server_protocol::TrustedIdempotencyScope::new(account_id.clone()),
+        account_id,
+    }))
+}
+
+fn protocol_query(existing: Option<&str>, active_account_id: Option<String>) -> Option<String> {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(existing) = existing {
+        for (key, value) in url::form_urlencoded::parse(existing.as_bytes()) {
+            if key != "activeAccountId" {
+                serializer.append_pair(&key, &value);
+            }
+        }
+    }
+    if let Some(account_id) = active_account_id {
+        serializer.append_pair("activeAccountId", &account_id);
+    }
+    let query = serializer.finish();
+    (!query.is_empty()).then_some(query)
 }
 
 fn protocol_timeout_response() -> Response {
@@ -656,8 +721,97 @@ mod tests {
             .expect("handshake response");
         assert_eq!(handshake.status(), StatusCode::OK);
         let handshake = json_body(handshake).await;
-        assert_eq!(handshake["protocolVersion"], json!(1));
+        assert_eq!(handshake["protocolVersion"], json!(2));
+        assert_eq!(
+            handshake["activeAccountId"],
+            json!(lix_sdk::ANONYMOUS_ACCOUNT_ID)
+        );
         assert!(handshake["sessionId"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn trusted_account_is_provisioned_bound_and_attributed_end_to_end() {
+        const ACCOUNT_ID: &str = "01920000-0000-7000-8000-000000000601";
+        const OTHER_ACCOUNT_ID: &str = "01920000-0000-7000-8000-000000000602";
+        let app = test_router();
+        let handshake = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/lixes/account-e2e/lix/v1/?activeAccountId=spoofed")
+                    .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
+                    .body(Body::empty())
+                    .expect("trusted handshake request"),
+            )
+            .await
+            .expect("trusted handshake response");
+        assert_eq!(handshake.status(), StatusCode::OK);
+        let handshake = json_body(handshake).await;
+        assert_eq!(handshake["activeAccountId"], ACCOUNT_ID);
+        let session_id = handshake["sessionId"].as_str().expect("session id");
+
+        let insert = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/lixes/account-e2e/lix/v1/execute")
+                    .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(lix_server_protocol::IDEMPOTENCY_KEY_HEADER, "account-e2e-insert")
+                    .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"INSERT INTO lix_key_value (key, value) VALUES ('account-e2e', lix_json('true'))"}"#,
+                    ))
+                    .expect("attributed insert request"),
+            )
+            .await
+            .expect("attributed insert response");
+        assert_eq!(
+            insert.status(),
+            StatusCode::OK,
+            "{:?}",
+            json_body(insert).await
+        );
+
+        let attribution = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/lixes/account-e2e/lix/v1/execute")
+                    .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"SELECT account_id FROM lix_change WHERE schema_key = 'lix_key_value' ORDER BY created_at DESC LIMIT 1"}"#,
+                    ))
+                    .expect("attribution query request"),
+            )
+            .await
+            .expect("attribution query response");
+        assert_eq!(attribution.status(), StatusCode::OK);
+        assert_eq!(
+            json_body(attribution).await["rows"][0][0]["value"],
+            ACCOUNT_ID
+        );
+
+        let cross_account = app
+            .oneshot(
+                Request::builder()
+                    .uri("/lixes/account-e2e/lix/v1/")
+                    .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, OTHER_ACCOUNT_ID)
+                    .body(Body::empty())
+                    .expect("cross-account resume request"),
+            )
+            .await
+            .expect("cross-account resume response");
+        assert_eq!(cross_account.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            json_body(cross_account).await["error"]["code"],
+            "LIX_ERROR_PROTOCOL_ACCOUNT_MISMATCH"
+        );
     }
 
     #[tokio::test]
@@ -1008,10 +1162,11 @@ mod tests {
             .body(Body::empty())
             .expect("trusted scope request");
 
-        let scope = take_trusted_idempotency_scope(&mut request)
+        let principal = take_trusted_principal(&mut request)
             .expect("valid trusted scope")
             .expect("trusted scope should be present");
-        request.extensions_mut().insert(scope);
+        assert_eq!(principal.account_id, "user-123");
+        request.extensions_mut().insert(principal.idempotency_scope);
 
         assert!(request
             .headers()
@@ -1021,6 +1176,26 @@ mod tests {
             .extensions()
             .get::<lix_server_protocol::TrustedIdempotencyScope>()
             .is_some());
+    }
+
+    #[test]
+    fn trusted_account_overrides_handshake_query() {
+        let query = protocol_query(
+            Some("activeBranchId=draft&activeAccountId=spoofed"),
+            Some("01920000-0000-7000-8000-000000000601".to_string()),
+        )
+        .expect("handshake query");
+        let values = url::form_urlencoded::parse(query.as_bytes())
+            .into_owned()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            values.get("activeBranchId").map(String::as_str),
+            Some("draft")
+        );
+        assert_eq!(
+            values.get("activeAccountId").map(String::as_str),
+            Some("01920000-0000-7000-8000-000000000601")
+        );
     }
 
     #[tokio::test]

@@ -53,8 +53,9 @@ test("handshake establishes a session used by execute and close", async () => {
     calls.push({ url, ...options });
     if (options.method === "GET") {
       return Response.json({
-        protocolVersion: 1,
+        protocolVersion: 2,
         activeBranchId: "main",
+        activeAccountId: "00000000-0000-7000-8000-000000000002",
         sessionId: "session-capability",
         capabilities: { requestBlobSplice: true },
       });
