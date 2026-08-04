@@ -112,13 +112,21 @@ function scrubPostHogValue(
 	value: unknown,
 	depth = 0,
 	propertyKey?: string,
+	preserveExceptionValue = false,
 ): unknown {
 	if (depth > 10) return undefined;
 	if (typeof value === "string") {
 		return scrubPostHogString(value, propertyKey);
 	}
 	if (Array.isArray(value)) {
-		return value.map((item) => scrubPostHogValue(item, depth + 1, propertyKey));
+		return value.map((item) =>
+			scrubPostHogValue(
+				item,
+				depth + 1,
+				propertyKey,
+				propertyKey === "$exception_list",
+			),
+		);
 	}
 	if (!value || typeof value !== "object") return value;
 
@@ -126,7 +134,8 @@ function scrubPostHogValue(
 	for (const [key, nestedValue] of Object.entries(value)) {
 		const normalizedKey = key.toLowerCase();
 		if (
-			SENSITIVE_DOM_ATTRIBUTE_KEYS.has(normalizedKey) ||
+			(SENSITIVE_DOM_ATTRIBUTE_KEYS.has(normalizedKey) &&
+				!(preserveExceptionValue && normalizedKey === "value")) ||
 			SENSITIVE_EVENT_PROPERTY_KEYS.has(normalizedKey)
 		) {
 			continue;
