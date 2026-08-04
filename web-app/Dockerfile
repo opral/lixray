@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-bookworm AS builder
+FROM node:24-bookworm AS builder
 
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_KEY
@@ -70,9 +70,10 @@ RUN if echo "$RAILWAY_ENVIRONMENT_NAME" | grep -Eq '^(lixray-pr-[0-9]+|pr-[a-z0-
 		test -n "$VITE_SUPABASE_URL"; \
 		test -n "$VITE_SUPABASE_KEY"; \
 	fi \
-	&& pnpm --dir web-app build:node
+	&& pnpm --dir web-app ci:prepare:web \
+	&& pnpm --dir web-app ci:build:node
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 WORKDIR /app/web-app
 COPY --from=builder /app/web-app/dist ./dist
 COPY --from=builder /app/web-app/scripts/assert-railway-env.mjs ./scripts/assert-railway-env.mjs

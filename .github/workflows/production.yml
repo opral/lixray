@@ -1,0 +1,193 @@
+name: Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    name: Resolve tested images
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      server: ${{ steps.resolve.outputs.server }}
+      web: ${{ steps.resolve.outputs.web }}
+
+    steps:
+      - name: Check out tested commit
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve immutable images
+        id: resolve
+        shell: bash
+        run: |
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          for service in server web; do
+            repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-$service"
+            tree_tag="$repository:tree-$tree"
+            digest="$(
+              docker buildx imagetools inspect "$tree_tag" \
+                --format '{{json .Manifest.Digest}}' 2>/dev/null |
+                tr -d '"' || true
+            )"
+            if test -z "$digest"; then
+              echo "The pull request must publish $tree_tag before merge." >&2
+              exit 1
+            fi
+            image="$repository@$digest"
+            echo "$service=$image" >> "$GITHUB_OUTPUT"
+            echo "Resolved $service image: $image"
+          done
+
+      - name: Publish main aliases without rebuilding
+        shell: bash
+        env:
+          SERVER_IMAGE: ${{ steps.resolve.outputs.server }}
+          WEB_IMAGE: ${{ steps.resolve.outputs.web }}
+        run: |
+          docker buildx imagetools create \
+            --tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server:main" \
+            --tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server:sha-${GITHUB_SHA}" \
+            "$SERVER_IMAGE"
+          docker buildx imagetools create \
+            --tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-web:main" \
+            --tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-web:sha-${GITHUB_SHA}" \
+            "$WEB_IMAGE"
+
+  database:
+    name: Apply database migrations
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+
+    steps:
+      - name: Check out tested commit
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1
+
+      - name: Validate production configuration
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_PROJECT_REF"
+          test -n "$SUPABASE_DB_PASSWORD"
+
+      - name: Link production project
+        working-directory: database
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD" --yes
+
+      - name: Preview production migrations
+        working-directory: database
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase db push --linked --dry-run
+
+      - name: Apply production migrations
+        working-directory: database
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase db push --linked
+
+      - name: Confirm production has no pending migrations
+        working-directory: database
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase db push --linked --dry-run
+
+  release:
+    name: Promote production release
+    needs:
+      - database
+      - images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out release coordinator
+        uses: actions/checkout@v4
+
+      - name: Validate Infisical configuration
+        env:
+          INFISICAL_IDENTITY_ID: ${{ vars.INFISICAL_PRODUCTION_IDENTITY_ID }}
+          INFISICAL_PROJECT_SLUG: ${{ vars.INFISICAL_PROJECT_SLUG }}
+        run: |
+          test -n "$INFISICAL_IDENTITY_ID"
+          test -n "$INFISICAL_PROJECT_SLUG"
+
+      - name: Fetch deployment secrets from Infisical
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PRODUCTION_IDENTITY_ID }}
+          oidc-audience: https://github.com/opral
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: /ci
+
+      - name: Validate deployment credentials
+        run: |
+          test -n "$RAILWAY_API_TOKEN"
+          test -n "$RAILWAY_PROJECT_ID"
+          test -n "$RAILWAY_PRODUCTION_ENVIRONMENT"
+          test -n "$RAILWAY_SERVER_SERVICE"
+          test -n "$RAILWAY_WEB_SERVICE"
+          test -n "$GHCR_READ_USERNAME"
+          test -n "$GHCR_READ_TOKEN"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up Railway CLI
+        run: npm install --global @railway/cli@5.30.1
+
+      - name: Promote web and server images
+        shell: bash
+        env:
+          SERVER_IMAGE: ${{ needs.images.outputs.server }}
+          WEB_IMAGE: ${{ needs.images.outputs.web }}
+        run: .github/scripts/promote-production.sh
+
+      - name: Check public production canary
+        env:
+          LIXRAY_CANARY_WORKSPACE_URL: ${{ vars.LIXRAY_CANARY_WORKSPACE_URL || 'https://lixray.com/@samuel/2hello-world' }}
+        run: node scripts/check-production-lix.mjs

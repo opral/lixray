@@ -2,15 +2,10 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Pull requests should converge on the newest commit. Production pushes must
-  # finish in order so a newer merge cannot cancel a migration in flight.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -32,7 +27,7 @@ env:
   DEBIAN_FRONTEND: noninteractive
   BINSTALL_NO_CONFIRM: true
 
-  NODE_VERSION: "22"
+  NODE_VERSION: "24"
   PNPM_VERSION: "10.13.1"
 
 jobs:
@@ -65,11 +60,13 @@ jobs:
             } | git hash-object --stdin
           )"
           repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server"
-          echo "tree=$tree" >> "$GITHUB_OUTPUT"
-          echo "server_inputs=$server_inputs" >> "$GITHUB_OUTPUT"
-          echo "repository=$repository" >> "$GITHUB_OUTPUT"
-          echo "content_tag=$repository:server-$server_inputs" >> "$GITHUB_OUTPUT"
-          echo "tree_tag=$repository:tree-$tree" >> "$GITHUB_OUTPUT"
+          {
+            echo "tree=$tree"
+            echo "server_inputs=$server_inputs"
+            echo "repository=$repository"
+            echo "content_tag=$repository:server-$server_inputs"
+            echo "tree_tag=$repository:tree-$tree"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -94,14 +91,14 @@ jobs:
               tr -d '"'
           }
 
-          if digest="$(inspect_digest "$TREE_TAG")" && test -n "$digest"; then
+          if digest="$(inspect_digest "$CONTENT_TAG")" && test -n "$digest"; then
             echo "digest=$digest" >> "$GITHUB_OUTPUT"
             echo "found=true" >> "$GITHUB_OUTPUT"
-            echo "tree_found=true" >> "$GITHUB_OUTPUT"
-          elif digest="$(inspect_digest "$CONTENT_TAG")" && test -n "$digest"; then
-            echo "digest=$digest" >> "$GITHUB_OUTPUT"
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            echo "tree_found=false" >> "$GITHUB_OUTPUT"
+            if tree_digest="$(inspect_digest "$TREE_TAG")" && test "$tree_digest" = "$digest"; then
+              echo "tree_found=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "tree_found=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "found=false" >> "$GITHUB_OUTPUT"
             echo "tree_found=false" >> "$GITHUB_OUTPUT"
@@ -109,7 +106,7 @@ jobs:
 
       - name: Build and push server image
         id: build
-        if: github.event_name == 'pull_request' && steps.existing.outputs.found != 'true'
+        if: steps.existing.outputs.found != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -126,15 +123,149 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
-      - name: Require the tested image on main
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.existing.outputs.tree_found != 'true'
+      - name: Resolve immutable image
+        id: resolve
         shell: bash
         env:
-          IMAGE_TAG: ${{ steps.identity.outputs.tree_tag }}
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+          REPOSITORY: ${{ steps.identity.outputs.repository }}
         run: |
-          echo "Refusing to rebuild untested source on main." >&2
-          echo "The pull request must publish $IMAGE_TAG before merge." >&2
-          exit 1
+          digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
+          test -n "$digest"
+          echo "image=$REPOSITORY@$digest" >> "$GITHUB_OUTPUT"
+          echo "Using $REPOSITORY@$digest"
+
+      - name: Associate reused image with this Git tree
+        if: steps.existing.outputs.found == 'true' && steps.existing.outputs.tree_found != 'true'
+        shell: bash
+        env:
+          IMAGE: ${{ steps.resolve.outputs.image }}
+          TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
+        run: docker buildx imagetools create --tag "$TREE_TAG" "$IMAGE"
+
+  web-image:
+    name: Web image
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compute content-addressed image name
+        id: identity
+        shell: bash
+        env:
+          POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST }}
+          POSTHOG_TOKEN: ${{ vars.VITE_PUBLIC_POSTHOG_TOKEN }}
+        run: |
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          web_inputs="$(
+            {
+              git ls-tree HEAD -- \
+                .dockerignore \
+                .gitmodules \
+                package.json \
+                pnpm-lock.yaml \
+                pnpm-workspace.yaml \
+                vendor/atelier \
+                vendor/lix \
+                vendor/revisions.env
+              git ls-tree -r HEAD -- scripts web-app
+              printf 'posthog-host=%s\nposthog-token=%s\n' \
+                "$POSTHOG_HOST" "$POSTHOG_TOKEN"
+            } | git hash-object --stdin
+          )"
+          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-web"
+          {
+            echo "tree=$tree"
+            echo "repository=$repository"
+            echo "content_tag=$repository:web-$web_inputs"
+            echo "tree_tag=$repository:tree-$tree"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Read public production configuration
+        id: config
+        shell: bash
+        run: |
+          config="$(npx --yes json5@2.2.3 web-app/wrangler.jsonc)"
+          {
+            echo "supabase_url=$(jq -r '.vars.VITE_SUPABASE_URL' <<<"$config")"
+            echo "supabase_key=$(jq -r '.vars.VITE_SUPABASE_KEY' <<<"$config")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check for an existing image
+        id: existing
+        shell: bash
+        env:
+          CONTENT_TAG: ${{ steps.identity.outputs.content_tag }}
+          TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
+        run: |
+          inspect_digest() {
+            docker buildx imagetools inspect "$1" \
+              --format '{{json .Manifest.Digest}}' 2>/dev/null |
+              tr -d '"'
+          }
+
+          if digest="$(inspect_digest "$CONTENT_TAG")" && test -n "$digest"; then
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            if tree_digest="$(inspect_digest "$TREE_TAG")" && test "$tree_digest" = "$digest"; then
+              echo "tree_found=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "tree_found=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "tree_found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push web image
+        id: build
+        if: steps.existing.outputs.found != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web-app/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.identity.outputs.content_tag }}
+            ${{ steps.identity.outputs.tree_tag }}
+          build-args: |
+            VITE_SUPABASE_URL=${{ steps.config.outputs.supabase_url }}
+            VITE_SUPABASE_KEY=${{ steps.config.outputs.supabase_key }}
+            VITE_PUBLIC_POSTHOG_TOKEN=${{ vars.VITE_PUBLIC_POSTHOG_TOKEN }}
+            VITE_PUBLIC_POSTHOG_HOST=${{ vars.VITE_PUBLIC_POSTHOG_HOST }}
+            VITE_PUBLIC_TELEMETRY_ENVIRONMENT=production
+            RAILWAY_GIT_COMMIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=lixray-web-release
+          cache-to: type=gha,mode=max,scope=lixray-web-release
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       - name: Resolve immutable image
         id: resolve
@@ -150,28 +281,15 @@ jobs:
           echo "Using $REPOSITORY@$digest"
 
       - name: Associate reused image with this Git tree
-        if: github.event_name == 'pull_request' && steps.existing.outputs.found == 'true' && steps.existing.outputs.tree_found != 'true'
+        if: steps.existing.outputs.found == 'true' && steps.existing.outputs.tree_found != 'true'
         shell: bash
         env:
           IMAGE: ${{ steps.resolve.outputs.image }}
           TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
         run: docker buildx imagetools create --tag "$TREE_TAG" "$IMAGE"
 
-      - name: Publish main aliases without rebuilding
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: bash
-        env:
-          IMAGE: ${{ steps.resolve.outputs.image }}
-          REPOSITORY: ${{ steps.identity.outputs.repository }}
-        run: |
-          docker buildx imagetools create \
-            --tag "$REPOSITORY:main" \
-            --tag "$REPOSITORY:sha-${GITHUB_SHA}" \
-            "$IMAGE"
-
   frontend:
     name: Frontend
-    if: github.event_name == 'pull_request'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -210,8 +328,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare generated dependencies
+        run: pnpm --dir web-app ci:prepare
+
       - name: Test performance harness
         run: pnpm perf:test
+
+      - name: Test CI scripts
+        run: pnpm test:ci-scripts
 
       - name: Test production canary
         run: pnpm test:production-canary
@@ -220,19 +344,22 @@ jobs:
         run: pnpm --dir web-app format:check
 
       - name: Lint
-        run: pnpm --dir web-app lint
+        run: pnpm --dir web-app ci:lint
 
       - name: Typecheck and test frontend
-        run: pnpm --dir web-app check:cloudflare
+        run: pnpm --dir web-app ci:check
+
+      - name: Restore browser Lix SDK
+        run: pnpm --dir web-app lix:build
 
       - name: Build frontend
-        run: pnpm --dir web-app build
+        run: pnpm --dir web-app ci:build
 
       - name: Build Railway target
         env:
           VITE_SUPABASE_URL: https://example.invalid
           VITE_SUPABASE_KEY: ci-public-placeholder
-        run: pnpm --dir web-app build:node
+        run: pnpm --dir web-app ci:build:node
 
       - name: Verify generated files are committed
         run: git diff --exit-code
@@ -257,7 +384,6 @@ jobs:
 
   database:
     name: Database
-    if: github.event_name == 'pull_request'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -273,12 +399,17 @@ jobs:
       - name: Test database policies and functions
         working-directory: database
         run: |
+          supabase stop --no-backup || true
           supabase start --exclude edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector
           supabase test db
 
+      - name: Stop local database
+        if: always()
+        working-directory: database
+        run: supabase stop --no-backup
+
   rust:
     name: Rust
-    if: github.event_name == 'pull_request'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -307,7 +438,6 @@ jobs:
 
   e2e:
     name: E2E
-    if: github.event_name == 'pull_request'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
@@ -407,13 +537,14 @@ jobs:
 
   ci:
     name: CI
-    if: ${{ github.event_name == 'pull_request' && always() }}
+    if: always()
     needs:
       - frontend
       - database
       - rust
       - e2e
       - server-image
+      - web-image
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 5
 
@@ -425,60 +556,6 @@ jobs:
       - name: Fail for an unsuccessful CI lane
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
         run: exit 1
-
-  deploy-database:
-    name: Deploy production database
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs:
-      - server-image
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
-
-    steps:
-      - name: Check out the tested commit
-        uses: actions/checkout@v4
-
-      - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v1
-        with:
-          version: 2.109.1
-
-      - name: Validate production configuration
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: |
-          test -n "$SUPABASE_ACCESS_TOKEN"
-          test -n "$SUPABASE_PROJECT_REF"
-          test -n "$SUPABASE_DB_PASSWORD"
-
-      - name: Link production project
-        working-directory: database
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD" --yes
-
-      - name: Preview production migrations
-        working-directory: database
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push --linked --dry-run
-
-      - name: Apply production migrations
-        working-directory: database
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push --linked
-
-      - name: Confirm production has no pending migrations
-        working-directory: database
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push --linked --dry-run
 
   deploy-server-preview:
     name: Deploy server preview
@@ -532,6 +609,12 @@ jobs:
           test -n "$GHCR_READ_USERNAME"
           test -n "$GHCR_READ_TOKEN"
           echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.credentials.outputs.available == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Set up Railway CLI
         if: steps.credentials.outputs.available == 'true'
@@ -733,71 +816,3 @@ jobs:
             --field context='lixray - lix-server' \
             --field description='Success - tested image deployed by GitHub Actions' \
             --field target_url='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
-
-  deploy-server-production:
-    name: Deploy production release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs:
-      - deploy-database
-      - server-image
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: production
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Check out release coordinator
-        uses: actions/checkout@v4
-
-      - name: Check Infisical configuration
-        id: infisical
-        shell: bash
-        env:
-          INFISICAL_IDENTITY_ID: ${{ vars.INFISICAL_PRODUCTION_IDENTITY_ID }}
-          INFISICAL_PROJECT_SLUG: ${{ vars.INFISICAL_PROJECT_SLUG }}
-        run: |
-          if test -n "$INFISICAL_IDENTITY_ID" &&
-             test -n "$INFISICAL_PROJECT_SLUG"; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Skipping Railway production promotion; configure the Infisical Actions variables documented in README.md."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Fetch deployment secrets from Infisical
-        if: steps.infisical.outputs.available == 'true'
-        uses: Infisical/secrets-action@v1.0.9
-        with:
-          method: oidc
-          identity-id: ${{ vars.INFISICAL_PRODUCTION_IDENTITY_ID }}
-          oidc-audience: https://github.com/opral
-          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
-          env-slug: prod
-          secret-path: /ci
-
-      - name: Check deployment credentials
-        if: steps.infisical.outputs.available == 'true'
-        id: credentials
-        shell: bash
-        run: |
-          test -n "$RAILWAY_API_TOKEN"
-          test -n "$RAILWAY_PROJECT_ID"
-          test -n "$RAILWAY_PRODUCTION_ENVIRONMENT"
-          test -n "$RAILWAY_SERVER_SERVICE"
-          test -n "$RAILWAY_WEB_SERVICE"
-          test -n "$GHCR_READ_USERNAME"
-          test -n "$GHCR_READ_TOKEN"
-          echo "available=true" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Railway CLI
-        if: steps.credentials.outputs.available == 'true'
-        run: npm install --global @railway/cli@5.30.1
-
-      - name: Coordinate web and server production deployment
-        if: steps.credentials.outputs.available == 'true'
-        shell: bash
-        env:
-          IMAGE: ${{ needs.server-image.outputs.image }}
-        run: .github/scripts/promote-production.sh
