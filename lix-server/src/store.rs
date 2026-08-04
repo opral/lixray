@@ -2076,7 +2076,12 @@ mod tests {
     #[tokio::test]
     async fn recovery_releases_an_eof_drained_observation_body_lease() {
         let manager = memory_manager(1);
-        let app = crate::router(Arc::clone(&manager), None, Duration::from_secs(60));
+        let app = crate::router(
+            Arc::clone(&manager),
+            None,
+            Duration::from_secs(60),
+            crate::telemetry::InFlightSqlRegistry::default(),
+        );
         let session = open_protocol_session(&app, "lix-a").await;
         let response = app
             .clone()
@@ -2706,7 +2711,12 @@ mod tests {
     #[tokio::test]
     async fn fenced_protocol_runtime_retires_without_waiting_for_finite_error_body() {
         let manager = memory_manager(1);
-        let app = crate::router(Arc::clone(&manager), None, Duration::from_secs(60));
+        let app = crate::router(
+            Arc::clone(&manager),
+            None,
+            Duration::from_secs(60),
+            crate::telemetry::InFlightSqlRegistry::default(),
+        );
         let session = open_protocol_session(&app, "lix-a").await;
         let object_store = match &manager.backend {
             StorageBackend::Memory { object_store } => Arc::clone(object_store),

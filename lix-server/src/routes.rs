@@ -1,4 +1,5 @@
 use crate::store::{LixRuntimeError, LixService};
+use crate::telemetry::InFlightSqlRegistry;
 use crate::LixRuntimeManager;
 use axum::{
     body::Body,
@@ -12,9 +13,12 @@ use serde::Serialize;
 use serde_json::json;
 use std::{
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tower::ServiceExt;
 use tracing::Instrument as _;
@@ -32,6 +36,9 @@ struct AppState {
     manager: Arc<LixRuntimeManager>,
     internal_token: Option<Arc<str>>,
     protocol_timeout: Duration,
+    request_id_key: [u8; 32],
+    request_sequence: Arc<AtomicU64>,
+    in_flight_sql: InFlightSqlRegistry,
 }
 
 struct TracedBody {
@@ -170,7 +177,9 @@ pub fn router(
     manager: Arc<LixRuntimeManager>,
     internal_token: Option<String>,
     protocol_timeout: Duration,
+    in_flight_sql: InFlightSqlRegistry,
 ) -> Router {
+    let request_id_key = protocol_request_id_key(internal_token.as_deref());
     Router::new()
         .route("/healthz", get(healthz))
         .route("/lixes/{lix_id}/{*protocol_path}", any(lix_protocol))
@@ -178,6 +187,9 @@ pub fn router(
             manager,
             internal_token: internal_token.map(Arc::from),
             protocol_timeout,
+            request_id_key,
+            request_sequence: Arc::new(AtomicU64::new(0)),
+            in_flight_sql,
         })
 }
 
@@ -207,6 +219,7 @@ async fn lix_protocol(
     Path((lix_id, protocol_path)): Path<(String, String)>,
     request: Request<Body>,
 ) -> Response {
+    let request_id = protocol_request_id(&state, &lix_id, &protocol_path);
     let span = tracing::info_span!(
         "lix.protocol.request",
         "otel.name" = "Lix protocol request",
@@ -215,13 +228,22 @@ async fn lix_protocol(
         "http.route" = "/lixes/{lix_id}/{*protocol_path}",
         "lix.lix.id" = %lix_id,
         "lix.protocol.path" = %protocol_path,
+        "lix.request.id" = %request_id,
+        "lix.request.phase" = tracing::field::Empty,
+        "lix.sql.active.count" = tracing::field::Empty,
+        "lix.sql.active.operations" = tracing::field::Empty,
+        "lix.sql.active.execution_kinds" = tracing::field::Empty,
+        "lix.sql.active.fingerprints" = tracing::field::Empty,
         "http.response.status_code" = tracing::field::Empty,
         "lix.error.code" = tracing::field::Empty,
         "otel.status_code" = tracing::field::Empty,
     );
-    let response = lix_protocol_inner(state, lix_id, protocol_path, request)
+    let response = lix_protocol_inner(state, lix_id, protocol_path, request_id, request)
         .instrument(span.clone())
         .await;
+    if response.status() != StatusCode::GATEWAY_TIMEOUT {
+        span.record("lix.request.phase", "completed");
+    }
     span.record("http.response.status_code", response.status().as_u16());
     if response.status().is_server_error() {
         span.record("otel.status_code", "ERROR");
@@ -234,8 +256,16 @@ async fn lix_protocol_inner(
     state: AppState,
     lix_id: String,
     protocol_path: String,
+    request_id: String,
     mut request: Request<Body>,
 ) -> Response {
+    tracing::info!(
+        request_id,
+        lix_id,
+        protocol_path,
+        method = %request.method(),
+        "protocol request started"
+    );
     if !authorized(request.headers(), state.internal_token.as_deref()) {
         let mut response = protocol_error(
             StatusCode::UNAUTHORIZED,
@@ -355,8 +385,32 @@ async fn lix_protocol_inner(
     let response = match tokio::time::timeout(state.protocol_timeout, handler_future).await {
         Ok(response) => response.expect("canonical Lix protocol router is infallible"),
         Err(_elapsed) => {
+            let activities = state.in_flight_sql.current();
+            let phase = if activities.is_empty() {
+                "protocol_handler"
+            } else {
+                "sql_execution"
+            };
+            let operations =
+                sql_activity_values(&activities, |activity| activity.operation.as_deref());
+            let execution_kinds =
+                sql_activity_values(&activities, |activity| activity.execution_kind.as_deref());
+            let fingerprints =
+                sql_activity_values(&activities, |activity| activity.fingerprint.as_deref());
+            let span = tracing::Span::current();
+            span.record("lix.request.phase", phase);
+            span.record("lix.sql.active.count", activities.len() as u64);
+            span.record("lix.sql.active.operations", operations.as_str());
+            span.record("lix.sql.active.execution_kinds", execution_kinds.as_str());
+            span.record("lix.sql.active.fingerprints", fingerprints.as_str());
             tracing::warn!(
                 lix_id,
+                request_id,
+                phase,
+                active_sql_count = activities.len(),
+                active_sql_operations = operations,
+                active_sql_execution_kinds = execution_kinds,
+                active_sql_fingerprints = fingerprints,
                 timeout_secs = state.protocol_timeout.as_secs(),
                 "protocol request exceeded its deadline; recovering runtime"
             );
@@ -412,6 +466,48 @@ async fn lix_protocol_inner(
         )
     } else {
         Response::from_parts(parts, body)
+    }
+}
+
+fn protocol_request_id_key(internal_token: Option<&str>) -> [u8; 32] {
+    blake3::derive_key(
+        "lixray protocol request identity v1",
+        internal_token.unwrap_or("local-development").as_bytes(),
+    )
+}
+
+fn protocol_request_id(state: &AppState, lix_id: &str, protocol_path: &str) -> String {
+    let sequence = state.request_sequence.fetch_add(1, Ordering::Relaxed);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut hasher = blake3::Hasher::new_keyed(&state.request_id_key);
+    hasher.update(b"lixray.protocol.request.v1\0");
+    hasher.update(&timestamp.to_le_bytes());
+    hasher.update(&sequence.to_le_bytes());
+    hasher.update(lix_id.as_bytes());
+    hasher.update(protocol_path.as_bytes());
+    hasher.finalize().to_hex().as_str()[..24].to_string()
+}
+
+fn sql_activity_values<'a>(
+    activities: &'a [crate::telemetry::InFlightSqlActivity],
+    value: impl Fn(&'a crate::telemetry::InFlightSqlActivity) -> Option<&'a str>,
+) -> String {
+    let mut values = Vec::new();
+    for activity in activities {
+        let Some(value) = value(activity) else {
+            continue;
+        };
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    if values.is_empty() {
+        "unavailable".to_string()
+    } else {
+        values.join(",")
     }
 }
 
@@ -680,7 +776,12 @@ mod tests {
 
     fn test_router() -> Router {
         let manager = LixRuntimeManager::new_in_memory(4);
-        router(manager, None, TEST_PROTOCOL_TIMEOUT)
+        router(
+            manager,
+            None,
+            TEST_PROTOCOL_TIMEOUT,
+            InFlightSqlRegistry::default(),
+        )
     }
 
     async fn json_body(response: Response) -> JsonValue {
@@ -841,7 +942,12 @@ mod tests {
     #[tokio::test]
     async fn internal_token_protects_lix_routes() {
         let manager = LixRuntimeManager::new_in_memory(4);
-        let app = router(manager, Some("secret".to_string()), TEST_PROTOCOL_TIMEOUT);
+        let app = router(
+            manager,
+            Some("secret".to_string()),
+            TEST_PROTOCOL_TIMEOUT,
+            InFlightSqlRegistry::default(),
+        );
 
         let unauthorized = app
             .clone()

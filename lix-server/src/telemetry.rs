@@ -10,15 +10,185 @@ use opentelemetry_sdk::{
     },
     Resource,
 };
-use std::{collections::HashMap, env, time::Duration};
+use std::{
+    collections::HashMap,
+    env,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tracing::{field::Visit, span::Attributes, Subscriber};
 use tracing_subscriber::{
-    fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter,
+    fmt::format::FmtSpan,
+    layer::{Context as LayerContext, SubscriberExt},
+    registry::LookupSpan,
+    util::SubscriberInitExt,
+    EnvFilter, Layer,
 };
 
 const DEFAULT_POSTHOG_HOST: &str = "https://us.i.posthog.com";
 const PERF_SPAN_EVENTS_ENV: &str = "LIXRAY_PERF_SPANS";
+const SQL_TELEMETRY_DIRECTIVE: &str = "lix_sql=info";
 
-pub(crate) fn init() -> Option<SdkTracerProvider> {
+#[derive(Clone, Debug, Default)]
+/// Tracks SQL spans that have started under a protocol request but have not closed.
+pub struct InFlightSqlRegistry {
+    inner: Arc<Mutex<InFlightSqlState>>,
+}
+
+#[derive(Debug, Default)]
+struct InFlightSqlState {
+    request_by_sql_span: HashMap<tracing::span::Id, tracing::span::Id>,
+    activity_by_request:
+        HashMap<tracing::span::Id, HashMap<tracing::span::Id, InFlightSqlActivity>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct InFlightSqlActivity {
+    pub(crate) operation: Option<String>,
+    pub(crate) fingerprint: Option<String>,
+    pub(crate) execution_kind: Option<String>,
+    pub(crate) batch_index: Option<u64>,
+}
+
+impl InFlightSqlRegistry {
+    pub(crate) fn current(&self) -> Vec<InFlightSqlActivity> {
+        let Some(request_span_id) = tracing::Span::current().id() else {
+            return Vec::new();
+        };
+        let state = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut activities = state
+            .activity_by_request
+            .get(&request_span_id)
+            .map(|activities| activities.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        activities.sort_by_key(|activity| activity.batch_index);
+        activities
+    }
+}
+
+#[derive(Clone, Debug)]
+struct InFlightSqlLayer {
+    registry: InFlightSqlRegistry,
+}
+
+impl<S> Layer<S> for InFlightSqlLayer
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+    fn on_new_span(
+        &self,
+        attributes: &Attributes<'_>,
+        id: &tracing::span::Id,
+        context: LayerContext<'_, S>,
+    ) {
+        if attributes.metadata().name() != "lix.sql.query" {
+            return;
+        }
+        let Some(sql_span) = context.span(id) else {
+            return;
+        };
+        let mut ancestor = sql_span.parent();
+        let mut request_span_id = None;
+        while let Some(span) = ancestor {
+            if span.metadata().name() == "lix.protocol.request" {
+                request_span_id = Some(span.id().clone());
+                break;
+            }
+            ancestor = span.parent();
+        }
+        let Some(request_span_id) = request_span_id else {
+            return;
+        };
+
+        let mut activity = InFlightSqlActivity::default();
+        attributes.record(&mut SqlActivityVisitor(&mut activity));
+        let mut state = self
+            .registry
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state
+            .request_by_sql_span
+            .insert(id.clone(), request_span_id.clone());
+        state
+            .activity_by_request
+            .entry(request_span_id)
+            .or_default()
+            .insert(id.clone(), activity);
+    }
+
+    fn on_record(
+        &self,
+        id: &tracing::span::Id,
+        values: &tracing::span::Record<'_>,
+        _context: LayerContext<'_, S>,
+    ) {
+        let mut state = self
+            .registry
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(request_span_id) = state.request_by_sql_span.get(id).cloned() else {
+            return;
+        };
+        let Some(activity) = state
+            .activity_by_request
+            .get_mut(&request_span_id)
+            .and_then(|activities| activities.get_mut(id))
+        else {
+            return;
+        };
+        values.record(&mut SqlActivityVisitor(activity));
+    }
+
+    fn on_close(&self, id: tracing::span::Id, _context: LayerContext<'_, S>) {
+        let mut state = self
+            .registry
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(request_span_id) = state.request_by_sql_span.remove(&id) else {
+            return;
+        };
+        let remove_request = state
+            .activity_by_request
+            .get_mut(&request_span_id)
+            .is_some_and(|activities| {
+                activities.remove(&id);
+                activities.is_empty()
+            });
+        if remove_request {
+            state.activity_by_request.remove(&request_span_id);
+        }
+    }
+}
+
+struct SqlActivityVisitor<'a>(&'a mut InFlightSqlActivity);
+
+impl Visit for SqlActivityVisitor<'_> {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        match field.name() {
+            "db.operation.name" => self.0.operation = Some(value.to_string()),
+            "lix.sql.fingerprint" => self.0.fingerprint = Some(value.to_string()),
+            "lix.execution.kind" => self.0.execution_kind = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        if field.name() == "lix.batch.index" {
+            self.0.batch_index = Some(value);
+        }
+    }
+
+    fn record_debug(&mut self, _field: &tracing::field::Field, _value: &dyn std::fmt::Debug) {}
+}
+
+/// Installs server tracing and returns its exporter and in-flight SQL registry.
+pub fn init() -> (Option<SdkTracerProvider>, InFlightSqlRegistry) {
     let provider = match posthog_provider_from_env() {
         Ok(provider) => provider,
         Err(error) => {
@@ -37,14 +207,25 @@ pub(crate) fn init() -> Option<SdkTracerProvider> {
     } else {
         FmtSpan::NONE
     };
+    let in_flight_sql = InFlightSqlRegistry::default();
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"))
+        .add_directive(
+            SQL_TELEMETRY_DIRECTIVE
+                .parse()
+                .expect("the built-in SQL telemetry directive is valid"),
+        );
 
     tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(env_filter)
         .with(tracing_subscriber::fmt::layer().with_span_events(span_events))
         .with(telemetry_layer)
+        .with(InFlightSqlLayer {
+            registry: in_flight_sql.clone(),
+        })
         .init();
 
-    provider
+    (provider, in_flight_sql)
 }
 
 fn perf_span_events_enabled() -> bool {
@@ -173,6 +354,47 @@ mod tests {
         env::set_var(PERF_SPAN_EVENTS_ENV, "true");
         assert!(perf_span_events_enabled());
         env::remove_var(PERF_SPAN_EVENTS_ENV);
+    }
+
+    #[test]
+    fn in_flight_sql_survives_until_the_unfinished_span_closes() {
+        let in_flight_sql = InFlightSqlRegistry::default();
+        let subscriber = tracing_subscriber::registry().with(InFlightSqlLayer {
+            registry: in_flight_sql.clone(),
+        });
+        tracing::subscriber::with_default(subscriber, || {
+            let request = tracing::info_span!("lix.protocol.request");
+            request.in_scope(|| {
+                let sql = tracing::info_span!(
+                    target: "lix_sql",
+                    "lix.sql.query",
+                    "db.operation.name" = tracing::field::Empty,
+                    "lix.sql.fingerprint" = tracing::field::Empty,
+                    "lix.execution.kind" = tracing::field::Empty,
+                    "lix.batch.index" = tracing::field::Empty,
+                    "db.query.text" = tracing::field::Empty,
+                );
+                sql.record("db.operation.name", "SELECT");
+                sql.record("lix.sql.fingerprint", "safe-fingerprint");
+                sql.record("lix.execution.kind", "query");
+                sql.record("lix.batch.index", 2_u64);
+                sql.record("db.query.text", "SELECT secret FROM private_table");
+
+                assert_eq!(
+                    in_flight_sql.current(),
+                    vec![InFlightSqlActivity {
+                        operation: Some("SELECT".to_string()),
+                        fingerprint: Some("safe-fingerprint".to_string()),
+                        execution_kind: Some("query".to_string()),
+                        batch_index: Some(2),
+                    }]
+                );
+                assert!(!format!("{:?}", in_flight_sql.current()).contains("secret"));
+
+                drop(sql);
+                assert!(in_flight_sql.current().is_empty());
+            });
+        });
     }
 
     #[test]
