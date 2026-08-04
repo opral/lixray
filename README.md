@@ -155,6 +155,8 @@ Put these secrets in the Infisical `prod` environment under `/ci`:
 - `RAILWAY_PRODUCTION_ENVIRONMENT`: the production environment name or ID;
 - `GHCR_READ_USERNAME`: the GitHub user owning a classic PAT;
 - `GHCR_READ_TOKEN`: that PAT with `read:packages`.
+- `VITE_SUPABASE_URL`: the public production Supabase project URL;
+- `VITE_SUPABASE_KEY`: the public production Supabase publishable key.
 
 Create separate Infisical OIDC machine identities for pull requests and the
 GitHub `production` environment. Give both read access only to `/ci`, bind
@@ -167,8 +169,9 @@ as GitHub Actions variables:
 - `INFISICAL_PREVIEW_IDENTITY_ID`;
 - `INFISICAL_PRODUCTION_IDENTITY_ID`.
 
-The production web image reads these public GitHub Actions variables at build
-time:
+The production web image reads the public Supabase and PostHog configuration
+from the build environment at build time. Supabase values come from Infisical
+`/ci`; PostHog values come from GitHub Actions variables:
 
 - `VITE_PUBLIC_POSTHOG_TOKEN`;
 - `VITE_PUBLIC_POSTHOG_HOST`.

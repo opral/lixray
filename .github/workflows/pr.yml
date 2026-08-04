@@ -151,6 +151,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     outputs:
       image: ${{ steps.resolve.outputs.image }}
 
@@ -160,12 +161,39 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Fetch web build configuration from Infisical
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PREVIEW_IDENTITY_ID }}
+          oidc-audience: https://github.com/opral
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: /ci
+
+      - name: Validate web build configuration
+        id: config
+        shell: bash
+        run: |
+          test -n "${VITE_SUPABASE_URL:-}"
+          test -n "${VITE_SUPABASE_KEY:-}"
+          case "$VITE_SUPABASE_URL" in
+            https://*.supabase.co) ;;
+            *) echo "VITE_SUPABASE_URL must be a Supabase project URL" >&2; exit 1 ;;
+          esac
+          {
+            echo "supabase_url=$VITE_SUPABASE_URL"
+            echo "supabase_key=$VITE_SUPABASE_KEY"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Compute content-addressed image name
         id: identity
         shell: bash
         env:
           POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST }}
           POSTHOG_TOKEN: ${{ vars.VITE_PUBLIC_POSTHOG_TOKEN }}
+          SUPABASE_URL: ${{ steps.config.outputs.supabase_url }}
+          SUPABASE_KEY: ${{ steps.config.outputs.supabase_key }}
         run: |
           tree="$(git rev-parse 'HEAD^{tree}')"
           web_inputs="$(
@@ -180,8 +208,8 @@ jobs:
                 vendor/lix \
                 vendor/revisions.env
               git ls-tree -r HEAD -- scripts web-app
-              printf 'posthog-host=%s\nposthog-token=%s\n' \
-                "$POSTHOG_HOST" "$POSTHOG_TOKEN"
+              printf 'posthog-host=%s\nposthog-token=%s\nsupabase-url=%s\nsupabase-key=%s\n' \
+                "$POSTHOG_HOST" "$POSTHOG_TOKEN" "$SUPABASE_URL" "$SUPABASE_KEY"
             } | git hash-object --stdin
           )"
           repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-web"
@@ -196,16 +224,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Read public production configuration
-        id: config
-        shell: bash
-        run: |
-          config="$(npx --yes json5@2.2.3 web-app/wrangler.jsonc)"
-          {
-            echo "supabase_url=$(jq -r '.vars.VITE_SUPABASE_URL' <<<"$config")"
-            echo "supabase_key=$(jq -r '.vars.VITE_SUPABASE_KEY' <<<"$config")"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
