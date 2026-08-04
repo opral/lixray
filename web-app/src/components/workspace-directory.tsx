@@ -97,7 +97,7 @@ export function WorkspaceDirectory() {
 	}, [auth.getAccessToken, organizations]);
 
 	if ((!isDemoModeEnabled && !auth.isLoaded) || !workspaceState.isLoaded) {
-		return <DirectoryStatus>Loading workspaces…</DirectoryStatus>;
+		return <DirectoryStatus>Loading repositories…</DirectoryStatus>;
 	}
 	if (!signedIn) return <SignedOutDirectory />;
 	if (workspaceState.error) {
@@ -143,7 +143,7 @@ export function WorkspaceDirectory() {
 							className="m-0 text-[27px] leading-[1.2] font-bold tracking-[-0.02em]"
 							id="workspaces-title"
 						>
-							Workspaces
+							Repositories
 						</h1>
 						<Button
 							variant="featured"
@@ -154,12 +154,12 @@ export function WorkspaceDirectory() {
 							onClick={() => setDialog({ type: "create" })}
 						>
 							<Plus className="size-3.5" aria-hidden="true" />
-							New workspace
+							New repository
 						</Button>
 					</div>
 					{workspaceCount > 0 ? (
 						<p className="m-0 px-3.5 pb-[30px] text-[13.5px] leading-normal text-text-tertiary max-[560px]:px-2 max-[560px]:pt-1 max-[560px]:pb-6">
-							{workspaceCount} {pluralize(workspaceCount, "workspace")} across{" "}
+							{workspaceCount} {pluralize(workspaceCount, "repository", "repositories")} across{" "}
 							{namespaceCount} {pluralize(namespaceCount, "namespace")}
 						</p>
 					) : null}
@@ -341,7 +341,7 @@ function WorkspaceRow({
 		await navigator.clipboard.writeText(
 			new URL(path, window.location.origin).href,
 		);
-		toast.success("Workspace URL copied");
+		toast.success("Repository URL copied");
 	};
 
 	const download = async () => {
@@ -431,7 +431,7 @@ function WorkspaceRow({
 							<DropdownMenuSeparator />
 							<DropdownMenuItem variant="destructive" onSelect={onDelete}>
 								<Trash2 aria-hidden="true" />
-								Delete workspace…
+								Delete repository…
 							</DropdownMenuItem>
 						</>
 					) : null}
@@ -496,12 +496,12 @@ function WorkspaceDialog({
 	const isDelete = dialog?.type === "delete";
 	const title =
 		dialog?.type === "create"
-			? "New workspace"
+			? "New repository"
 			: dialog?.type === "rename"
 				? `Rename ${dialog.workspace.name}`
 				: dialog?.type === "delete"
 					? `Delete ${dialog.workspace.name}?`
-					: "Workspace";
+					: "Repository";
 
 	return (
 		<Dialog open={Boolean(dialog)} onOpenChange={(open) => !open && onClose()}>
@@ -511,10 +511,10 @@ function WorkspaceDialog({
 						<DialogTitle>{title}</DialogTitle>
 						<DialogDescription>
 							{isDelete
-								? "This removes the workspace from your directory and keeps its name reserved."
+								? "This removes the repository from your directory and keeps its name reserved."
 								: dialog?.type === "rename"
-									? "The workspace URL stays the same."
-									: "Choose a namespace and give the workspace a name."}
+									? "The repository URL stays the same."
+									: "Choose a namespace and give the repository a name."}
 						</DialogDescription>
 					</DialogHeader>
 
@@ -553,7 +553,7 @@ function WorkspaceDialog({
 						) : (
 							<label className="grid gap-2">
 								<span className="text-[13px] font-semibold text-text-secondary">
-									Workspace name
+									Repository name
 								</span>
 								<input
 									className="h-10 w-full rounded-lg border border-border-panel bg-bg-panel px-[11px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1"
@@ -592,10 +592,10 @@ function WorkspaceDialog({
 							{busy
 								? "Saving…"
 								: isDelete
-									? "Delete workspace"
+									? "Delete repository"
 									: dialog?.type === "rename"
 										? "Rename"
-										: "Create workspace"}
+										: "Create repository"}
 						</Button>
 					</DialogFooter>
 				</form>
@@ -630,7 +630,7 @@ function SignedOutDirectory() {
 				<AppTitlebarBrand />
 			</AppTitlebar>
 			<DirectoryStatusContent>
-				<h1>Sign in to see your workspaces.</h1>
+				<h1>Sign in to see your repositories.</h1>
 				<Button asChild variant="secondary">
 					<Link to="/sign-in">Sign in</Link>
 				</Button>
@@ -647,8 +647,8 @@ function workspaceInitials(name: string): string {
 	return `${first.charAt(0)}${(parts[1] ?? "").charAt(0)}`.toUpperCase();
 }
 
-function pluralize(count: number, singular: string): string {
-	return count === 1 ? singular : `${singular}s`;
+function pluralize(count: number, singular: string, plural?: string): string {
+	return count === 1 ? singular : (plural ?? `${singular}s`);
 }
 
 function accountInitial(metadata: Record<string, unknown> | undefined): string {

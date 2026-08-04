@@ -86,7 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 								))}
 							</select>
 							<label className="sr-only" htmlFor="workspace-switcher">
-								Workspace
+								Repository
 							</label>
 							<select
 								id="workspace-switcher"

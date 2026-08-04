@@ -52,7 +52,7 @@ function AuthenticatedWorkspaceGate({
 	if (!user) return <SignedOutHome />;
 	if (error) {
 		return (
-			<EmptyState eyebrow="Unable to load workspaces" title={error}>
+			<EmptyState eyebrow="Unable to load repositories" title={error}>
 				<button className={buttonClass} onClick={() => void refresh()}>
 					Try again
 				</button>
@@ -74,15 +74,15 @@ function AuthenticatedWorkspaceGate({
 		return (
 			<NamePrompt
 				eyebrow={selectedOrganization.name}
-				title="Create your first workspace."
-				label="Workspace name"
-				buttonLabel="Create workspace"
+				title="Create your first repository."
+				label="Repository name"
+				buttonLabel="Create repository"
 				onSubmit={createWorkspace}
 			/>
 		);
 	}
 	if (!activeWorkspace) {
-		return <div className={workspaceEmptyClass}>Loading workspace...</div>;
+		return <div className={workspaceEmptyClass}>Loading repository...</div>;
 	}
 	return <>{children(activeWorkspace)}</>;
 }

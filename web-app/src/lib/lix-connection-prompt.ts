@@ -31,7 +31,7 @@ export function createLixConnectionDetails({
 	const previewUrl = `${normalizedOrigin}/@${encodeURIComponent(namespace)}/${encodeURIComponent(lixSlug)}`;
 	const lixReference = `@${namespace}/${lixSlug}`;
 
-	const prompt = `Connect this agent to my Lix workspace \`${lixReference}\`.
+	const prompt = `Connect this agent to my Lix repository \`${lixReference}\`.
 
 Use the \`${serverName}\` MCP connection for Lix \`${lixId}\`. If that connection already exists, reuse it. Otherwise, create and authenticate it with ${mcpUrl}. Never open either URL in a browser.
 

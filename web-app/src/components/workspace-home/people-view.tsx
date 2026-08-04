@@ -267,7 +267,7 @@ export function PeopleView({ teamApi }: { teamApi: WorkspaceTeamApi | null }) {
 							<b className="font-semibold text-text-secondary">
 								{namespaceHandle}
 							</b>{" "}
-							as a member — every workspace, edit access.
+							as a member — every repository, edit access.
 						</>
 					)}
 				</p>

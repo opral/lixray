@@ -139,7 +139,7 @@ function WorkspaceRoutePage() {
 				setResolveError(
 					caught instanceof Error
 						? caught.message
-						: "Unable to open workspace.",
+						: "Unable to open repository.",
 				);
 				setResolved(null);
 			});
@@ -208,7 +208,7 @@ function WorkspaceRoutePage() {
 				const joined = data?.[0];
 				toast.success(
 					joined
-						? `You joined ${joined.namespace_name} — every workspace, edit access.`
+						? `You joined ${joined.namespace_name} — every repository, edit access.`
 						: "You joined the team.",
 				);
 				setAccessRevision((current) => current + 1);
@@ -250,7 +250,7 @@ function WorkspaceRoutePage() {
 				const joined = data?.[0];
 				toast.success(
 					joined
-						? `You joined ${joined.namespace_name} — every workspace, edit access.`
+						? `You joined ${joined.namespace_name} — every repository, edit access.`
 						: "You joined the team.",
 				);
 				setAccessRevision((current) => current + 1);
@@ -449,7 +449,7 @@ function WorkspaceRoutePage() {
 			toast.error(
 				caught instanceof Error
 					? caught.message
-					: "Unable to join this workspace.",
+					: "Unable to join this repository.",
 			);
 		});
 	}, [authUser, joinToEdit, resolved?.canEdit, shareCapability]);
@@ -467,11 +467,11 @@ function WorkspaceRoutePage() {
 	}, []);
 
 	if (resolved === undefined) {
-		return <WorkspaceRouteStatus>Opening workspace…</WorkspaceRouteStatus>;
+		return <WorkspaceRouteStatus>Opening repository…</WorkspaceRouteStatus>;
 	}
 	if (shouldWaitForInviteResolution) {
 		return (
-			<WorkspaceRouteStatus>Opening shared workspace…</WorkspaceRouteStatus>
+			<WorkspaceRouteStatus>Opening shared repository…</WorkspaceRouteStatus>
 		);
 	}
 	if (resolveError) {
@@ -480,9 +480,9 @@ function WorkspaceRoutePage() {
 	if (!resolved) {
 		return (
 			<WorkspaceRouteStatus>
-				<strong>Workspace not found</strong>
+				<strong>Repository not found</strong>
 				<Button asChild variant="outline">
-					<Link to="/home">Back to workspaces</Link>
+					<Link to="/home">Back to repositories</Link>
 				</Button>
 			</WorkspaceRouteStatus>
 		);

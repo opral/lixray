@@ -100,7 +100,7 @@ export function useLixrayApi() {
 	const getLix = useCallback(async (): Promise<Lix> => {
 		if (!activeWorkspace || !workspaceKey) {
 			throw new LixrayApiError(400, {
-				error: { message: "No active workspace is available" },
+				error: { message: "No active repository is available" },
 			});
 		}
 		if (clientRef.current?.key === workspaceKey) {

@@ -74,7 +74,7 @@ async function openWorkspaceLixSessionOnce(
 				const token = await options.getAccessToken();
 				if (token) return { Authorization: `Bearer ${token}` };
 				if (options.allowAnonymous) return {};
-				throw new Error("A workspace access token is required.");
+				throw new Error("A repository access token is required.");
 			},
 			...(options.fetch ? { fetch: options.fetch } : {}),
 		},
@@ -168,13 +168,13 @@ class RemoteWorkspaceLixSession implements WorkspaceLixSession {
 	}
 
 	#assertOpen(): void {
-		if (this.#closed) throw new Error("The workspace Lix session is closed.");
+		if (this.#closed) throw new Error("The repository Lix session is closed.");
 	}
 }
 
 function workspaceUrl(options: OpenWorkspaceLixSessionOptions): URL {
 	const origin = options.origin ?? globalThis.location?.origin;
-	if (!origin) throw new Error("A workspace server origin is required.");
+	if (!origin) throw new Error("A repository server origin is required.");
 	return new URL(
 		`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.workspaceSlug)}`,
 		origin,
