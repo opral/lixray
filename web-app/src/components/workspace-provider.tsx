@@ -437,7 +437,9 @@ function DemoWorkspaceProvider({ children }: { children: ReactNode }) {
 			(workspace) => workspace.id === selectedWorkspaceId,
 		) ?? organization.workspaces[0];
 	const unsupported = () =>
-		Promise.reject(new Error("Repository mutation is unavailable in demo mode"));
+		Promise.reject(
+			new Error("Repository mutation is unavailable in demo mode"),
+		);
 	const createWorkspace = (name: string, organizationId?: string) => {
 		if (organizationId && organizationId !== organization.id) {
 			throw new Error("Create or select an organization first");

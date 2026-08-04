@@ -489,8 +489,16 @@ function HeroVisual() {
 				fill="none"
 				aria-hidden="true"
 			>
-				<path d="M0 70 C 44 70, 36 160, 80 160" stroke="#E3DACC" strokeWidth="1.5" />
-				<path d="M0 250 C 44 250, 36 160, 80 160" stroke="#E3DACC" strokeWidth="1.5" />
+				<path
+					d="M0 70 C 44 70, 36 160, 80 160"
+					stroke="#E3DACC"
+					strokeWidth="1.5"
+				/>
+				<path
+					d="M0 250 C 44 250, 36 160, 80 160"
+					stroke="#E3DACC"
+					strokeWidth="1.5"
+				/>
 				<circle cx="80" cy="160" r="3" fill="#C2410C" />
 			</svg>
 			<div className="flex w-[320px] shrink-0 flex-col gap-px rounded-2xl border border-[#1c1917]/10 bg-white px-3 py-[18px] text-[13px] text-[#292524] shadow-[0_30px_80px_rgba(28,25,23,.14)]">
@@ -555,18 +563,22 @@ function HeroVisual() {
 				fill="none"
 				aria-hidden="true"
 			>
-				<path d="M80 70 C 36 70, 44 160, 0 160" stroke="#E3DACC" strokeWidth="1.5" />
-				<path d="M80 250 C 36 250, 44 160, 0 160" stroke="#E3DACC" strokeWidth="1.5" />
+				<path
+					d="M80 70 C 36 70, 44 160, 0 160"
+					stroke="#E3DACC"
+					strokeWidth="1.5"
+				/>
+				<path
+					d="M80 250 C 36 250, 44 160, 0 160"
+					stroke="#E3DACC"
+					strokeWidth="1.5"
+				/>
 				<circle cx="0" cy="160" r="3" fill="#C2410C" />
 			</svg>
 			<div className="flex w-[300px] shrink-0 flex-col gap-7">
 				<div className="overflow-hidden rounded-[14px] border border-[#f3d8be] bg-[#fbf5ea] shadow-[0_18px_44px_rgba(28,25,23,.1)]">
 					<div className="flex items-center gap-2 px-3.5 py-2.5">
-						<img
-							className="size-3.5"
-							src="/landing/claude-spark.svg"
-							alt=""
-						/>
+						<img className="size-3.5" src="/landing/claude-spark.svg" alt="" />
 						<span className="text-[12.5px] font-bold text-[#c2410c]">
 							Claude
 						</span>
@@ -657,10 +669,7 @@ function RepoChip({
 			)}
 		>
 			<img
-				className={cn(
-					"size-3",
-					variant === "github" && "opacity-60 grayscale",
-				)}
+				className={cn("size-3", variant === "github" && "opacity-60 grayscale")}
 				src="/landing/icon-folder.svg"
 				alt=""
 			/>
@@ -860,19 +869,31 @@ function AgentsVisual() {
 				fill="none"
 				aria-hidden="true"
 			>
-				<path d="M0 22 C 52 22, 44 106, 96 106" stroke="#E3DACC" strokeWidth="1.5" />
-				<path d="M0 78 C 52 78, 44 106, 96 106" stroke="#E3DACC" strokeWidth="1.5" />
-				<path d="M0 134 C 52 134, 44 106, 96 106" stroke="#E3DACC" strokeWidth="1.5" />
-				<path d="M0 190 C 52 190, 44 106, 96 106" stroke="#E3DACC" strokeWidth="1.5" />
+				<path
+					d="M0 22 C 52 22, 44 106, 96 106"
+					stroke="#E3DACC"
+					strokeWidth="1.5"
+				/>
+				<path
+					d="M0 78 C 52 78, 44 106, 96 106"
+					stroke="#E3DACC"
+					strokeWidth="1.5"
+				/>
+				<path
+					d="M0 134 C 52 134, 44 106, 96 106"
+					stroke="#E3DACC"
+					strokeWidth="1.5"
+				/>
+				<path
+					d="M0 190 C 52 190, 44 106, 96 106"
+					stroke="#E3DACC"
+					strokeWidth="1.5"
+				/>
 				<circle cx="96" cy="106" r="3" fill="#C2410C" />
 			</svg>
 			<div className="flex shrink-0 flex-col gap-2 rounded-[14px] border border-[#f3d8be] bg-[#fbefe4] px-5 py-[18px]">
 				<span className="inline-flex items-center gap-2">
-					<img
-						className="size-[18px]"
-						src="/landing/icon-folder.svg"
-						alt=""
-					/>
+					<img className="size-[18px]" src="/landing/icon-folder.svg" alt="" />
 					<span className="font-mono text-[13px] font-bold text-[#1c1917]">
 						@acme/company
 					</span>
@@ -948,7 +969,11 @@ function HistoryVisual() {
 					</span>
 				</div>
 				<div className="flex flex-col px-2 pt-2 pb-1">
-					<TimelineEntry current date="Feb 12" title="Startups removed from ICP" />
+					<TimelineEntry
+						current
+						date="Feb 12"
+						title="Startups removed from ICP"
+					/>
 					<TimelineEntry date="Nov 8" title="Startups added to ICP" />
 					<TimelineEntry last date="Oct 3" title="ICP drafted" />
 				</div>

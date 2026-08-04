@@ -159,7 +159,8 @@ export function WorkspaceDirectory() {
 					</div>
 					{workspaceCount > 0 ? (
 						<p className="m-0 px-3.5 pb-[30px] text-[13.5px] leading-normal text-text-tertiary max-[560px]:px-2 max-[560px]:pt-1 max-[560px]:pb-6">
-							{workspaceCount} {pluralize(workspaceCount, "repository", "repositories")} across{" "}
+							{workspaceCount}{" "}
+							{pluralize(workspaceCount, "repository", "repositories")} across{" "}
 							{namespaceCount} {pluralize(namespaceCount, "namespace")}
 						</p>
 					) : null}
