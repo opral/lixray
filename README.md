@@ -122,29 +122,24 @@ LIXRAY_MCP_ACCESS_TOKEN='<token>' pnpm --dir web-app check:mcp
 
 ## CI and deployment
 
-GitHub Actions builds the Rust server image once on a 32-core runner, tags it
-by its server inputs, associates it with the Git tree hash, runs the Compose
-browser flow against its immutable GHCR digest, and promotes that same digest
-to Railway. Trees with identical `lix-server`, vendored Lix, Dockerfile, and
-Docker-ignore inputs reuse the image without compiling Rust again. In-progress
-pull request runs for the same ref are cancelled.
-`server-*` tags identify reusable build inputs; `tree-*` tags record the exact
-repository states that passed E2E.
+GitHub Actions builds immutable web and server images on pull requests, tags
+them by reusable inputs and the Git tree hash, and runs the Compose browser flow
+against the server digest. Trees with unchanged inputs reuse existing images.
+In-progress runs for the same pull request are cancelled, and the stable `CI`
+job remains the merge gate.
 
-Pushes to `main` are promotion-only: they require the pull request's tested
-tree image to exist, publish stable aliases, apply database migrations, and
-deploy that digest. The production release waits for the matching Railway web
-deployment to finish building, starts the server promotion as the web service
-begins deploying, and stays pending until both services are healthy. CI refuses
-to rebuild an untested server image on `main`; the full validation suite runs
-on pull requests and remains the merge gate.
+The separate `Production` workflow is promotion-only. Pushes to `main` must
+resolve both tested `tree-*` images before applying database migrations. The
+workflow then points both Railway services at those GHCR digests, starts them
+together, and waits up to ten minutes for both health checks. Production never
+waits for an independent Railway build and never rebuilds merged source.
 
-Railway still creates the environments and builds the web service:
+Railway still creates preview environments and builds their demo web service:
 
 - pull requests create an isolated Railway demo environment with a built-in
   preview user, then CI points its server service at the tested image;
-- merging to `main` applies database migrations and points the production
-  server at the same image digest as the matching web deployment goes live;
+- merging to `main` applies database migrations and promotes the tested web and
+  server image digests together;
 - `railway.json` and `web-app/railway.json` define the two services;
 - Infisical syncs runtime configuration to Railway;
 - deployment and registry credentials come from Infisical via short-lived
@@ -172,9 +167,15 @@ as GitHub Actions variables:
 - `INFISICAL_PREVIEW_IDENTITY_ID`;
 - `INFISICAL_PRODUCTION_IDENTITY_ID`.
 
-No deployment secret is stored in GitHub. Until the Actions variables and
-Infisical identities are configured, CI builds and tests the image but prints
-a warning and skips Railway promotion.
+The production web image reads these public GitHub Actions variables at build
+time:
+
+- `VITE_PUBLIC_POSTHOG_TOKEN`;
+- `VITE_PUBLIC_POSTHOG_HOST`.
+
+No deployment secret is stored in GitHub. Preview promotion is skipped when its
+Infisical identity is absent; production configuration is required and fails
+fast when incomplete.
 
 Both services share `LIXRAY_INTERNAL_TOKEN`. The web service reaches the Rust
 service through Railway's private network. Production and preview environments
@@ -190,12 +191,12 @@ accepts the matching fixed demo token for the built-in `acme/launch-q3`
 workspace. No Supabase URL, key, branch, password, seed job, or provisioning
 workflow is involved.
 
-Railway GitHub autodeploy stays enabled for `lixray-web` and **Wait for CI stays
-disabled**. GitHub autodeploy is disabled for `lix-server` in production and
-the preview base environment; CI exclusively manages its service source as an
-immutable Docker image. Its Railway watch patterns therefore omit `web-app/**`.
-CI verifies that the server remains image-managed before each preview promotion
-and retries one failed or timed-out Railway deployment before failing the check.
+Railway GitHub autodeploy stays enabled for preview web services and **Wait for
+CI stays disabled**. Both production services are image-managed; the Production
+workflow is their only deployment initiator. The preview base keeps the server
+image-managed while Railway builds the demo web service from the pull request.
+CI verifies that the preview server remains image-managed and retries one failed
+or timed-out promotion before failing the check.
 Preview data is disposable and isolated by the Railway environment.
 Database-sensitive changes continue to use local Compose or an explicitly
 requested integration environment.
