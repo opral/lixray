@@ -259,10 +259,10 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			}
 			if (targetOrganization.role === null) {
 				throw new Error(
-					"Workspace membership does not grant organization access",
+					"Repository membership does not grant organization access",
 				);
 			}
-			const normalizedName = normalizeName(name, "Workspace");
+			const normalizedName = normalizeName(name, "Repository");
 			const workspaceId = crypto.randomUUID();
 			const { error: createError } = await client.from("lixes").insert({
 				id: workspaceId,
@@ -286,15 +286,15 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			const organization = organizations.find((candidate) =>
 				candidate.workspaces.some((workspace) => workspace.id === workspaceId),
 			);
-			if (!organization) throw new Error("Workspace not found");
+			if (!organization) throw new Error("Repository not found");
 			if (organization.role === null) {
 				throw new Error(
-					"Workspace membership does not grant organization access",
+					"Repository membership does not grant organization access",
 				);
 			}
 			const { error: renameError } = await client
 				.from("lixes")
-				.update({ name: normalizeName(name, "Workspace") })
+				.update({ name: normalizeName(name, "Repository") })
 				.eq("id", workspaceId);
 			if (renameError) throw renameError;
 			await refresh({
@@ -312,10 +312,10 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			const organization = organizations.find((candidate) =>
 				candidate.workspaces.some((workspace) => workspace.id === workspaceId),
 			);
-			if (!organization) throw new Error("Workspace not found");
+			if (!organization) throw new Error("Repository not found");
 			if (organization.role === null) {
 				throw new Error(
-					"Workspace membership does not grant organization access",
+					"Repository membership does not grant organization access",
 				);
 			}
 			const { error: deleteError } = await client.rpc("delete_lix", {
@@ -437,12 +437,14 @@ function DemoWorkspaceProvider({ children }: { children: ReactNode }) {
 			(workspace) => workspace.id === selectedWorkspaceId,
 		) ?? organization.workspaces[0];
 	const unsupported = () =>
-		Promise.reject(new Error("Workspace mutation is unavailable in demo mode"));
+		Promise.reject(
+			new Error("Repository mutation is unavailable in demo mode"),
+		);
 	const createWorkspace = (name: string, organizationId?: string) => {
 		if (organizationId && organizationId !== organization.id) {
 			throw new Error("Create or select an organization first");
 		}
-		const normalizedName = normalizeName(name, "Workspace");
+		const normalizedName = normalizeName(name, "Repository");
 		const now = new Date().toISOString();
 		const workspace: Workspace = {
 			id: DEMO_CREATED_WORKSPACE_ID,
@@ -495,7 +497,7 @@ function workspaceSlug(name: string): string {
 			.toLowerCase()
 			.replace(/[^a-z0-9]+/g, "-")
 			.replace(/^-+|-+$/g, "")
-			.slice(0, 100) || "workspace"
+			.slice(0, 100) || "repository"
 	);
 }
 
@@ -538,5 +540,5 @@ function workspaceStorageKey(userId: string) {
 }
 
 function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : "Unable to load workspaces";
+	return error instanceof Error ? error.message : "Unable to load repositories";
 }

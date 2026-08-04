@@ -375,7 +375,7 @@ export function WorkspaceAtelier({
 							toast.error(
 								caught instanceof Error
 									? caught.message
-									: "Unable to join this workspace.",
+									: "Unable to join this repository.",
 							);
 						})
 					}
@@ -733,7 +733,7 @@ export function WorkspaceAtelier({
 		void instance.views
 			.open(LIXRAY_HOME_EXTENSION_ID)
 			.catch((error: unknown) => {
-				console.error("Unable to activate the workspace home", error);
+				console.error("Unable to activate the repository home", error);
 			})
 			.finally(markRouteSynced);
 	}, [instance, markRouteSynced, namespace, pathname, workspaceSlug]);
@@ -760,7 +760,7 @@ export function WorkspaceAtelier({
 										navbarStart: (
 											<Link
 												to="/home"
-												aria-label="Back to workspaces"
+												aria-label="Back to repositories"
 												className="flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
 											>
 												<img
@@ -800,7 +800,7 @@ export function WorkspaceAtelier({
 			) : null}
 			{!instance && !error ? (
 				<main className="absolute inset-0 grid place-content-center justify-items-center gap-2 bg-bg-app p-6 text-center text-text-secondary">
-					Opening workspace…
+					Opening repository…
 				</main>
 			) : null}
 			{error ? (

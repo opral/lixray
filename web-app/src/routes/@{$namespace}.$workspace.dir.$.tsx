@@ -36,7 +36,7 @@ function WorkspaceDirRoute() {
 				instanceId: lixrayDirInstanceId(dirPath),
 			})
 			.catch((error: unknown) => {
-				console.error("Unable to open the requested workspace folder", error);
+				console.error("Unable to open the requested repository folder", error);
 			})
 			// Synced even on failure: tab activations should drive the URL
 			// again rather than staying frozen at a dead deep link.

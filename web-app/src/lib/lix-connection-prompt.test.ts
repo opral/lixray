@@ -19,7 +19,7 @@ void test("uses a Codex-safe isolated development registration on localhost", ()
 	assert.equal(details.mcpUrl, "http://127.0.0.1:8787/mcp");
 	assert.match(
 		details.prompt,
-		/^Connect this agent to my Lix workspace `@samuel\/workspace`\./,
+		/^Connect this agent to my Lix repository `@samuel\/workspace`\./,
 	);
 	assert.match(
 		details.prompt,
