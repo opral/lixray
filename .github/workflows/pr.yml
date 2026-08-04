@@ -192,16 +192,20 @@ jobs:
             echo "tree_tag=$repository:tree-$tree"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Read public production configuration
         id: config
         shell: bash
         run: |
-          node <<'NODE' >> "$GITHUB_OUTPUT"
-          const { readFileSync } = require("node:fs");
-          const config = JSON.parse(readFileSync("web-app/wrangler.jsonc", "utf8"));
-          console.log(`supabase_url=${config.vars.VITE_SUPABASE_URL}`);
-          console.log(`supabase_key=${config.vars.VITE_SUPABASE_KEY}`);
-          NODE
+          config="$(npx --yes json5@2.2.3 web-app/wrangler.jsonc)"
+          {
+            echo "supabase_url=$(jq -r '.vars.VITE_SUPABASE_URL' <<<"$config")"
+            echo "supabase_key=$(jq -r '.vars.VITE_SUPABASE_KEY' <<<"$config")"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
