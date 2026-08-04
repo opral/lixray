@@ -32,6 +32,13 @@ else
 	echo "::warning::Could not read the previous Railway server deployment; continuing with promotion."
 fi
 
+# Registry-image promotions bypass Railway's repository build detection. Apply the
+# checked-in deployment policy explicitly so health checks and restart behavior do
+# not silently drift from railway.json.
+production_deploy="$(
+	jq -c '.deploy * .environments.production.deploy' railway.json
+)"
+
 update_response="$(
 	jq -n \
 		--arg query 'mutation($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input) }' \
@@ -40,18 +47,19 @@ update_response="$(
 		--arg image "$IMAGE" \
 		--arg username "$GHCR_READ_USERNAME" \
 		--arg password "$GHCR_READ_TOKEN" \
+		--argjson deploy "$production_deploy" \
 		'{
 			query: $query,
 			variables: {
 				serviceId: $service_id,
 				environmentId: $environment_id,
-				input: {
+				input: ($deploy + {
 					source: {image: $image},
 					registryCredentials: {
 						username: $username,
 						password: $password
 					}
-				}
+				})
 			}
 		}' |
 		curl --fail --silent --show-error \

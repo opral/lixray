@@ -213,6 +213,9 @@ jobs:
       - name: Test performance harness
         run: pnpm perf:test
 
+      - name: Test production canary
+        run: pnpm test:production-canary
+
       - name: Check formatting
         run: pnpm --dir web-app format:check
 

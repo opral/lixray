@@ -1,0 +1,27 @@
+name: Production Lix canary
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-lix-canary
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Open and read production Lix
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check public canary workspace
+        env:
+          LIXRAY_CANARY_WORKSPACE_URL: ${{ vars.LIXRAY_CANARY_WORKSPACE_URL || 'https://lixray.com/@samuel/2hello-world' }}
+        run: node scripts/check-production-lix.mjs
