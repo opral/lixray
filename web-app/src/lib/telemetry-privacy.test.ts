@@ -67,6 +67,49 @@ void test("autocapture keeps only intentional safe data attributes", () => {
 	});
 });
 
+void test("preserves sanitized PostHog exception messages", () => {
+	const event = scrubPostHogEvent({
+		uuid: "event_exception",
+		event: "$exception",
+		properties: {
+			$exception_list: [
+				{
+					type: "LixError",
+					value:
+						"The lix is recovering at /Users/samuel/private and Bearer secret-token",
+					mechanism: { handled: true },
+					stacktrace: {
+						frames: [
+							{
+								filename: "file:///Users/samuel/private/protocol.ts",
+								vars: { value: "private document content" },
+							},
+						],
+					},
+				},
+			],
+		},
+	});
+
+	assert.deepEqual(event?.properties, {
+		$exception_list: [
+			{
+				type: "LixError",
+				value: "The lix is recovering at [redacted_path] and Bearer [redacted]",
+				mechanism: { handled: true },
+				stacktrace: {
+					frames: [
+						{
+							filename: "[redacted_path]",
+							vars: {},
+						},
+					],
+				},
+			},
+		],
+	});
+});
+
 void test("session replay blocks rich document content surfaces", () => {
 	for (const selector of [
 		"[data-attr='markdown-editor']",
