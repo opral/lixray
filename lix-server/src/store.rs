@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -73,6 +74,7 @@ enum LixRuntimeState {
 pub struct LixRuntimeManager {
     backend: StorageBackend,
     max_open_lixes: usize,
+    recovery_watchdog: RecoveryWatchdog,
     state: Mutex<ManagerState>,
     #[cfg(test)]
     open_gate: Option<TestOpenGate>,
@@ -80,6 +82,30 @@ pub struct LixRuntimeManager {
     // cache-root lease must outlive every retained Lix runtime and its
     // SlateDB workers during manager teardown.
     _cache_root_lease: Option<CacheRootLease>,
+}
+
+type RecoveryTimeoutAction = dyn Fn() + Send + Sync;
+
+struct RecoveryWatchdog {
+    timeout: Duration,
+    on_timeout: Arc<RecoveryTimeoutAction>,
+}
+
+impl RecoveryWatchdog {
+    fn production(timeout: Duration) -> Self {
+        Self {
+            timeout,
+            on_timeout: Arc::new(|| std::process::abort()),
+        }
+    }
+
+    #[cfg(test)]
+    fn test_default() -> Self {
+        Self {
+            timeout: Duration::from_secs(30),
+            on_timeout: Arc::new(|| panic!("recovery close watchdog fired in a test")),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -238,6 +264,7 @@ impl LixRuntimeManager {
         Ok(Arc::new(Self {
             backend,
             max_open_lixes: config.max_open_lixes,
+            recovery_watchdog: RecoveryWatchdog::production(config.recovery_close_timeout),
             state: Mutex::new(ManagerState::default()),
             #[cfg(test)]
             open_gate: None,
@@ -252,6 +279,7 @@ impl LixRuntimeManager {
                 object_store: Arc::new(InMemory::new()),
             },
             max_open_lixes,
+            recovery_watchdog: RecoveryWatchdog::test_default(),
             state: Mutex::new(ManagerState::default()),
             open_gate: None,
             _cache_root_lease: None,
@@ -692,7 +720,15 @@ impl LixRuntimeManager {
             // what ends that stream. Waiting for leases before close would
             // leave a recovering runtime permanently stuck behind its own
             // observation response.
-            let close_result = close_lix_service(Arc::clone(&draining_service)).await;
+            let Some(close_result) = await_recovery_close(
+                &manager.recovery_watchdog,
+                &lix_id,
+                close_lix_service(Arc::clone(&draining_service)),
+            )
+            .await
+            else {
+                return;
+            };
             match close_result {
                 Ok(()) => info!(
                     lix_id,
@@ -928,6 +964,28 @@ async fn close_lix_service(service: Arc<LixService>) -> Result<()> {
     })
     .await
     .context("join Lix protocol close")?
+}
+
+async fn await_recovery_close<F, T>(
+    watchdog: &RecoveryWatchdog,
+    lix_id: &str,
+    close: F,
+) -> Option<T>
+where
+    F: Future<Output = T>,
+{
+    match tokio::time::timeout(watchdog.timeout, close).await {
+        Ok(result) => Some(result),
+        Err(_elapsed) => {
+            tracing::error!(
+                lix_id,
+                timeout_secs = watchdog.timeout.as_secs(),
+                "lix runtime recovery close exceeded its deadline; aborting process"
+            );
+            (watchdog.on_timeout)();
+            None
+        }
+    }
 }
 
 async fn close_runtime_after_open(
@@ -1505,6 +1563,23 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn recovery_close_watchdog_fires_for_a_stuck_close() {
+        let fired = Arc::new(AtomicBool::new(false));
+        let fired_by_watchdog = Arc::clone(&fired);
+        let watchdog = RecoveryWatchdog {
+            timeout: Duration::from_millis(1),
+            on_timeout: Arc::new(move || {
+                fired_by_watchdog.store(true, Ordering::SeqCst);
+            }),
+        };
+
+        let result = await_recovery_close(&watchdog, "lix-a", std::future::pending::<()>()).await;
+
+        assert!(result.is_none());
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
     fn namespace_root(base_root: &Path, endpoint: &str) -> PathBuf {
         cache_namespace_root(
             base_root,
@@ -1637,6 +1712,7 @@ mod tests {
                 object_store: Arc::new(InMemory::new()),
             },
             max_open_lixes,
+            recovery_watchdog: RecoveryWatchdog::test_default(),
             state: Mutex::new(ManagerState::default()),
             _cache_root_lease: None,
             open_gate: Some(open_gate),
@@ -2255,6 +2331,7 @@ mod tests {
                 object_store: Arc::new(InMemory::new()),
             },
             max_open_lixes: 1,
+            recovery_watchdog: RecoveryWatchdog::test_default(),
             state: Mutex::new(ManagerState {
                 state_drop_probe: Some(CacheRootLeaseDropProbe {
                     root: root.0.clone(),
