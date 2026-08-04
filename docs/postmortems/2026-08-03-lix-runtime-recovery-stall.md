@@ -141,6 +141,13 @@ affected lix opened on the first verification attempt.
 - Include lix ID, protocol path, recovery age, and deployment identifier on
   structured recovery logs and metrics.
 
+The follow-up implementation keeps an independent registry of SQL spans from
+creation until close. On timeout, the still-running operation, execution kind,
+sanitized-query fingerprint, and request correlation ID are copied onto the
+completed parent span and structured Railway log. This makes the evidence
+available even though the child SQL span never finishes; raw SQL and parameters
+are not retained by the registry.
+
 ### P2 — operational hardening
 
 - Add a runbook for confirming this signature and restarting only
