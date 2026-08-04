@@ -399,8 +399,14 @@ jobs:
       - name: Test database policies and functions
         working-directory: database
         run: |
+          supabase stop --no-backup || true
           supabase start --exclude edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector
           supabase test db
+
+      - name: Stop local database
+        if: always()
+        working-directory: database
+        run: supabase stop --no-backup
 
   rust:
     name: Rust
