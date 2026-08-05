@@ -14,7 +14,10 @@
     "perf:run": "node perf/runner.mjs",
     "perf:movie:remote": "node perf/movie/remote-qualification.mjs",
     "perf:test": "node --test perf/test/*.test.mjs",
+    "ci": "node scripts/ci.mjs",
     "test:ci-scripts": "node --test .github/scripts/*.test.mjs",
+    "vendor:sync": "node scripts/sync-vendor.mjs",
+    "vendor:check": "node scripts/sync-vendor.mjs --check",
     "test:production-canary": "node --test scripts/check-production-lix.test.mjs",
     "postinstall": "pnpm --dir web-app lix:build"
   },

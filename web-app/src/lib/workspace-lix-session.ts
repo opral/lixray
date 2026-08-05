@@ -109,9 +109,7 @@ function createTelemetryFetch(
 	customFetch: RemoteLixFetch | undefined,
 	context: { workspaceId?: string },
 ): RemoteLixFetch {
-	const fetcher =
-		customFetch ??
-		(globalThis.fetch?.bind(globalThis) as RemoteLixFetch | undefined);
+	const fetcher = customFetch ?? globalThis.fetch?.bind(globalThis);
 	if (!fetcher) {
 		throw new TypeError("A fetch implementation is required for a workspace.");
 	}
@@ -125,6 +123,10 @@ function createTelemetryFetch(
 	};
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
 async function reportLixRequestFailure(
 	response: Response,
 	input: RequestInfo | URL,
@@ -133,10 +135,11 @@ async function reportLixRequestFailure(
 ): Promise<void> {
 	let code: string | undefined;
 	try {
-		const body = (await response.clone().json()) as {
-			error?: { code?: unknown };
-		};
-		if (typeof body.error?.code === "string") code = body.error.code;
+		const body: unknown = await response.clone().json();
+		const error = isRecord(body) ? body.error : undefined;
+		if (isRecord(error) && typeof error.code === "string") {
+			code = error.code;
+		}
 	} catch {
 		// The SDK will report malformed/non-JSON responses separately.
 	}

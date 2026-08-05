@@ -62,6 +62,13 @@ server access use the user's JWT with RLS; no Supabase secret key is required.
 
 ## Verification
 
+When changing the vendored Lix or Atelier revisions, run `pnpm vendor:sync`.
+It updates the Railway revision manifest and regenerates both Rust and pnpm
+lockfiles. `pnpm vendor:check` verifies that those derived files are committed
+and in sync.
+
+Run the complete frontend CI acceptance path locally with `pnpm run ci`.
+
 The same acceptance path used by CI is available locally:
 
 ```sh

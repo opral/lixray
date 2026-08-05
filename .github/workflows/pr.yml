@@ -327,6 +327,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Check vendored revisions
+        run: pnpm vendor:check
 
       - name: Cache vendored Lix SDK build
         uses: actions/cache@v4
@@ -346,41 +350,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Prepare generated dependencies
-        run: pnpm --dir web-app ci:prepare
-
-      - name: Test performance harness
-        run: pnpm perf:test
-
-      - name: Test CI scripts
-        run: pnpm test:ci-scripts
-
-      - name: Test production canary
-        run: pnpm test:production-canary
-
-      - name: Check formatting
-        run: pnpm --dir web-app format:check
-
-      - name: Lint
-        run: pnpm --dir web-app ci:lint
-
-      - name: Typecheck and test frontend
-        run: pnpm --dir web-app ci:check
-
-      - name: Restore browser Lix SDK
-        run: pnpm --dir web-app lix:build
-
-      - name: Build frontend
-        run: pnpm --dir web-app ci:build
-
-      - name: Build Railway target
-        env:
-          VITE_SUPABASE_URL: https://example.invalid
-          VITE_SUPABASE_KEY: ci-public-placeholder
-        run: pnpm --dir web-app ci:build:node
-
-      - name: Verify generated files are committed
-        run: git diff --exit-code
+      - name: Run root CI command
+        run: pnpm run ci
 
       - name: Validate submodule branches
         run: |
