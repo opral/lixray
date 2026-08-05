@@ -29,12 +29,12 @@ export async function buildWorkspaceArchive(
 		const entries: Record<string, Uint8Array> = {};
 		for (const row of result.rows) {
 			const path = row.value("path").toJS();
-			const data = row.value("content").asBytes();
-			if (typeof path !== "string" || !data) {
+			const content = row.value("content").asBytes();
+			if (typeof path !== "string" || !content) {
 				throw new Error("Repository archive returned invalid file data.");
 			}
 			const archivePath = path.replace(/^\/+/, "");
-			if (archivePath) entries[archivePath] = data;
+			if (archivePath) entries[archivePath] = content;
 		}
 		return zipSync(entries);
 	});

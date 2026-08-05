@@ -28,7 +28,6 @@ export function moviePayloadChunk(file, offset, length) {
   ]);
   return generated.subarray(prefix, prefix + length);
 }
-
 export function moviePayloadStream(
   file,
   { start = 0, endExclusive = file.bytes, chunkBytes = MOVIE_STREAM_CHUNK_BYTES } = {},
@@ -65,4 +64,3 @@ function validateSlice(file, offset, length) {
     throw new RangeError("movie payload slice must fit inside the logical file");
   }
 }
-

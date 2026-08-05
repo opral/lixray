@@ -522,6 +522,7 @@ export function WorkspaceAtelier({
 		void openWorkspaceLixSession({
 			namespace,
 			workspaceSlug,
+			workspaceId,
 			getAccessToken,
 			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
@@ -632,6 +633,8 @@ export function WorkspaceAtelier({
 				if (!disposed) {
 					captureExceptionTelemetry(caught, {
 						operation: "workspace_open",
+						lix_id: workspaceId,
+						namespace_id: namespace,
 					});
 					setError(formatWorkspaceOpenError(caught));
 				}

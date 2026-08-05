@@ -144,7 +144,7 @@ void test("MCP traces expose SQL friction without lix values or result rows", as
 	const executeOutput = observeExecuteOutput({
 		results: [
 			{
-				columns: ["data"],
+				columns: ["content"],
 				rows: [[{ kind: "text", value: "private result" }]],
 				rowsAffected: 0,
 				notices: [

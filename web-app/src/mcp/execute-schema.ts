@@ -58,7 +58,7 @@ WHERE table_schema = 'public'
   AND table_name = $1
 ORDER BY ordinal_position;`;
 
-export const EXECUTE_TOOL_DESCRIPTION = `Execute an ordered batch of caller-provided Lix SQL statements atomically against the lix's active Lix branch. To change branches, call switch_branch first. Each statement has its own parameters and produces one ordered result; if any statement fails, the complete batch rolls back. SQL can read or mutate any SQL-accessible branch data. Lix SQL does not support DDL statements.
+export const EXECUTE_TOOL_DESCRIPTION = `Execute an ordered batch of caller-provided Lix SQL statements atomically against the lix's active Lix branch. To change branches, call switch_branch first. Each statement has its own parameters and produces one ordered result; if any statement fails, the complete batch rolls back. SQL can read or mutate any SQL-accessible branch data, so this tool is not read-only. Lix records mutations in history so users can review and revert them in LixRay. Lix SQL does not support DDL statements.
 
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}
