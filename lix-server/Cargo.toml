@@ -24,6 +24,7 @@ tower = { version = "0.5.2", features = ["util"] }
 tracing = "0.1.44"
 tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+url = "2.5.8"
 
 [dev-dependencies]
 async-trait = "0.1.89"

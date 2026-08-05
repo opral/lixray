@@ -2,15 +2,10 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Pull requests should converge on the newest commit. Production pushes must
-  # finish in order so a newer merge cannot cancel a migration in flight.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -32,10 +27,285 @@ env:
   DEBIAN_FRONTEND: noninteractive
   BINSTALL_NO_CONFIRM: true
 
-  NODE_VERSION: "22"
+  NODE_VERSION: "24"
   PNPM_VERSION: "10.13.1"
 
 jobs:
+  server-image:
+    name: Server image
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+      tree: ${{ steps.identity.outputs.tree }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compute content-addressed image name
+        id: identity
+        shell: bash
+        run: |
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          server_inputs="$(
+            {
+              git ls-tree HEAD -- .dockerignore .gitmodules vendor/lix
+              git ls-tree -r HEAD -- lix-server
+            } | git hash-object --stdin
+          )"
+          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server"
+          {
+            echo "tree=$tree"
+            echo "server_inputs=$server_inputs"
+            echo "repository=$repository"
+            echo "content_tag=$repository:server-$server_inputs"
+            echo "tree_tag=$repository:tree-$tree"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check for an existing image
+        id: existing
+        shell: bash
+        env:
+          CONTENT_TAG: ${{ steps.identity.outputs.content_tag }}
+          TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
+        run: |
+          inspect_digest() {
+            docker buildx imagetools inspect "$1" \
+              --format '{{json .Manifest.Digest}}' 2>/dev/null |
+              tr -d '"'
+          }
+
+          if digest="$(inspect_digest "$CONTENT_TAG")" && test -n "$digest"; then
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            if tree_digest="$(inspect_digest "$TREE_TAG")" && test "$tree_digest" = "$digest"; then
+              echo "tree_found=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "tree_found=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "tree_found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push server image
+        id: build
+        if: steps.existing.outputs.found != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: lix-server/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.identity.outputs.content_tag }}
+            ${{ steps.identity.outputs.tree_tag }}
+          build-args: |
+            CARGO_BUILD_JOBS=32
+          cache-from: type=gha,scope=lix-server-release
+          cache-to: type=gha,mode=max,scope=lix-server-release
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Resolve immutable image
+        id: resolve
+        shell: bash
+        env:
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+          REPOSITORY: ${{ steps.identity.outputs.repository }}
+        run: |
+          digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
+          test -n "$digest"
+          echo "image=$REPOSITORY@$digest" >> "$GITHUB_OUTPUT"
+          echo "Using $REPOSITORY@$digest"
+
+      - name: Associate reused image with this Git tree
+        if: steps.existing.outputs.found == 'true' && steps.existing.outputs.tree_found != 'true'
+        shell: bash
+        env:
+          IMAGE: ${{ steps.resolve.outputs.image }}
+          TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
+        run: docker buildx imagetools create --tag "$TREE_TAG" "$IMAGE"
+
+  web-image:
+    name: Web image
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Fetch web build configuration from Infisical
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PREVIEW_IDENTITY_ID }}
+          oidc-audience: https://github.com/opral
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: /ci
+
+      - name: Validate web build configuration
+        id: config
+        shell: bash
+        run: |
+          test -n "${VITE_SUPABASE_URL:-}"
+          test -n "${VITE_SUPABASE_KEY:-}"
+          case "$VITE_SUPABASE_URL" in
+            https://*.supabase.co) ;;
+            *) echo "VITE_SUPABASE_URL must be a Supabase project URL" >&2; exit 1 ;;
+          esac
+          {
+            echo "supabase_url=$VITE_SUPABASE_URL"
+            echo "supabase_key=$VITE_SUPABASE_KEY"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compute content-addressed image name
+        id: identity
+        shell: bash
+        env:
+          POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST }}
+          POSTHOG_TOKEN: ${{ vars.VITE_PUBLIC_POSTHOG_TOKEN }}
+          SUPABASE_URL: ${{ steps.config.outputs.supabase_url }}
+          SUPABASE_KEY: ${{ steps.config.outputs.supabase_key }}
+        run: |
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          web_inputs="$(
+            {
+              git ls-tree HEAD -- \
+                .dockerignore \
+                .gitmodules \
+                package.json \
+                pnpm-lock.yaml \
+                pnpm-workspace.yaml \
+                vendor/atelier \
+                vendor/lix \
+                vendor/revisions.env
+              git ls-tree -r HEAD -- scripts web-app
+              printf 'posthog-host=%s\nposthog-token=%s\nsupabase-url=%s\nsupabase-key=%s\n' \
+                "$POSTHOG_HOST" "$POSTHOG_TOKEN" "$SUPABASE_URL" "$SUPABASE_KEY"
+            } | git hash-object --stdin
+          )"
+          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-web"
+          {
+            echo "tree=$tree"
+            echo "repository=$repository"
+            echo "content_tag=$repository:web-$web_inputs"
+            echo "tree_tag=$repository:tree-$tree"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check for an existing image
+        id: existing
+        shell: bash
+        env:
+          CONTENT_TAG: ${{ steps.identity.outputs.content_tag }}
+          TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
+        run: |
+          inspect_digest() {
+            docker buildx imagetools inspect "$1" \
+              --format '{{json .Manifest.Digest}}' 2>/dev/null |
+              tr -d '"'
+          }
+
+          if digest="$(inspect_digest "$CONTENT_TAG")" && test -n "$digest"; then
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            if tree_digest="$(inspect_digest "$TREE_TAG")" && test "$tree_digest" = "$digest"; then
+              echo "tree_found=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "tree_found=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "tree_found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push web image
+        id: build
+        if: steps.existing.outputs.found != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web-app/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.identity.outputs.content_tag }}
+            ${{ steps.identity.outputs.tree_tag }}
+          build-args: |
+            VITE_SUPABASE_URL=${{ steps.config.outputs.supabase_url }}
+            VITE_SUPABASE_KEY=${{ steps.config.outputs.supabase_key }}
+            VITE_PUBLIC_POSTHOG_TOKEN=${{ vars.VITE_PUBLIC_POSTHOG_TOKEN }}
+            VITE_PUBLIC_POSTHOG_HOST=${{ vars.VITE_PUBLIC_POSTHOG_HOST }}
+            VITE_PUBLIC_TELEMETRY_ENVIRONMENT=production
+            RAILWAY_GIT_COMMIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=lixray-web-release
+          cache-to: type=gha,mode=max,scope=lixray-web-release
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Resolve immutable image
+        id: resolve
+        shell: bash
+        env:
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+          REPOSITORY: ${{ steps.identity.outputs.repository }}
+        run: |
+          digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
+          test -n "$digest"
+          echo "image=$REPOSITORY@$digest" >> "$GITHUB_OUTPUT"
+          echo "Using $REPOSITORY@$digest"
+
+      - name: Associate reused image with this Git tree
+        if: steps.existing.outputs.found == 'true' && steps.existing.outputs.tree_found != 'true'
+        shell: bash
+        env:
+          IMAGE: ${{ steps.resolve.outputs.image }}
+          TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
+        run: docker buildx imagetools create --tag "$TREE_TAG" "$IMAGE"
+
   frontend:
     name: Frontend
     runs-on: blacksmith-32vcpu-ubuntu-2404
@@ -68,32 +338,46 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-lix-sdk-
 
-      - name: Validate Docker submodule fallbacks
-        run: pnpm check:docker-submodule-pins --verify-archives
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare generated dependencies
+        run: pnpm --dir web-app ci:prepare
+
       - name: Test performance harness
         run: pnpm perf:test
+
+      - name: Test CI scripts
+        run: pnpm test:ci-scripts
+
+      - name: Test production canary
+        run: pnpm test:production-canary
 
       - name: Check formatting
         run: pnpm --dir web-app format:check
 
       - name: Lint
-        run: pnpm --dir web-app lint
+        run: pnpm --dir web-app ci:lint
 
       - name: Typecheck and test frontend
-        run: pnpm --dir web-app check:cloudflare
+        run: pnpm --dir web-app ci:check
+
+      - name: Restore browser Lix SDK
+        run: pnpm --dir web-app lix:build
 
       - name: Build frontend
-        run: pnpm --dir web-app build
+        run: pnpm --dir web-app ci:build
 
       - name: Build Railway target
         env:
           VITE_SUPABASE_URL: https://example.invalid
           VITE_SUPABASE_KEY: ci-public-placeholder
-        run: pnpm --dir web-app build:node
+        run: pnpm --dir web-app ci:build:node
 
       - name: Verify generated files are committed
         run: git diff --exit-code
@@ -133,8 +417,14 @@ jobs:
       - name: Test database policies and functions
         working-directory: database
         run: |
+          supabase stop --no-backup || true
           supabase start --exclude edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector
           supabase test db
+
+      - name: Stop local database
+        if: always()
+        working-directory: database
+        run: supabase stop --no-backup
 
   rust:
     name: Rust
@@ -168,6 +458,9 @@ jobs:
     name: E2E
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Check out repository
@@ -201,13 +494,54 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-lix-sdk-
 
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for the content-addressed server image
+        id: server-image
+        shell: bash
+        run: |
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server"
+          tag="$repository:tree-$tree"
+
+          for attempt in $(seq 1 75); do
+            if digest="$(
+              docker buildx imagetools inspect "$tag" \
+                --format '{{json .Manifest.Digest}}' 2>/dev/null |
+                tr -d '"'
+            )" && test -n "$digest"; then
+              image="$repository@$digest"
+              docker pull "$image"
+              echo "image=$image" >> "$GITHUB_OUTPUT"
+              echo "Testing $image"
+              exit 0
+            fi
+            echo "Waiting for server image $tag ($attempt/75)"
+            sleep 10
+          done
+
+          echo "Server image $tag was not published within 12.5 minutes." >&2
+          exit 1
+
       - name: Run Compose e2e tests
+        env:
+          LIXRAY_SERVER_IMAGE: ${{ steps.server-image.outputs.image }}
         run: pnpm test:e2e
 
       - name: Upload Playwright failure artifacts
@@ -227,6 +561,8 @@ jobs:
       - database
       - rust
       - e2e
+      - server-image
+      - web-image
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 5
 
@@ -239,56 +575,262 @@ jobs:
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
         run: exit 1
 
-  deploy-database:
-    name: Deploy production database
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  deploy-server-preview:
+    name: Deploy server preview
+    if: github.event_name == 'pull_request'
     needs:
       - ci
+      - server-image
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      statuses: write
 
     steps:
-      - name: Check out the tested commit
-        uses: actions/checkout@v4
-
-      - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v1
-        with:
-          version: 2.109.1
-
-      - name: Validate production configuration
+      - name: Check Infisical configuration
+        id: infisical
+        shell: bash
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          INFISICAL_IDENTITY_ID: ${{ vars.INFISICAL_PREVIEW_IDENTITY_ID }}
+          INFISICAL_PROJECT_SLUG: ${{ vars.INFISICAL_PROJECT_SLUG }}
         run: |
-          test -n "$SUPABASE_ACCESS_TOKEN"
-          test -n "$SUPABASE_PROJECT_REF"
-          test -n "$SUPABASE_DB_PASSWORD"
+          if test -n "$INFISICAL_IDENTITY_ID" &&
+             test -n "$INFISICAL_PROJECT_SLUG"; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping Railway preview promotion; configure the Infisical Actions variables documented in README.md."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Link production project
-        working-directory: database
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD" --yes
+      - name: Fetch deployment secrets from Infisical
+        if: steps.infisical.outputs.available == 'true'
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PREVIEW_IDENTITY_ID }}
+          oidc-audience: https://github.com/opral
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: /ci
 
-      - name: Preview production migrations
-        working-directory: database
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push --linked --dry-run
+      - name: Check deployment credentials
+        if: steps.infisical.outputs.available == 'true'
+        id: credentials
+        shell: bash
+        run: |
+          test -n "$RAILWAY_API_TOKEN"
+          test -n "$RAILWAY_PROJECT_ID"
+          test -n "$RAILWAY_PRODUCTION_ENVIRONMENT"
+          test -n "$RAILWAY_SERVER_SERVICE"
+          test -n "$GHCR_READ_USERNAME"
+          test -n "$GHCR_READ_TOKEN"
+          echo "available=true" >> "$GITHUB_OUTPUT"
 
-      - name: Apply production migrations
-        working-directory: database
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push --linked
+      - name: Set up Node.js
+        if: steps.credentials.outputs.available == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Confirm production has no pending migrations
-        working-directory: database
+      - name: Set up Railway CLI
+        if: steps.credentials.outputs.available == 'true'
+        run: npm install --global @railway/cli@5.30.1
+
+      - name: Require image-managed server service
+        if: steps.credentials.outputs.available == 'true'
+        shell: bash
+        run: |
+          service="$(
+            railway service list \
+              --project "$RAILWAY_PROJECT_ID" \
+              --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
+              --json |
+              jq -c --arg id "$RAILWAY_SERVER_SERVICE" \
+                '.[] | select(.id == $id)'
+          )"
+          test -n "$service"
+          if test "$(jq -r '.source.repo // empty' <<<"$service")" != "" ||
+             test "$(jq -r '.source.image // empty' <<<"$service")" = ""; then
+            echo "The Railway server must remain image-managed so GitHub CI is the only server build path." >&2
+            exit 1
+          fi
+
+      - name: Find Railway PR environment
+        if: steps.credentials.outputs.available == 'true'
+        id: environment
+        shell: bash
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase db push --linked --dry-run
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if ! response="$(
+              jq -n \
+                --arg query 'query($id: String!) { project(id: $id) { environments { edges { node { id isEphemeral meta { prNumber } } } } } }' \
+                --arg project_id "$RAILWAY_PROJECT_ID" \
+                '{query: $query, variables: {id: $project_id}}' |
+                curl --fail --silent --show-error \
+                  --request POST \
+                  --url https://backboard.railway.com/graphql/v2 \
+                  --header "Authorization: Bearer $RAILWAY_API_TOKEN" \
+                  --header "Content-Type: application/json" \
+                  --data-binary @-
+            )"; then
+              echo "::warning::Railway environment lookup failed on attempt $attempt; retrying."
+              sleep 10
+              continue
+            fi
+            if jq -e '.errors | length > 0' <<<"$response" >/dev/null; then
+              jq -r '.errors[].message' <<<"$response" >&2
+              exit 1
+            fi
+            environment_id="$(
+              jq -r --argjson pr "$PR_NUMBER" \
+                '.data.project.environments.edges[].node |
+                  select(.isEphemeral and .meta.prNumber == $pr) |
+                  .id' <<<"$response" |
+                head -n 1
+            )"
+            if test -n "$environment_id"; then
+              echo "id=$environment_id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Railway did not create an environment for PR #$PR_NUMBER within 5 minutes." >&2
+          exit 1
+
+      - name: Promote tested image to preview
+        if: steps.credentials.outputs.available == 'true'
+        shell: bash
+        env:
+          IMAGE: ${{ needs.server-image.outputs.image }}
+          ENVIRONMENT_ID: ${{ steps.environment.outputs.id }}
+        run: |
+          update_response="$(
+            jq -n \
+              --arg query 'mutation($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input) }' \
+              --arg service_id "$RAILWAY_SERVER_SERVICE" \
+              --arg environment_id "$ENVIRONMENT_ID" \
+              --arg image "$IMAGE" \
+              --arg username "$GHCR_READ_USERNAME" \
+              --arg password "$GHCR_READ_TOKEN" \
+              '{
+                query: $query,
+                variables: {
+                  serviceId: $service_id,
+                  environmentId: $environment_id,
+                  input: {
+                    source: {image: $image},
+                    registryCredentials: {
+                      username: $username,
+                      password: $password
+                    }
+                  }
+                }
+              }' |
+              curl --fail --silent --show-error \
+                --request POST \
+                --url https://backboard.railway.com/graphql/v2 \
+                --header "Authorization: Bearer $RAILWAY_API_TOKEN" \
+                --header "Content-Type: application/json" \
+                --data-binary @-
+          )"
+          if jq -e '.errors | length > 0' <<<"$update_response" >/dev/null; then
+            jq -r '.errors[].message' <<<"$update_response" >&2
+            exit 1
+          fi
+          test "$(jq -r '.data.serviceInstanceUpdate' <<<"$update_response")" = true
+          for promotion_attempt in 1 2; do
+            previous_deployment=""
+            if deployment="$(
+              railway deployment list \
+                --project "$RAILWAY_PROJECT_ID" \
+                --environment "$ENVIRONMENT_ID" \
+                --service "$RAILWAY_SERVER_SERVICE" \
+                --limit 1 \
+                --json
+            )"; then
+              previous_deployment="$(jq -r '.[0].id // empty' <<<"$deployment")"
+            else
+              echo "::warning::Could not read the previous Railway deployment; continuing with promotion."
+            fi
+
+            deploy_response="$(
+              jq -n \
+                --arg query 'mutation($serviceId: String!, $environmentId: String!) { serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId) }' \
+                --arg service_id "$RAILWAY_SERVER_SERVICE" \
+                --arg environment_id "$ENVIRONMENT_ID" \
+                '{
+                  query: $query,
+                  variables: {
+                    serviceId: $service_id,
+                    environmentId: $environment_id
+                  }
+                }' |
+                curl --fail --silent --show-error \
+                  --request POST \
+                  --url https://backboard.railway.com/graphql/v2 \
+                  --header "Authorization: Bearer $RAILWAY_API_TOKEN" \
+                  --header "Content-Type: application/json" \
+                  --data-binary @-
+            )"
+            if jq -e '.errors | length > 0' <<<"$deploy_response" >/dev/null; then
+              jq -r '.errors[].message' <<<"$deploy_response" >&2
+              exit 1
+            fi
+            test "$(jq -r '.data.serviceInstanceDeploy' <<<"$deploy_response")" = true
+
+            terminal_status=""
+            for status_attempt in $(seq 1 30); do
+              if ! deployment="$(
+                railway deployment list \
+                  --project "$RAILWAY_PROJECT_ID" \
+                  --environment "$ENVIRONMENT_ID" \
+                  --service "$RAILWAY_SERVER_SERVICE" \
+                  --limit 1 \
+                  --json
+              )"; then
+                echo "::warning::Railway deployment lookup failed on attempt $status_attempt; retrying."
+                sleep 10
+                continue
+              fi
+              deployment_id="$(jq -r '.[0].id // empty' <<<"$deployment")"
+              status="$(jq -r '.[0].status // empty' <<<"$deployment")"
+              if test -n "$deployment_id" && test "$deployment_id" != "$previous_deployment"; then
+                case "$status" in
+                  SUCCESS)
+                    echo "Railway preview is running $IMAGE"
+                    exit 0
+                    ;;
+                  FAILED|CRASHED|REMOVED)
+                    terminal_status="$status"
+                    break
+                    ;;
+                esac
+              fi
+              sleep 10
+            done
+
+            if test "$promotion_attempt" -lt 2; then
+              echo "::warning::Railway preview attempt ended with ${terminal_status:-a timeout}; retrying once."
+              sleep 10
+              continue
+            fi
+            echo "Railway preview failed after two attempts; final status: ${terminal_status:-timeout}." >&2
+            exit 1
+          done
+
+      - name: Report server preview status
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
+            --field state=success \
+            --field context='lixray - lix-server' \
+            --field description='Success - tested image deployed by GitHub Actions' \
+            --field target_url='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'

@@ -280,8 +280,8 @@ export function useFileMarkdown(lix: Lix, path: string | null): string | null {
 		const row = rows[0];
 		const bytes = row?.value("content").asBytes();
 		if (bytes) return new TextDecoder().decode(bytes);
-		const content = row?.get("content");
-		if (typeof content === "string") return content;
+		const data = row?.get("content");
+		if (typeof data === "string") return data;
 		return null;
 	}, [path, rows]);
 }

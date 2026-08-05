@@ -1,4 +1,5 @@
 use crate::store::{LixRuntimeError, LixService};
+use crate::telemetry::InFlightSqlRegistry;
 use crate::LixRuntimeManager;
 use axum::{
     body::Body,
@@ -12,9 +13,12 @@ use serde::Serialize;
 use serde_json::json;
 use std::{
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tower::ServiceExt;
 use tracing::Instrument as _;
@@ -22,11 +26,19 @@ use tracing::Instrument as _;
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER: &str = "x-lixray-idempotency-principal";
 const MAX_TRUSTED_IDEMPOTENCY_PRINCIPAL_BYTES: usize = 255;
 
+struct TrustedRequestPrincipal {
+    account_id: String,
+    idempotency_scope: lix_server_protocol::TrustedIdempotencyScope,
+}
+
 #[derive(Clone)]
 struct AppState {
     manager: Arc<LixRuntimeManager>,
     internal_token: Option<Arc<str>>,
     protocol_timeout: Duration,
+    request_id_key: [u8; 32],
+    request_sequence: Arc<AtomicU64>,
+    in_flight_sql: InFlightSqlRegistry,
 }
 
 struct TracedBody {
@@ -165,7 +177,9 @@ pub fn router(
     manager: Arc<LixRuntimeManager>,
     internal_token: Option<String>,
     protocol_timeout: Duration,
+    in_flight_sql: InFlightSqlRegistry,
 ) -> Router {
+    let request_id_key = protocol_request_id_key(internal_token.as_deref());
     Router::new()
         .route("/healthz", get(healthz))
         .route("/lixes/{lix_id}/{*protocol_path}", any(lix_protocol))
@@ -173,6 +187,9 @@ pub fn router(
             manager,
             internal_token: internal_token.map(Arc::from),
             protocol_timeout,
+            request_id_key,
+            request_sequence: Arc::new(AtomicU64::new(0)),
+            in_flight_sql,
         })
 }
 
@@ -202,6 +219,7 @@ async fn lix_protocol(
     Path((lix_id, protocol_path)): Path<(String, String)>,
     request: Request<Body>,
 ) -> Response {
+    let request_id = protocol_request_id(&state, &lix_id, &protocol_path);
     let span = tracing::info_span!(
         "lix.protocol.request",
         "otel.name" = "Lix protocol request",
@@ -210,13 +228,22 @@ async fn lix_protocol(
         "http.route" = "/lixes/{lix_id}/{*protocol_path}",
         "lix.lix.id" = %lix_id,
         "lix.protocol.path" = %protocol_path,
+        "lix.request.id" = %request_id,
+        "lix.request.phase" = tracing::field::Empty,
+        "lix.sql.active.count" = tracing::field::Empty,
+        "lix.sql.active.operations" = tracing::field::Empty,
+        "lix.sql.active.execution_kinds" = tracing::field::Empty,
+        "lix.sql.active.fingerprints" = tracing::field::Empty,
         "http.response.status_code" = tracing::field::Empty,
         "lix.error.code" = tracing::field::Empty,
         "otel.status_code" = tracing::field::Empty,
     );
-    let response = lix_protocol_inner(state, lix_id, protocol_path, request)
+    let response = lix_protocol_inner(state, lix_id, protocol_path, request_id, request)
         .instrument(span.clone())
         .await;
+    if response.status() != StatusCode::GATEWAY_TIMEOUT {
+        span.record("lix.request.phase", "completed");
+    }
     span.record("http.response.status_code", response.status().as_u16());
     if response.status().is_server_error() {
         span.record("otel.status_code", "ERROR");
@@ -229,8 +256,16 @@ async fn lix_protocol_inner(
     state: AppState,
     lix_id: String,
     protocol_path: String,
+    request_id: String,
     mut request: Request<Body>,
 ) -> Response {
+    tracing::info!(
+        request_id,
+        lix_id,
+        protocol_path,
+        method = %request.method(),
+        "protocol request started"
+    );
     if !authorized(request.headers(), state.internal_token.as_deref()) {
         let mut response = protocol_error(
             StatusCode::UNAUTHORIZED,
@@ -245,8 +280,8 @@ async fn lix_protocol_inner(
         return response;
     }
 
-    let trusted_idempotency_scope = match take_trusted_idempotency_scope(&mut request) {
-        Ok(scope) => scope,
+    let trusted_principal = match take_trusted_principal(&mut request) {
+        Ok(principal) => principal,
         Err(message) => {
             return protocol_error(
                 StatusCode::BAD_REQUEST,
@@ -257,8 +292,18 @@ async fn lix_protocol_inner(
             );
         }
     };
-    if let Some(scope) = trusted_idempotency_scope {
-        request.extensions_mut().insert(scope);
+    let active_account_id = trusted_principal
+        .as_ref()
+        // Demo authentication is not a durable Supabase identity. Keep demo
+        // writes attributable to the built-in anonymous account while still
+        // retaining its principal for idempotency isolation.
+        .filter(|principal| principal.account_id != "lixray-demo")
+        .map(|principal| principal.account_id.clone());
+    let expected_account_id = active_account_id
+        .clone()
+        .unwrap_or_else(|| lix_sdk::ANONYMOUS_ACCOUNT_ID.to_string());
+    if let Some(principal) = trusted_principal {
+        request.extensions_mut().insert(principal.idempotency_scope);
     }
     let runtime =
         match tokio::time::timeout(state.protocol_timeout, state.manager.get(&lix_id)).await {
@@ -276,10 +321,37 @@ async fn lix_protocol_inner(
             }
         };
 
-    let path_and_query = match request.uri().query() {
-        Some(query) => format!("/{protocol_path}?{query}"),
-        None => format!("/{protocol_path}"),
-    };
+    let creates_session = request.method() == axum::http::Method::GET
+        && protocol_path.trim_end_matches('/') == "lix/v1"
+        && !request.headers().contains_key("lix-session-id");
+    if creates_session {
+        if let Some(account_id) = active_account_id.as_deref() {
+            if let Err(error) = runtime.ensure_human_account(account_id).await {
+                tracing::error!(
+                    lix_id,
+                    account_id,
+                    error = %error,
+                    "failed to provision authenticated Lix account"
+                );
+                return protocol_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "LIX_ACCOUNT_PROVISION_FAILED",
+                    "Could not provision the authenticated account.",
+                    None,
+                    None,
+                );
+            }
+        }
+    }
+
+    let query = protocol_query(
+        request.uri().query(),
+        creates_session.then_some(active_account_id).flatten(),
+    );
+    let path_and_query = query.map_or_else(
+        || format!("/{protocol_path}"),
+        |query| format!("/{protocol_path}?{query}"),
+    );
     let Ok(uri) = path_and_query.parse::<Uri>() else {
         return protocol_error(
             StatusCode::BAD_REQUEST,
@@ -293,6 +365,11 @@ async fn lix_protocol_inner(
 
     let (notifier, signal) = lix_server_protocol::durable_terminal_storage_signal();
     request.extensions_mut().insert(notifier);
+    request
+        .extensions_mut()
+        .insert(lix_server_protocol::TrustedActiveAccountId::new(
+            expected_account_id,
+        ));
     let mut cancellation_recovery = CancellationRecovery::new(
         signal,
         Arc::clone(&state.manager),
@@ -308,8 +385,32 @@ async fn lix_protocol_inner(
     let response = match tokio::time::timeout(state.protocol_timeout, handler_future).await {
         Ok(response) => response.expect("canonical Lix protocol router is infallible"),
         Err(_elapsed) => {
+            let activities = state.in_flight_sql.current();
+            let phase = if activities.is_empty() {
+                "protocol_handler"
+            } else {
+                "sql_execution"
+            };
+            let operations =
+                sql_activity_values(&activities, |activity| activity.operation.as_deref());
+            let execution_kinds =
+                sql_activity_values(&activities, |activity| activity.execution_kind.as_deref());
+            let fingerprints =
+                sql_activity_values(&activities, |activity| activity.fingerprint.as_deref());
+            let span = tracing::Span::current();
+            span.record("lix.request.phase", phase);
+            span.record("lix.sql.active.count", activities.len() as u64);
+            span.record("lix.sql.active.operations", operations.as_str());
+            span.record("lix.sql.active.execution_kinds", execution_kinds.as_str());
+            span.record("lix.sql.active.fingerprints", fingerprints.as_str());
             tracing::warn!(
                 lix_id,
+                request_id,
+                phase,
+                active_sql_count = activities.len(),
+                active_sql_operations = operations,
+                active_sql_execution_kinds = execution_kinds,
+                active_sql_fingerprints = fingerprints,
                 timeout_secs = state.protocol_timeout.as_secs(),
                 "protocol request exceeded its deadline; recovering runtime"
             );
@@ -368,9 +469,51 @@ async fn lix_protocol_inner(
     }
 }
 
-fn take_trusted_idempotency_scope(
+fn protocol_request_id_key(internal_token: Option<&str>) -> [u8; 32] {
+    blake3::derive_key(
+        "lixray protocol request identity v1",
+        internal_token.unwrap_or("local-development").as_bytes(),
+    )
+}
+
+fn protocol_request_id(state: &AppState, lix_id: &str, protocol_path: &str) -> String {
+    let sequence = state.request_sequence.fetch_add(1, Ordering::Relaxed);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut hasher = blake3::Hasher::new_keyed(&state.request_id_key);
+    hasher.update(b"lixray.protocol.request.v1\0");
+    hasher.update(&timestamp.to_le_bytes());
+    hasher.update(&sequence.to_le_bytes());
+    hasher.update(lix_id.as_bytes());
+    hasher.update(protocol_path.as_bytes());
+    hasher.finalize().to_hex().as_str()[..24].to_string()
+}
+
+fn sql_activity_values<'a>(
+    activities: &'a [crate::telemetry::InFlightSqlActivity],
+    value: impl Fn(&'a crate::telemetry::InFlightSqlActivity) -> Option<&'a str>,
+) -> String {
+    let mut values = Vec::new();
+    for activity in activities {
+        let Some(value) = value(activity) else {
+            continue;
+        };
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    if values.is_empty() {
+        "unavailable".to_string()
+    } else {
+        values.join(",")
+    }
+}
+
+fn take_trusted_principal(
     request: &mut Request<Body>,
-) -> Result<Option<lix_server_protocol::TrustedIdempotencyScope>, &'static str> {
+) -> Result<Option<TrustedRequestPrincipal>, &'static str> {
     let value = {
         let mut values = request
             .headers()
@@ -401,9 +544,27 @@ fn take_trusted_idempotency_scope(
             "Trusted idempotency principal must contain 1 to 255 visible ASCII characters.",
         );
     }
-    Ok(Some(lix_server_protocol::TrustedIdempotencyScope::new(
-        value.to_string(),
-    )))
+    let account_id = value.to_string();
+    Ok(Some(TrustedRequestPrincipal {
+        idempotency_scope: lix_server_protocol::TrustedIdempotencyScope::new(account_id.clone()),
+        account_id,
+    }))
+}
+
+fn protocol_query(existing: Option<&str>, active_account_id: Option<String>) -> Option<String> {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(existing) = existing {
+        for (key, value) in url::form_urlencoded::parse(existing.as_bytes()) {
+            if key != "activeAccountId" {
+                serializer.append_pair(&key, &value);
+            }
+        }
+    }
+    if let Some(account_id) = active_account_id {
+        serializer.append_pair("activeAccountId", &account_id);
+    }
+    let query = serializer.finish();
+    (!query.is_empty()).then_some(query)
 }
 
 fn protocol_timeout_response() -> Response {
@@ -615,7 +776,12 @@ mod tests {
 
     fn test_router() -> Router {
         let manager = LixRuntimeManager::new_in_memory(4);
-        router(manager, None, TEST_PROTOCOL_TIMEOUT)
+        router(
+            manager,
+            None,
+            TEST_PROTOCOL_TIMEOUT,
+            InFlightSqlRegistry::default(),
+        )
     }
 
     async fn json_body(response: Response) -> JsonValue {
@@ -657,7 +823,96 @@ mod tests {
         assert_eq!(handshake.status(), StatusCode::OK);
         let handshake = json_body(handshake).await;
         assert_eq!(handshake["protocolVersion"], json!(2));
+        assert_eq!(
+            handshake["activeAccountId"],
+            json!(lix_sdk::ANONYMOUS_ACCOUNT_ID)
+        );
         assert!(handshake["sessionId"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn trusted_account_is_provisioned_bound_and_attributed_end_to_end() {
+        const ACCOUNT_ID: &str = "01920000-0000-7000-8000-000000000601";
+        const OTHER_ACCOUNT_ID: &str = "01920000-0000-7000-8000-000000000602";
+        let app = test_router();
+        let handshake = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/lixes/account-e2e/lix/v1/?activeAccountId=spoofed")
+                    .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
+                    .body(Body::empty())
+                    .expect("trusted handshake request"),
+            )
+            .await
+            .expect("trusted handshake response");
+        assert_eq!(handshake.status(), StatusCode::OK);
+        let handshake = json_body(handshake).await;
+        assert_eq!(handshake["activeAccountId"], ACCOUNT_ID);
+        let session_id = handshake["sessionId"].as_str().expect("session id");
+
+        let insert = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/lixes/account-e2e/lix/v1/execute")
+                    .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(lix_server_protocol::IDEMPOTENCY_KEY_HEADER, "account-e2e-insert")
+                    .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"INSERT INTO lix_key_value (key, value) VALUES ('account-e2e', lix_json('true'))"}"#,
+                    ))
+                    .expect("attributed insert request"),
+            )
+            .await
+            .expect("attributed insert response");
+        assert_eq!(
+            insert.status(),
+            StatusCode::OK,
+            "{:?}",
+            json_body(insert).await
+        );
+
+        let attribution = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/lixes/account-e2e/lix/v1/execute")
+                    .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"SELECT account_id FROM lix_change WHERE schema_key = 'lix_key_value' ORDER BY created_at DESC LIMIT 1"}"#,
+                    ))
+                    .expect("attribution query request"),
+            )
+            .await
+            .expect("attribution query response");
+        assert_eq!(attribution.status(), StatusCode::OK);
+        assert_eq!(
+            json_body(attribution).await["rows"][0][0]["value"],
+            ACCOUNT_ID
+        );
+
+        let cross_account = app
+            .oneshot(
+                Request::builder()
+                    .uri("/lixes/account-e2e/lix/v1/")
+                    .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, OTHER_ACCOUNT_ID)
+                    .body(Body::empty())
+                    .expect("cross-account resume request"),
+            )
+            .await
+            .expect("cross-account resume response");
+        assert_eq!(cross_account.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            json_body(cross_account).await["error"]["code"],
+            "LIX_ERROR_PROTOCOL_ACCOUNT_MISMATCH"
+        );
     }
 
     #[tokio::test]
@@ -687,7 +942,12 @@ mod tests {
     #[tokio::test]
     async fn internal_token_protects_lix_routes() {
         let manager = LixRuntimeManager::new_in_memory(4);
-        let app = router(manager, Some("secret".to_string()), TEST_PROTOCOL_TIMEOUT);
+        let app = router(
+            manager,
+            Some("secret".to_string()),
+            TEST_PROTOCOL_TIMEOUT,
+            InFlightSqlRegistry::default(),
+        );
 
         let unauthorized = app
             .clone()
@@ -1008,10 +1268,11 @@ mod tests {
             .body(Body::empty())
             .expect("trusted scope request");
 
-        let scope = take_trusted_idempotency_scope(&mut request)
+        let principal = take_trusted_principal(&mut request)
             .expect("valid trusted scope")
             .expect("trusted scope should be present");
-        request.extensions_mut().insert(scope);
+        assert_eq!(principal.account_id, "user-123");
+        request.extensions_mut().insert(principal.idempotency_scope);
 
         assert!(request
             .headers()
@@ -1021,6 +1282,26 @@ mod tests {
             .extensions()
             .get::<lix_server_protocol::TrustedIdempotencyScope>()
             .is_some());
+    }
+
+    #[test]
+    fn trusted_account_overrides_handshake_query() {
+        let query = protocol_query(
+            Some("activeBranchId=draft&activeAccountId=spoofed"),
+            Some("01920000-0000-7000-8000-000000000601".to_string()),
+        )
+        .expect("handshake query");
+        let values = url::form_urlencoded::parse(query.as_bytes())
+            .into_owned()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            values.get("activeBranchId").map(String::as_str),
+            Some("draft")
+        );
+        assert_eq!(
+            values.get("activeAccountId").map(String::as_str),
+            Some("01920000-0000-7000-8000-000000000601")
+        );
     }
 
     #[tokio::test]

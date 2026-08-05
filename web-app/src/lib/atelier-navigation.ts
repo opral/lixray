@@ -1,4 +1,4 @@
-const FILE_NOT_FOUND_PREFIX = "File not found in the opened workspace: ";
+const FILE_NOT_FOUND_PREFIX = "File not found in the opened repository: ";
 
 export function isAtelierFileNotFoundError(
 	error: unknown,

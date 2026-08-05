@@ -18,6 +18,7 @@ export const operationNames = Object.freeze([
   "read-point-4k",
   "read-point-32k",
   "read-point-2m",
+  "read-range-256k-2m",
   "list-paths-100",
   "diff-file-history",
   "branch-create",
@@ -58,9 +59,12 @@ export function isMutationOperation(operation) {
 }
 
 export function isPointFileReadOperation(operation) {
-  return ["read-point-4k", "read-point-32k", "read-point-2m"].includes(
-    operation,
-  );
+  return [
+    "read-point-4k",
+    "read-point-32k",
+    "read-point-2m",
+    "read-range-256k-2m",
+  ].includes(operation);
 }
 
 export function minimumTotalCommitsForOperation(operation, corpusFiles) {
@@ -71,11 +75,13 @@ export function minimumTotalCommitsForOperation(operation, corpusFiles) {
 }
 
 function fixtureForOperation(operation) {
-  return operation === "read-point-2m" ? buildReadPoint2mFixture() : null;
+  return ["read-point-2m", "read-range-256k-2m"].includes(operation)
+    ? buildReadPoint2mFixture()
+    : null;
 }
 
 function fixtureSeedCommitCountForOperation(operation) {
-  return operation === "read-point-2m" ? 1 : 0;
+  return ["read-point-2m", "read-range-256k-2m"].includes(operation) ? 1 : 0;
 }
 
 function fixtureSeedCommitCountForFixture(fixture) {
@@ -150,6 +156,9 @@ export async function runBenchmark(
     throw new Error(
       "fileReadTransport: binary is only valid for exact point-read operations",
     );
+  }
+  if (operation === "read-range-256k-2m" && fileReadTransport !== "binary") {
+    throw new Error("read-range-256k-2m requires fileReadTransport: binary");
   }
   if (
     ["update-mixed-native-single", "update-mixed-native-batch"].includes(
@@ -533,7 +542,7 @@ export async function seedCorpus(
 
   if (fixture) {
     const result = await protocol.execute(
-      "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+      "INSERT INTO lix_file (path, content) VALUES ($1, $2)",
       [wireText(fixture.path), wireBlob(fixture.data)],
     );
     assertRowsAffected(result.value, 1, "targeted fixture insert");
@@ -558,7 +567,7 @@ export async function seedCorpus(
     // Keep history seeding distinct from the timed update in the SQL plan
     // cache without relying on DML target aliases, which Lix does not support.
     const result = await protocol.execute(
-      "UPDATE lix_file SET data = $2 WHERE path = $1",
+      "UPDATE lix_file SET content = $2 WHERE path = $1",
       [wireText(file.path), wireBlob(data)],
     );
     assertRowsAffected(result.value, 1, "history extension");
@@ -670,6 +679,37 @@ function prepareOperation(
       cases,
       fileReadTransport,
     );
+  }
+
+  if (name === "read-range-256k-2m") {
+    if (!fixture) {
+      throw new Error("read-range-256k-2m requires its targeted binary fixture");
+    }
+    const range = Object.freeze({
+      start: 768 * 1024,
+      endExclusive: 1024 * 1024,
+    });
+    const expected = fixture.data.subarray(range.start, range.endExclusive);
+    return {
+      description:
+        "read one bounded 256 KiB range from a deterministic 2 MiB binary fixture",
+      mutates: false,
+      corpusFileDelta: 0,
+      fileReadTransport: "binary",
+      fileReadPayloadBytes: expected.byteLength,
+      timingBoundary:
+        "ranged raw GET construction through selected response-body materialization",
+      preconditionDescription:
+        "unrelated exact-path reads through the raw binary endpoint before the timed range read",
+      preconditionExcludedPaths: new Set([fixture.path]),
+      preconditionRead: readPointFileBinary,
+      preconditionAssert: assertNativeFileRead,
+      execute: (protocol) => protocol.readFileData(fixture.path, range),
+      assert: (result) => {
+        assertNativeFileRange(result, fixture.path, expected, range, fixture.data.length);
+      },
+      verify: async () => {},
+    };
   }
 
   if (name === "list-paths-100") {
@@ -1045,7 +1085,7 @@ async function readPointFileJson(protocol, expected) {
     return protocol.readFileDataJson(expected.path);
   }
   const response = await protocol.execute(
-    "SELECT path, data FROM lix_file WHERE path = $1",
+    "SELECT path, content FROM lix_file WHERE path = $1",
     [wireText(expected.path)],
   );
   const base64 = response.value?.rows?.[0]?.[1]?.base64;
@@ -1134,7 +1174,7 @@ async function readPostTimingAccounting(protocol) {
 
 async function verifyFile(protocol, expected) {
   const result = await protocol.execute(
-    "SELECT path, data FROM lix_file WHERE path = $1",
+    "SELECT path, content FROM lix_file WHERE path = $1",
     [wireText(expected.path)],
   );
   assertFileRow(result.value, expected);
@@ -1159,7 +1199,7 @@ function fileInsertStatement(files) {
     params.push(wireText(file.path), wireBlob(file.data));
   }
   return {
-    sql: `INSERT INTO lix_file (path, data) VALUES ${values.join(", ")}`,
+    sql: `INSERT INTO lix_file (path, content) VALUES ${values.join(", ")}`,
     params,
   };
 }
@@ -1239,6 +1279,21 @@ function assertNativeFileRead(result, expected) {
   if (!result.data.equals(expected.data)) {
     throw new Error(
       `native point read returned the wrong data for ${expected.path}`,
+    );
+  }
+}
+
+function assertNativeFileRange(result, path, expectedData, range, totalSize) {
+  if (result?.found !== true || !Buffer.isBuffer(result.data)) {
+    throw new Error(`native range read did not return bytes for ${path}`);
+  }
+  if (!result.data.equals(expectedData)) {
+    throw new Error(`native range read returned the wrong data for ${path}`);
+  }
+  const expectedContentRange = `bytes ${range.start}-${range.endExclusive - 1}/${totalSize}`;
+  if (result.contentRange !== expectedContentRange) {
+    throw new Error(
+      `native range read returned ${result.contentRange}; expected ${expectedContentRange}`,
     );
   }
 }

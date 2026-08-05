@@ -70,7 +70,7 @@ function AuthCallbackPage() {
 						}
 					} catch (caught) {
 						stageWorkspaceShareJoinError(
-							`${caught instanceof Error ? caught.message : "Unable to join this workspace."} Select Join to edit to try again.`,
+							`${caught instanceof Error ? caught.message : "Unable to join this repository."} Select Join to edit to try again.`,
 						);
 					}
 				}

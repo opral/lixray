@@ -14,7 +14,7 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 		return Response.json({
 			protocolVersion: 2,
 			activeBranchId: "main",
-			activeAccountId: "account-1",
+			activeAccountId: "00000000-0000-7000-8000-000000000002",
 			sessionId: "runtime-client-session",
 		});
 	}

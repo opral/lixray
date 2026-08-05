@@ -145,26 +145,26 @@ export class ProtocolClient {
       const text = { kind: "text", value: path };
       if (shape === "insert") {
         return {
-          sql: "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+          sql: "INSERT INTO lix_file (path, content) VALUES ($1, $2)",
           params: [text, blob],
         };
       }
       if (shape === "upsert") {
         return {
           sql:
-            "INSERT INTO lix_file (path, data) VALUES ($1, $2) " +
-            "ON CONFLICT (path) DO UPDATE SET data = excluded.data",
+            "INSERT INTO lix_file (path, content) VALUES ($1, $2) " +
+            "ON CONFLICT (path) DO UPDATE SET content = excluded.content",
           params: [text, blob],
         };
       }
       return {
-        sql: "UPDATE lix_file SET data = $1 WHERE path = $2",
+        sql: "UPDATE lix_file SET content = $1 WHERE path = $2",
         params: [blob, text],
       };
     }, { idempotencyKey: idempotencyKeyFor(idempotencyKey) });
   }
 
-  upsertFileData(path, data) {
+  upsertFileData(path, data, upload = undefined) {
     this.requireSession();
     if (typeof path !== "string" || path.length === 0) {
       throw new TypeError("upsertFileData path must be a non-empty string");
@@ -172,11 +172,55 @@ export class ProtocolClient {
     if (!Buffer.isBuffer(data)) {
       throw new TypeError("upsertFileData data must be a Buffer");
     }
+    if (upload === undefined) {
+      return this.requestBinary(
+        `file/upsert?path=${encodeURIComponent(path)}`,
+        "POST",
+        data,
+      );
+    }
+    const { uploadId, start, totalSize } = upload;
+    if (typeof uploadId !== "string" || uploadId.length === 0) {
+      throw new TypeError("upsertFileData uploadId must be a non-empty string");
+    }
+    if (!Number.isSafeInteger(start) || start < 0) {
+      throw new TypeError("upsertFileData start must be a non-negative safe integer");
+    }
+    if (!Number.isSafeInteger(totalSize) || totalSize <= 0) {
+      throw new TypeError("upsertFileData totalSize must be a positive safe integer");
+    }
+    const end = start + data.byteLength - 1;
+    if (data.byteLength === 0 || end >= totalSize) {
+      throw new RangeError("upsertFileData part must fit inside totalSize");
+    }
     return this.requestBinary(
       `file/upsert?path=${encodeURIComponent(path)}`,
       "POST",
       data,
-    );
+      {
+        additionalHeaders: {
+          "lix-upload-id": uploadId,
+          "content-range": `bytes ${start}-${end}/${totalSize}`,
+        },
+        acceptedStatuses: [308],
+      },
+    ).then((result) => {
+      const acknowledged = result.headers.get("range");
+      const nextOffset = acknowledged
+        ? Number.parseInt(
+            acknowledged.slice(acknowledged.lastIndexOf("-") + 1),
+            10,
+          ) + 1
+        : totalSize;
+      return {
+        ...result,
+        value: {
+          ...result.value,
+          finalized: result.status !== 308,
+          nextOffset,
+        },
+      };
+    });
   }
 
   async upsertFileDataBatch(entries) {
@@ -208,7 +252,7 @@ export class ProtocolClient {
     };
   }
 
-  async readFileData(path) {
+  async readFileData(path, range = undefined) {
     // Match execute(): invariant validation is not useful transport work, but
     // URI construction, request dispatch, and body materialization are.
     this.requireSession();
@@ -216,11 +260,28 @@ export class ProtocolClient {
     if (typeof path !== "string" || path.length === 0) {
       throw new TypeError("readFileData path must be a non-empty string");
     }
+    let requestHeaders;
+    if (range !== undefined) {
+      if (
+        !Number.isSafeInteger(range?.start) ||
+        !Number.isSafeInteger(range?.endExclusive) ||
+        range.start < 0 ||
+        range.start >= range.endExclusive
+      ) {
+        throw new RangeError(
+          "readFileData range must contain non-negative safe-integer start and larger endExclusive",
+        );
+      }
+      requestHeaders = {
+        range: `bytes=${range.start}-${range.endExclusive - 1}`,
+      };
+    }
     const started = performance.now();
     return this.requestRawFile(
       `file?path=${encodeURIComponent(path)}`,
       "GET",
       started,
+      requestHeaders,
     );
   }
 
@@ -234,7 +295,7 @@ export class ProtocolClient {
     }
     const started = performance.now();
     const body = JSON.stringify({
-      sql: "SELECT path, data FROM lix_file WHERE path = $1",
+      sql: "SELECT path, content FROM lix_file WHERE path = $1",
       params: [{ kind: "text", value: path }],
     });
     const response = await this.fetchImpl(`${this.endpoint}/execute`, {
@@ -321,7 +382,7 @@ export class ProtocolClient {
     );
   }
 
-  async requestBinary(path, method, body) {
+  async requestBinary(path, method, body, options = {}) {
     const started = performance.now();
     return this.requestEncoded(
       path,
@@ -329,6 +390,9 @@ export class ProtocolClient {
       body,
       "application/octet-stream",
       started,
+      undefined,
+      options.additionalHeaders,
+      options.acceptedStatuses,
     );
   }
 
@@ -357,10 +421,10 @@ export class ProtocolClient {
     );
   }
 
-  async requestRawFile(path, method, started) {
+  async requestRawFile(path, method, started, additionalHeaders = undefined) {
     const response = await this.fetchImpl(`${this.endpoint}/${path}`, {
       method,
-      headers: this.requestHeaders(),
+      headers: { ...this.requestHeaders(), ...additionalHeaders },
     });
     const data = Buffer.from(await response.arrayBuffer());
     const elapsedMs = performance.now() - started;
@@ -389,8 +453,9 @@ export class ProtocolClient {
     if (!found && data.byteLength !== 0) {
       throw new Error(`${method} ${path} returned bytes for a missing file`);
     }
+    const contentRange = response.headers.get("content-range");
     return {
-      value: { found, data },
+      value: { found, data, contentRange },
       elapsedMs,
       requestBytes: 0,
       responseBytes: data.byteLength,
@@ -404,15 +469,20 @@ export class ProtocolClient {
     contentType,
     started,
     idempotencyKey,
+    additionalHeaders = undefined,
+    acceptedStatuses = undefined,
   ) {
     const url = path ? `${this.endpoint}/${path}` : `${this.endpoint}/`;
     const response = await this.fetchImpl(url, {
       method,
-      headers: this.requestHeaders(contentType, idempotencyKey),
+      headers: {
+        ...this.requestHeaders(contentType, idempotencyKey),
+        ...additionalHeaders,
+      },
       body,
     });
     const text = await response.text();
-    if (!response.ok) {
+    if (!response.ok && !acceptedStatuses?.includes(response.status)) {
       throw new ProtocolError(method, path || "/", response.status, text);
     }
     let value = null;
@@ -434,6 +504,8 @@ export class ProtocolClient {
       // not, especially for multi-megabyte controls.
       requestBytes: requestBodyBytes(body),
       responseBytes: Buffer.byteLength(text),
+      status: response.status,
+      headers: response.headers,
     };
   }
 

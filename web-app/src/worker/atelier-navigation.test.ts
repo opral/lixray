@@ -13,7 +13,7 @@ void test("only the requested normalized Atelier not-found path redirects", () =
 
 	assert.equal(
 		isAtelierFileNotFoundError(
-			new Error(`File not found in the opened workspace: ${requestedPath}`),
+			new Error(`File not found in the opened repository: ${requestedPath}`),
 			requestedPath,
 		),
 		true,
@@ -28,14 +28,14 @@ void test("only the requested normalized Atelier not-found path redirects", () =
 	);
 	assert.equal(
 		isAtelierFileNotFoundError(
-			new Error("File not found in the opened workspace: /notes/other.md"),
+			new Error("File not found in the opened repository: /notes/other.md"),
 			requestedPath,
 		),
 		false,
 	);
 	assert.equal(
 		isAtelierFileNotFoundError(
-			new Error("File not found in the opened workspace: /notes/missing.md"),
+			new Error("File not found in the opened repository: /notes/missing.md"),
 			"/notes//draft/../missing.md",
 		),
 		true,
