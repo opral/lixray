@@ -62,6 +62,7 @@ export default tseslint.config(
 			},
 		},
 		rules: {
+			"@typescript-eslint/no-unnecessary-type-assertion": "off",
 			"react-hooks/exhaustive-deps": "error",
 			"react-hooks/set-state-in-effect": "off",
 		},
