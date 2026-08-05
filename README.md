@@ -33,7 +33,8 @@ security proves workspace access before a request reaches `lix-server`.
 
 ## Setup
 
-Requirements: Node.js 22, pnpm 10.13.1, Rust, Docker, and the Supabase CLI.
+Requirements: Node.js 22, pnpm 10.13.1, Rust, Docker, the Supabase CLI, and
+the Infisical CLI authenticated to the LixRay project.
 
 ```sh
 git submodule update --init --recursive
@@ -42,11 +43,12 @@ pnpm dev
 ```
 
 Open `http://127.0.0.1:8787` and choose **Continue as local developer**.
-`pnpm dev` starts Supabase, applies migrations, creates the local account, runs
-the stateful backend services with Compose, and serves the web app with Vite.
+`pnpm dev` loads the Infisical `dev` environment, starts Supabase, applies
+migrations, creates the local account, runs the stateful backend services with
+Compose, and serves the web app with Vite.
 Edits in `web-app` and `vendor/atelier` update through HMR. Ctrl-C stops Vite;
 the backend services remain available for the next run. Use `pnpm dev --down`
-to stop the services, or set `LIXRAY_DEV_PORT` to use another port.
+to stop the services. The local web and MCP endpoint always use port `8787`.
 
 For a hosted Supabase project, link the CLI and apply migrations:
 
@@ -74,7 +76,7 @@ The same acceptance path used by CI is available locally:
 ```sh
 pnpm --dir web-app format:check
 pnpm --dir web-app lint
-pnpm --dir web-app check:cloudflare
+pnpm --dir web-app check
 pnpm --dir web-app build
 cargo fmt --manifest-path lix-server/Cargo.toml --check
 cargo clippy --manifest-path lix-server/Cargo.toml --locked --all-targets --all-features -- -D warnings
@@ -102,7 +104,22 @@ SQL execution. OAuth protected-resource metadata is served from
 `/.well-known/oauth-protected-resource`; MCP access tokens are Supabase ES256
 tokens bound to `https://lixray.com`.
 
-Register LixRay with Codex using:
+For local MCP testing, configure exactly one MCP connection. Remove the
+installed production plugin and connection from the local Codex configuration,
+then register and authenticate the local endpoint:
+
+```sh
+codex plugin remove lixray@personal
+codex mcp remove LixRay
+codex mcp add LixRay_Dev \
+  --url http://127.0.0.1:8787/mcp \
+  --oauth-resource http://127.0.0.1:8787
+codex mcp login LixRay_Dev
+```
+
+Do not keep `LixRay` and `LixRay_Dev` enabled in the same local Codex task.
+
+For production-only Codex configuration, register LixRay using:
 
 ```sh
 codex mcp add LixRay \

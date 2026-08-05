@@ -6,11 +6,9 @@ Create a fast, trustworthy loop for reproducing a slow workspace, measuring its
 queries, improving Lix or `lix-server`, and proving the improvement before
 merge.
 
-Local development and CI use the same Compose `lixray-web -> lix-server ->
-MinIO` path. Railway previews use the portable web and server images with R2.
-The current Cloudflare production deployment is a temporary cutover exception,
-not a local, CI, or preview runtime. We should not maintain an alternate Lix
-runtime for tests or previews.
+Local development, CI, previews, and production use the same portable Compose
+and Railway `lixray-web -> lix-server -> MinIO/R2` architecture. There is one
+Lix runtime path; tests do not maintain a provider-specific runtime.
 
 ## Target architecture
 
@@ -161,13 +159,9 @@ Production consists of two portable Docker services:
 Durable workspace data remains in R2/S3. Avoid provider-specific persistent
 volumes so the services remain portable.
 
-Railway is the current preferred deployment target because mostly idle PR
-environments can use usage-based billing and Serverless/App Sleeping. Production
-services remain awake initially.
-
-Cloudflare remains the temporary production control plane until this topology
-has been smoke-tested in a Railway production environment. That exception must
-not reintroduce a Workerd/Wasm path for local development, CI, or previews.
+Railway is the deployment target because mostly idle PR environments can use
+usage-based billing and Serverless/App Sleeping. Production services remain
+awake initially.
 
 Before committing to Railway, run a small deployment spike that verifies:
 
@@ -184,8 +178,7 @@ hosting provider rather than changing the application model.
 
 ## PR previews
 
-A PR preview is a disposable deployment of the production topology, not an
-alternate Workerd/Wasm Lix implementation:
+A PR preview is a disposable deployment of the production topology:
 
 ```text
 PR environment
@@ -198,17 +191,12 @@ credentials supplied through Infisical. Railway environment IDs prefix every
 workspace, and bucket lifecycle rules expire abandoned preview data. Previews
 must not receive production bucket credentials.
 
-There is no Workerd/Wasm snapshot preview path. The current Cloudflare
-production deployment remains only until the Railway production cutover.
-
 ## Next milestones
 
 1. Keep the Compose browser E2E green as the one local/CI acceptance path.
 2. Establish a slow-workspace baseline and begin comparing performance changes.
-3. Create the Railway production web and `lix-server` services, sync production
-   R2 configuration through Infisical, and smoke-test them.
-4. Attach `lixray.com`, cut traffic to Railway, and then remove the temporary
-   Cloudflare Worker, Durable Object Container, and remaining Worker-only code.
+3. Keep the Railway production web and `lix-server` services healthy, with
+   production R2 configuration supplied through Infisical.
 
 ## MVP success criteria
 

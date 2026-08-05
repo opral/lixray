@@ -12,7 +12,7 @@ import {
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
-import { LixFileService, type LixSummary } from "../mcp/file-service.ts";
+import { LixService, type LixSummary } from "../mcp/lix-service.ts";
 import {
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
@@ -22,25 +22,18 @@ import {
 	MCP_RESOURCE,
 	mcpDocumentationResponse,
 	mcpUnauthorizedResponse,
+	requestIdForMcpRequest,
 	protectedResourceMetadataResponse,
+	withMcpRequestId,
 	type McpToolCallObservation,
 } from "../mcp/server.ts";
 import {
 	createMcpTelemetrySession,
 	type McpTelemetrySession,
 } from "./mcp-telemetry.ts";
-import {
-	containerErrorDetails,
-	fetchContainerWithRetry,
-	logContainerRetry,
-	type ContainerNamespace as RetryingContainerNamespace,
-	type ContainerRetryDelay,
-} from "./container-retry.ts";
 import { resolveSupabaseLixId } from "./lix-resolver.ts";
 
 export interface WorkerEnv {
-	ASSETS?: Fetcher;
-	SLATEDB_CONTAINER?: ContainerNamespace;
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
 	SUPABASE_JWKS_URL?: string;
@@ -50,17 +43,6 @@ export interface WorkerEnv {
 	 * instance through Docker's host gateway.
 	 */
 	SUPABASE_JWT_ISSUER_URL?: string;
-	R2_ENDPOINT?: string;
-	R2_BUCKET?: string;
-	R2_ACCESS_KEY_ID?: string;
-	R2_SECRET_ACCESS_KEY?: string;
-	R2_REGION?: string;
-	S3_PREFIX?: string;
-	S3_ALLOW_HTTP?: string;
-	SLATEDB_CACHE_DIR?: string;
-	SLATEDB_CACHE_MAX_BYTES?: string;
-	SLATEDB_BLOCK_CACHE_BYTES?: string;
-	SLATEDB_METADATA_CACHE_BYTES?: string;
 	LIXRAY_DEMO?: string;
 	LIXRAY_DEMO_LIX_IDS?: string;
 	LIXRAY_LIX_SERVICE_URL?: string;
@@ -73,13 +55,18 @@ export interface WorkerEnv {
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
+	/** HMAC key used to sign stateless MCP Lix contexts. */
+	LIXRAY_CONTEXT_SIGNING_KEY?: string;
 	LIXRAY_RELEASE_ID?: string;
 	RAILWAY_ENVIRONMENT_NAME?: string;
 	RAILWAY_GIT_COMMIT_SHA?: string;
-	CF_VERSION_METADATA?: WorkerVersionMetadata;
 }
 
-export type ContainerNamespace = RetryingContainerNamespace;
+export interface RequestExecutionContext {
+	waitUntil(promise: Promise<unknown>): void;
+	passThroughOnException(): void;
+	props: Record<string, unknown>;
+}
 
 interface HandleRequestOptions {
 	authenticate?: AuthenticateRequest;
@@ -91,11 +78,9 @@ interface HandleRequestOptions {
 	mcpTransport?: typeof handleMcpTransport;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
-	executionContext?: ExecutionContext;
+	executionContext?: RequestExecutionContext;
 	createMcpTelemetry?: typeof createMcpTelemetrySession;
 	recordMcpLixConnection?: RecordMcpLixConnection;
-	containerRetryDelay?: ContainerRetryDelay;
-	containerRetryRandom?: () => number;
 }
 
 interface AuthenticatedUser {
@@ -214,19 +199,23 @@ export async function handleRequest(
 	}
 
 	if (url.pathname === MCP_PATH) {
-		if (request.method === "OPTIONS") return corsPreflight();
+		const requestId = requestIdForMcpRequest(request);
+		if (request.method === "OPTIONS") {
+			return withMcpRequestId(corsPreflight(), requestId);
+		}
 		const executionContext = options.executionContext ?? noopExecutionContext();
 		const authenticateMcp =
 			options.authenticateMcp ?? authenticateMcpWithSupabase;
 		const authResult = await authenticateMcp(request, env);
-		if (!authResult.ok) return authResult.response;
+		if (!authResult.ok) return withMcpRequestId(authResult.response, requestId);
 		const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
 		// This positive cache is recreated for every MCP HTTP request.
 		const authorizedLixIds = new Set<string>();
-		if (!env.SLATEDB_CONTAINER && !options.lixFetch) {
-			return new Response("Lix storage is not configured\n", {
-				status: 500,
-			});
+		if (!options.lixFetch) {
+			return withMcpRequestId(
+				new Response("Lix storage is not configured\n", { status: 500 }),
+				requestId,
+			);
 		}
 		const client = new WorkerLixRuntimeClient(
 			env,
@@ -239,8 +228,6 @@ export async function handleRequest(
 			},
 			{
 				signal: request.signal,
-				retryDelay: options.containerRetryDelay,
-				retryRandom: options.containerRetryRandom,
 				lixFetch: options.lixFetch,
 				lixSummaries: isDemoMode(env) ? demoLixSummaries(env) : undefined,
 			},
@@ -286,29 +273,43 @@ export async function handleRequest(
 					executionContext.waitUntil(work);
 				}
 			: undefined;
-		try {
-			return await (options.mcpTransport ?? handleMcpTransport)(
-				request,
-				new LixFileService(client, {
-					agentReview: {
-						agent: "codex",
-						sessionId: authResult.auth.userId,
-					},
-				}),
-				{
-					authMode: isDemoMode(env) ? "none" : "oauth",
-					onToolCall,
-					posthogToken,
-					posthogHost: env.POSTHOG_HOST,
-					posthogDistinctId: authResult.auth.userId,
-					posthogClientId: authResult.auth.clientId,
-					onPosthogFlush,
-				},
-			);
-		} finally {
+		let responseCleanupDeferred = false;
+		const cleanup = async (): Promise<void> => {
 			await Promise.all(pendingConnectionRecords);
 			scheduleMcpTelemetryFlush(executionContext, telemetry);
 			await client.close();
+		};
+		try {
+			const response = withMcpRequestId(
+				await (options.mcpTransport ?? handleMcpTransport)(
+					request,
+					new LixService(client, {
+						contextSigningKey: env.LIXRAY_CONTEXT_SIGNING_KEY,
+						principal: {
+							userId: authResult.auth.userId,
+							clientId: authResult.auth.clientId,
+						},
+					}),
+					{
+						authMode: isDemoMode(env) ? "none" : "oauth",
+						requestId,
+						onToolCall,
+						posthogToken,
+						posthogHost: env.POSTHOG_HOST,
+						posthogDistinctId: authResult.auth.userId,
+						posthogClientId: authResult.auth.clientId,
+						onPosthogFlush,
+					},
+				),
+				requestId,
+			);
+			if (isStreamingMcpResponse(response)) {
+				responseCleanupDeferred = true;
+				return deferResponseCleanup(response, cleanup);
+			}
+			return response;
+		} finally {
+			if (!responseCleanupDeferred) await cleanup();
 		}
 	}
 
@@ -326,7 +327,7 @@ export async function handleRequest(
 		}
 
 		const endpoint = remoteLixMatch[3]?.replace(/\/+$/, "") ?? "";
-		const containerPath = `/lix/v1${endpoint ? `/${endpoint}` : "/"}`;
+		const protocolPath = `/lix/v1${endpoint ? `/${endpoint}` : "/"}`;
 		const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
 
 		const authenticate = options.authenticate ?? authenticateWithSupabase;
@@ -343,7 +344,7 @@ export async function handleRequest(
 					return fetchLixRequest(
 						resolution.lixId,
 						request,
-						containerPath,
+						protocolPath,
 						env,
 						options,
 						authResult.auth.userId,
@@ -372,7 +373,7 @@ export async function handleRequest(
 		return fetchLixRequest(
 			publicResolution.lixId,
 			request,
-			containerPath,
+			protocolPath,
 			env,
 			options,
 		);
@@ -387,72 +388,20 @@ export async function handleRequest(
 async function fetchLixRequest(
 	lixId: string,
 	request: Request,
-	containerPath: string,
+	protocolPath: string,
 	env: WorkerEnv,
 	options: HandleRequestOptions,
 	trustedPrincipal?: string,
 ): Promise<Response> {
 	const rewrittenRequest = rewriteLixRequest(
 		request,
-		containerPath,
+		protocolPath,
 		trustedPrincipal,
 	);
 	if (options.lixFetch) {
 		return options.lixFetch(lixId, rewrittenRequest);
 	}
-	if (!env.SLATEDB_CONTAINER) {
-		return new Response("Lix storage is not configured\n", {
-			status: 500,
-		});
-	}
-	const lixPath = lixServicePath(lixId, containerPath);
-	const containerRequest = rewriteLixRequest(
-		rewrittenRequest.clone() as unknown as Request,
-		lixPath,
-		trustedPrincipal,
-	);
-	try {
-		return await fetchContainerWithRetry({
-			namespace: env.SLATEDB_CONTAINER,
-			lixId,
-			operation: `${request.method} ${lixPath}`,
-			envVars: containerEnv(env),
-			createRequest: () => containerRequest.clone() as unknown as Request,
-			requestReplay: containerRequestReplay(request.method, containerPath),
-			signal: request.signal,
-			retryDelay: options.containerRetryDelay,
-			retryRandom: options.containerRetryRandom,
-			onRetry: logContainerRetry,
-		});
-	} catch (caught) {
-		if (request.signal.aborted) throw caught;
-		console.error("LixRay container request failed", {
-			lixId,
-			operation: `${request.method} ${containerPath}`,
-			error: containerErrorDetails(caught),
-		});
-		return Response.json(
-			{
-				error: {
-					code: "CONTAINER_UNAVAILABLE",
-					message: "Lix storage is temporarily unavailable.",
-				},
-			},
-			{ status: 503, headers: { "Retry-After": "1" } },
-		);
-	}
-}
-
-function containerRequestReplay(
-	method: string,
-	path: string,
-): "safe" | "unsafe" {
-	if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return "safe";
-	return path.endsWith("/observe") ||
-		path.endsWith("/observe/multiplex") ||
-		(method.toUpperCase() === "DELETE" && path.endsWith("/lix/v1/session"))
-		? "safe"
-		: "unsafe";
+	return new Response("Lix storage is not configured\n", { status: 500 });
 }
 
 export async function authenticateWithSupabase(
@@ -507,6 +456,57 @@ export function supabaseJwtIssuer(
 		""
 	).replace(/\/$/, "");
 	return `${baseUrl}/auth/v1`;
+}
+
+function isStreamingMcpResponse(response: Response): boolean {
+	return (
+		response.body !== null &&
+		(response.headers.get("content-type") ?? "")
+			.toLowerCase()
+			.includes("text/event-stream")
+	);
+}
+
+function deferResponseCleanup(
+	response: Response,
+	cleanup: () => Promise<void>,
+): Response {
+	if (!response.body) return response;
+	const reader = response.body.getReader();
+	let cleanedUp = false;
+	const finish = async (): Promise<void> => {
+		if (cleanedUp) return;
+		cleanedUp = true;
+		await cleanup();
+	};
+	const body = new ReadableStream<Uint8Array>({
+		async pull(controller) {
+			try {
+				const { done, value } = await reader.read();
+				if (done) {
+					await finish();
+					controller.close();
+					return;
+				}
+				if (value) controller.enqueue(value);
+			} catch (error) {
+				await finish();
+				controller.error(error);
+			}
+		},
+		async cancel(reason) {
+			try {
+				await reader.cancel(reason);
+			} finally {
+				await finish();
+			}
+		},
+	});
+	return new Response(body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers: response.headers,
+	});
 }
 
 export function validateBrowserJwtClaims(payload: JWTPayload): boolean {
@@ -919,7 +919,7 @@ function isPublicReadRemoteLixRequest(
 }
 
 /**
- * The container's canonical Lix protocol has no read-only mode, so the Worker
+ * The canonical Lix protocol has no read-only mode, so the service
  * is the authorization boundary for public readers: every SQL statement in a
  * public request must classify as a read. Statements are split by Lix's own
  * script parser (injected as `options.parseSqlScript`) before the keyword
@@ -1092,11 +1092,11 @@ function remoteJwks(url: string): JWTVerifyGetKey {
 
 function rewriteLixRequest(
 	request: Request,
-	containerPath: string,
+	protocolPath: string,
 	trustedPrincipal?: string,
 ) {
 	const url = new URL(request.url);
-	url.pathname = containerPath;
+	url.pathname = protocolPath;
 	const rewritten = new Request(url, request);
 	const headers = new Headers(rewritten.headers);
 	headers.delete("Authorization");
@@ -1127,22 +1127,22 @@ function corsPreflight(): Response {
 			"access-control-allow-origin": "*",
 			"access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
 			"access-control-allow-headers":
-				"Authorization, Content-Type, Lix-Session-Id, MCP-Protocol-Version",
+				"Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Param-*",
 			"access-control-max-age": "86400",
 		},
 	});
 }
 
-function noopExecutionContext(): ExecutionContext {
+function noopExecutionContext(): RequestExecutionContext {
 	return {
 		waitUntil: () => undefined,
 		passThroughOnException: () => undefined,
 		props: {},
-	} as unknown as ExecutionContext;
+	};
 }
 
 function scheduleMcpTelemetryFlush(
-	executionContext: ExecutionContext,
+	executionContext: RequestExecutionContext,
 	telemetry: McpTelemetrySession | null,
 ): void {
 	if (!telemetry) return;
@@ -1156,37 +1156,6 @@ function scheduleMcpTelemetryFlush(
 	}
 }
 
-function containerEnv(env: WorkerEnv): Record<string, string> {
-	const vars: Record<string, string> = {};
-	addOptionalEnv(vars, "S3_ENDPOINT", env.R2_ENDPOINT);
-	addOptionalEnv(vars, "S3_BUCKET", env.R2_BUCKET);
-	addOptionalEnv(vars, "S3_ACCESS_KEY_ID", env.R2_ACCESS_KEY_ID);
-	addOptionalEnv(vars, "S3_SECRET_ACCESS_KEY", env.R2_SECRET_ACCESS_KEY);
-	addOptionalEnv(vars, "S3_REGION", env.R2_REGION);
-	addOptionalEnv(vars, "S3_PREFIX", env.S3_PREFIX);
-	addOptionalEnv(vars, "S3_ALLOW_HTTP", env.S3_ALLOW_HTTP);
-	addOptionalEnv(vars, "SLATEDB_CACHE_DIR", env.SLATEDB_CACHE_DIR);
-	addOptionalEnv(vars, "SLATEDB_CACHE_MAX_BYTES", env.SLATEDB_CACHE_MAX_BYTES);
-	addOptionalEnv(
-		vars,
-		"SLATEDB_BLOCK_CACHE_BYTES",
-		env.SLATEDB_BLOCK_CACHE_BYTES,
-	);
-	addOptionalEnv(
-		vars,
-		"SLATEDB_METADATA_CACHE_BYTES",
-		env.SLATEDB_METADATA_CACHE_BYTES,
-	);
-	addOptionalEnv(vars, "POSTHOG_PROJECT_TOKEN", env.POSTHOG_PROJECT_TOKEN);
-	addOptionalEnv(vars, "POSTHOG_HOST", env.POSTHOG_HOST);
-	addOptionalEnv(vars, "POSTHOG_ENVIRONMENT", env.POSTHOG_ENVIRONMENT);
-	return vars;
-}
-
-function lixServicePath(lixId: string, protocolPath: string): string {
-	return `/lixes/${encodeURIComponent(lixId)}${protocolPath}`;
-}
-
 function json(value: unknown, init?: ResponseInit): Response {
 	return new Response(JSON.stringify(value), {
 		...init,
@@ -1195,12 +1164,4 @@ function json(value: unknown, init?: ResponseInit): Response {
 			...init?.headers,
 		},
 	});
-}
-
-function addOptionalEnv(
-	vars: Record<string, string>,
-	name: string,
-	value: string | undefined,
-) {
-	if (value !== undefined) vars[name] = value;
 }

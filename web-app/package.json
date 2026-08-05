@@ -5,17 +5,17 @@
 	"type": "module",
 	"packageManager": "pnpm@10.13.1",
 	"scripts": {
-		"dev": "vite",
-		"check:cloudflare": "pnpm typecheck && pnpm test:analytics && pnpm test:auth && pnpm test:railway-config && pnpm test:worker",
+		"check": "pnpm typecheck && pnpm test:analytics && pnpm test:auth && pnpm test:workspace && pnpm test:railway-config && pnpm test:worker",
 		"lix:build": "node ../scripts/prepare-vendored-lix-sdk.mjs",
 		"lix:build:native": "node ../scripts/prepare-vendored-lix-sdk.mjs --native",
 		"atelier:build": "pnpm --filter @opral/atelier exec vite build && pnpm --filter @opral/atelier exec tsc -p tsconfig.build.json --noCheck && pnpm --filter @opral/atelier exec node scripts/prune-types.mjs",
 		"ci:prepare": "LIXRAY_SKIP_VENDORED_LIX_WASM=1 pnpm lix:build:native && pnpm ci:prepare:web",
 		"ci:prepare:web": "pnpm atelier:build && pnpm routes:generate && pnpm mcp:tools:generate",
 		"ci:lint": "eslint . --max-warnings=0",
-		"ci:check": "tsc --noEmit && pnpm test:analytics && pnpm test:auth && pnpm test:railway-config && pnpm test:worker",
+		"ci:check": "tsc --noEmit && pnpm test:analytics && pnpm test:auth && pnpm test:workspace && pnpm test:railway-config && pnpm test:worker",
 		"ci:build": "vite build",
-		"ci:build:node": "node scripts/assert-railway-env.mjs && LIXRAY_WORKER_TARGET=railway vite build",
+		"ci:build:node": "node scripts/assert-railway-env.mjs && vite build && pnpm bundle:railway",
+		"bundle:railway": "pnpm exec esbuild dist/server/railway-server.js --bundle --platform=node --format=esm --packages=bundle '--external:node:*' '--banner:js=import { createRequire as createNodeRequire } from \"node:module\"; const require = createNodeRequire(import.meta.url);' --outfile=dist/server/railway-server.bundled.js && mv dist/server/railway-server.bundled.js dist/server/railway-server.js",
 		"prebuild": "pnpm lix:build && pnpm atelier:build",
 		"prelint": "pnpm lix:build && pnpm atelier:build && pnpm routes:generate",
 		"pretypecheck": "pnpm lix:build:native && pnpm atelier:build",
@@ -23,25 +23,25 @@
 		"format:check": "oxfmt --check --ignore-path .oxfmtignore .",
 		"lint": "eslint . --max-warnings=0",
 		"build": "pnpm run routes:generate && pnpm run mcp:tools:generate && vite build",
-		"build:node": "node scripts/assert-railway-env.mjs && LIXRAY_WORKER_TARGET=railway LIXRAY_SKIP_VENDORED_LIX_WASM=1 pnpm build",
+		"build:node": "node scripts/assert-railway-env.mjs && LIXRAY_SKIP_VENDORED_LIX_WASM=1 pnpm build",
 		"start:railway": "node scripts/start-railway.mjs",
-		"deploy:worker": "pnpm run build && wrangler deploy --config ./dist/server/wrangler.json",
 		"routes:generate": "node scripts/generate-routes.mjs",
 		"pretest:e2e": "pnpm lix:build",
 		"test:e2e": "playwright test",
 		"test:analytics": "node --test --experimental-strip-types src/lib/*telemetry*.test.ts",
 		"test:auth": "node --test --experimental-strip-types src/lib/auth-return-to.test.ts src/lib/lix-connection-prompt.test.ts src/lib/workspace-share-capability.test.ts",
+		"test:workspace": "node --test --experimental-strip-types src/components/workspace-home/lix-data.test.ts",
 		"test:railway-config": "node --test scripts/*.test.mjs",
 		"test:worker": "node --test --experimental-strip-types src/worker/*.test.ts src/mcp/*.test.ts",
 		"check:mcp": "node scripts/check-mcp-connection.mjs",
 		"mcp:tools:generate": "node --experimental-strip-types scripts/generate-mcp-tools.mjs",
-		"typecheck": "pnpm run routes:generate && tsc --noEmit",
-		"cf-typegen": "wrangler types --config ./wrangler.jsonc"
+		"typecheck": "pnpm run routes:generate && tsc --noEmit"
 	},
 	"dependencies": {
-		"@cloudflare/containers": "0.3.7",
 		"@lix-js/sdk": "workspace:*",
+		"@modelcontextprotocol/client": "^2.0.0",
 		"@modelcontextprotocol/sdk": "1.29.0",
+		"@modelcontextprotocol/server": "^2.0.0",
 		"@opral/atelier": "workspace:*",
 		"@posthog/mcp": "0.10.2",
 		"@supabase/supabase-js": "^2.110.2",
@@ -64,8 +64,6 @@
 		"zod": "4.4.3"
 	},
 	"devDependencies": {
-		"@cloudflare/vite-plugin": "^1.43.0",
-		"@cloudflare/workers-types": "4.20260701.1",
 		"@eslint/js": "^10.0.1",
 		"@playwright/test": "^1.61.1",
 		"@posthog/rollup-plugin": "1.4.7",
@@ -75,6 +73,7 @@
 		"@types/react": "^19.2.17",
 		"@types/react-dom": "^19.2.3",
 		"@vitejs/plugin-react": "^6.0.3",
+		"esbuild": "^0.28.1",
 		"eslint": "^10.6.0",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-react-hooks": "^7.1.1",
@@ -84,7 +83,6 @@
 		"tw-animate-css": "^1.4.0",
 		"typescript": "^5.9.2",
 		"typescript-eslint": "^8.63.0",
-		"vite": "^8.1.3",
-		"wrangler": "^4.107.0"
+		"vite": "^8.1.3"
 	}
 }

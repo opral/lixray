@@ -27,9 +27,33 @@ insert into auth.oauth_clients (
 	'dynamic',
 	'http://127.0.0.1:45678/callback',
 	'authorization_code refresh_token',
-	'Codex LixRay_Dev',
+	'Codex',
 	'public',
 	'none'
+);
+
+insert into auth.oauth_authorizations (
+	id,
+	authorization_id,
+	client_id,
+	user_id,
+	redirect_uri,
+	scope,
+	resource,
+	status,
+	expires_at,
+	approved_at
+) values (
+	'31000000-0000-4000-8000-000000000001',
+	'codex-local-authorization',
+	'30000000-0000-4000-8000-000000000001',
+	'20000000-0000-0000-0000-000000000001',
+	'http://127.0.0.1:45678/callback',
+	'openid email profile',
+	'http://127.0.0.1:8787/mcp',
+	'approved',
+	now() + interval '5 minutes',
+	now()
 );
 
 select is(

@@ -18,7 +18,6 @@ export default tseslint.config(
 			"dist/**",
 			"node_modules/**",
 			"vendor/atelier/**",
-			".wrangler/**",
 			".output/**",
 			"target/**",
 			"submodule/**",

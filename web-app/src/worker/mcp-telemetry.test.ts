@@ -9,6 +9,7 @@ import { createMcpTelemetrySession } from "./mcp-telemetry.ts";
 
 const SURFACE_VERSION = "fnv1a32:1234abcd";
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
+const REQUEST_ID = "request-123";
 
 void test("MCP telemetry captures a PostHog AI span for production tool usage", async () => {
 	const captured: Array<EventMessage> = [];
@@ -18,7 +19,7 @@ void test("MCP telemetry captures a PostHog AI span for production tool usage", 
 			POSTHOG_PROJECT_TOKEN: " project-token ",
 			POSTHOG_HOST: " https://posthog.example ",
 			POSTHOG_ENVIRONMENT: "production",
-			CF_VERSION_METADATA: { id: "worker-version-123" },
+			RAILWAY_GIT_COMMIT_SHA: "worker-version-123",
 		},
 		{ userId: "user-123", clientId: "oauth-client-456" },
 		{
@@ -43,6 +44,7 @@ void test("MCP telemetry captures a PostHog AI span for production tool usage", 
 	assert.ok(session);
 
 	session.onToolCall({
+		requestId: REQUEST_ID,
 		toolName: "list_lixes",
 		outcome: "success",
 		durationMs: 12,
@@ -65,6 +67,7 @@ void test("MCP telemetry captures a PostHog AI span for production tool usage", 
 		$ai_is_error: false,
 		mcp_server: "lixray",
 		mcp_tool: "list_lixes",
+		request_id: REQUEST_ID,
 		outcome: "success",
 		duration_ms: 12,
 		oauth_client_id: "oauth-client-456",
@@ -99,6 +102,7 @@ void test("MCP telemetry records trace errors without lix grouping", async () =>
 	assert.ok(session);
 
 	session.onToolCall({
+		requestId: REQUEST_ID,
 		toolName: "execute",
 		outcome: "error",
 		errorCode: "invalid_arguments",
@@ -109,6 +113,7 @@ void test("MCP telemetry records trace errors without lix grouping", async () =>
 
 	assert.equal(captured[0]?.event, "$ai_span");
 	assert.equal(captured[0]?.properties?.$ai_is_error, true);
+	assert.equal(captured[0]?.properties?.request_id, REQUEST_ID);
 	assert.deepEqual(captured[0]?.properties?.$ai_error, {
 		code: "invalid_arguments",
 	});
@@ -160,6 +165,7 @@ void test("MCP traces expose SQL friction without lix values or result rows", as
 	assert.ok(executeOutput);
 
 	session.onToolCall({
+		requestId: REQUEST_ID,
 		toolName: "execute",
 		outcome: "success",
 		durationMs: 4,
@@ -259,6 +265,7 @@ void test("PostHog delivery failures do not escape the telemetry session", async
 
 	assert.doesNotThrow(() =>
 		session.onToolCall({
+			requestId: REQUEST_ID,
 			toolName: "list_lixes",
 			outcome: "success",
 			durationMs: 1,

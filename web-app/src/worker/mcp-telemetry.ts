@@ -12,7 +12,6 @@ interface McpTelemetryEnvironment {
 	POSTHOG_ENVIRONMENT?: string;
 	LIXRAY_RELEASE_ID?: string;
 	RAILWAY_GIT_COMMIT_SHA?: string;
-	CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string };
 }
 
 interface McpTelemetryIdentity {
@@ -70,7 +69,6 @@ export function createMcpTelemetrySession(
 		const spanId = crypto.randomUUID();
 		const releaseId =
 			env.LIXRAY_RELEASE_ID?.trim() ||
-			env.CF_VERSION_METADATA?.id?.trim() ||
 			env.RAILWAY_GIT_COMMIT_SHA?.trim() ||
 			"unknown";
 		const properties: Record<string, unknown> = {
@@ -81,6 +79,7 @@ export function createMcpTelemetrySession(
 			$ai_is_error: observation.outcome === "error",
 			mcp_server: "lixray",
 			mcp_tool: observation.toolName,
+			request_id: observation.requestId,
 			outcome: observation.outcome,
 			duration_ms: observation.durationMs,
 			oauth_client_id: identity.clientId,

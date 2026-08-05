@@ -31,13 +31,13 @@ export function createLixConnectionDetails({
 	const previewUrl = `${normalizedOrigin}/@${encodeURIComponent(namespace)}/${encodeURIComponent(lixSlug)}`;
 	const lixReference = `@${namespace}/${lixSlug}`;
 
-	const prompt = `Connect this agent to my Lix repository \`${lixReference}\`.
+	const prompt = `Connect to my Lix repository ${lixReference}.
 
-Use the \`${serverName}\` MCP connection for Lix \`${lixId}\`. If that connection already exists, reuse it. Otherwise, create and authenticate it with ${mcpUrl}. Never open either URL in a browser.
+Use the ${serverName} MCP connection for Lix ${lixId}. If that connection already exists, reuse it. Otherwise, create and authenticate it with [${mcpUrl}](${mcpUrl}).
 
-If you cannot connect, stop and tell me exactly what I need to do next.
+Once connected, and the lix has no files, guide the user in setting up their repository.
 
-Call active_branch_id with this exact Lix ID. Once verified, ask me for the first files. Do not inspect unrelated apps or files or write yet.`;
+Lix's goal is a repository for non-code. If it's a company, main valuable files are icp.md, skills, etc "a repository for your entire company". Generally check the memory to what the user's workflows/files are that benefit most from being in a repository.`;
 
 	return {
 		serverName,

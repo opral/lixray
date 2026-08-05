@@ -1,4 +1,5 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:net";
 import { dirname } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -28,6 +29,16 @@ if (teardownRequested) {
 	stopDatabase();
 	process.exit(0);
 }
+
+const devHost = process.env.LIXRAY_DEV_HOST?.trim() || "127.0.0.1";
+const devPort = process.env.LIXRAY_DEV_PORT?.trim() || "8787";
+const serverPort = "18080";
+const minioPort = "19000";
+const minioConsolePort = "19001";
+const internalToken = "lixray-local-internal-token";
+
+await assertPortAvailable(devHost, devPort);
+
 for (const signal of Object.keys(signalExitCodes)) {
 	process.on(signal, () => handleSignal(signal));
 }
@@ -51,9 +62,8 @@ if (!localSupabase) {
 	);
 }
 const supabaseUrl = localSupabase.API_URL;
-const supabaseKey = localSupabase.PUBLISHABLE_KEY ?? localSupabase.ANON_KEY;
-const supabaseSecretKey =
-	localSupabase.SECRET_KEY ?? localSupabase.SERVICE_ROLE_KEY;
+const supabaseKey = localSupabase.PUBLISHABLE_KEY;
+const supabaseSecretKey = localSupabase.SECRET_KEY;
 const localDevEmail = "dev@lixray.local";
 const localDevPassword = "lixray-local-dev";
 
@@ -72,23 +82,16 @@ await ensureLocalDevUser({
 	supabaseUrl,
 });
 
-const devPort = process.env.LIXRAY_DEV_PORT ?? "8787";
-const devHost = process.env.LIXRAY_DEV_HOST ?? "127.0.0.1";
-const composeSupabaseUrl =
-	process.env.LIXRAY_COMPOSE_SUPABASE_URL ?? dockerReachableUrl(supabaseUrl);
-const internalToken =
-	process.env.LIXRAY_INTERNAL_TOKEN ?? "lixray-local-internal-token";
-const serverImage = process.env.LIXRAY_SERVER_IMAGE;
+const composeSupabaseUrl = dockerReachableUrl(supabaseUrl);
 
 composeEnv = {
 	...process.env,
 	LIXRAY_DEV_HOST: devHost,
 	LIXRAY_DEV_PORT: devPort,
-	LIXRAY_SERVER_PORT: process.env.LIXRAY_SERVER_PORT ?? "18080",
-	LIXRAY_MINIO_PORT: process.env.LIXRAY_MINIO_PORT ?? "19000",
-	LIXRAY_MINIO_CONSOLE_PORT: process.env.LIXRAY_MINIO_CONSOLE_PORT ?? "19001",
-	LIXRAY_LIX_SERVICE_URL:
-		process.env.LIXRAY_LIX_SERVICE_URL ?? "http://lix-server:8080",
+	LIXRAY_SERVER_PORT: serverPort,
+	LIXRAY_MINIO_PORT: minioPort,
+	LIXRAY_MINIO_CONSOLE_PORT: minioConsolePort,
+	LIXRAY_LIX_SERVICE_URL: "http://lix-server:8080",
 	LIXRAY_INTERNAL_TOKEN: internalToken,
 	SUPABASE_URL: composeSupabaseUrl,
 	SUPABASE_JWKS_URL: `${composeSupabaseUrl}/auth/v1/.well-known/jwks.json`,
@@ -115,32 +118,37 @@ if (staleWebContainer.status !== 0) {
 	process.exit(staleWebContainer.status ?? 1);
 }
 
-const stack = spawnSync(
-	"docker",
-	serverImage
-		? ["compose", "up", "--no-build", "--pull", "always", "-d", "lix-server"]
-		: ["compose", "up", "--build", "-d", "lix-server"],
-	{
-		cwd: repositoryRoot,
-		stdio: "inherit",
-		env: composeEnv,
-	},
-);
+const stackArguments = ["compose", "up"];
+if (!process.env.LIXRAY_SERVER_IMAGE?.trim()) stackArguments.push("--build");
+stackArguments.push("-d", "lix-server");
+
+const stack = spawnSync("docker", stackArguments, {
+	cwd: repositoryRoot,
+	stdio: "inherit",
+	env: composeEnv,
+});
 if (stack.error) throw stack.error;
 if (stack.status !== 0) process.exit(stack.status ?? 1);
 
 webApp = spawn(
 	pnpm,
-	["--dir", "web-app", "dev", "--host", devHost, "--port", devPort],
+	[
+		"--dir",
+		"web-app",
+		"exec",
+		"vite",
+		"--host",
+		devHost,
+		"--port",
+		devPort,
+		"--strictPort",
+	],
 	{
 		cwd: repositoryRoot,
 		stdio: "inherit",
 		env: {
 			...composeEnv,
-			LIXRAY_WORKER_TARGET: "railway",
-			LIXRAY_LIX_SERVICE_URL:
-				process.env.LIXRAY_LIX_SERVICE_URL ??
-				`http://127.0.0.1:${composeEnv.LIXRAY_SERVER_PORT}`,
+			LIXRAY_LIX_SERVICE_URL: `http://127.0.0.1:${serverPort}`,
 			SUPABASE_URL: supabaseUrl,
 			SUPABASE_JWKS_URL: `${supabaseUrl}/auth/v1/.well-known/jwks.json`,
 		},
@@ -187,6 +195,26 @@ function stopCompose() {
 			env: composeEnv,
 		},
 	);
+}
+
+async function assertPortAvailable(host, port) {
+	const probe = createServer();
+	await new Promise((resolve, reject) => {
+		probe.once("error", (error) => {
+			if (error.code === "EADDRINUSE") {
+				reject(
+					new Error(
+						`LixRay dev port ${port} is already in use. Stop the existing local dev process before running pnpm dev.`,
+					),
+				);
+				return;
+			}
+			reject(error);
+		});
+		probe.listen(Number(port), host, () => {
+			probe.close(resolve);
+		});
+	});
 }
 
 function dockerReachableUrl(value) {

@@ -1,710 +1,330 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import {
-	LixFileService,
+	Client,
+	StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
+import {
+	createLixError,
+	LixService,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
-	type ExecuteResponse,
-	type ExecuteScriptResponse,
 	type LixRuntimeClient,
-} from "./file-service.ts";
+} from "./lix-service.ts";
 import {
-	EXECUTE_SQL_COLUMNS_QUERY,
-	EXECUTE_SQL_CORE_SCHEMA,
-	EXECUTE_SQL_TABLES_QUERY,
-	EXECUTE_TOOL_DESCRIPTION,
-} from "./execute-schema.ts";
-import {
-	MCP_PROTECTED_RESOURCE_URL,
-	MCP_RESOURCE,
-	createLixrayMcpServer,
 	handleMcpTransport,
-	mcpServerNameForUrl,
+	MCP_REQUEST_ID_HEADER,
+	MCP_PROTOCOL_VERSION,
+	MCP_RESOURCE,
 	mcpAuthenticateChallenge,
 	mcpDocumentationResponse,
 	mcpUnauthorizedResponse,
-	protectedResourceMetadataResponse,
 	redactMcpAnalyticsEvent,
-	type McpToolCallObservation,
+	requestIdForMcpRequest,
+	withMcpRequestId,
+	protectedResourceMetadataResponse,
 } from "./server.ts";
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
-const BRANCH_ID = "22222222-2222-4222-8222-222222222222";
-const THROW_BRANCH_ID = "33333333-3333-4333-8333-333333333333";
-const AUTHORIZATION_SERVER = "https://supabase.example.test/auth/v1";
 
-void test("protected resource discovery advertises the Supabase authorization server", async () => {
-	const response = protectedResourceMetadataResponse({
-		authorizationServer: AUTHORIZATION_SERVER,
-	});
-	assert.equal(response.status, 200);
-	assert.equal(response.headers.get("access-control-allow-origin"), "*");
-	assert.deepEqual(await response.json(), {
-		resource: MCP_RESOURCE,
-		authorization_servers: [AUTHORIZATION_SERVER],
-		scopes_supported: ["openid", "email", "profile"],
-		resource_documentation: "https://lixray.com/mcp/docs",
-	});
-	assert.match(
-		mcpAuthenticateChallenge(),
-		new RegExp(
-			`resource_metadata="${escapeRegExp(MCP_PROTECTED_RESOURCE_URL)}"`,
-		),
-	);
-	const unauthorized = mcpUnauthorizedResponse("invalid_token", "Expired.");
-	assert.equal(unauthorized.status, 401);
-	assert.equal(unauthorized.headers.get("access-control-allow-origin"), "*");
-	const challenge = unauthorized.headers.get("www-authenticate");
-	assert.ok(challenge);
-	assert.deepEqual(await unauthorized.json(), {
-		error: "unauthorized",
-		error_description: "Expired.",
-		_meta: { "mcp/www_authenticate": [challenge] },
-	});
-});
-
-void test("MCP documentation distinguishes browser and client authentication", async () => {
-	const response = mcpDocumentationResponse();
-	assert.equal(response.status, 200);
-	const documentation = await response.text();
-	assert.match(
-		documentation,
-		/browser session and your MCP client authorization are separate/,
-	);
-	assert.match(documentation, /challenges unauthenticated requests/);
-	assert.match(documentation, /Complete authorization before initialize/);
-	assert.match(
-		documentation,
-		/authorization prompt, then confirm initialize, tools\/list, and list_lixes succeed/,
-	);
-	assert.match(documentation, /use LixRay_Dev for local development/);
-	assert.match(documentation, /Do not launch a nested agent or Codex process/);
-	assert.match(documentation, /no refresh token is available/);
-	assert.match(documentation, /do not include access or refresh tokens/);
-	assert.match(documentation, /ordered batch of statements/);
-	assert.match(documentation, /executes the batch atomically/);
-	assert.match(documentation, /active Lix branch/);
-	assert.match(documentation, /active_branch_id/);
-	assert.match(documentation, /switch_branch/);
-	assert.match(documentation, /lix_branch/);
-	assert.match(documentation, /raw Lix SQL execute/);
-	assert.doesNotMatch(documentation, /file tools|reading, creating, editing/i);
-});
-
-void test("local MCP URLs advertise an isolated development server name", () => {
-	assert.equal(mcpServerNameForUrl("http://127.0.0.1:8787/mcp"), "LixRay_Dev");
-	assert.equal(mcpServerNameForUrl("http://localhost:8787/mcp"), "LixRay_Dev");
-	assert.equal(mcpServerNameForUrl("https://lixray.com/mcp"), "LixRay");
-});
-
-void test("MCP analytics strips request, response, and error content", () => {
-	const event = redactMcpAnalyticsEvent({
-		event: "$mcp_tool_call",
-		properties: {
-			$mcp_tool_name: "execute",
-			$mcp_is_error: true,
-			$mcp_parameters: { sql: "SELECT private_document FROM lix_file" },
-			$mcp_response: { rows: [["private value"]] },
-			$mcp_error_message: "private SQL error",
-			$exception_list: [{ value: "private stack" }],
-		},
-	});
-
-	assert.deepEqual(event, {
-		event: "$mcp_tool_call",
-		properties: {
-			$mcp_tool_name: "execute",
-			$mcp_is_error: true,
-		},
-	});
-});
-
-void test("web-standard MCP transport initializes in the Node runtime", async () => {
-	const response = await handleMcpTransport(
-		new Request("https://lixray.com/mcp", {
-			method: "POST",
-			headers: {
-				accept: "application/json, text/event-stream",
-				"content-type": "application/json",
-			},
-			body: JSON.stringify({
-				jsonrpc: "2.0",
-				id: 1,
-				method: "initialize",
-				params: {
-					protocolVersion: "2025-06-18",
-					capabilities: {},
-					clientInfo: { name: "node-runtime-test", version: "1.0.0" },
-				},
-			}),
-		}),
-		new LixFileService(new ProtocolLixRuntimeClient()),
-	);
-	assert.equal(response.status, 200);
-	assert.equal(response.headers.get("access-control-allow-origin"), "*");
-	const payload: unknown = await response.json();
-	assert.ok(isRecord(payload));
-	assert.ok(isRecord(payload.result));
-	assert.ok(isRecord(payload.result.serverInfo));
-	assert.equal(payload.result.serverInfo.name, "LixRay");
-});
-
-void test("MCP initialize, tools/list, and tools/call expose the authenticated tool contract", async () => {
-	const runtimeClient = new ProtocolLixRuntimeClient();
-	const service = new LixFileService(runtimeClient);
-	const observations: Array<McpToolCallObservation> = [];
-	const server = createLixrayMcpServer(service, {
-		onToolCall: (observation) => observations.push(observation),
-	});
-	const client = new Client({ name: "lixray-test", version: "1.0.0" });
-	const [clientTransport, serverTransport] =
-		InMemoryTransport.createLinkedPair();
-	const rawMessages: Array<JSONRPCMessage> = [];
-	const send = serverTransport.send.bind(serverTransport);
-	serverTransport.send = async (message, options) => {
-		rawMessages.push(structuredClone(message));
-		await send(message, options);
-	};
-
-	try {
-		await server.connect(serverTransport);
-		await client.connect(clientTransport);
-		const listed = await client.listTools();
-		assert.deepEqual(
-			listed.tools.map((tool) => tool.name),
-			["list_lixes", "active_branch_id", "switch_branch", "execute"],
-		);
-		for (const tool of listed.tools) {
-			assert.deepEqual(tool._meta?.securitySchemes, [
-				{ type: "oauth2", scopes: ["openid", "email", "profile"] },
-			]);
-			assert.equal(tool.annotations?.openWorldHint, false);
-		}
-		for (const name of ["list_lixes", "active_branch_id"]) {
-			assert.equal(
-				listed.tools.find((tool) => tool.name === name)?.annotations
-					?.readOnlyHint,
-				true,
-			);
-		}
-		for (const tool of listed.tools.filter((tool) => tool.name !== "execute")) {
-			assert.equal(tool.annotations?.destructiveHint, false, tool.name);
-		}
-		const executeTool = listed.tools.find((tool) => tool.name === "execute");
-		assert.ok(executeTool);
-		const executeDescription = executeTool.description;
-		assert.ok(executeDescription);
-		assert.ok(executeDescription.startsWith(EXECUTE_TOOL_DESCRIPTION));
-		assert.match(executeDescription, /INSERT OR REPLACE INTO lix_file/);
-		assert.match(executeDescription, /"kind":"blob","base64":/);
-		assert.ok(executeDescription.includes(EXECUTE_SQL_CORE_SCHEMA));
-		assert.ok(executeDescription.includes(EXECUTE_SQL_TABLES_QUERY));
-		assert.ok(executeDescription.includes(EXECUTE_SQL_COLUMNS_QUERY));
-		assert.match(executeDescription, /active Lix branch/);
-		assert.deepEqual(runtimeClient.executeRequests, []);
-		assert.equal(executeTool?.annotations?.readOnlyHint, false);
-		assert.equal(executeTool?.annotations?.destructiveHint, false);
-		assert.equal(executeTool?.annotations?.idempotentHint, false);
-
-		const rawTools = findRawTools(rawMessages);
-		assert.equal(rawTools.length, 4);
-		const checkedInTools: unknown = JSON.parse(
-			await readFile(new URL("../../mcp-tools.json", import.meta.url), "utf8"),
-		);
-		assert.deepEqual(
-			checkedInTools,
-			rawTools,
-			"web-app/mcp-tools.json is stale; run `pnpm --dir web-app mcp:tools:generate` or `pnpm --dir web-app build`",
-		);
-		for (const tool of rawTools) {
-			assert.deepEqual(tool.securitySchemes, [
-				{ type: "oauth2", scopes: ["openid", "email", "profile"] },
-			]);
-			assert.ok(
-				tool.outputSchema,
-				`${String(tool.name)} should expose an output schema`,
-			);
-		}
-		for (const name of rawTools
-			.map((tool) => String(tool.name))
-			.filter((name) => name !== "list_lixes")) {
-			const inputSchema = rawTools.find((tool) => tool.name === name)
-				?.inputSchema as
-				| {
-						required?: Array<string>;
-						properties?: Record<
-							string,
-							{
-								type?: string;
-								description?: string;
-								anyOf?: unknown;
-								format?: unknown;
-								pattern?: unknown;
-							}
-						>;
-				  }
-				| undefined;
-			assert.ok(inputSchema, `${name} should expose an input schema`);
-			assert.equal(inputSchema.properties?.lix_id, undefined, name);
-			assert.ok(inputSchema.properties?.lix_ref, name);
-			assert.equal(inputSchema.required?.includes("lix_ref"), true, name);
-			assert.equal(inputSchema.properties?.lix_ref?.type, "string", name);
-			assert.equal(inputSchema.properties?.lix_ref?.anyOf, undefined, name);
-			assert.equal(inputSchema.properties?.lix_ref?.format, undefined, name);
-			assert.equal(inputSchema.properties?.lix_ref?.pattern, undefined, name);
-			assert.match(
-				inputSchema.properties?.lix_ref?.description ?? "",
-				/Exact lix UUID, exact lix slug, or exact @namespace\/slug\. Use the lix UUID when available\./,
-				name,
-			);
-		}
-		const executeInput = rawTools.find((tool) => tool.name === "execute")
-			?.inputSchema as
-			| {
-					properties?: {
-						statements?: {
-							items?: {
-								required?: Array<string>;
-							};
-						};
-					};
-			  }
-			| undefined;
-		assert.equal(
-			executeInput?.properties?.statements?.items?.required?.includes(
-				"params",
-			) ?? false,
-			false,
-		);
-		for (const name of ["execute"]) {
-			const inputSchema = rawTools.find((tool) => tool.name === name)
-				?.inputSchema as
-				| {
-						required?: Array<string>;
-						properties?: Record<
-							string,
-							{
-								format?: string;
-								maxLength?: number;
-								description?: string;
-							}
-						>;
-				  }
-				| undefined;
-			assert.equal(
-				inputSchema?.properties?.branch_id,
-				undefined,
-				`${name} should use the active branch without a branch_id input`,
-			);
-		}
-		const switchBranchInput = rawTools.find(
-			(tool) => tool.name === "switch_branch",
-		)?.inputSchema as
-			| {
-					required?: Array<string>;
-					properties?: Record<
-						string,
-						{ format?: string; minLength?: number; description?: string }
-					>;
-			  }
-			| undefined;
-		assert.ok(switchBranchInput);
-		const switchBranchId = switchBranchInput.properties?.branch_id;
-		assert.ok(switchBranchId);
-		assert.equal(switchBranchId.format, undefined);
-		assert.equal(switchBranchId.minLength, 1);
-		assert.equal(switchBranchId.description, "Lix branch ID");
-		assert.equal(
-			switchBranchInput.required?.includes("branch_id"),
-			true,
-			"switch_branch should require an explicit branch ID",
-		);
-
-		const lixes = await client.callTool({
-			name: "list_lixes",
-			arguments: {},
-		});
-		assert.equal(lixes.isError, undefined);
-		assert.deepEqual(lixes.structuredContent, {
-			lixes: [
-				{
-					id: LIX_ID,
-					name: "Personal",
-					slug: "personal",
-					namespace: {
-						id: "org-1",
-						name: "Example",
-						handle: "example",
-					},
-				},
-			],
-		});
-
-		const activeBranch = await client.callTool({
-			name: "active_branch_id",
-			arguments: { lix_ref: "personal" },
-		});
-		assert.equal(activeBranch.isError, undefined);
-		assert.deepEqual(activeBranch.structuredContent, { branch_id: BRANCH_ID });
-
-		const switchedBranch = await client.callTool({
-			name: "switch_branch",
-			arguments: { lix_ref: "personal", branch_id: "global" },
-		});
-		assert.equal(switchedBranch.isError, undefined);
-		assert.deepEqual(switchedBranch.structuredContent, { branch_id: "global" });
-
-		const activeGlobalBranch = await client.callTool({
-			name: "active_branch_id",
-			arguments: { lix_ref: "personal" },
-		});
-		assert.equal(activeGlobalBranch.isError, undefined);
-		assert.deepEqual(activeGlobalBranch.structuredContent, {
-			branch_id: "global",
-		});
-
-		const executed = await client.callTool({
-			name: "execute",
-			arguments: {
-				lix_ref: LIX_ID,
-				statements: [
-					{
-						sql: "SELECT value FROM lix_key_value WHERE key = $1",
-						params: [{ kind: "text", value: "example" }],
-					},
-				],
-			},
-		});
-		assert.equal(executed.isError, undefined);
-		assert.deepEqual(executed.structuredContent, {
-			results: [
-				{
-					columns: ["value"],
-					rows: [[{ kind: "text", value: "result" }]],
-					rowsAffected: 0,
-					notices: [],
-				},
-			],
-		});
-		assert.deepEqual(runtimeClient.executeRequests, [
-			{
-				lixId: LIX_ID,
-				request: {
-					sql: "SELECT value FROM lix_key_value WHERE key = $1",
-					params: [{ kind: "text", value: "example" }],
-					options: undefined,
-				},
-			},
-		]);
-		assert.deepEqual(runtimeClient.executeActiveBranchIds, ["global"]);
-
-		const batch = await client.callTool({
-			name: "execute",
-			arguments: {
-				lix_ref: LIX_ID,
-				statements: [
-					{
-						sql: "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
-						params: [
-							{ kind: "text", value: "example" },
-							{ kind: "text", value: "result" },
-						],
-					},
-					{
-						sql: "SELECT value FROM lix_key_value WHERE key = $1",
-						params: [{ kind: "text", value: "example" }],
-					},
-				],
-			},
-		});
-		assert.equal(batch.isError, undefined);
-		assert.equal(
-			(batch.structuredContent as { results: Array<unknown> }).results.length,
-			2,
-		);
-
-		const invalidExecuteArguments = await client.callTool({
-			name: "execute",
-			arguments: {
-				lix_ref: LIX_ID,
-				statements: [{ sql: "  SELECT $1  ", params: [{ kind: "text" }] }],
-			},
-		});
-		assert.equal(invalidExecuteArguments.isError, true);
-		assert.equal(
-			(
-				invalidExecuteArguments.structuredContent as
-					| { error?: { code?: string } }
-					| undefined
-			)?.error?.code,
-			"invalid_arguments",
-		);
-
-		const rejectedBranchOverride = await client.callTool({
-			name: "execute",
-			arguments: {
-				lix_ref: LIX_ID,
-				branch_id: BRANCH_ID,
-				statements: [{ sql: "SELECT 1" }],
-			},
-		});
-		assert.equal(rejectedBranchOverride.isError, true);
-		assert.equal(
-			(
-				rejectedBranchOverride.structuredContent as
-					| { error?: { code?: string } }
-					| undefined
-			)?.error?.code,
-			"invalid_arguments",
-		);
-
-		const switchedToFailingBranch = await client.callTool({
-			name: "switch_branch",
-			arguments: { lix_ref: LIX_ID, branch_id: THROW_BRANCH_ID },
-		});
-		assert.equal(switchedToFailingBranch.isError, undefined);
-		assert.deepEqual(switchedToFailingBranch.structuredContent, {
-			branch_id: THROW_BRANCH_ID,
-		});
-
-		const internalFailure = await client.callTool({
-			name: "execute",
-			arguments: {
-				lix_ref: LIX_ID,
-				statements: [{ sql: "SELECT 1" }],
-			},
-		});
-		assert.equal(internalFailure.isError, true);
-		assert.equal(
-			(
-				internalFailure.structuredContent as
-					| { error?: { code?: string } }
-					| undefined
-			)?.error?.code,
-			"internal_error",
-		);
-
-		await assert.rejects(
-			client.callTool({ name: "untrusted-secret-tool-name", arguments: {} }),
-			/Unknown tool/,
-		);
-
-		assert.deepEqual(
-			observations.map(
-				({
-					durationMs,
-					surfaceVersion,
-					executeInput,
-					executeOutput,
-					...observation
-				}) => {
-					assert.ok(Number.isInteger(durationMs));
-					assert.ok(durationMs >= 0);
-					assert.match(surfaceVersion, /^fnv1a32:[0-9a-f]{8}$/);
-					return {
-						...observation,
-						...(executeInput
-							? { statementCount: executeInput.statementCount }
-							: {}),
-						...(executeOutput
-							? { resultCount: executeOutput.resultCount }
-							: {}),
-					};
-				},
-			),
-			[
-				{ toolName: "list_lixes", outcome: "success" },
-				{
-					toolName: "active_branch_id",
-					outcome: "success",
-					lixId: LIX_ID,
-				},
-				{
-					toolName: "switch_branch",
-					outcome: "success",
-					lixId: LIX_ID,
-				},
-				{
-					toolName: "active_branch_id",
-					outcome: "success",
-					lixId: LIX_ID,
-				},
-				{
-					toolName: "execute",
-					outcome: "success",
-					lixId: LIX_ID,
-					statementCount: 1,
-					resultCount: 1,
-				},
-				{
-					toolName: "execute",
-					outcome: "success",
-					lixId: LIX_ID,
-					statementCount: 2,
-					resultCount: 2,
-				},
-				{
-					toolName: "execute",
-					outcome: "error",
-					errorCode: "invalid_arguments",
-					statementCount: 1,
-				},
-				{
-					toolName: "execute",
-					outcome: "error",
-					errorCode: "invalid_arguments",
-					statementCount: 1,
-				},
-				{
-					toolName: "switch_branch",
-					outcome: "success",
-					lixId: LIX_ID,
-				},
-				{
-					toolName: "execute",
-					outcome: "error",
-					errorCode: "internal_error",
-					lixId: LIX_ID,
-					statementCount: 1,
-				},
-				{
-					toolName: "unknown",
-					outcome: "error",
-					errorCode: "unknown_tool",
-				},
-			],
-		);
-		assert.doesNotMatch(JSON.stringify(observations), /"example"|"result"/);
-	} finally {
-		await client.close();
-		await server.close();
-	}
-});
-
-void test("authless MCP tools advertise noauth security", async () => {
-	const server = createLixrayMcpServer(
-		new LixFileService(new ProtocolLixRuntimeClient()),
-		{ authMode: "none" },
-	);
-	const client = new Client({ name: "lixray-demo-test", version: "1.0.0" });
-	const [clientTransport, serverTransport] =
-		InMemoryTransport.createLinkedPair();
-	const rawMessages: Array<JSONRPCMessage> = [];
-	const send = serverTransport.send.bind(serverTransport);
-	serverTransport.send = async (message, options) => {
-		rawMessages.push(structuredClone(message));
-		await send(message, options);
-	};
-
-	try {
-		await server.connect(serverTransport);
-		await client.connect(clientTransport);
-		const listed = await client.listTools();
-		for (const tool of listed.tools) {
-			assert.deepEqual(tool._meta?.securitySchemes, [{ type: "noauth" }]);
-		}
-		const rawTools = findRawTools(rawMessages);
-		assert.equal(rawTools.length, 4);
-		for (const tool of rawTools) {
-			assert.deepEqual(tool.securitySchemes, [{ type: "noauth" }]);
-		}
-	} finally {
-		await client.close();
-		await server.close();
-	}
-});
-
-class ProtocolLixRuntimeClient implements LixRuntimeClient {
-	private currentBranchId = BRANCH_ID;
-	readonly executeRequests: Array<{
-		lixId: string;
-		request: ExecuteRequest;
-	}> = [];
-	readonly executeActiveBranchIds: Array<string> = [];
-
+class FakeRuntime implements LixRuntimeClient {
 	async listLixes() {
 		return [
 			{
 				id: LIX_ID,
-				name: "Personal",
-				slug: "personal",
-				namespace: { id: "org-1", name: "Example", handle: "example" },
+				name: "Company",
+				slug: "company",
+				namespace: { id: "n", name: "Acme", handle: "acme" },
 			},
 		];
 	}
-
-	async activeBranchId() {
-		return this.currentBranchId;
+	async activeBranchId(_lixId: string, branchId?: string) {
+		return branchId ?? "main";
 	}
-
 	async switchBranch(_lixId: string, branchId: string) {
-		this.currentBranchId = branchId;
 		return { branchId };
 	}
-
-	async execute(
-		lixId: string,
-		request: ExecuteRequest,
-	): Promise<ExecuteResponse> {
-		if (this.currentBranchId === THROW_BRANCH_ID) {
-			throw new Error("Unexpected runtime failure");
+	async execute(_lixId: string, _branchId: string, request: ExecuteRequest) {
+		if (request.sql === "SELECT error") {
+			throw createLixError(
+				"LIX_UNSUPPORTED_SQL",
+				"This SQL statement is not supported.",
+				{
+					details: { operation: "execute" },
+					hint: "Use SELECT 1 instead.",
+				},
+			);
 		}
-		this.executeActiveBranchIds.push(this.currentBranchId);
-		this.executeRequests.push({ lixId, request });
+		if (request.sql.includes("lix_active_branch_commit_id")) {
+			return {
+				columns: ["commit_id"],
+				rows: [[{ kind: "text" as const, value: "commit-1" }]],
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
 		return {
 			columns: ["value"],
-			rows: [[{ kind: "text", value: "result" }]],
+			rows: [[{ kind: "text" as const, value: "ok" }]],
 			rowsAffected: 0,
 			notices: [],
 		};
 	}
-
 	async executeBatch(
 		lixId: string,
+		branchId: string,
 		request: ExecuteBatchRequest,
-	): Promise<ExecuteScriptResponse> {
+	) {
 		return {
 			results: await Promise.all(
 				request.statements.map((statement) =>
-					this.execute(lixId, {
-						...statement,
-						options: request.options,
-					}),
+					this.execute(lixId, branchId, statement),
 				),
 			),
 		};
 	}
-
-	async mutate(): Promise<never> {
-		throw new Error("No filesystem mutation should run for this protocol test");
+	async createBranch() {
+		return { id: "draft", name: "Draft", hidden: false, commitId: "commit-1" };
+	}
+	async createCheckpoint() {
+		return { commitId: "commit-1" };
+	}
+	async undo() {
+		return {
+			branchId: "main",
+			targetCommitId: "old",
+			inverseCommitId: "inverse",
+		};
+	}
+	async redo() {
+		return {
+			branchId: "main",
+			targetCommitId: "next",
+			replayCommitId: "replay",
+		};
+	}
+	async mergeBranchPreview() {
+		return { outcome: "alreadyUpToDate" };
+	}
+	async mergeBranch() {
+		return { outcome: "mergeCommitted" };
 	}
 }
 
-function findRawTools(
-	messages: Array<JSONRPCMessage>,
-): Array<Record<string, unknown>> {
-	for (const message of messages) {
-		if (
-			"result" in message &&
-			message.result &&
-			typeof message.result === "object" &&
-			"tools" in message.result &&
-			Array.isArray(message.result.tools)
-		) {
-			return message.result.tools as Array<Record<string, unknown>>;
+void test("discovery helpers advertise the modern stateless contract", async () => {
+	assert.equal(MCP_PROTOCOL_VERSION, "2026-07-28");
+	assert.match(mcpAuthenticateChallenge(), /resource_metadata=/);
+	assert.deepEqual(
+		await protectedResourceMetadataResponse({
+			authorizationServer: "https://auth.example",
+		}).json(),
+		{
+			resource: MCP_RESOURCE,
+			authorization_servers: ["https://auth.example"],
+			scopes_supported: ["openid", "email", "profile"],
+			resource_documentation: "https://lixray.com/mcp/docs",
+		},
+	);
+	assert.match(
+		await mcpDocumentationResponse().text(),
+		/server\/discover|X-Request-ID/,
+	);
+	assert.equal(mcpUnauthorizedResponse().status, 401);
+});
+
+void test("PostHog MCP analytics redaction removes private payloads", () => {
+	const event = redactMcpAnalyticsEvent({
+		event: "$mcp_tool_call",
+		properties: {
+			$mcp_parameters: { context: "signed-context", sql: "SELECT secret" },
+			$mcp_response: { rows: [["secret"]] },
+			$mcp_error_message: "private error",
+			$exception_list: [{ stack: "private stack" }],
+			mcp_tool_name: "execute",
+		},
+	});
+	assert.deepEqual(event.properties, { mcp_tool_name: "execute" });
+});
+
+void test("MCP request IDs accept a valid incoming ID and expose generated IDs", () => {
+	const supplied = new Request("https://lixray.test/mcp", {
+		headers: { [MCP_REQUEST_ID_HEADER]: "edge-request-123" },
+	});
+	assert.equal(requestIdForMcpRequest(supplied), "edge-request-123");
+
+	const response = withMcpRequestId(
+		new Response("ok"),
+		"generated-request-456",
+	);
+	assert.equal(
+		response.headers.get(MCP_REQUEST_ID_HEADER),
+		"generated-request-456",
+	);
+	assert.match(
+		response.headers.get("access-control-expose-headers") ?? "",
+		/X-Request-ID/,
+	);
+});
+
+void test("modern MCP discover and tool calls work without a session id", async () => {
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const requests: Array<Request> = [];
+	const responseRequestIds: Array<string> = [];
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		requests.push(request.clone());
+		const response = await handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_Test",
+		});
+		responseRequestIds.push(response.headers.get("x-request-id") ?? "");
+		return response;
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{
+			fetch: fetcher,
+		},
+	);
+	const client = new Client(
+		{ name: "lixray-test-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		assert.equal(client.getProtocolEra(), "modern");
+		const tools = await client.listTools();
+		assert.deepEqual(
+			tools.tools.map((tool) => tool.name),
+			[
+				"list_lixes",
+				"open_lix",
+				"execute",
+				"execute_batch",
+				"active_branch_id",
+				"switch_branch",
+				"create_branch",
+				"create_checkpoint",
+				"undo",
+				"redo",
+				"merge_branch_preview",
+				"merge_branch",
+			],
+		);
+		assert.ok(!tools.tools.some((tool) => tool.name.includes("file")));
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
+		});
+		assert.equal(opened.isError, undefined, JSON.stringify(opened));
+		const openedContent = opened.structuredContent as {
+			context: string;
+			request_id: string;
+		};
+		const context = openedContent.context;
+		assert.equal(typeof context, "string");
+		assert.match(openedContent.request_id, /^[0-9a-f-]{36}$/i);
+		assert.equal(responseRequestIds.at(-1), openedContent.request_id);
+		const executed = await client.callTool({
+			name: "execute",
+			arguments: { context, sql: "SELECT 1" },
+		});
+		assert.equal(executed.isError, undefined);
+		const executedContent = executed.structuredContent as {
+			request_id: string;
+			result: { rowsAffected: number };
+		};
+		assert.equal(executedContent.result.rowsAffected, 0);
+		assert.equal(responseRequestIds.at(-1), executedContent.request_id);
+		const failed = await client.callTool({
+			name: "execute",
+			arguments: { context, sql: "SELECT error" },
+		});
+		assert.equal(failed.isError, true);
+		const failedContent = failed.structuredContent as {
+			request_id: string;
+			error: Record<string, unknown>;
+		};
+		assert.deepEqual(failedContent.error, {
+			code: "LIX_UNSUPPORTED_SQL",
+			message: "This SQL statement is not supported.",
+			hint: "Use SELECT 1 instead.",
+			details: { operation: "execute" },
+		});
+		assert.equal(responseRequestIds.at(-1), failedContent.request_id);
+		assert.match(
+			failed.content?.[0]?.type === "text" ? failed.content[0].text : "",
+			/Use SELECT 1 instead\./,
+		);
+		assert.ok(
+			requests.length >= 4,
+			"discover, tools/list, and tool calls should be separate requests",
+		);
+		for (const request of requests) {
+			assert.equal(request.headers.has("mcp-session-id"), false);
 		}
+		const firstBody = await requests[0].text();
+		assert.match(firstBody, /server\/discover/);
+		assert.match(firstBody, /2026-07-28/);
+	} finally {
+		await client.close();
 	}
-	return [];
-}
+});
 
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object";
-}
+void test("legacy MCP initialize and tool calls work without a session id", async () => {
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const requests: Array<Request> = [];
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		requests.push(request.clone());
+		return handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_Legacy_Test",
+		});
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{
+			fetch: fetcher,
+		},
+	);
+	const client = new Client(
+		{ name: "lixray-legacy-test-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: "legacy" } },
+	);
+	try {
+		await client.connect(transport);
+		assert.equal(client.getProtocolEra(), "legacy");
+		const tools = await client.listTools();
+		assert.ok(tools.tools.some((tool) => tool.name === "execute"));
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
+		});
+		assert.equal(opened.isError, undefined, JSON.stringify(opened));
+		const context = (opened.structuredContent as { context: string }).context;
+		const executed = await client.callTool({
+			name: "execute",
+			arguments: { context, sql: "SELECT 1" },
+		});
+		assert.equal(executed.isError, undefined);
+		assert.ok(
+			requests.length >= 3,
+			"initialize, tools/list, and tool calls should run",
+		);
+		for (const request of requests) {
+			assert.equal(request.headers.has("mcp-session-id"), false);
+		}
+		const firstBody = await requests[0].text();
+		assert.match(firstBody, /initialize/);
+		assert.doesNotMatch(firstBody, /server\/discover/);
+	} finally {
+		await client.close();
+	}
+});

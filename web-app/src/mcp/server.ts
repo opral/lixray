@@ -1,17 +1,18 @@
+/*
+ * The MCP SDK exposes dynamically registered tool arguments as `any`. Keep
+ * this exception at the adapter boundary; the individual Zod schemas and
+ * Lix service remain the runtime type guards for these values.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { instrument } from "@posthog/mcp";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
-	CallToolRequestSchema,
-	ErrorCode,
-	ListToolsRequestSchema,
-	McpError,
+	createMcpHandler,
+	McpServer,
 	type ToolAnnotations,
-} from "@modelcontextprotocol/sdk/types.js";
+} from "@modelcontextprotocol/server";
 import { PostHog } from "posthog-node";
 import { z } from "zod";
-import { FileServiceError, LixFileService } from "./file-service.ts";
-import { EXECUTE_TOOL_DESCRIPTION } from "./execute-schema.ts";
+import { isLixError, LixService, type ExecuteRequest } from "./lix-service.ts";
 import {
 	mcpSurfaceVersion,
 	observeExecuteInput,
@@ -22,17 +23,18 @@ import {
 
 export const MCP_PATH = "/mcp";
 export const MCP_RESOURCE = "https://lixray.com";
+export const MCP_PROTOCOL_VERSION = "2026-07-28";
 export const MCP_PROTECTED_RESOURCE_PATH =
 	"/.well-known/oauth-protected-resource";
-// Not under /docs — that prefix belongs to the human docs site; this is the
-// plain-text page MCP clients are pointed at via resource_documentation.
 export const MCP_DOCUMENTATION_PATH = "/mcp/docs";
 export const MCP_PROTECTED_RESOURCE_URL = `${MCP_RESOURCE}${MCP_PROTECTED_RESOURCE_PATH}`;
+export const MCP_REQUEST_ID_HEADER = "X-Request-ID";
 const MCP_SCOPES = ["openid", "email", "profile"] as const;
 
 type McpAuthMode = "oauth" | "none";
 
 export interface McpToolCallObservation {
+	requestId: string;
 	toolName: string;
 	outcome: "success" | "error";
 	durationMs: number;
@@ -45,10 +47,11 @@ export interface McpToolCallObservation {
 
 export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
 
-interface McpServerOptions {
+export interface McpServerOptions {
 	authMode?: McpAuthMode;
+	requestId?: string;
+	serverName?: string;
 	onToolCall?: McpToolCallObserver;
-	serverName?: "LixRay" | "LixRay_Dev";
 	posthogToken?: string;
 	posthogHost?: string;
 	posthogDistinctId?: string;
@@ -56,7 +59,14 @@ interface McpServerOptions {
 	onPosthogFlush?: (flush: () => Promise<void>) => void;
 }
 
-const LOCAL_MCP_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
+type McpSecurityScheme =
+	| { type: "oauth2"; scopes: Array<string> }
+	| { type: "noauth" };
+
+const oauthSecuritySchemes: Array<McpSecurityScheme> = [
+	{ type: "oauth2", scopes: [...MCP_SCOPES] },
+];
+
 const PRIVATE_MCP_ANALYTICS_PROPERTIES = [
 	"$mcp_parameters",
 	"$mcp_response",
@@ -74,266 +84,497 @@ export function redactMcpAnalyticsEvent<
 	return { ...event, properties };
 }
 
-export function mcpServerNameForUrl(url: string): "LixRay" | "LixRay_Dev" {
-	return LOCAL_MCP_HOSTNAMES.has(new URL(url).hostname)
-		? "LixRay_Dev"
-		: "LixRay";
-}
-
-type McpSecurityScheme =
-	| { type: "oauth2"; scopes: Array<string> }
-	| { type: "noauth" };
-
-const oauthSecuritySchemes: Array<McpSecurityScheme> = [
-	{ type: "oauth2", scopes: [...MCP_SCOPES] },
-];
-
-const uuid = z.uuid().describe("Lix UUID");
 const lixRef = z
 	.string()
-	.describe(
-		"Exact lix UUID, exact lix slug, or exact @namespace/slug. Use the lix UUID when available.",
-	);
-// Lix accepts non-UUID branch identifiers such as the built-in `global`
-// branch. Keep the MCP contract as broad as the Lix client contract.
-const branchId = z.string().min(1).describe("Lix branch ID");
-const executeSqlText = z.string().trim().min(1);
-const wireValue = z.discriminatedUnion("kind", [
+	.min(1)
+	.describe("Lix UUID, slug, or @namespace/slug reference");
+const context = z
+	.string()
+	.min(1)
+	.describe("Opaque Lix context returned by open_lix or switch_branch");
+const branchId = z.string().min(1).describe("Lix branch id");
+const sourceBranchId = z.string().min(1).describe("Source branch id");
+const requestIdValue = z
+	.string()
+	.min(1)
+	.describe("Request ID for correlating this response with server telemetry");
+const wireValue = z.union([
 	z.object({ kind: z.literal("null"), value: z.null().optional() }).strict(),
 	z.object({ kind: z.literal("bool"), value: z.boolean() }).strict(),
-	z.object({ kind: z.literal("int"), value: z.number().int().safe() }).strict(),
-	z.object({ kind: z.literal("float"), value: z.number().finite() }).strict(),
+	z.object({ kind: z.literal("int"), value: z.number().int() }).strict(),
+	z.object({ kind: z.literal("float"), value: z.number() }).strict(),
 	z.object({ kind: z.literal("text"), value: z.string() }).strict(),
 	z.object({ kind: z.literal("blob"), base64: z.string() }).strict(),
 	z.object({ kind: z.literal("json"), value: z.unknown() }).strict(),
 ]);
-const executeStatement = z
+const executeOptions = z
 	.object({
-		sql: executeSqlText,
-		params: z.array(wireValue).max(1000).optional().default([]),
+		origin_key: z.string().optional(),
+		idempotency_key: z.string().optional(),
 	})
 	.strict();
-const lixSummaryOutput = z
-	.object({
-		id: uuid,
-		name: z.string(),
-		slug: z.string(),
-		namespace: z
-			.object({ id: z.string(), name: z.string(), handle: z.string() })
-			.strict(),
-	})
+const sqlStatement = z
+	.object({ sql: z.string().min(1), params: z.array(wireValue).optional() })
 	.strict();
-const toolErrorOutput = z
+
+const errorOutput = z
 	.object({
+		request_id: requestIdValue,
 		error: z
 			.object({
 				code: z.string(),
 				message: z.string(),
-				details: z.record(z.string(), z.unknown()).optional(),
+				hint: z.string().optional(),
+				details: z.unknown().optional(),
 			})
 			.strict(),
 	})
 	.strict();
-const listLixesOutput = z.union([
-	z.object({ lixes: z.array(lixSummaryOutput) }).strict(),
-	toolErrorOutput,
-]);
-const activeBranchOutput = z.union([
-	z.object({ branch_id: branchId }).strict(),
-	toolErrorOutput,
-]);
-const executeStatementOutput = z
-	.object({
-		columns: z.array(z.string()),
-		rows: z.array(z.array(wireValue)),
-		rowsAffected: z.number().int().nonnegative(),
-		notices: z.array(z.unknown()),
-	})
-	.strict();
-const executeOutput = z.union([
-	z.object({ results: z.array(executeStatementOutput) }).strict(),
-	toolErrorOutput,
-]);
 
-interface ToolDefinition {
-	descriptor: {
-		name: string;
-		title: string;
-		description: string;
-		inputSchema: Record<string, unknown>;
-		outputSchema?: Record<string, unknown>;
-		securitySchemes: Array<McpSecurityScheme>;
-		annotations: ToolAnnotations;
-		_meta: Record<string, unknown>;
-	};
-	schema: z.ZodType<Record<string, unknown>>;
-	outputSchema?: z.ZodType<Record<string, unknown>>;
-	call(args: Record<string, unknown>): Promise<unknown>;
+const listLixesOutput = withError(
+	z.object({
+		lixes: z.array(
+			z
+				.object({
+					id: z.string(),
+					name: z.string(),
+					slug: z.string(),
+					namespace: z
+						.object({ id: z.string(), name: z.string(), handle: z.string() })
+						.strict(),
+				})
+				.strict(),
+		),
+	}),
+);
+const openLixOutput = withError(
+	z.object({
+		context,
+		lix_id: z.string(),
+		branch_id: branchId,
+		commit_id: z.string(),
+	}),
+);
+const branchStateOutput = withError(
+	z.object({ context, branch_id: branchId, commit_id: z.string() }),
+);
+const executeOutput = withError(
+	z.object({
+		context,
+		result: z
+			.object({
+				columns: z.array(z.string()),
+				rows: z.array(z.array(wireValue)),
+				rowsAffected: z.number().int(),
+				notices: z.array(z.unknown()),
+			})
+			.strict(),
+	}),
+);
+const executeBatchOutput = withError(
+	z.object({
+		context,
+		results: z.array(
+			z
+				.object({
+					columns: z.array(z.string()),
+					rows: z.array(z.array(wireValue)),
+					rowsAffected: z.number().int(),
+					notices: z.array(z.unknown()),
+				})
+				.strict(),
+		),
+	}),
+);
+const branchOutput = withError(
+	z.object({
+		context,
+		branch: z
+			.object({
+				id: z.string(),
+				name: z.string(),
+				hidden: z.boolean(),
+				commit_id: z.string(),
+			})
+			.strict(),
+	}),
+);
+const checkpointOutput = withError(
+	z.object({ context, commit_id: z.string() }),
+);
+const undoOutput = withError(
+	z.object({
+		context,
+		branch_id: branchId,
+		target_commit_id: z.string(),
+		inverse_commit_id: z.string(),
+	}),
+);
+const redoOutput = withError(
+	z.object({
+		context,
+		branch_id: branchId,
+		target_commit_id: z.string(),
+		replay_commit_id: z.string(),
+	}),
+);
+
+const baseMergeOutput = z.object({ context }).catchall(z.unknown());
+
+export function mcpServerNameForUrl(url: string): "LixRay" | "LixRay_Dev" {
+	const hostname = new URL(url).hostname;
+	return new Set(["localhost", "127.0.0.1", "::1"]).has(hostname)
+		? "LixRay_Dev"
+		: "LixRay";
+}
+
+export function requestIdForMcpRequest(request: Request): string {
+	const supplied = request.headers.get(MCP_REQUEST_ID_HEADER)?.trim();
+	return supplied && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(supplied)
+		? supplied
+		: crypto.randomUUID();
+}
+
+export function withMcpRequestId(
+	response: Response,
+	requestId: string,
+): Response {
+	const headers = new Headers(response.headers);
+	headers.set(MCP_REQUEST_ID_HEADER, requestId);
+	const exposedHeaders = new Set(
+		(headers.get("access-control-expose-headers") ?? "")
+			.split(",")
+			.map((header) => header.trim())
+			.filter(Boolean),
+	);
+	exposedHeaders.add(MCP_REQUEST_ID_HEADER);
+	headers.set("access-control-expose-headers", [...exposedHeaders].join(", "));
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
+	});
 }
 
 export function createLixrayMcpServer(
-	service: LixFileService,
+	service: LixService,
 	options: McpServerOptions = {},
-): Server {
-	const server = new Server(
-		{ name: options.serverName ?? "LixRay", version: "0.1.0" },
+): McpServer {
+	const requestId = options.requestId ?? crypto.randomUUID();
+	const securitySchemes =
+		options.authMode === "none"
+			? [{ type: "noauth" as const }]
+			: oauthSecuritySchemes;
+	const server = new McpServer(
+		{ name: options.serverName ?? "LixRay", version: "0.2.0" },
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"Use LixRay's execute tool for lix inspection and changes. SQL and branch controls use the lix's active Lix branch, just like the Lix client. Use active_branch_id to inspect it and switch_branch to change it. Query lix_branch with execute when you need the branch catalog. Freely make changes, as the user can review all changes in the UI. Never guess lix or branch IDs.",
+				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through execute or execute_batch using the public lix_file and lix_directory tables. execute_batch is the atomic boundary. Do not invent file helper tools or branch state.",
 		},
 	);
-	const tools = buildTools(
-		service,
-		options.authMode === "none" ? [{ type: "noauth" }] : oauthSecuritySchemes,
-	);
-	const surfaceVersion = mcpSurfaceVersion(
-		tools.map((tool) => tool.descriptor),
-	);
-	const observe = (
-		startedAt: number,
-		observation: Omit<McpToolCallObservation, "durationMs" | "surfaceVersion">,
-	) =>
-		observeToolCall(options.onToolCall, startedAt, {
-			...observation,
-			surfaceVersion,
-		});
+	const surfaceVersion = mcpSurfaceVersion(toolSurfaceDescriptions());
 
-	server.setRequestHandler(ListToolsRequestSchema, () => ({
-		tools: tools.map((tool) => tool.descriptor),
-	}));
-	server.setRequestHandler(CallToolRequestSchema, async (request) => {
-		const startedAt = Date.now();
-		const tool = tools.find(
-			(candidate) => candidate.descriptor.name === request.params.name,
-		);
-		if (!tool) {
-			observe(startedAt, {
-				toolName: "unknown",
-				outcome: "error",
-				errorCode: "unknown_tool",
-			});
-			throw new McpError(
-				ErrorCode.InvalidParams,
-				`Unknown tool: ${request.params.name}`,
-			);
-		}
-		const executeInput =
-			tool.descriptor.name === "execute"
-				? observeExecuteInput(request.params.arguments?.statements)
-				: undefined;
-		const parsed = tool.schema.safeParse(request.params.arguments ?? {});
-		if (!parsed.success) {
-			observe(startedAt, {
-				toolName: tool.descriptor.name,
-				outcome: "error",
-				errorCode: "invalid_arguments",
-				...(executeInput ? { executeInput } : {}),
-			});
-			return errorResult("invalid_arguments", z.prettifyError(parsed.error));
-		}
-		let lixId: string | undefined;
-		try {
-			const callArgs: Record<string, unknown> = { ...parsed.data };
-			if (typeof parsed.data.lix_ref === "string") {
-				lixId = await service.resolveLixRef(parsed.data.lix_ref);
-				callArgs.lix_ref = lixId;
-			}
-			const rawStructuredContent = asStructuredContent(
-				await tool.call(callArgs),
-			);
-			const parsedOutput = tool.outputSchema?.safeParse(rawStructuredContent);
-			if (parsedOutput && !parsedOutput.success) {
-				throw new Error(
-					`${tool.descriptor.name} returned invalid structured output: ${z.prettifyError(parsedOutput.error)}`,
-				);
-			}
-			const structuredContent = parsedOutput?.success
-				? parsedOutput.data
-				: rawStructuredContent;
-			const executeOutput =
-				tool.descriptor.name === "execute"
-					? observeExecuteOutput(structuredContent)
-					: undefined;
-			observe(startedAt, {
-				toolName: tool.descriptor.name,
-				outcome: "success",
-				...(lixId ? { lixId } : {}),
-				...(executeInput ? { executeInput } : {}),
-				...(executeOutput ? { executeOutput } : {}),
+	registerTool(
+		server,
+		"list_lixes",
+		"List lixes",
+		"List LixRay lixes the signed-in user can access. Use this before open_lix when the Lix is not already known.",
+		z.object({}).strict(),
+		listLixesOutput,
+		readAnnotations(),
+		securitySchemes,
+		async () => ({ lixes: await service.listLixes() }),
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"open_lix",
+		"Open a Lix",
+		"Resolve and open a Lix context. If branch_id is omitted, pin the context to the Lix's current active branch. The returned context is required by every other tool.",
+		z.object({ lix_ref: lixRef, branch_id: branchId.optional() }).strict(),
+		openLixOutput,
+		readAnnotations(),
+		securitySchemes,
+		async ({ lix_ref, branch_id }) => {
+			const opened = await service.openLix(lix_ref, branch_id);
+			return {
+				context: opened.context,
+				lix_id: opened.lixId,
+				branch_id: opened.branchId,
+				commit_id: opened.commitId,
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"execute",
+		"Execute SQL",
+		"Execute exactly one SQL statement against the active branch in context. Use public Lix SQL surfaces such as lix_file, lix_directory, lix_file_history(), lix_directory_history(), information_schema, and lix_branch. File content is a blob; use CAST(content AS TEXT) for text. Directory paths do not have trailing slashes.",
+		z
+			.object({
+				context,
+				sql: z.string().min(1),
+				params: z.array(wireValue).optional(),
+				options: executeOptions.optional(),
+			})
+			.strict(),
+		executeOutput,
+		writeAnnotations(),
+		securitySchemes,
+		async (args) => service.execute(args.context, toExecuteRequest(args)),
+		"execute",
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"execute_batch",
+		"Execute an atomic SQL batch",
+		"Execute an ordered, atomic batch of SQL statements against the active branch in context. Use this for multi-step file or directory changes so partial setup cannot leak. File creation, reads, edits, deletes, directory creation, and path renames all belong here as SQL.",
+		z
+			.object({
+				context,
+				statements: z.array(sqlStatement).min(1),
+				options: executeOptions.optional(),
+			})
+			.strict(),
+		executeBatchOutput,
+		writeAnnotations(),
+		securitySchemes,
+		async ({ context: token, statements, options: batchOptions }) => ({
+			...(await service.executeBatch(token, {
+				statements,
+				options: toExecuteOptions(batchOptions),
+			})),
+		}),
+		"execute_batch",
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"active_branch_id",
+		"Get active branch",
+		"Return the branch selected by context and its current commit id.",
+		z.object({ context }).strict(),
+		branchStateOutput,
+		readAnnotations(),
+		securitySchemes,
+		async ({ context: token }) => {
+			const state = await service.activeBranchId(token);
+			return {
+				context: state.context,
+				branch_id: state.branchId,
+				commit_id: state.commitId,
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"switch_branch",
+		"Switch branch",
+		"Return a new context pinned to branch_id. Context switching is explicit and stateless; pass the returned context to subsequent calls.",
+		z.object({ context, branch_id: branchId }).strict(),
+		branchStateOutput,
+		writeAnnotations(false, false),
+		securitySchemes,
+		async ({ context: token, branch_id }) => {
+			const state = await service.switchBranch(token, branch_id);
+			return {
+				context: state.context,
+				branch_id: state.branchId,
+				commit_id: state.commitId,
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"create_branch",
+		"Create branch",
+		"Create a branch from the branch selected by context. The new branch is not made active; call switch_branch when the agent wants to work there.",
+		z
+			.object({
+				context,
+				id: z.string().optional(),
+				name: z.string().min(1),
+				from_commit_id: z.string().optional(),
+			})
+			.strict(),
+		branchOutput,
+		writeAnnotations(),
+		securitySchemes,
+		async ({ context: token, id, name, from_commit_id }) => {
+			const result = await service.createBranch(token, {
+				id,
+				name,
+				fromCommitId: from_commit_id,
 			});
 			return {
-				structuredContent,
-				content: [
-					{
-						type: "text" as const,
-						text: successSummary(tool.descriptor.name),
-					},
-				],
+				context: result.context,
+				branch: {
+					id: result.branch.id,
+					name: result.branch.name,
+					hidden: result.branch.hidden,
+					commit_id: result.branch.commitId,
+				},
 			};
-		} catch (caught) {
-			if (caught instanceof FileServiceError) {
-				observe(startedAt, {
-					toolName: tool.descriptor.name,
-					outcome: "error",
-					errorCode: caught.code,
-					...(lixId ? { lixId } : {}),
-					...(executeInput ? { executeInput } : {}),
-				});
-				return errorResult(caught.code, caught.message, caught.details);
-			}
-			observe(startedAt, {
-				toolName: tool.descriptor.name,
-				outcome: "error",
-				errorCode: "internal_error",
-				...(lixId ? { lixId } : {}),
-				...(executeInput ? { executeInput } : {}),
-			});
-			console.error("LixRay MCP tool failed", {
-				tool: tool.descriptor.name,
-				error: errorDetails(caught),
-			});
-			return errorResult("internal_error", "The LixRay tool call failed.");
-		}
-	});
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"create_checkpoint",
+		"Create checkpoint",
+		"Create a checkpoint on the branch selected by context.",
+		z.object({ context }).strict(),
+		checkpointOutput,
+		writeAnnotations(),
+		securitySchemes,
+		async ({ context: token }) => {
+			const result = await service.createCheckpoint(token);
+			return { context: result.context, commit_id: result.commitId };
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"undo",
+		"Undo last commit",
+		"Undo the latest commit on the branch selected by context.",
+		z.object({ context }).strict(),
+		undoOutput,
+		writeAnnotations(false, true),
+		securitySchemes,
+		async ({ context: token }) => {
+			const result = await service.undo(token);
+			return {
+				context: result.context,
+				branch_id: result.branchId,
+				target_commit_id: result.targetCommitId,
+				inverse_commit_id: result.inverseCommitId,
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"redo",
+		"Redo commit",
+		"Redo the latest undone commit on the branch selected by context.",
+		z.object({ context }).strict(),
+		redoOutput,
+		writeAnnotations(false, true),
+		securitySchemes,
+		async ({ context: token }) => {
+			const result = await service.redo(token);
+			return {
+				context: result.context,
+				branch_id: result.branchId,
+				target_commit_id: result.targetCommitId,
+				replay_commit_id: result.replayCommitId,
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"merge_branch_preview",
+		"Preview branch merge",
+		"Preview merging source_branch_id into the active branch selected by context. This does not mutate Lix state.",
+		z.object({ context, source_branch_id: sourceBranchId }).strict(),
+		withError(baseMergeOutput),
+		readAnnotations(),
+		securitySchemes,
+		async ({ context: token, source_branch_id }) =>
+			service.mergeBranchPreview(token, source_branch_id),
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
+
+	registerTool(
+		server,
+		"merge_branch",
+		"Merge branch",
+		"Merge source_branch_id into the active branch selected by context. Preview first and resolve conflicts before calling this mutating operation.",
+		z.object({ context, source_branch_id: sourceBranchId }).strict(),
+		withError(baseMergeOutput),
+		writeAnnotations(),
+		securitySchemes,
+		async ({ context: token, source_branch_id }) =>
+			service.mergeBranch(token, source_branch_id),
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+	);
 
 	return server;
 }
 
-function observeToolCall(
-	observer: McpToolCallObserver | undefined,
-	startedAt: number,
-	observation: Omit<McpToolCallObservation, "durationMs">,
-): void {
-	if (!observer) return;
-	try {
-		observer({
-			...observation,
-			durationMs: Math.max(0, Date.now() - startedAt),
-		});
-	} catch (caught) {
-		console.warn(
-			"Failed to observe LixRay MCP tool call",
-			errorDetails(caught),
-		);
-	}
-}
-
 export async function handleMcpTransport(
 	request: Request,
-	service: LixFileService,
+	service: LixService,
 	options: McpServerOptions = {},
 ): Promise<Response> {
+	const requestId = options.requestId ?? requestIdForMcpRequest(request);
 	if (new URL(request.url).pathname !== MCP_PATH) {
-		return new Response("Not found\n", { status: 404 });
+		return withMcpRequestId(
+			new Response("Not found\n", { status: 404 }),
+			requestId,
+		);
 	}
-	const transport = new WebStandardStreamableHTTPServerTransport({
-		enableJsonResponse: true,
-		sessionIdGenerator: undefined,
-	});
 	const server = createLixrayMcpServer(service, {
 		...options,
+		requestId,
 		serverName: options.serverName ?? mcpServerNameForUrl(request.url),
+	});
+	const handler = createMcpHandler(() => server, {
+		legacy: "stateless",
+		responseMode: "json",
+		onerror: (error) =>
+			console.error("LixRay MCP protocol error", { requestId, error }),
 	});
 	let shutdownPosthog: (() => Promise<void>) | undefined;
 	if (options.posthogToken) {
@@ -342,7 +583,10 @@ export async function handleMcpTransport(
 			flushAt: 1,
 			flushInterval: 0,
 		});
-		instrument(server, posthog, {
+		// @posthog/mcp 0.10.x recognizes the v1 low-level Server shape. The v2
+		// high-level McpServer intentionally exposes registerTool(), so instrument
+		// its underlying low-level server while keeping the v2 transport intact.
+		instrument(server.server, posthog, {
 			context: false,
 			enableExceptionAutocapture: false,
 			identify: options.posthogDistinctId
@@ -352,6 +596,7 @@ export async function handleMcpTransport(
 				environment: "production",
 				mcp_server: "lixray",
 				oauth_client_id: options.posthogClientId,
+				request_id: requestId,
 			}),
 			beforeSend: redactMcpAnalyticsEvent,
 		});
@@ -363,19 +608,21 @@ export async function handleMcpTransport(
 		};
 	}
 	try {
-		await server.connect(transport);
-		const response = await transport.handleRequest(request);
+		const response = await handler.fetch(request);
 		const headers = new Headers(response.headers);
 		headers.set("access-control-allow-origin", "*");
 		headers.set(
 			"access-control-expose-headers",
-			"MCP-Session-Id, MCP-Protocol-Version",
+			"MCP-Protocol-Version, Mcp-Method, Mcp-Name",
 		);
-		return new Response(response.body, {
-			status: response.status,
-			statusText: response.statusText,
-			headers,
-		});
+		return withMcpRequestId(
+			new Response(response.body, {
+				status: response.status,
+				statusText: response.statusText,
+				headers,
+			}),
+			requestId,
+		);
 	} finally {
 		if (shutdownPosthog) {
 			if (options.onPosthogFlush) {
@@ -429,20 +676,15 @@ export function mcpDocumentationResponse(
 			"LixRay MCP",
 			"",
 			`Endpoint: ${options.endpointUrl ?? `${MCP_RESOURCE}${MCP_PATH}`}`,
+			`Protocol: MCP ${MCP_PROTOCOL_VERSION} (modern stateless transport only).`,
 			"Authentication: Supabase OAuth 2.1 with PKCE and dynamic client registration.",
 			"",
-			"Your LixRay browser session and your MCP client authorization are separate. Being signed in at lixray.com does not mean that Codex or another MCP client has a usable access and refresh token.",
-			"The endpoint challenges unauthenticated requests with the OAuth protected-resource metadata URL. Complete authorization before initialize, tools/list, or tools/call.",
+			"Call list_lixes when the Lix is unknown, then open_lix. Pass the returned context to every later tool. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
 			"",
-			"Connection check:",
-			"1. Confirm this endpoint is registered exactly once for the environment you intend to use. MCP registration names must contain only letters, numbers, hyphens, or underscores; use LixRay_Dev for local development.",
-			"2. Revoke or log out the MCP connection, then authorize it again.",
-			"3. If a task does not refresh its MCP tool catalog after setup, stop and start a fresh user task. Do not launch a nested agent or Codex process.",
-			"4. Verify the client receives the authorization prompt, then confirm initialize, tools/list, and list_lixes succeed after authorization.",
+			"Use execute for one SQL statement and execute_batch for an atomic ordered batch. File and directory operations are SQL against public lix_file and lix_directory tables; do not expect separate file helper tools. Directory paths use /skills, not /skills/.",
+			"Every MCP response includes X-Request-ID and every tool result includes request_id. You may send X-Request-ID to preserve an upstream correlation ID; use the returned ID when reporting failures.",
 			"",
-			"If the client reports that no refresh token is available, remove the connection's saved authorization and reconnect. If it recurs, report the client version, server URL, and time of the attempt; do not include access or refresh tokens.",
-			"",
-			"The server exposes list_lixes, active_branch_id, switch_branch, and raw Lix SQL execute. SQL and branch controls use the lix's active Lix branch, matching the Lix client. Use active_branch_id to inspect it, switch_branch to change it, and SQL against lix_branch to discover branches. Execute accepts an ordered batch of statements with $n or ? parameters. Lix executes the batch atomically and returns one ordered result per statement.",
+			"Modern clients begin with server/discover. There is no initialize handshake and no MCP session id on this endpoint.",
 		].join("\n"),
 		{
 			headers: {
@@ -487,199 +729,199 @@ export function mcpAuthenticateChallenge(
 	return `Bearer resource_metadata="${protectedResourceUrl}", scope="${MCP_SCOPES.join(" ")}", error="${error}", error_description="${description.replaceAll('"', "'")}"`;
 }
 
-function buildTools(
-	service: LixFileService,
-	securitySchemes: Array<McpSecurityScheme>,
-): Array<ToolDefinition> {
-	const tool = <T extends z.ZodType<Record<string, unknown>>>(
-		name: string,
-		title: string,
-		description: string,
-		schema: T,
-		annotations: ToolAnnotations,
-		call: (args: z.output<T>) => Promise<unknown>,
-		outputSchema?: z.ZodType<Record<string, unknown>>,
-	) =>
-		createTool(
-			name,
-			title,
-			description,
-			schema,
-			annotations,
-			securitySchemes,
-			call,
-			outputSchema,
-		);
-	return [
-		tool(
-			"list_lixes",
-			"List lixes",
-			"List the LixRay lixes the signed-in user can access.",
-			z.object({}).strict(),
-			readAnnotations(),
-			async () => ({ lixes: await service.listLixes() }),
-			listLixesOutput,
-		),
-		tool(
-			"active_branch_id",
-			"Get active branch ID",
-			"Return the lix's active Lix branch ID.",
-			z.object({ lix_ref: lixRef }).strict(),
-			readAnnotations(),
-			async ({ lix_ref }) => ({
-				branch_id: await service.activeBranchId(String(lix_ref)),
-			}),
-			activeBranchOutput,
-		),
-		tool(
-			"switch_branch",
-			"Switch active branch",
-			"Switch the lix's active Lix branch. This shared lix state affects subsequent SQL operations.",
-			z
-				.object({
-					lix_ref: lixRef,
-					branch_id: branchId,
-				})
-				.strict(),
-			writeAnnotations(false, false),
-			async ({ lix_ref, branch_id }) => ({
-				branch_id: (
-					await service.switchBranch(String(lix_ref), String(branch_id))
-				).branchId,
-			}),
-			activeBranchOutput,
-		),
-		tool(
-			"execute",
-			"Execute raw Lix SQL",
-			EXECUTE_TOOL_DESCRIPTION,
-			z
-				.object({
-					lix_ref: lixRef,
-					statements: z.array(executeStatement).min(1).max(100),
-				})
-				.strict(),
-			writeAnnotations(false, false),
-			async ({ lix_ref, statements }) =>
-				service.executeSql(
-					String(lix_ref),
-					statements.map((statement) => ({
-						sql: statement.sql,
-						params: statement.params,
-					})),
-				),
-			executeOutput,
-		),
-	];
-}
-
-function createTool<T extends z.ZodType<Record<string, unknown>>>(
+function registerTool(
+	server: McpServer,
 	name: string,
 	title: string,
 	description: string,
-	schema: T,
+	inputSchema: z.ZodTypeAny,
+	outputSchema: z.ZodTypeAny,
 	annotations: ToolAnnotations,
 	securitySchemes: Array<McpSecurityScheme>,
-	call: (args: z.output<T>) => Promise<unknown>,
-	outputSchema?: z.ZodType<Record<string, unknown>>,
-): ToolDefinition {
-	return {
-		descriptor: {
-			name,
+	call: (args: Record<string, any>) => Promise<any>,
+	observationName: string | undefined,
+	observer: McpToolCallObserver | undefined,
+	surfaceVersion: string,
+	requestId: string,
+): void {
+	server.registerTool(
+		name,
+		{
 			title,
 			description,
-			inputSchema: mcpJsonSchema(schema, "input"),
-			...(outputSchema
-				? {
-						outputSchema: {
-							...mcpJsonSchema(outputSchema, "output"),
-							type: "object" as const,
-						},
-					}
-				: {}),
-			securitySchemes: securitySchemes.map(cloneSecurityScheme),
+			inputSchema,
+			outputSchema,
 			annotations,
-			_meta: {
-				securitySchemes: securitySchemes.map(cloneSecurityScheme),
-			},
+			_meta: { securitySchemes },
 		},
-		schema,
-		...(outputSchema ? { outputSchema } : {}),
-		call: (args) => call(args as z.output<T>),
+		async (args) => {
+			const startedAt = Date.now();
+			const toolName = observationName ?? name;
+			const input = args as Record<string, any>;
+			const executeInput = isExecuteTool(name)
+				? observeExecuteInput(name === "execute" ? [input] : input.statements)
+				: undefined;
+			try {
+				const raw = await call(input);
+				const executeOutput = isExecuteTool(name)
+					? observeExecuteOutput(
+							name === "execute" ? { results: [raw.result] } : raw,
+						)
+					: undefined;
+				observeToolCall(observer, startedAt, {
+					requestId,
+					toolName,
+					outcome: "success",
+					surfaceVersion,
+					...(executeInput ? { executeInput } : {}),
+					...(executeOutput ? { executeOutput } : {}),
+				});
+				const structuredContent = {
+					...(raw as Record<string, unknown>),
+					request_id: requestId,
+				};
+				return {
+					structuredContent,
+					content: [
+						{ type: "text" as const, text: JSON.stringify(structuredContent) },
+					],
+				};
+			} catch (caught) {
+				const error = toMcpError(caught);
+				observeToolCall(observer, startedAt, {
+					requestId,
+					toolName,
+					outcome: "error",
+					surfaceVersion,
+					errorCode: error.code,
+					...(executeInput ? { executeInput } : {}),
+				});
+				if (!isLixError(caught)) {
+					console.error("LixRay MCP tool failed", {
+						tool: name,
+						error: errorDetails(caught),
+					});
+				}
+				const structuredContent = { request_id: requestId, error };
+				return {
+					isError: true,
+					structuredContent,
+					content: [
+						{ type: "text" as const, text: JSON.stringify(structuredContent) },
+					],
+				};
+			}
+		},
+	);
+}
+
+function toMcpError(caught: unknown): {
+	code: string;
+	message: string;
+	hint?: string;
+	details?: unknown;
+} {
+	if (isLixError(caught)) {
+		return {
+			code: caught.code ?? "internal_error",
+			message: caught.message,
+			...(caught.hint ? { hint: caught.hint } : {}),
+			...(caught.details !== undefined ? { details: caught.details } : {}),
+		};
+	}
+	return {
+		code: "internal_error",
+		message: "The LixRay tool call failed.",
 	};
 }
 
-function mcpJsonSchema(
-	schema: z.ZodType,
-	io: "input" | "output",
-): Record<string, unknown> {
-	const jsonSchema = z.toJSONSchema(schema, { io }) as Record<string, unknown>;
-	removeUuidPatterns(jsonSchema);
-	return jsonSchema;
+function withError(schema: z.ZodObject<any>) {
+	return z.union([schema.extend({ request_id: requestIdValue }), errorOutput]);
 }
 
-function removeUuidPatterns(value: unknown): void {
-	if (!value || typeof value !== "object") return;
-	if (Array.isArray(value)) {
-		for (const item of value) removeUuidPatterns(item);
-		return;
-	}
-	const object = value as Record<string, unknown>;
-	if (object.format === "uuid") delete object.pattern;
-	for (const child of Object.values(object)) removeUuidPatterns(child);
+function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
+	return [
+		"list_lixes",
+		"open_lix",
+		"execute",
+		"execute_batch",
+		"active_branch_id",
+		"switch_branch",
+		"create_branch",
+		"create_checkpoint",
+		"undo",
+		"redo",
+		"merge_branch_preview",
+		"merge_branch",
+	].map((name) => ({ name }));
 }
 
-function cloneSecurityScheme(scheme: McpSecurityScheme): McpSecurityScheme {
-	return scheme.type === "oauth2"
-		? { ...scheme, scopes: [...scheme.scopes] }
-		: { ...scheme };
+function toExecuteRequest(args: Record<string, any>): ExecuteRequest {
+	return {
+		sql: args.sql,
+		params: args.params,
+		options: toExecuteOptions(args.options),
+	};
+}
+
+function toExecuteOptions(
+	options: Record<string, string> | undefined,
+): { originKey?: string; idempotencyKey?: string } | undefined {
+	if (!options) return undefined;
+	return {
+		...(options.origin_key ? { originKey: options.origin_key } : {}),
+		...(options.idempotency_key
+			? { idempotencyKey: options.idempotency_key }
+			: {}),
+	};
+}
+
+function isExecuteTool(name: string): boolean {
+	return name === "execute" || name === "execute_batch";
 }
 
 function readAnnotations(): ToolAnnotations {
 	return {
 		readOnlyHint: true,
-		destructiveHint: false,
 		openWorldHint: false,
-		idempotentHint: true,
 	};
 }
 
 function writeAnnotations(
-	destructiveHint: boolean,
-	idempotentHint: boolean,
+	destructiveHint = true,
+	idempotentHint = false,
 ): ToolAnnotations {
 	return {
 		readOnlyHint: false,
 		destructiveHint,
-		openWorldHint: false,
 		idempotentHint,
+		openWorldHint: false,
 	};
 }
 
-function errorResult(
-	code: string,
-	message: string,
-	details?: Record<string, unknown>,
-) {
-	return {
-		structuredContent: { error: { code, message, details } },
-		content: [{ type: "text" as const, text: `${code}: ${message}` }],
-		isError: true,
-	};
-}
-
-function asStructuredContent(value: unknown): Record<string, unknown> {
-	return value && typeof value === "object"
-		? (value as Record<string, unknown>)
-		: { result: value };
-}
-
-function successSummary(toolName: string): string {
-	return `${toolName} completed successfully.`;
+function observeToolCall(
+	observer: McpToolCallObserver | undefined,
+	startedAt: number,
+	observation: Omit<McpToolCallObservation, "durationMs">,
+): void {
+	if (!observer) return;
+	try {
+		observer({
+			...observation,
+			durationMs: Math.max(0, Date.now() - startedAt),
+		});
+	} catch (caught) {
+		console.warn(
+			"Failed to observe LixRay MCP tool call",
+			errorDetails(caught),
+		);
+	}
 }
 
 function errorDetails(caught: unknown): Record<string, unknown> {
-	return caught instanceof Error
-		? { name: caught.name, message: caught.message, stack: caught.stack }
+	if (caught instanceof Error)
+		return { name: caught.name, message: caught.message };
+	return caught && typeof caught === "object"
+		? { ...(caught as Record<string, unknown>) }
 		: { value: String(caught) };
 }
