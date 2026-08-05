@@ -95,9 +95,9 @@ void test("execute tool documents only the compact core schema", () => {
 		EXECUTE_TOOL_DESCRIPTION,
 		/do not inspect `information_schema` for them/,
 	);
-	assert.match(EXECUTE_SQL_CORE_SCHEMA, /data \(binary\)/);
+	assert.match(EXECUTE_SQL_CORE_SCHEMA, /content \(binary\)/);
 	assert.doesNotMatch(EXECUTE_SQL_CORE_SCHEMA, /data \(BLOB\)/);
-	assert.match(EXECUTE_TOOL_DESCRIPTION, /`lix_file\.data` is binary/);
+	assert.match(EXECUTE_TOOL_DESCRIPTION, /`lix_file\.content` is binary/);
 	assert.match(
 		EXECUTE_TOOL_DESCRIPTION,
 		/Pass binary values as `\{"kind":"blob","base64":"\.\.\."\}`/,

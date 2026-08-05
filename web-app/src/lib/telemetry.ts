@@ -4,13 +4,45 @@ import {
 	AUTOCAPTURE_SELECTOR_IGNORELIST,
 	SESSION_RECORDING_BLOCK_SELECTOR,
 	scrubPostHogEvent,
-} from "./telemetry-privacy";
-import { BROWSER_EXCEPTION_CAPTURE_CONFIG } from "./telemetry-exceptions";
+} from "./telemetry-privacy.ts";
+import { BROWSER_EXCEPTION_CAPTURE_CONFIG } from "./telemetry-exceptions.ts";
 
 const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
 
 let client: PostHog | null = null;
 let initializationPromise: Promise<PostHog | null> | null = null;
+
+const MAX_LIX_TELEMETRY_STRING_LENGTH = 200;
+
+/** Extracts the stable, non-content fields exposed by the Lix remote SDK. */
+export function lixErrorTelemetryProperties(error: unknown): Properties {
+	if (!error || typeof error !== "object") return {};
+	const candidate = error as {
+		name?: unknown;
+		code?: unknown;
+		status?: unknown;
+		hint?: unknown;
+	};
+	const code = typeof candidate.code === "string" ? candidate.code : undefined;
+	if (candidate.name !== "LixError" && !code?.startsWith("LIX_")) return {};
+
+	return {
+		...(code
+			? { lix_error_code: code.slice(0, MAX_LIX_TELEMETRY_STRING_LENGTH) }
+			: {}),
+		...(typeof candidate.status === "number"
+			? { lix_error_status: candidate.status }
+			: {}),
+		...(typeof candidate.hint === "string"
+			? {
+					lix_error_hint: candidate.hint.slice(
+						0,
+						MAX_LIX_TELEMETRY_STRING_LENGTH,
+					),
+				}
+			: {}),
+	};
+}
 
 type TelemetryEnvironment = "dev" | "preview" | "production";
 
@@ -99,7 +131,10 @@ export function captureExceptionTelemetry(
 ): void {
 	void initializeTelemetry()
 		.then((posthog) => {
-			posthog?.captureException(error, properties);
+			posthog?.captureException(error, {
+				...lixErrorTelemetryProperties(error),
+				...properties,
+			});
 		})
 		.catch((telemetryError: unknown) => {
 			console.warn("Failed to capture browser exception", telemetryError);

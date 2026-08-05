@@ -5,12 +5,14 @@ import {
 	type RemoteLixFetch,
 } from "@lix-js/sdk";
 import { LocalStorage } from "@lix-js/sdk/local-storage-adapter";
+import { captureTelemetry } from "./telemetry.ts";
 
 type TokenProvider = () => Promise<string | null>;
 
 interface OpenWorkspaceLixSessionOptions {
 	namespace: string;
 	workspaceSlug: string;
+	workspaceId?: string;
 	getAccessToken: TokenProvider;
 	/**
 	 * Opens the session without an Authorization header when no access token
@@ -58,7 +60,9 @@ export async function openWorkspaceLixSession(
 				if (options.allowAnonymous) return {};
 				throw new Error("A workspace access token is required.");
 			},
-			...(options.fetch ? { fetch: options.fetch } : {}),
+			fetch: createTelemetryFetch(options.fetch, {
+				workspaceId: options.workspaceId,
+			}),
 		},
 		...(clientStorage ? { storage: clientStorage } : {}),
 	});
@@ -80,6 +84,68 @@ export async function openWorkspaceLixSession(
 	} catch (error) {
 		await lix.close().catch(() => undefined);
 		throw error;
+	}
+}
+
+function createTelemetryFetch(
+	customFetch: RemoteLixFetch | undefined,
+	context: { workspaceId?: string },
+): RemoteLixFetch {
+	const fetcher =
+		customFetch ??
+		(globalThis.fetch?.bind(globalThis) as RemoteLixFetch | undefined);
+	if (!fetcher) {
+		throw new TypeError("A fetch implementation is required for a workspace.");
+	}
+
+	return async (input, init) => {
+		const response = await fetcher(input, init);
+		if (!response.ok) {
+			void reportLixRequestFailure(response, input, init, context);
+		}
+		return response;
+	};
+}
+
+async function reportLixRequestFailure(
+	response: Response,
+	input: RequestInfo | URL,
+	init: RequestInit | undefined,
+	context: { workspaceId?: string },
+): Promise<void> {
+	let code: string | undefined;
+	try {
+		const body = (await response.clone().json()) as {
+			error?: { code?: unknown };
+		};
+		if (typeof body.error?.code === "string") code = body.error.code;
+	} catch {
+		// The SDK will report malformed/non-JSON responses separately.
+	}
+
+	captureTelemetry("lix_request_failed", {
+		lix_request_endpoint: lixRequestEndpoint(input),
+		lix_request_method: init?.method ?? "GET",
+		lix_http_status: response.status,
+		...(code ? { lix_error_code: code } : {}),
+		...(context.workspaceId ? { lix_id: context.workspaceId } : {}),
+	});
+}
+
+function lixRequestEndpoint(input: RequestInfo | URL): string {
+	const raw =
+		typeof input === "string"
+			? input
+			: input instanceof URL
+				? input.toString()
+				: input.url;
+	try {
+		const path = new URL(raw, globalThis.location?.origin).pathname;
+		const marker = "/lix/v1/";
+		const endpoint = path.split(marker, 2)[1]?.split("/", 1)[0];
+		return endpoint || "unknown";
+	} catch {
+		return "unknown";
 	}
 }
 

@@ -272,16 +272,16 @@ export function listDirectory(
 export function useFileMarkdown(lix: Lix, path: string | null): string | null {
 	const rows = useObservedRows(
 		lix,
-		"SELECT data FROM lix_file WHERE path = $1",
+		"SELECT content FROM lix_file WHERE path = $1",
 		path ? [path] : [""],
 	);
 	return useMemo(() => {
 		if (!path || !rows || rows.length === 0) return null;
 		const row = rows[0];
-		const bytes = row?.value("data").asBytes();
+		const bytes = row?.value("content").asBytes();
 		if (bytes) return new TextDecoder().decode(bytes);
-		const data = row?.get("data");
-		if (typeof data === "string") return data;
+		const content = row?.get("content");
+		if (typeof content === "string") return content;
 		return null;
 	}, [path, rows]);
 }
@@ -331,7 +331,7 @@ export async function createWorkspaceFile(
 			? `${dirPath}${template.base}.${extension}`
 			: `${dirPath}${template.base}-${suffix}.${extension}`,
 	);
-	await lix.execute("INSERT INTO lix_file (path, data) VALUES ($1, $2)", [
+	await lix.execute("INSERT INTO lix_file (path, content) VALUES ($1, $2)", [
 		path,
 		new TextEncoder().encode(template.data),
 	]);
@@ -369,7 +369,7 @@ export async function importDroppedFiles(
 		try {
 			const bytes = new Uint8Array(await file.arrayBuffer());
 			await lix.execute(
-				"INSERT INTO lix_file (path, data) VALUES ($1, $2) ON CONFLICT (path) DO UPDATE SET data = excluded.data",
+				"INSERT INTO lix_file (path, content) VALUES ($1, $2) ON CONFLICT (path) DO UPDATE SET content = excluded.content",
 				[`${dirPath}${name}`, bytes],
 			);
 			imported += 1;

@@ -611,7 +611,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 
 		if (
 			sql ===
-			"SELECT data, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE path = $1"
+			"SELECT content, lixcol_change_id, lixcol_updated_at FROM lix_file WHERE path = $1"
 		) {
 			const path = textParam(params[0]);
 			const file = this.files.get(path);
@@ -640,7 +640,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		}
 		if (
 			sql ===
-			"INSERT INTO lix_file (path, data, lixcol_metadata) VALUES ($1, $2, $3)"
+			"INSERT INTO lix_file (path, content, lixcol_metadata) VALUES ($1, $2, $3)"
 		) {
 			const path = textParam(params[0]);
 			if (this.files.has(path)) throw new Error("duplicate path");
@@ -652,7 +652,7 @@ class MemoryLixRuntimeClient implements LixRuntimeClient {
 		}
 		if (
 			sql ===
-			"UPDATE lix_file SET data = $1, lixcol_metadata = $2 WHERE path = $3 AND lixcol_change_id = $4"
+			"UPDATE lix_file SET content = $1, lixcol_metadata = $2 WHERE path = $3 AND lixcol_change_id = $4"
 		) {
 			const path = textParam(params[2]);
 			const expected = textParam(params[3]);

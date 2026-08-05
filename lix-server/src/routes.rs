@@ -656,7 +656,7 @@ mod tests {
             .expect("handshake response");
         assert_eq!(handshake.status(), StatusCode::OK);
         let handshake = json_body(handshake).await;
-        assert_eq!(handshake["protocolVersion"], json!(1));
+        assert_eq!(handshake["protocolVersion"], json!(2));
         assert!(handshake["sessionId"].as_str().is_some());
     }
 
@@ -738,7 +738,7 @@ mod tests {
                     .header(lix_server_protocol::IDEMPOTENCY_KEY_HEADER, "isolate-lix-a")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        r#"{"sql":"INSERT INTO lix_file (path, data) VALUES ('/only-a.txt', X'41')"}"#,
+                        r#"{"sql":"INSERT INTO lix_file (path, content) VALUES ('/only-a.txt', X'41')"}"#,
                     ))
                     .expect("insert request"),
             )
@@ -803,7 +803,7 @@ mod tests {
                 app.clone(),
                 lix_id,
                 &installer,
-                "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+                "INSERT INTO lix_file (path, content) VALUES ($1, $2)",
                 vec![
                     wire_value(LixValue::Text(
                         "/.lix/plugins/plugin_markdown_incremental_v2.lixplugin".to_string(),
@@ -824,7 +824,7 @@ mod tests {
                 app.clone(),
                 lix_id,
                 &session_a,
-                "INSERT INTO lix_file (path, data) VALUES ($1, $2)",
+                "INSERT INTO lix_file (path, content) VALUES ($1, $2)",
                 vec![
                     wire_value(LixValue::Text(path.to_string())),
                     wire_value(LixValue::Blob(seed.clone().into())),
@@ -840,7 +840,7 @@ mod tests {
                     app.clone(),
                     lix_id,
                     session_id,
-                    "SELECT data FROM lix_file WHERE path = $1",
+                    "SELECT content FROM lix_file WHERE path = $1",
                     vec![wire_value(LixValue::Text(path.to_string()))],
                 )
                 .await,
@@ -853,7 +853,7 @@ mod tests {
             app.clone(),
             lix_id,
             &session_a,
-            "UPDATE lix_file SET data = $1 WHERE path = $2",
+            "UPDATE lix_file SET content = $1 WHERE path = $2",
             vec![
                 wire_value(LixValue::Blob(
                     b"# Shared\n\nLeft: A\n\nRight: 0\n".to_vec().into(),
@@ -865,7 +865,7 @@ mod tests {
             app.clone(),
             lix_id,
             &session_b,
-            "UPDATE lix_file SET data = $1 WHERE path = $2",
+            "UPDATE lix_file SET content = $1 WHERE path = $2",
             vec![
                 wire_value(LixValue::Blob(
                     b"# Shared\n\nLeft: 0\n\nRight: B\n".to_vec().into(),
@@ -882,7 +882,7 @@ mod tests {
                 app.clone(),
                 lix_id,
                 &session_a,
-                "SELECT data FROM lix_file WHERE path = $1",
+                "SELECT content FROM lix_file WHERE path = $1",
                 vec![wire_value(LixValue::Text(path.to_string()))],
             )
             .await,
