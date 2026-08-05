@@ -58,7 +58,6 @@ export function buildMovieCorpusIndex() {
   validateMovieCorpus(files);
   return files;
 }
-
 export function movieCorpusManifest(files = buildMovieCorpusIndex()) {
   validateMovieCorpus(files);
   const digest = createHash("sha256");
@@ -103,4 +102,3 @@ export function validateMovieCorpus(files) {
     paths.add(file.path);
   }
 }
-
