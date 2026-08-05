@@ -28,6 +28,8 @@ interface OpenWorkspaceLixSessionOptions {
 	fetch?: RemoteLixFetch;
 }
 
+const RECOVERING_OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
+
 export interface WorkspaceLixSession {
 	readonly lix: Lix;
 	activeBranchSnapshot(): string;
@@ -39,6 +41,22 @@ export interface WorkspaceLixSession {
 }
 
 export async function openWorkspaceLixSession(
+	options: OpenWorkspaceLixSessionOptions,
+): Promise<WorkspaceLixSession> {
+	for (let attempt = 0; ; attempt += 1) {
+		try {
+			return await openWorkspaceLixSessionOnce(options);
+		} catch (error) {
+			const retryDelay = RECOVERING_OPEN_RETRY_DELAYS_MS[attempt];
+			if (!isLixRecoveringError(error) || retryDelay === undefined) {
+				throw error;
+			}
+			await delay(retryDelay);
+		}
+	}
+}
+
+async function openWorkspaceLixSessionOnce(
 	options: OpenWorkspaceLixSessionOptions,
 ): Promise<WorkspaceLixSession> {
 	const clientStorage =
@@ -58,7 +76,7 @@ export async function openWorkspaceLixSession(
 				const token = await options.getAccessToken();
 				if (token) return { Authorization: `Bearer ${token}` };
 				if (options.allowAnonymous) return {};
-				throw new Error("A workspace access token is required.");
+				throw new Error("A repository access token is required.");
 			},
 			fetch: createTelemetryFetch(options.fetch, {
 				workspaceId: options.workspaceId,
@@ -149,6 +167,20 @@ function lixRequestEndpoint(input: RequestInfo | URL): string {
 	}
 }
 
+function isLixRecoveringError(
+	error: unknown,
+): error is Error & { code: "LIX_ERROR_LIX_RECOVERING" } {
+	return (
+		error instanceof Error &&
+		"code" in error &&
+		error.code === "LIX_ERROR_LIX_RECOVERING"
+	);
+}
+
+function delay(milliseconds: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 class RemoteWorkspaceLixSession implements WorkspaceLixSession {
 	readonly lix: Lix;
 	readonly #listeners = new Set<() => void>();
@@ -202,13 +234,13 @@ class RemoteWorkspaceLixSession implements WorkspaceLixSession {
 	}
 
 	#assertOpen(): void {
-		if (this.#closed) throw new Error("The workspace Lix session is closed.");
+		if (this.#closed) throw new Error("The repository Lix session is closed.");
 	}
 }
 
 function workspaceUrl(options: OpenWorkspaceLixSessionOptions): URL {
 	const origin = options.origin ?? globalThis.location?.origin;
-	if (!origin) throw new Error("A workspace server origin is required.");
+	if (!origin) throw new Error("A repository server origin is required.");
 	return new URL(
 		`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.workspaceSlug)}`,
 		origin,

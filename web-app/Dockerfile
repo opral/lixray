@@ -1,11 +1,7 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-bookworm AS builder
+FROM node:24-bookworm AS builder
 
-ARG LIX_REV=a199befdad3e2b877e4618880d307e9f067f0f21
-ARG LIX_ARCHIVE_SHA256=ae16903b8802b2f9eef5ccb9a0f208eecdd630f4b6c9f94b3fabfcce9be21c64
-ARG ATELIER_REV=a639f90f1a1670f3741db92dae0d26eca4820bcf
-ARG ATELIER_ARCHIVE_SHA256=64d5e39fd352f6a0746ebac976c57b6d5eb061f2397b6c195d1f8cbd1e54cb35
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_KEY
 ARG LIXRAY_DEMO
@@ -36,20 +32,25 @@ ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL} \
 	VITE_LIXRAY_LOCAL_DEV_PASSWORD=${VITE_LIXRAY_LOCAL_DEV_PASSWORD} \
 	RAILWAY_ENVIRONMENT_NAME=${RAILWAY_ENVIRONMENT_NAME}
 RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends mold \
+	&& rm -rf /var/lib/apt/lists/*
 COPY . .
 
 # Railway's GitHub builder does not populate submodules. Local builds retain
 # the checked-out sources so edits are tested directly; Railway falls back to
-# the exact revisions recorded by this repository.
-RUN if [ ! -f vendor/lix/packages/js-sdk/package.json ]; then \
-		curl -fsSL "https://github.com/opral/lix/archive/${LIX_REV}.tar.gz" -o /tmp/lix.tar.gz; \
-		echo "${LIX_ARCHIVE_SHA256}  /tmp/lix.tar.gz" | sha256sum -c -; \
+# archives pinned to the repository's gitlink revisions. CI verifies that the
+# manifest remains in sync with the submodule pointers.
+RUN set -eu; \
+	. /app/vendor/revisions.env; \
+	mkdir -p vendor/lix vendor/atelier; \
+	if [ ! -f vendor/lix/packages/js-sdk/package.json ]; then \
+		curl -fsSL "https://github.com/opral/lix/archive/${LIX_REVISION}.tar.gz" -o /tmp/lix.tar.gz; \
 		tar -xzf /tmp/lix.tar.gz -C vendor/lix --strip-components=1; \
 		rm /tmp/lix.tar.gz; \
 	fi \
 	&& if [ ! -f vendor/atelier/package.json ]; then \
-		curl -fsSL "https://github.com/opral/atelier/archive/${ATELIER_REV}.tar.gz" -o /tmp/atelier.tar.gz; \
-		echo "${ATELIER_ARCHIVE_SHA256}  /tmp/atelier.tar.gz" | sha256sum -c -; \
+		curl -fsSL "https://github.com/opral/atelier/archive/${ATELIER_REVISION}.tar.gz" -o /tmp/atelier.tar.gz; \
 		tar -xzf /tmp/atelier.tar.gz -C vendor/atelier --strip-components=1; \
 		rm /tmp/atelier.tar.gz; \
 	fi
@@ -69,9 +70,10 @@ RUN if echo "$RAILWAY_ENVIRONMENT_NAME" | grep -Eq '^(lixray-pr-[0-9]+|pr-[a-z0-
 		test -n "$VITE_SUPABASE_URL"; \
 		test -n "$VITE_SUPABASE_KEY"; \
 	fi \
-	&& pnpm --dir web-app build:node
+	&& pnpm --dir web-app ci:prepare:web \
+	&& pnpm --dir web-app ci:build:node
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 WORKDIR /app/web-app
 COPY --from=builder /app/web-app/dist ./dist
 COPY --from=builder /app/web-app/scripts/assert-railway-env.mjs ./scripts/assert-railway-env.mjs

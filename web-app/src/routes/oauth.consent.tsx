@@ -235,12 +235,12 @@ function OAuthConsentPage() {
 							className="flex flex-col gap-[11px] rounded-[11px] border border-[#F0EBE3] bg-[#FAF8F5] px-[17px] py-[15px]"
 							aria-label="Permissions"
 						>
-							<ScopeLine allowed>See your workspaces and branches</ScopeLine>
+							<ScopeLine allowed>See your repositories and branches</ScopeLine>
 							<ScopeLine allowed>
-								Read and write files in workspaces you open
+								Read and write files in repositories you open
 							</ScopeLine>
 							<ScopeLine>
-								It can’t manage members or delete workspaces
+								It can’t manage members or delete repositories
 							</ScopeLine>
 						</div>
 						<div className="flex gap-2.5">

@@ -5,16 +5,18 @@ import {
 	type AtelierExtensionView,
 	type AtelierSessionUiState,
 } from "@opral/atelier";
-import { Folder, Home, Sparkles } from "lucide-react";
+import { Folder, Home, Sparkles, Users } from "lucide-react";
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
 import { DirectoryView, GettingStartedView } from "./directory-view";
 import { dirNameFromPath, normalizeHomeDirPath } from "./lix-data";
+import { PeopleView, type WorkspaceTeamApi } from "./people-view";
 
 export const LIXRAY_HOME_EXTENSION_ID = "lixray_home";
 export const LIXRAY_DIR_EXTENSION_ID = "lixray_dir";
 export const LIXRAY_GETTING_STARTED_EXTENSION_ID = "lixray_getting_started";
+export const LIXRAY_PEOPLE_EXTENSION_ID = "lixray_people";
 
 export type LixWorkspaceConnection = Omit<LixConnectionPromptInput, "origin">;
 export type AgentConnectionProbe = () => Promise<boolean>;
@@ -70,6 +72,14 @@ function openDirFromView(
 		});
 }
 
+function openPeopleFromView(atelier: AtelierExtensionRuntime) {
+	void atelier.views
+		.open(LIXRAY_PEOPLE_EXTENSION_ID)
+		.catch((error: unknown) => {
+			console.error("workspace-home: unable to open the People tab", error);
+		});
+}
+
 function mountDirectoryView({
 	element,
 	atelier,
@@ -77,6 +87,8 @@ function mountDirectoryView({
 	dirPath,
 	isHome,
 	connection,
+	teamApi,
+	hasAgentConnected,
 }: {
 	element: HTMLElement;
 	atelier: AtelierExtensionRuntime;
@@ -84,6 +96,8 @@ function mountDirectoryView({
 	dirPath: (candidate: AtelierExtensionView) => string;
 	isHome: boolean;
 	connection: LixWorkspaceConnection;
+	teamApi: WorkspaceTeamApi | null;
+	hasAgentConnected: AgentConnectionProbe | null;
 }): { root: Root; render: (candidate: AtelierExtensionView) => void } {
 	const root = createRoot(element);
 	// Re-rendered on view updates so shortcut bindings track isActive.
@@ -96,11 +110,14 @@ function mountDirectoryView({
 					isHome={isHome}
 					readOnly={atelier.readOnly}
 					connection={connection}
+					teamApi={teamApi}
+					hasAgentConnected={hasAgentConnected}
 					isActive={candidate.isActive}
 					onOpenFile={(path, options) =>
 						openFileFromView(atelier, path, options)
 					}
 					onOpenDir={(path, options) => openDirFromView(atelier, path, options)}
+					onOpenPeople={() => openPeopleFromView(atelier)}
 				/>
 			</StrictMode>,
 		);
@@ -115,12 +132,14 @@ function mountDirectoryView({
  */
 const createLixrayHomeExtension = (
 	connection: LixWorkspaceConnection,
+	hasAgentConnected: AgentConnectionProbe,
+	teamApi: WorkspaceTeamApi | null,
 ): AtelierExtensionRegistration => ({
 	manifest: {
 		apiVersion: 1,
 		id: LIXRAY_HOME_EXTENSION_ID,
 		name: "Home",
-		description: "Workspace home: files, README, connect.",
+		description: "Repository home: files, README, connect.",
 		placement: ["central"],
 		hidden: true,
 	},
@@ -134,6 +153,8 @@ const createLixrayHomeExtension = (
 				dirPath: () => "/",
 				isHome: true,
 				connection,
+				teamApi,
+				hasAgentConnected,
 			});
 			return {
 				update: ({ view: nextView }) => render(nextView),
@@ -156,7 +177,7 @@ const createLixrayDirExtension = (
 		apiVersion: 1,
 		id: LIXRAY_DIR_EXTENSION_ID,
 		name: "Folder",
-		description: "A workspace folder as a content tab.",
+		description: "A repository folder as a content tab.",
 		placement: ["central"],
 		hidden: true,
 		multiInstance: true,
@@ -175,6 +196,8 @@ const createLixrayDirExtension = (
 				dirPath: dirPathFromView,
 				isHome: false,
 				connection,
+				teamApi: null,
+				hasAgentConnected: null,
 			});
 			return {
 				update: ({ view: nextView }) => render(nextView),
@@ -229,13 +252,49 @@ const createLixrayGettingStartedExtension = (
 	},
 });
 
+/**
+ * The People tab (3c): the namespace roster and invite link as a regular
+ * closable content tab — tabs are the shell's only navigation primitive, so
+ * People behaves like any file rather than a modal or standalone route shell.
+ */
+const createLixrayPeopleExtension = (
+	teamApi: WorkspaceTeamApi | null,
+): AtelierExtensionRegistration => ({
+	manifest: {
+		apiVersion: 1,
+		id: LIXRAY_PEOPLE_EXTENSION_ID,
+		name: "People",
+		description: "Who's in this repository's namespace, and the invite link.",
+		placement: ["central"],
+		hidden: true,
+	},
+	entry: {
+		icon: Users,
+		mount: ({ element }) => {
+			const root = createRoot(element);
+			root.render(
+				<StrictMode>
+					<PeopleView teamApi={teamApi} />
+				</StrictMode>,
+			);
+			return {
+				dispose: () => {
+					queueMicrotask(() => root.unmount());
+				},
+			};
+		},
+	},
+});
+
 export const createLixrayWorkspaceExtensions = (
 	connection: LixWorkspaceConnection,
 	hasAgentConnected: AgentConnectionProbe,
+	teamApi: WorkspaceTeamApi | null,
 ): readonly AtelierExtensionRegistration[] => [
-	createLixrayHomeExtension(connection),
+	createLixrayHomeExtension(connection, hasAgentConnected, teamApi),
 	createLixrayDirExtension(connection),
 	createLixrayGettingStartedExtension(connection, hasAgentConnected),
+	createLixrayPeopleExtension(teamApi),
 ];
 
 /**

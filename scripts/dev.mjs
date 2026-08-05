@@ -78,6 +78,7 @@ const composeSupabaseUrl =
 	process.env.LIXRAY_COMPOSE_SUPABASE_URL ?? dockerReachableUrl(supabaseUrl);
 const internalToken =
 	process.env.LIXRAY_INTERNAL_TOKEN ?? "lixray-local-internal-token";
+const serverImage = process.env.LIXRAY_SERVER_IMAGE;
 
 composeEnv = {
 	...process.env,
@@ -116,7 +117,9 @@ if (staleWebContainer.status !== 0) {
 
 const stack = spawnSync(
 	"docker",
-	["compose", "up", "--build", "-d", "lix-server"],
+	serverImage
+		? ["compose", "up", "--no-build", "--pull", "always", "-d", "lix-server"]
+		: ["compose", "up", "--build", "-d", "lix-server"],
 	{
 		cwd: repositoryRoot,
 		stdio: "inherit",

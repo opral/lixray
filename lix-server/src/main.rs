@@ -1,12 +1,10 @@
 use anyhow::Context;
-use lixray::{router, Config, LixRuntimeManager};
+use lixray::{router, telemetry, Config, LixRuntimeManager};
 use tokio::net::TcpListener;
-
-mod telemetry;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let trace_provider = telemetry::init();
+    let (trace_provider, in_flight_sql) = telemetry::init();
 
     let config = Config::from_env()?;
     let listener = TcpListener::bind(&config.bind_addr)
@@ -31,7 +29,12 @@ async fn main() -> anyhow::Result<()> {
     );
     let result = axum::serve(
         listener,
-        router(manager, internal_token, config.protocol_timeout),
+        router(
+            manager,
+            internal_token,
+            config.protocol_timeout,
+            in_flight_sql,
+        ),
     )
     .with_graceful_shutdown(async move {
         shutdown_signal().await;

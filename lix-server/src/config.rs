@@ -13,6 +13,7 @@ const DEFAULT_METADATA_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 // more simultaneously active Lixes can opt in with LIXRAY_MAX_OPEN_LIXS.
 const DEFAULT_MAX_OPEN_LIXS: u64 = 4;
 const DEFAULT_PROTOCOL_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_RECOVERY_CLOSE_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -20,6 +21,7 @@ pub struct Config {
     pub internal_token: Option<String>,
     pub max_open_lixes: usize,
     pub protocol_timeout: Duration,
+    pub recovery_close_timeout: Duration,
     pub(crate) storage: S3StorageConfig,
 }
 
@@ -62,6 +64,10 @@ impl Config {
             "LIXRAY_PROTOCOL_TIMEOUT_SECS",
             DEFAULT_PROTOCOL_TIMEOUT_SECS,
         )?);
+        let recovery_close_timeout = Duration::from_secs(positive_u64_env(
+            "LIXRAY_RECOVERY_CLOSE_TIMEOUT_SECS",
+            DEFAULT_RECOVERY_CLOSE_TIMEOUT_SECS,
+        )?);
 
         let storage = S3StorageConfig {
             endpoint: required_env("S3_ENDPOINT")?,
@@ -79,6 +85,7 @@ impl Config {
             internal_token,
             max_open_lixes,
             protocol_timeout,
+            recovery_close_timeout,
             storage,
         })
     }
@@ -261,6 +268,32 @@ mod tests {
     }
 
     #[test]
+    fn from_env_configures_recovery_close_timeout() {
+        let _guard = env_lock().lock().unwrap();
+        clear_lixray_env();
+        set_s3_env();
+        env::set_var("LIXRAY_RECOVERY_CLOSE_TIMEOUT_SECS", "17");
+
+        let config = Config::from_env().unwrap();
+
+        assert_eq!(config.recovery_close_timeout, Duration::from_secs(17));
+        clear_lixray_env();
+    }
+
+    #[test]
+    fn from_env_rejects_zero_recovery_close_timeout() {
+        let _guard = env_lock().lock().unwrap();
+        clear_lixray_env();
+        env::set_var("LIXRAY_RECOVERY_CLOSE_TIMEOUT_SECS", "0");
+
+        let error = Config::from_env().unwrap_err();
+
+        assert!(format!("{error:#}")
+            .contains("LIXRAY_RECOVERY_CLOSE_TIMEOUT_SECS must be greater than zero"));
+        clear_lixray_env();
+    }
+
+    #[test]
     fn from_env_rejects_zero_lix_capacity() {
         let _guard = env_lock().lock().unwrap();
         clear_lixray_env();
@@ -354,6 +387,8 @@ mod tests {
             "RAILWAY_PROJECT_ID",
             "RAILWAY_ENVIRONMENT_ID",
             "LIXRAY_MAX_OPEN_LIXS",
+            "LIXRAY_PROTOCOL_TIMEOUT_SECS",
+            "LIXRAY_RECOVERY_CLOSE_TIMEOUT_SECS",
             "S3_ENDPOINT",
             "S3_BUCKET",
             "S3_ACCESS_KEY_ID",

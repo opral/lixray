@@ -44,7 +44,7 @@ handle       = lowercase [a-z0-9], internal hyphens (never consecutive, never at
 slug         = same grammar, max 100 chars
 changeset-id = ^[a-z0-9][a-z0-9._-]{0,63}$          ; MUST NOT contain "/"; "latest","main" reserved
 file-path    = "/"-separated segments, RFC 3986 percent-encoded, NFC-normalized
-verb (v1)    = "file" | "dir"
+verb (v1)    = "file" | "dir" | "team"
 verb (rsvd)  = raw diff change changes history blame settings edit new embed
                archive zip releases agents threads blob tree folder files sync
 ```

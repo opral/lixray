@@ -1,6 +1,81 @@
 # Lixray CRUD performance findings
 
-## Outcome
+## Media-write whole-buffer baseline
+
+The implemented fixed-chunk resumable path changes the result materially. A
+256 MiB initial write fell from 471 to 352-356 ms on RocksDB and from 312 to
+217-219 ms on SlateDB. With value-space accounting disabled (that diagnostic
+itself materializes payload rows), a combined 256 MiB then 1 GiB run peaked at
+244 MiB RSS on RocksDB and 113 MiB on SlateDB. The 1 GiB writes completed in
+1.29 s and 0.78 s respectively, demonstrating memory bounded by the 16 MiB
+part and backend buffers rather than file size. Fixed 1 MiB chunks also reduce
+the 256 MiB manifest from 290 rows to 256.
+
+Use `LIX_LARGE_BLOB_OPERATIONS=resumable_initial_write` and
+`LIX_LARGE_BLOB_SKIP_SPACE_ACCOUNTING=1` for the bounded-memory profile; the
+space-accounting scans intentionally materialize values and would otherwise
+pollute process peak RSS.
+
+The exact 20 GiB ceiling run completes and publishes correctly on both
+backends. Removing redundant CAS Zstd and RocksDB's automatic live-blob
+relocation changes RocksDB from 105.39 s and 216 GiB of physical writes to
+22.51 s and 20.01 GiB, with 248,324 KiB peak RSS. Its same-shaped raw adapter
+control takes 21.52 s, so Lix retains 95.6% of backend throughput. SlateDB Lix
+ingest takes 13.92 s versus 11.58 s for its same-space raw adapter control,
+retaining 83.2%. Both clear the 70% throughput gate and 512 MiB upload gate.
+
+The raw control must use the same storage-adapter path, hash-distributed keys,
+16 MiB commits, and CAS payload space. A generic high-numbered space on
+SlateDB created a different compaction regime and 4x physical write
+amplification; that is not an equivalent backend control.
+
+The release interference benchmark first seeds 5,000 project commits, then
+uses two independent 1 MiB range readers paced at 80 ms (100 Mbit/s each), a
+realistic one-second read-ahead buffer, 40 concurrent project saves, and a 512
+MiB resumable ingest. RocksDB reports zero late reads, 1.51 ms save p95, and
+800.9 MiB/s ingest. SlateDB reports zero late reads, 6.66 ms save p95, and
+1,223.3 MiB/s ingest. Run it with:
+
+```sh
+cargo test -p lix_engine_benchmarks --release \
+  --test movie_workspace_qualification \
+  --features 'storage-benches slatedb rocksdb' -- --ignored --nocapture
+```
+
+RocksDB and SlateDB restart tests also commit one 16 MiB part, drop and reopen
+the engine on the same database, resume at the durable offset, atomically
+publish the file, and verify its final range. The CAS unit qualification
+imports identical media under a second path and observes no additional payload
+rows.
+
+The media qualification work first extended the direct large-blob accounting
+profile to accept arbitrary MiB sizes. A single 256 MiB high-entropy initial
+write demonstrates why increasing the HTTP request limit cannot support the
+20 GiB target: before protocol buffering, the engine benchmark's peak RSS grew
+by roughly 3.2--4.0 times the logical payload after subtracting the equivalent
+1 MiB process run.
+
+| Backend | 256 MiB write | Approx. throughput | Peak RSS | 1 MiB run RSS | Incremental RSS / payload |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| RocksDB | 470.749 ms | 544 MiB/s | 1,101,944 KiB | 60,192 KiB | 3.97x |
+| SlateDB | 311.699 ms | 821 MiB/s | 904,348 KiB | 62,692 KiB | 3.21x |
+
+Each arm used one fresh direct-backend process, one measured initial write,
+the production binary CAS, and `/usr/bin/time -v` around the already-built
+release benchmark executable. The RocksDB write produced 290 payload chunks
+and 268,516,559 physical bytes; SlateDB produced the same 290 logical chunks
+and 268,478,252 physical bytes. The nearly 1.0x storage result is healthy for
+already-compressed media, but the process retains the generated source, the
+prepared replacement, chunking/compression buffers, and the transaction write
+set at once. The HTTP endpoint adds another complete `Bytes` request body.
+
+This is a causal architecture gate, not a stable throughput comparison: the
+local SlateDB fixture does not model remote object-store latency, and one
+sample does not characterize a distribution. The replacement must publish CAS
+chunks incrementally and keep both request and transaction memory independent
+of complete file size before larger latency qualification is meaningful.
+
+## Existing CRUD outcome
 
 The dominant 1,000–5,000-commit write cost was not SlateDB acceptance, commit
 enumeration, or SQL2. It was repeated filesystem namespace validation after the

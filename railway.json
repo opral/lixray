@@ -5,7 +5,6 @@
     "dockerfilePath": "lix-server/Dockerfile",
     "watchPatterns": [
       "lix-server/**",
-      "web-app/**",
       "vendor/lix",
       "vendor/lix/**",
       ".gitmodules",

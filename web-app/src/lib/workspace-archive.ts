@@ -31,7 +31,7 @@ export async function buildWorkspaceArchive(
 			const path = row.value("path").toJS();
 			const content = row.value("content").asBytes();
 			if (typeof path !== "string" || !content) {
-				throw new Error("Workspace archive returned invalid file data.");
+				throw new Error("Repository archive returned invalid file data.");
 			}
 			const archivePath = path.replace(/^\/+/, "");
 			if (archivePath) entries[archivePath] = content;
@@ -53,7 +53,7 @@ async function withWorkspaceLix<T>(
 			),
 			headers: async () => {
 				const token = await options.getAccessToken();
-				if (!token) throw new Error("Sign in to access this workspace.");
+				if (!token) throw new Error("Sign in to access this repository.");
 				return { Authorization: `Bearer ${token}` };
 			},
 		},

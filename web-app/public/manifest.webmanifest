@@ -2,7 +2,7 @@
 	"id": "/",
 	"name": "LixRay",
 	"short_name": "LixRay",
-	"description": "Explore and manage Lix workspaces.",
+	"description": "Explore and manage Lix repositories.",
 	"start_url": "/open",
 	"scope": "/",
 	"display_override": ["window-controls-overlay"],

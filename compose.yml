@@ -26,6 +26,9 @@ services:
     # Give graceful shutdown room to drain and close workspace stores; a
     # 10s SIGKILL mid-write leaves store state whose next open hangs.
     stop_grace_period: 30s
+    # CI sets this to the immutable GHCR digest built by the server-image job.
+    # Local development keeps building the Dockerfile below.
+    image: ${LIXRAY_SERVER_IMAGE:-lixray-server:local}
     build:
       context: .
       dockerfile: lix-server/Dockerfile

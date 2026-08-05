@@ -28,8 +28,8 @@ void test("explains how to recover from the structured unsupported format error"
 void test("preserves unrelated workspace opening errors", () => {
 	assert.equal(
 		formatWorkspaceOpenError(
-			new Error("A workspace access token is required."),
+			new Error("A repository access token is required."),
 		),
-		"A workspace access token is required.",
+		"A repository access token is required.",
 	);
 });

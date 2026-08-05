@@ -53,8 +53,9 @@ test("handshake establishes a session used by execute and close", async () => {
     calls.push({ url, ...options });
     if (options.method === "GET") {
       return Response.json({
-        protocolVersion: 1,
+        protocolVersion: 2,
         activeBranchId: "main",
+        activeAccountId: "00000000-0000-7000-8000-000000000002",
         sessionId: "session-capability",
         capabilities: { requestBlobSplice: true },
       });
@@ -77,7 +78,7 @@ test("handshake establishes a session used by execute and close", async () => {
   });
 
   const handshake = await client.open();
-  assert.equal(handshake.protocolVersion, 1);
+  assert.equal(handshake.protocolVersion, 2);
   assert.equal(handshake.sessionId, undefined);
   assert.equal(client.hasSession, true);
   await client.execute("SELECT 1");
@@ -206,6 +207,37 @@ test("upsertFileData sends an authenticated raw octet-stream request", async () 
   assert.deepEqual(calls[1].body, payload);
 });
 
+test("upsertFileData keeps resumable media parts on the same file abstraction", async () => {
+  const calls = [];
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    internalToken: "internal-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, ...options });
+      if (options.method === "GET") {
+        return Response.json({ sessionId: "session-file-part" });
+      }
+      return new Response(JSON.stringify({ rowsAffected: 0, columns: [], rows: [] }), {
+        status: 308,
+        headers: { "content-type": "application/json", range: "bytes=0-3" },
+      });
+    },
+  });
+
+  await client.open();
+  const result = await client.upsertFileData(
+    "/proxy.mov",
+    Buffer.from([1, 2, 3, 4]),
+    { uploadId: "proxy-1", start: 0, totalSize: 8 },
+  );
+
+  assert.equal(result.value.finalized, false);
+  assert.equal(result.value.nextOffset, 4);
+  assert.equal(calls[1].headers["lix-upload-id"], "proxy-1");
+  assert.equal(calls[1].headers["content-range"], "bytes 0-3/8");
+});
+
 test("upsertFileDataBatch frames raw entries after its advertised capability", async () => {
   const calls = [];
   const client = new ProtocolClient({
@@ -317,6 +349,7 @@ test("readFileData sends an authenticated raw GET and preserves binary bytes", a
 
   assert.equal(result.value.found, true);
   assert.deepEqual(result.value.data, payload);
+  assert.equal(result.value.contentRange, null);
   assert.equal(result.requestBytes, 0);
   assert.equal(result.responseBytes, payload.byteLength);
   assert.equal(
@@ -328,6 +361,41 @@ test("readFileData sends an authenticated raw GET and preserves binary bytes", a
   assert.equal(calls[1].headers["lix-session-id"], "session-file-read");
   assert.equal(calls[1].headers["content-type"], undefined);
   assert.equal(calls[1].body, undefined);
+});
+
+test("readFileData sends one bounded byte range", async () => {
+  const calls = [];
+  const client = new ProtocolClient({
+    baseUrl: "http://example.test",
+    workspaceId: "workspace",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, ...options });
+      if (calls.length === 1) {
+        return Response.json({
+          sessionId: "session-file-range",
+          capabilities: { binaryFileRead: true },
+        });
+      }
+      return new Response(Buffer.from([2, 3, 4]), {
+        status: 206,
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-range": "bytes 2-4/10",
+          "lix-file-found": "true",
+        },
+      });
+    },
+  });
+
+  await client.open();
+  const result = await client.readFileData("/clip.mov", {
+    start: 2,
+    endExclusive: 5,
+  });
+
+  assert.equal(calls[1].headers.range, "bytes=2-4");
+  assert.deepEqual(result.value.data, Buffer.from([2, 3, 4]));
+  assert.equal(result.value.contentRange, "bytes 2-4/10");
 });
 
 test("readFileData validates its session, capability, and path before dispatch", async () => {
@@ -395,8 +463,16 @@ test("readFileData distinguishes present empty files from missing files", async 
   await client.open();
   const empty = await client.readFileData("/empty.bin");
   const missing = await client.readFileData("/missing.bin");
-  assert.deepEqual(empty.value, { found: true, data: Buffer.alloc(0) });
-  assert.deepEqual(missing.value, { found: false, data: Buffer.alloc(0) });
+  assert.deepEqual(empty.value, {
+    found: true,
+    data: Buffer.alloc(0),
+    contentRange: null,
+  });
+  assert.deepEqual(missing.value, {
+    found: false,
+    data: Buffer.alloc(0),
+    contentRange: null,
+  });
   await assert.rejects(
     client.readFileData("/invalid-missing.bin"),
     /returned bytes for a missing file/,
@@ -435,7 +511,7 @@ test("readFileDataJson decodes the matched SQL/base64 response before timing sto
   assert.deepEqual(result.value.data, payload);
   assert.equal(result.value.response.rows.length, 1);
   const body = JSON.parse(calls[1].body);
-  assert.equal(body.sql, "SELECT path, data FROM lix_file WHERE path = $1");
+  assert.equal(body.sql, "SELECT path, content FROM lix_file WHERE path = $1");
   assert.deepEqual(body.params, [
     { kind: "text", value: "/nested/payload.bin" },
   ]);

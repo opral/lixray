@@ -140,6 +140,7 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 	assert.deepEqual(values.get(ATELIER_USER_PREFERENCES_KEY), {
 		version: 1,
 		layout: { sizes: { left: 10, central: 65, right: 25 } },
+		review: { autoAcceptAgentChanges: false },
 	});
 	assert.equal(fallbackStorage.length, 0);
 	assert.deepEqual(
@@ -161,6 +162,7 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 		{
 			version: 1,
 			layout: { sizes: { left: 10, central: 65, right: 25 } },
+			review: { autoAcceptAgentChanges: false },
 		},
 		"a second consumer of this client Lix can restore layout state",
 	);
@@ -314,6 +316,7 @@ void test("demo preferences and review status survive a same-tab reload", async 
 		{
 			version: 1,
 			layout: { sizes: { left: 20, central: 50, right: 30 } },
+			review: { autoAcceptAgentChanges: false },
 		},
 	);
 
@@ -444,7 +447,7 @@ void test("lix sessions use unified remote Lix with session-local branch state a
 			return Response.json({
 				protocolVersion: 2,
 				activeBranchId,
-				activeAccountId: "account-1",
+				activeAccountId: "00000000-0000-7000-8000-000000000002",
 				sessionId: "lix-session",
 			});
 		}
