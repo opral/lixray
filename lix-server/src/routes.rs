@@ -536,10 +536,11 @@ fn is_unsupported_storage_format(error: &anyhow::Error) -> bool {
         source
             .downcast_ref::<lix_sdk::LixError>()
             .is_some_and(|error| {
-                error.code == lix_sdk::LixError::CODE_INTERNAL_ERROR
-                    && error
-                        .message
-                        .contains("tracked_state commit_root has an unsupported format")
+                error.code == "LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT"
+                    || (error.code == lix_sdk::LixError::CODE_INTERNAL_ERROR
+                        && error
+                            .message
+                            .contains("tracked_state commit_root has an unsupported format"))
             })
     })
 }
@@ -923,8 +924,8 @@ mod tests {
     async fn unsupported_storage_format_is_a_terminal_structured_error() {
         let response = lix_error(LixRuntimeError::Open(anyhow::Error::new(
             lix_sdk::LixError::new(
-                lix_sdk::LixError::CODE_INTERNAL_ERROR,
-                "tracked_state commit_root has an unsupported format; recreate the repository",
+                "LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT",
+                "repository uses an unsupported storage protocol; recreate the repository",
             ),
         )));
 
