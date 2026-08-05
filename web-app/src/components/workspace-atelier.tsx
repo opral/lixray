@@ -558,9 +558,9 @@ export function WorkspaceAtelier({
 				// An empty workspace defaults to the Getting started tab (12f),
 				// seeded into the first-visit session state rather than opened
 				// imperatively — views.open() races the shell's mount/restore.
-				const startsEmpty = await workspaceHasNoFiles(session.lix).catch(
-					() => false,
-				);
+				// This query is part of boot. If it cannot answer, the workspace must
+				// show the real error instead of silently taking the non-empty path.
+				const startsEmpty = await workspaceHasNoFiles(session.lix);
 				if (disposed) return;
 				const atelierInstance = createAtelier({
 					lix: session.lix,

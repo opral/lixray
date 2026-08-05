@@ -7,22 +7,17 @@ import {
 	Value,
 } from "@lix-js/sdk";
 import {
+	type CreateBranchInput,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
 	type ExecuteResponse,
 	type ExecuteScriptResponse,
-	FileServiceError,
-	type FileServiceErrorCode,
+	createLixError,
+	isLixError,
+	type LixError,
 	type LixRuntimeClient,
 	type LixSummary,
-} from "./file-service.ts";
-import {
-	containerErrorDetails,
-	fetchContainerWithRetry,
-	type ContainerNamespace,
-	type ContainerRetryDelay,
-	type ContainerRetryObservation,
-} from "../worker/container-retry.ts";
+} from "./lix-service.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
 
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
@@ -33,20 +28,8 @@ interface McpUser {
 }
 
 export interface WorkerLixRuntimeEnv {
-	SLATEDB_CONTAINER?: ContainerNamespace;
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
-	R2_ENDPOINT?: string;
-	R2_BUCKET?: string;
-	R2_ACCESS_KEY_ID?: string;
-	R2_SECRET_ACCESS_KEY?: string;
-	R2_REGION?: string;
-	S3_PREFIX?: string;
-	S3_ALLOW_HTTP?: string;
-	SLATEDB_CACHE_DIR?: string;
-	SLATEDB_CACHE_MAX_BYTES?: string;
-	SLATEDB_BLOCK_CACHE_BYTES?: string;
-	SLATEDB_METADATA_CACHE_BYTES?: string;
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
@@ -60,8 +43,6 @@ type AuthorizeLix = (
 
 interface WorkerLixRuntimeClientOptions {
 	fetcher?: typeof fetch;
-	retryDelay?: ContainerRetryDelay;
-	retryRandom?: () => number;
 	signal?: AbortSignal;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
@@ -77,8 +58,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	private readonly user: McpUser;
 	private readonly authorizeLix: AuthorizeLix;
 	private readonly fetcher: typeof fetch;
-	private readonly retryDelay: ContainerRetryDelay | undefined;
-	private readonly retryRandom: (() => number) | undefined;
 	private readonly signal: AbortSignal | undefined;
 	private readonly lixFetch:
 		| ((lixId: string, request: Request) => Promise<Response>)
@@ -98,8 +77,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		this.user = user;
 		this.authorizeLix = authorizeLix;
 		this.fetcher = options.fetcher ?? fetch;
-		this.retryDelay = options.retryDelay;
-		this.retryRandom = options.retryRandom;
 		this.signal = options.signal;
 		this.lixFetch = options.lixFetch;
 		this.lixSummaries = options.lixSummaries;
@@ -137,16 +114,10 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			console.error("LixRay lix discovery fetch failed", {
 				error: errorDetails(caught),
 			});
-			throw new FileServiceError(
-				"upstream_error",
-				"Lix discovery is unavailable.",
-			);
+			throw createLixError("upstream_error", "Lix discovery is unavailable.");
 		}
 		if (!lixesResponse.ok) {
-			throw new FileServiceError(
-				"upstream_error",
-				"Lix discovery is unavailable.",
-			);
+			throw createLixError("upstream_error", "Lix discovery is unavailable.");
 		}
 		const lixes = asRows(await lixesResponse.json());
 
@@ -179,14 +150,15 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		});
 	}
 
-	async activeBranchId(lixId: string): Promise<string> {
+	async activeBranchId(lixId: string, branchId?: string): Promise<string> {
 		try {
 			const session = await this.session(lixId);
-			return await this.enqueueSession(session, () =>
-				session.lix.activeBranchId(),
-			);
+			return await this.enqueueSession(session, async () => {
+				if (branchId) await this.ensureBranch(session, branchId);
+				return session.lix.activeBranchId();
+			});
 		} catch (caught) {
-			throw asFileServiceError(caught);
+			throw asLixError(caught);
 		}
 	}
 
@@ -200,17 +172,36 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				session.lix.switchBranch({ branchId }),
 			);
 		} catch (caught) {
-			throw asFileServiceError(caught);
+			throw asLixError(caught);
 		}
 	}
 
 	async execute(
 		lixId: string,
 		request: ExecuteRequest,
+	): Promise<ExecuteResponse>;
+	async execute(
+		lixId: string,
+		branchId: string,
+		request: ExecuteRequest,
+	): Promise<ExecuteResponse>;
+	async execute(
+		lixId: string,
+		branchOrRequest: string | ExecuteRequest,
+		maybeRequest?: ExecuteRequest,
 	): Promise<ExecuteResponse> {
+		const branchId =
+			typeof branchOrRequest === "string"
+				? branchOrRequest
+				: await this.activeBranchId(lixId);
+		const request =
+			typeof branchOrRequest === "string" ? maybeRequest : branchOrRequest;
+		if (!request)
+			throw createLixError("upstream_error", "SQL request is missing.");
 		try {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
+				await this.ensureBranch(session, branchId);
 				return encodeExecuteResult(
 					await session.lix.execute(
 						request.sql,
@@ -220,18 +211,47 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				);
 			});
 		} catch (caught) {
-			throw asFileServiceError(caught);
+			throw asLixError(caught);
 		}
 	}
 
 	async executeBatch(
 		lixId: string,
 		request: ExecuteBatchRequest,
+	): Promise<ExecuteScriptResponse>;
+	async executeBatch(
+		lixId: string,
+		branchId: string,
+		request: ExecuteBatchRequest,
+	): Promise<ExecuteScriptResponse>;
+	async executeBatch(
+		lixId: string,
+		branchOrRequest: string | ExecuteBatchRequest,
+		maybeRequest?: ExecuteBatchRequest,
 	): Promise<ExecuteScriptResponse> {
+		const branchId =
+			typeof branchOrRequest === "string"
+				? branchOrRequest
+				: await this.activeBranchId(lixId);
+		const request =
+			typeof branchOrRequest === "string" ? maybeRequest : branchOrRequest;
+		if (!request)
+			throw createLixError("upstream_error", "SQL batch is missing.");
 		try {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
-				const results = await session.lix.executeBatch(
+				await this.ensureBranch(session, branchId);
+				const results = await (
+					session.lix as unknown as {
+						executeBatch: (
+							statements: ReadonlyArray<{
+								sql: string;
+								params?: ReadonlyArray<SqlParam>;
+							}>,
+							options?: { originKey?: string; idempotencyKey?: string },
+						) => Promise<ReadonlyArray<LixExecuteResult>>;
+					}
+				).executeBatch(
 					request.statements.map((statement) => ({
 						sql: statement.sql,
 						params: (statement.params ?? []).map(decodeWireParam),
@@ -241,7 +261,107 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				return { results: results.map(encodeExecuteResult) };
 			});
 		} catch (caught) {
-			throw asFileServiceError(caught);
+			throw asLixError(caught);
+		}
+	}
+
+	async createBranch(
+		lixId: string,
+		branchId: string,
+		input: CreateBranchInput,
+	) {
+		try {
+			const session = await this.session(lixId);
+			return await this.enqueueSession(session, async () => {
+				await this.ensureBranch(session, branchId);
+				return session.lix.createBranch(input);
+			});
+		} catch (caught) {
+			throw asLixError(caught);
+		}
+	}
+
+	async createCheckpoint(lixId: string, branchId: string) {
+		try {
+			const session = await this.session(lixId);
+			return await this.enqueueSession(session, async () => {
+				await this.ensureBranch(session, branchId);
+				return (
+					session.lix as unknown as {
+						createCheckpoint: () => Promise<{ commitId: string }>;
+					}
+				).createCheckpoint();
+			});
+		} catch (caught) {
+			throw asLixError(caught);
+		}
+	}
+
+	async undo(lixId: string, branchId: string) {
+		try {
+			const session = await this.session(lixId);
+			return await this.enqueueSession(session, async () => {
+				await this.ensureBranch(session, branchId);
+				return (
+					session.lix as unknown as {
+						undo: () => Promise<{
+							branchId: string;
+							targetCommitId: string;
+							inverseCommitId: string;
+						}>;
+					}
+				).undo();
+			});
+		} catch (caught) {
+			throw asLixError(caught);
+		}
+	}
+
+	async redo(lixId: string, branchId: string) {
+		try {
+			const session = await this.session(lixId);
+			return await this.enqueueSession(session, async () => {
+				await this.ensureBranch(session, branchId);
+				return (
+					session.lix as unknown as {
+						redo: () => Promise<{
+							branchId: string;
+							targetCommitId: string;
+							replayCommitId: string;
+						}>;
+					}
+				).redo();
+			});
+		} catch (caught) {
+			throw asLixError(caught);
+		}
+	}
+
+	async mergeBranchPreview(
+		lixId: string,
+		branchId: string,
+		sourceBranchId: string,
+	) {
+		try {
+			const session = await this.session(lixId);
+			return await this.enqueueSession(session, async () => {
+				await this.ensureBranch(session, branchId);
+				return session.lix.mergeBranchPreview({ sourceBranchId });
+			});
+		} catch (caught) {
+			throw asLixError(caught);
+		}
+	}
+
+	async mergeBranch(lixId: string, branchId: string, sourceBranchId: string) {
+		try {
+			const session = await this.session(lixId);
+			return await this.enqueueSession(session, async () => {
+				await this.ensureBranch(session, branchId);
+				return session.lix.mergeBranch({ sourceBranchId });
+			});
+		} catch (caught) {
+			throw asLixError(caught);
 		}
 	}
 
@@ -267,7 +387,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 
 	private session(lixId: string): Promise<LixSession> {
 		if (this.closed) {
-			throw new FileServiceError("upstream_error", "Lix client is closed.");
+			throw createLixError("upstream_error", "Lix client is closed.");
 		}
 		let pending = this.sessions.get(lixId);
 		if (pending) return pending;
@@ -284,9 +404,10 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			server: {
 				mode: "remote",
 				url: "https://mcp.lixray.invalid",
-				fetch: (input, init) => this.protocolFetch(lixId, input, init),
+				fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+					this.protocolFetch(lixId, input, init),
 			},
-		});
+		} as never);
 		return {
 			lix,
 			queue: Promise.resolve(),
@@ -303,6 +424,15 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			() => undefined,
 		);
 		return result;
+	}
+
+	private async ensureBranch(
+		session: LixSession,
+		branchId: string,
+	): Promise<void> {
+		if ((await session.lix.activeBranchId()) !== branchId) {
+			await session.lix.switchBranch({ branchId });
+		}
 	}
 
 	private async protocolFetch(
@@ -342,48 +472,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		if (this.lixFetch) {
 			return this.lixFetch(lixId, template);
 		}
-
-		const containerNamespace = this.env.SLATEDB_CONTAINER;
-		if (!containerNamespace) {
-			return new Response("Lix storage is not configured.\n", {
-				status: 500,
-			});
-		}
-		const lixPath = `/lixes/${encodeURIComponent(lixId)}${path}`;
-		url.pathname = lixPath;
-		const containerTemplate = new Request(url, template);
-		try {
-			return await fetchContainerWithRetry({
-				namespace: containerNamespace,
-				lixId,
-				operation: `${request.method} ${lixPath}`,
-				envVars: containerEnv(this.env),
-				createRequest: () => containerTemplate.clone() as unknown as Request,
-				requestReplay: lixRequestReplay(request.method, path),
-				signal: request.signal,
-				retryDelay: this.retryDelay,
-				retryRandom: this.retryRandom,
-				onRetry: logTransientContainerRetry,
-			});
-		} catch (caught) {
-			if (request.signal.aborted) {
-				return Response.json(
-					{
-						error: {
-							code: "LIX_REMOTE_CANCELLED",
-							message: "Lix storage request was cancelled.",
-						},
-					},
-					{ status: 499 },
-				);
-			}
-			console.error("LixRay container request failed", {
-				lixId,
-				path,
-				error: containerErrorDetails(caught),
-			});
-			throw caught;
-		}
+		return new Response("Lix storage is not configured.\n", { status: 500 });
 	}
 }
 
@@ -392,15 +481,6 @@ function canonicalProtocolPath(url: URL): string | null {
 	const markerIndex = url.pathname.indexOf(marker);
 	if (markerIndex === -1) return null;
 	return url.pathname.slice(markerIndex);
-}
-
-function lixRequestReplay(method: string, path: string): "safe" | "unsafe" {
-	if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return "safe";
-	return path.endsWith("/observe") ||
-		path.endsWith("/observe/multiplex") ||
-		(method.toUpperCase() === "DELETE" && path.endsWith("/lix/v1/session"))
-		? "safe"
-		: "unsafe";
 }
 
 function decodeWireParam(
@@ -457,7 +537,7 @@ function encodeLixValue(
 		case "blob": {
 			const bytes = value.asBytes();
 			if (!bytes) {
-				throw new FileServiceError(
+				throw createLixError(
 					"upstream_error",
 					"Lix returned an invalid blob value.",
 				);
@@ -467,8 +547,8 @@ function encodeLixValue(
 	}
 }
 
-function asFileServiceError(caught: unknown): FileServiceError {
-	if (caught instanceof FileServiceError) return caught;
+function asLixError(caught: unknown): LixError {
+	if (isLixError(caught) && !shouldRemapLixError(caught)) return caught;
 	const error =
 		caught && typeof caught === "object"
 			? (caught as Record<string, unknown>)
@@ -480,67 +560,40 @@ function asFileServiceError(caught: unknown): FileServiceError {
 		rawCode === "LIX_REMOTE_PROTOCOL_ERROR" ||
 		rawCode === "LIX_REMOTE_REQUEST_FAILED" ||
 		rawCode === "LIX_REMOTE_UNAVAILABLE";
-	const details =
-		error?.details &&
-		typeof error.details === "object" &&
-		!Array.isArray(error.details)
-			? { ...(error.details as Record<string, unknown>) }
-			: {};
-	if (status !== undefined) details.status = status;
-	if (typeof error?.hint === "string") details.hint = error.hint;
-	const code: FileServiceErrorCode =
+	const details = error?.details;
+	const message =
+		typeof error?.message === "string"
+			? error.message
+			: caught instanceof Error
+				? caught.message
+				: "Lix request failed.";
+	const hint = typeof error?.hint === "string" ? error.hint : undefined;
+	const code =
 		status === 403 || status === 404
 			? "not_found"
 			: rawCode?.startsWith("LIX_") && !transportError
 				? (rawCode as `LIX_${string}`)
 				: "upstream_error";
-	return new FileServiceError(
-		code,
-		caught instanceof Error ? caught.message : "Lix request failed.",
-		Object.keys(details).length === 0 ? undefined : details,
+	return createLixError(code, message, { details, hint, status });
+}
+
+function shouldRemapLixError(error: LixError): boolean {
+	const rawCode = error.code;
+	const transportError =
+		rawCode === "LIX_REMOTE_CANCELLED" ||
+		rawCode === "LIX_REMOTE_PROTOCOL_ERROR" ||
+		rawCode === "LIX_REMOTE_REQUEST_FAILED" ||
+		rawCode === "LIX_REMOTE_UNAVAILABLE";
+	return (
+		(typeof error.status === "number" &&
+			(error.status === 403 || error.status === 404)) ||
+		transportError
 	);
-}
-
-function containerEnv(env: WorkerLixRuntimeEnv): Record<string, string> {
-	const vars: Record<string, string> = {};
-	for (const [target, source] of [
-		["S3_ENDPOINT", "R2_ENDPOINT"],
-		["S3_BUCKET", "R2_BUCKET"],
-		["S3_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID"],
-		["S3_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY"],
-		["S3_REGION", "R2_REGION"],
-		["S3_PREFIX", "S3_PREFIX"],
-		["S3_ALLOW_HTTP", "S3_ALLOW_HTTP"],
-		["SLATEDB_CACHE_DIR", "SLATEDB_CACHE_DIR"],
-		["SLATEDB_CACHE_MAX_BYTES", "SLATEDB_CACHE_MAX_BYTES"],
-		["SLATEDB_BLOCK_CACHE_BYTES", "SLATEDB_BLOCK_CACHE_BYTES"],
-		["SLATEDB_METADATA_CACHE_BYTES", "SLATEDB_METADATA_CACHE_BYTES"],
-		["POSTHOG_PROJECT_TOKEN", "POSTHOG_PROJECT_TOKEN"],
-		["POSTHOG_HOST", "POSTHOG_HOST"],
-		["POSTHOG_ENVIRONMENT", "POSTHOG_ENVIRONMENT"],
-	] as const) {
-		const value = env[source];
-		if (value !== undefined) vars[target] = value;
-	}
-	return vars;
-}
-
-function logTransientContainerRetry(
-	observation: ContainerRetryObservation,
-): void {
-	if (observation.retryCount !== 1 && observation.retryCount % 30 !== 0) return;
-	console.warn("Transient LixRay container failure; retrying", {
-		lixId: observation.lixId,
-		path: observation.operation,
-		retryCount: observation.retryCount,
-		retryDelayMs: observation.retryDelayMs,
-		error: errorDetails(observation.error),
-	});
 }
 
 function requiredEnv(value: string | undefined, name: string): string {
 	if (!value) {
-		throw new FileServiceError("upstream_error", `${name} is not configured.`);
+		throw createLixError("upstream_error", `${name} is not configured.`);
 	}
 	return value;
 }

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+	Client,
+	StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 
 const mcpUrl = new URL(process.env.LIXRAY_MCP_URL ?? "https://lixray.com/mcp");
 const accessToken = process.env.LIXRAY_MCP_ACCESS_TOKEN;
@@ -46,10 +48,13 @@ for (const issuer of resource.authorization_servers) {
 	);
 }
 
-const client = new Client({
-	name: "lixray-connection-check",
-	version: "1.0.0",
-});
+const client = new Client(
+	{
+		name: "lixray-connection-check",
+		version: "1.0.0",
+	},
+	{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
+);
 const transport = new StreamableHTTPClientTransport(mcpUrl, {
 	requestInit: { headers: { Authorization: `Bearer ${accessToken}` } },
 });

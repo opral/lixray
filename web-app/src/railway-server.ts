@@ -1,27 +1,34 @@
+import process from "node:process";
 import startHandler from "@tanstack/react-start/server-entry";
 import { addGoogleAnalytics } from "./lib/google-analytics";
 import { parseSqlScript as parseNodeSqlScript } from "./lib/node-lix-sql-parser";
 import { withShareSecurityHeaders } from "./lib/share-security";
-import { handleRequest, type WorkerEnv } from "./worker/handler";
+import {
+	handleRequest,
+	type RequestExecutionContext,
+	type WorkerEnv,
+} from "./worker/handler";
 
 export default {
 	async fetch(
 		request: Request,
-		env: WorkerEnv,
-		ctx: ExecutionContext,
+		env?: WorkerEnv,
+		ctx?: RequestExecutionContext,
 	): Promise<Response> {
-		ctx.passThroughOnException();
-		return handleRequest(request, env, {
+		const runtimeEnv = env ?? (process.env as WorkerEnv);
+		ctx?.passThroughOnException();
+		return handleRequest(request, runtimeEnv, {
 			executionContext: ctx,
 			parseSqlScript: parseNodeSqlScript,
-			lixFetch: (lixId, lixRequest) => fetchLixService(env, lixId, lixRequest),
+			lixFetch: (lixId, lixRequest) =>
+				fetchLixService(runtimeEnv, lixId, lixRequest),
 			fallback: async (fallbackRequest) => {
 				const response = await startHandler.fetch(fallbackRequest);
 				return withShareSecurityHeaders(
 					await addGoogleAnalytics(
 						fallbackRequest,
 						response,
-						env.GOOGLE_ANALYTICS_ID,
+						runtimeEnv.GOOGLE_ANALYTICS_ID,
 					),
 				);
 			},

@@ -7,7 +7,7 @@ import {
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
-import { FileServiceError } from "../mcp/file-service.ts";
+import { isLixError } from "../mcp/lix-service.ts";
 import {
 	authenticateWithSupabase,
 	authorizeLixWithSupabase,
@@ -19,7 +19,7 @@ import {
 	type AuthenticateRequest,
 	type AuthenticateMcpRequest,
 	type ResolveLix,
-	type ContainerNamespace,
+	type RequestExecutionContext,
 	type WorkerEnv,
 } from "./handler.ts";
 import {
@@ -32,19 +32,12 @@ const LIX_A = "11111111-1111-4111-8111-111111111111";
 const LIX_B = "22222222-2222-4222-8222-222222222222";
 
 void test("GET /healthz returns Worker health without auth or proxying", async () => {
-	let proxied = false;
 	const response = await handleRequest(
 		new Request("https://example.test/healthz"),
-		env({
-			fetch: async () => {
-				proxied = true;
-				return new Response();
-			},
-		}),
+		env({}),
 	);
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true, service: "lixray" });
-	assert.equal(proxied, false);
 });
 
 void test("non-/v1 routes delegate to the frontend fallback", async () => {
@@ -290,6 +283,7 @@ void test("authenticated MCP initialize reaches the MCP transport before fallbac
 		env({}),
 		{
 			authenticateMcp: authenticatedMcp(),
+			lixFetch: async () => new Response("unused"),
 			mcpTransport: async () => {
 				reachedTransport = true;
 				return Response.json({
@@ -335,8 +329,10 @@ void test("MCP reuses successful lix authorization only within one HTTP request"
 				},
 				lixFetch: mcpLixFetch(protocolPaths, "request-scoped-authorization"),
 				mcpTransport: async (_request, service) => {
-					await service.executeSql(LIX_A, [{ sql: "SELECT 1" }]);
-					await service.executeSql(LIX_A, [{ sql: "SELECT 2" }]);
+					const opened = await service.openLix(LIX_A);
+					await service.executeBatch(opened.context, {
+						statements: [{ sql: "SELECT 1" }, { sql: "SELECT 2" }],
+					});
 					return Response.json({ ok: true });
 				},
 			},
@@ -347,14 +343,47 @@ void test("MCP reuses successful lix authorization only within one HTTP request"
 	assert.equal(authorizationChecks, 2);
 	assert.deepEqual(protocolPaths, [
 		"/lix/v1/",
-		"/lix/v1/execute-batch",
+		"/lix/v1/execute",
 		"/lix/v1/execute-batch",
 		"/lix/v1/session",
 		"/lix/v1/",
-		"/lix/v1/execute-batch",
+		"/lix/v1/execute",
 		"/lix/v1/execute-batch",
 		"/lix/v1/session",
 	]);
+});
+
+void test("MCP keeps the runtime client alive until a streamed response is consumed", async () => {
+	const protocolPaths: string[] = [];
+	let lixCallCompleted = false;
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			authorizeLix: async () => null,
+			lixFetch: mcpLixFetch(protocolPaths, "streaming-response"),
+			mcpTransport: async (_request, service) => {
+				const body = new ReadableStream<Uint8Array>({
+					async pull(controller) {
+						const opened = await service.openLix(LIX_A);
+						await service.execute(opened.context, { sql: "SELECT 1" });
+						lixCallCompleted = true;
+						controller.enqueue(
+							new TextEncoder().encode("event: done\\ndata: ok\\n\\n"),
+						);
+						controller.close();
+					},
+				});
+				return new Response(body, {
+					headers: { "content-type": "text/event-stream" },
+				});
+			},
+		},
+	);
+	assert.equal(lixCallCompleted, false);
+	assert.match(await response.text(), /event: done/);
+	assert.equal(lixCallCompleted, true);
 });
 
 void test("MCP retries lix authorization after a denial", async () => {
@@ -374,11 +403,11 @@ void test("MCP retries lix authorization after a denial", async () => {
 			lixFetch: mcpLixFetch(protocolPaths, "authorization-retry"),
 			mcpTransport: async (_request, service) => {
 				await assert.rejects(
-					service.executeSql(LIX_A, [{ sql: "SELECT 1" }]),
-					(error: unknown) =>
-						error instanceof FileServiceError && error.code === "not_found",
+					service.openLix(LIX_A),
+					(error: unknown) => isLixError(error) && error.code === "not_found",
 				);
-				await service.executeSql(LIX_A, [{ sql: "SELECT 1" }]);
+				const opened = await service.openLix(LIX_A);
+				await service.execute(opened.context, { sql: "SELECT 1" });
 				return Response.json({ ok: true });
 			},
 		},
@@ -388,7 +417,8 @@ void test("MCP retries lix authorization after a denial", async () => {
 	assert.equal(authorizationChecks, 2);
 	assert.deepEqual(protocolPaths, [
 		"/lix/v1/",
-		"/lix/v1/execute-batch",
+		"/lix/v1/execute",
+		"/lix/v1/execute",
 		"/lix/v1/session",
 	]);
 });
@@ -403,7 +433,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 		},
 		passThroughOnException: () => undefined,
 		props: {},
-	} as unknown as ExecutionContext;
+	} as unknown as RequestExecutionContext;
 	const testEnv = env({
 		extra: {
 			POSTHOG_PROJECT_TOKEN: "project-token",
@@ -418,6 +448,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 		{
 			authenticateMcp: authenticatedMcp(),
 			executionContext,
+			lixFetch: async () => new Response("unused"),
 			createMcpTelemetry: (telemetryEnv, identity) => {
 				assert.equal(telemetryEnv.POSTHOG_PROJECT_TOKEN, "project-token");
 				assert.deepEqual(identity, {
@@ -438,6 +469,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 				assert.equal(options.posthogDistinctId, "user-123");
 				assert.equal(options.posthogClientId, "chatgpt-client");
 				options.onToolCall?.({
+					requestId: options.requestId!,
 					toolName: "list_lixes",
 					outcome: "success",
 					durationMs: 2,
@@ -450,6 +482,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	assert.equal(await response.text(), "mcp response");
 	assert.deepEqual(observations, [
 		{
+			requestId: response.headers.get("x-request-id"),
 			toolName: "list_lixes",
 			outcome: "success",
 			durationMs: 2,
@@ -460,7 +493,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	assert.equal(flushes, 1);
 });
 
-void test("PostHog MCP SDK instrumentation is disabled outside production", async () => {
+void test("MCP telemetry is disabled outside production", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/mcp", { method: "POST" }),
 		env({
@@ -472,6 +505,7 @@ void test("PostHog MCP SDK instrumentation is disabled outside production", asyn
 		{
 			authenticateMcp: authenticatedMcp(),
 			createMcpTelemetry: () => null,
+			lixFetch: async () => new Response("unused"),
 			mcpTransport: async (_request, _service, options) => {
 				assert.equal(options.posthogToken, undefined);
 				assert.equal(options.onPosthogFlush, undefined);
@@ -500,6 +534,7 @@ void test("successful exact-Lix MCP activity is persisted before the response co
 		env({}),
 		{
 			authenticateMcp: authenticatedMcp(),
+			lixFetch: async () => new Response("unused"),
 			recordMcpLixConnection: async (observation, auth) => {
 				records.push({
 					lixId: observation.lixId,
@@ -511,6 +546,7 @@ void test("successful exact-Lix MCP activity is persisted before the response co
 			},
 			mcpTransport: async (_request, _service, options) => {
 				options.onToolCall?.({
+					requestId: options.requestId!,
 					toolName: "active_branch_id",
 					outcome: "success",
 					durationMs: 2,
@@ -518,12 +554,14 @@ void test("successful exact-Lix MCP activity is persisted before the response co
 					lixId: LIX_A,
 				});
 				options.onToolCall?.({
+					requestId: options.requestId!,
 					toolName: "list_lixes",
 					outcome: "success",
 					durationMs: 1,
 					surfaceVersion: "test",
 				});
 				options.onToolCall?.({
+					requestId: options.requestId!,
 					toolName: "execute",
 					outcome: "error",
 					durationMs: 1,
@@ -736,23 +774,16 @@ void test("canonical mutation routes return authentication failures", async () =
 	assert.equal(await response.text(), "Unauthorized\n");
 });
 
-void test("inaccessible lixes return 403 from mutation routes without starting a container", async () => {
-	let started = false;
+void test("inaccessible lixes return 403 from mutation routes", async () => {
 	const response = await handleRequest(
 		remoteLixRequest("/branch/switch", {
 			method: "POST",
 			headers: { Authorization: "Bearer user-token" },
 		}),
-		env({
-			fetch: async () => {
-				started = true;
-				return new Response();
-			},
-		}),
+		env({}),
 		{ authenticate: authenticated(), resolveLix: unresolved(403) },
 	);
 	assert.equal(response.status, 403);
-	assert.equal(started, false);
 });
 
 void test("anonymous public reads resolve publicly and forward without auth", async () => {
@@ -1039,7 +1070,6 @@ void test("authenticated non-members are downgraded to the public read transport
 });
 
 void test("authorized requests route by lix, rewrite paths, preserve bodies and strip auth", async () => {
-	let startOptions: unknown;
 	let proxiedRequest: Request | undefined;
 	const request = remoteLixRequest("/observe?mode=test", {
 		method: "POST",
@@ -1058,219 +1088,31 @@ void test("authorized requests route by lix, rewrite paths, preserve bodies and 
 				POSTHOG_HOST: "https://posthog.example",
 				POSTHOG_ENVIRONMENT: "production",
 			},
-			getByName: (name) => {
-				assert.equal(name, LIX_A);
-				return {
-					startAndWaitForPorts: async (options) => {
-						startOptions = options;
-					},
-					fetch: async (incoming) => {
-						proxiedRequest = incoming;
-						return new Response("event: next\ndata: {}\n\n", {
-							status: 200,
-							headers: { "content-type": "text/event-stream" },
-						});
-					},
-				};
-			},
 		}),
-		{ authenticate: authenticated(), resolveLix: resolved(LIX_A) },
+		{
+			authenticate: authenticated(),
+			resolveLix: resolved(LIX_A),
+			lixFetch: async (lixId, incoming) => {
+				assert.equal(lixId, LIX_A);
+				proxiedRequest = incoming;
+				return new Response("event: next\ndata: {}\n\n", {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				});
+			},
+		},
 	);
 
 	assert.equal(response.headers.get("content-type"), "text/event-stream");
-	const capturedStartOptions = startOptions as {
-		cancellationOptions?: { abort?: AbortSignal };
-		ports?: number | number[];
-		startOptions: { envVars: Record<string, string> };
-	};
-	assert.equal(capturedStartOptions.cancellationOptions, undefined);
-	assert.deepEqual(
-		{
-			ports: capturedStartOptions.ports,
-			startOptions: capturedStartOptions.startOptions,
-		},
-		{
-			ports: 8080,
-			startOptions: {
-				envVars: {
-					S3_ENDPOINT: "https://r2.example",
-					S3_BUCKET: "lixray",
-					S3_ACCESS_KEY_ID: "access-key",
-					S3_SECRET_ACCESS_KEY: "secret-key",
-					S3_REGION: "auto",
-					SLATEDB_CACHE_DIR: "/tmp/lixray-slatedb-cache",
-					SLATEDB_CACHE_MAX_BYTES: "2147483648",
-					SLATEDB_BLOCK_CACHE_BYTES: "134217728",
-					SLATEDB_METADATA_CACHE_BYTES: "33554432",
-					POSTHOG_PROJECT_TOKEN: "project-token",
-					POSTHOG_HOST: "https://posthog.example",
-					POSTHOG_ENVIRONMENT: "production",
-				},
-			},
-		},
-	);
 	assert.ok(proxiedRequest);
-	assert.equal(
-		new URL(proxiedRequest.url).pathname,
-		`/lixes/${LIX_A}/lix/v1/observe`,
-	);
+	assert.equal(new URL(proxiedRequest.url).pathname, "/lix/v1/observe");
 	assert.equal(new URL(proxiedRequest.url).search, "?mode=test");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
 	assert.equal(proxiedRequest.headers.get("x-client-header"), "kept");
 	assert.deepEqual(await proxiedRequest.json(), { sql: "SELECT 1" });
 });
 
-void test("transient container resets retry with a reacquired stub", async () => {
-	let acquisitions = 0;
-	let starts = 0;
-	let fetches = 0;
-	const response = await handleRequest(
-		remoteLixRequest("/", {
-			headers: { Authorization: "Bearer user-token" },
-		}),
-		env({
-			getByName: () => {
-				acquisitions += 1;
-				return {
-					startAndWaitForPorts: async () => {
-						starts += 1;
-						if (acquisitions === 1) {
-							throw new Error(
-								"Internal error in Durable Object storage caused object to be reset; reference = retry-me",
-							);
-						}
-					},
-					fetch: async () => {
-						fetches += 1;
-						return new Response("ok");
-					},
-				};
-			},
-		}),
-		{
-			authenticate: authenticated(),
-			resolveLix: resolved(LIX_A),
-			containerRetryDelay: async () => undefined,
-			containerRetryRandom: () => 1,
-		},
-	);
-
-	assert.equal(response.status, 200);
-	assert.equal(await response.text(), "ok");
-	assert.equal(acquisitions, 2);
-	assert.equal(starts, 2);
-	assert.equal(fetches, 1);
-});
-
-void test("canonical mutation bodies are not replayed after ambiguous proxy failures", async () => {
-	let acquisitions = 0;
-	const bodies: Array<unknown> = [];
-	const terminalLogs: Array<Array<unknown>> = [];
-	const originalConsoleError = console.error;
-	console.error = (...arguments_: Array<unknown>) =>
-		terminalLogs.push(arguments_);
-	const request = remoteLixRequest("/execute", {
-		method: "POST",
-		headers: {
-			Authorization: "Bearer user-token",
-			"content-type": "application/json",
-			"Idempotency-Key": "opaque-proxy-key",
-		},
-		body: JSON.stringify({ sql: "SELECT 1" }),
-	});
-	let response: Response;
-	try {
-		response = await handleRequest(
-			request,
-			env({
-				getByName: () => {
-					acquisitions += 1;
-					return {
-						fetch: async (incoming) => {
-							assert.equal(incoming.headers.get("authorization"), null);
-							bodies.push(await incoming.json());
-							throw new Error("Error proxying request to container");
-						},
-					};
-				},
-			}),
-			{
-				authenticate: authenticated(),
-				resolveLix: resolved(LIX_A),
-				containerRetryDelay: async () => undefined,
-			},
-		);
-	} finally {
-		console.error = originalConsoleError;
-	}
-
-	assert.equal(response.status, 503);
-	assert.equal(acquisitions, 1);
-	assert.deepEqual(bodies, [{ sql: "SELECT 1" }]);
-	assert.equal(terminalLogs.length, 1);
-	assert.equal(terminalLogs[0]?.[0], "LixRay container request failed");
-	assert.deepEqual(
-		(terminalLogs[0]?.[1] as { error?: { message?: string } }).error?.message,
-		"Error proxying request to container",
-	);
-});
-
-void test("permanent container startup failures return a controlled 503 response", async () => {
-	let fetched = false;
-	const response = await handleRequest(
-		remoteLixRequest("/", {
-			headers: { Authorization: "Bearer user-token" },
-		}),
-		env({
-			getByName: () => ({
-				startAndWaitForPorts: async () => {
-					throw new Error("S3_ACCESS_KEY_ID is required");
-				},
-				fetch: async () => {
-					fetched = true;
-					return new Response("unexpected");
-				},
-			}),
-		}),
-		{ authenticate: authenticated(), resolveLix: resolved(LIX_A) },
-	);
-
-	assert.equal(response.status, 503);
-	assert.equal(response.headers.get("retry-after"), "1");
-	assert.equal(fetched, false);
-	assert.deepEqual(await response.json(), {
-		error: {
-			code: "CONTAINER_UNAVAILABLE",
-			message: "Lix storage is temporarily unavailable.",
-		},
-	});
-});
-
-void test("two lixes route to distinct containers", async () => {
-	const names: Array<string> = [];
-	const testEnv = env({
-		getByName: (name) => {
-			names.push(name);
-			return { fetch: async () => new Response("ok") };
-		},
-	});
-	for (const lixId of [LIX_A, LIX_B]) {
-		const response = await handleRequest(
-			remoteLixRequest("/", {
-				headers: { Authorization: "Bearer user-token" },
-			}),
-			testEnv,
-			{
-				authenticate: authenticated(),
-				resolveLix: resolved(lixId),
-			},
-		);
-		assert.equal(response.status, 200);
-	}
-	assert.deepEqual(names, [LIX_A, LIX_B]);
-});
-
-void test("demo auth on workers.dev only resolves configured lixes", async () => {
+void test("demo auth only resolves configured lixes", async () => {
 	const testEnv = env({
 		extra: {
 			LIXRAY_DEMO: "1",
@@ -1279,22 +1121,20 @@ void test("demo auth on workers.dev only resolves configured lixes", async () =>
 	});
 	const accepted = await handleRequest(
 		new Request(
-			"https://pr-42-lixray-preview.example.workers.dev/@acme/launch-q3/lix/v1/",
+			"https://pr-42-lixray-preview.example/@acme/launch-q3/lix/v1/",
 			{
 				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
 			},
 		),
 		testEnv,
+		{ lixFetch: async () => new Response("ok") },
 	);
 	assert.equal(accepted.status, 200);
 
 	const deniedResponse = await handleRequest(
-		new Request(
-			"https://pr-42-lixray-preview.example.workers.dev/@acme/missing/lix/v1/",
-			{
-				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
-			},
-		),
+		new Request("https://pr-42-lixray-preview.example/@acme/missing/lix/v1/", {
+			headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
+		}),
 		testEnv,
 	);
 	// Public routes resolve globally. An unconfigured demo lix falls
@@ -1348,6 +1188,7 @@ void test("Railway PR environments enable the built-in demo lix", async () => {
 				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
 			}),
 			testEnv,
+			{ lixFetch: async () => new Response("ok") },
 		);
 		assert.equal(response.status, 200, name);
 	}
@@ -1417,11 +1258,14 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 						},
 					},
 				]);
-				assert.equal(await service.activeBranchId(DEMO_LIX_ID), "main");
+				const opened = await service.openLix(DEMO_LIX_ID);
+				assert.equal(
+					(await service.activeBranchId(opened.context)).branchId,
+					"main",
+				);
 				await assert.rejects(
-					service.activeBranchId(LIX_B),
-					(error: unknown) =>
-						error instanceof FileServiceError && error.code === "not_found",
+					service.openLix(LIX_B),
+					(error: unknown) => isLixError(error) && error.code === "not_found",
 				);
 				return Response.json({ ok: true });
 			},
@@ -1430,7 +1274,7 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
-	assert.equal(lixFetches, 2);
+	assert.equal(lixFetches, 4);
 });
 
 void test("Supabase lix authorization uses the user token and RLS-visible row", async () => {
@@ -1557,6 +1401,14 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 		if (path === "/lix/v1/session" && request.method === "DELETE") {
 			return new Response(null, { status: 204 });
 		}
+		if (path === "/lix/v1/execute") {
+			return Response.json({
+				columns: ["value"],
+				rows: [[{ kind: "text", value: "commit-1" }]],
+				rowsAffected: 0,
+				notices: [],
+			});
+		}
 		assert.equal(path, "/lix/v1/execute-batch");
 		return Response.json([
 			{
@@ -1602,32 +1454,8 @@ function unresolved(status: number): ResolveLix {
 	});
 }
 
-function env(options: {
-	fetch?: (request: Request) => Promise<Response>;
-	getByName?: ContainerNamespace["getByName"];
-	extra?: Partial<WorkerEnv>;
-}): WorkerEnv {
-	return {
-		R2_ENDPOINT: "https://r2.example",
-		R2_BUCKET: "lixray",
-		R2_ACCESS_KEY_ID: "access-key",
-		R2_SECRET_ACCESS_KEY: "secret-key",
-		R2_REGION: "auto",
-		SLATEDB_CACHE_DIR: "/tmp/lixray-slatedb-cache",
-		SLATEDB_CACHE_MAX_BYTES: "2147483648",
-		SLATEDB_BLOCK_CACHE_BYTES: "134217728",
-		SLATEDB_METADATA_CACHE_BYTES: "33554432",
-		SLATEDB_CONTAINER: {
-			getByName:
-				options.getByName ??
-				(() => ({
-					fetch:
-						options.fetch ??
-						(async () => new Response("proxied", { status: 200 })),
-				})),
-		},
-		...options.extra,
-	};
+function env(options: { extra?: Partial<WorkerEnv> }): WorkerEnv {
+	return { ...options.extra };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

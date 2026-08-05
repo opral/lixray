@@ -2,11 +2,9 @@
   "name": "lixray-workspace",
   "private": true,
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "infisical run --env=dev -- node scripts/dev.mjs",
     "dev:reset-onboarding": "node scripts/reset-onboarding.mjs",
     "test:e2e": "pnpm --dir web-app test:e2e",
-    "dev:telemetry": "infisical run --env=dev -- pnpm dev",
-    "deploy:worker": "infisical run --env=prod -- pnpm --dir web-app deploy:worker",
     "perf:build": "docker build -f lix-server/Dockerfile -t lixray-perf .",
     "perf:up": "docker compose up --build -d lix-server",
     "perf:down": "docker compose down",

@@ -455,7 +455,7 @@ void test("lix sessions use unified remote Lix with session-local branch state a
 			return new Response(null, { status: 204 });
 		}
 		const body: Record<string, unknown> = request.body
-			? await request.clone().json()
+			? ((await request.clone().json()) as Record<string, unknown>)
 			: {};
 		if (pathname.endsWith("/branch/switch")) {
 			const branchId = body.branchId;

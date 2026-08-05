@@ -1,7 +1,7 @@
 {
 	"extends": "./tsconfig.json",
 	"compilerOptions": {
-		"types": ["@cloudflare/workers-types", "vite/client", "node"]
+		"types": ["node", "vite/client"]
 	},
 	"include": ["src", "tests", "vite.config.ts", "playwright.config.ts"],
 	"exclude": ["src/routeTree.gen.ts"]

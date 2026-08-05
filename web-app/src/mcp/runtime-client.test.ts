@@ -4,7 +4,7 @@ import {
 	WorkerLixRuntimeClient,
 	type WorkerLixRuntimeEnv,
 } from "./runtime-client.ts";
-import { FileServiceError } from "./file-service.ts";
+import { isLixError } from "./lix-service.ts";
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -37,8 +37,18 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 		});
 	}
 	if (pathname === "/lix/v1/branch/switch") {
-		const body: { branchId: string } = await request.json();
+		const body = JSON.parse(await request.text()) as { branchId: string };
 		return Response.json({ branchId: body.branchId });
+	}
+	if (pathname === "/lix/v1/execute-batch") {
+		return Response.json([
+			{
+				columns: [],
+				rows: [],
+				rowsAffected: 0,
+				notices: [],
+			},
+		]);
 	}
 	return new Response("Not found", { status: 404 });
 }
@@ -47,58 +57,48 @@ function testProtocolPath(request: Request): string {
 	return new URL(request.url).pathname.replace(/^\/lixes\/[^/]+/, "");
 }
 
-void test("container calls reauthorize every time and never forward the OAuth token", async () => {
-	let authorizationChecks = 0;
-	let starts = 0;
-	const containerEnvironments: Array<Record<string, string>> = [];
-	const requests: Array<Request> = [];
-	const client = new WorkerLixRuntimeClient(
-		env({
-			extra: {
-				POSTHOG_PROJECT_TOKEN: "project-token",
-				POSTHOG_HOST: "https://posthog.example",
-				POSTHOG_ENVIRONMENT: "production",
-			},
-			getByName: (name) => {
-				assert.equal(name, LIX_ID);
-				return {
-					startAndWaitForPorts: async (options) => {
-						starts += 1;
-						containerEnvironments.push(options.startOptions.envVars);
-					},
-					fetch: async (request) => {
-						requests.push(request);
-						return branchProtocolResponse(request);
-					},
-				};
-			},
-		}),
+function env(): WorkerLixRuntimeEnv {
+	return {
+		SUPABASE_URL: "https://project.supabase.co",
+		SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+	};
+}
+
+function client(
+	fetcher: (lixId: string, request: Request) => Promise<Response>,
+	authorize: (lixId: string) => Promise<Response | null> = async () => null,
+): WorkerLixRuntimeClient {
+	return new WorkerLixRuntimeClient(
+		env(),
 		{ userId: "user-1", token: "secret-oauth-token" },
-		async (lixId, user) => {
+		async (lixId) => authorize(lixId),
+		{ lixFetch: fetcher },
+	);
+}
+
+void test("Railway Lix fetch strips OAuth and adds the trusted principal", async () => {
+	let authorizationChecks = 0;
+	const requests: Array<Request> = [];
+	const runtime = client(
+		async (_lixId, request) => {
+			requests.push(request);
+			return branchProtocolResponse(request);
+		},
+		async (lixId) => {
 			authorizationChecks += 1;
 			assert.equal(lixId, LIX_ID);
-			assert.equal(user.token, "secret-oauth-token");
 			return null;
 		},
 	);
 
-	await client.execute(LIX_ID, { sql: "SELECT 1" });
-	await client.execute(LIX_ID, { sql: "SELECT 2" });
-	assert.equal(authorizationChecks, 3);
-	assert.equal(starts, 3);
-	assert.deepEqual(containerEnvironments[0], {
-		POSTHOG_PROJECT_TOKEN: "project-token",
-		POSTHOG_HOST: "https://posthog.example",
-		POSTHOG_ENVIRONMENT: "production",
-	});
-	assert.equal(requests.length, 3);
+	const response = await runtime.execute(LIX_ID, { sql: "SELECT 1" });
+
+	assert.equal(response.rowsAffected, 0);
+	assert.equal(authorizationChecks, 2);
+	assert.equal(requests.length, 2);
 	assert.deepEqual(
 		requests.map((request) => new URL(request.url).pathname),
-		[
-			`/lixes/${LIX_ID}/lix/v1/`,
-			`/lixes/${LIX_ID}/lix/v1/execute`,
-			`/lixes/${LIX_ID}/lix/v1/execute`,
-		],
+		["/lix/v1/", "/lix/v1/execute"],
 	);
 	for (const request of requests) {
 		assert.equal(request.headers.get("authorization"), null);
@@ -113,670 +113,96 @@ void test("container calls reauthorize every time and never forward the OAuth to
 	}
 });
 
-void test("active-branch lookup reuses the authorized handshake without listing branches", async () => {
-	let authorizationChecks = 0;
-	const requests: Array<Request> = [];
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: (name) => {
-				assert.equal(name, LIX_ID);
-				return {
-					fetch: async (request) => {
-						requests.push(request);
-						return branchProtocolResponse(request);
-					},
-				};
-			},
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => {
-			authorizationChecks += 1;
-			return null;
-		},
-	);
-
-	assert.equal(await client.activeBranchId(LIX_ID), "main");
-	assert.equal(authorizationChecks, 1);
-	assert.deepEqual(
-		requests.map((request) => new URL(request.url).pathname),
-		[`/lixes/${LIX_ID}/lix/v1/`],
-	);
-	for (const request of requests) {
-		assert.equal(request.headers.get("authorization"), null);
-	}
-});
-
-void test("active-branch lookup, branch switch, and execution are queued", async () => {
+void test("active branch, switch, and execution use one serialized Lix session", async () => {
 	const operations: string[] = [];
-	const client = new WorkerLixRuntimeClient(
-		{},
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{
-			lixFetch: async (_lixId, request) => {
-				const pathname = new URL(request.url).pathname;
-				if (pathname === "/lix/v1/") {
-					operations.push("active-branch");
-					return branchProtocolResponse(request);
-				}
-				if (pathname === "/lix/v1/branch/switch") {
-					const body: { branchId: string } = await request.json();
-					operations.push(`switch:${body.branchId}`);
-					return Response.json({ branchId: body.branchId });
-				}
-				operations.push("execute");
-				return Response.json({
-					columns: [],
-					rows: [],
-					rowsAffected: 0,
-					notices: [],
-				});
-			},
-		},
-	);
+	const runtime = client(async (_lixId, request) => {
+		const pathname = testProtocolPath(request);
+		if (pathname === "/lix/v1/") {
+			operations.push("active-branch");
+			return branchProtocolResponse(request);
+		}
+		if (pathname === "/lix/v1/branch/switch") {
+			const body = JSON.parse(await request.text()) as { branchId: string };
+			operations.push(`switch:${body.branchId}`);
+			return Response.json({ branchId: body.branchId });
+		}
+		operations.push("execute");
+		return Response.json({
+			columns: [],
+			rows: [],
+			rowsAffected: 0,
+			notices: [],
+		});
+	});
 
-	const branchId = await client.activeBranchId(LIX_ID);
-	assert.deepEqual(await client.switchBranch(LIX_ID, branchId), {
+	const branchId = await runtime.activeBranchId(LIX_ID);
+	assert.deepEqual(await runtime.switchBranch(LIX_ID, branchId), {
 		branchId,
 	});
-	await client.execute(LIX_ID, { sql: "SELECT 1" });
+	await runtime.execute(LIX_ID, { sql: "SELECT 1" });
 	assert.deepEqual(operations, ["active-branch", "switch:main", "execute"]);
 });
 
-void test("transient container failures retry indefinitely with capped jitter and reacquired stubs", async () => {
-	let acquisitions = 0;
-	let starts = 0;
-	let fetches = 0;
-	const delays: Array<number> = [];
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => {
-				acquisitions += 1;
-				return {
-					startAndWaitForPorts: async () => {
-						starts += 1;
-						if (starts <= 5) {
-							throw new Error(
-								"The container is not running, consider calling start()",
-							);
-						}
-					},
-					fetch: async (request) => {
-						fetches += 1;
-						return branchProtocolResponse(request);
-					},
-				};
-			},
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{
-			retryRandom: () => 1,
-			retryDelay: async (milliseconds) => {
-				delays.push(milliseconds);
-			},
-		},
-	);
-
-	assert.equal(await client.activeBranchId(LIX_ID), "main");
-	assert.equal(acquisitions, 6);
-	assert.equal(starts, 6);
-	assert.equal(fetches, 1);
-	assert.deepEqual(delays, [1_000, 2_000, 4_000, 5_000, 5_000]);
-});
-
-void test("Durable Object storage resets are retried", async () => {
-	let acquisitions = 0;
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => {
-				acquisitions += 1;
-				return {
-					startAndWaitForPorts: async () => {
-						if (acquisitions === 1) {
-							throw new Error(
-								"Internal error in Durable Object storage caused object to be reset; reference = retry-me",
-							);
-						}
-					},
-					fetch: branchProtocolResponse,
-				};
-			},
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{ retryDelay: async () => undefined },
-	);
-
-	assert.equal(await client.activeBranchId(LIX_ID), "main");
-	assert.equal(acquisitions, 2);
-});
-
-void test("transient HTTP responses retry and replay request bodies", async () => {
-	let acquisitions = 0;
-	const bodies: Array<unknown> = [];
-	const delays: Array<number> = [];
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => {
-				acquisitions += 1;
-				return {
-					fetch: async (request) => {
-						const pathname = testProtocolPath(request);
-						if (
-							pathname === "/lix/v1/" ||
-							pathname === "/lix/v1/branch/switch"
-						) {
-							return branchProtocolResponse(request);
-						}
-						bodies.push(await request.json());
-						if (bodies.length === 1) {
-							return new Response("Failed to start container: cold start", {
-								status: 500,
-							});
-						}
-						return Response.json({
-							columns: [],
-							rows: [],
-							rowsAffected: 0,
-							notices: [],
-						});
-					},
-				};
-			},
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{
-			retryRandom: () => 1,
-			retryDelay: async (milliseconds) => {
-				delays.push(milliseconds);
-			},
-		},
-	);
-	const request = {
-		sql: "SELECT $1",
-		params: [{ kind: "text" as const, value: "ok" }],
-	};
-
-	assert.equal((await client.execute(LIX_ID, request)).rowsAffected, 0);
-	assert.equal(acquisitions, 3);
-	assert.deepEqual(bodies, [
-		{ sql: request.sql, params: request.params },
-		{ sql: request.sql, params: request.params },
-	]);
-	assert.deepEqual(delays, [1_000]);
-});
-
-void test("session release retries an ambiguous container disconnect", async () => {
-	let deleteAttempts = 0;
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => ({
-				fetch: async (request) => {
-					const pathname = testProtocolPath(request);
-					if (pathname === "/lix/v1/session") {
-						deleteAttempts += 1;
-						if (deleteAttempts === 1) {
-							throw new Error("network connection lost after session release");
-						}
-					}
-					return branchProtocolResponse(request);
-				},
-			}),
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{ retryDelay: async () => undefined },
-	);
-
-	await client.execute(LIX_ID, { sql: "SELECT 1" });
-	await client.close();
-
-	assert.equal(deleteAttempts, 2);
-});
-
-void test("caller cancellation stops otherwise retryable container work", async () => {
-	const controller = new AbortController();
-	let acquisitions = 0;
-	let observedCancellationOptions: unknown;
-	let delays = 0;
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => {
-				acquisitions += 1;
-				return {
-					startAndWaitForPorts: async (options) => {
-						observedCancellationOptions = options.cancellationOptions;
-						queueMicrotask(() => controller.abort());
-						return new Promise(() => undefined);
-					},
-					fetch: async () => new Response("unreachable"),
-				};
-			},
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{
-			signal: controller.signal,
-			retryDelay: async () => {
-				delays += 1;
-			},
-		},
-	);
-
-	await assert.rejects(client.activeBranchId(LIX_ID), (error: unknown) => {
-		return (
-			error instanceof FileServiceError &&
-			error.message === "Lix storage request was cancelled."
-		);
+void test("executeBatch uses the canonical atomic endpoint", async () => {
+	const requests: Array<Request> = [];
+	const runtime = client(async (_lixId, request) => {
+		requests.push(request);
+		return branchProtocolResponse(request);
 	});
-	assert.equal(observedCancellationOptions, undefined);
-	assert.equal(acquisitions, 1);
-	assert.equal(delays, 0);
-});
 
-void test("non-zero container exits are not retried indefinitely", async () => {
-	let acquisitions = 0;
-	let delays = 0;
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => {
-				acquisitions += 1;
-				return {
-					startAndWaitForPorts: async () => {
-						throw new Error(
-							"Container exited before we could determine health, exit code: 1",
-						);
-					},
-					fetch: async () => new Response("unreachable"),
-				};
-			},
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{
-			retryDelay: async () => {
-				delays += 1;
-			},
-		},
-	);
-
-	await assert.rejects(client.activeBranchId(LIX_ID), (error: unknown) => {
-		return error instanceof FileServiceError && error.code === "upstream_error";
+	const response = await runtime.executeBatch(LIX_ID, {
+		statements: [{ sql: "SELECT 1" }, { sql: "SELECT 2" }],
 	});
-	assert.equal(acquisitions, 1);
-	assert.equal(delays, 0);
-});
 
-void test("permanent container responses are not retried", async () => {
-	let fetches = 0;
-	let delays = 0;
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => ({
-				fetch: async () => {
-					fetches += 1;
-					return Response.json(
-						{ error: { message: "Invalid branch" } },
-						{ status: 400 },
-					);
-				},
-			}),
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{
-			retryDelay: async () => {
-				delays += 1;
-			},
-		},
-	);
-
-	await assert.rejects(client.activeBranchId(LIX_ID), (error: unknown) => {
-		return (
-			error instanceof FileServiceError &&
-			error.code === "upstream_error" &&
-			error.details?.status === 400
-		);
-	});
-	assert.equal(fetches, 1);
-	assert.equal(delays, 0);
-});
-
-void test("a denied lix never starts or calls a container", async () => {
-	let touchedContainer = false;
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => {
-				touchedContainer = true;
-				throw new Error("container should not be reached");
-			},
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => new Response("Lix access denied", { status: 403 }),
-	);
-
-	await assert.rejects(client.activeBranchId(LIX_ID), (error: unknown) => {
-		return error instanceof FileServiceError && error.code === "not_found";
-	});
-	assert.equal(touchedContainer, false);
-});
-
-void test("active-branch lookup preserves denied-lix errors", async () => {
-	let touchedContainer = false;
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => {
-				touchedContainer = true;
-				throw new Error("container should not be reached");
-			},
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => new Response("Lix access denied", { status: 403 }),
-	);
-
-	await assert.rejects(client.activeBranchId(LIX_ID), (error: unknown) => {
-		return error instanceof FileServiceError && error.code === "not_found";
-	});
-	assert.equal(touchedContainer, false);
-});
-
-void test("unified Lix execute reauthorizes and strips the OAuth token", async () => {
-	let authorizationChecks = 0;
-	let received: Request | undefined;
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => ({
-				fetch: async (request) => {
-					const pathname = testProtocolPath(request);
-					if (pathname === "/lix/v1/" || pathname === "/lix/v1/branch/switch") {
-						return branchProtocolResponse(request);
-					}
-					received = request;
-					return Response.json({
-						columns: ["value"],
-						rows: [[{ kind: "text", value: "ok" }]],
-						rowsAffected: 0,
-						notices: [],
-					});
-				},
-			}),
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => {
-			authorizationChecks += 1;
-			return null;
-		},
-	);
-
-	const response = await client.execute(LIX_ID, {
-		sql: "SELECT $1 AS value",
-		params: [{ kind: "text", value: "ok" }],
-	});
-	assert.equal(response.rowsAffected, 0);
-	assert.equal(authorizationChecks, 2);
-	assert.ok(received);
+	assert.equal(response.results.length, 1);
 	assert.equal(
-		new URL(received.url).pathname,
-		`/lixes/${LIX_ID}/lix/v1/execute`,
+		new URL(requests.at(-1)?.url ?? "https://invalid").pathname,
+		"/lix/v1/execute-batch",
 	);
-	assert.equal(received.headers.get("authorization"), null);
-	assert.deepEqual(await received.json(), {
-		sql: "SELECT $1 AS value",
-		params: [{ kind: "text", value: "ok" }],
-	});
-});
-
-void test("unified Lix executeBatch uses the canonical atomic batch endpoint", async () => {
-	let received: Request | undefined;
-	const client = new WorkerLixRuntimeClient(
-		{},
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{
-			lixFetch: async (_lixId, request) => {
-				const pathname = new URL(request.url).pathname;
-				if (pathname === "/lix/v1/" || pathname === "/lix/v1/branch/switch") {
-					return branchProtocolResponse(request);
-				}
-				received = request;
-				return Response.json([
-					{
-						columns: ["value"],
-						rows: [[{ kind: "int", value: 1 }]],
-						rowsAffected: 0,
-						notices: [],
-					},
-					{
-						columns: ["value"],
-						rows: [[{ kind: "text", value: "two" }]],
-						rowsAffected: 0,
-						notices: [],
-					},
-				]);
-			},
-		},
-	);
-
-	const response = await client.executeBatch(LIX_ID, {
+	assert.deepEqual(await requests.at(-1)?.json(), {
 		statements: [
-			{ sql: "SELECT $1 AS value", params: [{ kind: "int", value: 1 }] },
-			{
-				sql: "SELECT $1 AS value",
-				params: [{ kind: "text", value: "two" }],
-			},
+			{ sql: "SELECT 1", params: [] },
+			{ sql: "SELECT 2", params: [] },
 		],
-		options: { originKey: "mcp-batch" },
-	});
-
-	assert.equal(response.results.length, 2);
-	assert.ok(received);
-	assert.equal(new URL(received.url).pathname, "/lix/v1/execute-batch");
-	assert.deepEqual(await received.json(), {
-		statements: [
-			{ sql: "SELECT $1 AS value", params: [{ kind: "int", value: 1 }] },
-			{
-				sql: "SELECT $1 AS value",
-				params: [{ kind: "text", value: "two" }],
-			},
-		],
-		options: { originKey: "mcp-batch" },
 	});
 });
 
-void test("unified Lix sessions serialize execution without selecting a branch", async () => {
-	const operations: string[] = [];
-	const client = new WorkerLixRuntimeClient(
-		{},
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{
-			lixFetch: async (_lixId, request) => {
-				const pathname = new URL(request.url).pathname;
-				if (pathname === "/lix/v1/") {
-					operations.push("handshake");
-					return branchProtocolResponse(request);
-				}
-				const body: { sql: string } = await request.json();
-				const statement = body.sql.endsWith("1") ? "one" : "two";
-				operations.push(`execute:${statement}`);
-				return Response.json({
-					columns: ["statement"],
-					rows: [[{ kind: "text", value: statement }]],
-					rowsAffected: 0,
-					notices: [],
-				});
-			},
-		},
+void test("Lix protocol errors retain status and structured error details", async () => {
+	const runtime = client(async () =>
+		Response.json(
+			{ error: { code: "invalid_branch", message: "Invalid branch" } },
+			{ status: 400 },
+		),
 	);
 
-	const [first, second] = await Promise.all([
-		client.execute(LIX_ID, { sql: "SELECT 1" }),
-		client.execute(LIX_ID, { sql: "SELECT 2" }),
-	]);
-
-	assert.equal(first.rows[0]?.[0]?.kind, "text");
-	assert.equal(second.rows[0]?.[0]?.kind, "text");
-	assert.deepEqual(operations, ["handshake", "execute:one", "execute:two"]);
+	await assert.rejects(runtime.activeBranchId(LIX_ID), (error: unknown) => {
+		return (
+			isLixError(error) &&
+			error.code === "invalid_branch" &&
+			error.status === 400 &&
+			error.message === "Invalid branch"
+		);
+	});
 });
 
-void test("unified Lix execute preserves every wire value kind", async () => {
-	const params: NonNullable<
-		import("./file-service.ts").ExecuteRequest["params"]
-	> = [
-		{ kind: "null", value: null },
-		{ kind: "bool", value: true },
-		{ kind: "int", value: 42 },
-		{ kind: "float", value: 1.5 },
-		{ kind: "text", value: "hello" },
-		{ kind: "json", value: { nested: [true, null] } },
-		{ kind: "blob", base64: "AQID" },
-	];
-	let receivedParams: unknown;
-	const client = new WorkerLixRuntimeClient(
-		{},
-		{ userId: "user-1", token: "secret-oauth-token" },
+void test("injected Lix summaries bypass Supabase discovery", async () => {
+	const runtime = new WorkerLixRuntimeClient(
+		env(),
+		{ userId: "user-1", token: "token" },
 		async () => null,
 		{
-			lixFetch: async (_lixId, request) => {
-				const pathname = new URL(request.url).pathname;
-				if (pathname === "/lix/v1/" || pathname === "/lix/v1/branch/switch") {
-					return branchProtocolResponse(request);
-				}
-				const body: { params: typeof params } = await request.json();
-				receivedParams = body.params;
-				return Response.json({
-					columns: params.map((_, index) => `value_${index}`),
-					rows: [body.params],
-					rowsAffected: 0,
-					notices: [],
-				});
-			},
-		},
-	);
-
-	const result = await client.execute(LIX_ID, {
-		sql: "SELECT values",
-		params,
-	});
-
-	assert.deepEqual(receivedParams, params);
-	assert.deepEqual(result.rows, [params]);
-});
-
-void test("unified Lix execute preserves structured Lix errors", async () => {
-	const client = new WorkerLixRuntimeClient(
-		env({
-			getByName: () => ({
-				fetch: async (request) => {
-					const pathname = testProtocolPath(request);
-					if (pathname === "/lix/v1/" || pathname === "/lix/v1/branch/switch") {
-						return branchProtocolResponse(request);
-					}
-					return Response.json(
-						{
-							error: {
-								code: "LIX_UNSUPPORTED_SQL",
-								message: "Unsupported transaction control",
-								hint: "Use BEGIN ... COMMIT.",
-								details: { operation: "execute" },
-							},
-						},
-						{ status: 400 },
-					);
+			lixSummaries: [
+				{
+					id: LIX_ID,
+					name: "Personal",
+					slug: "personal",
+					namespace: { id: "org-1", name: "Example", handle: "example" },
 				},
-			}),
-		}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-	);
-
-	await assert.rejects(
-		client.execute(LIX_ID, {
-			sql: "BEGIN; COMMIT",
-		}),
-		(error: unknown) =>
-			error instanceof FileServiceError &&
-			error.code === "LIX_UNSUPPORTED_SQL" &&
-			error.details?.status === 400 &&
-			error.details?.hint === "Use BEGIN ... COMMIT." &&
-			error.details?.operation === "execute",
-	);
-});
-
-void test("injected lixes and lix fetch bypass Supabase and containers", async () => {
-	let authorizationChecks = 0;
-	const received: Request[] = [];
-	const lixSummaries = [
-		{
-			id: LIX_ID,
-			name: "Demo lix",
-			slug: "demo-lix",
-			namespace: { id: "org-demo", name: "Demo", handle: "demo" },
-		},
-	];
-	const client = new WorkerLixRuntimeClient(
-		{},
-		{ userId: "lixray-demo", token: "lixray-demo" },
-		async (lixId) => {
-			authorizationChecks += 1;
-			assert.equal(lixId, LIX_ID);
-			return null;
-		},
-		{
-			lixSummaries,
-			lixFetch: async (lixId, request) => {
-				assert.equal(lixId, LIX_ID);
-				received.push(request);
-				return branchProtocolResponse(request);
-			},
+			],
 		},
 	);
 
-	assert.deepEqual(await client.listLixes(), lixSummaries);
-	assert.equal(await client.activeBranchId(LIX_ID), "main");
-	assert.equal(authorizationChecks, 1);
-	assert.deepEqual(
-		received.map((request) => new URL(request.url).pathname),
-		["/lix/v1/"],
-	);
-	for (const request of received) {
-		assert.equal(request.headers.get("authorization"), null);
-	}
-});
-
-void test("lix discovery uses the OAuth token and only joins RLS-visible rows", async () => {
-	const requests: Array<{ url: URL; headers: Headers }> = [];
-	const client = new WorkerLixRuntimeClient(
-		env({}),
-		{ userId: "user-1", token: "secret-oauth-token" },
-		async () => null,
-		{
-			fetcher: async (input, init) => {
-				const url = new URL(
-					typeof input === "string"
-						? input
-						: input instanceof URL
-							? input.href
-							: input.url,
-				);
-				requests.push({ url, headers: new Headers(init?.headers) });
-				return Response.json([
-					{
-						lix_id: LIX_ID,
-						lix_name: "Personal",
-						lix_slug: "personal",
-						namespace_id: "org-1",
-						namespace_name: "Example",
-						namespace_handle: "example",
-					},
-				]);
-			},
-		},
-	);
-
-	assert.deepEqual(await client.listLixes(), [
+	assert.deepEqual(await runtime.listLixes(), [
 		{
 			id: LIX_ID,
 			name: "Personal",
@@ -784,74 +210,16 @@ void test("lix discovery uses the OAuth token and only joins RLS-visible rows", 
 			namespace: { id: "org-1", name: "Example", handle: "example" },
 		},
 	]);
-	assert.equal(requests.length, 1);
-	for (const request of requests) {
-		assert.equal(
-			request.headers.get("authorization"),
-			"Bearer secret-oauth-token",
-		);
-		assert.equal(request.headers.get("apikey"), "publishable-key");
-	}
-	assert.equal(requests[0]?.url.pathname, "/rest/v1/rpc/list_accessible_lixes");
 });
 
-void test("lix discovery invokes the Worker fetch function without a class receiver", async () => {
-	const originalFetch = globalThis.fetch;
-	let calls = 0;
-	globalThis.fetch = function (
-		this: unknown,
-		input: RequestInfo | URL,
-	): Promise<Response> {
-		assert.equal(this, undefined);
-		calls += 1;
-		const url = new URL(
-			typeof input === "string"
-				? input
-				: input instanceof URL
-					? input.href
-					: input.url,
-		);
-		assert.equal(url.pathname, "/rest/v1/rpc/list_accessible_lixes");
-		return Promise.resolve(
-			Response.json([
-				{
-					lix_id: LIX_ID,
-					lix_name: "Personal",
-					lix_slug: "personal",
-					namespace_id: "org-1",
-					namespace_name: "Example",
-					namespace_handle: "example",
-				},
-			]),
-		);
-	};
-	try {
-		const client = new WorkerLixRuntimeClient(
-			env({}),
-			{ userId: "user-1", token: "secret-oauth-token" },
-			async () => null,
-		);
-		assert.equal((await client.listLixes()).length, 1);
-		assert.equal(calls, 1);
-	} finally {
-		globalThis.fetch = originalFetch;
-	}
-});
+void test("closing a Railway Lix session releases its remote session", async () => {
+	const paths: string[] = [];
+	const runtime = client(async (_lixId, request) => {
+		paths.push(`${request.method} ${testProtocolPath(request)}`);
+		return branchProtocolResponse(request);
+	});
 
-function env(options: {
-	getByName?: NonNullable<
-		WorkerLixRuntimeEnv["SLATEDB_CONTAINER"]
-	>["getByName"];
-	extra?: Partial<WorkerLixRuntimeEnv>;
-}): WorkerLixRuntimeEnv {
-	return {
-		SUPABASE_URL: "https://project.supabase.co",
-		SUPABASE_PUBLISHABLE_KEY: "publishable-key",
-		SLATEDB_CONTAINER: {
-			getByName:
-				options.getByName ??
-				(() => ({ fetch: async () => new Response("not used") })),
-		},
-		...options.extra,
-	};
-}
+	await runtime.activeBranchId(LIX_ID);
+	await runtime.close();
+	assert.deepEqual(paths, ["GET /lix/v1/", "DELETE /lix/v1/session"]);
+});

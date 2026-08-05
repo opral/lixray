@@ -1,51 +1,47 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import {
+	Client,
+	StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import { format } from "oxfmt";
-import { LixFileService } from "../src/mcp/file-service.ts";
-import { createLixrayMcpServer } from "../src/mcp/server.ts";
+import { LixService } from "../src/mcp/lix-service.ts";
+import { handleMcpTransport, MCP_PROTOCOL_VERSION } from "../src/mcp/server.ts";
 
 const unusedRuntimeClient = new Proxy(
 	{},
 	{
-		get: (target, property) => () => {
-			void target;
+		get: (_target, property) => () => {
 			throw new Error(
 				`tools/list unexpectedly invoked runtime method ${String(property)}`,
 			);
 		},
 	},
 );
-const server = createLixrayMcpServer(new LixFileService(unusedRuntimeClient));
-const client = new Client({
-	name: "lixray-mcp-tools-generator",
-	version: "1.0.0",
-});
-const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-const rawMessages = [];
-const send = serverTransport.send.bind(serverTransport);
-serverTransport.send = async (message, options) => {
-	rawMessages.push(structuredClone(message));
-	await send(message, options);
-};
+const service = new LixService(unusedRuntimeClient);
+const fetcher = (input, init) =>
+	handleMcpTransport(new Request(input, init), service, {
+		authMode: "none",
+		serverName: "LixRay_Tools",
+	});
+const transport = new StreamableHTTPClientTransport(
+	new URL("https://lixray.test/mcp"),
+	{ fetch: fetcher },
+);
+const client = new Client(
+	{ name: "lixray-mcp-tools-generator", version: "1.0.0" },
+	{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+);
 
 try {
-	await server.connect(serverTransport);
-	await client.connect(clientTransport);
-	await client.listTools();
-
-	const response = rawMessages.find(isToolsListResponse);
-	if (!response) {
-		throw new Error("MCP server did not return a tools/list response");
-	}
-
+	await client.connect(transport);
+	const response = await client.listTools();
 	const formatOptions = JSON.parse(
 		await readFile(new URL("../.oxfmtrc.json", import.meta.url), "utf8"),
 	);
 	delete formatOptions.$schema;
 	const formatted = await format(
 		"mcp-tools.json",
-		`${JSON.stringify(response.result.tools, null, "\t")}\n`,
+		`${JSON.stringify(response.tools, null, "\t")}\n`,
 		formatOptions,
 	);
 	if (formatted.errors.length > 0) {
@@ -59,15 +55,4 @@ try {
 	);
 } finally {
 	await client.close();
-	await server.close();
-}
-
-function isToolsListResponse(message) {
-	return (
-		"result" in message &&
-		message.result &&
-		typeof message.result === "object" &&
-		"tools" in message.result &&
-		Array.isArray(message.result.tools)
-	);
 }

@@ -1,6 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import app from "../dist/server/index.js";
+import app from "../dist/server/railway-server.js";
 import { createRailwayServer } from "./railway-server.mjs";
 import "./assert-railway-env.mjs";
 

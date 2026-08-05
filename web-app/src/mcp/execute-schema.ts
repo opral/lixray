@@ -58,16 +58,16 @@ WHERE table_schema = 'public'
   AND table_name = $1
 ORDER BY ordinal_position;`;
 
-export const EXECUTE_TOOL_DESCRIPTION = `Execute an ordered batch of caller-provided Lix SQL statements atomically against the lix's active Lix branch. To change branches, call switch_branch first. Each statement has its own parameters and produces one ordered result; if any statement fails, the complete batch rolls back. SQL can read or mutate any SQL-accessible branch data, so this tool is not read-only. Lix records mutations in history so users can review and revert them in LixRay. Lix SQL does not support DDL statements.
+export const EXECUTE_TOOL_DESCRIPTION = `Use the JavaScript Lix SDK SQL surface. execute runs one statement; execute_batch runs an ordered atomic batch against the branch selected by context. File and directory creation, reads, edits, deletes, and path changes are SQL operations. SQL can read or mutate any SQL-accessible branch data. Lix SQL does not support DDL statements.
 
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}
 
-Path rules: \`lix_file.path\` never ends in \`/\`; \`lix_directory.path\` always does. \`lix_file.directory_id\` references \`lix_directory.id\`; \`lix_directory.parent_id\` references \`lix_directory.id\`. Use those IDs for hierarchy queries.
+Path rules: \`lix_file.path\` and \`lix_directory.path\` are canonical absolute paths and neither ends in \`/\` (except the root path \`/\`). \`lix_file.directory_id\` references \`lix_directory.id\`; \`lix_directory.parent_id\` references \`lix_directory.id\`. Use those IDs for hierarchy queries.
 
 \`lix_file.content\` is binary. Pass binary values as \`{"kind":"blob","base64":"..."}\`. Never use \`CAST(... AS BLOB)\`; if a SQL cast is unavoidable, use \`BYTEA\`.
 
-To create or replace a file, pass one statement with SQL \`INSERT OR REPLACE INTO lix_file (path, content) VALUES ($1, $2)\`. Encode \`$1\` as \`{"kind":"text","value":"/example.md"}\` and the file bytes in \`$2\` with the blob parameter above. To verify a write, read that exact path with \`SELECT path, content FROM lix_file WHERE path = $1\` and the same text parameter.
+To create a file, use \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))\`; to read it, use \`SELECT CAST(content AS TEXT) FROM lix_file WHERE path = $1\`; to rename it, use \`UPDATE lix_file SET path = $2 WHERE path = $1\`. Create directories with \`INSERT INTO lix_directory (path) VALUES ($1)\`. Use \`execute_batch\` for a multi-step change.
 
 Use the core tables above, plus their \`_by_branch\` / \`_history\` companions, directly; do not inspect \`information_schema\` for them.
 

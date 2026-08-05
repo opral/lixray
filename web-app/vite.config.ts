@@ -1,4 +1,3 @@
-import { cloudflare } from "@cloudflare/vite-plugin";
 import posthogRollupPlugin from "@posthog/rollup-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
@@ -6,15 +5,29 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 const webAppDir = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(webAppDir, "..");
 const atelierSourceDir = path.resolve(repositoryRoot, "vendor/atelier/src");
 
-const workerTarget = process.env.LIXRAY_WORKER_TARGET ?? "production";
-const workerConfigPath =
-	workerTarget === "railway" ? "./wrangler.railway.jsonc" : "./wrangler.jsonc";
+function devHealthcheckPlugin(): Plugin {
+	return {
+		name: "lixray-dev-healthcheck",
+		configureServer(server) {
+			server.middlewares.use((request, response, next) => {
+				const pathname = request.url?.split("?", 1)[0];
+				if (request.method !== "GET" || pathname !== "/healthz") {
+					next();
+					return;
+				}
+				response.statusCode = 200;
+				response.setHeader("content-type", "application/json");
+				response.end(JSON.stringify({ status: "ok" }));
+			});
+		},
+	};
+}
 
 function requiredProductionSourceMapVariable(
 	name: "POSTHOG_API_KEY" | "POSTHOG_PROJECT_ID",
@@ -31,7 +44,6 @@ function requiredProductionSourceMapVariable(
 function posthogSourceMapPlugins(command: string) {
 	const uploadPostHogSourceMaps =
 		command === "build" &&
-		workerTarget === "railway" &&
 		process.env.RAILWAY_ENVIRONMENT_NAME?.trim() === "production";
 	if (!uploadPostHogSourceMaps) return [];
 
@@ -105,78 +117,13 @@ export default defineConfig(({ command }) => ({
 				: [],
 	},
 	plugins: [
-		cloudflare({
-			configPath: workerConfigPath,
-			viteEnvironment: { name: "ssr" },
-			config: (config) => {
-				const configuredPosthogProjectToken =
-					typeof config.vars?.POSTHOG_PROJECT_TOKEN === "string"
-						? config.vars.POSTHOG_PROJECT_TOKEN
-						: undefined;
-				const posthogProjectToken =
-					process.env.POSTHOG_PROJECT_TOKEN ??
-					process.env.VITE_PUBLIC_POSTHOG_TOKEN ??
-					configuredPosthogProjectToken;
-				const configuredPosthogHost =
-					typeof config.vars?.POSTHOG_HOST === "string"
-						? config.vars.POSTHOG_HOST
-						: undefined;
-				const posthogVars: Record<string, string> = {};
-				if (
-					command === "build" &&
-					workerTarget === "production" &&
-					posthogProjectToken?.trim()
-				) {
-					posthogVars.POSTHOG_PROJECT_TOKEN = posthogProjectToken.trim();
-					posthogVars.POSTHOG_HOST =
-						process.env.POSTHOG_HOST ??
-						process.env.VITE_PUBLIC_POSTHOG_HOST ??
-						configuredPosthogHost ??
-						"https://us.i.posthog.com";
-					posthogVars.POSTHOG_ENVIRONMENT = "production";
-				}
-				return {
-					vars: {
-						...config.vars,
-						LIXRAY_LIX_SERVICE_URL:
-							process.env.LIXRAY_LIX_SERVICE_URL ??
-							config.vars?.LIXRAY_LIX_SERVICE_URL,
-						LIXRAY_INTERNAL_TOKEN:
-							process.env.LIXRAY_INTERNAL_TOKEN ??
-							config.vars?.LIXRAY_INTERNAL_TOKEN,
-						R2_ENDPOINT: process.env.R2_ENDPOINT ?? config.vars?.R2_ENDPOINT,
-						R2_BUCKET: process.env.R2_BUCKET ?? config.vars?.R2_BUCKET,
-						R2_ACCESS_KEY_ID:
-							process.env.R2_ACCESS_KEY_ID ?? config.vars?.R2_ACCESS_KEY_ID,
-						R2_SECRET_ACCESS_KEY:
-							process.env.R2_SECRET_ACCESS_KEY ??
-							config.vars?.R2_SECRET_ACCESS_KEY,
-						R2_REGION: process.env.R2_REGION ?? config.vars?.R2_REGION,
-						S3_PREFIX: process.env.S3_PREFIX ?? config.vars?.S3_PREFIX,
-						S3_ALLOW_HTTP:
-							process.env.S3_ALLOW_HTTP ?? config.vars?.S3_ALLOW_HTTP,
-						SUPABASE_JWKS_URL:
-							process.env.SUPABASE_JWKS_URL ?? config.vars?.SUPABASE_JWKS_URL,
-						SUPABASE_JWT_ISSUER_URL:
-							process.env.SUPABASE_JWT_ISSUER_URL ??
-							config.vars?.SUPABASE_JWT_ISSUER_URL,
-						SUPABASE_PUBLISHABLE_KEY:
-							process.env.SUPABASE_PUBLISHABLE_KEY ??
-							config.vars?.SUPABASE_PUBLISHABLE_KEY,
-						SUPABASE_URL: process.env.SUPABASE_URL ?? config.vars?.SUPABASE_URL,
-						LIXRAY_DEMO:
-							process.env.LIXRAY_DEMO ?? config.vars?.LIXRAY_DEMO ?? "",
-						LIXRAY_DEMO_LIX_IDS:
-							process.env.LIXRAY_DEMO_LIX_IDS ??
-							config.vars?.LIXRAY_DEMO_LIX_IDS ??
-							"",
-						...posthogVars,
-					},
-				};
+		devHealthcheckPlugin(),
+		tailwindcss(),
+		tanstackStart({
+			server: {
+				entry: "railway-server.ts",
 			},
 		}),
-		tailwindcss(),
-		tanstackStart(),
 		react(),
 		...posthogSourceMapPlugins(command),
 	],

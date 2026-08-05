@@ -8,6 +8,6 @@ void test("the Railway entrypoint uses only the Node SQL parser", async () => {
 	const source = await readFile(railwayEntrypoint, "utf8");
 
 	assert.match(source, /from ["']\.\/lib\/node-lix-sql-parser["']/);
-	assert.doesNotMatch(source, /@lix-js\/sdk\/workerd/);
+	assert.doesNotMatch(source, /cloudflare|workerd|wrangler/i);
 	assert.doesNotMatch(source, /import\.meta\.env\.DEV/);
 });
