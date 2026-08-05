@@ -8,6 +8,7 @@ const revisionManifestPath = join(repositoryRoot, "vendor", "revisions.env");
 const lixManifestPath = join(repositoryRoot, "vendor", "lix", "Cargo.toml");
 const lixToolchainPath = join(repositoryRoot, "vendor", "lix", "rust-toolchain.toml");
 const serverLockfilePath = join(repositoryRoot, "lix-server", "Cargo.lock");
+const pnpmLockfilePath = join(repositoryRoot, "pnpm-lock.yaml");
 
 const lixLockPackages = [
   "lix_engine",
@@ -111,6 +112,16 @@ async function assertServerLockfile() {
   }
 }
 
+async function assertPnpmLockfile() {
+  await readFile(pnpmLockfilePath, "utf8");
+  run("pnpm", [
+    "install",
+    "--lockfile-only",
+    "--frozen-lockfile",
+    "--ignore-scripts",
+  ]);
+}
+
 async function syncCargoLock() {
   const toolchainSource = await readFile(lixToolchainPath, "utf8");
   const toolchain = /channel\s*=\s*"([^"]+)"/.exec(toolchainSource)?.[1];
@@ -128,6 +139,10 @@ async function syncCargoLock() {
   ]);
 }
 
+async function syncPnpmLockfile() {
+  run("pnpm", ["install", "--lockfile-only", "--ignore-scripts"]);
+}
+
 const checkOnly = process.argv.slice(2).includes("--check");
 const unknownArguments = process.argv.slice(2).filter((argument) => argument !== "--check");
 if (unknownArguments.length > 0) {
@@ -138,12 +153,15 @@ const revisions = await expectedRevisions();
 if (checkOnly) {
   await assertRevisionManifest(revisions);
   await assertServerLockfile();
-  console.log("Vendored revisions and lix-server/Cargo.lock are synchronized.");
+  await assertPnpmLockfile();
+  console.log("Vendored revisions, Cargo.lock, and pnpm-lock.yaml are synchronized.");
 } else {
   await syncCargoLock();
+  await syncPnpmLockfile();
   const source = await readFile(revisionManifestPath, "utf8");
   const rendered = renderRevisionManifest(source, revisions);
   if (source !== rendered) await writeFile(revisionManifestPath, rendered);
   await assertServerLockfile();
-  console.log("Synchronized vendored revisions and lix-server/Cargo.lock.");
+  await assertPnpmLockfile();
+  console.log("Synchronized vendored revisions, Cargo.lock, and pnpm-lock.yaml.");
 }
