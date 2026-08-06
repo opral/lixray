@@ -112,7 +112,7 @@ export function LandingPage() {
 						into a repository
 					</h1>
 					<p className="m-0 max-w-[680px] text-[21px] leading-[1.55] text-[#57534e] text-pretty">
-						Your code already lives in one. LixRay is the repository for
+						Your codebase already lives in one. LixRay is the repository for
 						everything else: GTM, operations, sales, finance. Built for every
 						file format and every person, not just engineers.
 					</p>
@@ -375,7 +375,7 @@ export function LandingPage() {
 								What goes in the company repo
 							</h2>
 							<p className="m-0 max-w-[560px] text-[17px] leading-[1.55] text-[#57534e] text-pretty">
-								Everything a 5–20 person startup runs on that isn&apos;t code.
+								Everything a 5–20 person startup runs on, outside the codebase.
 							</p>
 						</div>
 						<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -419,8 +419,8 @@ export function LandingPage() {
 						</div>
 						<div className="flex flex-col items-start gap-6 rounded-[14px] border border-[#1c1917]/6 bg-[#f7f3ed] px-7 py-6 lg:flex-row lg:items-center lg:gap-9">
 							<p className="m-0 max-w-[340px] text-base leading-[1.55] text-[#292524] text-pretty">
-								<b>Your code stays in GitHub.</b> LixRay is for the repos that
-								are not code.
+								<b>Your codebase stays in GitHub.</b> LixRay is for the repos
+								the company runs on.
 							</p>
 							<div className="flex flex-1 flex-wrap items-center justify-center gap-4 lg:flex-nowrap">
 								<div className="flex shrink-0 flex-col gap-[11px] rounded-xl border border-[#1c1917]/10 bg-white px-[18px] py-4">
@@ -439,7 +439,7 @@ export function LandingPage() {
 										<RepoChip variant="github">backend</RepoChip>
 									</span>
 									<span className="text-[11.5px] font-semibold text-[#8a8178]">
-										code
+										codebase
 									</span>
 								</div>
 								<span className="text-lg font-semibold text-[#c9c2b8]">+</span>
