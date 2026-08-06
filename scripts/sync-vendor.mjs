@@ -5,19 +5,20 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const revisionManifestPath = join(repositoryRoot, "vendor", "revisions.env");
-const lixManifestPath = join(repositoryRoot, "vendor", "lix", "Cargo.toml");
 const lixToolchainPath = join(repositoryRoot, "vendor", "lix", "rust-toolchain.toml");
 const serverLockfilePath = join(repositoryRoot, "lix-server", "Cargo.lock");
 const pnpmLockfilePath = join(repositoryRoot, "pnpm-lock.yaml");
 
 const lixLockPackages = [
-  "lix_engine",
-  "lix_plugin_arena",
-  "lix_plugin_layout",
-  "lix_plugin_wire",
-  "lix_sdk",
-  "lix_server_protocol",
-  "lix_slatedb_storage",
+  { name: "lix", manifest: "packages/lix/Cargo.toml" },
+  {
+    name: "lix-server-protocol",
+    manifest: "packages/server-protocol/Cargo.toml",
+  },
+  {
+    name: "lix-storage-slatedb",
+    manifest: "packages/slatedb-storage/Cargo.toml",
+  },
 ];
 
 export function parseRevisionManifest(source) {
@@ -52,8 +53,8 @@ export function parseCargoLockPackages(source) {
   return packages;
 }
 
-export function workspacePackageVersion(source) {
-  return /^\[workspace\.package\][\s\S]*?^version = "([^"]+)"/m.exec(source)?.[1];
+export function packageVersion(source) {
+  return /^\[package\][\s\S]*?^version = "([^"]+)"/m.exec(source)?.[1];
 }
 
 function run(command, args) {
@@ -89,21 +90,25 @@ async function assertRevisionManifest(revisions) {
 }
 
 async function assertServerLockfile() {
-  const [lockfile, lixManifest] = await Promise.all([
+  const [lockfile, ...lixPackageManifests] = await Promise.all([
     readFile(serverLockfilePath, "utf8"),
-    readFile(lixManifestPath, "utf8"),
+    ...lixLockPackages.map(({ manifest }) =>
+      readFile(join(repositoryRoot, "vendor", "lix", manifest), "utf8"),
+    ),
   ]);
-  const expectedVersion = workspacePackageVersion(lixManifest);
-  if (!expectedVersion) {
-    throw new Error("Could not read the vendored Lix workspace package version");
-  }
 
   const packages = parseCargoLockPackages(lockfile);
   const mismatches = lixLockPackages
-    .filter((name) => packages.get(name) !== expectedVersion)
-    .map(
-      (name) =>
-        `${name}: lockfile=${packages.get(name) ?? "missing"}, vendored-lix=${expectedVersion}`,
+    .map(({ name }, index) => ({
+      name,
+      expectedVersion: packageVersion(lixPackageManifests[index]),
+    }))
+    .flatMap(({ name, expectedVersion }) =>
+      expectedVersion && packages.get(name) === expectedVersion
+        ? []
+        : [
+            `${name}: lockfile=${packages.get(name) ?? "missing"}, vendored-lix=${expectedVersion ?? "missing"}`,
+          ],
     );
   if (mismatches.length > 0) {
     throw new Error(
