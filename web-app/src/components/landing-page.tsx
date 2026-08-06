@@ -371,32 +371,31 @@ export function LandingPage() {
 						<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
 							<RepoArea
 								path="skills/"
-								title="Skills"
 								body="The SKILL.md files and prompts your agents run on. Diff each revision; roll back the edit that broke behavior."
 							/>
 							<RepoArea
+								path="automations/"
+								body="The recurring jobs your agents run on a schedule: the Monday pipeline summary, the weekly KB check. Versioned and reviewable like everything else."
+							/>
+							<RepoArea
 								path="gtm/"
-								title="Go-to-market"
 								body="Launch plans, messaging, positioning docs, the pricing one-pager. Agents keep them consistent with each other."
 							/>
 							<RepoArea
 								path="sales/"
-								title="Sales"
 								body="The pipeline CSV, call notes, proposals. An agent updates the pipeline after every call. You review the diff."
 							/>
 							<RepoArea
 								path="ops/"
-								title="Operations"
 								body='Runbooks, vendor lists, onboarding checklists. The files that answer "how do we do this here."'
 							/>
 							<RepoArea
 								path="finance/"
-								title="Finance"
 								body="The budget, the model, board decks. Every version kept; every change attributed."
 							/>
 							<RepoArea
+								className="lg:col-start-2"
 								path="kb/"
-								title="Knowledge base"
 								body="Policies, FAQs, product facts. The answers your team and agents rely on, kept current and trustworthy."
 							/>
 						</div>
@@ -1214,19 +1213,26 @@ function LockIcon() {
 
 function RepoArea({
 	path,
-	title,
 	body,
+	className,
 }: {
 	path: string;
-	title: string;
 	body: string;
+	className?: string;
 }) {
 	return (
-		<div className="flex flex-col gap-2.5 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-6">
-			<span className="font-mono text-[13px] font-semibold text-[#c2410c]">
-				{path}
-			</span>
-			<h3 className="m-0 text-[17px] font-bold">{title}</h3>
+		<div
+			className={cn(
+				"flex flex-col gap-2.5 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-6",
+				className,
+			)}
+		>
+			<h3 className="m-0 inline-flex items-center gap-2.5">
+				<img className="size-[19px]" src="/landing/icon-folder.svg" alt="" />
+				<span className="font-mono text-[15px] font-bold text-[#1c1917]">
+					{path}
+				</span>
+			</h3>
 			<p className="m-0 text-sm leading-[1.6] text-[#57534e]">{body}</p>
 		</div>
 	);
