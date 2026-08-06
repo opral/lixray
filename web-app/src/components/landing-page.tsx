@@ -457,7 +457,7 @@ export function LandingPage() {
 									<span className="inline-flex flex-wrap items-center gap-1.5">
 										<RepoChip>gtm</RepoChip>
 										<RepoChip>sales</RepoChip>
-										<RepoChip>ops</RepoChip>
+										<RepoChip>operations</RepoChip>
 										<RepoChip>finance</RepoChip>
 										<RepoChip>skills</RepoChip>
 									</span>
@@ -581,7 +581,7 @@ function HeroVisual() {
 								<span className="text-[12.5px] leading-[1.45] text-[#1f1f1f]">
 									Done. Proposed an edit to{" "}
 									<span className="rounded bg-[#f7f3ed] px-1 font-mono text-[11.5px]">
-										ops/runbook.md
+										operations/runbook.md
 									</span>
 								</span>
 							</span>
@@ -634,7 +634,7 @@ function HeroVisual() {
 					pipeline.csv
 				</TreeFile>
 				<TreeFile icon="/landing/icon-sq-md.svg">call-notes.md</TreeFile>
-				<TreeFolder>ops</TreeFolder>
+				<TreeFolder>operations</TreeFolder>
 				<TreeFile
 					icon="/landing/icon-sq-md.svg"
 					highlighted
@@ -1142,7 +1142,7 @@ function InsightsVisual() {
 			/>
 			<InsightRow
 				icon="/landing/icon-sq-md.svg"
-				name="ops/runbook.md"
+				name="operations/runbook.md"
 				percent={26}
 				count="56"
 			/>
