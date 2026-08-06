@@ -176,8 +176,8 @@ export function LandingPage() {
 						</h2>
 						<p className="m-0 max-w-[640px] text-[17px] leading-[1.6] text-[#57534e] text-pretty">
 							Putting work in a repository is why engineering has one source of
-							truth, real review, and agents that actually ship. Teams try to
-							extend it: markdown in the repo, a{" "}
+							truth, review before changes land, and agents you can safely let
+							write. Teams try to extend it: markdown in the repo, a{" "}
 							<span className="rounded-[5px] bg-[#f7f3ed] px-1.5 py-px font-mono text-[15px]">
 								docs/
 							</span>{" "}
@@ -206,9 +206,10 @@ export function LandingPage() {
 									Git is designed for source code
 								</h3>
 								<p className="m-0 text-[15.5px] leading-[1.6] text-[#57534e] text-pretty">
-									Text diffs cleanly. Everything else is an opaque blob: PDFs,
-									spreadsheets, decks, images. Stored, but nothing to review or
-									compare. LFS is a workaround, not an answer.
+									Git stores any file, but only text is first-class. History for
+									PDFs, spreadsheets, decks, and images means wiring up custom
+									diff and merge drivers — nothing works out of the box. LFS is
+									a workaround, not an answer.
 								</p>
 							</div>
 							<div className="flex flex-col gap-3 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-7">
@@ -229,20 +230,20 @@ export function LandingPage() {
 								<p className="m-0 text-[15.5px] leading-[1.6] text-[#57534e] text-pretty">
 									Clone, branch, stage, resolve conflicts. Your GTM lead is not
 									going to do that and should not have to. The moment
-									non-engineers can&apos;t participate, the repo stops being the
-									source of truth.
+									non-developers can&apos;t participate, the repo stops being
+									the source of truth.
 								</p>
 							</div>
 						</div>
 						<div className="mt-6 flex flex-col items-start gap-8 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] px-8 py-7 lg:flex-row lg:items-center lg:gap-12">
 							<div className="flex max-w-[340px] shrink-0 flex-col gap-3">
 								<h3 className="m-0 text-xl font-bold tracking-[-.01em]">
-									Git optimizes for async engineering workflows
+									Git&apos;s workflow is built for async engineering
 								</h3>
 								<p className="m-0 text-[15.5px] leading-[1.6] text-[#57534e] text-pretty">
-									In Git every change takes a detour: branch off, open a pull
-									request, wait, merge back. Non-devs just need to make a change
-									and move on.
+									The standard flow takes a detour: branch off, open a pull
+									request, wait for review and CI, merge back. Non-developers
+									just need to make a change and move on.
 								</p>
 							</div>
 							<div className="flex w-full flex-1 flex-col gap-1.5">
@@ -328,13 +329,13 @@ export function LandingPage() {
 						<Band
 							label="Beyond text files"
 							title="Every file format is first-class"
-							body="One history for the 2GB launch video, the board PDF, the pipeline CSV, and the launch plan. Prose diffs as prose, spreadsheets diff row by row, large assets keep every version. No size limits, no LFS setup."
+							body="One history for the 2.1 GB launch video, the board PDF, the pipeline CSV, and the launch plan. Prose diffs as prose, spreadsheets diff row by row, large assets keep every version. No size limits, no LFS setup."
 							visual={<FileFormatsVisual />}
 						/>
 						<Band
 							reverse
 							label="Suggestions instead of pull requests"
-							title="Understandable by non-devs"
+							title="Understandable by non-developers"
 							body="Suggest a change, the owner accepts or rejects it. Checkpoints instead of commits. No branching to learn."
 							visual={<ProposalsVisual />}
 						/>
@@ -349,7 +350,7 @@ export function LandingPage() {
 							soon
 							label="Access control"
 							title="Permissions"
-							body="Who can see, who can edit, who approves. Git access is all-or-nothing on the repo."
+							body="Who can see, who can edit, who approves. Git hosts control who can push, not who can see. There's no “finance can read this folder, sales can't.”"
 							visual={<PermissionsVisual />}
 						/>
 						<Band
@@ -469,7 +470,7 @@ export function LandingPage() {
 
 				<section className="flex flex-col items-center gap-[22px] border-t border-[#1c1917]/7 bg-white px-5 py-24 text-center sm:py-[120px]">
 					<h2 className="m-0 max-w-[720px] text-[clamp(2rem,4.5vw,2.625rem)] leading-[1.1] font-bold tracking-[-.03em] text-balance">
-						Put your company into a repo
+						Put your company into a repository
 					</h2>
 					<a className={cn(primaryButton, "mt-1")} href={workspaceTo}>
 						{heroCtaLabel}
