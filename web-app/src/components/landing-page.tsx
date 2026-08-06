@@ -1,13 +1,13 @@
 import {
 	ArrowRight,
 	BookOpen,
-	Coins,
+	DollarSign,
 	type LucideIcon,
 	Sparkles,
 	TrendingUp,
+	Workflow,
 	Wrench,
 	X,
-	Zap,
 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { SiteHeader, useWorkspaceCta } from "~/components/site-header";
@@ -386,7 +386,7 @@ export function LandingPage() {
 							/>
 							<RepoArea
 								path="automations/"
-								Icon={Zap}
+								Icon={Workflow}
 								body="The recurring jobs your agents run on a schedule: the Monday pipeline summary, the weekly KB check. Versioned and reviewable like everything else."
 							/>
 							<RepoArea
@@ -401,7 +401,7 @@ export function LandingPage() {
 							/>
 							<RepoArea
 								path="finance/"
-								Icon={Coins}
+								Icon={DollarSign}
 								body="The budget, the model, board decks. Every version kept; every change attributed."
 							/>
 							<RepoArea
@@ -1237,7 +1237,7 @@ function RepoArea({
 				<span className="relative inline-flex size-8 shrink-0">
 					<img className="size-full" src="/landing/icon-folder.svg" alt="" />
 					<Icon
-						className="absolute inset-x-0 top-[13px] mx-auto size-3.5 text-white"
+						className="absolute inset-x-0 top-[14px] mx-auto size-3 text-[#dbeafe]"
 						strokeWidth={2.4}
 						aria-hidden="true"
 					/>
