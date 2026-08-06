@@ -387,7 +387,7 @@ export function LandingPage() {
 							<RepoArea
 								path="automations/"
 								Icon={Workflow}
-								body="The recurring jobs your agents run on a schedule: the Monday pipeline summary, the weekly KB check. Versioned and reviewable like everything else."
+								body="The recurring jobs your agents run on a schedule: the Monday pipeline summary, the weekly knowledge-base check. Versioned and reviewable like everything else."
 							/>
 							<RepoArea
 								path="sales/"
@@ -395,7 +395,7 @@ export function LandingPage() {
 								body="The pipeline CSV, call notes, proposals. An agent updates the pipeline after every call. You review the diff."
 							/>
 							<RepoArea
-								path="ops/"
+								path="operations/"
 								Icon={Wrench}
 								body='Runbooks, vendor lists, onboarding checklists. The files that answer "how do we do this here."'
 							/>
@@ -405,7 +405,7 @@ export function LandingPage() {
 								body="The budget, the model, board decks. Every version kept; every change attributed."
 							/>
 							<RepoArea
-								path="kb/"
+								path="knowledge-base/"
 								Icon={BookOpen}
 								body="Policies, FAQs, product facts. The answers your team and agents rely on, kept current and trustworthy."
 							/>
@@ -1234,10 +1234,15 @@ function RepoArea({
 	return (
 		<div className="flex flex-col gap-3 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-6">
 			<h3 className="m-0 inline-flex items-center gap-2.5">
-				<span className="relative inline-flex size-8 shrink-0">
-					<img className="size-full" src="/landing/icon-folder.svg" alt="" />
+				<span className="relative inline-flex size-8 shrink-0 items-center justify-center">
+					<img
+						className="absolute inset-0 size-full"
+						src="/landing/icon-folder.svg"
+						alt=""
+					/>
+					{/* Nudged below box center onto the folder's front panel. */}
 					<Icon
-						className="absolute inset-x-0 top-[14px] mx-auto size-3 text-[#dbeafe]"
+						className="relative top-1 size-3 text-[#dbeafe]"
 						strokeWidth={2.4}
 						aria-hidden="true"
 					/>
