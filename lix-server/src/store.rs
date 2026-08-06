@@ -522,12 +522,11 @@ impl LixRuntimeManager {
         };
 
         let protocol_root = Arc::new(
-            lix_sdk::open_lix_with_telemetry(
-                lix_sdk::OpenLixOptions::new(storage),
-                Arc::new(lix_sdk::TracingTelemetrySink::new()),
-            )
-            .await
-            .context("open Lix lix session for the canonical server protocol")?,
+            lix_sdk::open_lix()
+                .with_storage(storage)
+                .with_telemetry(Arc::new(lix_sdk::telemetry::TracingTelemetrySink::new()))
+                .await
+                .context("open Lix lix session for the canonical server protocol")?,
         );
         let protocol = lix_server_protocol::LixProtocolServer::new(Arc::clone(&protocol_root));
         let protocol_router = protocol.router();

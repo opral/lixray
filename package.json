@@ -21,7 +21,7 @@
     "postinstall": "pnpm --dir web-app lix:build"
   },
   "devDependencies": {
-    "@lix-js/sdk-release": "https://registry.npmjs.org/@lix-js/sdk/-/sdk-0.8.4.tgz"
+    "@lix-js/sdk-release": "https://registry.npmjs.org/@lix-js/sdk/-/sdk-0.10.0.tgz"
   },
   "packageManager": "pnpm@10.13.1",
   "pnpm": {

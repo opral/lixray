@@ -61,9 +61,9 @@ checksum = "e9d4ee0d472d1cd2e28c97dfa124b3d8d992e10eb0a035f33f5d12e3a177ba3b"
 
 [[package]]
 name = "android_system_properties"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311"
+checksum = "ae221649c9976a6f6c56ae1facf410f3ddb33cc661c4b7b61020a912d4237fbc"
 dependencies = [
  "libc",
 ]
@@ -591,9 +591,9 @@ checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
 name = "blake3"
-version = "1.8.5"
+version = "1.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0aa83c34e62843d924f905e0f5c866eb1dd6545fc4d719e803d9ba6030371fce"
+checksum = "76ae7bad254120e9e4c63bafc385310756f90c484eac0e36b8317cf09cb92a77"
 dependencies = [
  "arrayref",
  "arrayvec",
@@ -3042,8 +3042,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
-name = "lix_engine"
-version = "0.10.0"
+name = "lix"
+version = "0.11.0"
 dependencies = [
  "ahash",
  "async-trait",
@@ -3058,12 +3058,11 @@ dependencies = [
  "globset",
  "jiff",
  "jsonschema",
- "lix_plugin_arena",
- "lix_plugin_layout",
- "lix_plugin_wire",
  "lru",
  "memchr",
  "musli",
+ "notify-debouncer-full",
+ "parking_lot",
  "ruzstd",
  "serde",
  "serde_json",
@@ -3072,6 +3071,8 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wasmtime",
+ "wasmtime-wasi",
  "web-time",
  "xxhash-rust",
  "zip",
@@ -3079,55 +3080,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "lix_plugin_arena"
-version = "0.10.0"
-dependencies = [
- "blake3",
- "parking_lot",
-]
-
-[[package]]
-name = "lix_plugin_layout"
-version = "0.10.0"
-dependencies = [
- "base64 0.22.1",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "lix_plugin_wire"
-version = "0.10.0"
-
-[[package]]
-name = "lix_sdk"
-version = "0.10.0"
-dependencies = [
- "async-trait",
- "blake3",
- "bytes",
- "lix_engine",
- "lix_plugin_layout",
- "lix_plugin_wire",
- "lru",
- "notify-debouncer-full",
- "serde_json",
- "tokio",
- "tracing",
- "uuid",
- "wasmtime",
- "wasmtime-wasi",
-]
-
-[[package]]
-name = "lix_server_protocol"
-version = "0.10.0"
+name = "lix-server-protocol"
+version = "0.1.0"
 dependencies = [
  "async-stream",
  "axum",
  "futures-core",
  "getrandom 0.3.4",
- "lix_sdk",
+ "lix",
  "serde",
  "serde_json",
  "sha2",
@@ -3137,14 +3097,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "lix_slatedb_storage"
-version = "0.10.0"
+name = "lix-storage-slatedb"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "blake3",
  "bytes",
  "futures-util",
- "lix_engine",
+ "lix",
  "object_store 0.14.1",
  "slatedb",
  "slatedb-common",
@@ -3166,9 +3126,9 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
- "lix_sdk",
- "lix_server_protocol",
- "lix_slatedb_storage",
+ "lix",
+ "lix-server-protocol",
+ "lix-storage-slatedb",
  "object_store 0.14.1",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -5838,9 +5798,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d46a5a140e6f7afeccd8eae97eff335163939eac8b929834875168b29b3d267"
+checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -6385,18 +6345,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.55"
+version = "0.8.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5a105cd7b140f6eeec8acff2ea38135d3cab283ada58540f629fe51e46696eb"
+checksum = "556764e583adb45a9f8d413c2a147fa7e8d821e48e12b14fd560b607998b75eb"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.55"
+version = "0.8.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fe976fb70c78cd64cccfe3a6fc142244e8a77b70959b30faf9d0ac37ee228eb"
+checksum = "f2ab42fc20575779bd240faa45f94a74256f755c0fa9e89f0ede20d91d0cdfc1"
 dependencies = [
  "proc-macro2",
  "quote",

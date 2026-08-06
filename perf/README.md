@@ -124,7 +124,7 @@ Supported operation families are:
 - `delete-1k`: delete a unique existing 1 KiB text file
 
 The three exact point-read operations accept `--file-read-transport json|binary`
-and default to `json`. The JSON control sends the exact `SELECT path, data`
+and default to `json`. The JSON control sends the exact `SELECT path, content`
 query and times JSON parsing plus Base64-to-`Buffer` decoding. The binary arm
 sends `GET /lix/v1/file?path=…` and times raw response-body materialization.
 Both arms return and assert the same usable bytes; semantic envelope and row

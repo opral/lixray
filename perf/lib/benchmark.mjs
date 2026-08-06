@@ -755,7 +755,7 @@ function prepareOperation(
       },
       execute: (protocol, index) =>
         protocol.execute(
-          `SELECT path, data, lixcol_depth, lixcol_observed_commit_id
+          `SELECT path, content, lixcol_depth, lixcol_observed_commit_id
              FROM lix_file_history
             WHERE id = $1
             ORDER BY lixcol_depth`,
