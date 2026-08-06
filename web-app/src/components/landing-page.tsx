@@ -2,7 +2,7 @@ import {
 	ArrowRight,
 	BookOpen,
 	Coins,
-	Megaphone,
+	type LucideIcon,
 	Sparkles,
 	TrendingUp,
 	Wrench,
@@ -381,44 +381,32 @@ export function LandingPage() {
 						<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
 							<RepoArea
 								path="skills/"
-								icon={<Sparkles className="size-4" aria-hidden="true" />}
-								badgeClass="bg-[#fdf1e7] text-[#c2410c]"
+								Icon={Sparkles}
 								body="The SKILL.md files and prompts your agents run on. Diff each revision; roll back the edit that broke behavior."
 							/>
 							<RepoArea
 								path="automations/"
-								icon={<Zap className="size-4" aria-hidden="true" />}
-								badgeClass="bg-[#fef3c7] text-[#b45309]"
+								Icon={Zap}
 								body="The recurring jobs your agents run on a schedule: the Monday pipeline summary, the weekly KB check. Versioned and reviewable like everything else."
 							/>
 							<RepoArea
-								path="gtm/"
-								icon={<Megaphone className="size-4" aria-hidden="true" />}
-								badgeClass="bg-[#dbeafe] text-[#1d4ed8]"
-								body="Launch plans, messaging, positioning docs, the pricing one-pager. Agents keep them consistent with each other."
-							/>
-							<RepoArea
 								path="sales/"
-								icon={<TrendingUp className="size-4" aria-hidden="true" />}
-								badgeClass="bg-[#dcfce7] text-[#15803d]"
+								Icon={TrendingUp}
 								body="The pipeline CSV, call notes, proposals. An agent updates the pipeline after every call. You review the diff."
 							/>
 							<RepoArea
 								path="ops/"
-								icon={<Wrench className="size-4" aria-hidden="true" />}
-								badgeClass="bg-[#e2e8f0] text-[#475569]"
+								Icon={Wrench}
 								body='Runbooks, vendor lists, onboarding checklists. The files that answer "how do we do this here."'
 							/>
 							<RepoArea
 								path="finance/"
-								icon={<Coins className="size-4" aria-hidden="true" />}
-								badgeClass="bg-[#cffafe] text-[#0e7490]"
+								Icon={Coins}
 								body="The budget, the model, board decks. Every version kept; every change attributed."
 							/>
 							<RepoArea
 								path="kb/"
-								icon={<BookOpen className="size-4" aria-hidden="true" />}
-								badgeClass="bg-[#ede9fe] text-[#6d28d9]"
+								Icon={BookOpen}
 								body="Policies, FAQs, product facts. The answers your team and agents rely on, kept current and trustworthy."
 							/>
 						</div>
@@ -1237,24 +1225,22 @@ function LockIcon() {
 function RepoArea({
 	path,
 	body,
-	icon,
-	badgeClass,
+	Icon,
 }: {
 	path: string;
 	body: string;
-	icon: ReactNode;
-	badgeClass: string;
+	Icon: LucideIcon;
 }) {
 	return (
 		<div className="flex flex-col gap-3 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-6">
 			<h3 className="m-0 inline-flex items-center gap-2.5">
-				<span
-					className={cn(
-						"inline-flex size-7 shrink-0 items-center justify-center rounded-lg",
-						badgeClass,
-					)}
-				>
-					{icon}
+				<span className="relative inline-flex size-8 shrink-0">
+					<img className="size-full" src="/landing/icon-folder.svg" alt="" />
+					<Icon
+						className="absolute inset-x-0 top-[13px] mx-auto size-3.5 text-white"
+						strokeWidth={2.4}
+						aria-hidden="true"
+					/>
 				</span>
 				<span className="font-mono text-[15px] font-bold text-[#1c1917]">
 					{path}
