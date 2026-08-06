@@ -113,8 +113,8 @@ export function LandingPage() {
 					</h1>
 					<p className="m-0 max-w-[680px] text-[21px] leading-[1.55] text-[#57534e] text-pretty">
 						Your code already lives in one. LixRay is the repository for
-						everything else: GTM, ops, sales, finance. Built for every file
-						format and every person, not just engineers.
+						everything else: GTM, operations, sales, finance. Built for every
+						file format and every person, not just engineers.
 					</p>
 					<div className="mt-3 flex flex-wrap items-center justify-center gap-3">
 						<a className={primaryButton} href={workspaceTo}>
