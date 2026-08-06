@@ -12,6 +12,7 @@
     "perf:run": "node perf/runner.mjs",
     "perf:movie:remote": "node perf/movie/remote-qualification.mjs",
     "perf:test": "node --test perf/test/*.test.mjs",
+    "test:dev": "node --test scripts/supabase-readiness.test.mjs",
     "ci": "node scripts/ci.mjs",
     "test:ci-scripts": "node --test .github/scripts/*.test.mjs",
     "vendor:sync": "node scripts/sync-vendor.mjs",

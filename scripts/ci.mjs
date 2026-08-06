@@ -19,6 +19,7 @@ function run(label, args, extraEnv = {}) {
 
 run("Check vendored dependencies", ["vendor:check"]);
 run("Prepare generated dependencies", ["--dir", "web-app", "ci:prepare"]);
+run("Test development environment", ["test:dev"]);
 run("Test performance harness", ["perf:test"]);
 run("Test CI scripts", ["test:ci-scripts"]);
 run("Test production canary", ["test:production-canary"]);

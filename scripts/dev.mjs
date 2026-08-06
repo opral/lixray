@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { dirname } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { waitForSupabaseAuthDatabase } from "./supabase-readiness.mjs";
 
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -129,6 +130,15 @@ const stack = spawnSync("docker", stackArguments, {
 });
 if (stack.error) throw stack.error;
 if (stack.status !== 0) process.exit(stack.status ?? 1);
+
+// Building the Lix service can take several minutes and consume substantial
+// Docker storage. Recheck the database-backed Auth API after the build so a
+// crashed Postgres container cannot leave Vite advertising a broken MCP OAuth
+// endpoint as ready.
+await waitForSupabaseAuthDatabase({
+	secretKey: supabaseSecretKey,
+	supabaseUrl,
+});
 
 webApp = spawn(
 	pnpm,
