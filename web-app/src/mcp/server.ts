@@ -110,7 +110,6 @@ const wireValue = z.union([
 const executeOptions = z
 	.object({
 		origin_key: z.string().optional(),
-		idempotency_key: z.string().optional(),
 	})
 	.strict();
 const sqlStatement = z
@@ -866,13 +865,10 @@ function toExecuteRequest(args: Record<string, any>): ExecuteRequest {
 
 function toExecuteOptions(
 	options: Record<string, string> | undefined,
-): { originKey?: string; idempotencyKey?: string } | undefined {
+): { originKey?: string } | undefined {
 	if (!options) return undefined;
 	return {
 		...(options.origin_key ? { originKey: options.origin_key } : {}),
-		...(options.idempotency_key
-			? { idempotencyKey: options.idempotency_key }
-			: {}),
 	};
 }
 
