@@ -333,9 +333,6 @@
 					"properties": {
 						"origin_key": {
 							"type": "string"
-						},
-						"idempotency_key": {
-							"type": "string"
 						}
 					},
 					"additionalProperties": false
@@ -677,9 +674,6 @@
 					"type": "object",
 					"properties": {
 						"origin_key": {
-							"type": "string"
-						},
-						"idempotency_key": {
 							"type": "string"
 						}
 					},

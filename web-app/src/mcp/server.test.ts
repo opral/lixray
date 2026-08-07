@@ -214,6 +214,20 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				"merge_branch",
 			],
 		);
+		const executeTool = tools.tools.find((tool) => tool.name === "execute");
+		const executeBatchTool = tools.tools.find(
+			(tool) => tool.name === "execute_batch",
+		);
+		assert.ok(executeTool);
+		assert.ok(executeBatchTool);
+		assert.doesNotMatch(
+			JSON.stringify(executeTool.inputSchema),
+			/idempotency/i,
+		);
+		assert.doesNotMatch(
+			JSON.stringify(executeBatchTool.inputSchema),
+			/idempotency/i,
+		);
 		assert.ok(!tools.tools.some((tool) => tool.name.includes("file")));
 		const opened = await client.callTool({
 			name: "open_lix",

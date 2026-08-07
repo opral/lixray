@@ -248,7 +248,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 								sql: string;
 								params?: ReadonlyArray<SqlParam>;
 							}>,
-							options?: { originKey?: string; idempotencyKey?: string },
+							options?: { originKey?: string },
 						) => Promise<ReadonlyArray<LixExecuteResult>>;
 					}
 				).executeBatch(

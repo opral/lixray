@@ -18,7 +18,6 @@ export type WireValue =
 
 export interface ExecuteOptions {
 	originKey?: string;
-	idempotencyKey?: string;
 }
 
 export interface ExecuteRequest {
