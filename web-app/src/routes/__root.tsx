@@ -13,7 +13,7 @@ import appCss from "../styles.css?url";
 
 const title = "LixRay — Put your company into a repository";
 const description =
-	"Your code already lives in one. LixRay is the repository for everything else: GTM, ops, sales, finance. Built for every file format and every person, not just engineers.";
+	"Your codebase already lives in one. LixRay is the repository for everything else: GTM, operations, sales, finance. Built for every file format and every person, not just engineers.";
 
 export const Route = createRootRoute({
 	head: () => ({

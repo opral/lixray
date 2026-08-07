@@ -1,4 +1,14 @@
-import { ArrowRight, X } from "lucide-react";
+import {
+	ArrowRight,
+	BookOpen,
+	DollarSign,
+	type LucideIcon,
+	Sparkles,
+	TrendingUp,
+	Workflow,
+	Wrench,
+	X,
+} from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { SiteHeader, useWorkspaceCta } from "~/components/site-header";
 import { cn } from "~/lib/utils";
@@ -56,7 +66,7 @@ export function LandingPage() {
 	};
 
 	return (
-		<div className="min-h-screen bg-[#fbf6f0] font-sans text-[#1c1917] antialiased">
+		<div className="min-h-screen bg-white font-sans text-[#1c1917] antialiased">
 			<SiteHeader>
 				{user &&
 				autoOpenLoaded &&
@@ -102,9 +112,9 @@ export function LandingPage() {
 						into a repository
 					</h1>
 					<p className="m-0 max-w-[680px] text-[21px] leading-[1.55] text-[#57534e] text-pretty">
-						Your code already lives in one. LixRay is the repository for
-						everything else: GTM, ops, sales, finance. Built for every file
-						format and every person, not just engineers.
+						Your codebase already lives in one. LixRay is the repository for
+						everything else: GTM, operations, sales, finance. Built for every
+						file format and every person, not just engineers.
 					</p>
 					<div className="mt-3 flex flex-wrap items-center justify-center gap-3">
 						<a className={primaryButton} href={workspaceTo}>
@@ -166,12 +176,12 @@ export function LandingPage() {
 						</h2>
 						<p className="m-0 max-w-[640px] text-[17px] leading-[1.6] text-[#57534e] text-pretty">
 							Putting work in a repository is why engineering has one source of
-							truth, real review, and agents that actually ship. Teams try to
-							extend it: markdown in the repo, a{" "}
+							truth, review before changes land, and agents you can safely let
+							write. Teams try to extend it: markdown in the repo, a{" "}
 							<span className="rounded-[5px] bg-[#f7f3ed] px-1.5 py-px font-mono text-[15px]">
 								docs/
 							</span>{" "}
-							folder, LFS for the big files. They hit the same two walls.
+							folder, LFS for the big files. They hit the same three walls.
 						</p>
 						<div className="mt-[26px] grid gap-6 sm:grid-cols-2">
 							<div className="flex flex-col gap-3 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-7">
@@ -196,9 +206,10 @@ export function LandingPage() {
 									Git is designed for source code
 								</h3>
 								<p className="m-0 text-[15.5px] leading-[1.6] text-[#57534e] text-pretty">
-									Text diffs cleanly. Everything else is an opaque blob: PDFs,
-									spreadsheets, decks, images. Stored, but nothing to review or
-									compare. LFS is a workaround, not an answer.
+									Git stores any file, but only text is first-class. History for
+									PDFs, spreadsheets, decks, and images means wiring up custom
+									diff and merge drivers — nothing works out of the box. LFS is
+									a workaround, not an answer.
 								</p>
 							</div>
 							<div className="flex flex-col gap-3 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-7">
@@ -214,20 +225,200 @@ export function LandingPage() {
 									</span>
 								</span>
 								<h3 className="m-0 mt-1.5 text-xl font-bold tracking-[-.01em]">
-									Git is designed for engineers
+									Git is too complicated for non-developers
 								</h3>
 								<p className="m-0 text-[15.5px] leading-[1.6] text-[#57534e] text-pretty">
 									Clone, branch, stage, resolve conflicts. Your GTM lead is not
 									going to do that and should not have to. The moment
-									non-engineers can&apos;t participate, the repo stops being the
-									source of truth.
+									non-developers can&apos;t participate, the repo stops being
+									the source of truth.
 								</p>
 							</div>
 						</div>
-						<div className="mt-[26px] flex flex-col items-start gap-6 rounded-[14px] border border-[#1c1917]/6 bg-[#f7f3ed] px-7 py-6 lg:flex-row lg:items-center lg:gap-9">
+						<div className="mt-6 flex flex-col items-start gap-8 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] px-8 py-7 lg:flex-row lg:items-center lg:gap-12">
+							<div className="flex max-w-[340px] shrink-0 flex-col gap-3">
+								<h3 className="m-0 text-xl font-bold tracking-[-.01em]">
+									Git&apos;s workflow is built for async engineering
+								</h3>
+								<p className="m-0 text-[15.5px] leading-[1.6] text-[#57534e] text-pretty">
+									The standard flow takes a detour: branch off, open a pull
+									request, wait for review and CI, merge back. Non-developers
+									just need to make a change and move on.
+								</p>
+							</div>
+							<div className="flex w-full flex-1 flex-col gap-1.5">
+								<div className="flex items-center gap-3.5">
+									<span className="w-[110px] shrink-0 text-[11px] leading-[1.5] font-bold tracking-[.06em] text-[#8a8178] uppercase">
+										Git
+									</span>
+									<div className="relative h-[88px] flex-1">
+										<svg
+											className="absolute inset-0"
+											width="100%"
+											height="88"
+											viewBox="0 0 400 88"
+											preserveAspectRatio="none"
+											aria-hidden="true"
+										>
+											<path d="M0 62 H400" stroke="#E3DACC" strokeWidth="1.5" />
+											<path
+												d="M56 62 C 76 62, 76 26, 100 26 H 302 C 326 26, 326 62, 346 62"
+												stroke="#D9CFC0"
+												strokeWidth="1.5"
+												strokeDasharray="4 4"
+												fill="none"
+											/>
+											<circle cx="56" cy="62" r="4" fill="#1C1917" />
+											<circle cx="346" cy="62" r="4" fill="#C2410C" />
+										</svg>
+										<span className="absolute bottom-0.5 left-[3%] inline-flex items-center rounded-[5px] bg-[#efe9e1] px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-[#57534e]">
+											create branch
+										</span>
+										<span className="absolute top-1.5 left-[30%] inline-flex items-center rounded-[5px] bg-[#efe9e1] px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-[#57534e]">
+											open PR
+										</span>
+										<span className="absolute top-1.5 left-[58%] inline-flex items-center rounded-[5px] bg-[#efe9e1] px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-[#57534e]">
+											wait for CI
+										</span>
+										<span className="absolute right-0 bottom-0.5 inline-flex items-center rounded-[5px] bg-[#1c1917] px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-[#fbf6f0]">
+											merged · next day
+										</span>
+									</div>
+								</div>
+								<div className="flex items-start gap-3.5">
+									<span className="w-[110px] shrink-0 text-[11px] leading-[1.5] font-bold tracking-[.06em] text-[#c2410c] uppercase">
+										Non-devs want
+									</span>
+									<div className="relative h-12 flex-1">
+										<span className="absolute top-[18px] right-0 left-0 h-[1.5px] bg-[#e3dacc]" />
+										<span className="absolute top-[18px] left-[10%] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#c2410c]" />
+										<span className="absolute top-[18px] left-[40%] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#c2410c]" />
+										<span className="absolute top-[18px] left-[68%] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#c2410c]" />
+										<span className="absolute top-[30px] left-[10%] -translate-x-1/2 font-mono text-[10px] whitespace-nowrap text-[#9a6b4f]">
+											edit plan
+										</span>
+										<span className="absolute top-[30px] left-[40%] -translate-x-1/2 font-mono text-[10px] whitespace-nowrap text-[#9a6b4f]">
+											update csv
+										</span>
+										<span className="absolute top-[30px] left-[68%] -translate-x-1/2 font-mono text-[10px] whitespace-nowrap text-[#9a6b4f]">
+											fix pricing
+										</span>
+										<span className="absolute top-[18px] right-0 inline-flex -translate-y-1/2 items-center rounded-[5px] border border-[#f3d8be] bg-[#fbefe4] px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-[#9a6b4f]">
+											done
+										</span>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</section>
+
+				<section
+					className="border-t border-[#1c1917]/7 bg-[#fbf6f0]"
+					aria-labelledby="offers-title"
+				>
+					<div className="mx-auto flex max-w-[1040px] flex-col gap-24 px-5 py-24 sm:px-14 sm:py-[120px] lg:gap-[120px]">
+						<div className="-mb-14 flex flex-col items-center text-center lg:-mb-[70px]">
+							<h2
+								className="m-0 text-[clamp(2rem,4.5vw,2.375rem)] leading-[1.12] font-bold tracking-[-.03em]"
+								id="offers-title"
+							>
+								What LixRay offers
+							</h2>
+						</div>
+						<Band
+							label="Beyond text files"
+							title="Every file format is first-class"
+							body="One history for the 2.1 GB launch video, the board PDF, the pipeline CSV, and the launch plan. Prose diffs as prose, spreadsheets diff row by row, large assets keep every version. No size limits, no LFS setup."
+							visual={<FileFormatsVisual />}
+						/>
+						<Band
+							reverse
+							label="Suggestions instead of pull requests"
+							title="Understandable by non-developers"
+							body="Suggest a change, the owner accepts or rejects it. Checkpoints instead of commits. No branching to learn."
+							visual={<ProposalsVisual />}
+						/>
+						<Band
+							label="Branching optional"
+							title="Real-time support"
+							body="Non-developers want a simple mental model: make a change, it lands in one linear history. Branching and async review are supported for workflows that need them."
+							visual={<ActivityVisual />}
+						/>
+						<Band
+							reverse
+							soon
+							label="Access control"
+							title="Permissions"
+							body="Who can see, who can edit, who approves. Git hosts control who can push, not who can see. There's no “finance can read this folder, sales can't.”"
+							visual={<PermissionsVisual />}
+						/>
+						<Band
+							soon
+							label="Visibility"
+							title="Insights"
+							body="See which files and skills your agents actually read and use. Know what context matters and what is dead weight."
+							visual={<InsightsVisual />}
+						/>
+					</div>
+				</section>
+
+				<section
+					className="border-t border-[#1c1917]/7 bg-white"
+					aria-labelledby="what-goes-in-title"
+				>
+					<div className="mx-auto flex max-w-[1040px] flex-col gap-14 px-5 py-24 sm:px-14 sm:py-[110px]">
+						<div className="flex flex-col items-center gap-3.5 text-center">
+							<h2
+								className="m-0 text-[clamp(2rem,4.5vw,2.375rem)] leading-[1.12] font-bold tracking-[-.03em]"
+								id="what-goes-in-title"
+							>
+								What goes in the company repo
+							</h2>
+						</div>
+						<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+							<RepoArea
+								path="skills/"
+								Icon={Sparkles}
+								body="The SKILL.md files and prompts your agents run on. Diff each revision; roll back the edit that broke behavior."
+							/>
+							<RepoArea
+								path="automations/"
+								Icon={Workflow}
+								body="The recurring jobs your agents run on a schedule: the Monday pipeline summary, the weekly knowledge-base check. Versioned and reviewable like everything else."
+							/>
+							<RepoArea
+								path="sales/"
+								Icon={TrendingUp}
+								body="The pipeline CSV, call notes, proposals. An agent updates the pipeline after every call. You review the diff."
+							/>
+							<RepoArea
+								path="operations/"
+								Icon={Wrench}
+								body='Runbooks, vendor lists, onboarding checklists. The files that answer "how do we do this here."'
+							/>
+							<RepoArea
+								path="finance/"
+								Icon={DollarSign}
+								body="The budget, the model, board decks. Every version kept; every change attributed."
+							/>
+							<RepoArea
+								path="knowledge-base/"
+								Icon={BookOpen}
+								body="Policies, FAQs, product facts. The answers your team and agents rely on, kept current and trustworthy."
+							/>
+						</div>
+						<div className="flex items-center gap-[18px]">
+							<span className="flex-1 border-t-[1.5px] border-dashed border-[#d9cfc0]" />
+							<span className="text-sm font-bold whitespace-nowrap text-[#8a8178]">
+								What does not go in
+							</span>
+							<span className="flex-1 border-t-[1.5px] border-dashed border-[#d9cfc0]" />
+						</div>
+						<div className="flex flex-col items-start gap-6 rounded-[14px] border border-[#1c1917]/6 bg-[#f7f3ed] px-7 py-6 lg:flex-row lg:items-center lg:gap-9">
 							<p className="m-0 max-w-[340px] text-base leading-[1.55] text-[#292524] text-pretty">
-								<b>Your code stays in GitHub.</b> LixRay is for the repos that
-								are not code.
+								<b>Your codebase stays in GitHub.</b> LixRay is for data outside
+								your codebase.
 							</p>
 							<div className="flex flex-1 flex-wrap items-center justify-center gap-4 lg:flex-nowrap">
 								<div className="flex shrink-0 flex-col gap-[11px] rounded-xl border border-[#1c1917]/10 bg-white px-[18px] py-4">
@@ -246,7 +437,7 @@ export function LandingPage() {
 										<RepoChip variant="github">backend</RepoChip>
 									</span>
 									<span className="text-[11.5px] font-semibold text-[#8a8178]">
-										code
+										codebase
 									</span>
 								</div>
 								<span className="text-lg font-semibold text-[#c9c2b8]">+</span>
@@ -264,7 +455,7 @@ export function LandingPage() {
 									<span className="inline-flex flex-wrap items-center gap-1.5">
 										<RepoChip>gtm</RepoChip>
 										<RepoChip>sales</RepoChip>
-										<RepoChip>ops</RepoChip>
+										<RepoChip>operations</RepoChip>
 										<RepoChip>finance</RepoChip>
 										<RepoChip>skills</RepoChip>
 									</span>
@@ -277,94 +468,9 @@ export function LandingPage() {
 					</div>
 				</section>
 
-				<section
-					className="border-t border-[#1c1917]/7"
-					aria-label="What LixRay does"
-				>
-					<div className="mx-auto flex max-w-[1040px] flex-col gap-24 px-5 py-24 sm:px-14 sm:py-[120px] lg:gap-[120px]">
-						<Band
-							label="Beyond text files"
-							title="Every file format is first-class"
-							body="One history for the launch plan, the pipeline CSV, the board PDF, and the 2GB launch video. Prose diffs as prose, spreadsheets diff row by row, large assets keep every version. No size limits, no LFS setup."
-							visual={<FileFormatsVisual />}
-						/>
-						<Band
-							reverse
-							label="Review without git"
-							title="Proposals instead of pull requests"
-							body="Anyone, or anyone's agent, can propose a change to a file. The owner sees exactly what changed and approves or declines. The rigor of a PR with no branches to manage."
-							visual={<ProposalsVisual />}
-						/>
-						<Band
-							label="Agent-native"
-							title="All your agents share the same context"
-							body="Connect Claude, ChatGPT, Gemini, or Codex over MCP. They all read and write the same repo. No pasting context into chats. What one agent changes, the next one knows."
-							visual={<AgentsVisual />}
-						/>
-						<Band
-							reverse
-							label="Company history"
-							title="Historical context to make better decisions in the future"
-							body="Decisions live in files, and files have history. The file says what you do. The history says what you tried and why you stopped. When someone asks why, months later, the answer is already there. For people and for agents."
-							visual={<HistoryVisual />}
-						/>
-					</div>
-				</section>
-
-				<section
-					className="border-t border-[#1c1917]/7 bg-white"
-					aria-labelledby="what-goes-in-title"
-				>
-					<div className="mx-auto flex max-w-[1040px] flex-col gap-14 px-5 py-24 sm:px-14 sm:py-[110px]">
-						<div className="flex flex-col items-center gap-3.5 text-center">
-							<h2
-								className="m-0 text-[clamp(2rem,4.5vw,2.375rem)] leading-[1.12] font-bold tracking-[-.03em]"
-								id="what-goes-in-title"
-							>
-								What goes in the company repo
-							</h2>
-							<p className="m-0 max-w-[560px] text-[17px] leading-[1.55] text-[#57534e] text-pretty">
-								Everything a 5–20 person startup runs on that isn&apos;t code.
-							</p>
-						</div>
-						<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-							<RepoArea
-								path="skills/"
-								title="Skills"
-								body="The SKILL.md files and prompts your agents run on. Diff each revision; roll back the edit that broke behavior."
-							/>
-							<RepoArea
-								path="gtm/"
-								title="Go-to-market"
-								body="Launch plans, messaging, positioning docs, the pricing one-pager. Agents keep them consistent with each other."
-							/>
-							<RepoArea
-								path="sales/"
-								title="Sales"
-								body="The pipeline CSV, call notes, proposals. An agent updates the pipeline after every call. You review the diff."
-							/>
-							<RepoArea
-								path="ops/"
-								title="Operations"
-								body='Runbooks, vendor lists, onboarding checklists. The files that answer "how do we do this here."'
-							/>
-							<RepoArea
-								path="finance/"
-								title="Finance"
-								body="The budget, the model, board decks. Every version kept; every change attributed."
-							/>
-							<RepoArea
-								path="kb/"
-								title="Knowledge base"
-								body="Policies, FAQs, product facts. The answers your team and agents rely on, kept current and trustworthy."
-							/>
-						</div>
-					</div>
-				</section>
-
 				<section className="flex flex-col items-center gap-[22px] border-t border-[#1c1917]/7 bg-white px-5 py-24 text-center sm:py-[120px]">
 					<h2 className="m-0 max-w-[720px] text-[clamp(2rem,4.5vw,2.625rem)] leading-[1.1] font-bold tracking-[-.03em] text-balance">
-						Give your company a repository.
+						Put your company into a repository
 					</h2>
 					<a className={cn(primaryButton, "mt-1")} href={workspaceTo}>
 						{heroCtaLabel}
@@ -473,7 +579,7 @@ function HeroVisual() {
 								<span className="text-[12.5px] leading-[1.45] text-[#1f1f1f]">
 									Done. Proposed an edit to{" "}
 									<span className="rounded bg-[#f7f3ed] px-1 font-mono text-[11.5px]">
-										ops/runbook.md
+										operations/runbook.md
 									</span>
 								</span>
 							</span>
@@ -526,7 +632,7 @@ function HeroVisual() {
 					pipeline.csv
 				</TreeFile>
 				<TreeFile icon="/landing/icon-sq-md.svg">call-notes.md</TreeFile>
-				<TreeFolder>ops</TreeFolder>
+				<TreeFolder>operations</TreeFolder>
 				<TreeFile
 					icon="/landing/icon-sq-md.svg"
 					highlighted
@@ -684,12 +790,14 @@ function Band({
 	body,
 	visual,
 	reverse = false,
+	soon = false,
 }: {
 	label: string;
 	title: string;
 	body: string;
 	visual: ReactNode;
 	reverse?: boolean;
+	soon?: boolean;
 }) {
 	return (
 		<article
@@ -702,9 +810,16 @@ function Band({
 				<span className="text-sm font-bold tracking-[.02em] text-[#c2410c]">
 					{label}
 				</span>
-				<h3 className="m-0 text-[30px] leading-[1.18] font-bold tracking-[-.02em]">
-					{title}
-				</h3>
+				<div className="flex items-center gap-3">
+					<h3 className="m-0 text-[30px] leading-[1.18] font-bold tracking-[-.02em]">
+						{title}
+					</h3>
+					{soon ? (
+						<span className="rounded-full border border-[#f3d8be] bg-[#fbefe4] px-2.5 py-[3px] text-[10.5px] font-bold tracking-[.06em] text-[#c2410c] uppercase">
+							Soon
+						</span>
+					) : null}
+				</div>
 				<p className="m-0 text-[16.5px] leading-[1.6] text-[#57534e] text-pretty">
 					{body}
 				</p>
@@ -718,9 +833,14 @@ function FileFormatsVisual() {
 	return (
 		<div className={cn(visualCard, "flex flex-col gap-1 p-4")}>
 			<FileRow
+				icon="/landing/icon-sq-mp4.svg"
+				name="launch-video.mp4"
+				highlighted
+				meta="2.1 GB · v3 · no LFS needed"
+			/>
+			<FileRow
 				icon="/landing/icon-sq-md.svg"
 				name="launch-plan.md"
-				highlighted
 				meta={
 					<>
 						34 edits ·{" "}
@@ -751,11 +871,6 @@ function FileFormatsVisual() {
 				icon="/landing/icon-sq-png.svg"
 				name="logo-lockup.png"
 				meta="compare versions side by side"
-			/>
-			<FileRow
-				icon="/landing/icon-sq-mp4.svg"
-				name="launch-video.mp4"
-				meta="2.1 GB · v3 · no LFS needed"
 			/>
 		</div>
 	);
@@ -816,17 +931,17 @@ function ProposalsVisual() {
 				</span>
 				<span className="flex gap-2">
 					<span className="rounded-lg bg-[linear-gradient(180deg,#F97316_0%,#E8590C_100%)] px-3.5 py-1.5 text-[12.5px] font-bold text-white">
-						Approve
+						Accept
 					</span>
 					<span className="rounded-lg border border-[#ebdcc7] bg-white px-3.5 py-1.5 text-[12.5px] font-semibold text-[#44403c]">
-						Decline
+						Reject
 					</span>
 				</span>
 			</div>
 			<div className="flex items-center gap-[9px] px-4 pt-0.5 pb-1 text-[12.5px] text-[#a8a29e]">
 				<CheckIcon size={13} />
 				<span>
-					<b className="text-[#57534e]">Pricing one-pager v3</b> approved by
+					<b className="text-[#57534e]">Pricing one-pager v3</b> accepted by
 					Mara · 2 hr ago
 				</span>
 			</div>
@@ -834,274 +949,308 @@ function ProposalsVisual() {
 	);
 }
 
-function AgentsVisual() {
+function ActivityVisual() {
 	return (
-		<div
-			className={cn(
-				visualCard,
-				"flex flex-col items-center justify-center gap-5 p-7 sm:flex-row sm:gap-0",
-			)}
-		>
-			<div className="flex shrink-0 flex-col gap-3">
-				<AgentPill
-					icon="/landing/claude-spark.svg"
-					name="Claude"
-					person="Mara"
-					highlighted
+		<div className={cn(visualCard, "flex flex-col px-5 py-4")}>
+			<div className="relative flex flex-col">
+				<span className="absolute top-4 bottom-4 left-[3.75px] w-[1.5px] bg-[#ede7dd]" />
+				<ActivityRow
+					iconSrc="/landing/claude-spark.svg"
+					iconClass="bg-[#fdf1e7]"
+					who="Mara's Claude"
+					verb="edited"
+					file="gtm/launch-plan.md"
+					time="just now"
+					live
 				/>
-				<AgentPill
-					icon="/landing/brand-openai.svg"
-					name="ChatGPT"
-					person="Jonas"
+				<ActivityRow
+					iconSrc="/landing/brand-openai.svg"
+					iconClass="bg-[#f1f0ee]"
+					who="Jonas's ChatGPT"
+					verb="updated"
+					file="sales/pipeline.csv"
+					time="2 min ago"
+					live
 				/>
-				<AgentPill
-					icon="/landing/brand-gemini.svg"
-					name="Gemini"
-					person="Priya"
+				<ActivityRow
+					iconSrc="/landing/codex-icon.svg"
+					iconClass="bg-[#1c1917]"
+					iconSize="size-2.5"
+					who="Codex"
+					verb="uploaded"
+					file="finance/board-deck.pdf"
+					time="14 min ago"
 				/>
-				<AgentPill icon="/landing/codex-icon.svg" name="Codex" person="CLI" />
-			</div>
-			<svg
-				className="hidden shrink-0 sm:block"
-				width="96"
-				height="212"
-				viewBox="0 0 96 212"
-				fill="none"
-				aria-hidden="true"
-			>
-				<path
-					d="M0 22 C 52 22, 44 106, 96 106"
-					stroke="#E3DACC"
-					strokeWidth="1.5"
+				<ActivityRow
+					iconSrc="/landing/claude-spark.svg"
+					iconClass="bg-[#fdf1e7]"
+					who="Mara's Claude"
+					verb="edited"
+					file="kb/refunds.md"
+					time="1 hr ago"
 				/>
-				<path
-					d="M0 78 C 52 78, 44 106, 96 106"
-					stroke="#E3DACC"
-					strokeWidth="1.5"
-				/>
-				<path
-					d="M0 134 C 52 134, 44 106, 96 106"
-					stroke="#E3DACC"
-					strokeWidth="1.5"
-				/>
-				<path
-					d="M0 190 C 52 190, 44 106, 96 106"
-					stroke="#E3DACC"
-					strokeWidth="1.5"
-				/>
-				<circle cx="96" cy="106" r="3" fill="#C2410C" />
-			</svg>
-			<div className="flex shrink-0 flex-col gap-2 rounded-[14px] border border-[#f3d8be] bg-[#fbefe4] px-5 py-[18px]">
-				<span className="inline-flex items-center gap-2">
-					<img className="size-[18px]" src="/landing/icon-folder.svg" alt="" />
-					<span className="font-mono text-[13px] font-bold text-[#1c1917]">
-						@acme/company
-					</span>
-				</span>
-				<span className="text-xs text-[#9a6b4f]">one repo · one history</span>
-				<span className="inline-flex items-center gap-1.5 font-mono text-[11.5px] text-[#8a8178]">
-					<span className="size-[7px] rounded-full bg-[#19a463]" />
-					MCP
-				</span>
 			</div>
 		</div>
 	);
 }
 
-function AgentPill({
-	icon,
-	name,
-	person,
-	highlighted = false,
+function ActivityRow({
+	iconSrc,
+	iconClass,
+	iconSize = "size-[11px]",
+	who,
+	verb,
+	file,
+	time,
+	live = false,
 }: {
-	icon: string;
+	iconSrc: string;
+	iconClass: string;
+	iconSize?: string;
+	who: string;
+	verb: string;
+	file: string;
+	time: string;
+	live?: boolean;
+}) {
+	return (
+		<div className="flex items-center gap-3.5 px-1 py-2.5">
+			<span className="relative z-[1] size-[9px] shrink-0 rounded-full bg-[#c2410c] shadow-[0_0_0_3px_#ffffff]" />
+			<span
+				className={cn(
+					"inline-flex size-5 shrink-0 items-center justify-center rounded-md",
+					iconClass,
+				)}
+			>
+				<img className={cn("object-contain", iconSize)} src={iconSrc} alt="" />
+			</span>
+			<span className="min-w-0 text-[13px] text-[#44403c]">
+				<b className="text-[#1c1917]">{who}</b> {verb}{" "}
+				<span className="rounded bg-[#f7f3ed] px-[5px] py-px font-mono text-xs">
+					{file}
+				</span>
+			</span>
+			<span className="ml-auto inline-flex items-center gap-1.5 text-xs whitespace-nowrap text-[#8a8178]">
+				{live ? (
+					<span className="size-[7px] rounded-full bg-[#19a463]" />
+				) : null}
+				{time}
+			</span>
+		</div>
+	);
+}
+
+function PermissionsVisual() {
+	return (
+		<div className={cn(visualCard, "flex flex-col gap-1 p-4")}>
+			<PermissionRow name="gtm">
+				<PermChip>Everyone · edit</PermChip>
+			</PermissionRow>
+			<PermissionRow name="sales">
+				<PermChip>Sales team · edit</PermChip>
+				<PermChip>Everyone · view</PermChip>
+			</PermissionRow>
+			<PermissionRow name="finance" highlighted>
+				<PermChip variant="locked">
+					<LockIcon />
+					Finance only
+				</PermChip>
+				<PermChip>Mara approves</PermChip>
+			</PermissionRow>
+			<PermissionRow name="skills">
+				<PermChip>Everyone · view</PermChip>
+				<PermChip>proposals only</PermChip>
+			</PermissionRow>
+		</div>
+	);
+}
+
+function PermissionRow({
+	name,
+	highlighted = false,
+	children,
+}: {
 	name: string;
-	person: string;
 	highlighted?: boolean;
+	children: ReactNode;
+}) {
+	return (
+		<div
+			className={cn(
+				"flex items-center gap-[11px] rounded-[9px] px-3 py-[11px]",
+				highlighted && "bg-[#fbefe4]",
+			)}
+		>
+			<img className="size-[18px]" src="/landing/icon-folder.svg" alt="" />
+			<span className="text-[13.5px] font-semibold text-[#1c1917]">{name}</span>
+			<span className="ml-auto inline-flex flex-wrap items-center justify-end gap-1.5">
+				{children}
+			</span>
+		</div>
+	);
+}
+
+function PermChip({
+	children,
+	variant = "default",
+}: {
+	children: ReactNode;
+	variant?: "default" | "locked";
 }) {
 	return (
 		<span
 			className={cn(
-				"box-border inline-flex h-11 items-center gap-[9px] rounded-[11px] border px-4",
-				highlighted
-					? "border-[#f3d8be] bg-[#fbf5ea]"
-					: "border-[#e5e5e5] bg-[#f7f7f8]",
+				"inline-flex items-center gap-[5px] rounded-full border px-2.5 py-[3px] text-[11.5px] font-semibold whitespace-nowrap",
+				variant === "locked"
+					? "border-[#f3d8be] bg-white text-[#9a6b4f]"
+					: "border-[#ece8e2] bg-[#f7f3ed] text-[#57534e]",
 			)}
 		>
-			<img className="size-4 object-contain" src={icon} alt="" />
-			<span
-				className={cn(
-					"text-[13.5px] font-bold",
-					highlighted ? "text-[#c2410c]" : "text-[#1c1917]",
-				)}
-			>
-				{name}
-			</span>
-			<span
-				className={cn(
-					"text-[11.5px]",
-					highlighted ? "text-[#c88a5f]" : "text-[#a8a29e]",
-				)}
-			>
-				{person}
-			</span>
+			{children}
 		</span>
 	);
 }
 
-function HistoryVisual() {
+function InsightsVisual() {
 	return (
-		<div className="flex flex-col">
-			<div
-				className={cn(
-					visualCard,
-					"flex flex-col gap-2.5 px-4 pt-4 pb-5 sm:mr-7",
-				)}
-			>
-				<div className="flex items-center gap-[9px] px-1.5 py-1">
-					<img className="size-[18px]" src="/landing/icon-sq-md.svg" alt="" />
-					<span className="text-[13.5px] font-semibold text-[#1c1917]">
-						gtm/icp.md
-					</span>
-					<span className="ml-auto inline-flex items-center gap-[5px] text-xs font-semibold text-[#8a8178]">
-						<ClockIcon />
-						History
-					</span>
-				</div>
-				<div className="flex flex-col px-2 pt-2 pb-1">
-					<TimelineEntry
-						current
-						date="Feb 12"
-						title="Startups removed from ICP"
-					/>
-					<TimelineEntry date="Nov 8" title="Startups added to ICP" />
-					<TimelineEntry last date="Oct 3" title="ICP drafted" />
-				</div>
+		<div className={cn(visualCard, "flex flex-col gap-0.5 p-4")}>
+			<div className="flex items-center justify-between px-3 pt-1 pb-2.5">
+				<span className="text-[13.5px] font-bold text-[#1c1917]">
+					What agents read
+				</span>
+				<span className="text-xs text-[#8a8178]">last 30 days</span>
 			</div>
-			<div className="relative z-[2] mt-4 w-full max-w-[360px] rounded-[14px] border border-[#f3d8be] bg-[#fbf5ea] shadow-[0_20px_50px_rgba(28,25,23,.18)] sm:-mt-[26px] sm:ml-auto sm:w-[360px]">
-				<div className="flex items-center gap-2 px-3.5 py-2.5">
-					<img className="size-3.5" src="/landing/claude-spark.svg" alt="" />
-					<span className="text-[12.5px] font-bold text-[#c2410c]">Claude</span>
-					<span className="ml-auto text-[11px] text-[#c88a5f]">Jonas</span>
-				</div>
-				<div className="flex flex-col gap-2.5 px-3.5 pb-3.5">
-					<div className="max-w-[250px] self-end rounded-[14px_14px_4px_14px] bg-[#efe3cc] px-3 py-[7px] text-[12.5px] leading-[1.45] text-[#292524]">
-						Why did we stop selling to startups?
-					</div>
-					<div className="flex gap-[9px]">
-						<span className="inline-flex size-[22px] shrink-0 items-center justify-center rounded-full bg-[#fdf1e7]">
-							<img
-								className="size-[11px]"
-								src="/landing/claude-spark.svg"
-								alt=""
-							/>
-						</span>
-						<span className="flex flex-col gap-[7px]">
-							<span className="text-[12.5px] leading-[1.55] text-[#292524]">
-								We removed startups from the ICP in February. 14 pilots, none
-								converted to paid.
-							</span>
-							<span className="inline-flex items-center gap-[7px] self-start rounded-lg border border-[#ebdcc3] bg-white px-2.5 py-1.5">
-								<img
-									className="size-[13px]"
-									src="/landing/icon-sq-md.svg"
-									alt=""
-								/>
-								<span className="font-mono text-[11px] text-[#57534e]">
-									lixray.com/…/gtm/icp.md
-								</span>
-								<span className="text-[10.5px] whitespace-nowrap text-[#c88a5f]">
-									history · Feb 12
-								</span>
-							</span>
-						</span>
-					</div>
-				</div>
-			</div>
+			<InsightRow
+				icon="/landing/icon-sq-md.svg"
+				name="skills/research/SKILL.md"
+				percent={100}
+				count="214"
+			/>
+			<InsightRow
+				icon="/landing/icon-sq-md.svg"
+				name="gtm/icp.md"
+				percent={61}
+				count="131"
+			/>
+			<InsightRow
+				icon="/landing/icon-sq-csv.svg"
+				name="sales/pipeline.csv"
+				percent={42}
+				count="89"
+			/>
+			<InsightRow
+				icon="/landing/icon-sq-md.svg"
+				name="operations/runbook.md"
+				percent={26}
+				count="56"
+			/>
+			<InsightRow
+				icon="/landing/icon-sq-pdf.svg"
+				name="brand/old-deck.pdf"
+				percent={0}
+				count="0"
+				dead
+			/>
 		</div>
 	);
 }
 
-function TimelineEntry({
-	date,
-	title,
-	current = false,
-	last = false,
+function InsightRow({
+	icon,
+	name,
+	percent,
+	count,
+	dead = false,
 }: {
-	date: string;
-	title: string;
-	current?: boolean;
-	last?: boolean;
+	icon: string;
+	name: string;
+	percent: number;
+	count: string;
+	dead?: boolean;
 }) {
 	return (
-		<div className="flex gap-3.5">
-			<span className="flex w-2.5 shrink-0 flex-col items-center">
-				<span
-					className={cn(
-						"mt-1 size-[9px] rounded-full",
-						current ? "bg-[#c2410c]" : "bg-[#d9cfc0]",
-					)}
-				/>
-				{last ? null : <span className="w-[1.5px] flex-1 bg-[#f0ede8]" />}
+		<div className="flex items-center gap-[11px] px-3 py-[9px]">
+			<img
+				className={cn("size-[17px]", dead && "opacity-55 grayscale")}
+				src={icon}
+				alt=""
+			/>
+			<span
+				className={cn(
+					"w-[130px] shrink-0 truncate text-[13px] font-semibold sm:w-[210px]",
+					dead ? "text-[#a8a29e]" : "text-[#1c1917]",
+				)}
+			>
+				{name}
 			</span>
-			<span className={cn("flex flex-col gap-0.5", !last && "pb-[18px]")}>
+			<span className="h-2 flex-1 overflow-hidden rounded-full bg-[#f0ede8]">
 				<span
-					className={cn(
-						"text-[10.5px] font-bold tracking-[.06em] uppercase",
-						current ? "text-[#c2410c]" : "text-[#a8a29e]",
-					)}
-				>
-					{date}
-				</span>
-				<span
-					className={cn(
-						"text-[13px]",
-						current ? "font-bold text-[#1c1917]" : "text-[#57534e]",
-					)}
-				>
-					{title}
-				</span>
+					className="block h-full rounded-full bg-[linear-gradient(90deg,#F97316,#C2410C)]"
+					style={{ width: `${percent}%` }}
+				/>
+			</span>
+			<span
+				className={cn(
+					"w-9 shrink-0 text-right font-mono text-xs sm:w-[74px]",
+					dead ? "text-[#a8a29e]" : "text-[#57534e]",
+				)}
+			>
+				{count}
 			</span>
 		</div>
+	);
+}
+
+function LockIcon() {
+	return (
+		<svg
+			width="12"
+			height="12"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="#8A8178"
+			strokeWidth="2.2"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			aria-hidden="true"
+		>
+			<rect x="4" y="11" width="16" height="9" rx="2" />
+			<path d="M8 11V7a4 4 0 018 0v4" />
+		</svg>
 	);
 }
 
 function RepoArea({
 	path,
-	title,
 	body,
+	Icon,
 }: {
 	path: string;
-	title: string;
 	body: string;
+	Icon: LucideIcon;
 }) {
 	return (
-		<div className="flex flex-col gap-2.5 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-6">
-			<span className="font-mono text-[13px] font-semibold text-[#c2410c]">
-				{path}
-			</span>
-			<h3 className="m-0 text-[17px] font-bold">{title}</h3>
+		<div className="flex flex-col gap-3 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-6">
+			<h3 className="m-0 inline-flex items-center gap-2.5">
+				<span className="relative inline-flex size-8 shrink-0 items-center justify-center">
+					<img
+						className="absolute inset-0 size-full"
+						src="/landing/icon-folder.svg"
+						alt=""
+					/>
+					{/* Nudged below box center onto the folder's front panel. */}
+					<Icon
+						className="relative top-1 size-3 text-[#dbeafe]"
+						strokeWidth={2.4}
+						aria-hidden="true"
+					/>
+				</span>
+				<span className="font-mono text-[15px] font-bold text-[#1c1917]">
+					{path}
+				</span>
+			</h3>
 			<p className="m-0 text-sm leading-[1.6] text-[#57534e]">{body}</p>
 		</div>
-	);
-}
-
-function ClockIcon() {
-	return (
-		<svg
-			width="13"
-			height="13"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="#8C8580"
-			strokeWidth="2"
-			strokeLinecap="round"
-			strokeLinejoin="round"
-			aria-hidden="true"
-		>
-			<circle cx="12" cy="12" r="9" />
-			<path d="M12 7v5l3 2" />
-		</svg>
 	);
 }
 
