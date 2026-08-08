@@ -484,6 +484,14 @@ void test("lix sessions use unified remote Lix with session-local branch state a
 			});
 		}
 		if (pathname.endsWith("/execute")) {
+			if (body.sql === "SELECT branch") {
+				return Response.json({
+					columns: ["branch"],
+					rows: [[{ kind: "text", value: activeBranchId }]],
+					rowsAffected: 0,
+					notices: [],
+				});
+			}
 			executeBranches.push(activeBranchId);
 			return Response.json({
 				columns: [],

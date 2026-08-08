@@ -1412,6 +1412,7 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 		assert.equal(path, "/lix/v1/execute-batch");
 		return Response.json([
 			{
+				statementIndex: 0,
 				columns: ["value"],
 				rows: [[{ kind: "int", value: 1 }]],
 				rowsAffected: 0,

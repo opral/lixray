@@ -43,6 +43,7 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 	if (pathname === "/lix/v1/execute-batch") {
 		return Response.json([
 			{
+				statementIndex: 0,
 				columns: [],
 				rows: [],
 				rowsAffected: 0,
