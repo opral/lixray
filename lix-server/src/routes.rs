@@ -999,7 +999,7 @@ mod tests {
                     .header(lix_server_protocol::IDEMPOTENCY_KEY_HEADER, "isolate-lix-a")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        r#"{"sql":"INSERT INTO lix_file (path, content) VALUES ('/only-a.txt', X'41')"}"#,
+                        r#"{"sql":"INSERT INTO lix_file (path, content) VALUES ('/only-a.txt', CAST('A' AS BYTEA))"}"#,
                     ))
                     .expect("insert request"),
             )
