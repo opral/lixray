@@ -107,9 +107,9 @@ export function LandingPage() {
 						className="m-0 max-w-[1060px] text-[clamp(2.5rem,6vw,4rem)] leading-[1.08] font-bold tracking-[-.035em] text-balance"
 						id="landing-title"
 					>
-						Put your company
+						A repository for your
 						<br />
-						into a repository
+						whole company
 					</h1>
 					<p className="m-0 max-w-[680px] text-[21px] leading-[1.55] text-[#57534e] text-pretty">
 						Your codebase already lives in one. LixRay is the repository for
@@ -470,7 +470,7 @@ export function LandingPage() {
 
 				<section className="flex flex-col items-center gap-[22px] border-t border-[#1c1917]/7 bg-white px-5 py-24 text-center sm:py-[120px]">
 					<h2 className="m-0 max-w-[720px] text-[clamp(2rem,4.5vw,2.625rem)] leading-[1.1] font-bold tracking-[-.03em] text-balance">
-						Put your company into a repository
+						A repository for your whole company
 					</h2>
 					<a className={cn(primaryButton, "mt-1")} href={workspaceTo}>
 						{heroCtaLabel}
