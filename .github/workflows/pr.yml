@@ -220,11 +220,6 @@ jobs:
             echo "tree_tag=$repository:tree-$tree"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -317,35 +312,14 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up web toolchain
+        uses: ./.github/actions/setup-web
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Check vendored revisions
         run: pnpm vendor:check
-
-      - name: Cache vendored Lix SDK build
-        uses: actions/cache@v4
-        with:
-          path: |
-            vendor/lix/target
-            node_modules/.cache/lix-rust-toolchain
-          key: ${{ runner.os }}-${{ runner.arch }}-lix-sdk-${{ hashFiles('vendor/lix/Cargo.lock', 'vendor/lix/rust-toolchain.toml', 'vendor/lix/packages/js-sdk/**', 'scripts/prepare-vendored-lix-sdk.mjs') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-lix-sdk-
-
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mold
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -386,16 +360,7 @@ jobs:
           version: 2.109.1
 
       - name: Test database policies and functions
-        working-directory: database
-        run: |
-          supabase stop --no-backup || true
-          supabase start --exclude edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector
-          supabase test db
-
-      - name: Stop local database
-        if: always()
-        working-directory: database
-        run: supabase stop --no-backup
+        run: .github/scripts/test-database.sh
 
   rust:
     name: Rust
@@ -439,39 +404,19 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up web toolchain
+        uses: ./.github/actions/setup-web
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v1
         with:
           version: 2.109.1
-
-      - name: Cache vendored Lix SDK build
-        uses: actions/cache@v4
-        with:
-          path: |
-            vendor/lix/target
-            node_modules/.cache/lix-rust-toolchain
-          key: ${{ runner.os }}-${{ runner.arch }}-lix-sdk-${{ hashFiles('vendor/lix/Cargo.lock', 'vendor/lix/rust-toolchain.toml', 'vendor/lix/packages/js-sdk/**', 'scripts/prepare-vendored-lix-sdk.mjs') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-lix-sdk-
-
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mold
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium
@@ -486,29 +431,7 @@ jobs:
       - name: Wait for the content-addressed server image
         id: server-image
         shell: bash
-        run: |
-          tree="$(git rev-parse 'HEAD^{tree}')"
-          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server"
-          tag="$repository:tree-$tree"
-
-          for attempt in $(seq 1 75); do
-            if digest="$(
-              docker buildx imagetools inspect "$tag" \
-                --format '{{json .Manifest.Digest}}' 2>/dev/null |
-                tr -d '"'
-            )" && test -n "$digest"; then
-              image="$repository@$digest"
-              docker pull "$image"
-              echo "image=$image" >> "$GITHUB_OUTPUT"
-              echo "Testing $image"
-              exit 0
-            fi
-            echo "Waiting for server image $tag ($attempt/75)"
-            sleep 10
-          done
-
-          echo "Server image $tag was not published within 12.5 minutes." >&2
-          exit 1
+        run: .github/scripts/wait-for-server-image.sh
 
       - name: Run Compose e2e tests
         env:

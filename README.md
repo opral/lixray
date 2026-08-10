@@ -69,7 +69,9 @@ It updates the Railway revision manifest and regenerates both Rust and pnpm
 lockfiles. `pnpm vendor:check` verifies that those derived files are committed
 and in sync.
 
-Run the complete frontend CI acceptance path locally with `pnpm run ci`.
+Run the frontend source checks locally with `pnpm run ci`. Pull-request CI builds
+the production Railway bundle once through `web-app/Dockerfile`, so the
+frontend lane does not repeat that production build.
 
 The same acceptance path used by CI is available locally:
 
@@ -77,7 +79,9 @@ The same acceptance path used by CI is available locally:
 pnpm --dir web-app format:check
 pnpm --dir web-app lint
 pnpm --dir web-app check
-pnpm --dir web-app build
+VITE_SUPABASE_URL=https://example.invalid \
+VITE_SUPABASE_KEY=ci-public-placeholder \
+pnpm --dir web-app ci:build:node
 cargo fmt --manifest-path lix-server/Cargo.toml --check
 cargo clippy --manifest-path lix-server/Cargo.toml --locked --all-targets --all-features -- -D warnings
 cargo test --manifest-path lix-server/Cargo.toml --locked
