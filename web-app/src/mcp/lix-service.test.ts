@@ -100,12 +100,32 @@ void test("open_lix returns a signed context pinned to the selected branch", asy
 	});
 	const opened = await service.openLix("@acme/company");
 	assert.equal(opened.lixId, LIX_ID);
+	assert.equal(opened.lixRef, "@acme/company");
 	assert.equal(opened.branchId, "main");
 	assert.match(opened.context, /^[^.]+\.[^.]+$/);
+	assert.ok(Date.parse(opened.contextExpiresAt) > Date.now());
 
 	const result = await service.execute(opened.context, { sql: "SELECT 1" });
 	assert.equal(result.context, opened.context);
 	assert.equal(runtime.calls.at(-1)?.branchId, "main");
+});
+
+void test("expired contexts identify the Lix and branch needed to reopen", async () => {
+	const runtime = new FakeRuntime();
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+		contextTtlMs: -1,
+	});
+	const opened = await service.openLix(LIX_ID);
+	await assert.rejects(
+		service.execute(opened.context, { sql: "SELECT 1" }),
+		(error: unknown) =>
+			isLixError(error) &&
+			error.code === "context_expired" &&
+			error.hint?.includes("open_lix") === true &&
+			JSON.stringify(error.details).includes(LIX_ID),
+	);
 });
 
 void test("switch_branch returns a new context and never mutates the old handle", async () => {
