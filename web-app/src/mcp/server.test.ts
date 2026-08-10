@@ -220,6 +220,12 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		);
 		assert.ok(executeTool);
 		assert.ok(executeBatchTool);
+		assert.match(
+			executeTool.description ?? "",
+			/SQL as the universal interface/,
+		);
+		assert.match(executeTool.description ?? "", /information_schema\.tables/);
+		assert.match(executeBatchTool.description ?? "", /verification SELECT/);
 		assert.doesNotMatch(
 			JSON.stringify(executeTool.inputSchema),
 			/idempotency/i,
