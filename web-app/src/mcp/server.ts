@@ -12,6 +12,10 @@ import {
 } from "@modelcontextprotocol/server";
 import { PostHog } from "posthog-node";
 import { z } from "zod";
+import {
+	EXECUTE_BATCH_TOOL_DESCRIPTION,
+	EXECUTE_TOOL_DESCRIPTION,
+} from "./execute-schema.ts";
 import { isLixError, LixService, type ExecuteRequest } from "./lix-service.ts";
 import {
 	mcpSurfaceVersion,
@@ -318,7 +322,7 @@ export function createLixrayMcpServer(
 		server,
 		"execute",
 		"Execute SQL",
-		"Execute exactly one SQL statement against the active branch in context. Use public Lix SQL surfaces such as lix_file, lix_directory, lix_file_history(), lix_directory_history(), information_schema, and lix_branch. File content is a blob; use CAST(content AS TEXT) for text. Directory paths do not have trailing slashes.",
+		EXECUTE_TOOL_DESCRIPTION,
 		z
 			.object({
 				context,
@@ -341,7 +345,7 @@ export function createLixrayMcpServer(
 		server,
 		"execute_batch",
 		"Execute an atomic SQL batch",
-		"Execute an ordered, atomic batch of SQL statements against the active branch in context. Use this for multi-step file or directory changes so partial setup cannot leak. File creation, reads, edits, deletes, directory creation, and path renames all belong here as SQL.",
+		EXECUTE_BATCH_TOOL_DESCRIPTION,
 		z
 			.object({
 				context,
