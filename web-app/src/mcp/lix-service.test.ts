@@ -100,10 +100,9 @@ void test("open_lix returns a signed context pinned to the selected branch", asy
 	});
 	const opened = await service.openLix("@acme/company");
 	assert.equal(opened.lixId, LIX_ID);
+	assert.equal(opened.lixRef, "@acme/company");
 	assert.equal(opened.branchId, "main");
 	assert.match(opened.context, /^[^.]+\.[^.]+$/);
-	assert.equal(opened.repository.slug, "company");
-	assert.equal(opened.repository.namespace.handle, "acme");
 	assert.ok(Date.parse(opened.contextExpiresAt) > Date.now());
 
 	const result = await service.execute(opened.context, { sql: "SELECT 1" });

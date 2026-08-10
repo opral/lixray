@@ -61,9 +61,9 @@ export interface OpenedLixContext {
 	context: string;
 	contextExpiresAt: string;
 	lixId: string;
+	lixRef: string;
 	branchId: string;
 	commitId: string;
-	repository: LixSummary;
 }
 
 export interface CreateBranchInput {
@@ -265,9 +265,9 @@ export class LixService {
 			context: issuedContext.token,
 			contextExpiresAt: new Date(issuedContext.expiresAt).toISOString(),
 			lixId,
+			lixRef: `@${repository.namespace.handle}/${repository.slug}`,
 			branchId: selectedBranchId,
 			commitId: await this.commitId(lixId, selectedBranchId),
-			repository,
 		};
 	}
 

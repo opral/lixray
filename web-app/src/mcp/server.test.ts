@@ -238,20 +238,18 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			context: string;
 			request_id: string;
 			context_expires_at: string;
-			repository: { handle: string; canonical_url: string };
+			id: string;
+			url: string;
 		};
 		const context = openedContent.context;
 		assert.equal(typeof context, "string");
 		assert.match(openedContent.request_id, /^[0-9a-f-]{36}$/i);
-		assert.equal(openedContent.repository.handle, "@acme/company");
-		assert.equal(
-			openedContent.repository.canonical_url,
-			"https://lixray.com/@acme/company",
-		);
+		assert.equal(openedContent.id, LIX_ID);
+		assert.equal(openedContent.url, "https://lixray.com/@acme/company");
 		assert.ok(Date.parse(openedContent.context_expires_at) > Date.now());
 		assert.match(
 			opened.content?.[0]?.type === "text" ? opened.content[0].text : "",
-			/^Opened @acme\/company/,
+			/^Opened https:\/\/lixray\.com\/@acme\/company/,
 		);
 		assert.equal(responseRequestIds.at(-1), openedContent.request_id);
 		const executed = await client.callTool({

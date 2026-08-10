@@ -150,21 +150,10 @@ const openLixOutput = withError(
 	z.object({
 		context,
 		context_expires_at: z.string(),
-		lix_id: z.string(),
+		id: z.string(),
+		url: z.string(),
 		branch_id: branchId,
 		commit_id: z.string(),
-		repository: z
-			.object({
-				id: z.string(),
-				name: z.string(),
-				slug: z.string(),
-				handle: z.string(),
-				canonical_url: z.string(),
-				namespace: z
-					.object({ id: z.string(), name: z.string(), handle: z.string() })
-					.strict(),
-			})
-			.strict(),
 	}),
 );
 const branchStateOutput = withError(
@@ -314,18 +303,13 @@ export function createLixrayMcpServer(
 		securitySchemes,
 		async ({ lix_ref, branch_id }) => {
 			const opened = await service.openLix(lix_ref, branch_id);
-			const handle = `@${opened.repository.namespace.handle}/${opened.repository.slug}`;
 			return {
 				context: opened.context,
 				context_expires_at: opened.contextExpiresAt,
-				lix_id: opened.lixId,
+				id: opened.lixId,
+				url: `${MCP_RESOURCE}/${opened.lixRef}`,
 				branch_id: opened.branchId,
 				commit_id: opened.commitId,
-				repository: {
-					...opened.repository,
-					handle,
-					canonical_url: `${MCP_RESOURCE}/${handle}`,
-				},
 			};
 		},
 		undefined,
@@ -840,8 +824,7 @@ function summarizeToolResult(name: string, raw: unknown): string {
 		return `Found ${count} accessible ${count === 1 ? "Lix" : "Lixes"}.`;
 	}
 	if (name === "open_lix") {
-		const repository = result.repository as Record<string, unknown> | undefined;
-		return `Opened ${String(repository?.handle ?? result.lix_id)} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}. Context expires at ${String(result.context_expires_at)}.`;
+		return `Opened ${String(result.url ?? result.id)} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}. Context expires at ${String(result.context_expires_at)}.`;
 	}
 	if (name === "execute") {
 		return summarizeSqlResults([result.result]);
