@@ -328,6 +328,7 @@ void test("MCP reuses successful lix authorization only within one HTTP request"
 					return null;
 				},
 				lixFetch: mcpLixFetch(protocolPaths, "request-scoped-authorization"),
+				lixSummaries: mcpLixSummaries(),
 				mcpTransport: async (_request, service) => {
 					const opened = await service.openLix(LIX_A);
 					await service.executeBatch(opened.context, {
@@ -363,6 +364,7 @@ void test("MCP keeps the runtime client alive until a streamed response is consu
 			authenticateMcp: authenticatedMcp(),
 			authorizeLix: async () => null,
 			lixFetch: mcpLixFetch(protocolPaths, "streaming-response"),
+			lixSummaries: mcpLixSummaries(),
 			mcpTransport: async (_request, service) => {
 				const body = new ReadableStream<Uint8Array>({
 					async pull(controller) {
@@ -401,6 +403,7 @@ void test("MCP retries lix authorization after a denial", async () => {
 					: null;
 			},
 			lixFetch: mcpLixFetch(protocolPaths, "authorization-retry"),
+			lixSummaries: mcpLixSummaries(),
 			mcpTransport: async (_request, service) => {
 				await assert.rejects(
 					service.openLix(LIX_A),
@@ -1420,6 +1423,21 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 			},
 		]);
 	};
+}
+
+function mcpLixSummaries() {
+	return [
+		{
+			id: LIX_A,
+			name: "Launch Q3",
+			slug: "launch-q3",
+			namespace: {
+				id: "00000000-0000-7000-8000-000000000001",
+				name: "Acme",
+				handle: "acme",
+			},
+		},
+	];
 }
 
 function authenticated(): AuthenticateRequest {

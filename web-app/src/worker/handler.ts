@@ -77,6 +77,7 @@ interface HandleRequestOptions {
 	parseSqlScript?: ParseSqlScript;
 	mcpTransport?: typeof handleMcpTransport;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
+	lixSummaries?: ReadonlyArray<LixSummary>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	executionContext?: RequestExecutionContext;
 	createMcpTelemetry?: typeof createMcpTelemetrySession;
@@ -229,7 +230,9 @@ export async function handleRequest(
 			{
 				signal: request.signal,
 				lixFetch: options.lixFetch,
-				lixSummaries: isDemoMode(env) ? demoLixSummaries(env) : undefined,
+				lixSummaries:
+					options.lixSummaries ??
+					(isDemoMode(env) ? demoLixSummaries(env) : undefined),
 			},
 		);
 		const telemetry = (options.createMcpTelemetry ?? createMcpTelemetrySession)(
