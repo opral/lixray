@@ -137,7 +137,13 @@
 							"minLength": 1,
 							"description": "Opaque Lix context returned by open_lix or switch_branch"
 						},
-						"lix_id": {
+						"context_expires_at": {
+							"type": "string"
+						},
+						"id": {
+							"type": "string"
+						},
+						"url": {
 							"type": "string"
 						},
 						"branch_id": {
@@ -156,7 +162,9 @@
 					},
 					"required": [
 						"context",
-						"lix_id",
+						"context_expires_at",
+						"id",
+						"url",
 						"branch_id",
 						"commit_id",
 						"request_id"
