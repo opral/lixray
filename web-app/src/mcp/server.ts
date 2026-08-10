@@ -149,9 +149,22 @@ const listLixesOutput = withError(
 const openLixOutput = withError(
 	z.object({
 		context,
+		context_expires_at: z.string(),
 		lix_id: z.string(),
 		branch_id: branchId,
 		commit_id: z.string(),
+		repository: z
+			.object({
+				id: z.string(),
+				name: z.string(),
+				slug: z.string(),
+				handle: z.string(),
+				canonical_url: z.string(),
+				namespace: z
+					.object({ id: z.string(), name: z.string(), handle: z.string() })
+					.strict(),
+			})
+			.strict(),
 	}),
 );
 const branchStateOutput = withError(
@@ -301,11 +314,18 @@ export function createLixrayMcpServer(
 		securitySchemes,
 		async ({ lix_ref, branch_id }) => {
 			const opened = await service.openLix(lix_ref, branch_id);
+			const handle = `@${opened.repository.namespace.handle}/${opened.repository.slug}`;
 			return {
 				context: opened.context,
+				context_expires_at: opened.contextExpiresAt,
 				lix_id: opened.lixId,
 				branch_id: opened.branchId,
 				commit_id: opened.commitId,
+				repository: {
+					...opened.repository,
+					handle,
+					canonical_url: `${MCP_RESOURCE}/${handle}`,
+				},
 			};
 		},
 		undefined,
@@ -782,7 +802,7 @@ function registerTool(
 				return {
 					structuredContent,
 					content: [
-						{ type: "text" as const, text: JSON.stringify(structuredContent) },
+						{ type: "text" as const, text: summarizeToolResult(name, raw) },
 					],
 				};
 			} catch (caught) {
@@ -805,13 +825,54 @@ function registerTool(
 				return {
 					isError: true,
 					structuredContent,
-					content: [
-						{ type: "text" as const, text: JSON.stringify(structuredContent) },
-					],
+					content: [{ type: "text" as const, text: summarizeToolError(error) }],
 				};
 			}
 		},
 	);
+}
+
+function summarizeToolResult(name: string, raw: unknown): string {
+	if (!raw || typeof raw !== "object") return `${name} completed.`;
+	const result = raw as Record<string, unknown>;
+	if (name === "list_lixes") {
+		const count = Array.isArray(result.lixes) ? result.lixes.length : 0;
+		return `Found ${count} accessible ${count === 1 ? "Lix" : "Lixes"}.`;
+	}
+	if (name === "open_lix") {
+		const repository = result.repository as Record<string, unknown> | undefined;
+		return `Opened ${String(repository?.handle ?? result.lix_id)} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}. Context expires at ${String(result.context_expires_at)}.`;
+	}
+	if (name === "execute") {
+		return summarizeSqlResults([result.result]);
+	}
+	if (name === "execute_batch") {
+		const results = Array.isArray(result.results) ? result.results : [];
+		return `Atomic SQL batch completed ${results.length} ${results.length === 1 ? "statement" : "statements"}. ${summarizeSqlResults(results)}`;
+	}
+	return `${name} completed.`;
+}
+
+function summarizeSqlResults(results: Array<unknown>): string {
+	let returnedRows = 0;
+	let affectedRows = 0;
+	for (const value of results) {
+		if (!value || typeof value !== "object") continue;
+		const result = value as Record<string, unknown>;
+		if (Array.isArray(result.rows)) returnedRows += result.rows.length;
+		if (typeof result.rowsAffected === "number") {
+			affectedRows += result.rowsAffected;
+		}
+	}
+	return `SQL returned ${returnedRows} ${returnedRows === 1 ? "row" : "rows"} and affected ${affectedRows} ${affectedRows === 1 ? "row" : "rows"}.`;
+}
+
+function summarizeToolError(error: {
+	code: string;
+	message: string;
+	hint?: string;
+}): string {
+	return `LixRay error ${error.code}: ${error.message}${error.hint ? ` Hint: ${error.hint}` : ""}`;
 }
 
 function toMcpError(caught: unknown): {
