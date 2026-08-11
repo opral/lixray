@@ -11,6 +11,7 @@ import {
 	type ExecuteRequest,
 	type LixRuntimeClient,
 } from "./lix-service.ts";
+import type { ParseSqlScript } from "../lib/lix-sql-access.ts";
 import {
 	handleMcpTransport,
 	MCP_REQUEST_ID_HEADER,
@@ -26,6 +27,13 @@ import {
 } from "./server.ts";
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
+const parseSqlScript: ParseSqlScript = (sql) => ({
+	statements: sql
+		.split(";")
+		.map((statement) => statement.trim())
+		.filter(Boolean)
+		.map((statement) => ({ sql: statement })),
+});
 
 class FakeRuntime implements LixRuntimeClient {
 	async listLixes() {
@@ -45,6 +53,9 @@ class FakeRuntime implements LixRuntimeClient {
 		return { branchId };
 	}
 	async execute(_lixId: string, _branchId: string, request: ExecuteRequest) {
+		if (request.sql === "SELECT internal_error") {
+			throw new Error("private implementation detail");
+		}
 		if (request.sql === "SELECT error") {
 			throw createLixError(
 				"LIX_UNSUPPORTED_SQL",
@@ -60,6 +71,14 @@ class FakeRuntime implements LixRuntimeClient {
 				columns: ["commit_id"],
 				rows: [[{ kind: "text" as const, value: "commit-1" }]],
 				rowsAffected: 0,
+				notices: [],
+			};
+		}
+		if (/^\s*(?:INSERT|UPDATE|DELETE)\b/i.test(request.sql)) {
+			return {
+				columns: [],
+				rows: [],
+				rowsAffected: 1,
 				notices: [],
 			};
 		}
@@ -140,10 +159,10 @@ void test("PostHog MCP analytics redaction removes private payloads", () => {
 			$mcp_response: { rows: [["secret"]] },
 			$mcp_error_message: "private error",
 			$exception_list: [{ stack: "private stack" }],
-			mcp_tool_name: "execute",
+			mcp_tool_name: "query_sql",
 		},
 	});
-	assert.deepEqual(event.properties, { mcp_tool_name: "execute" });
+	assert.deepEqual(event.properties, { mcp_tool_name: "query_sql" });
 });
 
 void test("MCP request IDs accept a valid incoming ID and expose generated IDs", () => {
@@ -179,6 +198,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		const response = await handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_Test",
+			parseSqlScript,
 		});
 		responseRequestIds.push(response.headers.get("x-request-id") ?? "");
 		return response;
@@ -202,8 +222,8 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			[
 				"list_lixes",
 				"open_lix",
-				"execute",
-				"execute_batch",
+				"query_sql",
+				"execute_sql",
 				"active_branch_id",
 				"switch_branch",
 				"create_branch",
@@ -214,25 +234,51 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				"merge_branch",
 			],
 		);
-		const executeTool = tools.tools.find((tool) => tool.name === "execute");
-		const executeBatchTool = tools.tools.find(
-			(tool) => tool.name === "execute_batch",
+		for (const tool of tools.tools) {
+			assert.ok(tool.title, `${tool.name} must have a title`);
+			assert.ok(tool.name.length <= 64, `${tool.name} exceeds 64 characters`);
+			assert.ok(
+				tool.annotations?.readOnlyHint === true ||
+					tool.annotations?.destructiveHint === true,
+				`${tool.name} must be read-only or destructive`,
+			);
+		}
+		const queryTool = tools.tools.find((tool) => tool.name === "query_sql");
+		const executeSqlTool = tools.tools.find(
+			(tool) => tool.name === "execute_sql",
 		);
-		assert.ok(executeTool);
-		assert.ok(executeBatchTool);
+		assert.ok(queryTool);
+		assert.ok(executeSqlTool);
 		assert.match(
-			executeTool.description ?? "",
-			/SQL as the universal interface/,
+			queryTool.description ?? "",
+			/SQL as the universal read interface/,
 		);
-		assert.match(executeTool.description ?? "", /information_schema\.tables/);
-		assert.match(executeBatchTool.description ?? "", /verification SELECT/);
+		assert.equal(queryTool.annotations?.readOnlyHint, true);
+		assert.match(queryTool.description ?? "", /information_schema\.tables/);
+		assert.equal(executeSqlTool.annotations?.destructiveHint, true);
+		assert.match(
+			executeSqlTool.description ?? "",
+			/any ordered atomic SQL batch/,
+		);
+		assert.doesNotMatch(JSON.stringify(queryTool.inputSchema), /idempotency/i);
 		assert.doesNotMatch(
-			JSON.stringify(executeTool.inputSchema),
+			JSON.stringify(executeSqlTool.inputSchema),
 			/idempotency/i,
 		);
-		assert.doesNotMatch(
-			JSON.stringify(executeBatchTool.inputSchema),
-			/idempotency/i,
+		assert.equal(
+			tools.tools.find((tool) => tool.name === "switch_branch")?.annotations
+				?.readOnlyHint,
+			true,
+		);
+		assert.equal(
+			tools.tools.find((tool) => tool.name === "undo")?.annotations
+				?.destructiveHint,
+			true,
+		);
+		assert.equal(
+			tools.tools.find((tool) => tool.name === "redo")?.annotations
+				?.destructiveHint,
+			true,
 		);
 		assert.ok(!tools.tools.some((tool) => tool.name.includes("file")));
 		const opened = await client.callTool({
@@ -258,35 +304,38 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			/^Opened https:\/\/lixray\.com\/@acme\/company/,
 		);
 		assert.equal(responseRequestIds.at(-1), openedContent.request_id);
-		const executed = await client.callTool({
-			name: "execute",
+		const queried = await client.callTool({
+			name: "query_sql",
 			arguments: { context, sql: "SELECT 1" },
 		});
-		assert.equal(executed.isError, undefined);
-		const executedContent = executed.structuredContent as {
+		assert.equal(queried.isError, undefined);
+		const queriedContent = queried.structuredContent as {
 			request_id: string;
 			result: { rowsAffected: number };
 		};
-		assert.equal(executedContent.result.rowsAffected, 0);
+		assert.equal(queriedContent.result.rowsAffected, 0);
 		assert.match(
-			executed.content?.[0]?.type === "text" ? executed.content[0].text : "",
+			queried.content?.[0]?.type === "text" ? queried.content[0].text : "",
 			/^SQL returned 1 row and affected 0 rows\.$/,
 		);
-		assert.equal(responseRequestIds.at(-1), executedContent.request_id);
-		const batched = await client.callTool({
-			name: "execute_batch",
+		assert.equal(responseRequestIds.at(-1), queriedContent.request_id);
+		const mutated = await client.callTool({
+			name: "execute_sql",
 			arguments: {
 				context,
-				statements: [{ sql: "SELECT 1" }, { sql: "SELECT 2" }],
+				statements: [
+					{ sql: "INSERT INTO example VALUES (1)" },
+					{ sql: "SELECT 2" },
+				],
 			},
 		});
-		assert.equal(batched.isError, undefined);
+		assert.equal(mutated.isError, undefined);
 		assert.equal(
-			batched.content?.[0]?.type === "text" ? batched.content[0].text : "",
-			"Atomic SQL batch completed 2 statements. SQL returned 2 rows and affected 0 rows.",
+			mutated.content?.[0]?.type === "text" ? mutated.content[0].text : "",
+			"Atomic SQL completed 2 statements. SQL returned 1 row and affected 1 row.",
 		);
 		const failed = await client.callTool({
-			name: "execute",
+			name: "query_sql",
 			arguments: { context, sql: "SELECT error" },
 		});
 		assert.equal(failed.isError, true);
@@ -305,6 +354,63 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			failed.content?.[0]?.type === "text" ? failed.content[0].text : "",
 			/Use SELECT 1 instead\./,
 		);
+		const mutationThroughQuery = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "DELETE FROM example" },
+		});
+		assert.equal(mutationThroughQuery.isError, true);
+		assert.match(
+			JSON.stringify(mutationThroughQuery.structuredContent),
+			/Use execute_sql for non-SELECT SQL/,
+		);
+		const valuesThroughQuery = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "VALUES (1)" },
+		});
+		assert.equal(valuesThroughQuery.isError, true);
+		assert.match(
+			JSON.stringify(valuesThroughQuery.structuredContent),
+			/query_sql accepts only a SELECT/,
+		);
+		const scriptThroughQuery = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "SELECT 1; SELECT 2" },
+		});
+		assert.equal(scriptThroughQuery.isError, true);
+		assert.match(
+			JSON.stringify(scriptThroughQuery.structuredContent),
+			/requires exactly one SQL statement/,
+		);
+		const readThroughExecute = await client.callTool({
+			name: "execute_sql",
+			arguments: { context, statements: [{ sql: "SELECT 1" }] },
+		});
+		assert.equal(readThroughExecute.isError, undefined);
+		const mixedExecute = await client.callTool({
+			name: "execute_sql",
+			arguments: {
+				context,
+				statements: [
+					{ sql: "SELECT 1" },
+					{ sql: "UPDATE example SET value = 2" },
+				],
+			},
+		});
+		assert.equal(mixedExecute.isError, undefined);
+		const internalFailure = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "SELECT internal_error" },
+		});
+		assert.equal(internalFailure.isError, true);
+		const internalContent = internalFailure.structuredContent as {
+			request_id: string;
+			error: { message: string; hint: string };
+		};
+		assert.equal(internalContent.error.message, "The LixRay tool call failed.");
+		assert.match(internalContent.error.hint, /Retry once/);
+		assert.match(internalContent.error.hint, /request_id/);
+		assert.match(internalContent.error.hint, /LixRay support/);
+		assert.doesNotMatch(internalContent.error.hint, /private implementation/);
 		assert.ok(
 			requests.length >= 4,
 			"discover, tools/list, and tool calls should be separate requests",
@@ -332,6 +438,7 @@ void test("legacy MCP initialize and tool calls work without a session id", asyn
 		return handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_Legacy_Test",
+			parseSqlScript,
 		});
 	};
 	const transport = new StreamableHTTPClientTransport(
@@ -348,18 +455,18 @@ void test("legacy MCP initialize and tool calls work without a session id", asyn
 		await client.connect(transport);
 		assert.equal(client.getProtocolEra(), "legacy");
 		const tools = await client.listTools();
-		assert.ok(tools.tools.some((tool) => tool.name === "execute"));
+		assert.ok(tools.tools.some((tool) => tool.name === "query_sql"));
 		const opened = await client.callTool({
 			name: "open_lix",
 			arguments: { lix_ref: LIX_ID },
 		});
 		assert.equal(opened.isError, undefined, JSON.stringify(opened));
 		const context = (opened.structuredContent as { context: string }).context;
-		const executed = await client.callTool({
-			name: "execute",
+		const queried = await client.callTool({
+			name: "query_sql",
 			arguments: { context, sql: "SELECT 1" },
 		});
-		assert.equal(executed.isError, undefined);
+		assert.equal(queried.isError, undefined);
 		assert.ok(
 			requests.length >= 3,
 			"initialize, tools/list, and tool calls should run",

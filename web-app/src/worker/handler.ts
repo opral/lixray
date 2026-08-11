@@ -11,6 +11,10 @@ import {
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
+import {
+	isClearlyReadOnlySql,
+	type ParseSqlScript,
+} from "../lib/lix-sql-access.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
 import { LixService, type LixSummary } from "../mcp/lix-service.ts";
 import {
@@ -143,11 +147,6 @@ type ResolvePublicLix = (
  * gate classifies statements with the same grammar the engine executes —
  * not a transport-level keyword check.
  */
-export type ParseSqlScript = (
-	sql: string,
-	providedParamCount: number,
-) => { statements: ReadonlyArray<{ sql: string }> };
-
 type AuthResult =
 	| { ok: true; auth: AuthenticatedUser }
 	| { ok: false; response: Response };
@@ -302,6 +301,7 @@ export async function handleRequest(
 						posthogDistinctId: authResult.auth.userId,
 						posthogClientId: authResult.auth.clientId,
 						onPosthogFlush,
+						parseSqlScript: options.parseSqlScript,
 					},
 				),
 				requestId,
@@ -995,11 +995,6 @@ async function publicSqlStatements(
 		}
 		return { sql, paramCount: Array.isArray(params) ? params.length : 0 };
 	});
-}
-
-function isClearlyReadOnlySql(sql: string): boolean {
-	const keyword = /^\s*([a-z]+)/i.exec(sql)?.[1]?.toUpperCase();
-	return keyword === "SELECT" || keyword === "VALUES";
 }
 
 function publicReadOnlyResponse(): Response {

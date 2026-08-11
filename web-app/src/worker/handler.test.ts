@@ -565,7 +565,7 @@ void test("successful exact-Lix MCP activity is persisted before the response co
 				});
 				options.onToolCall?.({
 					requestId: options.requestId!,
-					toolName: "execute",
+					toolName: "query_sql",
 					outcome: "error",
 					durationMs: 1,
 					surfaceVersion: "test",
