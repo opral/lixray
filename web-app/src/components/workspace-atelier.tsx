@@ -68,8 +68,8 @@ import type {
 } from "~/components/workspace-home/people-view";
 import { isTeamInviteToken, randomTeamInviteToken } from "~/lib/team-invite";
 import { LixrayCentralTabStrip } from "~/components/workspace-home/central-tab-strip";
+import { EntryKind } from "~/lib/entry-kind";
 import {
-	normalizeHomeDirPath,
 	useWorkspaceIsEmpty,
 	workspaceHasNoFiles,
 } from "~/components/workspace-home/lix-data";
@@ -468,8 +468,13 @@ export function WorkspaceAtelier({
 				return;
 			}
 			if (event.viewKind === LIXRAY_DIR_EXTENSION_ID) {
-				const dirPath = normalizeHomeDirPath(event.state?.path);
-				const splat = dirPath.split("/").filter(Boolean).join("/");
+				const state = event.state;
+				if (!state) return;
+				if (state.kind !== undefined && state.kind !== EntryKind.Directory)
+					return;
+				const dirPath = state.path;
+				if (typeof dirPath !== "string" || dirPath === "/") return;
+				const splat = dirPath.startsWith("/") ? dirPath.slice(1) : "";
 				// A root-listing tab (the strip's New tab) stays URL-less: the
 				// workspace root URL means "Home is active" (rule 1), so syncing
 				// here would bounce the selection back to Home. The tab claims a

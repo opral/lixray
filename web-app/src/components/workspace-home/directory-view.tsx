@@ -40,7 +40,7 @@ import {
 	formatUpdatedAt,
 	importDroppedFiles,
 	listDirectory,
-	normalizeHomeDirPath,
+	persistedDirectoryPath,
 	resolveWorkspaceHref,
 	useFileMarkdown,
 	useWorkspaceTree,
@@ -262,12 +262,12 @@ export function DirectoryView({
 						onNavigate={(href, event) => {
 							const resolved = resolveWorkspaceHref(dirPath, href);
 							if (!resolved) return false;
-							const asDir = normalizeHomeDirPath(resolved);
-							const isDir =
-								href.endsWith("/") ||
-								tree.dirs.some((dir) => dir.path === asDir);
-							if (isDir) {
-								onOpenDir(asDir, {
+							// Directory paths are authoritative on lix_directory. A
+							// markdown link may omit its trailing slash, so look up the
+							// exact persisted directory path rather than inferring kind.
+							const directoryPath = persistedDirectoryPath(tree, resolved);
+							if (directoryPath) {
+								onOpenDir(directoryPath, {
 									newTab: newTabFromMouseEvent(event),
 								});
 							} else {
