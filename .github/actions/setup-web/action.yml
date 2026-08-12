@@ -1,0 +1,41 @@
+name: Set up web toolchain
+description: Install the shared Node, pnpm, vendored Lix cache, and native build prerequisites.
+
+inputs:
+  node-version:
+    description: Node.js version
+    required: true
+  pnpm-version:
+    description: pnpm version
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm-version }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+        cache-dependency-path: pnpm-lock.yaml
+
+    - name: Cache vendored Lix SDK build
+      uses: actions/cache@v4
+      with:
+        path: |
+          vendor/lix/target
+          node_modules/.cache/lix-rust-toolchain
+        key: ${{ runner.os }}-${{ runner.arch }}-lix-sdk-${{ hashFiles('vendor/lix/Cargo.lock', 'vendor/lix/rust-toolchain.toml', 'vendor/lix/packages/js-sdk/**', 'scripts/prepare-vendored-lix-sdk.mjs') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-lix-sdk-
+
+    - name: Install native build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y mold

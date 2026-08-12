@@ -220,6 +220,12 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		);
 		assert.ok(executeTool);
 		assert.ok(executeBatchTool);
+		assert.match(
+			executeTool.description ?? "",
+			/SQL as the universal interface/,
+		);
+		assert.match(executeTool.description ?? "", /information_schema\.tables/);
+		assert.match(executeBatchTool.description ?? "", /verification SELECT/);
 		assert.doesNotMatch(
 			JSON.stringify(executeTool.inputSchema),
 			/idempotency/i,
@@ -237,10 +243,20 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		const openedContent = opened.structuredContent as {
 			context: string;
 			request_id: string;
+			context_expires_at: string;
+			id: string;
+			url: string;
 		};
 		const context = openedContent.context;
 		assert.equal(typeof context, "string");
 		assert.match(openedContent.request_id, /^[0-9a-f-]{36}$/i);
+		assert.equal(openedContent.id, LIX_ID);
+		assert.equal(openedContent.url, "https://lixray.com/@acme/company");
+		assert.ok(Date.parse(openedContent.context_expires_at) > Date.now());
+		assert.match(
+			opened.content?.[0]?.type === "text" ? opened.content[0].text : "",
+			/^Opened https:\/\/lixray\.com\/@acme\/company/,
+		);
 		assert.equal(responseRequestIds.at(-1), openedContent.request_id);
 		const executed = await client.callTool({
 			name: "execute",
@@ -252,7 +268,23 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			result: { rowsAffected: number };
 		};
 		assert.equal(executedContent.result.rowsAffected, 0);
+		assert.match(
+			executed.content?.[0]?.type === "text" ? executed.content[0].text : "",
+			/^SQL returned 1 row and affected 0 rows\.$/,
+		);
 		assert.equal(responseRequestIds.at(-1), executedContent.request_id);
+		const batched = await client.callTool({
+			name: "execute_batch",
+			arguments: {
+				context,
+				statements: [{ sql: "SELECT 1" }, { sql: "SELECT 2" }],
+			},
+		});
+		assert.equal(batched.isError, undefined);
+		assert.equal(
+			batched.content?.[0]?.type === "text" ? batched.content[0].text : "",
+			"Atomic SQL batch completed 2 statements. SQL returned 2 rows and affected 0 rows.",
+		);
 		const failed = await client.callTool({
 			name: "execute",
 			arguments: { context, sql: "SELECT error" },

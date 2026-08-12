@@ -57,6 +57,15 @@ export interface LixContext {
 	readonly branchId: string;
 }
 
+export interface OpenedLixContext {
+	context: string;
+	contextExpiresAt: string;
+	lixId: string;
+	lixRef: string;
+	branchId: string;
+	commitId: string;
+}
+
 export interface CreateBranchInput {
 	id?: string;
 	name: string;
@@ -216,18 +225,27 @@ export class LixService {
 	}
 
 	async resolveLixRef(lixRef: string): Promise<string> {
-		if (LIX_UUID_PATTERN.test(lixRef)) return lixRef.toLowerCase();
+		return (await this.resolveLixSummary(lixRef)).id;
+	}
+
+	private async resolveLixSummary(lixRef: string): Promise<LixSummary> {
+		const normalizedUuid = LIX_UUID_PATTERN.test(lixRef)
+			? lixRef.toLowerCase()
+			: undefined;
 
 		const qualified = QUALIFIED_LIX_REF_PATTERN.exec(lixRef);
 		const lixes = await this.listLixes();
-		const matches = qualified
-			? lixes.filter(
-					(lix) =>
-						lix.namespace.handle === qualified[1] && lix.slug === qualified[2],
-				)
-			: lixes.filter((lix) => lix.slug === lixRef);
+		const matches = normalizedUuid
+			? lixes.filter((lix) => lix.id.toLowerCase() === normalizedUuid)
+			: qualified
+				? lixes.filter(
+						(lix) =>
+							lix.namespace.handle === qualified[1] &&
+							lix.slug === qualified[2],
+					)
+				: lixes.filter((lix) => lix.slug === lixRef);
 
-		if (matches.length === 1) return matches[0].id;
+		if (matches.length === 1) return matches[0];
 		if (matches.length === 0)
 			throw createLixError("not_found", "Lix not found.");
 		throw createLixError(
@@ -236,23 +254,18 @@ export class LixService {
 		);
 	}
 
-	async openLix(
-		lixRef: string,
-		branchId?: string,
-	): Promise<{
-		context: string;
-		lixId: string;
-		branchId: string;
-		commitId: string;
-	}> {
-		const lixId = await this.resolveLixRef(lixRef);
+	async openLix(lixRef: string, branchId?: string): Promise<OpenedLixContext> {
+		const repository = await this.resolveLixSummary(lixRef);
+		const lixId = repository.id;
 		const selectedBranchId = branchId
 			? (await this.client.switchBranch(lixId, branchId)).branchId
 			: await this.client.activeBranchId(lixId);
-		const context = await this.issueContext(lixId, selectedBranchId);
+		const issuedContext = await this.issueContext(lixId, selectedBranchId);
 		return {
-			context,
+			context: issuedContext.token,
+			contextExpiresAt: new Date(issuedContext.expiresAt).toISOString(),
 			lixId,
+			lixRef: `@${repository.namespace.handle}/${repository.slug}`,
 			branchId: selectedBranchId,
 			commitId: await this.commitId(lixId, selectedBranchId),
 		};
@@ -283,7 +296,7 @@ export class LixService {
 			selected.branchId,
 		);
 		return {
-			context: nextContext,
+			context: nextContext.token,
 			branchId: selected.branchId,
 			commitId: await this.commitId(context.lixId, selected.branchId),
 		};
@@ -392,14 +405,18 @@ export class LixService {
 		return value.value;
 	}
 
-	private async issueContext(lixId: string, branchId: string): Promise<string> {
+	private async issueContext(
+		lixId: string,
+		branchId: string,
+	): Promise<{ token: string; expiresAt: number }> {
+		const expiresAt = Date.now() + this.contextTtlMs;
 		const claims: ContextClaims = {
 			v: 1,
 			userId: this.principal.userId,
 			clientId: this.principal.clientId,
 			lixId,
 			branchId,
-			expiresAt: Date.now() + this.contextTtlMs,
+			expiresAt,
 		};
 		const encodedClaims = encodeBase64Url(
 			new TextEncoder().encode(JSON.stringify(claims)),
@@ -409,7 +426,10 @@ export class LixService {
 			await this.cryptoKeyPromise,
 			new TextEncoder().encode(encodedClaims),
 		);
-		return `${encodedClaims}.${encodeBase64Url(new Uint8Array(signature))}`;
+		return {
+			token: `${encodedClaims}.${encodeBase64Url(new Uint8Array(signature))}`,
+			expiresAt,
+		};
 	}
 
 	private async readContext(token: string): Promise<LixContext> {
@@ -449,7 +469,10 @@ export class LixService {
 			throw createLixError("invalid_context", "context is invalid.");
 		}
 		if (!Number.isFinite(claims.expiresAt) || claims.expiresAt <= Date.now()) {
-			throw createLixError("context_expired", "context has expired.");
+			throw createLixError("context_expired", "The Lix context has expired.", {
+				hint: "Call open_lix again for this Lix and branch, then retry the SQL operation.",
+				details: { lix_id: claims.lixId, branch_id: claims.branchId },
+			});
 		}
 		return { lixId: claims.lixId, branchId: claims.branchId };
 	}

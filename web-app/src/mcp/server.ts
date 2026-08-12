@@ -12,6 +12,10 @@ import {
 } from "@modelcontextprotocol/server";
 import { PostHog } from "posthog-node";
 import { z } from "zod";
+import {
+	EXECUTE_BATCH_TOOL_DESCRIPTION,
+	EXECUTE_TOOL_DESCRIPTION,
+} from "./execute-schema.ts";
 import { isLixError, LixService, type ExecuteRequest } from "./lix-service.ts";
 import {
 	mcpSurfaceVersion,
@@ -149,7 +153,9 @@ const listLixesOutput = withError(
 const openLixOutput = withError(
 	z.object({
 		context,
-		lix_id: z.string(),
+		context_expires_at: z.string(),
+		id: z.string(),
+		url: z.string(),
 		branch_id: branchId,
 		commit_id: z.string(),
 	}),
@@ -303,7 +309,9 @@ export function createLixrayMcpServer(
 			const opened = await service.openLix(lix_ref, branch_id);
 			return {
 				context: opened.context,
-				lix_id: opened.lixId,
+				context_expires_at: opened.contextExpiresAt,
+				id: opened.lixId,
+				url: `${MCP_RESOURCE}/${opened.lixRef}`,
 				branch_id: opened.branchId,
 				commit_id: opened.commitId,
 			};
@@ -318,7 +326,7 @@ export function createLixrayMcpServer(
 		server,
 		"execute",
 		"Execute SQL",
-		"Execute exactly one SQL statement against the active branch in context. Use public Lix SQL surfaces such as lix_file, lix_directory, lix_file_history(), lix_directory_history(), information_schema, and lix_branch. File content is a blob; use CAST(content AS TEXT) for text. Directory paths do not have trailing slashes.",
+		EXECUTE_TOOL_DESCRIPTION,
 		z
 			.object({
 				context,
@@ -341,7 +349,7 @@ export function createLixrayMcpServer(
 		server,
 		"execute_batch",
 		"Execute an atomic SQL batch",
-		"Execute an ordered, atomic batch of SQL statements against the active branch in context. Use this for multi-step file or directory changes so partial setup cannot leak. File creation, reads, edits, deletes, directory creation, and path renames all belong here as SQL.",
+		EXECUTE_BATCH_TOOL_DESCRIPTION,
 		z
 			.object({
 				context,
@@ -782,7 +790,7 @@ function registerTool(
 				return {
 					structuredContent,
 					content: [
-						{ type: "text" as const, text: JSON.stringify(structuredContent) },
+						{ type: "text" as const, text: summarizeToolResult(name, raw) },
 					],
 				};
 			} catch (caught) {
@@ -805,13 +813,53 @@ function registerTool(
 				return {
 					isError: true,
 					structuredContent,
-					content: [
-						{ type: "text" as const, text: JSON.stringify(structuredContent) },
-					],
+					content: [{ type: "text" as const, text: summarizeToolError(error) }],
 				};
 			}
 		},
 	);
+}
+
+function summarizeToolResult(name: string, raw: unknown): string {
+	if (!raw || typeof raw !== "object") return `${name} completed.`;
+	const result = raw as Record<string, unknown>;
+	if (name === "list_lixes") {
+		const count = Array.isArray(result.lixes) ? result.lixes.length : 0;
+		return `Found ${count} accessible ${count === 1 ? "Lix" : "Lixes"}.`;
+	}
+	if (name === "open_lix") {
+		return `Opened ${String(result.url ?? result.id)} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}. Context expires at ${String(result.context_expires_at)}.`;
+	}
+	if (name === "execute") {
+		return summarizeSqlResults([result.result]);
+	}
+	if (name === "execute_batch") {
+		const results = Array.isArray(result.results) ? result.results : [];
+		return `Atomic SQL batch completed ${results.length} ${results.length === 1 ? "statement" : "statements"}. ${summarizeSqlResults(results)}`;
+	}
+	return `${name} completed.`;
+}
+
+function summarizeSqlResults(results: Array<unknown>): string {
+	let returnedRows = 0;
+	let affectedRows = 0;
+	for (const value of results) {
+		if (!value || typeof value !== "object") continue;
+		const result = value as Record<string, unknown>;
+		if (Array.isArray(result.rows)) returnedRows += result.rows.length;
+		if (typeof result.rowsAffected === "number") {
+			affectedRows += result.rowsAffected;
+		}
+	}
+	return `SQL returned ${returnedRows} ${returnedRows === 1 ? "row" : "rows"} and affected ${affectedRows} ${affectedRows === 1 ? "row" : "rows"}.`;
+}
+
+function summarizeToolError(error: {
+	code: string;
+	message: string;
+	hint?: string;
+}): string {
+	return `LixRay error ${error.code}: ${error.message}${error.hint ? ` Hint: ${error.hint}` : ""}`;
 }
 
 function toMcpError(caught: unknown): {
