@@ -1,10 +1,9 @@
 import {
+	IndexedDbStorage,
 	openLix,
 	type Lix,
-	type LixSnapshotStorage,
 	type RemoteLixFetch,
 } from "@lix-js/sdk";
-import { LocalStorage } from "@lix-js/sdk/local-storage-adapter";
 import { captureTelemetry } from "./telemetry.ts";
 
 type TokenProvider = () => Promise<string | null>;
@@ -21,9 +20,9 @@ interface OpenWorkspaceLixSessionOptions {
 	 */
 	allowAnonymous?: boolean;
 	initialBranchId?: string | null;
-	/** Prefixes this browser client's private Lix snapshot (for account isolation). */
+	/** Names this browser client's private Lix client-state database. */
 	clientStoragePrefix?: string;
-	clientStorage?: LixSnapshotStorage;
+	clientStorage?: IndexedDbStorage;
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
 }
@@ -61,12 +60,10 @@ async function openWorkspaceLixSessionOnce(
 ): Promise<WorkspaceLixSession> {
 	const clientStorage =
 		options.clientStorage ??
-		(typeof globalThis.localStorage === "undefined"
+		(typeof globalThis.indexedDB === "undefined"
 			? undefined
-			: new LocalStorage({
-					...(options.clientStoragePrefix
-						? { prefix: options.clientStoragePrefix }
-						: {}),
+			: new IndexedDbStorage({
+					name: options.clientStoragePrefix ?? "lixray.client.v2",
 				}));
 	const lix = await openLix({
 		server: {

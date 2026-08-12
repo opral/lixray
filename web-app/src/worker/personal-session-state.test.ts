@@ -89,7 +89,7 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 	const values = new Map<string, unknown>();
 	const listeners = new Set<() => void>();
 	const clientState: AtelierClientState = {
-		get: (key) => values.get(key) as never,
+		get: async (key) => values.get(key) as never,
 		set: async (key, value) => {
 			values.set(key, value);
 			for (const listener of listeners) listener();
@@ -143,12 +143,14 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 		review: { autoAcceptAgentChanges: false },
 	});
 	assert.equal(fallbackStorage.length, 0);
+	const restoredShell = createWorkspaceSessionStateStore({
+		userId: USER,
+		workspaceId: LIX,
+		clientState,
+	});
+	await waitFor(() => restoredShell.getSnapshot() !== null);
 	assert.deepEqual(
-		createWorkspaceSessionStateStore({
-			userId: USER,
-			workspaceId: LIX,
-			clientState,
-		}).getSnapshot(),
+		restoredShell.getSnapshot(),
 		shellState,
 		"a second consumer of this client Lix can restore shell state",
 	);
@@ -177,7 +179,7 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 	);
 });
 
-void test("client Lix shell state applies the first-visit initializer", () => {
+void test("client Lix shell state applies the first-visit initializer", async () => {
 	const seededState = {
 		focusedPanel: "central" as const,
 		panels: {
@@ -198,6 +200,7 @@ void test("client Lix shell state applies the first-visit initializer", () => {
 		initializeSnapshot: (persisted) => persisted ?? seededState,
 	});
 
+	await waitFor(() => store.getSnapshot() !== null);
 	assert.deepEqual(store.getSnapshot(), seededState);
 });
 
@@ -645,7 +648,7 @@ class MemoryStorage implements Storage {
 function memoryClientState(): AtelierClientState {
 	const values = new Map<string, never>();
 	return {
-		get: (key) => values.get(key),
+		get: async (key) => values.get(key),
 		set: async (key, value) => {
 			values.set(key, value as never);
 		},

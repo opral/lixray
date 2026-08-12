@@ -12,12 +12,8 @@ const pnpmLockfilePath = join(repositoryRoot, "pnpm-lock.yaml");
 const lixLockPackages = [
   { name: "lix", manifest: "packages/lix/Cargo.toml" },
   {
-    name: "lix-server-protocol",
-    manifest: "packages/server-protocol/Cargo.toml",
-  },
-  {
     name: "lix-storage-slatedb",
-    manifest: "packages/slatedb-storage/Cargo.toml",
+    manifest: "packages/storage-slatedb/Cargo.toml",
   },
 ];
 
