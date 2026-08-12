@@ -8,9 +8,10 @@ import {
 import { Folder, Home, Sparkles, Users } from "lucide-react";
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { EntryKind } from "../../lib/entry-kind.ts";
 import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
 import { DirectoryView, GettingStartedView } from "./directory-view";
-import { dirNameFromPath, normalizeHomeDirPath } from "./lix-data";
+import { dirNameFromPath } from "./lix-data";
 import { PeopleView, type WorkspaceTeamApi } from "./people-view";
 
 export const LIXRAY_HOME_EXTENSION_ID = "lixray_home";
@@ -23,14 +24,14 @@ export type AgentConnectionProbe = () => Promise<boolean>;
 
 /** Stable central-tab identity for the folder view at dirPath. */
 export const lixrayDirInstanceId = (dirPath: string): string =>
-	`${LIXRAY_DIR_EXTENSION_ID}:${normalizeHomeDirPath(dirPath)}`;
+	`${LIXRAY_DIR_EXTENSION_ID}:${dirPath}`;
 
 /** Central-tab state for a folder view; the tab label is the folder name. */
 export const lixrayDirViewState = (dirPath: string) => {
-	const normalized = normalizeHomeDirPath(dirPath);
 	return {
-		path: normalized,
-		atelier: { label: dirNameFromPath(normalized) || "Folder" },
+		kind: EntryKind.Directory,
+		path: dirPath,
+		atelier: { label: dirNameFromPath(dirPath) || "Folder" },
 	};
 };
 
@@ -185,10 +186,19 @@ const createLixrayDirExtension = (
 	entry: {
 		icon: Folder,
 		mount: ({ element, atelier, view }) => {
-			const dirPathFromView = (candidate: AtelierExtensionView) =>
-				normalizeHomeDirPath(
-					typeof candidate.state.path === "string" ? candidate.state.path : "/",
-				);
+			const dirPathFromView = (candidate: AtelierExtensionView) => {
+				// LIXRAY_DIR is the authoritative surface for old persisted Atelier
+				// views that predate the explicit kind field. New state always writes
+				// the discriminant; a conflicting discriminant fails closed.
+				if (
+					candidate.state.kind !== undefined &&
+					candidate.state.kind !== EntryKind.Directory
+				)
+					return "/";
+				return typeof candidate.state.path === "string"
+					? candidate.state.path
+					: "/";
+			};
 			const { root, render } = mountDirectoryView({
 				element,
 				atelier,

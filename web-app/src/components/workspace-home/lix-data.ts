@@ -1,28 +1,24 @@
 import type { Lix } from "@lix-js/sdk";
 import { useEffect, useMemo, useState } from "react";
-
-/** Normalizes to a leading- and trailing-slash directory path; "" → "/". */
-export function normalizeHomeDirPath(raw: unknown): string {
-	if (typeof raw !== "string" || !raw) return "/";
-	const segments = raw.split("/").filter(Boolean);
-	if (segments.some((segment) => segment === "." || segment === "..")) {
-		return "/";
-	}
-	return segments.length === 0 ? "/" : `/${segments.join("/")}/`;
-}
+import { EntryKind } from "../../lib/entry-kind.ts";
 
 export function dirNameFromPath(dirPath: string): string {
 	return dirPath.split("/").filter(Boolean).at(-1) ?? "";
 }
 
-type WorkspaceTree = {
+export type WorkspaceTree = {
 	readonly dirs: ReadonlyArray<{
+		readonly kind: typeof EntryKind.Directory;
+		readonly id: string;
+		readonly parentId: string | null;
 		readonly path: string;
 		readonly name: string;
 		readonly updatedAt: string;
 	}>;
 	readonly files: ReadonlyArray<{
+		readonly kind: typeof EntryKind.File;
 		readonly id: string;
+		readonly directoryId: string | null;
 		readonly path: string;
 		readonly name: string;
 		readonly updatedAt: string;
@@ -71,28 +67,36 @@ function useObservedRows(
 const asText = (value: unknown): string =>
 	typeof value === "string" ? value : "";
 
+const asNullableText = (value: unknown): string | null =>
+	typeof value === "string" && value.length > 0 ? value : null;
+
 /** The full directory/file tree, kept live via lix observe. */
 export function useWorkspaceTree(lix: Lix): WorkspaceTree | null {
 	const dirRows = useObservedRows(
 		lix,
-		"SELECT path, name, lixcol_updated_at FROM lix_directory ORDER BY path",
+		"SELECT id, parent_id, path, name, lixcol_updated_at FROM lix_directory ORDER BY path",
 		[],
 	);
 	const fileRows = useObservedRows(
 		lix,
-		"SELECT id, path, name, lixcol_updated_at FROM lix_file ORDER BY path",
+		"SELECT id, directory_id, path, name, lixcol_updated_at FROM lix_file ORDER BY path",
 		[],
 	);
 	return useMemo(() => {
 		if (!dirRows || !fileRows) return null;
 		return {
 			dirs: dirRows.map((row) => ({
+				kind: EntryKind.Directory,
+				id: asText(row.get("id")),
+				parentId: asNullableText(row.get("parent_id")),
 				path: asText(row.get("path")),
 				name: asText(row.get("name")),
 				updatedAt: asText(row.get("lixcol_updated_at")),
 			})),
 			files: fileRows.map((row) => ({
+				kind: EntryKind.File,
 				id: asText(row.get("id")),
+				directoryId: asNullableText(row.get("directory_id")),
 				path: asText(row.get("path")),
 				name: asText(row.get("name")),
 				updatedAt: asText(row.get("lixcol_updated_at")),
@@ -175,7 +179,8 @@ export function resolveWorkspaceHref(
 		segments.push(segment);
 	}
 	if (segments.length === 0) return null;
-	return `/${segments.map((segment) => decodeURIComponent(segment)).join("/")}`;
+	const resolved = `/${segments.map((segment) => decodeURIComponent(segment)).join("/")}`;
+	return raw.endsWith("/") ? `${resolved}/` : resolved;
 }
 
 type DirectoryListing = {
@@ -192,40 +197,30 @@ type DirectoryListing = {
 	readonly readmePath: string | null;
 };
 
-/** Direct children of dirPath ("/" or "/segment/…/"), folders first. */
+/** Direct children of dirPath, folders first. Entry kind comes from the surface. */
 export function listDirectory(
 	tree: WorkspaceTree,
 	dirPath: string,
 ): DirectoryListing {
-	const isDirectChildDir = (path: string) => {
-		if (!path.startsWith(dirPath) || path === dirPath) return false;
-		const rest = path.slice(dirPath.length);
-		const segments = rest.split("/").filter(Boolean);
-		return segments.length === 1 && rest.endsWith("/");
-	};
-	const isDirectChildFile = (path: string) => {
-		if (!path.startsWith(dirPath)) return false;
-		const rest = path.slice(dirPath.length);
-		return rest.length > 0 && !rest.includes("/");
-	};
+	const currentDirectoryId =
+		dirPath === "/"
+			? null
+			: tree.dirs.find((directory) => directory.path === dirPath)?.id;
+	if (dirPath !== "/" && !currentDirectoryId) {
+		return { dirs: [], files: [], readmePath: null };
+	}
 	const countItemsIn = (childDirPath: string) => {
-		const directDir = (path: string) => {
-			if (!path.startsWith(childDirPath) || path === childDirPath) return false;
-			const rest = path.slice(childDirPath.length);
-			return rest.split("/").filter(Boolean).length === 1 && rest.endsWith("/");
-		};
-		const directFile = (path: string) => {
-			if (!path.startsWith(childDirPath)) return false;
-			const rest = path.slice(childDirPath.length);
-			return rest.length > 0 && !rest.includes("/");
-		};
+		const childDirectory = tree.dirs.find(
+			(directory) => directory.path === childDirPath,
+		);
+		if (!childDirectory) return 0;
 		return (
-			tree.dirs.filter((dir) => directDir(dir.path)).length +
-			tree.files.filter((file) => directFile(file.path)).length
+			tree.dirs.filter((dir) => dir.parentId === childDirectory.id).length +
+			tree.files.filter((file) => file.directoryId === childDirectory.id).length
 		);
 	};
 	const dirs = tree.dirs
-		.filter((dir) => isDirectChildDir(dir.path))
+		.filter((dir) => dir.parentId === currentDirectoryId)
 		.map((dir) => ({
 			path: dir.path,
 			name: dir.name,
@@ -233,7 +228,7 @@ export function listDirectory(
 		}));
 	// Per the home comp: README pinned first, then most recently updated.
 	const files = tree.files
-		.filter((file) => isDirectChildFile(file.path))
+		.filter((file) => file.directoryId === currentDirectoryId)
 		.map((file) => ({
 			path: file.path,
 			name: file.name,
@@ -248,6 +243,20 @@ export function listDirectory(
 	const readmePath =
 		files.find((file) => file.name.toLowerCase() === "readme.md")?.path ?? null;
 	return { dirs, files, readmePath };
+}
+
+/** Resolves a link against the persisted directory surface without inferring kind from a path. */
+export function persistedDirectoryPath(
+	tree: WorkspaceTree,
+	resolvedPath: string,
+): string | null {
+	return (
+		tree.dirs.find(
+			(dir) =>
+				dir.path === resolvedPath ||
+				(!resolvedPath.endsWith("/") && dir.path === `${resolvedPath}/`),
+		)?.path ?? null
+	);
 }
 
 /** Live markdown text of the file at path (null while loading/missing). */
@@ -279,21 +288,23 @@ const NEW_FILE_TEMPLATES: Record<string, { base: string; data: string }> = {
 
 async function firstFreePath(
 	lix: Lix,
+	kind: EntryKind,
 	candidate: (suffix: number | null) => string,
 ): Promise<string> {
 	for (let suffix = null as number | null, i = 0; i < 1000; i += 1) {
 		const path = candidate(suffix);
+		const directoryPath = kind === EntryKind.Directory ? path : `${path}/`;
+		const filePath = kind === EntryKind.File ? path : path.slice(0, -1);
 		const [dirHit, fileHit] = await Promise.all([
-			lix.execute(
-				"SELECT 1 FROM lix_directory WHERE lower(path) = lower($1) OR lower(path) = lower($2)",
-				[path, `${path}/`],
-			),
+			lix.execute("SELECT 1 FROM lix_directory WHERE lower(path) = lower($1)", [
+				directoryPath,
+			]),
 			lix.execute("SELECT 1 FROM lix_file WHERE lower(path) = lower($1)", [
-				path,
+				filePath,
 			]),
 		]);
 		if (dirHit.rows.length === 0 && fileHit.rows.length === 0) return path;
-		suffix = (suffix ?? 1) + 1;
+		suffix = suffix === null ? 1 : suffix + 1;
 	}
 	throw new Error("Unable to find a free file name.");
 }
@@ -308,7 +319,7 @@ export async function createWorkspaceFile(
 		base: "untitled",
 		data: "",
 	};
-	const path = await firstFreePath(lix, (suffix) =>
+	const path = await firstFreePath(lix, EntryKind.File, (suffix) =>
 		suffix === null
 			? `${dirPath}${template.base}.${extension}`
 			: `${dirPath}${template.base}-${suffix}.${extension}`,
@@ -325,13 +336,13 @@ export async function createWorkspaceFolder(
 	lix: Lix,
 	dirPath: string,
 ): Promise<string> {
-	const path = await firstFreePath(lix, (suffix) =>
-		suffix === null ? `${dirPath}new-folder` : `${dirPath}new-folder-${suffix}`,
+	const path = await firstFreePath(lix, EntryKind.Directory, (suffix) =>
+		suffix === null
+			? `${dirPath}new-folder/`
+			: `${dirPath}new-folder-${suffix}/`,
 	);
-	await lix.execute("INSERT INTO lix_directory (path) VALUES ($1)", [
-		`${path}/`,
-	]);
-	return `${path}/`;
+	await lix.execute("INSERT INTO lix_directory (path) VALUES ($1)", [path]);
+	return path;
 }
 
 /**
