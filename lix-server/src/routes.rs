@@ -9,6 +9,7 @@ use axum::{
     routing::{any, get},
     Json, Router,
 };
+use lix_sdk::server_protocol::{self, ServerProtocolContext, ServerProtocolPrincipal};
 use serde::Serialize;
 use serde_json::json;
 use std::{
@@ -20,15 +21,21 @@ use std::{
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tower::ServiceExt;
+use tower_http::{
+    compression::{
+        predicate::{DefaultPredicate, Predicate as _, SizeAbove},
+        CompressionLayer, CompressionLevel,
+    },
+    decompression::RequestDecompressionLayer,
+};
 use tracing::Instrument as _;
 
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER: &str = "x-lixray-idempotency-principal";
 const MAX_TRUSTED_IDEMPOTENCY_PRINCIPAL_BYTES: usize = 255;
+const MIN_COMPRESSION_BODY_BYTES: u16 = 32 * 1024;
 
 struct TrustedRequestPrincipal {
     account_id: String,
-    idempotency_scope: lix_server_protocol::TrustedIdempotencyScope,
 }
 
 #[derive(Clone)]
@@ -57,7 +64,7 @@ struct LixLeaseBody {
 }
 
 enum CancellationRecoveryMode {
-    WaitForTerminalStorage(lix_server_protocol::DurableTerminalStorageSignal),
+    WaitForTerminalStorage(server_protocol::DurableTerminalStorageSignal),
     RecoverOnDrop,
     Disarmed,
 }
@@ -74,7 +81,7 @@ struct CancellationRecovery {
 
 impl CancellationRecovery {
     fn new(
-        signal: lix_server_protocol::DurableTerminalStorageSignal,
+        signal: server_protocol::DurableTerminalStorageSignal,
         manager: Arc<LixRuntimeManager>,
         lix_id: String,
         service: Arc<LixService>,
@@ -191,6 +198,18 @@ pub fn router(
             request_sequence: Arc::new(AtomicU64::new(0)),
             in_flight_sql,
         })
+        .layer(
+            CompressionLayer::new()
+                .gzip(true)
+                .zstd(true)
+                .quality(CompressionLevel::Precise(2))
+                .compress_when(
+                    DefaultPredicate::new().and(SizeAbove::new(MIN_COMPRESSION_BODY_BYTES)),
+                ),
+        )
+        // The canonical protocol applies its body limit while consuming the
+        // expanded stream, so decompression must happen before dispatch.
+        .layer(RequestDecompressionLayer::new().gzip(true))
 }
 
 #[derive(Debug, Serialize)]
@@ -279,6 +298,9 @@ async fn lix_protocol_inner(
             .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
         return response;
     }
+    // The bearer token authenticates the outer LixRay host route. It is not
+    // part of the canonical Lix Server Protocol request.
+    request.headers_mut().remove(header::AUTHORIZATION);
 
     let trusted_principal = match take_trusted_principal(&mut request) {
         Ok(principal) => principal,
@@ -292,19 +314,22 @@ async fn lix_protocol_inner(
             );
         }
     };
-    let active_account_id = trusted_principal
-        .as_ref()
-        // Demo authentication is not a durable Supabase identity. Keep demo
-        // writes attributable to the built-in anonymous account while still
-        // retaining its principal for idempotency isolation.
-        .filter(|principal| principal.account_id != "lixray-demo")
-        .map(|principal| principal.account_id.clone());
-    let expected_account_id = active_account_id
-        .clone()
-        .unwrap_or_else(|| lix_sdk::ANONYMOUS_ACCOUNT_ID.to_string());
-    if let Some(principal) = trusted_principal {
-        request.extensions_mut().insert(principal.idempotency_scope);
-    }
+    let principal = trusted_principal.map_or(ServerProtocolPrincipal::Anonymous, |principal| {
+        if principal.account_id == "lixray-demo" {
+            // Demo authentication is not a durable Supabase identity. Keep
+            // writes attributed to the built-in anonymous account while
+            // retaining an isolated session and idempotency namespace.
+            ServerProtocolPrincipal::Authenticated {
+                account_id: lix_sdk::ANONYMOUS_ACCOUNT_ID.to_owned(),
+                idempotency_scope: principal.account_id,
+            }
+        } else {
+            ServerProtocolPrincipal::Authenticated {
+                idempotency_scope: principal.account_id.clone(),
+                account_id: principal.account_id,
+            }
+        }
+    });
     let runtime =
         match tokio::time::timeout(state.protocol_timeout, state.manager.get(&lix_id)).await {
             Ok(Ok(runtime)) => runtime,
@@ -321,34 +346,7 @@ async fn lix_protocol_inner(
             }
         };
 
-    let creates_session = request.method() == axum::http::Method::GET
-        && protocol_path.trim_end_matches('/') == "lix/v1"
-        && !request.headers().contains_key("lix-session-id");
-    if creates_session {
-        if let Some(account_id) = active_account_id.as_deref() {
-            if let Err(error) = runtime.ensure_human_account(account_id).await {
-                tracing::error!(
-                    lix_id,
-                    account_id,
-                    error = %error,
-                    "failed to provision authenticated Lix account"
-                );
-                return protocol_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "LIX_ACCOUNT_PROVISION_FAILED",
-                    "Could not provision the authenticated account.",
-                    None,
-                    None,
-                );
-            }
-        }
-    }
-
-    let query = protocol_query(
-        request.uri().query(),
-        creates_session.then_some(active_account_id).flatten(),
-    );
-    let path_and_query = query.map_or_else(
+    let path_and_query = request.uri().query().map_or_else(
         || format!("/{protocol_path}"),
         |query| format!("/{protocol_path}?{query}"),
     );
@@ -363,13 +361,11 @@ async fn lix_protocol_inner(
     };
     *request.uri_mut() = uri;
 
-    let (notifier, signal) = lix_server_protocol::durable_terminal_storage_signal();
-    request.extensions_mut().insert(notifier);
-    request
-        .extensions_mut()
-        .insert(lix_server_protocol::TrustedActiveAccountId::new(
-            expected_account_id,
-        ));
+    let (notifier, signal) = server_protocol::durable_terminal_storage_signal();
+    let context = ServerProtocolContext {
+        principal,
+        durable_terminal_storage_notifier: Some(notifier),
+    };
     let mut cancellation_recovery = CancellationRecovery::new(
         signal,
         Arc::clone(&state.manager),
@@ -381,9 +377,9 @@ async fn lix_protocol_inner(
     // object-store client has its own request budget, but a wedged connection
     // (e.g. after a host sleep) can still hang past it — without these bounds
     // requests never answer and a runtime can remain wedged for later calls.
-    let handler_future = runtime.protocol_router().oneshot(request);
+    let handler_future = runtime.handle_protocol(request, context);
     let response = match tokio::time::timeout(state.protocol_timeout, handler_future).await {
-        Ok(response) => response.expect("canonical Lix protocol router is infallible"),
+        Ok(response) => response,
         Err(_elapsed) => {
             let activities = state.in_flight_sql.current();
             let phase = if activities.is_empty() {
@@ -420,7 +416,7 @@ async fn lix_protocol_inner(
             return protocol_timeout_response();
         }
     };
-    if lix_server_protocol::is_terminal_storage_response(&response) {
+    if server_protocol::is_terminal_storage_response(&response) {
         tracing::warn!(
             lix_id = lix_id.as_str(),
             "protocol request hit a terminal storage error; recovering runtime"
@@ -431,7 +427,7 @@ async fn lix_protocol_inner(
         cancellation_recovery.recover_on_drop();
         state.manager.recover(&lix_id, &runtime).await;
     }
-    if let Some(terminal_signal) = lix_server_protocol::terminal_storage_stream_signal(&response) {
+    if let Some(terminal_signal) = server_protocol::terminal_storage_stream_signal(&response) {
         let manager = Arc::clone(&state.manager);
         let recovery_runtime = Arc::clone(&runtime);
         let recovery_lix_id = lix_id.clone();
@@ -456,6 +452,7 @@ async fn lix_protocol_inner(
         .and_then(|content_type| content_type.split(';').next())
         .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("text/event-stream"));
     let (parts, body) = response.into_parts();
+    let body = Body::new(body);
     if holds_lix_lease {
         Response::from_parts(
             parts,
@@ -545,26 +542,7 @@ fn take_trusted_principal(
         );
     }
     let account_id = value.to_string();
-    Ok(Some(TrustedRequestPrincipal {
-        idempotency_scope: lix_server_protocol::TrustedIdempotencyScope::new(account_id.clone()),
-        account_id,
-    }))
-}
-
-fn protocol_query(existing: Option<&str>, active_account_id: Option<String>) -> Option<String> {
-    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-    if let Some(existing) = existing {
-        for (key, value) in url::form_urlencoded::parse(existing.as_bytes()) {
-            if key != "activeAccountId" {
-                serializer.append_pair(&key, &value);
-            }
-        }
-    }
-    if let Some(account_id) = active_account_id {
-        serializer.append_pair("activeAccountId", &account_id);
-    }
-    let query = serializer.finish();
-    (!query.is_empty()).then_some(query)
+    Ok(Some(TrustedRequestPrincipal { account_id }))
 }
 
 fn protocol_timeout_response() -> Response {
@@ -760,10 +738,12 @@ impl RetryAfterResponse for Response {
 mod tests {
     use super::*;
     use axum::http::Request;
+    use flate2::{write::GzEncoder, Compression};
     use http_body_util::BodyExt;
     use lix_sdk::{Value as LixValue, WireValue};
     use serde_json::{json, Value as JsonValue};
     use std::{
+        io::Write as _,
         path::PathBuf,
         sync::{
             atomic::{AtomicUsize, Ordering},
@@ -771,6 +751,7 @@ mod tests {
         },
         time::Duration,
     };
+    use tower::ServiceExt as _;
 
     const TEST_PROTOCOL_TIMEOUT: Duration = Duration::from_secs(60);
     static TEST_IDEMPOTENCY_KEY_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
@@ -840,7 +821,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/account-e2e/lix/v1/?activeAccountId=spoofed")
+                    .uri("/lixes/account-e2e/lix/v1/")
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
                     .body(Body::empty())
                     .expect("trusted handshake request"),
@@ -858,8 +839,8 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/lixes/account-e2e/lix/v1/execute")
-                    .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
-                    .header(lix_server_protocol::IDEMPOTENCY_KEY_HEADER, "account-e2e-insert")
+                    .header(server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(server_protocol::IDEMPOTENCY_KEY_HEADER, "account-e2e-insert")
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
                     .header("content-type", "application/json")
                     .body(Body::from(
@@ -882,7 +863,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/lixes/account-e2e/lix/v1/execute")
-                    .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(server_protocol::SESSION_ID_HEADER, session_id)
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
                     .header("content-type", "application/json")
                     .body(Body::from(
@@ -902,7 +883,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/lixes/account-e2e/lix/v1/")
-                    .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(server_protocol::SESSION_ID_HEADER, session_id)
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, OTHER_ACCOUNT_ID)
                     .body(Body::empty())
                     .expect("cross-account resume request"),
@@ -914,6 +895,47 @@ mod tests {
             json_body(cross_account).await["error"]["code"],
             "LIX_ERROR_PROTOCOL_ACCOUNT_MISMATCH"
         );
+    }
+
+    #[tokio::test]
+    async fn decompresses_gzip_before_canonical_protocol_dispatch() {
+        let app = test_router();
+        let handshake = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/lixes/gzip-e2e/lix/v1/")
+                    .body(Body::empty())
+                    .expect("handshake request"),
+            )
+            .await
+            .expect("handshake response");
+        let session_id = json_body(handshake).await["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_owned();
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder
+            .write_all(br#"{"sql":"SELECT 1 AS value","params":[]}"#)
+            .expect("compress execute request");
+        let body = encoder.finish().expect("finish gzip request");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/lixes/gzip-e2e/lix/v1/execute")
+                    .header(server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::CONTENT_ENCODING, "gzip")
+                    .body(Body::from(body))
+                    .expect("compressed execute request"),
+            )
+            .await
+            .expect("compressed execute response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(json_body(response).await["rows"][0][0]["value"], 1);
     }
 
     #[tokio::test]
@@ -993,10 +1015,10 @@ mod tests {
                     .method("POST")
                     .uri("/lixes/lix-a/lix/v1/execute")
                     .header(
-                        lix_server_protocol::SESSION_ID_HEADER,
+                        server_protocol::SESSION_ID_HEADER,
                         &lix_a_session,
                     )
-                    .header(lix_server_protocol::IDEMPOTENCY_KEY_HEADER, "isolate-lix-a")
+                    .header(server_protocol::IDEMPOTENCY_KEY_HEADER, "isolate-lix-a")
                     .header("content-type", "application/json")
                     .body(Body::from(
                         r#"{"sql":"INSERT INTO lix_file (path, content) VALUES ('/only-a.txt', CAST('A' AS BYTEA))"}"#,
@@ -1026,7 +1048,7 @@ mod tests {
                         .uri(format!(
                             "/lixes/{lix_id}/lix/v1/execute"
                         ))
-                        .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                        .header(server_protocol::SESSION_ID_HEADER, session_id)
                         .header("content-type", "application/json")
                         .body(Body::from(
                             r#"{"sql":"SELECT COUNT(*) AS count FROM lix_file WHERE path = '/only-a.txt'"}"#,
@@ -1263,7 +1285,7 @@ mod tests {
     }
 
     #[test]
-    fn trusted_idempotency_scope_is_removed_from_headers_before_protocol_dispatch() {
+    fn trusted_principal_is_removed_from_headers_before_protocol_dispatch() {
         let mut request = Request::builder()
             .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, "user-123")
             .body(Body::empty())
@@ -1273,43 +1295,32 @@ mod tests {
             .expect("valid trusted scope")
             .expect("trusted scope should be present");
         assert_eq!(principal.account_id, "user-123");
-        request.extensions_mut().insert(principal.idempotency_scope);
 
         assert!(request
             .headers()
             .get(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER)
             .is_none());
-        assert!(request
-            .extensions()
-            .get::<lix_server_protocol::TrustedIdempotencyScope>()
-            .is_some());
     }
 
-    #[test]
-    fn trusted_account_overrides_handshake_query() {
-        let query = protocol_query(
-            Some("activeBranchId=draft&activeAccountId=spoofed"),
-            Some("01920000-0000-7000-8000-000000000601".to_string()),
-        )
-        .expect("handshake query");
-        let values = url::form_urlencoded::parse(query.as_bytes())
-            .into_owned()
-            .collect::<std::collections::BTreeMap<_, _>>();
-        assert_eq!(
-            values.get("activeBranchId").map(String::as_str),
-            Some("draft")
-        );
-        assert_eq!(
-            values.get("activeAccountId").map(String::as_str),
-            Some("01920000-0000-7000-8000-000000000601")
-        );
+    #[tokio::test]
+    async fn client_cannot_select_an_active_account_in_the_handshake() {
+        let response = test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/lixes/lix-a/lix/v1?activeAccountId=spoofed")
+                    .body(Body::empty())
+                    .expect("handshake request"),
+            )
+            .await
+            .expect("handshake response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn cancelled_nonterminal_request_does_not_recover_its_runtime() {
         let manager = LixRuntimeManager::new_in_memory(1);
         let service = manager.get("lix-a").await.expect("open lix runtime");
-        let (notifier, signal) = lix_server_protocol::durable_terminal_storage_signal();
+        let (notifier, signal) = server_protocol::durable_terminal_storage_signal();
         let cancellation_recovery = CancellationRecovery::new(
             signal,
             Arc::clone(&manager),
@@ -1329,7 +1340,7 @@ mod tests {
     async fn cancellation_during_terminal_response_recovery_still_starts_runtime_recovery() {
         let manager = LixRuntimeManager::new_in_memory(1);
         let service = manager.get("lix-a").await.expect("open lix runtime");
-        let (notifier, signal) = lix_server_protocol::durable_terminal_storage_signal();
+        let (notifier, signal) = server_protocol::durable_terminal_storage_signal();
         let mut cancellation_recovery = CancellationRecovery::new(
             signal,
             Arc::clone(&manager),
@@ -1383,9 +1394,9 @@ mod tests {
             Request::builder()
                 .method("POST")
                 .uri(format!("/lixes/{lix_id}/lix/v1/execute"))
-                .header(lix_server_protocol::SESSION_ID_HEADER, session_id)
+                .header(server_protocol::SESSION_ID_HEADER, session_id)
                 .header(
-                    lix_server_protocol::IDEMPOTENCY_KEY_HEADER,
+                    server_protocol::IDEMPOTENCY_KEY_HEADER,
                     format!(
                         "lix-server-test-{}",
                         TEST_IDEMPOTENCY_KEY_SEQUENCE.fetch_add(1, Ordering::Relaxed)

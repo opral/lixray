@@ -10,30 +10,6 @@ mode because reusing setup state makes write comparisons ambiguous.
 The measured bottlenecks, controlled A/B results, memory/storage accounting,
 tradeoffs, and external design references are in [FINDINGS.md](FINDINGS.md).
 
-## Direct SlateDB parity gate
-
-The pinned Lix revision also contains an ignored release benchmark that
-compares direct SlateDB-backed Lix reads with the same reads over an actual
-loopback Lix protocol connection:
-
-```sh
-cd vendor/lix
-cargo test -p lix_server_protocol --release \
-  slatedb_direct_versus_remote_reads -- --ignored --nocapture
-```
-
-It uses one immutable physical fixture, identical durability and cache
-configuration, separate equivalent cache roots, and one accounted object store
-with 0, 10, or 25 milliseconds of injected latency. The matrix covers
-exact-path lookup, ordered listing of 100 paths, and 4 KiB, 100 KiB, and 1 MiB
-file downloads in warm-memory, warm-disk, and cold-cache states. The test gates
-remote p50 and p95 at no more than twice their direct counterparts and permits
-at most one additional object-store request per remote operation. Responses
-negotiate zstd and are fully decoded inside the timer, matching modern browser
-transfers. See
-`vendor/lix/packages/server-protocol/README.md` for diagnostic filters and
-reported profile fields.
-
 ## Corpus and history
 
 `--files` is deliberately restricted to `1000`, `5000`, or `10000`. Each

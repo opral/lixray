@@ -1,8 +1,12 @@
 use crate::{config::SlateDBCacheConfig, Config};
 use anyhow::{Context, Result};
-use axum::Router;
+use axum::{body::Body, http::Request};
 use blake3::Hasher;
 use fs2::FileExt as _;
+use futures_util::TryStreamExt as _;
+use lix_sdk::server_protocol::{
+    LixServerProtocol, ServerProtocolBody, ServerProtocolContext, ServerProtocolResponse,
+};
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
 #[cfg(test)]
 use object_store::memory::InMemory;
@@ -15,6 +19,7 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::runtime::Handle;
@@ -56,9 +61,7 @@ struct S3RequestBudget {
 }
 
 pub(crate) struct LixService {
-    root: Arc<lix_sdk::Lix<SlateDB>>,
-    protocol: lix_server_protocol::LixProtocolServer<SlateDB>,
-    protocol_router: Router,
+    protocol: LixServerProtocol<SlateDB>,
 }
 
 struct LixRuntime {
@@ -528,18 +531,13 @@ impl LixRuntimeManager {
                 .await
                 .context("open Lix lix session for the canonical server protocol")?,
         );
-        let protocol = lix_server_protocol::LixProtocolServer::new(Arc::clone(&protocol_root));
-        let protocol_router = protocol.router();
+        let protocol = LixServerProtocol::new(Arc::clone(&protocol_root));
         info!(
             lix_id,
             elapsed_ms = elapsed_millis(started),
             "opened lix runtime"
         );
-        Ok(Arc::new(LixRuntime::new(LixService {
-            root: protocol_root,
-            protocol,
-            protocol_router,
-        })))
+        Ok(Arc::new(LixRuntime::new(LixService { protocol })))
     }
 
     fn spawn_eviction_cleanup(self: &Arc<Self>, evicted: EvictedRuntime) {
@@ -864,14 +862,44 @@ impl LixRuntimeManager {
 }
 
 impl LixService {
-    pub(crate) fn protocol_router(&self) -> Router {
-        self.protocol_router.clone()
+    pub(crate) fn handle_protocol(
+        &self,
+        request: Request<Body>,
+        context: ServerProtocolContext,
+    ) -> Pin<Box<dyn Future<Output = ServerProtocolResponse> + Send + 'static>> {
+        let (parts, body) = request.into_parts();
+        let body =
+            ServerProtocolBody::stream(body.into_data_stream().map_err(std::io::Error::other));
+        let protocol = self.protocol.clone();
+        Box::pin(async move {
+            protocol
+                .handle(Request::from_parts(parts, body), context)
+                .await
+        })
     }
 
-    pub(crate) async fn ensure_human_account(&self, account_id: &str) -> Result<()> {
-        Box::pin(self.root.ensure_account(account_id, account_id, "human"))
-            .await
-            .context("ensure authenticated Lix account")
+    #[cfg(test)]
+    fn protocol_router(&self) -> axum::Router {
+        use axum::routing::any;
+
+        let service = self.protocol.clone();
+        axum::Router::new().fallback(any(move |request: Request<Body>| {
+            let protocol = service.clone();
+            async move {
+                let (parts, body) = request.into_parts();
+                let body = ServerProtocolBody::stream(
+                    body.into_data_stream().map_err(std::io::Error::other),
+                );
+                let response = protocol
+                    .handle(
+                        Request::from_parts(parts, body),
+                        ServerProtocolContext::anonymous(),
+                    )
+                    .await;
+                let (parts, body) = response.into_parts();
+                axum::response::Response::from_parts(parts, Body::new(body))
+            }
+        }))
     }
 
     async fn close(&self) -> Result<()> {
@@ -2088,7 +2116,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/lixes/lix-a/lix/v1/observe")
-                    .header(lix_server_protocol::SESSION_ID_HEADER, session)
+                    .header(lix_sdk::server_protocol::SESSION_ID_HEADER, session)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
                     .expect("observation request"),
@@ -2740,7 +2768,7 @@ mod tests {
                     Request::builder()
                         .method("POST")
                         .uri("/lixes/lix-a/lix/v1/execute")
-                        .header(lix_server_protocol::SESSION_ID_HEADER, &session)
+                        .header(lix_sdk::server_protocol::SESSION_ID_HEADER, &session)
                         .header("content-type", "application/json")
                         .body(Body::from(r#"{"sql":"SELECT 1"}"#))
                         .expect("fence probe request"),
@@ -2805,7 +2833,10 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/lixes/lix-a/lix/v1/execute")
-                    .header(lix_server_protocol::SESSION_ID_HEADER, reopened_session)
+                    .header(
+                        lix_sdk::server_protocol::SESSION_ID_HEADER,
+                        reopened_session,
+                    )
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"sql":"SELECT 1"}"#))
                     .expect("reopened query request"),
