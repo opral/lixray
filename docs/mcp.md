@@ -8,10 +8,11 @@ tools.
 
 1. Call `list_lixes` when the target repository is unknown.
 2. Call `open_lix` and retain its returned context.
-3. Use `execute` to inspect the relevant state.
+3. Use `query_sql` to inspect the relevant state.
 4. Before guessing dynamic table or column names, query `information_schema`.
-5. Use `execute_batch` for related mutations and finish the batch with a
-   focused verification `SELECT`.
+5. Use `execute_sql` for any atomic SQL batch. It is always treated as
+   potentially destructive; a final focused verification `SELECT` is recommended
+   after mutations.
 6. Report `rowsAffected` and the returned verification rows.
 
 ## Discover tables and columns
@@ -48,7 +49,7 @@ INSERT INTO lix_file (path, content)
 VALUES ($1, CAST($2 AS BYTEA));
 ```
 
-For a multi-file setup, send the inserts as one `execute_batch` request and
+For a multi-file setup, send the inserts as one `execute_sql` request and
 make its final statement a readback query:
 
 ```sql

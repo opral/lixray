@@ -12,11 +12,17 @@ import {
 } from "@modelcontextprotocol/server";
 import { PostHog } from "posthog-node";
 import { z } from "zod";
+import type { ParseSqlScript } from "../lib/lix-sql-access.ts";
 import {
-	EXECUTE_BATCH_TOOL_DESCRIPTION,
-	EXECUTE_TOOL_DESCRIPTION,
+	EXECUTE_SQL_TOOL_DESCRIPTION,
+	QUERY_SQL_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
-import { isLixError, LixService, type ExecuteRequest } from "./lix-service.ts";
+import {
+	createLixError,
+	isLixError,
+	LixService,
+	type ExecuteRequest,
+} from "./lix-service.ts";
 import {
 	mcpSurfaceVersion,
 	observeExecuteInput,
@@ -61,6 +67,7 @@ export interface McpServerOptions {
 	posthogDistinctId?: string;
 	posthogClientId?: string;
 	onPosthogFlush?: (flush: () => Promise<void>) => void;
+	parseSqlScript?: ParseSqlScript;
 }
 
 type McpSecurityScheme =
@@ -275,7 +282,7 @@ export function createLixrayMcpServer(
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through execute or execute_batch using the public lix_file and lix_directory tables. execute_batch is the atomic boundary. Do not invent file helper tools or branch state.",
+				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. query_sql is SELECT-only; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Do not invent file helper tools or branch state.",
 		},
 	);
 	const surfaceVersion = mcpSurfaceVersion(toolSurfaceDescriptions());
@@ -324,22 +331,28 @@ export function createLixrayMcpServer(
 
 	registerTool(
 		server,
-		"execute",
-		"Execute SQL",
-		EXECUTE_TOOL_DESCRIPTION,
+		"query_sql",
+		"Query SQL",
+		QUERY_SQL_TOOL_DESCRIPTION,
 		z
 			.object({
 				context,
 				sql: z.string().min(1),
 				params: z.array(wireValue).optional(),
-				options: executeOptions.optional(),
 			})
 			.strict(),
 		executeOutput,
-		writeAnnotations(),
+		readAnnotations(),
 		securitySchemes,
-		async (args) => service.execute(args.context, toExecuteRequest(args)),
-		"execute",
+		async (args) => {
+			assertReadOnlyQuery(
+				options.parseSqlScript,
+				args.sql,
+				Array.isArray(args.params) ? args.params.length : 0,
+			);
+			return service.execute(args.context, toExecuteRequest(args));
+		},
+		"query_sql",
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
@@ -347,9 +360,9 @@ export function createLixrayMcpServer(
 
 	registerTool(
 		server,
-		"execute_batch",
-		"Execute an atomic SQL batch",
-		EXECUTE_BATCH_TOOL_DESCRIPTION,
+		"execute_sql",
+		"Execute SQL atomically",
+		EXECUTE_SQL_TOOL_DESCRIPTION,
 		z
 			.object({
 				context,
@@ -360,13 +373,15 @@ export function createLixrayMcpServer(
 		executeBatchOutput,
 		writeAnnotations(),
 		securitySchemes,
-		async ({ context: token, statements, options: batchOptions }) => ({
-			...(await service.executeBatch(token, {
-				statements,
-				options: toExecuteOptions(batchOptions),
-			})),
-		}),
-		"execute_batch",
+		async ({ context: token, statements, options: batchOptions }) => {
+			return {
+				...(await service.executeBatch(token, {
+					statements,
+					options: toExecuteOptions(batchOptions),
+				})),
+			};
+		},
+		"execute_sql",
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
@@ -402,7 +417,7 @@ export function createLixrayMcpServer(
 		"Return a new context pinned to branch_id. Context switching is explicit and stateless; pass the returned context to subsequent calls.",
 		z.object({ context, branch_id: branchId }).strict(),
 		branchStateOutput,
-		writeAnnotations(false, false),
+		readAnnotations(),
 		securitySchemes,
 		async ({ context: token, branch_id }) => {
 			const state = await service.switchBranch(token, branch_id);
@@ -482,7 +497,7 @@ export function createLixrayMcpServer(
 		"Undo the latest commit on the branch selected by context.",
 		z.object({ context }).strict(),
 		undoOutput,
-		writeAnnotations(false, true),
+		writeAnnotations(),
 		securitySchemes,
 		async ({ context: token }) => {
 			const result = await service.undo(token);
@@ -506,7 +521,7 @@ export function createLixrayMcpServer(
 		"Redo the latest undone commit on the branch selected by context.",
 		z.object({ context }).strict(),
 		redoOutput,
-		writeAnnotations(false, true),
+		writeAnnotations(),
 		securitySchemes,
 		async ({ context: token }) => {
 			const result = await service.redo(token);
@@ -688,7 +703,7 @@ export function mcpDocumentationResponse(
 			"",
 			"Call list_lixes when the Lix is unknown, then open_lix. Pass the returned context to every later tool. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
 			"",
-			"Use execute for one SQL statement and execute_batch for an atomic ordered batch. File and directory operations are SQL against public lix_file and lix_directory tables; do not expect separate file helper tools. Directory paths use /skills, not /skills/.",
+			"Use query_sql for one SELECT statement and execute_sql for any atomic ordered SQL batch. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; do not expect separate file helper tools. Directory paths use /skills, not /skills/.",
 			"Every MCP response includes X-Request-ID and every tool result includes request_id. You may send X-Request-ID to preserve an upstream correlation ID; use the returned ID when reporting failures.",
 			"",
 			"Modern clients begin with server/discover. There is no initialize handshake and no MCP session id on this endpoint.",
@@ -765,14 +780,14 @@ function registerTool(
 			const startedAt = Date.now();
 			const toolName = observationName ?? name;
 			const input = args as Record<string, any>;
-			const executeInput = isExecuteTool(name)
-				? observeExecuteInput(name === "execute" ? [input] : input.statements)
+			const executeInput = isSqlTool(name)
+				? observeExecuteInput(name === "query_sql" ? [input] : input.statements)
 				: undefined;
 			try {
 				const raw = await call(input);
-				const executeOutput = isExecuteTool(name)
+				const executeOutput = isSqlTool(name)
 					? observeExecuteOutput(
-							name === "execute" ? { results: [raw.result] } : raw,
+							name === "query_sql" ? { results: [raw.result] } : raw,
 						)
 					: undefined;
 				observeToolCall(observer, startedAt, {
@@ -794,7 +809,7 @@ function registerTool(
 					],
 				};
 			} catch (caught) {
-				const error = toMcpError(caught);
+				const error = toMcpError(caught, requestId);
 				observeToolCall(observer, startedAt, {
 					requestId,
 					toolName,
@@ -830,12 +845,12 @@ function summarizeToolResult(name: string, raw: unknown): string {
 	if (name === "open_lix") {
 		return `Opened ${String(result.url ?? result.id)} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}. Context expires at ${String(result.context_expires_at)}.`;
 	}
-	if (name === "execute") {
+	if (name === "query_sql") {
 		return summarizeSqlResults([result.result]);
 	}
-	if (name === "execute_batch") {
+	if (name === "execute_sql") {
 		const results = Array.isArray(result.results) ? result.results : [];
-		return `Atomic SQL batch completed ${results.length} ${results.length === 1 ? "statement" : "statements"}. ${summarizeSqlResults(results)}`;
+		return `Atomic SQL completed ${results.length} ${results.length === 1 ? "statement" : "statements"}. ${summarizeSqlResults(results)}`;
 	}
 	return `${name} completed.`;
 }
@@ -862,7 +877,10 @@ function summarizeToolError(error: {
 	return `LixRay error ${error.code}: ${error.message}${error.hint ? ` Hint: ${error.hint}` : ""}`;
 }
 
-function toMcpError(caught: unknown): {
+function toMcpError(
+	caught: unknown,
+	requestId: string,
+): {
 	code: string;
 	message: string;
 	hint?: string;
@@ -879,6 +897,7 @@ function toMcpError(caught: unknown): {
 	return {
 		code: "internal_error",
 		message: "The LixRay tool call failed.",
+		hint: `Retry once. If the failure persists, contact LixRay support with request_id ${requestId}.`,
 	};
 }
 
@@ -890,8 +909,8 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 	return [
 		"list_lixes",
 		"open_lix",
-		"execute",
-		"execute_batch",
+		"query_sql",
+		"execute_sql",
 		"active_branch_id",
 		"switch_branch",
 		"create_branch",
@@ -903,11 +922,77 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 	].map((name) => ({ name }));
 }
 
+function assertReadOnlyQuery(
+	parseSqlScript: ParseSqlScript | undefined,
+	sql: string,
+	paramCount: number,
+): void {
+	const statement = parsedSingleStatement(
+		parseSqlScript,
+		sql,
+		paramCount,
+		"query_sql",
+	);
+	if (!/^\s*SELECT\b/i.test(statement)) {
+		throw createLixError(
+			"invalid_request",
+			"query_sql accepts only a SELECT statement.",
+			{
+				hint: "Use execute_sql for non-SELECT SQL.",
+			},
+		);
+	}
+}
+
+function parsedSingleStatement(
+	parseSqlScript: ParseSqlScript | undefined,
+	sql: string,
+	paramCount: number,
+	toolName: "query_sql",
+): string {
+	if (!parseSqlScript) {
+		throw createLixError(
+			"upstream_error",
+			"SQL classification is unavailable.",
+			{
+				hint: "Retry later. If the failure persists, contact LixRay support.",
+			},
+		);
+	}
+	let parsed: ReturnType<ParseSqlScript>;
+	try {
+		parsed = parseSqlScript(sql, paramCount);
+	} catch (caught) {
+		throw createLixError(
+			"invalid_request",
+			`${toolName} could not parse SQL.`,
+			{
+				hint: "Correct the SQL syntax and parameter count, then retry.",
+				details: {
+					parser_message:
+						caught instanceof Error
+							? caught.message
+							: "SQL parser rejected input.",
+				},
+			},
+		);
+	}
+	if (parsed.statements.length !== 1) {
+		throw createLixError(
+			"invalid_request",
+			`${toolName} requires exactly one SQL statement per input entry.`,
+			{
+				hint: "Send one SELECT statement.",
+			},
+		);
+	}
+	return parsed.statements[0]!.sql;
+}
+
 function toExecuteRequest(args: Record<string, any>): ExecuteRequest {
 	return {
 		sql: args.sql,
 		params: args.params,
-		options: toExecuteOptions(args.options),
 	};
 }
 
@@ -920,8 +1005,8 @@ function toExecuteOptions(
 	};
 }
 
-function isExecuteTool(name: string): boolean {
-	return name === "execute" || name === "execute_batch";
+function isSqlTool(name: string): boolean {
+	return name === "query_sql" || name === "execute_sql";
 }
 
 function readAnnotations(): ToolAnnotations {

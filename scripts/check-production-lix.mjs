@@ -112,11 +112,11 @@ if (
 		process.argv[2] || process.env.LIXRAY_CANARY_WORKSPACE_URL;
 	if (!workspaceUrl) {
 		throw new Error(
-			"Pass a public workspace URL or set LIXRAY_CANARY_WORKSPACE_URL.",
+			"Pass a public repository URL or set LIXRAY_CANARY_WORKSPACE_URL.",
 		);
 	}
 	const result = await checkProductionLix({ workspaceUrl });
 	console.log(
-		`Production Lix canary passed for ${result.workspace} (protocol v${result.protocolVersion}).`,
+		`Production Lix canary passed for repository ${result.workspace} (protocol v${result.protocolVersion}).`,
 	);
 }

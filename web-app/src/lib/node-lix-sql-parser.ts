@@ -5,7 +5,7 @@ import {
 	parseSqlScript as parseSqlScriptBinding,
 } from "../../../vendor/lix/packages/js-sdk/dist/wasm/lix_js_sdk.js";
 import wasmUrl from "../../../vendor/lix/packages/js-sdk/dist/wasm/lix_js_sdk_bg.wasm?url";
-import type { ParseSqlScript } from "../worker/handler";
+import type { ParseSqlScript } from "./lix-sql-access";
 
 let initialized = false;
 

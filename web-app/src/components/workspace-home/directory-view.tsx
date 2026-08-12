@@ -830,7 +830,7 @@ function GettingStarted({
 				<div className="-mt-5 flex w-[min(560px,calc(100%-48px))] flex-col items-center">
 					<GettingStartedIllustration />
 					<h1 className="m-0 text-2xl font-bold tracking-[-0.02em]">
-						Welcome to your Lix workspace
+						Welcome to your Lix repository
 					</h1>
 					<p className="mt-3 mb-0 max-w-[470px] text-[14.5px] leading-[1.6] text-text-secondary">
 						A shared folder for you and your AI agents. Connect Claude, Codex,

@@ -36,7 +36,7 @@ await page.addInitScript(() => {
 		let wasOpening = false;
 		const sample = () => {
 			const isOpening =
-				document.body?.textContent?.includes("Opening workspace…") ?? false;
+				document.body?.textContent?.includes("Opening repository…") ?? false;
 			if (isOpening && !wasOpening) {
 				window.__lixrayProfile.openingWorkspaceAppearances += 1;
 			}
@@ -265,7 +265,7 @@ async function waitForWorkspace(targetPage) {
 		.getByRole("button", { name: "Toggle left panel" })
 		.waitFor({ state: "visible", timeout: 60_000 });
 	await targetPage
-		.getByText("Opening workspace…", { exact: true })
+		.getByText("Opening repository…", { exact: true })
 		.waitFor({ state: "detached", timeout: 60_000 })
 		.catch(() => {});
 }

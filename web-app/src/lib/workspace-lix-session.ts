@@ -108,7 +108,7 @@ function createTelemetryFetch(
 ): RemoteLixFetch {
 	const fetcher = customFetch ?? globalThis.fetch?.bind(globalThis);
 	if (!fetcher) {
-		throw new TypeError("A fetch implementation is required for a workspace.");
+		throw new TypeError("A fetch implementation is required for a repository.");
 	}
 
 	return async (input, init) => {

@@ -45,7 +45,7 @@ void test("checks a handshake and read, then closes the canary session", async (
 	]);
 });
 
-void test("reports recovering workspaces and does not attempt a close", async () => {
+void test("reports recovering repositories and does not attempt a close", async () => {
 	let requests = 0;
 	await assert.rejects(
 		checkProductionLix({

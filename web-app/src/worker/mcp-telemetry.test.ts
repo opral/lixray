@@ -103,7 +103,7 @@ void test("MCP telemetry records trace errors without lix grouping", async () =>
 
 	session.onToolCall({
 		requestId: REQUEST_ID,
-		toolName: "execute",
+		toolName: "query_sql",
 		outcome: "error",
 		errorCode: "invalid_arguments",
 		durationMs: 0,
@@ -166,7 +166,7 @@ void test("MCP traces expose SQL friction without lix values or result rows", as
 
 	session.onToolCall({
 		requestId: REQUEST_ID,
-		toolName: "execute",
+		toolName: "query_sql",
 		outcome: "success",
 		durationMs: 4,
 		surfaceVersion: SURFACE_VERSION,

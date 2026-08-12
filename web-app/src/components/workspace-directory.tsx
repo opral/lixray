@@ -305,10 +305,10 @@ function WorkspaceEmptyState() {
 				</div>
 			</div>
 			<h2 className="m-0 text-[20px] leading-tight font-bold tracking-[-0.015em]">
-				No workspaces yet
+				No repositories yet
 			</h2>
 			<p className="mt-2 mb-0 max-w-[480px] text-[14px] leading-[1.5] text-text-tertiary">
-				Create one to get going — a workspace is a shared folder where you and
+				Create one to get going — a repository is a shared folder where you and
 				agents like Claude, ChatGPT, and Gemini work in the same files.
 			</p>
 		</div>

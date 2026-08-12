@@ -1,8 +1,8 @@
 # LixRay
 
-LixRay is a collaborative workspace app built from a TanStack Start control
-plane and a multi-workspace Rust Lix service. Supabase provides identity and
-application data; SlateDB stores workspace data in S3-compatible object
+LixRay is a collaborative repository app built from a TanStack Start control
+plane and a multi-repository Rust Lix service. Supabase provides identity and
+application data; SlateDB stores repository data in S3-compatible object
 storage.
 
 Production: [lixray.com](https://lixray.com)
@@ -22,14 +22,14 @@ browser / MCP client -> lixray-web -> lix-server -> R2
                          Supabase
 ```
 
-Every workspace maps to an isolated SlateDB object prefix. One bounded
+Every repository maps to an isolated SlateDB object prefix. One bounded
 `lix-server` process hosts multiple lixes, opens them lazily, and evicts
 idle runtimes. Local development uses the same topology with MinIO in place of
 R2.
 
-The web service owns authentication, organization and workspace resolution,
-`/healthz`, `/mcp`, and the workspace-scoped Lix protocol. Supabase row-level
-security proves workspace access before a request reaches `lix-server`.
+The web service owns authentication, organization and repository resolution,
+`/healthz`, `/mcp`, and the repository-scoped Lix protocol. Supabase row-level
+security proves repository access before a request reaches `lix-server`.
 
 ## Setup
 
@@ -92,7 +92,7 @@ pnpm test:e2e
 ```
 
 The browser test starts local Supabase and the Compose topology, signs in,
-creates a workspace, completes a Lix handshake, and runs a query. Set
+creates a repository, completes a Lix handshake, and runs a query. Set
 `E2E_PORT` to override its default port (`8790`).
 
 ## MCP and HTTP API
@@ -103,7 +103,7 @@ The Streamable HTTP MCP endpoint is:
 https://lixray.com/mcp
 ```
 
-It exposes workspace and branch discovery, file operations, and atomic raw Lix
+It exposes repository and branch discovery, file operations, and atomic raw Lix
 SQL execution. OAuth protected-resource metadata is served from
 `/.well-known/oauth-protected-resource`; MCP access tokens are Supabase ES256
 tokens bound to `https://lixray.com`.
@@ -219,7 +219,7 @@ production Supabase credentials.
 Railway environments named `lixray-pr-*` automatically build and run in demo
 mode. The sign-in screen offers **Continue as preview user** and the server
 accepts the matching fixed demo token for the built-in `acme/launch-q3`
-workspace. No Supabase URL, key, branch, password, seed job, or provisioning
+repository. No Supabase URL, key, branch, password, seed job, or provisioning
 workflow is involved.
 
 Railway GitHub autodeploy stays enabled for preview web services and **Wait for
@@ -258,6 +258,6 @@ pnpm perf:down
 ```
 
 Set `LIXRAY_PERF_URL` and `LIXRAY_INTERNAL_TOKEN` to exercise a hosted service.
-Every invocation seeds a fresh deterministic 1,000-file workspace and measures
+Every invocation seeds a fresh deterministic 1,000-file repository and measures
 one CRUD operation family. See [`perf/README.md`](perf/README.md) for the
 operation matrix, exact commit semantics, repetition method, and result schema.

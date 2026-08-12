@@ -21,7 +21,8 @@ Every tool call includes:
 - `mcp_surface_version`, a content hash of the advertised MCP tool descriptors
 - stable `error_code` and `$ai_error.code` on failure
 
-`execute` spans add a privacy-safe `$ai_input_state` containing SQL operations,
+`query_sql` and `execute_sql` spans add a privacy-safe `$ai_input_state`
+containing SQL operations,
 sanitized statement shapes, shape IDs, parameter counts, and literal-redaction
 counts. `$ai_output_state` contains only result counts, row counts, affected-row
 counts, and notice codes.
