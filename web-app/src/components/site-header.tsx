@@ -55,19 +55,19 @@ export function SiteHeader({
 				>
 					Docs
 				</Link>
-			</div>
-			<nav
-				className="flex items-center gap-5 text-[15px] font-semibold sm:gap-6"
-				aria-label="Primary navigation"
-			>
 				<a
-					className="hidden text-[#57534e] no-underline sm:block"
+					className="hidden text-[15px] font-semibold text-[#57534e] no-underline hover:text-[#1c1917] sm:block"
 					href="https://github.com/opral"
 					target="_blank"
 					rel="noreferrer"
 				>
 					GitHub ↗
 				</a>
+			</div>
+			<nav
+				className="flex items-center gap-5 text-[15px] font-semibold sm:gap-6"
+				aria-label="Primary navigation"
+			>
 				{user ? (
 					<button
 						className="cursor-pointer border-0 bg-transparent p-0 text-[#1c1917] hover:text-[#e8590c]"
@@ -82,7 +82,7 @@ export function SiteHeader({
 					</a>
 				)}
 				<a
-					className="rounded-[10px] bg-[linear-gradient(180deg,#F97316_0%,#E8590C_100%)] px-[18px] py-2.5 font-bold text-white no-underline shadow-[0_6px_16px_rgba(232,89,12,.3),inset_0_1px_0_rgba(255,255,255,.25)] transition hover:brightness-105"
+					className="rounded-[10px] border border-[#1c1917]/15 bg-white px-[18px] py-2.5 font-semibold text-[#1c1917] no-underline transition hover:border-[#1c1917]/30"
 					href={workspaceTo}
 				>
 					{user ? "Open LixRay" : "Get started"}

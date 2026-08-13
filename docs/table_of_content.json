@@ -1,6 +1,6 @@
 {
 	"Platform": [
-		{ "path": "getting-started.md", "label": "Getting Started" },
+		{ "path": "what-is-lixray.md", "label": "What is LixRay?" },
 		{ "path": "mcp.md", "label": "MCP" }
 	]
 }
