@@ -23,14 +23,14 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 		<div className="flex min-h-screen flex-col bg-[#fbf6f0] font-sans text-[#1c1917] antialiased">
 			<SiteHeader sticky />
 
-			<div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-0 px-5 sm:px-10 lg:flex-row lg:gap-14">
+			<div className="flex w-full flex-1 flex-col px-5 sm:px-14 lg:flex-row lg:gap-14">
 				<nav
-					className="shrink-0 pt-8 lg:sticky lg:top-[90px] lg:max-h-[calc(100vh-90px)] lg:w-[220px] lg:self-start lg:overflow-y-auto lg:pt-10 lg:pb-20"
+					className="shrink-0 pt-8 lg:sticky lg:top-[90px] lg:max-h-[calc(100vh-90px)] lg:w-[200px] lg:self-start lg:overflow-y-auto lg:pt-10 lg:pb-20"
 					aria-label="Docs navigation"
 				>
 					{Object.entries(docsToc).map(([group, items]) => (
-						<div className="mb-[26px] flex flex-col gap-0.5" key={group}>
-							<span className="px-2.5 pb-[7px] text-[11.5px] font-bold tracking-[.07em] text-[#b5afa6] uppercase">
+						<div className="mb-[26px] flex flex-col gap-1.5" key={group}>
+							<span className="pb-1 font-mono text-[11.5px] font-semibold tracking-[.07em] text-[#b5afa6] uppercase">
 								{group}
 							</span>
 							{items.map((item) => {
@@ -39,8 +39,8 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 								return (
 									<Link
 										className={cn(
-											"block rounded-lg px-2.5 py-[7px] text-sm font-medium text-[#57534e] no-underline hover:text-[#1c1917]",
-											active && "bg-[#f7ede0] font-semibold text-[#c2410c]",
+											"block py-[3px] text-sm text-[#57534e] no-underline hover:text-[#1c1917]",
+											active && "font-semibold text-[#c2410c]",
 										)}
 										key={item.path}
 										to="/docs/$slug"
@@ -54,19 +54,15 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 					))}
 				</nav>
 
-				<main className="min-w-0 flex-1 pt-6 pb-[120px] lg:pt-11">
-					<div className="max-w-[720px]">
-						<div className="mb-3.5 flex items-center gap-[7px] text-[13px] text-[#8a8178]">
-							<span className="font-semibold">{entry.group}</span>
-							<span className="text-[#c9c2b8]">/</span>
-							<span className="font-semibold text-[#c2410c]">
-								{entry.label}
-							</span>
-							<span className="flex-1" />
+				<main className="min-w-0 flex-1 pt-6 pb-[120px] lg:pt-10">
+					<div className="relative max-w-[720px]">
+						{/* Pinned to the h1's first line so the heading stays level with
+						    the sidebar's group label. */}
+						<div className="absolute top-2.5 right-0">
 							<CopyMarkdownButton markdown={markdown} />
 						</div>
 						<DocsArticle html={html} />
-						<div className="mt-14 grid grid-cols-1 gap-3.5 border-t border-[#1c1917]/8 pt-6 sm:grid-cols-2">
+						<div className="mt-14 flex items-center justify-between border-t border-[#1c1917]/8 pt-6 text-sm">
 							{previous ? (
 								<PagerLink entry={previous} direction="previous" />
 							) : (
@@ -78,12 +74,27 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 				</main>
 			</div>
 
-			<footer className="flex items-center justify-between border-t border-[#1c1917]/7 px-5 py-[22px] text-[13.5px] text-[#8a8178] sm:px-10">
+			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-[#1c1917]/7 px-5 py-6 text-sm text-[#8a8178] sm:px-14">
 				<span className="inline-flex items-center gap-2">
-					<img className="size-[15px]" src="/lixray-mark.svg" alt="" />
+					<img className="size-4" src="/lixray-mark.svg" alt="" />
 					<span className="font-semibold text-[#57534e]">LixRay</span>
 				</span>
-				<span>© 2026 Opral</span>
+				<a
+					className="no-underline hover:text-[#57534e]"
+					href="https://opral.com"
+					target="_blank"
+					rel="noreferrer"
+				>
+					© 2026 Opral
+				</a>
+				<a
+					className="font-semibold text-[#57534e] no-underline"
+					href="https://github.com/opral"
+					target="_blank"
+					rel="noreferrer"
+				>
+					GitHub ↗
+				</a>
 			</footer>
 		</div>
 	);
@@ -138,7 +149,7 @@ function CopyMarkdownButton({ markdown }: { markdown: string }) {
 
 	return (
 		<button
-			className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#1c1917]/12 bg-white px-3 py-1.5 text-[12.5px] font-semibold text-[#57534e] transition hover:border-[#e8590c]/45 hover:text-[#1c1917]"
+			className="inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-mono text-xs text-[#8a8178] transition hover:text-[#1c1917]"
 			type="button"
 			onClick={() => {
 				void navigator.clipboard.writeText(markdown);
@@ -147,7 +158,7 @@ function CopyMarkdownButton({ markdown }: { markdown: string }) {
 			}}
 		>
 			<Copy className="size-3" aria-hidden="true" />
-			{copied ? "Copied" : "Copy as Markdown"}
+			{copied ? "copied" : "copy as markdown"}
 		</button>
 	);
 }
@@ -162,19 +173,11 @@ function PagerLink({
 	const next = direction === "next";
 	return (
 		<Link
-			className={cn(
-				"flex flex-col gap-1 rounded-xl border border-[#1c1917]/10 bg-white px-[18px] py-3.5 no-underline transition hover:border-[#e8590c]/45",
-				next && "items-end text-right sm:col-start-2",
-			)}
+			className="font-semibold text-[#57534e] no-underline transition hover:text-[#c2410c]"
 			to="/docs/$slug"
 			params={{ slug: entry.slug }}
 		>
-			<span className="text-xs font-semibold text-[#8a8178]">
-				{next ? "Next →" : "← Previous"}
-			</span>
-			<span className="text-[14.5px] font-bold text-[#1c1917]">
-				{entry.label}
-			</span>
+			{next ? `${entry.label} →` : `← ${entry.label}`}
 		</Link>
 	);
 }
