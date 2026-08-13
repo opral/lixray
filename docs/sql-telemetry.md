@@ -8,7 +8,7 @@ must not emit a second SQL telemetry event.
 Telemetry is opt-in per opened Lix instance. Without a telemetry sink the
 engine does not create spans, sanitize or fingerprint SQL for telemetry, read
 timestamps, or send cross-runtime messages. `lix-server` explicitly supplies
-the Rust tracing adapter when it opens Lix through `lix_sdk`.
+the Rust tracing adapter when it opens Lix through `lix`.
 
 ## SDK exposure
 

@@ -9,7 +9,7 @@ use axum::{
     routing::{any, get},
     Json, Router,
 };
-use lix_sdk::server_protocol::{self, ServerProtocolContext, ServerProtocolPrincipal};
+use lix::server_protocol::{self, ServerProtocolContext, ServerProtocolPrincipal};
 use serde::Serialize;
 use serde_json::json;
 use std::{
@@ -320,7 +320,7 @@ async fn lix_protocol_inner(
             // writes attributed to the built-in anonymous account while
             // retaining an isolated session and idempotency namespace.
             ServerProtocolPrincipal::Authenticated {
-                account_id: lix_sdk::ANONYMOUS_ACCOUNT_ID.to_owned(),
+                account_id: lix::ANONYMOUS_ACCOUNT_ID.to_owned(),
                 idempotency_scope: principal.account_id,
             }
         } else {
@@ -658,7 +658,7 @@ fn lix_error(error: LixRuntimeError) -> Response {
             tracing::error!(error = %error, "failed to open lix runtime");
             protocol_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                lix_sdk::LixError::CODE_INTERNAL_ERROR,
+                lix::LixError::CODE_INTERNAL_ERROR,
                 "Unable to open lix.",
                 None,
                 Some(json!({
@@ -672,15 +672,13 @@ fn lix_error(error: LixRuntimeError) -> Response {
 
 fn is_unsupported_storage_format(error: &anyhow::Error) -> bool {
     error.chain().any(|source| {
-        source
-            .downcast_ref::<lix_sdk::LixError>()
-            .is_some_and(|error| {
-                error.code == "LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT"
-                    || (error.code == lix_sdk::LixError::CODE_INTERNAL_ERROR
-                        && error
-                            .message
-                            .contains("tracked_state commit_root has an unsupported format"))
-            })
+        source.downcast_ref::<lix::LixError>().is_some_and(|error| {
+            error.code == "LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT"
+                || (error.code == lix::LixError::CODE_INTERNAL_ERROR
+                    && error
+                        .message
+                        .contains("tracked_state commit_root has an unsupported format"))
+        })
     })
 }
 
@@ -740,7 +738,7 @@ mod tests {
     use axum::http::Request;
     use flate2::{write::GzEncoder, Compression};
     use http_body_util::BodyExt;
-    use lix_sdk::{Value as LixValue, WireValue};
+    use lix::{Value as LixValue, WireValue};
     use serde_json::{json, Value as JsonValue};
     use std::{
         io::Write as _,
@@ -807,7 +805,7 @@ mod tests {
         assert_eq!(handshake["protocolVersion"], json!(2));
         assert_eq!(
             handshake["activeAccountId"],
-            json!(lix_sdk::ANONYMOUS_ACCOUNT_ID)
+            json!(lix::ANONYMOUS_ACCOUNT_ID)
         );
         assert!(handshake["sessionId"].as_str().is_some());
     }
@@ -1205,7 +1203,7 @@ mod tests {
     #[tokio::test]
     async fn unsupported_storage_format_is_a_terminal_structured_error() {
         let response = lix_error(LixRuntimeError::Open(anyhow::Error::new(
-            lix_sdk::LixError::new(
+            lix::LixError::new(
                 "LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT",
                 "repository uses an unsupported storage protocol; recreate the repository",
             ),

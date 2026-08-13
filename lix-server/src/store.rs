@@ -4,7 +4,7 @@ use axum::{body::Body, http::Request};
 use blake3::Hasher;
 use fs2::FileExt as _;
 use futures_util::TryStreamExt as _;
-use lix_sdk::server_protocol::{
+use lix::server_protocol::{
     LixServerProtocol, ServerProtocolBody, ServerProtocolContext, ServerProtocolResponse,
 };
 use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
@@ -525,9 +525,9 @@ impl LixRuntimeManager {
         };
 
         let protocol_root = Arc::new(
-            lix_sdk::open_lix()
+            lix::open_lix()
                 .with_storage(storage)
-                .with_telemetry(Arc::new(lix_sdk::telemetry::TracingTelemetrySink::new()))
+                .with_telemetry(Arc::new(lix::telemetry::TracingTelemetrySink::new()))
                 .await
                 .context("open Lix lix session for the canonical server protocol")?,
         );
@@ -2116,7 +2116,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/lixes/lix-a/lix/v1/observe")
-                    .header(lix_sdk::server_protocol::SESSION_ID_HEADER, session)
+                    .header(lix::server_protocol::SESSION_ID_HEADER, session)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
                     .expect("observation request"),
@@ -2768,7 +2768,7 @@ mod tests {
                     Request::builder()
                         .method("POST")
                         .uri("/lixes/lix-a/lix/v1/execute")
-                        .header(lix_sdk::server_protocol::SESSION_ID_HEADER, &session)
+                        .header(lix::server_protocol::SESSION_ID_HEADER, &session)
                         .header("content-type", "application/json")
                         .body(Body::from(r#"{"sql":"SELECT 1"}"#))
                         .expect("fence probe request"),
@@ -2833,10 +2833,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/lixes/lix-a/lix/v1/execute")
-                    .header(
-                        lix_sdk::server_protocol::SESSION_ID_HEADER,
-                        reopened_session,
-                    )
+                    .header(lix::server_protocol::SESSION_ID_HEADER, reopened_session)
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"sql":"SELECT 1"}"#))
                     .expect("reopened query request"),
