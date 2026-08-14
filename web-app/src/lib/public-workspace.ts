@@ -10,6 +10,10 @@ export interface PublicWorkspaceRoute {
 	readonly canEdit: boolean;
 }
 
+export class TeamInviteAccessConfirmationError extends Error {
+	readonly name = "TeamInviteAccessConfirmationError";
+}
+
 interface ResolvedWorkspaceShare extends Omit<PublicWorkspaceRoute, "canEdit"> {
 	readonly sharedByName: string | null;
 	readonly sharedByAvatarUrl: string | null;
@@ -28,6 +32,55 @@ export async function resolvePublicWorkspaceByRoute(
 	});
 	if (error) throw error;
 	return data?.[0] ? publicWorkspaceRoute(data[0]) : null;
+}
+
+/**
+ * Accepts a namespace invite and then verifies that the current session can
+ * edit the repository from the invite URL. Callers must not open the writable
+ * Atelier until this promise resolves.
+ */
+export async function acceptTeamInviteForWorkspace(
+	client: LixraySupabaseClient,
+	token: string,
+	organizationHandle: string,
+	workspaceSlug: string,
+	expectedWorkspaceId: string,
+): Promise<{
+	readonly joinedNamespaceName: string | null;
+	readonly workspace: PublicWorkspaceRoute;
+}> {
+	const { data, error } = await client.rpc("accept_namespace_invite", {
+		p_token: token,
+	});
+	if (error) throw error;
+
+	let workspace: PublicWorkspaceRoute | null;
+	try {
+		workspace = await resolvePublicWorkspaceByRoute(
+			client,
+			organizationHandle,
+			workspaceSlug,
+		);
+	} catch (cause) {
+		throw new TeamInviteAccessConfirmationError(
+			"The invite was accepted, but edit access could not be refreshed.",
+			{ cause },
+		);
+	}
+	if (
+		!workspace ||
+		workspace.workspaceId !== expectedWorkspaceId ||
+		!workspace.canEdit
+	) {
+		throw new TeamInviteAccessConfirmationError(
+			"The invite was accepted, but edit access is not available.",
+		);
+	}
+
+	return {
+		joinedNamespaceName: data?.[0]?.namespace_name ?? null,
+		workspace,
+	};
 }
 
 export async function resolveWorkspaceShareToken(

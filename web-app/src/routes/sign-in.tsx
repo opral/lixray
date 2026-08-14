@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { LogIn, PencilLine } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { GoogleMark } from "~/components/google-mark";
 import { Button } from "~/components/ui/button";
 import { normalizeAuthReturnTo } from "~/lib/auth-return-to";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { localDevCredentials } from "~/lib/supabase";
+import { peekTeamInvite } from "~/lib/team-invite";
 import { peekWorkspaceShareJoinIntent } from "~/lib/workspace-share-capability";
 
 interface SignInSearch {
@@ -27,9 +28,14 @@ function SignInPage() {
 	const [submitting, setSubmitting] = useState(false);
 	const usesPreviewAccount = isDemoModeEnabled;
 	const usesLocalAccount = Boolean(localDevCredentials) || usesPreviewAccount;
-	const joiningSharedWorkspace =
-		usesPreviewAccount && peekWorkspaceShareJoinIntent() !== null;
+	const [joiningSharedWorkspace, setJoiningSharedWorkspace] = useState(false);
 	const usesGoogle = !usesLocalAccount;
+
+	useEffect(() => {
+		setJoiningSharedWorkspace(
+			peekTeamInvite() !== null || peekWorkspaceShareJoinIntent() !== null,
+		);
+	}, []);
 
 	const signIn = async () => {
 		setSubmitting(true);

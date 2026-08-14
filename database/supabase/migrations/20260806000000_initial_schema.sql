@@ -1599,7 +1599,7 @@ begin
 	if target_namespace_id is null then raise exception 'Invalid or reset invite link'; end if;
 	insert into public.namespace_members (namespace_id, user_id, role)
 	values (target_namespace_id, current_user_id, 'member')
-	on conflict (namespace_id, user_id) do nothing;
+	on conflict on constraint namespace_members_pkey do nothing;
 	return query
 	select namespace.id, namespace.name, handle.handle
 	from public.namespaces namespace
@@ -1689,5 +1689,4 @@ end;
 $$;
 
 ALTER FUNCTION "private"."custom_access_token_hook"("event" "jsonb") OWNER TO "postgres";
-
 
