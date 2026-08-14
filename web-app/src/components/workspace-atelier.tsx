@@ -51,9 +51,9 @@ import {
 } from "~/lib/workspace-share-url";
 import { isWorkspaceShareToken } from "~/lib/workspace-share-capability";
 import {
-	openWorkspaceLixSession,
-	type WorkspaceLixSession,
-} from "~/lib/workspace-lix-session";
+	openRepositoryLixSession,
+	type RepositoryLixSession,
+} from "~/lib/repository-lix-session";
 import { formatWorkspaceOpenError } from "~/lib/workspace-open-error";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
@@ -150,7 +150,7 @@ export function WorkspaceAtelier({
 		string | null
 	>(null);
 	const [error, setError] = useState<string | null>(null);
-	const activeLixRef = useRef<WorkspaceLixSession | null>(null);
+	const activeLixRef = useRef<RepositoryLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeChildRef = useRef<{
 		kind: "file" | "dir" | "team" | null;
@@ -512,7 +512,7 @@ export function WorkspaceAtelier({
 
 	useEffect(() => {
 		let disposed = false;
-		let activeLix: WorkspaceLixSession | null = null;
+		let activeLix: RepositoryLixSession | null = null;
 		setInstance(null);
 		setBranchSession(null);
 		setWorkspaceDefaultBranchId(null);
@@ -524,10 +524,10 @@ export function WorkspaceAtelier({
 			return;
 		}
 		const openingBranchId = branchIdRef.current ?? null;
-		void openWorkspaceLixSession({
+		void openRepositoryLixSession({
 			namespace,
-			workspaceSlug,
-			workspaceId,
+			repositorySlug: workspaceSlug,
+			repositoryId: workspaceId,
 			getAccessToken,
 			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,

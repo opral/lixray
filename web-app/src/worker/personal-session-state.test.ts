@@ -13,9 +13,9 @@ import {
 } from "../lib/atelier-state.ts";
 import type { LixraySupabaseClient } from "../lib/supabase.ts";
 import {
-	openWorkspaceLixSession,
-	type WorkspaceLixSession,
-} from "../lib/workspace-lix-session.ts";
+	openRepositoryLixSession,
+	type RepositoryLixSession,
+} from "../lib/repository-lix-session.ts";
 
 const USER = "71000000-0000-0000-0000-000000000001";
 const OTHER_USER = "71000000-0000-0000-0000-000000000002";
@@ -229,7 +229,7 @@ void test("branch selection is serialized and only the latest request is routed"
 			activeBranchId = branchId;
 			return branchId;
 		},
-	} as unknown as WorkspaceLixSession;
+	} as unknown as RepositoryLixSession;
 	const branch = createWorkspaceBranchSession({
 		session,
 		onSwitch: (branchId) => {
@@ -274,7 +274,7 @@ void test("a failed latest branch selection reconciles the last successful branc
 			}
 			throw new Error(`Unable to switch to ${branchId}`);
 		},
-	} as unknown as WorkspaceLixSession;
+	} as unknown as RepositoryLixSession;
 	const branch = createWorkspaceBranchSession({
 		session,
 		onSwitch: (branchId) => {
@@ -531,9 +531,9 @@ void test("lix sessions use unified remote Lix with session-local branch state a
 		}
 		return new Response("Not found", { status: 404 });
 	};
-	const session = await openWorkspaceLixSession({
+	const session = await openRepositoryLixSession({
 		namespace: "acme",
-		workspaceSlug: "launch-q3",
+		repositorySlug: "launch-q3",
 		origin: "https://lixray.test",
 		getAccessToken: async () => "token",
 		initialBranchId: "invalid-branch",

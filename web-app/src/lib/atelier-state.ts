@@ -13,7 +13,7 @@ import {
 	type AtelierUserPreferencesV1,
 } from "@opral/atelier/state-adapters";
 import type { LixraySupabaseClient } from "./supabase";
-import type { WorkspaceLixSession } from "./workspace-lix-session";
+import type { RepositoryLixSession } from "./repository-lix-session";
 
 const SESSION_STATE_VERSION = 1;
 const PREFERENCES_STATE_VERSION = 1;
@@ -78,7 +78,7 @@ export type WorkspaceBranchSession = AtelierBranchSession & {
 };
 
 export function createWorkspaceBranchSession(args: {
-	readonly session: WorkspaceLixSession;
+	readonly session: RepositoryLixSession;
 	readonly onSwitch: (
 		branchId: string,
 		context?: { readonly failedBranchId?: string },
