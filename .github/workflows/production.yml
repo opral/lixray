@@ -18,6 +18,7 @@ jobs:
     name: Resolve tested images
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    environment: production
     permissions:
       contents: read
       id-token: write
@@ -34,7 +35,7 @@ jobs:
         uses: Infisical/secrets-action@v1.0.9
         with:
           method: oidc
-          identity-id: ${{ vars.INFISICAL_PREVIEW_IDENTITY_ID }}
+          identity-id: ${{ vars.INFISICAL_PRODUCTION_IDENTITY_ID }}
           oidc-audience: https://github.com/opral
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           env-slug: prod
