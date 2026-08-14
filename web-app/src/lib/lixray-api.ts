@@ -3,6 +3,7 @@ import {
 	type ExecuteResult as LixExecuteResult,
 	type Lix,
 	type SqlParam,
+	Value,
 } from "@lix-js/sdk";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "~/components/auth-provider";
@@ -15,6 +16,7 @@ type WireValue =
 	| { kind: "int"; value: number }
 	| { kind: "float"; value: number }
 	| { kind: "text"; value: string }
+	| { kind: "timestamp"; value: string }
 	| { kind: "blob"; base64: string }
 	| { kind: "json"; value: unknown };
 
@@ -243,6 +245,8 @@ function toSqlParam(value: WireValue): SqlParam {
 		case "float":
 		case "text":
 			return value.value;
+		case "timestamp":
+			return Value.timestamp(value.value);
 		case "json":
 			return value.value as SqlParam;
 		case "blob":
@@ -268,6 +272,8 @@ function toWireResult(result: LixExecuteResult): ExecuteResponse {
 						return { kind: "float", value: Number(js) };
 					case "text":
 						return { kind: "text", value: String(js) };
+					case "timestamp":
+						return { kind: "timestamp", value: String(js) };
 					case "blob":
 						return { kind: "blob", base64: bytesToBase64(value.asBytes()!) };
 					case "json":
@@ -330,6 +336,7 @@ export function formatWireValue(value: WireValue): string {
 		case "float":
 			return String(value.value);
 		case "text":
+		case "timestamp":
 			return value.value;
 		case "blob":
 			return `[blob ${value.base64.length} base64 chars]`;

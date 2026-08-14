@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const revisionManifestPath = join(repositoryRoot, "vendor", "revisions.env");
+const lixWorkspaceManifestPath = join(repositoryRoot, "vendor", "lix", "Cargo.toml");
 const lixToolchainPath = join(repositoryRoot, "vendor", "lix", "rust-toolchain.toml");
 const serverLockfilePath = join(repositoryRoot, "lix-server", "Cargo.lock");
 const pnpmLockfilePath = join(repositoryRoot, "pnpm-lock.yaml");
@@ -49,8 +50,23 @@ export function parseCargoLockPackages(source) {
   return packages;
 }
 
-export function packageVersion(source) {
-  return /^\[package\][\s\S]*?^version = "([^"]+)"/m.exec(source)?.[1];
+export function packageVersion(source, workspaceSource = source) {
+  const packageSection = tomlSection(source, "package");
+  const directVersion = /^version\s*=\s*"([^"]+)"/m.exec(packageSection)?.[1];
+  if (directVersion) return directVersion;
+
+  if (!/^version\.workspace\s*=\s*true/m.test(packageSection)) return undefined;
+  const workspacePackageSection = tomlSection(workspaceSource, "workspace.package");
+  return /^version\s*=\s*"([^"]+)"/m.exec(workspacePackageSection)?.[1];
+}
+
+function tomlSection(source, name) {
+  const marker = `[${name}]`;
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex === -1) return "";
+  const remainder = source.slice(markerIndex + marker.length);
+  const nextSectionIndex = remainder.search(/^\[/m);
+  return nextSectionIndex === -1 ? remainder : remainder.slice(0, nextSectionIndex);
 }
 
 function run(command, args) {
@@ -86,8 +102,9 @@ async function assertRevisionManifest(revisions) {
 }
 
 async function assertServerLockfile() {
-  const [lockfile, ...lixPackageManifests] = await Promise.all([
+  const [lockfile, workspaceManifest, ...lixPackageManifests] = await Promise.all([
     readFile(serverLockfilePath, "utf8"),
+    readFile(lixWorkspaceManifestPath, "utf8"),
     ...lixLockPackages.map(({ manifest }) =>
       readFile(join(repositoryRoot, "vendor", "lix", manifest), "utf8"),
     ),
@@ -97,7 +114,7 @@ async function assertServerLockfile() {
   const mismatches = lixLockPackages
     .map(({ name }, index) => ({
       name,
-      expectedVersion: packageVersion(lixPackageManifests[index]),
+      expectedVersion: packageVersion(lixPackageManifests[index], workspaceManifest),
     }))
     .flatMap(({ name, expectedVersion }) =>
       expectedVersion && packages.get(name) === expectedVersion

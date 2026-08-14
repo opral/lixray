@@ -13,6 +13,7 @@ export type WireValue =
 	| { kind: "int"; value: number }
 	| { kind: "float"; value: number }
 	| { kind: "text"; value: string }
+	| { kind: "timestamp"; value: string }
 	| { kind: "blob"; base64: string }
 	| { kind: "json"; value: unknown };
 
