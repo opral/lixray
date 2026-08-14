@@ -275,7 +275,10 @@ jobs:
             VITE_PUBLIC_TELEMETRY_ENVIRONMENT=production
             RAILWAY_GIT_COMMIT_SHA=${{ github.sha }}
           cache-from: type=gha,scope=lixray-web-release
-          cache-to: type=gha,mode=max,scope=lixray-web-release
+          # The maximal cache includes a multi-gigabyte builder layer. Uploading
+          # it took 8+ minutes, longer than rebuilding the web image from scratch.
+          # Keep only the final-image layers used by subsequent releases.
+          cache-to: type=gha,mode=min,scope=lixray-web-release
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
