@@ -388,7 +388,7 @@ jobs:
         run: |
           cargo -Z bindeps fmt --manifest-path lix-server/Cargo.toml --check
           cargo clippy --manifest-path lix-server/Cargo.toml -Z bindeps --locked --all-targets --all-features -- -D warnings
-          cargo -Z bindeps test --manifest-path lix-server/Cargo.toml --locked
+          RUST_MIN_STACK=8388608 cargo -Z bindeps test --manifest-path lix-server/Cargo.toml --locked
 
   e2e:
     name: E2E

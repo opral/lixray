@@ -497,6 +497,8 @@ function decodeWireParam(
 			return Value.real(value.value);
 		case "text":
 			return Value.text(value.value);
+		case "timestamp":
+			return Value.timestamp(value.value);
 		case "json":
 			return Value.json(value.value as JsonValue);
 		case "blob":
@@ -532,6 +534,8 @@ function encodeLixValue(
 			return { kind: "float", value: jsValue as number };
 		case "text":
 			return { kind: "text", value: jsValue as string };
+		case "timestamp":
+			return { kind: "timestamp", value: jsValue as string };
 		case "json":
 			return { kind: "json", value: jsValue };
 		case "blob": {

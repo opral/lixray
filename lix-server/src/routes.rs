@@ -844,7 +844,7 @@ mod tests {
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        r#"{"sql":"INSERT INTO lix_key_value (key, value) VALUES ('account-e2e', lix_json('true'))"}"#,
+                        r#"{"sql":"INSERT INTO lix_key_value (key, value) VALUES ('account-e2e', $1)","params":[{"kind":"json","value":true}]}"#,
                     ))
                     .expect("attributed insert request"),
             )
