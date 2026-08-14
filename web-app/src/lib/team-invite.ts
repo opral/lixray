@@ -5,6 +5,12 @@
  */
 const PENDING_TEAM_INVITE_KEY = "lixray.team-invite.pending";
 
+export interface PendingTeamInvite {
+	readonly token: `tm_${string}`;
+	readonly namespace: string;
+	readonly workspaceSlug: string;
+}
+
 export function isTeamInviteToken(value: unknown): value is `tm_${string}` {
 	return typeof value === "string" && /^tm_[A-Za-z0-9_-]{16,64}$/.test(value);
 }
@@ -23,13 +29,50 @@ export function randomTeamInviteToken(): `tm_${string}` {
 	return `tm_${token}`;
 }
 
-/** Holds an invite across the sign-in redirect, same-tab session only. */
-export function stageTeamInvite(token: string): void {
-	window.sessionStorage.setItem(PENDING_TEAM_INVITE_KEY, token);
+/** Holds a route-bound invite across the sign-in redirect, same-tab only. */
+export function stageTeamInvite(invite: PendingTeamInvite): void {
+	window.sessionStorage.setItem(
+		PENDING_TEAM_INVITE_KEY,
+		JSON.stringify(invite),
+	);
 }
 
-export function takeTeamInvite(): string | null {
-	const token = window.sessionStorage.getItem(PENDING_TEAM_INVITE_KEY);
+export function peekTeamInvite(): PendingTeamInvite | null {
+	if (typeof window === "undefined") return null;
+	const serialized = window.sessionStorage.getItem(PENDING_TEAM_INVITE_KEY);
+	if (!serialized) return null;
+	try {
+		const invite = JSON.parse(serialized) as Partial<PendingTeamInvite>;
+		return isTeamInviteToken(invite.token) &&
+			typeof invite.namespace === "string" &&
+			invite.namespace.length > 0 &&
+			typeof invite.workspaceSlug === "string" &&
+			invite.workspaceSlug.length > 0
+			? {
+					token: invite.token,
+					namespace: invite.namespace,
+					workspaceSlug: invite.workspaceSlug,
+				}
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+export function takeTeamInvite(): PendingTeamInvite | null {
+	if (typeof window === "undefined") return null;
+	const invite = peekTeamInvite();
 	window.sessionStorage.removeItem(PENDING_TEAM_INVITE_KEY);
-	return isTeamInviteToken(token) ? token : null;
+	return invite;
+}
+
+export function stagedTeamInviteForRoute(
+	invite: PendingTeamInvite | null,
+	namespace: string,
+	workspaceSlug: string,
+): `tm_${string}` | null {
+	return invite?.namespace === namespace &&
+		invite.workspaceSlug === workspaceSlug
+		? invite.token
+		: null;
 }

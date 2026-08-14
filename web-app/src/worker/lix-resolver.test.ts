@@ -32,7 +32,7 @@ void test("lix resolver returns one RLS-visible lix", async () => {
 			});
 			assert.equal(headers.get("apikey"), "publishable-key");
 			assert.equal(headers.get("authorization"), "Bearer user-token");
-			return Response.json([{ lix_id: LIX_ID }]);
+			return Response.json([{ lix_id: LIX_ID, can_edit: true }]);
 		},
 	});
 
@@ -52,6 +52,13 @@ void test("lix resolver distinguishes absence from invalid upstream data", async
 		await resolveSupabaseLixId({
 			...baseOptions,
 			fetch: async () => Response.json([]),
+		}),
+		{ ok: false, reason: "not_found" },
+	);
+	assert.deepEqual(
+		await resolveSupabaseLixId({
+			...baseOptions,
+			fetch: async () => Response.json([{ lix_id: LIX_ID, can_edit: false }]),
 		}),
 		{ ok: false, reason: "not_found" },
 	);

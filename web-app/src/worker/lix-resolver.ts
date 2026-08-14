@@ -4,6 +4,7 @@ const lixLookupRows = z
 	.array(
 		z.object({
 			lix_id: z.uuid(),
+			can_edit: z.boolean(),
 		}),
 	)
 	.max(1);
@@ -54,7 +55,7 @@ export async function resolveSupabaseLixId(
 		const rows = lixLookupRows.safeParse(await response.json());
 		if (!rows.success) return { ok: false, reason: "unavailable" };
 		const lix = rows.data[0];
-		return lix
+		return lix?.can_edit
 			? { ok: true, lixId: lix.lix_id }
 			: { ok: false, reason: "not_found" };
 	} catch {

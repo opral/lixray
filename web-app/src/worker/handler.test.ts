@@ -1072,6 +1072,40 @@ void test("authenticated non-members are downgraded to the public read transport
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
 });
 
+void test("authenticated repository members can proxy a write request", async () => {
+	let proxiedRequest: Request | undefined;
+	const response = await handleRequest(
+		remoteLixRequest("/execute", {
+			method: "POST",
+			headers: {
+				Authorization: "Bearer invited-member-token",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sql: "DELETE FROM lix_file" }),
+		}),
+		env({}),
+		{
+			authenticate: authenticated(),
+			resolveLix: resolved(LIX_A),
+			resolvePublicLix: async () => {
+				throw new Error("members must not use the public read transport");
+			},
+			lixFetch: async (_lixId, request) => {
+				proxiedRequest = request;
+				return new Response("written");
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(await response.text(), "written");
+	assert.ok(proxiedRequest);
+	assert.equal(proxiedRequest.headers.get("authorization"), null);
+	assert.deepEqual(await proxiedRequest.json(), {
+		sql: "DELETE FROM lix_file",
+	});
+});
+
 void test("authorized requests route by lix, rewrite paths, preserve bodies and strip auth", async () => {
 	let proxiedRequest: Request | undefined;
 	const request = remoteLixRequest("/observe?mode=test", {
@@ -1356,7 +1390,7 @@ void test("Supabase canonical lix resolution joins RLS-visible organization and 
 			new Headers(init?.headers).get("authorization"),
 			"Bearer verified-user-token",
 		);
-		return Response.json([{ lix_id: LIX_A }]);
+		return Response.json([{ lix_id: LIX_A, can_edit: true }]);
 	};
 	try {
 		const resolution = await resolveLixWithSupabase(

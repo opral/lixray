@@ -14,8 +14,10 @@ import { WorkspaceAtelier } from "~/components/workspace-atelier";
 import { useWorkspace } from "~/components/workspace-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import {
+	acceptTeamInviteForWorkspace,
 	resolvePublicWorkspaceByRoute,
 	resolveWorkspaceShareToken,
+	TeamInviteAccessConfirmationError,
 	type PublicWorkspaceRoute,
 } from "~/lib/public-workspace";
 import {
@@ -33,7 +35,9 @@ import {
 } from "~/lib/workspace-share-capability";
 import {
 	isTeamInviteToken,
+	peekTeamInvite,
 	stageTeamInvite,
+	stagedTeamInviteForRoute,
 	takeTeamInvite,
 } from "~/lib/team-invite";
 import { canonicalPathFromLocation } from "~/lib/workspace-share-url";
@@ -95,10 +99,20 @@ function WorkspaceRoutePage() {
 	const [joining, setJoining] = useState(false);
 	const [accessRevision, setAccessRevision] = useState(0);
 	const [settledInviteKey, setSettledInviteKey] = useState<string | null>(null);
+	const [stagedTeamInvite, setStagedTeamInvite] = useState(peekTeamInvite);
+	const [failedInviteKey, setFailedInviteKey] = useState<string | null>(null);
 	const automaticJoinAttempt = useRef<string | null>(null);
 	const resolvedWorkspaceId = resolved?.workspaceId;
+	const urlTeamInvite = invite && isTeamInviteToken(invite) ? invite : null;
+	const pendingTeamInvite =
+		urlTeamInvite ??
+		stagedTeamInviteForRoute(stagedTeamInvite, namespace, workspaceSlug);
 	const inviteResolutionKey =
-		resolvedWorkspaceId && invite ? `${resolvedWorkspaceId}:${invite}` : null;
+		resolvedWorkspaceId && pendingTeamInvite
+			? `${resolvedWorkspaceId}:${pendingTeamInvite}`
+			: resolvedWorkspaceId && invite
+				? `${resolvedWorkspaceId}:${invite}`
+				: null;
 	const shouldWaitForInviteResolution =
 		!isDemoModeEnabled &&
 		inviteResolutionKey !== null &&
@@ -172,53 +186,74 @@ function WorkspaceRoutePage() {
 		});
 	}, [navigate]);
 
-	// A team invite (tm_…) joins the workspace's namespace. Signed in, it is
-	// accepted on sight — anyone who opens the link joins as a member. Signed
-	// out, the token is staged for the effect below to accept after sign-in.
+	// A team invite (tm_…) joins the workspace's namespace. Keep the Atelier
+	// closed until the invite has been accepted and a fresh route lookup confirms
+	// edit access. Otherwise the public route can mount a read-only Lix while the
+	// membership update is still in flight.
 	useEffect(() => {
 		if (
 			isDemoModeEnabled ||
 			!resolvedWorkspaceId ||
 			!authClient ||
-			!invite ||
-			!isTeamInviteToken(invite) ||
+			!pendingTeamInvite ||
 			!authIsLoaded
 		) {
 			return;
 		}
+		const inviteKey = `${resolvedWorkspaceId}:${pendingTeamInvite}`;
+		if (settledInviteKey === inviteKey || failedInviteKey === inviteKey) return;
 		let disposed = false;
-		const settle = () => {
+		const settle = (clearPending: boolean) => {
 			if (disposed) return;
-			setSettledInviteKey(`${resolvedWorkspaceId}:${invite}`);
-			cleanInviteFromAddressBar();
+			setSettledInviteKey(inviteKey);
+			if (clearPending) {
+				takeTeamInvite();
+				setStagedTeamInvite(null);
+			}
+			if (urlTeamInvite) cleanInviteFromAddressBar();
 		};
 		if (!authUser) {
-			stageTeamInvite(invite);
-			settle();
+			const staged = {
+				token: pendingTeamInvite,
+				namespace,
+				workspaceSlug,
+			} as const;
+			stageTeamInvite(staged);
+			setStagedTeamInvite(staged);
+			const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+			window.location.replace(
+				`/sign-in?returnTo=${encodeURIComponent(returnTo)}`,
+			);
 			return;
 		}
 		void (async () => {
 			try {
-				const { data, error } = await authClient.rpc(
-					"accept_namespace_invite",
-					{ p_token: invite },
+				const joined = await acceptTeamInviteForWorkspace(
+					authClient,
+					pendingTeamInvite,
+					namespace,
+					workspaceSlug,
+					resolvedWorkspaceId,
 				);
-				if (error) throw new Error(error.message);
 				if (disposed) return;
-				const joined = data?.[0];
+				setResolved(joined.workspace);
 				toast.success(
-					joined
-						? `You joined ${joined.namespace_name} — every repository, edit access.`
+					joined.joinedNamespaceName
+						? `You joined ${joined.joinedNamespaceName} — every repository, edit access.`
 						: "You joined the team.",
 				);
-				setAccessRevision((current) => current + 1);
-				void workspaceState.refresh();
-			} catch {
+				settle(true);
+				void workspaceState.refresh({ workspaceId: resolvedWorkspaceId });
+			} catch (caught) {
 				if (!disposed) {
-					toast.error("This invite link is invalid or was reset.");
+					if (caught instanceof TeamInviteAccessConfirmationError) {
+						setFailedInviteKey(inviteKey);
+						toast.error(caught.message);
+					} else {
+						toast.error("This invite link is invalid or was reset.");
+						settle(true);
+					}
 				}
-			} finally {
-				settle();
 			}
 		})();
 		return () => {
@@ -229,37 +264,15 @@ function WorkspaceRoutePage() {
 		authIsLoaded,
 		authUser,
 		cleanInviteFromAddressBar,
-		invite,
+		failedInviteKey,
+		namespace,
+		pendingTeamInvite,
 		resolvedWorkspaceId,
+		settledInviteKey,
+		urlTeamInvite,
+		workspaceSlug,
 		workspaceState,
 	]);
-
-	// A staged team invite survives the sign-in redirect in sessionStorage and
-	// is accepted as soon as the signed-in session is back on this route.
-	useEffect(() => {
-		if (isDemoModeEnabled || !authClient || !authUser) return;
-		const staged = takeTeamInvite();
-		if (!staged) return;
-		void (async () => {
-			try {
-				const { data, error } = await authClient.rpc(
-					"accept_namespace_invite",
-					{ p_token: staged },
-				);
-				if (error) throw new Error(error.message);
-				const joined = data?.[0];
-				toast.success(
-					joined
-						? `You joined ${joined.namespace_name} — every repository, edit access.`
-						: "You joined the team.",
-				);
-				setAccessRevision((current) => current + 1);
-				void workspaceState.refresh();
-			} catch {
-				toast.error("This invite link is invalid or was reset.");
-			}
-		})();
-	}, [authClient, authUser, workspaceState]);
 
 	// A capability is resolved once, held only for this browser session, then
 	// removed from router state and the address bar. Invalid/revoked links clean
@@ -470,6 +483,16 @@ function WorkspaceRoutePage() {
 		return <WorkspaceRouteStatus>Opening repository…</WorkspaceRouteStatus>;
 	}
 	if (shouldWaitForInviteResolution) {
+		if (failedInviteKey === inviteResolutionKey) {
+			return (
+				<WorkspaceRouteStatus>
+					<strong>You joined, but edit access could not be refreshed.</strong>
+					<Button variant="outline" onClick={() => setFailedInviteKey(null)}>
+						Retry
+					</Button>
+				</WorkspaceRouteStatus>
+			);
+		}
 		return (
 			<WorkspaceRouteStatus>Opening shared repository…</WorkspaceRouteStatus>
 		);

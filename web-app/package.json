@@ -29,7 +29,7 @@
 		"pretest:e2e": "pnpm lix:build",
 		"test:e2e": "playwright test",
 		"test:analytics": "node --test --experimental-strip-types src/lib/*telemetry*.test.ts",
-		"test:auth": "node --test --experimental-strip-types src/lib/auth-return-to.test.ts src/lib/lix-connection-prompt.test.ts src/lib/workspace-share-capability.test.ts",
+		"test:auth": "node --test --experimental-strip-types src/lib/auth-return-to.test.ts src/lib/lix-connection-prompt.test.ts src/lib/public-workspace.test.ts src/lib/team-invite.test.ts src/lib/workspace-share-capability.test.ts",
 		"test:workspace": "node --test --experimental-strip-types src/components/workspace-home/lix-data.test.ts src/lib/repository-session-manager.test.ts",
 		"test:railway-config": "node --test scripts/*.test.mjs",
 		"test:worker": "node --test --experimental-strip-types src/worker/*.test.ts src/mcp/*.test.ts",
