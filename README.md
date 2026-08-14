@@ -33,8 +33,7 @@ security proves repository access before a request reaches `lix-server`.
 
 ## Setup
 
-Requirements: Node.js 22, pnpm 10.13.1, Rust, Docker, the Supabase CLI, and
-the Infisical CLI authenticated to the LixRay project.
+Requirements: Node.js 22, pnpm 10.13.1, Rust, Docker, and the Supabase CLI.
 
 ```sh
 git submodule update --init --recursive
@@ -43,9 +42,11 @@ pnpm dev
 ```
 
 Open `http://127.0.0.1:8787` and choose **Continue as local developer**.
-`pnpm dev` loads the Infisical `dev` environment, starts Supabase, applies
-migrations, creates the local account, runs the stateful backend services with
-Compose, and serves the web app with Vite.
+`pnpm dev` starts Supabase, applies migrations, creates the local account, runs
+the stateful backend services with Compose, and serves the web app with Vite.
+Use `pnpm dev:telemetry` to load the Infisical `dev` environment and enable
+development telemetry; this requires an Infisical CLI session authenticated to
+the LixRay project.
 Edits in `web-app` and `vendor/atelier` update through HMR. Ctrl-C stops Vite;
 the backend services remain available for the next run. Use `pnpm dev --down`
 to stop the services. The local web and MCP endpoint always use port `8787`.
