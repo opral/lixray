@@ -51,7 +51,7 @@ export async function openRepositoryLixSession(
 		repositorySessionKey(options),
 		() => openRepositoryLixSessionWithRetry(options),
 	);
-	return new RepositoryLixSessionLease(lease.resource, lease.release);
+	return new RepositoryLixSessionLease(lease.resource, () => lease.release());
 }
 
 async function openRepositoryLixSessionWithRetry(
@@ -296,12 +296,13 @@ class RepositoryLixSessionLease implements RepositoryLixSession {
 		return this.#session.switchBranch(branchId);
 	}
 
-	async close(): Promise<void> {
-		if (this.#closed) return;
+	close(): Promise<void> {
+		if (this.#closed) return Promise.resolve();
 		this.#closed = true;
 		for (const unsubscribe of this.#subscriptions) unsubscribe();
 		this.#subscriptions.clear();
 		this.#release();
+		return Promise.resolve();
 	}
 
 	#assertOpen(): void {
