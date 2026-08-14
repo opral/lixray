@@ -31,6 +31,26 @@ env:
   PNPM_VERSION: "10.13.1"
 
 jobs:
+  changes:
+    name: Select validation lanes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.classify.outputs.frontend }}
+      database: ${{ steps.classify.outputs.database }}
+      rust: ${{ steps.classify.outputs.rust }}
+      e2e: ${{ steps.classify.outputs.e2e }}
+
+    steps:
+      - name: Check out pull request merge
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Classify changed files
+        id: classify
+        run: node .github/scripts/classify-ci-changes.mjs
+
   server-image:
     name: Server image
     runs-on: blacksmith-32vcpu-ubuntu-2404
@@ -303,6 +323,8 @@ jobs:
 
   frontend:
     name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -347,6 +369,8 @@ jobs:
 
   database:
     name: Database
+    needs: changes
+    if: needs.changes.outputs.database == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -364,6 +388,8 @@ jobs:
 
   rust:
     name: Rust
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -383,6 +409,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lix-server
+          shared-key: lixray-server-nightly-2026-05-21
+          save-if: false
 
       - name: Check Rust
         run: |
@@ -392,6 +420,8 @@ jobs:
 
   e2e:
     name: E2E
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
@@ -451,23 +481,55 @@ jobs:
     name: CI
     if: always()
     needs:
+      - changes
       - frontend
       - database
       - rust
       - e2e
       - server-image
       - web-image
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
-      - name: Confirm all CI lanes passed
-        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}
-        run: echo "All CI lanes passed"
+      - name: Confirm selected CI lanes passed
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          SERVER_IMAGE_RESULT: ${{ needs.server-image.result }}
+          WEB_IMAGE_RESULT: ${{ needs.web-image.result }}
+          FRONTEND_SELECTED: ${{ needs.changes.outputs.frontend }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          DATABASE_SELECTED: ${{ needs.changes.outputs.database }}
+          DATABASE_RESULT: ${{ needs.database.result }}
+          RUST_SELECTED: ${{ needs.changes.outputs.rust }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          E2E_SELECTED: ${{ needs.changes.outputs.e2e }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+        run: |
+          require_success() {
+            if test "$2" != "success"; then
+              echo "$1 did not succeed: $2" >&2
+              exit 1
+            fi
+          }
+          require_selected_success() {
+            if test "$2" = "true"; then
+              require_success "$1" "$3"
+            elif test "$3" != "skipped"; then
+              echo "$1 was not selected but finished with unexpected result: $3" >&2
+              exit 1
+            fi
+          }
 
-      - name: Fail for an unsuccessful CI lane
-        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
-        run: exit 1
+          require_success "Change selection" "$CHANGES_RESULT"
+          require_success "Server image" "$SERVER_IMAGE_RESULT"
+          require_success "Web image" "$WEB_IMAGE_RESULT"
+          require_selected_success "Frontend" "$FRONTEND_SELECTED" "$FRONTEND_RESULT"
+          require_selected_success "Database" "$DATABASE_SELECTED" "$DATABASE_RESULT"
+          require_selected_success "Rust" "$RUST_SELECTED" "$RUST_RESULT"
+          require_selected_success "E2E" "$E2E_SELECTED" "$E2E_RESULT"
+          echo "All selected CI lanes passed"
 
   deploy-server-preview:
     name: Deploy server preview

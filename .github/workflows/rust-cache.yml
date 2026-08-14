@@ -1,0 +1,61 @@
+name: Seed Rust cache
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "lix-server/**"
+      - "vendor/lix"
+      - ".github/workflows/rust-cache.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: rust-cache-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_PROFILE_RELEASE_DEBUG: 0
+  CARGO_PROFILE_BENCH_DEBUG: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  seed:
+    name: Seed Rust cache
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-05-21
+          components: clippy
+
+      - name: Restore shared Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lix-server
+          shared-key: lixray-server-nightly-2026-05-21
+          save-if: true
+
+      - name: Compile clippy targets
+        run: cargo clippy --manifest-path lix-server/Cargo.toml -Z bindeps --locked --all-targets --all-features -- -D warnings
+
+      - name: Compile test targets
+        env:
+          RUST_MIN_STACK: 8388608
+        run: cargo -Z bindeps test --manifest-path lix-server/Cargo.toml --locked --no-run
