@@ -5,22 +5,23 @@ import {
 	type RemoteLixFetch,
 } from "@lix-js/sdk";
 import { captureTelemetry } from "./telemetry.ts";
+import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 
 type TokenProvider = () => Promise<string | null>;
 
-interface OpenWorkspaceLixSessionOptions {
+interface OpenRepositoryLixSessionOptions {
 	namespace: string;
-	workspaceSlug: string;
-	workspaceId?: string;
+	repositorySlug: string;
+	repositoryId?: string;
 	getAccessToken: TokenProvider;
 	/**
 	 * Opens the session without an Authorization header when no access token
 	 * is available. The worker only serves such requests through its public,
-	 * read-only workspace transport.
+	 * read-only repository transport.
 	 */
 	allowAnonymous?: boolean;
 	initialBranchId?: string | null;
-	/** Names this browser client's private Lix client-state database. */
+	/** Prefixes this browser client's repository-scoped Lix client-state database. */
 	clientStoragePrefix?: string;
 	clientStorage?: IndexedDbStorage;
 	origin?: string | URL;
@@ -29,7 +30,7 @@ interface OpenWorkspaceLixSessionOptions {
 
 const RECOVERING_OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
 
-export interface WorkspaceLixSession {
+export interface RepositoryLixSession {
 	readonly lix: Lix;
 	activeBranchSnapshot(): string;
 	defaultBranchSnapshot(): string;
@@ -39,12 +40,26 @@ export interface WorkspaceLixSession {
 	close(): Promise<void>;
 }
 
-export async function openWorkspaceLixSession(
-	options: OpenWorkspaceLixSessionOptions,
-): Promise<WorkspaceLixSession> {
+export async function openRepositoryLixSession(
+	options: OpenRepositoryLixSessionOptions,
+): Promise<RepositoryLixSession> {
+	if (options.clientStorage) {
+		return openRepositoryLixSessionWithRetry(options);
+	}
+
+	const lease = await acquireManagedRepositoryResource(
+		repositorySessionKey(options),
+		() => openRepositoryLixSessionWithRetry(options),
+	);
+	return new RepositoryLixSessionLease(lease.resource, () => lease.release());
+}
+
+async function openRepositoryLixSessionWithRetry(
+	options: OpenRepositoryLixSessionOptions,
+): Promise<RepositoryLixSession> {
 	for (let attempt = 0; ; attempt += 1) {
 		try {
-			return await openWorkspaceLixSessionOnce(options);
+			return await openRepositoryLixSessionOnce(options);
 		} catch (error) {
 			const retryDelay = RECOVERING_OPEN_RETRY_DELAYS_MS[attempt];
 			if (!isLixRecoveringError(error) || retryDelay === undefined) {
@@ -55,20 +70,20 @@ export async function openWorkspaceLixSession(
 	}
 }
 
-async function openWorkspaceLixSessionOnce(
-	options: OpenWorkspaceLixSessionOptions,
-): Promise<WorkspaceLixSession> {
+async function openRepositoryLixSessionOnce(
+	options: OpenRepositoryLixSessionOptions,
+): Promise<RepositoryLixSession> {
 	const clientStorage =
 		options.clientStorage ??
 		(typeof globalThis.indexedDB === "undefined"
 			? undefined
 			: new IndexedDbStorage({
-					name: options.clientStoragePrefix ?? "lixray.client.v2",
+					name: repositoryClientStorageName(options),
 				}));
 	const lix = await openLix({
 		server: {
 			mode: "remote",
-			url: workspaceUrl(options),
+			url: repositoryUrl(options),
 			headers: async (): Promise<Record<string, string>> => {
 				const token = await options.getAccessToken();
 				if (token) return { Authorization: `Bearer ${token}` };
@@ -76,7 +91,7 @@ async function openWorkspaceLixSessionOnce(
 				throw new Error("A repository access token is required.");
 			},
 			fetch: createTelemetryFetch(options.fetch, {
-				workspaceId: options.workspaceId,
+				repositoryId: options.repositoryId,
 			}),
 		},
 		...(clientStorage ? { storage: clientStorage } : {}),
@@ -84,7 +99,7 @@ async function openWorkspaceLixSessionOnce(
 
 	try {
 		const defaultBranchId = await lix.activeBranchId();
-		const session = new RemoteWorkspaceLixSession(lix, defaultBranchId);
+		const session = new RemoteRepositoryLixSession(lix, defaultBranchId);
 		if (
 			options.initialBranchId &&
 			options.initialBranchId !== defaultBranchId
@@ -104,7 +119,7 @@ async function openWorkspaceLixSessionOnce(
 
 function createTelemetryFetch(
 	customFetch: RemoteLixFetch | undefined,
-	context: { workspaceId?: string },
+	context: { repositoryId?: string },
 ): RemoteLixFetch {
 	const fetcher = customFetch ?? globalThis.fetch?.bind(globalThis);
 	if (!fetcher) {
@@ -128,7 +143,7 @@ async function reportLixRequestFailure(
 	response: Response,
 	input: RequestInfo | URL,
 	init: RequestInit | undefined,
-	context: { workspaceId?: string },
+	context: { repositoryId?: string },
 ): Promise<void> {
 	let code: string | undefined;
 	try {
@@ -146,7 +161,7 @@ async function reportLixRequestFailure(
 		lix_request_method: init?.method ?? "GET",
 		lix_http_status: response.status,
 		...(code ? { lix_error_code: code } : {}),
-		...(context.workspaceId ? { lix_id: context.workspaceId } : {}),
+		...(context.repositoryId ? { lix_id: context.repositoryId } : {}),
 	});
 }
 
@@ -181,7 +196,7 @@ function delay(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-class RemoteWorkspaceLixSession implements WorkspaceLixSession {
+class RemoteRepositoryLixSession implements RepositoryLixSession {
 	readonly lix: Lix;
 	readonly #listeners = new Set<() => void>();
 	readonly #defaultBranchId: string;
@@ -238,11 +253,83 @@ class RemoteWorkspaceLixSession implements WorkspaceLixSession {
 	}
 }
 
-function workspaceUrl(options: OpenWorkspaceLixSessionOptions): URL {
+class RepositoryLixSessionLease implements RepositoryLixSession {
+	readonly lix: Lix;
+	readonly #session: RepositoryLixSession;
+	readonly #subscriptions = new Set<() => void>();
+	readonly #release: () => void;
+	#closed = false;
+
+	constructor(session: RepositoryLixSession, release: () => void) {
+		this.lix = session.lix;
+		this.#session = session;
+		this.#release = release;
+	}
+
+	activeBranchSnapshot(): string {
+		this.#assertOpen();
+		return this.#session.activeBranchSnapshot();
+	}
+
+	defaultBranchSnapshot(): string {
+		this.#assertOpen();
+		return this.#session.defaultBranchSnapshot();
+	}
+
+	subscribeActiveBranch(listener: () => void): () => void {
+		this.#assertOpen();
+		const unsubscribe = this.#session.subscribeActiveBranch(listener);
+		this.#subscriptions.add(unsubscribe);
+		return () => {
+			this.#subscriptions.delete(unsubscribe);
+			unsubscribe();
+		};
+	}
+
+	createBranch(name: string): Promise<string> {
+		this.#assertOpen();
+		return this.#session.createBranch(name);
+	}
+
+	switchBranch(branchId: string): Promise<string> {
+		this.#assertOpen();
+		return this.#session.switchBranch(branchId);
+	}
+
+	close(): Promise<void> {
+		if (this.#closed) return Promise.resolve();
+		this.#closed = true;
+		for (const unsubscribe of this.#subscriptions) unsubscribe();
+		this.#subscriptions.clear();
+		this.#release();
+		return Promise.resolve();
+	}
+
+	#assertOpen(): void {
+		if (this.#closed) throw new Error("The repository Lix session is closed.");
+	}
+}
+
+function repositoryClientStorageName(
+	options: OpenRepositoryLixSessionOptions,
+): string {
+	const prefix = options.clientStoragePrefix ?? "lixray.client.v2";
+	const repository =
+		options.repositoryId ?? `${options.namespace}:${options.repositorySlug}`;
+	return `${prefix}:${repository}`;
+}
+
+function repositorySessionKey(
+	options: OpenRepositoryLixSessionOptions,
+): string {
+	return `${repositoryUrl(options).href}\n${repositoryClientStorageName(options)}`;
+}
+
+function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {
 	const origin = options.origin ?? globalThis.location?.origin;
 	if (!origin) throw new Error("A repository server origin is required.");
 	return new URL(
-		`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.workspaceSlug)}`,
+		`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.repositorySlug)}`,
 		origin,
 	);
 }

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { openWorkspaceLixSession } from "./workspace-lix-session";
+import { openRepositoryLixSession } from "./repository-lix-session.ts";
 
-void test("retries a recovering workspace until its handshake succeeds", async (t) => {
+void test("retries a recovering repository until its handshake succeeds", async (t) => {
 	let handshakeAttempts = 0;
 	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 		const request =
@@ -36,9 +36,9 @@ void test("retries a recovering workspace until its handshake succeeds", async (
 		return new Response("Not found", { status: 404 });
 	};
 
-	const session = await openWorkspaceLixSession({
+	const session = await openRepositoryLixSession({
 		namespace: "acme",
-		workspaceSlug: "launch-q3",
+		repositorySlug: "launch-q3",
 		origin: "https://lixray.test",
 		getAccessToken: async () => "token",
 		fetch,

@@ -450,6 +450,9 @@ export class LixService {
 				throw new Error("invalid claims");
 			claims = parsed as ContextClaims;
 			signature = base64ToBytes(toBase64(encodedSignature));
+			if (encodeBase64Url(signature) !== encodedSignature) {
+				throw new Error("non-canonical signature");
+			}
 		} catch {
 			throw createLixError("invalid_context", "context is invalid.");
 		}
