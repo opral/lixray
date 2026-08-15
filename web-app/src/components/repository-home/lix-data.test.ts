@@ -3,9 +3,13 @@ import test from "node:test";
 import type { Lix } from "@lix-js/sdk";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import {
+	canonicalDirectoryPath,
+	createRepositoryFile,
 	createRepositoryFolder,
+	importDroppedFiles,
 	listDirectory,
 	persistedDirectoryPath,
+	resolveRepositoryHref,
 	type RepositoryTree,
 	repositoryHasNoFiles,
 } from "./lix-data.ts";
@@ -16,7 +20,7 @@ const tree: RepositoryTree = {
 			kind: EntryKind.Directory,
 			id: "docs",
 			parentId: null,
-			path: "/docs/",
+			path: "/docs",
 			name: "docs",
 			updatedAt: "2026-08-10T00:00:00Z",
 		},
@@ -24,7 +28,7 @@ const tree: RepositoryTree = {
 			kind: EntryKind.Directory,
 			id: "guides",
 			parentId: "docs",
-			path: "/docs/guides/",
+			path: "/docs/guides",
 			name: "guides",
 			updatedAt: "2026-08-10T00:00:00Z",
 		},
@@ -53,7 +57,7 @@ void test("lists directory entries from their separate surfaces", () => {
 	const listing = listDirectory(tree, "/");
 	assert.deepEqual(
 		listing.dirs.map((entry) => entry.path),
-		["/docs/"],
+		["/docs"],
 	);
 	assert.deepEqual(
 		listing.files.map((entry) => entry.path),
@@ -62,10 +66,10 @@ void test("lists directory entries from their separate surfaces", () => {
 });
 
 void test("lists nested children through parent identifiers", () => {
-	const listing = listDirectory(tree, "/docs/");
+	const listing = listDirectory(tree, "/docs");
 	assert.deepEqual(
 		listing.dirs.map((entry) => entry.path),
-		["/docs/guides/"],
+		["/docs/guides"],
 	);
 	assert.deepEqual(
 		listing.files.map((entry) => entry.path),
@@ -73,9 +77,16 @@ void test("lists nested children through parent identifiers", () => {
 	);
 });
 
-void test("resolves slashless links through the directory surface", () => {
-	assert.equal(persistedDirectoryPath(tree, "/docs"), "/docs/");
+void test("resolves canonical links through the directory surface", () => {
+	assert.equal(persistedDirectoryPath(tree, "/docs/"), "/docs");
 	assert.equal(persistedDirectoryPath(tree, "/README.md"), null);
+});
+
+void test("canonicalizes directory paths and nested relative links", () => {
+	assert.equal(canonicalDirectoryPath("docs/"), "/docs");
+	assert.equal(canonicalDirectoryPath("/"), "/");
+	assert.equal(resolveRepositoryHref("/docs", "guides/"), "/docs/guides");
+	assert.equal(resolveRepositoryHref("/docs", "../README.md"), "/README.md");
 });
 
 void test("repositoryHasNoFiles reports an empty repository", async () => {
@@ -109,10 +120,10 @@ void test("creates a directory with an exact persisted directory path", async ()
 		},
 	} as unknown as Lix;
 
-	assert.equal(await createRepositoryFolder(lix, "/"), "/new-folder/");
+	assert.equal(await createRepositoryFolder(lix, "/"), "/new-folder");
 	assert.deepEqual(calls.at(-1), {
 		sql: "INSERT INTO lix_directory (path) VALUES ($1)",
-		params: ["/new-folder/"],
+		params: ["/new-folder"],
 	});
 });
 
@@ -126,5 +137,42 @@ void test("checks the opposite surface when choosing a directory path", async ()
 		},
 	} as unknown as Lix;
 
-	assert.equal(await createRepositoryFolder(lix, "/"), "/new-folder-1/");
+	assert.equal(await createRepositoryFolder(lix, "/"), "/new-folder-1");
+});
+
+void test("creates nested files and folders with canonical separators", async () => {
+	const calls: Array<{ sql: string; params: ReadonlyArray<unknown> }> = [];
+	const lix = {
+		execute: async (sql: string, params: ReadonlyArray<unknown>) => {
+			calls.push({ sql, params });
+			return { rows: [] };
+		},
+	} as unknown as Lix;
+
+	assert.equal(await createRepositoryFolder(lix, "/docs"), "/docs/new-folder");
+	assert.equal(
+		await createRepositoryFile(lix, "/docs", "md"),
+		"/docs/untitled.md",
+	);
+	assert.deepEqual(calls.at(-1)?.params[0], "/docs/untitled.md");
+});
+
+void test("imports dropped files into a canonical nested directory", async () => {
+	const calls: Array<{ sql: string; params: ReadonlyArray<unknown> }> = [];
+	const lix = {
+		execute: async (sql: string, params: ReadonlyArray<unknown>) => {
+			calls.push({ sql, params });
+			return { rows: [] };
+		},
+	} as unknown as Lix;
+	const file = {
+		name: "notes.md",
+		arrayBuffer: async () => new TextEncoder().encode("notes").buffer,
+	} as File;
+
+	assert.deepEqual(await importDroppedFiles(lix, "/docs", [file]), {
+		imported: 1,
+		failed: [],
+	});
+	assert.equal(calls.at(-1)?.params[0], "/docs/notes.md");
 });

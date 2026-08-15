@@ -262,9 +262,8 @@ export function DirectoryView({
 						onNavigate={(href, event) => {
 							const resolved = resolveRepositoryHref(dirPath, href);
 							if (!resolved) return false;
-							// Directory paths are authoritative on lix_directory. A
-							// markdown link may omit its trailing slash, so look up the
-							// exact persisted directory path rather than inferring kind.
+							// Directory paths are authoritative on lix_directory, so look
+							// up the exact persisted path rather than inferring kind.
 							const directoryPath = persistedDirectoryPath(tree, resolved);
 							if (directoryPath) {
 								onOpenDir(directoryPath, {

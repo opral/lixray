@@ -6,6 +6,17 @@ export function dirNameFromPath(dirPath: string): string {
 	return dirPath.split("/").filter(Boolean).at(-1) ?? "";
 }
 
+/** Canonical persisted lix_directory path: absolute, with no trailing slash. */
+export function canonicalDirectoryPath(path: string): string {
+	const absolute = path.startsWith("/") ? path : `/${path}`;
+	return absolute.replace(/\/+$/, "") || "/";
+}
+
+function childPath(dirPath: string, name: string): string {
+	const directory = canonicalDirectoryPath(dirPath);
+	return directory === "/" ? `/${name}` : `${directory}/${name}`;
+}
+
 export type RepositoryTree = {
 	readonly dirs: ReadonlyArray<{
 		readonly kind: typeof EntryKind.Directory;
@@ -167,7 +178,7 @@ export function resolveRepositoryHref(
 	) {
 		return null;
 	}
-	const raw = href.startsWith("/") ? href : `${baseDir}${href}`;
+	const raw = href.startsWith("/") ? href : childPath(baseDir, href);
 	const segments: string[] = [];
 	for (const segment of raw.split("/")) {
 		if (!segment || segment === ".") continue;
@@ -179,8 +190,7 @@ export function resolveRepositoryHref(
 		segments.push(segment);
 	}
 	if (segments.length === 0) return null;
-	const resolved = `/${segments.map((segment) => decodeURIComponent(segment)).join("/")}`;
-	return raw.endsWith("/") ? `${resolved}/` : resolved;
+	return `/${segments.map((segment) => decodeURIComponent(segment)).join("/")}`;
 }
 
 type DirectoryListing = {
@@ -250,13 +260,8 @@ export function persistedDirectoryPath(
 	tree: RepositoryTree,
 	resolvedPath: string,
 ): string | null {
-	return (
-		tree.dirs.find(
-			(dir) =>
-				dir.path === resolvedPath ||
-				(!resolvedPath.endsWith("/") && dir.path === `${resolvedPath}/`),
-		)?.path ?? null
-	);
+	const canonicalPath = canonicalDirectoryPath(resolvedPath);
+	return tree.dirs.find((dir) => dir.path === canonicalPath)?.path ?? null;
 }
 
 /** Live markdown text of the file at path (null while loading/missing). */
@@ -288,19 +293,16 @@ const NEW_FILE_TEMPLATES: Record<string, { base: string; data: string }> = {
 
 async function firstFreePath(
 	lix: Lix,
-	kind: EntryKind,
 	candidate: (suffix: number | null) => string,
 ): Promise<string> {
 	for (let suffix = null as number | null, i = 0; i < 1000; i += 1) {
 		const path = candidate(suffix);
-		const directoryPath = kind === EntryKind.Directory ? path : `${path}/`;
-		const filePath = kind === EntryKind.File ? path : path.slice(0, -1);
 		const [dirHit, fileHit] = await Promise.all([
 			lix.execute("SELECT 1 FROM lix_directory WHERE lower(path) = lower($1)", [
-				directoryPath,
+				path,
 			]),
 			lix.execute("SELECT 1 FROM lix_file WHERE lower(path) = lower($1)", [
-				filePath,
+				path,
 			]),
 		]);
 		if (dirHit.rows.length === 0 && fileHit.rows.length === 0) return path;
@@ -319,10 +321,13 @@ export async function createRepositoryFile(
 		base: "untitled",
 		data: "",
 	};
-	const path = await firstFreePath(lix, EntryKind.File, (suffix) =>
-		suffix === null
-			? `${dirPath}${template.base}.${extension}`
-			: `${dirPath}${template.base}-${suffix}.${extension}`,
+	const path = await firstFreePath(lix, (suffix) =>
+		childPath(
+			dirPath,
+			suffix === null
+				? `${template.base}.${extension}`
+				: `${template.base}-${suffix}.${extension}`,
+		),
 	);
 	await lix.execute("INSERT INTO lix_file (path, content) VALUES ($1, $2)", [
 		path,
@@ -331,15 +336,13 @@ export async function createRepositoryFile(
 	return path;
 }
 
-/** Creates an empty folder in dirPath; returns its trailing-slash path. */
+/** Creates an empty folder in dirPath; returns its canonical persisted path. */
 export async function createRepositoryFolder(
 	lix: Lix,
 	dirPath: string,
 ): Promise<string> {
-	const path = await firstFreePath(lix, EntryKind.Directory, (suffix) =>
-		suffix === null
-			? `${dirPath}new-folder/`
-			: `${dirPath}new-folder-${suffix}/`,
+	const path = await firstFreePath(lix, (suffix) =>
+		childPath(dirPath, suffix === null ? "new-folder" : `new-folder-${suffix}`),
 	);
 	await lix.execute("INSERT INTO lix_directory (path) VALUES ($1)", [path]);
 	return path;
@@ -363,7 +366,7 @@ export async function importDroppedFiles(
 			const bytes = new Uint8Array(await file.arrayBuffer());
 			await lix.execute(
 				"INSERT INTO lix_file (path, content) VALUES ($1, $2) ON CONFLICT (path) DO UPDATE SET content = excluded.content",
-				[`${dirPath}${name}`, bytes],
+				[childPath(dirPath, name), bytes],
 			);
 			imported += 1;
 		} catch (error) {
