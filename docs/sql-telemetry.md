@@ -58,6 +58,15 @@ end-to-end latency. Their SQL input state contains independently sanitized
 statement shapes, never bound values or returned rows; see
 [mcp-telemetry.md](./mcp-telemetry.md).
 
+## Failure logs
+
+When a protocol request contains a failed SQL statement, `lix-server` emits a
+structured warning with the HTTP status, `error.type`,
+`lix.sql.fingerprint`, operation, execution kind, and request identity. The
+same error code is recorded on the enclosing `lix.protocol.request` span.
+These logs deliberately exclude SQL text, literal values, bound parameters,
+and returned rows.
+
 ## Export configuration
 
 Infisical supplies these production variables directly to the Railway

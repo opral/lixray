@@ -417,6 +417,13 @@ async fn lix_protocol_inner(
             return protocol_timeout_response();
         }
     };
+    record_sql_failures(
+        &state.in_flight_sql,
+        response.status(),
+        &request_id,
+        &lix_id,
+        &protocol_path,
+    );
     if server_protocol::is_terminal_storage_response(&response) {
         tracing::warn!(
             lix_id = lix_id.as_str(),
@@ -473,6 +480,39 @@ async fn lix_protocol_inner(
         )
     } else {
         Response::from_parts(parts, body)
+    }
+}
+
+fn record_sql_failures(
+    registry: &InFlightSqlRegistry,
+    response_status: StatusCode,
+    request_id: &str,
+    lix_id: &str,
+    protocol_path: &str,
+) {
+    let failures = registry.take_errors();
+    if failures.is_empty() {
+        return;
+    }
+
+    let error_codes = sql_activity_values(&failures, |activity| activity.error_code.as_deref());
+    let span = tracing::Span::current();
+    span.record("lix.error.code", error_codes.as_str());
+    span.record("otel.status_code", "ERROR");
+
+    for failure in failures {
+        tracing::warn!(
+            request_id,
+            lix_id,
+            protocol_path,
+            "http.response.status_code" = response_status.as_u16(),
+            "lix.error.code" = failure.error_code.as_deref().unwrap_or("unavailable"),
+            "lix.sql.fingerprint" = failure.fingerprint.as_deref().unwrap_or("unavailable"),
+            "db.operation.name" = failure.operation.as_deref().unwrap_or("unavailable"),
+            "lix.execution.kind" = failure.execution_kind.as_deref().unwrap_or("unavailable"),
+            "lix.batch.index" = ?failure.batch_index,
+            "Lix SQL protocol request failed"
+        );
     }
 }
 

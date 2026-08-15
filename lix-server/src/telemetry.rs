@@ -40,6 +40,7 @@ struct InFlightSqlState {
     request_by_sql_span: HashMap<tracing::span::Id, tracing::span::Id>,
     activity_by_request:
         HashMap<tracing::span::Id, HashMap<tracing::span::Id, InFlightSqlActivity>>,
+    errors_by_request: HashMap<tracing::span::Id, Vec<InFlightSqlActivity>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -48,6 +49,7 @@ pub(crate) struct InFlightSqlActivity {
     pub(crate) fingerprint: Option<String>,
     pub(crate) execution_kind: Option<String>,
     pub(crate) batch_index: Option<u64>,
+    pub(crate) error_code: Option<String>,
 }
 
 impl InFlightSqlRegistry {
@@ -66,6 +68,24 @@ impl InFlightSqlRegistry {
             .unwrap_or_default();
         activities.sort_by_key(|activity| activity.batch_index);
         activities
+    }
+
+    /// Drains completed SQL failures for the current protocol request.
+    ///
+    /// Lix SQL spans finish before the protocol response is returned. Keeping
+    /// only their redacted fingerprint and stable error code until this call
+    /// lets the HTTP boundary log actionable failures without buffering or
+    /// parsing request/response bodies.
+    pub(crate) fn take_errors(&self) -> Vec<InFlightSqlActivity> {
+        let Some(request_span_id) = tracing::Span::current().id() else {
+            return Vec::new();
+        };
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .errors_by_request
+            .remove(&request_span_id)
+            .unwrap_or_default()
     }
 }
 
@@ -144,24 +164,44 @@ where
         values.record(&mut SqlActivityVisitor(activity));
     }
 
-    fn on_close(&self, id: tracing::span::Id, _context: LayerContext<'_, S>) {
+    fn on_close(&self, id: tracing::span::Id, context: LayerContext<'_, S>) {
         let mut state = self
             .registry
             .inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if context
+            .span(&id)
+            .is_some_and(|span| span.metadata().name() == "lix.protocol.request")
+        {
+            state.activity_by_request.remove(&id);
+            state.errors_by_request.remove(&id);
+            state
+                .request_by_sql_span
+                .retain(|_, request_span_id| request_span_id != &id);
+            return;
+        }
         let Some(request_span_id) = state.request_by_sql_span.remove(&id) else {
             return;
         };
-        let remove_request = state
+        let (activity, remove_request) = state
             .activity_by_request
             .get_mut(&request_span_id)
-            .is_some_and(|activities| {
-                activities.remove(&id);
-                activities.is_empty()
+            .map_or((None, false), |activities| {
+                let activity = activities.remove(&id);
+                (activity, activities.is_empty())
             });
         if remove_request {
             state.activity_by_request.remove(&request_span_id);
+        }
+        if let Some(activity) = activity {
+            if activity.error_code.is_some() {
+                state
+                    .errors_by_request
+                    .entry(request_span_id)
+                    .or_default()
+                    .push(activity);
+            }
         }
     }
 }
@@ -174,6 +214,7 @@ impl Visit for SqlActivityVisitor<'_> {
             "db.operation.name" => self.0.operation = Some(value.to_string()),
             "lix.sql.fingerprint" => self.0.fingerprint = Some(value.to_string()),
             "lix.execution.kind" => self.0.execution_kind = Some(value.to_string()),
+            "error.type" => self.0.error_code = Some(value.to_string()),
             _ => {}
         }
     }
@@ -387,12 +428,80 @@ mod tests {
                         fingerprint: Some("safe-fingerprint".to_string()),
                         execution_kind: Some("query".to_string()),
                         batch_index: Some(2),
+                        error_code: None,
                     }]
                 );
                 assert!(!format!("{:?}", in_flight_sql.current()).contains("secret"));
 
                 drop(sql);
                 assert!(in_flight_sql.current().is_empty());
+            });
+        });
+    }
+
+    #[test]
+    fn completed_sql_failures_retain_only_safe_diagnostics_until_drained() {
+        let in_flight_sql = InFlightSqlRegistry::default();
+        let subscriber = tracing_subscriber::registry().with(InFlightSqlLayer {
+            registry: in_flight_sql.clone(),
+        });
+        tracing::subscriber::with_default(subscriber, || {
+            let request = tracing::info_span!("lix.protocol.request");
+            request.in_scope(|| {
+                let sql = tracing::info_span!(
+                    target: "lix_sql",
+                    "lix.sql.query",
+                    "db.operation.name" = tracing::field::Empty,
+                    "lix.sql.fingerprint" = tracing::field::Empty,
+                    "lix.execution.kind" = tracing::field::Empty,
+                    "lix.batch.index" = tracing::field::Empty,
+                    "db.query.text" = tracing::field::Empty,
+                    "error.type" = tracing::field::Empty,
+                );
+                sql.record("db.operation.name", "SELECT");
+                sql.record("lix.sql.fingerprint", "safe-fingerprint");
+                sql.record("lix.execution.kind", "execute");
+                sql.record("lix.batch.index", 3_u64);
+                sql.record("db.query.text", "SELECT secret FROM private_table");
+                sql.record("error.type", "LIX_ERROR_UNKNOWN_COLUMN");
+                drop(sql);
+
+                assert!(in_flight_sql.current().is_empty());
+                let failures = in_flight_sql.take_errors();
+                assert_eq!(
+                    failures,
+                    vec![InFlightSqlActivity {
+                        operation: Some("SELECT".to_string()),
+                        fingerprint: Some("safe-fingerprint".to_string()),
+                        execution_kind: Some("execute".to_string()),
+                        batch_index: Some(3),
+                        error_code: Some("LIX_ERROR_UNKNOWN_COLUMN".to_string()),
+                    }]
+                );
+                assert!(!format!("{failures:?}").contains("secret"));
+                assert!(in_flight_sql.take_errors().is_empty());
+            });
+        });
+    }
+
+    #[test]
+    fn completed_successful_sql_is_not_retained_as_a_failure() {
+        let in_flight_sql = InFlightSqlRegistry::default();
+        let subscriber = tracing_subscriber::registry().with(InFlightSqlLayer {
+            registry: in_flight_sql.clone(),
+        });
+        tracing::subscriber::with_default(subscriber, || {
+            let request = tracing::info_span!("lix.protocol.request");
+            request.in_scope(|| {
+                let sql = tracing::info_span!(
+                    target: "lix_sql",
+                    "lix.sql.query",
+                    "lix.sql.fingerprint" = "safe-fingerprint",
+                    "error.type" = tracing::field::Empty,
+                );
+                drop(sql);
+
+                assert!(in_flight_sql.take_errors().is_empty());
             });
         });
     }
