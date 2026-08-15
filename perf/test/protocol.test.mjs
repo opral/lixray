@@ -72,7 +72,7 @@ test("handshake establishes a session used by execute and close", async () => {
   };
   const client = new ProtocolClient({
     baseUrl: "http://example.test/",
-    workspaceId: "workspace with spaces",
+    repositoryId: "repository with spaces",
     internalToken: "internal-token",
     fetchImpl,
   });
@@ -87,7 +87,7 @@ test("handshake establishes a session used by execute and close", async () => {
 
   assert.equal(
     calls[0].url,
-    "http://example.test/lixes/workspace%20with%20spaces/lix/v1/",
+    "http://example.test/lixes/repository%20with%20spaces/lix/v1/",
   );
   assert.equal(calls[0].headers["lix-session-id"], undefined);
   assert.equal(calls[0].headers.authorization, "Bearer internal-token");
@@ -105,7 +105,7 @@ test("SQL write requests preserve their caller-provided idempotency keys", async
   const calls = [];
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async (url, options) => {
       calls.push({ url, ...options });
       if (options.method === "GET") {
@@ -142,7 +142,7 @@ test("close clears the session even when the request fails", async () => {
   let requests = 0;
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async (_url, options) => {
       requests += 1;
       if (options.method === "GET") {
@@ -161,7 +161,7 @@ test("close clears the session even when the request fails", async () => {
 test("execute requires an established session", async () => {
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async () => {
       throw new Error("fetch should not run");
     },
@@ -174,7 +174,7 @@ test("upsertFileData sends an authenticated raw octet-stream request", async () 
   const calls = [];
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     internalToken: "internal-token",
     fetchImpl: async (url, options) => {
       calls.push({ url, ...options });
@@ -198,7 +198,7 @@ test("upsertFileData sends an authenticated raw octet-stream request", async () 
   assert.equal(result.requestBytes, payload.byteLength);
   assert.equal(
     calls[1].url,
-    "http://example.test/lixes/workspace/lix/v1/file/upsert?path=%2Fnested%2Fpayload.bin",
+    "http://example.test/lixes/repository/lix/v1/file/upsert?path=%2Fnested%2Fpayload.bin",
   );
   assert.equal(calls[1].method, "POST");
   assert.equal(calls[1].headers.authorization, "Bearer internal-token");
@@ -211,7 +211,7 @@ test("upsertFileData keeps resumable media parts on the same file abstraction", 
   const calls = [];
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     internalToken: "internal-token",
     fetchImpl: async (url, options) => {
       calls.push({ url, ...options });
@@ -242,7 +242,7 @@ test("upsertFileDataBatch frames raw entries after its advertised capability", a
   const calls = [];
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     internalToken: "internal-token",
     fetchImpl: async (url, options) => {
       calls.push({ url, ...options });
@@ -281,7 +281,7 @@ test("upsertFileDataBatch frames raw entries after its advertised capability", a
   );
   assert.equal(
     calls[1].url,
-    "http://example.test/lixes/workspace/lix/v1/file/upsert-batch",
+    "http://example.test/lixes/repository/lix/v1/file/upsert-batch",
   );
   assert.equal(calls[1].method, "POST");
   assert.equal(calls[1].headers.authorization, "Bearer internal-token");
@@ -294,7 +294,7 @@ test("upsertFileDataBatch rejects more than 1,024 entries to preserve atomicity"
   const calls = [];
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async (_url, options) => {
       calls.push(options);
       if (options.method === "GET") {
@@ -325,7 +325,7 @@ test("readFileData sends an authenticated raw GET and preserves binary bytes", a
   const payload = Buffer.from([0, 1, 2, 255]);
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     internalToken: "internal-token",
     fetchImpl: async (url, options) => {
       calls.push({ url, ...options });
@@ -354,7 +354,7 @@ test("readFileData sends an authenticated raw GET and preserves binary bytes", a
   assert.equal(result.responseBytes, payload.byteLength);
   assert.equal(
     calls[1].url,
-    "http://example.test/lixes/workspace/lix/v1/file?path=%2Fnested%2Fpayload.bin",
+    "http://example.test/lixes/repository/lix/v1/file?path=%2Fnested%2Fpayload.bin",
   );
   assert.equal(calls[1].method, "GET");
   assert.equal(calls[1].headers.authorization, "Bearer internal-token");
@@ -367,7 +367,7 @@ test("readFileData sends one bounded byte range", async () => {
   const calls = [];
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async (url, options) => {
       calls.push({ url, ...options });
       if (calls.length === 1) {
@@ -401,7 +401,7 @@ test("readFileData sends one bounded byte range", async () => {
 test("readFileData validates its session, capability, and path before dispatch", async () => {
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async () => {
       throw new Error("fetch should not run");
     },
@@ -426,7 +426,7 @@ test("readFileData validates its session, capability, and path before dispatch",
 test("readFileData distinguishes present empty files from missing files", async () => {
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async (_url, options) => {
       if (options.method === "GET" && !options.headers["lix-session-id"]) {
         return Response.json({
@@ -484,7 +484,7 @@ test("readFileDataJson decodes the matched SQL/base64 response before timing sto
   const payload = Buffer.from([0, 1, 2, 255]);
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     internalToken: "internal-token",
     fetchImpl: async (url, options) => {
       calls.push({ url, ...options });
@@ -523,7 +523,7 @@ test("executeFileData keeps JSON/base64 work inside the timed protocol request",
   const calls = [];
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async (url, options) => {
       calls.push({ url, ...options });
       if (options.method === "GET") {
@@ -557,7 +557,7 @@ test("executeFileData keeps JSON/base64 work inside the timed protocol request",
 test("upsertFileData validates its local call shape", () => {
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async () => {
       throw new Error("fetch should not run");
     },
@@ -581,7 +581,7 @@ test("upsertFileData validates its local call shape", () => {
 test("upsertFileDataBatch validates capability and every entry before requests", async () => {
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async () => {
       throw new Error("fetch should not run");
     },
@@ -618,7 +618,7 @@ test("branch methods use the authenticated protocol endpoints", async () => {
   let getCalls = 0;
   const client = new ProtocolClient({
     baseUrl: "http://example.test",
-    workspaceId: "workspace",
+    repositoryId: "repository",
     fetchImpl: async (url, options) => {
       calls.push({ url, ...options });
       if (options.method === "GET") {

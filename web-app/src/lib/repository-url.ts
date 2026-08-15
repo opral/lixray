@@ -1,10 +1,13 @@
-import type { Organization, Workspace } from "~/components/workspace-provider";
+import type {
+	Organization,
+	Repository,
+} from "~/components/repository-provider";
 
-export function workspacePath(
+export function repositoryPath(
 	organization: Organization,
-	workspace: Workspace,
+	repository: Repository,
 ): string {
-	return `/@${organization.handle}/${workspace.slug}`;
+	return `/@${organization.handle}/${repository.slug}`;
 }
 
 /** Normalizes to a leading- and trailing-slash directory path; "" becomes "/". */
@@ -19,23 +22,23 @@ export function normalizeDirPath(raw: unknown): string {
 	return segments.length === 0 ? "/" : `/${segments.join("/")}/`;
 }
 
-export function findWorkspaceByRoute(
+export function findRepositoryByRoute(
 	organizations: Array<Organization>,
 	namespace: string,
-	workspaceSlug: string,
-): { organization: Organization; workspace: Workspace } | null {
+	repositorySlug: string,
+): { organization: Organization; repository: Repository } | null {
 	const normalizedNamespace = normalizeRouteSegment(namespace);
 	const organization = organizations.find(
 		(candidate) =>
 			normalizeRouteSegment(candidate.handle) === normalizedNamespace,
 	);
 	if (!organization) return null;
-	const normalizedWorkspaceSlug = normalizeRouteSegment(workspaceSlug);
-	const workspace = organization.workspaces.find(
+	const normalizedRepositorySlug = normalizeRouteSegment(repositorySlug);
+	const repository = organization.repositories.find(
 		(candidate) =>
-			normalizeRouteSegment(candidate.slug) === normalizedWorkspaceSlug,
+			normalizeRouteSegment(candidate.slug) === normalizedRepositorySlug,
 	);
-	return workspace ? { organization, workspace } : null;
+	return repository ? { organization, repository } : null;
 }
 
 function normalizeRouteSegment(value: string): string {

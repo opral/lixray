@@ -28,7 +28,7 @@ page.on("requestfailed", (request) => {
 
 await page.addInitScript(() => {
 	window.__lixrayProfile = {
-		openingWorkspaceAppearances: 0,
+		openingRepositoryAppearances: 0,
 		longTasks: [],
 	};
 
@@ -38,7 +38,7 @@ await page.addInitScript(() => {
 			const isOpening =
 				document.body?.textContent?.includes("Opening repository…") ?? false;
 			if (isOpening && !wasOpening) {
-				window.__lixrayProfile.openingWorkspaceAppearances += 1;
+				window.__lixrayProfile.openingRepositoryAppearances += 1;
 			}
 			wasOpening = isOpening;
 		};
@@ -77,17 +77,17 @@ await runPhase("sign-in-and-first-open", async () => {
 	await page
 		.getByRole("button", { name: "Continue as local developer" })
 		.click();
-	await waitForWorkspace(page);
+	await waitForRepository(page);
 });
 
-const workspaceUrl = page.url();
+const repositoryUrl = page.url();
 const fileName = await ensureMarkdownFile(page);
 await switchToHome(page);
 
 for (let run = 1; run <= reloadRuns; run += 1) {
-	await runPhase(`workspace-reload-${run}`, async () => {
-		await page.goto(workspaceUrl);
-		await waitForWorkspace(page);
+	await runPhase(`repository-reload-${run}`, async () => {
+		await page.goto(repositoryUrl);
+		await waitForRepository(page);
 	});
 }
 
@@ -138,7 +138,7 @@ console.log(
 	JSON.stringify(
 		{
 			baseUrl,
-			workspaceUrl,
+			repositoryUrl,
 			fileName,
 			reloadRuns,
 			phases: phases.map(summarizePhase),
@@ -178,7 +178,7 @@ async function runPhase(name, action) {
 
 async function openingAppearances() {
 	return page
-		.evaluate(() => window.__lixrayProfile?.openingWorkspaceAppearances ?? 0)
+		.evaluate(() => window.__lixrayProfile?.openingRepositoryAppearances ?? 0)
 		.catch(() => 0);
 }
 
@@ -213,7 +213,7 @@ function summarizePhase(phase) {
 		request.path.includes("/lix/v1"),
 	);
 	const routeResolutionRequests = phase.requests.filter((request) =>
-		/request_workspace|workspace.*route|resolve/i.test(request.path),
+		/request_repository|repository.*route|resolve/i.test(request.path),
 	);
 	const longTasks =
 		phase.longTasksAfter.length >= phase.longTasksBefore.length
@@ -222,7 +222,7 @@ function summarizePhase(phase) {
 	return {
 		name: phase.name,
 		durationMs: round(phase.durationMs),
-		openingWorkspaceAppearances:
+		openingRepositoryAppearances:
 			phase.openingAfter >= phase.openingBefore
 				? phase.openingAfter - phase.openingBefore
 				: phase.openingAfter,
@@ -260,7 +260,7 @@ function round(value) {
 	return Math.round(value * 10) / 10;
 }
 
-async function waitForWorkspace(targetPage) {
+async function waitForRepository(targetPage) {
 	await targetPage
 		.getByRole("button", { name: "Toggle left panel" })
 		.waitFor({ state: "visible", timeout: 60_000 });

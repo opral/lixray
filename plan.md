@@ -2,7 +2,7 @@
 
 ## Goal
 
-Create a fast, trustworthy loop for reproducing a slow workspace, measuring its
+Create a fast, trustworthy loop for reproducing a slow repository, measuring its
 queries, improving Lix or `lix-server`, and proving the improvement before
 merge.
 
@@ -21,14 +21,14 @@ Browser / MCP
 LixRay web service
 - UI and public routes
 - authentication
-- namespace/workspace resolution
+- namespace/repository resolution
       |
-      | stable workspace ID over private HTTP
+      | stable repository ID over private HTTP
       v
-lix-server workspace service
+lix-server repository service
 - one long-running Rust service
-- hosts multiple workspaces
-- opens workspace runtimes lazily
+- hosts multiple repositories
+- opens repository runtimes lazily
       |
       v
 SlateDB object storage
@@ -40,27 +40,27 @@ The public Lix protocol remains stable. Browser and MCP traffic share one
 internal abstraction:
 
 ```ts
-type WorkspaceFetch = (
-  workspaceId: string,
+type RepositoryFetch = (
+  repositoryId: string,
   request: Request,
 ) => Promise<Response>;
 ```
 
-Its normal implementation forwards HTTP to the workspace service, for example:
+Its normal implementation forwards HTTP to the repository service, for example:
 
 ```text
 /lixes/{lixId}/lix/v1/...
 ```
 
-For each request, `lix-server` validates the workspace ID, finds or lazily opens
+For each request, `lix-server` validates the repository ID, finds or lazily opens
 the corresponding Lix/SlateDB runtime, executes the canonical Lix protocol
-request, and keeps frequently used runtimes warm. It isolates workspace storage
+request, and keeps frequently used runtimes warm. It isolates repository storage
 through object-store prefixes and can evict an idle runtime without deleting
 durable data.
 
-The workspace service does not authenticate users, resolve
-`@namespace/workspace` slugs, serve the UI, or create a separate process for
-each workspace. Those public control-plane responsibilities remain in the
+The repository service does not authenticate users, resolve
+`@namespace/repository` slugs, serve the UI, or create a separate process for
+each repository. Those public control-plane responsibilities remain in the
 LixRay web service.
 
 ## MVP boundaries
@@ -68,15 +68,15 @@ LixRay web service.
 The first version has:
 
 - one region;
-- one `lix-server` workspace service instance;
-- one writer owner for all workspaces;
-- workspace isolation through object-store prefixes;
-- lazy workspace opening and a bounded warm-workspace cache;
-- the existing Lix workspace/session and branch behavior.
+- one `lix-server` repository service instance;
+- one writer owner for all repositories;
+- repository isolation through object-store prefixes;
+- lazy repository opening and a bounded warm-repository cache;
+- the existing Lix repository/session and branch behavior.
 
 The first version does not need distributed placement, leases, replicas,
 multi-region routing, Kubernetes, or a new branch/client-state model. Those can
-be added behind the same workspace routing boundary later.
+be added behind the same repository routing boundary later.
 
 ## One Lix source tree
 
@@ -110,15 +110,15 @@ browser -> lixray-web (Compose) -> lix-server (private Compose network) -> MinIO
 ```
 
 `pnpm test:e2e` starts that same topology on an isolated port. Its one browser
-test signs in through local Supabase, creates a workspace, verifies the Lix
+test signs in through local Supabase, creates a repository, verifies the Lix
 handshake, and executes a query through the web service and `lix-server`.
 
-The fast performance loop talks directly to the real `lix-server` workspace
+The fast performance loop talks directly to the real `lix-server` repository
 service:
 
 ```text
 perf:reset
--> delete one explicitly named perf-* workspace prefix
+-> delete one explicitly named perf-* repository prefix
 
 perf:up
 -> build and start lix-server
@@ -133,7 +133,7 @@ perf:run
 ```
 
 Controlled mutation comparisons clone a gracefully closed, revision-native
-template into fresh workspaces and start a fresh server process for each
+template into fresh repositories and start a fresh server process for each
 single timed request. Read comparisons use repeated distributions. The corpus,
 operation matrix, isolation rules, and result schema live in
 `perf/README.md`; measured findings and raw sample summaries live in
@@ -143,7 +143,7 @@ Every PR runs `pnpm test:e2e` in CI. One outer browser test proves the full
 path:
 
 ```text
-browser -> web service -> WorkspaceFetch -> lix-server
+browser -> web service -> RepositoryFetch -> lix-server
 ```
 
 Performance measurements should run on controlled CI workers, not public PR
@@ -154,9 +154,9 @@ preview instances.
 Production consists of two portable Docker services:
 
 - a public LixRay web service;
-- a private `lix-server` workspace service.
+- a private `lix-server` repository service.
 
-Durable workspace data remains in R2/S3. Avoid provider-specific persistent
+Durable repository data remains in R2/S3. Avoid provider-specific persistent
 volumes so the services remain portable.
 
 Railway is the deployment target because mostly idle PR environments can use
@@ -169,7 +169,7 @@ Before committing to Railway, run a small deployment spike that verifies:
 - both Dockerfiles can build from the repository-root context;
 - PR environments contain both services and private networking works;
 - both preview services can sleep when inactive;
-- the web service can reliably wake and retry the private workspace service;
+- the web service can reliably wake and retry the private repository service;
 - closing a PR removes its environment;
 - usage limits prevent unexpected preview costs.
 
@@ -183,18 +183,18 @@ A PR preview is a disposable deployment of the production topology:
 ```text
 PR environment
 |- LixRay web service (public, sleeping)
-`- lix-server workspace service (private, sleeping, S3 storage)
+`- lix-server repository service (private, sleeping, S3 storage)
 ```
 
 Previews use their configured Supabase control plane and dedicated preview R2
 credentials supplied through Infisical. Railway environment IDs prefix every
-workspace, and bucket lifecycle rules expire abandoned preview data. Previews
+repository, and bucket lifecycle rules expire abandoned preview data. Previews
 must not receive production bucket credentials.
 
 ## Next milestones
 
 1. Keep the Compose browser E2E green as the one local/CI acceptance path.
-2. Establish a slow-workspace baseline and begin comparing performance changes.
+2. Establish a slow-repository baseline and begin comparing performance changes.
 3. Keep the Railway production web and `lix-server` services healthy, with
    production R2 configuration supplied through Infisical.
 
@@ -203,7 +203,7 @@ must not receive production bucket credentials.
 The MVP is complete when:
 
 - one command starts the production-shaped stack locally;
-- one command seeds a known slow workspace;
+- one command seeds a known slow repository;
 - one command produces repeatable per-query results and compares them with a
   baseline;
 - edits to `vendor/lix` are included in the tested Rust server image;
@@ -211,4 +211,4 @@ The MVP is complete when:
 - CI exercises the same images;
 - a PR can receive an isolated, disposable full-stack preview;
 - production deploys from the same Dockerfiles without Durable Objects or
-  per-workspace containers.
+  per-repository containers.

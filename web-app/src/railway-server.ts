@@ -42,7 +42,7 @@ export async function fetchLixService(
 	request: Request,
 ): Promise<Response> {
 	const serviceUrl =
-		env.LIXRAY_LIX_SERVICE_URL ?? env.LIXRAY_WORKSPACE_SERVICE_URL;
+		env.LIXRAY_LIX_SERVICE_URL ?? env.LIXRAY_REPOSITORY_SERVICE_URL;
 	if (!serviceUrl) {
 		return new Response("LIXRAY_LIX_SERVICE_URL is not configured\n", {
 			status: 500,

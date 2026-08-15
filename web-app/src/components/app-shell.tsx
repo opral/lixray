@@ -7,7 +7,7 @@ import {
 	AppTitlebarTitle,
 } from "~/components/app-titlebar";
 import { useAuth } from "~/components/auth-provider";
-import { useWorkspace } from "~/components/workspace-provider";
+import { useRepository } from "~/components/repository-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 
 const compactSelectClass =
@@ -19,25 +19,27 @@ export function AppShell({ children }: { children: ReactNode }) {
 	const { signOut } = useAuth();
 	const navigate = useNavigate();
 	const {
-		activeWorkspace,
+		activeRepository,
 		organizations,
 		selectOrganization,
-		selectWorkspace,
+		selectRepository,
 		selectedOrganization,
-	} = useWorkspace();
+	} = useRepository();
 
-	const openWorkspace = (workspaceId: string) => {
+	const openRepository = (repositoryId: string) => {
 		const organization = organizations.find((candidate) =>
-			candidate.workspaces.some((workspace) => workspace.id === workspaceId),
+			candidate.repositories.some(
+				(repository) => repository.id === repositoryId,
+			),
 		);
-		const workspace = organization?.workspaces.find(
-			(candidate) => candidate.id === workspaceId,
+		const repository = organization?.repositories.find(
+			(candidate) => candidate.id === repositoryId,
 		);
-		if (!organization || !workspace) return;
-		selectWorkspace(workspace.id);
+		if (!organization || !repository) return;
+		selectRepository(repository.id);
 		void navigate({
-			to: "/@{$namespace}/$workspace",
-			params: { namespace: organization.handle, workspace: workspace.slug },
+			to: "/@{$namespace}/$repository",
+			params: { namespace: organization.handle, repository: repository.slug },
 			search: {},
 		});
 	};
@@ -66,13 +68,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 										(candidate) => candidate.id === event.target.value,
 									);
 									selectOrganization(event.target.value);
-									const workspace = organization?.workspaces[0];
-									if (organization && workspace) {
+									const repository = organization?.repositories[0];
+									if (organization && repository) {
 										void navigate({
-											to: "/@{$namespace}/$workspace",
+											to: "/@{$namespace}/$repository",
 											params: {
 												namespace: organization.handle,
-												workspace: workspace.slug,
+												repository: repository.slug,
 											},
 											search: {},
 										});
@@ -85,18 +87,18 @@ export function AppShell({ children }: { children: ReactNode }) {
 									</option>
 								))}
 							</select>
-							<label className="sr-only" htmlFor="workspace-switcher">
+							<label className="sr-only" htmlFor="repository-switcher">
 								Repository
 							</label>
 							<select
-								id="workspace-switcher"
+								id="repository-switcher"
 								className={compactSelectClass}
-								value={activeWorkspace?.workspace.id ?? ""}
-								onChange={(event) => openWorkspace(event.target.value)}
+								value={activeRepository?.repository.id ?? ""}
+								onChange={(event) => openRepository(event.target.value)}
 							>
-								{selectedOrganization?.workspaces.map((workspace) => (
-									<option key={workspace.id} value={workspace.id}>
-										{workspace.name}
+								{selectedOrganization?.repositories.map((repository) => (
+									<option key={repository.id} value={repository.id}>
+										{repository.name}
 									</option>
 								))}
 							</select>

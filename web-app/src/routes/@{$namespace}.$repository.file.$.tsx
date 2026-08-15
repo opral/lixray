@@ -1,28 +1,28 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
-	useMarkWorkspaceRouteSynced,
-	useWorkspaceActiveBranchId,
-	useWorkspaceAtelierInstance,
-	useWorkspaceDefaultBranchId,
-} from "~/components/workspace-atelier";
+	useMarkRepositoryRouteSynced,
+	useRepositoryActiveBranchId,
+	useRepositoryAtelierInstance,
+	useRepositoryDefaultBranchId,
+} from "~/components/repository-atelier";
 import {
 	atelierBranchSearch,
 	isAtelierFileNotFoundError,
 } from "~/lib/atelier-navigation";
 
-export const Route = createFileRoute("/@{$namespace}/$workspace/file/$")({
-	component: WorkspaceFileRoute,
+export const Route = createFileRoute("/@{$namespace}/$repository/file/$")({
+	component: RepositoryFileRoute,
 });
 
-function WorkspaceFileRoute() {
-	const atelier = useWorkspaceAtelierInstance();
-	const defaultBranchId = useWorkspaceDefaultBranchId();
-	const markRouteSynced = useMarkWorkspaceRouteSynced();
+function RepositoryFileRoute() {
+	const atelier = useRepositoryAtelierInstance();
+	const defaultBranchId = useRepositoryDefaultBranchId();
+	const markRouteSynced = useMarkRepositoryRouteSynced();
 	const navigate = useNavigate();
-	const { namespace, workspace, _splat: filePath } = Route.useParams();
+	const { namespace, repository, _splat: filePath } = Route.useParams();
 	const { branch } = Route.useSearch();
-	const activeBranchId = useWorkspaceActiveBranchId();
+	const activeBranchId = useRepositoryActiveBranchId();
 
 	useEffect(() => {
 		if (!atelier || !filePath) return;
@@ -45,8 +45,8 @@ function WorkspaceFileRoute() {
 				}
 				const routedBranch = branch ?? activeBranchId ?? undefined;
 				void navigate({
-					to: "/@{$namespace}/$workspace",
-					params: { namespace, workspace },
+					to: "/@{$namespace}/$repository",
+					params: { namespace, repository },
 					search:
 						routedBranch && defaultBranchId
 							? atelierBranchSearch(routedBranch, defaultBranchId)
@@ -66,7 +66,7 @@ function WorkspaceFileRoute() {
 		markRouteSynced,
 		namespace,
 		navigate,
-		workspace,
+		repository,
 	]);
 
 	return null;

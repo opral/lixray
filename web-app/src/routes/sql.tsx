@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "~/components/app-shell";
 import { SqlConsole } from "~/components/sql-console";
-import { WorkspaceGate } from "~/components/workspace-gate";
+import { RepositoryGate } from "~/components/repository-gate";
 
 export const Route = createFileRoute("/sql")({
 	component: SqlPage,
@@ -9,12 +9,12 @@ export const Route = createFileRoute("/sql")({
 
 function SqlPage() {
 	return (
-		<WorkspaceGate>
-			{(activeWorkspace) => (
-				<AppShell key={activeWorkspace.workspace.id}>
-					<SqlConsole workspaceName={activeWorkspace.workspace.name} />
+		<RepositoryGate>
+			{(activeRepository) => (
+				<AppShell key={activeRepository.repository.id}>
+					<SqlConsole repositoryName={activeRepository.repository.name} />
 				</AppShell>
 			)}
-		</WorkspaceGate>
+		</RepositoryGate>
 	);
 }

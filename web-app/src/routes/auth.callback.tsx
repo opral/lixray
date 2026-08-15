@@ -4,12 +4,12 @@ import { peekAuthReturnTo, takeAuthReturnTo } from "~/components/auth-provider";
 import { Button } from "~/components/ui/button";
 import { getBrowserSupabaseClient } from "~/lib/supabase";
 import {
-	markWorkspaceShareJoined,
-	peekWorkspaceShareCapability,
-	stageWorkspaceShareJoinError,
-	takeWorkspaceShareJoinIntent,
-	takeWorkspaceShareCapability,
-} from "~/lib/workspace-share-capability";
+	markRepositoryShareJoined,
+	peekRepositoryShareCapability,
+	stageRepositoryShareJoinError,
+	takeRepositoryShareJoinIntent,
+	takeRepositoryShareCapability,
+} from "~/lib/repository-share-capability";
 
 interface CallbackSearch {
 	code?: string;
@@ -52,24 +52,24 @@ function AuthCallbackPage() {
 					setError(exchangeError.message);
 					return;
 				}
-				const capability = peekWorkspaceShareCapability();
-				const joinWorkspaceId = takeWorkspaceShareJoinIntent();
-				if (capability && joinWorkspaceId === capability.workspaceId) {
+				const capability = peekRepositoryShareCapability();
+				const joinRepositoryId = takeRepositoryShareJoinIntent();
+				if (capability && joinRepositoryId === capability.repositoryId) {
 					try {
 						const { error: acceptError } = await getBrowserSupabaseClient().rpc(
 							"accept_lix_share_token",
 							{ p_token: capability.token },
 						);
 						if (acceptError) {
-							stageWorkspaceShareJoinError(
+							stageRepositoryShareJoinError(
 								`${acceptError.message} Select Join to edit to try again.`,
 							);
 						} else {
-							takeWorkspaceShareCapability();
-							markWorkspaceShareJoined(capability.workspaceId);
+							takeRepositoryShareCapability();
+							markRepositoryShareJoined(capability.repositoryId);
 						}
 					} catch (caught) {
-						stageWorkspaceShareJoinError(
+						stageRepositoryShareJoinError(
 							`${caught instanceof Error ? caught.message : "Unable to join this repository."} Select Join to edit to try again.`,
 						);
 					}

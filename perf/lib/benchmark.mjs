@@ -181,7 +181,7 @@ export async function runBenchmark(
     // therefore compare systematically different history depths. The useful
     // comparison is one operation from each independently cloned template.
     throw new Error(
-      "native mixed file-update comparisons require isolated one-sample workspaces; hotSession is not supported",
+      "native mixed file-update comparisons require isolated one-sample repositories; hotSession is not supported",
     );
   }
   if (isMutationOperation(operation) && warmupRuns !== 0) {
@@ -212,7 +212,7 @@ export async function runBenchmark(
   }
   if (isMutationOperation(operation) && measuredRuns !== 1 && !hotSession) {
     throw new Error(
-      "mutation benchmarks require one measured request per fresh workspace unless hotSession is enabled",
+      "mutation benchmarks require one measured request per fresh repository unless hotSession is enabled",
     );
   }
 
@@ -318,8 +318,8 @@ export async function runBenchmark(
       genesisIncludedInTarget: true,
       expectedStartTotalCommits: targetTotalCommits,
       knownStartTotalCommits: preseeded ? null : targetTotalCommits,
-      freshWorkspaceRequired: !preseeded,
-      preseededExactWorkspaceRequired: preseeded,
+      freshRepositoryRequired: !preseeded,
+      preseededExactRepositoryRequired: preseeded,
       historyPreparation: preseeded
         ? "externally-preseeded"
         : "same-session-post-ingest",
@@ -337,8 +337,8 @@ export async function runBenchmark(
       mutationCommitsPerOperation,
       mutationSampleIsolation: prepared.mutates
         ? hotSession
-          ? "one fresh workspace and one live protocol session; sequential writes form a hot-session distribution"
-          : `one timed mutation operation per fresh workspace (${mutationCommitsPerOperation} commit${mutationCommitsPerOperation === 1 ? "" : "s"})`
+          ? "one fresh repository and one live protocol session; sequential writes form a hot-session distribution"
+          : `one timed mutation operation per fresh repository (${mutationCommitsPerOperation} commit${mutationCommitsPerOperation === 1 ? "" : "s"})`
         : "not applicable",
       fileWriteTransport: prepared.fileWriteTransport ?? null,
       fileWriteShape: prepared.fileWriteShape ?? null,
@@ -798,7 +798,7 @@ function prepareOperation(
   if (name === "branch-switch") {
     // Branch creation is intentionally outside the timer. A switch is a
     // distinct lifecycle primitive: it changes the pinned branch for a live
-    // protocol session but does not write a new workspace commit.
+    // protocol session but does not write a new repository commit.
     const branches = [
       {
         id: "perf-switch-a",

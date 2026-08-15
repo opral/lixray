@@ -8,7 +8,7 @@ import { normalizeAuthReturnTo } from "~/lib/auth-return-to";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { localDevCredentials } from "~/lib/supabase";
 import { peekTeamInvite } from "~/lib/team-invite";
-import { peekWorkspaceShareJoinIntent } from "~/lib/workspace-share-capability";
+import { peekRepositoryShareJoinIntent } from "~/lib/repository-share-capability";
 
 interface SignInSearch {
 	returnTo?: string;
@@ -28,12 +28,12 @@ function SignInPage() {
 	const [submitting, setSubmitting] = useState(false);
 	const usesPreviewAccount = isDemoModeEnabled;
 	const usesLocalAccount = Boolean(localDevCredentials) || usesPreviewAccount;
-	const [joiningSharedWorkspace, setJoiningSharedWorkspace] = useState(false);
+	const [joiningSharedRepository, setJoiningSharedRepository] = useState(false);
 	const usesGoogle = !usesLocalAccount;
 
 	useEffect(() => {
-		setJoiningSharedWorkspace(
-			peekTeamInvite() !== null || peekWorkspaceShareJoinIntent() !== null,
+		setJoiningSharedRepository(
+			peekTeamInvite() !== null || peekRepositoryShareJoinIntent() !== null,
 		);
 	}, []);
 
@@ -68,16 +68,16 @@ function SignInPage() {
 				</a>
 				<div className="grid gap-[7px] text-center">
 					<h1 className="m-0 text-xl font-bold leading-tight">
-						{joiningSharedWorkspace ? "Join to edit" : "Sign in to LixRay"}
+						{joiningSharedRepository ? "Join to edit" : "Sign in to LixRay"}
 					</h1>
 					<p className="m-0 text-[13.5px] leading-normal text-text-quaternary">
 						{usesPreviewAccount
-							? joiningSharedWorkspace
+							? joiningSharedRepository
 								? "Sign in with the preview test account and you’ll land back on the shared file, ready to edit."
 								: "Use the preview test account to continue."
 							: localDevCredentials
 								? "Use the seeded local development account."
-								: joiningSharedWorkspace
+								: joiningSharedRepository
 									? "Sign in with Google and you’ll land back on the shared file, ready to edit."
 									: "Use your Google account to continue."}
 					</p>
@@ -100,7 +100,7 @@ function SignInPage() {
 					>
 						{usesGoogle ? (
 							<GoogleMark />
-						) : joiningSharedWorkspace ? (
+						) : joiningSharedRepository ? (
 							<PencilLine aria-hidden="true" />
 						) : (
 							<LogIn aria-hidden="true" />
@@ -110,7 +110,7 @@ function SignInPage() {
 								? "Signing in..."
 								: "Redirecting..."
 							: usesPreviewAccount
-								? joiningSharedWorkspace
+								? joiningSharedRepository
 									? "Join as preview user"
 									: "Continue as preview user"
 								: localDevCredentials

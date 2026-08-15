@@ -35,7 +35,7 @@ async function main(args) {
   const selected = segments[config.segmentIndex];
   const client = new ProtocolClient({
     baseUrl: config.baseUrl,
-    workspaceId: config.workspaceId,
+    repositoryId: config.repositoryId,
     internalToken: config.internalToken,
   });
   const startedAt = new Date().toISOString();
@@ -102,7 +102,7 @@ async function main(args) {
       finishedAt: new Date().toISOString(),
       target: {
         baseUrl: config.baseUrl,
-        workspaceId: config.workspaceId,
+        repositoryId: config.repositoryId,
         ...storage,
       },
       corpus: manifest,
@@ -205,7 +205,7 @@ async function countCommits(client) {
 }
 
 async function extendHistory(client, current, onProgress) {
-  if (current > TARGET_COMMITS) throw new Error(`workspace already has ${current} commits; target is ${TARGET_COMMITS}`);
+  if (current > TARGET_COMMITS) throw new Error(`repository already has ${current} commits; target is ${TARGET_COMMITS}`);
   const path = "/movie/sidecar/00000.json";
   for (let commit = current; commit < TARGET_COMMITS; commit += 1) {
     const digest = createHash("sha256").update(`movie-project-save-v1\0${commit}`).digest();
@@ -230,7 +230,7 @@ function parseArgs(args) {
   const values = new Map();
   for (let index = 0; index < args.length; index += 2) values.set(args[index], args[index + 1]);
   const baseUrl = required(values, "--url").replace(/\/+$/, "");
-  const workspaceId = required(values, "--workspace");
+  const repositoryId = required(values, "--repository");
   const segmentIndex = integer(values, "--segment-index", 0);
   const segmentCount = integer(values, "--segment-count", 1);
   if (segmentIndex >= segmentCount) throw new RangeError("segment index must be smaller than segment count");
@@ -238,7 +238,7 @@ function parseArgs(args) {
   if (!internalToken) throw new Error("LIXRAY_INTERNAL_TOKEN is required");
   return {
     baseUrl,
-    workspaceId,
+    repositoryId,
     segmentIndex,
     segmentCount,
     internalToken,

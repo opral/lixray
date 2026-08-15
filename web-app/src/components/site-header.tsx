@@ -1,21 +1,24 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useAuth } from "~/components/auth-provider";
-import { useWorkspace } from "~/components/workspace-provider";
+import { useRepository } from "~/components/repository-provider";
 import { cn } from "~/lib/utils";
-import { workspacePath } from "~/lib/workspace-url";
+import { repositoryPath } from "~/lib/repository-url";
 
 /** Auth-aware target and labels for the "open the app" call to action. */
-export function useWorkspaceCta() {
+export function useRepositoryCta() {
 	const { isLoaded: authLoaded, signOut, user } = useAuth();
-	const workspaceState = useWorkspace();
-	const activeWorkspace = workspaceState.activeWorkspace;
-	const workspaceTo = user
-		? activeWorkspace
-			? workspacePath(activeWorkspace.organization, activeWorkspace.workspace)
+	const repositoryState = useRepository();
+	const activeRepository = repositoryState.activeRepository;
+	const repositoryTo = user
+		? activeRepository
+			? repositoryPath(
+					activeRepository.organization,
+					activeRepository.repository,
+				)
 			: "/home"
 		: "/sign-in";
-	return { authLoaded, signOut, user, workspaceState, workspaceTo };
+	return { authLoaded, signOut, user, repositoryState, repositoryTo };
 }
 
 /**
@@ -29,7 +32,7 @@ export function SiteHeader({
 	sticky?: boolean;
 	children?: ReactNode;
 }) {
-	const { signOut, user, workspaceTo } = useWorkspaceCta();
+	const { signOut, user, repositoryTo } = useRepositoryCta();
 	return (
 		<header
 			className={cn(
@@ -83,7 +86,7 @@ export function SiteHeader({
 				)}
 				<a
 					className="rounded-[10px] border border-[#1c1917]/15 bg-white px-[18px] py-2.5 font-semibold text-[#1c1917] no-underline transition hover:border-[#1c1917]/30"
-					href={workspaceTo}
+					href={repositoryTo}
 				>
 					{user ? "Open LixRay" : "Get started"}
 				</a>

@@ -35,7 +35,7 @@ on the server and are not duplicated in the remote client.
 - `lix.sql.coherent_read_batch` is the equivalent parent for internal coherent
   reads.
 - `lix.protocol.request` stays active through the response body and connects
-  protocol calls, including observer reevaluations, to a workspace. SQL analysis
+  protocol calls, including observer reevaluations, to a repository. SQL analysis
   should aggregate the statement spans, not request or batch spans.
 
 Statement attributes:

@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-	appendWorkspaceShareToken,
+	appendRepositoryShareToken,
 	stripInviteFromUrl,
-} from "./workspace-share-url.ts";
+} from "./repository-share-url.ts";
 
 void test("share URLs add the capability without changing the canonical path", () => {
 	const canonical =
 		"https://lixray.com/@acme/launch-q3/file/icp.md?branch=main#notes";
 	assert.equal(
-		appendWorkspaceShareToken(canonical, "opaque_token"),
+		appendRepositoryShareToken(canonical, "opaque_token"),
 		"https://lixray.com/@acme/launch-q3/file/icp.md?branch=main&invite=opaque_token#notes",
 	);
 });

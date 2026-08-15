@@ -6,7 +6,7 @@ export function dirNameFromPath(dirPath: string): string {
 	return dirPath.split("/").filter(Boolean).at(-1) ?? "";
 }
 
-export type WorkspaceTree = {
+export type RepositoryTree = {
 	readonly dirs: ReadonlyArray<{
 		readonly kind: typeof EntryKind.Directory;
 		readonly id: string;
@@ -52,7 +52,7 @@ function useObservedRows(
 				}
 			} catch (error) {
 				if (!disposed) {
-					console.error("workspace-home: lix observe failed", error);
+					console.error("repository-home: lix observe failed", error);
 				}
 			}
 		})();
@@ -71,7 +71,7 @@ const asNullableText = (value: unknown): string | null =>
 	typeof value === "string" && value.length > 0 ? value : null;
 
 /** The full directory/file tree, kept live via lix observe. */
-export function useWorkspaceTree(lix: Lix): WorkspaceTree | null {
+export function useRepositoryTree(lix: Lix): RepositoryTree | null {
 	const dirRows = useObservedRows(
 		lix,
 		"SELECT id, parent_id, path, name, lixcol_updated_at FROM lix_directory ORDER BY path",
@@ -106,17 +106,17 @@ export function useWorkspaceTree(lix: Lix): WorkspaceTree | null {
 }
 
 /**
- * One-shot check whether the workspace has zero files — used before the
+ * One-shot check whether the repository has zero files — used before the
  * Atelier shell mounts (e.g. to seed the getting-started tab); the hook
  * below is the live variant.
  */
-export async function workspaceHasNoFiles(lix: Lix): Promise<boolean> {
+export async function repositoryHasNoFiles(lix: Lix): Promise<boolean> {
 	const result = await lix.execute("SELECT 1 FROM lix_file LIMIT 1", []);
 	return result.rows.length === 0;
 }
 
-/** Whether the workspace has zero files (null while loading / no lix). */
-export function useWorkspaceIsEmpty(lix: Lix | null): boolean | null {
+/** Whether the repository has zero files (null while loading / no lix). */
+export function useRepositoryIsEmpty(lix: Lix | null): boolean | null {
 	const [isEmpty, setIsEmpty] = useState<boolean | null>(null);
 	useEffect(() => {
 		if (!lix) {
@@ -139,7 +139,7 @@ export function useWorkspaceIsEmpty(lix: Lix | null): boolean | null {
 				}
 			} catch (error) {
 				if (!disposed) {
-					console.error("workspace-home: emptiness observe failed", error);
+					console.error("repository-home: emptiness observe failed", error);
 				}
 			}
 		})();
@@ -155,7 +155,7 @@ export function useWorkspaceIsEmpty(lix: Lix | null): boolean | null {
  * Resolves a README-relative link against a directory. Returns null for
  * absolute/external/fragment hrefs (which keep default browser behavior).
  */
-export function resolveWorkspaceHref(
+export function resolveRepositoryHref(
 	baseDir: string,
 	href: string,
 ): string | null {
@@ -199,7 +199,7 @@ type DirectoryListing = {
 
 /** Direct children of dirPath, folders first. Entry kind comes from the surface. */
 export function listDirectory(
-	tree: WorkspaceTree,
+	tree: RepositoryTree,
 	dirPath: string,
 ): DirectoryListing {
 	const currentDirectoryId =
@@ -247,7 +247,7 @@ export function listDirectory(
 
 /** Resolves a link against the persisted directory surface without inferring kind from a path. */
 export function persistedDirectoryPath(
-	tree: WorkspaceTree,
+	tree: RepositoryTree,
 	resolvedPath: string,
 ): string | null {
 	return (
@@ -310,7 +310,7 @@ async function firstFreePath(
 }
 
 /** Creates an empty file of the given type in dirPath; returns its path. */
-export async function createWorkspaceFile(
+export async function createRepositoryFile(
 	lix: Lix,
 	dirPath: string,
 	extension: "md" | "csv" | "excalidraw",
@@ -332,7 +332,7 @@ export async function createWorkspaceFile(
 }
 
 /** Creates an empty folder in dirPath; returns its trailing-slash path. */
-export async function createWorkspaceFolder(
+export async function createRepositoryFolder(
 	lix: Lix,
 	dirPath: string,
 ): Promise<string> {
@@ -367,7 +367,7 @@ export async function importDroppedFiles(
 			);
 			imported += 1;
 		} catch (error) {
-			console.error(`workspace-home: unable to import ${name}`, error);
+			console.error(`repository-home: unable to import ${name}`, error);
 			failed.push(name);
 		}
 	}

@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useAuth } from "~/components/auth-provider";
 import {
-	DEMO_CREATED_WORKSPACE_ID,
+	DEMO_CREATED_REPOSITORY_ID,
 	DEMO_ORGANIZATION_ID,
 	DEMO_ORGANIZATION_NAME,
 	DEMO_LIX_ID,
@@ -21,7 +21,7 @@ import { captureTelemetry } from "~/lib/telemetry";
 
 export type OrganizationRole = "owner" | "member";
 
-export interface Workspace {
+export interface Repository {
 	id: string;
 	organizationId: string;
 	name: string;
@@ -34,49 +34,49 @@ export interface Organization {
 	id: string;
 	name: string;
 	handle: string;
-	/** Null means direct workspace membership, not organization membership. */
+	/** Null means direct repository membership, not organization membership. */
 	role: OrganizationRole | null;
 	createdAt: string;
 	updatedAt: string;
-	workspaces: Array<Workspace>;
+	repositories: Array<Repository>;
 }
 
-export interface ActiveWorkspace {
+export interface ActiveRepository {
 	organization: Organization;
-	workspace: Workspace;
+	repository: Repository;
 }
 
 interface RefreshOptions {
 	organizationId?: string;
-	workspaceId?: string;
+	repositoryId?: string;
 }
 
-interface WorkspaceContextValue {
+interface RepositoryContextValue {
 	isLoaded: boolean;
 	error: string | null;
 	organizations: Array<Organization>;
 	selectedOrganization: Organization | null;
-	activeWorkspace: ActiveWorkspace | null;
+	activeRepository: ActiveRepository | null;
 	refresh: (options?: RefreshOptions) => Promise<void>;
 	selectOrganization: (organizationId: string) => void;
-	selectWorkspace: (workspaceId: string) => void;
+	selectRepository: (repositoryId: string) => void;
 	createOrganization: (name: string) => Promise<void>;
 	renameOrganization: (name: string) => Promise<void>;
-	createWorkspace: (name: string, organizationId?: string) => Promise<void>;
-	renameWorkspace: (workspaceId: string, name: string) => Promise<void>;
-	deleteWorkspace: (workspaceId: string) => Promise<void>;
+	createRepository: (name: string, organizationId?: string) => Promise<void>;
+	renameRepository: (repositoryId: string, name: string) => Promise<void>;
+	deleteRepository: (repositoryId: string) => Promise<void>;
 }
 
-const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
+const RepositoryContext = createContext<RepositoryContextValue | null>(null);
 
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
+export function RepositoryProvider({ children }: { children: ReactNode }) {
 	if (isDemoModeEnabled) {
-		return <DemoWorkspaceProvider>{children}</DemoWorkspaceProvider>;
+		return <DemoRepositoryProvider>{children}</DemoRepositoryProvider>;
 	}
-	return <SupabaseWorkspaceProvider>{children}</SupabaseWorkspaceProvider>;
+	return <SupabaseRepositoryProvider>{children}</SupabaseRepositoryProvider>;
 }
 
-function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
+function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 	const { client, isLoaded: authLoaded, user } = useAuth();
 	const userId = user?.id ?? null;
 	const [isLoaded, setIsLoaded] = useState(false);
@@ -85,15 +85,15 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 	const [selectedOrganizationId, setSelectedOrganizationId] = useState<
 		string | null
 	>(null);
-	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
-		null,
-	);
+	const [selectedRepositoryId, setSelectedRepositoryId] = useState<
+		string | null
+	>(null);
 	const refresh = useCallback(
 		async (options: RefreshOptions = {}) => {
 			if (!client || !userId) {
 				setOrganizations([]);
 				setSelectedOrganizationId(null);
-				setSelectedWorkspaceId(null);
+				setSelectedRepositoryId(null);
 				setError(null);
 				setIsLoaded(true);
 				return;
@@ -109,18 +109,18 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				const storedOrganizationId = window.localStorage.getItem(
 					organizationStorageKey(userId),
 				);
-				const requestedWorkspace = options.workspaceId
+				const requestedRepository = options.repositoryId
 					? nextOrganizations
 							.flatMap((organization) =>
-								organization.workspaces.map((workspace) => ({
+								organization.repositories.map((repository) => ({
 									organization,
-									workspace,
+									repository,
 								})),
 							)
-							.find(({ workspace }) => workspace.id === options.workspaceId)
+							.find(({ repository }) => repository.id === options.repositoryId)
 					: null;
 				const nextOrganization =
-					requestedWorkspace?.organization ??
+					requestedRepository?.organization ??
 					nextOrganizations.find(
 						(organization) =>
 							organization.id ===
@@ -129,25 +129,25 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 					nextOrganizations[0] ??
 					null;
 
-				const storedWorkspaceId = window.localStorage.getItem(
-					workspaceStorageKey(userId),
+				const storedRepositoryId = window.localStorage.getItem(
+					repositoryStorageKey(userId),
 				);
-				const nextWorkspace =
-					requestedWorkspace?.workspace ??
-					nextOrganization?.workspaces.find(
-						(workspace) =>
-							workspace.id === (options.workspaceId ?? storedWorkspaceId),
+				const nextRepository =
+					requestedRepository?.repository ??
+					nextOrganization?.repositories.find(
+						(repository) =>
+							repository.id === (options.repositoryId ?? storedRepositoryId),
 					) ??
-					nextOrganization?.workspaces[0] ??
+					nextOrganization?.repositories[0] ??
 					null;
 
 				setOrganizations(nextOrganizations);
 				setSelectedOrganizationId(nextOrganization?.id ?? null);
-				setSelectedWorkspaceId(nextWorkspace?.id ?? null);
+				setSelectedRepositoryId(nextRepository?.id ?? null);
 				persistSelection(
 					userId,
 					nextOrganization?.id ?? null,
-					nextWorkspace?.id ?? null,
+					nextRepository?.id ?? null,
 				);
 			} catch (loadError) {
 				setError(errorMessage(loadError));
@@ -168,16 +168,16 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 		organizations.find(
 			(organization) => organization.id === selectedOrganizationId,
 		) ?? null;
-	const selectedWorkspace =
-		selectedOrganization?.workspaces.find(
-			(workspace) => workspace.id === selectedWorkspaceId,
+	const selectedRepository =
+		selectedOrganization?.repositories.find(
+			(repository) => repository.id === selectedRepositoryId,
 		) ?? null;
-	const activeWorkspace = useMemo(
+	const activeRepository = useMemo(
 		() =>
-			selectedOrganization && selectedWorkspace
-				? { organization: selectedOrganization, workspace: selectedWorkspace }
+			selectedOrganization && selectedRepository
+				? { organization: selectedOrganization, repository: selectedRepository }
 				: null,
-		[selectedOrganization, selectedWorkspace],
+		[selectedOrganization, selectedRepository],
 	);
 
 	const selectOrganization = useCallback(
@@ -187,27 +187,29 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				(candidate) => candidate.id === organizationId,
 			);
 			if (!organization) return;
-			const workspace = organization.workspaces[0] ?? null;
+			const repository = organization.repositories[0] ?? null;
 			setSelectedOrganizationId(organization.id);
-			setSelectedWorkspaceId(workspace?.id ?? null);
-			persistSelection(userId, organization.id, workspace?.id ?? null);
+			setSelectedRepositoryId(repository?.id ?? null);
+			persistSelection(userId, organization.id, repository?.id ?? null);
 		},
 		[organizations, userId],
 	);
 
-	const selectWorkspace = useCallback(
-		(workspaceId: string) => {
+	const selectRepository = useCallback(
+		(repositoryId: string) => {
 			if (!userId) return;
 			const organization = organizations.find((candidate) =>
-				candidate.workspaces.some((workspace) => workspace.id === workspaceId),
+				candidate.repositories.some(
+					(repository) => repository.id === repositoryId,
+				),
 			);
-			const workspace = organization?.workspaces.find(
-				(candidate) => candidate.id === workspaceId,
+			const repository = organization?.repositories.find(
+				(candidate) => candidate.id === repositoryId,
 			);
-			if (!organization || !workspace) return;
+			if (!organization || !repository) return;
 			setSelectedOrganizationId(organization.id);
-			setSelectedWorkspaceId(workspace.id);
-			persistSelection(userId, organization.id, workspace.id);
+			setSelectedRepositoryId(repository.id);
+			persistSelection(userId, organization.id, repository.id);
 		},
 		[organizations, userId],
 	);
@@ -241,14 +243,14 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			if (renameError) throw renameError;
 			await refresh({
 				organizationId: selectedOrganization.id,
-				workspaceId: selectedWorkspaceId ?? undefined,
+				repositoryId: selectedRepositoryId ?? undefined,
 			});
 			captureTelemetry("organization_renamed");
 		},
-		[client, refresh, selectedOrganization, selectedWorkspaceId],
+		[client, refresh, selectedOrganization, selectedRepositoryId],
 	);
 
-	const createWorkspace = useCallback(
+	const createRepository = useCallback(
 		async (name: string, organizationId?: string) => {
 			const targetOrganization = organizations.find(
 				(organization) =>
@@ -263,28 +265,30 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				);
 			}
 			const normalizedName = normalizeName(name, "Repository");
-			const workspaceId = crypto.randomUUID();
+			const repositoryId = crypto.randomUUID();
 			const { error: createError } = await client.from("lixes").insert({
-				id: workspaceId,
+				id: repositoryId,
 				namespace_id: targetOrganization.id,
 				name: normalizedName,
-				slug: workspaceSlug(normalizedName),
+				slug: repositorySlug(normalizedName),
 			});
 			if (createError) throw createError;
 			await refresh({
 				organizationId: targetOrganization.id,
-				workspaceId,
+				repositoryId,
 			});
-			captureTelemetry("workspace_created");
+			captureTelemetry("repository_created");
 		},
 		[client, organizations, refresh, selectedOrganization],
 	);
 
-	const renameWorkspace = useCallback(
-		async (workspaceId: string, name: string) => {
+	const renameRepository = useCallback(
+		async (repositoryId: string, name: string) => {
 			if (!client) throw new Error("Authentication is still loading");
 			const organization = organizations.find((candidate) =>
-				candidate.workspaces.some((workspace) => workspace.id === workspaceId),
+				candidate.repositories.some(
+					(repository) => repository.id === repositoryId,
+				),
 			);
 			if (!organization) throw new Error("Repository not found");
 			if (organization.role === null) {
@@ -295,22 +299,24 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 			const { error: renameError } = await client
 				.from("lixes")
 				.update({ name: normalizeName(name, "Repository") })
-				.eq("id", workspaceId);
+				.eq("id", repositoryId);
 			if (renameError) throw renameError;
 			await refresh({
 				organizationId: organization.id,
-				workspaceId,
+				repositoryId,
 			});
-			captureTelemetry("workspace_renamed");
+			captureTelemetry("repository_renamed");
 		},
 		[client, organizations, refresh],
 	);
 
-	const deleteWorkspace = useCallback(
-		async (workspaceId: string) => {
+	const deleteRepository = useCallback(
+		async (repositoryId: string) => {
 			if (!client) throw new Error("Authentication is still loading");
 			const organization = organizations.find((candidate) =>
-				candidate.workspaces.some((workspace) => workspace.id === workspaceId),
+				candidate.repositories.some(
+					(repository) => repository.id === repositoryId,
+				),
 			);
 			if (!organization) throw new Error("Repository not found");
 			if (organization.role === null) {
@@ -319,52 +325,52 @@ function SupabaseWorkspaceProvider({ children }: { children: ReactNode }) {
 				);
 			}
 			const { error: deleteError } = await client.rpc("delete_lix", {
-				p_lix_id: workspaceId,
+				p_lix_id: repositoryId,
 			});
 			if (deleteError) throw deleteError;
 			await refresh();
-			captureTelemetry("workspace_deleted");
+			captureTelemetry("repository_deleted");
 		},
 		[client, organizations, refresh],
 	);
 
-	const value = useMemo<WorkspaceContextValue>(
+	const value = useMemo<RepositoryContextValue>(
 		() => ({
 			isLoaded,
 			error,
 			organizations,
 			selectedOrganization,
-			activeWorkspace,
+			activeRepository,
 			refresh,
 			selectOrganization,
-			selectWorkspace,
+			selectRepository,
 			createOrganization,
 			renameOrganization,
-			createWorkspace,
-			renameWorkspace,
-			deleteWorkspace,
+			createRepository,
+			renameRepository,
+			deleteRepository,
 		}),
 		[
-			activeWorkspace,
+			activeRepository,
 			createOrganization,
-			createWorkspace,
-			deleteWorkspace,
+			createRepository,
+			deleteRepository,
 			error,
 			isLoaded,
 			organizations,
 			refresh,
 			renameOrganization,
-			renameWorkspace,
+			renameRepository,
 			selectOrganization,
 			selectedOrganization,
-			selectWorkspace,
+			selectRepository,
 		],
 	);
 
 	return (
-		<WorkspaceContext.Provider value={value}>
+		<RepositoryContext.Provider value={value}>
 			{children}
-		</WorkspaceContext.Provider>
+		</RepositoryContext.Provider>
 	);
 }
 
@@ -386,12 +392,12 @@ async function loadOrganizations(
 				role: row.namespace_role,
 				createdAt: String(row.namespace_created_at),
 				updatedAt: String(row.namespace_updated_at),
-				workspaces: [],
+				repositories: [],
 			};
 			organizations.set(organizationId, organization);
 		}
 		if (row.lix_id) {
-			organization.workspaces.push({
+			organization.repositories.push({
 				id: String(row.lix_id),
 				organizationId,
 				name: String(row.lix_name),
@@ -405,14 +411,14 @@ async function loadOrganizations(
 	return [...organizations.values()]
 		.map((organization) => ({
 			...organization,
-			workspaces: [...organization.workspaces].sort((left, right) =>
+			repositories: [...organization.repositories].sort((left, right) =>
 				left.createdAt.localeCompare(right.createdAt),
 			),
 		}))
 		.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
-function DemoWorkspaceProvider({ children }: { children: ReactNode }) {
+function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 	const [organization, setOrganization] = useState<Organization>(() => ({
 		id: DEMO_ORGANIZATION_ID,
 		name: DEMO_ORGANIZATION_NAME,
@@ -420,7 +426,7 @@ function DemoWorkspaceProvider({ children }: { children: ReactNode }) {
 		role: "owner",
 		createdAt: "2026-07-01T12:00:00.000Z",
 		updatedAt: "2026-07-12T18:58:00.000Z",
-		workspaces: [
+		repositories: [
 			{
 				id: DEMO_LIX_ID,
 				organizationId: DEMO_ORGANIZATION_ID,
@@ -431,67 +437,67 @@ function DemoWorkspaceProvider({ children }: { children: ReactNode }) {
 			},
 		],
 	}));
-	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(DEMO_LIX_ID);
-	const selectedWorkspace =
-		organization.workspaces.find(
-			(workspace) => workspace.id === selectedWorkspaceId,
-		) ?? organization.workspaces[0];
+	const [selectedRepositoryId, setSelectedRepositoryId] = useState(DEMO_LIX_ID);
+	const selectedRepository =
+		organization.repositories.find(
+			(repository) => repository.id === selectedRepositoryId,
+		) ?? organization.repositories[0];
 	const unsupported = () =>
 		Promise.reject(
 			new Error("Repository mutation is unavailable in demo mode"),
 		);
-	const createWorkspace = (name: string, organizationId?: string) => {
+	const createRepository = (name: string, organizationId?: string) => {
 		if (organizationId && organizationId !== organization.id) {
 			throw new Error("Create or select an organization first");
 		}
 		const normalizedName = normalizeName(name, "Repository");
 		const now = new Date().toISOString();
-		const workspace: Workspace = {
-			id: DEMO_CREATED_WORKSPACE_ID,
+		const repository: Repository = {
+			id: DEMO_CREATED_REPOSITORY_ID,
 			organizationId: organization.id,
 			name: normalizedName,
-			slug: workspaceSlug(normalizedName),
+			slug: repositorySlug(normalizedName),
 			createdAt: now,
 			updatedAt: now,
 		};
 		setOrganization((current) => ({
 			...current,
 			updatedAt: now,
-			workspaces: [
-				...current.workspaces.filter(
-					(candidate) => candidate.id !== DEMO_CREATED_WORKSPACE_ID,
+			repositories: [
+				...current.repositories.filter(
+					(candidate) => candidate.id !== DEMO_CREATED_REPOSITORY_ID,
 				),
-				workspace,
+				repository,
 			],
 		}));
-		setSelectedWorkspaceId(workspace.id);
+		setSelectedRepositoryId(repository.id);
 		return Promise.resolve();
 	};
-	const value: WorkspaceContextValue = {
+	const value: RepositoryContextValue = {
 		isLoaded: true,
 		error: null,
 		organizations: [organization],
 		selectedOrganization: organization,
-		activeWorkspace: selectedWorkspace
-			? { organization, workspace: selectedWorkspace }
+		activeRepository: selectedRepository
+			? { organization, repository: selectedRepository }
 			: null,
 		refresh: () => Promise.resolve(),
 		selectOrganization: () => undefined,
-		selectWorkspace: setSelectedWorkspaceId,
+		selectRepository: setSelectedRepositoryId,
 		createOrganization: unsupported,
 		renameOrganization: unsupported,
-		createWorkspace,
-		renameWorkspace: unsupported,
-		deleteWorkspace: unsupported,
+		createRepository,
+		renameRepository: unsupported,
+		deleteRepository: unsupported,
 	};
 	return (
-		<WorkspaceContext.Provider value={value}>
+		<RepositoryContext.Provider value={value}>
 			{children}
-		</WorkspaceContext.Provider>
+		</RepositoryContext.Provider>
 	);
 }
 
-function workspaceSlug(name: string): string {
+function repositorySlug(name: string): string {
 	return (
 		name
 			.toLowerCase()
@@ -501,10 +507,10 @@ function workspaceSlug(name: string): string {
 	);
 }
 
-export function useWorkspace() {
-	const value = useContext(WorkspaceContext);
+export function useRepository() {
+	const value = useContext(RepositoryContext);
 	if (!value) {
-		throw new Error("useWorkspace must be used inside WorkspaceProvider");
+		throw new Error("useRepository must be used inside RepositoryProvider");
 	}
 	return value;
 }
@@ -520,10 +526,10 @@ function normalizeName(value: string, label: string): string {
 function persistSelection(
 	userId: string,
 	organizationId: string | null,
-	workspaceId: string | null,
+	repositoryId: string | null,
 ) {
 	setOrRemove(organizationStorageKey(userId), organizationId);
-	setOrRemove(workspaceStorageKey(userId), workspaceId);
+	setOrRemove(repositoryStorageKey(userId), repositoryId);
 }
 
 function setOrRemove(key: string, value: string | null) {
@@ -535,8 +541,8 @@ function organizationStorageKey(userId: string) {
 	return `lixray.active-organization.${userId}`;
 }
 
-function workspaceStorageKey(userId: string) {
-	return `lixray.active-workspace.${userId}`;
+function repositoryStorageKey(userId: string) {
+	return `lixray.active-repository.${userId}`;
 }
 
 function errorMessage(error: unknown): string {

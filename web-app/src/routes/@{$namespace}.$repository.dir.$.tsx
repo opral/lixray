@@ -1,30 +1,30 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
-	useMarkWorkspaceRouteSynced,
-	useWorkspaceActiveBranchId,
-	useWorkspaceAtelierInstance,
-} from "~/components/workspace-atelier";
+	useMarkRepositoryRouteSynced,
+	useRepositoryActiveBranchId,
+	useRepositoryAtelierInstance,
+} from "~/components/repository-atelier";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	lixrayDirInstanceId,
 	lixrayDirViewState,
-} from "~/components/workspace-home/host-extensions";
+} from "~/components/repository-home/host-extensions";
 
-export const Route = createFileRoute("/@{$namespace}/$workspace/dir/$")({
-	component: WorkspaceDirRoute,
+export const Route = createFileRoute("/@{$namespace}/$repository/dir/$")({
+	component: RepositoryDirRoute,
 });
 
 /**
  * A folder opened as a central content tab (rule 3 of the tab model: the URL
  * names the active tab's location; opening navigates the tab in place).
  */
-function WorkspaceDirRoute() {
-	const atelier = useWorkspaceAtelierInstance();
-	const markRouteSynced = useMarkWorkspaceRouteSynced();
+function RepositoryDirRoute() {
+	const atelier = useRepositoryAtelierInstance();
+	const markRouteSynced = useMarkRepositoryRouteSynced();
 	const { _splat: dirSplat } = Route.useParams();
 	const { branch } = Route.useSearch();
-	const activeBranchId = useWorkspaceActiveBranchId();
+	const activeBranchId = useRepositoryActiveBranchId();
 
 	useEffect(() => {
 		if (!atelier || !dirSplat) return;

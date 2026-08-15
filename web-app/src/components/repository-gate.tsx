@@ -2,12 +2,12 @@ import { Link } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { useAuth } from "~/components/auth-provider";
 import {
-	type ActiveWorkspace,
-	useWorkspace,
-} from "~/components/workspace-provider";
+	type ActiveRepository,
+	useRepository,
+} from "~/components/repository-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 
-const workspaceEmptyClass =
+const repositoryEmptyClass =
 	"grid min-h-[calc(100vh_-_80px)] place-items-center px-5 py-10";
 const buttonClass =
 	"inline-flex min-h-[38px] cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-bg-action-primary bg-bg-action-primary px-3.5 font-[680] text-text-on-action-primary no-underline disabled:cursor-not-allowed disabled:opacity-[0.55] max-[800px]:w-full";
@@ -18,36 +18,36 @@ const inputClass =
 const errorClass =
 	"mt-3.5 whitespace-pre-wrap rounded-[8px] border border-error-200 bg-error-50 px-3.5 py-3 text-error-800";
 
-export function WorkspaceGate({
+export function RepositoryGate({
 	children,
 }: {
-	children: (activeWorkspace: ActiveWorkspace) => ReactNode;
+	children: (activeRepository: ActiveRepository) => ReactNode;
 }) {
 	if (isDemoModeEnabled) {
-		return <LoadedWorkspace>{children}</LoadedWorkspace>;
+		return <LoadedRepository>{children}</LoadedRepository>;
 	}
-	return <AuthenticatedWorkspaceGate>{children}</AuthenticatedWorkspaceGate>;
+	return <AuthenticatedRepositoryGate>{children}</AuthenticatedRepositoryGate>;
 }
 
-function AuthenticatedWorkspaceGate({
+function AuthenticatedRepositoryGate({
 	children,
 }: {
-	children: (activeWorkspace: ActiveWorkspace) => ReactNode;
+	children: (activeRepository: ActiveRepository) => ReactNode;
 }) {
 	const { isLoaded: authLoaded, user } = useAuth();
 	const {
-		activeWorkspace,
+		activeRepository,
 		createOrganization,
-		createWorkspace,
+		createRepository,
 		error,
-		isLoaded: workspaceLoaded,
+		isLoaded: repositoryLoaded,
 		organizations,
 		refresh,
 		selectedOrganization,
-	} = useWorkspace();
+	} = useRepository();
 
-	if (!authLoaded || !workspaceLoaded) {
-		return <div className={workspaceEmptyClass}>Loading...</div>;
+	if (!authLoaded || !repositoryLoaded) {
+		return <div className={repositoryEmptyClass}>Loading...</div>;
 	}
 	if (!user) return <SignedOutHome />;
 	if (error) {
@@ -70,30 +70,30 @@ function AuthenticatedWorkspaceGate({
 			/>
 		);
 	}
-	if (selectedOrganization && selectedOrganization.workspaces.length === 0) {
+	if (selectedOrganization && selectedOrganization.repositories.length === 0) {
 		return (
 			<NamePrompt
 				eyebrow={selectedOrganization.name}
 				title="Create your first repository."
 				label="Repository name"
 				buttonLabel="Create repository"
-				onSubmit={createWorkspace}
+				onSubmit={createRepository}
 			/>
 		);
 	}
-	if (!activeWorkspace) {
-		return <div className={workspaceEmptyClass}>Loading repository...</div>;
+	if (!activeRepository) {
+		return <div className={repositoryEmptyClass}>Loading repository...</div>;
 	}
-	return <>{children(activeWorkspace)}</>;
+	return <>{children(activeRepository)}</>;
 }
 
-function LoadedWorkspace({
+function LoadedRepository({
 	children,
 }: {
-	children: (activeWorkspace: ActiveWorkspace) => ReactNode;
+	children: (activeRepository: ActiveRepository) => ReactNode;
 }) {
-	const { activeWorkspace } = useWorkspace();
-	return activeWorkspace ? <>{children(activeWorkspace)}</> : null;
+	const { activeRepository } = useRepository();
+	return activeRepository ? <>{children(activeRepository)}</> : null;
 }
 
 function SignedOutHome() {
@@ -175,7 +175,7 @@ function EmptyState({
 	children: ReactNode;
 }) {
 	return (
-		<main className={workspaceEmptyClass}>
+		<main className={repositoryEmptyClass}>
 			<div className="w-[min(620px,100%)] rounded-[8px] border border-border-panel bg-bg-panel p-7 shadow-md">
 				<p className="mb-2 text-[13px] font-[760] tracking-[0.08em] text-text-link uppercase">
 					{eyebrow}

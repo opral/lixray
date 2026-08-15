@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
-	useMarkWorkspaceRouteSynced,
-	useWorkspaceAtelierInstance,
-} from "~/components/workspace-atelier";
-import { LIXRAY_PEOPLE_EXTENSION_ID } from "~/components/workspace-home/host-extensions";
+	useMarkRepositoryRouteSynced,
+	useRepositoryAtelierInstance,
+} from "~/components/repository-atelier";
+import { LIXRAY_PEOPLE_EXTENSION_ID } from "~/components/repository-home/host-extensions";
 
-export const Route = createFileRoute("/@{$namespace}/$workspace/team")({
-	component: WorkspaceTeamRoute,
+export const Route = createFileRoute("/@{$namespace}/$repository/team")({
+	component: RepositoryTeamRoute,
 });
 
 /**
@@ -15,9 +15,9 @@ export const Route = createFileRoute("/@{$namespace}/$workspace/team")({
  * active tab, exactly like /file/ and /dir/; the tab itself is branch-
  * independent, so no branch gate is needed here.
  */
-function WorkspaceTeamRoute() {
-	const atelier = useWorkspaceAtelierInstance();
-	const markRouteSynced = useMarkWorkspaceRouteSynced();
+function RepositoryTeamRoute() {
+	const atelier = useRepositoryAtelierInstance();
+	const markRouteSynced = useMarkRepositoryRouteSynced();
 
 	useEffect(() => {
 		if (!atelier) return;

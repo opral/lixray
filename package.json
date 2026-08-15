@@ -1,5 +1,5 @@
 {
-  "name": "lixray-workspace",
+  "name": "lixray-repository",
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",

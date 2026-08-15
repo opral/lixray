@@ -1,8 +1,8 @@
-# 1 TiB media workspace qualification
+# 1 TiB media repository qualification
 
 ## Release envelope
 
-The release workload is one deterministic 1 TiB workspace with 10,000 files,
+The release workload is one deterministic 1 TiB repository with 10,000 files,
 2,000 media files, a 20 GiB maximum file, 5,000 commits, one to three active
 users, and two concurrent 100 Mbit/s proxy reads. It includes proxies,
 production audio, graphics, project metadata, selected originals, review
@@ -15,20 +15,20 @@ without materializing the file or a second fixture tree.
 
 The remote qualification runner materializes that manifest in byte-balanced
 segments so each invocation remains inside CI's execution ceiling. Segments
-must run sequentially against one fresh workspace; the last segment extends
+must run sequentially against one fresh repository; the last segment extends
 the resulting history to exactly 5,000 commits and verifies the final count:
 
 ```sh
 LIXRAY_INTERNAL_TOKEN=... pnpm perf:movie:remote -- \
   --url https://lix-server.example \
-  --workspace perf-movie-1tib-REVISION \
+  --repository perf-movie-1tib-REVISION \
   --segment-index 0 \
   --segment-count 4 \
   --finalize-history false
 ```
 
 Pass `--finalize-history true` only for the final segment. Use a fresh
-workspace and run each segment exactly once. The runner retries an acknowledged
+repository and run each segment exactly once. The runner retries an acknowledged
 16 MiB media part in place and writes one JSON report per segment under
 `perf/results/`.
 

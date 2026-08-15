@@ -14,9 +14,9 @@ import { useAuth } from "~/components/auth-provider";
 import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";
 import {
 	type Organization,
-	type Workspace,
-	useWorkspace,
-} from "~/components/workspace-provider";
+	type Repository,
+	useRepository,
+} from "~/components/repository-provider";
 import { Button } from "~/components/ui/button";
 import {
 	Dialog,
@@ -37,15 +37,15 @@ import { triggerBrowserDownload } from "~/lib/download";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { formatCaughtError, formatRelativeTime } from "~/lib/format";
 import {
-	buildWorkspaceArchive,
-	fetchWorkspaceFileCount,
-} from "~/lib/workspace-archive";
-import { workspacePath } from "~/lib/workspace-url";
+	buildRepositoryArchive,
+	fetchRepositoryFileCount,
+} from "~/lib/repository-archive";
+import { repositoryPath } from "~/lib/repository-url";
 
 type DialogState =
 	| { type: "create" }
-	| { type: "rename"; organization: Organization; workspace: Workspace }
-	| { type: "delete"; organization: Organization; workspace: Workspace }
+	| { type: "rename"; organization: Organization; repository: Repository }
+	| { type: "delete"; organization: Organization; repository: Repository }
 	| null;
 
 const TILE_PALETTES = [
@@ -59,13 +59,13 @@ const TILE_PALETTES = [
 	{ background: "#f3eef6", border: "#e2d7e9", color: "#7a5e8c" },
 ] as const;
 
-export function WorkspaceDirectory() {
+export function RepositoryDirectory() {
 	const auth = useAuth();
-	const workspaceState = useWorkspace();
+	const repositoryState = useRepository();
 	const [dialog, setDialog] = useState<DialogState>(null);
 	const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
 	const signedIn = isDemoModeEnabled || Boolean(auth.user);
-	const organizations = workspaceState.organizations;
+	const organizations = repositoryState.organizations;
 	const writableOrganizations = organizations.filter(
 		(organization) => organization.role !== null,
 	);
@@ -74,17 +74,17 @@ export function WorkspaceDirectory() {
 		let cancelled = false;
 		setFileCounts({});
 		for (const organization of organizations) {
-			for (const workspace of organization.workspaces) {
-				void fetchWorkspaceFileCount({
+			for (const repository of organization.repositories) {
+				void fetchRepositoryFileCount({
 					namespace: organization.handle,
-					workspaceSlug: workspace.slug,
+					repositorySlug: repository.slug,
 					getAccessToken: auth.getAccessToken,
 				})
 					.then((count) => {
 						if (!cancelled) {
 							setFileCounts((current) => ({
 								...current,
-								[workspace.id]: count,
+								[repository.id]: count,
 							}));
 						}
 					})
@@ -96,18 +96,18 @@ export function WorkspaceDirectory() {
 		};
 	}, [auth.getAccessToken, organizations]);
 
-	if ((!isDemoModeEnabled && !auth.isLoaded) || !workspaceState.isLoaded) {
+	if ((!isDemoModeEnabled && !auth.isLoaded) || !repositoryState.isLoaded) {
 		return <DirectoryStatus>Loading repositories…</DirectoryStatus>;
 	}
 	if (!signedIn) return <SignedOutDirectory />;
-	if (workspaceState.error) {
+	if (repositoryState.error) {
 		return (
 			<DirectoryStatus>
-				<span>{workspaceState.error}</span>
+				<span>{repositoryState.error}</span>
 				<Button
 					variant="featured"
 					className="font-bold"
-					onClick={() => void workspaceState.refresh()}
+					onClick={() => void repositoryState.refresh()}
 				>
 					Try again
 				</Button>
@@ -115,40 +115,40 @@ export function WorkspaceDirectory() {
 		);
 	}
 
-	const workspaceCount = organizations.reduce(
-		(total, organization) => total + organization.workspaces.length,
+	const repositoryCount = organizations.reduce(
+		(total, organization) => total + organization.repositories.length,
 		0,
 	);
 	const namespaceCount = organizations.filter(
-		(organization) => organization.workspaces.length > 0,
+		(organization) => organization.repositories.length > 0,
 	).length;
 	const paletteOrder = new Map(
 		organizations
-			.flatMap((organization) => organization.workspaces)
-			.map((workspace, index) => [workspace.id, index] as const),
+			.flatMap((organization) => organization.repositories)
+			.map((repository, index) => [repository.id, index] as const),
 	);
 	return (
 		<div
 			className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary"
-			data-testid="workspace-directory"
+			data-testid="repository-directory"
 		>
 			<DirectoryHeader />
 			<main className="flex min-h-0 flex-1 justify-center overflow-auto">
 				<section
 					className="w-[min(920px,calc(100%-32px))] pt-14 pb-[60px] max-[560px]:w-[min(100%-20px,920px)] max-[560px]:pt-[34px]"
-					aria-labelledby="workspaces-title"
+					aria-labelledby="repositories-title"
 				>
 					<div className="flex items-center gap-4 px-3.5 pb-1.5 max-[560px]:flex-col max-[560px]:items-stretch max-[560px]:px-2">
 						<h1
 							className="m-0 text-[27px] leading-[1.2] font-bold tracking-[-0.02em]"
-							id="workspaces-title"
+							id="repositories-title"
 						>
 							Repositories
 						</h1>
 						<Button
 							variant="featured"
 							className="ml-auto h-9 gap-1.5 px-3.5 text-[13.5px] font-bold max-[560px]:ml-0 max-[560px]:self-start"
-							data-testid="new-workspace-button"
+							data-testid="new-repository-button"
 							type="button"
 							disabled={writableOrganizations.length === 0}
 							onClick={() => setDialog({ type: "create" })}
@@ -157,19 +157,19 @@ export function WorkspaceDirectory() {
 							New repository
 						</Button>
 					</div>
-					{workspaceCount > 0 ? (
+					{repositoryCount > 0 ? (
 						<p className="m-0 px-3.5 pb-[30px] text-[13.5px] leading-normal text-text-tertiary max-[560px]:px-2 max-[560px]:pt-1 max-[560px]:pb-6">
-							{workspaceCount}{" "}
-							{pluralize(workspaceCount, "repository", "repositories")} across{" "}
+							{repositoryCount}{" "}
+							{pluralize(repositoryCount, "repository", "repositories")} across{" "}
 							{namespaceCount} {pluralize(namespaceCount, "namespace")}
 						</p>
 					) : null}
 
-					{workspaceCount === 0 ? (
-						<WorkspaceEmptyState />
+					{repositoryCount === 0 ? (
+						<RepositoryEmptyState />
 					) : (
 						organizations.map((organization, groupIndex) =>
-							organization.workspaces.length > 0 ? (
+							organization.repositories.length > 0 ? (
 								<section
 									className="pt-[26px] data-[first=true]:pt-0"
 									data-first={groupIndex === 0 || undefined}
@@ -183,19 +183,27 @@ export function WorkspaceDirectory() {
 										{organization.handle}
 									</h2>
 									<div className="flex flex-col">
-										{organization.workspaces.map((workspace) => (
-											<WorkspaceRow
-												key={workspace.id}
+										{organization.repositories.map((repository) => (
+											<RepositoryRow
+												key={repository.id}
 												organization={organization}
-												workspace={workspace}
-												fileCount={fileCounts[workspace.id]}
-												paletteIndex={paletteOrder.get(workspace.id) ?? 0}
+												repository={repository}
+												fileCount={fileCounts[repository.id]}
+												paletteIndex={paletteOrder.get(repository.id) ?? 0}
 												canManage={organization.role !== null}
 												onRename={() =>
-													setDialog({ type: "rename", organization, workspace })
+													setDialog({
+														type: "rename",
+														organization,
+														repository,
+													})
 												}
 												onDelete={() =>
-													setDialog({ type: "delete", organization, workspace })
+													setDialog({
+														type: "delete",
+														organization,
+														repository,
+													})
 												}
 											/>
 										))}
@@ -207,7 +215,7 @@ export function WorkspaceDirectory() {
 				</section>
 			</main>
 
-			<WorkspaceDialog
+			<RepositoryDialog
 				dialog={dialog}
 				organizations={writableOrganizations}
 				onClose={() => setDialog(null)}
@@ -249,11 +257,11 @@ function DirectoryHeader() {
 	);
 }
 
-function WorkspaceEmptyState() {
+function RepositoryEmptyState() {
 	return (
 		<div
 			className="grid min-h-[480px] place-content-center justify-items-center px-4 pb-16 text-center max-[560px]:min-h-[400px] max-[560px]:pb-8"
-			data-testid="workspace-empty-state"
+			data-testid="repository-empty-state"
 		>
 			<div
 				className="relative mb-8 h-[176px] w-[360px] max-w-full"
@@ -315,9 +323,9 @@ function WorkspaceEmptyState() {
 	);
 }
 
-function WorkspaceRow({
+function RepositoryRow({
 	organization,
-	workspace,
+	repository,
 	fileCount,
 	paletteIndex,
 	canManage,
@@ -325,7 +333,7 @@ function WorkspaceRow({
 	onDelete,
 }: {
 	organization: Organization;
-	workspace: Workspace;
+	repository: Repository;
 	fileCount?: number;
 	paletteIndex: number;
 	canManage: boolean;
@@ -334,7 +342,7 @@ function WorkspaceRow({
 }) {
 	const { getAccessToken } = useAuth();
 	const [downloading, setDownloading] = useState(false);
-	const path = workspacePath(organization, workspace);
+	const path = repositoryPath(organization, repository);
 	const palette =
 		TILE_PALETTES[paletteIndex % TILE_PALETTES.length] ?? TILE_PALETTES[0];
 
@@ -348,16 +356,16 @@ function WorkspaceRow({
 	const download = async () => {
 		setDownloading(true);
 		try {
-			const archive = await buildWorkspaceArchive({
+			const archive = await buildRepositoryArchive({
 				namespace: organization.handle,
-				workspaceSlug: workspace.slug,
+				repositorySlug: repository.slug,
 				getAccessToken,
 			});
 			triggerBrowserDownload(
-				`${workspace.slug}.zip`,
+				`${repository.slug}.zip`,
 				new Blob([archive], { type: "application/zip" }),
 			);
-			toast.success(`Downloaded ${workspace.slug}.zip`);
+			toast.success(`Downloaded ${repository.slug}.zip`);
 		} catch (caught) {
 			toast.error(formatCaughtError(caught));
 		} finally {
@@ -369,8 +377,8 @@ function WorkspaceRow({
 		<div className="relative flex min-h-[60px] items-center rounded-[10px] px-3.5 transition-colors hover:bg-bg-hover focus-within:bg-bg-hover has-[[data-state=open]]:bg-bg-hover max-[560px]:px-2">
 			<Link
 				className="flex min-w-0 flex-1 items-center gap-3.5 rounded-lg py-[13px] text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
-				to="/@{$namespace}/$workspace"
-				params={{ namespace: organization.handle, workspace: workspace.slug }}
+				to="/@{$namespace}/$repository"
+				params={{ namespace: organization.handle, repository: repository.slug }}
 				search={{}}
 			>
 				<span
@@ -382,16 +390,16 @@ function WorkspaceRow({
 					}}
 					aria-hidden="true"
 				>
-					{workspaceInitials(workspace.name)}
+					{repositoryInitials(repository.name)}
 				</span>
 				<span className="flex min-w-0 flex-col gap-0.5">
 					<strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[15px] leading-tight font-semibold text-text-primary">
-						{workspace.name}
+						{repository.name}
 					</strong>
 					<span className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] leading-tight text-text-tertiary">
 						{fileCount === undefined ? "…" : fileCount}{" "}
 						{pluralize(fileCount ?? 0, "file")} · active{" "}
-						{formatRelativeTime(workspace.updatedAt)}
+						{formatRelativeTime(repository.updatedAt)}
 					</span>
 				</span>
 			</Link>
@@ -400,7 +408,7 @@ function WorkspaceRow({
 					<button
 						className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[7px] border-0 bg-transparent p-0 text-icon-tertiary transition-colors hover:bg-bg-hover hover:text-icon-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible data-[state=open]:bg-bg-hover data-[state=open]:text-icon-secondary [&_svg]:size-[15px] [&_svg]:stroke-[2.3]"
 						type="button"
-						aria-label={`Actions for ${workspace.name}`}
+						aria-label={`Actions for ${repository.name}`}
 					>
 						<Ellipsis aria-hidden="true" />
 					</button>
@@ -442,7 +450,7 @@ function WorkspaceRow({
 	);
 }
 
-function WorkspaceDialog({
+function RepositoryDialog({
 	dialog,
 	organizations,
 	onClose,
@@ -451,7 +459,8 @@ function WorkspaceDialog({
 	organizations: Array<Organization>;
 	onClose: () => void;
 }) {
-	const { createWorkspace, deleteWorkspace, renameWorkspace } = useWorkspace();
+	const { createRepository, deleteRepository, renameRepository } =
+		useRepository();
 	const defaultOrganizationId = organizations[0]?.id ?? "";
 	const [name, setName] = useState("");
 	const [organizationId, setOrganizationId] = useState(defaultOrganizationId);
@@ -460,7 +469,7 @@ function WorkspaceDialog({
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
-		setName(dialog?.type === "rename" ? dialog.workspace.name : "");
+		setName(dialog?.type === "rename" ? dialog.repository.name : "");
 		setOrganizationId(
 			dialog && dialog.type !== "create"
 				? dialog.organization.id
@@ -478,14 +487,14 @@ function WorkspaceDialog({
 		setError(null);
 		try {
 			if (dialog.type === "create") {
-				await createWorkspace(name, organizationId);
+				await createRepository(name, organizationId);
 				toast.success(`Created “${name.trim()}”`);
 			} else if (dialog.type === "rename") {
-				await renameWorkspace(dialog.workspace.id, name);
+				await renameRepository(dialog.repository.id, name);
 				toast.success(`Renamed to “${name.trim()}”`);
 			} else {
-				await deleteWorkspace(dialog.workspace.id);
-				toast.success(`Deleted “${dialog.workspace.name}”`);
+				await deleteRepository(dialog.repository.id);
+				toast.success(`Deleted “${dialog.repository.name}”`);
 			}
 			onClose();
 		} catch (caught) {
@@ -499,9 +508,9 @@ function WorkspaceDialog({
 		dialog?.type === "create"
 			? "New repository"
 			: dialog?.type === "rename"
-				? `Rename ${dialog.workspace.name}`
+				? `Rename ${dialog.repository.name}`
 				: dialog?.type === "delete"
-					? `Delete ${dialog.workspace.name}?`
+					? `Delete ${dialog.repository.name}?`
 					: "Repository";
 
 	return (
@@ -519,7 +528,7 @@ function WorkspaceDialog({
 						</DialogDescription>
 					</DialogHeader>
 
-					<div className="grid gap-2" data-testid="workspace-dialog-fields">
+					<div className="grid gap-2" data-testid="repository-dialog-fields">
 						{dialog?.type === "create" && organizations.length > 1 ? (
 							<label className="grid gap-2">
 								<span className="text-[13px] font-semibold text-text-secondary">
@@ -542,7 +551,7 @@ function WorkspaceDialog({
 						{isDelete ? (
 							<label className="grid gap-2">
 								<span className="text-[13px] font-semibold text-text-secondary">
-									Type <strong>{dialog.workspace.name}</strong> to confirm
+									Type <strong>{dialog.repository.name}</strong> to confirm
 								</span>
 								<input
 									className="h-10 w-full rounded-lg border border-border-panel bg-bg-panel px-[11px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1"
@@ -586,7 +595,7 @@ function WorkspaceDialog({
 							disabled={
 								busy ||
 								(isDelete
-									? confirmation !== dialog.workspace.name
+									? confirmation !== dialog.repository.name
 									: !name.trim() || !organizationId)
 							}
 						>
@@ -640,7 +649,7 @@ function SignedOutDirectory() {
 	);
 }
 
-function workspaceInitials(name: string): string {
+function repositoryInitials(name: string): string {
 	const parts = name.match(/[a-z0-9]+/gi) ?? [];
 	if (parts.length === 0) return "W";
 	const first = parts[0] ?? "W";

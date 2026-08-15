@@ -5,7 +5,7 @@ const UNSUPPORTED_STORAGE_FORMAT_CODES = new Set([
 	"LIX_ERROR_STORAGE_FORMAT_UNSUPPORTED",
 ]);
 
-export function formatWorkspaceOpenError(caught: unknown): string {
+export function formatRepositoryOpenError(caught: unknown): string {
 	const message = getErrorMessage(caught);
 	const code = getErrorCode(caught);
 

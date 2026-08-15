@@ -30,7 +30,7 @@ const statusClass = "text-sm text-text-tertiary";
 const errorClass =
 	"mt-3.5 whitespace-pre-wrap rounded-[8px] border border-error-200 bg-error-50 px-3.5 py-3 text-error-800";
 
-export function SqlConsole({ workspaceName }: { workspaceName: string }) {
+export function SqlConsole({ repositoryName }: { repositoryName: string }) {
 	const { isLoaded: authLoaded, user } = useAuth();
 	const api = useLixrayApi();
 	const [branches, setBranches] = useState<Array<Branch>>([]);
@@ -104,7 +104,7 @@ export function SqlConsole({ workspaceName }: { workspaceName: string }) {
 		<>
 			<section className="mb-[18px] max-w-[760px]">
 				<p className="mb-2 text-[13px] font-[760] tracking-[0.08em] text-text-link uppercase">
-					{workspaceName}
+					{repositoryName}
 				</p>
 				<h1 className="m-0 text-2xl leading-[1.2] tracking-normal">
 					SQL console

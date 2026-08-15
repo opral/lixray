@@ -614,7 +614,7 @@ test("native mixed comparison rejects hot sessions that would drift commit depth
       hotSession: true,
       preseeded: true,
     }),
-    /require isolated one-sample workspaces; hotSession is not supported/,
+    /require isolated one-sample repositories; hotSession is not supported/,
   );
 });
 

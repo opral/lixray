@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { WorkspaceDirectory } from "~/components/workspace-directory";
+import { RepositoryDirectory } from "~/components/repository-directory";
 
 export const Route = createFileRoute("/home")({
 	head: () => ({
@@ -9,5 +9,5 @@ export const Route = createFileRoute("/home")({
 });
 
 function HomePage() {
-	return <WorkspaceDirectory />;
+	return <RepositoryDirectory />;
 }

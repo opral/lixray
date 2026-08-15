@@ -9,11 +9,11 @@ import {
 void test("canonicalizes private Lixray routes for Web Analytics", () => {
 	assert.equal(
 		sanitizeLixrayPathname("/@samuel/customer-roadmap/file/private/plan.md"),
-		"/workspace/:workspace/file/:file",
+		"/repository/:repository/file/:file",
 	);
 	assert.equal(
 		sanitizeLixrayPathname("/@samuel/customer-roadmap?branch=secret"),
-		"/workspace/:workspace",
+		"/repository/:repository",
 	);
 	assert.equal(sanitizeLixrayPathname("/sign-in"), "/sign-in");
 });
@@ -34,8 +34,8 @@ void test("scrubs URLs, referrers, tokens, and sensitive explicit properties", (
 	});
 
 	assert.deepEqual(event?.properties, {
-		$current_url: "https://lixray.com/workspace/:workspace/file/:file",
-		$pathname: "/workspace/:workspace/file/:file",
+		$current_url: "https://lixray.com/repository/:repository/file/:file",
+		$pathname: "/repository/:repository/file/:file",
 		$referrer: "https://search.example",
 		note: "Bearer [redacted]",
 	});
