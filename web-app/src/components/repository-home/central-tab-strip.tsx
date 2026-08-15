@@ -4,7 +4,7 @@ import type {
 } from "@opral/atelier";
 import { LIXRAY_DIR_EXTENSION_ID } from "./host-extensions";
 import { fileIconUrl } from "@opral/atelier/file-icons";
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
 /**
@@ -22,6 +22,17 @@ export function LixrayCentralTabStrip({
 			{context.tabs.map((tab) => (
 				<TabChip key={tab.instanceId} tab={tab} />
 			))}
+			{context.newTab ? (
+				<button
+					type="button"
+					title="New tab"
+					aria-label="New tab"
+					onClick={context.newTab}
+					className="flex size-[26px] flex-none items-center justify-center rounded-md text-icon-quaternary hover:bg-bg-hover-canvas hover:text-icon-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1 focus-visible:ring-offset-bg-panel"
+				>
+					<Plus aria-hidden="true" className="size-3.25" strokeWidth={2} />
+				</button>
+			) : null}
 		</div>
 	);
 }
