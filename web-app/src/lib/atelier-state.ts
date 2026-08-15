@@ -1,9 +1,6 @@
 import {
 	coerceAtelierSessionUiState,
 	coerceAtelierUserPreferences,
-	createLixPreferencesStore,
-	createLixSessionStateStore,
-	type AtelierClientState,
 	type AtelierBranchSession,
 	type AtelierPreferencesStore,
 	type AtelierReviewStatusStore,
@@ -22,7 +19,6 @@ const REVIEW_STATE_VERSION = 1;
 export function createRepositorySessionStateStore(args: {
 	readonly userId: string;
 	readonly repositoryId: string;
-	readonly clientState?: AtelierClientState;
 	readonly storage?: Storage;
 	/**
 	 * Adjusts the snapshot once at store creation, receiving the persisted
@@ -34,16 +30,8 @@ export function createRepositorySessionStateStore(args: {
 		persisted: AtelierSessionUiState | null,
 	) => AtelierSessionUiState | null;
 }): AtelierSessionStateStore {
-	if (args.clientState) {
-		const store = createLixSessionStateStore(args.clientState);
-		if (args.initializeSnapshot) {
-			const initialized = args.initializeSnapshot(store.getSnapshot());
-			if (initialized) store.setSnapshot(initialized);
-		}
-		return store;
-	}
 	const key = namespacedAtelierStateKey("shell", SESSION_STATE_VERSION, args);
-	const storage = args.storage ?? window.localStorage;
+	const storage = args.storage ?? window.sessionStorage;
 	const value = readStoredJson(storage, key);
 	const persisted: AtelierSessionUiState | null = value
 		? coerceAtelierSessionUiState(value)
@@ -147,12 +135,8 @@ export function createRepositoryPreferencesStore(args: {
 	readonly client: LixraySupabaseClient | null;
 	readonly userId: string;
 	readonly repositoryId: string;
-	readonly clientState?: AtelierClientState;
 	readonly storage?: Storage;
 }): AtelierPreferencesStore {
-	if (args.clientState) {
-		return createLixPreferencesStore(args.clientState);
-	}
 	const client = args.client;
 	if (!client) {
 		const storage = args.storage ?? window.sessionStorage;
