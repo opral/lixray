@@ -551,7 +551,11 @@ jobs:
 
   deploy-server-preview:
     name: Deploy server preview
-    if: github.event_name == 'pull_request'
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.ci.result == 'success' &&
+      needs.server-image.result == 'success'
     needs:
       - ci
       - server-image
