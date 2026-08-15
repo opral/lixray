@@ -498,9 +498,9 @@ function decodeWireParam(
 		case "text":
 			return Value.text(value.value);
 		case "timestamp":
-			return Value.timestamp(value.value);
+			return Value.timestamptz(value.value);
 		case "json":
-			return Value.json(value.value as JsonValue);
+			return Value.jsonb(value.value as JsonValue);
 		case "blob":
 			return Value.blob(base64ToBytes(value.base64));
 	}
@@ -534,9 +534,9 @@ function encodeLixValue(
 			return { kind: "float", value: jsValue as number };
 		case "text":
 			return { kind: "text", value: jsValue as string };
-		case "timestamp":
+		case "timestamptz":
 			return { kind: "timestamp", value: jsValue as string };
-		case "json":
+		case "jsonb":
 			return { kind: "json", value: jsValue };
 		case "blob": {
 			const bytes = value.asBytes();

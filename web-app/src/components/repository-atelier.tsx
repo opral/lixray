@@ -531,7 +531,6 @@ export function RepositoryAtelier({
 			getAccessToken,
 			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
-			clientStoragePrefix: `lixray.client.v2:${atelierUserId}`,
 		})
 			.then(async (session) => {
 				if (disposed) {
@@ -599,7 +598,6 @@ export function RepositoryAtelier({
 					sessionStateStore: createRepositorySessionStateStore({
 						userId: atelierUserId,
 						repositoryId,
-						clientState: session.lix.clientState,
 						...(startsEmpty
 							? { initializeSnapshot: emptyRepositoryOpeningUiState }
 							: {}),
@@ -608,7 +606,6 @@ export function RepositoryAtelier({
 						client: canEdit ? client : null,
 						userId: atelierUserId,
 						repositoryId,
-						clientState: session.lix.clientState,
 					}),
 					reviewStatusStore: createRepositoryReviewStatusStore({
 						client: canEdit ? client : null,
