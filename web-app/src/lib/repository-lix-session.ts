@@ -9,6 +9,8 @@ interface OpenRepositoryLixSessionOptions {
 	repositorySlug: string;
 	repositoryId?: string;
 	getAccessToken: TokenProvider;
+	/** Refreshes the auth session before retrying an expired-token request. */
+	refreshAccessToken?: TokenProvider;
 	/**
 	 * Opens the session without an Authorization header when no access token
 	 * is available. The worker only serves such requests through its public,
@@ -73,6 +75,7 @@ async function openRepositoryLixSessionOnce(
 			},
 			fetch: createTelemetryFetch(options.fetch, {
 				repositoryId: options.repositoryId,
+				refreshAccessToken: options.refreshAccessToken,
 			}),
 		},
 	});
@@ -99,7 +102,10 @@ async function openRepositoryLixSessionOnce(
 
 function createTelemetryFetch(
 	customFetch: RemoteLixFetch | undefined,
-	context: { repositoryId?: string },
+	context: {
+		repositoryId?: string;
+		refreshAccessToken?: TokenProvider;
+	},
 ): RemoteLixFetch {
 	const fetcher = customFetch ?? globalThis.fetch?.bind(globalThis);
 	if (!fetcher) {
@@ -107,8 +113,24 @@ function createTelemetryFetch(
 	}
 
 	return async (input, init) => {
-		const response = await fetcher(input, init);
-		recordLixServerTiming(response, input);
+		let response = await fetcher(input, init);
+		if (
+			response.status === 401 &&
+			context.refreshAccessToken &&
+			init?.method !== "DELETE"
+		) {
+			try {
+				const token = await context.refreshAccessToken();
+				if (token) {
+					const headers = new Headers(init?.headers);
+					headers.set("Authorization", `Bearer ${token}`);
+					response = await fetcher(input, { ...init, headers });
+				}
+			} catch {
+				// Preserve the original auth response when the refresh itself fails.
+			}
+		}
+		recordLixrayServerTiming(response, input);
 		if (!response.ok) {
 			void reportLixRequestFailure(response, input, init, context);
 		}
@@ -116,7 +138,43 @@ function createTelemetryFetch(
 	};
 }
 
-function recordLixServerTiming(
+const LIXRAY_SERVER_TIMING_NAMES = [
+	"lixray-web-auth",
+	"lixray-web-resolve",
+	"lixray-server-roundtrip",
+	"lix-server-protocol",
+] as const;
+
+type LixrayServerTimingName = (typeof LIXRAY_SERVER_TIMING_NAMES)[number];
+
+export type LixrayServerTimings = Partial<
+	Record<LixrayServerTimingName, number>
+>;
+
+export function parseLixrayServerTiming(raw: string): LixrayServerTimings {
+	const durations: LixrayServerTimings = {};
+	for (const entry of raw.split(",")) {
+		const [rawName, ...parameters] = entry.split(";");
+		const name = rawName?.trim();
+		if (!isLixrayServerTimingName(name)) continue;
+		const duration = parameters
+			.map((parameter) => parameter.trim())
+			.find((parameter) => parameter.startsWith("dur="))
+			?.slice("dur=".length);
+		const parsed = duration === undefined ? Number.NaN : Number(duration);
+		if (!Number.isFinite(parsed) || parsed < 0) continue;
+		durations[name] = (durations[name] ?? 0) + parsed;
+	}
+	return durations;
+}
+
+function isLixrayServerTimingName(
+	name: string | undefined,
+): name is LixrayServerTimingName {
+	return LIXRAY_SERVER_TIMING_NAMES.some((candidate) => candidate === name);
+}
+
+function recordLixrayServerTiming(
 	response: Response,
 	input: RequestInfo | URL,
 ): void {
@@ -124,23 +182,11 @@ function recordLixServerTiming(
 	if (endpoint === "unknown") return;
 	const raw = response.headers.get("server-timing");
 	if (!raw || typeof window === "undefined") return;
-	const durationMs = raw
-		.split(",")
-		.map((entry) => {
-			const [name, ...parameters] = entry.split(";");
-			if (name?.trim() !== "lix-protocol") return null;
-			const duration = parameters
-				.map((parameter) => parameter.trim())
-				.find((parameter) => parameter.startsWith("dur="))
-				?.slice("dur=".length);
-			const parsed = duration === undefined ? Number.NaN : Number(duration);
-			return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-		})
-		.find((duration): duration is number => duration !== null);
-	if (durationMs === undefined) return;
+	const durationsMs = parseLixrayServerTiming(raw);
+	if (Object.keys(durationsMs).length === 0) return;
 	window.dispatchEvent(
-		new CustomEvent("lix-server-timing", {
-			detail: { endpoint, durationMs },
+		new CustomEvent("lixray-server-timing", {
+			detail: { endpoint, durationsMs },
 		}),
 	);
 }

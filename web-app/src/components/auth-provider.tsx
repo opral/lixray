@@ -24,6 +24,7 @@ interface AuthContextValue {
 	client: LixraySupabaseClient | null;
 	getAccessToken: () => Promise<string | null>;
 	signInAsLocalDev: () => Promise<void>;
+	signInAsProdDev: (password: string) => Promise<void>;
 	signInWithGoogle: (returnTo?: string) => Promise<void>;
 	signOut: () => Promise<void>;
 	refreshSession: () => Promise<void>;
@@ -69,6 +70,7 @@ function DemoAuthProvider({ children }: { children: ReactNode }) {
 			client: null,
 			getAccessToken: () => Promise.resolve(DEMO_AUTH_TOKEN),
 			signInAsLocalDev: () => Promise.resolve(),
+			signInAsProdDev: () => Promise.resolve(),
 			signInWithGoogle: beginPreviewSignIn,
 			signOut,
 			refreshSession: () => Promise.resolve(),
@@ -138,13 +140,48 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 		const { error } = await client.auth.signInWithPassword(localDevCredentials);
 		if (error) throw error;
 	}, [client]);
+	const signInAsProdDev = useCallback(
+		async (password: string) => {
+			if (!client) throw new Error("Authentication is still loading");
+			if (!password) {
+				throw new Error("Production developer password is required");
+			}
+			const response = await fetch("/auth/email", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ password }),
+			});
+			let body: {
+				access_token?: string;
+				refresh_token?: string;
+				msg?: string;
+			};
+			try {
+				body = (await response.json()) as typeof body;
+			} catch {
+				throw new Error("Production developer sign-in failed");
+			}
+			if (!response.ok || !body.access_token || !body.refresh_token) {
+				throw new Error(body.msg ?? "Production developer sign-in failed");
+			}
+			const { error } = await client.auth.setSession({
+				access_token: body.access_token,
+				refresh_token: body.refresh_token,
+			});
+			if (error) throw error;
+		},
+		[client],
+	);
 	const refreshSession = useCallback(async () => {
 		if (!client) {
 			setSession(null);
 			return;
 		}
-		const { data, error } = await client.auth.getSession();
-		if (error) throw error;
+		const { data, error } = await client.auth.refreshSession();
+		if (error) {
+			setSession(null);
+			throw error;
+		}
 		setSession(data.session);
 		setIsLoaded(true);
 	}, [client]);
@@ -163,6 +200,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			client,
 			getAccessToken,
 			signInAsLocalDev,
+			signInAsProdDev,
 			signInWithGoogle,
 			signOut,
 			refreshSession,
@@ -173,6 +211,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			isLoaded,
 			session,
 			signInAsLocalDev,
+			signInAsProdDev,
 			signInWithGoogle,
 			signOut,
 			refreshSession,
