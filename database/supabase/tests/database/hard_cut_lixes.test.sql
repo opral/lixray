@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(14);
+select plan(16);
 
 select is(to_regclass('public.organizations')::text, null::text, 'legacy organizations are gone');
 select is(to_regclass('public.workspaces')::text, null::text, 'legacy workspaces are gone');
@@ -23,10 +23,10 @@ set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000001';
 
 select results_eq(
-  $$select namespace_handle, lix_id, lix_name, lix_slug, created
+  $$select namespace_handle, lix_name, lix_slug, created
     from public.bootstrap_personal_namespace()$$,
-  $$values ('samuel'::text, null::uuid, null::text, null::text, true)$$,
-  'first bootstrap derives the handle without creating a workspace'
+  $$values ('samuel'::text, 'repository'::text, 'repository'::text, true)$$,
+  'first bootstrap derives the handle and creates the default repository'
 );
 
 select is(
@@ -37,14 +37,14 @@ select is(
 
 select is(
   (select count(*) from public.lixes where deleted_at is null),
-  0::bigint,
-  'bootstrap leaves the workspace directory empty'
+  1::bigint,
+  'bootstrap creates one default repository'
 );
 
 select results_eq(
-  $$select created from public.bootstrap_personal_namespace()$$,
-  $$values (false)$$,
-  'bootstrap is idempotent'
+  $$select lix_name, lix_slug, created from public.bootstrap_personal_namespace()$$,
+  $$values ('repository'::text, 'repository'::text, false)$$,
+  'bootstrap is idempotent and reuses the default repository'
 );
 
 select lives_ok(
@@ -52,27 +52,40 @@ select lives_ok(
     values (
       '20000000-0000-0000-0000-000000000001',
       (select namespace_id from public.list_accessible_lixes() limit 1),
-      'Workspace',
-      'workspace'
+      'Additional Repository',
+      'additional-repository'
     )$$,
-  'a workspace can be explicitly created in the personal namespace'
+  'an additional repository can be explicitly created in the personal namespace'
 );
 
 select lives_ok(
   $$select public.delete_lix('20000000-0000-0000-0000-000000000001')$$,
-  'an explicitly created workspace can be deleted'
+  'an explicitly created repository can be deleted'
+);
+
+select results_eq(
+  $$select lix_name, lix_slug, created from public.bootstrap_personal_namespace()$$,
+  $$values ('repository'::text, 'repository'::text, false)$$,
+  'bootstrap does not recreate a deleted additional repository'
+);
+
+select results_eq(
+  $$select namespace_handle, lix_name, lix_slug from public.list_accessible_lixes()$$,
+  $$values ('samuel'::text, 'repository'::text, 'repository'::text)$$,
+  'the default repository remains visible after deleting an additional repository'
+);
+
+select lives_ok(
+  $$select public.delete_lix(
+    (select id from public.lixes where name = 'repository' and deleted_at is null)
+  )$$,
+  'the default repository can be deleted'
 );
 
 select results_eq(
   $$select lix_id, created from public.bootstrap_personal_namespace()$$,
   $$values (null::uuid, false)$$,
-  'bootstrap never recreates a deleted last lix'
-);
-
-select results_eq(
-  $$select namespace_handle, lix_id from public.list_accessible_lixes()$$,
-  $$values ('samuel'::text, null::uuid)$$,
-  'an empty namespace remains visible after deleting its last lix'
+  'bootstrap does not recreate a deleted default repository'
 );
 
 select lives_ok(
