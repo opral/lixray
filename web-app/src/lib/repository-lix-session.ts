@@ -1,9 +1,4 @@
-import {
-	IndexedDbStorage,
-	openLix,
-	type Lix,
-	type RemoteLixFetch,
-} from "@lix-js/sdk";
+import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk";
 import { captureTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 
@@ -21,9 +16,6 @@ interface OpenRepositoryLixSessionOptions {
 	 */
 	allowAnonymous?: boolean;
 	initialBranchId?: string | null;
-	/** Prefixes this browser client's repository-scoped Lix client-state database. */
-	clientStoragePrefix?: string;
-	clientStorage?: IndexedDbStorage;
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
 }
@@ -43,10 +35,6 @@ export interface RepositoryLixSession {
 export async function openRepositoryLixSession(
 	options: OpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
-	if (options.clientStorage) {
-		return openRepositoryLixSessionWithRetry(options);
-	}
-
 	const lease = await acquireManagedRepositoryResource(
 		repositorySessionKey(options),
 		() => openRepositoryLixSessionWithRetry(options),
@@ -73,13 +61,6 @@ async function openRepositoryLixSessionWithRetry(
 async function openRepositoryLixSessionOnce(
 	options: OpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
-	const clientStorage =
-		options.clientStorage ??
-		(typeof globalThis.indexedDB === "undefined"
-			? undefined
-			: new IndexedDbStorage({
-					name: repositoryClientStorageName(options),
-				}));
 	const lix = await openLix({
 		server: {
 			mode: "remote",
@@ -94,7 +75,6 @@ async function openRepositoryLixSessionOnce(
 				repositoryId: options.repositoryId,
 			}),
 		},
-		...(clientStorage ? { storage: clientStorage } : {}),
 	});
 
 	try {
@@ -128,11 +108,41 @@ function createTelemetryFetch(
 
 	return async (input, init) => {
 		const response = await fetcher(input, init);
+		recordLixServerTiming(response, input);
 		if (!response.ok) {
 			void reportLixRequestFailure(response, input, init, context);
 		}
 		return response;
 	};
+}
+
+function recordLixServerTiming(
+	response: Response,
+	input: RequestInfo | URL,
+): void {
+	const endpoint = lixRequestEndpoint(input);
+	if (endpoint === "unknown") return;
+	const raw = response.headers.get("server-timing");
+	if (!raw || typeof window === "undefined") return;
+	const durationMs = raw
+		.split(",")
+		.map((entry) => {
+			const [name, ...parameters] = entry.split(";");
+			if (name?.trim() !== "lix-protocol") return null;
+			const duration = parameters
+				.map((parameter) => parameter.trim())
+				.find((parameter) => parameter.startsWith("dur="))
+				?.slice("dur=".length);
+			const parsed = duration === undefined ? Number.NaN : Number(duration);
+			return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+		})
+		.find((duration): duration is number => duration !== null);
+	if (durationMs === undefined) return;
+	window.dispatchEvent(
+		new CustomEvent("lix-server-timing", {
+			detail: { endpoint, durationMs },
+		}),
+	);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -310,19 +320,10 @@ class RepositoryLixSessionLease implements RepositoryLixSession {
 	}
 }
 
-function repositoryClientStorageName(
-	options: OpenRepositoryLixSessionOptions,
-): string {
-	const prefix = options.clientStoragePrefix ?? "lixray.client.v2";
-	const repository =
-		options.repositoryId ?? `${options.namespace}:${options.repositorySlug}`;
-	return `${prefix}:${repository}`;
-}
-
 function repositorySessionKey(
 	options: OpenRepositoryLixSessionOptions,
 ): string {
-	return `${repositoryUrl(options).href}\n${repositoryClientStorageName(options)}`;
+	return repositoryUrl(options).href;
 }
 
 function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {

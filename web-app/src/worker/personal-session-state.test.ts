@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-	ATELIER_SESSION_UI_STATE_KEY,
-	ATELIER_USER_PREFERENCES_KEY,
-	type AtelierClientState,
-} from "@opral/atelier/state-adapters";
-import {
 	createRepositoryBranchSession,
 	createRepositoryPreferencesStore,
 	createRepositoryReviewStatusStore,
@@ -25,17 +20,18 @@ const MAIN = "73000000-0000-4000-8000-000000000001";
 const DRAFT = "73000000-0000-4000-8000-000000000002";
 const CREATED = "73000000-0000-4000-8000-000000000003";
 
-void test("shell state is shared across new tabs and isolated by account and lix", () => {
-	const browserStorage = new MemoryStorage();
+void test("shell state survives reloads within one tab but is isolated across tabs", () => {
+	const tabAStorage = new MemoryStorage();
+	const tabBStorage = new MemoryStorage();
 	const storeA = createRepositorySessionStateStore({
 		userId: USER,
 		repositoryId: LIX,
-		storage: browserStorage,
+		storage: tabAStorage,
 	});
 	const alreadyOpenStore = createRepositorySessionStateStore({
 		userId: USER,
 		repositoryId: LIX,
-		storage: browserStorage,
+		storage: tabAStorage,
 	});
 	let alreadyOpenNotifications = 0;
 	alreadyOpenStore.subscribe(() => {
@@ -60,16 +56,25 @@ void test("shell state is shared across new tabs and isolated by account and lix
 		createRepositorySessionStateStore({
 			userId: USER,
 			repositoryId: LIX,
-			storage: browserStorage,
+			storage: tabAStorage,
 		}).getSnapshot(),
 		storeA.getSnapshot(),
-		"a new tab restores state from the shared browser storage",
+		"a reload in the same tab restores its session state",
+	);
+	assert.equal(
+		createRepositorySessionStateStore({
+			userId: USER,
+			repositoryId: LIX,
+			storage: tabBStorage,
+		}).getSnapshot(),
+		null,
+		"another tab starts with independent shell state",
 	);
 	assert.equal(
 		createRepositorySessionStateStore({
 			userId: OTHER_USER,
 			repositoryId: LIX,
-			storage: browserStorage,
+			storage: tabAStorage,
 		}).getSnapshot(),
 		null,
 		"another account cannot inherit the previous account's state",
@@ -78,108 +83,14 @@ void test("shell state is shared across new tabs and isolated by account and lix
 		createRepositorySessionStateStore({
 			userId: USER,
 			repositoryId: OTHER_LIX,
-			storage: browserStorage,
+			storage: tabAStorage,
 		}).getSnapshot(),
 		null,
 		"another lix cannot inherit the previous lix's state",
 	);
 });
 
-void test("Atelier shell and layout state use the client Lix without remote or browser fallback writes", async () => {
-	const values = new Map<string, unknown>();
-	const listeners = new Set<() => void>();
-	const clientState: AtelierClientState = {
-		get: async (key) => values.get(key) as never,
-		set: async (key, value) => {
-			values.set(key, value);
-			for (const listener of listeners) listener();
-		},
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => listeners.delete(listener);
-		},
-	};
-	const fallbackStorage = new MemoryStorage();
-	const rejectingRemote = {
-		from: () => {
-			throw new Error("Atelier UI state must not reach Supabase");
-		},
-	} as unknown as LixraySupabaseClient;
-	const shell = createRepositorySessionStateStore({
-		userId: USER,
-		repositoryId: LIX,
-		clientState,
-		storage: fallbackStorage,
-	});
-	const preferences = createRepositoryPreferencesStore({
-		client: rejectingRemote,
-		userId: USER,
-		repositoryId: LIX,
-		clientState,
-		storage: fallbackStorage,
-	});
-	const shellState = {
-		focusedPanel: "right" as const,
-		panels: {
-			left: { views: [], activeInstance: null },
-			central: { views: [], activeInstance: null },
-			right: {
-				views: [{ instance: "files-client", kind: "atelier_files" }],
-				activeInstance: "files-client",
-			},
-		},
-	};
-
-	shell.setSnapshot(shellState);
-	await preferences.save({
-		version: 1,
-		layout: { sizes: { left: 10, central: 65, right: 25 } },
-	});
-
-	assert.deepEqual(values.get(ATELIER_SESSION_UI_STATE_KEY), shellState);
-	assert.deepEqual(values.get(ATELIER_USER_PREFERENCES_KEY), {
-		version: 1,
-		layout: { sizes: { left: 10, central: 65, right: 25 } },
-		review: { autoAcceptAgentChanges: false },
-	});
-	assert.equal(fallbackStorage.length, 0);
-	const restoredShell = createRepositorySessionStateStore({
-		userId: USER,
-		repositoryId: LIX,
-		clientState,
-	});
-	await waitFor(() => restoredShell.getSnapshot() !== null);
-	assert.deepEqual(
-		restoredShell.getSnapshot(),
-		shellState,
-		"a second consumer of this client Lix can restore shell state",
-	);
-	assert.deepEqual(
-		await createRepositoryPreferencesStore({
-			client: rejectingRemote,
-			userId: USER,
-			repositoryId: LIX,
-			clientState,
-		}).load(),
-		{
-			version: 1,
-			layout: { sizes: { left: 10, central: 65, right: 25 } },
-			review: { autoAcceptAgentChanges: false },
-		},
-		"a second consumer of this client Lix can restore layout state",
-	);
-	assert.equal(
-		createRepositorySessionStateStore({
-			userId: OTHER_USER,
-			repositoryId: LIX,
-			clientState: memoryClientState(),
-		}).getSnapshot(),
-		null,
-		"another client-state namespace does not inherit this UI state",
-	);
-});
-
-void test("client Lix shell state applies the first-visit initializer", async () => {
+void test("session shell state applies the first-visit initializer", () => {
 	const seededState = {
 		focusedPanel: "central" as const,
 		panels: {
@@ -196,11 +107,10 @@ void test("client Lix shell state applies the first-visit initializer", async ()
 	const store = createRepositorySessionStateStore({
 		userId: USER,
 		repositoryId: LIX,
-		clientState: memoryClientState(),
+		storage: new MemoryStorage(),
 		initializeSnapshot: (persisted) => persisted ?? seededState,
 	});
 
-	await waitFor(() => store.getSnapshot() !== null);
 	assert.deepEqual(store.getSnapshot(), seededState);
 });
 
@@ -643,17 +553,6 @@ class MemoryStorage implements Storage {
 	setItem(key: string, value: string): void {
 		this.#values.set(key, value);
 	}
-}
-
-function memoryClientState(): AtelierClientState {
-	const values = new Map<string, never>();
-	return {
-		get: async (key) => values.get(key),
-		set: async (key, value) => {
-			values.set(key, value as never);
-		},
-		subscribe: () => () => undefined,
-	};
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {

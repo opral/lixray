@@ -246,7 +246,7 @@ function toSqlParam(value: WireValue): SqlParam {
 		case "text":
 			return value.value;
 		case "timestamp":
-			return Value.timestamp(value.value);
+			return Value.timestamptz(value.value);
 		case "json":
 			return value.value as SqlParam;
 		case "blob":
@@ -272,11 +272,11 @@ function toWireResult(result: LixExecuteResult): ExecuteResponse {
 						return { kind: "float", value: Number(js) };
 					case "text":
 						return { kind: "text", value: String(js) };
-					case "timestamp":
+					case "timestamptz":
 						return { kind: "timestamp", value: String(js) };
 					case "blob":
 						return { kind: "blob", base64: bytesToBase64(value.asBytes()!) };
-					case "json":
+					case "jsonb":
 						return { kind: "json", value: js };
 				}
 			}),
