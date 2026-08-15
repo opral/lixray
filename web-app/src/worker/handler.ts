@@ -54,6 +54,8 @@ export interface WorkerEnv {
 	LIXRAY_DEMO_REPOSITORY_IDS?: string;
 	/** Temporary deployment fallback; remove after production variables migrate. */
 	LIXRAY_REPOSITORY_SERVICE_URL?: string;
+	/** Temporary deployment fallback; remove after Railway uses LIXRAY_LIX_SERVICE_URL. */
+	LIXRAY_WORKSPACE_SERVICE_URL?: string;
 	LIXRAY_INTERNAL_TOKEN?: string;
 	GOOGLE_ANALYTICS_ID?: string;
 	POSTHOG_PROJECT_TOKEN?: string;
