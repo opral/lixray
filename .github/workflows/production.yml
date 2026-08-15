@@ -243,7 +243,7 @@ jobs:
           WEB_IMAGE: ${{ needs.images.outputs.web }}
         run: .github/scripts/promote-production.sh
 
-      - name: Check public production canary
+      - name: Check public production repository canary
         env:
-          LIXRAY_CANARY_WORKSPACE_URL: ${{ vars.LIXRAY_CANARY_WORKSPACE_URL || 'https://lixray.com/@samuel/2hello-world' }}
+          LIXRAY_CANARY_REPOSITORY_URL: ${{ vars.LIXRAY_CANARY_REPOSITORY_URL || 'https://lixray.com/@dev/ci-repo' }}
         run: node scripts/check-production-lix.mjs

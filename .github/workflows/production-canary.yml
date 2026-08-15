@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Check public canary workspace
+      - name: Check public canary repository
         env:
-          LIXRAY_CANARY_WORKSPACE_URL: ${{ vars.LIXRAY_CANARY_WORKSPACE_URL || 'https://lixray.com/@samuel/2hello-world' }}
+          LIXRAY_CANARY_REPOSITORY_URL: ${{ vars.LIXRAY_CANARY_REPOSITORY_URL || 'https://lixray.com/@dev/ci-repo' }}
         run: node scripts/check-production-lix.mjs
