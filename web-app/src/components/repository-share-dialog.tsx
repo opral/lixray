@@ -203,7 +203,7 @@ export function RepositoryShareDialog({
 								className="size-3.5 shrink-0 text-text-tertiary"
 								aria-hidden="true"
 							/>
-							Invite your team — open People
+							Invite your team
 						</button>
 					) : null}
 				</PopoverPrimitive.Content>

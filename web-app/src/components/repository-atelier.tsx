@@ -67,12 +67,8 @@ import type {
 	RepositoryTeamApi,
 } from "~/components/repository-home/people-view";
 import { isTeamInviteToken, randomTeamInviteToken } from "~/lib/team-invite";
-import { LixrayCentralTabStrip } from "~/components/repository-home/central-tab-strip";
 import { EntryKind } from "~/lib/entry-kind";
-import {
-	useRepositoryIsEmpty,
-	repositoryHasNoFiles,
-} from "~/components/repository-home/lix-data";
+import { repositoryHasNoFiles } from "~/components/repository-home/lix-data";
 
 interface RepositoryAtelierProps {
 	repositoryId: string;
@@ -204,7 +200,6 @@ export function RepositoryAtelier({
 			);
 		}
 	}, [signInWithGoogle]);
-	const repositoryIsEmpty = useRepositoryIsEmpty(instance?.lix ?? null);
 	// The raw team api is rebuilt after every render so its closures always see
 	// the current Supabase client and user; the stable facade below is what the
 	// long-lived Atelier extension mounts capture. The demo deployment has no
@@ -326,9 +321,10 @@ export function RepositoryAtelier({
 			Share
 		</span>
 	);
-	// Share stays inert until the repository has content to share (12b/12c).
+	// Sharing is available for the whole repository as well as individual files;
+	// the current browser URL is captured when the dialog is opened.
 	const headerActions = canEdit ? (
-		client && repositoryIsEmpty === false ? (
+		client ? (
 			<RepositoryShareControl
 				createShareToken={async () => {
 					const { data, error } = await client.rpc("create_lix_share_token", {
@@ -345,7 +341,7 @@ export function RepositoryAtelier({
 				documentName={documentName}
 				onOpenTeam={() => {
 					void instance?.views
-						.open(LIXRAY_PEOPLE_EXTENSION_ID)
+						.open(LIXRAY_PEOPLE_EXTENSION_ID, { newTab: true })
 						.catch((error: unknown) => {
 							console.error("Unable to open the People tab", error);
 						});
@@ -773,7 +769,7 @@ export function RepositoryAtelier({
 											<Link
 												to="/home"
 												aria-label="Back to repositories"
-												className="flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+												className="-mr-1 flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
 											>
 												<img
 													src="/lixray-mark.svg"
@@ -781,25 +777,6 @@ export function RepositoryAtelier({
 													className="size-[18px]"
 												/>
 											</Link>
-										),
-										// The two homes chain here: the namespace links up
-										// to the hosted home, the repository names itself.
-										navbarCenter: (
-											<span className="flex items-center gap-2 text-[13px]">
-												<Link
-													to="/home"
-													className="font-medium text-text-tertiary hover:text-text-primary"
-												>
-													{namespace}
-												</Link>
-												<span className="text-text-tertiary/60">/</span>
-												<span className="font-semibold text-text-primary">
-													{repositorySlug}
-												</span>
-											</span>
-										),
-										centralTabStrip: (context) => (
-											<LixrayCentralTabStrip context={context} />
 										),
 										navbarEnd: headerActions,
 									}}
