@@ -78,7 +78,7 @@ select set_config(
 
 select lives_ok(
 	$$select * from public.bootstrap_personal_namespace()$$,
-	'the owner bootstraps an empty personal namespace'
+	'the owner bootstraps a personal namespace'
 );
 
 select lives_ok(
@@ -86,15 +86,15 @@ select lives_ok(
 	values (
 		'40000000-0000-0000-0000-000000000001',
 		(select namespace_id from public.list_accessible_lixes() limit 1),
-		'MCP Workspace',
-		'mcp-workspace'
+		'MCP Repository',
+		'mcp-repository'
 	)$$,
-	'the owner explicitly creates a Lix to connect'
+	'the owner explicitly creates a repository to connect'
 );
 
 select throws_ok(
 	$$select public.record_mcp_lix_connection(
-		(select id from public.lixes where deleted_at is null),
+		'40000000-0000-0000-0000-000000000001',
 		'active_branch_id'
 	)$$,
 	'P0001',
@@ -107,7 +107,7 @@ select throws_ok(
 		user_id, lix_id, oauth_client_id, last_tool
 	) values (
 		'20000000-0000-0000-0000-000000000001',
-		(select id from public.lixes where deleted_at is null),
+		'40000000-0000-0000-0000-000000000001',
 		'forged-client',
 		'active_branch_id'
 	)$$,
@@ -124,7 +124,7 @@ select set_config(
 
 select lives_ok(
 	$$select public.record_mcp_lix_connection(
-		(select id from public.lixes where deleted_at is null),
+		'40000000-0000-0000-0000-000000000001',
 		'active_branch_id'
 	)$$,
 	'a valid LixRay MCP session records the handshake'
