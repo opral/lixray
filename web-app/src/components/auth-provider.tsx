@@ -177,8 +177,11 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			setSession(null);
 			return;
 		}
-		const { data, error } = await client.auth.getSession();
-		if (error) throw error;
+		const { data, error } = await client.auth.refreshSession();
+		if (error) {
+			setSession(null);
+			throw error;
+		}
 		setSession(data.session);
 		setIsLoaded(true);
 	}, [client]);

@@ -9,6 +9,8 @@ interface OpenRepositoryLixSessionOptions {
 	repositorySlug: string;
 	repositoryId?: string;
 	getAccessToken: TokenProvider;
+	/** Refreshes the auth session before retrying an expired-token request. */
+	refreshAccessToken?: TokenProvider;
 	/**
 	 * Opens the session without an Authorization header when no access token
 	 * is available. The worker only serves such requests through its public,
@@ -73,6 +75,7 @@ async function openRepositoryLixSessionOnce(
 			},
 			fetch: createTelemetryFetch(options.fetch, {
 				repositoryId: options.repositoryId,
+				refreshAccessToken: options.refreshAccessToken,
 			}),
 		},
 	});
@@ -99,7 +102,10 @@ async function openRepositoryLixSessionOnce(
 
 function createTelemetryFetch(
 	customFetch: RemoteLixFetch | undefined,
-	context: { repositoryId?: string },
+	context: {
+		repositoryId?: string;
+		refreshAccessToken?: TokenProvider;
+	},
 ): RemoteLixFetch {
 	const fetcher = customFetch ?? globalThis.fetch?.bind(globalThis);
 	if (!fetcher) {
@@ -107,7 +113,23 @@ function createTelemetryFetch(
 	}
 
 	return async (input, init) => {
-		const response = await fetcher(input, init);
+		let response = await fetcher(input, init);
+		if (
+			response.status === 401 &&
+			context.refreshAccessToken &&
+			init?.method !== "DELETE"
+		) {
+			try {
+				const token = await context.refreshAccessToken();
+				if (token) {
+					const headers = new Headers(init?.headers);
+					headers.set("Authorization", `Bearer ${token}`);
+					response = await fetcher(input, { ...init, headers });
+				}
+			} catch {
+				// Preserve the original auth response when the refresh itself fails.
+			}
+		}
 		recordLixServerTiming(response, input);
 		if (!response.ok) {
 			void reportLixRequestFailure(response, input, init, context);

@@ -365,7 +365,10 @@ export async function handleRequest(
 				// A signed-in non-member falls through to the public read
 				// transport instead of a dead end.
 				if (!publicReadRequest) return resolution.response;
-			} else if (!publicReadRequest) {
+			} else {
+				// A bearer token was supplied but could not be authenticated. Do not
+				// downgrade this request to public transport: an expired token must
+				// remain distinguishable from a valid non-member public reader.
 				return authResult.response;
 			}
 		} else if (!publicReadRequest) {

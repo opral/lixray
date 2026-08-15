@@ -110,6 +110,7 @@ export function RepositoryAtelier({
 		client,
 		getAccessToken: getSessionAccessToken,
 		isLoaded: isAuthLoaded,
+		refreshSession,
 		signInWithGoogle,
 		user,
 	} = useAuth();
@@ -190,6 +191,10 @@ export function RepositoryAtelier({
 				: getSessionAccessToken(),
 		[canEdit, getSessionAccessToken],
 	);
+	const refreshAccessToken = useCallback(async () => {
+		await refreshSession();
+		return getAccessToken();
+	}, [getAccessToken, refreshSession]);
 	const signInToCurrentRepository = useCallback(async () => {
 		try {
 			await signInWithGoogle(canonicalPathFromLocation(window.location));
@@ -529,6 +534,7 @@ export function RepositoryAtelier({
 			repositorySlug: repositorySlug,
 			repositoryId: repositoryId,
 			getAccessToken,
+			refreshAccessToken,
 			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
 		})
@@ -655,6 +661,7 @@ export function RepositoryAtelier({
 		canEdit,
 		isReadOnly,
 		getAccessToken,
+		refreshAccessToken,
 		navigateToCurrentPathBranch,
 		namespace,
 		repositoryId,

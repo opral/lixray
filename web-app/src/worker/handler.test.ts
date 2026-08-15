@@ -832,6 +832,32 @@ void test("canonical mutation routes return authentication failures", async () =
 	assert.equal(await response.text(), "Unauthorized\n");
 });
 
+void test("invalid bearer tokens do not fall through to public reads", async () => {
+	let publicLixLookups = 0;
+	const response = await handleRequest(
+		remoteLixRequest("/execute", {
+			method: "POST",
+			headers: {
+				Authorization: "Bearer expired-user-token",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sql: "SELECT 1" }),
+		}),
+		env({}),
+		{
+			authenticate: rejected(401, "Unauthorized\n"),
+			resolvePublicLix: async () => {
+				publicLixLookups += 1;
+				return { ok: true, lixId: LIX_A };
+			},
+		},
+	);
+
+	assert.equal(response.status, 401);
+	assert.equal(await response.text(), "Unauthorized\n");
+	assert.equal(publicLixLookups, 0);
+});
+
 void test("inaccessible lixes return 403 from mutation routes", async () => {
 	const response = await handleRequest(
 		remoteLixRequest("/branch/switch", {
