@@ -16,14 +16,11 @@ function parseRevisionManifest(source) {
 	);
 }
 
-function gitlinkRevision(path) {
-	const output = execFileSync("git", ["ls-tree", "HEAD", path], {
+function submoduleRevision(path) {
+	return execFileSync("git", ["-C", path, "rev-parse", "HEAD"], {
 		cwd: repositoryRoot,
 		encoding: "utf8",
-	});
-	const match = /^160000 commit ([0-9a-f]{40})\t/.exec(output);
-	assert.ok(match, `${path} must be a git submodule`);
-	return match[1];
+	}).trim();
 }
 
 test("Railway fallback revisions match the repository submodule pointers", async () => {
@@ -33,8 +30,8 @@ test("Railway fallback revisions match the repository submodule pointers", async
 	);
 	const revisions = parseRevisionManifest(source);
 
-	assert.equal(revisions.LIX_REVISION, gitlinkRevision("vendor/lix"));
-	assert.equal(revisions.ATELIER_REVISION, gitlinkRevision("vendor/atelier"));
+	assert.equal(revisions.LIX_REVISION, submoduleRevision("vendor/lix"));
+	assert.equal(revisions.ATELIER_REVISION, submoduleRevision("vendor/atelier"));
 });
 
 test("Railway Docker fallback uses pinned revisions instead of moving branches", async () => {
@@ -55,4 +52,23 @@ test("Railway rebuilds the web service when fallback revisions change", async ()
 	);
 
 	assert.ok(railwayConfig.build.watchPatterns.includes("vendor/revisions.env"));
+});
+
+test("Atelier resolves the vendored Lix SDK instead of npm", async () => {
+	const [rootPackage, atelierPackage, lixPackage] = await Promise.all(
+		[
+			new URL("../../package.json", import.meta.url),
+			new URL("../../vendor/atelier/package.json", import.meta.url),
+			new URL("../../vendor/lix/packages/js-sdk/package.json", import.meta.url),
+		].map(async (url) => JSON.parse(await readFile(url, "utf8"))),
+	);
+
+	assert.equal(
+		rootPackage.pnpm.overrides["@lix-js/sdk"],
+		"link:vendor/lix/packages/js-sdk",
+	);
+	assert.equal(
+		atelierPackage.peerDependencies["@lix-js/sdk"],
+		`^${lixPackage.version}`,
+	);
 });
