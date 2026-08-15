@@ -2,6 +2,12 @@ name: CI
 
 on:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -166,6 +172,7 @@ jobs:
 
   web-image:
     name: Web image
+    if: github.event.pull_request.draft != true
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 25
     permissions:
@@ -327,7 +334,7 @@ jobs:
   frontend:
     name: Frontend
     needs: changes
-    if: needs.changes.outputs.frontend == 'true'
+    if: github.event.pull_request.draft != true && needs.changes.outputs.frontend == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -373,7 +380,7 @@ jobs:
   database:
     name: Database
     needs: changes
-    if: needs.changes.outputs.database == 'true'
+    if: github.event.pull_request.draft != true && needs.changes.outputs.database == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -392,7 +399,7 @@ jobs:
   rust:
     name: Rust
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: github.event.pull_request.draft != true && needs.changes.outputs.rust == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
 
@@ -424,7 +431,7 @@ jobs:
   e2e:
     name: E2E
     needs: changes
-    if: needs.changes.outputs.e2e == 'true'
+    if: github.event.pull_request.draft != true && needs.changes.outputs.e2e == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
@@ -509,6 +516,7 @@ jobs:
           RUST_RESULT: ${{ needs.rust.result }}
           E2E_SELECTED: ${{ needs.changes.outputs.e2e }}
           E2E_RESULT: ${{ needs.e2e.result }}
+          DRAFT: ${{ github.event.pull_request.draft }}
         run: |
           require_success() {
             if test "$2" != "success"; then
@@ -524,6 +532,13 @@ jobs:
               exit 1
             fi
           }
+
+          if test "$DRAFT" = "true"; then
+            require_success "Change selection" "$CHANGES_RESULT"
+            require_success "Server image" "$SERVER_IMAGE_RESULT"
+            echo "Draft pull request: full validation lanes skipped; preview server image is ready."
+            exit 0
+          fi
 
           require_success "Change selection" "$CHANGES_RESULT"
           require_success "Server image" "$SERVER_IMAGE_RESULT"
