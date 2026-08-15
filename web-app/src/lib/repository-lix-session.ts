@@ -108,11 +108,41 @@ function createTelemetryFetch(
 
 	return async (input, init) => {
 		const response = await fetcher(input, init);
+		recordLixServerTiming(response, input);
 		if (!response.ok) {
 			void reportLixRequestFailure(response, input, init, context);
 		}
 		return response;
 	};
+}
+
+function recordLixServerTiming(
+	response: Response,
+	input: RequestInfo | URL,
+): void {
+	const endpoint = lixRequestEndpoint(input);
+	if (endpoint === "unknown") return;
+	const raw = response.headers.get("server-timing");
+	if (!raw || typeof window === "undefined") return;
+	const durationMs = raw
+		.split(",")
+		.map((entry) => {
+			const [name, ...parameters] = entry.split(";");
+			if (name?.trim() !== "lix-protocol") return null;
+			const duration = parameters
+				.map((parameter) => parameter.trim())
+				.find((parameter) => parameter.startsWith("dur="))
+				?.slice("dur=".length);
+			const parsed = duration === undefined ? Number.NaN : Number(duration);
+			return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+		})
+		.find((duration): duration is number => duration !== null);
+	if (durationMs === undefined) return;
+	window.dispatchEvent(
+		new CustomEvent("lix-server-timing", {
+			detail: { endpoint, durationMs },
+		}),
+	);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

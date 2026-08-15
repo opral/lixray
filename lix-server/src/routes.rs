@@ -19,7 +19,7 @@ use std::{
         Arc,
     },
     task::{Context, Poll},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tower_http::{
     compression::{
@@ -330,6 +330,7 @@ async fn lix_protocol_inner(
             }
         }
     });
+    let protocol_started_at = Instant::now();
     let runtime =
         match tokio::time::timeout(state.protocol_timeout, state.manager.get(&lix_id)).await {
             Ok(Ok(runtime)) => runtime,
@@ -445,13 +446,22 @@ async fn lix_protocol_inner(
         });
     }
     cancellation_recovery.disarm();
+    let protocol_duration_ms = protocol_started_at.elapsed().as_secs_f64() * 1_000.0;
     let holds_lix_lease = response
         .headers()
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .and_then(|content_type| content_type.split(';').next())
         .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("text/event-stream"));
-    let (parts, body) = response.into_parts();
+    let (mut parts, body) = response.into_parts();
+    if let Ok(server_timing) =
+        HeaderValue::from_str(&format!("lix-protocol;dur={protocol_duration_ms:.3}"))
+    {
+        parts.headers.insert(
+            header::HeaderName::from_static("server-timing"),
+            server_timing,
+        );
+    }
     let body = Body::new(body);
     if holds_lix_lease {
         Response::from_parts(
