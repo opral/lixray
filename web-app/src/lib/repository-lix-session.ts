@@ -131,8 +131,8 @@ function recordLixServerTiming(
 			if (name?.trim() !== "lix-protocol") return null;
 			const duration = parameters
 				.map((parameter) => parameter.trim())
-			.find((parameter) => parameter.startsWith("dur="))
-			?.slice("dur=".length);
+				.find((parameter) => parameter.startsWith("dur="))
+				?.slice("dur=".length);
 			const parsed = duration === undefined ? Number.NaN : Number(duration);
 			return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 		})
