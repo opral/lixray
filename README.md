@@ -51,6 +51,19 @@ Edits in `web-app` and `vendor/atelier` update through HMR. Ctrl-C stops Vite;
 the backend services remain available for the next run. Use `pnpm dev --down`
 to stop the services. The local web and MCP endpoint always use port `8787`.
 
+### Production developer sign-in
+
+For production smoke testing without Google, create and confirm the dedicated
+Supabase email/password user `dev@lixray.com`. Production automatically shows
+the developer sign-in form on `/sign-up-dev`; standard `/sign-in` continues to
+show Google sign-in. Preview and local environments do not expose the developer
+form. The browser calls `POST /auth/email` for the server-side Supabase password
+exchange; `/auth/email` is not a page route.
+
+Keep Supabase sign-ups disabled and store the account password in the team's
+password manager. The password is not baked into the image, frontend bundle,
+or repository.
+
 For a hosted Supabase project, link the CLI and apply migrations:
 
 ```sh
@@ -59,9 +72,11 @@ pnpm --dir database exec supabase link --project-ref <project-ref>
 pnpm --dir database exec supabase db push
 ```
 
-Enable Google authentication, disable email authentication, and configure the
-site URL plus `/auth/callback` redirect in both Supabase and Google. Browser and
-server access use the user's JWT with RLS; no Supabase secret key is required.
+Enable Google authentication, keep public email sign-ups disabled, and configure
+the site URL plus `/auth/callback` redirect in both Supabase and Google. Enable
+Supabase email password sign-in while keeping new-user registration disabled.
+Browser and server access use the user's JWT with RLS; no Supabase secret key is
+required.
 
 ## Verification
 

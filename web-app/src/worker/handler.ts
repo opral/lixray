@@ -85,6 +85,7 @@ interface HandleRequestOptions {
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
+	fetch?: typeof fetch;
 	executionContext?: RequestExecutionContext;
 	createMcpTelemetry?: typeof createMcpTelemetrySession;
 	recordMcpLixConnection?: RecordMcpLixConnection;
@@ -166,6 +167,8 @@ type McpClaimsValidation =
 	  };
 
 const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
+const PROD_DEV_AUTH_PATH = "/auth/email";
+const PROD_DEV_EMAIL = "dev@lixray.com";
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
@@ -180,6 +183,10 @@ export async function handleRequest(
 
 	if (request.method === "GET" && url.pathname === "/healthz") {
 		return json({ ok: true, service: "lixray" });
+	}
+
+	if (url.pathname === PROD_DEV_AUTH_PATH) {
+		return handleProdDevAuth(request, env, options.fetch ?? fetch);
 	}
 
 	if (isDemoMode(env) && isProductionOnlyPath(url.pathname)) {
@@ -388,6 +395,82 @@ export async function handleRequest(
 		options.fallback?.(request, env) ??
 		new Response("Not found\n", { status: 404 })
 	);
+}
+
+async function handleProdDevAuth(
+	request: Request,
+	env: WorkerEnv,
+	fetchImpl: typeof fetch,
+): Promise<Response> {
+	const email = productionDevEmail(env);
+	if (request.method === "GET") {
+		return json(email ? { enabled: true, email } : { enabled: false }, {
+			headers: { "Cache-Control": "no-store" },
+		});
+	}
+	if (request.method !== "POST") {
+		return new Response("Method not allowed\n", { status: 405 });
+	}
+	if (!email) return new Response("Not found\n", { status: 404 });
+
+	const origin = request.headers.get("origin");
+	if (origin && origin !== new URL(request.url).origin) {
+		return new Response("Forbidden\n", { status: 403 });
+	}
+
+	let password: unknown;
+	try {
+		const body: unknown = await request.json();
+		password =
+			body && typeof body === "object" && "password" in body
+				? body.password
+				: undefined;
+	} catch {
+		return json({ msg: "A password is required" }, { status: 400 });
+	}
+	if (typeof password !== "string" || password.length === 0) {
+		return json({ msg: "A password is required" }, { status: 400 });
+	}
+
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return new Response("Supabase authentication is not configured\n", {
+			status: 500,
+		});
+	}
+
+	const tokenUrl = new URL("/auth/v1/token", env.SUPABASE_URL);
+	tokenUrl.searchParams.set("grant_type", "password");
+	let response: Response;
+	try {
+		response = await fetchImpl(tokenUrl, {
+			method: "POST",
+			headers: {
+				apikey: env.SUPABASE_PUBLISHABLE_KEY,
+				Authorization: `Bearer ${env.SUPABASE_PUBLISHABLE_KEY}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ email, password }),
+		});
+	} catch {
+		return new Response("Supabase authentication is unavailable\n", {
+			status: 502,
+		});
+	}
+
+	return new Response(await response.text(), {
+		status: response.status,
+		headers: {
+			"Cache-Control": "no-store",
+			"Content-Type":
+				response.headers.get("content-type") ?? "application/json",
+		},
+	});
+}
+
+function productionDevEmail(env: WorkerEnv): string | null {
+	return env.RAILWAY_ENVIRONMENT_NAME?.trim() === "production"
+		? PROD_DEV_EMAIL
+		: null;
 }
 
 async function fetchLixRequest(

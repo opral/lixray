@@ -106,9 +106,9 @@ function SignInPage() {
 							<LogIn aria-hidden="true" />
 						)}
 						{submitting
-							? usesLocalAccount
-								? "Signing in..."
-								: "Redirecting..."
+							? usesGoogle
+								? "Redirecting..."
+								: "Signing in..."
 							: usesPreviewAccount
 								? joiningSharedRepository
 									? "Join as preview user"

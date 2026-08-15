@@ -40,6 +40,61 @@ void test("GET /healthz returns Worker health without auth or proxying", async (
 	assert.deepEqual(await response.json(), { ok: true, service: "lixray" });
 });
 
+void test("production email sign-in status is disabled outside production", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/auth/email"),
+		env({
+			extra: {
+				RAILWAY_ENVIRONMENT_NAME: "lixray-pr-91",
+			},
+		}),
+	);
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), { enabled: false });
+});
+
+void test("production email sign-in exchanges a password through Supabase", async () => {
+	let upstreamRequest: Request | null = null;
+	let upstreamBody: BodyInit | null | undefined;
+	const response = await handleRequest(
+		new Request("https://example.test/auth/email", {
+			method: "POST",
+			headers: { origin: "https://example.test" },
+			body: JSON.stringify({ password: "test-password" }),
+		}),
+		env({
+			extra: {
+				RAILWAY_ENVIRONMENT_NAME: "production",
+				SUPABASE_URL: "https://project.supabase.co",
+				SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+			},
+		}),
+		{
+			fetch: async (input, init) => {
+				upstreamRequest = new Request(input, init);
+				upstreamBody = init?.body;
+				return Response.json({
+					access_token: "access-token",
+					refresh_token: "refresh-token",
+				});
+			},
+		},
+	);
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), {
+		access_token: "access-token",
+		refresh_token: "refresh-token",
+	});
+	assert.equal(
+		upstreamRequest?.url,
+		"https://project.supabase.co/auth/v1/token?grant_type=password",
+	);
+	assert.equal(
+		upstreamBody,
+		JSON.stringify({ email: "dev@lixray.com", password: "test-password" }),
+	);
+});
+
 void test("non-/v1 routes delegate to the frontend fallback", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/"),
