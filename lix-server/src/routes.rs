@@ -454,9 +454,9 @@ async fn lix_protocol_inner(
         .and_then(|content_type| content_type.split(';').next())
         .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("text/event-stream"));
     let (mut parts, body) = response.into_parts();
-    if let Ok(server_timing) =
-        HeaderValue::from_str(&format!("lix-protocol;dur={protocol_duration_ms:.3}"))
-    {
+    if let Ok(server_timing) = HeaderValue::from_str(&format!(
+        "lix-server-protocol;dur={protocol_duration_ms:.3}"
+    )) {
         parts.headers.insert(
             header::HeaderName::from_static("server-timing"),
             server_timing,
@@ -813,6 +813,14 @@ mod tests {
             .await
             .expect("handshake response");
         assert_eq!(handshake.status(), StatusCode::OK);
+        assert!(
+            handshake
+                .headers()
+                .get("server-timing")
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.starts_with("lix-server-protocol;dur=")),
+            "Lix protocol responses expose the canonical Server-Timing metric"
+        );
         let handshake = json_body(handshake).await;
         assert_eq!(handshake["protocolVersion"], json!(2));
         assert_eq!(

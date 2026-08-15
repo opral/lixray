@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { openRepositoryLixSession } from "./repository-lix-session.ts";
+import {
+	openRepositoryLixSession,
+	parseLixrayServerTiming,
+} from "./repository-lix-session.ts";
+
+void test("parses the Lixray and Lix Server-Timing hard cut", () => {
+	assert.deepEqual(
+		parseLixrayServerTiming(
+			"cache;desc=ignored, lixray-web-auth;dur=1.250, lixray-web-resolve;dur=2.500, lixray-server-roundtrip;dur=8.750, lix-server-protocol;dur=1.500",
+		),
+		{
+			"lixray-web-auth": 1.25,
+			"lixray-web-resolve": 2.5,
+			"lixray-server-roundtrip": 8.75,
+			"lix-server-protocol": 1.5,
+		},
+	);
+});
 
 void test("retries a recovering repository until its handshake succeeds", async (t) => {
 	let handshakeAttempts = 0;

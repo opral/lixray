@@ -130,7 +130,7 @@ function createTelemetryFetch(
 				// Preserve the original auth response when the refresh itself fails.
 			}
 		}
-		recordLixServerTiming(response, input);
+		recordLixrayServerTiming(response, input);
 		if (!response.ok) {
 			void reportLixRequestFailure(response, input, init, context);
 		}
@@ -138,7 +138,43 @@ function createTelemetryFetch(
 	};
 }
 
-function recordLixServerTiming(
+const LIXRAY_SERVER_TIMING_NAMES = [
+	"lixray-web-auth",
+	"lixray-web-resolve",
+	"lixray-server-roundtrip",
+	"lix-server-protocol",
+] as const;
+
+type LixrayServerTimingName = (typeof LIXRAY_SERVER_TIMING_NAMES)[number];
+
+export type LixrayServerTimings = Partial<
+	Record<LixrayServerTimingName, number>
+>;
+
+export function parseLixrayServerTiming(raw: string): LixrayServerTimings {
+	const durations: LixrayServerTimings = {};
+	for (const entry of raw.split(",")) {
+		const [rawName, ...parameters] = entry.split(";");
+		const name = rawName?.trim();
+		if (!isLixrayServerTimingName(name)) continue;
+		const duration = parameters
+			.map((parameter) => parameter.trim())
+			.find((parameter) => parameter.startsWith("dur="))
+			?.slice("dur=".length);
+		const parsed = duration === undefined ? Number.NaN : Number(duration);
+		if (!Number.isFinite(parsed) || parsed < 0) continue;
+		durations[name] = (durations[name] ?? 0) + parsed;
+	}
+	return durations;
+}
+
+function isLixrayServerTimingName(
+	name: string | undefined,
+): name is LixrayServerTimingName {
+	return LIXRAY_SERVER_TIMING_NAMES.some((candidate) => candidate === name);
+}
+
+function recordLixrayServerTiming(
 	response: Response,
 	input: RequestInfo | URL,
 ): void {
@@ -146,23 +182,11 @@ function recordLixServerTiming(
 	if (endpoint === "unknown") return;
 	const raw = response.headers.get("server-timing");
 	if (!raw || typeof window === "undefined") return;
-	const durationMs = raw
-		.split(",")
-		.map((entry) => {
-			const [name, ...parameters] = entry.split(";");
-			if (name?.trim() !== "lix-protocol") return null;
-			const duration = parameters
-				.map((parameter) => parameter.trim())
-				.find((parameter) => parameter.startsWith("dur="))
-				?.slice("dur=".length);
-			const parsed = duration === undefined ? Number.NaN : Number(duration);
-			return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-		})
-		.find((duration): duration is number => duration !== null);
-	if (durationMs === undefined) return;
+	const durationsMs = parseLixrayServerTiming(raw);
+	if (Object.keys(durationsMs).length === 0) return;
 	window.dispatchEvent(
-		new CustomEvent("lix-server-timing", {
-			detail: { endpoint, durationMs },
+		new CustomEvent("lixray-server-timing", {
+			detail: { endpoint, durationsMs },
 		}),
 	);
 }

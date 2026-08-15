@@ -174,6 +174,14 @@ const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
 const jwksByUrl = new Map<string, JWTVerifyGetKey>();
 
+type ServerTimingMetric = {
+	readonly name:
+		| "lixray-web-auth"
+		| "lixray-web-resolve"
+		| "lixray-server-roundtrip";
+	readonly durationMs: number;
+};
+
 export async function handleRequest(
 	request: Request,
 	env: WorkerEnv,
@@ -327,6 +335,7 @@ export async function handleRequest(
 
 	const remoteLixMatch = REMOTE_LIX_API_PATH.exec(url.pathname);
 	if (remoteLixMatch) {
+		const serverTimings: ServerTimingMetric[] = [];
 		const namespace = normalizedRouteSegment(remoteLixMatch[1]);
 		const lixSlug = normalizedRouteSegment(remoteLixMatch[2]);
 		if (
@@ -343,61 +352,138 @@ export async function handleRequest(
 		const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
 
 		const authenticate = options.authenticate ?? authenticateWithSupabase;
+		const authCheckStartedAt = performance.now();
 		if (bearerToken(request)) {
-			const authResult = await authenticate(request, env);
+			const authResult = await measureServerTiming(
+				serverTimings,
+				"lixray-web-auth",
+				() => authenticate(request, env),
+			);
 			if (authResult.ok) {
-				const resolution = await (options.resolveLix ?? resolveLixWithSupabase)(
-					namespace,
-					lixSlug,
-					authResult.auth,
-					env,
+				const resolution = await measureServerTiming(
+					serverTimings,
+					"lixray-web-resolve",
+					() =>
+						(options.resolveLix ?? resolveLixWithSupabase)(
+							namespace,
+							lixSlug,
+							authResult.auth,
+							env,
+						),
 				);
 				if (resolution.ok) {
-					return fetchLixRequest(
-						resolution.lixId,
-						request,
-						protocolPath,
-						env,
-						options,
-						authResult.auth.userId,
+					const response = await measureServerTiming(
+						serverTimings,
+						"lixray-server-roundtrip",
+						() =>
+							fetchLixRequest(
+								resolution.lixId,
+								request,
+								protocolPath,
+								env,
+								options,
+								authResult.auth.userId,
+							),
 					);
+					return withServerTimings(response, serverTimings);
 				}
 				// A signed-in non-member falls through to the public read
 				// transport instead of a dead end.
-				if (!publicReadRequest) return resolution.response;
+				if (!publicReadRequest) {
+					return withServerTimings(resolution.response, serverTimings);
+				}
 			} else {
 				// A bearer token was supplied but could not be authenticated. Do not
 				// downgrade this request to public transport: an expired token must
 				// remain distinguishable from a valid non-member public reader.
-				return authResult.response;
+				return withServerTimings(authResult.response, serverTimings);
 			}
 		} else if (!publicReadRequest) {
-			return unauthorized().response;
+			serverTimings.push({
+				name: "lixray-web-auth",
+				durationMs: performance.now() - authCheckStartedAt,
+			});
+			return withServerTimings(unauthorized().response, serverTimings);
 		}
 
-		const publicResolution = await (
-			options.resolvePublicLix ?? resolvePublicLixWithSupabase
-		)(namespace, lixSlug, env);
-		if (!publicResolution.ok) return publicResolution.response;
+		const publicResolution = await measureServerTiming(
+			serverTimings,
+			"lixray-web-resolve",
+			() =>
+				(options.resolvePublicLix ?? resolvePublicLixWithSupabase)(
+					namespace,
+					lixSlug,
+					env,
+				),
+		);
+		if (!publicResolution.ok) {
+			return withServerTimings(publicResolution.response, serverTimings);
+		}
 		const mutationRejection = await rejectPublicMutation(
 			request,
 			endpoint,
 			options.parseSqlScript,
 		);
-		if (mutationRejection) return mutationRejection;
-		return fetchLixRequest(
-			publicResolution.lixId,
-			request,
-			protocolPath,
-			env,
-			options,
+		if (mutationRejection) {
+			return withServerTimings(mutationRejection, serverTimings);
+		}
+		const response = await measureServerTiming(
+			serverTimings,
+			"lixray-server-roundtrip",
+			() =>
+				fetchLixRequest(
+					publicResolution.lixId,
+					request,
+					protocolPath,
+					env,
+					options,
+				),
 		);
+		return withServerTimings(response, serverTimings);
 	}
 
 	return (
 		options.fallback?.(request, env) ??
 		new Response("Not found\n", { status: 404 })
 	);
+}
+
+async function measureServerTiming<T>(
+	metrics: ServerTimingMetric[],
+	name: ServerTimingMetric["name"],
+	operation: () => Promise<T>,
+): Promise<T> {
+	const startedAt = performance.now();
+	try {
+		return await operation();
+	} finally {
+		metrics.push({ name, durationMs: performance.now() - startedAt });
+	}
+}
+
+function withServerTimings(
+	response: Response,
+	metrics: readonly ServerTimingMetric[],
+): Response {
+	if (metrics.length === 0) return response;
+	const headers = new Headers(response.headers);
+	const durationsByName = new Map<ServerTimingMetric["name"], number>();
+	for (const { name, durationMs } of metrics) {
+		durationsByName.set(name, (durationsByName.get(name) ?? 0) + durationMs);
+	}
+	const measured = [...durationsByName]
+		.map(([name, durationMs]) => `${name};dur=${durationMs.toFixed(3)}`)
+		.join(", ");
+	const existing = headers.get("Server-Timing");
+	headers.set(
+		"Server-Timing",
+		existing ? `${existing}, ${measured}` : measured,
+	);
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
+	});
 }
 
 async function handleProdDevAuth(
