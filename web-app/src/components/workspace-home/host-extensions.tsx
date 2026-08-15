@@ -11,7 +11,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
 import { DirectoryView, GettingStartedView } from "./directory-view";
-import { dirNameFromPath } from "./lix-data";
+import { canonicalDirectoryPath, dirNameFromPath } from "./lix-data";
 import { PeopleView, type WorkspaceTeamApi } from "./people-view";
 
 export const LIXRAY_HOME_EXTENSION_ID = "lixray_home";
@@ -24,14 +24,15 @@ export type AgentConnectionProbe = () => Promise<boolean>;
 
 /** Stable central-tab identity for the folder view at dirPath. */
 export const lixrayDirInstanceId = (dirPath: string): string =>
-	`${LIXRAY_DIR_EXTENSION_ID}:${dirPath}`;
+	`${LIXRAY_DIR_EXTENSION_ID}:${canonicalDirectoryPath(dirPath)}`;
 
 /** Central-tab state for a folder view; the tab label is the folder name. */
 export const lixrayDirViewState = (dirPath: string) => {
+	const path = canonicalDirectoryPath(dirPath);
 	return {
 		kind: EntryKind.Directory,
-		path: dirPath,
-		atelier: { label: dirNameFromPath(dirPath) || "Folder" },
+		path,
+		atelier: { label: dirNameFromPath(path) || "Folder" },
 	};
 };
 
@@ -196,7 +197,7 @@ const createLixrayDirExtension = (
 				)
 					return "/";
 				return typeof candidate.state.path === "string"
-					? candidate.state.path
+					? canonicalDirectoryPath(candidate.state.path)
 					: "/";
 			};
 			const { root, render } = mountDirectoryView({
