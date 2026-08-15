@@ -48,3 +48,11 @@ test("Railway Docker fallback uses pinned revisions instead of moving branches",
 	assert.match(dockerfile, /atelier\/archive\/\$\{ATELIER_REVISION\}\.tar\.gz/);
 	assert.doesNotMatch(dockerfile, /archive\/refs\/heads\//);
 });
+
+test("Railway rebuilds the web service when fallback revisions change", async () => {
+	const railwayConfig = JSON.parse(
+		await readFile(new URL("../railway.json", import.meta.url), "utf8"),
+	);
+
+	assert.ok(railwayConfig.build.watchPatterns.includes("vendor/revisions.env"));
+});
