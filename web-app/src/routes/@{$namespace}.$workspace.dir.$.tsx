@@ -29,9 +29,9 @@ function WorkspaceDirRoute() {
 	useEffect(() => {
 		if (!atelier || !dirSplat) return;
 		if (branch && activeBranchId !== branch) return;
-		// Keep the exact directory-surface path supplied by the URL. The route
-		// generator may include the trailing slash in the splat already.
-		const dirPath = dirSplat.endsWith("/") ? `/${dirSplat}` : `/${dirSplat}/`;
+		// View state follows lix_directory's canonical persisted path contract.
+		// lixrayDirViewState strips a trailing slash supplied by the URL.
+		const dirPath = `/${dirSplat}`;
 		void atelier.views
 			.open(LIXRAY_DIR_EXTENSION_ID, {
 				state: lixrayDirViewState(dirPath),
