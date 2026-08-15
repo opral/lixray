@@ -7,7 +7,7 @@ import {
 } from "@lix-js/sdk";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "~/components/auth-provider";
-import { useWorkspace } from "~/components/workspace-provider";
+import { useRepository } from "~/components/repository-provider";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 
 type WireValue =
@@ -77,7 +77,7 @@ export class LixrayApiError extends Error {
 
 export function useLixrayApi() {
 	const { getAccessToken } = useAuth();
-	const { activeWorkspace } = useWorkspace();
+	const { activeRepository } = useRepository();
 	const getTokenRef = useRef(getAccessToken);
 	const clientRef = useRef<{ key: string; promise: Promise<Lix> } | null>(null);
 	const queueRef = useRef(Promise.resolve());
@@ -86,9 +86,9 @@ export function useLixrayApi() {
 		getTokenRef.current = getAccessToken;
 	}, [getAccessToken]);
 
-	const workspaceId = activeWorkspace?.workspace.id ?? null;
-	const workspaceKey = activeWorkspace
-		? `${activeWorkspace.organization.handle}/${activeWorkspace.workspace.slug}`
+	const repositoryId = activeRepository?.repository.id ?? null;
+	const repositoryKey = activeRepository
+		? `${activeRepository.organization.handle}/${activeRepository.repository.slug}`
 		: null;
 
 	useEffect(() => {
@@ -97,21 +97,21 @@ export function useLixrayApi() {
 			clientRef.current = null;
 			if (client) void client.promise.then((lix) => lix.close());
 		};
-	}, [workspaceKey]);
+	}, [repositoryKey]);
 
 	const getLix = useCallback(async (): Promise<Lix> => {
-		if (!activeWorkspace || !workspaceKey) {
+		if (!activeRepository || !repositoryKey) {
 			throw new LixrayApiError(400, {
 				error: { message: "No active repository is available" },
 			});
 		}
-		if (clientRef.current?.key === workspaceKey) {
+		if (clientRef.current?.key === repositoryKey) {
 			return clientRef.current.promise;
 		}
 		const previous = clientRef.current;
 		if (previous) void previous.promise.then((lix) => lix.close());
 		const url = new URL(
-			`/@${encodeURIComponent(activeWorkspace.organization.handle)}/${encodeURIComponent(activeWorkspace.workspace.slug)}`,
+			`/@${encodeURIComponent(activeRepository.organization.handle)}/${encodeURIComponent(activeRepository.repository.slug)}`,
 			globalThis.location.origin,
 		);
 		const promise = openLix({
@@ -129,13 +129,13 @@ export function useLixrayApi() {
 				},
 			},
 		});
-		const client = { key: workspaceKey, promise };
+		const client = { key: repositoryKey, promise };
 		clientRef.current = client;
 		void promise.catch(() => {
 			if (clientRef.current === client) clientRef.current = null;
 		});
 		return promise;
-	}, [activeWorkspace, workspaceKey]);
+	}, [activeRepository, repositoryKey]);
 
 	const serialized = useCallback(
 		async <T>(operation: (lix: Lix) => Promise<T>): Promise<T> => {
@@ -153,7 +153,7 @@ export function useLixrayApi() {
 
 	return useMemo(
 		() => ({
-			workspaceId,
+			repositoryId,
 			activeBranchId: () => serialized((lix) => lix.activeBranchId()),
 			switchBranch: (branchId: string) =>
 				serialized((lix) => lix.switchBranch({ branchId })),
@@ -232,7 +232,7 @@ export function useLixrayApi() {
 					).map(toWireResult),
 				})),
 		}),
-		[serialized, workspaceId],
+		[serialized, repositoryId],
 	);
 }
 

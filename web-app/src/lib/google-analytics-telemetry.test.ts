@@ -27,7 +27,7 @@ void test("does not add the Google tag outside the landing page", async () => {
 		headers: { "content-type": "text/html" },
 	});
 	const response = await addGoogleAnalytics(
-		new Request("https://lixray.com/workspace"),
+		new Request("https://lixray.com/repository"),
 		original,
 		"G-TB0B5Q9D8Z",
 	);

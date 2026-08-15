@@ -10,29 +10,29 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
 import { Button } from "~/components/ui/button";
-import { WorkspaceAtelier } from "~/components/workspace-atelier";
-import { useWorkspace } from "~/components/workspace-provider";
+import { RepositoryAtelier } from "~/components/repository-atelier";
+import { useRepository } from "~/components/repository-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import {
-	acceptTeamInviteForWorkspace,
-	resolvePublicWorkspaceByRoute,
-	resolveWorkspaceShareToken,
+	acceptTeamInviteForRepository,
+	resolvePublicRepositoryByRoute,
+	resolveRepositoryShareToken,
 	TeamInviteAccessConfirmationError,
-	type PublicWorkspaceRoute,
-} from "~/lib/public-workspace";
+	type PublicRepositoryRoute,
+} from "~/lib/public-repository";
 import {
-	clearWorkspaceShareCapability,
-	isWorkspaceShareToken,
-	peekWorkspaceShareCapability,
-	peekWorkspaceShareJoinIntent,
-	requestWorkspaceShareJoin,
-	stageWorkspaceShareCapability,
-	takeWorkspaceShareCapability,
-	takeWorkspaceShareJoinError,
-	takeWorkspaceShareJoinIntent,
-	takeWorkspaceShareJoined,
-	type PendingWorkspaceShareCapability,
-} from "~/lib/workspace-share-capability";
+	clearRepositoryShareCapability,
+	isRepositoryShareToken,
+	peekRepositoryShareCapability,
+	peekRepositoryShareJoinIntent,
+	requestRepositoryShareJoin,
+	stageRepositoryShareCapability,
+	takeRepositoryShareCapability,
+	takeRepositoryShareJoinError,
+	takeRepositoryShareJoinIntent,
+	takeRepositoryShareJoined,
+	type PendingRepositoryShareCapability,
+} from "~/lib/repository-share-capability";
 import {
 	isTeamInviteToken,
 	peekTeamInvite,
@@ -40,24 +40,24 @@ import {
 	stagedTeamInviteForRoute,
 	takeTeamInvite,
 } from "~/lib/team-invite";
-import { canonicalPathFromLocation } from "~/lib/workspace-share-url";
-import { findWorkspaceByRoute, normalizeDirPath } from "~/lib/workspace-url";
+import { canonicalPathFromLocation } from "~/lib/repository-share-url";
+import { findRepositoryByRoute, normalizeDirPath } from "~/lib/repository-url";
 
-interface WorkspaceSearch {
+interface RepositorySearch {
 	dir?: string;
 	branch?: string;
 	invite?: string;
 }
 
-export const Route = createFileRoute("/@{$namespace}/$workspace")({
+export const Route = createFileRoute("/@{$namespace}/$repository")({
 	ssr: false,
-	validateSearch: (search: Record<string, unknown>): WorkspaceSearch => {
+	validateSearch: (search: Record<string, unknown>): RepositorySearch => {
 		const dir = normalizeDirPath(search.dir);
 		const branch =
 			typeof search.branch === "string" && search.branch.trim().length > 0
 				? search.branch.trim()
 				: undefined;
-		const invite = isWorkspaceShareToken(search.invite)
+		const invite = isRepositoryShareToken(search.invite)
 			? search.invite
 			: undefined;
 		return {
@@ -66,11 +66,11 @@ export const Route = createFileRoute("/@{$namespace}/$workspace")({
 			...(invite ? { invite } : {}),
 		};
 	},
-	component: WorkspaceRoutePage,
+	component: RepositoryRoutePage,
 });
 
-function WorkspaceRoutePage() {
-	const { namespace, workspace: workspaceSlug } = Route.useParams();
+function RepositoryRoutePage() {
+	const { namespace, repository: repositorySlug } = Route.useParams();
 	const { branch, invite } = Route.useSearch();
 	const {
 		client: authClient,
@@ -78,47 +78,47 @@ function WorkspaceRoutePage() {
 		signInWithGoogle,
 		user: authUser,
 	} = useAuth();
-	const workspaceState = useWorkspace();
+	const repositoryState = useRepository();
 	const navigate = useNavigate();
 	const demoResolved = useMemo(
 		() =>
-			findWorkspaceByRoute(
-				workspaceState.organizations,
+			findRepositoryByRoute(
+				repositoryState.organizations,
 				namespace,
-				workspaceSlug,
+				repositorySlug,
 			),
-		[namespace, workspaceSlug, workspaceState.organizations],
+		[namespace, repositorySlug, repositoryState.organizations],
 	);
 	const demoCanEdit = isDemoModeEnabled && demoResolved !== null;
 	const [resolved, setResolved] = useState<
-		PublicWorkspaceRoute | null | undefined
+		PublicRepositoryRoute | null | undefined
 	>(undefined);
 	const [resolveError, setResolveError] = useState<string | null>(null);
 	const [shareCapability, setShareCapability] =
-		useState<PendingWorkspaceShareCapability | null>(null);
+		useState<PendingRepositoryShareCapability | null>(null);
 	const [joining, setJoining] = useState(false);
 	const [accessRevision, setAccessRevision] = useState(0);
 	const [settledInviteKey, setSettledInviteKey] = useState<string | null>(null);
 	const [stagedTeamInvite, setStagedTeamInvite] = useState(peekTeamInvite);
 	const [failedInviteKey, setFailedInviteKey] = useState<string | null>(null);
 	const automaticJoinAttempt = useRef<string | null>(null);
-	const resolvedWorkspaceId = resolved?.workspaceId;
+	const resolvedRepositoryId = resolved?.repositoryId;
 	const urlTeamInvite = invite && isTeamInviteToken(invite) ? invite : null;
 	const pendingTeamInvite =
 		urlTeamInvite ??
-		stagedTeamInviteForRoute(stagedTeamInvite, namespace, workspaceSlug);
+		stagedTeamInviteForRoute(stagedTeamInvite, namespace, repositorySlug);
 	const inviteResolutionKey =
-		resolvedWorkspaceId && pendingTeamInvite
-			? `${resolvedWorkspaceId}:${pendingTeamInvite}`
-			: resolvedWorkspaceId && invite
-				? `${resolvedWorkspaceId}:${invite}`
+		resolvedRepositoryId && pendingTeamInvite
+			? `${resolvedRepositoryId}:${pendingTeamInvite}`
+			: resolvedRepositoryId && invite
+				? `${resolvedRepositoryId}:${invite}`
 				: null;
 	const shouldWaitForInviteResolution =
 		!isDemoModeEnabled &&
 		inviteResolutionKey !== null &&
 		settledInviteKey !== inviteResolutionKey;
 
-	// Public route resolution is intentionally independent of the workspace
+	// Public route resolution is intentionally independent of the repository
 	// directory. A reader may have no organization membership at all.
 	useEffect(() => {
 		let disposed = false;
@@ -133,9 +133,9 @@ function WorkspaceRoutePage() {
 							organizationId: demoResolved.organization.id,
 							organizationName: demoResolved.organization.name,
 							organizationHandle: demoResolved.organization.handle,
-							workspaceId: demoResolved.workspace.id,
-							workspaceName: demoResolved.workspace.name,
-							workspaceSlug: demoResolved.workspace.slug,
+							repositoryId: demoResolved.repository.id,
+							repositoryName: demoResolved.repository.name,
+							repositorySlug: demoResolved.repository.slug,
 							canEdit: demoCanEdit,
 						}
 					: null,
@@ -144,7 +144,7 @@ function WorkspaceRoutePage() {
 		}
 		if (!authIsLoaded || !authClient) return;
 
-		void resolvePublicWorkspaceByRoute(authClient, namespace, workspaceSlug)
+		void resolvePublicRepositoryByRoute(authClient, namespace, repositorySlug)
 			.then((nextResolved) => {
 				if (!disposed) setResolved(nextResolved);
 			})
@@ -169,14 +169,14 @@ function WorkspaceRoutePage() {
 		demoCanEdit,
 		demoResolved,
 		namespace,
-		workspaceSlug,
+		repositorySlug,
 	]);
 
 	const cleanInviteFromAddressBar = useCallback(() => {
 		void navigate({
 			to: ".",
 			search: (previous) => {
-				const canonicalSearch = { ...(previous as WorkspaceSearch) };
+				const canonicalSearch = { ...(previous as RepositorySearch) };
 				delete canonicalSearch.invite;
 				return canonicalSearch;
 			},
@@ -186,21 +186,21 @@ function WorkspaceRoutePage() {
 		});
 	}, [navigate]);
 
-	// A team invite (tm_…) joins the workspace's namespace. Keep the Atelier
+	// A team invite (tm_…) joins the repository's namespace. Keep the Atelier
 	// closed until the invite has been accepted and a fresh route lookup confirms
 	// edit access. Otherwise the public route can mount a read-only Lix while the
 	// membership update is still in flight.
 	useEffect(() => {
 		if (
 			isDemoModeEnabled ||
-			!resolvedWorkspaceId ||
+			!resolvedRepositoryId ||
 			!authClient ||
 			!pendingTeamInvite ||
 			!authIsLoaded
 		) {
 			return;
 		}
-		const inviteKey = `${resolvedWorkspaceId}:${pendingTeamInvite}`;
+		const inviteKey = `${resolvedRepositoryId}:${pendingTeamInvite}`;
 		if (settledInviteKey === inviteKey || failedInviteKey === inviteKey) return;
 		let disposed = false;
 		const settle = (clearPending: boolean) => {
@@ -216,7 +216,7 @@ function WorkspaceRoutePage() {
 			const staged = {
 				token: pendingTeamInvite,
 				namespace,
-				workspaceSlug,
+				repositorySlug,
 			} as const;
 			stageTeamInvite(staged);
 			setStagedTeamInvite(staged);
@@ -228,22 +228,22 @@ function WorkspaceRoutePage() {
 		}
 		void (async () => {
 			try {
-				const joined = await acceptTeamInviteForWorkspace(
+				const joined = await acceptTeamInviteForRepository(
 					authClient,
 					pendingTeamInvite,
 					namespace,
-					workspaceSlug,
-					resolvedWorkspaceId,
+					repositorySlug,
+					resolvedRepositoryId,
 				);
 				if (disposed) return;
-				setResolved(joined.workspace);
+				setResolved(joined.repository);
 				toast.success(
 					joined.joinedNamespaceName
 						? `You joined ${joined.joinedNamespaceName} — every repository, edit access.`
 						: "You joined the team.",
 				);
 				settle(true);
-				void workspaceState.refresh({ workspaceId: resolvedWorkspaceId });
+				void repositoryState.refresh({ repositoryId: resolvedRepositoryId });
 			} catch (caught) {
 				if (!disposed) {
 					if (caught instanceof TeamInviteAccessConfirmationError) {
@@ -267,11 +267,11 @@ function WorkspaceRoutePage() {
 		failedInviteKey,
 		namespace,
 		pendingTeamInvite,
-		resolvedWorkspaceId,
+		resolvedRepositoryId,
 		settledInviteKey,
 		urlTeamInvite,
-		workspaceSlug,
-		workspaceState,
+		repositorySlug,
+		repositoryState,
 	]);
 
 	// A capability is resolved once, held only for this browser session, then
@@ -280,51 +280,51 @@ function WorkspaceRoutePage() {
 	useEffect(() => {
 		if (
 			isDemoModeEnabled ||
-			!resolvedWorkspaceId ||
+			!resolvedRepositoryId ||
 			!authClient ||
 			!invite ||
 			isTeamInviteToken(invite)
 		)
 			return;
 		let disposed = false;
-		void resolveWorkspaceShareToken(authClient, invite)
+		void resolveRepositoryShareToken(authClient, invite)
 			.then((candidate) => {
 				if (disposed) return;
 				if (
 					candidate &&
 					candidate.grantsEdit &&
-					candidate.workspaceId === resolvedWorkspaceId
+					candidate.repositoryId === resolvedRepositoryId
 				) {
 					const capability = {
 						token: invite,
-						workspaceId: candidate.workspaceId,
+						repositoryId: candidate.repositoryId,
 						sharerName: candidate.sharedByName,
 					};
-					stageWorkspaceShareCapability(capability);
+					stageRepositoryShareCapability(capability);
 					// Render token-derived UI only after the canonical URL has been
 					// reached and the session-held capability is checked again.
 					setShareCapability(null);
 				} else {
-					clearWorkspaceShareCapability();
+					clearRepositoryShareCapability();
 					setShareCapability(null);
 				}
 			})
 			.catch(() => {
 				if (disposed) return;
-				clearWorkspaceShareCapability();
+				clearRepositoryShareCapability();
 				setShareCapability(null);
 				toast.error("Unable to validate this share link.");
 			})
 			.finally(() => {
 				if (!disposed) {
-					setSettledInviteKey(`${resolvedWorkspaceId}:${invite}`);
+					setSettledInviteKey(`${resolvedRepositoryId}:${invite}`);
 					cleanInviteFromAddressBar();
 				}
 			});
 		return () => {
 			disposed = true;
 		};
-	}, [authClient, cleanInviteFromAddressBar, invite, resolvedWorkspaceId]);
+	}, [authClient, cleanInviteFromAddressBar, invite, resolvedRepositoryId]);
 
 	// Validation deliberately drops malformed tokens from router search. Clean a
 	// raw malformed `invite` parameter too, so it cannot survive in history or
@@ -334,8 +334,8 @@ function WorkspaceRoutePage() {
 			return;
 		}
 		const rawInvite = new URLSearchParams(window.location.search).get("invite");
-		if (!rawInvite || isWorkspaceShareToken(rawInvite)) return;
-		clearWorkspaceShareCapability();
+		if (!rawInvite || isRepositoryShareToken(rawInvite)) return;
+		clearRepositoryShareCapability();
 		setShareCapability(null);
 		cleanInviteFromAddressBar();
 	}, [cleanInviteFromAddressBar, invite, resolved]);
@@ -345,47 +345,47 @@ function WorkspaceRoutePage() {
 	useEffect(() => {
 		if (!resolved || invite) return;
 		if (isDemoModeEnabled) {
-			clearWorkspaceShareCapability();
+			clearRepositoryShareCapability();
 			setShareCapability(null);
 			return;
 		}
 		if (!authClient) return;
-		const staged = peekWorkspaceShareCapability();
+		const staged = peekRepositoryShareCapability();
 		if (
 			!staged ||
-			staged.workspaceId !== resolved.workspaceId ||
+			staged.repositoryId !== resolved.repositoryId ||
 			resolved.canEdit
 		) {
-			if (resolved.canEdit) clearWorkspaceShareCapability();
+			if (resolved.canEdit) clearRepositoryShareCapability();
 			setShareCapability(null);
 			return;
 		}
 
 		let disposed = false;
 		setShareCapability(null);
-		void resolveWorkspaceShareToken(authClient, staged.token)
+		void resolveRepositoryShareToken(authClient, staged.token)
 			.then((candidate) => {
 				if (disposed) return;
 				if (
 					!candidate ||
 					!candidate.grantsEdit ||
-					candidate.workspaceId !== resolved.workspaceId
+					candidate.repositoryId !== resolved.repositoryId
 				) {
-					clearWorkspaceShareCapability();
+					clearRepositoryShareCapability();
 					setShareCapability(null);
 					return;
 				}
 				const capability = {
 					token: staged.token,
-					workspaceId: candidate.workspaceId,
+					repositoryId: candidate.repositoryId,
 					sharerName: candidate.sharedByName,
 				};
-				stageWorkspaceShareCapability(capability);
+				stageRepositoryShareCapability(capability);
 				setShareCapability(capability);
 			})
 			.catch(() => {
 				if (disposed) return;
-				clearWorkspaceShareCapability();
+				clearRepositoryShareCapability();
 				setShareCapability(null);
 			});
 
@@ -397,20 +397,20 @@ function WorkspaceRoutePage() {
 	useEffect(() => {
 		if (
 			!resolved?.canEdit ||
-			!workspaceState.isLoaded ||
-			workspaceState.activeWorkspace?.workspace.id === resolved.workspaceId
+			!repositoryState.isLoaded ||
+			repositoryState.activeRepository?.repository.id === resolved.repositoryId
 		) {
 			return;
 		}
-		workspaceState.selectWorkspace(resolved.workspaceId);
-	}, [resolved, workspaceState]);
+		repositoryState.selectRepository(resolved.repositoryId);
+	}, [resolved, repositoryState]);
 
 	const joinToEdit = useCallback(async () => {
 		if (!resolved || !shareCapability) {
 			throw new Error("This share link is no longer available.");
 		}
 		if (!authUser) {
-			requestWorkspaceShareJoin(resolved.workspaceId);
+			requestRepositoryShareJoin(resolved.repositoryId);
 			await signInWithGoogle(canonicalPathFromLocation(window.location));
 			return;
 		}
@@ -422,16 +422,18 @@ function WorkspaceRoutePage() {
 				p_token: shareCapability.token,
 			});
 			if (error) throw error;
-			takeWorkspaceShareCapability();
+			takeRepositoryShareCapability();
 			setShareCapability(null);
 			setResolved((current) =>
-				current && current.workspaceId === resolved.workspaceId
+				current && current.repositoryId === resolved.repositoryId
 					? { ...current, canEdit: true }
 					: current,
 			);
 			setAccessRevision((current) => current + 1);
-			await workspaceState.refresh({ workspaceId: resolved.workspaceId });
-			toast.success(`You joined ${resolved.workspaceName} — you can edit now.`);
+			await repositoryState.refresh({ repositoryId: resolved.repositoryId });
+			toast.success(
+				`You joined ${resolved.repositoryName} — you can edit now.`,
+			);
 		} finally {
 			setJoining(false);
 		}
@@ -441,7 +443,7 @@ function WorkspaceRoutePage() {
 		resolved,
 		shareCapability,
 		signInWithGoogle,
-		workspaceState,
+		repositoryState,
 	]);
 
 	// Local development sign-in does not pass through /auth/callback. The join
@@ -451,13 +453,13 @@ function WorkspaceRoutePage() {
 			!authUser ||
 			!shareCapability ||
 			resolved?.canEdit ||
-			peekWorkspaceShareJoinIntent() !== shareCapability.workspaceId
+			peekRepositoryShareJoinIntent() !== shareCapability.repositoryId
 		) {
 			return;
 		}
 		if (automaticJoinAttempt.current === shareCapability.token) return;
 		automaticJoinAttempt.current = shareCapability.token;
-		takeWorkspaceShareJoinIntent();
+		takeRepositoryShareJoinIntent();
 		void joinToEdit().catch((caught: unknown) => {
 			toast.error(
 				caught instanceof Error
@@ -469,56 +471,58 @@ function WorkspaceRoutePage() {
 
 	useEffect(() => {
 		if (!resolved?.canEdit) return;
-		if (takeWorkspaceShareJoined(resolved.workspaceId)) {
-			toast.success(`You joined ${resolved.workspaceName} — you can edit now.`);
+		if (takeRepositoryShareJoined(resolved.repositoryId)) {
+			toast.success(
+				`You joined ${resolved.repositoryName} — you can edit now.`,
+			);
 		}
-	}, [resolved?.canEdit, resolved?.workspaceId, resolved?.workspaceName]);
+	}, [resolved?.canEdit, resolved?.repositoryId, resolved?.repositoryName]);
 
 	useEffect(() => {
-		const joinError = takeWorkspaceShareJoinError();
+		const joinError = takeRepositoryShareJoinError();
 		if (joinError) toast.error(joinError);
 	}, []);
 
 	if (resolved === undefined) {
-		return <WorkspaceRouteStatus>Opening repository…</WorkspaceRouteStatus>;
+		return <RepositoryRouteStatus>Opening repository…</RepositoryRouteStatus>;
 	}
 	if (shouldWaitForInviteResolution) {
 		if (failedInviteKey === inviteResolutionKey) {
 			return (
-				<WorkspaceRouteStatus>
+				<RepositoryRouteStatus>
 					<strong>You joined, but edit access could not be refreshed.</strong>
 					<Button variant="outline" onClick={() => setFailedInviteKey(null)}>
 						Retry
 					</Button>
-				</WorkspaceRouteStatus>
+				</RepositoryRouteStatus>
 			);
 		}
 		return (
-			<WorkspaceRouteStatus>Opening shared repository…</WorkspaceRouteStatus>
+			<RepositoryRouteStatus>Opening shared repository…</RepositoryRouteStatus>
 		);
 	}
 	if (resolveError) {
-		return <WorkspaceRouteStatus>{resolveError}</WorkspaceRouteStatus>;
+		return <RepositoryRouteStatus>{resolveError}</RepositoryRouteStatus>;
 	}
 	if (!resolved) {
 		return (
-			<WorkspaceRouteStatus>
+			<RepositoryRouteStatus>
 				<strong>Repository not found</strong>
 				<Button asChild variant="outline">
 					<Link to="/home">Back to repositories</Link>
 				</Button>
-			</WorkspaceRouteStatus>
+			</RepositoryRouteStatus>
 		);
 	}
 
 	return (
-		<WorkspaceAtelier
-			key={`${resolved.workspaceId}:${resolved.canEdit ? "edit" : "read"}`}
-			workspaceId={resolved.workspaceId}
+		<RepositoryAtelier
+			key={`${resolved.repositoryId}:${resolved.canEdit ? "edit" : "read"}`}
+			repositoryId={resolved.repositoryId}
 			namespaceId={resolved.organizationId}
 			namespace={resolved.organizationHandle}
-			workspaceSlug={resolved.workspaceSlug}
-			workspaceName={resolved.workspaceName}
+			repositorySlug={resolved.repositorySlug}
+			repositoryName={resolved.repositoryName}
 			branchId={branch}
 			canEdit={resolved.canEdit}
 			shareAccess={
@@ -530,7 +534,7 @@ function WorkspaceRoutePage() {
 	);
 }
 
-function WorkspaceRouteStatus({ children }: { children: ReactNode }) {
+function RepositoryRouteStatus({ children }: { children: ReactNode }) {
 	return (
 		<main className="grid min-h-[70vh] place-content-center justify-items-center gap-3.5 p-8 text-center text-text-secondary">
 			{children}

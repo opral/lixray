@@ -12,14 +12,14 @@ import { EntryKind } from "../../lib/entry-kind.ts";
 import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
 import { DirectoryView, GettingStartedView } from "./directory-view";
 import { canonicalDirectoryPath, dirNameFromPath } from "./lix-data";
-import { PeopleView, type WorkspaceTeamApi } from "./people-view";
+import { PeopleView, type RepositoryTeamApi } from "./people-view";
 
 export const LIXRAY_HOME_EXTENSION_ID = "lixray_home";
 export const LIXRAY_DIR_EXTENSION_ID = "lixray_dir";
 export const LIXRAY_GETTING_STARTED_EXTENSION_ID = "lixray_getting_started";
 export const LIXRAY_PEOPLE_EXTENSION_ID = "lixray_people";
 
-export type LixWorkspaceConnection = Omit<LixConnectionPromptInput, "origin">;
+export type LixRepositoryConnection = Omit<LixConnectionPromptInput, "origin">;
 export type AgentConnectionProbe = () => Promise<boolean>;
 
 /** Stable central-tab identity for the folder view at dirPath. */
@@ -54,7 +54,7 @@ function openFileFromView(
 				: {}),
 		})
 		.catch((error: unknown) => {
-			console.error("workspace-home: unable to open file", error);
+			console.error("repository-home: unable to open file", error);
 		});
 }
 
@@ -70,7 +70,7 @@ function openDirFromView(
 			...(options.newTab ? { newTab: true } : {}),
 		})
 		.catch((error: unknown) => {
-			console.error("workspace-home: unable to open folder", error);
+			console.error("repository-home: unable to open folder", error);
 		});
 }
 
@@ -78,7 +78,7 @@ function openPeopleFromView(atelier: AtelierExtensionRuntime) {
 	void atelier.views
 		.open(LIXRAY_PEOPLE_EXTENSION_ID)
 		.catch((error: unknown) => {
-			console.error("workspace-home: unable to open the People tab", error);
+			console.error("repository-home: unable to open the People tab", error);
 		});
 }
 
@@ -97,8 +97,8 @@ function mountDirectoryView({
 	view: AtelierExtensionView;
 	dirPath: (candidate: AtelierExtensionView) => string;
 	isHome: boolean;
-	connection: LixWorkspaceConnection;
-	teamApi: WorkspaceTeamApi | null;
+	connection: LixRepositoryConnection;
+	teamApi: RepositoryTeamApi | null;
 	hasAgentConnected: AgentConnectionProbe | null;
 }): { root: Root; render: (candidate: AtelierExtensionView) => void } {
 	const root = createRoot(element);
@@ -129,13 +129,13 @@ function mountDirectoryView({
 }
 
 /**
- * The workspace home — the pinned, never-closing first tab of the central
+ * The repository home — the pinned, never-closing first tab of the central
  * panel (12b/12f in the home comp).
  */
 const createLixrayHomeExtension = (
-	connection: LixWorkspaceConnection,
+	connection: LixRepositoryConnection,
 	hasAgentConnected: AgentConnectionProbe,
-	teamApi: WorkspaceTeamApi | null,
+	teamApi: RepositoryTeamApi | null,
 ): AtelierExtensionRegistration => ({
 	manifest: {
 		apiVersion: 1,
@@ -173,7 +173,7 @@ const createLixrayHomeExtension = (
  * the connect row, navigating in place by the browser-like tab rules.
  */
 const createLixrayDirExtension = (
-	connection: LixWorkspaceConnection,
+	connection: LixRepositoryConnection,
 ): AtelierExtensionRegistration => ({
 	manifest: {
 		apiVersion: 1,
@@ -222,11 +222,11 @@ const createLixrayDirExtension = (
 
 /**
  * The Getting started tab (12f): a regular closable content tab the host
- * opens as the default active tab while the workspace is empty. Home stays
+ * opens as the default active tab while the repository is empty. Home stays
  * the pinned first tab and never changes its presentation.
  */
 const createLixrayGettingStartedExtension = (
-	connection: LixWorkspaceConnection,
+	connection: LixRepositoryConnection,
 	hasAgentConnected: AgentConnectionProbe,
 ): AtelierExtensionRegistration => ({
 	manifest: {
@@ -269,7 +269,7 @@ const createLixrayGettingStartedExtension = (
  * People behaves like any file rather than a modal or standalone route shell.
  */
 const createLixrayPeopleExtension = (
-	teamApi: WorkspaceTeamApi | null,
+	teamApi: RepositoryTeamApi | null,
 ): AtelierExtensionRegistration => ({
 	manifest: {
 		apiVersion: 1,
@@ -297,10 +297,10 @@ const createLixrayPeopleExtension = (
 	},
 });
 
-export const createLixrayWorkspaceExtensions = (
-	connection: LixWorkspaceConnection,
+export const createLixrayRepositoryExtensions = (
+	connection: LixRepositoryConnection,
 	hasAgentConnected: AgentConnectionProbe,
-	teamApi: WorkspaceTeamApi | null,
+	teamApi: RepositoryTeamApi | null,
 ): readonly AtelierExtensionRegistration[] => [
 	createLixrayHomeExtension(connection, hasAgentConnected, teamApi),
 	createLixrayDirExtension(connection),
@@ -309,13 +309,13 @@ export const createLixrayWorkspaceExtensions = (
 ];
 
 /**
- * Opening shell state for an empty workspace: the Getting started tab open
+ * Opening shell state for an empty repository: the Getting started tab open
  * and active next to the pinned Home (12f), merged into whatever tab state
  * is persisted. Applied through the session state store so the first paint
  * already shows it — an imperative views.open() here races the shell's
  * mount/restore churn.
  */
-export const emptyWorkspaceOpeningUiState = (
+export const emptyRepositoryOpeningUiState = (
 	persisted: AtelierSessionUiState | null,
 ): AtelierSessionUiState => {
 	const base =

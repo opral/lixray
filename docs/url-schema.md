@@ -4,12 +4,12 @@ Status: **design reference** · Updated 2026-07-22
 
 Implementation note: the current hard-cut schema uses one `namespaces` model for
 personal and organization ownership, one global `handles` pool, and internal
-`lixes` records rendered as “workspaces” in the UI. Handle and slug redirects,
+`lixes` records rendered as “repositories” in the UI. Handle and slug redirects,
 tombstones, renames, and transfer semantics described later in this document are
 future design material and are explicitly out of scope for the current release.
 
 Scope: the public URL grammar of lixray.com, the identity model behind it (handles, namespaces,
-workspaces), and the Postgres schema that implements it. v1 ships latest-only URLs, no raw-bytes
+repositories), and the Postgres schema that implements it. v1 ships latest-only URLs, no raw-bytes
 serving, one shared handle pool for users and orgs, and a minimal entity set — but the grammar
 reserves every extension point now, because URL grammar is a public API with unenumerable
 consumers (regexes, agent memories, oEmbed registries) and cannot be changed later without a
@@ -22,10 +22,10 @@ Figma-class ecosystem migration.
 ```
 url          = "https://lixray.com" path [ query ] [ fragment ]
 path         = "/@" handle                          ; namespace profile
-             | "/@" handle "/" slug [pin] sub       ; workspace + sub-resources
+             | "/@" handle "/" slug [pin] sub       ; repository + sub-resources
              | "/" product-route                    ; app-owned, unlimited, forever
 
-sub          = ""                                   ; workspace overview
+sub          = ""                                   ; repository overview
              | "/file/" file-path                   ; file viewer         (v1)
              | "/dir" [ "/" file-path ]             ; directory listing   (v1; bare = root)
              | "/raw/"  file-path                   ; raw bytes           (RESERVED)
@@ -97,7 +97,7 @@ shipping it.
 closed and documented; `/file/` on a directory MUST 301 to `/dir/` and vice versa (GitHub does
 the equivalent blob/tree correction in both directions, verified).
 
-**Why.** (a) Bare `/{slug}/{path}` would let user file trees swallow the sub-workspace URL space,
+**Why.** (a) Bare `/{slug}/{path}` would let user file trees swallow the sub-repository URL space,
 forcing reserved words _inside user trees_ (GitLab's `PROJECT_WILDCARD_ROUTES` disaster — users
 owned `tree`, `raw`, `badges` before GitLab reserved them). (b) Two verbs make the URL
 self-describing: the router picks the renderer before any storage lookup (relevant to SlateDB
@@ -116,7 +116,7 @@ permanent typo tax — stays reserved).
 ### D4 — Version pin: `{slug}@{changeset-id}`, reserved now, shipped later
 
 **Decision.** v1 URLs mean "current state". The future immutable permalink attaches the pin to
-the workspace segment: `/@{ns}/{ws}@{cs}/file/{path}`. `@` is outside slug grammar, so parsing is
+the repository segment: `/@{ns}/{ws}@{cs}/file/{path}`. `@` is outside slug grammar, so parsing is
 unambiguous by string inspection alone, forever. Unpinned = latest.
 
 **Why.** (a) Retrofit safety: a later positional ref slot (`/file/{ref}/{path}`) is fatally
@@ -166,11 +166,11 @@ GitHub OG output is byte-identical for any `#L` anchor), so if a selection must 
 card, use `?line=10-20` — Slack caches per exact URL, so variants get distinct unfurls. Additive;
 nothing to reserve beyond convention.
 
-### D6a — `?invite=` is the reserved workspace edit-capability parameter
+### D6a — `?invite=` is the reserved repository edit-capability parameter
 
 **Decision.** `invite` is reserved in the published query grammar. A Share action mints one
 opaque, reusable token and appends it to the otherwise byte-identical canonical URL:
-`/@{ns}/{ws}/file/{path}?invite={token}`. The token maps only to its sharer, this workspace, and
+`/@{ns}/{ws}/file/{path}?invite={token}`. The token maps only to its sharer, this repository, and
 an edit grant. It never identifies a person, grants organization membership, or changes the
 resource identity in the path.
 
@@ -202,14 +202,14 @@ it does not make the URL unresolvable.
   disagreement is an attack class behind a CDN).
 - Filenames NFC-normalized at write time; NFC/NFD and case-only sibling files rejected at
   creation (beats git's macOS case-collision checkouts). Windows-illegal names (`CON`, trailing
-  dot/space, …) warned or rejected — they sync-poison workspaces.
+  dot/space, …) warned or rejected — they sync-poison repositories.
 - Encoded path length capped ~2,048 bytes.
 - ASCII-only handles/slugs (homoglyph squatting is an attack class amplified by agents that
   dereference URLs without judgment); Unicode lives in display names, not identifiers.
 
 ### D8 — Identity lifecycle: names are aliases, IDs are truth
 
-- Every namespace and workspace has an immutable ID (UUIDv7/ULID) minted at creation. Storage,
+- Every namespace and repository has an immutable ID (UUIDv7/ULID) minted at creation. Storage,
   permissions, stars, mentions, containers, and agent state key on IDs, never on names.
 - Rename ⇒ old name becomes a permanent 301 (`redirect` state) on **every** surface (pages, file
   URLs, future raw/sync/API). GitHub's partial coverage (profiles/gists don't redirect) is a
@@ -232,7 +232,7 @@ it does not make the URL unresolvable.
 ### D9 — Namespaces MUST be taggable
 
 **Decision.** `@{handle}` is simultaneously the URL segment and the mention token. Typing
-`@samuel` in any text surface (change reviews, comments, agent threads, workspace docs) MUST
+`@samuel` in any text surface (change reviews, comments, agent threads, repository docs) MUST
 resolve against the same handle registry that routes URLs, and MUST link to `lixray.com/@samuel`
 by pure string concatenation — no mapping table, no lookup divergence.
 
@@ -258,7 +258,7 @@ this" (activity feed actor) into one registry, which agents can also resolve mec
 
 ### D10 — Machine consumption (reserved, cheap, differentiating)
 
-- `/@{ns}/{ws}/llms.txt`: auto-generated per-workspace index (spec-legal at subpaths; Cloudflare
+- `/@{ns}/{ws}/llms.txt`: auto-generated per-repository index (spec-legal at subpaths; Cloudflare
   ships per-product llms.txt). Root `lixray.com/llms.txt` documents the grammar itself.
 - Publish the grammar as RFC 6570 templates (`https://lixray.com/@{ns}/{ws}/file/{+path}`) — a
   documented parsing contract (Figma's openapi.yaml precedent). Anonymous, SSR'd LixRay URLs are
@@ -341,8 +341,8 @@ create unique index handles_squat on handles (squat_key);   -- npm moniker rule
 create unique index handles_one_active_per_ns on handles (namespace_id)
   where state = 'active';
 
--- workspaces + their slug pool (same registry pattern, scoped per namespace) -
-create table workspaces (
+-- repositories + their slug pool (same registry pattern, scoped per namespace) -
+create table repositories (
   id           uuid primary key default gen_random_uuid(),
   namespace_id uuid not null references namespaces(id),
   display_name text,
@@ -350,21 +350,21 @@ create table workspaces (
   created_at   timestamptz not null default now()
 );
 
-create table workspace_slugs (
+create table repository_slugs (
   namespace_id uuid not null references namespaces(id) on delete cascade,
   slug         text not null
                check (slug ~ '^[a-z0-9](?:-?[a-z0-9]){0,99}$'
                       and char_length(slug) <= 100),
   squat_key    text generated always as (replace(slug, '-', '')) stored,
   state        text not null check (state in ('active','redirect','tombstone')),
-  workspace_id uuid references workspaces(id),
+  repository_id uuid references repositories(id),
   created_at   timestamptz not null default now(),
   deleted_at   timestamptz,
   primary key (namespace_id, slug),
-  check (state not in ('active','redirect') or workspace_id is not null)
+  check (state not in ('active','redirect') or repository_id is not null)
 );
-create unique index ws_slugs_squat on workspace_slugs (namespace_id, squat_key);
-create unique index ws_one_active_slug on workspace_slugs (workspace_id)
+create unique index ws_slugs_squat on repository_slugs (namespace_id, squat_key);
+create unique index ws_one_active_slug on repository_slugs (repository_id)
   where state = 'active';
 
 -- mentions store the immutable id, never the handle string -------------------
@@ -376,9 +376,9 @@ create unique index ws_one_active_slug on workspace_slugs (workspace_id)
 - _Routing_ `/@{h}/{s}`: lower-case `h`, look up `handles` — `active` ⇒ serve; `redirect` ⇒ 301
   to the namespace's active handle (partial unique index guarantees at most one; see deletion
   rule below); `tombstone` ⇒ 410; `reserved`/missing ⇒ 404. Namespace profiles are public, so
-  this is safe at the handle tier. **Workspace slugs resolve visibility-first** (invariant 9):
-  resolve `s` to its workspace, apply the visibility/RLS check, and only then emit 301
-  (redirect) or 410 (tombstone) — an anonymous request touching a _private_ workspace's current,
+  this is safe at the handle tier. **Repository slugs resolve visibility-first** (invariant 9):
+  resolve `s` to its repository, apply the visibility/RLS check, and only then emit 301
+  (redirect) or 410 (tombstone) — an anonymous request touching a _private_ repository's current,
   former, or deleted slug gets the uniform 404. Emitting 301/410 before the visibility check
   leaks existence, rename targets, and deletion dates to anonymous crawlers whose caches you
   cannot purge.
@@ -400,8 +400,8 @@ WHERE handle=$old AND state='active' AND namespace_id=$ns` (rowcount MUST be 1 �
   `namespace_id`).
 - _Delete_ (one transaction): the active handle → `tombstone` (set `deleted_at`) **and all of the
   entity's `redirect` rows → `tombstone`** — otherwise they would dangle, pointing at a namespace
-  with no active handle to 301 to. Same rule for `workspace_slugs` on workspace deletion.
-- _Transfer_: update `namespaces.owner_*` — every URL, mention, and workspace survives verbatim.
+  with no active handle to 301 to. Same rule for `repository_slugs` on repository deletion.
+- _Transfer_: update `namespaces.owner_*` — every URL, mention, and repository survives verbatim.
 - Intentional property: tombstoned rows keep their `squat_key` claimed, so punctuation variants
   of retired names stay blocked (repo-jacking hygiene); only the exact string can return, via the
   guarded transition. Known edge case: `handles_squat` also blocks an owner renaming to a
@@ -411,7 +411,7 @@ WHERE handle=$old AND state='active' AND namespace_id=$ns` (rowcount MUST be 1 �
 
 **RLS sketch** (illustrative, not exhaustive). On Supabase, **every** table MUST have RLS
 enabled: tables in the exposed schema default to RLS-off, and the anon key can otherwise
-enumerate `workspace_slugs` (every private workspace's name), `memberships` (org rosters),
+enumerate `repository_slugs` (every private repository's name), `memberships` (org rosters),
 `namespaces`, and `organizations` straight through the auto-generated PostgREST Data API —
 gutting invariant 9 regardless of routing behavior. Server-side routing reads (which must see
 redirect/tombstone rows the anon role cannot) go through `security definer` functions or the
@@ -424,16 +424,16 @@ alter table organizations  enable row level security;
 alter table memberships    enable row level security;
 alter table namespaces     enable row level security;
 alter table handles        enable row level security;
-alter table workspaces     enable row level security;
-alter table workspace_slugs enable row level security;
+alter table repositories     enable row level security;
+alter table repository_slugs enable row level security;
 
-create policy workspaces_public_read on workspaces
+create policy repositories_public_read on repositories
   for select using (visibility = 'public');
 
-create policy workspaces_member_all on workspaces
+create policy repositories_member_all on repositories
   for all using (
     exists (select 1 from namespaces n
-            where n.id = workspaces.namespace_id
+            where n.id = repositories.namespace_id
               and (n.owner_user_id = auth.uid()
                    or exists (select 1 from memberships m
                               where m.org_id = n.owner_org_id
@@ -460,19 +460,19 @@ alone.
    handles; agent handles come from reserved space only.
 8. User bytes are never echoed verbatim from lixray.com; raw serving (when it ships) 302s to a
    separate registrable, PSL-listed domain.
-9. v1 workspace URLs resolve globally for public read. If private resources are introduced later,
+9. v1 repository URLs resolve globally for public read. If private resources are introduced later,
    they MUST be indistinguishable from nonexistent to anonymous requests — including through
    redirects and tombstones (resolve → visibility check → only then 301/410; else uniform 404)
    and through the Data API (RLS on every table).
 10. Public pages are server-rendered; the URL grammar is published as a parsing contract and
    treated as a breaking-change surface (like an API signature).
-11. `invite` is a reserved query parameter for a workspace-scoped edit capability; the canonical
+11. `invite` is a reserved query parameter for a repository-scoped edit capability; the canonical
     URL never includes it and public read never requires it.
 
 ## 6. Open questions
 
-- Container/SlateDB store keying must move from org-id to workspace UUID when the two-level
-  model lands (today workspace == org, keyed `getByName(orgId)`).
+- Container/SlateDB store keying must move from org-id to repository UUID when the two-level
+  model lands (today repository == org, keyed `getByName(orgId)`).
 - Timing of the usercontent domain purchase + PSL submission (months of lead time; do well
   before raw ships).
 - Popularity threshold + metric for permanent name retirement (fetches? agent-syncs? stars?).

@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowRight, Building2, type LucideIcon, User, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { SiteHeader, useWorkspaceCta } from "~/components/site-header";
+import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 
 const primaryButton =
 	"inline-flex items-center justify-center rounded-[10px] bg-[linear-gradient(180deg,#F97316_0%,#E8590C_100%)] px-[22px] py-3 text-base font-bold whitespace-nowrap text-white no-underline shadow-[0_6px_16px_rgba(232,89,12,.3),inset_0_1px_0_rgba(255,255,255,.25)] transition hover:brightness-105";
@@ -10,7 +10,8 @@ const secondaryButton =
 const bookDemoHref = "mailto:hello@opral.com?subject=LixRay%20demo";
 
 export function LandingPage() {
-	const { authLoaded, user, workspaceState, workspaceTo } = useWorkspaceCta();
+	const { authLoaded, user, repositoryState, repositoryTo } =
+		useRepositoryCta();
 	const [audience, setAudience] = useState<"individual" | "company">("company");
 	const [autoOpenLoaded, setAutoOpenLoaded] = useState(false);
 	const [autoOpenEnabled, setAutoOpenEnabled] = useState(false);
@@ -35,29 +36,29 @@ export function LandingPage() {
 			!user ||
 			!autoOpenLoaded ||
 			!autoOpenEnabled ||
-			!workspaceState.isLoaded
+			!repositoryState.isLoaded
 		) {
 			return;
 		}
-		window.location.replace(workspaceTo);
+		window.location.replace(repositoryTo);
 	}, [
 		autoOpenEnabled,
 		autoOpenLoaded,
 		user,
-		workspaceState.isLoaded,
-		workspaceTo,
+		repositoryState.isLoaded,
+		repositoryTo,
 	]);
 
 	const alwaysOpenLixRay = () => {
 		if (!user) return;
 		window.localStorage.setItem(autoOpenStorageKey(user.id), "true");
 		setAutoOpenEnabled(true);
-		window.location.assign(workspaceTo);
+		window.location.assign(repositoryTo);
 	};
 
 	const ctaRow = (
 		<div className="flex flex-wrap items-center gap-3">
-			<a className={primaryButton} href={workspaceTo}>
+			<a className={primaryButton} href={repositoryTo}>
 				{heroCtaLabel}
 			</a>
 			<a className={secondaryButton} href={bookDemoHref}>
@@ -71,7 +72,7 @@ export function LandingPage() {
 			<SiteHeader>
 				{user &&
 				autoOpenLoaded &&
-				workspaceState.isLoaded &&
+				repositoryState.isLoaded &&
 				!autoOpenEnabled &&
 				!openPromptDismissed ? (
 					<div

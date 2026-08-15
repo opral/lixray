@@ -3,26 +3,26 @@ import { zipSync } from "fflate";
 
 type AccessTokenGetter = () => Promise<string | null>;
 
-interface WorkspaceRemote {
+interface RepositoryRemote {
 	namespace: string;
-	workspaceSlug: string;
+	repositorySlug: string;
 	getAccessToken: AccessTokenGetter;
 }
 
-export async function fetchWorkspaceFileCount(
-	options: WorkspaceRemote,
+export async function fetchRepositoryFileCount(
+	options: RepositoryRemote,
 ): Promise<number> {
-	return withWorkspaceLix(options, async (lix) => {
+	return withRepositoryLix(options, async (lix) => {
 		const result = await lix.execute("SELECT COUNT(*) AS count FROM lix_file");
 		const count = result.rows[0]?.toObject().count;
 		return typeof count === "number" ? count : 0;
 	});
 }
 
-export async function buildWorkspaceArchive(
-	options: WorkspaceRemote,
+export async function buildRepositoryArchive(
+	options: RepositoryRemote,
 ): Promise<Uint8Array<ArrayBuffer>> {
-	return withWorkspaceLix(options, async (lix) => {
+	return withRepositoryLix(options, async (lix) => {
 		const result = await lix.execute(
 			"SELECT path, content FROM lix_file ORDER BY path",
 		);
@@ -40,15 +40,15 @@ export async function buildWorkspaceArchive(
 	});
 }
 
-async function withWorkspaceLix<T>(
-	options: WorkspaceRemote,
+async function withRepositoryLix<T>(
+	options: RepositoryRemote,
 	operation: (lix: Lix) => Promise<T>,
 ): Promise<T> {
 	const lix = await openLix({
 		server: {
 			mode: "remote",
 			url: new URL(
-				`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.workspaceSlug)}`,
+				`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.repositorySlug)}`,
 				globalThis.location.origin,
 			),
 			headers: async () => {

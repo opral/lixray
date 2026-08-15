@@ -35,32 +35,32 @@ import {
 	type LixConnectionPromptInput,
 } from "~/lib/lix-connection-prompt";
 import {
-	createWorkspaceFile,
-	createWorkspaceFolder,
+	createRepositoryFile,
+	createRepositoryFolder,
 	formatUpdatedAt,
 	importDroppedFiles,
 	listDirectory,
 	persistedDirectoryPath,
-	resolveWorkspaceHref,
+	resolveRepositoryHref,
 	useFileMarkdown,
-	useWorkspaceTree,
+	useRepositoryTree,
 } from "./lix-data";
 import {
 	MemberAvatar,
 	type TeamMember,
-	type WorkspaceTeamApi,
+	type RepositoryTeamApi,
 } from "./people-view";
 
 type DirectoryViewProps = {
 	readonly lix: Lix;
-	/** Normalized trailing-slash directory path; "/" is the workspace home. */
+	/** Normalized trailing-slash directory path; "/" is the repository home. */
 	readonly dirPath: string;
 	/** The pinned home shows the connect row. */
 	readonly isHome: boolean;
 	readonly readOnly: boolean;
 	readonly connection: Omit<LixConnectionPromptInput, "origin">;
-	/** Present on the home of an editable workspace; drives the Invite control. */
-	readonly teamApi?: WorkspaceTeamApi | null;
+	/** Present on the home of an editable repository; drives the Invite control. */
+	readonly teamApi?: RepositoryTeamApi | null;
 	/** Present on the home tab; drives the Connect agent button. */
 	readonly hasAgentConnected?: (() => Promise<boolean>) | null;
 	/** Only the active view binds shortcuts (several stay mounted hidden). */
@@ -77,7 +77,7 @@ const newTabFromMouseEvent = (event: ReactMouseEvent): boolean =>
 	event.metaKey || event.ctrlKey;
 
 /**
- * The workspace home / folder view rendered inside Atelier's central tabs.
+ * The repository home / folder view rendered inside Atelier's central tabs.
  * Folders first, then files, then the directory's README rendered below —
  * the tab names the location, so the view carries no title of its own.
  */
@@ -94,7 +94,7 @@ export function DirectoryView({
 	onOpenDir,
 	onOpenPeople,
 }: DirectoryViewProps) {
-	const tree = useWorkspaceTree(lix);
+	const tree = useRepositoryTree(lix);
 	const listing = useMemo(
 		() => (tree ? listDirectory(tree, dirPath) : null),
 		[tree, dirPath],
@@ -112,10 +112,10 @@ export function DirectoryView({
 		async (extension: "md" | "csv" | "excalidraw") => {
 			try {
 				setActionError(null);
-				const path = await createWorkspaceFile(lix, dirPath, extension);
+				const path = await createRepositoryFile(lix, dirPath, extension);
 				onOpenFile(path, { newTab: false, created: true });
 			} catch (error) {
-				console.error("workspace-home: unable to create file", error);
+				console.error("repository-home: unable to create file", error);
 				setActionError("Unable to create the file. Try again.");
 			}
 		},
@@ -136,16 +136,16 @@ export function DirectoryView({
 			event.preventDefault();
 			setActionError(null);
 			if (event.shiftKey) {
-				void createWorkspaceFolder(lix, dirPath).catch((error: unknown) => {
-					console.error("workspace-home: new folder failed", error);
+				void createRepositoryFolder(lix, dirPath).catch((error: unknown) => {
+					console.error("repository-home: new folder failed", error);
 					setActionError("Unable to create the folder. Try again.");
 				});
 				return;
 			}
-			void createWorkspaceFile(lix, dirPath, "md")
+			void createRepositoryFile(lix, dirPath, "md")
 				.then((path) => onOpenFile(path, { newTab: false, created: true }))
 				.catch((error: unknown) => {
-					console.error("workspace-home: new file failed", error);
+					console.error("repository-home: new file failed", error);
 					setActionError("Unable to create the file. Try again.");
 				});
 		};
@@ -185,9 +185,9 @@ export function DirectoryView({
 							onCreateFile={(extension) => void createFile(extension)}
 							onCreateFolder={() => {
 								setActionError(null);
-								void createWorkspaceFolder(lix, dirPath).catch(
+								void createRepositoryFolder(lix, dirPath).catch(
 									(error: unknown) => {
-										console.error("workspace-home: new folder failed", error);
+										console.error("repository-home: new folder failed", error);
 										setActionError("Unable to create the folder. Try again.");
 									},
 								);
@@ -260,7 +260,7 @@ export function DirectoryView({
 							})
 						}
 						onNavigate={(href, event) => {
-							const resolved = resolveWorkspaceHref(dirPath, href);
+							const resolved = resolveRepositoryHref(dirPath, href);
 							if (!resolved) return false;
 							// Directory paths are authoritative on lix_directory, so look
 							// up the exact persisted path rather than inferring kind.
@@ -329,7 +329,7 @@ function InviteControl({
 	teamApi,
 	onOpenPeople,
 }: {
-	teamApi: WorkspaceTeamApi;
+	teamApi: RepositoryTeamApi;
 	onOpenPeople: () => void;
 }) {
 	const [members, setMembers] = useState<readonly TeamMember[] | null>(null);
@@ -342,7 +342,7 @@ function InviteControl({
 				if (!disposed) setMembers(next);
 			})
 			.catch((error: unknown) => {
-				console.error("workspace-home: unable to list the team", error);
+				console.error("repository-home: unable to list the team", error);
 			});
 		return () => {
 			disposed = true;
@@ -392,7 +392,7 @@ function InviteControl({
 
 /**
  * The standalone Getting started tab: the default active tab while the
- * workspace is empty, opened next to — never replacing — the pinned Home.
+ * repository is empty, opened next to — never replacing — the pinned Home.
  */
 export function GettingStartedView({
 	lix,
@@ -411,7 +411,7 @@ export function GettingStartedView({
 	) => void;
 }) {
 	const [actionError, setActionError] = useState<string | null>(null);
-	const tree = useWorkspaceTree(lix);
+	const tree = useRepositoryTree(lix);
 	const firstFileOpenedRef = useRef(false);
 	const { isDropTarget, dragHandlers } = useImportDrop({
 		lix,
@@ -433,11 +433,11 @@ export function GettingStartedView({
 		firstFileOpenedRef.current = true;
 		try {
 			setActionError(null);
-			const path = await createWorkspaceFile(lix, "/", extension);
+			const path = await createRepositoryFile(lix, "/", extension);
 			onOpenFile(path, { newTab: false, created: true });
 		} catch (error) {
 			firstFileOpenedRef.current = false;
-			console.error("workspace-home: unable to create file", error);
+			console.error("repository-home: unable to create file", error);
 			setActionError("Unable to create the file. Try again.");
 		}
 	};
@@ -500,7 +500,7 @@ function useImportDrop({
 					}
 				})
 				.catch((error: unknown) => {
-					console.error("workspace-home: import failed", error);
+					console.error("repository-home: import failed", error);
 					onError("Unable to import the dropped files.");
 				});
 		},
@@ -805,7 +805,7 @@ function GettingStartedIllustration() {
 }
 
 /**
- * The empty-workspace pitch (12f in the comp): connect an agent, start a
+ * The empty-repository pitch (12f in the comp): connect an agent, start a
  * document yourself, or drop files anywhere to import.
  */
 function GettingStarted({
@@ -1137,7 +1137,10 @@ function useMcpConnectionStatus(
 			try {
 				connected = await hasAgentConnected();
 			} catch (error) {
-				console.warn("workspace-home: unable to check agent connection", error);
+				console.warn(
+					"repository-home: unable to check agent connection",
+					error,
+				);
 			}
 			if (disposed) return;
 			if (connected) {
@@ -1211,7 +1214,7 @@ function useAgentConnectionPrompt(
 			// the user can re-copy.
 			window.setTimeout(() => setCopyState("idle"), 2_500);
 		} catch (error) {
-			console.error("workspace-home: unable to copy agent prompt", error);
+			console.error("repository-home: unable to copy agent prompt", error);
 			setCopyState("error");
 		}
 	};

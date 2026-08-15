@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { AuthProvider } from "~/components/auth-provider";
 import { PostHogAnalytics } from "~/components/posthog-analytics";
 import { Toaster } from "~/components/ui/sonner";
-import { WorkspaceProvider } from "~/components/workspace-provider";
+import { RepositoryProvider } from "~/components/repository-provider";
 import appCss from "../styles.css?url";
 
 const title = "LixRay — A repository for your entire company";
@@ -50,10 +50,10 @@ function RootDocument({ children }: { children: ReactNode }) {
 			</head>
 			<body>
 				<AuthProvider>
-					<WorkspaceProvider>
+					<RepositoryProvider>
 						<PostHogAnalytics />
 						{children}
-					</WorkspaceProvider>
+					</RepositoryProvider>
 				</AuthProvider>
 				<Toaster />
 				<Scripts />

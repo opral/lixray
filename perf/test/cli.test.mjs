@@ -57,7 +57,7 @@ test("rejects a declared backend that disagrees with health before handshake", a
   assert.notEqual(typeof address, "string");
 
   const result = await runRunner([
-    "--workspace",
+    "--repository",
     "perf-attestation-mismatch",
     "--operation",
     "read-point-4k",
@@ -90,7 +90,7 @@ test("rejects mutating warmups before opening a server connection", () => {
     [
       runner,
       "--",
-      "--workspace",
+      "--repository",
       "perf-cli-check",
       "--operation",
       "create-4k",
@@ -113,7 +113,7 @@ test("requires a preseeded clone for hot-session mutation distributions", () => 
     [
       runner,
       "--",
-      "--workspace",
+      "--repository",
       "perf-cli-check",
       "--operation",
       "update-4k",
@@ -134,7 +134,7 @@ test("requires full deterministic cycles for mixed hot writes", () => {
     [
       runner,
       "--",
-      "--workspace",
+      "--repository",
       "perf-cli-check",
       "--operation",
       "update-mixed",
@@ -156,7 +156,7 @@ test("requires raw transport for the native mixed comparison", () => {
     [
       runner,
       "--",
-      "--workspace",
+      "--repository",
       "perf-cli-check",
       "--operation",
       "update-mixed-native-batch",
@@ -174,7 +174,7 @@ test("rejects binary file reads for operations without an exact-file endpoint", 
     [
       runner,
       "--",
-      "--workspace",
+      "--repository",
       "perf-cli-check",
       "--operation",
       "list-paths-100",
@@ -197,7 +197,7 @@ test("rejects hot sessions for the native mixed comparison", () => {
     [
       runner,
       "--",
-      "--workspace",
+      "--repository",
       "perf-cli-check",
       "--operation",
       "update-mixed-native-batch",
@@ -212,7 +212,7 @@ test("rejects hot sessions for the native mixed comparison", () => {
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /require isolated one-sample workspaces/);
+  assert.match(result.stderr, /require isolated one-sample repositories/);
 });
 
 test("rejects corpus sizes outside the reproducible matrix", () => {
@@ -221,7 +221,7 @@ test("rejects corpus sizes outside the reproducible matrix", () => {
     [
       runner,
       "--",
-      "--workspace",
+      "--repository",
       "perf-cli-check",
       "--operation",
       "read-point-4k",
@@ -241,7 +241,7 @@ test("requires enough commits to cover all fixed-size seed commits", () => {
     [
       runner,
       "--",
-      "--workspace",
+      "--repository",
       "perf-cli-check",
       "--operation",
       "read-point-4k",
@@ -266,7 +266,7 @@ test("requires the extra targeted seed commit for read-point-2m", () => {
     [
       runner,
       "--",
-      "--workspace",
+      "--repository",
       "perf-cli-check",
       "--operation",
       "read-point-2m",

@@ -16,7 +16,7 @@ export function stripInviteFromUrl(url: string): string {
 	return `${path}${retained.length > 0 ? `?${retained.join("&")}` : ""}${hash}`;
 }
 
-export function appendWorkspaceShareToken(
+export function appendRepositoryShareToken(
 	canonicalUrl: string,
 	token: string,
 ): string {

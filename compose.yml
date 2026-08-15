@@ -23,7 +23,7 @@ services:
         mc mb --ignore-existing local/lixray
 
   lix-server:
-    # Give graceful shutdown room to drain and close workspace stores; a
+    # Give graceful shutdown room to drain and close repository stores; a
     # 10s SIGKILL mid-write leaves store state whose next open hangs.
     stop_grace_period: 30s
     # CI sets this to the immutable GHCR digest built by the server-image job.
@@ -88,31 +88,31 @@ services:
       minio-init:
         condition: service_completed_successfully
     environment:
-      LIXRAY_PERF_WORKSPACE: ${LIXRAY_PERF_WORKSPACE:-}
+      LIXRAY_PERF_REPOSITORY: ${LIXRAY_PERF_REPOSITORY:-}
     entrypoint: /bin/sh
     command:
       - -c
       - |
-        if [ -z "$${LIXRAY_PERF_WORKSPACE}" ]; then
-          echo "LIXRAY_PERF_WORKSPACE is required" >&2
+        if [ -z "$${LIXRAY_PERF_REPOSITORY}" ]; then
+          echo "LIXRAY_PERF_REPOSITORY is required" >&2
           exit 2
         fi
-        case "$${LIXRAY_PERF_WORKSPACE}" in
+        case "$${LIXRAY_PERF_REPOSITORY}" in
           perf-[A-Za-z0-9]*)
             ;;
           *)
-            echo "LIXRAY_PERF_WORKSPACE must be a benchmark id beginning with perf-" >&2
+            echo "LIXRAY_PERF_REPOSITORY must be a benchmark id beginning with perf-" >&2
             exit 2
             ;;
         esac
-        case "$${LIXRAY_PERF_WORKSPACE}" in
+        case "$${LIXRAY_PERF_REPOSITORY}" in
           *[!A-Za-z0-9._-]*)
-            echo "LIXRAY_PERF_WORKSPACE contains invalid characters" >&2
+            echo "LIXRAY_PERF_REPOSITORY contains invalid characters" >&2
             exit 2
             ;;
         esac
         mc alias set local http://minio:9000 lixray lixray-local-secret
-        mc rm --recursive --force "local/lixray/local/$${LIXRAY_PERF_WORKSPACE}/"
+        mc rm --recursive --force "local/lixray/local/$${LIXRAY_PERF_REPOSITORY}/"
 
   onboarding-storage-reset:
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z

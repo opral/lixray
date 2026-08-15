@@ -36,7 +36,7 @@ try {
 async function main(args) {
   // pnpm 10 forwards the conventional script/argument separator to the
   // script itself. Accept exactly one leading separator so the documented
-  // `pnpm perf:run -- --workspace ...` form reaches the real option parser.
+  // `pnpm perf:run -- --repository ...` form reaches the real option parser.
   args = args[0] === "--" ? args.slice(1) : args;
 
   if (args.includes("--help") || args.includes("-h")) {
@@ -47,7 +47,7 @@ async function main(args) {
   const config = parseArgs(args);
   const client = new ProtocolClient({
     baseUrl: config.baseUrl,
-    workspaceId: config.workspaceId,
+    repositoryId: config.repositoryId,
     internalToken: process.env.LIXRAY_INTERNAL_TOKEN?.trim(),
   });
 
@@ -102,7 +102,7 @@ async function main(args) {
       revisions,
       target: {
         baseUrl: config.baseUrl,
-        workspaceId: config.workspaceId,
+        repositoryId: config.repositoryId,
         storageBackend: storageIdentity.storageBackend,
         storageLayout: storageIdentity.storageLayout,
         storageCohort: config.storageCohort,
@@ -157,7 +157,7 @@ function parseArgs(args) {
   const booleanFlags = new Set(["--hot-session", "--preseeded", "--quiet"]);
   const allowed = new Set([
     "--url",
-    "--workspace",
+    "--repository",
     "--operation",
     "--files",
     "--commits",
@@ -198,10 +198,10 @@ function parseArgs(args) {
     throw new Error(`--operation must be one of: ${operationNames.join(", ")}`);
   }
 
-  const workspaceId = required(values, "--workspace");
-  if (!/^perf-[A-Za-z0-9][A-Za-z0-9._-]{0,122}$/.test(workspaceId)) {
+  const repositoryId = required(values, "--repository");
+  if (!/^perf-[A-Za-z0-9][A-Za-z0-9._-]{0,122}$/.test(repositoryId)) {
     throw new Error(
-      "--workspace must start with 'perf-' and use at most 128 letters, digits, '.', '_' or '-'",
+      "--repository must start with 'perf-' and use at most 128 letters, digits, '.', '_' or '-'",
     );
   }
 
@@ -270,7 +270,7 @@ function parseArgs(args) {
     )
   ) {
     throw new Error(
-      "native mixed file-update comparisons require isolated one-sample workspaces; --hot-session is not supported",
+      "native mixed file-update comparisons require isolated one-sample repositories; --hot-session is not supported",
     );
   }
   if (hotSession && !mutationOperation) {
@@ -301,7 +301,7 @@ function parseArgs(args) {
   ).replace(/\/+$/, "");
   const outputPath = resolve(
     root,
-    values.get("--output") ?? `perf/results/${workspaceId}-${operation}.json`,
+    values.get("--output") ?? `perf/results/${repositoryId}-${operation}.json`,
   );
   const declaredStorageBackend = optionalStorageBackend(
     values,
@@ -311,7 +311,7 @@ function parseArgs(args) {
 
   return {
     baseUrl,
-    workspaceId,
+    repositoryId,
     operation,
     corpusFiles,
     targetTotalCommits,
@@ -478,7 +478,7 @@ function printResult(report, outputPath) {
   console.log(
     JSON.stringify(
       {
-        workspaceId: report.target.workspaceId,
+        repositoryId: report.target.repositoryId,
         corpusFiles: report.corpus.files,
         targetTotalCommits: report.methodology.targetTotalCommits,
         seedFilesPerCommit: report.setup.seedFilesPerCommit,
@@ -522,7 +522,7 @@ function integer(values, name, fallback, minimum) {
 function usage() {
   return `Usage:
   node perf/runner.mjs \\
-    --workspace <fresh-workspace-id> \\
+    --repository <fresh-repository-id> \\
     --operation <${operationNames.join("|")}> \\
     [--files <${SUPPORTED_CORPUS_FILE_COUNTS.join("|")}>] \\
     [--commits <total-including-genesis>] \\
@@ -538,7 +538,7 @@ function usage() {
     [--storage-backend <slatedb|rocksdb>] [--storage-cohort <label>] \\
     [--preseeded] [--quiet]
 
-Each invocation seeds a new deterministic workspace with ${SUPPORTED_CORPUS_FILE_COUNTS.join(
+Each invocation seeds a new deterministic repository with ${SUPPORTED_CORPUS_FILE_COUNTS.join(
     ", ",
   )} files and measures one operation family. The runner commits exactly
 ${SEED_FILES_PER_COMMIT} files per atomic execute-batch seed request, so a
@@ -547,15 +547,15 @@ timed request with no mutating warmup; reads default to three warmups and 30 sam
 --precondition-reads to warm unrelated point-read infrastructure without
 changing commit depth. Use --settle-ms to keep runtime-open background work out
 of an active-path measurement. Pass --preseeded only for an exact, externally
-cloned workspace at the requested commit depth. File create/update operations
+cloned repository at the requested commit depth. File create/update operations
 use JSON by default so an unchanged baseline remains runnable; pass
 --file-write-transport binary to measure the raw octet-stream transfer path.
 Point reads use the JSON SQL path by default; pass --file-read-transport binary
 to measure the raw exact-file response path advertised by the server.
 JSON updates use SQL UPDATE by default; pass --file-write-shape upsert for
 the matched INSERT ON CONFLICT(path) DO UPDATE control. Mutation benchmarks
-normally require one request per fresh workspace. Pass --hot-session with two
-or more samples to measure sequential mutations in one fresh workspace and
+normally require one request per fresh repository. Pass --hot-session with two
+or more samples to measure sequential mutations in one fresh repository and
 one live protocol session; --hot-session requires --preseeded. update-mixed
 also requires --samples to be a multiple of 10. read-point-2m explicitly adds
 one deterministic 2 MiB binary fixture in its own seed commit outside
@@ -564,5 +564,5 @@ update-mixed-native-single
 and update-mixed-native-batch require --file-write-transport binary; they use
 the same 10-file mixed payload, with ten sequential commits versus one atomic
 raw batch commit, and require one isolated sample per externally cloned
-workspace (they reject --hot-session).`;
+repository (they reject --hot-session).`;
 }

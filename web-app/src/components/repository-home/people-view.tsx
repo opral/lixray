@@ -22,7 +22,7 @@ export type TeamMember = {
  * roots inside Atelier tabs) and the Supabase-backed team model. Methods so a
  * stable facade can delegate to the latest client without remounting.
  */
-export type WorkspaceTeamApi = {
+export type RepositoryTeamApi = {
 	namespaceHandle(): string;
 	listMembers(): Promise<readonly TeamMember[]>;
 	/** The full invite URL, minted on first read. */
@@ -83,12 +83,12 @@ export function MemberAvatar({
 }
 
 /**
- * The People tab (3c): the namespace roster behind a workspace. The invite
+ * The People tab (3c): the namespace roster behind a repository. The invite
  * link reuses the dashed-container vocabulary from Home's agent-connect row;
  * the roster reuses the file-list row. Copy invite link is the page's only
  * primary action.
  */
-export function PeopleView({ teamApi }: { teamApi: WorkspaceTeamApi | null }) {
+export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 	const [members, setMembers] = useState<readonly TeamMember[] | null>(null);
 	const [inviteUrl, setInviteUrl] = useState<string | null>(null);
 	const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
@@ -104,7 +104,7 @@ export function PeopleView({ teamApi }: { teamApi: WorkspaceTeamApi | null }) {
 			.listMembers()
 			.then(setMembers)
 			.catch((caught: unknown) => {
-				console.error("workspace-people: unable to list members", caught);
+				console.error("repository-people: unable to list members", caught);
 				setError("Unable to load the team. Try again.");
 			});
 	}, [teamApi]);
@@ -116,7 +116,7 @@ export function PeopleView({ teamApi }: { teamApi: WorkspaceTeamApi | null }) {
 			.inviteUrl()
 			.then(setInviteUrl)
 			.catch((caught: unknown) => {
-				console.error("workspace-people: unable to load invite link", caught);
+				console.error("repository-people: unable to load invite link", caught);
 				setError("Unable to load the invite link. Try again.");
 			});
 	}, [refreshMembers, teamApi]);
@@ -162,7 +162,7 @@ export function PeopleView({ teamApi }: { teamApi: WorkspaceTeamApi | null }) {
 		try {
 			setInviteUrl(await teamApi.resetInviteUrl());
 		} catch (caught) {
-			console.error("workspace-people: unable to reset invite link", caught);
+			console.error("repository-people: unable to reset invite link", caught);
 			setError("Unable to reset the invite link. Try again.");
 		} finally {
 			setBusy(false);
@@ -177,7 +177,7 @@ export function PeopleView({ teamApi }: { teamApi: WorkspaceTeamApi | null }) {
 			await teamApi.removeMember(member.userId);
 			refreshMembers();
 		} catch (caught) {
-			console.error("workspace-people: unable to remove member", caught);
+			console.error("repository-people: unable to remove member", caught);
 			setError(
 				caught instanceof Error && /last owner/i.test(caught.message)
 					? `${member.name} is the last owner of ${namespaceHandle} and can't be removed.`

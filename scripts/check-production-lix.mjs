@@ -3,13 +3,13 @@ import { pathToFileURL } from "node:url";
 const REQUEST_TIMEOUT_MS = 20_000;
 
 export async function checkProductionLix({
-	workspaceUrl,
+	repositoryUrl,
 	fetchImpl = globalThis.fetch,
 	timeoutMs = REQUEST_TIMEOUT_MS,
 }) {
 	const protocolUrl = new URL(
-		`${new URL(workspaceUrl).pathname.replace(/\/$/, "")}/lix/v1/`,
-		workspaceUrl,
+		`${new URL(repositoryUrl).pathname.replace(/\/$/, "")}/lix/v1/`,
+		repositoryUrl,
 	);
 	let sessionId;
 	let checkCompleted = false;
@@ -52,7 +52,7 @@ export async function checkProductionLix({
 
 		return {
 			protocolVersion: handshake.body.protocolVersion,
-			workspace: protocolUrl.pathname.replace(/\/lix\/v1\/$/, ""),
+			repository: protocolUrl.pathname.replace(/\/lix\/v1\/$/, ""),
 		};
 	} finally {
 		if (sessionId) {
@@ -108,15 +108,15 @@ if (
 	process.argv[1] &&
 	import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-	const workspaceUrl =
-		process.argv[2] || process.env.LIXRAY_CANARY_WORKSPACE_URL;
-	if (!workspaceUrl) {
+	const repositoryUrl =
+		process.argv[2] || process.env.LIXRAY_CANARY_REPOSITORY_URL;
+	if (!repositoryUrl) {
 		throw new Error(
-			"Pass a public repository URL or set LIXRAY_CANARY_WORKSPACE_URL.",
+			"Pass a public repository URL or set LIXRAY_CANARY_REPOSITORY_URL.",
 		);
 	}
-	const result = await checkProductionLix({ workspaceUrl });
+	const result = await checkProductionLix({ repositoryUrl });
 	console.log(
-		`Production Lix canary passed for repository ${result.workspace} (protocol v${result.protocolVersion}).`,
+		`Production Lix canary passed for repository ${result.repository} (protocol v${result.protocolVersion}).`,
 	);
 }

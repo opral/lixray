@@ -6,10 +6,10 @@ import {
 	type AtelierClientState,
 } from "@opral/atelier/state-adapters";
 import {
-	createWorkspaceBranchSession,
-	createWorkspacePreferencesStore,
-	createWorkspaceReviewStatusStore,
-	createWorkspaceSessionStateStore,
+	createRepositoryBranchSession,
+	createRepositoryPreferencesStore,
+	createRepositoryReviewStatusStore,
+	createRepositorySessionStateStore,
 } from "../lib/atelier-state.ts";
 import type { LixraySupabaseClient } from "../lib/supabase.ts";
 import {
@@ -27,14 +27,14 @@ const CREATED = "73000000-0000-4000-8000-000000000003";
 
 void test("shell state is shared across new tabs and isolated by account and lix", () => {
 	const browserStorage = new MemoryStorage();
-	const storeA = createWorkspaceSessionStateStore({
+	const storeA = createRepositorySessionStateStore({
 		userId: USER,
-		workspaceId: LIX,
+		repositoryId: LIX,
 		storage: browserStorage,
 	});
-	const alreadyOpenStore = createWorkspaceSessionStateStore({
+	const alreadyOpenStore = createRepositorySessionStateStore({
 		userId: USER,
-		workspaceId: LIX,
+		repositoryId: LIX,
 		storage: browserStorage,
 	});
 	let alreadyOpenNotifications = 0;
@@ -57,27 +57,27 @@ void test("shell state is shared across new tabs and isolated by account and lix
 	assert.equal(alreadyOpenStore.getSnapshot(), null);
 	assert.equal(alreadyOpenNotifications, 0);
 	assert.deepEqual(
-		createWorkspaceSessionStateStore({
+		createRepositorySessionStateStore({
 			userId: USER,
-			workspaceId: LIX,
+			repositoryId: LIX,
 			storage: browserStorage,
 		}).getSnapshot(),
 		storeA.getSnapshot(),
 		"a new tab restores state from the shared browser storage",
 	);
 	assert.equal(
-		createWorkspaceSessionStateStore({
+		createRepositorySessionStateStore({
 			userId: OTHER_USER,
-			workspaceId: LIX,
+			repositoryId: LIX,
 			storage: browserStorage,
 		}).getSnapshot(),
 		null,
 		"another account cannot inherit the previous account's state",
 	);
 	assert.equal(
-		createWorkspaceSessionStateStore({
+		createRepositorySessionStateStore({
 			userId: USER,
-			workspaceId: OTHER_LIX,
+			repositoryId: OTHER_LIX,
 			storage: browserStorage,
 		}).getSnapshot(),
 		null,
@@ -105,16 +105,16 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 			throw new Error("Atelier UI state must not reach Supabase");
 		},
 	} as unknown as LixraySupabaseClient;
-	const shell = createWorkspaceSessionStateStore({
+	const shell = createRepositorySessionStateStore({
 		userId: USER,
-		workspaceId: LIX,
+		repositoryId: LIX,
 		clientState,
 		storage: fallbackStorage,
 	});
-	const preferences = createWorkspacePreferencesStore({
+	const preferences = createRepositoryPreferencesStore({
 		client: rejectingRemote,
 		userId: USER,
-		workspaceId: LIX,
+		repositoryId: LIX,
 		clientState,
 		storage: fallbackStorage,
 	});
@@ -143,9 +143,9 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 		review: { autoAcceptAgentChanges: false },
 	});
 	assert.equal(fallbackStorage.length, 0);
-	const restoredShell = createWorkspaceSessionStateStore({
+	const restoredShell = createRepositorySessionStateStore({
 		userId: USER,
-		workspaceId: LIX,
+		repositoryId: LIX,
 		clientState,
 	});
 	await waitFor(() => restoredShell.getSnapshot() !== null);
@@ -155,10 +155,10 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 		"a second consumer of this client Lix can restore shell state",
 	);
 	assert.deepEqual(
-		await createWorkspacePreferencesStore({
+		await createRepositoryPreferencesStore({
 			client: rejectingRemote,
 			userId: USER,
-			workspaceId: LIX,
+			repositoryId: LIX,
 			clientState,
 		}).load(),
 		{
@@ -169,9 +169,9 @@ void test("Atelier shell and layout state use the client Lix without remote or b
 		"a second consumer of this client Lix can restore layout state",
 	);
 	assert.equal(
-		createWorkspaceSessionStateStore({
+		createRepositorySessionStateStore({
 			userId: OTHER_USER,
-			workspaceId: LIX,
+			repositoryId: LIX,
 			clientState: memoryClientState(),
 		}).getSnapshot(),
 		null,
@@ -193,9 +193,9 @@ void test("client Lix shell state applies the first-visit initializer", async ()
 			right: { views: [], activeInstance: null },
 		},
 	};
-	const store = createWorkspaceSessionStateStore({
+	const store = createRepositorySessionStateStore({
 		userId: USER,
-		workspaceId: LIX,
+		repositoryId: LIX,
 		clientState: memoryClientState(),
 		initializeSnapshot: (persisted) => persisted ?? seededState,
 	});
@@ -230,7 +230,7 @@ void test("branch selection is serialized and only the latest request is routed"
 			return branchId;
 		},
 	} as unknown as RepositoryLixSession;
-	const branch = createWorkspaceBranchSession({
+	const branch = createRepositoryBranchSession({
 		session,
 		onSwitch: (branchId) => {
 			routed.push(branchId);
@@ -275,7 +275,7 @@ void test("a failed latest branch selection reconciles the last successful branc
 			throw new Error(`Unable to switch to ${branchId}`);
 		},
 	} as unknown as RepositoryLixSession;
-	const branch = createWorkspaceBranchSession({
+	const branch = createRepositoryBranchSession({
 		session,
 		onSwitch: (branchId) => {
 			routed.push(branchId);
@@ -299,10 +299,10 @@ void test("a failed latest branch selection reconciles the last successful branc
 
 void test("demo preferences and review status survive a same-tab reload", async () => {
 	const storage = new MemoryStorage();
-	const preferences = createWorkspacePreferencesStore({
+	const preferences = createRepositoryPreferencesStore({
 		client: null,
 		userId: USER,
-		workspaceId: LIX,
+		repositoryId: LIX,
 		storage,
 	});
 	await preferences.save({
@@ -310,10 +310,10 @@ void test("demo preferences and review status survive a same-tab reload", async 
 		layout: { sizes: { left: 20, central: 50, right: 30 } },
 	});
 	assert.deepEqual(
-		await createWorkspacePreferencesStore({
+		await createRepositoryPreferencesStore({
 			client: null,
 			userId: USER,
-			workspaceId: LIX,
+			repositoryId: LIX,
 			storage,
 		}).load(),
 		{
@@ -323,10 +323,10 @@ void test("demo preferences and review status survive a same-tab reload", async 
 		},
 	);
 
-	const reviews = createWorkspaceReviewStatusStore({
+	const reviews = createRepositoryReviewStatusStore({
 		client: null,
 		userId: USER,
-		workspaceId: LIX,
+		repositoryId: LIX,
 		storage,
 	});
 	await reviews.resolve({
@@ -336,19 +336,19 @@ void test("demo preferences and review status survive a same-tab reload", async 
 		outcome: "accepted",
 	});
 	assert.deepEqual(
-		await createWorkspaceReviewStatusStore({
+		await createRepositoryReviewStatusStore({
 			client: null,
 			userId: USER,
-			workspaceId: LIX,
+			repositoryId: LIX,
 			storage,
 		}).loadResolvedReviewIds(DRAFT),
 		["review-1"],
 	);
 	assert.deepEqual(
-		await createWorkspaceReviewStatusStore({
+		await createRepositoryReviewStatusStore({
 			client: null,
 			userId: OTHER_USER,
-			workspaceId: LIX,
+			repositoryId: LIX,
 			storage,
 		}).loadResolvedReviewIds(DRAFT),
 		[],
@@ -368,10 +368,10 @@ void test("failed remote review persistence survives tab loss and retries idempo
 			return null;
 		},
 	});
-	const reviews = createWorkspaceReviewStatusStore({
+	const reviews = createRepositoryReviewStatusStore({
 		client,
 		userId: USER,
-		workspaceId: LIX,
+		repositoryId: LIX,
 		durableStorage,
 	});
 
@@ -383,20 +383,20 @@ void test("failed remote review persistence survives tab loss and retries idempo
 	});
 	assert.equal(upsertAttempts, 1);
 	assert.deepEqual(
-		await createWorkspaceReviewStatusStore({
+		await createRepositoryReviewStatusStore({
 			client: null,
 			userId: USER,
-			workspaceId: LIX,
+			repositoryId: LIX,
 			storage: durableStorage,
 		}).loadResolvedReviewIds(DRAFT),
 		["review-outbox"],
 		"the local acknowledgement is durable before the remote write succeeds",
 	);
 
-	const freshTab = createWorkspaceReviewStatusStore({
+	const freshTab = createRepositoryReviewStatusStore({
 		client,
 		userId: USER,
-		workspaceId: LIX,
+		repositoryId: LIX,
 		durableStorage,
 	});
 	assert.deepEqual(await freshTab.loadResolvedReviewIds(DRAFT), [

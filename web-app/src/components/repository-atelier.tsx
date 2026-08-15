@@ -25,7 +25,7 @@ import {
 import { PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
-import { WorkspaceShareDialog } from "~/components/workspace-share-dialog";
+import { RepositoryShareDialog } from "~/components/repository-share-dialog";
 import { Button } from "~/components/ui/button";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
@@ -37,51 +37,51 @@ import {
 	shouldNormalizeInitialBranch,
 } from "~/lib/atelier-navigation";
 import {
-	createWorkspaceBranchSession,
-	createWorkspacePreferencesStore,
-	createWorkspaceReviewStatusStore,
-	createWorkspaceSessionStateStore,
-	type WorkspaceBranchSession,
+	createRepositoryBranchSession,
+	createRepositoryPreferencesStore,
+	createRepositoryReviewStatusStore,
+	createRepositorySessionStateStore,
+	type RepositoryBranchSession,
 } from "~/lib/atelier-state";
 import { captureExceptionTelemetry, captureTelemetry } from "~/lib/telemetry";
 import {
-	appendWorkspaceShareToken,
+	appendRepositoryShareToken,
 	canonicalPathFromLocation,
 	stripInviteFromUrl,
-} from "~/lib/workspace-share-url";
-import { isWorkspaceShareToken } from "~/lib/workspace-share-capability";
+} from "~/lib/repository-share-url";
+import { isRepositoryShareToken } from "~/lib/repository-share-capability";
 import {
 	openRepositoryLixSession,
 	type RepositoryLixSession,
 } from "~/lib/repository-lix-session";
-import { formatWorkspaceOpenError } from "~/lib/workspace-open-error";
+import { formatRepositoryOpenError } from "~/lib/repository-open-error";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
 	LIXRAY_PEOPLE_EXTENSION_ID,
-	createLixrayWorkspaceExtensions,
-	emptyWorkspaceOpeningUiState,
-} from "~/components/workspace-home/host-extensions";
+	createLixrayRepositoryExtensions,
+	emptyRepositoryOpeningUiState,
+} from "~/components/repository-home/host-extensions";
 import type {
 	TeamMember,
-	WorkspaceTeamApi,
-} from "~/components/workspace-home/people-view";
+	RepositoryTeamApi,
+} from "~/components/repository-home/people-view";
 import { isTeamInviteToken, randomTeamInviteToken } from "~/lib/team-invite";
-import { LixrayCentralTabStrip } from "~/components/workspace-home/central-tab-strip";
+import { LixrayCentralTabStrip } from "~/components/repository-home/central-tab-strip";
 import { EntryKind } from "~/lib/entry-kind";
 import {
-	useWorkspaceIsEmpty,
-	workspaceHasNoFiles,
-} from "~/components/workspace-home/lix-data";
+	useRepositoryIsEmpty,
+	repositoryHasNoFiles,
+} from "~/components/repository-home/lix-data";
 
-interface WorkspaceAtelierProps {
-	workspaceId: string;
+interface RepositoryAtelierProps {
+	repositoryId: string;
 	namespaceId: string;
 	namespace: string;
-	workspaceSlug: string;
-	workspaceName: string;
+	repositorySlug: string;
+	repositoryName: string;
 	branchId?: string;
-	/** The only mode allowed to make workspace mutations in this view. */
+	/** The only mode allowed to make repository mutations in this view. */
 	canEdit: boolean;
 	/** Present only for a valid, session-held share capability. */
 	shareAccess?: {
@@ -90,22 +90,22 @@ interface WorkspaceAtelierProps {
 	};
 }
 
-const WorkspaceAtelierContext = createContext<AtelierInstance | null>(null);
-const WorkspaceDefaultBranchContext = createContext<string | null>(null);
-const WorkspaceRouteSyncContext = createContext<(() => void) | null>(null);
-const WorkspaceBranchSessionContext =
-	createContext<WorkspaceBranchSession | null>(null);
+const RepositoryAtelierContext = createContext<AtelierInstance | null>(null);
+const RepositoryDefaultBranchContext = createContext<string | null>(null);
+const RepositoryRouteSyncContext = createContext<(() => void) | null>(null);
+const RepositoryBranchSessionContext =
+	createContext<RepositoryBranchSession | null>(null);
 
-export function WorkspaceAtelier({
-	workspaceId,
+export function RepositoryAtelier({
+	repositoryId,
 	namespaceId,
 	namespace,
-	workspaceSlug,
-	workspaceName,
+	repositorySlug,
+	repositoryName,
 	branchId,
 	canEdit,
 	shareAccess,
-}: WorkspaceAtelierProps) {
+}: RepositoryAtelierProps) {
 	const {
 		client,
 		getAccessToken: getSessionAccessToken,
@@ -119,34 +119,34 @@ export function WorkspaceAtelier({
 		? DEMO_AUTH_TOKEN
 		: canEdit
 			? user?.id
-			: `public:${workspaceId}`;
+			: `public:${repositoryId}`;
 	const navigate = useNavigate();
 	const pathname = useRouterState({
 		select: (state) => state.location.pathname,
 	});
 	const routeParams = useParams({ strict: false });
 	const routeSplat = "_splat" in routeParams ? routeParams._splat : undefined;
-	const workspaceRootPath = `/@${namespace}/${workspaceSlug}`;
+	const repositoryRootPath = `/@${namespace}/${repositorySlug}`;
 	const routeChildKind: "file" | "dir" | "team" | null = pathname.startsWith(
-		`${workspaceRootPath}/file/`,
+		`${repositoryRootPath}/file/`,
 	)
 		? "file"
-		: pathname.startsWith(`${workspaceRootPath}/dir/`)
+		: pathname.startsWith(`${repositoryRootPath}/dir/`)
 			? "dir"
-			: pathname === `${workspaceRootPath}/team`
+			: pathname === `${repositoryRootPath}/team`
 				? "team"
 				: null;
 	const routeFilePath = routeChildKind === "file" ? routeSplat : undefined;
 	const documentName = activeDocumentName({
 		pathname,
 		routeFilePath,
-		workspaceName,
+		repositoryName,
 	});
 	const isReadOnly = !canEdit;
 	const [instance, setInstance] = useState<AtelierInstance | null>(null);
 	const [branchSession, setBranchSession] =
-		useState<WorkspaceBranchSession | null>(null);
-	const [workspaceDefaultBranchId, setWorkspaceDefaultBranchId] = useState<
+		useState<RepositoryBranchSession | null>(null);
+	const [repositoryDefaultBranchId, setRepositoryDefaultBranchId] = useState<
 		string | null
 	>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -162,7 +162,7 @@ export function WorkspaceAtelier({
 	const suppressBranchNavigationRef = useRef(false);
 	// Instance whose session state was seeded with the Getting started tab;
 	// the first root-URL sync must not clobber that seed by forcing Home.
-	const emptyWorkspaceSeededRef = useRef<AtelierInstance | null>(null);
+	const emptyRepositorySeededRef = useRef<AtelierInstance | null>(null);
 	const eventHandlerRef = useRef<(event: AtelierEvent) => void>(
 		() => undefined,
 	);
@@ -190,7 +190,7 @@ export function WorkspaceAtelier({
 				: getSessionAccessToken(),
 		[canEdit, getSessionAccessToken],
 	);
-	const signInToCurrentWorkspace = useCallback(async () => {
+	const signInToCurrentRepository = useCallback(async () => {
 		try {
 			await signInWithGoogle(canonicalPathFromLocation(window.location));
 		} catch (caught) {
@@ -199,12 +199,12 @@ export function WorkspaceAtelier({
 			);
 		}
 	}, [signInWithGoogle]);
-	const workspaceIsEmpty = useWorkspaceIsEmpty(instance?.lix ?? null);
+	const repositoryIsEmpty = useRepositoryIsEmpty(instance?.lix ?? null);
 	// The raw team api is rebuilt after every render so its closures always see
 	// the current Supabase client and user; the stable facade below is what the
 	// long-lived Atelier extension mounts capture. The demo deployment has no
 	// Supabase, so it gets an in-memory stand-in and the same UI.
-	const teamApiRef = useRef<WorkspaceTeamApi | null>(null);
+	const teamApiRef = useRef<RepositoryTeamApi | null>(null);
 	const demoTeamStateRef = useRef<{
 		members: TeamMember[];
 		token: string;
@@ -226,8 +226,8 @@ export function WorkspaceAtelier({
 				token: "tm_preview-demo-invite",
 			});
 		const demoInviteUrl = () =>
-			appendWorkspaceShareToken(
-				`${window.location.origin}/@${namespace}/${workspaceSlug}`,
+			appendRepositoryShareToken(
+				`${window.location.origin}/@${namespace}/${repositorySlug}`,
 				demoTeamState().token,
 			);
 		teamApiRef.current = !canEdit
@@ -276,8 +276,8 @@ export function WorkspaceAtelier({
 							if (!isTeamInviteToken(data)) {
 								throw new Error("The invite service returned an invalid link.");
 							}
-							return appendWorkspaceShareToken(
-								`${window.location.origin}/@${namespace}/${workspaceSlug}`,
+							return appendRepositoryShareToken(
+								`${window.location.origin}/@${namespace}/${repositorySlug}`,
 								data,
 							);
 						},
@@ -290,8 +290,8 @@ export function WorkspaceAtelier({
 							if (!isTeamInviteToken(data)) {
 								throw new Error("The invite service returned an invalid link.");
 							}
-							return appendWorkspaceShareToken(
-								`${window.location.origin}/@${namespace}/${workspaceSlug}`,
+							return appendRepositoryShareToken(
+								`${window.location.origin}/@${namespace}/${repositorySlug}`,
 								data,
 							);
 						},
@@ -304,7 +304,7 @@ export function WorkspaceAtelier({
 						},
 					};
 	});
-	const stableTeamApiRef = useRef<WorkspaceTeamApi>({
+	const stableTeamApiRef = useRef<RepositoryTeamApi>({
 		namespaceHandle: () => teamApiRef.current?.namespaceHandle() ?? "",
 		listMembers: () => requireTeamApi(teamApiRef.current).listMembers(),
 		inviteUrl: () => requireTeamApi(teamApiRef.current).inviteUrl(),
@@ -321,22 +321,22 @@ export function WorkspaceAtelier({
 			Share
 		</span>
 	);
-	// Share stays inert until the workspace has content to share (12b/12c).
+	// Share stays inert until the repository has content to share (12b/12c).
 	const headerActions = canEdit ? (
-		client && workspaceIsEmpty === false ? (
-			<WorkspaceShareControl
+		client && repositoryIsEmpty === false ? (
+			<RepositoryShareControl
 				createShareToken={async () => {
 					const { data, error } = await client.rpc("create_lix_share_token", {
-						p_lix_id: workspaceId,
+						p_lix_id: repositoryId,
 					});
 					if (error) throw error;
 					const token = data?.[0]?.token;
-					if (!isWorkspaceShareToken(token)) {
+					if (!isRepositoryShareToken(token)) {
 						throw new Error("The share service returned an invalid link.");
 					}
 					return token;
 				}}
-				workspaceName={workspaceName}
+				repositoryName={repositoryName}
 				documentName={documentName}
 				onOpenTeam={() => {
 					void instance?.views
@@ -358,7 +358,7 @@ export function WorkspaceAtelier({
 					size="xs"
 					className="h-7 gap-1.5 px-3"
 					disabled={!isAuthLoaded}
-					onClick={() => void signInToCurrentWorkspace()}
+					onClick={() => void signInToCurrentRepository()}
 				>
 					Sign in
 				</Button>
@@ -395,8 +395,8 @@ export function WorkspaceAtelier({
 			const routeChild = routeChildRef.current;
 			if (routeChild.kind === "team") {
 				await navigate({
-					to: "/@{$namespace}/$workspace/team",
-					params: { namespace, workspace: workspaceSlug },
+					to: "/@{$namespace}/$repository/team",
+					params: { namespace, repository: repositorySlug },
 					search,
 					replace,
 				});
@@ -406,11 +406,11 @@ export function WorkspaceAtelier({
 				await navigate({
 					to:
 						routeChild.kind === "dir"
-							? "/@{$namespace}/$workspace/dir/$"
-							: "/@{$namespace}/$workspace/file/$",
+							? "/@{$namespace}/$repository/dir/$"
+							: "/@{$namespace}/$repository/file/$",
 					params: {
 						namespace,
-						workspace: workspaceSlug,
+						repository: repositorySlug,
 						_splat: routeChild.splat,
 					},
 					search,
@@ -419,13 +419,13 @@ export function WorkspaceAtelier({
 				return;
 			}
 			await navigate({
-				to: "/@{$namespace}/$workspace",
-				params: { namespace, workspace: workspaceSlug },
+				to: "/@{$namespace}/$repository",
+				params: { namespace, repository: repositorySlug },
 				search,
 				replace,
 			});
 		},
-		[namespace, navigate, workspaceSlug],
+		[namespace, navigate, repositorySlug],
 	);
 
 	// URL ⇄ tabs: the URL always names the ACTIVE central view. Atelier
@@ -448,21 +448,21 @@ export function WorkspaceAtelier({
 					? atelierBranchSearch(activeBranchId, defaultBranchId)
 					: {};
 			if (event.viewKind === LIXRAY_HOME_EXTENSION_ID) {
-				const targetPath = `/@${namespace}/${workspaceSlug}`;
+				const targetPath = `/@${namespace}/${repositorySlug}`;
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
-					to: "/@{$namespace}/$workspace",
-					params: { namespace, workspace: workspaceSlug },
+					to: "/@{$namespace}/$repository",
+					params: { namespace, repository: repositorySlug },
 					search,
 				});
 				return;
 			}
 			if (event.viewKind === LIXRAY_PEOPLE_EXTENSION_ID) {
-				const targetPath = `/@${namespace}/${workspaceSlug}/team`;
+				const targetPath = `/@${namespace}/${repositorySlug}/team`;
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
-					to: "/@{$namespace}/$workspace/team",
-					params: { namespace, workspace: workspaceSlug },
+					to: "/@{$namespace}/$repository/team",
+					params: { namespace, repository: repositorySlug },
 					search,
 				});
 				return;
@@ -476,11 +476,11 @@ export function WorkspaceAtelier({
 				if (typeof dirPath !== "string" || dirPath === "/") return;
 				const splat = dirPath.startsWith("/") ? dirPath.slice(1) : "";
 				// A root-listing tab (the strip's New tab) stays URL-less: the
-				// workspace root URL means "Home is active" (rule 1), so syncing
+				// repository root URL means "Home is active" (rule 1), so syncing
 				// here would bounce the selection back to Home. The tab claims a
 				// URL on its first in-place navigation instead.
 				if (!splat) return;
-				const targetPath = `/@${namespace}/${workspaceSlug}/dir/${splat}`;
+				const targetPath = `/@${namespace}/${repositorySlug}/dir/${splat}`;
 				const currentPath = (() => {
 					try {
 						return decodeURIComponent(pathnameRef.current);
@@ -490,8 +490,8 @@ export function WorkspaceAtelier({
 				})();
 				if (currentPath === targetPath) return;
 				void navigate({
-					to: "/@{$namespace}/$workspace/dir/$",
-					params: { namespace, workspace: workspaceSlug, _splat: splat },
+					to: "/@{$namespace}/$repository/dir/$",
+					params: { namespace, repository: repositorySlug, _splat: splat },
 					search,
 				});
 				return;
@@ -499,23 +499,23 @@ export function WorkspaceAtelier({
 			const filePath = event.filePath?.replace(/^\/+/, "") ?? "";
 			if (!filePath || routeFilePathRef.current === filePath) return;
 			void navigate({
-				to: "/@{$namespace}/$workspace/file/$",
+				to: "/@{$namespace}/$repository/file/$",
 				params: {
 					namespace,
-					workspace: workspaceSlug,
+					repository: repositorySlug,
 					_splat: filePath,
 				},
 				search,
 			});
 		};
-	}, [namespace, navigate, workspaceSlug]);
+	}, [namespace, navigate, repositorySlug]);
 
 	useEffect(() => {
 		let disposed = false;
 		let activeLix: RepositoryLixSession | null = null;
 		setInstance(null);
 		setBranchSession(null);
-		setWorkspaceDefaultBranchId(null);
+		setRepositoryDefaultBranchId(null);
 		setError(null);
 		routeSyncedRef.current = false;
 
@@ -526,8 +526,8 @@ export function WorkspaceAtelier({
 		const openingBranchId = branchIdRef.current ?? null;
 		void openRepositoryLixSession({
 			namespace,
-			repositorySlug: workspaceSlug,
-			repositoryId: workspaceId,
+			repositorySlug: repositorySlug,
+			repositoryId: repositoryId,
 			getAccessToken,
 			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
@@ -540,8 +540,8 @@ export function WorkspaceAtelier({
 				}
 				activeLix = session;
 				activeLixRef.current = session;
-				setWorkspaceDefaultBranchId(session.defaultBranchSnapshot());
-				const workspaceBranchSession = createWorkspaceBranchSession({
+				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
+				const repositoryBranchSession = createRepositoryBranchSession({
 					session,
 					onSwitch: async (nextBranchId, context) => {
 						const routedBranchId = resolveAtelierRouteBranchId(
@@ -559,25 +559,25 @@ export function WorkspaceAtelier({
 						await navigateToCurrentPathBranch(nextBranchId);
 					},
 				});
-				setBranchSession(workspaceBranchSession);
-				// An empty workspace defaults to the Getting started tab (12f),
+				setBranchSession(repositoryBranchSession);
+				// An empty repository defaults to the Getting started tab (12f),
 				// seeded into the first-visit session state rather than opened
 				// imperatively — views.open() races the shell's mount/restore.
-				// This query is part of boot. If it cannot answer, the workspace must
+				// This query is part of boot. If it cannot answer, the repository must
 				// show the real error instead of silently taking the non-empty path.
-				const startsEmpty = await workspaceHasNoFiles(session.lix);
+				const startsEmpty = await repositoryHasNoFiles(session.lix);
 				if (disposed) return;
 				const atelierInstance = createAtelier({
 					lix: session.lix,
 					readOnly: isReadOnly,
-					branchSession: workspaceBranchSession,
+					branchSession: repositoryBranchSession,
 					reviewRangeSessionId: atelierUserId,
-					extensions: createLixrayWorkspaceExtensions(
+					extensions: createLixrayRepositoryExtensions(
 						{
-							lixId: workspaceId,
+							lixId: repositoryId,
 							namespace,
-							lixSlug: workspaceSlug,
-							lixName: workspaceName,
+							lixSlug: repositorySlug,
+							lixName: repositoryName,
 						},
 						async () => {
 							if (!client || !canEdit || !atelierUserId) return false;
@@ -585,7 +585,7 @@ export function WorkspaceAtelier({
 							const { data, error } = await client
 								.from("mcp_lix_connections")
 								.select("last_seen_at")
-								.eq("lix_id", workspaceId)
+								.eq("lix_id", repositoryId)
 								.order("last_seen_at", { ascending: false })
 								.limit(1);
 							if (error) throw error;
@@ -596,32 +596,32 @@ export function WorkspaceAtelier({
 					centralPanel: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
 					},
-					sessionStateStore: createWorkspaceSessionStateStore({
+					sessionStateStore: createRepositorySessionStateStore({
 						userId: atelierUserId,
-						workspaceId,
+						repositoryId,
 						clientState: session.lix.clientState,
 						...(startsEmpty
-							? { initializeSnapshot: emptyWorkspaceOpeningUiState }
+							? { initializeSnapshot: emptyRepositoryOpeningUiState }
 							: {}),
 					}),
-					preferencesStore: createWorkspacePreferencesStore({
+					preferencesStore: createRepositoryPreferencesStore({
 						client: canEdit ? client : null,
 						userId: atelierUserId,
-						workspaceId,
+						repositoryId,
 						clientState: session.lix.clientState,
 					}),
-					reviewStatusStore: createWorkspaceReviewStatusStore({
+					reviewStatusStore: createRepositoryReviewStatusStore({
 						client: canEdit ? client : null,
 						userId: atelierUserId,
-						workspaceId,
+						repositoryId,
 					}),
 					onEvent: (event) => eventHandlerRef.current(event),
 				});
 				if (startsEmpty) {
-					emptyWorkspaceSeededRef.current = atelierInstance;
+					emptyRepositorySeededRef.current = atelierInstance;
 				}
 				setInstance(atelierInstance);
-				captureTelemetry("workspace_opened");
+				captureTelemetry("repository_opened");
 				const actualBranchId = session.activeBranchSnapshot();
 				if (
 					shouldNormalizeInitialBranch({
@@ -637,11 +637,11 @@ export function WorkspaceAtelier({
 			.catch((caught: unknown) => {
 				if (!disposed) {
 					captureExceptionTelemetry(caught, {
-						operation: "workspace_open",
-						lix_id: workspaceId,
+						operation: "repository_open",
+						lix_id: repositoryId,
 						namespace_id: namespace,
 					});
-					setError(formatWorkspaceOpenError(caught));
+					setError(formatRepositoryOpenError(caught));
 				}
 			});
 
@@ -660,9 +660,9 @@ export function WorkspaceAtelier({
 		getAccessToken,
 		navigateToCurrentPathBranch,
 		namespace,
-		workspaceId,
-		workspaceName,
-		workspaceSlug,
+		repositoryId,
+		repositoryName,
+		repositorySlug,
 	]);
 
 	useEffect(() => {
@@ -724,17 +724,17 @@ export function WorkspaceAtelier({
 		pathname,
 	]);
 
-	// The workspace root URL means "the pinned Home tab is active" — content
+	// The repository root URL means "the pinned Home tab is active" — content
 	// tabs stay open (rule 1 of the tab model: Home never navigates or closes).
 	useEffect(() => {
 		if (!instance) return;
-		const workspaceRoot = `/@${namespace}/${workspaceSlug}`;
-		if (pathname !== workspaceRoot) return;
-		// The first sync of a seeded empty workspace keeps the Getting started
+		const repositoryRoot = `/@${namespace}/${repositorySlug}`;
+		if (pathname !== repositoryRoot) return;
+		// The first sync of a seeded empty repository keeps the Getting started
 		// tab active instead of forcing Home over it (12f). Later returns to
 		// the root URL activate Home as usual.
-		if (emptyWorkspaceSeededRef.current === instance) {
-			emptyWorkspaceSeededRef.current = null;
+		if (emptyRepositorySeededRef.current === instance) {
+			emptyRepositorySeededRef.current = null;
 			markRouteSynced();
 			return;
 		}
@@ -744,7 +744,7 @@ export function WorkspaceAtelier({
 				console.error("Unable to activate the repository home", error);
 			})
 			.finally(markRouteSynced);
-	}, [instance, markRouteSynced, namespace, pathname, workspaceSlug]);
+	}, [instance, markRouteSynced, namespace, pathname, repositorySlug]);
 
 	return (
 		<div
@@ -752,12 +752,12 @@ export function WorkspaceAtelier({
 			aria-busy={!instance && !error}
 		>
 			{instance ? (
-				<WorkspaceDefaultBranchContext.Provider
-					value={workspaceDefaultBranchId}
+				<RepositoryDefaultBranchContext.Provider
+					value={repositoryDefaultBranchId}
 				>
-					<WorkspaceBranchSessionContext.Provider value={branchSession}>
-						<WorkspaceRouteSyncContext.Provider value={markRouteSynced}>
-							<WorkspaceAtelierContext.Provider value={instance}>
+					<RepositoryBranchSessionContext.Provider value={branchSession}>
+						<RepositoryRouteSyncContext.Provider value={markRouteSynced}>
+							<RepositoryAtelierContext.Provider value={instance}>
 								<Atelier
 									instance={instance}
 									topBarProps={{
@@ -779,7 +779,7 @@ export function WorkspaceAtelier({
 											</Link>
 										),
 										// The two homes chain here: the namespace links up
-										// to the hosted home, the workspace names itself.
+										// to the hosted home, the repository names itself.
 										navbarCenter: (
 											<span className="flex items-center gap-2 text-[13px]">
 												<Link
@@ -790,7 +790,7 @@ export function WorkspaceAtelier({
 												</Link>
 												<span className="text-text-tertiary/60">/</span>
 												<span className="font-semibold text-text-primary">
-													{workspaceSlug}
+													{repositorySlug}
 												</span>
 											</span>
 										),
@@ -801,10 +801,10 @@ export function WorkspaceAtelier({
 									}}
 								/>
 								<Outlet />
-							</WorkspaceAtelierContext.Provider>
-						</WorkspaceRouteSyncContext.Provider>
-					</WorkspaceBranchSessionContext.Provider>
-				</WorkspaceDefaultBranchContext.Provider>
+							</RepositoryAtelierContext.Provider>
+						</RepositoryRouteSyncContext.Provider>
+					</RepositoryBranchSessionContext.Provider>
+				</RepositoryDefaultBranchContext.Provider>
 			) : null}
 			{!instance && !error ? (
 				<main className="absolute inset-0 grid place-content-center justify-items-center gap-2 bg-bg-app p-6 text-center text-text-secondary">
@@ -826,29 +826,29 @@ export function WorkspaceAtelier({
 	);
 }
 
-export function useWorkspaceAtelierInstance(): AtelierInstance | null {
-	return useContext(WorkspaceAtelierContext);
+export function useRepositoryAtelierInstance(): AtelierInstance | null {
+	return useContext(RepositoryAtelierContext);
 }
 
-export function useWorkspaceDefaultBranchId(): string | null {
-	return useContext(WorkspaceDefaultBranchContext);
+export function useRepositoryDefaultBranchId(): string | null {
+	return useContext(RepositoryDefaultBranchContext);
 }
 
 /**
  * Child routes call this after applying their URL to the Atelier tabs;
  * until then, tab-activation events do not navigate (deep links win).
  */
-export function useMarkWorkspaceRouteSynced(): () => void {
-	const markRouteSynced = useContext(WorkspaceRouteSyncContext);
+export function useMarkRepositoryRouteSynced(): () => void {
+	const markRouteSynced = useContext(RepositoryRouteSyncContext);
 	return markRouteSynced ?? (() => undefined);
 }
 
 const NO_BRANCH_SUBSCRIBE = () => () => undefined;
 const NO_BRANCH_SNAPSHOT = () => null;
 
-/** The active workspace branch id, live (null before the session opens). */
-export function useWorkspaceActiveBranchId(): string | null {
-	const branchSession = useContext(WorkspaceBranchSessionContext);
+/** The active repository branch id, live (null before the session opens). */
+export function useRepositoryActiveBranchId(): string | null {
+	const branchSession = useContext(RepositoryBranchSessionContext);
 	return useSyncExternalStore(
 		branchSession?.subscribe.bind(branchSession) ?? NO_BRANCH_SUBSCRIBE,
 		branchSession?.getSnapshot.bind(branchSession) ?? NO_BRANCH_SNAPSHOT,
@@ -856,19 +856,19 @@ export function useWorkspaceActiveBranchId(): string | null {
 	);
 }
 
-function requireTeamApi(api: WorkspaceTeamApi | null): WorkspaceTeamApi {
+function requireTeamApi(api: RepositoryTeamApi | null): RepositoryTeamApi {
 	if (!api) throw new Error("Team access requires an editable session.");
 	return api;
 }
 
-function WorkspaceShareControl({
+function RepositoryShareControl({
 	createShareToken,
-	workspaceName,
+	repositoryName,
 	documentName,
 	onOpenTeam,
 }: {
 	createShareToken: () => Promise<string>;
-	workspaceName: string;
+	repositoryName: string;
 	documentName: string;
 	onOpenTeam?: () => void;
 }) {
@@ -884,7 +884,7 @@ function WorkspaceShareControl({
 			const canonicalUrl = stripInviteFromUrl(window.location.href);
 			setUrls({
 				canonicalUrl,
-				editableUrl: appendWorkspaceShareToken(canonicalUrl, token),
+				editableUrl: appendRepositoryShareToken(canonicalUrl, token),
 			});
 			captureTelemetry("share_link_created");
 			setOpen(true);
@@ -900,11 +900,11 @@ function WorkspaceShareControl({
 	};
 
 	return (
-		<WorkspaceShareDialog
+		<RepositoryShareDialog
 			canonicalUrl={urls.canonicalUrl}
 			editableUrl={urls.editableUrl}
 			documentName={documentName}
-			workspaceName={workspaceName}
+			repositoryName={repositoryName}
 			onOpenTeam={
 				onOpenTeam
 					? () => {
@@ -942,15 +942,15 @@ function WorkspaceShareControl({
 function activeDocumentName({
 	pathname,
 	routeFilePath,
-	workspaceName,
+	repositoryName,
 }: {
 	pathname: string;
 	routeFilePath: string | undefined;
-	workspaceName: string;
+	repositoryName: string;
 }) {
 	const encodedPath = routeFilePath || pathname.split("/file/", 2)[1];
 	const encodedName = encodedPath?.split("/").filter(Boolean).at(-1);
-	if (!encodedName) return workspaceName;
+	if (!encodedName) return repositoryName;
 	try {
 		return decodeURIComponent(encodedName);
 	} catch {

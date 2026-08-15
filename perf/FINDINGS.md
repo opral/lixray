@@ -38,7 +38,7 @@ MiB resumable ingest. RocksDB reports zero late reads, 1.51 ms save p95, and
 
 ```sh
 cargo test -p lix_engine_benchmarks --release \
-  --test movie_workspace_qualification \
+  --test movie_repository_qualification \
   --features 'storage-benches slatedb rocksdb' -- --ignored --nocapture
 ```
 
@@ -92,8 +92,8 @@ end-to-end pairs measured:
 | Create 4 KiB in an existing directory | 181.252 ms | 118.463 ms | **34.6% faster** | **29.7% faster** |
 | Delete an existing 1 KiB file | 75.034 ms | 51.860 ms | **30.9% faster** | **30.9% faster** |
 
-The corrected server open-workspace cap also materially bounds retained
-resources: in a same-binary 32-workspace comparison it reduced process RSS
+The corrected server open-repository cap also materially bounds retained
+resources: in a same-binary 32-repository comparison it reduced process RSS
 29.3%, anonymous memory 35.6%, and the Docker working set 35.0%.
 
 A follow-on changelog-append profile found a separate history-proportional
@@ -144,7 +144,7 @@ Markdown, text, XML, YAML, PDF, PNG, binary, and log. Sizes range from 1 KiB to
 
 `--commits` includes genesis. Every depth gets one atomic 1,000-file insertion
 commit followed by deterministic single-file update commits. A mutation run
-times exactly one request on a fresh workspace. A read run reports a
+times exactly one request on a fresh repository. A read run reports a
 distribution. The current file-write timer starts before client base64/JSON
 encoding or raw-body transfer and ends after the complete response body has
 been read and decoded. Assertions and accounting are outside it.
@@ -356,14 +356,14 @@ matrix has SHA-256
 
 ## Memory accounting
 
-The Compose profile intended to cap cached workspace runtimes at four, but used
-the nonexistent `LIXRAY_MAX_OPEN_WORKSPACES` variable. It therefore silently
+The Compose profile intended to cap cached repository runtimes at four, but used
+the nonexistent `LIXRAY_MAX_OPEN_REPOSITORIES` variable. It therefore silently
 ran the server default of 32. The profile now uses the actual
 `LIXRAY_MAX_OPEN_LIXS` setting, defaults it to four, and permits an environment
 override.
 
 The controlled accounting opens, point-reads, and closes 32 cloned
-1,000-commit workspaces on the same binary. Each run starts a fresh process;
+1,000-commit repositories on the same binary. Each run starts a fresh process;
 the snapshot is taken 30 seconds after the final close. RSS/PSS, anonymous
 memory, thread count, file descriptors, and cgroup memory are collected before
 graceful shutdown.

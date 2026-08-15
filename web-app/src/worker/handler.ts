@@ -51,9 +51,9 @@ export interface WorkerEnv {
 	LIXRAY_DEMO_LIX_IDS?: string;
 	LIXRAY_LIX_SERVICE_URL?: string;
 	/** Temporary deployment fallback; remove after production variables migrate. */
-	LIXRAY_DEMO_WORKSPACE_IDS?: string;
+	LIXRAY_DEMO_REPOSITORY_IDS?: string;
 	/** Temporary deployment fallback; remove after production variables migrate. */
-	LIXRAY_WORKSPACE_SERVICE_URL?: string;
+	LIXRAY_REPOSITORY_SERVICE_URL?: string;
 	LIXRAY_INTERNAL_TOKEN?: string;
 	GOOGLE_ANALYTICS_ID?: string;
 	POSTHOG_PROJECT_TOKEN?: string;
@@ -1017,7 +1017,7 @@ function authenticateDemo(request: Request, env: WorkerEnv): AuthResult | null {
 
 function demoLixIds(env: WorkerEnv): Set<string> {
 	const lixIds = new Set(
-		(env.LIXRAY_DEMO_LIX_IDS ?? env.LIXRAY_DEMO_WORKSPACE_IDS ?? "")
+		(env.LIXRAY_DEMO_LIX_IDS ?? env.LIXRAY_DEMO_REPOSITORY_IDS ?? "")
 			.split(",")
 			.map((lixId) => lixId.trim())
 			.filter(Boolean),

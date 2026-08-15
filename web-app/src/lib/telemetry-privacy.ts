@@ -24,7 +24,7 @@ export const AUTOCAPTURE_SELECTOR_IGNORELIST = [
 /**
  * Text and inputs are masked globally. Rich document surfaces are blocked as a
  * second layer because images, canvases, and embedded HTML can contain private
- * workspace content that text masking cannot protect.
+ * repository content that text masking cannot protect.
  */
 export const SESSION_RECORDING_BLOCK_SELECTOR = [
 	".ph-no-capture",
@@ -61,7 +61,7 @@ const SENSITIVE_EVENT_PROPERTY_KEYS = new Set([
 	"organization_name",
 	"refresh_token",
 	"sql",
-	"workspace_name",
+	"repository_name",
 ]);
 
 const URL_PROPERTY_KEYS = new Set([
@@ -149,10 +149,10 @@ function scrubPostHogValue(
 export function sanitizeLixrayPathname(value: string): string {
 	const pathname = value.split(/[?#]/, 1)[0] || "/";
 	if (/^\/@[^/]+\/[^/]+\/file(?:\/|$)/.test(pathname)) {
-		return "/workspace/:workspace/file/:file";
+		return "/repository/:repository/file/:file";
 	}
 	if (/^\/@[^/]+\/[^/]+(?:\/|$)/.test(pathname)) {
-		return "/workspace/:workspace";
+		return "/repository/:repository";
 	}
 	return pathname;
 }
@@ -178,7 +178,7 @@ function scrubPostHogString(value: string, propertyKey?: string): string {
 		.replaceAll(/[A-Za-z]:\\[^\s)"'<>[\]{}]+/g, "[redacted_path]")
 		.replaceAll(
 			/\/@[^/\s]+\/[^/\s]+\/file(?:\/[^\s)"'<>[\]{}]*)?/g,
-			"/workspace/:workspace/file/:file",
+			"/repository/:repository/file/:file",
 		);
 }
 

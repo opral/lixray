@@ -4,17 +4,17 @@ import type { Lix } from "@lix-js/sdk";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import {
 	canonicalDirectoryPath,
-	createWorkspaceFile,
-	createWorkspaceFolder,
+	createRepositoryFile,
+	createRepositoryFolder,
 	importDroppedFiles,
 	listDirectory,
 	persistedDirectoryPath,
-	resolveWorkspaceHref,
-	type WorkspaceTree,
-	workspaceHasNoFiles,
+	resolveRepositoryHref,
+	type RepositoryTree,
+	repositoryHasNoFiles,
 } from "./lix-data.ts";
 
-const tree: WorkspaceTree = {
+const tree: RepositoryTree = {
 	dirs: [
 		{
 			kind: EntryKind.Directory,
@@ -85,20 +85,20 @@ void test("resolves canonical links through the directory surface", () => {
 void test("canonicalizes directory paths and nested relative links", () => {
 	assert.equal(canonicalDirectoryPath("docs/"), "/docs");
 	assert.equal(canonicalDirectoryPath("/"), "/");
-	assert.equal(resolveWorkspaceHref("/docs", "guides/"), "/docs/guides");
-	assert.equal(resolveWorkspaceHref("/docs", "../README.md"), "/README.md");
+	assert.equal(resolveRepositoryHref("/docs", "guides/"), "/docs/guides");
+	assert.equal(resolveRepositoryHref("/docs", "../README.md"), "/README.md");
 });
 
-void test("workspaceHasNoFiles reports an empty workspace", async () => {
+void test("repositoryHasNoFiles reports an empty repository", async () => {
 	const lix = {
 		execute: async () => ({ rows: [] }),
 	} as never;
 
-	assert.equal(await workspaceHasNoFiles(lix), true);
+	assert.equal(await repositoryHasNoFiles(lix), true);
 });
 
-void test("workspaceHasNoFiles preserves SQL failures for boot error UI", async () => {
-	const failure = new Error("workspace query failed");
+void test("repositoryHasNoFiles preserves SQL failures for boot error UI", async () => {
+	const failure = new Error("repository query failed");
 	const lix = {
 		execute: async () => {
 			throw failure;
@@ -106,7 +106,7 @@ void test("workspaceHasNoFiles preserves SQL failures for boot error UI", async 
 	} as never;
 
 	await assert.rejects(
-		workspaceHasNoFiles(lix),
+		repositoryHasNoFiles(lix),
 		(caught) => caught === failure,
 	);
 });
@@ -120,7 +120,7 @@ void test("creates a directory with an exact persisted directory path", async ()
 		},
 	} as unknown as Lix;
 
-	assert.equal(await createWorkspaceFolder(lix, "/"), "/new-folder");
+	assert.equal(await createRepositoryFolder(lix, "/"), "/new-folder");
 	assert.deepEqual(calls.at(-1), {
 		sql: "INSERT INTO lix_directory (path) VALUES ($1)",
 		params: ["/new-folder"],
@@ -137,7 +137,7 @@ void test("checks the opposite surface when choosing a directory path", async ()
 		},
 	} as unknown as Lix;
 
-	assert.equal(await createWorkspaceFolder(lix, "/"), "/new-folder-1");
+	assert.equal(await createRepositoryFolder(lix, "/"), "/new-folder-1");
 });
 
 void test("creates nested files and folders with canonical separators", async () => {
@@ -149,9 +149,9 @@ void test("creates nested files and folders with canonical separators", async ()
 		},
 	} as unknown as Lix;
 
-	assert.equal(await createWorkspaceFolder(lix, "/docs"), "/docs/new-folder");
+	assert.equal(await createRepositoryFolder(lix, "/docs"), "/docs/new-folder");
 	assert.equal(
-		await createWorkspaceFile(lix, "/docs", "md"),
+		await createRepositoryFile(lix, "/docs", "md"),
 		"/docs/untitled.md",
 	);
 	assert.deepEqual(calls.at(-1)?.params[0], "/docs/untitled.md");

@@ -236,22 +236,22 @@ requested integration environment.
 ## Performance loop
 
 ```sh
-LIXRAY_PERF_WORKSPACE=perf-baseline-c1000-read4k-r1 pnpm perf:reset
+LIXRAY_PERF_REPOSITORY=perf-baseline-c1000-read4k-r1 pnpm perf:reset
 LIXRAY_PERF_SPANS=true \
   RUST_LOG=lixray=info,lix_perf=debug \
   pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --workspace perf-baseline-c1000-read4k-r1 \
+  --repository perf-baseline-c1000-read4k-r1 \
   --operation read-point-4k \
   --commits 1000 \
   --output perf/results/baseline.json
 # edit vendor/lix or lix-server
-LIXRAY_PERF_WORKSPACE=perf-candidate-c1000-read4k-r1 pnpm perf:reset
+LIXRAY_PERF_REPOSITORY=perf-candidate-c1000-read4k-r1 pnpm perf:reset
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --workspace perf-candidate-c1000-read4k-r1 \
+  --repository perf-candidate-c1000-read4k-r1 \
   --operation read-point-4k \
   --commits 1000 \
   --output perf/results/candidate.json

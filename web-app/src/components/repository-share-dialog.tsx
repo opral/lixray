@@ -8,13 +8,13 @@ import { cn } from "~/lib/utils";
 type ShareMode = "edit" | "read";
 type CopyState = "idle" | "copied" | "error";
 
-interface WorkspaceShareDialogProps {
+interface RepositoryShareDialogProps {
 	/** The public, canonical resource URL. */
 	canonicalUrl: string;
 	/** The canonical resource URL with its opaque `invite` capability token. */
 	editableUrl: string;
 	documentName: string;
-	workspaceName: string;
+	repositoryName: string;
 	/**
 	 * An optional composed trigger. Pass a single button-like element when the
 	 * surrounding shell owns the Share button.
@@ -36,18 +36,18 @@ async function copyText(value: string) {
 	await navigator.clipboard.writeText(value);
 }
 
-export function WorkspaceShareDialog({
+export function RepositoryShareDialog({
 	canonicalUrl,
 	editableUrl,
 	documentName,
-	workspaceName,
+	repositoryName,
 	trigger,
 	open,
 	onOpenChange,
 	onCopied,
 	onOpenTeam,
 	className,
-}: WorkspaceShareDialogProps) {
+}: RepositoryShareDialogProps) {
 	const [shareMode, setShareMode] = useState<ShareMode>("read");
 	const [copyState, setCopyState] = useState<CopyState>("idle");
 	const copiedUrl = shareMode === "edit" ? editableUrl : canonicalUrl;
@@ -178,7 +178,7 @@ export function WorkspaceShareDialog({
 								</b>{" "}
 								and join{" "}
 								<b className="font-semibold text-text-secondary">
-									{workspaceName}
+									{repositoryName}
 								</b>{" "}
 								as an editor. Read only copies the plain link.
 							</>

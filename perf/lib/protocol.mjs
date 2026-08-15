@@ -74,7 +74,7 @@ function storageIdentityField(value, name) {
 export class ProtocolClient {
   constructor({
     baseUrl,
-    workspaceId,
+    repositoryId,
     internalToken,
     fetchImpl = globalThis.fetch,
   }) {
@@ -82,7 +82,7 @@ export class ProtocolClient {
       throw new Error("a fetch implementation is required");
     }
     this.endpoint = `${baseUrl.replace(/\/+$/, "")}/lixes/${encodeURIComponent(
-      workspaceId,
+      repositoryId,
     )}/lix/v1`;
     this.internalToken = internalToken;
     this.fetchImpl = fetchImpl;

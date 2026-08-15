@@ -1,14 +1,14 @@
 import { useEffect } from "react";
 import { useAuth } from "~/components/auth-provider";
-import { useWorkspace } from "~/components/workspace-provider";
+import { useRepository } from "~/components/repository-provider";
 import { initializeTelemetry } from "~/lib/telemetry";
 
 let groupedOrganizationId: string | null = null;
-let groupedWorkspaceId: string | null = null;
+let groupedRepositoryId: string | null = null;
 
 export function PostHogAnalytics() {
 	const { isLoaded: authLoaded, user } = useAuth();
-	const { activeWorkspace, isLoaded: workspaceLoaded } = useWorkspace();
+	const { activeRepository, isLoaded: repositoryLoaded } = useRepository();
 	const userId = user?.id;
 
 	useEffect(() => {
@@ -34,41 +34,41 @@ export function PostHogAnalytics() {
 	}, [authLoaded, user, userId]);
 
 	useEffect(() => {
-		if (!authLoaded || !workspaceLoaded) return;
+		if (!authLoaded || !repositoryLoaded) return;
 		let disposed = false;
 		void initializeTelemetry().then((posthog) => {
 			if (!posthog || disposed) return;
-			if (!user || !activeWorkspace) {
+			if (!user || !activeRepository) {
 				posthog.unregister("namespace_id");
 				posthog.unregister("lix_id");
 				groupedOrganizationId = null;
-				groupedWorkspaceId = null;
+				groupedRepositoryId = null;
 				return;
 			}
 
-			const organizationId = activeWorkspace.organization.id;
-			const workspaceId = activeWorkspace.workspace.id;
+			const organizationId = activeRepository.organization.id;
+			const repositoryId = activeRepository.repository.id;
 			if (groupedOrganizationId !== organizationId) {
 				posthog.group("organization", organizationId, {
 					namespace_id: organizationId,
 				});
 				groupedOrganizationId = organizationId;
 			}
-			if (groupedWorkspaceId !== workspaceId) {
-				posthog.group("workspace", workspaceId, {
-					lix_id: workspaceId,
+			if (groupedRepositoryId !== repositoryId) {
+				posthog.group("repository", repositoryId, {
+					lix_id: repositoryId,
 				});
-				groupedWorkspaceId = workspaceId;
+				groupedRepositoryId = repositoryId;
 			}
 			posthog.register({
 				namespace_id: organizationId,
-				lix_id: workspaceId,
+				lix_id: repositoryId,
 			});
 		});
 		return () => {
 			disposed = true;
 		};
-	}, [activeWorkspace, authLoaded, user, workspaceLoaded]);
+	}, [activeRepository, authLoaded, user, repositoryLoaded]);
 
 	return null;
 }

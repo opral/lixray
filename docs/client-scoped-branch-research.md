@@ -74,7 +74,7 @@ When reopening a remote LixRay repository:
    sending a client-selected account through the handshake.
 
 Switching replaces only that protocol session's pinned branch and restarts its
-observations. It does not write the workspace branch selector, so another
+observations. It does not write the repository branch selector, so another
 client is unaffected. SQL such as `lix_active_branch_id()` continues to work
 because it resolves against the requesting client's pinned server session.
 

@@ -9,7 +9,7 @@ const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 // The stack outlives dev.mjs on purpose: stopping stateful services on every
 // iteration (each Ctrl-C or script kill) SIGKILLed lix-server mid-write and
-// left workspace stores in a state whose next open hangs. `--down` is the
+// left repository stores in a state whose next open hangs. `--down` is the
 // explicit teardown.
 const teardownRequested = process.argv.includes("--down");
 const signalExitCodes = {

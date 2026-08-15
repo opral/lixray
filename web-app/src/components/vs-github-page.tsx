@@ -8,7 +8,7 @@ import {
 	Wrench,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { SiteHeader, useWorkspaceCta } from "~/components/site-header";
+import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 import { cn } from "~/lib/utils";
 
 const primaryButton =
@@ -19,7 +19,7 @@ const visualCard =
 	"rounded-2xl border border-[#1c1917]/8 bg-white shadow-[0_24px_60px_rgba(28,25,23,.08)]";
 
 export function VsGithubPage() {
-	const { user, workspaceTo } = useWorkspaceCta();
+	const { user, repositoryTo } = useRepositoryCta();
 	const heroCtaLabel = user ? "Open LixRay" : "Create your repo for free";
 
 	return (
@@ -44,7 +44,7 @@ export function VsGithubPage() {
 						them.
 					</p>
 					<div className="mt-3 flex flex-wrap items-center justify-center gap-3">
-						<a className={primaryButton} href={workspaceTo}>
+						<a className={primaryButton} href={repositoryTo}>
 							{heroCtaLabel}
 						</a>
 						{user ? null : (
@@ -455,7 +455,7 @@ export function VsGithubPage() {
 					<h2 className="m-0 max-w-[720px] text-[clamp(2rem,4.5vw,2.625rem)] leading-[1.1] font-bold tracking-[-.03em] text-balance">
 						Put your company into a repo
 					</h2>
-					<a className={cn(primaryButton, "mt-1")} href={workspaceTo}>
+					<a className={cn(primaryButton, "mt-1")} href={repositoryTo}>
 						{heroCtaLabel}
 					</a>
 				</section>

@@ -5,8 +5,8 @@ import { createLixConnectionDetails } from "./lix-connection-prompt.ts";
 const lix = {
 	lixId: "8b4382f8-239d-4b76-bb77-401de5f1d6ae",
 	namespace: "samuel",
-	lixSlug: "workspace",
-	lixName: "Workspace",
+	lixSlug: "repository",
+	lixName: "Repository",
 };
 
 void test("uses a Codex-safe isolated development registration on localhost", () => {
@@ -19,7 +19,7 @@ void test("uses a Codex-safe isolated development registration on localhost", ()
 	assert.equal(details.mcpUrl, "http://127.0.0.1:8787/mcp");
 	assert.match(
 		details.prompt,
-		/^Connect to my Lix repository @samuel\/workspace\./,
+		/^Connect to my Lix repository @samuel\/repository\./,
 	);
 	assert.match(
 		details.prompt,

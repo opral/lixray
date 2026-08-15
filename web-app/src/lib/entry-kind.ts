@@ -1,4 +1,4 @@
-/** The two persisted workspace entry surfaces. */
+/** The two persisted repository entry surfaces. */
 export const EntryKind = {
 	File: "file",
 	Directory: "directory",

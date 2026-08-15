@@ -34,7 +34,7 @@ void test("team invite tokens survive sign-in and are consumed once", () => {
 	const invite = {
 		token,
 		namespace: "atelier",
-		workspaceSlug: "website",
+		repositorySlug: "website",
 	} as const;
 	stageTeamInvite(invite);
 	assert.deepEqual(peekTeamInvite(), invite);
@@ -47,7 +47,7 @@ void test("staged team invites are only accepted on their intended route", () =>
 	const invite = {
 		token: "tm_AAAAAAAAAAAAAAAAAAAA" as const,
 		namespace: "atelier",
-		workspaceSlug: "website",
+		repositorySlug: "website",
 	};
 	assert.equal(
 		stagedTeamInviteForRoute(invite, "atelier", "website"),

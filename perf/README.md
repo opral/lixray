@@ -2,7 +2,7 @@
 
 This worker measures one request at a time through the full
 `lix-server -> Lix server protocol -> Lix engine -> configured storage` path.
-It is intentionally opinionated: every invocation uses a fresh workspace,
+It is intentionally opinionated: every invocation uses a fresh repository,
 seeds one of the fixed 1,000-, 5,000-, or 10,000-file corpora, creates an
 exact history depth, and measures one operation family. There is no resume
 mode because reusing setup state makes write comparisons ambiguous.
@@ -51,7 +51,7 @@ the same setup plan.
 The runner performs no pre-timing current-state or history accounting scan:
 such a scan would prime the same blocks used by CRUD validation. It derives
 the start counts from acknowledged seed mutations and verifies actual file and
-commit counts after timing. A reused workspace fails this final invariant
+commit counts after timing. A reused repository fails this final invariant
 instead of silently producing a misleading result.
 
 ## Run
@@ -59,11 +59,11 @@ instead of silently producing a misleading result.
 Start the local stack and provide its local internal token:
 
 ```sh
-LIXRAY_PERF_WORKSPACE=perf-main-c1000-read4k-r1 pnpm perf:reset
+LIXRAY_PERF_REPOSITORY=perf-main-c1000-read4k-r1 pnpm perf:reset
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --workspace perf-main-c1000-read4k-r1 \
+  --repository perf-main-c1000-read4k-r1 \
   --operation read-point-4k \
   --files 1000 \
   --commits 1000 \
@@ -118,7 +118,7 @@ causal comparison.
 that is a multiple of 10, preserving its stated deterministic weights.
 `update-mixed-native-single` and `update-mixed-native-batch` require
 `--file-write-transport binary`. For a fair one-logical-operation comparison,
-repeat each command on independently cloned workspaces, counterbalance the two
+repeat each command on independently cloned repositories, counterbalance the two
 operation families, and compare the report's explicit
 `mutationCommitsPerOperation` (10 versus 1). A native batch frame is limited
 to 1,024 files; the client rejects larger calls rather than silently creating
@@ -144,7 +144,7 @@ adds its tracked branch-descriptor commit to the verified final count.
 `branch-switch` is a distribution: it first creates two sibling branches outside
 the timer and then alternates the live session between them. The report records
 those two setup commits separately, so its expected final count remains
-auditable. Repeat a mutation with fresh workspace IDs to obtain independent
+auditable. Repeat a mutation with fresh repository IDs to obtain independent
 samples. For a hot-session mutation distribution, pass `--hot-session` with
 `--preseeded` and `--samples` of at least two: it keeps one fresh clone and one
 live protocol session, records each sequential write, and verifies the expected final commit
@@ -177,13 +177,13 @@ deployed revision.
 
 ## Scaling and comparison method
 
-Use fresh workspace IDs for every point and run at least five independent
+Use fresh repository IDs for every point and run at least five independent
 repetitions per candidate. The canonical scaling matrix crosses
 `--files 1000|5000|10000` with `--commits 1000|5000` total commits. (The
 smaller 2/10/100 depths remain useful diagnosis points when they satisfy the
 seed minimum shown above.) Counterbalance baseline and candidate runs (for
 example A/B/B/A) instead of running every baseline first. For mutations,
-aggregate the one-request reports across workspaces; for reads, compare each
+aggregate the one-request reports across repositories; for reads, compare each
 report's median and p95.
 
 By default, setup and timing share a session, so the result is explicitly
@@ -191,9 +191,9 @@ reported as a post-ingest operational profile: cache heat and compaction
 backlog vary with history depth. To isolate the timed operation, first create a
 template using a non-mutating read run and gracefully stop lix-server. For each
 repetition, copy that closed template through the object-store API to one
-workspace, start a fresh server process, run only that clone with `--preseeded`,
+repository, start a fresh server process, run only that clone with `--preseeded`,
 then gracefully stop the server before preparing the next clone. A single
-restart followed by several clones is not isolated: open-workspace retention,
+restart followed by several clones is not isolated: open-repository retention,
 threads, and cache pressure change across the series. `--preseeded` performs no
 setup or pre-timing accounting scan; the final accounting check fails if the
 clone was not at the requested exact depth.
@@ -211,7 +211,7 @@ For the local Compose MinIO stack, a stopped template can be copied with `mc`
 ```sh
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --workspace perf-template-c1000 \
+  --repository perf-template-c1000 \
   --operation read-point-4k \
   --files 1000 \
   --commits 1000 \
@@ -226,7 +226,7 @@ docker compose run --rm --no-deps --entrypoint /bin/sh minio-init -c \
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --workspace perf-candidate-c1000-r1 \
+  --repository perf-candidate-c1000-r1 \
   --operation create-4k \
   --files 1000 \
   --commits 1000 \
@@ -259,11 +259,11 @@ raw octet-stream bytes for the binary path; neither includes HTTP framing.
 Storage size, server RSS, object-store requests, and cache size are properties
 outside the protocol response. For memory, sample the lix-server container
 after the runner closes its child protocol session but before stopping the
-server; this measures the retained open-workspace runtime. For physical
+server; this measures the retained open-repository runtime. For physical
 storage, gracefully stop lix-server with its 30-second Compose grace period
-before measuring the workspace prefix, so SlateDB has closed and background
-work is no longer changing the result. Key both snapshots by workspace ID,
-target revision, Compose project, cache configuration, and open-workspace cap.
+before measuring the repository prefix, so SlateDB has closed and background
+work is no longer changing the result. Key both snapshots by repository ID,
+target revision, Compose project, cache configuration, and open-repository cap.
 
 Run the fast harness tests with:
 

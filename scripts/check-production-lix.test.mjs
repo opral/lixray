@@ -5,7 +5,7 @@ import { checkProductionLix } from "./check-production-lix.mjs";
 void test("checks a handshake and read, then closes the canary session", async () => {
 	const requests = [];
 	const result = await checkProductionLix({
-		workspaceUrl: "https://lixray.example/@lixray/canary",
+		repositoryUrl: "https://lixray.example/@lixray/canary",
 		fetchImpl: async (url, init = {}) => {
 			requests.push({
 				method: init.method ?? "GET",
@@ -24,7 +24,7 @@ void test("checks a handshake and read, then closes the canary session", async (
 
 	assert.deepEqual(result, {
 		protocolVersion: 2,
-		workspace: "/@lixray/canary",
+		repository: "/@lixray/canary",
 	});
 	assert.deepEqual(requests, [
 		{
@@ -49,7 +49,7 @@ void test("reports recovering repositories and does not attempt a close", async 
 	let requests = 0;
 	await assert.rejects(
 		checkProductionLix({
-			workspaceUrl: "https://lixray.example/@lixray/canary",
+			repositoryUrl: "https://lixray.example/@lixray/canary",
 			fetchImpl: async () => {
 				requests += 1;
 				return Response.json(
@@ -66,7 +66,7 @@ void test("reports recovering repositories and does not attempt a close", async 
 void test("fails when the canary session cannot close", async () => {
 	await assert.rejects(
 		checkProductionLix({
-			workspaceUrl: "https://lixray.example/@lixray/canary",
+			repositoryUrl: "https://lixray.example/@lixray/canary",
 			fetchImpl: async (url, init = {}) => {
 				const pathname = new URL(url).pathname;
 				if (pathname.endsWith("/lix/v1/")) {

@@ -19,14 +19,14 @@ const SESSION_STATE_VERSION = 1;
 const PREFERENCES_STATE_VERSION = 1;
 const REVIEW_STATE_VERSION = 1;
 
-export function createWorkspaceSessionStateStore(args: {
+export function createRepositorySessionStateStore(args: {
 	readonly userId: string;
-	readonly workspaceId: string;
+	readonly repositoryId: string;
 	readonly clientState?: AtelierClientState;
 	readonly storage?: Storage;
 	/**
 	 * Adjusts the snapshot once at store creation, receiving the persisted
-	 * state (null on a first visit) — e.g. the empty-workspace
+	 * state (null on a first visit) — e.g. the empty-repository
 	 * getting-started seed. The result is not persisted until the shell's
 	 * first own write.
 	 */
@@ -72,18 +72,18 @@ export function createWorkspaceSessionStateStore(args: {
  * Atelier only observes the active branch; LixRay keeps the mutation
  * surface (create/switch) for its own routing and UI.
  */
-export type WorkspaceBranchSession = AtelierBranchSession & {
+export type RepositoryBranchSession = AtelierBranchSession & {
 	createBranch(name: string): Promise<string>;
 	switchBranch(branchId: string): Promise<void>;
 };
 
-export function createWorkspaceBranchSession(args: {
+export function createRepositoryBranchSession(args: {
 	readonly session: RepositoryLixSession;
 	readonly onSwitch: (
 		branchId: string,
 		context?: { readonly failedBranchId?: string },
 	) => Promise<void> | void;
-}): WorkspaceBranchSession {
+}): RepositoryBranchSession {
 	let latestSelection = 0;
 	let pendingSelection = Promise.resolve();
 	const select = <T>(
@@ -143,10 +143,10 @@ export function createWorkspaceBranchSession(args: {
 	};
 }
 
-export function createWorkspacePreferencesStore(args: {
+export function createRepositoryPreferencesStore(args: {
 	readonly client: LixraySupabaseClient | null;
 	readonly userId: string;
-	readonly workspaceId: string;
+	readonly repositoryId: string;
 	readonly clientState?: AtelierClientState;
 	readonly storage?: Storage;
 }): AtelierPreferencesStore {
@@ -183,7 +183,7 @@ export function createWorkspacePreferencesStore(args: {
 				.from("user_lix_preferences")
 				.select("atelier_layout")
 				.eq("user_id", args.userId)
-				.eq("lix_id", args.workspaceId)
+				.eq("lix_id", args.repositoryId)
 				.maybeSingle();
 			if (error) throw error;
 			return data?.atelier_layout
@@ -195,7 +195,7 @@ export function createWorkspacePreferencesStore(args: {
 			const { error } = await client.from("user_lix_preferences").upsert(
 				{
 					user_id: args.userId,
-					lix_id: args.workspaceId,
+					lix_id: args.repositoryId,
 					atelier_layout: preferences,
 					updated_at: new Date().toISOString(),
 				},
@@ -206,10 +206,10 @@ export function createWorkspacePreferencesStore(args: {
 	};
 }
 
-export function createWorkspaceReviewStatusStore(args: {
+export function createRepositoryReviewStatusStore(args: {
 	readonly client: LixraySupabaseClient | null;
 	readonly userId: string;
-	readonly workspaceId: string;
+	readonly repositoryId: string;
 	readonly storage?: Storage;
 	readonly durableStorage?: Storage;
 }): AtelierReviewStatusStore {
@@ -229,7 +229,7 @@ export function createWorkspaceReviewStatusStore(args: {
 		const { error } = await client.from("user_lix_review_resolutions").upsert(
 			{
 				user_id: args.userId,
-				lix_id: args.workspaceId,
+				lix_id: args.repositoryId,
 				branch_id: review.branchId,
 				review_id: review.reviewId,
 				file_id: review.fileId,
@@ -275,7 +275,7 @@ export function createWorkspaceReviewStatusStore(args: {
 				.from("user_lix_review_resolutions")
 				.select("review_id")
 				.eq("user_id", args.userId)
-				.eq("lix_id", args.workspaceId)
+				.eq("lix_id", args.repositoryId)
 				.eq("branch_id", branchId);
 			if (error) {
 				if (localIds.length > 0) return [...new Set(localIds)];
@@ -350,9 +350,9 @@ function reviewResolutionKey(review: AtelierReviewResolution): string {
 function namespacedAtelierStateKey(
 	family: "shell" | "preferences" | "reviews",
 	version: number,
-	args: { readonly userId: string; readonly workspaceId: string },
+	args: { readonly userId: string; readonly repositoryId: string },
 ): string {
-	return `lixray.atelier.${family}.v${version}:${args.userId}:${args.workspaceId}`;
+	return `lixray.atelier.${family}.v${version}:${args.userId}:${args.repositoryId}`;
 }
 
 function readStoredJson(storage: Storage, key: string): unknown {
