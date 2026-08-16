@@ -96,6 +96,39 @@ export default defineConfig(({ command }) => ({
 	},
 	server: {
 		fs: { allow: [repositoryRoot] },
+		// The Codex/browser preview tunnels the Vite origin, but not arbitrary
+		// localhost ports. Proxy local Supabase through that same origin so the
+		// browser and the server resolve repository metadata from one stack.
+		proxy:
+			command === "serve"
+				? {
+						"/auth": {
+							target: "http://127.0.0.1:54321",
+							changeOrigin: true,
+						},
+						"/rest": {
+							target: "http://127.0.0.1:54321",
+							changeOrigin: true,
+						},
+						"/storage": {
+							target: "http://127.0.0.1:54321",
+							changeOrigin: true,
+						},
+						"/realtime": {
+							target: "http://127.0.0.1:54321",
+							changeOrigin: true,
+							ws: true,
+						},
+						"/functions": {
+							target: "http://127.0.0.1:54321",
+							changeOrigin: true,
+						},
+						"/graphql": {
+							target: "http://127.0.0.1:54321",
+							changeOrigin: true,
+						},
+					}
+				: undefined,
 	},
 	optimizeDeps: {
 		// Atelier is linked source and first reached through a lazy workspace
