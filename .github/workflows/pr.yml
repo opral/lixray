@@ -81,7 +81,11 @@ jobs:
           tree="$(git rev-parse 'HEAD^{tree}')"
           server_inputs="$(
             {
-              git ls-tree HEAD -- .dockerignore .gitmodules vendor/lix vendor/revisions.env
+              git ls-tree HEAD -- \
+                .dockerignore \
+                .gitmodules \
+                scripts/resolve-gitlink-submodules.sh \
+                vendor/lix
               git ls-tree -r HEAD -- lix-server
             } | git hash-object --stdin
           )"
@@ -232,8 +236,7 @@ jobs:
                 pnpm-lock.yaml \
                 pnpm-workspace.yaml \
                 vendor/atelier \
-                vendor/lix \
-                vendor/revisions.env
+                vendor/lix
               git ls-tree -r HEAD -- scripts web-app
               printf 'posthog-host=%s\nposthog-token=%s\nsupabase-url=%s\nsupabase-key=%s\n' \
                 "$POSTHOG_HOST" "$POSTHOG_TOKEN" "$SUPABASE_URL" "$SUPABASE_KEY"

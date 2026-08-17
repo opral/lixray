@@ -4,21 +4,18 @@ ARG LIXRAY_IMAGE_VARIANT=production
 
 FROM rust:1-bookworm AS builder
 ARG CARGO_BUILD_JOBS=2
+ARG RAILWAY_GIT_COMMIT_SHA
+ARG RAILWAY_GIT_REPO_NAME
+ARG RAILWAY_GIT_REPO_OWNER
 WORKDIR /app
 
 # This Dockerfile uses the repository root as its build context so the server
 # and its vendored Lix checkout are built together. Railway source snapshots do
-# not populate submodules, so recover the revision recorded by vendor:sync.
-COPY vendor/revisions.env ./vendor/revisions.env
+# not populate submodules, so recover the gitlink from the triggering commit.
+COPY .gitmodules ./.gitmodules
+COPY scripts/resolve-gitlink-submodules.sh ./scripts/resolve-gitlink-submodules.sh
 COPY vendor/lix ./vendor/lix
-RUN set -eu; \
-	. ./vendor/revisions.env; \
-	mkdir -p vendor/lix; \
-	if [ ! -f vendor/lix/packages/lix/Cargo.toml ]; then \
-		curl -fsSL "https://github.com/opral/lix/archive/${LIX_REVISION}.tar.gz" -o /tmp/lix.tar.gz; \
-		tar -xzf /tmp/lix.tar.gz -C vendor/lix --strip-components=1; \
-		rm /tmp/lix.tar.gz; \
-	fi
+RUN ./scripts/resolve-gitlink-submodules.sh vendor/lix
 RUN cp vendor/lix/rust-toolchain.toml ./rust-toolchain.toml
 COPY lix-server/Cargo.toml lix-server/Cargo.lock ./lix-server/
 COPY lix-server/src ./lix-server/src

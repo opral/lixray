@@ -7,8 +7,8 @@
       "lix-server/**",
       "vendor/lix",
       "vendor/lix/**",
-      "vendor/revisions.env",
       ".gitmodules",
+      "scripts/resolve-gitlink-submodules.sh",
       "railway.json"
     ]
   },

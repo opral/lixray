@@ -7,7 +7,6 @@
 			"web-app/**",
 			"vendor/atelier",
 			"vendor/atelier/**",
-			"vendor/revisions.env",
 			"vendor/lix",
 			"vendor/lix/**",
 			"package.json",
