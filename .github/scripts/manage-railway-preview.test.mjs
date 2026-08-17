@@ -42,11 +42,28 @@ test("deletes the exact CI-managed preview on PR close", async () => {
   assert.match(await readFile(fixture.calls, "utf8"), /existing-preview/);
 });
 
+test("publishes a Railway domain for the GitHub deployment URL", async () => {
+  const fixture = await createFixture("with-preview");
+  const result = runManager(fixture, "url", false);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /https:\/\/lixray-pr-214\.up\.railway\.app/);
+  assert.match(
+    await readFile(fixture.output, "utf8"),
+    /preview_url=https:\/\/lixray-pr-214\.up\.railway\.app/,
+  );
+  const calls = await readFile(fixture.calls, "utf8");
+  assert.match(calls, /railway domain list/);
+  assert.match(calls, /--environment existing-preview/);
+  assert.match(calls, /--service web-service/);
+});
+
 async function createFixture(mode) {
   const directory = await mkdtemp(join(tmpdir(), "lixray-preview-"));
   const calls = join(directory, "calls.jsonl");
   const output = join(directory, "github-output");
   const curl = join(directory, "curl");
+  const railway = join(directory, "railway");
   await Promise.all([writeFile(calls, ""), writeFile(output, "")]);
   await writeFile(
     curl,
@@ -68,8 +85,22 @@ else
 fi
 `,
   );
-  await chmod(curl, 0o755);
-  return { calls, directory, mode, output };
+  await writeFile(
+    railway,
+    `#!/usr/bin/env bash
+set -euo pipefail
+printf 'railway %s\n' "$*" >> "$MOCK_CALLS"
+if test "$1" = domain && test "\${2:-}" = list; then
+	printf '{"serviceDomains":[]}\n'
+elif test "$1" = domain; then
+	printf '{"domain":"lixray-pr-214.up.railway.app"}\n'
+else
+	exit 2
+fi
+`,
+  );
+  await Promise.all([chmod(curl, 0o755), chmod(railway, 0o755)]);
+  return { calls, directory, mode, output, railway };
 }
 
 function runManager(fixture, action, includePreviewBase = true) {
@@ -84,7 +115,9 @@ function runManager(fixture, action, includePreviewBase = true) {
       PATH: `${fixture.directory}:${process.env.PATH}`,
       PR_NUMBER: "214",
       RAILWAY_API_TOKEN: "railway-token",
+      RAILWAY_BIN: fixture.railway,
       RAILWAY_PROJECT_ID: "project",
+      RAILWAY_WEB_SERVICE: "web-service",
       ...(includePreviewBase ? { RAILWAY_PREVIEW_BASE_ENVIRONMENT: "preview-base" } : {}),
     },
   });

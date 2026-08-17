@@ -50,9 +50,19 @@ test("PR previews promote both tested images instead of rebuilding source", asyn
 
 	assert.match(workflow, /needs\.web-image\.outputs\.image/);
 	assert.match(workflow, /manage-railway-preview\.sh ensure/);
+	assert.match(workflow, /manage-railway-preview\.sh url/);
+	assert.match(workflow, /name: lixray-pr-/);
+	assert.match(
+		workflow,
+		/url: \$\{\{ needs\.deploy-preview\.outputs\.preview_url \}\}/,
+	);
+	assert.match(workflow, /publish-preview:/);
 	assert.match(workflow, /RAILWAY_DEPLOY_POLICY: pr/);
 	assert.match(workflow, /promote-production\.sh/);
 	assert.match(cleanupWorkflow, /manage-railway-preview\.sh delete/);
+	assert.match(cleanupWorkflow, /environments\/\$PREVIEW_NAME/);
+	assert.match(cleanupWorkflow, /GITHUB_ENVIRONMENT_ADMIN_TOKEN/);
+	assert.match(cleanupWorkflow, /gh api --method DELETE/);
 	assert.match(
 		coordinator,
 		/update_service "\$RAILWAY_WEB_SERVICE" "\$WEB_IMAGE"/,

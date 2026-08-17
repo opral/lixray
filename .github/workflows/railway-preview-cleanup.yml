@@ -37,3 +37,18 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: .github/scripts/manage-railway-preview.sh delete
+
+      - name: Delete GitHub preview environment
+        if: always()
+        env:
+          PREVIEW_NAME: lixray-pr-${{ github.event.pull_request.number }}
+        run: |
+          : "${GITHUB_ENVIRONMENT_ADMIN_TOKEN:?}"
+          export GH_TOKEN="$GITHUB_ENVIRONMENT_ADMIN_TOKEN"
+          endpoint="repos/${{ github.repository }}/environments/$PREVIEW_NAME"
+          if gh api "$endpoint" >/dev/null 2>&1; then
+            gh api --method DELETE "$endpoint"
+            echo "Deleted GitHub preview environment $PREVIEW_NAME."
+          else
+            echo "GitHub preview environment $PREVIEW_NAME is already absent."
+          fi

@@ -185,6 +185,8 @@ GitHub Actions is the only build and deployment authority:
 - pull request CI creates an isolated Railway environment without initial
   source deployments, points both services at tested image digests, and deletes
   the environment when the pull request closes;
+- each healthy preview is published as a GitHub deployment with a **View
+  deployment** link in the pull request;
 - merging to `main` applies database migrations and promotes the tested web and
   server image digests together;
 - `railway.json` and `web-app/railway.json` define the two services;
@@ -204,7 +206,10 @@ Put these secrets in the Infisical `prod` environment under `/ci`:
   containing demo configuration and isolated preview storage, but no production
   Supabase credentials;
 - `GHCR_READ_USERNAME`: the GitHub user owning a classic PAT;
-- `GHCR_READ_TOKEN`: that PAT with `read:packages`.
+- `GHCR_READ_TOKEN`: that PAT with `read:packages`;
+- `GITHUB_ENVIRONMENT_ADMIN_TOKEN`: a fine-grained token scoped only to this
+  repository with Administration write access, used to delete closed PR
+  environments because GitHub's workflow token cannot delete them;
 - `VITE_SUPABASE_URL`: the public production Supabase project URL;
 - `VITE_SUPABASE_KEY`: the public production Supabase publishable key.
 
@@ -260,7 +265,9 @@ Both production services remain image-managed, and their GitHub autodeploy is
 disabled. CI clones the isolated preview-base configuration without starting a
 deployment, applies the preview policy, and deploys the tested web and server
 images together. The same coordinator promotes both images in production.
-Preview data is disposable and isolated by the Railway environment.
+Preview data is disposable and isolated by the Railway environment. Closing or
+merging the pull request deletes both the Railway environment and its matching
+GitHub deployment environment.
 Database-sensitive changes continue to use local Compose or an explicitly
 requested integration environment.
 

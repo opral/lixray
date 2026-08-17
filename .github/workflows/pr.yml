@@ -565,6 +565,8 @@ jobs:
       - web-image
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      preview_url: ${{ steps.preview.outputs.preview_url }}
     permissions:
       contents: read
       id-token: write
@@ -660,6 +662,14 @@ jobs:
           WEB_IMAGE: ${{ needs.web-image.outputs.image }}
         run: .github/scripts/promote-production.sh
 
+      - name: Publish preview URL
+        if: steps.credentials.outputs.available == 'true'
+        id: preview
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: .github/scripts/manage-railway-preview.sh url
+
       - name: Report preview statuses
         if: steps.credentials.outputs.available == 'true'
         env:
@@ -685,3 +695,21 @@ jobs:
 
           report_status 'lixray - lixray-web'
           report_status 'lixray - lix-server'
+
+  publish-preview:
+    name: Publish preview link
+    if: needs.deploy-preview.outputs.preview_url != ''
+    needs:
+      - deploy-preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment:
+      name: lixray-pr-${{ github.event.pull_request.number }}
+      url: ${{ needs.deploy-preview.outputs.preview_url }}
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Publish GitHub deployment
+        run: echo "Preview is available at ${{ needs.deploy-preview.outputs.preview_url }}"

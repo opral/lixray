@@ -8,6 +8,7 @@ set -euo pipefail
 
 ACTION="${1:-}"
 PREVIEW_NAME="lixray-pr-$PR_NUMBER"
+RAILWAY_BIN="${RAILWAY_BIN:-railway}"
 
 graphql() {
 	local payload="$1"
@@ -122,11 +123,69 @@ delete_preview() {
 	echo "Deleted Railway preview environment $PREVIEW_NAME ($preview_id)."
 }
 
+preview_domain_from_json() {
+	jq -r '
+		[.. | objects | .domain? // empty |
+			select(type == "string" and endswith(".up.railway.app"))][0] // empty
+	'
+}
+
+resolve_preview_url() {
+	: "${RAILWAY_WEB_SERVICE:?}"
+	local environments preview_id domains domain attempt
+	environments="$(list_environments)"
+	preview_id="$(environment_id_by_name "$environments" "$PREVIEW_NAME")"
+	if test -z "$preview_id"; then
+		echo "Railway preview environment not found: $PREVIEW_NAME" >&2
+		return 1
+	fi
+
+	domain=""
+	for attempt in 1 2 3; do
+		if domains="$(
+			"$RAILWAY_BIN" domain list \
+				--project "$RAILWAY_PROJECT_ID" \
+				--environment "$preview_id" \
+				--service "$RAILWAY_WEB_SERVICE" \
+				--json
+		)"; then
+			domain="$(preview_domain_from_json <<<"$domains")"
+		fi
+		if test -n "$domain"; then
+			break
+		fi
+		if domains="$(
+			"$RAILWAY_BIN" domain \
+				--project "$RAILWAY_PROJECT_ID" \
+				--environment "$preview_id" \
+				--service "$RAILWAY_WEB_SERVICE" \
+				--json
+		)"; then
+			domain="$(preview_domain_from_json <<<"$domains")"
+		fi
+		if test -n "$domain"; then
+			break
+		fi
+		echo "Railway preview domain is not ready; retrying ($attempt/3)." >&2
+		sleep "$attempt"
+	done
+	if test -z "$domain"; then
+		echo "Railway did not provide a public domain for $PREVIEW_NAME." >&2
+		return 1
+	fi
+
+	echo "Railway preview URL: https://$domain"
+	if test -n "${GITHUB_OUTPUT:-}"; then
+		echo "preview_url=https://$domain" >>"$GITHUB_OUTPUT"
+	fi
+}
+
 case "$ACTION" in
 	ensure) ensure_preview ;;
 	delete) delete_preview ;;
+	url) resolve_preview_url ;;
 	*)
-		echo "Usage: $0 ensure|delete" >&2
+		echo "Usage: $0 ensure|delete|url" >&2
 		exit 2
 		;;
 esac
