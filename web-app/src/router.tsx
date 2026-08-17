@@ -1,10 +1,11 @@
 import { createBrowserHistory, createRouter } from "@tanstack/react-router";
+import { isDemoModeEnabled } from "./lib/demo-client";
 import { routeTree } from "./routeTree.gen";
 
 export function getRouter() {
 	return createRouter({
 		history:
-			typeof window !== "undefined" && import.meta.env.VITE_LIXRAY_DEMO === "1"
+			typeof window !== "undefined" && isDemoModeEnabled
 				? createBrowserHistory({
 						parseLocation: () => {
 							const rawState: unknown = window.history.state;

@@ -2,9 +2,10 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StartClient } from "@tanstack/react-start/client";
 import { StrictMode, startTransition } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
+import { isDemoModeEnabled } from "./lib/demo-client";
 import { getRouter } from "./router";
 
-if (import.meta.env.VITE_LIXRAY_DEMO === "1") {
+if (isDemoModeEnabled) {
 	const router = getRouter();
 	void router.load().then(() => {
 		startTransition(() => {
