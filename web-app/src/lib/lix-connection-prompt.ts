@@ -31,9 +31,9 @@ export function createLixConnectionDetails({
 	const previewUrl = `${normalizedOrigin}/@${encodeURIComponent(namespace)}/${encodeURIComponent(lixSlug)}`;
 	const lixReference = `@${namespace}/${lixSlug}`;
 
-	const prompt = `Connect to my Lix repository ${lixReference}.
+	const prompt = `Guide the user to connect to this MCP server for Lix repository ${lixReference} (${lixId}): [${mcpUrl}](${mcpUrl}).
 
-Guide the user to connect to this MCP server for Lix ${lixId}: [${mcpUrl}](${mcpUrl}). The user must connect and authenticate it themselves because agents cannot connect MCP servers from the chat. If ${serverName} is already connected, reuse it.
+The user must connect and authenticate it themselves because agents cannot connect MCP servers from the chat. If ${serverName} is already connected, reuse it.
 
 Once connected, and the lix has no files, guide the user in setting up their repository.
 
