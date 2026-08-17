@@ -529,6 +529,7 @@ export function RepositoryAtelier({
 			namespace,
 			repositorySlug: repositorySlug,
 			repositoryId: repositoryId,
+			replicaId: atelierUserId,
 			getAccessToken,
 			refreshAccessToken,
 			allowAnonymous: isReadOnly,

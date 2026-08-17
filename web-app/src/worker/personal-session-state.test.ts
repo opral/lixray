@@ -444,6 +444,7 @@ void test("lix sessions use unified remote Lix with session-local branch state a
 	const session = await openRepositoryLixSession({
 		namespace: "acme",
 		repositorySlug: "launch-q3",
+		replicaId: "test-user",
 		origin: "https://lixray.test",
 		getAccessToken: async () => "token",
 		initialBranchId: "invalid-branch",

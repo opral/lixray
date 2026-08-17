@@ -56,6 +56,7 @@ void test("retries a recovering repository until its handshake succeeds", async 
 	const session = await openRepositoryLixSession({
 		namespace: "acme",
 		repositorySlug: "launch-q3",
+		replicaId: "test-user",
 		origin: "https://lixray.test",
 		getAccessToken: async () => "token",
 		fetch,
@@ -116,6 +117,7 @@ void test("refreshes an expired access token and retries the remote request once
 	const session = await openRepositoryLixSession({
 		namespace: "acme-refresh",
 		repositorySlug: "launch-q3-refresh",
+		replicaId: "test-user",
 		origin: "https://lixray.test",
 		getAccessToken: async () => accessToken,
 		refreshAccessToken: async () => {

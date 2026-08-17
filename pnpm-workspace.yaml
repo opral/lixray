@@ -4,6 +4,7 @@ packages:
   - web-app
   - vendor/atelier
   - vendor/lix/packages/js-sdk
+  - vendor/lix/packages/storage-opfs
 
 onlyBuiltDependencies:
   - esbuild
