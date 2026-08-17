@@ -6,7 +6,6 @@ import {
 } from "@opral/atelier";
 import "@opral/atelier/style.css";
 import {
-	Link,
 	Outlet,
 	useNavigate,
 	useParams,
@@ -25,6 +24,7 @@ import {
 import { PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
+import { RepositoryPicker } from "~/components/repository-picker";
 import { RepositoryShareDialog } from "~/components/repository-share-dialog";
 import { Button } from "~/components/ui/button";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
@@ -765,18 +765,12 @@ export function RepositoryAtelier({
 										className: "border-b border-border-subtle bg-bg-app",
 									}}
 									slots={{
-										navbarStart: (
-											<Link
-												to="/home"
-												aria-label="Back to repositories"
-												className="-mr-1 flex size-7 items-center justify-start rounded-[7px] transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
-											>
-												<img
-													src="/lixray-mark.svg"
-													alt=""
-													className="size-[18px]"
-												/>
-											</Link>
+										navbarBrand: (
+											<RepositoryPicker
+												namespaceId={namespaceId}
+												repositoryName={repositoryName}
+												repositorySlug={repositorySlug}
+											/>
 										),
 										navbarEnd: headerActions,
 									}}
