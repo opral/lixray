@@ -9,40 +9,62 @@ const repositoryRoot = resolve(import.meta.dirname, "../..");
 const coordinator = resolve(import.meta.dirname, "promote-production.sh");
 
 test("promotes both immutable images and waits for both deployments", async () => {
-	const fixture = await createFixture();
-	const result = runCoordinator(fixture, {
-		MOCK_SERVER_STATUS: "SUCCESS",
-		MOCK_WEB_STATUS: "SUCCESS",
-	});
+  const fixture = await createFixture();
+  const result = runCoordinator(fixture, {
+    MOCK_SERVER_STATUS: "SUCCESS",
+    MOCK_WEB_STATUS: "SUCCESS",
+  });
 
-	assert.equal(result.status, 0, result.stderr);
-	assert.match(result.stdout, /Railway production release is healthy/);
-	const calls = await readFile(fixture.calls, "utf8");
-	assert.match(calls, /ghcr\.io\/opral\/lixray-web@sha256:web/);
-	assert.match(calls, /ghcr\.io\/opral\/lixray-server@sha256:server/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Railway production release is healthy/);
+  const calls = await readFile(fixture.calls, "utf8");
+  assert.match(calls, /ghcr\.io\/opral\/lixray-web@sha256:web/);
+  assert.match(calls, /ghcr\.io\/opral\/lixray-server@sha256:server/);
 });
 
 test("fails immediately when either deployment reaches a terminal state", async () => {
-	const fixture = await createFixture();
-	const result = runCoordinator(fixture, {
-		MOCK_SERVER_STATUS: "FAILED",
-		MOCK_WEB_STATUS: "SUCCESS",
-	});
+  const fixture = await createFixture();
+  const result = runCoordinator(fixture, {
+    MOCK_SERVER_STATUS: "FAILED",
+    MOCK_WEB_STATUS: "SUCCESS",
+  });
 
-	assert.equal(result.status, 1);
-	assert.match(result.stderr, /ended with FAILED/);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /ended with FAILED/);
+});
+
+test("uses preview deployment policy for a CI-managed PR environment", async () => {
+  const fixture = await createFixture();
+  const result = runCoordinator(
+    fixture,
+    {
+      MOCK_SERVER_STATUS: "SUCCESS",
+      MOCK_WEB_STATUS: "SUCCESS",
+    },
+    {
+      RAILWAY_DEPLOY_POLICY: "pr",
+      RAILWAY_RELEASE_LABEL: "preview",
+      RAILWAY_TARGET_ENVIRONMENT: "preview-environment",
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Railway preview release is healthy/);
+  const calls = await readFile(fixture.calls, "utf8");
+  assert.match(calls, /"sleepApplication":true/);
+  assert.match(calls, /"environmentId":"preview-environment"/);
 });
 
 async function createFixture() {
-	const directory = await mkdtemp(join(tmpdir(), "lixray-promotion-"));
-	const calls = join(directory, "calls.jsonl");
-	const deployed = join(directory, "deployed");
-	const railway = join(directory, "railway");
-	const curl = join(directory, "curl");
+  const directory = await mkdtemp(join(tmpdir(), "lixray-promotion-"));
+  const calls = join(directory, "calls.jsonl");
+  const deployed = join(directory, "deployed");
+  const railway = join(directory, "railway");
+  const curl = join(directory, "curl");
 
-	await writeFile(
-		railway,
-		`#!/usr/bin/env bash
+  await writeFile(
+    railway,
+    `#!/usr/bin/env bash
 set -euo pipefail
 service=""
 while test "$#" -gt 0; do
@@ -55,10 +77,10 @@ else
 	printf '[{"id":"old-%s","status":"SUCCESS"}]\n' "$service"
 fi
 `,
-	);
-	await writeFile(
-		curl,
-		`#!/usr/bin/env bash
+  );
+  await writeFile(
+    curl,
+    `#!/usr/bin/env bash
 set -euo pipefail
 payload=""
 while test "$#" -gt 0; do
@@ -73,34 +95,35 @@ else
 	printf '{"data":{"serviceInstanceDeploy":true}}\n'
 fi
 `,
-	);
-	await Promise.all([chmod(railway, 0o755), chmod(curl, 0o755)]);
-	return { calls, curl, deployed, directory, railway };
+  );
+  await Promise.all([chmod(railway, 0o755), chmod(curl, 0o755)]);
+  return { calls, curl, deployed, directory, railway };
 }
 
-function runCoordinator(fixture, statuses) {
-	return spawnSync("bash", [coordinator], {
-		cwd: repositoryRoot,
-		encoding: "utf8",
-		env: {
-			...process.env,
-			...statuses,
-			GHCR_READ_TOKEN: "registry-token",
-			GHCR_READ_USERNAME: "registry-user",
-			GITHUB_STEP_SUMMARY: join(fixture.directory, "summary.md"),
-			MOCK_CALLS: fixture.calls,
-			MOCK_DEPLOYED: fixture.deployed,
-			PATH: `${fixture.directory}:${process.env.PATH}`,
-			POLL_ATTEMPTS: "2",
-			POLL_INTERVAL_SECONDS: "0",
-			RAILWAY_API_TOKEN: "railway-token",
-			RAILWAY_BIN: fixture.railway,
-			RAILWAY_PRODUCTION_ENVIRONMENT: "production",
-			RAILWAY_PROJECT_ID: "project",
-			RAILWAY_SERVER_SERVICE: "server-service",
-			RAILWAY_WEB_SERVICE: "web-service",
-			SERVER_IMAGE: "ghcr.io/opral/lixray-server@sha256:server",
-			WEB_IMAGE: "ghcr.io/opral/lixray-web@sha256:web",
-		},
-	});
+function runCoordinator(fixture, statuses, extraEnv = {}) {
+  return spawnSync("bash", [coordinator], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ...statuses,
+      ...extraEnv,
+      GHCR_READ_TOKEN: "registry-token",
+      GHCR_READ_USERNAME: "registry-user",
+      GITHUB_STEP_SUMMARY: join(fixture.directory, "summary.md"),
+      MOCK_CALLS: fixture.calls,
+      MOCK_DEPLOYED: fixture.deployed,
+      PATH: `${fixture.directory}:${process.env.PATH}`,
+      POLL_ATTEMPTS: "2",
+      POLL_INTERVAL_SECONDS: "0",
+      RAILWAY_API_TOKEN: "railway-token",
+      RAILWAY_BIN: fixture.railway,
+      RAILWAY_PRODUCTION_ENVIRONMENT: "production",
+      RAILWAY_PROJECT_ID: "project",
+      RAILWAY_SERVER_SERVICE: "server-service",
+      RAILWAY_WEB_SERVICE: "web-service",
+      SERVER_IMAGE: "ghcr.io/opral/lixray-server@sha256:server",
+      WEB_IMAGE: "ghcr.io/opral/lixray-web@sha256:web",
+    },
+  });
 }

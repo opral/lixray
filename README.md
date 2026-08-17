@@ -180,10 +180,11 @@ workflow then points both Railway services at those GHCR digests, starts them
 together, and waits up to ten minutes for both health checks. Production never
 waits for an independent Railway build and never rebuilds merged source.
 
-Railway still creates preview environments and builds their demo web service:
+GitHub Actions is the only build and deployment authority:
 
-- pull requests create an isolated Railway demo environment with a built-in
-  preview user, then CI points its server service at the tested image;
+- pull request CI creates an isolated Railway environment without initial
+  source deployments, points both services at tested image digests, and deletes
+  the environment when the pull request closes;
 - merging to `main` applies database migrations and promotes the tested web and
   server image digests together;
 - `railway.json` and `web-app/railway.json` define the two services;
@@ -199,6 +200,9 @@ Put these secrets in the Infisical `prod` environment under `/ci`:
 - `RAILWAY_SERVER_SERVICE`: the `lix-server` service name or ID;
 - `RAILWAY_WEB_SERVICE`: the `lixray-web` service name or ID;
 - `RAILWAY_PRODUCTION_ENVIRONMENT`: the production environment name or ID;
+- `RAILWAY_PREVIEW_BASE_ENVIRONMENT`: a persistent image-managed environment
+  containing demo configuration and isolated preview storage, but no production
+  Supabase credentials;
 - `GHCR_READ_USERNAME`: the GitHub user owning a classic PAT;
 - `GHCR_READ_TOKEN`: that PAT with `read:packages`.
 - `VITE_SUPABASE_URL`: the public production Supabase project URL;
@@ -226,6 +230,18 @@ No deployment secret is stored in GitHub. Preview promotion is skipped when its
 Infisical identity is absent; production configuration is required and fails
 fast when incomplete.
 
+Disable Railway's native GitHub autodeploy on both services and disable
+Railway-managed PR environments. The repository workflows own preview creation,
+cleanup, image deployment, health checks, and production promotion; leaving the
+native triggers enabled starts an untested duplicate source build without Git
+submodules and produces misleading commit statuses.
+
+Migrate in this order: create the persistent image-managed preview-base
+environment, add its name or ID as `RAILWAY_PREVIEW_BASE_ENVIRONMENT`, merge the
+workflow change, and only then disable Railway's native GitHub autodeploy and
+PR environments. This keeps preview deployment available throughout the
+transition.
+
 Both services share `LIXRAY_INTERNAL_TOKEN`. The web service reaches the Rust
 service through Railway's private network. Production and preview environments
 use separate S3 storage configuration; when `S3_PREFIX` is unset, the server
@@ -234,18 +250,16 @@ production Supabase credentials.
 
 ### Fast pull request previews
 
-Railway environments named `lixray-pr-*` automatically build and run in demo
-mode. The sign-in screen offers **Continue as preview user** and the server
+CI-managed Railway environments named `lixray-pr-*` run in demo mode. The
+sign-in screen offers **Continue as preview user** and the server
 accepts the matching fixed demo token for the built-in `acme/launch-q3`
 repository. No Supabase URL, key, branch, password, seed job, or provisioning
 workflow is involved.
 
-Railway GitHub autodeploy stays enabled for preview web services and **Wait for
-CI stays disabled**. Both production services are image-managed; the Production
-workflow is their only deployment initiator. The preview base keeps the server
-image-managed while Railway builds the demo web service from the pull request.
-CI verifies that the preview server remains image-managed and retries one failed
-or timed-out promotion before failing the check.
+Both production services remain image-managed, and their GitHub autodeploy is
+disabled. CI clones the isolated preview-base configuration without starting a
+deployment, applies the preview policy, and deploys the tested web and server
+images together. The same coordinator promotes both images in production.
 Preview data is disposable and isolated by the Railway environment.
 Database-sensitive changes continue to use local Compose or an explicitly
 requested integration environment.

@@ -5,12 +5,24 @@ set -euo pipefail
 : "${GHCR_READ_TOKEN:?}"
 : "${GHCR_READ_USERNAME:?}"
 : "${RAILWAY_API_TOKEN:?}"
-: "${RAILWAY_PRODUCTION_ENVIRONMENT:?}"
 : "${RAILWAY_PROJECT_ID:?}"
 : "${RAILWAY_SERVER_SERVICE:?}"
 : "${RAILWAY_WEB_SERVICE:?}"
 : "${SERVER_IMAGE:?}"
 : "${WEB_IMAGE:?}"
+
+RAILWAY_TARGET_ENVIRONMENT="${RAILWAY_TARGET_ENVIRONMENT:-${RAILWAY_PRODUCTION_ENVIRONMENT:-}}"
+RAILWAY_DEPLOY_POLICY="${RAILWAY_DEPLOY_POLICY:-production}"
+RAILWAY_RELEASE_LABEL="${RAILWAY_RELEASE_LABEL:-production}"
+: "${RAILWAY_TARGET_ENVIRONMENT:?}"
+
+case "$RAILWAY_DEPLOY_POLICY" in
+	production | pr) ;;
+	*)
+		echo "Unknown Railway deploy policy: $RAILWAY_DEPLOY_POLICY" >&2
+		exit 1
+		;;
+esac
 
 POLL_ATTEMPTS="${POLL_ATTEMPTS:-60}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-10}"
@@ -20,7 +32,7 @@ list_deployments() {
 	local service="$1"
 	"$RAILWAY_BIN" deployment list \
 		--project "$RAILWAY_PROJECT_ID" \
-		--environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
+		--environment "$RAILWAY_TARGET_ENVIRONMENT" \
 		--service "$service" \
 		--limit 1 \
 		--json
@@ -64,7 +76,7 @@ update_service() {
 		jq -cn \
 			--arg query 'mutation($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input) }' \
 			--arg service_id "$service" \
-			--arg environment_id "$RAILWAY_PRODUCTION_ENVIRONMENT" \
+			--arg environment_id "$RAILWAY_TARGET_ENVIRONMENT" \
 			--arg image "$image" \
 			--arg username "$GHCR_READ_USERNAME" \
 			--arg password "$GHCR_READ_TOKEN" \
@@ -96,7 +108,7 @@ deploy_service() {
 		jq -cn \
 			--arg query 'mutation($serviceId: String!, $environmentId: String!) { serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId) }' \
 			--arg service_id "$service" \
-			--arg environment_id "$RAILWAY_PRODUCTION_ENVIRONMENT" \
+			--arg environment_id "$RAILWAY_TARGET_ENVIRONMENT" \
 			'{
 				query: $query,
 				variables: {
@@ -140,15 +152,15 @@ previous_deployment_id() {
 previous_web="$(previous_deployment_id "$RAILWAY_WEB_SERVICE")"
 previous_server="$(previous_deployment_id "$RAILWAY_SERVER_SERVICE")"
 
-web_policy="$(jq -c '.deploy * .environments.production.deploy' web-app/railway.json)"
-server_policy="$(jq -c '.deploy * .environments.production.deploy' railway.json)"
+web_policy="$(jq -c --arg policy "$RAILWAY_DEPLOY_POLICY" '.deploy * .environments[$policy].deploy' web-app/railway.json)"
+server_policy="$(jq -c --arg policy "$RAILWAY_DEPLOY_POLICY" '.deploy * .environments[$policy].deploy' railway.json)"
 
 update_service "$RAILWAY_WEB_SERVICE" "$WEB_IMAGE" "$web_policy"
 update_service "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" "$server_policy"
 deploy_service "$RAILWAY_WEB_SERVICE"
 deploy_service "$RAILWAY_SERVER_SERVICE"
 
-echo "Started Railway production deployment for both tested images."
+echo "Started Railway $RAILWAY_RELEASE_LABEL deployment for both tested images."
 
 last_web_status=""
 last_server_status=""
@@ -184,7 +196,7 @@ for attempt in $(seq 1 "$POLL_ATTEMPTS"); do
 	for state in "$web_status" "$server_status"; do
 		case "$state" in
 			FAILED | CRASHED | REMOVED | SKIPPED | CANCELED | CANCELLED)
-				echo "Railway production deployment ended with $state." >&2
+				echo "Railway $RAILWAY_RELEASE_LABEL deployment ended with $state." >&2
 				exit 1
 				;;
 		esac
@@ -195,21 +207,21 @@ for attempt in $(seq 1 "$POLL_ATTEMPTS"); do
 		test -n "$server_id" && test "$server_id" != "$previous_server" &&
 		test "$server_status" = SUCCESS; then
 		{
-			echo "## Production release"
+			echo "## Railway $RAILWAY_RELEASE_LABEL release"
 			echo
 			echo "| Service | Deployment | Image |"
 			echo "| --- | --- | --- |"
 			echo "| Web | \`$web_id\` | \`$WEB_IMAGE\` |"
 			echo "| Server | \`$server_id\` | \`$SERVER_IMAGE\` |"
 		} >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
-		echo "Railway production release is healthy."
+		echo "Railway $RAILWAY_RELEASE_LABEL release is healthy."
 		exit 0
 	fi
 
 	sleep "$POLL_INTERVAL_SECONDS"
 done
 
-echo "Railway production release did not become healthy after $POLL_ATTEMPTS checks." >&2
+echo "Railway $RAILWAY_RELEASE_LABEL release did not become healthy after $POLL_ATTEMPTS checks." >&2
 echo "Web: ${web_id:-not started} $web_status" >&2
 echo "Server: ${server_id:-not started} $server_status" >&2
 exit 1

@@ -30,16 +30,36 @@ test("Railway watches the submodule pointers used by each service", async () => 
 });
 
 test("PR previews promote both tested images instead of rebuilding source", async () => {
-	const workflow = await readFile(
-		new URL("../../.github/workflows/pr.yml", import.meta.url),
-		"utf8",
-	);
+	const [workflow, cleanupWorkflow, coordinator] = await Promise.all([
+		readFile(
+			new URL("../../.github/workflows/pr.yml", import.meta.url),
+			"utf8",
+		),
+		readFile(
+			new URL(
+				"../../.github/workflows/railway-preview-cleanup.yml",
+				import.meta.url,
+			),
+			"utf8",
+		),
+		readFile(
+			new URL("../../.github/scripts/promote-production.sh", import.meta.url),
+			"utf8",
+		),
+	]);
 
 	assert.match(workflow, /needs\.web-image\.outputs\.image/);
-	assert.match(workflow, /promote "\$RAILWAY_WEB_SERVICE" "\$WEB_IMAGE" web/);
+	assert.match(workflow, /manage-railway-preview\.sh ensure/);
+	assert.match(workflow, /RAILWAY_DEPLOY_POLICY: pr/);
+	assert.match(workflow, /promote-production\.sh/);
+	assert.match(cleanupWorkflow, /manage-railway-preview\.sh delete/);
 	assert.match(
-		workflow,
-		/promote "\$RAILWAY_SERVER_SERVICE" "\$SERVER_IMAGE" server/,
+		coordinator,
+		/update_service "\$RAILWAY_WEB_SERVICE" "\$WEB_IMAGE"/,
+	);
+	assert.match(
+		coordinator,
+		/update_service "\$RAILWAY_SERVER_SERVICE" "\$SERVER_IMAGE"/,
 	);
 	assert.match(workflow, /report_status 'lixray - lixray-web'/);
 	assert.match(workflow, /report_status 'lixray - lix-server'/);
