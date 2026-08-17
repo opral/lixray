@@ -60,7 +60,7 @@ export function RepositoryPicker({
 
 	if (!organization || !activeRepository) {
 		return (
-			<span className="flex h-7 min-w-0 items-center gap-1.5 rounded-[7px] px-1.5 text-[13px] font-semibold text-text-primary">
+			<span className="-ml-[3px] flex h-7 min-w-0 items-center gap-1 rounded-[7px] py-0 pr-1 pl-[5px] text-[13px] font-semibold text-text-primary">
 				<RepositoryChip
 					initials={repositoryInitials(repositoryName)}
 					palette={repositoryPalette(0)}
