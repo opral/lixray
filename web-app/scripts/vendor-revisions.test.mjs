@@ -30,16 +30,51 @@ test("Railway watches the submodule pointers used by each service", async () => 
 });
 
 test("PR previews promote both tested images instead of rebuilding source", async () => {
-	const workflow = await readFile(
-		new URL("../../.github/workflows/pr.yml", import.meta.url),
-		"utf8",
+	const [workflow, cleanupWorkflow, coordinator] = await Promise.all([
+		readFile(
+			new URL("../../.github/workflows/pr.yml", import.meta.url),
+			"utf8",
+		),
+		readFile(
+			new URL(
+				"../../.github/workflows/railway-preview-cleanup.yml",
+				import.meta.url,
+			),
+			"utf8",
+		),
+		readFile(
+			new URL("../../.github/scripts/promote-production.sh", import.meta.url),
+			"utf8",
+		),
+	]);
+	const deployPreviewJob = workflow.slice(
+		workflow.indexOf("  deploy-preview:"),
+		workflow.indexOf("  publish-preview:"),
 	);
 
 	assert.match(workflow, /needs\.web-image\.outputs\.image/);
-	assert.match(workflow, /promote "\$RAILWAY_WEB_SERVICE" "\$WEB_IMAGE" web/);
+	assert.match(deployPreviewJob, /uses: actions\/checkout@v4/);
+	assert.match(workflow, /manage-railway-preview\.sh ensure/);
+	assert.match(workflow, /manage-railway-preview\.sh url/);
+	assert.match(workflow, /name: lixray-pr-/);
 	assert.match(
 		workflow,
-		/promote "\$RAILWAY_SERVER_SERVICE" "\$SERVER_IMAGE" server/,
+		/url: \$\{\{ needs\.deploy-preview\.outputs\.preview_url \}\}/,
+	);
+	assert.match(workflow, /publish-preview:/);
+	assert.match(workflow, /RAILWAY_DEPLOY_POLICY: pr/);
+	assert.match(workflow, /promote-production\.sh/);
+	assert.match(cleanupWorkflow, /manage-railway-preview\.sh delete/);
+	assert.match(cleanupWorkflow, /environments\/\$PREVIEW_NAME/);
+	assert.match(cleanupWorkflow, /GITHUB_ENVIRONMENT_ADMIN_TOKEN/);
+	assert.match(cleanupWorkflow, /gh api --method DELETE/);
+	assert.match(
+		coordinator,
+		/update_service "\$RAILWAY_WEB_SERVICE" "\$WEB_IMAGE"/,
+	);
+	assert.match(
+		coordinator,
+		/update_service "\$RAILWAY_SERVER_SERVICE" "\$SERVER_IMAGE"/,
 	);
 	assert.match(workflow, /report_status 'lixray - lixray-web'/);
 	assert.match(workflow, /report_status 'lixray - lix-server'/);

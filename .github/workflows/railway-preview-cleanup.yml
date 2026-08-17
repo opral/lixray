@@ -1,0 +1,54 @@
+name: Cleanup Railway preview
+
+on:
+  pull_request:
+    types:
+      - closed
+
+concurrency:
+  group: railway-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  cleanup:
+    name: Delete preview environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out cleanup coordinator
+        uses: actions/checkout@v4
+
+      - name: Fetch deployment secrets from Infisical
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PREVIEW_IDENTITY_ID }}
+          oidc-audience: https://github.com/opral
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: /ci
+
+      - name: Delete CI-managed Railway preview
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: .github/scripts/manage-railway-preview.sh delete
+
+      - name: Delete GitHub preview environment
+        if: always()
+        env:
+          PREVIEW_NAME: lixray-pr-${{ github.event.pull_request.number }}
+        run: |
+          : "${GITHUB_ENVIRONMENT_ADMIN_TOKEN:?}"
+          export GH_TOKEN="$GITHUB_ENVIRONMENT_ADMIN_TOKEN"
+          endpoint="repos/${{ github.repository }}/environments/$PREVIEW_NAME"
+          if gh api "$endpoint" >/dev/null 2>&1; then
+            gh api --method DELETE "$endpoint"
+            echo "Deleted GitHub preview environment $PREVIEW_NAME."
+          else
+            echo "GitHub preview environment $PREVIEW_NAME is already absent."
+          fi
