@@ -8,7 +8,13 @@ import {
 	Plus,
 	Trash2,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import {
+	type FormEvent,
+	type ReactNode,
+	useEffect,
+	useMemo,
+	useState,
+} from "react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
 import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";
@@ -41,23 +47,16 @@ import {
 	fetchRepositoryFileCount,
 } from "~/lib/repository-archive";
 import { repositoryPath } from "~/lib/repository-url";
+import {
+	repositoryInitials,
+	TILE_PALETTES,
+} from "~/components/repository-identity";
 
 type DialogState =
 	| { type: "create" }
 	| { type: "rename"; organization: Organization; repository: Repository }
 	| { type: "delete"; organization: Organization; repository: Repository }
 	| null;
-
-const TILE_PALETTES = [
-	{
-		background: "var(--color-bg-selection-current)",
-		border: "var(--color-border-selection-current)",
-		color: "var(--color-icon-selection-current)",
-	},
-	{ background: "#eff2e9", border: "#dce3cc", color: "#5a7052" },
-	{ background: "#ebf0f4", border: "#d3dfe8", color: "#4a6b85" },
-	{ background: "#f3eef6", border: "#e2d7e9", color: "#7a5e8c" },
-] as const;
 
 export function RepositoryDirectory() {
 	const auth = useAuth();
@@ -450,6 +449,35 @@ function RepositoryRow({
 	);
 }
 
+/**
+ * "New repository" dialog for hosts outside the directory (e.g. the
+ * workspace repository picker). Pass the writable organizations; the first
+ * one is preselected.
+ */
+export function CreateRepositoryDialog({
+	open,
+	organizations,
+	onClose,
+}: {
+	open: boolean;
+	organizations: Array<Organization>;
+	onClose: () => void;
+}) {
+	// The inner dialog resets its fields when the `dialog` object changes, so
+	// keep a stable identity while open.
+	const dialog = useMemo<DialogState>(
+		() => (open ? { type: "create" } : null),
+		[open],
+	);
+	return (
+		<RepositoryDialog
+			dialog={dialog}
+			organizations={organizations}
+			onClose={onClose}
+		/>
+	);
+}
+
 function RepositoryDialog({
 	dialog,
 	organizations,
@@ -647,14 +675,6 @@ function SignedOutDirectory() {
 			</DirectoryStatusContent>
 		</div>
 	);
-}
-
-function repositoryInitials(name: string): string {
-	const parts = name.match(/[a-z0-9]+/gi) ?? [];
-	if (parts.length === 0) return "W";
-	const first = parts[0] ?? "W";
-	if (parts.length === 1) return first.slice(0, 2).toUpperCase();
-	return `${first.charAt(0)}${(parts[1] ?? "").charAt(0)}`.toUpperCase();
 }
 
 function pluralize(count: number, singular: string, plural?: string): string {
