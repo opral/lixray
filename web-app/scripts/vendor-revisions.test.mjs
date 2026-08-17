@@ -47,8 +47,13 @@ test("PR previews promote both tested images instead of rebuilding source", asyn
 			"utf8",
 		),
 	]);
+	const deployPreviewJob = workflow.slice(
+		workflow.indexOf("  deploy-preview:"),
+		workflow.indexOf("  publish-preview:"),
+	);
 
 	assert.match(workflow, /needs\.web-image\.outputs\.image/);
+	assert.match(deployPreviewJob, /uses: actions\/checkout@v4/);
 	assert.match(workflow, /manage-railway-preview\.sh ensure/);
 	assert.match(workflow, /manage-railway-preview\.sh url/);
 	assert.match(workflow, /name: lixray-pr-/);

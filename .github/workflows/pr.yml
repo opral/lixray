@@ -573,6 +573,9 @@ jobs:
       statuses: write
 
     steps:
+      - name: Check out deployment coordinator
+        uses: actions/checkout@v4
+
       - name: Check Infisical configuration
         id: infisical
         shell: bash
