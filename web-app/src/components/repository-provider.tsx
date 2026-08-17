@@ -16,8 +16,18 @@ import {
 	DEMO_LIX_NAME,
 } from "~/lib/demo-identity";
 import { isDemoModeEnabled } from "~/lib/demo-client";
+import {
+	normalizeRepositoryListError,
+	RepositoryListError,
+	repositoryListTelemetryProperties,
+} from "~/lib/repository-list-error";
 import type { LixraySupabaseClient } from "~/lib/supabase";
-import { captureTelemetry } from "~/lib/telemetry";
+import {
+	captureErrorLogImmediately,
+	captureExceptionTelemetryAsync,
+	captureTelemetry,
+	captureTelemetryImmediately,
+} from "~/lib/telemetry";
 
 export type OrganizationRole = "owner" | "member";
 
@@ -77,7 +87,7 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
 }
 
 function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
-	const { client, isLoaded: authLoaded, user } = useAuth();
+	const { client, isLoaded: authLoaded, user, validateSession } = useAuth();
 	const userId = user?.id ?? null;
 	const [isLoaded, setIsLoaded] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -101,10 +111,15 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 
 			setError(null);
 			try {
-				const { error: provisioningError } = await client.rpc(
+				const provisioningResponse = await client.rpc(
 					"bootstrap_personal_namespace",
 				);
-				if (provisioningError) throw provisioningError;
+				if (provisioningResponse.error) {
+					throw new RepositoryListError(
+						"bootstrap_personal_namespace",
+						provisioningResponse,
+					);
+				}
 				const nextOrganizations = await loadOrganizations(client);
 				const storedOrganizationId = window.localStorage.getItem(
 					organizationStorageKey(userId),
@@ -150,12 +165,26 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 					nextRepository?.id ?? null,
 				);
 			} catch (loadError) {
-				setError(errorMessage(loadError));
+				const failure = normalizeRepositoryListError(loadError);
+				const telemetryProperties = repositoryListTelemetryProperties(failure);
+				setError(failure.message);
+				await Promise.all([
+					captureTelemetryImmediately(
+						"repository_list_failed",
+						telemetryProperties,
+					),
+					captureErrorLogImmediately(
+						"Repository list failed",
+						telemetryProperties,
+					),
+					captureExceptionTelemetryAsync(failure, telemetryProperties),
+				]);
+				await validateSession("repository_list_failed");
 			} finally {
 				setIsLoaded(true);
 			}
 		},
-		[client, userId],
+		[client, userId, validateSession],
 	);
 
 	useEffect(() => {
@@ -377,11 +406,13 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 async function loadOrganizations(
 	client: LixraySupabaseClient,
 ): Promise<Array<Organization>> {
-	const { data, error } = await client.rpc("list_accessible_lixes");
-	if (error) throw error;
+	const response = await client.rpc("list_accessible_lixes");
+	if (response.error) {
+		throw new RepositoryListError("list_accessible_lixes", response);
+	}
 
 	const organizations = new Map<string, Organization>();
-	for (const row of data ?? []) {
+	for (const row of response.data ?? []) {
 		const organizationId = String(row.namespace_id);
 		let organization = organizations.get(organizationId);
 		if (!organization) {
@@ -543,8 +574,4 @@ function organizationStorageKey(userId: string) {
 
 function repositoryStorageKey(userId: string) {
 	return `lixray.active-repository.${userId}`;
-}
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : "Unable to load repositories";
 }

@@ -13,7 +13,18 @@ import type { LixraySupabaseClient } from "~/lib/supabase";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { normalizeAuthReturnTo } from "~/lib/auth-return-to";
-import { resetTelemetry } from "~/lib/telemetry";
+import {
+	authErrorTelemetryProperties,
+	isOrphanedAuthError,
+	loadValidatedInitialSession,
+	orphanedSessionSignInUrl,
+} from "~/lib/auth-session-validation";
+import {
+	captureErrorLogImmediately,
+	captureTelemetry,
+	captureTelemetryImmediately,
+	resetTelemetry,
+} from "~/lib/telemetry";
 
 const RETURN_TO_KEY = "lixray.auth.return-to";
 
@@ -28,6 +39,9 @@ interface AuthContextValue {
 	signInWithGoogle: (returnTo?: string) => Promise<void>;
 	signOut: () => Promise<void>;
 	refreshSession: () => Promise<void>;
+	validateSession: (
+		operation: string,
+	) => Promise<"valid" | "orphaned" | "unknown">;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -74,6 +88,7 @@ function DemoAuthProvider({ children }: { children: ReactNode }) {
 			signInWithGoogle: beginPreviewSignIn,
 			signOut,
 			refreshSession: () => Promise.resolve(),
+			validateSession: () => Promise.resolve("valid"),
 		}),
 		[beginPreviewSignIn, signOut],
 	);
@@ -88,21 +103,47 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 	useEffect(() => {
 		const supabase = getBrowserSupabaseClient();
 		let disposed = false;
+		let authStateChanged = false;
 		setClient(supabase);
 
-		const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+		const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
+			if (event === "INITIAL_SESSION") return;
+			authStateChanged = true;
 			if (!disposed) {
 				setSession(nextSession);
 				setIsLoaded(true);
 			}
 		});
 
-		void supabase.auth.getSession().then(({ data: initialData }) => {
-			if (!disposed) {
-				setSession(initialData.session);
+		void loadValidatedInitialSession(supabase.auth)
+			.then(async (result) => {
+				if (disposed || authStateChanged) return;
+				if (result.kind === "orphaned") {
+					await clearOrphanedSession(
+						supabase,
+						result.error,
+						"initial_session_validation",
+					);
+					return;
+				}
+				if (result.kind === "validation_failed") {
+					captureTelemetry("auth_session_validation_failed", {
+						auth_validation_operation: "initial_session_validation",
+						...authErrorTelemetryProperties(result.error),
+					});
+				}
+				setSession(result.kind === "authenticated" ? result.session : null);
 				setIsLoaded(true);
-			}
-		});
+			})
+			.catch((error: unknown) => {
+				if (disposed || authStateChanged) return;
+				captureTelemetry("auth_session_validation_failed", {
+					auth_validation_operation: "initial_session_validation",
+					...authErrorTelemetryProperties(error),
+				});
+				setSession(null);
+				setIsLoaded(true);
+			});
 
 		return () => {
 			disposed = true;
@@ -191,6 +232,33 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 		if (error) throw error;
 		resetTelemetry();
 	}, [client]);
+	const validateSession = useCallback(
+		async (operation: string): Promise<"valid" | "orphaned" | "unknown"> => {
+			if (!client) return "unknown";
+			try {
+				const { data, error } = await client.auth.getUser();
+				if (!error && data.user) return "valid";
+				if (!data.user && isOrphanedAuthError(error)) {
+					setSession(null);
+					setIsLoaded(true);
+					await clearOrphanedSession(client, error, operation);
+					return "orphaned";
+				}
+				captureTelemetry("auth_session_validation_failed", {
+					auth_validation_operation: operation,
+					...authErrorTelemetryProperties(error),
+				});
+				return "unknown";
+			} catch (error: unknown) {
+				captureTelemetry("auth_session_validation_failed", {
+					auth_validation_operation: operation,
+					...authErrorTelemetryProperties(error),
+				});
+				return "unknown";
+			}
+		},
+		[client],
+	);
 
 	const value = useMemo<AuthContextValue>(
 		() => ({
@@ -204,6 +272,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			signInWithGoogle,
 			signOut,
 			refreshSession,
+			validateSession,
 		}),
 		[
 			client,
@@ -215,10 +284,34 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			signInWithGoogle,
 			signOut,
 			refreshSession,
+			validateSession,
 		],
 	);
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+async function clearOrphanedSession(
+	client: LixraySupabaseClient,
+	error: unknown,
+	operation: string,
+): Promise<void> {
+	const telemetryProperties = {
+		auth_validation_operation: operation,
+		...authErrorTelemetryProperties(error),
+	};
+	await Promise.all([
+		captureTelemetryImmediately("auth_session_orphaned", telemetryProperties),
+		captureErrorLogImmediately("Auth session orphaned", telemetryProperties),
+	]);
+	await client.auth.signOut({ scope: "local" });
+	resetTelemetry();
+	const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+	const returnTo =
+		window.location.pathname === "/sign-in"
+			? "/home"
+			: normalizeAuthReturnTo(currentPath);
+	window.location.replace(orphanedSessionSignInUrl(returnTo));
 }
 
 export function useAuth() {

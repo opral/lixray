@@ -1,4 +1,9 @@
-import type { PostHog, PostHogConfig, Properties } from "posthog-js";
+import type {
+	LogAttributes,
+	PostHog,
+	PostHogConfig,
+	Properties,
+} from "posthog-js";
 import {
 	AUTOCAPTURE_ATTRIBUTE_IGNORELIST,
 	AUTOCAPTURE_SELECTOR_IGNORELIST,
@@ -89,6 +94,10 @@ function registerTelemetryEnvironment(
 function buildPostHogConfig(
 	host = DEFAULT_POSTHOG_HOST,
 ): Partial<PostHogConfig> {
+	const environment = telemetryEnvironment(
+		import.meta.env.VITE_PUBLIC_TELEMETRY_ENVIRONMENT,
+		import.meta.env.PROD,
+	);
 	return {
 		api_host: host,
 		defaults: "2026-05-30",
@@ -102,6 +111,11 @@ function buildPostHogConfig(
 		capture_pageview: "history_change",
 		capture_pageleave: true,
 		disable_session_recording: false,
+		logs: {
+			captureConsoleLogs: false,
+			environment,
+			serviceName: "lixray-web",
+		},
 		mask_all_text: true,
 		person_profiles: "identified_only",
 		session_recording: {
@@ -110,6 +124,21 @@ function buildPostHogConfig(
 			blockSelector: SESSION_RECORDING_BLOCK_SELECTOR,
 		},
 	};
+}
+
+/** Sends an intentionally content-free structured error to PostHog Logs. */
+export async function captureErrorLogImmediately(
+	body: string,
+	attributes: LogAttributes = {},
+): Promise<void> {
+	try {
+		const posthog = await initializeTelemetry();
+		if (!posthog) return;
+		posthog.captureLog({ body, level: "error", attributes });
+		posthog.logs?.flushLogs("sendBeacon");
+	} catch (error: unknown) {
+		console.warn("Failed to capture browser error log", error);
+	}
 }
 
 export function captureTelemetry(
@@ -123,6 +152,19 @@ export function captureTelemetry(
 		.catch((error: unknown) => {
 			console.warn("Failed to capture browser telemetry", error);
 		});
+}
+
+/** Captures before identity reset or navigation and bypasses request batching. */
+export async function captureTelemetryImmediately(
+	event: string,
+	properties: Properties = {},
+): Promise<void> {
+	try {
+		const posthog = await initializeTelemetry();
+		posthog?.capture(event, properties, { send_instantly: true });
+	} catch (error: unknown) {
+		console.warn("Failed to capture browser telemetry", error);
+	}
 }
 
 export function captureExceptionTelemetry(
@@ -139,6 +181,22 @@ export function captureExceptionTelemetry(
 		.catch((telemetryError: unknown) => {
 			console.warn("Failed to capture browser exception", telemetryError);
 		});
+}
+
+/** Ensures handled exception capture is invoked before identity reset. */
+export async function captureExceptionTelemetryAsync(
+	error: unknown,
+	properties: Properties = {},
+): Promise<void> {
+	try {
+		const posthog = await initializeTelemetry();
+		posthog?.captureException(error, {
+			...lixErrorTelemetryProperties(error),
+			...properties,
+		});
+	} catch (telemetryError: unknown) {
+		console.warn("Failed to capture browser exception", telemetryError);
+	}
 }
 
 export function telemetryEnvironment(
