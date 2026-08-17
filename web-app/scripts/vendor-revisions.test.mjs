@@ -35,23 +35,34 @@ test("Railway fallback revisions match the repository submodule pointers", async
 });
 
 test("Railway Docker fallback uses pinned revisions instead of moving branches", async () => {
-	const dockerfile = await readFile(
-		new URL("../Dockerfile", import.meta.url),
-		"utf8",
-	);
+	const [webDockerfile, serverDockerfile] = await Promise.all([
+		readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
+		readFile(new URL("../../lix-server/Dockerfile", import.meta.url), "utf8"),
+	]);
 
-	assert.match(dockerfile, /\. \/app\/vendor\/revisions\.env/);
-	assert.match(dockerfile, /lix\/archive\/\$\{LIX_REVISION\}\.tar\.gz/);
-	assert.match(dockerfile, /atelier\/archive\/\$\{ATELIER_REVISION\}\.tar\.gz/);
-	assert.doesNotMatch(dockerfile, /archive\/refs\/heads\//);
+	for (const dockerfile of [webDockerfile, serverDockerfile]) {
+		assert.match(dockerfile, /vendor\/revisions\.env/);
+		assert.match(dockerfile, /lix\/archive\/\$\{LIX_REVISION\}\.tar\.gz/);
+		assert.doesNotMatch(dockerfile, /ARG LIX_REV/);
+		assert.doesNotMatch(dockerfile, /archive\/refs\/heads\//);
+	}
+	assert.match(
+		webDockerfile,
+		/atelier\/archive\/\$\{ATELIER_REVISION\}\.tar\.gz/,
+	);
 });
 
-test("Railway rebuilds the web service when fallback revisions change", async () => {
-	const railwayConfig = JSON.parse(
-		await readFile(new URL("../railway.json", import.meta.url), "utf8"),
-	);
+test("Railway rebuilds services when fallback revisions change", async () => {
+	const [webConfig, serverConfig] = await Promise.all([
+		readFile(new URL("../railway.json", import.meta.url), "utf8"),
+		readFile(new URL("../../railway.json", import.meta.url), "utf8"),
+	]).then((sources) => sources.map((source) => JSON.parse(source)));
 
-	assert.ok(railwayConfig.build.watchPatterns.includes("vendor/revisions.env"));
+	for (const railwayConfig of [webConfig, serverConfig]) {
+		assert.ok(
+			railwayConfig.build.watchPatterns.includes("vendor/revisions.env"),
+		);
+	}
 });
 
 test("Atelier resolves the vendored Lix SDK instead of npm", async () => {

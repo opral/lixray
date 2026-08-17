@@ -81,7 +81,7 @@ jobs:
           tree="$(git rev-parse 'HEAD^{tree}')"
           server_inputs="$(
             {
-              git ls-tree HEAD -- .dockerignore .gitmodules vendor/lix
+              git ls-tree HEAD -- .dockerignore .gitmodules vendor/lix vendor/revisions.env
               git ls-tree -r HEAD -- lix-server
             } | git hash-object --stdin
           )"

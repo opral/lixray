@@ -7,11 +7,18 @@ ARG CARGO_BUILD_JOBS=2
 WORKDIR /app
 
 # This Dockerfile uses the repository root as its build context so the server
-# and the exact Lix submodule revision are built together. Server deployments
-# use the image built by GitHub Actions, which checks out submodules recursively.
+# and its vendored Lix checkout are built together. Railway source snapshots do
+# not populate submodules, so recover the revision recorded by vendor:sync.
+COPY vendor/revisions.env ./vendor/revisions.env
 COPY vendor/lix ./vendor/lix
-RUN test -f vendor/lix/packages/lix/Cargo.toml \
-	|| (echo "vendor/lix is missing; initialize submodules before building the server image" >&2; exit 1)
+RUN set -eu; \
+	. ./vendor/revisions.env; \
+	mkdir -p vendor/lix; \
+	if [ ! -f vendor/lix/packages/lix/Cargo.toml ]; then \
+		curl -fsSL "https://github.com/opral/lix/archive/${LIX_REVISION}.tar.gz" -o /tmp/lix.tar.gz; \
+		tar -xzf /tmp/lix.tar.gz -C vendor/lix --strip-components=1; \
+		rm /tmp/lix.tar.gz; \
+	fi
 RUN cp vendor/lix/rust-toolchain.toml ./rust-toolchain.toml
 COPY lix-server/Cargo.toml lix-server/Cargo.lock ./lix-server/
 COPY lix-server/src ./lix-server/src
