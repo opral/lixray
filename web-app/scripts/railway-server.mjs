@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -12,7 +12,7 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 	return createServer(async (incoming, outgoing) => {
 		let upstreamFailure = false;
 		try {
-			if (await serveStatic(clientRoot, incoming, outgoing)) return;
+			if (await serveStatic(clientRoot, incoming, outgoing, env)) return;
 
 			const requestUrl = new URL(
 				incoming.url ?? "/",
@@ -44,6 +44,12 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 				outgoing.end();
 				return;
 			}
+			if (isHtmlResponse(response) && isDemoMode(env)) {
+				const body = injectRuntimeConfig(await response.text());
+				outgoing.setHeader("content-length", Buffer.byteLength(body));
+				outgoing.end(body);
+				return;
+			}
 			const body = Readable.fromWeb(response.body);
 			// Stream failures surface as async 'error' events after this
 			// handler returns; without listeners they crash the whole
@@ -72,7 +78,7 @@ function isUpstreamFetchFailure(error) {
 	return error instanceof TypeError && error.message === "fetch failed";
 }
 
-async function serveStatic(clientRoot, request, response) {
+async function serveStatic(clientRoot, request, response, env) {
 	if (request.method !== "GET" && request.method !== "HEAD") return false;
 	const pathname = new URL(
 		request.url ?? "/",
@@ -87,14 +93,41 @@ async function serveStatic(clientRoot, request, response) {
 		if (!file.isFile()) return false;
 		response.statusCode = 200;
 		response.setHeader("content-type", contentType(filePath));
-		response.setHeader("content-length", file.size);
-		if (request.method === "HEAD") response.end();
-		else createReadStream(filePath).pipe(response);
+		if (extname(filePath) === ".html" && isDemoMode(env)) {
+			const body = injectRuntimeConfig(await readFile(filePath, "utf8"));
+			response.setHeader("content-length", Buffer.byteLength(body));
+			if (request.method === "HEAD") response.end();
+			else response.end(body);
+		} else {
+			response.setHeader("content-length", file.size);
+			if (request.method === "HEAD") response.end();
+			else createReadStream(filePath).pipe(response);
+		}
 		return true;
 	} catch (error) {
 		if (error?.code === "ENOENT") return false;
 		throw error;
 	}
+}
+
+function isHtmlResponse(response) {
+	return response.headers.get("content-type")?.includes("text/html") ?? false;
+}
+
+function isDemoMode(env) {
+	return (
+		env.LIXRAY_DEMO === "1" ||
+		/^(lixray-pr-[0-9]+|pr-[a-z0-9]+-[0-9]+)$/.test(
+			env.RAILWAY_ENVIRONMENT_NAME ?? "",
+		)
+	);
+}
+
+function injectRuntimeConfig(html) {
+	const marker = '<meta name="lixray-demo" content="1">';
+	return html.includes(marker)
+		? html
+		: html.replace(/<head([^>]*)>/i, `$&${marker}`);
 }
 
 function executionContext() {

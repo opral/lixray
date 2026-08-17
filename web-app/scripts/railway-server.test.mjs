@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createRailwayServer } from "./railway-server.mjs";
 
-async function withServer(appFetch, run) {
+async function withServer(appFetch, run, env = {}) {
 	const clientRoot = await mkdtemp(join(tmpdir(), "railway-server-"));
 	const server = createRailwayServer({
 		app: { fetch: appFetch },
 		clientRoot,
-		env: {},
+		env,
 	});
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const { port } = server.address();
@@ -20,6 +20,54 @@ async function withServer(appFetch, run) {
 		await new Promise((resolve) => server.close(resolve));
 	}
 }
+
+test("injects preview mode into static HTML at runtime", async () => {
+	const clientRoot = await mkdtemp(join(tmpdir(), "railway-server-static-"));
+	await writeFile(
+		clientRoot + "/index.html",
+		"<html><head></head><body></body></html>",
+	);
+	const server = createRailwayServer({
+		app: { fetch: () => new Response("unused") },
+		clientRoot,
+		env: { RAILWAY_ENVIRONMENT_NAME: "lixray-pr-216" },
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const { port } = server.address();
+	try {
+		const response = await fetch(`http://127.0.0.1:${port}/`);
+		assert.match(
+			await response.text(),
+			/<meta name="lixray-demo" content="1">/,
+		);
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+});
+
+test("injects preview mode into rendered HTML at runtime", async () => {
+	const response = await withServer(
+		async () =>
+			new Response("<html><head></head><body>rendered</body></html>", {
+				headers: { "content-type": "text/html; charset=utf-8" },
+			}),
+		(origin) => fetch(`${origin}/sign-in`),
+		{ LIXRAY_DEMO: "1" },
+	);
+	assert.match(await response.text(), /<meta name="lixray-demo" content="1">/);
+});
+
+test("does not inject preview mode in production", async () => {
+	const response = await withServer(
+		async () =>
+			new Response("<html><head></head><body>rendered</body></html>", {
+				headers: { "content-type": "text/html; charset=utf-8" },
+			}),
+		(origin) => fetch(`${origin}/sign-in`),
+		{ RAILWAY_ENVIRONMENT_NAME: "production" },
+	);
+	assert.doesNotMatch(await response.text(), /lixray-demo/);
+});
 
 test("proxies a streaming response through", async () => {
 	const response = await withServer(
