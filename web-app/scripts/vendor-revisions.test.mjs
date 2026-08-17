@@ -1,57 +1,48 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const repositoryRoot = fileURLToPath(new URL("../..", import.meta.url));
+test("Docker builds require the checked-out submodules without a revision fallback", async () => {
+	const [webDockerfile, serverDockerfile] = await Promise.all([
+		readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
+		readFile(new URL("../../lix-server/Dockerfile", import.meta.url), "utf8"),
+	]);
 
-function parseRevisionManifest(source) {
-	return Object.fromEntries(
-		source
-			.split("\n")
-			.map((line) => line.trim())
-			.filter((line) => line && !line.startsWith("#"))
-			.map((line) => line.split("=", 2)),
-	);
-}
-
-function submoduleRevision(path) {
-	return execFileSync("git", ["-C", path, "rev-parse", "HEAD"], {
-		cwd: repositoryRoot,
-		encoding: "utf8",
-	}).trim();
-}
-
-test("Railway fallback revisions match the repository submodule pointers", async () => {
-	const source = await readFile(
-		new URL("../../vendor/revisions.env", import.meta.url),
-		"utf8",
-	);
-	const revisions = parseRevisionManifest(source);
-
-	assert.equal(revisions.LIX_REVISION, submoduleRevision("vendor/lix"));
-	assert.equal(revisions.ATELIER_REVISION, submoduleRevision("vendor/atelier"));
+	for (const dockerfile of [webDockerfile, serverDockerfile]) {
+		assert.match(dockerfile, /initialize submodules before building/);
+		assert.doesNotMatch(dockerfile, /resolve-gitlink-submodules/);
+		assert.doesNotMatch(dockerfile, /RAILWAY_GIT_REPO_/);
+		assert.doesNotMatch(dockerfile, /vendor\/revisions\.env/);
+	}
 });
 
-test("Railway Docker fallback uses pinned revisions instead of moving branches", async () => {
-	const dockerfile = await readFile(
-		new URL("../Dockerfile", import.meta.url),
+test("Railway watches the submodule pointers used by each service", async () => {
+	const [webConfig, serverConfig] = await Promise.all([
+		readFile(new URL("../railway.json", import.meta.url), "utf8"),
+		readFile(new URL("../../railway.json", import.meta.url), "utf8"),
+	]).then((sources) => sources.map((source) => JSON.parse(source)));
+
+	for (const railwayConfig of [webConfig, serverConfig]) {
+		assert.ok(railwayConfig.build.watchPatterns.includes(".gitmodules"));
+		assert.ok(railwayConfig.build.watchPatterns.includes("vendor/lix"));
+	}
+	assert.ok(webConfig.build.watchPatterns.includes("vendor/atelier"));
+});
+
+test("PR previews promote both tested images instead of rebuilding source", async () => {
+	const workflow = await readFile(
+		new URL("../../.github/workflows/pr.yml", import.meta.url),
 		"utf8",
 	);
 
-	assert.match(dockerfile, /\. \/app\/vendor\/revisions\.env/);
-	assert.match(dockerfile, /lix\/archive\/\$\{LIX_REVISION\}\.tar\.gz/);
-	assert.match(dockerfile, /atelier\/archive\/\$\{ATELIER_REVISION\}\.tar\.gz/);
-	assert.doesNotMatch(dockerfile, /archive\/refs\/heads\//);
-});
-
-test("Railway rebuilds the web service when fallback revisions change", async () => {
-	const railwayConfig = JSON.parse(
-		await readFile(new URL("../railway.json", import.meta.url), "utf8"),
+	assert.match(workflow, /needs\.web-image\.outputs\.image/);
+	assert.match(workflow, /promote "\$RAILWAY_WEB_SERVICE" "\$WEB_IMAGE" web/);
+	assert.match(
+		workflow,
+		/promote "\$RAILWAY_SERVER_SERVICE" "\$SERVER_IMAGE" server/,
 	);
-
-	assert.ok(railwayConfig.build.watchPatterns.includes("vendor/revisions.env"));
+	assert.match(workflow, /report_status 'lixray - lixray-web'/);
+	assert.match(workflow, /report_status 'lixray - lix-server'/);
 });
 
 test("Atelier resolves the vendored Lix SDK instead of npm", async () => {

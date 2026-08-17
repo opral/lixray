@@ -19,16 +19,20 @@ void test("uses a Codex-safe isolated development registration on localhost", ()
 	assert.equal(details.mcpUrl, "http://127.0.0.1:8787/mcp");
 	assert.match(
 		details.prompt,
-		/^Connect to my Lix repository @samuel\/repository\./,
-	);
-	assert.match(
-		details.prompt,
-		/Otherwise, create and authenticate it with \[http:\/\/127\.0\.0\.1:8787\/mcp\]\(http:\/\/127\.0\.0\.1:8787\/mcp\)/,
+		/^Guide the user to connect to this MCP server for Lix repository @samuel\/repository \(8b4382f8-239d-4b76-bb77-401de5f1d6ae\): \[http:\/\/127\.0\.0\.1:8787\/mcp\]\(http:\/\/127\.0\.0\.1:8787\/mcp\)\./,
 	);
 	assert.match(details.serverName, /^[a-zA-Z0-9_-]+$/);
 	assert.doesNotMatch(details.prompt, /Preview:/);
 	assert.doesNotMatch(details.prompt, /Setup docs:/);
-	assert.match(details.prompt, /If that connection already exists, reuse it/);
+	assert.match(
+		details.prompt,
+		/The user must connect and authenticate it themselves because agents cannot connect MCP servers from the chat\./,
+	);
+	assert.match(
+		details.prompt,
+		/If LixRay_Dev is already connected, reuse it\./,
+	);
+	assert.doesNotMatch(details.prompt, /plugins/);
 	assert.match(details.prompt, /Once connected, and the lix has no files/);
 	assert.match(details.prompt, /Lix's goal is a repository for non-code\./);
 	assert.match(details.prompt, /icp\.md, skills/);

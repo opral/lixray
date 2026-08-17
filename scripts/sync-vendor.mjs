@@ -1,10 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const revisionManifestPath = join(repositoryRoot, "vendor", "revisions.env");
 const lixWorkspaceManifestPath = join(repositoryRoot, "vendor", "lix", "Cargo.toml");
 const lixToolchainPath = join(repositoryRoot, "vendor", "lix", "rust-toolchain.toml");
 const serverLockfilePath = join(repositoryRoot, "lix-server", "Cargo.lock");
@@ -17,28 +16,6 @@ const lixLockPackages = [
     manifest: "packages/storage-slatedb/Cargo.toml",
   },
 ];
-
-export function parseRevisionManifest(source) {
-  return Object.fromEntries(
-    source
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"))
-      .map((line) => line.split("=", 2)),
-  );
-}
-
-export function renderRevisionManifest(source, revisions) {
-  let rendered = source;
-  for (const [key, revision] of Object.entries(revisions)) {
-    const pattern = new RegExp(`^${key}=.*$`, "m");
-    if (!pattern.test(rendered)) {
-      throw new Error(`Revision manifest is missing ${key}`);
-    }
-    rendered = rendered.replace(pattern, `${key}=${revision}`);
-  }
-  return rendered;
-}
 
 export function parseCargoLockPackages(source) {
   const packages = new Map();
@@ -75,30 +52,6 @@ function run(command, args) {
     encoding: "utf8",
     stdio: "inherit",
   });
-}
-
-function submoduleRevision(path) {
-  return execFileSync("git", ["-C", join(repositoryRoot, path), "rev-parse", "HEAD"], {
-    cwd: repositoryRoot,
-    encoding: "utf8",
-  }).trim();
-}
-
-async function expectedRevisions() {
-  return {
-    LIX_REVISION: submoduleRevision("vendor/lix"),
-    ATELIER_REVISION: submoduleRevision("vendor/atelier"),
-  };
-}
-
-async function assertRevisionManifest(revisions) {
-  const source = await readFile(revisionManifestPath, "utf8");
-  const expected = renderRevisionManifest(source, revisions);
-  if (source !== expected) {
-    throw new Error(
-      "vendor/revisions.env is out of sync with the submodule checkouts; run pnpm vendor:sync",
-    );
-  }
 }
 
 async function assertServerLockfile() {
@@ -167,19 +120,14 @@ if (unknownArguments.length > 0) {
   throw new Error(`Unknown argument: ${unknownArguments.join(" ")}`);
 }
 
-const revisions = await expectedRevisions();
 if (checkOnly) {
-  await assertRevisionManifest(revisions);
   await assertServerLockfile();
   await assertPnpmLockfile();
-  console.log("Vendored revisions, Cargo.lock, and pnpm-lock.yaml are synchronized.");
+  console.log("Vendored Cargo.lock and pnpm-lock.yaml are synchronized.");
 } else {
   await syncCargoLock();
   await syncPnpmLockfile();
-  const source = await readFile(revisionManifestPath, "utf8");
-  const rendered = renderRevisionManifest(source, revisions);
-  if (source !== rendered) await writeFile(revisionManifestPath, rendered);
   await assertServerLockfile();
   await assertPnpmLockfile();
-  console.log("Synchronized vendored revisions, Cargo.lock, and pnpm-lock.yaml.");
+  console.log("Synchronized vendored Cargo.lock and pnpm-lock.yaml.");
 }

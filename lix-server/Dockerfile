@@ -4,23 +4,14 @@ ARG LIXRAY_IMAGE_VARIANT=production
 
 FROM rust:1-bookworm AS builder
 ARG CARGO_BUILD_JOBS=2
-ARG LIX_REV=887b7a45ae732f2d3e0de8c13778dfc9b05f6e4c
-ARG LIX_ARCHIVE_SHA256=c3c8b7fcf771c5b5e13a34b95f55e678707271d7730ab5b6b00419dc8f4201b5
 WORKDIR /app
 
 # This Dockerfile uses the repository root as its build context so the server
-# and its vendored Lix checkout are built together. Railway's GitHub builder
-# does not populate submodules, so an empty checkout falls back to the exact
-# pinned revision rather than silently building a different version. Web-app
-# changes also deploy this service so focused PR environments remain usable.
+# and its vendored Lix checkout are built together.
 COPY vendor/lix ./vendor/lix
-RUN if [ ! -f vendor/lix/packages/lix/Cargo.toml ]; then \
-		curl -fsSL "https://github.com/opral/lix/archive/${LIX_REV}.tar.gz" -o /tmp/lix.tar.gz; \
-		echo "${LIX_ARCHIVE_SHA256}  /tmp/lix.tar.gz" | sha256sum -c -; \
-		tar -xzf /tmp/lix.tar.gz -C vendor/lix --strip-components=1; \
-		rm /tmp/lix.tar.gz; \
-	fi \
-	&& cp vendor/lix/rust-toolchain.toml ./rust-toolchain.toml
+RUN test -f vendor/lix/packages/lix/Cargo.toml \
+	|| (echo "vendor/lix is missing; initialize submodules before building the server image" >&2; exit 1)
+RUN cp vendor/lix/rust-toolchain.toml ./rust-toolchain.toml
 COPY lix-server/Cargo.toml lix-server/Cargo.lock ./lix-server/
 COPY lix-server/src ./lix-server/src
 
@@ -33,7 +24,7 @@ WORKDIR /app/lix-server
 RUN --mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/usr/local/cargo/registry,target=/usr/local/cargo/registry \
 	--mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/usr/local/cargo/git,target=/usr/local/cargo/git \
 	--mount=type=cache,id=s/e84e4572-f7b7-4d3e-abb9-bfdc80c23be7-/app/lix-server/target,target=/app/lix-server/target \
-	cargo -Z bindeps clean --release --package lixray \
+	cargo -Z bindeps clean --release --package lixray --locked \
 	&& CARGO_BUILD_JOBS="$CARGO_BUILD_JOBS" cargo -Z bindeps build --release --locked \
 	&& mkdir -p /app/dist \
 	&& cp /app/lix-server/target/release/lixray /app/dist/lixray

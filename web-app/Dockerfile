@@ -16,7 +16,6 @@ ARG VITE_LIXRAY_LOCAL_DEV
 ARG VITE_LIXRAY_LOCAL_DEV_EMAIL
 ARG VITE_LIXRAY_LOCAL_DEV_PASSWORD
 ARG RAILWAY_ENVIRONMENT_NAME
-ARG RAILWAY_GIT_COMMIT_SHA
 
 WORKDIR /app
 ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL} \
@@ -37,23 +36,9 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 COPY . .
 
-# Railway's GitHub builder does not populate submodules. Local builds retain
-# the checked-out sources so edits are tested directly; Railway falls back to
-# archives pinned to the repository's gitlink revisions. CI verifies that the
-# manifest remains in sync with the submodule pointers.
-RUN set -eu; \
-	. /app/vendor/revisions.env; \
-	mkdir -p vendor/lix vendor/atelier; \
-	if [ ! -f vendor/lix/packages/js-sdk/package.json ]; then \
-		curl -fsSL "https://github.com/opral/lix/archive/${LIX_REVISION}.tar.gz" -o /tmp/lix.tar.gz; \
-		tar -xzf /tmp/lix.tar.gz -C vendor/lix --strip-components=1; \
-		rm /tmp/lix.tar.gz; \
-	fi \
-	&& if [ ! -f vendor/atelier/package.json ]; then \
-		curl -fsSL "https://github.com/opral/atelier/archive/${ATELIER_REVISION}.tar.gz" -o /tmp/atelier.tar.gz; \
-		tar -xzf /tmp/atelier.tar.gz -C vendor/atelier --strip-components=1; \
-		rm /tmp/atelier.tar.gz; \
-	fi
+RUN test -f vendor/lix/packages/js-sdk/package.json \
+	&& test -f vendor/atelier/package.json \
+	|| (echo "vendored dependencies are missing; initialize submodules before building the web image" >&2; exit 1)
 
 # Railway cache mounts must be namespaced by this service's ID. Docker treats
 # the ID as opaque, so the same cache works for local Compose builds.
