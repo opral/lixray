@@ -35,6 +35,8 @@ export function createLixConnectionDetails({
 
 Use the ${serverName} MCP connection for Lix ${lixId}. If that connection already exists, reuse it. Otherwise, create and authenticate it with [${mcpUrl}](${mcpUrl}).
 
+Use only the MCP connection. Do not install or use plugins unless the user explicitly asks for them.
+
 Once connected, and the lix has no files, guide the user in setting up their repository.
 
 Lix's goal is a repository for non-code. If it's a company, main valuable files are icp.md, skills, etc "a repository for your entire company". Generally check the memory to what the user's workflows/files are that benefit most from being in a repository.`;

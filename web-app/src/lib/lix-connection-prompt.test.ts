@@ -29,6 +29,11 @@ void test("uses a Codex-safe isolated development registration on localhost", ()
 	assert.doesNotMatch(details.prompt, /Preview:/);
 	assert.doesNotMatch(details.prompt, /Setup docs:/);
 	assert.match(details.prompt, /If that connection already exists, reuse it/);
+	assert.match(details.prompt, /Use only the MCP connection\./);
+	assert.match(
+		details.prompt,
+		/Do not install or use plugins unless the user explicitly asks for them\./,
+	);
 	assert.match(details.prompt, /Once connected, and the lix has no files/);
 	assert.match(details.prompt, /Lix's goal is a repository for non-code\./);
 	assert.match(details.prompt, /icp\.md, skills/);

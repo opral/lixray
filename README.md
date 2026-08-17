@@ -125,11 +125,10 @@ SQL execution. OAuth protected-resource metadata is served from
 tokens bound to `https://lixray.com`.
 
 For local MCP testing, configure exactly one MCP connection. Remove the
-installed production plugin and connection from the local Codex configuration,
-then register and authenticate the local endpoint:
+production connection from the local Codex configuration, then register and
+authenticate the local endpoint:
 
 ```sh
-codex plugin remove lixray@personal
 codex mcp remove LixRay
 codex mcp add LixRay_Dev \
   --url http://127.0.0.1:8787/mcp \
