@@ -84,7 +84,6 @@ jobs:
               git ls-tree HEAD -- \
                 .dockerignore \
                 .gitmodules \
-                scripts/resolve-gitlink-submodules.sh \
                 vendor/lix
               git ls-tree -r HEAD -- lix-server
             } | git hash-object --stdin
@@ -558,10 +557,12 @@ jobs:
       always() &&
       github.event_name == 'pull_request' &&
       needs.ci.result == 'success' &&
-      needs.server-image.result == 'success'
+      needs.server-image.result == 'success' &&
+      needs.web-image.result == 'success'
     needs:
       - ci
       - server-image
+      - web-image
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -605,6 +606,7 @@ jobs:
           test -n "$RAILWAY_PROJECT_ID"
           test -n "$RAILWAY_PRODUCTION_ENVIRONMENT"
           test -n "$RAILWAY_SERVER_SERVICE"
+          test -n "$RAILWAY_WEB_SERVICE"
           test -n "$GHCR_READ_USERNAME"
           test -n "$GHCR_READ_TOKEN"
           echo "available=true" >> "$GITHUB_OUTPUT"
@@ -619,24 +621,25 @@ jobs:
         if: steps.credentials.outputs.available == 'true'
         run: npm install --global @railway/cli@5.30.1
 
-      - name: Require image-managed server service
+      - name: Require image-managed services
         if: steps.credentials.outputs.available == 'true'
         shell: bash
         run: |
-          service="$(
+          services="$(
             railway service list \
               --project "$RAILWAY_PROJECT_ID" \
               --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
-              --json |
-              jq -c --arg id "$RAILWAY_SERVER_SERVICE" \
-                '.[] | select(.id == $id)'
+              --json
           )"
-          test -n "$service"
-          if test "$(jq -r '.source.repo // empty' <<<"$service")" != "" ||
-             test "$(jq -r '.source.image // empty' <<<"$service")" = ""; then
-            echo "The Railway server must remain image-managed so GitHub CI is the only server build path." >&2
-            exit 1
-          fi
+          for service_id in "$RAILWAY_SERVER_SERVICE" "$RAILWAY_WEB_SERVICE"; do
+            service="$(jq -c --arg id "$service_id" '.[] | select(.id == $id)' <<<"$services")"
+            test -n "$service"
+            if test "$(jq -r '.source.repo // empty' <<<"$service")" != "" ||
+               test "$(jq -r '.source.image // empty' <<<"$service")" = ""; then
+              echo "Railway service $service_id must remain image-managed so GitHub CI is its only build path." >&2
+              exit 1
+            fi
+          done
 
       - name: Find Railway PR environment
         if: steps.credentials.outputs.available == 'true'
@@ -682,136 +685,169 @@ jobs:
           echo "Railway did not create an environment for PR #$PR_NUMBER within 5 minutes." >&2
           exit 1
 
-      - name: Promote tested image to preview
+      - name: Promote tested images to preview
         if: steps.credentials.outputs.available == 'true'
         shell: bash
         env:
-          IMAGE: ${{ needs.server-image.outputs.image }}
+          SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
+          WEB_IMAGE: ${{ needs.web-image.outputs.image }}
           ENVIRONMENT_ID: ${{ steps.environment.outputs.id }}
         run: |
-          update_response="$(
-            jq -n \
-              --arg query 'mutation($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input) }' \
-              --arg service_id "$RAILWAY_SERVER_SERVICE" \
-              --arg environment_id "$ENVIRONMENT_ID" \
-              --arg image "$IMAGE" \
-              --arg username "$GHCR_READ_USERNAME" \
-              --arg password "$GHCR_READ_TOKEN" \
-              '{
-                query: $query,
-                variables: {
-                  serviceId: $service_id,
-                  environmentId: $environment_id,
-                  input: {
-                    source: {image: $image},
-                    registryCredentials: {
-                      username: $username,
-                      password: $password
-                    }
-                  }
-                }
-              }' |
-              curl --fail --silent --show-error \
-                --request POST \
-                --url https://backboard.railway.com/graphql/v2 \
-                --header "Authorization: Bearer $RAILWAY_API_TOKEN" \
-                --header "Content-Type: application/json" \
-                --data-binary @-
-          )"
-          if jq -e '.errors | length > 0' <<<"$update_response" >/dev/null; then
-            jq -r '.errors[].message' <<<"$update_response" >&2
-            exit 1
-          fi
-          test "$(jq -r '.data.serviceInstanceUpdate' <<<"$update_response")" = true
-          for promotion_attempt in 1 2; do
-            previous_deployment=""
-            if deployment="$(
-              railway deployment list \
-                --project "$RAILWAY_PROJECT_ID" \
-                --environment "$ENVIRONMENT_ID" \
-                --service "$RAILWAY_SERVER_SERVICE" \
-                --limit 1 \
-                --json
-            )"; then
-              previous_deployment="$(jq -r '.[0].id // empty' <<<"$deployment")"
-            else
-              echo "::warning::Could not read the previous Railway deployment; continuing with promotion."
-            fi
-
-            deploy_response="$(
-              jq -n \
-                --arg query 'mutation($serviceId: String!, $environmentId: String!) { serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId) }' \
-                --arg service_id "$RAILWAY_SERVER_SERVICE" \
-                --arg environment_id "$ENVIRONMENT_ID" \
-                '{
-                  query: $query,
-                  variables: {
-                    serviceId: $service_id,
-                    environmentId: $environment_id
-                  }
-                }' |
+          graphql() {
+            local payload="$1"
+            local response
+            for api_attempt in 1 2 3; do
+              if response="$(
                 curl --fail --silent --show-error \
                   --request POST \
                   --url https://backboard.railway.com/graphql/v2 \
                   --header "Authorization: Bearer $RAILWAY_API_TOKEN" \
                   --header "Content-Type: application/json" \
-                  --data-binary @-
-            )"
-            if jq -e '.errors | length > 0' <<<"$deploy_response" >/dev/null; then
-              jq -r '.errors[].message' <<<"$deploy_response" >&2
-              exit 1
-            fi
-            test "$(jq -r '.data.serviceInstanceDeploy' <<<"$deploy_response")" = true
+                  --data-binary "$payload"
+              )"; then
+                if jq -e '.errors | length > 0' <<<"$response" >/dev/null; then
+                  jq -r '.errors[].message' <<<"$response" >&2
+                  return 1
+                fi
+                printf '%s\n' "$response"
+                return 0
+              fi
+              echo "::warning::Railway API request failed on attempt $api_attempt; retrying."
+              sleep "$api_attempt"
+            done
+            return 1
+          }
 
-            terminal_status=""
-            for status_attempt in $(seq 1 30); do
-              if ! deployment="$(
+          promote() {
+            local service_id="$1"
+            local image="$2"
+            local label="$3"
+            local payload response previous_deployment deployment deploy_response
+            local deployment_id status terminal_status
+
+            payload="$(
+              jq -cn \
+                --arg query 'mutation($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input) }' \
+                --arg service_id "$service_id" \
+                --arg environment_id "$ENVIRONMENT_ID" \
+                --arg image "$image" \
+                --arg username "$GHCR_READ_USERNAME" \
+                --arg password "$GHCR_READ_TOKEN" \
+                '{
+                  query: $query,
+                  variables: {
+                    serviceId: $service_id,
+                    environmentId: $environment_id,
+                    input: {
+                      source: {image: $image},
+                      registryCredentials: {
+                        username: $username,
+                        password: $password
+                      }
+                    }
+                  }
+                }'
+            )"
+            response="$(graphql "$payload")"
+            test "$(jq -r '.data.serviceInstanceUpdate' <<<"$response")" = true
+
+            for promotion_attempt in 1 2; do
+              previous_deployment=""
+              if deployment="$(
                 railway deployment list \
                   --project "$RAILWAY_PROJECT_ID" \
                   --environment "$ENVIRONMENT_ID" \
-                  --service "$RAILWAY_SERVER_SERVICE" \
+                  --service "$service_id" \
                   --limit 1 \
                   --json
               )"; then
-                echo "::warning::Railway deployment lookup failed on attempt $status_attempt; retrying."
+                previous_deployment="$(jq -r '.[0].id // empty' <<<"$deployment")"
+              else
+                echo "::warning::Could not read the previous $label deployment; continuing with promotion."
+              fi
+
+              payload="$(
+                jq -cn \
+                  --arg query 'mutation($serviceId: String!, $environmentId: String!) { serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId) }' \
+                  --arg service_id "$service_id" \
+                  --arg environment_id "$ENVIRONMENT_ID" \
+                  '{
+                    query: $query,
+                    variables: {
+                      serviceId: $service_id,
+                      environmentId: $environment_id
+                    }
+                  }'
+              )"
+              deploy_response="$(graphql "$payload")"
+              test "$(jq -r '.data.serviceInstanceDeploy' <<<"$deploy_response")" = true
+
+              terminal_status=""
+              for status_attempt in $(seq 1 30); do
+                if ! deployment="$(
+                  railway deployment list \
+                    --project "$RAILWAY_PROJECT_ID" \
+                    --environment "$ENVIRONMENT_ID" \
+                    --service "$service_id" \
+                    --limit 1 \
+                    --json
+                )"; then
+                  echo "::warning::$label deployment lookup failed on attempt $status_attempt; retrying."
+                  sleep 10
+                  continue
+                fi
+                deployment_id="$(jq -r '.[0].id // empty' <<<"$deployment")"
+                status="$(jq -r '.[0].status // empty' <<<"$deployment")"
+                if test -n "$deployment_id" && test "$deployment_id" != "$previous_deployment"; then
+                  case "$status" in
+                    SUCCESS)
+                      echo "Railway $label preview is running $image"
+                      return 0
+                      ;;
+                    FAILED|CRASHED|REMOVED|SKIPPED|CANCELED|CANCELLED)
+                      terminal_status="$status"
+                      break
+                      ;;
+                  esac
+                fi
+                sleep 10
+              done
+
+              if test "$promotion_attempt" -lt 2; then
+                echo "::warning::Railway $label preview attempt ended with ${terminal_status:-a timeout}; retrying once."
                 sleep 10
                 continue
               fi
-              deployment_id="$(jq -r '.[0].id // empty' <<<"$deployment")"
-              status="$(jq -r '.[0].status // empty' <<<"$deployment")"
-              if test -n "$deployment_id" && test "$deployment_id" != "$previous_deployment"; then
-                case "$status" in
-                  SUCCESS)
-                    echo "Railway preview is running $IMAGE"
-                    exit 0
-                    ;;
-                  FAILED|CRASHED|REMOVED)
-                    terminal_status="$status"
-                    break
-                    ;;
-                esac
-              fi
-              sleep 10
+              echo "Railway $label preview failed after two attempts; final status: ${terminal_status:-timeout}." >&2
+              return 1
             done
+          }
 
-            if test "$promotion_attempt" -lt 2; then
-              echo "::warning::Railway preview attempt ended with ${terminal_status:-a timeout}; retrying once."
-              sleep 10
-              continue
-            fi
-            echo "Railway preview failed after two attempts; final status: ${terminal_status:-timeout}." >&2
-            exit 1
-          done
+          promote "$RAILWAY_WEB_SERVICE" "$WEB_IMAGE" web
+          promote "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" server
 
-      - name: Report server preview status
+      - name: Report preview statuses
         if: steps.credentials.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api \
-            --method POST \
-            "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
-            --field state=success \
-            --field context='lixray - lix-server' \
-            --field description='Success - tested image deployed by GitHub Actions' \
-            --field target_url='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          report_status() {
+            local context="$1"
+            for attempt in 1 2 3; do
+              if gh api \
+                --method POST \
+                "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
+                --field state=success \
+                --field context="$context" \
+                --field description='Success - tested image deployed by GitHub Actions' \
+                --field target_url='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'; then
+                return 0
+              fi
+              echo "::warning::GitHub status report failed on attempt $attempt; retrying."
+              sleep "$attempt"
+            done
+            return 1
+          }
+
+          report_status 'lixray - lixray-web'
+          report_status 'lixray - lix-server'

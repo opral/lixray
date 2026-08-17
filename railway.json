@@ -8,7 +8,6 @@
       "vendor/lix",
       "vendor/lix/**",
       ".gitmodules",
-      "scripts/resolve-gitlink-submodules.sh",
       "railway.json"
     ]
   },

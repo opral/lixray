@@ -1,37 +1,19 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-test("Railway Docker fallback resolves submodule gitlinks from the parent commit", async () => {
-	const [webDockerfile, serverDockerfile, resolver] = await Promise.all([
+test("Docker builds require the checked-out submodules without a revision fallback", async () => {
+	const [webDockerfile, serverDockerfile] = await Promise.all([
 		readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
 		readFile(new URL("../../lix-server/Dockerfile", import.meta.url), "utf8"),
-		readFile(
-			new URL("../../scripts/resolve-gitlink-submodules.sh", import.meta.url),
-			"utf8",
-		),
 	]);
 
 	for (const dockerfile of [webDockerfile, serverDockerfile]) {
-		assert.match(dockerfile, /ARG RAILWAY_GIT_COMMIT_SHA/);
-		assert.match(dockerfile, /resolve-gitlink-submodules\.sh/);
+		assert.match(dockerfile, /initialize submodules before building/);
+		assert.doesNotMatch(dockerfile, /resolve-gitlink-submodules/);
+		assert.doesNotMatch(dockerfile, /RAILWAY_GIT_REPO_/);
 		assert.doesNotMatch(dockerfile, /vendor\/revisions\.env/);
 	}
-	assert.match(resolver, /git .* ls-tree FETCH_HEAD/);
-	assert.match(resolver, /mode.*160000/);
-	assert.match(resolver, /archive\/\$\{revision\}\.tar\.gz/);
-	execFileSync(
-		"sh",
-		[
-			"-n",
-			fileURLToPath(
-				new URL("../../scripts/resolve-gitlink-submodules.sh", import.meta.url),
-			),
-		],
-		{ stdio: "inherit" },
-	);
 });
 
 test("Railway watches the submodule pointers used by each service", async () => {
@@ -45,6 +27,22 @@ test("Railway watches the submodule pointers used by each service", async () => 
 		assert.ok(railwayConfig.build.watchPatterns.includes("vendor/lix"));
 	}
 	assert.ok(webConfig.build.watchPatterns.includes("vendor/atelier"));
+});
+
+test("PR previews promote both tested images instead of rebuilding source", async () => {
+	const workflow = await readFile(
+		new URL("../../.github/workflows/pr.yml", import.meta.url),
+		"utf8",
+	);
+
+	assert.match(workflow, /needs\.web-image\.outputs\.image/);
+	assert.match(workflow, /promote "\$RAILWAY_WEB_SERVICE" "\$WEB_IMAGE" web/);
+	assert.match(
+		workflow,
+		/promote "\$RAILWAY_SERVER_SERVICE" "\$SERVER_IMAGE" server/,
+	);
+	assert.match(workflow, /report_status 'lixray - lixray-web'/);
+	assert.match(workflow, /report_status 'lixray - lix-server'/);
 });
 
 test("Atelier resolves the vendored Lix SDK instead of npm", async () => {

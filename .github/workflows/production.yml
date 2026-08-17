@@ -80,7 +80,6 @@ jobs:
               git ls-tree HEAD -- \
                 .dockerignore \
                 .gitmodules \
-                scripts/resolve-gitlink-submodules.sh \
                 vendor/lix
               git ls-tree -r HEAD -- lix-server
             } | git hash-object --stdin

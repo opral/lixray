@@ -4,18 +4,13 @@ ARG LIXRAY_IMAGE_VARIANT=production
 
 FROM rust:1-bookworm AS builder
 ARG CARGO_BUILD_JOBS=2
-ARG RAILWAY_GIT_COMMIT_SHA
-ARG RAILWAY_GIT_REPO_NAME
-ARG RAILWAY_GIT_REPO_OWNER
 WORKDIR /app
 
 # This Dockerfile uses the repository root as its build context so the server
-# and its vendored Lix checkout are built together. Railway source snapshots do
-# not populate submodules, so recover the gitlink from the triggering commit.
-COPY .gitmodules ./.gitmodules
-COPY scripts/resolve-gitlink-submodules.sh ./scripts/resolve-gitlink-submodules.sh
+# and its vendored Lix checkout are built together.
 COPY vendor/lix ./vendor/lix
-RUN ./scripts/resolve-gitlink-submodules.sh vendor/lix
+RUN test -f vendor/lix/packages/lix/Cargo.toml \
+	|| (echo "vendor/lix is missing; initialize submodules before building the server image" >&2; exit 1)
 RUN cp vendor/lix/rust-toolchain.toml ./rust-toolchain.toml
 COPY lix-server/Cargo.toml lix-server/Cargo.lock ./lix-server/
 COPY lix-server/src ./lix-server/src

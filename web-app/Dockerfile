@@ -16,9 +16,6 @@ ARG VITE_LIXRAY_LOCAL_DEV
 ARG VITE_LIXRAY_LOCAL_DEV_EMAIL
 ARG VITE_LIXRAY_LOCAL_DEV_PASSWORD
 ARG RAILWAY_ENVIRONMENT_NAME
-ARG RAILWAY_GIT_COMMIT_SHA
-ARG RAILWAY_GIT_REPO_NAME
-ARG RAILWAY_GIT_REPO_OWNER
 
 WORKDIR /app
 ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL} \
@@ -39,10 +36,9 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 COPY . .
 
-# Railway source snapshots do not populate submodules. Local and GitHub builds
-# retain their checked-out sources; Railway resolves the exact gitlinks from
-# the parent commit that triggered the deployment.
-RUN ./scripts/resolve-gitlink-submodules.sh vendor/lix vendor/atelier
+RUN test -f vendor/lix/packages/js-sdk/package.json \
+	&& test -f vendor/atelier/package.json \
+	|| (echo "vendored dependencies are missing; initialize submodules before building the web image" >&2; exit 1)
 
 # Railway cache mounts must be namespaced by this service's ID. Docker treats
 # the ID as opaque, so the same cache works for local Compose builds.

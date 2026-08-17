@@ -28,7 +28,7 @@ function lanesForFile(file) {
   if (file.startsWith("scripts/")) return ["frontend", "e2e"];
   if (file.startsWith("perf/")) return ["frontend"];
 
-  if (file === "vendor/lix" || file === "vendor/revisions.env") {
+  if (file === "vendor/lix") {
     return ["frontend", "rust", "e2e"];
   }
   if (file === "vendor/atelier") return ["frontend", "e2e"];
