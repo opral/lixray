@@ -24,6 +24,8 @@ import {
 import { PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
+import { useRepository } from "~/components/repository-provider";
+import type { RepositorySettingsApi } from "~/components/repository-home/settings-view";
 import { RepositoryPicker } from "~/components/repository-picker";
 import { RepositoryShareDialog } from "~/components/repository-share-dialog";
 import { Button } from "~/components/ui/button";
@@ -59,8 +61,10 @@ import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
 	LIXRAY_PEOPLE_EXTENSION_ID,
+	LIXRAY_SETTINGS_EXTENSION_ID,
 	createLixrayRepositoryExtensions,
 	emptyRepositoryOpeningUiState,
+	lixrayHomeDirState,
 } from "~/components/repository-home/host-extensions";
 import type {
 	TeamMember,
@@ -89,6 +93,9 @@ interface RepositoryAtelierProps {
 const RepositoryAtelierContext = createContext<AtelierInstance | null>(null);
 const RepositoryDefaultBranchContext = createContext<string | null>(null);
 const RepositoryRouteSyncContext = createContext<(() => void) | null>(null);
+const RepositoryShellDirNavigationContext = createContext<
+	((dirPath: string) => boolean) | null
+>(null);
 const RepositoryBranchSessionContext =
 	createContext<RepositoryBranchSession | null>(null);
 
@@ -124,15 +131,18 @@ export function RepositoryAtelier({
 	const routeParams = useParams({ strict: false });
 	const routeSplat = "_splat" in routeParams ? routeParams._splat : undefined;
 	const repositoryRootPath = `/@${namespace}/${repositorySlug}`;
-	const routeChildKind: "file" | "dir" | "team" | null = pathname.startsWith(
-		`${repositoryRootPath}/file/`,
-	)
-		? "file"
-		: pathname.startsWith(`${repositoryRootPath}/dir/`)
-			? "dir"
-			: pathname === `${repositoryRootPath}/team`
-				? "team"
-				: null;
+	const routeChildKind: "file" | "dir" | "team" | "settings" | "sql" | null =
+		pathname.startsWith(`${repositoryRootPath}/file/`)
+			? "file"
+			: pathname.startsWith(`${repositoryRootPath}/dir/`)
+				? "dir"
+				: pathname === `${repositoryRootPath}/team`
+					? "team"
+					: pathname === `${repositoryRootPath}/settings`
+						? "settings"
+						: pathname === `${repositoryRootPath}/sql`
+							? "sql"
+							: null;
 	const routeFilePath = routeChildKind === "file" ? routeSplat : undefined;
 	const documentName = activeDocumentName({
 		pathname,
@@ -150,7 +160,7 @@ export function RepositoryAtelier({
 	const activeLixRef = useRef<RepositoryLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeChildRef = useRef<{
-		kind: "file" | "dir" | "team" | null;
+		kind: "file" | "dir" | "team" | "settings" | "sql" | null;
 		splat: string | undefined;
 	}>({ kind: routeChildKind, splat: routeSplat });
 	const routeFilePathRef = useRef(routeFilePath);
@@ -312,6 +322,107 @@ export function RepositoryAtelier({
 		removeMember: (userId) =>
 			requireTeamApi(teamApiRef.current).removeMember(userId),
 	});
+
+	// Same rebuilt-per-render / stable-facade split for the Settings tab.
+	const { organizations, renameRepository, deleteRepository } = useRepository();
+	const settingsApiRef = useRef<RepositorySettingsApi | null>(null);
+	useEffect(() => {
+		const organization = organizations.find(
+			(candidate) => candidate.id === namespaceId,
+		);
+		const isOwner = organization?.role === "owner";
+		settingsApiRef.current =
+			!canEdit || isDemoModeEnabled || !client
+				? null
+				: {
+						info: () => ({
+							namespaceHandle: namespace,
+							repositorySlug,
+							repositoryName:
+								organization?.repositories.find(
+									(candidate) => candidate.id === repositoryId,
+								)?.name ?? repositoryName,
+							isOwner: Boolean(isOwner),
+							currentUserId: user?.id ?? null,
+						}),
+						rename: (name) => renameRepository(repositoryId, name),
+						listDirectMembers: async () => {
+							const { data, error } = await client.rpc("list_lix_members", {
+								p_lix_id: repositoryId,
+							});
+							if (error) throw new Error(error.message);
+							return (data ?? []).map((row) => ({
+								userId: row.user_id,
+								name: row.name,
+								email: row.email,
+								avatarUrl: row.avatar_url,
+							}));
+						},
+						removeDirectMember: async (memberUserId) => {
+							const { error } = await client.rpc("remove_lix_member", {
+								p_lix_id: repositoryId,
+								p_user_id: memberUserId,
+							});
+							if (error) throw new Error(error.message);
+						},
+						listNamespaceMembers: async () => {
+							if (!organization || organization.role === null) return null;
+							const { data, error } = await client.rpc(
+								"list_namespace_members",
+								{ p_namespace_id: namespaceId },
+							);
+							if (error) return null;
+							return (data ?? []).map((row) => ({
+								userId: row.user_id,
+								name: row.name,
+								email: row.email,
+								avatarUrl: row.avatar_url,
+							}));
+						},
+						createEditLink: async () => {
+							const { data, error } = await client.rpc(
+								"create_lix_share_token",
+								{ p_lix_id: repositoryId },
+							);
+							if (error) throw new Error(error.message);
+							const token = data?.[0]?.token;
+							if (!isRepositoryShareToken(token)) {
+								throw new Error("The share service returned an invalid link.");
+							}
+							return appendRepositoryShareToken(
+								`${window.location.origin}/@${namespace}/${repositorySlug}`,
+								token,
+							);
+						},
+						deleteRepository: async () => {
+							await deleteRepository(repositoryId);
+							void navigate({ to: "/home" });
+						},
+					};
+	});
+	const stableSettingsApiRef = useRef<RepositorySettingsApi>({
+		info: () =>
+			settingsApiRef.current?.info() ?? {
+				namespaceHandle: namespace,
+				repositorySlug,
+				repositoryName,
+				isOwner: false,
+				currentUserId: null,
+			},
+		rename: (name) => requireSettingsApi(settingsApiRef.current).rename(name),
+		listDirectMembers: () =>
+			requireSettingsApi(settingsApiRef.current).listDirectMembers(),
+		removeDirectMember: (memberUserId) =>
+			requireSettingsApi(settingsApiRef.current).removeDirectMember(
+				memberUserId,
+			),
+		listNamespaceMembers: () =>
+			requireSettingsApi(settingsApiRef.current).listNamespaceMembers(),
+		createEditLink: () =>
+			requireSettingsApi(settingsApiRef.current).createEditLink(),
+		deleteRepository: () =>
+			requireSettingsApi(settingsApiRef.current).deleteRepository(),
+	});
 	const disabledShareButton = (
 		<span
 			aria-disabled="true"
@@ -403,6 +514,24 @@ export function RepositoryAtelier({
 				});
 				return;
 			}
+			if (routeChild.kind === "settings") {
+				await navigate({
+					to: "/@{$namespace}/$repository/settings",
+					params: { namespace, repository: repositorySlug },
+					search,
+					replace,
+				});
+				return;
+			}
+			if (routeChild.kind === "sql") {
+				await navigate({
+					to: "/@{$namespace}/$repository/sql",
+					params: { namespace, repository: repositorySlug },
+					search,
+					replace,
+				});
+				return;
+			}
 			if (routeChild.kind && routeChild.splat !== undefined) {
 				await navigate({
 					to:
@@ -437,11 +566,30 @@ export function RepositoryAtelier({
 	const markRouteSynced = useCallback(() => {
 		routeSyncedRef.current = true;
 	}, []);
+	// Each instance applies the initial route exactly once. Without the reset,
+	// a deep link that raced a dying instance (dev double-mount, HMR) would
+	// stay "synced", letting the next instance's restored session steal the
+	// URL before the deep-linked tab ever opened.
+	useEffect(() => {
+		routeSyncedRef.current = false;
+	}, [instance]);
+	// The folder path of the last /dir navigation this handler issued. The
+	// dir route consumes it to tell shell-originated URL changes (the right
+	// view is already active — e.g. a forked folder tab) from outside ones
+	// (deep link, back/forward), which must hydrate the Home surface.
+	const shellDirNavigationRef = useRef<string | null>(null);
+	const consumeShellDirNavigation = useCallback((dirPath: string) => {
+		const matches = shellDirNavigationRef.current === dirPath;
+		shellDirNavigationRef.current = null;
+		return matches;
+	}, []);
 	useEffect(() => {
 		eventHandlerRef.current = (event) => {
 			atelierTelemetryHandlerRef.current?.(event);
 			if (event.type !== "central_view_activated") return;
 			if (!routeSyncedRef.current) return;
+			// Any activation supersedes an unconsumed dir-navigation marker.
+			shellDirNavigationRef.current = null;
 			const activeBranchId = activeLixRef.current?.activeBranchSnapshot();
 			const defaultBranchId = activeLixRef.current?.defaultBranchSnapshot();
 			const search =
@@ -449,6 +597,35 @@ export function RepositoryAtelier({
 					? atelierBranchSearch(activeBranchId, defaultBranchId)
 					: {};
 			if (event.viewKind === LIXRAY_HOME_EXTENSION_ID) {
+				// Home is the primary Files surface (flow A): drilled into a
+				// folder it claims the /dir URL, at the root it claims the
+				// repository root URL.
+				const state = event.state;
+				const dirPath =
+					state &&
+					(state.kind === undefined || state.kind === EntryKind.Directory) &&
+					typeof state.path === "string"
+						? state.path
+						: "/";
+				const splat = dirPath.replace(/^\/+/, "");
+				if (splat) {
+					const targetPath = `/@${namespace}/${repositorySlug}/dir/${splat}`;
+					const currentPath = (() => {
+						try {
+							return decodeURIComponent(pathnameRef.current);
+						} catch {
+							return pathnameRef.current;
+						}
+					})();
+					if (currentPath === targetPath) return;
+					shellDirNavigationRef.current = `/${splat}`;
+					void navigate({
+						to: "/@{$namespace}/$repository/dir/$",
+						params: { namespace, repository: repositorySlug, _splat: splat },
+						search,
+					});
+					return;
+				}
 				const targetPath = `/@${namespace}/${repositorySlug}`;
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
@@ -463,6 +640,26 @@ export function RepositoryAtelier({
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
 					to: "/@{$namespace}/$repository/team",
+					params: { namespace, repository: repositorySlug },
+					search,
+				});
+				return;
+			}
+			if (event.viewKind === LIXRAY_SETTINGS_EXTENSION_ID) {
+				const targetPath = `/@${namespace}/${repositorySlug}/settings`;
+				if (pathnameRef.current === targetPath) return;
+				void navigate({
+					to: "/@{$namespace}/$repository/settings",
+					params: { namespace, repository: repositorySlug },
+					search,
+				});
+				return;
+			}
+			if (event.viewKind === "sql_explorer") {
+				const targetPath = `/@${namespace}/${repositorySlug}/sql`;
+				if (pathnameRef.current === targetPath) return;
+				void navigate({
+					to: "/@{$namespace}/$repository/sql",
 					params: { namespace, repository: repositorySlug },
 					search,
 				});
@@ -490,6 +687,7 @@ export function RepositoryAtelier({
 					}
 				})();
 				if (currentPath === targetPath) return;
+				shellDirNavigationRef.current = `/${splat}`;
 				void navigate({
 					to: "/@{$namespace}/$repository/dir/$",
 					params: { namespace, repository: repositorySlug, _splat: splat },
@@ -593,6 +791,7 @@ export function RepositoryAtelier({
 							return data.length > 0;
 						},
 						canEdit ? stableTeamApiRef.current : null,
+						canEdit ? stableSettingsApiRef.current : null,
 					),
 					centralPanel: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
@@ -738,8 +937,11 @@ export function RepositoryAtelier({
 			markRouteSynced();
 			return;
 		}
+		// The state reset matters as much as the activation: Home may be
+		// drilled into a folder (flow A), and the root URL means the root
+		// listing.
 		void instance.views
-			.open(LIXRAY_HOME_EXTENSION_ID)
+			.open(LIXRAY_HOME_EXTENSION_ID, { state: lixrayHomeDirState("/") })
 			.catch((error: unknown) => {
 				console.error("Unable to activate the repository home", error);
 			})
@@ -757,26 +959,30 @@ export function RepositoryAtelier({
 				>
 					<RepositoryBranchSessionContext.Provider value={branchSession}>
 						<RepositoryRouteSyncContext.Provider value={markRouteSynced}>
-							<RepositoryAtelierContext.Provider value={instance}>
-								<Atelier
-									instance={instance}
-									topBarProps={{
-										"data-app-titlebar": true,
-										className: "border-b border-border-subtle bg-bg-app",
-									}}
-									slots={{
-										navbarBrand: (
-											<RepositoryPicker
-												namespaceId={namespaceId}
-												repositoryName={repositoryName}
-												repositorySlug={repositorySlug}
-											/>
-										),
-										navbarEnd: headerActions,
-									}}
-								/>
-								<Outlet />
-							</RepositoryAtelierContext.Provider>
+							<RepositoryShellDirNavigationContext.Provider
+								value={consumeShellDirNavigation}
+							>
+								<RepositoryAtelierContext.Provider value={instance}>
+									<Atelier
+										instance={instance}
+										topBarProps={{
+											"data-app-titlebar": true,
+											className: "border-b border-border-subtle bg-bg-app",
+										}}
+										slots={{
+											navbarBrand: (
+												<RepositoryPicker
+													namespaceId={namespaceId}
+													repositoryName={repositoryName}
+													repositorySlug={repositorySlug}
+												/>
+											),
+											navbarEnd: headerActions,
+										}}
+									/>
+									<Outlet />
+								</RepositoryAtelierContext.Provider>
+							</RepositoryShellDirNavigationContext.Provider>
 						</RepositoryRouteSyncContext.Provider>
 					</RepositoryBranchSessionContext.Provider>
 				</RepositoryDefaultBranchContext.Provider>
@@ -818,6 +1024,18 @@ export function useMarkRepositoryRouteSynced(): () => void {
 	return markRouteSynced ?? (() => undefined);
 }
 
+/**
+ * True when the current /dir URL was just written by a tab activation inside
+ * the shell — the right Files surface is already active, so the dir route
+ * must not hydrate Home over it (it would steal focus from a forked folder
+ * tab). Consuming clears the marker; outside navigations (deep link,
+ * back/forward) never match and hydrate as usual.
+ */
+export function useConsumeShellDirNavigation(): (dirPath: string) => boolean {
+	const consume = useContext(RepositoryShellDirNavigationContext);
+	return consume ?? (() => false);
+}
+
 const NO_BRANCH_SUBSCRIBE = () => () => undefined;
 const NO_BRANCH_SNAPSHOT = () => null;
 
@@ -829,6 +1047,13 @@ export function useRepositoryActiveBranchId(): string | null {
 		branchSession?.getSnapshot.bind(branchSession) ?? NO_BRANCH_SNAPSHOT,
 		branchSession?.getSnapshot.bind(branchSession) ?? NO_BRANCH_SNAPSHOT,
 	);
+}
+
+function requireSettingsApi(
+	api: RepositorySettingsApi | null,
+): RepositorySettingsApi {
+	if (!api) throw new Error("Repository settings require edit access.");
+	return api;
 }
 
 function requireTeamApi(api: RepositoryTeamApi | null): RepositoryTeamApi {

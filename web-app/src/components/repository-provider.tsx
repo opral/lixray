@@ -44,6 +44,8 @@ export interface Organization {
 	id: string;
 	name: string;
 	handle: string;
+	/** True when this namespace is a user's primary (personal) namespace. */
+	isPersonal: boolean;
 	/** Null means direct repository membership, not organization membership. */
 	role: OrganizationRole | null;
 	createdAt: string;
@@ -70,8 +72,9 @@ interface RepositoryContextValue {
 	refresh: (options?: RefreshOptions) => Promise<void>;
 	selectOrganization: (organizationId: string) => void;
 	selectRepository: (repositoryId: string) => void;
-	createOrganization: (name: string) => Promise<void>;
-	renameOrganization: (name: string) => Promise<void>;
+	/** Resolves with the new organization's id. */
+	createOrganization: (name: string) => Promise<string>;
+	renameOrganization: (organizationId: string, name: string) => Promise<void>;
 	createRepository: (name: string, organizationId?: string) => Promise<void>;
 	renameRepository: (repositoryId: string, name: string) => Promise<void>;
 	deleteRepository: (repositoryId: string) => Promise<void>;
@@ -251,32 +254,36 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				{ p_name: normalizeName(name, "Organization") },
 			);
 			if (createError) throw createError;
-			await refresh({ organizationId: String(data) });
+			const organizationId = String(data);
+			await refresh({ organizationId });
 			captureTelemetry("organization_created");
+			return organizationId;
 		},
 		[client, refresh],
 	);
 
 	const renameOrganization = useCallback(
-		async (name: string) => {
-			if (!client || !selectedOrganization) {
-				throw new Error("No organization is selected");
-			}
-			if (selectedOrganization.role !== "owner") {
+		async (organizationId: string, name: string) => {
+			if (!client) throw new Error("Authentication is still loading");
+			const organization = organizations.find(
+				(candidate) => candidate.id === organizationId,
+			);
+			if (!organization) throw new Error("Unknown organization");
+			if (organization.role !== "owner") {
 				throw new Error("Only organization owners can rename an organization");
 			}
 			const { error: renameError } = await client.rpc("rename_namespace", {
-				p_namespace_id: selectedOrganization.id,
+				p_namespace_id: organizationId,
 				p_name: normalizeName(name, "Organization"),
 			});
 			if (renameError) throw renameError;
 			await refresh({
-				organizationId: selectedOrganization.id,
+				organizationId,
 				repositoryId: selectedRepositoryId ?? undefined,
 			});
 			captureTelemetry("organization_renamed");
 		},
-		[client, refresh, selectedOrganization, selectedRepositoryId],
+		[client, organizations, refresh, selectedRepositoryId],
 	);
 
 	const createRepository = useCallback(
@@ -420,6 +427,7 @@ async function loadOrganizations(
 				id: organizationId,
 				name: String(row.namespace_name),
 				handle: String(row.namespace_handle),
+				isPersonal: Boolean(row.namespace_is_personal),
 				role: row.namespace_role,
 				createdAt: String(row.namespace_created_at),
 				updatedAt: String(row.namespace_updated_at),
@@ -454,6 +462,7 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 		id: DEMO_ORGANIZATION_ID,
 		name: DEMO_ORGANIZATION_NAME,
 		handle: DEMO_ORGANIZATION_NAME,
+		isPersonal: true,
 		role: "owner",
 		createdAt: "2026-07-01T12:00:00.000Z",
 		updatedAt: "2026-07-12T18:58:00.000Z",
@@ -528,7 +537,7 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 	);
 }
 
-function repositorySlug(name: string): string {
+export function repositorySlug(name: string): string {
 	return (
 		name
 			.toLowerCase()

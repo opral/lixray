@@ -164,35 +164,55 @@ export function DirectoryView({
 		>
 			{isDropTarget ? <DropImportOverlay /> : null}
 			<div className="mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10">
-				{readOnly ? null : (
+				{readOnly && dirPath === "/" ? null : (
 					<div className="flex items-center gap-2 pb-5">
-						{isHome ? (
+						{dirPath !== "/" ? (
+							<Breadcrumb
+								repositoryName={connection.lixName}
+								dirPath={dirPath}
+								onNavigate={(path, event) =>
+									onOpenDir(path, { newTab: newTabFromMouseEvent(event) })
+								}
+							/>
+						) : isHome ? (
 							<span className="px-3 text-[11.5px] font-bold tracking-[0.06em] text-text-quaternary uppercase">
 								Files
 							</span>
 						) : null}
 						<span className="flex-1" />
-						{isHome && hasAgentConnected ? (
-							<ConnectAgentButton
-								connection={connection}
-								hasAgentConnected={hasAgentConnected}
-							/>
-						) : null}
-						{isHome && teamApi && onOpenPeople ? (
-							<InviteControl teamApi={teamApi} onOpenPeople={onOpenPeople} />
-						) : null}
-						<NewMenu
-							onCreateFile={(extension) => void createFile(extension)}
-							onCreateFolder={() => {
-								setActionError(null);
-								void createRepositoryFolder(lix, dirPath).catch(
-									(error: unknown) => {
-										console.error("repository-home: new folder failed", error);
-										setActionError("Unable to create the folder. Try again.");
-									},
-								);
-							}}
-						/>
+						{readOnly ? null : (
+							<>
+								{isHome && dirPath === "/" && hasAgentConnected ? (
+									<ConnectAgentButton
+										connection={connection}
+										hasAgentConnected={hasAgentConnected}
+									/>
+								) : null}
+								{isHome && dirPath === "/" && teamApi && onOpenPeople ? (
+									<InviteControl
+										teamApi={teamApi}
+										onOpenPeople={onOpenPeople}
+									/>
+								) : null}
+								<NewMenu
+									onCreateFile={(extension) => void createFile(extension)}
+									onCreateFolder={() => {
+										setActionError(null);
+										void createRepositoryFolder(lix, dirPath).catch(
+											(error: unknown) => {
+												console.error(
+													"repository-home: new folder failed",
+													error,
+												);
+												setActionError(
+													"Unable to create the folder. Try again.",
+												);
+											},
+										);
+									}}
+								/>
+							</>
+						)}
 					</div>
 				)}
 				{actionError ? (
@@ -280,6 +300,65 @@ export function DirectoryView({
 				) : null}
 			</div>
 		</div>
+	);
+}
+
+/**
+ * The drilled-in location of a Files surface (flow A): repository name, then
+ * one crumb per folder. Every ancestor navigates the surface in place; the
+ * last crumb is the folder being listed.
+ */
+function Breadcrumb({
+	repositoryName,
+	dirPath,
+	onNavigate,
+}: {
+	readonly repositoryName: string;
+	readonly dirPath: string;
+	readonly onNavigate: (dirPath: string, event: ReactMouseEvent) => void;
+}) {
+	const segments = dirPath.split("/").filter(Boolean);
+	const crumbs = [
+		{ label: repositoryName, path: "/" },
+		...segments.map((segment, index) => ({
+			label: segment,
+			path: `/${segments.slice(0, index + 1).join("/")}`,
+		})),
+	];
+	return (
+		<nav
+			aria-label="Folder path"
+			className="flex min-w-0 items-center gap-1 px-3 text-[13px]"
+		>
+			{crumbs.map((crumb, index) => {
+				const isCurrent = index === crumbs.length - 1;
+				return (
+					<span key={crumb.path} className="flex min-w-0 items-center gap-1">
+						{index > 0 ? (
+							<span aria-hidden className="text-text-quaternary">
+								/
+							</span>
+						) : null}
+						{isCurrent ? (
+							<span
+								aria-current="location"
+								className="truncate font-semibold text-text-primary"
+							>
+								{crumb.label}
+							</span>
+						) : (
+							<button
+								type="button"
+								onClick={(event) => onNavigate(crumb.path, event)}
+								className="max-w-[180px] cursor-pointer truncate rounded text-text-tertiary transition-colors hover:text-text-primary"
+							>
+								{crumb.label}
+							</button>
+						)}
+					</span>
+				);
+			})}
+		</nav>
 	);
 }
 

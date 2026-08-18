@@ -1,12 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import {
+	ChevronDown,
 	Download,
 	Ellipsis,
 	Link2,
 	LogOut,
-	Pencil,
 	Plus,
-	Trash2,
+	Settings,
 } from "lucide-react";
 import {
 	type FormEvent,
@@ -51,9 +51,10 @@ import {
 	repositoryInitials,
 	TILE_PALETTES,
 } from "~/components/repository-identity";
+import { CreateOrganizationDialog } from "~/components/create-organization-dialog";
 
 type DialogState =
-	| { type: "create" }
+	| { type: "create"; organizationId?: string }
 	| { type: "rename"; organization: Organization; repository: Repository }
 	| { type: "delete"; organization: Organization; repository: Repository }
 	| null;
@@ -62,6 +63,7 @@ export function RepositoryDirectory() {
 	const auth = useAuth();
 	const repositoryState = useRepository();
 	const [dialog, setDialog] = useState<DialogState>(null);
+	const [creatingOrganization, setCreatingOrganization] = useState(false);
 	const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
 	const signedIn = isDemoModeEnabled || Boolean(auth.user);
 	const organizations = repositoryState.organizations;
@@ -121,6 +123,10 @@ export function RepositoryDirectory() {
 	const namespaceCount = organizations.filter(
 		(organization) => organization.repositories.length > 0,
 	).length;
+	const hasEmptyOrganizations = organizations.some(
+		(organization) =>
+			!organization.isPersonal && organization.repositories.length === 0,
+	);
 	const paletteOrder = new Map(
 		organizations
 			.flatMap((organization) => organization.repositories)
@@ -164,53 +170,98 @@ export function RepositoryDirectory() {
 						</p>
 					) : null}
 
-					{repositoryCount === 0 ? (
+					{repositoryCount === 0 && !hasEmptyOrganizations ? (
 						<RepositoryEmptyState />
 					) : (
 						organizations.map((organization, groupIndex) =>
-							organization.repositories.length > 0 ? (
+							organization.repositories.length > 0 ||
+							!organization.isPersonal ? (
 								<section
 									className="pt-[26px] data-[first=true]:pt-0"
 									data-first={groupIndex === 0 || undefined}
 									key={organization.id}
 									aria-labelledby={`namespace-${organization.id}`}
 								>
-									<h2
-										className="m-0 px-3.5 pb-2 text-[11.5px] leading-[1.35] font-bold tracking-[0.08em] text-text-tertiary uppercase max-[560px]:px-2"
-										id={`namespace-${organization.id}`}
-									>
-										{organization.handle}
-									</h2>
-									<div className="flex flex-col">
-										{organization.repositories.map((repository) => (
-											<RepositoryRow
-												key={repository.id}
-												organization={organization}
-												repository={repository}
-												fileCount={fileCounts[repository.id]}
-												paletteIndex={paletteOrder.get(repository.id) ?? 0}
-												canManage={organization.role !== null}
-												onRename={() =>
-													setDialog({
-														type: "rename",
-														organization,
-														repository,
-													})
-												}
-												onDelete={() =>
-													setDialog({
-														type: "delete",
-														organization,
-														repository,
-													})
-												}
-											/>
-										))}
+									<div className="flex items-baseline gap-2 px-3.5 pb-1.5 max-[560px]:px-2">
+										<h2
+											className="m-0 text-[14px] leading-[1.35] font-bold tracking-[-0.01em]"
+											id={`namespace-${organization.id}`}
+										>
+											@{organization.handle}
+										</h2>
+										<span className="text-[12px] text-text-tertiary">
+											{organization.repositories.length}{" "}
+											{pluralize(
+												organization.repositories.length,
+												"repository",
+												"repositories",
+											)}
+										</span>
+										<span className="flex-1" />
+										{organization.role !== null ? (
+											<Link
+												to="/settings/@{$namespace}"
+												params={{ namespace: organization.handle }}
+												aria-label={`Settings for @${organization.handle}`}
+												className="inline-flex size-6 shrink-0 items-center justify-center self-center rounded-[7px] text-icon-quaternary transition-colors hover:bg-bg-hover-canvas hover:text-icon-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+											>
+												<Settings className="size-[14px]" aria-hidden="true" />
+											</Link>
+										) : null}
 									</div>
+									{organization.repositories.length === 0 ? (
+										<EmptyOrganizationSection
+											organization={organization}
+											onNewRepository={() =>
+												setDialog({
+													type: "create",
+													organizationId: organization.id,
+												})
+											}
+										/>
+									) : (
+										<div className="flex flex-col">
+											{organization.repositories.map((repository) => (
+												<RepositoryRow
+													key={repository.id}
+													organization={organization}
+													repository={repository}
+													fileCount={fileCounts[repository.id]}
+													paletteIndex={paletteOrder.get(repository.id) ?? 0}
+												/>
+											))}
+										</div>
+									)}
 								</section>
 							) : null,
 						)
 					)}
+
+					{!isDemoModeEnabled &&
+					!organizations.some((organization) => !organization.isPersonal) ? (
+						<button
+							className="mx-3.5 mt-[26px] flex w-[calc(100%-28px)] cursor-pointer items-center gap-3.5 rounded-[10px] border-[1.5px] border-dashed border-border-action-secondary bg-transparent px-4 py-[13px] text-left transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible max-[560px]:mx-2 max-[560px]:w-[calc(100%-16px)]"
+							type="button"
+							data-testid="create-organization-row"
+							onClick={() => setCreatingOrganization(true)}
+						>
+							<span
+								className="inline-flex size-[30px] shrink-0 items-center justify-center rounded-lg bg-bg-hover-canvas text-[15px] text-text-secondary"
+								aria-hidden="true"
+							>
+								<Plus className="size-4" />
+							</span>
+							<span className="flex min-w-0 flex-col gap-0.5">
+								<span className="text-[13.5px] leading-tight font-semibold text-text-secondary">
+									Create an organization
+								</span>
+								<span className="text-[12.5px] leading-tight text-text-tertiary">
+									Shared repositories for your company — teammates and agents
+									work in one place.
+								</span>
+							</span>
+						</button>
+					) : null}
 				</section>
 			</main>
 
@@ -219,13 +270,69 @@ export function RepositoryDirectory() {
 				organizations={writableOrganizations}
 				onClose={() => setDialog(null)}
 			/>
+			<CreateOrganizationDialog
+				open={creatingOrganization}
+				onClose={() => setCreatingOrganization(false)}
+			/>
 		</div>
 	);
 }
 
-function DirectoryHeader() {
+/**
+ * A freshly created organization has no repositories; this section makes the
+ * next two moves obvious. Invites currently travel on repository links, so
+ * the invite affordance points people at creating the first repository.
+ */
+function EmptyOrganizationSection({
+	organization,
+	onNewRepository,
+}: {
+	organization: Organization;
+	onNewRepository: () => void;
+}) {
+	return (
+		<div
+			className="mx-3.5 rounded-xl border border-border-panel bg-bg-panel px-6 py-[22px] text-center max-[560px]:mx-2"
+			data-testid="empty-organization-section"
+		>
+			<p className="m-0 text-[14px] font-bold">
+				@{organization.handle} is ready
+			</p>
+			<p className="mx-auto mt-1.5 mb-3.5 max-w-[440px] text-[12.5px] leading-normal text-text-tertiary">
+				No repositories yet. Create the first one, or bring your team in —
+				everyone you invite sees every repository in this organization.
+			</p>
+			<div className="flex justify-center gap-2">
+				<Button
+					variant="featured"
+					className="gap-1.5 font-bold"
+					type="button"
+					onClick={onNewRepository}
+				>
+					<Plus className="size-3.5" aria-hidden="true" />
+					New repository
+				</Button>
+				<Button
+					variant="outline"
+					type="button"
+					onClick={() =>
+						toast(
+							"Invites travel on repository links — create the first repository, then invite your team from its Share menu.",
+						)
+					}
+				>
+					Invite teammates
+				</Button>
+			</div>
+		</div>
+	);
+}
+
+export function DirectoryHeader() {
 	const { signOut, user } = useAuth();
 	const initial = isDemoModeEnabled ? "M" : accountInitial(user?.user_metadata);
+	const fullName = accountFullName(user?.user_metadata);
+	const email = user?.email ?? null;
 
 	return (
 		<AppTitlebar>
@@ -242,18 +349,47 @@ function DirectoryHeader() {
 				</DropdownMenuTrigger>
 				<DropdownMenuContent
 					align="end"
-					className="min-w-[190px] border-border-panel bg-bg-panel"
+					sideOffset={6}
+					className="w-[232px] min-w-[232px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2.5 [&_[data-slot=dropdown-menu-item]]:py-2 [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-item]_svg]:size-3.5 [&_[data-slot=dropdown-menu-item]_svg]:text-icon-tertiary [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle"
 				>
+					<div className="flex items-center gap-2.5 px-2.5 py-2">
+						<span
+							className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-bg-hover-canvas text-[12px] font-semibold text-text-secondary"
+							aria-hidden="true"
+						>
+							{initial}
+						</span>
+						<span className="flex min-w-0 flex-col gap-px">
+							<span className="truncate text-[13px] leading-tight font-semibold text-text-primary">
+								{fullName ?? email ?? "Account"}
+							</span>
+							{fullName && email ? (
+								<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
+									{email}
+								</span>
+							) : null}
+						</span>
+					</div>
 					{isDemoModeEnabled ? null : (
-						<DropdownMenuItem onSelect={() => void signOut()}>
-							<LogOut aria-hidden="true" />
-							Sign out
-						</DropdownMenuItem>
+						<>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem onSelect={() => void signOut()}>
+								<LogOut aria-hidden="true" />
+								Sign out
+							</DropdownMenuItem>
+						</>
 					)}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</AppTitlebar>
 	);
+}
+
+function accountFullName(
+	metadata: Record<string, unknown> | undefined,
+): string | null {
+	const value = metadata?.full_name ?? metadata?.name;
+	return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function RepositoryEmptyState() {
@@ -327,17 +463,11 @@ function RepositoryRow({
 	repository,
 	fileCount,
 	paletteIndex,
-	canManage,
-	onRename,
-	onDelete,
 }: {
 	organization: Organization;
 	repository: Repository;
 	fileCount?: number;
 	paletteIndex: number;
-	canManage: boolean;
-	onRename: () => void;
-	onDelete: () => void;
 }) {
 	const { getAccessToken } = useAuth();
 	const [downloading, setDownloading] = useState(false);
@@ -417,12 +547,18 @@ function RepositoryRow({
 					sideOffset={4}
 					className="w-[210px] min-w-[210px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2.5 [&_[data-slot=dropdown-menu-item]]:py-2 [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:leading-tight [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-item]_svg]:size-3.5 [&_[data-slot=dropdown-menu-item]_svg]:text-icon-tertiary [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle [&_[data-variant=destructive]]:text-error-700 [&_[data-variant=destructive]:focus]:bg-error-50 [&_[data-variant=destructive]:focus]:text-error-700"
 				>
-					{canManage ? (
-						<DropdownMenuItem onSelect={onRename}>
-							<Pencil aria-hidden="true" />
-							Rename
-						</DropdownMenuItem>
-					) : null}
+					<DropdownMenuItem asChild>
+						<Link
+							to="/@{$namespace}/$repository/settings"
+							params={{
+								namespace: organization.handle,
+								repository: repository.slug,
+							}}
+						>
+							<Settings aria-hidden="true" />
+							Settings
+						</Link>
+					</DropdownMenuItem>
 					<DropdownMenuItem onSelect={() => void copyUrl()}>
 						<Link2 aria-hidden="true" />
 						Copy URL
@@ -434,15 +570,6 @@ function RepositoryRow({
 						<Download aria-hidden="true" />
 						{downloading ? "Preparing archive…" : "Download archive"}
 					</DropdownMenuItem>
-					{canManage ? (
-						<>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem variant="destructive" onSelect={onDelete}>
-								<Trash2 aria-hidden="true" />
-								Delete repository…
-							</DropdownMenuItem>
-						</>
-					) : null}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</div>
@@ -495,13 +622,14 @@ function RepositoryDialog({
 	const [confirmation, setConfirmation] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [creatingOrganization, setCreatingOrganization] = useState(false);
 
 	useEffect(() => {
 		setName(dialog?.type === "rename" ? dialog.repository.name : "");
 		setOrganizationId(
 			dialog && dialog.type !== "create"
 				? dialog.organization.id
-				: defaultOrganizationId,
+				: (dialog?.organizationId ?? defaultOrganizationId),
 		);
 		setConfirmation("");
 		setError(null);
@@ -552,28 +680,62 @@ function RepositoryDialog({
 								? "This removes the repository from your directory and keeps its name reserved."
 								: dialog?.type === "rename"
 									? "The repository URL stays the same."
-									: "Choose a namespace and give the repository a name."}
+									: "A shared folder for your team and agents — any file type, every change tracked."}
 						</DialogDescription>
 					</DialogHeader>
 
 					<div className="grid gap-2" data-testid="repository-dialog-fields">
-						{dialog?.type === "create" && organizations.length > 1 ? (
-							<label className="grid gap-2">
-								<span className="text-[13px] font-semibold text-text-secondary">
-									Namespace
-								</span>
-								<select
-									className="h-10 w-full rounded-lg border border-border-panel bg-bg-panel px-[11px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1"
-									value={organizationId}
-									onChange={(event) => setOrganizationId(event.target.value)}
-								>
-									{organizations.map((organization) => (
-										<option key={organization.id} value={organization.id}>
-											@{organization.handle}
-										</option>
-									))}
-								</select>
-							</label>
+						{dialog?.type === "create" && !isDemoModeEnabled ? (
+							<>
+								<div className="flex h-11 items-center rounded-lg border border-border-panel bg-bg-panel pr-2.5 pl-3 focus-within:ring-2 focus-within:ring-ring-focus-visible focus-within:ring-offset-1">
+									<span className="relative inline-flex h-full shrink-0 cursor-pointer items-center gap-0.5 text-[13.5px] font-semibold text-text-primary">
+										@
+										{organizations.find(
+											(organization) => organization.id === organizationId,
+										)?.handle ?? "…"}
+										<ChevronDown
+											className="size-3.5 text-icon-tertiary"
+											aria-hidden="true"
+										/>
+										<select
+											aria-label="Account"
+											className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+											value={organizationId}
+											onChange={(event) => {
+												if (event.target.value === CREATE_ORGANIZATION_OPTION) {
+													setCreatingOrganization(true);
+													return;
+												}
+												setOrganizationId(event.target.value);
+											}}
+										>
+											{organizations.map((organization) => (
+												<option key={organization.id} value={organization.id}>
+													@{organization.handle}
+												</option>
+											))}
+											<option value={CREATE_ORGANIZATION_OPTION}>
+												+ New organization…
+											</option>
+										</select>
+									</span>
+									<span
+										className="px-1 text-[13.5px] text-text-quaternary"
+										aria-hidden="true"
+									>
+										/
+									</span>
+									<input
+										aria-label="Repository name"
+										className="h-full min-w-0 flex-1 bg-transparent text-[13.5px] text-text-primary outline-none placeholder:text-text-quaternary"
+										autoFocus
+										maxLength={80}
+										placeholder="repository-name"
+										value={name}
+										onChange={(event) => setName(event.target.value)}
+									/>
+								</div>
+							</>
 						) : null}
 
 						{isDelete ? (
@@ -588,7 +750,8 @@ function RepositoryDialog({
 									onChange={(event) => setConfirmation(event.target.value)}
 								/>
 							</label>
-						) : (
+						) : dialog?.type === "rename" ||
+						  (dialog?.type === "create" && isDemoModeEnabled) ? (
 							<label className="grid gap-2">
 								<span className="text-[13px] font-semibold text-text-secondary">
 									Repository name
@@ -601,7 +764,7 @@ function RepositoryDialog({
 									onChange={(event) => setName(event.target.value)}
 								/>
 							</label>
-						)}
+						) : null}
 						{error ? (
 							<p
 								className="m-0 rounded-lg bg-error-50 px-3 py-2.5 text-[13px] text-error-700"
@@ -638,9 +801,17 @@ function RepositoryDialog({
 					</DialogFooter>
 				</form>
 			</DialogContent>
+			<CreateOrganizationDialog
+				open={creatingOrganization}
+				onClose={() => setCreatingOrganization(false)}
+				onCreated={(newOrganizationId) => setOrganizationId(newOrganizationId)}
+			/>
 		</Dialog>
 	);
 }
+
+/** Sentinel option value in the namespace select that opens the org dialog. */
+const CREATE_ORGANIZATION_OPTION = "__create-organization__";
 
 function DirectoryStatus({ children }: { children: ReactNode }) {
 	return (
@@ -677,7 +848,11 @@ function SignedOutDirectory() {
 	);
 }
 
-function pluralize(count: number, singular: string, plural?: string): string {
+export function pluralize(
+	count: number,
+	singular: string,
+	plural?: string,
+): string {
 	return count === 1 ? singular : (plural ?? `${singular}s`);
 }
 

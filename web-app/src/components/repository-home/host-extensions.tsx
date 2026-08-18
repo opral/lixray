@@ -5,7 +5,7 @@ import {
 	type AtelierExtensionView,
 	type AtelierSessionUiState,
 } from "@opral/atelier";
-import { Folder, Home, Sparkles, Users } from "lucide-react";
+import { Folder, Home, Settings, Sparkles, Users } from "lucide-react";
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { EntryKind } from "../../lib/entry-kind.ts";
@@ -13,18 +13,16 @@ import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
 import { DirectoryView, GettingStartedView } from "./directory-view";
 import { canonicalDirectoryPath, dirNameFromPath } from "./lix-data";
 import { PeopleView, type RepositoryTeamApi } from "./people-view";
+import { SettingsView, type RepositorySettingsApi } from "./settings-view";
 
 export const LIXRAY_HOME_EXTENSION_ID = "lixray_home";
 export const LIXRAY_DIR_EXTENSION_ID = "lixray_dir";
 export const LIXRAY_GETTING_STARTED_EXTENSION_ID = "lixray_getting_started";
 export const LIXRAY_PEOPLE_EXTENSION_ID = "lixray_people";
+export const LIXRAY_SETTINGS_EXTENSION_ID = "lixray_settings";
 
 export type LixRepositoryConnection = Omit<LixConnectionPromptInput, "origin">;
 export type AgentConnectionProbe = () => Promise<boolean>;
-
-/** Stable central-tab identity for the folder view at dirPath. */
-export const lixrayDirInstanceId = (dirPath: string): string =>
-	`${LIXRAY_DIR_EXTENSION_ID}:${canonicalDirectoryPath(dirPath)}`;
 
 /** Central-tab state for a folder view; the tab label is the folder name. */
 export const lixrayDirViewState = (dirPath: string) => {
@@ -34,6 +32,31 @@ export const lixrayDirViewState = (dirPath: string) => {
 		path,
 		atelier: { label: dirNameFromPath(path) || "Folder" },
 	};
+};
+
+/**
+ * Navigation state for the pinned Home surface: no label override, so the
+ * tab keeps reading "Home" while its listing drills into folders (flow A).
+ */
+export const lixrayHomeDirState = (dirPath: string) => ({
+	kind: EntryKind.Directory,
+	path: canonicalDirectoryPath(dirPath),
+});
+
+/**
+ * The folder a Files surface is showing, read from its view state. Old
+ * persisted views predate the explicit kind discriminant; a conflicting
+ * discriminant fails closed to the root listing.
+ */
+const dirPathFromViewState = (candidate: AtelierExtensionView): string => {
+	if (
+		candidate.state.kind !== undefined &&
+		candidate.state.kind !== EntryKind.Directory
+	)
+		return "/";
+	return typeof candidate.state.path === "string"
+		? canonicalDirectoryPath(candidate.state.path)
+		: "/";
 };
 
 function openFileFromView(
@@ -58,20 +81,34 @@ function openFileFromView(
 		});
 }
 
+/**
+ * Folder navigation follows flow A: a plain click navigates the current
+ * Files surface in place (re-opening its own instance with a new state
+ * path — the shell merges state and re-renders the same tab), while an
+ * explicit new-tab gesture forks a fresh folder tab, browser-style.
+ */
 function openDirFromView(
 	atelier: AtelierExtensionRuntime,
+	surface: { isHome: boolean; instanceId: string },
 	dirPath: string,
 	options: { newTab: boolean },
 ) {
-	void atelier.views
-		.open(LIXRAY_DIR_EXTENSION_ID, {
-			state: lixrayDirViewState(dirPath),
-			instanceId: lixrayDirInstanceId(dirPath),
-			...(options.newTab ? { newTab: true } : {}),
-		})
-		.catch((error: unknown) => {
-			console.error("repository-home: unable to open folder", error);
-		});
+	const open = options.newTab
+		? atelier.views.open(LIXRAY_DIR_EXTENSION_ID, {
+				state: lixrayDirViewState(dirPath),
+				newTab: true,
+			})
+		: surface.isHome
+			? atelier.views.open(LIXRAY_HOME_EXTENSION_ID, {
+					state: lixrayHomeDirState(dirPath),
+				})
+			: atelier.views.open(LIXRAY_DIR_EXTENSION_ID, {
+					state: lixrayDirViewState(dirPath),
+					instanceId: surface.instanceId,
+				});
+	void open.catch((error: unknown) => {
+		console.error("repository-home: unable to open folder", error);
+	});
 }
 
 function openPeopleFromView(atelier: AtelierExtensionRuntime) {
@@ -118,7 +155,14 @@ function mountDirectoryView({
 					onOpenFile={(path, options) =>
 						openFileFromView(atelier, path, options)
 					}
-					onOpenDir={(path, options) => openDirFromView(atelier, path, options)}
+					onOpenDir={(path, options) =>
+						openDirFromView(
+							atelier,
+							{ isHome, instanceId: candidate.instanceId },
+							path,
+							options,
+						)
+					}
 					onOpenPeople={() => openPeopleFromView(atelier)}
 				/>
 			</StrictMode>,
@@ -152,7 +196,9 @@ const createLixrayHomeExtension = (
 				element,
 				atelier,
 				view,
-				dirPath: () => "/",
+				// Home is the primary Files surface (flow A): it drills into
+				// folders in place, tracking the path in its view state.
+				dirPath: dirPathFromViewState,
 				isHome: true,
 				connection,
 				teamApi,
@@ -187,24 +233,11 @@ const createLixrayDirExtension = (
 	entry: {
 		icon: Folder,
 		mount: ({ element, atelier, view }) => {
-			const dirPathFromView = (candidate: AtelierExtensionView) => {
-				// LIXRAY_DIR is the authoritative surface for old persisted Atelier
-				// views that predate the explicit kind field. New state always writes
-				// the discriminant; a conflicting discriminant fails closed.
-				if (
-					candidate.state.kind !== undefined &&
-					candidate.state.kind !== EntryKind.Directory
-				)
-					return "/";
-				return typeof candidate.state.path === "string"
-					? canonicalDirectoryPath(candidate.state.path)
-					: "/";
-			};
 			const { root, render } = mountDirectoryView({
 				element,
 				atelier,
 				view,
-				dirPath: dirPathFromView,
+				dirPath: dirPathFromViewState,
 				isHome: false,
 				connection,
 				teamApi: null,
@@ -297,15 +330,51 @@ const createLixrayPeopleExtension = (
 	},
 });
 
+/**
+ * The Settings tab (flow A): repository management as a regular closable
+ * central tab, so navigation back is just closing the tab or clicking any
+ * other one.
+ */
+const createLixraySettingsExtension = (
+	settingsApi: RepositorySettingsApi | null,
+): AtelierExtensionRegistration => ({
+	manifest: {
+		apiVersion: 1,
+		id: LIXRAY_SETTINGS_EXTENSION_ID,
+		name: "Settings",
+		description: "Rename, access, and deletion for this repository.",
+		placement: ["central"],
+		hidden: true,
+	},
+	entry: {
+		icon: Settings,
+		mount: ({ element }) => {
+			const root = createRoot(element);
+			root.render(
+				<StrictMode>
+					<SettingsView settingsApi={settingsApi} />
+				</StrictMode>,
+			);
+			return {
+				dispose: () => {
+					queueMicrotask(() => root.unmount());
+				},
+			};
+		},
+	},
+});
+
 export const createLixrayRepositoryExtensions = (
 	connection: LixRepositoryConnection,
 	hasAgentConnected: AgentConnectionProbe,
 	teamApi: RepositoryTeamApi | null,
+	settingsApi: RepositorySettingsApi | null,
 ): readonly AtelierExtensionRegistration[] => [
 	createLixrayHomeExtension(connection, hasAgentConnected, teamApi),
 	createLixrayDirExtension(connection),
 	createLixrayGettingStartedExtension(connection, hasAgentConnected),
 	createLixrayPeopleExtension(teamApi),
+	createLixraySettingsExtension(settingsApi),
 ];
 
 /**
