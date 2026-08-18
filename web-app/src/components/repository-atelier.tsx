@@ -127,7 +127,7 @@ export function RepositoryAtelier({
 	const routeParams = useParams({ strict: false });
 	const routeSplat = "_splat" in routeParams ? routeParams._splat : undefined;
 	const repositoryRootPath = `/@${namespace}/${repositorySlug}`;
-	const routeChildKind: "file" | "dir" | "team" | "settings" | null =
+	const routeChildKind: "file" | "dir" | "team" | "settings" | "sql" | null =
 		pathname.startsWith(`${repositoryRootPath}/file/`)
 			? "file"
 			: pathname.startsWith(`${repositoryRootPath}/dir/`)
@@ -136,7 +136,9 @@ export function RepositoryAtelier({
 					? "team"
 					: pathname === `${repositoryRootPath}/settings`
 						? "settings"
-						: null;
+						: pathname === `${repositoryRootPath}/sql`
+							? "sql"
+							: null;
 	const routeFilePath = routeChildKind === "file" ? routeSplat : undefined;
 	const documentName = activeDocumentName({
 		pathname,
@@ -154,7 +156,7 @@ export function RepositoryAtelier({
 	const activeLixRef = useRef<RepositoryLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeChildRef = useRef<{
-		kind: "file" | "dir" | "team" | "settings" | null;
+		kind: "file" | "dir" | "team" | "settings" | "sql" | null;
 		splat: string | undefined;
 	}>({ kind: routeChildKind, splat: routeSplat });
 	const routeFilePathRef = useRef(routeFilePath);
@@ -517,6 +519,15 @@ export function RepositoryAtelier({
 				});
 				return;
 			}
+			if (routeChild.kind === "sql") {
+				await navigate({
+					to: "/@{$namespace}/$repository/sql",
+					params: { namespace, repository: repositorySlug },
+					search,
+					replace,
+				});
+				return;
+			}
 			if (routeChild.kind && routeChild.splat !== undefined) {
 				await navigate({
 					to:
@@ -594,6 +605,16 @@ export function RepositoryAtelier({
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
 					to: "/@{$namespace}/$repository/settings",
+					params: { namespace, repository: repositorySlug },
+					search,
+				});
+				return;
+			}
+			if (event.viewKind === "sql_explorer") {
+				const targetPath = `/@${namespace}/${repositorySlug}/sql`;
+				if (pathnameRef.current === targetPath) return;
+				void navigate({
+					to: "/@{$namespace}/$repository/sql",
 					params: { namespace, repository: repositorySlug },
 					search,
 				});
