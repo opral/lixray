@@ -702,10 +702,19 @@ export async function handleMcpTransport(
 			flushAt: 1,
 			flushInterval: 0,
 		});
-		// @posthog/mcp 0.10.x recognizes the v1 low-level Server shape. The v2
-		// high-level McpServer intentionally exposes registerTool(), so instrument
-		// its underlying low-level server while keeping the v2 transport intact.
-		instrument(server.server, posthog, {
+		// @posthog/mcp 0.10.x low-level instrument() calls
+		// setRequestHandler(CallToolRequestSchema, …). MCP server v2 requires a
+		// method string there and throws, so tools/call is never wrapped and
+		// $mcp_tool_call never fires. High-level instrument() patches the
+		// handler Map instead. v2 exposes registerTool(), not tool(), so alias
+		// it for the SDK compatibility check.
+		const highLevel = server as McpServer & {
+			tool?: McpServer["registerTool"];
+		};
+		if (typeof highLevel.tool !== "function") {
+			highLevel.tool = server.registerTool.bind(server);
+		}
+		instrument(highLevel, posthog, {
 			context: false,
 			enableExceptionAutocapture: false,
 			identify: options.posthogDistinctId

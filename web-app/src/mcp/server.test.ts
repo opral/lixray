@@ -280,6 +280,7 @@ void test("official $mcp_tool_call emits success and failure with the four P0 fi
 			serverName: "LixRay_Telemetry_Test",
 			parseSqlScript,
 			posthogToken: "phc_test_token",
+			posthogHost: "https://posthog.test",
 			posthogDistinctId: "user-felix",
 			posthogClientId: "oauth-client",
 			requestId: `felix-${requestIds.length + 1}`,
@@ -327,9 +328,11 @@ void test("official $mcp_tool_call emits success and failure with the four P0 fi
 	);
 	assert.ok(
 		toolCalls.length >= 3,
-		`expected open_lix + success + failure $mcp_tool_call, got ${toolCalls
-			.map((event) => event.properties?.$mcp_tool_name)
-			.join(",")}`,
+		`expected open_lix + success + failure $mcp_tool_call, got ${
+			toolCalls
+				.map((event) => event.properties?.$mcp_tool_name)
+				.join(",") || interceptor.events.map((event) => event.event).join(",")
+		}`,
 	);
 
 	const openLix = toolCalls.find(
@@ -382,14 +385,44 @@ function interceptPosthogCaptures(): {
 	restore: () => void;
 } {
 	const events: Array<EventMessage> = [];
-	const original = PostHog.prototype.capture;
+	const originalCapture = PostHog.prototype.capture;
 	PostHog.prototype.capture = function (event: EventMessage) {
 		events.push(structuredClone(event));
+	};
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input, init) => {
+		const url = String(
+			typeof input === "string"
+				? input
+				: input instanceof URL
+					? input.href
+					: input.url,
+		);
+		if (/posthog|\/batch\/?|\/e\/?/.test(url)) {
+			try {
+				const payload = JSON.parse(String(init?.body ?? "{}")) as {
+					event?: string;
+					batch?: Array<EventMessage & { event?: string }>;
+				};
+				if (Array.isArray(payload.batch)) {
+					for (const item of payload.batch) {
+						events.push(structuredClone(item));
+					}
+				} else if (payload.event) {
+					events.push(structuredClone(payload as EventMessage));
+				}
+			} catch {
+				// Ignore non-JSON ingest bodies.
+			}
+			return new Response(JSON.stringify({ status: 1 }), { status: 200 });
+		}
+		return originalFetch(input, init);
 	};
 	return {
 		events,
 		restore: () => {
-			PostHog.prototype.capture = original;
+			PostHog.prototype.capture = originalCapture;
+			globalThis.fetch = originalFetch;
 		},
 	};
 }
