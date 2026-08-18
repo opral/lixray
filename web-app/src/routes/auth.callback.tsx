@@ -54,14 +54,14 @@ function AuthCallbackPage() {
 					return;
 				}
 
-			// Track lixray_user_signed_up event for first-time users only
-			const userId = sessionData?.user?.id;
-			if (userId) {
-				const signupKey = `lixray.signup.${userId}`;
-				const hasTrackedSignup = window.localStorage.getItem(signupKey);
-				if (!hasTrackedSignup) {
-					const returnTo = peekAuthReturnTo();
-					await captureTelemetryImmediately("lixray_user_signed_up", {
+				// Track lixray_user_signed_up event for first-time users only
+				const userId = sessionData?.user?.id;
+				if (userId) {
+					const signupKey = `lixray.signup.${userId}`;
+					const hasTrackedSignup = window.localStorage.getItem(signupKey);
+					if (!hasTrackedSignup) {
+						const returnTo = peekAuthReturnTo();
+						await captureTelemetryImmediately("lixray_user_signed_up", {
 							auth_provider: "google",
 							signup_source: returnTo === "/open" ? "direct" : returnTo,
 						});

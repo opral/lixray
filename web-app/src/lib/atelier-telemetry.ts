@@ -53,61 +53,61 @@ export function createAtelierTelemetryHandler(
 					view_kind: event.viewKind,
 				});
 				break;
-		case "document_modified": {
-			const capturedAt = now();
-			const lastCapturedAt = lastModificationByPath.get(event.filePath);
-			if (
-				lastCapturedAt !== undefined &&
-				capturedAt - lastCapturedAt < modificationThrottleMs
-			) {
+			case "document_modified": {
+				const capturedAt = now();
+				const lastCapturedAt = lastModificationByPath.get(event.filePath);
+				if (
+					lastCapturedAt !== undefined &&
+					capturedAt - lastCapturedAt < modificationThrottleMs
+				) {
+					break;
+				}
+				lastModificationByPath.set(event.filePath, capturedAt);
+				capture("document_modified", {
+					file_extension: fileExtensionProperty(event.filePath),
+					modified_by: event.modifiedBy,
+				});
+
+				// Track lixray_first_file_added event for repositories
+				if (context.lix && context.repositoryId && context.organizationId) {
+					const firstFileKey = `lixray.first-file.${context.repositoryId}`;
+					const hasTrackedFirstFile =
+						typeof window !== "undefined"
+							? window.localStorage.getItem(firstFileKey)
+							: null;
+
+					if (!hasTrackedFirstFile) {
+						void (async () => {
+							try {
+								// Check if this is the first file in the repository
+								const result = await context.lix!.execute(
+									"SELECT COUNT(*) as count FROM lix_file",
+									[],
+								);
+								const row = result.rows[0] as
+									| { get(column: string): unknown }
+									| undefined;
+								const fileCount = Number(row?.get("count") ?? 0);
+
+								// If there's exactly 1 file, this is the first one
+								if (fileCount === 1) {
+									capture("lixray_first_file_added", {
+										repository_id: context.repositoryId!,
+										organization_id: context.organizationId!,
+										file_extension: fileExtensionProperty(event.filePath),
+									});
+									if (typeof window !== "undefined") {
+										window.localStorage.setItem(firstFileKey, "true");
+									}
+								}
+							} catch (error) {
+								console.warn("Failed to check first file status", error);
+							}
+						})();
+					}
+				}
 				break;
 			}
-			lastModificationByPath.set(event.filePath, capturedAt);
-			capture("document_modified", {
-				file_extension: fileExtensionProperty(event.filePath),
-				modified_by: event.modifiedBy,
-			});
-
-		// Track lixray_first_file_added event for repositories
-		if (context.lix && context.repositoryId && context.organizationId) {
-			const firstFileKey = `lixray.first-file.${context.repositoryId}`;
-			const hasTrackedFirstFile =
-				typeof window !== "undefined"
-					? window.localStorage.getItem(firstFileKey)
-					: null;
-
-			if (!hasTrackedFirstFile) {
-				void (async () => {
-					try {
-						// Check if this is the first file in the repository
-						const result = await context.lix!.execute(
-							"SELECT COUNT(*) as count FROM lix_file",
-							[],
-						);
-						const row = result.rows[0] as
-							| { get(column: string): unknown }
-							| undefined;
-						const fileCount = Number(row?.get("count") ?? 0);
-
-						// If there's exactly 1 file, this is the first one
-						if (fileCount === 1) {
-							capture("lixray_first_file_added", {
-									repository_id: context.repositoryId!,
-									organization_id: context.organizationId!,
-									file_extension: fileExtensionProperty(event.filePath),
-								});
-								if (typeof window !== "undefined") {
-									window.localStorage.setItem(firstFileKey, "true");
-								}
-							}
-						} catch (error) {
-							console.warn("Failed to check first file status", error);
-						}
-					})();
-				}
-			}
-			break;
-		}
 			case "extension_opened":
 				capture("extension_opened", {
 					extension_id: normalizeExtensionId(event.extensionId),
