@@ -133,67 +133,6 @@ void test("refreshes an expired access token and retries the remote request once
 	assert.equal(executeAttempts, 2);
 });
 
-void test("the protocol client reopens a gone session and retries execute", async (t) => {
-	const sessionIds: string[] = [];
-	let executeCalls = 0;
-	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-		const request =
-			input instanceof Request
-				? new Request(input, init)
-				: new Request(new URL(input, "https://lixray.test"), init);
-		const pathname = new URL(request.url).pathname;
-		if (pathname.endsWith("/lix/v1/")) {
-			const sessionId = `session-${sessionIds.length + 1}`;
-			sessionIds.push(sessionId);
-			return Response.json({
-				protocolVersion: 2,
-				activeBranchId: "main",
-				activeAccountId: "00000000-0000-7000-8000-000000000002",
-				sessionId,
-			});
-		}
-		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
-			return new Response(null, { status: 204 });
-		}
-		if (pathname.endsWith("/lix/v1/execute")) {
-			executeCalls += 1;
-			if (request.headers.get("lix-session-id") === "session-1") {
-				return Response.json(
-					{
-						error: {
-							code: "LIX_ERROR_PROTOCOL_SESSION_GONE",
-							message:
-								"the Lix protocol session is unknown, expired, or closed; open a new client session",
-						},
-					},
-					{ status: 410 },
-				);
-			}
-			return Response.json({
-				columns: ["value"],
-				rows: [[{ kind: "int", value: 1 }]],
-				rowsAffected: 0,
-				notices: [],
-			});
-		}
-		throw new Error(`Unexpected remote request: ${request.method} ${pathname}`);
-	};
-
-	const session = await openRepositoryLixSession({
-		namespace: "opral",
-		repositorySlug: "monorepo",
-		origin: "https://lixray.test",
-		getAccessToken: async () => "token",
-		fetch,
-	});
-	t.after(() => session.close());
-
-	const result = await session.lix.execute("SELECT 1");
-	assert.equal(result.rows[0]?.toObject().value, 1);
-	assert.equal(executeCalls, 2);
-	assert.deepEqual(sessionIds, ["session-1", "session-2"]);
-});
-
 void test("opens a new client session when the signed-in identity changes", async (t) => {
 	const sessionIds: string[] = [];
 	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {

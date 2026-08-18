@@ -1,5 +1,4 @@
 import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk";
-import { protocolSessionGoneErrorCode } from "./protocol-session.ts";
 import { captureTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 
@@ -141,8 +140,7 @@ function createTelemetryFetch(
 		}
 		recordLixrayServerTiming(response, input);
 		if (!response.ok) {
-			const code = await readLixErrorCode(response);
-			reportLixRequestFailure(response, input, init, context, code);
+			void reportLixRequestFailure(response, input, init, context);
 		}
 		return response;
 	};
@@ -205,35 +203,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
-async function readLixErrorCode(
-	response: Response,
-): Promise<string | undefined> {
-	try {
-		const body: unknown = await response.clone().json();
-		const error = isRecord(body) ? body.error : undefined;
-		if (isRecord(error) && typeof error.code === "string") {
-			return error.code;
-		}
-	} catch {
-		// The SDK will report malformed/non-JSON responses separately.
-	}
-	return undefined;
-}
-
-function reportLixRequestFailure(
+async function reportLixRequestFailure(
 	response: Response,
 	input: RequestInfo | URL,
 	init: RequestInit | undefined,
 	context: { repositoryId?: string },
-	code?: string,
-): void {
-	const errorCode = protocolSessionGoneErrorCode(response.status, code);
+): Promise<void> {
+	let code: string | undefined;
+	try {
+		const body: unknown = await response.clone().json();
+		const error = isRecord(body) ? body.error : undefined;
+		if (isRecord(error) && typeof error.code === "string") {
+			code = error.code;
+		}
+	} catch {
+		// The SDK will report malformed/non-JSON responses separately.
+	}
 
 	captureTelemetry("lix_request_failed", {
 		lix_request_endpoint: lixRequestEndpoint(input),
 		lix_request_method: init?.method ?? "GET",
 		lix_http_status: response.status,
-		...(errorCode ? { lix_error_code: errorCode } : {}),
+		...(code ? { lix_error_code: code } : {}),
 		...(context.repositoryId ? { lix_id: context.repositoryId } : {}),
 	});
 }
