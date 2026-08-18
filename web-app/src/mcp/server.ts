@@ -1169,7 +1169,10 @@ function sqlToolStatements(
 ): Array<{ sql: string; params?: Array<unknown> }> | undefined {
 	if (name === "query_sql") return [input];
 	if (name === "execute_sql" && Array.isArray(input.statements)) {
-		return input.statements;
+		return input.statements as Array<{
+			sql: string;
+			params?: Array<unknown>;
+		}>;
 	}
 	return undefined;
 }

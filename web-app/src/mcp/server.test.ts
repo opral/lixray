@@ -829,8 +829,8 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 		distinctId: string;
 		properties: Record<string, unknown>;
 	}> = [];
-	const originalCapture = PostHog.prototype.capture;
-	const originalShutdown = PostHog.prototype.shutdown;
+	const originalCapture = PostHog.prototype.capture.bind(PostHog.prototype);
+	const originalShutdown = PostHog.prototype.shutdown.bind(PostHog.prototype);
 	PostHog.prototype.capture = function capture(event) {
 		captured.push({
 			event: event.event,
