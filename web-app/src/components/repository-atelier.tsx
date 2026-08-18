@@ -45,10 +45,6 @@ import {
 	createRepositorySessionStateStore,
 	type RepositoryBranchSession,
 } from "~/lib/atelier-state";
-import {
-	createProtocolSessionRecovery,
-	isProtocolSessionGoneError,
-} from "~/lib/protocol-session";
 import { captureExceptionTelemetry, captureTelemetry } from "~/lib/telemetry";
 import {
 	appendRepositoryShareToken,
@@ -161,13 +157,6 @@ export function RepositoryAtelier({
 		string | null
 	>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [sessionEpoch, setSessionEpoch] = useState(0);
-	const protocolSessionRecoveryRef = useRef(createProtocolSessionRecovery());
-	const recoverProtocolSession = useCallback(() => {
-		if (!protocolSessionRecoveryRef.current.recover()) return false;
-		setSessionEpoch(protocolSessionRecoveryRef.current.getEpoch());
-		return true;
-	}, []);
 	const activeLixRef = useRef<RepositoryLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeChildRef = useRef<{
@@ -745,10 +734,6 @@ export function RepositoryAtelier({
 			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
 			authIdentity: atelierUserId,
-			sessionEpoch,
-			onProtocolSessionGone: () => {
-				if (!disposed) recoverProtocolSession();
-			},
 		})
 			.then(async (session) => {
 				if (disposed) {
@@ -757,7 +742,6 @@ export function RepositoryAtelier({
 				}
 				activeLix = session;
 				activeLixRef.current = session;
-				protocolSessionRecoveryRef.current.markReady();
 				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
 
 				// Initialize telemetry handler with repository context
@@ -863,16 +847,14 @@ export function RepositoryAtelier({
 				}
 			})
 			.catch((caught: unknown) => {
-				if (disposed) return;
-				if (isProtocolSessionGoneError(caught) && recoverProtocolSession()) {
-					return;
+				if (!disposed) {
+					captureExceptionTelemetry(caught, {
+						operation: "repository_open",
+						lix_id: repositoryId,
+						namespace_id: namespace,
+					});
+					setError(formatRepositoryOpenError(caught));
 				}
-				captureExceptionTelemetry(caught, {
-					operation: "repository_open",
-					lix_id: repositoryId,
-					namespace_id: namespace,
-				});
-				setError(formatRepositoryOpenError(caught));
 			});
 
 		return () => {
@@ -892,11 +874,9 @@ export function RepositoryAtelier({
 		navigateToCurrentPathBranch,
 		namespace,
 		namespaceId,
-		recoverProtocolSession,
 		repositoryId,
 		repositoryName,
 		repositorySlug,
-		sessionEpoch,
 	]);
 
 	useEffect(() => {
@@ -1000,33 +980,6 @@ export function RepositoryAtelier({
 								<RepositoryAtelierContext.Provider value={instance}>
 									<Atelier
 										instance={instance}
-										onError={(caught) => {
-											if (isProtocolSessionGoneError(caught)) {
-												recoverProtocolSession();
-											}
-										}}
-										errorFallback={({ error: renderError }) =>
-											isProtocolSessionGoneError(renderError) ? (
-												<main className="grid h-full w-full place-content-center bg-bg-app p-6 text-center text-text-secondary">
-													Reconnecting to the repository…
-												</main>
-											) : (
-												<div className="grid h-full w-full place-content-center bg-bg-app p-6 text-center text-text-primary">
-													<div
-														className="grid max-w-[640px] gap-2"
-														role="alert"
-													>
-														<strong>Unable to render Atelier</strong>
-														<span className="text-text-secondary">
-															{renderError instanceof Error &&
-															renderError.message
-																? renderError.message
-																: "An unexpected error occurred while rendering Atelier."}
-														</span>
-													</div>
-												</div>
-											)
-										}
 										topBarProps={{
 											"data-app-titlebar": true,
 											className: "border-b border-border-subtle bg-bg-app",

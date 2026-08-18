@@ -1,8 +1,5 @@
 import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk";
-import {
-	isProtocolSessionGoneStatus,
-	protocolSessionGoneErrorCode,
-} from "./protocol-session.ts";
+import { protocolSessionGoneErrorCode } from "./protocol-session.ts";
 import { captureTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 
@@ -25,18 +22,13 @@ interface OpenRepositoryLixSessionOptions {
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
 	/**
-	 * Bumps the managed-session key so a recovered client does not reuse a
-	 * protocol session the server already marked gone.
-	 */
-	sessionEpoch?: number;
-	/**
 	 * Distinguishes anonymous and signed-in clients for the same repository.
 	 * Sign-in must open a new protocol session instead of reusing the
-	 * public-read session from the signed-out view.
+	 * public-read session from the signed-out view. The protocol binds each
+	 * session to the host-injected principal; reusing the anonymous session
+	 * after sign-in is a 403 account mismatch, not a 410.
 	 */
 	authIdentity?: string;
-	/** Fired when execute/observe (not session DELETE) returns a gone session. */
-	onProtocolSessionGone?: () => void;
 }
 
 const RECOVERING_OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
@@ -93,7 +85,6 @@ async function openRepositoryLixSessionOnce(
 			fetch: createTelemetryFetch(options.fetch, {
 				repositoryId: options.repositoryId,
 				refreshAccessToken: options.refreshAccessToken,
-				onProtocolSessionGone: options.onProtocolSessionGone,
 			}),
 		},
 	});
@@ -123,7 +114,6 @@ function createTelemetryFetch(
 	context: {
 		repositoryId?: string;
 		refreshAccessToken?: TokenProvider;
-		onProtocolSessionGone?: () => void;
 	},
 ): RemoteLixFetch {
 	const fetcher = customFetch ?? globalThis.fetch?.bind(globalThis);
@@ -153,12 +143,6 @@ function createTelemetryFetch(
 		if (!response.ok) {
 			const code = await readLixErrorCode(response);
 			reportLixRequestFailure(response, input, init, context, code);
-			if (
-				init?.method !== "DELETE" &&
-				isProtocolSessionGoneStatus(response.status, code)
-			) {
-				context.onProtocolSessionGone?.();
-			}
 		}
 		return response;
 	};
@@ -404,8 +388,7 @@ function repositorySessionKey(
 ): string {
 	const href = repositoryUrl(options).href;
 	const identity = options.authIdentity ?? "anonymous";
-	const epoch = options.sessionEpoch ?? 0;
-	return `${href}#auth=${identity}#epoch=${epoch}`;
+	return `${href}#auth=${identity}`;
 }
 
 function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {
