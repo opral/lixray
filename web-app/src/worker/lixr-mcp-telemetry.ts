@@ -211,7 +211,11 @@ export function detectFileWrites(
 			sql.includes("insert into public.lix_file")
 		) {
 			const pathMatch = extractPathFromSql(stmt);
-			const content = extractContentFromParams(stmt.params);
+			const contentIndex = extractContentIndexFromInsert(sql);
+			const content =
+				contentIndex !== null
+					? extractContentFromParamsByIndex(stmt.params, contentIndex)
+					: extractContentFromParams(stmt.params);
 			if (pathMatch) {
 				fileWrites.push({ path: pathMatch, operation: "insert", content });
 			}
@@ -244,6 +248,29 @@ function extractPathFromSql(stmt: {
 }): string | null {
 	const sql = stmt.sql.toLowerCase();
 
+	// Handle INSERT: extract from column list
+	if (sql.includes("insert into")) {
+		const columnsMatch = sql.match(/\(([^)]+)\)\s*values/);
+		if (columnsMatch?.[1] && stmt.params) {
+			const columns = columnsMatch[1].split(",").map((col) => col.trim());
+			const pathIndex = columns.indexOf("path");
+			if (pathIndex !== -1) {
+				const param = stmt.params[pathIndex];
+				if (
+					param &&
+					typeof param === "object" &&
+					"kind" in param &&
+					param.kind === "text" &&
+					"value" in param &&
+					typeof param.value === "string"
+				) {
+					return param.value;
+				}
+			}
+		}
+	}
+
+	// Handle UPDATE/DELETE: extract from WHERE clause
 	if (sql.includes("path =")) {
 		const pathParamMatch = sql.match(/path\s*=\s*\$(\d+)/);
 		if (pathParamMatch && stmt.params) {
@@ -268,6 +295,37 @@ function extractPathFromSql(stmt: {
 	}
 
 	return null;
+}
+
+function extractContentIndexFromInsert(sql: string): number | null {
+	const columnsMatch = sql.match(/\(([^)]+)\)\s*values/);
+	if (columnsMatch?.[1]) {
+		const columns = columnsMatch[1].split(",").map((col) => col.trim());
+		const contentIndex = columns.indexOf("content");
+		if (contentIndex !== -1) {
+			return contentIndex;
+		}
+	}
+	return null;
+}
+
+function extractContentFromParamsByIndex(
+	params: Array<unknown> | undefined,
+	index: number,
+): string | undefined {
+	if (!params || index < 0 || index >= params.length) return undefined;
+	const param = params[index];
+	if (
+		param &&
+		typeof param === "object" &&
+		"kind" in param &&
+		param.kind === "text" &&
+		"value" in param &&
+		typeof param.value === "string"
+	) {
+		return param.value;
+	}
+	return undefined;
 }
 
 function extractContentFromParams(
