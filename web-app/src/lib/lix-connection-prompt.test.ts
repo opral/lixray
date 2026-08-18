@@ -44,7 +44,10 @@ void test("uses Lixray in production and starts with one user-picked skill", () 
 	assert.equal(details.serverName, "LixRay");
 	assert.equal(details.documentationUrl, "https://app.lixray.com/docs/mcp");
 	assert.match(details.prompt, /^Lixray is a host for Lix repositories\./);
-	assert.match(details.prompt, /Documentation is under https:\/\/lixray\.com\/docs\./);
+	assert.match(
+		details.prompt,
+		/Documentation is under https:\/\/lixray\.com\/docs\./,
+	);
 	assert.doesNotMatch(details.prompt, /local connection/);
 	assert.match(
 		details.prompt,
