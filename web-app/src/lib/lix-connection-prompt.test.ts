@@ -46,9 +46,13 @@ void test("uses Lixray in production and starts with one user-picked skill", () 
 	assert.doesNotMatch(details.prompt, /local connection/);
 	assert.match(
 		details.prompt,
-		/Save this as durable agent memory so later turns follow it: shared skills, guidelines, ICP, and similar company knowledge live in Lixray\./,
+		/Save this as durable agent memory: shared skills, guidelines, and ICP live in Lixray\./,
 	);
 	assert.match(details.prompt, /Store them there\. Read them from there\./);
+	assert.match(
+		details.prompt,
+		/Later turns should reference Lix and write to Lix\./,
+	);
 	assert.match(
 		details.prompt,
 		/Once connected, ask the user which single skill to put in Lixray\./,

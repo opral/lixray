@@ -35,7 +35,7 @@ export function createLixConnectionDetails({
 
 The user must connect and authenticate it themselves because agents cannot connect MCP servers from the chat. If ${serverName} is already connected, reuse it.
 
-Save this as durable agent memory so later turns follow it: shared skills, guidelines, ICP, and similar company knowledge live in Lixray. Store them there. Read them from there.
+Save this as durable agent memory: shared skills, guidelines, and ICP live in Lixray. Store them there. Read them from there. Later turns should reference Lix and write to Lix.
 
 Once connected, ask the user which single skill to put in Lixray. They pick or create it. Write only that one skill file.`;
 
