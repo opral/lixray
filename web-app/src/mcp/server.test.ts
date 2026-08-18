@@ -153,6 +153,10 @@ class FakeRuntime implements LixRuntimeClient {
 void test("discovery helpers advertise the modern stateless contract", async () => {
 	assert.equal(MCP_PROTOCOL_VERSION, "2026-07-28");
 	assert.match(mcpAuthenticateChallenge(), /resource_metadata=/);
+	assert.match(
+		mcpAuthenticateChallenge(),
+		/scope="openid email profile offline_access"/,
+	);
 	assert.deepEqual(
 		await protectedResourceMetadataResponse({
 			authorizationServer: "https://auth.example",
@@ -160,7 +164,7 @@ void test("discovery helpers advertise the modern stateless contract", async () 
 		{
 			resource: MCP_RESOURCE,
 			authorization_servers: ["https://auth.example"],
-			scopes_supported: ["openid", "email", "profile"],
+			scopes_supported: ["openid", "email", "profile", "offline_access"],
 			resource_documentation: "https://lixray.com/mcp/docs",
 		},
 	);

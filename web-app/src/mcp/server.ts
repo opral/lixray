@@ -39,7 +39,7 @@ export const MCP_PROTECTED_RESOURCE_PATH =
 export const MCP_DOCUMENTATION_PATH = "/mcp/docs";
 export const MCP_PROTECTED_RESOURCE_URL = `${MCP_RESOURCE}${MCP_PROTECTED_RESOURCE_PATH}`;
 export const MCP_REQUEST_ID_HEADER = "X-Request-ID";
-const MCP_SCOPES = ["openid", "email", "profile"] as const;
+const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
 type McpAuthMode = "oauth" | "none";
 
