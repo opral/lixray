@@ -51,8 +51,7 @@ function RepositorySqlRoute() {
 					clearTimeout(timer);
 					if (cancelled) return;
 					const transient =
-						error instanceof Error &&
-						error.message.includes("shell unmounted");
+						error instanceof Error && error.message.includes("shell unmounted");
 					if (transient && retriesLeft > 0) {
 						setTimeout(() => {
 							if (!cancelled) attempt(retriesLeft - 1);
