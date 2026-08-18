@@ -22,11 +22,11 @@ interface OpenRepositoryLixSessionOptions {
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
 	/**
-	 * Distinguishes anonymous and signed-in clients for the same repository.
-	 * Sign-in must open a new protocol session instead of reusing the
-	 * public-read session from the signed-out view. The protocol binds each
-	 * session to the host-injected principal; reusing the anonymous session
-	 * after sign-in is a 403 account mismatch, not a 410.
+	 * Isolates protocol clients by host principal. The protocol binds each
+	 * session id to Anonymous or Authenticated at handshake. Reusing one id
+	 * after the worker starts injecting the other principal is 403
+	 * ACCOUNT_MISMATCH, not 410 SESSION_GONE. This is not a session store:
+	 * the server HashMap stays ephemeral.
 	 */
 	authIdentity?: string;
 }
