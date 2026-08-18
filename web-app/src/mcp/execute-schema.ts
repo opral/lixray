@@ -86,7 +86,9 @@ Path rules: \`lix_file.path\` and \`lix_directory.path\` are canonical absolute 
 
 \`lix_file.content\` is stored as bytes. For UTF-8 / text files, pass \`$1\` (path) and \`$2\` (file body) as \`kind: "text"\` and write with \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))\`. Never use \`CAST(... AS BLOB)\`; if a SQL cast is needed, use \`BYTEA\`. Actual binaries use \`kind: "blob"\` without CAST.
 
-To create a file, use \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))\`; to read it, use \`SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1\`; to rename it, use \`UPDATE lix_file SET path = $2 WHERE path = $1\`. Create directories with \`INSERT INTO lix_directory (path) VALUES ($1)\`.
+To create a file, use \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content\`; to read it, use \`SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1\`; to rename it, use \`UPDATE lix_file SET path = $2 WHERE path = $1\`. Create directories with \`INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (path) DO NOTHING\`.
+
+Lix supports Postgres \`INSERT ... ON CONFLICT (cols) DO UPDATE\` / \`DO NOTHING\` with \`excluded.col\` on files (\`lix_file\` on \`path\` or \`id\`) and schema-driven views such as \`lix_key_value\`. Example: \`INSERT INTO lix_key_value (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value\`. This is how you create-or-update without a probe SELECT. Name the conflict columns; \`ON CONSTRAINT\`, inference without columns, and \`DO UPDATE WHERE\` are not supported.
 
 For a mutation, inspect the relevant rows first with query_sql, execute the mutation, and verify it with a focused SELECT. Put related mutations and their final verification SELECT in one execute_sql call so the change is atomic and the returned final result is its readback. Use rowsAffected plus returned rows to report what changed; never infer success from prose alone.
 

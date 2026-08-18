@@ -63,3 +63,17 @@ void test("SQL tool descriptions use CAST plus kind text for file content", () =
 		assert.doesNotMatch(description, /MCP callers pass/);
 	}
 });
+
+void test("execute_sql describes Postgres ON CONFLICT upserts", () => {
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ON CONFLICT/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /excluded\.content/);
+	assert.match(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/INSERT INTO lix_key_value \(key, value\) VALUES \(\$1, \$2\) ON CONFLICT \(key\) DO UPDATE SET value = excluded\.value/,
+	);
+	assert.match(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/INSERT INTO lix_directory \(path\) VALUES \(\$1\) ON CONFLICT \(path\) DO NOTHING/,
+	);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /without a probe SELECT/);
+});
