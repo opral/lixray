@@ -90,6 +90,8 @@ To create a file, use \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2
 
 For a mutation, inspect the relevant rows first with query_sql, execute the mutation, and verify it with a focused SELECT. Put related mutations and their final verification SELECT in one execute_sql call so the change is atomic and the returned final result is its readback. Use rowsAffected plus returned rows to report what changed; never infer success from prose alone.
 
+A successful execute_sql mutation is already saved; Lix does not require a checkpoint for durability. Unlike Git, skipping create_checkpoint keeps the files; you just do not have a named restore point, and \`lix_working_diff\` keeps accumulating from the last checkpoint. create_checkpoint is optional later, when a session or task is complete and someone may want this exact state; do not call it after every write. List checkpoints with \`SELECT\` on \`lix_checkpoint\` or \`lix_checkpoint_history()\`.
+
 Use the core tables above, plus their \`_by_branch\` / \`_history\` companions, directly; do not inspect \`information_schema\` for them.
 
 Entity tables are lix-dynamic: do not assume a fixed entity-table list or column shape. Before guessing a dynamic table or column name, discover its table name through information_schema, then inspect only that table:
