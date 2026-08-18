@@ -7,6 +7,8 @@ storage.
 
 Production: [lixray.com](https://lixray.com)
 
+<!-- Content-addressed web image republish trigger; this file is outside hashed inputs. -->
+
 ## Repository layout
 
 - `web-app/` — TanStack Start app, MCP server, and Atelier integration
