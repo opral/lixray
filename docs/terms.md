@@ -2,63 +2,46 @@
 
 Last updated: 18 August 2026
 
-If you signed a separate Order Form for LixRay with the same account, and that agreement has not ended, those terms apply instead of this page.
+These terms are a contract between **Opral US Inc.** (“we”) and you. If you use LixRay for a company, you bind that company. By creating an account or using LixRay, you agree.
 
-This Agreement is between **Opral US Inc.** (“Provider”) and the company or person accessing or using LixRay (the “Cloud Service”). If you are accepting on behalf of a company, you represent that you are authorized to bind that company. By signing up, accessing, or using LixRay, you agree to this Agreement.
+LixRay is the hosted service at [lixray.com](https://lixray.com), including the browser app, the Lix protocol, and the MCP server at `https://lixray.com/mcp`. It is currently free. We may change, suspend, or end any part of it at any time.
 
-This page is a Common Paper cover page. It incorporates the [Common Paper Cloud Service Agreement Standard Terms Version 2.1](https://commonpaper.com/standards/cloud-service-agreement/2.1) (CC BY 4.0). Those Standard Terms stay hosted and versioned by Common Paper. Changes to them do not apply here unless this cover page is updated to a new version. Conflicts are resolved in favor of this cover page.
+## Your content
 
-## Order Form
+You own the files, SQL rows, and history you put in LixRay. You are responsible for that content and for anyone you authorize to access it, including MCP clients. You grant us a license to host, process, and transmit it only as needed to run the service.
 
-**Cloud Service.** LixRay is the hosted Lix repository service at [lixray.com](https://lixray.com), including the browser app, the HTTP Lix protocol, and the remote MCP server at `https://lixray.com/mcp`.
+## Acceptable use
 
-**Order Date / Effective Date.** The date you first accept this Agreement by creating an account or using the Cloud Service.
+Do not use LixRay for illegal activity, to attack or overload the service, or to interfere with other users. We may suspend or close accounts that do.
 
-**Subscription Period.** Ongoing until you or Provider ends access. Either party may stop the subscription at any time by closing the account or by notice.
+## No warranties
 
-**Cloud Service Fees.** The Cloud Service is currently free. If paid plans are offered, the applicable fees will be shown at signup or on a pricing page, and Provider will give at least 30 days’ notice before a paid charge applies to an existing account.
+LixRay is provided **AS IS** and **AS AVAILABLE**. We disclaim all warranties, express or implied, including merchantability, fitness for a particular purpose, non-infringement, and uninterrupted or error-free operation. We do not promise uptime, durability, or that the service will meet your needs.
 
-**Payment Process.** None while the Cloud Service is free. If paid plans are offered, Provider will charge the payment method on file or invoice as stated at signup.
+## Liability
 
-**Non-Renewal Notice Period.** Immediate. Close the account or email [hello@opral.com](mailto:hello@opral.com).
+We are not liable for indirect, incidental, special, consequential, or punitive damages, or for lost profits, lost data, or lost business, even if we were told they were possible.
 
-**Use Limitations.** Fair use of shared infrastructure. Provider may throttle or suspend accounts that degrade the service for others.
+Our total liability for all claims in the aggregate is the greater of **$100** or the fees you paid us for LixRay in the 12 months before the claim. These limits apply to the maximum extent allowed by law.
 
-**Technical Support.** Best-effort via [hello@opral.com](mailto:hello@opral.com). No response-time commitment.
+## Your responsibility
 
-**SLA.** None.
+You will defend and indemnify Opral US Inc. and its officers, directors, and employees against claims arising from your content or your use of LixRay, including use by MCP clients you authorize.
 
-**Professional Services.** None.
+## Termination
 
-## Key Terms
+Either of us may stop at any time. We may delete account and repository data after the account is closed. Sections that should survive (your content responsibility, no warranties, liability, indemnity, law) do.
 
-**Customer.** The company or person who accesses or uses LixRay. If you accept on behalf of a company, “Customer” means that company.
+## Changes
 
-**Provider.** Opral US Inc.
+We may update these terms by posting them at [lixray.com/terms](https://lixray.com/terms). Continued use after a change is acceptance. If you do not agree, close the account.
 
-**Governing Law.** the State of Delaware, United States
+## Privacy
 
-**Chosen Courts.** the state and federal courts located in the State of Delaware
+How we handle personal data is in the [Privacy Policy](https://lixray.com/privacy).
 
-**Customer Content.** Files, SQL rows, version history, and other data Customer stores in a LixRay repository, including data written through the MCP server. Customer owns Customer Content. Provider hosts it only to provide the Cloud Service. MCP clients Customer authorizes may read and write Customer Content with Customer’s credentials.
+## Law
 
-**Covered Claims.**
+Delaware law governs, without regard to conflict-of-law rules. The state and federal courts in Delaware have exclusive jurisdiction.
 
-- **Provider Covered Claims:** A third-party claim that the Cloud Service, used as authorized, infringes that third party’s intellectual property.
-- **Customer Covered Claims:** A third-party claim that Customer Content, or Customer’s use of the Cloud Service, infringes that third party’s rights, or arises from Customer’s breach of the restrictions in the Standard Terms.
-
-**General Cap Amount.** The greater of $100 or the fees paid or payable by Customer to Provider in the 12 months immediately before the claim.
-
-**Notice Address.**
-
-- Provider: [hello@opral.com](mailto:hello@opral.com)
-- Customer: the email address on the account
-
-## Changes to the Standard Terms
-
-1. While no Cloud Service Fees are payable, the Cloud Service is provided **AS IS**, without the uptime or performance warranties in the Standard Terms.
-2. Provider does not use Customer Content to train foundation models.
-3. Provider may update this cover page by posting a new version at [lixray.com/terms](https://lixray.com/terms). Material changes take effect 30 days after posting, or sooner if required by law. Continued use after that date is acceptance. If you do not agree, close the account.
-4. Privacy practices are described in the [Privacy Policy](https://lixray.com/privacy).
-
-These terms are adapted from the [Common Paper Terms of Service](https://commonpaper.com/standards/terms-of-service/), based on the Cloud Service Agreement v2.1, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+Contact: [hello@opral.com](mailto:hello@opral.com)
