@@ -1163,16 +1163,15 @@ function isSqlTool(name: string): boolean {
 	return name === "query_sql" || name === "execute_sql";
 }
 
+type SqlToolStatement = { sql: string; params?: Array<unknown> };
+
 function sqlToolStatements(
 	name: string,
 	input: Record<string, any>,
-): Array<{ sql: string; params?: Array<unknown> }> | undefined {
-	if (name === "query_sql") return [input];
+): Array<SqlToolStatement> | undefined {
+	if (name === "query_sql") return [input as SqlToolStatement];
 	if (name === "execute_sql" && Array.isArray(input.statements)) {
-		return input.statements as Array<{
-			sql: string;
-			params?: Array<unknown>;
-		}>;
+		return input.statements as Array<SqlToolStatement>;
 	}
 	return undefined;
 }

@@ -829,19 +829,29 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 		distinctId: string;
 		properties: Record<string, unknown>;
 	}> = [];
-	const originalCapture = PostHog.prototype.capture.bind(PostHog.prototype);
-	const originalShutdown = PostHog.prototype.shutdown.bind(PostHog.prototype);
+	type CaptureMethod = typeof PostHog.prototype.capture;
+	type ShutdownMethod = typeof PostHog.prototype.shutdown;
+	const originalCapture = PostHog.prototype.capture.bind(
+		PostHog.prototype,
+	) as CaptureMethod;
+	const originalShutdown = PostHog.prototype.shutdown.bind(
+		PostHog.prototype,
+	) as ShutdownMethod;
 	PostHog.prototype.capture = function capture(event) {
+		const distinctId = event.distinctId;
+		if (typeof distinctId !== "string") {
+			throw new Error("expected PostHog capture distinctId");
+		}
 		captured.push({
 			event: event.event,
-			distinctId: event.distinctId,
+			distinctId,
 			properties: { ...(event.properties ?? {}) },
 		});
-		return { uuid: "test-uuid", event, distinct_id: event.distinctId };
-	} as typeof PostHog.prototype.capture;
+		return { uuid: "test-uuid", event, distinct_id: distinctId };
+	} as CaptureMethod;
 	PostHog.prototype.shutdown = async function shutdown() {
 		return;
-	};
+	} as ShutdownMethod;
 
 	const service = new LixService(new FakeRuntime(), {
 		contextSigningKey: "test-key",
