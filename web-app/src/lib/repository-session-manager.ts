@@ -4,6 +4,7 @@ interface AsyncCloseable {
 
 interface ManagedResource {
 	resourcePromise: Promise<AsyncCloseable>;
+	resource?: AsyncCloseable;
 	leaseCount: number;
 	closeTimer?: ReturnType<typeof setTimeout>;
 	closePromise?: Promise<void>;
@@ -35,6 +36,7 @@ export async function acquireManagedRepositoryResource<
 
 		try {
 			const resource = (await managed.resourcePromise) as T;
+			managed.resource = resource;
 			let released = false;
 			return {
 				resource,
@@ -83,13 +85,43 @@ function releaseManagedResource(key: string, managed: ManagedResource): void {
 	managed.closeTimer = setTimeout(() => {
 		managed.closeTimer = undefined;
 		if (managed.leaseCount !== 0) return;
-		managed.closePromise = managed.resourcePromise
-			.then((resource) => resource.close())
-			.finally(() => {
-				if (managedResources.get(key) === managed) {
-					managedResources.delete(key);
-				}
-			});
-		void managed.closePromise.catch(() => undefined);
+		closeManagedResource(key, managed);
 	}, 0);
+}
+
+function closeManagedResource(key: string, managed: ManagedResource): void {
+	if (managed.closePromise) return;
+	let close: Promise<void>;
+	try {
+		close = managed.resource
+			? managed.resource.close()
+			: managed.resourcePromise.then((resource) => resource.close());
+	} catch (error) {
+		close = Promise.reject(
+			error instanceof Error ? error : new Error(String(error)),
+		);
+	}
+	managed.closePromise = close.finally(() => {
+		if (managedResources.get(key) === managed) {
+			managedResources.delete(key);
+		}
+	});
+	void managed.closePromise.catch(() => undefined);
+}
+
+export function closeManagedRepositoryResourcesForPageUnload(): void {
+	for (const [key, managed] of managedResources) {
+		if (managed.closeTimer) clearTimeout(managed.closeTimer);
+		managed.closeTimer = undefined;
+		closeManagedResource(key, managed);
+	}
+}
+
+if (typeof window !== "undefined") {
+	window.addEventListener("pagehide", (event) => {
+		// BFCache freezes and resumes the same page. A real unload cannot run the
+		// deferred React release timer, so close synchronously enough to abort the
+		// browser sync transport before the document disappears.
+		if (!event.persisted) closeManagedRepositoryResourcesForPageUnload();
+	});
 }
