@@ -12,7 +12,9 @@ import {
 	type LixRuntimeClient,
 } from "./lix-service.ts";
 import type { ParseSqlScript } from "../lib/lix-sql-access.ts";
+import { PostHog, type EventMessage } from "posthog-node";
 import {
+	attachMcpToolCallAnalyticsProperties,
 	handleMcpTransport,
 	MCP_REQUEST_ID_HEADER,
 	MCP_PROTOCOL_VERSION,
@@ -22,9 +24,14 @@ import {
 	mcpUnauthorizedResponse,
 	redactMcpAnalyticsEvent,
 	requestIdForMcpRequest,
+	sqlOpFromMcpToolArguments,
 	withMcpRequestId,
 	protectedResourceMetadataResponse,
 } from "./server.ts";
+import {
+	observeExecuteInput,
+	observeExecuteOutput,
+} from "./tool-observation.ts";
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
 const parseSqlScript: ParseSqlScript = (sql) => ({
@@ -184,6 +191,208 @@ void test("PostHog MCP analytics redaction removes private payloads", () => {
 	});
 	assert.deepEqual(event.properties, { mcp_tool_name: "query_sql" });
 });
+
+void test("sql_op is derived from SQL tool arguments before the tool runs", () => {
+	assert.equal(
+		sqlOpFromMcpToolArguments("query_sql", { sql: "SELECT 1" }),
+		"SELECT",
+	);
+	assert.equal(
+		sqlOpFromMcpToolArguments("execute_sql", {
+			statements: [{ sql: "INSERT INTO example VALUES (1)" }],
+		}),
+		"INSERT",
+	);
+	assert.equal(sqlOpFromMcpToolArguments("list_lixes", {}), undefined);
+	assert.equal(sqlOpFromMcpToolArguments("query_sql", { sql: "" }), undefined);
+});
+
+void test("success MCP tool observations attach request_id sql_op and success", () => {
+	const executeInput = observeExecuteInput([{ sql: "SELECT 1" }]);
+	const executeOutput = observeExecuteOutput({
+		results: [{ columns: ["value"], rows: [[{ kind: "text", value: "ok" }]] }],
+	});
+	assert.ok(executeInput);
+	assert.ok(executeOutput);
+	const properties: Record<string, unknown> = { request_id: "req-success" };
+	attachMcpToolCallAnalyticsProperties(properties, {
+		requestId: "req-success",
+		toolName: "query_sql",
+		outcome: "success",
+		durationMs: 4,
+		surfaceVersion: "fnv1a32:test",
+		executeInput,
+		executeOutput,
+	});
+	assert.equal(properties.success, true);
+	assert.equal(properties.request_id, "req-success");
+	assert.equal(properties.sql_op, "SELECT");
+	assert.equal(properties.error_code, undefined);
+	assert.equal(properties.file_path, undefined);
+	assert.equal(properties.file_extension, undefined);
+});
+
+void test("failure MCP tool observations attach success false and error_code", () => {
+	const executeInput = observeExecuteInput([{ sql: "SELECT error" }]);
+	assert.ok(executeInput);
+	const properties: Record<string, unknown> = { request_id: "req-failure" };
+	attachMcpToolCallAnalyticsProperties(properties, {
+		requestId: "req-failure",
+		toolName: "query_sql",
+		outcome: "error",
+		errorCode: "LIX_UNSUPPORTED_SQL",
+		durationMs: 2,
+		surfaceVersion: "fnv1a32:test",
+		executeInput,
+	});
+	assert.equal(properties.success, false);
+	assert.equal(properties.request_id, "req-failure");
+	assert.equal(properties.sql_op, "SELECT");
+	assert.equal(properties.error_code, "LIX_UNSUPPORTED_SQL");
+	assert.equal(properties.row_count, undefined);
+});
+
+void test("missing observations still mark failure from the official MCP envelope", () => {
+	const properties: Record<string, unknown> = {
+		request_id: "req-fallback",
+		$mcp_is_error: true,
+		$mcp_response: {
+			isError: true,
+			structuredContent: { error: { code: "invalid_request" } },
+		},
+	};
+	attachMcpToolCallAnalyticsProperties(properties, undefined);
+	assert.equal(properties.success, false);
+	assert.equal(properties.error_code, "invalid_request");
+});
+
+void test("official $mcp_tool_call emits success and failure with the four P0 fields", async () => {
+	const interceptor = interceptPosthogCaptures();
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const requestIds: Array<string> = [];
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		const response = await handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_Telemetry_Test",
+			parseSqlScript,
+			posthogToken: "phc_test_token",
+			posthogDistinctId: "user-felix",
+			posthogClientId: "oauth-client",
+			requestId: `felix-${requestIds.length + 1}`,
+		});
+		requestIds.push(response.headers.get("x-request-id") ?? "");
+		return response;
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcher },
+	);
+	const client = new Client(
+		{ name: "lixray-telemetry-test-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
+		});
+		assert.equal(opened.isError, undefined, JSON.stringify(opened));
+		const context = (opened.structuredContent as { context: string }).context;
+		const succeeded = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "SELECT 1" },
+		});
+		assert.equal(succeeded.isError, undefined);
+		const failed = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "SELECT error" },
+		});
+		assert.equal(failed.isError, true);
+	} finally {
+		await client.close();
+		interceptor.restore();
+	}
+
+	const toolCalls = interceptor.events.filter(
+		(event) => event.event === "$mcp_tool_call",
+	);
+	assert.equal(
+		interceptor.events.some((event) => event.event === "mcp_tool_called"),
+		false,
+	);
+	assert.ok(
+		toolCalls.length >= 3,
+		`expected open_lix + success + failure $mcp_tool_call, got ${toolCalls
+			.map((event) => event.properties?.$mcp_tool_name)
+			.join(",")}`,
+	);
+
+	const openLix = toolCalls.find(
+		(event) => event.properties?.$mcp_tool_name === "open_lix",
+	);
+	const success = toolCalls.find(
+		(event) =>
+			event.properties?.$mcp_tool_name === "query_sql" &&
+			event.properties?.success === true,
+	);
+	const failure = toolCalls.find(
+		(event) =>
+			event.properties?.$mcp_tool_name === "query_sql" &&
+			event.properties?.success === false,
+	);
+	assert.ok(openLix, "open_lix must emit $mcp_tool_call");
+	assert.ok(success, "successful query_sql must emit $mcp_tool_call");
+	assert.ok(failure, "failed query_sql must emit $mcp_tool_call");
+
+	assert.equal(typeof openLix.properties?.request_id, "string");
+	assert.equal(openLix.properties?.success, true);
+	assert.equal(openLix.properties?.sql_op, undefined);
+	assert.equal(openLix.properties?.error_code, undefined);
+
+	assert.equal(typeof success.properties?.request_id, "string");
+	assert.equal(success.properties?.success, true);
+	assert.equal(success.properties?.sql_op, "SELECT");
+	assert.equal(success.properties?.error_code, undefined);
+
+	assert.equal(typeof failure.properties?.request_id, "string");
+	assert.equal(failure.properties?.success, false);
+	assert.equal(failure.properties?.sql_op, "SELECT");
+	assert.equal(failure.properties?.error_code, "LIX_UNSUPPORTED_SQL");
+
+	for (const event of toolCalls) {
+		assert.equal(event.properties?.$mcp_parameters, undefined);
+		assert.equal(event.properties?.$mcp_response, undefined);
+		assert.equal(event.properties?.$mcp_error_message, undefined);
+		assert.equal(event.properties?.file_path, undefined);
+		assert.equal(event.properties?.file_extension, undefined);
+		assert.doesNotMatch(
+			JSON.stringify(event.properties),
+			/SELECT secret|private implementation|file_path/,
+		);
+	}
+});
+
+function interceptPosthogCaptures(): {
+	events: Array<EventMessage>;
+	restore: () => void;
+} {
+	const events: Array<EventMessage> = [];
+	const original = PostHog.prototype.capture;
+	PostHog.prototype.capture = function (event: EventMessage) {
+		events.push(structuredClone(event));
+	};
+	return {
+		events,
+		restore: () => {
+			PostHog.prototype.capture = original;
+		},
+	};
+}
 
 void test("MCP request IDs accept a valid incoming ID and expose generated IDs", () => {
 	const supplied = new Request("https://lixray.test/mcp", {

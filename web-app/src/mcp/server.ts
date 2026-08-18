@@ -97,6 +97,87 @@ export function redactMcpAnalyticsEvent<
 	return { ...event, properties };
 }
 
+/**
+ * First statement operation for query_sql / execute_sql arguments.
+ * Used by eventProperties, which @posthog/mcp invokes before the tool runs.
+ */
+export function sqlOpFromMcpToolArguments(
+	toolName: string | undefined,
+	args: unknown,
+): string | undefined {
+	return executeInputFromMcpToolArguments(toolName, args)?.statements[0]
+		?.operation;
+}
+
+/**
+ * Attach outcome fields that are only known after the tool finishes.
+ * @posthog/mcp calls eventProperties before execute(), so success / error_code
+ * (and observation-only extras) must land in beforeSend.
+ */
+export function attachMcpToolCallAnalyticsProperties(
+	properties: Record<string, unknown>,
+	observation: McpToolCallObservation | undefined,
+): void {
+	if (observation) {
+		properties.success = observation.outcome === "success";
+		if (observation.errorCode) {
+			properties.error_code = observation.errorCode;
+		}
+		if (properties.sql_op == null && observation.executeInput) {
+			const sqlOp = observation.executeInput.statements[0]?.operation;
+			if (sqlOp) properties.sql_op = sqlOp;
+		}
+		if (observation.executeInput) {
+			properties.is_bulk = observation.executeInput.statementCount > 1;
+		}
+		if (observation.executeOutput) {
+			properties.row_count = observation.executeOutput.rowCount;
+		}
+		if (observation.lixId) {
+			properties.lix_id = observation.lixId;
+			properties.repository_id = observation.lixId;
+		}
+		if (observation.fileContentCharCount !== undefined) {
+			properties.char_count = observation.fileContentCharCount;
+		}
+		if (observation.fileContentByteCount !== undefined) {
+			properties.byte_count = observation.fileContentByteCount;
+		}
+		return;
+	}
+
+	if (typeof properties.success !== "boolean") {
+		properties.success = properties.$mcp_is_error !== true;
+	}
+	if (properties.success === false && properties.error_code == null) {
+		const fallback = errorCodeFromMcpResponse(properties.$mcp_response);
+		if (fallback) properties.error_code = fallback;
+	}
+}
+
+function executeInputFromMcpToolArguments(
+	toolName: string | undefined,
+	args: unknown,
+): McpExecuteInputObservation | undefined {
+	if (toolName !== "query_sql" && toolName !== "execute_sql") return undefined;
+	if (!args || typeof args !== "object") return undefined;
+	const record = args as Record<string, unknown>;
+	return observeExecuteInput(
+		toolName === "query_sql" ? [record] : record.statements,
+	);
+}
+
+function errorCodeFromMcpResponse(response: unknown): string | undefined {
+	if (!response || typeof response !== "object") return undefined;
+	const structured = (response as { structuredContent?: unknown })
+		.structuredContent;
+	if (!structured || typeof structured !== "object") return undefined;
+	const error = (structured as { error?: unknown }).error;
+	if (!error || typeof error !== "object") return undefined;
+	const code = (error as { code?: unknown }).code;
+	return typeof code === "string" && code.length > 0 ? code : undefined;
+}
+
 const lixRef = z
 	.string()
 	.min(1)
@@ -589,9 +670,23 @@ export async function handleMcpTransport(
 			requestId,
 		);
 	}
+	// @posthog/mcp calls eventProperties before the tool and beforeSend after.
+	// Cache the observation during the tool so beforeSend can attach success /
+	// error_code. The wrap must be passed into createLixrayMcpServer — assigning
+	// options.onToolCall after registration never reaches the tool closures.
+	const observationCache = new Map<string, McpToolCallObservation>();
+	const originalOnToolCall = options.onToolCall;
+	const onToolCall: McpToolCallObserver | undefined =
+		options.posthogToken || originalOnToolCall
+			? (observation) => {
+					observationCache.set(observation.requestId, observation);
+					originalOnToolCall?.(observation);
+				}
+			: undefined;
 	const server = createLixrayMcpServer(service, {
 		...options,
 		requestId,
+		onToolCall,
 		serverName: options.serverName ?? mcpServerNameForUrl(request.url),
 	});
 	const handler = createMcpHandler(() => server, {
@@ -610,53 +705,42 @@ export async function handleMcpTransport(
 		// @posthog/mcp 0.10.x recognizes the v1 low-level Server shape. The v2
 		// high-level McpServer intentionally exposes registerTool(), so instrument
 		// its underlying low-level server while keeping the v2 transport intact.
-		const observationCache = new Map<string, McpToolCallObservation>();
-		const originalOnToolCall = options.onToolCall;
-		const wrappedOnToolCall = originalOnToolCall
-			? (observation: McpToolCallObservation): void => {
-					observationCache.set(observation.requestId, observation);
-					originalOnToolCall(observation);
-				}
-			: undefined;
-		(options as any).onToolCall = wrappedOnToolCall;
-
 		instrument(server.server, posthog, {
 			context: false,
 			enableExceptionAutocapture: false,
 			identify: options.posthogDistinctId
 				? { distinctId: options.posthogDistinctId }
 				: null,
-			eventProperties: () => {
-				const observation = observationCache.get(requestId);
-				const baseProps: Record<string, unknown> = {
+			eventProperties: (mcpRequest) => {
+				const props: Record<string, unknown> = {
 					environment: "production",
 					mcp_server: "lixray",
 					oauth_client_id: options.posthogClientId,
 					request_id: requestId,
 				};
-
-				if (observation?.executeInput && observation?.executeOutput) {
-					const firstStmt = observation.executeInput.statements[0];
-
-					baseProps.sql_op = firstStmt?.operation;
-					baseProps.row_count = observation.executeOutput.rowCount;
-					baseProps.is_bulk = observation.executeInput.statementCount > 1;
-					if (observation.lixId) baseProps.lix_id = observation.lixId;
-					if (observation.lixId) baseProps.repository_id = observation.lixId;
-
-					// For file writes, add actual content size (computed in handler from content.length / Buffer.byteLength utf8)
-					// Do not emit file_path or file_extension (real values are on lixray_file_written only)
-					if (observation.fileContentCharCount !== undefined) {
-						baseProps.char_count = observation.fileContentCharCount;
-					}
-					if (observation.fileContentByteCount !== undefined) {
-						baseProps.byte_count = observation.fileContentByteCount;
-					}
+				const executeInput = executeInputFromMcpToolArguments(
+					mcpRequest.params?.name,
+					mcpRequest.params?.arguments,
+				);
+				const sqlOp = executeInput?.statements[0]?.operation;
+				if (sqlOp) props.sql_op = sqlOp;
+				if (executeInput) {
+					props.is_bulk = executeInput.statementCount > 1;
 				}
-
-				return baseProps;
+				return props;
 			},
 			beforeSend: (event) => {
+				if (
+					event.event === "$mcp_tool_call" &&
+					event.properties &&
+					typeof event.properties === "object" &&
+					!Array.isArray(event.properties)
+				) {
+					attachMcpToolCallAnalyticsProperties(
+						event.properties as Record<string, unknown>,
+						observationCache.get(requestId),
+					);
+				}
 				const redacted = redactMcpAnalyticsEvent(event);
 				if (
 					redacted.properties &&
