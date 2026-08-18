@@ -290,13 +290,15 @@ export async function handleRequest(
 				const sqlAnalysis = observation.executeInput
 					? analyzeSqlOperation(observation.executeInput)
 					: undefined;
-				const fileWrites = observation.executeInput
-					? detectFileWrites(
-							observation.executeInput.statements.map((s) => ({
-								sql: s.sanitizedSql,
-							})),
-						)
-					: [];
+				const fileWrites = observation.rawStatements
+					? detectFileWrites(observation.rawStatements)
+					: observation.executeInput
+						? detectFileWrites(
+								observation.executeInput.statements.map((s) => ({
+									sql: s.sanitizedSql,
+								})),
+							)
+						: [];
 
 				importSession.toolCallCount++;
 				if (observation.lixId) importSession.lixId = observation.lixId;

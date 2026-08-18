@@ -607,6 +607,19 @@ void test("Lixr MCP telemetry captures file writes and import completion", async
 					durationMs: 15,
 					surfaceVersion: "v1",
 					lixId: "lix-123",
+					rawStatements: [
+						{
+							sql: "INSERT INTO lix_file (id, path, content) VALUES ($1, $2, $3)",
+							params: [
+								{ kind: "text", value: "file-1" },
+								{ kind: "text", value: "/skills/hello.md" },
+								{
+									kind: "text",
+									value: "# Hello\n\nImported markdown for onboarding.",
+								},
+							],
+						},
+					],
 					executeInput: {
 						statementCount: 1,
 						statements: [
@@ -639,6 +652,116 @@ void test("Lixr MCP telemetry captures file writes and import completion", async
 
 	assert.equal(response.status, 200);
 	assert.equal(await response.text(), "mcp response");
+});
+
+void test("failed then successful MCP executes share identity and flush", async () => {
+	const observations: Array<{
+		requestId: string;
+		outcome: string;
+		errorCode?: string;
+		lixId?: string;
+	}> = [];
+	let flushes = 0;
+	const executionContext = {
+		waitUntil: () => undefined,
+		passThroughOnException: () => undefined,
+		props: {},
+	} as unknown as RequestExecutionContext;
+
+	const failId = "3d7be30b-24a7-4ae6-8694-28e35b803b43";
+	const successId = "82db8877-4cc3-42a3-b291-76a23a9b3ac6";
+	const response = await handleRequest(
+		new Request("https://lixray.com/mcp", { method: "POST" }),
+		env({
+			extra: {
+				POSTHOG_PROJECT_TOKEN: "project-token",
+				POSTHOG_ENVIRONMENT: "production",
+			},
+		}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			executionContext,
+			lixFetch: async () => new Response("unused"),
+			createMcpTelemetry: () => ({
+				onToolCall: (observation) => {
+					observations.push({
+						requestId: observation.requestId,
+						outcome: observation.outcome,
+						errorCode: observation.errorCode,
+						lixId: observation.lixId,
+					});
+				},
+				flush: async () => {
+					flushes += 1;
+				},
+			}),
+			mcpTransport: async (_request, _service, options) => {
+				options.onToolCall?.({
+					requestId: failId,
+					toolName: "execute_sql",
+					outcome: "error",
+					durationMs: 8,
+					surfaceVersion: "v1",
+					errorCode: "LIX_TYPE_MISMATCH",
+					lixId: "lix-123",
+					executeInput: {
+						statementCount: 1,
+						statements: [
+							{
+								operation: "INSERT",
+								sanitizedSql: "insert into lix_file(path,content)values(?,?)",
+								shapeId: "shape1",
+							},
+						],
+					},
+				});
+				options.onToolCall?.({
+					requestId: successId,
+					toolName: "execute_sql",
+					outcome: "success",
+					durationMs: 11,
+					surfaceVersion: "v1",
+					lixId: "lix-123",
+					executeInput: {
+						statementCount: 1,
+						statements: [
+							{
+								operation: "INSERT",
+								sanitizedSql: "insert into lix_file(path,content)values(?,?)",
+								shapeId: "shape1",
+							},
+						],
+					},
+					executeOutput: {
+						resultCount: 1,
+						rowCount: 0,
+						rowsAffected: 1,
+						noticeCodes: [],
+						results: [],
+					},
+				});
+				return new Response("mcp response");
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(observations, [
+		{
+			requestId: failId,
+			outcome: "error",
+			errorCode: "LIX_TYPE_MISMATCH",
+			lixId: "lix-123",
+		},
+		{
+			requestId: successId,
+			outcome: "success",
+			errorCode: undefined,
+			lixId: "lix-123",
+		},
+	]);
+	assert.notEqual(observations[0]?.requestId, observations[1]?.requestId);
+	assert.equal(flushes, 1);
 });
 
 void test("successful exact-Lix MCP activity is persisted before the response completes", async () => {
