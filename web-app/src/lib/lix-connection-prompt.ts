@@ -31,7 +31,9 @@ export function createLixConnectionDetails({
 	const previewUrl = `${normalizedOrigin}/@${encodeURIComponent(namespace)}/${encodeURIComponent(lixSlug)}`;
 	const lixReference = `@${namespace}/${lixSlug}`;
 
-	const prompt = `Guide the user to connect to this MCP server for Lixray repository ${lixReference} (${lixId}): [${mcpUrl}](${mcpUrl}).
+	const prompt = `Lixray is a host for Lix repositories. Documentation is under https://lixray.com/docs.
+
+Guide the user to connect to this MCP server for Lixray repository ${lixReference} (${lixId}): [${mcpUrl}](${mcpUrl}).
 
 The user must connect and authenticate it themselves because agents cannot connect MCP servers from the chat. If ${serverName} is already connected, reuse it.
 
