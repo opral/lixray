@@ -9,10 +9,4 @@ cd "$repo_root"
 
 bash "$repo_root/.cursor/start-docker.sh"
 
-# Reach the Docker daemon without sudo even if this login started before the
-# docker group membership took effect.
-if ! docker info >/dev/null 2>&1; then
-	exec sg docker -c "cd '$repo_root' && exec pnpm dev"
-fi
-
 exec pnpm dev
