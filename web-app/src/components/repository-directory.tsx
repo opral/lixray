@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import {
+	ChevronDown,
 	Download,
 	Ellipsis,
 	Link2,
@@ -705,38 +706,62 @@ function RepositoryDialog({
 								? "This removes the repository from your directory and keeps its name reserved."
 								: dialog?.type === "rename"
 									? "The repository URL stays the same."
-									: "Choose a namespace and give the repository a name."}
+									: "A shared folder for your team and agents — any file type, every change tracked."}
 						</DialogDescription>
 					</DialogHeader>
 
 					<div className="grid gap-2" data-testid="repository-dialog-fields">
 						{dialog?.type === "create" && !isDemoModeEnabled ? (
-							<label className="grid gap-2">
-								<span className="text-[13px] font-semibold text-text-secondary">
-									Namespace
-								</span>
-								<select
-									className="h-10 w-full rounded-lg border border-border-panel bg-bg-panel px-[11px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1"
-									value={organizationId}
-									onChange={(event) => {
-										if (event.target.value === CREATE_ORGANIZATION_OPTION) {
-											setCreatingOrganization(true);
-											return;
-										}
-										setOrganizationId(event.target.value);
-									}}
-								>
-									{organizations.map((organization) => (
-										<option key={organization.id} value={organization.id}>
-											@{organization.handle}
-											{organization.isPersonal ? " · personal" : ""}
-										</option>
-									))}
-									<option value={CREATE_ORGANIZATION_OPTION}>
-										+ Create an organization…
-									</option>
-								</select>
-							</label>
+							<>
+								<div className="flex h-11 items-center rounded-lg border border-border-panel bg-bg-panel pr-2.5 pl-3 focus-within:ring-2 focus-within:ring-ring-focus-visible focus-within:ring-offset-1">
+									<span className="relative inline-flex h-full shrink-0 cursor-pointer items-center gap-0.5 text-[13.5px] font-semibold text-text-primary">
+										@
+										{organizations.find(
+											(organization) => organization.id === organizationId,
+										)?.handle ?? "…"}
+										<ChevronDown
+											className="size-3.5 text-icon-tertiary"
+											aria-hidden="true"
+										/>
+										<select
+											aria-label="Account"
+											className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+											value={organizationId}
+											onChange={(event) => {
+												if (event.target.value === CREATE_ORGANIZATION_OPTION) {
+													setCreatingOrganization(true);
+													return;
+												}
+												setOrganizationId(event.target.value);
+											}}
+										>
+											{organizations.map((organization) => (
+												<option key={organization.id} value={organization.id}>
+													@{organization.handle}
+												</option>
+											))}
+											<option value={CREATE_ORGANIZATION_OPTION}>
+												+ New organization…
+											</option>
+										</select>
+									</span>
+									<span
+										className="px-1 text-[13.5px] text-text-quaternary"
+										aria-hidden="true"
+									>
+										/
+									</span>
+									<input
+										aria-label="Repository name"
+										className="h-full min-w-0 flex-1 bg-transparent text-[13.5px] text-text-primary outline-none placeholder:text-text-quaternary"
+										autoFocus
+										maxLength={80}
+										placeholder="repository-name"
+										value={name}
+										onChange={(event) => setName(event.target.value)}
+									/>
+								</div>
+							</>
 						) : null}
 
 						{isDelete ? (
@@ -751,7 +776,8 @@ function RepositoryDialog({
 									onChange={(event) => setConfirmation(event.target.value)}
 								/>
 							</label>
-						) : (
+						) : dialog?.type === "rename" ||
+						  (dialog?.type === "create" && isDemoModeEnabled) ? (
 							<label className="grid gap-2">
 								<span className="text-[13px] font-semibold text-text-secondary">
 									Repository name
@@ -764,7 +790,7 @@ function RepositoryDialog({
 									onChange={(event) => setName(event.target.value)}
 								/>
 							</label>
-						)}
+						) : null}
 						{error ? (
 							<p
 								className="m-0 rounded-lg bg-error-50 px-3 py-2.5 text-[13px] text-error-700"

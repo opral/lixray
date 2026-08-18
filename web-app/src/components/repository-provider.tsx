@@ -537,7 +537,7 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 	);
 }
 
-function repositorySlug(name: string): string {
+export function repositorySlug(name: string): string {
 	return (
 		name
 			.toLowerCase()
