@@ -33,7 +33,10 @@ function isAbortLikeError(error: unknown): boolean {
 	if (!error || typeof error !== "object") return false;
 	const candidate = error as { name?: unknown; message?: unknown };
 	if (candidate.name === "AbortError") return true;
-	if (error instanceof Error && /aborted|failed to fetch/i.test(error.message)) {
+	if (
+		error instanceof Error &&
+		/aborted|failed to fetch/i.test(error.message)
+	) {
 		return true;
 	}
 	return false;

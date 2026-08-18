@@ -186,7 +186,7 @@ void test("notifies the host when a live protocol session is gone so it can remo
 	assert.equal(goneCalls, 1);
 });
 
-void test("does not treat a gone-session DELETE as a remount signal", async (t) => {
+void test("does not treat a gone-session DELETE as a remount signal", async () => {
 	let goneCalls = 0;
 	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 		const request =

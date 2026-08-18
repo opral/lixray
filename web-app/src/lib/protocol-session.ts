@@ -25,7 +25,9 @@ export function isProtocolSessionGoneCode(code: string | undefined): boolean {
 
 export function isProtocolSessionGoneError(error: unknown): boolean {
 	if (!error || typeof error !== "object") {
-		return typeof error === "string" && PROTOCOL_SESSION_GONE_MESSAGE.test(error);
+		return (
+			typeof error === "string" && PROTOCOL_SESSION_GONE_MESSAGE.test(error)
+		);
 	}
 	const candidate = error as {
 		code?: unknown;

@@ -16,10 +16,7 @@ void test("treats HTTP 410 as a gone protocol session", () => {
 		true,
 	);
 	assert.equal(isProtocolSessionGoneStatus(500), false);
-	assert.equal(
-		protocolSessionGoneErrorCode(410),
-		PROTOCOL_SESSION_GONE_CODE,
-	);
+	assert.equal(protocolSessionGoneErrorCode(410), PROTOCOL_SESSION_GONE_CODE);
 	assert.equal(
 		protocolSessionGoneErrorCode(410, REMOTE_SESSION_EXPIRED_CODE),
 		REMOTE_SESSION_EXPIRED_CODE,
@@ -48,7 +45,9 @@ void test("recognizes protocol-session-gone errors from status, code, and messag
 		true,
 	);
 	assert.equal(
-		isProtocolSessionGoneError(new Error("A repository access token is required.")),
+		isProtocolSessionGoneError(
+			new Error("A repository access token is required."),
+		),
 		false,
 	);
 });

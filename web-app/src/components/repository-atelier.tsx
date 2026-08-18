@@ -864,10 +864,7 @@ export function RepositoryAtelier({
 			})
 			.catch((caught: unknown) => {
 				if (disposed) return;
-				if (
-					isProtocolSessionGoneError(caught) &&
-					recoverProtocolSession()
-				) {
+				if (isProtocolSessionGoneError(caught) && recoverProtocolSession()) {
 					return;
 				}
 				captureExceptionTelemetry(caught, {

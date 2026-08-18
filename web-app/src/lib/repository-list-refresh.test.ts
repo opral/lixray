@@ -53,8 +53,5 @@ void test("still alerts a real repository list failure after sign-in lands", () 
 	});
 
 	assert.equal(isTransientRepositoryListFailure(failure), false);
-	assert.equal(
-		shouldCaptureRepositoryListException("/home", failure),
-		true,
-	);
+	assert.equal(shouldCaptureRepositoryListException("/home", failure), true);
 });

@@ -152,7 +152,7 @@ function createTelemetryFetch(
 		recordLixrayServerTiming(response, input);
 		if (!response.ok) {
 			const code = await readLixErrorCode(response);
-			void reportLixRequestFailure(response, input, init, context, code);
+			reportLixRequestFailure(response, input, init, context, code);
 			if (
 				init?.method !== "DELETE" &&
 				isProtocolSessionGoneStatus(response.status, code)
@@ -236,13 +236,13 @@ async function readLixErrorCode(
 	return undefined;
 }
 
-async function reportLixRequestFailure(
+function reportLixRequestFailure(
 	response: Response,
 	input: RequestInfo | URL,
 	init: RequestInit | undefined,
 	context: { repositoryId?: string },
 	code?: string,
-): Promise<void> {
+): void {
 	const errorCode = protocolSessionGoneErrorCode(response.status, code);
 
 	captureTelemetry("lix_request_failed", {
