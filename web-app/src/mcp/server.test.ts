@@ -35,6 +35,13 @@ const parseSqlScript: ParseSqlScript = (sql) => ({
 		.map((statement) => ({ sql: statement })),
 });
 
+function sqlPayloadFromText(text: string): unknown {
+	const withoutContext = text.replace(/\s*context=\S+\s*$/, "");
+	const jsonStart = withoutContext.search(/[[{]/);
+	assert.ok(jsonStart >= 0, `expected JSON SQL result in text: ${text}`);
+	return JSON.parse(withoutContext.slice(jsonStart));
+}
+
 class FakeRuntime implements LixRuntimeClient {
 	async listLixes() {
 		return [
@@ -70,6 +77,19 @@ class FakeRuntime implements LixRuntimeClient {
 			return {
 				columns: ["commit_id"],
 				rows: [[{ kind: "text" as const, value: "commit-1" }]],
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
+		if (/FROM lix_file\b/i.test(request.sql)) {
+			return {
+				columns: ["path", "name"],
+				rows: [
+					[
+						{ kind: "text" as const, value: "/skills/hello.md" },
+						{ kind: "text" as const, value: "hello.md" },
+					],
+				],
 				rowsAffected: 0,
 				notices: [],
 			};
@@ -326,13 +346,49 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(queriedContent.result.rowsAffected, 0);
 		const queriedText =
 			queried.content?.[0]?.type === "text" ? queried.content[0].text : "";
-		assert.match(queriedText, /^SQL returned 1 row and affected 0 rows\./);
+		assert.deepEqual(sqlPayloadFromText(queriedText), {
+			columns: ["value"],
+			rows: [[{ kind: "text", value: "ok" }]],
+			rowsAffected: 0,
+			notices: [],
+		});
 		assert.match(
 			queriedText,
 			/context=[^\s]+/,
 			"query_sql text fallback must include context",
 		);
 		assert.equal(responseRequestIds.at(-1), queriedContent.request_id);
+		const listedFiles = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "SELECT path, name FROM lix_file" },
+		});
+		assert.equal(listedFiles.isError, undefined);
+		const listedFilesText =
+			listedFiles.content?.[0]?.type === "text"
+				? listedFiles.content[0].text
+				: "";
+		assert.match(
+			listedFilesText,
+			/\/skills\/hello\.md/,
+			"query_sql text must include SELECT cell values, not only a row count",
+		);
+		assert.match(listedFilesText, /hello\.md/);
+		assert.deepEqual(sqlPayloadFromText(listedFilesText), {
+			columns: ["path", "name"],
+			rows: [
+				[
+					{ kind: "text", value: "/skills/hello.md" },
+					{ kind: "text", value: "hello.md" },
+				],
+			],
+			rowsAffected: 0,
+			notices: [],
+		});
+		assert.match(
+			listedFilesText,
+			/context=[^\s]+/,
+			"query_sql text fallback must include context",
+		);
 		const mutated = await client.callTool({
 			name: "execute_sql",
 			arguments: {
@@ -346,10 +402,16 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(mutated.isError, undefined);
 		const mutatedText =
 			mutated.content?.[0]?.type === "text" ? mutated.content[0].text : "";
-		assert.match(
-			mutatedText,
-			/^Atomic SQL completed 2 statements\. SQL returned 1 row and affected 1 row\./,
-		);
+		assert.match(mutatedText, /^Atomic SQL completed 2 statements\. /);
+		assert.deepEqual(sqlPayloadFromText(mutatedText), [
+			{ columns: [], rows: [], rowsAffected: 1, notices: [] },
+			{
+				columns: ["value"],
+				rows: [[{ kind: "text", value: "ok" }]],
+				rowsAffected: 0,
+				notices: [],
+			},
+		]);
 		assert.match(
 			mutatedText,
 			/context=[^\s]+/,

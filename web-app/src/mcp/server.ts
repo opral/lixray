@@ -897,7 +897,7 @@ function summarizeToolResult(name: string, raw: unknown): string {
 		return `Opened ${String(result.url ?? result.id)} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}. Context expires at ${String(result.context_expires_at)}.${contextSuffix}`;
 	}
 	if (name === "query_sql") {
-		return `${summarizeSqlResults([result.result])}${contextSuffix}`;
+		return `${summarizeSqlResults(result.result)}${contextSuffix}`;
 	}
 	if (name === "execute_sql") {
 		const results = Array.isArray(result.results) ? result.results : [];
@@ -949,18 +949,12 @@ function formatContextSuffix(result: Record<string, unknown>): string {
 	return ` context=${result.context}`;
 }
 
-function summarizeSqlResults(results: Array<unknown>): string {
-	let returnedRows = 0;
-	let affectedRows = 0;
-	for (const value of results) {
-		if (!value || typeof value !== "object") continue;
-		const result = value as Record<string, unknown>;
-		if (Array.isArray(result.rows)) returnedRows += result.rows.length;
-		if (typeof result.rowsAffected === "number") {
-			affectedRows += result.rowsAffected;
-		}
-	}
-	return `SQL returned ${returnedRows} ${returnedRows === 1 ? "row" : "rows"} and affected ${affectedRows} ${affectedRows === 1 ? "row" : "rows"}.`;
+/**
+ * MCP clients typically surface only content[].text, not structuredContent.
+ * Serialize the Lix execute result so agents can read columns, rows, and notices.
+ */
+function summarizeSqlResults(payload: unknown): string {
+	return JSON.stringify(payload);
 }
 
 function summarizeToolError(error: {
