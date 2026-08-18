@@ -636,27 +636,20 @@ export async function handleMcpTransport(
 				if (observation?.executeInput && observation?.executeOutput) {
 					const firstStmt = observation.executeInput.statements[0];
 					const sql = firstStmt?.sanitizedSql ?? "";
-					const isFilePath = sql.includes("lix_file");
-					let filePath: string | undefined;
-					let fileExtension: string | undefined;
-
-					if (isFilePath && sql.match(/path\s*=\s*\?/i)) {
-						filePath = "redacted";
-						const pathMatch = sql.match(/\.([a-z0-9]+)['"]?\s*$/i);
-						if (pathMatch) {
-							fileExtension = pathMatch[1];
-						}
-					}
+					const isFileOp = sql.includes("lix_file");
 
 					baseProps.sql_op = firstStmt?.operation;
 					baseProps.row_count = observation.executeOutput.rowCount;
-					baseProps.char_count = observation.executeOutput.rowCount;
-					baseProps.byte_count = observation.executeOutput.rowCount;
 					baseProps.is_bulk = observation.executeInput.statementCount > 1;
-					if (filePath) baseProps.file_path = filePath;
-					if (fileExtension) baseProps.file_extension = fileExtension;
 					if (observation.lixId) baseProps.lix_id = observation.lixId;
 					if (observation.lixId) baseProps.repository_id = observation.lixId;
+
+					// For file operations, extract actual content size from parameters
+					// Do not emit file_path (real path is on lixr_file_written only)
+					if (isFileOp) {
+						// Omit file_path and file_extension - cannot reliably extract from sanitized SQL
+						// char_count and byte_count also omitted - would need unsanitized params
+					}
 				}
 
 				return baseProps;
