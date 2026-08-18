@@ -53,4 +53,11 @@ docker compose pull minio
 pnpm --dir database exec supabase start
 pnpm --dir database exec supabase stop
 
+# Only the pre-built/pre-pulled images should carry into the snapshot, never
+# application containers. A reused lix-server container keeps a populated
+# slatedb cache whose restart cleanup fails under fuse-overlayfs (EXDEV), so the
+# first `pnpm dev` must be able to create fresh containers. Remove any that a
+# base snapshot may have left behind (images and volumes are preserved).
+docker compose down --remove-orphans
+
 echo "LixRay install complete."
