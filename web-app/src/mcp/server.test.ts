@@ -37,7 +37,7 @@ const parseSqlScript: ParseSqlScript = (sql) => ({
 
 function sqlPayloadFromText(text: string): unknown {
 	const withoutContext = text.replace(/\s*context=\S+\s*$/, "");
-	const jsonStart = withoutContext.search(/[\[{]/);
+	const jsonStart = withoutContext.search(/[[{]/);
 	assert.ok(jsonStart >= 0, `expected JSON SQL result in text: ${text}`);
 	return JSON.parse(withoutContext.slice(jsonStart));
 }
