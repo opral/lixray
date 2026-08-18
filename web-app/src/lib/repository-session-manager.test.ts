@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
+import {
+	acquireManagedRepositoryResource,
+	closeManagedRepositoryResourcesForPageUnload,
+} from "./repository-session-manager.ts";
 
 void test("reuses a repository resource while Strict Mode remounts", async () => {
 	let openCount = 0;
@@ -23,6 +26,24 @@ void test("reuses a repository resource while Strict Mode remounts", async () =>
 	assert.equal(closeCount, 0);
 
 	second.release();
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.equal(closeCount, 1);
+});
+
+void test("closes live repository resources during a real page unload", async () => {
+	let closeCount = 0;
+	const lease = await acquireManagedRepositoryResource(
+		"repository-page-unload",
+		async () => ({
+			async close() {
+				closeCount += 1;
+			},
+		}),
+	);
+
+	closeManagedRepositoryResourcesForPageUnload();
+	assert.equal(closeCount, 1);
+	lease.release();
 	await new Promise((resolve) => setTimeout(resolve, 10));
 	assert.equal(closeCount, 1);
 });
