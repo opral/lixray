@@ -167,9 +167,7 @@ function createPostHogClient(
 	return new PostHog(token, options);
 }
 
-export function analyzeSqlOperation(
-	executeInput: McpExecuteInputObservation,
-): {
+export function analyzeSqlOperation(executeInput: McpExecuteInputObservation): {
 	operation: string;
 	isBulk: boolean;
 	estimatedRowCount: number;

@@ -267,14 +267,11 @@ export async function handleRequest(
 				isDemo: authResult.auth.isDemo,
 			},
 		);
-		const lixrTelemetry = createLixrMcpTelemetrySession(
-			env,
-			{
-				userId: authResult.auth.userId,
-				clientId: authResult.auth.clientId,
-				isDemo: authResult.auth.isDemo,
-			},
-		);
+		const lixrTelemetry = createLixrMcpTelemetrySession(env, {
+			userId: authResult.auth.userId,
+			clientId: authResult.auth.clientId,
+			isDemo: authResult.auth.isDemo,
+		});
 		const pendingConnectionRecords: Array<Promise<void>> = [];
 		const recordMcpLixConnection =
 			options.recordMcpLixConnection ?? recordMcpLixConnectionWithSupabase;

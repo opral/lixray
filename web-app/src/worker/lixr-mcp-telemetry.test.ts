@@ -148,10 +148,7 @@ void test("Lixr MCP telemetry captures lixr_import_completed event", async () =>
 	assert.equal(captured[0]?.properties?.byte_count, 126000);
 	assert.equal(captured[0]?.properties?.tool_call_count, 32);
 	assert.equal(captured[0]?.properties?.is_bulk, true);
-	assert.doesNotMatch(
-		JSON.stringify(captured),
-		/private|secret|confidential/i,
-	);
+	assert.doesNotMatch(JSON.stringify(captured), /private|secret|confidential/i);
 });
 
 void test("Lixr MCP telemetry does not log file content", async () => {
@@ -317,7 +314,10 @@ void test("detectFileWrites handles multiple file operations", () => {
 		},
 		{
 			sql: "UPDATE lix_file SET content = $1 WHERE path = $2",
-			params: [{ kind: "text", value: "Content 2" }, { kind: "text", value: "/file2.txt" }],
+			params: [
+				{ kind: "text", value: "Content 2" },
+				{ kind: "text", value: "/file2.txt" },
+			],
 		},
 		{
 			sql: "DELETE FROM lix_file WHERE path = $1",
