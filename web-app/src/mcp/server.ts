@@ -644,8 +644,8 @@ export async function handleMcpTransport(
 					if (observation.lixId) baseProps.lix_id = observation.lixId;
 					if (observation.lixId) baseProps.repository_id = observation.lixId;
 
-				// For file writes, add actual content size (computed in handler from content.length / Buffer.byteLength utf8)
-				// Do not emit file_path or file_extension (real values are on lixray_file_written only)
+					// For file writes, add actual content size (computed in handler from content.length / Buffer.byteLength utf8)
+					// Do not emit file_path or file_extension (real values are on lixray_file_written only)
 					if (observation.fileContentCharCount !== undefined) {
 						baseProps.char_count = observation.fileContentCharCount;
 					}
