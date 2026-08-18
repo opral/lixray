@@ -58,7 +58,7 @@ WHERE table_schema = 'public'
   AND table_name = $1
 ORDER BY ordinal_position;`;
 
-export const QUERY_SQL_TOOL_DESCRIPTION = `Use SQL as the universal read interface to Lix. query_sql runs exactly one SELECT statement against the branch selected by context. Non-SELECT and multi-statement scripts are rejected; use execute_sql when arbitrary SQL is required. Do not look for or invent typed file or entity tools.
+export const QUERY_SQL_TOOL_DESCRIPTION = `Use SQL as the universal read interface to Lix. Lix SQL is a Postgres dialect subset. query_sql runs exactly one SELECT statement against the branch selected by context. Non-SELECT and multi-statement scripts are rejected; use execute_sql when arbitrary SQL is required. Do not look for or invent typed file or entity tools.
 
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}
@@ -77,7 +77,7 @@ ${EXECUTE_SQL_COLUMNS_QUERY}
 
 Where present, \`<table>_by_branch\` adds \`lixcol_branch_id\` for cross-branch reads. \`<table>_history\` is read-only: scope every history query with \`WHERE lixcol_start_commit_id = lix_active_branch_commit_id()\`, then constrain it by stable identity (\`id = $n\` for files/directories or \`lixcol_entity_pk = $n\` for entities) resolved from the active table. Read a current item's \`lixcol_change_id\` from its active table, not an historical row; use \`lixcol_depth\` / \`lixcol_observed_commit_id\` for prior revisions.`;
 
-const EXECUTE_SQL_GUIDE = `Use SQL as the universal interface to Lix. execute_sql runs any ordered atomic SQL batch against the branch selected by context and is always treated as potentially destructive. File and directory creation, reads, edits, deletes, path changes, and entity operations are SQL. Do not look for or invent typed file or entity tools. Lix SQL does not support DDL statements.
+const EXECUTE_SQL_GUIDE = `Use SQL as the universal interface to Lix. Lix SQL is a Postgres dialect subset. execute_sql runs any ordered atomic SQL batch against the branch selected by context and is always treated as potentially destructive. File and directory creation, reads, edits, deletes, path changes, and entity operations are SQL. Do not look for or invent typed file or entity tools. Lix SQL does not support DDL statements.
 
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}

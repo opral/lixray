@@ -2,7 +2,7 @@
 
 LixRay exposes Lix through a deliberately small MCP surface. SQL is the
 universal interface for repository data; there are no separate file or entity
-tools.
+tools. Lix SQL is a Postgres dialect subset.
 
 ## Recommended workflow
 

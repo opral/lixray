@@ -341,7 +341,7 @@ export function createLixrayMcpServer(
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. query_sql is SELECT-only; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; create_checkpoint is optional at the end of a finished task or session. Do not invent file helper tools or branch state.",
+				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. Lix SQL is a Postgres dialect subset. query_sql is SELECT-only; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; create_checkpoint is optional at the end of a finished task or session. Do not invent file helper tools or branch state.",
 		},
 	);
 	const surfaceVersion = mcpSurfaceVersion(toolSurfaceDescriptions());

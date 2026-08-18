@@ -21,6 +21,14 @@ void test("SQL guidance models the public Lix surfaces", () => {
 	);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /SQL as the universal interface/);
+	assert.match(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/Lix SQL is a Postgres dialect subset\./,
+	);
+	assert.match(
+		QUERY_SQL_TOOL_DESCRIPTION,
+		/Lix SQL is a Postgres dialect subset\./,
+	);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /Do not look for or invent typed/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /any ordered atomic SQL batch/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /never infer success from prose/);
