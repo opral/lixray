@@ -284,7 +284,7 @@ export function createLixrayMcpServer(
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. query_sql is SELECT-only; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Do not invent file helper tools or branch state.",
+				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. query_sql is SELECT-only; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; create_checkpoint is optional at the end of a finished task or session. Do not invent file helper tools or branch state.",
 		},
 	);
 	const surfaceVersion = mcpSurfaceVersion(toolSurfaceDescriptions());
@@ -477,7 +477,7 @@ export function createLixrayMcpServer(
 		server,
 		"create_checkpoint",
 		"Create checkpoint",
-		"Create a checkpoint on the branch selected by context.",
+		"Create an optional restore point on the branch selected by context. Writes already persist through execute_sql; a checkpoint is not required for durability. Call this when a session or task is complete and someone may want this exact state later. Do not call it after every write.",
 		z.object({ context }).strict(),
 		checkpointOutput,
 		writeAnnotations(),

@@ -15,6 +15,11 @@ tools.
    after mutations.
 6. Report `rowsAffected` and the returned verification rows.
 
+A successful `execute_sql` mutation is already saved. `create_checkpoint` is an
+optional restore point for a finished task or session — not required for
+durability, and not something to call after every write. Skipping it keeps the
+files; you just do not have a named restore point.
+
 ## Discover tables and columns
 
 ```sql

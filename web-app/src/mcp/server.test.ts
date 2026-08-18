@@ -296,6 +296,25 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			/\{"kind":"blob"/,
 			"execute_sql must not advertise kind blob as the default content wire value",
 		);
+		assert.match(executeSqlTool.description ?? "", /already saved/);
+		assert.match(
+			executeSqlTool.description ?? "",
+			/does not require a checkpoint/,
+		);
+		assert.match(
+			executeSqlTool.description ?? "",
+			/do not call it after every write/i,
+		);
+		const checkpointTool = tools.tools.find(
+			(tool) => tool.name === "create_checkpoint",
+		);
+		assert.ok(checkpointTool);
+		assert.match(checkpointTool.description ?? "", /already persist/);
+		assert.match(checkpointTool.description ?? "", /not required/);
+		assert.match(
+			checkpointTool.description ?? "",
+			/Do not call it after every write/,
+		);
 		assert.doesNotMatch(JSON.stringify(queryTool.inputSchema), /idempotency/i);
 		assert.doesNotMatch(
 			JSON.stringify(executeSqlTool.inputSchema),
