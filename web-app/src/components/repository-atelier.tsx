@@ -64,6 +64,7 @@ import {
 	LIXRAY_SETTINGS_EXTENSION_ID,
 	createLixrayRepositoryExtensions,
 	emptyRepositoryOpeningUiState,
+	lixrayHomeDirState,
 } from "~/components/repository-home/host-extensions";
 import type {
 	TeamMember,
@@ -92,6 +93,9 @@ interface RepositoryAtelierProps {
 const RepositoryAtelierContext = createContext<AtelierInstance | null>(null);
 const RepositoryDefaultBranchContext = createContext<string | null>(null);
 const RepositoryRouteSyncContext = createContext<(() => void) | null>(null);
+const RepositoryShellDirNavigationContext = createContext<
+	((dirPath: string) => boolean) | null
+>(null);
 const RepositoryBranchSessionContext =
 	createContext<RepositoryBranchSession | null>(null);
 
@@ -569,11 +573,23 @@ export function RepositoryAtelier({
 	useEffect(() => {
 		routeSyncedRef.current = false;
 	}, [instance]);
+	// The folder path of the last /dir navigation this handler issued. The
+	// dir route consumes it to tell shell-originated URL changes (the right
+	// view is already active — e.g. a forked folder tab) from outside ones
+	// (deep link, back/forward), which must hydrate the Home surface.
+	const shellDirNavigationRef = useRef<string | null>(null);
+	const consumeShellDirNavigation = useCallback((dirPath: string) => {
+		const matches = shellDirNavigationRef.current === dirPath;
+		shellDirNavigationRef.current = null;
+		return matches;
+	}, []);
 	useEffect(() => {
 		eventHandlerRef.current = (event) => {
 			atelierTelemetryHandlerRef.current?.(event);
 			if (event.type !== "central_view_activated") return;
 			if (!routeSyncedRef.current) return;
+			// Any activation supersedes an unconsumed dir-navigation marker.
+			shellDirNavigationRef.current = null;
 			const activeBranchId = activeLixRef.current?.activeBranchSnapshot();
 			const defaultBranchId = activeLixRef.current?.defaultBranchSnapshot();
 			const search =
@@ -581,6 +597,35 @@ export function RepositoryAtelier({
 					? atelierBranchSearch(activeBranchId, defaultBranchId)
 					: {};
 			if (event.viewKind === LIXRAY_HOME_EXTENSION_ID) {
+				// Home is the primary Files surface (flow A): drilled into a
+				// folder it claims the /dir URL, at the root it claims the
+				// repository root URL.
+				const state = event.state;
+				const dirPath =
+					state &&
+					(state.kind === undefined || state.kind === EntryKind.Directory) &&
+					typeof state.path === "string"
+						? state.path
+						: "/";
+				const splat = dirPath.replace(/^\/+/, "");
+				if (splat) {
+					const targetPath = `/@${namespace}/${repositorySlug}/dir/${splat}`;
+					const currentPath = (() => {
+						try {
+							return decodeURIComponent(pathnameRef.current);
+						} catch {
+							return pathnameRef.current;
+						}
+					})();
+					if (currentPath === targetPath) return;
+					shellDirNavigationRef.current = `/${splat}`;
+					void navigate({
+						to: "/@{$namespace}/$repository/dir/$",
+						params: { namespace, repository: repositorySlug, _splat: splat },
+						search,
+					});
+					return;
+				}
 				const targetPath = `/@${namespace}/${repositorySlug}`;
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
@@ -642,6 +687,7 @@ export function RepositoryAtelier({
 					}
 				})();
 				if (currentPath === targetPath) return;
+				shellDirNavigationRef.current = `/${splat}`;
 				void navigate({
 					to: "/@{$namespace}/$repository/dir/$",
 					params: { namespace, repository: repositorySlug, _splat: splat },
@@ -891,8 +937,11 @@ export function RepositoryAtelier({
 			markRouteSynced();
 			return;
 		}
+		// The state reset matters as much as the activation: Home may be
+		// drilled into a folder (flow A), and the root URL means the root
+		// listing.
 		void instance.views
-			.open(LIXRAY_HOME_EXTENSION_ID)
+			.open(LIXRAY_HOME_EXTENSION_ID, { state: lixrayHomeDirState("/") })
 			.catch((error: unknown) => {
 				console.error("Unable to activate the repository home", error);
 			})
@@ -910,26 +959,30 @@ export function RepositoryAtelier({
 				>
 					<RepositoryBranchSessionContext.Provider value={branchSession}>
 						<RepositoryRouteSyncContext.Provider value={markRouteSynced}>
-							<RepositoryAtelierContext.Provider value={instance}>
-								<Atelier
-									instance={instance}
-									topBarProps={{
-										"data-app-titlebar": true,
-										className: "border-b border-border-subtle bg-bg-app",
-									}}
-									slots={{
-										navbarBrand: (
-											<RepositoryPicker
-												namespaceId={namespaceId}
-												repositoryName={repositoryName}
-												repositorySlug={repositorySlug}
-											/>
-										),
-										navbarEnd: headerActions,
-									}}
-								/>
-								<Outlet />
-							</RepositoryAtelierContext.Provider>
+							<RepositoryShellDirNavigationContext.Provider
+								value={consumeShellDirNavigation}
+							>
+								<RepositoryAtelierContext.Provider value={instance}>
+									<Atelier
+										instance={instance}
+										topBarProps={{
+											"data-app-titlebar": true,
+											className: "border-b border-border-subtle bg-bg-app",
+										}}
+										slots={{
+											navbarBrand: (
+												<RepositoryPicker
+													namespaceId={namespaceId}
+													repositoryName={repositoryName}
+													repositorySlug={repositorySlug}
+												/>
+											),
+											navbarEnd: headerActions,
+										}}
+									/>
+									<Outlet />
+								</RepositoryAtelierContext.Provider>
+							</RepositoryShellDirNavigationContext.Provider>
 						</RepositoryRouteSyncContext.Provider>
 					</RepositoryBranchSessionContext.Provider>
 				</RepositoryDefaultBranchContext.Provider>
@@ -969,6 +1022,18 @@ export function useRepositoryDefaultBranchId(): string | null {
 export function useMarkRepositoryRouteSynced(): () => void {
 	const markRouteSynced = useContext(RepositoryRouteSyncContext);
 	return markRouteSynced ?? (() => undefined);
+}
+
+/**
+ * True when the current /dir URL was just written by a tab activation inside
+ * the shell — the right Files surface is already active, so the dir route
+ * must not hydrate Home over it (it would steal focus from a forked folder
+ * tab). Consuming clears the marker; outside navigations (deep link,
+ * back/forward) never match and hydrate as usual.
+ */
+export function useConsumeShellDirNavigation(): (dirPath: string) => boolean {
+	const consume = useContext(RepositoryShellDirNavigationContext);
+	return consume ?? (() => false);
 }
 
 const NO_BRANCH_SUBSCRIBE = () => () => undefined;
