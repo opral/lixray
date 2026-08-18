@@ -132,3 +132,190 @@ void test("refreshes an expired access token and retries the remote request once
 	assert.equal(refreshCalls, 1);
 	assert.equal(executeAttempts, 2);
 });
+
+void test("notifies the host when a live protocol session is gone so it can remount", async (t) => {
+	let goneCalls = 0;
+	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request =
+			input instanceof Request
+				? new Request(input, init)
+				: new Request(new URL(input, "https://lixray.test"), init);
+		const pathname = new URL(request.url).pathname;
+		if (pathname.endsWith("/lix/v1/")) {
+			return Response.json({
+				protocolVersion: 2,
+				activeBranchId: "main",
+				activeAccountId: "00000000-0000-7000-8000-000000000002",
+				sessionId: "stale-session",
+			});
+		}
+		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
+			return new Response(null, { status: 410 });
+		}
+		if (pathname.endsWith("/lix/v1/execute")) {
+			return Response.json(
+				{
+					error: {
+						code: "LIX_ERROR_PROTOCOL_SESSION_GONE",
+						message:
+							"the Lix protocol session is unknown, expired, or closed; open a new client session",
+					},
+				},
+				{ status: 410 },
+			);
+		}
+		throw new Error(`Unexpected remote request: ${request.method} ${pathname}`);
+	};
+
+	const session = await openRepositoryLixSession({
+		namespace: "opral",
+		repositorySlug: "monorepo",
+		origin: "https://lixray.test",
+		getAccessToken: async () => "token",
+		fetch,
+		onProtocolSessionGone: () => {
+			goneCalls += 1;
+		},
+	});
+	t.after(() => session.close());
+
+	await assert.rejects(() => session.lix.execute("SELECT 1"), {
+		status: 410,
+		code: "LIX_ERROR_PROTOCOL_SESSION_GONE",
+	});
+	assert.equal(goneCalls, 1);
+});
+
+void test("does not treat a gone-session DELETE as a remount signal", async (t) => {
+	let goneCalls = 0;
+	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request =
+			input instanceof Request
+				? new Request(input, init)
+				: new Request(new URL(input, "https://lixray.test"), init);
+		const pathname = new URL(request.url).pathname;
+		if (pathname.endsWith("/lix/v1/")) {
+			return Response.json({
+				protocolVersion: 2,
+				activeBranchId: "main",
+				activeAccountId: "00000000-0000-7000-8000-000000000002",
+				sessionId: "closing-session",
+			});
+		}
+		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
+			return new Response(null, { status: 410 });
+		}
+		throw new Error(`Unexpected remote request: ${request.method} ${pathname}`);
+	};
+
+	const session = await openRepositoryLixSession({
+		namespace: "opral",
+		repositorySlug: "closing",
+		origin: "https://lixray.test",
+		getAccessToken: async () => "token",
+		fetch,
+		onProtocolSessionGone: () => {
+			goneCalls += 1;
+		},
+	});
+	await session.close();
+	assert.equal(goneCalls, 0);
+});
+
+void test("opens a new managed client session after the host bumps the epoch", async (t) => {
+	const sessionIds: string[] = [];
+	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request =
+			input instanceof Request
+				? new Request(input, init)
+				: new Request(new URL(input, "https://lixray.test"), init);
+		const pathname = new URL(request.url).pathname;
+		if (pathname.endsWith("/lix/v1/")) {
+			const sessionId = `session-${sessionIds.length + 1}`;
+			sessionIds.push(sessionId);
+			return Response.json({
+				protocolVersion: 2,
+				activeBranchId: "main",
+				activeAccountId: "00000000-0000-7000-8000-000000000002",
+				sessionId,
+			});
+		}
+		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
+			return new Response(null, { status: 204 });
+		}
+		throw new Error(`Unexpected remote request: ${request.method} ${pathname}`);
+	};
+
+	const first = await openRepositoryLixSession({
+		namespace: "opral",
+		repositorySlug: "epoch",
+		origin: "https://lixray.test",
+		getAccessToken: async () => "token",
+		fetch,
+	});
+	const second = await openRepositoryLixSession({
+		namespace: "opral",
+		repositorySlug: "epoch",
+		origin: "https://lixray.test",
+		getAccessToken: async () => "token",
+		fetch,
+		sessionEpoch: 1,
+	});
+	t.after(async () => {
+		await first.close();
+		await second.close();
+	});
+
+	assert.deepEqual(sessionIds, ["session-1", "session-2"]);
+	assert.notEqual(first.lix, second.lix);
+});
+
+void test("opens a new client session when the signed-in identity changes", async (t) => {
+	const sessionIds: string[] = [];
+	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request =
+			input instanceof Request
+				? new Request(input, init)
+				: new Request(new URL(input, "https://lixray.test"), init);
+		const pathname = new URL(request.url).pathname;
+		if (pathname.endsWith("/lix/v1/")) {
+			const sessionId = `session-${sessionIds.length + 1}`;
+			sessionIds.push(sessionId);
+			return Response.json({
+				protocolVersion: 2,
+				activeBranchId: "main",
+				activeAccountId: "00000000-0000-7000-8000-000000000002",
+				sessionId,
+			});
+		}
+		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
+			return new Response(null, { status: 204 });
+		}
+		throw new Error(`Unexpected remote request: ${request.method} ${pathname}`);
+	};
+
+	const anonymous = await openRepositoryLixSession({
+		namespace: "opral",
+		repositorySlug: "monorepo",
+		origin: "https://lixray.test",
+		getAccessToken: async () => null,
+		allowAnonymous: true,
+		authIdentity: "public:acc2bc33",
+		fetch,
+	});
+	const signedIn = await openRepositoryLixSession({
+		namespace: "opral",
+		repositorySlug: "monorepo",
+		origin: "https://lixray.test",
+		getAccessToken: async () => "token",
+		authIdentity: "user-samuel",
+		fetch,
+	});
+	t.after(async () => {
+		await anonymous.close();
+		await signedIn.close();
+	});
+
+	assert.deepEqual(sessionIds, ["session-1", "session-2"]);
+	assert.notEqual(anonymous.lix, signedIn.lix);
+});

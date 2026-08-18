@@ -1,4 +1,8 @@
 import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk";
+import {
+	isProtocolSessionGoneStatus,
+	protocolSessionGoneErrorCode,
+} from "./protocol-session.ts";
 import { captureTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 
@@ -20,6 +24,19 @@ interface OpenRepositoryLixSessionOptions {
 	initialBranchId?: string | null;
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
+	/**
+	 * Bumps the managed-session key so a recovered client does not reuse a
+	 * protocol session the server already marked gone.
+	 */
+	sessionEpoch?: number;
+	/**
+	 * Distinguishes anonymous and signed-in clients for the same repository.
+	 * Sign-in must open a new protocol session instead of reusing the
+	 * public-read session from the signed-out view.
+	 */
+	authIdentity?: string;
+	/** Fired when execute/observe (not session DELETE) returns a gone session. */
+	onProtocolSessionGone?: () => void;
 }
 
 const RECOVERING_OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
@@ -76,6 +93,7 @@ async function openRepositoryLixSessionOnce(
 			fetch: createTelemetryFetch(options.fetch, {
 				repositoryId: options.repositoryId,
 				refreshAccessToken: options.refreshAccessToken,
+				onProtocolSessionGone: options.onProtocolSessionGone,
 			}),
 		},
 	});
@@ -105,6 +123,7 @@ function createTelemetryFetch(
 	context: {
 		repositoryId?: string;
 		refreshAccessToken?: TokenProvider;
+		onProtocolSessionGone?: () => void;
 	},
 ): RemoteLixFetch {
 	const fetcher = customFetch ?? globalThis.fetch?.bind(globalThis);
@@ -132,7 +151,14 @@ function createTelemetryFetch(
 		}
 		recordLixrayServerTiming(response, input);
 		if (!response.ok) {
-			void reportLixRequestFailure(response, input, init, context);
+			const code = await readLixErrorCode(response);
+			void reportLixRequestFailure(response, input, init, context, code);
+			if (
+				init?.method !== "DELETE" &&
+				isProtocolSessionGoneStatus(response.status, code)
+			) {
+				context.onProtocolSessionGone?.();
+			}
 		}
 		return response;
 	};
@@ -195,28 +221,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
+async function readLixErrorCode(
+	response: Response,
+): Promise<string | undefined> {
+	try {
+		const body: unknown = await response.clone().json();
+		const error = isRecord(body) ? body.error : undefined;
+		if (isRecord(error) && typeof error.code === "string") {
+			return error.code;
+		}
+	} catch {
+		// The SDK will report malformed/non-JSON responses separately.
+	}
+	return undefined;
+}
+
 async function reportLixRequestFailure(
 	response: Response,
 	input: RequestInfo | URL,
 	init: RequestInit | undefined,
 	context: { repositoryId?: string },
+	code?: string,
 ): Promise<void> {
-	let code: string | undefined;
-	try {
-		const body: unknown = await response.clone().json();
-		const error = isRecord(body) ? body.error : undefined;
-		if (isRecord(error) && typeof error.code === "string") {
-			code = error.code;
-		}
-	} catch {
-		// The SDK will report malformed/non-JSON responses separately.
-	}
+	const errorCode = protocolSessionGoneErrorCode(response.status, code);
 
 	captureTelemetry("lix_request_failed", {
 		lix_request_endpoint: lixRequestEndpoint(input),
 		lix_request_method: init?.method ?? "GET",
 		lix_http_status: response.status,
-		...(code ? { lix_error_code: code } : {}),
+		...(errorCode ? { lix_error_code: errorCode } : {}),
 		...(context.repositoryId ? { lix_id: context.repositoryId } : {}),
 	});
 }
@@ -369,7 +402,10 @@ class RepositoryLixSessionLease implements RepositoryLixSession {
 function repositorySessionKey(
 	options: OpenRepositoryLixSessionOptions,
 ): string {
-	return repositoryUrl(options).href;
+	const href = repositoryUrl(options).href;
+	const identity = options.authIdentity ?? "anonymous";
+	const epoch = options.sessionEpoch ?? 0;
+	return `${href}#auth=${identity}#epoch=${epoch}`;
 }
 
 function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {
