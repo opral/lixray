@@ -63,7 +63,7 @@ export const QUERY_SQL_TOOL_DESCRIPTION = `Use SQL as the universal read interfa
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}
 
-Use focused projections, predicates, and LIMIT where applicable. To read a text file, use \`SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1\`. \`lix_file.content\` is binary; select only content the user actually requested.
+Use focused projections, predicates, and LIMIT where applicable. UTF-8 / text files are written with \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))\` using \`kind: "text"\` parameters. To read a text file, use \`SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1\`. \`lix_file.content\` is stored as bytes; select only content the user actually requested.
 
 Use the core tables above, plus their \`_by_branch\` / \`_history\` companions, directly; do not inspect \`information_schema\` for them. Entity tables are lix-dynamic: discover their table and column names before guessing:
 
@@ -84,7 +84,7 @@ ${EXECUTE_SQL_CORE_SCHEMA}
 
 Path rules: \`lix_file.path\` and \`lix_directory.path\` are canonical absolute paths and neither ends in \`/\` (except the root path \`/\`). \`lix_file.directory_id\` references \`lix_directory.id\`; \`lix_directory.parent_id\` references \`lix_directory.id\`. Use those IDs for hierarchy queries.
 
-\`lix_file.content\` is binary. Pass binary values as \`{"kind":"blob","base64":"..."}\`. Never use \`CAST(... AS BLOB)\`; if a SQL cast is unavoidable, use \`BYTEA\`.
+\`lix_file.content\` is stored as bytes. For UTF-8 / text files, pass \`$1\` (path) and \`$2\` (file body) as \`kind: "text"\` and write with \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))\`. Never use \`CAST(... AS BLOB)\`; if a SQL cast is needed, use \`BYTEA\`. Actual binaries use \`kind: "blob"\` without CAST.
 
 To create a file, use \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))\`; to read it, use \`SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1\`; to rename it, use \`UPDATE lix_file SET path = $2 WHERE path = $1\`. Create directories with \`INSERT INTO lix_directory (path) VALUES ($1)\`.
 

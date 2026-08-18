@@ -49,6 +49,10 @@ INSERT INTO lix_file (path, content)
 VALUES ($1, CAST($2 AS BYTEA));
 ```
 
+Pass `$1` (path) and `$2` (file body) as `kind: "text"`. Never use
+`CAST(... AS BLOB)`; if a SQL cast is needed, use `BYTEA`. Actual binaries
+use `kind: "blob"` without CAST.
+
 For a multi-file setup, send the inserts as one `execute_sql` request and
 make its final statement a readback query:
 
@@ -58,6 +62,3 @@ FROM lix_file
 WHERE path IN ($1, $2, $3)
 ORDER BY path;
 ```
-
-`lix_file.content` is binary. MCP callers pass it as a wire value with
-`{"kind":"blob","base64":"..."}`.
