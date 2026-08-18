@@ -44,6 +44,7 @@ export interface Organization {
 	id: string;
 	name: string;
 	handle: string;
+	kind: "personal" | "organization";
 	/** Null means direct repository membership, not organization membership. */
 	role: OrganizationRole | null;
 	createdAt: string;
@@ -70,7 +71,8 @@ interface RepositoryContextValue {
 	refresh: (options?: RefreshOptions) => Promise<void>;
 	selectOrganization: (organizationId: string) => void;
 	selectRepository: (repositoryId: string) => void;
-	createOrganization: (name: string) => Promise<void>;
+	/** Resolves with the new organization's id. */
+	createOrganization: (name: string) => Promise<string>;
 	renameOrganization: (name: string) => Promise<void>;
 	createRepository: (name: string, organizationId?: string) => Promise<void>;
 	renameRepository: (repositoryId: string, name: string) => Promise<void>;
@@ -251,8 +253,10 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				{ p_name: normalizeName(name, "Organization") },
 			);
 			if (createError) throw createError;
-			await refresh({ organizationId: String(data) });
+			const organizationId = String(data);
+			await refresh({ organizationId });
 			captureTelemetry("organization_created");
+			return organizationId;
 		},
 		[client, refresh],
 	);
@@ -420,6 +424,7 @@ async function loadOrganizations(
 				id: organizationId,
 				name: String(row.namespace_name),
 				handle: String(row.namespace_handle),
+				kind: row.namespace_kind,
 				role: row.namespace_role,
 				createdAt: String(row.namespace_created_at),
 				updatedAt: String(row.namespace_updated_at),
@@ -454,6 +459,7 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 		id: DEMO_ORGANIZATION_ID,
 		name: DEMO_ORGANIZATION_NAME,
 		handle: DEMO_ORGANIZATION_NAME,
+		kind: "personal",
 		role: "owner",
 		createdAt: "2026-07-01T12:00:00.000Z",
 		updatedAt: "2026-07-12T18:58:00.000Z",

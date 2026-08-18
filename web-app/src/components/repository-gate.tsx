@@ -66,7 +66,9 @@ function AuthenticatedRepositoryGate({
 				title="Create your organization."
 				label="Organization name"
 				buttonLabel="Create organization"
-				onSubmit={createOrganization}
+				onSubmit={async (name) => {
+					await createOrganization(name);
+				}}
 			/>
 		);
 	}
