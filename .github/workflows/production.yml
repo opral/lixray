@@ -20,7 +20,7 @@ jobs:
     # content tag so interleaved merges cannot leave main red. PR CI already
     # uses this runner; 5 minutes on ubuntu-latest cannot finish a real build.
     runs-on: blacksmith-32vcpu-ubuntu-2404
-    timeout-minutes: 40
+    timeout-minutes: 50
     environment: production
     permissions:
       contents: read

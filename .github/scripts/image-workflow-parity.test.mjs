@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -81,4 +82,67 @@ test("production inspects published content tags and builds only on a miss", () 
 		production,
 		/Pull request CI must publish/,
 	);
+});
+
+function resolveDigests(env) {
+	const result = spawnSync(
+		"bash",
+		[
+			"-c",
+			`
+set -euo pipefail
+server_digest="\${SERVER_BUILT_DIGEST:-\$SERVER_EXISTING_DIGEST}"
+web_digest="\${WEB_BUILT_DIGEST:-\$WEB_EXISTING_DIGEST}"
+test -n "\$server_digest"
+test -n "\$web_digest"
+printf 'server=%s@%s\\nweb=%s@%s\\n' \
+  "\$SERVER_REPOSITORY" "\$server_digest" \
+  "\$WEB_REPOSITORY" "\$web_digest"
+`,
+		],
+		{ encoding: "utf8", env: { ...process.env, ...env } },
+	);
+	return result;
+}
+
+test("resolve reuses published digests and prefers a just-built miss", () => {
+	const hit = resolveDigests({
+		SERVER_BUILT_DIGEST: "",
+		SERVER_EXISTING_DIGEST: "sha256:server-hit",
+		SERVER_REPOSITORY: "ghcr.io/opral/lixray-server",
+		WEB_BUILT_DIGEST: "",
+		WEB_EXISTING_DIGEST: "sha256:web-hit",
+		WEB_REPOSITORY: "ghcr.io/opral/lixray-web",
+	});
+	assert.equal(hit.status, 0, hit.stderr);
+	assert.equal(
+		hit.stdout,
+		"server=ghcr.io/opral/lixray-server@sha256:server-hit\nweb=ghcr.io/opral/lixray-web@sha256:web-hit\n",
+	);
+
+	const webMiss = resolveDigests({
+		SERVER_BUILT_DIGEST: "",
+		SERVER_EXISTING_DIGEST: "sha256:server-hit",
+		SERVER_REPOSITORY: "ghcr.io/opral/lixray-server",
+		WEB_BUILT_DIGEST: "sha256:web-built",
+		WEB_EXISTING_DIGEST: "",
+		WEB_REPOSITORY: "ghcr.io/opral/lixray-web",
+	});
+	assert.equal(webMiss.status, 0, webMiss.stderr);
+	assert.equal(
+		webMiss.stdout,
+		"server=ghcr.io/opral/lixray-server@sha256:server-hit\nweb=ghcr.io/opral/lixray-web@sha256:web-built\n",
+	);
+});
+
+test("resolve fails when a service still has no digest after inspect and build", () => {
+	const result = resolveDigests({
+		SERVER_BUILT_DIGEST: "",
+		SERVER_EXISTING_DIGEST: "sha256:server-hit",
+		SERVER_REPOSITORY: "ghcr.io/opral/lixray-server",
+		WEB_BUILT_DIGEST: "",
+		WEB_EXISTING_DIGEST: "",
+		WEB_REPOSITORY: "ghcr.io/opral/lixray-web",
+	});
+	assert.equal(result.status, 1);
 });
