@@ -53,6 +53,8 @@ export interface McpToolCallObservation {
 	lixId?: string;
 	executeInput?: McpExecuteInputObservation;
 	executeOutput?: McpExecuteOutputObservation;
+	fileContentCharCount?: number;
+	fileContentByteCount?: number;
 }
 
 export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
@@ -635,8 +637,6 @@ export async function handleMcpTransport(
 
 				if (observation?.executeInput && observation?.executeOutput) {
 					const firstStmt = observation.executeInput.statements[0];
-					const sql = firstStmt?.sanitizedSql ?? "";
-					const isFileOp = sql.includes("lix_file");
 
 					baseProps.sql_op = firstStmt?.operation;
 					baseProps.row_count = observation.executeOutput.rowCount;
@@ -644,11 +644,13 @@ export async function handleMcpTransport(
 					if (observation.lixId) baseProps.lix_id = observation.lixId;
 					if (observation.lixId) baseProps.repository_id = observation.lixId;
 
-					// For file operations, extract actual content size from parameters
-					// Do not emit file_path (real path is on lixr_file_written only)
-					if (isFileOp) {
-						// Omit file_path and file_extension - cannot reliably extract from sanitized SQL
-						// char_count and byte_count also omitted - would need unsanitized params
+					// For file writes, add actual content size (computed in handler from content.length / Buffer.byteLength utf8)
+					// Do not emit file_path or file_extension (real values are on lixr_file_written only)
+					if (observation.fileContentCharCount !== undefined) {
+						baseProps.char_count = observation.fileContentCharCount;
+					}
+					if (observation.fileContentByteCount !== undefined) {
+						baseProps.byte_count = observation.fileContentByteCount;
 					}
 				}
 

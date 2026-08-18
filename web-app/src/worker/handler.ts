@@ -290,8 +290,6 @@ export async function handleRequest(
 		};
 
 		const onToolCall = (observation: McpToolCallObservation): void => {
-			telemetry?.onToolCall(observation);
-
 			if (lixrTelemetry && observation.outcome === "success") {
 				const sqlAnalysis = observation.executeInput
 					? analyzeSqlOperation(observation.executeInput)
@@ -307,6 +305,10 @@ export async function handleRequest(
 				importSession.toolCallCount++;
 				if (observation.lixId) importSession.lixId = observation.lixId;
 
+				// Enrich observation with file content size for $mcp_tool_call eventProperties
+				let totalContentChars = 0;
+				let totalContentBytes = 0;
+
 				for (const write of fileWrites) {
 					if (write.content) {
 						const contentBytes = Buffer.byteLength(write.content, "utf8");
@@ -314,6 +316,8 @@ export async function handleRequest(
 						const contentHash = computeContentHash(write.content);
 						const fileExtension = getFileExtension(write.path);
 
+						totalContentChars += contentChars;
+						totalContentBytes += contentBytes;
 						importSession.totalChars += contentChars;
 						importSession.totalBytes += contentBytes;
 						importSession.fileWrites.add(write.path);
@@ -341,7 +345,15 @@ export async function handleRequest(
 						}
 					}
 				}
+
+				// Add file content size to observation for $mcp_tool_call eventProperties
+				if (totalContentChars > 0) {
+					observation.fileContentCharCount = totalContentChars;
+					observation.fileContentByteCount = totalContentBytes;
+				}
 			}
+
+			telemetry?.onToolCall(observation);
 
 			if (
 				authResult.auth.isDemo ||
