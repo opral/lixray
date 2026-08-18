@@ -5,14 +5,16 @@
 # driver and legacy iptables are set up in install.sh).
 set -euo pipefail
 
-log=/tmp/dockerd.log
+# Log to a root-owned, non-sticky directory. /tmp is world-writable and sticky,
+# where the kernel's protected_regular guard can block re-opening a stale
+# foreign-owned log file — even for root.
+log=/var/log/dockerd.log
 
 if ! docker info >/dev/null 2>&1; then
 	if ! pgrep -x dockerd >/dev/null 2>&1; then
-		# Launch dockerd as root; run the redirect inside the root shell so the
-		# log file is created with root privileges (a user-level redirect to a
-		# root-owned path fails before sudo runs).
-		sudo sh -c "nohup dockerd >'$log' 2>&1 &"
+		# Launch dockerd as root and perform the redirect inside the root shell
+		# so the log is created with root privileges.
+		sudo sh -c "rm -f '$log'; nohup dockerd >'$log' 2>&1 &"
 	fi
 	for _ in $(seq 1 60); do
 		if sudo docker info >/dev/null 2>&1; then
