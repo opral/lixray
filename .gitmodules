@@ -5,4 +5,4 @@
 [submodule "vendor/lix"]
 	path = vendor/lix
 	url = https://github.com/opral/lix.git
-	branch = integration/opfs-browser-sync
+	branch = experiment/complete-commit-sync
