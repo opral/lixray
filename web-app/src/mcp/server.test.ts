@@ -284,6 +284,18 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			executeSqlTool.description ?? "",
 			/any ordered atomic SQL batch/,
 		);
+		assert.match(queryTool.description ?? "", /CAST\(\$2 AS BYTEA\)/);
+		assert.match(executeSqlTool.description ?? "", /CAST\(\$2 AS BYTEA\)/);
+		assert.doesNotMatch(
+			queryTool.description ?? "",
+			/\{"kind":"blob"/,
+			"query_sql must not advertise kind blob as the default content wire value",
+		);
+		assert.doesNotMatch(
+			executeSqlTool.description ?? "",
+			/\{"kind":"blob"/,
+			"execute_sql must not advertise kind blob as the default content wire value",
+		);
 		assert.doesNotMatch(JSON.stringify(queryTool.inputSchema), /idempotency/i);
 		assert.doesNotMatch(
 			JSON.stringify(executeSqlTool.inputSchema),

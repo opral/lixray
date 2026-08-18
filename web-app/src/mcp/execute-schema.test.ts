@@ -38,3 +38,22 @@ void test("SQL guidance models the public Lix surfaces", () => {
 	assert.match(EXECUTE_SQL_COLUMNS_QUERY, /information_schema\.columns/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
 });
+
+void test("SQL tool descriptions use CAST plus kind text for file content", () => {
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /CAST\(\$2 AS BYTEA\)/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /CAST\(\$2 AS BYTEA\)/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /kind: "text"/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /kind: "text"/);
+	for (const description of [
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		QUERY_SQL_TOOL_DESCRIPTION,
+	]) {
+		assert.doesNotMatch(
+			description,
+			/\{"kind":"blob"/,
+			"must not tell callers to pass kind blob as the default content wire value",
+		);
+		assert.doesNotMatch(description, /Pass binary values as/);
+		assert.doesNotMatch(description, /MCP callers pass/);
+	}
+});
