@@ -78,3 +78,46 @@ void test("normalizes file extensions without retaining names", () => {
 	assert.equal(fileExtensionProperty("/private/no-extension"), "(none)");
 	assert.equal(fileExtensionProperty("/private/file.we!rd"), "werd");
 });
+
+void test("first_file_added fires once when repository gets its first file", async () => {
+	const captured: Array<{
+		event: string;
+		properties: Record<string, unknown>;
+	}> = [];
+	const mockLix = {
+		execute: async () => ({
+			rows: [{ get: () => 1 }],
+		}),
+	};
+	const handler = createAtelierTelemetryHandler(
+		(event, properties) => {
+			captured.push({ event, properties });
+		},
+		{
+			context: {
+				lix: mockLix as never,
+				repositoryId: "repo-123",
+				organizationId: "org-456",
+			},
+		},
+	);
+
+	handler({
+		type: "document_modified",
+		filePath: "/first-file.md",
+		modifiedBy: "user",
+	});
+
+	// Wait for async check to complete
+	await new Promise((resolve) => setTimeout(resolve, 10));
+
+	const firstFileEvent = captured.find(
+		(event) => event.event === "first_file_added",
+	);
+	assert.ok(firstFileEvent, "first_file_added event should be captured");
+	assert.deepEqual(firstFileEvent?.properties, {
+		repository_id: "repo-123",
+		organization_id: "org-456",
+		file_extension: "md",
+	});
+});

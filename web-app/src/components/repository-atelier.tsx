@@ -176,8 +176,6 @@ export function RepositoryAtelier({
 	const atelierTelemetryHandlerRef = useRef<
 		ReturnType<typeof createAtelierTelemetryHandler> | undefined
 	>(undefined);
-	atelierTelemetryHandlerRef.current ??=
-		createAtelierTelemetryHandler(captureTelemetry);
 	useEffect(() => {
 		pathnameRef.current = pathname;
 	}, [pathname]);
@@ -740,6 +738,19 @@ export function RepositoryAtelier({
 				activeLix = session;
 				activeLixRef.current = session;
 				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
+
+				// Initialize telemetry handler with repository context
+				atelierTelemetryHandlerRef.current = createAtelierTelemetryHandler(
+					captureTelemetry,
+					{
+						context: {
+							lix: session.lix,
+							repositoryId,
+							organizationId: namespaceId,
+						},
+					},
+				);
+
 				const repositoryBranchSession = createRepositoryBranchSession({
 					session,
 					onSwitch: async (nextBranchId, context) => {

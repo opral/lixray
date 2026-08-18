@@ -10,6 +10,7 @@ import {
 	takeRepositoryShareJoinIntent,
 	takeRepositoryShareCapability,
 } from "~/lib/repository-share-capability";
+import { captureTelemetryImmediately } from "~/lib/telemetry";
 
 interface CallbackSearch {
 	code?: string;
@@ -46,12 +47,28 @@ function AuthCallbackPage() {
 		let disposed = false;
 		void getBrowserSupabaseClient()
 			.auth.exchangeCodeForSession(search.code)
-			.then(async ({ error: exchangeError }) => {
+			.then(async ({ data: sessionData, error: exchangeError }) => {
 				if (disposed) return;
 				if (exchangeError) {
 					setError(exchangeError.message);
 					return;
 				}
+
+				// Track user_signed_up event for first-time users only
+				const userId = sessionData?.user?.id;
+				if (userId) {
+					const signupKey = `lixray.signup.${userId}`;
+					const hasTrackedSignup = window.localStorage.getItem(signupKey);
+					if (!hasTrackedSignup) {
+						const returnTo = peekAuthReturnTo();
+						await captureTelemetryImmediately("user_signed_up", {
+							auth_provider: "google",
+							signup_source: returnTo === "/open" ? "direct" : returnTo,
+						});
+						window.localStorage.setItem(signupKey, "true");
+					}
+				}
+
 				const capability = peekRepositoryShareCapability();
 				const joinRepositoryId = takeRepositoryShareJoinIntent();
 				if (capability && joinRepositoryId === capability.repositoryId) {
