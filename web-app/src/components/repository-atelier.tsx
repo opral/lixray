@@ -870,6 +870,7 @@ export function RepositoryAtelier({
 		refreshAccessToken,
 		navigateToCurrentPathBranch,
 		namespace,
+		namespaceId,
 		repositoryId,
 		repositoryName,
 		repositorySlug,
