@@ -126,8 +126,7 @@ export function RepositoryDirectory() {
 	).length;
 	const hasEmptyOrganizations = organizations.some(
 		(organization) =>
-			organization.kind === "organization" &&
-			organization.repositories.length === 0,
+			!organization.isPersonal && organization.repositories.length === 0,
 	);
 	const paletteOrder = new Map(
 		organizations
@@ -177,7 +176,7 @@ export function RepositoryDirectory() {
 					) : (
 						organizations.map((organization, groupIndex) =>
 							organization.repositories.length > 0 ||
-							organization.kind === "organization" ? (
+							!organization.isPersonal ? (
 								<section
 									className="pt-[26px] data-[first=true]:pt-0"
 									data-first={groupIndex === 0 || undefined}
@@ -255,9 +254,7 @@ export function RepositoryDirectory() {
 					)}
 
 					{!isDemoModeEnabled &&
-					!organizations.some(
-						(organization) => organization.kind === "organization",
-					) ? (
+					!organizations.some((organization) => !organization.isPersonal) ? (
 						<button
 							className="mx-3.5 mt-[26px] flex w-[calc(100%-28px)] cursor-pointer items-center gap-3.5 rounded-[10px] border-[1.5px] border-dashed border-border-action-secondary bg-transparent px-4 py-[13px] text-left transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible max-[560px]:mx-2 max-[560px]:w-[calc(100%-16px)]"
 							type="button"
@@ -732,7 +729,7 @@ function RepositoryDialog({
 									{organizations.map((organization) => (
 										<option key={organization.id} value={organization.id}>
 											@{organization.handle}
-											{organization.kind === "personal" ? " · personal" : ""}
+											{organization.isPersonal ? " · personal" : ""}
 										</option>
 									))}
 									<option value={CREATE_ORGANIZATION_OPTION}>

@@ -38,20 +38,26 @@ export type Database = {
 				Row: {
 					created_at: string;
 					handle: string;
-					namespace_id: string;
+					namespace_id: string | null;
+					reason: string | null;
 					squat_key: string | null;
+					state: string;
 				};
 				Insert: {
 					created_at?: string;
 					handle: string;
-					namespace_id: string;
+					namespace_id?: string | null;
+					reason?: string | null;
 					squat_key?: string | null;
+					state?: string;
 				};
 				Update: {
 					created_at?: string;
 					handle?: string;
-					namespace_id?: string;
+					namespace_id?: string | null;
+					reason?: string | null;
 					squat_key?: string | null;
+					state?: string;
 				};
 				Relationships: [
 					{
@@ -268,21 +274,18 @@ export type Database = {
 				Row: {
 					created_at: string;
 					id: string;
-					kind: Database["public"]["Enums"]["namespace_kind"];
 					name: string;
 					updated_at: string;
 				};
 				Insert: {
 					created_at?: string;
 					id?: string;
-					kind: Database["public"]["Enums"]["namespace_kind"];
 					name: string;
 					updated_at?: string;
 				};
 				Update: {
 					created_at?: string;
 					id?: string;
-					kind?: Database["public"]["Enums"]["namespace_kind"];
 					name?: string;
 					updated_at?: string;
 				};
@@ -457,7 +460,7 @@ export type Database = {
 					namespace_created_at: string;
 					namespace_handle: string;
 					namespace_id: string;
-					namespace_kind: Database["public"]["Enums"]["namespace_kind"];
+					namespace_is_personal: boolean;
 					namespace_name: string;
 					namespace_role: Database["public"]["Enums"]["namespace_role"];
 					namespace_updated_at: string;
@@ -531,7 +534,6 @@ export type Database = {
 			revoke_lix_share_token: { Args: { p_token: string }; Returns: undefined };
 		};
 		Enums: {
-			namespace_kind: "personal" | "organization";
 			namespace_role: "owner" | "member";
 		};
 		CompositeTypes: {

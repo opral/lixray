@@ -44,7 +44,8 @@ export interface Organization {
 	id: string;
 	name: string;
 	handle: string;
-	kind: "personal" | "organization";
+	/** True when this namespace is a user's primary (personal) namespace. */
+	isPersonal: boolean;
 	/** Null means direct repository membership, not organization membership. */
 	role: OrganizationRole | null;
 	createdAt: string;
@@ -426,7 +427,7 @@ async function loadOrganizations(
 				id: organizationId,
 				name: String(row.namespace_name),
 				handle: String(row.namespace_handle),
-				kind: row.namespace_kind,
+				isPersonal: Boolean(row.namespace_is_personal),
 				role: row.namespace_role,
 				createdAt: String(row.namespace_created_at),
 				updatedAt: String(row.namespace_updated_at),
@@ -461,7 +462,7 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 		id: DEMO_ORGANIZATION_ID,
 		name: DEMO_ORGANIZATION_NAME,
 		handle: DEMO_ORGANIZATION_NAME,
-		kind: "personal",
+		isPersonal: true,
 		role: "owner",
 		createdAt: "2026-07-01T12:00:00.000Z",
 		updatedAt: "2026-07-12T18:58:00.000Z",

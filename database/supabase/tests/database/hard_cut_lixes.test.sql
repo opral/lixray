@@ -29,11 +29,16 @@ select results_eq(
   'first bootstrap derives the handle and creates the default repository'
 );
 
+-- The primary-namespace pointer is not client-readable; assert as superuser,
+-- scoped to the test user so pre-existing local data cannot skew the count.
+reset role;
 select is(
-  (select count(*) from public.namespaces where kind = 'personal'),
+  (select count(*) from public.user_primary_namespaces primary_namespace
+   where primary_namespace.user_id = '10000000-0000-0000-0000-000000000001'),
   1::bigint,
-  'personal ownership uses the namespace model'
+  'personal ownership is derived from the primary-namespace pointer'
 );
+set local role authenticated;
 
 select is(
   (select count(*) from public.lixes where deleted_at is null),

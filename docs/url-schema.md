@@ -1,6 +1,6 @@
 # LixRay URL Schema Specification
 
-Status: **design reference** · Updated 2026-07-22
+Status: **design reference** · Updated 2026-08-17
 
 Implementation note: the current hard-cut schema uses one `namespaces` model for
 personal and organization ownership, one global `handles` pool, and internal
@@ -22,6 +22,7 @@ Figma-class ecosystem migration.
 ```
 url          = "https://lixray.com" path [ query ] [ fragment ]
 path         = "/@" handle                          ; namespace profile
+             | "/@" handle "/-/" ns-verb …          ; namespace sub-resources (RESERVED)
              | "/@" handle "/" slug [pin] sub       ; repository + sub-resources
              | "/" product-route                    ; app-owned, unlimited, forever
 
@@ -47,6 +48,8 @@ file-path    = "/"-separated segments, RFC 3986 percent-encoded, NFC-normalized
 verb (v1)    = "file" | "dir" | "team"
 verb (rsvd)  = raw diff change changes history blame settings edit new embed
                archive zip releases agents threads blob tree folder files sync
+ns-verb      = future closed set under "/@" handle "/-/" (RESERVED; none shipped —
+               namespace administration lives in product space, see D2)
 ```
 
 Examples: `lixray.com/@samuel` · `lixray.com/@google/android/file/gearbox/housing.step` ·
@@ -90,6 +93,16 @@ MUST be treated as impossible.
 groups and the verb position became ambiguous; the fix (`/-/` delimiter) took a 5-year dual-route
 migration and hard link rot at 17.0. If nesting ever returns to the roadmap, adopt `/-/` **before**
 shipping it.
+
+**Namespace sub-resources: `/@{handle}/-/…` is reserved now.** Slug grammar requires segments to
+start and end with an alphanumeric, so a bare `-` can never be a repository slug — `/-/` at
+segment 2 is collision-free by construction, with no blocklist to govern. It is the escape hatch
+if namespace-scoped pages ever need user-space URLs (a public org people page, say). Until then,
+namespace **administration** lives in product space (`/settings/@{handle}`) — admin URLs are not
+shared socially and are freely migratable, which is also GitHub's end state
+(`github.com/settings`, `github.com/orgs/{org}/…`). Public **profile facets** are view state and
+belong in query parameters on the profile (`/@{handle}?tab=…`), per D6's identity/view split.
+Implementations MUST NOT allocate namespace-level pages at bare segment 2.
 
 ### D3 — Fixed verb segment `file` / `dir`; closed verb set; self-healing
 
@@ -282,6 +295,12 @@ brand policy only:
 2. **System-owned active namespaces** (need working URLs and mentionability, per D9): `lixray`,
    `lix`, `ghost`/`deleted` (sentinel owner for deleted principals, see D8), and agent actor
    handles (`claude`, `chatgpt`, `gemini`, `codex`, `copilot`, …).
+
+Implementation status: mechanism 1 shipped (migration `20260818000000_reserved_handles`; the
+registry gained the `state` column and the launch seed list, including a `lixray-*` prefix
+constraint). Agent actor handles are temporarily held as `reserved` rows and flip to
+system-owned `active` namespaces via the guarded state transition when D9 mention
+infrastructure lands.
 
 ---
 

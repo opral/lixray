@@ -74,9 +74,7 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 			<div className="mb-5 flex items-center gap-3">
 				<span
 					className={`inline-flex size-10 shrink-0 items-center justify-center bg-bg-hover-canvas text-[15px] font-bold text-text-secondary ${
-						organization.kind === "organization"
-							? "rounded-[11px]"
-							: "rounded-full"
+						!organization.isPersonal ? "rounded-[11px]" : "rounded-full"
 					}`}
 					aria-hidden="true"
 				>
@@ -93,7 +91,7 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 			</div>
 
 			<GeneralPanel organization={organization} />
-			{organization.kind === "organization" && client ? (
+			{!organization.isPersonal && client ? (
 				<>
 					<MembersPanel organization={organization} />
 					<div className="rounded-xl border border-dashed border-border-panel px-[18px] py-4 opacity-70">
