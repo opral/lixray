@@ -11,7 +11,7 @@ import {
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
 
-void test("Lixr MCP telemetry captures lixr_file_written event", async () => {
+void test("Lixr MCP telemetry captures lixray_file_written event", async () => {
 	const captured: Array<EventMessage> = [];
 	let shutdowns = 0;
 	const session = createLixrMcpTelemetrySession(
@@ -63,7 +63,7 @@ void test("Lixr MCP telemetry captures lixr_file_written event", async () => {
 	assert.equal(captured.length, 1);
 	const event = captured[0];
 	assert.equal(event?.distinctId, "user-123");
-	assert.equal(event?.event, "lixr_file_written");
+	assert.equal(event?.event, "lixray_file_written");
 	assert.deepEqual(event?.groups, { lix: LIX_ID });
 	assert.equal(event?.properties?.file_path, "/skills/my-skill.md");
 	assert.equal(event?.properties?.file_extension, "md");
@@ -71,7 +71,7 @@ void test("Lixr MCP telemetry captures lixr_file_written event", async () => {
 	assert.equal(event?.properties?.byte_count, 1024);
 });
 
-void test("Lixr MCP telemetry captures lixr_first_file_added event", async () => {
+void test("Lixr MCP telemetry captures lixray_first_file_added event", async () => {
 	const captured: Array<EventMessage> = [];
 	const session = createLixrMcpTelemetrySession(
 		{
@@ -106,12 +106,12 @@ void test("Lixr MCP telemetry captures lixr_first_file_added event", async () =>
 	});
 	await session.flush();
 
-	assert.equal(captured[0]?.event, "lixr_first_file_added");
+	assert.equal(captured[0]?.event, "lixray_first_file_added");
 	assert.equal(captured[0]?.properties?.file_path, "/first-file.md");
 	assert.equal(captured[0]?.properties?.file_extension, "md");
 });
 
-void test("Lixr MCP telemetry captures lixr_import_completed event", async () => {
+void test("Lixr MCP telemetry captures lixray_import_completed event", async () => {
 	const captured: Array<EventMessage> = [];
 	const session = createLixrMcpTelemetrySession(
 		{
@@ -142,7 +142,7 @@ void test("Lixr MCP telemetry captures lixr_import_completed event", async () =>
 	});
 	await session.flush();
 
-	assert.equal(captured[0]?.event, "lixr_import_completed");
+	assert.equal(captured[0]?.event, "lixray_import_completed");
 	assert.equal(captured[0]?.properties?.file_count, 29);
 	assert.equal(captured[0]?.properties?.char_count, 124000);
 	assert.equal(captured[0]?.properties?.byte_count, 126000);
@@ -186,7 +186,7 @@ void test("Lixr MCP telemetry does not log file content", async () => {
 	});
 	await session.flush();
 
-	assert.equal(captured[0]?.event, "lixr_file_written");
+	assert.equal(captured[0]?.event, "lixray_file_written");
 	assert.equal(captured[0]?.properties?.file_path, "/private-file.txt");
 	assert.equal(
 		typeof captured[0]?.properties?.content_sha256 === "string"
