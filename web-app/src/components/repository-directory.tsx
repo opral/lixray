@@ -5,10 +5,8 @@ import {
 	Ellipsis,
 	Link2,
 	LogOut,
-	Pencil,
 	Plus,
 	Settings,
-	Trash2,
 } from "lucide-react";
 import {
 	type FormEvent,
@@ -230,21 +228,6 @@ export function RepositoryDirectory() {
 													repository={repository}
 													fileCount={fileCounts[repository.id]}
 													paletteIndex={paletteOrder.get(repository.id) ?? 0}
-													canManage={organization.role !== null}
-													onRename={() =>
-														setDialog({
-															type: "rename",
-															organization,
-															repository,
-														})
-													}
-													onDelete={() =>
-														setDialog({
-															type: "delete",
-															organization,
-															repository,
-														})
-													}
 												/>
 											))}
 										</div>
@@ -480,17 +463,11 @@ function RepositoryRow({
 	repository,
 	fileCount,
 	paletteIndex,
-	canManage,
-	onRename,
-	onDelete,
 }: {
 	organization: Organization;
 	repository: Repository;
 	fileCount?: number;
 	paletteIndex: number;
-	canManage: boolean;
-	onRename: () => void;
-	onDelete: () => void;
 }) {
 	const { getAccessToken } = useAuth();
 	const [downloading, setDownloading] = useState(false);
@@ -570,12 +547,18 @@ function RepositoryRow({
 					sideOffset={4}
 					className="w-[210px] min-w-[210px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2.5 [&_[data-slot=dropdown-menu-item]]:py-2 [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:leading-tight [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-item]_svg]:size-3.5 [&_[data-slot=dropdown-menu-item]_svg]:text-icon-tertiary [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle [&_[data-variant=destructive]]:text-error-700 [&_[data-variant=destructive]:focus]:bg-error-50 [&_[data-variant=destructive]:focus]:text-error-700"
 				>
-					{canManage ? (
-						<DropdownMenuItem onSelect={onRename}>
-							<Pencil aria-hidden="true" />
-							Rename
-						</DropdownMenuItem>
-					) : null}
+					<DropdownMenuItem asChild>
+						<Link
+							to="/@{$namespace}/$repository/settings"
+							params={{
+								namespace: organization.handle,
+								repository: repository.slug,
+							}}
+						>
+							<Settings aria-hidden="true" />
+							Settings
+						</Link>
+					</DropdownMenuItem>
 					<DropdownMenuItem onSelect={() => void copyUrl()}>
 						<Link2 aria-hidden="true" />
 						Copy URL
@@ -587,15 +570,6 @@ function RepositoryRow({
 						<Download aria-hidden="true" />
 						{downloading ? "Preparing archive…" : "Download archive"}
 					</DropdownMenuItem>
-					{canManage ? (
-						<>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem variant="destructive" onSelect={onDelete}>
-								<Trash2 aria-hidden="true" />
-								Delete repository…
-							</DropdownMenuItem>
-						</>
-					) : null}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</div>

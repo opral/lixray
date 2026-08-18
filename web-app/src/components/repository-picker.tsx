@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Check, ChevronDown, LayoutGrid, Plus } from "lucide-react";
+import { Check, ChevronDown, LayoutGrid, Plus, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CreateRepositoryDialog } from "~/components/repository-directory";
 import {
@@ -161,6 +161,23 @@ export function RepositoryPicker({
 						</div>
 					))}
 					<DropdownMenuSeparator />
+					<DropdownMenuItem
+						onSelect={() =>
+							void navigate({
+								to: "/@{$namespace}/$repository/settings",
+								params: {
+									namespace: organization.handle,
+									repository: activeRepository.slug,
+								},
+							})
+						}
+					>
+						<Settings
+							className="size-3.5 text-icon-tertiary"
+							aria-hidden="true"
+						/>
+						Repository settings
+					</DropdownMenuItem>
 					<DropdownMenuItem onSelect={() => void navigate({ to: "/home" })}>
 						<LayoutGrid
 							className="size-3.5 text-icon-tertiary"

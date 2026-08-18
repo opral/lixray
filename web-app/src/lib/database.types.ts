@@ -466,6 +466,17 @@ export type Database = {
 					namespace_updated_at: string;
 				}[];
 			};
+			list_lix_members: {
+				Args: { p_lix_id: string };
+				Returns: {
+					avatar_url: string | null;
+					email: string;
+					joined_at: string;
+					name: string;
+					role: Database["public"]["Enums"]["namespace_role"];
+					user_id: string;
+				}[];
+			};
 			list_namespace_members: {
 				Args: { p_namespace_id: string };
 				Returns: {
@@ -476,6 +487,10 @@ export type Database = {
 					role: Database["public"]["Enums"]["namespace_role"];
 					user_id: string;
 				}[];
+			};
+			remove_lix_member: {
+				Args: { p_lix_id: string; p_user_id: string };
+				Returns: undefined;
 			};
 			remove_namespace_member: {
 				Args: { p_namespace_id: string; p_user_id: string };
