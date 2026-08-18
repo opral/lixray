@@ -24,6 +24,8 @@ import {
 import { PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
+import { useRepository } from "~/components/repository-provider";
+import type { RepositorySettingsApi } from "~/components/repository-home/settings-view";
 import { RepositoryPicker } from "~/components/repository-picker";
 import { RepositoryShareDialog } from "~/components/repository-share-dialog";
 import { Button } from "~/components/ui/button";
@@ -59,6 +61,7 @@ import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
 	LIXRAY_PEOPLE_EXTENSION_ID,
+	LIXRAY_SETTINGS_EXTENSION_ID,
 	createLixrayRepositoryExtensions,
 	emptyRepositoryOpeningUiState,
 } from "~/components/repository-home/host-extensions";
@@ -124,15 +127,16 @@ export function RepositoryAtelier({
 	const routeParams = useParams({ strict: false });
 	const routeSplat = "_splat" in routeParams ? routeParams._splat : undefined;
 	const repositoryRootPath = `/@${namespace}/${repositorySlug}`;
-	const routeChildKind: "file" | "dir" | "team" | null = pathname.startsWith(
-		`${repositoryRootPath}/file/`,
-	)
-		? "file"
-		: pathname.startsWith(`${repositoryRootPath}/dir/`)
-			? "dir"
-			: pathname === `${repositoryRootPath}/team`
-				? "team"
-				: null;
+	const routeChildKind: "file" | "dir" | "team" | "settings" | null =
+		pathname.startsWith(`${repositoryRootPath}/file/`)
+			? "file"
+			: pathname.startsWith(`${repositoryRootPath}/dir/`)
+				? "dir"
+				: pathname === `${repositoryRootPath}/team`
+					? "team"
+					: pathname === `${repositoryRootPath}/settings`
+						? "settings"
+						: null;
 	const routeFilePath = routeChildKind === "file" ? routeSplat : undefined;
 	const documentName = activeDocumentName({
 		pathname,
@@ -150,7 +154,7 @@ export function RepositoryAtelier({
 	const activeLixRef = useRef<RepositoryLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeChildRef = useRef<{
-		kind: "file" | "dir" | "team" | null;
+		kind: "file" | "dir" | "team" | "settings" | null;
 		splat: string | undefined;
 	}>({ kind: routeChildKind, splat: routeSplat });
 	const routeFilePathRef = useRef(routeFilePath);
@@ -312,6 +316,102 @@ export function RepositoryAtelier({
 		removeMember: (userId) =>
 			requireTeamApi(teamApiRef.current).removeMember(userId),
 	});
+
+	// Same rebuilt-per-render / stable-facade split for the Settings tab.
+	const { organizations, renameRepository, deleteRepository } = useRepository();
+	const settingsApiRef = useRef<RepositorySettingsApi | null>(null);
+	useEffect(() => {
+		const organization = organizations.find(
+			(candidate) => candidate.id === namespaceId,
+		);
+		const isOwner = organization?.role === "owner";
+		settingsApiRef.current =
+			!canEdit || isDemoModeEnabled || !client
+				? null
+				: {
+						info: () => ({
+							namespaceHandle: namespace,
+							repositorySlug,
+							repositoryName:
+								organization?.repositories.find(
+									(candidate) => candidate.id === repositoryId,
+								)?.name ?? repositoryName,
+							isOwner: Boolean(isOwner),
+							currentUserId: user?.id ?? null,
+						}),
+						rename: (name) => renameRepository(repositoryId, name),
+						listDirectMembers: async () => {
+							const { data, error } = await client.rpc("list_lix_members", {
+								p_lix_id: repositoryId,
+							});
+							if (error) throw new Error(error.message);
+							return (data ?? []).map((row) => ({
+								userId: row.user_id,
+								name: row.name,
+								email: row.email,
+								avatarUrl: row.avatar_url,
+							}));
+						},
+						removeDirectMember: async (memberUserId) => {
+							const { error } = await client.rpc("remove_lix_member", {
+								p_lix_id: repositoryId,
+								p_user_id: memberUserId,
+							});
+							if (error) throw new Error(error.message);
+						},
+						namespaceMemberCount: async () => {
+							if (!organization || organization.role === null) return null;
+							const { data, error } = await client.rpc(
+								"list_namespace_members",
+								{ p_namespace_id: namespaceId },
+							);
+							if (error) return null;
+							return (data ?? []).length;
+						},
+						createEditLink: async () => {
+							const { data, error } = await client.rpc(
+								"create_lix_share_token",
+								{ p_lix_id: repositoryId },
+							);
+							if (error) throw new Error(error.message);
+							const token = data?.[0]?.token;
+							if (!isRepositoryShareToken(token)) {
+								throw new Error("The share service returned an invalid link.");
+							}
+							return appendRepositoryShareToken(
+								`${window.location.origin}/@${namespace}/${repositorySlug}`,
+								token,
+							);
+						},
+						deleteRepository: async () => {
+							await deleteRepository(repositoryId);
+							void navigate({ to: "/home" });
+						},
+					};
+	});
+	const stableSettingsApiRef = useRef<RepositorySettingsApi>({
+		info: () =>
+			settingsApiRef.current?.info() ?? {
+				namespaceHandle: namespace,
+				repositorySlug,
+				repositoryName,
+				isOwner: false,
+				currentUserId: null,
+			},
+		rename: (name) => requireSettingsApi(settingsApiRef.current).rename(name),
+		listDirectMembers: () =>
+			requireSettingsApi(settingsApiRef.current).listDirectMembers(),
+		removeDirectMember: (memberUserId) =>
+			requireSettingsApi(settingsApiRef.current).removeDirectMember(
+				memberUserId,
+			),
+		namespaceMemberCount: () =>
+			requireSettingsApi(settingsApiRef.current).namespaceMemberCount(),
+		createEditLink: () =>
+			requireSettingsApi(settingsApiRef.current).createEditLink(),
+		deleteRepository: () =>
+			requireSettingsApi(settingsApiRef.current).deleteRepository(),
+	});
 	const disabledShareButton = (
 		<span
 			aria-disabled="true"
@@ -403,6 +503,15 @@ export function RepositoryAtelier({
 				});
 				return;
 			}
+			if (routeChild.kind === "settings") {
+				await navigate({
+					to: "/@{$namespace}/$repository/settings",
+					params: { namespace, repository: repositorySlug },
+					search,
+					replace,
+				});
+				return;
+			}
 			if (routeChild.kind && routeChild.splat !== undefined) {
 				await navigate({
 					to:
@@ -437,6 +546,13 @@ export function RepositoryAtelier({
 	const markRouteSynced = useCallback(() => {
 		routeSyncedRef.current = true;
 	}, []);
+	// Each instance applies the initial route exactly once. Without the reset,
+	// a deep link that raced a dying instance (dev double-mount, HMR) would
+	// stay "synced", letting the next instance's restored session steal the
+	// URL before the deep-linked tab ever opened.
+	useEffect(() => {
+		routeSyncedRef.current = false;
+	}, [instance]);
 	useEffect(() => {
 		eventHandlerRef.current = (event) => {
 			atelierTelemetryHandlerRef.current?.(event);
@@ -463,6 +579,16 @@ export function RepositoryAtelier({
 				if (pathnameRef.current === targetPath) return;
 				void navigate({
 					to: "/@{$namespace}/$repository/team",
+					params: { namespace, repository: repositorySlug },
+					search,
+				});
+				return;
+			}
+			if (event.viewKind === LIXRAY_SETTINGS_EXTENSION_ID) {
+				const targetPath = `/@${namespace}/${repositorySlug}/settings`;
+				if (pathnameRef.current === targetPath) return;
+				void navigate({
+					to: "/@{$namespace}/$repository/settings",
 					params: { namespace, repository: repositorySlug },
 					search,
 				});
@@ -593,6 +719,7 @@ export function RepositoryAtelier({
 							return data.length > 0;
 						},
 						canEdit ? stableTeamApiRef.current : null,
+						canEdit ? stableSettingsApiRef.current : null,
 					),
 					centralPanel: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
@@ -829,6 +956,13 @@ export function useRepositoryActiveBranchId(): string | null {
 		branchSession?.getSnapshot.bind(branchSession) ?? NO_BRANCH_SNAPSHOT,
 		branchSession?.getSnapshot.bind(branchSession) ?? NO_BRANCH_SNAPSHOT,
 	);
+}
+
+function requireSettingsApi(
+	api: RepositorySettingsApi | null,
+): RepositorySettingsApi {
+	if (!api) throw new Error("Repository settings require edit access.");
+	return api;
 }
 
 function requireTeamApi(api: RepositoryTeamApi | null): RepositoryTeamApi {

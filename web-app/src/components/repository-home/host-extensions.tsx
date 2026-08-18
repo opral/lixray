@@ -5,7 +5,7 @@ import {
 	type AtelierExtensionView,
 	type AtelierSessionUiState,
 } from "@opral/atelier";
-import { Folder, Home, Sparkles, Users } from "lucide-react";
+import { Folder, Home, Settings, Sparkles, Users } from "lucide-react";
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { EntryKind } from "../../lib/entry-kind.ts";
@@ -13,11 +13,13 @@ import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
 import { DirectoryView, GettingStartedView } from "./directory-view";
 import { canonicalDirectoryPath, dirNameFromPath } from "./lix-data";
 import { PeopleView, type RepositoryTeamApi } from "./people-view";
+import { SettingsView, type RepositorySettingsApi } from "./settings-view";
 
 export const LIXRAY_HOME_EXTENSION_ID = "lixray_home";
 export const LIXRAY_DIR_EXTENSION_ID = "lixray_dir";
 export const LIXRAY_GETTING_STARTED_EXTENSION_ID = "lixray_getting_started";
 export const LIXRAY_PEOPLE_EXTENSION_ID = "lixray_people";
+export const LIXRAY_SETTINGS_EXTENSION_ID = "lixray_settings";
 
 export type LixRepositoryConnection = Omit<LixConnectionPromptInput, "origin">;
 export type AgentConnectionProbe = () => Promise<boolean>;
@@ -297,15 +299,51 @@ const createLixrayPeopleExtension = (
 	},
 });
 
+/**
+ * The Settings tab (flow A): repository management as a regular closable
+ * central tab, so navigation back is just closing the tab or clicking any
+ * other one.
+ */
+const createLixraySettingsExtension = (
+	settingsApi: RepositorySettingsApi | null,
+): AtelierExtensionRegistration => ({
+	manifest: {
+		apiVersion: 1,
+		id: LIXRAY_SETTINGS_EXTENSION_ID,
+		name: "Settings",
+		description: "Rename, access, and deletion for this repository.",
+		placement: ["central"],
+		hidden: true,
+	},
+	entry: {
+		icon: Settings,
+		mount: ({ element }) => {
+			const root = createRoot(element);
+			root.render(
+				<StrictMode>
+					<SettingsView settingsApi={settingsApi} />
+				</StrictMode>,
+			);
+			return {
+				dispose: () => {
+					queueMicrotask(() => root.unmount());
+				},
+			};
+		},
+	},
+});
+
 export const createLixrayRepositoryExtensions = (
 	connection: LixRepositoryConnection,
 	hasAgentConnected: AgentConnectionProbe,
 	teamApi: RepositoryTeamApi | null,
+	settingsApi: RepositorySettingsApi | null,
 ): readonly AtelierExtensionRegistration[] => [
 	createLixrayHomeExtension(connection, hasAgentConnected, teamApi),
 	createLixrayDirExtension(connection),
 	createLixrayGettingStartedExtension(connection, hasAgentConnected),
 	createLixrayPeopleExtension(teamApi),
+	createLixraySettingsExtension(settingsApi),
 ];
 
 /**
