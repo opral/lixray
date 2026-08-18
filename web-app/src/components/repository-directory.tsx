@@ -6,6 +6,7 @@ import {
 	LogOut,
 	Pencil,
 	Plus,
+	Settings,
 	Trash2,
 } from "lucide-react";
 import {
@@ -183,20 +184,33 @@ export function RepositoryDirectory() {
 									key={organization.id}
 									aria-labelledby={`namespace-${organization.id}`}
 								>
-									<h2
-										className="m-0 px-3.5 pb-2 text-[11.5px] leading-[1.35] font-bold tracking-[0.08em] text-text-tertiary uppercase max-[560px]:px-2"
-										id={`namespace-${organization.id}`}
-									>
-										{organization.handle}
-										<span className="ml-2 font-medium tracking-normal normal-case">
-											·{" "}
-											{organization.kind === "organization"
-												? organization.role === "owner"
-													? "organization · you’re the owner"
-													: "organization"
-												: "personal"}
+									<div className="flex items-baseline gap-2 px-3.5 pb-1.5 max-[560px]:px-2">
+										<h2
+											className="m-0 text-[14px] leading-[1.35] font-bold tracking-[-0.01em]"
+											id={`namespace-${organization.id}`}
+										>
+											@{organization.handle}
+										</h2>
+										<span className="text-[12px] text-text-tertiary">
+											{organization.repositories.length}{" "}
+											{pluralize(
+												organization.repositories.length,
+												"repository",
+												"repositories",
+											)}
 										</span>
-									</h2>
+										<span className="flex-1" />
+										{organization.role !== null ? (
+											<Link
+												to="/settings/@{$namespace}"
+												params={{ namespace: organization.handle }}
+												aria-label={`Settings for @${organization.handle}`}
+												className="inline-flex size-6 shrink-0 items-center justify-center self-center rounded-[7px] text-icon-quaternary transition-colors hover:bg-bg-hover-canvas hover:text-icon-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+											>
+												<Settings className="size-[14px]" aria-hidden="true" />
+											</Link>
+										) : null}
+									</div>
 									{organization.repositories.length === 0 ? (
 										<EmptyOrganizationSection
 											organization={organization}
@@ -333,7 +347,7 @@ function EmptyOrganizationSection({
 	);
 }
 
-function DirectoryHeader() {
+export function DirectoryHeader() {
 	const { signOut, user } = useAuth();
 	const initial = isDemoModeEnabled ? "M" : accountInitial(user?.user_metadata);
 	const fullName = accountFullName(user?.user_metadata);
@@ -837,7 +851,11 @@ function SignedOutDirectory() {
 	);
 }
 
-function pluralize(count: number, singular: string, plural?: string): string {
+export function pluralize(
+	count: number,
+	singular: string,
+	plural?: string,
+): string {
 	return count === 1 ? singular : (plural ?? `${singular}s`);
 }
 

@@ -73,7 +73,7 @@ interface RepositoryContextValue {
 	selectRepository: (repositoryId: string) => void;
 	/** Resolves with the new organization's id. */
 	createOrganization: (name: string) => Promise<string>;
-	renameOrganization: (name: string) => Promise<void>;
+	renameOrganization: (organizationId: string, name: string) => Promise<void>;
 	createRepository: (name: string, organizationId?: string) => Promise<void>;
 	renameRepository: (repositoryId: string, name: string) => Promise<void>;
 	deleteRepository: (repositoryId: string) => Promise<void>;
@@ -262,25 +262,27 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 	);
 
 	const renameOrganization = useCallback(
-		async (name: string) => {
-			if (!client || !selectedOrganization) {
-				throw new Error("No organization is selected");
-			}
-			if (selectedOrganization.role !== "owner") {
+		async (organizationId: string, name: string) => {
+			if (!client) throw new Error("Authentication is still loading");
+			const organization = organizations.find(
+				(candidate) => candidate.id === organizationId,
+			);
+			if (!organization) throw new Error("Unknown organization");
+			if (organization.role !== "owner") {
 				throw new Error("Only organization owners can rename an organization");
 			}
 			const { error: renameError } = await client.rpc("rename_namespace", {
-				p_namespace_id: selectedOrganization.id,
+				p_namespace_id: organizationId,
 				p_name: normalizeName(name, "Organization"),
 			});
 			if (renameError) throw renameError;
 			await refresh({
-				organizationId: selectedOrganization.id,
+				organizationId,
 				repositoryId: selectedRepositoryId ?? undefined,
 			});
 			captureTelemetry("organization_renamed");
 		},
-		[client, refresh, selectedOrganization, selectedRepositoryId],
+		[client, organizations, refresh, selectedRepositoryId],
 	);
 
 	const createRepository = useCallback(
