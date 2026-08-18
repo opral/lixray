@@ -838,21 +838,66 @@ function registerTool(
 function summarizeToolResult(name: string, raw: unknown): string {
 	if (!raw || typeof raw !== "object") return `${name} completed.`;
 	const result = raw as Record<string, unknown>;
+	const contextSuffix = formatContextSuffix(result);
+
 	if (name === "list_lixes") {
 		const count = Array.isArray(result.lixes) ? result.lixes.length : 0;
 		return `Found ${count} accessible ${count === 1 ? "Lix" : "Lixes"}.`;
 	}
 	if (name === "open_lix") {
-		return `Opened ${String(result.url ?? result.id)} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}. Context expires at ${String(result.context_expires_at)}.`;
+		return `Opened ${String(result.url ?? result.id)} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}. Context expires at ${String(result.context_expires_at)}.${contextSuffix}`;
 	}
 	if (name === "query_sql") {
-		return summarizeSqlResults([result.result]);
+		return `${summarizeSqlResults([result.result])}${contextSuffix}`;
 	}
 	if (name === "execute_sql") {
 		const results = Array.isArray(result.results) ? result.results : [];
-		return `Atomic SQL completed ${results.length} ${results.length === 1 ? "statement" : "statements"}. ${summarizeSqlResults(results)}`;
+		return `Atomic SQL completed ${results.length} ${results.length === 1 ? "statement" : "statements"}. ${summarizeSqlResults(results)}${contextSuffix}`;
 	}
-	return `${name} completed.`;
+	if (name === "active_branch_id") {
+		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.${contextSuffix}`;
+	}
+	if (name === "switch_branch") {
+		return `Switched to branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.${contextSuffix}`;
+	}
+	if (name === "create_branch") {
+		const branch = result.branch as Record<string, unknown> | undefined;
+		if (branch) {
+			return `Created branch ${String(branch.name)} (${String(branch.id)}) at commit ${String(branch.commit_id)}.${contextSuffix}`;
+		}
+		return `Branch created.${contextSuffix}`;
+	}
+	if (name === "create_checkpoint") {
+		return `Checkpoint created at commit ${String(result.commit_id)}.${contextSuffix}`;
+	}
+	if (name === "undo") {
+		return `Undone to commit ${String(result.target_commit_id)} (inverse commit ${String(result.inverse_commit_id)}).${contextSuffix}`;
+	}
+	if (name === "redo") {
+		return `Redone to commit ${String(result.target_commit_id)} (replay commit ${String(result.replay_commit_id)}).${contextSuffix}`;
+	}
+	if (name === "merge_branch_preview") {
+		return `Merge preview completed.${contextSuffix}`;
+	}
+	if (name === "merge_branch") {
+		return `Branch merged.${contextSuffix}`;
+	}
+	return `${name} completed.${contextSuffix}`;
+}
+
+/**
+ * Format essential continuation fields for text content fallback.
+ * Returns a consistent machine-parseable suffix containing the opaque context
+ * token required for chaining operations. The context is canonically provided
+ * in structuredContent; including it in text content ensures compatibility with
+ * MCP bridges or wrappers that expose only content[].text without propagating
+ * the full structuredContent to downstream consumers.
+ */
+function formatContextSuffix(result: Record<string, unknown>): string {
+	if (typeof result.context !== "string" || result.context.length === 0) {
+		return "";
+	}
+	return ` context=${result.context}`;
 }
 
 function summarizeSqlResults(results: Array<unknown>): string {

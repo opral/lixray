@@ -299,9 +299,19 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(openedContent.id, LIX_ID);
 		assert.equal(openedContent.url, "https://lixray.com/@acme/company");
 		assert.ok(Date.parse(openedContent.context_expires_at) > Date.now());
+		const openedText =
+			opened.content?.[0]?.type === "text" ? opened.content[0].text : "";
+		assert.match(openedText, /^Opened https:\/\/lixray\.com\/@acme\/company/);
 		assert.match(
-			opened.content?.[0]?.type === "text" ? opened.content[0].text : "",
-			/^Opened https:\/\/lixray\.com\/@acme\/company/,
+			openedText,
+			/context=[^\s]+/,
+			"open_lix text must include context for bridges that only expose content[].text",
+		);
+		const extractedContext = /context=([^\s]+)/.exec(openedText)?.[1];
+		assert.equal(
+			extractedContext,
+			context,
+			"context in text content must match structuredContent",
 		);
 		assert.equal(responseRequestIds.at(-1), openedContent.request_id);
 		const queried = await client.callTool({
@@ -314,9 +324,13 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			result: { rowsAffected: number };
 		};
 		assert.equal(queriedContent.result.rowsAffected, 0);
+		const queriedText =
+			queried.content?.[0]?.type === "text" ? queried.content[0].text : "";
+		assert.match(queriedText, /^SQL returned 1 row and affected 0 rows\./);
 		assert.match(
-			queried.content?.[0]?.type === "text" ? queried.content[0].text : "",
-			/^SQL returned 1 row and affected 0 rows\.$/,
+			queriedText,
+			/context=[^\s]+/,
+			"query_sql text fallback must include context",
 		);
 		assert.equal(responseRequestIds.at(-1), queriedContent.request_id);
 		const mutated = await client.callTool({
@@ -330,9 +344,16 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			},
 		});
 		assert.equal(mutated.isError, undefined);
-		assert.equal(
-			mutated.content?.[0]?.type === "text" ? mutated.content[0].text : "",
-			"Atomic SQL completed 2 statements. SQL returned 1 row and affected 1 row.",
+		const mutatedText =
+			mutated.content?.[0]?.type === "text" ? mutated.content[0].text : "";
+		assert.match(
+			mutatedText,
+			/^Atomic SQL completed 2 statements\. SQL returned 1 row and affected 1 row\./,
+		);
+		assert.match(
+			mutatedText,
+			/context=[^\s]+/,
+			"execute_sql text fallback must include context",
 		);
 		const failed = await client.callTool({
 			name: "query_sql",
@@ -421,6 +442,177 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		const firstBody = await requests[0].text();
 		assert.match(firstBody, /server\/discover/);
 		assert.match(firstBody, /2026-07-28/);
+	} finally {
+		await client.close();
+	}
+});
+
+void test("MCP tools preserve continuation fields in text fallback", async () => {
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		return handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_TextContent_Test",
+			parseSqlScript,
+		});
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcher },
+	);
+	const client = new Client(
+		{ name: "text-content-test-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
+		});
+		const context = (opened.structuredContent as { context: string }).context;
+
+		const activeBranch = await client.callTool({
+			name: "active_branch_id",
+			arguments: { context },
+		});
+		const activeBranchText =
+			activeBranch.content?.[0]?.type === "text"
+				? activeBranch.content[0].text
+				: "";
+		assert.match(
+			activeBranchText,
+			/Active branch.*at commit/,
+			"active_branch_id must describe result",
+		);
+		assert.match(
+			activeBranchText,
+			/context=[^\s]+/,
+			"active_branch_id text fallback must include context",
+		);
+
+		const switched = await client.callTool({
+			name: "switch_branch",
+			arguments: { context, branch_id: "main" },
+		});
+		const switchedText =
+			switched.content?.[0]?.type === "text" ? switched.content[0].text : "";
+		assert.match(
+			switchedText,
+			/Switched to branch/,
+			"switch_branch must describe result",
+		);
+		assert.match(
+			switchedText,
+			/context=[^\s]+/,
+			"switch_branch text fallback must include context",
+		);
+		const switchedContext = /context=([^\s]+)/.exec(switchedText)?.[1];
+		assert.ok(
+			switchedContext && switchedContext.length > 0,
+			"switch_branch context must be extractable from text",
+		);
+
+		const created = await client.callTool({
+			name: "create_branch",
+			arguments: { context, name: "test-branch" },
+		});
+		const createdText =
+			created.content?.[0]?.type === "text" ? created.content[0].text : "";
+		assert.match(
+			createdText,
+			/Created branch/,
+			"create_branch must describe result",
+		);
+		assert.match(
+			createdText,
+			/context=[^\s]+/,
+			"create_branch text fallback must include context",
+		);
+
+		const checkpoint = await client.callTool({
+			name: "create_checkpoint",
+			arguments: { context },
+		});
+		const checkpointText =
+			checkpoint.content?.[0]?.type === "text"
+				? checkpoint.content[0].text
+				: "";
+		assert.match(
+			checkpointText,
+			/Checkpoint created/,
+			"create_checkpoint must describe result",
+		);
+		assert.match(
+			checkpointText,
+			/context=[^\s]+/,
+			"create_checkpoint text fallback must include context",
+		);
+
+		const undone = await client.callTool({
+			name: "undo",
+			arguments: { context },
+		});
+		const undoneText =
+			undone.content?.[0]?.type === "text" ? undone.content[0].text : "";
+		assert.match(undoneText, /Undone to commit/, "undo must describe result");
+		assert.match(
+			undoneText,
+			/context=[^\s]+/,
+			"undo text fallback must include context",
+		);
+
+		const redone = await client.callTool({
+			name: "redo",
+			arguments: { context },
+		});
+		const redoneText =
+			redone.content?.[0]?.type === "text" ? redone.content[0].text : "";
+		assert.match(redoneText, /Redone to commit/, "redo must describe result");
+		assert.match(
+			redoneText,
+			/context=[^\s]+/,
+			"redo text fallback must include context",
+		);
+
+		const preview = await client.callTool({
+			name: "merge_branch_preview",
+			arguments: { context, source_branch_id: "main" },
+		});
+		const previewText =
+			preview.content?.[0]?.type === "text" ? preview.content[0].text : "";
+		assert.match(
+			previewText,
+			/Merge preview/,
+			"merge_branch_preview must describe result",
+		);
+		assert.match(
+			previewText,
+			/context=[^\s]+/,
+			"merge_branch_preview text fallback must include context",
+		);
+
+		const merged = await client.callTool({
+			name: "merge_branch",
+			arguments: { context, source_branch_id: "main" },
+		});
+		const mergedText =
+			merged.content?.[0]?.type === "text" ? merged.content[0].text : "";
+		assert.match(
+			mergedText,
+			/Branch merged/,
+			"merge_branch must describe result",
+		);
+		assert.match(
+			mergedText,
+			/context=[^\s]+/,
+			"merge_branch text fallback must include context",
+		);
 	} finally {
 		await client.close();
 	}
