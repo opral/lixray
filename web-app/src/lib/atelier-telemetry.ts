@@ -68,30 +68,30 @@ export function createAtelierTelemetryHandler(
 				modified_by: event.modifiedBy,
 			});
 
-			// Track first_file_added event for repositories
-			if (context.lix && context.repositoryId && context.organizationId) {
-				const firstFileKey = `lixray.first-file.${context.repositoryId}`;
-				const hasTrackedFirstFile =
-					typeof window !== "undefined"
-						? window.localStorage.getItem(firstFileKey)
-						: null;
+		// Track lixray_first_file_added event for repositories
+		if (context.lix && context.repositoryId && context.organizationId) {
+			const firstFileKey = `lixray.first-file.${context.repositoryId}`;
+			const hasTrackedFirstFile =
+				typeof window !== "undefined"
+					? window.localStorage.getItem(firstFileKey)
+					: null;
 
-				if (!hasTrackedFirstFile) {
-					void (async () => {
-						try {
-							// Check if this is the first file in the repository
-							const result = await context.lix!.execute(
-								"SELECT COUNT(*) as count FROM lix_file",
-								[],
-							);
-							const row = result.rows[0] as
-								| { get(column: string): unknown }
-								| undefined;
-							const fileCount = Number(row?.get("count") ?? 0);
+			if (!hasTrackedFirstFile) {
+				void (async () => {
+					try {
+						// Check if this is the first file in the repository
+						const result = await context.lix!.execute(
+							"SELECT COUNT(*) as count FROM lix_file",
+							[],
+						);
+						const row = result.rows[0] as
+							| { get(column: string): unknown }
+							| undefined;
+						const fileCount = Number(row?.get("count") ?? 0);
 
-							// If there's exactly 1 file, this is the first one
-							if (fileCount === 1) {
-								capture("first_file_added", {
+						// If there's exactly 1 file, this is the first one
+						if (fileCount === 1) {
+							capture("lixray_first_file_added", {
 									repository_id: context.repositoryId!,
 									organization_id: context.organizationId!,
 									file_extension: fileExtensionProperty(event.filePath),

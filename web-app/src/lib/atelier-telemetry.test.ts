@@ -79,7 +79,7 @@ void test("normalizes file extensions without retaining names", () => {
 	assert.equal(fileExtensionProperty("/private/file.we!rd"), "werd");
 });
 
-void test("first_file_added fires once when repository gets its first file", async () => {
+void test("lixray_first_file_added fires once when repository gets its first file", async () => {
 	const captured: Array<{
 		event: string;
 		properties: Record<string, unknown>;
@@ -112,9 +112,9 @@ void test("first_file_added fires once when repository gets its first file", asy
 	await new Promise((resolve) => setTimeout(resolve, 10));
 
 	const firstFileEvent = captured.find(
-		(event) => event.event === "first_file_added",
+		(event) => event.event === "lixray_first_file_added",
 	);
-	assert.ok(firstFileEvent, "first_file_added event should be captured");
+	assert.ok(firstFileEvent, "lixray_first_file_added event should be captured");
 	assert.deepEqual(firstFileEvent?.properties, {
 		repository_id: "repo-123",
 		organization_id: "org-456",
