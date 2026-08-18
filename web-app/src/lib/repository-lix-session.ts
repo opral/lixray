@@ -34,6 +34,8 @@ export interface RepositoryLixSession {
 	subscribeActiveBranch(listener: () => void): () => void;
 	createBranch(name: string): Promise<string>;
 	switchBranch(branchId: string): Promise<string>;
+	/** Immediately cancels browser sync when a non-BFCache page unloads. */
+	terminateForPageUnload?(): void;
 	close(): Promise<void>;
 }
 
@@ -334,6 +336,12 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 		this.#closed = true;
 		this.#listeners.clear();
 		await this.lix.close();
+	}
+
+	terminateForPageUnload(): void {
+		this.#closed = true;
+		this.#listeners.clear();
+		this.lix.terminateForPageUnload();
 	}
 
 	#assertOpen(): void {
