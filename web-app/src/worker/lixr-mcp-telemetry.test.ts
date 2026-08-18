@@ -11,7 +11,7 @@ import {
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
 
-void test("Lixr MCP telemetry captures mcp_connected event", async () => {
+void test("Lixr MCP telemetry captures lixr_file_written event", async () => {
 	const captured: Array<EventMessage> = [];
 	let shutdowns = 0;
 	const session = createLixrMcpTelemetrySession(
@@ -43,11 +43,19 @@ void test("Lixr MCP telemetry captures mcp_connected event", async () => {
 	);
 	assert.ok(session);
 
-	session.captureConnected({
-		serverUrl: "https://lixr.com/mcp",
-		oauthResult: "success",
-		tokenLengthChars: 512,
-		lixId: LIX_ID,
+	session.captureFileWritten({
+		file_path: "/skills/my-skill.md",
+		file_extension: "md",
+		char_count: 1000,
+		byte_count: 1024,
+		content_sha256:
+			"abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+		is_bulk: false,
+		source: "mcp",
+		verified: true,
+		hash_match: true,
+		lix_id: LIX_ID,
+		repository_id: LIX_ID,
 	});
 	await session.flush();
 
@@ -55,20 +63,15 @@ void test("Lixr MCP telemetry captures mcp_connected event", async () => {
 	assert.equal(captured.length, 1);
 	const event = captured[0];
 	assert.equal(event?.distinctId, "user-123");
-	assert.equal(event?.event, "mcp_connected");
+	assert.equal(event?.event, "lixr_file_written");
 	assert.deepEqual(event?.groups, { lix: LIX_ID });
-	assert.deepEqual(event?.properties, {
-		serverUrl: "https://lixr.com/mcp",
-		oauthResult: "success",
-		tokenLengthChars: 512,
-		lixId: LIX_ID,
-		oauth_client_id: "oauth-client-456",
-		environment: "production",
-		release_id: "worker-version-123",
-	});
+	assert.equal(event?.properties?.file_path, "/skills/my-skill.md");
+	assert.equal(event?.properties?.file_extension, "md");
+	assert.equal(event?.properties?.char_count, 1000);
+	assert.equal(event?.properties?.byte_count, 1024);
 });
 
-void test("Lixr MCP telemetry captures mcp_tool_called event", async () => {
+void test("Lixr MCP telemetry captures lixr_first_file_added event", async () => {
 	const captured: Array<EventMessage> = [];
 	const session = createLixrMcpTelemetrySession(
 		{
@@ -87,26 +90,71 @@ void test("Lixr MCP telemetry captures mcp_tool_called event", async () => {
 	);
 	assert.ok(session);
 
-	session.captureToolCalled({
-		toolName: "execute_sql",
-		sqlOp: "INSERT",
-		isBulk: true,
-		rowCount: 5,
-		durationMs: 42,
-		requestBytes: 2048,
-		isError: false,
-		lixId: LIX_ID,
+	session.captureFirstFileAdded({
+		file_path: "/first-file.md",
+		file_extension: "md",
+		char_count: 100,
+		byte_count: 102,
+		content_sha256:
+			"def456abc123def456abc123def456abc123def456abc123def456abc123def4",
+		is_bulk: false,
+		source: "mcp",
+		verified: true,
+		hash_match: true,
+		lix_id: LIX_ID,
+		repository_id: LIX_ID,
 	});
 	await session.flush();
 
-	assert.equal(captured[0]?.event, "mcp_tool_called");
-	assert.equal(captured[0]?.properties?.toolName, "execute_sql");
-	assert.equal(captured[0]?.properties?.sqlOp, "INSERT");
-	assert.equal(captured[0]?.properties?.isBulk, true);
-	assert.equal(captured[0]?.properties?.rowCount, 5);
+	assert.equal(captured[0]?.event, "lixr_first_file_added");
+	assert.equal(captured[0]?.properties?.file_path, "/first-file.md");
+	assert.equal(captured[0]?.properties?.file_extension, "md");
 });
 
-void test("Lixr MCP telemetry captures file_written event without content", async () => {
+void test("Lixr MCP telemetry captures lixr_import_completed event", async () => {
+	const captured: Array<EventMessage> = [];
+	const session = createLixrMcpTelemetrySession(
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		{ userId: "user-123", clientId: "oauth-client-456" },
+		{
+			createClient: () => ({
+				captureImmediate: async (event) => {
+					captured.push(structuredClone(event));
+				},
+				shutdown: async () => undefined,
+			}),
+		},
+	);
+	assert.ok(session);
+
+	session.captureImportCompleted({
+		file_count: 29,
+		char_count: 124000,
+		byte_count: 126000,
+		tool_call_count: 32,
+		duration_ms: 15000,
+		is_bulk: true,
+		lix_id: LIX_ID,
+		repository_id: LIX_ID,
+	});
+	await session.flush();
+
+	assert.equal(captured[0]?.event, "lixr_import_completed");
+	assert.equal(captured[0]?.properties?.file_count, 29);
+	assert.equal(captured[0]?.properties?.char_count, 124000);
+	assert.equal(captured[0]?.properties?.byte_count, 126000);
+	assert.equal(captured[0]?.properties?.tool_call_count, 32);
+	assert.equal(captured[0]?.properties?.is_bulk, true);
+	assert.doesNotMatch(
+		JSON.stringify(captured),
+		/private|secret|confidential/i,
+	);
+});
+
+void test("Lixr MCP telemetry does not log file content", async () => {
 	const captured: Array<EventMessage> = [];
 	const session = createLixrMcpTelemetrySession(
 		{
@@ -126,63 +174,28 @@ void test("Lixr MCP telemetry captures file_written event without content", asyn
 	assert.ok(session);
 
 	session.captureFileWritten({
-		path: "/skills/my-skill.md",
-		extension: "md",
-		bytes: 1024,
-		chars: 1000,
-		contentSha256:
-			"abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
-		writeMode: "single_row",
+		file_path: "/private-file.txt",
+		file_extension: "txt",
+		char_count: 50,
+		byte_count: 50,
+		content_sha256:
+			"secrethashsecrethashsecrethashsecrethashsecrethashsecrethashsecr",
+		is_bulk: false,
 		source: "mcp",
-		lixId: LIX_ID,
+		verified: true,
+		hash_match: true,
+		lix_id: LIX_ID,
+		repository_id: LIX_ID,
 	});
 	await session.flush();
 
-	assert.equal(captured[0]?.event, "file_written");
-	assert.equal(captured[0]?.properties?.path, "/skills/my-skill.md");
-	assert.equal(captured[0]?.properties?.extension, "md");
-	assert.equal(captured[0]?.properties?.bytes, 1024);
-	assert.equal(captured[0]?.properties?.chars, 1000);
-	assert.equal(captured[0]?.properties?.writeMode, "single_row");
-	assert.equal(captured[0]?.properties?.source, "mcp");
-	assert.equal(captured[0]?.properties?.contentSha256?.length, 64);
+	assert.equal(captured[0]?.event, "lixr_file_written");
+	assert.equal(captured[0]?.properties?.file_path, "/private-file.txt");
+	assert.equal(captured[0]?.properties?.content_sha256?.length, 64);
 	assert.doesNotMatch(
 		JSON.stringify(captured),
-		/private|secret|confidential/i,
+		/private content|secret data|confidential/i,
 	);
-});
-
-void test("Lixr MCP telemetry captures lix_request_succeeded", async () => {
-	const captured: Array<EventMessage> = [];
-	const session = createLixrMcpTelemetrySession(
-		{
-			POSTHOG_PROJECT_TOKEN: "project-token",
-			POSTHOG_ENVIRONMENT: "production",
-		},
-		{ userId: "user-123", clientId: "oauth-client-456" },
-		{
-			createClient: () => ({
-				captureImmediate: async (event) => {
-					captured.push(structuredClone(event));
-				},
-				shutdown: async () => undefined,
-			}),
-		},
-	);
-	assert.ok(session);
-
-	session.captureLixRequestSucceeded({
-		lixRequestEndpoint: "/execute",
-		lixRequestMethod: "POST",
-		lixHttpStatus: 200,
-		lixId: LIX_ID,
-	});
-	await session.flush();
-
-	assert.equal(captured[0]?.event, "lix_request_succeeded");
-	assert.equal(captured[0]?.properties?.lixRequestEndpoint, "/execute");
-	assert.equal(captured[0]?.properties?.lixRequestMethod, "POST");
-	assert.equal(captured[0]?.properties?.lixHttpStatus, 200);
 });
 
 void test("Lixr MCP telemetry is disabled without production configuration", () => {

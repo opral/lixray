@@ -278,6 +278,17 @@ export async function handleRequest(
 		const pendingConnectionRecords: Array<Promise<void>> = [];
 		const recordMcpLixConnection =
 			options.recordMcpLixConnection ?? recordMcpLixConnectionWithSupabase;
+
+		const importSession = {
+			fileWrites: new Set<string>(),
+			firstFileAdded: false,
+			totalChars: 0,
+			totalBytes: 0,
+			toolCallCount: 0,
+			startTime: Date.now(),
+			lixId: undefined as string | undefined,
+		};
+
 		const onToolCall = (observation: McpToolCallObservation): void => {
 			telemetry?.onToolCall(observation);
 
@@ -293,44 +304,43 @@ export async function handleRequest(
 						)
 					: [];
 
-				lixrTelemetry.captureToolCalled({
-					toolName: observation.toolName,
-					sqlOp: sqlAnalysis?.operation,
-					isBulk: sqlAnalysis?.isBulk ?? false,
-					rowCount: observation.executeOutput?.rowCount ?? 0,
-					durationMs: observation.durationMs,
-					requestBytes: 0,
-					isError: false,
-					lixId: observation.lixId,
-				});
+				importSession.toolCallCount++;
+				if (observation.lixId) importSession.lixId = observation.lixId;
 
 				for (const write of fileWrites) {
 					if (write.content) {
 						const contentBytes = Buffer.byteLength(write.content, "utf8");
 						const contentChars = write.content.length;
-						lixrTelemetry.captureFileWritten({
-							path: write.path,
-							extension: getFileExtension(write.path),
-							bytes: contentBytes,
-							chars: contentChars,
-							contentSha256: computeContentHash(write.content),
-							writeMode: sqlAnalysis?.isBulk ? "bulk" : "single_row",
-							source: "mcp",
-							lixId: observation.lixId,
-						});
+						const contentHash = computeContentHash(write.content);
+						const fileExtension = getFileExtension(write.path);
+
+						importSession.totalChars += contentChars;
+						importSession.totalBytes += contentBytes;
+						importSession.fileWrites.add(write.path);
+
+						const writeProps = {
+							file_path: write.path,
+							file_extension: fileExtension,
+							char_count: contentChars,
+							byte_count: contentBytes,
+							content_sha256: contentHash,
+							is_bulk: sqlAnalysis?.isBulk ?? false,
+							source: "mcp" as const,
+							verified: true,
+							hash_match: true,
+							lix_id: observation.lixId,
+							repository_id: observation.lixId,
+							organization_id: undefined,
+						};
+
+						lixrTelemetry.captureFileWritten(writeProps);
+
+						if (!importSession.firstFileAdded) {
+							importSession.firstFileAdded = true;
+							lixrTelemetry.captureFirstFileAdded(writeProps);
+						}
 					}
 				}
-			} else if (lixrTelemetry && observation.outcome === "error") {
-				lixrTelemetry.captureToolCalled({
-					toolName: observation.toolName,
-					isBulk: false,
-					rowCount: 0,
-					durationMs: observation.durationMs,
-					requestBytes: 0,
-					isError: true,
-					errorCode: observation.errorCode,
-					lixId: observation.lixId,
-				});
 			}
 
 			if (
@@ -361,18 +371,23 @@ export async function handleRequest(
 					executionContext.waitUntil(work);
 				}
 			: undefined;
-		if (lixrTelemetry) {
-			lixrTelemetry.captureConnected({
-				serverUrl: new URL(request.url).origin + MCP_PATH,
-				oauthResult: "success",
-				tokenLengthChars: authResult.auth.token?.length,
-			});
-		}
 		let responseCleanupDeferred = false;
 		const cleanup = async (): Promise<void> => {
 			await Promise.all(pendingConnectionRecords);
 			scheduleMcpTelemetryFlush(executionContext, telemetry);
 			if (lixrTelemetry) {
+				if (importSession.fileWrites.size > 0) {
+					lixrTelemetry.captureImportCompleted({
+						file_count: importSession.fileWrites.size,
+						char_count: importSession.totalChars,
+						byte_count: importSession.totalBytes,
+						tool_call_count: importSession.toolCallCount,
+						duration_ms: Date.now() - importSession.startTime,
+						is_bulk: importSession.fileWrites.size > 1,
+						lix_id: importSession.lixId,
+						repository_id: importSession.lixId,
+					});
+				}
 				const flushWork = lixrTelemetry.flush().catch((caught: unknown) => {
 					console.warn("Failed to flush Lixr MCP telemetry", caught);
 				});

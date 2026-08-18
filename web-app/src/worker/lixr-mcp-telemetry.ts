@@ -19,49 +19,45 @@ interface LixrMcpTelemetryIdentity {
 }
 
 export interface LixrMcpTelemetrySession {
-	captureConnected(properties: {
-		serverUrl: string;
-		oauthResult: "success" | "failure";
-		tokenLengthChars?: number;
-		lixId?: string;
-	}): void;
-
-	captureToolCalled(properties: {
-		toolName: string;
-		sqlOp?: string;
-		isBulk: boolean;
-		rowCount: number;
-		durationMs: number;
-		requestBytes: number;
-		isError: boolean;
-		errorCode?: string;
-		lixId?: string;
-	}): void;
-
 	captureFileWritten(properties: {
-		path: string;
-		extension: string;
-		bytes: number;
-		chars: number;
-		contentSha256: string;
-		writeMode: "single_row" | "bulk";
+		file_path: string;
+		file_extension: string;
+		char_count: number;
+		byte_count: number;
+		content_sha256: string;
+		is_bulk: boolean;
 		source: "mcp" | "ui" | "onboarding_injected";
-		lixId?: string;
+		verified: boolean;
+		hash_match: boolean;
+		lix_id?: string;
+		repository_id?: string;
+		organization_id?: string;
 	}): void;
 
-	captureFileWriteVerified(properties: {
-		path: string;
-		lengthChars: number;
-		lengthBytes: number;
-		hashMatch: boolean;
-		lixId?: string;
+	captureFirstFileAdded(properties: {
+		file_path: string;
+		file_extension: string;
+		char_count: number;
+		byte_count: number;
+		content_sha256: string;
+		is_bulk: boolean;
+		source: "mcp" | "ui" | "onboarding_injected";
+		verified: boolean;
+		hash_match: boolean;
+		lix_id?: string;
+		repository_id?: string;
+		organization_id?: string;
 	}): void;
 
-	captureLixRequestSucceeded(properties: {
-		lixRequestEndpoint: string;
-		lixRequestMethod: string;
-		lixHttpStatus: number;
-		lixId?: string;
+	captureImportCompleted(properties: {
+		file_count: number;
+		char_count: number;
+		byte_count: number;
+		tool_call_count: number;
+		duration_ms: number;
+		is_bulk: boolean;
+		lix_id?: string;
+		repository_id?: string;
 	}): void;
 
 	flush(): Promise<void>;
@@ -141,24 +137,16 @@ export function createLixrMcpTelemetrySession(
 	};
 
 	return {
-		captureConnected(properties) {
-			captureEvent("mcp_connected", properties, properties.lixId);
-		},
-
-		captureToolCalled(properties) {
-			captureEvent("mcp_tool_called", properties, properties.lixId);
-		},
-
 		captureFileWritten(properties) {
-			captureEvent("file_written", properties, properties.lixId);
+			captureEvent("lixr_file_written", properties, properties.lix_id);
 		},
 
-		captureFileWriteVerified(properties) {
-			captureEvent("file_write_verified", properties, properties.lixId);
+		captureFirstFileAdded(properties) {
+			captureEvent("lixr_first_file_added", properties, properties.lix_id);
 		},
 
-		captureLixRequestSucceeded(properties) {
-			captureEvent("lix_request_succeeded", properties, properties.lixId);
+		captureImportCompleted(properties) {
+			captureEvent("lixr_import_completed", properties, properties.lix_id);
 		},
 
 		async flush(): Promise<void> {

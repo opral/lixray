@@ -575,8 +575,7 @@ void test("MCP telemetry is disabled outside production", async () => {
 	assert.equal(await response.text(), "mcp response");
 });
 
-void test("Lixr MCP telemetry captures mcp_connected and tool events", async () => {
-	const captured: Array<{ event: string; properties: Record<string, unknown> }> = [];
+void test("Lixr MCP telemetry captures file writes and import completion", async () => {
 	const executionContext = {
 		waitUntil: () => undefined,
 		passThroughOnException: () => undefined,

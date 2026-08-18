@@ -608,19 +608,73 @@ export async function handleMcpTransport(
 		// @posthog/mcp 0.10.x recognizes the v1 low-level Server shape. The v2
 		// high-level McpServer intentionally exposes registerTool(), so instrument
 		// its underlying low-level server while keeping the v2 transport intact.
+		const observationCache = new Map<string, McpToolCallObservation>();
+		const originalOnToolCall = options.onToolCall;
+		const wrappedOnToolCall = originalOnToolCall
+			? (observation: McpToolCallObservation): void => {
+					observationCache.set(observation.requestId, observation);
+					originalOnToolCall(observation);
+				}
+			: undefined;
+		(options as any).onToolCall = wrappedOnToolCall;
+
 		instrument(server.server, posthog, {
 			context: false,
 			enableExceptionAutocapture: false,
 			identify: options.posthogDistinctId
 				? { distinctId: options.posthogDistinctId }
 				: null,
-			eventProperties: () => ({
-				environment: "production",
-				mcp_server: "lixray",
-				oauth_client_id: options.posthogClientId,
-				request_id: requestId,
-			}),
-			beforeSend: redactMcpAnalyticsEvent,
+			eventProperties: () => {
+				const observation = observationCache.get(requestId);
+				const baseProps: Record<string, unknown> = {
+					environment: "production",
+					mcp_server: "lixray",
+					oauth_client_id: options.posthogClientId,
+					request_id: requestId,
+				};
+
+				if (observation?.executeInput && observation?.executeOutput) {
+					const firstStmt = observation.executeInput.statements[0];
+					const sql = firstStmt?.sanitizedSql ?? "";
+					const isFilePath = sql.includes("lix_file");
+					let filePath: string | undefined;
+					let fileExtension: string | undefined;
+
+					if (isFilePath && sql.match(/path\s*=\s*\?/i)) {
+						filePath = "redacted";
+						const pathMatch = sql.match(/\.([a-z0-9]+)['"]?\s*$/i);
+						if (pathMatch) {
+							fileExtension = pathMatch[1];
+						}
+					}
+
+					baseProps.sql_op = firstStmt?.operation;
+					baseProps.row_count = observation.executeOutput.rowCount;
+					baseProps.char_count = observation.executeOutput.rowCount;
+					baseProps.byte_count = observation.executeOutput.rowCount;
+					baseProps.is_bulk = observation.executeInput.statementCount > 1;
+					if (filePath) baseProps.file_path = filePath;
+					if (fileExtension) baseProps.file_extension = fileExtension;
+					if (observation.lixId) baseProps.lix_id = observation.lixId;
+					if (observation.lixId) baseProps.repository_id = observation.lixId;
+				}
+
+				return baseProps;
+			},
+			beforeSend: (event) => {
+				const redacted = redactMcpAnalyticsEvent(event);
+				if (
+					redacted.properties &&
+					typeof redacted.properties === "object" &&
+					!Array.isArray(redacted.properties)
+				) {
+					const props = redacted.properties as Record<string, unknown>;
+					delete props.$mcp_parameters;
+					delete props.$mcp_response;
+					delete props.$mcp_error_message;
+				}
+				return redacted;
+			},
 		});
 		shutdownPosthog = async () => {
 			// @posthog/mcp publishes through an internal async redaction pipeline.
