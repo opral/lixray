@@ -14,6 +14,8 @@ export const Route = createFileRoute("/docs/$slug")({
 
 function DocsRoute() {
 	const { slug } = Route.useParams();
+	if (slug === "privacy") return <Navigate to="/privacy" replace />;
+	if (slug === "terms") return <Navigate to="/terms" replace />;
 	const entry = docsEntryBySlug(slug);
 	if (!entry) return <Navigate to="/docs" replace />;
 	return <DocsPage entry={entry} />;

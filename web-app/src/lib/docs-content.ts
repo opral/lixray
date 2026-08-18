@@ -35,6 +35,22 @@ export function docsEntryBySlug(slug: string): DocsEntry | undefined {
 	return docsEntries.find((entry) => entry.slug === slug);
 }
 
+export const legalPages = {
+	privacy: { path: "privacy.md", label: "Privacy Policy", slug: "privacy" },
+	terms: { path: "terms.md", label: "Terms of Service", slug: "terms" },
+} as const;
+
+export type LegalSlug = keyof typeof legalPages;
+
+export function legalMarkdown(slug: LegalSlug): string {
+	const path = legalPages[slug].path;
+	const raw = markdownByPath[path];
+	if (raw === undefined) {
+		throw new Error(`legal page "${path}" is missing from docs/`);
+	}
+	return raw;
+}
+
 export function docsMarkdown(entry: DocsEntry): string {
 	const raw = markdownByPath[entry.path];
 	if (raw === undefined) {

@@ -25,20 +25,27 @@ void test("legal docs name Opral US Inc. and Delaware law", () => {
 	);
 	assert.match(
 		terms,
-		/This Agreement is between \*\*Opral US Inc\.\*\* \(“Provider”\)/,
-	);
-	assert.match(terms, /\*\*Provider\.\*\* Opral US Inc\./);
-	assert.match(
-		terms,
-		/\*\*Governing Law\.\*\* the State of Delaware, United States/,
+		/These terms are a contract between \*\*Opral US Inc\.\*\* \(“we”\) and you/,
 	);
 	assert.match(
 		terms,
-		/\*\*Chosen Courts\.\*\* the state and federal courts located in the State of Delaware/,
+		/LixRay is provided \*\*AS IS\*\* and \*\*AS AVAILABLE\*\*/,
 	);
 	assert.match(
 		terms,
-		/\*\*General Cap Amount\.\*\* The greater of \$100 or the fees paid or payable/,
+		/the greater of \*\*\$100\*\* or the fees you paid us for LixRay/,
+	);
+	assert.match(
+		terms,
+		/Delaware law governs, without regard to conflict-of-law rules/,
+	);
+	assert.match(
+		terms,
+		/The state and federal courts in Delaware have exclusive jurisdiction/,
+	);
+	assert.doesNotMatch(
+		terms,
+		/Common Paper|cover page|Cloud Service Agreement|Provider Covered Claims/,
 	);
 
 	for (const [name, text] of [
@@ -49,10 +56,11 @@ void test("legal docs name Opral US Inc. and Delaware law", () => {
 		assert.doesNotMatch(text, /(?<!US Inc\.)\bOpral\b(?! US Inc\.)/, name);
 	}
 
-	assert.deepEqual(toc.Legal, [
-		{ path: "privacy.md", label: "Privacy Policy" },
-		{ path: "terms.md", label: "Terms of Service" },
-	]);
+	assert.equal(toc.Legal, undefined);
+	assert.deepEqual(
+		Object.values(toc).flatMap((items) => items.map((item) => item.path)),
+		["what-is-lixray.md", "mcp.md"],
+	);
 
 	assert.match(
 		renderDocsMarkdown(privacy).html,

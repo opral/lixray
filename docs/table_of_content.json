@@ -2,9 +2,5 @@
 	"Platform": [
 		{ "path": "what-is-lixray.md", "label": "What is LixRay?" },
 		{ "path": "mcp.md", "label": "MCP" }
-	],
-	"Legal": [
-		{ "path": "privacy.md", "label": "Privacy Policy" },
-		{ "path": "terms.md", "label": "Terms of Service" }
 	]
 }

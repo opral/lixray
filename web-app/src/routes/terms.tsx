@@ -1,19 +1,14 @@
-import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { DocsPage } from "~/components/docs-page";
-import { docsEntryBySlug } from "~/lib/docs-content";
+import { createFileRoute } from "@tanstack/react-router";
+import { LegalPage } from "~/components/legal-page";
+import { legalPages } from "~/lib/docs-content";
 
 export const Route = createFileRoute("/terms")({
-	head: () => {
-		const entry = docsEntryBySlug("terms");
-		return {
-			meta: entry ? [{ title: `${entry.label} — LixRay` }] : [],
-		};
-	},
+	head: () => ({
+		meta: [{ title: `${legalPages.terms.label} — LixRay` }],
+	}),
 	component: TermsRoute,
 });
 
 function TermsRoute() {
-	const entry = docsEntryBySlug("terms");
-	if (!entry) return <Navigate to="/docs" replace />;
-	return <DocsPage entry={entry} />;
+	return <LegalPage slug="terms" />;
 }
