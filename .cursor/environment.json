@@ -1,0 +1,16 @@
+{
+  "name": "LixRay",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "bash .cursor/dev.sh"
+    }
+  ],
+  "ports": [
+    { "name": "web", "port": 8787 },
+    { "name": "supabase-studio", "port": 54323 }
+  ]
+}
