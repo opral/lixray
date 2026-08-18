@@ -1,5 +1,6 @@
 interface AsyncCloseable {
 	close(): Promise<void>;
+	terminateForPageUnload?(): void;
 }
 
 interface ManagedResource {
@@ -113,7 +114,16 @@ export function closeManagedRepositoryResourcesForPageUnload(): void {
 	for (const [key, managed] of managedResources) {
 		if (managed.closeTimer) clearTimeout(managed.closeTimer);
 		managed.closeTimer = undefined;
-		closeManagedResource(key, managed);
+		if (managed.resource?.terminateForPageUnload) {
+			try {
+				managed.resource.terminateForPageUnload();
+			} finally {
+				managed.closePromise = Promise.resolve();
+				if (managedResources.get(key) === managed) managedResources.delete(key);
+			}
+		} else {
+			closeManagedResource(key, managed);
+		}
 	}
 }
 
