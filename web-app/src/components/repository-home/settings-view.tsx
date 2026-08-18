@@ -29,7 +29,7 @@ export interface RepositorySettingsApi {
 	listDirectMembers(): Promise<readonly DirectRepositoryMember[]>;
 	removeDirectMember(userId: string): Promise<void>;
 	/** Null when the caller cannot read the namespace roster. */
-	namespaceMemberCount(): Promise<number | null>;
+	listNamespaceMembers(): Promise<readonly DirectRepositoryMember[] | null>;
 	createEditLink(): Promise<string>;
 	/** Deletes and navigates away; the tab unmounts with the workspace. */
 	deleteRepository(): Promise<void>;
@@ -141,8 +141,8 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 	const [directMembers, setDirectMembers] = useState<
 		readonly DirectRepositoryMember[] | null
 	>(null);
-	const [namespaceMemberCount, setNamespaceMemberCount] = useState<
-		number | null
+	const [namespaceMembers, setNamespaceMembers] = useState<
+		readonly DirectRepositoryMember[] | null
 	>(null);
 	const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(
 		null,
@@ -157,9 +157,9 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 			})
 			.catch(() => undefined);
 		settingsApi
-			.namespaceMemberCount()
-			.then((count) => {
-				if (!cancelled) setNamespaceMemberCount(count);
+			.listNamespaceMembers()
+			.then((members) => {
+				if (!cancelled) setNamespaceMembers(members);
 			})
 			.catch(() => undefined);
 		return () => {
@@ -211,35 +211,12 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 				Anyone with the plain URL can read. The edit link lets people join as
 				editors of this repository.
 			</p>
-			<div className="flex items-center gap-2.5 py-2">
-				<span
-					className="inline-flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-bg-hover-canvas text-[10.5px] font-semibold text-text-secondary"
-					aria-hidden="true"
-				>
-					{info.namespaceHandle.charAt(0).toUpperCase()}
-				</span>
-				<span className="flex min-w-0 flex-col">
-					<span className="truncate text-[13px] leading-tight font-semibold">
-						Everyone in @{info.namespaceHandle}
-					</span>
-					<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
-						{namespaceMemberCount === null
-							? "via account membership"
-							: `${namespaceMemberCount} ${
-									namespaceMemberCount === 1 ? "member" : "members"
-								} · via account membership`}
-					</span>
-				</span>
-				<span className="ml-auto rounded-[7px] border border-border-panel px-2 py-1 text-[12px] text-text-secondary">
-					Full access
-				</span>
-			</div>
-			{directMembers?.map((member) => {
+			{namespaceMembers?.map((member) => {
 				const isSelf = member.userId === info.currentUserId;
 				return (
 					<div
 						key={member.userId}
-						className="flex items-center gap-2.5 border-t border-border-subtle py-2"
+						className="flex items-center gap-2.5 border-t border-border-subtle py-2 first-of-type:border-t-0"
 					>
 						<MemberAvatar
 							member={{
@@ -258,38 +235,78 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 								) : null}
 							</span>
 							<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
-								{member.email} · joined via edit link
+								{member.email}
 							</span>
 						</span>
 						<span className="ml-auto rounded-[7px] border border-border-panel px-2 py-1 text-[12px] text-text-secondary">
-							Editor
+							Full access
 						</span>
-						{info.isOwner || isSelf ? (
-							confirmingRemoval === member.userId ? (
-								<Button
-									type="button"
-									variant="destructive"
-									size="sm"
-									className="h-7"
-									onClick={() => void removeMember(member)}
-								>
-									Confirm
-								</Button>
-							) : (
-								<Button
-									type="button"
-									variant="ghost"
-									size="sm"
-									className="h-7 text-text-tertiary"
-									onClick={() => setConfirmingRemoval(member.userId)}
-								>
-									{isSelf ? "Leave" : "Remove"}
-								</Button>
-							)
-						) : null}
 					</div>
 				);
 			})}
+			{directMembers
+				?.filter(
+					(member) =>
+						!namespaceMembers?.some(
+							(namespaceMember) => namespaceMember.userId === member.userId,
+						),
+				)
+				.map((member) => {
+					const isSelf = member.userId === info.currentUserId;
+					return (
+						<div
+							key={member.userId}
+							className="flex items-center gap-2.5 border-t border-border-subtle py-2"
+						>
+							<MemberAvatar
+								member={{
+									name: member.name || member.email,
+									avatarUrl: member.avatarUrl,
+								}}
+								className="size-6 text-[11px]"
+							/>
+							<span className="flex min-w-0 flex-col">
+								<span className="truncate text-[13px] leading-tight font-semibold">
+									{member.name || member.email}
+									{isSelf ? (
+										<span className="ml-1.5 font-normal text-text-quaternary">
+											you
+										</span>
+									) : null}
+								</span>
+								<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
+									{member.email} · joined via edit link
+								</span>
+							</span>
+							<span className="ml-auto rounded-[7px] border border-border-panel px-2 py-1 text-[12px] text-text-secondary">
+								Editor
+							</span>
+							{info.isOwner || isSelf ? (
+								confirmingRemoval === member.userId ? (
+									<Button
+										type="button"
+										variant="destructive"
+										size="sm"
+										className="h-7"
+										onClick={() => void removeMember(member)}
+									>
+										Confirm
+									</Button>
+								) : (
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										className="h-7 text-text-tertiary"
+										onClick={() => setConfirmingRemoval(member.userId)}
+									>
+										{isSelf ? "Leave" : "Remove"}
+									</Button>
+								)
+							) : null}
+						</div>
+					);
+				})}
 		</section>
 	);
 }

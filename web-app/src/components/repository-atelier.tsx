@@ -359,14 +359,19 @@ export function RepositoryAtelier({
 							});
 							if (error) throw new Error(error.message);
 						},
-						namespaceMemberCount: async () => {
+						listNamespaceMembers: async () => {
 							if (!organization || organization.role === null) return null;
 							const { data, error } = await client.rpc(
 								"list_namespace_members",
 								{ p_namespace_id: namespaceId },
 							);
 							if (error) return null;
-							return (data ?? []).length;
+							return (data ?? []).map((row) => ({
+								userId: row.user_id,
+								name: row.name,
+								email: row.email,
+								avatarUrl: row.avatar_url,
+							}));
 						},
 						createEditLink: async () => {
 							const { data, error } = await client.rpc(
@@ -405,8 +410,8 @@ export function RepositoryAtelier({
 			requireSettingsApi(settingsApiRef.current).removeDirectMember(
 				memberUserId,
 			),
-		namespaceMemberCount: () =>
-			requireSettingsApi(settingsApiRef.current).namespaceMemberCount(),
+		listNamespaceMembers: () =>
+			requireSettingsApi(settingsApiRef.current).listNamespaceMembers(),
 		createEditLink: () =>
 			requireSettingsApi(settingsApiRef.current).createEditLink(),
 		deleteRepository: () =>
