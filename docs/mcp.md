@@ -2,7 +2,7 @@
 
 LixRay exposes Lix through a deliberately small MCP surface. SQL is the
 universal interface for repository data; there are no separate file or entity
-tools.
+tools. Lix SQL is a Postgres dialect subset.
 
 ## Recommended workflow
 
@@ -51,12 +51,27 @@ WHERE path = $1;
 
 ```sql
 INSERT INTO lix_file (path, content)
-VALUES ($1, CAST($2 AS BYTEA));
+VALUES ($1, CAST($2 AS BYTEA))
+ON CONFLICT (path) DO UPDATE SET content = excluded.content;
 ```
 
 Pass `$1` (path) and `$2` (file body) as `kind: "text"`. Never use
 `CAST(... AS BLOB)`; if a SQL cast is needed, use `BYTEA`. Actual binaries
 use `kind: "blob"` without CAST.
+
+Lix supports Postgres `ON CONFLICT (cols) DO UPDATE` / `DO NOTHING` with
+`excluded.col` on files and schema-driven views. Use it to create-or-update
+without a probe `SELECT`.
+
+```sql
+INSERT INTO lix_key_value (key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET value = excluded.value
+```
+
+Parent directories: `INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (path) DO NOTHING`.
+
+Name the conflict columns. Lix does not support `ON CONSTRAINT`, inference
+without columns, or `DO UPDATE WHERE`.
 
 For a multi-file setup, send the inserts as one `execute_sql` request and
 make its final statement a readback query:

@@ -21,6 +21,14 @@ void test("SQL guidance models the public Lix surfaces", () => {
 	);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /SQL as the universal interface/);
+	assert.match(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/Lix SQL is a Postgres dialect subset\./,
+	);
+	assert.match(
+		QUERY_SQL_TOOL_DESCRIPTION,
+		/Lix SQL is a Postgres dialect subset\./,
+	);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /Do not look for or invent typed/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /any ordered atomic SQL batch/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /never infer success from prose/);
@@ -62,4 +70,18 @@ void test("SQL tool descriptions use CAST plus kind text for file content", () =
 		assert.doesNotMatch(description, /Pass binary values as/);
 		assert.doesNotMatch(description, /MCP callers pass/);
 	}
+});
+
+void test("execute_sql describes Postgres ON CONFLICT upserts", () => {
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ON CONFLICT/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /excluded\.content/);
+	assert.match(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/INSERT INTO lix_key_value \(key, value\) VALUES \(\$1, \$2\) ON CONFLICT \(key\) DO UPDATE SET value = excluded\.value/,
+	);
+	assert.match(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/INSERT INTO lix_directory \(path\) VALUES \(\$1\) ON CONFLICT \(path\) DO NOTHING/,
+	);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /without a probe SELECT/);
 });

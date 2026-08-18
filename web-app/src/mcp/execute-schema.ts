@@ -58,7 +58,7 @@ WHERE table_schema = 'public'
   AND table_name = $1
 ORDER BY ordinal_position;`;
 
-export const QUERY_SQL_TOOL_DESCRIPTION = `Use SQL as the universal read interface to Lix. query_sql runs exactly one SELECT statement against the branch selected by context. Non-SELECT and multi-statement scripts are rejected; use execute_sql when arbitrary SQL is required. Do not look for or invent typed file or entity tools.
+export const QUERY_SQL_TOOL_DESCRIPTION = `Use SQL as the universal read interface to Lix. Lix SQL is a Postgres dialect subset. query_sql runs exactly one SELECT statement against the branch selected by context. Non-SELECT and multi-statement scripts are rejected; use execute_sql when arbitrary SQL is required. Do not look for or invent typed file or entity tools.
 
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}
@@ -77,7 +77,7 @@ ${EXECUTE_SQL_COLUMNS_QUERY}
 
 Where present, \`<table>_by_branch\` adds \`lixcol_branch_id\` for cross-branch reads. \`<table>_history\` is read-only: scope every history query with \`WHERE lixcol_start_commit_id = lix_active_branch_commit_id()\`, then constrain it by stable identity (\`id = $n\` for files/directories or \`lixcol_entity_pk = $n\` for entities) resolved from the active table. Read a current item's \`lixcol_change_id\` from its active table, not an historical row; use \`lixcol_depth\` / \`lixcol_observed_commit_id\` for prior revisions.`;
 
-const EXECUTE_SQL_GUIDE = `Use SQL as the universal interface to Lix. execute_sql runs any ordered atomic SQL batch against the branch selected by context and is always treated as potentially destructive. File and directory creation, reads, edits, deletes, path changes, and entity operations are SQL. Do not look for or invent typed file or entity tools. Lix SQL does not support DDL statements.
+const EXECUTE_SQL_GUIDE = `Use SQL as the universal interface to Lix. Lix SQL is a Postgres dialect subset. execute_sql runs any ordered atomic SQL batch against the branch selected by context and is always treated as potentially destructive. File and directory creation, reads, edits, deletes, path changes, and entity operations are SQL. Do not look for or invent typed file or entity tools. Lix SQL does not support DDL statements.
 
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}
@@ -86,7 +86,9 @@ Path rules: \`lix_file.path\` and \`lix_directory.path\` are canonical absolute 
 
 \`lix_file.content\` is stored as bytes. For UTF-8 / text files, pass \`$1\` (path) and \`$2\` (file body) as \`kind: "text"\` and write with \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))\`. Never use \`CAST(... AS BLOB)\`; if a SQL cast is needed, use \`BYTEA\`. Actual binaries use \`kind: "blob"\` without CAST.
 
-To create a file, use \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))\`; to read it, use \`SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1\`; to rename it, use \`UPDATE lix_file SET path = $2 WHERE path = $1\`. Create directories with \`INSERT INTO lix_directory (path) VALUES ($1)\`.
+To create a file, use \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content\`; to read it, use \`SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1\`; to rename it, use \`UPDATE lix_file SET path = $2 WHERE path = $1\`. Create directories with \`INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (path) DO NOTHING\`.
+
+Lix supports Postgres \`INSERT ... ON CONFLICT (cols) DO UPDATE\` / \`DO NOTHING\` with \`excluded.col\` on files (\`lix_file\` on \`path\` or \`id\`) and schema-driven views such as \`lix_key_value\`. Example: \`INSERT INTO lix_key_value (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value\`. This is how you create-or-update without a probe SELECT. Name the conflict columns; \`ON CONSTRAINT\`, inference without columns, and \`DO UPDATE WHERE\` are not supported.
 
 For a mutation, inspect the relevant rows first with query_sql, execute the mutation, and verify it with a focused SELECT. Put related mutations and their final verification SELECT in one execute_sql call so the change is atomic and the returned final result is its readback. Use rowsAffected plus returned rows to report what changed; never infer success from prose alone.
 
