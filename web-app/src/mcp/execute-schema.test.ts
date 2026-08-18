@@ -26,7 +26,10 @@ void test("SQL guidance models the public Lix surfaces", () => {
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /never infer success from prose/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already saved/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /does not require a checkpoint/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /do not call it after every write/i);
+	assert.match(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/do not call it after every write/i,
+	);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_file\.path.*canonical/);
 	assert.match(
 		EXECUTE_SQL_TOOL_DESCRIPTION,
