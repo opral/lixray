@@ -12,7 +12,9 @@ import {
 	type LixRuntimeClient,
 } from "./lix-service.ts";
 import type { ParseSqlScript } from "../lib/lix-sql-access.ts";
+import { PostHog } from "posthog-node";
 import {
+	attachMcpToolCallObservationProperties,
 	handleMcpTransport,
 	MCP_REQUEST_ID_HEADER,
 	MCP_PROTOCOL_VERSION,
@@ -72,6 +74,11 @@ class FakeRuntime implements LixRuntimeClient {
 					hint: "Use SELECT 1 instead.",
 				},
 			);
+		}
+		if (request.sql.includes("LIX_TYPE_MISMATCH")) {
+			throw createLixError("LIX_TYPE_MISMATCH", "column expects text", {
+				hint: "Bind a text value.",
+			});
 		}
 		if (request.sql.includes("lix_active_branch_commit_id")) {
 			return {
@@ -184,9 +191,89 @@ void test("PostHog MCP analytics redaction removes private payloads", () => {
 			$mcp_error_message: "private error",
 			$exception_list: [{ stack: "private stack" }],
 			mcp_tool_name: "query_sql",
+			request_id: "req-1",
+			success: false,
+			error_code: "LIX_TYPE_MISMATCH",
 		},
 	});
-	assert.deepEqual(event.properties, { mcp_tool_name: "query_sql" });
+	assert.deepEqual(event.properties, {
+		mcp_tool_name: "query_sql",
+		request_id: "req-1",
+		success: false,
+		error_code: "LIX_TYPE_MISMATCH",
+	});
+});
+
+void test("observation properties attach success and error_code on both outcomes", () => {
+	const failed = attachMcpToolCallObservationProperties(
+		{ request_id: "fail-1" },
+		{
+			requestId: "fail-1",
+			toolName: "execute_sql",
+			outcome: "error",
+			durationMs: 4,
+			surfaceVersion: "test",
+			errorCode: "LIX_TYPE_MISMATCH",
+			lixId: LIX_ID,
+			executeInput: {
+				statementCount: 1,
+				statements: [
+					{
+						index: 0,
+						operation: "INSERT",
+						sanitizedSql: "insert into lix_file(path,content)values(?,?)",
+						shapeId: "shape",
+						parameterCount: 2,
+						redactedLiteralCount: 0,
+						truncated: false,
+					},
+				],
+			},
+		},
+	);
+	assert.equal(failed.success, false);
+	assert.equal(failed.error_code, "LIX_TYPE_MISMATCH");
+	assert.equal(failed.sql_op, "INSERT");
+	assert.equal(failed.lix_id, LIX_ID);
+	assert.equal(failed.repository_id, LIX_ID);
+	assert.equal(failed.request_id, "fail-1");
+
+	const succeeded = attachMcpToolCallObservationProperties(
+		{ request_id: "ok-1" },
+		{
+			requestId: "ok-1",
+			toolName: "execute_sql",
+			outcome: "success",
+			durationMs: 6,
+			surfaceVersion: "test",
+			lixId: LIX_ID,
+			executeInput: {
+				statementCount: 1,
+				statements: [
+					{
+						index: 0,
+						operation: "INSERT",
+						sanitizedSql: "insert into lix_file(path,content)values(?,?)",
+						shapeId: "shape",
+						parameterCount: 2,
+						redactedLiteralCount: 0,
+						truncated: false,
+					},
+				],
+			},
+			executeOutput: {
+				resultCount: 1,
+				rowCount: 0,
+				rowsAffected: 1,
+				noticeCodes: [],
+				results: [],
+			},
+		},
+	);
+	assert.equal(succeeded.success, true);
+	assert.equal(succeeded.error_code, undefined);
+	assert.equal(succeeded.sql_op, "INSERT");
+	assert.equal(succeeded.row_count, 0);
 });
 
 void test("MCP request IDs accept a valid incoming ID and expose generated IDs", () => {
@@ -748,6 +835,162 @@ void test("legacy MCP initialize and tool calls work without a session id", asyn
 		assert.match(firstBody, /initialize/);
 		assert.doesNotMatch(firstBody, /server\/discover/);
 	} finally {
+		await client.close();
+	}
+});
+
+void test("failed execute_sql then successful retry both emit $mcp_tool_call", async () => {
+	const captured: Array<{
+		event: string;
+		distinctId: string;
+		properties: Record<string, unknown>;
+	}> = [];
+	type CaptureMethod = typeof PostHog.prototype.capture;
+	type ShutdownMethod = typeof PostHog.prototype.shutdown;
+	const originalCapture = PostHog.prototype.capture.bind(
+		PostHog.prototype,
+	) as CaptureMethod;
+	const originalShutdown = PostHog.prototype.shutdown.bind(
+		PostHog.prototype,
+	) as ShutdownMethod;
+	PostHog.prototype.capture = function capture(event) {
+		const distinctId = event.distinctId;
+		if (typeof distinctId !== "string") {
+			throw new Error("expected PostHog capture distinctId");
+		}
+		captured.push({
+			event: event.event,
+			distinctId,
+			properties: { ...(event.properties ?? {}) },
+		});
+		return { uuid: "test-uuid", event, distinct_id: distinctId };
+	} as CaptureMethod;
+	PostHog.prototype.shutdown = async function shutdown() {
+		return;
+	} as ShutdownMethod;
+
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "felix", clientId: "codex-desktop" },
+	});
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		return handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_Telemetry_Test",
+			parseSqlScript,
+			posthogToken: "phc_test_token",
+			posthogDistinctId: "felix",
+			posthogClientId: "codex-desktop",
+		});
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcher },
+	);
+	const client = new Client(
+		{ name: "codex-desktop", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
+		});
+		assert.equal(opened.isError, undefined, JSON.stringify(opened));
+		const context = (opened.structuredContent as { context: string }).context;
+
+		const failed = await client.callTool({
+			name: "execute_sql",
+			arguments: {
+				context,
+				statements: [
+					{
+						sql: "INSERT INTO lix_file (path, content) VALUES ($1, $2) -- LIX_TYPE_MISMATCH",
+						params: [
+							{ kind: "text", value: "/skills/hello.md" },
+							{ kind: "int", value: 1 },
+						],
+					},
+				],
+			},
+		});
+		assert.equal(failed.isError, true);
+		const failedContent = failed.structuredContent as {
+			request_id: string;
+			error: { code: string };
+		};
+		assert.equal(failedContent.error.code, "LIX_TYPE_MISMATCH");
+
+		const succeeded = await client.callTool({
+			name: "execute_sql",
+			arguments: {
+				context,
+				statements: [
+					{
+						sql: "INSERT INTO lix_file (path, content) VALUES ($1, $2)",
+						params: [
+							{ kind: "text", value: "/skills/hello.md" },
+							{ kind: "text", value: "# hello\n" },
+						],
+					},
+				],
+			},
+		});
+		assert.equal(succeeded.isError, undefined, JSON.stringify(succeeded));
+		const succeededContent = succeeded.structuredContent as {
+			request_id: string;
+		};
+
+		const toolCalls = captured.filter(
+			(event) => event.event === "$mcp_tool_call",
+		);
+		const executeCalls = toolCalls.filter(
+			(event) => event.properties.$mcp_tool_name === "execute_sql",
+		);
+		assert.equal(
+			executeCalls.length,
+			2,
+			`expected two execute_sql $mcp_tool_call events, got ${JSON.stringify(captured)}`,
+		);
+
+		const [first, retry] = executeCalls;
+		assert.ok(first);
+		assert.ok(retry);
+		assert.equal(first.distinctId, "felix");
+		assert.equal(retry.distinctId, "felix");
+		assert.equal(first.properties.request_id, failedContent.request_id);
+		assert.equal(retry.properties.request_id, succeededContent.request_id);
+		assert.notEqual(first.properties.request_id, retry.properties.request_id);
+		assert.equal(first.properties.lix_id, LIX_ID);
+		assert.equal(retry.properties.lix_id, LIX_ID);
+		assert.equal(first.properties.success, false);
+		assert.equal(retry.properties.success, true);
+		assert.equal(first.properties.error_code, "LIX_TYPE_MISMATCH");
+		assert.equal(retry.properties.error_code, undefined);
+		assert.equal(first.properties.sql_op, "INSERT");
+		assert.equal(retry.properties.sql_op, "INSERT");
+		assert.equal(first.properties.environment, "production");
+		assert.equal(first.properties.mcp_server, "lixray");
+		assert.equal(
+			first.properties.$mcp_parameters,
+			undefined,
+			"SQL bodies must not survive redaction",
+		);
+		assert.equal(first.properties.$mcp_response, undefined);
+		assert.equal(first.properties.$mcp_error_message, undefined);
+		assert.doesNotMatch(
+			JSON.stringify(captured),
+			/"mcp_tool_called"|"mcp_connected"|"file_written"/,
+		);
+		const mcpToolCallWriters = captured.filter(
+			(event) => event.event === "$mcp_tool_call",
+		);
+		assert.equal(mcpToolCallWriters.length, toolCalls.length);
+	} finally {
+		PostHog.prototype.capture = originalCapture;
+		PostHog.prototype.shutdown = originalShutdown;
 		await client.close();
 	}
 });

@@ -55,6 +55,8 @@ export interface McpToolCallObservation {
 	executeOutput?: McpExecuteOutputObservation;
 	fileContentCharCount?: number;
 	fileContentByteCount?: number;
+	/** Original SQL + params for in-process file-write detection. Never sent to PostHog. */
+	rawStatements?: Array<{ sql: string; params?: Array<unknown> }>;
 }
 
 export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
@@ -95,6 +97,61 @@ export function redactMcpAnalyticsEvent<
 		delete properties[property];
 	}
 	return { ...event, properties };
+}
+
+/**
+ * `@posthog/mcp` 0.10.x treats a high-level server as anything with `.server`
+ * plus `tool()`. MCP TypeScript SDK v2 exposes `registerTool()` instead, so
+ * instrument() would reject the v2 `McpServer`. Alias `tool` so the official
+ * high-level adapter can wrap `tools/call` via `_requestHandlers`.
+ */
+export function prepareHighLevelMcpServerForPosthog(
+	server: McpServer,
+): McpServer {
+	const highLevel = server as McpServer & {
+		tool?: McpServer["registerTool"];
+	};
+	if (typeof highLevel.tool !== "function") {
+		highLevel.tool = server.registerTool.bind(server);
+	}
+	return server;
+}
+
+/**
+ * Locked `$mcp_tool_call` properties. Applied after the tool finishes so
+ * failures still get `success=false`, `error_code`, and `sql_op`.
+ */
+export function attachMcpToolCallObservationProperties(
+	properties: Record<string, unknown>,
+	observation: McpToolCallObservation | undefined,
+	fallbackIsError?: boolean,
+): Record<string, unknown> {
+	properties.success = observation
+		? observation.outcome === "success"
+		: fallbackIsError !== true;
+	if (observation?.errorCode) {
+		properties.error_code = observation.errorCode;
+	} else {
+		delete properties.error_code;
+	}
+	if (observation?.executeInput) {
+		properties.sql_op = observation.executeInput.statements[0]?.operation;
+		properties.is_bulk = observation.executeInput.statementCount > 1;
+	}
+	if (observation?.executeOutput) {
+		properties.row_count = observation.executeOutput.rowCount;
+	}
+	if (observation?.lixId) {
+		properties.lix_id = observation.lixId;
+		properties.repository_id = observation.lixId;
+	}
+	if (observation?.fileContentCharCount !== undefined) {
+		properties.char_count = observation.fileContentCharCount;
+	}
+	if (observation?.fileContentByteCount !== undefined) {
+		properties.byte_count = observation.fileContentByteCount;
+	}
+	return properties;
 }
 
 const lixRef = z
@@ -303,6 +360,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -329,6 +387,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -358,6 +417,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -387,6 +447,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -410,6 +471,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -433,6 +495,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -471,6 +534,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -490,6 +554,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -514,6 +579,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -538,6 +604,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -555,6 +622,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	registerTool(
@@ -572,6 +640,7 @@ export function createLixrayMcpServer(
 		options.onToolCall,
 		surfaceVersion,
 		requestId,
+		service,
 	);
 
 	return server;
@@ -589,9 +658,20 @@ export async function handleMcpTransport(
 			requestId,
 		);
 	}
+	// Cache observations before constructing the server. `eventProperties`
+	// runs before the tool; `beforeSend` runs after, so the wrap must be
+	// bound into registerTool() — assigning onto `options` later is a no-op.
+	const observationCache = new Map<string, McpToolCallObservation>();
+	const onToolCall: McpToolCallObserver | undefined = options.posthogToken
+		? (observation) => {
+				observationCache.set(observation.requestId, observation);
+				options.onToolCall?.(observation);
+			}
+		: options.onToolCall;
 	const server = createLixrayMcpServer(service, {
 		...options,
 		requestId,
+		onToolCall,
 		serverName: options.serverName ?? mcpServerNameForUrl(request.url),
 	});
 	const handler = createMcpHandler(() => server, {
@@ -607,73 +687,51 @@ export async function handleMcpTransport(
 			flushAt: 1,
 			flushInterval: 0,
 		});
-		// @posthog/mcp 0.10.x recognizes the v1 low-level Server shape. The v2
-		// high-level McpServer intentionally exposes registerTool(), so instrument
-		// its underlying low-level server while keeping the v2 transport intact.
-		const observationCache = new Map<string, McpToolCallObservation>();
-		const originalOnToolCall = options.onToolCall;
-		const wrappedOnToolCall = originalOnToolCall
-			? (observation: McpToolCallObservation): void => {
-					observationCache.set(observation.requestId, observation);
-					originalOnToolCall(observation);
-				}
-			: undefined;
-		(options as any).onToolCall = wrappedOnToolCall;
-
-		instrument(server.server, posthog, {
+		// Official @posthog/mcp is the only $mcp_* writer. The v2 McpServer must
+		// be instrumented as a high-level server: the low-level adapter calls
+		// setRequestHandler(CallToolRequestSchema), which v2 rejects (it wants
+		// the string "tools/call"). That throw was swallowed, so initialize and
+		// tools/list were patched (July 31 probes) while tools/call was not.
+		instrument(prepareHighLevelMcpServerForPosthog(server), posthog, {
 			context: false,
 			enableExceptionAutocapture: false,
 			identify: options.posthogDistinctId
 				? { distinctId: options.posthogDistinctId }
 				: null,
-			eventProperties: () => {
-				const observation = observationCache.get(requestId);
-				const baseProps: Record<string, unknown> = {
-					environment: "production",
-					mcp_server: "lixray",
-					oauth_client_id: options.posthogClientId,
-					request_id: requestId,
-				};
-
-				if (observation?.executeInput && observation?.executeOutput) {
-					const firstStmt = observation.executeInput.statements[0];
-
-					baseProps.sql_op = firstStmt?.operation;
-					baseProps.row_count = observation.executeOutput.rowCount;
-					baseProps.is_bulk = observation.executeInput.statementCount > 1;
-					if (observation.lixId) baseProps.lix_id = observation.lixId;
-					if (observation.lixId) baseProps.repository_id = observation.lixId;
-
-					// For file writes, add actual content size (computed in handler from content.length / Buffer.byteLength utf8)
-					// Do not emit file_path or file_extension (real values are on lixray_file_written only)
-					if (observation.fileContentCharCount !== undefined) {
-						baseProps.char_count = observation.fileContentCharCount;
-					}
-					if (observation.fileContentByteCount !== undefined) {
-						baseProps.byte_count = observation.fileContentByteCount;
-					}
-				}
-
-				return baseProps;
-			},
+			eventProperties: () => ({
+				environment: "production",
+				mcp_server: "lixray",
+				oauth_client_id: options.posthogClientId,
+				request_id: requestId,
+			}),
 			beforeSend: (event) => {
 				const redacted = redactMcpAnalyticsEvent(event);
 				if (
-					redacted.properties &&
-					typeof redacted.properties === "object" &&
-					!Array.isArray(redacted.properties)
+					!redacted.properties ||
+					typeof redacted.properties !== "object" ||
+					Array.isArray(redacted.properties)
 				) {
-					const props = redacted.properties as Record<string, unknown>;
-					delete props.$mcp_parameters;
-					delete props.$mcp_response;
-					delete props.$mcp_error_message;
+					return redacted;
+				}
+				const props = redacted.properties as Record<string, unknown>;
+				delete props.$mcp_parameters;
+				delete props.$mcp_response;
+				delete props.$mcp_error_message;
+				if (redacted.event === "$mcp_tool_call") {
+					attachMcpToolCallObservationProperties(
+						props,
+						observationCache.get(requestId),
+						props.$mcp_is_error === true,
+					);
 				}
 				return redacted;
 			},
 		});
 		shutdownPosthog = async () => {
 			// @posthog/mcp publishes through an internal async redaction pipeline.
-			// Let that pipeline enqueue its captures before draining the client.
+			// Drain microtasks, then one macrotask, before shutting the client.
+			await Promise.resolve();
+			await Promise.resolve();
 			await new Promise<void>((resolve) => setTimeout(resolve, 0));
 			await posthog.shutdown();
 		};
@@ -814,6 +872,7 @@ function registerTool(
 	observer: McpToolCallObserver | undefined,
 	surfaceVersion: string,
 	requestId: string,
+	service: LixService,
 ): void {
 	server.registerTool(
 		name,
@@ -829,8 +888,9 @@ function registerTool(
 			const startedAt = Date.now();
 			const toolName = observationName ?? name;
 			const input = args as Record<string, any>;
-			const executeInput = isSqlTool(name)
-				? observeExecuteInput(name === "query_sql" ? [input] : input.statements)
+			const rawStatements = sqlToolStatements(name, input);
+			const executeInput = rawStatements
+				? observeExecuteInput(rawStatements)
 				: undefined;
 			try {
 				const raw = await call(input);
@@ -839,13 +899,16 @@ function registerTool(
 							name === "query_sql" ? { results: [raw.result] } : raw,
 						)
 					: undefined;
+				const lixId = await observationLixId(service, input, raw);
 				observeToolCall(observer, startedAt, {
 					requestId,
 					toolName,
 					outcome: "success",
 					surfaceVersion,
+					...(lixId ? { lixId } : {}),
 					...(executeInput ? { executeInput } : {}),
 					...(executeOutput ? { executeOutput } : {}),
+					...(rawStatements ? { rawStatements } : {}),
 				});
 				const structuredContent = {
 					...(raw as Record<string, unknown>),
@@ -859,13 +922,16 @@ function registerTool(
 				};
 			} catch (caught) {
 				const error = toMcpError(caught, requestId);
+				const lixId = await observationLixId(service, input);
 				observeToolCall(observer, startedAt, {
 					requestId,
 					toolName,
 					outcome: "error",
 					surfaceVersion,
 					errorCode: error.code,
+					...(lixId ? { lixId } : {}),
 					...(executeInput ? { executeInput } : {}),
+					...(rawStatements ? { rawStatements } : {}),
 				});
 				if (!isLixError(caught)) {
 					console.error("LixRay MCP tool failed", {
@@ -1095,6 +1161,36 @@ function toExecuteOptions(
 
 function isSqlTool(name: string): boolean {
 	return name === "query_sql" || name === "execute_sql";
+}
+
+type SqlToolStatement = { sql: string; params?: Array<unknown> };
+
+function sqlToolStatements(
+	name: string,
+	input: Record<string, any>,
+): Array<SqlToolStatement> | undefined {
+	if (name === "query_sql") return [input as SqlToolStatement];
+	if (name === "execute_sql" && Array.isArray(input.statements)) {
+		return input.statements as Array<SqlToolStatement>;
+	}
+	return undefined;
+}
+
+async function observationLixId(
+	service: LixService,
+	input: Record<string, any>,
+	raw?: unknown,
+): Promise<string | undefined> {
+	if (raw && typeof raw === "object" && "id" in raw) {
+		const openedId = (raw as { id: unknown }).id;
+		if (typeof openedId === "string" && openedId.length > 0) return openedId;
+	}
+	if (typeof input.context !== "string") return undefined;
+	try {
+		return await service.contextLixId(input.context);
+	} catch {
+		return undefined;
+	}
 }
 
 function readAnnotations(): ToolAnnotations {
