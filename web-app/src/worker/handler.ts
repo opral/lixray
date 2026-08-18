@@ -37,7 +37,6 @@ import {
 } from "./mcp-telemetry.ts";
 import {
 	createLixrMcpTelemetrySession,
-	type LixrMcpTelemetrySession,
 	analyzeSqlOperation,
 	detectFileWrites,
 	computeContentHash,
