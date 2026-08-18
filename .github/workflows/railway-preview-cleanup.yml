@@ -11,13 +11,15 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  cleanup:
-    name: Delete preview environment
+  cleanup-railway:
+    name: Delete Railway preview
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Check out cleanup coordinator
@@ -38,17 +40,22 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: .github/scripts/manage-railway-preview.sh delete
 
-      - name: Delete GitHub preview environment
-        if: always()
+  cleanup-github:
+    name: Delete GitHub preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      deployments: write
+      environments: write
+
+    steps:
+      - name: Check out cleanup coordinator
+        uses: actions/checkout@v4
+
+      - name: Delete GitHub preview environments
         env:
-          PREVIEW_NAME: lixray-pr-${{ github.event.pull_request.number }}
-        run: |
-          : "${GITHUB_ENVIRONMENT_ADMIN_TOKEN:?}"
-          export GH_TOKEN="$GITHUB_ENVIRONMENT_ADMIN_TOKEN"
-          endpoint="repos/${{ github.repository }}/environments/$PREVIEW_NAME"
-          if gh api "$endpoint" >/dev/null 2>&1; then
-            gh api --method DELETE "$endpoint"
-            echo "Deleted GitHub preview environment $PREVIEW_NAME."
-          else
-            echo "GitHub preview environment $PREVIEW_NAME is already absent."
-          fi
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ENVIRONMENT_ADMIN_TOKEN: ${{ secrets.GITHUB_ENVIRONMENT_ADMIN_TOKEN }}
+        run: .github/scripts/cleanup-github-preview.sh

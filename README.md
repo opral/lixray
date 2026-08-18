@@ -209,9 +209,10 @@ Put these secrets in the Infisical `prod` environment under `/ci`:
   Supabase credentials;
 - `GHCR_READ_USERNAME`: the GitHub user owning a classic PAT;
 - `GHCR_READ_TOKEN`: that PAT with `read:packages`;
-- `GITHUB_ENVIRONMENT_ADMIN_TOKEN`: a fine-grained token scoped only to this
-  repository with Administration write access, used to delete closed PR
-  environments because GitHub's workflow token cannot delete them;
+- `GITHUB_ENVIRONMENT_ADMIN_TOKEN` (optional): a fine-grained token scoped only
+  to this repository with Administration write access. Closed-PR cleanup uses
+  `GITHUB_TOKEN` with `environments: write` and `deployments: write`. Set this
+  only if that workflow token is denied; it is not required in Infisical;
 - `VITE_SUPABASE_URL`: the public production Supabase project URL;
 - `VITE_SUPABASE_KEY`: the public production Supabase publishable key.
 
