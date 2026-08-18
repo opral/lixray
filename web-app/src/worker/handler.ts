@@ -35,6 +35,14 @@ import {
 	createMcpTelemetrySession,
 	type McpTelemetrySession,
 } from "./mcp-telemetry.ts";
+import {
+	createLixrMcpTelemetrySession,
+	type LixrMcpTelemetrySession,
+	analyzeSqlOperation,
+	detectFileWrites,
+	computeContentHash,
+	getFileExtension,
+} from "./lixr-mcp-telemetry.ts";
 import { resolveSupabaseLixId } from "./lix-resolver.ts";
 
 export interface WorkerEnv {
@@ -259,11 +267,72 @@ export async function handleRequest(
 				isDemo: authResult.auth.isDemo,
 			},
 		);
+		const lixrTelemetry = createLixrMcpTelemetrySession(
+			env,
+			{
+				userId: authResult.auth.userId,
+				clientId: authResult.auth.clientId,
+				isDemo: authResult.auth.isDemo,
+			},
+		);
 		const pendingConnectionRecords: Array<Promise<void>> = [];
 		const recordMcpLixConnection =
 			options.recordMcpLixConnection ?? recordMcpLixConnectionWithSupabase;
 		const onToolCall = (observation: McpToolCallObservation): void => {
 			telemetry?.onToolCall(observation);
+
+			if (lixrTelemetry && observation.outcome === "success") {
+				const sqlAnalysis = observation.executeInput
+					? analyzeSqlOperation(observation.executeInput)
+					: undefined;
+				const fileWrites = observation.executeInput
+					? detectFileWrites(
+							observation.executeInput.statements.map((s) => ({
+								sql: s.sanitizedSql,
+							})),
+						)
+					: [];
+
+				lixrTelemetry.captureToolCalled({
+					toolName: observation.toolName,
+					sqlOp: sqlAnalysis?.operation,
+					isBulk: sqlAnalysis?.isBulk ?? false,
+					rowCount: observation.executeOutput?.rowCount ?? 0,
+					durationMs: observation.durationMs,
+					requestBytes: 0,
+					isError: false,
+					lixId: observation.lixId,
+				});
+
+				for (const write of fileWrites) {
+					if (write.content) {
+						const contentBytes = Buffer.byteLength(write.content, "utf8");
+						const contentChars = write.content.length;
+						lixrTelemetry.captureFileWritten({
+							path: write.path,
+							extension: getFileExtension(write.path),
+							bytes: contentBytes,
+							chars: contentChars,
+							contentSha256: computeContentHash(write.content),
+							writeMode: sqlAnalysis?.isBulk ? "bulk" : "single_row",
+							source: "mcp",
+							lixId: observation.lixId,
+						});
+					}
+				}
+			} else if (lixrTelemetry && observation.outcome === "error") {
+				lixrTelemetry.captureToolCalled({
+					toolName: observation.toolName,
+					isBulk: false,
+					rowCount: 0,
+					durationMs: observation.durationMs,
+					requestBytes: 0,
+					isError: true,
+					errorCode: observation.errorCode,
+					lixId: observation.lixId,
+				});
+			}
+
 			if (
 				authResult.auth.isDemo ||
 				observation.outcome !== "success" ||
@@ -292,10 +361,23 @@ export async function handleRequest(
 					executionContext.waitUntil(work);
 				}
 			: undefined;
+		if (lixrTelemetry) {
+			lixrTelemetry.captureConnected({
+				serverUrl: new URL(request.url).origin + MCP_PATH,
+				oauthResult: "success",
+				tokenLengthChars: authResult.auth.token?.length,
+			});
+		}
 		let responseCleanupDeferred = false;
 		const cleanup = async (): Promise<void> => {
 			await Promise.all(pendingConnectionRecords);
 			scheduleMcpTelemetryFlush(executionContext, telemetry);
+			if (lixrTelemetry) {
+				const flushWork = lixrTelemetry.flush().catch((caught: unknown) => {
+					console.warn("Failed to flush Lixr MCP telemetry", caught);
+				});
+				executionContext.waitUntil(flushWork);
+			}
 			await client.close();
 		};
 		try {

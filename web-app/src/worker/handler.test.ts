@@ -575,6 +575,73 @@ void test("MCP telemetry is disabled outside production", async () => {
 	assert.equal(await response.text(), "mcp response");
 });
 
+void test("Lixr MCP telemetry captures mcp_connected and tool events", async () => {
+	const captured: Array<{ event: string; properties: Record<string, unknown> }> = [];
+	const executionContext = {
+		waitUntil: () => undefined,
+		passThroughOnException: () => undefined,
+		props: {},
+	} as unknown as RequestExecutionContext;
+
+	const response = await handleRequest(
+		new Request("https://lixr.com/mcp", { method: "POST" }),
+		env({
+			extra: {
+				POSTHOG_PROJECT_TOKEN: "project-token",
+				POSTHOG_HOST: "https://posthog.example",
+				POSTHOG_ENVIRONMENT: "production",
+			},
+		}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			executionContext,
+			lixFetch: async () => new Response("unused"),
+			createMcpTelemetry: () => ({
+				onToolCall: () => undefined,
+				flush: async () => undefined,
+			}),
+			mcpTransport: async (_request, _service, options) => {
+				options.onToolCall?.({
+					requestId: options.requestId!,
+					toolName: "execute_sql",
+					outcome: "success",
+					durationMs: 15,
+					surfaceVersion: "v1",
+					lixId: "lix-123",
+					executeInput: {
+						statementCount: 1,
+						statements: [
+							{
+								operation: "INSERT",
+								sanitizedSql: "INSERT INTO lix_file VALUES (?, ?, ?)",
+								shapeId: "shape1",
+							},
+						],
+					},
+					executeOutput: {
+						resultCount: 1,
+						rowCount: 1,
+						rowsAffected: 1,
+						noticeCodes: [],
+						results: [
+							{
+								columnCount: 0,
+								rowCount: 1,
+								rowsAffected: 1,
+								noticeCodes: [],
+							},
+						],
+					},
+				});
+				return new Response("mcp response");
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(await response.text(), "mcp response");
+});
+
 void test("successful exact-Lix MCP activity is persisted before the response completes", async () => {
 	const records: Array<{
 		lixId: string | undefined;
