@@ -35,6 +35,13 @@ import {
 	createMcpTelemetrySession,
 	type McpTelemetrySession,
 } from "./mcp-telemetry.ts";
+import {
+	createLixrMcpTelemetrySession,
+	analyzeSqlOperation,
+	detectFileWrites,
+	computeContentHash,
+	getFileExtension,
+} from "./lixr-mcp-telemetry.ts";
 import { resolveSupabaseLixId } from "./lix-resolver.ts";
 
 export interface WorkerEnv {
@@ -259,11 +266,91 @@ export async function handleRequest(
 				isDemo: authResult.auth.isDemo,
 			},
 		);
+		const lixrTelemetry = createLixrMcpTelemetrySession(env, {
+			userId: authResult.auth.userId,
+			clientId: authResult.auth.clientId,
+			isDemo: authResult.auth.isDemo,
+		});
 		const pendingConnectionRecords: Array<Promise<void>> = [];
 		const recordMcpLixConnection =
 			options.recordMcpLixConnection ?? recordMcpLixConnectionWithSupabase;
+
+		const importSession = {
+			fileWrites: new Set<string>(),
+			firstFileAdded: false,
+			totalChars: 0,
+			totalBytes: 0,
+			toolCallCount: 0,
+			startTime: Date.now(),
+			lixId: undefined as string | undefined,
+		};
+
 		const onToolCall = (observation: McpToolCallObservation): void => {
+			if (lixrTelemetry && observation.outcome === "success") {
+				const sqlAnalysis = observation.executeInput
+					? analyzeSqlOperation(observation.executeInput)
+					: undefined;
+				const fileWrites = observation.executeInput
+					? detectFileWrites(
+							observation.executeInput.statements.map((s) => ({
+								sql: s.sanitizedSql,
+							})),
+						)
+					: [];
+
+				importSession.toolCallCount++;
+				if (observation.lixId) importSession.lixId = observation.lixId;
+
+				// Enrich observation with file content size for $mcp_tool_call eventProperties
+				let totalContentChars = 0;
+				let totalContentBytes = 0;
+
+				for (const write of fileWrites) {
+					if (write.content) {
+						const contentBytes = Buffer.byteLength(write.content, "utf8");
+						const contentChars = write.content.length;
+						const contentHash = computeContentHash(write.content);
+						const fileExtension = getFileExtension(write.path);
+
+						totalContentChars += contentChars;
+						totalContentBytes += contentBytes;
+						importSession.totalChars += contentChars;
+						importSession.totalBytes += contentBytes;
+						importSession.fileWrites.add(write.path);
+
+						const writeProps = {
+							file_path: write.path,
+							file_extension: fileExtension,
+							char_count: contentChars,
+							byte_count: contentBytes,
+							content_sha256: contentHash,
+							is_bulk: sqlAnalysis?.isBulk ?? false,
+							source: "mcp" as const,
+							verified: true,
+							hash_match: true,
+							lix_id: observation.lixId,
+							repository_id: observation.lixId,
+							organization_id: undefined,
+						};
+
+						lixrTelemetry.captureFileWritten(writeProps);
+
+						if (!importSession.firstFileAdded) {
+							importSession.firstFileAdded = true;
+							lixrTelemetry.captureFirstFileAdded(writeProps);
+						}
+					}
+				}
+
+				// Add file content size to observation for $mcp_tool_call eventProperties
+				if (totalContentChars > 0) {
+					observation.fileContentCharCount = totalContentChars;
+					observation.fileContentByteCount = totalContentBytes;
+				}
+			}
+
 			telemetry?.onToolCall(observation);
+
 			if (
 				authResult.auth.isDemo ||
 				observation.outcome !== "success" ||
@@ -296,6 +383,24 @@ export async function handleRequest(
 		const cleanup = async (): Promise<void> => {
 			await Promise.all(pendingConnectionRecords);
 			scheduleMcpTelemetryFlush(executionContext, telemetry);
+			if (lixrTelemetry) {
+				if (importSession.fileWrites.size > 0) {
+					lixrTelemetry.captureImportCompleted({
+						file_count: importSession.fileWrites.size,
+						char_count: importSession.totalChars,
+						byte_count: importSession.totalBytes,
+						tool_call_count: importSession.toolCallCount,
+						duration_ms: Date.now() - importSession.startTime,
+						is_bulk: importSession.fileWrites.size > 1,
+						lix_id: importSession.lixId,
+						repository_id: importSession.lixId,
+					});
+				}
+				const flushWork = lixrTelemetry.flush().catch((caught: unknown) => {
+					console.warn("Failed to flush Lixr MCP telemetry", caught);
+				});
+				executionContext.waitUntil(flushWork);
+			}
 			await client.close();
 		};
 		try {
