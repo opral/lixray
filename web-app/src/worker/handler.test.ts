@@ -129,7 +129,7 @@ void test("protected resource discovery is public and precedes the frontend fall
 	assert.deepEqual(await response.json(), {
 		resource: MCP_RESOURCE,
 		authorization_servers: ["https://supabase.example.test/auth/v1"],
-		scopes_supported: ["openid", "email", "profile"],
+		scopes_supported: ["openid", "email", "profile", "offline_access"],
 		resource_documentation: "https://lixray.com/mcp/docs",
 	});
 });
@@ -145,7 +145,7 @@ void test("localhost discovery isolates its OAuth resource from production", asy
 	assert.deepEqual(await response.json(), {
 		resource: "http://localhost:8787",
 		authorization_servers: ["http://127.0.0.1:54321/auth/v1"],
-		scopes_supported: ["openid", "email", "profile"],
+		scopes_supported: ["openid", "email", "profile", "offline_access"],
 		resource_documentation: "http://localhost:8787/mcp/docs",
 	});
 });
@@ -162,7 +162,7 @@ void test("local MCP tokens cannot be replayed against production or another loc
 		client_id: "codex-local",
 		resource: "http://127.0.0.1:8787",
 		lixray_mcp: true,
-		scope: "openid email profile",
+		scope: "openid email profile offline_access",
 	};
 
 	assert.equal(
@@ -731,7 +731,7 @@ void test("MCP JWT claims require issuer, audience, expiry, OAuth client, and re
 		client_id: "chatgpt-client",
 		resource: MCP_RESOURCE,
 		lixray_mcp: true,
-		scope: "openid email profile",
+		scope: "openid email profile offline_access",
 	};
 	assert.deepEqual(validateMcpJwtClaims(valid, issuer, now), {
 		ok: true,

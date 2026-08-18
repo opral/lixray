@@ -31,6 +31,10 @@ assert.equal(
 );
 assert.ok(Array.isArray(resource.authorization_servers));
 assert.ok(resource.authorization_servers.length > 0);
+assert.ok(
+	resource.scopes_supported?.includes("offline_access"),
+	"protected resource must advertise offline_access so clients persist refresh tokens",
+);
 
 for (const issuer of resource.authorization_servers) {
 	const metadataUrl = new URL(issuer);
