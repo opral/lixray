@@ -188,7 +188,12 @@ void test("Lixr MCP telemetry does not log file content", async () => {
 
 	assert.equal(captured[0]?.event, "lixr_file_written");
 	assert.equal(captured[0]?.properties?.file_path, "/private-file.txt");
-	assert.equal(captured[0]?.properties?.content_sha256?.length, 64);
+	assert.equal(
+		typeof captured[0]?.properties?.content_sha256 === "string"
+			? captured[0].properties.content_sha256.length
+			: 0,
+		64,
+	);
 	assert.doesNotMatch(
 		JSON.stringify(captured),
 		/private content|secret data|confidential/i,
