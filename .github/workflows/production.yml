@@ -16,8 +16,11 @@ permissions:
 jobs:
   images:
     name: Resolve tested images
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Cache hits still only inspect and retag. A miss builds the missing
+    # content tag so interleaved merges cannot leave main red. PR CI already
+    # uses this runner; 5 minutes on ubuntu-latest cannot finish a real build.
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 40
     environment: production
     permissions:
       contents: read
@@ -56,18 +59,8 @@ jobs:
             echo "supabase_key=$VITE_SUPABASE_KEY"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Resolve immutable images
-        id: resolve
+      - name: Compute content-addressed image names
+        id: identity
         shell: bash
         env:
           POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST }}
@@ -75,6 +68,8 @@ jobs:
           SUPABASE_URL: ${{ steps.config.outputs.supabase_url }}
           SUPABASE_KEY: ${{ steps.config.outputs.supabase_key }}
         run: |
+          # Keep these inputs identical to .github/workflows/pr.yml.
+          tree="$(git rev-parse 'HEAD^{tree}')"
           server_inputs="$(
             {
               git ls-tree HEAD -- \
@@ -99,25 +94,130 @@ jobs:
                 "$POSTHOG_HOST" "$POSTHOG_TOKEN" "$SUPABASE_URL" "$SUPABASE_KEY"
             } | git hash-object --stdin
           )"
+          server_repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server"
+          web_repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-web"
+          {
+            echo "tree=$tree"
+            echo "server_repository=$server_repository"
+            echo "server_content_tag=$server_repository:server-$server_inputs"
+            echo "server_tree_tag=$server_repository:tree-$tree"
+            echo "web_repository=$web_repository"
+            echo "web_content_tag=$web_repository:web-$web_inputs"
+            echo "web_tree_tag=$web_repository:tree-$tree"
+          } >> "$GITHUB_OUTPUT"
 
-          for service_and_inputs in "server:$server_inputs" "web:$web_inputs"; do
-            service="${service_and_inputs%%:*}"
-            inputs="${service_and_inputs#*:}"
-            repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-$service"
-            content_tag="$repository:$service-$inputs"
-            digest="$(
-              docker buildx imagetools inspect "$content_tag" \
-                --format '{{json .Manifest.Digest}}' 2>/dev/null |
-                tr -d '"' || true
-            )"
-            if test -z "$digest"; then
-              echo "Pull request CI must publish $content_tag before merge." >&2
-              exit 1
-            fi
-            image="$repository@$digest"
-            echo "$service=$image" >> "$GITHUB_OUTPUT"
-            echo "Resolved $service image: $image"
-          done
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check for existing images
+        id: existing
+        shell: bash
+        env:
+          SERVER_CONTENT_TAG: ${{ steps.identity.outputs.server_content_tag }}
+          WEB_CONTENT_TAG: ${{ steps.identity.outputs.web_content_tag }}
+        run: |
+          inspect_digest() {
+            docker buildx imagetools inspect "$1" \
+              --format '{{json .Manifest.Digest}}' 2>/dev/null |
+              tr -d '"'
+          }
+
+          if digest="$(inspect_digest "$SERVER_CONTENT_TAG")" && test -n "$digest"; then
+            echo "server_digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "server_found=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing published server image $SERVER_CONTENT_TAG"
+          else
+            echo "server_found=false" >> "$GITHUB_OUTPUT"
+            echo "Server content tag $SERVER_CONTENT_TAG is missing; building it."
+          fi
+
+          if digest="$(inspect_digest "$WEB_CONTENT_TAG")" && test -n "$digest"; then
+            echo "web_digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "web_found=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing published web image $WEB_CONTENT_TAG"
+          else
+            echo "web_found=false" >> "$GITHUB_OUTPUT"
+            echo "Web content tag $WEB_CONTENT_TAG is missing; building it."
+          fi
+
+      - name: Check out image build inputs
+        if: steps.existing.outputs.server_found != 'true' || steps.existing.outputs.web_found != 'true'
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build and push server image
+        id: build-server
+        if: steps.existing.outputs.server_found != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: lix-server/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.identity.outputs.server_content_tag }}
+            ${{ steps.identity.outputs.server_tree_tag }}
+          build-args: |
+            CARGO_BUILD_JOBS=32
+          cache-from: type=gha,scope=lix-server-release
+          cache-to: type=gha,mode=max,scope=lix-server-release
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Build and push web image
+        id: build-web
+        if: steps.existing.outputs.web_found != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web-app/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.identity.outputs.web_content_tag }}
+            ${{ steps.identity.outputs.web_tree_tag }}
+          build-args: |
+            VITE_SUPABASE_URL=${{ steps.config.outputs.supabase_url }}
+            VITE_SUPABASE_KEY=${{ steps.config.outputs.supabase_key }}
+            VITE_PUBLIC_POSTHOG_TOKEN=${{ vars.VITE_PUBLIC_POSTHOG_TOKEN }}
+            VITE_PUBLIC_POSTHOG_HOST=${{ vars.VITE_PUBLIC_POSTHOG_HOST }}
+            VITE_PUBLIC_TELEMETRY_ENVIRONMENT=production
+            RAILWAY_GIT_COMMIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=lixray-web-release
+          # The maximal cache includes a multi-gigabyte builder layer. Uploading
+          # it took 8+ minutes, longer than rebuilding the web image from scratch.
+          # Keep only the final-image layers used by subsequent releases.
+          cache-to: type=gha,mode=min,scope=lixray-web-release
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Resolve immutable images
+        id: resolve
+        shell: bash
+        env:
+          SERVER_BUILT_DIGEST: ${{ steps.build-server.outputs.digest }}
+          SERVER_EXISTING_DIGEST: ${{ steps.existing.outputs.server_digest }}
+          SERVER_REPOSITORY: ${{ steps.identity.outputs.server_repository }}
+          WEB_BUILT_DIGEST: ${{ steps.build-web.outputs.digest }}
+          WEB_EXISTING_DIGEST: ${{ steps.existing.outputs.web_digest }}
+          WEB_REPOSITORY: ${{ steps.identity.outputs.web_repository }}
+        run: |
+          server_digest="${SERVER_BUILT_DIGEST:-$SERVER_EXISTING_DIGEST}"
+          web_digest="${WEB_BUILT_DIGEST:-$WEB_EXISTING_DIGEST}"
+          test -n "$server_digest"
+          test -n "$web_digest"
+          echo "server=$SERVER_REPOSITORY@$server_digest" >> "$GITHUB_OUTPUT"
+          echo "web=$WEB_REPOSITORY@$web_digest" >> "$GITHUB_OUTPUT"
+          echo "Resolved server image: $SERVER_REPOSITORY@$server_digest"
+          echo "Resolved web image: $WEB_REPOSITORY@$web_digest"
 
       - name: Publish main aliases without rebuilding
         shell: bash
