@@ -87,14 +87,22 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 				>
 					© 2026 Opral
 				</a>
-				<a
-					className="font-semibold text-[#57534e] no-underline"
-					href="https://github.com/opral"
-					target="_blank"
-					rel="noreferrer"
-				>
-					GitHub ↗
-				</a>
+				<nav className="flex flex-wrap items-center gap-4">
+					<Link className="no-underline hover:text-[#57534e]" to="/privacy">
+						Privacy
+					</Link>
+					<Link className="no-underline hover:text-[#57534e]" to="/terms">
+						Terms
+					</Link>
+					<a
+						className="font-semibold text-[#57534e] no-underline"
+						href="https://github.com/opral"
+						target="_blank"
+						rel="noreferrer"
+					>
+						GitHub ↗
+					</a>
+				</nav>
 			</footer>
 		</div>
 	);
