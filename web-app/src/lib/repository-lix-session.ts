@@ -2,7 +2,10 @@ import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk";
 import { OpfsStorage } from "@lix-js/storage-opfs";
 import { captureTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
-import { repositoryOpfsCacheName } from "./repository-opfs-cache.ts";
+import {
+	claimRepositoryBrowserReplicaId,
+	repositoryOpfsCacheName,
+} from "./repository-opfs-cache.ts";
 
 type TokenProvider = () => Promise<string | null>;
 
@@ -43,9 +46,15 @@ export interface RepositoryLixSession {
 export async function openRepositoryLixSession(
 	options: OpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
+	const resolvedOptions = options.authIdentity
+		? {
+				...options,
+				replicaId: await claimRepositoryBrowserReplicaId(options.authIdentity),
+			}
+		: options;
 	const lease = await acquireManagedRepositoryResource(
-		repositorySessionKey(options),
-		() => openRepositoryLixSessionWithRetry(options),
+		repositorySessionKey(resolvedOptions),
+		() => openRepositoryLixSessionWithRetry(resolvedOptions),
 	);
 	return new RepositoryLixSessionLease(lease.resource, () => lease.release());
 }

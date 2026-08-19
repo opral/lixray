@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	BROWSER_REPLICA_TAB_STORAGE_KEY,
 	REPOSITORY_OPFS_CACHE_NAMESPACE,
+	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
+	rotateRepositoryBrowserReplicaId,
+	tryClaimBrowserReplicaIdLock,
+	type BrowserReplicaLockManager,
 } from "./repository-opfs-cache.ts";
 
 void test("hard-cuts repository replicas away from the pre-protocol cache", () => {
@@ -47,4 +52,85 @@ void test("keeps anonymous repository and replica caches isolated", () => {
 		repositoryOpfsCacheName(base),
 		repositoryOpfsCacheName({ ...base, repositorySlug: "other" }),
 	);
+});
+
+void test("uses one warm-reopen replica per browser tab", () => {
+	const tabA = new Map<string, string>();
+	const tabB = new Map<string, string>();
+	const storage = (values: Map<string, string>) => ({
+		getItem: (key: string) => values.get(key) ?? null,
+		setItem: (key: string, value: string) => values.set(key, value),
+	});
+
+	const replicaA = repositoryBrowserReplicaId("account-123", {
+		storage: storage(tabA),
+		createId: () => "tab-a",
+	});
+	assert.equal(replicaA, "account-123:tab-a");
+	assert.equal(tabA.get(BROWSER_REPLICA_TAB_STORAGE_KEY), "tab-a");
+	assert.equal(
+		repositoryBrowserReplicaId("account-123", {
+			storage: storage(tabA),
+			createId: () => "unused",
+		}),
+		replicaA,
+	);
+	assert.equal(
+		repositoryBrowserReplicaId("account-123", {
+			storage: storage(tabB),
+			createId: () => "tab-b",
+		}),
+		"account-123:tab-b",
+	);
+	assert.notEqual(replicaA, "account-123:tab-b");
+	assert.equal(
+		rotateRepositoryBrowserReplicaId("account-123", {
+			storage: storage(tabA),
+			createId: () => "tab-a-rotated",
+		}),
+		"account-123:tab-a-rotated",
+	);
+	assert.equal(tabA.get(BROWSER_REPLICA_TAB_STORAGE_KEY), "tab-a-rotated");
+});
+
+void test("rotates a sessionStorage identity copied into another tab", () => {
+	const originalTab = new Map([[BROWSER_REPLICA_TAB_STORAGE_KEY, "copied"]]);
+	const duplicatedTab = new Map(originalTab);
+	const storage = (values: Map<string, string>) => ({
+		getItem: (key: string) => values.get(key) ?? null,
+		setItem: (key: string, value: string) => values.set(key, value),
+	});
+	assert.equal(
+		repositoryBrowserReplicaId("account-123", {
+			storage: storage(originalTab),
+		}),
+		repositoryBrowserReplicaId("account-123", {
+			storage: storage(duplicatedTab),
+		}),
+	);
+	assert.notEqual(
+		repositoryBrowserReplicaId("account-123", {
+			storage: storage(originalTab),
+		}),
+		rotateRepositoryBrowserReplicaId("account-123", {
+			storage: storage(duplicatedTab),
+			createId: () => "rotated-copy",
+		}),
+	);
+});
+
+void test("exclusively claims a copied browser replica identity", async () => {
+	const held = new Set<string>();
+	const locks: BrowserReplicaLockManager = {
+		async request(name, _options, callback) {
+			if (held.has(name)) {
+				await callback(null);
+				return;
+			}
+			held.add(name);
+			await callback({});
+		},
+	};
+	assert.equal(await tryClaimBrowserReplicaIdLock("copied", locks), true);
+	assert.equal(await tryClaimBrowserReplicaIdLock("copied", locks), false);
 });
