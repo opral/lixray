@@ -15,7 +15,7 @@
 		"ci:check": "tsc --noEmit && pnpm test:analytics && pnpm test:auth && pnpm test:docs && pnpm test:repository && pnpm test:railway-config && pnpm test:worker",
 		"ci:build": "vite build",
 		"ci:build:node": "node scripts/assert-railway-env.mjs && vite build && pnpm bundle:railway",
-		"bundle:railway": "pnpm exec esbuild dist/server/railway-server.js --bundle --platform=node --format=esm --packages=bundle '--external:node:*' '--banner:js=import { createRequire as createNodeRequire } from \"node:module\"; const require = createNodeRequire(import.meta.url);' --outfile=dist/server/railway-server.bundled.js && mv dist/server/railway-server.bundled.js dist/server/railway-server.js",
+		"bundle:railway": "pnpm exec esbuild dist/server/railway-server.js --bundle --platform=node --format=esm --packages=bundle '--external:node:*' '--banner:js=import { createRequire as createNodeRequire } from \"node:module\"; const require = createNodeRequire(import.meta.url);' --outfile=dist/server/railway-server.bundled.js && mv dist/server/railway-server.bundled.js dist/server/railway-server.js && node scripts/bake-node-wasm.mjs",
 		"prebuild": "pnpm lix:build && pnpm atelier:build",
 		"prelint": "pnpm lix:build && pnpm atelier:build && pnpm routes:generate",
 		"pretypecheck": "pnpm lix:build:native && pnpm atelier:build",
