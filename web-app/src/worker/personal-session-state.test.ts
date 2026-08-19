@@ -209,7 +209,6 @@ void test("a failed latest branch selection reconciles the last successful branc
 void test("demo preferences and tab-local review status survive a same-tab reload", async () => {
 	const storage = new MemoryStorage();
 	const preferences = createRepositoryPreferencesStore({
-		client: null,
 		userId: USER,
 		repositoryId: LIX,
 		storage,
@@ -220,7 +219,6 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 	});
 	assert.deepEqual(
 		await createRepositoryPreferencesStore({
-			client: null,
 			userId: USER,
 			repositoryId: LIX,
 			storage,
@@ -230,6 +228,15 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 			layout: { sizes: { left: 20, central: 50, right: 30 } },
 			review: { autoAcceptAgentChanges: false },
 		},
+	);
+	assert.equal(
+		await createRepositoryPreferencesStore({
+			userId: USER,
+			repositoryId: LIX,
+			storage: new MemoryStorage(),
+		}).load(),
+		null,
+		"a separate tab does not inherit user preferences",
 	);
 
 	const reviews = createRepositoryReviewStatusStore({
