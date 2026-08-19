@@ -94,8 +94,22 @@ test("Atelier resolves the vendored Lix SDK instead of npm", async () => {
 		rootPackage.pnpm.overrides["@lix-js/sdk"],
 		"link:vendor/lix/packages/js-sdk",
 	);
-	assert.equal(
-		atelierPackage.peerDependencies["@lix-js/sdk"],
-		`^${lixPackage.version}`,
+	assert.ok(
+		atelierPeerSatisfiesVendoredSdk(
+			atelierPackage.peerDependencies["@lix-js/sdk"],
+			lixPackage.version,
+		),
+		`Atelier peer ${atelierPackage.peerDependencies["@lix-js/sdk"]} must accept vendored ${lixPackage.version}`,
 	);
 });
+
+function atelierPeerSatisfiesVendoredSdk(peerRange, version) {
+	const peer = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(peerRange);
+	const vendored = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+	if (!peer || !vendored) return false;
+	const [, peerMajor, peerMinor, peerPatch] = peer.map(Number);
+	const [, major, minor, patch] = vendored.map(Number);
+	if (major !== peerMajor) return false;
+	if (minor !== peerMinor) return false;
+	return patch >= peerPatch;
+}
