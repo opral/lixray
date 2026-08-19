@@ -53,6 +53,22 @@ void test("production email sign-in status is disabled outside production", asyn
 	assert.deepEqual(await response.json(), { enabled: false });
 });
 
+void test("production email sign-in status is enabled in production", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/auth/email"),
+		env({
+			extra: {
+				RAILWAY_ENVIRONMENT_NAME: "production",
+			},
+		}),
+	);
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), {
+		enabled: true,
+		email: "dev@lixray.com",
+	});
+});
+
 void test("production email sign-in exchanges a password through Supabase", async () => {
 	let upstreamRequest: Request | null = null;
 	let upstreamBody: BodyInit | null | undefined;
@@ -93,6 +109,86 @@ void test("production email sign-in exchanges a password through Supabase", asyn
 		upstreamBody,
 		JSON.stringify({ email: "dev@lixray.com", password: "test-password" }),
 	);
+});
+
+void test("production email sign-in accepts the public origin behind a Railway host", async () => {
+	const productionEnv = env({
+		extra: {
+			RAILWAY_ENVIRONMENT_NAME: "production",
+			SUPABASE_URL: "https://project.supabase.co",
+			SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+		},
+	});
+	const invalidCredentials = {
+		error: "invalid_credentials",
+		msg: "Invalid login credentials",
+	};
+	const cases: Array<{ url: string; headers: Record<string, string> }> = [
+		{
+			url: "https://web-production.up.railway.app/auth/email",
+			headers: { origin: "https://lixray.com" },
+		},
+		{
+			url: "http://web-production.up.railway.app/auth/email",
+			headers: {
+				origin: "https://lixray.com",
+				"x-forwarded-host": "lixray.com",
+				"x-forwarded-proto": "https",
+			},
+		},
+	];
+
+	for (const testCase of cases) {
+		let reachedPasswordGrant = false;
+		const response = await handleRequest(
+			new Request(testCase.url, {
+				method: "POST",
+				headers: testCase.headers,
+				body: JSON.stringify({ password: "wrong-password" }),
+			}),
+			productionEnv,
+			{
+				fetch: async () => {
+					reachedPasswordGrant = true;
+					return Response.json(invalidCredentials, { status: 400 });
+				},
+			},
+		);
+		assert.equal(response.status, 400, testCase.url);
+		assert.equal(reachedPasswordGrant, true, testCase.url);
+		assert.deepEqual(await response.json(), invalidCredentials);
+	}
+});
+
+void test("production email sign-in rejects a cross-origin POST", async () => {
+	let reachedPasswordGrant = false;
+	const response = await handleRequest(
+		new Request("https://web-production.up.railway.app/auth/email", {
+			method: "POST",
+			headers: {
+				origin: "https://evil.example",
+				"x-forwarded-host": "evil.example",
+				"x-forwarded-proto": "https",
+			},
+			body: JSON.stringify({ password: "test-password" }),
+		}),
+		env({
+			extra: {
+				RAILWAY_ENVIRONMENT_NAME: "production",
+				SUPABASE_URL: "https://project.supabase.co",
+				SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+			},
+		}),
+		{
+			fetch: async () => {
+				reachedPasswordGrant = true;
+				return Response.json({ access_token: "should-not-run" });
+			},
+		},
+	);
+	assert.equal(response.status, 403);
+	assert.equal(await response.text(), "Forbidden\n");
+	assert.equal(reachedPasswordGrant, false);
 });
 
 void test("non-/v1 routes delegate to the frontend fallback", async () => {
