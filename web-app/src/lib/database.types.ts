@@ -347,44 +347,6 @@ export type Database = {
 					},
 				];
 			};
-			user_lix_review_resolutions: {
-				Row: {
-					branch_id: string;
-					file_id: string;
-					lix_id: string;
-					outcome: string;
-					resolved_at: string;
-					review_id: string;
-					user_id: string;
-				};
-				Insert: {
-					branch_id: string;
-					file_id: string;
-					lix_id: string;
-					outcome: string;
-					resolved_at?: string;
-					review_id: string;
-					user_id: string;
-				};
-				Update: {
-					branch_id?: string;
-					file_id?: string;
-					lix_id?: string;
-					outcome?: string;
-					resolved_at?: string;
-					review_id?: string;
-					user_id?: string;
-				};
-				Relationships: [
-					{
-						foreignKeyName: "user_lix_review_resolutions_lix_id_fkey";
-						columns: ["lix_id"];
-						isOneToOne: false;
-						referencedRelation: "lixes";
-						referencedColumns: ["id"];
-					},
-				];
-			};
 			user_primary_namespaces: {
 				Row: {
 					created_at: string;
