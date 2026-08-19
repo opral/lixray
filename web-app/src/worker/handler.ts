@@ -176,6 +176,7 @@ type McpClaimsValidation =
 const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
 const PROD_DEV_AUTH_PATH = "/auth/email";
 const PROD_DEV_EMAIL = "dev@lixray.com";
+const PUBLIC_PRODUCTION_ORIGIN = "https://lixray.com";
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
@@ -610,7 +611,7 @@ async function handleProdDevAuth(
 	if (!email) return new Response("Not found\n", { status: 404 });
 
 	const origin = request.headers.get("origin");
-	if (origin && origin !== new URL(request.url).origin) {
+	if (origin && !isTrustedProdDevAuthOrigin(request, origin)) {
 		return new Response("Forbidden\n", { status: 403 });
 	}
 
@@ -667,6 +668,42 @@ function productionDevEmail(env: WorkerEnv): string | null {
 	return env.RAILWAY_ENVIRONMENT_NAME?.trim() === "production"
 		? PROD_DEV_EMAIL
 		: null;
+}
+
+/**
+ * Same-site CSRF check for the production developer password grant.
+ *
+ * `request.url` behind Cloudflare/Railway is often the internal service
+ * host (and may be `http:`), while the browser sends
+ * `Origin: https://lixray.com`. Accept the public production origin and
+ * a matching forwarded host/proto, but never an arbitrary third-party
+ * Origin — even if `X-Forwarded-Host` is spoofed.
+ */
+function isTrustedProdDevAuthOrigin(request: Request, origin: string): boolean {
+	const trusted = new Set<string>([
+		new URL(request.url).origin,
+		PUBLIC_PRODUCTION_ORIGIN,
+	]);
+	const forwarded = originFromForwardedHeaders(request);
+	if (forwarded) trusted.add(forwarded);
+	return trusted.has(origin);
+}
+
+function originFromForwardedHeaders(request: Request): string | null {
+	const host = firstForwardedValue(request.headers.get("x-forwarded-host"));
+	const proto = firstForwardedValue(request.headers.get("x-forwarded-proto"));
+	if (!host || (proto !== "http" && proto !== "https")) return null;
+	try {
+		const origin = new URL(`${proto}://${host}`).origin;
+		return origin === PUBLIC_PRODUCTION_ORIGIN ? origin : null;
+	} catch {
+		return null;
+	}
+}
+
+function firstForwardedValue(value: string | null): string | null {
+	const first = value?.split(",")[0]?.trim();
+	return first && first.length > 0 ? first : null;
 }
 
 async function fetchLixRequest(
