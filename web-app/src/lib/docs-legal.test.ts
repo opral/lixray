@@ -13,6 +13,7 @@ function readDocs(name: string): string {
 
 void test("legal docs name Opral US Inc. and Delaware law", () => {
 	const privacy = readDocs("privacy.md");
+	const support = readDocs("support.md");
 	const terms = readDocs("terms.md");
 	const toc = JSON.parse(readDocs("table_of_content.json")) as Record<
 		string,
@@ -48,8 +49,14 @@ void test("legal docs name Opral US Inc. and Delaware law", () => {
 		/Common Paper|cover page|Cloud Service Agreement|Provider Covered Claims/,
 	);
 
+	assert.match(support, /For help with LixRay, email/);
+	assert.match(support, /\[hello@opral\.com\]\(mailto:hello@opral\.com\)/);
+	assert.match(support, /\*\*Opral US Inc\.\*\*/);
+	assert.doesNotMatch(support, /phone|chat widget|SLA|ticket|live chat/i);
+
 	for (const [name, text] of [
 		["privacy.md", privacy],
+		["support.md", support],
 		["terms.md", terms],
 	] as const) {
 		assert.doesNotMatch(text, /Germany|Berlin|GmbH|€/, name);
@@ -66,8 +73,44 @@ void test("legal docs name Opral US Inc. and Delaware law", () => {
 		renderDocsMarkdown(privacy).html,
 		/<h1 id="lixray-privacy-policy">LixRay Privacy Policy/,
 	);
+	assert.match(renderDocsMarkdown(support).html, /<h1 id="support">Support/);
+	assert.match(
+		renderDocsMarkdown(support).html,
+		/<a href="mailto:hello@opral.com">hello@opral.com<\/a>/,
+	);
 	assert.match(
 		renderDocsMarkdown(terms).html,
 		/<h1 id="lixray-terms-of-service">LixRay Terms of Service/,
 	);
+});
+
+void test("public legal pages live at root URLs and appear in site footers", () => {
+	const webAppSrc = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+	for (const slug of ["privacy", "support", "terms"] as const) {
+		const route = readFileSync(
+			join(webAppSrc, "routes", `${slug}.tsx`),
+			"utf8",
+		);
+		assert.match(route, new RegExp(`createFileRoute\\("/${slug}"\\)`));
+		assert.match(route, new RegExp(`slug="${slug}"`));
+	}
+
+	const docsRoute = readFileSync(
+		join(webAppSrc, "routes", "docs.$slug.tsx"),
+		"utf8",
+	);
+	assert.match(docsRoute, /slug === "support".*to="\/support"/s);
+
+	for (const file of [
+		"legal-page.tsx",
+		"landing-page.tsx",
+		"docs-page.tsx",
+		"vs-github-page.tsx",
+	] as const) {
+		const source = readFileSync(join(webAppSrc, "components", file), "utf8");
+		assert.match(source, /to="\/privacy"/, file);
+		assert.match(source, /to="\/terms"/, file);
+		assert.match(source, /to="\/support"/, file);
+	}
 });
