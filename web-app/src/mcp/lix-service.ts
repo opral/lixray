@@ -267,26 +267,26 @@ export class LixService {
 	async openLix(lixRef: string, branchId?: string): Promise<OpenedLixContext> {
 		const repository = await this.resolveLixSummary(lixRef);
 		const lixId = repository.id;
-		const cacheHit = this.client.hasOpenRuntime(lixId);
 		const selectedBranchId = branchId
 			? (await this.client.switchBranch(lixId, branchId)).branchId
 			: await this.client.activeBranchId(lixId);
 		const issuedContext = await this.issueContext(lixId, selectedBranchId);
-		if (cacheHit) {
-			this.client.bindSession({
-				lixId,
-				branchId: selectedBranchId,
-				accountId: this.principal.userId,
-				organizationId: repository.namespace.id,
-			});
-		}
+		const commitId = await this.commitId(lixId, selectedBranchId);
+		// Bind the OAuth / principal account on every successful signed-context
+		// mint. Cache-admit's anonymous `open_lix` bind is not the product event.
+		this.client.bindSession({
+			lixId,
+			branchId: selectedBranchId,
+			accountId: this.principal.userId,
+			organizationId: repository.namespace.id,
+		});
 		return {
 			context: issuedContext.token,
 			contextExpiresAt: new Date(issuedContext.expiresAt).toISOString(),
 			lixId,
 			lixRef: `@${repository.namespace.handle}/${repository.slug}`,
 			branchId: selectedBranchId,
-			commitId: await this.commitId(lixId, selectedBranchId),
+			commitId,
 		};
 	}
 

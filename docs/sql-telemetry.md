@@ -37,9 +37,9 @@ LixRay's host sink is the only writer of the PostHog product event
 `repository_opened`. On lix-server, `HostTelemetrySink` watches completed
 `lix.opened` spans and `capture()`s that event with the session account as
 `distinct_id`. In-process WASM uses the same mapping from `onSpan` when
-`span.name` is `lix.opened`. MCP `open_lix` calls `bindSession` when it mints a
-signed context against an already-open runtime; cache-admit alone does not
-bind.
+`span.name` is `lix.opened`. MCP `open_lix` calls `bindSession` on every
+successful signed-context mint, cache-hit or miss, with the OAuth / principal
+account. Cache-admit's anonymous `open_lix` bind is not the product event.
 
 Identity is the OAuth / session account so the same person on web and MCP is
 one WAU. Anonymous and demo accounts are not captured. Optional `source`
