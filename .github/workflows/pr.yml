@@ -630,12 +630,23 @@ jobs:
         if: steps.credentials.outputs.available == 'true'
         shell: bash
         run: |
-          services="$(
-            railway service list \
-              --project "$RAILWAY_PROJECT_ID" \
-              --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
-              --json
-          )"
+          services=
+          for attempt in 1 2 3; do
+            if services="$(
+              railway service list \
+                --project "$RAILWAY_PROJECT_ID" \
+                --environment "$RAILWAY_PRODUCTION_ENVIRONMENT" \
+                --json
+            )" && jq -e 'type == "array"' >/dev/null <<<"$services"; then
+              break
+            fi
+            if test "$attempt" -eq 3; then
+              echo "Railway service discovery failed after $attempt attempts." >&2
+              exit 1
+            fi
+            echo "::warning::Railway service discovery failed on attempt $attempt; retrying."
+            sleep "$((attempt * 5))"
+          done
           for service_id in "$RAILWAY_SERVER_SERVICE" "$RAILWAY_WEB_SERVICE"; do
             service="$(jq -c --arg id "$service_id" '.[] | select(.id == $id)' <<<"$services")"
             test -n "$service"
