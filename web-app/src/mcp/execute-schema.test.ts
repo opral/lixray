@@ -51,6 +51,10 @@ void test("SQL guidance models the public Lix surfaces", () => {
 	assert.match(EXECUTE_SQL_TABLES_QUERY, /information_schema\.tables/);
 	assert.match(EXECUTE_SQL_COLUMNS_QUERY, /information_schema\.columns/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /current Lix session/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /current Lix session/);
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /lixcol_branch_id/);
+	assert.doesNotMatch(QUERY_SQL_TOOL_DESCRIPTION, /lixcol_branch_id/);
 });
 
 void test("SQL tool descriptions use CAST plus kind text for file content", () => {
