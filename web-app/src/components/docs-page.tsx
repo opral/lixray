@@ -94,6 +94,9 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 					<Link className="no-underline hover:text-[#57534e]" to="/terms">
 						Terms
 					</Link>
+					<Link className="no-underline hover:text-[#57534e]" to="/support">
+						Support
+					</Link>
 					<a
 						className="font-semibold text-[#57534e] no-underline"
 						href="https://github.com/opral"
