@@ -1,6 +1,8 @@
 import process from "node:process";
 import startHandler from "@tanstack/react-start/server-entry";
 import { addGoogleAnalytics } from "./lib/google-analytics";
+import { lixServiceRequestHeaders } from "./lib/lix-service-proxy";
+import { parseSqlScript as parseNodeSqlScript } from "./lib/node-lix-sql-parser";
 import { withShareSecurityHeaders } from "./lib/share-security";
 import {
 	handleRequest,
@@ -63,7 +65,9 @@ export async function fetchLixService(
 	targetUrl.pathname = `/lixes/${encodeURIComponent(lixId)}${sourceUrl.pathname}`;
 	targetUrl.search = sourceUrl.search;
 
-	const headers = new Headers(request.headers);
-	headers.set("authorization", `Bearer ${env.LIXRAY_INTERNAL_TOKEN}`);
+	const headers = lixServiceRequestHeaders(
+		request.headers,
+		env.LIXRAY_INTERNAL_TOKEN,
+	);
 	return fetch(new Request(targetUrl, request), { headers });
 }
