@@ -140,9 +140,11 @@ export async function tryClaimBrowserReplicaIdLock(
 					await new Promise<never>(() => undefined);
 				},
 			);
-			void request.catch(reject);
+			void request.catch((error: unknown) =>
+				reject(error instanceof Error ? error : new Error(String(error))),
+			);
 		} catch (error) {
-			reject(error);
+			reject(error instanceof Error ? error : new Error(String(error)));
 		}
 	});
 }
