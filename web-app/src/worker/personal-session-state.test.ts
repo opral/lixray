@@ -6,7 +6,6 @@ import {
 	createRepositoryReviewStatusStore,
 	createRepositorySessionStateStore,
 } from "../lib/atelier-state.ts";
-import type { LixraySupabaseClient } from "../lib/supabase.ts";
 import {
 	openRepositoryLixSession,
 	type RepositoryLixSession,
@@ -207,7 +206,7 @@ void test("a failed latest branch selection reconciles the last successful branc
 	);
 });
 
-void test("demo preferences and review status survive a same-tab reload", async () => {
+void test("demo preferences and tab-local review status survive a same-tab reload", async () => {
 	const storage = new MemoryStorage();
 	const preferences = createRepositoryPreferencesStore({
 		client: null,
@@ -234,7 +233,6 @@ void test("demo preferences and review status survive a same-tab reload", async 
 	);
 
 	const reviews = createRepositoryReviewStatusStore({
-		client: null,
 		userId: USER,
 		repositoryId: LIX,
 		storage,
@@ -247,7 +245,6 @@ void test("demo preferences and review status survive a same-tab reload", async 
 	});
 	assert.deepEqual(
 		await createRepositoryReviewStatusStore({
-			client: null,
 			userId: USER,
 			repositoryId: LIX,
 			storage,
@@ -256,73 +253,22 @@ void test("demo preferences and review status survive a same-tab reload", async 
 	);
 	assert.deepEqual(
 		await createRepositoryReviewStatusStore({
-			client: null,
 			userId: OTHER_USER,
 			repositoryId: LIX,
 			storage,
 		}).loadResolvedReviewIds(DRAFT),
 		[],
 	);
-});
-
-void test("failed remote review persistence survives tab loss and retries idempotently", async () => {
-	const durableStorage = new MemoryStorage();
-	const remoteReviewIds = new Set<string>();
-	let upsertAttempts = 0;
-	const client = fakeReviewClient({
-		load: () => [...remoteReviewIds],
-		upsert: (row) => {
-			upsertAttempts += 1;
-			if (upsertAttempts === 1) return new Error("temporarily unavailable");
-			remoteReviewIds.add(row.review_id);
-			return null;
-		},
-	});
-	const reviews = createRepositoryReviewStatusStore({
-		client,
-		userId: USER,
-		repositoryId: LIX,
-		durableStorage,
-	});
-
-	await reviews.resolve({
-		branchId: DRAFT,
-		reviewId: "review-outbox",
-		fileId: "file-outbox",
-		outcome: "rejected",
-	});
-	assert.equal(upsertAttempts, 1);
 	assert.deepEqual(
 		await createRepositoryReviewStatusStore({
-			client: null,
 			userId: USER,
 			repositoryId: LIX,
-			storage: durableStorage,
+			storage: new MemoryStorage(),
 		}).loadResolvedReviewIds(DRAFT),
-		["review-outbox"],
-		"the local acknowledgement is durable before the remote write succeeds",
-	);
-
-	const freshTab = createRepositoryReviewStatusStore({
-		client,
-		userId: USER,
-		repositoryId: LIX,
-		durableStorage,
-	});
-	assert.deepEqual(await freshTab.loadResolvedReviewIds(DRAFT), [
-		"review-outbox",
-	]);
-	assert.equal(upsertAttempts, 2);
-	assert.deepEqual(await freshTab.loadResolvedReviewIds(DRAFT), [
-		"review-outbox",
-	]);
-	assert.equal(
-		upsertAttempts,
-		2,
-		"a flushed outbox entry is not retried again",
+		[],
+		"a separate tab does not inherit review-resolution state",
 	);
 });
-
 void test("lix sessions use unified remote Lix with session-local branch state and rebound observations", async (t) => {
 	const executeBranches: string[] = [];
 	const createBodies: unknown[] = [];
@@ -472,60 +418,6 @@ void test("lix sessions use unified remote Lix with session-local branch state a
 	assert.equal(requestPaths[0], "/@acme/launch-q3/lix/v1/");
 	assert.ok(requestPaths.includes("/@acme/launch-q3/lix/v1/observe/multiplex"));
 });
-
-type RemoteReviewRow = {
-	review_id: string;
-};
-
-function fakeReviewClient(args: {
-	load: () => string[];
-	upsert: (row: RemoteReviewRow) => Error | null;
-}): LixraySupabaseClient {
-	return {
-		from: () => new FakeReviewQuery(args),
-	} as unknown as LixraySupabaseClient;
-}
-
-class FakeReviewQuery {
-	readonly #args: {
-		load: () => string[];
-		upsert: (row: RemoteReviewRow) => Error | null;
-	};
-
-	constructor(args: {
-		load: () => string[];
-		upsert: (row: RemoteReviewRow) => Error | null;
-	}) {
-		this.#args = args;
-	}
-
-	select(): this {
-		return this;
-	}
-
-	eq(): this {
-		return this;
-	}
-
-	async upsert(row: RemoteReviewRow): Promise<{ error: Error | null }> {
-		return { error: this.#args.upsert(row) };
-	}
-
-	then<TResult1 = { data: RemoteReviewRow[]; error: null }, TResult2 = never>(
-		onfulfilled?:
-			| ((value: {
-					data: RemoteReviewRow[];
-					error: null;
-			  }) => TResult1 | PromiseLike<TResult1>)
-			| null,
-		onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
-	): Promise<TResult1 | TResult2> {
-		return Promise.resolve({
-			data: this.#args.load().map((review_id) => ({ review_id })),
-			error: null,
-		}).then(onfulfilled, onrejected);
-	}
-}
 
 class MemoryStorage implements Storage {
 	readonly #values = new Map<string, string>();

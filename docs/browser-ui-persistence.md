@@ -10,8 +10,8 @@ Lixray deliberately separates repository data from browser UI state.
   it.
 - Authenticated user preferences are stored in `user_lix_preferences` through
   Supabase. Anonymous/demo preferences use `sessionStorage`.
-- Review-resolution state keeps its existing account-backed persistence and
-  offline browser staging.
+- Review-resolution state is transient tab-local state in `sessionStorage`.
+  It is not persisted in the LixRay control-plane database.
 
 This follows the browser's ownership model: repository state belongs to Lix,
 durable user preferences belong to the user account, and transient window/tab

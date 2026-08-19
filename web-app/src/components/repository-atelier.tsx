@@ -820,7 +820,6 @@ export function RepositoryAtelier({
 						repositoryId,
 					}),
 					reviewStatusStore: createRepositoryReviewStatusStore({
-						client: canEdit ? client : null,
 						userId: atelierUserId,
 						repositoryId,
 					}),
