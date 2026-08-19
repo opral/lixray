@@ -23,14 +23,18 @@ export type ValidatedInitialSession =
 	| { kind: "authenticated"; session: Session }
 	| { kind: "signed_out" }
 	| { kind: "orphaned"; error: unknown }
-	| { kind: "validation_failed"; error: unknown };
+	| { kind: "validation_failed"; error: unknown; session?: Session };
 
 export async function loadValidatedInitialSession(
 	auth: PersistedSessionAuth,
 ): Promise<ValidatedInitialSession> {
 	const sessionResponse = await auth.getSession();
 	if (sessionResponse.error) {
-		return { kind: "validation_failed", error: sessionResponse.error };
+		return {
+			kind: "validation_failed",
+			error: sessionResponse.error,
+			session: sessionResponse.data.session ?? undefined,
+		};
 	}
 	if (!sessionResponse.data.session) return { kind: "signed_out" };
 
@@ -47,7 +51,11 @@ export async function loadValidatedInitialSession(
 	if (!userResponse.data.user && isOrphanedAuthError(userResponse.error)) {
 		return { kind: "orphaned", error: userResponse.error };
 	}
-	return { kind: "validation_failed", error: userResponse.error };
+	return {
+		kind: "validation_failed",
+		error: userResponse.error,
+		session: sessionResponse.data.session,
+	};
 }
 
 export function isOrphanedAuthError(error: unknown): boolean {

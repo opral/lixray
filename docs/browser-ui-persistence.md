@@ -2,8 +2,9 @@
 
 Lixray deliberately separates repository data from browser UI state.
 
-- The remote Lix is the sole repository authority. Opening it does not create a
-  second local IndexedDB-backed Lix.
+- The server remains the repository authority. Atelier opens one durable OPFS
+  replica in `server.mode: "sync"`; reads and writes use that local replica while
+  synchronization runs outside the interaction path.
 - Atelier shell state (open views, focus, and other tab-local navigation) is
   stored in `sessionStorage`, namespaced by account and repository. Each browser
   tab therefore has an independent workspace, while reloads in that tab restore

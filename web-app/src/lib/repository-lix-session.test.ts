@@ -1,9 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-	openRepositoryLixSession,
+	createTelemetryFetch,
 	parseLixrayServerTiming,
+	repositorySessionKey,
 } from "./repository-lix-session.ts";
+
+void test("isolates managed OPFS sessions by replica identity", () => {
+	const repository = {
+		namespace: "acme",
+		repositorySlug: "launch-q3",
+		origin: "https://lixray.test",
+		getAccessToken: async () => null,
+	};
+
+	assert.notEqual(
+		repositorySessionKey({ ...repository, replicaId: "anonymous" }),
+		repositorySessionKey({ ...repository, replicaId: "account-123" }),
+	);
+});
 
 void test("parses the Lixray and Lix Server-Timing hard cut", () => {
 	assert.deepEqual(
@@ -19,120 +34,44 @@ void test("parses the Lixray and Lix Server-Timing hard cut", () => {
 	);
 });
 
-void test("retries a recovering repository until its handshake succeeds", async (t) => {
-	let handshakeAttempts = 0;
-	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-		const request =
-			input instanceof Request
-				? input
-				: new Request(new URL(input, "https://lixray.test"), init);
-		const pathname = new URL(request.url).pathname;
-		if (pathname.endsWith("/lix/v1/")) {
-			handshakeAttempts += 1;
-			if (handshakeAttempts < 3) {
-				return Response.json(
-					{
-						error: {
-							code: "LIX_ERROR_LIX_RECOVERING",
-							message: "The lix is recovering.",
-						},
-					},
-					{ status: 503 },
-				);
-			}
-			return Response.json({
-				protocolVersion: 2,
-				activeBranchId: "main",
-				activeAccountId: "00000000-0000-7000-8000-000000000002",
-				sessionId: "recovered-session",
-			});
-		}
-		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
-			return new Response(null, { status: 204 });
-		}
-		return new Response("Not found", { status: 404 });
-	};
-
-	const session = await openRepositoryLixSession({
-		namespace: "acme",
-		repositorySlug: "launch-q3",
-		replicaId: "test-user",
-		origin: "https://lixray.test",
-		getAccessToken: async () => "token",
-		fetch,
-	});
-	t.after(() => session.close());
-
-	assert.equal(handshakeAttempts, 3);
-	assert.equal(session.activeBranchSnapshot(), "main");
-});
-
-void test("refreshes an expired access token and retries the remote request once", async (t) => {
-	let accessToken = "expired-token";
+void test("refreshes an expired access token and retries a sync request once", async () => {
 	let refreshCalls = 0;
-	let executeAttempts = 0;
+	let attempts = 0;
 	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 		const request =
 			input instanceof Request
 				? new Request(input, init)
 				: new Request(new URL(input, "https://lixray.test"), init);
-		const pathname = new URL(request.url).pathname;
-		if (pathname.endsWith("/lix/v1/")) {
-			return Response.json({
-				protocolVersion: 2,
-				activeBranchId: "main",
-				activeAccountId: "00000000-0000-7000-8000-000000000002",
-				sessionId: "fresh-session",
-			});
+		attempts += 1;
+		if (attempts === 1) {
+			assert.equal(
+				request.headers.get("authorization"),
+				"Bearer expired-token",
+			);
+			return new Response("Unauthorized\n", { status: 401 });
 		}
-		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
-			return new Response(null, { status: 204 });
-		}
-		if (
-			pathname.endsWith("/lix/v1/execute") ||
-			pathname.endsWith("/lix/v1/execute-batch")
-		) {
-			executeAttempts += 1;
-			if (executeAttempts === 1) {
-				assert.equal(
-					request.headers.get("authorization"),
-					"Bearer expired-token",
-				);
-				return new Response("Unauthorized\n", { status: 401 });
-			}
-			assert.equal(request.headers.get("authorization"), "Bearer fresh-token");
-			const result = {
-				columns: ["value"],
-				rows: [[{ kind: "int", value: 1 }]],
-				rowsAffected: 0,
-				notices: [],
-			};
-			return pathname.endsWith("/execute-batch")
-				? Response.json([result])
-				: Response.json(result);
-		}
-		throw new Error(`Unexpected remote request: ${request.method} ${pathname}`);
+		assert.equal(request.headers.get("authorization"), "Bearer fresh-token");
+		return Response.json({ ok: true });
 	};
 
-	const session = await openRepositoryLixSession({
-		namespace: "acme-refresh",
-		repositorySlug: "launch-q3-refresh",
-		replicaId: "test-user",
-		origin: "https://lixray.test",
-		getAccessToken: async () => accessToken,
+	const authenticatedFetch = createTelemetryFetch(fetch, {
+		repositoryId: "repo-id",
 		refreshAccessToken: async () => {
 			refreshCalls += 1;
-			accessToken = "fresh-token";
-			return accessToken;
+			return "fresh-token";
 		},
-		fetch,
 	});
-	t.after(() => session.close());
+	const response = await authenticatedFetch(
+		"https://lixray.test/repos/acme/launch-q3/lix/v1/sync/pull",
+		{
+			method: "GET",
+			headers: { Authorization: "Bearer expired-token" },
+		},
+	);
 
-	const result = await session.lix.execute("SELECT 1");
-	assert.equal(result.rows[0]?.toObject().value, 1);
+	assert.equal(response.status, 200);
 	assert.equal(refreshCalls, 1);
-	assert.equal(executeAttempts, 2);
+	assert.equal(attempts, 2);
 });
 
 void test("opens a new client session when the signed-in identity changes", async (t) => {

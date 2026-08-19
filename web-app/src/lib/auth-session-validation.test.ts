@@ -62,7 +62,11 @@ void test("does not destroy a session for an indeterminate network failure", asy
 		getUser: async () => ({ data: { user: null }, error: networkError }),
 	});
 
-	assert.deepEqual(result, { kind: "validation_failed", error: networkError });
+	assert.deepEqual(result, {
+		kind: "validation_failed",
+		error: networkError,
+		session: cachedSession,
+	});
 	assert.equal(isOrphanedAuthError(networkError), false);
 });
 

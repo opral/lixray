@@ -2,6 +2,7 @@ import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk";
 import { OpfsStorage } from "@lix-js/storage-opfs";
 import { captureTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
+import { repositoryOpfsCacheName } from "./repository-opfs-cache.ts";
 
 type TokenProvider = () => Promise<string | null>;
 
@@ -68,9 +69,7 @@ async function openRepositoryLixSessionWithRetry(
 async function openRepositoryLixSessionOnce(
 	options: OpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
-	const lix = options.fetch
-		? await openRemoteTestSession(options)
-		: await openOpfsSyncSession(options);
+	const lix = await openOpfsSyncSession(options);
 
 	try {
 		const defaultBranchId = await lix.activeBranchId();
@@ -95,34 +94,16 @@ async function openRepositoryLixSessionOnce(
 async function openOpfsSyncSession(
 	options: OpenRepositoryLixSessionOptions,
 ): Promise<Lix> {
-	const token = await options.getAccessToken();
-	if (!token && !options.allowAnonymous) {
-		throw new Error("A repository access token is required.");
-	}
 	return openLix({
 		storage: new OpfsStorage({
-			name: `lixray:${options.repositoryId ?? `${options.namespace}/${options.repositorySlug}`}:${options.replicaId}`,
+			name: repositoryOpfsCacheName(options),
 		}),
 		server: {
 			mode: "sync",
 			url: repositoryUrl(options),
-			headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-		},
-	});
-}
-
-// Unit tests inject fetch to exercise remote error and token-refresh behavior
-// without requiring a browser OPFS implementation.
-async function openRemoteTestSession(
-	options: OpenRepositoryLixSessionOptions,
-): Promise<Lix> {
-	return openLix({
-		server: {
-			mode: "remote",
-			url: repositoryUrl(options),
 			headers: async (): Promise<Record<string, string>> => {
-				const token = await options.getAccessToken();
-				if (token) return { Authorization: `Bearer ${token}` };
+				const currentToken = await options.getAccessToken();
+				if (currentToken) return { Authorization: `Bearer ${currentToken}` };
 				if (options.allowAnonymous) return {};
 				throw new Error("A repository access token is required.");
 			},
@@ -134,7 +115,7 @@ async function openRemoteTestSession(
 	});
 }
 
-function createTelemetryFetch(
+export function createTelemetryFetch(
 	customFetch: RemoteLixFetch | undefined,
 	context: {
 		repositoryId?: string;
@@ -406,10 +387,10 @@ class RepositoryLixSessionLease implements RepositoryLixSession {
 	}
 }
 
-function repositorySessionKey(
+export function repositorySessionKey(
 	options: OpenRepositoryLixSessionOptions,
 ): string {
-	return repositoryUrl(options).href;
+	return `${repositoryUrl(options).href}\n${options.replicaId}`;
 }
 
 function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {

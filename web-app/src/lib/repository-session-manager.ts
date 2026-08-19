@@ -82,7 +82,7 @@ function releaseManagedResource(key: string, managed: ManagedResource): void {
 
 	// React Strict Mode releases and reacquires effects synchronously in
 	// development. Deferring the final close lets that reacquisition reuse the
-	// live repository resource instead of racing a second IndexedDB open.
+	// live repository resource instead of racing a second OPFS owner open.
 	managed.closeTimer = setTimeout(() => {
 		managed.closeTimer = undefined;
 		if (managed.leaseCount !== 0) return;

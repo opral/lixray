@@ -1239,6 +1239,30 @@ void test("invalid bearer tokens do not fall through to public reads", async () 
 	assert.doesNotMatch(serverTiming, /lixray-server-roundtrip/);
 });
 
+void test("remote sync CORS permits session headers and chunk uploads", async () => {
+	const response = await handleRequest(
+		remoteLixRequest("/sync/chunk", {
+			method: "OPTIONS",
+			headers: { origin: "https://atelier-preview.test" },
+		}),
+		env({}),
+	);
+
+	assert.equal(response.status, 204);
+	assert.equal(
+		response.headers.get("access-control-allow-origin"),
+		"https://atelier-preview.test",
+	);
+	assert.match(
+		response.headers.get("access-control-allow-methods") ?? "",
+		/PUT/,
+	);
+	assert.match(
+		response.headers.get("access-control-allow-headers") ?? "",
+		/Lix-Session-Id/i,
+	);
+});
+
 void test("inaccessible lixes return 403 from mutation routes", async () => {
 	const response = await handleRequest(
 		remoteLixRequest("/branch/switch", {
@@ -1292,6 +1316,72 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 		sql: "SELECT path FROM lix_file",
 	});
 });
+
+for (const endpoint of [
+	"/sync/pull?limit=512",
+	"/sync/history?commitId=commit-1",
+	"/sync/blob?blobId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	"/sync/chunk?chunkId=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+]) {
+	void test(`anonymous public sync read ${endpoint} forwards without auth`, async () => {
+		let proxiedRequest: Request | undefined;
+		const response = await handleRequest(
+			remoteLixRequest(endpoint, { method: "GET" }),
+			env({}),
+			{
+				authenticate: async () => {
+					throw new Error("anonymous sync reads must not authenticate first");
+				},
+				resolvePublicLix: async () => ({ ok: true, lixId: LIX_A }),
+				lixFetch: async (_lixId, request) => {
+					proxiedRequest = request;
+					return Response.json({ ok: true });
+				},
+			},
+		);
+
+		assert.equal(response.status, 200);
+		assert.ok(proxiedRequest);
+		assert.equal(proxiedRequest.method, "GET");
+		assert.equal(proxiedRequest.headers.get("authorization"), null);
+		assert.equal(
+			new URL(proxiedRequest.url).pathname,
+			`/lix/v1${endpoint.split("?")[0]}`,
+		);
+	});
+}
+
+for (const [endpoint, method] of [
+	["/sync/push", "POST"],
+	["/sync/blob", "POST"],
+	[
+		"/sync/chunk?chunkId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"PUT",
+	],
+] as const) {
+	void test(`anonymous sync mutation ${method} ${endpoint} remains unauthorized`, async () => {
+		let publicLixLookedUp = false;
+		let proxied = false;
+		const response = await handleRequest(
+			remoteLixRequest(endpoint, { method }),
+			env({}),
+			{
+				resolvePublicLix: async () => {
+					publicLixLookedUp = true;
+					return { ok: true, lixId: LIX_A };
+				},
+				lixFetch: async () => {
+					proxied = true;
+					return new Response("unexpected");
+				},
+			},
+		);
+
+		assert.equal(response.status, 401);
+		assert.equal(publicLixLookedUp, false);
+		assert.equal(proxied, false);
+	});
+}
 
 void test("anonymous public binary file reads forward without SQL parsing", async () => {
 	let proxiedRequest: Request | undefined;

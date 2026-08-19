@@ -478,6 +478,7 @@ export async function handleRequest(
 
 	const remoteLixMatch = REMOTE_LIX_API_PATH.exec(url.pathname);
 	if (remoteLixMatch) {
+		if (request.method === "OPTIONS") return remoteLixCorsPreflight(request);
 		const serverTimings: ServerTimingMetric[] = [];
 		const namespace = normalizedRouteSegment(remoteLixMatch[1]);
 		const lixSlug = normalizedRouteSegment(remoteLixMatch[2]);
@@ -1331,6 +1332,7 @@ function isPublicReadRemoteLixRequest(
 	if (endpoint === "session") return request.method === "DELETE";
 	if (endpoint === "file") return request.method === "GET";
 	if (endpoint === "published-directory") return request.method === "GET";
+	if (isPublicSyncReadRequest(request, endpoint)) return true;
 	return (
 		request.method === "POST" &&
 		["execute", "execute-batch", "observe", "observe/multiplex"].includes(
@@ -1406,6 +1408,13 @@ LIMIT 1001`,
 	}
 }
 
+function isPublicSyncReadRequest(request: Request, endpoint: string): boolean {
+	return (
+		request.method === "GET" &&
+		["sync/pull", "sync/history", "sync/blob", "sync/chunk"].includes(endpoint)
+	);
+}
+
 /**
  * The canonical Lix protocol has no read-only mode, so the service
  * is the authorization boundary for public readers: every SQL string in a
@@ -1421,7 +1430,8 @@ async function rejectPublicMutation(
 	if (
 		!endpoint ||
 		endpoint === "session" ||
-		(endpoint === "file" && request.method === "GET")
+		(endpoint === "file" && request.method === "GET") ||
+		isPublicSyncReadRequest(request, endpoint)
 	) {
 		return null;
 	}
@@ -1611,6 +1621,22 @@ function corsPreflight(): Response {
 			"access-control-allow-headers":
 				"Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Param-*",
 			"access-control-max-age": "86400",
+		},
+	});
+}
+
+function remoteLixCorsPreflight(request: Request): Response {
+	const origin = request.headers.get("origin") ?? "*";
+	return new Response(null, {
+		status: 204,
+		headers: {
+			"access-control-allow-origin": origin,
+			"access-control-allow-credentials": "true",
+			"access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+			"access-control-allow-headers":
+				"Authorization, Content-Type, Lix-Client-Id, Lix-Session-Id, Last-Event-ID",
+			"access-control-max-age": "86400",
+			vary: "Origin",
 		},
 	});
 }
