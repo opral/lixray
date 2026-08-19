@@ -1,8 +1,8 @@
 # LixRay
 
 LixRay is a collaborative repository app built from a TanStack Start control
-plane and a multi-repository Rust Lix service. Supabase provides identity and
-application data; SlateDB stores repository data in S3-compatible object
+plane and a multi-repository Rust Lix service. Supabase supports control-plane
+identity and metadata; SlateDB stores Lix repositories in S3-compatible object
 storage.
 
 Production: [lixray.com](https://lixray.com)
@@ -23,6 +23,27 @@ browser / MCP client -> lixray-web -> lix-server -> R2
                             |
                          Supabase
 ```
+
+### Architectural boundaries
+
+A Lix repository is a self-contained unit of durable repository state. Content,
+repository configuration, and repository-scoped application state belong in the
+Lix itself so that cloning, transferring, or hosting the repository elsewhere
+does not silently lose behavior or data.
+
+User preferences illustrate this boundary. A preference associated with a
+particular repository should be stored as account-scoped state in that Lix,
+typically on its global branch when it must apply across working branches. It
+should not use a LixRay database table as its source of truth. Transient browser
+state may remain in browser storage when it is intentionally local to a tab or
+device.
+
+LixRay is the hosting and control plane around those self-contained
+repositories. It authenticates users, manages organizations and access,
+provisions and resolves repositories, routes requests, and operates the hosted
+service. Control-plane databases may index or coordinate repositories, but they
+must not become the authority for durable state that needs to travel with a
+Lix.
 
 Every repository maps to an isolated SlateDB object prefix. One bounded
 `lix-server` process hosts multiple lixes, opens them lazily, and evicts
