@@ -4,13 +4,12 @@
  * Lix service remain the runtime type guards for these values.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
-import { instrument } from "@posthog/mcp";
+import { instrument, PostHogMCP } from "@posthog/mcp";
 import {
 	createMcpHandler,
 	McpServer,
 	type ToolAnnotations,
 } from "@modelcontextprotocol/server";
-import { PostHog } from "posthog-node";
 import { z } from "zod";
 import type { ParseSqlScript } from "../lib/lix-sql-access.ts";
 import {
@@ -99,22 +98,109 @@ export function redactMcpAnalyticsEvent<
 	return { ...event, properties };
 }
 
+const MCP_DISCOVER_METHOD = "server/discover";
+
+interface OfficialDiscoverEmitter {
+	captureInitialize(data: {
+		distinctId?: string;
+		durationMs?: number;
+		protocolVersion?: string;
+		properties?: Record<string, unknown>;
+	}): void;
+	captureToolsList(data: {
+		distinctId?: string;
+		durationMs?: number;
+		protocolVersion?: string;
+		toolNames?: string[];
+		properties?: Record<string, unknown>;
+	}): void;
+}
+
 /**
- * `@posthog/mcp` 0.10.x treats a high-level server as anything with `.server`
- * plus `tool()`. MCP TypeScript SDK v2 exposes `registerTool()` instead, so
- * instrument() would reject the v2 `McpServer`. Alias `tool` so the official
- * high-level adapter can wrap `tools/call` via `_requestHandlers`.
+ * `@posthog/mcp` 0.11.x still does not capture `server/discover`. Modern
+ * 2026-07-28 clients skip initialize/tools/list, so map discover onto the
+ * official handshake events without a second duration field.
  */
-export function prepareHighLevelMcpServerForPosthog(
+export function wrapDiscoverAsOfficialHandshake(
 	server: McpServer,
-): McpServer {
-	const highLevel = server as McpServer & {
-		tool?: McpServer["registerTool"];
+	posthog: OfficialDiscoverEmitter,
+	identity: {
+		distinctId?: string;
+		clientId?: string;
+		requestId?: string;
+	} = {},
+): void {
+	const lowLevel = server.server as {
+		setRequestHandler: (...args: unknown[]) => unknown;
 	};
-	if (typeof highLevel.tool !== "function") {
-		highLevel.tool = server.registerTool.bind(server);
-	}
-	return server;
+	const originalSetRequestHandler = lowLevel.setRequestHandler.bind(lowLevel);
+	lowLevel.setRequestHandler = (...args: unknown[]) => {
+		if (args[0] !== MCP_DISCOVER_METHOD) {
+			return originalSetRequestHandler(...args);
+		}
+		const handler = args.at(-1);
+		if (typeof handler !== "function") {
+			return originalSetRequestHandler(...args);
+		}
+		const wrapped = async (...handlerArgs: unknown[]) => {
+			const startedAt = Date.now();
+			const result = await (handler as (...h: unknown[]) => unknown)(
+				...handlerArgs,
+			);
+			emitDiscoverAsOfficialHandshake(
+				server,
+				posthog,
+				identity,
+				Date.now() - startedAt,
+			);
+			return result;
+		};
+		return originalSetRequestHandler(...args.slice(0, -1), wrapped);
+	};
+}
+
+function emitDiscoverAsOfficialHandshake(
+	server: McpServer,
+	posthog: OfficialDiscoverEmitter,
+	identity: {
+		distinctId?: string;
+		clientId?: string;
+		requestId?: string;
+	},
+	durationMs: number,
+): void {
+	if (!identity.distinctId) return;
+	const properties = {
+		environment: "production",
+		mcp_server: "lixray",
+		oauth_client_id: identity.clientId,
+		request_id: identity.requestId,
+	};
+	posthog.captureInitialize({
+		distinctId: identity.distinctId,
+		durationMs,
+		protocolVersion: MCP_PROTOCOL_VERSION,
+		properties,
+	});
+	posthog.captureToolsList({
+		distinctId: identity.distinctId,
+		durationMs,
+		protocolVersion: MCP_PROTOCOL_VERSION,
+		toolNames: registeredMcpToolNames(server),
+		properties,
+	});
+}
+
+function registeredMcpToolNames(server: McpServer): string[] {
+	const tools = (
+		server as McpServer & {
+			_registeredTools?: Record<string, { enabled?: boolean }>;
+		}
+	)._registeredTools;
+	if (!tools) return [];
+	return Object.entries(tools)
+		.filter(([, tool]) => tool.enabled !== false)
+		.map(([name]) => name);
 }
 
 /**
@@ -668,65 +754,15 @@ export async function handleMcpTransport(
 				options.onToolCall?.(observation);
 			}
 		: options.onToolCall;
-	const server = createLixrayMcpServer(service, {
-		...options,
-		requestId,
-		onToolCall,
-		serverName: options.serverName ?? mcpServerNameForUrl(request.url),
-	});
-	const handler = createMcpHandler(() => server, {
-		legacy: "stateless",
-		responseMode: "json",
-		onerror: (error) =>
-			console.error("LixRay MCP protocol error", { requestId, error }),
-	});
 	let shutdownPosthog: (() => Promise<void>) | undefined;
-	if (options.posthogToken) {
-		const posthog = new PostHog(options.posthogToken, {
-			host: options.posthogHost ?? "https://us.i.posthog.com",
-			flushAt: 1,
-			flushInterval: 0,
-		});
-		// Official @posthog/mcp is the only $mcp_* writer. The v2 McpServer must
-		// be instrumented as a high-level server: the low-level adapter calls
-		// setRequestHandler(CallToolRequestSchema), which v2 rejects (it wants
-		// the string "tools/call"). That throw was swallowed, so initialize and
-		// tools/list were patched (July 31 probes) while tools/call was not.
-		instrument(prepareHighLevelMcpServerForPosthog(server), posthog, {
-			context: false,
-			enableExceptionAutocapture: false,
-			identify: options.posthogDistinctId
-				? { distinctId: options.posthogDistinctId }
-				: null,
-			eventProperties: () => ({
-				environment: "production",
-				mcp_server: "lixray",
-				oauth_client_id: options.posthogClientId,
-				request_id: requestId,
-			}),
-			beforeSend: (event) => {
-				const redacted = redactMcpAnalyticsEvent(event);
-				if (
-					!redacted.properties ||
-					typeof redacted.properties !== "object" ||
-					Array.isArray(redacted.properties)
-				) {
-					return redacted;
-				}
-				const props = redacted.properties as Record<string, unknown>;
-				delete props.$mcp_parameters;
-				delete props.$mcp_response;
-				delete props.$mcp_error_message;
-				if (redacted.event === "$mcp_tool_call") {
-					attachMcpToolCallObservationProperties(
-						props,
-						observationCache.get(requestId),
-						props.$mcp_is_error === true,
-					);
-				}
-				return redacted;
-			},
-		});
+	const posthog = options.posthogToken
+		? new PostHogMCP(options.posthogToken, {
+				host: options.posthogHost ?? "https://us.i.posthog.com",
+				flushAt: 1,
+				flushInterval: 0,
+			})
+		: undefined;
+	if (posthog) {
 		shutdownPosthog = async () => {
 			// @posthog/mcp publishes through an internal async redaction pipeline.
 			// Drain microtasks, then one macrotask, before shutting the client.
@@ -736,6 +772,67 @@ export async function handleMcpTransport(
 			await posthog.shutdown();
 		};
 	}
+	const handler = createMcpHandler(
+		() => {
+			const server = createLixrayMcpServer(service, {
+				...options,
+				requestId,
+				onToolCall,
+				serverName: options.serverName ?? mcpServerNameForUrl(request.url),
+			});
+			if (posthog) {
+				// Instrument inside the factory so 0.11.x can wrap v2 string
+				// `tools/call` and later `server/discover` registrations.
+				instrument(server, posthog, {
+					context: false,
+					enableExceptionAutocapture: false,
+					identify: options.posthogDistinctId
+						? { distinctId: options.posthogDistinctId }
+						: null,
+					eventProperties: () => ({
+						environment: "production",
+						mcp_server: "lixray",
+						oauth_client_id: options.posthogClientId,
+						request_id: requestId,
+					}),
+					beforeSend: (event) => {
+						const redacted = redactMcpAnalyticsEvent(event);
+						if (
+							!redacted.properties ||
+							typeof redacted.properties !== "object" ||
+							Array.isArray(redacted.properties)
+						) {
+							return redacted;
+						}
+						const props = redacted.properties as Record<string, unknown>;
+						delete props.$mcp_parameters;
+						delete props.$mcp_response;
+						delete props.$mcp_error_message;
+						if (redacted.event === "$mcp_tool_call") {
+							attachMcpToolCallObservationProperties(
+								props,
+								observationCache.get(requestId),
+								props.$mcp_is_error === true,
+							);
+						}
+						return redacted;
+					},
+				});
+				wrapDiscoverAsOfficialHandshake(server, posthog, {
+					distinctId: options.posthogDistinctId,
+					clientId: options.posthogClientId,
+					requestId,
+				});
+			}
+			return server;
+		},
+		{
+			legacy: "stateless",
+			responseMode: "json",
+			onerror: (error) =>
+				console.error("LixRay MCP protocol error", { requestId, error }),
+		},
+	);
 	try {
 		const response = await handler.fetch(request);
 		const headers = new Headers(response.headers);
