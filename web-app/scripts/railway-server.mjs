@@ -13,6 +13,20 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 		let upstreamFailure = false;
 		try {
 			if (await serveStatic(clientRoot, incoming, outgoing, env)) return;
+			const requestAbort = new AbortController();
+			const abortDisconnectedRequest = () => requestAbort.abort();
+			const abortPrematureResponseClose = () => {
+				if (!outgoing.writableFinished) requestAbort.abort();
+				cleanupCancellation();
+			};
+			const cleanupCancellation = () => {
+				incoming.off("aborted", abortDisconnectedRequest);
+				outgoing.off("close", abortPrematureResponseClose);
+				outgoing.off("finish", cleanupCancellation);
+			};
+			incoming.once("aborted", abortDisconnectedRequest);
+			outgoing.once("close", abortPrematureResponseClose);
+			outgoing.once("finish", cleanupCancellation);
 
 			const requestUrl = new URL(
 				incoming.url ?? "/",
@@ -27,6 +41,7 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 						? undefined
 						: Readable.toWeb(incoming),
 				duplex: "half",
+				signal: requestAbort.signal,
 			});
 			let response;
 			try {

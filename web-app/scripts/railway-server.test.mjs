@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { request as httpRequest } from "node:http";
 import test from "node:test";
 import { createRailwayServer } from "./railway-server.mjs";
 
@@ -89,6 +90,50 @@ test("answers 502 when the upstream fetch fails", async () => {
 	);
 	assert.equal(response.status, 502);
 	assert.match(await response.text(), /Upstream service unavailable/);
+});
+
+test("client disconnect aborts a held application request", async () => {
+	let requestReachedApp;
+	const reachedApp = new Promise((resolve) => {
+		requestReachedApp = resolve;
+	});
+	let requestAborted;
+	const appSawAbort = new Promise((resolve) => {
+		requestAborted = resolve;
+	});
+
+	await withServer(
+		async (request) => {
+			requestReachedApp();
+			await new Promise((resolve) => {
+				request.signal.addEventListener(
+					"abort",
+					() => {
+						requestAborted();
+						resolve();
+					},
+					{ once: true },
+				);
+			});
+			return new Response("cancelled");
+		},
+		async (origin) => {
+			const clientRequest = httpRequest(`${origin}/held`);
+			clientRequest.on("error", () => undefined);
+			clientRequest.end();
+			await reachedApp;
+			clientRequest.destroy();
+			await Promise.race([
+				appSawAbort,
+				new Promise((_, reject) =>
+					setTimeout(
+						() => reject(new Error("disconnect did not abort app request")),
+						1_000,
+					),
+				),
+			]);
+		},
+	);
 });
 
 test("a response body erroring mid-stream does not crash the process", async () => {
