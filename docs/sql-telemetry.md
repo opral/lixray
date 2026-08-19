@@ -29,9 +29,9 @@ applies to `lix.opened`.
 ## Product open event
 
 The engine emits a vendor-neutral `lix.opened` span when a client session binds
-to a Lix (handshake session create, in-process `open_lix`, or an explicit
-`Lix::bind_session` / `lix::bind_session` on a cache-hit runtime). Lix never
-names or captures `repository_opened`.
+to a Lix (handshake session create, in-process client `open_lix()`, or an
+explicit `Lix::bind_session` / `lix::bind_session`). Lix never names or
+captures `repository_opened`.
 
 LixRay's host sink is the only writer of the PostHog product event
 `repository_opened`. On lix-server, `HostTelemetrySink` watches completed
@@ -39,7 +39,8 @@ LixRay's host sink is the only writer of the PostHog product event
 `distinct_id`. In-process WASM uses the same mapping from `onSpan` when
 `span.name` is `lix.opened`. MCP `open_lix` calls `bindSession` on every
 successful signed-context mint, cache-hit or miss, with the OAuth / principal
-account. Cache-admit's anonymous `open_lix` bind is not the product event.
+account. Cache-admit / protocol-root open uses
+`open_lix().with_telemetry(...).as_protocol_root()` and is not a product bind.
 
 Identity is the OAuth / session account so the same person on web and MCP is
 one WAU. Anonymous and demo accounts are not captured. Optional `source`

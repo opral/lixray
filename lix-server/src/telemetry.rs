@@ -883,6 +883,23 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn protocol_root_open_does_not_capture() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
+            Arc::new(RecordingCapture(Arc::clone(&captured))),
+        ));
+        let _lix = lix_sdk::open_lix()
+            .with_telemetry(Arc::clone(&sink))
+            .as_protocol_root()
+            .await
+            .expect("open protocol root");
+        assert!(captured.lock().unwrap().is_empty());
+
+        lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", Some("user-123"));
+        assert_eq!(captured.lock().unwrap().len(), 1);
+    }
+
     #[test]
     fn cache_admit_anonymous_bind_does_not_capture() {
         let captured = Arc::new(Mutex::new(Vec::new()));

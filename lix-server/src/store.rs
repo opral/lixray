@@ -531,13 +531,15 @@ impl LixRuntimeManager {
             }
         };
 
-        // Cache-admit uses in-process open_lix, which may emit lix.opened with
-        // the anonymous account. HostTelemetrySink skips that; handshake and
-        // explicit bind_session with an OAuth account are the product binds.
+        // Cache-admit is a protocol root, not a client session. as_protocol_root
+        // attaches the host sink so handshake sessions inherit it, without a
+        // phantom lix.opened. Handshake create and explicit MCP bindSession
+        // with an OAuth account are the product binds.
         let protocol_root = Arc::new(
             lix_sdk::open_lix()
                 .with_storage(storage)
                 .with_telemetry(Arc::clone(&self.telemetry))
+                .as_protocol_root()
                 .await
                 .context("open Lix lix session for the canonical server protocol")?,
         );

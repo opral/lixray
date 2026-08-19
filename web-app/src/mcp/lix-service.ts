@@ -273,7 +273,7 @@ export class LixService {
 		const issuedContext = await this.issueContext(lixId, selectedBranchId);
 		const commitId = await this.commitId(lixId, selectedBranchId);
 		// Bind the OAuth / principal account on every successful signed-context
-		// mint. Cache-admit's anonymous `open_lix` bind is not the product event.
+		// mint. Cache-admit / protocol-root open is not a product bind.
 		this.client.bindSession({
 			lixId,
 			branchId: selectedBranchId,
