@@ -21,6 +21,10 @@ import {
 	RepositoryListError,
 	repositoryListTelemetryProperties,
 } from "~/lib/repository-list-error";
+import {
+	shouldCaptureRepositoryListException,
+	shouldRefreshRepositoryList,
+} from "~/lib/repository-list-refresh";
 import type { LixraySupabaseClient } from "~/lib/supabase";
 import {
 	captureErrorLogImmediately,
@@ -112,6 +116,15 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				return;
 			}
 
+			if (
+				typeof window !== "undefined" &&
+				!shouldRefreshRepositoryList(window.location.pathname)
+			) {
+				setError(null);
+				setIsLoaded(true);
+				return;
+			}
+
 			setError(null);
 			try {
 				const provisioningResponse = await client.rpc(
@@ -171,18 +184,24 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				const failure = normalizeRepositoryListError(loadError);
 				const telemetryProperties = repositoryListTelemetryProperties(failure);
 				setError(failure.message);
-				await Promise.all([
-					captureTelemetryImmediately(
-						"repository_list_failed",
-						telemetryProperties,
-					),
-					captureErrorLogImmediately(
-						"Repository list failed",
-						telemetryProperties,
-					),
-					captureExceptionTelemetryAsync(failure, telemetryProperties),
-				]);
-				await validateSession("repository_list_failed");
+				const pathname =
+					typeof window === "undefined" ? "" : window.location.pathname;
+				if (
+					shouldCaptureRepositoryListException(pathname, failure, loadError)
+				) {
+					await Promise.all([
+						captureTelemetryImmediately(
+							"repository_list_failed",
+							telemetryProperties,
+						),
+						captureErrorLogImmediately(
+							"Repository list failed",
+							telemetryProperties,
+						),
+						captureExceptionTelemetryAsync(failure, telemetryProperties),
+					]);
+					await validateSession("repository_list_failed");
+				}
 			} finally {
 				setIsLoaded(true);
 			}

@@ -119,6 +119,11 @@ export function RepositoryAtelier({
 	} = useAuth();
 	// Supabase may replace the Session/User objects when a background tab resumes.
 	// Keep the open Lix session keyed to identity so token refreshes do not reopen it.
+	// `canEdit` is the protocol-principal split: members handshake as
+	// Authenticated(user.id); public readers handshake as Anonymous
+	// (`public:${repositoryId}`), including signed-in non-members whose JWT
+	// is stripped by the worker before lix-server. Mixing those on one
+	// session id is ACCOUNT_MISMATCH 403, not SESSION_GONE 410.
 	const atelierUserId = isDemoModeEnabled
 		? DEMO_AUTH_TOKEN
 		: canEdit
@@ -729,6 +734,7 @@ export function RepositoryAtelier({
 			refreshAccessToken,
 			allowAnonymous: isReadOnly,
 			initialBranchId: openingBranchId,
+			authIdentity: atelierUserId,
 		})
 			.then(async (session) => {
 				if (disposed) {
