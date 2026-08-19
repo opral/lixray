@@ -7,6 +7,7 @@ import {
 import {
 	createLixError,
 	LixService,
+	type BindSessionInput,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
 	type LixRuntimeClient,
@@ -45,6 +46,10 @@ function sqlPayloadFromText(text: string): unknown {
 }
 
 class FakeRuntime implements LixRuntimeClient {
+	hasOpenRuntime() {
+		return false;
+	}
+	bindSession(_input: BindSessionInput) {}
 	async listLixes() {
 		return [
 			{

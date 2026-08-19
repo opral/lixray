@@ -23,7 +23,29 @@ The JS SDK accepts `openLix({ telemetry: { onSpan(span) {} } })`. Local browser
 and Node execution forwards the completed engine span through the native or
 WASM binding and the SDK worker. The callback is isolated from query results;
 an exception in `onSpan` does not fail the Lix operation. Remote SQL spans stay
-on the server and are not duplicated in the remote client.
+on the server and are not duplicated in the remote client. The same rule
+applies to `lix.opened`.
+
+## Product open event
+
+The engine emits a vendor-neutral `lix.opened` span when a client session binds
+to a Lix (handshake session create, in-process `open_lix`, or an explicit
+`Lix::bind_session` / `lix::bind_session` on a cache-hit runtime). Lix never
+names or captures `repository_opened`.
+
+LixRay's host sink is the only writer of the PostHog product event
+`repository_opened`. On lix-server, `HostTelemetrySink` watches completed
+`lix.opened` spans and `capture()`s that event with the session account as
+`distinct_id`. In-process WASM uses the same mapping from `onSpan` when
+`span.name` is `lix.opened`. MCP `open_lix` calls `bindSession` when it mints a
+signed context against an already-open runtime; cache-admit alone does not
+bind.
+
+Identity is the OAuth / session account so the same person on web and MCP is
+one WAU. Anonymous and demo accounts are not captured. Optional `source`
+(`web` / `mcp` / `server`) is diagnostic only and must not split the north
+star. Missing or invalid PostHog config never prevents the server from
+starting.
 
 ## Span model
 

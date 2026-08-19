@@ -125,8 +125,17 @@ export function isLixError(value: unknown): value is LixError {
  * mutate Lix state receives a branch id and the implementation pins the
  * underlying SDK handle to it before executing.
  */
+export interface BindSessionInput {
+	lixId: string;
+	branchId: string;
+	accountId: string;
+	organizationId?: string;
+}
+
 export interface LixRuntimeClient {
 	listLixes(): Promise<Array<LixSummary>>;
+	hasOpenRuntime(lixId: string): boolean;
+	bindSession(input: BindSessionInput): void;
 	activeBranchId(lixId: string, branchId?: string): Promise<string>;
 	switchBranch(lixId: string, branchId: string): Promise<{ branchId: string }>;
 	execute(
@@ -258,10 +267,19 @@ export class LixService {
 	async openLix(lixRef: string, branchId?: string): Promise<OpenedLixContext> {
 		const repository = await this.resolveLixSummary(lixRef);
 		const lixId = repository.id;
+		const cacheHit = this.client.hasOpenRuntime(lixId);
 		const selectedBranchId = branchId
 			? (await this.client.switchBranch(lixId, branchId)).branchId
 			: await this.client.activeBranchId(lixId);
 		const issuedContext = await this.issueContext(lixId, selectedBranchId);
+		if (cacheHit) {
+			this.client.bindSession({
+				lixId,
+				branchId: selectedBranchId,
+				accountId: this.principal.userId,
+				organizationId: repository.namespace.id,
+			});
+		}
 		return {
 			context: issuedContext.token,
 			contextExpiresAt: new Date(issuedContext.expiresAt).toISOString(),

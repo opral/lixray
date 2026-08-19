@@ -29,6 +29,10 @@ use tokio::sync::{watch, Mutex, OnceCell};
 use tokio::task::JoinSet;
 use tracing::info;
 
+fn host_telemetry_sink() -> Arc<dyn lix_sdk::telemetry::TelemetrySink> {
+    Arc::new(crate::telemetry::HostTelemetrySink::from_env())
+}
+
 // The Lix SlateDB adapter fetches object-store cache parts in 2 MiB chunks.
 // A 15 second request timeout still permits a part to arrive at roughly 140
 // KiB/s, while a single stalled request can no longer occupy a lix runtime
@@ -79,6 +83,7 @@ pub struct LixRuntimeManager {
     max_open_lixes: usize,
     recovery_watchdog: RecoveryWatchdog,
     state: Mutex<ManagerState>,
+    telemetry: Arc<dyn lix_sdk::telemetry::TelemetrySink>,
     #[cfg(test)]
     open_gate: Option<TestOpenGate>,
     // Keep this last: struct fields drop in declaration order. The exclusive
@@ -269,6 +274,7 @@ impl LixRuntimeManager {
             max_open_lixes: config.max_open_lixes,
             recovery_watchdog: RecoveryWatchdog::production(config.recovery_close_timeout),
             state: Mutex::new(ManagerState::default()),
+            telemetry: host_telemetry_sink(),
             #[cfg(test)]
             open_gate: None,
             _cache_root_lease: Some(cache_root_lease),
@@ -284,6 +290,7 @@ impl LixRuntimeManager {
             max_open_lixes,
             recovery_watchdog: RecoveryWatchdog::test_default(),
             state: Mutex::new(ManagerState::default()),
+            telemetry: host_telemetry_sink(),
             open_gate: None,
             _cache_root_lease: None,
         })
@@ -524,10 +531,13 @@ impl LixRuntimeManager {
             }
         };
 
+        // Cache-admit uses in-process open_lix, which may emit lix.opened with
+        // the anonymous account. HostTelemetrySink skips that; handshake and
+        // explicit bind_session with an OAuth account are the product binds.
         let protocol_root = Arc::new(
             lix_sdk::open_lix()
                 .with_storage(storage)
-                .with_telemetry(Arc::new(lix_sdk::telemetry::TracingTelemetrySink::new()))
+                .with_telemetry(Arc::clone(&self.telemetry))
                 .await
                 .context("open Lix lix session for the canonical server protocol")?,
         );
@@ -1741,6 +1751,7 @@ mod tests {
             max_open_lixes,
             recovery_watchdog: RecoveryWatchdog::test_default(),
             state: Mutex::new(ManagerState::default()),
+            telemetry: host_telemetry_sink(),
             _cache_root_lease: None,
             open_gate: Some(open_gate),
         })
@@ -2371,6 +2382,7 @@ mod tests {
                 }),
                 ..ManagerState::default()
             }),
+            telemetry: host_telemetry_sink(),
             _cache_root_lease: Some(
                 CacheRootLease::acquire(&root.0).expect("acquire cache-root lease"),
             ),
