@@ -815,7 +815,6 @@ export function RepositoryAtelier({
 							: {}),
 					}),
 					preferencesStore: createRepositoryPreferencesStore({
-						client: canEdit ? client : null,
 						userId: atelierUserId,
 						repositoryId,
 					}),

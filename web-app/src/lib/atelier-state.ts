@@ -9,7 +9,6 @@ import {
 	type AtelierSessionUiState,
 	type AtelierUserPreferencesV1,
 } from "@opral/atelier/state-adapters";
-import type { LixraySupabaseClient } from "./supabase";
 import type { RepositoryLixSession } from "./repository-lix-session";
 
 const SESSION_STATE_VERSION = 1;
@@ -132,60 +131,26 @@ export function createRepositoryBranchSession(args: {
 }
 
 export function createRepositoryPreferencesStore(args: {
-	readonly client: LixraySupabaseClient | null;
 	readonly userId: string;
 	readonly repositoryId: string;
 	readonly storage?: Storage;
 }): AtelierPreferencesStore {
-	const client = args.client;
-	if (!client) {
-		const storage = args.storage ?? window.sessionStorage;
-		const key = namespacedAtelierStateKey(
-			"preferences",
-			PREFERENCES_STATE_VERSION,
-			args,
-		);
-		return {
-			load: () => {
-				const value = readStoredJson(storage, key);
-				return Promise.resolve(
-					value ? coerceAtelierUserPreferences(value) : null,
-				);
-			},
-			save: (value: AtelierUserPreferencesV1) => {
-				storage.setItem(
-					key,
-					JSON.stringify(coerceAtelierUserPreferences(value)),
-				);
-				return Promise.resolve();
-			},
-		};
-	}
+	const storage = args.storage ?? window.sessionStorage;
+	const key = namespacedAtelierStateKey(
+		"preferences",
+		PREFERENCES_STATE_VERSION,
+		args,
+	);
 	return {
-		load: async () => {
-			const { data, error } = await client
-				.from("user_lix_preferences")
-				.select("atelier_layout")
-				.eq("user_id", args.userId)
-				.eq("lix_id", args.repositoryId)
-				.maybeSingle();
-			if (error) throw error;
-			return data?.atelier_layout
-				? coerceAtelierUserPreferences(data.atelier_layout)
-				: null;
-		},
-		save: async (value: AtelierUserPreferencesV1) => {
-			const preferences = coerceAtelierUserPreferences(value);
-			const { error } = await client.from("user_lix_preferences").upsert(
-				{
-					user_id: args.userId,
-					lix_id: args.repositoryId,
-					atelier_layout: preferences,
-					updated_at: new Date().toISOString(),
-				},
-				{ onConflict: "user_id,lix_id" },
+		load: () => {
+			const value = readStoredJson(storage, key);
+			return Promise.resolve(
+				value ? coerceAtelierUserPreferences(value) : null,
 			);
-			if (error) throw error;
+		},
+		save: (value: AtelierUserPreferencesV1) => {
+			storage.setItem(key, JSON.stringify(coerceAtelierUserPreferences(value)));
+			return Promise.resolve();
 		},
 	};
 }

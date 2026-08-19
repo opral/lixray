@@ -318,35 +318,6 @@ export type Database = {
 				};
 				Relationships: [];
 			};
-			user_lix_preferences: {
-				Row: {
-					atelier_layout: Json;
-					lix_id: string;
-					updated_at: string;
-					user_id: string;
-				};
-				Insert: {
-					atelier_layout: Json;
-					lix_id: string;
-					updated_at?: string;
-					user_id: string;
-				};
-				Update: {
-					atelier_layout?: Json;
-					lix_id?: string;
-					updated_at?: string;
-					user_id?: string;
-				};
-				Relationships: [
-					{
-						foreignKeyName: "user_lix_preferences_lix_id_fkey";
-						columns: ["lix_id"];
-						isOneToOne: false;
-						referencedRelation: "lixes";
-						referencedColumns: ["id"];
-					},
-				];
-			};
 			user_primary_namespaces: {
 				Row: {
 					created_at: string;
