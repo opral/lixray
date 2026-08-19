@@ -43,6 +43,10 @@ import {
 	getFileExtension,
 } from "./lixr-mcp-telemetry.ts";
 import { resolveSupabaseLixId } from "./lix-resolver.ts";
+import {
+	isDemoEnvironment,
+	resolveOfficialMcpPosthogToken,
+} from "./mcp-posthog-env.ts";
 
 export interface WorkerEnv {
 	SUPABASE_URL?: string;
@@ -68,6 +72,10 @@ export interface WorkerEnv {
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
+	/** Personal API key (`phx_`). Never used as a capture token. */
+	POSTHOG_API_KEY?: string;
+	VITE_PUBLIC_POSTHOG_TOKEN?: string;
+	VITE_PUBLIC_TELEMETRY_ENVIRONMENT?: string;
 	/** HMAC key used to sign stateless MCP Lix contexts. */
 	LIXRAY_CONTEXT_SIGNING_KEY?: string;
 	LIXRAY_RELEASE_ID?: string;
@@ -373,7 +381,9 @@ export async function handleRequest(
 				),
 			);
 		};
-		const posthogToken = telemetry ? env.POSTHOG_PROJECT_TOKEN : undefined;
+		const posthogToken = resolveOfficialMcpPosthogToken(env, {
+			isDemo: authResult.auth.isDemo,
+		});
 		const onPosthogFlush = posthogToken
 			? (flush: () => Promise<void>): void => {
 					const work = flush().catch((caught: unknown) => {
@@ -1363,12 +1373,7 @@ function isDemoMode(env: WorkerEnv): boolean {
 	// Railway names PR environments "lixray-pr-<n>" when configured, but
 	// recreated ones get the default "pr-<hash>-<n>" — accept both. Keep in
 	// sync with web-app/Dockerfile and scripts/assert-railway-env.mjs.
-	return (
-		env.LIXRAY_DEMO === "1" ||
-		/^(lixray-pr-\d+|pr-[a-z0-9]+-\d+)$/.test(
-			env.RAILWAY_ENVIRONMENT_NAME ?? "",
-		)
-	);
+	return isDemoEnvironment(env);
 }
 
 function isProductionOnlyPath(pathname: string): boolean {

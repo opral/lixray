@@ -992,6 +992,21 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 		assert.equal(retry.properties.sql_op, "INSERT");
 		assert.equal(first.properties.environment, "production");
 		assert.equal(first.properties.mcp_server, "lixray");
+		assert.equal(typeof first.properties.$mcp_duration_ms, "number");
+		assert.equal(first.properties.duration_ms, undefined);
+		assert.equal(first.properties.$ai_latency, undefined);
+		assert.ok(
+			captured.some((event) => event.event === "$mcp_initialize"),
+			"official instrument() must emit $mcp_initialize",
+		);
+		assert.ok(
+			captured.some((event) => event.event === "$mcp_tools_list"),
+			"official instrument() must emit $mcp_tools_list",
+		);
+		assert.equal(
+			captured.find((event) => event.event === "$mcp_initialize")?.distinctId,
+			"felix",
+		);
 		assert.equal(
 			first.properties.$mcp_parameters,
 			undefined,

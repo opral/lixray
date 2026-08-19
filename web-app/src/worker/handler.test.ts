@@ -647,13 +647,94 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	assert.equal(flushes, 1);
 });
 
-void test("MCP telemetry is disabled outside production", async () => {
+void test("official MCP PostHog token uses VITE_PUBLIC_POSTHOG_TOKEN when the project token is unset", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({
+			extra: {
+				VITE_PUBLIC_POSTHOG_TOKEN: " phc_public_project_token ",
+			},
+		}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			createMcpTelemetry: () => null,
+			lixFetch: async () => new Response("unused"),
+			mcpTransport: async (_request, _service, options) => {
+				assert.equal(options.posthogToken, "phc_public_project_token");
+				assert.equal(options.posthogDistinctId, "user-123");
+				assert.equal(typeof options.onPosthogFlush, "function");
+				return new Response("mcp response");
+			},
+		},
+	);
+
+	assert.equal(await response.text(), "mcp response");
+});
+
+void test("official MCP PostHog token is passed when POSTHOG_ENVIRONMENT is unset", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/mcp", { method: "POST" }),
 		env({
 			extra: {
 				POSTHOG_PROJECT_TOKEN: "project-token",
-				POSTHOG_ENVIRONMENT: "preview",
+			},
+		}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			createMcpTelemetry: () => null,
+			lixFetch: async () => new Response("unused"),
+			mcpTransport: async (_request, _service, options) => {
+				assert.equal(options.posthogToken, "project-token");
+				assert.equal(options.posthogDistinctId, "user-123");
+				assert.equal(typeof options.onPosthogFlush, "function");
+				return new Response("mcp response");
+			},
+		},
+	);
+
+	assert.equal(await response.text(), "mcp response");
+});
+
+void test("official MCP PostHog token is omitted in demo and Railway PR environments", async () => {
+	for (const extra of [
+		{
+			LIXRAY_DEMO: "1",
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			VITE_PUBLIC_POSTHOG_TOKEN: "phc_public_project_token",
+		},
+		{
+			RAILWAY_ENVIRONMENT_NAME: "lixray-pr-91",
+			POSTHOG_PROJECT_TOKEN: "project-token",
+		},
+		{
+			RAILWAY_ENVIRONMENT_NAME: "pr-11b179-85",
+			VITE_PUBLIC_POSTHOG_TOKEN: "phc_public_project_token",
+		},
+	]) {
+		const response = await handleRequest(
+			new Request("https://example.test/mcp", { method: "POST" }),
+			env({ extra }),
+			{
+				authenticateMcp: authenticatedMcp(),
+				createMcpTelemetry: () => null,
+				lixFetch: async () => new Response("unused"),
+				mcpTransport: async (_request, _service, options) => {
+					assert.equal(options.posthogToken, undefined, JSON.stringify(extra));
+					assert.equal(options.onPosthogFlush, undefined);
+					return new Response("mcp response");
+				},
+			},
+		);
+		assert.equal(await response.text(), "mcp response");
+	}
+});
+
+void test("POSTHOG_API_KEY alone does not enable official MCP capture", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({
+			extra: {
+				POSTHOG_API_KEY: "phx_personal_api_key",
 			},
 		}),
 		{
