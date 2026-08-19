@@ -33,7 +33,7 @@
 		"test:docs": "node --test --experimental-strip-types src/lib/docs-legal.test.ts",
 		"test:repository": "node --test --experimental-strip-types src/components/repository-home/lix-data.test.ts src/lib/repository-list-error.test.ts src/lib/repository-list-refresh.test.ts src/lib/repository-lix-session.test.ts src/lib/repository-session-manager.test.ts",
 		"test:railway-config": "node --test scripts/*.test.mjs",
-		"test:worker": "node --test --experimental-strip-types src/worker/*.test.ts src/mcp/*.test.ts",
+		"test:worker": "node --test --experimental-strip-types src/worker/*.test.ts src/mcp/*.test.ts src/lib/lix-sql-access.test.ts",
 		"check:mcp": "node scripts/check-mcp-connection.mjs",
 		"mcp:tools:generate": "node --experimental-strip-types scripts/generate-mcp-tools.mjs",
 		"typecheck": "pnpm run routes:generate && tsc --noEmit"

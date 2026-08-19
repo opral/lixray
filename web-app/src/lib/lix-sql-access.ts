@@ -1,14 +1,12 @@
-/**
- * Lix's SQL script parser result at the authorization boundary. Keeping this
- * structural type independent from the Node/WASM binding lets every transport
- * classify exactly what the engine will execute.
- */
-export type ParseSqlScript = (
-	sql: string,
-	providedParamCount: number,
-) => { statements: ReadonlyArray<{ sql: string }> };
+const WRITE_SQL_VERB = /\b(?:INSERT|UPDATE|DELETE)\b/i;
+
+/** Cheap write-verb check. MCP callers are trusted; we do not parse SQL. */
+export function sqlLooksLikeWrite(sql: string): boolean {
+	return WRITE_SQL_VERB.test(sql);
+}
 
 export function isClearlyReadOnlySql(sql: string): boolean {
+	if (sqlLooksLikeWrite(sql)) return false;
 	const keyword = /^\s*([a-z]+)/i.exec(sql)?.[1]?.toUpperCase();
 	return keyword === "SELECT" || keyword === "VALUES";
 }
