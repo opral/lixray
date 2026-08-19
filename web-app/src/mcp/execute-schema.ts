@@ -65,7 +65,7 @@ ${EXECUTE_SQL_CORE_SCHEMA}
 
 Use focused projections, predicates, and LIMIT where applicable. UTF-8 / text files are written with \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))\` using \`kind: "text"\` parameters. To read a text file, use \`SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1\`. \`lix_file.content\` is stored as bytes; select only content the user actually requested.
 
-Use the core tables above, plus their \`_by_branch\` / \`_history\` companions, directly; do not inspect \`information_schema\` for them. Entity tables are lix-dynamic: discover their table and column names before guessing:
+SQL tables always use the branch selected by the current Lix session. They do not expose branch-routing columns or \`_by_branch\` variants. Entity tables are lix-dynamic: discover their table and column names before guessing:
 
 \`\`\`sql
 ${EXECUTE_SQL_TABLES_QUERY}
@@ -75,7 +75,7 @@ ${EXECUTE_SQL_TABLES_QUERY}
 ${EXECUTE_SQL_COLUMNS_QUERY}
 \`\`\`
 
-Where present, \`<table>_by_branch\` adds \`lixcol_branch_id\` for cross-branch reads. \`<table>_history\` is read-only: scope every history query with \`WHERE lixcol_start_commit_id = lix_active_branch_commit_id()\`, then constrain it by stable identity (\`id = $n\` for files/directories or \`lixcol_entity_pk = $n\` for entities) resolved from the active table. Read a current item's \`lixcol_change_id\` from its active table, not an historical row; use \`lixcol_depth\` / \`lixcol_observed_commit_id\` for prior revisions.`;
+History table functions are read-only revision streams, not current-state snapshot tables. Call \`lix_file_history()\`, \`lix_directory_history()\`, or \`<schema>_history()\` to start at the active branch head. For an explicit anchor commit, pass its id as the function argument, for example \`lix_file_history($1)\` or \`<schema>_history($1)\`. Constrain the result by stable identity: \`id = $n\` for files/directories or the schema's declared primary-key columns for entities, resolved from the current table. Read a current item's \`lixcol_change_id\` from its current table, not an historical row; use \`lixcol_depth\` / \`lixcol_observed_commit_id\` for prior revisions.`;
 
 const EXECUTE_SQL_GUIDE = `Use SQL as the universal interface to Lix. Lix SQL is a Postgres dialect subset. execute_sql runs any ordered atomic SQL batch against the branch selected by context and is always treated as potentially destructive. File and directory creation, reads, edits, deletes, path changes, and entity operations are SQL. Do not look for or invent typed file or entity tools. Lix SQL does not support DDL statements.
 
@@ -94,7 +94,7 @@ For a mutation, inspect the relevant rows first with query_sql, execute the muta
 
 A successful execute_sql mutation is already saved; Lix does not require a checkpoint for durability. Unlike Git, skipping create_checkpoint keeps the files; you just do not have a named restore point, and \`lix_working_diff\` keeps accumulating from the last checkpoint. create_checkpoint is optional later, when a session or task is complete and someone may want this exact state; do not call it after every write. List checkpoints with \`SELECT\` on \`lix_checkpoint\` or \`lix_checkpoint_history()\`.
 
-Use the core tables above, plus their \`_by_branch\` / \`_history\` companions, directly; do not inspect \`information_schema\` for them.
+SQL tables always use the branch selected by the current Lix session. They do not expose branch-routing columns or \`_by_branch\` variants.
 
 Entity tables are lix-dynamic: do not assume a fixed entity-table list or column shape. Before guessing a dynamic table or column name, discover its table name through information_schema, then inspect only that table:
 
@@ -106,7 +106,7 @@ ${EXECUTE_SQL_TABLES_QUERY}
 ${EXECUTE_SQL_COLUMNS_QUERY}
 \`\`\`
 
-System \`lixcol_*\` metadata is intentionally omitted from the core guide. Where present, \`<table>_by_branch\` adds \`lixcol_branch_id\` for cross-branch reads and writes. \`<table>_history\` is read-only: scope every history query with \`WHERE lixcol_start_commit_id = lix_active_branch_commit_id()\`, then constrain it by stable identity (\`id = $n\` for files/directories or \`lixcol_entity_pk = $n\` for entities) resolved from the active table. That avoids \`LIX_HISTORY_NON_IDENTITY_FILTER\` and preserves renamed/tombstoned history. Read a current item's \`lixcol_change_id\` from its active table, not an historical row; use \`lixcol_depth\` / \`lixcol_observed_commit_id\` for prior revisions.`;
+System \`lixcol_*\` metadata is intentionally omitted from the core guide. History table functions are read-only revision streams, not current-state snapshot tables. Call \`lix_file_history()\`, \`lix_directory_history()\`, or \`<schema>_history()\` to start at the active branch head. For an explicit anchor commit, pass its id as the function argument, for example \`lix_file_history($1)\` or \`<schema>_history($1)\`. Constrain the result by stable identity: \`id = $n\` for files/directories or the schema's declared primary-key columns for entities, resolved from the current table. Read a current item's \`lixcol_change_id\` from its current table, not an historical row; use \`lixcol_depth\` / \`lixcol_observed_commit_id\` for prior revisions.`;
 
 export const EXECUTE_SQL_TOOL_DESCRIPTION = `${EXECUTE_SQL_GUIDE}
 
