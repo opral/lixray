@@ -29,6 +29,7 @@ export interface BrowserReplicaLockManager {
 
 const volatileBrowserReplicaTabIds = new WeakMap<object, string>();
 let volatileBrowserReplicaTabIdWithoutStorage: string | undefined;
+let unlockedBrowserReplicaTabId: string | undefined;
 const claimedBrowserReplicaIds = new Set<string>();
 const browserReplicaClaims = new Map<string, Promise<boolean>>();
 
@@ -93,6 +94,11 @@ export function rotateRepositoryBrowserReplicaId(
 export async function claimRepositoryBrowserReplicaId(
 	authIdentity: string,
 ): Promise<string> {
+	const lockManager = browserReplicaLockManager();
+	if (!lockManager) {
+		unlockedBrowserReplicaTabId ??= globalThis.crypto.randomUUID();
+		return `${authIdentity}:${unlockedBrowserReplicaTabId}`;
+	}
 	for (let collision = 0; collision < 8; collision += 1) {
 		const replicaId =
 			collision === 0
@@ -101,7 +107,7 @@ export async function claimRepositoryBrowserReplicaId(
 		if (claimedBrowserReplicaIds.has(replicaId)) return replicaId;
 		let claim = browserReplicaClaims.get(replicaId);
 		if (!claim) {
-			claim = tryClaimBrowserReplicaIdLock(replicaId);
+			claim = tryClaimBrowserReplicaIdLock(replicaId, lockManager);
 			browserReplicaClaims.set(replicaId, claim);
 		}
 		const acquired = await claim.finally(() => {
