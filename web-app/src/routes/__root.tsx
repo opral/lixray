@@ -14,6 +14,8 @@ import appCss from "../styles.css?url";
 const title = "LixRay — A repository for your entire company";
 const description =
 	"One repo your team and your agents share. Any file type, every change tracked.";
+// Absolute URL: link-preview crawlers do not resolve relative image paths.
+const ogImage = "https://lixray.com/og.png";
 
 export const Route = createRootRoute({
 	head: () => ({
@@ -24,6 +26,14 @@ export const Route = createRootRoute({
 			{ name: "description", content: description },
 			{ name: "theme-color", content: "#f4f2ef" },
 			{ name: "referrer", content: "no-referrer" },
+			{ property: "og:title", content: title },
+			{ property: "og:description", content: description },
+			{ property: "og:type", content: "website" },
+			{ property: "og:image", content: ogImage },
+			{ property: "og:image:width", content: "2400" },
+			{ property: "og:image:height", content: "1260" },
+			{ name: "twitter:card", content: "summary_large_image" },
+			{ name: "twitter:image", content: ogImage },
 		],
 		links: [
 			{ rel: "stylesheet", href: appCss },
