@@ -42,6 +42,8 @@ export interface Repository {
 	slug: string;
 	createdAt: string;
 	updatedAt: string;
+	role: "admin" | "member";
+	visibility: "private" | "public";
 }
 
 export interface Organization {
@@ -345,11 +347,12 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 					(repository) => repository.id === repositoryId,
 				),
 			);
-			if (!organization) throw new Error("Repository not found");
-			if (organization.role === null) {
-				throw new Error(
-					"Repository membership does not grant organization access",
-				);
+			const repository = organization?.repositories.find(
+				(candidate) => candidate.id === repositoryId,
+			);
+			if (!organization || !repository) throw new Error("Repository not found");
+			if (repository.role !== "admin") {
+				throw new Error("Repository admin access required");
 			}
 			const { error: renameError } = await client
 				.from("lixes")
@@ -373,11 +376,12 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 					(repository) => repository.id === repositoryId,
 				),
 			);
-			if (!organization) throw new Error("Repository not found");
-			if (organization.role === null) {
-				throw new Error(
-					"Repository membership does not grant organization access",
-				);
+			const repository = organization?.repositories.find(
+				(candidate) => candidate.id === repositoryId,
+			);
+			if (!organization || !repository) throw new Error("Repository not found");
+			if (repository.role !== "admin") {
+				throw new Error("Repository admin access required");
 			}
 			const { error: deleteError } = await client.rpc("delete_lix", {
 				p_lix_id: repositoryId,
@@ -462,6 +466,8 @@ async function loadOrganizations(
 				slug: String(row.lix_slug),
 				createdAt: String(row.lix_created_at),
 				updatedAt: String(row.lix_updated_at),
+				role: row.lix_role,
+				visibility: row.lix_visibility,
 			});
 		}
 	}
@@ -493,6 +499,8 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 				slug: DEMO_LIX_NAME,
 				createdAt: "2026-07-01T12:00:00.000Z",
 				updatedAt: "2026-07-12T18:58:00.000Z",
+				role: "admin",
+				visibility: "public",
 			},
 		],
 	}));
@@ -518,6 +526,8 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 			slug: repositorySlug(normalizedName),
 			createdAt: now,
 			updatedAt: now,
+			role: "admin",
+			visibility: "private",
 		};
 		setOrganization((current) => ({
 			...current,

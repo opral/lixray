@@ -29,6 +29,9 @@ function clientReturning(canEdit: boolean) {
 						lix_name: "Website",
 						lix_slug: "website",
 						can_edit: canEdit,
+						role: canEdit ? "member" : null,
+						visibility: "private",
+						path_public: false,
 					},
 				],
 				error: null,
@@ -45,7 +48,6 @@ void test("team invite acceptance confirms edit access before resolving", async 
 		"tm_AAAAAAAAAAAAAAAAAAAA",
 		"atelier",
 		"website",
-		REPOSITORY_ID,
 	);
 
 	assert.deepEqual(calls, [
@@ -64,7 +66,6 @@ void test("team invite acceptance rejects a stale read-only route", async () => 
 			"tm_AAAAAAAAAAAAAAAAAAAA",
 			"atelier",
 			"website",
-			REPOSITORY_ID,
 		),
 		(caught) =>
 			caught instanceof TeamInviteAccessConfirmationError &&

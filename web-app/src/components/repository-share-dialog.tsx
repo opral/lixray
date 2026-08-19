@@ -24,6 +24,8 @@ interface RepositoryShareDialogProps {
 	onOpenChange?: (open: boolean) => void;
 	/** Called after the link has been written to the clipboard. */
 	onCopied?: (url: string, mode: ShareMode) => void;
+	/** Makes the plain resource URL readable before it leaves the browser. */
+	prepareReadLink?: () => Promise<void>;
 	/** When set, the popover offers the People tab as its team entry (1c). */
 	onOpenTeam?: () => void;
 	className?: string;
@@ -45,6 +47,7 @@ export function RepositoryShareDialog({
 	open,
 	onOpenChange,
 	onCopied,
+	prepareReadLink,
 	onOpenTeam,
 	className,
 }: RepositoryShareDialogProps) {
@@ -69,6 +72,7 @@ export function RepositoryShareDialog({
 
 	const handleCopy = async () => {
 		try {
+			if (!isEditableLink) await prepareReadLink?.();
 			await copyText(copiedUrl);
 		} catch {
 			setCopyState("error");

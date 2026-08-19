@@ -1,4 +1,10 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import {
+	createFileRoute,
+	Link,
+	Outlet,
+	useNavigate,
+	useRouterState,
+} from "@tanstack/react-router";
 import {
 	type ReactNode,
 	useCallback,
@@ -10,6 +16,10 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
 import { Button } from "~/components/ui/button";
+import {
+	PublishedResourceView,
+	type PublishedResource,
+} from "~/components/published-resource-view";
 import { RepositoryAtelier } from "~/components/repository-atelier";
 import { useRepository } from "~/components/repository-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
@@ -80,6 +90,15 @@ function RepositoryRoutePage() {
 	} = useAuth();
 	const repositoryState = useRepository();
 	const navigate = useNavigate();
+	const pathname = useRouterState({
+		select: (state) => state.location.pathname,
+	});
+	const publishedResource = publishedResourceFromRoute(
+		pathname,
+		namespace,
+		repositorySlug,
+	);
+	const publicPath = publishedResource?.path;
 	const demoResolved = useMemo(
 		() =>
 			findRepositoryByRoute(
@@ -107,12 +126,11 @@ function RepositoryRoutePage() {
 	const pendingTeamInvite =
 		urlTeamInvite ??
 		stagedTeamInviteForRoute(stagedTeamInvite, namespace, repositorySlug);
-	const inviteResolutionKey =
-		resolvedRepositoryId && pendingTeamInvite
-			? `${resolvedRepositoryId}:${pendingTeamInvite}`
-			: resolvedRepositoryId && invite
-				? `${resolvedRepositoryId}:${invite}`
-				: null;
+	const inviteResolutionKey = pendingTeamInvite
+		? `team:${namespace}/${repositorySlug}:${pendingTeamInvite}`
+		: resolvedRepositoryId && invite
+			? `${resolvedRepositoryId}:${invite}`
+			: null;
 	const shouldWaitForInviteResolution =
 		!isDemoModeEnabled &&
 		inviteResolutionKey !== null &&
@@ -137,6 +155,9 @@ function RepositoryRoutePage() {
 							repositoryName: demoResolved.repository.name,
 							repositorySlug: demoResolved.repository.slug,
 							canEdit: demoCanEdit,
+							role: demoCanEdit ? "admin" : null,
+							visibility: "public",
+							pathPublic: true,
 						}
 					: null,
 			);
@@ -144,7 +165,42 @@ function RepositoryRoutePage() {
 		}
 		if (!authIsLoaded || !authClient) return;
 
-		void resolvePublicRepositoryByRoute(authClient, namespace, repositorySlug)
+		const repositoryCapabilityToken =
+			invite && !isTeamInviteToken(invite)
+				? invite
+				: peekRepositoryShareCapability()?.token;
+		const resolution = repositoryCapabilityToken
+			? resolveRepositoryShareToken(authClient, repositoryCapabilityToken).then(
+					(candidate) => {
+						if (
+							!candidate ||
+							candidate.organizationHandle !== namespace ||
+							candidate.repositorySlug !== repositorySlug
+						) {
+							return null;
+						}
+						return {
+							organizationId: candidate.organizationId,
+							organizationName: candidate.organizationName,
+							organizationHandle: candidate.organizationHandle,
+							repositoryId: candidate.repositoryId,
+							repositoryName: candidate.repositoryName,
+							repositorySlug: candidate.repositorySlug,
+							canEdit: candidate.role !== null,
+							role: candidate.role,
+							visibility: candidate.visibility,
+							pathPublic: candidate.pathPublic,
+						} satisfies PublicRepositoryRoute;
+					},
+				)
+			: resolvePublicRepositoryByRoute(
+					authClient,
+					namespace,
+					repositorySlug,
+					publicPath,
+				);
+
+		void resolution
 			.then((nextResolved) => {
 				if (!disposed) setResolved(nextResolved);
 			})
@@ -168,7 +224,9 @@ function RepositoryRoutePage() {
 		authUser?.id,
 		demoCanEdit,
 		demoResolved,
+		invite,
 		namespace,
+		publicPath,
 		repositorySlug,
 	]);
 
@@ -193,14 +251,13 @@ function RepositoryRoutePage() {
 	useEffect(() => {
 		if (
 			isDemoModeEnabled ||
-			!resolvedRepositoryId ||
 			!authClient ||
 			!pendingTeamInvite ||
 			!authIsLoaded
 		) {
 			return;
 		}
-		const inviteKey = `${resolvedRepositoryId}:${pendingTeamInvite}`;
+		const inviteKey = `team:${namespace}/${repositorySlug}:${pendingTeamInvite}`;
 		if (settledInviteKey === inviteKey || failedInviteKey === inviteKey) return;
 		let disposed = false;
 		const settle = (clearPending: boolean) => {
@@ -233,7 +290,6 @@ function RepositoryRoutePage() {
 					pendingTeamInvite,
 					namespace,
 					repositorySlug,
-					resolvedRepositoryId,
 				);
 				if (disposed) return;
 				setResolved(joined.repository);
@@ -243,7 +299,9 @@ function RepositoryRoutePage() {
 						: "You joined the team.",
 				);
 				settle(true);
-				void repositoryState.refresh({ repositoryId: resolvedRepositoryId });
+				void repositoryState.refresh({
+					repositoryId: joined.repository.repositoryId,
+				});
 			} catch (caught) {
 				if (!disposed) {
 					if (caught instanceof TeamInviteAccessConfirmationError) {
@@ -267,7 +325,6 @@ function RepositoryRoutePage() {
 		failedInviteKey,
 		namespace,
 		pendingTeamInvite,
-		resolvedRepositoryId,
 		settledInviteKey,
 		urlTeamInvite,
 		repositorySlug,
@@ -514,6 +571,54 @@ function RepositoryRoutePage() {
 			</RepositoryRouteStatus>
 		);
 	}
+	if (
+		!resolved.canEdit &&
+		resolved.visibility === "private" &&
+		shareCapability &&
+		!resolved.pathPublic
+	) {
+		return (
+			<RepositoryRouteStatus>
+				<strong>
+					{shareCapability.sharerName ?? "A repository member"} invited you to{" "}
+					{resolved.repositoryName}
+				</strong>
+				<span>Join as a member to open and edit this private repository.</span>
+				<Button
+					disabled={joining}
+					onClick={() =>
+						void joinToEdit().catch((caught: unknown) => {
+							toast.error(
+								caught instanceof Error
+									? caught.message
+									: "Unable to join this repository.",
+							);
+						})
+					}
+				>
+					{joining ? "Joining…" : "Join repository"}
+				</Button>
+			</RepositoryRouteStatus>
+		);
+	}
+	if (
+		!resolved.canEdit &&
+		resolved.visibility === "private" &&
+		resolved.pathPublic &&
+		publishedResource
+	) {
+		return (
+			<>
+				<PublishedResourceView
+					namespace={resolved.organizationHandle}
+					repositorySlug={resolved.repositorySlug}
+					repositoryName={resolved.repositoryName}
+					resource={publishedResource}
+				/>
+				<Outlet />
+			</>
+		);
+	}
 
 	return (
 		<RepositoryAtelier
@@ -525,6 +630,11 @@ function RepositoryRoutePage() {
 			repositoryName={resolved.repositoryName}
 			branchId={branch}
 			canEdit={resolved.canEdit}
+			publicPath={
+				!resolved.canEdit && resolved.visibility === "private"
+					? publicPath
+					: undefined
+			}
 			shareAccess={
 				shareCapability && !resolved.canEdit
 					? { onJoinToEdit: joinToEdit, joining }
@@ -532,6 +642,27 @@ function RepositoryRoutePage() {
 			}
 		/>
 	);
+}
+
+function publishedResourceFromRoute(
+	pathname: string,
+	namespace: string,
+	repositorySlug: string,
+): PublishedResource | undefined {
+	const root = `/@${namespace}/${repositorySlug}`;
+	for (const kind of ["file", "dir"] as const) {
+		const prefix = `${root}/${kind}/`;
+		if (!pathname.startsWith(prefix)) continue;
+		try {
+			return {
+				kind: kind === "dir" ? "directory" : "file",
+				path: `/${decodeURIComponent(pathname.slice(prefix.length))}`,
+			};
+		} catch {
+			return undefined;
+		}
+	}
+	return undefined;
 }
 
 function RepositoryRouteStatus({ children }: { children: ReactNode }) {

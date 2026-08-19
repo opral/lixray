@@ -10,6 +10,7 @@ export interface DirectRepositoryMember {
 	name: string;
 	email: string;
 	avatarUrl: string | null;
+	role: "admin" | "member";
 }
 
 /**
@@ -22,14 +23,15 @@ export interface RepositorySettingsApi {
 		namespaceHandle: string;
 		repositorySlug: string;
 		repositoryName: string;
-		isOwner: boolean;
+		isAdmin: boolean;
+		visibility: "private" | "public";
 		currentUserId: string | null;
 	};
 	rename(name: string): Promise<void>;
 	listDirectMembers(): Promise<readonly DirectRepositoryMember[]>;
 	removeDirectMember(userId: string): Promise<void>;
-	/** Null when the caller cannot read the namespace roster. */
-	listNamespaceMembers(): Promise<readonly DirectRepositoryMember[] | null>;
+	setMemberRole(userId: string, role: "admin" | "member"): Promise<void>;
+	setVisibility(visibility: "private" | "public"): Promise<void>;
 	createEditLink(): Promise<string>;
 	/** Deletes and navigates away; the tab unmounts with the workspace. */
 	deleteRepository(): Promise<void>;
@@ -71,7 +73,7 @@ function SettingsContent({
 				</p>
 				<NamePanel settingsApi={settingsApi} />
 				<AccessPanel settingsApi={settingsApi} />
-				{info.isOwner ? <DangerPanel settingsApi={settingsApi} /> : null}
+				{info.isAdmin ? <DangerPanel settingsApi={settingsApi} /> : null}
 			</div>
 		</div>
 	);
@@ -112,7 +114,7 @@ function NamePanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 					className="h-9 min-w-0 flex-1 rounded-lg border border-border-panel bg-bg-panel px-[11px] text-[13px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1 disabled:opacity-60"
 					maxLength={80}
 					value={name}
-					disabled={!info.isOwner}
+					disabled={!info.isAdmin}
 					onChange={(event) => setName(event.target.value)}
 				/>
 				<Button
@@ -121,15 +123,15 @@ function NamePanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 					size="sm"
 					className="h-9"
 					disabled={
-						!info.isOwner || busy || !name.trim() || name.trim() === savedName
+						!info.isAdmin || busy || !name.trim() || name.trim() === savedName
 					}
 				>
 					{busy ? "Saving…" : "Save"}
 				</Button>
 			</form>
-			{!info.isOwner ? (
+			{!info.isAdmin ? (
 				<p className="m-0 mt-2 text-[12px] text-text-quaternary">
-					Only owners of @{info.namespaceHandle} can rename this repository.
+					Only repository admins can rename this repository.
 				</p>
 			) : null}
 		</section>
@@ -141,9 +143,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 	const [directMembers, setDirectMembers] = useState<
 		readonly DirectRepositoryMember[] | null
 	>(null);
-	const [namespaceMembers, setNamespaceMembers] = useState<
-		readonly DirectRepositoryMember[] | null
-	>(null);
+	const [visibility, setVisibility] = useState(info.visibility);
 	const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(
 		null,
 	);
@@ -154,12 +154,6 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 			.listDirectMembers()
 			.then((members) => {
 				if (!cancelled) setDirectMembers(members);
-			})
-			.catch(() => undefined);
-		settingsApi
-			.listNamespaceMembers()
-			.then((members) => {
-				if (!cancelled) setNamespaceMembers(members);
 			})
 			.catch(() => undefined);
 		return () => {
@@ -191,8 +185,58 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 		}
 	};
 
+	const changeRole = async (member: DirectRepositoryMember) => {
+		const role = member.role === "admin" ? "member" : "admin";
+		try {
+			await settingsApi.setMemberRole(member.userId, role);
+			setDirectMembers(
+				(current) =>
+					current?.map((entry) =>
+						entry.userId === member.userId ? { ...entry, role } : entry,
+					) ?? null,
+			);
+			toast.success(
+				role === "admin"
+					? `${member.name || member.email} is now an admin`
+					: `${member.name || member.email} is now a member`,
+			);
+		} catch (caught) {
+			toast.error(formatCaughtError(caught));
+		}
+	};
+
+	const changeVisibility = async () => {
+		const next = visibility === "private" ? "public" : "private";
+		try {
+			await settingsApi.setVisibility(next);
+			setVisibility(next);
+			toast.success(`Repository is now ${next}`);
+		} catch (caught) {
+			toast.error(formatCaughtError(caught));
+		}
+	};
+
 	return (
 		<section className="mb-3.5 rounded-xl border border-border-panel px-[18px] py-4">
+			<div className="mb-3 flex items-center gap-3 border-b border-border-subtle pb-3">
+				<div className="min-w-0 flex-1">
+					<h3 className="m-0 text-[13.5px] font-bold">Repository visibility</h3>
+					<p className="m-0 mt-0.5 text-[12px] text-text-tertiary">
+						{visibility === "public"
+							? "Anyone can read. Only members can edit."
+							: "Only repository members can open this repository. Published files remain public."}
+					</p>
+				</div>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					disabled={!info.isAdmin}
+					onClick={() => void changeVisibility()}
+				>
+					{visibility === "public" ? "Make private" : "Make public"}
+				</Button>
+			</div>
 			<div className="flex items-center gap-2">
 				<h3 className="m-0 text-[13.5px] font-bold">Who has access</h3>
 				<span className="flex-1" />
@@ -208,15 +252,15 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 				</Button>
 			</div>
 			<p className="m-0 mt-1 mb-2 text-[12px] text-text-tertiary">
-				Anyone with the plain URL can read. The edit link lets people join as
-				editors of this repository.
+				The edit link lets people join as members. Admins can promote members
+				and remove access.
 			</p>
-			{namespaceMembers?.map((member) => {
+			{directMembers?.map((member) => {
 				const isSelf = member.userId === info.currentUserId;
 				return (
 					<div
 						key={member.userId}
-						className="flex items-center gap-2.5 border-t border-border-subtle py-2 first-of-type:border-t-0"
+						className="flex items-center gap-2.5 border-t border-border-subtle py-2"
 					>
 						<MemberAvatar
 							member={{
@@ -239,74 +283,45 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 							</span>
 						</span>
 						<span className="ml-auto rounded-[7px] border border-border-panel px-2 py-1 text-[12px] text-text-secondary">
-							Full access
+							{member.role === "admin" ? "Admin" : "Member"}
 						</span>
+						{info.isAdmin ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="h-7 text-text-tertiary"
+								onClick={() => void changeRole(member)}
+							>
+								{member.role === "admin" ? "Make member" : "Make admin"}
+							</Button>
+						) : null}
+						{info.isAdmin || isSelf ? (
+							confirmingRemoval === member.userId ? (
+								<Button
+									type="button"
+									variant="destructive"
+									size="sm"
+									className="h-7"
+									onClick={() => void removeMember(member)}
+								>
+									Confirm
+								</Button>
+							) : (
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="h-7 text-text-tertiary"
+									onClick={() => setConfirmingRemoval(member.userId)}
+								>
+									{isSelf ? "Leave" : "Remove"}
+								</Button>
+							)
+						) : null}
 					</div>
 				);
 			})}
-			{directMembers
-				?.filter(
-					(member) =>
-						!namespaceMembers?.some(
-							(namespaceMember) => namespaceMember.userId === member.userId,
-						),
-				)
-				.map((member) => {
-					const isSelf = member.userId === info.currentUserId;
-					return (
-						<div
-							key={member.userId}
-							className="flex items-center gap-2.5 border-t border-border-subtle py-2"
-						>
-							<MemberAvatar
-								member={{
-									name: member.name || member.email,
-									avatarUrl: member.avatarUrl,
-								}}
-								className="size-6 text-[11px]"
-							/>
-							<span className="flex min-w-0 flex-col">
-								<span className="truncate text-[13px] leading-tight font-semibold">
-									{member.name || member.email}
-									{isSelf ? (
-										<span className="ml-1.5 font-normal text-text-quaternary">
-											you
-										</span>
-									) : null}
-								</span>
-								<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
-									{member.email} · joined via edit link
-								</span>
-							</span>
-							<span className="ml-auto rounded-[7px] border border-border-panel px-2 py-1 text-[12px] text-text-secondary">
-								Editor
-							</span>
-							{info.isOwner || isSelf ? (
-								confirmingRemoval === member.userId ? (
-									<Button
-										type="button"
-										variant="destructive"
-										size="sm"
-										className="h-7"
-										onClick={() => void removeMember(member)}
-									>
-										Confirm
-									</Button>
-								) : (
-									<Button
-										type="button"
-										variant="ghost"
-										size="sm"
-										className="h-7 text-text-tertiary"
-										onClick={() => setConfirmingRemoval(member.userId)}
-									>
-										{isSelf ? "Leave" : "Remove"}
-									</Button>
-								)
-							) : null}
-						</div>
-					);
-				})}
 		</section>
 	);
 }
