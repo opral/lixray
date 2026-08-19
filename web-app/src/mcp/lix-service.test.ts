@@ -138,11 +138,6 @@ void test("open_lix returns a signed context pinned to the selected branch", asy
 
 void test("first open still binds the identified account; cache-admit does not", async () => {
 	const runtime = new FakeRuntime();
-	const service = new LixService(runtime, {
-		contextSigningKey: "test-key",
-		principal: { userId: "user-123", clientId: "client" },
-	});
-
 	assert.equal(runtime.hasOpenRuntime(LIX_ID), false);
 	assert.deepEqual(runtime.binds, []);
 
