@@ -1121,6 +1121,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn anonymous_file_transport_enforces_repository_cedar_policy() {
+        let app = test_router();
+        let lix_id = "cedar-file-sharing";
+        let session_id = open_protocol_session(app.clone(), lix_id).await;
+        let public_file_id = "01920000-0000-7000-8000-000000000201";
+        let private_file_id = "01920000-0000-7000-8000-000000000202";
+        let schema = r#"
+            entity Account;
+            entity File;
+            action "view" appliesTo { principal: Account, resource: File };
+        "#;
+        let policy = format!(
+            r#"permit (
+                principal == Account::"{}",
+                action == Action::"view",
+                resource == File::"{public_file_id}"
+            );"#,
+            lix_sdk::ANONYMOUS_ACCOUNT_ID
+        );
+        expect_protocol_ok(
+            protocol_execute(
+                app.clone(),
+                lix_id,
+                &session_id,
+                "INSERT INTO lix_file (id, path, content) VALUES ($1, '/public.txt', CAST('public' AS BYTEA)), ($2, '/private.txt', CAST('private' AS BYTEA)), ($3, '/.lix/permissions/schema.cedarschema', CAST($4 AS BYTEA)), ($5, '/.lix/permissions/publications.cedar', CAST($6 AS BYTEA))",
+                vec![
+                    wire_value(LixValue::Text(public_file_id.to_string())),
+                    wire_value(LixValue::Text(private_file_id.to_string())),
+                    wire_value(LixValue::Text(
+                        "01920000-0000-7000-8000-000000000203".to_string(),
+                    )),
+                    wire_value(LixValue::Text(schema.to_string())),
+                    wire_value(LixValue::Text(
+                        "01920000-0000-7000-8000-000000000204".to_string(),
+                    )),
+                    wire_value(LixValue::Text(policy)),
+                ],
+            )
+            .await,
+        )
+        .await;
+
+        let read = |path: &'static str| {
+            let app = app.clone();
+            let session_id = session_id.clone();
+            async move {
+                app.oneshot(
+                    Request::builder()
+                        .uri(format!("/lixes/{lix_id}/lix/v1/file?path={path}"))
+                        .header(server_protocol::SESSION_ID_HEADER, session_id)
+                        .body(Body::empty())
+                        .expect("file read request"),
+                )
+                .await
+                .expect("file read response")
+            }
+        };
+
+        let public = read("%2Fpublic.txt").await;
+        assert_eq!(public.status(), StatusCode::OK);
+        assert_eq!(
+            public
+                .into_body()
+                .collect()
+                .await
+                .expect("public file body")
+                .to_bytes()
+                .as_ref(),
+            b"public"
+        );
+
+        let private = read("%2Fprivate.txt").await;
+        assert_eq!(private.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            json_body(private).await["error"]["code"],
+            lix_sdk::LixError::CODE_PERMISSION_DENIED
+        );
+    }
+
+    #[tokio::test]
     async fn strict_remote_sessions_merge_disjoint_markdown_blob_edits() {
         let archive_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join(

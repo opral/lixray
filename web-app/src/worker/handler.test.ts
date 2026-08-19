@@ -1167,9 +1167,9 @@ void test("inaccessible lixes return 403 from mutation routes", async () => {
 	assert.equal(response.status, 403);
 });
 
-void test("anonymous public reads resolve publicly and forward without auth", async () => {
-	let proxiedRequest: Request | undefined;
-	let publicLixLookups = 0;
+void test("anonymous SQL is rejected before public resolution", async () => {
+	let publicLixLookedUp = false;
+	let proxied = false;
 	const response = await handleRequest(
 		remoteLixRequest("/execute", {
 			method: "POST",
@@ -1178,36 +1178,20 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 		}),
 		env({}),
 		{
-			authenticate: async () => {
-				throw new Error("anonymous reads must not authenticate first");
-			},
-			resolvePublicLix: async (namespace, lixSlug) => {
-				publicLixLookups += 1;
-				assert.equal(namespace, "acme");
-				assert.equal(lixSlug, "launch-q3");
+			resolvePublicLix: async () => {
+				publicLixLookedUp = true;
 				return { ok: true, lixId: LIX_A };
 			},
-			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
-			lixFetch: async (lixId, request) => {
-				assert.equal(lixId, LIX_A);
-				proxiedRequest = request;
-				return new Response("public read");
+			lixFetch: async () => {
+				proxied = true;
+				return new Response("unexpected");
 			},
 		},
 	);
 
-	assert.equal(response.status, 200);
-	assert.equal(await response.text(), "public read");
-	assert.equal(publicLixLookups, 1);
-	assert.ok(proxiedRequest);
-	assert.equal(proxiedRequest.headers.get("authorization"), null);
-	assert.equal(
-		proxiedRequest.headers.get("x-lixray-idempotency-principal"),
-		null,
-	);
-	assert.deepEqual(await proxiedRequest.json(), {
-		sql: "SELECT path FROM lix_file",
-	});
+	assert.equal(response.status, 401);
+	assert.equal(publicLixLookedUp, false);
+	assert.equal(proxied, false);
 });
 
 void test("anonymous public binary file reads forward without SQL parsing", async () => {
@@ -1251,6 +1235,24 @@ void test("anonymous public binary file reads forward without SQL parsing", asyn
 		proxiedRequest.headers.get("lix-session-id"),
 		"public-reader-session",
 	);
+});
+
+void test("anonymous Cedar denials are indistinguishable from missing files", async () => {
+	const response = await handleRequest(
+		remoteLixRequest("/file?path=%2Fprivate.md", { method: "GET" }),
+		env({}),
+		{
+			resolvePublicLix: async () => ({ ok: true, lixId: LIX_A }),
+			lixFetch: async () =>
+				Response.json(
+					{ error: { code: "LIX_PERMISSION_DENIED" } },
+					{ status: 403 },
+				),
+		},
+	);
+
+	assert.equal(response.status, 404);
+	assert.equal(await response.text(), "Not found\n");
 });
 
 void test("anonymous binary file writes remain unauthorized", async () => {
@@ -1340,7 +1342,7 @@ void test("anonymous branch mutations remain unauthorized", async () => {
 	assert.equal(proxied, false);
 });
 
-void test("public write SQL is rejected before it reaches the lix", async () => {
+void test("anonymous write SQL is rejected before it reaches the lix", async () => {
 	let proxied = false;
 	const response = await handleRequest(
 		remoteLixRequest("/execute", {
@@ -1362,10 +1364,7 @@ void test("public write SQL is rejected before it reaches the lix", async () => 
 		},
 	);
 
-	assert.equal(response.status, 400);
-	assert.deepEqual(await response.json(), {
-		error: { code: "LIX_READ_ONLY", message: "lix is read-only" },
-	});
+	assert.equal(response.status, 401);
 	assert.equal(proxied, false);
 });
 
@@ -1395,11 +1394,11 @@ void test("a mutation cannot hide behind a multi-statement public script", async
 		},
 	);
 
-	assert.equal(response.status, 400);
+	assert.equal(response.status, 401);
 	assert.equal(proxied, false);
 });
 
-void test("public reads fail closed when no SQL parser is configured", async () => {
+void test("anonymous read SQL is unavailable regardless of parser configuration", async () => {
 	const response = await handleRequest(
 		remoteLixRequest("/execute", {
 			method: "POST",
@@ -1416,11 +1415,10 @@ void test("public reads fail closed when no SQL parser is configured", async () 
 		},
 	);
 
-	assert.equal(response.status, 400);
+	assert.equal(response.status, 401);
 });
 
-void test("authenticated non-members are downgraded to the public read transport", async () => {
-	let proxiedRequest: Request | undefined;
+void test("authenticated non-members cannot downgrade SQL to public transport", async () => {
 	let publicLixLookups = 0;
 	const response = await handleRequest(
 		remoteLixRequest("/execute", {
@@ -1439,19 +1437,12 @@ void test("authenticated non-members are downgraded to the public read transport
 				publicLixLookups += 1;
 				return { ok: true, lixId: LIX_A };
 			},
-			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
-			lixFetch: async (_lixId, request) => {
-				proxiedRequest = request;
-				return new Response("downgraded");
-			},
+			lixFetch: async () => new Response("unexpected"),
 		},
 	);
 
-	assert.equal(response.status, 200);
-	assert.equal(await response.text(), "downgraded");
-	assert.equal(publicLixLookups, 1);
-	assert.ok(proxiedRequest);
-	assert.equal(proxiedRequest.headers.get("authorization"), null);
+	assert.equal(response.status, 403);
+	assert.equal(publicLixLookups, 0);
 });
 
 void test("authenticated repository members can proxy a write request", async () => {

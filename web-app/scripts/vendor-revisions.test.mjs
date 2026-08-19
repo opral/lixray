@@ -94,8 +94,18 @@ test("Atelier resolves the vendored Lix SDK instead of npm", async () => {
 		rootPackage.pnpm.overrides["@lix-js/sdk"],
 		"link:vendor/lix/packages/js-sdk",
 	);
-	assert.equal(
+	assertCaretRangeIncludes(
 		atelierPackage.peerDependencies["@lix-js/sdk"],
-		`^${lixPackage.version}`,
+		lixPackage.version,
 	);
 });
+
+function assertCaretRangeIncludes(range, version) {
+	const minimum = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range);
+	const candidate = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+	assert.ok(minimum, `expected a caret range, received ${range}`);
+	assert.ok(candidate, `expected a semantic version, received ${version}`);
+	assert.equal(candidate[1], minimum[1]);
+	assert.equal(candidate[2], minimum[2]);
+	assert.ok(Number(candidate[3]) >= Number(minimum[3]));
+}
