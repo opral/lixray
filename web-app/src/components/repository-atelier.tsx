@@ -576,10 +576,6 @@ export function RepositoryAtelier({
 	useEffect(() => {
 		routeSyncedRef.current = false;
 	}, [instance]);
-	useEffect(() => {
-		protocolSessionRecoveryRef.current.resetBudget();
-		setSessionEpoch(0);
-	}, [atelierUserId, repositoryId]);
 	// The folder path of the last /dir navigation this handler issued. The
 	// dir route consumes it to tell shell-originated URL changes (the right
 	// view is already active — e.g. a forked folder tab) from outside ones
