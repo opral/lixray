@@ -198,11 +198,13 @@ type DirectoryListing = {
 		readonly path: string;
 		readonly name: string;
 		readonly itemCount: number;
+		readonly hidden?: true;
 	}>;
 	readonly files: ReadonlyArray<{
 		readonly path: string;
 		readonly name: string;
 		readonly updatedAt: string;
+		readonly hidden?: true;
 	}>;
 	readonly readmePath: string | null;
 };
@@ -211,38 +213,48 @@ type DirectoryListing = {
 export function listDirectory(
 	tree: RepositoryTree,
 	dirPath: string,
+	options: { readonly showHiddenFiles?: boolean } = {},
 ): DirectoryListing {
+	const visibleDirs = options.showHiddenFiles
+		? tree.dirs
+		: tree.dirs.filter((directory) => !hasDotPrefixedSegment(directory.path));
+	const visibleFiles = options.showHiddenFiles
+		? tree.files
+		: tree.files.filter((file) => !hasDotPrefixedSegment(file.path));
 	const currentDirectoryId =
 		dirPath === "/"
 			? null
-			: tree.dirs.find((directory) => directory.path === dirPath)?.id;
+			: visibleDirs.find((directory) => directory.path === dirPath)?.id;
 	if (dirPath !== "/" && !currentDirectoryId) {
 		return { dirs: [], files: [], readmePath: null };
 	}
 	const countItemsIn = (childDirPath: string) => {
-		const childDirectory = tree.dirs.find(
+		const childDirectory = visibleDirs.find(
 			(directory) => directory.path === childDirPath,
 		);
 		if (!childDirectory) return 0;
 		return (
-			tree.dirs.filter((dir) => dir.parentId === childDirectory.id).length +
-			tree.files.filter((file) => file.directoryId === childDirectory.id).length
+			visibleDirs.filter((dir) => dir.parentId === childDirectory.id).length +
+			visibleFiles.filter((file) => file.directoryId === childDirectory.id)
+				.length
 		);
 	};
-	const dirs = tree.dirs
+	const dirs = visibleDirs
 		.filter((dir) => dir.parentId === currentDirectoryId)
 		.map((dir) => ({
 			path: dir.path,
 			name: dir.name,
 			itemCount: countItemsIn(dir.path),
+			...(dir.name.startsWith(".") ? { hidden: true as const } : {}),
 		}));
 	// Per the home comp: README pinned first, then most recently updated.
-	const files = tree.files
+	const files = visibleFiles
 		.filter((file) => file.directoryId === currentDirectoryId)
 		.map((file) => ({
 			path: file.path,
 			name: file.name,
 			updatedAt: file.updatedAt,
+			...(file.name.startsWith(".") ? { hidden: true as const } : {}),
 		}))
 		.sort((left, right) => {
 			const leftReadme = left.name.toLowerCase() === "readme.md" ? 1 : 0;
@@ -253,6 +265,10 @@ export function listDirectory(
 	const readmePath =
 		files.find((file) => file.name.toLowerCase() === "readme.md")?.path ?? null;
 	return { dirs, files, readmePath };
+}
+
+function hasDotPrefixedSegment(path: string): boolean {
+	return path.split("/").some((segment) => segment.startsWith("."));
 }
 
 /** Resolves a link against the persisted directory surface without inferring kind from a path. */

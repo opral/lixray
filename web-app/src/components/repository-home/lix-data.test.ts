@@ -77,6 +77,66 @@ void test("lists nested children through parent identifiers", () => {
 	);
 });
 
+void test("uses one hidden-file policy for root and nested listings", () => {
+	const hiddenTree: RepositoryTree = {
+		dirs: [
+			{
+				kind: EntryKind.Directory,
+				id: "lix-dir",
+				parentId: null,
+				path: "/.lix",
+				name: ".lix",
+				updatedAt: "2026-08-10T00:00:00Z",
+			},
+			{
+				kind: EntryKind.Directory,
+				id: "permissions-dir",
+				parentId: "lix-dir",
+				path: "/.lix/permissions",
+				name: "permissions",
+				updatedAt: "2026-08-10T00:00:00Z",
+			},
+		],
+		files: [
+			{
+				kind: EntryKind.File,
+				id: "env-file",
+				directoryId: null,
+				path: "/.env",
+				name: ".env",
+				updatedAt: "2026-08-10T00:00:00Z",
+			},
+			{
+				kind: EntryKind.File,
+				id: "policy-file",
+				directoryId: "permissions-dir",
+				path: "/.lix/permissions/policies.cedar",
+				name: "policies.cedar",
+				updatedAt: "2026-08-10T00:00:00Z",
+			},
+		],
+	};
+
+	assert.deepEqual(listDirectory(hiddenTree, "/"), {
+		dirs: [],
+		files: [],
+		readmePath: null,
+	});
+	const revealed = listDirectory(hiddenTree, "/", {
+		showHiddenFiles: true,
+	});
+	assert.equal(revealed.dirs[0]?.path, "/.lix");
+	assert.equal(revealed.dirs[0]?.hidden, true);
+	assert.equal(revealed.files[0]?.path, "/.env");
+	assert.equal(revealed.files[0]?.hidden, true);
+	assert.deepEqual(
+		listDirectory(hiddenTree, "/.lix", { showHiddenFiles: true }).dirs.map(
+			(entry) => entry.path,
+		),
+		["/.lix/permissions"],
+	);
+});
+
 void test("resolves canonical links through the directory surface", () => {
 	assert.equal(persistedDirectoryPath(tree, "/docs/"), "/docs");
 	assert.equal(persistedDirectoryPath(tree, "/README.md"), null);
