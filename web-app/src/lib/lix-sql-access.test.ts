@@ -14,7 +14,13 @@ void test("sqlLooksLikeWrite matches INSERT, UPDATE, and DELETE", () => {
 void test("isClearlyReadOnlySql keeps SELECT/VALUES and rejects writes", () => {
 	assert.equal(isClearlyReadOnlySql("SELECT path FROM lix_file"), true);
 	assert.equal(isClearlyReadOnlySql("VALUES (1)"), true);
-	assert.equal(isClearlyReadOnlySql("WITH x AS (SELECT 1) SELECT * FROM x"), false);
+	assert.equal(
+		isClearlyReadOnlySql("WITH x AS (SELECT 1) SELECT * FROM x"),
+		false,
+	);
 	assert.equal(isClearlyReadOnlySql("SELECT 1; DELETE FROM lix_file"), false);
-	assert.equal(isClearlyReadOnlySql("INSERT INTO lix_file (path) VALUES ($1)"), false);
+	assert.equal(
+		isClearlyReadOnlySql("INSERT INTO lix_file (path) VALUES ($1)"),
+		false,
+	);
 });
