@@ -67,7 +67,7 @@ test("PR previews promote both tested images instead of rebuilding source", asyn
 	assert.match(cleanupWorkflow, /manage-railway-preview\.sh delete/);
 	assert.match(cleanupWorkflow, /cleanup-github-preview\.sh/);
 	assert.match(cleanupWorkflow, /deployments:\s*write/);
-	assert.match(cleanupWorkflow, /environments:\s*write/);
+	assert.doesNotMatch(cleanupWorkflow, /environments:\s*write/);
 	assert.doesNotMatch(cleanupWorkflow, /GITHUB_ENVIRONMENT_ADMIN_TOKEN:\?/);
 	assert.match(
 		coordinator,

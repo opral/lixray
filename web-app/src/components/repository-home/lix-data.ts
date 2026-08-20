@@ -103,17 +103,16 @@ export type RepositoryControlPlaneData = {
 	readonly createdAt: string | null;
 };
 
+/** Lix exposes the active branch's working changes as a table function. */
+export const WORKING_DIFF_COUNT_SQL =
+	"SELECT count(*) AS n FROM lix_working_diff()";
+
 /** Live, repository-derived facts used by the Home control-plane rail. */
 export function useRepositoryControlPlaneData(
 	lix: Lix,
 	enabled = true,
 ): RepositoryControlPlaneData | null {
-	const workingRows = useObservedRows(
-		lix,
-		"SELECT count(*) AS n FROM lix_working_diff",
-		[],
-		enabled,
-	);
+	const workingRows = useObservedRows(lix, WORKING_DIFF_COUNT_SQL, [], enabled);
 	const checkpointRows = useObservedRows(
 		lix,
 		"SELECT lixcol_created_at AS created_at FROM lix_checkpoint ORDER BY lixcol_created_at DESC LIMIT 10",
