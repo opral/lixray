@@ -267,48 +267,11 @@ export function useRepositoryTree(lix: Lix): {
 
 /**
  * One-shot check whether the repository has zero files — used before the
- * Atelier shell mounts (e.g. to seed the getting-started tab); the hook
- * below is the live variant.
+ * Atelier shell mounts (e.g. to seed the getting-started tab).
  */
 export async function repositoryHasNoFiles(lix: Lix): Promise<boolean> {
 	const result = await lix.execute("SELECT 1 FROM lix_file LIMIT 1", []);
 	return result.rows.length === 0;
-}
-
-/** Whether the repository has zero files (null while loading / no lix). */
-export function useRepositoryIsEmpty(lix: Lix | null): boolean | null {
-	const [isEmpty, setIsEmpty] = useState<boolean | null>(null);
-	useEffect(() => {
-		if (!lix) {
-			setIsEmpty(null);
-			return;
-		}
-		let disposed = false;
-		setIsEmpty(null);
-		const events = lix.observe("SELECT count(*) AS n FROM lix_file", []);
-		void (async () => {
-			try {
-				while (!disposed) {
-					const event = await events.next();
-					if (!event) break;
-					const row = event.result.rows[0] as
-						| { get(column: string): unknown }
-						| undefined;
-					const count = Number(row?.get("n") ?? 0);
-					if (!disposed) setIsEmpty(count === 0);
-				}
-			} catch (error) {
-				if (!disposed) {
-					console.error("repository-home: emptiness observe failed", error);
-				}
-			}
-		})();
-		return () => {
-			disposed = true;
-			events.close();
-		};
-	}, [lix]);
-	return isEmpty;
 }
 
 /**
