@@ -38,7 +38,7 @@ export type LixOpenedSpanLike = Pick<
 	start?: {
 		kind?: string;
 		name?: string;
-		attributes?: Record<string, string | number | boolean> | unknown;
+		attributes?: unknown;
 	};
 };
 
@@ -148,7 +148,8 @@ function spanAttributes(
 	}
 	if (Array.isArray(startAttributes)) {
 		const attributes: Record<string, string | number | boolean> = {};
-		for (const attribute of startAttributes) {
+		const rawAttributes: unknown[] = startAttributes;
+		for (const attribute of rawAttributes) {
 			if (
 				attribute &&
 				typeof attribute === "object" &&

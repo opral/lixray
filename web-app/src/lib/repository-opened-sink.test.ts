@@ -18,6 +18,7 @@ void test("MCP cache-hit bind produces one repository_opened for the identified 
 		{
 			createClient: () => ({
 				async captureImmediate(event) {
+					assert.ok(event.distinctId);
 					captured.push({
 						distinctId: event.distinctId,
 						event: event.event,

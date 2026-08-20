@@ -1,9 +1,10 @@
+import { jwtVerify, type JWTPayload } from "jose";
 import {
-	createRemoteJWKSet,
-	jwtVerify,
-	type JWTPayload,
-	type JWTVerifyGetKey,
-} from "jose";
+	classifyJwtVerifyError,
+	getRemoteJwks,
+	persistRemoteJwksIfPresent,
+	warmRemoteJwks,
+} from "./jwt-verifier.ts";
 import {
 	DEMO_AUTH_TOKEN,
 	DEMO_ORGANIZATION_ID,
@@ -11,10 +12,7 @@ import {
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
-import {
-	isClearlyReadOnlySql,
-	type ParseSqlScript,
-} from "../lib/lix-sql-access.ts";
+import { isClearlyReadOnlySql } from "../lib/lix-sql-access.ts";
 import { createRepositoryOpenedSink } from "../lib/repository-opened-sink.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
 import { LixService, type LixSummary } from "../mcp/lix-service.ts";
@@ -44,6 +42,10 @@ import {
 	getFileExtension,
 } from "./lixr-mcp-telemetry.ts";
 import { resolveSupabaseLixId } from "./lix-resolver.ts";
+import {
+	isDemoEnvironment,
+	resolveOfficialMcpPosthogToken,
+} from "./mcp-posthog-env.ts";
 
 export interface WorkerEnv {
 	SUPABASE_URL?: string;
@@ -69,8 +71,17 @@ export interface WorkerEnv {
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
+	/** Personal API key (`phx_`). Never used as a capture token. */
+	POSTHOG_API_KEY?: string;
+	VITE_PUBLIC_POSTHOG_TOKEN?: string;
+	VITE_PUBLIC_TELEMETRY_ENVIRONMENT?: string;
 	/** HMAC key used to sign stateless MCP Lix contexts. */
 	LIXRAY_CONTEXT_SIGNING_KEY?: string;
+	/**
+	 * JSON file used to persist the Supabase JWKS across process restarts.
+	 * Railway recycle must not drop a previously-valid MCP bearer.
+	 */
+	LIXRAY_JWKS_CACHE_PATH?: string;
 	LIXRAY_RELEASE_ID?: string;
 	RAILWAY_ENVIRONMENT_NAME?: string;
 	RAILWAY_GIT_COMMIT_SHA?: string;
@@ -88,7 +99,6 @@ interface HandleRequestOptions {
 	authorizeLix?: AuthorizeLix;
 	resolveLix?: ResolveLix;
 	resolvePublicLix?: ResolvePublicLix;
-	parseSqlScript?: ParseSqlScript;
 	mcpTransport?: typeof handleMcpTransport;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
@@ -151,7 +161,12 @@ type ResolvePublicLix = (
 	namespace: string,
 	lixSlug: string,
 	env: WorkerEnv,
-) => Promise<LixResolution>;
+	publicPath?: string,
+) => Promise<PublicLixResolution>;
+
+type PublicLixResolution =
+	| { ok: true; lixId: string; scope?: "repository" | "path" }
+	| { ok: false; response: Response };
 
 /**
  * Lix's SQL script parser, injected by the worker entry so the public read
@@ -177,10 +192,14 @@ type McpClaimsValidation =
 const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
 const PROD_DEV_AUTH_PATH = "/auth/email";
 const PROD_DEV_EMAIL = "dev@lixray.com";
+const PUBLIC_PRODUCTION_ORIGIN = "https://lixray.com";
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
+// Keep server-owned public reads attributed to Lix's built-in anonymous
+// account. Protocol principals are persisted as lix_account IDs, so an
+// arbitrary service label is not valid here.
+const LIX_ANONYMOUS_ACCOUNT_ID = "00000000-0000-7000-8000-000000000002";
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
-const jwksByUrl = new Map<string, JWTVerifyGetKey>();
 
 type ServerTimingMetric = {
 	readonly name:
@@ -380,7 +399,9 @@ export async function handleRequest(
 				),
 			);
 		};
-		const posthogToken = telemetry ? env.POSTHOG_PROJECT_TOKEN : undefined;
+		const posthogToken = resolveOfficialMcpPosthogToken(env, {
+			isDemo: authResult.auth.isDemo,
+		});
 		const onPosthogFlush = posthogToken
 			? (flush: () => Promise<void>): void => {
 					const work = flush().catch((caught: unknown) => {
@@ -441,7 +462,6 @@ export async function handleRequest(
 						posthogDistinctId: authResult.auth.userId,
 						posthogClientId: authResult.auth.clientId,
 						onPosthogFlush,
-						parseSqlScript: options.parseSqlScript,
 					},
 				),
 				requestId,
@@ -473,6 +493,10 @@ export async function handleRequest(
 		const endpoint = remoteLixMatch[3]?.replace(/\/+$/, "") ?? "";
 		const protocolPath = `/lix/v1${endpoint ? `/${endpoint}` : "/"}`;
 		const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
+		const publicPath =
+			(endpoint === "file" || endpoint === "published-directory"
+				? url.searchParams.get("path")
+				: request.headers.get("x-lixray-public-path")) ?? undefined;
 
 		const authenticate = options.authenticate ?? authenticateWithSupabase;
 		const authCheckStartedAt = performance.now();
@@ -537,16 +561,50 @@ export async function handleRequest(
 					namespace,
 					lixSlug,
 					env,
+					publicPath,
 				),
 		);
 		if (!publicResolution.ok) {
 			return withServerTimings(publicResolution.response, serverTimings);
 		}
-		const mutationRejection = await rejectPublicMutation(
-			request,
-			endpoint,
-			options.parseSqlScript,
-		);
+		if (
+			publicResolution.scope === "path" &&
+			!(
+				!endpoint ||
+				endpoint === "session" ||
+				endpoint === "file" ||
+				endpoint === "published-directory"
+			)
+		) {
+			return withServerTimings(lixNotFound().response, serverTimings);
+		}
+		if (endpoint === "published-directory") {
+			if (!publicPath || !options.lixFetch) {
+				return withServerTimings(lixNotFound().response, serverTimings);
+			}
+			try {
+				const listing = await measureServerTiming(
+					serverTimings,
+					"lixray-server-roundtrip",
+					() =>
+						listPublishedDirectory(
+							publicResolution.lixId,
+							publicPath,
+							env,
+							options.lixFetch as NonNullable<HandleRequestOptions["lixFetch"]>,
+							request.signal,
+						),
+				);
+				return withServerTimings(json(listing), serverTimings);
+			} catch (caught) {
+				console.error("Unable to list a published directory", caught);
+				return withServerTimings(
+					new Response("Published directory is unavailable\n", { status: 502 }),
+					serverTimings,
+				);
+			}
+		}
+		const mutationRejection = await rejectPublicMutation(request, endpoint);
 		if (mutationRejection) {
 			return withServerTimings(mutationRejection, serverTimings);
 		}
@@ -626,7 +684,7 @@ async function handleProdDevAuth(
 	if (!email) return new Response("Not found\n", { status: 404 });
 
 	const origin = request.headers.get("origin");
-	if (origin && origin !== new URL(request.url).origin) {
+	if (origin && !isTrustedProdDevAuthOrigin(request, origin)) {
 		return new Response("Forbidden\n", { status: 403 });
 	}
 
@@ -685,6 +743,42 @@ function productionDevEmail(env: WorkerEnv): string | null {
 		: null;
 }
 
+/**
+ * Same-site CSRF check for the production developer password grant.
+ *
+ * `request.url` behind Cloudflare/Railway is often the internal service
+ * host (and may be `http:`), while the browser sends
+ * `Origin: https://lixray.com`. Accept the public production origin and
+ * a matching forwarded host/proto, but never an arbitrary third-party
+ * Origin — even if `X-Forwarded-Host` is spoofed.
+ */
+function isTrustedProdDevAuthOrigin(request: Request, origin: string): boolean {
+	const trusted = new Set<string>([
+		new URL(request.url).origin,
+		PUBLIC_PRODUCTION_ORIGIN,
+	]);
+	const forwarded = originFromForwardedHeaders(request);
+	if (forwarded) trusted.add(forwarded);
+	return trusted.has(origin);
+}
+
+function originFromForwardedHeaders(request: Request): string | null {
+	const host = firstForwardedValue(request.headers.get("x-forwarded-host"));
+	const proto = firstForwardedValue(request.headers.get("x-forwarded-proto"));
+	if (!host || (proto !== "http" && proto !== "https")) return null;
+	try {
+		const origin = new URL(`${proto}://${host}`).origin;
+		return origin === PUBLIC_PRODUCTION_ORIGIN ? origin : null;
+	} catch {
+		return null;
+	}
+}
+
+function firstForwardedValue(value: string | null): string | null {
+	const first = value?.split(",")[0]?.trim();
+	return first && first.length > 0 ? first : null;
+}
+
 async function fetchLixRequest(
 	lixId: string,
 	request: Request,
@@ -728,21 +822,27 @@ export async function authenticateWithSupabase(
 
 	try {
 		const issuer = supabaseJwtIssuer(env);
+		const jwksUrl = env.SUPABASE_JWKS_URL ?? "";
+		const cachePath = env.LIXRAY_JWKS_CACHE_PATH?.trim() || undefined;
 		const { payload } = await jwtVerify(
 			token,
-			remoteJwks(env.SUPABASE_JWKS_URL ?? ""),
+			await getRemoteJwks(jwksUrl, { cachePath }),
 			{
 				algorithms: ["ES256"],
 				issuer,
 				audience: "authenticated",
 			},
 		);
+		await persistRemoteJwksIfPresent(jwksUrl, cachePath);
 		if (!validateBrowserJwtClaims(payload)) return unauthorized();
 		return {
 			ok: true,
 			auth: { userId: payload.sub as string, token },
 		};
-	} catch {
+	} catch (error) {
+		if (classifyJwtVerifyError(error) === "jwks_unavailable") {
+			return jwksUnavailable();
+		}
 		return unauthorized();
 	}
 }
@@ -857,15 +957,17 @@ async function authenticateMcpWithSupabase(
 
 	try {
 		const issuer = supabaseJwtIssuer(env);
+		const cachePath = env.LIXRAY_JWKS_CACHE_PATH?.trim() || undefined;
 		const { payload } = await jwtVerify(
 			token,
-			remoteJwks(env.SUPABASE_JWKS_URL),
+			await getRemoteJwks(env.SUPABASE_JWKS_URL, { cachePath }),
 			{
 				algorithms: ["ES256"],
 				issuer,
 				audience: "authenticated",
 			},
 		);
+		await persistRemoteJwksIfPresent(env.SUPABASE_JWKS_URL, cachePath);
 		const claims = validateMcpJwtClaims(
 			payload,
 			issuer,
@@ -890,7 +992,13 @@ async function authenticateMcpWithSupabase(
 				clientId: claims.clientId,
 			},
 		};
-	} catch {
+	} catch (error) {
+		if (classifyJwtVerifyError(error) === "jwks_unavailable") {
+			return {
+				ok: false,
+				response: mcpJwksUnavailableResponse(),
+			};
+		}
 		return {
 			ok: false,
 			response: mcpUnauthorizedResponse(
@@ -1110,7 +1218,7 @@ export async function resolveLixWithSupabase(
 	return { ok: true, lixId: result.lixId };
 }
 
-function lixNotFound(): LixResolution {
+function lixNotFound(): { ok: false; response: Response } {
 	return {
 		ok: false,
 		response: new Response("Lix not found\n", { status: 404 }),
@@ -1138,7 +1246,8 @@ async function resolvePublicLixWithSupabase(
 	namespace: string,
 	lixSlug: string,
 	env: WorkerEnv,
-): Promise<LixResolution> {
+	publicPath?: string,
+): Promise<PublicLixResolution> {
 	if (isDemoMode(env)) {
 		const lix = demoLixSummaries(env).find(
 			(candidate) =>
@@ -1171,6 +1280,7 @@ async function resolvePublicLixWithSupabase(
 			body: JSON.stringify({
 				p_namespace_handle: namespace,
 				p_lix_slug: lixSlug,
+				...(publicPath ? { p_path: publicPath } : {}),
 			}),
 		});
 	} catch {
@@ -1181,11 +1291,21 @@ async function resolvePublicLixWithSupabase(
 	}
 	try {
 		const rows: unknown = await response.json();
-		const lixId =
-			Array.isArray(rows) && rows.length === 1 ? lixRowId(rows[0]) : null;
-		return typeof lixId === "string" && lixId
-			? { ok: true, lixId }
-			: lixNotFound();
+		const candidate: unknown =
+			Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
+		if (!candidate || typeof candidate !== "object") return lixNotFound();
+		const row = candidate as Record<string, unknown>;
+		const lixId = lixRowId(row);
+		if (typeof lixId !== "string" || !lixId) {
+			return lixNotFound();
+		}
+		if ("visibility" in row && row.visibility === "public") {
+			return { ok: true, lixId, scope: "repository" };
+		}
+		if (publicPath && "path_public" in row && row.path_public === true) {
+			return { ok: true, lixId, scope: "path" };
+		}
+		return lixNotFound();
 	} catch {
 		return lixResolutionUnavailable();
 	}
@@ -1210,6 +1330,7 @@ function isPublicReadRemoteLixRequest(
 	if (!endpoint) return request.method === "GET";
 	if (endpoint === "session") return request.method === "DELETE";
 	if (endpoint === "file") return request.method === "GET";
+	if (endpoint === "published-directory") return request.method === "GET";
 	return (
 		request.method === "POST" &&
 		["execute", "execute-batch", "observe", "observe/multiplex"].includes(
@@ -1218,18 +1339,84 @@ function isPublicReadRemoteLixRequest(
 	);
 }
 
+type PublishedDirectoryEntry = {
+	path: string;
+	kind: "file" | "directory";
+};
+
+/**
+ * A path publication must not turn into a general-purpose SQL capability.
+ * This server-owned query exposes only the direct file/directory names below
+ * the already-authorized directory. Descendant authorization remains dynamic:
+ * opening any returned child resolves it against the directory publication.
+ */
+async function listPublishedDirectory(
+	lixId: string,
+	directoryPath: string,
+	env: WorkerEnv,
+	lixFetch: NonNullable<HandleRequestOptions["lixFetch"]>,
+	signal: AbortSignal,
+): Promise<{ entries: PublishedDirectoryEntry[]; truncated: boolean }> {
+	const client = new WorkerLixRuntimeClient(
+		env,
+		{ userId: LIX_ANONYMOUS_ACCOUNT_ID, token: "" },
+		() => Promise.resolve(null),
+		{ lixFetch, signal },
+	);
+	try {
+		const result = await client.execute(lixId, {
+			sql: `
+WITH published_directory AS (
+  SELECT id FROM lix_directory WHERE path = $1 LIMIT 1
+)
+SELECT path, 'file' AS kind
+FROM lix_file
+WHERE directory_id = (SELECT id FROM published_directory)
+UNION ALL
+SELECT path, 'directory' AS kind
+FROM lix_directory
+WHERE parent_id = (SELECT id FROM published_directory)
+ORDER BY path
+LIMIT 1001`,
+			params: [{ kind: "text", value: directoryPath }],
+		});
+		const pathColumn = result.columns.indexOf("path");
+		const kindColumn = result.columns.indexOf("kind");
+		if (pathColumn === -1 || kindColumn === -1) {
+			throw new Error("Published directory query returned unexpected columns.");
+		}
+		const entries = result.rows.flatMap((row): PublishedDirectoryEntry[] => {
+			const path = row[pathColumn];
+			const kind = row[kindColumn];
+			if (
+				path?.kind !== "text" ||
+				kind?.kind !== "text" ||
+				(kind.value !== "file" && kind.value !== "directory")
+			) {
+				return [];
+			}
+			return [{ path: path.value, kind: kind.value }];
+		});
+		return {
+			entries: entries.slice(0, 1000),
+			truncated: entries.length > 1000,
+		};
+	} finally {
+		await client.close();
+	}
+}
+
 /**
  * The canonical Lix protocol has no read-only mode, so the service
- * is the authorization boundary for public readers: every SQL statement in a
- * public request must classify as a read. Statements are split by Lix's own
- * script parser (injected as `options.parseSqlScript`) before the keyword
- * check, so a mutation cannot hide behind a multi-statement script. Without a
- * parser the gate fails closed.
+ * is the authorization boundary for public readers: every SQL string in a
+ * public request must classify as a read. Classification is a SELECT/VALUES
+ * prefix check plus a write-verb regex (INSERT/UPDATE/DELETE). A mutation
+ * cannot hide behind a multi-statement script because those verbs are matched
+ * anywhere in the string. Empty or unreadable bodies fail closed.
  */
 async function rejectPublicMutation(
 	request: Request,
 	endpoint: string,
-	parseSqlScript: ParseSqlScript | undefined,
 ): Promise<Response | null> {
 	if (
 		!endpoint ||
@@ -1238,32 +1425,17 @@ async function rejectPublicMutation(
 	) {
 		return null;
 	}
-	let statements: Array<{ sql: string; paramCount: number }>;
+	let statements: Array<string>;
 	try {
 		statements = await publicSqlStatements(request, endpoint);
 	} catch {
 		return publicReadOnlyResponse();
 	}
-	if (statements.length === 0 || !parseSqlScript) {
+	if (statements.length === 0) {
 		return publicReadOnlyResponse();
 	}
-	for (const statement of statements) {
-		let plan: ReturnType<ParseSqlScript>;
-		try {
-			plan = parseSqlScript(statement.sql, statement.paramCount);
-		} catch {
-			return publicReadOnlyResponse();
-		}
-		if (plan.statements.length === 0) return publicReadOnlyResponse();
-		// Observers represent one live query; requiring exactly one parsed
-		// statement prevents a read followed by a mutation from hiding behind
-		// the SSE endpoint.
-		if (endpoint.startsWith("observe") && plan.statements.length !== 1) {
-			return publicReadOnlyResponse();
-		}
-		if (!plan.statements.every((parsed) => isClearlyReadOnlySql(parsed.sql))) {
-			return publicReadOnlyResponse();
-		}
+	if (!statements.every((sql) => isClearlyReadOnlySql(sql))) {
+		return publicReadOnlyResponse();
 	}
 	return null;
 }
@@ -1271,7 +1443,7 @@ async function rejectPublicMutation(
 async function publicSqlStatements(
 	request: Request,
 	endpoint: string,
-): Promise<Array<{ sql: string; paramCount: number }>> {
+): Promise<Array<string>> {
 	const body: unknown = await request.clone().json();
 	if (!body || typeof body !== "object") return [];
 	const record = body as Record<string, unknown>;
@@ -1286,11 +1458,11 @@ async function publicSqlStatements(
 		if (!entry || typeof entry !== "object") {
 			throw new Error("Malformed public statement");
 		}
-		const { sql, params } = entry as Record<string, unknown>;
+		const { sql } = entry as Record<string, unknown>;
 		if (typeof sql !== "string" || sql.length === 0) {
 			throw new Error("Malformed public statement");
 		}
-		return { sql, paramCount: Array.isArray(params) ? params.length : 0 };
+		return sql;
 	});
 }
 
@@ -1342,12 +1514,7 @@ function isDemoMode(env: WorkerEnv): boolean {
 	// Railway names PR environments "lixray-pr-<n>" when configured, but
 	// recreated ones get the default "pr-<hash>-<n>" — accept both. Keep in
 	// sync with web-app/Dockerfile and scripts/assert-railway-env.mjs.
-	return (
-		env.LIXRAY_DEMO === "1" ||
-		/^(lixray-pr-\d+|pr-[a-z0-9]+-\d+)$/.test(
-			env.RAILWAY_ENVIRONMENT_NAME ?? "",
-		)
-	);
+	return isDemoEnvironment(env);
 }
 
 function isProductionOnlyPath(pathname: string): boolean {
@@ -1376,13 +1543,33 @@ function unauthorized(): Extract<AuthResult, { ok: false }> {
 	};
 }
 
-function remoteJwks(url: string): JWTVerifyGetKey {
-	let jwks = jwksByUrl.get(url);
-	if (!jwks) {
-		jwks = createRemoteJWKSet(new URL(url));
-		jwksByUrl.set(url, jwks);
-	}
-	return jwks;
+function jwksUnavailable(): Extract<AuthResult, { ok: false }> {
+	return {
+		ok: false,
+		response: new Response("Authentication is temporarily unavailable\n", {
+			status: 503,
+		}),
+	};
+}
+
+function mcpJwksUnavailableResponse(): Response {
+	return new Response("MCP authentication is temporarily unavailable\n", {
+		status: 503,
+		headers: {
+			"access-control-allow-origin": "*",
+			"retry-after": "2",
+		},
+	});
+}
+
+export async function warmJwtVerifier(
+	env: Pick<WorkerEnv, "SUPABASE_JWKS_URL" | "LIXRAY_JWKS_CACHE_PATH">,
+): Promise<void> {
+	const jwksUrl = env.SUPABASE_JWKS_URL?.trim();
+	if (!jwksUrl) return;
+	await warmRemoteJwks(jwksUrl, {
+		cachePath: env.LIXRAY_JWKS_CACHE_PATH?.trim() || undefined,
+	});
 }
 
 function rewriteLixRequest(

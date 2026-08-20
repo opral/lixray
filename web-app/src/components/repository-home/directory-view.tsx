@@ -6,7 +6,9 @@ import {
 	Check,
 	ChevronDown,
 	Copy,
+	Globe2,
 	Link2,
+	LockKeyhole,
 	PencilLine,
 	Plus,
 	UserRoundPlus,
@@ -43,7 +45,9 @@ import {
 	persistedDirectoryPath,
 	resolveRepositoryHref,
 	useFileMarkdown,
+	useRepositoryControlPlaneData,
 	useRepositoryTree,
+	type RepositoryControlPlaneData,
 } from "./lix-data";
 import {
 	MemberAvatar,
@@ -57,12 +61,15 @@ type DirectoryViewProps = {
 	readonly dirPath: string;
 	/** The pinned home shows the connect row. */
 	readonly isHome: boolean;
+	/** Mirrors the bundled Atelier Files extension's authoritative preference. */
+	readonly showHiddenFiles?: boolean;
 	readonly readOnly: boolean;
 	readonly connection: Omit<LixConnectionPromptInput, "origin">;
 	/** Present on the home of an editable repository; drives the Invite control. */
 	readonly teamApi?: RepositoryTeamApi | null;
 	/** Present on the home tab; drives the Connect agent button. */
 	readonly hasAgentConnected?: (() => Promise<boolean>) | null;
+	readonly visibility?: "private" | "public";
 	/** Only the active view binds shortcuts (several stay mounted hidden). */
 	readonly isActive?: boolean;
 	readonly onOpenFile: (
@@ -71,6 +78,9 @@ type DirectoryViewProps = {
 	) => void;
 	readonly onOpenDir: (dirPath: string, options: { newTab: boolean }) => void;
 	readonly onOpenPeople?: () => void;
+	readonly onOpenSettings?: () => void;
+	readonly onOpenSqlExplorer?: () => void;
+	readonly onOpenReview?: () => void;
 };
 
 const newTabFromMouseEvent = (event: ReactMouseEvent): boolean =>
@@ -85,19 +95,28 @@ export function DirectoryView({
 	lix,
 	dirPath,
 	isHome,
+	showHiddenFiles = false,
 	readOnly,
 	connection,
 	teamApi = null,
 	hasAgentConnected = null,
+	visibility = "private",
 	isActive = true,
 	onOpenFile,
 	onOpenDir,
 	onOpenPeople,
+	onOpenSettings,
+	onOpenSqlExplorer,
+	onOpenReview,
 }: DirectoryViewProps) {
 	const tree = useRepositoryTree(lix);
+	const controlPlaneData = useRepositoryControlPlaneData(
+		lix,
+		isHome && dirPath === "/",
+	);
 	const listing = useMemo(
-		() => (tree ? listDirectory(tree, dirPath) : null),
-		[tree, dirPath],
+		() => (tree ? listDirectory(tree, dirPath, { showHiddenFiles }) : null),
+		[tree, dirPath, showHiddenFiles],
 	);
 	const readme = useFileMarkdown(lix, listing?.readmePath ?? null);
 	const [actionError, setActionError] = useState<string | null>(null);
@@ -159,13 +178,19 @@ export function DirectoryView({
 
 	return (
 		<div
-			className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
+			className="@container relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
 			{...dragHandlers}
 		>
 			{isDropTarget ? <DropImportOverlay /> : null}
-			<div className="mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10">
-				{readOnly && dirPath === "/" ? null : (
-					<div className="flex items-center gap-2 pb-5">
+			<div
+				className={
+					isHome && dirPath === "/"
+						? "mx-auto grid w-[min(1020px,calc(100%-48px))] grid-cols-[minmax(0,1fr)_244px] gap-12 pt-10 pb-10 @max-[1100px]:grid-cols-1 @max-[1100px]:gap-8"
+						: "mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10"
+				}
+			>
+				<main className="min-w-0">
+					<div className="flex flex-wrap items-center gap-2 pb-5">
 						{dirPath !== "/" ? (
 							<Breadcrumb
 								repositoryName={connection.lixName}
@@ -180,127 +205,390 @@ export function DirectoryView({
 							</span>
 						) : null}
 						<span className="flex-1" />
-						{readOnly ? null : (
-							<>
-								{isHome && dirPath === "/" && hasAgentConnected ? (
-									<ConnectAgentButton
-										connection={connection}
-										hasAgentConnected={hasAgentConnected}
-									/>
-								) : null}
-								{isHome && dirPath === "/" && teamApi && onOpenPeople ? (
-									<InviteControl
-										teamApi={teamApi}
-										onOpenPeople={onOpenPeople}
-									/>
-								) : null}
-								<NewMenu
-									onCreateFile={(extension) => void createFile(extension)}
-									onCreateFolder={() => {
-										setActionError(null);
-										void createRepositoryFolder(lix, dirPath).catch(
-											(error: unknown) => {
-												console.error(
-													"repository-home: new folder failed",
-													error,
-												);
-												setActionError(
-													"Unable to create the folder. Try again.",
-												);
-											},
-										);
-									}}
+						<div className="flex flex-wrap items-center justify-end gap-2 @max-[520px]:w-full @max-[520px]:justify-start">
+							{isHome && dirPath === "/" && hasAgentConnected ? (
+								<ConnectAgentButton
+									connection={connection}
+									hasAgentConnected={hasAgentConnected}
+									disabled={readOnly}
 								/>
-							</>
-						)}
-					</div>
-				)}
-				{actionError ? (
-					<p
-						role="alert"
-						className="mb-3 rounded-lg bg-error-700/10 px-3 py-2 text-[13px] text-error-700"
-					>
-						{actionError}
-					</p>
-				) : null}
-				{listing.dirs.length === 0 && listing.files.length === 0 ? (
-					<div className="rounded-[10px] border border-dashed border-border-panel px-6 py-12 text-center text-[13px] leading-6 text-text-tertiary">
-						{readOnly ? (
-							"No files yet."
-						) : (
-							<>
-								No files yet — create one with{" "}
-								<b className="font-semibold text-text-secondary">New</b>, or
-								drop files anywhere to import.
-							</>
-						)}
-					</div>
-				) : null}
-				<div className="flex flex-col gap-px" data-testid="home-entry-list">
-					{listing.dirs.map((dir) => (
-						<EntryRow
-							key={dir.path}
-							icon={
-								<img src="/icon-sq-folder.svg" alt="" className="size-[19px]" />
-							}
-							name={dir.name}
-							meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
-							onClick={(event) =>
-								onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
-							}
-						/>
-					))}
-					{listing.files.map((file) => (
-						<EntryRow
-							key={file.path}
-							icon={
-								<img
-									src={fileIconUrl(file.name)}
-									alt=""
-									className="size-[19px]"
+							) : null}
+							{isHome && dirPath === "/" && onOpenPeople ? (
+								<InviteControl
+									teamApi={teamApi}
+									onOpenPeople={onOpenPeople}
+									disabled={readOnly || !teamApi}
 								/>
+							) : null}
+							<NewMenu
+								disabled={readOnly}
+								onCreateFile={(extension) => void createFile(extension)}
+								onCreateFolder={() => {
+									setActionError(null);
+									void createRepositoryFolder(lix, dirPath).catch(
+										(error: unknown) => {
+											console.error(
+												"repository-home: new folder failed",
+												error,
+											);
+											setActionError("Unable to create the folder. Try again.");
+										},
+									);
+								}}
+							/>
+						</div>
+					</div>
+					{actionError ? (
+						<p
+							role="alert"
+							className="mb-3 rounded-lg bg-error-700/10 px-3 py-2 text-[13px] text-error-700"
+						>
+							{actionError}
+						</p>
+					) : null}
+					{listing.dirs.length === 0 && listing.files.length === 0 ? (
+						<div className="rounded-[10px] border border-dashed border-border-panel px-6 py-12 text-center text-[13px] leading-6 text-text-tertiary">
+							{readOnly ? (
+								"No files yet."
+							) : (
+								<>
+									No files yet — create one with{" "}
+									<b className="font-semibold text-text-secondary">New</b>, or
+									drop files anywhere to import.
+								</>
+							)}
+						</div>
+					) : null}
+					<div className="flex flex-col gap-px" data-testid="home-entry-list">
+						{listing.dirs.map((dir) => (
+							<EntryRow
+								key={dir.path}
+								icon={
+									<img
+										src="/icon-sq-folder.svg"
+										alt=""
+										className="size-[19px]"
+									/>
+								}
+								name={dir.name}
+								meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
+								hidden={dir.hidden}
+								onClick={(event) =>
+									onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
+								}
+							/>
+						))}
+						{listing.files.map((file) => (
+							<EntryRow
+								key={file.path}
+								icon={
+									<img
+										src={fileIconUrl(file.name)}
+										alt=""
+										className="size-[19px]"
+									/>
+								}
+								name={file.name}
+								meta={formatUpdatedAt(file.updatedAt)}
+								hidden={file.hidden}
+								onClick={(event) =>
+									onOpenFile(file.path, { newTab: newTabFromMouseEvent(event) })
+								}
+							/>
+						))}
+					</div>
+					{listing.readmePath && readme !== null ? (
+						<ReadmePreview
+							fileName={
+								listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
 							}
-							name={file.name}
-							meta={formatUpdatedAt(file.updatedAt)}
-							onClick={(event) =>
-								onOpenFile(file.path, { newTab: newTabFromMouseEvent(event) })
+							markdown={readme}
+							onOpen={(event) =>
+								onOpenFile(listing.readmePath as string, {
+									newTab: newTabFromMouseEvent(event),
+								})
 							}
+							onNavigate={(href, event) => {
+								const resolved = resolveRepositoryHref(dirPath, href);
+								if (!resolved) return false;
+								// Directory paths are authoritative on lix_directory, so look
+								// up the exact persisted path rather than inferring kind.
+								const directoryPath = persistedDirectoryPath(tree, resolved);
+								if (directoryPath) {
+									onOpenDir(directoryPath, {
+										newTab: newTabFromMouseEvent(event),
+									});
+								} else {
+									onOpenFile(resolved, {
+										newTab: newTabFromMouseEvent(event),
+									});
+								}
+								return true;
+							}}
 						/>
-					))}
-				</div>
-				{listing.readmePath && readme !== null ? (
-					<ReadmePreview
-						fileName={
-							listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
-						}
-						markdown={readme}
-						onOpen={(event) =>
-							onOpenFile(listing.readmePath as string, {
-								newTab: newTabFromMouseEvent(event),
-							})
-						}
-						onNavigate={(href, event) => {
-							const resolved = resolveRepositoryHref(dirPath, href);
-							if (!resolved) return false;
-							// Directory paths are authoritative on lix_directory, so look
-							// up the exact persisted path rather than inferring kind.
-							const directoryPath = persistedDirectoryPath(tree, resolved);
-							if (directoryPath) {
-								onOpenDir(directoryPath, {
-									newTab: newTabFromMouseEvent(event),
-								});
-							} else {
-								onOpenFile(resolved, {
-									newTab: newTabFromMouseEvent(event),
-								});
-							}
-							return true;
-						}}
+					) : null}
+				</main>
+				{isHome && dirPath === "/" ? (
+					<RepositoryControlPlaneRail
+						visibility={visibility}
+						fileCount={tree.files.length}
+						data={controlPlaneData}
+						onOpenSettings={onOpenSettings}
+						onOpenReview={onOpenReview}
+						onOpenSqlExplorer={onOpenSqlExplorer}
 					/>
 				) : null}
 			</div>
 		</div>
 	);
+}
+
+function RepositoryControlPlaneRail({
+	visibility,
+	fileCount,
+	data,
+	onOpenSettings,
+	onOpenReview,
+	onOpenSqlExplorer,
+}: {
+	readonly visibility: "private" | "public";
+	readonly fileCount: number;
+	readonly data: RepositoryControlPlaneData | null;
+	readonly onOpenSettings?: () => void;
+	readonly onOpenReview?: () => void;
+	readonly onOpenSqlExplorer?: () => void;
+}) {
+	return (
+		<aside
+			aria-label="Repository overview"
+			className="min-w-0 @max-[1100px]:hidden"
+		>
+			<section className="border-b border-border-panel pb-7">
+				<RailHeading>About</RailHeading>
+				<button
+					type="button"
+					onClick={onOpenSettings}
+					className="mt-3 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-[7px] bg-[#f4eee5] px-2.5 text-[11.5px] font-bold text-[#57534e] transition-colors hover:bg-[#ebe2d6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+				>
+					{visibility === "public" ? (
+						<Globe2 className="size-3.5" aria-hidden="true" />
+					) : (
+						<LockKeyhole className="size-3.5" aria-hidden="true" />
+					)}
+					{visibility === "public" ? "Public" : "Private"}
+				</button>
+			</section>
+
+			<section className="border-b border-border-panel py-7 @max-[1100px]:border-t-0">
+				<RailHeading>Changes</RailHeading>
+				<ChangesSummary data={data} onOpenReview={onOpenReview} />
+			</section>
+
+			<section className="border-b border-border-panel py-7">
+				<RailHeading>Database</RailHeading>
+				<DatabaseSummary
+					data={data}
+					fileCount={fileCount}
+					onOpenSqlExplorer={onOpenSqlExplorer}
+				/>
+			</section>
+		</aside>
+	);
+}
+
+function RailHeading({ children }: { readonly children: ReactNode }) {
+	return (
+		<h2 className="m-0 text-[11.5px] font-bold tracking-[0.08em] text-text-quaternary uppercase">
+			{children}
+		</h2>
+	);
+}
+
+function ChangesSummary({
+	data,
+	onOpenReview,
+}: {
+	readonly data: RepositoryControlPlaneData | null;
+	readonly onOpenReview?: () => void;
+}) {
+	if (!data) {
+		return (
+			<div className="mt-3 h-[118px] animate-pulse rounded-lg bg-bg-hover" />
+		);
+	}
+	const hasCheckpoint = data.checkpointDates.length > 0;
+	const changeCount = hasCheckpoint
+		? data.workingChangeCount
+		: data.totalChangeCount;
+
+	return (
+		<div className="mt-2.5">
+			<div className="flex items-baseline gap-1.5">
+				<strong className="text-[24px] leading-none font-semibold tracking-[-0.04em] text-text-primary">
+					{formatCompactCount(changeCount)}
+				</strong>
+				<span className="text-[11.5px] text-text-tertiary">
+					{hasCheckpoint ? "since last checkpoint" : "changes so far"}
+				</span>
+			</div>
+			<ChangeBars data={data} />
+			{changeCount > 0 && onOpenReview ? (
+				<button
+					type="button"
+					onClick={onOpenReview}
+					className="mt-3 cursor-pointer text-[12px] font-semibold text-[#c2410c] hover:text-[#9a3412] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+				>
+					Review changes →
+				</button>
+			) : (
+				<p className="m-0 mt-3 text-[11.5px] leading-4 text-text-quaternary">
+					Edits appear here as they happen.
+				</p>
+			)}
+		</div>
+	);
+}
+
+function ChangeBars({ data }: { readonly data: RepositoryControlPlaneData }) {
+	const days = data.changeDays;
+	const maxCount = Math.max(1, ...days.map((day) => day.count));
+	const latestCheckpointDay = data.checkpointDates[0]?.slice(0, 10) ?? null;
+	const visibleDays = days.length > 0 ? days : [{ day: "", count: 0 }];
+	const paddedDays = [
+		...Array.from({ length: Math.max(0, 9 - visibleDays.length) }, () => ({
+			day: "",
+			count: 0,
+		})),
+		...visibleDays,
+	];
+
+	return (
+		<div className="mt-4">
+			<div className="flex h-11 items-end gap-[3px] border-b border-[#ded5c8]">
+				{paddedDays.map((entry, index) => {
+					const afterCheckpoint =
+						!latestCheckpointDay ||
+						!entry.day ||
+						entry.day > latestCheckpointDay;
+					const isLatest = index === paddedDays.length - 1;
+					const height = entry.count
+						? Math.max(7, Math.round((entry.count / maxCount) * 38))
+						: 3;
+					return (
+						<span
+							key={`${entry.day || "empty"}-${index}`}
+							className={`min-w-0 flex-1 rounded-t-[2px] ${
+								afterCheckpoint
+									? isLatest
+										? "bg-[#e8590c]"
+										: "bg-[#f0b48a]"
+									: "bg-[#ebe2d4]"
+							}`}
+							style={{ height }}
+							title={
+								entry.day
+									? `${entry.count} ${entry.count === 1 ? "change" : "changes"} on ${entry.day}`
+									: undefined
+							}
+						/>
+					);
+				})}
+			</div>
+			<div className="mt-1.5 flex items-center justify-between text-[9.5px] text-text-quaternary">
+				<span>{formatShortDate(data.createdAt)}</span>
+				{latestCheckpointDay ? <span>⚑ checkpoint</span> : null}
+				<span>today</span>
+			</div>
+		</div>
+	);
+}
+
+function DatabaseSummary({
+	data,
+	fileCount,
+	onOpenSqlExplorer,
+}: {
+	readonly data: RepositoryControlPlaneData | null;
+	readonly fileCount: number;
+	readonly onOpenSqlExplorer?: () => void;
+}) {
+	if (!data) {
+		return (
+			<div className="mt-3 h-[132px] animate-pulse rounded-lg bg-bg-hover" />
+		);
+	}
+	const checkpointCount = data.checkpointDates.length;
+	const rows = [
+		{ label: "Files", count: fileCount, color: "bg-[#e8590c]" },
+		{ label: "Checkpoints", count: checkpointCount, color: "bg-[#d8cdbc]" },
+		{
+			label: "Changes",
+			count: data.totalChangeCount,
+			color: "bg-[#eeb17f]",
+		},
+	];
+
+	return (
+		<div className="mt-2.5">
+			<div className="flex items-baseline gap-1.5">
+				<strong className="text-[20px] leading-none font-semibold tracking-[-0.03em] text-text-primary">
+					{data.tableCount === null ? "—" : formatCompactCount(data.tableCount)}
+				</strong>
+				<span className="text-[11.5px] text-text-tertiary">
+					{data.tableCount === 1 ? "table" : "tables"}
+				</span>
+			</div>
+			<div className="mt-3 flex h-2 overflow-hidden rounded-full bg-bg-hover">
+				{rows.map((row) => (
+					<span
+						key={row.label}
+						className={row.color}
+						style={{ flexGrow: Math.max(1, row.count) }}
+					/>
+				))}
+			</div>
+			<ul className="m-0 mt-3 space-y-1.5 p-0">
+				{rows.map((row) => (
+					<li
+						key={row.label}
+						className="flex items-center gap-2 text-[11px] text-text-tertiary"
+					>
+						<span className={`size-1.5 rounded-full ${row.color}`} />
+						<span>{row.label}</span>
+						<span className="flex-1 border-b border-dotted border-border-panel" />
+						<span className="tabular-nums">
+							{formatCompactCount(row.count)}
+						</span>
+					</li>
+				))}
+			</ul>
+			{onOpenSqlExplorer ? (
+				<button
+					type="button"
+					onClick={onOpenSqlExplorer}
+					className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-[#c2410c] hover:text-[#9a3412] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+				>
+					Open SQL Explorer →
+				</button>
+			) : null}
+		</div>
+	);
+}
+
+const compactNumber = new Intl.NumberFormat("en", {
+	notation: "compact",
+	maximumFractionDigits: 1,
+});
+
+function formatCompactCount(count: number): string {
+	return compactNumber.format(count);
+}
+
+function formatShortDate(value: string | null): string {
+	if (!value) return "start";
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "start";
+	return date.toLocaleDateString("en", { month: "short", day: "numeric" });
 }
 
 /**
@@ -369,9 +657,11 @@ function Breadcrumb({
 function ConnectAgentButton({
 	connection,
 	hasAgentConnected,
+	disabled = false,
 }: {
 	readonly connection: Omit<LixConnectionPromptInput, "origin">;
 	readonly hasAgentConnected: () => Promise<boolean>;
+	readonly disabled?: boolean;
 }) {
 	const [dialogOpen, setDialogOpen] = useState(false);
 	return (
@@ -380,6 +670,7 @@ function ConnectAgentButton({
 				type="button"
 				variant="outline"
 				className="h-9 gap-2 px-3.5 text-[13px]"
+				disabled={disabled}
 				onClick={() => setDialogOpen(true)}
 			>
 				<span className="flex items-center gap-1" aria-hidden="true">
@@ -407,13 +698,19 @@ function ConnectAgentButton({
 function InviteControl({
 	teamApi,
 	onOpenPeople,
+	disabled = false,
 }: {
-	teamApi: RepositoryTeamApi;
+	teamApi: RepositoryTeamApi | null;
 	onOpenPeople: () => void;
+	disabled?: boolean;
 }) {
 	const [members, setMembers] = useState<readonly TeamMember[] | null>(null);
 
 	useEffect(() => {
+		if (!teamApi) {
+			setMembers(null);
+			return;
+		}
 		let disposed = false;
 		teamApi
 			.listMembers()
@@ -436,9 +733,10 @@ function InviteControl({
 			{team.length > 1 ? (
 				<button
 					type="button"
+					disabled={disabled}
 					onClick={onOpenPeople}
 					aria-label={`${team.length} people — open People`}
-					className="flex cursor-pointer items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+					className="flex cursor-pointer items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible disabled:cursor-not-allowed disabled:opacity-50"
 				>
 					<span className="flex -space-x-1.5">
 						{team.slice(0, 3).map((member) => (
@@ -460,6 +758,7 @@ function InviteControl({
 				type="button"
 				variant="outline"
 				className="h-9 gap-1.5 px-3.5 text-[13px]"
+				disabled={disabled}
 				onClick={onOpenPeople}
 			>
 				<UserRoundPlus className="size-3.5" aria-hidden="true" />
@@ -618,18 +917,21 @@ function EntryRow({
 	icon,
 	name,
 	meta,
+	hidden = false,
 	onClick,
 }: {
 	readonly icon: ReactNode;
 	readonly name: string;
 	readonly meta: string;
+	readonly hidden?: boolean;
 	readonly onClick: (event: ReactMouseEvent) => void;
 }) {
 	return (
 		<button
 			type="button"
 			onClick={onClick}
-			className="flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left hover:bg-bg-hover"
+			className={`flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left hover:bg-bg-hover ${hidden ? "opacity-[0.48] hover:opacity-[0.62]" : ""}`}
+			data-hidden-entry={hidden ? "true" : undefined}
 		>
 			{icon}
 			<span className="text-sm font-medium text-text-primary">{name}</span>
@@ -704,9 +1006,11 @@ const NEW_FILE_KINDS = [
 ] as const;
 
 function NewMenu({
+	disabled = false,
 	onCreateFile,
 	onCreateFolder,
 }: {
+	readonly disabled?: boolean;
 	readonly onCreateFile: (extension: "md" | "csv" | "excalidraw") => void;
 	readonly onCreateFolder: () => void;
 }) {
@@ -728,6 +1032,7 @@ function NewMenu({
 				type="button"
 				variant="featured"
 				className="h-9 gap-1.5 px-3.5 text-[13.5px] font-bold"
+				disabled={disabled}
 				aria-expanded={open}
 				data-testid="home-new-button"
 				onClick={() => setOpen((current) => !current)}

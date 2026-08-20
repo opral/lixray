@@ -241,6 +241,45 @@ void test("MCP telemetry is disabled without production configuration", () => {
 	assert.equal(clientCreations, 0);
 });
 
+void test("MCP telemetry treats Railway or Vite production as production", async () => {
+	const captured: Array<EventMessage> = [];
+	const createClient = () => ({
+		captureImmediate: async (event: EventMessage) => {
+			captured.push(structuredClone(event));
+		},
+		shutdown: async () => undefined,
+	});
+
+	const railwaySession = createMcpTelemetrySession(
+		{
+			VITE_PUBLIC_POSTHOG_TOKEN: "phc_public_token",
+			RAILWAY_ENVIRONMENT_NAME: "production",
+		},
+		{ userId: "user-123", clientId: "client-123" },
+		{ createClient },
+	);
+	assert.ok(railwaySession);
+	railwaySession.onToolCall({
+		requestId: REQUEST_ID,
+		toolName: "list_lixes",
+		outcome: "success",
+		durationMs: 1,
+		surfaceVersion: SURFACE_VERSION,
+	});
+	await railwaySession.flush();
+	assert.equal(captured[0]?.event, "$ai_span");
+
+	const viteSession = createMcpTelemetrySession(
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			VITE_PUBLIC_TELEMETRY_ENVIRONMENT: "production",
+		},
+		{ userId: "user-123", clientId: "client-123" },
+		{ createClient },
+	);
+	assert.ok(viteSession);
+});
+
 void test("PostHog delivery failures do not escape the telemetry session", async () => {
 	const warnings: Array<string> = [];
 	const session = createMcpTelemetrySession(

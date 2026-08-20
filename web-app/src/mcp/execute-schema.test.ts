@@ -14,11 +14,8 @@ void test("SQL guidance models the public Lix surfaces", () => {
 		EXECUTE_SQL_CORE_TABLES.map((table) => table.name),
 		["lix_file", "lix_directory", "lix_branch", "lix_change"],
 	);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /exactly one SELECT/);
-	assert.match(
-		QUERY_SQL_TOOL_DESCRIPTION,
-		/use execute_sql when arbitrary SQL/,
-	);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /INSERT, UPDATE, and DELETE/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /use execute_sql for writes/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /SQL as the universal interface/);
 	assert.match(
@@ -46,11 +43,20 @@ void test("SQL guidance models the public Lix surfaces", () => {
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /INSERT INTO lix_file/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /UPDATE lix_file SET path/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /INSERT INTO lix_directory/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_active_branch_commit_id/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_file_history\(\$1\)/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /declared primary-key columns/);
 	assert.match(EXECUTE_SQL_CORE_SCHEMA, /content \(binary\)/);
 	assert.match(EXECUTE_SQL_TABLES_QUERY, /information_schema\.tables/);
 	assert.match(EXECUTE_SQL_COLUMNS_QUERY, /information_schema\.columns/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /current Lix session/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /current Lix session/);
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /lixcol_branch_id/);
+	assert.doesNotMatch(QUERY_SQL_TOOL_DESCRIPTION, /lixcol_branch_id/);
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /lixcol_start_commit_id/);
+	assert.doesNotMatch(QUERY_SQL_TOOL_DESCRIPTION, /lixcol_start_commit_id/);
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /lixcol_entity_pk/);
+	assert.doesNotMatch(QUERY_SQL_TOOL_DESCRIPTION, /lixcol_entity_pk/);
 });
 
 void test("SQL tool descriptions use CAST plus kind text for file content", () => {

@@ -259,3 +259,118 @@ void test("closing a Railway Lix session releases its remote session", async () 
 	await runtime.close();
 	assert.deepEqual(paths, ["GET /lix/v1/", "DELETE /lix/v1/session"]);
 });
+
+void test("execute maps protocol wire values without opening WASM", async () => {
+	const runtime = client(async (_lixId, request) => {
+		if (testProtocolPath(request) === "/lix/v1/execute") {
+			return Response.json({
+				columns: ["n", "when", "payload", "bytes"],
+				rows: [
+					[
+						{ kind: "int", value: 7 },
+						{ kind: "timestamptz", value: "2026-08-20T00:00:00Z" },
+						{ kind: "jsonb", value: { ok: true } },
+						{ kind: "blob", base64: "AQID" },
+					],
+				],
+				rowsAffected: 0,
+				notices: [],
+			});
+		}
+		return branchProtocolResponse(request);
+	});
+
+	const response = await runtime.execute(LIX_ID, {
+		sql: "SELECT $1, $2, $3, $4",
+		params: [
+			{ kind: "int", value: 7 },
+			{ kind: "timestamp", value: "2026-08-20T00:00:00Z" },
+			{ kind: "json", value: { ok: true } },
+			{ kind: "blob", base64: "AQID" },
+		],
+	});
+
+	assert.deepEqual(response.rows, [
+		[
+			{ kind: "int", value: 7 },
+			{ kind: "timestamp", value: "2026-08-20T00:00:00Z" },
+			{ kind: "json", value: { ok: true } },
+			{ kind: "blob", base64: "AQID" },
+		],
+	]);
+});
+
+void test("createBranch, checkpoint, undo, and redo use protocol HTTP", async () => {
+	const paths: string[] = [];
+	const runtime = client(async (_lixId, request) => {
+		const pathname = testProtocolPath(request);
+		paths.push(`${request.method} ${pathname}`);
+		if (pathname === "/lix/v1/branch/create") {
+			return Response.json({
+				id: "draft",
+				name: "Draft",
+				hidden: false,
+				commitId: "commit-2",
+			});
+		}
+		if (pathname === "/lix/v1/checkpoint/create") {
+			return Response.json({ commitId: "checkpoint-1" });
+		}
+		if (pathname === "/lix/v1/undo") {
+			return Response.json({
+				branchId: "main",
+				targetCommitId: "target",
+				inverseCommitId: "inverse",
+			});
+		}
+		if (pathname === "/lix/v1/redo") {
+			return Response.json({
+				branchId: "main",
+				targetCommitId: "target",
+				replayCommitId: "replay",
+			});
+		}
+		return branchProtocolResponse(request);
+	});
+
+	assert.deepEqual(
+		await runtime.createBranch(LIX_ID, "main", { name: "Draft" }),
+		{
+			id: "draft",
+			name: "Draft",
+			hidden: false,
+			commitId: "commit-2",
+		},
+	);
+	assert.deepEqual(await runtime.createCheckpoint(LIX_ID, "main"), {
+		commitId: "checkpoint-1",
+	});
+	assert.deepEqual(await runtime.undo(LIX_ID, "main"), {
+		branchId: "main",
+		targetCommitId: "target",
+		inverseCommitId: "inverse",
+	});
+	assert.deepEqual(await runtime.redo(LIX_ID, "main"), {
+		branchId: "main",
+		targetCommitId: "target",
+		replayCommitId: "replay",
+	});
+	assert.deepEqual(paths.slice(1), [
+		"POST /lix/v1/branch/create",
+		"POST /lix/v1/checkpoint/create",
+		"POST /lix/v1/undo",
+		"POST /lix/v1/redo",
+	]);
+});
+
+void test("remote merge stays unsupported without loading WASM", async () => {
+	const runtime = client(async (_lixId, request) =>
+		branchProtocolResponse(request),
+	);
+	await assert.rejects(runtime.mergeBranch(LIX_ID, "main", "draft"), {
+		code: "LIX_UNSUPPORTED_REMOTE_OPERATION",
+	});
+	await assert.rejects(runtime.mergeBranchPreview(LIX_ID, "main", "draft"), {
+		code: "LIX_UNSUPPORTED_REMOTE_OPERATION",
+	});
+});

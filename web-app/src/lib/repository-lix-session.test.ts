@@ -132,3 +132,53 @@ void test("refreshes an expired access token and retries the remote request once
 	assert.equal(refreshCalls, 1);
 	assert.equal(executeAttempts, 2);
 });
+
+void test("opens a new client session when the signed-in identity changes", async (t) => {
+	const sessionIds: string[] = [];
+	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request =
+			input instanceof Request
+				? new Request(input, init)
+				: new Request(new URL(input, "https://lixray.test"), init);
+		const pathname = new URL(request.url).pathname;
+		if (pathname.endsWith("/lix/v1/")) {
+			const sessionId = `session-${sessionIds.length + 1}`;
+			sessionIds.push(sessionId);
+			return Response.json({
+				protocolVersion: 2,
+				activeBranchId: "main",
+				activeAccountId: "00000000-0000-7000-8000-000000000002",
+				sessionId,
+			});
+		}
+		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
+			return new Response(null, { status: 204 });
+		}
+		throw new Error(`Unexpected remote request: ${request.method} ${pathname}`);
+	};
+
+	const anonymous = await openRepositoryLixSession({
+		namespace: "opral",
+		repositorySlug: "monorepo",
+		origin: "https://lixray.test",
+		getAccessToken: async () => null,
+		allowAnonymous: true,
+		authIdentity: "public:acc2bc33",
+		fetch,
+	});
+	const signedIn = await openRepositoryLixSession({
+		namespace: "opral",
+		repositorySlug: "monorepo",
+		origin: "https://lixray.test",
+		getAccessToken: async () => "token",
+		authIdentity: "user-samuel",
+		fetch,
+	});
+	t.after(async () => {
+		await anonymous.close();
+		await signedIn.close();
+	});
+
+	assert.deepEqual(sessionIds, ["session-1", "session-2"]);
+	assert.notEqual(anonymous.lix, signedIn.lix);
+});

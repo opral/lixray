@@ -8,13 +8,16 @@ export interface PublicRepositoryRoute {
 	readonly repositoryName: string;
 	readonly repositorySlug: string;
 	readonly canEdit: boolean;
+	readonly role: "admin" | "member" | null;
+	readonly visibility: "private" | "public";
+	readonly pathPublic: boolean;
 }
 
 export class TeamInviteAccessConfirmationError extends Error {
 	readonly name = "TeamInviteAccessConfirmationError";
 }
 
-interface ResolvedRepositoryShare extends Omit<
+export interface ResolvedRepositoryShare extends Omit<
 	PublicRepositoryRoute,
 	"canEdit"
 > {
@@ -28,10 +31,12 @@ export async function resolvePublicRepositoryByRoute(
 	client: LixraySupabaseClient,
 	organizationHandle: string,
 	repositorySlug: string,
+	publicPath?: string,
 ): Promise<PublicRepositoryRoute | null> {
 	const { data, error } = await client.rpc("resolve_public_lix_by_route", {
 		p_namespace_handle: organizationHandle,
 		p_lix_slug: repositorySlug,
+		...(publicPath ? { p_path: publicPath } : {}),
 	});
 	if (error) throw error;
 	return data?.[0] ? publicRepositoryRoute(data[0]) : null;
@@ -47,7 +52,6 @@ export async function acceptTeamInviteForRepository(
 	token: string,
 	organizationHandle: string,
 	repositorySlug: string,
-	expectedRepositoryId: string,
 ): Promise<{
 	readonly joinedNamespaceName: string | null;
 	readonly repository: PublicRepositoryRoute;
@@ -70,11 +74,7 @@ export async function acceptTeamInviteForRepository(
 			{ cause },
 		);
 	}
-	if (
-		!repository ||
-		repository.repositoryId !== expectedRepositoryId ||
-		!repository.canEdit
-	) {
+	if (!repository || !repository.canEdit) {
 		throw new TeamInviteAccessConfirmationError(
 			"The invite was accepted, but edit access is not available.",
 		);
@@ -96,7 +96,12 @@ export async function resolveRepositoryShareToken(
 	if (error) throw error;
 	const row = data?.[0];
 	if (!row) return null;
-	const { canEdit: grantsEdit, ...repository } = publicRepositoryRoute(row);
+	const { canEdit: grantsEdit, ...repository } = publicRepositoryRoute({
+		...row,
+		role: row.role,
+		visibility: row.visibility,
+		path_public: row.path_public,
+	});
 	return {
 		...repository,
 		sharedByName: row.shared_by_name,
@@ -113,6 +118,9 @@ function publicRepositoryRoute(row: {
 	lix_name: string;
 	lix_slug: string;
 	can_edit: boolean;
+	role: "admin" | "member" | null;
+	visibility: "private" | "public";
+	path_public: boolean;
 }): PublicRepositoryRoute {
 	return {
 		organizationId: row.namespace_id,
@@ -122,5 +130,8 @@ function publicRepositoryRoute(row: {
 		repositoryName: row.lix_name,
 		repositorySlug: row.lix_slug,
 		canEdit: row.can_edit,
+		role: row.role,
+		visibility: row.visibility,
+		pathPublic: row.path_public,
 	};
 }

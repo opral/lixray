@@ -108,24 +108,85 @@ export type Database = {
 				Row: {
 					created_at: string;
 					lix_id: string;
-					role: Database["public"]["Enums"]["namespace_role"];
+					role: Database["public"]["Enums"]["lix_role"];
 					user_id: string;
 				};
 				Insert: {
 					created_at?: string;
 					lix_id: string;
-					role?: Database["public"]["Enums"]["namespace_role"];
+					role?: Database["public"]["Enums"]["lix_role"];
 					user_id: string;
 				};
 				Update: {
 					created_at?: string;
 					lix_id?: string;
-					role?: Database["public"]["Enums"]["namespace_role"];
+					role?: Database["public"]["Enums"]["lix_role"];
 					user_id?: string;
 				};
 				Relationships: [
 					{
 						foreignKeyName: "lix_members_lix_id_fkey";
+						columns: ["lix_id"];
+						isOneToOne: false;
+						referencedRelation: "lixes";
+						referencedColumns: ["id"];
+					},
+				];
+			};
+			lix_invite_links: {
+				Row: {
+					created_at: string;
+					created_by: string | null;
+					lix_id: string;
+					token: string;
+				};
+				Insert: {
+					created_at?: string;
+					created_by?: string | null;
+					lix_id: string;
+					token: string;
+				};
+				Update: {
+					created_at?: string;
+					created_by?: string | null;
+					lix_id?: string;
+					token?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "lix_invite_links_lix_id_fkey";
+						columns: ["lix_id"];
+						isOneToOne: true;
+						referencedRelation: "lixes";
+						referencedColumns: ["id"];
+					},
+				];
+			};
+			lix_publications: {
+				Row: {
+					created_at: string;
+					kind: Database["public"]["Enums"]["lix_publication_kind"];
+					lix_id: string;
+					path: string;
+					published_by: string;
+				};
+				Insert: {
+					created_at?: string;
+					kind: Database["public"]["Enums"]["lix_publication_kind"];
+					lix_id: string;
+					path: string;
+					published_by: string;
+				};
+				Update: {
+					created_at?: string;
+					kind?: Database["public"]["Enums"]["lix_publication_kind"];
+					lix_id?: string;
+					path?: string;
+					published_by?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "lix_publications_lix_id_fkey";
 						columns: ["lix_id"];
 						isOneToOne: false;
 						referencedRelation: "lixes";
@@ -181,6 +242,7 @@ export type Database = {
 					slug: string;
 					slug_squat_key: string | null;
 					updated_at: string;
+					visibility: Database["public"]["Enums"]["lix_visibility"];
 				};
 				Insert: {
 					created_at?: string;
@@ -191,6 +253,7 @@ export type Database = {
 					slug: string;
 					slug_squat_key?: string | null;
 					updated_at?: string;
+					visibility?: Database["public"]["Enums"]["lix_visibility"];
 				};
 				Update: {
 					created_at?: string;
@@ -201,6 +264,7 @@ export type Database = {
 					slug?: string;
 					slug_squat_key?: string | null;
 					updated_at?: string;
+					visibility?: Database["public"]["Enums"]["lix_visibility"];
 				};
 				Relationships: [
 					{
@@ -318,73 +382,6 @@ export type Database = {
 				};
 				Relationships: [];
 			};
-			user_lix_preferences: {
-				Row: {
-					atelier_layout: Json;
-					lix_id: string;
-					updated_at: string;
-					user_id: string;
-				};
-				Insert: {
-					atelier_layout: Json;
-					lix_id: string;
-					updated_at?: string;
-					user_id: string;
-				};
-				Update: {
-					atelier_layout?: Json;
-					lix_id?: string;
-					updated_at?: string;
-					user_id?: string;
-				};
-				Relationships: [
-					{
-						foreignKeyName: "user_lix_preferences_lix_id_fkey";
-						columns: ["lix_id"];
-						isOneToOne: false;
-						referencedRelation: "lixes";
-						referencedColumns: ["id"];
-					},
-				];
-			};
-			user_lix_review_resolutions: {
-				Row: {
-					branch_id: string;
-					file_id: string;
-					lix_id: string;
-					outcome: string;
-					resolved_at: string;
-					review_id: string;
-					user_id: string;
-				};
-				Insert: {
-					branch_id: string;
-					file_id: string;
-					lix_id: string;
-					outcome: string;
-					resolved_at?: string;
-					review_id: string;
-					user_id: string;
-				};
-				Update: {
-					branch_id?: string;
-					file_id?: string;
-					lix_id?: string;
-					outcome?: string;
-					resolved_at?: string;
-					review_id?: string;
-					user_id?: string;
-				};
-				Relationships: [
-					{
-						foreignKeyName: "user_lix_review_resolutions_lix_id_fkey";
-						columns: ["lix_id"];
-						isOneToOne: false;
-						referencedRelation: "lixes";
-						referencedColumns: ["id"];
-					},
-				];
-			};
 			user_primary_namespaces: {
 				Row: {
 					created_at: string;
@@ -449,6 +446,10 @@ export type Database = {
 				Args: { p_namespace_id: string };
 				Returns: string;
 			};
+			get_lix_invite_link: {
+				Args: { p_lix_id: string };
+				Returns: string;
+			};
 			list_accessible_lixes: {
 				Args: never;
 				Returns: {
@@ -457,6 +458,8 @@ export type Database = {
 					lix_name: string;
 					lix_slug: string;
 					lix_updated_at: string;
+					lix_role: Database["public"]["Enums"]["lix_role"];
+					lix_visibility: Database["public"]["Enums"]["lix_visibility"];
 					namespace_created_at: string;
 					namespace_handle: string;
 					namespace_id: string;
@@ -473,9 +476,26 @@ export type Database = {
 					email: string;
 					joined_at: string;
 					name: string;
-					role: Database["public"]["Enums"]["namespace_role"];
+					role: Database["public"]["Enums"]["lix_role"];
 					user_id: string;
 				}[];
+			};
+			list_lix_publications: {
+				Args: { p_lix_id: string };
+				Returns: {
+					created_at: string;
+					kind: Database["public"]["Enums"]["lix_publication_kind"];
+					path: string;
+					published_by: string;
+				}[];
+			};
+			publish_lix_resource: {
+				Args: {
+					p_kind: Database["public"]["Enums"]["lix_publication_kind"];
+					p_lix_id: string;
+					p_path: string;
+				};
+				Returns: undefined;
 			};
 			list_namespace_members: {
 				Args: { p_namespace_id: string };
@@ -504,6 +524,10 @@ export type Database = {
 				Args: { p_namespace_id: string };
 				Returns: string;
 			};
+			reset_lix_invite_link: {
+				Args: { p_lix_id: string };
+				Returns: string;
+			};
 			record_mcp_lix_connection: {
 				Args: { p_lix_id: string; p_tool_name: string };
 				Returns: undefined;
@@ -518,12 +542,15 @@ export type Database = {
 					namespace_handle: string;
 					namespace_id: string;
 					namespace_name: string;
+					path_public: boolean;
+					role: Database["public"]["Enums"]["lix_role"] | null;
 					shared_by_avatar_url: string;
 					shared_by_name: string;
+					visibility: Database["public"]["Enums"]["lix_visibility"];
 				}[];
 			};
 			resolve_public_lix: {
-				Args: { p_lix_id: string };
+				Args: { p_lix_id: string; p_path?: string };
 				Returns: {
 					can_edit: boolean;
 					lix_id: string;
@@ -532,10 +559,17 @@ export type Database = {
 					namespace_handle: string;
 					namespace_id: string;
 					namespace_name: string;
+					path_public: boolean;
+					role: Database["public"]["Enums"]["lix_role"] | null;
+					visibility: Database["public"]["Enums"]["lix_visibility"];
 				}[];
 			};
 			resolve_public_lix_by_route: {
-				Args: { p_lix_slug: string; p_namespace_handle: string };
+				Args: {
+					p_lix_slug: string;
+					p_namespace_handle: string;
+					p_path?: string;
+				};
 				Returns: {
 					can_edit: boolean;
 					lix_id: string;
@@ -544,11 +578,40 @@ export type Database = {
 					namespace_handle: string;
 					namespace_id: string;
 					namespace_name: string;
+					path_public: boolean;
+					role: Database["public"]["Enums"]["lix_role"] | null;
+					visibility: Database["public"]["Enums"]["lix_visibility"];
 				}[];
 			};
 			revoke_lix_share_token: { Args: { p_token: string }; Returns: undefined };
+			set_lix_member_role: {
+				Args: {
+					p_lix_id: string;
+					p_role: Database["public"]["Enums"]["lix_role"];
+					p_user_id: string;
+				};
+				Returns: undefined;
+			};
+			set_lix_visibility: {
+				Args: {
+					p_lix_id: string;
+					p_visibility: Database["public"]["Enums"]["lix_visibility"];
+				};
+				Returns: undefined;
+			};
+			unpublish_lix_resource: {
+				Args: {
+					p_kind: Database["public"]["Enums"]["lix_publication_kind"];
+					p_lix_id: string;
+					p_path: string;
+				};
+				Returns: undefined;
+			};
 		};
 		Enums: {
+			lix_publication_kind: "file" | "directory";
+			lix_role: "admin" | "member";
+			lix_visibility: "private" | "public";
 			namespace_role: "owner" | "member";
 		};
 		CompositeTypes: {

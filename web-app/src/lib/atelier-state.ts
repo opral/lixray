@@ -9,7 +9,6 @@ import {
 	type AtelierSessionUiState,
 	type AtelierUserPreferencesV1,
 } from "@opral/atelier/state-adapters";
-import type { LixraySupabaseClient } from "./supabase";
 import type { RepositoryLixSession } from "./repository-lix-session";
 
 const SESSION_STATE_VERSION = 1;
@@ -132,142 +131,45 @@ export function createRepositoryBranchSession(args: {
 }
 
 export function createRepositoryPreferencesStore(args: {
-	readonly client: LixraySupabaseClient | null;
 	readonly userId: string;
 	readonly repositoryId: string;
 	readonly storage?: Storage;
 }): AtelierPreferencesStore {
-	const client = args.client;
-	if (!client) {
-		const storage = args.storage ?? window.sessionStorage;
-		const key = namespacedAtelierStateKey(
-			"preferences",
-			PREFERENCES_STATE_VERSION,
-			args,
-		);
-		return {
-			load: () => {
-				const value = readStoredJson(storage, key);
-				return Promise.resolve(
-					value ? coerceAtelierUserPreferences(value) : null,
-				);
-			},
-			save: (value: AtelierUserPreferencesV1) => {
-				storage.setItem(
-					key,
-					JSON.stringify(coerceAtelierUserPreferences(value)),
-				);
-				return Promise.resolve();
-			},
-		};
-	}
+	const storage = args.storage ?? window.sessionStorage;
+	const key = namespacedAtelierStateKey(
+		"preferences",
+		PREFERENCES_STATE_VERSION,
+		args,
+	);
 	return {
-		load: async () => {
-			const { data, error } = await client
-				.from("user_lix_preferences")
-				.select("atelier_layout")
-				.eq("user_id", args.userId)
-				.eq("lix_id", args.repositoryId)
-				.maybeSingle();
-			if (error) throw error;
-			return data?.atelier_layout
-				? coerceAtelierUserPreferences(data.atelier_layout)
-				: null;
-		},
-		save: async (value: AtelierUserPreferencesV1) => {
-			const preferences = coerceAtelierUserPreferences(value);
-			const { error } = await client.from("user_lix_preferences").upsert(
-				{
-					user_id: args.userId,
-					lix_id: args.repositoryId,
-					atelier_layout: preferences,
-					updated_at: new Date().toISOString(),
-				},
-				{ onConflict: "user_id,lix_id" },
+		load: () => {
+			const value = readStoredJson(storage, key);
+			return Promise.resolve(
+				value ? coerceAtelierUserPreferences(value) : null,
 			);
-			if (error) throw error;
+		},
+		save: (value: AtelierUserPreferencesV1) => {
+			storage.setItem(key, JSON.stringify(coerceAtelierUserPreferences(value)));
+			return Promise.resolve();
 		},
 	};
 }
 
 export function createRepositoryReviewStatusStore(args: {
-	readonly client: LixraySupabaseClient | null;
 	readonly userId: string;
 	readonly repositoryId: string;
 	readonly storage?: Storage;
-	readonly durableStorage?: Storage;
 }): AtelierReviewStatusStore {
-	const client = args.client;
-	const storage =
-		args.storage ??
-		(client
-			? (args.durableStorage ?? window.localStorage)
-			: window.sessionStorage);
+	const storage = args.storage ?? window.sessionStorage;
 	const key = namespacedAtelierStateKey("reviews", REVIEW_STATE_VERSION, args);
 	const localReviewIds = (branchId: string) =>
 		readReviewState(storage, key)
 			.resolutions.filter((review) => review.branchId === branchId)
 			.map((review) => review.reviewId);
-	const persistRemote = async (review: AtelierReviewResolution) => {
-		if (!client) return;
-		const { error } = await client.from("user_lix_review_resolutions").upsert(
-			{
-				user_id: args.userId,
-				lix_id: args.repositoryId,
-				branch_id: review.branchId,
-				review_id: review.reviewId,
-				file_id: review.fileId,
-				outcome: review.outcome,
-				resolved_at: new Date().toISOString(),
-			},
-			{
-				onConflict: "user_id,lix_id,branch_id,review_id,file_id",
-			},
-		);
-		if (error) throw error;
-	};
-	const flushPending = async () => {
-		if (!client) return;
-		const state = readReviewState(storage, key);
-		for (const pendingKey of [...state.pending]) {
-			const review = state.resolutions.find(
-				(candidate) => reviewResolutionKey(candidate) === pendingKey,
-			);
-			if (!review) {
-				state.pending = state.pending.filter((value) => value !== pendingKey);
-				writeReviewState(storage, key, state);
-				continue;
-			}
-			try {
-				await persistRemote(review);
-				const latest = readReviewState(storage, key);
-				latest.pending = latest.pending.filter((value) => value !== pendingKey);
-				writeReviewState(storage, key, latest);
-			} catch {
-				// The local acknowledgement is authoritative for this account in this
-				// browser. Keep the idempotent upsert in the durable outbox for a later
-				// load/retry.
-			}
-		}
-	};
 	return {
-		loadResolvedReviewIds: async (branchId: string) => {
-			await flushPending();
-			const localIds = localReviewIds(branchId);
-			if (!client) return [...new Set(localIds)];
-			const { data, error } = await client
-				.from("user_lix_review_resolutions")
-				.select("review_id")
-				.eq("user_id", args.userId)
-				.eq("lix_id", args.repositoryId)
-				.eq("branch_id", branchId);
-			if (error) {
-				if (localIds.length > 0) return [...new Set(localIds)];
-				throw error;
-			}
-			return [...new Set([...localIds, ...data.map((row) => row.review_id)])];
-		},
-		resolve: async (review: AtelierReviewResolution) => {
+		loadResolvedReviewIds: (branchId: string) =>
+			Promise.resolve([...new Set(localReviewIds(branchId))]),
+		resolve: (review: AtelierReviewResolution) => {
 			const state = readReviewState(storage, key);
 			const reviewKey = reviewResolutionKey(review);
 			state.resolutions = [
@@ -276,32 +178,25 @@ export function createRepositoryReviewStatusStore(args: {
 				),
 				review,
 			];
-			state.pending = [...new Set([...state.pending, reviewKey])];
 			writeReviewState(storage, key, state);
-			await flushPending();
+			return Promise.resolve();
 		},
 	};
 }
 
 type StoredReviewState = {
 	resolutions: AtelierReviewResolution[];
-	pending: string[];
 };
 
 function readReviewState(storage: Storage, key: string): StoredReviewState {
 	const value = readStoredJson(storage, key);
 	if (!value || typeof value !== "object" || Array.isArray(value)) {
-		return { resolutions: [], pending: [] };
+		return { resolutions: [] };
 	}
-	const candidate = value as { resolutions?: unknown; pending?: unknown };
+	const candidate = value as { resolutions?: unknown };
 	return {
 		resolutions: Array.isArray(candidate.resolutions)
 			? candidate.resolutions.filter(isReviewResolution)
-			: [],
-		pending: Array.isArray(candidate.pending)
-			? candidate.pending.filter(
-					(pendingKey): pendingKey is string => typeof pendingKey === "string",
-				)
 			: [],
 	};
 }

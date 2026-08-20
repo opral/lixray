@@ -45,10 +45,15 @@ function useObservedRows(
 	lix: Lix,
 	sql: string,
 	params: ReadonlyArray<string>,
+	enabled = true,
 ): ObservedRow[] | null {
 	const [rows, setRows] = useState<ObservedRow[] | null>(null);
 	const paramsKey = JSON.stringify(params);
 	useEffect(() => {
+		if (!enabled) {
+			setRows(null);
+			return;
+		}
 		let disposed = false;
 		// Remote observe reconciles every stream's first frame through execute,
 		// including reconnects, so event.result is safe to publish directly.
@@ -71,7 +76,7 @@ function useObservedRows(
 			disposed = true;
 			events.close();
 		};
-	}, [lix, sql, paramsKey]);
+	}, [enabled, lix, sql, paramsKey]);
 	return rows;
 }
 
@@ -80,6 +85,102 @@ const asText = (value: unknown): string =>
 
 const asNullableText = (value: unknown): string | null =>
 	typeof value === "string" && value.length > 0 ? value : null;
+
+const asNumber = (value: unknown): number => {
+	const parsed = Number(value ?? 0);
+	return Number.isFinite(parsed) ? parsed : 0;
+};
+
+export type RepositoryControlPlaneData = {
+	readonly workingChangeCount: number;
+	readonly totalChangeCount: number;
+	readonly tableCount: number | null;
+	readonly checkpointDates: readonly string[];
+	readonly changeDays: ReadonlyArray<{
+		readonly day: string;
+		readonly count: number;
+	}>;
+	readonly createdAt: string | null;
+};
+
+/** Live, repository-derived facts used by the Home control-plane rail. */
+export function useRepositoryControlPlaneData(
+	lix: Lix,
+	enabled = true,
+): RepositoryControlPlaneData | null {
+	const workingRows = useObservedRows(
+		lix,
+		"SELECT count(*) AS n FROM lix_working_diff",
+		[],
+		enabled,
+	);
+	const checkpointRows = useObservedRows(
+		lix,
+		"SELECT lixcol_created_at AS created_at FROM lix_checkpoint ORDER BY lixcol_created_at DESC LIMIT 10",
+		[],
+		enabled,
+	);
+	const changeStatsRows = useObservedRows(
+		lix,
+		"SELECT count(*) AS n, min(created_at) AS created_at FROM lix_change",
+		[],
+		enabled,
+	);
+	const changeDayRows = useObservedRows(
+		lix,
+		"SELECT substr(created_at, 1, 10) AS day, count(*) AS n FROM lix_change GROUP BY substr(created_at, 1, 10) ORDER BY day DESC LIMIT 10",
+		[],
+		enabled,
+	);
+	const [tableCount, setTableCount] = useState<number | null>(null);
+
+	useEffect(() => {
+		if (!enabled) {
+			setTableCount(null);
+			return;
+		}
+		let disposed = false;
+		void lix
+			.execute(
+				"SELECT count(DISTINCT table_name) AS n FROM information_schema.columns WHERE table_schema = 'public' AND table_name NOT LIKE '%_history' AND table_name NOT LIKE '%_by_branch'",
+				[],
+			)
+			.then((result) => {
+				if (!disposed) setTableCount(asNumber(result.rows[0]?.get("n")));
+			})
+			.catch((error: unknown) => {
+				console.error(
+					"repository-home: unable to count database tables",
+					error,
+				);
+				if (!disposed) setTableCount(0);
+			});
+		return () => {
+			disposed = true;
+		};
+	}, [enabled, lix]);
+
+	return useMemo(() => {
+		if (!workingRows || !checkpointRows || !changeStatsRows || !changeDayRows) {
+			return null;
+		}
+		return {
+			workingChangeCount: asNumber(workingRows[0]?.get("n")),
+			totalChangeCount: asNumber(changeStatsRows[0]?.get("n")),
+			tableCount,
+			checkpointDates: checkpointRows
+				.map((row) => asText(row.get("created_at")))
+				.filter(Boolean),
+			changeDays: changeDayRows
+				.map((row) => ({
+					day: asText(row.get("day")),
+					count: asNumber(row.get("n")),
+				}))
+				.reverse(),
+			createdAt: asNullableText(changeStatsRows[0]?.get("created_at")),
+		};
+	}, [changeDayRows, changeStatsRows, checkpointRows, tableCount, workingRows]);
+}
 
 /** The full directory/file tree, kept live via lix observe. */
 export function useRepositoryTree(lix: Lix): RepositoryTree | null {
@@ -198,11 +299,13 @@ type DirectoryListing = {
 		readonly path: string;
 		readonly name: string;
 		readonly itemCount: number;
+		readonly hidden?: true;
 	}>;
 	readonly files: ReadonlyArray<{
 		readonly path: string;
 		readonly name: string;
 		readonly updatedAt: string;
+		readonly hidden?: true;
 	}>;
 	readonly readmePath: string | null;
 };
@@ -211,38 +314,48 @@ type DirectoryListing = {
 export function listDirectory(
 	tree: RepositoryTree,
 	dirPath: string,
+	options: { readonly showHiddenFiles?: boolean } = {},
 ): DirectoryListing {
+	const visibleDirs = options.showHiddenFiles
+		? tree.dirs
+		: tree.dirs.filter((directory) => !hasDotPrefixedSegment(directory.path));
+	const visibleFiles = options.showHiddenFiles
+		? tree.files
+		: tree.files.filter((file) => !hasDotPrefixedSegment(file.path));
 	const currentDirectoryId =
 		dirPath === "/"
 			? null
-			: tree.dirs.find((directory) => directory.path === dirPath)?.id;
+			: visibleDirs.find((directory) => directory.path === dirPath)?.id;
 	if (dirPath !== "/" && !currentDirectoryId) {
 		return { dirs: [], files: [], readmePath: null };
 	}
 	const countItemsIn = (childDirPath: string) => {
-		const childDirectory = tree.dirs.find(
+		const childDirectory = visibleDirs.find(
 			(directory) => directory.path === childDirPath,
 		);
 		if (!childDirectory) return 0;
 		return (
-			tree.dirs.filter((dir) => dir.parentId === childDirectory.id).length +
-			tree.files.filter((file) => file.directoryId === childDirectory.id).length
+			visibleDirs.filter((dir) => dir.parentId === childDirectory.id).length +
+			visibleFiles.filter((file) => file.directoryId === childDirectory.id)
+				.length
 		);
 	};
-	const dirs = tree.dirs
+	const dirs = visibleDirs
 		.filter((dir) => dir.parentId === currentDirectoryId)
 		.map((dir) => ({
 			path: dir.path,
 			name: dir.name,
 			itemCount: countItemsIn(dir.path),
+			...(dir.name.startsWith(".") ? { hidden: true as const } : {}),
 		}));
 	// Per the home comp: README pinned first, then most recently updated.
-	const files = tree.files
+	const files = visibleFiles
 		.filter((file) => file.directoryId === currentDirectoryId)
 		.map((file) => ({
 			path: file.path,
 			name: file.name,
 			updatedAt: file.updatedAt,
+			...(file.name.startsWith(".") ? { hidden: true as const } : {}),
 		}))
 		.sort((left, right) => {
 			const leftReadme = left.name.toLowerCase() === "readme.md" ? 1 : 0;
@@ -253,6 +366,10 @@ export function listDirectory(
 	const readmePath =
 		files.find((file) => file.name.toLowerCase() === "readme.md")?.path ?? null;
 	return { dirs, files, readmePath };
+}
+
+function hasDotPrefixedSegment(path: string): boolean {
+	return path.split("/").some((segment) => segment.startsWith("."));
 }
 
 /** Resolves a link against the persisted directory surface without inferring kind from a path. */

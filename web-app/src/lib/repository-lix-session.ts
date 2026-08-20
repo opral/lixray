@@ -17,9 +17,19 @@ interface OpenRepositoryLixSessionOptions {
 	 * read-only repository transport.
 	 */
 	allowAnonymous?: boolean;
+	/** Limits an anonymous session to one control-plane-published path. */
+	publicPath?: string;
 	initialBranchId?: string | null;
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
+	/**
+	 * Isolates protocol clients by host principal. The protocol binds each
+	 * session id to Anonymous or Authenticated at handshake. Reusing one id
+	 * after the worker starts injecting the other principal is 403
+	 * ACCOUNT_MISMATCH, not 410 SESSION_GONE. This is not a session store:
+	 * the server HashMap stays ephemeral.
+	 */
+	authIdentity?: string;
 }
 
 const RECOVERING_OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
@@ -69,8 +79,14 @@ async function openRepositoryLixSessionOnce(
 			url: repositoryUrl(options),
 			headers: async (): Promise<Record<string, string>> => {
 				const token = await options.getAccessToken();
-				if (token) return { Authorization: `Bearer ${token}` };
-				if (options.allowAnonymous) return {};
+				const publicPathHeaders: Record<string, string> = {};
+				if (options.publicPath) {
+					publicPathHeaders["X-Lixray-Public-Path"] = options.publicPath;
+				}
+				if (token) {
+					return { Authorization: `Bearer ${token}`, ...publicPathHeaders };
+				}
+				if (options.allowAnonymous) return publicPathHeaders;
 				throw new Error("A repository access token is required.");
 			},
 			fetch: createTelemetryFetch(options.fetch, {
@@ -369,7 +385,9 @@ class RepositoryLixSessionLease implements RepositoryLixSession {
 function repositorySessionKey(
 	options: OpenRepositoryLixSessionOptions,
 ): string {
-	return repositoryUrl(options).href;
+	const href = repositoryUrl(options).href;
+	const identity = options.authIdentity ?? "anonymous";
+	return `${href}#auth=${identity}&publicPath=${options.publicPath ?? ""}`;
 }
 
 function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {

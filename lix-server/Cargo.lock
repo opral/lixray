@@ -3195,18 +3195,18 @@ dependencies = [
 
 [[package]]
 name = "musli-core"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a89a1338c2da9f8cbf8b60c4e3edaab4eb0809d52fc2d7f69ac4da58d9050953"
+checksum = "4971186bfa3e5adf5f37ae93d0320b883350212fde578807ff926f30f9156740"
 dependencies = [
  "musli-macros",
 ]
 
 [[package]]
 name = "musli-macros"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff6dea70dccfc68fd441c128bdaf31c454542676f750f095465640367fd94118"
+checksum = "0a350fb3a6eb2e5a847fbdeebaea1d51a7260577d15455ba145aa445a426846e"
 dependencies = [
  "proc-macro2",
  "quote",

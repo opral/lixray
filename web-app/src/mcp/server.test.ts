@@ -7,12 +7,10 @@ import {
 import {
 	createLixError,
 	LixService,
-	type BindSessionInput,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
 	type LixRuntimeClient,
 } from "./lix-service.ts";
-import type { ParseSqlScript } from "../lib/lix-sql-access.ts";
 import { PostHog } from "posthog-node";
 import {
 	attachMcpToolCallObservationProperties,
@@ -30,13 +28,6 @@ import {
 } from "./server.ts";
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
-const parseSqlScript: ParseSqlScript = (sql) => ({
-	statements: sql
-		.split(";")
-		.map((statement) => statement.trim())
-		.filter(Boolean)
-		.map((statement) => ({ sql: statement })),
-});
 
 function sqlPayloadFromText(text: string): unknown {
 	const withoutContext = text.replace(/\s*context=\S+\s*$/, "");
@@ -49,7 +40,7 @@ class FakeRuntime implements LixRuntimeClient {
 	hasOpenRuntime() {
 		return false;
 	}
-	bindSession(_input: BindSessionInput) {}
+	bindSession() {}
 	async listLixes() {
 		return [
 			{
@@ -84,6 +75,23 @@ class FakeRuntime implements LixRuntimeClient {
 			throw createLixError("LIX_TYPE_MISMATCH", "column expects text", {
 				hint: "Bind a text value.",
 			});
+		}
+		if (request.sql === "SELECT lix_restore($1)") {
+			if (
+				request.params?.[0]?.kind === "text" &&
+				request.params[0].value === "missing-commit"
+			) {
+				throw createLixError(
+					"LIX_COMMIT_NOT_FOUND",
+					"Restore target commit does not exist.",
+				);
+			}
+			return {
+				columns: ["lix_restore"],
+				rows: [[request.params?.[0] ?? { kind: "null" as const }]],
+				rowsAffected: 0,
+				notices: [],
+			};
 		}
 		if (request.sql.includes("lix_active_branch_commit_id")) {
 			return {
@@ -314,7 +322,6 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		const response = await handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_Test",
-			parseSqlScript,
 		});
 		responseRequestIds.push(response.headers.get("x-request-id") ?? "");
 		return response;
@@ -344,6 +351,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				"switch_branch",
 				"create_branch",
 				"create_checkpoint",
+				"restore",
 				"undo",
 				"redo",
 				"merge_branch_preview",
@@ -407,6 +415,23 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			checkpointTool.description ?? "",
 			/Do not call it after every write/,
 		);
+		const restoreTool = tools.tools.find((tool) => tool.name === "restore");
+		assert.ok(restoreTool);
+		assert.match(restoreTool.description ?? "", /ancestor/);
+		assert.match(restoreTool.description ?? "", /creates no commit/);
+		assert.match(restoreTool.description ?? "", /does not delete/);
+		assert.match(restoreTool.description ?? "", /not undoable/);
+		assert.match(restoreTool.description ?? "", /undo only applies/);
+		assert.match(restoreTool.description ?? "", /checkpoint-driven/);
+		assert.match(
+			restoreTool.description ?? "",
+			/untracked rows remain unchanged/,
+		);
+		assert.match(restoreTool.description ?? "", /create_checkpoint returns/);
+		assert.match(restoreTool.description ?? "", /no restore_checkpoint/);
+		assert.equal(restoreTool.annotations?.destructiveHint, true);
+		assert.equal(restoreTool.annotations?.idempotentHint, true);
+		assert.match(JSON.stringify(restoreTool.inputSchema), /commit_id/);
 		assert.doesNotMatch(JSON.stringify(queryTool.inputSchema), /idempotency/i);
 		assert.doesNotMatch(
 			JSON.stringify(executeSqlTool.inputSchema),
@@ -461,6 +486,34 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			"context in text content must match structuredContent",
 		);
 		assert.equal(responseRequestIds.at(-1), openedContent.request_id);
+		const restored = await client.callTool({
+			name: "restore",
+			arguments: { context, commit_id: "commit-target" },
+		});
+		assert.equal(restored.isError, undefined, JSON.stringify(restored));
+		assert.deepEqual(restored.structuredContent, {
+			context,
+			branch_id: "main",
+			commit_id: "commit-target",
+			request_id: responseRequestIds.at(-1),
+		});
+		const restoredText =
+			restored.content?.[0]?.type === "text" ? restored.content[0].text : "";
+		assert.match(restoredText, /Restored branch main to commit commit-target/);
+		assert.match(restoredText, /context=[^\s]+/);
+		const failedRestore = await client.callTool({
+			name: "restore",
+			arguments: { context, commit_id: "missing-commit" },
+		});
+		assert.equal(failedRestore.isError, true);
+		assert.deepEqual(
+			(failedRestore.structuredContent as { error: Record<string, unknown> })
+				.error,
+			{
+				code: "LIX_COMMIT_NOT_FOUND",
+				message: "Restore target commit does not exist.",
+			},
+		);
 		const queried = await client.callTool({
 			name: "query_sql",
 			arguments: { context, sql: "SELECT 1" },
@@ -571,26 +624,27 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(mutationThroughQuery.isError, true);
 		assert.match(
 			JSON.stringify(mutationThroughQuery.structuredContent),
-			/Use execute_sql for non-SELECT SQL/,
+			/query_sql rejects INSERT, UPDATE, and DELETE/,
 		);
+		assert.match(
+			JSON.stringify(mutationThroughQuery.structuredContent),
+			/Use execute_sql for writes/,
+		);
+		const insertThroughQuery = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "INSERT INTO example VALUES (1)" },
+		});
+		assert.equal(insertThroughQuery.isError, true);
+		const updateThroughQuery = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "UPDATE example SET value = 2" },
+		});
+		assert.equal(updateThroughQuery.isError, true);
 		const valuesThroughQuery = await client.callTool({
 			name: "query_sql",
 			arguments: { context, sql: "VALUES (1)" },
 		});
-		assert.equal(valuesThroughQuery.isError, true);
-		assert.match(
-			JSON.stringify(valuesThroughQuery.structuredContent),
-			/query_sql accepts only a SELECT/,
-		);
-		const scriptThroughQuery = await client.callTool({
-			name: "query_sql",
-			arguments: { context, sql: "SELECT 1; SELECT 2" },
-		});
-		assert.equal(scriptThroughQuery.isError, true);
-		assert.match(
-			JSON.stringify(scriptThroughQuery.structuredContent),
-			/requires exactly one SQL statement/,
-		);
+		assert.equal(valuesThroughQuery.isError, undefined);
 		const readThroughExecute = await client.callTool({
 			name: "execute_sql",
 			arguments: { context, statements: [{ sql: "SELECT 1" }] },
@@ -646,7 +700,6 @@ void test("MCP tools preserve continuation fields in text fallback", async () =>
 		return handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_TextContent_Test",
-			parseSqlScript,
 		});
 	};
 	const transport = new StreamableHTTPClientTransport(
@@ -819,7 +872,6 @@ void test("legacy MCP initialize and tool calls work without a session id", asyn
 		return handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_Legacy_Test",
-			parseSqlScript,
 		});
 	};
 	const transport = new StreamableHTTPClientTransport(
@@ -902,7 +954,6 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 		return handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_Telemetry_Test",
-			parseSqlScript,
 			posthogToken: "phc_test_token",
 			posthogDistinctId: "felix",
 			posthogClientId: "codex-desktop",
@@ -997,6 +1048,9 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 		assert.equal(retry.properties.sql_op, "INSERT");
 		assert.equal(first.properties.environment, "production");
 		assert.equal(first.properties.mcp_server, "lixray");
+		assert.equal(typeof first.properties.$mcp_duration_ms, "number");
+		assert.equal(first.properties.duration_ms, undefined);
+		assert.equal(first.properties.$ai_latency, undefined);
 		assert.equal(
 			first.properties.$mcp_parameters,
 			undefined,
@@ -1015,6 +1069,195 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 	} finally {
 		PostHog.prototype.capture = originalCapture;
 		PostHog.prototype.shutdown = originalShutdown;
+		await client.close();
+	}
+});
+
+type CapturedMcpEvent = {
+	event: string;
+	distinctId: string;
+	properties: Record<string, unknown>;
+};
+
+function stubPosthogCapture(captured: CapturedMcpEvent[]): () => void {
+	type CaptureMethod = typeof PostHog.prototype.capture;
+	type ShutdownMethod = typeof PostHog.prototype.shutdown;
+	const originalCapture = PostHog.prototype.capture.bind(
+		PostHog.prototype,
+	) as CaptureMethod;
+	const originalShutdown = PostHog.prototype.shutdown.bind(
+		PostHog.prototype,
+	) as ShutdownMethod;
+	PostHog.prototype.capture = function capture(event) {
+		const distinctId =
+			typeof event.distinctId === "string" ? event.distinctId : "anonymous";
+		captured.push({
+			event: event.event,
+			distinctId,
+			properties: { ...(event.properties ?? {}) },
+		});
+		return { uuid: "test-uuid", event, distinct_id: distinctId };
+	} as CaptureMethod;
+	PostHog.prototype.shutdown = async function shutdown() {
+		return;
+	} as ShutdownMethod;
+	return () => {
+		PostHog.prototype.capture = originalCapture;
+		PostHog.prototype.shutdown = originalShutdown;
+	};
+}
+
+async function drainPosthogMcp(): Promise<void> {
+	await Promise.resolve();
+	await Promise.resolve();
+	await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+function assertOfficialToolCall(
+	captured: CapturedMcpEvent[],
+	toolName: string,
+	distinctId: string,
+): void {
+	const match = captured.find(
+		(event) =>
+			event.event === "$mcp_tool_call" &&
+			event.properties.$mcp_tool_name === toolName,
+	);
+	assert.ok(match, `expected $mcp_tool_call for ${toolName}`);
+	assert.equal(match.distinctId, distinctId);
+	assert.equal(typeof match.properties.$mcp_duration_ms, "number");
+	assert.equal(match.properties.duration_ms, undefined);
+	assert.equal(match.properties.$ai_latency, undefined);
+}
+
+void test("legacy initialize instrument() emits $mcp_tool_call for list_lixes and query_sql", async () => {
+	const captured: CapturedMcpEvent[] = [];
+	const restore = stubPosthogCapture(captured);
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "felix", clientId: "codex-desktop" },
+	});
+	const requests: Array<Request> = [];
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		requests.push(request.clone());
+		return handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_Legacy_Instrument_Test",
+			posthogToken: "phc_test_token",
+			posthogDistinctId: "felix",
+			posthogClientId: "codex-desktop",
+		});
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcher },
+	);
+	const client = new Client(
+		{ name: "legacy-instrument-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: "legacy" } },
+	);
+	try {
+		await client.connect(transport);
+		const tools = await client.listTools();
+		const listLixesTool = tools.tools.find(
+			(tool) => tool.name === "list_lixes",
+		);
+		const querySqlTool = tools.tools.find((tool) => tool.name === "query_sql");
+		assert.equal(
+			(listLixesTool?.inputSchema as { properties?: { context?: unknown } })
+				?.properties?.context,
+			undefined,
+			"context: false must not inject PostHog intent context onto list_lixes",
+		);
+		assert.ok(
+			(querySqlTool?.inputSchema as { properties?: { context?: unknown } })
+				?.properties?.context,
+			"query_sql must keep LixRay's signed context argument",
+		);
+		const listed = await client.callTool({ name: "list_lixes", arguments: {} });
+		assert.equal(listed.isError, undefined, JSON.stringify(listed));
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
+		});
+		const context = (opened.structuredContent as { context: string }).context;
+		assert.match(context, /\S+/);
+		const queried = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "SELECT 1" },
+		});
+		assert.equal(queried.isError, undefined, JSON.stringify(queried));
+		await drainPosthogMcp();
+		const firstBody = await requests[0]?.text();
+		assert.match(firstBody ?? "", /initialize/);
+		assert.ok(captured.some((event) => event.event === "$mcp_initialize"));
+		assertOfficialToolCall(captured, "list_lixes", "felix");
+		assertOfficialToolCall(captured, "query_sql", "felix");
+	} finally {
+		restore();
+		await client.close();
+	}
+});
+
+void test("modern 2026-07-28 instrument() emits $mcp_tool_call for list_lixes and query_sql", async () => {
+	const captured: CapturedMcpEvent[] = [];
+	const restore = stubPosthogCapture(captured);
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "felix", clientId: "cursor-desktop" },
+	});
+	const requests: Array<Request> = [];
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		requests.push(request.clone());
+		return handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_Modern_Instrument_Test",
+			posthogToken: "phc_test_token",
+			posthogDistinctId: "felix",
+			posthogClientId: "cursor-desktop",
+		});
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcher },
+	);
+	const client = new Client(
+		{ name: "modern-instrument-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		assert.equal(client.getProtocolEra(), "modern");
+		const listed = await client.callTool({ name: "list_lixes", arguments: {} });
+		assert.equal(listed.isError, undefined, JSON.stringify(listed));
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
+		});
+		const context = (opened.structuredContent as { context: string }).context;
+		const queried = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "SELECT 1" },
+		});
+		assert.equal(queried.isError, undefined, JSON.stringify(queried));
+		await drainPosthogMcp();
+		const firstBody = await requests[0]?.text();
+		assert.match(firstBody ?? "", /server\/discover/);
+		assert.doesNotMatch(firstBody ?? "", /"method":"initialize"/);
+		assert.ok(
+			captured.some((event) => event.event === "$mcp_initialize"),
+			"discover must emit official $mcp_initialize",
+		);
+		assert.ok(
+			captured.some((event) => event.event === "$mcp_tools_list"),
+			"discover must emit official $mcp_tools_list",
+		);
+		assertOfficialToolCall(captured, "list_lixes", "felix");
+		assertOfficialToolCall(captured, "query_sql", "felix");
+	} finally {
+		restore();
 		await client.close();
 	}
 });

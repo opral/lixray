@@ -37,6 +37,7 @@ export function docsEntryBySlug(slug: string): DocsEntry | undefined {
 
 export const legalPages = {
 	privacy: { path: "privacy.md", label: "Privacy Policy", slug: "privacy" },
+	support: { path: "support.md", label: "Support", slug: "support" },
 	terms: { path: "terms.md", label: "Terms of Service", slug: "terms" },
 } as const;
 

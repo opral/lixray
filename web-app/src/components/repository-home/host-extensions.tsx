@@ -1,5 +1,6 @@
 import {
 	coerceAtelierSessionUiState,
+	ATELIER_BUILTIN_EXTENSION_IDS,
 	type AtelierExtensionRegistration,
 	type AtelierExtensionRuntime,
 	type AtelierExtensionView,
@@ -119,6 +120,27 @@ function openPeopleFromView(atelier: AtelierExtensionRuntime) {
 		});
 }
 
+function openSettingsFromView(atelier: AtelierExtensionRuntime) {
+	void atelier.views
+		.open(LIXRAY_SETTINGS_EXTENSION_ID)
+		.catch((error: unknown) => {
+			console.error("repository-home: unable to open the Settings tab", error);
+		});
+}
+
+function openSqlExplorerFromView(atelier: AtelierExtensionRuntime) {
+	void atelier.views.open("sql_explorer").catch((error: unknown) => {
+		console.error("repository-home: unable to open SQL Explorer", error);
+	});
+}
+
+function openReviewFromView(atelier: AtelierExtensionRuntime) {
+	const runtime = atelier as AtelierExtensionRuntime & {
+		readonly reviews?: { readonly openWorkingChanges?: () => void };
+	};
+	runtime.reviews?.openWorkingChanges?.();
+}
+
 function mountDirectoryView({
 	element,
 	atelier,
@@ -128,6 +150,7 @@ function mountDirectoryView({
 	connection,
 	teamApi,
 	hasAgentConnected,
+	visibility,
 }: {
 	element: HTMLElement;
 	atelier: AtelierExtensionRuntime;
@@ -137,20 +160,37 @@ function mountDirectoryView({
 	connection: LixRepositoryConnection;
 	teamApi: RepositoryTeamApi | null;
 	hasAgentConnected: AgentConnectionProbe | null;
-}): { root: Root; render: (candidate: AtelierExtensionView) => void } {
+	visibility: "private" | "public";
+}): {
+	root: Root;
+	render: (
+		candidate: AtelierExtensionView,
+		runtime: AtelierExtensionRuntime,
+	) => void;
+} {
 	const root = createRoot(element);
 	// Re-rendered on view updates so shortcut bindings track isActive.
-	const render = (candidate: AtelierExtensionView) => {
+	const render = (
+		candidate: AtelierExtensionView,
+		runtime: AtelierExtensionRuntime,
+	) => {
 		root.render(
 			<StrictMode>
 				<DirectoryView
 					lix={atelier.lix}
 					dirPath={dirPath(candidate)}
 					isHome={isHome}
+					showHiddenFiles={
+						runtime.preferences.get(
+							ATELIER_BUILTIN_EXTENSION_IDS.files,
+							"showHiddenFiles",
+						) === true
+					}
 					readOnly={atelier.readOnly}
 					connection={connection}
 					teamApi={teamApi}
 					hasAgentConnected={hasAgentConnected}
+					visibility={visibility}
 					isActive={candidate.isActive}
 					onOpenFile={(path, options) =>
 						openFileFromView(atelier, path, options)
@@ -164,11 +204,14 @@ function mountDirectoryView({
 						)
 					}
 					onOpenPeople={() => openPeopleFromView(atelier)}
+					onOpenSettings={() => openSettingsFromView(atelier)}
+					onOpenSqlExplorer={() => openSqlExplorerFromView(atelier)}
+					onOpenReview={() => openReviewFromView(atelier)}
 				/>
 			</StrictMode>,
 		);
 	};
-	render(view);
+	render(view, atelier);
 	return { root, render };
 }
 
@@ -180,6 +223,7 @@ const createLixrayHomeExtension = (
 	connection: LixRepositoryConnection,
 	hasAgentConnected: AgentConnectionProbe,
 	teamApi: RepositoryTeamApi | null,
+	visibility: "private" | "public",
 ): AtelierExtensionRegistration => ({
 	manifest: {
 		apiVersion: 1,
@@ -203,9 +247,11 @@ const createLixrayHomeExtension = (
 				connection,
 				teamApi,
 				hasAgentConnected,
+				visibility,
 			});
 			return {
-				update: ({ view: nextView }) => render(nextView),
+				update: ({ atelier: nextAtelier, view: nextView }) =>
+					render(nextView, nextAtelier),
 				dispose: () => {
 					queueMicrotask(() => root.unmount());
 				},
@@ -242,9 +288,11 @@ const createLixrayDirExtension = (
 				connection,
 				teamApi: null,
 				hasAgentConnected: null,
+				visibility: "private",
 			});
 			return {
-				update: ({ view: nextView }) => render(nextView),
+				update: ({ atelier: nextAtelier, view: nextView }) =>
+					render(nextView, nextAtelier),
 				dispose: () => {
 					queueMicrotask(() => root.unmount());
 				},
@@ -369,8 +417,9 @@ export const createLixrayRepositoryExtensions = (
 	hasAgentConnected: AgentConnectionProbe,
 	teamApi: RepositoryTeamApi | null,
 	settingsApi: RepositorySettingsApi | null,
+	visibility: "private" | "public",
 ): readonly AtelierExtensionRegistration[] => [
-	createLixrayHomeExtension(connection, hasAgentConnected, teamApi),
+	createLixrayHomeExtension(connection, hasAgentConnected, teamApi, visibility),
 	createLixrayDirExtension(connection),
 	createLixrayGettingStartedExtension(connection, hasAgentConnected),
 	createLixrayPeopleExtension(teamApi),

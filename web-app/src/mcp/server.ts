@@ -4,15 +4,14 @@
  * Lix service remain the runtime type guards for these values.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
-import { instrument } from "@posthog/mcp";
+import { instrument, PostHogMCP } from "@posthog/mcp";
 import {
 	createMcpHandler,
 	McpServer,
 	type ToolAnnotations,
 } from "@modelcontextprotocol/server";
-import { PostHog } from "posthog-node";
 import { z } from "zod";
-import type { ParseSqlScript } from "../lib/lix-sql-access.ts";
+import { sqlLooksLikeWrite } from "../lib/lix-sql-access.ts";
 import {
 	EXECUTE_SQL_TOOL_DESCRIPTION,
 	QUERY_SQL_TOOL_DESCRIPTION,
@@ -71,7 +70,6 @@ export interface McpServerOptions {
 	posthogDistinctId?: string;
 	posthogClientId?: string;
 	onPosthogFlush?: (flush: () => Promise<void>) => void;
-	parseSqlScript?: ParseSqlScript;
 }
 
 type McpSecurityScheme =
@@ -99,11 +97,29 @@ export function redactMcpAnalyticsEvent<
 	return { ...event, properties };
 }
 
+const MCP_DISCOVER_METHOD = "server/discover";
+
+interface OfficialDiscoverEmitter {
+	captureInitialize(data: {
+		distinctId?: string;
+		durationMs?: number;
+		protocolVersion?: string;
+		properties?: Record<string, unknown>;
+	}): void;
+	captureToolsList(data: {
+		distinctId?: string;
+		durationMs?: number;
+		protocolVersion?: string;
+		toolNames?: string[];
+		properties?: Record<string, unknown>;
+	}): void;
+}
+
 /**
- * `@posthog/mcp` 0.10.x treats a high-level server as anything with `.server`
+ * `@posthog/mcp` 0.11.x treats a high-level server as anything with `.server`
  * plus `tool()`. MCP TypeScript SDK v2 exposes `registerTool()` instead, so
- * instrument() would reject the v2 `McpServer`. Alias `tool` so the official
- * high-level adapter can wrap `tools/call` via `_requestHandlers`.
+ * instrument() rejects the v2 `McpServer` and official `$mcp_tool_call` never
+ * wraps. Alias `tool` so the high-level adapter can patch `tools/call`.
  */
 export function prepareHighLevelMcpServerForPosthog(
 	server: McpServer,
@@ -115,6 +131,95 @@ export function prepareHighLevelMcpServerForPosthog(
 		highLevel.tool = server.registerTool.bind(server);
 	}
 	return server;
+}
+
+/**
+ * `@posthog/mcp` 0.11.x still does not capture `server/discover`. Modern
+ * 2026-07-28 clients skip initialize/tools/list, so map discover onto the
+ * official handshake events without a second duration field.
+ */
+export function wrapDiscoverAsOfficialHandshake(
+	server: McpServer,
+	posthog: OfficialDiscoverEmitter,
+	identity: {
+		distinctId?: string;
+		clientId?: string;
+		requestId?: string;
+	} = {},
+): void {
+	const lowLevel = server.server as {
+		setRequestHandler: (...args: unknown[]) => unknown;
+	};
+	const originalSetRequestHandler = lowLevel.setRequestHandler.bind(lowLevel);
+	lowLevel.setRequestHandler = (...args: unknown[]) => {
+		if (args[0] !== MCP_DISCOVER_METHOD) {
+			return originalSetRequestHandler(...args);
+		}
+		const handler = args.at(-1);
+		if (typeof handler !== "function") {
+			return originalSetRequestHandler(...args);
+		}
+		const wrapped = async (...handlerArgs: unknown[]) => {
+			const startedAt = Date.now();
+			const result = await (handler as (...h: unknown[]) => unknown)(
+				...handlerArgs,
+			);
+			emitDiscoverAsOfficialHandshake(
+				server,
+				posthog,
+				identity,
+				Date.now() - startedAt,
+			);
+			return result;
+		};
+		return originalSetRequestHandler(...args.slice(0, -1), wrapped);
+	};
+}
+
+function emitDiscoverAsOfficialHandshake(
+	server: McpServer,
+	posthog: OfficialDiscoverEmitter,
+	identity: {
+		distinctId?: string;
+		clientId?: string;
+		requestId?: string;
+	},
+	durationMs: number,
+): void {
+	if (!identity.distinctId) return;
+	const properties = {
+		environment: "production",
+		mcp_server: "lixray",
+		oauth_client_id: identity.clientId,
+		request_id: identity.requestId,
+	};
+	posthog.captureInitialize({
+		distinctId: identity.distinctId,
+		durationMs,
+		protocolVersion: MCP_PROTOCOL_VERSION,
+		properties,
+	});
+	posthog.captureToolsList({
+		distinctId: identity.distinctId,
+		durationMs,
+		protocolVersion: MCP_PROTOCOL_VERSION,
+		toolNames: registeredMcpToolNames(server),
+		properties,
+	});
+}
+
+function registeredMcpToolNames(server: McpServer): string[] {
+	// `_registeredTools` is private on the SDK class. Intersecting McpServer
+	// with a public copy of that field collapses the type to `never`.
+	const tools = (
+		server as unknown as {
+			_registeredTools?: Record<string, { enabled?: boolean }>;
+		}
+	)._registeredTools;
+	if (!tools) return [];
+	return Object.entries(tools)
+		.filter(([, tool]) => tool.enabled !== false)
+		.map(([name]) => name);
 }
 
 /**
@@ -163,6 +268,7 @@ const context = z
 	.min(1)
 	.describe("Opaque Lix context returned by open_lix or switch_branch");
 const branchId = z.string().min(1).describe("Lix branch id");
+const commitId = z.string().min(1).describe("Lix commit id");
 const sourceBranchId = z.string().min(1).describe("Source branch id");
 const requestIdValue = z
 	.string()
@@ -341,7 +447,7 @@ export function createLixrayMcpServer(
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. Lix SQL is a Postgres dialect subset. query_sql is SELECT-only; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; create_checkpoint is optional at the end of a finished task or session. Do not invent file helper tools or branch state.",
+				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. Lix SQL is a Postgres dialect subset. query_sql is a single-statement read path and rejects INSERT, UPDATE, and DELETE; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; create_checkpoint is optional at the end of a finished task or session. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent file helper tools or branch state.",
 		},
 	);
 	const surfaceVersion = mcpSurfaceVersion(toolSurfaceDescriptions());
@@ -406,11 +512,7 @@ export function createLixrayMcpServer(
 		readAnnotations(),
 		securitySchemes,
 		async (args) => {
-			assertReadOnlyQuery(
-				options.parseSqlScript,
-				args.sql,
-				Array.isArray(args.params) ? args.params.length : 0,
-			);
+			assertReadOnlyQuery(args.sql);
 			return service.execute(args.context, toExecuteRequest(args));
 		},
 		"query_sql",
@@ -559,6 +661,30 @@ export function createLixrayMcpServer(
 
 	registerTool(
 		server,
+		"restore",
+		"Restore branch",
+		"Move the branch selected by context to ancestor commit_id. The commit must exist and be an ancestor of the current branch head. Restore creates no commit, does not delete abandoned commits, and is not undoable; undo only applies to commits made afterward. A later checkpoint-driven garbage-collection sweep may reclaim abandoned commits that are not reachable from a retention root. Other branches and branch-local untracked rows remain unchanged. create_checkpoint returns a commit_id usable here; there is no restore_checkpoint tool.",
+		z.object({ context, commit_id: commitId }).strict(),
+		branchStateOutput,
+		writeAnnotations(true, true),
+		securitySchemes,
+		async ({ context: token, commit_id }) => {
+			const result = await service.restore(token, commit_id);
+			return {
+				context: result.context,
+				branch_id: result.branchId,
+				commit_id: result.commitId,
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+	);
+
+	registerTool(
+		server,
 		"undo",
 		"Undo last commit",
 		"Undo the latest commit on the branch selected by context.",
@@ -668,65 +794,15 @@ export async function handleMcpTransport(
 				options.onToolCall?.(observation);
 			}
 		: options.onToolCall;
-	const server = createLixrayMcpServer(service, {
-		...options,
-		requestId,
-		onToolCall,
-		serverName: options.serverName ?? mcpServerNameForUrl(request.url),
-	});
-	const handler = createMcpHandler(() => server, {
-		legacy: "stateless",
-		responseMode: "json",
-		onerror: (error) =>
-			console.error("LixRay MCP protocol error", { requestId, error }),
-	});
 	let shutdownPosthog: (() => Promise<void>) | undefined;
-	if (options.posthogToken) {
-		const posthog = new PostHog(options.posthogToken, {
-			host: options.posthogHost ?? "https://us.i.posthog.com",
-			flushAt: 1,
-			flushInterval: 0,
-		});
-		// Official @posthog/mcp is the only $mcp_* writer. The v2 McpServer must
-		// be instrumented as a high-level server: the low-level adapter calls
-		// setRequestHandler(CallToolRequestSchema), which v2 rejects (it wants
-		// the string "tools/call"). That throw was swallowed, so initialize and
-		// tools/list were patched (July 31 probes) while tools/call was not.
-		instrument(prepareHighLevelMcpServerForPosthog(server), posthog, {
-			context: false,
-			enableExceptionAutocapture: false,
-			identify: options.posthogDistinctId
-				? { distinctId: options.posthogDistinctId }
-				: null,
-			eventProperties: () => ({
-				environment: "production",
-				mcp_server: "lixray",
-				oauth_client_id: options.posthogClientId,
-				request_id: requestId,
-			}),
-			beforeSend: (event) => {
-				const redacted = redactMcpAnalyticsEvent(event);
-				if (
-					!redacted.properties ||
-					typeof redacted.properties !== "object" ||
-					Array.isArray(redacted.properties)
-				) {
-					return redacted;
-				}
-				const props = redacted.properties as Record<string, unknown>;
-				delete props.$mcp_parameters;
-				delete props.$mcp_response;
-				delete props.$mcp_error_message;
-				if (redacted.event === "$mcp_tool_call") {
-					attachMcpToolCallObservationProperties(
-						props,
-						observationCache.get(requestId),
-						props.$mcp_is_error === true,
-					);
-				}
-				return redacted;
-			},
-		});
+	const posthog = options.posthogToken
+		? new PostHogMCP(options.posthogToken, {
+				host: options.posthogHost ?? "https://us.i.posthog.com",
+				flushAt: 1,
+				flushInterval: 0,
+			})
+		: undefined;
+	if (posthog) {
 		shutdownPosthog = async () => {
 			// @posthog/mcp publishes through an internal async redaction pipeline.
 			// Drain microtasks, then one macrotask, before shutting the client.
@@ -736,6 +812,67 @@ export async function handleMcpTransport(
 			await posthog.shutdown();
 		};
 	}
+	const handler = createMcpHandler(
+		() => {
+			const server = createLixrayMcpServer(service, {
+				...options,
+				requestId,
+				onToolCall,
+				serverName: options.serverName ?? mcpServerNameForUrl(request.url),
+			});
+			if (posthog) {
+				// Instrument inside the factory so 0.11.x can wrap v2 string
+				// `tools/call` and later `server/discover` registrations.
+				instrument(prepareHighLevelMcpServerForPosthog(server), posthog, {
+					context: false,
+					enableExceptionAutocapture: false,
+					identify: options.posthogDistinctId
+						? { distinctId: options.posthogDistinctId }
+						: null,
+					eventProperties: () => ({
+						environment: "production",
+						mcp_server: "lixray",
+						oauth_client_id: options.posthogClientId,
+						request_id: requestId,
+					}),
+					beforeSend: (event) => {
+						const redacted = redactMcpAnalyticsEvent(event);
+						if (
+							!redacted.properties ||
+							typeof redacted.properties !== "object" ||
+							Array.isArray(redacted.properties)
+						) {
+							return redacted;
+						}
+						const props = redacted.properties as Record<string, unknown>;
+						delete props.$mcp_parameters;
+						delete props.$mcp_response;
+						delete props.$mcp_error_message;
+						if (redacted.event === "$mcp_tool_call") {
+							attachMcpToolCallObservationProperties(
+								props,
+								observationCache.get(requestId),
+								props.$mcp_is_error === true,
+							);
+						}
+						return redacted;
+					},
+				});
+				wrapDiscoverAsOfficialHandshake(server, posthog, {
+					distinctId: options.posthogDistinctId,
+					clientId: options.posthogClientId,
+					requestId,
+				});
+			}
+			return server;
+		},
+		{
+			legacy: "stateless",
+			responseMode: "json",
+			onerror: (error) =>
+				console.error("LixRay MCP protocol error", { requestId, error }),
+		},
+	);
 	try {
 		const response = await handler.fetch(request);
 		const headers = new Headers(response.headers);
@@ -985,6 +1122,9 @@ function summarizeToolResult(name: string, raw: unknown): string {
 	if (name === "create_checkpoint") {
 		return `Checkpoint created at commit ${String(result.commit_id)}.${contextSuffix}`;
 	}
+	if (name === "restore") {
+		return `Restored branch ${String(result.branch_id)} to commit ${String(result.commit_id)}.${contextSuffix}`;
+	}
 	if (name === "undo") {
 		return `Undone to commit ${String(result.target_commit_id)} (inverse commit ${String(result.inverse_commit_id)}).${contextSuffix}`;
 	}
@@ -1069,6 +1209,7 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"switch_branch",
 		"create_branch",
 		"create_checkpoint",
+		"restore",
 		"undo",
 		"redo",
 		"merge_branch_preview",
@@ -1076,71 +1217,16 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 	].map((name) => ({ name }));
 }
 
-function assertReadOnlyQuery(
-	parseSqlScript: ParseSqlScript | undefined,
-	sql: string,
-	paramCount: number,
-): void {
-	const statement = parsedSingleStatement(
-		parseSqlScript,
-		sql,
-		paramCount,
-		"query_sql",
-	);
-	if (!/^\s*SELECT\b/i.test(statement)) {
+function assertReadOnlyQuery(sql: string): void {
+	if (sqlLooksLikeWrite(sql)) {
 		throw createLixError(
 			"invalid_request",
-			"query_sql accepts only a SELECT statement.",
+			"query_sql rejects INSERT, UPDATE, and DELETE.",
 			{
-				hint: "Use execute_sql for non-SELECT SQL.",
+				hint: "Use execute_sql for writes.",
 			},
 		);
 	}
-}
-
-function parsedSingleStatement(
-	parseSqlScript: ParseSqlScript | undefined,
-	sql: string,
-	paramCount: number,
-	toolName: "query_sql",
-): string {
-	if (!parseSqlScript) {
-		throw createLixError(
-			"upstream_error",
-			"SQL classification is unavailable.",
-			{
-				hint: "Retry later. If the failure persists, contact LixRay support.",
-			},
-		);
-	}
-	let parsed: ReturnType<ParseSqlScript>;
-	try {
-		parsed = parseSqlScript(sql, paramCount);
-	} catch (caught) {
-		throw createLixError(
-			"invalid_request",
-			`${toolName} could not parse SQL.`,
-			{
-				hint: "Correct the SQL syntax and parameter count, then retry.",
-				details: {
-					parser_message:
-						caught instanceof Error
-							? caught.message
-							: "SQL parser rejected input.",
-				},
-			},
-		);
-	}
-	if (parsed.statements.length !== 1) {
-		throw createLixError(
-			"invalid_request",
-			`${toolName} requires exactly one SQL statement per input entry.`,
-			{
-				hint: "Send one SELECT statement.",
-			},
-		);
-	}
-	return parsed.statements[0]!.sql;
 }
 
 function toExecuteRequest(args: Record<string, any>): ExecuteRequest {
