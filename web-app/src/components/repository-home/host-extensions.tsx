@@ -1,5 +1,6 @@
 import {
 	coerceAtelierSessionUiState,
+	ATELIER_BUILTIN_EXTENSION_IDS,
 	type AtelierExtensionRegistration,
 	type AtelierExtensionRuntime,
 	type AtelierExtensionView,
@@ -160,16 +161,31 @@ function mountDirectoryView({
 	teamApi: RepositoryTeamApi | null;
 	hasAgentConnected: AgentConnectionProbe | null;
 	visibility: "private" | "public";
-}): { root: Root; render: (candidate: AtelierExtensionView) => void } {
+}): {
+	root: Root;
+	render: (
+		candidate: AtelierExtensionView,
+		runtime: AtelierExtensionRuntime,
+	) => void;
+} {
 	const root = createRoot(element);
 	// Re-rendered on view updates so shortcut bindings track isActive.
-	const render = (candidate: AtelierExtensionView) => {
+	const render = (
+		candidate: AtelierExtensionView,
+		runtime: AtelierExtensionRuntime,
+	) => {
 		root.render(
 			<StrictMode>
 				<DirectoryView
 					lix={atelier.lix}
 					dirPath={dirPath(candidate)}
 					isHome={isHome}
+					showHiddenFiles={
+						runtime.preferences.get(
+							ATELIER_BUILTIN_EXTENSION_IDS.files,
+							"showHiddenFiles",
+						) === true
+					}
 					readOnly={atelier.readOnly}
 					connection={connection}
 					teamApi={teamApi}
@@ -195,7 +211,7 @@ function mountDirectoryView({
 			</StrictMode>,
 		);
 	};
-	render(view);
+	render(view, atelier);
 	return { root, render };
 }
 
@@ -234,7 +250,8 @@ const createLixrayHomeExtension = (
 				visibility,
 			});
 			return {
-				update: ({ view: nextView }) => render(nextView),
+				update: ({ atelier: nextAtelier, view: nextView }) =>
+					render(nextView, nextAtelier),
 				dispose: () => {
 					queueMicrotask(() => root.unmount());
 				},
@@ -274,7 +291,8 @@ const createLixrayDirExtension = (
 				visibility: "private",
 			});
 			return {
-				update: ({ view: nextView }) => render(nextView),
+				update: ({ atelier: nextAtelier, view: nextView }) =>
+					render(nextView, nextAtelier),
 				dispose: () => {
 					queueMicrotask(() => root.unmount());
 				},
