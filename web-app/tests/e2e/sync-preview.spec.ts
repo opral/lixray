@@ -38,6 +38,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	const syncFailures: string[] = [];
 	const runtimeFailures: string[] = [];
 	const coldReads = new Map<Page, string[]>();
+	const blobLaneRequests = new Map<Page, string[]>();
 	const openHistoryPanel = async (page: Page) => {
 		const history = page.getByRole("region", {
 			name: "Checkpoint history",
@@ -59,6 +60,13 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	const observePage = (page: Page, label: string) => {
 		const pageColdReads: string[] = [];
 		coldReads.set(page, pageColdReads);
+		const pageBlobLaneRequests: string[] = [];
+		blobLaneRequests.set(page, pageBlobLaneRequests);
+		page.on("request", (request) => {
+			if (/\/sync\/(blob|chunk)(?:\?|$)/.test(request.url())) {
+				pageBlobLaneRequests.push(`${request.method()} ${request.url()}`);
+			}
+		});
 		page.on("pageerror", (error) => {
 			runtimeFailures.push(`${label} pageerror: ${error.message}`);
 		});
@@ -111,6 +119,11 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			(count, page) => count + (coldReads.get(page)?.length ?? 0),
 			0,
 		);
+	const blobLaneRequestCount = (pages: Page[]) =>
+		pages.reduce(
+			(count, page) => count + (blobLaneRequests.get(page)?.length ?? 0),
+			0,
+		);
 	observePage(left, "left");
 	observePage(right, "right");
 
@@ -143,6 +156,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			.count();
 		expect(initialCheckpointCount).toBeGreaterThan(0);
 
+		const blobLaneBeforeEmptyFile = blobLaneRequestCount([left, right]);
 		await right.getByTestId("home-new-button").click();
 		await right
 			.getByRole("button", { name: "New Markdown (.md)", exact: true })
@@ -157,6 +171,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			createdName,
 			{ timeout: realtimeTimeout },
 		);
+		expect(blobLaneRequestCount([left, right])).toBe(blobLaneBeforeEmptyFile);
 		await left.goto(createdUrl);
 		const leftEditor = left.locator('.ProseMirror[contenteditable="true"]');
 		// File discovery and a cold editor open are separate from the realtime
@@ -164,6 +179,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		// two already-open clients, not extension startup or demand hydration.
 		await leftEditor.waitFor({ timeout: 30_000 });
 
+		const blobLaneBeforeRightEdit = blobLaneRequestCount([left, right]);
 		const rightMarker = `right-${Date.now()}`;
 		await rightEditor.click();
 		await right.keyboard.insertText(rightMarker);
@@ -173,6 +189,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		await expect(leftEditor).toContainText(rightMarker, {
 			timeout: realtimeTimeout,
 		});
+		expect(blobLaneRequestCount([left, right])).toBe(blobLaneBeforeRightEdit);
 
 		const { fresh, freshEntries } =
 			await test.step("fresh/incognito bootstrap renders hot History", async () => {
@@ -211,6 +228,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		// Keep the originating editor warm for the reverse direction. Reload and
 		// OPFS-resume behavior is qualified independently below; coupling it to the
 		// realtime budget made this assertion measure startup contention.
+		const blobLaneBeforeLeftEdit = blobLaneRequestCount([left, right]);
 		const leftMarker = `left-${Date.now()}`;
 		await leftEditor.click();
 		await left.keyboard.press("End");
@@ -219,6 +237,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		await expect(rightEditor).toContainText(leftMarker, {
 			timeout: realtimeTimeout,
 		});
+		expect(blobLaneRequestCount([left, right])).toBe(blobLaneBeforeLeftEdit);
 		for (const page of [left, right]) {
 			await expect(
 				page.getByRole("button", {
