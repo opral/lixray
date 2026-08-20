@@ -98,7 +98,10 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			) {
 				syncFailures.push(`${response.status()} ${url}`);
 			}
-			if (/\/sync\/(history|chunk)(?:\?|$)/.test(url)) {
+			if (
+				response.request().method() === "GET" &&
+				/\/sync\/(history|blob|chunk)(?:\?|$)/.test(url)
+			) {
 				pageColdReads.push(url);
 			}
 		});
@@ -153,7 +156,9 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		const rightMarker = `right-${Date.now()}`;
 		await rightEditor.click();
 		await right.keyboard.insertText(rightMarker);
-		await right.keyboard.press("Tab");
+		// Keep ordinary typing focused. This qualifies the editor's debounce and
+		// outbox path without relying on a blur/focus transition to publish it.
+		await expect(rightEditor).toBeFocused();
 
 		await expect(left.getByTestId("home-entry-list")).toContainText(
 			createdName,
@@ -377,6 +382,28 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		}
 		await left.waitForTimeout(500);
 		expect(coldReadCount([left, right])).toBe(coldReadsBeforeHistory);
+
+		// The checkpoint list is hot, but opening a checkpoint intentionally
+		// crosses the lazy-history boundary. Exercise that boundary on the fresh
+		// replica and report its request count without imposing a zero-read budget.
+		const freshReadsBeforeCheckpoint = coldReadCount([fresh]);
+		const freshHistory = await openHistoryPanel(fresh);
+		await freshHistory
+			.getByRole("button", { name: /Latest checkpoint/ })
+			.click();
+		await expect(
+			fresh.getByRole("button", { name: "Back to now" }),
+		).toBeVisible({ timeout: 30_000 });
+		await expect(
+			freshHistory.getByRole("list", { name: "Files at this checkpoint" }),
+		).toBeVisible({ timeout: 30_000 });
+		await expect(
+			fresh.locator("[data-atelier-extension-suspended]"),
+		).toHaveCount(0);
+		test.info().annotations.push({
+			type: "lazy-history-reads",
+			description: String(coldReadCount([fresh]) - freshReadsBeforeCheckpoint),
+		});
 		expect(syncFailures).toEqual([]);
 		expect(runtimeFailures).toEqual([]);
 	} finally {
