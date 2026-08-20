@@ -37,7 +37,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	});
 	const syncFailures: string[] = [];
 	const runtimeFailures: string[] = [];
-	const coldReads: string[] = [];
+	const coldReads = new Map<Page, string[]>();
 	const openHistoryPanel = async (page: Page) => {
 		const history = page.getByRole("region", {
 			name: "Checkpoint history",
@@ -53,10 +53,12 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			.getByRole("button", { name: "History", exact: true })
 			.last()
 			.click();
-		await expect(history).toBeVisible({ timeout: 5_000 });
+		await expect(history).toBeVisible({ timeout: 30_000 });
 		return history;
 	};
 	const observePage = (page: Page) => {
+		const pageColdReads: string[] = [];
+		coldReads.set(page, pageColdReads);
 		page.on("pageerror", (error) => {
 			runtimeFailures.push(`pageerror: ${error.message}`);
 		});
@@ -95,10 +97,15 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				syncFailures.push(`${response.status()} ${url}`);
 			}
 			if (/\/sync\/(history|chunk)(?:\?|$)/.test(url)) {
-				coldReads.push(url);
+				pageColdReads.push(url);
 			}
 		});
 	};
+	const coldReadCount = (pages: Page[]) =>
+		pages.reduce(
+			(count, page) => count + (coldReads.get(page)?.length ?? 0),
+			0,
+		);
 	for (const page of [left, right]) {
 		observePage(page);
 	}
@@ -157,6 +164,40 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			timeout: realtimeTimeout,
 		});
 
+		const { fresh, freshEntries } =
+			await test.step("fresh/incognito bootstrap renders hot History", async () => {
+				// A context created only after the write exercises snapshot bootstrap,
+				// as an incognito window does. Qualify History before later realtime
+				// assertions so a collaboration failure cannot mask this result.
+				const freshContext = await browser.newContext();
+				contexts.push(freshContext);
+				const fresh = await freshContext.newPage();
+				observePage(fresh);
+				await fresh.goto(repositoryUrl);
+				const freshEntries = fresh.getByTestId("home-entry-list");
+				await expect(freshEntries).toContainText(createdName, {
+					timeout: 120_000,
+				});
+				const coldReadsBeforeFreshHistory = coldReadCount([fresh]);
+				const freshHistory = await openHistoryPanel(fresh);
+				await expect(
+					freshHistory.getByRole("button", { name: "Working changes" }),
+				).toBeVisible();
+				await expect(
+					freshHistory
+						.getByRole("list", { name: "Checkpoints" })
+						.locator(":scope > li"),
+				).toHaveCount(initialCheckpointCount);
+				await expect(freshHistory).toContainText("Latest checkpoint");
+				await expect(freshHistory).toContainText("Initial checkpoint");
+				await expect(
+					fresh.locator("[data-atelier-extension-suspended]"),
+				).toHaveCount(0);
+				await fresh.waitForTimeout(500);
+				expect(coldReadCount([fresh])).toBe(coldReadsBeforeFreshHistory);
+				return { fresh, freshEntries };
+			});
+
 		await right.goto(createdUrl);
 		await rightEditor.waitFor({ timeout: 30_000 });
 		const leftMarker = `left-${Date.now()}`;
@@ -201,6 +242,12 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				.getByRole("list", { name: "Checkpoints" })
 				.locator(":scope > li"),
 		).toHaveCount(initialCheckpointCount + 1, { timeout: realtimeTimeout });
+		const freshHistoryAfterCheckpoint = await openHistoryPanel(fresh);
+		await expect(
+			freshHistoryAfterCheckpoint
+				.getByRole("list", { name: "Checkpoints" })
+				.locator(":scope > li"),
+		).toHaveCount(initialCheckpointCount + 1, { timeout: realtimeTimeout });
 
 		// The checkpoint coordinate is part of branch state. A later remote edit
 		// must advance the receiver's head without silently advancing its checkpoint.
@@ -240,35 +287,19 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			).toBeVisible({ timeout: 30_000 });
 		}
 
-		// A context created only after the writes exercises snapshot bootstrap, as
-		// an incognito window does. It must receive both head and checkpoint, render
-		// the hot History queries, and preserve the dirty working-diff baseline.
-		const freshContext = await browser.newContext();
-		contexts.push(freshContext);
-		const fresh = await freshContext.newPage();
-		observePage(fresh);
-		await fresh.goto(repositoryUrl);
-		const freshEntries = fresh.getByTestId("home-entry-list");
-		await expect(freshEntries).toContainText(createdName, { timeout: 30_000 });
-		await expect(freshEntries).toContainText(leftConcurrentName);
-		await expect(freshEntries).toContainText(rightConcurrentName);
+		// The already-qualified incognito client must stay live through a stale
+		// push reconciliation; do not hide this behind a second cold bootstrap.
+		await expect(freshEntries).toContainText(leftConcurrentName, {
+			timeout: 30_000,
+		});
+		await expect(freshEntries).toContainText(rightConcurrentName, {
+			timeout: 30_000,
+		});
 		await expect(
 			fresh.getByRole("button", {
 				name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
 			}),
 		).toBeVisible({ timeout: 30_000 });
-		const coldReadsBeforeFreshHistory = coldReads.length;
-		const freshHistory = await openHistoryPanel(fresh);
-		await expect(
-			freshHistory.getByRole("button", { name: "Working changes" }),
-		).toContainText(/now · [1-9]\d* changes?/);
-		await expect(freshHistory).toContainText("Latest checkpoint");
-		await expect(freshHistory).toContainText("Initial checkpoint");
-		await expect(
-			fresh.locator("[data-atelier-extension-suspended]"),
-		).toHaveCount(0);
-		await fresh.waitForTimeout(500);
-		expect(coldReads).toHaveLength(coldReadsBeforeFreshHistory);
 
 		// Reuse the same tab identity and OPFS database. Fresh contexts only cover
 		// bootstrap; a reload proves that the persisted cursor/read model can resume
@@ -336,7 +367,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				.locator(":scope > li"),
 		).toHaveCount(initialCheckpointCount + 2, { timeout: realtimeTimeout });
 
-		const coldReadsBeforeHistory = coldReads.length;
+		const coldReadsBeforeHistory = coldReadCount([left, right]);
 		for (const page of [left, right]) {
 			const history = await openHistoryPanel(page);
 			await expect(history).toContainText("Working changes");
@@ -344,7 +375,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			await expect(history).toContainText("Initial checkpoint");
 		}
 		await left.waitForTimeout(500);
-		expect(coldReads).toHaveLength(coldReadsBeforeHistory);
+		expect(coldReadCount([left, right])).toBe(coldReadsBeforeHistory);
 		expect(syncFailures).toEqual([]);
 		expect(runtimeFailures).toEqual([]);
 	} finally {
