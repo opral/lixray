@@ -137,6 +137,25 @@ deployment_status() {
 	jq -r '.status // "unknown"' <<<"$1"
 }
 
+print_deployment_logs() {
+	local label="$1"
+	local service="$2"
+	local deployment="$3"
+	if test -z "$deployment"; then
+		return
+	fi
+	echo "::group::Railway $label deployment logs ($deployment)"
+	if ! "$RAILWAY_BIN" logs \
+		--project "$RAILWAY_PROJECT_ID" \
+		--environment "$RAILWAY_TARGET_ENVIRONMENT" \
+		--service "$service" \
+		--lines 200 \
+		"$deployment"; then
+		echo "::warning::Could not read Railway $label deployment logs."
+	fi
+	echo "::endgroup::"
+}
+
 previous_deployment_id() {
 	local service="$1"
 	local deployment
@@ -228,4 +247,6 @@ done
 echo "Railway $RAILWAY_RELEASE_LABEL release did not become healthy after $POLL_ATTEMPTS checks." >&2
 echo "Web: ${web_id:-not started} $web_status" >&2
 echo "Server: ${server_id:-not started} $server_status" >&2
+print_deployment_logs "web" "$RAILWAY_WEB_SERVICE" "$web_id"
+print_deployment_logs "server" "$RAILWAY_SERVER_SERVICE" "$server_id"
 exit 1

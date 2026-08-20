@@ -34,6 +34,19 @@ test("fails immediately when either deployment reaches a terminal state", async 
   assert.match(result.stderr, /ended with FAILED/);
 });
 
+test("prints bounded deployment logs when Railway never becomes healthy", async () => {
+  const fixture = await createFixture();
+  const result = runCoordinator(fixture, {
+    MOCK_SERVER_STATUS: "DEPLOYING",
+    MOCK_WEB_STATUS: "DEPLOYING",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /did not become healthy/);
+  assert.match(result.stdout, /mock deployment log for new-web-service/);
+  assert.match(result.stdout, /mock deployment log for new-server-service/);
+});
+
 test("uses preview deployment policy for a CI-managed PR environment", async () => {
   const fixture = await createFixture();
   const result = runCoordinator(
@@ -67,10 +80,26 @@ async function createFixture() {
     railway,
     `#!/usr/bin/env bash
 set -euo pipefail
+command="\${1:-}"
+shift || true
 service=""
+deployment=""
 while test "$#" -gt 0; do
-	if test "$1" = --service; then service="$2"; shift 2; else shift; fi
+	if test "$1" = --service; then
+		service="$2"
+		shift 2
+	elif [[ "$1" != --* ]]; then
+		deployment="$1"
+		shift
+	else
+		shift
+		if test "$#" -gt 0 && [[ "$1" != --* ]]; then shift; fi
+	fi
 done
+if test "$command" = logs; then
+	printf 'mock deployment log for %s\n' "$deployment"
+	exit 0
+fi
 if grep -qx "$service" "$MOCK_DEPLOYED" 2>/dev/null; then
 	if test "$service" = "$RAILWAY_WEB_SERVICE"; then status="$MOCK_WEB_STATUS"; else status="$MOCK_SERVER_STATUS"; fi
 	printf '[{"id":"new-%s","status":"%s"}]\n' "$service" "$status"
