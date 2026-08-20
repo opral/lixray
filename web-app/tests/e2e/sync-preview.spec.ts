@@ -151,6 +151,14 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			})
 			.click();
 		await left.getByRole("button", { name: "Checkpoint", exact: true }).click();
+		// A Playwright click resolves after dispatch, while the async checkpoint
+		// transaction can still be committing locally. Start the realtime budget
+		// only after the originating replica exposes the durable checkpoint.
+		await expect(
+			left.getByRole("button", {
+				name: "Latest checkpoint. Open checkpoint history",
+			}),
+		).toBeVisible({ timeout: 30_000 });
 		await expect(
 			right.getByRole("button", {
 				name: "Latest checkpoint. Open checkpoint history",
@@ -215,9 +223,10 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		const freshHistoryTab = fresh
 			.getByRole("button", { name: "History", exact: true })
 			.last();
-		if (!(await freshHistoryTab.isVisible())) {
-			await fresh.getByRole("button", { name: "Toggle right panel" }).click();
-		}
+		// `isVisible()` is true for controls laid out inside the collapsed panel,
+		// even though the central canvas covers them and intercepts pointer input.
+		// A new context starts with the right panel collapsed, so open it explicitly.
+		await fresh.getByRole("button", { name: "Toggle right panel" }).click();
 		const coldReadsBeforeFreshHistory = coldReads.length;
 		await freshHistoryTab.click();
 		const freshHistory = fresh.getByRole("region", {
