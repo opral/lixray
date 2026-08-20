@@ -150,19 +150,34 @@ delete_deployment() {
 delete_environment() {
 	local name="$1"
 	local encoded="$2"
-	local status=0
-	github_api --method DELETE \
-		"repos/${GITHUB_REPOSITORY}/environments/${encoded}" \
-		>/dev/null || status=$?
-	if test "$status" -eq 0; then
+	local endpoint="repos/${GITHUB_REPOSITORY}/environments/${encoded}"
+	if call_gh "$PRIMARY_TOKEN" --method DELETE "$endpoint" >/dev/null; then
 		echo "Deleted GitHub preview environment $name."
 		return 0
 	fi
-	if test "$status" -eq 4; then
+	if test "$LAST_HTTP_STATUS" -eq 404; then
 		echo "GitHub preview environment $name is already absent."
 		return 0
 	fi
-	return "$status"
+	if test "$LAST_HTTP_STATUS" -eq 403; then
+		if test -n "$ADMIN_TOKEN" && test "$ADMIN_TOKEN" != "$PRIMARY_TOKEN"; then
+			echo "GITHUB_TOKEN cannot delete environments; retrying with GITHUB_ENVIRONMENT_ADMIN_TOKEN." >&2
+			if call_gh "$ADMIN_TOKEN" --method DELETE "$endpoint" >/dev/null; then
+				echo "Deleted GitHub preview environment $name."
+				return 0
+			fi
+			if test "$LAST_HTTP_STATUS" -eq 404; then
+				echo "GitHub preview environment $name is already absent."
+				return 0
+			fi
+			echo "GitHub environment cleanup failed (HTTP ${LAST_HTTP_STATUS}): ${LAST_GH_ERROR}" >&2
+			return 1
+		fi
+		echo "GitHub deployments for $name were cleaned, but GITHUB_TOKEN cannot delete the environment; set optional GITHUB_ENVIRONMENT_ADMIN_TOKEN to remove it." >&2
+		return 0
+	fi
+	echo "GitHub environment cleanup failed (HTTP ${LAST_HTTP_STATUS}): ${LAST_GH_ERROR}" >&2
+	return 1
 }
 
 cleanup_environment() {
