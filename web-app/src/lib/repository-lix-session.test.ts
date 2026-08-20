@@ -12,6 +12,8 @@ void test("isolates managed OPFS sessions by replica identity", () => {
 		namespace: "acme",
 		repositorySlug: "launch-q3",
 		origin: "https://lixray.test",
+		replicaId: "shared-browser",
+		authIdentity: "user-samuel",
 		getAccessToken: async () => null,
 	};
 
@@ -150,6 +152,7 @@ void test("opens a new client session when the signed-in identity changes", asyn
 		namespace: "opral",
 		repositorySlug: "monorepo",
 		origin: "https://lixray.test",
+		replicaId: "shared-browser",
 		getAccessToken: async () => null,
 		allowAnonymous: true,
 		authIdentity: "public:acc2bc33",
@@ -159,6 +162,7 @@ void test("opens a new client session when the signed-in identity changes", asyn
 		namespace: "opral",
 		repositorySlug: "monorepo",
 		origin: "https://lixray.test",
+		replicaId: "shared-browser",
 		getAccessToken: async () => "token",
 		authIdentity: "user-samuel",
 		fetch,

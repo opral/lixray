@@ -13,8 +13,6 @@ interface OpenRepositoryLixSessionOptions {
 	namespace: string;
 	repositorySlug: string;
 	repositoryId?: string;
-	/** Separates durable browser replicas for different signed-in identities. */
-	replicaId: string;
 	getAccessToken: TokenProvider;
 	/** Refreshes the auth session before retrying an expired-token request. */
 	refreshAccessToken?: TokenProvider;
@@ -27,7 +25,18 @@ interface OpenRepositoryLixSessionOptions {
 	initialBranchId?: string | null;
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
+	/**
+	 * Isolates protocol clients by host principal. The protocol binds each
+	 * session id to Anonymous or Authenticated at handshake. Reusing one id
+	 * after the worker starts injecting the other principal is 403
+	 * ACCOUNT_MISMATCH, not 410 SESSION_GONE. This is not a session store:
+	 * the server HashMap stays ephemeral.
+	 */
+	authIdentity: string;
 }
+
+type ResolvedOpenRepositoryLixSessionOptions =
+	OpenRepositoryLixSessionOptions & { replicaId: string };
 
 const OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
 
@@ -48,12 +57,10 @@ export interface RepositoryLixSession {
 export async function openRepositoryLixSession(
 	options: OpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
-	const resolvedOptions = options.authIdentity
-		? {
-				...options,
-				replicaId: await claimRepositoryBrowserReplicaId(options.authIdentity),
-			}
-		: options;
+	const resolvedOptions = {
+		...options,
+		replicaId: await claimRepositoryBrowserReplicaId(options.authIdentity),
+	};
 	const lease = await acquireManagedRepositoryResource(
 		repositorySessionKey(resolvedOptions),
 		() => openRepositoryLixSessionWithRetry(resolvedOptions),
@@ -62,7 +69,7 @@ export async function openRepositoryLixSession(
 }
 
 async function openRepositoryLixSessionWithRetry(
-	options: OpenRepositoryLixSessionOptions,
+	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
 	for (let attempt = 0; ; attempt += 1) {
 		try {
@@ -78,7 +85,7 @@ async function openRepositoryLixSessionWithRetry(
 }
 
 async function openRepositoryLixSessionOnce(
-	options: OpenRepositoryLixSessionOptions,
+	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
 	const lix = await openOpfsSyncSession(options);
 
@@ -103,7 +110,7 @@ async function openRepositoryLixSessionOnce(
 }
 
 async function openOpfsSyncSession(
-	options: OpenRepositoryLixSessionOptions,
+	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<Lix> {
 	return openLix({
 		storage: new OpfsStorage({
@@ -438,9 +445,15 @@ class RepositoryLixSessionLease implements RepositoryLixSession {
 }
 
 export function repositorySessionKey(
-	options: OpenRepositoryLixSessionOptions,
+	options: ResolvedOpenRepositoryLixSessionOptions,
 ): string {
-	return `${repositoryUrl(options).href}\n${options.replicaId}`;
+	const href = repositoryUrl(options).href;
+	return JSON.stringify({
+		href,
+		identity: options.authIdentity,
+		publicPath: options.publicPath ?? null,
+		replicaId: options.replicaId,
+	});
 }
 
 function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {
