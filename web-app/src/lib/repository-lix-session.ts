@@ -34,7 +34,7 @@ const RECOVERING_OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
 export interface RepositoryLixSession {
 	readonly lix: Lix;
 	/** Resolves only when the session's observer channel stops unexpectedly. */
-	waitForSyncFailure(): Promise<unknown | null>;
+	waitForSyncFailure(): Promise<Error | null>;
 	activeBranchSnapshot(): string;
 	defaultBranchSnapshot(): string;
 	subscribeActiveBranch(listener: () => void): () => void;
@@ -282,7 +282,7 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 	readonly lix: Lix;
 	readonly #listeners = new Set<() => void>();
 	readonly #syncObserver: ReturnType<Lix["observe"]>;
-	readonly #syncFailure: Promise<unknown | null>;
+	readonly #syncFailure: Promise<Error | null>;
 	readonly #defaultBranchId: string;
 	#activeBranchId: string;
 	#closed = false;
@@ -295,7 +295,7 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 		this.#syncFailure = this.#monitorSync();
 	}
 
-	waitForSyncFailure(): Promise<unknown | null> {
+	waitForSyncFailure(): Promise<Error | null> {
 		return this.#syncFailure;
 	}
 
@@ -350,7 +350,7 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 		if (this.#closed) throw new Error("The repository Lix session is closed.");
 	}
 
-	async #monitorSync(): Promise<unknown | null> {
+	async #monitorSync(): Promise<Error | null> {
 		try {
 			while ((await this.#syncObserver.next()) !== undefined) {
 				// The result is irrelevant: the observer is the session health signal.
@@ -359,7 +359,8 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 				? null
 				: new Error("The repository sync observer stopped unexpectedly.");
 		} catch (error) {
-			return this.#closed ? null : error;
+			if (this.#closed) return null;
+			return error instanceof Error ? error : new Error(String(error));
 		}
 	}
 }
@@ -377,7 +378,7 @@ class RepositoryLixSessionLease implements RepositoryLixSession {
 		this.#release = release;
 	}
 
-	waitForSyncFailure(): Promise<unknown | null> {
+	waitForSyncFailure(): Promise<Error | null> {
 		return this.#session.waitForSyncFailure();
 	}
 
