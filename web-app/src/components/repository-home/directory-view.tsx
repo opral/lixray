@@ -61,6 +61,8 @@ type DirectoryViewProps = {
 	readonly dirPath: string;
 	/** The pinned home shows the connect row. */
 	readonly isHome: boolean;
+	/** Mirrors the bundled Atelier Files extension's authoritative preference. */
+	readonly showHiddenFiles?: boolean;
 	readonly readOnly: boolean;
 	readonly connection: Omit<LixConnectionPromptInput, "origin">;
 	/** Present on the home of an editable repository; drives the Invite control. */
@@ -93,6 +95,7 @@ export function DirectoryView({
 	lix,
 	dirPath,
 	isHome,
+	showHiddenFiles = false,
 	readOnly,
 	connection,
 	teamApi = null,
@@ -112,8 +115,8 @@ export function DirectoryView({
 		isHome && dirPath === "/",
 	);
 	const listing = useMemo(
-		() => (tree ? listDirectory(tree, dirPath) : null),
-		[tree, dirPath],
+		() => (tree ? listDirectory(tree, dirPath, { showHiddenFiles }) : null),
+		[tree, dirPath, showHiddenFiles],
 	);
 	const readme = useFileMarkdown(lix, listing?.readmePath ?? null);
 	const [actionError, setActionError] = useState<string | null>(null);
@@ -269,6 +272,7 @@ export function DirectoryView({
 								}
 								name={dir.name}
 								meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
+								hidden={dir.hidden}
 								onClick={(event) =>
 									onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
 								}
@@ -286,6 +290,7 @@ export function DirectoryView({
 								}
 								name={file.name}
 								meta={formatUpdatedAt(file.updatedAt)}
+								hidden={file.hidden}
 								onClick={(event) =>
 									onOpenFile(file.path, { newTab: newTabFromMouseEvent(event) })
 								}
@@ -912,18 +917,21 @@ function EntryRow({
 	icon,
 	name,
 	meta,
+	hidden = false,
 	onClick,
 }: {
 	readonly icon: ReactNode;
 	readonly name: string;
 	readonly meta: string;
+	readonly hidden?: boolean;
 	readonly onClick: (event: ReactMouseEvent) => void;
 }) {
 	return (
 		<button
 			type="button"
 			onClick={onClick}
-			className="flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left hover:bg-bg-hover"
+			className={`flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left hover:bg-bg-hover ${hidden ? "opacity-[0.48] hover:opacity-[0.62]" : ""}`}
+			data-hidden-entry={hidden ? "true" : undefined}
 		>
 			{icon}
 			<span className="text-sm font-medium text-text-primary">{name}</span>
