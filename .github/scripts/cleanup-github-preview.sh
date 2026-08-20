@@ -57,8 +57,8 @@ call_gh() {
 
 fail_forbidden() {
 	echo "GitHub denied preview cleanup with GITHUB_TOKEN (HTTP 403)." >&2
-	echo "Grant this workflow 'environments: write' and 'deployments: write'." >&2
-	echo "If those permissions are insufficient, set optional GITHUB_ENVIRONMENT_ADMIN_TOKEN as a repository secret or Infisical /ci variable." >&2
+	echo "Grant this workflow 'deployments: write'." >&2
+	echo "For environment deletion, set optional GITHUB_ENVIRONMENT_ADMIN_TOKEN as a repository secret or Infisical /ci variable." >&2
 	exit 1
 }
 

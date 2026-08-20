@@ -12,6 +12,7 @@ import {
 	resolveRepositoryHref,
 	type RepositoryTree,
 	repositoryHasNoFiles,
+	WORKING_DIFF_COUNT_SQL,
 } from "./lix-data.ts";
 
 const tree: RepositoryTree = {
@@ -52,6 +53,13 @@ const tree: RepositoryTree = {
 		},
 	],
 };
+
+void test("queries the latest Lix working-diff table function", () => {
+	assert.equal(
+		WORKING_DIFF_COUNT_SQL,
+		"SELECT count(*) AS n FROM lix_working_diff()",
+	);
+});
 
 void test("lists directory entries from their separate surfaces", () => {
 	const listing = listDirectory(tree, "/");

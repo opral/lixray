@@ -16,7 +16,7 @@ test("workflow splits Railway and GitHub cleanup and does not require an admin t
 	assert.match(workflow, /manage-railway-preview\.sh delete/);
 	assert.match(workflow, /cleanup-github-preview\.sh/);
 	assert.match(workflow, /deployments:\s*write/);
-	assert.match(workflow, /environments:\s*write/);
+	assert.doesNotMatch(workflow, /environments:\s*write/);
 	assert.match(workflow, /secrets\.GITHUB_TOKEN/);
 	assert.doesNotMatch(workflow, /GITHUB_ENVIRONMENT_ADMIN_TOKEN:\?/);
 	assert.match(
@@ -132,7 +132,8 @@ test("fails clearly when GITHUB_TOKEN is denied and no admin token is set", asyn
 
 	assert.equal(result.status, 1);
 	assert.match(result.stderr, /HTTP 403/);
-	assert.match(result.stderr, /environments: write/);
+	assert.match(result.stderr, /deployments: write/);
+	assert.doesNotMatch(result.stderr, /environments: write/);
 	assert.match(result.stderr, /GITHUB_ENVIRONMENT_ADMIN_TOKEN/);
 	assert.doesNotMatch(result.stderr, /parameter null or not set/);
 });

@@ -47,7 +47,6 @@ jobs:
     permissions:
       contents: read
       deployments: write
-      environments: write
 
     steps:
       - name: Check out cleanup coordinator
