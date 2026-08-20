@@ -7,7 +7,9 @@ use futures_util::TryStreamExt as _;
 use lix_sdk::server_protocol::{
     LixServerProtocol, ServerProtocolBody, ServerProtocolContext, ServerProtocolResponse,
 };
-use lix_slatedb_storage::{SlateDB, SlateDBCacheOptions, SlateDBObjectStoreOptions};
+use lix_slatedb_storage::{
+    SlateDB, SlateDBCacheOptions, SlateDBIoCounters, SlateDBObjectStoreOptions,
+};
 #[cfg(test)]
 use object_store::memory::InMemory;
 use object_store::{aws::AmazonS3Builder, ClientOptions, ObjectStore, RetryConfig};
@@ -27,7 +29,7 @@ use tokio::runtime::Handle;
 use tokio::sync::Notify;
 use tokio::sync::{watch, Mutex, OnceCell};
 use tokio::task::JoinSet;
-use tracing::info;
+use tracing::{info, info_span, Instrument};
 
 fn host_telemetry_sink() -> Arc<dyn lix_sdk::telemetry::TelemetrySink> {
     Arc::new(crate::telemetry::HostTelemetrySink::from_env())
@@ -447,33 +449,41 @@ impl LixRuntimeManager {
 
     fn spawn_runtime_open(self: &Arc<Self>, opener: PendingRuntimeOpen) {
         let manager = Arc::clone(self);
-        tokio::spawn(async move {
-            let opened = manager.open_lix_for_handler(opener.lix_id.clone()).await;
-            match opened {
-                Ok(runtime) => {
-                    assert!(
-                        opener.runtime.set(runtime).is_ok(),
-                        "managed opener is the sole OnceCell initializer"
-                    );
-                    opener.done.send_replace(RuntimeOpenState::Ready);
-                }
-                Err(error) => {
-                    let error = Arc::<str>::from(format!("{error:#}"));
-                    if let Some((sequence, done)) = manager
-                        .begin_failed_open_cleanup(&opener.lix_id, &opener.runtime)
-                        .await
-                    {
-                        let cleanup = manager
-                            .retire_and_delete_cache_child(&opener.lix_id, sequence)
-                            .await;
-                        manager
-                            .finish_cleanup(&opener.lix_id, sequence, done, cleanup)
-                            .await;
+        let span = info_span!(
+            "lix.runtime.open",
+            lix.id = %opener.lix_id,
+            storage.backend = STORAGE_BACKEND,
+        );
+        tokio::spawn(
+            async move {
+                let opened = manager.open_lix_for_handler(opener.lix_id.clone()).await;
+                match opened {
+                    Ok(runtime) => {
+                        assert!(
+                            opener.runtime.set(runtime).is_ok(),
+                            "managed opener is the sole OnceCell initializer"
+                        );
+                        opener.done.send_replace(RuntimeOpenState::Ready);
                     }
-                    opener.done.send_replace(RuntimeOpenState::Failed(error));
+                    Err(error) => {
+                        let error = Arc::<str>::from(format!("{error:#}"));
+                        if let Some((sequence, done)) = manager
+                            .begin_failed_open_cleanup(&opener.lix_id, &opener.runtime)
+                            .await
+                        {
+                            let cleanup = manager
+                                .retire_and_delete_cache_child(&opener.lix_id, sequence)
+                                .await;
+                            manager
+                                .finish_cleanup(&opener.lix_id, sequence, done, cleanup)
+                                .await;
+                        }
+                        opener.done.send_replace(RuntimeOpenState::Failed(error));
+                    }
                 }
             }
-        });
+            .instrument(span),
+        );
     }
 
     async fn open_lix_for_handler(self: &Arc<Self>, lix_id: String) -> Result<Arc<LixRuntime>> {
@@ -492,61 +502,92 @@ impl LixRuntimeManager {
         }
         let manager = Arc::clone(self);
         let runtime = Handle::current();
-        tokio::task::spawn_blocking(move || runtime.block_on(manager.open_lix(&lix_id)))
-            .await
-            .context("join lix runtime initialization")?
+        let span = tracing::Span::current();
+        tokio::task::spawn_blocking(move || {
+            runtime.block_on(manager.open_lix(&lix_id).instrument(span))
+        })
+        .await
+        .context("join lix runtime initialization")?
     }
 
     async fn open_lix(&self, lix_id: &str) -> Result<Arc<LixRuntime>> {
         let started = Instant::now();
-        let storage = match &self.backend {
-            #[cfg(test)]
-            StorageBackend::Memory { object_store } => SlateDB::open_object_store_with_options(
-                lix_id,
-                Arc::clone(object_store),
-                SlateDBObjectStoreOptions::default(),
-            )
-            .context("open in-memory Lix SlateDB storage")?,
-            StorageBackend::S3 {
-                object_store,
-                prefix,
-                cache,
-            } => {
-                let storage_prefix = if prefix.is_empty() {
-                    lix_id.to_string()
-                } else {
-                    format!("{prefix}/{lix_id}")
-                };
-                let mut lix_cache = cache.clone();
-                lix_cache.root_folder = cache_child_path(&cache.root_folder, lix_id)
-                    .expect("Lix IDs are validated before opening cached storage");
-                SlateDB::open_object_store_with_options(
-                    storage_prefix,
-                    Arc::clone(object_store),
-                    SlateDBObjectStoreOptions {
-                        cache: Some(lix_cache),
-                    },
-                )
-                .context("open cached S3-backed Lix SlateDB storage")?
-            }
-        };
+        let io = SlateDBIoCounters::default();
+        let storage_started = Instant::now();
+        let storage =
+            info_span!("lix.storage.open", lix.id = lix_id).in_scope(|| match &self.backend {
+                #[cfg(test)]
+                StorageBackend::Memory { object_store } => {
+                    SlateDB::open_object_store_with_options_and_io_counters(
+                        lix_id,
+                        Arc::clone(object_store),
+                        SlateDBObjectStoreOptions::default(),
+                        io.clone(),
+                    )
+                    .context("open in-memory Lix SlateDB storage")
+                }
+                StorageBackend::S3 {
+                    object_store,
+                    prefix,
+                    cache,
+                } => {
+                    let storage_prefix = if prefix.is_empty() {
+                        lix_id.to_string()
+                    } else {
+                        format!("{prefix}/{lix_id}")
+                    };
+                    let mut lix_cache = cache.clone();
+                    lix_cache.root_folder = cache_child_path(&cache.root_folder, lix_id)
+                        .expect("Lix IDs are validated before opening cached storage");
+                    SlateDB::open_object_store_with_options_and_io_counters(
+                        storage_prefix,
+                        Arc::clone(object_store),
+                        SlateDBObjectStoreOptions {
+                            cache: Some(lix_cache),
+                        },
+                        io.clone(),
+                    )
+                    .context("open cached S3-backed Lix SlateDB storage")
+                }
+            })?;
+        let storage_open_ms = elapsed_millis(storage_started);
 
+        let engine_started = Instant::now();
         // Cache-admit is a protocol root, not a client session. as_protocol_root
         // attaches the host sink so handshake sessions inherit it, without a
         // phantom lix.opened. Handshake create and explicit MCP bindSession
         // with an OAuth account are the product binds.
         let protocol_root = Arc::new(
-            lix_sdk::open_lix()
-                .with_storage(storage)
-                .with_telemetry(Arc::clone(&self.telemetry))
-                .as_protocol_root()
-                .await
-                .context("open Lix lix session for the canonical server protocol")?,
+            async {
+                lix_sdk::open_lix()
+                    .with_storage(storage)
+                    .with_telemetry(Arc::clone(&self.telemetry))
+                    .as_protocol_root()
+                    .await
+                    .context("open Lix lix session for the canonical server protocol")
+            }
+            .instrument(info_span!("lix.engine.open", lix.id = lix_id))
+            .await?,
         );
+        let engine_open_ms = elapsed_millis(engine_started);
+        let io = io.snapshot();
         let protocol = LixServerProtocol::new(Arc::clone(&protocol_root));
         info!(
             lix_id,
             elapsed_ms = elapsed_millis(started),
+            storage_open_ms,
+            engine_open_ms,
+            storage.read_objects = io.read_objects,
+            storage.read_bytes = io.read_bytes,
+            storage.write_objects = io.write_objects,
+            storage.write_bytes = io.write_bytes,
+            storage.list_operations = io.list_operations,
+            storage.cache_filesystem_reads = io.cache_filesystem_reads,
+            storage.manifest_read_objects = io.manifest.read_objects,
+            storage.manifest_write_objects = io.manifest.write_objects,
+            storage.wal_read_objects = io.wal.read_objects,
+            storage.wal_write_objects = io.wal.write_objects,
+            storage.compacted_read_objects = io.compacted.read_objects,
             "opened lix runtime"
         );
         Ok(Arc::new(LixRuntime::new(LixService { protocol })))
