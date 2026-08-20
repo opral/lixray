@@ -742,7 +742,10 @@ jobs:
           pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        # This job drives an already-built remote preview. Running the repository
+        # postinstall here rebuilds the vendored Lix WASM SDK and can consume the
+        # entire job timeout without adding anything Playwright needs.
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium
