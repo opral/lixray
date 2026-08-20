@@ -1077,7 +1077,6 @@ void test("legacy initialize instrument() emits $mcp_tool_call for list_lixes an
 		return handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_Legacy_Instrument_Test",
-			parseSqlScript,
 			posthogToken: "phc_test_token",
 			posthogDistinctId: "felix",
 			posthogClientId: "codex-desktop",
@@ -1094,7 +1093,9 @@ void test("legacy initialize instrument() emits $mcp_tool_call for list_lixes an
 	try {
 		await client.connect(transport);
 		const tools = await client.listTools();
-		const listLixesTool = tools.tools.find((tool) => tool.name === "list_lixes");
+		const listLixesTool = tools.tools.find(
+			(tool) => tool.name === "list_lixes",
+		);
 		const querySqlTool = tools.tools.find((tool) => tool.name === "query_sql");
 		assert.equal(
 			(listLixesTool?.inputSchema as { properties?: { context?: unknown } })
@@ -1146,7 +1147,6 @@ void test("modern 2026-07-28 instrument() emits $mcp_tool_call for list_lixes an
 		return handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_Modern_Instrument_Test",
-			parseSqlScript,
 			posthogToken: "phc_test_token",
 			posthogDistinctId: "felix",
 			posthogClientId: "cursor-desktop",

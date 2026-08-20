@@ -116,6 +116,24 @@ interface OfficialDiscoverEmitter {
 }
 
 /**
+ * `@posthog/mcp` 0.11.x treats a high-level server as anything with `.server`
+ * plus `tool()`. MCP TypeScript SDK v2 exposes `registerTool()` instead, so
+ * instrument() rejects the v2 `McpServer` and official `$mcp_tool_call` never
+ * wraps. Alias `tool` so the high-level adapter can patch `tools/call`.
+ */
+export function prepareHighLevelMcpServerForPosthog(
+	server: McpServer,
+): McpServer {
+	const highLevel = server as McpServer & {
+		tool?: McpServer["registerTool"];
+	};
+	if (typeof highLevel.tool !== "function") {
+		highLevel.tool = server.registerTool.bind(server);
+	}
+	return server;
+}
+
+/**
  * `@posthog/mcp` 0.11.x still does not capture `server/discover`. Modern
  * 2026-07-28 clients skip initialize/tools/list, so map discover onto the
  * official handshake events without a second duration field.
@@ -191,8 +209,10 @@ function emitDiscoverAsOfficialHandshake(
 }
 
 function registeredMcpToolNames(server: McpServer): string[] {
+	// `_registeredTools` is private on the SDK class. Intersecting McpServer
+	// with a public copy of that field collapses the type to `never`.
 	const tools = (
-		server as McpServer & {
+		server as unknown as {
 			_registeredTools?: Record<string, { enabled?: boolean }>;
 		}
 	)._registeredTools;
@@ -778,7 +798,7 @@ export async function handleMcpTransport(
 			if (posthog) {
 				// Instrument inside the factory so 0.11.x can wrap v2 string
 				// `tools/call` and later `server/discover` registrations.
-				instrument(server, posthog, {
+				instrument(prepareHighLevelMcpServerForPosthog(server), posthog, {
 					context: false,
 					enableExceptionAutocapture: false,
 					identify: options.posthogDistinctId

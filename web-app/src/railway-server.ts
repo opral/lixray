@@ -4,9 +4,12 @@ import { addGoogleAnalytics } from "./lib/google-analytics";
 import { withShareSecurityHeaders } from "./lib/share-security";
 import {
 	handleRequest,
+	warmJwtVerifier,
 	type RequestExecutionContext,
 	type WorkerEnv,
 } from "./worker/handler";
+
+export { warmJwtVerifier };
 
 export default {
 	async fetch(
@@ -32,6 +35,7 @@ export default {
 			},
 		});
 	},
+	warmJwtVerifier,
 };
 
 export async function fetchLixService(
