@@ -17,6 +17,8 @@ interface OpenRepositoryLixSessionOptions {
 	 * read-only repository transport.
 	 */
 	allowAnonymous?: boolean;
+	/** Limits an anonymous session to one control-plane-published path. */
+	publicPath?: string;
 	initialBranchId?: string | null;
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
@@ -77,8 +79,14 @@ async function openRepositoryLixSessionOnce(
 			url: repositoryUrl(options),
 			headers: async (): Promise<Record<string, string>> => {
 				const token = await options.getAccessToken();
-				if (token) return { Authorization: `Bearer ${token}` };
-				if (options.allowAnonymous) return {};
+				const publicPathHeaders: Record<string, string> = {};
+				if (options.publicPath) {
+					publicPathHeaders["X-Lixray-Public-Path"] = options.publicPath;
+				}
+				if (token) {
+					return { Authorization: `Bearer ${token}`, ...publicPathHeaders };
+				}
+				if (options.allowAnonymous) return publicPathHeaders;
 				throw new Error("A repository access token is required.");
 			},
 			fetch: createTelemetryFetch(options.fetch, {
@@ -379,7 +387,7 @@ function repositorySessionKey(
 ): string {
 	const href = repositoryUrl(options).href;
 	const identity = options.authIdentity ?? "anonymous";
-	return `${href}#auth=${identity}`;
+	return `${href}#auth=${identity}&publicPath=${options.publicPath ?? ""}`;
 }
 
 function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {

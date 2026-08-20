@@ -3,14 +3,23 @@ import type {
 	McpToolCallObservation,
 	McpToolCallObserver,
 } from "../mcp/server.ts";
+import {
+	isDemoEnvironment,
+	isProductionTelemetryEnvironment,
+	resolvePosthogProjectToken,
+} from "./mcp-posthog-env.ts";
 
 const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
 
 interface McpTelemetryEnvironment {
 	POSTHOG_PROJECT_TOKEN?: string;
+	VITE_PUBLIC_POSTHOG_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
+	VITE_PUBLIC_TELEMETRY_ENVIRONMENT?: string;
+	LIXRAY_DEMO?: string;
 	LIXRAY_RELEASE_ID?: string;
+	RAILWAY_ENVIRONMENT_NAME?: string;
 	RAILWAY_GIT_COMMIT_SHA?: string;
 }
 
@@ -43,8 +52,13 @@ export function createMcpTelemetrySession(
 	identity: McpTelemetryIdentity,
 	dependencies: McpTelemetryDependencies = {},
 ): McpTelemetrySession | null {
-	const token = env.POSTHOG_PROJECT_TOKEN?.trim();
-	if (!token || env.POSTHOG_ENVIRONMENT !== "production" || identity.isDemo) {
+	const token = resolvePosthogProjectToken(env);
+	if (
+		!token ||
+		!isProductionTelemetryEnvironment(env) ||
+		identity.isDemo ||
+		isDemoEnvironment(env)
+	) {
 		return null;
 	}
 

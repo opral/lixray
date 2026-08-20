@@ -217,7 +217,7 @@
 	{
 		"name": "query_sql",
 		"title": "Query SQL",
-		"description": "Use SQL as the universal read interface to Lix. Lix SQL is a Postgres dialect subset. query_sql runs exactly one SELECT statement against the branch selected by context. Non-SELECT and multi-statement scripts are rejected; use execute_sql when arbitrary SQL is required. Do not look for or invent typed file or entity tools.\n\nCore tables:\n- `lix_file` — Current files in the active branch. Columns: `id, path, directory_id, name, content (binary)`.\n- `lix_directory` — Current directories in the active branch. Columns: `id, path, parent_id, name`.\n- `lix_branch` — Lix branches and their current commits. Columns: `id, name, hidden, commit_id`.\n- `lix_change` — Global immutable change ledger; use it for activity and audit. Columns: `id, entity_pk, schema_key, file_id, snapshot_content, metadata, created_at, origin_key`.\n\nUse focused projections, predicates, and LIMIT where applicable. UTF-8 / text files are written with `INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))` using `kind: \"text\"` parameters. To read a text file, use `SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1`. `lix_file.content` is stored as bytes; select only content the user actually requested.\n\nSQL tables always use the branch selected by the current Lix session. They do not expose branch-routing columns or `_by_branch` variants. Entity tables are lix-dynamic: discover their table and column names before guessing:\n\n```sql\nSELECT table_name, table_type\nFROM information_schema.tables\nWHERE table_schema = 'public'\nORDER BY table_name;\n```\n\n```sql\nSELECT column_name, data_type, is_nullable, ordinal_position\nFROM information_schema.columns\nWHERE table_schema = 'public'\n  AND table_name = $1\nORDER BY ordinal_position;\n```\n\nHistory table functions are read-only revision streams, not current-state snapshot tables. Call `lix_history('lix_file')`, `lix_history('lix_directory')`, or `lix_history('<schema>')` to start at the active branch head. For an explicit anchor commit, pass its id as the second function argument, for example `lix_history('lix_file', $1)` or `lix_history('<schema>', $1)`. The relation name must be a non-null text literal, not a SQL parameter. Constrain the result by stable identity: `id = $n` for files/directories or the schema's declared primary-key columns for entities, resolved from the current table. Read a current item's `lixcol_change_id` from its current table, not an historical row; use `lixcol_depth` / `lixcol_observed_commit_id` for prior revisions.",
+		"description": "Use SQL as the universal read interface to Lix. Lix SQL is a Postgres dialect subset. query_sql runs one statement against the branch selected by context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes. Do not look for or invent typed file or entity tools.\n\nCore tables:\n- `lix_file` — Current files in the active branch. Columns: `id, path, directory_id, name, content (binary)`.\n- `lix_directory` — Current directories in the active branch. Columns: `id, path, parent_id, name`.\n- `lix_branch` — Lix branches and their current commits. Columns: `id, name, hidden, commit_id`.\n- `lix_change` — Global immutable change ledger; use it for activity and audit. Columns: `id, entity_pk, schema_key, file_id, snapshot_content, metadata, created_at, origin_key`.\n\nUse focused projections, predicates, and LIMIT where applicable. UTF-8 / text files are written with `INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))` using `kind: \"text\"` parameters. To read a text file, use `SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1`. `lix_file.content` is stored as bytes; select only content the user actually requested.\n\nSQL tables always use the branch selected by the current Lix session. They do not expose branch-routing columns or `_by_branch` variants. Entity tables are lix-dynamic: discover their table and column names before guessing:\n\n```sql\nSELECT table_name, table_type\nFROM information_schema.tables\nWHERE table_schema = 'public'\nORDER BY table_name;\n```\n\n```sql\nSELECT column_name, data_type, is_nullable, ordinal_position\nFROM information_schema.columns\nWHERE table_schema = 'public'\n  AND table_name = $1\nORDER BY ordinal_position;\n```\n\nHistory table functions are read-only revision streams, not current-state snapshot tables. Call `lix_history('lix_file')`, `lix_history('lix_directory')`, or `lix_history('<schema>')` to start at the active branch head. For an explicit anchor commit, pass its id as the second function argument, for example `lix_history('lix_file', $1)` or `lix_history('<schema>', $1)`. The relation name must be a non-null text literal, not a SQL parameter. Constrain the result by stable identity: `id = $n` for files/directories or the schema's declared primary-key columns for entities, resolved from the current table. Read a current item's `lixcol_change_id` from its current table, not an historical row; use `lixcol_depth` / `lixcol_observed_commit_id` for prior revisions.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1250,6 +1250,102 @@
 			"readOnlyHint": false,
 			"destructiveHint": true,
 			"idempotentHint": false,
+			"openWorldHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "noauth"
+				}
+			]
+		}
+	},
+	{
+		"name": "restore",
+		"title": "Restore branch",
+		"description": "Move the branch selected by context to ancestor commit_id. The commit must exist and be an ancestor of the current branch head. Restore creates no commit, does not delete abandoned commits, and is not undoable; undo only applies to commits made afterward. A later checkpoint-driven garbage-collection sweep may reclaim abandoned commits that are not reachable from a retention root. Other branches and branch-local untracked rows remain unchanged. create_checkpoint returns a commit_id usable here; there is no restore_checkpoint tool.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"commit_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Lix commit id"
+				}
+			},
+			"required": ["context", "commit_id"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"context": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Opaque Lix context returned by open_lix or switch_branch"
+						},
+						"branch_id": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Lix branch id"
+						},
+						"commit_id": {
+							"type": "string"
+						},
+						"request_id": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Request ID for correlating this response with server telemetry"
+						}
+					},
+					"required": ["context", "branch_id", "commit_id", "request_id"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"request_id": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Request ID for correlating this response with server telemetry"
+						},
+						"error": {
+							"type": "object",
+							"properties": {
+								"code": {
+									"type": "string"
+								},
+								"message": {
+									"type": "string"
+								},
+								"hint": {
+									"type": "string"
+								},
+								"details": {}
+							},
+							"required": ["code", "message"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["request_id", "error"],
+					"additionalProperties": false
+				}
+			]
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": true,
+			"idempotentHint": true,
 			"openWorldHint": false
 		},
 		"_meta": {

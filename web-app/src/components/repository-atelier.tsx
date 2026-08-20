@@ -27,7 +27,10 @@ import { useAuth } from "~/components/auth-provider";
 import { useRepository } from "~/components/repository-provider";
 import type { RepositorySettingsApi } from "~/components/repository-home/settings-view";
 import { RepositoryPicker } from "~/components/repository-picker";
-import { RepositoryShareDialog } from "~/components/repository-share-dialog";
+import {
+	RepositoryShareDialog,
+	type ReadShareAccess,
+} from "~/components/repository-share-dialog";
 import { Button } from "~/components/ui/button";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
@@ -70,7 +73,7 @@ import type {
 	TeamMember,
 	RepositoryTeamApi,
 } from "~/components/repository-home/people-view";
-import { isTeamInviteToken, randomTeamInviteToken } from "~/lib/team-invite";
+import { isTeamInviteToken } from "~/lib/team-invite";
 import { EntryKind } from "~/lib/entry-kind";
 import { repositoryHasNoFiles } from "~/components/repository-home/lix-data";
 
@@ -80,9 +83,12 @@ interface RepositoryAtelierProps {
 	namespace: string;
 	repositorySlug: string;
 	repositoryName: string;
+	repositoryVisibility: "private" | "public";
 	branchId?: string;
 	/** The only mode allowed to make repository mutations in this view. */
 	canEdit: boolean;
+	/** Set for a private repository opened through a published file/directory URL. */
+	publicPath?: string;
 	/** Present only for a valid, session-held share capability. */
 	shareAccess?: {
 		onJoinToEdit: () => Promise<void>;
@@ -105,8 +111,10 @@ export function RepositoryAtelier({
 	namespace,
 	repositorySlug,
 	repositoryName,
+	repositoryVisibility,
 	branchId,
 	canEdit,
+	publicPath,
 	shareAccess,
 }: RepositoryAtelierProps) {
 	const {
@@ -213,6 +221,15 @@ export function RepositoryAtelier({
 			);
 		}
 	}, [signInWithGoogle]);
+	const { organizations, renameRepository, deleteRepository, refresh } =
+		useRepository();
+	const activeOrganization = organizations.find(
+		(candidate) => candidate.id === namespaceId,
+	);
+	const activeRepository = activeOrganization?.repositories.find(
+		(candidate) => candidate.id === repositoryId,
+	);
+	const isRepositoryAdmin = activeRepository?.role === "admin";
 	// The raw team api is rebuilt after every render so its closures always see
 	// the current Supabase client and user; the stable facade below is what the
 	// long-lived Atelier extension mounts capture. The demo deployment has no
@@ -233,10 +250,11 @@ export function RepositoryAtelier({
 								?.full_name ?? "Preview user",
 						email: user?.email ?? "preview-user@lixray.invalid",
 						avatarUrl: null,
+						role: "admin",
 						isSelf: true,
 					},
 				],
-				token: "tm_preview-demo-invite",
+				token: randomRepositoryInviteToken(),
 			});
 		const demoInviteUrl = () =>
 			appendRepositoryShareToken(
@@ -248,10 +266,11 @@ export function RepositoryAtelier({
 			: isDemoModeEnabled || !client
 				? {
 						namespaceHandle: () => namespace,
+						canManageMembers: () => true,
 						listMembers: () => Promise.resolve([...demoTeamState().members]),
 						inviteUrl: () => Promise.resolve(demoInviteUrl()),
 						resetInviteUrl: () => {
-							demoTeamState().token = randomTeamInviteToken();
+							demoTeamState().token = randomRepositoryInviteToken();
 							return Promise.resolve(demoInviteUrl());
 						},
 						removeMember: (userId) => {
@@ -264,29 +283,27 @@ export function RepositoryAtelier({
 					}
 				: {
 						namespaceHandle: () => namespace,
+						canManageMembers: () => Boolean(isRepositoryAdmin),
 						listMembers: async (): Promise<readonly TeamMember[]> => {
-							const { data, error } = await client.rpc(
-								"list_namespace_members",
-								{
-									p_namespace_id: namespaceId,
-								},
-							);
+							const { data, error } = await client.rpc("list_lix_members", {
+								p_lix_id: repositoryId,
+							});
 							if (error) throw new Error(error.message);
 							return data.map((row) => ({
 								userId: row.user_id,
 								name: row.name,
 								email: row.email,
 								avatarUrl: row.avatar_url,
+								role: row.role,
 								isSelf: row.user_id === user?.id,
 							}));
 						},
 						inviteUrl: async () => {
-							const { data, error } = await client.rpc(
-								"get_namespace_invite_link",
-								{ p_namespace_id: namespaceId },
-							);
+							const { data, error } = await client.rpc("get_lix_invite_link", {
+								p_lix_id: repositoryId,
+							});
 							if (error) throw new Error(error.message);
-							if (!isTeamInviteToken(data)) {
+							if (!isRepositoryShareToken(data) || isTeamInviteToken(data)) {
 								throw new Error("The invite service returned an invalid link.");
 							}
 							return appendRepositoryShareToken(
@@ -296,11 +313,13 @@ export function RepositoryAtelier({
 						},
 						resetInviteUrl: async () => {
 							const { data, error } = await client.rpc(
-								"reset_namespace_invite_link",
-								{ p_namespace_id: namespaceId },
+								"reset_lix_invite_link",
+								{
+									p_lix_id: repositoryId,
+								},
 							);
 							if (error) throw new Error(error.message);
-							if (!isTeamInviteToken(data)) {
+							if (!isRepositoryShareToken(data) || isTeamInviteToken(data)) {
 								throw new Error("The invite service returned an invalid link.");
 							}
 							return appendRepositoryShareToken(
@@ -309,8 +328,8 @@ export function RepositoryAtelier({
 							);
 						},
 						removeMember: async (userId: string) => {
-							const { error } = await client.rpc("remove_namespace_member", {
-								p_namespace_id: namespaceId,
+							const { error } = await client.rpc("remove_lix_member", {
+								p_lix_id: repositoryId,
 								p_user_id: userId,
 							});
 							if (error) throw new Error(error.message);
@@ -319,6 +338,7 @@ export function RepositoryAtelier({
 	});
 	const stableTeamApiRef = useRef<RepositoryTeamApi>({
 		namespaceHandle: () => teamApiRef.current?.namespaceHandle() ?? "",
+		canManageMembers: () => teamApiRef.current?.canManageMembers() ?? false,
 		listMembers: () => requireTeamApi(teamApiRef.current).listMembers(),
 		inviteUrl: () => requireTeamApi(teamApiRef.current).inviteUrl(),
 		resetInviteUrl: () => requireTeamApi(teamApiRef.current).resetInviteUrl(),
@@ -327,13 +347,8 @@ export function RepositoryAtelier({
 	});
 
 	// Same rebuilt-per-render / stable-facade split for the Settings tab.
-	const { organizations, renameRepository, deleteRepository } = useRepository();
 	const settingsApiRef = useRef<RepositorySettingsApi | null>(null);
 	useEffect(() => {
-		const organization = organizations.find(
-			(candidate) => candidate.id === namespaceId,
-		);
-		const isOwner = organization?.role === "owner";
 		settingsApiRef.current =
 			!canEdit || isDemoModeEnabled || !client
 				? null
@@ -341,11 +356,9 @@ export function RepositoryAtelier({
 						info: () => ({
 							namespaceHandle: namespace,
 							repositorySlug,
-							repositoryName:
-								organization?.repositories.find(
-									(candidate) => candidate.id === repositoryId,
-								)?.name ?? repositoryName,
-							isOwner: Boolean(isOwner),
+							repositoryName: activeRepository?.name ?? repositoryName,
+							isAdmin: Boolean(isRepositoryAdmin),
+							visibility: activeRepository?.visibility ?? "private",
 							currentUserId: user?.id ?? null,
 						}),
 						rename: (name) => renameRepository(repositoryId, name),
@@ -359,6 +372,7 @@ export function RepositoryAtelier({
 								name: row.name,
 								email: row.email,
 								avatarUrl: row.avatar_url,
+								role: row.role,
 							}));
 						},
 						removeDirectMember: async (memberUserId) => {
@@ -368,33 +382,32 @@ export function RepositoryAtelier({
 							});
 							if (error) throw new Error(error.message);
 						},
-						listNamespaceMembers: async () => {
-							if (!organization || organization.role === null) return null;
-							const { data, error } = await client.rpc(
-								"list_namespace_members",
-								{ p_namespace_id: namespaceId },
-							);
-							if (error) return null;
-							return (data ?? []).map((row) => ({
-								userId: row.user_id,
-								name: row.name,
-								email: row.email,
-								avatarUrl: row.avatar_url,
-							}));
-						},
-						createEditLink: async () => {
-							const { data, error } = await client.rpc(
-								"create_lix_share_token",
-								{ p_lix_id: repositoryId },
-							);
+						setMemberRole: async (memberUserId, role) => {
+							const { error } = await client.rpc("set_lix_member_role", {
+								p_lix_id: repositoryId,
+								p_user_id: memberUserId,
+								p_role: role,
+							});
 							if (error) throw new Error(error.message);
-							const token = data?.[0]?.token;
-							if (!isRepositoryShareToken(token)) {
-								throw new Error("The share service returned an invalid link.");
+						},
+						setVisibility: async (visibility) => {
+							const { error } = await client.rpc("set_lix_visibility", {
+								p_lix_id: repositoryId,
+								p_visibility: visibility,
+							});
+							if (error) throw new Error(error.message);
+						},
+						getInviteLink: async () => {
+							const { data, error } = await client.rpc("get_lix_invite_link", {
+								p_lix_id: repositoryId,
+							});
+							if (error) throw new Error(error.message);
+							if (!isRepositoryShareToken(data) || isTeamInviteToken(data)) {
+								throw new Error("The invite service returned an invalid link.");
 							}
 							return appendRepositoryShareToken(
 								`${window.location.origin}/@${namespace}/${repositorySlug}`,
-								token,
+								data,
 							);
 						},
 						deleteRepository: async () => {
@@ -409,7 +422,8 @@ export function RepositoryAtelier({
 				namespaceHandle: namespace,
 				repositorySlug,
 				repositoryName,
-				isOwner: false,
+				isAdmin: false,
+				visibility: "private",
 				currentUserId: null,
 			},
 		rename: (name) => requireSettingsApi(settingsApiRef.current).rename(name),
@@ -419,10 +433,15 @@ export function RepositoryAtelier({
 			requireSettingsApi(settingsApiRef.current).removeDirectMember(
 				memberUserId,
 			),
-		listNamespaceMembers: () =>
-			requireSettingsApi(settingsApiRef.current).listNamespaceMembers(),
-		createEditLink: () =>
-			requireSettingsApi(settingsApiRef.current).createEditLink(),
+		setMemberRole: (memberUserId, role) =>
+			requireSettingsApi(settingsApiRef.current).setMemberRole(
+				memberUserId,
+				role,
+			),
+		setVisibility: (visibility) =>
+			requireSettingsApi(settingsApiRef.current).setVisibility(visibility),
+		getInviteLink: () =>
+			requireSettingsApi(settingsApiRef.current).getInviteLink(),
 		deleteRepository: () =>
 			requireSettingsApi(settingsApiRef.current).deleteRepository(),
 	});
@@ -440,18 +459,117 @@ export function RepositoryAtelier({
 	const headerActions = canEdit ? (
 		client ? (
 			<RepositoryShareControl
-				createShareToken={async () => {
-					const { data, error } = await client.rpc("create_lix_share_token", {
+				loadReadAccess={async () => {
+					const resourcePath =
+						routeChildKind === "file" || routeChildKind === "dir"
+							? normalizedRouteResourcePath(routeSplat)
+							: "/";
+					const { data: resolved, error: resolveError } = await client.rpc(
+						"resolve_public_lix",
+						{ p_lix_id: repositoryId, p_path: resourcePath },
+					);
+					if (resolveError) throw resolveError;
+					const currentAccess = resolved?.[0];
+					if (!currentAccess)
+						throw new Error("Repository access is unavailable.");
+
+					if (currentAccess.visibility === "public") {
+						return {
+							status: "published",
+							source: "repository",
+							canUnpublish:
+								routeChildKind === null && currentAccess.role === "admin",
+						};
+					}
+					if (routeChildKind !== "file" && routeChildKind !== "dir") {
+						return {
+							status: "private",
+							canPublish: currentAccess.role === "admin",
+						};
+					}
+
+					const path = resourcePath;
+					const { data, error } = await client.rpc("list_lix_publications", {
 						p_lix_id: repositoryId,
 					});
 					if (error) throw error;
-					const token = data?.[0]?.token;
-					if (!isRepositoryShareToken(token)) {
-						throw new Error("The share service returned an invalid link.");
+					const kind = routeChildKind === "file" ? "file" : "directory";
+					if (
+						data?.some(
+							(publication) =>
+								publication.path === path && publication.kind === kind,
+						)
+					) {
+						return {
+							status: "published",
+							source: "resource",
+							canUnpublish: true,
+						};
 					}
-					return token;
+					const ancestor = data
+						?.filter(
+							(publication) =>
+								publication.kind === "directory" &&
+								(publication.path === "/" ||
+									path === publication.path ||
+									path.startsWith(`${publication.path}/`)),
+						)
+						.sort((left, right) => right.path.length - left.path.length)[0];
+					if (ancestor) {
+						return {
+							status: "published",
+							source: "ancestor",
+							canUnpublish: false,
+							inheritedFrom:
+								ancestor.path === "/"
+									? "the published root folder"
+									: `the published folder ${ancestor.path}`,
+						};
+					}
+					return { status: "private", canPublish: true };
 				}}
-				repositoryName={repositoryName}
+				publishReadLink={async () => {
+					if (routeChildKind === "file" || routeChildKind === "dir") {
+						const path = normalizedRouteResourcePath(routeSplat);
+						const { error } = await client.rpc("publish_lix_resource", {
+							p_lix_id: repositoryId,
+							p_path: path,
+							p_kind: routeChildKind === "file" ? "file" : "directory",
+						});
+						if (error) throw error;
+						return;
+					}
+					const { error } = await client.rpc("set_lix_visibility", {
+						p_lix_id: repositoryId,
+						p_visibility: "public",
+					});
+					if (error) throw error;
+					await refresh({ organizationId: namespaceId, repositoryId });
+				}}
+				unpublishReadLink={async () => {
+					if (routeChildKind === "file" || routeChildKind === "dir") {
+						const { error } = await client.rpc("unpublish_lix_resource", {
+							p_lix_id: repositoryId,
+							p_path: normalizedRouteResourcePath(routeSplat),
+							p_kind: routeChildKind === "file" ? "file" : "directory",
+						});
+						if (error) throw error;
+						return;
+					}
+					const { error } = await client.rpc("set_lix_visibility", {
+						p_lix_id: repositoryId,
+						p_visibility: "private",
+					});
+					if (error) throw error;
+					await refresh({ organizationId: namespaceId, repositoryId });
+				}}
+				publicationLabel={
+					routeChildKind === "file"
+						? "file"
+						: routeChildKind === "dir"
+							? "folder"
+							: "repository"
+				}
 				documentName={documentName}
 				onOpenTeam={() => {
 					void instance?.views
@@ -733,6 +851,7 @@ export function RepositoryAtelier({
 			getAccessToken,
 			refreshAccessToken,
 			allowAnonymous: isReadOnly,
+			publicPath: isReadOnly ? publicPath : undefined,
 			initialBranchId: openingBranchId,
 			authIdentity: atelierUserId,
 		})
@@ -809,6 +928,7 @@ export function RepositoryAtelier({
 						},
 						canEdit ? stableTeamApiRef.current : null,
 						canEdit ? stableSettingsApiRef.current : null,
+						repositoryVisibility,
 					),
 					centralPanel: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
@@ -834,7 +954,6 @@ export function RepositoryAtelier({
 					emptyRepositorySeededRef.current = atelierInstance;
 				}
 				setInstance(atelierInstance);
-				captureTelemetry("repository_opened");
 				const actualBranchId = session.activeBranchSnapshot();
 				if (
 					shouldNormalizeInitialBranch({
@@ -872,12 +991,14 @@ export function RepositoryAtelier({
 		isReadOnly,
 		getAccessToken,
 		refreshAccessToken,
+		publicPath,
 		navigateToCurrentPathBranch,
 		namespace,
 		namespaceId,
 		repositoryId,
 		repositoryName,
 		repositorySlug,
+		repositoryVisibility,
 	]);
 
 	useEffect(() => {
@@ -989,6 +1110,7 @@ export function RepositoryAtelier({
 											navbarBrand: (
 												<RepositoryPicker
 													namespaceId={namespaceId}
+													namespaceHandle={namespace}
 													repositoryName={repositoryName}
 													repositorySlug={repositorySlug}
 												/>
@@ -1077,50 +1199,74 @@ function requireTeamApi(api: RepositoryTeamApi | null): RepositoryTeamApi {
 	return api;
 }
 
+function randomRepositoryInviteToken(): string {
+	const alphabet =
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+	const bytes = crypto.getRandomValues(new Uint8Array(20));
+	let token = "ri_";
+	for (const byte of bytes) token += alphabet[byte & 63];
+	return token;
+}
+
 function RepositoryShareControl({
-	createShareToken,
-	repositoryName,
+	loadReadAccess,
+	publishReadLink,
+	unpublishReadLink,
+	publicationLabel,
 	documentName,
 	onOpenTeam,
 }: {
-	createShareToken: () => Promise<string>;
-	repositoryName: string;
+	loadReadAccess: () => Promise<ReadShareAccess>;
+	publishReadLink: () => Promise<void>;
+	unpublishReadLink: () => Promise<void>;
+	publicationLabel: "file" | "folder" | "repository";
 	documentName: string;
 	onOpenTeam?: () => void;
 }) {
 	const [open, setOpen] = useState(false);
-	const [minting, setMinting] = useState(false);
-	const [urls, setUrls] = useState({ canonicalUrl: "", editableUrl: "" });
+	const [readAccess, setReadAccess] = useState<ReadShareAccess | null>(null);
+	const [canonicalUrl, setCanonicalUrl] = useState("");
 
-	const mintShareLink = async () => {
-		if (minting) return;
-		setMinting(true);
-		try {
-			const token = await createShareToken();
-			const canonicalUrl = stripInviteFromUrl(window.location.href);
-			setUrls({
-				canonicalUrl,
-				editableUrl: appendRepositoryShareToken(canonicalUrl, token),
+	const openShare = () => {
+		setCanonicalUrl(stripInviteFromUrl(window.location.href));
+		setReadAccess(null);
+		setOpen(true);
+		void loadReadAccess()
+			.then(setReadAccess)
+			.catch((caught: unknown) => {
+				toast.error(
+					caught instanceof Error
+						? caught.message
+						: "Unable to load sharing status.",
+				);
+				setOpen(false);
 			});
-			captureTelemetry("share_link_created");
-			setOpen(true);
-		} catch (caught) {
-			toast.error(
-				caught instanceof Error
-					? caught.message
-					: "Unable to create a share link.",
-			);
-		} finally {
-			setMinting(false);
-		}
 	};
 
 	return (
 		<RepositoryShareDialog
-			canonicalUrl={urls.canonicalUrl}
-			editableUrl={urls.editableUrl}
+			canonicalUrl={canonicalUrl}
 			documentName={documentName}
-			repositoryName={repositoryName}
+			publicationLabel={publicationLabel}
+			readAccess={readAccess}
+			publishReadLink={async () => {
+				await publishReadLink();
+				setReadAccess({
+					status: "published",
+					source: publicationLabel === "repository" ? "repository" : "resource",
+					canUnpublish: true,
+				});
+				captureTelemetry("resource_published", {
+					resource_kind: publicationLabel,
+				});
+			}}
+			unpublishReadLink={async () => {
+				await unpublishReadLink();
+				setReadAccess({ status: "private", canPublish: true });
+				captureTelemetry("resource_unpublished", {
+					resource_kind: publicationLabel,
+				});
+			}}
 			onOpenTeam={
 				onOpenTeam
 					? () => {
@@ -1135,20 +1281,14 @@ function RepositoryShareControl({
 					setOpen(false);
 					return;
 				}
-				void mintShareLink();
+				openShare();
 			}}
-			onCopied={(_url, mode) => {
-				captureTelemetry("share_link_copied", { share_mode: mode });
+			onCopied={() => {
+				captureTelemetry("share_link_copied", { share_mode: "public" });
 			}}
 			trigger={
-				<Button
-					type="button"
-					size="xs"
-					variant="outline"
-					className="h-7 px-3"
-					disabled={minting}
-				>
-					{minting ? "Creating…" : "Share"}
+				<Button type="button" size="xs" variant="outline" className="h-7 px-3">
+					Share
 				</Button>
 			}
 		/>
@@ -1172,4 +1312,9 @@ function activeDocumentName({
 	} catch {
 		return encodedName;
 	}
+}
+
+function normalizedRouteResourcePath(routeSplat: string | undefined) {
+	const path = (routeSplat ?? "").replace(/^\/+|\/+$/g, "");
+	return path ? `/${path}` : "/";
 }

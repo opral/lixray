@@ -18,7 +18,21 @@ tools. Lix SQL is a Postgres dialect subset.
 A successful `execute_sql` mutation is already saved. `create_checkpoint` is an
 optional restore point for a finished task or session — not required for
 durability, and not something to call after every write. Skipping it keeps the
-files; you just do not have a named restore point.
+files; you just do not have a checkpoint marker for that commit.
+
+## Restore an ancestor
+
+Call `restore` with the open Lix `context` and a `commit_id`. The commit must
+exist and be an ancestor of the selected branch head. Restore moves that branch
+head without creating a new commit. It does not delete the abandoned commits;
+a later checkpoint-driven garbage-collection sweep may reclaim those that are
+not reachable from a retention root. Other branches and branch-local untracked
+rows are unchanged.
+
+Restore is not undoable. `undo` only applies to commits made after the restore.
+
+`create_checkpoint` returns a commit id that can be passed directly to
+`restore`. There is no `restore_checkpoint` tool.
 
 ## Discover tables and columns
 

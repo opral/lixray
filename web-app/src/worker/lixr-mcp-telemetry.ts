@@ -1,14 +1,23 @@
 import { PostHog, type EventMessage } from "posthog-node";
 import type { McpExecuteInputObservation } from "../mcp/tool-observation.ts";
 import { createHash } from "node:crypto";
+import {
+	isDemoEnvironment,
+	isProductionTelemetryEnvironment,
+	resolvePosthogProjectToken,
+} from "./mcp-posthog-env.ts";
 
 const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
 
 interface LixrMcpTelemetryEnvironment {
 	POSTHOG_PROJECT_TOKEN?: string;
+	VITE_PUBLIC_POSTHOG_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
+	VITE_PUBLIC_TELEMETRY_ENVIRONMENT?: string;
+	LIXRAY_DEMO?: string;
 	LIXRAY_RELEASE_ID?: string;
+	RAILWAY_ENVIRONMENT_NAME?: string;
 	RAILWAY_GIT_COMMIT_SHA?: string;
 }
 
@@ -81,8 +90,13 @@ export function createLixrMcpTelemetrySession(
 	identity: LixrMcpTelemetryIdentity,
 	dependencies: LixrMcpTelemetryDependencies = {},
 ): LixrMcpTelemetrySession | null {
-	const token = env.POSTHOG_PROJECT_TOKEN?.trim();
-	if (!token || env.POSTHOG_ENVIRONMENT !== "production" || identity.isDemo) {
+	const token = resolvePosthogProjectToken(env);
+	if (
+		!token ||
+		!isProductionTelemetryEnvironment(env) ||
+		identity.isDemo ||
+		isDemoEnvironment(env)
+	) {
 		return null;
 	}
 

@@ -14,6 +14,7 @@ export type TeamMember = {
 	readonly name: string;
 	readonly email: string;
 	readonly avatarUrl: string | null;
+	readonly role: "admin" | "member";
 	readonly isSelf: boolean;
 };
 
@@ -24,6 +25,7 @@ export type TeamMember = {
  */
 export type RepositoryTeamApi = {
 	namespaceHandle(): string;
+	canManageMembers(): boolean;
 	listMembers(): Promise<readonly TeamMember[]>;
 	/** The full invite URL, minted on first read. */
 	inviteUrl(): Promise<string>;
@@ -83,7 +85,7 @@ export function MemberAvatar({
 }
 
 /**
- * The People tab (3c): the namespace roster behind a repository. The invite
+ * The People tab (3c): the repository roster. The invite
  * link reuses the dashed-container vocabulary from Home's agent-connect row;
  * the roster reuses the file-list row. Copy invite link is the page's only
  * primary action.
@@ -178,11 +180,7 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 			refreshMembers();
 		} catch (caught) {
 			console.error("repository-people: unable to remove member", caught);
-			setError(
-				caught instanceof Error && /last owner/i.test(caught.message)
-					? `${member.name} is the last owner of ${namespaceHandle} and can't be removed.`
-					: "Unable to remove this person. Try again.",
-			);
+			setError("Unable to remove this member. Try again.");
 		} finally {
 			setBusy(false);
 		}
@@ -263,11 +261,11 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 						</span>
 					) : (
 						<>
-							Anyone who opens the link joins{" "}
+							Anyone who opens the link joins this repository as a member with
+							edit access. Repository:{" "}
 							<b className="font-semibold text-text-secondary">
 								{namespaceHandle}
-							</b>{" "}
-							as a member — every repository, edit access.
+							</b>
 						</>
 					)}
 				</p>
@@ -289,12 +287,15 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 									) : null}
 								</p>
 								<p className="truncate text-xs text-text-tertiary">
-									{member.email}
+									{member.email} ·{" "}
+									{member.role === "admin" ? "Admin" : "Member"}
 								</p>
 							</div>
-							{/* You can leave a team, not remove yourself from it — no
-							    self-remove affordance, and the RPC rejects it too. */}
-							{member.isSelf ? null : (
+							{/* Self-service leaving lives in Settings; this menu is for
+							    repository admins managing other members. */}
+							{member.isSelf ||
+							member.role === "admin" ||
+							!teamApi.canManageMembers() ? null : (
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
 										<Button
@@ -317,7 +318,7 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 											onSelect={() => void removeMember(member)}
 										>
 											<UserRoundMinus aria-hidden="true" />
-											Remove from {namespaceHandle}
+											Remove from repository
 										</DropdownMenuItem>
 									</DropdownMenuContent>
 								</DropdownMenu>

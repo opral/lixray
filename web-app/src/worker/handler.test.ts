@@ -647,13 +647,94 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	assert.equal(flushes, 1);
 });
 
-void test("MCP telemetry is disabled outside production", async () => {
+void test("official MCP PostHog token uses VITE_PUBLIC_POSTHOG_TOKEN when the project token is unset", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({
+			extra: {
+				VITE_PUBLIC_POSTHOG_TOKEN: " phc_public_project_token ",
+			},
+		}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			createMcpTelemetry: () => null,
+			lixFetch: async () => new Response("unused"),
+			mcpTransport: async (_request, _service, options) => {
+				assert.equal(options.posthogToken, "phc_public_project_token");
+				assert.equal(options.posthogDistinctId, "user-123");
+				assert.equal(typeof options.onPosthogFlush, "function");
+				return new Response("mcp response");
+			},
+		},
+	);
+
+	assert.equal(await response.text(), "mcp response");
+});
+
+void test("official MCP PostHog token is passed when POSTHOG_ENVIRONMENT is unset", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/mcp", { method: "POST" }),
 		env({
 			extra: {
 				POSTHOG_PROJECT_TOKEN: "project-token",
-				POSTHOG_ENVIRONMENT: "preview",
+			},
+		}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			createMcpTelemetry: () => null,
+			lixFetch: async () => new Response("unused"),
+			mcpTransport: async (_request, _service, options) => {
+				assert.equal(options.posthogToken, "project-token");
+				assert.equal(options.posthogDistinctId, "user-123");
+				assert.equal(typeof options.onPosthogFlush, "function");
+				return new Response("mcp response");
+			},
+		},
+	);
+
+	assert.equal(await response.text(), "mcp response");
+});
+
+void test("official MCP PostHog token is omitted in demo and Railway PR environments", async () => {
+	for (const extra of [
+		{
+			LIXRAY_DEMO: "1",
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			VITE_PUBLIC_POSTHOG_TOKEN: "phc_public_project_token",
+		},
+		{
+			RAILWAY_ENVIRONMENT_NAME: "lixray-pr-91",
+			POSTHOG_PROJECT_TOKEN: "project-token",
+		},
+		{
+			RAILWAY_ENVIRONMENT_NAME: "pr-11b179-85",
+			VITE_PUBLIC_POSTHOG_TOKEN: "phc_public_project_token",
+		},
+	]) {
+		const response = await handleRequest(
+			new Request("https://example.test/mcp", { method: "POST" }),
+			env({ extra }),
+			{
+				authenticateMcp: authenticatedMcp(),
+				createMcpTelemetry: () => null,
+				lixFetch: async () => new Response("unused"),
+				mcpTransport: async (_request, _service, options) => {
+					assert.equal(options.posthogToken, undefined, JSON.stringify(extra));
+					assert.equal(options.onPosthogFlush, undefined);
+					return new Response("mcp response");
+				},
+			},
+		);
+		assert.equal(await response.text(), "mcp response");
+	}
+});
+
+void test("POSTHOG_API_KEY alone does not enable official MCP capture", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({
+			extra: {
+				POSTHOG_API_KEY: "phx_personal_api_key",
 			},
 		}),
 		{
@@ -1187,7 +1268,6 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 				assert.equal(lixSlug, "launch-q3");
 				return { ok: true, lixId: LIX_A };
 			},
-			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
 			lixFetch: async (lixId, request) => {
 				assert.equal(lixId, LIX_A);
 				proxiedRequest = request;
@@ -1251,6 +1331,150 @@ void test("anonymous public binary file reads forward without SQL parsing", asyn
 		proxiedRequest.headers.get("lix-session-id"),
 		"public-reader-session",
 	);
+});
+
+void test("a published file resolves by path without exposing private SQL", async () => {
+	const originalFetch = globalThis.fetch;
+	let lookupBody: unknown;
+	let proxied = 0;
+	globalThis.fetch = async (_input, init) => {
+		assert.equal(typeof init?.body, "string");
+		if (typeof init?.body !== "string") {
+			throw new TypeError("Expected a JSON request body");
+		}
+		lookupBody = JSON.parse(init.body) as unknown;
+		return Response.json([
+			{
+				lix_id: LIX_A,
+				visibility: "private",
+				path_public: true,
+			},
+		]);
+	};
+	try {
+		const fileResponse = await handleRequest(
+			remoteLixRequest("/file?path=%2Ffinance%2Fq1.pdf"),
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+			{
+				lixFetch: async () => {
+					proxied += 1;
+					return new Response("published file");
+				},
+			},
+		);
+		assert.equal(fileResponse.status, 200);
+		assert.equal(await fileResponse.text(), "published file");
+		assert.deepEqual(lookupBody, {
+			p_namespace_handle: "acme",
+			p_lix_slug: "launch-q3",
+			p_path: "/finance/q1.pdf",
+		});
+
+		const sqlResponse = await handleRequest(
+			remoteLixRequest("/execute", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-lixray-public-path": "/finance/q1.pdf",
+				},
+				body: JSON.stringify({ sql: "SELECT * FROM lix_file" }),
+			}),
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+			{
+				lixFetch: async () => {
+					proxied += 1;
+					return new Response("private rows leaked");
+				},
+			},
+		);
+		assert.equal(sqlResponse.status, 404);
+		assert.equal(proxied, 1);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+void test("a published directory exposes only its direct child names", async () => {
+	const protocolPaths: string[] = [];
+	let executeBody: unknown;
+	const response = await handleRequest(
+		remoteLixRequest("/published-directory?path=%2Ffinance"),
+		env({}),
+		{
+			resolvePublicLix: async (namespace, lixSlug, _env, publicPath) => {
+				assert.equal(namespace, "acme");
+				assert.equal(lixSlug, "launch-q3");
+				assert.equal(publicPath, "/finance");
+				return { ok: true, lixId: LIX_A, scope: "path" };
+			},
+			lixFetch: async (lixId, request) => {
+				assert.equal(lixId, LIX_A);
+				assert.equal(
+					request.headers.get("x-lixray-idempotency-principal"),
+					"00000000-0000-7000-8000-000000000002",
+				);
+				const path = new URL(request.url).pathname;
+				protocolPaths.push(path);
+				if (path === "/lix/v1/") {
+					return Response.json({
+						protocolVersion: 2,
+						activeBranchId: "main",
+						activeAccountId: "00000000-0000-7000-8000-000000000002",
+						sessionId: "published-directory-session",
+					});
+				}
+				if (path === "/lix/v1/session") {
+					assert.equal(request.method, "DELETE");
+					return new Response(null, { status: 204 });
+				}
+				assert.equal(path, "/lix/v1/execute");
+				executeBody = await request.json();
+				return Response.json({
+					columns: ["path", "kind"],
+					rows: [
+						[
+							{ kind: "text", value: "/finance/budget.csv" },
+							{ kind: "text", value: "file" },
+						],
+						[
+							{ kind: "text", value: "/finance/reports" },
+							{ kind: "text", value: "directory" },
+						],
+					],
+					rowsAffected: 0,
+					notices: [],
+				});
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), {
+		entries: [
+			{ path: "/finance/budget.csv", kind: "file" },
+			{ path: "/finance/reports", kind: "directory" },
+		],
+		truncated: false,
+	});
+	assert.ok(isRecord(executeBody));
+	assert.match(String(executeBody.sql), /FROM lix_file/);
+	assert.match(String(executeBody.sql), /FROM lix_directory/);
+	assert.deepEqual(executeBody.params, [{ kind: "text", value: "/finance" }]);
+	assert.deepEqual(protocolPaths, [
+		"/lix/v1/",
+		"/lix/v1/execute",
+		"/lix/v1/session",
+	]);
 });
 
 void test("anonymous binary file writes remain unauthorized", async () => {
@@ -1354,7 +1578,6 @@ void test("public write SQL is rejected before it reaches the lix", async () => 
 				ok: true,
 				lixId: LIX_A,
 			}),
-			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
 			lixFetch: async () => {
 				proxied = true;
 				return new Response("unexpected");
@@ -1383,11 +1606,6 @@ void test("a mutation cannot hide behind a multi-statement public script", async
 				ok: true,
 				lixId: LIX_A,
 			}),
-			parseSqlScript: (sql) => ({
-				statements: sql
-					.split(";")
-					.map((statement) => ({ sql: statement.trim() })),
-			}),
 			lixFetch: async () => {
 				proxied = true;
 				return new Response("unexpected");
@@ -1399,7 +1617,8 @@ void test("a mutation cannot hide behind a multi-statement public script", async
 	assert.equal(proxied, false);
 });
 
-void test("public reads fail closed when no SQL parser is configured", async () => {
+void test("public reads classify writes without a SQL parser", async () => {
+	let proxied = false;
 	const response = await handleRequest(
 		remoteLixRequest("/execute", {
 			method: "POST",
@@ -1412,11 +1631,16 @@ void test("public reads fail closed when no SQL parser is configured", async () 
 				ok: true,
 				lixId: LIX_A,
 			}),
-			lixFetch: async () => new Response("unexpected"),
+			lixFetch: async () => {
+				proxied = true;
+				return new Response("public read");
+			},
 		},
 	);
 
-	assert.equal(response.status, 400);
+	assert.equal(response.status, 200);
+	assert.equal(await response.text(), "public read");
+	assert.equal(proxied, true);
 });
 
 void test("authenticated non-members are downgraded to the public read transport", async () => {
@@ -1439,7 +1663,6 @@ void test("authenticated non-members are downgraded to the public read transport
 				publicLixLookups += 1;
 				return { ok: true, lixId: LIX_A };
 			},
-			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
 			lixFetch: async (_lixId, request) => {
 				proxiedRequest = request;
 				return new Response("downgraded");
