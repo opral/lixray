@@ -360,7 +360,7 @@ The benchmark Compose profile intended to cap cached repository runtimes at four
 the nonexistent `LIXRAY_MAX_OPEN_REPOSITORIES` variable. It therefore silently
 ran the server default of 32. The experiment was corrected to use the actual
 `LIXRAY_MAX_OPEN_LIXS` setting with a cap of four. The normal Compose default is
-now 16; callers can still override it for this benchmark or constrained hosts.
+now 32; callers can still override it for this benchmark or constrained hosts.
 
 The controlled accounting opens, point-reads, and closes 32 cloned
 1,000-commit repositories on the same binary. Each run starts a fresh process;

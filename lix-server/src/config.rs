@@ -12,7 +12,7 @@ const DEFAULT_METADATA_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 // Keep a useful single-operator working set warm. Cache byte budgets are split
 // across this cap, so raising it does not raise the configured aggregate block,
 // metadata, or disk-cache budgets. Larger deployments can still override it.
-const DEFAULT_MAX_OPEN_LIXS: u64 = 16;
+const DEFAULT_MAX_OPEN_LIXS: u64 = 32;
 const DEFAULT_PROTOCOL_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_RECOVERY_CLOSE_TIMEOUT_SECS: u64 = 30;
 
@@ -205,7 +205,7 @@ mod tests {
 
         let config = Config::from_env().unwrap();
 
-        assert_eq!(config.max_open_lixes, 16);
+        assert_eq!(config.max_open_lixes, 32);
         assert_eq!(config.bind_addr, "0.0.0.0:8080");
         assert_eq!(config.internal_token, None);
         assert_eq!(config.storage.endpoint, "https://s3.example");

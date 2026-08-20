@@ -37,7 +37,7 @@ services:
         LIXRAY_IMAGE_VARIANT: perf
     environment:
       BIND_ADDR: 0.0.0.0:8080
-      LIXRAY_MAX_OPEN_LIXS: ${LIXRAY_MAX_OPEN_LIXS:-16}
+      LIXRAY_MAX_OPEN_LIXS: ${LIXRAY_MAX_OPEN_LIXS:-32}
       LIXRAY_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
       LIXRAY_PERF_SPANS: ${LIXRAY_PERF_SPANS:-false}
       RUST_LOG: ${RUST_LOG:-lixray=info}
