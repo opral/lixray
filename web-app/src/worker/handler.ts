@@ -1,9 +1,10 @@
+import { jwtVerify, type JWTPayload } from "jose";
 import {
-	createRemoteJWKSet,
-	jwtVerify,
-	type JWTPayload,
-	type JWTVerifyGetKey,
-} from "jose";
+	classifyJwtVerifyError,
+	getRemoteJwks,
+	persistRemoteJwksIfPresent,
+	warmRemoteJwks,
+} from "./jwt-verifier.ts";
 import {
 	DEMO_AUTH_TOKEN,
 	DEMO_ORGANIZATION_ID,
@@ -75,6 +76,11 @@ export interface WorkerEnv {
 	VITE_PUBLIC_TELEMETRY_ENVIRONMENT?: string;
 	/** HMAC key used to sign stateless MCP Lix contexts. */
 	LIXRAY_CONTEXT_SIGNING_KEY?: string;
+	/**
+	 * JSON file used to persist the Supabase JWKS across process restarts.
+	 * Railway recycle must not drop a previously-valid MCP bearer.
+	 */
+	LIXRAY_JWKS_CACHE_PATH?: string;
 	LIXRAY_RELEASE_ID?: string;
 	RAILWAY_ENVIRONMENT_NAME?: string;
 	RAILWAY_GIT_COMMIT_SHA?: string;
@@ -184,7 +190,6 @@ const PUBLIC_PRODUCTION_ORIGIN = "https://lixray.com";
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
-const jwksByUrl = new Map<string, JWTVerifyGetKey>();
 
 type ServerTimingMetric = {
 	readonly name:
@@ -750,21 +755,27 @@ export async function authenticateWithSupabase(
 
 	try {
 		const issuer = supabaseJwtIssuer(env);
+		const jwksUrl = env.SUPABASE_JWKS_URL ?? "";
+		const cachePath = env.LIXRAY_JWKS_CACHE_PATH?.trim() || undefined;
 		const { payload } = await jwtVerify(
 			token,
-			remoteJwks(env.SUPABASE_JWKS_URL ?? ""),
+			await getRemoteJwks(jwksUrl, { cachePath }),
 			{
 				algorithms: ["ES256"],
 				issuer,
 				audience: "authenticated",
 			},
 		);
+		await persistRemoteJwksIfPresent(jwksUrl, cachePath);
 		if (!validateBrowserJwtClaims(payload)) return unauthorized();
 		return {
 			ok: true,
 			auth: { userId: payload.sub as string, token },
 		};
-	} catch {
+	} catch (error) {
+		if (classifyJwtVerifyError(error) === "jwks_unavailable") {
+			return jwksUnavailable();
+		}
 		return unauthorized();
 	}
 }
@@ -879,15 +890,17 @@ async function authenticateMcpWithSupabase(
 
 	try {
 		const issuer = supabaseJwtIssuer(env);
+		const cachePath = env.LIXRAY_JWKS_CACHE_PATH?.trim() || undefined;
 		const { payload } = await jwtVerify(
 			token,
-			remoteJwks(env.SUPABASE_JWKS_URL),
+			await getRemoteJwks(env.SUPABASE_JWKS_URL, { cachePath }),
 			{
 				algorithms: ["ES256"],
 				issuer,
 				audience: "authenticated",
 			},
 		);
+		await persistRemoteJwksIfPresent(env.SUPABASE_JWKS_URL, cachePath);
 		const claims = validateMcpJwtClaims(
 			payload,
 			issuer,
@@ -912,7 +925,13 @@ async function authenticateMcpWithSupabase(
 				clientId: claims.clientId,
 			},
 		};
-	} catch {
+	} catch (error) {
+		if (classifyJwtVerifyError(error) === "jwks_unavailable") {
+			return {
+				ok: false,
+				response: mcpJwksUnavailableResponse(),
+			};
+		}
 		return {
 			ok: false,
 			response: mcpUnauthorizedResponse(
@@ -1377,13 +1396,33 @@ function unauthorized(): Extract<AuthResult, { ok: false }> {
 	};
 }
 
-function remoteJwks(url: string): JWTVerifyGetKey {
-	let jwks = jwksByUrl.get(url);
-	if (!jwks) {
-		jwks = createRemoteJWKSet(new URL(url));
-		jwksByUrl.set(url, jwks);
-	}
-	return jwks;
+function jwksUnavailable(): Extract<AuthResult, { ok: false }> {
+	return {
+		ok: false,
+		response: new Response("Authentication is temporarily unavailable\n", {
+			status: 503,
+		}),
+	};
+}
+
+function mcpJwksUnavailableResponse(): Response {
+	return new Response("MCP authentication is temporarily unavailable\n", {
+		status: 503,
+		headers: {
+			"access-control-allow-origin": "*",
+			"retry-after": "2",
+		},
+	});
+}
+
+export async function warmJwtVerifier(
+	env: Pick<WorkerEnv, "SUPABASE_JWKS_URL" | "LIXRAY_JWKS_CACHE_PATH">,
+): Promise<void> {
+	const jwksUrl = env.SUPABASE_JWKS_URL?.trim();
+	if (!jwksUrl) return;
+	await warmRemoteJwks(jwksUrl, {
+		cachePath: env.LIXRAY_JWKS_CACHE_PATH?.trim() || undefined,
+	});
 }
 
 function rewriteLixRequest(

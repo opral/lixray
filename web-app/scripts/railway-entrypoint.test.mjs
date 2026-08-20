@@ -14,3 +14,16 @@ void test("the Railway entrypoint does not load the Node SQL parser or WASM", as
 	assert.doesNotMatch(source, /cloudflare|workerd|wrangler/i);
 	assert.doesNotMatch(source, /import\.meta\.env\.DEV/);
 });
+
+void test("Railway start warms persisted JWKS before accepting traffic", async () => {
+	const source = await readFile(
+		new URL("./start-railway.mjs", import.meta.url),
+		"utf8",
+	);
+	assert.match(source, /app\.warmJwtVerifier/);
+	assert.match(source, /LIXRAY_JWKS_CACHE_PATH/);
+	assert.ok(
+		source.indexOf("warmJwtVerifier") < source.indexOf("server.listen"),
+		"JWKS warmup must finish before the HTTP server listens",
+	);
+});
