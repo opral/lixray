@@ -1333,6 +1333,150 @@ void test("anonymous public binary file reads forward without SQL parsing", asyn
 	);
 });
 
+void test("a published file resolves by path without exposing private SQL", async () => {
+	const originalFetch = globalThis.fetch;
+	let lookupBody: unknown;
+	let proxied = 0;
+	globalThis.fetch = async (_input, init) => {
+		assert.equal(typeof init?.body, "string");
+		if (typeof init?.body !== "string") {
+			throw new TypeError("Expected a JSON request body");
+		}
+		lookupBody = JSON.parse(init.body) as unknown;
+		return Response.json([
+			{
+				lix_id: LIX_A,
+				visibility: "private",
+				path_public: true,
+			},
+		]);
+	};
+	try {
+		const fileResponse = await handleRequest(
+			remoteLixRequest("/file?path=%2Ffinance%2Fq1.pdf"),
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+			{
+				lixFetch: async () => {
+					proxied += 1;
+					return new Response("published file");
+				},
+			},
+		);
+		assert.equal(fileResponse.status, 200);
+		assert.equal(await fileResponse.text(), "published file");
+		assert.deepEqual(lookupBody, {
+			p_namespace_handle: "acme",
+			p_lix_slug: "launch-q3",
+			p_path: "/finance/q1.pdf",
+		});
+
+		const sqlResponse = await handleRequest(
+			remoteLixRequest("/execute", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-lixray-public-path": "/finance/q1.pdf",
+				},
+				body: JSON.stringify({ sql: "SELECT * FROM lix_file" }),
+			}),
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+			{
+				lixFetch: async () => {
+					proxied += 1;
+					return new Response("private rows leaked");
+				},
+			},
+		);
+		assert.equal(sqlResponse.status, 404);
+		assert.equal(proxied, 1);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+void test("a published directory exposes only its direct child names", async () => {
+	const protocolPaths: string[] = [];
+	let executeBody: unknown;
+	const response = await handleRequest(
+		remoteLixRequest("/published-directory?path=%2Ffinance"),
+		env({}),
+		{
+			resolvePublicLix: async (namespace, lixSlug, _env, publicPath) => {
+				assert.equal(namespace, "acme");
+				assert.equal(lixSlug, "launch-q3");
+				assert.equal(publicPath, "/finance");
+				return { ok: true, lixId: LIX_A, scope: "path" };
+			},
+			lixFetch: async (lixId, request) => {
+				assert.equal(lixId, LIX_A);
+				assert.equal(
+					request.headers.get("x-lixray-idempotency-principal"),
+					"00000000-0000-7000-8000-000000000002",
+				);
+				const path = new URL(request.url).pathname;
+				protocolPaths.push(path);
+				if (path === "/lix/v1/") {
+					return Response.json({
+						protocolVersion: 2,
+						activeBranchId: "main",
+						activeAccountId: "00000000-0000-7000-8000-000000000002",
+						sessionId: "published-directory-session",
+					});
+				}
+				if (path === "/lix/v1/session") {
+					assert.equal(request.method, "DELETE");
+					return new Response(null, { status: 204 });
+				}
+				assert.equal(path, "/lix/v1/execute");
+				executeBody = await request.json();
+				return Response.json({
+					columns: ["path", "kind"],
+					rows: [
+						[
+							{ kind: "text", value: "/finance/budget.csv" },
+							{ kind: "text", value: "file" },
+						],
+						[
+							{ kind: "text", value: "/finance/reports" },
+							{ kind: "text", value: "directory" },
+						],
+					],
+					rowsAffected: 0,
+					notices: [],
+				});
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), {
+		entries: [
+			{ path: "/finance/budget.csv", kind: "file" },
+			{ path: "/finance/reports", kind: "directory" },
+		],
+		truncated: false,
+	});
+	assert.ok(isRecord(executeBody));
+	assert.match(String(executeBody.sql), /FROM lix_file/);
+	assert.match(String(executeBody.sql), /FROM lix_directory/);
+	assert.deepEqual(executeBody.params, [{ kind: "text", value: "/finance" }]);
+	assert.deepEqual(protocolPaths, [
+		"/lix/v1/",
+		"/lix/v1/execute",
+		"/lix/v1/session",
+	]);
+});
+
 void test("anonymous binary file writes remain unauthorized", async () => {
 	let publicLixLookedUp = false;
 	let proxied = false;

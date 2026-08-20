@@ -59,12 +59,12 @@ select set_config(
 	true
 );
 
-select results_eq(
-	$$select can_edit from public.resolve_public_lix_by_route(
+select is(
+	(select count(*) from public.resolve_public_lix_by_route(
 		'invite-owner', 'invited-repository'
-	)$$,
-	$$values (false)$$,
-	'the invitee starts with read-only public access'
+	)),
+	0::bigint,
+	'the invitee cannot discover the private repository before joining'
 );
 
 select lives_ok(

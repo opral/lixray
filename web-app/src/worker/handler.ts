@@ -160,7 +160,12 @@ type ResolvePublicLix = (
 	namespace: string,
 	lixSlug: string,
 	env: WorkerEnv,
-) => Promise<LixResolution>;
+	publicPath?: string,
+) => Promise<PublicLixResolution>;
+
+type PublicLixResolution =
+	| { ok: true; lixId: string; scope?: "repository" | "path" }
+	| { ok: false; response: Response };
 
 /**
  * Lix's SQL script parser, injected by the worker entry so the public read
@@ -188,6 +193,10 @@ const PROD_DEV_AUTH_PATH = "/auth/email";
 const PROD_DEV_EMAIL = "dev@lixray.com";
 const PUBLIC_PRODUCTION_ORIGIN = "https://lixray.com";
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
+// Keep server-owned public reads attributed to Lix's built-in anonymous
+// account. Protocol principals are persisted as lix_account IDs, so an
+// arbitrary service label is not valid here.
+const LIX_ANONYMOUS_ACCOUNT_ID = "00000000-0000-7000-8000-000000000002";
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
 
@@ -468,6 +477,10 @@ export async function handleRequest(
 		const endpoint = remoteLixMatch[3]?.replace(/\/+$/, "") ?? "";
 		const protocolPath = `/lix/v1${endpoint ? `/${endpoint}` : "/"}`;
 		const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
+		const publicPath =
+			(endpoint === "file" || endpoint === "published-directory"
+				? url.searchParams.get("path")
+				: request.headers.get("x-lixray-public-path")) ?? undefined;
 
 		const authenticate = options.authenticate ?? authenticateWithSupabase;
 		const authCheckStartedAt = performance.now();
@@ -532,10 +545,48 @@ export async function handleRequest(
 					namespace,
 					lixSlug,
 					env,
+					publicPath,
 				),
 		);
 		if (!publicResolution.ok) {
 			return withServerTimings(publicResolution.response, serverTimings);
+		}
+		if (
+			publicResolution.scope === "path" &&
+			!(
+				!endpoint ||
+				endpoint === "session" ||
+				endpoint === "file" ||
+				endpoint === "published-directory"
+			)
+		) {
+			return withServerTimings(lixNotFound().response, serverTimings);
+		}
+		if (endpoint === "published-directory") {
+			if (!publicPath || !options.lixFetch) {
+				return withServerTimings(lixNotFound().response, serverTimings);
+			}
+			try {
+				const listing = await measureServerTiming(
+					serverTimings,
+					"lixray-server-roundtrip",
+					() =>
+						listPublishedDirectory(
+							publicResolution.lixId,
+							publicPath,
+							env,
+							options.lixFetch as NonNullable<HandleRequestOptions["lixFetch"]>,
+							request.signal,
+						),
+				);
+				return withServerTimings(json(listing), serverTimings);
+			} catch (caught) {
+				console.error("Unable to list a published directory", caught);
+				return withServerTimings(
+					new Response("Published directory is unavailable\n", { status: 502 }),
+					serverTimings,
+				);
+			}
 		}
 		const mutationRejection = await rejectPublicMutation(request, endpoint);
 		if (mutationRejection) {
@@ -1151,7 +1202,7 @@ export async function resolveLixWithSupabase(
 	return { ok: true, lixId: result.lixId };
 }
 
-function lixNotFound(): LixResolution {
+function lixNotFound(): { ok: false; response: Response } {
 	return {
 		ok: false,
 		response: new Response("Lix not found\n", { status: 404 }),
@@ -1179,7 +1230,8 @@ async function resolvePublicLixWithSupabase(
 	namespace: string,
 	lixSlug: string,
 	env: WorkerEnv,
-): Promise<LixResolution> {
+	publicPath?: string,
+): Promise<PublicLixResolution> {
 	if (isDemoMode(env)) {
 		const lix = demoLixSummaries(env).find(
 			(candidate) =>
@@ -1212,6 +1264,7 @@ async function resolvePublicLixWithSupabase(
 			body: JSON.stringify({
 				p_namespace_handle: namespace,
 				p_lix_slug: lixSlug,
+				...(publicPath ? { p_path: publicPath } : {}),
 			}),
 		});
 	} catch {
@@ -1222,11 +1275,21 @@ async function resolvePublicLixWithSupabase(
 	}
 	try {
 		const rows: unknown = await response.json();
-		const lixId =
-			Array.isArray(rows) && rows.length === 1 ? lixRowId(rows[0]) : null;
-		return typeof lixId === "string" && lixId
-			? { ok: true, lixId }
-			: lixNotFound();
+		const candidate: unknown =
+			Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
+		if (!candidate || typeof candidate !== "object") return lixNotFound();
+		const row = candidate as Record<string, unknown>;
+		const lixId = lixRowId(row);
+		if (typeof lixId !== "string" || !lixId) {
+			return lixNotFound();
+		}
+		if ("visibility" in row && row.visibility === "public") {
+			return { ok: true, lixId, scope: "repository" };
+		}
+		if (publicPath && "path_public" in row && row.path_public === true) {
+			return { ok: true, lixId, scope: "path" };
+		}
+		return lixNotFound();
 	} catch {
 		return lixResolutionUnavailable();
 	}
@@ -1251,12 +1314,80 @@ function isPublicReadRemoteLixRequest(
 	if (!endpoint) return request.method === "GET";
 	if (endpoint === "session") return request.method === "DELETE";
 	if (endpoint === "file") return request.method === "GET";
+	if (endpoint === "published-directory") return request.method === "GET";
 	return (
 		request.method === "POST" &&
 		["execute", "execute-batch", "observe", "observe/multiplex"].includes(
 			endpoint,
 		)
 	);
+}
+
+type PublishedDirectoryEntry = {
+	path: string;
+	kind: "file" | "directory";
+};
+
+/**
+ * A path publication must not turn into a general-purpose SQL capability.
+ * This server-owned query exposes only the direct file/directory names below
+ * the already-authorized directory. Descendant authorization remains dynamic:
+ * opening any returned child resolves it against the directory publication.
+ */
+async function listPublishedDirectory(
+	lixId: string,
+	directoryPath: string,
+	env: WorkerEnv,
+	lixFetch: NonNullable<HandleRequestOptions["lixFetch"]>,
+	signal: AbortSignal,
+): Promise<{ entries: PublishedDirectoryEntry[]; truncated: boolean }> {
+	const client = new WorkerLixRuntimeClient(
+		env,
+		{ userId: LIX_ANONYMOUS_ACCOUNT_ID, token: "" },
+		() => Promise.resolve(null),
+		{ lixFetch, signal },
+	);
+	try {
+		const result = await client.execute(lixId, {
+			sql: `
+WITH published_directory AS (
+  SELECT id FROM lix_directory WHERE path = $1 LIMIT 1
+)
+SELECT path, 'file' AS kind
+FROM lix_file
+WHERE directory_id = (SELECT id FROM published_directory)
+UNION ALL
+SELECT path, 'directory' AS kind
+FROM lix_directory
+WHERE parent_id = (SELECT id FROM published_directory)
+ORDER BY path
+LIMIT 1001`,
+			params: [{ kind: "text", value: directoryPath }],
+		});
+		const pathColumn = result.columns.indexOf("path");
+		const kindColumn = result.columns.indexOf("kind");
+		if (pathColumn === -1 || kindColumn === -1) {
+			throw new Error("Published directory query returned unexpected columns.");
+		}
+		const entries = result.rows.flatMap((row): PublishedDirectoryEntry[] => {
+			const path = row[pathColumn];
+			const kind = row[kindColumn];
+			if (
+				path?.kind !== "text" ||
+				kind?.kind !== "text" ||
+				(kind.value !== "file" && kind.value !== "directory")
+			) {
+				return [];
+			}
+			return [{ path: path.value, kind: kind.value }];
+		});
+		return {
+			entries: entries.slice(0, 1000),
+			truncated: entries.length > 1000,
+		};
+	} finally {
+		await client.close();
+	}
 }
 
 /**
