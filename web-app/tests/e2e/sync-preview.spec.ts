@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 test("deployed OPFS clients sync files, editors, and hot checkpoint history", async ({
 	browser,
@@ -15,6 +15,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	}
 
 	const repositoryUrl = new URL("/@acme/launch-q3", baseURL).toString();
+	const realtimeTimeout = 5_000;
 	const contexts = await Promise.all([
 		browser.newContext(),
 		browser.newContext(),
@@ -35,8 +36,29 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		deploymentId: expectedDeploymentId,
 	});
 	const syncFailures: string[] = [];
+	const runtimeFailures: string[] = [];
 	const coldReads: string[] = [];
-	for (const page of [left, right]) {
+	const observePage = (page: Page) => {
+		page.on("pageerror", (error) => {
+			runtimeFailures.push(`pageerror: ${error.message}`);
+		});
+		page.on("console", (message) => {
+			if (message.type() === "error") {
+				runtimeFailures.push(`console: ${message.text()}`);
+			}
+		});
+		page.on("requestfailed", (request) => {
+			if (request.url().includes("/lix/v1/")) {
+				const errorText = request.failure()?.errorText ?? "unknown";
+				if (
+					request.url().includes("/lix/v1/sync/pull") &&
+					/abort|cancel/i.test(errorText)
+				) {
+					return;
+				}
+				runtimeFailures.push(`requestfailed: ${errorText} ${request.url()}`);
+			}
+		});
 		page.on("response", (response) => {
 			const url = response.url();
 			if (!url.includes("/lix/v1/sync/")) return;
@@ -52,9 +74,28 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				coldReads.push(url);
 			}
 		});
+	};
+	for (const page of [left, right]) {
+		observePage(page);
 	}
 
 	try {
+		const createFileFromHome = async (
+			page: Page,
+			buttonName: string,
+		): Promise<string> => {
+			await page.goto(repositoryUrl);
+			await page.getByTestId("home-entry-list").waitFor({ timeout: 30_000 });
+			await page.getByTestId("home-new-button").click();
+			await page.getByRole("button", { name: buttonName, exact: true }).click();
+			await page.waitForURL((url) => url.toString() !== repositoryUrl, {
+				timeout: 30_000,
+			});
+			return decodeURIComponent(
+				new URL(page.url()).pathname.split("/").at(-1) ?? "",
+			);
+		};
+
 		await Promise.all([left.goto(repositoryUrl), right.goto(repositoryUrl)]);
 		await Promise.all([
 			left.getByTestId("home-entry-list").waitFor({ timeout: 120_000 }),
@@ -78,11 +119,13 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 
 		await expect(left.getByTestId("home-entry-list")).toContainText(
 			createdName,
-			{ timeout: 30_000 },
+			{ timeout: realtimeTimeout },
 		);
 		await left.goto(createdUrl);
 		const leftEditor = left.locator('.ProseMirror[contenteditable="true"]');
-		await expect(leftEditor).toContainText(rightMarker, { timeout: 30_000 });
+		await expect(leftEditor).toContainText(rightMarker, {
+			timeout: realtimeTimeout,
+		});
 
 		await right.goto(createdUrl);
 		await rightEditor.waitFor({ timeout: 30_000 });
@@ -91,7 +134,106 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		await left.keyboard.press("End");
 		await left.keyboard.insertText(leftMarker);
 		await left.keyboard.press("Tab");
-		await expect(rightEditor).toContainText(leftMarker, { timeout: 30_000 });
+		await expect(rightEditor).toContainText(leftMarker, {
+			timeout: realtimeTimeout,
+		});
+		for (const page of [left, right]) {
+			await expect(
+				page.getByRole("button", {
+					name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+				}),
+			).toBeVisible({ timeout: 30_000 });
+		}
+
+		await left
+			.getByRole("button", {
+				name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+			})
+			.click();
+		await left.getByRole("button", { name: "Checkpoint", exact: true }).click();
+		await expect(
+			right.getByRole("button", {
+				name: "Latest checkpoint. Open checkpoint history",
+			}),
+		).toBeVisible({ timeout: realtimeTimeout });
+
+		// The checkpoint coordinate is part of branch state. A later remote edit
+		// must advance the receiver's head without silently advancing its checkpoint.
+		const afterCheckpointMarker = `after-checkpoint-${Date.now()}`;
+		await rightEditor.click();
+		await right.keyboard.press("End");
+		await right.keyboard.insertText(afterCheckpointMarker);
+		await right.keyboard.press("Tab");
+		await expect(leftEditor).toContainText(afterCheckpointMarker, {
+			timeout: realtimeTimeout,
+		});
+		await expect(
+			left.getByRole("button", {
+				name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+			}),
+		).toBeVisible({ timeout: realtimeTimeout });
+
+		// Deliberately race two distinct local commits. One push should lose the
+		// authority ref-CAS and then reconcile; both replicas must retain both rows.
+		const [leftConcurrentName, rightConcurrentName] = await Promise.all([
+			createFileFromHome(left, "New Markdown (.md)"),
+			createFileFromHome(right, "New CSV (.csv)"),
+		]);
+		await Promise.all([left.goto(repositoryUrl), right.goto(repositoryUrl)]);
+		for (const page of [left, right]) {
+			const entries = page.getByTestId("home-entry-list");
+			await expect(entries).toContainText(leftConcurrentName, {
+				timeout: 30_000,
+			});
+			await expect(entries).toContainText(rightConcurrentName, {
+				timeout: 30_000,
+			});
+			await expect(
+				page.getByRole("button", {
+					name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+				}),
+			).toBeVisible({ timeout: 30_000 });
+		}
+
+		// A context created only after the writes exercises snapshot bootstrap, as
+		// an incognito window does. It must receive both head and checkpoint, render
+		// the hot History queries, and preserve the dirty working-diff baseline.
+		const freshContext = await browser.newContext();
+		contexts.push(freshContext);
+		const fresh = await freshContext.newPage();
+		observePage(fresh);
+		await fresh.goto(repositoryUrl);
+		const freshEntries = fresh.getByTestId("home-entry-list");
+		await expect(freshEntries).toContainText(createdName, { timeout: 30_000 });
+		await expect(freshEntries).toContainText(leftConcurrentName);
+		await expect(freshEntries).toContainText(rightConcurrentName);
+		await expect(
+			fresh.getByRole("button", {
+				name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+			}),
+		).toBeVisible({ timeout: 30_000 });
+		const freshHistoryTab = fresh
+			.getByRole("button", { name: "History", exact: true })
+			.last();
+		if (!(await freshHistoryTab.isVisible())) {
+			await fresh.getByRole("button", { name: "Toggle right panel" }).click();
+		}
+		const coldReadsBeforeFreshHistory = coldReads.length;
+		await freshHistoryTab.click();
+		const freshHistory = fresh.getByRole("region", {
+			name: "Checkpoint history",
+		});
+		await expect(freshHistory).toBeVisible({ timeout: 5_000 });
+		await expect(
+			freshHistory.getByRole("button", { name: "Working changes" }),
+		).toContainText(/now · [1-9]\d* changes?/);
+		await expect(freshHistory).toContainText("Latest checkpoint");
+		await expect(freshHistory).toContainText("Initial checkpoint");
+		await expect(
+			fresh.locator("[data-atelier-extension-suspended]"),
+		).toHaveCount(0);
+		await fresh.waitForTimeout(500);
+		expect(coldReads).toHaveLength(coldReadsBeforeFreshHistory);
 
 		const coldReadsBeforeHistory = coldReads.length;
 		for (const page of [left, right]) {
@@ -104,11 +246,13 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				name: "Checkpoint history",
 			});
 			await expect(history).toContainText("Working changes");
+			await expect(history).toContainText("Latest checkpoint");
 			await expect(history).toContainText("Initial checkpoint");
 		}
 		await left.waitForTimeout(500);
 		expect(coldReads).toHaveLength(coldReadsBeforeHistory);
 		expect(syncFailures).toEqual([]);
+		expect(runtimeFailures).toEqual([]);
 	} finally {
 		await Promise.all(contexts.map((context) => context.close()));
 	}
