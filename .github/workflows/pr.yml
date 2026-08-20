@@ -716,3 +716,46 @@ jobs:
     steps:
       - name: Publish GitHub deployment
         run: echo "Preview is available at ${{ needs.deploy-preview.outputs.preview_url }}"
+
+  preview-e2e:
+    name: Preview sync E2E
+    if: needs.deploy-preview.outputs.preview_url != ''
+    needs:
+      - deploy-preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up web toolchain
+        uses: ./.github/actions/setup-web
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm --dir web-app exec playwright install --with-deps chromium
+
+      - name: Test deployed two-client sync
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ needs.deploy-preview.outputs.preview_url }}
+          PLAYWRIGHT_SYNC_PREVIEW: "1"
+        run: pnpm --dir web-app exec playwright test tests/e2e/sync-preview.spec.ts
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-sync-playwright-failure
+          path: web-app/test-results
+          if-no-files-found: ignore
+          retention-days: 7

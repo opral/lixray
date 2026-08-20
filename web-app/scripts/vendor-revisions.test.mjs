@@ -62,6 +62,9 @@ test("PR previews promote both tested images instead of rebuilding source", asyn
 		/url: \$\{\{ needs\.deploy-preview\.outputs\.preview_url \}\}/,
 	);
 	assert.match(workflow, /publish-preview:/);
+	assert.match(workflow, /preview-e2e:/);
+	assert.match(workflow, /PLAYWRIGHT_SYNC_PREVIEW: "1"/);
+	assert.match(workflow, /tests\/e2e\/sync-preview\.spec\.ts/);
 	assert.match(workflow, /RAILWAY_DEPLOY_POLICY: pr/);
 	assert.match(workflow, /promote-production\.sh/);
 	assert.match(cleanupWorkflow, /manage-railway-preview\.sh delete/);

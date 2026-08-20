@@ -33,6 +33,8 @@ const RECOVERING_OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
 
 export interface RepositoryLixSession {
 	readonly lix: Lix;
+	/** Resolves only when the session's observer channel stops unexpectedly. */
+	waitForSyncFailure(): Promise<unknown | null>;
 	activeBranchSnapshot(): string;
 	defaultBranchSnapshot(): string;
 	subscribeActiveBranch(listener: () => void): () => void;
@@ -279,6 +281,8 @@ function delay(milliseconds: number): Promise<void> {
 class RemoteRepositoryLixSession implements RepositoryLixSession {
 	readonly lix: Lix;
 	readonly #listeners = new Set<() => void>();
+	readonly #syncObserver: ReturnType<Lix["observe"]>;
+	readonly #syncFailure: Promise<unknown | null>;
 	readonly #defaultBranchId: string;
 	#activeBranchId: string;
 	#closed = false;
@@ -287,6 +291,12 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 		this.lix = lix;
 		this.#defaultBranchId = defaultBranchId;
 		this.#activeBranchId = defaultBranchId;
+		this.#syncObserver = lix.observe("SELECT 1", []);
+		this.#syncFailure = this.#monitorSync();
+	}
+
+	waitForSyncFailure(): Promise<unknown | null> {
+		return this.#syncFailure;
 	}
 
 	activeBranchSnapshot(): string {
@@ -325,17 +335,32 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 		if (this.#closed) return;
 		this.#closed = true;
 		this.#listeners.clear();
+		this.#syncObserver.close();
 		await this.lix.close();
 	}
 
 	terminateForPageUnload(): void {
 		this.#closed = true;
 		this.#listeners.clear();
+		this.#syncObserver.close();
 		this.lix.terminateForPageUnload();
 	}
 
 	#assertOpen(): void {
 		if (this.#closed) throw new Error("The repository Lix session is closed.");
+	}
+
+	async #monitorSync(): Promise<unknown | null> {
+		try {
+			while ((await this.#syncObserver.next()) !== undefined) {
+				// The result is irrelevant: the observer is the session health signal.
+			}
+			return this.#closed
+				? null
+				: new Error("The repository sync observer stopped unexpectedly.");
+		} catch (error) {
+			return this.#closed ? null : error;
+		}
 	}
 }
 
@@ -350,6 +375,10 @@ class RepositoryLixSessionLease implements RepositoryLixSession {
 		this.lix = session.lix;
 		this.#session = session;
 		this.#release = release;
+	}
+
+	waitForSyncFailure(): Promise<unknown | null> {
+		return this.#session.waitForSyncFailure();
 	}
 
 	activeBranchSnapshot(): string {

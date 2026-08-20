@@ -832,6 +832,7 @@ export function RepositoryAtelier({
 
 	useEffect(() => {
 		let disposed = false;
+		let syncFailed = false;
 		let activeLix: RepositoryLixSession | null = null;
 		setInstance(null);
 		setBranchSession(null);
@@ -864,6 +865,20 @@ export function RepositoryAtelier({
 				activeLix = session;
 				activeLixRef.current = session;
 				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
+				void session.waitForSyncFailure().then((syncError) => {
+					if (disposed || activeLix !== session || syncError === null) return;
+					syncFailed = true;
+					captureExceptionTelemetry(syncError, {
+						operation: "repository_sync",
+						lix_id: repositoryId,
+						namespace_id: namespace,
+					});
+					setInstance(null);
+					setBranchSession(null);
+					setRepositoryDefaultBranchId(null);
+					activeLixRef.current = null;
+					setError(formatRepositoryOpenError(syncError));
+				});
 
 				// Initialize telemetry handler with repository context
 				atelierTelemetryHandlerRef.current = createAtelierTelemetryHandler(
@@ -902,7 +917,7 @@ export function RepositoryAtelier({
 				// This query is part of boot. If it cannot answer, the repository must
 				// show the real error instead of silently taking the non-empty path.
 				const startsEmpty = await repositoryHasNoFiles(session.lix);
-				if (disposed) return;
+				if (disposed || syncFailed) return;
 				const atelierInstance = createAtelier({
 					lix: session.lix,
 					readOnly: isReadOnly,
