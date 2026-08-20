@@ -204,8 +204,9 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				return { fresh, freshEntries };
 			});
 
-		await right.goto(createdUrl);
-		await rightEditor.waitFor({ timeout: 30_000 });
+		// Keep the originating editor warm for the reverse direction. Reload and
+		// OPFS-resume behavior is qualified independently below; coupling it to the
+		// realtime budget made this assertion measure startup contention.
 		const leftMarker = `left-${Date.now()}`;
 		await leftEditor.click();
 		await left.keyboard.press("End");
