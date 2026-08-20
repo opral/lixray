@@ -12,7 +12,7 @@ import {
 	resolveRepositoryHref,
 	type RepositoryTree,
 	repositoryHasNoFiles,
-	resolveObservedRowsAfterError,
+	preserveObservedRowsAfterError,
 	WORKING_DIFF_COUNT_SQL,
 } from "./lix-data.ts";
 
@@ -62,25 +62,20 @@ void test("queries the latest Lix working-diff table function", () => {
 	);
 });
 
-void test("optional observer failures resolve first-frame loading to empty data", () => {
-	assert.deepEqual(resolveObservedRowsAfterError(null, true), {
-		rows: [],
-		hadRows: false,
-	});
+void test("observer failures expose first-frame errors without inventing rows", () => {
+	const error = new Error("observe failed");
+	assert.deepEqual(
+		preserveObservedRowsAfterError({ rows: null, error: null }, error),
+		{ rows: null, error },
+	);
 });
 
-void test("optional observer failures after a frame preserve its rows", () => {
+void test("observer failures after a frame preserve its rows", () => {
 	const rows = [{ value: "cached" }];
-	const resolved = resolveObservedRowsAfterError(rows, true);
+	const error = new Error("observe failed");
+	const resolved = preserveObservedRowsAfterError({ rows, error: null }, error);
 	assert.equal(resolved.rows, rows);
-	assert.equal(resolved.hadRows, true);
-});
-
-void test("authoritative observer failures remain unresolved for explicit error UI", () => {
-	assert.deepEqual(resolveObservedRowsAfterError(null, false), {
-		rows: null,
-		hadRows: false,
-	});
+	assert.equal(resolved.error, error);
 });
 
 void test("lists directory entries from their separate surfaces", () => {

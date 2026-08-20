@@ -109,9 +109,7 @@ export function DirectoryView({
 	onOpenSqlExplorer,
 	onOpenReview,
 }: DirectoryViewProps) {
-	const [treeFailed, setTreeFailed] = useState(false);
-	const markTreeFailed = useCallback(() => setTreeFailed(true), []);
-	const tree = useRepositoryTree(lix, markTreeFailed);
+	const { tree, error: treeError } = useRepositoryTree(lix);
 	const controlPlaneData = useRepositoryControlPlaneData(
 		lix,
 		isHome && dirPath === "/",
@@ -122,7 +120,6 @@ export function DirectoryView({
 	);
 	const readme = useFileMarkdown(lix, listing?.readmePath ?? null);
 	const [actionError, setActionError] = useState<string | null>(null);
-	useEffect(() => setTreeFailed(false), [lix]);
 	const { isDropTarget, dragHandlers } = useImportDrop({
 		lix,
 		dirPath,
@@ -176,7 +173,7 @@ export function DirectoryView({
 	}, [dirPath, isActive, lix, onOpenFile, readOnly]);
 
 	if (!tree || !listing) {
-		if (treeFailed) {
+		if (treeError) {
 			return (
 				<div
 					role="alert"
@@ -437,10 +434,13 @@ function ChangesSummary({
 			<div className="mt-3 h-[118px] animate-pulse rounded-lg bg-bg-hover" />
 		);
 	}
-	const hasCheckpoint = data.checkpointDates.length > 0;
-	const changeCount = hasCheckpoint
-		? data.workingChangeCount
-		: data.totalChangeCount;
+	const hasCheckpoint = (data.checkpointDates?.length ?? 0) > 0;
+	const changeCount =
+		data.checkpointDates === null
+			? null
+			: hasCheckpoint
+				? data.workingChangeCount
+				: data.totalChangeCount;
 
 	return (
 		<div className="mt-2.5">
@@ -487,7 +487,7 @@ function ChangeBars({ data }: { readonly data: RepositoryControlPlaneData }) {
 		);
 	}
 	const maxCount = Math.max(1, ...days.map((day) => day.count));
-	const latestCheckpointDay = data.checkpointDates[0]?.slice(0, 10) ?? null;
+	const latestCheckpointDay = data.checkpointDates?.[0]?.slice(0, 10) ?? null;
 	const visibleDays = days.length > 0 ? days : [{ day: "", count: 0 }];
 	const paddedDays = [
 		...Array.from({ length: Math.max(0, 9 - visibleDays.length) }, () => ({
@@ -552,7 +552,7 @@ function DatabaseSummary({
 			<div className="mt-3 h-[132px] animate-pulse rounded-lg bg-bg-hover" />
 		);
 	}
-	const checkpointCount = data.checkpointDates.length;
+	const checkpointCount = data.checkpointDates?.length ?? null;
 	const rows = [
 		{ label: "Files", count: fileCount, color: "bg-[#e8590c]" },
 		{ label: "Checkpoints", count: checkpointCount, color: "bg-[#d8cdbc]" },
@@ -824,7 +824,7 @@ export function GettingStartedView({
 	) => void;
 }) {
 	const [actionError, setActionError] = useState<string | null>(null);
-	const tree = useRepositoryTree(lix);
+	const { tree } = useRepositoryTree(lix);
 	const firstFileOpenedRef = useRef(false);
 	const { isDropTarget, dragHandlers } = useImportDrop({
 		lix,
