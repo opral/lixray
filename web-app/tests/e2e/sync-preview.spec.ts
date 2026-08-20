@@ -9,6 +9,10 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		"requires a deployed preview",
 	);
 	if (!baseURL) throw new Error("PLAYWRIGHT_BASE_URL is required");
+	const expectedDeploymentId = process.env.PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID;
+	if (!expectedDeploymentId) {
+		throw new Error("PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID is required");
+	}
 
 	const repositoryUrl = new URL("/@acme/launch-q3", baseURL).toString();
 	const contexts = await Promise.all([
@@ -18,6 +22,18 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	const [left, right] = await Promise.all(
 		contexts.map((context) => context.newPage()),
 	);
+	const healthResponse = await contexts[0]!.request.get(
+		new URL("/healthz", baseURL).toString(),
+	);
+	expect(healthResponse.status()).toBe(200);
+	expect(healthResponse.headers()["x-railway-deployment-id"]).toBe(
+		expectedDeploymentId,
+	);
+	expect(await healthResponse.json()).toMatchObject({
+		ok: true,
+		service: "lixray",
+		deploymentId: expectedDeploymentId,
+	});
 	const syncFailures: string[] = [];
 	const coldReads: string[] = [];
 	for (const page of [left, right]) {

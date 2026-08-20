@@ -567,6 +567,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       preview_url: ${{ steps.preview.outputs.preview_url }}
+      deployment_id: ${{ steps.promote.outputs.web_deployment_id }}
     permissions:
       contents: read
       id-token: write
@@ -655,6 +656,7 @@ jobs:
         run: .github/scripts/manage-railway-preview.sh ensure
 
       - name: Deploy tested images to preview
+        id: promote
         if: steps.credentials.outputs.available == 'true'
         shell: bash
         env:
@@ -748,6 +750,7 @@ jobs:
       - name: Test deployed two-client sync
         env:
           PLAYWRIGHT_BASE_URL: ${{ needs.deploy-preview.outputs.preview_url }}
+          PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID: ${{ needs.deploy-preview.outputs.deployment_id }}
           PLAYWRIGHT_SYNC_PREVIEW: "1"
         run: pnpm --dir web-app exec playwright test tests/e2e/sync-preview.spec.ts
 

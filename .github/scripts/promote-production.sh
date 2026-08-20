@@ -214,6 +214,10 @@ for attempt in $(seq 1 "$POLL_ATTEMPTS"); do
 			echo "| Web | \`$web_id\` | \`$WEB_IMAGE\` |"
 			echo "| Server | \`$server_id\` | \`$SERVER_IMAGE\` |"
 		} >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
+		if test -n "${GITHUB_OUTPUT:-}"; then
+			echo "web_deployment_id=$web_id" >>"$GITHUB_OUTPUT"
+			echo "server_deployment_id=$server_id" >>"$GITHUB_OUTPUT"
+		fi
 		echo "Railway $RAILWAY_RELEASE_LABEL release is healthy."
 		exit 0
 	fi

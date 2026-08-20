@@ -84,6 +84,7 @@ export interface WorkerEnv {
 	LIXRAY_JWKS_CACHE_PATH?: string;
 	LIXRAY_RELEASE_ID?: string;
 	RAILWAY_ENVIRONMENT_NAME?: string;
+	RAILWAY_DEPLOYMENT_ID?: string;
 	RAILWAY_GIT_COMMIT_SHA?: string;
 }
 
@@ -217,7 +218,16 @@ export async function handleRequest(
 	const url = new URL(request.url);
 
 	if (request.method === "GET" && url.pathname === "/healthz") {
-		return json({ ok: true, service: "lixray" });
+		const deploymentId = env.RAILWAY_DEPLOYMENT_ID?.trim() || null;
+		return json(
+			{ ok: true, service: "lixray", deploymentId },
+			{
+				headers: {
+					"cache-control": "no-store",
+					...(deploymentId ? { "x-railway-deployment-id": deploymentId } : {}),
+				},
+			},
+		);
 	}
 
 	if (url.pathname === PROD_DEV_AUTH_PATH) {

@@ -37,7 +37,30 @@ void test("GET /healthz returns Worker health without auth or proxying", async (
 		env({}),
 	);
 	assert.equal(response.status, 200);
-	assert.deepEqual(await response.json(), { ok: true, service: "lixray" });
+	assert.equal(response.headers.get("cache-control"), "no-store");
+	assert.equal(response.headers.get("x-railway-deployment-id"), null);
+	assert.deepEqual(await response.json(), {
+		ok: true,
+		service: "lixray",
+		deploymentId: null,
+	});
+});
+
+void test("GET /healthz identifies the exact Railway deployment", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/healthz"),
+		env({ extra: { RAILWAY_DEPLOYMENT_ID: "web-deployment-123" } }),
+	);
+	assert.equal(response.status, 200);
+	assert.equal(
+		response.headers.get("x-railway-deployment-id"),
+		"web-deployment-123",
+	);
+	assert.deepEqual(await response.json(), {
+		ok: true,
+		service: "lixray",
+		deploymentId: "web-deployment-123",
+	});
 });
 
 void test("production email sign-in status is disabled outside production", async () => {

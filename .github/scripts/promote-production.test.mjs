@@ -17,6 +17,7 @@ test("promotes both immutable images and waits for both deployments", async () =
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Railway production release is healthy/);
+  assert.match(await readFile(fixture.output, "utf8"), /web_deployment_id=new-web-service/);
   const calls = await readFile(fixture.calls, "utf8");
   assert.match(calls, /ghcr\.io\/opral\/lixray-web@sha256:web/);
   assert.match(calls, /ghcr\.io\/opral\/lixray-server@sha256:server/);
@@ -97,7 +98,7 @@ fi
 `,
   );
   await Promise.all([chmod(railway, 0o755), chmod(curl, 0o755)]);
-  return { calls, curl, deployed, directory, railway };
+  return { calls, curl, deployed, directory, output: join(directory, "output"), railway };
 }
 
 function runCoordinator(fixture, statuses, extraEnv = {}) {
@@ -111,6 +112,7 @@ function runCoordinator(fixture, statuses, extraEnv = {}) {
       GHCR_READ_TOKEN: "registry-token",
       GHCR_READ_USERNAME: "registry-user",
       GITHUB_STEP_SUMMARY: join(fixture.directory, "summary.md"),
+      GITHUB_OUTPUT: fixture.output,
       MOCK_CALLS: fixture.calls,
       MOCK_DEPLOYED: fixture.deployed,
       PATH: `${fixture.directory}:${process.env.PATH}`,
