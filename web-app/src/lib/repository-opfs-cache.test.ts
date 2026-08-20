@@ -5,6 +5,7 @@ import {
 	REPOSITORY_OPFS_CACHE_NAMESPACE,
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
+	releaseRepositoryBrowserReplicaClaimsForPageUnload,
 	rotateRepositoryBrowserReplicaId,
 	tryClaimBrowserReplicaIdLock,
 	type BrowserReplicaLockManager,
@@ -137,4 +138,40 @@ void test("exclusively claims a copied browser replica identity", async () => {
 	};
 	assert.equal(await tryClaimBrowserReplicaIdLock("copied", locks), true);
 	assert.equal(await tryClaimBrowserReplicaIdLock("copied", locks), false);
+	releaseRepositoryBrowserReplicaClaimsForPageUnload();
+});
+
+void test("releases a replica lock so reload preserves its identity", async () => {
+	const values = new Map([[BROWSER_REPLICA_TAB_STORAGE_KEY, "warm-tab"]]);
+	const storage = {
+		getItem: (key: string) => values.get(key) ?? null,
+		setItem: (key: string, value: string) => values.set(key, value),
+	};
+	const held = new Set<string>();
+	const locks: BrowserReplicaLockManager = {
+		async request(name, _options, callback) {
+			if (held.has(name)) {
+				await callback(null);
+				return;
+			}
+			held.add(name);
+			try {
+				await callback({});
+			} finally {
+				held.delete(name);
+			}
+		},
+	};
+	const beforeReload = repositoryBrowserReplicaId("account-123", { storage });
+	assert.equal(beforeReload, "account-123:warm-tab");
+	assert.equal(await tryClaimBrowserReplicaIdLock(beforeReload, locks), true);
+
+	releaseRepositoryBrowserReplicaClaimsForPageUnload();
+	await Promise.resolve();
+	await Promise.resolve();
+
+	const afterReload = repositoryBrowserReplicaId("account-123", { storage });
+	assert.equal(afterReload, beforeReload);
+	assert.equal(await tryClaimBrowserReplicaIdLock(afterReload, locks), true);
+	releaseRepositoryBrowserReplicaClaimsForPageUnload();
 });

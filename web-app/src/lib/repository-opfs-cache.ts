@@ -32,6 +32,7 @@ let volatileBrowserReplicaTabIdWithoutStorage: string | undefined;
 let unlockedBrowserReplicaTabId: string | undefined;
 const claimedBrowserReplicaIds = new Set<string>();
 const browserReplicaClaims = new Map<string, Promise<boolean>>();
+const browserReplicaClaimReleases = new Map<string, () => void>();
 
 /**
  * Returns a durable replica identity for this browser tab.
@@ -136,8 +137,20 @@ export async function tryClaimBrowserReplicaIdLock(
 						resolve(false);
 						return;
 					}
+					let releaseLock!: () => void;
+					const held = new Promise<void>((release) => {
+						releaseLock = release;
+					});
+					browserReplicaClaimReleases.set(replicaId, releaseLock);
 					resolve(true);
-					await new Promise<never>(() => undefined);
+					try {
+						await held;
+					} finally {
+						if (browserReplicaClaimReleases.get(replicaId) === releaseLock) {
+							browserReplicaClaimReleases.delete(replicaId);
+						}
+						claimedBrowserReplicaIds.delete(replicaId);
+					}
 				},
 			);
 			void request.catch((error: unknown) =>
@@ -147,6 +160,15 @@ export async function tryClaimBrowserReplicaIdLock(
 			reject(error instanceof Error ? error : new Error(String(error)));
 		}
 	});
+}
+
+/** Releases page-owned OPFS replica locks before a real document unload. */
+export function releaseRepositoryBrowserReplicaClaimsForPageUnload(): void {
+	for (const [replicaId, release] of browserReplicaClaimReleases) {
+		browserReplicaClaimReleases.delete(replicaId);
+		claimedBrowserReplicaIds.delete(replicaId);
+		release();
+	}
 }
 
 function browserReplicaLockManager(): BrowserReplicaLockManager | null {

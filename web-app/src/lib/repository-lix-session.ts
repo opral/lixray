@@ -29,7 +29,7 @@ interface OpenRepositoryLixSessionOptions {
 	fetch?: RemoteLixFetch;
 }
 
-const RECOVERING_OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
+const OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
 
 export interface RepositoryLixSession {
 	readonly lix: Lix;
@@ -68,8 +68,8 @@ async function openRepositoryLixSessionWithRetry(
 		try {
 			return await openRepositoryLixSessionOnce(options);
 		} catch (error) {
-			const retryDelay = RECOVERING_OPEN_RETRY_DELAYS_MS[attempt];
-			if (!isLixRecoveringError(error) || retryDelay === undefined) {
+			const retryDelay = OPEN_RETRY_DELAYS_MS[attempt];
+			if (!isRetryableRepositoryOpenError(error) || retryDelay === undefined) {
 				throw error;
 			}
 			await delay(retryDelay);
@@ -271,6 +271,17 @@ function isLixRecoveringError(
 		error instanceof Error &&
 		"code" in error &&
 		error.code === "LIX_ERROR_LIX_RECOVERING"
+	);
+}
+
+export function isRetryableRepositoryOpenError(error: unknown): boolean {
+	if (isLixRecoveringError(error)) return true;
+	if (!(error instanceof Error)) return false;
+	if (error.name === "AbortError") return true;
+	return (
+		error.message === "Failed to fetch" ||
+		error.message === "browser sync fetch failed: Failed to fetch" ||
+		error.message === "browser sync fetch failed: The operation was aborted"
 	);
 }
 

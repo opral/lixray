@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	createTelemetryFetch,
+	isRetryableRepositoryOpenError,
 	parseLixrayServerTiming,
 	repositorySessionKey,
 } from "./repository-lix-session.ts";
@@ -17,6 +18,53 @@ void test("isolates managed OPFS sessions by replica identity", () => {
 	assert.notEqual(
 		repositorySessionKey({ ...repository, replicaId: "anonymous" }),
 		repositorySessionKey({ ...repository, replicaId: "account-123" }),
+	);
+});
+
+void test("retries only transient repository-open transport failures", () => {
+	assert.equal(
+		isRetryableRepositoryOpenError(new TypeError("Failed to fetch")),
+		true,
+	);
+	assert.equal(
+		isRetryableRepositoryOpenError(
+			new Error("browser sync fetch failed: Failed to fetch"),
+		),
+		true,
+	);
+	const aborted = new Error("The operation was aborted");
+	aborted.name = "AbortError";
+	assert.equal(isRetryableRepositoryOpenError(aborted), true);
+	assert.equal(
+		isRetryableRepositoryOpenError(
+			new Error("browser sync fetch failed: The operation was aborted"),
+		),
+		true,
+	);
+	assert.equal(
+		isRetryableRepositoryOpenError(
+			Object.assign(new Error("The replica is recovering"), {
+				code: "LIX_ERROR_LIX_RECOVERING",
+			}),
+		),
+		true,
+	);
+
+	assert.equal(
+		isRetryableRepositoryOpenError(
+			Object.assign(new Error("unrelated internal failure"), {
+				code: "LIX_INTERNAL_ERROR",
+			}),
+		),
+		false,
+	);
+	assert.equal(
+		isRetryableRepositoryOpenError(new Error("request failed with status 500")),
+		false,
+	);
+	assert.equal(
+		isRetryableRepositoryOpenError(new Error("Failed to fetch repository row")),
+		false,
 	);
 });
 
