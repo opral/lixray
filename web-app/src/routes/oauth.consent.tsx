@@ -11,7 +11,12 @@ import {
 import { useAuth } from "~/components/auth-provider";
 import { GoogleMark } from "~/components/google-mark";
 import { Button } from "~/components/ui/button";
+import {
+	OAUTH_CONSENT_OPEN_HREF,
+	resolveOAuthConsentDecision,
+} from "~/lib/oauth-consent";
 import { localDevCredentials } from "~/lib/supabase";
+import { captureTelemetryImmediately } from "~/lib/telemetry";
 
 interface ConsentSearch {
 	authorization_id?: string;
@@ -42,8 +47,11 @@ function OAuthConsentPage() {
 	const [details, setDetails] = useState<ConsentDetails | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState<"approve" | "deny" | null>(null);
+	const [approved, setApproved] = useState(false);
+	const [showOpenFallback, setShowOpenFallback] = useState(false);
 	const [localSignInPending, setLocalSignInPending] = useState(false);
 	const localSignInAttempted = useRef(false);
+	const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const usesLocalAccount = Boolean(localDevCredentials);
 	const returnTo = useMemo(
 		() =>
@@ -115,35 +123,76 @@ function OAuthConsentPage() {
 		};
 	}, [authorizationId, client, isLoaded, user]);
 
+	useEffect(() => {
+		return () => {
+			if (fallbackTimer.current !== null) {
+				clearTimeout(fallbackTimer.current);
+			}
+		};
+	}, []);
+
 	const decide = async (decision: "approve" | "deny") => {
 		if (!client || !details) return;
 		setSubmitting(decision);
 		setError(null);
-		const result = await client.auth.oauth[
-			decision === "approve" ? "approveAuthorization" : "denyAuthorization"
-		](details.authorizationId, { skipBrowserRedirect: true });
-		if (result.error || !result.data?.redirect_url) {
-			setError(result.error?.message ?? "Unable to complete authorization.");
+		const outcome = await resolveOAuthConsentDecision(
+			{
+				decision,
+				authorizationId: details.authorizationId,
+				clientName: details.clientName,
+				oauth: client.auth.oauth,
+			},
+			{
+				captureImmediately: captureTelemetryImmediately,
+				navigate: (url) => {
+					if (decision === "approve") {
+						window.location.assign(url);
+						return;
+					}
+					window.location.replace(url);
+				},
+				scheduleFallback: (callback, delayMs) => {
+					if (fallbackTimer.current !== null) {
+						clearTimeout(fallbackTimer.current);
+					}
+					fallbackTimer.current = setTimeout(callback, delayMs);
+				},
+				onShowOpenFallback: () => {
+					setShowOpenFallback(true);
+				},
+			},
+		);
+		if (!outcome.ok) {
+			setError(outcome.error);
 			setSubmitting(null);
 			return;
 		}
-		window.location.replace(result.data.redirect_url);
+		if (decision === "approve") {
+			setApproved(true);
+		}
 	};
 
 	const clientName = details?.clientName ?? "your agent";
 	const signedOut = isLoaded && !user;
+	const connected = approved || showOpenFallback;
 
 	// The client-to-LixRay handshake is the headline (1g): agent glyph →
 	// LixRay mark, scopes as three plain sentences, raw scopes behind a
 	// title attribute. Signed-out keeps the same card and swaps the body
-	// for one sign-in button that returns to this consent URL.
+	// for one sign-in button that returns to this consent URL. After Allow,
+	// the same card becomes the connected interstitial if the client hop
+	// leaves this tab on lixray.com.
 	return (
 		<main className="grid min-h-screen place-items-center bg-bg-app px-5 py-8 text-text-primary">
 			<div className="flex w-full max-w-[420px] flex-col gap-5 rounded-[14px] border border-border-panel bg-bg-panel px-7 pt-8 pb-6 shadow-[0_18px_50px_rgba(28,25,23,0.1),0_2px_8px_rgba(28,25,23,0.05)]">
 				<div className="flex flex-col items-center gap-4">
 					<div className="flex items-center gap-3.5" aria-hidden="true">
 						<span className="inline-flex size-11 items-center justify-center rounded-xl bg-[#FAF4EC] shadow-[inset_0_0_0_1px_#EDE2D2]">
-							<Plug className="size-6 text-text-secondary" />
+							{connected ? (
+								<Check className="size-6 text-[#5A7052]" strokeWidth={2.4} />
+							) : (
+								<Plug className="size-6 text-text-secondary" />
+							)}
 						</span>
 						<svg
 							width="26"
@@ -160,9 +209,17 @@ function OAuthConsentPage() {
 					</div>
 					<div className="flex flex-col gap-1.5 text-center">
 						<h1 className="m-0 text-xl leading-tight font-bold tracking-[-0.01em]">
-							Connect {clientName} to LixRay
+							{connected
+								? `Connected to ${clientName}`
+								: `Connect ${clientName} to LixRay`}
 						</h1>
-						{signedOut ? (
+						{connected ? (
+							<p className="m-0 text-[13.5px] leading-[1.55] text-text-secondary">
+								{showOpenFallback
+									? "If your agent didn’t open, continue in LixRay"
+									: `Sending you back to ${displayOrigin(details?.redirectUri ?? "")}…`}
+							</p>
+						) : signedOut ? (
 							<p className="m-0 text-[12.5px] leading-normal text-text-quaternary">
 								Sign in first — you’ll come right back to approve the
 								connection.
@@ -195,7 +252,7 @@ function OAuthConsentPage() {
 					</div>
 				</div>
 
-				{signedOut ? (
+				{signedOut && !connected ? (
 					usesLocalAccount ? (
 						<div className="flex flex-col items-center gap-3">
 							<p className="m-0 text-[12.5px] text-text-quaternary">
@@ -228,7 +285,17 @@ function OAuthConsentPage() {
 					)
 				) : null}
 
-				{details ? (
+				{showOpenFallback ? (
+					<Button
+						asChild
+						variant="featured"
+						className="h-auto w-full rounded-[10px] py-2.75 text-[13.5px] font-bold"
+					>
+						<a href={OAUTH_CONSENT_OPEN_HREF}>Continue in LixRay</a>
+					</Button>
+				) : null}
+
+				{details && !connected ? (
 					<>
 						<div
 							title={`Requested OAuth scopes: ${details.scopes.join(" ") || "none"}`}
@@ -272,7 +339,7 @@ function OAuthConsentPage() {
 					</p>
 				) : null}
 
-				{details ? (
+				{details && !connected ? (
 					<p className="m-0 text-center text-[11.5px] leading-normal text-text-quaternary">
 						You’ll be sent back to {displayOrigin(details.redirectUri)} to
 						finish.
