@@ -51,8 +51,21 @@ test("PR previews promote both tested images instead of rebuilding source", asyn
 		workflow.indexOf("  deploy-preview:"),
 		workflow.indexOf("  publish-preview:"),
 	);
+	const webImageJob = workflow.slice(
+		workflow.indexOf("  web-image:"),
+		workflow.indexOf("  frontend:"),
+	);
+	const ciJob = workflow.slice(
+		workflow.indexOf("  ci:"),
+		workflow.indexOf("  deploy-preview:"),
+	);
 
 	assert.match(workflow, /needs\.web-image\.outputs\.image/);
+	assert.doesNotMatch(webImageJob, /pull_request\.draft/);
+	assert.match(
+		ciJob,
+		/if test "\$DRAFT" = "true"; then[\s\S]*require_success "Server image" "\$SERVER_IMAGE_RESULT"[\s\S]*require_success "Web image" "\$WEB_IMAGE_RESULT"/,
+	);
 	assert.match(deployPreviewJob, /uses: actions\/checkout@v4/);
 	assert.match(workflow, /manage-railway-preview\.sh ensure/);
 	assert.match(workflow, /manage-railway-preview\.sh url/);

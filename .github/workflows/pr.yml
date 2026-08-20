@@ -175,7 +175,6 @@ jobs:
 
   web-image:
     name: Web image
-    if: github.event.pull_request.draft != true
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 25
     permissions:
@@ -538,7 +537,8 @@ jobs:
           if test "$DRAFT" = "true"; then
             require_success "Change selection" "$CHANGES_RESULT"
             require_success "Server image" "$SERVER_IMAGE_RESULT"
-            echo "Draft pull request: full validation lanes skipped; preview server image is ready."
+            require_success "Web image" "$WEB_IMAGE_RESULT"
+            echo "Draft pull request: full validation lanes skipped; preview images are ready."
             exit 0
           fi
 

@@ -191,11 +191,11 @@ LIXRAY_MCP_ACCESS_TOKEN='<token>' pnpm --dir web-app check:mcp
 GitHub Actions builds immutable web and server images on pull requests, tags
 them by reusable inputs and the Git tree hash, and runs the Compose browser flow
 against the server digest. Trees with unchanged inputs reuse existing images.
-Draft pull requests build only the server image needed by the preview and skip
-the frontend, database, Rust, E2E, and production-style web-image validation
-lanes. Marking a pull request ready for review runs the complete validation
-set. In-progress runs for the same pull request are cancelled, and the stable
-`CI` job remains the merge gate.
+Draft pull requests build both immutable images and refresh their deployed
+preview, while skipping the frontend, database, Rust, and local E2E validation
+lanes. Marking a pull request ready for review runs the complete validation set.
+In-progress runs for the same pull request are cancelled, and the stable `CI`
+job remains the merge gate.
 
 The separate `Production` workflow is promotion-only. Pushes to `main` must
 resolve both tested `tree-*` images before applying database migrations. The
