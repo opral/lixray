@@ -15,10 +15,12 @@ tools. Lix SQL is a Postgres dialect subset.
    after mutations.
 6. Report `rowsAffected` and the returned verification rows.
 
-A successful `execute_sql` mutation is already saved. `create_checkpoint` is an
-optional restore point for a finished task or session — not required for
-durability, and not something to call after every write. Skipping it keeps the
-files; you just do not have a checkpoint marker for that commit.
+A successful `execute_sql` mutation is already saved. Writes persist without a
+checkpoint. `create_checkpoint` is an explicit user-facing action, not agent
+ceremony — not a Git-style commit, and not required for durability. Do not call
+`create_checkpoint` after a write, after every change, or "to be safe." The
+agent may recommend that the user checkpoint when a task or session is done;
+prefer leaving the checkpoint to the user.
 
 ## Restore an ancestor
 

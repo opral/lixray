@@ -14,10 +14,12 @@ import {
 import { PostHog } from "posthog-node";
 import {
 	attachMcpToolCallObservationProperties,
+	CREATE_CHECKPOINT_TOOL_DESCRIPTION,
 	handleMcpTransport,
 	MCP_REQUEST_ID_HEADER,
 	MCP_PROTOCOL_VERSION,
 	MCP_RESOURCE,
+	MCP_SERVER_INSTRUCTIONS,
 	mcpAuthenticateChallenge,
 	mcpDocumentationResponse,
 	mcpUnauthorizedResponse,
@@ -26,8 +28,23 @@ import {
 	withMcpRequestId,
 	protectedResourceMetadataResponse,
 } from "./server.ts";
+import { EXECUTE_SQL_TOOL_DESCRIPTION } from "./execute-schema.ts";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
+const MCP_DOCS = readFileSync(
+	join(dirname(fileURLToPath(import.meta.url)), "../../../docs/mcp.md"),
+	"utf8",
+);
+
+function assertCheckpointPolicy(text: string): void {
+	assert.match(text, /user-facing/);
+	assert.match(text, /do not call/i);
+	assert.match(text, /after a write/i);
+	assert.match(text, /agent may recommend/);
+}
 
 function sqlPayloadFromText(text: string): unknown {
 	const withoutContext = text.replace(/\s*context=\S+\s*$/, "");
@@ -401,20 +418,14 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			executeSqlTool.description ?? "",
 			/does not require a checkpoint/,
 		);
-		assert.match(
-			executeSqlTool.description ?? "",
-			/do not call it after every write/i,
-		);
+		assertCheckpointPolicy(executeSqlTool.description ?? "");
 		const checkpointTool = tools.tools.find(
 			(tool) => tool.name === "create_checkpoint",
 		);
 		assert.ok(checkpointTool);
 		assert.match(checkpointTool.description ?? "", /already persist/);
 		assert.match(checkpointTool.description ?? "", /not required/);
-		assert.match(
-			checkpointTool.description ?? "",
-			/Do not call it after every write/,
-		);
+		assertCheckpointPolicy(checkpointTool.description ?? "");
 		const restoreTool = tools.tools.find((tool) => tool.name === "restore");
 		assert.ok(restoreTool);
 		assert.match(restoreTool.description ?? "", /ancestor/);
@@ -688,6 +699,92 @@ void test("modern MCP discover and tool calls work without a session id", async 
 	} finally {
 		await client.close();
 	}
+});
+
+void test("list_lixes text lists @handle/slug and uuid for each lix", async () => {
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		return handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_ListLixes_Test",
+		});
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcher },
+	);
+	const client = new Client(
+		{ name: "list-lixes-text-test-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		const listed = await client.callTool({ name: "list_lixes", arguments: {} });
+		assert.equal(listed.isError, undefined, JSON.stringify(listed));
+		const listedText =
+			listed.content?.[0]?.type === "text" ? listed.content[0].text : "";
+		assert.match(listedText, /@acme\/company/);
+		assert.match(listedText, new RegExp(LIX_ID));
+		assert.doesNotMatch(
+			listedText,
+			/^Found \d+ accessible Lix(?:es)?\.$/,
+			"list_lixes must not regress to a count-only sentence when lixes exist",
+		);
+	} finally {
+		await client.close();
+	}
+});
+
+void test("list_lixes text is a clear sentence when no lixes exist", async () => {
+	class EmptyListRuntime extends FakeRuntime {
+		async listLixes() {
+			return [];
+		}
+	}
+	const service = new LixService(new EmptyListRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		return handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_ListLixes_Empty_Test",
+		});
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcher },
+	);
+	const client = new Client(
+		{ name: "list-lixes-empty-test-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		const listed = await client.callTool({ name: "list_lixes", arguments: {} });
+		assert.equal(listed.isError, undefined, JSON.stringify(listed));
+		const listedText =
+			listed.content?.[0]?.type === "text" ? listed.content[0].text : "";
+		assert.match(listedText, /Found 0 accessible Lixes\./);
+		assert.doesNotMatch(listedText, /@/);
+	} finally {
+		await client.close();
+	}
+});
+
+void test("checkpoint copy forbids agent-initiated checkpoints after writes", () => {
+	assertCheckpointPolicy(MCP_SERVER_INSTRUCTIONS);
+	assertCheckpointPolicy(CREATE_CHECKPOINT_TOOL_DESCRIPTION);
+	assertCheckpointPolicy(EXECUTE_SQL_TOOL_DESCRIPTION);
+	assertCheckpointPolicy(MCP_DOCS);
+	assert.match(MCP_SERVER_INSTRUCTIONS, /already saved/);
+	assert.match(CREATE_CHECKPOINT_TOOL_DESCRIPTION, /user explicitly asked/);
+	assert.match(MCP_DOCS, /Writes persist without a\s+checkpoint/);
 });
 
 void test("MCP tools preserve continuation fields in text fallback", async () => {
