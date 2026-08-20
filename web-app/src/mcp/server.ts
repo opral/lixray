@@ -191,8 +191,10 @@ function emitDiscoverAsOfficialHandshake(
 }
 
 function registeredMcpToolNames(server: McpServer): string[] {
+	// `_registeredTools` is private on the SDK class. Intersecting McpServer
+	// with a public copy of that field collapses the type to `never`.
 	const tools = (
-		server as McpServer & {
+		server as unknown as {
 			_registeredTools?: Record<string, { enabled?: boolean }>;
 		}
 	)._registeredTools;
