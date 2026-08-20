@@ -13,6 +13,7 @@ import {
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import { isClearlyReadOnlySql } from "../lib/lix-sql-access.ts";
+import { createRepositoryOpenedSink } from "../lib/repository-opened-sink.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
 import { LixService, type LixSummary } from "../mcp/lix-service.ts";
 import {
@@ -260,6 +261,10 @@ export async function handleRequest(
 				requestId,
 			);
 		}
+		const repositoryOpenedSink = createRepositoryOpenedSink(env, {
+			userId: authResult.auth.userId,
+			isDemo: authResult.auth.isDemo,
+		});
 		const client = new WorkerLixRuntimeClient(
 			env,
 			authResult.auth,
@@ -275,6 +280,9 @@ export async function handleRequest(
 				lixSummaries:
 					options.lixSummaries ??
 					(isDemoMode(env) ? demoLixSummaries(env) : undefined),
+				onBindSession: repositoryOpenedSink
+					? (input) => repositoryOpenedSink.bind(input)
+					: undefined,
 			},
 		);
 		const telemetry = (options.createMcpTelemetry ?? createMcpTelemetrySession)(
@@ -405,6 +413,14 @@ export async function handleRequest(
 		let responseCleanupDeferred = false;
 		const cleanup = async (): Promise<void> => {
 			await Promise.all(pendingConnectionRecords);
+			if (repositoryOpenedSink) {
+				const openedFlush = repositoryOpenedSink
+					.flush()
+					.catch((caught: unknown) => {
+						console.warn("Failed to flush repository_opened host sink", caught);
+					});
+				executionContext.waitUntil(openedFlush);
+			}
 			scheduleMcpTelemetryFlush(executionContext, telemetry);
 			if (lixrTelemetry) {
 				if (importSession.fileWrites.size > 0) {

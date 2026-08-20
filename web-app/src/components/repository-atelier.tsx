@@ -954,7 +954,6 @@ export function RepositoryAtelier({
 					emptyRepositorySeededRef.current = atelierInstance;
 				}
 				setInstance(atelierInstance);
-				captureTelemetry("repository_opened");
 				const actualBranchId = session.activeBranchSnapshot();
 				if (
 					shouldNormalizeInitialBranch({

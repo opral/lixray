@@ -125,8 +125,17 @@ export function isLixError(value: unknown): value is LixError {
  * mutate Lix state receives a branch id and the implementation pins the
  * underlying SDK handle to it before executing.
  */
+export interface BindSessionInput {
+	lixId: string;
+	branchId: string;
+	accountId: string;
+	organizationId?: string;
+}
+
 export interface LixRuntimeClient {
 	listLixes(): Promise<Array<LixSummary>>;
+	hasOpenRuntime(lixId: string): boolean;
+	bindSession(input: BindSessionInput): void;
 	activeBranchId(lixId: string, branchId?: string): Promise<string>;
 	switchBranch(lixId: string, branchId: string): Promise<{ branchId: string }>;
 	execute(
@@ -262,13 +271,22 @@ export class LixService {
 			? (await this.client.switchBranch(lixId, branchId)).branchId
 			: await this.client.activeBranchId(lixId);
 		const issuedContext = await this.issueContext(lixId, selectedBranchId);
+		const commitId = await this.commitId(lixId, selectedBranchId);
+		// Bind the OAuth / principal account on every successful signed-context
+		// mint. Cache-admit / protocol-root open is not a product bind.
+		this.client.bindSession({
+			lixId,
+			branchId: selectedBranchId,
+			accountId: this.principal.userId,
+			organizationId: repository.namespace.id,
+		});
 		return {
 			context: issuedContext.token,
 			contextExpiresAt: new Date(issuedContext.expiresAt).toISOString(),
 			lixId,
 			lixRef: `@${repository.namespace.handle}/${repository.slug}`,
 			branchId: selectedBranchId,
-			commitId: await this.commitId(lixId, selectedBranchId),
+			commitId,
 		};
 	}
 

@@ -28,7 +28,7 @@
 		"routes:generate": "node scripts/generate-routes.mjs",
 		"pretest:e2e": "pnpm lix:build",
 		"test:e2e": "playwright test",
-		"test:analytics": "node --test --experimental-strip-types src/lib/*telemetry*.test.ts",
+		"test:analytics": "node --test --experimental-strip-types src/lib/*telemetry*.test.ts src/lib/repository-opened-sink.test.ts",
 		"test:auth": "node --test --experimental-strip-types src/lib/auth-return-to.test.ts src/lib/auth-session-validation.test.ts src/lib/lix-connection-prompt.test.ts src/lib/oauth-consent.test.ts src/lib/public-repository.test.ts src/lib/team-invite.test.ts src/lib/repository-share-capability.test.ts",
 		"test:docs": "node --test --experimental-strip-types src/lib/docs-legal.test.ts",
 		"test:repository": "node --test --experimental-strip-types src/components/repository-home/lix-data.test.ts src/lib/repository-list-error.test.ts src/lib/repository-list-refresh.test.ts src/lib/repository-lix-session.test.ts src/lib/repository-session-manager.test.ts",

@@ -1,4 +1,8 @@
 use anyhow::{Context, Result};
+use lix_sdk::telemetry::{
+    TelemetrySink, TelemetrySpanEnd, TelemetrySpanEnterGuard, TelemetrySpanHandle,
+    TelemetrySpanKind, TelemetrySpanStart, TelemetryValue, TracingTelemetrySink,
+};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::{Compression, Protocol, WithExportConfig, WithHttpConfig};
@@ -332,6 +336,237 @@ where
         .build()
 }
 
+const ANONYMOUS_ACCOUNT_ID: &str = lix_sdk::ANONYMOUS_ACCOUNT_ID;
+const DEMO_ACCOUNT_ID: &str = "lixray-demo";
+const REPOSITORY_OPENED_EVENT: &str = "repository_opened";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepositoryOpenedEvent {
+    pub distinct_id: String,
+    pub lix_id: String,
+    pub branch_id: Option<String>,
+    pub repository_id: Option<String>,
+    pub organization_id: Option<String>,
+    pub environment: String,
+    pub source: Option<String>,
+}
+
+pub trait RepositoryOpenedCapture: Send + Sync {
+    fn capture(&self, event: RepositoryOpenedEvent);
+}
+
+/// Host sink: SQL spans stay on the tracing/OTLP path; `lix.opened` becomes
+/// the product event `repository_opened` when the session has an identified person.
+#[derive(Clone)]
+pub struct HostTelemetrySink {
+    tracing: TracingTelemetrySink,
+    product: Option<Arc<dyn RepositoryOpenedCapture>>,
+    source: &'static str,
+}
+
+impl HostTelemetrySink {
+    pub fn from_env() -> Self {
+        Self {
+            tracing: TracingTelemetrySink::new(),
+            product: product_capture_from_env(),
+            source: "server",
+        }
+    }
+
+    pub fn with_product_capture(product: Arc<dyn RepositoryOpenedCapture>) -> Self {
+        Self {
+            tracing: TracingTelemetrySink::new(),
+            product: Some(product),
+            source: "server",
+        }
+    }
+
+    fn repository_opened(&self, start: &TelemetrySpanStart) -> Option<RepositoryOpenedEvent> {
+        if start.kind != TelemetrySpanKind::LixOpened && start.name != "lix.opened" {
+            return None;
+        }
+        let lix_id = string_attribute(start, "lix.id")?.to_owned();
+        let distinct_id =
+            identified_distinct_id(string_attribute(start, "lix.account_id"))?.to_owned();
+        let branch_id = string_attribute(start, "lix.branch_id").map(ToOwned::to_owned);
+        Some(RepositoryOpenedEvent {
+            distinct_id,
+            repository_id: Some(lix_id.clone()),
+            lix_id,
+            branch_id,
+            organization_id: None,
+            environment: "production".to_string(),
+            source: Some(self.source.to_string()),
+        })
+    }
+}
+
+impl TelemetrySink for HostTelemetrySink {
+    fn enabled(&self, kind: TelemetrySpanKind) -> bool {
+        match kind {
+            TelemetrySpanKind::LixOpened => self.product.is_some() || self.tracing.enabled(kind),
+            TelemetrySpanKind::SqlQuery
+            | TelemetrySpanKind::SqlBatch
+            | TelemetrySpanKind::SqlCoherentReadBatch => self.tracing.enabled(kind),
+        }
+    }
+
+    fn start_span(&self, start: TelemetrySpanStart) -> Box<dyn TelemetrySpanHandle> {
+        let tracing = self.tracing.start_span(TelemetrySpanStart {
+            kind: start.kind,
+            name: start.name,
+            started_at_unix_ms: start.started_at_unix_ms,
+            attributes: start.attributes.clone(),
+        });
+        if start.kind == TelemetrySpanKind::LixOpened {
+            if let Some(product) = self.product.clone() {
+                return Box::new(HostOpenedSpan {
+                    tracing,
+                    product,
+                    event: self.repository_opened(&start),
+                });
+            }
+        }
+        tracing
+    }
+}
+
+struct HostOpenedSpan {
+    tracing: Box<dyn TelemetrySpanHandle>,
+    product: Arc<dyn RepositoryOpenedCapture>,
+    event: Option<RepositoryOpenedEvent>,
+}
+
+impl TelemetrySpanHandle for HostOpenedSpan {
+    fn enter(&self) -> Box<dyn TelemetrySpanEnterGuard + '_> {
+        self.tracing.enter()
+    }
+
+    fn finish(self: Box<Self>, end: TelemetrySpanEnd) {
+        if let Some(event) = self.event {
+            self.product.capture(event);
+        }
+        self.tracing.finish(end);
+    }
+}
+
+fn identified_distinct_id(account_id: Option<&str>) -> Option<&str> {
+    let distinct_id = account_id?.trim();
+    if distinct_id.is_empty()
+        || distinct_id == ANONYMOUS_ACCOUNT_ID
+        || distinct_id == DEMO_ACCOUNT_ID
+    {
+        None
+    } else {
+        Some(distinct_id)
+    }
+}
+
+fn string_attribute<'a>(start: &'a TelemetrySpanStart, key: &str) -> Option<&'a str> {
+    start.attributes.iter().find_map(|attribute| {
+        if attribute.key == key {
+            match &attribute.value {
+                TelemetryValue::String(value) if !value.is_empty() => Some(value.as_str()),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    })
+}
+
+fn product_capture_from_env() -> Option<Arc<dyn RepositoryOpenedCapture>> {
+    match posthog_product_config_from_env() {
+        Ok(Some(config)) => Some(Arc::new(PostHogProductCapture::new(config))),
+        Ok(None) => None,
+        Err(error) => {
+            eprintln!(
+                "failed to initialize PostHog product events; continuing without them: {error:#}"
+            );
+            None
+        }
+    }
+}
+
+struct PostHogProductConfig {
+    token: String,
+    host: String,
+}
+
+fn posthog_product_config_from_env() -> Result<Option<PostHogProductConfig>> {
+    if env::var("POSTHOG_ENVIRONMENT").ok().as_deref() != Some("production") {
+        return Ok(None);
+    }
+    let Some(token) = optional_nonempty_env("POSTHOG_PROJECT_TOKEN")? else {
+        return Ok(None);
+    };
+    let host =
+        optional_nonempty_env("POSTHOG_HOST")?.unwrap_or_else(|| DEFAULT_POSTHOG_HOST.to_string());
+    Ok(Some(PostHogProductConfig { token, host }))
+}
+
+struct PostHogProductCapture {
+    client: reqwest::Client,
+    token: String,
+    endpoint: String,
+}
+
+impl PostHogProductCapture {
+    fn new(config: PostHogProductConfig) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            token: config.token,
+            endpoint: format!("{}/i/v0/e/", config.host.trim_end_matches('/')),
+        }
+    }
+}
+
+impl RepositoryOpenedCapture for PostHogProductCapture {
+    fn capture(&self, event: RepositoryOpenedEvent) {
+        let client = self.client.clone();
+        let token = self.token.clone();
+        let endpoint = self.endpoint.clone();
+        let send = async move {
+            let mut properties = serde_json::Map::new();
+            properties.insert("lix_id".into(), serde_json::Value::String(event.lix_id));
+            if let Some(branch_id) = event.branch_id {
+                properties.insert("branch_id".into(), serde_json::Value::String(branch_id));
+            }
+            if let Some(repository_id) = event.repository_id {
+                properties.insert(
+                    "repository_id".into(),
+                    serde_json::Value::String(repository_id),
+                );
+            }
+            if let Some(organization_id) = event.organization_id {
+                properties.insert(
+                    "organization_id".into(),
+                    serde_json::Value::String(organization_id),
+                );
+            }
+            properties.insert(
+                "environment".into(),
+                serde_json::Value::String(event.environment),
+            );
+            if let Some(source) = event.source {
+                properties.insert("source".into(), serde_json::Value::String(source));
+            }
+            let body = serde_json::json!({
+                "api_key": token,
+                "event": REPOSITORY_OPENED_EVENT,
+                "distinct_id": event.distinct_id,
+                "properties": properties,
+            });
+            if let Err(error) = client.post(&endpoint).json(&body).send().await {
+                tracing::warn!(error = %error, "failed to capture repository_opened");
+            }
+        };
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(send);
+        }
+    }
+}
+
 fn optional_nonempty_env(name: &str) -> Result<Option<String>> {
     match env::var(name) {
         Ok(value) if value.trim().is_empty() => anyhow::bail!("{name} must not be empty when set"),
@@ -615,5 +850,91 @@ mod tests {
         assert!(flush_result.is_ok());
         assert!(exported.load(Ordering::SeqCst));
         assert!(shutdown_result.is_ok());
+    }
+
+    struct RecordingCapture(Arc<Mutex<Vec<RepositoryOpenedEvent>>>);
+
+    impl RepositoryOpenedCapture for RecordingCapture {
+        fn capture(&self, event: RepositoryOpenedEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    #[test]
+    fn lix_opened_span_captures_one_repository_opened() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
+            Arc::new(RecordingCapture(Arc::clone(&captured))),
+        ));
+        lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", Some("user-123"));
+        let events = captured.lock().unwrap().clone();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0],
+            RepositoryOpenedEvent {
+                distinct_id: "user-123".to_string(),
+                lix_id: "lix-1".to_string(),
+                branch_id: Some("branch-1".to_string()),
+                repository_id: Some("lix-1".to_string()),
+                organization_id: None,
+                environment: "production".to_string(),
+                source: Some("server".to_string()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn protocol_root_open_does_not_capture() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
+            Arc::new(RecordingCapture(Arc::clone(&captured))),
+        ));
+        let _lix = lix_sdk::open_lix()
+            .with_telemetry(Arc::clone(&sink))
+            .as_protocol_root()
+            .await
+            .expect("open protocol root");
+        assert!(captured.lock().unwrap().is_empty());
+
+        lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", Some("user-123"));
+        assert_eq!(captured.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn cache_admit_anonymous_bind_does_not_capture() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
+            Arc::new(RecordingCapture(Arc::clone(&captured))),
+        ));
+        lix_sdk::bind_session(
+            Some(&sink),
+            "lix-1",
+            "branch-1",
+            Some(lix_sdk::ANONYMOUS_ACCOUNT_ID),
+        );
+        lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", Some("lixray-demo"));
+        lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", None);
+        assert!(captured.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn missing_or_invalid_posthog_config_does_not_prevent_startup() {
+        let _guard = env_lock().lock().unwrap();
+        env::remove_var("POSTHOG_ENVIRONMENT");
+        env::set_var("POSTHOG_PROJECT_TOKEN", "test-token");
+        assert!(posthog_product_config_from_env().unwrap().is_none());
+        let _sink = HostTelemetrySink::from_env();
+
+        env::set_var("POSTHOG_ENVIRONMENT", "production");
+        env::remove_var("POSTHOG_PROJECT_TOKEN");
+        assert!(posthog_product_config_from_env().unwrap().is_none());
+        let _sink = HostTelemetrySink::from_env();
+
+        env::set_var("POSTHOG_PROJECT_TOKEN", "   ");
+        assert!(product_capture_from_env().is_none());
+        let _sink = HostTelemetrySink::from_env();
+
+        env::remove_var("POSTHOG_ENVIRONMENT");
+        env::remove_var("POSTHOG_PROJECT_TOKEN");
     }
 }
