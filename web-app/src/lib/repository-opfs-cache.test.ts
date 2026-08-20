@@ -10,8 +10,8 @@ import {
 	type BrowserReplicaLockManager,
 } from "./repository-opfs-cache.ts";
 
-void test("hard-cuts repository replicas away from the pre-protocol cache", () => {
-	assert.equal(REPOSITORY_OPFS_CACHE_NAMESPACE, "lixray:sync-protocol-v2");
+void test("hard-cuts replicas created before selected-change locators", () => {
+	assert.equal(REPOSITORY_OPFS_CACHE_NAMESPACE, "lixray:sync-protocol-v3");
 	const identity = {
 		namespace: "atelier",
 		repositorySlug: "website",
@@ -31,6 +31,10 @@ void test("hard-cuts repository replicas away from the pre-protocol cache", () =
 	assert.notEqual(
 		name,
 		`lixray:sync-protocol-v1:${identity.repositoryId}:${identity.replicaId}`,
+	);
+	assert.notEqual(
+		name,
+		`lixray:sync-protocol-v2:${identity.repositoryId}:${identity.replicaId}`,
 	);
 });
 

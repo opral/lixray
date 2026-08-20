@@ -8,7 +8,7 @@ export interface RepositoryOpfsCacheIdentity {
 // Hard-cut this prefix whenever an unshipped sync protocol or durable replica
 // layout changes. Reusing the old `lixray:` names would let incompatible OPFS
 // rows participate in bootstrap before the new server can repair them.
-export const REPOSITORY_OPFS_CACHE_NAMESPACE = "lixray:sync-protocol-v2";
+export const REPOSITORY_OPFS_CACHE_NAMESPACE = "lixray:sync-protocol-v3";
 
 export const BROWSER_REPLICA_TAB_STORAGE_KEY = "lixray:browser-replica-tab:v1";
 

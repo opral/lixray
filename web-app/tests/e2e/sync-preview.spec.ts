@@ -38,6 +38,24 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	const syncFailures: string[] = [];
 	const runtimeFailures: string[] = [];
 	const coldReads: string[] = [];
+	const openHistoryPanel = async (page: Page) => {
+		const history = page.getByRole("region", {
+			name: "Checkpoint history",
+		});
+		if (await history.isVisible()) return history;
+		const panelToggle = page.getByRole("button", {
+			name: "Toggle right panel",
+		});
+		if ((await panelToggle.getAttribute("aria-pressed")) === "false") {
+			await panelToggle.click();
+		}
+		await page
+			.getByRole("button", { name: "History", exact: true })
+			.last()
+			.click();
+		await expect(history).toBeVisible({ timeout: 5_000 });
+		return history;
+	};
 	const observePage = (page: Page) => {
 		page.on("pageerror", (error) => {
 			runtimeFailures.push(`pageerror: ${error.message}`);
@@ -107,6 +125,12 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			left.getByTestId("home-entry-list").waitFor({ timeout: 120_000 }),
 			right.getByTestId("home-entry-list").waitFor({ timeout: 120_000 }),
 		]);
+		const initialLeftHistory = await openHistoryPanel(left);
+		const initialCheckpointCount = await initialLeftHistory
+			.getByRole("list", { name: "Checkpoints" })
+			.locator(":scope > li")
+			.count();
+		expect(initialCheckpointCount).toBeGreaterThan(0);
 
 		await right.getByTestId("home-new-button").click();
 		await right
@@ -165,11 +189,18 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				name: "Latest checkpoint. Open checkpoint history",
 			}),
 		).toBeVisible({ timeout: 30_000 });
+		const leftHistoryAfterCheckpoint = await openHistoryPanel(left);
 		await expect(
-			right.getByRole("button", {
-				name: "Latest checkpoint. Open checkpoint history",
-			}),
-		).toBeVisible({ timeout: realtimeTimeout });
+			leftHistoryAfterCheckpoint
+				.getByRole("list", { name: "Checkpoints" })
+				.locator(":scope > li"),
+		).toHaveCount(initialCheckpointCount + 1, { timeout: 30_000 });
+		const rightHistoryAfterCheckpoint = await openHistoryPanel(right);
+		await expect(
+			rightHistoryAfterCheckpoint
+				.getByRole("list", { name: "Checkpoints" })
+				.locator(":scope > li"),
+		).toHaveCount(initialCheckpointCount + 1, { timeout: realtimeTimeout });
 
 		// The checkpoint coordinate is part of branch state. A later remote edit
 		// must advance the receiver's head without silently advancing its checkpoint.
@@ -226,19 +257,8 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
 			}),
 		).toBeVisible({ timeout: 30_000 });
-		const freshHistoryTab = fresh
-			.getByRole("button", { name: "History", exact: true })
-			.last();
-		// `isVisible()` is true for controls laid out inside the collapsed panel,
-		// even though the central canvas covers them and intercepts pointer input.
-		// A new context starts with the right panel collapsed, so open it explicitly.
-		await fresh.getByRole("button", { name: "Toggle right panel" }).click();
 		const coldReadsBeforeFreshHistory = coldReads.length;
-		await freshHistoryTab.click();
-		const freshHistory = fresh.getByRole("region", {
-			name: "Checkpoint history",
-		});
-		await expect(freshHistory).toBeVisible({ timeout: 5_000 });
+		const freshHistory = await openHistoryPanel(fresh);
 		await expect(
 			freshHistory.getByRole("button", { name: "Working changes" }),
 		).toContainText(/now · [1-9]\d* changes?/);
@@ -250,16 +270,42 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		await fresh.waitForTimeout(500);
 		expect(coldReads).toHaveLength(coldReadsBeforeFreshHistory);
 
+		// Reuse the same tab identity and OPFS database. Fresh contexts only cover
+		// bootstrap; a reload proves that the persisted cursor/read model can resume
+		// and still render the latest files and checkpoint rows.
+		const freshReplicaTabId = await fresh.evaluate(() =>
+			sessionStorage.getItem("lixray:browser-replica-tab:v1"),
+		);
+		expect(freshReplicaTabId).toBeTruthy();
+		await fresh.reload({ waitUntil: "domcontentloaded" });
+		expect(
+			await fresh.evaluate(() =>
+				sessionStorage.getItem("lixray:browser-replica-tab:v1"),
+			),
+		).toBe(freshReplicaTabId);
+		const reopenedEntries = fresh.getByTestId("home-entry-list");
+		await expect(reopenedEntries).toContainText(createdName, {
+			timeout: 30_000,
+		});
+		await expect(reopenedEntries).toContainText(leftConcurrentName);
+		await expect(reopenedEntries).toContainText(rightConcurrentName);
+		const reopenedHistory = await openHistoryPanel(fresh);
+		await expect(
+			reopenedHistory
+				.getByRole("list", { name: "Checkpoints" })
+				.locator(":scope > li"),
+		).toHaveCount(initialCheckpointCount + 1);
+		const afterReopenName = await createFileFromHome(
+			left,
+			"New Markdown (.md)",
+		);
+		await expect(reopenedEntries).toContainText(afterReopenName, {
+			timeout: realtimeTimeout,
+		});
+
 		const coldReadsBeforeHistory = coldReads.length;
 		for (const page of [left, right]) {
-			await page.getByRole("button", { name: "Toggle right panel" }).click();
-			await page
-				.getByRole("button", { name: "History", exact: true })
-				.last()
-				.click();
-			const history = page.getByRole("region", {
-				name: "Checkpoint history",
-			});
+			const history = await openHistoryPanel(page);
 			await expect(history).toContainText("Working changes");
 			await expect(history).toContainText("Latest checkpoint");
 			await expect(history).toContainText("Initial checkpoint");
