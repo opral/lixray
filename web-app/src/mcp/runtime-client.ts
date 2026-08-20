@@ -1,12 +1,4 @@
 import {
-	openLix,
-	type ExecuteResult as LixExecuteResult,
-	type JsonValue,
-	type Lix,
-	type SqlParam,
-	Value,
-} from "@lix-js/sdk";
-import {
 	type CreateBranchInput,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
@@ -18,7 +10,10 @@ import {
 	type LixRuntimeClient,
 	type LixSummary,
 } from "./lix-service.ts";
-import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
+import {
+	openProtocolSession,
+	type ProtocolSession,
+} from "./protocol-session.ts";
 
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 
@@ -49,7 +44,7 @@ interface WorkerLixRuntimeClientOptions {
 }
 
 interface LixSession {
-	lix: Lix;
+	protocol: ProtocolSession;
 	queue: Promise<void>;
 }
 
@@ -155,7 +150,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				if (branchId) await this.ensureBranch(session, branchId);
-				return session.lix.activeBranchId();
+				return session.protocol.activeBranchId();
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -169,7 +164,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		try {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, () =>
-				session.lix.switchBranch({ branchId }),
+				session.protocol.switchBranch(branchId),
 			);
 		} catch (caught) {
 			throw asLixError(caught);
@@ -202,13 +197,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return encodeExecuteResult(
-					await session.lix.execute(
-						request.sql,
-						(request.params ?? []).map(decodeWireParam),
-						request.options,
-					),
-				);
+				return session.protocol.execute(request);
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -241,24 +230,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				const results = await (
-					session.lix as unknown as {
-						executeBatch: (
-							statements: ReadonlyArray<{
-								sql: string;
-								params?: ReadonlyArray<SqlParam>;
-							}>,
-							options?: { originKey?: string },
-						) => Promise<ReadonlyArray<LixExecuteResult>>;
-					}
-				).executeBatch(
-					request.statements.map((statement) => ({
-						sql: statement.sql,
-						params: (statement.params ?? []).map(decodeWireParam),
-					})),
-					request.options,
-				);
-				return { results: results.map(encodeExecuteResult) };
+				return session.protocol.executeBatch(request);
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -274,7 +246,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.lix.createBranch(input);
+				return session.protocol.createBranch(input);
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -286,11 +258,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return (
-					session.lix as unknown as {
-						createCheckpoint: () => Promise<{ commitId: string }>;
-					}
-				).createCheckpoint();
+				return session.protocol.createCheckpoint();
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -302,15 +270,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return (
-					session.lix as unknown as {
-						undo: () => Promise<{
-							branchId: string;
-							targetCommitId: string;
-							inverseCommitId: string;
-						}>;
-					}
-				).undo();
+				return session.protocol.undo();
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -322,15 +282,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return (
-					session.lix as unknown as {
-						redo: () => Promise<{
-							branchId: string;
-							targetCommitId: string;
-							replayCommitId: string;
-						}>;
-					}
-				).redo();
+				return session.protocol.redo();
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -346,7 +298,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.lix.mergeBranchPreview({ sourceBranchId });
+				return session.protocol.mergeBranchPreview(sourceBranchId);
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -358,7 +310,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.lix.mergeBranch({ sourceBranchId });
+				return session.protocol.mergeBranch(sourceBranchId);
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -375,7 +327,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 					try {
 						const session = await pending;
 						await session.queue;
-						await session.lix.close();
+						await session.protocol.close();
 					} catch {
 						// A failed open or operation has no live session to close.
 					}
@@ -400,16 +352,10 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	private async openSession(lixId: string): Promise<LixSession> {
-		const lix = await openLix({
-			server: {
-				mode: "remote",
-				url: "https://mcp.lixray.invalid",
-				fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-					this.protocolFetch(lixId, input, init),
-			},
-		} as never);
 		return {
-			lix,
+			protocol: await openProtocolSession((path, request) =>
+				this.lixResponse(lixId, path, request),
+			),
 			queue: Promise.resolve(),
 		};
 	}
@@ -430,23 +376,9 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		session: LixSession,
 		branchId: string,
 	): Promise<void> {
-		if ((await session.lix.activeBranchId()) !== branchId) {
-			await session.lix.switchBranch({ branchId });
+		if (session.protocol.activeBranchId() !== branchId) {
+			await session.protocol.switchBranch(branchId);
 		}
-	}
-
-	private async protocolFetch(
-		lixId: string,
-		input: RequestInfo | URL,
-		init?: RequestInit,
-	): Promise<Response> {
-		const request = new Request(input, {
-			...init,
-			signal: init?.signal ?? this.signal,
-		});
-		const path = canonicalProtocolPath(new URL(request.url));
-		if (path === null) return new Response("Not found\n", { status: 404 });
-		return this.lixResponse(lixId, path, request);
 	}
 
 	private async lixResponse(
@@ -468,86 +400,14 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		headers.delete("authorization");
 		headers.delete(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER);
 		headers.set(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, this.user.userId);
-		const template = new Request(rewritten, { headers });
+		const template = new Request(rewritten, {
+			headers,
+			signal: this.signal ?? rewritten.signal,
+		});
 		if (this.lixFetch) {
 			return this.lixFetch(lixId, template);
 		}
 		return new Response("Lix storage is not configured.\n", { status: 500 });
-	}
-}
-
-function canonicalProtocolPath(url: URL): string | null {
-	const marker = "/lix/v1/";
-	const markerIndex = url.pathname.indexOf(marker);
-	if (markerIndex === -1) return null;
-	return url.pathname.slice(markerIndex);
-}
-
-function decodeWireParam(
-	value: NonNullable<ExecuteRequest["params"]>[number],
-): SqlParam {
-	switch (value.kind) {
-		case "null":
-			return Value.null();
-		case "bool":
-			return Value.boolean(value.value);
-		case "int":
-			return Value.integer(value.value);
-		case "float":
-			return Value.real(value.value);
-		case "text":
-			return Value.text(value.value);
-		case "timestamp":
-			return Value.timestamptz(value.value);
-		case "json":
-			return Value.jsonb(value.value as JsonValue);
-		case "blob":
-			return Value.blob(base64ToBytes(value.base64));
-	}
-}
-
-function encodeExecuteResult(result: LixExecuteResult): ExecuteResponse {
-	return {
-		columns: [...result.columns],
-		rows: result.rows.map((row) =>
-			result.columns.map((column) => encodeLixValue(row.value(column))),
-		),
-		rowsAffected: result.rowsAffected,
-		notices: result.notices.map((notice) => ({ ...notice })),
-	};
-}
-
-type LixResultValue = ReturnType<LixExecuteResult["rows"][number]["value"]>;
-
-function encodeLixValue(
-	value: LixResultValue,
-): ExecuteResponse["rows"][number][number] {
-	const jsValue = value.toJS();
-	switch (value.kind) {
-		case "null":
-			return { kind: "null", value: null };
-		case "boolean":
-			return { kind: "bool", value: jsValue as boolean };
-		case "integer":
-			return { kind: "int", value: jsValue as number };
-		case "real":
-			return { kind: "float", value: jsValue as number };
-		case "text":
-			return { kind: "text", value: jsValue as string };
-		case "timestamptz":
-			return { kind: "timestamp", value: jsValue as string };
-		case "jsonb":
-			return { kind: "json", value: jsValue };
-		case "blob": {
-			const bytes = value.asBytes();
-			if (!bytes) {
-				throw createLixError(
-					"upstream_error",
-					"Lix returned an invalid blob value.",
-				);
-			}
-			return { kind: "blob", base64: bytesToBase64(bytes) };
-		}
 	}
 }
 
