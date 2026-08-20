@@ -2,22 +2,14 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useRepository } from "~/components/repository-provider";
+import { repositoryCtaHref } from "~/lib/repository-cta";
 import { cn } from "~/lib/utils";
-import { repositoryPath } from "~/lib/repository-url";
 
 /** Auth-aware target and labels for the "open the app" call to action. */
 export function useRepositoryCta() {
 	const { isLoaded: authLoaded, signOut, user } = useAuth();
 	const repositoryState = useRepository();
-	const activeRepository = repositoryState.activeRepository;
-	const repositoryTo = user
-		? activeRepository
-			? repositoryPath(
-					activeRepository.organization,
-					activeRepository.repository,
-				)
-			: "/home"
-		: "/sign-in";
+	const repositoryTo = repositoryCtaHref(Boolean(user));
 	return { authLoaded, signOut, user, repositoryState, repositoryTo };
 }
 
