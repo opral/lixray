@@ -107,6 +107,22 @@ test("missing admin token is not a hard fail when GITHUB_TOKEN can delete", asyn
 	assert.doesNotMatch(await readFile(fixture.calls, "utf8"), /admin-token/);
 });
 
+test("environment deletion is best-effort when the workflow token lacks admin access", async () => {
+	const fixture = await createFixture("environment-forbidden");
+	const result = runCleanup(fixture, { omitAdminToken: true });
+
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(result.stderr, /deployments .* were cleaned/);
+	assert.match(result.stderr, /optional GITHUB_ENVIRONMENT_ADMIN_TOKEN/);
+	const calls = await readFile(fixture.calls, "utf8");
+	assert.match(calls, /workflow-token GET .*deployments\?environment=lixray-pr-231/);
+	assert.match(
+		calls,
+		/workflow-token DELETE repos\/opral\/lixray\/environments\/lixray-pr-231/,
+	);
+	assert.doesNotMatch(calls, /admin-token/);
+});
+
 test("falls back to the optional admin token only after GITHUB_TOKEN is denied", async () => {
 	const fixture = await createFixture("token-forbidden");
 	const result = runCleanup(fixture);
@@ -193,6 +209,11 @@ if [[ "$endpoint" =~ production|preview-base|lixray-pr-216 ]] || [[ "$endpoint" 
 fi
 
 if test "$MOCK_MODE" = forbidden || { test "$MOCK_MODE" = token-forbidden && test "$token" != admin-token; }; then
+	echo "gh: Resource not accessible by integration (HTTP 403)" >&2
+	exit 1
+fi
+
+if test "$MOCK_MODE" = environment-forbidden && test "$method" = DELETE && [[ "$endpoint" == *"/environments/"* ]]; then
 	echo "gh: Resource not accessible by integration (HTTP 403)" >&2
 	exit 1
 fi
