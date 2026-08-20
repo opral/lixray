@@ -212,17 +212,31 @@ void test("creates a directory with an exact persisted directory path", async ()
 	});
 });
 
-void test("checks the opposite surface when choosing a directory path", async () => {
+void test("checks both path surfaces once per candidate", async () => {
+	const directoryPaths = new Set(["/new-folder"]);
+	const filePaths = new Set(["/new-folder-1"]);
+	const checkedPaths: string[] = [];
 	const lix = {
 		execute: async (sql: string, params: ReadonlyArray<unknown>) => {
-			if (sql.includes("FROM lix_file") && params[0] === "/new-folder") {
-				return { rows: [{}] };
+			if (sql.startsWith("SELECT 1 FROM lix_directory")) {
+				assert.match(sql, /UNION ALL SELECT 1 FROM lix_file/);
+				assert.match(sql, /LIMIT 1$/);
+				const path = String(params[0]);
+				checkedPaths.push(path);
+				return {
+					rows: directoryPaths.has(path) || filePaths.has(path) ? [{}] : [],
+				};
 			}
 			return { rows: [] };
 		},
 	} as unknown as Lix;
 
-	assert.equal(await createRepositoryFolder(lix, "/"), "/new-folder-1");
+	assert.equal(await createRepositoryFolder(lix, "/"), "/new-folder-2");
+	assert.deepEqual(checkedPaths, [
+		"/new-folder",
+		"/new-folder-1",
+		"/new-folder-2",
+	]);
 });
 
 void test("creates nested files and folders with canonical separators", async () => {

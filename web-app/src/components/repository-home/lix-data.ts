@@ -425,15 +425,11 @@ async function firstFreePath(
 ): Promise<string> {
 	for (let suffix = null as number | null, i = 0; i < 1000; i += 1) {
 		const path = candidate(suffix);
-		const [dirHit, fileHit] = await Promise.all([
-			lix.execute("SELECT 1 FROM lix_directory WHERE lower(path) = lower($1)", [
-				path,
-			]),
-			lix.execute("SELECT 1 FROM lix_file WHERE lower(path) = lower($1)", [
-				path,
-			]),
-		]);
-		if (dirHit.rows.length === 0 && fileHit.rows.length === 0) return path;
+		const hit = await lix.execute(
+			"SELECT 1 FROM lix_directory WHERE lower(path) = lower($1) UNION ALL SELECT 1 FROM lix_file WHERE lower(path) = lower($1) LIMIT 1",
+			[path],
+		);
+		if (hit.rows.length === 0) return path;
 		suffix = suffix === null ? 1 : suffix + 1;
 	}
 	throw new Error("Unable to find a free file name.");
