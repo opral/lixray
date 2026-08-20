@@ -1,7 +1,7 @@
 [submodule "vendor/atelier"]
 	path = vendor/atelier
 	url = https://github.com/opral/atelier.git
-	branch = codex/extension-menu-preferences
+	branch = main
 [submodule "vendor/lix"]
 	path = vendor/lix
 	url = https://github.com/opral/lix.git
