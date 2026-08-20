@@ -1261,6 +1261,102 @@
 		}
 	},
 	{
+		"name": "restore",
+		"title": "Restore branch",
+		"description": "Move the branch selected by context to ancestor commit_id. The commit must exist and be an ancestor of the current branch head. Restore creates no commit, does not delete abandoned commits, and is not undoable; undo only applies to commits made afterward. A later checkpoint-driven garbage-collection sweep may reclaim abandoned commits that are not reachable from a retention root. Other branches and branch-local untracked rows remain unchanged. create_checkpoint returns a commit_id usable here; there is no restore_checkpoint tool.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"commit_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Lix commit id"
+				}
+			},
+			"required": ["context", "commit_id"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"context": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Opaque Lix context returned by open_lix or switch_branch"
+						},
+						"branch_id": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Lix branch id"
+						},
+						"commit_id": {
+							"type": "string"
+						},
+						"request_id": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Request ID for correlating this response with server telemetry"
+						}
+					},
+					"required": ["context", "branch_id", "commit_id", "request_id"],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"request_id": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Request ID for correlating this response with server telemetry"
+						},
+						"error": {
+							"type": "object",
+							"properties": {
+								"code": {
+									"type": "string"
+								},
+								"message": {
+									"type": "string"
+								},
+								"hint": {
+									"type": "string"
+								},
+								"details": {}
+							},
+							"required": ["code", "message"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["request_id", "error"],
+					"additionalProperties": false
+				}
+			]
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": true,
+			"idempotentHint": true,
+			"openWorldHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "noauth"
+				}
+			]
+		}
+	},
+	{
 		"name": "undo",
 		"title": "Undo last commit",
 		"description": "Undo the latest commit on the branch selected by context.",

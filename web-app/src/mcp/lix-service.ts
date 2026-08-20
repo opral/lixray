@@ -352,6 +352,34 @@ export class LixService {
 		return { context: contextToken, commitId: checkpoint.commitId };
 	}
 
+	async restore(contextToken: string, commitId: string) {
+		const context = await this.readContext(contextToken);
+		const response = await this.client.execute(
+			context.lixId,
+			context.branchId,
+			{
+				sql: "SELECT lix_restore($1)",
+				params: [{ kind: "text", value: commitId }],
+			},
+		);
+		const restoredCommitId = response.rows[0]?.[0];
+		if (
+			!restoredCommitId ||
+			restoredCommitId.kind !== "text" ||
+			restoredCommitId.value !== commitId
+		) {
+			throw createLixError(
+				"upstream_error",
+				"Lix did not confirm the requested restore commit id.",
+			);
+		}
+		return {
+			context: contextToken,
+			branchId: context.branchId,
+			commitId: restoredCommitId.value,
+		};
+	}
+
 	async undo(contextToken: string) {
 		const context = await this.readContext(contextToken);
 		const receipt = await this.client.undo(context.lixId, context.branchId);
