@@ -58,7 +58,7 @@ WHERE table_schema = 'public'
   AND table_name = $1
 ORDER BY ordinal_position;`;
 
-export const QUERY_SQL_TOOL_DESCRIPTION = `Use SQL as the universal read interface to Lix. Lix SQL is a Postgres dialect subset. query_sql runs exactly one SELECT statement against the branch selected by context. Non-SELECT and multi-statement scripts are rejected; use execute_sql when arbitrary SQL is required. Do not look for or invent typed file or entity tools.
+export const QUERY_SQL_TOOL_DESCRIPTION = `Use SQL as the universal read interface to Lix. Lix SQL is a Postgres dialect subset. query_sql runs one statement against the branch selected by context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes. Do not look for or invent typed file or entity tools.
 
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}

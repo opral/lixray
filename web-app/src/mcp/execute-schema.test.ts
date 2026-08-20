@@ -14,11 +14,8 @@ void test("SQL guidance models the public Lix surfaces", () => {
 		EXECUTE_SQL_CORE_TABLES.map((table) => table.name),
 		["lix_file", "lix_directory", "lix_branch", "lix_change"],
 	);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /exactly one SELECT/);
-	assert.match(
-		QUERY_SQL_TOOL_DESCRIPTION,
-		/use execute_sql when arbitrary SQL/,
-	);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /INSERT, UPDATE, and DELETE/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /use execute_sql for writes/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /SQL as the universal interface/);
 	assert.match(

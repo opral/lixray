@@ -1187,7 +1187,6 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 				assert.equal(lixSlug, "launch-q3");
 				return { ok: true, lixId: LIX_A };
 			},
-			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
 			lixFetch: async (lixId, request) => {
 				assert.equal(lixId, LIX_A);
 				proxiedRequest = request;
@@ -1354,7 +1353,6 @@ void test("public write SQL is rejected before it reaches the lix", async () => 
 				ok: true,
 				lixId: LIX_A,
 			}),
-			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
 			lixFetch: async () => {
 				proxied = true;
 				return new Response("unexpected");
@@ -1383,11 +1381,6 @@ void test("a mutation cannot hide behind a multi-statement public script", async
 				ok: true,
 				lixId: LIX_A,
 			}),
-			parseSqlScript: (sql) => ({
-				statements: sql
-					.split(";")
-					.map((statement) => ({ sql: statement.trim() })),
-			}),
 			lixFetch: async () => {
 				proxied = true;
 				return new Response("unexpected");
@@ -1399,7 +1392,8 @@ void test("a mutation cannot hide behind a multi-statement public script", async
 	assert.equal(proxied, false);
 });
 
-void test("public reads fail closed when no SQL parser is configured", async () => {
+void test("public reads classify writes without a SQL parser", async () => {
+	let proxied = false;
 	const response = await handleRequest(
 		remoteLixRequest("/execute", {
 			method: "POST",
@@ -1412,11 +1406,16 @@ void test("public reads fail closed when no SQL parser is configured", async () 
 				ok: true,
 				lixId: LIX_A,
 			}),
-			lixFetch: async () => new Response("unexpected"),
+			lixFetch: async () => {
+				proxied = true;
+				return new Response("public read");
+			},
 		},
 	);
 
-	assert.equal(response.status, 400);
+	assert.equal(response.status, 200);
+	assert.equal(await response.text(), "public read");
+	assert.equal(proxied, true);
 });
 
 void test("authenticated non-members are downgraded to the public read transport", async () => {
@@ -1439,7 +1438,6 @@ void test("authenticated non-members are downgraded to the public read transport
 				publicLixLookups += 1;
 				return { ok: true, lixId: LIX_A };
 			},
-			parseSqlScript: (sql) => ({ statements: [{ sql }] }),
 			lixFetch: async (_lixId, request) => {
 				proxiedRequest = request;
 				return new Response("downgraded");

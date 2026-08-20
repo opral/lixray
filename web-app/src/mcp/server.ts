@@ -12,7 +12,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { PostHog } from "posthog-node";
 import { z } from "zod";
-import type { ParseSqlScript } from "../lib/lix-sql-access.ts";
+import { sqlLooksLikeWrite } from "../lib/lix-sql-access.ts";
 import {
 	EXECUTE_SQL_TOOL_DESCRIPTION,
 	QUERY_SQL_TOOL_DESCRIPTION,
@@ -71,7 +71,6 @@ export interface McpServerOptions {
 	posthogDistinctId?: string;
 	posthogClientId?: string;
 	onPosthogFlush?: (flush: () => Promise<void>) => void;
-	parseSqlScript?: ParseSqlScript;
 }
 
 type McpSecurityScheme =
@@ -341,7 +340,7 @@ export function createLixrayMcpServer(
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. Lix SQL is a Postgres dialect subset. query_sql is SELECT-only; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; create_checkpoint is optional at the end of a finished task or session. Do not invent file helper tools or branch state.",
+				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. Lix SQL is a Postgres dialect subset. query_sql is a single-statement read path and rejects INSERT, UPDATE, and DELETE; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; create_checkpoint is optional at the end of a finished task or session. Do not invent file helper tools or branch state.",
 		},
 	);
 	const surfaceVersion = mcpSurfaceVersion(toolSurfaceDescriptions());
@@ -406,11 +405,7 @@ export function createLixrayMcpServer(
 		readAnnotations(),
 		securitySchemes,
 		async (args) => {
-			assertReadOnlyQuery(
-				options.parseSqlScript,
-				args.sql,
-				Array.isArray(args.params) ? args.params.length : 0,
-			);
+			assertReadOnlyQuery(args.sql);
 			return service.execute(args.context, toExecuteRequest(args));
 		},
 		"query_sql",
@@ -1076,71 +1071,16 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 	].map((name) => ({ name }));
 }
 
-function assertReadOnlyQuery(
-	parseSqlScript: ParseSqlScript | undefined,
-	sql: string,
-	paramCount: number,
-): void {
-	const statement = parsedSingleStatement(
-		parseSqlScript,
-		sql,
-		paramCount,
-		"query_sql",
-	);
-	if (!/^\s*SELECT\b/i.test(statement)) {
+function assertReadOnlyQuery(sql: string): void {
+	if (sqlLooksLikeWrite(sql)) {
 		throw createLixError(
 			"invalid_request",
-			"query_sql accepts only a SELECT statement.",
+			"query_sql rejects INSERT, UPDATE, and DELETE.",
 			{
-				hint: "Use execute_sql for non-SELECT SQL.",
+				hint: "Use execute_sql for writes.",
 			},
 		);
 	}
-}
-
-function parsedSingleStatement(
-	parseSqlScript: ParseSqlScript | undefined,
-	sql: string,
-	paramCount: number,
-	toolName: "query_sql",
-): string {
-	if (!parseSqlScript) {
-		throw createLixError(
-			"upstream_error",
-			"SQL classification is unavailable.",
-			{
-				hint: "Retry later. If the failure persists, contact LixRay support.",
-			},
-		);
-	}
-	let parsed: ReturnType<ParseSqlScript>;
-	try {
-		parsed = parseSqlScript(sql, paramCount);
-	} catch (caught) {
-		throw createLixError(
-			"invalid_request",
-			`${toolName} could not parse SQL.`,
-			{
-				hint: "Correct the SQL syntax and parameter count, then retry.",
-				details: {
-					parser_message:
-						caught instanceof Error
-							? caught.message
-							: "SQL parser rejected input.",
-				},
-			},
-		);
-	}
-	if (parsed.statements.length !== 1) {
-		throw createLixError(
-			"invalid_request",
-			`${toolName} requires exactly one SQL statement per input entry.`,
-			{
-				hint: "Send one SELECT statement.",
-			},
-		);
-	}
-	return parsed.statements[0]!.sql;
 }
 
 function toExecuteRequest(args: Record<string, any>): ExecuteRequest {

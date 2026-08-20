@@ -11,10 +11,7 @@ import {
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
-import {
-	isClearlyReadOnlySql,
-	type ParseSqlScript,
-} from "../lib/lix-sql-access.ts";
+import { isClearlyReadOnlySql } from "../lib/lix-sql-access.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
 import { LixService, type LixSummary } from "../mcp/lix-service.ts";
 import {
@@ -87,7 +84,6 @@ interface HandleRequestOptions {
 	authorizeLix?: AuthorizeLix;
 	resolveLix?: ResolveLix;
 	resolvePublicLix?: ResolvePublicLix;
-	parseSqlScript?: ParseSqlScript;
 	mcpTransport?: typeof handleMcpTransport;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
@@ -426,7 +422,6 @@ export async function handleRequest(
 						posthogDistinctId: authResult.auth.userId,
 						posthogClientId: authResult.auth.clientId,
 						onPosthogFlush,
-						parseSqlScript: options.parseSqlScript,
 					},
 				),
 				requestId,
@@ -527,11 +522,7 @@ export async function handleRequest(
 		if (!publicResolution.ok) {
 			return withServerTimings(publicResolution.response, serverTimings);
 		}
-		const mutationRejection = await rejectPublicMutation(
-			request,
-			endpoint,
-			options.parseSqlScript,
-		);
+		const mutationRejection = await rejectPublicMutation(request, endpoint);
 		if (mutationRejection) {
 			return withServerTimings(mutationRejection, serverTimings);
 		}
@@ -1241,16 +1232,15 @@ function isPublicReadRemoteLixRequest(
 
 /**
  * The canonical Lix protocol has no read-only mode, so the service
- * is the authorization boundary for public readers: every SQL statement in a
- * public request must classify as a read. Statements are split by Lix's own
- * script parser (injected as `options.parseSqlScript`) before the keyword
- * check, so a mutation cannot hide behind a multi-statement script. Without a
- * parser the gate fails closed.
+ * is the authorization boundary for public readers: every SQL string in a
+ * public request must classify as a read. Classification is a SELECT/VALUES
+ * prefix check plus a write-verb regex (INSERT/UPDATE/DELETE). A mutation
+ * cannot hide behind a multi-statement script because those verbs are matched
+ * anywhere in the string. Empty or unreadable bodies fail closed.
  */
 async function rejectPublicMutation(
 	request: Request,
 	endpoint: string,
-	parseSqlScript: ParseSqlScript | undefined,
 ): Promise<Response | null> {
 	if (
 		!endpoint ||
@@ -1259,32 +1249,17 @@ async function rejectPublicMutation(
 	) {
 		return null;
 	}
-	let statements: Array<{ sql: string; paramCount: number }>;
+	let statements: Array<string>;
 	try {
 		statements = await publicSqlStatements(request, endpoint);
 	} catch {
 		return publicReadOnlyResponse();
 	}
-	if (statements.length === 0 || !parseSqlScript) {
+	if (statements.length === 0) {
 		return publicReadOnlyResponse();
 	}
-	for (const statement of statements) {
-		let plan: ReturnType<ParseSqlScript>;
-		try {
-			plan = parseSqlScript(statement.sql, statement.paramCount);
-		} catch {
-			return publicReadOnlyResponse();
-		}
-		if (plan.statements.length === 0) return publicReadOnlyResponse();
-		// Observers represent one live query; requiring exactly one parsed
-		// statement prevents a read followed by a mutation from hiding behind
-		// the SSE endpoint.
-		if (endpoint.startsWith("observe") && plan.statements.length !== 1) {
-			return publicReadOnlyResponse();
-		}
-		if (!plan.statements.every((parsed) => isClearlyReadOnlySql(parsed.sql))) {
-			return publicReadOnlyResponse();
-		}
+	if (!statements.every((sql) => isClearlyReadOnlySql(sql))) {
+		return publicReadOnlyResponse();
 	}
 	return null;
 }
@@ -1292,7 +1267,7 @@ async function rejectPublicMutation(
 async function publicSqlStatements(
 	request: Request,
 	endpoint: string,
-): Promise<Array<{ sql: string; paramCount: number }>> {
+): Promise<Array<string>> {
 	const body: unknown = await request.clone().json();
 	if (!body || typeof body !== "object") return [];
 	const record = body as Record<string, unknown>;
@@ -1307,11 +1282,11 @@ async function publicSqlStatements(
 		if (!entry || typeof entry !== "object") {
 			throw new Error("Malformed public statement");
 		}
-		const { sql, params } = entry as Record<string, unknown>;
+		const { sql } = entry as Record<string, unknown>;
 		if (typeof sql !== "string" || sql.length === 0) {
 			throw new Error("Malformed public statement");
 		}
-		return { sql, paramCount: Array.isArray(params) ? params.length : 0 };
+		return sql;
 	});
 }
 

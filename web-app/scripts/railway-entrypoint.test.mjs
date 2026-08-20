@@ -4,10 +4,13 @@ import test from "node:test";
 
 const railwayEntrypoint = new URL("../src/railway-server.ts", import.meta.url);
 
-void test("the Railway entrypoint uses only the Node SQL parser", async () => {
+void test("the Railway entrypoint does not load the Node SQL parser or WASM", async () => {
 	const source = await readFile(railwayEntrypoint, "utf8");
 
-	assert.match(source, /from ["']\.\/lib\/node-lix-sql-parser["']/);
+	assert.doesNotMatch(
+		source,
+		/node-lix-sql-parser|lix_js_sdk_bg\.wasm|parseSqlScript|initSync/,
+	);
 	assert.doesNotMatch(source, /cloudflare|workerd|wrangler/i);
 	assert.doesNotMatch(source, /import\.meta\.env\.DEV/);
 });

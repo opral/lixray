@@ -1,7 +1,6 @@
 import process from "node:process";
 import startHandler from "@tanstack/react-start/server-entry";
 import { addGoogleAnalytics } from "./lib/google-analytics";
-import { parseSqlScript as parseNodeSqlScript } from "./lib/node-lix-sql-parser";
 import { withShareSecurityHeaders } from "./lib/share-security";
 import {
 	handleRequest,
@@ -19,7 +18,6 @@ export default {
 		ctx?.passThroughOnException();
 		return handleRequest(request, runtimeEnv, {
 			executionContext: ctx,
-			parseSqlScript: parseNodeSqlScript,
 			lixFetch: (lixId, lixRequest) =>
 				fetchLixService(runtimeEnv, lixId, lixRequest),
 			fallback: async (fallbackRequest) => {

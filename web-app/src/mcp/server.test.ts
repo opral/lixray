@@ -11,7 +11,6 @@ import {
 	type ExecuteRequest,
 	type LixRuntimeClient,
 } from "./lix-service.ts";
-import type { ParseSqlScript } from "../lib/lix-sql-access.ts";
 import { PostHog } from "posthog-node";
 import {
 	attachMcpToolCallObservationProperties,
@@ -29,13 +28,6 @@ import {
 } from "./server.ts";
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
-const parseSqlScript: ParseSqlScript = (sql) => ({
-	statements: sql
-		.split(";")
-		.map((statement) => statement.trim())
-		.filter(Boolean)
-		.map((statement) => ({ sql: statement })),
-});
 
 function sqlPayloadFromText(text: string): unknown {
 	const withoutContext = text.replace(/\s*context=\S+\s*$/, "");
@@ -309,7 +301,6 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		const response = await handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_Test",
-			parseSqlScript,
 		});
 		responseRequestIds.push(response.headers.get("x-request-id") ?? "");
 		return response;
@@ -566,26 +557,27 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(mutationThroughQuery.isError, true);
 		assert.match(
 			JSON.stringify(mutationThroughQuery.structuredContent),
-			/Use execute_sql for non-SELECT SQL/,
+			/query_sql rejects INSERT, UPDATE, and DELETE/,
 		);
+		assert.match(
+			JSON.stringify(mutationThroughQuery.structuredContent),
+			/Use execute_sql for writes/,
+		);
+		const insertThroughQuery = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "INSERT INTO example VALUES (1)" },
+		});
+		assert.equal(insertThroughQuery.isError, true);
+		const updateThroughQuery = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "UPDATE example SET value = 2" },
+		});
+		assert.equal(updateThroughQuery.isError, true);
 		const valuesThroughQuery = await client.callTool({
 			name: "query_sql",
 			arguments: { context, sql: "VALUES (1)" },
 		});
-		assert.equal(valuesThroughQuery.isError, true);
-		assert.match(
-			JSON.stringify(valuesThroughQuery.structuredContent),
-			/query_sql accepts only a SELECT/,
-		);
-		const scriptThroughQuery = await client.callTool({
-			name: "query_sql",
-			arguments: { context, sql: "SELECT 1; SELECT 2" },
-		});
-		assert.equal(scriptThroughQuery.isError, true);
-		assert.match(
-			JSON.stringify(scriptThroughQuery.structuredContent),
-			/requires exactly one SQL statement/,
-		);
+		assert.equal(valuesThroughQuery.isError, undefined);
 		const readThroughExecute = await client.callTool({
 			name: "execute_sql",
 			arguments: { context, statements: [{ sql: "SELECT 1" }] },
@@ -641,7 +633,6 @@ void test("MCP tools preserve continuation fields in text fallback", async () =>
 		return handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_TextContent_Test",
-			parseSqlScript,
 		});
 	};
 	const transport = new StreamableHTTPClientTransport(
@@ -814,7 +805,6 @@ void test("legacy MCP initialize and tool calls work without a session id", asyn
 		return handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_Legacy_Test",
-			parseSqlScript,
 		});
 	};
 	const transport = new StreamableHTTPClientTransport(
@@ -897,7 +887,6 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 		return handleMcpTransport(request as never, service, {
 			authMode: "none",
 			serverName: "LixRay_Telemetry_Test",
-			parseSqlScript,
 			posthogToken: "phc_test_token",
 			posthogDistinctId: "felix",
 			posthogClientId: "codex-desktop",
