@@ -4,6 +4,8 @@ import {
 	OAUTH_CONSENT_FALLBACK_MS,
 	OAUTH_CONSENT_OPEN_HREF,
 	OAUTH_CONSENT_RESOLVED_EVENT,
+	keepsLixrayDocument,
+	oauthConsentHandoff,
 	oauthConsentResolvedProperties,
 	redirectHostFromUrl,
 	resolveOAuthConsentDecision,
@@ -14,6 +16,8 @@ import {
 const CLIENT_REDIRECT_URL =
 	"https://chatgpt.com/connector/oauth/callback?code=auth-code&state=xyz";
 const LOOPBACK_REDIRECT_URL = "http://127.0.0.1:8765/callback?code=loopback";
+const LOCALHOST_REDIRECT_URL = "http://localhost:65229/callback?code=local";
+const IPV6_LOOPBACK_REDIRECT_URL = "http://[::1]:8765/callback?code=v6";
 const CUSTOM_SCHEME_REDIRECT_URL =
 	"cursor://anysphere.cursor-mcp/oauth/callback?code=custom";
 
@@ -47,6 +51,24 @@ void test("redirectHostFromUrl is the host, never the full URL", () => {
 	assert.doesNotMatch(redirectHostFromUrl(CLIENT_REDIRECT_URL), /https:/);
 });
 
+void test("keeps the LixRay tab for loopback and custom schemes only", () => {
+	assert.equal(keepsLixrayDocument(LOOPBACK_REDIRECT_URL), true);
+	assert.equal(keepsLixrayDocument(LOCALHOST_REDIRECT_URL), true);
+	assert.equal(keepsLixrayDocument(IPV6_LOOPBACK_REDIRECT_URL), true);
+	assert.equal(keepsLixrayDocument(CUSTOM_SCHEME_REDIRECT_URL), true);
+	assert.equal(
+		keepsLixrayDocument("vscode://vscode.github-authentication"),
+		true,
+	);
+	assert.equal(keepsLixrayDocument(CLIENT_REDIRECT_URL), false);
+	assert.equal(
+		keepsLixrayDocument("https://claude.ai/oauth/callback?code=x"),
+		false,
+	);
+	assert.equal(oauthConsentHandoff(LOOPBACK_REDIRECT_URL), "keep-tab");
+	assert.equal(oauthConsentHandoff(CLIENT_REDIRECT_URL), "leave-tab");
+});
+
 void test("resolved event properties are decision, client_name, redirect_host", () => {
 	assert.deepEqual(
 		oauthConsentResolvedProperties({
@@ -65,9 +87,10 @@ void test("resolved event properties are decision, client_name, redirect_host", 
 	assert.equal(OAUTH_CONSENT_FALLBACK_MS, 2000);
 });
 
-void test("approve navigates to the client redirect_url and offers /open if still here", async () => {
+void test("https approve assigns the client redirect_url and offers /open after 2s", async () => {
 	const oauthCalls: Array<{ method: "approve" | "deny"; id: string }> = [];
 	const navigations: Array<string> = [];
+	const hops: Array<string> = [];
 	const events: Array<{ event: string; properties: unknown }> = [];
 	const scheduled: Array<{ delayMs: number; callback: () => void }> = [];
 	let showOpenFallback = false;
@@ -89,6 +112,9 @@ void test("approve navigates to the client redirect_url and offers /open if stil
 			navigate: (url) => {
 				navigations.push(url);
 			},
+			openClientHop: (url) => {
+				hops.push(url);
+			},
 			scheduleFallback: (callback, delayMs) => {
 				scheduled.push({ delayMs, callback });
 			},
@@ -98,9 +124,14 @@ void test("approve navigates to the client redirect_url and offers /open if stil
 		},
 	);
 
-	assert.deepEqual(outcome, { ok: true, redirectUrl: CLIENT_REDIRECT_URL });
+	assert.deepEqual(outcome, {
+		ok: true,
+		redirectUrl: CLIENT_REDIRECT_URL,
+		handoff: "leave-tab",
+	});
 	assert.deepEqual(oauthCalls, [{ method: "approve", id: "auth-1" }]);
 	assert.deepEqual(navigations, [CLIENT_REDIRECT_URL]);
+	assert.deepEqual(hops, []);
 	assert.deepEqual(events, [
 		{
 			event: "lixray_oauth_consent_resolved",
@@ -120,12 +151,19 @@ void test("approve navigates to the client redirect_url and offers /open if stil
 	assert.equal(OAUTH_CONSENT_OPEN_HREF, "/open");
 });
 
-void test("approve still delivers a loopback or custom-scheme redirect_url", async () => {
+void test("loopback and custom-scheme approve offer /open before the client hop", async () => {
 	for (const redirectUrl of [
 		LOOPBACK_REDIRECT_URL,
+		LOCALHOST_REDIRECT_URL,
+		IPV6_LOOPBACK_REDIRECT_URL,
 		CUSTOM_SCHEME_REDIRECT_URL,
 	]) {
+		const order: Array<string> = [];
 		const navigations: Array<string> = [];
+		const hops: Array<string> = [];
+		let scheduled = 0;
+		let showOpenFallback = false;
+
 		const outcome = await resolveOAuthConsentDecision(
 			{
 				decision: "approve",
@@ -136,19 +174,44 @@ void test("approve still delivers a loopback or custom-scheme redirect_url", asy
 			{
 				captureImmediately: () => undefined,
 				navigate: (url) => {
+					order.push("navigate");
 					navigations.push(url);
 				},
-				scheduleFallback: () => undefined,
+				openClientHop: (url) => {
+					order.push("hop");
+					hops.push(url);
+				},
+				scheduleFallback: () => {
+					scheduled += 1;
+					throw new Error(
+						"loopback/custom-scheme must not wait on a navigation-killed timeout",
+					);
+				},
+				onShowOpenFallback: () => {
+					order.push("open");
+					showOpenFallback = true;
+				},
 			},
 		);
-		assert.deepEqual(outcome, { ok: true, redirectUrl });
-		assert.deepEqual(navigations, [redirectUrl]);
+
+		assert.deepEqual(
+			outcome,
+			{ ok: true, redirectUrl, handoff: "keep-tab" },
+			redirectUrl,
+		);
+		assert.equal(showOpenFallback, true, redirectUrl);
+		assert.deepEqual(order, ["open", "hop"], redirectUrl);
+		assert.deepEqual(hops, [redirectUrl], redirectUrl);
+		assert.deepEqual(navigations, [], redirectUrl);
+		assert.equal(scheduled, 0, redirectUrl);
+		assert.equal(OAUTH_CONSENT_OPEN_HREF, "/open");
 	}
 });
 
 void test("deny navigates to the client error redirect and does not offer /open", async () => {
 	const oauthCalls: Array<{ method: "approve" | "deny"; id: string }> = [];
 	const navigations: Array<string> = [];
+	const hops: Array<string> = [];
 	const events: Array<{ event: string; properties: unknown }> = [];
 	let scheduled = 0;
 	let showOpenFallback = false;
@@ -175,6 +238,9 @@ void test("deny navigates to the client error redirect and does not offer /open"
 			navigate: (url) => {
 				navigations.push(url);
 			},
+			openClientHop: (url) => {
+				hops.push(url);
+			},
 			scheduleFallback: () => {
 				scheduled += 1;
 			},
@@ -187,11 +253,13 @@ void test("deny navigates to the client error redirect and does not offer /open"
 	assert.deepEqual(outcome, {
 		ok: true,
 		redirectUrl: "https://claude.ai/oauth/callback?error=access_denied",
+		handoff: "deny",
 	});
 	assert.deepEqual(oauthCalls, [{ method: "deny", id: "auth-2" }]);
 	assert.deepEqual(navigations, [
 		"https://claude.ai/oauth/callback?error=access_denied",
 	]);
+	assert.deepEqual(hops, []);
 	assert.deepEqual(events, [
 		{
 			event: "lixray_oauth_consent_resolved",

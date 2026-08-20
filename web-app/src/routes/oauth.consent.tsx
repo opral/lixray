@@ -8,11 +8,13 @@ import {
 	useState,
 	type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import { useAuth } from "~/components/auth-provider";
 import { GoogleMark } from "~/components/google-mark";
 import { Button } from "~/components/ui/button";
 import {
 	OAUTH_CONSENT_OPEN_HREF,
+	keepsLixrayDocument,
 	resolveOAuthConsentDecision,
 } from "~/lib/oauth-consent";
 import { localDevCredentials } from "~/lib/supabase";
@@ -52,6 +54,7 @@ function OAuthConsentPage() {
 	const [localSignInPending, setLocalSignInPending] = useState(false);
 	const localSignInAttempted = useRef(false);
 	const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const pendingClientHop = useRef<Window | null>(null);
 	const usesLocalAccount = Boolean(localDevCredentials);
 	const returnTo = useMemo(
 		() =>
@@ -128,13 +131,23 @@ function OAuthConsentPage() {
 			if (fallbackTimer.current !== null) {
 				clearTimeout(fallbackTimer.current);
 			}
+			pendingClientHop.current?.close();
+			pendingClientHop.current = null;
 		};
 	}, []);
+
+	const closePendingClientHop = () => {
+		pendingClientHop.current?.close();
+		pendingClientHop.current = null;
+	};
 
 	const decide = async (decision: "approve" | "deny") => {
 		if (!client || !details) return;
 		setSubmitting(decision);
 		setError(null);
+		if (decision === "approve" && keepsLixrayDocument(details.redirectUri)) {
+			pendingClientHop.current = window.open("about:blank", "_blank");
+		}
 		const outcome = await resolveOAuthConsentDecision(
 			{
 				decision,
@@ -145,11 +158,21 @@ function OAuthConsentPage() {
 			{
 				captureImmediately: captureTelemetryImmediately,
 				navigate: (url) => {
+					closePendingClientHop();
 					if (decision === "approve") {
 						window.location.assign(url);
 						return;
 					}
 					window.location.replace(url);
+				},
+				openClientHop: (url) => {
+					const hop = pendingClientHop.current;
+					pendingClientHop.current = null;
+					if (hop && !hop.closed) {
+						hop.location.replace(url);
+						return;
+					}
+					window.open(url, "_blank", "noopener,noreferrer");
 				},
 				scheduleFallback: (callback, delayMs) => {
 					if (fallbackTimer.current !== null) {
@@ -158,16 +181,20 @@ function OAuthConsentPage() {
 					fallbackTimer.current = setTimeout(callback, delayMs);
 				},
 				onShowOpenFallback: () => {
-					setShowOpenFallback(true);
+					flushSync(() => {
+						setApproved(true);
+						setShowOpenFallback(true);
+					});
 				},
 			},
 		);
 		if (!outcome.ok) {
+			closePendingClientHop();
 			setError(outcome.error);
 			setSubmitting(null);
 			return;
 		}
-		if (decision === "approve") {
+		if (decision === "approve" && outcome.handoff === "leave-tab") {
 			setApproved(true);
 		}
 	};
@@ -180,8 +207,9 @@ function OAuthConsentPage() {
 	// LixRay mark, scopes as three plain sentences, raw scopes behind a
 	// title attribute. Signed-out keeps the same card and swaps the body
 	// for one sign-in button that returns to this consent URL. After Allow,
-	// the same card becomes the connected interstitial if the client hop
-	// leaves this tab on lixray.com.
+	// HTTPS clients assign away and get a 2s /open fallback if this tab
+	// stays. Loopback and custom-scheme clients keep this tab and show
+	// Continue in LixRay immediately.
 	return (
 		<main className="grid min-h-screen place-items-center bg-bg-app px-5 py-8 text-text-primary">
 			<div className="flex w-full max-w-[420px] flex-col gap-5 rounded-[14px] border border-border-panel bg-bg-panel px-7 pt-8 pb-6 shadow-[0_18px_50px_rgba(28,25,23,0.1),0_2px_8px_rgba(28,25,23,0.05)]">

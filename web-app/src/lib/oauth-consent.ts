@@ -26,6 +26,10 @@ export type OAuthConsentResolvedProperties = {
 	redirect_host: string;
 };
 
+export type OAuthConsentHandoff = "keep-tab" | "leave-tab";
+
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1"]);
+
 /** Host of an OAuth redirect target — never the full URL. */
 export function redirectHostFromUrl(value: string): string {
 	try {
@@ -33,6 +37,27 @@ export function redirectHostFromUrl(value: string): string {
 	} catch {
 		return "";
 	}
+}
+
+/**
+ * Loopback HTTP(S) and non-http(s) schemes cannot take the current tab:
+ * assign() unloads lixray.com and kills the /open fallback timer.
+ */
+export function keepsLixrayDocument(value: string): boolean {
+	try {
+		const url = new URL(value);
+		if (url.protocol !== "http:" && url.protocol !== "https:") {
+			return true;
+		}
+		const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+		return LOOPBACK_HOSTNAMES.has(hostname);
+	} catch {
+		return value.length > 0 && !/^https?:/i.test(value);
+	}
+}
+
+export function oauthConsentHandoff(redirectUrl: string): OAuthConsentHandoff {
+	return keepsLixrayDocument(redirectUrl) ? "keep-tab" : "leave-tab";
 }
 
 export function oauthConsentResolvedProperties(input: {
@@ -49,9 +74,10 @@ export function oauthConsentResolvedProperties(input: {
 
 /**
  * Completes an OAuth consent decision: grant/deny with skipBrowserRedirect,
- * emit `lixray_oauth_consent_resolved`, then navigate to the client
- * `redirect_url`. Approve also schedules an in-tab /open fallback for when
- * the client hop leaves the document on lixray.com.
+ * emit `lixray_oauth_consent_resolved`, then deliver the client
+ * `redirect_url`. HTTPS approve assigns this tab and waits ~2s before
+ * offering /open. Loopback and custom-scheme approve paint /open first,
+ * then hop in another browsing context so this tab survives.
  */
 export async function resolveOAuthConsentDecision(
 	input: {
@@ -66,10 +92,14 @@ export async function resolveOAuthConsentDecision(
 			properties: OAuthConsentResolvedProperties,
 		) => void | Promise<void>;
 		navigate: (url: string) => void;
+		openClientHop?: (url: string) => void;
 		scheduleFallback?: (callback: () => void, delayMs: number) => void;
 		onShowOpenFallback?: () => void;
 	},
-): Promise<{ ok: true; redirectUrl: string } | { ok: false; error: string }> {
+): Promise<
+	| { ok: true; redirectUrl: string; handoff: OAuthConsentHandoff | "deny" }
+	| { ok: false; error: string }
+> {
 	const decide =
 		input.decision === "approve"
 			? input.oauth.approveAuthorization
@@ -94,18 +124,31 @@ export async function resolveOAuthConsentDecision(
 		}),
 	);
 
-	deps.navigate(redirectUrl);
-
-	if (input.decision === "approve") {
-		const schedule =
-			deps.scheduleFallback ??
-			((callback, delayMs) => {
-				setTimeout(callback, delayMs);
-			});
-		schedule(() => {
-			deps.onShowOpenFallback?.();
-		}, OAUTH_CONSENT_FALLBACK_MS);
+	if (input.decision === "deny") {
+		deps.navigate(redirectUrl);
+		return { ok: true, redirectUrl, handoff: "deny" };
 	}
 
-	return { ok: true, redirectUrl };
+	const handoff = oauthConsentHandoff(redirectUrl);
+	if (handoff === "keep-tab") {
+		deps.onShowOpenFallback?.();
+		const openHop =
+			deps.openClientHop ??
+			((url) => {
+				window.open(url, "_blank", "noopener,noreferrer");
+			});
+		openHop(redirectUrl);
+		return { ok: true, redirectUrl, handoff };
+	}
+
+	deps.navigate(redirectUrl);
+	const schedule =
+		deps.scheduleFallback ??
+		((callback, delayMs) => {
+			setTimeout(callback, delayMs);
+		});
+	schedule(() => {
+		deps.onShowOpenFallback?.();
+	}, OAUTH_CONSENT_FALLBACK_MS);
+	return { ok: true, redirectUrl, handoff };
 }
