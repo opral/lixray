@@ -56,7 +56,8 @@ RUN if echo "$RAILWAY_ENVIRONMENT_NAME" | grep -Eq '^(lixray-pr-[0-9]+|pr-[a-z0-
 		test -n "$VITE_SUPABASE_KEY"; \
 	fi \
 	&& pnpm --dir web-app ci:prepare:web \
-	&& pnpm --dir web-app ci:build:node
+	&& pnpm --dir web-app ci:build:node \
+	&& test ! -e web-app/dist/wasm/lix_js_sdk_bg.wasm
 
 FROM node:24-bookworm-slim AS runtime
 WORKDIR /app/web-app
