@@ -3,10 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import {
-	REPOSITORY_HOME_PATH,
-	repositoryCtaHref,
-} from "./repository-cta.ts";
+import { REPOSITORY_HOME_PATH, repositoryCtaHref } from "./repository-cta.ts";
 
 void test("marketing CTA always opens home, not the last repository", () => {
 	assert.equal(REPOSITORY_HOME_PATH, "/home");
