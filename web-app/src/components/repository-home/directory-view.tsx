@@ -109,7 +109,9 @@ export function DirectoryView({
 	onOpenSqlExplorer,
 	onOpenReview,
 }: DirectoryViewProps) {
-	const tree = useRepositoryTree(lix);
+	const [treeFailed, setTreeFailed] = useState(false);
+	const markTreeFailed = useCallback(() => setTreeFailed(true), []);
+	const tree = useRepositoryTree(lix, markTreeFailed);
 	const controlPlaneData = useRepositoryControlPlaneData(
 		lix,
 		isHome && dirPath === "/",
@@ -120,6 +122,7 @@ export function DirectoryView({
 	);
 	const readme = useFileMarkdown(lix, listing?.readmePath ?? null);
 	const [actionError, setActionError] = useState<string | null>(null);
+	useEffect(() => setTreeFailed(false), [lix]);
 	const { isDropTarget, dragHandlers } = useImportDrop({
 		lix,
 		dirPath,
@@ -173,6 +176,16 @@ export function DirectoryView({
 	}, [dirPath, isActive, lix, onOpenFile, readOnly]);
 
 	if (!tree || !listing) {
+		if (treeFailed) {
+			return (
+				<div
+					role="alert"
+					className="grid h-full w-full place-content-center px-6 text-center text-[13px] text-text-secondary"
+				>
+					Unable to load repository files. Reload to try again.
+				</div>
+			);
+		}
 		return <div className="h-full w-full" aria-busy="true" />;
 	}
 
@@ -381,6 +394,14 @@ function RepositoryControlPlaneRail({
 
 			<section className="border-b border-border-panel py-7 @max-[1100px]:border-t-0">
 				<RailHeading>Changes</RailHeading>
+				{data?.changeHistoryUnavailable ? (
+					<p
+						role="status"
+						className="m-0 mt-2 text-[11.5px] leading-4 text-text-tertiary"
+					>
+						Some change history is unavailable.
+					</p>
+				) : null}
 				<ChangesSummary data={data} onOpenReview={onOpenReview} />
 			</section>
 
@@ -425,14 +446,18 @@ function ChangesSummary({
 		<div className="mt-2.5">
 			<div className="flex items-baseline gap-1.5">
 				<strong className="text-[24px] leading-none font-semibold tracking-[-0.04em] text-text-primary">
-					{formatCompactCount(changeCount)}
+					{changeCount === null ? "—" : formatCompactCount(changeCount)}
 				</strong>
 				<span className="text-[11.5px] text-text-tertiary">
-					{hasCheckpoint ? "since last checkpoint" : "changes so far"}
+					{changeCount === null
+						? "change history unavailable"
+						: hasCheckpoint
+							? "since last checkpoint"
+							: "changes so far"}
 				</span>
 			</div>
 			<ChangeBars data={data} />
-			{changeCount > 0 && onOpenReview ? (
+			{changeCount !== null && changeCount > 0 && onOpenReview ? (
 				<button
 					type="button"
 					onClick={onOpenReview}
@@ -451,6 +476,16 @@ function ChangesSummary({
 
 function ChangeBars({ data }: { readonly data: RepositoryControlPlaneData }) {
 	const days = data.changeDays;
+	if (days === null) {
+		return (
+			<div
+				className="mt-4 h-11 border-b border-[#ded5c8] text-center text-[18px] leading-10 text-text-quaternary"
+				aria-hidden="true"
+			>
+				—
+			</div>
+		);
+	}
 	const maxCount = Math.max(1, ...days.map((day) => day.count));
 	const latestCheckpointDay = data.checkpointDates[0]?.slice(0, 10) ?? null;
 	const visibleDays = days.length > 0 ? days : [{ day: "", count: 0 }];
@@ -543,7 +578,7 @@ function DatabaseSummary({
 					<span
 						key={row.label}
 						className={row.color}
-						style={{ flexGrow: Math.max(1, row.count) }}
+						style={{ flexGrow: Math.max(1, row.count ?? 0) }}
 					/>
 				))}
 			</div>
@@ -557,7 +592,7 @@ function DatabaseSummary({
 						<span>{row.label}</span>
 						<span className="flex-1 border-b border-dotted border-border-panel" />
 						<span className="tabular-nums">
-							{formatCompactCount(row.count)}
+							{row.count === null ? "—" : formatCompactCount(row.count)}
 						</span>
 					</li>
 				))}

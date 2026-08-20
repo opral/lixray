@@ -1,5 +1,5 @@
 import type { Lix } from "@lix-js/sdk";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EntryKind } from "../../lib/entry-kind.ts";
 
 export function dirNameFromPath(dirPath: string): string {
@@ -41,16 +41,30 @@ type ObservedRow = {
 	value(column: string): { asBytes(): Uint8Array | undefined };
 };
 
+export function resolveObservedRowsAfterError<TRow>(
+	rows: TRow[] | null,
+	fallbackToEmpty: boolean,
+): { readonly rows: TRow[] | null; readonly hadRows: boolean } {
+	return {
+		rows: fallbackToEmpty ? (rows ?? []) : rows,
+		hadRows: rows !== null,
+	};
+}
+
 function useObservedRows(
 	lix: Lix,
 	sql: string,
 	params: ReadonlyArray<string>,
 	enabled = true,
+	fallbackToEmptyOnError = false,
+	onError?: (hadRows: boolean) => void,
 ): ObservedRow[] | null {
 	const [rows, setRows] = useState<ObservedRow[] | null>(null);
+	const rowsRef = useRef<ObservedRow[] | null>(null);
 	const paramsKey = JSON.stringify(params);
 	useEffect(() => {
 		if (!enabled) {
+			rowsRef.current = null;
 			setRows(null);
 			return;
 		}
@@ -58,17 +72,28 @@ function useObservedRows(
 		// Remote observe reconciles every stream's first frame through execute,
 		// including reconnects, so event.result is safe to publish directly.
 		const events = lix.observe(sql, JSON.parse(paramsKey) as string[]);
+		rowsRef.current = null;
 		setRows(null);
 		void (async () => {
 			try {
 				while (!disposed) {
 					const event = await events.next();
-					if (!event) break;
-					if (!disposed) setRows(event.result.rows);
+					if (!event) throw new Error("Lix observer ended unexpectedly.");
+					if (!disposed) {
+						rowsRef.current = event.result.rows;
+						setRows(event.result.rows);
+					}
 				}
 			} catch (error) {
 				if (!disposed) {
 					console.error("repository-home: lix observe failed", error);
+					const resolved = resolveObservedRowsAfterError(
+						rowsRef.current,
+						fallbackToEmptyOnError,
+					);
+					rowsRef.current = resolved.rows;
+					setRows(resolved.rows);
+					onError?.(resolved.hadRows);
 				}
 			}
 		})();
@@ -76,7 +101,7 @@ function useObservedRows(
 			disposed = true;
 			events.close();
 		};
-	}, [enabled, lix, sql, paramsKey]);
+	}, [enabled, fallbackToEmptyOnError, lix, onError, sql, paramsKey]);
 	return rows;
 }
 
@@ -93,14 +118,15 @@ const asNumber = (value: unknown): number => {
 
 export type RepositoryControlPlaneData = {
 	readonly workingChangeCount: number;
-	readonly totalChangeCount: number;
+	readonly totalChangeCount: number | null;
 	readonly tableCount: number | null;
 	readonly checkpointDates: readonly string[];
 	readonly changeDays: ReadonlyArray<{
 		readonly day: string;
 		readonly count: number;
-	}>;
+	}> | null;
 	readonly createdAt: string | null;
+	readonly changeHistoryUnavailable: boolean;
 };
 
 /** Lix exposes the active branch's working changes as a table function. */
@@ -112,6 +138,19 @@ export function useRepositoryControlPlaneData(
 	lix: Lix,
 	enabled = true,
 ): RepositoryControlPlaneData | null {
+	const [changeStatsHadRowsOnFailure, setChangeStatsHadRowsOnFailure] =
+		useState<boolean | null>(null);
+	const [changeDaysHadRowsOnFailure, setChangeDaysHadRowsOnFailure] = useState<
+		boolean | null
+	>(null);
+	const markChangeStatsUnavailable = useCallback(
+		(hadRows: boolean) => setChangeStatsHadRowsOnFailure(hadRows),
+		[],
+	);
+	const markChangeDaysUnavailable = useCallback(
+		(hadRows: boolean) => setChangeDaysHadRowsOnFailure(hadRows),
+		[],
+	);
 	const workingRows = useObservedRows(lix, WORKING_DIFF_COUNT_SQL, [], enabled);
 	const checkpointRows = useObservedRows(
 		lix,
@@ -124,14 +163,23 @@ export function useRepositoryControlPlaneData(
 		"SELECT count(*) AS n, min(created_at) AS created_at FROM lix_change",
 		[],
 		enabled,
+		true,
+		markChangeStatsUnavailable,
 	);
 	const changeDayRows = useObservedRows(
 		lix,
 		"SELECT substr(created_at, 1, 10) AS day, count(*) AS n FROM lix_change GROUP BY substr(created_at, 1, 10) ORDER BY day DESC LIMIT 10",
 		[],
 		enabled,
+		true,
+		markChangeDaysUnavailable,
 	);
 	const [tableCount, setTableCount] = useState<number | null>(null);
+
+	useEffect(() => {
+		setChangeStatsHadRowsOnFailure(null);
+		setChangeDaysHadRowsOnFailure(null);
+	}, [enabled, lix]);
 
 	useEffect(() => {
 		if (!enabled) {
@@ -165,33 +213,62 @@ export function useRepositoryControlPlaneData(
 		}
 		return {
 			workingChangeCount: asNumber(workingRows[0]?.get("n")),
-			totalChangeCount: asNumber(changeStatsRows[0]?.get("n")),
+			totalChangeCount:
+				changeStatsHadRowsOnFailure === false
+					? null
+					: asNumber(changeStatsRows[0]?.get("n")),
 			tableCount,
 			checkpointDates: checkpointRows
 				.map((row) => asText(row.get("created_at")))
 				.filter(Boolean),
-			changeDays: changeDayRows
-				.map((row) => ({
-					day: asText(row.get("day")),
-					count: asNumber(row.get("n")),
-				}))
-				.reverse(),
-			createdAt: asNullableText(changeStatsRows[0]?.get("created_at")),
+			changeDays:
+				changeDaysHadRowsOnFailure === false
+					? null
+					: changeDayRows
+							.map((row) => ({
+								day: asText(row.get("day")),
+								count: asNumber(row.get("n")),
+							}))
+							.reverse(),
+			createdAt:
+				changeStatsHadRowsOnFailure === false
+					? null
+					: asNullableText(changeStatsRows[0]?.get("created_at")),
+			changeHistoryUnavailable:
+				changeStatsHadRowsOnFailure !== null ||
+				changeDaysHadRowsOnFailure !== null,
 		};
-	}, [changeDayRows, changeStatsRows, checkpointRows, tableCount, workingRows]);
+	}, [
+		changeDayRows,
+		changeDaysHadRowsOnFailure,
+		changeStatsHadRowsOnFailure,
+		changeStatsRows,
+		checkpointRows,
+		tableCount,
+		workingRows,
+	]);
 }
 
 /** The full directory/file tree, kept live via lix observe. */
-export function useRepositoryTree(lix: Lix): RepositoryTree | null {
+export function useRepositoryTree(
+	lix: Lix,
+	onError?: (hadRows: boolean) => void,
+): RepositoryTree | null {
 	const dirRows = useObservedRows(
 		lix,
 		"SELECT id, parent_id, path, name, lixcol_updated_at FROM lix_directory ORDER BY path",
 		[],
+		true,
+		false,
+		onError,
 	);
 	const fileRows = useObservedRows(
 		lix,
 		"SELECT id, directory_id, path, name, lixcol_updated_at FROM lix_file ORDER BY path",
 		[],
+		true,
+		false,
+		onError,
 	);
 	return useMemo(() => {
 		if (!dirRows || !fileRows) return null;

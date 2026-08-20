@@ -12,6 +12,7 @@ import {
 	resolveRepositoryHref,
 	type RepositoryTree,
 	repositoryHasNoFiles,
+	resolveObservedRowsAfterError,
 	WORKING_DIFF_COUNT_SQL,
 } from "./lix-data.ts";
 
@@ -59,6 +60,27 @@ void test("queries the latest Lix working-diff table function", () => {
 		WORKING_DIFF_COUNT_SQL,
 		"SELECT count(*) AS n FROM lix_working_diff()",
 	);
+});
+
+void test("optional observer failures resolve first-frame loading to empty data", () => {
+	assert.deepEqual(resolveObservedRowsAfterError(null, true), {
+		rows: [],
+		hadRows: false,
+	});
+});
+
+void test("optional observer failures after a frame preserve its rows", () => {
+	const rows = [{ value: "cached" }];
+	const resolved = resolveObservedRowsAfterError(rows, true);
+	assert.equal(resolved.rows, rows);
+	assert.equal(resolved.hadRows, true);
+});
+
+void test("authoritative observer failures remain unresolved for explicit error UI", () => {
+	assert.deepEqual(resolveObservedRowsAfterError(null, false), {
+		rows: null,
+		hadRows: false,
+	});
 });
 
 void test("lists directory entries from their separate surfaces", () => {
