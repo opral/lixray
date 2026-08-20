@@ -40,6 +40,12 @@ export const MCP_PROTECTED_RESOURCE_URL = `${MCP_RESOURCE}${MCP_PROTECTED_RESOUR
 export const MCP_REQUEST_ID_HEADER = "X-Request-ID";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
+export const MCP_SERVER_INSTRUCTIONS =
+	"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. Lix SQL is a Postgres dialect subset. query_sql is a single-statement read path and rejects INSERT, UPDATE, and DELETE; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; execute_sql already saved the files. create_checkpoint is an explicit user-facing action, not agent ceremony. Do not call create_checkpoint after a write, after every change, or to be safe. The agent may recommend that the user checkpoint when a task or session is done; prefer leaving the checkpoint to the user. Never treat checkpointing as required, unlike Git commits. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent file helper tools or branch state.";
+
+export const CREATE_CHECKPOINT_TOOL_DESCRIPTION =
+	"Create a named restore point on the branch selected by context. This is an explicit user-facing action, not agent ceremony. Writes already persist through execute_sql; a checkpoint is not required for durability and is not a Git-style commit. Do not call this after a write, after every change, or to be safe. Call it only when the user explicitly asked. The agent may recommend that the user checkpoint when a task or session is done; prefer leaving the checkpoint to the user.";
+
 type McpAuthMode = "oauth" | "none";
 
 export interface McpToolCallObservation {
@@ -446,8 +452,7 @@ export function createLixrayMcpServer(
 		{ name: options.serverName ?? "LixRay", version: "0.2.0" },
 		{
 			capabilities: { tools: {} },
-			instructions:
-				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. Lix SQL is a Postgres dialect subset. query_sql is a single-statement read path and rejects INSERT, UPDATE, and DELETE; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; create_checkpoint is optional at the end of a finished task or session. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent file helper tools or branch state.",
+			instructions: MCP_SERVER_INSTRUCTIONS,
 		},
 	);
 	const surfaceVersion = mcpSurfaceVersion(toolSurfaceDescriptions());
@@ -643,7 +648,7 @@ export function createLixrayMcpServer(
 		server,
 		"create_checkpoint",
 		"Create checkpoint",
-		"Create an optional restore point on the branch selected by context. Writes already persist through execute_sql; a checkpoint is not required for durability. Call this when a session or task is complete and someone may want this exact state later. Do not call it after every write.",
+		CREATE_CHECKPOINT_TOOL_DESCRIPTION,
 		z.object({ context }).strict(),
 		checkpointOutput,
 		writeAnnotations(),
@@ -1087,14 +1092,47 @@ function registerTool(
 	);
 }
 
+function summarizeListLixes(result: Record<string, unknown>): string {
+	const lixes = Array.isArray(result.lixes) ? result.lixes : [];
+	const count = lixes.length;
+	const heading = `Found ${count} accessible ${count === 1 ? "Lix" : "Lixes"}.`;
+	if (count === 0) {
+		return heading;
+	}
+	const identities = lixes.map((item) => formatListLixIdentity(item));
+	return `${heading}\n${identities.join("\n")}`;
+}
+
+function formatListLixIdentity(item: unknown): string {
+	const lix =
+		item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+	const namespace =
+		lix.namespace && typeof lix.namespace === "object"
+			? (lix.namespace as Record<string, unknown>)
+			: {};
+	const handle = typeof namespace.handle === "string" ? namespace.handle : "";
+	const slug = typeof lix.slug === "string" ? lix.slug : "";
+	const id = typeof lix.id === "string" ? lix.id : "";
+	const name = typeof lix.name === "string" ? lix.name : "";
+	const identity =
+		handle && slug ? `@${handle}/${slug}` : slug || id || "unknown";
+	const parts = [identity];
+	if (id && id !== identity) {
+		parts.push(id);
+	}
+	if (name) {
+		parts.push(name);
+	}
+	return parts.join(" ");
+}
+
 function summarizeToolResult(name: string, raw: unknown): string {
 	if (!raw || typeof raw !== "object") return `${name} completed.`;
 	const result = raw as Record<string, unknown>;
 	const contextSuffix = formatContextSuffix(result);
 
 	if (name === "list_lixes") {
-		const count = Array.isArray(result.lixes) ? result.lixes.length : 0;
-		return `Found ${count} accessible ${count === 1 ? "Lix" : "Lixes"}.`;
+		return summarizeListLixes(result);
 	}
 	if (name === "open_lix") {
 		return `Opened ${String(result.url ?? result.id)} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}. Context expires at ${String(result.context_expires_at)}.${contextSuffix}`;
