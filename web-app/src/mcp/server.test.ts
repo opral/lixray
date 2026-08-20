@@ -1094,7 +1094,9 @@ void test("legacy initialize instrument() emits $mcp_tool_call for list_lixes an
 	try {
 		await client.connect(transport);
 		const tools = await client.listTools();
-		const listLixesTool = tools.tools.find((tool) => tool.name === "list_lixes");
+		const listLixesTool = tools.tools.find(
+			(tool) => tool.name === "list_lixes",
+		);
 		const querySqlTool = tools.tools.find((tool) => tool.name === "query_sql");
 		assert.equal(
 			(listLixesTool?.inputSchema as { properties?: { context?: unknown } })
