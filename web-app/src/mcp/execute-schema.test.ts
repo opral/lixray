@@ -43,7 +43,9 @@ void test("SQL guidance models the public Lix surfaces", () => {
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /INSERT INTO lix_file/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /UPDATE lix_file SET path/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /INSERT INTO lix_directory/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_file_history\(\$1\)/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_history\('lix_file', \$1\)/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_working_diff\(\)/);
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_file_history/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /declared primary-key columns/);
 	assert.match(EXECUTE_SQL_CORE_SCHEMA, /content \(binary\)/);
 	assert.match(EXECUTE_SQL_TABLES_QUERY, /information_schema\.tables/);
