@@ -299,9 +299,42 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			left,
 			"New Markdown (.md)",
 		);
+		const afterReopenUrl = left.url();
+		const afterReopenEditor = left.locator(
+			'.ProseMirror[contenteditable="true"]:visible',
+		);
+		const afterReopenMarker = `after-reopen-${Date.now()}`;
+		await afterReopenEditor.click();
+		await left.keyboard.insertText(afterReopenMarker);
+		await left.keyboard.press("Tab");
 		await expect(reopenedEntries).toContainText(afterReopenName, {
 			timeout: realtimeTimeout,
 		});
+		await fresh.goto(afterReopenUrl);
+		await expect(
+			fresh.locator('.ProseMirror[contenteditable="true"]:visible'),
+		).toContainText(afterReopenMarker, { timeout: realtimeTimeout });
+
+		// Exercise the same warm-replica path for branch checkpoint state. The
+		// reopened client must observe an additional checkpoint, not merely keep
+		// rendering the checkpoint rows imported during bootstrap.
+		await left
+			.getByRole("button", {
+				name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+			})
+			.click();
+		await left.getByRole("button", { name: "Checkpoint", exact: true }).click();
+		await expect(
+			left.getByRole("button", {
+				name: "Latest checkpoint. Open checkpoint history",
+			}),
+		).toBeVisible({ timeout: 30_000 });
+		const postReopenHistory = await openHistoryPanel(fresh);
+		await expect(
+			postReopenHistory
+				.getByRole("list", { name: "Checkpoints" })
+				.locator(":scope > li"),
+		).toHaveCount(initialCheckpointCount + 2, { timeout: realtimeTimeout });
 
 		const coldReadsBeforeHistory = coldReads.length;
 		for (const page of [left, right]) {
