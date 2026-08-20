@@ -193,6 +193,10 @@ const PROD_DEV_AUTH_PATH = "/auth/email";
 const PROD_DEV_EMAIL = "dev@lixray.com";
 const PUBLIC_PRODUCTION_ORIGIN = "https://lixray.com";
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
+// Keep server-owned public reads attributed to Lix's built-in anonymous
+// account. Protocol principals are persisted as lix_account IDs, so an
+// arbitrary service label is not valid here.
+const LIX_ANONYMOUS_ACCOUNT_ID = "00000000-0000-7000-8000-000000000002";
 const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
 const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
 
@@ -1339,7 +1343,7 @@ async function listPublishedDirectory(
 ): Promise<{ entries: PublishedDirectoryEntry[]; truncated: boolean }> {
 	const client = new WorkerLixRuntimeClient(
 		env,
-		{ userId: "lixray-public-directory-reader", token: "" },
+		{ userId: LIX_ANONYMOUS_ACCOUNT_ID, token: "" },
 		() => Promise.resolve(null),
 		{ lixFetch, signal },
 	);

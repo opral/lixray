@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(23);
+select plan(25);
 
 insert into auth.users (
 	id, instance_id, aud, role, email, encrypted_password,
@@ -121,7 +121,7 @@ select set_config(
 );
 select lives_ok(
 	$$select public.accept_lix_share_token(current_setting('test.member_token'))$$,
-	'an edit invitation adds a normal member'
+	'an invitation adds a normal member'
 );
 select results_eq(
 	$$select role from public.list_lix_members(current_setting('test.repository_id')::uuid)
@@ -191,12 +191,24 @@ select set_config(
 	'{"sub":"71000000-0000-0000-0000-000000000003","role":"authenticated"}',
 	true
 );
-select lives_ok(
+select throws_ok(
 	$$select public.remove_lix_member(
 		current_setting('test.repository_id')::uuid,
 		'71000000-0000-0000-0000-000000000001'
 	)$$,
-	'another admin can remove the original admin'
+	'P0001',
+	'Repository admins cannot leave or be removed',
+	'an admin cannot remove another admin'
+);
+select throws_ok(
+	$$select public.set_lix_member_role(
+		current_setting('test.repository_id')::uuid,
+		'71000000-0000-0000-0000-000000000001',
+		'member'
+	)$$,
+	'P0001',
+	'Repository admins cannot be demoted',
+	'an admin cannot demote another admin'
 );
 select throws_ok(
 	$$select public.remove_lix_member(
@@ -204,8 +216,8 @@ select throws_ok(
 		'71000000-0000-0000-0000-000000000003'
 	)$$,
 	'P0001',
-	'Repository must keep at least one admin',
-	'the last admin cannot leave'
+	'Repository admins cannot leave or be removed',
+	'an admin cannot leave'
 );
 
 select lives_ok(
@@ -271,6 +283,29 @@ select results_eq(
 	)$$,
 	$$values (false, 'public'::public.lix_visibility)$$,
 	'public repositories are readable but not editable by outsiders'
+);
+
+set local role authenticated;
+select set_config(
+	'request.jwt.claims',
+	'{"sub":"71000000-0000-0000-0000-000000000001","role":"authenticated"}',
+	true
+);
+select results_eq(
+	$$with inserted as (
+		insert into public.lixes (id, namespace_id, name, slug)
+		values (
+			'72000000-0000-0000-0000-000000000001',
+			(select namespace_id from public.lixes
+			 where id = current_setting('test.repository_id')::uuid),
+			'Returning repository',
+			'returning-repository'
+		)
+		returning id
+	)
+	select id from inserted$$,
+	$$values ('72000000-0000-0000-0000-000000000001'::uuid)$$,
+	'an authenticated namespace member can create and return a repository row'
 );
 
 select * from finish();

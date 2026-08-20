@@ -1,32 +1,35 @@
 import { fileIconUrl } from "@opral/atelier/file-icons";
-import { Check, Copy, Users } from "lucide-react";
+import { Check, Copy, Globe2, LockKeyhole, Users } from "lucide-react";
 import { type ReactElement, useEffect, useState } from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 
-type ShareMode = "edit" | "read";
-type CopyState = "idle" | "copied" | "error";
+type CopyState = "idle" | "copied";
+
+export type ReadShareAccess =
+	| { status: "private"; canPublish: boolean }
+	| {
+			status: "published";
+			source: "resource" | "repository" | "ancestor";
+			canUnpublish: boolean;
+			inheritedFrom?: string;
+	  };
 
 interface RepositoryShareDialogProps {
 	/** The public, canonical resource URL. */
 	canonicalUrl: string;
-	/** The canonical resource URL with its opaque `invite` capability token. */
-	editableUrl: string;
 	documentName: string;
-	repositoryName: string;
-	/**
-	 * An optional composed trigger. Pass a single button-like element when the
-	 * surrounding shell owns the Share button.
-	 */
+	publicationLabel: "file" | "folder" | "repository";
+	readAccess: ReadShareAccess | null;
+	/** An optional composed trigger owned by the surrounding shell. */
 	trigger?: ReactElement;
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
-	/** Called after the link has been written to the clipboard. */
-	onCopied?: (url: string, mode: ShareMode) => void;
-	/** Makes the plain resource URL readable before it leaves the browser. */
-	prepareReadLink?: () => Promise<void>;
-	/** When set, the popover offers the People tab as its team entry (1c). */
+	onCopied?: (url: string) => void;
+	publishReadLink: () => Promise<void>;
+	unpublishReadLink: () => Promise<void>;
+	/** Opens the repository People tab, where membership invitations live. */
 	onOpenTeam?: () => void;
 	className?: string;
 }
@@ -40,26 +43,28 @@ async function copyText(value: string) {
 
 export function RepositoryShareDialog({
 	canonicalUrl,
-	editableUrl,
 	documentName,
-	repositoryName,
+	publicationLabel,
+	readAccess,
 	trigger,
 	open,
 	onOpenChange,
 	onCopied,
-	prepareReadLink,
+	publishReadLink,
+	unpublishReadLink,
 	onOpenTeam,
 	className,
 }: RepositoryShareDialogProps) {
-	const [shareMode, setShareMode] = useState<ShareMode>("read");
 	const [copyState, setCopyState] = useState<CopyState>("idle");
-	const copiedUrl = shareMode === "edit" ? editableUrl : canonicalUrl;
-	const isEditableLink = shareMode === "edit";
+	const [errorMessage, setErrorMessage] = useState<string | null>(null);
+	const [busy, setBusy] = useState<"publish" | "unpublish" | null>(null);
+	const isPublished = readAccess?.status === "published";
 	const documentIconUrl = fileIconUrl(documentName);
 
 	useEffect(() => {
 		setCopyState("idle");
-	}, [copiedUrl]);
+		setErrorMessage(null);
+	}, [canonicalUrl, readAccess]);
 
 	const selectLinkText = (element: HTMLElement) => {
 		const selection = window.getSelection();
@@ -71,17 +76,49 @@ export function RepositoryShareDialog({
 	};
 
 	const handleCopy = async () => {
+		if (!isPublished) return;
 		try {
-			if (!isEditableLink) await prepareReadLink?.();
-			await copyText(copiedUrl);
+			await copyText(canonicalUrl);
 		} catch {
-			setCopyState("error");
+			setErrorMessage(
+				"Couldn’t copy the link. Select it above and copy it manually.",
+			);
 			return;
 		}
 
 		setCopyState("copied");
-		onCopied?.(copiedUrl, shareMode);
+		onCopied?.(canonicalUrl);
 	};
+
+	const runPermissionChange = async (
+		kind: "publish" | "unpublish",
+		action: () => Promise<void>,
+	) => {
+		if (busy) return;
+		setBusy(kind);
+		setCopyState("idle");
+		setErrorMessage(null);
+		try {
+			await action();
+		} catch {
+			setErrorMessage(
+				kind === "publish"
+					? `Couldn’t publish this ${publicationLabel}.`
+					: `Couldn’t unpublish this ${publicationLabel}.`,
+			);
+		} finally {
+			setBusy(null);
+		}
+	};
+
+	const publishLabel =
+		publicationLabel === "repository"
+			? "Make repository public"
+			: `Publish ${publicationLabel}`;
+	const unpublishLabel =
+		publicationLabel === "repository"
+			? "Make repository private"
+			: `Unpublish ${publicationLabel}`;
 
 	return (
 		<PopoverPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -104,98 +141,137 @@ export function RepositoryShareDialog({
 					)}
 				>
 					<div className="flex items-center gap-2.5">
-						<img
-							src={documentIconUrl}
-							alt=""
-							className="size-[22px] shrink-0"
-						/>
+						{publicationLabel === "repository" ? null : (
+							<img
+								src={documentIconUrl}
+								alt=""
+								className="size-[22px] shrink-0"
+							/>
+						)}
 						<h2 className="min-w-0 truncate text-sm font-bold">
 							Share {documentName}
 						</h2>
 					</div>
 
-					<div className="flex min-w-0 items-stretch gap-2 max-[420px]:flex-col">
-						<div
-							className="flex h-9 min-w-0 grow cursor-text select-all items-center overflow-hidden rounded-lg border border-border-panel bg-bg-panel px-3 font-mono text-[11px] text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
-							tabIndex={0}
-							role="textbox"
-							aria-readonly="true"
-							aria-label={`${isEditableLink ? "Editable" : "Read-only"} link: ${copiedUrl}`}
-							title={copiedUrl}
-							onClick={(event) => selectLinkText(event.currentTarget)}
-							onKeyDown={(event) => {
-								if (event.key === "Enter" || event.key === " ") {
-									event.preventDefault();
-									selectLinkText(event.currentTarget);
-								}
-							}}
-						>
-							<ShareLinkText url={copiedUrl} />
+					<div
+						className={cn(
+							"flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-xs",
+							isPublished
+								? "border-success-200 bg-success-50 text-success-800"
+								: "border-border-subtle bg-bg-hover text-text-secondary",
+						)}
+					>
+						{isPublished ? (
+							<Globe2 className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+						) : (
+							<LockKeyhole
+								className="mt-0.5 size-3.5 shrink-0 text-text-tertiary"
+								aria-hidden="true"
+							/>
+						)}
+						<span className="leading-5">
+							{readAccess === null
+								? "Checking publication status…"
+								: readAccess.status === "private"
+									? `This ${publicationLabel} is private.`
+									: readAccess.source === "ancestor"
+										? `Public through ${readAccess.inheritedFrom ?? "a published parent folder"}.`
+										: readAccess.source === "repository"
+											? "Public because the repository is public."
+											: `This ${publicationLabel} is published.`}
+						</span>
+					</div>
+
+					{isPublished ? (
+						<div className="flex min-w-0 items-stretch gap-2 max-[420px]:flex-col">
+							<div
+								className="flex h-9 min-w-0 grow cursor-text select-all items-center overflow-hidden rounded-lg border border-border-panel bg-bg-panel px-3 font-mono text-[11px] text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+								tabIndex={0}
+								role="textbox"
+								aria-readonly="true"
+								aria-label={`Public link: ${canonicalUrl}`}
+								title={canonicalUrl}
+								onClick={(event) => selectLinkText(event.currentTarget)}
+								onKeyDown={(event) => {
+									if (event.key === "Enter" || event.key === " ") {
+										event.preventDefault();
+										selectLinkText(event.currentTarget);
+									}
+								}}
+							>
+								<span className="block truncate">{canonicalUrl}</span>
+							</div>
+							<Button
+								type="button"
+								variant="featured"
+								onClick={() => void handleCopy()}
+								className="shrink-0 font-semibold max-[420px]:w-full"
+							>
+								{copyState === "copied" ? (
+									<Check aria-hidden="true" />
+								) : (
+									<Copy aria-hidden="true" />
+								)}
+								{copyState === "copied" ? "Copied" : "Copy link"}
+							</Button>
 						</div>
+					) : readAccess?.status === "private" ? (
 						<Button
 							type="button"
 							variant="featured"
-							onClick={() => void handleCopy()}
-							className="shrink-0 font-semibold max-[420px]:w-full"
+							disabled={!readAccess.canPublish || busy !== null}
+							onClick={() =>
+								void runPermissionChange("publish", publishReadLink)
+							}
 						>
-							{copyState === "copied" ? (
-								<Check aria-hidden="true" />
-							) : (
-								<Copy aria-hidden="true" />
-							)}
-							{copyState === "copied" ? "Copied" : "Copy link"}
+							{busy === "publish" ? "Publishing…" : publishLabel}
 						</Button>
-					</div>
-
-					<div
-						className="inline-flex w-fit rounded-lg bg-bg-hover p-[3px]"
-						role="radiogroup"
-						aria-label="Link access"
-					>
-						<ShareModeButton
-							active={isEditableLink}
-							onClick={() => setShareMode("edit")}
-						>
-							Can edit
-						</ShareModeButton>
-						<ShareModeButton
-							active={!isEditableLink}
-							onClick={() => setShareMode("read")}
-						>
-							Read only
-						</ShareModeButton>
-					</div>
+					) : null}
 
 					<p
 						className="text-xs leading-5 text-text-tertiary"
 						aria-live="polite"
 					>
-						{copyState === "error" ? (
+						{errorMessage ? (
 							<span className="text-error-700" role="alert">
-								Couldn’t copy the link. Select it above and copy it manually.
+								{errorMessage}
 							</span>
-						) : isEditableLink ? (
-							<>
-								Anyone who opens your link can read{" "}
-								<b className="font-semibold text-text-secondary">
-									{documentName}
-								</b>{" "}
-								and join{" "}
-								<b className="font-semibold text-text-secondary">
-									{repositoryName}
-								</b>{" "}
-								as an editor. Read only copies the plain link.
-							</>
+						) : readAccess?.status === "private" ? (
+							readAccess.canPublish ? (
+								publicationLabel === "folder" ? (
+									<>
+										Publishing makes this folder and everything below it
+										readable by anyone with the link.
+									</>
+								) : publicationLabel === "repository" ? (
+									<>
+										Anyone can read a public repository. Only members can edit.
+									</>
+								) : (
+									<>
+										Publishing makes this file readable by anyone with the link.
+									</>
+								)
+							) : (
+								<>Only a repository admin can make the repository public.</>
+							)
 						) : (
-							<>
-								Anyone who opens your link can read{" "}
-								<b className="font-semibold text-text-secondary">
-									{documentName}
-								</b>
-								. The plain link carries no join grant.
-							</>
+							<>Anyone who opens the public link can read {documentName}.</>
 						)}
 					</p>
+
+					{readAccess?.status === "published" && readAccess.canUnpublish ? (
+						<button
+							type="button"
+							disabled={busy !== null}
+							onClick={() =>
+								void runPermissionChange("unpublish", unpublishReadLink)
+							}
+							className="w-fit text-xs font-semibold text-text-secondary underline decoration-border-strong underline-offset-4 hover:text-text-primary disabled:opacity-50"
+						>
+							{busy === "unpublish" ? "Updating…" : unpublishLabel}
+						</button>
+					) : null}
 
 					{onOpenTeam ? (
 						<button
@@ -213,50 +289,5 @@ export function RepositoryShareDialog({
 				</PopoverPrimitive.Content>
 			</PopoverPrimitive.Portal>
 		</PopoverPrimitive.Root>
-	);
-}
-
-/**
- * Renders the share URL with the invite capability emphasized, so the sender
- * sees which part of the link makes it special. Plain spans keep the text
- * selectable and clipboard-safe.
- */
-function ShareLinkText({ url }: { url: string }) {
-	const tokenStart = url.indexOf("?invite=");
-	if (tokenStart === -1) {
-		return <span className="block truncate">{url}</span>;
-	}
-	return (
-		<span className="block truncate">
-			{url.slice(0, tokenStart)}
-			<span className="font-medium text-text-primary">
-				{url.slice(tokenStart)}
-			</span>
-		</span>
-	);
-}
-
-function ShareModeButton({
-	active,
-	children,
-	onClick,
-}: {
-	active: boolean;
-	children: string;
-	onClick: () => void;
-}) {
-	return (
-		<button
-			type="button"
-			role="radio"
-			aria-checked={active}
-			onClick={onClick}
-			className={cn(
-				"rounded-md px-3 py-[5px] text-xs font-semibold text-text-tertiary transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible",
-				active && "bg-bg-panel font-bold text-text-primary shadow-sm",
-			)}
-		>
-			{children}
-		</button>
 	);
 }

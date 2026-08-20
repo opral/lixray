@@ -1391,7 +1391,6 @@ void test("a published file resolves by path without exposing private SQL", asyn
 				},
 			}),
 			{
-				parseSqlScript: (sql) => ({ statements: [{ sql }] }),
 				lixFetch: async () => {
 					proxied += 1;
 					return new Response("private rows leaked");
@@ -1420,6 +1419,10 @@ void test("a published directory exposes only its direct child names", async () 
 			},
 			lixFetch: async (lixId, request) => {
 				assert.equal(lixId, LIX_A);
+				assert.equal(
+					request.headers.get("x-lixray-idempotency-principal"),
+					"00000000-0000-7000-8000-000000000002",
+				);
 				const path = new URL(request.url).pathname;
 				protocolPaths.push(path);
 				if (path === "/lix/v1/") {

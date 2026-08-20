@@ -180,11 +180,7 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 			refreshMembers();
 		} catch (caught) {
 			console.error("repository-people: unable to remove member", caught);
-			setError(
-				caught instanceof Error && /last admin/i.test(caught.message)
-					? `${member.name} is the last admin and can't be removed.`
-					: "Unable to remove this person. Try again.",
-			);
+			setError("Unable to remove this member. Try again.");
 		} finally {
 			setBusy(false);
 		}
@@ -297,7 +293,9 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 							</div>
 							{/* Self-service leaving lives in Settings; this menu is for
 							    repository admins managing other members. */}
-							{member.isSelf || !teamApi.canManageMembers() ? null : (
+							{member.isSelf ||
+							member.role === "admin" ||
+							!teamApi.canManageMembers() ? null : (
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
 										<Button

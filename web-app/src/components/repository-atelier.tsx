@@ -27,7 +27,10 @@ import { useAuth } from "~/components/auth-provider";
 import { useRepository } from "~/components/repository-provider";
 import type { RepositorySettingsApi } from "~/components/repository-home/settings-view";
 import { RepositoryPicker } from "~/components/repository-picker";
-import { RepositoryShareDialog } from "~/components/repository-share-dialog";
+import {
+	RepositoryShareDialog,
+	type ReadShareAccess,
+} from "~/components/repository-share-dialog";
 import { Button } from "~/components/ui/button";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
@@ -80,6 +83,7 @@ interface RepositoryAtelierProps {
 	namespace: string;
 	repositorySlug: string;
 	repositoryName: string;
+	repositoryVisibility: "private" | "public";
 	branchId?: string;
 	/** The only mode allowed to make repository mutations in this view. */
 	canEdit: boolean;
@@ -107,6 +111,7 @@ export function RepositoryAtelier({
 	namespace,
 	repositorySlug,
 	repositoryName,
+	repositoryVisibility,
 	branchId,
 	canEdit,
 	publicPath,
@@ -216,7 +221,8 @@ export function RepositoryAtelier({
 			);
 		}
 	}, [signInWithGoogle]);
-	const { organizations, renameRepository, deleteRepository } = useRepository();
+	const { organizations, renameRepository, deleteRepository, refresh } =
+		useRepository();
 	const activeOrganization = organizations.find(
 		(candidate) => candidate.id === namespaceId,
 	);
@@ -391,19 +397,17 @@ export function RepositoryAtelier({
 							});
 							if (error) throw new Error(error.message);
 						},
-						createEditLink: async () => {
-							const { data, error } = await client.rpc(
-								"create_lix_share_token",
-								{ p_lix_id: repositoryId },
-							);
+						getInviteLink: async () => {
+							const { data, error } = await client.rpc("get_lix_invite_link", {
+								p_lix_id: repositoryId,
+							});
 							if (error) throw new Error(error.message);
-							const token = data?.[0]?.token;
-							if (!isRepositoryShareToken(token)) {
-								throw new Error("The share service returned an invalid link.");
+							if (!isRepositoryShareToken(data) || isTeamInviteToken(data)) {
+								throw new Error("The invite service returned an invalid link.");
 							}
 							return appendRepositoryShareToken(
 								`${window.location.origin}/@${namespace}/${repositorySlug}`,
-								token,
+								data,
 							);
 						},
 						deleteRepository: async () => {
@@ -436,8 +440,8 @@ export function RepositoryAtelier({
 			),
 		setVisibility: (visibility) =>
 			requireSettingsApi(settingsApiRef.current).setVisibility(visibility),
-		createEditLink: () =>
-			requireSettingsApi(settingsApiRef.current).createEditLink(),
+		getInviteLink: () =>
+			requireSettingsApi(settingsApiRef.current).getInviteLink(),
 		deleteRepository: () =>
 			requireSettingsApi(settingsApiRef.current).deleteRepository(),
 	});
@@ -455,20 +459,78 @@ export function RepositoryAtelier({
 	const headerActions = canEdit ? (
 		client ? (
 			<RepositoryShareControl
-				createShareToken={async () => {
-					const { data, error } = await client.rpc("create_lix_share_token", {
+				loadReadAccess={async () => {
+					const resourcePath =
+						routeChildKind === "file" || routeChildKind === "dir"
+							? normalizedRouteResourcePath(routeSplat)
+							: "/";
+					const { data: resolved, error: resolveError } = await client.rpc(
+						"resolve_public_lix",
+						{ p_lix_id: repositoryId, p_path: resourcePath },
+					);
+					if (resolveError) throw resolveError;
+					const currentAccess = resolved?.[0];
+					if (!currentAccess)
+						throw new Error("Repository access is unavailable.");
+
+					if (currentAccess.visibility === "public") {
+						return {
+							status: "published",
+							source: "repository",
+							canUnpublish:
+								routeChildKind === null && currentAccess.role === "admin",
+						};
+					}
+					if (routeChildKind !== "file" && routeChildKind !== "dir") {
+						return {
+							status: "private",
+							canPublish: currentAccess.role === "admin",
+						};
+					}
+
+					const path = resourcePath;
+					const { data, error } = await client.rpc("list_lix_publications", {
 						p_lix_id: repositoryId,
 					});
 					if (error) throw error;
-					const token = data?.[0]?.token;
-					if (!isRepositoryShareToken(token)) {
-						throw new Error("The share service returned an invalid link.");
+					const kind = routeChildKind === "file" ? "file" : "directory";
+					if (
+						data?.some(
+							(publication) =>
+								publication.path === path && publication.kind === kind,
+						)
+					) {
+						return {
+							status: "published",
+							source: "resource",
+							canUnpublish: true,
+						};
 					}
-					return token;
+					const ancestor = data
+						?.filter(
+							(publication) =>
+								publication.kind === "directory" &&
+								(publication.path === "/" ||
+									path === publication.path ||
+									path.startsWith(`${publication.path}/`)),
+						)
+						.sort((left, right) => right.path.length - left.path.length)[0];
+					if (ancestor) {
+						return {
+							status: "published",
+							source: "ancestor",
+							canUnpublish: false,
+							inheritedFrom:
+								ancestor.path === "/"
+									? "the published root folder"
+									: `the published folder ${ancestor.path}`,
+						};
+					}
+					return { status: "private", canPublish: true };
 				}}
 				publishReadLink={async () => {
 					if (routeChildKind === "file" || routeChildKind === "dir") {
-						const path = `/${(routeSplat ?? "").replace(/^\/+|\/+$/g, "")}`;
+						const path = normalizedRouteResourcePath(routeSplat);
 						const { error } = await client.rpc("publish_lix_resource", {
 							p_lix_id: repositoryId,
 							p_path: path,
@@ -482,8 +544,32 @@ export function RepositoryAtelier({
 						p_visibility: "public",
 					});
 					if (error) throw error;
+					await refresh({ organizationId: namespaceId, repositoryId });
 				}}
-				repositoryName={repositoryName}
+				unpublishReadLink={async () => {
+					if (routeChildKind === "file" || routeChildKind === "dir") {
+						const { error } = await client.rpc("unpublish_lix_resource", {
+							p_lix_id: repositoryId,
+							p_path: normalizedRouteResourcePath(routeSplat),
+							p_kind: routeChildKind === "file" ? "file" : "directory",
+						});
+						if (error) throw error;
+						return;
+					}
+					const { error } = await client.rpc("set_lix_visibility", {
+						p_lix_id: repositoryId,
+						p_visibility: "private",
+					});
+					if (error) throw error;
+					await refresh({ organizationId: namespaceId, repositoryId });
+				}}
+				publicationLabel={
+					routeChildKind === "file"
+						? "file"
+						: routeChildKind === "dir"
+							? "folder"
+							: "repository"
+				}
 				documentName={documentName}
 				onOpenTeam={() => {
 					void instance?.views
@@ -842,6 +928,7 @@ export function RepositoryAtelier({
 						},
 						canEdit ? stableTeamApiRef.current : null,
 						canEdit ? stableSettingsApiRef.current : null,
+						repositoryVisibility,
 					),
 					centralPanel: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
@@ -912,6 +999,7 @@ export function RepositoryAtelier({
 		repositoryId,
 		repositoryName,
 		repositorySlug,
+		repositoryVisibility,
 	]);
 
 	useEffect(() => {
@@ -1023,6 +1111,7 @@ export function RepositoryAtelier({
 											navbarBrand: (
 												<RepositoryPicker
 													namespaceId={namespaceId}
+													namespaceHandle={namespace}
 													repositoryName={repositoryName}
 													repositorySlug={repositorySlug}
 												/>
@@ -1121,52 +1210,64 @@ function randomRepositoryInviteToken(): string {
 }
 
 function RepositoryShareControl({
-	createShareToken,
+	loadReadAccess,
 	publishReadLink,
-	repositoryName,
+	unpublishReadLink,
+	publicationLabel,
 	documentName,
 	onOpenTeam,
 }: {
-	createShareToken: () => Promise<string>;
+	loadReadAccess: () => Promise<ReadShareAccess>;
 	publishReadLink: () => Promise<void>;
-	repositoryName: string;
+	unpublishReadLink: () => Promise<void>;
+	publicationLabel: "file" | "folder" | "repository";
 	documentName: string;
 	onOpenTeam?: () => void;
 }) {
 	const [open, setOpen] = useState(false);
-	const [minting, setMinting] = useState(false);
-	const [urls, setUrls] = useState({ canonicalUrl: "", editableUrl: "" });
+	const [readAccess, setReadAccess] = useState<ReadShareAccess | null>(null);
+	const [canonicalUrl, setCanonicalUrl] = useState("");
 
-	const mintShareLink = async () => {
-		if (minting) return;
-		setMinting(true);
-		try {
-			const token = await createShareToken();
-			const canonicalUrl = stripInviteFromUrl(window.location.href);
-			setUrls({
-				canonicalUrl,
-				editableUrl: appendRepositoryShareToken(canonicalUrl, token),
+	const openShare = () => {
+		setCanonicalUrl(stripInviteFromUrl(window.location.href));
+		setReadAccess(null);
+		setOpen(true);
+		void loadReadAccess()
+			.then(setReadAccess)
+			.catch((caught: unknown) => {
+				toast.error(
+					caught instanceof Error
+						? caught.message
+						: "Unable to load sharing status.",
+				);
+				setOpen(false);
 			});
-			captureTelemetry("share_link_created");
-			setOpen(true);
-		} catch (caught) {
-			toast.error(
-				caught instanceof Error
-					? caught.message
-					: "Unable to create a share link.",
-			);
-		} finally {
-			setMinting(false);
-		}
 	};
 
 	return (
 		<RepositoryShareDialog
-			canonicalUrl={urls.canonicalUrl}
-			editableUrl={urls.editableUrl}
+			canonicalUrl={canonicalUrl}
 			documentName={documentName}
-			repositoryName={repositoryName}
-			prepareReadLink={publishReadLink}
+			publicationLabel={publicationLabel}
+			readAccess={readAccess}
+			publishReadLink={async () => {
+				await publishReadLink();
+				setReadAccess({
+					status: "published",
+					source: publicationLabel === "repository" ? "repository" : "resource",
+					canUnpublish: true,
+				});
+				captureTelemetry("resource_published", {
+					resource_kind: publicationLabel,
+				});
+			}}
+			unpublishReadLink={async () => {
+				await unpublishReadLink();
+				setReadAccess({ status: "private", canPublish: true });
+				captureTelemetry("resource_unpublished", {
+					resource_kind: publicationLabel,
+				});
+			}}
 			onOpenTeam={
 				onOpenTeam
 					? () => {
@@ -1181,20 +1282,14 @@ function RepositoryShareControl({
 					setOpen(false);
 					return;
 				}
-				void mintShareLink();
+				openShare();
 			}}
-			onCopied={(_url, mode) => {
-				captureTelemetry("share_link_copied", { share_mode: mode });
+			onCopied={() => {
+				captureTelemetry("share_link_copied", { share_mode: "public" });
 			}}
 			trigger={
-				<Button
-					type="button"
-					size="xs"
-					variant="outline"
-					className="h-7 px-3"
-					disabled={minting}
-				>
-					{minting ? "Creating…" : "Share"}
+				<Button type="button" size="xs" variant="outline" className="h-7 px-3">
+					Share
 				</Button>
 			}
 		/>
@@ -1218,4 +1313,9 @@ function activeDocumentName({
 	} catch {
 		return encodedName;
 	}
+}
+
+function normalizedRouteResourcePath(routeSplat: string | undefined) {
+	const path = (routeSplat ?? "").replace(/^\/+|\/+$/g, "");
+	return path ? `/${path}` : "/";
 }

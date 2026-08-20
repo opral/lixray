@@ -121,6 +121,14 @@ function RepositoryRoutePage() {
 	const [stagedTeamInvite, setStagedTeamInvite] = useState(peekTeamInvite);
 	const [failedInviteKey, setFailedInviteKey] = useState<string | null>(null);
 	const automaticJoinAttempt = useRef<string | null>(null);
+	// File and tab navigation changes `publicPath`, but a public repository or
+	// editable workspace has already crossed the repository authorization
+	// boundary. Only anonymous private-resource views remain path-scoped.
+	const routeAccessPath =
+		isDemoModeEnabled ||
+		(resolved && (resolved.canEdit || resolved.visibility === "public"))
+			? undefined
+			: publicPath;
 	const resolvedRepositoryId = resolved?.repositoryId;
 	const urlTeamInvite = invite && isTeamInviteToken(invite) ? invite : null;
 	const pendingTeamInvite =
@@ -141,7 +149,14 @@ function RepositoryRoutePage() {
 	useEffect(() => {
 		let disposed = false;
 		setResolveError(null);
-		setResolved(undefined);
+		setResolved((current) => {
+			const stillSameRepository =
+				current?.organizationHandle === namespace &&
+				current.repositorySlug === repositorySlug;
+			// Refreshing access for another path in this repository must not tear
+			// down Atelier. A changed repository identity still gets the loading UI.
+			return stillSameRepository ? current : undefined;
+		});
 
 		if (isDemoModeEnabled) {
 			if (!authIsLoaded) return;
@@ -197,7 +212,7 @@ function RepositoryRoutePage() {
 					authClient,
 					namespace,
 					repositorySlug,
-					publicPath,
+					routeAccessPath,
 				);
 
 		void resolution
@@ -226,7 +241,7 @@ function RepositoryRoutePage() {
 		demoResolved,
 		invite,
 		namespace,
-		publicPath,
+		routeAccessPath,
 		repositorySlug,
 	]);
 
@@ -628,6 +643,7 @@ function RepositoryRoutePage() {
 			namespace={resolved.organizationHandle}
 			repositorySlug={resolved.repositorySlug}
 			repositoryName={resolved.repositoryName}
+			repositoryVisibility={resolved.visibility}
 			branchId={branch}
 			canEdit={resolved.canEdit}
 			publicPath={

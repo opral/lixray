@@ -32,7 +32,7 @@ export interface RepositorySettingsApi {
 	removeDirectMember(userId: string): Promise<void>;
 	setMemberRole(userId: string, role: "admin" | "member"): Promise<void>;
 	setVisibility(visibility: "private" | "public"): Promise<void>;
-	createEditLink(): Promise<string>;
+	getInviteLink(): Promise<string>;
 	/** Deletes and navigates away; the tab unmounts with the workspace. */
 	deleteRepository(): Promise<void>;
 }
@@ -161,10 +161,10 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 		};
 	}, [settingsApi]);
 
-	const copyEditLink = async () => {
+	const copyInviteLink = async () => {
 		try {
-			await navigator.clipboard.writeText(await settingsApi.createEditLink());
-			toast.success("Edit link copied");
+			await navigator.clipboard.writeText(await settingsApi.getInviteLink());
+			toast.success("Invite link copied");
 		} catch (caught) {
 			toast.error(formatCaughtError(caught));
 		}
@@ -185,21 +185,18 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 		}
 	};
 
-	const changeRole = async (member: DirectRepositoryMember) => {
-		const role = member.role === "admin" ? "member" : "admin";
+	const promoteMember = async (member: DirectRepositoryMember) => {
 		try {
-			await settingsApi.setMemberRole(member.userId, role);
+			await settingsApi.setMemberRole(member.userId, "admin");
 			setDirectMembers(
 				(current) =>
 					current?.map((entry) =>
-						entry.userId === member.userId ? { ...entry, role } : entry,
+						entry.userId === member.userId
+							? { ...entry, role: "admin" }
+							: entry,
 					) ?? null,
 			);
-			toast.success(
-				role === "admin"
-					? `${member.name || member.email} is now an admin`
-					: `${member.name || member.email} is now a member`,
-			);
+			toast.success(`${member.name || member.email} is now an admin`);
 		} catch (caught) {
 			toast.error(formatCaughtError(caught));
 		}
@@ -239,21 +236,9 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 			</div>
 			<div className="flex items-center gap-2">
 				<h3 className="m-0 text-[13.5px] font-bold">Who has access</h3>
-				<span className="flex-1" />
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					className="h-8 gap-1.5"
-					onClick={() => void copyEditLink()}
-				>
-					<Copy className="size-3" aria-hidden="true" />
-					Copy edit link
-				</Button>
 			</div>
 			<p className="m-0 mt-1 mb-2 text-[12px] text-text-tertiary">
-				The edit link lets people join as members. Admins can promote members
-				and remove access.
+				Admins can promote members and remove member access.
 			</p>
 			{directMembers?.map((member) => {
 				const isSelf = member.userId === info.currentUserId;
@@ -285,18 +270,18 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 						<span className="ml-auto rounded-[7px] border border-border-panel px-2 py-1 text-[12px] text-text-secondary">
 							{member.role === "admin" ? "Admin" : "Member"}
 						</span>
-						{info.isAdmin ? (
+						{info.isAdmin && member.role === "member" ? (
 							<Button
 								type="button"
 								variant="ghost"
 								size="sm"
 								className="h-7 text-text-tertiary"
-								onClick={() => void changeRole(member)}
+								onClick={() => void promoteMember(member)}
 							>
-								{member.role === "admin" ? "Make member" : "Make admin"}
+								Make admin
 							</Button>
 						) : null}
-						{info.isAdmin || isSelf ? (
+						{member.role === "member" && (info.isAdmin || isSelf) ? (
 							confirmingRemoval === member.userId ? (
 								<Button
 									type="button"
@@ -322,6 +307,26 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 					</div>
 				);
 			})}
+			<div className="mt-3 flex items-center gap-3 rounded-lg border border-border-subtle bg-bg-hover px-3 py-2.5">
+				<div className="min-w-0 flex-1">
+					<p className="m-0 text-[12.5px] font-semibold text-text-primary">
+						Invite members
+					</p>
+					<p className="m-0 mt-0.5 text-[11.5px] text-text-tertiary">
+						Anyone with the invite link can join this repository as a member.
+					</p>
+				</div>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="h-8 shrink-0 gap-1.5"
+					onClick={() => void copyInviteLink()}
+				>
+					<Copy className="size-3" aria-hidden="true" />
+					Copy invite link
+				</Button>
+			</div>
 		</section>
 	);
 }

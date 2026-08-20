@@ -27,10 +27,12 @@ import {
  */
 export function RepositoryPicker({
 	namespaceId,
+	namespaceHandle,
 	repositoryName,
 	repositorySlug,
 }: {
 	namespaceId: string;
+	namespaceHandle: string;
 	repositoryName: string;
 	repositorySlug: string;
 }) {
@@ -65,6 +67,10 @@ export function RepositoryPicker({
 					initials={repositoryInitials(repositoryName)}
 					palette={repositoryPalette(0)}
 				/>
+				<span className="max-w-[120px] truncate text-text-secondary">
+					{namespaceHandle}
+				</span>
+				<span className="shrink-0 text-text-tertiary">/</span>
 				<span className="max-w-[180px] truncate">{repositoryName}</span>
 			</span>
 		);
@@ -99,7 +105,7 @@ export function RepositoryPicker({
 					<button
 						type="button"
 						data-testid="repository-picker"
-						aria-label={`Switch repository — current: ${activeRepository.name}`}
+						aria-label={`Switch repository — current: ${organization.handle} / ${activeRepository.name}`}
 						className="-ml-[3px] flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-[7px] border-0 bg-transparent py-0 pr-1 pl-[5px] text-[13px] font-semibold text-text-primary transition-colors hover:bg-bg-hover-canvas focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible data-[state=open]:bg-bg-active"
 					>
 						<RepositoryChip
@@ -108,6 +114,10 @@ export function RepositoryPicker({
 								paletteOrder.get(activeRepository.id) ?? 0,
 							)}
 						/>
+						<span className="max-w-[120px] truncate text-text-secondary">
+							{organization.handle}
+						</span>
+						<span className="shrink-0 text-text-tertiary">/</span>
 						<span className="max-w-[180px] truncate">
 							{activeRepository.name}
 						</span>
