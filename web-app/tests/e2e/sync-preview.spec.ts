@@ -35,6 +35,32 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		service: "lixray",
 		deploymentId: expectedDeploymentId,
 	});
+	await left.goto(new URL("/", baseURL).toString());
+	const cacheProbeUrl = new URL(
+		"/@acme/launch-q3/lix/v1/sync/pull?after=18446744073709551615&limit=512",
+		baseURL,
+	).toString();
+	const cacheProbes = await left.evaluate(async (url) => {
+		const probe = async () => {
+			const response = await fetch(url, {
+				headers: {
+					Authorization: "Bearer lixray-demo",
+					"Lix-Session-Id": "0".repeat(64),
+				},
+			});
+			return {
+				status: response.status,
+				cacheControl: response.headers.get("cache-control"),
+				requestId: response.headers.get("x-railway-request-id"),
+			};
+		};
+		return [await probe(), await probe()];
+	}, cacheProbeUrl);
+	for (const probe of cacheProbes) {
+		expect(probe).toMatchObject({ status: 410, cacheControl: "no-store" });
+		expect(probe.requestId).toBeTruthy();
+	}
+	expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
 	const syncFailures: string[] = [];
 	const runtimeFailures: string[] = [];
 	const coldReads = new Map<Page, string[]>();
@@ -50,10 +76,22 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		if ((await panelToggle.getAttribute("aria-pressed")) === "false") {
 			await panelToggle.click();
 		}
-		await page
+		const historyTab = page
 			.getByRole("button", { name: "History", exact: true })
-			.last()
-			.click();
+			.last();
+		const selectedHistoryMenu = page.getByRole("button", {
+			name: "History panel view menu",
+			exact: true,
+		});
+		await expect(
+			history.or(historyTab).or(selectedHistoryMenu).first(),
+		).toBeVisible({ timeout: 30_000 });
+		if (
+			!(await history.isVisible()) &&
+			!(await selectedHistoryMenu.isVisible())
+		) {
+			await historyTab.click();
+		}
 		await expect(history).toBeVisible({ timeout: 30_000 });
 		return history;
 	};
@@ -98,6 +136,15 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		page.on("response", (response) => {
 			const url = response.url();
 			if (!url.includes("/lix/v1/sync/")) return;
+			if (
+				!(
+					response.request().method() === "GET" &&
+					/\/sync\/chunk(?:\?|$)/.test(url)
+				) &&
+				response.headers()["cache-control"] !== "no-store"
+			) {
+				syncFailures.push(`cacheable protocol response ${url}`);
+			}
 			// Push has no idempotency key, so its only 409 mapping is the expected
 			// ref-CAS race. Convergence below proves that reconciliation completed.
 			if (
