@@ -6,8 +6,9 @@ import { request as httpRequest } from "node:http";
 import test from "node:test";
 import { createRailwayServer } from "./railway-server.mjs";
 
-async function withServer(appFetch, run, env = {}) {
+async function withServer(appFetch, run, env = {}, prepare = async () => {}) {
 	const clientRoot = await mkdtemp(join(tmpdir(), "railway-server-"));
+	await prepare(clientRoot);
 	const server = createRailwayServer({
 		app: { fetch: appFetch },
 		clientRoot,
@@ -21,6 +22,18 @@ async function withServer(appFetch, run, env = {}) {
 		await new Promise((resolve) => server.close(resolve));
 	}
 }
+
+test("serves WebAssembly with its streaming compilation MIME type", async () => {
+	const wasm = new Uint8Array([0x00, 0x61, 0x73, 0x6d]);
+	const response = await withServer(
+		async () => new Response("unused"),
+		(origin) => fetch(`${origin}/lix.wasm`),
+		{},
+		(clientRoot) => writeFile(join(clientRoot, "lix.wasm"), wasm),
+	);
+	assert.equal(response.headers.get("content-type"), "application/wasm");
+	assert.deepEqual(new Uint8Array(await response.arrayBuffer()), wasm);
+});
 
 test("injects preview mode into static HTML at runtime", async () => {
 	const clientRoot = await mkdtemp(join(tmpdir(), "railway-server-static-"));
