@@ -72,6 +72,23 @@ class FakeRuntime implements LixRuntimeClient {
 				hint: "Bind a text value.",
 			});
 		}
+		if (request.sql === "SELECT lix_restore($1)") {
+			if (
+				request.params?.[0]?.kind === "text" &&
+				request.params[0].value === "missing-commit"
+			) {
+				throw createLixError(
+					"LIX_COMMIT_NOT_FOUND",
+					"Restore target commit does not exist.",
+				);
+			}
+			return {
+				columns: ["lix_restore"],
+				rows: [[request.params?.[0] ?? { kind: "null" as const }]],
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
 		if (request.sql.includes("lix_active_branch_commit_id")) {
 			return {
 				columns: ["commit_id"],
@@ -330,6 +347,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				"switch_branch",
 				"create_branch",
 				"create_checkpoint",
+				"restore",
 				"undo",
 				"redo",
 				"merge_branch_preview",
@@ -393,6 +411,23 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			checkpointTool.description ?? "",
 			/Do not call it after every write/,
 		);
+		const restoreTool = tools.tools.find((tool) => tool.name === "restore");
+		assert.ok(restoreTool);
+		assert.match(restoreTool.description ?? "", /ancestor/);
+		assert.match(restoreTool.description ?? "", /creates no commit/);
+		assert.match(restoreTool.description ?? "", /does not delete/);
+		assert.match(restoreTool.description ?? "", /not undoable/);
+		assert.match(restoreTool.description ?? "", /undo only applies/);
+		assert.match(restoreTool.description ?? "", /checkpoint-driven/);
+		assert.match(
+			restoreTool.description ?? "",
+			/untracked rows remain unchanged/,
+		);
+		assert.match(restoreTool.description ?? "", /create_checkpoint returns/);
+		assert.match(restoreTool.description ?? "", /no restore_checkpoint/);
+		assert.equal(restoreTool.annotations?.destructiveHint, true);
+		assert.equal(restoreTool.annotations?.idempotentHint, true);
+		assert.match(JSON.stringify(restoreTool.inputSchema), /commit_id/);
 		assert.doesNotMatch(JSON.stringify(queryTool.inputSchema), /idempotency/i);
 		assert.doesNotMatch(
 			JSON.stringify(executeSqlTool.inputSchema),
@@ -447,6 +482,34 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			"context in text content must match structuredContent",
 		);
 		assert.equal(responseRequestIds.at(-1), openedContent.request_id);
+		const restored = await client.callTool({
+			name: "restore",
+			arguments: { context, commit_id: "commit-target" },
+		});
+		assert.equal(restored.isError, undefined, JSON.stringify(restored));
+		assert.deepEqual(restored.structuredContent, {
+			context,
+			branch_id: "main",
+			commit_id: "commit-target",
+			request_id: responseRequestIds.at(-1),
+		});
+		const restoredText =
+			restored.content?.[0]?.type === "text" ? restored.content[0].text : "";
+		assert.match(restoredText, /Restored branch main to commit commit-target/);
+		assert.match(restoredText, /context=[^\s]+/);
+		const failedRestore = await client.callTool({
+			name: "restore",
+			arguments: { context, commit_id: "missing-commit" },
+		});
+		assert.equal(failedRestore.isError, true);
+		assert.deepEqual(
+			(failedRestore.structuredContent as { error: Record<string, unknown> })
+				.error,
+			{
+				code: "LIX_COMMIT_NOT_FOUND",
+				message: "Restore target commit does not exist.",
+			},
+		);
 		const queried = await client.callTool({
 			name: "query_sql",
 			arguments: { context, sql: "SELECT 1" },

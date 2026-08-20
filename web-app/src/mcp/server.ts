@@ -268,6 +268,7 @@ const context = z
 	.min(1)
 	.describe("Opaque Lix context returned by open_lix or switch_branch");
 const branchId = z.string().min(1).describe("Lix branch id");
+const commitId = z.string().min(1).describe("Lix commit id");
 const sourceBranchId = z.string().min(1).describe("Source branch id");
 const requestIdValue = z
 	.string()
@@ -446,7 +447,7 @@ export function createLixrayMcpServer(
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. Lix SQL is a Postgres dialect subset. query_sql is a single-statement read path and rejects INSERT, UPDATE, and DELETE; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; create_checkpoint is optional at the end of a finished task or session. Do not invent file helper tools or branch state.",
+				"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. Lix SQL is a Postgres dialect subset. query_sql is a single-statement read path and rejects INSERT, UPDATE, and DELETE; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; create_checkpoint is optional at the end of a finished task or session. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent file helper tools or branch state.",
 		},
 	);
 	const surfaceVersion = mcpSurfaceVersion(toolSurfaceDescriptions());
@@ -650,6 +651,30 @@ export function createLixrayMcpServer(
 		async ({ context: token }) => {
 			const result = await service.createCheckpoint(token);
 			return { context: result.context, commit_id: result.commitId };
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+	);
+
+	registerTool(
+		server,
+		"restore",
+		"Restore branch",
+		"Move the branch selected by context to ancestor commit_id. The commit must exist and be an ancestor of the current branch head. Restore creates no commit, does not delete abandoned commits, and is not undoable; undo only applies to commits made afterward. A later checkpoint-driven garbage-collection sweep may reclaim abandoned commits that are not reachable from a retention root. Other branches and branch-local untracked rows remain unchanged. create_checkpoint returns a commit_id usable here; there is no restore_checkpoint tool.",
+		z.object({ context, commit_id: commitId }).strict(),
+		branchStateOutput,
+		writeAnnotations(true, true),
+		securitySchemes,
+		async ({ context: token, commit_id }) => {
+			const result = await service.restore(token, commit_id);
+			return {
+				context: result.context,
+				branch_id: result.branchId,
+				commit_id: result.commitId,
+			};
 		},
 		undefined,
 		options.onToolCall,
@@ -1097,6 +1122,9 @@ function summarizeToolResult(name: string, raw: unknown): string {
 	if (name === "create_checkpoint") {
 		return `Checkpoint created at commit ${String(result.commit_id)}.${contextSuffix}`;
 	}
+	if (name === "restore") {
+		return `Restored branch ${String(result.branch_id)} to commit ${String(result.commit_id)}.${contextSuffix}`;
+	}
 	if (name === "undo") {
 		return `Undone to commit ${String(result.target_commit_id)} (inverse commit ${String(result.inverse_commit_id)}).${contextSuffix}`;
 	}
@@ -1181,6 +1209,7 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"switch_branch",
 		"create_branch",
 		"create_checkpoint",
+		"restore",
 		"undo",
 		"redo",
 		"merge_branch_preview",
