@@ -56,11 +56,11 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		await expect(history).toBeVisible({ timeout: 30_000 });
 		return history;
 	};
-	const observePage = (page: Page) => {
+	const observePage = (page: Page, label: string) => {
 		const pageColdReads: string[] = [];
 		coldReads.set(page, pageColdReads);
 		page.on("pageerror", (error) => {
-			runtimeFailures.push(`pageerror: ${error.message}`);
+			runtimeFailures.push(`${label} pageerror: ${error.message}`);
 		});
 		page.on("console", (message) => {
 			// Chromium mirrors an expected HTTP 409 response to the console without
@@ -70,7 +70,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				message.type() === "error" &&
 				/Failed to load resource:.*status of 409/i.test(message.text());
 			if (message.type() === "error" && !expectedCasNoise) {
-				runtimeFailures.push(`console: ${message.text()}`);
+				runtimeFailures.push(`${label} console: ${message.text()}`);
 			}
 		});
 		page.on("requestfailed", (request) => {
@@ -82,7 +82,9 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				if (/abort|cancel/i.test(errorText)) {
 					return;
 				}
-				runtimeFailures.push(`requestfailed: ${errorText} ${request.url()}`);
+				runtimeFailures.push(
+					`${label} requestfailed: ${errorText} ${request.url()}`,
+				);
 			}
 		});
 		page.on("response", (response) => {
@@ -106,9 +108,8 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			(count, page) => count + (coldReads.get(page)?.length ?? 0),
 			0,
 		);
-	for (const page of [left, right]) {
-		observePage(page);
-	}
+	observePage(left, "left");
+	observePage(right, "right");
 
 	try {
 		const createFileFromHome = async (
@@ -172,7 +173,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				const freshContext = await browser.newContext();
 				contexts.push(freshContext);
 				const fresh = await freshContext.newPage();
-				observePage(fresh);
+				observePage(fresh, "fresh");
 				await fresh.goto(repositoryUrl);
 				const freshEntries = fresh.getByTestId("home-entry-list");
 				await expect(freshEntries).toContainText(createdName, {
