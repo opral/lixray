@@ -43,17 +43,23 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			runtimeFailures.push(`pageerror: ${error.message}`);
 		});
 		page.on("console", (message) => {
-			if (message.type() === "error") {
+			// Chromium mirrors an expected HTTP 409 response to the console without
+			// exposing its URL. The response listener below classifies the push CAS
+			// conflict precisely and still rejects every other sync failure.
+			const expectedCasNoise =
+				message.type() === "error" &&
+				/Failed to load resource:.*status of 409/i.test(message.text());
+			if (message.type() === "error" && !expectedCasNoise) {
 				runtimeFailures.push(`console: ${message.text()}`);
 			}
 		});
 		page.on("requestfailed", (request) => {
 			if (request.url().includes("/lix/v1/")) {
 				const errorText = request.failure()?.errorText ?? "unknown";
-				if (
-					request.url().includes("/lix/v1/sync/pull") &&
-					/abort|cancel/i.test(errorText)
-				) {
+				// Reconciliation cancels an obsolete in-flight long poll or push after
+				// another request wins the ref CAS. Final convergence assertions prove
+				// that the replacement request completed.
+				if (/abort|cancel/i.test(errorText)) {
 					return;
 				}
 				runtimeFailures.push(`requestfailed: ${errorText} ${request.url()}`);
