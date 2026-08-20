@@ -153,19 +153,23 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		const createdName = decodeURIComponent(
 			new URL(createdUrl).pathname.split("/").at(-1) ?? "",
 		);
-		const rightMarker = `right-${Date.now()}`;
-		await rightEditor.click();
-		await right.keyboard.insertText(rightMarker);
-		// Keep ordinary typing focused. This qualifies the editor's debounce and
-		// outbox path without relying on a blur/focus transition to publish it.
-		await expect(rightEditor).toBeFocused();
-
 		await expect(left.getByTestId("home-entry-list")).toContainText(
 			createdName,
 			{ timeout: realtimeTimeout },
 		);
 		await left.goto(createdUrl);
 		const leftEditor = left.locator('.ProseMirror[contenteditable="true"]');
+		// File discovery and a cold editor open are separate from the realtime
+		// interaction budget. Qualify both first so the assertions below measure
+		// two already-open clients, not extension startup or demand hydration.
+		await leftEditor.waitFor({ timeout: 30_000 });
+
+		const rightMarker = `right-${Date.now()}`;
+		await rightEditor.click();
+		await right.keyboard.insertText(rightMarker);
+		// Keep ordinary typing focused. This qualifies the editor's debounce and
+		// outbox path without relying on a blur/focus transition to publish it.
+		await expect(rightEditor).toBeFocused();
 		await expect(leftEditor).toContainText(rightMarker, {
 			timeout: realtimeTimeout,
 		});
