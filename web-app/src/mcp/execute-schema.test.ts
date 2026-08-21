@@ -1,94 +1,114 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	EXECUTE_SQL_COLUMNS_QUERY,
 	EXECUTE_SQL_CORE_SCHEMA,
 	EXECUTE_SQL_CORE_TABLES,
 	EXECUTE_SQL_TOOL_DESCRIPTION,
 	EXECUTE_SQL_TABLES_QUERY,
+	LIX_SQL_OPERATING_GUIDE,
 	QUERY_SQL_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
+import { MCP_SERVER_INSTRUCTIONS } from "./server.ts";
+
+const MCP_DOCS = readFileSync(
+	join(dirname(fileURLToPath(import.meta.url)), "../../../docs/mcp.md"),
+	"utf8",
+);
+
+const SHARED_GUIDE_MARKERS = [
+	/lix_history\('lix_file'/,
+	/information_schema\.tables/,
+	/CAST\(\$2 AS BYTEA\)/,
+	/ON CONFLICT \(path\) DO UPDATE/,
+] as const;
 
 void test("SQL guidance models the public Lix surfaces", () => {
 	assert.deepEqual(
 		EXECUTE_SQL_CORE_TABLES.map((table) => table.name),
 		["lix_file", "lix_directory", "lix_branch", "lix_change"],
 	);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /INSERT, UPDATE, and DELETE/);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /use execute_sql for writes/);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /SQL as the universal interface/);
-	assert.match(
-		EXECUTE_SQL_TOOL_DESCRIPTION,
-		/Lix SQL is a Postgres dialect subset\./,
-	);
-	assert.match(
-		QUERY_SQL_TOOL_DESCRIPTION,
-		/Lix SQL is a Postgres dialect subset\./,
-	);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /Do not look for or invent typed/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /any ordered atomic SQL batch/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /never infer success from prose/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already saved/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /does not require a checkpoint/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /user-facing/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /do not call it after a write/i);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /agent may recommend/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_file\.path.*canonical/);
-	assert.match(
-		EXECUTE_SQL_TOOL_DESCRIPTION,
-		/lix_directory\.path.*neither ends/,
-	);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /INSERT INTO lix_file/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /UPDATE lix_file SET path/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /INSERT INTO lix_directory/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_history\('lix_file', \$1\)/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_working_diff\(\)/);
-	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /lix_file_history/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /declared primary-key columns/);
 	assert.match(EXECUTE_SQL_CORE_SCHEMA, /content \(binary\)/);
 	assert.match(EXECUTE_SQL_TABLES_QUERY, /information_schema\.tables/);
 	assert.match(EXECUTE_SQL_COLUMNS_QUERY, /information_schema\.columns/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /current Lix session/);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /current Lix session/);
-	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /lixcol_branch_id/);
-	assert.doesNotMatch(QUERY_SQL_TOOL_DESCRIPTION, /lixcol_branch_id/);
-	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /lixcol_start_commit_id/);
-	assert.doesNotMatch(QUERY_SQL_TOOL_DESCRIPTION, /lixcol_start_commit_id/);
-	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /lixcol_entity_pk/);
-	assert.doesNotMatch(QUERY_SQL_TOOL_DESCRIPTION, /lixcol_entity_pk/);
 });
 
-void test("SQL tool descriptions use CAST plus kind text for file content", () => {
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /CAST\(\$2 AS BYTEA\)/);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /CAST\(\$2 AS BYTEA\)/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /kind: "text"/);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /kind: "text"/);
-	for (const description of [
-		EXECUTE_SQL_TOOL_DESCRIPTION,
-		QUERY_SQL_TOOL_DESCRIPTION,
+void test("shared operating guide keeps file-content, upsert, and no-verify copy", () => {
+	for (const text of [
+		LIX_SQL_OPERATING_GUIDE,
+		MCP_SERVER_INSTRUCTIONS,
+		MCP_DOCS,
 	]) {
+		assert.match(text, /Lix SQL is a Postgres dialect subset\./);
+		assert.match(text, /CAST\(\$2 AS BYTEA\)/);
+		assert.match(text, /kind: "text"/);
+		assert.match(text, /ON CONFLICT/);
 		assert.doesNotMatch(
-			description,
+			text,
 			/\{"kind":"blob"/,
 			"must not tell callers to pass kind blob as the default content wire value",
 		);
-		assert.doesNotMatch(description, /Pass binary values as/);
-		assert.doesNotMatch(description, /MCP callers pass/);
+		assert.doesNotMatch(text, /Pass binary values as/);
+		assert.doesNotMatch(text, /MCP callers pass/);
+		assert.match(text, /verification [`']?SELECT/);
+		assert.match(text, /do not follow a write/i);
+		assert.doesNotMatch(text, /inspect the relevant rows first/);
+		assert.doesNotMatch(text, /final verification SELECT is recommended/);
+		assert.doesNotMatch(
+			text,
+			/Put related mutations and their final verification/,
+		);
 	}
-});
-
-void test("execute_sql describes Postgres ON CONFLICT upserts", () => {
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ON CONFLICT/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /excluded\.content/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /excluded\.content/);
 	assert.match(
-		EXECUTE_SQL_TOOL_DESCRIPTION,
+		LIX_SQL_OPERATING_GUIDE,
 		/INSERT INTO lix_key_value \(key, value\) VALUES \(\$1, \$2\) ON CONFLICT \(key\) DO UPDATE SET value = excluded\.value/,
 	);
 	assert.match(
-		EXECUTE_SQL_TOOL_DESCRIPTION,
+		LIX_SQL_OPERATING_GUIDE,
 		/INSERT INTO lix_directory \(path\) VALUES \(\$1\) ON CONFLICT \(path\) DO NOTHING/,
 	);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /without a probe SELECT/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /without a probe SELECT/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /lix_history\('lix_file', \$1\)/);
+	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lix_file_history/);
+	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lixcol_branch_id/);
+	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lixcol_start_commit_id/);
+	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lixcol_entity_pk/);
+	assert.match(MCP_DOCS, /CAST\(\$2 AS BYTEA\)/);
+	assert.match(MCP_DOCS, /ON CONFLICT \(path\) DO UPDATE/);
+});
+
+void test("per-tool SQL descriptions are short and omit the shared guide", () => {
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /INSERT, UPDATE, and DELETE/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /use execute_sql for writes/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ordered atomic SQL batch/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /verification SELECT/);
+	assert.match(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/Do not call create_checkpoint after a write/,
+	);
+	assert.doesNotMatch(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/never infer success from prose/,
+	);
+	for (const description of [
+		QUERY_SQL_TOOL_DESCRIPTION,
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+	]) {
+		for (const marker of SHARED_GUIDE_MARKERS) {
+			assert.doesNotMatch(
+				description,
+				marker,
+				`tool description must not repeat ${marker}`,
+			);
+		}
+		assert.doesNotMatch(description, /lixcol_branch_id/);
+		assert.doesNotMatch(description, /lixcol_start_commit_id/);
+		assert.doesNotMatch(description, /lixcol_entity_pk/);
+	}
 });
