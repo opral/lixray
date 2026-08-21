@@ -52,6 +52,7 @@ import {
 	isDemoEnvironment,
 	resolveOfficialMcpPosthogToken,
 } from "./mcp-posthog-env.ts";
+import { PublicProfileActivityCache } from "./profile-activity-cache.ts";
 
 export interface WorkerEnv {
 	SUPABASE_URL?: string;
@@ -108,6 +109,7 @@ interface HandleRequestOptions {
 	resolvePublicLix?: ResolvePublicLix;
 	resolveNamespaceProfile?: ResolveNamespaceProfile;
 	resolvePublicProfileRepositories?: ResolvePublicProfileRepositories;
+	profileActivityCache?: PublicProfileActivityCache | null;
 	mcpTransport?: typeof handleMcpTransport;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
@@ -117,6 +119,9 @@ interface HandleRequestOptions {
 	createMcpTelemetry?: typeof createMcpTelemetrySession;
 	recordMcpLixConnection?: RecordMcpLixConnection;
 }
+
+const publicProfileActivityCache = new PublicProfileActivityCache();
+const PUBLIC_PROFILE_ACTIVITY_TIMEOUT_MS = 30_000;
 
 interface AuthenticatedUser {
 	userId: string;
@@ -283,12 +288,20 @@ export async function handleRequest(
 				? resolveDemoPublicProfileRepositories(namespaceId)
 				: resolvePublicProfileRepositoriesWithSupabase(namespaceId, env));
 		if (!resolution.ok) return withProfileCors(resolution.response);
-		const activity = await loadPublicProfileActivity(
-			resolution.repositories,
-			env,
-			options.lixFetch,
-			request.signal,
-		);
+		const loadActivity = () =>
+			loadPublicProfileActivity(
+				resolution.repositories,
+				env,
+				options.lixFetch,
+				AbortSignal.timeout(PUBLIC_PROFILE_ACTIVITY_TIMEOUT_MS),
+			);
+		const activityCache =
+			options.profileActivityCache === undefined
+				? publicProfileActivityCache
+				: options.profileActivityCache;
+		const activity = activityCache
+			? await activityCache.resolve(namespaceId, loadActivity)
+			: await loadActivity();
 		return profileActivityResponse(request, activity);
 	}
 
@@ -1998,7 +2011,7 @@ function profileActivityResponse(
 		{
 			status: 200,
 			headers: {
-				"cache-control": "public, max-age=60, stale-while-revalidate=300",
+				"cache-control": "public, max-age=0, s-maxage=300",
 				"content-type": "application/json; charset=utf-8",
 			},
 		},

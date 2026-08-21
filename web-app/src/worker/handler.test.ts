@@ -32,6 +32,7 @@ import {
 	MCP_PROTECTED_RESOURCE_PATH,
 	MCP_RESOURCE,
 } from "../mcp/server.ts";
+import { PublicProfileActivityCache } from "./profile-activity-cache.ts";
 
 const LIX_A = "11111111-1111-4111-8111-111111111111";
 const LIX_B = "22222222-2222-4222-8222-222222222222";
@@ -316,6 +317,7 @@ void test("GET /profile/{namespace_id}/activity lists real public repositories",
 		new Request(`https://example.test/profile/${NAMESPACE_ID}/activity`),
 		env({}),
 		{
+			profileActivityCache: null,
 			resolvePublicProfileRepositories: async (namespaceId) => {
 				resolvedNamespaceId = namespaceId;
 				return {
@@ -336,7 +338,7 @@ void test("GET /profile/{namespace_id}/activity lists real public repositories",
 	assert.equal(response.status, 200);
 	assert.equal(resolvedNamespaceId, NAMESPACE_ID);
 	assert.equal(response.headers.get("access-control-allow-origin"), "*");
-	assert.match(response.headers.get("cache-control") ?? "", /max-age=60/);
+	assert.match(response.headers.get("cache-control") ?? "", /s-maxage=300/);
 	const activity = (await response.json()) as PublicProfileActivity;
 	assert.equal(activity.totalFiles, 0);
 	assert.equal(activity.failedRepositories, 1);
@@ -356,6 +358,7 @@ void test("profile activity queries file paths from every public Lix", async () 
 		new Request(`https://example.test/profile/${NAMESPACE_ID}/activity`),
 		env({}),
 		{
+			profileActivityCache: null,
 			resolvePublicProfileRepositories: async () => ({
 				ok: true,
 				repositories: [
@@ -407,6 +410,61 @@ void test("profile activity queries file paths from every public Lix", async () 
 		activity.fileMix.map((segment) => segment.count),
 		[1, 1, 0, 0, 1],
 	);
+});
+
+void test("profile activity shares one repository scan across visitors", async () => {
+	const cache = new PublicProfileActivityCache();
+	let executeRequests = 0;
+	const options = {
+		profileActivityCache: cache,
+		resolvePublicProfileRepositories: async () => ({
+			ok: true as const,
+			repositories: [
+				{
+					id: LIX_A,
+					name: "Launch plan",
+					slug: "launch-plan",
+					namespaceHandle: "samuel",
+				},
+			],
+		}),
+		lixFetch: async (_lixId: string, request: Request) => {
+			const pathname = new URL(request.url).pathname;
+			if (pathname === "/lix/v1/") {
+				return Response.json({
+					protocolVersion: 2,
+					activeBranchId: "main",
+					activeAccountId: "00000000-0000-7000-8000-000000000002",
+					sessionId: "profile-cache-session",
+				});
+			}
+			if (pathname === "/lix/v1/session" && request.method === "DELETE") {
+				return new Response(null, { status: 204 });
+			}
+			executeRequests += 1;
+			return Response.json({
+				columns: ["path"],
+				rows: [[{ kind: "text", value: "/README.md" }]],
+				rowsAffected: 0,
+				notices: [],
+			});
+		},
+	};
+
+	const first = await handleRequest(
+		new Request(`https://first-visitor.test/profile/${NAMESPACE_ID}/activity`),
+		env({}),
+		options,
+	);
+	const second = await handleRequest(
+		new Request(`https://second-visitor.test/profile/${NAMESPACE_ID}/activity`),
+		env({}),
+		options,
+	);
+
+	assert.equal(first.status, 200);
+	assert.equal(second.status, 200);
+	assert.equal(executeRequests, 1);
 });
 
 void test("public profile repository resolution calls the anonymous RPC", async () => {
