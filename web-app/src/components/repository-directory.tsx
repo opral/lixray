@@ -4,7 +4,6 @@ import {
 	Download,
 	Ellipsis,
 	Link2,
-	LogOut,
 	Plus,
 	Settings,
 } from "lucide-react";
@@ -17,6 +16,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
+import { AccountMenu } from "~/components/account-menu";
 import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";
 import {
 	type Organization,
@@ -329,67 +329,12 @@ function EmptyOrganizationSection({
 }
 
 export function DirectoryHeader() {
-	const { signOut, user } = useAuth();
-	const initial = isDemoModeEnabled ? "M" : accountInitial(user?.user_metadata);
-	const fullName = accountFullName(user?.user_metadata);
-	const email = user?.email ?? null;
-
 	return (
 		<AppTitlebar>
 			<AppTitlebarBrand />
-			<DropdownMenu>
-				<DropdownMenuTrigger asChild>
-					<button
-						className="ml-auto inline-flex size-[26px] cursor-pointer items-center justify-center rounded-full border-0 bg-bg-action-secondary p-0 text-[11px] font-semibold text-text-on-action-secondary transition hover:-translate-y-px hover:bg-bg-action-secondary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
-						type="button"
-						aria-label="Account menu"
-					>
-						{initial}
-					</button>
-				</DropdownMenuTrigger>
-				<DropdownMenuContent
-					align="end"
-					sideOffset={6}
-					className="w-[232px] min-w-[232px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2.5 [&_[data-slot=dropdown-menu-item]]:py-2 [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-item]_svg]:size-3.5 [&_[data-slot=dropdown-menu-item]_svg]:text-icon-tertiary [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle"
-				>
-					<div className="flex items-center gap-2.5 px-2.5 py-2">
-						<span
-							className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-bg-hover-canvas text-[12px] font-semibold text-text-secondary"
-							aria-hidden="true"
-						>
-							{initial}
-						</span>
-						<span className="flex min-w-0 flex-col gap-px">
-							<span className="truncate text-[13px] leading-tight font-semibold text-text-primary">
-								{fullName ?? email ?? "Account"}
-							</span>
-							{fullName && email ? (
-								<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
-									{email}
-								</span>
-							) : null}
-						</span>
-					</div>
-					{isDemoModeEnabled ? null : (
-						<>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem onSelect={() => void signOut()}>
-								<LogOut aria-hidden="true" />
-								Sign out
-							</DropdownMenuItem>
-						</>
-					)}
-				</DropdownMenuContent>
-			</DropdownMenu>
+			<AccountMenu className="ml-auto size-[26px] border-0" />
 		</AppTitlebar>
 	);
-}
-
-function accountFullName(
-	metadata: Record<string, unknown> | undefined,
-): string | null {
-	const value = metadata?.full_name ?? metadata?.name;
-	return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function RepositoryEmptyState() {
@@ -854,11 +799,4 @@ export function pluralize(
 	plural?: string,
 ): string {
 	return count === 1 ? singular : (plural ?? `${singular}s`);
-}
-
-function accountInitial(metadata: Record<string, unknown> | undefined): string {
-	const value = metadata?.full_name ?? metadata?.name;
-	return typeof value === "string" && value.trim()
-		? value.trim().charAt(0).toUpperCase()
-		: "M";
 }

@@ -23,6 +23,7 @@ import {
 } from "react";
 import { PencilLine } from "lucide-react";
 import { toast } from "sonner";
+import { AccountMenu } from "~/components/account-menu";
 import { useAuth } from "~/components/auth-provider";
 import { useRepository } from "~/components/repository-provider";
 import type { RepositorySettingsApi } from "~/components/repository-home/settings-view";
@@ -460,7 +461,7 @@ export function RepositoryAtelier({
 	);
 	// Sharing is available for the whole repository as well as individual files;
 	// the current browser URL is captured when the dialog is opened.
-	const headerActions = canEdit ? (
+	const repositoryHeaderActions = canEdit ? (
 		client ? (
 			<RepositoryShareControl
 				loadReadAccess={async () => {
@@ -621,6 +622,12 @@ export function RepositoryAtelier({
 					{shareAccess.joining ? "Joining…" : "Join to edit"}
 				</Button>
 			) : null}
+		</div>
+	);
+	const headerActions = (
+		<div className="flex items-center gap-2">
+			{repositoryHeaderActions}
+			{user ? <AccountMenu className="size-7" /> : null}
 		</div>
 	);
 	const navigateToCurrentPathBranch = useCallback(

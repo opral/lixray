@@ -16,6 +16,10 @@ void test("canonicalizes private Lixray routes for Web Analytics", () => {
 		sanitizeLixrayPathname("/@samuel/customer-roadmap?branch=secret"),
 		"/repository/:repository",
 	);
+	assert.equal(
+		sanitizeLixrayPathname("/profile/33333333-3333-4333-8333-333333333333"),
+		"/profile/:namespace",
+	);
 	assert.equal(sanitizeLixrayPathname("/sign-in"), "/sign-in");
 });
 

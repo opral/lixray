@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(16);
+select plan(20);
 
 select is(to_regclass('public.organizations')::text, null::text, 'legacy organizations are gone');
 select is(to_regclass('public.workspaces')::text, null::text, 'legacy workspaces are gone');
@@ -16,7 +16,7 @@ insert into auth.users (
   '00000000-0000-0000-0000-000000000000',
   'authenticated', 'authenticated', 'samuel@example.com', '', now(),
   '{"provider":"google","providers":["google"]}',
-  '{"full_name":"Samuel"}', now(), now()
+  '{"full_name":"Samuel","picture":"https://lh3.googleusercontent.com/samuel"}', now(), now()
 );
 
 set local role authenticated;
@@ -39,6 +39,52 @@ select is(
   'personal ownership is derived from the primary-namespace pointer'
 );
 set local role authenticated;
+
+select is(
+  (
+    select document #>> '{media,avatar,uri}'
+    from public.namespace_profiles
+    limit 1
+  ),
+  'https://lh3.googleusercontent.com/samuel',
+  'personal bootstrap seeds the public JSContact avatar from Google metadata'
+);
+
+select results_eq(
+  $$select namespace_handle
+    from public.resolve_public_profile_by_handle('samuel')$$,
+  $$values ('samuel'::text)$$,
+  'a public handle resolves to its canonical profile identity'
+);
+
+select is(
+  (
+    select count(*)
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profiles'
+      and column_name = 'avatar_url'
+  ),
+  0::bigint,
+  'the private auth profile no longer duplicates the public avatar'
+);
+
+reset role;
+update auth.users
+set raw_user_meta_data = '{"full_name":"Samuel","picture":"https://lh3.googleusercontent.com/changed"}'
+where id = '10000000-0000-0000-0000-000000000001';
+set local role authenticated;
+set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000001';
+
+select is(
+  (
+    select document #>> '{media,avatar,uri}'
+    from public.namespace_profiles
+    limit 1
+  ),
+  'https://lh3.googleusercontent.com/samuel',
+  'later Google metadata does not overwrite the authoritative JSContact profile'
+);
 
 select is(
   (select count(*) from public.lixes where deleted_at is null),

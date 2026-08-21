@@ -3,6 +3,8 @@ import test from "node:test";
 import {
 	DEMO_AUTH_TOKEN,
 	DEMO_ORGANIZATION_ID,
+	DEMO_PROFILE_NAMESPACE_ID,
+	demoProfileDocument,
 	DEMO_ORGANIZATION_NAME,
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
@@ -13,6 +15,7 @@ import {
 	authorizeLixWithSupabase,
 	handleRequest,
 	resolveLixWithSupabase,
+	resolveNamespaceProfileWithSupabase,
 	supabaseJwtIssuer,
 	validateBrowserJwtClaims,
 	validateMcpJwtClaims,
@@ -30,6 +33,13 @@ import {
 
 const LIX_A = "11111111-1111-4111-8111-111111111111";
 const LIX_B = "22222222-2222-4222-8222-222222222222";
+const NAMESPACE_ID = "33333333-3333-4333-8333-333333333333";
+const PROFILE_DOCUMENT = {
+	"@type": "Card",
+	version: "2.0",
+	kind: "individual",
+	name: { full: "Samuel Stroschein" },
+};
 
 void test("GET /healthz returns Worker health without auth or proxying", async () => {
 	const response = await handleRequest(
@@ -212,6 +222,90 @@ void test("production email sign-in rejects a cross-origin POST", async () => {
 	assert.equal(response.status, 403);
 	assert.equal(await response.text(), "Forbidden\n");
 	assert.equal(reachedPasswordGrant, false);
+});
+
+void test("GET /profile/{namespace_id} serves a public JSContact profile", async () => {
+	let resolvedNamespaceId: string | undefined;
+	let fellBack = false;
+	const response = await handleRequest(
+		new Request(`https://example.test/profile/${NAMESPACE_ID}`),
+		env({}),
+		{
+			resolveNamespaceProfile: async (namespaceId) => {
+				resolvedNamespaceId = namespaceId;
+				return {
+					ok: true,
+					document: PROFILE_DOCUMENT,
+					updatedAt: "2026-08-21T12:00:00.000Z",
+				};
+			},
+			fallback: async () => {
+				fellBack = true;
+				return new Response("frontend");
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(resolvedNamespaceId, NAMESPACE_ID);
+	assert.equal(fellBack, false);
+	assert.equal(
+		response.headers.get("content-type"),
+		"application/jscontact+json; version=2.0",
+	);
+	assert.equal(response.headers.get("access-control-allow-origin"), "*");
+	assert.match(response.headers.get("cache-control") ?? "", /max-age=3600/);
+	assert.deepEqual(await response.json(), PROFILE_DOCUMENT);
+});
+
+void test("profile responses support HEAD and ETag revalidation", async () => {
+	const resolveNamespaceProfile = async () => ({
+		ok: true as const,
+		document: PROFILE_DOCUMENT,
+		updatedAt: "2026-08-21T12:00:00.000Z",
+	});
+	const first = await handleRequest(
+		new Request(`https://example.test/profile/${NAMESPACE_ID}`, {
+			method: "HEAD",
+		}),
+		env({}),
+		{ resolveNamespaceProfile },
+	);
+	const etag = first.headers.get("etag");
+	assert.equal(first.status, 200);
+	assert.ok(etag);
+	assert.equal(await first.text(), "");
+
+	const revalidated = await handleRequest(
+		new Request(`https://example.test/profile/${NAMESPACE_ID}`, {
+			headers: { "If-None-Match": etag ?? "" },
+		}),
+		env({}),
+		{ resolveNamespaceProfile },
+	);
+	assert.equal(revalidated.status, 304);
+	assert.equal(await revalidated.text(), "");
+});
+
+void test("invalid profile IDs are rejected before profile resolution", async () => {
+	let resolved = false;
+	const response = await handleRequest(
+		new Request("https://example.test/profile/not-a-uuid"),
+		env({}),
+		{
+			resolveNamespaceProfile: async () => {
+				resolved = true;
+				return {
+					ok: true,
+					document: PROFILE_DOCUMENT,
+					updatedAt: "2026-08-21T12:00:00.000Z",
+				};
+			},
+		},
+	);
+	assert.equal(response.status, 404);
+	assert.equal(response.headers.get("access-control-allow-origin"), "*");
+	assert.equal(resolved, false);
 });
 
 void test("non-/v1 routes delegate to the frontend fallback", async () => {
@@ -1910,6 +2004,22 @@ void test("demo mode keeps OAuth endpoints disabled", async () => {
 	}
 });
 
+void test("demo mode exposes its namespace through the production profile route", async () => {
+	const response = await handleRequest(
+		new Request(`http://localhost/profile/${DEMO_PROFILE_NAMESPACE_ID}`),
+		env({ extra: { LIXRAY_DEMO: "1" } }),
+	);
+	assert.equal(response.status, 200);
+	assert.equal(
+		response.headers.get("content-type"),
+		"application/jscontact+json; version=2.0",
+	);
+	assert.deepEqual(
+		await response.json(),
+		demoProfileDocument("http://localhost"),
+	);
+});
+
 void test("Railway PR environments enable the built-in demo lix", async () => {
 	// Both naming schemes: configured "lixray-pr-<n>" and Railway's default
 	// "pr-<hash>-<n>" used for recreated PR environments.
@@ -2121,6 +2231,87 @@ void test("Supabase canonical lix resolution joins RLS-visible organization and 
 			lookups[0]?.pathname,
 			"/rest/v1/rpc/resolve_public_lix_by_route",
 		);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+void test("Supabase namespace profile resolution uses the public namespace ID", async () => {
+	const originalFetch = globalThis.fetch;
+	let lookupUrl: URL | undefined;
+	let lookupHeaders: Headers | undefined;
+	globalThis.fetch = async (input, init) => {
+		const requestUrl =
+			typeof input === "string"
+				? input
+				: input instanceof URL
+					? input.href
+					: input.url;
+		lookupUrl = new URL(requestUrl);
+		lookupHeaders = new Headers(init?.headers);
+		return Response.json([
+			{
+				document: PROFILE_DOCUMENT,
+				updated_at: "2026-08-21T12:00:00.000Z",
+			},
+		]);
+	};
+	try {
+		const resolution = await resolveNamespaceProfileWithSupabase(
+			NAMESPACE_ID,
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+		);
+		assert.deepEqual(resolution, {
+			ok: true,
+			document: PROFILE_DOCUMENT,
+			updatedAt: "2026-08-21T12:00:00.000Z",
+		});
+		assert.equal(lookupUrl?.pathname, "/rest/v1/namespace_profiles");
+		assert.equal(lookupUrl?.searchParams.get("select"), "document,updated_at");
+		assert.equal(
+			lookupUrl?.searchParams.get("namespace_id"),
+			`eq.${NAMESPACE_ID}`,
+		);
+		assert.equal(lookupHeaders?.get("apikey"), "publishable-key");
+		assert.equal(lookupHeaders?.get("authorization"), null);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+void test("Supabase namespace profile resolution distinguishes absence from invalid data", async () => {
+	const originalFetch = globalThis.fetch;
+	try {
+		globalThis.fetch = async () => Response.json([]);
+		const missing = await resolveNamespaceProfileWithSupabase(
+			NAMESPACE_ID,
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+		);
+		assert.equal(missing.ok, false);
+		if (!missing.ok) assert.equal(missing.response.status, 404);
+
+		globalThis.fetch = async () => Response.json([{ document: {} }]);
+		const invalid = await resolveNamespaceProfileWithSupabase(
+			NAMESPACE_ID,
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+		);
+		assert.equal(invalid.ok, false);
+		if (!invalid.ok) assert.equal(invalid.response.status, 502);
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
