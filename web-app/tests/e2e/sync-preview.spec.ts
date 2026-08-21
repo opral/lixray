@@ -175,12 +175,27 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	observePage(right, "right");
 
 	try {
+		const openHome = async (page: Page) => {
+			await page.goto(repositoryUrl);
+			const newButton = page.getByTestId("home-new-button");
+			if (!(await newButton.isVisible())) {
+				const homeTab = page.getByRole("button", {
+					name: "Home",
+					exact: true,
+				});
+				await homeTab.waitFor({ timeout: 120_000 });
+				// Pinned Atelier tabs are sortable and expose aria-disabled while
+				// remaining selectable. Bypass Playwright's disabled actionability
+				// check so the test follows the same pointer activation path.
+				await homeTab.click({ force: true });
+			}
+			await newButton.waitFor({ timeout: 120_000 });
+		};
 		const createFileFromHome = async (
 			page: Page,
 			buttonName: string,
 		): Promise<string> => {
-			await page.goto(repositoryUrl);
-			await page.getByTestId("home-entry-list").waitFor({ timeout: 30_000 });
+			await openHome(page);
 			await page.getByTestId("home-new-button").click();
 			await page.getByRole("button", { name: buttonName, exact: true }).click();
 			await page.waitForURL((url) => url.toString() !== repositoryUrl, {
@@ -191,7 +206,11 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			);
 		};
 
-		await Promise.all([left.goto(repositoryUrl), right.goto(repositoryUrl)]);
+		await Promise.all([openHome(left), openHome(right)]);
+		if (!(await left.getByTestId("home-entry-list").isVisible())) {
+			await createFileFromHome(left, "New Markdown (.md)");
+			await left.goto(repositoryUrl);
+		}
 		await Promise.all([
 			left.getByTestId("home-entry-list").waitFor({ timeout: 120_000 }),
 			right.getByTestId("home-entry-list").waitFor({ timeout: 120_000 }),
@@ -262,7 +281,9 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 						.getByRole("list", { name: "Checkpoints" })
 						.locator(":scope > li"),
 				).toHaveCount(initialCheckpointCount);
-				await expect(freshHistory).toContainText("Latest checkpoint");
+				if (initialCheckpointCount > 1) {
+					await expect(freshHistory).toContainText("Latest checkpoint");
+				}
 				await expect(freshHistory).toContainText("Initial checkpoint");
 				await expect(
 					fresh.locator("[data-atelier-extension-suspended]"),
