@@ -1,27 +1,22 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { EventMessage } from "posthog-node";
-import {
-	observeExecuteInput,
-	observeExecuteOutput,
-} from "../mcp/tool-observation.ts";
-import { createMcpTelemetrySession } from "./mcp-telemetry.ts";
+import { createLixEngineTelemetrySession } from "./mcp-telemetry.ts";
 
-const SURFACE_VERSION = "fnv1a32:1234abcd";
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
-const REQUEST_ID = "request-123";
 
-void test("MCP telemetry captures a PostHog AI span for production tool usage", async () => {
+void test("Lix engine telemetry forwards a Lix SQL span, never mcp.*", async () => {
 	const captured: Array<EventMessage> = [];
 	let shutdowns = 0;
-	const session = createMcpTelemetrySession(
+	const session = createLixEngineTelemetrySession(
 		{
 			POSTHOG_PROJECT_TOKEN: " project-token ",
 			POSTHOG_HOST: " https://posthog.example ",
 			POSTHOG_ENVIRONMENT: "production",
 			RAILWAY_GIT_COMMIT_SHA: "worker-version-123",
 		},
-		{ userId: "user-123", clientId: "oauth-client-456" },
+		{ userId: "user-123" },
 		{
 			createClient: (token, options) => {
 				assert.equal(token, "project-token");
@@ -43,13 +38,32 @@ void test("MCP telemetry captures a PostHog AI span for production tool usage", 
 	);
 	assert.ok(session);
 
-	session.onToolCall({
-		requestId: REQUEST_ID,
-		toolName: "list_lixes",
-		outcome: "success",
-		durationMs: 12,
-		surfaceVersion: SURFACE_VERSION,
-		lixId: LIX_ID,
+	session.onSpan({
+		schemaVersion: 2,
+		name: "lix.sql.batch",
+		traceId: "trace-lix",
+		spanId: "span-lix",
+		parentSpanId: "parent-lix",
+		durationMs: 42,
+		status: "ok",
+		attributes: { "lix.id": LIX_ID, "lix.execution.kind": "batch" },
+	});
+	session.onSpan({
+		name: "mcp.execute_sql",
+		traceId: "invented",
+		spanId: "invented",
+		durationMs: 279,
+		status: "ok",
+	});
+	session.onSpan({
+		name: "mcp.open_lix",
+		durationMs: 10,
+		status: "ok",
+	});
+	session.onSpan({
+		name: "mcp.create_checkpoint",
+		durationMs: 10,
+		status: "ok",
 	});
 	await session.flush();
 
@@ -59,34 +73,32 @@ void test("MCP telemetry captures a PostHog AI span for production tool usage", 
 	assert.equal(event?.distinctId, "user-123");
 	assert.equal(event?.event, "$ai_span");
 	assert.deepEqual(event?.groups, { lix: LIX_ID });
-	assert.match(String(event?.properties?.$ai_trace_id), UUID_PATTERN);
-	assert.match(String(event?.properties?.$ai_span_id), UUID_PATTERN);
-	assert.deepEqual(omitIds(event?.properties), {
-		$ai_span_name: "mcp.list_lixes",
-		$ai_latency: 0.012,
+	assert.deepEqual(event?.properties, {
+		$ai_span_name: "lix.sql.batch",
+		$ai_latency: 0.042,
 		$ai_is_error: false,
-		mcp_server: "lixray",
-		mcp_tool: "list_lixes",
-		request_id: REQUEST_ID,
-		outcome: "success",
-		duration_ms: 12,
-		oauth_client_id: "oauth-client-456",
+		$ai_trace_id: "trace-lix",
+		$ai_span_id: "span-lix",
+		$ai_parent_id: "parent-lix",
+		lix_attributes: { "lix.id": LIX_ID, "lix.execution.kind": "batch" },
 		environment: "production",
 		release_id: "worker-version-123",
-		mcp_surface_version: SURFACE_VERSION,
-		lix_id: LIX_ID,
 	});
+	assert.doesNotMatch(
+		JSON.stringify(captured),
+		/mcp\.execute_sql|mcp\.open_lix|mcp\.create_checkpoint/,
+	);
 });
 
-void test("MCP telemetry records trace errors without lix grouping", async () => {
+void test("Lix engine telemetry records Lix errors without inventing ids", async () => {
 	const captured: Array<EventMessage> = [];
-	const session = createMcpTelemetrySession(
+	const session = createLixEngineTelemetrySession(
 		{
 			POSTHOG_PROJECT_TOKEN: "project-token",
 			POSTHOG_ENVIRONMENT: "production",
 			LIXRAY_RELEASE_ID: "release-456",
 		},
-		{ userId: "user-123", clientId: "oauth-client-456" },
+		{ userId: "user-123" },
 		{
 			createClient: (_token, options) => {
 				assert.equal(options.host, "https://us.i.posthog.com");
@@ -101,35 +113,32 @@ void test("MCP telemetry records trace errors without lix grouping", async () =>
 	);
 	assert.ok(session);
 
-	session.onToolCall({
-		requestId: REQUEST_ID,
-		toolName: "query_sql",
-		outcome: "error",
-		errorCode: "invalid_arguments",
-		durationMs: 0,
-		surfaceVersion: SURFACE_VERSION,
+	session.onSpan({
+		schemaVersion: 1,
+		name: "lix.sql.query",
+		durationMs: 4,
+		status: "error",
+		attributes: { "error.type": "LIX_UNSUPPORTED_SQL" },
 	});
 	await session.flush();
 
 	assert.equal(captured[0]?.event, "$ai_span");
+	assert.equal(captured[0]?.properties?.$ai_span_name, "lix.sql.query");
 	assert.equal(captured[0]?.properties?.$ai_is_error, true);
-	assert.equal(captured[0]?.properties?.request_id, REQUEST_ID);
-	assert.deepEqual(captured[0]?.properties?.$ai_error, {
-		code: "invalid_arguments",
-	});
-	assert.equal(captured[0]?.properties?.error_code, "invalid_arguments");
+	assert.equal(captured[0]?.properties?.$ai_trace_id, undefined);
+	assert.equal(captured[0]?.properties?.$ai_span_id, undefined);
 	assert.equal(captured[0]?.properties?.release_id, "release-456");
 	assert.equal(captured[0]?.groups, undefined);
 });
 
-void test("MCP traces expose SQL friction without lix values or result rows", async () => {
+void test("lix.opened is not a timed $ai_span product event", async () => {
 	const captured: Array<EventMessage> = [];
-	const session = createMcpTelemetrySession(
+	const session = createLixEngineTelemetrySession(
 		{
 			POSTHOG_PROJECT_TOKEN: "project-token",
 			POSTHOG_ENVIRONMENT: "production",
 		},
-		{ userId: "user-123", clientId: "oauth-client-456" },
+		{ userId: "user-123" },
 		{
 			createClient: () => ({
 				captureImmediate: async (event) => {
@@ -140,68 +149,17 @@ void test("MCP traces expose SQL friction without lix values or result rows", as
 		},
 	);
 	assert.ok(session);
-	const executeInput = observeExecuteInput([
-		{
-			sql: "SELECT content FROM lix_file WHERE path = '/private.txt' AND id = $1",
-			params: [{ kind: "text", value: "private-bound-value" }],
-		},
-	]);
-	const executeOutput = observeExecuteOutput({
-		results: [
-			{
-				columns: ["content"],
-				rows: [[{ kind: "text", value: "private result" }]],
-				rowsAffected: 0,
-				notices: [
-					{
-						code: "LIX_HISTORY_NON_IDENTITY_FILTER",
-						message: "private notice message",
-					},
-				],
-			},
-		],
-	});
-	assert.ok(executeInput);
-	assert.ok(executeOutput);
-
-	session.onToolCall({
-		requestId: REQUEST_ID,
-		toolName: "query_sql",
-		outcome: "success",
-		durationMs: 4,
-		surfaceVersion: SURFACE_VERSION,
-		lixId: LIX_ID,
-		executeInput,
-		executeOutput,
+	session.onSpan({
+		name: "lix.opened",
+		durationMs: 15,
+		status: "ok",
+		attributes: { "lix.id": LIX_ID, "lix.account_id": "user-123" },
 	});
 	await session.flush();
-
-	const properties = captured[0]?.properties;
-	assert.equal(properties?.statement_count, 1);
-	assert.deepEqual(properties?.sql_operations, ["SELECT"]);
-	assert.deepEqual(properties?.notice_codes, [
-		"LIX_HISTORY_NON_IDENTITY_FILTER",
-	]);
-	assert.equal(properties?.row_count, 1);
-	assert.equal(properties?.rows_affected, 0);
-	assert.equal(properties?.notice_count, 1);
-	assert.match(
-		String(
-			(
-				properties?.$ai_input_state as {
-					statements?: Array<{ sanitizedSql?: string }>;
-				}
-			)?.statements?.[0]?.sanitizedSql,
-		),
-		/where path = \? and id = \?/,
-	);
-	assert.doesNotMatch(
-		JSON.stringify(captured),
-		/private\.txt|private-bound-value|private result|private notice message/,
-	);
+	assert.equal(captured.length, 0);
 });
 
-void test("MCP telemetry is disabled without production configuration", () => {
+void test("Lix engine telemetry is disabled without production configuration", () => {
 	let clientCreations = 0;
 	const createClient = () => {
 		clientCreations += 1;
@@ -209,31 +167,31 @@ void test("MCP telemetry is disabled without production configuration", () => {
 	};
 
 	assert.equal(
-		createMcpTelemetrySession(
+		createLixEngineTelemetrySession(
 			{ POSTHOG_ENVIRONMENT: "production" },
-			{ userId: "user-123", clientId: "client-123" },
+			{ userId: "user-123" },
 			{ createClient },
 		),
 		null,
 	);
 	assert.equal(
-		createMcpTelemetrySession(
+		createLixEngineTelemetrySession(
 			{
 				POSTHOG_PROJECT_TOKEN: "token",
 				POSTHOG_ENVIRONMENT: "preview",
 			},
-			{ userId: "user-123", clientId: "client-123" },
+			{ userId: "user-123" },
 			{ createClient },
 		),
 		null,
 	);
 	assert.equal(
-		createMcpTelemetrySession(
+		createLixEngineTelemetrySession(
 			{
 				POSTHOG_PROJECT_TOKEN: "token",
 				POSTHOG_ENVIRONMENT: "production",
 			},
-			{ userId: "demo", clientId: "demo", isDemo: true },
+			{ userId: "demo", isDemo: true },
 			{ createClient },
 		),
 		null,
@@ -241,7 +199,7 @@ void test("MCP telemetry is disabled without production configuration", () => {
 	assert.equal(clientCreations, 0);
 });
 
-void test("MCP telemetry treats Railway or Vite production as production", async () => {
+void test("Lix engine telemetry treats Railway or Vite production as production", async () => {
 	const captured: Array<EventMessage> = [];
 	const createClient = () => ({
 		captureImmediate: async (event: EventMessage) => {
@@ -250,31 +208,30 @@ void test("MCP telemetry treats Railway or Vite production as production", async
 		shutdown: async () => undefined,
 	});
 
-	const railwaySession = createMcpTelemetrySession(
+	const railwaySession = createLixEngineTelemetrySession(
 		{
 			VITE_PUBLIC_POSTHOG_TOKEN: "phc_public_token",
 			RAILWAY_ENVIRONMENT_NAME: "production",
 		},
-		{ userId: "user-123", clientId: "client-123" },
+		{ userId: "user-123" },
 		{ createClient },
 	);
 	assert.ok(railwaySession);
-	railwaySession.onToolCall({
-		requestId: REQUEST_ID,
-		toolName: "list_lixes",
-		outcome: "success",
+	railwaySession.onSpan({
+		name: "lix.sql.query",
 		durationMs: 1,
-		surfaceVersion: SURFACE_VERSION,
+		status: "ok",
 	});
 	await railwaySession.flush();
 	assert.equal(captured[0]?.event, "$ai_span");
+	assert.equal(captured[0]?.properties?.$ai_span_name, "lix.sql.query");
 
-	const viteSession = createMcpTelemetrySession(
+	const viteSession = createLixEngineTelemetrySession(
 		{
 			POSTHOG_PROJECT_TOKEN: "project-token",
 			VITE_PUBLIC_TELEMETRY_ENVIRONMENT: "production",
 		},
-		{ userId: "user-123", clientId: "client-123" },
+		{ userId: "user-123" },
 		{ createClient },
 	);
 	assert.ok(viteSession);
@@ -282,12 +239,12 @@ void test("MCP telemetry treats Railway or Vite production as production", async
 
 void test("PostHog delivery failures do not escape the telemetry session", async () => {
 	const warnings: Array<string> = [];
-	const session = createMcpTelemetrySession(
+	const session = createLixEngineTelemetrySession(
 		{
 			POSTHOG_PROJECT_TOKEN: "token",
 			POSTHOG_ENVIRONMENT: "production",
 		},
-		{ userId: "user-123", clientId: "client-123" },
+		{ userId: "user-123" },
 		{
 			createClient: () => ({
 				captureImmediate: async () => {
@@ -303,29 +260,26 @@ void test("PostHog delivery failures do not escape the telemetry session", async
 	assert.ok(session);
 
 	assert.doesNotThrow(() =>
-		session.onToolCall({
-			requestId: REQUEST_ID,
-			toolName: "list_lixes",
-			outcome: "success",
+		session.onSpan({
+			name: "lix.sql.query",
 			durationMs: 1,
-			surfaceVersion: SURFACE_VERSION,
+			status: "ok",
 		}),
 	);
 	await assert.doesNotReject(session.flush());
 	assert.deepEqual(warnings, [
-		"Failed to capture MCP telemetry",
-		"Failed to shut down MCP telemetry",
+		"Failed to capture Lix engine telemetry",
+		"Failed to shut down Lix engine telemetry",
 	]);
 });
 
-const UUID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function omitIds(
-	properties: EventMessage["properties"],
-): Record<string, unknown> {
-	const rest = { ...(properties ?? {}) };
-	delete rest.$ai_trace_id;
-	delete rest.$ai_span_id;
-	return rest;
-}
+void test("worker MCP telemetry source does not invent mcp.* $ai_span names", async () => {
+	const source = await readFile(
+		new URL("./mcp-telemetry.ts", import.meta.url),
+		"utf8",
+	);
+	assert.doesNotMatch(source, /mcp\.\$\{/);
+	assert.doesNotMatch(source, /\$ai_span_name:\s*`mcp\./);
+	assert.match(source, /createLixEngineTelemetrySession/);
+	assert.doesNotMatch(source, /createMcpTelemetrySession/);
+});

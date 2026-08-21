@@ -8,9 +8,10 @@ state.
 
 The integration emits PostHog's canonical MCP events and removes private MCP
 payload properties (`$mcp_parameters`, `$mcp_response`, `$mcp_error_message`,
-and `$exception_list`) before delivery. LixRay's worker telemetry continues to
-emit the separate redacted `$ai_span` observations used for SQL shape and Lix
-grouping.
+and `$exception_list`) before delivery. `$mcp_duration_ms` is harness wall
+clock. Engine SQL / open / checkpoint timing comes only from Lix spans
+(`lix.sql.*` and related), never from synthesized `$ai_span` names such as
+`mcp.execute_sql`.
 
 The PostHog MCP SDK is pinned because its MCP Analytics event contract is still
 beta. Future changes must preserve the redaction boundary and must not make

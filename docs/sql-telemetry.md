@@ -75,10 +75,9 @@ Statement attributes:
 | `lix.rows_affected` | Rows changed on success |
 | `error.type` | Stable Lix error code on failure |
 
-Bound parameter values and SQL literal values are never captured. MCP
-AI Observability spans remain the source for tool-level usability and
-end-to-end latency. Their SQL input state contains independently sanitized
-statement shapes, never bound values or returned rows; see
+Bound parameter values and SQL literal values are never captured. Official MCP
+`$mcp_tool_call` events remain the source for tool-level usability and harness
+wall clock (`$mcp_duration_ms`). They are not an engine performance clock; see
 [mcp-telemetry.md](./mcp-telemetry.md).
 
 ## Failure logs

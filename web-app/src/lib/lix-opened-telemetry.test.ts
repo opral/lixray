@@ -43,6 +43,11 @@ void test("completed lix.opened span captures exactly one repository_opened", ()
 			},
 		},
 	]);
+	assert.equal(
+		"duration_ms" in (captured[0]?.properties ?? {}),
+		false,
+		"repository_opened is a count event unless Lix provides a duration",
+	);
 });
 
 void test("engine start.kind LixOpened maps the same product event", () => {
@@ -115,6 +120,34 @@ void test("one bind produces one product event", () => {
 				source: "mcp",
 			},
 		},
+	);
+});
+
+void test("engine spans pass through onEngineSpan without becoming repository_opened", () => {
+	const captured: Array<ReturnType<typeof repositoryOpenedFromLixOpened>> = [];
+	const engine: Array<{ name: string }> = [];
+	const onSpan = createLixOpenedOnSpan({
+		capture: (event) => captured.push(event),
+		onEngineSpan: (span) => engine.push({ name: span.name }),
+		environment: "production",
+		source: "web",
+	});
+	onSpan({
+		name: "lix.sql.batch",
+		attributes: { "lix.id": "lix-1" },
+	});
+	onSpan({
+		name: "lix.opened",
+		attributes: {
+			"lix.id": "lix-1",
+			"lix.account_id": "user-123",
+		},
+	});
+	assert.equal(captured.length, 1);
+	assert.equal(captured[0]?.event, "repository_opened");
+	assert.deepEqual(
+		engine.map((span) => span.name),
+		["lix.sql.batch", "lix.opened"],
 	);
 });
 

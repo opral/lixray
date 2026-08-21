@@ -1,8 +1,8 @@
 import { PostHog, type EventMessage } from "posthog-node";
-import type {
-	McpToolCallObservation,
-	McpToolCallObserver,
-} from "../mcp/server.ts";
+import {
+	lixEngineAiSpan,
+	type LixEngineSpanLike,
+} from "../lib/lix-engine-telemetry.ts";
 import {
 	isDemoEnvironment,
 	isProductionTelemetryEnvironment,
@@ -11,7 +11,7 @@ import {
 
 const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
 
-interface McpTelemetryEnvironment {
+interface LixEngineTelemetryEnvironment {
 	POSTHOG_PROJECT_TOKEN?: string;
 	VITE_PUBLIC_POSTHOG_TOKEN?: string;
 	POSTHOG_HOST?: string;
@@ -23,14 +23,13 @@ interface McpTelemetryEnvironment {
 	RAILWAY_GIT_COMMIT_SHA?: string;
 }
 
-interface McpTelemetryIdentity {
+interface LixEngineTelemetryIdentity {
 	userId: string;
-	clientId: string;
 	isDemo?: boolean;
 }
 
-export interface McpTelemetrySession {
-	onToolCall: McpToolCallObserver;
+export interface LixEngineTelemetrySession {
+	onSpan(span: LixEngineSpanLike): void;
 	flush(): Promise<void>;
 }
 
@@ -39,7 +38,7 @@ interface PostHogCaptureClient {
 	shutdown(): Promise<void>;
 }
 
-interface McpTelemetryDependencies {
+interface LixEngineTelemetryDependencies {
 	createClient?: (
 		token: string,
 		options: { host: string; flushAt: number; flushInterval: number },
@@ -47,11 +46,15 @@ interface McpTelemetryDependencies {
 	warn?: (message: string, error: unknown) => void;
 }
 
-export function createMcpTelemetrySession(
-	env: McpTelemetryEnvironment,
-	identity: McpTelemetryIdentity,
-	dependencies: McpTelemetryDependencies = {},
-): McpTelemetrySession | null {
+/**
+ * Worker sink for Lix `onSpan` records. MCP tool wall clock stays on official
+ * `$mcp_tool_call` (`$mcp_duration_ms`). This path never names `mcp.*`.
+ */
+export function createLixEngineTelemetrySession(
+	env: LixEngineTelemetryEnvironment,
+	identity: LixEngineTelemetryIdentity,
+	dependencies: LixEngineTelemetryDependencies = {},
+): LixEngineTelemetrySession | null {
 	const token = resolvePosthogProjectToken(env);
 	if (
 		!token ||
@@ -73,88 +76,48 @@ export function createMcpTelemetrySession(
 			flushInterval: 0,
 		});
 	} catch (caught) {
-		warn("Failed to initialize MCP telemetry", caught);
+		warn("Failed to initialize Lix engine telemetry", caught);
 		return null;
 	}
 
 	const pendingCaptures: Array<Promise<void>> = [];
-	const onToolCall = (observation: McpToolCallObservation): void => {
-		const traceId = crypto.randomUUID();
-		const spanId = crypto.randomUUID();
-		const releaseId =
-			env.LIXRAY_RELEASE_ID?.trim() ||
-			env.RAILWAY_GIT_COMMIT_SHA?.trim() ||
-			"unknown";
+	const releaseId =
+		env.LIXRAY_RELEASE_ID?.trim() ||
+		env.RAILWAY_GIT_COMMIT_SHA?.trim() ||
+		"unknown";
+	const onSpan = (span: LixEngineSpanLike): void => {
+		const mapped = lixEngineAiSpan(span);
+		if (!mapped) return;
 		const properties: Record<string, unknown> = {
-			$ai_trace_id: traceId,
-			$ai_span_id: spanId,
-			$ai_span_name: `mcp.${observation.toolName}`,
-			$ai_latency: observation.durationMs / 1000,
-			$ai_is_error: observation.outcome === "error",
-			mcp_server: "lixray",
-			mcp_tool: observation.toolName,
-			request_id: observation.requestId,
-			outcome: observation.outcome,
-			duration_ms: observation.durationMs,
-			oauth_client_id: identity.clientId,
+			...mapped.properties,
 			environment: "production",
 			release_id: releaseId,
-			mcp_surface_version: observation.surfaceVersion,
 		};
-		if (observation.errorCode) {
-			properties.error_code = observation.errorCode;
-			properties.$ai_error = { code: observation.errorCode };
-		}
-		if (observation.lixId) {
-			properties.lix_id = observation.lixId;
-		}
-		if (observation.executeInput) {
-			properties.$ai_input_state = observation.executeInput;
-			properties.statement_count = observation.executeInput.statementCount;
-			properties.sql_operations = observation.executeInput.statements.map(
-				(statement) => statement.operation,
-			);
-			properties.sql_shape_ids = observation.executeInput.statements.map(
-				(statement) => statement.shapeId,
-			);
-		}
-		if (observation.executeOutput) {
-			properties.$ai_output_state = observation.executeOutput;
-			properties.result_count = observation.executeOutput.resultCount;
-			properties.row_count = observation.executeOutput.rowCount;
-			properties.rows_affected = observation.executeOutput.rowsAffected;
-			properties.notice_codes = observation.executeOutput.noticeCodes;
-			properties.notice_count = observation.executeOutput.results.reduce(
-				(sum, result) => sum + result.noticeCodes.length,
-				0,
-			);
-		}
-
 		try {
 			const capture = client
 				.captureImmediate({
 					distinctId: identity.userId,
-					event: "$ai_span",
+					event: mapped.event,
 					properties,
-					...(observation.lixId ? { groups: { lix: observation.lixId } } : {}),
+					...(mapped.lixId ? { groups: { lix: mapped.lixId } } : {}),
 				})
 				.catch((caught: unknown) => {
-					warn("Failed to capture MCP telemetry", caught);
+					warn("Failed to capture Lix engine telemetry", caught);
 				});
 			pendingCaptures.push(capture);
 		} catch (caught) {
-			warn("Failed to capture MCP telemetry", caught);
+			warn("Failed to capture Lix engine telemetry", caught);
 		}
 	};
 
 	return {
-		onToolCall,
+		onSpan,
 		async flush(): Promise<void> {
 			await Promise.all(pendingCaptures);
 			try {
 				await client.shutdown();
 			} catch (caught) {
-				warn("Failed to shut down MCP telemetry", caught);
+				warn("Failed to shut down Lix engine telemetry", caught);
 			}
 		},
 	};

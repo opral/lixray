@@ -1159,6 +1159,16 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 			JSON.stringify(captured),
 			/"mcp_tool_called"|"mcp_connected"|"file_written"/,
 		);
+		assert.doesNotMatch(
+			JSON.stringify(captured),
+			/"\$ai_span_name":"mcp\./,
+			"MCP tool calls must not invent mcp.* engine span names",
+		);
+		assert.equal(
+			captured.filter((event) => event.event === "$ai_span").length,
+			0,
+			"official MCP capture is $mcp_tool_call, not a parallel $ai_span clock",
+		);
 		const mcpToolCallWriters = captured.filter(
 			(event) => event.event === "$mcp_tool_call",
 		);

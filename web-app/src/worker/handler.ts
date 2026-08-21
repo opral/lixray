@@ -31,10 +31,6 @@ import {
 	type McpToolCallObservation,
 } from "../mcp/server.ts";
 import {
-	createMcpTelemetrySession,
-	type McpTelemetrySession,
-} from "./mcp-telemetry.ts";
-import {
 	createLixrMcpTelemetrySession,
 	analyzeSqlOperation,
 	detectFileWrites,
@@ -105,7 +101,6 @@ interface HandleRequestOptions {
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	fetch?: typeof fetch;
 	executionContext?: RequestExecutionContext;
-	createMcpTelemetry?: typeof createMcpTelemetrySession;
 	recordMcpLixConnection?: RecordMcpLixConnection;
 }
 
@@ -285,14 +280,6 @@ export async function handleRequest(
 					: undefined,
 			},
 		);
-		const telemetry = (options.createMcpTelemetry ?? createMcpTelemetrySession)(
-			env,
-			{
-				userId: authResult.auth.userId,
-				clientId: authResult.auth.clientId,
-				isDemo: authResult.auth.isDemo,
-			},
-		);
 		const lixrTelemetry = createLixrMcpTelemetrySession(env, {
 			userId: authResult.auth.userId,
 			clientId: authResult.auth.clientId,
@@ -378,8 +365,6 @@ export async function handleRequest(
 				}
 			}
 
-			telemetry?.onToolCall(observation);
-
 			if (
 				authResult.auth.isDemo ||
 				observation.outcome !== "success" ||
@@ -421,7 +406,6 @@ export async function handleRequest(
 					});
 				executionContext.waitUntil(openedFlush);
 			}
-			scheduleMcpTelemetryFlush(executionContext, telemetry);
 			if (lixrTelemetry) {
 				if (importSession.fileWrites.size > 0) {
 					lixrTelemetry.captureImportCompleted({
@@ -1621,21 +1605,6 @@ function noopExecutionContext(): RequestExecutionContext {
 		passThroughOnException: () => undefined,
 		props: {},
 	};
-}
-
-function scheduleMcpTelemetryFlush(
-	executionContext: RequestExecutionContext,
-	telemetry: McpTelemetrySession | null,
-): void {
-	if (!telemetry) return;
-	try {
-		const flush = telemetry.flush().catch((caught: unknown) => {
-			console.warn("Failed to flush MCP telemetry", caught);
-		});
-		executionContext.waitUntil(flush);
-	} catch (caught) {
-		console.warn("Failed to start MCP telemetry flush", caught);
-	}
 }
 
 function json(value: unknown, init?: ResponseInit): Response {

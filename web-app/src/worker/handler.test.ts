@@ -577,51 +577,36 @@ void test("MCP retries lix authorization after a denial", async () => {
 	]);
 });
 
-void test("authenticated MCP telemetry receives identity and flushes through waitUntil", async () => {
-	let waitedFor: Promise<unknown> | undefined;
-	let flushes = 0;
-	const observations: Array<unknown> = [];
+void test("authenticated MCP harness telemetry uses official $mcp_tool_call identity", async () => {
+	let flushScheduled = false;
 	const executionContext = {
-		waitUntil: (promise: Promise<unknown>) => {
-			waitedFor = promise;
+		waitUntil: () => {
+			flushScheduled = true;
 		},
 		passThroughOnException: () => undefined,
 		props: {},
 	} as unknown as RequestExecutionContext;
-	const testEnv = env({
-		extra: {
-			POSTHOG_PROJECT_TOKEN: "project-token",
-			POSTHOG_HOST: "https://posthog.example",
-			POSTHOG_ENVIRONMENT: "production",
-		},
-	});
 
 	const response = await handleRequest(
 		new Request("https://example.test/mcp", { method: "POST" }),
-		testEnv,
+		env({
+			extra: {
+				POSTHOG_PROJECT_TOKEN: "project-token",
+				POSTHOG_HOST: "https://posthog.example",
+				POSTHOG_ENVIRONMENT: "production",
+			},
+		}),
 		{
 			authenticateMcp: authenticatedMcp(),
 			executionContext,
 			lixFetch: async () => new Response("unused"),
-			createMcpTelemetry: (telemetryEnv, identity) => {
-				assert.equal(telemetryEnv.POSTHOG_PROJECT_TOKEN, "project-token");
-				assert.deepEqual(identity, {
-					userId: "user-123",
-					clientId: "chatgpt-client",
-					isDemo: undefined,
-				});
-				return {
-					onToolCall: (observation) => observations.push(observation),
-					flush: async () => {
-						flushes += 1;
-					},
-				};
-			},
 			mcpTransport: async (_request, _service, options) => {
 				assert.equal(options.posthogToken, "project-token");
 				assert.equal(options.posthogHost, "https://posthog.example");
 				assert.equal(options.posthogDistinctId, "user-123");
 				assert.equal(options.posthogClientId, "chatgpt-client");
+				assert.equal(typeof options.onPosthogFlush, "function");
+				options.onPosthogFlush?.(async () => undefined);
 				options.onToolCall?.({
 					requestId: options.requestId!,
 					toolName: "list_lixes",
@@ -634,17 +619,7 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	);
 
 	assert.equal(await response.text(), "mcp response");
-	assert.deepEqual(observations, [
-		{
-			requestId: response.headers.get("x-request-id"),
-			toolName: "list_lixes",
-			outcome: "success",
-			durationMs: 2,
-		},
-	]);
-	assert.ok(waitedFor);
-	await waitedFor;
-	assert.equal(flushes, 1);
+	assert.equal(flushScheduled, true);
 });
 
 void test("official MCP PostHog token uses VITE_PUBLIC_POSTHOG_TOKEN when the project token is unset", async () => {
@@ -657,7 +632,6 @@ void test("official MCP PostHog token uses VITE_PUBLIC_POSTHOG_TOKEN when the pr
 		}),
 		{
 			authenticateMcp: authenticatedMcp(),
-			createMcpTelemetry: () => null,
 			lixFetch: async () => new Response("unused"),
 			mcpTransport: async (_request, _service, options) => {
 				assert.equal(options.posthogToken, "phc_public_project_token");
@@ -681,7 +655,6 @@ void test("official MCP PostHog token is passed when POSTHOG_ENVIRONMENT is unse
 		}),
 		{
 			authenticateMcp: authenticatedMcp(),
-			createMcpTelemetry: () => null,
 			lixFetch: async () => new Response("unused"),
 			mcpTransport: async (_request, _service, options) => {
 				assert.equal(options.posthogToken, "project-token");
@@ -716,7 +689,6 @@ void test("official MCP PostHog token is omitted in demo and Railway PR environm
 			env({ extra }),
 			{
 				authenticateMcp: authenticatedMcp(),
-				createMcpTelemetry: () => null,
 				lixFetch: async () => new Response("unused"),
 				mcpTransport: async (_request, _service, options) => {
 					assert.equal(options.posthogToken, undefined, JSON.stringify(extra));
@@ -739,7 +711,6 @@ void test("POSTHOG_API_KEY alone does not enable official MCP capture", async ()
 		}),
 		{
 			authenticateMcp: authenticatedMcp(),
-			createMcpTelemetry: () => null,
 			lixFetch: async () => new Response("unused"),
 			mcpTransport: async (_request, _service, options) => {
 				assert.equal(options.posthogToken, undefined);
@@ -772,10 +743,6 @@ void test("Lixr MCP telemetry captures file writes and import completion", async
 			authenticateMcp: authenticatedMcp(),
 			executionContext,
 			lixFetch: async () => new Response("unused"),
-			createMcpTelemetry: () => ({
-				onToolCall: () => undefined,
-				flush: async () => undefined,
-			}),
 			mcpTransport: async (_request, _service, options) => {
 				options.onToolCall?.({
 					requestId: options.requestId!,
@@ -829,116 +796,6 @@ void test("Lixr MCP telemetry captures file writes and import completion", async
 
 	assert.equal(response.status, 200);
 	assert.equal(await response.text(), "mcp response");
-});
-
-void test("failed then successful MCP executes share identity and flush", async () => {
-	const observations: Array<{
-		requestId: string;
-		outcome: string;
-		errorCode?: string;
-		lixId?: string;
-	}> = [];
-	let flushes = 0;
-	const executionContext = {
-		waitUntil: () => undefined,
-		passThroughOnException: () => undefined,
-		props: {},
-	} as unknown as RequestExecutionContext;
-
-	const failId = "3d7be30b-24a7-4ae6-8694-28e35b803b43";
-	const successId = "82db8877-4cc3-42a3-b291-76a23a9b3ac6";
-	const response = await handleRequest(
-		new Request("https://lixray.com/mcp", { method: "POST" }),
-		env({
-			extra: {
-				POSTHOG_PROJECT_TOKEN: "project-token",
-				POSTHOG_ENVIRONMENT: "production",
-			},
-		}),
-		{
-			authenticateMcp: authenticatedMcp(),
-			executionContext,
-			lixFetch: async () => new Response("unused"),
-			createMcpTelemetry: () => ({
-				onToolCall: (observation) => {
-					observations.push({
-						requestId: observation.requestId,
-						outcome: observation.outcome,
-						errorCode: observation.errorCode,
-						lixId: observation.lixId,
-					});
-				},
-				flush: async () => {
-					flushes += 1;
-				},
-			}),
-			mcpTransport: async (_request, _service, options) => {
-				options.onToolCall?.({
-					requestId: failId,
-					toolName: "execute_sql",
-					outcome: "error",
-					durationMs: 8,
-					surfaceVersion: "v1",
-					errorCode: "LIX_TYPE_MISMATCH",
-					lixId: "lix-123",
-					executeInput: {
-						statementCount: 1,
-						statements: [
-							{
-								operation: "INSERT",
-								sanitizedSql: "insert into lix_file(path,content)values(?,?)",
-								shapeId: "shape1",
-							},
-						],
-					},
-				});
-				options.onToolCall?.({
-					requestId: successId,
-					toolName: "execute_sql",
-					outcome: "success",
-					durationMs: 11,
-					surfaceVersion: "v1",
-					lixId: "lix-123",
-					executeInput: {
-						statementCount: 1,
-						statements: [
-							{
-								operation: "INSERT",
-								sanitizedSql: "insert into lix_file(path,content)values(?,?)",
-								shapeId: "shape1",
-							},
-						],
-					},
-					executeOutput: {
-						resultCount: 1,
-						rowCount: 0,
-						rowsAffected: 1,
-						noticeCodes: [],
-						results: [],
-					},
-				});
-				return new Response("mcp response");
-			},
-		},
-	);
-
-	assert.equal(response.status, 200);
-	assert.deepEqual(observations, [
-		{
-			requestId: failId,
-			outcome: "error",
-			errorCode: "LIX_TYPE_MISMATCH",
-			lixId: "lix-123",
-		},
-		{
-			requestId: successId,
-			outcome: "success",
-			errorCode: undefined,
-			lixId: "lix-123",
-		},
-	]);
-	assert.notEqual(observations[0]?.requestId, observations[1]?.requestId);
-	assert.equal(flushes, 1);
 });
 
 void test("successful exact-Lix MCP activity is persisted before the response completes", async () => {

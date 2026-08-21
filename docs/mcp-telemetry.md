@@ -1,50 +1,52 @@
-# MCP friction telemetry
+# MCP harness telemetry
 
-LixRay records each production MCP tool call as a PostHog AI Observability
-`$ai_span`. These spans are for MCP contract and SQL usability friction. SQL
-engine performance remains in the native `lix.sql.*` OpenTelemetry spans
-described in [sql-telemetry.md](./sql-telemetry.md).
+LixRay emits official PostHog MCP Analytics events (`$mcp_tool_call` and
+handshake `$mcp_*`) for tool and protocol wall clock. `$mcp_duration_ms` is
+how long the tool felt to the agent. It is never engine time.
 
-PostHog automatically presents each MCP span as a trace. LixRay does not set an
-`$ai_session_id`: the stateless MCP server does not receive the agent's
-conversation or task identifier, and grouping unrelated calls would be
+Engine performance clocks come only from Lix (`lix.sql.*`, `lix.engine.open`,
+`lix.session.open`, `lix.checkpoint.create`, `lix.transaction.*`). LixRay
+forwards those `onSpan` records. Remote SQL / open / checkpoint spans stay on
+lix-server's OpenTelemetry export; see [sql-telemetry.md](./sql-telemetry.md).
+LixRay does not synthesize `$ai_span` names such as `mcp.open_lix`,
+`mcp.execute_sql`, or `mcp.create_checkpoint`.
+
+In-process WASM can attach `openLix({ telemetry: { onSpan } })`. The host maps
+`lix.opened` to the product count `repository_opened` and may forward other
+Lix-named spans as `$ai_span` using the Lix name and Lix ids. Missing Lix ids
+are omitted; they are not invented.
+
+PostHog automatically presents each official MCP tool call as analytics. LixRay
+does not set an `$ai_session_id`: the stateless MCP server does not receive the
+agent's conversation or task identifier, and grouping unrelated calls would be
 misleading.
 
-## Span model
+## Official `$mcp_tool_call`
 
 Every tool call includes:
 
-- `$ai_trace_id`, `$ai_span_id`, `$ai_span_name`, `$ai_latency`, and
-  `$ai_is_error`
-- `mcp_server`, `mcp_tool`, `oauth_client_id`, `lix_id`, and `outcome`
-- `release_id` from `LIXRAY_RELEASE_ID` or Railway's commit SHA
-- `mcp_surface_version`, a content hash of the advertised MCP tool descriptors
-- stable `error_code` and `$ai_error.code` on failure
+- `$mcp_tool_name` and `$mcp_duration_ms` (harness wall clock only)
+- `mcp_server`, `oauth_client_id`, `lix_id`, `success`, and `request_id`
+- stable `error_code` on failure
+- `sql_op`, `is_bulk`, and `row_count` when the tool executed SQL
 
-`query_sql` and `execute_sql` spans add a privacy-safe `$ai_input_state`
-containing SQL operations,
-sanitized statement shapes, shape IDs, parameter counts, and literal-redaction
-counts. `$ai_output_state` contains only result counts, row counts, affected-row
-counts, and notice codes.
+Do not add a second duration field. Do not put SQL text or commit ids on the
+MCP event unless Lix put them on a span.
 
-SQL comments, literals, and bound values are never captured. Returned columns,
-rows, file contents, notice messages, error details, and unsanitized SQL are
-never captured. Sanitized SQL is capped at 4 KiB per statement.
+## Product open event
+
+`repository_opened` is the north star. It maps from Lix `lix.repository.opened`
+/ `lix.opened` on bind. It is a count. Do not rename it. Do not put duration on
+it unless Lix provides one.
 
 ## Analyze with an agent
 
 Connect the analysis agent to PostHog's MCP server and point it at the LixRay
 project. A useful starting prompt is:
 
-> Analyze LixRay MCP `$ai_span` traces from the last seven days. Group recurring
-> friction by `mcp_surface_version`, `error_code`, `notice_codes`,
-> `sql_shape_ids`, and `sql_operations`. Inspect representative trace IDs and
-> report unsupported SQL, unnecessary schema discovery, zero-row query shapes,
-> excessive statement counts, and recurring notices. Treat `lix.sql.query`
-> traces as SQL performance telemetry, not MCP usability evidence. Include the
-> trace IDs supporting every finding.
-
-The large `$ai_input_state` and `$ai_output_state` fields live in
-`posthog.ai_events`. Metadata remains queryable as normal PostHog event
-properties. There is intentionally no scheduler or automated remediation in
-this implementation.
+> Analyze LixRay MCP `$mcp_tool_call` events from the last seven days as
+> harness wall clock (`$mcp_duration_ms`), not engine time. Group friction by
+> `$mcp_tool_name`, `error_code`, `sql_op`, and `success`. Treat `lix.sql.query`
+> OpenTelemetry spans as SQL engine performance. Never treat `mcp.execute_sql`
+> / `mcp.open_lix` `$ai_span` names as a performance source — those names must
+> not exist. Include the event and trace IDs supporting every finding.

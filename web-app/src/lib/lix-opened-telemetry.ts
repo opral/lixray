@@ -116,10 +116,14 @@ export function repositoryOpenedFromLixOpened(
 
 /**
  * In-process `openLix({ telemetry: { onSpan } })` adapter.
- * Remote mode must not attach this: `lix.opened` stays on the server.
+ * Remote mode must not attach this: engine spans stay on the server.
+ *
+ * `lix.opened` becomes the product count `repository_opened`. Other Lix
+ * engine spans can be forwarded through `onEngineSpan` — never as `mcp.*`.
  */
 export function createLixOpenedOnSpan(options: {
 	capture: (event: RepositoryOpenedEvent) => void;
+	onEngineSpan?: (span: LixOpenedSpanLike) => void;
 	environment: string;
 	source?: RepositoryOpenedSource;
 	organizationId?: string;
@@ -129,6 +133,7 @@ export function createLixOpenedOnSpan(options: {
 	return (span) => {
 		const event = repositoryOpenedFromLixOpened(span, options);
 		if (event) options.capture(event);
+		options.onEngineSpan?.(span);
 	};
 }
 
