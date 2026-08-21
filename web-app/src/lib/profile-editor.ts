@@ -25,9 +25,13 @@ export function editableProfileFromDocument(
 	const card = jsContactCard(document);
 	const title = firstRecordValue(card.titles);
 	const organizationId = stringValue(title?.organizationId);
-	const organization = organizationId
-		? recordValue(card.organizations, organizationId)
-		: firstRecordValue(card.organizations);
+	const organizationEntries = recordEntries(card.organizations);
+	const organization = title
+		? organizationId
+			? recordValue(card.organizations, organizationId)
+			: null
+		: (recordValue(card.organizations, "profile") ??
+			(organizationEntries.length === 1 ? organizationEntries[0][1] : null));
 	const avatar =
 		recordValue(card.media, "avatar") ?? firstRecordValue(card.media);
 
@@ -62,17 +66,43 @@ export function profileDocumentWithEdits(
 		...current,
 		note: value,
 	}));
-	const organizationKey = setFirstRecord(
+	const titleEntry = recordEntries(card.titles)[0];
+	const referencedOrganizationKey = stringValue(titleEntry?.[1].organizationId);
+	const organizationEntries = recordEntries(card.organizations);
+	const organizationRecordKey =
+		referencedOrganizationKey &&
+		recordValue(card.organizations, referencedOrganizationKey)
+			? referencedOrganizationKey
+			: titleEntry
+				? uniqueRecordKey(
+						"profile",
+						new Set(organizationEntries.map(([key]) => key)),
+					)
+				: recordValue(card.organizations, "profile")
+					? "profile"
+					: organizationEntries.length === 1
+						? organizationEntries[0][0]
+						: uniqueRecordKey(
+								"profile",
+								new Set(organizationEntries.map(([key]) => key)),
+							);
+	const organizationKey = setRecord(
 		card,
 		"organizations",
-		"primary",
+		organizationRecordKey,
 		normalized.organization,
 		(current, value) => ({ ...current, name: value }),
+		{
+			retainEmpty:
+				!normalized.organization &&
+				Boolean(referencedOrganizationKey) &&
+				organizationEntries.length > 1,
+		},
 	);
-	setFirstRecord(
+	setRecord(
 		card,
 		"titles",
-		"primary",
+		titleEntry?.[0] ?? "primary",
 		normalized.title,
 		(current, value) => {
 			const next: Record<string, unknown> = {
@@ -109,9 +139,14 @@ export function profileDocumentWithEdits(
 
 	const currentLinks = recordEntries(card.links);
 	const links: Record<string, unknown> = {};
+	const usedLinkKeys = new Set<string>();
 	for (const [index, link] of normalized.links.entries()) {
 		const existing = currentLinks.find(([key]) => key === link.key);
-		const key = existing?.[0] ?? `link${index + 1}`;
+		const key = uniqueRecordKey(
+			existing?.[0] ?? safeRecordKey(link.key, index),
+			usedLinkKeys,
+		);
+		usedLinkKeys.add(key);
 		links[key] = {
 			...(existing?.[1] ?? {}),
 			uri: link.uri,
@@ -158,8 +193,8 @@ function normalizeEditableProfile(
 	const location = limitedOptional(values.location, "Location", 120);
 	const avatarUri = normalizedUri(values.avatarUri, "Avatar URL", options);
 	const links = values.links
-		.map((link, index) => ({
-			key: safeRecordKey(link.key, index),
+		.map((link) => ({
+			key: link.key,
 			label: limitedOptional(link.label, "Link label", 80),
 			uri: normalizedUri(link.uri, "Link URL", {}),
 		}))
@@ -230,13 +265,37 @@ function setFirstRecord(
 		value: string,
 	) => Record<string, unknown>,
 ): string | null {
-	const records = { ...(recordValue(card[property]) ?? {}) };
+	const records = recordValue(card[property]);
 	const key = recordEntries(records)[0]?.[0] ?? fallbackKey;
+	return setRecord(card, property, key, value, update);
+}
+
+function setRecord(
+	card: Record<string, unknown>,
+	property: string,
+	key: string,
+	value: string,
+	update: (
+		current: Record<string, unknown>,
+		value: string,
+	) => Record<string, unknown>,
+	options: { retainEmpty?: boolean } = {},
+): string | null {
+	const records = { ...(recordValue(card[property]) ?? {}) };
 	if (value) records[key] = update(recordValue(records[key]) ?? {}, value);
-	else delete records[key];
+	else if (options.retainEmpty) {
+		records[key] = update(recordValue(records[key]) ?? {}, "");
+	} else delete records[key];
 	if (Object.keys(records).length === 0) delete card[property];
 	else card[property] = records;
-	return value ? key : null;
+	return value || options.retainEmpty ? key : null;
+}
+
+function uniqueRecordKey(preferred: string, used: Set<string>): string {
+	if (!used.has(preferred)) return preferred;
+	let suffix = 2;
+	while (used.has(`${preferred}-${suffix}`)) suffix += 1;
+	return `${preferred}-${suffix}`;
 }
 
 function jsContactCard(value: unknown): Record<string, unknown> {

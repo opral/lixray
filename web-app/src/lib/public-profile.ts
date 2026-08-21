@@ -138,9 +138,13 @@ function profileFromDocument(
 ): PublicProfile {
 	const title = firstRecordValue(document.titles);
 	const organizationId = stringValue(title?.organizationId);
-	const organization = organizationId
-		? recordValue(document.organizations, organizationId)
-		: firstRecordValue(document.organizations);
+	const organizationEntries = recordEntries(document.organizations);
+	const organization = title
+		? organizationId
+			? recordValue(document.organizations, organizationId)
+			: null
+		: (recordValue(document.organizations, "profile") ??
+			(organizationEntries.length === 1 ? organizationEntries[0][1] : null));
 	const avatar = preferredRecordValue(document.media, "avatar");
 
 	return {

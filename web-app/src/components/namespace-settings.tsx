@@ -149,6 +149,7 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 	const [document, setDocument] = useState<Record<string, unknown> | null>(
 		null,
 	);
+	const [version, setVersion] = useState<string | null>(null);
 	const [values, setValues] = useState<EditableProfile | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -156,6 +157,7 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 	useEffect(() => {
 		let cancelled = false;
 		setDocument(null);
+		setVersion(null);
 		setValues(null);
 		setError(null);
 		void (async () => {
@@ -169,11 +171,12 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 					if (!client) throw new Error("Profile settings are still loading.");
 					const { data, error: loadError } = await client
 						.from("namespace_profiles")
-						.select("document")
+						.select("document, updated_at")
 						.eq("namespace_id", organization.id)
 						.single();
 					if (loadError) throw loadError;
 					nextDocument = data.document;
+					if (!cancelled) setVersion(data.updated_at);
 				}
 				const nextValues = editableProfileFromDocument(nextDocument);
 				if (!cancelled) {
@@ -202,13 +205,21 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 				saveDemoProfileDocument(nextDocument);
 			} else {
 				if (!client) throw new Error("Profile settings are still loading.");
-				const { error: saveError } = await client
+				if (!version) throw new Error("Reload the profile before saving.");
+				const { data: saved, error: saveError } = await client
 					.from("namespace_profiles")
 					.update({ document: nextDocument as Json })
 					.eq("namespace_id", organization.id)
+					.eq("updated_at", version)
 					.select("updated_at")
-					.single();
+					.maybeSingle();
 				if (saveError) throw saveError;
+				if (!saved) {
+					throw new Error(
+						"This profile changed elsewhere. Reload the page and try again.",
+					);
+				}
+				setVersion(saved.updated_at);
 			}
 			setDocument(nextDocument);
 			setValues(editableProfileFromDocument(nextDocument));

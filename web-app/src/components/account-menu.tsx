@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { LogOut, Pencil, UserRound } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { ProfileAvatar } from "~/components/profile-avatar";
 import {
@@ -15,12 +16,16 @@ import {
 	DEMO_PROFILE_HANDLE,
 	DEMO_PROFILE_NAMESPACE_ID,
 } from "~/lib/demo-identity";
+import {
+	demoProfileDocumentWithOverride,
+	editableProfileFromDocument,
+	PROFILE_UPDATED_EVENT,
+} from "~/lib/profile-editor";
 import { cn } from "~/lib/utils";
 
 export function AccountMenu({ className }: { className?: string }) {
 	const { signOut, user } = useAuth();
 	const { organizations } = useRepository();
-	if (!user) return null;
 	const personalNamespace = organizations.find(
 		(organization) => organization.isPersonal,
 	);
@@ -30,6 +35,8 @@ export function AccountMenu({ className }: { className?: string }) {
 	const personalNamespaceId = isDemoModeEnabled
 		? DEMO_PROFILE_NAMESPACE_ID
 		: (personalNamespace?.id ?? null);
+	const publicName = usePublicProfileName(personalNamespaceId);
+	if (!user) return null;
 	const fullName = accountFullName(user.user_metadata);
 	const email = user.email ?? null;
 
@@ -64,7 +71,7 @@ export function AccountMenu({ className }: { className?: string }) {
 					/>
 					<span className="flex min-w-0 flex-col gap-px">
 						<span className="truncate text-[13px] leading-tight font-semibold text-text-primary">
-							{fullName ?? email ?? "Account"}
+							{publicName ?? fullName ?? email ?? "Account"}
 						</span>
 						{fullName && email ? (
 							<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
@@ -108,6 +115,52 @@ export function AccountMenu({ className }: { className?: string }) {
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);
+}
+
+function usePublicProfileName(namespaceId: string | null): string | null {
+	const [name, setName] = useState<string | null>(null);
+
+	useEffect(() => {
+		let controller: AbortController | null = null;
+		const load = () => {
+			controller?.abort();
+			setName(null);
+			if (!namespaceId) return;
+			if (isDemoModeEnabled) {
+				setName(
+					editableProfileFromDocument(
+						demoProfileDocumentWithOverride(window.location.origin),
+					).name,
+				);
+				return;
+			}
+			const requestController = new AbortController();
+			controller = requestController;
+			void fetch(`/profile/${encodeURIComponent(namespaceId)}`, {
+				headers: { Accept: "application/jscontact+json; version=2.0" },
+				cache: "no-cache",
+				signal: requestController.signal,
+			})
+				.then(
+					async (response): Promise<unknown> =>
+						response.ok ? ((await response.json()) as unknown) : null,
+				)
+				.then((document) => {
+					if (!requestController.signal.aborted) {
+						setName(editableProfileFromDocument(document).name);
+					}
+				})
+				.catch(() => undefined);
+		};
+		load();
+		window.addEventListener(PROFILE_UPDATED_EVENT, load);
+		return () => {
+			controller?.abort();
+			window.removeEventListener(PROFILE_UPDATED_EVENT, load);
+		};
+	}, [namespaceId]);
+
+	return name;
 }
 
 function accountFullName(

@@ -111,6 +111,89 @@ void test("merges edits without discarding unknown JSContact data", () => {
 	);
 });
 
+void test("updates the organization referenced by the displayed title", () => {
+	const document = {
+		...sourceDocument,
+		organizations: {
+			first: { name: "First organization" },
+			second: { name: "Displayed organization" },
+		},
+		titles: {
+			role: {
+				kind: "title",
+				name: "Founder",
+				organizationId: "second",
+			},
+		},
+	};
+	const updated = profileDocumentWithEdits(document, {
+		...editableProfileFromDocument(document),
+		organization: "Updated organization",
+	});
+	const organizations = updated.organizations as Record<
+		string,
+		Record<string, unknown>
+	>;
+	const titles = updated.titles as Record<string, Record<string, unknown>>;
+
+	assert.equal(organizations.first.name, "First organization");
+	assert.equal(organizations.second.name, "Updated organization");
+	assert.equal(titles.role.organizationId, "second");
+});
+
+void test("clearing a referenced organization does not expose a sibling", () => {
+	const document = {
+		...sourceDocument,
+		organizations: {
+			first: { name: "Other organization" },
+			second: { name: "Displayed organization" },
+		},
+		titles: {
+			role: {
+				kind: "title",
+				name: "Founder",
+				organizationId: "second",
+			},
+		},
+	};
+	const updated = profileDocumentWithEdits(document, {
+		...editableProfileFromDocument(document),
+		organization: "",
+		title: "",
+	});
+
+	assert.equal(editableProfileFromDocument(updated).organization, "");
+	assert.deepEqual(updated.organizations, {
+		first: { name: "Other organization" },
+		second: { name: "" },
+	});
+});
+
+void test("assigns a unique key when a new link key normalizes to a collision", () => {
+	const document = {
+		...sourceDocument,
+		links: {
+			link2: {
+				uri: "https://existing.example/",
+				label: "Existing",
+				custom: "existing-only",
+			},
+		},
+	};
+	const updated = profileDocumentWithEdits(document, {
+		...editableProfileFromDocument(document),
+		links: [
+			{ key: "link2", label: "Existing", uri: "https://existing.example/" },
+			{ key: "unsafe key", label: "New", uri: "https://new.example/" },
+		],
+	});
+	const links = updated.links as Record<string, Record<string, unknown>>;
+
+	assert.equal(links.link2.uri, "https://existing.example/");
+	assert.equal(links["link2-2"].uri, "https://new.example/");
+	assert.equal(links["link2-2"].custom, undefined);
+});
+
 void test("clearing fields deletes only the controlled records", () => {
 	const updated = profileDocumentWithEdits(sourceDocument, {
 		name: "Samuel",
