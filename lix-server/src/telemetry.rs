@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use lix_sdk::telemetry::{
-    TelemetrySink, TelemetrySpanEnd, TelemetrySpanEnterGuard, TelemetrySpanHandle,
-    TelemetrySpanKind, TelemetrySpanStart, TelemetryValue, TracingTelemetrySink,
+    TelemetrySink, TelemetrySpanClass, TelemetrySpanEnd, TelemetrySpanEnterGuard,
+    TelemetrySpanHandle, TelemetrySpanStart, TelemetryValue, TracingTelemetrySink,
 };
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
@@ -355,7 +355,7 @@ pub trait RepositoryOpenedCapture: Send + Sync {
     fn capture(&self, event: RepositoryOpenedEvent);
 }
 
-/// Host sink: SQL spans stay on the tracing/OTLP path; `lix.opened` becomes
+/// Host sink: Lix spans stay on the tracing/OTLP path; `lix.repository.opened` becomes
 /// the product event `repository_opened` when the session has an identified person.
 #[derive(Clone)]
 pub struct HostTelemetrySink {
@@ -382,7 +382,7 @@ impl HostTelemetrySink {
     }
 
     fn repository_opened(&self, start: &TelemetrySpanStart) -> Option<RepositoryOpenedEvent> {
-        if start.kind != TelemetrySpanKind::LixOpened && start.name != "lix.opened" {
+        if start.class != TelemetrySpanClass::Lifecycle || start.name != "lix.repository.opened" {
             return None;
         }
         let lix_id = string_attribute(start, "lix.id")?.to_owned();
@@ -402,23 +402,17 @@ impl HostTelemetrySink {
 }
 
 impl TelemetrySink for HostTelemetrySink {
-    fn enabled(&self, kind: TelemetrySpanKind) -> bool {
-        match kind {
-            TelemetrySpanKind::LixOpened => self.product.is_some() || self.tracing.enabled(kind),
-            TelemetrySpanKind::SqlQuery
-            | TelemetrySpanKind::SqlBatch
-            | TelemetrySpanKind::SqlCoherentReadBatch => self.tracing.enabled(kind),
+    fn enabled(&self, class: TelemetrySpanClass, name: &'static str) -> bool {
+        if class == TelemetrySpanClass::Lifecycle && name == "lix.repository.opened" {
+            self.product.is_some() || self.tracing.enabled(class, name)
+        } else {
+            self.tracing.enabled(class, name)
         }
     }
 
     fn start_span(&self, start: TelemetrySpanStart) -> Box<dyn TelemetrySpanHandle> {
-        let tracing = self.tracing.start_span(TelemetrySpanStart {
-            kind: start.kind,
-            name: start.name,
-            started_at_unix_ms: start.started_at_unix_ms,
-            attributes: start.attributes.clone(),
-        });
-        if start.kind == TelemetrySpanKind::LixOpened {
+        let tracing = self.tracing.start_span(start.clone());
+        if start.class == TelemetrySpanClass::Lifecycle && start.name == "lix.repository.opened" {
             if let Some(product) = self.product.clone() {
                 return Box::new(HostOpenedSpan {
                     tracing,

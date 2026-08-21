@@ -862,7 +862,10 @@ mod tests {
             "Lix protocol responses expose the canonical Server-Timing metric"
         );
         let handshake = json_body(handshake).await;
-        assert_eq!(handshake["protocolVersion"], json!(2));
+        assert_eq!(
+            handshake["protocolVersion"],
+            json!(lix_sdk::server_protocol::PROTOCOL_VERSION)
+        );
         assert_eq!(
             handshake["activeAccountId"],
             json!(lix_sdk::ANONYMOUS_ACCOUNT_ID)
