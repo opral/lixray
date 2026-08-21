@@ -10,9 +10,12 @@ import { AccountMenu } from "~/components/account-menu";
 import { useAuth } from "~/components/auth-provider";
 import { Button } from "~/components/ui/button";
 import {
-	PLACEHOLDER_PROFILE_ACTIVITY,
-	resolvePublicProfileByHandle,
 	type ProfileRepositoryActivity,
+	type PublicProfileActivity,
+} from "~/lib/profile-activity-aggregate";
+import { resolvePublicProfileActivity } from "~/lib/public-profile-activity";
+import {
+	resolvePublicProfileByHandle,
 	type PublicProfile,
 } from "~/lib/public-profile";
 
@@ -37,16 +40,36 @@ function PublicProfilePage() {
 	const { isLoaded: authLoaded, user } = useAuth();
 	const [profile, setProfile] = useState<PublicProfile | null | undefined>();
 	const [error, setError] = useState<string | null>(null);
+	const [activity, setActivity] = useState<
+		PublicProfileActivity | null | undefined
+	>();
+	const [activityError, setActivityError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let disposed = false;
 		setProfile(undefined);
 		setError(null);
-		void resolvePublicProfileByHandle(namespace)
-			.then((nextProfile) => {
-				if (!disposed) setProfile(nextProfile);
-			})
-			.catch((caught: unknown) => {
+		setActivity(undefined);
+		setActivityError(null);
+		void (async () => {
+			try {
+				const nextProfile = await resolvePublicProfileByHandle(namespace);
+				if (disposed) return;
+				setProfile(nextProfile);
+				if (!nextProfile) return;
+				try {
+					const nextActivity = await resolvePublicProfileActivity(nextProfile);
+					if (!disposed) setActivity(nextActivity);
+				} catch (caught) {
+					if (disposed) return;
+					setActivityError(
+						caught instanceof Error
+							? caught.message
+							: "Unable to load public repositories.",
+					);
+					setActivity(null);
+				}
+			} catch (caught) {
 				if (disposed) return;
 				setError(
 					caught instanceof Error
@@ -54,7 +77,8 @@ function PublicProfilePage() {
 						: "Unable to load this profile.",
 				);
 				setProfile(null);
-			});
+			}
+		})();
 		return () => {
 			disposed = true;
 		};
@@ -70,7 +94,11 @@ function PublicProfilePage() {
 					{error ?? `The @${namespace} profile does not exist.`}
 				</ProfileStatus>
 			) : (
-				<ProfileContent profile={profile} />
+				<ProfileContent
+					profile={profile}
+					activity={activity}
+					activityError={activityError}
+				/>
 			)}
 		</div>
 	);
@@ -121,8 +149,15 @@ function ProfileHeader({
 	);
 }
 
-function ProfileContent({ profile }: { profile: PublicProfile }) {
-	const activity = PLACEHOLDER_PROFILE_ACTIVITY;
+function ProfileContent({
+	profile,
+	activity,
+	activityError,
+}: {
+	profile: PublicProfile;
+	activity: PublicProfileActivity | null | undefined;
+	activityError: string | null;
+}) {
 	return (
 		<main className="mx-auto flex w-full max-w-[1240px] gap-[72px] px-16 pt-14 pb-20 max-[900px]:gap-10 max-[760px]:flex-col max-[760px]:gap-7 max-[760px]:px-6 max-[760px]:pt-7 max-[760px]:pb-12">
 			<aside className="flex w-[264px] shrink-0 flex-col gap-5 max-[760px]:w-full">
@@ -187,69 +222,140 @@ function ProfileContent({ profile }: { profile: PublicProfile }) {
 				className="flex min-w-0 flex-1 flex-col gap-10 pt-2 max-[760px]:pt-0"
 				aria-labelledby="profile-files-title"
 			>
-				<div>
-					<div className="flex items-baseline gap-2.5">
-						<h2 id="profile-files-title" className="m-0 text-[15px] font-bold">
-							Files
-						</h2>
-						<p className="m-0 text-[12.5px] text-[#a8a29e]">
-							{activity.totalFiles} across {activity.repositories.length} public
-							repositories
-						</p>
-					</div>
-
-					<div className="mt-3.5 flex h-4 gap-[3px]">
-						{activity.fileMix.map((segment) => (
-							<span
-								key={segment.label}
-								style={{
-									flexGrow: segment.percentage,
-									flexBasis: 0,
-									background: segment.color,
-								}}
-								className="rounded-[5px]"
-							/>
-						))}
-					</div>
-					<div className="mt-2.5">
-						{activity.fileMix.map((segment) => (
-							<div
-								className="flex items-center gap-2.5 border-t border-[#efe8dc] px-0.5 py-2 text-[13px] first:border-t-0"
-								key={segment.label}
-							>
-								<span
-									className="size-2.5 shrink-0 rounded-[3px]"
-									style={{ background: segment.color }}
-								/>
-								<span className="font-semibold">{segment.label}</span>
-								<span className="text-[12px] text-[#a8a29e]">
-									{segment.examples}
-								</span>
-								<span className="ml-auto shrink-0 text-[12px] text-[#a8a29e]">
-									{segment.percentage}%
-								</span>
-							</div>
-						))}
-					</div>
-				</div>
-
-				<div>
-					<div className="flex items-baseline gap-2.5 pb-3">
-						<h2 className="m-0 text-[15px] font-bold">Repositories</h2>
-						<p className="m-0 text-[12.5px] text-[#a8a29e]">
-							{activity.repositories.length} public
-						</p>
-					</div>
-					{activity.repositories.map((repository) => (
-						<RepositoryRow
-							key={repository.slug}
-							handle={profile.handle}
-							repository={repository}
-						/>
-					))}
-				</div>
+				{activity === undefined ? (
+					<ProfileActivityStatus>
+						Loading public repositories…
+					</ProfileActivityStatus>
+				) : activity === null ? (
+					<ProfileActivityStatus>
+						{activityError ?? "Unable to load public repositories."}
+					</ProfileActivityStatus>
+				) : (
+					<ProfileActivityContent activity={activity} />
+				)}
 			</section>
 		</main>
+	);
+}
+
+function ProfileActivityContent({
+	activity,
+}: {
+	activity: PublicProfileActivity;
+}) {
+	const visibleFileMix = activity.fileMix.filter(
+		(segment) => segment.count > 0,
+	);
+	return (
+		<>
+			<div>
+				<div className="flex items-baseline gap-2.5">
+					<h2 id="profile-files-title" className="m-0 text-[15px] font-bold">
+						Files
+					</h2>
+					<p className="m-0 text-[12.5px] text-[#a8a29e]">
+						{profileFileSummary(activity)}
+					</p>
+				</div>
+
+				{visibleFileMix.length > 0 ? (
+					<>
+						<div className="mt-3.5 flex h-4 gap-[3px]">
+							{visibleFileMix.map((segment) => (
+								<span
+									key={segment.label}
+									style={{
+										flexGrow: segment.percentage,
+										flexBasis: 0,
+										background: segment.color,
+									}}
+									className="rounded-[5px]"
+								/>
+							))}
+						</div>
+						<div className="mt-2.5">
+							{visibleFileMix.map((segment) => (
+								<div
+									className="flex items-center gap-2.5 border-t border-[#efe8dc] px-0.5 py-2 text-[13px] first:border-t-0"
+									key={segment.label}
+								>
+									<span
+										className="size-2.5 shrink-0 rounded-[3px]"
+										style={{ background: segment.color }}
+									/>
+									<span className="font-semibold">{segment.label}</span>
+									<span className="text-[12px] text-[#a8a29e]">
+										{segment.examples}
+									</span>
+									<span className="ml-auto shrink-0 text-[12px] text-[#a8a29e]">
+										{segment.percentage}%
+									</span>
+								</div>
+							))}
+						</div>
+					</>
+				) : (
+					<p className="m-0 mt-3 text-[13px] text-[#8a8178]">
+						{activity.repositories.length === 0
+							? "No public repositories yet."
+							: activity.failedRepositories === activity.repositories.length
+								? "File totals are temporarily unavailable."
+								: "No files in these public repositories yet."}
+					</p>
+				)}
+				{activity.failedRepositories > 0 ? (
+					<p className="m-0 mt-2 text-[12px] text-[#a8a29e]">
+						{activity.failedRepositories} recovering{" "}
+						{activity.failedRepositories === 1
+							? "repository is"
+							: "repositories are"}{" "}
+						not included in the file total yet.
+					</p>
+				) : null}
+			</div>
+
+			<div>
+				<div className="flex items-baseline gap-2.5 pb-3">
+					<h2 className="m-0 text-[15px] font-bold">Repositories</h2>
+					<p className="m-0 text-[12.5px] text-[#a8a29e]">
+						{activity.repositories.length} public
+					</p>
+				</div>
+				{activity.repositories.length === 0 ? (
+					<p className="m-0 text-[13px] text-[#8a8178]">
+						Public repositories will appear here.
+					</p>
+				) : null}
+				{activity.repositories.map((repository) => (
+					<RepositoryRow
+						key={repository.id}
+						handle={repository.namespaceHandle}
+						repository={repository}
+					/>
+				))}
+			</div>
+		</>
+	);
+}
+
+function profileFileSummary(activity: PublicProfileActivity): string {
+	const repositoryCount = activity.repositories.length;
+	const repositoryLabel =
+		repositoryCount === 1 ? "public repository" : "public repositories";
+	if (repositoryCount > 0 && activity.failedRepositories === repositoryCount) {
+		return `Checking files across ${repositoryCount} ${repositoryLabel}`;
+	}
+	return `${activity.totalFiles}${activity.failedRepositories > 0 ? "+" : ""} across ${repositoryCount} ${repositoryLabel}`;
+}
+
+function ProfileActivityStatus({ children }: { children: React.ReactNode }) {
+	return (
+		<div>
+			<h2 id="profile-files-title" className="m-0 text-[15px] font-bold">
+				Files
+			</h2>
+			<p className="m-0 mt-3 text-[13px] text-[#8a8178]">{children}</p>
+		</div>
 	);
 }
 

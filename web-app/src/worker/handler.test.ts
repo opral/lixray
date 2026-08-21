@@ -9,6 +9,7 @@ import {
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
+import type { PublicProfileActivity } from "../lib/profile-activity-aggregate.ts";
 import { isLixError } from "../mcp/lix-service.ts";
 import {
 	authenticateWithSupabase,
@@ -16,6 +17,7 @@ import {
 	handleRequest,
 	resolveLixWithSupabase,
 	resolveNamespaceProfileWithSupabase,
+	resolvePublicProfileRepositoriesWithSupabase,
 	supabaseJwtIssuer,
 	validateBrowserJwtClaims,
 	validateMcpJwtClaims,
@@ -306,6 +308,156 @@ void test("invalid profile IDs are rejected before profile resolution", async ()
 	assert.equal(response.status, 404);
 	assert.equal(response.headers.get("access-control-allow-origin"), "*");
 	assert.equal(resolved, false);
+});
+
+void test("GET /profile/{namespace_id}/activity lists real public repositories", async () => {
+	let resolvedNamespaceId: string | undefined;
+	const response = await handleRequest(
+		new Request(`https://example.test/profile/${NAMESPACE_ID}/activity`),
+		env({}),
+		{
+			resolvePublicProfileRepositories: async (namespaceId) => {
+				resolvedNamespaceId = namespaceId;
+				return {
+					ok: true,
+					repositories: [
+						{
+							id: LIX_A,
+							name: "Launch plan",
+							slug: "launch-plan",
+							namespaceHandle: "samuel",
+						},
+					],
+				};
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(resolvedNamespaceId, NAMESPACE_ID);
+	assert.equal(response.headers.get("access-control-allow-origin"), "*");
+	assert.match(response.headers.get("cache-control") ?? "", /max-age=60/);
+	const activity = (await response.json()) as PublicProfileActivity;
+	assert.equal(activity.totalFiles, 0);
+	assert.equal(activity.failedRepositories, 1);
+	assert.deepEqual(activity.repositories, [
+		{
+			id: LIX_A,
+			name: "Launch plan",
+			slug: "launch-plan",
+			namespaceHandle: "samuel",
+			fileCount: null,
+		},
+	]);
+});
+
+void test("profile activity queries file paths from every public Lix", async () => {
+	const response = await handleRequest(
+		new Request(`https://example.test/profile/${NAMESPACE_ID}/activity`),
+		env({}),
+		{
+			resolvePublicProfileRepositories: async () => ({
+				ok: true,
+				repositories: [
+					{
+						id: LIX_A,
+						name: "Launch plan",
+						slug: "launch-plan",
+						namespaceHandle: "samuel",
+					},
+				],
+			}),
+			lixFetch: async (lixId, request) => {
+				assert.equal(lixId, LIX_A);
+				const pathname = new URL(request.url).pathname;
+				if (pathname === "/lix/v1/") {
+					return Response.json({
+						protocolVersion: 2,
+						activeBranchId: "main",
+						activeAccountId: "00000000-0000-7000-8000-000000000002",
+						sessionId: "profile-activity-session",
+					});
+				}
+				if (pathname === "/lix/v1/session" && request.method === "DELETE") {
+					return new Response(null, { status: 204 });
+				}
+				assert.equal(pathname, "/lix/v1/execute");
+				const body = (await request.json()) as { sql?: unknown };
+				assert.equal(body.sql, "SELECT path FROM lix_file ORDER BY path");
+				return Response.json({
+					columns: ["path"],
+					rows: [
+						[{ kind: "text", value: "/README.md" }],
+						[{ kind: "text", value: "/src/index.ts" }],
+						[{ kind: "text", value: "/assets/logo.png" }],
+					],
+					rowsAffected: 0,
+					notices: [],
+				});
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	const activity = (await response.json()) as PublicProfileActivity;
+	assert.equal(activity.totalFiles, 3);
+	assert.equal(activity.failedRepositories, 0);
+	assert.equal(activity.repositories[0].fileCount, 3);
+	assert.deepEqual(
+		activity.fileMix.map((segment) => segment.count),
+		[1, 1, 0, 0, 1],
+	);
+});
+
+void test("public profile repository resolution calls the anonymous RPC", async () => {
+	const originalFetch = globalThis.fetch;
+	let request: Request | undefined;
+	globalThis.fetch = async (input, init) => {
+		request = new Request(input, init);
+		return Response.json([
+			{
+				namespace_id: NAMESPACE_ID,
+				namespace_handle: "samuel",
+				lix_id: LIX_A,
+				lix_name: "Launch plan",
+				lix_slug: "launch-plan",
+				lix_updated_at: "2026-08-21T12:00:00.000Z",
+			},
+		]);
+	};
+	try {
+		const resolution = await resolvePublicProfileRepositoriesWithSupabase(
+			NAMESPACE_ID,
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+		);
+		assert.equal(resolution.ok, true);
+		assert.equal(
+			request?.url,
+			"https://project.supabase.co/rest/v1/rpc/list_public_profile_lixes",
+		);
+		assert.equal(request?.method, "POST");
+		assert.equal(
+			await request?.text(),
+			JSON.stringify({ p_namespace_id: NAMESPACE_ID }),
+		);
+		if (resolution.ok) {
+			assert.deepEqual(resolution.repositories, [
+				{
+					id: LIX_A,
+					name: "Launch plan",
+					slug: "launch-plan",
+					namespaceHandle: "samuel",
+				},
+			]);
+		}
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
 });
 
 void test("non-/v1 routes delegate to the frontend fallback", async () => {

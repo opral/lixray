@@ -495,6 +495,17 @@ export type Database = {
 					namespace_updated_at: string;
 				}[];
 			};
+			list_public_profile_lixes: {
+				Args: { p_namespace_id: string };
+				Returns: {
+					lix_id: string;
+					lix_name: string;
+					lix_slug: string;
+					lix_updated_at: string;
+					namespace_handle: string;
+					namespace_id: string;
+				}[];
+			};
 			list_lix_members: {
 				Args: { p_lix_id: string };
 				Returns: {

@@ -25,59 +25,6 @@ export interface PublicProfile {
 	contactCardUri: string;
 }
 
-export interface ProfileRepositoryActivity {
-	slug: string;
-}
-
-/**
- * Profile activity is intentionally a read-model placeholder. Replace this
- * with a scheduled indexer that materializes public lix statistics; identity
- * and profile presentation already resolve through the canonical profile URI.
- */
-export const PLACEHOLDER_PROFILE_ACTIVITY = {
-	totalFiles: 312,
-	repositories: [
-		{ slug: "handbook" },
-		{ slug: "customer-roadmap" },
-		{ slug: "brand-assets" },
-		{ slug: "launch-deck" },
-		{ slug: "pricing-model" },
-		{ slug: "weekly-updates" },
-	] satisfies Array<ProfileRepositoryActivity>,
-	fileMix: [
-		{
-			label: "Docs",
-			examples: "markdown, text",
-			percentage: 42,
-			color: "#b9aa8f",
-		},
-		{
-			label: "Code",
-			examples: "ts, rust",
-			percentage: 18,
-			color: "#cbbb9e",
-		},
-		{
-			label: "Sheets",
-			examples: "csv, tables",
-			percentage: 17,
-			color: "#dccdb1",
-		},
-		{
-			label: "Decks",
-			examples: "slides",
-			percentage: 13,
-			color: "#e8dcc4",
-		},
-		{
-			label: "PDFs & other",
-			examples: "pdf, images",
-			percentage: 10,
-			color: "#f0e7d6",
-		},
-	],
-} as const;
-
 export async function resolvePublicProfileByHandle(
 	handle: string,
 ): Promise<PublicProfile | null> {
