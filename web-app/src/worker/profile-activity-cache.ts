@@ -1,5 +1,8 @@
 import type { PublicProfileActivity } from "../lib/profile-activity-aggregate.ts";
 
+export const PUBLIC_PROFILE_ACTIVITY_FRESH_SECONDS = 24 * 60 * 60;
+const PUBLIC_PROFILE_ACTIVITY_FALLBACK_MS = 48 * 60 * 60 * 1000;
+
 interface CacheEntry {
 	cachedAt: number;
 	activity: PublicProfileActivity;
@@ -19,8 +22,10 @@ export class PublicProfileActivityCache {
 			now?: () => number;
 		} = {},
 	) {
-		this.#freshForMs = options.freshForMs ?? 5 * 60 * 1000;
-		this.#fallbackForMs = options.fallbackForMs ?? 24 * 60 * 60 * 1000;
+		this.#freshForMs =
+			options.freshForMs ?? PUBLIC_PROFILE_ACTIVITY_FRESH_SECONDS * 1000;
+		this.#fallbackForMs =
+			options.fallbackForMs ?? PUBLIC_PROFILE_ACTIVITY_FALLBACK_MS;
 		this.#now = options.now ?? Date.now;
 	}
 

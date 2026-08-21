@@ -338,7 +338,7 @@ void test("GET /profile/{namespace_id}/activity lists real public repositories",
 	assert.equal(response.status, 200);
 	assert.equal(resolvedNamespaceId, NAMESPACE_ID);
 	assert.equal(response.headers.get("access-control-allow-origin"), "*");
-	assert.match(response.headers.get("cache-control") ?? "", /s-maxage=300/);
+	assert.match(response.headers.get("cache-control") ?? "", /s-maxage=86400/);
 	const activity = (await response.json()) as PublicProfileActivity;
 	assert.equal(activity.totalFiles, 0);
 	assert.equal(activity.failedRepositories, 1);

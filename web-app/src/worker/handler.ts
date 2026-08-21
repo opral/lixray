@@ -52,7 +52,10 @@ import {
 	isDemoEnvironment,
 	resolveOfficialMcpPosthogToken,
 } from "./mcp-posthog-env.ts";
-import { PublicProfileActivityCache } from "./profile-activity-cache.ts";
+import {
+	PUBLIC_PROFILE_ACTIVITY_FRESH_SECONDS,
+	PublicProfileActivityCache,
+} from "./profile-activity-cache.ts";
 
 export interface WorkerEnv {
 	SUPABASE_URL?: string;
@@ -2011,7 +2014,7 @@ function profileActivityResponse(
 		{
 			status: 200,
 			headers: {
-				"cache-control": "public, max-age=0, s-maxage=300",
+				"cache-control": `public, max-age=0, s-maxage=${PUBLIC_PROFILE_ACTIVITY_FRESH_SECONDS}`,
 				"content-type": "application/json; charset=utf-8",
 			},
 		},

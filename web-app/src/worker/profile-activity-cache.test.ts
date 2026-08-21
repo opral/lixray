@@ -4,7 +4,8 @@ import type { PublicProfileActivity } from "../lib/profile-activity-aggregate.ts
 import { PublicProfileActivityCache } from "./profile-activity-cache.ts";
 
 void test("shares a fresh profile activity result across visitors", async () => {
-	const cache = new PublicProfileActivityCache();
+	let now = 1_800_000_000_000;
+	const cache = new PublicProfileActivityCache({ now: () => now });
 	let loads = 0;
 	const load = async () => {
 		loads += 1;
@@ -12,11 +13,15 @@ void test("shares a fresh profile activity result across visitors", async () => 
 	};
 
 	const first = await cache.resolve("namespace-a", load);
+	now += 23 * 60 * 60 * 1000;
 	const second = await cache.resolve("namespace-a", load);
+	now += 2 * 60 * 60 * 1000;
+	const refreshed = await cache.resolve("namespace-a", load);
 
 	assert.equal(first.totalFiles, 1);
 	assert.equal(second.totalFiles, 1);
-	assert.equal(loads, 1);
+	assert.equal(refreshed.totalFiles, 2);
+	assert.equal(loads, 2);
 });
 
 void test("deduplicates simultaneous profile activity scans", async () => {
