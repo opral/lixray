@@ -1,9 +1,9 @@
 import {
 	DEMO_PROFILE_HANDLE,
 	DEMO_PROFILE_NAMESPACE_ID,
-	demoProfileDocument,
 } from "~/lib/demo-identity";
 import { isDemoModeEnabled } from "~/lib/demo-client";
+import { demoProfileDocumentWithOverride } from "~/lib/profile-editor";
 import { getBrowserSupabaseClient } from "~/lib/supabase";
 
 export interface PublicProfileLink {
@@ -112,7 +112,7 @@ export async function resolvePublicProfileByHandle(
 	}
 
 	const document = isDemoModeEnabled
-		? demoProfileDocument(window.location.origin)
+		? demoProfileDocumentWithOverride(window.location.origin)
 		: await fetchProfileDocument(identity.namespaceId);
 	if (!isJsContactCard(document)) return null;
 	return profileFromDocument(identity, document);
@@ -121,6 +121,7 @@ export async function resolvePublicProfileByHandle(
 async function fetchProfileDocument(namespaceId: string): Promise<unknown> {
 	const response = await fetch(`/profile/${encodeURIComponent(namespaceId)}`, {
 		headers: { Accept: "application/jscontact+json; version=2.0" },
+		cache: "no-cache",
 	});
 	if (response.status === 404) return null;
 	if (!response.ok) throw new Error("Unable to load this profile right now.");

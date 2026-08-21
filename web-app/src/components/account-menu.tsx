@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { LogOut, UserRound } from "lucide-react";
+import { LogOut, Pencil, UserRound } from "lucide-react";
 import { useAuth } from "~/components/auth-provider";
 import { ProfileAvatar } from "~/components/profile-avatar";
 import {
@@ -75,15 +75,26 @@ export function AccountMenu({ className }: { className?: string }) {
 				</div>
 				<DropdownMenuSeparator />
 				{personalNamespaceHandle ? (
-					<DropdownMenuItem asChild>
-						<Link
-							to="/@{$namespace}"
-							params={{ namespace: personalNamespaceHandle }}
-						>
-							<UserRound aria-hidden="true" />
-							View profile
-						</Link>
-					</DropdownMenuItem>
+					<>
+						<DropdownMenuItem asChild>
+							<Link
+								to="/@{$namespace}"
+								params={{ namespace: personalNamespaceHandle }}
+							>
+								<UserRound aria-hidden="true" />
+								View profile
+							</Link>
+						</DropdownMenuItem>
+						<DropdownMenuItem asChild>
+							<Link
+								to="/settings/@{$namespace}"
+								params={{ namespace: personalNamespaceHandle }}
+							>
+								<Pencil aria-hidden="true" />
+								Edit profile
+							</Link>
+						</DropdownMenuItem>
+					</>
 				) : null}
 				{!isDemoModeEnabled ? (
 					<>

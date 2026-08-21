@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Copy } from "lucide-react";
+import { Copy, Plus } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "~/components/auth-provider";
@@ -10,7 +10,22 @@ import {
 	useRepository,
 } from "~/components/repository-provider";
 import { Button } from "~/components/ui/button";
+import type { Json } from "~/lib/database.types";
+import { isDemoModeEnabled } from "~/lib/demo-client";
+import {
+	DEMO_PROFILE_HANDLE,
+	DEMO_PROFILE_NAME,
+	DEMO_PROFILE_NAMESPACE_ID,
+} from "~/lib/demo-identity";
 import { formatCaughtError } from "~/lib/format";
+import {
+	demoProfileDocumentWithOverride,
+	editableProfileFromDocument,
+	type EditableProfile,
+	PROFILE_UPDATED_EVENT,
+	profileDocumentWithEdits,
+	saveDemoProfileDocument,
+} from "~/lib/profile-editor";
 import { isTeamInviteToken } from "~/lib/team-invite";
 import { appendRepositoryShareToken } from "~/lib/repository-share-url";
 
@@ -30,9 +45,10 @@ interface NamespaceMember {
 export function NamespaceSettings({ handle }: { handle: string }) {
 	const { client, isLoaded: authLoaded, user } = useAuth();
 	const repositoryState = useRepository();
-	const organization = repositoryState.organizations.find(
-		(candidate) => candidate.handle.toLowerCase() === handle.toLowerCase(),
-	);
+	const organization =
+		repositoryState.organizations.find(
+			(candidate) => candidate.handle.toLowerCase() === handle.toLowerCase(),
+		) ?? demoProfileOrganization(handle);
 
 	if (!authLoaded || !repositoryState.isLoaded) {
 		return (
@@ -90,7 +106,12 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 				</div>
 			</div>
 
-			<GeneralPanel organization={organization} />
+			{organization.isPersonal ? (
+				<ProfilePanel organization={organization} />
+			) : null}
+			{organization.id !== DEMO_PROFILE_NAMESPACE_ID ? (
+				<GeneralPanel organization={organization} />
+			) : null}
 			{!organization.isPersonal && client ? (
 				<>
 					<MembersPanel organization={organization} />
@@ -121,6 +142,338 @@ function SettingsShell({ children }: { children: React.ReactNode }) {
 		</div>
 	);
 }
+
+function ProfilePanel({ organization }: { organization: Organization }) {
+	const { client } = useAuth();
+	const isOwner = organization.role === "owner";
+	const [document, setDocument] = useState<Record<string, unknown> | null>(
+		null,
+	);
+	const [values, setValues] = useState<EditableProfile | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+
+	useEffect(() => {
+		let cancelled = false;
+		setDocument(null);
+		setValues(null);
+		setError(null);
+		void (async () => {
+			try {
+				let nextDocument: unknown;
+				if (isDemoModeEnabled) {
+					nextDocument = demoProfileDocumentWithOverride(
+						window.location.origin,
+					);
+				} else {
+					if (!client) throw new Error("Profile settings are still loading.");
+					const { data, error: loadError } = await client
+						.from("namespace_profiles")
+						.select("document")
+						.eq("namespace_id", organization.id)
+						.single();
+					if (loadError) throw loadError;
+					nextDocument = data.document;
+				}
+				const nextValues = editableProfileFromDocument(nextDocument);
+				if (!cancelled) {
+					setDocument(nextDocument as Record<string, unknown>);
+					setValues(nextValues);
+				}
+			} catch (caught) {
+				if (!cancelled) setError(formatCaughtError(caught));
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [client, organization.id]);
+
+	const submit = async (event: FormEvent) => {
+		event.preventDefault();
+		if (!document || !values || !isOwner) return;
+		setBusy(true);
+		setError(null);
+		try {
+			const nextDocument = profileDocumentWithEdits(document, values, {
+				allowLocalHttp: isDemoModeEnabled,
+			});
+			if (isDemoModeEnabled) {
+				saveDemoProfileDocument(nextDocument);
+			} else {
+				if (!client) throw new Error("Profile settings are still loading.");
+				const { error: saveError } = await client
+					.from("namespace_profiles")
+					.update({ document: nextDocument as Json })
+					.eq("namespace_id", organization.id)
+					.select("updated_at")
+					.single();
+				if (saveError) throw saveError;
+			}
+			setDocument(nextDocument);
+			setValues(editableProfileFromDocument(nextDocument));
+			window.dispatchEvent(
+				new CustomEvent(PROFILE_UPDATED_EVENT, {
+					detail: { namespaceId: organization.id },
+				}),
+			);
+			toast.success("Profile saved");
+		} catch (caught) {
+			const message = formatCaughtError(caught);
+			setError(message);
+			toast.error(message);
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const update = <Key extends keyof EditableProfile>(
+		key: Key,
+		value: EditableProfile[Key],
+	) => {
+		setValues((current) => (current ? { ...current, [key]: value } : current));
+	};
+
+	return (
+		<section className="mb-3.5 rounded-xl border border-border-panel bg-bg-panel px-[18px] py-4">
+			<div className="flex items-start gap-3">
+				<div className="min-w-0 flex-1">
+					<h3 className="m-0 text-[13.5px] font-bold">Public profile</h3>
+					<p className="m-0 mt-0.5 text-[12px] text-text-tertiary">
+						The information shown at lixray.com/@{organization.handle}.
+					</p>
+				</div>
+				<Button asChild variant="ghost" size="sm" className="h-8">
+					<Link to="/@{$namespace}" params={{ namespace: organization.handle }}>
+						View profile
+					</Link>
+				</Button>
+			</div>
+
+			{error && !values ? (
+				<p className="m-0 mt-3 text-[12.5px] text-error-700">{error}</p>
+			) : null}
+			{!values && !error ? (
+				<p className="m-0 mt-3 text-[12.5px] text-text-tertiary">
+					Loading profile…
+				</p>
+			) : null}
+			{values ? (
+				<form
+					className="mt-4 grid gap-3.5"
+					onSubmit={(event) => void submit(event)}
+				>
+					<ProfileField label="Display name">
+						<input
+							className={profileInputClass}
+							maxLength={80}
+							value={values.name}
+							disabled={!isOwner || busy}
+							onChange={(event) => update("name", event.target.value)}
+						/>
+					</ProfileField>
+
+					<ProfileField label="Bio">
+						<textarea
+							className={`${profileInputClass} min-h-20 resize-y py-2`}
+							maxLength={280}
+							value={values.bio}
+							disabled={!isOwner || busy}
+							onChange={(event) => update("bio", event.target.value)}
+						/>
+					</ProfileField>
+
+					<div className="grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
+						<ProfileField label="Title">
+							<input
+								className={profileInputClass}
+								maxLength={80}
+								value={values.title}
+								disabled={!isOwner || busy}
+								onChange={(event) => update("title", event.target.value)}
+							/>
+						</ProfileField>
+						<ProfileField label="Organization">
+							<input
+								className={profileInputClass}
+								maxLength={80}
+								value={values.organization}
+								disabled={!isOwner || busy}
+								onChange={(event) => update("organization", event.target.value)}
+							/>
+						</ProfileField>
+					</div>
+
+					<ProfileField label="Location">
+						<input
+							className={profileInputClass}
+							maxLength={120}
+							value={values.location}
+							disabled={!isOwner || busy}
+							onChange={(event) => update("location", event.target.value)}
+						/>
+					</ProfileField>
+
+					<ProfileField label="Avatar URL" hint="HTTPS image URL">
+						<input
+							className={profileInputClass}
+							type="url"
+							value={values.avatarUri}
+							disabled={!isOwner || busy}
+							onChange={(event) => update("avatarUri", event.target.value)}
+						/>
+					</ProfileField>
+
+					<div
+						className="grid gap-2.5"
+						role="group"
+						aria-labelledby="profile-links-label"
+					>
+						<div className="flex items-center">
+							<span
+								id="profile-links-label"
+								className="text-[12px] font-semibold text-text-secondary"
+							>
+								Links
+							</span>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="ml-auto h-7 gap-1 px-2 text-[12px]"
+								disabled={!isOwner || busy || values.links.length >= 6}
+								onClick={() =>
+									update("links", [
+										...values.links,
+										{
+											key: `new-${crypto.randomUUID()}`,
+											label: "",
+											uri: "",
+										},
+									])
+								}
+							>
+								<Plus className="size-3" aria-hidden="true" />
+								Add link
+							</Button>
+						</div>
+						{values.links.length === 0 ? (
+							<p className="m-0 text-[12px] text-text-tertiary">
+								No links yet.
+							</p>
+						) : null}
+						{values.links.map((link, index) => (
+							<div
+								className="grid grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)_auto] gap-2 max-[560px]:grid-cols-1"
+								key={link.key}
+							>
+								<input
+									aria-label={`Link ${index + 1} label`}
+									className={profileInputClass}
+									maxLength={80}
+									placeholder="Label"
+									value={link.label}
+									disabled={!isOwner || busy}
+									onChange={(event) =>
+										update(
+											"links",
+											values.links.map((candidate) =>
+												candidate.key === link.key
+													? { ...candidate, label: event.target.value }
+													: candidate,
+											),
+										)
+									}
+								/>
+								<input
+									aria-label={`Link ${index + 1} URL`}
+									className={profileInputClass}
+									type="url"
+									placeholder="https://example.com"
+									value={link.uri}
+									disabled={!isOwner || busy}
+									onChange={(event) =>
+										update(
+											"links",
+											values.links.map((candidate) =>
+												candidate.key === link.key
+													? { ...candidate, uri: event.target.value }
+													: candidate,
+											),
+										)
+									}
+								/>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="h-9 px-2 text-[12px] text-text-tertiary"
+									disabled={!isOwner || busy}
+									onClick={() =>
+										update(
+											"links",
+											values.links.filter(
+												(candidate) => candidate.key !== link.key,
+											),
+										)
+									}
+								>
+									Remove
+								</Button>
+							</div>
+						))}
+					</div>
+
+					{error ? (
+						<p className="m-0 text-[12.5px] text-error-700">{error}</p>
+					) : null}
+					<div className="flex items-center gap-2 border-t border-border-subtle pt-3.5">
+						<Button
+							type="submit"
+							variant="featured"
+							size="sm"
+							disabled={!isOwner || busy || !values.name.trim()}
+						>
+							{busy ? "Saving…" : "Save profile"}
+						</Button>
+						{!isOwner ? (
+							<span className="text-[12px] text-text-quaternary">
+								Only namespace owners can edit this profile.
+							</span>
+						) : null}
+					</div>
+				</form>
+			) : null}
+		</section>
+	);
+}
+
+function ProfileField({
+	children,
+	hint,
+	label,
+}: {
+	children: React.ReactNode;
+	hint?: string;
+	label: string;
+}) {
+	return (
+		<label className="grid gap-1.5 text-[12px] font-semibold text-text-secondary">
+			<span>
+				{label}
+				{hint ? (
+					<span className="ml-1.5 font-normal text-text-quaternary">
+						{hint}
+					</span>
+				) : null}
+			</span>
+			{children}
+		</label>
+	);
+}
+
+const profileInputClass =
+	"h-9 min-w-0 rounded-lg border border-border-panel bg-bg-panel px-[11px] text-[13px] font-normal text-text-primary outline-none placeholder:text-text-quaternary focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1 disabled:opacity-60";
 
 function GeneralPanel({ organization }: { organization: Organization }) {
 	const { renameOrganization } = useRepository();
@@ -405,4 +758,23 @@ function namespaceInitials(name: string): string {
 	if (parts.length === 0) return "N";
 	if (parts.length === 1) return (parts[0] ?? "N").slice(0, 2).toUpperCase();
 	return `${parts[0]?.charAt(0) ?? ""}${parts[1]?.charAt(0) ?? ""}`.toUpperCase();
+}
+
+function demoProfileOrganization(handle: string): Organization | undefined {
+	if (
+		!isDemoModeEnabled ||
+		handle.trim().toLowerCase() !== DEMO_PROFILE_HANDLE
+	) {
+		return undefined;
+	}
+	return {
+		id: DEMO_PROFILE_NAMESPACE_ID,
+		name: DEMO_PROFILE_NAME,
+		handle: DEMO_PROFILE_HANDLE,
+		isPersonal: true,
+		role: "owner",
+		createdAt: "2026-03-01T00:00:00.000Z",
+		updatedAt: "2026-08-21T00:00:00.000Z",
+		repositories: [],
+	};
 }
