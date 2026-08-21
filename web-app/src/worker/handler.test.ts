@@ -496,9 +496,11 @@ void test("MCP reuses successful lix authorization only within one HTTP request"
 	assert.deepEqual(protocolPaths, [
 		"/lix/v1/",
 		"/lix/v1/execute",
+		"/lix/v1/execute",
 		"/lix/v1/execute-batch",
 		"/lix/v1/session",
 		"/lix/v1/",
+		"/lix/v1/execute",
 		"/lix/v1/execute",
 		"/lix/v1/execute-batch",
 		"/lix/v1/session",
@@ -571,6 +573,7 @@ void test("MCP retries lix authorization after a denial", async () => {
 	assert.equal(authorizationChecks, 2);
 	assert.deepEqual(protocolPaths, [
 		"/lix/v1/",
+		"/lix/v1/execute",
 		"/lix/v1/execute",
 		"/lix/v1/execute",
 		"/lix/v1/session",
@@ -1862,6 +1865,20 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 					return new Response(null, { status: 204 });
 				}
 				assert.equal(pathname, "/lix/v1/execute");
+				const body = (await request.json()) as { sql?: string };
+				if (typeof body.sql === "string" && body.sql.includes("file_count")) {
+					return Response.json({
+						columns: ["file_count", "directory_count"],
+						rows: [
+							[
+								{ kind: "int", value: 0 },
+								{ kind: "int", value: 0 },
+							],
+						],
+						rowsAffected: 0,
+						notices: [],
+					});
+				}
 				return Response.json({
 					columns: ["id", "name", "hidden", "commit_id"],
 					rows: [
@@ -1916,7 +1933,7 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
-	assert.equal(lixFetches, 4);
+	assert.equal(lixFetches, 5);
 });
 
 void test("Supabase lix authorization uses the user token and RLS-visible row", async () => {
@@ -2044,6 +2061,20 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 			return new Response(null, { status: 204 });
 		}
 		if (path === "/lix/v1/execute") {
+			const body = (await request.json()) as { sql?: string };
+			if (typeof body.sql === "string" && body.sql.includes("file_count")) {
+				return Response.json({
+					columns: ["file_count", "directory_count"],
+					rows: [
+						[
+							{ kind: "int", value: 0 },
+							{ kind: "int", value: 0 },
+						],
+					],
+					rowsAffected: 0,
+					notices: [],
+				});
+			}
 			return Response.json({
 				columns: ["value"],
 				rows: [[{ kind: "text", value: "commit-1" }]],

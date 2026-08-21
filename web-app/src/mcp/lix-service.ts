@@ -63,9 +63,19 @@ export interface OpenedLixContext {
 	contextExpiresAt: string;
 	lixId: string;
 	lixRef: string;
+	name: string;
 	branchId: string;
 	commitId: string;
+	fileCount: number;
+	directoryCount: number;
+	empty: boolean;
 }
+
+export const OPEN_LIX_INVENTORY_SQL =
+	"SELECT (SELECT COUNT(*) FROM lix_file) AS file_count, (SELECT COUNT(*) FROM lix_directory) AS directory_count";
+
+export const CONTEXT_REOPEN_HINT =
+	"Call open_lix again for this Lix and branch. Do not retry the same context token.";
 
 export interface CreateBranchInput {
 	id?: string;
@@ -256,11 +266,17 @@ export class LixService {
 				: lixes.filter((lix) => lix.slug === lixRef);
 
 		if (matches.length === 1) return matches[0];
-		if (matches.length === 0)
-			throw createLixError("not_found", "Lix not found.");
+		if (matches.length === 0) {
+			throw createLixError("not_found", "Lix not found.", {
+				hint: "Call list_lixes and pass an exact @handle/slug or Lix UUID to open_lix.",
+			});
+		}
 		throw createLixError(
 			"ambiguous_lix_ref",
 			"Lix slug is ambiguous; use an exact Lix UUID or @namespace/slug.",
+			{
+				hint: "Call list_lixes and pass the exact Lix UUID or @namespace/slug.",
+			},
 		);
 	}
 
@@ -272,6 +288,7 @@ export class LixService {
 			: await this.client.activeBranchId(lixId);
 		const issuedContext = await this.issueContext(lixId, selectedBranchId);
 		const commitId = await this.commitId(lixId, selectedBranchId);
+		const inventory = await this.fileInventory(lixId, selectedBranchId);
 		// Bind the OAuth / principal account on every successful signed-context
 		// mint. Cache-admit / protocol-root open is not a product bind.
 		this.client.bindSession({
@@ -285,8 +302,12 @@ export class LixService {
 			contextExpiresAt: new Date(issuedContext.expiresAt).toISOString(),
 			lixId,
 			lixRef: `@${repository.namespace.handle}/${repository.slug}`,
+			name: repository.name,
 			branchId: selectedBranchId,
 			commitId,
+			fileCount: inventory.fileCount,
+			directoryCount: inventory.directoryCount,
+			empty: inventory.fileCount === 0 && inventory.directoryCount === 0,
 		};
 	}
 
@@ -389,6 +410,9 @@ export class LixService {
 			throw createLixError(
 				"upstream_error",
 				"Lix did not confirm the requested restore commit id.",
+				{
+					hint: "Pass a commit_id that exists on the selected branch. create_checkpoint returns a usable commit_id.",
+				},
 			);
 		}
 		return {
@@ -447,9 +471,33 @@ export class LixService {
 			throw createLixError(
 				"upstream_error",
 				"Lix did not return an active commit id.",
+				{
+					hint: "Retry open_lix. If it persists, contact LixRay support.",
+				},
 			);
 		}
 		return value.value;
+	}
+
+	private async fileInventory(
+		lixId: string,
+		branchId: string,
+	): Promise<{ fileCount: number; directoryCount: number }> {
+		const response = await this.client.execute(lixId, branchId, {
+			sql: OPEN_LIX_INVENTORY_SQL,
+		});
+		const fileCount = wireNonNegativeInt(response.rows[0]?.[0]);
+		const directoryCount = wireNonNegativeInt(response.rows[0]?.[1]);
+		if (fileCount === undefined || directoryCount === undefined) {
+			throw createLixError(
+				"upstream_error",
+				"Lix did not return file inventory counts.",
+				{
+					hint: "Retry open_lix. If it persists, inspect lix_file and lix_directory with query_sql.",
+				},
+			);
+		}
+		return { fileCount, directoryCount };
 	}
 
 	private async issueContext(
@@ -481,11 +529,11 @@ export class LixService {
 
 	private async readContext(token: string): Promise<LixContext> {
 		if (typeof token !== "string") {
-			throw createLixError("invalid_context", "context must be a string.");
+			throw contextError("malformed_context", "context must be a string.");
 		}
 		const parts = token.split(".");
 		if (parts.length !== 2) {
-			throw createLixError("invalid_context", "context is invalid.");
+			throw contextError("malformed_context", "context is malformed.");
 		}
 		const [encodedClaims, encodedSignature] = parts;
 		let claims: ContextClaims;
@@ -500,32 +548,99 @@ export class LixService {
 				throw new Error("non-canonical signature");
 			}
 		} catch {
-			throw createLixError("invalid_context", "context is invalid.");
+			throw contextError("malformed_context", "context is malformed.");
 		}
+		const advertisedExpiresAt = finiteTimestamp(claims.expiresAt);
 		const valid = await crypto.subtle.verify(
 			"HMAC",
 			await this.cryptoKeyPromise,
 			signature,
 			new TextEncoder().encode(encodedClaims),
 		);
+		if (!valid) {
+			throw contextError("invalid_signature", "context signature is invalid.", {
+				expiresAt: advertisedExpiresAt,
+			});
+		}
 		if (
-			!valid ||
 			claims.v !== 1 ||
 			claims.userId !== this.principal.userId ||
 			claims.clientId !== this.principal.clientId ||
 			typeof claims.lixId !== "string" ||
 			typeof claims.branchId !== "string"
 		) {
-			throw createLixError("invalid_context", "context is invalid.");
+			throw contextError("invalid_context", "context is invalid.", {
+				expiresAt: advertisedExpiresAt,
+			});
 		}
-		if (!Number.isFinite(claims.expiresAt) || claims.expiresAt <= Date.now()) {
-			throw createLixError("context_expired", "The Lix context has expired.", {
-				hint: "Call open_lix again for this Lix and branch, then retry the SQL operation.",
-				details: { lix_id: claims.lixId, branch_id: claims.branchId },
+		if (
+			advertisedExpiresAt === undefined ||
+			advertisedExpiresAt <= Date.now()
+		) {
+			throw contextError("expired_context", "The Lix context has expired.", {
+				expiresAt: advertisedExpiresAt,
+				lixId: claims.lixId,
+				branchId: claims.branchId,
 			});
 		}
 		return { lixId: claims.lixId, branchId: claims.branchId };
 	}
+}
+
+function contextError(
+	code:
+		| "expired_context"
+		| "invalid_signature"
+		| "malformed_context"
+		| "invalid_context",
+	message: string,
+	options: {
+		expiresAt?: number;
+		lixId?: string;
+		branchId?: string;
+	} = {},
+): LixError {
+	const details: Record<string, unknown> = {
+		server_time: new Date().toISOString(),
+	};
+	if (options.expiresAt !== undefined) {
+		details.expires_at = new Date(options.expiresAt).toISOString();
+	}
+	if (options.lixId) details.lix_id = options.lixId;
+	if (options.branchId) details.branch_id = options.branchId;
+	return createLixError(code, message, {
+		hint: CONTEXT_REOPEN_HINT,
+		details,
+	});
+}
+
+function finiteTimestamp(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value)
+		? value
+		: undefined;
+}
+
+function wireNonNegativeInt(value: WireValue | undefined): number | undefined {
+	if (!value) return undefined;
+	if (
+		value.kind === "int" &&
+		Number.isSafeInteger(value.value) &&
+		value.value >= 0
+	) {
+		return value.value;
+	}
+	if (
+		value.kind === "float" &&
+		Number.isFinite(value.value) &&
+		value.value >= 0
+	) {
+		return Math.trunc(value.value);
+	}
+	if (value.kind === "text" && /^\d+$/.test(value.value)) {
+		const parsed = Number(value.value);
+		if (Number.isSafeInteger(parsed)) return parsed;
+	}
+	return undefined;
 }
 
 function encodeBase64Url(bytes: Uint8Array): string {

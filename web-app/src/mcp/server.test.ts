@@ -16,10 +16,12 @@ import {
 	attachMcpToolCallObservationProperties,
 	CREATE_CHECKPOINT_TOOL_DESCRIPTION,
 	handleMcpTransport,
+	LIST_LIXES_TOOL_DESCRIPTION,
 	MCP_REQUEST_ID_HEADER,
 	MCP_PROTOCOL_VERSION,
 	MCP_RESOURCE,
 	MCP_SERVER_INSTRUCTIONS,
+	OPEN_LIX_TOOL_DESCRIPTION,
 	mcpAuthenticateChallenge,
 	mcpDocumentationResponse,
 	mcpUnauthorizedResponse,
@@ -28,7 +30,11 @@ import {
 	withMcpRequestId,
 	protectedResourceMetadataResponse,
 } from "./server.ts";
-import { EXECUTE_SQL_TOOL_DESCRIPTION } from "./execute-schema.ts";
+import {
+	EXECUTE_SQL_TOOL_DESCRIPTION,
+	LIX_SQL_OPERATING_GUIDE,
+} from "./execute-schema.ts";
+import { CONTEXT_REOPEN_HINT, OPEN_LIX_INVENTORY_SQL } from "./lix-service.ts";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,14 +52,32 @@ function assertCheckpointPolicy(text: string): void {
 	assert.match(text, /agent may recommend/);
 }
 
-function sqlPayloadFromText(text: string): unknown {
-	const withoutContext = text.replace(/\s*context=\S+\s*$/, "");
-	const jsonStart = withoutContext.search(/[[{]/);
-	assert.ok(jsonStart >= 0, `expected JSON SQL result in text: ${text}`);
-	return JSON.parse(withoutContext.slice(jsonStart));
+function toolText(result: {
+	content?: Array<{ type: string; text?: string }>;
+}): string {
+	return result.content?.[0]?.type === "text"
+		? (result.content[0].text ?? "")
+		: "";
 }
 
+function assertTextOmitsContext(text: string, context: string): void {
+	assert.doesNotMatch(text, /context=/);
+	assert.ok(
+		!text.includes(context),
+		"tool text must not echo the signed context token",
+	);
+}
+
+const SHARED_GUIDE_MARKERS = [
+	/lix_history\('lix_file'/,
+	/information_schema\.tables/,
+	/CAST\(\$2 AS BYTEA\)/,
+	/ON CONFLICT \(path\) DO UPDATE/,
+] as const;
+
 class FakeRuntime implements LixRuntimeClient {
+	fileCount = 0;
+	directoryCount = 0;
 	hasOpenRuntime() {
 		return false;
 	}
@@ -114,6 +138,19 @@ class FakeRuntime implements LixRuntimeClient {
 			return {
 				columns: ["commit_id"],
 				rows: [[{ kind: "text" as const, value: "commit-1" }]],
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
+		if (request.sql === OPEN_LIX_INVENTORY_SQL) {
+			return {
+				columns: ["file_count", "directory_count"],
+				rows: [
+					[
+						{ kind: "int" as const, value: this.fileCount },
+						{ kind: "int" as const, value: this.directoryCount },
+					],
+				],
 				rowsAffected: 0,
 				notices: [],
 			};
@@ -390,35 +427,25 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		);
 		assert.ok(queryTool);
 		assert.ok(executeSqlTool);
-		assert.match(
-			queryTool.description ?? "",
-			/SQL as the universal read interface/,
-		);
+		assert.match(queryTool.description ?? "", /read-only SQL statement/);
 		assert.equal(queryTool.annotations?.readOnlyHint, true);
-		assert.match(queryTool.description ?? "", /information_schema\.tables/);
 		assert.equal(executeSqlTool.annotations?.destructiveHint, true);
+		assert.match(executeSqlTool.description ?? "", /ordered atomic SQL batch/);
+		assert.match(executeSqlTool.description ?? "", /already persisted/);
+		assert.match(executeSqlTool.description ?? "", /verification SELECT/);
 		assert.match(
 			executeSqlTool.description ?? "",
-			/any ordered atomic SQL batch/,
+			/Do not call create_checkpoint after a write/,
 		);
-		assert.match(queryTool.description ?? "", /CAST\(\$2 AS BYTEA\)/);
-		assert.match(executeSqlTool.description ?? "", /CAST\(\$2 AS BYTEA\)/);
-		assert.doesNotMatch(
-			queryTool.description ?? "",
-			/\{"kind":"blob"/,
-			"query_sql must not advertise kind blob as the default content wire value",
-		);
-		assert.doesNotMatch(
-			executeSqlTool.description ?? "",
-			/\{"kind":"blob"/,
-			"execute_sql must not advertise kind blob as the default content wire value",
-		);
-		assert.match(executeSqlTool.description ?? "", /already saved/);
-		assert.match(
-			executeSqlTool.description ?? "",
-			/does not require a checkpoint/,
-		);
-		assertCheckpointPolicy(executeSqlTool.description ?? "");
+		for (const tool of tools.tools) {
+			for (const marker of SHARED_GUIDE_MARKERS) {
+				assert.doesNotMatch(
+					tool.description ?? "",
+					marker,
+					`${tool.name} must not repeat the shared SQL guide`,
+				);
+			}
+		}
 		const checkpointTool = tools.tools.find(
 			(tool) => tool.name === "create_checkpoint",
 		);
@@ -475,6 +502,11 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			context_expires_at: string;
 			id: string;
 			url: string;
+			lix_ref: string;
+			name: string;
+			file_count: number;
+			directory_count: number;
+			empty: boolean;
 		};
 		const context = openedContent.context;
 		assert.equal(typeof context, "string");
@@ -482,20 +514,14 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(openedContent.id, LIX_ID);
 		assert.equal(openedContent.url, "https://lixray.com/@acme/company");
 		assert.ok(Date.parse(openedContent.context_expires_at) > Date.now());
-		const openedText =
-			opened.content?.[0]?.type === "text" ? opened.content[0].text : "";
-		assert.match(openedText, /^Opened https:\/\/lixray\.com\/@acme\/company/);
-		assert.match(
-			openedText,
-			/context=[^\s]+/,
-			"open_lix text must include context for bridges that only expose content[].text",
-		);
-		const extractedContext = /context=([^\s]+)/.exec(openedText)?.[1];
-		assert.equal(
-			extractedContext,
-			context,
-			"context in text content must match structuredContent",
-		);
+		const openedText = toolText(opened);
+		assert.match(openedText, /^Opened @acme\/company \(Company\) on branch/);
+		assert.match(openedText, /empty, 0 files, 0 directories/);
+		assertTextOmitsContext(openedText, context);
+		assert.equal(openedContent.lix_ref, "@acme/company");
+		assert.equal(openedContent.empty, true);
+		assert.equal(openedContent.file_count, 0);
+		assert.equal(openedContent.directory_count, 0);
 		assert.equal(responseRequestIds.at(-1), openedContent.request_id);
 		const restored = await client.callTool({
 			name: "restore",
@@ -508,10 +534,9 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			commit_id: "commit-target",
 			request_id: responseRequestIds.at(-1),
 		});
-		const restoredText =
-			restored.content?.[0]?.type === "text" ? restored.content[0].text : "";
+		const restoredText = toolText(restored);
 		assert.match(restoredText, /Restored branch main to commit commit-target/);
-		assert.match(restoredText, /context=[^\s]+/);
+		assertTextOmitsContext(restoredText, context);
 		const failedRestore = await client.callTool({
 			name: "restore",
 			arguments: { context, commit_id: "missing-commit" },
@@ -535,18 +560,17 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			result: { rowsAffected: number };
 		};
 		assert.equal(queriedContent.result.rowsAffected, 0);
-		const queriedText =
-			queried.content?.[0]?.type === "text" ? queried.content[0].text : "";
-		assert.deepEqual(sqlPayloadFromText(queriedText), {
-			columns: ["value"],
-			rows: [[{ kind: "text", value: "ok" }]],
-			rowsAffected: 0,
-			notices: [],
-		});
-		assert.match(
-			queriedText,
-			/context=[^\s]+/,
-			"query_sql text fallback must include context",
+		const queriedText = toolText(queried);
+		assert.equal(queriedText, "query_sql: 1 row");
+		assertTextOmitsContext(queriedText, context);
+		assert.deepEqual(
+			(queried.structuredContent as { result: unknown }).result,
+			{
+				columns: ["value"],
+				rows: [[{ kind: "text", value: "ok" }]],
+				rowsAffected: 0,
+				notices: [],
+			},
 		);
 		assert.equal(responseRequestIds.at(-1), queriedContent.request_id);
 		const listedFiles = await client.callTool({
@@ -554,31 +578,27 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			arguments: { context, sql: "SELECT path, name FROM lix_file" },
 		});
 		assert.equal(listedFiles.isError, undefined);
-		const listedFilesText =
-			listedFiles.content?.[0]?.type === "text"
-				? listedFiles.content[0].text
-				: "";
-		assert.match(
+		const listedFilesText = toolText(listedFiles);
+		assert.equal(listedFilesText, "query_sql: 1 row");
+		assertTextOmitsContext(listedFilesText, context);
+		assert.doesNotMatch(
 			listedFilesText,
 			/\/skills\/hello\.md/,
-			"query_sql text must include SELECT cell values, not only a row count",
+			"query_sql text must not dump structured rows when structuredContent is present",
 		);
-		assert.match(listedFilesText, /hello\.md/);
-		assert.deepEqual(sqlPayloadFromText(listedFilesText), {
-			columns: ["path", "name"],
-			rows: [
-				[
-					{ kind: "text", value: "/skills/hello.md" },
-					{ kind: "text", value: "hello.md" },
+		assert.deepEqual(
+			(listedFiles.structuredContent as { result: unknown }).result,
+			{
+				columns: ["path", "name"],
+				rows: [
+					[
+						{ kind: "text", value: "/skills/hello.md" },
+						{ kind: "text", value: "hello.md" },
+					],
 				],
-			],
-			rowsAffected: 0,
-			notices: [],
-		});
-		assert.match(
-			listedFilesText,
-			/context=[^\s]+/,
-			"query_sql text fallback must include context",
+				rowsAffected: 0,
+				notices: [],
+			},
 		);
 		const mutated = await client.callTool({
 			name: "execute_sql",
@@ -591,22 +611,21 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			},
 		});
 		assert.equal(mutated.isError, undefined);
-		const mutatedText =
-			mutated.content?.[0]?.type === "text" ? mutated.content[0].text : "";
-		assert.match(mutatedText, /^Atomic SQL completed 2 statements\. /);
-		assert.deepEqual(sqlPayloadFromText(mutatedText), [
-			{ columns: [], rows: [], rowsAffected: 1, notices: [] },
-			{
-				columns: ["value"],
-				rows: [[{ kind: "text", value: "ok" }]],
-				rowsAffected: 0,
-				notices: [],
-			},
-		]);
-		assert.match(
-			mutatedText,
-			/context=[^\s]+/,
-			"execute_sql text fallback must include context",
+		const mutatedText = toolText(mutated);
+		assert.equal(mutatedText, "execute_sql: 1 row affected");
+		assertTextOmitsContext(mutatedText, context);
+		assert.doesNotMatch(mutatedText, /\[\{/);
+		assert.deepEqual(
+			(mutated.structuredContent as { results: unknown }).results,
+			[
+				{ columns: [], rows: [], rowsAffected: 1, notices: [] },
+				{
+					columns: ["value"],
+					rows: [[{ kind: "text", value: "ok" }]],
+					rowsAffected: 0,
+					notices: [],
+				},
+			],
 		);
 		const failed = await client.callTool({
 			name: "query_sql",
@@ -780,14 +799,39 @@ void test("list_lixes text is a clear sentence when no lixes exist", async () =>
 void test("checkpoint copy forbids agent-initiated checkpoints after writes", () => {
 	assertCheckpointPolicy(MCP_SERVER_INSTRUCTIONS);
 	assertCheckpointPolicy(CREATE_CHECKPOINT_TOOL_DESCRIPTION);
-	assertCheckpointPolicy(EXECUTE_SQL_TOOL_DESCRIPTION);
 	assertCheckpointPolicy(MCP_DOCS);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /already saved/);
 	assert.match(CREATE_CHECKPOINT_TOOL_DESCRIPTION, /user explicitly asked/);
 	assert.match(MCP_DOCS, /Writes persist without a\s+checkpoint/);
+	assert.match(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/Do not call create_checkpoint after a write/,
+	);
 });
 
-void test("MCP tools preserve continuation fields in text fallback", async () => {
+void test("shipped copy tells agents not to verify writes", async () => {
+	for (const text of [
+		MCP_SERVER_INSTRUCTIONS,
+		LIX_SQL_OPERATING_GUIDE,
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		MCP_DOCS,
+	]) {
+		assert.match(text, /verification [`']?SELECT/);
+		assert.doesNotMatch(text, /inspect the relevant rows first/);
+		assert.doesNotMatch(text, /final verification SELECT is recommended/);
+	}
+	assert.match(MCP_SERVER_INSTRUCTIONS, /do not follow a write/i);
+	assert.match(MCP_DOCS, /Do not follow a write/);
+	assert.match(await mcpDocumentationResponse().text(), /verification SELECT/);
+});
+
+void test("list_lixes and open_lix descriptions stay identity- and empty-state honest", () => {
+	assert.match(LIST_LIXES_TOOL_DESCRIPTION, /@handle\/slug/);
+	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /file and directory counts/);
+	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /empty/);
+});
+
+void test("MCP tool text describes outcomes without echoing the context token", async () => {
 	const service = new LixService(new FakeRuntime(), {
 		contextSigningKey: "test-key",
 		principal: { userId: "user", clientId: "client" },
@@ -814,144 +858,252 @@ void test("MCP tools preserve continuation fields in text fallback", async () =>
 			name: "open_lix",
 			arguments: { lix_ref: LIX_ID },
 		});
-		const context = (opened.structuredContent as { context: string }).context;
+		const openedContent = opened.structuredContent as {
+			context: string;
+			lix_ref: string;
+			empty: boolean;
+		};
+		const context = openedContent.context;
+		assert.match(context, /\S+/);
+		assert.equal(openedContent.lix_ref, "@acme/company");
+		assert.equal(openedContent.empty, true);
+		assertTextOmitsContext(toolText(opened), context);
 
-		const activeBranch = await client.callTool({
-			name: "active_branch_id",
-			arguments: { context },
-		});
-		const activeBranchText =
-			activeBranch.content?.[0]?.type === "text"
-				? activeBranch.content[0].text
-				: "";
-		assert.match(
-			activeBranchText,
-			/Active branch.*at commit/,
-			"active_branch_id must describe result",
-		);
-		assert.match(
-			activeBranchText,
-			/context=[^\s]+/,
-			"active_branch_id text fallback must include context",
-		);
+		const cases: Array<{
+			name: string;
+			arguments: Record<string, unknown>;
+			text: RegExp;
+		}> = [
+			{
+				name: "active_branch_id",
+				arguments: { context },
+				text: /Active branch.*at commit/,
+			},
+			{
+				name: "switch_branch",
+				arguments: { context, branch_id: "main" },
+				text: /Switched to branch/,
+			},
+			{
+				name: "create_branch",
+				arguments: { context, name: "test-branch" },
+				text: /Created branch/,
+			},
+			{
+				name: "create_checkpoint",
+				arguments: { context },
+				text: /Checkpoint created/,
+			},
+			{ name: "undo", arguments: { context }, text: /Undone to commit/ },
+			{ name: "redo", arguments: { context }, text: /Redone to commit/ },
+			{
+				name: "merge_branch_preview",
+				arguments: { context, source_branch_id: "main" },
+				text: /Merge preview/,
+			},
+			{
+				name: "merge_branch",
+				arguments: { context, source_branch_id: "main" },
+				text: /Branch merged/,
+			},
+		];
+		for (const toolCall of cases) {
+			const result = await client.callTool(toolCall);
+			assert.equal(result.isError, undefined, JSON.stringify(result));
+			const text = toolText(result);
+			assert.match(
+				text,
+				toolCall.text,
+				`${toolCall.name} must describe result`,
+			);
+			assertTextOmitsContext(text, context);
+			assert.equal(
+				(result.structuredContent as { context: string }).context.length > 0,
+				true,
+				`${toolCall.name} structuredContent must still carry context`,
+			);
+		}
+	} finally {
+		await client.close();
+	}
+});
 
-		const switched = await client.callTool({
-			name: "switch_branch",
-			arguments: { context, branch_id: "main" },
-		});
-		const switchedText =
-			switched.content?.[0]?.type === "text" ? switched.content[0].text : "";
-		assert.match(
-			switchedText,
-			/Switched to branch/,
-			"switch_branch must describe result",
-		);
-		assert.match(
-			switchedText,
-			/context=[^\s]+/,
-			"switch_branch text fallback must include context",
-		);
-		const switchedContext = /context=([^\s]+)/.exec(switchedText)?.[1];
-		assert.ok(
-			switchedContext && switchedContext.length > 0,
-			"switch_branch context must be extractable from text",
-		);
+void test("typed context errors include hint, server time, and advertised expiration", async () => {
+	const expiredService = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+		contextTtlMs: -1,
+	});
+	const liveService = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const fetcherFor = (service: LixService) => {
+		return async (input: RequestInfo | URL, init?: RequestInit) => {
+			const request = new globalThis.Request(input, init) as unknown as Request;
+			return handleMcpTransport(request as never, service, {
+				authMode: "none",
+				serverName: "LixRay_ContextError_Test",
+			});
+		};
+	};
 
-		const created = await client.callTool({
-			name: "create_branch",
-			arguments: { context, name: "test-branch" },
+	const expiredTransport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcherFor(expiredService) },
+	);
+	const expiredClient = new Client(
+		{ name: "context-error-expired-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	const liveTransport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcherFor(liveService) },
+	);
+	const liveClient = new Client(
+		{ name: "context-error-live-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await expiredClient.connect(expiredTransport);
+		const expiredOpen = await expiredClient.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
 		});
-		const createdText =
-			created.content?.[0]?.type === "text" ? created.content[0].text : "";
-		assert.match(
-			createdText,
-			/Created branch/,
-			"create_branch must describe result",
-		);
-		assert.match(
-			createdText,
-			/context=[^\s]+/,
-			"create_branch text fallback must include context",
-		);
+		const expiredContext = (
+			expiredOpen.structuredContent as { context: string }
+		).context;
+		const expired = await expiredClient.callTool({
+			name: "query_sql",
+			arguments: { context: expiredContext, sql: "SELECT 1" },
+		});
+		assert.equal(expired.isError, true);
+		const expiredError = (
+			expired.structuredContent as {
+				error: {
+					code: string;
+					hint?: string;
+					details?: Record<string, unknown>;
+				};
+			}
+		).error;
+		assert.equal(expiredError.code, "expired_context");
+		assert.equal(expiredError.hint, CONTEXT_REOPEN_HINT);
+		assert.equal(typeof expiredError.details?.server_time, "string");
+		assert.equal(typeof expiredError.details?.expires_at, "string");
+		assert.match(toolText(expired), /Call open_lix again/);
+		assertTextOmitsContext(toolText(expired), expiredContext);
 
-		const checkpoint = await client.callTool({
-			name: "create_checkpoint",
-			arguments: { context },
+		await liveClient.connect(liveTransport);
+		const liveOpen = await liveClient.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
 		});
-		const checkpointText =
-			checkpoint.content?.[0]?.type === "text"
-				? checkpoint.content[0].text
-				: "";
-		assert.match(
-			checkpointText,
-			/Checkpoint created/,
-			"create_checkpoint must describe result",
-		);
-		assert.match(
-			checkpointText,
-			/context=[^\s]+/,
-			"create_checkpoint text fallback must include context",
-		);
+		const liveContext = (liveOpen.structuredContent as { context: string })
+			.context;
 
-		const undone = await client.callTool({
-			name: "undo",
-			arguments: { context },
+		const malformed = await liveClient.callTool({
+			name: "query_sql",
+			arguments: {
+				context: liveContext.slice(0, 12),
+				sql: "SELECT 1",
+			},
 		});
-		const undoneText =
-			undone.content?.[0]?.type === "text" ? undone.content[0].text : "";
-		assert.match(undoneText, /Undone to commit/, "undo must describe result");
-		assert.match(
-			undoneText,
-			/context=[^\s]+/,
-			"undo text fallback must include context",
-		);
+		assert.equal(malformed.isError, true);
+		const malformedError = (
+			malformed.structuredContent as {
+				error: {
+					code: string;
+					hint?: string;
+					details?: Record<string, unknown>;
+				};
+			}
+		).error;
+		assert.equal(malformedError.code, "malformed_context");
+		assert.equal(malformedError.hint, CONTEXT_REOPEN_HINT);
+		assert.equal(typeof malformedError.details?.server_time, "string");
 
-		const redone = await client.callTool({
-			name: "redo",
-			arguments: { context },
+		const wrongKey = new LixService(new FakeRuntime(), {
+			contextSigningKey: "other-key",
+			principal: { userId: "user", clientId: "client" },
 		});
-		const redoneText =
-			redone.content?.[0]?.type === "text" ? redone.content[0].text : "";
-		assert.match(redoneText, /Redone to commit/, "redo must describe result");
-		assert.match(
-			redoneText,
-			/context=[^\s]+/,
-			"redo text fallback must include context",
+		const wrongKeyClient = new Client(
+			{ name: "context-error-signature-client", version: "1.0.0" },
+			{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
 		);
+		const wrongKeyTransport = new StreamableHTTPClientTransport(
+			new URL("https://lixray.test/mcp"),
+			{ fetch: fetcherFor(wrongKey) },
+		);
+		await wrongKeyClient.connect(wrongKeyTransport);
+		const signature = await wrongKeyClient.callTool({
+			name: "query_sql",
+			arguments: { context: liveContext, sql: "SELECT 1" },
+		});
+		assert.equal(signature.isError, true);
+		const signatureError = (
+			signature.structuredContent as {
+				error: {
+					code: string;
+					hint?: string;
+					details?: Record<string, unknown>;
+				};
+			}
+		).error;
+		assert.equal(signatureError.code, "invalid_signature");
+		assert.equal(signatureError.hint, CONTEXT_REOPEN_HINT);
+		assert.equal(typeof signatureError.details?.server_time, "string");
+		assert.equal(typeof signatureError.details?.expires_at, "string");
+		await wrongKeyClient.close();
+	} finally {
+		await expiredClient.close();
+		await liveClient.close();
+	}
+});
 
-		const preview = await client.callTool({
-			name: "merge_branch_preview",
-			arguments: { context, source_branch_id: "main" },
+void test("open_lix text reports a populated inventory without calling the lix empty", async () => {
+	const runtime = new FakeRuntime();
+	runtime.fileCount = 4;
+	runtime.directoryCount = 1;
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		return handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_OpenInventory_Test",
 		});
-		const previewText =
-			preview.content?.[0]?.type === "text" ? preview.content[0].text : "";
-		assert.match(
-			previewText,
-			/Merge preview/,
-			"merge_branch_preview must describe result",
-		);
-		assert.match(
-			previewText,
-			/context=[^\s]+/,
-			"merge_branch_preview text fallback must include context",
-		);
-
-		const merged = await client.callTool({
-			name: "merge_branch",
-			arguments: { context, source_branch_id: "main" },
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcher },
+	);
+	const client = new Client(
+		{ name: "open-inventory-test-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
 		});
-		const mergedText =
-			merged.content?.[0]?.type === "text" ? merged.content[0].text : "";
-		assert.match(
-			mergedText,
-			/Branch merged/,
-			"merge_branch must describe result",
-		);
-		assert.match(
-			mergedText,
-			/context=[^\s]+/,
-			"merge_branch text fallback must include context",
-		);
+		assert.equal(opened.isError, undefined, JSON.stringify(opened));
+		const content = opened.structuredContent as {
+			context: string;
+			file_count: number;
+			directory_count: number;
+			empty: boolean;
+		};
+		assert.equal(content.file_count, 4);
+		assert.equal(content.directory_count, 1);
+		assert.equal(content.empty, false);
+		const text = toolText(opened);
+		assert.match(text, /4 files, 1 directory/);
+		assert.doesNotMatch(text, /\bempty\b/);
+		assertTextOmitsContext(text, content.context);
 	} finally {
 		await client.close();
 	}

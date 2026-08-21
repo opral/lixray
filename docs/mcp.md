@@ -6,14 +6,20 @@ tools. Lix SQL is a Postgres dialect subset.
 
 ## Recommended workflow
 
-1. Call `list_lixes` when the target repository is unknown.
-2. Call `open_lix` and retain its returned context.
-3. Use `query_sql` to inspect the relevant state.
+1. Call `list_lixes` when the target repository is unknown. The text channel
+   lists each lix as `@handle/slug` plus uuid.
+2. Call `open_lix` and retain its returned context from `structuredContent`.
+   Never copy a context token from tool text. `open_lix` reports file and
+   directory counts so empty lixes are obvious.
+3. Use `query_sql` to inspect the relevant state when you need to read.
 4. Before guessing dynamic table or column names, query `information_schema`.
 5. Use `execute_sql` for any atomic SQL batch. It is always treated as
-   potentially destructive; a final focused verification `SELECT` is recommended
-   after mutations.
-6. Report `rowsAffected` and the returned verification rows.
+   potentially destructive. The mutation is already persisted — `rowsAffected`
+   and any rows the batch itself returned are sufficient.
+6. Do not follow a write with a verification `SELECT`, a second `query_sql`
+   "to check", or path/length/substring readback. One `execute_sql` batch is
+   the whole write (dirs + file + `ON CONFLICT` is fine inside that batch).
+   Then stop.
 
 A successful `execute_sql` mutation is already saved. Writes persist without a
 checkpoint. `create_checkpoint` is an explicit user-facing action, not agent
@@ -88,13 +94,3 @@ Parent directories: `INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (p
 
 Name the conflict columns. Lix does not support `ON CONSTRAINT`, inference
 without columns, or `DO UPDATE WHERE`.
-
-For a multi-file setup, send the inserts as one `execute_sql` request and
-make its final statement a readback query:
-
-```sql
-SELECT path
-FROM lix_file
-WHERE path IN ($1, $2, $3)
-ORDER BY path;
-```

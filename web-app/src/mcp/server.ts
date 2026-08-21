@@ -14,6 +14,7 @@ import { z } from "zod";
 import { sqlLooksLikeWrite } from "../lib/lix-sql-access.ts";
 import {
 	EXECUTE_SQL_TOOL_DESCRIPTION,
+	LIX_SQL_OPERATING_GUIDE,
 	QUERY_SQL_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 import {
@@ -40,11 +41,23 @@ export const MCP_PROTECTED_RESOURCE_URL = `${MCP_RESOURCE}${MCP_PROTECTED_RESOUR
 export const MCP_REQUEST_ID_HEADER = "X-Request-ID";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
-export const MCP_SERVER_INSTRUCTIONS =
-	"LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. File and directory creation, reads, edits, deletes, and path changes are SQL operations through query_sql or execute_sql using the public lix_file and lix_directory tables. Lix SQL is a Postgres dialect subset. query_sql is a single-statement read path and rejects INSERT, UPDATE, and DELETE; execute_sql accepts any atomic SQL batch and is always treated as potentially destructive. Writes persist without a checkpoint; execute_sql already saved the files. create_checkpoint is an explicit user-facing action, not agent ceremony. Do not call create_checkpoint after a write, after every change, or to be safe. The agent may recommend that the user checkpoint when a task or session is done; prefer leaving the checkpoint to the user. Never treat checkpointing as required, unlike Git commits. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent file helper tools or branch state.";
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Read the context from structuredContent only — never copy a context token from tool text.
+
+${LIX_SQL_OPERATING_GUIDE}
+
+Writes persist without a checkpoint; execute_sql already saved the files. create_checkpoint is an explicit user-facing action, not agent ceremony. Do not call create_checkpoint after a write, after every change, or to be safe. The agent may recommend that the user checkpoint when a task or session is done; prefer leaving the checkpoint to the user. Never treat checkpointing as required, unlike Git commits. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent file helper tools or branch state.`;
 
 export const CREATE_CHECKPOINT_TOOL_DESCRIPTION =
-	"Create a named restore point on the branch selected by context. This is an explicit user-facing action, not agent ceremony. Writes already persist through execute_sql; a checkpoint is not required for durability and is not a Git-style commit. Do not call this after a write, after every change, or to be safe. Call it only when the user explicitly asked. The agent may recommend that the user checkpoint when a task or session is done; prefer leaving the checkpoint to the user.";
+	"Create a named restore point on the branch selected by context. This is an explicit user-facing action, not agent ceremony — writes already persist through execute_sql and a checkpoint is not required for durability. Do not call this after a write, after every change, or to be safe; call it only when the user explicitly asked. The agent may recommend that the user checkpoint when a task or session is done; prefer leaving the checkpoint to the user.";
+
+export const RESTORE_TOOL_DESCRIPTION =
+	"Move the branch selected by context to ancestor commit_id. Restore creates no commit, does not delete abandoned commits, and is not undoable; undo only applies to commits made afterward. A later checkpoint-driven garbage-collection sweep may reclaim abandoned commits that are not reachable from a retention root; other branches and branch-local untracked rows remain unchanged. create_checkpoint returns a commit_id usable here; there is no restore_checkpoint tool.";
+
+export const LIST_LIXES_TOOL_DESCRIPTION =
+	"List LixRay lixes the signed-in user can access. Use this before open_lix when the Lix is not already known. Each result identifies a lix as @handle/slug plus uuid.";
+
+export const OPEN_LIX_TOOL_DESCRIPTION =
+	"Resolve a lix and mint a signed context required by every later tool. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports file and directory counts so empty lixes are obvious.";
 
 type McpAuthMode = "oauth" | "none";
 
@@ -334,8 +347,13 @@ const openLixOutput = withError(
 		context_expires_at: z.string(),
 		id: z.string(),
 		url: z.string(),
+		lix_ref: z.string(),
+		name: z.string(),
 		branch_id: branchId,
 		commit_id: z.string(),
+		file_count: z.number().int(),
+		directory_count: z.number().int(),
+		empty: z.boolean(),
 	}),
 );
 const branchStateOutput = withError(
@@ -461,7 +479,7 @@ export function createLixrayMcpServer(
 		server,
 		"list_lixes",
 		"List lixes",
-		"List LixRay lixes the signed-in user can access. Use this before open_lix when the Lix is not already known.",
+		LIST_LIXES_TOOL_DESCRIPTION,
 		z.object({}).strict(),
 		listLixesOutput,
 		readAnnotations(),
@@ -478,7 +496,7 @@ export function createLixrayMcpServer(
 		server,
 		"open_lix",
 		"Open a Lix",
-		"Resolve and open a Lix context. If branch_id is omitted, pin the context to the Lix's current active branch. The returned context is required by every other tool.",
+		OPEN_LIX_TOOL_DESCRIPTION,
 		z.object({ lix_ref: lixRef, branch_id: branchId.optional() }).strict(),
 		openLixOutput,
 		readAnnotations(),
@@ -490,8 +508,13 @@ export function createLixrayMcpServer(
 				context_expires_at: opened.contextExpiresAt,
 				id: opened.lixId,
 				url: `${MCP_RESOURCE}/${opened.lixRef}`,
+				lix_ref: opened.lixRef,
+				name: opened.name,
 				branch_id: opened.branchId,
 				commit_id: opened.commitId,
+				file_count: opened.fileCount,
+				directory_count: opened.directoryCount,
+				empty: opened.empty,
 			};
 		},
 		undefined,
@@ -668,7 +691,7 @@ export function createLixrayMcpServer(
 		server,
 		"restore",
 		"Restore branch",
-		"Move the branch selected by context to ancestor commit_id. The commit must exist and be an ancestor of the current branch head. Restore creates no commit, does not delete abandoned commits, and is not undoable; undo only applies to commits made afterward. A later checkpoint-driven garbage-collection sweep may reclaim abandoned commits that are not reachable from a retention root. Other branches and branch-local untracked rows remain unchanged. create_checkpoint returns a commit_id usable here; there is no restore_checkpoint tool.",
+		RESTORE_TOOL_DESCRIPTION,
 		z.object({ context, commit_id: commitId }).strict(),
 		branchStateOutput,
 		writeAnnotations(true, true),
@@ -950,9 +973,10 @@ export function mcpDocumentationResponse(
 			`Protocol: MCP ${MCP_PROTOCOL_VERSION} (modern stateless transport only).`,
 			"Authentication: Supabase OAuth 2.1 with PKCE and dynamic client registration.",
 			"",
-			"Call list_lixes when the Lix is unknown, then open_lix. Pass the returned context to every later tool. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
+			"Call list_lixes when the Lix is unknown, then open_lix. Pass the returned context from structuredContent to every later tool. Never copy a context token from tool text. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
 			"",
 			"Use query_sql for one SELECT statement and execute_sql for any atomic ordered SQL batch. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; do not expect separate file helper tools. Directory paths use /skills, not /skills/.",
+			"execute_sql already persisted the mutation. Do not follow a write with a verification SELECT.",
 			"Every MCP response includes X-Request-ID and every tool result includes request_id. You may send X-Request-ID to preserve an upstream correlation ID; use the returned ID when reporting failures.",
 			"",
 			"Modern clients begin with server/discover. There is no initialize handshake and no MCP session id on this endpoint.",
@@ -1129,76 +1153,106 @@ function formatListLixIdentity(item: unknown): string {
 function summarizeToolResult(name: string, raw: unknown): string {
 	if (!raw || typeof raw !== "object") return `${name} completed.`;
 	const result = raw as Record<string, unknown>;
-	const contextSuffix = formatContextSuffix(result);
 
 	if (name === "list_lixes") {
 		return summarizeListLixes(result);
 	}
 	if (name === "open_lix") {
-		return `Opened ${String(result.url ?? result.id)} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}. Context expires at ${String(result.context_expires_at)}.${contextSuffix}`;
+		return summarizeOpenLix(result);
 	}
 	if (name === "query_sql") {
-		return `${summarizeSqlResults(result.result)}${contextSuffix}`;
+		return summarizeQuerySql(result.result);
 	}
 	if (name === "execute_sql") {
-		const results = Array.isArray(result.results) ? result.results : [];
-		return `Atomic SQL completed ${results.length} ${results.length === 1 ? "statement" : "statements"}. ${summarizeSqlResults(results)}${contextSuffix}`;
+		return summarizeExecuteSql(result.results);
 	}
 	if (name === "active_branch_id") {
-		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.${contextSuffix}`;
+		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.`;
 	}
 	if (name === "switch_branch") {
-		return `Switched to branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.${contextSuffix}`;
+		return `Switched to branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.`;
 	}
 	if (name === "create_branch") {
 		const branch = result.branch as Record<string, unknown> | undefined;
 		if (branch) {
-			return `Created branch ${String(branch.name)} (${String(branch.id)}) at commit ${String(branch.commit_id)}.${contextSuffix}`;
+			return `Created branch ${String(branch.name)} (${String(branch.id)}) at commit ${String(branch.commit_id)}.`;
 		}
-		return `Branch created.${contextSuffix}`;
+		return "Branch created.";
 	}
 	if (name === "create_checkpoint") {
-		return `Checkpoint created at commit ${String(result.commit_id)}.${contextSuffix}`;
+		return `Checkpoint created at commit ${String(result.commit_id)}.`;
 	}
 	if (name === "restore") {
-		return `Restored branch ${String(result.branch_id)} to commit ${String(result.commit_id)}.${contextSuffix}`;
+		return `Restored branch ${String(result.branch_id)} to commit ${String(result.commit_id)}.`;
 	}
 	if (name === "undo") {
-		return `Undone to commit ${String(result.target_commit_id)} (inverse commit ${String(result.inverse_commit_id)}).${contextSuffix}`;
+		return `Undone to commit ${String(result.target_commit_id)} (inverse commit ${String(result.inverse_commit_id)}).`;
 	}
 	if (name === "redo") {
-		return `Redone to commit ${String(result.target_commit_id)} (replay commit ${String(result.replay_commit_id)}).${contextSuffix}`;
+		return `Redone to commit ${String(result.target_commit_id)} (replay commit ${String(result.replay_commit_id)}).`;
 	}
 	if (name === "merge_branch_preview") {
-		return `Merge preview completed.${contextSuffix}`;
+		return "Merge preview completed.";
 	}
 	if (name === "merge_branch") {
-		return `Branch merged.${contextSuffix}`;
+		return "Branch merged.";
 	}
-	return `${name} completed.${contextSuffix}`;
+	return `${name} completed.`;
 }
 
-/**
- * Format essential continuation fields for text content fallback.
- * Returns a consistent machine-parseable suffix containing the opaque context
- * token required for chaining operations. The context is canonically provided
- * in structuredContent; including it in text content ensures compatibility with
- * MCP bridges or wrappers that expose only content[].text without propagating
- * the full structuredContent to downstream consumers.
- */
-function formatContextSuffix(result: Record<string, unknown>): string {
-	if (typeof result.context !== "string" || result.context.length === 0) {
+function summarizeOpenLix(result: Record<string, unknown>): string {
+	const identity =
+		typeof result.lix_ref === "string" && result.lix_ref.length > 0
+			? result.lix_ref
+			: String(result.url ?? result.id);
+	const name =
+		typeof result.name === "string" && result.name.length > 0
+			? ` (${result.name})`
+			: "";
+	return `Opened ${identity}${name} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.${formatInventory(result)} Context expires at ${String(result.context_expires_at)}.`;
+}
+
+function formatInventory(result: Record<string, unknown>): string {
+	if (
+		typeof result.file_count !== "number" ||
+		typeof result.directory_count !== "number"
+	) {
 		return "";
 	}
-	return ` context=${result.context}`;
+	const files = `${result.file_count} ${result.file_count === 1 ? "file" : "files"}`;
+	const dirs = `${result.directory_count} ${result.directory_count === 1 ? "directory" : "directories"}`;
+	if (result.empty === true) {
+		return ` empty, ${files}, ${dirs}.`;
+	}
+	return ` ${files}, ${dirs}.`;
 }
 
-/**
- * MCP clients typically surface only content[].text, not structuredContent.
- * Serialize the Lix execute result so agents can read columns, rows, and notices.
- */
-function summarizeSqlResults(payload: unknown): string {
-	return JSON.stringify(payload);
+function summarizeQuerySql(payload: unknown): string {
+	const rows = sqlRowCount(payload);
+	return `query_sql: ${rows} ${rows === 1 ? "row" : "rows"}`;
+}
+
+function summarizeExecuteSql(payload: unknown): string {
+	const results = Array.isArray(payload) ? payload : [];
+	const affected = results.reduce(
+		(sum, item) => sum + sqlRowsAffected(item),
+		0,
+	);
+	return `execute_sql: ${affected} ${affected === 1 ? "row" : "rows"} affected`;
+}
+
+function sqlRowCount(payload: unknown): number {
+	if (!payload || typeof payload !== "object") return 0;
+	const rows = (payload as { rows?: unknown }).rows;
+	return Array.isArray(rows) ? rows.length : 0;
+}
+
+function sqlRowsAffected(payload: unknown): number {
+	if (!payload || typeof payload !== "object") return 0;
+	const rowsAffected = (payload as { rowsAffected?: unknown }).rowsAffected;
+	return typeof rowsAffected === "number" && Number.isFinite(rowsAffected)
+		? Math.max(0, Math.trunc(rowsAffected))
+		: 0;
 }
 
 function summarizeToolError(error: {
