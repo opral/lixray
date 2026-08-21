@@ -27,10 +27,6 @@ export interface PublicProfile {
 
 export interface ProfileRepositoryActivity {
 	slug: string;
-	description: string;
-	fileCount: number;
-	updatedLabel: string;
-	fileKind: "docs" | "code" | "sheets" | "decks" | "other";
 }
 
 /**
@@ -41,55 +37,44 @@ export interface ProfileRepositoryActivity {
 export const PLACEHOLDER_PROFILE_ACTIVITY = {
 	totalFiles: 312,
 	repositories: [
-		{
-			slug: "handbook",
-			description: "How we work, decide, and build at Opral.",
-			fileCount: 84,
-			updatedLabel: "Updated 2 days ago",
-			fileKind: "docs",
-		},
-		{
-			slug: "customer-roadmap",
-			description: "Research, requests, and the product roadmap.",
-			fileCount: 67,
-			updatedLabel: "Updated 4 days ago",
-			fileKind: "sheets",
-		},
-		{
-			slug: "brand-assets",
-			description: "Logos, product shots, and campaign source files.",
-			fileCount: 53,
-			updatedLabel: "Updated last week",
-			fileKind: "other",
-		},
-		{
-			slug: "launch-deck",
-			description: "The working deck for the next LixRay launch.",
-			fileCount: 42,
-			updatedLabel: "Updated last week",
-			fileKind: "decks",
-		},
-		{
-			slug: "pricing-model",
-			description: "Scenarios and assumptions for pricing LixRay.",
-			fileCount: 38,
-			updatedLabel: "Updated 2 weeks ago",
-			fileKind: "sheets",
-		},
-		{
-			slug: "weekly-updates",
-			description: "Weekly notes and progress across the team.",
-			fileCount: 28,
-			updatedLabel: "Updated 3 weeks ago",
-			fileKind: "docs",
-		},
+		{ slug: "handbook" },
+		{ slug: "customer-roadmap" },
+		{ slug: "brand-assets" },
+		{ slug: "launch-deck" },
+		{ slug: "pricing-model" },
+		{ slug: "weekly-updates" },
 	] satisfies Array<ProfileRepositoryActivity>,
 	fileMix: [
-		{ label: "Docs", percentage: 42, color: "#e8590c" },
-		{ label: "Code", percentage: 18, color: "#25211f" },
-		{ label: "Sheets", percentage: 17, color: "#6b8e67" },
-		{ label: "Decks", percentage: 13, color: "#c79a6b" },
-		{ label: "PDFs & other", percentage: 10, color: "#cfc4b8" },
+		{
+			label: "Docs",
+			examples: "markdown, text",
+			percentage: 42,
+			color: "#b9aa8f",
+		},
+		{
+			label: "Code",
+			examples: "ts, rust",
+			percentage: 18,
+			color: "#cbbb9e",
+		},
+		{
+			label: "Sheets",
+			examples: "csv, tables",
+			percentage: 17,
+			color: "#dccdb1",
+		},
+		{
+			label: "Decks",
+			examples: "slides",
+			percentage: 13,
+			color: "#e8dcc4",
+		},
+		{
+			label: "PDFs & other",
+			examples: "pdf, images",
+			percentage: 10,
+			color: "#f0e7d6",
+		},
 	],
 } as const;
 

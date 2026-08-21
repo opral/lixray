@@ -4,19 +4,8 @@ import {
 	Outlet,
 	useRouterState,
 } from "@tanstack/react-router";
-import {
-	BriefcaseBusiness,
-	Clock3,
-	Code2,
-	Download,
-	FileArchive,
-	FileText,
-	Link2,
-	MapPin,
-	Presentation,
-	Table2,
-} from "lucide-react";
-import { type ComponentType, useEffect, useState } from "react";
+import { ArrowDown, ArrowRight } from "lucide-react";
+import { useEffect, useState } from "react";
 import { AccountMenu } from "~/components/account-menu";
 import { useAuth } from "~/components/auth-provider";
 import { Button } from "~/components/ui/button";
@@ -72,7 +61,7 @@ function PublicProfilePage() {
 	}, [namespace]);
 
 	return (
-		<div className="min-h-dvh bg-[#fbf6f0] font-sans text-[#25211f]">
+		<div className="min-h-dvh bg-[#fbf6f0] font-sans text-[#1c1917]">
 			<ProfileHeader authLoaded={authLoaded} signedIn={Boolean(user)} />
 			{profile === undefined ? (
 				<ProfileStatus>Loading profile…</ProfileStatus>
@@ -95,13 +84,13 @@ function ProfileHeader({
 	signedIn: boolean;
 }) {
 	return (
-		<header className="flex h-14 items-center border-b border-[#25211f]/10 px-9 max-[760px]:px-5">
+		<header className="flex min-h-[60px] items-center border-b border-[#1c1917]/[0.06] px-9 py-[18px] max-[760px]:px-5 max-[760px]:py-3.5">
 			<Link
 				to="/"
-				className="inline-flex items-center gap-2 text-[15px] font-bold tracking-[-0.01em] no-underline"
+				className="inline-flex items-center gap-2 text-[17px] font-bold tracking-[-0.01em] no-underline"
 				aria-label="LixRay home"
 			>
-				<img className="size-5" src="/lixray-mark.svg" alt="" />
+				<img className="size-6" src="/lixray-mark.svg" alt="" />
 				LixRay
 			</Link>
 			<div className="ml-auto flex items-center gap-2.5">
@@ -135,9 +124,9 @@ function ProfileHeader({
 function ProfileContent({ profile }: { profile: PublicProfile }) {
 	const activity = PLACEHOLDER_PROFILE_ACTIVITY;
 	return (
-		<main className="mx-auto flex w-full max-w-[1240px] gap-[72px] px-16 pt-14 pb-20 max-[900px]:gap-10 max-[760px]:flex-col max-[760px]:px-5 max-[760px]:pt-8">
-			<aside className="w-[264px] shrink-0 max-[760px]:w-full">
-				<div className="size-[108px] overflow-hidden rounded-full border border-[#25211f]/10 bg-[#eee4d8] text-[34px] font-bold max-[760px]:size-[68px]">
+		<main className="mx-auto flex w-full max-w-[1240px] gap-[72px] px-16 pt-14 pb-20 max-[900px]:gap-10 max-[760px]:flex-col max-[760px]:gap-7 max-[760px]:px-6 max-[760px]:pt-7 max-[760px]:pb-12">
+			<aside className="flex w-[264px] shrink-0 flex-col gap-5 max-[760px]:w-full">
+				<div className="size-[108px] overflow-hidden rounded-full border border-[#1c1917]/10 bg-[#1c1917] text-[42px] font-bold text-[#fbf6f0] max-[760px]:size-[68px] max-[760px]:text-[28px]">
 					{profile.avatarUri ? (
 						<img
 							src={profile.avatarUri}
@@ -151,101 +140,114 @@ function ProfileContent({ profile }: { profile: PublicProfile }) {
 						</span>
 					)}
 				</div>
-				<h1 className="mt-5 mb-0 text-[27px] leading-[1.18] font-bold tracking-[-0.025em] max-[760px]:text-[21px]">
-					{profile.name}
-				</h1>
-				<p className="mt-1 font-mono text-[13px] text-[#766d65]">
-					@{profile.handle}
-				</p>
+				<div className="flex flex-col gap-1">
+					<h1 className="m-0 text-[27px] leading-[1.15] font-bold tracking-[-0.025em] max-[760px]:text-[21px]">
+						{profile.name}
+					</h1>
+					<p className="m-0 font-mono text-[14px] text-[#8a8178]">
+						@{profile.handle}
+					</p>
+				</div>
 				{profile.bio ? (
-					<p className="mt-5 text-[14px] leading-[1.55] text-[#4d4641]">
+					<p className="m-0 text-[14.5px] leading-[1.6] text-[#57534e]">
 						{profile.bio}
 					</p>
 				) : null}
 
-				<div className="my-6 h-px bg-[#25211f]/10" />
-				<div className="grid gap-3 text-[13.5px] text-[#4d4641]">
+				<div className="h-px bg-[#eae2d6]" />
+				<div className="flex flex-col gap-[9px] text-[13.5px] text-[#57534e]">
 					{profile.title || profile.organization ? (
-						<ProfileFact icon={BriefcaseBusiness}>
+						<span>
 							{[profile.title, profile.organization]
 								.filter(Boolean)
 								.join(" · ")}
-						</ProfileFact>
+						</span>
 					) : null}
-					{profile.location ? (
-						<ProfileFact icon={MapPin}>{profile.location}</ProfileFact>
-					) : null}
+					{profile.location ? <span>{profile.location}</span> : null}
 					{profile.links.map((link) => (
-						<ProfileFact icon={Link2} key={link.uri}>
-							<a
-								className="underline decoration-[#25211f]/25 underline-offset-4 hover:decoration-[#25211f]"
-								href={link.uri}
-								target="_blank"
-								rel="noreferrer"
-							>
-								{link.label}
-							</a>
-						</ProfileFact>
+						<a
+							key={link.uri}
+							className="font-semibold text-[#c2410c] no-underline hover:text-[#9a3412]"
+							href={link.uri}
+							target="_blank"
+							rel="noreferrer"
+						>
+							{link.label}
+						</a>
 					))}
 				</div>
 
-				<div className="my-6 h-px bg-[#25211f]/10" />
+				<div className="h-px bg-[#eae2d6]" />
 				<a
 					href={profile.contactCardUri}
 					download={`${profile.handle}.json`}
-					className="inline-flex items-center gap-2 text-[13.5px] font-semibold underline decoration-[#25211f]/25 underline-offset-4 hover:decoration-[#25211f]"
+					className="inline-flex items-center gap-1 self-start border-b border-[#c9bca4] pb-0.5 text-[13px] font-semibold no-underline hover:border-[#c2410c] hover:text-[#c2410c]"
 				>
-					<Download className="size-4" aria-hidden="true" />
 					Contact card
+					<ArrowDown className="size-3" aria-hidden="true" />
 				</a>
-				<ProfileFact icon={Clock3} className="mt-4 text-[#766d65]">
+				<span className="text-[12px] text-[#b5afa6]">
 					On LixRay since {joinedMonth(profile.joinedAt)}
-				</ProfileFact>
+				</span>
 			</aside>
 
-			<section className="min-w-0 flex-1" aria-labelledby="profile-files-title">
-				<div className="flex items-baseline gap-2.5 border-b border-[#25211f]/10 pb-5">
-					<h2
-						id="profile-files-title"
-						className="m-0 text-[21px] font-bold tracking-[-0.02em]"
-					>
-						Files
-					</h2>
-					<p className="m-0 text-[13px] text-[#766d65]">
-						{activity.totalFiles} across {activity.repositories.length} public
-						repositories
-					</p>
-				</div>
+			<section
+				className="flex min-w-0 flex-1 flex-col gap-10 pt-2 max-[760px]:pt-0"
+				aria-labelledby="profile-files-title"
+			>
+				<div>
+					<div className="flex items-baseline gap-2.5">
+						<h2 id="profile-files-title" className="m-0 text-[15px] font-bold">
+							Files
+						</h2>
+						<p className="m-0 text-[12.5px] text-[#a8a29e]">
+							{activity.totalFiles} across {activity.repositories.length} public
+							repositories
+						</p>
+					</div>
 
-				<div className="py-7">
-					<div className="flex h-2.5 overflow-hidden rounded-full bg-[#e9dfd4]">
+					<div className="mt-3.5 flex h-4 gap-[3px]">
 						{activity.fileMix.map((segment) => (
 							<span
 								key={segment.label}
 								style={{
-									width: `${segment.percentage}%`,
+									flexGrow: segment.percentage,
+									flexBasis: 0,
 									background: segment.color,
 								}}
+								className="rounded-[5px]"
 							/>
 						))}
 					</div>
-					<div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+					<div className="mt-2.5">
 						{activity.fileMix.map((segment) => (
-							<span
-								className="inline-flex items-center gap-1.5 text-[11.5px] text-[#766d65]"
+							<div
+								className="flex items-center gap-2.5 border-t border-[#efe8dc] px-0.5 py-2 text-[13px] first:border-t-0"
 								key={segment.label}
 							>
-								<i
-									className="size-2 rounded-full"
+								<span
+									className="size-2.5 shrink-0 rounded-[3px]"
 									style={{ background: segment.color }}
 								/>
-								{segment.label} {segment.percentage}%
-							</span>
+								<span className="font-semibold">{segment.label}</span>
+								<span className="text-[12px] text-[#a8a29e]">
+									{segment.examples}
+								</span>
+								<span className="ml-auto shrink-0 text-[12px] text-[#a8a29e]">
+									{segment.percentage}%
+								</span>
+							</div>
 						))}
 					</div>
 				</div>
 
-				<div className="divide-y divide-[#25211f]/10 border-y border-[#25211f]/10">
+				<div>
+					<div className="flex items-baseline gap-2.5 pb-3">
+						<h2 className="m-0 text-[15px] font-bold">Repositories</h2>
+						<p className="m-0 text-[12.5px] text-[#a8a29e]">
+							{activity.repositories.length} public
+						</p>
+					</div>
 					{activity.repositories.map((repository) => (
 						<RepositoryRow
 							key={repository.slug}
@@ -259,26 +261,6 @@ function ProfileContent({ profile }: { profile: PublicProfile }) {
 	);
 }
 
-function ProfileFact({
-	children,
-	className,
-	icon: Icon,
-}: {
-	children: React.ReactNode;
-	className?: string;
-	icon: ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" }>;
-}) {
-	return (
-		<div className={`flex items-start gap-2.5 ${className ?? ""}`}>
-			<Icon
-				className="mt-0.5 size-4 shrink-0 text-[#8b8178]"
-				aria-hidden="true"
-			/>
-			<span className="min-w-0">{children}</span>
-		</div>
-	);
-}
-
 function RepositoryRow({
 	handle,
 	repository,
@@ -286,40 +268,22 @@ function RepositoryRow({
 	handle: string;
 	repository: ProfileRepositoryActivity;
 }) {
-	const Icon = repositoryIcon(repository.fileKind);
 	return (
 		<Link
 			to="/@{$namespace}/$repository"
 			params={{ namespace: handle, repository: repository.slug }}
 			search={{}}
-			className="group flex items-center gap-4 px-1 py-[18px] no-underline transition hover:bg-white/35 max-[540px]:items-start"
+			className="group -mx-3 flex items-center gap-5 rounded-lg border-t border-[#eae2d6] px-3 py-3.5 no-underline transition hover:bg-[#f6efe4]"
 		>
-			<span className="grid size-9 shrink-0 place-items-center rounded-[9px] border border-[#25211f]/10 bg-white/45">
-				<Icon className="size-[17px] text-[#635b54]" aria-hidden="true" />
-			</span>
-			<span className="min-w-0 flex-1">
-				<strong className="block truncate text-[14px] font-semibold group-hover:text-[#d6530b]">
-					{repository.slug}
-				</strong>
-				<span className="mt-1 block truncate text-[12.5px] text-[#766d65]">
-					{repository.description}
-				</span>
-			</span>
-			<span className="ml-auto shrink-0 text-right text-[11.5px] leading-5 text-[#8b8178] max-[540px]:hidden">
-				{repository.fileCount} files
-				<br />
-				{repository.updatedLabel}
-			</span>
+			<strong className="min-w-0 flex-1 truncate font-mono text-[14px] font-bold text-[#1c1917] group-hover:text-[#c2410c]">
+				{repository.slug}
+			</strong>
+			<ArrowRight
+				className="ml-auto size-3.5 shrink-0 text-[#c9c2b8] transition-transform group-hover:translate-x-0.5 group-hover:text-[#c2410c]"
+				aria-hidden="true"
+			/>
 		</Link>
 	);
-}
-
-function repositoryIcon(kind: ProfileRepositoryActivity["fileKind"]) {
-	if (kind === "code") return Code2;
-	if (kind === "sheets") return Table2;
-	if (kind === "decks") return Presentation;
-	if (kind === "other") return FileArchive;
-	return FileText;
 }
 
 function joinedMonth(value: string): string {
