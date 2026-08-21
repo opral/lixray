@@ -987,11 +987,12 @@ void test("typed context errors include hint, server time, and advertised expira
 				};
 			}
 		).error;
-		assert.equal(expiredError.code, "expired_context");
+		assert.equal(expiredError.code, "context_expired");
 		assert.equal(expiredError.hint, CONTEXT_REOPEN_HINT);
 		assert.equal(typeof expiredError.details?.server_time, "string");
 		assert.equal(typeof expiredError.details?.expires_at, "string");
 		assert.match(toolText(expired), /Call open_lix again/);
+		assert.match(toolText(expired), /structuredContent\.context/);
 		assertTextOmitsContext(toolText(expired), expiredContext);
 
 		await liveClient.connect(liveTransport);
@@ -1023,6 +1024,24 @@ void test("typed context errors include hint, server time, and advertised expira
 		assert.equal(malformedError.hint, CONTEXT_REOPEN_HINT);
 		assert.equal(typeof malformedError.details?.server_time, "string");
 
+		const malformedWrite = await liveClient.callTool({
+			name: "execute_sql",
+			arguments: {
+				context: liveContext.slice(0, 12),
+				statements: [{ sql: "INSERT INTO example VALUES (1)" }],
+			},
+		});
+		assert.equal(malformedWrite.isError, true);
+		assert.equal(
+			(
+				malformedWrite.structuredContent as {
+					error: { code: string };
+				}
+			).error.code,
+			"malformed_context",
+		);
+		assertTextOmitsContext(toolText(malformedWrite), liveContext);
+
 		const wrongKey = new LixService(new FakeRuntime(), {
 			contextSigningKey: "other-key",
 			principal: { userId: "user", clientId: "client" },
@@ -1050,10 +1069,11 @@ void test("typed context errors include hint, server time, and advertised expira
 				};
 			}
 		).error;
-		assert.equal(signatureError.code, "invalid_signature");
+		assert.equal(signatureError.code, "invalid_context");
 		assert.equal(signatureError.hint, CONTEXT_REOPEN_HINT);
 		assert.equal(typeof signatureError.details?.server_time, "string");
 		assert.equal(typeof signatureError.details?.expires_at, "string");
+		assert.equal(signatureError.details?.lix_id, undefined);
 		await wrongKeyClient.close();
 	} finally {
 		await expiredClient.close();

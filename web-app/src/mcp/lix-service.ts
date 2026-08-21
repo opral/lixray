@@ -75,7 +75,7 @@ export const OPEN_LIX_INVENTORY_SQL =
 	"SELECT (SELECT COUNT(*) FROM lix_file) AS file_count, (SELECT COUNT(*) FROM lix_directory) AS directory_count";
 
 export const CONTEXT_REOPEN_HINT =
-	"Call open_lix again for this Lix and branch. Do not retry the same context token.";
+	"Call open_lix again. Use structuredContent.context; do not copy TEXT.";
 
 export interface CreateBranchInput {
 	id?: string;
@@ -536,8 +536,8 @@ export class LixService {
 			throw contextError("malformed_context", "context is malformed.");
 		}
 		const [encodedClaims, encodedSignature] = parts;
-		let claims: ContextClaims;
-		let signature: Uint8Array<ArrayBuffer>;
+		let claims: ContextClaims | undefined;
+		let signature: Uint8Array<ArrayBuffer> | undefined;
 		try {
 			const parsed: unknown = JSON.parse(decodeBase64Url(encodedClaims));
 			if (!parsed || typeof parsed !== "object")
@@ -548,7 +548,9 @@ export class LixService {
 				throw new Error("non-canonical signature");
 			}
 		} catch {
-			throw contextError("malformed_context", "context is malformed.");
+			throw contextError("malformed_context", "context is malformed.", {
+				expiresAt: finiteTimestamp(claims?.expiresAt),
+			});
 		}
 		const advertisedExpiresAt = finiteTimestamp(claims.expiresAt);
 		const valid = await crypto.subtle.verify(
@@ -557,12 +559,8 @@ export class LixService {
 			signature,
 			new TextEncoder().encode(encodedClaims),
 		);
-		if (!valid) {
-			throw contextError("invalid_signature", "context signature is invalid.", {
-				expiresAt: advertisedExpiresAt,
-			});
-		}
 		if (
+			!valid ||
 			claims.v !== 1 ||
 			claims.userId !== this.principal.userId ||
 			claims.clientId !== this.principal.clientId ||
@@ -577,7 +575,7 @@ export class LixService {
 			advertisedExpiresAt === undefined ||
 			advertisedExpiresAt <= Date.now()
 		) {
-			throw contextError("expired_context", "The Lix context has expired.", {
+			throw contextError("context_expired", "The Lix context has expired.", {
 				expiresAt: advertisedExpiresAt,
 				lixId: claims.lixId,
 				branchId: claims.branchId,
@@ -588,11 +586,7 @@ export class LixService {
 }
 
 function contextError(
-	code:
-		| "expired_context"
-		| "invalid_signature"
-		| "malformed_context"
-		| "invalid_context",
+	code: "context_expired" | "malformed_context" | "invalid_context",
 	message: string,
 	options: {
 		expiresAt?: number;
