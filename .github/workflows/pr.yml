@@ -675,6 +675,42 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: .github/scripts/manage-railway-preview.sh url
 
+      - name: Verify preview server protocol
+        if: steps.credentials.outputs.available == 'true'
+        shell: bash
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
+        run: |
+          response_body="$(mktemp)"
+          status="$(
+            curl \
+              --silent \
+              --show-error \
+              --output "$response_body" \
+              --write-out '%{http_code}' \
+              --header 'Authorization: Bearer lixray-demo' \
+              --header 'Lix-Session-Id: 0000000000000000000000000000000000000000000000000000000000000000' \
+              "$PREVIEW_URL/@acme/launch-q3/lix/v1/sync/pull?after=18446744073709551615&limit=512"
+          )"
+          if test "$status" != 410; then
+            echo "Preview sync protocol returned HTTP $status; expected 410." >&2
+            jq . "$response_body" >&2 || sed -n '1,80p' "$response_body" >&2
+            exit 1
+          fi
+          jq -e '.error.code == "LIX_ERROR_PROTOCOL_SESSION_GONE"' "$response_body"
+
+      - name: Print bounded preview server errors
+        if: failure() && steps.credentials.outputs.available == 'true'
+        shell: bash
+        run: |
+          railway logs \
+            "${{ steps.promote.outputs.server_deployment_id }}" \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "${{ steps.environment.outputs.environment_id }}" \
+            --service "$RAILWAY_SERVER_SERVICE" \
+            --lines 100 \
+            --filter '@level:error'
+
       - name: Report preview statuses
         if: steps.credentials.outputs.available == 'true'
         env:
@@ -703,7 +739,7 @@ jobs:
 
   publish-preview:
     name: Publish preview link
-    if: needs.deploy-preview.outputs.preview_url != ''
+    if: always() && needs.deploy-preview.result == 'success'
     needs:
       - deploy-preview
     runs-on: ubuntu-latest
@@ -721,7 +757,7 @@ jobs:
 
   preview-e2e:
     name: Preview sync E2E
-    if: needs.deploy-preview.outputs.preview_url != ''
+    if: always() && needs.deploy-preview.result == 'success'
     needs:
       - deploy-preview
     runs-on: ubuntu-latest
