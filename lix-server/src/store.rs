@@ -466,7 +466,11 @@ impl LixRuntimeManager {
                         opener.done.send_replace(RuntimeOpenState::Ready);
                     }
                     Err(error) => {
-                        let error = Arc::<str>::from(format!("{error:#}"));
+                        // Railway records one physical line per log event. Preserve the
+                        // complete anyhow/Lix error chain after it crosses this async
+                        // opener boundary instead of losing everything after the first
+                        // newline in a structured Lix error.
+                        let error = Arc::<str>::from(format!("{error:#}").replace('\n', " | "));
                         if let Some((sequence, done)) = manager
                             .begin_failed_open_cleanup(&opener.lix_id, &opener.runtime)
                             .await
