@@ -4,7 +4,7 @@ import {
 	Outlet,
 	useRouterState,
 } from "@tanstack/react-router";
-import { ArrowDown, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AccountMenu } from "~/components/account-menu";
 import { useAuth } from "~/components/auth-provider";
@@ -178,14 +178,6 @@ function ProfileContent({ profile }: { profile: PublicProfile }) {
 				</div>
 
 				<div className="h-px bg-[#eae2d6]" />
-				<a
-					href={profile.contactCardUri}
-					download={`${profile.handle}.json`}
-					className="inline-flex items-center gap-1 self-start border-b border-[#c9bca4] pb-0.5 text-[13px] font-semibold no-underline hover:border-[#c2410c] hover:text-[#c2410c]"
-				>
-					Contact card
-					<ArrowDown className="size-3" aria-hidden="true" />
-				</a>
 				<span className="text-[12px] text-[#b5afa6]">
 					On LixRay since {joinedMonth(profile.joinedAt)}
 				</span>
