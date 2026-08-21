@@ -1233,11 +1233,11 @@ function summarizeQuerySql(payload: unknown): string {
 }
 
 function summarizeExecuteSql(payload: unknown): string {
-	const results = Array.isArray(payload) ? payload : [];
-	const affected = results.reduce(
-		(sum, item) => sum + sqlRowsAffected(item),
-		0,
-	);
+	const results: Array<unknown> = Array.isArray(payload) ? payload : [];
+	let affected = 0;
+	for (const item of results) {
+		affected += sqlRowsAffected(item);
+	}
 	return `execute_sql: ${affected} ${affected === 1 ? "row" : "rows"} affected`;
 }
 
