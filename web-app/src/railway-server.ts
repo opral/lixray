@@ -2,7 +2,6 @@ import process from "node:process";
 import startHandler from "@tanstack/react-start/server-entry";
 import { addGoogleAnalytics } from "./lib/google-analytics";
 import { lixServiceRequestHeaders } from "./lib/lix-service-proxy";
-import { parseSqlScript as parseNodeSqlScript } from "./lib/node-lix-sql-parser";
 import { withShareSecurityHeaders } from "./lib/share-security";
 import {
 	handleRequest,

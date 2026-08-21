@@ -22,6 +22,8 @@ interface OpenRepositoryLixSessionOptions {
 	 * read-only repository transport.
 	 */
 	allowAnonymous?: boolean;
+	/** Limits an anonymous session to one control-plane-published path. */
+	publicPath?: string;
 	initialBranchId?: string | null;
 	origin?: string | URL;
 	fetch?: RemoteLixFetch;
@@ -121,8 +123,17 @@ async function openOpfsSyncSession(
 			url: repositoryUrl(options),
 			headers: async (): Promise<Record<string, string>> => {
 				const currentToken = await options.getAccessToken();
-				if (currentToken) return { Authorization: `Bearer ${currentToken}` };
-				if (options.allowAnonymous) return {};
+				const publicPathHeaders: Record<string, string> = {};
+				if (options.publicPath) {
+					publicPathHeaders["X-Lixray-Public-Path"] = options.publicPath;
+				}
+				if (currentToken) {
+					return {
+						Authorization: `Bearer ${currentToken}`,
+						...publicPathHeaders,
+					};
+				}
+				if (options.allowAnonymous) return publicPathHeaders;
 				throw new Error("A repository access token is required.");
 			},
 			fetch: createTelemetryFetch(options.fetch, {
@@ -358,10 +369,9 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 	}
 
 	terminateForPageUnload(): void {
-		this.#closed = true;
-		this.#listeners.clear();
-		this.#syncObserver.close();
-		this.lix.terminateForPageUnload();
+		// Current Lix close starts synchronously by rejecting new operations and
+		// closing observers, then drains the transport asynchronously.
+		void this.close().catch(() => undefined);
 	}
 
 	#assertOpen(): void {

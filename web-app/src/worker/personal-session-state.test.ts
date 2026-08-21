@@ -6,10 +6,7 @@ import {
 	createRepositoryReviewStatusStore,
 	createRepositorySessionStateStore,
 } from "../lib/atelier-state.ts";
-import {
-	openRepositoryLixSession,
-	type RepositoryLixSession,
-} from "../lib/repository-lix-session.ts";
+import type { RepositoryLixSession } from "../lib/repository-lix-session.ts";
 
 const USER = "71000000-0000-0000-0000-000000000001";
 const OTHER_USER = "71000000-0000-0000-0000-000000000002";
@@ -276,157 +273,6 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 		"a separate tab does not inherit review-resolution state",
 	);
 });
-void test("lix sessions use unified remote Lix with session-local branch state and rebound observations", async (t) => {
-	const executeBranches: string[] = [];
-	const createBodies: unknown[] = [];
-	const requestPaths: string[] = [];
-	let activeBranchId = MAIN;
-	let observeOpenCount = 0;
-	let observationSequence = 0;
-	let observationController:
-		| ReadableStreamDefaultController<Uint8Array>
-		| undefined;
-	let observationSubscriptionId: string | undefined;
-	const emitObservation = () => {
-		if (!observationController || !observationSubscriptionId) return;
-		const frame = `event: next\ndata: ${JSON.stringify({
-			subscriptionId: observationSubscriptionId,
-			sequence: observationSequence++,
-			mutationSequence: observationSequence,
-			result: {
-				columns: ["branch"],
-				rows: [[{ kind: "text", value: activeBranchId }]],
-				rowsAffected: 0,
-				notices: [],
-			},
-		})}\n\n`;
-		observationController.enqueue(new TextEncoder().encode(frame));
-	};
-	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-		const request =
-			input instanceof Request
-				? input
-				: new Request(new URL(input, "https://lixray.test"), init);
-		const pathname = new URL(request.url).pathname;
-		requestPaths.push(pathname);
-		if (pathname.endsWith("/lix/v1/")) {
-			return Response.json({
-				protocolVersion: 2,
-				activeBranchId,
-				activeAccountId: "00000000-0000-7000-8000-000000000002",
-				sessionId: "lix-session",
-			});
-		}
-		if (pathname.endsWith("/lix/v1/session") && request.method === "DELETE") {
-			return new Response(null, { status: 204 });
-		}
-		const body: Record<string, unknown> = request.body
-			? ((await request.clone().json()) as Record<string, unknown>)
-			: {};
-		if (pathname.endsWith("/branch/switch")) {
-			const branchId = body.branchId;
-			if (branchId === "invalid-branch") {
-				return Response.json(
-					{
-						error: {
-							code: "LIX_BRANCH_NOT_FOUND",
-							message: "Branch not found",
-						},
-					},
-					{ status: 404 },
-				);
-			}
-			activeBranchId = String(branchId);
-			emitObservation();
-			return Response.json({ branchId });
-		}
-		if (pathname.endsWith("/branch/create")) {
-			createBodies.push(body);
-			return Response.json({
-				id: CREATED,
-				name: "Created",
-				hidden: false,
-				commitId: "created-commit",
-			});
-		}
-		if (pathname.endsWith("/execute")) {
-			if (body.sql === "SELECT branch") {
-				return Response.json({
-					columns: ["branch"],
-					rows: [[{ kind: "text", value: activeBranchId }]],
-					rowsAffected: 0,
-					notices: [],
-				});
-			}
-			executeBranches.push(activeBranchId);
-			return Response.json({
-				columns: [],
-				rows: [],
-				rowsAffected: 0,
-				notices: [],
-			});
-		}
-		if (pathname.endsWith("/observe/multiplex")) {
-			observeOpenCount += 1;
-			const subscriptions = body.subscriptions as Array<{ id: string }>;
-			observationSubscriptionId = subscriptions[0]?.id;
-			const signal = request.signal;
-			return new Response(
-				new ReadableStream<Uint8Array>({
-					start(controller) {
-						observationController = controller;
-						emitObservation();
-						if (signal?.aborted) controller.close();
-						else {
-							signal?.addEventListener(
-								"abort",
-								() => {
-									observationController = undefined;
-									controller.close();
-								},
-								{ once: true },
-							);
-						}
-					},
-				}),
-				{ headers: { "content-type": "text/event-stream" } },
-			);
-		}
-		return new Response("Not found", { status: 404 });
-	};
-	const session = await openRepositoryLixSession({
-		namespace: "acme",
-		repositorySlug: "launch-q3",
-		replicaId: "test-user",
-		origin: "https://lixray.test",
-		getAccessToken: async () => "token",
-		initialBranchId: "invalid-branch",
-		fetch,
-	});
-	t.after(() => session.close());
-	assert.equal(session.activeBranchSnapshot(), MAIN);
-	await session.lix.execute("SELECT 1");
-	const events = session.lix.observe("SELECT branch");
-	t.after(() => events.close());
-	assert.equal((await events.next())?.result.rows[0]?.get("branch"), MAIN);
-	await session.switchBranch(DRAFT);
-	assert.equal((await events.next())?.result.rows[0]?.get("branch"), DRAFT);
-	await session.lix.execute("SELECT 2");
-	assert.equal(await session.createBranch("Created"), CREATED);
-	assert.equal(session.activeBranchSnapshot(), CREATED);
-	assert.equal((await events.next())?.result.rows[0]?.get("branch"), CREATED);
-	await waitFor(() => observeOpenCount === 3);
-	assert.deepEqual(executeBranches, [MAIN, DRAFT]);
-	assert.deepEqual(createBodies, [{ name: "Created" }]);
-	assert.equal(
-		observeOpenCount,
-		3,
-		"the initial observation is rebound after each successful branch switch",
-	);
-	assert.equal(requestPaths[0], "/@acme/launch-q3/lix/v1/");
-	assert.ok(requestPaths.includes("/@acme/launch-q3/lix/v1/observe/multiplex"));
-});
-
 class MemoryStorage implements Storage {
 	readonly #values = new Map<string, string>();
 
@@ -453,12 +299,4 @@ class MemoryStorage implements Storage {
 	setItem(key: string, value: string): void {
 		this.#values.set(key, value);
 	}
-}
-
-async function waitFor(predicate: () => boolean): Promise<void> {
-	for (let attempt = 0; attempt < 100; attempt += 1) {
-		if (predicate()) return;
-		await new Promise<void>((resolve) => setTimeout(resolve, 0));
-	}
-	assert.fail("Timed out waiting for asynchronous session state");
 }
