@@ -173,6 +173,21 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			(count, page) => count + (blobLaneRequests.get(page)?.length ?? 0),
 			0,
 		);
+	const waitForBlobLaneQuiescence = async (pages: Page[]) => {
+		let lastCount = blobLaneRequestCount(pages);
+		let stableSamples = 0;
+		await expect
+			.poll(
+				() => {
+					const currentCount = blobLaneRequestCount(pages);
+					stableSamples = currentCount === lastCount ? stableSamples + 1 : 0;
+					lastCount = currentCount;
+					return stableSamples;
+				},
+				{ intervals: [500], timeout: 30_000 },
+			)
+			.toBeGreaterThanOrEqual(8);
+	};
 	observePage(left, "left");
 	observePage(right, "right");
 
@@ -237,6 +252,9 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			await backToNow.click();
 			await expect(backToNow).not.toBeVisible();
 		}
+		// History hydration is deliberately concurrent. Let its trailing batches
+		// finish before measuring whether an empty realtime file uses the blob lane.
+		await waitForBlobLaneQuiescence([left, right]);
 
 		const blobLaneBeforeEmptyFile = blobLaneRequestCount([left, right]);
 		await right.getByTestId("home-new-button").click();
