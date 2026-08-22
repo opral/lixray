@@ -223,6 +223,20 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			.locator(":scope > li")
 			.count();
 		expect(initialCheckpointCount).toBeGreaterThan(0);
+		if (initialCheckpointCount > 1) {
+			// Checkpoint creation compares against the latest checkpoint state. Warm
+			// that intentionally lazy boundary before timing collaboration and later
+			// checkpoint writes, just as the cold editors below are preconditioned.
+			await initialLeftHistory
+				.getByRole("button", { name: /Latest checkpoint/ })
+				.click();
+			const backToNow = left.getByRole("button", { name: "Back to now" });
+			await expect(backToNow).toBeVisible({
+				timeout: repositoryOperationTimeout,
+			});
+			await backToNow.click();
+			await expect(backToNow).not.toBeVisible();
+		}
 
 		const blobLaneBeforeEmptyFile = blobLaneRequestCount([left, right]);
 		await right.getByTestId("home-new-button").click();
