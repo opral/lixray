@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, type Request, test } from "@playwright/test";
 
 test("deployed OPFS clients sync files, editors, and hot checkpoint history", async ({
 	browser,
@@ -67,6 +67,11 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	const runtimeFailures: string[] = [];
 	const coldReads = new Map<Page, string[]>();
 	const blobLaneRequests = new Map<Page, string[]>();
+	const blobLanePayloadSizes = new Map<Page, number[]>();
+	const pendingBlobLaneResponses = new Set<Promise<void>>();
+	const pendingBlobLaneRequests = new Set<Request>();
+	const unreadableBlobLaneResponses = new Map<Request, string>();
+	const blobLaneObservationFailures: string[] = [];
 	const openHistoryPanel = async (page: Page) => {
 		const history = page.getByRole("region", {
 			name: "Checkpoint history",
@@ -102,10 +107,40 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		coldReads.set(page, pageColdReads);
 		const pageBlobLaneRequests: string[] = [];
 		blobLaneRequests.set(page, pageBlobLaneRequests);
+		const pageBlobLanePayloadSizes: number[] = [];
+		blobLanePayloadSizes.set(page, pageBlobLanePayloadSizes);
 		page.on("request", (request) => {
 			if (/\/sync\/(blob|chunk)(?:\?|$)/.test(request.url())) {
 				pageBlobLaneRequests.push(`${request.method()} ${request.url()}`);
+				pendingBlobLaneRequests.add(request);
+				if (
+					request.method() === "POST" &&
+					/\/sync\/blob(?:\?|$)/.test(request.url())
+				) {
+					try {
+						const manifest = request.postDataJSON() as unknown;
+						if (
+							typeof manifest !== "object" ||
+							manifest === null ||
+							!("sizeBytes" in manifest) ||
+							typeof manifest.sizeBytes !== "number"
+						) {
+							blobLaneObservationFailures.push(
+								`invalid POST blob manifest ${request.url()}`,
+							);
+						} else {
+							pageBlobLanePayloadSizes.push(manifest.sizeBytes);
+						}
+					} catch (error) {
+						blobLaneObservationFailures.push(
+							`unreadable POST blob manifest ${request.url()}: ${String(error)}`,
+						);
+					}
+				}
 			}
+		});
+		page.on("requestfinished", (request) => {
+			pendingBlobLaneRequests.delete(request);
 		});
 		page.on("pageerror", (error) => {
 			runtimeFailures.push(`${label} pageerror: ${error.message}`);
@@ -122,8 +157,12 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			}
 		});
 		page.on("requestfailed", (request) => {
+			pendingBlobLaneRequests.delete(request);
+			const errorText = request.failure()?.errorText ?? "unknown";
+			if (/abort|cancel/i.test(errorText)) {
+				unreadableBlobLaneResponses.delete(request);
+			}
 			if (request.url().includes("/lix/v1/")) {
-				const errorText = request.failure()?.errorText ?? "unknown";
 				// Reconciliation cancels an obsolete in-flight long poll or push after
 				// another request wins the ref CAS. Final convergence assertions prove
 				// that the replacement request completed.
@@ -138,6 +177,39 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		page.on("response", (response) => {
 			const url = response.url();
 			if (!url.includes("/lix/v1/sync/")) return;
+			if (
+				response.request().method() === "GET" &&
+				/\/sync\/blob(?:\?|$)/.test(url) &&
+				response.ok()
+			) {
+				const responseBody = response
+					.json()
+					.then((body: unknown) => {
+						if (!Array.isArray(body)) return;
+						for (const manifest of body as unknown[]) {
+							if (
+								typeof manifest === "object" &&
+								manifest !== null &&
+								"sizeBytes" in manifest &&
+								typeof manifest.sizeBytes === "number"
+							) {
+								pageBlobLanePayloadSizes.push(manifest.sizeBytes);
+							}
+						}
+					})
+					.catch((error: unknown) => {
+						const failureText = response.request().failure()?.errorText ?? "";
+						if (/abort|cancel/i.test(failureText)) return;
+						unreadableBlobLaneResponses.set(
+							response.request(),
+							`unreadable GET blob manifest ${url}: ${String(error)}`,
+						);
+					});
+				pendingBlobLaneResponses.add(responseBody);
+				void responseBody.finally(() => {
+					pendingBlobLaneResponses.delete(responseBody);
+				});
+			}
 			if (
 				!(
 					response.request().method() === "GET" &&
@@ -180,13 +252,21 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			.poll(
 				() => {
 					const currentCount = blobLaneRequestCount(pages);
-					stableSamples = currentCount === lastCount ? stableSamples + 1 : 0;
+					stableSamples =
+						currentCount === lastCount && pendingBlobLaneRequests.size === 0
+							? stableSamples + 1
+							: 0;
 					lastCount = currentCount;
 					return stableSamples;
 				},
 				{ intervals: [500], timeout: 30_000 },
 			)
 			.toBeGreaterThanOrEqual(8);
+	};
+	const settleBlobLaneResponses = async () => {
+		while (pendingBlobLaneResponses.size > 0) {
+			await Promise.all([...pendingBlobLaneResponses]);
+		}
 	};
 	observePage(left, "left");
 	observePage(right, "right");
@@ -254,10 +334,19 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			await expect(backToNow).not.toBeVisible();
 		}
 		// History hydration is deliberately concurrent. Let its trailing batches
-		// finish before measuring whether an empty realtime file uses the blob lane.
+		// finish before attributing any later blob payload to realtime work.
 		await waitForBlobLaneQuiescence([left, right]);
+		await settleBlobLaneResponses();
+		expect(blobLaneObservationFailures).toEqual([]);
+		expect([...blobLanePayloadSizes.values()].flat().length).toBeGreaterThan(0);
+		expect([...unreadableBlobLaneResponses.values()]).toEqual([]);
+		const blobPayloadCountsBeforeEmptyFile = new Map(
+			[left, right].map((page) => [
+				page,
+				blobLanePayloadSizes.get(page)?.length ?? 0,
+			]),
+		);
 
-		const blobLaneBeforeEmptyFile = blobLaneRequestCount([left, right]);
 		await right.getByTestId("home-new-button").click();
 		await right
 			.getByRole("button", { name: "New Markdown (.md)", exact: true })
@@ -272,7 +361,18 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			createdName,
 			{ timeout: realtimeTimeout },
 		);
-		expect(blobLaneRequestCount([left, right])).toBe(blobLaneBeforeEmptyFile);
+		await waitForBlobLaneQuiescence([left, right]);
+		await settleBlobLaneResponses();
+		expect(blobLaneObservationFailures).toEqual([]);
+		expect([...unreadableBlobLaneResponses.values()]).toEqual([]);
+		const newBlobPayloadSizes = [left, right].flatMap((page) =>
+			(blobLanePayloadSizes.get(page) ?? []).slice(
+				blobPayloadCountsBeforeEmptyFile.get(page) ?? 0,
+			),
+		);
+		// Attribute the transport assertion to the empty payload itself. A global
+		// request count also includes delayed hydration for unrelated older files.
+		expect(newBlobPayloadSizes).not.toContain(0);
 		await left.goto(createdUrl);
 		const leftEditor = left.locator('.ProseMirror[contenteditable="true"]');
 		// File discovery and a cold editor open are separate from the realtime
