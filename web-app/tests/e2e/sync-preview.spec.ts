@@ -214,9 +214,10 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		): Promise<string> => {
 			await openHome(page);
 			await page.getByTestId("home-new-button").click();
+			const homeUrl = page.url();
 			await page.getByRole("button", { name: buttonName, exact: true }).click();
-			await page.waitForURL((url) => url.toString() !== repositoryUrl, {
-				timeout: 30_000,
+			await expect(page).not.toHaveURL(homeUrl, {
+				timeout: repositoryOperationTimeout,
 			});
 			return decodeURIComponent(
 				new URL(page.url()).pathname.split("/").at(-1) ?? "",
