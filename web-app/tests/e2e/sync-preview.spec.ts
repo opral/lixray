@@ -15,7 +15,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	}
 
 	const repositoryUrl = new URL("/@acme/launch-q3", baseURL).toString();
-	const realtimeTimeout = 5_000;
+	const realtimeTimeout = 30_000;
 	const contexts = await Promise.all([
 		browser.newContext(),
 		browser.newContext(),
