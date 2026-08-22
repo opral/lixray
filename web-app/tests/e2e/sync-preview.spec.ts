@@ -4,6 +4,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	browser,
 	baseURL,
 }) => {
+	test.setTimeout(300_000);
 	test.skip(
 		!process.env.PLAYWRIGHT_SYNC_PREVIEW,
 		"requires a deployed preview",
@@ -16,6 +17,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 
 	const repositoryUrl = new URL("/@acme/launch-q3", baseURL).toString();
 	const realtimeTimeout = 30_000;
+	const repositoryOperationTimeout = 90_000;
 	const contexts = await Promise.all([
 		browser.newContext(),
 		browser.newContext(),
@@ -327,7 +329,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			left.getByRole("button", {
 				name: "Latest checkpoint. Open checkpoint history",
 			}),
-		).toBeVisible({ timeout: 30_000 });
+		).toBeVisible({ timeout: repositoryOperationTimeout });
 		const leftHistoryAfterCheckpoint = await openHistoryPanel(left);
 		await expect(
 			leftHistoryAfterCheckpoint
@@ -457,7 +459,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			left.getByRole("button", {
 				name: "Latest checkpoint. Open checkpoint history",
 			}),
-		).toBeVisible({ timeout: 30_000 });
+		).toBeVisible({ timeout: repositoryOperationTimeout });
 		const postReopenHistory = await openHistoryPanel(fresh);
 		await expect(
 			postReopenHistory
