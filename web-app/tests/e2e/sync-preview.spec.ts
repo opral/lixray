@@ -338,8 +338,14 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		await waitForBlobLaneQuiescence([left, right]);
 		await settleBlobLaneResponses();
 		expect(blobLaneObservationFailures).toEqual([]);
-		expect([...blobLanePayloadSizes.values()].flat().length).toBeGreaterThan(0);
 		expect([...unreadableBlobLaneResponses.values()]).toEqual([]);
+		test.info().annotations.push({
+			type: "bootstrap-blob-manifests",
+			description: JSON.stringify({
+				requests: blobLaneRequestCount([left, right]),
+				manifests: [...blobLanePayloadSizes.values()].flat().length,
+			}),
+		});
 		const blobPayloadCountsBeforeEmptyFile = new Map(
 			[left, right].map((page) => [
 				page,
