@@ -326,12 +326,12 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			await initialLeftHistory
 				.getByRole("button", { name: /Latest checkpoint/ })
 				.click();
-			const backToNow = left.getByRole("button", { name: "Back to now" });
-			await expect(backToNow).toBeVisible({
+			const exitHistory = left.getByRole("button", { name: "Exit" });
+			await expect(exitHistory).toBeVisible({
 				timeout: repositoryOperationTimeout,
 			});
-			await backToNow.click();
-			await expect(backToNow).not.toBeVisible();
+			await exitHistory.click();
+			await expect(exitHistory).not.toBeVisible();
 		}
 		// Let bootstrap and historical-view hydration finish before attributing
 		// any later blob payload to realtime work.
@@ -444,14 +444,14 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		for (const page of [left, right]) {
 			await expect(
 				page.getByRole("button", {
-					name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+					name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
 				}),
 			).toBeVisible({ timeout: 30_000 });
 		}
 
 		await left
 			.getByRole("button", {
-				name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
 			})
 			.click();
 		await left.getByRole("button", { name: "Checkpoint", exact: true }).click();
@@ -494,7 +494,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		});
 		await expect(
 			left.getByRole("button", {
-				name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
 			}),
 		).toBeVisible({ timeout: realtimeTimeout });
 
@@ -515,7 +515,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			});
 			await expect(
 				page.getByRole("button", {
-					name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+					name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
 				}),
 			).toBeVisible({ timeout: 30_000 });
 		}
@@ -530,7 +530,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		});
 		await expect(
 			fresh.getByRole("button", {
-				name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
 			}),
 		).toBeVisible({ timeout: 30_000 });
 
@@ -584,7 +584,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		// rendering the checkpoint rows imported during bootstrap.
 		await left
 			.getByRole("button", {
-				name: /[1-9]\d* changes? since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
 			})
 			.click();
 		await left.getByRole("button", { name: "Checkpoint", exact: true }).click();
@@ -618,9 +618,9 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		await freshHistory
 			.getByRole("button", { name: /Latest checkpoint/ })
 			.click();
-		await expect(
-			fresh.getByRole("button", { name: "Back to now" }),
-		).toBeVisible({ timeout: 30_000 });
+		await expect(fresh.getByRole("button", { name: "Exit" })).toBeVisible({
+			timeout: 30_000,
+		});
 		await expect(
 			freshHistory.getByRole("list", { name: "Files at this checkpoint" }),
 		).toBeVisible({ timeout: 30_000 });
