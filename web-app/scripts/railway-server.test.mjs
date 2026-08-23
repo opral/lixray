@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request as httpRequest } from "node:http";
 import test from "node:test";
+import vm from "node:vm";
 import { createRailwayServer } from "./railway-server.mjs";
 
 async function withServer(appFetch, run, env = {}, prepare = async () => {}) {
@@ -77,6 +78,103 @@ test("does not cache an unfingerprinted build asset immutably", async () => {
 		response.headers.get("cache-control"),
 		"public, max-age=0, must-revalidate",
 	);
+});
+
+test("revalidates the asset-cache service worker", async () => {
+	const response = await withServer(
+		async () => new Response("unused"),
+		(origin) => fetch(`${origin}/lixray-asset-cache-sw.js`),
+		{},
+		(clientRoot) =>
+			writeFile(
+				join(clientRoot, "lixray-asset-cache-sw.js"),
+				"self.addEventListener('fetch', () => undefined);",
+			),
+	);
+	assert.equal(
+		response.headers.get("cache-control"),
+		"public, max-age=0, must-revalidate",
+	);
+});
+
+test("the asset-cache worker isolates Lix versions by Wasm fingerprint", async () => {
+	const source = await readFile(
+		new URL("../public/lixray-asset-cache-sw.js", import.meta.url),
+		"utf8",
+	);
+	const listeners = new Map();
+	const entries = new Map();
+	let networkRequests = 0;
+	let contentType = "application/wasm; charset=binary";
+	const cache = {
+		async delete(request) {
+			return entries.delete(request.url);
+		},
+		async keys() {
+			return [...entries.values()].map((entry) => entry.request);
+		},
+		async match(request) {
+			return entries.get(request.url)?.response.clone();
+		},
+		async put(request, response) {
+			entries.set(request.url, {
+				request,
+				response: response.clone(),
+			});
+		},
+	};
+	const context = {
+		Request,
+		Response,
+		URL,
+		caches: { open: async () => cache },
+		fetch: async () => {
+			networkRequests += 1;
+			return new Response(`wasm-${networkRequests}`, {
+				headers: { "content-type": contentType },
+			});
+		},
+		self: {
+			addEventListener: (name, listener) => listeners.set(name, listener),
+			clients: { claim: async () => undefined },
+			location: { origin: "https://lixray.example" },
+			skipWaiting: async () => undefined,
+		},
+	};
+	vm.runInNewContext(source, context);
+
+	async function dispatch(path) {
+		let responsePromise;
+		listeners.get("fetch")({
+			request: new Request(`https://lixray.example${path}`),
+			respondWith: (response) => {
+				responsePromise = Promise.resolve(response);
+			},
+		});
+		return responsePromise;
+	}
+
+	const firstUrl = "/assets/lix_js_sdk_bg-DqSFzV-L.wasm";
+	assert.equal(await (await dispatch(firstUrl)).text(), "wasm-1");
+	assert.equal(await (await dispatch(firstUrl)).text(), "wasm-1");
+	assert.equal(networkRequests, 1);
+
+	const nextVersionUrl = "/assets/lix_js_sdk_bg-X7abc123.wasm";
+	assert.equal(await (await dispatch(nextVersionUrl)).text(), "wasm-2");
+	assert.equal(networkRequests, 2);
+
+	assert.equal(await dispatch("/assets/lix_js_sdk_bg.wasm"), undefined);
+	assert.equal(
+		await dispatch(`${firstUrl}?not-the-fingerprinted-resource=1`),
+		undefined,
+	);
+	assert.equal(networkRequests, 2);
+
+	contentType = "text/html";
+	const invalidUrl = "/assets/lix_js_sdk_bg-BadMime1.wasm";
+	await dispatch(invalidUrl);
+	await dispatch(invalidUrl);
+	assert.equal(networkRequests, 4);
 });
 
 test("injects preview mode into static HTML at runtime", async () => {

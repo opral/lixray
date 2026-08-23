@@ -552,6 +552,29 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			),
 		);
 		expect(freshReplicaEntries).toHaveLength(1);
+		await expect
+			.poll(
+				() =>
+					fresh.evaluate(async () => {
+						const cache = await caches.open("lixray-lix-wasm-v1");
+						return (await cache.keys())
+							.map((request) => request.url)
+							.filter((url) =>
+								/\/assets\/lix_js_sdk_bg-[A-Za-z0-9_-]{8}\.wasm$/.test(url),
+							);
+					}),
+				{ timeout: 10_000 },
+			)
+			.toHaveLength(1);
+		const [cachedLixWasmUrl] = await fresh.evaluate(async () => {
+			const cache = await caches.open("lixray-lix-wasm-v1");
+			return (await cache.keys())
+				.map((request) => request.url)
+				.filter((url) =>
+					/\/assets\/lix_js_sdk_bg-[A-Za-z0-9_-]{8}\.wasm$/.test(url),
+				);
+		});
+		expect(cachedLixWasmUrl).toBeTruthy();
 		const warmReopenUsableSamplesMs: number[] = [];
 		const warmReopenProfiles: Array<{
 			phases: Array<{ name: string; startTime: number }>;
@@ -578,6 +601,12 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			await expect(freshEntries).toContainText(createdName, {
 				timeout: 30_000,
 			});
+			expect(
+				await fresh.evaluate(async (url) => {
+					const cache = await caches.open("lixray-lix-wasm-v1");
+					return (await cache.match(url)) !== undefined;
+				}, cachedLixWasmUrl),
+			).toBe(true);
 			warmReopenUsableSamplesMs.push(Date.now() - reopenStartedAt);
 			warmReopenProfiles.push(
 				await fresh.evaluate(() => {
