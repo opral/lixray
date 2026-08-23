@@ -7,11 +7,11 @@ import {
 	createRepositoryFile,
 	createRepositoryFolder,
 	importDroppedFiles,
+	initialRepositoryTreeIsEmpty,
 	listDirectory,
 	persistedDirectoryPath,
 	resolveRepositoryHref,
 	type RepositoryTree,
-	repositoryHasNoFiles,
 	preserveObservedRowsAfterError,
 	WORKING_DIFF_COUNT_SQL,
 } from "./lix-data.ts";
@@ -54,6 +54,12 @@ const tree: RepositoryTree = {
 		},
 	],
 };
+
+void test("decides empty routing only from a complete initial tree", () => {
+	assert.equal(initialRepositoryTreeIsEmpty(null), null);
+	assert.equal(initialRepositoryTreeIsEmpty(tree), false);
+	assert.equal(initialRepositoryTreeIsEmpty({ dirs: [], files: [] }), true);
+});
 
 void test("queries the latest Lix working-diff table function", () => {
 	assert.equal(
@@ -172,28 +178,6 @@ void test("canonicalizes directory paths and nested relative links", () => {
 	assert.equal(canonicalDirectoryPath("/"), "/");
 	assert.equal(resolveRepositoryHref("/docs", "guides/"), "/docs/guides");
 	assert.equal(resolveRepositoryHref("/docs", "../README.md"), "/README.md");
-});
-
-void test("repositoryHasNoFiles reports an empty repository", async () => {
-	const lix = {
-		execute: async () => ({ rows: [] }),
-	} as never;
-
-	assert.equal(await repositoryHasNoFiles(lix), true);
-});
-
-void test("repositoryHasNoFiles preserves SQL failures for boot error UI", async () => {
-	const failure = new Error("repository query failed");
-	const lix = {
-		execute: async () => {
-			throw failure;
-		},
-	} as never;
-
-	await assert.rejects(
-		repositoryHasNoFiles(lix),
-		(caught) => caught === failure,
-	);
 });
 
 void test("creates a directory with an exact persisted directory path", async () => {

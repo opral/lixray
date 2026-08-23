@@ -37,10 +37,15 @@ import {
 	type LixConnectionPromptInput,
 } from "~/lib/lix-connection-prompt";
 import {
+	markRepositoryOpenPerformance,
+	REPOSITORY_OPEN_MARKS,
+} from "~/lib/repository-open-performance";
+import {
 	createRepositoryFile,
 	createRepositoryFolder,
 	formatUpdatedAt,
 	importDroppedFiles,
+	initialRepositoryTreeIsEmpty,
 	listDirectory,
 	persistedDirectoryPath,
 	resolveRepositoryHref,
@@ -81,6 +86,7 @@ type DirectoryViewProps = {
 	readonly onOpenSettings?: () => void;
 	readonly onOpenSqlExplorer?: () => void;
 	readonly onOpenReview?: () => void;
+	readonly onRepositoryEmpty?: () => void;
 };
 
 const newTabFromMouseEvent = (event: ReactMouseEvent): boolean =>
@@ -108,17 +114,24 @@ export function DirectoryView({
 	onOpenSettings,
 	onOpenSqlExplorer,
 	onOpenReview,
+	onRepositoryEmpty,
 }: DirectoryViewProps) {
-	const { tree, error: treeError } = useRepositoryTree(lix);
-	const controlPlaneData = useRepositoryControlPlaneData(
-		lix,
-		isHome && dirPath === "/",
+	const { tree, error: treeError } = useRepositoryTree(lix, isActive);
+	const detailsEnabled = useAfterInitialIdle(
+		isActive && isHome && dirPath === "/" && tree !== null,
 	);
+	const controlPlaneData = useRepositoryControlPlaneData(lix, detailsEnabled);
 	const listing = useMemo(
 		() => (tree ? listDirectory(tree, dirPath, { showHiddenFiles }) : null),
 		[tree, dirPath, showHiddenFiles],
 	);
-	const readme = useFileMarkdown(lix, listing?.readmePath ?? null);
+	const readme = useFileMarkdown(
+		lix,
+		listing?.readmePath ?? null,
+		detailsEnabled,
+	);
+	const initialRepositoryTreeHandledRef = useRef(false);
+	const repositoryTreeMarkedRef = useRef(false);
 	const [actionError, setActionError] = useState<string | null>(null);
 	const { isDropTarget, dragHandlers } = useImportDrop({
 		lix,
@@ -140,6 +153,27 @@ export function DirectoryView({
 		},
 		[dirPath, lix, onOpenFile],
 	);
+
+	useEffect(() => {
+		if (!isActive || !isHome || initialRepositoryTreeHandledRef.current) return;
+		const isEmpty = initialRepositoryTreeIsEmpty(tree);
+		if (isEmpty === null) return;
+		initialRepositoryTreeHandledRef.current = true;
+		if (isEmpty) onRepositoryEmpty?.();
+	}, [isActive, isHome, onRepositoryEmpty, tree]);
+
+	useEffect(() => {
+		if (
+			!isActive ||
+			!isHome ||
+			tree === null ||
+			repositoryTreeMarkedRef.current
+		) {
+			return;
+		}
+		repositoryTreeMarkedRef.current = true;
+		markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.treeReady);
+	}, [isActive, isHome, tree]);
 
 	useEffect(() => {
 		if (!isActive || readOnly) return;
@@ -216,14 +250,14 @@ export function DirectoryView({
 						) : null}
 						<span className="flex-1" />
 						<div className="flex flex-wrap items-center justify-end gap-2 @max-[520px]:w-full @max-[520px]:justify-start">
-							{isHome && dirPath === "/" && hasAgentConnected ? (
+							{detailsEnabled && hasAgentConnected ? (
 								<ConnectAgentButton
 									connection={connection}
 									hasAgentConnected={hasAgentConnected}
 									disabled={readOnly}
 								/>
 							) : null}
-							{isHome && dirPath === "/" && onOpenPeople ? (
+							{detailsEnabled && onOpenPeople ? (
 								<InviteControl
 									teamApi={teamApi}
 									onOpenPeople={onOpenPeople}
@@ -351,6 +385,41 @@ export function DirectoryView({
 			</div>
 		</div>
 	);
+}
+
+function useAfterInitialIdle(enabled: boolean): boolean {
+	const [ready, setReady] = useState(false);
+	useEffect(() => {
+		if (!enabled) {
+			setReady(false);
+			return;
+		}
+		let idleCallback = 0;
+		let timeout = 0;
+		if (typeof requestAnimationFrame !== "function") {
+			timeout = window.setTimeout(() => setReady(true), 0);
+			return () => window.clearTimeout(timeout);
+		}
+		let secondFrame = 0;
+		const firstFrame = requestAnimationFrame(() => {
+			secondFrame = requestAnimationFrame(() => {
+				if (typeof requestIdleCallback === "function") {
+					idleCallback = requestIdleCallback(() => setReady(true), {
+						timeout: 1_500,
+					});
+				} else {
+					timeout = window.setTimeout(() => setReady(true), 0);
+				}
+			});
+		});
+		return () => {
+			cancelAnimationFrame(firstFrame);
+			cancelAnimationFrame(secondFrame);
+			if (idleCallback) cancelIdleCallback(idleCallback);
+			if (timeout) window.clearTimeout(timeout);
+		};
+	}, [enabled]);
+	return enabled && ready;
 }
 
 function RepositoryControlPlaneRail({

@@ -113,7 +113,7 @@ function closeManagedResource(key: string, managed: ManagedResource): void {
 }
 
 export function closeManagedRepositoryResourcesForPageUnload(): void {
-	// Let the next document reclaim its sessionStorage-backed replica identity
+	// Let the next document reclaim its localStorage-backed replica identity
 	// before aborting workers and closing the current document's resources.
 	releaseRepositoryBrowserReplicaClaimsForPageUnload();
 	for (const [key, managed] of managedResources) {

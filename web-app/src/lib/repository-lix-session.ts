@@ -6,6 +6,10 @@ import {
 	claimRepositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
 } from "./repository-opfs-cache.ts";
+import {
+	markRepositoryOpenPerformance,
+	REPOSITORY_OPEN_MARKS,
+} from "./repository-open-performance.ts";
 
 type TokenProvider = () => Promise<string | null>;
 
@@ -59,9 +63,11 @@ export interface RepositoryLixSession {
 export async function openRepositoryLixSession(
 	options: OpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
+	const replicaId = await claimRepositoryBrowserReplicaId(options);
+	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaClaimed);
 	const resolvedOptions = {
 		...options,
-		replicaId: await claimRepositoryBrowserReplicaId(options.authIdentity),
+		replicaId,
 	};
 	const lease = await acquireManagedRepositoryResource(
 		repositorySessionKey(resolvedOptions),
@@ -90,9 +96,11 @@ async function openRepositoryLixSessionOnce(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
 	const lix = await openOpfsSyncSession(options);
+	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.lixOpened);
 
 	try {
 		const defaultBranchId = await lix.activeBranchId();
+		markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.branchReady);
 		const session = new RemoteRepositoryLixSession(lix, defaultBranchId);
 		if (
 			options.initialBranchId &&

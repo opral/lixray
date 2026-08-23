@@ -72,6 +72,9 @@ function useObservedRows(
 		let disposed = false;
 		// Remote observe reconciles every stream's first frame through execute,
 		// including reconnects, so event.result is safe to publish directly.
+		if (typeof performance !== "undefined") {
+			performance.mark("lixray:query:observe");
+		}
 		const events = lix.observe(sql, JSON.parse(paramsKey) as string[]);
 		setState({ rows: null, error: null });
 		void (async () => {
@@ -223,7 +226,10 @@ export function useRepositoryControlPlaneData(
 }
 
 /** The full directory/file tree, kept live via lix observe. */
-export function useRepositoryTree(lix: Lix): {
+export function useRepositoryTree(
+	lix: Lix,
+	enabled = true,
+): {
 	readonly tree: RepositoryTree | null;
 	readonly error: Error | null;
 } {
@@ -231,11 +237,13 @@ export function useRepositoryTree(lix: Lix): {
 		lix,
 		"SELECT id, parent_id, path, name, lixcol_updated_at FROM lix_directory ORDER BY path",
 		[],
+		enabled,
 	);
 	const files = useObservedRows(
 		lix,
 		"SELECT id, directory_id, path, name, lixcol_updated_at FROM lix_file ORDER BY path",
 		[],
+		enabled,
 	);
 	return useMemo(() => {
 		if (!dirs.rows || !files.rows) {
@@ -265,13 +273,11 @@ export function useRepositoryTree(lix: Lix): {
 	}, [dirs, files]);
 }
 
-/**
- * One-shot check whether the repository has zero files — used before the
- * Atelier shell mounts (e.g. to seed the getting-started tab).
- */
-export async function repositoryHasNoFiles(lix: Lix): Promise<boolean> {
-	const result = await lix.execute("SELECT 1 FROM lix_file LIMIT 1", []);
-	return result.rows.length === 0;
+/** Decides empty-repository routing only after the first complete tree frame. */
+export function initialRepositoryTreeIsEmpty(
+	tree: RepositoryTree | null,
+): boolean | null {
+	return tree === null ? null : tree.files.length === 0;
 }
 
 /**
@@ -393,11 +399,16 @@ export function persistedDirectoryPath(
 }
 
 /** Live markdown text of the file at path (null while loading/missing). */
-export function useFileMarkdown(lix: Lix, path: string | null): string | null {
+export function useFileMarkdown(
+	lix: Lix,
+	path: string | null,
+	enabled = path !== null,
+): string | null {
 	const { rows } = useObservedRows(
 		lix,
 		"SELECT content FROM lix_file WHERE path = $1",
 		path ? [path] : [""],
+		enabled && path !== null,
 	);
 	return useMemo(() => {
 		if (!path || !rows || rows.length === 0) return null;

@@ -1,10 +1,8 @@
 import {
-	coerceAtelierSessionUiState,
 	ATELIER_BUILTIN_EXTENSION_IDS,
 	type AtelierExtensionRegistration,
 	type AtelierExtensionRuntime,
 	type AtelierExtensionView,
-	type AtelierSessionUiState,
 } from "@opral/atelier";
 import { Folder, Home, Settings, Sparkles, Users } from "lucide-react";
 import { StrictMode } from "react";
@@ -207,6 +205,20 @@ function mountDirectoryView({
 					onOpenSettings={() => openSettingsFromView(atelier)}
 					onOpenSqlExplorer={() => openSqlExplorerFromView(atelier)}
 					onOpenReview={() => openReviewFromView(atelier)}
+					{...(isHome
+						? {
+								onRepositoryEmpty: () => {
+									void runtime.views
+										.open(LIXRAY_GETTING_STARTED_EXTENSION_ID)
+										.catch((error: unknown) => {
+											console.error(
+												"repository-home: unable to open Getting started",
+												error,
+											);
+										});
+								},
+							}
+						: {})}
 				/>
 			</StrictMode>,
 		);
@@ -425,41 +437,3 @@ export const createLixrayRepositoryExtensions = (
 	createLixrayPeopleExtension(teamApi),
 	createLixraySettingsExtension(settingsApi),
 ];
-
-/**
- * Opening shell state for an empty repository: the Getting started tab open
- * and active next to the pinned Home (12f), merged into whatever tab state
- * is persisted. Applied through the session state store so the first paint
- * already shows it — an imperative views.open() here races the shell's
- * mount/restore churn.
- */
-export const emptyRepositoryOpeningUiState = (
-	persisted: AtelierSessionUiState | null,
-): AtelierSessionUiState => {
-	const base =
-		persisted ??
-		coerceAtelierSessionUiState({ focusedPanel: "central", panels: {} });
-	const central = base.panels.central;
-	const existingInstance = central.views.find(
-		(view) => view.kind === LIXRAY_GETTING_STARTED_EXTENSION_ID,
-	)?.instance;
-	return {
-		...base,
-		focusedPanel: "central",
-		panels: {
-			...base.panels,
-			central: {
-				views: existingInstance
-					? central.views
-					: [
-							...central.views,
-							{
-								instance: LIXRAY_GETTING_STARTED_EXTENSION_ID,
-								kind: LIXRAY_GETTING_STARTED_EXTENSION_ID,
-							},
-						],
-				activeInstance: existingInstance ?? LIXRAY_GETTING_STARTED_EXTENSION_ID,
-			},
-		},
-	};
-};

@@ -392,7 +392,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		});
 		expect(blobLaneRequestCount([left, right])).toBe(blobLaneBeforeRightEdit);
 
-		const { fresh, freshEntries } =
+		const freshBootstrap =
 			await test.step("fresh/incognito bootstrap renders hot History", async () => {
 				// A context created only after the write exercises snapshot bootstrap,
 				// as an incognito window does. Qualify History before later realtime
@@ -425,8 +425,10 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				).toHaveCount(0);
 				await fresh.waitForTimeout(500);
 				expect(coldReadCount([fresh])).toBe(coldReadsBeforeFreshHistory);
-				return { fresh, freshEntries };
+				return { freshContext, fresh, freshEntries };
 			});
+		let { fresh, freshEntries } = freshBootstrap;
+		const { freshContext } = freshBootstrap;
 
 		// Keep the originating editor warm for the reverse direction. Reload and
 		// OPFS-resume behavior is qualified independently below; coupling it to the
@@ -534,23 +536,129 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			}),
 		).toBeVisible({ timeout: 30_000 });
 
-		// Reuse the same tab identity and OPFS database. Fresh contexts only cover
-		// bootstrap; a reload proves that the persisted cursor/read model can resume
-		// and still render the latest files and checkpoint rows.
-		const freshReplicaTabId = await fresh.evaluate(() =>
-			sessionStorage.getItem("lixray:browser-replica-tab:v1"),
-		);
-		expect(freshReplicaTabId).toBeTruthy();
-		await fresh.reload({ waitUntil: "domcontentloaded" });
-		expect(
-			await fresh.evaluate(() =>
-				sessionStorage.getItem("lixray:browser-replica-tab:v1"),
+		// Close the only tab, then create a new top-level browsing context in the
+		// same browser profile. This is the real warm-reopen case: sessionStorage is
+		// gone, while localStorage and OPFS survive. The Web Lock released by unload
+		// lets the new document reclaim the exact same mutable replica safely.
+		const freshReplicaEntries = await fresh.evaluate(() =>
+			Object.entries(localStorage).filter(([key]) =>
+				key.startsWith("lixray:browser-replica:v2:"),
 			),
-		).toBe(freshReplicaTabId);
-		const reopenedEntries = fresh.getByTestId("home-entry-list");
-		await expect(reopenedEntries).toContainText(createdName, {
-			timeout: 30_000,
+		);
+		expect(freshReplicaEntries).toHaveLength(1);
+		const warmReopenUsableSamplesMs: number[] = [];
+		const warmReopenProfiles: Array<{
+			phases: Array<{ name: string; startTime: number }>;
+			startupUiHookQueryCensus: {
+				atelierObserve: number;
+				atelierExecute: number;
+				lixrayObserve: number;
+			};
+		}> = [];
+		for (let sample = 0; sample < 3; sample += 1) {
+			await fresh.close();
+			fresh = await freshContext.newPage();
+			observePage(fresh, `fresh-reopen-${sample + 1}`);
+			const reopenStartedAt = Date.now();
+			await fresh.goto(repositoryUrl, { waitUntil: "domcontentloaded" });
+			expect(
+				await fresh.evaluate(() =>
+					Object.entries(localStorage).filter(([key]) =>
+						key.startsWith("lixray:browser-replica:v2:"),
+					),
+				),
+			).toEqual(freshReplicaEntries);
+			freshEntries = fresh.getByTestId("home-entry-list");
+			await expect(freshEntries).toContainText(createdName, {
+				timeout: 30_000,
+			});
+			warmReopenUsableSamplesMs.push(Date.now() - reopenStartedAt);
+			warmReopenProfiles.push(
+				await fresh.evaluate(() => {
+					const phases = performance
+						.getEntriesByType("mark")
+						.filter((entry) => entry.name.startsWith("lixray:repository-open:"))
+						.map((entry) => ({
+							name: entry.name,
+							startTime: Math.round(entry.startTime),
+						}));
+					const treeReady = performance.getEntriesByName(
+						"lixray:repository-open:tree-ready",
+					)[0]?.startTime;
+					const countBeforeTreeReady = (name: string) =>
+						performance
+							.getEntriesByName(name)
+							.filter(
+								(entry) =>
+									treeReady !== undefined && entry.startTime <= treeReady,
+							).length;
+					return {
+						phases,
+						startupUiHookQueryCensus: {
+							atelierObserve: countBeforeTreeReady("atelier:query:observe"),
+							atelierExecute: countBeforeTreeReady("atelier:query:execute"),
+							lixrayObserve: countBeforeTreeReady("lixray:query:observe"),
+						},
+					};
+				}),
+			);
+			await fresh.waitForTimeout(500);
+			expect(coldReadCount([fresh])).toBe(0);
+		}
+		const reopenedEntries = freshEntries;
+		const warmReopenPhases = warmReopenProfiles[0]!.phases;
+		const startupUiHookQueryCensus =
+			warmReopenProfiles[0]!.startupUiHookQueryCensus;
+		const phaseNames = [
+			"lixray:repository-open:start",
+			"lixray:repository-open:replica-claimed",
+			"lixray:repository-open:lix-opened",
+			"lixray:repository-open:branch-ready",
+			"lixray:repository-open:session-ready",
+			"lixray:repository-open:atelier-ready",
+			"lixray:repository-open:tree-ready",
+		];
+		expect(warmReopenPhases.map((phase) => phase.name)).toEqual(phaseNames);
+		for (let index = 1; index < warmReopenPhases.length; index += 1) {
+			expect(warmReopenPhases[index]!.startTime).toBeGreaterThanOrEqual(
+				warmReopenPhases[index - 1]!.startTime,
+			);
+		}
+		const sortedSamples = [...warmReopenUsableSamplesMs].sort(
+			(leftSample, rightSample) => leftSample - rightSample,
+		);
+		const medianWarmReopenUsableMs = sortedSamples[1]!;
+		const internalTreeReadyMs =
+			warmReopenPhases.at(-1)!.startTime - warmReopenPhases[0]!.startTime;
+		await test.info().attach("warm-reopen-profile.json", {
+			body: JSON.stringify(
+				{
+					warmReopenUsableSamplesMs,
+					medianWarmReopenUsableMs,
+					warmReopenProfiles,
+					phasesFromNavigationStartMs: Object.fromEntries(
+						warmReopenPhases.map((phase) => [phase.name, phase.startTime]),
+					),
+					startupUiHookQueryCensus,
+				},
+				null,
+				2,
+			),
+			contentType: "application/json",
 		});
+		expect(warmReopenUsableSamplesMs[0]).toBeLessThan(2_500);
+		expect(medianWarmReopenUsableMs).toBeLessThan(2_500);
+		expect(Math.max(...warmReopenUsableSamplesMs)).toBeLessThan(4_000);
+		expect(internalTreeReadyMs).toBeLessThan(2_000);
+		expect(startupUiHookQueryCensus.lixrayObserve).toBe(2);
+		expect(startupUiHookQueryCensus.atelierObserve).toBeGreaterThan(0);
+		expect(startupUiHookQueryCensus.atelierObserve).toBeLessThanOrEqual(8);
+		expect(startupUiHookQueryCensus.atelierExecute).toBeLessThanOrEqual(2);
+		expect(
+			startupUiHookQueryCensus.atelierObserve +
+				startupUiHookQueryCensus.atelierExecute +
+				startupUiHookQueryCensus.lixrayObserve,
+		).toBeLessThanOrEqual(12);
 		await expect(reopenedEntries).toContainText(leftConcurrentName);
 		await expect(reopenedEntries).toContainText(rightConcurrentName);
 		const reopenedHistory = await openHistoryPanel(fresh);
