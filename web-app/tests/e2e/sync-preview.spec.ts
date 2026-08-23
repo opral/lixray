@@ -320,9 +320,9 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			.count();
 		expect(initialCheckpointCount).toBeGreaterThan(0);
 		if (initialCheckpointCount > 1) {
-			// Checkpoint creation compares against the latest checkpoint state. Warm
-			// that intentionally lazy boundary before timing collaboration and later
-			// checkpoint writes, just as the cold editors below are preconditioned.
+			// A historical snapshot read must not monopolize the live repository
+			// after its view closes. Exit immediately, while cold content may still
+			// be loading, then prove the same client can create a checkpoint below.
 			await initialLeftHistory
 				.getByRole("button", { name: /Latest checkpoint/ })
 				.click();
@@ -333,8 +333,8 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			await backToNow.click();
 			await expect(backToNow).not.toBeVisible();
 		}
-		// History hydration is deliberately concurrent. Let its trailing batches
-		// finish before attributing any later blob payload to realtime work.
+		// Let bootstrap and historical-view hydration finish before attributing
+		// any later blob payload to realtime work.
 		await waitForBlobLaneQuiescence([left, right]);
 		await settleBlobLaneResponses();
 		expect(blobLaneObservationFailures).toEqual([]);
