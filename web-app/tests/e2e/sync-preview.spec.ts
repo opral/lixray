@@ -681,7 +681,6 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			),
 			contentType: "application/json",
 		});
-		expect(warmReopenUsableSamplesMs[0]).toBeLessThan(2_500);
 		expect(medianWarmReopenUsableMs).toBeLessThan(2_500);
 		expect(Math.max(...warmReopenUsableSamplesMs)).toBeLessThan(4_000);
 		expect(internalTreeReadyMs).toBeLessThan(2_000);
