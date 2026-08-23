@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request as httpRequest } from "node:http";
@@ -32,7 +32,51 @@ test("serves WebAssembly with its streaming compilation MIME type", async () => 
 		(clientRoot) => writeFile(join(clientRoot, "lix.wasm"), wasm),
 	);
 	assert.equal(response.headers.get("content-type"), "application/wasm");
+	assert.equal(
+		response.headers.get("cache-control"),
+		"public, max-age=0, must-revalidate",
+	);
 	assert.deepEqual(new Uint8Array(await response.arrayBuffer()), wasm);
+});
+
+test("caches fingerprinted build assets immutably", async () => {
+	const wasm = new Uint8Array([0x00, 0x61, 0x73, 0x6d]);
+	const response = await withServer(
+		async () => new Response("unused"),
+		(origin) => fetch(`${origin}/assets/lix_js_sdk_bg-DqSFzV-L.wasm`),
+		{},
+		async (clientRoot) => {
+			await mkdir(join(clientRoot, "assets"));
+			await writeFile(
+				join(clientRoot, "assets/lix_js_sdk_bg-DqSFzV-L.wasm"),
+				wasm,
+			);
+		},
+	);
+	assert.equal(response.headers.get("content-type"), "application/wasm");
+	assert.equal(
+		response.headers.get("cache-control"),
+		"public, max-age=31536000, immutable",
+	);
+});
+
+test("does not cache an unfingerprinted build asset immutably", async () => {
+	const response = await withServer(
+		async () => new Response("unused"),
+		(origin) => fetch(`${origin}/assets/lix_js_sdk_bg.wasm`),
+		{},
+		async (clientRoot) => {
+			await mkdir(join(clientRoot, "assets"));
+			await writeFile(
+				join(clientRoot, "assets/lix_js_sdk_bg.wasm"),
+				new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+			);
+		},
+	);
+	assert.equal(
+		response.headers.get("cache-control"),
+		"public, max-age=0, must-revalidate",
+	);
 });
 
 test("injects preview mode into static HTML at runtime", async () => {
@@ -54,6 +98,7 @@ test("injects preview mode into static HTML at runtime", async () => {
 			await response.text(),
 			/<meta name="lixray-demo" content="1">/,
 		);
+		assert.equal(response.headers.get("cache-control"), "private, no-cache");
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
 	}
@@ -69,6 +114,7 @@ test("injects preview mode into rendered HTML at runtime", async () => {
 		{ LIXRAY_DEMO: "1" },
 	);
 	assert.match(await response.text(), /<meta name="lixray-demo" content="1">/);
+	assert.equal(response.headers.get("cache-control"), "private, no-cache");
 });
 
 test("does not inject preview mode in production", async () => {
@@ -81,6 +127,21 @@ test("does not inject preview mode in production", async () => {
 		{ RAILWAY_ENVIRONMENT_NAME: "production" },
 	);
 	assert.doesNotMatch(await response.text(), /lixray-demo/);
+	assert.equal(response.headers.get("cache-control"), "private, no-cache");
+});
+
+test("preserves no-store on sensitive rendered HTML", async () => {
+	const response = await withServer(
+		async () =>
+			new Response("<html><body>private</body></html>", {
+				headers: {
+					"cache-control": "private, no-store",
+					"content-type": "text/html; charset=utf-8",
+				},
+			}),
+		(origin) => fetch(`${origin}/account`),
+	);
+	assert.equal(response.headers.get("cache-control"), "private, no-store");
 });
 
 test("proxies a streaming response through", async () => {

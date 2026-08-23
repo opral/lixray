@@ -4,6 +4,10 @@ import { createServer } from "node:http";
 import { extname, resolve } from "node:path";
 import { Readable } from "node:stream";
 
+const IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const REVALIDATED_STATIC_CACHE_CONTROL = "public, max-age=0, must-revalidate";
+const HTML_CACHE_CONTROL = "private, no-cache";
+
 /**
  * The Railway entry's HTTP server, extracted so request handling is
  * testable without a built `dist/server` bundle.
@@ -54,6 +58,14 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 			outgoing.statusCode = response.status;
 			for (const [name, value] of response.headers) {
 				outgoing.setHeader(name, value);
+			}
+			if (isHtmlResponse(response)) {
+				// Documents select the fingerprinted asset URLs for a release. Always
+				// revalidate them so a new deployment cannot keep loading an old bundle.
+				// Preserve no-store when an application route requires the stricter policy.
+				if (!hasCacheDirective(response, "no-store")) {
+					outgoing.setHeader("cache-control", HTML_CACHE_CONTROL);
+				}
 			}
 			if (!response.body || method === "HEAD") {
 				outgoing.end();
@@ -108,6 +120,7 @@ async function serveStatic(clientRoot, request, response, env) {
 		if (!file.isFile()) return false;
 		response.statusCode = 200;
 		response.setHeader("content-type", contentType(filePath));
+		response.setHeader("cache-control", staticCacheControl(pathname, filePath));
 		if (extname(filePath) === ".html" && isDemoMode(env)) {
 			const body = injectRuntimeConfig(await readFile(filePath, "utf8"));
 			response.setHeader("content-length", Buffer.byteLength(body));
@@ -123,6 +136,23 @@ async function serveStatic(clientRoot, request, response, env) {
 		if (error?.code === "ENOENT") return false;
 		throw error;
 	}
+}
+
+function hasCacheDirective(response, directive) {
+	return (response.headers.get("cache-control") ?? "")
+		.split(",")
+		.some((value) => value.trim().toLowerCase() === directive);
+}
+
+function staticCacheControl(pathname, filePath) {
+	if (extname(filePath) === ".html") return HTML_CACHE_CONTROL;
+	// Vite's build assets end in an eight-character content fingerprint. Only
+	// those URLs are immutable: if Lix changes, the WASM bytes and URL change
+	// together. Root/public assets and unexpected names must be revalidated.
+	if (/^\/assets\/.+-[A-Za-z0-9_-]{8}\.[^/]+$/.test(pathname)) {
+		return IMMUTABLE_ASSET_CACHE_CONTROL;
+	}
+	return REVALIDATED_STATIC_CACHE_CONTROL;
 }
 
 function isHtmlResponse(response) {
