@@ -18,7 +18,7 @@ export interface RepositoryBrowserReplicaScope {
 type BrowserReplicaStorage = Pick<Storage, "getItem" | "setItem">;
 
 interface BrowserReplicaIdEnvironment {
-	storage?: BrowserReplicaStorage | null;
+	storage?: BrowserReplicaStorage;
 	createId?: () => string;
 }
 
@@ -39,9 +39,6 @@ export interface BrowserReplicaClaim {
 	release(): void;
 }
 
-const volatileBrowserReplicaIds = new WeakMap<object, Map<string, string>>();
-const volatileBrowserReplicaIdsWithoutStorage = new Map<string, string>();
-
 /**
  * Returns a durable replica identity for this browser profile.
  *
@@ -57,12 +54,12 @@ export function repositoryBrowserReplicaId(
 	const storage = browserReplicaStorage(environment);
 	const scopeKey = repositoryBrowserReplicaScopeKey(scope);
 	const storageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(scopeKey)}`;
-	let browserId = readBrowserReplicaId(storage, storageKey, scopeKey);
+	let browserId = storage.getItem(storageKey) ?? undefined;
 	if (!browserId) {
 		browserId = (
 			environment.createId ?? (() => globalThis.crypto.randomUUID())
 		)();
-		persistBrowserReplicaId(storage, storageKey, scopeKey, browserId);
+		storage.setItem(storageKey, browserId);
 	}
 	return `${scope.authIdentity}:${browserId}`;
 }
@@ -87,46 +84,6 @@ export async function claimRepositoryBrowserReplicaId(
 		lockManager,
 	);
 	return { replicaId: durableReplicaId, release };
-}
-
-function readBrowserReplicaId(
-	storage: BrowserReplicaStorage | null,
-	storageKey: string,
-	scopeKey: string,
-): string | undefined {
-	let storedValue: string | null = null;
-	try {
-		storedValue = storage?.getItem(storageKey) ?? null;
-	} catch {
-		// Restricted browser storage falls through to the page-scoped pool.
-	}
-	if (storedValue) return storedValue;
-	return storage
-		? volatileBrowserReplicaIds.get(storage)?.get(scopeKey)
-		: volatileBrowserReplicaIdsWithoutStorage.get(scopeKey);
-}
-
-function persistBrowserReplicaId(
-	storage: BrowserReplicaStorage | null,
-	storageKey: string,
-	scopeKey: string,
-	id: string,
-): void {
-	if (storage) {
-		let byScope = volatileBrowserReplicaIds.get(storage);
-		if (!byScope) {
-			byScope = new Map();
-			volatileBrowserReplicaIds.set(storage, byScope);
-		}
-		byScope.set(scopeKey, id);
-	} else {
-		volatileBrowserReplicaIdsWithoutStorage.set(scopeKey, id);
-	}
-	try {
-		storage?.setItem(storageKey, id);
-	} catch {
-		// The page-scoped fallback remains stable until navigation.
-	}
 }
 
 function claimBrowserReplicaIdLock(
@@ -180,15 +137,14 @@ function browserReplicaLockManager(): BrowserReplicaLockManager | null {
 
 function browserReplicaStorage(
 	environment: BrowserReplicaIdEnvironment,
-): BrowserReplicaStorage | null {
+): BrowserReplicaStorage {
 	if (environment.storage !== undefined) return environment.storage;
-	try {
-		return typeof globalThis.localStorage === "undefined"
-			? null
-			: globalThis.localStorage;
-	} catch {
-		return null;
+	if (typeof globalThis.localStorage === "undefined") {
+		throw new Error(
+			"Opening a durable browser repository requires localStorage.",
+		);
 	}
+	return globalThis.localStorage;
 }
 
 export function repositoryOpfsCacheName(

@@ -558,19 +558,12 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				lixrayObserve: number;
 			};
 		}> = [];
-		for (let sample = 0; sample < 3; sample += 1) {
+		for (let sample = 0; sample < 5; sample += 1) {
 			await fresh.close();
 			fresh = await freshContext.newPage();
 			observePage(fresh, `fresh-reopen-${sample + 1}`);
 			const reopenStartedAt = Date.now();
 			await fresh.goto(repositoryUrl, { waitUntil: "domcontentloaded" });
-			expect(
-				await fresh.evaluate(() =>
-					Object.entries(localStorage).filter(([key]) =>
-						key.startsWith("lixray:browser-replica:v3:"),
-					),
-				),
-			).toEqual(freshReplicaEntries);
 			freshEntries = fresh.getByTestId("home-entry-list");
 			await expect(freshEntries).toContainText(createdName, {
 				timeout: 30_000,
@@ -578,6 +571,15 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			const sampleColdReads = [...(coldReads.get(fresh) ?? [])];
 			warmReopenColdReads.push(sampleColdReads);
 			warmReopenUsableSamplesMs.push(Date.now() - reopenStartedAt);
+			// Keep durability verification outside the usable-time sample. This
+			// Playwright RPC validates identity continuity but is not app startup.
+			expect(
+				await fresh.evaluate(() =>
+					Object.entries(localStorage).filter(([key]) =>
+						key.startsWith("lixray:browser-replica:v3:"),
+					),
+				),
+			).toEqual(freshReplicaEntries);
 			warmReopenProfiles.push(
 				await fresh.evaluate(() => {
 					const phases = performance
@@ -629,13 +631,23 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		const sortedSamples = [...warmReopenUsableSamplesMs].sort(
 			(leftSample, rightSample) => leftSample - rightSample,
 		);
-		const medianWarmReopenUsableMs = sortedSamples[1]!;
+		const medianWarmReopenUsableMs =
+			sortedSamples[Math.floor(sortedSamples.length / 2)]!;
+		const warmReopenP90UsableMs =
+			sortedSamples[Math.ceil(sortedSamples.length * 0.9) - 1]!;
+		// This is a hosted regression ceiling, not the product latency target.
+		// The causal phase/query assertions below identify where time is spent;
+		// this bound prevents a locally cached reopen from silently taking tens
+		// of seconds while remaining tolerant of shared CI runner variance.
+		const warmReopenP90CeilingMs = 10_000;
 		await test.info().attach("warm-reopen-profile.json", {
 			body: JSON.stringify(
 				{
 					warmReopenUsableSamplesMs,
 					warmReopenColdReads,
 					medianWarmReopenUsableMs,
+					warmReopenP90UsableMs,
+					warmReopenP90CeilingMs,
 					warmReopenProfiles,
 					phasesFromNavigationStartMs: Object.fromEntries(
 						warmReopenPhases.map((phase) => [phase.name, phase.startTime]),
@@ -648,6 +660,10 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			),
 			contentType: "application/json",
 		});
+		expect(
+			warmReopenP90UsableMs,
+			"warm OPFS reopen p90 exceeded the hosted regression ceiling",
+		).toBeLessThanOrEqual(warmReopenP90CeilingMs);
 		for (const sampleColdReads of warmReopenColdReads) {
 			expect(
 				sampleColdReads,

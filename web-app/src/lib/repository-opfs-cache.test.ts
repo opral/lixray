@@ -138,6 +138,35 @@ void test("keeps durable warm replicas independent across repositories", () => {
 	);
 });
 
+void test("fails closed when durable replica storage cannot be read or written", () => {
+	assert.throws(
+		() =>
+			repositoryBrowserReplicaId(browserScope, {
+				storage: {
+					getItem: () => {
+						throw new Error("storage read denied");
+					},
+					setItem: () => undefined,
+				},
+				createId: () => "must-not-fallback",
+			}),
+		/storage read denied/,
+	);
+	assert.throws(
+		() =>
+			repositoryBrowserReplicaId(browserScope, {
+				storage: {
+					getItem: () => null,
+					setItem: () => {
+						throw new Error("storage write denied");
+					},
+				},
+				createId: () => "must-not-fallback",
+			}),
+		/storage write denied/,
+	);
+});
+
 void test("fails closed when exclusive browser replica ownership is unavailable", async () => {
 	await assert.rejects(
 		claimRepositoryBrowserReplicaId(browserScope, { lockManager: null }),
