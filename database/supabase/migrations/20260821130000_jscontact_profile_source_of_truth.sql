@@ -115,7 +115,7 @@ begin
   if existing_namespace_id is not null then
     insert into public.namespace_profiles (namespace_id, document)
     values (existing_namespace_id, profile_document)
-    on conflict (namespace_id) do nothing;
+    on conflict on constraint namespace_profiles_pkey do nothing;
 
     return query
     select namespace.id, namespace.name, handle.handle,
