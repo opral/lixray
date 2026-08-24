@@ -71,9 +71,12 @@ class FakeRuntime implements LixRuntimeClient {
 			sql: request.sql,
 			params: request.params,
 		});
-		if (request.sql === "SELECT lix_restore($1)") {
+		if (
+			request.sql ===
+			"INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id"
+		) {
 			return {
-				columns: ["lix_restore"],
+				columns: ["commit_id"],
 				rows: [
 					[
 						this.restoreCommitId === undefined
@@ -81,7 +84,7 @@ class FakeRuntime implements LixRuntimeClient {
 							: { kind: "text" as const, value: this.restoreCommitId },
 					],
 				],
-				rowsAffected: 0,
+				rowsAffected: 1,
 				notices: [],
 			};
 		}
@@ -321,7 +324,7 @@ void test("restore uses one parameterized SQL command on the context branch", as
 		{
 			lixId: LIX_ID,
 			branchId: "draft",
-			sql: "SELECT lix_restore($1)",
+			sql: "INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id",
 			params: [{ kind: "text", value: "commit-target" }],
 		},
 	]);
