@@ -37,7 +37,7 @@ This Lixray repository is ${lixReference} (${lixId}). Ask the user whether it is
 
 Lixray is added as a normal MCP connector. Guide the user to add ${serverName} from the cloud marketplace, or add the MCP manually at ${mcpUrl} and authenticate. If ${serverName} is already connected, reuse it.
 
-Skills, guidelines, and working files live here. Read from it and write to it. Guide the user to put that in AGENTS.md if it exists, CLAUDE.md if it exists, or both. If Lixray is not connected, tell the user to add ${mcpUrl} and reopen the chat.
+Skills, guidelines, and working files live here. Read from it and write to it. Guide the user to add this rule to AGENTS.md if it exists, CLAUDE.md if it exists, or both: Lixray ${lixReference} is this personal or company repository. Read from it and write to it. If Lixray is not connected, tell the user to add ${mcpUrl} and reopen the chat.
 
 Once connected, ask the user which single skill to put in Lixray. They pick or create it. Write only that one skill file.`;
 
