@@ -318,6 +318,36 @@ void test("PostHog delivery failures do not escape the telemetry session", async
 	]);
 });
 
+void test("open_lix does not invent a parallel mcp.open_lix $ai_span", async () => {
+	const captured: Array<EventMessage> = [];
+	const session = createMcpTelemetrySession(
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		{ userId: "user-123", clientId: "oauth-client-456" },
+		{
+			createClient: () => ({
+				captureImmediate: async (event) => {
+					captured.push(structuredClone(event));
+				},
+				shutdown: async () => undefined,
+			}),
+		},
+	);
+	assert.ok(session);
+	session.onToolCall({
+		requestId: REQUEST_ID,
+		toolName: "open_lix",
+		outcome: "success",
+		durationMs: 42,
+		surfaceVersion: SURFACE_VERSION,
+		lixId: LIX_ID,
+	});
+	await session.flush();
+	assert.deepEqual(captured, []);
+});
+
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

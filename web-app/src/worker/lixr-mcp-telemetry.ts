@@ -152,15 +152,15 @@ export function createLixrMcpTelemetrySession(
 
 	return {
 		captureFileWritten(properties) {
-			captureEvent("lixray_file_written", properties, properties.lix_id);
+			captureEvent("webapp_file_written", properties, properties.lix_id);
 		},
 
 		captureFirstFileAdded(properties) {
-			captureEvent("lixray_first_file_added", properties, properties.lix_id);
+			captureEvent("webapp_first_file_added", properties, properties.lix_id);
 		},
 
 		captureImportCompleted(properties) {
-			captureEvent("lixray_import_completed", properties, properties.lix_id);
+			captureEvent("webapp_import_completed", properties, properties.lix_id);
 		},
 
 		async flush(): Promise<void> {

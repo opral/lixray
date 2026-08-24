@@ -1,6 +1,6 @@
 export const OAUTH_CONSENT_FALLBACK_MS = 2000;
 export const OAUTH_CONSENT_OPEN_HREF = "/open";
-export const OAUTH_CONSENT_RESOLVED_EVENT = "lixray_oauth_consent_resolved";
+export const OAUTH_CONSENT_RESOLVED_EVENT = "webapp_oauth_consent_resolved";
 
 export type OAuthConsentDecision = "approve" | "deny";
 
@@ -74,7 +74,7 @@ export function oauthConsentResolvedProperties(input: {
 
 /**
  * Completes an OAuth consent decision: grant/deny with skipBrowserRedirect,
- * emit `lixray_oauth_consent_resolved`, then deliver the client
+ * emit `webapp_oauth_consent_resolved`, then deliver the client
  * `redirect_url`. HTTPS approve assigns this tab and waits ~2s before
  * offering /open. Loopback and custom-scheme approve paint /open first,
  * then hop in another browsing context so this tab survives.

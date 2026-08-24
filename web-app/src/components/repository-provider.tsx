@@ -193,7 +193,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				) {
 					await Promise.all([
 						captureTelemetryImmediately(
-							"repository_list_failed",
+							"webapp_repository_list_failed",
 							telemetryProperties,
 						),
 						captureErrorLogImmediately(
@@ -277,7 +277,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 			if (createError) throw createError;
 			const organizationId = String(data);
 			await refresh({ organizationId });
-			captureTelemetry("organization_created");
+			captureTelemetry("webapp_organization_created");
 			return organizationId;
 		},
 		[client, refresh],
@@ -302,7 +302,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				organizationId,
 				repositoryId: selectedRepositoryId ?? undefined,
 			});
-			captureTelemetry("organization_renamed");
+			captureTelemetry("webapp_organization_renamed");
 		},
 		[client, organizations, refresh, selectedRepositoryId],
 	);
@@ -334,7 +334,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				organizationId: targetOrganization.id,
 				repositoryId,
 			});
-			captureTelemetry("repository_created");
+			captureTelemetry("webapp_repository_created");
 		},
 		[client, organizations, refresh, selectedOrganization],
 	);
@@ -363,7 +363,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				organizationId: organization.id,
 				repositoryId,
 			});
-			captureTelemetry("repository_renamed");
+			captureTelemetry("webapp_repository_renamed");
 		},
 		[client, organizations, refresh],
 	);
@@ -388,7 +388,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 			});
 			if (deleteError) throw deleteError;
 			await refresh();
-			captureTelemetry("repository_deleted");
+			captureTelemetry("webapp_repository_deleted");
 		},
 		[client, organizations, refresh],
 	);

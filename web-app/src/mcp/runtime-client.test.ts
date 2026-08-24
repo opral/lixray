@@ -213,7 +213,7 @@ void test("injected Lix summaries bypass Supabase discovery", async () => {
 	]);
 });
 
-void test("cache-admit does not bind; bindSession is the host writer", async () => {
+void test("cache-admit does not bind; bindSession is an identity hook", async () => {
 	const binds: Array<{ lixId: string; branchId: string; accountId: string }> =
 		[];
 	const runtime = new WorkerLixRuntimeClient(

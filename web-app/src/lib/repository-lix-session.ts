@@ -333,7 +333,7 @@ async function reportLixRequestFailure(
 	}
 	if (code === MIGRATION_ERROR_CODE) return;
 
-	captureTelemetry("lix_request_failed", {
+	captureTelemetry("webapp_request_failed", {
 		lix_request_endpoint: lixRequestEndpoint(input),
 		lix_request_method: init?.method ?? "GET",
 		lix_http_status: response.status,

@@ -640,8 +640,8 @@ impl LixRuntimeManager {
         let engine_started = Instant::now();
         // Cache-admit is a protocol root, not a client session. as_protocol_root
         // attaches the host sink so handshake sessions inherit it, without a
-        // phantom lix.opened. Handshake create and explicit MCP bindSession
-        // with an OAuth account are the product binds.
+        // phantom lix.repository.opened. Handshake create emits the engine
+        // span; LixRay captures that span as `$ai_span`, not a product event.
         let protocol_root = Arc::new(
             async {
                 lix_sdk::open_lix()
