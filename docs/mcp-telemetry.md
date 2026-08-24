@@ -1,9 +1,12 @@
 # MCP friction telemetry
 
-LixRay records each production MCP tool call as a PostHog AI Observability
-`$ai_span`. These spans are for MCP contract and SQL usability friction. SQL
-engine performance remains in the native `lix.sql.*` OpenTelemetry spans
-described in [sql-telemetry.md](./sql-telemetry.md).
+LixRay records production MCP tool friction as official `$mcp_*` harness
+events (`$mcp_duration_ms` is tool wall clock) plus optional `$ai_span`
+captures that are **not** invented `mcp.*` engine clocks. `open_lix` does
+not emit `mcp.open_lix`. The open-repo north star is the captured Lix span
+`$ai_span` named `lix.repository.opened`. SQL engine performance remains in
+the native `lix.sql.*` OpenTelemetry spans described in
+[sql-telemetry.md](./sql-telemetry.md).
 
 PostHog automatically presents each MCP span as a trace. LixRay does not set an
 `$ai_session_id`: the stateless MCP server does not receive the agent's
@@ -12,7 +15,7 @@ misleading.
 
 ## Span model
 
-Every tool call includes:
+Tool-friction `$ai_span` captures (never `open_lix` / `mcp.open_lix`) include:
 
 - `$ai_trace_id`, `$ai_span_id`, `$ai_span_name`, `$ai_latency`, and
   `$ai_is_error`

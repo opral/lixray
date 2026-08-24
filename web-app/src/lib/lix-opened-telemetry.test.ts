@@ -5,12 +5,18 @@ import {
 	ANONYMOUS_LIX_ACCOUNT_ID,
 	createLixOpenedOnSpan,
 	identifiedDistinctId,
-	repositoryOpenedFromBind,
-	repositoryOpenedFromLixOpened,
+	repositoryOpenedAiSpanFromLixSpan,
 } from "./lix-opened-telemetry.ts";
 
-void test("completed lix.opened span captures exactly one repository_opened", () => {
-	const captured: Array<ReturnType<typeof repositoryOpenedFromLixOpened>> = [];
+const FORBIDDEN_OPEN_PRODUCT_EVENTS = [
+	"repository_opened",
+	"lixray_repository_opened",
+	"webapp_repository_opened",
+];
+
+void test("completed lix.repository.opened span captures exactly one $ai_span", () => {
+	const captured: Array<ReturnType<typeof repositoryOpenedAiSpanFromLixSpan>> =
+		[];
 	const onSpan = createLixOpenedOnSpan({
 		capture: (event) => captured.push(event),
 		environment: "production",
@@ -24,6 +30,15 @@ void test("completed lix.opened span captures exactly one repository_opened", ()
 	onSpan({
 		name: "lix.opened",
 		attributes: {
+			"lix.id": "legacy-must-not-map",
+			"lix.account_id": "user-123",
+		},
+	});
+	onSpan({
+		name: "lix.repository.opened",
+		traceId: "trace-1",
+		spanId: "span-1",
+		attributes: {
 			"lix.id": "lix-1",
 			"lix.branch_id": "branch-1",
 			"lix.account_id": "user-123",
@@ -32,9 +47,12 @@ void test("completed lix.opened span captures exactly one repository_opened", ()
 
 	assert.deepEqual(captured, [
 		{
-			event: "repository_opened",
+			event: "$ai_span",
 			distinctId: "user-123",
 			properties: {
+				$ai_span_name: "lix.repository.opened",
+				$ai_trace_id: "trace-1",
+				$ai_span_id: "span-1",
 				lix_id: "lix-1",
 				branch_id: "branch-1",
 				repository_id: "lix-1",
@@ -43,16 +61,19 @@ void test("completed lix.opened span captures exactly one repository_opened", ()
 			},
 		},
 	]);
+	assert.equal(
+		captured[0]?.properties && "$ai_latency" in captured[0].properties,
+		false,
+	);
 });
 
-void test("engine start.kind LixOpened maps the same product event", () => {
+void test("engine start.name lix.repository.opened maps the same $ai_span", () => {
 	assert.deepEqual(
-		repositoryOpenedFromLixOpened(
+		repositoryOpenedAiSpanFromLixSpan(
 			{
-				name: "lix.opened",
+				name: "callback",
 				start: {
-					kind: "LixOpened",
-					name: "lix.opened",
+					name: "lix.repository.opened",
 					attributes: [
 						{ key: "lix.id", value: { String: "lix-1" } },
 						{ key: "lix.branch_id", value: { String: "branch-1" } },
@@ -64,9 +85,10 @@ void test("engine start.kind LixOpened maps the same product event", () => {
 			{ environment: "production", source: "web" },
 		),
 		{
-			event: "repository_opened",
+			event: "$ai_span",
 			distinctId: "user-123",
 			properties: {
+				$ai_span_name: "lix.repository.opened",
 				lix_id: "lix-1",
 				branch_id: "branch-1",
 				repository_id: "lix-1",
@@ -82,55 +104,37 @@ void test("anonymous and demo accounts never become a distinct_id", () => {
 	assert.equal(identifiedDistinctId("lixray-demo"), null);
 	assert.equal(identifiedDistinctId(""), null);
 	assert.equal(
-		repositoryOpenedFromBind({
-			lixId: "lix-1",
-			branchId: "branch-1",
-			accountId: ANONYMOUS_LIX_ACCOUNT_ID,
-			environment: "production",
-			source: "server",
-		}),
+		repositoryOpenedAiSpanFromLixSpan(
+			{
+				name: "lix.repository.opened",
+				attributes: {
+					"lix.id": "lix-1",
+					"lix.account_id": ANONYMOUS_LIX_ACCOUNT_ID,
+				},
+			},
+			{ environment: "production", source: "server" },
+		),
 		null,
 	);
 });
 
-void test("one bind produces one product event", () => {
-	assert.deepEqual(
-		repositoryOpenedFromBind({
-			lixId: "lix-1",
-			branchId: "branch-1",
-			accountId: "user-123",
-			organizationId: "org-1",
-			environment: "production",
-			source: "mcp",
-		}),
-		{
-			event: "repository_opened",
-			distinctId: "user-123",
-			properties: {
-				lix_id: "lix-1",
-				branch_id: "branch-1",
-				repository_id: "lix-1",
-				organization_id: "org-1",
-				environment: "production",
-				source: "mcp",
-			},
-		},
-	);
-});
-
-void test("Atelier and MCP tool handlers are not repository_opened writers", async () => {
+void test("Atelier, MCP tools, and bind hooks are not open-repo product writers", async () => {
 	const files = await Promise.all([
 		readFile(
 			new URL("../components/repository-atelier.tsx", import.meta.url),
 			"utf8",
 		),
 		readFile(new URL("../mcp/server.ts", import.meta.url), "utf8"),
+		readFile(new URL("../mcp/lix-service.ts", import.meta.url), "utf8"),
+		readFile(new URL("../worker/handler.ts", import.meta.url), "utf8"),
 	]);
 	for (const source of files) {
-		assert.doesNotMatch(
-			source,
-			/captureTelemetry\(\s*["']repository_opened["']/,
-		);
-		assert.doesNotMatch(source, /["']repository_opened["']/);
+		for (const eventName of FORBIDDEN_OPEN_PRODUCT_EVENTS) {
+			assert.doesNotMatch(source, new RegExp(`["']${eventName}["']`));
+			assert.doesNotMatch(
+				source,
+				new RegExp(`captureTelemetry\\(\\s*["']${eventName}["']`),
+			);
+		}
 	}
 });

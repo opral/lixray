@@ -24,29 +24,73 @@ and Node execution forwards the completed engine span through the native or
 WASM binding and the SDK worker. The callback is isolated from query results;
 an exception in `onSpan` does not fail the Lix operation. Remote SQL spans stay
 on the server and are not duplicated in the remote client. The same rule
-applies to `lix.opened`.
+applies to `lix.repository.opened`.
 
-## Product open event
+## Open-repo north star
 
-The engine emits a vendor-neutral `lix.opened` span when a client session binds
-to a Lix (handshake session create, in-process client `open_lix()`, or an
-explicit `Lix::bind_session` / `lix::bind_session`). Lix never names or
-captures `repository_opened`.
+The engine emits a vendor-neutral `lix.repository.opened` span when a client
+session binds to a Lix (handshake session create, in-process client
+`open_lix()`, or an explicit `Lix::bind_session` / `lix::bind_session`). That
+span is the north star. LixRay does not emit a parallel product event named
+`repository_opened`, `lixray_repository_opened`, or `webapp_repository_opened`.
 
-LixRay's host sink is the only writer of the PostHog product event
-`repository_opened`. On lix-server, `HostTelemetrySink` watches completed
-`lix.opened` spans and `capture()`s that event with the session account as
-`distinct_id`. In-process WASM uses the same mapping from `onSpan` when
-`span.name` is `lix.opened`. MCP `open_lix` calls `bindSession` on every
-successful signed-context mint, cache-hit or miss, with the OAuth / principal
-account. Cache-admit / protocol-root open uses
-`open_lix().with_telemetry(...).as_protocol_root()` and is not a product bind.
+Lix spans stay `lix.*` on the TelemetrySink / OTLP path. LixRay also captures
+`lix.repository.opened` as a PostHog `$ai_span` whose `$ai_span_name` equals
+the Lix name. On lix-server, `HostTelemetrySink` watches completed
+`lix.repository.opened` spans and captures that `$ai_span` with the session
+account as `distinct_id`. In-process WASM uses the same mapping from `onSpan`
+when `span.name` is `lix.repository.opened`. Remote/sync clients must not
+attach a second mapper: the span stays on the server.
+
+MCP `open_lix` does not invent an `mcp.open_lix` `$ai_span`. Official
+`$mcp_tool_call` keeps `$mcp_duration_ms` as harness wall clock. Cache-admit /
+protocol-root open uses `open_lix().with_telemetry(...).as_protocol_root()`
+and is not a client bind.
 
 Identity is the OAuth / session account so the same person on web and MCP is
 one WAU. Anonymous and demo accounts are not captured. Optional `source`
 (`web` / `mcp` / `server`) is diagnostic only and must not split the north
 star. Missing or invalid PostHog config never prevents the server from
 starting.
+
+Web UI product counts use the `webapp_*` prefix. See
+[Product event rename](#product-event-rename).
+
+## Product event rename
+
+Hard-cut emit (no dual-emit). Old unprefixed / `lixray_*` UI names are gone.
+
+| Old name | New name |
+| --- | --- |
+| `lixray_user_signed_up` | `webapp_user_signed_up` |
+| `lixray_first_file_added` | `webapp_first_file_added` |
+| `lixray_oauth_consent_resolved` | `webapp_oauth_consent_resolved` |
+| `lixray_file_written` | `webapp_file_written` |
+| `lixray_import_completed` | `webapp_import_completed` |
+| `lixray_telemetry_probe` | `webapp_telemetry_probe` |
+| `repository_created` | `webapp_repository_created` |
+| `repository_deleted` | `webapp_repository_deleted` |
+| `repository_list_failed` | `webapp_repository_list_failed` |
+| `workspace_opened` | `webapp_workspace_opened` |
+| `workspace_created` | `webapp_workspace_created` |
+| `workspace_deleted` | `webapp_workspace_deleted` |
+| `organization_created` | `webapp_organization_created` |
+| `document_open_attempted` | `webapp_document_open_attempted` |
+| `document_viewed` | `webapp_document_viewed` |
+| `document_modified` | `webapp_document_modified` |
+| `diff_opened` | `webapp_diff_opened` |
+| `extension_opened` | `webapp_extension_opened` |
+| `share_link_created` | `webapp_share_link_created` |
+| `share_link_copied` | `webapp_share_link_copied` |
+| `auth_session_validation_failed` | `webapp_auth_session_validation_failed` |
+| `lix_request_failed` | `webapp_request_failed` |
+| `auth_session_orphaned` | `webapp_auth_session_orphaned` |
+| `resource_published` | `webapp_resource_published` |
+| `resource_unpublished` | `webapp_resource_unpublished` |
+| `organization_renamed` | `webapp_organization_renamed` |
+| `repository_renamed` | `webapp_repository_renamed` |
+| `diff_resolved` | `webapp_diff_resolved` |
+| `repository_opened` | deleted — use `$ai_span` `$ai_span_name=lix.repository.opened` |
 
 ## Span model
 

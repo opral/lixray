@@ -3,15 +3,18 @@ import type { LixTelemetrySpan } from "@lix-js/sdk";
 /** Built-in anonymous Lix account. Never a PostHog person. */
 export const ANONYMOUS_LIX_ACCOUNT_ID = "00000000-0000-7000-8000-000000000002";
 
-export const LIX_OPENED_SPAN_NAME = "lix.opened";
-export const REPOSITORY_OPENED_EVENT = "repository_opened";
+export const LIX_REPOSITORY_OPENED_SPAN_NAME = "lix.repository.opened";
+export const LIX_REPOSITORY_OPENED_AI_SPAN_EVENT = "$ai_span";
 
 export type RepositoryOpenedSource = "web" | "mcp" | "server";
 
-export interface RepositoryOpenedEvent {
-	event: typeof REPOSITORY_OPENED_EVENT;
+export interface LixRepositoryOpenedAiSpan {
+	event: typeof LIX_REPOSITORY_OPENED_AI_SPAN_EVENT;
 	distinctId: string;
 	properties: {
+		$ai_span_name: typeof LIX_REPOSITORY_OPENED_SPAN_NAME;
+		$ai_trace_id?: string;
+		$ai_span_id?: string;
 		lix_id: string;
 		branch_id?: string;
 		repository_id?: string;
@@ -21,20 +24,12 @@ export interface RepositoryOpenedEvent {
 	};
 }
 
-export interface LixOpenedBind {
-	lixId: string;
-	branchId?: string;
-	accountId: string;
-	organizationId?: string;
-	repositoryId?: string;
-	environment: string;
-	source?: RepositoryOpenedSource;
-}
-
 export type LixOpenedSpanLike = Pick<
 	LixTelemetrySpan,
 	"name" | "attributes"
 > & {
+	traceId?: string;
+	spanId?: string;
 	start?: {
 		kind?: string;
 		name?: string;
@@ -56,41 +51,17 @@ export function identifiedDistinctId(
 	return distinctId;
 }
 
-export function isLixOpenedSpan(span: LixOpenedSpanLike): boolean {
-	if (span.name === LIX_OPENED_SPAN_NAME) return true;
-	const start = span.start;
-	if (!start) return false;
-	return (
-		start.name === LIX_OPENED_SPAN_NAME ||
-		start.kind === "LixOpened" ||
-		start.kind === LIX_OPENED_SPAN_NAME
-	);
+export function isLixRepositoryOpenedSpan(span: LixOpenedSpanLike): boolean {
+	if (span.name === LIX_REPOSITORY_OPENED_SPAN_NAME) return true;
+	return span.start?.name === LIX_REPOSITORY_OPENED_SPAN_NAME;
 }
 
-export function repositoryOpenedFromBind(
-	bind: LixOpenedBind,
-): RepositoryOpenedEvent | null {
-	const distinctId = identifiedDistinctId(bind.accountId);
-	const lixId = bind.lixId.trim();
-	if (!distinctId || !lixId) return null;
-	const branchId = bind.branchId?.trim();
-	const organizationId = bind.organizationId?.trim();
-	const repositoryId = bind.repositoryId?.trim() || lixId;
-	return {
-		event: REPOSITORY_OPENED_EVENT,
-		distinctId,
-		properties: {
-			lix_id: lixId,
-			...(branchId ? { branch_id: branchId } : {}),
-			repository_id: repositoryId,
-			...(organizationId ? { organization_id: organizationId } : {}),
-			environment: bind.environment,
-			...(bind.source ? { source: bind.source } : {}),
-		},
-	};
-}
-
-export function repositoryOpenedFromLixOpened(
+/**
+ * Maps a completed Lix `lix.repository.opened` span to a PostHog `$ai_span`.
+ * This is a capture of the engine span, not a parallel product event.
+ * Missing Lix ids are omitted; duration is never invented.
+ */
+export function repositoryOpenedAiSpanFromLixSpan(
 	span: LixOpenedSpanLike,
 	options: {
 		environment: string;
@@ -99,27 +70,43 @@ export function repositoryOpenedFromLixOpened(
 		repositoryId?: string;
 		distinctId?: string;
 	},
-): RepositoryOpenedEvent | null {
-	if (!isLixOpenedSpan(span)) return null;
+): LixRepositoryOpenedAiSpan | null {
+	if (!isLixRepositoryOpenedSpan(span)) return null;
 	const attributes = spanAttributes(span);
-	return repositoryOpenedFromBind({
-		lixId: stringAttribute(attributes, "lix.id") ?? "",
-		branchId: stringAttribute(attributes, "lix.branch_id"),
-		accountId:
-			options.distinctId ?? stringAttribute(attributes, "lix.account_id") ?? "",
-		organizationId: options.organizationId,
-		repositoryId: options.repositoryId,
-		environment: options.environment,
-		source: options.source,
-	});
+	const distinctId = identifiedDistinctId(
+		options.distinctId ?? stringAttribute(attributes, "lix.account_id"),
+	);
+	const lixId = stringAttribute(attributes, "lix.id") ?? "";
+	if (!distinctId || !lixId) return null;
+	const branchId = stringAttribute(attributes, "lix.branch_id");
+	const organizationId = options.organizationId?.trim();
+	const repositoryId = options.repositoryId?.trim() || lixId;
+	const traceId = span.traceId?.trim();
+	const spanId = span.spanId?.trim();
+	return {
+		event: LIX_REPOSITORY_OPENED_AI_SPAN_EVENT,
+		distinctId,
+		properties: {
+			$ai_span_name: LIX_REPOSITORY_OPENED_SPAN_NAME,
+			...(traceId ? { $ai_trace_id: traceId } : {}),
+			...(spanId ? { $ai_span_id: spanId } : {}),
+			lix_id: lixId,
+			...(branchId ? { branch_id: branchId } : {}),
+			repository_id: repositoryId,
+			...(organizationId ? { organization_id: organizationId } : {}),
+			environment: options.environment,
+			...(options.source ? { source: options.source } : {}),
+		},
+	};
 }
 
 /**
  * In-process `openLix({ telemetry: { onSpan } })` adapter.
- * Remote mode must not attach this: `lix.opened` stays on the server.
+ * Remote/sync mode must not attach this: `lix.repository.opened` stays on
+ * the server HostTelemetrySink `$ai_span` capture.
  */
 export function createLixOpenedOnSpan(options: {
-	capture: (event: RepositoryOpenedEvent) => void;
+	capture: (event: LixRepositoryOpenedAiSpan) => void;
 	environment: string;
 	source?: RepositoryOpenedSource;
 	organizationId?: string;
@@ -127,7 +114,7 @@ export function createLixOpenedOnSpan(options: {
 	distinctId?: string;
 }): (span: LixOpenedSpanLike) => void {
 	return (span) => {
-		const event = repositoryOpenedFromLixOpened(span, options);
+		const event = repositoryOpenedAiSpanFromLixSpan(span, options);
 		if (event) options.capture(event);
 	};
 }

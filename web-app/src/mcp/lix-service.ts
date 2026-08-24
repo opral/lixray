@@ -290,7 +290,8 @@ export class LixService {
 		const commitId = await this.commitId(lixId, selectedBranchId);
 		const inventory = await this.fileInventory(lixId, selectedBranchId);
 		// Bind the OAuth / principal account on every successful signed-context
-		// mint. Cache-admit / protocol-root open is not a product bind.
+		// mint. Open-repo telemetry is the Lix `lix.repository.opened` span,
+		// not a host product event.
 		this.client.bindSession({
 			lixId,
 			branchId: selectedBranchId,

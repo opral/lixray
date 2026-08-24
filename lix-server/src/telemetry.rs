@@ -342,10 +342,11 @@ where
 
 const ANONYMOUS_ACCOUNT_ID: &str = lix_sdk::ANONYMOUS_ACCOUNT_ID;
 const DEMO_ACCOUNT_ID: &str = "lixray-demo";
-const REPOSITORY_OPENED_EVENT: &str = "repository_opened";
+const AI_SPAN_EVENT: &str = "$ai_span";
+const LIX_REPOSITORY_OPENED_SPAN_NAME: &str = "lix.repository.opened";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RepositoryOpenedEvent {
+pub struct LixRepositoryOpenedAiSpan {
     pub distinct_id: String,
     pub lix_id: String,
     pub branch_id: Option<String>,
@@ -353,18 +354,21 @@ pub struct RepositoryOpenedEvent {
     pub organization_id: Option<String>,
     pub environment: String,
     pub source: Option<String>,
+    pub trace_id: Option<String>,
+    pub span_id: Option<String>,
 }
 
-pub trait RepositoryOpenedCapture: Send + Sync {
-    fn capture(&self, event: RepositoryOpenedEvent);
+pub trait LixRepositoryOpenedCapture: Send + Sync {
+    fn capture(&self, event: LixRepositoryOpenedAiSpan);
 }
 
-/// Host sink: Lix spans stay on the tracing/OTLP path; `lix.repository.opened` becomes
-/// the product event `repository_opened` when the session has an identified person.
+/// Host sink: Lix spans stay on the tracing/OTLP path. `lix.repository.opened`
+/// is also captured as `$ai_span` with the Lix name when the session has an
+/// identified person. This is not a parallel product event.
 #[derive(Clone)]
 pub struct HostTelemetrySink {
     tracing: OpenTelemetryTracingSink,
-    product: Option<Arc<dyn RepositoryOpenedCapture>>,
+    product: Option<Arc<dyn LixRepositoryOpenedCapture>>,
     source: &'static str,
 }
 
@@ -377,7 +381,7 @@ impl HostTelemetrySink {
         }
     }
 
-    pub fn with_product_capture(product: Arc<dyn RepositoryOpenedCapture>) -> Self {
+    pub fn with_product_capture(product: Arc<dyn LixRepositoryOpenedCapture>) -> Self {
         Self {
             tracing: OpenTelemetryTracingSink::new(),
             product: Some(product),
@@ -385,15 +389,17 @@ impl HostTelemetrySink {
         }
     }
 
-    fn repository_opened(&self, start: &TelemetrySpanStart) -> Option<RepositoryOpenedEvent> {
-        if start.class != TelemetrySpanClass::Lifecycle || start.name != "lix.repository.opened" {
+    fn repository_opened(&self, start: &TelemetrySpanStart) -> Option<LixRepositoryOpenedAiSpan> {
+        if start.class != TelemetrySpanClass::Lifecycle
+            || start.name != LIX_REPOSITORY_OPENED_SPAN_NAME
+        {
             return None;
         }
         let lix_id = string_attribute(start, "lix.id")?.to_owned();
         let distinct_id =
             identified_distinct_id(string_attribute(start, "lix.account_id"))?.to_owned();
         let branch_id = string_attribute(start, "lix.branch_id").map(ToOwned::to_owned);
-        Some(RepositoryOpenedEvent {
+        Some(LixRepositoryOpenedAiSpan {
             distinct_id,
             repository_id: Some(lix_id.clone()),
             lix_id,
@@ -401,6 +407,8 @@ impl HostTelemetrySink {
             organization_id: None,
             environment: "production".to_string(),
             source: Some(self.source.to_string()),
+            trace_id: None,
+            span_id: None,
         })
     }
 }
@@ -408,7 +416,7 @@ impl HostTelemetrySink {
 impl TelemetrySink for HostTelemetrySink {
     fn enabled(&self, descriptor: &TelemetrySpanDescriptor) -> bool {
         if descriptor.class() == TelemetrySpanClass::Lifecycle
-            && descriptor.name() == "lix.repository.opened"
+            && descriptor.name() == LIX_REPOSITORY_OPENED_SPAN_NAME
         {
             self.product.is_some() || self.tracing.enabled(descriptor)
         } else {
@@ -418,7 +426,9 @@ impl TelemetrySink for HostTelemetrySink {
 
     fn start_span(&self, start: TelemetrySpanStart) -> Box<dyn TelemetrySpanHandle> {
         let tracing = self.tracing.start_span(start.clone());
-        if start.class == TelemetrySpanClass::Lifecycle && start.name == "lix.repository.opened" {
+        if start.class == TelemetrySpanClass::Lifecycle
+            && start.name == LIX_REPOSITORY_OPENED_SPAN_NAME
+        {
             if let Some(product) = self.product.clone() {
                 return Box::new(HostOpenedSpan {
                     tracing,
@@ -433,8 +443,8 @@ impl TelemetrySink for HostTelemetrySink {
 
 struct HostOpenedSpan {
     tracing: Box<dyn TelemetrySpanHandle>,
-    product: Arc<dyn RepositoryOpenedCapture>,
-    event: Option<RepositoryOpenedEvent>,
+    product: Arc<dyn LixRepositoryOpenedCapture>,
+    event: Option<LixRepositoryOpenedAiSpan>,
 }
 
 impl TelemetrySpanHandle for HostOpenedSpan {
@@ -447,7 +457,12 @@ impl TelemetrySpanHandle for HostOpenedSpan {
     }
 
     fn finish(self: Box<Self>, end: TelemetrySpanEnd) {
-        if let Some(event) = self.event {
+        if let Some(mut event) = self.event {
+            let context = self.tracing.span_context();
+            if context.is_valid() {
+                event.trace_id = Some(context.trace_id().to_string());
+                event.span_id = Some(context.span_id().to_string());
+            }
             self.product.capture(event);
         }
         self.tracing.finish(end);
@@ -479,7 +494,7 @@ fn string_attribute<'a>(start: &'a TelemetrySpanStart, key: &str) -> Option<&'a 
     })
 }
 
-fn product_capture_from_env() -> Option<Arc<dyn RepositoryOpenedCapture>> {
+fn product_capture_from_env() -> Option<Arc<dyn LixRepositoryOpenedCapture>> {
     match posthog_product_config_from_env() {
         Ok(Some(config)) => Some(Arc::new(PostHogProductCapture::new(config))),
         Ok(None) => None,
@@ -525,50 +540,78 @@ impl PostHogProductCapture {
     }
 }
 
-impl RepositoryOpenedCapture for PostHogProductCapture {
-    fn capture(&self, event: RepositoryOpenedEvent) {
+impl LixRepositoryOpenedCapture for PostHogProductCapture {
+    fn capture(&self, event: LixRepositoryOpenedAiSpan) {
         let client = self.client.clone();
         let token = self.token.clone();
         let endpoint = self.endpoint.clone();
         let send = async move {
-            let mut properties = serde_json::Map::new();
-            properties.insert("lix_id".into(), serde_json::Value::String(event.lix_id));
-            if let Some(branch_id) = event.branch_id {
-                properties.insert("branch_id".into(), serde_json::Value::String(branch_id));
-            }
-            if let Some(repository_id) = event.repository_id {
-                properties.insert(
-                    "repository_id".into(),
-                    serde_json::Value::String(repository_id),
-                );
-            }
-            if let Some(organization_id) = event.organization_id {
-                properties.insert(
-                    "organization_id".into(),
-                    serde_json::Value::String(organization_id),
-                );
-            }
-            properties.insert(
-                "environment".into(),
-                serde_json::Value::String(event.environment),
-            );
-            if let Some(source) = event.source {
-                properties.insert("source".into(), serde_json::Value::String(source));
-            }
             let body = serde_json::json!({
                 "api_key": token,
-                "event": REPOSITORY_OPENED_EVENT,
+                "event": AI_SPAN_EVENT,
                 "distinct_id": event.distinct_id,
-                "properties": properties,
+                "properties": ai_span_properties(&event),
             });
             if let Err(error) = client.post(&endpoint).json(&body).send().await {
-                tracing::warn!(error = %error, "failed to capture repository_opened");
+                tracing::warn!(error = %error, "failed to capture lix.repository.opened $ai_span");
             }
         };
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(send);
         }
     }
+}
+
+fn ai_span_properties(
+    event: &LixRepositoryOpenedAiSpan,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut properties = serde_json::Map::new();
+    properties.insert(
+        "$ai_span_name".into(),
+        serde_json::Value::String(LIX_REPOSITORY_OPENED_SPAN_NAME.to_string()),
+    );
+    if let Some(trace_id) = &event.trace_id {
+        properties.insert(
+            "$ai_trace_id".into(),
+            serde_json::Value::String(trace_id.clone()),
+        );
+    }
+    if let Some(span_id) = &event.span_id {
+        properties.insert(
+            "$ai_span_id".into(),
+            serde_json::Value::String(span_id.clone()),
+        );
+    }
+    properties.insert(
+        "lix_id".into(),
+        serde_json::Value::String(event.lix_id.clone()),
+    );
+    if let Some(branch_id) = &event.branch_id {
+        properties.insert(
+            "branch_id".into(),
+            serde_json::Value::String(branch_id.clone()),
+        );
+    }
+    if let Some(repository_id) = &event.repository_id {
+        properties.insert(
+            "repository_id".into(),
+            serde_json::Value::String(repository_id.clone()),
+        );
+    }
+    if let Some(organization_id) = &event.organization_id {
+        properties.insert(
+            "organization_id".into(),
+            serde_json::Value::String(organization_id.clone()),
+        );
+    }
+    properties.insert(
+        "environment".into(),
+        serde_json::Value::String(event.environment.clone()),
+    );
+    if let Some(source) = &event.source {
+        properties.insert("source".into(), serde_json::Value::String(source.clone()));
+    }
+    properties
 }
 
 fn optional_nonempty_env(name: &str) -> Result<Option<String>> {
@@ -867,16 +910,16 @@ mod tests {
         assert!(shutdown_result.is_ok());
     }
 
-    struct RecordingCapture(Arc<Mutex<Vec<RepositoryOpenedEvent>>>);
+    struct RecordingCapture(Arc<Mutex<Vec<LixRepositoryOpenedAiSpan>>>);
 
-    impl RepositoryOpenedCapture for RecordingCapture {
-        fn capture(&self, event: RepositoryOpenedEvent) {
+    impl LixRepositoryOpenedCapture for RecordingCapture {
+        fn capture(&self, event: LixRepositoryOpenedAiSpan) {
             self.0.lock().unwrap().push(event);
         }
     }
 
     #[test]
-    fn lix_opened_span_captures_one_repository_opened() {
+    fn lix_repository_opened_span_captures_one_ai_span() {
         let (_subscriber, _provider) = install_test_otel();
         let captured = Arc::new(Mutex::new(Vec::new()));
         let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
@@ -885,18 +928,24 @@ mod tests {
         lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", Some("user-123"));
         let events = captured.lock().unwrap().clone();
         assert_eq!(events.len(), 1);
+        assert_eq!(events[0].distinct_id, "user-123");
+        assert_eq!(events[0].lix_id, "lix-1");
+        assert_eq!(events[0].branch_id.as_deref(), Some("branch-1"));
+        assert_eq!(events[0].repository_id.as_deref(), Some("lix-1"));
+        assert_eq!(events[0].organization_id, None);
+        assert_eq!(events[0].environment, "production");
+        assert_eq!(events[0].source.as_deref(), Some("server"));
+        let properties = ai_span_properties(&events[0]);
         assert_eq!(
-            events[0],
-            RepositoryOpenedEvent {
-                distinct_id: "user-123".to_string(),
-                lix_id: "lix-1".to_string(),
-                branch_id: Some("branch-1".to_string()),
-                repository_id: Some("lix-1".to_string()),
-                organization_id: None,
-                environment: "production".to_string(),
-                source: Some("server".to_string()),
-            }
+            properties
+                .get("$ai_span_name")
+                .and_then(|value| value.as_str()),
+            Some(LIX_REPOSITORY_OPENED_SPAN_NAME)
         );
+        assert!(!properties.contains_key("$ai_latency"));
+        assert_ne!(AI_SPAN_EVENT, "repository_opened");
+        assert_ne!(AI_SPAN_EVENT, "lixray_repository_opened");
+        assert_ne!(AI_SPAN_EVENT, "webapp_repository_opened");
     }
 
     #[tokio::test]

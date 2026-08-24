@@ -32,7 +32,7 @@ export function createAtelierTelemetryHandler(
 		switch (event.type) {
 			case "document_open_attempted": {
 				const fileExtension = fileExtensionProperty(event.filePath);
-				capture("document_open_attempted", {
+				capture("webapp_document_open_attempted", {
 					document_open_result: event.supported ? "viewed" : "unsupported",
 					file_extension: fileExtension,
 					...(event.supported
@@ -47,7 +47,7 @@ export function createAtelierTelemetryHandler(
 				break;
 			}
 			case "document_viewed":
-				capture("document_viewed", {
+				capture("webapp_document_viewed", {
 					document_origin: event.documentOrigin,
 					file_extension: fileExtensionProperty(event.filePath),
 					view_kind: event.viewKind,
@@ -63,12 +63,12 @@ export function createAtelierTelemetryHandler(
 					break;
 				}
 				lastModificationByPath.set(event.filePath, capturedAt);
-				capture("document_modified", {
+				capture("webapp_document_modified", {
 					file_extension: fileExtensionProperty(event.filePath),
 					modified_by: event.modifiedBy,
 				});
 
-				// Track lixray_first_file_added event for repositories
+				// Track webapp_first_file_added event for repositories
 				if (context.lix && context.repositoryId && context.organizationId) {
 					const firstFileKey = `lixray.first-file.${context.repositoryId}`;
 					const hasTrackedFirstFile =
@@ -91,7 +91,7 @@ export function createAtelierTelemetryHandler(
 
 								// If there's exactly 1 file, this is the first one
 								if (fileCount === 1) {
-									capture("lixray_first_file_added", {
+									capture("webapp_first_file_added", {
 										repository_id: context.repositoryId!,
 										organization_id: context.organizationId!,
 										file_extension: fileExtensionProperty(event.filePath),
@@ -109,18 +109,18 @@ export function createAtelierTelemetryHandler(
 				break;
 			}
 			case "extension_opened":
-				capture("extension_opened", {
+				capture("webapp_extension_opened", {
 					extension_id: normalizeExtensionId(event.extensionId),
 					panel: event.panel,
 				});
 				break;
 			case "diff_opened":
-				capture("diff_opened", {
+				capture("webapp_diff_opened", {
 					file_extension: fileExtensionProperty(event.filePath),
 				});
 				break;
 			case "diff_resolved":
-				capture("diff_resolved", {
+				capture("webapp_diff_resolved", {
 					file_extension: fileExtensionProperty(event.filePath),
 					outcome: event.outcome,
 				});

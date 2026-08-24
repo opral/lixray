@@ -1268,14 +1268,14 @@ function RepositoryShareControl({
 					source: publicationLabel === "repository" ? "repository" : "resource",
 					canUnpublish: true,
 				});
-				captureTelemetry("resource_published", {
+				captureTelemetry("webapp_resource_published", {
 					resource_kind: publicationLabel,
 				});
 			}}
 			unpublishReadLink={async () => {
 				await unpublishReadLink();
 				setReadAccess({ status: "private", canPublish: true });
-				captureTelemetry("resource_unpublished", {
+				captureTelemetry("webapp_resource_unpublished", {
 					resource_kind: publicationLabel,
 				});
 			}}
@@ -1296,7 +1296,7 @@ function RepositoryShareControl({
 				openShare();
 			}}
 			onCopied={() => {
-				captureTelemetry("share_link_copied", { share_mode: "public" });
+				captureTelemetry("webapp_share_link_copied", { share_mode: "public" });
 			}}
 			trigger={
 				<Button type="button" size="xs" variant="outline" className="h-7 px-3">

@@ -127,7 +127,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 					return;
 				}
 				if (result.kind === "validation_failed") {
-					captureTelemetry("auth_session_validation_failed", {
+					captureTelemetry("webapp_auth_session_validation_failed", {
 						auth_validation_operation: "initial_session_validation",
 						...authErrorTelemetryProperties(result.error),
 					});
@@ -143,7 +143,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			})
 			.catch((error: unknown) => {
 				if (disposed || authStateChanged) return;
-				captureTelemetry("auth_session_validation_failed", {
+				captureTelemetry("webapp_auth_session_validation_failed", {
 					auth_validation_operation: "initial_session_validation",
 					...authErrorTelemetryProperties(error),
 				});
@@ -250,13 +250,13 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 					await clearOrphanedSession(client, error, operation);
 					return "orphaned";
 				}
-				captureTelemetry("auth_session_validation_failed", {
+				captureTelemetry("webapp_auth_session_validation_failed", {
 					auth_validation_operation: operation,
 					...authErrorTelemetryProperties(error),
 				});
 				return "unknown";
 			} catch (error: unknown) {
-				captureTelemetry("auth_session_validation_failed", {
+				captureTelemetry("webapp_auth_session_validation_failed", {
 					auth_validation_operation: operation,
 					...authErrorTelemetryProperties(error),
 				});
@@ -307,7 +307,10 @@ async function clearOrphanedSession(
 		...authErrorTelemetryProperties(error),
 	};
 	await Promise.all([
-		captureTelemetryImmediately("auth_session_orphaned", telemetryProperties),
+		captureTelemetryImmediately(
+			"webapp_auth_session_orphaned",
+			telemetryProperties,
+		),
 		captureErrorLogImmediately("Auth session orphaned", telemetryProperties),
 	]);
 	await client.auth.signOut({ scope: "local" });
