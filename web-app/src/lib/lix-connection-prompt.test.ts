@@ -52,15 +52,10 @@ void test("uses Lixray in production and starts with one user-picked skill", () 
 	assert.doesNotMatch(details.prompt, /local connection/);
 	assert.match(details.prompt, /Lixray is added as a normal MCP connector\./);
 	assert.match(details.prompt, /guide the user to add it manually/);
-	assert.match(
-		details.prompt,
-		/put this in the team's shared AGENTS\.md or CLAUDE\.md/,
-	);
-	assert.match(details.prompt, /Do not save it to personal agent memory/);
 	assert.doesNotMatch(details.prompt, /Save this as durable agent memory/);
 	assert.match(
 		details.prompt,
-		/Once that file is updated, ask the user which single skill to put in Lixray\./,
+		/Once connected, ask the user which single skill to put in Lixray\./,
 	);
 	assert.match(details.prompt, /They pick or create it\./);
 	assert.match(details.prompt, /Write only that one skill file\./);
@@ -109,8 +104,8 @@ void test("keeps the connection prompt concise", () => {
 	const words = details.prompt.trim().split(/\s+/);
 
 	assert.ok(
-		words.length <= 165,
-		`expected at most 165 words, got ${words.length}`,
+		words.length <= 133,
+		`expected at most 133 words, got ${words.length}`,
 	);
 	assert.doesNotMatch(details.prompt, /active_branch_id/);
 	assert.doesNotMatch(details.prompt, /first files/);

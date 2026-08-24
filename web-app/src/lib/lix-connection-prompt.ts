@@ -37,11 +37,9 @@ This team's company repository is Lixray ${lixReference} (${lixId}).
 
 Lixray is added as a normal MCP connector. Agents cannot add connectors from the chat, so guide the user to add it manually: open their agent's connector / MCP settings, add ${serverName} at ${mcpUrl}, and authenticate. Claude: Settings → Connectors → Add custom connector. Codex: MCP settings. If ${serverName} is already connected, reuse it.
 
-Then guide the user to put this in the team's shared AGENTS.md or CLAUDE.md. Do not save it to personal agent memory — memory does not transfer to teammates.
-
 The company repository is Lixray ${lixReference}. Shared skills, guidelines, ICP, playbooks, and scripts live there. Read from it and write to it. If Lixray is not connected, tell the user to add ${mcpUrl} and reopen the chat.
 
-Once that file is updated, ask the user which single skill to put in Lixray. They pick or create it. Write only that one skill file.`;
+Once connected, ask the user which single skill to put in Lixray. They pick or create it. Write only that one skill file.`;
 
 	return {
 		serverName,
