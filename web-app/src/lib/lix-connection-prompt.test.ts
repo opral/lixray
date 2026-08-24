@@ -56,7 +56,8 @@ void test("uses Lixray in production and starts with one user-picked skill", () 
 		/Documentation is under https:\/\/lixray\.com\/docs\./,
 	);
 	assert.doesNotMatch(details.prompt, /local connection/);
-	assert.doesNotMatch(details.prompt, /company repository/i);
+	assert.doesNotMatch(details.prompt, /This team's company repository/);
+	assert.doesNotMatch(details.prompt, /The company repository is/);
 	assert.match(
 		details.prompt,
 		/Ask the user whether it is for personal stuff or company stuff, then treat it that way\./,
@@ -73,9 +74,13 @@ void test("uses Lixray in production and starts with one user-picked skill", () 
 		details.prompt,
 		/do not save it to personal agent memory/i,
 	);
+	assert.doesNotMatch(
+		details.prompt,
+		/Guide the user to put that in AGENTS\.md/,
+	);
 	assert.match(
 		details.prompt,
-		/Guide the user to put that in AGENTS\.md if it exists, CLAUDE\.md if it exists, or both\./,
+		/Guide the user to add this rule to AGENTS\.md if it exists, CLAUDE\.md if it exists, or both: Lixray @samuel\/repository is this personal or company repository\./,
 	);
 	assert.match(
 		details.prompt,
@@ -128,8 +133,8 @@ void test("keeps the connection prompt concise", () => {
 	const words = details.prompt.trim().split(/\s+/);
 
 	assert.ok(
-		words.length <= 137,
-		`expected at most 137 words, got ${words.length}`,
+		words.length <= 153,
+		`expected at most 153 words, got ${words.length}`,
 	);
 	assert.doesNotMatch(details.prompt, /active_branch_id/);
 	assert.doesNotMatch(details.prompt, /first files/);
