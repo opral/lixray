@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowRight, Building2, type LucideIcon, User, X } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { Building2, type LucideIcon, User } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 
 const primaryButton =
@@ -10,51 +10,9 @@ const secondaryButton =
 const bookDemoHref = "mailto:hello@opral.com?subject=LixRay%20demo";
 
 export function LandingPage() {
-	const { authLoaded, user, repositoryState, repositoryTo } =
-		useRepositoryCta();
+	const { user, repositoryTo } = useRepositoryCta();
 	const [audience, setAudience] = useState<"individual" | "company">("company");
-	const [autoOpenLoaded, setAutoOpenLoaded] = useState(false);
-	const [autoOpenEnabled, setAutoOpenEnabled] = useState(false);
-	const [openPromptDismissed, setOpenPromptDismissed] = useState(false);
 	const heroCtaLabel = user ? "Open LixRay" : "Create your repo for free";
-
-	useEffect(() => {
-		if (!authLoaded) return;
-		if (!user) {
-			setAutoOpenEnabled(false);
-			setAutoOpenLoaded(true);
-			return;
-		}
-		setAutoOpenEnabled(
-			window.localStorage.getItem(autoOpenStorageKey(user.id)) === "true",
-		);
-		setAutoOpenLoaded(true);
-	}, [authLoaded, user]);
-
-	useEffect(() => {
-		if (
-			!user ||
-			!autoOpenLoaded ||
-			!autoOpenEnabled ||
-			!repositoryState.isLoaded
-		) {
-			return;
-		}
-		window.location.replace(repositoryTo);
-	}, [
-		autoOpenEnabled,
-		autoOpenLoaded,
-		user,
-		repositoryState.isLoaded,
-		repositoryTo,
-	]);
-
-	const alwaysOpenLixRay = () => {
-		if (!user) return;
-		window.localStorage.setItem(autoOpenStorageKey(user.id), "true");
-		setAutoOpenEnabled(true);
-		window.location.assign(repositoryTo);
-	};
 
 	const ctaRow = (
 		<div className="flex flex-wrap items-center gap-3">
@@ -69,36 +27,7 @@ export function LandingPage() {
 
 	return (
 		<div className="min-h-screen bg-[#fbf6f0] font-sans text-[#1c1917] antialiased">
-			<SiteHeader>
-				{user &&
-				autoOpenLoaded &&
-				repositoryState.isLoaded &&
-				!autoOpenEnabled &&
-				!openPromptDismissed ? (
-					<div
-						className="absolute top-[78px] right-5 grid w-[min(330px,calc(100vw-40px))] gap-2.5 rounded-[18px] border border-black/8 bg-white py-5 pr-12 pl-6 text-base shadow-[0_18px_48px_rgba(74,40,19,.18)] sm:right-14"
-						role="status"
-					>
-						<button
-							className="absolute top-4 right-4 grid cursor-pointer place-items-center border-0 bg-transparent p-1 text-stone-400"
-							type="button"
-							aria-label="Dismiss"
-							onClick={() => setOpenPromptDismissed(true)}
-						>
-							<X className="size-5" aria-hidden="true" />
-						</button>
-						<span className="font-semibold">Skip this page next time?</span>
-						<button
-							className="inline-flex cursor-pointer items-center gap-2 justify-self-start border-0 bg-transparent p-0 font-bold text-[#e8590c]"
-							type="button"
-							onClick={alwaysOpenLixRay}
-						>
-							Always open LixRay{" "}
-							<ArrowRight className="size-4" aria-hidden="true" />
-						</button>
-					</div>
-				) : null}
-			</SiteHeader>
+			<SiteHeader />
 
 			<main className="mx-auto flex w-full max-w-[660px] flex-col gap-16 px-6 pt-16 pb-[130px] sm:px-8 sm:pt-20">
 				<section
@@ -285,10 +214,6 @@ export function LandingPage() {
 			</footer>
 		</div>
 	);
-}
-
-function autoOpenStorageKey(userId: string) {
-	return `lixray.landing.auto-open:${userId}`;
 }
 
 function AudienceButton({
