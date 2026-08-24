@@ -131,6 +131,8 @@ export type RepositoryControlPlaneData = {
 
 export const CHECKPOINT_SUMMARY_SQL =
 	"SELECT lixcol_created_at AS created_at, count(*) over () AS total_count FROM lix_checkpoint ORDER BY lixcol_created_at DESC LIMIT 10";
+export const CHANGE_SUMMARY_SQL =
+	"WITH daily AS (SELECT substr(created_at, 1, 10) AS day, count(*) AS day_count, min(created_at) AS day_created_at FROM lix_change GROUP BY substr(created_at, 1, 10)) SELECT day, day_count AS n, sum(day_count) over () AS total_count, min(day_created_at) over () AS created_at FROM daily ORDER BY day DESC LIMIT 10";
 
 /** Live, repository-derived facts used by the Home control-plane rail. */
 export function useRepositoryControlPlaneData(
@@ -138,18 +140,7 @@ export function useRepositoryControlPlaneData(
 	enabled = true,
 ): RepositoryControlPlaneData | null {
 	const checkpoints = useObservedRows(lix, CHECKPOINT_SUMMARY_SQL, [], enabled);
-	const changeStats = useObservedRows(
-		lix,
-		"SELECT count(*) AS n, min(created_at) AS created_at FROM lix_change",
-		[],
-		enabled,
-	);
-	const changeDays = useObservedRows(
-		lix,
-		"SELECT substr(created_at, 1, 10) AS day, count(*) AS n FROM lix_change GROUP BY substr(created_at, 1, 10) ORDER BY day DESC LIMIT 10",
-		[],
-		enabled,
-	);
+	const changeSummary = useObservedRows(lix, CHANGE_SUMMARY_SQL, [], enabled);
 	const [tableCount, setTableCount] = useState<number | null>(null);
 
 	useEffect(() => {
@@ -179,17 +170,16 @@ export function useRepositoryControlPlaneData(
 	}, [enabled, lix]);
 
 	return useMemo(() => {
-		const observations = [checkpoints, changeStats, changeDays];
+		const observations = [checkpoints, changeSummary];
 		if (observations.some(({ rows, error }) => rows === null && !error)) {
 			return null;
 		}
 		// Full change history is optional for Home. A failed first frame settles to
 		// unavailable while successful frames stay visible after later failures.
-		const changeStatsRows = changeStats.rows ?? [];
-		const changeDayRows = changeDays.rows ?? [];
+		const changeSummaryRows = changeSummary.rows ?? [];
 		return {
-			totalChangeCount: changeStats.rows
-				? asNumber(changeStatsRows[0]?.get("n"))
+			totalChangeCount: changeSummary.rows
+				? asNumber(changeSummaryRows[0]?.get("total_count"))
 				: null,
 			tableCount,
 			checkpointCount: checkpoints.rows
@@ -200,22 +190,22 @@ export function useRepositoryControlPlaneData(
 						.map((row) => asText(row.get("created_at")))
 						.filter(Boolean)
 				: null,
-			changeDays: changeDays.rows
-				? changeDayRows
+			changeDays: changeSummary.rows
+				? changeSummaryRows
 						.map((row) => ({
 							day: asText(row.get("day")),
 							count: asNumber(row.get("n")),
 						}))
 						.reverse()
 				: null,
-			createdAt: changeStats.rows
-				? asNullableText(changeStatsRows[0]?.get("created_at"))
+			createdAt: changeSummary.rows
+				? asNullableText(changeSummaryRows[0]?.get("created_at"))
 				: null,
 			changeHistoryUnavailable: observations.some(
 				({ error }) => error !== null,
 			),
 		};
-	}, [changeDays, changeStats, checkpoints, tableCount]);
+	}, [changeSummary, checkpoints, tableCount]);
 }
 
 /** The full directory/file tree, kept live via lix observe. */

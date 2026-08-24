@@ -3,6 +3,7 @@ import test from "node:test";
 import type { Lix } from "@lix-js/sdk";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import {
+	CHANGE_SUMMARY_SQL,
 	CHECKPOINT_SUMMARY_SQL,
 	canonicalDirectoryPath,
 	createRepositoryFile,
@@ -64,6 +65,18 @@ void test("decides empty routing only from a complete initial tree", () => {
 void test("keeps checkpoint dates bounded while returning the total count", () => {
 	assert.match(CHECKPOINT_SUMMARY_SQL, /count\(\*\) over \(\) AS total_count/i);
 	assert.match(CHECKPOINT_SUMMARY_SQL, /LIMIT 10$/i);
+});
+
+void test("derives change totals and dates from one bounded daily query", () => {
+	assert.match(
+		CHANGE_SUMMARY_SQL,
+		/sum\(day_count\) over \(\) AS total_count/i,
+	);
+	assert.match(
+		CHANGE_SUMMARY_SQL,
+		/min\(day_created_at\) over \(\) AS created_at/i,
+	);
+	assert.match(CHANGE_SUMMARY_SQL, /LIMIT 10$/i);
 });
 
 void test("observer failures expose first-frame errors without inventing rows", () => {
