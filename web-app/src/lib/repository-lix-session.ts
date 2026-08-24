@@ -55,33 +55,38 @@ export interface RepositoryLixSession {
 	subscribeActiveBranch(listener: () => void): () => void;
 	createBranch(name: string): Promise<string>;
 	switchBranch(branchId: string): Promise<string>;
-	/** Immediately cancels browser sync when a non-BFCache page unloads. */
-	terminateForPageUnload?(): void;
 	close(): Promise<void>;
 }
 
 export async function openRepositoryLixSession(
 	options: OpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
-	const replicaId = await claimRepositoryBrowserReplicaId(options);
-	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaClaimed);
-	const resolvedOptions = {
-		...options,
-		replicaId,
-	};
 	const lease = await acquireManagedRepositoryResource(
-		repositorySessionKey(resolvedOptions),
-		() => openRepositoryLixSessionWithRetry(resolvedOptions),
+		repositorySessionKey(options),
+		async () => {
+			const replicaClaim = await claimRepositoryBrowserReplicaId(options);
+			markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaClaimed);
+			try {
+				return await openRepositoryLixSessionWithRetry(
+					{ ...options, replicaId: replicaClaim.replicaId },
+					() => replicaClaim.release(),
+				);
+			} catch (error) {
+				replicaClaim.release();
+				throw error;
+			}
+		},
 	);
 	return new RepositoryLixSessionLease(lease.resource, () => lease.release());
 }
 
 async function openRepositoryLixSessionWithRetry(
 	options: ResolvedOpenRepositoryLixSessionOptions,
+	releaseReplicaClaim: () => void,
 ): Promise<RepositoryLixSession> {
 	for (let attempt = 0; ; attempt += 1) {
 		try {
-			return await openRepositoryLixSessionOnce(options);
+			return await openRepositoryLixSessionOnce(options, releaseReplicaClaim);
 		} catch (error) {
 			const retryDelay = OPEN_RETRY_DELAYS_MS[attempt];
 			if (!isRetryableRepositoryOpenError(error) || retryDelay === undefined) {
@@ -94,6 +99,7 @@ async function openRepositoryLixSessionWithRetry(
 
 async function openRepositoryLixSessionOnce(
 	options: ResolvedOpenRepositoryLixSessionOptions,
+	releaseReplicaClaim: () => void,
 ): Promise<RepositoryLixSession> {
 	const lix = await openOpfsSyncSession(options);
 	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.lixOpened);
@@ -101,7 +107,11 @@ async function openRepositoryLixSessionOnce(
 	try {
 		const defaultBranchId = await lix.activeBranchId();
 		markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.branchReady);
-		const session = new RemoteRepositoryLixSession(lix, defaultBranchId);
+		const session = new RemoteRepositoryLixSession(
+			lix,
+			defaultBranchId,
+			releaseReplicaClaim,
+		);
 		if (
 			options.initialBranchId &&
 			options.initialBranchId !== defaultBranchId
@@ -321,13 +331,19 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 	readonly #syncObserver: ReturnType<Lix["observe"]>;
 	readonly #syncFailure: Promise<Error | null>;
 	readonly #defaultBranchId: string;
+	readonly #releaseReplicaClaim: () => void;
 	#activeBranchId: string;
 	#closed = false;
 
-	constructor(lix: Lix, defaultBranchId: string) {
+	constructor(
+		lix: Lix,
+		defaultBranchId: string,
+		releaseReplicaClaim: () => void,
+	) {
 		this.lix = lix;
 		this.#defaultBranchId = defaultBranchId;
 		this.#activeBranchId = defaultBranchId;
+		this.#releaseReplicaClaim = releaseReplicaClaim;
 		this.#syncObserver = lix.observe("SELECT 1", []);
 		this.#syncFailure = this.#monitorSync();
 	}
@@ -373,13 +389,11 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 		this.#closed = true;
 		this.#listeners.clear();
 		this.#syncObserver.close();
-		await this.lix.close();
-	}
-
-	terminateForPageUnload(): void {
-		// Current Lix close starts synchronously by rejecting new operations and
-		// closing observers, then drains the transport asynchronously.
-		void this.close().catch(() => undefined);
+		try {
+			await this.lix.close();
+		} finally {
+			this.#releaseReplicaClaim();
+		}
 	}
 
 	#assertOpen(): void {
@@ -463,14 +477,14 @@ class RepositoryLixSessionLease implements RepositoryLixSession {
 }
 
 export function repositorySessionKey(
-	options: ResolvedOpenRepositoryLixSessionOptions,
+	options: OpenRepositoryLixSessionOptions,
 ): string {
 	const href = repositoryUrl(options).href;
 	return JSON.stringify({
 		href,
+		repositoryId: options.repositoryId ?? null,
 		identity: options.authIdentity,
 		publicPath: options.publicPath ?? null,
-		replicaId: options.replicaId,
 	});
 }
 

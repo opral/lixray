@@ -1262,30 +1262,6 @@ void test("invalid bearer tokens do not fall through to public reads", async () 
 	assert.doesNotMatch(serverTiming, /lixray-server-roundtrip/);
 });
 
-void test("remote sync CORS permits session headers and chunk uploads", async () => {
-	const response = await handleRequest(
-		remoteLixRequest("/sync/chunk", {
-			method: "OPTIONS",
-			headers: { origin: "https://atelier-preview.test" },
-		}),
-		env({}),
-	);
-
-	assert.equal(response.status, 204);
-	assert.equal(
-		response.headers.get("access-control-allow-origin"),
-		"https://atelier-preview.test",
-	);
-	assert.match(
-		response.headers.get("access-control-allow-methods") ?? "",
-		/PUT/,
-	);
-	assert.match(
-		response.headers.get("access-control-allow-headers") ?? "",
-		/Lix-Session-Id/i,
-	);
-});
-
 void test("inaccessible lixes return 403 from mutation routes", async () => {
 	const response = await handleRequest(
 		remoteLixRequest("/branch/switch", {

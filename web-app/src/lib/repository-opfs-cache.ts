@@ -10,7 +10,9 @@ export interface RepositoryOpfsCacheIdentity {
 // rows participate in bootstrap before the new server can repair them.
 export const REPOSITORY_OPFS_CACHE_NAMESPACE = "lixray:sync-protocol-v3";
 
-export const BROWSER_REPLICA_STORAGE_KEY_PREFIX = "lixray:browser-replica:v2:";
+export const BROWSER_REPLICA_STORAGE_KEY_PREFIX = "lixray:browser-replica:v3:";
+export const BROWSER_TAB_REPLICA_STORAGE_KEY_PREFIX =
+	"lixray:browser-replica-tab:v1:";
 
 export interface RepositoryBrowserReplicaScope {
 	authIdentity: string;
@@ -28,6 +30,7 @@ interface BrowserReplicaIdEnvironment {
 
 interface BrowserReplicaClaimEnvironment extends BrowserReplicaIdEnvironment {
 	lockManager?: BrowserReplicaLockManager | null;
+	tabStorage?: BrowserReplicaStorage | null;
 }
 
 export interface BrowserReplicaLockManager {
@@ -38,12 +41,13 @@ export interface BrowserReplicaLockManager {
 	): Promise<void>;
 }
 
-const volatileBrowserReplicaIds = new WeakMap<object, Map<string, string[]>>();
-const volatileBrowserReplicaIdsWithoutStorage = new Map<string, string[]>();
-let unlockedBrowserReplicaTabId: string | undefined;
-const claimedBrowserReplicaIds = new Set<string>();
-const browserReplicaClaims = new Map<string, Promise<boolean>>();
-const browserReplicaClaimReleases = new Map<string, () => void>();
+export interface BrowserReplicaClaim {
+	replicaId: string;
+	release(): void;
+}
+
+const volatileBrowserReplicaIds = new WeakMap<object, Map<string, string>>();
+const volatileBrowserReplicaIdsWithoutStorage = new Map<string, string>();
 
 /**
  * Returns a durable replica identity for this browser profile.
@@ -61,227 +65,163 @@ export function repositoryBrowserReplicaId(
 	const storage = browserReplicaStorage(environment);
 	const scopeKey = repositoryBrowserReplicaScopeKey(scope);
 	const storageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(scopeKey)}`;
-	const existingIds = readBrowserReplicaIds(storage, storageKey, scopeKey);
-	let browserId = existingIds[0];
+	let browserId = readBrowserReplicaId(storage, storageKey, scopeKey);
 	if (!browserId) {
 		browserId = (
 			environment.createId ?? (() => globalThis.crypto.randomUUID())
 		)();
-		persistBrowserReplicaIds(storage, storageKey, scopeKey, [browserId]);
+		persistBrowserReplicaId(storage, storageKey, scopeKey, browserId);
 	}
-	return `${scope.authIdentity}:${browserId}`;
-}
-
-export function rotateRepositoryBrowserReplicaId(
-	scope: RepositoryBrowserReplicaScope,
-	environment: BrowserReplicaIdEnvironment = {},
-): string {
-	const storage = browserReplicaStorage(environment);
-	const scopeKey = repositoryBrowserReplicaScopeKey(scope);
-	const storageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(scopeKey)}`;
-	const browserId = (
-		environment.createId ?? (() => globalThis.crypto.randomUUID())
-	)();
-	const existingIds = readBrowserReplicaIds(storage, storageKey, scopeKey);
-	persistBrowserReplicaIds(storage, storageKey, scopeKey, [
-		...existingIds,
-		browserId,
-	]);
 	return `${scope.authIdentity}:${browserId}`;
 }
 
 export async function claimRepositoryBrowserReplicaId(
 	scope: RepositoryBrowserReplicaScope,
 	environment: BrowserReplicaClaimEnvironment = {},
-): Promise<string> {
+): Promise<BrowserReplicaClaim> {
 	const scopeKey = repositoryBrowserReplicaScopeKey(scope);
 	const lockManager =
 		environment.lockManager === undefined
 			? browserReplicaLockManager()
 			: environment.lockManager;
 	if (!lockManager) {
-		unlockedBrowserReplicaTabId ??= globalThis.crypto.randomUUID();
-		return `${scope.authIdentity}:${unlockedBrowserReplicaTabId}`;
-	}
-	return withBrowserReplicaAllocationLock(scopeKey, lockManager, async () => {
-		return claimRepositoryBrowserReplicaIdFromPool(
-			scope,
-			scopeKey,
-			lockManager,
-			environment,
+		throw new Error(
+			"Opening a durable browser repository requires the Web Locks API.",
 		);
-	});
-}
-
-async function claimRepositoryBrowserReplicaIdFromPool(
-	scope: RepositoryBrowserReplicaScope,
-	scopeKey: string,
-	lockManager: BrowserReplicaLockManager,
-	environment: BrowserReplicaClaimEnvironment,
-): Promise<string> {
-	const storage = browserReplicaStorage(environment);
-	const storageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(scopeKey)}`;
-	const savedIds = readBrowserReplicaIds(storage, storageKey, scopeKey);
-	if (savedIds.length === 0) {
-		savedIds.push(
-			repositoryBrowserReplicaId(scope, environment).slice(
-				scope.authIdentity.length + 1,
+	}
+	const tabStorage = browserReplicaTabStorage(environment);
+	const fallbackStorageKey = `${BROWSER_TAB_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(scopeKey)}`;
+	const pinnedBrowserId = readBrowserReplicaId(
+		tabStorage,
+		fallbackStorageKey,
+		scopeKey,
+	);
+	if (pinnedBrowserId) {
+		const pinnedReplicaId = `${scope.authIdentity}:${pinnedBrowserId}`;
+		return {
+			replicaId: pinnedReplicaId,
+			release: await waitForBrowserReplicaIdLock(
+				`${scopeKey}:${pinnedReplicaId}`,
+				lockManager,
 			),
-		);
+		};
 	}
-	const newestFirstIds = [...savedIds].reverse();
-	for (let candidate = 0; candidate < 8; candidate += 1) {
-		const replicaId =
-			candidate < newestFirstIds.length
-				? `${scope.authIdentity}:${newestFirstIds[candidate]}`
-				: rotateRepositoryBrowserReplicaId(scope, environment);
-		const claimKey = `${scopeKey}:${replicaId}`;
-		if (claimedBrowserReplicaIds.has(claimKey)) return replicaId;
-		let claim = browserReplicaClaims.get(claimKey);
-		if (!claim) {
-			claim = tryClaimBrowserReplicaIdLock(claimKey, lockManager);
-			browserReplicaClaims.set(claimKey, claim);
-		}
-		const acquired = await claim.finally(() => {
-			browserReplicaClaims.delete(claimKey);
-		});
-		if (acquired) {
-			claimedBrowserReplicaIds.add(claimKey);
-			promoteBrowserReplicaId(
-				storage,
-				storageKey,
-				scopeKey,
-				replicaId.slice(scope.authIdentity.length + 1),
-			);
-			return replicaId;
-		}
+	const durableReplicaId = repositoryBrowserReplicaId(scope, environment);
+	const durableRelease = await tryClaimBrowserReplicaIdLock(
+		`${scopeKey}:${durableReplicaId}`,
+		lockManager,
+	);
+	if (durableRelease) {
+		return { replicaId: durableReplicaId, release: durableRelease };
 	}
-	throw new Error("Unable to claim an exclusive browser replica identity.");
+
+	// Concurrent tabs must not share one mutable OPFS database. Pin the later
+	// tab to its own replica so reloads cannot strand an offline outbox by
+	// switching back to the profile replica. A reload waits for its old document
+	// to finish closing that same replica.
+	const fallbackBrowserId = (
+		environment.createId ?? (() => globalThis.crypto.randomUUID())
+	)();
+	persistBrowserReplicaId(
+		tabStorage,
+		fallbackStorageKey,
+		scopeKey,
+		fallbackBrowserId,
+	);
+	const fallbackReplicaId = `${scope.authIdentity}:${fallbackBrowserId}`;
+	const fallbackRelease = await waitForBrowserReplicaIdLock(
+		`${scopeKey}:${fallbackReplicaId}`,
+		lockManager,
+	);
+	return { replicaId: fallbackReplicaId, release: fallbackRelease };
 }
 
-async function withBrowserReplicaAllocationLock<TResult>(
-	scopeKey: string,
-	lockManager: BrowserReplicaLockManager,
-	operation: () => Promise<TResult>,
-): Promise<TResult> {
-	return new Promise<TResult>((resolve, reject) => {
-		try {
-			const request = lockManager.request(
-				`lixray:opfs-replica-pool:${scopeKey}`,
-				{ mode: "exclusive" },
-				async () => {
-					try {
-						resolve(await operation());
-					} catch (error) {
-						reject(error instanceof Error ? error : new Error(String(error)));
-					}
-				},
-			);
-			void request.catch(reject);
-		} catch (error) {
-			reject(error instanceof Error ? error : new Error(String(error)));
-		}
-	});
-}
-
-function readBrowserReplicaIds(
+function readBrowserReplicaId(
 	storage: BrowserReplicaStorage | null,
 	storageKey: string,
 	scopeKey: string,
-): string[] {
+): string | undefined {
 	let storedValue: string | null = null;
 	try {
 		storedValue = storage?.getItem(storageKey) ?? null;
 	} catch {
 		// Restricted browser storage falls through to the page-scoped pool.
 	}
-	if (storedValue) {
-		try {
-			const parsed: unknown = JSON.parse(storedValue);
-			if (Array.isArray(parsed)) {
-				return parsed.filter(
-					(value, index): value is string =>
-						typeof value === "string" &&
-						value.length > 0 &&
-						parsed.indexOf(value) === index,
-				);
-			}
-		} catch {
-			// A v2 single-id value is migrated lazily into the replica pool.
-		}
-		return [storedValue];
-	}
+	if (storedValue) return storedValue;
 	return storage
-		? [...(volatileBrowserReplicaIds.get(storage)?.get(scopeKey) ?? [])]
-		: [...(volatileBrowserReplicaIdsWithoutStorage.get(scopeKey) ?? [])];
+		? volatileBrowserReplicaIds.get(storage)?.get(scopeKey)
+		: volatileBrowserReplicaIdsWithoutStorage.get(scopeKey);
 }
 
-function persistBrowserReplicaIds(
+function persistBrowserReplicaId(
 	storage: BrowserReplicaStorage | null,
 	storageKey: string,
 	scopeKey: string,
-	ids: string[],
+	id: string,
 ): void {
-	const uniqueIds = [...new Set(ids)];
 	if (storage) {
 		let byScope = volatileBrowserReplicaIds.get(storage);
 		if (!byScope) {
 			byScope = new Map();
 			volatileBrowserReplicaIds.set(storage, byScope);
 		}
-		byScope.set(scopeKey, uniqueIds);
+		byScope.set(scopeKey, id);
 	} else {
-		volatileBrowserReplicaIdsWithoutStorage.set(scopeKey, uniqueIds);
+		volatileBrowserReplicaIdsWithoutStorage.set(scopeKey, id);
 	}
 	try {
-		storage?.setItem(storageKey, JSON.stringify(uniqueIds));
+		storage?.setItem(storageKey, id);
 	} catch {
 		// The page-scoped fallback remains stable until navigation.
 	}
 }
 
-function promoteBrowserReplicaId(
-	storage: BrowserReplicaStorage | null,
-	storageKey: string,
-	scopeKey: string,
-	replicaId: string,
-): void {
-	const ids = readBrowserReplicaIds(storage, storageKey, scopeKey);
-	persistBrowserReplicaIds(storage, storageKey, scopeKey, [
-		...ids.filter((id) => id !== replicaId),
-		replicaId,
-	]);
-}
-
 export async function tryClaimBrowserReplicaIdLock(
 	claimKey: string,
 	lockManager: BrowserReplicaLockManager | null = browserReplicaLockManager(),
-): Promise<boolean> {
-	if (!lockManager) return true;
-	return new Promise<boolean>((resolve, reject) => {
+): Promise<(() => void) | null> {
+	if (!lockManager) return () => undefined;
+	return claimBrowserReplicaIdLock(claimKey, lockManager, true);
+}
+
+async function waitForBrowserReplicaIdLock(
+	claimKey: string,
+	lockManager: BrowserReplicaLockManager,
+): Promise<() => void> {
+	const release = await claimBrowserReplicaIdLock(claimKey, lockManager, false);
+	if (!release)
+		throw new Error("Browser replica lock wait ended without a lock.");
+	return release;
+}
+
+function claimBrowserReplicaIdLock(
+	claimKey: string,
+	lockManager: BrowserReplicaLockManager,
+	ifAvailable: boolean,
+): Promise<(() => void) | null> {
+	return new Promise<(() => void) | null>((resolve, reject) => {
 		try {
 			const request = lockManager.request(
 				`lixray:opfs-replica:${claimKey}`,
-				{ mode: "exclusive", ifAvailable: true },
+				ifAvailable
+					? { mode: "exclusive", ifAvailable: true }
+					: { mode: "exclusive" },
 				async (lock) => {
 					if (!lock) {
-						resolve(false);
+						resolve(null);
 						return;
 					}
 					let releaseLock!: () => void;
+					let released = false;
 					const held = new Promise<void>((release) => {
 						releaseLock = release;
 					});
-					browserReplicaClaimReleases.set(claimKey, releaseLock);
-					resolve(true);
-					try {
-						await held;
-					} finally {
-						if (browserReplicaClaimReleases.get(claimKey) === releaseLock) {
-							browserReplicaClaimReleases.delete(claimKey);
-						}
-						claimedBrowserReplicaIds.delete(claimKey);
-					}
+					resolve(() => {
+						if (released) return;
+						released = true;
+						releaseLock();
+					});
+					await held;
 				},
 			);
 			void request.catch((error: unknown) =>
@@ -299,15 +239,6 @@ function repositoryBrowserReplicaScopeKey(
 	const repository =
 		scope.repositoryId ?? `${scope.namespace}/${scope.repositorySlug}`;
 	return `${scope.authIdentity}:${repository}`;
-}
-
-/** Releases page-owned OPFS replica locks before a real document unload. */
-export function releaseRepositoryBrowserReplicaClaimsForPageUnload(): void {
-	for (const [claimKey, release] of browserReplicaClaimReleases) {
-		browserReplicaClaimReleases.delete(claimKey);
-		claimedBrowserReplicaIds.delete(claimKey);
-		release();
-	}
 }
 
 function browserReplicaLockManager(): BrowserReplicaLockManager | null {
@@ -329,6 +260,19 @@ function browserReplicaStorage(
 		return typeof globalThis.localStorage === "undefined"
 			? null
 			: globalThis.localStorage;
+	} catch {
+		return null;
+	}
+}
+
+function browserReplicaTabStorage(
+	environment: BrowserReplicaClaimEnvironment,
+): BrowserReplicaStorage | null {
+	if (environment.tabStorage !== undefined) return environment.tabStorage;
+	try {
+		return typeof globalThis.sessionStorage === "undefined"
+			? null
+			: globalThis.sessionStorage;
 	} catch {
 		return null;
 	}

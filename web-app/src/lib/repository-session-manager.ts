@@ -1,8 +1,5 @@
-import { releaseRepositoryBrowserReplicaClaimsForPageUnload } from "./repository-opfs-cache.ts";
-
 interface AsyncCloseable {
 	close(): Promise<void>;
-	terminateForPageUnload?(): void;
 }
 
 interface ManagedResource {
@@ -113,22 +110,10 @@ function closeManagedResource(key: string, managed: ManagedResource): void {
 }
 
 export function closeManagedRepositoryResourcesForPageUnload(): void {
-	// Let the next document reclaim its localStorage-backed replica identity
-	// before aborting workers and closing the current document's resources.
-	releaseRepositoryBrowserReplicaClaimsForPageUnload();
 	for (const [key, managed] of managedResources) {
 		if (managed.closeTimer) clearTimeout(managed.closeTimer);
 		managed.closeTimer = undefined;
-		if (managed.resource?.terminateForPageUnload) {
-			try {
-				managed.resource.terminateForPageUnload();
-			} finally {
-				managed.closePromise = Promise.resolve();
-				if (managedResources.get(key) === managed) managedResources.delete(key);
-			}
-		} else {
-			closeManagedResource(key, managed);
-		}
+		closeManagedResource(key, managed);
 	}
 }
 

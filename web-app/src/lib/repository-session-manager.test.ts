@@ -30,26 +30,26 @@ void test("reuses a repository resource while Strict Mode remounts", async () =>
 	assert.equal(closeCount, 1);
 });
 
-void test("terminates live repository resources during a real page unload", async () => {
+void test("starts one close lifecycle during a real page unload", async () => {
 	let closeCount = 0;
-	let terminateCount = 0;
+	let finishClose!: () => void;
 	const lease = await acquireManagedRepositoryResource(
 		"repository-page-unload",
 		async () => ({
-			terminateForPageUnload() {
-				terminateCount += 1;
-			},
 			async close() {
 				closeCount += 1;
+				await new Promise<void>((resolve) => {
+					finishClose = resolve;
+				});
 			},
 		}),
 	);
 
 	closeManagedRepositoryResourcesForPageUnload();
-	assert.equal(terminateCount, 1);
-	assert.equal(closeCount, 0);
+	assert.equal(closeCount, 1);
 	lease.release();
-	await new Promise((resolve) => setTimeout(resolve, 10));
-	assert.equal(terminateCount, 1);
-	assert.equal(closeCount, 0);
+	closeManagedRepositoryResourcesForPageUnload();
+	assert.equal(closeCount, 1);
+	finishClose();
+	await new Promise((resolve) => setTimeout(resolve, 0));
 });

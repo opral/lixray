@@ -7,22 +7,6 @@ import {
 	repositorySessionKey,
 } from "./repository-lix-session.ts";
 
-void test("isolates managed OPFS sessions by replica identity", () => {
-	const repository = {
-		namespace: "acme",
-		repositorySlug: "launch-q3",
-		origin: "https://lixray.test",
-		replicaId: "shared-browser",
-		authIdentity: "user-samuel",
-		getAccessToken: async () => null,
-	};
-
-	assert.notEqual(
-		repositorySessionKey({ ...repository, replicaId: "anonymous" }),
-		repositorySessionKey({ ...repository, replicaId: "account-123" }),
-	);
-});
-
 void test("retries only transient repository-open transport failures", () => {
 	assert.equal(
 		isRetryableRepositoryOpenError(new TypeError("Failed to fetch")),
@@ -140,5 +124,20 @@ void test("isolates managed sessions when the signed-in identity changes", () =>
 			authIdentity: "public:acc2bc33",
 		}),
 		repositorySessionKey({ ...repository, authIdentity: "user-samuel" }),
+	);
+});
+
+void test("isolates managed sessions when a slug is recreated", () => {
+	const repository = {
+		namespace: "opral",
+		repositorySlug: "monorepo",
+		origin: "https://lixray.test",
+		getAccessToken: async () => null,
+		authIdentity: "user-samuel",
+	};
+
+	assert.notEqual(
+		repositorySessionKey({ ...repository, repositoryId: "repository-before" }),
+		repositorySessionKey({ ...repository, repositoryId: "repository-after" }),
 	);
 });

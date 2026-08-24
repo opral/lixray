@@ -488,7 +488,6 @@ export async function handleRequest(
 
 	const remoteLixMatch = REMOTE_LIX_API_PATH.exec(url.pathname);
 	if (remoteLixMatch) {
-		if (request.method === "OPTIONS") return remoteLixCorsPreflight(request);
 		const serverTimings: ServerTimingMetric[] = [];
 		const namespace = normalizedRouteSegment(remoteLixMatch[1]);
 		const lixSlug = normalizedRouteSegment(remoteLixMatch[2]);
@@ -1631,22 +1630,6 @@ function corsPreflight(): Response {
 			"access-control-allow-headers":
 				"Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Param-*",
 			"access-control-max-age": "86400",
-		},
-	});
-}
-
-function remoteLixCorsPreflight(request: Request): Response {
-	const origin = request.headers.get("origin") ?? "*";
-	return new Response(null, {
-		status: 204,
-		headers: {
-			"access-control-allow-origin": origin,
-			"access-control-allow-credentials": "true",
-			"access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
-			"access-control-allow-headers":
-				"Authorization, Content-Type, Lix-Client-Id, Lix-Session-Id, Last-Event-ID",
-			"access-control-max-age": "86400",
-			vary: "Origin",
 		},
 	});
 }

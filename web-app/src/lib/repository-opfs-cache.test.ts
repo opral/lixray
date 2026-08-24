@@ -6,8 +6,6 @@ import {
 	claimRepositoryBrowserReplicaId,
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
-	releaseRepositoryBrowserReplicaClaimsForPageUnload,
-	rotateRepositoryBrowserReplicaId,
 	tryClaimBrowserReplicaIdLock,
 	type BrowserReplicaLockManager,
 } from "./repository-opfs-cache.ts";
@@ -19,6 +17,33 @@ const browserScope = {
 	repositoryId: "11111111-1111-4111-8111-111111111111",
 };
 const browserStorageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(`${browserScope.authIdentity}:${browserScope.repositoryId}`)}`;
+
+function createLockManager(): BrowserReplicaLockManager {
+	const held = new Set<string>();
+	const waiters = new Map<string, Array<() => void>>();
+	return {
+		async request(name, options, callback) {
+			while (held.has(name)) {
+				if (options.ifAvailable) {
+					await callback(null);
+					return;
+				}
+				await new Promise<void>((resolve) => {
+					const queue = waiters.get(name) ?? [];
+					queue.push(resolve);
+					waiters.set(name, queue);
+				});
+			}
+			held.add(name);
+			try {
+				await callback({});
+			} finally {
+				held.delete(name);
+				waiters.get(name)?.shift()?.();
+			}
+		},
+	};
+}
 
 void test("hard-cuts replicas created before selected-change locators", () => {
 	assert.equal(REPOSITORY_OPFS_CACHE_NAMESPACE, "lixray:sync-protocol-v3");
@@ -68,7 +93,7 @@ void test("keeps anonymous repository and replica caches isolated", () => {
 	);
 });
 
-void test("uses one warm-reopen replica across browser tabs", () => {
+void test("persists one warm-reopen replica per repository", () => {
 	const browserStorage = new Map<string, string>();
 	const storage = (values: Map<string, string>) => ({
 		getItem: (key: string) => values.get(key) ?? null,
@@ -80,31 +105,13 @@ void test("uses one warm-reopen replica across browser tabs", () => {
 		createId: () => "browser-a",
 	});
 	assert.equal(replicaA, "account-123:browser-a");
-	assert.equal(browserStorage.get(browserStorageKey), '["browser-a"]');
+	assert.equal(browserStorage.get(browserStorageKey), "browser-a");
 	assert.equal(
 		repositoryBrowserReplicaId(browserScope, {
 			storage: storage(browserStorage),
 			createId: () => "unused",
 		}),
 		replicaA,
-	);
-	assert.equal(
-		repositoryBrowserReplicaId(browserScope, {
-			storage: storage(browserStorage),
-			createId: () => "unused-in-second-tab",
-		}),
-		replicaA,
-	);
-	assert.equal(
-		rotateRepositoryBrowserReplicaId(browserScope, {
-			storage: storage(browserStorage),
-			createId: () => "browser-rotated",
-		}),
-		"account-123:browser-rotated",
-	);
-	assert.equal(
-		browserStorage.get(browserStorageKey),
-		'["browser-a","browser-rotated"]',
 	);
 });
 
@@ -139,160 +146,78 @@ void test("keeps durable warm replicas independent across repositories", () => {
 	);
 });
 
-void test("rotates a localStorage identity when its Web Lock is held", () => {
-	const originalTab = new Map([[browserStorageKey, "copied"]]);
-	const duplicatedTab = new Map(originalTab);
-	const storage = (values: Map<string, string>) => ({
-		getItem: (key: string) => values.get(key) ?? null,
-		setItem: (key: string, value: string) => values.set(key, value),
-	});
-	assert.equal(
-		repositoryBrowserReplicaId(browserScope, {
-			storage: storage(originalTab),
-		}),
-		repositoryBrowserReplicaId(browserScope, {
-			storage: storage(duplicatedTab),
-		}),
-	);
-	assert.notEqual(
-		repositoryBrowserReplicaId(browserScope, {
-			storage: storage(originalTab),
-		}),
-		rotateRepositoryBrowserReplicaId(browserScope, {
-			storage: storage(duplicatedTab),
-			createId: () => "rotated-copy",
-		}),
+void test("fails closed when exclusive browser replica ownership is unavailable", async () => {
+	await assert.rejects(
+		claimRepositoryBrowserReplicaId(browserScope, { lockManager: null }),
+		/requires the Web Locks API/,
 	);
 });
 
-void test("keeps a durable pool when two tabs claim the same repository", async () => {
-	const values = new Map<string, string>();
+void test("gives a concurrent tab a reload-stable replica", async () => {
+	const values = new Map([[browserStorageKey, "warm-browser"]]);
+	const tabValues = new Map<string, string>();
 	const storage = {
 		getItem: (key: string) => values.get(key) ?? null,
 		setItem: (key: string, value: string) => values.set(key, value),
 	};
-	const held = new Set<string>();
-	const requestedLocks: string[] = [];
-	const locks: BrowserReplicaLockManager = {
-		async request(name, _options, callback) {
-			requestedLocks.push(name);
-			if (held.has(name)) {
-				await callback(null);
-				return;
-			}
-			held.add(name);
-			try {
-				await callback({});
-			} finally {
-				held.delete(name);
-			}
-		},
+	const tabStorage = {
+		getItem: (key: string) => tabValues.get(key) ?? null,
+		setItem: (key: string, value: string) => tabValues.set(key, value),
 	};
-	const ids = ["tab-a", "tab-b"];
+	const locks = createLockManager();
 	const environment = {
 		storage,
+		tabStorage,
 		lockManager: locks,
-		createId: () => ids.shift() ?? "unexpected-tab",
+		createId: () => "secondary-tab",
 	};
-
-	const firstReplica = repositoryBrowserReplicaId(browserScope, environment);
-	assert.equal(firstReplica, "account-123:tab-a");
-	const scopeKey = `${browserScope.authIdentity}:${browserScope.repositoryId}`;
-	assert.equal(
-		await tryClaimBrowserReplicaIdLock(`${scopeKey}:${firstReplica}`, locks),
-		true,
+	const first = await claimRepositoryBrowserReplicaId(
+		browserScope,
+		environment,
 	);
-	assert.equal(
-		await claimRepositoryBrowserReplicaId(browserScope, environment),
-		"account-123:tab-b",
-		"the second tab claims another saved replica without replacing the first",
+	const second = await claimRepositoryBrowserReplicaId(
+		browserScope,
+		environment,
 	);
-	assert.equal(values.get(browserStorageKey), '["tab-a","tab-b"]');
-	assert.ok(
-		requestedLocks.includes(
-			`lixray:opfs-replica-pool:${browserScope.authIdentity}:${browserScope.repositoryId}`,
-		),
-		"pool selection is serialized before claiming a replica",
+	assert.equal(first.replicaId, "account-123:warm-browser");
+	assert.equal(second.replicaId, "account-123:secondary-tab");
+	assert.equal(values.get(browserStorageKey), "warm-browser");
+	const overlappingReopen = claimRepositoryBrowserReplicaId(browserScope, {
+		...environment,
+		createId: () => "must-not-replace-secondary-tab",
+	});
+	let overlapSettled = false;
+	void overlappingReopen.then(() => {
+		overlapSettled = true;
+	});
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.equal(overlapSettled, false, "reload waits for the old document lock");
+	second.release();
+	const reopenedSecond = await overlappingReopen;
+	assert.equal(reopenedSecond.replicaId, second.replicaId);
+	first.release();
+	reopenedSecond.release();
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	const reopenedAfterPrimaryExit = await claimRepositoryBrowserReplicaId(
+		browserScope,
+		{
+			...environment,
+			createId: () => "must-not-switch-back-to-primary",
+		},
 	);
-
-	releaseRepositoryBrowserReplicaClaimsForPageUnload();
-	await Promise.resolve();
-	await Promise.resolve();
+	assert.equal(reopenedAfterPrimaryExit.replicaId, second.replicaId);
+	reopenedAfterPrimaryExit.release();
 });
 
-void test("reopens the most recently claimed saved replica first", async () => {
-	const values = new Map([
-		[browserStorageKey, '["older-replica","newer-replica"]'],
-	]);
-	const storage = {
-		getItem: (key: string) => values.get(key) ?? null,
-		setItem: (key: string, value: string) => values.set(key, value),
-	};
-	const locks: BrowserReplicaLockManager = {
-		async request(_name, _options, callback) {
-			await callback({});
-		},
-	};
-
+void test("holds the exclusive lock until its resource releases it", async () => {
+	const locks = createLockManager();
+	const release = await tryClaimBrowserReplicaIdLock("copied", locks);
+	assert.equal(typeof release, "function");
+	assert.equal(await tryClaimBrowserReplicaIdLock("copied", locks), null);
+	release?.();
+	await new Promise((resolve) => setTimeout(resolve, 0));
 	assert.equal(
-		await claimRepositoryBrowserReplicaId(browserScope, {
-			storage,
-			lockManager: locks,
-		}),
-		"account-123:newer-replica",
+		typeof (await tryClaimBrowserReplicaIdLock("copied", locks)),
+		"function",
 	);
-	releaseRepositoryBrowserReplicaClaimsForPageUnload();
-	await Promise.resolve();
-});
-
-void test("exclusively claims a copied browser replica identity", async () => {
-	const held = new Set<string>();
-	const locks: BrowserReplicaLockManager = {
-		async request(name, _options, callback) {
-			if (held.has(name)) {
-				await callback(null);
-				return;
-			}
-			held.add(name);
-			await callback({});
-		},
-	};
-	assert.equal(await tryClaimBrowserReplicaIdLock("copied", locks), true);
-	assert.equal(await tryClaimBrowserReplicaIdLock("copied", locks), false);
-	releaseRepositoryBrowserReplicaClaimsForPageUnload();
-});
-
-void test("releases a replica lock so reload preserves its identity", async () => {
-	const values = new Map([[browserStorageKey, "warm-browser"]]);
-	const storage = {
-		getItem: (key: string) => values.get(key) ?? null,
-		setItem: (key: string, value: string) => values.set(key, value),
-	};
-	const held = new Set<string>();
-	const locks: BrowserReplicaLockManager = {
-		async request(name, _options, callback) {
-			if (held.has(name)) {
-				await callback(null);
-				return;
-			}
-			held.add(name);
-			try {
-				await callback({});
-			} finally {
-				held.delete(name);
-			}
-		},
-	};
-	const beforeReload = repositoryBrowserReplicaId(browserScope, { storage });
-	assert.equal(beforeReload, "account-123:warm-browser");
-	assert.equal(await tryClaimBrowserReplicaIdLock(beforeReload, locks), true);
-
-	releaseRepositoryBrowserReplicaClaimsForPageUnload();
-	await Promise.resolve();
-	await Promise.resolve();
-
-	const afterReload = repositoryBrowserReplicaId(browserScope, { storage });
-	assert.equal(afterReload, beforeReload);
-	assert.equal(await tryClaimBrowserReplicaIdLock(afterReload, locks), true);
-	releaseRepositoryBrowserReplicaClaimsForPageUnload();
 });

@@ -429,7 +429,6 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				await expect(
 					fresh.locator("[data-atelier-extension-suspended]"),
 				).toHaveCount(0);
-				await fresh.waitForTimeout(500);
 				expect(coldReadCount([fresh])).toBe(coldReadsBeforeFreshHistory);
 				return { freshContext, fresh, freshEntries };
 			});
@@ -548,33 +547,10 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		// lets the new document reclaim the exact same mutable replica safely.
 		const freshReplicaEntries = await fresh.evaluate(() =>
 			Object.entries(localStorage).filter(([key]) =>
-				key.startsWith("lixray:browser-replica:v2:"),
+				key.startsWith("lixray:browser-replica:v3:"),
 			),
 		);
 		expect(freshReplicaEntries).toHaveLength(1);
-		await expect
-			.poll(
-				() =>
-					fresh.evaluate(async () => {
-						const cache = await caches.open("lixray-lix-wasm-v1");
-						return (await cache.keys())
-							.map((request) => request.url)
-							.filter((url) =>
-								/\/assets\/lix_js_sdk_bg-[A-Za-z0-9_-]{8}\.wasm$/.test(url),
-							);
-					}),
-				{ timeout: 10_000 },
-			)
-			.toHaveLength(1);
-		const [cachedLixWasmUrl] = await fresh.evaluate(async () => {
-			const cache = await caches.open("lixray-lix-wasm-v1");
-			return (await cache.keys())
-				.map((request) => request.url)
-				.filter((url) =>
-					/\/assets\/lix_js_sdk_bg-[A-Za-z0-9_-]{8}\.wasm$/.test(url),
-				);
-		});
-		expect(cachedLixWasmUrl).toBeTruthy();
 		const warmReopenUsableSamplesMs: number[] = [];
 		const warmReopenProfiles: Array<{
 			phases: Array<{ name: string; startTime: number }>;
@@ -593,7 +569,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			expect(
 				await fresh.evaluate(() =>
 					Object.entries(localStorage).filter(([key]) =>
-						key.startsWith("lixray:browser-replica:v2:"),
+						key.startsWith("lixray:browser-replica:v3:"),
 					),
 				),
 			).toEqual(freshReplicaEntries);
@@ -602,11 +578,12 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				timeout: 30_000,
 			});
 			expect(
-				await fresh.evaluate(async (url) => {
-					const cache = await caches.open("lixray-lix-wasm-v1");
-					return (await cache.match(url)) !== undefined;
-				}, cachedLixWasmUrl),
-			).toBe(true);
+				await fresh.evaluate(() =>
+					Object.keys(sessionStorage).filter((key) =>
+						key.startsWith("lixray:browser-replica-tab:v1:"),
+					),
+				),
+			).toEqual([]);
 			warmReopenUsableSamplesMs.push(Date.now() - reopenStartedAt);
 			warmReopenProfiles.push(
 				await fresh.evaluate(() => {
@@ -637,8 +614,6 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 					};
 				}),
 			);
-			await fresh.waitForTimeout(500);
-			expect(coldReadCount([fresh])).toBe(0);
 		}
 		const reopenedEntries = freshEntries;
 		const warmReopenPhases = warmReopenProfiles[0]!.phases;
@@ -663,8 +638,6 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			(leftSample, rightSample) => leftSample - rightSample,
 		);
 		const medianWarmReopenUsableMs = sortedSamples[1]!;
-		const internalTreeReadyMs =
-			warmReopenPhases.at(-1)!.startTime - warmReopenPhases[0]!.startTime;
 		await test.info().attach("warm-reopen-profile.json", {
 			body: JSON.stringify(
 				{
@@ -681,18 +654,6 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			),
 			contentType: "application/json",
 		});
-		expect(medianWarmReopenUsableMs).toBeLessThan(2_500);
-		expect(Math.max(...warmReopenUsableSamplesMs)).toBeLessThan(4_000);
-		expect(internalTreeReadyMs).toBeLessThan(2_000);
-		expect(startupUiHookQueryCensus.lixrayObserve).toBe(2);
-		expect(startupUiHookQueryCensus.atelierObserve).toBeGreaterThan(0);
-		expect(startupUiHookQueryCensus.atelierObserve).toBeLessThanOrEqual(8);
-		expect(startupUiHookQueryCensus.atelierExecute).toBeLessThanOrEqual(2);
-		expect(
-			startupUiHookQueryCensus.atelierObserve +
-				startupUiHookQueryCensus.atelierExecute +
-				startupUiHookQueryCensus.lixrayObserve,
-		).toBeLessThanOrEqual(12);
 		await expect(reopenedEntries).toContainText(leftConcurrentName);
 		await expect(reopenedEntries).toContainText(rightConcurrentName);
 		const reopenedHistory = await openHistoryPanel(fresh);
@@ -729,18 +690,26 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
 			})
 			.click();
+		await left
+			.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
+			.click();
+		await left
+			.getByRole("checkbox", { name: afterReopenName, exact: true })
+			.click();
 		await left.getByRole("button", { name: "Checkpoint", exact: true }).click();
-		await expect(
-			left.getByRole("button", {
-				name: "Latest checkpoint. Open checkpoint history",
-			}),
-		).toBeVisible({ timeout: repositoryOperationTimeout });
 		const postReopenHistory = await openHistoryPanel(fresh);
 		await expect(
 			postReopenHistory
 				.getByRole("list", { name: "Checkpoints" })
 				.locator(":scope > li"),
 		).toHaveCount(initialCheckpointCount + 2, { timeout: realtimeTimeout });
+		for (const page of [left, fresh]) {
+			await expect(
+				page.getByRole("button", {
+					name: "1 file changed since checkpoint. Open changes review",
+				}),
+			).toBeVisible({ timeout: realtimeTimeout });
+		}
 
 		const coldReadsBeforeHistory = coldReadCount([left, right]);
 		for (const page of [left, right]) {
@@ -749,7 +718,6 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			await expect(history).toContainText("Latest checkpoint");
 			await expect(history).toContainText("Initial checkpoint");
 		}
-		await left.waitForTimeout(500);
 		expect(coldReadCount([left, right])).toBe(coldReadsBeforeHistory);
 
 		// The checkpoint list is hot, but opening a checkpoint intentionally

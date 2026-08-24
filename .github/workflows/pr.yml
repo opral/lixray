@@ -750,7 +750,10 @@ jobs:
 
   publish-preview:
     name: Publish preview link
-    if: always() && needs.deploy-preview.result == 'success'
+    if: >-
+      always() &&
+      needs.deploy-preview.result == 'success' &&
+      needs.deploy-preview.outputs.preview_url != ''
     needs:
       - deploy-preview
     runs-on: ubuntu-latest
@@ -768,7 +771,11 @@ jobs:
 
   preview-e2e:
     name: Preview sync E2E
-    if: always() && needs.deploy-preview.result == 'success'
+    if: >-
+      always() &&
+      needs.deploy-preview.result == 'success' &&
+      needs.deploy-preview.outputs.preview_url != '' &&
+      needs.deploy-preview.outputs.deployment_id != ''
     needs:
       - deploy-preview
     runs-on: ubuntu-latest
