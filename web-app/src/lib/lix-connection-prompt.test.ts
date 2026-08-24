@@ -19,7 +19,11 @@ void test("uses a Codex-safe isolated development registration on localhost", ()
 	assert.equal(details.mcpUrl, "http://127.0.0.1:8787/mcp");
 	assert.match(
 		details.prompt,
-		/^Lixray is a host for Lix repositories\. Documentation is under https:\/\/lixray\.com\/docs\.\n\nThis team's company repository is Lixray @samuel\/repository \(8b4382f8-239d-4b76-bb77-401de5f1d6ae\)\./,
+		/^Lixray is a host for Lix repositories\. Documentation is under https:\/\/lixray\.com\/docs\.\n\nThis Lixray repository is @samuel\/repository \(8b4382f8-239d-4b76-bb77-401de5f1d6ae\)\./,
+	);
+	assert.match(
+		details.prompt,
+		/Ask the user whether it is for personal stuff or company stuff, then treat it that way\./,
 	);
 	assert.match(details.prompt, /http:\/\/127\.0\.0\.1:8787\/mcp/);
 	assert.match(details.serverName, /^[a-zA-Z0-9_-]+$/);
@@ -52,6 +56,11 @@ void test("uses Lixray in production and starts with one user-picked skill", () 
 		/Documentation is under https:\/\/lixray\.com\/docs\./,
 	);
 	assert.doesNotMatch(details.prompt, /local connection/);
+	assert.doesNotMatch(details.prompt, /company repository/i);
+	assert.match(
+		details.prompt,
+		/Ask the user whether it is for personal stuff or company stuff, then treat it that way\./,
+	);
 	assert.match(details.prompt, /Lixray is added as a normal MCP connector\./);
 	assert.match(
 		details.prompt,
@@ -111,8 +120,8 @@ void test("keeps the connection prompt concise", () => {
 	const words = details.prompt.trim().split(/\s+/);
 
 	assert.ok(
-		words.length <= 113,
-		`expected at most 113 words, got ${words.length}`,
+		words.length <= 120,
+		`expected at most 120 words, got ${words.length}`,
 	);
 	assert.doesNotMatch(details.prompt, /active_branch_id/);
 	assert.doesNotMatch(details.prompt, /first files/);
