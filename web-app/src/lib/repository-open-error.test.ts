@@ -33,3 +33,14 @@ void test("preserves unrelated repository opening errors", () => {
 		"A repository access token is required.",
 	);
 });
+
+void test("explains a terminal automatic migration failure", () => {
+	assert.equal(
+		formatRepositoryOpenError(
+			Object.assign(new Error("The lix repository migration failed."), {
+				code: "LIX_ERROR_LIX_MIGRATION_FAILED",
+			}),
+		),
+		"Repository migration failed. Contact support to recover the repository.",
+	);
+});

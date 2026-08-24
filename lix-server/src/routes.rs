@@ -649,6 +649,37 @@ fn lix_error(error: LixRuntimeError) -> Response {
             })),
         )
         .with_retry_after(),
+        LixRuntimeError::Migrating {
+            from_version,
+            to_version,
+        } => protocol_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "LIX_ERROR_LIX_MIGRATING",
+            "The lix repository is being migrated.",
+            Some("Retry after the migration completes.".to_string()),
+            Some(json!({
+                "fromVersion": from_version,
+                "toVersion": to_version,
+                "operation": "lix_open",
+                "retryable": true,
+            })),
+        )
+        .with_retry_after(),
+        LixRuntimeError::MigrationFailed {
+            from_version,
+            to_version,
+        } => protocol_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "LIX_ERROR_LIX_MIGRATION_FAILED",
+            "The lix repository migration failed.",
+            Some("Contact the service operator to recover the repository.".to_string()),
+            Some(json!({
+                "fromVersion": from_version,
+                "toVersion": to_version,
+                "operation": "lix_open",
+                "retryable": false,
+            })),
+        ),
         LixRuntimeError::Recovering => protocol_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "LIX_ERROR_LIX_RECOVERING",
@@ -1289,6 +1320,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn migrating_lix_is_a_retryable_structured_state() {
+        let response = lix_error(LixRuntimeError::Migrating {
+            from_version: 68,
+            to_version: 71,
+        });
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+        assert_eq!(
+            json_body(response).await["error"],
+            json!({
+                "code": "LIX_ERROR_LIX_MIGRATING",
+                "message": "The lix repository is being migrated.",
+                "hint": "Retry after the migration completes.",
+                "details": {
+                    "fromVersion": 68,
+                    "toVersion": 71,
+                    "operation": "lix_open",
+                    "retryable": true,
+                },
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_lix_migration_is_a_terminal_structured_error() {
+        let response = lix_error(LixRuntimeError::MigrationFailed {
+            from_version: 68,
+            to_version: 71,
+        });
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!response.headers().contains_key(header::RETRY_AFTER));
+        assert_eq!(
+            json_body(response).await["error"],
+            json!({
+                "code": "LIX_ERROR_LIX_MIGRATION_FAILED",
+                "message": "The lix repository migration failed.",
+                "hint": "Contact the service operator to recover the repository.",
+                "details": {
+                    "fromVersion": 68,
+                    "toVersion": 71,
+                    "operation": "lix_open",
+                    "retryable": false,
+                },
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn unexpected_lix_open_errors_are_redacted() {
         let response = lix_error(LixRuntimeError::Open(anyhow::anyhow!(
             "secret object-store failure"
@@ -1454,6 +1535,10 @@ mod tests {
     async fn retryable_lix_errors_include_retry_after() {
         for error in [
             LixRuntimeError::AtCapacity { max: 4 },
+            LixRuntimeError::Migrating {
+                from_version: 68,
+                to_version: 71,
+            },
             LixRuntimeError::Recovering,
             LixRuntimeError::ShuttingDown,
         ] {
