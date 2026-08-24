@@ -556,36 +556,7 @@ impl LixRuntimeManager {
             })?;
         let storage_open_ms = elapsed_millis(storage_started);
 
-        let migration_status = lix_sdk::migration::inspect_repository(&storage)
-            .await
-            .context("inspect Lix repository format")?;
-        if let lix_sdk::migration::MigrationStatus::Required {
-            from_version,
-            to_version,
-        } = migration_status
-        {
-            let migration_started = Instant::now();
-            info!(
-                lix_id,
-                from_version, to_version, "migrating Lix repository format before opening"
-            );
-            let report = lix_sdk::migration::migrate_repository(
-                storage.clone(),
-                lix_sdk::migration::MigrationOptions::default(),
-            )
-            .await
-            .context("migrate Lix repository format")?;
-            info!(
-                lix_id,
-                from_version = report.from_version,
-                to_version = report.to_version,
-                changes_rewritten = report.changes_rewritten,
-                commit_members_rewritten = report.commit_members_rewritten,
-                hot_rows_rewritten = report.hot_rows_rewritten,
-                elapsed_ms = elapsed_millis(migration_started),
-                "migrated Lix repository format"
-            );
-        }
+        migrate_lix_if_required(lix_id, &storage).await?;
 
         let engine_started = Instant::now();
         // Cache-admit is a protocol root, not a client session. as_protocol_root
@@ -947,6 +918,47 @@ impl LixRuntimeManager {
             .state_drop_probe
             .is_some()
     }
+}
+
+async fn migrate_lix_if_required<S>(lix_id: &str, storage: &S) -> Result<()>
+where
+    S: lix_sdk::storage::Storage + Clone + Send + Sync + 'static,
+{
+    let migration_status = lix_sdk::migration::inspect_lix(storage)
+        .await
+        .context("inspect Lix repository format")?;
+    let lix_sdk::migration::MigrationStatus::Required {
+        from_version,
+        to_version,
+    } = migration_status
+    else {
+        // open_lix remains the authority for current, missing, malformed, and
+        // too-new repositories. This helper owns only automatic migration.
+        return Ok(());
+    };
+
+    let migration_started = Instant::now();
+    info!(
+        lix_id,
+        from_version, to_version, "migrating Lix repository format before opening"
+    );
+    let report = lix_sdk::migration::migrate_lix(
+        storage.clone(),
+        lix_sdk::migration::MigrationOptions::default(),
+    )
+    .await
+    .context("migrate Lix repository format")?;
+    info!(
+        lix_id,
+        from_version = report.from_version,
+        to_version = report.to_version,
+        changes_rewritten = report.changes_rewritten,
+        commit_members_rewritten = report.commit_members_rewritten,
+        hot_rows_rewritten = report.hot_rows_rewritten,
+        elapsed_ms = elapsed_millis(migration_started),
+        "migrated Lix repository format"
+    );
+    Ok(())
 }
 
 impl LixService {
@@ -1657,6 +1669,11 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use tower::ServiceExt as _;
 
+    const V68_REPOSITORY: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../vendor/lix/packages/lix/tests/fixtures/v68_external_tombstones.snapshot"
+    ));
+
     struct TestCacheRoot(PathBuf);
 
     impl TestCacheRoot {
@@ -1816,6 +1833,37 @@ mod tests {
 
     fn memory_manager(max_open_lixes: usize) -> Arc<LixRuntimeManager> {
         LixRuntimeManager::new_in_memory(max_open_lixes)
+    }
+
+    #[tokio::test]
+    async fn explicit_server_migration_prepares_an_old_lix_for_open() {
+        let storage =
+            lix_sdk::Memory::from_snapshot(V68_REPOSITORY).expect("decode frozen v68 repository");
+        assert!(matches!(
+            lix_sdk::migration::inspect_lix(&storage)
+                .await
+                .expect("inspect old Lix"),
+            lix_sdk::migration::MigrationStatus::Required {
+                from_version: 68,
+                ..
+            }
+        ));
+
+        migrate_lix_if_required("migration-regression", &storage)
+            .await
+            .expect("migrate old Lix before opening");
+        assert!(matches!(
+            lix_sdk::migration::inspect_lix(&storage)
+                .await
+                .expect("inspect migrated Lix"),
+            lix_sdk::migration::MigrationStatus::Current { .. }
+        ));
+
+        let lix = lix_sdk::open_lix()
+            .with_storage(storage)
+            .await
+            .expect("open migrated Lix");
+        lix.close().await.expect("close migrated Lix");
     }
 
     fn memory_manager_with_open_gate(
