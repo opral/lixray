@@ -50,22 +50,13 @@ void test("uses Lixray in production and starts with one user-picked skill", () 
 		/Documentation is under https:\/\/lixray\.com\/docs\./,
 	);
 	assert.doesNotMatch(details.prompt, /local connection/);
-	assert.match(
-		details.prompt,
-		/Lixray is added as a normal MCP connector\./,
-	);
-	assert.match(
-		details.prompt,
-		/guide the user to add it manually/,
-	);
+	assert.match(details.prompt, /Lixray is added as a normal MCP connector\./);
+	assert.match(details.prompt, /guide the user to add it manually/);
 	assert.match(
 		details.prompt,
 		/put this in the team's shared AGENTS\.md or CLAUDE\.md/,
 	);
-	assert.match(
-		details.prompt,
-		/Do not save it to personal agent memory/,
-	);
+	assert.match(details.prompt, /Do not save it to personal agent memory/);
 	assert.doesNotMatch(details.prompt, /Save this as durable agent memory/);
 	assert.match(
 		details.prompt,
