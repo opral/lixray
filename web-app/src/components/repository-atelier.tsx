@@ -865,19 +865,6 @@ export function RepositoryAtelier({
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
 				activeLixRef.current = session;
 				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
-				void session.waitForSyncFailure().then((syncError) => {
-					if (disposed || activeLix !== session || syncError === null) return;
-					captureExceptionTelemetry(syncError, {
-						operation: "repository_sync",
-						lix_id: repositoryId,
-						namespace_id: namespace,
-					});
-					setInstance(null);
-					setBranchSession(null);
-					setRepositoryDefaultBranchId(null);
-					activeLixRef.current = null;
-					setError(formatRepositoryOpenError(syncError));
-				});
 
 				// Initialize telemetry handler with repository context
 				atelierTelemetryHandlerRef.current = createAtelierTelemetryHandler(

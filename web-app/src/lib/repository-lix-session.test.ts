@@ -3,7 +3,6 @@ import test from "node:test";
 import {
 	createTelemetryFetch,
 	isRetryableRepositoryOpenError,
-	parseLixrayServerTiming,
 	repositorySessionKey,
 } from "./repository-lix-session.ts";
 
@@ -54,20 +53,6 @@ void test("retries only transient repository-open transport failures", () => {
 	);
 });
 
-void test("parses the Lixray and Lix Server-Timing hard cut", () => {
-	assert.deepEqual(
-		parseLixrayServerTiming(
-			"cache;desc=ignored, lixray-web-auth;dur=1.250, lixray-web-resolve;dur=2.500, lixray-server-roundtrip;dur=8.750, lix-server-protocol;dur=1.500",
-		),
-		{
-			"lixray-web-auth": 1.25,
-			"lixray-web-resolve": 2.5,
-			"lixray-server-roundtrip": 8.75,
-			"lix-server-protocol": 1.5,
-		},
-	);
-});
-
 void test("refreshes an expired access token and retries a sync request once", async () => {
 	let refreshCalls = 0;
 	let attempts = 0;
@@ -112,6 +97,7 @@ void test("isolates managed sessions when the signed-in identity changes", () =>
 	const repository = {
 		namespace: "opral",
 		repositorySlug: "monorepo",
+		repositoryId: "repository-id",
 		origin: "https://lixray.test",
 		replicaId: "shared-browser",
 		getAccessToken: async () => null,
@@ -131,6 +117,7 @@ void test("isolates managed sessions when a slug is recreated", () => {
 	const repository = {
 		namespace: "opral",
 		repositorySlug: "monorepo",
+		repositoryId: "repository-id",
 		origin: "https://lixray.test",
 		getAccessToken: async () => null,
 		authIdentity: "user-samuel",

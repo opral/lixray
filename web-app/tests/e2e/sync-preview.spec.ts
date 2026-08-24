@@ -110,6 +110,12 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		const pageBlobLanePayloadSizes: number[] = [];
 		blobLanePayloadSizes.set(page, pageBlobLanePayloadSizes);
 		page.on("request", (request) => {
+			if (
+				request.method() === "GET" &&
+				/\/sync\/(history|blob|chunk)(?:\?|$)/.test(request.url())
+			) {
+				pageColdReads.push(request.url());
+			}
 			if (/\/sync\/(blob|chunk)(?:\?|$)/.test(request.url())) {
 				pageBlobLaneRequests.push(`${request.method()} ${request.url()}`);
 				pendingBlobLaneRequests.add(request);
@@ -226,12 +232,6 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				!(response.status() === 409 && url.endsWith("/sync/push"))
 			) {
 				syncFailures.push(`${response.status()} ${url}`);
-			}
-			if (
-				response.request().method() === "GET" &&
-				/\/sync\/(history|blob|chunk)(?:\?|$)/.test(url)
-			) {
-				pageColdReads.push(url);
 			}
 		});
 	};
@@ -549,6 +549,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		);
 		expect(freshReplicaEntries).toHaveLength(1);
 		const warmReopenUsableSamplesMs: number[] = [];
+		const warmReopenColdReads: string[][] = [];
 		const warmReopenProfiles: Array<{
 			phases: Array<{ name: string; startTime: number }>;
 			startupUiHookQueryCensus: {
@@ -574,13 +575,8 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			await expect(freshEntries).toContainText(createdName, {
 				timeout: 30_000,
 			});
-			expect(
-				await fresh.evaluate(() =>
-					Object.keys(sessionStorage).filter((key) =>
-						key.startsWith("lixray:browser-replica-tab:v1:"),
-					),
-				),
-			).toEqual([]);
+			const sampleColdReads = [...(coldReads.get(fresh) ?? [])];
+			warmReopenColdReads.push(sampleColdReads);
 			warmReopenUsableSamplesMs.push(Date.now() - reopenStartedAt);
 			warmReopenProfiles.push(
 				await fresh.evaluate(() => {
@@ -616,6 +612,11 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		const warmReopenPhases = warmReopenProfiles[0]!.phases;
 		const startupUiHookQueryCensus =
 			warmReopenProfiles[0]!.startupUiHookQueryCensus;
+		const startupUiHookQueryBudget = {
+			atelierObserve: 3,
+			atelierExecute: 0,
+			lixrayObserve: 2,
+		};
 		const phaseNames = [
 			"lixray:repository-open:start",
 			"lixray:repository-open:replica-claimed",
@@ -625,12 +626,6 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			"lixray:repository-open:atelier-ready",
 			"lixray:repository-open:tree-ready",
 		];
-		expect(warmReopenPhases.map((phase) => phase.name)).toEqual(phaseNames);
-		for (let index = 1; index < warmReopenPhases.length; index += 1) {
-			expect(warmReopenPhases[index]!.startTime).toBeGreaterThanOrEqual(
-				warmReopenPhases[index - 1]!.startTime,
-			);
-		}
 		const sortedSamples = [...warmReopenUsableSamplesMs].sort(
 			(leftSample, rightSample) => leftSample - rightSample,
 		);
@@ -639,18 +634,46 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			body: JSON.stringify(
 				{
 					warmReopenUsableSamplesMs,
+					warmReopenColdReads,
 					medianWarmReopenUsableMs,
 					warmReopenProfiles,
 					phasesFromNavigationStartMs: Object.fromEntries(
 						warmReopenPhases.map((phase) => [phase.name, phase.startTime]),
 					),
 					startupUiHookQueryCensus,
+					startupUiHookQueryBudget,
 				},
 				null,
 				2,
 			),
 			contentType: "application/json",
 		});
+		for (const sampleColdReads of warmReopenColdReads) {
+			expect(
+				sampleColdReads,
+				"a warm OPFS reopen must not request history or blob payloads before usable",
+			).toEqual([]);
+		}
+		for (const profile of warmReopenProfiles) {
+			expect(profile.startupUiHookQueryCensus.atelierObserve).toBeGreaterThan(
+				0,
+			);
+			expect(profile.startupUiHookQueryCensus.lixrayObserve).toBeGreaterThan(0);
+			for (const [name, budget] of Object.entries(startupUiHookQueryBudget)) {
+				expect(
+					profile.startupUiHookQueryCensus[
+						name as keyof typeof startupUiHookQueryBudget
+					],
+					`${name} startup fan-out exceeded its lazy home-view budget`,
+				).toBeLessThanOrEqual(budget);
+			}
+		}
+		expect(warmReopenPhases.map((phase) => phase.name)).toEqual(phaseNames);
+		for (let index = 1; index < warmReopenPhases.length; index += 1) {
+			expect(warmReopenPhases[index]!.startTime).toBeGreaterThanOrEqual(
+				warmReopenPhases[index - 1]!.startTime,
+			);
+		}
 		await expect(reopenedEntries).toContainText(leftConcurrentName);
 		await expect(reopenedEntries).toContainText(rightConcurrentName);
 		const reopenedHistory = await openHistoryPanel(fresh);

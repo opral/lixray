@@ -811,11 +811,11 @@ jobs:
           PLAYWRIGHT_SYNC_PREVIEW: "1"
         run: pnpm --dir web-app exec playwright test tests/e2e/sync-preview.spec.ts
 
-      - name: Upload Playwright failure artifacts
-        if: failure()
+      - name: Upload Playwright profile and failure artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: preview-sync-playwright-failure
+          name: preview-sync-playwright
           path: web-app/test-results
           if-no-files-found: ignore
           retention-days: 7

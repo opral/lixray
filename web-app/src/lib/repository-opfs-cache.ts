@@ -1,7 +1,5 @@
 export interface RepositoryOpfsCacheIdentity {
-	namespace: string;
-	repositorySlug: string;
-	repositoryId?: string;
+	repositoryId: string;
 	replicaId: string;
 }
 
@@ -11,14 +9,10 @@ export interface RepositoryOpfsCacheIdentity {
 export const REPOSITORY_OPFS_CACHE_NAMESPACE = "lixray:sync-protocol-v3";
 
 export const BROWSER_REPLICA_STORAGE_KEY_PREFIX = "lixray:browser-replica:v3:";
-export const BROWSER_TAB_REPLICA_STORAGE_KEY_PREFIX =
-	"lixray:browser-replica-tab:v1:";
 
 export interface RepositoryBrowserReplicaScope {
 	authIdentity: string;
-	namespace: string;
-	repositorySlug: string;
-	repositoryId?: string;
+	repositoryId: string;
 }
 
 type BrowserReplicaStorage = Pick<Storage, "getItem" | "setItem">;
@@ -30,14 +24,13 @@ interface BrowserReplicaIdEnvironment {
 
 interface BrowserReplicaClaimEnvironment extends BrowserReplicaIdEnvironment {
 	lockManager?: BrowserReplicaLockManager | null;
-	tabStorage?: BrowserReplicaStorage | null;
 }
 
 export interface BrowserReplicaLockManager {
 	request(
 		name: string,
-		options: { mode: "exclusive"; ifAvailable?: true },
-		callback: (lock: object | null) => Promise<void>,
+		options: { mode: "exclusive" },
+		callback: (lock: object) => Promise<void>,
 	): Promise<void>;
 }
 
@@ -54,9 +47,8 @@ const volatileBrowserReplicaIdsWithoutStorage = new Map<string, string>();
  *
  * OPFS SQLite is a mutable replica, so separate top-level browsing contexts
  * must not open the same file concurrently. localStorage preserves the identity
- * after every tab closes; a Web Lock rejects concurrent reuse and lets the
- * later tab claim another durable replica from the repository's saved pool.
- * Authentication remains a separate server principal.
+ * after every tab closes; a Web Lock serializes concurrent ownership of that
+ * one durable replica. Authentication remains a separate server principal.
  */
 export function repositoryBrowserReplicaId(
 	scope: RepositoryBrowserReplicaScope,
@@ -89,51 +81,12 @@ export async function claimRepositoryBrowserReplicaId(
 			"Opening a durable browser repository requires the Web Locks API.",
 		);
 	}
-	const tabStorage = browserReplicaTabStorage(environment);
-	const fallbackStorageKey = `${BROWSER_TAB_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(scopeKey)}`;
-	const pinnedBrowserId = readBrowserReplicaId(
-		tabStorage,
-		fallbackStorageKey,
-		scopeKey,
-	);
-	if (pinnedBrowserId) {
-		const pinnedReplicaId = `${scope.authIdentity}:${pinnedBrowserId}`;
-		return {
-			replicaId: pinnedReplicaId,
-			release: await waitForBrowserReplicaIdLock(
-				`${scopeKey}:${pinnedReplicaId}`,
-				lockManager,
-			),
-		};
-	}
 	const durableReplicaId = repositoryBrowserReplicaId(scope, environment);
-	const durableRelease = await tryClaimBrowserReplicaIdLock(
+	const release = await claimBrowserReplicaIdLock(
 		`${scopeKey}:${durableReplicaId}`,
 		lockManager,
 	);
-	if (durableRelease) {
-		return { replicaId: durableReplicaId, release: durableRelease };
-	}
-
-	// Concurrent tabs must not share one mutable OPFS database. Pin the later
-	// tab to its own replica so reloads cannot strand an offline outbox by
-	// switching back to the profile replica. A reload waits for its old document
-	// to finish closing that same replica.
-	const fallbackBrowserId = (
-		environment.createId ?? (() => globalThis.crypto.randomUUID())
-	)();
-	persistBrowserReplicaId(
-		tabStorage,
-		fallbackStorageKey,
-		scopeKey,
-		fallbackBrowserId,
-	);
-	const fallbackReplicaId = `${scope.authIdentity}:${fallbackBrowserId}`;
-	const fallbackRelease = await waitForBrowserReplicaIdLock(
-		`${scopeKey}:${fallbackReplicaId}`,
-		lockManager,
-	);
-	return { replicaId: fallbackReplicaId, release: fallbackRelease };
+	return { replicaId: durableReplicaId, release };
 }
 
 function readBrowserReplicaId(
@@ -176,41 +129,16 @@ function persistBrowserReplicaId(
 	}
 }
 
-export async function tryClaimBrowserReplicaIdLock(
-	claimKey: string,
-	lockManager: BrowserReplicaLockManager | null = browserReplicaLockManager(),
-): Promise<(() => void) | null> {
-	if (!lockManager) return () => undefined;
-	return claimBrowserReplicaIdLock(claimKey, lockManager, true);
-}
-
-async function waitForBrowserReplicaIdLock(
-	claimKey: string,
-	lockManager: BrowserReplicaLockManager,
-): Promise<() => void> {
-	const release = await claimBrowserReplicaIdLock(claimKey, lockManager, false);
-	if (!release)
-		throw new Error("Browser replica lock wait ended without a lock.");
-	return release;
-}
-
 function claimBrowserReplicaIdLock(
 	claimKey: string,
 	lockManager: BrowserReplicaLockManager,
-	ifAvailable: boolean,
-): Promise<(() => void) | null> {
-	return new Promise<(() => void) | null>((resolve, reject) => {
+): Promise<() => void> {
+	return new Promise<() => void>((resolve, reject) => {
 		try {
 			const request = lockManager.request(
 				`lixray:opfs-replica:${claimKey}`,
-				ifAvailable
-					? { mode: "exclusive", ifAvailable: true }
-					: { mode: "exclusive" },
-				async (lock) => {
-					if (!lock) {
-						resolve(null);
-						return;
-					}
+				{ mode: "exclusive" },
+				async () => {
 					let releaseLock!: () => void;
 					let released = false;
 					const held = new Promise<void>((release) => {
@@ -236,9 +164,7 @@ function claimBrowserReplicaIdLock(
 function repositoryBrowserReplicaScopeKey(
 	scope: RepositoryBrowserReplicaScope,
 ): string {
-	const repository =
-		scope.repositoryId ?? `${scope.namespace}/${scope.repositorySlug}`;
-	return `${scope.authIdentity}:${repository}`;
+	return `${scope.authIdentity}:${scope.repositoryId}`;
 }
 
 function browserReplicaLockManager(): BrowserReplicaLockManager | null {
@@ -265,23 +191,8 @@ function browserReplicaStorage(
 	}
 }
 
-function browserReplicaTabStorage(
-	environment: BrowserReplicaClaimEnvironment,
-): BrowserReplicaStorage | null {
-	if (environment.tabStorage !== undefined) return environment.tabStorage;
-	try {
-		return typeof globalThis.sessionStorage === "undefined"
-			? null
-			: globalThis.sessionStorage;
-	} catch {
-		return null;
-	}
-}
-
 export function repositoryOpfsCacheName(
 	identity: RepositoryOpfsCacheIdentity,
 ): string {
-	const repository =
-		identity.repositoryId ?? `${identity.namespace}/${identity.repositorySlug}`;
-	return `${REPOSITORY_OPFS_CACHE_NAMESPACE}:${repository}:${identity.replicaId}`;
+	return `${REPOSITORY_OPFS_CACHE_NAMESPACE}:${identity.repositoryId}:${identity.replicaId}`;
 }

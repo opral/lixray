@@ -6,14 +6,11 @@ import {
 	claimRepositoryBrowserReplicaId,
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
-	tryClaimBrowserReplicaIdLock,
 	type BrowserReplicaLockManager,
 } from "./repository-opfs-cache.ts";
 
 const browserScope = {
 	authIdentity: "account-123",
-	namespace: "acme",
-	repositorySlug: "website",
 	repositoryId: "11111111-1111-4111-8111-111111111111",
 };
 const browserStorageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(`${browserScope.authIdentity}:${browserScope.repositoryId}`)}`;
@@ -22,12 +19,8 @@ function createLockManager(): BrowserReplicaLockManager {
 	const held = new Set<string>();
 	const waiters = new Map<string, Array<() => void>>();
 	return {
-		async request(name, options, callback) {
+		async request(name, _options, callback) {
 			while (held.has(name)) {
-				if (options.ifAvailable) {
-					await callback(null);
-					return;
-				}
 				await new Promise<void>((resolve) => {
 					const queue = waiters.get(name) ?? [];
 					queue.push(resolve);
@@ -48,8 +41,6 @@ function createLockManager(): BrowserReplicaLockManager {
 void test("hard-cuts replicas created before selected-change locators", () => {
 	assert.equal(REPOSITORY_OPFS_CACHE_NAMESPACE, "lixray:sync-protocol-v3");
 	const identity = {
-		namespace: "atelier",
-		repositorySlug: "website",
 		repositoryId: "11111111-1111-4111-8111-111111111111",
 		replicaId: "22222222-2222-4222-8222-222222222222",
 	};
@@ -73,15 +64,14 @@ void test("hard-cuts replicas created before selected-change locators", () => {
 	);
 });
 
-void test("keeps anonymous repository and replica caches isolated", () => {
+void test("keys repository and replica caches by stable repository id", () => {
 	const base = {
-		namespace: "atelier",
-		repositorySlug: "website",
+		repositoryId: "11111111-1111-4111-8111-111111111111",
 		replicaId: "anonymous-a",
 	};
 	assert.equal(
 		repositoryOpfsCacheName(base),
-		`${REPOSITORY_OPFS_CACHE_NAMESPACE}:atelier/website:anonymous-a`,
+		`${REPOSITORY_OPFS_CACHE_NAMESPACE}:${base.repositoryId}:anonymous-a`,
 	);
 	assert.notEqual(
 		repositoryOpfsCacheName(base),
@@ -89,7 +79,10 @@ void test("keeps anonymous repository and replica caches isolated", () => {
 	);
 	assert.notEqual(
 		repositoryOpfsCacheName(base),
-		repositoryOpfsCacheName({ ...base, repositorySlug: "other" }),
+		repositoryOpfsCacheName({
+			...base,
+			repositoryId: "22222222-2222-4222-8222-222222222222",
+		}),
 	);
 });
 
@@ -124,7 +117,6 @@ void test("keeps durable warm replicas independent across repositories", () => {
 	const otherScope = {
 		...browserScope,
 		repositoryId: "22222222-2222-4222-8222-222222222222",
-		repositorySlug: "other",
 	};
 	const first = repositoryBrowserReplicaId(browserScope, {
 		storage,
@@ -153,71 +145,33 @@ void test("fails closed when exclusive browser replica ownership is unavailable"
 	);
 });
 
-void test("gives a concurrent tab a reload-stable replica", async () => {
+void test("queues concurrent opens on the same durable replica", async () => {
 	const values = new Map([[browserStorageKey, "warm-browser"]]);
-	const tabValues = new Map<string, string>();
 	const storage = {
 		getItem: (key: string) => values.get(key) ?? null,
 		setItem: (key: string, value: string) => values.set(key, value),
 	};
-	const tabStorage = {
-		getItem: (key: string) => tabValues.get(key) ?? null,
-		setItem: (key: string, value: string) => tabValues.set(key, value),
-	};
 	const locks = createLockManager();
 	const environment = {
 		storage,
-		tabStorage,
 		lockManager: locks,
-		createId: () => "secondary-tab",
+		createId: () => "must-not-replace-warm-browser",
 	};
 	const first = await claimRepositoryBrowserReplicaId(
 		browserScope,
 		environment,
 	);
-	const second = await claimRepositoryBrowserReplicaId(
-		browserScope,
-		environment,
-	);
 	assert.equal(first.replicaId, "account-123:warm-browser");
-	assert.equal(second.replicaId, "account-123:secondary-tab");
-	assert.equal(values.get(browserStorageKey), "warm-browser");
-	const overlappingReopen = claimRepositoryBrowserReplicaId(browserScope, {
-		...environment,
-		createId: () => "must-not-replace-secondary-tab",
-	});
-	let overlapSettled = false;
-	void overlappingReopen.then(() => {
-		overlapSettled = true;
+	const secondOpen = claimRepositoryBrowserReplicaId(browserScope, environment);
+	let secondSettled = false;
+	void secondOpen.then(() => {
+		secondSettled = true;
 	});
 	await new Promise((resolve) => setTimeout(resolve, 0));
-	assert.equal(overlapSettled, false, "reload waits for the old document lock");
-	second.release();
-	const reopenedSecond = await overlappingReopen;
-	assert.equal(reopenedSecond.replicaId, second.replicaId);
+	assert.equal(secondSettled, false, "the later open waits for ownership");
 	first.release();
-	reopenedSecond.release();
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	const reopenedAfterPrimaryExit = await claimRepositoryBrowserReplicaId(
-		browserScope,
-		{
-			...environment,
-			createId: () => "must-not-switch-back-to-primary",
-		},
-	);
-	assert.equal(reopenedAfterPrimaryExit.replicaId, second.replicaId);
-	reopenedAfterPrimaryExit.release();
-});
-
-void test("holds the exclusive lock until its resource releases it", async () => {
-	const locks = createLockManager();
-	const release = await tryClaimBrowserReplicaIdLock("copied", locks);
-	assert.equal(typeof release, "function");
-	assert.equal(await tryClaimBrowserReplicaIdLock("copied", locks), null);
-	release?.();
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	assert.equal(
-		typeof (await tryClaimBrowserReplicaIdLock("copied", locks)),
-		"function",
-	);
+	const second = await secondOpen;
+	assert.equal(second.replicaId, first.replicaId);
+	assert.equal(values.get(browserStorageKey), "warm-browser");
+	second.release();
 });

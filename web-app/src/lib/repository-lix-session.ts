@@ -16,7 +16,7 @@ type TokenProvider = () => Promise<string | null>;
 interface OpenRepositoryLixSessionOptions {
 	namespace: string;
 	repositorySlug: string;
-	repositoryId?: string;
+	repositoryId: string;
 	getAccessToken: TokenProvider;
 	/** Refreshes the auth session before retrying an expired-token request. */
 	refreshAccessToken?: TokenProvider;
@@ -48,8 +48,6 @@ const OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
 
 export interface RepositoryLixSession {
 	readonly lix: Lix;
-	/** Resolves only when the session's observer channel stops unexpectedly. */
-	waitForSyncFailure(): Promise<Error | null>;
 	activeBranchSnapshot(): string;
 	defaultBranchSnapshot(): string;
 	subscribeActiveBranch(listener: () => void): () => void;
@@ -165,7 +163,7 @@ async function openOpfsSyncSession(
 export function createTelemetryFetch(
 	customFetch: RemoteLixFetch | undefined,
 	context: {
-		repositoryId?: string;
+		repositoryId: string;
 		refreshAccessToken?: TokenProvider;
 	},
 ): RemoteLixFetch {
@@ -192,65 +190,11 @@ export function createTelemetryFetch(
 				// Preserve the original auth response when the refresh itself fails.
 			}
 		}
-		recordLixrayServerTiming(response, input);
 		if (!response.ok) {
 			void reportLixRequestFailure(response, input, init, context);
 		}
 		return response;
 	};
-}
-
-const LIXRAY_SERVER_TIMING_NAMES = [
-	"lixray-web-auth",
-	"lixray-web-resolve",
-	"lixray-server-roundtrip",
-	"lix-server-protocol",
-] as const;
-
-type LixrayServerTimingName = (typeof LIXRAY_SERVER_TIMING_NAMES)[number];
-
-export type LixrayServerTimings = Partial<
-	Record<LixrayServerTimingName, number>
->;
-
-export function parseLixrayServerTiming(raw: string): LixrayServerTimings {
-	const durations: LixrayServerTimings = {};
-	for (const entry of raw.split(",")) {
-		const [rawName, ...parameters] = entry.split(";");
-		const name = rawName?.trim();
-		if (!isLixrayServerTimingName(name)) continue;
-		const duration = parameters
-			.map((parameter) => parameter.trim())
-			.find((parameter) => parameter.startsWith("dur="))
-			?.slice("dur=".length);
-		const parsed = duration === undefined ? Number.NaN : Number(duration);
-		if (!Number.isFinite(parsed) || parsed < 0) continue;
-		durations[name] = (durations[name] ?? 0) + parsed;
-	}
-	return durations;
-}
-
-function isLixrayServerTimingName(
-	name: string | undefined,
-): name is LixrayServerTimingName {
-	return LIXRAY_SERVER_TIMING_NAMES.some((candidate) => candidate === name);
-}
-
-function recordLixrayServerTiming(
-	response: Response,
-	input: RequestInfo | URL,
-): void {
-	const endpoint = lixRequestEndpoint(input);
-	if (endpoint === "unknown") return;
-	const raw = response.headers.get("server-timing");
-	if (!raw || typeof window === "undefined") return;
-	const durationsMs = parseLixrayServerTiming(raw);
-	if (Object.keys(durationsMs).length === 0) return;
-	window.dispatchEvent(
-		new CustomEvent("lixray-server-timing", {
-			detail: { endpoint, durationsMs },
-		}),
-	);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -261,7 +205,7 @@ async function reportLixRequestFailure(
 	response: Response,
 	input: RequestInfo | URL,
 	init: RequestInit | undefined,
-	context: { repositoryId?: string },
+	context: { repositoryId: string },
 ): Promise<void> {
 	let code: string | undefined;
 	try {
@@ -279,7 +223,7 @@ async function reportLixRequestFailure(
 		lix_request_method: init?.method ?? "GET",
 		lix_http_status: response.status,
 		...(code ? { lix_error_code: code } : {}),
-		...(context.repositoryId ? { lix_id: context.repositoryId } : {}),
+		lix_id: context.repositoryId,
 	});
 }
 
@@ -328,8 +272,6 @@ function delay(milliseconds: number): Promise<void> {
 class RemoteRepositoryLixSession implements RepositoryLixSession {
 	readonly lix: Lix;
 	readonly #listeners = new Set<() => void>();
-	readonly #syncObserver: ReturnType<Lix["observe"]>;
-	readonly #syncFailure: Promise<Error | null>;
 	readonly #defaultBranchId: string;
 	readonly #releaseReplicaClaim: () => void;
 	#activeBranchId: string;
@@ -344,12 +286,6 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 		this.#defaultBranchId = defaultBranchId;
 		this.#activeBranchId = defaultBranchId;
 		this.#releaseReplicaClaim = releaseReplicaClaim;
-		this.#syncObserver = lix.observe("SELECT 1", []);
-		this.#syncFailure = this.#monitorSync();
-	}
-
-	waitForSyncFailure(): Promise<Error | null> {
-		return this.#syncFailure;
 	}
 
 	activeBranchSnapshot(): string {
@@ -388,7 +324,6 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 		if (this.#closed) return;
 		this.#closed = true;
 		this.#listeners.clear();
-		this.#syncObserver.close();
 		try {
 			await this.lix.close();
 		} finally {
@@ -398,20 +333,6 @@ class RemoteRepositoryLixSession implements RepositoryLixSession {
 
 	#assertOpen(): void {
 		if (this.#closed) throw new Error("The repository Lix session is closed.");
-	}
-
-	async #monitorSync(): Promise<Error | null> {
-		try {
-			while ((await this.#syncObserver.next()) !== undefined) {
-				// The result is irrelevant: the observer is the session health signal.
-			}
-			return this.#closed
-				? null
-				: new Error("The repository sync observer stopped unexpectedly.");
-		} catch (error) {
-			if (this.#closed) return null;
-			return error instanceof Error ? error : new Error(String(error));
-		}
 	}
 }
 
@@ -426,10 +347,6 @@ class RepositoryLixSessionLease implements RepositoryLixSession {
 		this.lix = session.lix;
 		this.#session = session;
 		this.#release = release;
-	}
-
-	waitForSyncFailure(): Promise<Error | null> {
-		return this.#session.waitForSyncFailure();
 	}
 
 	activeBranchSnapshot(): string {
@@ -482,7 +399,7 @@ export function repositorySessionKey(
 	const href = repositoryUrl(options).href;
 	return JSON.stringify({
 		href,
-		repositoryId: options.repositoryId ?? null,
+		repositoryId: options.repositoryId,
 		identity: options.authIdentity,
 		publicPath: options.publicPath ?? null,
 	});
