@@ -5,7 +5,9 @@ import {
 	createTelemetryFetch,
 	isRetryableRepositoryOpenError,
 	RemoteRepositoryLixSession,
+	repositoryMigrationStateFromError,
 	repositorySessionKey,
+	retryRepositoryOpenDuringMigration,
 } from "./repository-lix-session.ts";
 
 void test("does not create a synthetic observer for session health", async () => {
@@ -76,6 +78,91 @@ void test("retries only transient repository-open transport failures", () => {
 		false,
 	);
 });
+
+void test("reads structured repository migration state from an open error", () => {
+	assert.deepEqual(
+		repositoryMigrationStateFromError(
+			Object.assign(new Error("The lix repository is being migrated."), {
+				code: "LIX_ERROR_LIX_MIGRATING",
+				details: { fromVersion: 68, toVersion: 71, retryable: true },
+			}),
+		),
+		{ fromVersion: 68, toVersion: 71 },
+	);
+	assert.equal(
+		repositoryMigrationStateFromError(
+			Object.assign(new Error("Malformed migration state"), {
+				code: "LIX_ERROR_LIX_MIGRATING",
+				details: { fromVersion: "68", toVersion: 71 },
+			}),
+		),
+		null,
+	);
+	assert.equal(
+		repositoryMigrationStateFromError(
+			Object.assign(new Error("The replica is recovering"), {
+				code: "LIX_ERROR_LIX_RECOVERING",
+			}),
+		),
+		null,
+	);
+});
+
+void test("polls migration in one open lifecycle until the repository is ready", async () => {
+	let opens = 0;
+	const waits: number[] = [];
+	const states: Array<{ fromVersion: number; toVersion: number } | null> = [];
+	const session = await retryRepositoryOpenDuringMigration({
+		open: async () => {
+			opens += 1;
+			if (opens < 3) throw migrationError();
+			return "ready";
+		},
+		onMigration: (state) => states.push(state),
+		wait: async (milliseconds) => {
+			waits.push(milliseconds);
+		},
+	});
+
+	assert.equal(session, "ready");
+	assert.equal(opens, 3);
+	assert.deepEqual(waits, [1_000, 1_000]);
+	assert.deepEqual(states, [
+		{ fromVersion: 68, toVersion: 71 },
+		{ fromVersion: 68, toVersion: 71 },
+		null,
+	]);
+});
+
+void test("stops polling and clears progress when its owner aborts", async () => {
+	const controller = new AbortController();
+	let opens = 0;
+	const states: Array<{ fromVersion: number; toVersion: number } | null> = [];
+	await assert.rejects(
+		retryRepositoryOpenDuringMigration({
+			open: async () => {
+				opens += 1;
+				throw migrationError();
+			},
+			onMigration: (state) => states.push(state),
+			signal: controller.signal,
+			wait: async (_milliseconds, signal) => {
+				controller.abort();
+				signal?.throwIfAborted();
+			},
+		}),
+		{ name: "AbortError" },
+	);
+	assert.equal(opens, 1);
+	assert.deepEqual(states, [{ fromVersion: 68, toVersion: 71 }, null]);
+});
+
+function migrationError(): Error {
+	return Object.assign(new Error("The lix repository is being migrated."), {
+		code: "LIX_ERROR_LIX_MIGRATING",
+		details: { fromVersion: 68, toVersion: 71, retryable: true },
+	});
+}
 
 void test("refreshes an expired access token and retries a sync request once", async () => {
 	let refreshCalls = 0;

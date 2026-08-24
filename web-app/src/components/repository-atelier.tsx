@@ -57,6 +57,7 @@ import {
 import { isRepositoryShareToken } from "~/lib/repository-share-capability";
 import {
 	openRepositoryLixSession,
+	type RepositoryMigrationState,
 	type RepositoryLixSession,
 } from "~/lib/repository-lix-session";
 import { formatRepositoryOpenError } from "~/lib/repository-open-error";
@@ -173,6 +174,9 @@ export function RepositoryAtelier({
 		string | null
 	>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [migration, setMigration] = useState<RepositoryMigrationState | null>(
+		null,
+	);
 	const activeLixRef = useRef<RepositoryLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeChildRef = useRef<{
@@ -833,11 +837,13 @@ export function RepositoryAtelier({
 	useEffect(() => {
 		let disposed = false;
 		let activeLix: RepositoryLixSession | null = null;
+		const openController = new AbortController();
 		resetRepositoryOpenPerformance();
 		setInstance(null);
 		setBranchSession(null);
 		setRepositoryDefaultBranchId(null);
 		setError(null);
+		setMigration(null);
 		routeSyncedRef.current = false;
 
 		if (!atelierUserId) {
@@ -855,6 +861,10 @@ export function RepositoryAtelier({
 			publicPath: isReadOnly ? publicPath : undefined,
 			initialBranchId: openingBranchId,
 			authIdentity: atelierUserId,
+			signal: openController.signal,
+			onMigration: (state) => {
+				if (!disposed) setMigration(state);
+			},
 		})
 			.then(async (session) => {
 				if (disposed) {
@@ -862,6 +872,7 @@ export function RepositoryAtelier({
 					return;
 				}
 				activeLix = session;
+				setMigration(null);
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
 				activeLixRef.current = session;
 				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
@@ -958,6 +969,7 @@ export function RepositoryAtelier({
 			})
 			.catch((caught: unknown) => {
 				if (!disposed) {
+					setMigration(null);
 					captureExceptionTelemetry(caught, {
 						operation: "repository_open",
 						lix_id: repositoryId,
@@ -969,6 +981,7 @@ export function RepositoryAtelier({
 
 		return () => {
 			disposed = true;
+			openController.abort();
 			const session = activeLix;
 			activeLix = null;
 			activeLixRef.current = null;
@@ -1107,7 +1120,24 @@ export function RepositoryAtelier({
 					</RepositoryBranchSessionContext.Provider>
 				</RepositoryDefaultBranchContext.Provider>
 			) : null}
-			{!instance && !error ? (
+			{!instance && !error && migration ? (
+				<main className="absolute inset-0 grid place-content-center justify-items-center gap-3 bg-bg-app p-6 text-center text-text-secondary">
+					<strong>Migrating repository…</strong>
+					<span className="text-sm text-text-tertiary">
+						Updating the repository from v{migration.fromVersion} to v
+						{migration.toVersion}. This happens automatically.
+					</span>
+					<div
+						className="h-1.5 w-64 max-w-full overflow-hidden rounded-full bg-border-subtle"
+						role="progressbar"
+						aria-label="Repository migration"
+						aria-valuetext="Migration in progress"
+					>
+						<div className="h-full w-1/3 animate-pulse rounded-full bg-text-secondary" />
+					</div>
+				</main>
+			) : null}
+			{!instance && !error && !migration ? (
 				<main className="absolute inset-0 grid place-content-center justify-items-center gap-2 bg-bg-app p-6 text-center text-text-secondary">
 					Opening repository…
 				</main>

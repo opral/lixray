@@ -10,13 +10,15 @@ permissions:
 
 concurrency:
   group: production-lix-canary
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   check:
     name: Open and read production Lix
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    # A repository format migration is an explicit, retryable server state.
+    # Leave enough time for the canary's bounded migration poll to complete.
+    timeout-minutes: 12
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

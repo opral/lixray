@@ -5,6 +5,7 @@ interface AsyncCloseable {
 interface ManagedResource {
 	resourcePromise: Promise<AsyncCloseable>;
 	resource?: AsyncCloseable;
+	openController: AbortController;
 	leaseCount: number;
 	closeTimer?: ReturnType<typeof setTimeout>;
 	closePromise?: Promise<void>;
@@ -19,8 +20,13 @@ const managedResources = new Map<string, ManagedResource>();
 
 export async function acquireManagedRepositoryResource<
 	T extends AsyncCloseable,
->(key: string, open: () => Promise<T>): Promise<ManagedResourceLease<T>> {
+>(
+	key: string,
+	open: (signal: AbortSignal) => Promise<T>,
+	options: { signal?: AbortSignal } = {},
+): Promise<ManagedResourceLease<T>> {
 	for (;;) {
+		options.signal?.throwIfAborted();
 		const existing = managedResources.get(key);
 		if (existing?.closePromise) {
 			await existing.closePromise.catch(() => undefined);
@@ -35,7 +41,10 @@ export async function acquireManagedRepositoryResource<
 		managed.leaseCount += 1;
 
 		try {
-			const resource = (await managed.resourcePromise) as T;
+			const resource = (await waitForResource(
+				managed.resourcePromise,
+				options.signal,
+			)) as T;
 			managed.resource = resource;
 			let released = false;
 			return {
@@ -55,10 +64,12 @@ export async function acquireManagedRepositoryResource<
 
 function createManagedResource<T extends AsyncCloseable>(
 	key: string,
-	open: () => Promise<T>,
+	open: (signal: AbortSignal) => Promise<T>,
 ): ManagedResource {
+	const openController = new AbortController();
 	const managed: ManagedResource = {
-		resourcePromise: open(),
+		resourcePromise: open(openController.signal),
+		openController,
 		leaseCount: 0,
 	};
 	managedResources.set(key, managed);
@@ -66,6 +77,26 @@ function createManagedResource<T extends AsyncCloseable>(
 		if (managedResources.get(key) === managed) managedResources.delete(key);
 	});
 	return managed;
+}
+
+function waitForResource<T>(
+	resourcePromise: Promise<T>,
+	signal: AbortSignal | undefined,
+): Promise<T> {
+	if (!signal) return resourcePromise;
+	return new Promise<T>((resolve, reject) => {
+		const abort = () => reject(abortError(signal));
+		signal.addEventListener("abort", abort, { once: true });
+		void resourcePromise.then(resolve, reject).finally(() => {
+			signal.removeEventListener("abort", abort);
+		});
+	});
+}
+
+function abortError(signal: AbortSignal): Error {
+	return signal.reason instanceof Error
+		? signal.reason
+		: new DOMException("The operation was aborted.", "AbortError");
 }
 
 function releaseManagedResource(key: string, managed: ManagedResource): void {
@@ -91,11 +122,15 @@ function releaseManagedResource(key: string, managed: ManagedResource): void {
 
 function closeManagedResource(key: string, managed: ManagedResource): void {
 	if (managed.closePromise) return;
+	if (!managed.resource) managed.openController.abort();
 	let close: Promise<void>;
 	try {
 		close = managed.resource
 			? managed.resource.close()
-			: managed.resourcePromise.then((resource) => resource.close());
+			: managed.resourcePromise.then(
+					(resource) => resource.close(),
+					() => undefined,
+				);
 	} catch (error) {
 		close = Promise.reject(
 			error instanceof Error ? error : new Error(String(error)),

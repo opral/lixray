@@ -24,12 +24,13 @@ interface BrowserReplicaIdEnvironment {
 
 interface BrowserReplicaClaimEnvironment extends BrowserReplicaIdEnvironment {
 	lockManager?: BrowserReplicaLockManager | null;
+	signal?: AbortSignal;
 }
 
 export interface BrowserReplicaLockManager {
 	request(
 		name: string,
-		options: { mode: "exclusive" },
+		options: { mode: "exclusive"; signal?: AbortSignal },
 		callback: (lock: object) => Promise<void>,
 	): Promise<void>;
 }
@@ -82,6 +83,7 @@ export async function claimRepositoryBrowserReplicaId(
 	const release = await claimBrowserReplicaIdLock(
 		`${scopeKey}:${durableReplicaId}`,
 		lockManager,
+		environment.signal,
 	);
 	return { replicaId: durableReplicaId, release };
 }
@@ -89,12 +91,14 @@ export async function claimRepositoryBrowserReplicaId(
 function claimBrowserReplicaIdLock(
 	claimKey: string,
 	lockManager: BrowserReplicaLockManager,
+	signal?: AbortSignal,
 ): Promise<() => void> {
+	signal?.throwIfAborted();
 	return new Promise<() => void>((resolve, reject) => {
 		try {
 			const request = lockManager.request(
 				`lixray:opfs-replica:${claimKey}`,
-				{ mode: "exclusive" },
+				{ mode: "exclusive", signal },
 				async () => {
 					let releaseLock!: () => void;
 					let released = false;

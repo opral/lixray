@@ -292,7 +292,9 @@ jobs:
       - database
       - images
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Promotion can legitimately include the canary waiting through one
+    # bounded, server-owned repository migration.
+    timeout-minutes: 25
     environment: production
     permissions:
       contents: read

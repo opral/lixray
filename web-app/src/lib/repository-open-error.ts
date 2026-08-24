@@ -15,6 +15,9 @@ export function formatRepositoryOpenError(caught: unknown): string {
 	) {
 		return "This repository was created with an older Lix storage format that this version can no longer read. Automatic migration is unavailable. Recreate the repository to continue; its existing files and history can only be recovered from an export or backup.";
 	}
+	if (code === "LIX_ERROR_LIX_MIGRATION_FAILED") {
+		return "Repository migration failed. Contact support to recover the repository.";
+	}
 
 	return message;
 }

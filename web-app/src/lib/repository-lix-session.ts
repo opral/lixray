@@ -39,12 +39,23 @@ interface OpenRepositoryLixSessionOptions {
 	 * the server HashMap stays ephemeral.
 	 */
 	authIdentity: string;
+	onMigration?: (state: RepositoryMigrationState | null) => void;
+	signal?: AbortSignal;
 }
 
 type ResolvedOpenRepositoryLixSessionOptions =
 	OpenRepositoryLixSessionOptions & { replicaId: string };
 
 const OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
+const MIGRATION_ERROR_CODE = "LIX_ERROR_LIX_MIGRATING";
+const MIGRATION_RETRY_DELAY_MS = 1_000;
+
+interface MigrationProgress {
+	state: RepositoryMigrationState | null;
+	listeners: Set<(state: RepositoryMigrationState | null) => void>;
+}
+
+const migrationProgressBySession = new Map<string, MigrationProgress>();
 
 export interface RepositoryLixSession {
 	readonly lix: Lix;
@@ -56,26 +67,111 @@ export interface RepositoryLixSession {
 	close(): Promise<void>;
 }
 
+export interface RepositoryMigrationState {
+	fromVersion: number;
+	toVersion: number;
+}
+
 export async function openRepositoryLixSession(
 	options: OpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
-	const lease = await acquireManagedRepositoryResource(
-		repositorySessionKey(options),
-		async () => {
-			const replicaClaim = await claimRepositoryBrowserReplicaId(options);
-			markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaClaimed);
+	const sessionKey = repositorySessionKey(options);
+	const unsubscribe = options.onMigration
+		? subscribeToMigrationProgress(sessionKey, options.onMigration)
+		: undefined;
+	try {
+		const lease = await acquireManagedRepositoryResource(
+			sessionKey,
+			async (signal) => {
+				const replicaClaim = await claimRepositoryBrowserReplicaId(options, {
+					signal,
+				});
+				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaClaimed);
+				try {
+					return await retryRepositoryOpenDuringMigration({
+						open: () =>
+							openRepositoryLixSessionWithRetry(
+								{ ...options, replicaId: replicaClaim.replicaId, signal },
+								() => replicaClaim.release(),
+							),
+						onMigration: (state) => publishMigrationProgress(sessionKey, state),
+						signal,
+					});
+				} catch (error) {
+					replicaClaim.release();
+					throw error;
+				}
+			},
+			{ signal: options.signal },
+		);
+		return new RepositoryLixSessionLease(lease.resource, () => lease.release());
+	} finally {
+		unsubscribe?.();
+	}
+}
+
+function subscribeToMigrationProgress(
+	key: string,
+	listener: (state: RepositoryMigrationState | null) => void,
+): () => void {
+	let progress = migrationProgressBySession.get(key);
+	if (!progress) {
+		progress = { state: null, listeners: new Set() };
+		migrationProgressBySession.set(key, progress);
+	}
+	progress.listeners.add(listener);
+	if (progress.state) listener(progress.state);
+	return () => {
+		progress?.listeners.delete(listener);
+		if (progress?.listeners.size === 0 && !progress.state) {
+			migrationProgressBySession.delete(key);
+		}
+	};
+}
+
+function publishMigrationProgress(
+	key: string,
+	state: RepositoryMigrationState | null,
+): void {
+	const progress = migrationProgressBySession.get(key);
+	if (!progress) return;
+	progress.state = state;
+	for (const listener of progress.listeners) listener(state);
+	if (progress.listeners.size === 0 && !state) {
+		migrationProgressBySession.delete(key);
+	}
+}
+
+export async function retryRepositoryOpenDuringMigration<T>({
+	open,
+	onMigration,
+	wait = delay,
+	signal,
+}: {
+	open: () => Promise<T>;
+	onMigration?: (state: RepositoryMigrationState | null) => void;
+	wait?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+	signal?: AbortSignal;
+}): Promise<T> {
+	let observedMigration = false;
+	try {
+		for (;;) {
+			signal?.throwIfAborted();
 			try {
-				return await openRepositoryLixSessionWithRetry(
-					{ ...options, replicaId: replicaClaim.replicaId },
-					() => replicaClaim.release(),
-				);
+				const session = await open();
+				return session;
 			} catch (error) {
-				replicaClaim.release();
-				throw error;
+				signal?.throwIfAborted();
+				const migration = repositoryMigrationStateFromError(error);
+				if (!migration) throw error;
+				observedMigration = true;
+				onMigration?.(migration);
+				await wait(MIGRATION_RETRY_DELAY_MS, signal);
 			}
-		},
-	);
-	return new RepositoryLixSessionLease(lease.resource, () => lease.release());
+		}
+	} finally {
+		if (observedMigration) onMigration?.(null);
+	}
 }
 
 async function openRepositoryLixSessionWithRetry(
@@ -83,14 +179,24 @@ async function openRepositoryLixSessionWithRetry(
 	releaseReplicaClaim: () => void,
 ): Promise<RepositoryLixSession> {
 	for (let attempt = 0; ; attempt += 1) {
+		options.signal?.throwIfAborted();
 		try {
-			return await openRepositoryLixSessionOnce(options, releaseReplicaClaim);
+			const session = await openRepositoryLixSessionOnce(
+				options,
+				releaseReplicaClaim,
+			);
+			if (options.signal?.aborted) {
+				await session.close();
+				options.signal.throwIfAborted();
+			}
+			return session;
 		} catch (error) {
+			options.signal?.throwIfAborted();
 			const retryDelay = OPEN_RETRY_DELAYS_MS[attempt];
 			if (!isRetryableRepositoryOpenError(error) || retryDelay === undefined) {
 				throw error;
 			}
-			await delay(retryDelay);
+			await delay(retryDelay, options.signal);
 		}
 	}
 }
@@ -155,6 +261,7 @@ async function openOpfsSyncSession(
 			fetch: createTelemetryFetch(options.fetch, {
 				repositoryId: options.repositoryId,
 				refreshAccessToken: options.refreshAccessToken,
+				signal: options.signal,
 			}),
 		},
 	});
@@ -165,6 +272,7 @@ export function createTelemetryFetch(
 	context: {
 		repositoryId: string;
 		refreshAccessToken?: TokenProvider;
+		signal?: AbortSignal;
 	},
 ): RemoteLixFetch {
 	const fetcher = customFetch ?? globalThis.fetch?.bind(globalThis);
@@ -173,25 +281,31 @@ export function createTelemetryFetch(
 	}
 
 	return async (input, init) => {
-		let response = await fetcher(input, init);
+		const requestSignal = input instanceof Request ? input.signal : undefined;
+		const signals = [context.signal, init?.signal, requestSignal].filter(
+			(signal): signal is AbortSignal => signal !== undefined,
+		);
+		const requestInit =
+			signals.length > 0 ? { ...init, signal: AbortSignal.any(signals) } : init;
+		let response = await fetcher(input, requestInit);
 		if (
 			response.status === 401 &&
 			context.refreshAccessToken &&
-			init?.method !== "DELETE"
+			requestInit?.method !== "DELETE"
 		) {
 			try {
 				const token = await context.refreshAccessToken();
 				if (token) {
-					const headers = new Headers(init?.headers);
+					const headers = new Headers(requestInit?.headers);
 					headers.set("Authorization", `Bearer ${token}`);
-					response = await fetcher(input, { ...init, headers });
+					response = await fetcher(input, { ...requestInit, headers });
 				}
 			} catch {
 				// Preserve the original auth response when the refresh itself fails.
 			}
 		}
 		if (!response.ok) {
-			void reportLixRequestFailure(response, input, init, context);
+			void reportLixRequestFailure(response, input, requestInit, context);
 		}
 		return response;
 	};
@@ -217,6 +331,7 @@ async function reportLixRequestFailure(
 	} catch {
 		// The SDK will report malformed/non-JSON responses separately.
 	}
+	if (code === MIGRATION_ERROR_CODE) return;
 
 	captureTelemetry("lix_request_failed", {
 		lix_request_endpoint: lixRequestEndpoint(input),
@@ -254,6 +369,27 @@ function isLixRecoveringError(
 	);
 }
 
+export function repositoryMigrationStateFromError(
+	error: unknown,
+): RepositoryMigrationState | null {
+	if (!(error instanceof Error) || !("code" in error)) return null;
+	if (error.code !== MIGRATION_ERROR_CODE || !("details" in error)) {
+		return null;
+	}
+	const details = error.details;
+	if (!isRecord(details)) return null;
+	const { fromVersion, toVersion } = details;
+	if (
+		typeof fromVersion !== "number" ||
+		!Number.isInteger(fromVersion) ||
+		typeof toVersion !== "number" ||
+		!Number.isInteger(toVersion)
+	) {
+		return null;
+	}
+	return { fromVersion, toVersion };
+}
+
 export function isRetryableRepositoryOpenError(error: unknown): boolean {
 	if (isLixRecoveringError(error)) return true;
 	if (!(error instanceof Error)) return false;
@@ -265,8 +401,27 @@ export function isRetryableRepositoryOpenError(error: unknown): boolean {
 	);
 }
 
-function delay(milliseconds: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+	if (!signal)
+		return new Promise((resolve) => setTimeout(resolve, milliseconds));
+	return new Promise((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			signal.removeEventListener("abort", abort);
+			resolve();
+		}, milliseconds);
+		const abort = () => {
+			clearTimeout(timeout);
+			signal.removeEventListener("abort", abort);
+			reject(abortError(signal));
+		};
+		signal.addEventListener("abort", abort, { once: true });
+	});
+}
+
+function abortError(signal: AbortSignal): Error {
+	return signal.reason instanceof Error
+		? signal.reason
+		: new DOMException("The operation was aborted.", "AbortError");
 }
 
 export class RemoteRepositoryLixSession implements RepositoryLixSession {
