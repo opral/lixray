@@ -25,9 +25,11 @@ void test("uses a Codex-safe isolated development registration on localhost", ()
 	assert.match(details.serverName, /^[a-zA-Z0-9_-]+$/);
 	assert.doesNotMatch(details.prompt, /Preview:/);
 	assert.doesNotMatch(details.prompt, /Setup docs:/);
+	assert.doesNotMatch(details.prompt, /cannot add/i);
+	assert.doesNotMatch(details.prompt, /cannot connect/i);
 	assert.match(
 		details.prompt,
-		/Agents cannot add connectors from the chat, so guide the user to add it manually/,
+		/Guide the user to add LixRay_Dev from the cloud marketplace, or add the MCP manually at http:\/\/127\.0\.0\.1:8787\/mcp and authenticate\./,
 	);
 	assert.match(
 		details.prompt,
@@ -51,7 +53,12 @@ void test("uses Lixray in production and starts with one user-picked skill", () 
 	);
 	assert.doesNotMatch(details.prompt, /local connection/);
 	assert.match(details.prompt, /Lixray is added as a normal MCP connector\./);
-	assert.match(details.prompt, /guide the user to add it manually/);
+	assert.match(
+		details.prompt,
+		/Guide the user to add LixRay from the cloud marketplace, or add the MCP manually at https:\/\/app\.lixray\.com\/mcp and authenticate\./,
+	);
+	assert.doesNotMatch(details.prompt, /cannot add/i);
+	assert.doesNotMatch(details.prompt, /cannot connect/i);
 	assert.doesNotMatch(details.prompt, /Save this as durable agent memory/);
 	assert.match(
 		details.prompt,
@@ -104,8 +111,8 @@ void test("keeps the connection prompt concise", () => {
 	const words = details.prompt.trim().split(/\s+/);
 
 	assert.ok(
-		words.length <= 133,
-		`expected at most 133 words, got ${words.length}`,
+		words.length <= 113,
+		`expected at most 113 words, got ${words.length}`,
 	);
 	assert.doesNotMatch(details.prompt, /active_branch_id/);
 	assert.doesNotMatch(details.prompt, /first files/);
