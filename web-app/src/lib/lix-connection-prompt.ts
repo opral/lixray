@@ -33,11 +33,11 @@ export function createLixConnectionDetails({
 
 	const prompt = `Lixray is a host for Lix repositories. Documentation is under https://lixray.com/docs.
 
-Guide the user to connect to this MCP server for Lixray repository ${lixReference} (${lixId}): [${mcpUrl}](${mcpUrl}).
+This Lixray repository is ${lixReference} (${lixId}). Ask the user whether it is for personal stuff or company stuff, then treat it that way.
 
-The user must connect and authenticate it themselves because agents cannot connect MCP servers from the chat. If ${serverName} is already connected, reuse it.
+Lixray is added as a normal MCP connector. Guide the user to add ${serverName} from the cloud marketplace, or add the MCP manually at ${mcpUrl} and authenticate. If ${serverName} is already connected, reuse it.
 
-Save this as durable agent memory: shared skills, guidelines, and ICP live in Lixray. Store them there. Read them from there. Later turns should reference Lix and write to Lix.
+Skills, guidelines, and working files live here. Read from it and write to it. Guide the user to put that in AGENTS.md if it exists, CLAUDE.md if it exists, or both. If Lixray is not connected, tell the user to add ${mcpUrl} and reopen the chat.
 
 Once connected, ask the user which single skill to put in Lixray. They pick or create it. Write only that one skill file.`;
 

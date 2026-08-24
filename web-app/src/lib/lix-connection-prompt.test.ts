@@ -19,14 +19,21 @@ void test("uses a Codex-safe isolated development registration on localhost", ()
 	assert.equal(details.mcpUrl, "http://127.0.0.1:8787/mcp");
 	assert.match(
 		details.prompt,
-		/^Lixray is a host for Lix repositories\. Documentation is under https:\/\/lixray\.com\/docs\.\n\nGuide the user to connect to this MCP server for Lixray repository @samuel\/repository \(8b4382f8-239d-4b76-bb77-401de5f1d6ae\): \[http:\/\/127\.0\.0\.1:8787\/mcp\]\(http:\/\/127\.0\.0\.1:8787\/mcp\)\./,
+		/^Lixray is a host for Lix repositories\. Documentation is under https:\/\/lixray\.com\/docs\.\n\nThis Lixray repository is @samuel\/repository \(8b4382f8-239d-4b76-bb77-401de5f1d6ae\)\./,
 	);
+	assert.match(
+		details.prompt,
+		/Ask the user whether it is for personal stuff or company stuff, then treat it that way\./,
+	);
+	assert.match(details.prompt, /http:\/\/127\.0\.0\.1:8787\/mcp/);
 	assert.match(details.serverName, /^[a-zA-Z0-9_-]+$/);
 	assert.doesNotMatch(details.prompt, /Preview:/);
 	assert.doesNotMatch(details.prompt, /Setup docs:/);
+	assert.doesNotMatch(details.prompt, /cannot add/i);
+	assert.doesNotMatch(details.prompt, /cannot connect/i);
 	assert.match(
 		details.prompt,
-		/The user must connect and authenticate it themselves because agents cannot connect MCP servers from the chat\./,
+		/Guide the user to add LixRay_Dev from the cloud marketplace, or add the MCP manually at http:\/\/127\.0\.0\.1:8787\/mcp and authenticate\./,
 	);
 	assert.match(
 		details.prompt,
@@ -49,14 +56,26 @@ void test("uses Lixray in production and starts with one user-picked skill", () 
 		/Documentation is under https:\/\/lixray\.com\/docs\./,
 	);
 	assert.doesNotMatch(details.prompt, /local connection/);
+	assert.doesNotMatch(details.prompt, /company repository/i);
 	assert.match(
 		details.prompt,
-		/Save this as durable agent memory: shared skills, guidelines, and ICP live in Lixray\./,
+		/Ask the user whether it is for personal stuff or company stuff, then treat it that way\./,
 	);
-	assert.match(details.prompt, /Store them there\. Read them from there\./);
+	assert.match(details.prompt, /Lixray is added as a normal MCP connector\./);
 	assert.match(
 		details.prompt,
-		/Later turns should reference Lix and write to Lix\./,
+		/Guide the user to add LixRay from the cloud marketplace, or add the MCP manually at https:\/\/app\.lixray\.com\/mcp and authenticate\./,
+	);
+	assert.doesNotMatch(details.prompt, /cannot add/i);
+	assert.doesNotMatch(details.prompt, /cannot connect/i);
+	assert.doesNotMatch(details.prompt, /Save this as durable agent memory/);
+	assert.doesNotMatch(
+		details.prompt,
+		/do not save it to personal agent memory/i,
+	);
+	assert.match(
+		details.prompt,
+		/Guide the user to put that in AGENTS\.md if it exists, CLAUDE\.md if it exists, or both\./,
 	);
 	assert.match(
 		details.prompt,
@@ -72,6 +91,7 @@ void test("does not survey private memory or request a bulk upload", () => {
 		origin: "https://app.lixray.com",
 	});
 
+	assert.doesNotMatch(details.prompt, /Save this as durable agent memory/);
 	assert.doesNotMatch(details.prompt, /check the memory/i);
 	assert.doesNotMatch(details.prompt, /survey/i);
 	assert.doesNotMatch(details.prompt, /upload/i);
@@ -108,8 +128,8 @@ void test("keeps the connection prompt concise", () => {
 	const words = details.prompt.trim().split(/\s+/);
 
 	assert.ok(
-		words.length <= 130,
-		`expected at most 130 words, got ${words.length}`,
+		words.length <= 137,
+		`expected at most 137 words, got ${words.length}`,
 	);
 	assert.doesNotMatch(details.prompt, /active_branch_id/);
 	assert.doesNotMatch(details.prompt, /first files/);
