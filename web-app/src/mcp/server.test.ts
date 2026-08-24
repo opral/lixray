@@ -117,7 +117,10 @@ class FakeRuntime implements LixRuntimeClient {
 				hint: "Bind a text value.",
 			});
 		}
-		if (request.sql === "SELECT lix_restore($1)") {
+		if (
+			request.sql ===
+			"INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id"
+		) {
 			if (
 				request.params?.[0]?.kind === "text" &&
 				request.params[0].value === "missing-commit"
@@ -128,9 +131,9 @@ class FakeRuntime implements LixRuntimeClient {
 				);
 			}
 			return {
-				columns: ["lix_restore"],
+				columns: ["commit_id"],
 				rows: [[request.params?.[0] ?? { kind: "null" as const }]],
-				rowsAffected: 0,
+				rowsAffected: 1,
 				notices: [],
 			};
 		}

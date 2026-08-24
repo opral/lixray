@@ -275,7 +275,8 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		const openHome = async (page: Page) => {
 			await page.goto(repositoryUrl);
 			const newButton = page.getByTestId("home-new-button");
-			if (!(await newButton.isVisible())) {
+			const gettingStarted = page.getByTestId("home-getting-started");
+			if (!(await newButton.or(gettingStarted).first().isVisible())) {
 				const homeTab = page.getByRole("button", {
 					name: "Home",
 					exact: true,
@@ -286,16 +287,27 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 				// check so the test follows the same pointer activation path.
 				await homeTab.click({ force: true });
 			}
-			await newButton.waitFor({ timeout: 120_000 });
+			await newButton.or(gettingStarted).first().waitFor({ timeout: 120_000 });
 		};
 		const createFileFromHome = async (
 			page: Page,
 			buttonName: string,
 		): Promise<string> => {
 			await openHome(page);
-			await page.getByTestId("home-new-button").click();
 			const homeUrl = page.url();
-			await page.getByRole("button", { name: buttonName, exact: true }).click();
+			if (await page.getByTestId("home-getting-started").isVisible()) {
+				const onboardingButtonName = buttonName
+					.replace(/^New /, "")
+					.replace(/ \(\.[^)]+\)$/, "");
+				await page
+					.getByRole("button", { name: onboardingButtonName, exact: true })
+					.click();
+			} else {
+				await page.getByTestId("home-new-button").click();
+				await page
+					.getByRole("button", { name: buttonName, exact: true })
+					.click();
+			}
 			await expect(page).not.toHaveURL(homeUrl, {
 				timeout: repositoryOperationTimeout,
 			});
@@ -307,7 +319,10 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		await Promise.all([openHome(left), openHome(right)]);
 		if (!(await left.getByTestId("home-entry-list").isVisible())) {
 			await createFileFromHome(left, "New Markdown (.md)");
-			await left.goto(repositoryUrl);
+			await right
+				.getByTestId("home-getting-started")
+				.waitFor({ state: "hidden", timeout: repositoryOperationTimeout });
+			await Promise.all([openHome(left), openHome(right)]);
 		}
 		await Promise.all([
 			left.getByTestId("home-entry-list").waitFor({ timeout: 120_000 }),

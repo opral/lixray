@@ -397,7 +397,7 @@ export class LixService {
 			context.lixId,
 			context.branchId,
 			{
-				sql: "SELECT lix_restore($1)",
+				sql: "INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id",
 				params: [{ kind: "text", value: commitId }],
 			},
 		);
