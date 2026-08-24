@@ -2,11 +2,13 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StartClient } from "@tanstack/react-start/client";
 import { StrictMode, startTransition } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
+import { isDemoModeEnabled } from "./lib/demo-client";
 import { getRouter } from "./router";
 
-if (import.meta.env.VITE_LIXRAY_DEMO === "1") {
-	const router = getRouter();
-	void router.load().then(() => {
+async function startClient() {
+	if (isDemoModeEnabled) {
+		const router = getRouter();
+		await router.load();
 		startTransition(() => {
 			createRoot(document).render(
 				<StrictMode>
@@ -14,14 +16,16 @@ if (import.meta.env.VITE_LIXRAY_DEMO === "1") {
 				</StrictMode>,
 			);
 		});
-	});
-} else {
-	startTransition(() => {
-		hydrateRoot(
-			document,
-			<StrictMode>
-				<StartClient />
-			</StrictMode>,
-		);
-	});
+	} else {
+		startTransition(() => {
+			hydrateRoot(
+				document,
+				<StrictMode>
+					<StartClient />
+				</StrictMode>,
+			);
+		});
+	}
 }
+
+void startClient();

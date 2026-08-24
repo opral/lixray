@@ -41,34 +41,59 @@ type ObservedRow = {
 	value(column: string): { asBytes(): Uint8Array | undefined };
 };
 
+type ObservedRowsState<TRow> = {
+	readonly rows: TRow[] | null;
+	readonly error: Error | null;
+};
+
+export function preserveObservedRowsAfterError<TRow>(
+	state: ObservedRowsState<TRow>,
+	error: Error,
+): ObservedRowsState<TRow> {
+	return { rows: state.rows, error };
+}
+
 function useObservedRows(
 	lix: Lix,
 	sql: string,
 	params: ReadonlyArray<string>,
 	enabled = true,
-): ObservedRow[] | null {
-	const [rows, setRows] = useState<ObservedRow[] | null>(null);
+): ObservedRowsState<ObservedRow> {
+	const [state, setState] = useState<ObservedRowsState<ObservedRow>>({
+		rows: null,
+		error: null,
+	});
 	const paramsKey = JSON.stringify(params);
 	useEffect(() => {
 		if (!enabled) {
-			setRows(null);
+			setState({ rows: null, error: null });
 			return;
 		}
 		let disposed = false;
 		// Remote observe reconciles every stream's first frame through execute,
 		// including reconnects, so event.result is safe to publish directly.
+		if (typeof performance !== "undefined") {
+			performance.mark("lixray:query:observe");
+		}
 		const events = lix.observe(sql, JSON.parse(paramsKey) as string[]);
-		setRows(null);
+		setState({ rows: null, error: null });
 		void (async () => {
 			try {
 				while (!disposed) {
 					const event = await events.next();
-					if (!event) break;
-					if (!disposed) setRows(event.result.rows);
+					if (!event) throw new Error("Lix observer ended unexpectedly.");
+					if (!disposed) {
+						setState({ rows: event.result.rows, error: null });
+					}
 				}
 			} catch (error) {
 				if (!disposed) {
 					console.error("repository-home: lix observe failed", error);
+					const failure =
+						error instanceof Error ? error : new Error(String(error));
+					setState((current) =>
+						preserveObservedRowsAfterError(current, failure),
+					);
 				}
 			}
 		})();
@@ -77,7 +102,7 @@ function useObservedRows(
 			events.close();
 		};
 	}, [enabled, lix, sql, paramsKey]);
-	return rows;
+	return state;
 }
 
 const asText = (value: unknown): string =>
@@ -92,45 +117,30 @@ const asNumber = (value: unknown): number => {
 };
 
 export type RepositoryControlPlaneData = {
-	readonly workingChangeCount: number;
-	readonly totalChangeCount: number;
+	readonly totalChangeCount: number | null;
 	readonly tableCount: number | null;
-	readonly checkpointDates: readonly string[];
+	readonly checkpointCount: number | null;
+	readonly checkpointDates: readonly string[] | null;
 	readonly changeDays: ReadonlyArray<{
 		readonly day: string;
 		readonly count: number;
-	}>;
+	}> | null;
 	readonly createdAt: string | null;
+	readonly changeHistoryUnavailable: boolean;
 };
 
-/** Lix exposes the active branch's working changes as a table function. */
-export const WORKING_DIFF_COUNT_SQL =
-	"SELECT count(*) AS n FROM lix_working_diff()";
+export const CHECKPOINT_SUMMARY_SQL =
+	"SELECT lixcol_created_at AS created_at, count(*) over () AS total_count FROM lix_checkpoint ORDER BY lixcol_created_at DESC LIMIT 10";
+export const CHANGE_SUMMARY_SQL =
+	"WITH daily AS (SELECT substr(created_at, 1, 10) AS day, count(*) AS day_count, min(created_at) AS day_created_at FROM lix_change GROUP BY substr(created_at, 1, 10)) SELECT day, day_count AS n, sum(day_count) over () AS total_count, min(day_created_at) over () AS created_at FROM daily ORDER BY day DESC LIMIT 10";
 
 /** Live, repository-derived facts used by the Home control-plane rail. */
 export function useRepositoryControlPlaneData(
 	lix: Lix,
 	enabled = true,
 ): RepositoryControlPlaneData | null {
-	const workingRows = useObservedRows(lix, WORKING_DIFF_COUNT_SQL, [], enabled);
-	const checkpointRows = useObservedRows(
-		lix,
-		"SELECT lixcol_created_at AS created_at FROM lix_checkpoint ORDER BY lixcol_created_at DESC LIMIT 10",
-		[],
-		enabled,
-	);
-	const changeStatsRows = useObservedRows(
-		lix,
-		"SELECT count(*) AS n, min(created_at) AS created_at FROM lix_change",
-		[],
-		enabled,
-	);
-	const changeDayRows = useObservedRows(
-		lix,
-		"SELECT substr(created_at, 1, 10) AS day, count(*) AS n FROM lix_change GROUP BY substr(created_at, 1, 10) ORDER BY day DESC LIMIT 10",
-		[],
-		enabled,
-	);
+	const checkpoints = useObservedRows(lix, CHECKPOINT_SUMMARY_SQL, [], enabled);
+	const changeSummary = useObservedRows(lix, CHANGE_SUMMARY_SQL, [], enabled);
 	const [tableCount, setTableCount] = useState<number | null>(null);
 
 	useEffect(() => {
@@ -139,6 +149,7 @@ export function useRepositoryControlPlaneData(
 			return;
 		}
 		let disposed = false;
+		setTableCount(null);
 		void lix
 			.execute(
 				"SELECT count(DISTINCT table_name) AS n FROM information_schema.columns WHERE table_schema = 'public' AND table_name NOT LIKE '%_history' AND table_name NOT LIKE '%_by_branch'",
@@ -152,7 +163,6 @@ export function useRepositoryControlPlaneData(
 					"repository-home: unable to count database tables",
 					error,
 				);
-				if (!disposed) setTableCount(0);
 			});
 		return () => {
 			disposed = true;
@@ -160,106 +170,97 @@ export function useRepositoryControlPlaneData(
 	}, [enabled, lix]);
 
 	return useMemo(() => {
-		if (!workingRows || !checkpointRows || !changeStatsRows || !changeDayRows) {
+		const observations = [checkpoints, changeSummary];
+		if (observations.some(({ rows, error }) => rows === null && !error)) {
 			return null;
 		}
+		// Full change history is optional for Home. A failed first frame settles to
+		// unavailable while successful frames stay visible after later failures.
+		const changeSummaryRows = changeSummary.rows ?? [];
 		return {
-			workingChangeCount: asNumber(workingRows[0]?.get("n")),
-			totalChangeCount: asNumber(changeStatsRows[0]?.get("n")),
+			totalChangeCount: changeSummary.rows
+				? asNumber(changeSummaryRows[0]?.get("total_count"))
+				: null,
 			tableCount,
-			checkpointDates: checkpointRows
-				.map((row) => asText(row.get("created_at")))
-				.filter(Boolean),
-			changeDays: changeDayRows
-				.map((row) => ({
-					day: asText(row.get("day")),
-					count: asNumber(row.get("n")),
-				}))
-				.reverse(),
-			createdAt: asNullableText(changeStatsRows[0]?.get("created_at")),
+			checkpointCount: checkpoints.rows
+				? asNumber(checkpoints.rows[0]?.get("total_count"))
+				: null,
+			checkpointDates: checkpoints.rows
+				? checkpoints.rows
+						.map((row) => asText(row.get("created_at")))
+						.filter(Boolean)
+				: null,
+			changeDays: changeSummary.rows
+				? changeSummaryRows
+						.map((row) => ({
+							day: asText(row.get("day")),
+							count: asNumber(row.get("n")),
+						}))
+						.reverse()
+				: null,
+			createdAt: changeSummary.rows
+				? asNullableText(changeSummaryRows[0]?.get("created_at"))
+				: null,
+			changeHistoryUnavailable: observations.some(
+				({ error }) => error !== null,
+			),
 		};
-	}, [changeDayRows, changeStatsRows, checkpointRows, tableCount, workingRows]);
+	}, [changeSummary, checkpoints, tableCount]);
 }
 
 /** The full directory/file tree, kept live via lix observe. */
-export function useRepositoryTree(lix: Lix): RepositoryTree | null {
-	const dirRows = useObservedRows(
+export function useRepositoryTree(
+	lix: Lix,
+	enabled = true,
+): {
+	readonly tree: RepositoryTree | null;
+	readonly error: Error | null;
+} {
+	const dirs = useObservedRows(
 		lix,
 		"SELECT id, parent_id, path, name, lixcol_updated_at FROM lix_directory ORDER BY path",
 		[],
+		enabled,
 	);
-	const fileRows = useObservedRows(
+	const files = useObservedRows(
 		lix,
 		"SELECT id, directory_id, path, name, lixcol_updated_at FROM lix_file ORDER BY path",
 		[],
+		enabled,
 	);
 	return useMemo(() => {
-		if (!dirRows || !fileRows) return null;
-		return {
-			dirs: dirRows.map((row) => ({
-				kind: EntryKind.Directory,
-				id: asText(row.get("id")),
-				parentId: asNullableText(row.get("parent_id")),
-				path: asText(row.get("path")),
-				name: asText(row.get("name")),
-				updatedAt: asText(row.get("lixcol_updated_at")),
-			})),
-			files: fileRows.map((row) => ({
-				kind: EntryKind.File,
-				id: asText(row.get("id")),
-				directoryId: asNullableText(row.get("directory_id")),
-				path: asText(row.get("path")),
-				name: asText(row.get("name")),
-				updatedAt: asText(row.get("lixcol_updated_at")),
-			})),
-		};
-	}, [dirRows, fileRows]);
-}
-
-/**
- * One-shot check whether the repository has zero files — used before the
- * Atelier shell mounts (e.g. to seed the getting-started tab); the hook
- * below is the live variant.
- */
-export async function repositoryHasNoFiles(lix: Lix): Promise<boolean> {
-	const result = await lix.execute("SELECT 1 FROM lix_file LIMIT 1", []);
-	return result.rows.length === 0;
-}
-
-/** Whether the repository has zero files (null while loading / no lix). */
-export function useRepositoryIsEmpty(lix: Lix | null): boolean | null {
-	const [isEmpty, setIsEmpty] = useState<boolean | null>(null);
-	useEffect(() => {
-		if (!lix) {
-			setIsEmpty(null);
-			return;
+		if (!dirs.rows || !files.rows) {
+			return { tree: null, error: dirs.error ?? files.error };
 		}
-		let disposed = false;
-		setIsEmpty(null);
-		const events = lix.observe("SELECT count(*) AS n FROM lix_file", []);
-		void (async () => {
-			try {
-				while (!disposed) {
-					const event = await events.next();
-					if (!event) break;
-					const row = event.result.rows[0] as
-						| { get(column: string): unknown }
-						| undefined;
-					const count = Number(row?.get("n") ?? 0);
-					if (!disposed) setIsEmpty(count === 0);
-				}
-			} catch (error) {
-				if (!disposed) {
-					console.error("repository-home: emptiness observe failed", error);
-				}
-			}
-		})();
-		return () => {
-			disposed = true;
-			events.close();
+		return {
+			tree: {
+				dirs: dirs.rows.map((row) => ({
+					kind: EntryKind.Directory,
+					id: asText(row.get("id")),
+					parentId: asNullableText(row.get("parent_id")),
+					path: asText(row.get("path")),
+					name: asText(row.get("name")),
+					updatedAt: asText(row.get("lixcol_updated_at")),
+				})),
+				files: files.rows.map((row) => ({
+					kind: EntryKind.File,
+					id: asText(row.get("id")),
+					directoryId: asNullableText(row.get("directory_id")),
+					path: asText(row.get("path")),
+					name: asText(row.get("name")),
+					updatedAt: asText(row.get("lixcol_updated_at")),
+				})),
+			},
+			error: dirs.error ?? files.error,
 		};
-	}, [lix]);
-	return isEmpty;
+	}, [dirs, files]);
+}
+
+/** Decides empty-repository routing only after the first complete tree frame. */
+export function initialRepositoryTreeIsEmpty(
+	tree: RepositoryTree | null,
+): boolean | null {
+	return tree === null ? null : tree.files.length === 0;
 }
 
 /**
@@ -381,11 +382,16 @@ export function persistedDirectoryPath(
 }
 
 /** Live markdown text of the file at path (null while loading/missing). */
-export function useFileMarkdown(lix: Lix, path: string | null): string | null {
-	const rows = useObservedRows(
+export function useFileMarkdown(
+	lix: Lix,
+	path: string | null,
+	enabled = path !== null,
+): string | null {
+	const { rows } = useObservedRows(
 		lix,
 		"SELECT content FROM lix_file WHERE path = $1",
 		path ? [path] : [""],
+		enabled && path !== null,
 	);
 	return useMemo(() => {
 		if (!path || !rows || rows.length === 0) return null;
@@ -413,15 +419,11 @@ async function firstFreePath(
 ): Promise<string> {
 	for (let suffix = null as number | null, i = 0; i < 1000; i += 1) {
 		const path = candidate(suffix);
-		const [dirHit, fileHit] = await Promise.all([
-			lix.execute("SELECT 1 FROM lix_directory WHERE lower(path) = lower($1)", [
-				path,
-			]),
-			lix.execute("SELECT 1 FROM lix_file WHERE lower(path) = lower($1)", [
-				path,
-			]),
-		]);
-		if (dirHit.rows.length === 0 && fileHit.rows.length === 0) return path;
+		const hit = await lix.execute(
+			"SELECT 1 FROM lix_directory WHERE lower(path) = lower($1) UNION ALL SELECT 1 FROM lix_file WHERE lower(path) = lower($1) LIMIT 1",
+			[path],
+		);
+		if (hit.rows.length === 0) return path;
 		suffix = suffix === null ? 1 : suffix + 1;
 	}
 	throw new Error("Unable to find a free file name.");

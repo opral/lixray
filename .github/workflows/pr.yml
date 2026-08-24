@@ -175,7 +175,6 @@ jobs:
 
   web-image:
     name: Web image
-    if: github.event.pull_request.draft != true
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 25
     permissions:
@@ -538,7 +537,8 @@ jobs:
           if test "$DRAFT" = "true"; then
             require_success "Change selection" "$CHANGES_RESULT"
             require_success "Server image" "$SERVER_IMAGE_RESULT"
-            echo "Draft pull request: full validation lanes skipped; preview server image is ready."
+            require_success "Web image" "$WEB_IMAGE_RESULT"
+            echo "Draft pull request: full validation lanes skipped; preview images are ready."
             exit 0
           fi
 
@@ -567,6 +567,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       preview_url: ${{ steps.preview.outputs.preview_url }}
+      deployment_id: ${{ steps.promote.outputs.web_deployment_id }}
     permissions:
       contents: read
       id-token: write
@@ -655,6 +656,7 @@ jobs:
         run: .github/scripts/manage-railway-preview.sh ensure
 
       - name: Deploy tested images to preview
+        id: promote
         if: steps.credentials.outputs.available == 'true'
         shell: bash
         env:
@@ -672,6 +674,53 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: .github/scripts/manage-railway-preview.sh url
+
+      - name: Verify preview server protocol
+        if: steps.credentials.outputs.available == 'true'
+        shell: bash
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
+        run: |
+          response_body="$(mktemp)"
+          status="$(
+            curl \
+              --silent \
+              --show-error \
+              --output "$response_body" \
+              --write-out '%{http_code}' \
+              --header 'Authorization: Bearer lixray-demo' \
+              --header 'Lix-Session-Id: 0000000000000000000000000000000000000000000000000000000000000000' \
+              "$PREVIEW_URL/@acme/launch-q3/lix/v1/sync/pull?after=18446744073709551615&limit=512"
+          )"
+          if test "$status" != 410; then
+            echo "Preview sync protocol returned HTTP $status; expected 410." >&2
+            jq . "$response_body" >&2 || sed -n '1,80p' "$response_body" >&2
+            exit 1
+          fi
+          jq -e '.error.code == "LIX_ERROR_PROTOCOL_SESSION_GONE"' "$response_body"
+
+      - name: Print bounded preview server errors
+        if: failure() && steps.credentials.outputs.available == 'true'
+        shell: bash
+        run: |
+          # Repository migration is manager-owned and may outlive the first
+          # request's admission deadline. Poll this exact deployment until its
+          # terminal migration/open event is ingested, while keeping the final
+          # workflow output bounded.
+          logs_file="$(mktemp)"
+          for attempt in $(seq 1 10); do
+            sleep 30
+            railway logs \
+              "${{ steps.promote.outputs.server_deployment_id }}" \
+              --project "$RAILWAY_PROJECT_ID" \
+              --environment "${{ steps.environment.outputs.environment_id }}" \
+              --service "$RAILWAY_SERVER_SERVICE" \
+              --lines 250 > "$logs_file" || true
+            if grep -Eq 'migrated Lix repository format|failed to open lix runtime' "$logs_file"; then
+              break
+            fi
+          done
+          sed -n '1,250p' "$logs_file"
 
       - name: Report preview statuses
         if: steps.credentials.outputs.available == 'true'
@@ -701,7 +750,10 @@ jobs:
 
   publish-preview:
     name: Publish preview link
-    if: needs.deploy-preview.outputs.preview_url != ''
+    if: >-
+      always() &&
+      needs.deploy-preview.result == 'success' &&
+      needs.deploy-preview.outputs.preview_url != ''
     needs:
       - deploy-preview
     runs-on: ubuntu-latest
@@ -716,3 +768,54 @@ jobs:
     steps:
       - name: Publish GitHub deployment
         run: echo "Preview is available at ${{ needs.deploy-preview.outputs.preview_url }}"
+
+  preview-e2e:
+    name: Preview sync E2E
+    if: >-
+      always() &&
+      needs.deploy-preview.result == 'success' &&
+      needs.deploy-preview.outputs.preview_url != '' &&
+      needs.deploy-preview.outputs.deployment_id != ''
+    needs:
+      - deploy-preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up web toolchain
+        uses: ./.github/actions/setup-web
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        # This job drives an already-built remote preview. Running the repository
+        # postinstall here rebuilds the vendored Lix WASM SDK and can consume the
+        # entire job timeout without adding anything Playwright needs.
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Install Playwright browser
+        run: pnpm --dir web-app exec playwright install --with-deps chromium
+
+      - name: Test deployed two-client sync
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ needs.deploy-preview.outputs.preview_url }}
+          PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID: ${{ needs.deploy-preview.outputs.deployment_id }}
+          PLAYWRIGHT_SYNC_PREVIEW: "1"
+        run: pnpm --dir web-app exec playwright test tests/e2e/sync-preview.spec.ts
+
+      - name: Upload Playwright profile and failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-sync-playwright
+          path: web-app/test-results
+          if-no-files-found: ignore
+          retention-days: 7

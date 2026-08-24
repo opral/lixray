@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use lix_sdk::telemetry::{
-    TelemetrySink, TelemetrySpanEnd, TelemetrySpanEnterGuard, TelemetrySpanHandle,
-    TelemetrySpanKind, TelemetrySpanStart, TelemetryValue, TracingTelemetrySink,
+    OpenTelemetryTracingSink, SpanContext, TelemetrySink, TelemetrySpanClass,
+    TelemetrySpanDescriptor, TelemetrySpanEnd, TelemetrySpanEnterGuard, TelemetrySpanHandle,
+    TelemetrySpanStart, TelemetryValue,
 };
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
@@ -243,10 +244,13 @@ pub fn init() -> (Option<SdkTracerProvider>, InFlightSqlRegistry) {
             None
         }
     };
-    let telemetry_layer = provider.as_ref().map(|provider| {
-        let tracer = provider.tracer("lix-server");
-        tracing_opentelemetry::layer().with_tracer(tracer)
-    });
+    // Lix's OpenTelemetryTracingSink requires the tracing subscriber to assign
+    // real OpenTelemetry span contexts even when remote export is disabled.
+    let tracing_provider = provider
+        .clone()
+        .unwrap_or_else(|| SdkTracerProvider::builder().build());
+    let tracer = tracing_provider.tracer("lix-server");
+    let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
     let span_events = if perf_span_events_enabled() {
         FmtSpan::CLOSE
     } else {
@@ -355,11 +359,11 @@ pub trait RepositoryOpenedCapture: Send + Sync {
     fn capture(&self, event: RepositoryOpenedEvent);
 }
 
-/// Host sink: SQL spans stay on the tracing/OTLP path; `lix.opened` becomes
+/// Host sink: Lix spans stay on the tracing/OTLP path; `lix.repository.opened` becomes
 /// the product event `repository_opened` when the session has an identified person.
 #[derive(Clone)]
 pub struct HostTelemetrySink {
-    tracing: TracingTelemetrySink,
+    tracing: OpenTelemetryTracingSink,
     product: Option<Arc<dyn RepositoryOpenedCapture>>,
     source: &'static str,
 }
@@ -367,7 +371,7 @@ pub struct HostTelemetrySink {
 impl HostTelemetrySink {
     pub fn from_env() -> Self {
         Self {
-            tracing: TracingTelemetrySink::new(),
+            tracing: OpenTelemetryTracingSink::new(),
             product: product_capture_from_env(),
             source: "server",
         }
@@ -375,14 +379,14 @@ impl HostTelemetrySink {
 
     pub fn with_product_capture(product: Arc<dyn RepositoryOpenedCapture>) -> Self {
         Self {
-            tracing: TracingTelemetrySink::new(),
+            tracing: OpenTelemetryTracingSink::new(),
             product: Some(product),
             source: "server",
         }
     }
 
     fn repository_opened(&self, start: &TelemetrySpanStart) -> Option<RepositoryOpenedEvent> {
-        if start.kind != TelemetrySpanKind::LixOpened && start.name != "lix.opened" {
+        if start.class != TelemetrySpanClass::Lifecycle || start.name != "lix.repository.opened" {
             return None;
         }
         let lix_id = string_attribute(start, "lix.id")?.to_owned();
@@ -402,23 +406,19 @@ impl HostTelemetrySink {
 }
 
 impl TelemetrySink for HostTelemetrySink {
-    fn enabled(&self, kind: TelemetrySpanKind) -> bool {
-        match kind {
-            TelemetrySpanKind::LixOpened => self.product.is_some() || self.tracing.enabled(kind),
-            TelemetrySpanKind::SqlQuery
-            | TelemetrySpanKind::SqlBatch
-            | TelemetrySpanKind::SqlCoherentReadBatch => self.tracing.enabled(kind),
+    fn enabled(&self, descriptor: &TelemetrySpanDescriptor) -> bool {
+        if descriptor.class() == TelemetrySpanClass::Lifecycle
+            && descriptor.name() == "lix.repository.opened"
+        {
+            self.product.is_some() || self.tracing.enabled(descriptor)
+        } else {
+            self.tracing.enabled(descriptor)
         }
     }
 
     fn start_span(&self, start: TelemetrySpanStart) -> Box<dyn TelemetrySpanHandle> {
-        let tracing = self.tracing.start_span(TelemetrySpanStart {
-            kind: start.kind,
-            name: start.name,
-            started_at_unix_ms: start.started_at_unix_ms,
-            attributes: start.attributes.clone(),
-        });
-        if start.kind == TelemetrySpanKind::LixOpened {
+        let tracing = self.tracing.start_span(start.clone());
+        if start.class == TelemetrySpanClass::Lifecycle && start.name == "lix.repository.opened" {
             if let Some(product) = self.product.clone() {
                 return Box::new(HostOpenedSpan {
                     tracing,
@@ -438,6 +438,10 @@ struct HostOpenedSpan {
 }
 
 impl TelemetrySpanHandle for HostOpenedSpan {
+    fn span_context(&self) -> &SpanContext {
+        self.tracing.span_context()
+    }
+
     fn enter(&self) -> Box<dyn TelemetrySpanEnterGuard + '_> {
         self.tracing.enter()
     }
@@ -598,6 +602,17 @@ mod tests {
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn install_test_otel() -> (
+        tracing::subscriber::DefaultGuard,
+        opentelemetry_sdk::trace::SdkTracerProvider,
+    ) {
+        let provider = SdkTracerProvider::builder().build();
+        let tracer = provider.tracer("lix-server-test");
+        let subscriber =
+            tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
+        (tracing::subscriber::set_default(subscriber), provider)
     }
 
     #[test]
@@ -862,6 +877,7 @@ mod tests {
 
     #[test]
     fn lix_opened_span_captures_one_repository_opened() {
+        let (_subscriber, _provider) = install_test_otel();
         let captured = Arc::new(Mutex::new(Vec::new()));
         let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
             Arc::new(RecordingCapture(Arc::clone(&captured))),
@@ -885,6 +901,7 @@ mod tests {
 
     #[tokio::test]
     async fn protocol_root_open_does_not_capture() {
+        let (_subscriber, _provider) = install_test_otel();
         let captured = Arc::new(Mutex::new(Vec::new()));
         let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
             Arc::new(RecordingCapture(Arc::clone(&captured))),
@@ -902,6 +919,7 @@ mod tests {
 
     #[test]
     fn cache_admit_anonymous_bind_does_not_capture() {
+        let (_subscriber, _provider) = install_test_otel();
         let captured = Arc::new(Mutex::new(Vec::new()));
         let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
             Arc::new(RecordingCapture(Arc::clone(&captured))),

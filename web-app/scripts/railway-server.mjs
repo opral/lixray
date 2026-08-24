@@ -1,8 +1,12 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve } from "node:path";
 import { Readable } from "node:stream";
+
+const IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const REVALIDATED_STATIC_CACHE_CONTROL = "public, max-age=0, must-revalidate";
+const HTML_CACHE_CONTROL = "private, no-cache";
 
 /**
  * The Railway entry's HTTP server, extracted so request handling is
@@ -12,7 +16,21 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 	return createServer(async (incoming, outgoing) => {
 		let upstreamFailure = false;
 		try {
-			if (await serveStatic(clientRoot, incoming, outgoing)) return;
+			if (await serveStatic(clientRoot, incoming, outgoing, env)) return;
+			const requestAbort = new AbortController();
+			const abortDisconnectedRequest = () => requestAbort.abort();
+			const abortPrematureResponseClose = () => {
+				if (!outgoing.writableFinished) requestAbort.abort();
+				cleanupCancellation();
+			};
+			const cleanupCancellation = () => {
+				incoming.off("aborted", abortDisconnectedRequest);
+				outgoing.off("close", abortPrematureResponseClose);
+				outgoing.off("finish", cleanupCancellation);
+			};
+			incoming.once("aborted", abortDisconnectedRequest);
+			outgoing.once("close", abortPrematureResponseClose);
+			outgoing.once("finish", cleanupCancellation);
 
 			const requestUrl = new URL(
 				incoming.url ?? "/",
@@ -27,6 +45,7 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 						? undefined
 						: Readable.toWeb(incoming),
 				duplex: "half",
+				signal: requestAbort.signal,
 			});
 			let response;
 			try {
@@ -40,8 +59,22 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 			for (const [name, value] of response.headers) {
 				outgoing.setHeader(name, value);
 			}
+			if (isHtmlResponse(response)) {
+				// Documents select the fingerprinted asset URLs for a release. Always
+				// revalidate them so a new deployment cannot keep loading an old bundle.
+				// Preserve no-store when an application route requires the stricter policy.
+				if (!hasCacheDirective(response, "no-store")) {
+					outgoing.setHeader("cache-control", HTML_CACHE_CONTROL);
+				}
+			}
 			if (!response.body || method === "HEAD") {
 				outgoing.end();
+				return;
+			}
+			if (isHtmlResponse(response) && isDemoMode(env)) {
+				const body = injectRuntimeConfig(await response.text());
+				outgoing.setHeader("content-length", Buffer.byteLength(body));
+				outgoing.end(body);
 				return;
 			}
 			const body = Readable.fromWeb(response.body);
@@ -72,7 +105,7 @@ function isUpstreamFetchFailure(error) {
 	return error instanceof TypeError && error.message === "fetch failed";
 }
 
-async function serveStatic(clientRoot, request, response) {
+async function serveStatic(clientRoot, request, response, env) {
 	if (request.method !== "GET" && request.method !== "HEAD") return false;
 	const pathname = new URL(
 		request.url ?? "/",
@@ -87,14 +120,59 @@ async function serveStatic(clientRoot, request, response) {
 		if (!file.isFile()) return false;
 		response.statusCode = 200;
 		response.setHeader("content-type", contentType(filePath));
-		response.setHeader("content-length", file.size);
-		if (request.method === "HEAD") response.end();
-		else createReadStream(filePath).pipe(response);
+		response.setHeader("cache-control", staticCacheControl(pathname, filePath));
+		if (extname(filePath) === ".html" && isDemoMode(env)) {
+			const body = injectRuntimeConfig(await readFile(filePath, "utf8"));
+			response.setHeader("content-length", Buffer.byteLength(body));
+			if (request.method === "HEAD") response.end();
+			else response.end(body);
+		} else {
+			response.setHeader("content-length", file.size);
+			if (request.method === "HEAD") response.end();
+			else createReadStream(filePath).pipe(response);
+		}
 		return true;
 	} catch (error) {
 		if (error?.code === "ENOENT") return false;
 		throw error;
 	}
+}
+
+function hasCacheDirective(response, directive) {
+	return (response.headers.get("cache-control") ?? "")
+		.split(",")
+		.some((value) => value.trim().toLowerCase() === directive);
+}
+
+function staticCacheControl(pathname, filePath) {
+	if (extname(filePath) === ".html") return HTML_CACHE_CONTROL;
+	// Vite's build assets end in an eight-character content fingerprint. Only
+	// those URLs are immutable: if Lix changes, the WASM bytes and URL change
+	// together. Root/public assets and unexpected names must be revalidated.
+	if (/^\/assets\/.+-[A-Za-z0-9_-]{8}\.[^/]+$/.test(pathname)) {
+		return IMMUTABLE_ASSET_CACHE_CONTROL;
+	}
+	return REVALIDATED_STATIC_CACHE_CONTROL;
+}
+
+function isHtmlResponse(response) {
+	return response.headers.get("content-type")?.includes("text/html") ?? false;
+}
+
+function isDemoMode(env) {
+	return (
+		env.LIXRAY_DEMO === "1" ||
+		/^(lixray-pr-[0-9]+|pr-[a-z0-9]+-[0-9]+)$/.test(
+			env.RAILWAY_ENVIRONMENT_NAME ?? "",
+		)
+	);
+}
+
+function injectRuntimeConfig(html) {
+	const marker = '<meta name="lixray-demo" content="1">';
+	return html.includes(marker)
+		? html
+		: html.replace(/<head([^>]*)>/i, `$&${marker}`);
 }
 
 function executionContext() {
@@ -118,6 +196,7 @@ function contentType(path) {
 			".json": "application/json; charset=utf-8",
 			".png": "image/png",
 			".svg": "image/svg+xml",
+			".wasm": "application/wasm",
 			".webmanifest": "application/manifest+json",
 		}[extname(path)] ?? "application/octet-stream"
 	);

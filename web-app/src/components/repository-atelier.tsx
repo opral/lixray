@@ -66,7 +66,6 @@ import {
 	LIXRAY_PEOPLE_EXTENSION_ID,
 	LIXRAY_SETTINGS_EXTENSION_ID,
 	createLixrayRepositoryExtensions,
-	emptyRepositoryOpeningUiState,
 	lixrayHomeDirState,
 } from "~/components/repository-home/host-extensions";
 import type {
@@ -75,7 +74,11 @@ import type {
 } from "~/components/repository-home/people-view";
 import { isTeamInviteToken } from "~/lib/team-invite";
 import { EntryKind } from "~/lib/entry-kind";
-import { repositoryHasNoFiles } from "~/components/repository-home/lix-data";
+import {
+	markRepositoryOpenPerformance,
+	REPOSITORY_OPEN_MARKS,
+	resetRepositoryOpenPerformance,
+} from "~/lib/repository-open-performance";
 
 interface RepositoryAtelierProps {
 	repositoryId: string;
@@ -180,9 +183,6 @@ export function RepositoryAtelier({
 	const branchIdRef = useRef(branchId);
 	const routeBranchSwitchRef = useRef(0);
 	const suppressBranchNavigationRef = useRef(false);
-	// Instance whose session state was seeded with the Getting started tab;
-	// the first root-URL sync must not clobber that seed by forcing Home.
-	const emptyRepositorySeededRef = useRef<AtelierInstance | null>(null);
 	const eventHandlerRef = useRef<(event: AtelierEvent) => void>(
 		() => undefined,
 	);
@@ -833,6 +833,7 @@ export function RepositoryAtelier({
 	useEffect(() => {
 		let disposed = false;
 		let activeLix: RepositoryLixSession | null = null;
+		resetRepositoryOpenPerformance();
 		setInstance(null);
 		setBranchSession(null);
 		setRepositoryDefaultBranchId(null);
@@ -861,6 +862,7 @@ export function RepositoryAtelier({
 					return;
 				}
 				activeLix = session;
+				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
 				activeLixRef.current = session;
 				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
 
@@ -895,13 +897,6 @@ export function RepositoryAtelier({
 					},
 				});
 				setBranchSession(repositoryBranchSession);
-				// An empty repository defaults to the Getting started tab (12f),
-				// seeded into the first-visit session state rather than opened
-				// imperatively — views.open() races the shell's mount/restore.
-				// This query is part of boot. If it cannot answer, the repository must
-				// show the real error instead of silently taking the non-empty path.
-				const startsEmpty = await repositoryHasNoFiles(session.lix);
-				if (disposed) return;
 				const atelierInstance = createAtelier({
 					lix: session.lix,
 					readOnly: isReadOnly,
@@ -936,9 +931,6 @@ export function RepositoryAtelier({
 					sessionStateStore: createRepositorySessionStateStore({
 						userId: atelierUserId,
 						repositoryId,
-						...(startsEmpty
-							? { initializeSnapshot: emptyRepositoryOpeningUiState }
-							: {}),
 					}),
 					preferencesStore: createRepositoryPreferencesStore({
 						userId: atelierUserId,
@@ -950,9 +942,7 @@ export function RepositoryAtelier({
 					}),
 					onEvent: (event) => eventHandlerRef.current(event),
 				});
-				if (startsEmpty) {
-					emptyRepositorySeededRef.current = atelierInstance;
-				}
+				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.atelierReady);
 				setInstance(atelierInstance);
 				const actualBranchId = session.activeBranchSnapshot();
 				if (
@@ -1066,14 +1056,6 @@ export function RepositoryAtelier({
 		if (!instance) return;
 		const repositoryRoot = `/@${namespace}/${repositorySlug}`;
 		if (pathname !== repositoryRoot) return;
-		// The first sync of a seeded empty repository keeps the Getting started
-		// tab active instead of forcing Home over it (12f). Later returns to
-		// the root URL activate Home as usual.
-		if (emptyRepositorySeededRef.current === instance) {
-			emptyRepositorySeededRef.current = null;
-			markRouteSynced();
-			return;
-		}
 		// The state reset matters as much as the activation: Home may be
 		// drilled into a folder (flow A), and the root URL means the root
 		// listing.

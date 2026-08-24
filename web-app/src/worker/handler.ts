@@ -84,6 +84,7 @@ export interface WorkerEnv {
 	LIXRAY_JWKS_CACHE_PATH?: string;
 	LIXRAY_RELEASE_ID?: string;
 	RAILWAY_ENVIRONMENT_NAME?: string;
+	RAILWAY_DEPLOYMENT_ID?: string;
 	RAILWAY_GIT_COMMIT_SHA?: string;
 }
 
@@ -217,7 +218,16 @@ export async function handleRequest(
 	const url = new URL(request.url);
 
 	if (request.method === "GET" && url.pathname === "/healthz") {
-		return json({ ok: true, service: "lixray" });
+		const deploymentId = env.RAILWAY_DEPLOYMENT_ID?.trim() || null;
+		return json(
+			{ ok: true, service: "lixray", deploymentId },
+			{
+				headers: {
+					"cache-control": "no-store",
+					...(deploymentId ? { "x-railway-deployment-id": deploymentId } : {}),
+				},
+			},
+		);
 	}
 
 	if (url.pathname === PROD_DEV_AUTH_PATH) {
@@ -1331,6 +1341,7 @@ function isPublicReadRemoteLixRequest(
 	if (endpoint === "session") return request.method === "DELETE";
 	if (endpoint === "file") return request.method === "GET";
 	if (endpoint === "published-directory") return request.method === "GET";
+	if (isPublicSyncReadRequest(request, endpoint)) return true;
 	return (
 		request.method === "POST" &&
 		["execute", "execute-batch", "observe", "observe/multiplex"].includes(
@@ -1406,6 +1417,13 @@ LIMIT 1001`,
 	}
 }
 
+function isPublicSyncReadRequest(request: Request, endpoint: string): boolean {
+	return (
+		request.method === "GET" &&
+		["sync/pull", "sync/history", "sync/blob", "sync/chunk"].includes(endpoint)
+	);
+}
+
 /**
  * The canonical Lix protocol has no read-only mode, so the service
  * is the authorization boundary for public readers: every SQL string in a
@@ -1421,7 +1439,8 @@ async function rejectPublicMutation(
 	if (
 		!endpoint ||
 		endpoint === "session" ||
-		(endpoint === "file" && request.method === "GET")
+		(endpoint === "file" && request.method === "GET") ||
+		isPublicSyncReadRequest(request, endpoint)
 	) {
 		return null;
 	}

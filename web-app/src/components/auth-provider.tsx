@@ -132,7 +132,13 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 						...authErrorTelemetryProperties(result.error),
 					});
 				}
-				setSession(result.kind === "authenticated" ? result.session : null);
+				setSession(
+					result.kind === "authenticated"
+						? result.session
+						: result.kind === "validation_failed"
+							? (result.session ?? null)
+							: null,
+				);
 				setIsLoaded(true);
 			})
 			.catch((error: unknown) => {

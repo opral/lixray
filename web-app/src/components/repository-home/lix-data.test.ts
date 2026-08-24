@@ -3,16 +3,18 @@ import test from "node:test";
 import type { Lix } from "@lix-js/sdk";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import {
+	CHANGE_SUMMARY_SQL,
+	CHECKPOINT_SUMMARY_SQL,
 	canonicalDirectoryPath,
 	createRepositoryFile,
 	createRepositoryFolder,
 	importDroppedFiles,
+	initialRepositoryTreeIsEmpty,
 	listDirectory,
 	persistedDirectoryPath,
 	resolveRepositoryHref,
 	type RepositoryTree,
-	repositoryHasNoFiles,
-	WORKING_DIFF_COUNT_SQL,
+	preserveObservedRowsAfterError,
 } from "./lix-data.ts";
 
 const tree: RepositoryTree = {
@@ -54,11 +56,43 @@ const tree: RepositoryTree = {
 	],
 };
 
-void test("queries the latest Lix working-diff table function", () => {
-	assert.equal(
-		WORKING_DIFF_COUNT_SQL,
-		"SELECT count(*) AS n FROM lix_working_diff()",
+void test("decides empty routing only from a complete initial tree", () => {
+	assert.equal(initialRepositoryTreeIsEmpty(null), null);
+	assert.equal(initialRepositoryTreeIsEmpty(tree), false);
+	assert.equal(initialRepositoryTreeIsEmpty({ dirs: [], files: [] }), true);
+});
+
+void test("keeps checkpoint dates bounded while returning the total count", () => {
+	assert.match(CHECKPOINT_SUMMARY_SQL, /count\(\*\) over \(\) AS total_count/i);
+	assert.match(CHECKPOINT_SUMMARY_SQL, /LIMIT 10$/i);
+});
+
+void test("derives change totals and dates from one bounded daily query", () => {
+	assert.match(
+		CHANGE_SUMMARY_SQL,
+		/sum\(day_count\) over \(\) AS total_count/i,
 	);
+	assert.match(
+		CHANGE_SUMMARY_SQL,
+		/min\(day_created_at\) over \(\) AS created_at/i,
+	);
+	assert.match(CHANGE_SUMMARY_SQL, /LIMIT 10$/i);
+});
+
+void test("observer failures expose first-frame errors without inventing rows", () => {
+	const error = new Error("observe failed");
+	assert.deepEqual(
+		preserveObservedRowsAfterError({ rows: null, error: null }, error),
+		{ rows: null, error },
+	);
+});
+
+void test("observer failures after a frame preserve its rows", () => {
+	const rows = [{ value: "cached" }];
+	const error = new Error("observe failed");
+	const resolved = preserveObservedRowsAfterError({ rows, error: null }, error);
+	assert.equal(resolved.rows, rows);
+	assert.equal(resolved.error, error);
 });
 
 void test("lists directory entries from their separate surfaces", () => {
@@ -157,28 +191,6 @@ void test("canonicalizes directory paths and nested relative links", () => {
 	assert.equal(resolveRepositoryHref("/docs", "../README.md"), "/README.md");
 });
 
-void test("repositoryHasNoFiles reports an empty repository", async () => {
-	const lix = {
-		execute: async () => ({ rows: [] }),
-	} as never;
-
-	assert.equal(await repositoryHasNoFiles(lix), true);
-});
-
-void test("repositoryHasNoFiles preserves SQL failures for boot error UI", async () => {
-	const failure = new Error("repository query failed");
-	const lix = {
-		execute: async () => {
-			throw failure;
-		},
-	} as never;
-
-	await assert.rejects(
-		repositoryHasNoFiles(lix),
-		(caught) => caught === failure,
-	);
-});
-
 void test("creates a directory with an exact persisted directory path", async () => {
 	const calls: Array<{ sql: string; params: ReadonlyArray<unknown> }> = [];
 	const lix = {
@@ -195,17 +207,31 @@ void test("creates a directory with an exact persisted directory path", async ()
 	});
 });
 
-void test("checks the opposite surface when choosing a directory path", async () => {
+void test("checks both path surfaces once per candidate", async () => {
+	const directoryPaths = new Set(["/new-folder"]);
+	const filePaths = new Set(["/new-folder-1"]);
+	const checkedPaths: string[] = [];
 	const lix = {
 		execute: async (sql: string, params: ReadonlyArray<unknown>) => {
-			if (sql.includes("FROM lix_file") && params[0] === "/new-folder") {
-				return { rows: [{}] };
+			if (sql.startsWith("SELECT 1 FROM lix_directory")) {
+				assert.match(sql, /UNION ALL SELECT 1 FROM lix_file/);
+				assert.match(sql, /LIMIT 1$/);
+				const path = String(params[0]);
+				checkedPaths.push(path);
+				return {
+					rows: directoryPaths.has(path) || filePaths.has(path) ? [{}] : [],
+				};
 			}
 			return { rows: [] };
 		},
 	} as unknown as Lix;
 
-	assert.equal(await createRepositoryFolder(lix, "/"), "/new-folder-1");
+	assert.equal(await createRepositoryFolder(lix, "/"), "/new-folder-2");
+	assert.deepEqual(checkedPaths, [
+		"/new-folder",
+		"/new-folder-1",
+		"/new-folder-2",
+	]);
 });
 
 void test("creates nested files and folders with canonical separators", async () => {

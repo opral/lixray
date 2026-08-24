@@ -24,6 +24,13 @@ const releaseDist = join(
 );
 const sdkRoot = join(workspaceRoot, "vendor", "lix", "packages", "js-sdk");
 const sdkDist = join(sdkRoot, "dist");
+const opfsStorageRoot = join(
+	workspaceRoot,
+	"vendor",
+	"lix",
+	"packages",
+	"storage-opfs",
+);
 const tsc = join(
 	workspaceRoot,
 	"web-app",
@@ -97,6 +104,8 @@ const compiled = spawnSync(
 );
 if (compiled.error) throw compiled.error;
 if (compiled.status !== 0) process.exit(compiled.status ?? 1);
+
+run("pnpm", ["--dir", opfsStorageRoot, "build"], toolchainEnv);
 
 await rm(join(sdkDist, "bundled-plugins"), { recursive: true, force: true });
 run(

@@ -37,10 +37,15 @@ import {
 	type LixConnectionPromptInput,
 } from "~/lib/lix-connection-prompt";
 import {
+	markRepositoryOpenPerformance,
+	REPOSITORY_OPEN_MARKS,
+} from "~/lib/repository-open-performance";
+import {
 	createRepositoryFile,
 	createRepositoryFolder,
 	formatUpdatedAt,
 	importDroppedFiles,
+	initialRepositoryTreeIsEmpty,
 	listDirectory,
 	persistedDirectoryPath,
 	resolveRepositoryHref,
@@ -80,7 +85,7 @@ type DirectoryViewProps = {
 	readonly onOpenPeople?: () => void;
 	readonly onOpenSettings?: () => void;
 	readonly onOpenSqlExplorer?: () => void;
-	readonly onOpenReview?: () => void;
+	readonly onRepositoryEmpty?: () => void;
 };
 
 const newTabFromMouseEvent = (event: ReactMouseEvent): boolean =>
@@ -107,18 +112,24 @@ export function DirectoryView({
 	onOpenPeople,
 	onOpenSettings,
 	onOpenSqlExplorer,
-	onOpenReview,
+	onRepositoryEmpty,
 }: DirectoryViewProps) {
-	const tree = useRepositoryTree(lix);
-	const controlPlaneData = useRepositoryControlPlaneData(
-		lix,
-		isHome && dirPath === "/",
+	const { tree, error: treeError } = useRepositoryTree(lix, isActive);
+	const detailsEnabled = useAfterInitialIdle(
+		isActive && isHome && dirPath === "/" && tree !== null,
 	);
+	const controlPlaneData = useRepositoryControlPlaneData(lix, detailsEnabled);
 	const listing = useMemo(
 		() => (tree ? listDirectory(tree, dirPath, { showHiddenFiles }) : null),
 		[tree, dirPath, showHiddenFiles],
 	);
-	const readme = useFileMarkdown(lix, listing?.readmePath ?? null);
+	const readme = useFileMarkdown(
+		lix,
+		listing?.readmePath ?? null,
+		detailsEnabled,
+	);
+	const initialRepositoryTreeHandledRef = useRef(false);
+	const repositoryTreeMarkedRef = useRef(false);
 	const [actionError, setActionError] = useState<string | null>(null);
 	const { isDropTarget, dragHandlers } = useImportDrop({
 		lix,
@@ -140,6 +151,27 @@ export function DirectoryView({
 		},
 		[dirPath, lix, onOpenFile],
 	);
+
+	useEffect(() => {
+		if (!isActive || !isHome || initialRepositoryTreeHandledRef.current) return;
+		const isEmpty = initialRepositoryTreeIsEmpty(tree);
+		if (isEmpty === null) return;
+		initialRepositoryTreeHandledRef.current = true;
+		if (isEmpty) onRepositoryEmpty?.();
+	}, [isActive, isHome, onRepositoryEmpty, tree]);
+
+	useEffect(() => {
+		if (
+			!isActive ||
+			!isHome ||
+			tree === null ||
+			repositoryTreeMarkedRef.current
+		) {
+			return;
+		}
+		repositoryTreeMarkedRef.current = true;
+		markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.treeReady);
+	}, [isActive, isHome, tree]);
 
 	useEffect(() => {
 		if (!isActive || readOnly) return;
@@ -173,6 +205,16 @@ export function DirectoryView({
 	}, [dirPath, isActive, lix, onOpenFile, readOnly]);
 
 	if (!tree || !listing) {
+		if (treeError) {
+			return (
+				<div
+					role="alert"
+					className="grid h-full w-full place-content-center px-6 text-center text-[13px] text-text-secondary"
+				>
+					Unable to load repository files. Reload to try again.
+				</div>
+			);
+		}
 		return <div className="h-full w-full" aria-busy="true" />;
 	}
 
@@ -206,14 +248,14 @@ export function DirectoryView({
 						) : null}
 						<span className="flex-1" />
 						<div className="flex flex-wrap items-center justify-end gap-2 @max-[520px]:w-full @max-[520px]:justify-start">
-							{isHome && dirPath === "/" && hasAgentConnected ? (
+							{detailsEnabled && hasAgentConnected ? (
 								<ConnectAgentButton
 									connection={connection}
 									hasAgentConnected={hasAgentConnected}
 									disabled={readOnly}
 								/>
 							) : null}
-							{isHome && dirPath === "/" && onOpenPeople ? (
+							{detailsEnabled && onOpenPeople ? (
 								<InviteControl
 									teamApi={teamApi}
 									onOpenPeople={onOpenPeople}
@@ -334,7 +376,6 @@ export function DirectoryView({
 						fileCount={tree.files.length}
 						data={controlPlaneData}
 						onOpenSettings={onOpenSettings}
-						onOpenReview={onOpenReview}
 						onOpenSqlExplorer={onOpenSqlExplorer}
 					/>
 				) : null}
@@ -343,19 +384,52 @@ export function DirectoryView({
 	);
 }
 
+function useAfterInitialIdle(enabled: boolean): boolean {
+	const [ready, setReady] = useState(false);
+	useEffect(() => {
+		if (!enabled) {
+			setReady(false);
+			return;
+		}
+		let idleCallback = 0;
+		let timeout = 0;
+		if (typeof requestAnimationFrame !== "function") {
+			timeout = window.setTimeout(() => setReady(true), 0);
+			return () => window.clearTimeout(timeout);
+		}
+		let secondFrame = 0;
+		const firstFrame = requestAnimationFrame(() => {
+			secondFrame = requestAnimationFrame(() => {
+				if (typeof requestIdleCallback === "function") {
+					idleCallback = requestIdleCallback(() => setReady(true), {
+						timeout: 1_500,
+					});
+				} else {
+					timeout = window.setTimeout(() => setReady(true), 0);
+				}
+			});
+		});
+		return () => {
+			cancelAnimationFrame(firstFrame);
+			cancelAnimationFrame(secondFrame);
+			if (idleCallback) cancelIdleCallback(idleCallback);
+			if (timeout) window.clearTimeout(timeout);
+		};
+	}, [enabled]);
+	return enabled && ready;
+}
+
 function RepositoryControlPlaneRail({
 	visibility,
 	fileCount,
 	data,
 	onOpenSettings,
-	onOpenReview,
 	onOpenSqlExplorer,
 }: {
 	readonly visibility: "private" | "public";
 	readonly fileCount: number;
 	readonly data: RepositoryControlPlaneData | null;
 	readonly onOpenSettings?: () => void;
-	readonly onOpenReview?: () => void;
 	readonly onOpenSqlExplorer?: () => void;
 }) {
 	return (
@@ -381,7 +455,15 @@ function RepositoryControlPlaneRail({
 
 			<section className="border-b border-border-panel py-7 @max-[1100px]:border-t-0">
 				<RailHeading>Changes</RailHeading>
-				<ChangesSummary data={data} onOpenReview={onOpenReview} />
+				{data?.changeHistoryUnavailable ? (
+					<p
+						role="status"
+						className="m-0 mt-2 text-[11.5px] leading-4 text-text-tertiary"
+					>
+						Some change history is unavailable.
+					</p>
+				) : null}
+				<ChangesSummary data={data} />
 			</section>
 
 			<section className="border-b border-border-panel py-7">
@@ -406,53 +488,31 @@ function RailHeading({ children }: { readonly children: ReactNode }) {
 
 function ChangesSummary({
 	data,
-	onOpenReview,
 }: {
 	readonly data: RepositoryControlPlaneData | null;
-	readonly onOpenReview?: () => void;
 }) {
 	if (!data) {
 		return (
 			<div className="mt-3 h-[118px] animate-pulse rounded-lg bg-bg-hover" />
 		);
 	}
-	const hasCheckpoint = data.checkpointDates.length > 0;
-	const changeCount = hasCheckpoint
-		? data.workingChangeCount
-		: data.totalChangeCount;
-
-	return (
-		<div className="mt-2.5">
-			<div className="flex items-baseline gap-1.5">
-				<strong className="text-[24px] leading-none font-semibold tracking-[-0.04em] text-text-primary">
-					{formatCompactCount(changeCount)}
-				</strong>
-				<span className="text-[11.5px] text-text-tertiary">
-					{hasCheckpoint ? "since last checkpoint" : "changes so far"}
-				</span>
-			</div>
-			<ChangeBars data={data} />
-			{changeCount > 0 && onOpenReview ? (
-				<button
-					type="button"
-					onClick={onOpenReview}
-					className="mt-3 cursor-pointer text-[12px] font-semibold text-[#c2410c] hover:text-[#9a3412] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
-				>
-					Review changes →
-				</button>
-			) : (
-				<p className="m-0 mt-3 text-[11.5px] leading-4 text-text-quaternary">
-					Edits appear here as they happen.
-				</p>
-			)}
-		</div>
-	);
+	return <ChangeBars data={data} />;
 }
 
 function ChangeBars({ data }: { readonly data: RepositoryControlPlaneData }) {
 	const days = data.changeDays;
+	if (days === null) {
+		return (
+			<div
+				className="mt-4 h-11 border-b border-[#ded5c8] text-center text-[18px] leading-10 text-text-quaternary"
+				aria-hidden="true"
+			>
+				—
+			</div>
+		);
+	}
 	const maxCount = Math.max(1, ...days.map((day) => day.count));
-	const latestCheckpointDay = data.checkpointDates[0]?.slice(0, 10) ?? null;
+	const latestCheckpointDay = data.checkpointDates?.[0]?.slice(0, 10) ?? null;
 	const visibleDays = days.length > 0 ? days : [{ day: "", count: 0 }];
 	const paddedDays = [
 		...Array.from({ length: Math.max(0, 9 - visibleDays.length) }, () => ({
@@ -517,10 +577,13 @@ function DatabaseSummary({
 			<div className="mt-3 h-[132px] animate-pulse rounded-lg bg-bg-hover" />
 		);
 	}
-	const checkpointCount = data.checkpointDates.length;
 	const rows = [
 		{ label: "Files", count: fileCount, color: "bg-[#e8590c]" },
-		{ label: "Checkpoints", count: checkpointCount, color: "bg-[#d8cdbc]" },
+		{
+			label: "Checkpoints",
+			count: data.checkpointCount,
+			color: "bg-[#d8cdbc]",
+		},
 		{
 			label: "Changes",
 			count: data.totalChangeCount,
@@ -543,7 +606,7 @@ function DatabaseSummary({
 					<span
 						key={row.label}
 						className={row.color}
-						style={{ flexGrow: Math.max(1, row.count) }}
+						style={{ flexGrow: Math.max(1, row.count ?? 0) }}
 					/>
 				))}
 			</div>
@@ -557,7 +620,7 @@ function DatabaseSummary({
 						<span>{row.label}</span>
 						<span className="flex-1 border-b border-dotted border-border-panel" />
 						<span className="tabular-nums">
-							{formatCompactCount(row.count)}
+							{row.count === null ? "—" : formatCompactCount(row.count)}
 						</span>
 					</li>
 				))}
@@ -789,7 +852,7 @@ export function GettingStartedView({
 	) => void;
 }) {
 	const [actionError, setActionError] = useState<string | null>(null);
-	const tree = useRepositoryTree(lix);
+	const { tree } = useRepositoryTree(lix);
 	const firstFileOpenedRef = useRef(false);
 	const { isDropTarget, dragHandlers } = useImportDrop({
 		lix,

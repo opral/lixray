@@ -31,7 +31,7 @@
 		"test:analytics": "node --test --experimental-strip-types src/lib/*telemetry*.test.ts src/lib/repository-opened-sink.test.ts",
 		"test:auth": "node --test --experimental-strip-types src/lib/auth-return-to.test.ts src/lib/auth-session-validation.test.ts src/lib/lix-connection-prompt.test.ts src/lib/oauth-consent.test.ts src/lib/public-repository.test.ts src/lib/team-invite.test.ts src/lib/repository-share-capability.test.ts src/lib/repository-cta.test.ts",
 		"test:docs": "node --test --experimental-strip-types src/lib/docs-legal.test.ts",
-		"test:repository": "node --test --experimental-strip-types src/components/repository-home/lix-data.test.ts src/lib/repository-list-error.test.ts src/lib/repository-list-refresh.test.ts src/lib/repository-lix-session.test.ts src/lib/repository-session-manager.test.ts",
+		"test:repository": "node --test --experimental-strip-types src/components/repository-home/lix-data.test.ts src/lib/deployed-browser-storage.test.ts src/lib/repository-list-error.test.ts src/lib/repository-list-refresh.test.ts src/lib/repository-lix-session.test.ts src/lib/repository-opfs-cache.test.ts src/lib/repository-session-manager.test.ts",
 		"test:railway-config": "node --test scripts/*.test.mjs",
 		"test:worker": "node --test --experimental-strip-types src/worker/*.test.ts src/mcp/*.test.ts src/lib/lix-sql-access.test.ts",
 		"check:mcp": "node scripts/check-mcp-connection.mjs",
@@ -40,6 +40,7 @@
 	},
 	"dependencies": {
 		"@lix-js/sdk": "workspace:*",
+		"@lix-js/storage-opfs": "workspace:*",
 		"@modelcontextprotocol/client": "^2.0.0",
 		"@modelcontextprotocol/sdk": "1.29.0",
 		"@modelcontextprotocol/server": "^2.0.0",

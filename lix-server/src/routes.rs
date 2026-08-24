@@ -862,7 +862,10 @@ mod tests {
             "Lix protocol responses expose the canonical Server-Timing metric"
         );
         let handshake = json_body(handshake).await;
-        assert_eq!(handshake["protocolVersion"], json!(2));
+        assert_eq!(
+            handshake["protocolVersion"],
+            json!(lix_sdk::server_protocol::PROTOCOL_VERSION)
+        );
         assert_eq!(
             handshake["activeAccountId"],
             json!(lix_sdk::ANONYMOUS_ACCOUNT_ID)
@@ -1422,6 +1425,29 @@ mod tests {
         .await
         .expect("cancellation recovery should start runtime recovery");
         drop(service);
+
+        // Recovery closes the protocol on a blocking task. Do not let the
+        // Tokio test runtime start shutting down while that task still needs
+        // the runtime's drivers to finish. Reopening the same ID joins the
+        // cleanup tombstone and proves the old runtime was fully retired.
+        let replacement = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match manager.get("lix-a").await {
+                    Ok(replacement) => return replacement,
+                    Err(LixRuntimeError::Recovering) => {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                    Err(error) => panic!("unexpected replacement runtime state: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("cancellation recovery should finish");
+        drop(replacement);
+        manager
+            .shutdown()
+            .await
+            .expect("replacement runtime should close cleanly");
     }
 
     #[tokio::test]

@@ -51,8 +51,21 @@ test("PR previews promote both tested images instead of rebuilding source", asyn
 		workflow.indexOf("  deploy-preview:"),
 		workflow.indexOf("  publish-preview:"),
 	);
+	const webImageJob = workflow.slice(
+		workflow.indexOf("  web-image:"),
+		workflow.indexOf("  frontend:"),
+	);
+	const ciJob = workflow.slice(
+		workflow.indexOf("  ci:"),
+		workflow.indexOf("  deploy-preview:"),
+	);
 
 	assert.match(workflow, /needs\.web-image\.outputs\.image/);
+	assert.doesNotMatch(webImageJob, /pull_request\.draft/);
+	assert.match(
+		ciJob,
+		/if test "\$DRAFT" = "true"; then[\s\S]*require_success "Server image" "\$SERVER_IMAGE_RESULT"[\s\S]*require_success "Web image" "\$WEB_IMAGE_RESULT"/,
+	);
 	assert.match(deployPreviewJob, /uses: actions\/checkout@v4/);
 	assert.match(workflow, /manage-railway-preview\.sh ensure/);
 	assert.match(workflow, /manage-railway-preview\.sh url/);
@@ -62,6 +75,14 @@ test("PR previews promote both tested images instead of rebuilding source", asyn
 		/url: \$\{\{ needs\.deploy-preview\.outputs\.preview_url \}\}/,
 	);
 	assert.match(workflow, /publish-preview:/);
+	assert.match(workflow, /preview-e2e:/);
+	assert.match(workflow, /PLAYWRIGHT_SYNC_PREVIEW: "1"/);
+	assert.match(workflow, /PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID:/);
+	assert.match(
+		workflow,
+		/deployment_id: \$\{\{ steps\.promote\.outputs\.web_deployment_id \}\}/,
+	);
+	assert.match(workflow, /tests\/e2e\/sync-preview\.spec\.ts/);
 	assert.match(workflow, /RAILWAY_DEPLOY_POLICY: pr/);
 	assert.match(workflow, /promote-production\.sh/);
 	assert.match(cleanupWorkflow, /manage-railway-preview\.sh delete/);

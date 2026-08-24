@@ -466,7 +466,11 @@ impl LixRuntimeManager {
                         opener.done.send_replace(RuntimeOpenState::Ready);
                     }
                     Err(error) => {
-                        let error = Arc::<str>::from(format!("{error:#}"));
+                        // Railway records one physical line per log event. Preserve the
+                        // complete anyhow/Lix error chain after it crosses this async
+                        // opener boundary instead of losing everything after the first
+                        // newline in a structured Lix error.
+                        let error = Arc::<str>::from(format!("{error:#}").replace('\n', " | "));
                         if let Some((sequence, done)) = manager
                             .begin_failed_open_cleanup(&opener.lix_id, &opener.runtime)
                             .await
@@ -551,6 +555,37 @@ impl LixRuntimeManager {
                 }
             })?;
         let storage_open_ms = elapsed_millis(storage_started);
+
+        let migration_status = lix_sdk::migration::inspect_repository(&storage)
+            .await
+            .context("inspect Lix repository format")?;
+        if let lix_sdk::migration::MigrationStatus::Required {
+            from_version,
+            to_version,
+        } = migration_status
+        {
+            let migration_started = Instant::now();
+            info!(
+                lix_id,
+                from_version, to_version, "migrating Lix repository format before opening"
+            );
+            let report = lix_sdk::migration::migrate_repository(
+                storage.clone(),
+                lix_sdk::migration::MigrationOptions::default(),
+            )
+            .await
+            .context("migrate Lix repository format")?;
+            info!(
+                lix_id,
+                from_version = report.from_version,
+                to_version = report.to_version,
+                changes_rewritten = report.changes_rewritten,
+                commit_members_rewritten = report.commit_members_rewritten,
+                hot_rows_rewritten = report.hot_rows_rewritten,
+                elapsed_ms = elapsed_millis(migration_started),
+                "migrated Lix repository format"
+            );
+        }
 
         let engine_started = Instant::now();
         // Cache-admit is a protocol root, not a client session. as_protocol_root
