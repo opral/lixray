@@ -69,6 +69,14 @@ void test("uses Lixray in production and starts with one user-picked skill", () 
 	assert.doesNotMatch(details.prompt, /cannot add/i);
 	assert.doesNotMatch(details.prompt, /cannot connect/i);
 	assert.doesNotMatch(details.prompt, /Save this as durable agent memory/);
+	assert.doesNotMatch(
+		details.prompt,
+		/do not save it to personal agent memory/i,
+	);
+	assert.match(
+		details.prompt,
+		/Guide the user to put that in AGENTS\.md if it exists, CLAUDE\.md if it exists, or both\./,
+	);
 	assert.match(
 		details.prompt,
 		/Once connected, ask the user which single skill to put in Lixray\./,
@@ -120,8 +128,8 @@ void test("keeps the connection prompt concise", () => {
 	const words = details.prompt.trim().split(/\s+/);
 
 	assert.ok(
-		words.length <= 120,
-		`expected at most 120 words, got ${words.length}`,
+		words.length <= 137,
+		`expected at most 137 words, got ${words.length}`,
 	);
 	assert.doesNotMatch(details.prompt, /active_branch_id/);
 	assert.doesNotMatch(details.prompt, /first files/);
