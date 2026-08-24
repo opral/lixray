@@ -132,13 +132,6 @@ function openSqlExplorerFromView(atelier: AtelierExtensionRuntime) {
 	});
 }
 
-function openReviewFromView(atelier: AtelierExtensionRuntime) {
-	const runtime = atelier as AtelierExtensionRuntime & {
-		readonly reviews?: { readonly openWorkingChanges?: () => void };
-	};
-	runtime.reviews?.openWorkingChanges?.();
-}
-
 function mountDirectoryView({
 	element,
 	atelier,
@@ -204,7 +197,6 @@ function mountDirectoryView({
 					onOpenPeople={() => openPeopleFromView(atelier)}
 					onOpenSettings={() => openSettingsFromView(atelier)}
 					onOpenSqlExplorer={() => openSqlExplorerFromView(atelier)}
-					onOpenReview={() => openReviewFromView(atelier)}
 					{...(isHome
 						? {
 								onRepositoryEmpty: () => {

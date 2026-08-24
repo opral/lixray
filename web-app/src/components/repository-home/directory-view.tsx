@@ -85,7 +85,6 @@ type DirectoryViewProps = {
 	readonly onOpenPeople?: () => void;
 	readonly onOpenSettings?: () => void;
 	readonly onOpenSqlExplorer?: () => void;
-	readonly onOpenReview?: () => void;
 	readonly onRepositoryEmpty?: () => void;
 };
 
@@ -113,7 +112,6 @@ export function DirectoryView({
 	onOpenPeople,
 	onOpenSettings,
 	onOpenSqlExplorer,
-	onOpenReview,
 	onRepositoryEmpty,
 }: DirectoryViewProps) {
 	const { tree, error: treeError } = useRepositoryTree(lix, isActive);
@@ -378,7 +376,6 @@ export function DirectoryView({
 						fileCount={tree.files.length}
 						data={controlPlaneData}
 						onOpenSettings={onOpenSettings}
-						onOpenReview={onOpenReview}
 						onOpenSqlExplorer={onOpenSqlExplorer}
 					/>
 				) : null}
@@ -427,14 +424,12 @@ function RepositoryControlPlaneRail({
 	fileCount,
 	data,
 	onOpenSettings,
-	onOpenReview,
 	onOpenSqlExplorer,
 }: {
 	readonly visibility: "private" | "public";
 	readonly fileCount: number;
 	readonly data: RepositoryControlPlaneData | null;
 	readonly onOpenSettings?: () => void;
-	readonly onOpenReview?: () => void;
 	readonly onOpenSqlExplorer?: () => void;
 }) {
 	return (
@@ -468,7 +463,7 @@ function RepositoryControlPlaneRail({
 						Some change history is unavailable.
 					</p>
 				) : null}
-				<ChangesSummary data={data} onOpenReview={onOpenReview} />
+				<ChangesSummary data={data} />
 			</section>
 
 			<section className="border-b border-border-panel py-7">
@@ -493,54 +488,15 @@ function RailHeading({ children }: { readonly children: ReactNode }) {
 
 function ChangesSummary({
 	data,
-	onOpenReview,
 }: {
 	readonly data: RepositoryControlPlaneData | null;
-	readonly onOpenReview?: () => void;
 }) {
 	if (!data) {
 		return (
 			<div className="mt-3 h-[118px] animate-pulse rounded-lg bg-bg-hover" />
 		);
 	}
-	const hasCheckpoint = (data.checkpointDates?.length ?? 0) > 0;
-	const changeCount =
-		data.checkpointDates === null
-			? null
-			: hasCheckpoint
-				? data.workingChangeCount
-				: data.totalChangeCount;
-
-	return (
-		<div className="mt-2.5">
-			<div className="flex items-baseline gap-1.5">
-				<strong className="text-[24px] leading-none font-semibold tracking-[-0.04em] text-text-primary">
-					{changeCount === null ? "—" : formatCompactCount(changeCount)}
-				</strong>
-				<span className="text-[11.5px] text-text-tertiary">
-					{changeCount === null
-						? "change history unavailable"
-						: hasCheckpoint
-							? "since last checkpoint"
-							: "changes so far"}
-				</span>
-			</div>
-			<ChangeBars data={data} />
-			{changeCount !== null && changeCount > 0 && onOpenReview ? (
-				<button
-					type="button"
-					onClick={onOpenReview}
-					className="mt-3 cursor-pointer text-[12px] font-semibold text-[#c2410c] hover:text-[#9a3412] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
-				>
-					Review changes →
-				</button>
-			) : (
-				<p className="m-0 mt-3 text-[11.5px] leading-4 text-text-quaternary">
-					Edits appear here as they happen.
-				</p>
-			)}
-		</div>
-	);
+	return <ChangeBars data={data} />;
 }
 
 function ChangeBars({ data }: { readonly data: RepositoryControlPlaneData }) {

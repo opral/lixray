@@ -117,7 +117,6 @@ const asNumber = (value: unknown): number => {
 };
 
 export type RepositoryControlPlaneData = {
-	readonly workingChangeCount: number | null;
 	readonly totalChangeCount: number | null;
 	readonly tableCount: number | null;
 	readonly checkpointDates: readonly string[] | null;
@@ -129,16 +128,11 @@ export type RepositoryControlPlaneData = {
 	readonly changeHistoryUnavailable: boolean;
 };
 
-/** Lix exposes the active branch's working changes as a table function. */
-export const WORKING_DIFF_COUNT_SQL =
-	"SELECT count(*) AS n FROM lix_working_diff()";
-
 /** Live, repository-derived facts used by the Home control-plane rail. */
 export function useRepositoryControlPlaneData(
 	lix: Lix,
 	enabled = true,
 ): RepositoryControlPlaneData | null {
-	const working = useObservedRows(lix, WORKING_DIFF_COUNT_SQL, [], enabled);
 	const checkpoints = useObservedRows(
 		lix,
 		"SELECT lixcol_created_at AS created_at FROM lix_checkpoint ORDER BY lixcol_created_at DESC LIMIT 10",
@@ -186,7 +180,7 @@ export function useRepositoryControlPlaneData(
 	}, [enabled, lix]);
 
 	return useMemo(() => {
-		const observations = [working, checkpoints, changeStats, changeDays];
+		const observations = [checkpoints, changeStats, changeDays];
 		if (observations.some(({ rows, error }) => rows === null && !error)) {
 			return null;
 		}
@@ -195,9 +189,6 @@ export function useRepositoryControlPlaneData(
 		const changeStatsRows = changeStats.rows ?? [];
 		const changeDayRows = changeDays.rows ?? [];
 		return {
-			workingChangeCount: working.rows
-				? asNumber(working.rows[0]?.get("n"))
-				: null,
 			totalChangeCount: changeStats.rows
 				? asNumber(changeStatsRows[0]?.get("n"))
 				: null,
@@ -222,7 +213,7 @@ export function useRepositoryControlPlaneData(
 				({ error }) => error !== null,
 			),
 		};
-	}, [changeDays, changeStats, checkpoints, tableCount, working]);
+	}, [changeDays, changeStats, checkpoints, tableCount]);
 }
 
 /** The full directory/file tree, kept live via lix observe. */

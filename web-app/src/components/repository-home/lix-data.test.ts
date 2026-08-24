@@ -13,7 +13,6 @@ import {
 	resolveRepositoryHref,
 	type RepositoryTree,
 	preserveObservedRowsAfterError,
-	WORKING_DIFF_COUNT_SQL,
 } from "./lix-data.ts";
 
 const tree: RepositoryTree = {
@@ -59,13 +58,6 @@ void test("decides empty routing only from a complete initial tree", () => {
 	assert.equal(initialRepositoryTreeIsEmpty(null), null);
 	assert.equal(initialRepositoryTreeIsEmpty(tree), false);
 	assert.equal(initialRepositoryTreeIsEmpty({ dirs: [], files: [] }), true);
-});
-
-void test("queries the latest Lix working-diff table function", () => {
-	assert.equal(
-		WORKING_DIFF_COUNT_SQL,
-		"SELECT count(*) AS n FROM lix_working_diff()",
-	);
 });
 
 void test("observer failures expose first-frame errors without inventing rows", () => {
