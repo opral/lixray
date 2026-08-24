@@ -3,6 +3,7 @@ import test from "node:test";
 import type { Lix } from "@lix-js/sdk";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import {
+	CHECKPOINT_SUMMARY_SQL,
 	canonicalDirectoryPath,
 	createRepositoryFile,
 	createRepositoryFolder,
@@ -58,6 +59,11 @@ void test("decides empty routing only from a complete initial tree", () => {
 	assert.equal(initialRepositoryTreeIsEmpty(null), null);
 	assert.equal(initialRepositoryTreeIsEmpty(tree), false);
 	assert.equal(initialRepositoryTreeIsEmpty({ dirs: [], files: [] }), true);
+});
+
+void test("keeps checkpoint dates bounded while returning the total count", () => {
+	assert.match(CHECKPOINT_SUMMARY_SQL, /count\(\*\) over \(\) AS total_count/i);
+	assert.match(CHECKPOINT_SUMMARY_SQL, /LIMIT 10$/i);
 });
 
 void test("observer failures expose first-frame errors without inventing rows", () => {

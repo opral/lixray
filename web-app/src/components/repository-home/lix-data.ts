@@ -119,6 +119,7 @@ const asNumber = (value: unknown): number => {
 export type RepositoryControlPlaneData = {
 	readonly totalChangeCount: number | null;
 	readonly tableCount: number | null;
+	readonly checkpointCount: number | null;
 	readonly checkpointDates: readonly string[] | null;
 	readonly changeDays: ReadonlyArray<{
 		readonly day: string;
@@ -128,17 +129,15 @@ export type RepositoryControlPlaneData = {
 	readonly changeHistoryUnavailable: boolean;
 };
 
+export const CHECKPOINT_SUMMARY_SQL =
+	"SELECT lixcol_created_at AS created_at, count(*) over () AS total_count FROM lix_checkpoint ORDER BY lixcol_created_at DESC LIMIT 10";
+
 /** Live, repository-derived facts used by the Home control-plane rail. */
 export function useRepositoryControlPlaneData(
 	lix: Lix,
 	enabled = true,
 ): RepositoryControlPlaneData | null {
-	const checkpoints = useObservedRows(
-		lix,
-		"SELECT lixcol_created_at AS created_at FROM lix_checkpoint ORDER BY lixcol_created_at DESC LIMIT 10",
-		[],
-		enabled,
-	);
+	const checkpoints = useObservedRows(lix, CHECKPOINT_SUMMARY_SQL, [], enabled);
 	const changeStats = useObservedRows(
 		lix,
 		"SELECT count(*) AS n, min(created_at) AS created_at FROM lix_change",
@@ -193,6 +192,9 @@ export function useRepositoryControlPlaneData(
 				? asNumber(changeStatsRows[0]?.get("n"))
 				: null,
 			tableCount,
+			checkpointCount: checkpoints.rows
+				? asNumber(checkpoints.rows[0]?.get("total_count"))
+				: null,
 			checkpointDates: checkpoints.rows
 				? checkpoints.rows
 						.map((row) => asText(row.get("created_at")))

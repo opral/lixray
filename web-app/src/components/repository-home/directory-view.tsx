@@ -577,10 +577,13 @@ function DatabaseSummary({
 			<div className="mt-3 h-[132px] animate-pulse rounded-lg bg-bg-hover" />
 		);
 	}
-	const checkpointCount = data.checkpointDates?.length ?? null;
 	const rows = [
 		{ label: "Files", count: fileCount, color: "bg-[#e8590c]" },
-		{ label: "Checkpoints", count: checkpointCount, color: "bg-[#d8cdbc]" },
+		{
+			label: "Checkpoints",
+			count: data.checkpointCount,
+			color: "bg-[#d8cdbc]",
+		},
 		{
 			label: "Changes",
 			count: data.totalChangeCount,
