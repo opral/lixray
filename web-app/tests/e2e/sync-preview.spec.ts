@@ -462,20 +462,17 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 			})
 			.click();
 		await left.getByRole("button", { name: "Checkpoint", exact: true }).click();
-		// A Playwright click resolves after dispatch, while the async checkpoint
-		// transaction can still be committing locally. Start the realtime budget
-		// only after the originating replica exposes the durable checkpoint.
-		await expect(
-			left.getByRole("button", {
-				name: "Latest checkpoint. Open checkpoint history",
-			}),
-		).toBeVisible({ timeout: repositoryOperationTimeout });
 		const leftHistoryAfterCheckpoint = await openHistoryPanel(left);
+		// A Playwright click resolves after dispatch, while the async checkpoint
+		// transaction can still be committing locally. Observe the durable row
+		// directly; the header shortcut is intentionally hidden while History is open.
 		await expect(
 			leftHistoryAfterCheckpoint
 				.getByRole("list", { name: "Checkpoints" })
 				.locator(":scope > li"),
-		).toHaveCount(initialCheckpointCount + 1, { timeout: 30_000 });
+		).toHaveCount(initialCheckpointCount + 1, {
+			timeout: repositoryOperationTimeout,
+		});
 		const rightHistoryAfterCheckpoint = await openHistoryPanel(right);
 		await expect(
 			rightHistoryAfterCheckpoint
