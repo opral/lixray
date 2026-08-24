@@ -269,7 +269,7 @@ function delay(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-class RemoteRepositoryLixSession implements RepositoryLixSession {
+export class RemoteRepositoryLixSession implements RepositoryLixSession {
 	readonly lix: Lix;
 	readonly #listeners = new Set<() => void>();
 	readonly #defaultBranchId: string;

@@ -1,10 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { Lix } from "@lix-js/sdk";
 import {
 	createTelemetryFetch,
 	isRetryableRepositoryOpenError,
+	RemoteRepositoryLixSession,
 	repositorySessionKey,
 } from "./repository-lix-session.ts";
+
+void test("does not create a synthetic observer for session health", async () => {
+	let observerCalls = 0;
+	let closeCalls = 0;
+	let releaseCalls = 0;
+	const lix = {
+		observe: () => {
+			observerCalls += 1;
+			throw new Error("session construction must not observe");
+		},
+		close: async () => {
+			closeCalls += 1;
+		},
+	} as unknown as Lix;
+	const session = new RemoteRepositoryLixSession(lix, "main", () => {
+		releaseCalls += 1;
+	});
+	assert.equal(observerCalls, 0);
+	await session.close();
+	assert.equal(closeCalls, 1);
+	assert.equal(releaseCalls, 1);
+});
 
 void test("retries only transient repository-open transport failures", () => {
 	assert.equal(
