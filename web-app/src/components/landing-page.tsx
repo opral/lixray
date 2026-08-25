@@ -1,6 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Building2, type LucideIcon, User } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode } from "react";
 import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 
 const primaryButton =
@@ -11,7 +10,6 @@ const bookDemoHref = "mailto:hello@opral.com?subject=LixRay%20demo";
 
 export function LandingPage() {
 	const { user, repositoryTo } = useRepositoryCta();
-	const [audience, setAudience] = useState<"individual" | "company">("company");
 	const heroCtaLabel = user ? "Open LixRay" : "Create your repo for free";
 
 	const ctaRow = (
@@ -34,52 +32,60 @@ export function LandingPage() {
 					className="flex flex-col items-start gap-[22px]"
 					aria-labelledby="landing-title"
 				>
-					<div
-						className="flex items-center gap-5 text-sm"
-						role="group"
-						aria-label="Pitch audience"
-					>
-						<AudienceButton
-							active={audience === "company"}
-							Icon={Building2}
-							onClick={() => setAudience("company")}
-						>
-							Company
-						</AudienceButton>
-						<AudienceButton
-							active={audience === "individual"}
-							Icon={User}
-							onClick={() => setAudience("individual")}
-						>
-							Individual
-						</AudienceButton>
-					</div>
-					{/* Both pitches are server-rendered so crawlers and agents see them
-					    without pressing the toggle; the inactive one is hidden. */}
+					{/* Design 26a: the audience phrase rotates on a CSS reel — no
+					    interaction, no JS. The reel spans company and personal
+					    audiences, replacing the old pitch toggle. All phrases stay
+					    in the DOM for crawlers; the aria-label keeps the accessible
+					    name stable. */}
 					<h1
-						className="m-0 text-[clamp(2.25rem,5.5vw,2.875rem)] leading-[1.12] font-bold tracking-[-.03em] text-balance"
+						className="m-0 text-[clamp(2.25rem,5.5vw,2.875rem)] leading-[1.12] font-bold tracking-[-.03em]"
 						id="landing-title"
-						hidden={audience !== "company"}
+						aria-label="A repository for your entire company"
 					>
-						A repository for your entire company
+						A repository for
+						<br />
+						your{" "}
+						<span className="landing-headline-slot">
+							<span className="landing-headline-reel">
+								<span>entire company</span>
+								<span>sales team</span>
+								<span>marketing team</span>
+								<span>personal life</span>
+								{/* Duplicate of the first phrase closes the loop. */}
+								<span aria-hidden="true">entire company</span>
+							</span>
+						</span>
 					</h1>
-					<h1
-						className="m-0 text-[clamp(2.25rem,5.5vw,2.875rem)] leading-[1.12] font-bold tracking-[-.03em] text-balance"
-						hidden={audience !== "individual"}
-					>
-						A repository for you and your agents
-					</h1>
-					<p
-						className="m-0 text-lg leading-[1.6] text-[#57534e] text-pretty"
-						hidden={audience !== "company"}
-					>
-						One repo your team and your agents share. Any file type, every
-						change tracked.
-					</p>
-					<p
-						className="m-0 text-lg leading-[1.6] text-[#57534e] text-pretty"
-						hidden={audience !== "individual"}
-					>
+					<style>{`
+						.landing-headline-slot {
+							display: inline-block;
+							overflow: hidden;
+							height: 1.12em;
+							vertical-align: bottom;
+							color: #e8590c;
+						}
+						.landing-headline-reel {
+							display: flex;
+							flex-direction: column;
+							animation: landing-headline-rotate 10s infinite
+								cubic-bezier(0.6, 0, 0.2, 1);
+						}
+						.landing-headline-reel > span {
+							white-space: nowrap;
+							line-height: 1.12;
+						}
+						@keyframes landing-headline-rotate {
+							0%, 18% { transform: translateY(0); }
+							23%, 41% { transform: translateY(-20%); }
+							46%, 64% { transform: translateY(-40%); }
+							69%, 87% { transform: translateY(-60%); }
+							92%, 100% { transform: translateY(-80%); }
+						}
+						@media (prefers-reduced-motion: reduce) {
+							.landing-headline-reel { animation: none; }
+						}
+					`}</style>
+					<p className="m-0 text-lg leading-[1.6] text-[#57534e] text-pretty">
 						One repo you and your agents share. Any file type, every change
 						tracked.
 					</p>
@@ -213,38 +219,6 @@ export function LandingPage() {
 				</nav>
 			</footer>
 		</div>
-	);
-}
-
-function AudienceButton({
-	active,
-	Icon,
-	onClick,
-	children,
-}: {
-	active: boolean;
-	Icon: LucideIcon;
-	onClick: () => void;
-	children: ReactNode;
-}) {
-	return (
-		<button
-			className={
-				active
-					? "inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-semibold text-[#1c1917]"
-					: "inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-[#8a8178] hover:text-[#1c1917]"
-			}
-			type="button"
-			aria-pressed={active}
-			onClick={onClick}
-		>
-			<Icon
-				className="size-4"
-				strokeWidth={active ? 2.4 : 2}
-				aria-hidden="true"
-			/>
-			{children}
-		</button>
 	);
 }
 

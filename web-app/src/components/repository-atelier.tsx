@@ -1,5 +1,6 @@
 import {
 	Atelier,
+	AtelierSkeleton,
 	createAtelier,
 	type AtelierEvent,
 	type AtelierInstance,
@@ -23,6 +24,7 @@ import {
 } from "react";
 import { PencilLine } from "lucide-react";
 import { toast } from "sonner";
+import { AccountMenu } from "~/components/account-menu";
 import { useAuth } from "~/components/auth-provider";
 import { useRepository } from "~/components/repository-provider";
 import type { RepositorySettingsApi } from "~/components/repository-home/settings-view";
@@ -400,6 +402,19 @@ export function RepositoryAtelier({
 								p_visibility: visibility,
 							});
 							if (error) throw new Error(error.message);
+							// The public profile serves activity from a day-long cache;
+							// a visibility change should show up there right away.
+							void (async () => {
+								const accessToken = await getSessionAccessToken();
+								if (!accessToken) return;
+								await fetch(
+									`/profile/${encodeURIComponent(namespaceId)}/activity/refresh`,
+									{
+										method: "POST",
+										headers: { Authorization: `Bearer ${accessToken}` },
+									},
+								);
+							})().catch(() => undefined);
 						},
 						getInviteLink: async () => {
 							const { data, error } = await client.rpc("get_lix_invite_link", {
@@ -453,14 +468,14 @@ export function RepositoryAtelier({
 		<span
 			aria-disabled="true"
 			title="Nothing to share yet"
-			className="inline-flex h-7 cursor-default items-center rounded-[7px] border border-border-panel px-3 text-xs font-semibold text-text-tertiary/70"
+			className="inline-flex h-7 cursor-default items-center rounded-[7px] px-2.5 text-xs font-semibold text-text-tertiary/70"
 		>
 			Share
 		</span>
 	);
 	// Sharing is available for the whole repository as well as individual files;
 	// the current browser URL is captured when the dialog is opened.
-	const headerActions = canEdit ? (
+	const repositoryHeaderActions = canEdit ? (
 		client ? (
 			<RepositoryShareControl
 				loadReadAccess={async () => {
@@ -621,6 +636,12 @@ export function RepositoryAtelier({
 					{shareAccess.joining ? "Joining…" : "Join to edit"}
 				</Button>
 			) : null}
+		</div>
+	);
+	const headerActions = (
+		<div className="flex items-center gap-2">
+			{repositoryHeaderActions}
+			{user ? <AccountMenu /> : null}
 		</div>
 	);
 	const navigateToCurrentPathBranch = useCallback(
@@ -912,7 +933,6 @@ export function RepositoryAtelier({
 					lix: session.lix,
 					readOnly: isReadOnly,
 					branchSession: repositoryBranchSession,
-					reviewRangeSessionId: atelierUserId,
 					extensions: createLixrayRepositoryExtensions(
 						{
 							lixId: repositoryId,
@@ -1080,6 +1100,15 @@ export function RepositoryAtelier({
 			.finally(markRouteSynced);
 	}, [instance, markRouteSynced, namespace, pathname, repositorySlug]);
 
+	const navbarBrand = (
+		<RepositoryNavbarBrand
+			signedIn={Boolean(user)}
+			namespaceId={namespaceId}
+			namespaceHandle={namespace}
+			repositoryName={repositoryName}
+			repositorySlug={repositorySlug}
+		/>
+	);
 	return (
 		<div
 			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
@@ -1097,19 +1126,9 @@ export function RepositoryAtelier({
 								<RepositoryAtelierContext.Provider value={instance}>
 									<Atelier
 										instance={instance}
-										topBarProps={{
-											"data-app-titlebar": true,
-											className: "border-b border-border-subtle bg-bg-app",
-										}}
+										topBarProps={REPOSITORY_TOP_BAR_PROPS}
 										slots={{
-											navbarBrand: (
-												<RepositoryPicker
-													namespaceId={namespaceId}
-													namespaceHandle={namespace}
-													repositoryName={repositoryName}
-													repositorySlug={repositorySlug}
-												/>
-											),
+											navbarBrand,
 											navbarEnd: headerActions,
 										}}
 									/>
@@ -1138,9 +1157,12 @@ export function RepositoryAtelier({
 				</main>
 			) : null}
 			{!instance && !error && !migration ? (
-				<main className="absolute inset-0 grid place-content-center justify-items-center gap-2 bg-bg-app p-6 text-center text-text-secondary">
-					Opening repository…
-				</main>
+				<AtelierSkeleton
+					topBarProps={REPOSITORY_TOP_BAR_PROPS}
+					slots={{ navbarBrand, navbarEnd: headerActions }}
+				>
+					<DelayedOpeningLabel />
+				</AtelierSkeleton>
 			) : null}
 			{error ? (
 				<main className="absolute inset-0 grid place-content-center bg-bg-app p-6 text-center text-text-secondary">
@@ -1299,7 +1321,12 @@ function RepositoryShareControl({
 				captureTelemetry("webapp_share_link_copied", { share_mode: "public" });
 			}}
 			trigger={
-				<Button type="button" size="xs" variant="outline" className="h-7 px-3">
+				<Button
+					type="button"
+					size="xs"
+					variant="ghost"
+					className="h-7 rounded-[7px] px-2.5 text-xs font-semibold text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary"
+				>
 					Share
 				</Button>
 			}
@@ -1329,4 +1356,97 @@ function activeDocumentName({
 function normalizedRouteResourcePath(routeSplat: string | undefined) {
 	const path = (routeSplat ?? "").replace(/^\/+|\/+$/g, "");
 	return path ? `/${path}` : "/";
+}
+
+/** Keeps fast opens silent; the label appears only when opening is slow. */
+function DelayedOpeningLabel() {
+	const [visible, setVisible] = useState(false);
+	useEffect(() => {
+		const timer = window.setTimeout(() => setVisible(true), 500);
+		return () => window.clearTimeout(timer);
+	}, []);
+	return visible ? <>Opening repository…</> : null;
+}
+
+const REPOSITORY_TOP_BAR_PROPS = {
+	"data-app-titlebar": true,
+	className: "border-b border-border-subtle bg-bg-app",
+} as const;
+
+function RepositoryNavbarBrand({
+	signedIn,
+	namespaceId,
+	namespaceHandle,
+	repositoryName,
+	repositorySlug,
+}: {
+	signedIn: boolean;
+	namespaceId: string;
+	namespaceHandle: string;
+	repositoryName: string;
+	repositorySlug: string;
+}) {
+	return (
+		<span className="flex min-w-0 items-center gap-2">
+			<a
+				href={signedIn ? "/home" : "/"}
+				aria-label="LixRay home"
+				// -ml-1.5 pulls the mark from the top bar's 14px content line to
+				// x=8 — the same x as the profile and home headers' mark. The
+				// sidebar's 14px icon column centers under the 24px mark.
+				className="-ml-1.5 inline-flex shrink-0 items-center rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+			>
+				<img className="size-6" src="/lixray-mark.svg" alt="" />
+			</a>
+			<RepositoryPicker
+				namespaceId={namespaceId}
+				namespaceHandle={namespaceHandle}
+				repositoryName={repositoryName}
+				repositorySlug={repositorySlug}
+			/>
+		</span>
+	);
+}
+
+/**
+ * Atelier chrome with an empty panel, shown wherever a repository is still
+ * resolving or opening so navigation never flashes a bespoke splash screen.
+ */
+export function RepositoryOpeningSkeleton({
+	signedIn,
+	namespaceHandle,
+	repositorySlug,
+	namespaceId = "",
+	repositoryName,
+}: {
+	signedIn: boolean;
+	namespaceHandle: string;
+	repositorySlug: string;
+	/** Unknown while the route is still resolving; the picker falls back to a label. */
+	namespaceId?: string;
+	repositoryName?: string;
+}) {
+	return (
+		<div
+			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
+			aria-busy
+		>
+			<AtelierSkeleton
+				topBarProps={REPOSITORY_TOP_BAR_PROPS}
+				slots={{
+					navbarBrand: (
+						<RepositoryNavbarBrand
+							signedIn={signedIn}
+							namespaceId={namespaceId}
+							namespaceHandle={namespaceHandle}
+							repositoryName={repositoryName ?? repositorySlug}
+							repositorySlug={repositorySlug}
+						/>
+					),
+				}}
+			>
+				<DelayedOpeningLabel />
+			</AtelierSkeleton>
+		</div>
+	);
 }

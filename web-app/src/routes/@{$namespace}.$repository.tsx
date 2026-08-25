@@ -20,7 +20,10 @@ import {
 	PublishedResourceView,
 	type PublishedResource,
 } from "~/components/published-resource-view";
-import { RepositoryAtelier } from "~/components/repository-atelier";
+import {
+	RepositoryAtelier,
+	RepositoryOpeningSkeleton,
+} from "~/components/repository-atelier";
 import { useRepository } from "~/components/repository-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import {
@@ -556,7 +559,13 @@ function RepositoryRoutePage() {
 	}, []);
 
 	if (resolved === undefined) {
-		return <RepositoryRouteStatus>Opening repository…</RepositoryRouteStatus>;
+		return (
+			<RepositoryOpeningSkeleton
+				signedIn={Boolean(authUser)}
+				namespaceHandle={namespace}
+				repositorySlug={repositorySlug}
+			/>
+		);
 	}
 	if (shouldWaitForInviteResolution) {
 		if (failedInviteKey === inviteResolutionKey) {

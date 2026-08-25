@@ -21,7 +21,7 @@ export function AppTitlebar({
 		<header
 			{...props}
 			className={cn(
-				"flex h-11 shrink-0 items-center border-b border-border-subtle bg-bg-app text-text-primary",
+				"flex h-[46px] shrink-0 items-center border-b border-border-subtle bg-bg-app text-text-primary",
 				className,
 			)}
 			data-app-titlebar
@@ -57,19 +57,20 @@ export function AppTitlebarTitle({
 
 export function AppTitlebarBrand({
 	className,
+	href = "/home",
 	...props
-}: Omit<ComponentPropsWithRef<"a">, "children" | "href">) {
+}: Omit<ComponentPropsWithRef<"a">, "children">) {
 	return (
 		<a
 			{...props}
 			aria-label={props["aria-label"] ?? "LixRay home"}
 			className={cn(
-				"inline-flex shrink-0 items-center gap-2 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline",
+				"-ml-2.5 inline-flex shrink-0 items-center gap-2 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline max-[560px]:-ml-1",
 				className,
 			)}
-			href="/home"
+			href={href}
 		>
-			<img className="size-[19px]" src="/lixray-mark.svg" alt="" />
+			<img className="size-6" src="/lixray-mark.svg" alt="" />
 			<span data-app-titlebar-brand-label>LixRay</span>
 		</a>
 	);

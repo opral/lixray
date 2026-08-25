@@ -1,4 +1,4 @@
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, ChevronDown, LayoutGrid, Plus, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CreateRepositoryDialog } from "~/components/repository-directory";
@@ -62,16 +62,17 @@ export function RepositoryPicker({
 
 	if (!organization || !activeRepository) {
 		return (
-			<span className="-ml-[3px] flex h-7 min-w-0 items-center gap-1 rounded-[7px] py-0 pr-1 pl-[5px] text-[13px] font-semibold text-text-primary">
-				<RepositoryChip
-					initials={repositoryInitials(repositoryName)}
-					palette={repositoryPalette(0)}
-				/>
-				<span className="max-w-[120px] truncate text-text-secondary">
+			<span className="-ml-[3px] flex h-7 min-w-0 items-center rounded-[7px] py-0 pr-1 text-[13px] font-semibold text-text-primary">
+				<Link
+					to="/@{$namespace}"
+					params={{ namespace: namespaceHandle }}
+					aria-label={`View the @${namespaceHandle} profile`}
+					className="flex h-7 max-w-[120px] shrink-0 items-center truncate rounded-[7px] px-[5px] text-text-secondary no-underline transition-colors hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+				>
 					{namespaceHandle}
-				</span>
+				</Link>
 				<span className="shrink-0 text-text-tertiary">/</span>
-				<span className="max-w-[180px] truncate">{repositoryName}</span>
+				<span className="max-w-[180px] truncate pl-1">{repositoryName}</span>
 			</span>
 		);
 	}
@@ -100,112 +101,115 @@ export function RepositoryPicker({
 
 	return (
 		<>
-			<DropdownMenu>
-				<DropdownMenuTrigger asChild>
-					<button
-						type="button"
-						data-testid="repository-picker"
-						aria-label={`Switch repository — current: ${organization.handle} / ${activeRepository.name}`}
-						className="-ml-[3px] flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-[7px] border-0 bg-transparent py-0 pr-1 pl-[5px] text-[13px] font-semibold text-text-primary transition-colors hover:bg-bg-hover-canvas focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible data-[state=open]:bg-bg-active"
-					>
-						<RepositoryChip
-							initials={repositoryInitials(activeRepository.name)}
-							palette={repositoryPalette(
-								paletteOrder.get(activeRepository.id) ?? 0,
-							)}
-						/>
-						<span className="max-w-[120px] truncate text-text-secondary">
-							{organization.handle}
-						</span>
-						<span className="shrink-0 text-text-tertiary">/</span>
-						<span className="max-w-[180px] truncate">
-							{activeRepository.name}
-						</span>
-						<ChevronDown
-							className="size-3.5 shrink-0 text-icon-tertiary"
-							aria-hidden="true"
-						/>
-					</button>
-				</DropdownMenuTrigger>
-				<DropdownMenuContent
-					align="start"
-					sideOffset={6}
-					className="w-[248px] min-w-[248px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2 [&_[data-slot=dropdown-menu-item]]:py-[7px] [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:leading-tight [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle"
+			<span className="-ml-[3px] flex h-7 min-w-0 items-center text-[13px] font-semibold text-text-primary">
+				<Link
+					to="/@{$namespace}"
+					params={{ namespace: organization.handle }}
+					aria-label={`View the @${organization.handle} profile`}
+					className="flex h-7 max-w-[120px] shrink-0 items-center truncate rounded-[7px] px-[5px] text-text-secondary no-underline transition-colors hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
 				>
-					{organizations.map((owner) => (
-						<div key={owner.id}>
-							<div className="flex items-baseline gap-1.5 px-2 pt-[7px] pb-1 text-[11.5px]">
-								<span className="min-w-0 truncate font-semibold text-text-secondary">
-									@{owner.handle}
-								</span>
-								<span className="shrink-0 text-text-tertiary">
-									· {owner.repositories.length}{" "}
-									{owner.repositories.length === 1 ? "repo" : "repos"}
-								</span>
-							</div>
-							{owner.repositories.map((repository) => {
-								const isActive = repository.id === activeRepository.id;
-								return (
-									<DropdownMenuItem
-										key={repository.id}
-										data-active={isActive || undefined}
-										className="data-[active]:bg-bg-selection-current data-[active]:text-text-primary data-[active]:focus:bg-bg-selection-current"
-										onSelect={() => openRepository(owner, repository)}
-									>
-										<RepositoryChip
-											initials={repositoryInitials(repository.name)}
-											palette={repositoryPalette(
-												paletteOrder.get(repository.id) ?? 0,
-											)}
-										/>
-										<span className="min-w-0 truncate">{repository.name}</span>
-										{isActive ? (
-											<Check
-												className="ml-auto size-3.5 shrink-0 stroke-[2.5] text-icon-selection-current"
-												aria-hidden="true"
-											/>
-										) : null}
-									</DropdownMenuItem>
-								);
-							})}
-						</div>
-					))}
-					<DropdownMenuSeparator />
-					<DropdownMenuItem
-						onSelect={() =>
-							void navigate({
-								to: "/@{$namespace}/$repository/settings",
-								params: {
-									namespace: organization.handle,
-									repository: activeRepository.slug,
-								},
-							})
-						}
+					{organization.handle}
+				</Link>
+				<span className="shrink-0 text-text-tertiary">/</span>
+				<DropdownMenu>
+					<DropdownMenuTrigger asChild>
+						<button
+							type="button"
+							data-testid="repository-picker"
+							aria-label={`Switch repository — current: ${organization.handle} / ${activeRepository.name}`}
+							className="flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-[7px] border-0 bg-transparent py-0 pr-1 pl-[5px] text-[13px] font-semibold text-text-primary transition-colors hover:bg-bg-hover-canvas focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible data-[state=open]:bg-bg-active"
+						>
+							<span className="max-w-[180px] truncate">
+								{activeRepository.name}
+							</span>
+							<ChevronDown
+								className="size-3.5 shrink-0 text-icon-tertiary"
+								aria-hidden="true"
+							/>
+						</button>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent
+						align="start"
+						sideOffset={6}
+						className="w-[248px] min-w-[248px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2 [&_[data-slot=dropdown-menu-item]]:py-[7px] [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:leading-tight [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle"
 					>
-						<Settings
-							className="size-3.5 text-icon-tertiary"
-							aria-hidden="true"
-						/>
-						Repository settings
-					</DropdownMenuItem>
-					<DropdownMenuItem onSelect={() => void navigate({ to: "/home" })}>
-						<LayoutGrid
-							className="size-3.5 text-icon-tertiary"
-							aria-hidden="true"
-						/>
-						All repositories
-					</DropdownMenuItem>
-					{canCreate ? (
-						<DropdownMenuItem onSelect={() => setCreating(true)}>
-							<Plus
+						{organizations.map((owner) => (
+							<div key={owner.id}>
+								<div className="flex items-baseline gap-1.5 px-2 pt-[7px] pb-1 text-[11.5px]">
+									<span className="min-w-0 truncate font-semibold text-text-secondary">
+										@{owner.handle}
+									</span>
+									<span className="shrink-0 text-text-tertiary">
+										· {owner.repositories.length}{" "}
+										{owner.repositories.length === 1 ? "repo" : "repos"}
+									</span>
+								</div>
+								{owner.repositories.map((repository) => {
+									const isActive = repository.id === activeRepository.id;
+									return (
+										<DropdownMenuItem
+											key={repository.id}
+											data-active={isActive || undefined}
+											className="data-[active]:bg-bg-selection-current data-[active]:text-text-primary data-[active]:focus:bg-bg-selection-current"
+											onSelect={() => openRepository(owner, repository)}
+										>
+											<RepositoryChip
+												initials={repositoryInitials(repository.name)}
+												palette={repositoryPalette(
+													paletteOrder.get(repository.id) ?? 0,
+												)}
+											/>
+											<span className="min-w-0 truncate">
+												{repository.name}
+											</span>
+											{isActive ? (
+												<Check
+													className="ml-auto size-3.5 shrink-0 stroke-[2.5] text-icon-selection-current"
+													aria-hidden="true"
+												/>
+											) : null}
+										</DropdownMenuItem>
+									);
+								})}
+							</div>
+						))}
+						<DropdownMenuSeparator />
+						<DropdownMenuItem
+							onSelect={() =>
+								void navigate({
+									to: "/@{$namespace}/$repository/settings",
+									params: {
+										namespace: organization.handle,
+										repository: activeRepository.slug,
+									},
+								})
+							}
+						>
+							<Settings
 								className="size-3.5 text-icon-tertiary"
 								aria-hidden="true"
 							/>
-							New repository
+							Repository settings
 						</DropdownMenuItem>
-					) : null}
-				</DropdownMenuContent>
-			</DropdownMenu>
+						<DropdownMenuItem onSelect={() => void navigate({ to: "/home" })}>
+							<LayoutGrid
+								className="size-3.5 text-icon-tertiary"
+								aria-hidden="true"
+							/>
+							All repositories
+						</DropdownMenuItem>
+						{canCreate ? (
+							<DropdownMenuItem onSelect={() => setCreating(true)}>
+								<Plus
+									className="size-3.5 text-icon-tertiary"
+									aria-hidden="true"
+								/>
+								New repository
+							</DropdownMenuItem>
+						) : null}
+					</DropdownMenuContent>
+				</DropdownMenu>
+			</span>
 			{canCreate ? (
 				<CreateRepositoryDialog
 					open={creating}

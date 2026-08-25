@@ -209,6 +209,88 @@ export function useRepositoryControlPlaneData(
 }
 
 /** The full directory/file tree, kept live via lix observe. */
+/**
+ * Files as of a commit: the empty-root diff, where the commit's full state
+ * appears as added rows. Null while loading (or when no commit is given).
+ */
+export function useFilesAtCommit(
+	lix: Lix,
+	commitId: string | null,
+): ReadonlyArray<{ readonly id: string; readonly path: string }> | null {
+	const rows = useObservedRows(
+		lix,
+		"SELECT row_pk ->> 0 AS id, to_path AS path FROM lix_diff('lix_file', lix_root_commit_id(), $1) ORDER BY to_path",
+		commitId ? [commitId] : [""],
+		commitId !== null,
+	);
+	return useMemo(() => {
+		if (!commitId) return null;
+		if (!rows.rows) return null;
+		const files: Array<{ readonly id: string; readonly path: string }> = [];
+		for (const row of rows.rows) {
+			const id = row.get("id");
+			const path = row.get("path");
+			if (typeof id === "string" && typeof path === "string") {
+				files.push({ id, path });
+			}
+		}
+		return files;
+	}, [commitId, rows.rows]);
+}
+
+/**
+ * A directory listing derived purely from file paths — the shape of the
+ * repository at a historical commit, where empty directories do not exist.
+ */
+export function listDirectoryFromFiles(
+	files: ReadonlyArray<{ readonly id: string; readonly path: string }>,
+	dirPath: string,
+	options: { readonly showHiddenFiles?: boolean } = {},
+): DirectoryListing {
+	const showHidden = options.showHiddenFiles === true;
+	const directory = canonicalDirectoryPath(dirPath);
+	const prefix = directory === "/" ? "/" : `${directory}/`;
+	const childDirs = new Map<string, number>();
+	const childFiles: DirectoryListing["files"][number][] = [];
+	for (const file of files) {
+		if (!file.path.startsWith(prefix)) continue;
+		const rest = file.path.slice(prefix.length);
+		if (!showHidden && rest.split("/").some((s) => s.startsWith("."))) {
+			continue;
+		}
+		const slash = rest.indexOf("/");
+		if (slash === -1) {
+			if (rest.length === 0) continue;
+			childFiles.push({
+				path: file.path,
+				name: rest,
+				updatedAt: "",
+				...(rest.startsWith(".") ? { hidden: true as const } : {}),
+			});
+			continue;
+		}
+		const dirName = rest.slice(0, slash);
+		childDirs.set(dirName, (childDirs.get(dirName) ?? 0) + 1);
+	}
+	const dirs = [...childDirs.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([name, itemCount]) => ({
+			path: directory === "/" ? `/${name}` : `${directory}/${name}`,
+			name,
+			itemCount,
+			...(name.startsWith(".") ? { hidden: true as const } : {}),
+		}));
+	const readme =
+		childFiles.find((file) => file.name.toLowerCase() === "readme.md") ?? null;
+	return {
+		dirs,
+		files: childFiles.sort((left, right) =>
+			left.name.localeCompare(right.name),
+		),
+		readmePath: readme?.path ?? null,
+	};
+}
+
 export function useRepositoryTree(
 	lix: Lix,
 	enabled = true,
