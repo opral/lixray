@@ -151,7 +151,7 @@ function ProfileContent({
 		) ?? null;
 	const isOwner = Boolean(
 		memberOrganization &&
-			(memberOrganization.isPersonal || memberOrganization.role === "owner"),
+		(memberOrganization.isPersonal || memberOrganization.role === "owner"),
 	);
 	const hasDetails =
 		Boolean(profile.title || profile.organization || profile.location) ||

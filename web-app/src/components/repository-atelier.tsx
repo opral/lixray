@@ -1427,7 +1427,10 @@ export function RepositoryOpeningSkeleton({
 	repositoryName?: string;
 }) {
 	return (
-		<div className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app" aria-busy>
+		<div
+			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
+			aria-busy
+		>
 			<AtelierSkeleton
 				topBarProps={REPOSITORY_TOP_BAR_PROPS}
 				slots={{

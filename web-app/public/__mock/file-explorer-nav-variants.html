@@ -1,216 +1,511 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Home file explorer — navigation variants</title>
-<style>
-	/* Real tokens from vendor/atelier/src/shell/theme.css */
-	:root {
-		--bg-app: rgb(244, 242, 239);
-		--bg-panel: rgb(255, 255, 255);
-		--bg-hover: rgb(245, 242, 237);
-		--bg-hover-canvas: rgb(236, 231, 223);
-		--bg-active: rgb(239, 232, 221);
-		--border-panel: rgb(236, 232, 226);
-		--border-subtle: rgb(244, 241, 236);
-		--text-primary: rgb(28, 25, 23);
-		--text-secondary: rgb(68, 64, 60);
-		--text-tertiary: rgb(120, 113, 108);
-		--text-quaternary: rgb(168, 162, 158);
-		--brand-600: rgb(234, 88, 12);
-		--brand-700: rgb(194, 65, 12);
-		--brand-soft: rgb(255, 247, 237);
-	}
-	* { box-sizing: border-box; margin: 0; }
-	body {
-		background: var(--bg-app);
-		color: var(--text-primary);
-		font: 14px/1.5 -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
-		padding: 40px 32px 80px;
-	}
-	.intro { max-width: 860px; margin: 0 auto 12px; }
-	.intro h1 { font-size: 22px; letter-spacing: -0.02em; margin-bottom: 8px; }
-	.intro p { color: var(--text-secondary); font-size: 13.5px; margin-bottom: 6px; }
-	.premise {
-		max-width: 860px; margin: 18px auto 40px; padding: 12px 16px;
-		background: var(--brand-soft); border: 1px solid rgb(254,215,170);
-		border-radius: 10px; font-size: 13px; color: var(--text-secondary);
-	}
-	.variant { max-width: 1120px; margin: 0 auto 56px; }
-	.variant > h2 {
-		font-size: 15px; letter-spacing: -0.01em; margin-bottom: 4px;
-	}
-	.variant > h2 .tag {
-		display: inline-block; background: var(--text-primary); color: #fff;
-		border-radius: 6px; padding: 1px 8px; font-size: 12px; margin-right: 8px;
-		vertical-align: 1px;
-	}
-	.variant > h2 .rec {
-		display: inline-block; background: var(--brand-600); color: #fff;
-		border-radius: 6px; padding: 1px 8px; font-size: 11px; margin-left: 8px;
-		vertical-align: 1px; letter-spacing: 0.04em;
-	}
-	.variant > .notes { color: var(--text-tertiary); font-size: 12.5px; margin-bottom: 14px; max-width: 860px; }
-	.variant > .notes b { color: var(--text-secondary); }
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Home file explorer — navigation variants</title>
+		<style>
+			/* Real tokens from vendor/atelier/src/shell/theme.css */
+			:root {
+				--bg-app: rgb(244, 242, 239);
+				--bg-panel: rgb(255, 255, 255);
+				--bg-hover: rgb(245, 242, 237);
+				--bg-hover-canvas: rgb(236, 231, 223);
+				--bg-active: rgb(239, 232, 221);
+				--border-panel: rgb(236, 232, 226);
+				--border-subtle: rgb(244, 241, 236);
+				--text-primary: rgb(28, 25, 23);
+				--text-secondary: rgb(68, 64, 60);
+				--text-tertiary: rgb(120, 113, 108);
+				--text-quaternary: rgb(168, 162, 158);
+				--brand-600: rgb(234, 88, 12);
+				--brand-700: rgb(194, 65, 12);
+				--brand-soft: rgb(255, 247, 237);
+			}
+			* {
+				box-sizing: border-box;
+				margin: 0;
+			}
+			body {
+				background: var(--bg-app);
+				color: var(--text-primary);
+				font:
+					14px/1.5 -apple-system,
+					"SF Pro Text",
+					"Segoe UI",
+					sans-serif;
+				padding: 40px 32px 80px;
+			}
+			.intro {
+				max-width: 860px;
+				margin: 0 auto 12px;
+			}
+			.intro h1 {
+				font-size: 22px;
+				letter-spacing: -0.02em;
+				margin-bottom: 8px;
+			}
+			.intro p {
+				color: var(--text-secondary);
+				font-size: 13.5px;
+				margin-bottom: 6px;
+			}
+			.premise {
+				max-width: 860px;
+				margin: 18px auto 40px;
+				padding: 12px 16px;
+				background: var(--brand-soft);
+				border: 1px solid rgb(254, 215, 170);
+				border-radius: 10px;
+				font-size: 13px;
+				color: var(--text-secondary);
+			}
+			.variant {
+				max-width: 1120px;
+				margin: 0 auto 56px;
+			}
+			.variant > h2 {
+				font-size: 15px;
+				letter-spacing: -0.01em;
+				margin-bottom: 4px;
+			}
+			.variant > h2 .tag {
+				display: inline-block;
+				background: var(--text-primary);
+				color: #fff;
+				border-radius: 6px;
+				padding: 1px 8px;
+				font-size: 12px;
+				margin-right: 8px;
+				vertical-align: 1px;
+			}
+			.variant > h2 .rec {
+				display: inline-block;
+				background: var(--brand-600);
+				color: #fff;
+				border-radius: 6px;
+				padding: 1px 8px;
+				font-size: 11px;
+				margin-left: 8px;
+				vertical-align: 1px;
+				letter-spacing: 0.04em;
+			}
+			.variant > .notes {
+				color: var(--text-tertiary);
+				font-size: 12.5px;
+				margin-bottom: 14px;
+				max-width: 860px;
+			}
+			.variant > .notes b {
+				color: var(--text-secondary);
+			}
 
-	/* ---- demo frame: the white content panel as in atelier ---- */
-	.frame {
-		background: var(--bg-panel); border: 1px solid var(--border-panel);
-		border-radius: 10px; overflow: hidden; box-shadow: 0 1px 2px rgba(28,25,23,0.03);
-	}
-	.canvas {
-		display: grid; grid-template-columns: minmax(0,1fr) 244px; gap: 48px;
-		width: min(1020px, calc(100% - 48px)); margin: 0 auto; padding: 40px 0;
-	}
-	/* explorer header row */
-	.xhead { display: flex; align-items: center; gap: 8px; padding-bottom: 20px; min-height: 36px; }
-	.xhead .grow { flex: 1; }
-	.label {
-		padding: 0 12px; font-size: 11.5px; font-weight: 700;
-		letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-quaternary);
-	}
-	button { font: inherit; cursor: pointer; }
-	.btn {
-		display: inline-flex; align-items: center; gap: 7px; height: 36px;
-		padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-panel);
-		background: var(--bg-panel); font-size: 13px; font-weight: 600;
-		color: var(--text-secondary); box-shadow: 0 1px 1px rgba(28,25,23,0.04);
-	}
-	.btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.btn.primary {
-		background: var(--brand-600); border-color: var(--brand-600); color: #fff;
-		box-shadow: 0 2px 6px rgba(234,88,12,0.25);
-	}
-	.btn.small { height: 30px; padding: 0 11px; font-size: 12.5px; }
-	.btn.full { width: 100%; justify-content: center; }
-	/* file rows */
-	.rows { }
-	.row {
-		display: flex; align-items: center; gap: 12px; padding: 9px 12px;
-		border-radius: 8px; font-weight: 600; font-size: 13.5px; cursor: pointer;
-		border: 0; background: transparent; width: 100%; text-align: left; color: var(--text-primary);
-	}
-	.row:hover { background: var(--bg-hover); }
-	.row .ico { width: 18px; text-align: center; }
-	.row .meta { margin-left: auto; color: var(--text-quaternary); font-weight: 400; font-size: 12.5px; }
-	.row.up { color: var(--text-tertiary); font-weight: 500; }
-	.readme { margin-top: 28px; border-top: 1px solid var(--border-subtle); padding-top: 20px; }
-	.readme .cap { font-size: 11px; color: var(--text-quaternary); margin-bottom: 10px; }
-	.readme h3 { font-size: 19px; letter-spacing: -0.02em; margin-bottom: 6px; }
-	.readme p { color: var(--text-secondary); font-size: 13.5px; }
-	/* right rail */
-	.rail section { border-bottom: 1px solid var(--border-panel); padding: 0 0 26px; margin-bottom: 26px; }
-	.rail h4 {
-		font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em;
-		text-transform: uppercase; color: var(--text-quaternary); margin-bottom: 12px;
-	}
-	.chip {
-		display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
-		border-radius: 7px; background: rgb(244,238,229); font-size: 11.5px; font-weight: 700;
-		color: var(--text-secondary); border: 0;
-	}
-	.bars { display: flex; align-items: flex-end; gap: 3px; height: 44px; border-bottom: 1px solid rgb(222,213,200); }
-	.bars span { flex: 1; border-radius: 2px 2px 0 0; background: rgb(240,180,138); }
-	.bars .dim { background: rgb(235,226,212); }
-	.bars .hot { background: var(--brand-600); }
-	.axis { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--text-quaternary); margin-top: 6px; }
-	.raillink {
-		margin-top: 14px; border: 0; background: none; padding: 0;
-		color: var(--brand-700); font-size: 12px; font-weight: 600;
-	}
-	.raillink:hover { color: rgb(154,52,18); }
-	/* breadcrumb pieces */
-	.crumb {
-		display: inline-flex; align-items: center; height: 30px; padding: 0 8px;
-		border-radius: 7px; border: 0; background: transparent;
-		font-size: 13.5px; font-weight: 600; color: var(--text-tertiary);
-	}
-	.crumb:hover { background: var(--bg-hover-canvas); color: var(--text-primary); }
-	.crumb.here { color: var(--text-primary); cursor: default; }
-	.crumb.here:hover { background: transparent; }
-	.crumb-sep { color: var(--text-quaternary); font-size: 12px; padding: 0 1px; }
-	.upbtn {
-		display: inline-flex; align-items: center; justify-content: center;
-		width: 30px; height: 30px; border-radius: 7px; border: 0;
-		background: transparent; color: var(--text-tertiary); font-size: 15px;
-	}
-	.upbtn:hover { background: var(--bg-hover-canvas); color: var(--text-primary); }
-	.upbtn[disabled] { opacity: 0.35; cursor: default; }
-	.upbtn[disabled]:hover { background: transparent; }
-	.hint { font-size: 11px; color: var(--text-quaternary); margin-top: 10px; padding: 0 4px; }
-</style>
-</head>
-<body>
+			/* ---- demo frame: the white content panel as in atelier ---- */
+			.frame {
+				background: var(--bg-panel);
+				border: 1px solid var(--border-panel);
+				border-radius: 10px;
+				overflow: hidden;
+				box-shadow: 0 1px 2px rgba(28, 25, 23, 0.03);
+			}
+			.canvas {
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) 244px;
+				gap: 48px;
+				width: min(1020px, calc(100% - 48px));
+				margin: 0 auto;
+				padding: 40px 0;
+			}
+			/* explorer header row */
+			.xhead {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				padding-bottom: 20px;
+				min-height: 36px;
+			}
+			.xhead .grow {
+				flex: 1;
+			}
+			.label {
+				padding: 0 12px;
+				font-size: 11.5px;
+				font-weight: 700;
+				letter-spacing: 0.06em;
+				text-transform: uppercase;
+				color: var(--text-quaternary);
+			}
+			button {
+				font: inherit;
+				cursor: pointer;
+			}
+			.btn {
+				display: inline-flex;
+				align-items: center;
+				gap: 7px;
+				height: 36px;
+				padding: 0 14px;
+				border-radius: 8px;
+				border: 1px solid var(--border-panel);
+				background: var(--bg-panel);
+				font-size: 13px;
+				font-weight: 600;
+				color: var(--text-secondary);
+				box-shadow: 0 1px 1px rgba(28, 25, 23, 0.04);
+			}
+			.btn:hover {
+				background: var(--bg-hover);
+				color: var(--text-primary);
+			}
+			.btn.primary {
+				background: var(--brand-600);
+				border-color: var(--brand-600);
+				color: #fff;
+				box-shadow: 0 2px 6px rgba(234, 88, 12, 0.25);
+			}
+			.btn.small {
+				height: 30px;
+				padding: 0 11px;
+				font-size: 12.5px;
+			}
+			.btn.full {
+				width: 100%;
+				justify-content: center;
+			}
+			/* file rows */
+			.rows {
+			}
+			.row {
+				display: flex;
+				align-items: center;
+				gap: 12px;
+				padding: 9px 12px;
+				border-radius: 8px;
+				font-weight: 600;
+				font-size: 13.5px;
+				cursor: pointer;
+				border: 0;
+				background: transparent;
+				width: 100%;
+				text-align: left;
+				color: var(--text-primary);
+			}
+			.row:hover {
+				background: var(--bg-hover);
+			}
+			.row .ico {
+				width: 18px;
+				text-align: center;
+			}
+			.row .meta {
+				margin-left: auto;
+				color: var(--text-quaternary);
+				font-weight: 400;
+				font-size: 12.5px;
+			}
+			.row.up {
+				color: var(--text-tertiary);
+				font-weight: 500;
+			}
+			.readme {
+				margin-top: 28px;
+				border-top: 1px solid var(--border-subtle);
+				padding-top: 20px;
+			}
+			.readme .cap {
+				font-size: 11px;
+				color: var(--text-quaternary);
+				margin-bottom: 10px;
+			}
+			.readme h3 {
+				font-size: 19px;
+				letter-spacing: -0.02em;
+				margin-bottom: 6px;
+			}
+			.readme p {
+				color: var(--text-secondary);
+				font-size: 13.5px;
+			}
+			/* right rail */
+			.rail section {
+				border-bottom: 1px solid var(--border-panel);
+				padding: 0 0 26px;
+				margin-bottom: 26px;
+			}
+			.rail h4 {
+				font-size: 11.5px;
+				font-weight: 700;
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+				color: var(--text-quaternary);
+				margin-bottom: 12px;
+			}
+			.chip {
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				height: 28px;
+				padding: 0 10px;
+				border-radius: 7px;
+				background: rgb(244, 238, 229);
+				font-size: 11.5px;
+				font-weight: 700;
+				color: var(--text-secondary);
+				border: 0;
+			}
+			.bars {
+				display: flex;
+				align-items: flex-end;
+				gap: 3px;
+				height: 44px;
+				border-bottom: 1px solid rgb(222, 213, 200);
+			}
+			.bars span {
+				flex: 1;
+				border-radius: 2px 2px 0 0;
+				background: rgb(240, 180, 138);
+			}
+			.bars .dim {
+				background: rgb(235, 226, 212);
+			}
+			.bars .hot {
+				background: var(--brand-600);
+			}
+			.axis {
+				display: flex;
+				justify-content: space-between;
+				font-size: 9.5px;
+				color: var(--text-quaternary);
+				margin-top: 6px;
+			}
+			.raillink {
+				margin-top: 14px;
+				border: 0;
+				background: none;
+				padding: 0;
+				color: var(--brand-700);
+				font-size: 12px;
+				font-weight: 600;
+			}
+			.raillink:hover {
+				color: rgb(154, 52, 18);
+			}
+			/* breadcrumb pieces */
+			.crumb {
+				display: inline-flex;
+				align-items: center;
+				height: 30px;
+				padding: 0 8px;
+				border-radius: 7px;
+				border: 0;
+				background: transparent;
+				font-size: 13.5px;
+				font-weight: 600;
+				color: var(--text-tertiary);
+			}
+			.crumb:hover {
+				background: var(--bg-hover-canvas);
+				color: var(--text-primary);
+			}
+			.crumb.here {
+				color: var(--text-primary);
+				cursor: default;
+			}
+			.crumb.here:hover {
+				background: transparent;
+			}
+			.crumb-sep {
+				color: var(--text-quaternary);
+				font-size: 12px;
+				padding: 0 1px;
+			}
+			.upbtn {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				width: 30px;
+				height: 30px;
+				border-radius: 7px;
+				border: 0;
+				background: transparent;
+				color: var(--text-tertiary);
+				font-size: 15px;
+			}
+			.upbtn:hover {
+				background: var(--bg-hover-canvas);
+				color: var(--text-primary);
+			}
+			.upbtn[disabled] {
+				opacity: 0.35;
+				cursor: default;
+			}
+			.upbtn[disabled]:hover {
+				background: transparent;
+			}
+			.hint {
+				font-size: 11px;
+				color: var(--text-quaternary);
+				margin-top: 10px;
+				padding: 0 4px;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="intro">
+			<h1>Home file explorer — folder navigation</h1>
+			<p>
+				<b>Feedback being addressed:</b> entering a folder shifts the whole
+				layout (the 1020px grid with the right rail collapses to a 760px single
+				column) and there is no obvious way back to the root.
+			</p>
+			<p>
+				Every variant below is clickable — enter folders, go back up. Watch what
+				the header does.
+			</p>
+		</div>
 
-<div class="intro">
-	<h1>Home file explorer — folder navigation</h1>
-	<p><b>Feedback being addressed:</b> entering a folder shifts the whole layout (the 1020px grid with the right rail collapses to a 760px single column) and there is no obvious way back to the root.</p>
-	<p>Every variant below is clickable — enter folders, go back up. Watch what the header does.</p>
-</div>
+		<div class="premise">
+			<b>Fixed premise (your proposal 1):</b> all variants keep the root layout
+			when navigating into folders — same grid, same rail, same width. The rail
+			stays repository-scoped (About / Changes / Database don't change per
+			folder). The variants only differ in the
+			<b>header affordance</b> (decision 2) and
+			<b>where Connect&nbsp;agent / Invite live</b> (decision 3).
+		</div>
 
-<div class="premise">
-	<b>Fixed premise (your proposal 1):</b> all variants keep the root layout when navigating into folders — same grid, same rail, same width. The rail stays repository-scoped (About / Changes / Database don't change per folder). The variants only differ in the <b>header affordance</b> (decision 2) and <b>where Connect&nbsp;agent / Invite live</b> (decision 3).
-</div>
+		<!-- ================= VARIANT A ================= -->
+		<div class="variant">
+			<h2>
+				<span class="tag">2a + 3a</span>Breadcrumb in the header, agent &amp;
+				team actions in the rail<span class="rec">RECOMMENDED</span>
+			</h2>
+			<div class="notes">
+				The "FILES" label is replaced by a breadcrumb that always starts at the
+				repository name — at root it reads like a title, in folders each
+				ancestor is clickable. <b>Connect agent</b> and <b>Invite</b> move to a
+				new "Team &amp; agents" rail section, so the header only carries
+				navigation + New and never wraps. <b>Trade-offs:</b> + matches the
+				top-bar breadcrumb pattern we just shipped (dev / peter); + scales to
+				deep paths (middle segments collapse to “…”); − repo name appears twice
+				on screen (top bar and here).
+			</div>
+			<div class="frame"><div class="canvas" id="vA"></div></div>
+		</div>
 
-<!-- ================= VARIANT A ================= -->
-<div class="variant">
-	<h2><span class="tag">2a + 3a</span>Breadcrumb in the header, agent &amp; team actions in the rail<span class="rec">RECOMMENDED</span></h2>
-	<div class="notes">
-		The "FILES" label is replaced by a breadcrumb that always starts at the repository name — at root it reads like a title, in folders each ancestor is clickable. <b>Connect agent</b> and <b>Invite</b> move to a new "Team &amp; agents" rail section, so the header only carries navigation + New and never wraps. <b>Trade-offs:</b> + matches the top-bar breadcrumb pattern we just shipped (dev / peter); + scales to deep paths (middle segments collapse to “…”); − repo name appears twice on screen (top bar and here).
-	</div>
-	<div class="frame"><div class="canvas" id="vA"></div></div>
-</div>
+		<!-- ================= VARIANT B ================= -->
+		<div class="variant">
+			<h2><span class="tag">2b + 3a</span>Back arrow + current folder name</h2>
+			<div class="notes">
+				Finder-style: a single <b>←</b> button (disabled at root) plus the
+				current folder name; the header otherwise never changes. Actions also
+				moved to the rail. <b>Trade-offs:</b> + minimal, zero layout churn; +
+				the ← position is a stable click target for walking all the way up; − no
+				random-access to ancestors (must click ← repeatedly); − “where am I?”
+				only shows one level.
+			</div>
+			<div class="frame"><div class="canvas" id="vB"></div></div>
+		</div>
 
-<!-- ================= VARIANT B ================= -->
-<div class="variant">
-	<h2><span class="tag">2b + 3a</span>Back arrow + current folder name</h2>
-	<div class="notes">
-		Finder-style: a single <b>←</b> button (disabled at root) plus the current folder name; the header otherwise never changes. Actions also moved to the rail. <b>Trade-offs:</b ,> + minimal, zero layout churn; + the ← position is a stable click target for walking all the way up; − no random-access to ancestors (must click ← repeatedly); − “where am I?” only shows one level.
-	</div>
-	<div class="frame"><div class="canvas" id="vB"></div></div>
-</div>
+		<!-- ================= VARIANT C ================= -->
+		<div class="variant">
+			<h2>
+				<span class="tag">2c + 3a</span>Persistent “FILES” label + “..” up-row
+				in the list
+			</h2>
+			<div class="notes">
+				The header literally never changes ("FILES" + New). Navigation state
+				lives in the list itself: a subdued <b>.. (up)</b> row pinned first
+				inside folders, and a small path line under the label.
+				<b>Trade-offs:</b> + absolutely zero header movement; + the
+				up-affordance is where the eyes already are (the list); − ".." is
+				developer-culture, less obvious to non-technical teammates; − path line
+				is small.
+			</div>
+			<div class="frame"><div class="canvas" id="vC"></div></div>
+		</div>
 
-<!-- ================= VARIANT C ================= -->
-<div class="variant">
-	<h2><span class="tag">2c + 3a</span>Persistent “FILES” label + “..” up-row in the list</h2>
-	<div class="notes">
-		The header literally never changes ("FILES" + New). Navigation state lives in the list itself: a subdued <b>.. (up)</b> row pinned first inside folders, and a small path line under the label. <b>Trade-offs:</b> + absolutely zero header movement; + the up-affordance is where the eyes already are (the list); − ".." is developer-culture, less obvious to non-technical teammates; − path line is small.
-	</div>
-	<div class="frame"><div class="canvas" id="vC"></div></div>
-</div>
+		<!-- ================= VARIANT D ================= -->
+		<div class="variant">
+			<h2>
+				<span class="tag">2a + 3b</span>Breadcrumb, but actions stay in the
+				header (for comparison)
+			</h2>
+			<div class="notes">
+				Same breadcrumb as A but Connect agent / Invite stay where they are
+				today. <b>Trade-offs:</b> + agent CTA stays prominent on the primary
+				surface; − on deep paths the header wraps to two lines (resize this
+				window to see) — exactly the kind of shift we're trying to kill; −
+				crowded.
+			</div>
+			<div class="frame"><div class="canvas" id="vD"></div></div>
+		</div>
 
-<!-- ================= VARIANT D ================= -->
-<div class="variant">
-	<h2><span class="tag">2a + 3b</span>Breadcrumb, but actions stay in the header (for comparison)</h2>
-	<div class="notes">
-		Same breadcrumb as A but Connect agent / Invite stay where they are today. <b>Trade-offs:</b> + agent CTA stays prominent on the primary surface; − on deep paths the header wraps to two lines (resize this window to see) — exactly the kind of shift we're trying to kill; − crowded.
-	</div>
-	<div class="frame"><div class="canvas" id="vD"></div></div>
-</div>
+		<script>
+			const TREE = {
+				"/": {
+					folders: ["automations", "brand", "docs", "notes", "sales", "skills"],
+					files: [["README.md", "Aug 17"]],
+				},
+				"/sales": {
+					folders: ["q3"],
+					files: [
+						["playbook.md", "Aug 19"],
+						["icp.md", "Aug 12"],
+						["leads.csv", "Aug 20"],
+					],
+				},
+				"/sales/q3": {
+					folders: [],
+					files: [
+						["forecast.csv", "Aug 21"],
+						["pipeline-review.md", "Aug 22"],
+					],
+				},
+				"/docs": {
+					folders: [],
+					files: [
+						["onboarding.md", "Aug 17"],
+						["handbook.md", "Aug 15"],
+					],
+				},
+				"/automations": {
+					folders: [],
+					files: [
+						["crm-sync.py", "Aug 22"],
+						["weekly-report.js", "Aug 18"],
+					],
+				},
+				"/brand": {
+					folders: [],
+					files: [
+						["logo.png", "Aug 10"],
+						["deck.pdf", "Aug 11"],
+					],
+				},
+				"/notes": { folders: [], files: [["ideas.md", "Aug 16"]] },
+				"/skills": {
+					folders: [],
+					files: [
+						["call-prep.md", "Aug 14"],
+						["research.md", "Aug 13"],
+					],
+				},
+			};
+			const REPO = "peter";
 
-<script>
-const TREE = {
-	"/": { folders: ["automations", "brand", "docs", "notes", "sales", "skills"], files: [["README.md", "Aug 17"]] },
-	"/sales": { folders: ["q3"], files: [["playbook.md", "Aug 19"], ["icp.md", "Aug 12"], ["leads.csv", "Aug 20"]] },
-	"/sales/q3": { folders: [], files: [["forecast.csv", "Aug 21"], ["pipeline-review.md", "Aug 22"]] },
-	"/docs": { folders: [], files: [["onboarding.md", "Aug 17"], ["handbook.md", "Aug 15"]] },
-	"/automations": { folders: [], files: [["crm-sync.py", "Aug 22"], ["weekly-report.js", "Aug 18"]] },
-	"/brand": { folders: [], files: [["logo.png", "Aug 10"], ["deck.pdf", "Aug 11"]] },
-	"/notes": { folders: [], files: [["ideas.md", "Aug 16"]] },
-	"/skills": { folders: [], files: [["call-prep.md", "Aug 14"], ["research.md", "Aug 13"]] },
-};
-const REPO = "peter";
-
-function railHTML(withActions) {
-	return `
+			function railHTML(withActions) {
+				return `
 	<aside class="rail">
-		${withActions ? `
+		${
+			withActions
+				? `
 		<section>
 			<h4>Team &amp; agents</h4>
 			<button class="btn small full" style="margin-bottom:8px">✳ ⊙ ✦&nbsp; Connect agent</button>
 			<button class="btn small full">⊕ Invite teammates</button>
-		</section>` : ``}
+		</section>`
+				: ``
+		}
 		<section>
 			<h4>About</h4>
 			<button class="chip">🔒 Private</button>
@@ -231,82 +526,92 @@ function railHTML(withActions) {
 			<button class="raillink">Open SQL Explorer →</button>
 		</section>
 	</aside>`;
-}
+			}
 
-function listHTML(path, opts = {}) {
-	const node = TREE[path];
-	let rows = "";
-	if (opts.upRow && path !== "/") {
-		rows += `<button class="row up" data-nav="${parentOf(path)}"><span class="ico">↰</span>..<span class="meta">up to ${parentLabel(path)}</span></button>`;
-	}
-	for (const f of node.folders) {
-		rows += `<button class="row" data-nav="${path === "/" ? "" : path}/${f}"><span class="ico">📁</span>${f}<span class="meta">${(TREE[(path === "/" ? "" : path) + "/" + f]?.folders.length ?? 0) + (TREE[(path === "/" ? "" : path) + "/" + f]?.files.length ?? 0)} items</span></button>`;
-	}
-	for (const [name, date] of node.files) {
-		rows += `<button class="row"><span class="ico">📄</span>${name}<span class="meta">${date}</span></button>`;
-	}
-	const readme = path === "/" ? `
+			function listHTML(path, opts = {}) {
+				const node = TREE[path];
+				let rows = "";
+				if (opts.upRow && path !== "/") {
+					rows += `<button class="row up" data-nav="${parentOf(path)}"><span class="ico">↰</span>..<span class="meta">up to ${parentLabel(path)}</span></button>`;
+				}
+				for (const f of node.folders) {
+					rows += `<button class="row" data-nav="${path === "/" ? "" : path}/${f}"><span class="ico">📁</span>${f}<span class="meta">${(TREE[(path === "/" ? "" : path) + "/" + f]?.folders.length ?? 0) + (TREE[(path === "/" ? "" : path) + "/" + f]?.files.length ?? 0)} items</span></button>`;
+				}
+				for (const [name, date] of node.files) {
+					rows += `<button class="row"><span class="ico">📄</span>${name}<span class="meta">${date}</span></button>`;
+				}
+				const readme =
+					path === "/"
+						? `
 		<div class="readme">
 			<div class="cap">README.md ✎</div>
 			<h3>Acme company repo</h3>
 			<p>The shared home for the team and our agents. Start with docs/onboarding.md.</p>
-		</div>` : "";
-	return `<div class="rows">${rows}</div>${readme}`;
-}
+		</div>`
+						: "";
+				return `<div class="rows">${rows}</div>${readme}`;
+			}
 
-const parentOf = (p) => p.split("/").slice(0, -1).join("/") || "/";
-const parentLabel = (p) => { const par = parentOf(p); return par === "/" ? REPO : par.split("/").pop(); };
+			const parentOf = (p) => p.split("/").slice(0, -1).join("/") || "/";
+			const parentLabel = (p) => {
+				const par = parentOf(p);
+				return par === "/" ? REPO : par.split("/").pop();
+			};
 
-function crumbHTML(path) {
-	const segs = path === "/" ? [] : path.slice(1).split("/");
-	let html = `<button class="crumb ${segs.length ? "" : "here"}" data-nav="/">${REPO}</button>`;
-	segs.forEach((seg, i) => {
-		const target = "/" + segs.slice(0, i + 1).join("/");
-		const here = i === segs.length - 1;
-		html += `<span class="crumb-sep">/</span><button class="crumb ${here ? "here" : ""}" ${here ? "" : `data-nav="${target}"`}>${seg}</button>`;
-	});
-	return html;
-}
+			function crumbHTML(path) {
+				const segs = path === "/" ? [] : path.slice(1).split("/");
+				let html = `<button class="crumb ${segs.length ? "" : "here"}" data-nav="/">${REPO}</button>`;
+				segs.forEach((seg, i) => {
+					const target = "/" + segs.slice(0, i + 1).join("/");
+					const here = i === segs.length - 1;
+					html += `<span class="crumb-sep">/</span><button class="crumb ${here ? "here" : ""}" ${here ? "" : `data-nav="${target}"`}>${seg}</button>`;
+				});
+				return html;
+			}
 
-const HEADERS = {
-	A: (path) => `${crumbHTML(path)}<span class="grow"></span><button class="btn primary">＋ New ▾</button>`,
-	B: (path) => `
+			const HEADERS = {
+				A: (path) =>
+					`${crumbHTML(path)}<span class="grow"></span><button class="btn primary">＋ New ▾</button>`,
+				B: (path) => `
 		<button class="upbtn" ${path === "/" ? "disabled" : `data-nav="${parentOf(path)}"`} title="Up one level">←</button>
 		<span style="font-weight:700;font-size:13.5px;padding:0 2px">${path === "/" ? '<span class="label" style="padding:0">Files</span>' : path.split("/").pop()}</span>
 		<span class="grow"></span><button class="btn primary">＋ New ▾</button>`,
-	C: (path) => `
+				C: (path) => `
 		<div>
 			<span class="label" style="padding-left:0">Files</span>
 			<div style="font-size:11.5px;color:var(--text-quaternary);padding-top:1px">${path === "/" ? "&nbsp;" : REPO + path}</div>
 		</div>
 		<span class="grow"></span><button class="btn primary">＋ New ▾</button>`,
-	D: (path) => `${crumbHTML(path)}<span class="grow"></span>
+				D: (path) => `${crumbHTML(path)}<span class="grow"></span>
 		<button class="btn">✳ ⊙ ✦&nbsp; Connect agent</button>
 		<button class="btn">⊕ Invite</button>
 		<button class="btn primary">＋ New ▾</button>`,
-};
+			};
 
-const state = { A: "/", B: "/", C: "/", D: "/" };
+			const state = { A: "/", B: "/", C: "/", D: "/" };
 
-function render(v) {
-	const el = document.getElementById("v" + v);
-	const path = state[v];
-	const withRailActions = v !== "D";
-	el.innerHTML = `
+			function render(v) {
+				const el = document.getElementById("v" + v);
+				const path = state[v];
+				const withRailActions = v !== "D";
+				el.innerHTML = `
 		<main style="min-width:0">
 			<div class="xhead">${HEADERS[v](path)}</div>
 			${listHTML(path, { upRow: v === "C" })}
 			<div class="hint">state: <b>${REPO}${path === "/" ? "" : path}</b> — folders are clickable</div>
 		</main>
 		${railHTML(withRailActions)}`;
-	el.querySelectorAll("[data-nav]").forEach((b) => {
-		b.addEventListener("click", () => {
-			const target = b.getAttribute("data-nav");
-			if (TREE[target]) { state[v] = target; render(v); }
-		});
-	});
-}
-for (const v of ["A", "B", "C", "D"]) render(v);
-</script>
-</body>
+				el.querySelectorAll("[data-nav]").forEach((b) => {
+					b.addEventListener("click", () => {
+						const target = b.getAttribute("data-nav");
+						if (TREE[target]) {
+							state[v] = target;
+							render(v);
+						}
+					});
+				});
+			}
+			for (const v of ["A", "B", "C", "D"]) render(v);
+		</script>
+	</body>
 </html>

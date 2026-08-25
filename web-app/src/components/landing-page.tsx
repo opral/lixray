@@ -85,7 +85,7 @@ export function LandingPage() {
 							.landing-headline-reel { animation: none; }
 						}
 					`}</style>
-						<p className="m-0 text-lg leading-[1.6] text-[#57534e] text-pretty">
+					<p className="m-0 text-lg leading-[1.6] text-[#57534e] text-pretty">
 						One repo you and your agents share. Any file type, every change
 						tracked.
 					</p>

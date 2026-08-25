@@ -1159,35 +1159,35 @@ function DiffGlyph({
 			aria-label={title}
 			className={`inline-flex ${className ?? ""}`}
 		>
-		<svg width={12} height={12} viewBox="0 0 12 12" aria-hidden="true">
-			<circle cx="6" cy="6" r="5" fill={fill} />
-			{kind === "added" ? (
-				<path
-					d="M6 3.6v4.8M3.6 6h4.8"
-					stroke={knockout}
-					strokeWidth="1.7"
-					strokeLinecap="round"
-				/>
-			) : null}
-			{kind === "removed" ? (
-				<path
-					d="M3.6 6h4.8"
-					stroke={knockout}
-					strokeWidth="1.7"
-					strokeLinecap="round"
-				/>
-			) : null}
-			{kind === "moved" ? (
-				<path
-					d="M4.8 3.6 7.2 6 4.8 8.4"
-					stroke={knockout}
-					strokeWidth="1.7"
-					fill="none"
-					strokeLinecap="round"
-					strokeLinejoin="round"
-				/>
-			) : null}
-		</svg>
+			<svg width={12} height={12} viewBox="0 0 12 12" aria-hidden="true">
+				<circle cx="6" cy="6" r="5" fill={fill} />
+				{kind === "added" ? (
+					<path
+						d="M6 3.6v4.8M3.6 6h4.8"
+						stroke={knockout}
+						strokeWidth="1.7"
+						strokeLinecap="round"
+					/>
+				) : null}
+				{kind === "removed" ? (
+					<path
+						d="M3.6 6h4.8"
+						stroke={knockout}
+						strokeWidth="1.7"
+						strokeLinecap="round"
+					/>
+				) : null}
+				{kind === "moved" ? (
+					<path
+						d="M4.8 3.6 7.2 6 4.8 8.4"
+						stroke={knockout}
+						strokeWidth="1.7"
+						fill="none"
+						strokeLinecap="round"
+						strokeLinejoin="round"
+					/>
+				) : null}
+			</svg>
 		</span>
 	);
 }

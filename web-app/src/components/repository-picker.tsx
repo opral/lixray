@@ -128,83 +128,85 @@ export function RepositoryPicker({
 							/>
 						</button>
 					</DropdownMenuTrigger>
-				<DropdownMenuContent
-					align="start"
-					sideOffset={6}
-					className="w-[248px] min-w-[248px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2 [&_[data-slot=dropdown-menu-item]]:py-[7px] [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:leading-tight [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle"
-				>
-					{organizations.map((owner) => (
-						<div key={owner.id}>
-							<div className="flex items-baseline gap-1.5 px-2 pt-[7px] pb-1 text-[11.5px]">
-								<span className="min-w-0 truncate font-semibold text-text-secondary">
-									@{owner.handle}
-								</span>
-								<span className="shrink-0 text-text-tertiary">
-									· {owner.repositories.length}{" "}
-									{owner.repositories.length === 1 ? "repo" : "repos"}
-								</span>
-							</div>
-							{owner.repositories.map((repository) => {
-								const isActive = repository.id === activeRepository.id;
-								return (
-									<DropdownMenuItem
-										key={repository.id}
-										data-active={isActive || undefined}
-										className="data-[active]:bg-bg-selection-current data-[active]:text-text-primary data-[active]:focus:bg-bg-selection-current"
-										onSelect={() => openRepository(owner, repository)}
-									>
-										<RepositoryChip
-											initials={repositoryInitials(repository.name)}
-											palette={repositoryPalette(
-												paletteOrder.get(repository.id) ?? 0,
-											)}
-										/>
-										<span className="min-w-0 truncate">{repository.name}</span>
-										{isActive ? (
-											<Check
-												className="ml-auto size-3.5 shrink-0 stroke-[2.5] text-icon-selection-current"
-												aria-hidden="true"
-											/>
-										) : null}
-									</DropdownMenuItem>
-								);
-							})}
-						</div>
-					))}
-					<DropdownMenuSeparator />
-					<DropdownMenuItem
-						onSelect={() =>
-							void navigate({
-								to: "/@{$namespace}/$repository/settings",
-								params: {
-									namespace: organization.handle,
-									repository: activeRepository.slug,
-								},
-							})
-						}
+					<DropdownMenuContent
+						align="start"
+						sideOffset={6}
+						className="w-[248px] min-w-[248px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2 [&_[data-slot=dropdown-menu-item]]:py-[7px] [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:leading-tight [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle"
 					>
-						<Settings
-							className="size-3.5 text-icon-tertiary"
-							aria-hidden="true"
-						/>
-						Repository settings
-					</DropdownMenuItem>
-					<DropdownMenuItem onSelect={() => void navigate({ to: "/home" })}>
-						<LayoutGrid
-							className="size-3.5 text-icon-tertiary"
-							aria-hidden="true"
-						/>
-						All repositories
-					</DropdownMenuItem>
-					{canCreate ? (
-						<DropdownMenuItem onSelect={() => setCreating(true)}>
-							<Plus
+						{organizations.map((owner) => (
+							<div key={owner.id}>
+								<div className="flex items-baseline gap-1.5 px-2 pt-[7px] pb-1 text-[11.5px]">
+									<span className="min-w-0 truncate font-semibold text-text-secondary">
+										@{owner.handle}
+									</span>
+									<span className="shrink-0 text-text-tertiary">
+										· {owner.repositories.length}{" "}
+										{owner.repositories.length === 1 ? "repo" : "repos"}
+									</span>
+								</div>
+								{owner.repositories.map((repository) => {
+									const isActive = repository.id === activeRepository.id;
+									return (
+										<DropdownMenuItem
+											key={repository.id}
+											data-active={isActive || undefined}
+											className="data-[active]:bg-bg-selection-current data-[active]:text-text-primary data-[active]:focus:bg-bg-selection-current"
+											onSelect={() => openRepository(owner, repository)}
+										>
+											<RepositoryChip
+												initials={repositoryInitials(repository.name)}
+												palette={repositoryPalette(
+													paletteOrder.get(repository.id) ?? 0,
+												)}
+											/>
+											<span className="min-w-0 truncate">
+												{repository.name}
+											</span>
+											{isActive ? (
+												<Check
+													className="ml-auto size-3.5 shrink-0 stroke-[2.5] text-icon-selection-current"
+													aria-hidden="true"
+												/>
+											) : null}
+										</DropdownMenuItem>
+									);
+								})}
+							</div>
+						))}
+						<DropdownMenuSeparator />
+						<DropdownMenuItem
+							onSelect={() =>
+								void navigate({
+									to: "/@{$namespace}/$repository/settings",
+									params: {
+										namespace: organization.handle,
+										repository: activeRepository.slug,
+									},
+								})
+							}
+						>
+							<Settings
 								className="size-3.5 text-icon-tertiary"
 								aria-hidden="true"
 							/>
-							New repository
+							Repository settings
 						</DropdownMenuItem>
-					) : null}
+						<DropdownMenuItem onSelect={() => void navigate({ to: "/home" })}>
+							<LayoutGrid
+								className="size-3.5 text-icon-tertiary"
+								aria-hidden="true"
+							/>
+							All repositories
+						</DropdownMenuItem>
+						{canCreate ? (
+							<DropdownMenuItem onSelect={() => setCreating(true)}>
+								<Plus
+									className="size-3.5 text-icon-tertiary"
+									aria-hidden="true"
+								/>
+								New repository
+							</DropdownMenuItem>
+						) : null}
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</span>

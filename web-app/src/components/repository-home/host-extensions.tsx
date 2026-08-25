@@ -172,8 +172,7 @@ function mountDirectoryView({
 					diffSession={runtime.diff?.session ?? null}
 					{...(runtime.diff
 						? {
-								onOpenDiffFile: (path: string) =>
-									runtime.diff?.openFile(path),
+								onOpenDiffFile: (path: string) => runtime.diff?.openFile(path),
 							}
 						: {})}
 					dirPath={dirPath(candidate)}

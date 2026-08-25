@@ -284,7 +284,9 @@ export function listDirectoryFromFiles(
 		childFiles.find((file) => file.name.toLowerCase() === "readme.md") ?? null;
 	return {
 		dirs,
-		files: childFiles.sort((left, right) => left.name.localeCompare(right.name)),
+		files: childFiles.sort((left, right) =>
+			left.name.localeCompare(right.name),
+		),
 		readmePath: readme?.path ?? null,
 	};
 }
