@@ -13,11 +13,10 @@ the Rust tracing adapter when it opens Lix through `lix_sdk`.
 ## SDK exposure
 
 The Rust SDK accepts an `Arc<dyn TelemetrySink>` through
-`open_lix_with_telemetry`. The engine calls `enabled` before building
+`open_lix().with_telemetry(...)`. The engine calls `enabled` before building
 attributes, then uses the returned start/finish handle to preserve async span
-parentage. `TracingTelemetrySink` is the explicit adapter for hosts that use
-the Rust `tracing` ecosystem; Lix never installs a global subscriber or
-exporter.
+parentage. `OpenTelemetryTracingSink` captures an explicit `tracing::Dispatch`
+configured by the host; Lix never installs a global subscriber or exporter.
 
 The JS SDK accepts `openLix({ telemetry: { onSpan(span) {} } })`. Local browser
 and Node execution forwards the completed engine span through the native or
@@ -34,13 +33,12 @@ session binds to a Lix (handshake session create, in-process client
 span is the north star. LixRay does not emit a parallel product event named
 `repository_opened`, `lixray_repository_opened`, or `webapp_repository_opened`.
 
-Lix spans stay `lix.*` on the TelemetrySink / OTLP path. LixRay also captures
-`lix.repository.opened` as a PostHog `$ai_span` whose `$ai_span_name` equals
-the Lix name. On lix-server, `HostTelemetrySink` watches completed
-`lix.repository.opened` spans and captures that `$ai_span` with the session
-account as `distinct_id`. In-process WASM uses the same mapping from `onSpan`
-when `span.name` is `lix.repository.opened`. Remote/sync clients must not
-attach a second mapper: the span stays on the server.
+Lix spans stay `lix.*` on the TelemetrySink / OTLP path. LixRay's host-owned
+OpenTelemetry provider exports them and projects each completed identified
+`lix.repository.opened` span to a PostHog `$ai_span` whose `$ai_span_name`
+equals the Lix name. In-process WASM uses the same mapping from `onSpan` when
+`span.name` is `lix.repository.opened`. Remote/sync clients must not attach a
+second mapper: the span stays on the server.
 
 MCP `open_lix` does not invent an `mcp.open_lix` `$ai_span`. Official
 `$mcp_tool_call` keeps `$mcp_duration_ms` as harness wall clock. Cache admission
@@ -143,11 +141,11 @@ Infisical supplies these production variables directly to the Railway
 - `POSTHOG_HOST`
 - `POSTHOG_ENVIRONMENT=production`
 
-The server exports OTLP HTTP/protobuf to `<POSTHOG_HOST>/i/v1/traces`. Missing
-or invalid telemetry configuration never prevents the server from starting.
-
-Set `RUST_LOG=lixray=info,lix_sql=info` too: Lix SQL spans use the separate
-`lix_sql` tracing target and are otherwise filtered out.
+The server exports OTLP HTTP/protobuf to `<POSTHOG_HOST>/i/v1/traces` and uses
+the same provider's downstream processor for the `$ai_span` projection.
+Missing or invalid telemetry configuration never prevents the server from
+starting. `RUST_LOG` controls formatted server logs only; it does not enable or
+disable OpenTelemetry spans.
 
 ## Daily sweeper query
 

@@ -1,17 +1,13 @@
 use anyhow::{Context, Result};
-use lix_sdk::telemetry::{
-    OpenTelemetryTracingSink, SpanContext, TelemetrySink, TelemetrySpanClass,
-    TelemetrySpanDescriptor, TelemetrySpanEnd, TelemetrySpanEnterGuard, TelemetrySpanHandle,
-    TelemetrySpanStart, TelemetryValue,
-};
-use opentelemetry::trace::TracerProvider as _;
-use opentelemetry::KeyValue;
+use lix_sdk::telemetry::{OpenTelemetryTracingSink, TelemetrySink};
+use opentelemetry::{trace::TracerProvider as _, KeyValue, Value};
 use opentelemetry_otlp::{Compression, Protocol, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::{
+    error::{OTelSdkError, OTelSdkResult},
     runtime,
     trace::{
         span_processor_with_async_runtime::BatchSpanProcessor, BatchConfigBuilder,
-        SdkTracerProvider, SpanExporter,
+        SdkTracerProvider, SpanData, SpanExporter,
     },
     Resource,
 };
@@ -26,13 +22,12 @@ use tracing_subscriber::{
     fmt::format::FmtSpan,
     layer::{Context as LayerContext, SubscriberExt},
     registry::LookupSpan,
-    util::SubscriberInitExt,
     EnvFilter, Layer,
 };
 
 const DEFAULT_POSTHOG_HOST: &str = "https://us.i.posthog.com";
 const PERF_SPAN_EVENTS_ENV: &str = "LIXRAY_PERF_SPANS";
-const SQL_TELEMETRY_DIRECTIVE: &str = "lix_sql=info";
+const OTEL_TELEMETRY_FILTER: &str = "lixray=info,lix=info,lix_sql=info";
 
 #[derive(Clone, Debug, Default)]
 /// Tracks SQL spans that have started under a protocol request but have not closed.
@@ -233,23 +228,26 @@ impl Visit for SqlActivityVisitor<'_> {
     fn record_debug(&mut self, _field: &tracing::field::Field, _value: &dyn std::fmt::Debug) {}
 }
 
-/// Installs server tracing and returns its exporter and in-flight SQL registry.
-pub fn init() -> (Option<SdkTracerProvider>, InFlightSqlRegistry) {
-    let provider = match posthog_provider_from_env() {
+/// Host-owned telemetry runtime. Lix receives only the vendor-neutral sink;
+/// exporters, filtering, and PostHog projections remain server concerns.
+pub struct TelemetryRuntime {
+    pub trace_provider: SdkTracerProvider,
+    pub in_flight_sql: InFlightSqlRegistry,
+    pub lix_sink: Arc<dyn TelemetrySink>,
+}
+
+/// Installs server tracing and builds the explicitly configured Lix sink.
+pub fn init() -> TelemetryRuntime {
+    let provider = match provider_from_env() {
         Ok(provider) => provider,
         Err(error) => {
             eprintln!(
-                "failed to initialize PostHog trace export; continuing without it: {error:#}"
+                "failed to initialize PostHog telemetry; continuing without export: {error:#}"
             );
-            None
+            SdkTracerProvider::builder().build()
         }
     };
-    // Lix's OpenTelemetryTracingSink requires the tracing subscriber to assign
-    // real OpenTelemetry span contexts even when remote export is disabled.
-    let tracing_provider = provider
-        .clone()
-        .unwrap_or_else(|| SdkTracerProvider::builder().build());
-    let tracer = tracing_provider.tracer("lix-server");
+    let tracer = provider.tracer("lix-server");
     let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
     let span_events = if perf_span_events_enabled() {
         FmtSpan::CLOSE
@@ -257,24 +255,27 @@ pub fn init() -> (Option<SdkTracerProvider>, InFlightSqlRegistry) {
         FmtSpan::NONE
     };
     let in_flight_sql = InFlightSqlRegistry::default();
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"))
-        .add_directive(
-            SQL_TELEMETRY_DIRECTIVE
-                .parse()
-                .expect("the built-in SQL telemetry directive is valid"),
-        );
-
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(tracing_subscriber::fmt::layer().with_span_events(span_events))
-        .with(telemetry_layer)
+    let log_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let telemetry_filter = EnvFilter::new(OTEL_TELEMETRY_FILTER);
+    let subscriber = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_span_events(span_events)
+                .with_filter(log_filter),
+        )
+        .with(telemetry_layer.with_filter(telemetry_filter))
         .with(InFlightSqlLayer {
             registry: in_flight_sql.clone(),
-        })
-        .init();
+        });
+    let dispatch = tracing::Dispatch::new(subscriber);
+    tracing::dispatcher::set_global_default(dispatch.clone())
+        .expect("install the lix-server tracing dispatch once");
 
-    (provider, in_flight_sql)
+    TelemetryRuntime {
+        trace_provider: provider,
+        in_flight_sql,
+        lix_sink: Arc::new(OpenTelemetryTracingSink::new(dispatch)),
+    }
 }
 
 fn perf_span_events_enabled() -> bool {
@@ -283,7 +284,35 @@ fn perf_span_events_enabled() -> bool {
         .is_some_and(|value| matches!(value.trim(), "1" | "true"))
 }
 
-fn posthog_provider_from_env() -> Result<Option<SdkTracerProvider>> {
+fn provider_from_env() -> Result<SdkTracerProvider> {
+    let Some(config) = posthog_config_from_env()? else {
+        return Ok(SdkTracerProvider::builder().build());
+    };
+    let endpoint = format!("{}/i/v1/traces", config.host.trim_end_matches('/'));
+    let exporter = build_posthog_exporter(endpoint, &config.token)?;
+    let resource = Resource::builder()
+        .with_service_name("lix-server")
+        .with_attributes([
+            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+            KeyValue::new("deployment.environment.name", "production"),
+        ])
+        .build();
+    let otlp = batch_span_processor(exporter);
+    let ai_spans = batch_span_processor(PostHogAiSpanExporter::new(config));
+    Ok(SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_span_processor(otlp)
+        .with_span_processor(ai_spans)
+        .build())
+}
+
+#[derive(Clone)]
+struct PostHogConfig {
+    token: String,
+    host: String,
+}
+
+fn posthog_config_from_env() -> Result<Option<PostHogConfig>> {
     if env::var("POSTHOG_ENVIRONMENT").ok().as_deref() != Some("production") {
         return Ok(None);
     }
@@ -292,16 +321,7 @@ fn posthog_provider_from_env() -> Result<Option<SdkTracerProvider>> {
     };
     let host =
         optional_nonempty_env("POSTHOG_HOST")?.unwrap_or_else(|| DEFAULT_POSTHOG_HOST.to_string());
-    let endpoint = format!("{}/i/v1/traces", host.trim_end_matches('/'));
-    let exporter = build_posthog_exporter(endpoint, &token)?;
-    let resource = Resource::builder()
-        .with_service_name("lix-server")
-        .with_attributes([
-            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-            KeyValue::new("deployment.environment.name", "production"),
-        ])
-        .build();
-    Ok(Some(provider_with_tokio_batch_exporter(exporter, resource)))
+    Ok(Some(PostHogConfig { token, host }))
 }
 
 fn build_posthog_exporter(
@@ -323,22 +343,20 @@ fn build_posthog_exporter(
     Ok(exporter)
 }
 
-fn provider_with_tokio_batch_exporter<T>(exporter: T, resource: Resource) -> SdkTracerProvider
+fn batch_span_processor<T>(exporter: T) -> BatchSpanProcessor<TokioBatchRuntime>
 where
     T: SpanExporter + 'static,
 {
-    let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio)
+    BatchSpanProcessor::builder(exporter, runtime::Tokio)
         .with_batch_config(
             BatchConfigBuilder::default()
                 .with_max_export_timeout(Duration::from_secs(5))
                 .build(),
         )
-        .build();
-    SdkTracerProvider::builder()
-        .with_resource(resource)
-        .with_span_processor(processor)
         .build()
 }
+
+type TokioBatchRuntime = runtime::Tokio;
 
 const ANONYMOUS_ACCOUNT_ID: &str = lix_sdk::ANONYMOUS_ACCOUNT_ID;
 const DEMO_ACCOUNT_ID: &str = "lixray-demo";
@@ -346,127 +364,97 @@ const AI_SPAN_EVENT: &str = "$ai_span";
 const LIX_REPOSITORY_OPENED_SPAN_NAME: &str = "lix.repository.opened";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LixRepositoryOpenedAiSpan {
-    pub distinct_id: String,
-    pub lix_id: String,
-    pub branch_id: Option<String>,
-    pub repository_id: Option<String>,
-    pub organization_id: Option<String>,
-    pub environment: String,
-    pub source: Option<String>,
-    pub trace_id: Option<String>,
-    pub span_id: Option<String>,
+struct LixRepositoryOpenedAiSpan {
+    distinct_id: String,
+    lix_id: String,
+    branch_id: Option<String>,
+    repository_id: Option<String>,
+    organization_id: Option<String>,
+    environment: String,
+    source: Option<String>,
+    trace_id: String,
+    span_id: String,
 }
 
-pub trait LixRepositoryOpenedCapture: Send + Sync {
-    fn capture(&self, event: LixRepositoryOpenedAiSpan);
+/// PostHog-specific projection of completed OpenTelemetry spans. The batch
+/// processor invokes this exporter off the repository/session critical path.
+#[derive(Debug)]
+struct PostHogAiSpanExporter {
+    client: reqwest::Client,
+    token: String,
+    endpoint: String,
 }
 
-/// Host sink: Lix spans stay on the tracing/OTLP path. `lix.repository.opened`
-/// is also captured as `$ai_span` with the Lix name when the session has an
-/// identified person. This is not a parallel product event.
-#[derive(Clone)]
-pub struct HostTelemetrySink {
-    tracing: OpenTelemetryTracingSink,
-    product: Option<Arc<dyn LixRepositoryOpenedCapture>>,
-    source: &'static str,
-}
-
-impl HostTelemetrySink {
-    pub fn from_env() -> Self {
+impl PostHogAiSpanExporter {
+    fn new(config: PostHogConfig) -> Self {
         Self {
-            tracing: OpenTelemetryTracingSink::new(),
-            product: product_capture_from_env(),
-            source: "server",
+            client: reqwest::Client::new(),
+            token: config.token,
+            endpoint: format!("{}/i/v0/e/", config.host.trim_end_matches('/')),
         }
-    }
-
-    pub fn with_product_capture(product: Arc<dyn LixRepositoryOpenedCapture>) -> Self {
-        Self {
-            tracing: OpenTelemetryTracingSink::new(),
-            product: Some(product),
-            source: "server",
-        }
-    }
-
-    fn repository_opened(&self, start: &TelemetrySpanStart) -> Option<LixRepositoryOpenedAiSpan> {
-        if start.class != TelemetrySpanClass::Lifecycle
-            || start.name != LIX_REPOSITORY_OPENED_SPAN_NAME
-        {
-            return None;
-        }
-        let lix_id = string_attribute(start, "lix.id")?.to_owned();
-        let distinct_id =
-            identified_distinct_id(string_attribute(start, "lix.account_id"))?.to_owned();
-        let branch_id = string_attribute(start, "lix.branch_id").map(ToOwned::to_owned);
-        Some(LixRepositoryOpenedAiSpan {
-            distinct_id,
-            repository_id: Some(lix_id.clone()),
-            lix_id,
-            branch_id,
-            organization_id: None,
-            environment: "production".to_string(),
-            source: Some(self.source.to_string()),
-            trace_id: None,
-            span_id: None,
-        })
     }
 }
 
-impl TelemetrySink for HostTelemetrySink {
-    fn enabled(&self, descriptor: &TelemetrySpanDescriptor) -> bool {
-        if descriptor.class() == TelemetrySpanClass::Lifecycle
-            && descriptor.name() == LIX_REPOSITORY_OPENED_SPAN_NAME
-        {
-            self.product.is_some() || self.tracing.enabled(descriptor)
-        } else {
-            self.tracing.enabled(descriptor)
-        }
-    }
-
-    fn start_span(&self, start: TelemetrySpanStart) -> Box<dyn TelemetrySpanHandle> {
-        let tracing = self.tracing.start_span(start.clone());
-        if start.class == TelemetrySpanClass::Lifecycle
-            && start.name == LIX_REPOSITORY_OPENED_SPAN_NAME
-        {
-            if let Some(product) = self.product.clone() {
-                return Box::new(HostOpenedSpan {
-                    tracing,
-                    product,
-                    event: self.repository_opened(&start),
+impl SpanExporter for PostHogAiSpanExporter {
+    fn export(
+        &self,
+        batch: Vec<SpanData>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+        let client = self.client.clone();
+        let token = self.token.clone();
+        let endpoint = self.endpoint.clone();
+        let events = batch
+            .iter()
+            .filter_map(repository_opened_ai_span)
+            .collect::<Vec<_>>();
+        async move {
+            for event in events {
+                let body = serde_json::json!({
+                    "api_key": token,
+                    "event": AI_SPAN_EVENT,
+                    "distinct_id": event.distinct_id,
+                    "properties": ai_span_properties(&event),
                 });
+                let response =
+                    client
+                        .post(&endpoint)
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|error| {
+                            OTelSdkError::InternalFailure(format!(
+                                "send lix.repository.opened $ai_span: {error}"
+                            ))
+                        })?;
+                if !response.status().is_success() {
+                    return Err(OTelSdkError::InternalFailure(format!(
+                        "send lix.repository.opened $ai_span: HTTP {}",
+                        response.status()
+                    )));
+                }
             }
+            Ok(())
         }
-        tracing
     }
 }
 
-struct HostOpenedSpan {
-    tracing: Box<dyn TelemetrySpanHandle>,
-    product: Arc<dyn LixRepositoryOpenedCapture>,
-    event: Option<LixRepositoryOpenedAiSpan>,
-}
-
-impl TelemetrySpanHandle for HostOpenedSpan {
-    fn span_context(&self) -> &SpanContext {
-        self.tracing.span_context()
+fn repository_opened_ai_span(span: &SpanData) -> Option<LixRepositoryOpenedAiSpan> {
+    if span.name != LIX_REPOSITORY_OPENED_SPAN_NAME {
+        return None;
     }
-
-    fn enter(&self) -> Box<dyn TelemetrySpanEnterGuard + '_> {
-        self.tracing.enter()
-    }
-
-    fn finish(self: Box<Self>, end: TelemetrySpanEnd) {
-        if let Some(mut event) = self.event {
-            let context = self.tracing.span_context();
-            if context.is_valid() {
-                event.trace_id = Some(context.trace_id().to_string());
-                event.span_id = Some(context.span_id().to_string());
-            }
-            self.product.capture(event);
-        }
-        self.tracing.finish(end);
-    }
+    let lix_id = span_string_attribute(span, "lix.id")?.to_owned();
+    let distinct_id = identified_distinct_id(span_string_attribute(span, "lix.account_id"))?;
+    Some(LixRepositoryOpenedAiSpan {
+        distinct_id: distinct_id.to_owned(),
+        repository_id: Some(lix_id.clone()),
+        lix_id,
+        branch_id: span_string_attribute(span, "lix.branch_id").map(ToOwned::to_owned),
+        organization_id: None,
+        environment: "production".to_string(),
+        source: Some("server".to_string()),
+        trace_id: span.span_context.trace_id().to_string(),
+        span_id: span.span_context.span_id().to_string(),
+    })
 }
 
 fn identified_distinct_id(account_id: Option<&str>) -> Option<&str> {
@@ -481,85 +469,17 @@ fn identified_distinct_id(account_id: Option<&str>) -> Option<&str> {
     }
 }
 
-fn string_attribute<'a>(start: &'a TelemetrySpanStart, key: &str) -> Option<&'a str> {
-    start.attributes.iter().find_map(|attribute| {
-        if attribute.key == key {
+fn span_string_attribute<'a>(span: &'a SpanData, key: &str) -> Option<&'a str> {
+    span.attributes.iter().find_map(|attribute| {
+        if attribute.key.as_str() == key {
             match &attribute.value {
-                TelemetryValue::String(value) if !value.is_empty() => Some(value.as_str()),
+                Value::String(value) if !value.as_str().is_empty() => Some(value.as_str()),
                 _ => None,
             }
         } else {
             None
         }
     })
-}
-
-fn product_capture_from_env() -> Option<Arc<dyn LixRepositoryOpenedCapture>> {
-    match posthog_product_config_from_env() {
-        Ok(Some(config)) => Some(Arc::new(PostHogProductCapture::new(config))),
-        Ok(None) => None,
-        Err(error) => {
-            eprintln!(
-                "failed to initialize PostHog product events; continuing without them: {error:#}"
-            );
-            None
-        }
-    }
-}
-
-struct PostHogProductConfig {
-    token: String,
-    host: String,
-}
-
-fn posthog_product_config_from_env() -> Result<Option<PostHogProductConfig>> {
-    if env::var("POSTHOG_ENVIRONMENT").ok().as_deref() != Some("production") {
-        return Ok(None);
-    }
-    let Some(token) = optional_nonempty_env("POSTHOG_PROJECT_TOKEN")? else {
-        return Ok(None);
-    };
-    let host =
-        optional_nonempty_env("POSTHOG_HOST")?.unwrap_or_else(|| DEFAULT_POSTHOG_HOST.to_string());
-    Ok(Some(PostHogProductConfig { token, host }))
-}
-
-struct PostHogProductCapture {
-    client: reqwest::Client,
-    token: String,
-    endpoint: String,
-}
-
-impl PostHogProductCapture {
-    fn new(config: PostHogProductConfig) -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            token: config.token,
-            endpoint: format!("{}/i/v0/e/", config.host.trim_end_matches('/')),
-        }
-    }
-}
-
-impl LixRepositoryOpenedCapture for PostHogProductCapture {
-    fn capture(&self, event: LixRepositoryOpenedAiSpan) {
-        let client = self.client.clone();
-        let token = self.token.clone();
-        let endpoint = self.endpoint.clone();
-        let send = async move {
-            let body = serde_json::json!({
-                "api_key": token,
-                "event": AI_SPAN_EVENT,
-                "distinct_id": event.distinct_id,
-                "properties": ai_span_properties(&event),
-            });
-            if let Err(error) = client.post(&endpoint).json(&body).send().await {
-                tracing::warn!(error = %error, "failed to capture lix.repository.opened $ai_span");
-            }
-        };
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(send);
-        }
-    }
 }
 
 fn ai_span_properties(
@@ -570,18 +490,14 @@ fn ai_span_properties(
         "$ai_span_name".into(),
         serde_json::Value::String(LIX_REPOSITORY_OPENED_SPAN_NAME.to_string()),
     );
-    if let Some(trace_id) = &event.trace_id {
-        properties.insert(
-            "$ai_trace_id".into(),
-            serde_json::Value::String(trace_id.clone()),
-        );
-    }
-    if let Some(span_id) = &event.span_id {
-        properties.insert(
-            "$ai_span_id".into(),
-            serde_json::Value::String(span_id.clone()),
-        );
-    }
+    properties.insert(
+        "$ai_trace_id".into(),
+        serde_json::Value::String(event.trace_id.clone()),
+    );
+    properties.insert(
+        "$ai_span_id".into(),
+        serde_json::Value::String(event.span_id.clone()),
+    );
     properties.insert(
         "lix_id".into(),
         serde_json::Value::String(event.lix_id.clone()),
@@ -647,23 +563,12 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
-    fn install_test_otel() -> (
-        tracing::subscriber::DefaultGuard,
-        opentelemetry_sdk::trace::SdkTracerProvider,
-    ) {
-        let provider = SdkTracerProvider::builder().build();
-        let tracer = provider.tracer("lix-server-test");
-        let subscriber =
-            tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
-        (tracing::subscriber::set_default(subscriber), provider)
-    }
-
     #[test]
     fn exporter_is_disabled_outside_production() {
         let _guard = env_lock().lock().unwrap();
         env::remove_var("POSTHOG_ENVIRONMENT");
         env::set_var("POSTHOG_PROJECT_TOKEN", "test-token");
-        assert!(posthog_provider_from_env().unwrap().is_none());
+        assert!(posthog_config_from_env().unwrap().is_none());
         env::remove_var("POSTHOG_PROJECT_TOKEN");
     }
 
@@ -672,7 +577,7 @@ mod tests {
         let _guard = env_lock().lock().unwrap();
         env::set_var("POSTHOG_ENVIRONMENT", "production");
         env::remove_var("POSTHOG_PROJECT_TOKEN");
-        assert!(posthog_provider_from_env().unwrap().is_none());
+        assert!(posthog_config_from_env().unwrap().is_none());
         env::remove_var("POSTHOG_ENVIRONMENT");
     }
 
@@ -828,8 +733,10 @@ mod tests {
             let exporter =
                 build_posthog_exporter(format!("http://{address}/i/v1/traces"), "test-token")
                     .unwrap();
-            let provider =
-                provider_with_tokio_batch_exporter(exporter, Resource::builder().build());
+            let provider = SdkTracerProvider::builder()
+                .with_resource(Resource::builder().build())
+                .with_span_processor(batch_span_processor(exporter))
+                .build();
             let tracer = provider.tracer("compression-test");
             let mut span = tracer.start("gzip-regression");
             span.end();
@@ -882,12 +789,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn exporter_runs_on_the_tokio_runtime() {
         let exported = Arc::new(AtomicBool::new(false));
-        let provider = provider_with_tokio_batch_exporter(
-            TokioRuntimeExporter {
+        let provider = SdkTracerProvider::builder()
+            .with_resource(Resource::builder().build())
+            .with_span_processor(batch_span_processor(TokioRuntimeExporter {
                 exported: Arc::clone(&exported),
-            },
-            Resource::builder().build(),
-        );
+            }))
+            .build();
         let span_provider = provider.clone();
         tokio::task::spawn_blocking(move || {
             let tracer = span_provider.tracer("telemetry-test");
@@ -910,32 +817,73 @@ mod tests {
         assert!(shutdown_result.is_ok());
     }
 
-    struct RecordingCapture(Arc<Mutex<Vec<LixRepositoryOpenedAiSpan>>>);
+    #[derive(Clone, Debug)]
+    struct RecordingSpanExporter(Arc<Mutex<Vec<SpanData>>>);
 
-    impl LixRepositoryOpenedCapture for RecordingCapture {
-        fn capture(&self, event: LixRepositoryOpenedAiSpan) {
-            self.0.lock().unwrap().push(event);
+    impl SpanExporter for RecordingSpanExporter {
+        fn export(
+            &self,
+            batch: Vec<SpanData>,
+        ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+            let spans = Arc::clone(&self.0);
+            async move {
+                spans.lock().unwrap().extend(batch);
+                Ok(())
+            }
         }
     }
 
-    #[test]
-    fn lix_repository_opened_span_captures_one_ai_span() {
-        let (_subscriber, _provider) = install_test_otel();
-        let captured = Arc::new(Mutex::new(Vec::new()));
-        let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
-            Arc::new(RecordingCapture(Arc::clone(&captured))),
-        ));
+    fn production_shape_lix_sink(
+        spans: Arc<Mutex<Vec<SpanData>>>,
+    ) -> (SdkTracerProvider, Arc<dyn TelemetrySink>) {
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(batch_span_processor(RecordingSpanExporter(spans)))
+            .build();
+        let tracer = provider.tracer("lix-server-test");
+        let subscriber = tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::sink)
+                    .with_filter(EnvFilter::new("lixray=info,lix_sql=info")),
+            )
+            .with(
+                tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(EnvFilter::new(OTEL_TELEMETRY_FILTER)),
+            );
+        let dispatch = tracing::Dispatch::new(subscriber);
+        (provider, Arc::new(OpenTelemetryTracingSink::new(dispatch)))
+    }
+
+    async fn flush(provider: &SdkTracerProvider) {
+        let provider = provider.clone();
+        tokio::task::spawn_blocking(move || provider.force_flush())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn production_log_filter_still_projects_repository_opened_span() {
+        let spans = Arc::new(Mutex::new(Vec::new()));
+        let (provider, sink) = production_shape_lix_sink(Arc::clone(&spans));
         lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", Some("user-123"));
-        let events = captured.lock().unwrap().clone();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].distinct_id, "user-123");
-        assert_eq!(events[0].lix_id, "lix-1");
-        assert_eq!(events[0].branch_id.as_deref(), Some("branch-1"));
-        assert_eq!(events[0].repository_id.as_deref(), Some("lix-1"));
-        assert_eq!(events[0].organization_id, None);
-        assert_eq!(events[0].environment, "production");
-        assert_eq!(events[0].source.as_deref(), Some("server"));
-        let properties = ai_span_properties(&events[0]);
+        flush(&provider).await;
+
+        let spans = spans.lock().unwrap();
+        let span = spans
+            .iter()
+            .find(|span| span.name == LIX_REPOSITORY_OPENED_SPAN_NAME)
+            .expect("repository-opened span");
+        let event = repository_opened_ai_span(span).expect("identified PostHog projection");
+        assert_eq!(event.distinct_id, "user-123");
+        assert_eq!(event.lix_id, "lix-1");
+        assert_eq!(event.branch_id.as_deref(), Some("branch-1"));
+        assert_eq!(event.repository_id.as_deref(), Some("lix-1"));
+        assert_eq!(event.organization_id, None);
+        assert_eq!(event.environment, "production");
+        assert_eq!(event.source.as_deref(), Some("server"));
+        let properties = ai_span_properties(&event);
         assert_eq!(
             properties
                 .get("$ai_span_name")
@@ -948,31 +896,39 @@ mod tests {
         assert_ne!(AI_SPAN_EVENT, "webapp_repository_opened");
     }
 
-    #[tokio::test]
-    async fn protocol_engine_open_does_not_capture() {
-        let (_subscriber, _provider) = install_test_otel();
-        let captured = Arc::new(Mutex::new(Vec::new()));
-        let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
-            Arc::new(RecordingCapture(Arc::clone(&captured))),
-        ));
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn protocol_engine_open_does_not_project_a_repository_opened_span() {
+        let spans = Arc::new(Mutex::new(Vec::new()));
+        let (provider, sink) = production_shape_lix_sink(Arc::clone(&spans));
         let _protocol = lix_sdk::open_lix()
             .with_telemetry(Arc::clone(&sink))
             .serve()
             .await
             .expect("serve protocol engine");
-        assert!(captured.lock().unwrap().is_empty());
+        flush(&provider).await;
+        assert!(spans
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|span| repository_opened_ai_span(span).is_none()));
 
         lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", Some("user-123"));
-        assert_eq!(captured.lock().unwrap().len(), 1);
+        flush(&provider).await;
+        assert_eq!(
+            spans
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(repository_opened_ai_span)
+                .count(),
+            1
+        );
     }
 
-    #[test]
-    fn cache_admit_anonymous_bind_does_not_capture() {
-        let (_subscriber, _provider) = install_test_otel();
-        let captured = Arc::new(Mutex::new(Vec::new()));
-        let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
-            Arc::new(RecordingCapture(Arc::clone(&captured))),
-        ));
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn anonymous_and_demo_binds_are_not_projected_to_posthog() {
+        let spans = Arc::new(Mutex::new(Vec::new()));
+        let (provider, sink) = production_shape_lix_sink(Arc::clone(&spans));
         lix_sdk::bind_session(
             Some(&sink),
             "lix-1",
@@ -981,7 +937,12 @@ mod tests {
         );
         lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", Some("lixray-demo"));
         lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", None);
-        assert!(captured.lock().unwrap().is_empty());
+        flush(&provider).await;
+        assert!(spans
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|span| repository_opened_ai_span(span).is_none()));
     }
 
     #[test]
@@ -989,17 +950,14 @@ mod tests {
         let _guard = env_lock().lock().unwrap();
         env::remove_var("POSTHOG_ENVIRONMENT");
         env::set_var("POSTHOG_PROJECT_TOKEN", "test-token");
-        assert!(posthog_product_config_from_env().unwrap().is_none());
-        let _sink = HostTelemetrySink::from_env();
+        assert!(posthog_config_from_env().unwrap().is_none());
 
         env::set_var("POSTHOG_ENVIRONMENT", "production");
         env::remove_var("POSTHOG_PROJECT_TOKEN");
-        assert!(posthog_product_config_from_env().unwrap().is_none());
-        let _sink = HostTelemetrySink::from_env();
+        assert!(posthog_config_from_env().unwrap().is_none());
 
         env::set_var("POSTHOG_PROJECT_TOKEN", "   ");
-        assert!(product_capture_from_env().is_none());
-        let _sink = HostTelemetrySink::from_env();
+        assert!(posthog_config_from_env().is_err());
 
         env::remove_var("POSTHOG_ENVIRONMENT");
         env::remove_var("POSTHOG_PROJECT_TOKEN");

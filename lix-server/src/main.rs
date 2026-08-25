@@ -4,13 +4,13 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let (trace_provider, in_flight_sql) = telemetry::init();
+    let telemetry = telemetry::init();
 
     let config = Config::from_env()?;
     let listener = TcpListener::bind(&config.bind_addr)
         .await
         .with_context(|| format!("bind {}", config.bind_addr))?;
-    let manager = LixRuntimeManager::new(&config)?;
+    let manager = LixRuntimeManager::new(&config, telemetry.lix_sink)?;
     let internal_token = config.internal_token.clone();
     let shutdown_manager = manager.clone();
     let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
             manager,
             internal_token,
             config.protocol_timeout,
-            in_flight_sql,
+            telemetry.in_flight_sql,
         ),
     )
     .with_graceful_shutdown(async move {
@@ -48,12 +48,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("join Lix protocol shutdown task")
         .and_then(|result| result.context("close Lix protocols during shutdown"));
-    if let Some(provider) = trace_provider {
-        match tokio::task::spawn_blocking(move || provider.shutdown()).await {
-            Ok(Err(error)) => tracing::warn!(%error, "failed to flush traces during shutdown"),
-            Err(error) => tracing::warn!(%error, "failed to join trace shutdown task"),
-            Ok(Ok(())) => {}
-        }
+    match tokio::task::spawn_blocking(move || telemetry.trace_provider.shutdown()).await {
+        Ok(Err(error)) => tracing::warn!(%error, "failed to flush traces during shutdown"),
+        Err(error) => tracing::warn!(%error, "failed to join trace shutdown task"),
+        Ok(Ok(())) => {}
     }
     result?;
     shutdown_result
