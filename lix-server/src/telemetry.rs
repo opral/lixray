@@ -949,17 +949,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn protocol_root_open_does_not_capture() {
+    async fn protocol_engine_open_does_not_capture() {
         let (_subscriber, _provider) = install_test_otel();
         let captured = Arc::new(Mutex::new(Vec::new()));
         let sink: Arc<dyn TelemetrySink> = Arc::new(HostTelemetrySink::with_product_capture(
             Arc::new(RecordingCapture(Arc::clone(&captured))),
         ));
-        let _lix = lix_sdk::open_lix()
+        let _protocol = lix_sdk::open_lix()
             .with_telemetry(Arc::clone(&sink))
-            .as_protocol_root()
+            .serve()
             .await
-            .expect("open protocol root");
+            .expect("serve protocol engine");
         assert!(captured.lock().unwrap().is_empty());
 
         lix_sdk::bind_session(Some(&sink), "lix-1", "branch-1", Some("user-123"));
