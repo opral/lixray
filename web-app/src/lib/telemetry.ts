@@ -27,17 +27,22 @@ export function lixErrorTelemetryProperties(error: unknown): Properties {
 		code?: unknown;
 		status?: unknown;
 		hint?: unknown;
+		details?: { httpStatus?: unknown };
 	};
 	const code = typeof candidate.code === "string" ? candidate.code : undefined;
 	if (candidate.name !== "LixError" && !code?.startsWith("LIX_")) return {};
+	const status =
+		typeof candidate.status === "number"
+			? candidate.status
+			: typeof candidate.details?.httpStatus === "number"
+				? candidate.details.httpStatus
+				: undefined;
 
 	return {
 		...(code
 			? { lix_error_code: code.slice(0, MAX_LIX_TELEMETRY_STRING_LENGTH) }
 			: {}),
-		...(typeof candidate.status === "number"
-			? { lix_error_status: candidate.status }
-			: {}),
+		...(status !== undefined ? { lix_error_status: status } : {}),
 		...(typeof candidate.hint === "string"
 			? {
 					lix_error_hint: candidate.hint.slice(

@@ -21,7 +21,7 @@ import {
 } from "~/lib/auth-session-validation";
 import {
 	captureErrorLogImmediately,
-	captureTelemetry,
+	captureExceptionTelemetry,
 	captureTelemetryImmediately,
 	resetTelemetry,
 } from "~/lib/telemetry";
@@ -127,7 +127,8 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 					return;
 				}
 				if (result.kind === "validation_failed") {
-					captureTelemetry("webapp_auth_session_validation_failed", {
+					captureExceptionTelemetry(result.error, {
+						operation: "auth_session_validation",
 						auth_validation_operation: "initial_session_validation",
 						...authErrorTelemetryProperties(result.error),
 					});
@@ -143,7 +144,8 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			})
 			.catch((error: unknown) => {
 				if (disposed || authStateChanged) return;
-				captureTelemetry("webapp_auth_session_validation_failed", {
+				captureExceptionTelemetry(error, {
+					operation: "auth_session_validation",
 					auth_validation_operation: "initial_session_validation",
 					...authErrorTelemetryProperties(error),
 				});
@@ -250,13 +252,15 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 					await clearOrphanedSession(client, error, operation);
 					return "orphaned";
 				}
-				captureTelemetry("webapp_auth_session_validation_failed", {
+				captureExceptionTelemetry(error, {
+					operation: "auth_session_validation",
 					auth_validation_operation: operation,
 					...authErrorTelemetryProperties(error),
 				});
 				return "unknown";
 			} catch (error: unknown) {
-				captureTelemetry("webapp_auth_session_validation_failed", {
+				captureExceptionTelemetry(error, {
+					operation: "auth_session_validation",
 					auth_validation_operation: operation,
 					...authErrorTelemetryProperties(error),
 				});

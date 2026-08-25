@@ -163,6 +163,7 @@ function migrationError(): Error {
 void test("refreshes an expired access token and retries a sync request once", async () => {
 	let refreshCalls = 0;
 	let attempts = 0;
+	const captured: unknown[] = [];
 	const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 		const request =
 			input instanceof Request
@@ -180,13 +181,17 @@ void test("refreshes an expired access token and retries a sync request once", a
 		return Response.json({ ok: true });
 	};
 
-	const authenticatedFetch = createTelemetryFetch(fetch, {
-		repositoryId: "repo-id",
-		refreshAccessToken: async () => {
-			refreshCalls += 1;
-			return "fresh-token";
+	const authenticatedFetch = createTelemetryFetch(
+		fetch,
+		{
+			repositoryId: "repo-id",
+			refreshAccessToken: async () => {
+				refreshCalls += 1;
+				return "fresh-token";
+			},
 		},
-	});
+		{ captureException: (error) => captured.push(error) },
+	);
 	const response = await authenticatedFetch(
 		"https://lixray.test/repos/acme/launch-q3/lix/v1/sync/pull",
 		{
@@ -198,6 +203,172 @@ void test("refreshes an expired access token and retries a sync request once", a
 	assert.equal(response.status, 200);
 	assert.equal(refreshCalls, 1);
 	assert.equal(attempts, 2);
+	assert.deepEqual(captured, []);
+});
+
+void test("captures a terminal request failure as one structured exception", async () => {
+	const captured: Array<{
+		error: unknown;
+		properties: Record<string, unknown> | undefined;
+	}> = [];
+	const fetch = createTelemetryFetch(
+		async () =>
+			Response.json(
+				{
+					error: {
+						code: "LIX_ERROR_PROTOCOL_SESSION_GONE",
+						message: "private repository content must not be captured",
+					},
+				},
+				{ status: 410 },
+			),
+		{ repositoryId: "repo-id" },
+		{
+			captureException: (error, properties) => {
+				captured.push({ error, properties });
+			},
+		},
+	);
+
+	const response = await fetch(
+		"https://lixray.test/repos/acme/private/lix/v1/sync/pull",
+		{ method: "GET" },
+	);
+
+	assert.equal(response.status, 410);
+	assert.equal(captured.length, 1);
+	assert.ok(captured[0]?.error instanceof Error);
+	assert.equal(captured[0].error.name, "LixRequestError");
+	assert.equal(
+		captured[0].error.message,
+		"GET sync failed with HTTP 410 (LIX_ERROR_PROTOCOL_SESSION_GONE)",
+	);
+	assert.deepEqual(captured[0].properties, {
+		operation: "repository_request",
+		lix_request_endpoint: "sync",
+		lix_request_method: "GET",
+		lix_http_status: 410,
+		lix_error_code: "LIX_ERROR_PROTOCOL_SESSION_GONE",
+		lix_id: "repo-id",
+	});
+	assert.doesNotMatch(
+		JSON.stringify(captured[0].properties),
+		/private repository content/,
+	);
+});
+
+void test("deduplicates repeated request failures until the request recovers", async () => {
+	let shouldFail = true;
+	const captured: unknown[] = [];
+	const fetch = createTelemetryFetch(
+		async () =>
+			shouldFail
+				? Response.json(
+						{ error: { code: "LIX_ERROR_PROTOCOL_SESSION_GONE" } },
+						{ status: 410 },
+					)
+				: Response.json({ ok: true }),
+		{ repositoryId: "repo-id" },
+		{ captureException: (error) => captured.push(error) },
+	);
+	const url = "https://lixray.test/repos/acme/private/lix/v1/sync/pull";
+
+	await fetch(url);
+	await fetch(url);
+	await fetch(url);
+	assert.equal(captured.length, 1);
+
+	shouldFail = false;
+	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/chunk");
+	shouldFail = true;
+	await fetch(url);
+	assert.equal(captured.length, 1);
+
+	shouldFail = false;
+	await fetch(url);
+	shouldFail = true;
+	await fetch(url);
+	assert.equal(captured.length, 2);
+});
+
+void test("does not report expected migration, recovery, or missing-chunk responses", async () => {
+	const captured: unknown[] = [];
+	const responses = [
+		Response.json(
+			{ error: { code: "LIX_ERROR_LIX_MIGRATING" } },
+			{ status: 503 },
+		),
+		Response.json(
+			{ error: { code: "LIX_ERROR_LIX_RECOVERING" } },
+			{ status: 503 },
+		),
+		new Response(null, { status: 404 }),
+	];
+	const fetch = createTelemetryFetch(
+		async () => {
+			const response = responses.shift();
+			assert.ok(response);
+			return response;
+		},
+		{ repositoryId: "repo-id" },
+		{ captureException: (error) => captured.push(error) },
+	);
+
+	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/pull");
+	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/pull");
+	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/chunk");
+
+	assert.deepEqual(captured, []);
+});
+
+void test("leaves repository-open failures to their terminal exception boundary", async () => {
+	const captured: unknown[] = [];
+	const fetch = createTelemetryFetch(
+		async () =>
+			Response.json({ error: { code: "LIX_INTERNAL_ERROR" } }, { status: 500 }),
+		{
+			repositoryId: "repo-id",
+			shouldCaptureRequestFailures: () => false,
+		},
+		{ captureException: (error) => captured.push(error) },
+	);
+
+	const response = await fetch(
+		"https://lixray.test/repos/acme/private/lix/v1/",
+	);
+
+	assert.equal(response.status, 500);
+	assert.deepEqual(captured, []);
+});
+
+void test("captures unexpected network failures but ignores canceled requests", async () => {
+	const captured: unknown[] = [];
+	const networkError = new TypeError("Failed to fetch");
+	const failingFetch = createTelemetryFetch(
+		async () => {
+			throw networkError;
+		},
+		{ repositoryId: "repo-id" },
+		{ captureException: (error) => captured.push(error) },
+	);
+	const url = "https://lixray.test/repos/acme/private/lix/v1/sync/pull";
+
+	await assert.rejects(failingFetch(url), networkError);
+	await assert.rejects(failingFetch(url), networkError);
+	assert.equal(captured.length, 1);
+	assert.equal(captured[0], networkError);
+
+	const controller = new AbortController();
+	controller.abort();
+	const canceledFetch = createTelemetryFetch(
+		async () => {
+			throw new DOMException("The operation was aborted.", "AbortError");
+		},
+		{ repositoryId: "repo-id", signal: controller.signal },
+		{ captureException: (error) => captured.push(error) },
+	);
+	await assert.rejects(canceledFetch(url), { name: "AbortError" });
+	assert.deepEqual(captured, [networkError]);
 });
 
 void test("isolates managed sessions when the signed-in identity changes", () => {
