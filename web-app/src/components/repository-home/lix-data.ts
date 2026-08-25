@@ -209,32 +209,6 @@ export function useRepositoryControlPlaneData(
 }
 
 /** The full directory/file tree, kept live via lix observe. */
-/**
- * Live per-file change counts for the working diff, keyed by file id — the
- * same numbers the sidebar tree badges show during a review.
- */
-export function useWorkingChangeCounts(
-	lix: Lix,
-	enabled = true,
-): ReadonlyMap<string, number> {
-	const rows = useObservedRows(
-		lix,
-		"SELECT file_id, count(*) AS change_count FROM lix_working_diff() WHERE file_id IS NOT NULL GROUP BY file_id",
-		[],
-		enabled,
-	);
-	return useMemo(() => {
-		const counts = new Map<string, number>();
-		for (const row of rows.rows ?? []) {
-			const fileId = row.get("file_id");
-			if (typeof fileId === "string") {
-				counts.set(fileId, Number(row.get("change_count")) || 0);
-			}
-		}
-		return counts;
-	}, [rows.rows]);
-}
-
 export function useRepositoryTree(
 	lix: Lix,
 	enabled = true,
