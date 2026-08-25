@@ -96,3 +96,11 @@ fi
 		/pull ghcr\.io\/opral\/lixray-server@sha256:0123456789abcdef/,
 	);
 });
+
+test("submodule validation checks each configured vendored branch", async () => {
+	const { calls, result } = await runWithMocks("validate-submodule-branches.sh", {
+		git: 'printf "%s %s\\n" "$1" "$2" >> "$MOCK_CALLS"\n',
+	});
+	assert.equal(result.status, 0, result.stderr);
+	assert.equal(calls.trim(), "submodule foreach");
+});

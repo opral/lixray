@@ -5,6 +5,8 @@
 .github
 **/.DS_Store
 **/dist
+!.lixray-ci/vendored-lix-sdk/**/dist
+!.lixray-ci/vendored-lix-sdk/**/dist/**
 **/node_modules
 **/target
 **/.env

@@ -372,7 +372,9 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		await right
 			.getByRole("button", { name: "New Markdown (.md)", exact: true })
 			.click();
-		const rightEditor = right.locator('.ProseMirror[contenteditable="true"]');
+		const rightEditor = right.locator(
+			'.ProseMirror[contenteditable="true"]:visible',
+		);
 		await rightEditor.waitFor({ timeout: 30_000 });
 		const createdUrl = right.url();
 		const createdName = decodeURIComponent(
@@ -395,7 +397,9 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		// request count also includes delayed hydration for unrelated older files.
 		expect(newBlobPayloadSizes).not.toContain(0);
 		await left.goto(createdUrl);
-		const leftEditor = left.locator('.ProseMirror[contenteditable="true"]');
+		const leftEditor = left.locator(
+			'.ProseMirror[contenteditable="true"]:visible',
+		);
 		// File discovery and a cold editor open are separate from the realtime
 		// interaction budget. Qualify both first so the assertions below measure
 		// two already-open clients, not extension startup or demand hydration.

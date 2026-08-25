@@ -43,7 +43,14 @@ RUN test -f vendor/lix/packages/js-sdk/package.json \
 # Railway cache mounts must be namespaced by this service's ID. Docker treats
 # the ID as opaque, so the same cache works for local Compose builds.
 RUN --mount=type=cache,id=s/c745bcb2-fef1-4ba6-9ebf-a6d112d94d05-/root/.local/share/pnpm/store,target=/root/.local/share/pnpm/store \
-	pnpm install --frozen-lockfile
+	pnpm install --frozen-lockfile --ignore-scripts \
+	&& if test -f .lixray-ci/vendored-lix-sdk/js-sdk/dist/wasm/lix_js_sdk_bg.wasm \
+		&& test -f .lixray-ci/vendored-lix-sdk/storage-opfs/dist/index.js; then \
+		cp -a .lixray-ci/vendored-lix-sdk/js-sdk/dist vendor/lix/packages/js-sdk/dist; \
+		cp -a .lixray-ci/vendored-lix-sdk/storage-opfs/dist vendor/lix/packages/storage-opfs/dist; \
+	else \
+		pnpm --dir web-app lix:build; \
+	fi
 # Railway names PR environments "lixray-pr-<n>" when configured, but
 # recreated ones get the default "pr-<hash>-<n>" — accept both. Keep in
 # sync with assert-railway-env.mjs and worker/handler.ts isDemoMode.
