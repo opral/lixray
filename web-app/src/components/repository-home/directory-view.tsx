@@ -53,6 +53,7 @@ import {
 	useFileMarkdown,
 	useRepositoryControlPlaneData,
 	useRepositoryTree,
+	useWorkingChangeCounts,
 	type RepositoryControlPlaneData,
 } from "./lix-data";
 import {
@@ -138,6 +139,20 @@ export function DirectoryView({
 	const changedFilePaths = useMemo(() => {
 		return new Set((diffSession?.files ?? []).map((file) => file.path));
 	}, [diffSession]);
+	const sessionFileIdsByPath = useMemo(() => {
+		return new Map(
+			(diffSession?.files ?? []).map((file) => [file.path, file.id]),
+		);
+	}, [diffSession]);
+	// Live counts mirror the sidebar tree's badges (working reviews only).
+	const workingChangeCounts = useWorkingChangeCounts(
+		lix,
+		Boolean(diffSession && "working" in diffSession.target),
+	);
+	const changeCountForPath = (path: string): number | undefined => {
+		const fileId = sessionFileIdsByPath.get(path);
+		return fileId ? workingChangeCounts.get(fileId) : undefined;
+	};
 	const changedDirPaths = useMemo(() => {
 		// Ancestors use the canonical directory convention: absolute, no
 		// trailing slash (see canonicalDirectoryPath).
@@ -325,6 +340,7 @@ export function DirectoryView({
 								meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
 								hidden={dir.hidden}
 								changed={changedDirPaths.has(dir.path)}
+								dimIndicator
 								onClick={(event) =>
 									onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
 								}
@@ -344,6 +360,7 @@ export function DirectoryView({
 								meta={formatUpdatedAt(file.updatedAt)}
 								hidden={file.hidden}
 								changed={changedFilePaths.has(file.path)}
+								changeCount={changeCountForPath(file.path)}
 								onClick={(event) => {
 									// A changed file opens through the diff session, keeping
 									// the review float in step with the revealed document.
@@ -1074,6 +1091,8 @@ function EntryRow({
 	meta,
 	hidden = false,
 	changed = false,
+	changeCount,
+	dimIndicator = false,
 	onClick,
 }: {
 	readonly icon: ReactNode;
@@ -1082,6 +1101,10 @@ function EntryRow({
 	readonly hidden?: boolean;
 	/** Marked by the open diff session; mirrors the sidebar's indicator. */
 	readonly changed?: boolean;
+	/** Change count badge (files in a working review), like the sidebar's. */
+	readonly changeCount?: number;
+	/** Folders inherit a softened dot, matching the sidebar tree. */
+	readonly dimIndicator?: boolean;
 	readonly onClick: (event: ReactMouseEvent) => void;
 }) {
 	return (
@@ -1094,15 +1117,28 @@ function EntryRow({
 		>
 			{icon}
 			<span className="text-sm font-medium text-text-primary">{name}</span>
-			{changed ? (
-				<span
-					title="Changed in this review"
-					aria-label="Changed in this review"
-					className="size-1.5 shrink-0 rounded-full bg-[#e8590c]"
-				/>
-			) : null}
 			<span className="flex-1" />
-			<span className="text-[12.5px] text-text-quaternary">{meta}</span>
+			{/* In a review, the trailing slot carries the change indicator the
+			    sidebar tree uses — count badge for files, dot for folders —
+			    replacing the resting meta. */}
+			{changed ? (
+				changeCount ? (
+					<span
+						title={`${changeCount} ${changeCount === 1 ? "change" : "changes"} in this review`}
+						className="inline-flex h-4 min-w-4 items-center justify-center rounded-[5px] bg-[color-mix(in_srgb,currentColor_16%,transparent)] px-1 text-[9px] leading-4 font-bold text-[var(--color-icon-brand)]"
+					>
+						{changeCount}
+					</span>
+				) : (
+					<span
+						title="Changed in this review"
+						aria-label="Changed in this review"
+						className={`size-1.5 shrink-0 rounded-full bg-[var(--color-icon-brand)] ${dimIndicator ? "opacity-75" : ""}`}
+					/>
+				)
+			) : (
+				<span className="text-[12.5px] text-text-quaternary">{meta}</span>
+			)}
 		</button>
 	);
 }
