@@ -1,4 +1,4 @@
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, ChevronDown, LayoutGrid, Plus, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CreateRepositoryDialog } from "~/components/repository-directory";
@@ -62,16 +62,17 @@ export function RepositoryPicker({
 
 	if (!organization || !activeRepository) {
 		return (
-			<span className="-ml-[3px] flex h-7 min-w-0 items-center gap-1 rounded-[7px] py-0 pr-1 pl-[5px] text-[13px] font-semibold text-text-primary">
-				<RepositoryChip
-					initials={repositoryInitials(repositoryName)}
-					palette={repositoryPalette(0)}
-				/>
-				<span className="max-w-[120px] truncate text-text-secondary">
+			<span className="-ml-[3px] flex h-7 min-w-0 items-center rounded-[7px] py-0 pr-1 text-[13px] font-semibold text-text-primary">
+				<Link
+					to="/@{$namespace}"
+					params={{ namespace: namespaceHandle }}
+					aria-label={`View the @${namespaceHandle} profile`}
+					className="flex h-7 max-w-[120px] shrink-0 items-center truncate rounded-[7px] px-[5px] text-text-secondary no-underline transition-colors hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+				>
 					{namespaceHandle}
-				</span>
+				</Link>
 				<span className="shrink-0 text-text-tertiary">/</span>
-				<span className="max-w-[180px] truncate">{repositoryName}</span>
+				<span className="max-w-[180px] truncate pl-1">{repositoryName}</span>
 			</span>
 		);
 	}
@@ -100,33 +101,33 @@ export function RepositoryPicker({
 
 	return (
 		<>
-			<DropdownMenu>
-				<DropdownMenuTrigger asChild>
-					<button
-						type="button"
-						data-testid="repository-picker"
-						aria-label={`Switch repository — current: ${organization.handle} / ${activeRepository.name}`}
-						className="-ml-[3px] flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-[7px] border-0 bg-transparent py-0 pr-1 pl-[5px] text-[13px] font-semibold text-text-primary transition-colors hover:bg-bg-hover-canvas focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible data-[state=open]:bg-bg-active"
-					>
-						<RepositoryChip
-							initials={repositoryInitials(activeRepository.name)}
-							palette={repositoryPalette(
-								paletteOrder.get(activeRepository.id) ?? 0,
-							)}
-						/>
-						<span className="max-w-[120px] truncate text-text-secondary">
-							{organization.handle}
-						</span>
-						<span className="shrink-0 text-text-tertiary">/</span>
-						<span className="max-w-[180px] truncate">
-							{activeRepository.name}
-						</span>
-						<ChevronDown
-							className="size-3.5 shrink-0 text-icon-tertiary"
-							aria-hidden="true"
-						/>
-					</button>
-				</DropdownMenuTrigger>
+			<span className="-ml-[3px] flex h-7 min-w-0 items-center text-[13px] font-semibold text-text-primary">
+				<Link
+					to="/@{$namespace}"
+					params={{ namespace: organization.handle }}
+					aria-label={`View the @${organization.handle} profile`}
+					className="flex h-7 max-w-[120px] shrink-0 items-center truncate rounded-[7px] px-[5px] text-text-secondary no-underline transition-colors hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+				>
+					{organization.handle}
+				</Link>
+				<span className="shrink-0 text-text-tertiary">/</span>
+				<DropdownMenu>
+					<DropdownMenuTrigger asChild>
+						<button
+							type="button"
+							data-testid="repository-picker"
+							aria-label={`Switch repository — current: ${organization.handle} / ${activeRepository.name}`}
+							className="flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-[7px] border-0 bg-transparent py-0 pr-1 pl-[5px] text-[13px] font-semibold text-text-primary transition-colors hover:bg-bg-hover-canvas focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible data-[state=open]:bg-bg-active"
+						>
+							<span className="max-w-[180px] truncate">
+								{activeRepository.name}
+							</span>
+							<ChevronDown
+								className="size-3.5 shrink-0 text-icon-tertiary"
+								aria-hidden="true"
+							/>
+						</button>
+					</DropdownMenuTrigger>
 				<DropdownMenuContent
 					align="start"
 					sideOffset={6}
@@ -204,8 +205,9 @@ export function RepositoryPicker({
 							New repository
 						</DropdownMenuItem>
 					) : null}
-				</DropdownMenuContent>
-			</DropdownMenu>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			</span>
 			{canCreate ? (
 				<CreateRepositoryDialog
 					open={creating}

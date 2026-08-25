@@ -4,15 +4,18 @@ import {
 	Outlet,
 	useRouterState,
 } from "@tanstack/react-router";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Lock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AccountMenu } from "~/components/account-menu";
+import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";
 import { useAuth } from "~/components/auth-provider";
+import { useRepository } from "~/components/repository-provider";
 import { Button } from "~/components/ui/button";
 import {
 	type ProfileRepositoryActivity,
 	type PublicProfileActivity,
 } from "~/lib/profile-activity-aggregate";
+import { formatRelativeTime } from "~/lib/format";
 import { resolvePublicProfileActivity } from "~/lib/public-profile-activity";
 import {
 	resolvePublicProfileByHandle,
@@ -85,7 +88,7 @@ function PublicProfilePage() {
 	}, [namespace]);
 
 	return (
-		<div className="min-h-dvh bg-[#fbf6f0] font-sans text-[#1c1917]">
+		<div className="min-h-dvh bg-bg-app font-sans text-text-primary">
 			<ProfileHeader authLoaded={authLoaded} signedIn={Boolean(user)} />
 			{profile === undefined ? (
 				<ProfileStatus>Loading profile…</ProfileStatus>
@@ -112,28 +115,11 @@ function ProfileHeader({
 	signedIn: boolean;
 }) {
 	return (
-		<header className="flex min-h-[60px] items-center border-b border-[#1c1917]/[0.06] px-9 py-[18px] max-[760px]:px-5 max-[760px]:py-3.5">
-			<Link
-				to="/"
-				className="inline-flex items-center gap-2 text-[17px] font-bold tracking-[-0.01em] no-underline"
-				aria-label="LixRay home"
-			>
-				<img className="size-6" src="/lixray-mark.svg" alt="" />
-				LixRay
-			</Link>
+		<AppTitlebar>
+			<AppTitlebarBrand href={signedIn ? "/home" : "/"} />
 			<div className="ml-auto flex items-center gap-2.5">
 				{signedIn ? (
-					<>
-						<Button
-							asChild
-							variant="outline"
-							size="sm"
-							className="h-8 bg-white/40"
-						>
-							<Link to="/home">Open LixRay</Link>
-						</Button>
-						<AccountMenu />
-					</>
+					<AccountMenu className="size-[26px] border-0" />
 				) : (
 					<>
 						<Button asChild variant="ghost" size="sm" disabled={!authLoaded}>
@@ -145,7 +131,7 @@ function ProfileHeader({
 					</>
 				)}
 			</div>
-		</header>
+		</AppTitlebar>
 	);
 }
 
@@ -158,6 +144,18 @@ function ProfileContent({
 	activity: PublicProfileActivity | null | undefined;
 	activityError: string | null;
 }) {
+	const { organizations } = useRepository();
+	const memberOrganization =
+		organizations.find(
+			(organization) => organization.id === profile.namespaceId,
+		) ?? null;
+	const isOwner = Boolean(
+		memberOrganization &&
+			(memberOrganization.isPersonal || memberOrganization.role === "owner"),
+	);
+	const hasDetails =
+		Boolean(profile.title || profile.organization || profile.location) ||
+		profile.links.length > 0;
 	return (
 		<main className="mx-auto flex w-full max-w-[1240px] gap-[72px] px-16 pt-14 pb-20 max-[900px]:gap-10 max-[760px]:flex-col max-[760px]:gap-7 max-[760px]:px-6 max-[760px]:pt-7 max-[760px]:pb-12">
 			<aside className="flex w-[264px] shrink-0 flex-col gap-5 max-[760px]:w-full">
@@ -188,29 +186,48 @@ function ProfileContent({
 						{profile.bio}
 					</p>
 				) : null}
-
-				<div className="h-px bg-[#eae2d6]" />
-				<div className="flex flex-col gap-[9px] text-[13.5px] text-[#57534e]">
-					{profile.title || profile.organization ? (
-						<span>
-							{[profile.title, profile.organization]
-								.filter(Boolean)
-								.join(" · ")}
-						</span>
-					) : null}
-					{profile.location ? <span>{profile.location}</span> : null}
-					{profile.links.map((link) => (
-						<a
-							key={link.uri}
-							className="font-semibold text-[#c2410c] no-underline hover:text-[#9a3412]"
-							href={link.uri}
-							target="_blank"
-							rel="noreferrer"
+				{isOwner ? (
+					<Button
+						asChild
+						variant="outline"
+						size="sm"
+						className="h-8 w-full bg-white/40"
+					>
+						<Link
+							to="/settings/@{$namespace}"
+							params={{ namespace: profile.handle }}
 						>
-							{link.label}
-						</a>
-					))}
-				</div>
+							Edit profile
+						</Link>
+					</Button>
+				) : null}
+
+				{hasDetails ? (
+					<>
+						<div className="h-px bg-[#eae2d6]" />
+						<div className="flex flex-col gap-[9px] text-[13.5px] text-[#57534e]">
+							{profile.title || profile.organization ? (
+								<span>
+									{[profile.title, profile.organization]
+										.filter(Boolean)
+										.join(" · ")}
+								</span>
+							) : null}
+							{profile.location ? <span>{profile.location}</span> : null}
+							{profile.links.map((link) => (
+								<a
+									key={link.uri}
+									className="font-semibold text-[#c2410c] no-underline hover:text-[#9a3412]"
+									href={link.uri}
+									target="_blank"
+									rel="noreferrer"
+								>
+									{link.label}
+								</a>
+							))}
+						</div>
+					</>
+				) : null}
 
 				<div className="h-px bg-[#eae2d6]" />
 				<span className="text-[12px] text-[#b5afa6]">
@@ -231,7 +248,11 @@ function ProfileContent({
 						{activityError ?? "Unable to load public repositories."}
 					</ProfileActivityStatus>
 				) : (
-					<ProfileActivityContent activity={activity} />
+					<ProfileActivityContent
+						activity={activity}
+						memberRepositories={memberOrganization?.repositories ?? null}
+						profileHandle={profile.handle}
+					/>
 				)}
 			</section>
 		</main>
@@ -240,21 +261,44 @@ function ProfileContent({
 
 function ProfileActivityContent({
 	activity,
+	memberRepositories,
+	profileHandle,
 }: {
 	activity: PublicProfileActivity;
+	memberRepositories: Array<MemberRepository> | null;
+	profileHandle: string;
 }) {
 	const visibleFileMix = activity.fileMix.filter(
 		(segment) => segment.count > 0,
 	);
+	// The public feed is served from a cache that can lag behind visibility
+	// changes, so a member's own data fills in anything the feed is missing.
+	const feedRepositoryIds = new Set(
+		activity.repositories.map((repository) => repository.id),
+	);
+	const memberOnlyRepositories = (memberRepositories ?? []).filter(
+		(repository) => !feedRepositoryIds.has(repository.id),
+	);
+	const publicCount =
+		activity.repositories.length +
+		memberOnlyRepositories.filter(
+			(repository) => repository.visibility === "public",
+		).length;
+	const privateCount = memberOnlyRepositories.filter(
+		(repository) => repository.visibility === "private",
+	).length;
 	return (
 		<>
 			<div>
 				<div className="flex items-baseline gap-2.5">
 					<h2 id="profile-files-title" className="m-0 text-[15px] font-bold">
-						Files
+						Statistics
 					</h2>
 					<p className="m-0 text-[12.5px] text-[#a8a29e]">
 						{profileFileSummary(activity)}
+						{activity.computedAt
+							? ` · updated ${formatRelativeTime(activity.computedAt)}`
+							: ""}
 					</p>
 				</div>
 
@@ -318,10 +362,12 @@ function ProfileActivityContent({
 				<div className="flex items-baseline gap-2.5 pb-3">
 					<h2 className="m-0 text-[15px] font-bold">Repositories</h2>
 					<p className="m-0 text-[12.5px] text-[#a8a29e]">
-						{activity.repositories.length} public
+						{publicCount} public
+						{privateCount > 0 ? ` · ${privateCount} private` : ""}
 					</p>
 				</div>
-				{activity.repositories.length === 0 ? (
+				{activity.repositories.length === 0 &&
+				memberOnlyRepositories.length === 0 ? (
 					<p className="m-0 text-[13px] text-[#8a8178]">
 						Public repositories will appear here.
 					</p>
@@ -331,6 +377,14 @@ function ProfileActivityContent({
 						key={repository.id}
 						handle={repository.namespaceHandle}
 						repository={repository}
+					/>
+				))}
+				{memberOnlyRepositories.map((repository) => (
+					<RepositoryRow
+						key={repository.id}
+						handle={profileHandle}
+						repository={repository}
+						isPrivate={repository.visibility === "private"}
 					/>
 				))}
 			</div>
@@ -345,26 +399,35 @@ function profileFileSummary(activity: PublicProfileActivity): string {
 	if (repositoryCount > 0 && activity.failedRepositories === repositoryCount) {
 		return `Checking files across ${repositoryCount} ${repositoryLabel}`;
 	}
-	return `${activity.totalFiles}${activity.failedRepositories > 0 ? "+" : ""} across ${repositoryCount} ${repositoryLabel}`;
+	return `across ${repositoryCount} ${repositoryLabel}`;
 }
 
 function ProfileActivityStatus({ children }: { children: React.ReactNode }) {
 	return (
 		<div>
 			<h2 id="profile-files-title" className="m-0 text-[15px] font-bold">
-				Files
+				Statistics
 			</h2>
 			<p className="m-0 mt-3 text-[13px] text-[#8a8178]">{children}</p>
 		</div>
 	);
 }
 
+/** The subset of the repository provider's shape the profile page renders. */
+interface MemberRepository {
+	id: string;
+	slug: string;
+	visibility: "private" | "public";
+}
+
 function RepositoryRow({
 	handle,
 	repository,
+	isPrivate,
 }: {
 	handle: string;
-	repository: ProfileRepositoryActivity;
+	repository: Pick<ProfileRepositoryActivity, "slug">;
+	isPrivate?: boolean;
 }) {
 	return (
 		<Link
@@ -373,9 +436,15 @@ function RepositoryRow({
 			search={{}}
 			className="group -mx-3 flex items-center gap-5 rounded-lg border-t border-[#eae2d6] px-3 py-3.5 no-underline transition hover:bg-[#f6efe4]"
 		>
-			<strong className="min-w-0 flex-1 truncate font-mono text-[14px] font-bold text-[#1c1917] group-hover:text-[#c2410c]">
+			<strong className="min-w-0 flex-1 truncate text-[14.5px] font-semibold tracking-[-0.01em] text-[#1c1917] group-hover:text-[#c2410c]">
 				{repository.slug}
 			</strong>
+			{isPrivate ? (
+				<span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#eae2d6] px-2 py-0.5 text-[11px] font-semibold text-[#8a8178]">
+					<Lock className="size-3" aria-hidden="true" />
+					Private
+				</span>
+			) : null}
 			<ArrowRight
 				className="ml-auto size-3.5 shrink-0 text-[#c9c2b8] transition-transform group-hover:translate-x-0.5 group-hover:text-[#c2410c]"
 				aria-hidden="true"
@@ -395,7 +464,7 @@ function joinedMonth(value: string): string {
 
 function ProfileStatus({ children }: { children: React.ReactNode }) {
 	return (
-		<main className="grid min-h-[calc(100dvh-56px)] place-items-center px-6 text-center text-sm text-[#766d65]">
+		<main className="grid min-h-[calc(100dvh-44px)] place-items-center px-6 text-center text-sm text-[#766d65]">
 			{children}
 		</main>
 	);

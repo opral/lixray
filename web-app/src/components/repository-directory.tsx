@@ -187,7 +187,14 @@ export function RepositoryDirectory() {
 											className="m-0 text-[14px] leading-[1.35] font-bold tracking-[-0.01em]"
 											id={`namespace-${organization.id}`}
 										>
-											@{organization.handle}
+											<Link
+												to="/@{$namespace}"
+												params={{ namespace: organization.handle }}
+												aria-label={`View the @${organization.handle} profile`}
+												className="rounded-[5px] text-inherit no-underline transition-colors hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+											>
+												@{organization.handle}
+											</Link>
 										</h2>
 										<span className="text-[12px] text-text-tertiary">
 											{organization.repositories.length}{" "}
@@ -331,7 +338,7 @@ function EmptyOrganizationSection({
 export function DirectoryHeader() {
 	return (
 		<AppTitlebar>
-			<AppTitlebarBrand />
+			<AppTitlebarBrand href="/" />
 			<AccountMenu className="ml-auto size-[26px] border-0" />
 		</AppTitlebar>
 	);
@@ -762,7 +769,7 @@ function DirectoryStatus({ children }: { children: ReactNode }) {
 	return (
 		<div className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary">
 			<AppTitlebar>
-				<AppTitlebarBrand />
+				<AppTitlebarBrand href="/" />
 			</AppTitlebar>
 			<DirectoryStatusContent>{children}</DirectoryStatusContent>
 		</div>

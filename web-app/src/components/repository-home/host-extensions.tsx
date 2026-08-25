@@ -197,6 +197,12 @@ function mountDirectoryView({
 					onOpenPeople={() => openPeopleFromView(atelier)}
 					onOpenSettings={() => openSettingsFromView(atelier)}
 					onOpenSqlExplorer={() => openSqlExplorerFromView(atelier)}
+					{...(!atelier.readOnly && atelier.reviews?.openWorkingChanges
+						? {
+								onOpenChangesReview: () =>
+									atelier.reviews?.openWorkingChanges?.(),
+							}
+						: {})}
 					{...(isHome
 						? {
 								onRepositoryEmpty: () => {

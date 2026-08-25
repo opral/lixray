@@ -85,6 +85,7 @@ type DirectoryViewProps = {
 	readonly onOpenPeople?: () => void;
 	readonly onOpenSettings?: () => void;
 	readonly onOpenSqlExplorer?: () => void;
+	readonly onOpenChangesReview?: () => void;
 	readonly onRepositoryEmpty?: () => void;
 };
 
@@ -112,11 +113,12 @@ export function DirectoryView({
 	onOpenPeople,
 	onOpenSettings,
 	onOpenSqlExplorer,
+	onOpenChangesReview,
 	onRepositoryEmpty,
 }: DirectoryViewProps) {
 	const { tree, error: treeError } = useRepositoryTree(lix, isActive);
 	const detailsEnabled = useAfterInitialIdle(
-		isActive && isHome && dirPath === "/" && tree !== null,
+		isActive && isHome && tree !== null,
 	);
 	const controlPlaneData = useRepositoryControlPlaneData(lix, detailsEnabled);
 	const listing = useMemo(
@@ -226,42 +228,21 @@ export function DirectoryView({
 			{isDropTarget ? <DropImportOverlay /> : null}
 			<div
 				className={
-					isHome && dirPath === "/"
+					isHome
 						? "mx-auto grid w-[min(1020px,calc(100%-48px))] grid-cols-[minmax(0,1fr)_244px] gap-12 pt-10 pb-10 @max-[1100px]:grid-cols-1 @max-[1100px]:gap-8"
 						: "mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10"
 				}
 			>
 				<main className="min-w-0">
 					<div className="flex flex-wrap items-center gap-2 pb-5">
-						{dirPath !== "/" ? (
-							<Breadcrumb
-								repositoryName={connection.lixName}
-								dirPath={dirPath}
-								onNavigate={(path, event) =>
-									onOpenDir(path, { newTab: newTabFromMouseEvent(event) })
-								}
-							/>
-						) : isHome ? (
-							<span className="px-3 text-[11.5px] font-bold tracking-[0.06em] text-text-quaternary uppercase">
-								Files
-							</span>
-						) : null}
+						<Breadcrumb
+							dirPath={dirPath}
+							onNavigate={(path, event) =>
+								onOpenDir(path, { newTab: newTabFromMouseEvent(event) })
+							}
+						/>
 						<span className="flex-1" />
 						<div className="flex flex-wrap items-center justify-end gap-2 @max-[520px]:w-full @max-[520px]:justify-start">
-							{detailsEnabled && hasAgentConnected ? (
-								<ConnectAgentButton
-									connection={connection}
-									hasAgentConnected={hasAgentConnected}
-									disabled={readOnly}
-								/>
-							) : null}
-							{detailsEnabled && onOpenPeople ? (
-								<InviteControl
-									teamApi={teamApi}
-									onOpenPeople={onOpenPeople}
-									disabled={readOnly || !teamApi}
-								/>
-							) : null}
 							<NewMenu
 								disabled={readOnly}
 								onCreateFile={(extension) => void createFile(extension)}
@@ -370,13 +351,36 @@ export function DirectoryView({
 						/>
 					) : null}
 				</main>
-				{isHome && dirPath === "/" ? (
+				{isHome ? (
 					<RepositoryControlPlaneRail
 						visibility={visibility}
 						fileCount={tree.files.length}
 						data={controlPlaneData}
 						onOpenSettings={onOpenSettings}
 						onOpenSqlExplorer={onOpenSqlExplorer}
+						onOpenChangesReview={onOpenChangesReview}
+						teamSection={
+							detailsEnabled ? (
+								<>
+									{hasAgentConnected ? (
+										<ConnectAgentButton
+											connection={connection}
+											hasAgentConnected={hasAgentConnected}
+											disabled={readOnly}
+											className={RAIL_CHIP_CLASS}
+										/>
+									) : null}
+									{onOpenPeople ? (
+										<InviteControl
+											teamApi={teamApi}
+											onOpenPeople={onOpenPeople}
+											disabled={readOnly || !teamApi}
+											className={RAIL_CHIP_CLASS}
+										/>
+									) : null}
+								</>
+							) : null
+						}
 					/>
 				) : null}
 			</div>
@@ -425,19 +429,33 @@ function RepositoryControlPlaneRail({
 	data,
 	onOpenSettings,
 	onOpenSqlExplorer,
+	onOpenChangesReview,
+	teamSection,
 }: {
 	readonly visibility: "private" | "public";
 	readonly fileCount: number;
 	readonly data: RepositoryControlPlaneData | null;
 	readonly onOpenSettings?: () => void;
 	readonly onOpenSqlExplorer?: () => void;
+	readonly onOpenChangesReview?: () => void;
+	readonly teamSection?: ReactNode;
 }) {
 	return (
 		<aside
 			aria-label="Repository overview"
 			className="min-w-0 @max-[1100px]:hidden"
 		>
-			<section className="border-b border-border-panel pb-7">
+			{teamSection ? (
+				<section className="border-b border-border-panel pb-7">
+					<RailHeading>Team &amp; agents</RailHeading>
+					<div className="mt-3 flex flex-wrap items-center gap-2">
+						{teamSection}
+					</div>
+				</section>
+			) : null}
+			<section
+				className={`border-b border-border-panel pb-7 ${teamSection ? "pt-7" : ""}`}
+			>
 				<RailHeading>About</RailHeading>
 				<button
 					type="button"
@@ -463,7 +481,7 @@ function RepositoryControlPlaneRail({
 						Some change history is unavailable.
 					</p>
 				) : null}
-				<ChangesSummary data={data} />
+				<ChangesSummary data={data} onOpenChangesReview={onOpenChangesReview} />
 			</section>
 
 			<section className="border-b border-border-panel py-7">
@@ -478,6 +496,10 @@ function RepositoryControlPlaneRail({
 	);
 }
 
+/** Quiet tonal chip, matching the About section's visibility chip. */
+const RAIL_CHIP_CLASS =
+	"h-7 gap-1.5 rounded-[7px] border-0 bg-[#f4eee5] px-2.5 text-[11.5px] font-bold text-[#57534e] shadow-none hover:bg-[#ebe2d6] hover:text-[#44403c] [&_img]:size-3 [&_svg]:size-3";
+
 function RailHeading({ children }: { readonly children: ReactNode }) {
 	return (
 		<h2 className="m-0 text-[11.5px] font-bold tracking-[0.08em] text-text-quaternary uppercase">
@@ -488,18 +510,26 @@ function RailHeading({ children }: { readonly children: ReactNode }) {
 
 function ChangesSummary({
 	data,
+	onOpenChangesReview,
 }: {
 	readonly data: RepositoryControlPlaneData | null;
+	readonly onOpenChangesReview?: () => void;
 }) {
 	if (!data) {
 		return (
 			<div className="mt-3 h-[118px] animate-pulse rounded-lg bg-bg-hover" />
 		);
 	}
-	return <ChangeBars data={data} />;
+	return <ChangeBars data={data} onOpenChangesReview={onOpenChangesReview} />;
 }
 
-function ChangeBars({ data }: { readonly data: RepositoryControlPlaneData }) {
+function ChangeBars({
+	data,
+	onOpenChangesReview,
+}: {
+	readonly data: RepositoryControlPlaneData;
+	readonly onOpenChangesReview?: () => void;
+}) {
 	const days = data.changeDays;
 	if (days === null) {
 		return (
@@ -559,6 +589,20 @@ function ChangeBars({ data }: { readonly data: RepositoryControlPlaneData }) {
 				{latestCheckpointDay ? <span>⚑ checkpoint</span> : null}
 				<span>today</span>
 			</div>
+			{onOpenChangesReview &&
+			days.some(
+				(entry) =>
+					entry.count > 0 &&
+					(!latestCheckpointDay || entry.day >= latestCheckpointDay),
+			) ? (
+				<button
+					type="button"
+					onClick={onOpenChangesReview}
+					className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-[#c2410c] hover:text-[#9a3412] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+				>
+					Review changes →
+				</button>
+			) : null}
 		</div>
 	);
 }
@@ -660,17 +704,17 @@ function formatShortDate(value: string | null): string {
  * last crumb is the folder being listed.
  */
 function Breadcrumb({
-	repositoryName,
 	dirPath,
 	onNavigate,
 }: {
-	readonly repositoryName: string;
 	readonly dirPath: string;
 	readonly onNavigate: (dirPath: string, event: ReactMouseEvent) => void;
 }) {
 	const segments = dirPath.split("/").filter(Boolean);
 	const crumbs = [
-		{ label: repositoryName, path: "/" },
+		// The repository is already named in the top bar; the explorer's own
+		// root is "Home" — quiet when you're on it, a clickable way back inside.
+		{ label: "Home", path: "/" },
 		...segments.map((segment, index) => ({
 			label: segment,
 			path: `/${segments.slice(0, index + 1).join("/")}`,
@@ -679,21 +723,23 @@ function Breadcrumb({
 	return (
 		<nav
 			aria-label="Folder path"
-			className="flex min-w-0 items-center gap-1 px-3 text-[13px]"
+			className="flex min-w-0 items-center gap-0.5 px-1 text-[13.5px] font-semibold"
 		>
 			{crumbs.map((crumb, index) => {
 				const isCurrent = index === crumbs.length - 1;
 				return (
-					<span key={crumb.path} className="flex min-w-0 items-center gap-1">
+					<span key={crumb.path} className="flex min-w-0 items-center gap-0.5">
 						{index > 0 ? (
-							<span aria-hidden className="text-text-quaternary">
+							<span aria-hidden className="text-[12px] text-text-quaternary">
 								/
 							</span>
 						) : null}
 						{isCurrent ? (
 							<span
 								aria-current="location"
-								className="truncate font-semibold text-text-primary"
+								className={`max-w-[220px] truncate px-2 ${
+									index === 0 ? "text-text-quaternary" : "text-text-primary"
+								}`}
 							>
 								{crumb.label}
 							</span>
@@ -701,7 +747,7 @@ function Breadcrumb({
 							<button
 								type="button"
 								onClick={(event) => onNavigate(crumb.path, event)}
-								className="max-w-[180px] cursor-pointer truncate rounded text-text-tertiary transition-colors hover:text-text-primary"
+								className="flex h-[30px] max-w-[180px] cursor-pointer items-center truncate rounded-[7px] px-2 text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
 							>
 								{crumb.label}
 							</button>
@@ -721,10 +767,12 @@ function ConnectAgentButton({
 	connection,
 	hasAgentConnected,
 	disabled = false,
+	className = "h-9 gap-2 px-3.5 text-[13px]",
 }: {
 	readonly connection: Omit<LixConnectionPromptInput, "origin">;
 	readonly hasAgentConnected: () => Promise<boolean>;
 	readonly disabled?: boolean;
+	readonly className?: string;
 }) {
 	const [dialogOpen, setDialogOpen] = useState(false);
 	return (
@@ -732,7 +780,7 @@ function ConnectAgentButton({
 			<Button
 				type="button"
 				variant="outline"
-				className="h-9 gap-2 px-3.5 text-[13px]"
+				className={className}
 				disabled={disabled}
 				onClick={() => setDialogOpen(true)}
 			>
@@ -762,10 +810,12 @@ function InviteControl({
 	teamApi,
 	onOpenPeople,
 	disabled = false,
+	className = "h-9 gap-1.5 px-3.5 text-[13px]",
 }: {
 	teamApi: RepositoryTeamApi | null;
 	onOpenPeople: () => void;
 	disabled?: boolean;
+	className?: string;
 }) {
 	const [members, setMembers] = useState<readonly TeamMember[] | null>(null);
 
@@ -820,7 +870,7 @@ function InviteControl({
 			<Button
 				type="button"
 				variant="outline"
-				className="h-9 gap-1.5 px-3.5 text-[13px]"
+				className={className}
 				disabled={disabled}
 				onClick={onOpenPeople}
 			>
