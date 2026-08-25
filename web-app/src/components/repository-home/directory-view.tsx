@@ -52,6 +52,8 @@ import {
 	resolveRepositoryHref,
 	useFileMarkdown,
 	useRepositoryControlPlaneData,
+	listDirectoryFromFiles,
+	useFilesAtCommit,
 	useRepositoryTree,
 	type RepositoryControlPlaneData,
 } from "./lix-data";
@@ -128,10 +130,27 @@ export function DirectoryView({
 		isActive && isHome && tree !== null,
 	);
 	const controlPlaneData = useRepositoryControlPlaneData(lix, detailsEnabled);
-	const listing = useMemo(
-		() => (tree ? listDirectory(tree, dirPath, { showHiddenFiles }) : null),
-		[tree, dirPath, showHiddenFiles],
-	);
+	// Time travel: a historical session renders the listing as of its target
+	// commit. The working review keeps the live listing — its whole point is
+	// the latest state against the last checkpoint.
+	const historicalCommitId =
+		diffSession && "commitId" in diffSession.target
+			? diffSession.target.commitId
+			: null;
+	const historicalFiles = useFilesAtCommit(lix, historicalCommitId);
+	const listing = useMemo(() => {
+		if (historicalCommitId) {
+			return historicalFiles
+				? listDirectoryFromFiles(historicalFiles, dirPath, {
+						showHiddenFiles,
+					})
+				: null;
+		}
+		return tree ? listDirectory(tree, dirPath, { showHiddenFiles }) : null;
+	}, [historicalCommitId, historicalFiles, tree, dirPath, showHiddenFiles]);
+	// The past is immutable, and the README preview reads live content: both
+	// creation affordances and the preview stand down while viewing history.
+	const viewingHistory = historicalCommitId !== null;
 	// The open diff session marks its files in the listing, mirroring the
 	// sidebar's review indicators; folders inherit a dot from any changed
 	// descendant so drilling in stays guided.
@@ -206,7 +225,7 @@ export function DirectoryView({
 	}, [isActive, isHome, tree]);
 
 	useEffect(() => {
-		if (!isActive || readOnly) return;
+		if (!isActive || readOnly || viewingHistory) return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (
 				!event.metaKey ||
@@ -234,7 +253,7 @@ export function DirectoryView({
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [dirPath, isActive, lix, onOpenFile, readOnly]);
+	}, [dirPath, isActive, lix, onOpenFile, readOnly, viewingHistory]);
 
 	if (!tree || !listing) {
 		if (treeError) {
@@ -274,7 +293,7 @@ export function DirectoryView({
 						<span className="flex-1" />
 						<div className="flex flex-wrap items-center justify-end gap-2 @max-[520px]:w-full @max-[520px]:justify-start">
 							<NewMenu
-								disabled={readOnly}
+								disabled={readOnly || viewingHistory}
 								onCreateFile={(extension) => void createFile(extension)}
 								onCreateFolder={() => {
 									setActionError(null);
@@ -301,7 +320,7 @@ export function DirectoryView({
 					) : null}
 					{listing.dirs.length === 0 && listing.files.length === 0 ? (
 						<div className="rounded-[10px] border border-dashed border-border-panel px-6 py-12 text-center text-[13px] leading-6 text-text-tertiary">
-							{readOnly ? (
+							{readOnly || viewingHistory ? (
 								"No files yet."
 							) : (
 								<>
@@ -369,7 +388,7 @@ export function DirectoryView({
 							/>
 						))}
 					</div>
-					{listing.readmePath && readme !== null ? (
+					{listing.readmePath && readme !== null && !viewingHistory ? (
 						<ReadmePreview
 							fileName={
 								listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
@@ -1104,6 +1123,14 @@ function EntryRow({
 			: changeKind === "removed"
 				? "bg-[var(--color-text-status-danger)]"
 				: "bg-[var(--color-icon-brand)]";
+	// The label matches the sidebar tree: added reads green, removed red,
+	// modified keeps the resting text color.
+	const nameClass =
+		changeKind === "added"
+			? "text-[var(--color-text-status-success)]"
+			: changeKind === "removed"
+				? "text-[var(--color-text-status-danger)]"
+				: "text-text-primary";
 	return (
 		<button
 			type="button"
@@ -1113,7 +1140,7 @@ function EntryRow({
 			data-changed-entry={changed ? "true" : undefined}
 		>
 			{icon}
-			<span className="text-sm font-medium text-text-primary">{name}</span>
+			<span className={`text-sm font-medium ${nameClass}`}>{name}</span>
 			<span className="flex-1" />
 			{/* In a review, the trailing slot carries the same orange change dot
 			    the sidebar tree uses, replacing the resting meta. */}
