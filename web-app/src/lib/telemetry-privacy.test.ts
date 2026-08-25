@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	SESSION_RECORDING_BLOCK_SELECTOR,
+	safeCrossOriginScriptOrigins,
 	sanitizeLixrayPathname,
 	scrubPostHogEvent,
 } from "./telemetry-privacy.ts";
@@ -108,6 +109,75 @@ void test("preserves sanitized PostHog exception messages", () => {
 			},
 		],
 	});
+});
+
+void test("classifies opaque cross-origin exceptions without dropping them", () => {
+	const event = scrubPostHogEvent({
+		uuid: "event_opaque_exception",
+		event: "$exception",
+		properties: {
+			$exception_list: [
+				{
+					type: "Error",
+					value: "Script error.",
+					mechanism: { handled: false, synthetic: true },
+				},
+			],
+			$exception_sources: [],
+		},
+	});
+
+	assert.deepEqual(event?.properties, {
+		$exception_list: [
+			{
+				type: "Error",
+				value: "Script error.",
+				mechanism: { handled: false, synthetic: true },
+			},
+		],
+		$exception_sources: [],
+		lixray_exception_context_quality: "opaque_cross_origin",
+	});
+});
+
+void test("does not misclassify exceptions that contain a stack", () => {
+	const event = scrubPostHogEvent({
+		uuid: "event_script_error_with_stack",
+		event: "$exception",
+		properties: {
+			$exception_list: [
+				{
+					value: "Script error.",
+					stacktrace: { frames: [{ filename: "/assets/app.js" }] },
+				},
+			],
+		},
+	});
+
+	assert.deepEqual(event?.properties, {
+		$exception_list: [
+			{
+				value: "Script error.",
+				stacktrace: { frames: [{ filename: "/assets/app.js" }] },
+			},
+		],
+	});
+});
+
+void test("retains only safe HTTP origins when inventorying external scripts", () => {
+	assert.deepEqual(
+		safeCrossOriginScriptOrigins(
+			[
+				"/assets/app.js",
+				"https://cdn.example/extension.js?repository=private",
+				"https://cdn.example/other.js",
+				"safari-web-extension://private-extension-id/injected.js",
+			],
+			"https://lixray.com/",
+			"https://lixray.com",
+		),
+		["https://cdn.example"],
+	);
 });
 
 void test("session replay blocks rich document content surfaces", () => {

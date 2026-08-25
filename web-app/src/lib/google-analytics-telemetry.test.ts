@@ -16,6 +16,7 @@ void test("adds the privacy-limited Google tag to the landing page", async () =>
 	const html = await response.text();
 
 	assert.match(html, /googletagmanager\.com\/gtag\/js\?id=G-TB0B5Q9D8Z/);
+	assert.match(html, /crossorigin="anonymous"/);
 	assert.match(html, /gtag\("config","G-TB0B5Q9D8Z"/);
 	assert.match(html, /allow_google_signals:false/);
 	assert.match(html, /allow_ad_personalization_signals:false/);

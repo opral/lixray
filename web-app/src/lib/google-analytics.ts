@@ -34,7 +34,7 @@ export async function addGoogleAnalytics(
 
 function googleAnalyticsTag(measurementId: string): string {
 	const id = JSON.stringify(measurementId);
-	return `<script id="${GOOGLE_ANALYTICS_SCRIPT_ID}" async src="https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}"></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date);gtag("config",${id},{allow_google_signals:false,allow_ad_personalization_signals:false});</script>`;
+	return `<script id="${GOOGLE_ANALYTICS_SCRIPT_ID}" async crossorigin="anonymous" src="https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}"></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date);gtag("config",${id},{allow_google_signals:false,allow_ad_personalization_signals:false});</script>`;
 }
 
 function responseWithBody(response: Response, body: string): Response {
