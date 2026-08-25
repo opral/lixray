@@ -210,8 +210,8 @@ export function useRepositoryControlPlaneData(
 
 /** The full directory/file tree, kept live via lix observe. */
 /**
- * Files as of a commit: the shallowest history row per file id, existing
- * paths only. Null while loading (or when no commit is given).
+ * Files as of a commit: the empty-root diff, where the commit's full state
+ * appears as added rows. Null while loading (or when no commit is given).
  */
 export function useFilesAtCommit(
 	lix: Lix,
@@ -219,23 +219,22 @@ export function useFilesAtCommit(
 ): ReadonlyArray<{ readonly id: string; readonly path: string }> | null {
 	const rows = useObservedRows(
 		lix,
-		"SELECT id, path, lixcol_depth FROM lix_history('lix_file', $1) ORDER BY id ASC, lixcol_depth ASC",
+		"SELECT row_pk ->> 0 AS id, to_path AS path FROM lix_diff('lix_file', lix_root_commit_id(), $1) ORDER BY to_path",
 		commitId ? [commitId] : [""],
 		commitId !== null,
 	);
 	return useMemo(() => {
 		if (!commitId) return null;
 		if (!rows.rows) return null;
-		const seen = new Set<string>();
 		const files: Array<{ readonly id: string; readonly path: string }> = [];
 		for (const row of rows.rows) {
 			const id = row.get("id");
-			if (typeof id !== "string" || seen.has(id)) continue;
-			seen.add(id);
 			const path = row.get("path");
-			if (typeof path === "string") files.push({ id, path });
+			if (typeof id === "string" && typeof path === "string") {
+				files.push({ id, path });
+			}
 		}
-		return files.sort((left, right) => left.path.localeCompare(right.path));
+		return files;
 	}, [commitId, rows.rows]);
 }
 
