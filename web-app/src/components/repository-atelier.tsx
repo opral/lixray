@@ -1386,9 +1386,10 @@ function RepositoryNavbarBrand({
 			<a
 				href={signedIn ? "/home" : "/"}
 				aria-label="LixRay home"
-				// ml-1 lifts the mark from the top bar's 14px content line to x=18 —
-				// the same x as /home's titlebar mark and the sidebar's content column.
-				className="ml-1 inline-flex shrink-0 items-center rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+				// -ml-1.5 pulls the mark from the top bar's 14px content line to
+				// x=8 — the same x as the profile and home headers' mark. The
+				// sidebar's 14px icon column centers under the 24px mark.
+				className="-ml-1.5 inline-flex shrink-0 items-center rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
 			>
 				<img className="size-6" src="/lixray-mark.svg" alt="" />
 			</a>
