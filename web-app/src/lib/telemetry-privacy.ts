@@ -83,14 +83,89 @@ export function scrubPostHogEvent(
 ): CaptureResult | null {
 	if (!event) return event;
 	const scrubbableEvent = event as ScrubbableCaptureResult;
+	const classifiedProperties = classifyExceptionContext(
+		scrubbableEvent.event,
+		scrubbableEvent.properties,
+	);
 	const properties =
 		scrubbableEvent.event === "$autocapture"
-			? scrubAutocaptureProperties(scrubbableEvent.properties)
-			: scrubbableEvent.properties;
+			? scrubAutocaptureProperties(classifiedProperties)
+			: classifiedProperties;
 	return {
 		...scrubbableEvent,
 		properties: scrubPostHogValue(properties),
 	} as CaptureResult;
+}
+
+function classifyExceptionContext(
+	event: string | undefined,
+	value: unknown,
+): unknown {
+	if (event !== "$exception" || !isRecord(value)) return value;
+	const exceptionList = value.$exception_list;
+	if (
+		!Array.isArray(exceptionList) ||
+		!exceptionList.some(isOpaqueScriptError)
+	) {
+		return value;
+	}
+
+	const scriptOrigins = crossOriginScriptOrigins();
+	return {
+		...value,
+		lixray_exception_context_quality: "opaque_cross_origin",
+		...(scriptOrigins.length > 0
+			? { lixray_cross_origin_script_origins_present: scriptOrigins }
+			: {}),
+	};
+}
+
+function isOpaqueScriptError(value: unknown): boolean {
+	if (!isRecord(value) || value.value !== "Script error.") return false;
+	const stacktrace = value.stacktrace;
+	return (
+		!isRecord(stacktrace) ||
+		!Array.isArray(stacktrace.frames) ||
+		stacktrace.frames.length === 0
+	);
+}
+
+function crossOriginScriptOrigins(): string[] {
+	if (typeof document === "undefined" || typeof location === "undefined") {
+		return [];
+	}
+	return safeCrossOriginScriptOrigins(
+		Array.from(document.scripts, (script) => script.src),
+		document.baseURI,
+		location.origin,
+	);
+}
+
+export function safeCrossOriginScriptOrigins(
+	scriptSources: string[],
+	baseUrl: string,
+	pageOrigin: string,
+): string[] {
+	const origins = new Set<string>();
+	for (const source of scriptSources) {
+		if (!source) continue;
+		try {
+			const url = new URL(source, baseUrl);
+			if (
+				(url.protocol === "https:" || url.protocol === "http:") &&
+				url.origin !== pageOrigin
+			) {
+				origins.add(url.origin);
+			}
+		} catch {
+			// Ignore malformed and non-URL script sources.
+		}
+	}
+	return [...origins].sort().slice(0, 10);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function scrubAutocaptureProperties(value: unknown): unknown {
