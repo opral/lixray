@@ -159,21 +159,41 @@ export function DirectoryView({
 			(diffSession?.files ?? []).map((file) => [file.path, file.changeKind]),
 		);
 	}, [diffSession]);
-	const changedDirPaths = useMemo(() => {
+	const changedDirKinds = useMemo(() => {
 		// Ancestors use the canonical directory convention: absolute, no
-		// trailing slash (see canonicalDirectoryPath).
-		const dirs = new Set<string>();
+		// trailing slash (see canonicalDirectoryPath). A directory whose every
+		// file is newly added reads green like its contents; anything mixed
+		// keeps the contains-changes orange.
+		const dirs = new Map<string, "added" | "modified">();
 		for (const path of changedFileKinds.keys()) {
 			const segments = path.split("/").filter(Boolean);
 			segments.pop();
 			let prefix = "";
 			for (const segment of segments) {
 				prefix = `${prefix}/${segment}`;
-				dirs.add(prefix);
+				dirs.set(prefix, "modified");
 			}
 		}
+		if (dirs.size === 0) return dirs;
+		const allPaths = historicalFiles
+			? historicalFiles.map((file) => file.path)
+			: (tree?.files.map((file) => file.path) ?? []);
+		for (const dirPrefix of dirs.keys()) {
+			const prefix = `${dirPrefix}/`;
+			let fileCount = 0;
+			let allAdded = true;
+			for (const path of allPaths) {
+				if (!path.startsWith(prefix)) continue;
+				fileCount += 1;
+				if (changedFileKinds.get(path) !== "added") {
+					allAdded = false;
+					break;
+				}
+			}
+			if (fileCount > 0 && allAdded) dirs.set(dirPrefix, "added");
+		}
 		return dirs;
-	}, [changedFileKinds]);
+	}, [changedFileKinds, historicalFiles, tree]);
 	const readme = useFileMarkdown(
 		lix,
 		listing?.readmePath ?? null,
@@ -345,10 +365,15 @@ export function DirectoryView({
 								name={dir.name}
 								meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
 								hidden={dir.hidden}
-								{...(changedDirPaths.has(dir.path)
-									? { changeKind: "modified" as const }
+								{...(changedDirKinds.has(dir.path)
+									? {
+											changeKind: changedDirKinds.get(dir.path),
+											// The softened dot marks mixed contents; a fully
+											// new folder reads solid green like its files.
+											dimIndicator:
+												changedDirKinds.get(dir.path) === "modified",
+										}
 									: {})}
-								dimIndicator
 								onClick={(event) =>
 									onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
 								}
