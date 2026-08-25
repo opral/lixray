@@ -1142,19 +1142,20 @@ function EntryRow({
 	readonly onClick: (event: ReactMouseEvent) => void;
 }) {
 	const changed = changeKind !== undefined;
+	// The diff palette, matching the markdown diff editor: labels take the
+	// deep text tones; the 6px dots take the brighter border companions
+	// (tiny marks lose perceived chroma).
 	const dotClass =
 		changeKind === "added"
-			? "bg-[var(--color-text-status-success)]"
+			? "bg-[var(--color-border-diff-added)]"
 			: changeKind === "removed"
-				? "bg-[var(--color-text-status-danger)]"
+				? "bg-[var(--color-border-diff-removed)]"
 				: "bg-[var(--color-icon-brand)]";
-	// The label matches the sidebar tree: added reads green, removed red,
-	// modified keeps the resting text color.
 	const nameClass =
 		changeKind === "added"
-			? "text-[var(--color-text-status-success)]"
+			? "text-[var(--color-text-diff-added)]"
 			: changeKind === "removed"
-				? "text-[var(--color-text-status-danger)]"
+				? "text-[var(--color-text-diff-removed)]"
 				: "text-text-primary";
 	return (
 		<button
