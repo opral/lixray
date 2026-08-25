@@ -197,10 +197,15 @@ function mountDirectoryView({
 					onOpenPeople={() => openPeopleFromView(atelier)}
 					onOpenSettings={() => openSettingsFromView(atelier)}
 					onOpenSqlExplorer={() => openSqlExplorerFromView(atelier)}
-					{...(!atelier.readOnly && atelier.reviews?.openWorkingChanges
+					{...(!atelier.readOnly && atelier.diff
 						? {
+								// reveal: false — home stays the landing surface; the
+								// user picks the file from the review-aware listing.
 								onOpenChangesReview: () =>
-									atelier.reviews?.openWorkingChanges?.(),
+									void atelier.diff?.open({
+										target: { working: true },
+										reveal: false,
+									}),
 							}
 						: {})}
 					{...(isHome
