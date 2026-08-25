@@ -1,4 +1,12 @@
 import {
+	openLix,
+	type ExecuteResult as LixExecuteResult,
+	type JsonValue,
+	type Lix,
+	type SqlParam,
+	Value,
+} from "@lix-js/sdk";
+import {
 	type CreateBranchInput,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
@@ -11,10 +19,7 @@ import {
 	type LixRuntimeClient,
 	type LixSummary,
 } from "./lix-service.ts";
-import {
-	openProtocolSession,
-	type ProtocolSession,
-} from "./protocol-session.ts";
+import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
 
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 
@@ -46,7 +51,7 @@ interface WorkerLixRuntimeClientOptions {
 }
 
 interface LixSession {
-	protocol: ProtocolSession;
+	lix: Lix;
 	queue: Promise<void>;
 }
 
@@ -164,7 +169,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				if (branchId) await this.ensureBranch(session, branchId);
-				return session.protocol.activeBranchId();
+				return session.lix.activeBranchId();
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -178,7 +183,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		try {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, () =>
-				session.protocol.switchBranch(branchId),
+				session.lix.switchBranch({ branchId }),
 			);
 		} catch (caught) {
 			throw asLixError(caught);
@@ -211,7 +216,13 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.protocol.execute(request);
+				return encodeExecuteResult(
+					await session.lix.execute(
+						request.sql,
+						(request.params ?? []).map(decodeWireParam),
+						request.options,
+					),
+				);
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -244,7 +255,14 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.protocol.executeBatch(request);
+				const results = await session.lix.executeBatch(
+					request.statements.map((statement) => ({
+						sql: statement.sql,
+						params: (statement.params ?? []).map(decodeWireParam),
+					})),
+					request.options,
+				);
+				return { results: results.map(encodeExecuteResult) };
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -260,7 +278,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.protocol.createBranch(input);
+				return session.lix.createBranch(input);
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -272,7 +290,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.protocol.createCheckpoint();
+				return session.lix.createCheckpoint();
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -284,7 +302,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.protocol.undo();
+				return session.lix.undo();
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -296,7 +314,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.protocol.redo();
+				return session.lix.redo();
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -312,7 +330,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.protocol.mergeBranchPreview(sourceBranchId);
+				return session.lix.mergeBranchPreview({ sourceBranchId });
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -324,7 +342,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.protocol.mergeBranch(sourceBranchId);
+				return session.lix.mergeBranch({ sourceBranchId });
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -341,7 +359,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 					try {
 						const session = await pending;
 						await session.queue;
-						await session.protocol.close();
+						await session.lix.close();
 					} catch {
 						// A failed open or operation has no live session to close.
 					}
@@ -366,10 +384,16 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	private async openSession(lixId: string): Promise<LixSession> {
+		const lix = await openLix({
+			server: {
+				mode: "remote",
+				url: "https://mcp.lixray.invalid",
+				fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+					this.protocolFetch(lixId, input, init),
+			},
+		});
 		return {
-			protocol: await openProtocolSession((path, request) =>
-				this.lixResponse(lixId, path, request),
-			),
+			lix,
 			queue: Promise.resolve(),
 		};
 	}
@@ -390,9 +414,23 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		session: LixSession,
 		branchId: string,
 	): Promise<void> {
-		if (session.protocol.activeBranchId() !== branchId) {
-			await session.protocol.switchBranch(branchId);
+		if ((await session.lix.activeBranchId()) !== branchId) {
+			await session.lix.switchBranch({ branchId });
 		}
+	}
+
+	private async protocolFetch(
+		lixId: string,
+		input: RequestInfo | URL,
+		init?: RequestInit,
+	): Promise<Response> {
+		const request = new Request(input, {
+			...init,
+			signal: init?.signal ?? this.signal,
+		});
+		const path = canonicalProtocolPath(new URL(request.url));
+		if (path === null) return new Response("Not found\n", { status: 404 });
+		return this.lixResponse(lixId, path, request);
 	}
 
 	private async lixResponse(
@@ -422,6 +460,81 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			return this.lixFetch(lixId, template);
 		}
 		return new Response("Lix storage is not configured.\n", { status: 500 });
+	}
+}
+
+function canonicalProtocolPath(url: URL): string | null {
+	const marker = "/lix/v1/";
+	const markerIndex = url.pathname.indexOf(marker);
+	if (markerIndex === -1) return null;
+	return url.pathname.slice(markerIndex);
+}
+
+function decodeWireParam(
+	value: NonNullable<ExecuteRequest["params"]>[number],
+): SqlParam {
+	switch (value.kind) {
+		case "null":
+			return Value.null();
+		case "bool":
+			return Value.boolean(value.value);
+		case "int":
+			return Value.integer(value.value);
+		case "float":
+			return Value.real(value.value);
+		case "text":
+			return Value.text(value.value);
+		case "timestamp":
+			return Value.timestamptz(value.value);
+		case "json":
+			return Value.jsonb(value.value as JsonValue);
+		case "blob":
+			return Value.blob(base64ToBytes(value.base64));
+	}
+}
+
+function encodeExecuteResult(result: LixExecuteResult): ExecuteResponse {
+	return {
+		columns: [...result.columns],
+		rows: result.rows.map((row) =>
+			result.columns.map((column) => encodeLixValue(row.value(column))),
+		),
+		rowsAffected: result.rowsAffected,
+		notices: result.notices.map((notice) => ({ ...notice })),
+	};
+}
+
+type LixResultValue = ReturnType<LixExecuteResult["rows"][number]["value"]>;
+
+function encodeLixValue(
+	value: LixResultValue,
+): ExecuteResponse["rows"][number][number] {
+	const jsValue = value.toJS();
+	switch (value.kind) {
+		case "null":
+			return { kind: "null", value: null };
+		case "boolean":
+			return { kind: "bool", value: jsValue as boolean };
+		case "integer":
+			return { kind: "int", value: jsValue as number };
+		case "real":
+			return { kind: "float", value: jsValue as number };
+		case "text":
+			return { kind: "text", value: jsValue as string };
+		case "timestamptz":
+			return { kind: "timestamp", value: jsValue as string };
+		case "jsonb":
+			return { kind: "json", value: jsValue };
+		case "blob": {
+			const bytes = value.asBytes();
+			if (!bytes) {
+				throw createLixError(
+					"upstream_error",
+					"Lix returned an invalid blob value.",
+				);
+			}
+			return { kind: "blob", base64: bytesToBase64(bytes) };
+		}
 	}
 }
 

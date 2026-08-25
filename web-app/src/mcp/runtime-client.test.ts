@@ -12,7 +12,7 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 	const pathname = testProtocolPath(request);
 	if (pathname === "/lix/v1/") {
 		return Response.json({
-			protocolVersion: 2,
+			protocolVersion: 3,
 			activeBranchId: "main",
 			activeAccountId: "00000000-0000-7000-8000-000000000002",
 			sessionId: "runtime-client-session",
@@ -260,7 +260,7 @@ void test("closing a Railway Lix session releases its remote session", async () 
 	assert.deepEqual(paths, ["GET /lix/v1/", "DELETE /lix/v1/session"]);
 });
 
-void test("execute maps protocol wire values without opening WASM", async () => {
+void test("execute maps protocol wire values through the SDK", async () => {
 	const runtime = client(async (_lixId, request) => {
 		if (testProtocolPath(request) === "/lix/v1/execute") {
 			return Response.json({
@@ -293,7 +293,7 @@ void test("execute maps protocol wire values without opening WASM", async () => 
 	assert.deepEqual(response.rows, [
 		[
 			{ kind: "int", value: 7 },
-			{ kind: "timestamp", value: "2026-08-20T00:00:00Z" },
+			{ kind: "timestamp", value: "2026-08-20T00:00:00.000000Z" },
 			{ kind: "json", value: { ok: true } },
 			{ kind: "blob", base64: "AQID" },
 		],
@@ -363,7 +363,7 @@ void test("createBranch, checkpoint, undo, and redo use protocol HTTP", async ()
 	]);
 });
 
-void test("remote merge stays unsupported without loading WASM", async () => {
+void test("remote merge stays unsupported through the SDK", async () => {
 	const runtime = client(async (_lixId, request) =>
 		branchProtocolResponse(request),
 	);
