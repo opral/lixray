@@ -2,6 +2,7 @@ import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk";
 import { OpfsStorage } from "@lix-js/storage-opfs";
 import { captureTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
+import { waitForLixPrewarm } from "./lix-prewarm.ts";
 import {
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
@@ -221,6 +222,8 @@ async function openRepositoryLixSessionOnce(
 async function openOpfsSyncSession(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<Lix> {
+	await waitForLixPrewarm();
+	options.signal?.throwIfAborted();
 	return openLix({
 		storage: new OpfsStorage({
 			name: repositoryOpfsCacheName(options),
