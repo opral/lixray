@@ -42,9 +42,12 @@ set local role authenticated;
 
 select is(
   (
-    select document #>> '{media,avatar,uri}'
-    from public.namespace_profiles
-    limit 1
+    select profile.document #>> '{media,avatar,uri}'
+    from public.namespace_profiles profile
+    where profile.namespace_id = (
+      select resolved.namespace_id
+      from public.resolve_public_profile_by_handle('samuel') resolved
+    )
   ),
   'https://lh3.googleusercontent.com/samuel',
   'personal bootstrap seeds the public JSContact avatar from Google metadata'
@@ -78,9 +81,12 @@ set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000001';
 
 select is(
   (
-    select document #>> '{media,avatar,uri}'
-    from public.namespace_profiles
-    limit 1
+    select profile.document #>> '{media,avatar,uri}'
+    from public.namespace_profiles profile
+    where profile.namespace_id = (
+      select resolved.namespace_id
+      from public.resolve_public_profile_by_handle('samuel') resolved
+    )
   ),
   'https://lh3.googleusercontent.com/samuel',
   'later Google metadata does not overwrite the authoritative JSContact profile'

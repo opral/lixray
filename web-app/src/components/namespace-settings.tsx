@@ -106,9 +106,7 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 				</div>
 			</div>
 
-			{organization.isPersonal ? (
-				<ProfilePanel organization={organization} />
-			) : null}
+			<ProfilePanel organization={organization} />
 			{organization.id !== DEMO_PROFILE_NAMESPACE_ID ? (
 				<GeneralPanel organization={organization} />
 			) : null}
