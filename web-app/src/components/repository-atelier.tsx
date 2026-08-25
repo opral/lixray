@@ -468,7 +468,7 @@ export function RepositoryAtelier({
 		<span
 			aria-disabled="true"
 			title="Nothing to share yet"
-			className="inline-flex h-7 cursor-default items-center rounded-[7px] border border-border-panel px-3 text-xs font-semibold text-text-tertiary/70"
+			className="inline-flex h-7 cursor-default items-center rounded-[7px] px-2.5 text-xs font-semibold text-text-tertiary/70"
 		>
 			Share
 		</span>
@@ -641,7 +641,7 @@ export function RepositoryAtelier({
 	const headerActions = (
 		<div className="flex items-center gap-2">
 			{repositoryHeaderActions}
-			{user ? <AccountMenu className="size-7" /> : null}
+			{user ? <AccountMenu /> : null}
 		</div>
 	);
 	const navigateToCurrentPathBranch = useCallback(
@@ -1321,7 +1321,12 @@ function RepositoryShareControl({
 				captureTelemetry("webapp_share_link_copied", { share_mode: "public" });
 			}}
 			trigger={
-				<Button type="button" size="xs" variant="outline" className="h-7 px-3">
+				<Button
+					type="button"
+					size="xs"
+					variant="ghost"
+					className="h-7 rounded-[7px] px-2.5 text-xs font-semibold text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary"
+				>
 					Share
 				</Button>
 			}

@@ -119,7 +119,7 @@ function ProfileHeader({
 			<AppTitlebarBrand href={signedIn ? "/home" : "/"} />
 			<div className="ml-auto flex items-center gap-2.5">
 				{signedIn ? (
-					<AccountMenu className="size-[26px] border-0" />
+					<AccountMenu />
 				) : (
 					<>
 						<Button asChild variant="ghost" size="sm" disabled={!authLoaded}>

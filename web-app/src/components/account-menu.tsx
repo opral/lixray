@@ -45,7 +45,7 @@ export function AccountMenu({ className }: { className?: string }) {
 			<DropdownMenuTrigger asChild>
 				<button
 					className={cn(
-						"inline-flex size-[30px] cursor-pointer items-center justify-center rounded-full border border-border-panel bg-bg-action-secondary p-0 text-[11px] font-semibold text-text-on-action-secondary transition hover:-translate-y-px hover:bg-bg-action-secondary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible",
+						"inline-flex size-[26px] cursor-pointer items-center justify-center rounded-full bg-bg-action-secondary p-0 text-[11px] font-semibold text-text-on-action-secondary transition-colors hover:bg-bg-action-secondary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible",
 						className,
 					)}
 					type="button"

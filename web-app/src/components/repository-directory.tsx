@@ -339,7 +339,7 @@ export function DirectoryHeader() {
 	return (
 		<AppTitlebar>
 			<AppTitlebarBrand href="/" />
-			<AccountMenu className="ml-auto size-[26px] border-0" />
+			<AccountMenu className="ml-auto" />
 		</AppTitlebar>
 	);
 }
