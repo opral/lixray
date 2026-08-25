@@ -135,14 +135,16 @@ export function DirectoryView({
 	// The open diff session marks its files in the listing, mirroring the
 	// sidebar's review indicators; folders inherit a dot from any changed
 	// descendant so drilling in stays guided.
-	const changedFilePaths = useMemo(() => {
-		return new Set((diffSession?.files ?? []).map((file) => file.path));
+	const changedFileKinds = useMemo(() => {
+		return new Map(
+			(diffSession?.files ?? []).map((file) => [file.path, file.changeKind]),
+		);
 	}, [diffSession]);
 	const changedDirPaths = useMemo(() => {
 		// Ancestors use the canonical directory convention: absolute, no
 		// trailing slash (see canonicalDirectoryPath).
 		const dirs = new Set<string>();
-		for (const path of changedFilePaths) {
+		for (const path of changedFileKinds.keys()) {
 			const segments = path.split("/").filter(Boolean);
 			segments.pop();
 			let prefix = "";
@@ -152,7 +154,7 @@ export function DirectoryView({
 			}
 		}
 		return dirs;
-	}, [changedFilePaths]);
+	}, [changedFileKinds]);
 	const readme = useFileMarkdown(
 		lix,
 		listing?.readmePath ?? null,
@@ -324,7 +326,9 @@ export function DirectoryView({
 								name={dir.name}
 								meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
 								hidden={dir.hidden}
-								changed={changedDirPaths.has(dir.path)}
+								{...(changedDirPaths.has(dir.path)
+									? { changeKind: "modified" as const }
+									: {})}
 								dimIndicator
 								onClick={(event) =>
 									onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
@@ -344,12 +348,14 @@ export function DirectoryView({
 								name={file.name}
 								meta={formatUpdatedAt(file.updatedAt)}
 								hidden={file.hidden}
-								changed={changedFilePaths.has(file.path)}
+								{...(changedFileKinds.has(file.path)
+									? { changeKind: changedFileKinds.get(file.path) }
+									: {})}
 								onClick={(event) => {
 									// A changed file opens through the diff session, keeping
 									// the review float in step with the revealed document.
 									if (
-										changedFilePaths.has(file.path) &&
+										changedFileKinds.has(file.path) &&
 										onOpenDiffFile &&
 										!newTabFromMouseEvent(event)
 									) {
@@ -1074,7 +1080,7 @@ function EntryRow({
 	name,
 	meta,
 	hidden = false,
-	changed = false,
+	changeKind,
 	dimIndicator = false,
 	onClick,
 }: {
@@ -1082,12 +1088,22 @@ function EntryRow({
 	readonly name: string;
 	readonly meta: string;
 	readonly hidden?: boolean;
-	/** Marked by the open diff session; mirrors the sidebar's indicator. */
-	readonly changed?: boolean;
+	/**
+	 * Marked by the open diff session; mirrors the sidebar's indicator.
+	 * Added shows green, removed red, modified the brand orange.
+	 */
+	readonly changeKind?: "added" | "modified" | "removed";
 	/** Folders inherit a softened dot, matching the sidebar tree. */
 	readonly dimIndicator?: boolean;
 	readonly onClick: (event: ReactMouseEvent) => void;
 }) {
+	const changed = changeKind !== undefined;
+	const dotClass =
+		changeKind === "added"
+			? "bg-[var(--color-text-status-success)]"
+			: changeKind === "removed"
+				? "bg-[var(--color-text-status-danger)]"
+				: "bg-[var(--color-icon-brand)]";
 	return (
 		<button
 			type="button"
@@ -1105,7 +1121,7 @@ function EntryRow({
 				<span
 					title="Changed in this review"
 					aria-label="Changed in this review"
-					className={`size-1.5 shrink-0 rounded-full bg-[var(--color-icon-brand)] ${dimIndicator ? "opacity-75" : ""}`}
+					className={`size-1.5 shrink-0 rounded-full ${dotClass} ${dimIndicator ? "opacity-75" : ""}`}
 				/>
 			) : (
 				<span className="text-[12.5px] text-text-quaternary">{meta}</span>
