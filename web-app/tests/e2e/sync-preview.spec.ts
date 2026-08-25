@@ -1,6 +1,6 @@
 import { expect, type Page, type Request, test } from "@playwright/test";
 
-test("deployed OPFS clients sync files, editors, and hot checkpoint history", async ({
+test("deployed OPFS tabs share one replica and sync files, editors, and hot checkpoint history", async ({
 	browser,
 	baseURL,
 }) => {
@@ -18,13 +18,12 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 	const repositoryUrl = new URL("/@acme/launch-q3", baseURL).toString();
 	const realtimeTimeout = 30_000;
 	const repositoryOperationTimeout = 90_000;
-	const contexts = await Promise.all([
-		browser.newContext(),
-		browser.newContext(),
+	const sharedContext = await browser.newContext();
+	const contexts = [sharedContext];
+	const [left, right] = await Promise.all([
+		sharedContext.newPage(),
+		sharedContext.newPage(),
 	]);
-	const [left, right] = await Promise.all(
-		contexts.map((context) => context.newPage()),
-	);
 	const healthResponse = await contexts[0]!.request.get(
 		new URL("/healthz", baseURL).toString(),
 	);
@@ -640,7 +639,7 @@ test("deployed OPFS clients sync files, editors, and hot checkpoint history", as
 		};
 		const phaseNames = [
 			"lixray:repository-open:start",
-			"lixray:repository-open:replica-claimed",
+			"lixray:repository-open:replica-identified",
 			"lixray:repository-open:lix-opened",
 			"lixray:repository-open:branch-ready",
 			"lixray:repository-open:session-ready",

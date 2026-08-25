@@ -3,10 +3,8 @@ import test from "node:test";
 import {
 	BROWSER_REPLICA_STORAGE_KEY_PREFIX,
 	REPOSITORY_OPFS_CACHE_NAMESPACE,
-	claimRepositoryBrowserReplicaId,
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
-	type BrowserReplicaLockManager,
 } from "./repository-opfs-cache.ts";
 
 const browserScope = {
@@ -14,44 +12,6 @@ const browserScope = {
 	repositoryId: "11111111-1111-4111-8111-111111111111",
 };
 const browserStorageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(`${browserScope.authIdentity}:${browserScope.repositoryId}`)}`;
-
-function createLockManager(): BrowserReplicaLockManager {
-	const held = new Set<string>();
-	const waiters = new Map<string, Array<() => void>>();
-	return {
-		async request(name, options, callback) {
-			options.signal?.throwIfAborted();
-			while (held.has(name)) {
-				await new Promise<void>((resolve, reject) => {
-					const queue = waiters.get(name) ?? [];
-					const wake = () => {
-						options.signal?.removeEventListener("abort", abort);
-						resolve();
-					};
-					const abort = () => {
-						const index = queue.indexOf(wake);
-						if (index >= 0) queue.splice(index, 1);
-						reject(
-							options.signal?.reason instanceof Error
-								? options.signal.reason
-								: new DOMException("The operation was aborted.", "AbortError"),
-						);
-					};
-					queue.push(wake);
-					waiters.set(name, queue);
-					options.signal?.addEventListener("abort", abort, { once: true });
-				});
-			}
-			held.add(name);
-			try {
-				await callback({});
-			} finally {
-				held.delete(name);
-				waiters.get(name)?.shift()?.();
-			}
-		},
-	};
-}
 
 void test("hard-cuts replicas created before selected-change locators", () => {
 	assert.equal(REPOSITORY_OPFS_CACHE_NAMESPACE, "lixray:sync-protocol-v3");
@@ -180,64 +140,4 @@ void test("fails closed when durable replica storage cannot be read or written",
 			}),
 		/storage write denied/,
 	);
-});
-
-void test("fails closed when exclusive browser replica ownership is unavailable", async () => {
-	await assert.rejects(
-		claimRepositoryBrowserReplicaId(browserScope, { lockManager: null }),
-		/requires the Web Locks API/,
-	);
-});
-
-void test("queues concurrent opens on the same durable replica", async () => {
-	const values = new Map([[browserStorageKey, "warm-browser"]]);
-	const storage = {
-		getItem: (key: string) => values.get(key) ?? null,
-		setItem: (key: string, value: string) => values.set(key, value),
-	};
-	const locks = createLockManager();
-	const environment = {
-		storage,
-		lockManager: locks,
-		createId: () => "must-not-replace-warm-browser",
-	};
-	const first = await claimRepositoryBrowserReplicaId(
-		browserScope,
-		environment,
-	);
-	assert.equal(first.replicaId, "account-123:warm-browser");
-	const secondOpen = claimRepositoryBrowserReplicaId(browserScope, environment);
-	let secondSettled = false;
-	void secondOpen.then(() => {
-		secondSettled = true;
-	});
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	assert.equal(secondSettled, false, "the later open waits for ownership");
-	first.release();
-	const second = await secondOpen;
-	assert.equal(second.replicaId, first.replicaId);
-	assert.equal(values.get(browserStorageKey), "warm-browser");
-	second.release();
-});
-
-void test("cancels a queued replica claim before the owner releases", async () => {
-	const values = new Map([[browserStorageKey, "warm-browser"]]);
-	const storage = {
-		getItem: (key: string) => values.get(key) ?? null,
-		setItem: (key: string, value: string) => values.set(key, value),
-	};
-	const lockManager = createLockManager();
-	const first = await claimRepositoryBrowserReplicaId(browserScope, {
-		storage,
-		lockManager,
-	});
-	const controller = new AbortController();
-	const queued = claimRepositoryBrowserReplicaId(browserScope, {
-		storage,
-		lockManager,
-		signal: controller.signal,
-	});
-	controller.abort();
-	await assert.rejects(queued, { name: "AbortError" });
-	first.release();
 });

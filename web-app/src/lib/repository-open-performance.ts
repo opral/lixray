@@ -1,6 +1,6 @@
 export const REPOSITORY_OPEN_MARKS = {
 	start: "lixray:repository-open:start",
-	replicaClaimed: "lixray:repository-open:replica-claimed",
+	replicaIdentified: "lixray:repository-open:replica-identified",
 	lixOpened: "lixray:repository-open:lix-opened",
 	branchReady: "lixray:repository-open:branch-ready",
 	sessionReady: "lixray:repository-open:session-ready",
