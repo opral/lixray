@@ -36,32 +36,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		service: "lixray",
 		deploymentId: expectedDeploymentId,
 	});
-	await left.goto(new URL("/", baseURL).toString());
 	const cacheProbeUrl = new URL(
 		"/@acme/launch-q3/lix/v1/sync/pull?after=18446744073709551615&limit=512",
 		baseURL,
 	).toString();
-	const cacheProbes = await left.evaluate(async (url) => {
-		const probe = async () => {
-			const response = await fetch(url, {
-				headers: {
-					Authorization: "Bearer lixray-demo",
-					"Lix-Session-Id": "0".repeat(64),
-				},
-			});
-			return {
-				status: response.status,
-				cacheControl: response.headers.get("cache-control"),
-				requestId: response.headers.get("x-railway-request-id"),
-			};
-		};
-		return [await probe(), await probe()];
-	}, cacheProbeUrl);
-	for (const probe of cacheProbes) {
-		expect(probe).toMatchObject({ status: 410, cacheControl: "no-store" });
-		expect(probe.requestId).toBeTruthy();
-	}
-	expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
 	const syncFailures: string[] = [];
 	const runtimeFailures: string[] = [];
 	const coldReads = new Map<Page, string[]>();
@@ -316,6 +294,45 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		};
 
 		await Promise.all([openHome(left), openHome(right)]);
+		const lockState = await left.evaluate(async () => {
+			const snapshot = await navigator.locks.query();
+			return {
+				held: snapshot.held?.map((lock) => lock.name) ?? [],
+				pending: snapshot.pending?.map((lock) => lock.name) ?? [],
+			};
+		});
+		const opfsWriterLocks = [...lockState.held, ...lockState.pending].filter(
+			(name) => name?.startsWith("lix:opfs-sqlite:"),
+		);
+		expect(new Set(opfsWriterLocks).size).toBe(1);
+		expect(
+			[...lockState.held, ...lockState.pending].some((name) =>
+				name?.startsWith("lixray:opfs-replica:"),
+			),
+		).toBe(false);
+
+		const cacheProbes = await left.evaluate(async (url) => {
+			const probe = async () => {
+				const response = await fetch(url, {
+					headers: {
+						Authorization: "Bearer lixray-demo",
+						"Lix-Session-Id": "0".repeat(64),
+					},
+				});
+				return {
+					status: response.status,
+					cacheControl: response.headers.get("cache-control"),
+					requestId: response.headers.get("x-railway-request-id"),
+				};
+			};
+			return [await probe(), await probe()];
+		}, cacheProbeUrl);
+		for (const probe of cacheProbes) {
+			expect(probe).toMatchObject({ status: 410, cacheControl: "no-store" });
+			expect(probe.requestId).toBeTruthy();
+		}
+		expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
+
 		if (!(await left.getByTestId("home-entry-list").isVisible())) {
 			await createFileFromHome(left, "New Markdown (.md)");
 			await right

@@ -83,7 +83,7 @@ export async function openRepositoryLixSession(
 		const lease = await acquireManagedRepositoryResource(
 			sessionKey,
 			async (signal) => {
-				const replicaId = repositoryBrowserReplicaId(options);
+				const replicaId = await repositoryBrowserReplicaId(options);
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaIdentified);
 				return retryRepositoryOpenDuringMigration({
 					open: () =>

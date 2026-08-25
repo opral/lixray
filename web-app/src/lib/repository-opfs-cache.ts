@@ -20,6 +20,7 @@ type BrowserReplicaStorage = Pick<Storage, "getItem" | "setItem">;
 interface BrowserReplicaIdEnvironment {
 	storage?: BrowserReplicaStorage;
 	createId?: () => string;
+	requestExclusive?: <T>(name: string, callback: () => T) => Promise<T>;
 }
 
 /**
@@ -30,21 +31,37 @@ interface BrowserReplicaIdEnvironment {
  * single-writer fence and routes all clients through its elected owner worker.
  * Authentication remains a separate server principal.
  */
-export function repositoryBrowserReplicaId(
+export async function repositoryBrowserReplicaId(
 	scope: RepositoryBrowserReplicaScope,
 	environment: BrowserReplicaIdEnvironment = {},
-): string {
+): Promise<string> {
 	const storage = browserReplicaStorage(environment);
 	const scopeKey = repositoryBrowserReplicaScopeKey(scope);
 	const storageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(scopeKey)}`;
-	let browserId = storage.getItem(storageKey) ?? undefined;
-	if (!browserId) {
-		browserId = (
-			environment.createId ?? (() => globalThis.crypto.randomUUID())
-		)();
-		storage.setItem(storageKey, browserId);
+	const requestExclusive =
+		environment.requestExclusive ?? browserReplicaLockRequest();
+	return requestExclusive(`lixray:browser-replica-id:v3:${scopeKey}`, () => {
+		let browserId = storage.getItem(storageKey) ?? undefined;
+		if (!browserId) {
+			browserId = (
+				environment.createId ?? (() => globalThis.crypto.randomUUID())
+			)();
+			storage.setItem(storageKey, browserId);
+		}
+		return `${scope.authIdentity}:${browserId}`;
+	});
+}
+
+function browserReplicaLockRequest(): <T>(
+	name: string,
+	callback: () => T,
+) => Promise<T> {
+	if (typeof globalThis.navigator?.locks?.request !== "function") {
+		throw new Error(
+			"Opening a durable browser repository requires the Web Locks API.",
+		);
 	}
-	return `${scope.authIdentity}:${browserId}`;
+	return (name, callback) => globalThis.navigator.locks.request(name, callback);
 }
 
 function repositoryBrowserReplicaScopeKey(

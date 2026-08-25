@@ -61,29 +61,31 @@ void test("keys repository and replica caches by stable repository id", () => {
 	);
 });
 
-void test("persists one warm-reopen replica per repository", () => {
+void test("persists one warm-reopen replica per repository", async () => {
 	const browserStorage = new Map<string, string>();
 	const storage = (values: Map<string, string>) => ({
 		getItem: (key: string) => values.get(key) ?? null,
 		setItem: (key: string, value: string) => values.set(key, value),
 	});
 
-	const replicaA = repositoryBrowserReplicaId(browserScope, {
+	const replicaA = await repositoryBrowserReplicaId(browserScope, {
 		storage: storage(browserStorage),
 		createId: () => "browser-a",
+		requestExclusive: async (_name, callback) => callback(),
 	});
 	assert.equal(replicaA, "account-123:browser-a");
 	assert.equal(browserStorage.get(browserStorageKey), "browser-a");
 	assert.equal(
-		repositoryBrowserReplicaId(browserScope, {
+		await repositoryBrowserReplicaId(browserScope, {
 			storage: storage(browserStorage),
 			createId: () => "unused",
+			requestExclusive: async (_name, callback) => callback(),
 		}),
 		replicaA,
 	);
 });
 
-void test("keeps durable warm replicas independent across repositories", () => {
+void test("keeps durable warm replicas independent across repositories", async () => {
 	const values = new Map<string, string>();
 	const storage = {
 		getItem: (key: string) => values.get(key) ?? null,
@@ -93,29 +95,36 @@ void test("keeps durable warm replicas independent across repositories", () => {
 		...browserScope,
 		repositoryId: "22222222-2222-4222-8222-222222222222",
 	};
-	const first = repositoryBrowserReplicaId(browserScope, {
+	const requestExclusive = async <T>(_name: string, callback: () => T) =>
+		callback();
+	const first = await repositoryBrowserReplicaId(browserScope, {
 		storage,
 		createId: () => "website-replica",
+		requestExclusive,
 	});
-	const other = repositoryBrowserReplicaId(otherScope, {
+	const other = await repositoryBrowserReplicaId(otherScope, {
 		storage,
 		createId: () => "other-replica",
+		requestExclusive,
 	});
 
 	assert.equal(first, "account-123:website-replica");
 	assert.equal(other, "account-123:other-replica");
 	assert.equal(
-		repositoryBrowserReplicaId(browserScope, {
+		await repositoryBrowserReplicaId(browserScope, {
 			storage,
 			createId: () => "must-not-replace-website",
+			requestExclusive,
 		}),
 		first,
 	);
 });
 
-void test("fails closed when durable replica storage cannot be read or written", () => {
-	assert.throws(
-		() =>
+void test("fails closed when durable replica storage cannot be read or written", async () => {
+	const requestExclusive = async <T>(_name: string, callback: () => T) =>
+		callback();
+	await assert.rejects(
+		async () =>
 			repositoryBrowserReplicaId(browserScope, {
 				storage: {
 					getItem: () => {
@@ -124,11 +133,12 @@ void test("fails closed when durable replica storage cannot be read or written",
 					setItem: () => undefined,
 				},
 				createId: () => "must-not-fallback",
+				requestExclusive,
 			}),
 		/storage read denied/,
 	);
-	assert.throws(
-		() =>
+	await assert.rejects(
+		async () =>
 			repositoryBrowserReplicaId(browserScope, {
 				storage: {
 					getItem: () => null,
@@ -137,7 +147,45 @@ void test("fails closed when durable replica storage cannot be read or written",
 					},
 				},
 				createId: () => "must-not-fallback",
+				requestExclusive,
 			}),
 		/storage write denied/,
 	);
+});
+
+void test("serializes first-open identity creation across tabs", async () => {
+	const values = new Map<string, string>();
+	const storage = {
+		getItem: (key: string) => values.get(key) ?? null,
+		setItem: (key: string, value: string) => values.set(key, value),
+	};
+	let tail = Promise.resolve();
+	const requestExclusive = async <T>(_name: string, callback: () => T) => {
+		const previous = tail;
+		let release!: () => void;
+		tail = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await previous;
+		try {
+			return callback();
+		} finally {
+			release();
+		}
+	};
+	const [first, second] = await Promise.all([
+		repositoryBrowserReplicaId(browserScope, {
+			storage,
+			createId: () => "first-tab",
+			requestExclusive,
+		}),
+		repositoryBrowserReplicaId(browserScope, {
+			storage,
+			createId: () => "second-tab",
+			requestExclusive,
+		}),
+	]);
+
+	assert.equal(first, "account-123:first-tab");
+	assert.equal(second, first);
 });
