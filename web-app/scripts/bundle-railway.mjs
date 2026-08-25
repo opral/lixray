@@ -1,8 +1,9 @@
 import { build } from "esbuild";
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertRailwayBundle } from "./assert-railway-bundle.mjs";
+import { bakeLixWasm } from "./bake-lix-wasm.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const outfile = resolve(root, "../dist/server/railway-server.js");
@@ -20,30 +21,14 @@ await build({
 	},
 	outfile: bundled,
 	allowOverwrite: true,
-	plugins: [stubLixWasmPlugin()],
 });
 
-const rewritten = (await readFile(bundled, "utf8")).replaceAll(
-	"lix_js_sdk_bg.wasm",
-	"lix-wasm-not-shipped-on-railway",
+await rename(bundled, outfile);
+const source = await readFile(outfile, "utf8");
+const rewritten = source.replaceAll(
+	/\/assets\/lix_js_sdk_bg-[A-Za-z0-9_-]+\.wasm/g,
+	"../wasm/lix_js_sdk_bg.wasm",
 );
 await writeFile(outfile, rewritten);
-await unlink(bundled);
+await bakeLixWasm();
 await assertRailwayBundle(outfile);
-
-function stubLixWasmPlugin() {
-	return {
-		name: "stub-lix-wasm",
-		setup(buildApi) {
-			buildApi.onResolve({ filter: /lix_js_sdk_bg\.wasm$/ }, (args) => ({
-				path: args.path,
-				namespace: "lix-wasm-stub",
-			}));
-			buildApi.onLoad({ filter: /.*/, namespace: "lix-wasm-stub" }, () => ({
-				contents:
-					'throw new Error("Lix WASM is not shipped in the Railway image");',
-				loader: "js",
-			}));
-		},
-	};
-}

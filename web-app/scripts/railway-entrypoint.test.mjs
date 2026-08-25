@@ -6,7 +6,7 @@ const railwayEntrypoint = new URL("../src/railway-server.ts", import.meta.url);
 const wasmForbidden =
 	/node-lix-sql-parser|lix_js_sdk_bg\.wasm|parseSqlScript|initSync|@lix-js\/sdk|openLix/;
 
-void test("the Railway entrypoint does not load the Node SQL parser or WASM", async () => {
+void test("the Railway entrypoint does not directly load heavy runtime modules", async () => {
 	const source = await readFile(railwayEntrypoint, "utf8");
 
 	assert.doesNotMatch(source, wasmForbidden);
@@ -14,21 +14,15 @@ void test("the Railway entrypoint does not load the Node SQL parser or WASM", as
 	assert.doesNotMatch(source, /import\.meta\.env\.DEV/);
 });
 
-void test("the MCP runtime talks HTTP and does not load Lix WASM", async () => {
-	const sources = await Promise.all(
-		[
-			"../src/mcp/runtime-client.ts",
-			"../src/mcp/protocol-session.ts",
-			"../src/worker/handler.ts",
-		].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
+void test("the MCP runtime uses the Lix SDK remote client", async () => {
+	const source = await readFile(
+		new URL("../src/mcp/runtime-client.ts", import.meta.url),
+		"utf8",
 	);
 
-	for (const source of sources) {
-		assert.doesNotMatch(
-			source,
-			/node-lix-sql-parser|lix_js_sdk_bg\.wasm|parseSqlScript|initSync|@lix-js\/sdk|openLix/,
-		);
-	}
+	assert.match(source, /from "@lix-js\/sdk"/);
+	assert.match(source, /openLix\(\{/);
+	assert.doesNotMatch(source, /openProtocolSession|protocol-session/);
 });
 
 void test("Railway start warms persisted JWKS before accepting traffic", async () => {
