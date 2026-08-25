@@ -5,7 +5,8 @@ on:
     branches:
       - main
     paths:
-      - "lix-server/**"
+      - "lix-server/Cargo.lock"
+      - "lix-server/Cargo.toml"
       - "vendor/lix"
       - ".github/workflows/rust-cache.yml"
   workflow_dispatch:
@@ -46,6 +47,7 @@ jobs:
           components: clippy
 
       - name: Restore shared Cargo artifacts
+        id: rust-cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lix-server
@@ -53,9 +55,11 @@ jobs:
           save-if: true
 
       - name: Compile clippy targets
+        if: steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo clippy --manifest-path lix-server/Cargo.toml -Z bindeps --locked --all-targets --all-features -- -D warnings
 
       - name: Compile test targets
+        if: steps.rust-cache.outputs.cache-hit != 'true'
         env:
           RUST_MIN_STACK: 8388608
         run: cargo -Z bindeps test --manifest-path lix-server/Cargo.toml --locked --no-run
