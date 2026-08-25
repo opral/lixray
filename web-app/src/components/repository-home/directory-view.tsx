@@ -156,7 +156,12 @@ export function DirectoryView({
 	// descendant so drilling in stays guided.
 	const changedFileKinds = useMemo(() => {
 		return new Map(
-			(diffSession?.files ?? []).map((file) => [file.path, file.changeKind]),
+			(diffSession?.files ?? []).map((file) => [
+				file.path,
+				file.movedFromPath && file.changeKind === "modified"
+					? ("moved" as const)
+					: file.changeKind,
+			]),
 		);
 	}, [diffSession]);
 	const changedDirKinds = useMemo(() => {
@@ -1119,6 +1124,74 @@ function DropImportOverlay() {
 	);
 }
 
+/**
+ * Dot-hybrid diff glyphs (design 23d), mirroring atelier's: the familiar dot
+ * silhouette with a knockout so change types survive grayscale and color
+ * blindness. 12px keeps the internal detail crisp.
+ */
+function DiffGlyph({
+	kind,
+	className,
+}: {
+	readonly kind: "added" | "modified" | "removed" | "moved";
+	readonly className?: string;
+}) {
+	const fill =
+		kind === "added"
+			? "var(--color-border-diff-added)"
+			: kind === "removed"
+				? "var(--color-border-diff-removed)"
+				: kind === "moved"
+					? "var(--color-icon-diff-moved)"
+					: "var(--color-icon-brand)";
+	const knockout = "var(--color-bg-panel)";
+	const title =
+		kind === "added"
+			? "Added in this review"
+			: kind === "removed"
+				? "Removed in this review"
+				: kind === "moved"
+					? "Moved in this review"
+					: "Changed in this review";
+	return (
+		<span
+			title={title}
+			aria-label={title}
+			className={`inline-flex ${className ?? ""}`}
+		>
+		<svg width={12} height={12} viewBox="0 0 12 12" aria-hidden="true">
+			<circle cx="6" cy="6" r="5" fill={fill} />
+			{kind === "added" ? (
+				<path
+					d="M6 3.6v4.8M3.6 6h4.8"
+					stroke={knockout}
+					strokeWidth="1.7"
+					strokeLinecap="round"
+				/>
+			) : null}
+			{kind === "removed" ? (
+				<path
+					d="M3.6 6h4.8"
+					stroke={knockout}
+					strokeWidth="1.7"
+					strokeLinecap="round"
+				/>
+			) : null}
+			{kind === "moved" ? (
+				<path
+					d="M4.8 3.6 7.2 6 4.8 8.4"
+					stroke={knockout}
+					strokeWidth="1.7"
+					fill="none"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+				/>
+			) : null}
+		</svg>
+		</span>
+	);
+}
+
 function EntryRow({
 	icon,
 	name,
@@ -1134,23 +1207,15 @@ function EntryRow({
 	readonly hidden?: boolean;
 	/**
 	 * Marked by the open diff session; mirrors the sidebar's indicator.
-	 * Added shows green, removed red, modified the brand orange.
+	 * Shape + color (design 23d): added dot+plus green, removed dot+minus
+	 * red, moved dot+chevron blue, modified the plain brand-orange dot.
 	 */
-	readonly changeKind?: "added" | "modified" | "removed";
+	readonly changeKind?: "added" | "modified" | "removed" | "moved";
 	/** Folders inherit a softened dot, matching the sidebar tree. */
 	readonly dimIndicator?: boolean;
 	readonly onClick: (event: ReactMouseEvent) => void;
 }) {
 	const changed = changeKind !== undefined;
-	// The diff palette, matching the markdown diff editor: labels take the
-	// deep text tones; the 6px dots take the brighter border companions
-	// (tiny marks lose perceived chroma).
-	const dotClass =
-		changeKind === "added"
-			? "bg-[var(--color-border-diff-added)]"
-			: changeKind === "removed"
-				? "bg-[var(--color-border-diff-removed)]"
-				: "bg-[var(--color-icon-brand)]";
 	const nameClass =
 		changeKind === "added"
 			? "text-[var(--color-text-diff-added)]"
@@ -1170,11 +1235,10 @@ function EntryRow({
 			<span className="flex-1" />
 			{/* In a review, the trailing slot carries the same orange change dot
 			    the sidebar tree uses, replacing the resting meta. */}
-			{changed ? (
-				<span
-					title="Changed in this review"
-					aria-label="Changed in this review"
-					className={`size-1.5 shrink-0 rounded-full ${dotClass} ${dimIndicator ? "opacity-75" : ""}`}
+			{changed && changeKind ? (
+				<DiffGlyph
+					kind={changeKind}
+					className={`shrink-0 ${dimIndicator ? "opacity-75" : ""}`}
 				/>
 			) : (
 				<span className="text-[12.5px] text-text-quaternary">{meta}</span>
