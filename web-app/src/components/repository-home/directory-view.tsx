@@ -308,7 +308,7 @@ export function DirectoryView({
 				}
 			>
 				<main className="min-w-0">
-					<div className="flex flex-wrap items-center gap-2 pb-5">
+					<div className="flex items-center gap-2 pb-5">
 						<Breadcrumb
 							dirPath={dirPath}
 							onNavigate={(path, event) =>
@@ -316,7 +316,7 @@ export function DirectoryView({
 							}
 						/>
 						<span className="flex-1" />
-						<div className="flex flex-wrap items-center justify-end gap-2 @max-[520px]:w-full @max-[520px]:justify-start">
+						<div className="flex shrink-0 items-center gap-2">
 							<NewMenu
 								disabled={readOnly || viewingHistory}
 								onCreateFile={(extension) => void createFile(extension)}
@@ -1127,7 +1127,7 @@ function DropImportOverlay() {
 /**
  * Dot-hybrid diff glyphs (design 23d), mirroring atelier's: the familiar dot
  * silhouette with a knockout so change types survive grayscale and color
- * blindness. 12px keeps the internal detail crisp.
+ * blindness. 10px everywhere — one size across tree, history, and home.
  */
 function DiffGlyph({
 	kind,
@@ -1159,7 +1159,7 @@ function DiffGlyph({
 			aria-label={title}
 			className={`inline-flex ${className ?? ""}`}
 		>
-		<svg width={12} height={12} viewBox="0 0 12 12" aria-hidden="true">
+		<svg width={10} height={10} viewBox="0 0 12 12" aria-hidden="true">
 			<circle cx="6" cy="6" r="5" fill={fill} />
 			{kind === "added" ? (
 				<path
