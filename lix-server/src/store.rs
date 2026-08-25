@@ -638,25 +638,21 @@ impl LixRuntimeManager {
         migrate_lix_if_required(lix_id, &storage, opened).await?;
 
         let engine_started = Instant::now();
-        // Cache-admit is a protocol root, not a client session. as_protocol_root
-        // attaches the host sink so handshake sessions inherit it, without a
-        // phantom lix.repository.opened. Handshake create emits the engine
-        // span; LixRay captures that span as `$ai_span`, not a product event.
-        let protocol_root = Arc::new(
-            async {
-                lix_sdk::open_lix()
-                    .with_storage(storage)
-                    .with_telemetry(Arc::clone(&self.telemetry))
-                    .as_protocol_root()
-                    .await
-                    .context("open Lix lix session for the canonical server protocol")
-            }
-            .instrument(info_span!("lix.engine.open", lix.id = lix_id))
-            .await?,
-        );
+        // The canonical protocol owns the repository engine directly. Server
+        // admission creates no hidden application session; each successful
+        // handshake owns exactly one client session.
+        let protocol = async {
+            lix_sdk::open_lix()
+                .with_storage(storage)
+                .with_telemetry(Arc::clone(&self.telemetry))
+                .serve()
+                .await
+                .context("serve Lix repository through the canonical server protocol")
+        }
+        .instrument(info_span!("lix.engine.open", lix.id = lix_id))
+        .await?;
         let engine_open_ms = elapsed_millis(engine_started);
         let io = io.snapshot();
-        let protocol = LixServerProtocol::new(Arc::clone(&protocol_root));
         info!(
             lix_id,
             elapsed_ms = elapsed_millis(started),

@@ -43,9 +43,9 @@ when `span.name` is `lix.repository.opened`. Remote/sync clients must not
 attach a second mapper: the span stays on the server.
 
 MCP `open_lix` does not invent an `mcp.open_lix` `$ai_span`. Official
-`$mcp_tool_call` keeps `$mcp_duration_ms` as harness wall clock. Cache-admit /
-protocol-root open uses `open_lix().with_telemetry(...).as_protocol_root()`
-and is not a client bind.
+`$mcp_tool_call` keeps `$mcp_duration_ms` as harness wall clock. Cache admission
+uses `open_lix().with_telemetry(...).serve()` and owns only the repository
+engine, so it is not a client bind.
 
 Identity is the OAuth / session account so the same person on web and MCP is
 one WAU. Anonymous and demo accounts are not captured. Optional `source`
