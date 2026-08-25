@@ -29,6 +29,11 @@ export class PublicProfileActivityCache {
 		this.#now = options.now ?? Date.now;
 	}
 
+	/** Drop the cached entry so the next request recomputes (e.g. after a visibility change). */
+	invalidate(namespaceId: string): void {
+		this.#entries.delete(namespaceId);
+	}
+
 	async resolve(
 		namespaceId: string,
 		load: () => Promise<PublicProfileActivity>,

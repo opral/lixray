@@ -113,6 +113,11 @@ interface HandleRequestOptions {
 	resolveNamespaceProfile?: ResolveNamespaceProfile;
 	resolvePublicProfileRepositories?: ResolvePublicProfileRepositories;
 	profileActivityCache?: PublicProfileActivityCache | null;
+	resolveNamespaceMembership?: (
+		namespaceId: string,
+		accessToken: string,
+		env: WorkerEnv,
+	) => Promise<NamespaceMembershipResolution>;
 	mcpTransport?: typeof handleMcpTransport;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
@@ -230,6 +235,8 @@ const PROD_DEV_EMAIL = "dev@lixray.com";
 const PUBLIC_PRODUCTION_ORIGIN = "https://lixray.com";
 const NAMESPACE_PROFILE_PATH = /^\/profile\/([^/]+)$/;
 const NAMESPACE_PROFILE_ACTIVITY_PATH = /^\/profile\/([^/]+)\/activity$/;
+const NAMESPACE_PROFILE_ACTIVITY_REFRESH_PATH =
+	/^\/profile\/([^/]+)\/activity\/refresh$/;
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
@@ -268,6 +275,42 @@ export async function handleRequest(
 		);
 	}
 
+	const namespaceProfileActivityRefreshMatch =
+		NAMESPACE_PROFILE_ACTIVITY_REFRESH_PATH.exec(url.pathname);
+	if (namespaceProfileActivityRefreshMatch) {
+		if (request.method === "OPTIONS") return profileCorsPreflight();
+		if (request.method !== "POST") {
+			return profileResponse("Method not allowed\n", {
+				status: 405,
+				headers: { Allow: "POST, OPTIONS" },
+			});
+		}
+		const namespaceId = safeDecodeURIComponent(
+			namespaceProfileActivityRefreshMatch[1],
+		)?.toLowerCase();
+		if (!namespaceId || !UUID_PATTERN.test(namespaceId)) {
+			return profileResponse("Profile not found\n", { status: 404 });
+		}
+		if (isDemoMode(env)) return profileResponse(null, { status: 204 });
+		const token = bearerToken(request);
+		if (!token) {
+			return profileResponse("Authentication required\n", { status: 401 });
+		}
+		const membership = await (options.resolveNamespaceMembership
+			? options.resolveNamespaceMembership(namespaceId, token, env)
+			: resolveNamespaceMembershipWithSupabase(namespaceId, token, env));
+		if (!membership.ok) return withProfileCors(membership.response);
+		if (!membership.member) {
+			return profileResponse("Membership required\n", { status: 403 });
+		}
+		const refreshCache =
+			options.profileActivityCache === undefined
+				? publicProfileActivityCache
+				: options.profileActivityCache;
+		refreshCache?.invalidate(namespaceId);
+		return profileResponse(null, { status: 204 });
+	}
+
 	const namespaceProfileActivityMatch = NAMESPACE_PROFILE_ACTIVITY_PATH.exec(
 		url.pathname,
 	);
@@ -291,13 +334,15 @@ export async function handleRequest(
 				? resolveDemoPublicProfileRepositories(namespaceId)
 				: resolvePublicProfileRepositoriesWithSupabase(namespaceId, env));
 		if (!resolution.ok) return withProfileCors(resolution.response);
-		const loadActivity = () =>
-			loadPublicProfileActivity(
+		const loadActivity = async () => ({
+			...(await loadPublicProfileActivity(
 				resolution.repositories,
 				env,
 				options.lixFetch,
 				AbortSignal.timeout(PUBLIC_PROFILE_ACTIVITY_TIMEOUT_MS),
-			);
+			)),
+			computedAt: new Date().toISOString(),
+		});
 		const activityCache =
 			options.profileActivityCache === undefined
 				? publicProfileActivityCache
@@ -1315,6 +1360,74 @@ export async function resolveLixWithSupabase(
 	return { ok: true, lixId: result.lixId };
 }
 
+export type NamespaceMembershipResolution =
+	| { ok: true; member: boolean }
+	| { ok: false; response: Response };
+
+/**
+ * Checks whether the bearer of `accessToken` is a member of the namespace by
+ * querying namespace_members with the user's own token — RLS only returns
+ * rows the user is entitled to see, so a non-member gets an empty result.
+ */
+export async function resolveNamespaceMembershipWithSupabase(
+	namespaceId: string,
+	accessToken: string,
+	env: WorkerEnv,
+): Promise<NamespaceMembershipResolution> {
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return {
+			ok: false,
+			response: new Response("Supabase Data API is not configured\n", {
+				status: 500,
+			}),
+		};
+	}
+	const lookupUrl = new URL("/rest/v1/namespace_members", env.SUPABASE_URL);
+	lookupUrl.searchParams.set("select", "user_id");
+	lookupUrl.searchParams.set("namespace_id", `eq.${namespaceId}`);
+	lookupUrl.searchParams.set("limit", "1");
+
+	let response: Response;
+	try {
+		response = await fetch(lookupUrl, {
+			headers: {
+				apikey: env.SUPABASE_PUBLISHABLE_KEY,
+				Authorization: `Bearer ${accessToken}`,
+				Accept: "application/json",
+			},
+		});
+	} catch {
+		return {
+			ok: false,
+			response: new Response("Membership lookup is unavailable\n", {
+				status: 503,
+			}),
+		};
+	}
+	if (response.status === 401 || response.status === 403) {
+		return { ok: true, member: false };
+	}
+	if (!response.ok) {
+		return {
+			ok: false,
+			response: new Response("Membership lookup is unavailable\n", {
+				status: 503,
+			}),
+		};
+	}
+	try {
+		const rows: unknown = await response.json();
+		return { ok: true, member: Array.isArray(rows) && rows.length > 0 };
+	} catch {
+		return {
+			ok: false,
+			response: new Response("Membership lookup is unavailable\n", {
+				status: 503,
+			}),
+		};
+	}
+}
+
 export async function resolveNamespaceProfileWithSupabase(
 	namespaceId: string,
 	env: WorkerEnv,
@@ -1454,7 +1567,11 @@ async function loadPublicProfileActivity(
 							return value?.kind === "text" ? [value.value] : [];
 						}),
 					};
-				} catch {
+				} catch (error) {
+					console.error(
+						`[profile-activity] file listing failed for ${repository.slug}:`,
+						error,
+					);
 					return { repository, paths: null };
 				}
 			},

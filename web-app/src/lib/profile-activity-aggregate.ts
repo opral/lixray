@@ -19,6 +19,8 @@ export interface PublicProfileActivity {
 	repositories: Array<ProfileRepositoryActivity>;
 	fileMix: Array<ProfileFileMixSegment>;
 	failedRepositories: number;
+	/** When the server computed these numbers; cached responses keep the original stamp. */
+	computedAt?: string;
 }
 
 export interface ProfileRepositorySource {
