@@ -230,14 +230,14 @@ impl Visit for SqlActivityVisitor<'_> {
 
 /// Host-owned telemetry runtime. Lix receives only the vendor-neutral sink;
 /// exporters, filtering, and PostHog projections remain server concerns.
-pub(crate) struct TelemetryRuntime {
-    pub(crate) trace_provider: SdkTracerProvider,
-    pub(crate) in_flight_sql: InFlightSqlRegistry,
-    pub(crate) lix_sink: Arc<dyn TelemetrySink>,
+pub struct TelemetryRuntime {
+    pub trace_provider: SdkTracerProvider,
+    pub in_flight_sql: InFlightSqlRegistry,
+    pub lix_sink: Arc<dyn TelemetrySink>,
 }
 
 /// Installs server tracing and builds the explicitly configured Lix sink.
-pub(crate) fn init() -> TelemetryRuntime {
+pub fn init() -> TelemetryRuntime {
     let provider = match provider_from_env() {
         Ok(provider) => provider,
         Err(error) => {
