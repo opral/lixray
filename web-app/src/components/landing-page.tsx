@@ -56,13 +56,58 @@ export function LandingPage() {
 					</div>
 					{/* Both pitches are server-rendered so crawlers and agents see them
 					    without pressing the toggle; the inactive one is hidden. */}
+					{/* Design 26a: the audience phrase rotates on a CSS reel — no
+					    interaction, no JS. All phrases stay in the DOM for crawlers;
+					    the aria-label keeps the accessible name stable. */}
 					<h1
-						className="m-0 text-[clamp(2.25rem,5.5vw,2.875rem)] leading-[1.12] font-bold tracking-[-.03em] text-balance"
+						className="m-0 text-[clamp(2.25rem,5.5vw,2.875rem)] leading-[1.12] font-bold tracking-[-.03em]"
 						id="landing-title"
+						aria-label="A repository for your entire company"
 						hidden={audience !== "company"}
 					>
-						A repository for your entire company
+						A repository for
+						<br />
+						your{" "}
+						<span className="landing-headline-slot">
+							<span className="landing-headline-reel">
+								<span>entire company</span>
+								<span>sales team</span>
+								<span>marketing team</span>
+								<span>personal life</span>
+								{/* Duplicate of the first phrase closes the loop. */}
+								<span aria-hidden="true">entire company</span>
+							</span>
+						</span>
 					</h1>
+					<style>{`
+						.landing-headline-slot {
+							display: inline-block;
+							overflow: hidden;
+							height: 1.12em;
+							vertical-align: bottom;
+							color: #e8590c;
+						}
+						.landing-headline-reel {
+							display: flex;
+							flex-direction: column;
+							animation: landing-headline-rotate 10s infinite
+								cubic-bezier(0.6, 0, 0.2, 1);
+						}
+						.landing-headline-reel > span {
+							white-space: nowrap;
+							line-height: 1.12;
+						}
+						@keyframes landing-headline-rotate {
+							0%, 18% { transform: translateY(0); }
+							23%, 41% { transform: translateY(-20%); }
+							46%, 64% { transform: translateY(-40%); }
+							69%, 87% { transform: translateY(-60%); }
+							92%, 100% { transform: translateY(-80%); }
+						}
+						@media (prefers-reduced-motion: reduce) {
+							.landing-headline-reel { animation: none; }
+						}
+					`}</style>
 					<h1
 						className="m-0 text-[clamp(2.25rem,5.5vw,2.875rem)] leading-[1.12] font-bold tracking-[-.03em] text-balance"
 						hidden={audience !== "individual"}
