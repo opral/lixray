@@ -169,6 +169,13 @@ function mountDirectoryView({
 			<StrictMode>
 				<DirectoryView
 					lix={atelier.lix}
+					diffSession={runtime.diff?.session ?? null}
+					{...(runtime.diff
+						? {
+								onOpenDiffFile: (path: string) =>
+									runtime.diff?.openFile(path),
+							}
+						: {})}
 					dirPath={dirPath(candidate)}
 					isHome={isHome}
 					showHiddenFiles={

@@ -1,4 +1,5 @@
 import type { Lix } from "@lix-js/sdk";
+import type { AtelierDiffSession } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import DOMPurify from "dompurify";
 import {
@@ -62,6 +63,10 @@ import {
 
 type DirectoryViewProps = {
 	readonly lix: Lix;
+	/** The open diff session; its files get change indicators in the listing. */
+	readonly diffSession?: AtelierDiffSession | null;
+	/** Opens a changed file through the diff session (review-aware). */
+	readonly onOpenDiffFile?: (path: string) => void;
 	/** Normalized trailing-slash directory path; "/" is the repository home. */
 	readonly dirPath: string;
 	/** The pinned home shows the connect row. */
@@ -99,6 +104,8 @@ const newTabFromMouseEvent = (event: ReactMouseEvent): boolean =>
  */
 export function DirectoryView({
 	lix,
+	diffSession = null,
+	onOpenDiffFile,
 	dirPath,
 	isHome,
 	showHiddenFiles = false,
@@ -125,6 +132,27 @@ export function DirectoryView({
 		() => (tree ? listDirectory(tree, dirPath, { showHiddenFiles }) : null),
 		[tree, dirPath, showHiddenFiles],
 	);
+	// The open diff session marks its files in the listing, mirroring the
+	// sidebar's review indicators; folders inherit a dot from any changed
+	// descendant so drilling in stays guided.
+	const changedFilePaths = useMemo(() => {
+		return new Set((diffSession?.files ?? []).map((file) => file.path));
+	}, [diffSession]);
+	const changedDirPaths = useMemo(() => {
+		// Ancestors use the canonical directory convention: absolute, no
+		// trailing slash (see canonicalDirectoryPath).
+		const dirs = new Set<string>();
+		for (const path of changedFilePaths) {
+			const segments = path.split("/").filter(Boolean);
+			segments.pop();
+			let prefix = "";
+			for (const segment of segments) {
+				prefix = `${prefix}/${segment}`;
+				dirs.add(prefix);
+			}
+		}
+		return dirs;
+	}, [changedFilePaths]);
 	const readme = useFileMarkdown(
 		lix,
 		listing?.readmePath ?? null,
@@ -296,6 +324,7 @@ export function DirectoryView({
 								name={dir.name}
 								meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
 								hidden={dir.hidden}
+								changed={changedDirPaths.has(dir.path)}
 								onClick={(event) =>
 									onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
 								}
@@ -314,9 +343,22 @@ export function DirectoryView({
 								name={file.name}
 								meta={formatUpdatedAt(file.updatedAt)}
 								hidden={file.hidden}
-								onClick={(event) =>
-									onOpenFile(file.path, { newTab: newTabFromMouseEvent(event) })
-								}
+								changed={changedFilePaths.has(file.path)}
+								onClick={(event) => {
+									// A changed file opens through the diff session, keeping
+									// the review float in step with the revealed document.
+									if (
+										changedFilePaths.has(file.path) &&
+										onOpenDiffFile &&
+										!newTabFromMouseEvent(event)
+									) {
+										onOpenDiffFile(file.path);
+										return;
+									}
+									onOpenFile(file.path, {
+										newTab: newTabFromMouseEvent(event),
+									});
+								}}
 							/>
 						))}
 					</div>
@@ -1031,12 +1073,15 @@ function EntryRow({
 	name,
 	meta,
 	hidden = false,
+	changed = false,
 	onClick,
 }: {
 	readonly icon: ReactNode;
 	readonly name: string;
 	readonly meta: string;
 	readonly hidden?: boolean;
+	/** Marked by the open diff session; mirrors the sidebar's indicator. */
+	readonly changed?: boolean;
 	readonly onClick: (event: ReactMouseEvent) => void;
 }) {
 	return (
@@ -1045,9 +1090,17 @@ function EntryRow({
 			onClick={onClick}
 			className={`flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left hover:bg-bg-hover ${hidden ? "opacity-[0.48] hover:opacity-[0.62]" : ""}`}
 			data-hidden-entry={hidden ? "true" : undefined}
+			data-changed-entry={changed ? "true" : undefined}
 		>
 			{icon}
 			<span className="text-sm font-medium text-text-primary">{name}</span>
+			{changed ? (
+				<span
+					title="Changed in this review"
+					aria-label="Changed in this review"
+					className="size-1.5 shrink-0 rounded-full bg-[#e8590c]"
+				/>
+			) : null}
 			<span className="flex-1" />
 			<span className="text-[12.5px] text-text-quaternary">{meta}</span>
 		</button>
