@@ -30,7 +30,6 @@ import {
 	captureErrorLogImmediately,
 	captureExceptionTelemetryAsync,
 	captureTelemetry,
-	captureTelemetryImmediately,
 } from "~/lib/telemetry";
 
 export type OrganizationRole = "owner" | "member";
@@ -192,10 +191,6 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 					shouldCaptureRepositoryListException(pathname, failure, loadError)
 				) {
 					await Promise.all([
-						captureTelemetryImmediately(
-							"webapp_repository_list_failed",
-							telemetryProperties,
-						),
 						captureErrorLogImmediately(
 							"Repository list failed",
 							telemetryProperties,

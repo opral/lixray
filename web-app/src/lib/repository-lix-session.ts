@@ -1,6 +1,6 @@
 import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk";
 import { OpfsStorage } from "@lix-js/storage-opfs";
-import { captureTelemetry } from "./telemetry.ts";
+import { captureExceptionTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 import { waitForLixPrewarm } from "./lix-prewarm.ts";
 import {
@@ -195,7 +195,8 @@ async function openRepositoryLixSessionWithRetry(
 async function openRepositoryLixSessionOnce(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
-	const lix = await openOpfsSyncSession(options);
+	const requestFailureReporting = { enabled: false };
+	const lix = await openOpfsSyncSession(options, requestFailureReporting);
 	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.lixOpened);
 
 	try {
@@ -212,6 +213,7 @@ async function openRepositoryLixSessionOnce(
 				if (!isBranchNotFoundError(error)) throw error;
 			}
 		}
+		requestFailureReporting.enabled = true;
 		return session;
 	} catch (error) {
 		await lix.close().catch(() => undefined);
@@ -221,6 +223,7 @@ async function openRepositoryLixSessionOnce(
 
 async function openOpfsSyncSession(
 	options: ResolvedOpenRepositoryLixSessionOptions,
+	requestFailureReporting: { enabled: boolean },
 ): Promise<Lix> {
 	await waitForLixPrewarm();
 	options.signal?.throwIfAborted();
@@ -250,6 +253,7 @@ async function openOpfsSyncSession(
 				repositoryId: options.repositoryId,
 				refreshAccessToken: options.refreshAccessToken,
 				signal: options.signal,
+				shouldCaptureRequestFailures: () => requestFailureReporting.enabled,
 			}),
 		},
 	});
@@ -261,12 +265,19 @@ export function createTelemetryFetch(
 		repositoryId: string;
 		refreshAccessToken?: TokenProvider;
 		signal?: AbortSignal;
+		shouldCaptureRequestFailures?: () => boolean;
 	},
+	dependencies: {
+		captureException?: typeof captureExceptionTelemetry;
+	} = {},
 ): RemoteLixFetch {
 	const fetcher = customFetch ?? globalThis.fetch?.bind(globalThis);
 	if (!fetcher) {
 		throw new TypeError("A fetch implementation is required for a repository.");
 	}
+	const captureException =
+		dependencies.captureException ?? captureExceptionTelemetry;
+	const reportedFailures = new Map<string, string>();
 
 	return async (input, init) => {
 		const requestSignal = input instanceof Request ? input.signal : undefined;
@@ -275,7 +286,26 @@ export function createTelemetryFetch(
 		);
 		const requestInit =
 			signals.length > 0 ? { ...init, signal: AbortSignal.any(signals) } : init;
-		let response = await fetcher(input, requestInit);
+		let response: Response;
+		try {
+			response = await fetcher(input, requestInit);
+		} catch (error) {
+			if (
+				context.shouldCaptureRequestFailures?.() !== false &&
+				!requestInit?.signal?.aborted &&
+				!(error instanceof Error && error.name === "AbortError")
+			) {
+				reportLixTransportFailure(
+					error,
+					input,
+					requestInit,
+					context,
+					reportedFailures,
+					captureException,
+				);
+			}
+			throw error;
+		}
 		if (
 			response.status === 401 &&
 			context.refreshAccessToken &&
@@ -292,8 +322,17 @@ export function createTelemetryFetch(
 				// Preserve the original auth response when the refresh itself fails.
 			}
 		}
-		if (!response.ok) {
-			void reportLixRequestFailure(response, input, requestInit, context);
+		if (response.ok) {
+			reportedFailures.delete(lixRequestKey(input, requestInit));
+		} else if (context.shouldCaptureRequestFailures?.() !== false) {
+			await reportLixRequestFailure(
+				response,
+				input,
+				requestInit,
+				context,
+				reportedFailures,
+				captureException,
+			);
 		}
 		return response;
 	};
@@ -308,6 +347,8 @@ async function reportLixRequestFailure(
 	input: RequestInfo | URL,
 	init: RequestInit | undefined,
 	context: { repositoryId: string },
+	reportedFailures: Map<string, string>,
+	captureException: typeof captureExceptionTelemetry,
 ): Promise<void> {
 	let code: string | undefined;
 	try {
@@ -319,18 +360,88 @@ async function reportLixRequestFailure(
 	} catch {
 		// The SDK will report malformed/non-JSON responses separately.
 	}
-	if (code === MIGRATION_ERROR_CODE) return;
+	const method = lixRequestMethod(input, init);
+	if (
+		code === MIGRATION_ERROR_CODE ||
+		code === "LIX_ERROR_LIX_RECOVERING" ||
+		(response.status === 404 &&
+			method === "GET" &&
+			lixRequestPath(input).endsWith("/sync/chunk"))
+	) {
+		return;
+	}
 
-	captureTelemetry("webapp_request_failed", {
-		lix_request_endpoint: lixRequestEndpoint(input),
-		lix_request_method: init?.method ?? "GET",
+	const endpoint = lixRequestEndpoint(input);
+	const key = lixRequestKey(input, init);
+	const fingerprint = `${response.status}:${code ?? "unknown"}`;
+	if (reportedFailures.get(key) === fingerprint) return;
+	reportedFailures.set(key, fingerprint);
+
+	const error = Object.assign(
+		new Error(
+			`${method} ${endpoint} failed with HTTP ${response.status}${
+				code ? ` (${code})` : ""
+			}`,
+		),
+		{
+			name: "LixRequestError",
+			status: response.status,
+			...(code ? { code } : {}),
+		},
+	);
+	captureException(error, {
+		operation: "repository_request",
+		lix_request_endpoint: endpoint,
+		lix_request_method: method,
 		lix_http_status: response.status,
 		...(code ? { lix_error_code: code } : {}),
 		lix_id: context.repositoryId,
 	});
 }
 
-function lixRequestEndpoint(input: RequestInfo | URL): string {
+function reportLixTransportFailure(
+	error: unknown,
+	input: RequestInfo | URL,
+	init: RequestInit | undefined,
+	context: { repositoryId: string },
+	reportedFailures: Map<string, string>,
+	captureException: typeof captureExceptionTelemetry,
+): void {
+	const exception =
+		error instanceof Error ? error : new Error("Lix repository request failed");
+	const code =
+		"code" in exception && typeof exception.code === "string"
+			? exception.code
+			: undefined;
+	const key = lixRequestKey(input, init);
+	const fingerprint = `transport:${exception.name}:${code ?? "unknown"}`;
+	if (reportedFailures.get(key) === fingerprint) return;
+	reportedFailures.set(key, fingerprint);
+	captureException(exception, {
+		operation: "repository_request",
+		lix_request_endpoint: lixRequestEndpoint(input),
+		lix_request_method: lixRequestMethod(input, init),
+		...(code ? { lix_error_code: code } : {}),
+		lix_id: context.repositoryId,
+	});
+}
+
+function lixRequestKey(
+	input: RequestInfo | URL,
+	init: RequestInit | undefined,
+): string {
+	const path = lixRequestPath(input).split("/lix/v1/", 2)[1];
+	return `${lixRequestMethod(input, init)}:${path ?? lixRequestEndpoint(input)}`;
+}
+
+function lixRequestMethod(
+	input: RequestInfo | URL,
+	init: RequestInit | undefined,
+): string {
+	return init?.method ?? (input instanceof Request ? input.method : "GET");
+}
+
+function lixRequestPath(input: RequestInfo | URL): string {
 	const raw =
 		typeof input === "string"
 			? input
@@ -338,7 +449,15 @@ function lixRequestEndpoint(input: RequestInfo | URL): string {
 				? input.toString()
 				: input.url;
 	try {
-		const path = new URL(raw, globalThis.location?.origin).pathname;
+		return new URL(raw, globalThis.location?.origin).pathname;
+	} catch {
+		return "";
+	}
+}
+
+function lixRequestEndpoint(input: RequestInfo | URL): string {
+	try {
+		const path = lixRequestPath(input);
 		const marker = "/lix/v1/";
 		const endpoint = path.split(marker, 2)[1]?.split("/", 1)[0];
 		return endpoint || "unknown";

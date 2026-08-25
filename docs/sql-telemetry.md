@@ -68,7 +68,6 @@ Hard-cut emit (no dual-emit). Old unprefixed / `lixray_*` UI names are gone.
 | `lixray_telemetry_probe` | `webapp_telemetry_probe` |
 | `repository_created` | `webapp_repository_created` |
 | `repository_deleted` | `webapp_repository_deleted` |
-| `repository_list_failed` | `webapp_repository_list_failed` |
 | `workspace_opened` | `webapp_workspace_opened` |
 | `workspace_created` | `webapp_workspace_created` |
 | `workspace_deleted` | `webapp_workspace_deleted` |
@@ -80,8 +79,6 @@ Hard-cut emit (no dual-emit). Old unprefixed / `lixray_*` UI names are gone.
 | `extension_opened` | `webapp_extension_opened` |
 | `share_link_created` | `webapp_share_link_created` |
 | `share_link_copied` | `webapp_share_link_copied` |
-| `auth_session_validation_failed` | `webapp_auth_session_validation_failed` |
-| `lix_request_failed` | `webapp_request_failed` |
 | `auth_session_orphaned` | `webapp_auth_session_orphaned` |
 | `resource_published` | `webapp_resource_published` |
 | `resource_unpublished` | `webapp_resource_unpublished` |
@@ -89,6 +86,14 @@ Hard-cut emit (no dual-emit). Old unprefixed / `lixray_*` UI names are gone.
 | `repository_renamed` | `webapp_repository_renamed` |
 | `diff_resolved` | `webapp_diff_resolved` |
 | `repository_opened` | deleted — use `$ai_span` `$ai_span_name=lix.repository.opened` |
+
+Failures are not product events. Authentication validation, repository-list
+failures, and actionable repository request failures are captured as PostHog
+`$exception` events with stable operation, endpoint, status, and error-code
+properties. Repository opening owns its terminal exception after retry and
+migration handling. Established repository sessions report each consecutive
+transport failure once; successful requests reset that suppression. Expected
+migration, recovery, cancellation, and missing-chunk probes are not errors.
 
 ## Span model
 
