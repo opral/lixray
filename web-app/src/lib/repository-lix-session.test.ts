@@ -13,7 +13,6 @@ import {
 void test("does not create a synthetic observer for session health", async () => {
 	let observerCalls = 0;
 	let closeCalls = 0;
-	let releaseCalls = 0;
 	const lix = {
 		observe: () => {
 			observerCalls += 1;
@@ -23,13 +22,10 @@ void test("does not create a synthetic observer for session health", async () =>
 			closeCalls += 1;
 		},
 	} as unknown as Lix;
-	const session = new RemoteRepositoryLixSession(lix, "main", () => {
-		releaseCalls += 1;
-	});
+	const session = new RemoteRepositoryLixSession(lix, "main");
 	assert.equal(observerCalls, 0);
 	await session.close();
 	assert.equal(closeCalls, 1);
-	assert.equal(releaseCalls, 1);
 });
 
 void test("retries only transient repository-open transport failures", () => {

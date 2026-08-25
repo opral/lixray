@@ -3,10 +3,8 @@ import test from "node:test";
 import {
 	BROWSER_REPLICA_STORAGE_KEY_PREFIX,
 	REPOSITORY_OPFS_CACHE_NAMESPACE,
-	claimRepositoryBrowserReplicaId,
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
-	type BrowserReplicaLockManager,
 } from "./repository-opfs-cache.ts";
 
 const browserScope = {
@@ -14,44 +12,6 @@ const browserScope = {
 	repositoryId: "11111111-1111-4111-8111-111111111111",
 };
 const browserStorageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(`${browserScope.authIdentity}:${browserScope.repositoryId}`)}`;
-
-function createLockManager(): BrowserReplicaLockManager {
-	const held = new Set<string>();
-	const waiters = new Map<string, Array<() => void>>();
-	return {
-		async request(name, options, callback) {
-			options.signal?.throwIfAborted();
-			while (held.has(name)) {
-				await new Promise<void>((resolve, reject) => {
-					const queue = waiters.get(name) ?? [];
-					const wake = () => {
-						options.signal?.removeEventListener("abort", abort);
-						resolve();
-					};
-					const abort = () => {
-						const index = queue.indexOf(wake);
-						if (index >= 0) queue.splice(index, 1);
-						reject(
-							options.signal?.reason instanceof Error
-								? options.signal.reason
-								: new DOMException("The operation was aborted.", "AbortError"),
-						);
-					};
-					queue.push(wake);
-					waiters.set(name, queue);
-					options.signal?.addEventListener("abort", abort, { once: true });
-				});
-			}
-			held.add(name);
-			try {
-				await callback({});
-			} finally {
-				held.delete(name);
-				waiters.get(name)?.shift()?.();
-			}
-		},
-	};
-}
 
 void test("hard-cuts replicas created before selected-change locators", () => {
 	assert.equal(REPOSITORY_OPFS_CACHE_NAMESPACE, "lixray:sync-protocol-v3");
@@ -101,29 +61,31 @@ void test("keys repository and replica caches by stable repository id", () => {
 	);
 });
 
-void test("persists one warm-reopen replica per repository", () => {
+void test("persists one warm-reopen replica per repository", async () => {
 	const browserStorage = new Map<string, string>();
 	const storage = (values: Map<string, string>) => ({
 		getItem: (key: string) => values.get(key) ?? null,
 		setItem: (key: string, value: string) => values.set(key, value),
 	});
 
-	const replicaA = repositoryBrowserReplicaId(browserScope, {
+	const replicaA = await repositoryBrowserReplicaId(browserScope, {
 		storage: storage(browserStorage),
 		createId: () => "browser-a",
+		requestExclusive: async (_name, callback) => callback(),
 	});
 	assert.equal(replicaA, "account-123:browser-a");
 	assert.equal(browserStorage.get(browserStorageKey), "browser-a");
 	assert.equal(
-		repositoryBrowserReplicaId(browserScope, {
+		await repositoryBrowserReplicaId(browserScope, {
 			storage: storage(browserStorage),
 			createId: () => "unused",
+			requestExclusive: async (_name, callback) => callback(),
 		}),
 		replicaA,
 	);
 });
 
-void test("keeps durable warm replicas independent across repositories", () => {
+void test("keeps durable warm replicas independent across repositories", async () => {
 	const values = new Map<string, string>();
 	const storage = {
 		getItem: (key: string) => values.get(key) ?? null,
@@ -133,29 +95,36 @@ void test("keeps durable warm replicas independent across repositories", () => {
 		...browserScope,
 		repositoryId: "22222222-2222-4222-8222-222222222222",
 	};
-	const first = repositoryBrowserReplicaId(browserScope, {
+	const requestExclusive = async <T>(_name: string, callback: () => T) =>
+		callback();
+	const first = await repositoryBrowserReplicaId(browserScope, {
 		storage,
 		createId: () => "website-replica",
+		requestExclusive,
 	});
-	const other = repositoryBrowserReplicaId(otherScope, {
+	const other = await repositoryBrowserReplicaId(otherScope, {
 		storage,
 		createId: () => "other-replica",
+		requestExclusive,
 	});
 
 	assert.equal(first, "account-123:website-replica");
 	assert.equal(other, "account-123:other-replica");
 	assert.equal(
-		repositoryBrowserReplicaId(browserScope, {
+		await repositoryBrowserReplicaId(browserScope, {
 			storage,
 			createId: () => "must-not-replace-website",
+			requestExclusive,
 		}),
 		first,
 	);
 });
 
-void test("fails closed when durable replica storage cannot be read or written", () => {
-	assert.throws(
-		() =>
+void test("fails closed when durable replica storage cannot be read or written", async () => {
+	const requestExclusive = async <T>(_name: string, callback: () => T) =>
+		callback();
+	await assert.rejects(
+		async () =>
 			repositoryBrowserReplicaId(browserScope, {
 				storage: {
 					getItem: () => {
@@ -164,11 +133,12 @@ void test("fails closed when durable replica storage cannot be read or written",
 					setItem: () => undefined,
 				},
 				createId: () => "must-not-fallback",
+				requestExclusive,
 			}),
 		/storage read denied/,
 	);
-	assert.throws(
-		() =>
+	await assert.rejects(
+		async () =>
 			repositoryBrowserReplicaId(browserScope, {
 				storage: {
 					getItem: () => null,
@@ -177,67 +147,45 @@ void test("fails closed when durable replica storage cannot be read or written",
 					},
 				},
 				createId: () => "must-not-fallback",
+				requestExclusive,
 			}),
 		/storage write denied/,
 	);
 });
 
-void test("fails closed when exclusive browser replica ownership is unavailable", async () => {
-	await assert.rejects(
-		claimRepositoryBrowserReplicaId(browserScope, { lockManager: null }),
-		/requires the Web Locks API/,
-	);
-});
-
-void test("queues concurrent opens on the same durable replica", async () => {
-	const values = new Map([[browserStorageKey, "warm-browser"]]);
+void test("serializes first-open identity creation across tabs", async () => {
+	const values = new Map<string, string>();
 	const storage = {
 		getItem: (key: string) => values.get(key) ?? null,
 		setItem: (key: string, value: string) => values.set(key, value),
 	};
-	const locks = createLockManager();
-	const environment = {
-		storage,
-		lockManager: locks,
-		createId: () => "must-not-replace-warm-browser",
+	let tail = Promise.resolve();
+	const requestExclusive = async <T>(_name: string, callback: () => T) => {
+		const previous = tail;
+		let release!: () => void;
+		tail = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await previous;
+		try {
+			return callback();
+		} finally {
+			release();
+		}
 	};
-	const first = await claimRepositoryBrowserReplicaId(
-		browserScope,
-		environment,
-	);
-	assert.equal(first.replicaId, "account-123:warm-browser");
-	const secondOpen = claimRepositoryBrowserReplicaId(browserScope, environment);
-	let secondSettled = false;
-	void secondOpen.then(() => {
-		secondSettled = true;
-	});
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	assert.equal(secondSettled, false, "the later open waits for ownership");
-	first.release();
-	const second = await secondOpen;
-	assert.equal(second.replicaId, first.replicaId);
-	assert.equal(values.get(browserStorageKey), "warm-browser");
-	second.release();
-});
+	const [first, second] = await Promise.all([
+		repositoryBrowserReplicaId(browserScope, {
+			storage,
+			createId: () => "first-tab",
+			requestExclusive,
+		}),
+		repositoryBrowserReplicaId(browserScope, {
+			storage,
+			createId: () => "second-tab",
+			requestExclusive,
+		}),
+	]);
 
-void test("cancels a queued replica claim before the owner releases", async () => {
-	const values = new Map([[browserStorageKey, "warm-browser"]]);
-	const storage = {
-		getItem: (key: string) => values.get(key) ?? null,
-		setItem: (key: string, value: string) => values.set(key, value),
-	};
-	const lockManager = createLockManager();
-	const first = await claimRepositoryBrowserReplicaId(browserScope, {
-		storage,
-		lockManager,
-	});
-	const controller = new AbortController();
-	const queued = claimRepositoryBrowserReplicaId(browserScope, {
-		storage,
-		lockManager,
-		signal: controller.signal,
-	});
-	controller.abort();
-	await assert.rejects(queued, { name: "AbortError" });
-	first.release();
+	assert.equal(first, "account-123:first-tab");
+	assert.equal(second, first);
 });

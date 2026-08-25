@@ -3,7 +3,7 @@ import { OpfsStorage } from "@lix-js/storage-opfs";
 import { captureTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 import {
-	claimRepositoryBrowserReplicaId,
+	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
 } from "./repository-opfs-cache.ts";
 import {
@@ -83,24 +83,18 @@ export async function openRepositoryLixSession(
 		const lease = await acquireManagedRepositoryResource(
 			sessionKey,
 			async (signal) => {
-				const replicaClaim = await claimRepositoryBrowserReplicaId(options, {
+				const replicaId = await repositoryBrowserReplicaId(options);
+				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaIdentified);
+				return retryRepositoryOpenDuringMigration({
+					open: () =>
+						openRepositoryLixSessionWithRetry({
+							...options,
+							replicaId,
+							signal,
+						}),
+					onMigration: (state) => publishMigrationProgress(sessionKey, state),
 					signal,
 				});
-				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaClaimed);
-				try {
-					return await retryRepositoryOpenDuringMigration({
-						open: () =>
-							openRepositoryLixSessionWithRetry(
-								{ ...options, replicaId: replicaClaim.replicaId, signal },
-								() => replicaClaim.release(),
-							),
-						onMigration: (state) => publishMigrationProgress(sessionKey, state),
-						signal,
-					});
-				} catch (error) {
-					replicaClaim.release();
-					throw error;
-				}
 			},
 			{ signal: options.signal },
 		);
@@ -176,15 +170,11 @@ export async function retryRepositoryOpenDuringMigration<T>({
 
 async function openRepositoryLixSessionWithRetry(
 	options: ResolvedOpenRepositoryLixSessionOptions,
-	releaseReplicaClaim: () => void,
 ): Promise<RepositoryLixSession> {
 	for (let attempt = 0; ; attempt += 1) {
 		options.signal?.throwIfAborted();
 		try {
-			const session = await openRepositoryLixSessionOnce(
-				options,
-				releaseReplicaClaim,
-			);
+			const session = await openRepositoryLixSessionOnce(options);
 			if (options.signal?.aborted) {
 				await session.close();
 				options.signal.throwIfAborted();
@@ -203,7 +193,6 @@ async function openRepositoryLixSessionWithRetry(
 
 async function openRepositoryLixSessionOnce(
 	options: ResolvedOpenRepositoryLixSessionOptions,
-	releaseReplicaClaim: () => void,
 ): Promise<RepositoryLixSession> {
 	const lix = await openOpfsSyncSession(options);
 	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.lixOpened);
@@ -211,11 +200,7 @@ async function openRepositoryLixSessionOnce(
 	try {
 		const defaultBranchId = await lix.activeBranchId();
 		markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.branchReady);
-		const session = new RemoteRepositoryLixSession(
-			lix,
-			defaultBranchId,
-			releaseReplicaClaim,
-		);
+		const session = new RemoteRepositoryLixSession(lix, defaultBranchId);
 		if (
 			options.initialBranchId &&
 			options.initialBranchId !== defaultBranchId
@@ -428,19 +413,13 @@ export class RemoteRepositoryLixSession implements RepositoryLixSession {
 	readonly lix: Lix;
 	readonly #listeners = new Set<() => void>();
 	readonly #defaultBranchId: string;
-	readonly #releaseReplicaClaim: () => void;
 	#activeBranchId: string;
 	#closed = false;
 
-	constructor(
-		lix: Lix,
-		defaultBranchId: string,
-		releaseReplicaClaim: () => void,
-	) {
+	constructor(lix: Lix, defaultBranchId: string) {
 		this.lix = lix;
 		this.#defaultBranchId = defaultBranchId;
 		this.#activeBranchId = defaultBranchId;
-		this.#releaseReplicaClaim = releaseReplicaClaim;
 	}
 
 	activeBranchSnapshot(): string {
@@ -479,11 +458,7 @@ export class RemoteRepositoryLixSession implements RepositoryLixSession {
 		if (this.#closed) return;
 		this.#closed = true;
 		this.#listeners.clear();
-		try {
-			await this.lix.close();
-		} finally {
-			this.#releaseReplicaClaim();
-		}
+		await this.lix.close();
 	}
 
 	#assertOpen(): void {

@@ -20,123 +20,54 @@ type BrowserReplicaStorage = Pick<Storage, "getItem" | "setItem">;
 interface BrowserReplicaIdEnvironment {
 	storage?: BrowserReplicaStorage;
 	createId?: () => string;
-}
-
-interface BrowserReplicaClaimEnvironment extends BrowserReplicaIdEnvironment {
-	lockManager?: BrowserReplicaLockManager | null;
-	signal?: AbortSignal;
-}
-
-export interface BrowserReplicaLockManager {
-	request(
-		name: string,
-		options: { mode: "exclusive"; signal?: AbortSignal },
-		callback: (lock: object) => Promise<void>,
-	): Promise<void>;
-}
-
-export interface BrowserReplicaClaim {
-	replicaId: string;
-	release(): void;
+	requestExclusive?: <T>(name: string, callback: () => T) => Promise<T>;
 }
 
 /**
  * Returns a durable replica identity for this browser profile.
  *
- * OPFS SQLite is a mutable replica, so separate top-level browsing contexts
- * must not open the same file concurrently. localStorage preserves the identity
- * after every tab closes; a Web Lock serializes concurrent ownership of that
- * one durable replica. Authentication remains a separate server principal.
+ * localStorage preserves one replica identity across tabs and browser sessions.
+ * Every tab deliberately opens that same storage name: `OpfsStorage` owns the
+ * single-writer fence and routes all clients through its elected owner worker.
+ * Authentication remains a separate server principal.
  */
-export function repositoryBrowserReplicaId(
+export async function repositoryBrowserReplicaId(
 	scope: RepositoryBrowserReplicaScope,
 	environment: BrowserReplicaIdEnvironment = {},
-): string {
+): Promise<string> {
 	const storage = browserReplicaStorage(environment);
 	const scopeKey = repositoryBrowserReplicaScopeKey(scope);
 	const storageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(scopeKey)}`;
-	let browserId = storage.getItem(storageKey) ?? undefined;
-	if (!browserId) {
-		browserId = (
-			environment.createId ?? (() => globalThis.crypto.randomUUID())
-		)();
-		storage.setItem(storageKey, browserId);
-	}
-	return `${scope.authIdentity}:${browserId}`;
+	const requestExclusive =
+		environment.requestExclusive ?? browserReplicaLockRequest();
+	return requestExclusive(`lixray:browser-replica-id:v3:${scopeKey}`, () => {
+		let browserId = storage.getItem(storageKey) ?? undefined;
+		if (!browserId) {
+			browserId = (
+				environment.createId ?? (() => globalThis.crypto.randomUUID())
+			)();
+			storage.setItem(storageKey, browserId);
+		}
+		return `${scope.authIdentity}:${browserId}`;
+	});
 }
 
-export async function claimRepositoryBrowserReplicaId(
-	scope: RepositoryBrowserReplicaScope,
-	environment: BrowserReplicaClaimEnvironment = {},
-): Promise<BrowserReplicaClaim> {
-	const scopeKey = repositoryBrowserReplicaScopeKey(scope);
-	const lockManager =
-		environment.lockManager === undefined
-			? browserReplicaLockManager()
-			: environment.lockManager;
-	if (!lockManager) {
+function browserReplicaLockRequest(): <T>(
+	name: string,
+	callback: () => T,
+) => Promise<T> {
+	if (typeof globalThis.navigator?.locks?.request !== "function") {
 		throw new Error(
 			"Opening a durable browser repository requires the Web Locks API.",
 		);
 	}
-	const durableReplicaId = repositoryBrowserReplicaId(scope, environment);
-	const release = await claimBrowserReplicaIdLock(
-		`${scopeKey}:${durableReplicaId}`,
-		lockManager,
-		environment.signal,
-	);
-	return { replicaId: durableReplicaId, release };
-}
-
-function claimBrowserReplicaIdLock(
-	claimKey: string,
-	lockManager: BrowserReplicaLockManager,
-	signal?: AbortSignal,
-): Promise<() => void> {
-	signal?.throwIfAborted();
-	return new Promise<() => void>((resolve, reject) => {
-		try {
-			const request = lockManager.request(
-				`lixray:opfs-replica:${claimKey}`,
-				{ mode: "exclusive", signal },
-				async () => {
-					let releaseLock!: () => void;
-					let released = false;
-					const held = new Promise<void>((release) => {
-						releaseLock = release;
-					});
-					resolve(() => {
-						if (released) return;
-						released = true;
-						releaseLock();
-					});
-					await held;
-				},
-			);
-			void request.catch((error: unknown) =>
-				reject(error instanceof Error ? error : new Error(String(error))),
-			);
-		} catch (error) {
-			reject(error instanceof Error ? error : new Error(String(error)));
-		}
-	});
+	return (name, callback) => globalThis.navigator.locks.request(name, callback);
 }
 
 function repositoryBrowserReplicaScopeKey(
 	scope: RepositoryBrowserReplicaScope,
 ): string {
 	return `${scope.authIdentity}:${scope.repositoryId}`;
-}
-
-function browserReplicaLockManager(): BrowserReplicaLockManager | null {
-	try {
-		return (
-			(globalThis.navigator?.locks as BrowserReplicaLockManager | undefined) ??
-			null
-		);
-	} catch {
-		return null;
-	}
 }
 
 function browserReplicaStorage(
