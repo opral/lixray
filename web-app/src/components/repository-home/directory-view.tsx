@@ -1127,7 +1127,7 @@ function DropImportOverlay() {
 /**
  * Dot-hybrid diff glyphs (design 23d), mirroring atelier's: the familiar dot
  * silhouette with a knockout so change types survive grayscale and color
- * blindness. 10px everywhere — one size across tree, history, and home.
+ * blindness. 12px, matching the history panel's listings.
  */
 function DiffGlyph({
 	kind,
@@ -1159,7 +1159,7 @@ function DiffGlyph({
 			aria-label={title}
 			className={`inline-flex ${className ?? ""}`}
 		>
-		<svg width={10} height={10} viewBox="0 0 12 12" aria-hidden="true">
+		<svg width={12} height={12} viewBox="0 0 12 12" aria-hidden="true">
 			<circle cx="6" cy="6" r="5" fill={fill} />
 			{kind === "added" ? (
 				<path
