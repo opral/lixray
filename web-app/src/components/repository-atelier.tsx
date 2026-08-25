@@ -933,7 +933,6 @@ export function RepositoryAtelier({
 					lix: session.lix,
 					readOnly: isReadOnly,
 					branchSession: repositoryBranchSession,
-					reviewRangeSessionId: atelierUserId,
 					extensions: createLixrayRepositoryExtensions(
 						{
 							lixId: repositoryId,
