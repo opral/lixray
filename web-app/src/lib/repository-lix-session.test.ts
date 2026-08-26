@@ -3,6 +3,7 @@ import test from "node:test";
 import type { Lix } from "@lix-js/sdk";
 import {
 	createTelemetryFetch,
+	isReplicaMigrationRequiredError,
 	isRetryableRepositoryOpenError,
 	RemoteRepositoryLixSession,
 	repositoryMigrationStateFromError,
@@ -404,5 +405,43 @@ void test("isolates managed sessions when a slug is recreated", () => {
 	assert.notEqual(
 		repositorySessionKey({ ...repository, repositoryId: "repository-before" }),
 		repositorySessionKey({ ...repository, repositoryId: "repository-after" }),
+	);
+});
+
+void test("matches the replica-migration code, not messages or sibling codes", () => {
+	const migrationRequired = Object.assign(
+		new Error(
+			"repository format v72 must be migrated to v74 with lix::migration::migrate_lix before opening",
+		),
+		{ code: "LIX_ERROR_REPOSITORY_MIGRATION_REQUIRED" },
+	);
+	assert.equal(isReplicaMigrationRequiredError(migrationRequired), true);
+
+	// The message alone never matches — only the typed code does.
+	assert.equal(
+		isReplicaMigrationRequiredError(
+			new Error(
+				"repository format v72 must be migrated to v74 with lix::migration::migrate_lix before opening",
+			),
+		),
+		false,
+	);
+	// Too-new / malformed replicas share a different code and are never wiped.
+	assert.equal(
+		isReplicaMigrationRequiredError(
+			Object.assign(new Error("unsupported"), {
+				code: "LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT",
+			}),
+		),
+		false,
+	);
+	// The server migrating its own copy is a wait, not a wipe.
+	assert.equal(
+		isReplicaMigrationRequiredError(
+			Object.assign(new Error("migrating"), {
+				code: "LIX_ERROR_LIX_MIGRATING",
+			}),
+		),
+		false,
 	);
 });
