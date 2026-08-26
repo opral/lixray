@@ -191,6 +191,9 @@ type McpClaimsValidation =
 
 const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
 const PROD_DEV_AUTH_PATH = "/auth/email";
+const OPENAI_APPS_CHALLENGE_PATH = "/.well-known/openai-apps-challenge";
+const OPENAI_APPS_CHALLENGE_TOKEN =
+	"RBTbX7uPYZwmyPGnWX12eMruvkdC6MlM3Xsh95AqR0U";
 const PROD_DEV_EMAIL = "dev@lixray.com";
 const PUBLIC_PRODUCTION_ORIGIN = "https://lixray.com";
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
@@ -227,6 +230,18 @@ export async function handleRequest(
 				},
 			},
 		);
+	}
+
+	if (url.pathname === OPENAI_APPS_CHALLENGE_PATH) {
+		if (request.method !== "GET") {
+			return new Response("Method not allowed\n", { status: 405 });
+		}
+		return new Response(OPENAI_APPS_CHALLENGE_TOKEN, {
+			headers: {
+				"cache-control": "no-store",
+				"content-type": "text/plain; charset=utf-8",
+			},
+		});
 	}
 
 	if (url.pathname === PROD_DEV_AUTH_PATH) {
