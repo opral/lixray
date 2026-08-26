@@ -20,12 +20,17 @@ import {
 	type LixSummary,
 } from "./lix-service.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
+import {
+	provisionAccountAfterHandshake,
+	type LixAccountProfile,
+} from "./lix-account-provisioning.ts";
 
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 
 interface McpUser {
 	userId: string;
 	token: string;
+	account?: LixAccountProfile;
 }
 
 export interface WorkerLixRuntimeEnv {
@@ -457,7 +462,17 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			signal: this.signal ?? rewritten.signal,
 		});
 		if (this.lixFetch) {
-			return this.lixFetch(lixId, template);
+			const response = await this.lixFetch(lixId, template);
+			return provisionAccountAfterHandshake({
+				protocolPath: path,
+				response,
+				account: this.user.account,
+				lixFetch: (provisioningRequest) =>
+					this.lixFetch?.(lixId, provisioningRequest) ??
+					Promise.resolve(
+						new Response("Lix storage is not configured.\n", { status: 500 }),
+					),
+			});
 		}
 		return new Response("Lix storage is not configured.\n", { status: 500 });
 	}

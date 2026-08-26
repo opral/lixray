@@ -125,6 +125,7 @@ export function RepositoryAtelier({
 	shareAccess,
 }: RepositoryAtelierProps) {
 	const {
+		accountId,
 		client,
 		getAccessToken: getSessionAccessToken,
 		isLoaded: isAuthLoaded,
@@ -134,15 +135,15 @@ export function RepositoryAtelier({
 	} = useAuth();
 	// Supabase may replace the Session/User objects when a background tab resumes.
 	// Keep the open Lix session keyed to identity so token refreshes do not reopen it.
-	// `canEdit` is the protocol-principal split: members handshake as
-	// Authenticated(user.id); public readers handshake as Anonymous
+	// `canEdit` is the protocol-principal split: members handshake as their
+	// canonical account; public readers handshake as Anonymous
 	// (`public:${repositoryId}`), including signed-in non-members whose JWT
 	// is stripped by the worker before lix-server. Mixing those on one
 	// session id is ACCOUNT_MISMATCH 403, not SESSION_GONE 410.
-	const atelierUserId = isDemoModeEnabled
+	const atelierAccountId = isDemoModeEnabled
 		? DEMO_AUTH_TOKEN
 		: canEdit
-			? user?.id
+			? accountId
 			: `public:${repositoryId}`;
 	const navigate = useNavigate();
 	const pathname = useRouterState({
@@ -251,7 +252,7 @@ export function RepositoryAtelier({
 			(demoTeamStateRef.current ??= {
 				members: [
 					{
-						userId: user?.id ?? "demo-user",
+						accountId: accountId ?? "demo-account",
 						name:
 							(user?.user_metadata as { full_name?: string } | undefined)
 								?.full_name ?? "Preview user",
@@ -280,10 +281,11 @@ export function RepositoryAtelier({
 							demoTeamState().token = randomRepositoryInviteToken();
 							return Promise.resolve(demoInviteUrl());
 						},
-						removeMember: (userId) => {
+						removeMember: (memberAccountId) => {
 							const state = demoTeamState();
 							state.members = state.members.filter(
-								(member) => member.userId !== userId || member.isSelf,
+								(member) =>
+									member.accountId !== memberAccountId || member.isSelf,
 							);
 							return Promise.resolve();
 						},
@@ -297,12 +299,12 @@ export function RepositoryAtelier({
 							});
 							if (error) throw new Error(error.message);
 							return data.map((row) => ({
-								userId: row.user_id,
+								accountId: row.account_id,
 								name: row.name,
 								email: row.email,
 								avatarUrl: row.avatar_url,
 								role: row.role,
-								isSelf: row.user_id === user?.id,
+								isSelf: row.account_id === accountId,
 							}));
 						},
 						inviteUrl: async () => {
@@ -334,10 +336,10 @@ export function RepositoryAtelier({
 								data,
 							);
 						},
-						removeMember: async (userId: string) => {
+						removeMember: async (memberAccountId: string) => {
 							const { error } = await client.rpc("remove_lix_member", {
 								p_lix_id: repositoryId,
-								p_user_id: userId,
+								p_account_id: memberAccountId,
 							});
 							if (error) throw new Error(error.message);
 						},
@@ -349,8 +351,8 @@ export function RepositoryAtelier({
 		listMembers: () => requireTeamApi(teamApiRef.current).listMembers(),
 		inviteUrl: () => requireTeamApi(teamApiRef.current).inviteUrl(),
 		resetInviteUrl: () => requireTeamApi(teamApiRef.current).resetInviteUrl(),
-		removeMember: (userId) =>
-			requireTeamApi(teamApiRef.current).removeMember(userId),
+		removeMember: (memberAccountId) =>
+			requireTeamApi(teamApiRef.current).removeMember(memberAccountId),
 	});
 
 	// Same rebuilt-per-render / stable-facade split for the Settings tab.
@@ -366,7 +368,7 @@ export function RepositoryAtelier({
 							repositoryName: activeRepository?.name ?? repositoryName,
 							isAdmin: Boolean(isRepositoryAdmin),
 							visibility: activeRepository?.visibility ?? "private",
-							currentUserId: user?.id ?? null,
+							currentAccountId: accountId,
 						}),
 						rename: (name) => renameRepository(repositoryId, name),
 						listDirectMembers: async () => {
@@ -375,24 +377,24 @@ export function RepositoryAtelier({
 							});
 							if (error) throw new Error(error.message);
 							return (data ?? []).map((row) => ({
-								userId: row.user_id,
+								accountId: row.account_id,
 								name: row.name,
 								email: row.email,
 								avatarUrl: row.avatar_url,
 								role: row.role,
 							}));
 						},
-						removeDirectMember: async (memberUserId) => {
+						removeDirectMember: async (memberAccountId) => {
 							const { error } = await client.rpc("remove_lix_member", {
 								p_lix_id: repositoryId,
-								p_user_id: memberUserId,
+								p_account_id: memberAccountId,
 							});
 							if (error) throw new Error(error.message);
 						},
-						setMemberRole: async (memberUserId, role) => {
+						setMemberRole: async (memberAccountId, role) => {
 							const { error } = await client.rpc("set_lix_member_role", {
 								p_lix_id: repositoryId,
-								p_user_id: memberUserId,
+								p_account_id: memberAccountId,
 								p_role: role,
 							});
 							if (error) throw new Error(error.message);
@@ -444,7 +446,7 @@ export function RepositoryAtelier({
 				repositoryName,
 				isAdmin: false,
 				visibility: "private",
-				currentUserId: null,
+				currentAccountId: null,
 			},
 		rename: (name) => requireSettingsApi(settingsApiRef.current).rename(name),
 		listDirectMembers: () =>
@@ -868,7 +870,7 @@ export function RepositoryAtelier({
 		setMigration(null);
 		routeSyncedRef.current = false;
 
-		if (!atelierUserId) {
+		if (!atelierAccountId) {
 			setError("Unable to identify the current Atelier account.");
 			return;
 		}
@@ -882,7 +884,7 @@ export function RepositoryAtelier({
 			allowAnonymous: isReadOnly,
 			publicPath: isReadOnly ? publicPath : undefined,
 			initialBranchId: openingBranchId,
-			authIdentity: atelierUserId,
+			authIdentity: atelierAccountId,
 			signal: openController.signal,
 			onMigration: (state) => {
 				if (!disposed) setMigration(state);
@@ -942,7 +944,7 @@ export function RepositoryAtelier({
 							lixName: repositoryName,
 						},
 						async () => {
-							if (!client || !canEdit || !atelierUserId) return false;
+							if (!client || !canEdit || !atelierAccountId) return false;
 							if (!(await getAccessToken())) return false;
 							const { data, error } = await client
 								.from("mcp_lix_connections")
@@ -961,15 +963,15 @@ export function RepositoryAtelier({
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
 					},
 					sessionStateStore: createRepositorySessionStateStore({
-						userId: atelierUserId,
+						accountId: atelierAccountId,
 						repositoryId,
 					}),
 					preferencesStore: createRepositoryPreferencesStore({
-						userId: atelierUserId,
+						accountId: atelierAccountId,
 						repositoryId,
 					}),
 					reviewStatusStore: createRepositoryReviewStatusStore({
-						userId: atelierUserId,
+						accountId: atelierAccountId,
 						repositoryId,
 					}),
 					onEvent: (event) => eventHandlerRef.current(event),
@@ -1010,7 +1012,7 @@ export function RepositoryAtelier({
 		};
 	}, [
 		client,
-		atelierUserId,
+		atelierAccountId,
 		canEdit,
 		isReadOnly,
 		getAccessToken,

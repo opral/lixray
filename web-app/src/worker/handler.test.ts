@@ -17,6 +17,7 @@ import {
 	authorizeLixWithSupabase,
 	handleRequest,
 	resolveLixWithSupabase,
+	resolveCurrentAccount,
 	resolveNamespaceProfileWithSupabase,
 	resolvePublicProfileRepositoriesWithSupabase,
 	supabaseJwtIssuer,
@@ -1610,6 +1611,52 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 	assert.deepEqual(await proxiedRequest.json(), body);
 });
 
+void test("authenticated handshake provisions the canonical account profile", async () => {
+	const account = {
+		id: "01920000-0000-7000-8000-000000000601",
+		kind: "human",
+		name: "Example Account",
+		profileUri:
+			"https://lixray.com/profile/11111111-1111-4111-8111-111111111111",
+	};
+	const requests: Request[] = [];
+	const response = await handleRequest(
+		remoteLixRequest("/", {
+			headers: { Authorization: "Bearer user-token" },
+		}),
+		env({}),
+		{
+			authenticate: async () => ({
+				ok: true,
+				auth: { userId: account.id, token: "user-token", account },
+			}),
+			resolveLix: resolved(LIX_A),
+			lixFetch: async (_lixId, request) => {
+				requests.push(request);
+				if (new URL(request.url).pathname === "/lix/v1/") {
+					return Response.json({
+						activeAccountId: account.id,
+						sessionId: "session-1",
+					});
+				}
+				return Response.json({ rowsAffected: 1 });
+			},
+		},
+	);
+	assert.equal(response.status, 200);
+	assert.equal(requests.length, 2);
+	assert.deepEqual(
+		requests.map((request) => new URL(request.url).pathname),
+		["/lix/v1/", "/lix/v1/execute"],
+	);
+	for (const request of requests) {
+		assert.equal(
+			request.headers.get("x-lixray-idempotency-principal"),
+			account.id,
+		);
+	}
+});
+
 void test("removed lix sidecar routes return 404 before auth", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/v1/lixes/not-a-uuid/filesystem/mutate"),
@@ -2299,6 +2346,45 @@ void test("demo auth rejects an incorrect bearer token without Supabase", async 
 	if (!response.ok) {
 		assert.equal(response.response.status, 401);
 	}
+});
+
+void test("current account RPC maps a login to its canonical actor and profile", async () => {
+	let request: Request | undefined;
+	const result = await resolveCurrentAccount(
+		"login-token",
+		{
+			SUPABASE_URL: "https://supabase.example",
+			SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+		},
+		async (input, init) => {
+			request = new Request(input, init);
+			return Response.json([
+				{
+					account_id: "01920000-0000-7000-8000-000000000601",
+					kind: "human",
+					name: "Example Account",
+					profile_uri:
+						"https://lixray.com/profile/11111111-1111-4111-8111-111111111111",
+				},
+			]);
+		},
+	);
+	assert.deepEqual(result, {
+		ok: true,
+		account: {
+			id: "01920000-0000-7000-8000-000000000601",
+			kind: "human",
+			name: "Example Account",
+			profileUri:
+				"https://lixray.com/profile/11111111-1111-4111-8111-111111111111",
+		},
+	});
+	assert.ok(request);
+	assert.equal(
+		request.url,
+		"https://supabase.example/rest/v1/rpc/current_account",
+	);
+	assert.equal(request.headers.get("authorization"), "Bearer login-token");
 });
 
 void test("demo mode keeps OAuth endpoints disabled", async () => {

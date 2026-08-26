@@ -20,12 +20,12 @@ void test("shell state survives reloads within one tab but is isolated across ta
 	const tabAStorage = new MemoryStorage();
 	const tabBStorage = new MemoryStorage();
 	const storeA = createRepositorySessionStateStore({
-		userId: USER,
+		accountId: USER,
 		repositoryId: LIX,
 		storage: tabAStorage,
 	});
 	const alreadyOpenStore = createRepositorySessionStateStore({
-		userId: USER,
+		accountId: USER,
 		repositoryId: LIX,
 		storage: tabAStorage,
 	});
@@ -50,7 +50,7 @@ void test("shell state survives reloads within one tab but is isolated across ta
 	assert.equal(alreadyOpenNotifications, 0);
 	assert.deepEqual(
 		createRepositorySessionStateStore({
-			userId: USER,
+			accountId: USER,
 			repositoryId: LIX,
 			storage: tabAStorage,
 		}).getSnapshot(),
@@ -59,7 +59,7 @@ void test("shell state survives reloads within one tab but is isolated across ta
 	);
 	assert.equal(
 		createRepositorySessionStateStore({
-			userId: USER,
+			accountId: USER,
 			repositoryId: LIX,
 			storage: tabBStorage,
 		}).getSnapshot(),
@@ -68,7 +68,7 @@ void test("shell state survives reloads within one tab but is isolated across ta
 	);
 	assert.equal(
 		createRepositorySessionStateStore({
-			userId: OTHER_USER,
+			accountId: OTHER_USER,
 			repositoryId: LIX,
 			storage: tabAStorage,
 		}).getSnapshot(),
@@ -77,7 +77,7 @@ void test("shell state survives reloads within one tab but is isolated across ta
 	);
 	assert.equal(
 		createRepositorySessionStateStore({
-			userId: USER,
+			accountId: USER,
 			repositoryId: OTHER_LIX,
 			storage: tabAStorage,
 		}).getSnapshot(),
@@ -101,7 +101,7 @@ void test("session shell state applies the first-visit initializer", () => {
 		},
 	};
 	const store = createRepositorySessionStateStore({
-		userId: USER,
+		accountId: USER,
 		repositoryId: LIX,
 		storage: new MemoryStorage(),
 		initializeSnapshot: (persisted) => persisted ?? seededState,
@@ -206,7 +206,7 @@ void test("a failed latest branch selection reconciles the last successful branc
 void test("demo preferences and tab-local review status survive a same-tab reload", async () => {
 	const storage = new MemoryStorage();
 	const preferences = createRepositoryPreferencesStore({
-		userId: USER,
+		accountId: USER,
 		repositoryId: LIX,
 		storage,
 	});
@@ -216,7 +216,7 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 	});
 	assert.deepEqual(
 		await createRepositoryPreferencesStore({
-			userId: USER,
+			accountId: USER,
 			repositoryId: LIX,
 			storage,
 		}).load(),
@@ -228,7 +228,7 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 	);
 	assert.equal(
 		await createRepositoryPreferencesStore({
-			userId: USER,
+			accountId: USER,
 			repositoryId: LIX,
 			storage: new MemoryStorage(),
 		}).load(),
@@ -237,7 +237,7 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 	);
 
 	const reviews = createRepositoryReviewStatusStore({
-		userId: USER,
+		accountId: USER,
 		repositoryId: LIX,
 		storage,
 	});
@@ -249,7 +249,7 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 	});
 	assert.deepEqual(
 		await createRepositoryReviewStatusStore({
-			userId: USER,
+			accountId: USER,
 			repositoryId: LIX,
 			storage,
 		}).loadResolvedReviewIds(DRAFT),
@@ -257,7 +257,7 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 	);
 	assert.deepEqual(
 		await createRepositoryReviewStatusStore({
-			userId: OTHER_USER,
+			accountId: OTHER_USER,
 			repositoryId: LIX,
 			storage,
 		}).loadResolvedReviewIds(DRAFT),
@@ -265,7 +265,7 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 	);
 	assert.deepEqual(
 		await createRepositoryReviewStatusStore({
-			userId: USER,
+			accountId: USER,
 			repositoryId: LIX,
 			storage: new MemoryStorage(),
 		}).loadResolvedReviewIds(DRAFT),

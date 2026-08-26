@@ -33,8 +33,9 @@ select results_eq(
 -- scoped to the test user so pre-existing local data cannot skew the count.
 reset role;
 select is(
-  (select count(*) from public.user_primary_namespaces primary_namespace
-   where primary_namespace.user_id = '10000000-0000-0000-0000-000000000001'),
+  (select count(*) from public.accounts account
+   where account.id = '10000000-0000-0000-0000-000000000001'
+     and account.primary_namespace_id is not null),
   1::bigint,
   'personal ownership is derived from the primary-namespace pointer'
 );
@@ -61,15 +62,9 @@ select results_eq(
 );
 
 select is(
-  (
-    select count(*)
-    from information_schema.columns
-    where table_schema = 'public'
-      and table_name = 'profiles'
-      and column_name = 'avatar_url'
-  ),
-  0::bigint,
-  'the private auth profile no longer duplicates the public avatar'
+  to_regclass('public.profiles')::text,
+  null::text,
+  'the redundant private presentation profile is gone'
 );
 
 reset role;

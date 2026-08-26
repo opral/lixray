@@ -30,9 +30,9 @@ import { isTeamInviteToken } from "~/lib/team-invite";
 import { appendRepositoryShareToken } from "~/lib/repository-share-url";
 
 interface NamespaceMember {
-	userId: string;
+	accountId: string;
 	name: string;
-	email: string;
+	email: string | null;
 	avatarUrl: string | null;
 	role: "owner" | "member";
 }
@@ -555,7 +555,7 @@ function GeneralPanel({ organization }: { organization: Organization }) {
 }
 
 function MembersPanel({ organization }: { organization: Organization }) {
-	const { client, user } = useAuth();
+	const { accountId, client } = useAuth();
 	const { refresh } = useRepository();
 	const isOwner = organization.role === "owner";
 	const [members, setMembers] = useState<Array<NamespaceMember> | null>(null);
@@ -578,7 +578,7 @@ function MembersPanel({ organization }: { organization: Organization }) {
 				}
 				setMembers(
 					(data ?? []).map((row) => ({
-						userId: row.user_id,
+						accountId: row.account_id,
 						name: row.name,
 						email: row.email,
 						avatarUrl: row.avatar_url,
@@ -633,15 +633,16 @@ function MembersPanel({ organization }: { organization: Organization }) {
 		try {
 			const { error: removeError } = await client.rpc(
 				"remove_namespace_member",
-				{ p_namespace_id: organization.id, p_user_id: member.userId },
+				{ p_namespace_id: organization.id, p_account_id: member.accountId },
 			);
 			if (removeError) throw new Error(removeError.message);
 			setMembers(
 				(current) =>
-					current?.filter((entry) => entry.userId !== member.userId) ?? null,
+					current?.filter((entry) => entry.accountId !== member.accountId) ??
+					null,
 			);
-			toast.success(`Removed ${member.name || member.email}`);
-			if (member.userId === user?.id) await refresh();
+			toast.success(`Removed ${member.name || member.email || "account"}`);
+			if (member.accountId === accountId) await refresh();
 		} catch (caught) {
 			toast.error(formatCaughtError(caught));
 		} finally {
@@ -701,39 +702,41 @@ function MembersPanel({ organization }: { organization: Organization }) {
 				</p>
 			) : null}
 			{members?.map((member) => {
-				const isSelf = member.userId === user?.id;
+				const isSelf = member.accountId === accountId;
 				const removable =
 					(isOwner || isSelf) && !(member.role === "owner" && !isSelf);
 				return (
 					<div
-						key={member.userId}
+						key={member.accountId}
 						className="flex items-center gap-2.5 border-t border-border-subtle py-2 first-of-type:border-t-0"
 					>
 						<MemberAvatar
 							member={{
-								name: member.name || member.email,
+								name: member.name || member.email || "Account",
 								avatarUrl: member.avatarUrl,
 							}}
 							className="size-6 text-[11px]"
 						/>
 						<span className="flex min-w-0 flex-col">
 							<span className="truncate text-[13px] leading-tight font-semibold">
-								{member.name || member.email}
+								{member.name || member.email || "Account"}
 								{isSelf ? (
 									<span className="ml-1.5 font-normal text-text-quaternary">
 										you
 									</span>
 								) : null}
 							</span>
-							<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
-								{member.email}
-							</span>
+							{member.email ? (
+								<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
+									{member.email}
+								</span>
+							) : null}
 						</span>
 						<span className="ml-auto rounded-[7px] border border-border-panel px-2 py-1 text-[12px] text-text-secondary capitalize">
 							{member.role}
 						</span>
 						{removable ? (
-							confirmingRemoval === member.userId ? (
+							confirmingRemoval === member.accountId ? (
 								<Button
 									type="button"
 									variant="destructive"
@@ -749,7 +752,7 @@ function MembersPanel({ organization }: { organization: Organization }) {
 									variant="ghost"
 									size="sm"
 									className="h-7 text-text-tertiary"
-									onClick={() => setConfirmingRemoval(member.userId)}
+									onClick={() => setConfirmingRemoval(member.accountId)}
 								>
 									{isSelf ? "Leave" : "Remove"}
 								</Button>

@@ -6,9 +6,9 @@ import { Button } from "~/components/ui/button";
 import { formatCaughtError } from "~/lib/format";
 
 export interface DirectRepositoryMember {
-	userId: string;
+	accountId: string;
 	name: string;
-	email: string;
+	email: string | null;
 	avatarUrl: string | null;
 	role: "admin" | "member";
 }
@@ -25,12 +25,12 @@ export interface RepositorySettingsApi {
 		repositoryName: string;
 		isAdmin: boolean;
 		visibility: "private" | "public";
-		currentUserId: string | null;
+		currentAccountId: string | null;
 	};
 	rename(name: string): Promise<void>;
 	listDirectMembers(): Promise<readonly DirectRepositoryMember[]>;
-	removeDirectMember(userId: string): Promise<void>;
-	setMemberRole(userId: string, role: "admin" | "member"): Promise<void>;
+	removeDirectMember(accountId: string): Promise<void>;
+	setMemberRole(accountId: string, role: "admin" | "member"): Promise<void>;
 	setVisibility(visibility: "private" | "public"): Promise<void>;
 	getInviteLink(): Promise<string>;
 	/** Deletes and navigates away; the tab unmounts with the workspace. */
@@ -172,12 +172,13 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 
 	const removeMember = async (member: DirectRepositoryMember) => {
 		try {
-			await settingsApi.removeDirectMember(member.userId);
+			await settingsApi.removeDirectMember(member.accountId);
 			setDirectMembers(
 				(current) =>
-					current?.filter((entry) => entry.userId !== member.userId) ?? null,
+					current?.filter((entry) => entry.accountId !== member.accountId) ??
+					null,
 			);
-			toast.success(`Removed ${member.name || member.email}`);
+			toast.success(`Removed ${member.name || member.email || "account"}`);
 		} catch (caught) {
 			toast.error(formatCaughtError(caught));
 		} finally {
@@ -187,16 +188,18 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 
 	const promoteMember = async (member: DirectRepositoryMember) => {
 		try {
-			await settingsApi.setMemberRole(member.userId, "admin");
+			await settingsApi.setMemberRole(member.accountId, "admin");
 			setDirectMembers(
 				(current) =>
 					current?.map((entry) =>
-						entry.userId === member.userId
+						entry.accountId === member.accountId
 							? { ...entry, role: "admin" }
 							: entry,
 					) ?? null,
 			);
-			toast.success(`${member.name || member.email} is now an admin`);
+			toast.success(
+				`${member.name || member.email || "Account"} is now an admin`,
+			);
 		} catch (caught) {
 			toast.error(formatCaughtError(caught));
 		}
@@ -241,31 +244,33 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 				Admins can promote members and remove member access.
 			</p>
 			{directMembers?.map((member) => {
-				const isSelf = member.userId === info.currentUserId;
+				const isSelf = member.accountId === info.currentAccountId;
 				return (
 					<div
-						key={member.userId}
+						key={member.accountId}
 						className="flex items-center gap-2.5 border-t border-border-subtle py-2"
 					>
 						<MemberAvatar
 							member={{
-								name: member.name || member.email,
+								name: member.name || member.email || "Account",
 								avatarUrl: member.avatarUrl,
 							}}
 							className="size-6 text-[11px]"
 						/>
 						<span className="flex min-w-0 flex-col">
 							<span className="truncate text-[13px] leading-tight font-semibold">
-								{member.name || member.email}
+								{member.name || member.email || "Account"}
 								{isSelf ? (
 									<span className="ml-1.5 font-normal text-text-quaternary">
 										you
 									</span>
 								) : null}
 							</span>
-							<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
-								{member.email}
-							</span>
+							{member.email ? (
+								<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
+									{member.email}
+								</span>
+							) : null}
 						</span>
 						<span className="ml-auto rounded-[7px] border border-border-panel px-2 py-1 text-[12px] text-text-secondary">
 							{member.role === "admin" ? "Admin" : "Member"}
@@ -282,7 +287,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 							</Button>
 						) : null}
 						{member.role === "member" && (info.isAdmin || isSelf) ? (
-							confirmingRemoval === member.userId ? (
+							confirmingRemoval === member.accountId ? (
 								<Button
 									type="button"
 									variant="destructive"
@@ -298,7 +303,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 									variant="ghost"
 									size="sm"
 									className="h-7 text-text-tertiary"
-									onClick={() => setConfirmingRemoval(member.userId)}
+									onClick={() => setConfirmingRemoval(member.accountId)}
 								>
 									{isSelf ? "Leave" : "Remove"}
 								</Button>

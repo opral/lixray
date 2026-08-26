@@ -34,6 +34,67 @@ export type Database = {
 	};
 	public: {
 		Tables: {
+			account_logins: {
+				Row: {
+					account_id: string;
+					auth_user_id: string;
+					created_at: string;
+				};
+				Insert: {
+					account_id: string;
+					auth_user_id: string;
+					created_at?: string;
+				};
+				Update: {
+					account_id?: string;
+					auth_user_id?: string;
+					created_at?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "account_logins_account_id_fkey";
+						columns: ["account_id"];
+						isOneToOne: false;
+						referencedRelation: "accounts";
+						referencedColumns: ["id"];
+					},
+				];
+			};
+			accounts: {
+				Row: {
+					created_at: string;
+					id: string;
+					kind: string;
+					primary_namespace_id: string | null;
+					status: string;
+					updated_at: string;
+				};
+				Insert: {
+					created_at?: string;
+					id?: string;
+					kind?: string;
+					primary_namespace_id?: string | null;
+					status?: string;
+					updated_at?: string;
+				};
+				Update: {
+					created_at?: string;
+					id?: string;
+					kind?: string;
+					primary_namespace_id?: string | null;
+					status?: string;
+					updated_at?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "accounts_primary_namespace_id_fkey";
+						columns: ["primary_namespace_id"];
+						isOneToOne: true;
+						referencedRelation: "namespaces";
+						referencedColumns: ["id"];
+					},
+				];
+			};
 			handles: {
 				Row: {
 					created_at: string;
@@ -69,36 +130,37 @@ export type Database = {
 					},
 				];
 			};
-			mcp_lix_connections: {
+			lix_invite_links: {
 				Row: {
-					connected_at: string;
-					last_seen_at: string;
-					last_tool: string;
+					created_at: string;
+					created_by_account_id: string | null;
 					lix_id: string;
-					oauth_client_id: string;
-					user_id: string;
+					token: string;
 				};
 				Insert: {
-					connected_at?: string;
-					last_seen_at?: string;
-					last_tool: string;
+					created_at?: string;
+					created_by_account_id?: string | null;
 					lix_id: string;
-					oauth_client_id: string;
-					user_id: string;
+					token: string;
 				};
 				Update: {
-					connected_at?: string;
-					last_seen_at?: string;
-					last_tool?: string;
+					created_at?: string;
+					created_by_account_id?: string | null;
 					lix_id?: string;
-					oauth_client_id?: string;
-					user_id?: string;
+					token?: string;
 				};
 				Relationships: [
 					{
-						foreignKeyName: "mcp_lix_connections_lix_id_fkey";
-						columns: ["lix_id"];
+						foreignKeyName: "lix_invite_links_created_by_account_id_fkey";
+						columns: ["created_by_account_id"];
 						isOneToOne: false;
+						referencedRelation: "accounts";
+						referencedColumns: ["id"];
+					},
+					{
+						foreignKeyName: "lix_invite_links_lix_id_fkey";
+						columns: ["lix_id"];
+						isOneToOne: true;
 						referencedRelation: "lixes";
 						referencedColumns: ["id"];
 					},
@@ -106,57 +168,35 @@ export type Database = {
 			};
 			lix_members: {
 				Row: {
+					account_id: string;
 					created_at: string;
 					lix_id: string;
 					role: Database["public"]["Enums"]["lix_role"];
-					user_id: string;
 				};
 				Insert: {
+					account_id: string;
 					created_at?: string;
 					lix_id: string;
 					role?: Database["public"]["Enums"]["lix_role"];
-					user_id: string;
 				};
 				Update: {
+					account_id?: string;
 					created_at?: string;
 					lix_id?: string;
 					role?: Database["public"]["Enums"]["lix_role"];
-					user_id?: string;
 				};
 				Relationships: [
+					{
+						foreignKeyName: "lix_members_account_id_fkey";
+						columns: ["account_id"];
+						isOneToOne: false;
+						referencedRelation: "accounts";
+						referencedColumns: ["id"];
+					},
 					{
 						foreignKeyName: "lix_members_lix_id_fkey";
 						columns: ["lix_id"];
 						isOneToOne: false;
-						referencedRelation: "lixes";
-						referencedColumns: ["id"];
-					},
-				];
-			};
-			lix_invite_links: {
-				Row: {
-					created_at: string;
-					created_by: string | null;
-					lix_id: string;
-					token: string;
-				};
-				Insert: {
-					created_at?: string;
-					created_by?: string | null;
-					lix_id: string;
-					token: string;
-				};
-				Update: {
-					created_at?: string;
-					created_by?: string | null;
-					lix_id?: string;
-					token?: string;
-				};
-				Relationships: [
-					{
-						foreignKeyName: "lix_invite_links_lix_id_fkey";
-						columns: ["lix_id"];
-						isOneToOne: true;
 						referencedRelation: "lixes";
 						referencedColumns: ["id"];
 					},
@@ -168,21 +208,21 @@ export type Database = {
 					kind: Database["public"]["Enums"]["lix_publication_kind"];
 					lix_id: string;
 					path: string;
-					published_by: string;
+					published_by_account_id: string;
 				};
 				Insert: {
 					created_at?: string;
 					kind: Database["public"]["Enums"]["lix_publication_kind"];
 					lix_id: string;
 					path: string;
-					published_by: string;
+					published_by_account_id: string;
 				};
 				Update: {
 					created_at?: string;
 					kind?: Database["public"]["Enums"]["lix_publication_kind"];
 					lix_id?: string;
 					path?: string;
-					published_by?: string;
+					published_by_account_id?: string;
 				};
 				Relationships: [
 					{
@@ -190,6 +230,13 @@ export type Database = {
 						columns: ["lix_id"];
 						isOneToOne: false;
 						referencedRelation: "lixes";
+						referencedColumns: ["id"];
+					},
+					{
+						foreignKeyName: "lix_publications_published_by_account_id_fkey";
+						columns: ["published_by_account_id"];
+						isOneToOne: false;
+						referencedRelation: "accounts";
 						referencedColumns: ["id"];
 					},
 				];
@@ -201,7 +248,7 @@ export type Database = {
 					id: string;
 					lix_id: string;
 					revoked_at: string | null;
-					shared_by: string;
+					shared_by_account_id: string;
 					token_hash: string;
 				};
 				Insert: {
@@ -210,7 +257,7 @@ export type Database = {
 					id?: string;
 					lix_id: string;
 					revoked_at?: string | null;
-					shared_by: string;
+					shared_by_account_id: string;
 					token_hash: string;
 				};
 				Update: {
@@ -219,7 +266,7 @@ export type Database = {
 					id?: string;
 					lix_id?: string;
 					revoked_at?: string | null;
-					shared_by?: string;
+					shared_by_account_id?: string;
 					token_hash?: string;
 				};
 				Relationships: [
@@ -228,6 +275,13 @@ export type Database = {
 						columns: ["lix_id"];
 						isOneToOne: false;
 						referencedRelation: "lixes";
+						referencedColumns: ["id"];
+					},
+					{
+						foreignKeyName: "lix_share_tokens_shared_by_account_id_fkey";
+						columns: ["shared_by_account_id"];
+						isOneToOne: false;
+						referencedRelation: "accounts";
 						referencedColumns: ["id"];
 					},
 				];
@@ -276,26 +330,75 @@ export type Database = {
 					},
 				];
 			};
+			mcp_lix_connections: {
+				Row: {
+					account_id: string;
+					connected_at: string;
+					last_seen_at: string;
+					last_tool: string;
+					lix_id: string;
+					oauth_client_id: string;
+				};
+				Insert: {
+					account_id: string;
+					connected_at?: string;
+					last_seen_at?: string;
+					last_tool: string;
+					lix_id: string;
+					oauth_client_id: string;
+				};
+				Update: {
+					account_id?: string;
+					connected_at?: string;
+					last_seen_at?: string;
+					last_tool?: string;
+					lix_id?: string;
+					oauth_client_id?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "mcp_lix_connections_account_id_fkey";
+						columns: ["account_id"];
+						isOneToOne: false;
+						referencedRelation: "accounts";
+						referencedColumns: ["id"];
+					},
+					{
+						foreignKeyName: "mcp_lix_connections_lix_id_fkey";
+						columns: ["lix_id"];
+						isOneToOne: false;
+						referencedRelation: "lixes";
+						referencedColumns: ["id"];
+					},
+				];
+			};
 			namespace_invite_links: {
 				Row: {
 					created_at: string;
-					created_by: string | null;
+					created_by_account_id: string | null;
 					namespace_id: string;
 					token: string;
 				};
 				Insert: {
 					created_at?: string;
-					created_by?: string | null;
+					created_by_account_id?: string | null;
 					namespace_id: string;
 					token: string;
 				};
 				Update: {
 					created_at?: string;
-					created_by?: string | null;
+					created_by_account_id?: string | null;
 					namespace_id?: string;
 					token?: string;
 				};
 				Relationships: [
+					{
+						foreignKeyName: "namespace_invite_links_created_by_account_id_fkey";
+						columns: ["created_by_account_id"];
+						isOneToOne: false;
+						referencedRelation: "accounts";
+						referencedColumns: ["id"];
+					},
 					{
 						foreignKeyName: "namespace_invite_links_namespace_id_fkey";
 						columns: ["namespace_id"];
@@ -307,24 +410,31 @@ export type Database = {
 			};
 			namespace_members: {
 				Row: {
+					account_id: string;
 					created_at: string;
 					namespace_id: string;
 					role: Database["public"]["Enums"]["namespace_role"];
-					user_id: string;
 				};
 				Insert: {
+					account_id: string;
 					created_at?: string;
 					namespace_id: string;
 					role?: Database["public"]["Enums"]["namespace_role"];
-					user_id: string;
 				};
 				Update: {
+					account_id?: string;
 					created_at?: string;
 					namespace_id?: string;
 					role?: Database["public"]["Enums"]["namespace_role"];
-					user_id?: string;
 				};
 				Relationships: [
+					{
+						foreignKeyName: "namespace_members_account_id_fkey";
+						columns: ["account_id"];
+						isOneToOne: false;
+						referencedRelation: "accounts";
+						referencedColumns: ["id"];
+					},
 					{
 						foreignKeyName: "namespace_members_namespace_id_fkey";
 						columns: ["namespace_id"];
@@ -333,27 +443,6 @@ export type Database = {
 						referencedColumns: ["id"];
 					},
 				];
-			};
-			namespaces: {
-				Row: {
-					created_at: string;
-					id: string;
-					name: string;
-					updated_at: string;
-				};
-				Insert: {
-					created_at?: string;
-					id?: string;
-					name: string;
-					updated_at?: string;
-				};
-				Update: {
-					created_at?: string;
-					id?: string;
-					name?: string;
-					updated_at?: string;
-				};
-				Relationships: [];
 			};
 			namespace_profiles: {
 				Row: {
@@ -384,55 +473,26 @@ export type Database = {
 					},
 				];
 			};
-			profiles: {
+			namespaces: {
 				Row: {
 					created_at: string;
-					email: string;
 					id: string;
 					name: string;
 					updated_at: string;
 				};
 				Insert: {
 					created_at?: string;
-					email: string;
-					id: string;
+					id?: string;
 					name: string;
 					updated_at?: string;
 				};
 				Update: {
 					created_at?: string;
-					email?: string;
 					id?: string;
 					name?: string;
 					updated_at?: string;
 				};
 				Relationships: [];
-			};
-			user_primary_namespaces: {
-				Row: {
-					created_at: string;
-					namespace_id: string;
-					user_id: string;
-				};
-				Insert: {
-					created_at?: string;
-					namespace_id: string;
-					user_id: string;
-				};
-				Update: {
-					created_at?: string;
-					namespace_id?: string;
-					user_id?: string;
-				};
-				Relationships: [
-					{
-						foreignKeyName: "user_primary_namespaces_namespace_id_fkey";
-						columns: ["namespace_id"];
-						isOneToOne: true;
-						referencedRelation: "namespaces";
-						referencedColumns: ["id"];
-					},
-				];
 			};
 		};
 		Views: {
@@ -467,13 +527,19 @@ export type Database = {
 				}[];
 			};
 			create_namespace: { Args: { p_name: string }; Returns: string };
+			current_account: {
+				Args: never;
+				Returns: {
+					account_id: string;
+					kind: string;
+					name: string;
+					profile_uri: string;
+				}[];
+			};
 			delete_lix: { Args: { p_lix_id: string }; Returns: undefined };
+			get_lix_invite_link: { Args: { p_lix_id: string }; Returns: string };
 			get_namespace_invite_link: {
 				Args: { p_namespace_id: string };
-				Returns: string;
-			};
-			get_lix_invite_link: {
-				Args: { p_lix_id: string };
 				Returns: string;
 			};
 			list_accessible_lixes: {
@@ -482,9 +548,9 @@ export type Database = {
 					lix_created_at: string;
 					lix_id: string;
 					lix_name: string;
+					lix_role: Database["public"]["Enums"]["lix_role"];
 					lix_slug: string;
 					lix_updated_at: string;
-					lix_role: Database["public"]["Enums"]["lix_role"];
 					lix_visibility: Database["public"]["Enums"]["lix_visibility"];
 					namespace_created_at: string;
 					namespace_handle: string;
@@ -493,6 +559,37 @@ export type Database = {
 					namespace_name: string;
 					namespace_role: Database["public"]["Enums"]["namespace_role"];
 					namespace_updated_at: string;
+				}[];
+			};
+			list_lix_members: {
+				Args: { p_lix_id: string };
+				Returns: {
+					account_id: string;
+					avatar_url: string;
+					email: string;
+					joined_at: string;
+					name: string;
+					role: Database["public"]["Enums"]["lix_role"];
+				}[];
+			};
+			list_lix_publications: {
+				Args: { p_lix_id: string };
+				Returns: {
+					created_at: string;
+					kind: Database["public"]["Enums"]["lix_publication_kind"];
+					path: string;
+					published_by_account_id: string;
+				}[];
+			};
+			list_namespace_members: {
+				Args: { p_namespace_id: string };
+				Returns: {
+					account_id: string;
+					avatar_url: string;
+					email: string;
+					joined_at: string;
+					name: string;
+					role: Database["public"]["Enums"]["namespace_role"];
 				}[];
 			};
 			list_public_profile_lixes: {
@@ -506,26 +603,6 @@ export type Database = {
 					namespace_id: string;
 				}[];
 			};
-			list_lix_members: {
-				Args: { p_lix_id: string };
-				Returns: {
-					avatar_url: string | null;
-					email: string;
-					joined_at: string;
-					name: string;
-					role: Database["public"]["Enums"]["lix_role"];
-					user_id: string;
-				}[];
-			};
-			list_lix_publications: {
-				Args: { p_lix_id: string };
-				Returns: {
-					created_at: string;
-					kind: Database["public"]["Enums"]["lix_publication_kind"];
-					path: string;
-					published_by: string;
-				}[];
-			};
 			publish_lix_resource: {
 				Args: {
 					p_kind: Database["public"]["Enums"]["lix_publication_kind"];
@@ -534,40 +611,26 @@ export type Database = {
 				};
 				Returns: undefined;
 			};
-			list_namespace_members: {
-				Args: { p_namespace_id: string };
-				Returns: {
-					avatar_url: string | null;
-					email: string;
-					joined_at: string;
-					name: string;
-					role: Database["public"]["Enums"]["namespace_role"];
-					user_id: string;
-				}[];
+			record_mcp_lix_connection: {
+				Args: { p_lix_id: string; p_tool_name: string };
+				Returns: undefined;
 			};
 			remove_lix_member: {
-				Args: { p_lix_id: string; p_user_id: string };
+				Args: { p_account_id: string; p_lix_id: string };
 				Returns: undefined;
 			};
 			remove_namespace_member: {
-				Args: { p_namespace_id: string; p_user_id: string };
+				Args: { p_account_id: string; p_namespace_id: string };
 				Returns: undefined;
 			};
 			rename_namespace: {
 				Args: { p_name: string; p_namespace_id: string };
 				Returns: undefined;
 			};
+			reset_lix_invite_link: { Args: { p_lix_id: string }; Returns: string };
 			reset_namespace_invite_link: {
 				Args: { p_namespace_id: string };
 				Returns: string;
-			};
-			reset_lix_invite_link: {
-				Args: { p_lix_id: string };
-				Returns: string;
-			};
-			record_mcp_lix_connection: {
-				Args: { p_lix_id: string; p_tool_name: string };
-				Returns: undefined;
 			};
 			resolve_lix_share_token: {
 				Args: { p_token: string };
@@ -580,18 +643,10 @@ export type Database = {
 					namespace_id: string;
 					namespace_name: string;
 					path_public: boolean;
-					role: Database["public"]["Enums"]["lix_role"] | null;
+					role: Database["public"]["Enums"]["lix_role"];
 					shared_by_avatar_url: string;
 					shared_by_name: string;
 					visibility: Database["public"]["Enums"]["lix_visibility"];
-				}[];
-			};
-			resolve_public_profile_by_handle: {
-				Args: { p_handle: string };
-				Returns: {
-					namespace_created_at: string;
-					namespace_handle: string;
-					namespace_id: string;
 				}[];
 			};
 			resolve_public_lix: {
@@ -605,7 +660,7 @@ export type Database = {
 					namespace_id: string;
 					namespace_name: string;
 					path_public: boolean;
-					role: Database["public"]["Enums"]["lix_role"] | null;
+					role: Database["public"]["Enums"]["lix_role"];
 					visibility: Database["public"]["Enums"]["lix_visibility"];
 				}[];
 			};
@@ -624,16 +679,24 @@ export type Database = {
 					namespace_id: string;
 					namespace_name: string;
 					path_public: boolean;
-					role: Database["public"]["Enums"]["lix_role"] | null;
+					role: Database["public"]["Enums"]["lix_role"];
 					visibility: Database["public"]["Enums"]["lix_visibility"];
+				}[];
+			};
+			resolve_public_profile_by_handle: {
+				Args: { p_handle: string };
+				Returns: {
+					namespace_created_at: string;
+					namespace_handle: string;
+					namespace_id: string;
 				}[];
 			};
 			revoke_lix_share_token: { Args: { p_token: string }; Returns: undefined };
 			set_lix_member_role: {
 				Args: {
+					p_account_id: string;
 					p_lix_id: string;
 					p_role: Database["public"]["Enums"]["lix_role"];
-					p_user_id: string;
 				};
 				Returns: undefined;
 			};
@@ -768,10 +831,12 @@ export type Enums<
 		? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
 		: never;
 
+// Supabase emits `never` in this union while the public schema has no composites.
+/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 export type CompositeTypes<
-	PublicCompositeTypeNameOrOptions extends {
-		schema: keyof DatabaseWithoutInternals;
-	},
+	PublicCompositeTypeNameOrOptions extends
+		| keyof DefaultSchema["CompositeTypes"]
+		| { schema: keyof DatabaseWithoutInternals },
 	CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
 		schema: keyof DatabaseWithoutInternals;
 	}
@@ -784,6 +849,7 @@ export type CompositeTypes<
 	: PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
 		? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
 		: never;
+/* eslint-enable @typescript-eslint/no-redundant-type-constituents */
 
 export const Constants = {
 	graphql_public: {
@@ -791,7 +857,9 @@ export const Constants = {
 	},
 	public: {
 		Enums: {
-			namespace_kind: ["personal", "organization"],
+			lix_publication_kind: ["file", "directory"],
+			lix_role: ["admin", "member"],
+			lix_visibility: ["private", "public"],
 			namespace_role: ["owner", "member"],
 		},
 	},

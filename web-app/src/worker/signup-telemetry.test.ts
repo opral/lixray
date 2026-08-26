@@ -7,6 +7,7 @@ import {
 } from "./signup-telemetry.ts";
 
 const USER_ID = "95a017ae-6b39-4acc-ba13-f9bfec4c5e6e";
+const AUTH_USER_ID = "85b55493-0b11-4aaa-b148-c8acbcf18ef6";
 const NOW = Date.parse("2026-08-26T15:05:00.000Z");
 
 void test("signup capture remains retryable for every post-cutover account", () => {
@@ -37,7 +38,7 @@ void test("server capture identifies the person then emits the canonical signup 
 	const lifecycle: Array<string> = [];
 	const result = await captureUserSignedUp(
 		productionEnv(),
-		{ userId: USER_ID, token: "access-token" },
+		{ userId: USER_ID, authUserId: AUTH_USER_ID, token: "access-token" },
 		{ surface: "mcp", source: "oauth" },
 		{
 			now: () => NOW,
@@ -50,7 +51,7 @@ void test("server capture identifies the person then emits the canonical signup 
 					"Bearer access-token",
 				);
 				return Response.json({
-					id: USER_ID,
+					id: AUTH_USER_ID,
 					email: "new@example.com",
 					created_at: "2026-08-26T15:00:00.000Z",
 					app_metadata: { provider: "google" },

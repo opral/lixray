@@ -49,6 +49,10 @@ import {
 } from "./lixr-mcp-telemetry.ts";
 import { resolveSupabaseLixId } from "./lix-resolver.ts";
 import {
+	provisionAccountAfterHandshake,
+	type LixAccountProfile,
+} from "../mcp/lix-account-provisioning.ts";
+import {
 	isDemoEnvironment,
 	resolveOfficialMcpPosthogToken,
 } from "./mcp-posthog-env.ts";
@@ -141,10 +145,16 @@ const publicProfileActivityCache = new PublicProfileActivityCache();
 const PUBLIC_PROFILE_ACTIVITY_TIMEOUT_MS = 30_000;
 
 interface AuthenticatedUser {
+	/** Canonical LixRay account ID, never the Supabase auth user ID. */
 	userId: string;
+	/** The credential ID in auth.users for checks against Supabase Auth. */
+	authUserId?: string;
 	token: string;
+	account?: LixAccountPrincipal;
 	isDemo?: boolean;
 }
+
+export type LixAccountPrincipal = LixAccountProfile;
 
 interface AuthenticatedMcpUser extends AuthenticatedUser {
 	clientId: string;
@@ -699,6 +709,7 @@ export async function handleRequest(
 								env,
 								options,
 								authResult.auth.userId,
+								authResult.auth.account,
 							),
 					);
 					return withServerTimings(response, serverTimings);
@@ -999,14 +1010,22 @@ async function fetchLixRequest(
 	env: WorkerEnv,
 	options: HandleRequestOptions,
 	trustedPrincipal?: string,
+	account?: LixAccountPrincipal,
 ): Promise<Response> {
 	const rewrittenRequest = rewriteLixRequest(
 		request,
 		protocolPath,
 		trustedPrincipal,
 	);
-	if (options.lixFetch) {
-		return options.lixFetch(lixId, rewrittenRequest);
+	const lixFetch = options.lixFetch;
+	if (lixFetch) {
+		const response = await lixFetch(lixId, rewrittenRequest);
+		return provisionAccountAfterHandshake({
+			protocolPath,
+			response,
+			account,
+			lixFetch: (provisioningRequest) => lixFetch(lixId, provisioningRequest),
+		});
 	}
 	return new Response("Lix storage is not configured\n", { status: 500 });
 }
@@ -1048,15 +1067,121 @@ export async function authenticateWithSupabase(
 		);
 		await persistRemoteJwksIfPresent(jwksUrl, cachePath);
 		if (!validateBrowserJwtClaims(payload)) return unauthorized();
+		const account = await resolveCurrentAccount(token, env);
+		if (!account.ok) return account;
 		return {
 			ok: true,
-			auth: { userId: payload.sub as string, token },
+			auth: {
+				userId: account.account.id,
+				authUserId: payload.sub,
+				token,
+				account: account.account,
+			},
 		};
 	} catch (error) {
 		if (classifyJwtVerifyError(error) === "jwks_unavailable") {
 			return jwksUnavailable();
 		}
 		return unauthorized();
+	}
+}
+
+type CurrentAccountResolution =
+	| { ok: true; account: LixAccountPrincipal }
+	| { ok: false; response: Response };
+
+/** Resolve one validated Supabase login to its canonical LixRay account. */
+export async function resolveCurrentAccount(
+	token: string,
+	env: Pick<WorkerEnv, "SUPABASE_URL" | "SUPABASE_PUBLISHABLE_KEY">,
+	fetchImpl: typeof fetch = fetch,
+): Promise<CurrentAccountResolution> {
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return {
+			ok: false,
+			response: new Response("Supabase Data API is not configured\n", {
+				status: 500,
+			}),
+		};
+	}
+	const url = new URL("/rest/v1/rpc/current_account", env.SUPABASE_URL);
+	let response: Response;
+	try {
+		response = await fetchImpl(url, {
+			method: "POST",
+			headers: {
+				apikey: env.SUPABASE_PUBLISHABLE_KEY,
+				Authorization: `Bearer ${token}`,
+				Accept: "application/json",
+				"Content-Type": "application/json",
+			},
+			body: "{}",
+		});
+	} catch {
+		return {
+			ok: false,
+			response: new Response("Account resolution is unavailable\n", {
+				status: 502,
+			}),
+		};
+	}
+	if (!response.ok) {
+		return {
+			ok: false,
+			response: new Response("Account resolution is unavailable\n", {
+				status: 502,
+			}),
+		};
+	}
+	let payload: unknown;
+	try {
+		payload = await response.json();
+	} catch {
+		payload = null;
+	}
+	const row: unknown = Array.isArray(payload)
+		? (payload as Array<unknown>)[0]
+		: payload;
+	const account = parseCurrentAccount(row);
+	if (!account) {
+		return {
+			ok: false,
+			response: new Response("LixRay account is unavailable\n", {
+				status: 403,
+			}),
+		};
+	}
+	return { ok: true, account };
+}
+
+function parseCurrentAccount(value: unknown): LixAccountPrincipal | null {
+	if (!value || typeof value !== "object") return null;
+	const row = value as Record<string, unknown>;
+	const id = row.account_id;
+	const kind = row.kind;
+	const name = row.name;
+	const profileUri = row.profile_uri;
+	if (
+		typeof id !== "string" ||
+		!UUID_PATTERN.test(id) ||
+		typeof kind !== "string" ||
+		kind.trim().length === 0 ||
+		typeof name !== "string" ||
+		name.trim().length === 0 ||
+		typeof profileUri !== "string" ||
+		!isAbsoluteHttpUrl(profileUri)
+	) {
+		return null;
+	}
+	return { id, kind, name, profileUri };
+}
+
+function isAbsoluteHttpUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return url.protocol === "https:" || url.protocol === "http:";
+	} catch {
+		return false;
 	}
 }
 
@@ -1197,12 +1322,28 @@ async function authenticateMcpWithSupabase(
 				),
 			};
 		}
+		const account = await resolveCurrentAccount(token, env);
+		if (!account.ok) {
+			return {
+				ok: false,
+				response:
+					account.response.status === 403
+						? mcpUnauthorizedResponse(
+								"invalid_token",
+								"Your login is not linked to a LixRay account.",
+								protectedResourceUrl,
+							)
+						: account.response,
+			};
+		}
 		return {
 			ok: true,
 			auth: {
-				userId: claims.userId,
+				userId: account.account.id,
+				authUserId: claims.userId,
 				token,
 				clientId: claims.clientId,
+				account: account.account,
 			},
 		};
 	} catch (error) {
@@ -1454,7 +1595,7 @@ export async function resolveNamespaceMembershipWithSupabase(
 		};
 	}
 	const lookupUrl = new URL("/rest/v1/namespace_members", env.SUPABASE_URL);
-	lookupUrl.searchParams.set("select", "user_id");
+	lookupUrl.searchParams.set("select", "account_id");
 	lookupUrl.searchParams.set("namespace_id", `eq.${namespaceId}`);
 	lookupUrl.searchParams.set("limit", "1");
 
