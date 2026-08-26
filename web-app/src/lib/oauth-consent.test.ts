@@ -83,7 +83,7 @@ void test("resolved event properties are decision, client_name, redirect_host", 
 		},
 	);
 	assert.equal(OAUTH_CONSENT_OPEN_HREF, "/open");
-	assert.equal(OAUTH_CONSENT_RESOLVED_EVENT, "webapp_oauth_consent_resolved");
+	assert.equal(OAUTH_CONSENT_RESOLVED_EVENT, "oauth_consent_resolved");
 	assert.equal(OAUTH_CONSENT_FALLBACK_MS, 2000);
 });
 
@@ -134,7 +134,7 @@ void test("https approve assigns the client redirect_url and offers /open after 
 	assert.deepEqual(hops, []);
 	assert.deepEqual(events, [
 		{
-			event: "webapp_oauth_consent_resolved",
+			event: "oauth_consent_resolved",
 			properties: {
 				decision: "approve",
 				client_name: "ChatGPT",
@@ -262,7 +262,7 @@ void test("deny navigates to the client error redirect and does not offer /open"
 	assert.deepEqual(hops, []);
 	assert.deepEqual(events, [
 		{
-			event: "webapp_oauth_consent_resolved",
+			event: "oauth_consent_resolved",
 			properties: {
 				decision: "deny",
 				client_name: "Claude",

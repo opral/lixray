@@ -11,6 +11,7 @@ import {
 } from "../lib/demo-identity.ts";
 import type { PublicProfileActivity } from "../lib/profile-activity-aggregate.ts";
 import { isLixError } from "../mcp/lix-service.ts";
+import { SIGNUP_TELEMETRY_PATH } from "../lib/signup-telemetry.ts";
 import {
 	authenticateWithSupabase,
 	authorizeLixWithSupabase,
@@ -533,6 +534,91 @@ void test("public profile repository resolution calls the anonymous RPC", async 
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
+});
+
+void test("signup telemetry authenticates and delegates one cross-surface event", async () => {
+	let captured:
+		| {
+				userId: string;
+				token: string;
+				surface: string;
+				source: string;
+		  }
+		| undefined;
+	const response = await handleRequest(
+		new Request("https://example.test/api/telemetry/signup", {
+			method: "POST",
+			headers: {
+				Authorization: "Bearer access-token",
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				surface: "mcp",
+				source: "oauth",
+			}),
+		}),
+		env({}),
+		{
+			authenticate: async () => ({
+				ok: true,
+				auth: { userId: "user-id", token: "access-token" },
+			}),
+			captureSignup: async (_env, identity, context) => {
+				captured = { ...identity, ...context };
+				return "captured";
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), { captured: true });
+	assert.deepEqual(captured, {
+		userId: "user-id",
+		token: "access-token",
+		surface: "mcp",
+		source: "oauth",
+	});
+});
+
+void test("signup telemetry rejects invalid surfaces before capture", async () => {
+	let captureCalled = false;
+	const response = await handleRequest(
+		new Request("https://example.test/api/telemetry/signup", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ surface: "browser", source: "direct" }),
+		}),
+		env({}),
+		{
+			authenticate: async () => ({
+				ok: true,
+				auth: { userId: "user-id", token: "access-token" },
+			}),
+			captureSignup: async () => {
+				captureCalled = true;
+				return "captured";
+			},
+		},
+	);
+	assert.equal(response.status, 400);
+	assert.equal(captureCalled, false);
+});
+
+void test("signup telemetry requires an authenticated browser session", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/api/telemetry/signup", {
+			method: "POST",
+			body: JSON.stringify({ surface: "web", source: "direct" }),
+		}),
+		env({}),
+		{
+			authenticate: async () => ({
+				ok: false,
+				response: new Response("Unauthorized\n", { status: 401 }),
+			}),
+		},
+	);
+	assert.equal(response.status, 401);
 });
 
 void test("non-/v1 routes delegate to the frontend fallback", async () => {
@@ -2220,6 +2306,7 @@ void test("demo mode keeps OAuth endpoints disabled", async () => {
 	for (const path of [
 		MCP_PROTECTED_RESOURCE_PATH,
 		MCP_DOCUMENTATION_PATH,
+		SIGNUP_TELEMETRY_PATH,
 		"/auth/callback",
 		"/oauth/consent",
 	]) {

@@ -10,7 +10,7 @@ import {
 	takeRepositoryShareJoinIntent,
 	takeRepositoryShareCapability,
 } from "~/lib/repository-share-capability";
-import { captureTelemetryImmediately } from "~/lib/telemetry";
+import { reportUserSignedUp } from "~/lib/signup-telemetry";
 
 interface CallbackSearch {
 	code?: string;
@@ -54,18 +54,13 @@ function AuthCallbackPage() {
 					return;
 				}
 
-				// Track webapp_user_signed_up event for first-time users only
-				const userId = sessionData?.user?.id;
-				if (userId) {
-					const signupKey = `lixray.signup.${userId}`;
-					const hasTrackedSignup = window.localStorage.getItem(signupKey);
-					if (!hasTrackedSignup) {
-						const returnTo = peekAuthReturnTo();
-						await captureTelemetryImmediately("webapp_user_signed_up", {
-							auth_provider: "google",
-							signup_source: returnTo === "/open" ? "direct" : returnTo,
-						});
-						window.localStorage.setItem(signupKey, "true");
+				// The authenticated server decides whether this was account creation and
+				// emits the same canonical event for web and MCP-originated signups.
+				if (sessionData.session) {
+					try {
+						await reportUserSignedUp(sessionData.session, peekAuthReturnTo());
+					} catch (telemetryError: unknown) {
+						console.warn("Failed to report signup telemetry", telemetryError);
 					}
 				}
 
