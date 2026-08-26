@@ -4,6 +4,7 @@ import { captureExceptionTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 import { waitForLixPrewarm } from "./lix-prewarm.ts";
 import {
+	deleteRepositoryOpfsReplica,
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
 } from "./repository-opfs-cache.ts";
@@ -172,6 +173,7 @@ export async function retryRepositoryOpenDuringMigration<T>({
 async function openRepositoryLixSessionWithRetry(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
+	let replicaRebootstrapped = false;
 	for (let attempt = 0; ; attempt += 1) {
 		options.signal?.throwIfAborted();
 		try {
@@ -180,9 +182,32 @@ async function openRepositoryLixSessionWithRetry(
 				await session.close();
 				options.signal.throwIfAborted();
 			}
+			clearReplicaRebootstrapReload(repositoryOpfsCacheName(options));
 			return session;
 		} catch (error) {
 			options.signal?.throwIfAborted();
+			// The local replica is a cache of server state. An older-format
+			// replica is a typed cache miss — the engine that shipped with this
+			// build is the migration target, and the server (same engine)
+			// migrates itself — so discard it and bootstrap fresh.
+			// TooNew/Malformed carry a different code and are never wiped —
+			// a too-new replica is newer data, not a miss.
+			if (!replicaRebootstrapped && isReplicaMigrationRequiredError(error)) {
+				replicaRebootstrapped = true;
+				const cacheName = repositoryOpfsCacheName(options);
+				const wiped = await deleteRepositoryOpfsReplica(cacheName);
+				// The storage layer's owner worker caches the SQLite pool per
+				// replica; after the wipe that cached pool still points at the
+				// deleted files, so an in-page reopen reads a poisoned pool.
+				// One guarded reload restarts the worker clean — the guard makes
+				// a reload loop impossible: on the second encounter the retry
+				// stays in-page and the failure surfaces.
+				if (wiped && takeReplicaRebootstrapReload(cacheName)) {
+					globalThis.location.reload();
+					return await new Promise<never>(() => {});
+				}
+				continue;
+			}
 			const retryDelay = OPEN_RETRY_DELAYS_MS[attempt];
 			if (!isRetryableRepositoryOpenError(error) || retryDelay === undefined) {
 				throw error;
@@ -495,6 +520,52 @@ export function repositoryMigrationStateFromError(
 		return null;
 	}
 	return { fromVersion, toVersion };
+}
+
+const REPLICA_MIGRATION_REQUIRED_CODE =
+	"LIX_ERROR_REPOSITORY_MIGRATION_REQUIRED";
+const REPLICA_REBOOTSTRAP_RELOAD_KEY_PREFIX = "lixray:replica-rebootstrap:";
+
+/**
+ * Claims the one reload this replica's rebootstrap may perform. Returns true
+ * exactly once per replica until the marker is cleared by a successful open;
+ * a page that already reloaded for this replica retries in-page instead, so
+ * a persistent failure surfaces rather than looping reloads.
+ */
+function takeReplicaRebootstrapReload(cacheName: string): boolean {
+	try {
+		const key = `${REPLICA_REBOOTSTRAP_RELOAD_KEY_PREFIX}${cacheName}`;
+		if (globalThis.sessionStorage.getItem(key) !== null) return false;
+		globalThis.sessionStorage.setItem(key, "1");
+		return true;
+	} catch {
+		// No sessionStorage (or blocked): never reload without the guard.
+		return false;
+	}
+}
+
+function clearReplicaRebootstrapReload(cacheName: string): void {
+	try {
+		globalThis.sessionStorage.removeItem(
+			`${REPLICA_REBOOTSTRAP_RELOAD_KEY_PREFIX}${cacheName}`,
+		);
+	} catch {
+		// Nothing to clear when storage is unavailable.
+	}
+}
+
+/**
+ * The local wasm engine refused an older-format OPFS replica. Matched by the
+ * engine's typed code, never the message. Distinct from LIX_ERROR_LIX_MIGRATING
+ * (the server migrating its own copy) and from
+ * LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT (too-new or malformed — never wiped).
+ */
+export function isReplicaMigrationRequiredError(error: unknown): boolean {
+	return (
+		error instanceof Error &&
+		"code" in error &&
+		error.code === REPLICA_MIGRATION_REQUIRED_CODE
+	);
 }
 
 export function isRetryableRepositoryOpenError(error: unknown): boolean {
