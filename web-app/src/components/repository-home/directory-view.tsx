@@ -51,7 +51,6 @@ import {
 	createRepositoryFolder,
 	formatUpdatedAt,
 	importDroppedFiles,
-	initialRepositoryTreeIsEmpty,
 	listDirectory,
 	persistedDirectoryPath,
 	resolveRepositoryHref,
@@ -100,7 +99,6 @@ type DirectoryViewProps = {
 	readonly onOpenChangesReview?: () => void;
 	/** Opens the History view as a normal central tab. */
 	readonly onOpenHistory?: () => void;
-	readonly onRepositoryEmpty?: () => void;
 };
 
 const newTabFromMouseEvent = (event: ReactMouseEvent): boolean =>
@@ -131,7 +129,6 @@ export function DirectoryView({
 	onOpenSqlExplorer,
 	onOpenChangesReview,
 	onOpenHistory,
-	onRepositoryEmpty,
 }: DirectoryViewProps) {
 	const { tree, error: treeError } = useRepositoryTree(lix, isActive);
 	const detailsEnabled = useAfterInitialIdle(
@@ -233,7 +230,6 @@ export function DirectoryView({
 		listing?.readmePath ?? null,
 		detailsEnabled,
 	);
-	const initialRepositoryTreeHandledRef = useRef(false);
 	const repositoryTreeMarkedRef = useRef(false);
 	const [actionError, setActionError] = useState<string | null>(null);
 	// Right-click file management, sharing the File Explorer's operation
@@ -302,14 +298,6 @@ export function DirectoryView({
 	);
 
 	useEffect(() => {
-		if (!isActive || !isHome || initialRepositoryTreeHandledRef.current) return;
-		const isEmpty = initialRepositoryTreeIsEmpty(tree);
-		if (isEmpty === null) return;
-		initialRepositoryTreeHandledRef.current = true;
-		if (isEmpty) onRepositoryEmpty?.();
-	}, [isActive, isHome, onRepositoryEmpty, tree]);
-
-	useEffect(() => {
 		if (
 			!isActive ||
 			!isHome ||
@@ -353,6 +341,21 @@ export function DirectoryView({
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [dirPath, isActive, lix, onOpenFile, readOnly, viewingHistory]);
 
+	// The empty repository home renders the welcome pitch as the entire main
+	// column — the breadcrumb/New header stands down so "Connect an agent"
+	// and "start yourself" are the only calls to action. Empty folders,
+	// read-only repos, and history views keep the normal chrome.
+	const showGettingStarted = Boolean(
+		listing &&
+			listing.dirs.length === 0 &&
+			listing.files.length === 0 &&
+			isHome &&
+			dirPath === "/" &&
+			!readOnly &&
+			!viewingHistory &&
+			hasAgentConnected,
+	);
+
 	if (!tree || !listing) {
 		if (treeError) {
 			return (
@@ -380,7 +383,15 @@ export function DirectoryView({
 						: "mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10"
 				}
 			>
-				<main className="min-w-0">
+				<main
+					className={
+						// The pitch centers vertically against the rail: main
+						// stretches to the shared grid row, whose height the rail's
+						// content defines.
+						showGettingStarted ? "grid min-w-0 content-center" : "min-w-0"
+					}
+				>
+					{showGettingStarted ? null : (
 					<div className="flex items-center gap-2 pb-5">
 						<Breadcrumb
 							dirPath={dirPath}
@@ -412,6 +423,7 @@ export function DirectoryView({
 							/>
 						</div>
 					</div>
+					)}
 					{actionError ? (
 						<p
 							role="alert"
@@ -421,17 +433,25 @@ export function DirectoryView({
 						</p>
 					) : null}
 					{listing.dirs.length === 0 && listing.files.length === 0 ? (
-						<div className="rounded-[10px] border border-dashed border-border-panel px-6 py-12 text-center text-[13px] leading-6 text-text-tertiary">
-							{readOnly || viewingHistory ? (
-								"No files yet."
-							) : (
-								<>
-									No files yet — create one with{" "}
-									<b className="font-semibold text-text-secondary">New</b>, or
-									drop files anywhere to import.
-								</>
-							)}
-						</div>
+						showGettingStarted && hasAgentConnected ? (
+							<GettingStarted
+								connection={connection}
+								hasAgentConnected={hasAgentConnected}
+								onCreateFile={(extension) => void createFile(extension)}
+							/>
+						) : (
+							<div className="rounded-[10px] border border-dashed border-border-panel px-6 py-12 text-center text-[13px] leading-6 text-text-tertiary">
+								{readOnly || viewingHistory ? (
+									"No files yet."
+								) : (
+									<>
+										No files yet — create one with{" "}
+										<b className="font-semibold text-text-secondary">New</b>, or
+										drop files anywhere to import.
+									</>
+								)}
+							</div>
+						)
 					) : null}
 					<div className="flex flex-col gap-px" data-testid="home-entry-list">
 						{listing.dirs.map((dir) => (
@@ -1233,83 +1253,8 @@ function InviteControl({
 }
 
 /**
- * The standalone Getting started tab: the default active tab while the
- * repository is empty, opened next to — never replacing — the pinned Home.
- */
-export function GettingStartedView({
-	lix,
-	readOnly,
-	connection,
-	hasAgentConnected,
-	onOpenFile,
-}: {
-	readonly lix: Lix;
-	readonly readOnly: boolean;
-	readonly connection: Omit<LixConnectionPromptInput, "origin">;
-	readonly hasAgentConnected: () => Promise<boolean>;
-	readonly onOpenFile: (
-		path: string,
-		options: { newTab: boolean; created?: boolean },
-	) => void;
-}) {
-	const [actionError, setActionError] = useState<string | null>(null);
-	const { tree } = useRepositoryTree(lix);
-	const firstFileOpenedRef = useRef(false);
-	const { isDropTarget, dragHandlers } = useImportDrop({
-		lix,
-		dirPath: "/",
-		readOnly,
-		onError: setActionError,
-	});
-	useEffect(() => {
-		if (!tree || tree.files.length === 0 || firstFileOpenedRef.current) return;
-		firstFileOpenedRef.current = true;
-		const firstFile = [...tree.files].sort(
-			(left, right) =>
-				right.updatedAt.localeCompare(left.updatedAt) ||
-				left.path.localeCompare(right.path),
-		)[0];
-		if (firstFile) onOpenFile(firstFile.path, { newTab: false });
-	}, [onOpenFile, tree]);
-	const createFile = async (extension: "md" | "csv" | "excalidraw") => {
-		firstFileOpenedRef.current = true;
-		try {
-			setActionError(null);
-			const path = await createRepositoryFile(lix, "/", extension);
-			onOpenFile(path, { newTab: false, created: true });
-		} catch (error) {
-			firstFileOpenedRef.current = false;
-			console.error("repository-home: unable to create file", error);
-			setActionError("Unable to create the file. Try again.");
-		}
-	};
-	return (
-		<div
-			className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
-			{...dragHandlers}
-		>
-			{isDropTarget ? <DropImportOverlay /> : null}
-			{actionError ? (
-				<p
-					role="alert"
-					className="absolute inset-x-6 top-4 z-10 mx-auto max-w-[440px] rounded-lg bg-error-700/10 px-3 py-2 text-center text-[13px] text-error-700"
-				>
-					{actionError}
-				</p>
-			) : null}
-			<GettingStarted
-				readOnly={readOnly}
-				connection={connection}
-				hasAgentConnected={hasAgentConnected}
-				onCreateFile={(extension) => void createFile(extension)}
-			/>
-		</div>
-	);
-}
-
-/**
- * Drag-and-drop file import shared by the directory and getting-started
- * views; the caller renders {@link DropImportOverlay} and surfaces errors.
+ * Drag-and-drop file import for the directory view; the caller renders
+ * {@link DropImportOverlay} and surfaces errors.
  */
 function useImportDrop({
 	lix,
@@ -1892,16 +1837,15 @@ function GettingStartedIllustration() {
 }
 
 /**
- * The empty-repository pitch (12f in the comp): connect an agent, start a
- * document yourself, or drop files anywhere to import.
+ * The empty-repository pitch (12f in the comp), rendered inline where the
+ * home listing would be: connect an agent, start a document yourself, or
+ * drop files anywhere to import.
  */
 function GettingStarted({
-	readOnly,
 	connection,
 	hasAgentConnected,
 	onCreateFile,
 }: {
-	readonly readOnly: boolean;
 	readonly connection: Omit<LixConnectionPromptInput, "origin">;
 	readonly hasAgentConnected: () => Promise<boolean>;
 	readonly onCreateFile: (extension: "md" | "csv" | "excalidraw") => void;
@@ -1910,10 +1854,10 @@ function GettingStarted({
 	return (
 		<>
 			<div
-				className="flex h-full min-h-0 flex-col items-center justify-center text-center"
+				className="flex flex-col items-center text-center"
 				data-testid="home-getting-started"
 			>
-				<div className="-mt-5 flex w-[min(560px,calc(100%-48px))] flex-col items-center">
+				<div className="flex w-[min(560px,100%)] flex-col items-center">
 					<GettingStartedIllustration />
 					<h1 className="m-0 text-2xl font-bold tracking-[-0.02em]">
 						Welcome to your Lix repository
@@ -1931,33 +1875,29 @@ function GettingStarted({
 						<Link2 className="size-3.5" aria-hidden="true" />
 						Connect an agent
 					</button>
-					{readOnly ? null : (
-						<>
-							<div className="mb-3.5 text-[11.5px] font-bold tracking-[0.06em] text-text-quaternary uppercase">
-								or start yourself
-							</div>
-							<div className="flex justify-center gap-2.5">
-								{NEW_FILE_KINDS.map((kind) => (
-									<button
-										key={kind.extension}
-										type="button"
-										onClick={() => onCreateFile(kind.extension)}
-										className="inline-flex items-center gap-2 rounded-[9px] bg-bg-hover px-3.5 py-2.5 text-[13px] font-semibold text-text-secondary hover:bg-bg-active"
-									>
-										<img
-											src={fileIconUrl(`file.${kind.extension}`)}
-											alt=""
-											className="size-4"
-										/>
-										{kind.label.replace("New ", "")}
-									</button>
-								))}
-							</div>
-							<div className="mt-4.5 text-xs text-text-quaternary">
-								…or drop files anywhere in this window to import
-							</div>
-						</>
-					)}
+					<div className="mb-3.5 text-[11.5px] font-bold tracking-[0.06em] text-text-quaternary uppercase">
+						or start yourself
+					</div>
+					<div className="flex justify-center gap-2.5">
+						{NEW_FILE_KINDS.map((kind) => (
+							<button
+								key={kind.extension}
+								type="button"
+								onClick={() => onCreateFile(kind.extension)}
+								className="inline-flex items-center gap-2 rounded-[9px] bg-bg-hover px-3.5 py-2.5 text-[13px] font-semibold text-text-secondary hover:bg-bg-active"
+							>
+								<img
+									src={fileIconUrl(`file.${kind.extension}`)}
+									alt=""
+									className="size-4"
+								/>
+								{kind.label.replace("New ", "")}
+							</button>
+						))}
+					</div>
+					<div className="mt-4.5 text-xs text-text-quaternary">
+						…or drop files anywhere in this window to import
+					</div>
 				</div>
 			</div>
 			<AgentConnectionDialog

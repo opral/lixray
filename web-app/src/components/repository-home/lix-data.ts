@@ -333,13 +333,6 @@ export function useRepositoryTree(
 	}, [dirs, files]);
 }
 
-/** Decides empty-repository routing only after the first complete tree frame. */
-export function initialRepositoryTreeIsEmpty(
-	tree: RepositoryTree | null,
-): boolean | null {
-	return tree === null ? null : tree.files.length === 0;
-}
-
 /**
  * Resolves a README-relative link against a directory. Returns null for
  * absolute/external/fragment hrefs (which keep default browser behavior).
