@@ -1044,7 +1044,6 @@ where
         to_version = report.to_version,
         changes_rewritten = report.changes_rewritten,
         commit_members_rewritten = report.commit_members_rewritten,
-        hot_rows_rewritten = report.hot_rows_rewritten,
         elapsed_ms = elapsed_millis(migration_started),
         "migrated Lix repository format"
     );
