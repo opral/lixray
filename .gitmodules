@@ -1,8 +1,6 @@
 [submodule "vendor/atelier"]
 	path = vendor/atelier
 	url = https://github.com/opral/atelier.git
-	branch = dev
 [submodule "vendor/lix"]
 	path = vendor/lix
 	url = https://github.com/opral/lix.git
-	branch = dev
