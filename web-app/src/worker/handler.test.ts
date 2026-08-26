@@ -76,7 +76,7 @@ void test("GET /.well-known/openai-apps-challenge returns the OpenAI verificatio
 	assert.equal(response.headers.get("cache-control"), "no-store");
 	assert.equal(
 		await response.text(),
-		"RBTbX7uPYZwmyPGnWX12eMruvkdC6MlM3Xsh95AqR0U",
+		"RBTbX7uPYZwmyPGnWXM2eMruvkdC6MlM3Xsh95AqROU",
 	);
 });
 
