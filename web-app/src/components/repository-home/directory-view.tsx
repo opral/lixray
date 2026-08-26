@@ -641,6 +641,16 @@ function ChangeBars({
 	}
 	const maxCount = Math.max(1, ...days.map((day) => day.count));
 	const latestCheckpointDay = data.checkpointDates?.[0]?.slice(0, 10) ?? null;
+	// Same day-granularity rule the bar colors use: a checkpoint splits the
+	// window, and the headline counts the reviewable span after it.
+	const headlineCount = latestCheckpointDay
+		? days.reduce(
+				(sum, entry) =>
+					entry.day > latestCheckpointDay ? sum + entry.count : sum,
+				0,
+			)
+		: (data.totalChangeCount ??
+			days.reduce((sum, entry) => sum + entry.count, 0));
 	const visibleDays = days.length > 0 ? days : [{ day: "", count: 0 }];
 	const paddedDays = [
 		...Array.from({ length: Math.max(0, 9 - visibleDays.length) }, () => ({
@@ -651,8 +661,17 @@ function ChangeBars({
 	];
 
 	return (
-		<div className="mt-4">
-			<div className="flex h-11 items-end gap-[3px] border-b border-[#ded5c8]">
+		<div className="mt-2.5">
+			<div className="flex items-baseline gap-1.5">
+				<strong className="text-[20px] leading-none font-semibold tracking-[-0.03em] text-text-primary">
+					{formatCompactCount(headlineCount)}
+				</strong>
+				<span className="text-[11.5px] text-text-tertiary">
+					{headlineCount === 1 ? "change" : "changes"}
+					{latestCheckpointDay ? " since checkpoint" : ""}
+				</span>
+			</div>
+			<div className="mt-3 flex h-11 items-end gap-[3px] border-b border-[#ded5c8]">
 				{paddedDays.map((entry, index) => {
 					const afterCheckpoint =
 						!latestCheckpointDay ||
@@ -1216,12 +1235,21 @@ function EntryRow({
 	readonly onClick: (event: ReactMouseEvent) => void;
 }) {
 	const changed = changeKind !== undefined;
+	// In a review every changed name carries its action color — matching the
+	// sidebar tree's label tinting — so the action reads without hunting for
+	// the trailing glyph. Modified shares the tree's brand orange; moved the
+	// glyph's blue. Folders that merely contain changes (the dim indicator)
+	// keep a neutral name, like the tree's softened contains-changes dot.
 	const nameClass =
-		changeKind === "added"
-			? "text-[var(--color-text-diff-added)]"
-			: changeKind === "removed"
-				? "text-[var(--color-text-diff-removed)]"
-				: "text-text-primary";
+		dimIndicator || changeKind === undefined
+			? "text-text-primary"
+			: changeKind === "added"
+				? "text-[var(--color-text-diff-added)]"
+				: changeKind === "removed"
+					? "text-[var(--color-text-diff-removed)]"
+					: changeKind === "modified"
+						? "text-[var(--color-icon-brand)]"
+						: "text-[var(--color-icon-diff-moved)]";
 	return (
 		<button
 			type="button"
