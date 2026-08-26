@@ -199,6 +199,10 @@ export function DirectoryView({
 		}
 		return dirs;
 	}, [changedFileKinds, historicalFiles, tree]);
+	// Variant "dim the unchanged": while a review session marks rows, the
+	// untouched entries recede so the action-colored changes are the only
+	// thing at full contrast.
+	const reviewFocus = changedFileKinds.size > 0;
 	const readme = useFileMarkdown(
 		lix,
 		listing?.readmePath ?? null,
@@ -316,7 +320,13 @@ export function DirectoryView({
 							}
 						/>
 						<span className="flex-1" />
-						<div className="flex shrink-0 items-center gap-2">
+						<div
+							className={`flex shrink-0 items-center gap-2${
+								reviewFocus
+									? " opacity-[0.35] transition-opacity hover:opacity-100"
+									: ""
+							}`}
+						>
 							<NewMenu
 								disabled={readOnly || viewingHistory}
 								onCreateFile={(extension) => void createFile(extension)}
@@ -370,6 +380,7 @@ export function DirectoryView({
 								name={dir.name}
 								meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
 								hidden={dir.hidden}
+								dimmed={reviewFocus && !changedDirKinds.has(dir.path)}
 								{...(changedDirKinds.has(dir.path)
 									? {
 											changeKind: changedDirKinds.get(dir.path),
@@ -397,6 +408,7 @@ export function DirectoryView({
 								name={file.name}
 								meta={formatUpdatedAt(file.updatedAt)}
 								hidden={file.hidden}
+								dimmed={reviewFocus && !changedFileKinds.has(file.path)}
 								{...(changedFileKinds.has(file.path)
 									? { changeKind: changedFileKinds.get(file.path) }
 									: {})}
@@ -419,7 +431,14 @@ export function DirectoryView({
 						))}
 					</div>
 					{listing.readmePath && readme !== null && !viewingHistory ? (
-						<ReadmePreview
+						<div
+							className={
+								reviewFocus && !changedFileKinds.has(listing.readmePath)
+									? "opacity-[0.35] transition-opacity hover:opacity-100"
+									: undefined
+							}
+						>
+							<ReadmePreview
 							fileName={
 								listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
 							}
@@ -447,10 +466,12 @@ export function DirectoryView({
 								return true;
 							}}
 						/>
+						</div>
 					) : null}
 				</main>
 				{isHome ? (
 					<RepositoryControlPlaneRail
+						reviewFocus={reviewFocus}
 						visibility={visibility}
 						fileCount={tree.files.length}
 						data={controlPlaneData}
@@ -522,6 +543,7 @@ function useAfterInitialIdle(enabled: boolean): boolean {
 }
 
 function RepositoryControlPlaneRail({
+	reviewFocus = false,
 	visibility,
 	fileCount,
 	data,
@@ -530,6 +552,8 @@ function RepositoryControlPlaneRail({
 	onOpenChangesReview,
 	teamSection,
 }: {
+	/** Review focus: sections other than Changes recede with the page. */
+	readonly reviewFocus?: boolean;
 	readonly visibility: "private" | "public";
 	readonly fileCount: number;
 	readonly data: RepositoryControlPlaneData | null;
@@ -538,13 +562,16 @@ function RepositoryControlPlaneRail({
 	readonly onOpenChangesReview?: () => void;
 	readonly teamSection?: ReactNode;
 }) {
+	const mutedSection = reviewFocus
+		? " opacity-[0.35] transition-opacity hover:opacity-100"
+		: "";
 	return (
 		<aside
 			aria-label="Repository overview"
 			className="min-w-0 @max-[1100px]:hidden"
 		>
 			{teamSection ? (
-				<section className="border-b border-border-panel pb-7">
+				<section className={`border-b border-border-panel pb-7${mutedSection}`}>
 					<RailHeading>Team &amp; agents</RailHeading>
 					<div className="mt-3 flex flex-wrap items-center gap-2">
 						{teamSection}
@@ -552,7 +579,7 @@ function RepositoryControlPlaneRail({
 				</section>
 			) : null}
 			<section
-				className={`border-b border-border-panel pb-7 ${teamSection ? "pt-7" : ""}`}
+				className={`border-b border-border-panel pb-7 ${teamSection ? "pt-7" : ""}${mutedSection}`}
 			>
 				<RailHeading>About</RailHeading>
 				<button
@@ -582,7 +609,7 @@ function RepositoryControlPlaneRail({
 				<ChangesSummary data={data} onOpenChangesReview={onOpenChangesReview} />
 			</section>
 
-			<section className="border-b border-border-panel py-7">
+			<section className={`border-b border-border-panel py-7${mutedSection}`}>
 				<RailHeading>Database</RailHeading>
 				<DatabaseSummary
 					data={data}
@@ -1218,6 +1245,7 @@ function EntryRow({
 	hidden = false,
 	changeKind,
 	dimIndicator = false,
+	dimmed = false,
 	onClick,
 }: {
 	readonly icon: ReactNode;
@@ -1232,6 +1260,8 @@ function EntryRow({
 	readonly changeKind?: "added" | "modified" | "removed" | "moved";
 	/** Folders inherit a softened dot, matching the sidebar tree. */
 	readonly dimIndicator?: boolean;
+	/** Review focus: an unchanged row recedes; hover restores it. */
+	readonly dimmed?: boolean;
 	readonly onClick: (event: ReactMouseEvent) => void;
 }) {
 	const changed = changeKind !== undefined;
@@ -1254,7 +1284,13 @@ function EntryRow({
 		<button
 			type="button"
 			onClick={onClick}
-			className={`flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left hover:bg-bg-hover ${hidden ? "opacity-[0.48] hover:opacity-[0.62]" : ""}`}
+			className={`flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left hover:bg-bg-hover ${
+				hidden
+					? "opacity-[0.48] hover:opacity-[0.62]"
+					: dimmed
+						? "opacity-[0.35] transition-opacity hover:opacity-100"
+						: ""
+			}`}
 			data-hidden-entry={hidden ? "true" : undefined}
 			data-changed-entry={changed ? "true" : undefined}
 		>
