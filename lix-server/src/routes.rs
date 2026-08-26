@@ -680,6 +680,16 @@ fn lix_error(error: LixRuntimeError) -> Response {
                 "retryable": false,
             })),
         ),
+        LixRuntimeError::UpgradeFailed => protocol_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "LIX_ERROR_LIX_MIGRATION_FAILED",
+            "The lix repository upgrade failed.",
+            Some("Contact the service operator to recover the repository.".to_string()),
+            Some(json!({
+                "operation": "lix_open",
+                "retryable": false,
+            })),
+        ),
         LixRuntimeError::Recovering => protocol_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "LIX_ERROR_LIX_RECOVERING",
@@ -1362,6 +1372,26 @@ mod tests {
                 "details": {
                     "fromVersion": 68,
                     "toVersion": 71,
+                    "operation": "lix_open",
+                    "retryable": false,
+                },
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn pre_progress_upgrade_failure_is_a_terminal_structured_error() {
+        let response = lix_error(LixRuntimeError::UpgradeFailed);
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!response.headers().contains_key(header::RETRY_AFTER));
+        assert_eq!(
+            json_body(response).await["error"],
+            json!({
+                "code": "LIX_ERROR_LIX_MIGRATION_FAILED",
+                "message": "The lix repository upgrade failed.",
+                "hint": "Contact the service operator to recover the repository.",
+                "details": {
                     "operation": "lix_open",
                     "retryable": false,
                 },

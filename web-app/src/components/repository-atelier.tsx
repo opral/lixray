@@ -1141,7 +1141,7 @@ export function RepositoryAtelier({
 			) : null}
 			{!instance && !error && migration ? (
 				<main className="absolute inset-0 grid place-content-center justify-items-center gap-3 bg-bg-app p-6 text-center text-text-secondary">
-					<strong>Migrating repository…</strong>
+					<strong>{repositoryMigrationHeading(migration.phase)}</strong>
 					<span className="text-sm text-text-tertiary">
 						Updating the repository from v{migration.fromVersion} to v
 						{migration.toVersion}. This happens automatically.
@@ -1366,6 +1366,20 @@ function DelayedOpeningLabel() {
 		return () => window.clearTimeout(timer);
 	}, []);
 	return visible ? <>Opening repository…</> : null;
+}
+
+function repositoryMigrationHeading(
+	phase: RepositoryMigrationState["phase"],
+): string {
+	switch (phase) {
+		case "validating":
+			return "Verifying repository upgrade…";
+		case "opening":
+			return "Opening upgraded repository…";
+		case "migrating":
+		case undefined:
+			return "Upgrading repository…";
+	}
 }
 
 const REPOSITORY_TOP_BAR_PROPS = {
