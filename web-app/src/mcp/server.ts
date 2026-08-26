@@ -642,7 +642,7 @@ export function createLixrayMcpServer(
 			})
 			.strict(),
 		branchOutput,
-		writeAnnotations(),
+		writeAnnotations(false, false),
 		securitySchemes,
 		async ({ context: token, id, name, from_commit_id }) => {
 			const result = await service.createBranch(token, {
@@ -674,7 +674,7 @@ export function createLixrayMcpServer(
 		CREATE_CHECKPOINT_TOOL_DESCRIPTION,
 		z.object({ context }).strict(),
 		checkpointOutput,
-		writeAnnotations(),
+		writeAnnotations(false, false),
 		securitySchemes,
 		async ({ context: token }) => {
 			const result = await service.createCheckpoint(token);
@@ -1374,6 +1374,7 @@ async function observationLixId(
 function readAnnotations(): ToolAnnotations {
 	return {
 		readOnlyHint: true,
+		destructiveHint: false,
 		openWorldHint: false,
 	};
 }

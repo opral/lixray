@@ -1,0 +1,236 @@
+{
+  "$schema": "https://developers.openai.com/apps-sdk/schemas/chatgpt-app-submission.v1.json",
+  "schema_version": 1,
+  "app_info": {
+    "display_name": "LixRay",
+    "subtitle": "Version control for files",
+    "description": "LixRay gives people and their agents a shared repository for files beyond source code, with every change tracked. Use it to discover and open repositories, read or update files, create checkpoints and branches, restore earlier versions, undo or redo changes, and preview or merge branches.",
+    "category": "PRODUCTIVITY"
+  },
+  "tools": {
+    "list_lixes": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only lists Lix repositories that the signed-in user can access and does not modify them.",
+        "open_world_justification": "Only reads private LixRay account data and does not change public internet state or external systems.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or otherwise change repository data."
+      }
+    },
+    "open_lix": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Resolves an accessible Lix repository and returns a signed repository-and-branch context without modifying repository data.",
+        "open_world_justification": "Only opens a private LixRay context and does not change public internet state or external systems.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or otherwise change repository data."
+      }
+    },
+    "query_sql": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only runs SQL queries after rejecting INSERT, UPDATE, DELETE, and other mutating statements.",
+        "open_world_justification": "Only reads the signed-in user's private LixRay repository and does not change public or third-party systems.",
+        "destructive_justification": "Cannot delete or overwrite repository content because mutating SQL is rejected."
+      }
+    },
+    "execute_sql": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Atomically executes SQL statements that can create, update, rename, or delete data in the selected Lix repository.",
+        "open_world_justification": "Changes are confined to the signed-in user's private LixRay repository and do not publish to public or third-party systems.",
+        "destructive_justification": "A batch can delete or overwrite repository content, even though the complete batch rolls back if a statement fails."
+      }
+    },
+    "active_branch_id": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only returns the branch and commit selected by the provided context without modifying repository data.",
+        "open_world_justification": "Only reads private LixRay branch state and does not change public internet state or external systems.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or otherwise change repository data."
+      }
+    },
+    "switch_branch": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Returns a new signed context pinned to the requested branch without changing repository data or persistent branch state.",
+        "open_world_justification": "Only selects a context for a private LixRay branch and does not affect public or third-party systems.",
+        "destructive_justification": "Does not delete, overwrite, or commit repository content."
+      }
+    },
+    "create_branch": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a new branch in the selected private Lix repository.",
+        "open_world_justification": "The new branch exists only inside the user's private LixRay repository and is not published externally.",
+        "destructive_justification": "Adds a branch without deleting or overwriting the source branch or its content."
+      }
+    },
+    "create_checkpoint": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a checkpoint commit on the branch selected by the provided context.",
+        "open_world_justification": "The checkpoint is stored only in the user's private LixRay repository and is not published externally.",
+        "destructive_justification": "Adds a checkpoint while preserving repository content and history."
+      }
+    },
+    "restore": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Moves the selected branch to an earlier ancestor commit and changes the branch's current repository state.",
+        "open_world_justification": "The restore affects only the user's private LixRay repository and does not change public or third-party systems.",
+        "destructive_justification": "Abandons newer branch state and is not undoable, although the abandoned commits are not immediately deleted."
+      }
+    },
+    "undo": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Creates an inverse commit that changes the selected private branch by undoing its latest commit.",
+        "open_world_justification": "The undo affects only the user's private LixRay repository and does not change public or third-party systems.",
+        "destructive_justification": "Reverts the latest committed change and can remove or replace the branch's current content, even though redo may reapply it."
+      }
+    },
+    "redo": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Creates a replay commit that reapplies the latest undone change to the selected private branch.",
+        "open_world_justification": "The redo affects only the user's private LixRay repository and does not change public or third-party systems.",
+        "destructive_justification": "Reapplies a previously undone commit and can replace the branch's current content."
+      }
+    },
+    "merge_branch_preview": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Computes the result of merging a source branch into the selected branch without committing or changing repository state.",
+        "open_world_justification": "Only inspects private LixRay branch state and does not change public internet state or external systems.",
+        "destructive_justification": "Does not commit, delete, or overwrite content because it only returns a merge preview."
+      }
+    },
+    "merge_branch": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Commits a merge from the source branch into the active branch and changes its repository state.",
+        "open_world_justification": "The merge affects only the user's private LixRay repository and does not publish to public or third-party systems.",
+        "destructive_justification": "Can overwrite active-branch content with merged changes, so the operation may have destructive effects."
+      }
+    }
+  },
+  "test_cases": [
+    {
+      "description": "Discover the repositories available to the signed-in reviewer.",
+      "user_prompt": "Show me every Lix repository I can access.",
+      "file_attachment_urls": null,
+      "tools_triggered": "list_lixes",
+      "expected_output": "Returns the accessible repositories with their names and qualified references so the user can choose one.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Open an accessible repository and inspect its root files without changing them.",
+      "user_prompt": "Open the first Lix repository I can access and list the files at its root without changing anything.",
+      "file_attachment_urls": null,
+      "tools_triggered": "list_lixes, open_lix, query_sql",
+      "expected_output": "Opens one accessible repository, reads its root file paths, and reports them without making a mutation.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Create a minimal useful onboarding state and verify the atomic change.",
+      "user_prompt": "Onboard me into my first accessible Lix repository using what you already know about me. Keep it to README.md, context.md, and focus.md, preserve useful existing content, and verify the final files.",
+      "file_attachment_urls": null,
+      "tools_triggered": "list_lixes, open_lix, query_sql, execute_sql",
+      "expected_output": "Inspects the selected repository, creates no more than three useful Markdown files in one verified atomic change, and summarizes the files written.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Create an isolated branch, make a versioned change, and preview rather than commit the merge.",
+      "user_prompt": "In my first accessible Lix repository, create a branch named submission-review, switch to it, add a short review-note.md file, create a checkpoint, and preview merging it into the original branch without performing the merge.",
+      "file_attachment_urls": null,
+      "tools_triggered": "list_lixes, open_lix, create_branch, switch_branch, execute_sql, create_checkpoint, merge_branch_preview",
+      "expected_output": "Creates and selects the new branch, writes and checkpoints the note, returns a merge preview, and leaves the original branch unmerged.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Exercise recoverable history operations around a small file change.",
+      "user_prompt": "In my first accessible Lix repository, make one small edit to review-note.md, verify it, undo that commit and verify the prior content, then redo it and verify the edited content again.",
+      "file_attachment_urls": null,
+      "tools_triggered": "list_lixes, open_lix, execute_sql, undo, query_sql, redo",
+      "expected_output": "Applies and verifies one edit, reports the undo receipt and restored content, then reports the redo receipt and reapplied content.",
+      "expected_output_url": null
+    }
+  ],
+  "negative_test_cases": [
+    {
+      "description": "Do not use LixRay for source-code hosting or GitHub publication.",
+      "user_prompt": "Create a GitHub repository for this project and push my code to it.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because it cannot create GitHub repositories or publish source code to GitHub.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not use repository tools for account or access administration.",
+      "user_prompt": "Invite my coworker to LixRay and make them an organization administrator.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because it does not provide membership, invitation, or permission-management tools.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not treat file deletion as repository or account deletion.",
+      "user_prompt": "Permanently delete my entire LixRay repository and close my account.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because it cannot delete repositories, close accounts, or manage billing and identity data.",
+      "expected_output_url": null
+    }
+  ]
+}

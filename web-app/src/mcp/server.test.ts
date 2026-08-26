@@ -418,10 +418,20 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		for (const tool of tools.tools) {
 			assert.ok(tool.title, `${tool.name} must have a title`);
 			assert.ok(tool.name.length <= 64, `${tool.name} exceeds 64 characters`);
-			assert.ok(
-				tool.annotations?.readOnlyHint === true ||
-					tool.annotations?.destructiveHint === true,
-				`${tool.name} must be read-only or destructive`,
+			assert.equal(
+				typeof tool.annotations?.readOnlyHint,
+				"boolean",
+				`${tool.name} must declare readOnlyHint`,
+			);
+			assert.equal(
+				typeof tool.annotations?.openWorldHint,
+				"boolean",
+				`${tool.name} must declare openWorldHint`,
+			);
+			assert.equal(
+				typeof tool.annotations?.destructiveHint,
+				"boolean",
+				`${tool.name} must declare destructiveHint`,
 			);
 		}
 		const queryTool = tools.tools.find((tool) => tool.name === "query_sql");
