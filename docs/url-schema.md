@@ -24,6 +24,7 @@ url          = "https://lixray.com" path [ query ] [ fragment ]
 path         = "/@" handle                          ; namespace profile
              | "/@" handle "/-/" ns-verb …          ; namespace sub-resources (RESERVED)
              | "/@" handle "/" slug [pin] sub       ; repository + sub-resources
+             | "/profile/" namespace-id              ; public JSContact profile
              | "/" product-route                    ; app-owned, unlimited, forever
 
 sub          = ""                                   ; repository overview
@@ -43,6 +44,7 @@ handle       = lowercase [a-z0-9], internal hyphens (never consecutive, never at
                max 39 chars: ^[a-z0-9](?:-?[a-z0-9]){0,38}$ AND char_length ≤ 39
                (the regex alone admits up to 77 chars; the length cap is a separate check)
 slug         = same grammar, max 100 chars
+namespace-id = canonical UUID for the immutable public namespace identity
 changeset-id = ^[a-z0-9][a-z0-9._-]{0,63}$          ; MUST NOT contain "/"; "latest","main" reserved
 file-path    = "/"-separated segments, RFC 3986 percent-encoded, NFC-normalized
 verb (v1)    = "file" | "dir" | "team" | "settings" | "sql"
@@ -52,7 +54,8 @@ ns-verb      = future closed set under "/@" handle "/-/" (RESERVED; none shipped
                namespace administration lives in product space, see D2)
 ```
 
-Examples: `lixray.com/@samuel` · `lixray.com/@google/android/file/gearbox/housing.step` ·
+Examples: `lixray.com/@samuel` · `lixray.com/profile/019c…` ·
+`lixray.com/@google/android/file/gearbox/housing.step` ·
 `lixray.com/@google/android@01hx4f…/file/launch-plan.md` (future pin).
 
 ---
@@ -271,6 +274,8 @@ this" (activity feed actor) into one registry, which agents can also resolve mec
 
 ### D10 — Machine consumption (reserved, cheap, differentiating)
 
+- `/profile/{namespace-id}` returns the namespace's public JSContact 2.0 Card. Durable repository
+  references use this immutable ID-based URI; `@handle` remains a mutable human-facing alias.
 - `/@{ns}/{ws}/llms.txt`: auto-generated per-repository index (spec-legal at subpaths; Cloudflare
   ships per-product llms.txt). Root `lixray.com/llms.txt` documents the grammar itself.
 - Publish the grammar as RFC 6570 templates (`https://lixray.com/@{ns}/{ws}/file/{+path}`) — a

@@ -3,16 +3,21 @@ import test from "node:test";
 import {
 	DEMO_AUTH_TOKEN,
 	DEMO_ORGANIZATION_ID,
+	DEMO_PROFILE_NAMESPACE_ID,
+	demoProfileDocument,
 	DEMO_ORGANIZATION_NAME,
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
+import type { PublicProfileActivity } from "../lib/profile-activity-aggregate.ts";
 import { isLixError } from "../mcp/lix-service.ts";
 import {
 	authenticateWithSupabase,
 	authorizeLixWithSupabase,
 	handleRequest,
 	resolveLixWithSupabase,
+	resolveNamespaceProfileWithSupabase,
+	resolvePublicProfileRepositoriesWithSupabase,
 	supabaseJwtIssuer,
 	validateBrowserJwtClaims,
 	validateMcpJwtClaims,
@@ -27,9 +32,17 @@ import {
 	MCP_PROTECTED_RESOURCE_PATH,
 	MCP_RESOURCE,
 } from "../mcp/server.ts";
+import { PublicProfileActivityCache } from "./profile-activity-cache.ts";
 
 const LIX_A = "11111111-1111-4111-8111-111111111111";
 const LIX_B = "22222222-2222-4222-8222-222222222222";
+const NAMESPACE_ID = "33333333-3333-4333-8333-333333333333";
+const PROFILE_DOCUMENT = {
+	"@type": "Card",
+	version: "2.0",
+	kind: "individual",
+	name: { full: "Samuel Stroschein" },
+};
 
 void test("GET /healthz returns Worker health without auth or proxying", async () => {
 	const response = await handleRequest(
@@ -229,6 +242,297 @@ void test("production email sign-in rejects a cross-origin POST", async () => {
 	assert.equal(response.status, 403);
 	assert.equal(await response.text(), "Forbidden\n");
 	assert.equal(reachedPasswordGrant, false);
+});
+
+void test("GET /profile/{namespace_id} serves a public JSContact profile", async () => {
+	let resolvedNamespaceId: string | undefined;
+	let fellBack = false;
+	const response = await handleRequest(
+		new Request(`https://example.test/profile/${NAMESPACE_ID}`),
+		env({}),
+		{
+			resolveNamespaceProfile: async (namespaceId) => {
+				resolvedNamespaceId = namespaceId;
+				return {
+					ok: true,
+					document: PROFILE_DOCUMENT,
+					updatedAt: "2026-08-21T12:00:00.000Z",
+				};
+			},
+			fallback: async () => {
+				fellBack = true;
+				return new Response("frontend");
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(resolvedNamespaceId, NAMESPACE_ID);
+	assert.equal(fellBack, false);
+	assert.equal(
+		response.headers.get("content-type"),
+		"application/jscontact+json; version=2.0",
+	);
+	assert.equal(response.headers.get("access-control-allow-origin"), "*");
+	assert.match(response.headers.get("cache-control") ?? "", /max-age=3600/);
+	assert.deepEqual(await response.json(), PROFILE_DOCUMENT);
+});
+
+void test("profile responses support HEAD and ETag revalidation", async () => {
+	const resolveNamespaceProfile = async () => ({
+		ok: true as const,
+		document: PROFILE_DOCUMENT,
+		updatedAt: "2026-08-21T12:00:00.000Z",
+	});
+	const first = await handleRequest(
+		new Request(`https://example.test/profile/${NAMESPACE_ID}`, {
+			method: "HEAD",
+		}),
+		env({}),
+		{ resolveNamespaceProfile },
+	);
+	const etag = first.headers.get("etag");
+	assert.equal(first.status, 200);
+	assert.ok(etag);
+	assert.equal(await first.text(), "");
+
+	const revalidated = await handleRequest(
+		new Request(`https://example.test/profile/${NAMESPACE_ID}`, {
+			headers: { "If-None-Match": etag ?? "" },
+		}),
+		env({}),
+		{ resolveNamespaceProfile },
+	);
+	assert.equal(revalidated.status, 304);
+	assert.equal(await revalidated.text(), "");
+});
+
+void test("invalid profile IDs are rejected before profile resolution", async () => {
+	let resolved = false;
+	const response = await handleRequest(
+		new Request("https://example.test/profile/not-a-uuid"),
+		env({}),
+		{
+			resolveNamespaceProfile: async () => {
+				resolved = true;
+				return {
+					ok: true,
+					document: PROFILE_DOCUMENT,
+					updatedAt: "2026-08-21T12:00:00.000Z",
+				};
+			},
+		},
+	);
+	assert.equal(response.status, 404);
+	assert.equal(response.headers.get("access-control-allow-origin"), "*");
+	assert.equal(resolved, false);
+});
+
+void test("GET /profile/{namespace_id}/activity lists real public repositories", async () => {
+	let resolvedNamespaceId: string | undefined;
+	const response = await handleRequest(
+		new Request(`https://example.test/profile/${NAMESPACE_ID}/activity`),
+		env({}),
+		{
+			profileActivityCache: null,
+			resolvePublicProfileRepositories: async (namespaceId) => {
+				resolvedNamespaceId = namespaceId;
+				return {
+					ok: true,
+					repositories: [
+						{
+							id: LIX_A,
+							name: "Launch plan",
+							slug: "launch-plan",
+							namespaceHandle: "samuel",
+						},
+					],
+				};
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(resolvedNamespaceId, NAMESPACE_ID);
+	assert.equal(response.headers.get("access-control-allow-origin"), "*");
+	assert.match(response.headers.get("cache-control") ?? "", /s-maxage=86400/);
+	const activity = (await response.json()) as PublicProfileActivity;
+	assert.equal(activity.totalFiles, 0);
+	assert.equal(activity.failedRepositories, 1);
+	assert.deepEqual(activity.repositories, [
+		{
+			id: LIX_A,
+			name: "Launch plan",
+			slug: "launch-plan",
+			namespaceHandle: "samuel",
+			fileCount: null,
+		},
+	]);
+});
+
+void test("profile activity queries file paths from every public Lix", async () => {
+	const response = await handleRequest(
+		new Request(`https://example.test/profile/${NAMESPACE_ID}/activity`),
+		env({}),
+		{
+			profileActivityCache: null,
+			resolvePublicProfileRepositories: async () => ({
+				ok: true,
+				repositories: [
+					{
+						id: LIX_A,
+						name: "Launch plan",
+						slug: "launch-plan",
+						namespaceHandle: "samuel",
+					},
+				],
+			}),
+			lixFetch: async (lixId, request) => {
+				assert.equal(lixId, LIX_A);
+				const pathname = new URL(request.url).pathname;
+				if (pathname === "/lix/v1/") {
+					return Response.json({
+						protocolVersion: 4,
+						activeBranchId: "main",
+						activeAccountId: "00000000-0000-7000-8000-000000000002",
+						sessionId: "profile-activity-session",
+					});
+				}
+				if (pathname === "/lix/v1/session" && request.method === "DELETE") {
+					return new Response(null, { status: 204 });
+				}
+				assert.equal(pathname, "/lix/v1/execute");
+				const body = (await request.json()) as { sql?: unknown };
+				assert.equal(body.sql, "SELECT path FROM lix_file ORDER BY path");
+				return Response.json({
+					columns: ["path"],
+					rows: [
+						[{ kind: "text", value: "/README.md" }],
+						[{ kind: "text", value: "/src/index.ts" }],
+						[{ kind: "text", value: "/assets/logo.png" }],
+					],
+					rowsAffected: 0,
+					notices: [],
+				});
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	const activity = (await response.json()) as PublicProfileActivity;
+	assert.equal(activity.totalFiles, 3);
+	assert.equal(activity.failedRepositories, 0);
+	assert.equal(activity.repositories[0].fileCount, 3);
+	assert.deepEqual(
+		activity.fileMix.map((segment) => segment.count),
+		[1, 1, 0, 0, 1],
+	);
+});
+
+void test("profile activity shares one repository scan across visitors", async () => {
+	const cache = new PublicProfileActivityCache();
+	let executeRequests = 0;
+	const options = {
+		profileActivityCache: cache,
+		resolvePublicProfileRepositories: async () => ({
+			ok: true as const,
+			repositories: [
+				{
+					id: LIX_A,
+					name: "Launch plan",
+					slug: "launch-plan",
+					namespaceHandle: "samuel",
+				},
+			],
+		}),
+		lixFetch: async (_lixId: string, request: Request) => {
+			const pathname = new URL(request.url).pathname;
+			if (pathname === "/lix/v1/") {
+				return Response.json({
+					protocolVersion: 4,
+					activeBranchId: "main",
+					activeAccountId: "00000000-0000-7000-8000-000000000002",
+					sessionId: "profile-cache-session",
+				});
+			}
+			if (pathname === "/lix/v1/session" && request.method === "DELETE") {
+				return new Response(null, { status: 204 });
+			}
+			executeRequests += 1;
+			return Response.json({
+				columns: ["path"],
+				rows: [[{ kind: "text", value: "/README.md" }]],
+				rowsAffected: 0,
+				notices: [],
+			});
+		},
+	};
+
+	const first = await handleRequest(
+		new Request(`https://first-visitor.test/profile/${NAMESPACE_ID}/activity`),
+		env({}),
+		options,
+	);
+	const second = await handleRequest(
+		new Request(`https://second-visitor.test/profile/${NAMESPACE_ID}/activity`),
+		env({}),
+		options,
+	);
+
+	assert.equal(first.status, 200);
+	assert.equal(second.status, 200);
+	assert.equal(executeRequests, 1);
+});
+
+void test("public profile repository resolution calls the anonymous RPC", async () => {
+	const originalFetch = globalThis.fetch;
+	let request: Request | undefined;
+	globalThis.fetch = async (input, init) => {
+		request = new Request(input, init);
+		return Response.json([
+			{
+				namespace_id: NAMESPACE_ID,
+				namespace_handle: "samuel",
+				lix_id: LIX_A,
+				lix_name: "Launch plan",
+				lix_slug: "launch-plan",
+				lix_updated_at: "2026-08-21T12:00:00.000Z",
+			},
+		]);
+	};
+	try {
+		const resolution = await resolvePublicProfileRepositoriesWithSupabase(
+			NAMESPACE_ID,
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+		);
+		assert.equal(resolution.ok, true);
+		assert.equal(
+			request?.url,
+			"https://project.supabase.co/rest/v1/rpc/list_public_profile_lixes",
+		);
+		assert.equal(request?.method, "POST");
+		assert.equal(
+			await request?.text(),
+			JSON.stringify({ p_namespace_id: NAMESPACE_ID }),
+		);
+		if (resolution.ok) {
+			assert.deepEqual(resolution.repositories, [
+				{
+					id: LIX_A,
+					name: "Launch plan",
+					slug: "launch-plan",
+					namespaceHandle: "samuel",
+				},
+			]);
+		}
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
 });
 
 void test("non-/v1 routes delegate to the frontend fallback", async () => {
@@ -1536,7 +1840,7 @@ void test("a published directory exposes only its direct child names", async () 
 				protocolPaths.push(path);
 				if (path === "/lix/v1/") {
 					return Response.json({
-						protocolVersion: 3,
+						protocolVersion: 4,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "published-directory-session",
@@ -1927,6 +2231,22 @@ void test("demo mode keeps OAuth endpoints disabled", async () => {
 	}
 });
 
+void test("demo mode exposes its namespace through the production profile route", async () => {
+	const response = await handleRequest(
+		new Request(`http://localhost/profile/${DEMO_PROFILE_NAMESPACE_ID}`),
+		env({ extra: { LIXRAY_DEMO: "1" } }),
+	);
+	assert.equal(response.status, 200);
+	assert.equal(
+		response.headers.get("content-type"),
+		"application/jscontact+json; version=2.0",
+	);
+	assert.deepEqual(
+		await response.json(),
+		demoProfileDocument("http://localhost"),
+	);
+});
+
 void test("Railway PR environments enable the built-in demo lix", async () => {
 	// Both naming schemes: configured "lixray-pr-<n>" and Railway's default
 	// "pr-<hash>-<n>" used for recreated PR environments.
@@ -1961,7 +2281,7 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 				const pathname = new URL(request.url).pathname;
 				if (pathname === "/lix/v1/") {
 					return Response.json({
-						protocolVersion: 3,
+						protocolVersion: 4,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "demo-mcp-session",
@@ -2143,6 +2463,87 @@ void test("Supabase canonical lix resolution joins RLS-visible organization and 
 	}
 });
 
+void test("Supabase namespace profile resolution uses the public namespace ID", async () => {
+	const originalFetch = globalThis.fetch;
+	let lookupUrl: URL | undefined;
+	let lookupHeaders: Headers | undefined;
+	globalThis.fetch = async (input, init) => {
+		const requestUrl =
+			typeof input === "string"
+				? input
+				: input instanceof URL
+					? input.href
+					: input.url;
+		lookupUrl = new URL(requestUrl);
+		lookupHeaders = new Headers(init?.headers);
+		return Response.json([
+			{
+				document: PROFILE_DOCUMENT,
+				updated_at: "2026-08-21T12:00:00.000Z",
+			},
+		]);
+	};
+	try {
+		const resolution = await resolveNamespaceProfileWithSupabase(
+			NAMESPACE_ID,
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+		);
+		assert.deepEqual(resolution, {
+			ok: true,
+			document: PROFILE_DOCUMENT,
+			updatedAt: "2026-08-21T12:00:00.000Z",
+		});
+		assert.equal(lookupUrl?.pathname, "/rest/v1/namespace_profiles");
+		assert.equal(lookupUrl?.searchParams.get("select"), "document,updated_at");
+		assert.equal(
+			lookupUrl?.searchParams.get("namespace_id"),
+			`eq.${NAMESPACE_ID}`,
+		);
+		assert.equal(lookupHeaders?.get("apikey"), "publishable-key");
+		assert.equal(lookupHeaders?.get("authorization"), null);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+void test("Supabase namespace profile resolution distinguishes absence from invalid data", async () => {
+	const originalFetch = globalThis.fetch;
+	try {
+		globalThis.fetch = async () => Response.json([]);
+		const missing = await resolveNamespaceProfileWithSupabase(
+			NAMESPACE_ID,
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+		);
+		assert.equal(missing.ok, false);
+		if (!missing.ok) assert.equal(missing.response.status, 404);
+
+		globalThis.fetch = async () => Response.json([{ document: {} }]);
+		const invalid = await resolveNamespaceProfileWithSupabase(
+			NAMESPACE_ID,
+			env({
+				extra: {
+					SUPABASE_URL: "https://project.supabase.co",
+					SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+				},
+			}),
+		);
+		assert.equal(invalid.ok, false);
+		if (!invalid.ok) assert.equal(invalid.response.status, 502);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
 function remoteLixRequest(endpoint: string, init?: RequestInit) {
 	return new Request(
 		`https://example.test/@acme/launch-q3/lix/v1${endpoint}`,
@@ -2157,7 +2558,7 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 		protocolPaths.push(path);
 		if (path === "/lix/v1/") {
 			return Response.json({
-				protocolVersion: 3,
+				protocolVersion: 4,
 				activeBranchId: "main",
 				activeAccountId: "00000000-0000-7000-8000-000000000002",
 				sessionId,

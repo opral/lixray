@@ -223,6 +223,9 @@ function scrubPostHogValue(
 
 export function sanitizeLixrayPathname(value: string): string {
 	const pathname = value.split(/[?#]/, 1)[0] || "/";
+	if (/^\/profile\/[^/]+(?:\/|$)/.test(pathname)) {
+		return "/profile/:namespace";
+	}
 	if (/^\/@[^/]+\/[^/]+\/file(?:\/|$)/.test(pathname)) {
 		return "/repository/:repository/file/:file";
 	}

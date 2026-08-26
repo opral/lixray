@@ -3,6 +3,8 @@ import test from "node:test";
 import {
 	BROWSER_REPLICA_STORAGE_KEY_PREFIX,
 	REPOSITORY_OPFS_CACHE_NAMESPACE,
+	deleteRepositoryOpfsReplica,
+	opfsReplicaDirectoryName,
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
 } from "./repository-opfs-cache.ts";
@@ -188,4 +190,106 @@ void test("serializes first-open identity creation across tabs", async () => {
 
 	assert.equal(first, "account-123:first-tab");
 	assert.equal(second, first);
+});
+
+void test("replica directory name freezes the storage-opfs base64url encoding", () => {
+	// Golden values: must match @lix-js/storage-opfs's fileName() so deletion
+	// targets the directory the provider actually writes.
+	const name = repositoryOpfsCacheName({
+		repositoryId: "repo-1",
+		replicaId: "account-123:tab-1",
+	});
+	assert.equal(
+		opfsReplicaDirectoryName(name),
+		Buffer.from(name, "utf8").toString("base64url"),
+	);
+	// Padding is stripped, +/ become -_ (base64url), non-ASCII survives.
+	assert.equal(opfsReplicaDirectoryName("a"), "YQ");
+	assert.equal(opfsReplicaDirectoryName("sync✓"), "c3luY-Kckw");
+});
+
+void test("deletes exactly the named replica directory from the OPFS pool", async () => {
+	const removed: Array<{ name: string; recursive: boolean }> = [];
+	const pool = {
+		removeEntry: async (name: string, options: { recursive: boolean }) => {
+			removed.push({ name, recursive: options.recursive });
+		},
+	};
+	const lix = {
+		getDirectoryHandle: async (name: string) => {
+			assert.equal(name, "sqlite-sahpool");
+			return pool;
+		},
+	};
+	const root = {
+		getDirectoryHandle: async (name: string) => {
+			assert.equal(name, "lix");
+			return lix;
+		},
+	} as unknown as FileSystemDirectoryHandle;
+
+	const cacheName = repositoryOpfsCacheName({
+		repositoryId: "repo-1",
+		replicaId: "account-123:tab-1",
+	});
+	assert.equal(await deleteRepositoryOpfsReplica(cacheName, root), true);
+	assert.deepEqual(removed, [
+		{ name: opfsReplicaDirectoryName(cacheName), recursive: true },
+	]);
+});
+
+void test("a missing replica directory is a no-op", async () => {
+	const notFoundRoot = {
+		getDirectoryHandle: async () => {
+			throw new DOMException("missing", "NotFoundError");
+		},
+	} as unknown as FileSystemDirectoryHandle;
+	assert.equal(await deleteRepositoryOpfsReplica("gone", notFoundRoot), false);
+});
+
+void test("outwaits the storage layer's warm-idle handles, bounded", async () => {
+	// storage-opfs keeps closed backends warm (handles held) for 30s; the
+	// wipe retries through that window and succeeds once handles release.
+	let locked = 3;
+	const pool = {
+		removeEntry: async () => {
+			if (locked > 0) {
+				locked -= 1;
+				throw new DOMException("held", "NoModificationAllowedError");
+			}
+		},
+	};
+	const dir = { getDirectoryHandle: async () => dir, ...pool };
+	const root = {
+		getDirectoryHandle: async () => dir,
+	} as unknown as FileSystemDirectoryHandle;
+	let clock = 0;
+	const waits: number[] = [];
+	assert.equal(
+		await deleteRepositoryOpfsReplica("held", root, {
+			wait: async (milliseconds) => {
+				waits.push(milliseconds);
+				clock += milliseconds;
+			},
+			now: () => clock,
+		}),
+		true,
+	);
+	assert.deepEqual(waits, [500, 500, 500]);
+
+	// A wipe that never unblocks stops at the deadline and surfaces the error.
+	locked = Number.POSITIVE_INFINITY;
+	clock = 0;
+	await assert.rejects(
+		() =>
+			deleteRepositoryOpfsReplica("stuck", root, {
+				wait: async (milliseconds) => {
+					clock += milliseconds;
+				},
+				now: () => clock,
+			}),
+		(error: unknown) =>
+			error instanceof DOMException &&
+			error.name === "NoModificationAllowedError",
+	);
 });

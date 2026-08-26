@@ -10,7 +10,7 @@ import {
 } from "react";
 import { getBrowserSupabaseClient, localDevCredentials } from "~/lib/supabase";
 import type { LixraySupabaseClient } from "~/lib/supabase";
-import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
+import { DEMO_AUTH_TOKEN, DEMO_PROFILE_NAME } from "~/lib/demo-identity";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { normalizeAuthReturnTo } from "~/lib/auth-return-to";
 import {
@@ -51,7 +51,7 @@ const PREVIEW_DEMO_USER = {
 	role: "authenticated",
 	email: "preview-user@lixray.invalid",
 	app_metadata: {},
-	user_metadata: { full_name: "Preview user" },
+	user_metadata: { full_name: DEMO_PROFILE_NAME },
 	created_at: "2026-01-01T00:00:00.000Z",
 	updated_at: "2026-01-01T00:00:00.000Z",
 } as User;

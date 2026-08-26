@@ -355,9 +355,37 @@ export type Database = {
 				};
 				Relationships: [];
 			};
+			namespace_profiles: {
+				Row: {
+					created_at: string;
+					document: Json;
+					namespace_id: string;
+					updated_at: string;
+				};
+				Insert: {
+					created_at?: string;
+					document: Json;
+					namespace_id: string;
+					updated_at?: string;
+				};
+				Update: {
+					created_at?: string;
+					document?: Json;
+					namespace_id?: string;
+					updated_at?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "namespace_profiles_namespace_id_fkey";
+						columns: ["namespace_id"];
+						isOneToOne: true;
+						referencedRelation: "namespaces";
+						referencedColumns: ["id"];
+					},
+				];
+			};
 			profiles: {
 				Row: {
-					avatar_url: string | null;
 					created_at: string;
 					email: string;
 					id: string;
@@ -365,7 +393,6 @@ export type Database = {
 					updated_at: string;
 				};
 				Insert: {
-					avatar_url?: string | null;
 					created_at?: string;
 					email: string;
 					id: string;
@@ -373,7 +400,6 @@ export type Database = {
 					updated_at?: string;
 				};
 				Update: {
-					avatar_url?: string | null;
 					created_at?: string;
 					email?: string;
 					id?: string;
@@ -469,6 +495,17 @@ export type Database = {
 					namespace_updated_at: string;
 				}[];
 			};
+			list_public_profile_lixes: {
+				Args: { p_namespace_id: string };
+				Returns: {
+					lix_id: string;
+					lix_name: string;
+					lix_slug: string;
+					lix_updated_at: string;
+					namespace_handle: string;
+					namespace_id: string;
+				}[];
+			};
 			list_lix_members: {
 				Args: { p_lix_id: string };
 				Returns: {
@@ -547,6 +584,14 @@ export type Database = {
 					shared_by_avatar_url: string;
 					shared_by_name: string;
 					visibility: Database["public"]["Enums"]["lix_visibility"];
+				}[];
+			};
+			resolve_public_profile_by_handle: {
+				Args: { p_handle: string };
+				Returns: {
+					namespace_created_at: string;
+					namespace_handle: string;
+					namespace_id: string;
 				}[];
 			};
 			resolve_public_lix: {

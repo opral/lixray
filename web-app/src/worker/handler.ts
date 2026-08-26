@@ -9,10 +9,17 @@ import {
 	DEMO_AUTH_TOKEN,
 	DEMO_ORGANIZATION_ID,
 	DEMO_ORGANIZATION_NAME,
+	DEMO_PROFILE_NAMESPACE_ID,
+	demoProfileDocument,
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import { isClearlyReadOnlySql } from "../lib/lix-sql-access.ts";
+import {
+	aggregatePublicProfileActivity,
+	type ProfileRepositoryFiles,
+	type ProfileRepositorySource,
+} from "../lib/profile-activity-aggregate.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
 import { LixService, type LixSummary } from "../mcp/lix-service.ts";
 import {
@@ -45,6 +52,10 @@ import {
 	isDemoEnvironment,
 	resolveOfficialMcpPosthogToken,
 } from "./mcp-posthog-env.ts";
+import {
+	PUBLIC_PROFILE_ACTIVITY_FRESH_SECONDS,
+	PublicProfileActivityCache,
+} from "./profile-activity-cache.ts";
 
 export interface WorkerEnv {
 	SUPABASE_URL?: string;
@@ -99,6 +110,14 @@ interface HandleRequestOptions {
 	authorizeLix?: AuthorizeLix;
 	resolveLix?: ResolveLix;
 	resolvePublicLix?: ResolvePublicLix;
+	resolveNamespaceProfile?: ResolveNamespaceProfile;
+	resolvePublicProfileRepositories?: ResolvePublicProfileRepositories;
+	profileActivityCache?: PublicProfileActivityCache | null;
+	resolveNamespaceMembership?: (
+		namespaceId: string,
+		accessToken: string,
+		env: WorkerEnv,
+	) => Promise<NamespaceMembershipResolution>;
 	mcpTransport?: typeof handleMcpTransport;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
@@ -108,6 +127,9 @@ interface HandleRequestOptions {
 	createMcpTelemetry?: typeof createMcpTelemetrySession;
 	recordMcpLixConnection?: RecordMcpLixConnection;
 }
+
+const publicProfileActivityCache = new PublicProfileActivityCache();
+const PUBLIC_PROFILE_ACTIVITY_TIMEOUT_MS = 30_000;
 
 interface AuthenticatedUser {
 	userId: string;
@@ -168,6 +190,24 @@ type PublicLixResolution =
 	| { ok: true; lixId: string; scope?: "repository" | "path" }
 	| { ok: false; response: Response };
 
+export type ResolveNamespaceProfile = (
+	namespaceId: string,
+	env: WorkerEnv,
+) => Promise<NamespaceProfileResolution>;
+
+type NamespaceProfileResolution =
+	| { ok: true; document: Record<string, unknown>; updatedAt: string }
+	| { ok: false; response: Response };
+
+export type ResolvePublicProfileRepositories = (
+	namespaceId: string,
+	env: WorkerEnv,
+) => Promise<PublicProfileRepositoriesResolution>;
+
+type PublicProfileRepositoriesResolution =
+	| { ok: true; repositories: Array<ProfileRepositorySource> }
+	| { ok: false; response: Response };
+
 /**
  * Lix's SQL script parser, injected by the worker entry so the public read
  * gate classifies statements with the same grammar the engine executes —
@@ -196,6 +236,12 @@ const OPENAI_APPS_CHALLENGE_TOKEN =
 	"RBTbX7uPYZwmyPGnWXM2eMruvkdC6MlM3Xsh95AqROU";
 const PROD_DEV_EMAIL = "dev@lixray.com";
 const PUBLIC_PRODUCTION_ORIGIN = "https://lixray.com";
+const NAMESPACE_PROFILE_PATH = /^\/profile\/([^/]+)$/;
+const NAMESPACE_PROFILE_ACTIVITY_PATH = /^\/profile\/([^/]+)\/activity$/;
+const NAMESPACE_PROFILE_ACTIVITY_REFRESH_PATH =
+	/^\/profile\/([^/]+)\/activity\/refresh$/;
+const UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 // Keep server-owned public reads attributed to Lix's built-in anonymous
 // account. Protocol principals are persisted as lix_account IDs, so an
@@ -230,6 +276,108 @@ export async function handleRequest(
 				},
 			},
 		);
+	}
+
+	const namespaceProfileActivityRefreshMatch =
+		NAMESPACE_PROFILE_ACTIVITY_REFRESH_PATH.exec(url.pathname);
+	if (namespaceProfileActivityRefreshMatch) {
+		if (request.method === "OPTIONS") return profileCorsPreflight();
+		if (request.method !== "POST") {
+			return profileResponse("Method not allowed\n", {
+				status: 405,
+				headers: { Allow: "POST, OPTIONS" },
+			});
+		}
+		const namespaceId = safeDecodeURIComponent(
+			namespaceProfileActivityRefreshMatch[1],
+		)?.toLowerCase();
+		if (!namespaceId || !UUID_PATTERN.test(namespaceId)) {
+			return profileResponse("Profile not found\n", { status: 404 });
+		}
+		if (isDemoMode(env)) return profileResponse(null, { status: 204 });
+		const token = bearerToken(request);
+		if (!token) {
+			return profileResponse("Authentication required\n", { status: 401 });
+		}
+		const membership = await (options.resolveNamespaceMembership
+			? options.resolveNamespaceMembership(namespaceId, token, env)
+			: resolveNamespaceMembershipWithSupabase(namespaceId, token, env));
+		if (!membership.ok) return withProfileCors(membership.response);
+		if (!membership.member) {
+			return profileResponse("Membership required\n", { status: 403 });
+		}
+		const refreshCache =
+			options.profileActivityCache === undefined
+				? publicProfileActivityCache
+				: options.profileActivityCache;
+		refreshCache?.invalidate(namespaceId);
+		return profileResponse(null, { status: 204 });
+	}
+
+	const namespaceProfileActivityMatch = NAMESPACE_PROFILE_ACTIVITY_PATH.exec(
+		url.pathname,
+	);
+	if (namespaceProfileActivityMatch) {
+		if (request.method === "OPTIONS") return profileCorsPreflight();
+		if (request.method !== "GET" && request.method !== "HEAD") {
+			return profileResponse("Method not allowed\n", {
+				status: 405,
+				headers: { Allow: "GET, HEAD, OPTIONS" },
+			});
+		}
+		const namespaceId = safeDecodeURIComponent(
+			namespaceProfileActivityMatch[1],
+		)?.toLowerCase();
+		if (!namespaceId || !UUID_PATTERN.test(namespaceId)) {
+			return profileResponse("Profile not found\n", { status: 404 });
+		}
+		const resolution = await (options.resolvePublicProfileRepositories
+			? options.resolvePublicProfileRepositories(namespaceId, env)
+			: isDemoMode(env)
+				? resolveDemoPublicProfileRepositories(namespaceId)
+				: resolvePublicProfileRepositoriesWithSupabase(namespaceId, env));
+		if (!resolution.ok) return withProfileCors(resolution.response);
+		const loadActivity = async () => ({
+			...(await loadPublicProfileActivity(
+				resolution.repositories,
+				env,
+				options.lixFetch,
+				AbortSignal.timeout(PUBLIC_PROFILE_ACTIVITY_TIMEOUT_MS),
+			)),
+			computedAt: new Date().toISOString(),
+		});
+		const activityCache =
+			options.profileActivityCache === undefined
+				? publicProfileActivityCache
+				: options.profileActivityCache;
+		const activity = activityCache
+			? await activityCache.resolve(namespaceId, loadActivity)
+			: await loadActivity();
+		return profileActivityResponse(request, activity);
+	}
+
+	const namespaceProfileMatch = NAMESPACE_PROFILE_PATH.exec(url.pathname);
+	if (namespaceProfileMatch) {
+		if (request.method === "OPTIONS") return profileCorsPreflight();
+		if (request.method !== "GET" && request.method !== "HEAD") {
+			return profileResponse("Method not allowed\n", {
+				status: 405,
+				headers: { Allow: "GET, HEAD, OPTIONS" },
+			});
+		}
+		const namespaceId = safeDecodeURIComponent(
+			namespaceProfileMatch[1],
+		)?.toLowerCase();
+		if (!namespaceId || !UUID_PATTERN.test(namespaceId)) {
+			return profileResponse("Profile not found\n", { status: 404 });
+		}
+		const resolution = await (options.resolveNamespaceProfile
+			? options.resolveNamespaceProfile(namespaceId, env)
+			: isDemoMode(env)
+				? resolveDemoNamespaceProfile(namespaceId, url.origin)
+				: resolveNamespaceProfileWithSupabase(namespaceId, env));
+		if (!resolution.ok) return withProfileCors(resolution.response);
+		return resolvedProfileResponse(request, namespaceId, resolution);
 	}
 
 	if (url.pathname === OPENAI_APPS_CHALLENGE_PATH) {
@@ -1227,6 +1375,327 @@ export async function resolveLixWithSupabase(
 	return { ok: true, lixId: result.lixId };
 }
 
+export type NamespaceMembershipResolution =
+	| { ok: true; member: boolean }
+	| { ok: false; response: Response };
+
+/**
+ * Checks whether the bearer of `accessToken` is a member of the namespace by
+ * querying namespace_members with the user's own token — RLS only returns
+ * rows the user is entitled to see, so a non-member gets an empty result.
+ */
+export async function resolveNamespaceMembershipWithSupabase(
+	namespaceId: string,
+	accessToken: string,
+	env: WorkerEnv,
+): Promise<NamespaceMembershipResolution> {
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return {
+			ok: false,
+			response: new Response("Supabase Data API is not configured\n", {
+				status: 500,
+			}),
+		};
+	}
+	const lookupUrl = new URL("/rest/v1/namespace_members", env.SUPABASE_URL);
+	lookupUrl.searchParams.set("select", "user_id");
+	lookupUrl.searchParams.set("namespace_id", `eq.${namespaceId}`);
+	lookupUrl.searchParams.set("limit", "1");
+
+	let response: Response;
+	try {
+		response = await fetch(lookupUrl, {
+			headers: {
+				apikey: env.SUPABASE_PUBLISHABLE_KEY,
+				Authorization: `Bearer ${accessToken}`,
+				Accept: "application/json",
+			},
+		});
+	} catch {
+		return {
+			ok: false,
+			response: new Response("Membership lookup is unavailable\n", {
+				status: 503,
+			}),
+		};
+	}
+	if (response.status === 401 || response.status === 403) {
+		return { ok: true, member: false };
+	}
+	if (!response.ok) {
+		return {
+			ok: false,
+			response: new Response("Membership lookup is unavailable\n", {
+				status: 503,
+			}),
+		};
+	}
+	try {
+		const rows: unknown = await response.json();
+		return { ok: true, member: Array.isArray(rows) && rows.length > 0 };
+	} catch {
+		return {
+			ok: false,
+			response: new Response("Membership lookup is unavailable\n", {
+				status: 503,
+			}),
+		};
+	}
+}
+
+export async function resolveNamespaceProfileWithSupabase(
+	namespaceId: string,
+	env: WorkerEnv,
+): Promise<NamespaceProfileResolution> {
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return {
+			ok: false,
+			response: new Response("Supabase Data API is not configured\n", {
+				status: 500,
+			}),
+		};
+	}
+
+	const lookupUrl = new URL("/rest/v1/namespace_profiles", env.SUPABASE_URL);
+	lookupUrl.searchParams.set("select", "document,updated_at");
+	lookupUrl.searchParams.set("namespace_id", `eq.${namespaceId}`);
+	lookupUrl.searchParams.set("limit", "1");
+
+	let response: Response;
+	try {
+		response = await fetch(lookupUrl, {
+			headers: {
+				apikey: env.SUPABASE_PUBLISHABLE_KEY,
+				Accept: "application/json",
+			},
+		});
+	} catch {
+		return profileResolutionUnavailable();
+	}
+	if (!response.ok) return profileResolutionUnavailable();
+
+	try {
+		const rows: unknown = await response.json();
+		if (!Array.isArray(rows)) return profileResolutionUnavailable();
+		if (rows.length === 0) return profileNotFound();
+		if (rows.length !== 1) return profileResolutionUnavailable();
+		return namespaceProfileRow(rows[0]) ?? profileResolutionUnavailable();
+	} catch {
+		return profileResolutionUnavailable();
+	}
+}
+
+export async function resolvePublicProfileRepositoriesWithSupabase(
+	namespaceId: string,
+	env: WorkerEnv,
+): Promise<PublicProfileRepositoriesResolution> {
+	if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+		return profileRepositoriesUnavailable();
+	}
+	const lookupUrl = new URL(
+		"/rest/v1/rpc/list_public_profile_lixes",
+		env.SUPABASE_URL,
+	);
+	let response: Response;
+	try {
+		response = await fetch(lookupUrl, {
+			method: "POST",
+			headers: {
+				apikey: env.SUPABASE_PUBLISHABLE_KEY,
+				Accept: "application/json",
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ p_namespace_id: namespaceId }),
+		});
+	} catch {
+		return profileRepositoriesUnavailable();
+	}
+	if (!response.ok) return profileRepositoriesUnavailable();
+
+	try {
+		const rows: unknown = await response.json();
+		if (!Array.isArray(rows)) return profileRepositoriesUnavailable();
+		const repositories = rows.map(publicProfileRepositoryRow);
+		if (repositories.some((repository) => repository === null)) {
+			return profileRepositoriesUnavailable();
+		}
+		return {
+			ok: true,
+			repositories: repositories as Array<ProfileRepositorySource>,
+		};
+	} catch {
+		return profileRepositoriesUnavailable();
+	}
+}
+
+function resolveDemoPublicProfileRepositories(
+	namespaceId: string,
+): PublicProfileRepositoriesResolution {
+	if (namespaceId !== DEMO_PROFILE_NAMESPACE_ID) {
+		return profileRepositoriesNotFound();
+	}
+	return {
+		ok: true,
+		repositories: [
+			{
+				id: DEMO_LIX_ID,
+				name: DEMO_LIX_NAME,
+				slug: DEMO_LIX_NAME,
+				namespaceHandle: DEMO_ORGANIZATION_NAME,
+			},
+		],
+	};
+}
+
+async function loadPublicProfileActivity(
+	repositories: Array<ProfileRepositorySource>,
+	env: WorkerEnv,
+	lixFetch: HandleRequestOptions["lixFetch"],
+	signal: AbortSignal,
+) {
+	if (!lixFetch) {
+		return aggregatePublicProfileActivity(
+			repositories.map((repository) => ({ repository, paths: null })),
+		);
+	}
+	const client = new WorkerLixRuntimeClient(
+		env,
+		{ userId: LIX_ANONYMOUS_ACCOUNT_ID, token: "" },
+		() => Promise.resolve(null),
+		{ lixFetch, signal },
+	);
+	try {
+		const files = await mapWithConcurrency(
+			repositories,
+			4,
+			async (repository): Promise<ProfileRepositoryFiles> => {
+				try {
+					const result = await client.execute(repository.id, {
+						sql: "SELECT path FROM lix_file ORDER BY path",
+					});
+					const pathColumn = result.columns.indexOf("path");
+					if (pathColumn === -1) return { repository, paths: null };
+					return {
+						repository,
+						paths: result.rows.flatMap((row) => {
+							const value = row[pathColumn];
+							return value?.kind === "text" ? [value.value] : [];
+						}),
+					};
+				} catch (error) {
+					console.error(
+						`[profile-activity] file listing failed for ${repository.slug}:`,
+						error,
+					);
+					return { repository, paths: null };
+				}
+			},
+		);
+		return aggregatePublicProfileActivity(files);
+	} finally {
+		await client.close();
+	}
+}
+
+function publicProfileRepositoryRow(
+	value: unknown,
+): ProfileRepositorySource | null {
+	if (!value || typeof value !== "object") return null;
+	const row = value as Record<string, unknown>;
+	return typeof row.lix_id === "string" &&
+		typeof row.lix_name === "string" &&
+		typeof row.lix_slug === "string" &&
+		typeof row.namespace_handle === "string"
+		? {
+				id: row.lix_id,
+				name: row.lix_name,
+				slug: row.lix_slug,
+				namespaceHandle: row.namespace_handle,
+			}
+		: null;
+}
+
+async function mapWithConcurrency<Input, Output>(
+	inputs: Array<Input>,
+	concurrency: number,
+	operation: (input: Input) => Promise<Output>,
+): Promise<Array<Output>> {
+	const results = new Array<Output>(inputs.length);
+	let nextIndex = 0;
+	await Promise.all(
+		Array.from({ length: Math.min(concurrency, inputs.length) }, async () => {
+			while (nextIndex < inputs.length) {
+				const index = nextIndex;
+				nextIndex += 1;
+				results[index] = await operation(inputs[index]);
+			}
+		}),
+	);
+	return results;
+}
+
+function resolveDemoNamespaceProfile(
+	namespaceId: string,
+	origin: string,
+): NamespaceProfileResolution {
+	if (namespaceId !== DEMO_PROFILE_NAMESPACE_ID) return profileNotFound();
+	return {
+		ok: true,
+		document: demoProfileDocument(origin),
+		updatedAt: "2026-08-21T00:00:00.000Z",
+	};
+}
+
+function namespaceProfileRow(
+	value: unknown,
+): NamespaceProfileResolution | null {
+	if (!value || typeof value !== "object") return null;
+	const row = value as { document?: unknown; updated_at?: unknown };
+	if (
+		!row.document ||
+		typeof row.document !== "object" ||
+		Array.isArray(row.document) ||
+		typeof row.updated_at !== "string"
+	) {
+		return null;
+	}
+	const document = row.document as Record<string, unknown>;
+	if (document["@type"] !== "Card" || document.version !== "2.0") return null;
+	return { ok: true, document, updatedAt: row.updated_at };
+}
+
+function profileNotFound(): NamespaceProfileResolution {
+	return {
+		ok: false,
+		response: new Response("Profile not found\n", { status: 404 }),
+	};
+}
+
+function profileResolutionUnavailable(): NamespaceProfileResolution {
+	return {
+		ok: false,
+		response: new Response("Profile resolution is unavailable\n", {
+			status: 502,
+		}),
+	};
+}
+
+function profileRepositoriesNotFound(): PublicProfileRepositoriesResolution {
+	return {
+		ok: false,
+		response: new Response("Profile not found\n", { status: 404 }),
+	};
+}
+
+function profileRepositoriesUnavailable(): PublicProfileRepositoriesResolution {
+	return {
+		ok: false,
+		response: new Response("Profile repositories are unavailable\n", {
+			status: 502,
+		}),
+	};
+}
+
 function lixNotFound(): { ok: false; response: Response } {
 	return {
 		ok: false,
@@ -1630,6 +2099,88 @@ function corsPreflight(): Response {
 				"Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Param-*",
 			"access-control-max-age": "86400",
 		},
+	});
+}
+
+function profileCorsPreflight(): Response {
+	return new Response(null, {
+		status: 204,
+		headers: {
+			"access-control-allow-origin": "*",
+			"access-control-allow-methods": "GET, HEAD, OPTIONS",
+			"access-control-allow-headers": "If-None-Match",
+			"access-control-max-age": "86400",
+		},
+	});
+}
+
+function resolvedProfileResponse(
+	request: Request,
+	namespaceId: string,
+	profile: Extract<NamespaceProfileResolution, { ok: true }>,
+): Response {
+	const updatedAtToken = profile.updatedAt.replace(/[^0-9A-Za-z]/g, "");
+	const etag = `W/"${namespaceId}-${updatedAtToken}"`;
+	const headers = profileHeaders(etag, profile.updatedAt);
+	const ifNoneMatch = request.headers.get("if-none-match");
+	if (
+		ifNoneMatch
+			?.split(",")
+			.map((candidate) => candidate.trim())
+			.some((candidate) => candidate === "*" || candidate === etag)
+	) {
+		return new Response(null, { status: 304, headers });
+	}
+	return new Response(
+		request.method === "HEAD" ? null : JSON.stringify(profile.document),
+		{ status: 200, headers },
+	);
+}
+
+function profileActivityResponse(
+	request: Request,
+	activity: ReturnType<typeof aggregatePublicProfileActivity>,
+): Response {
+	return profileResponse(
+		request.method === "HEAD" ? null : JSON.stringify(activity),
+		{
+			status: 200,
+			headers: {
+				"cache-control": `public, max-age=0, s-maxage=${PUBLIC_PROFILE_ACTIVITY_FRESH_SECONDS}`,
+				"content-type": "application/json; charset=utf-8",
+			},
+		},
+	);
+}
+
+function profileHeaders(etag: string, updatedAt: string): Headers {
+	const headers = new Headers({
+		"access-control-allow-origin": "*",
+		"cache-control": "public, max-age=3600, stale-while-revalidate=86400",
+		"content-type": "application/jscontact+json; version=2.0",
+		etag,
+		"x-content-type-options": "nosniff",
+	});
+	const updatedAtDate = new Date(updatedAt);
+	if (!Number.isNaN(updatedAtDate.getTime())) {
+		headers.set("last-modified", updatedAtDate.toUTCString());
+	}
+	return headers;
+}
+
+function profileResponse(body: BodyInit | null, init?: ResponseInit): Response {
+	const response = new Response(body, init);
+	return withProfileCors(response);
+}
+
+function withProfileCors(response: Response): Response {
+	const headers = new Headers(response.headers);
+	headers.set("access-control-allow-origin", "*");
+	headers.set("x-content-type-options", "nosniff");
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
 	});
 }
 

@@ -169,6 +169,12 @@ function mountDirectoryView({
 			<StrictMode>
 				<DirectoryView
 					lix={atelier.lix}
+					diffSession={runtime.diff?.session ?? null}
+					{...(runtime.diff
+						? {
+								onOpenDiffFile: (path: string) => runtime.diff?.openFile(path),
+							}
+						: {})}
 					dirPath={dirPath(candidate)}
 					isHome={isHome}
 					showHiddenFiles={
@@ -197,6 +203,17 @@ function mountDirectoryView({
 					onOpenPeople={() => openPeopleFromView(atelier)}
 					onOpenSettings={() => openSettingsFromView(atelier)}
 					onOpenSqlExplorer={() => openSqlExplorerFromView(atelier)}
+					{...(!atelier.readOnly && atelier.diff
+						? {
+								// reveal: false — home stays the landing surface; the
+								// user picks the file from the review-aware listing.
+								onOpenChangesReview: () =>
+									void atelier.diff?.open({
+										target: { working: true },
+										reveal: false,
+									}),
+							}
+						: {})}
 					{...(isHome
 						? {
 								onRepositoryEmpty: () => {

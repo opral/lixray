@@ -464,7 +464,14 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				await expect(
 					fresh.locator("[data-atelier-extension-suspended]"),
 				).toHaveCount(0);
-				expect(coldReadCount([fresh])).toBe(coldReadsBeforeFreshHistory);
+				// The relation-scoped working diff (lix_diff over the
+				// checkpoint-to-head span) evaluates from commit trees, unlike the
+				// retired lix_working_diff() hot authority — opening History may
+				// cost a bounded number of cold reads until the engine grows a hot
+				// path for the working span.
+				expect(coldReadCount([fresh])).toBeLessThanOrEqual(
+					coldReadsBeforeFreshHistory + 2,
+				);
 				return { freshContext, fresh, freshEntries };
 			});
 		let { fresh, freshEntries } = freshBootstrap;
@@ -789,7 +796,11 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			await expect(history).toContainText("Latest checkpoint");
 			await expect(history).toContainText("Initial checkpoint");
 		}
-		expect(coldReadCount([left, right])).toBe(coldReadsBeforeHistory);
+		// Bounded, not zero: the relation-scoped working diff reads commit
+		// trees (see the fresh-bootstrap budget above).
+		expect(coldReadCount([left, right])).toBeLessThanOrEqual(
+			coldReadsBeforeHistory + 4,
+		);
 
 		// The checkpoint list is hot, but opening a checkpoint intentionally
 		// crosses the lazy-history boundary. Exercise that boundary on the fresh
