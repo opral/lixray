@@ -56,7 +56,13 @@ await requireDirectory(
 	sdkRoot,
 	"Initialize the vendor/lix submodule before installing dependencies.",
 );
-await rm(join(sdkRoot, "lix_js_sdk.node"), { force: true });
+// Only the native build clears the native binding (it rebuilds it below).
+// The wasm-only path must leave it alone: without the local binding, node
+// consumers silently fall back to the published prebuilt — a stale engine
+// masquerading as the vendored one.
+if (buildNative) {
+	await rm(join(sdkRoot, "lix_js_sdk.node"), { force: true });
+}
 
 const skipWasmBuild = process.env.LIXRAY_SKIP_VENDORED_LIX_WASM === "1";
 let preservedWasmRoot;

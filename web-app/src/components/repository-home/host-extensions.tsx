@@ -132,6 +132,15 @@ function openSqlExplorerFromView(atelier: AtelierExtensionRuntime) {
 	});
 }
 
+function openHistoryFromView(atelier: AtelierExtensionRuntime) {
+	// A normal central tab — the archive read, not the review mode.
+	void atelier.views
+		.open(ATELIER_BUILTIN_EXTENSION_IDS.history)
+		.catch((error: unknown) => {
+			console.error("repository-home: unable to open History", error);
+		});
+}
+
 function mountDirectoryView({
 	element,
 	atelier,
@@ -170,6 +179,7 @@ function mountDirectoryView({
 				<DirectoryView
 					lix={atelier.lix}
 					diffSession={runtime.diff?.session ?? null}
+					onOpenHistory={() => openHistoryFromView(runtime)}
 					{...(runtime.diff
 						? {
 								onOpenDiffFile: (path: string) => runtime.diff?.openFile(path),

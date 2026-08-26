@@ -1,7 +1,12 @@
 import type { Lix } from "@lix-js/sdk";
+import {
+	AtelierFilePreview,
+	deleteWorkspaceEntry,
+	renameWorkspaceEntry,
+	WorkspacePathTakenError,
+} from "@opral/atelier";
 import type { AtelierDiffSession } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
-import DOMPurify from "dompurify";
 import {
 	ArrowUp,
 	Check,
@@ -12,9 +17,9 @@ import {
 	LockKeyhole,
 	PencilLine,
 	Plus,
+	Trash2,
 	UserRoundPlus,
 } from "lucide-react";
-import { marked } from "marked";
 import {
 	useCallback,
 	useEffect,
@@ -93,6 +98,8 @@ type DirectoryViewProps = {
 	readonly onOpenSettings?: () => void;
 	readonly onOpenSqlExplorer?: () => void;
 	readonly onOpenChangesReview?: () => void;
+	/** Opens the History view as a normal central tab. */
+	readonly onOpenHistory?: () => void;
 	readonly onRepositoryEmpty?: () => void;
 };
 
@@ -123,6 +130,7 @@ export function DirectoryView({
 	onOpenSettings,
 	onOpenSqlExplorer,
 	onOpenChangesReview,
+	onOpenHistory,
 	onRepositoryEmpty,
 }: DirectoryViewProps) {
 	const { tree, error: treeError } = useRepositoryTree(lix, isActive);
@@ -203,6 +211,23 @@ export function DirectoryView({
 	// untouched entries recede so the action-colored changes are the only
 	// thing at full contrast.
 	const reviewFocus = changedFileKinds.size > 0;
+	// A changed README previews as its diff — the review renders the change
+	// itself, not the resulting document.
+	const readmeDiff = useMemo(() => {
+		const readmePath = listing?.readmePath;
+		if (!diffSession || !readmePath) return null;
+		const file = diffSession.files.find(
+			(candidate) => candidate.path === readmePath,
+		);
+		if (!file || file.changeKind === "removed") return null;
+		const baseCommitId =
+			file.changeKind !== "added" &&
+			diffSession.base &&
+			"commitId" in diffSession.base
+				? diffSession.base.commitId
+				: null;
+		return { fileId: file.id, baseCommitId };
+	}, [diffSession, listing?.readmePath]);
 	const readme = useFileMarkdown(
 		lix,
 		listing?.readmePath ?? null,
@@ -211,6 +236,50 @@ export function DirectoryView({
 	const initialRepositoryTreeHandledRef = useRef(false);
 	const repositoryTreeMarkedRef = useRef(false);
 	const [actionError, setActionError] = useState<string | null>(null);
+	// Right-click file management, sharing the File Explorer's operation
+	// semantics through @opral/atelier. Deletion needs no confirmation:
+	// lix history makes it recoverable.
+	const [entryMenu, setEntryMenu] = useState<{
+		kind: "file" | "directory";
+		name: string;
+		path: string;
+		id?: string;
+		x: number;
+		y: number;
+	} | null>(null);
+	const [renameTarget, setRenameTarget] = useState<{
+		kind: "file" | "directory";
+		name: string;
+		path: string;
+		id?: string;
+	} | null>(null);
+	useEffect(() => {
+		if (!entryMenu) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setEntryMenu(null);
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [entryMenu]);
+	const deleteEntry = useCallback(
+		(target: { kind: "file" | "directory"; path: string; id?: string }) => {
+			setActionError(null);
+			void deleteWorkspaceEntry(
+				lix,
+				target.kind === "file" && target.id
+					? { kind: "file", id: target.id }
+					: target.kind === "file"
+						? { kind: "file", path: target.path }
+						: { kind: "directory", path: target.path },
+			).catch((error: unknown) => {
+				console.error("repository-home: delete failed", error);
+				setActionError(
+					`Unable to delete the ${target.kind === "file" ? "file" : "folder"}. Try again.`,
+				);
+			});
+		},
+		[lix],
+	);
 	const { isDropTarget, dragHandlers } = useImportDrop({
 		lix,
 		dirPath,
@@ -321,10 +390,8 @@ export function DirectoryView({
 						/>
 						<span className="flex-1" />
 						<div
-							className={`flex shrink-0 items-center gap-2${
-								reviewFocus
-									? " opacity-[0.35] transition-opacity hover:opacity-100"
-									: ""
+							className={`flex shrink-0 items-center gap-2 transition-opacity${
+								reviewFocus ? " opacity-[0.35] hover:opacity-100" : ""
 							}`}
 						>
 							<NewMenu
@@ -380,6 +447,10 @@ export function DirectoryView({
 								name={dir.name}
 								meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
 								hidden={dir.hidden}
+								active={
+									entryMenu?.path === dir.path ||
+									renameTarget?.path === dir.path
+								}
 								dimmed={reviewFocus && !changedDirKinds.has(dir.path)}
 								{...(changedDirKinds.has(dir.path)
 									? {
@@ -393,6 +464,20 @@ export function DirectoryView({
 								onClick={(event) =>
 									onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
 								}
+								{...(readOnly || viewingHistory
+									? {}
+									: {
+											onContextMenu: (event: ReactMouseEvent) => {
+												event.preventDefault();
+												setEntryMenu({
+													kind: "directory",
+													name: dir.name,
+													path: dir.path,
+													x: event.clientX,
+													y: event.clientY,
+												});
+											},
+										})}
 							/>
 						))}
 						{listing.files.map((file) => (
@@ -408,6 +493,10 @@ export function DirectoryView({
 								name={file.name}
 								meta={formatUpdatedAt(file.updatedAt)}
 								hidden={file.hidden}
+								active={
+									entryMenu?.path === file.path ||
+									renameTarget?.path === file.path
+								}
 								dimmed={reviewFocus && !changedFileKinds.has(file.path)}
 								{...(changedFileKinds.has(file.path)
 									? { changeKind: changedFileKinds.get(file.path) }
@@ -427,28 +516,54 @@ export function DirectoryView({
 										newTab: newTabFromMouseEvent(event),
 									});
 								}}
+								{...(readOnly || viewingHistory
+									? {}
+									: {
+											onContextMenu: (event: ReactMouseEvent) => {
+												event.preventDefault();
+												setEntryMenu({
+													kind: "file",
+													name: file.name,
+													path: file.path,
+													id: tree.files.find(
+														(candidate) => candidate.path === file.path,
+													)?.id,
+													x: event.clientX,
+													y: event.clientY,
+												});
+											},
+										})}
 							/>
 						))}
 					</div>
 					{listing.readmePath && readme !== null && !viewingHistory ? (
 						<div
-							className={
+							className={`transition-opacity${
 								reviewFocus && !changedFileKinds.has(listing.readmePath)
-									? "opacity-[0.35] transition-opacity hover:opacity-100"
-									: undefined
-							}
+									? " opacity-[0.35] hover:opacity-100"
+									: ""
+							}`}
 						>
 							<ReadmePreview
+								lix={lix}
+								sourceFilePath={listing.readmePath}
+								fileId={
+									readmeDiff?.fileId ??
+									tree.files.find(
+										(file) => file.path === listing.readmePath,
+									)?.id ??
+									null
+								}
+								diff={readmeDiff}
 							fileName={
 								listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
 							}
-							markdown={readme}
 							onOpen={(event) =>
 								onOpenFile(listing.readmePath as string, {
 									newTab: newTabFromMouseEvent(event),
 								})
 							}
-							onNavigate={(href, event) => {
+							onNavigate={(href, event?) => {
 								const resolved = resolveRepositoryHref(dirPath, href);
 								if (!resolved) return false;
 								// Directory paths are authoritative on lix_directory, so look
@@ -456,17 +571,85 @@ export function DirectoryView({
 								const directoryPath = persistedDirectoryPath(tree, resolved);
 								if (directoryPath) {
 									onOpenDir(directoryPath, {
-										newTab: newTabFromMouseEvent(event),
+										newTab: event ? newTabFromMouseEvent(event) : false,
 									});
 								} else {
 									onOpenFile(resolved, {
-										newTab: newTabFromMouseEvent(event),
+										newTab: event ? newTabFromMouseEvent(event) : false,
 									});
 								}
 								return true;
 							}}
 						/>
 						</div>
+					) : null}
+					{entryMenu ? (
+						<div
+							className="fixed inset-0 z-40"
+							onClick={() => setEntryMenu(null)}
+							onContextMenu={(event) => {
+								event.preventDefault();
+								setEntryMenu(null);
+							}}
+						>
+							<div
+								role="menu"
+								className="absolute flex min-w-[164px] flex-col rounded-[10px] border border-border-panel bg-bg-panel p-1 shadow-[0_10px_28px_rgba(28,25,23,0.14)]"
+								style={{
+									left: Math.min(entryMenu.x + 2, window.innerWidth - 180),
+									top: Math.min(entryMenu.y + 2, window.innerHeight - 84),
+								}}
+								onClick={(event) => event.stopPropagation()}
+							>
+								<button
+									type="button"
+									role="menuitem"
+									onClick={() => {
+										setRenameTarget(entryMenu);
+										setEntryMenu(null);
+									}}
+									className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-text-primary hover:bg-bg-hover"
+								>
+									<PencilLine
+										className="size-3.5 text-icon-secondary"
+										aria-hidden="true"
+									/>
+									Rename…
+								</button>
+								<button
+									type="button"
+									role="menuitem"
+									onClick={() => {
+										deleteEntry(entryMenu);
+										setEntryMenu(null);
+									}}
+									className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-text-primary hover:bg-error-700/10 hover:text-error-700"
+								>
+									<Trash2 className="size-3.5" aria-hidden="true" />
+									Delete
+								</button>
+							</div>
+						</div>
+					) : null}
+					{renameTarget ? (
+						<RenameEntryDialog
+							target={renameTarget}
+							onClose={() => setRenameTarget(null)}
+							onRename={async (nextName) => {
+								const segments = renameTarget.path.split("/").filter(Boolean);
+								segments.pop();
+								const nextPath = `/${[...segments, nextName].join("/")}`;
+								await renameWorkspaceEntry(
+									lix,
+									renameTarget.kind === "file"
+										? renameTarget.id
+											? { kind: "file", id: renameTarget.id }
+											: { kind: "file", path: renameTarget.path }
+										: { kind: "directory", path: renameTarget.path },
+									nextPath,
+								);
+							}}
+						/>
 					) : null}
 				</main>
 				{isHome ? (
@@ -478,6 +661,7 @@ export function DirectoryView({
 						onOpenSettings={onOpenSettings}
 						onOpenSqlExplorer={onOpenSqlExplorer}
 						onOpenChangesReview={onOpenChangesReview}
+						onOpenHistory={onOpenHistory}
 						teamSection={
 							detailsEnabled ? (
 								<>
@@ -550,6 +734,7 @@ function RepositoryControlPlaneRail({
 	onOpenSettings,
 	onOpenSqlExplorer,
 	onOpenChangesReview,
+	onOpenHistory,
 	teamSection,
 }: {
 	/** Review focus: sections other than Changes recede with the page. */
@@ -560,11 +745,12 @@ function RepositoryControlPlaneRail({
 	readonly onOpenSettings?: () => void;
 	readonly onOpenSqlExplorer?: () => void;
 	readonly onOpenChangesReview?: () => void;
+	readonly onOpenHistory?: () => void;
 	readonly teamSection?: ReactNode;
 }) {
-	const mutedSection = reviewFocus
-		? " opacity-[0.35] transition-opacity hover:opacity-100"
-		: "";
+	const mutedSection = ` transition-opacity${
+		reviewFocus ? " opacity-[0.35] hover:opacity-100" : ""
+	}`;
 	return (
 		<aside
 			aria-label="Repository overview"
@@ -596,7 +782,9 @@ function RepositoryControlPlaneRail({
 				</button>
 			</section>
 
-			<section className="border-b border-border-panel py-7 @max-[1100px]:border-t-0">
+			<section
+				className={`border-b border-border-panel py-7 @max-[1100px]:border-t-0${mutedSection}`}
+			>
 				<RailHeading>Changes</RailHeading>
 				{data?.changeHistoryUnavailable ? (
 					<p
@@ -606,7 +794,11 @@ function RepositoryControlPlaneRail({
 						Some change history is unavailable.
 					</p>
 				) : null}
-				<ChangesSummary data={data} onOpenChangesReview={onOpenChangesReview} />
+				<ChangesSummary
+					data={data}
+					onOpenChangesReview={onOpenChangesReview}
+					onOpenHistory={onOpenHistory}
+				/>
 			</section>
 
 			<section className={`border-b border-border-panel py-7${mutedSection}`}>
@@ -636,24 +828,34 @@ function RailHeading({ children }: { readonly children: ReactNode }) {
 function ChangesSummary({
 	data,
 	onOpenChangesReview,
+	onOpenHistory,
 }: {
 	readonly data: RepositoryControlPlaneData | null;
 	readonly onOpenChangesReview?: () => void;
+	readonly onOpenHistory?: () => void;
 }) {
 	if (!data) {
 		return (
 			<div className="mt-3 h-[118px] animate-pulse rounded-lg bg-bg-hover" />
 		);
 	}
-	return <ChangeBars data={data} onOpenChangesReview={onOpenChangesReview} />;
+	return (
+		<ChangeBars
+			data={data}
+			onOpenChangesReview={onOpenChangesReview}
+			onOpenHistory={onOpenHistory}
+		/>
+	);
 }
 
 function ChangeBars({
 	data,
 	onOpenChangesReview,
+	onOpenHistory,
 }: {
 	readonly data: RepositoryControlPlaneData;
 	readonly onOpenChangesReview?: () => void;
+	readonly onOpenHistory?: () => void;
 }) {
 	const days = data.changeDays;
 	if (days === null) {
@@ -733,18 +935,23 @@ function ChangeBars({
 				{latestCheckpointDay ? <span>⚑ checkpoint</span> : null}
 				<span>today</span>
 			</div>
-			{onOpenChangesReview &&
-			days.some(
-				(entry) =>
-					entry.count > 0 &&
-					(!latestCheckpointDay || entry.day >= latestCheckpointDay),
-			) ? (
+			{/* With nothing to review, the panel's action is the archive: open
+			    History as a normal central tab instead of the review mode. */}
+			{headlineCount > 0 && onOpenChangesReview ? (
 				<button
 					type="button"
 					onClick={onOpenChangesReview}
 					className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-[#c2410c] hover:text-[#9a3412] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
 				>
 					Review changes →
+				</button>
+			) : headlineCount === 0 && onOpenHistory ? (
+				<button
+					type="button"
+					onClick={onOpenHistory}
+					className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-[#c2410c] hover:text-[#9a3412] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+				>
+					Show history →
 				</button>
 			) : null}
 		</div>
@@ -1246,7 +1453,9 @@ function EntryRow({
 	changeKind,
 	dimIndicator = false,
 	dimmed = false,
+	active = false,
 	onClick,
+	onContextMenu,
 }: {
 	readonly icon: ReactNode;
 	readonly name: string;
@@ -1262,7 +1471,10 @@ function EntryRow({
 	readonly dimIndicator?: boolean;
 	/** Review focus: an unchanged row recedes; hover restores it. */
 	readonly dimmed?: boolean;
+	/** Keeps the row anchored while its context menu or dialog is open. */
+	readonly active?: boolean;
 	readonly onClick: (event: ReactMouseEvent) => void;
+	readonly onContextMenu?: (event: ReactMouseEvent) => void;
 }) {
 	const changed = changeKind !== undefined;
 	// In a review every changed name carries its action color — matching the
@@ -1284,11 +1496,14 @@ function EntryRow({
 		<button
 			type="button"
 			onClick={onClick}
-			className={`flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left hover:bg-bg-hover ${
+			onContextMenu={onContextMenu}
+			className={`flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left transition-opacity hover:bg-bg-hover ${
+				active ? "bg-bg-hover " : ""
+			}${
 				hidden
 					? "opacity-[0.48] hover:opacity-[0.62]"
 					: dimmed
-						? "opacity-[0.35] transition-opacity hover:opacity-100"
+						? "opacity-[0.35] hover:opacity-100"
 						: ""
 			}`}
 			data-hidden-entry={hidden ? "true" : undefined}
@@ -1312,21 +1527,25 @@ function EntryRow({
 }
 
 function ReadmePreview({
+	lix,
+	sourceFilePath,
+	fileId,
+	diff,
 	fileName,
-	markdown,
 	onOpen,
 	onNavigate,
 }: {
+	readonly lix: Lix;
+	readonly sourceFilePath: string;
+	readonly fileId: string | null;
+	/** Present while a review marks the README; renders the diff itself. */
+	readonly diff: { fileId: string; baseCommitId: string | null } | null;
 	readonly fileName: string;
-	readonly markdown: string;
 	readonly onOpen: (event: ReactMouseEvent) => void;
 	/** Returns true when the link was handled inside the tab model. */
-	readonly onNavigate: (href: string, event: ReactMouseEvent) => boolean;
+	readonly onNavigate: (href: string, event?: ReactMouseEvent) => boolean;
 }) {
-	const html = useMemo(
-		() => DOMPurify.sanitize(marked.parse(markdown, { async: false })),
-		[markdown],
-	);
+	if (!fileId) return null;
 	return (
 		<>
 			<div className="flex items-center gap-1.5 px-3 pt-8 pb-3.5">
@@ -1362,9 +1581,18 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
-				className="px-3 pb-5 text-[15px] leading-[1.7] text-text-primary [&_a]:font-semibold [&_a]:text-text-link [&_code]:rounded [&_code]:bg-bg-hover [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[13px] [&_h1]:mb-3 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-[-0.02em] [&_h2]:mt-6 [&_h2]:mb-2 [&_h2]:text-xl [&_h2]:font-bold [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-base [&_h3]:font-bold [&_li]:my-1 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-				dangerouslySetInnerHTML={{ __html: html }}
-			/>
+				className="px-3 pb-5"
+			>
+				{/* Quick Look: the extension that owns the file type renders
+				    the preview — and during a review, the diff — so every
+				    state shares the editor's own presentation. */}
+				<AtelierFilePreview
+					lix={lix}
+					fileId={fileId}
+					filePath={sourceFilePath}
+					diff={diff ? { baseCommitId: diff.baseCommitId } : null}
+				/>
+			</div>
 		</>
 	);
 }
@@ -1452,6 +1680,111 @@ function NewMenu({
 					))}
 				</div>
 			) : null}
+		</div>
+	);
+}
+
+function RenameEntryDialog({
+	target,
+	onClose,
+	onRename,
+}: {
+	readonly target: { kind: "file" | "directory"; name: string };
+	readonly onClose: () => void;
+	readonly onRename: (nextName: string) => Promise<void>;
+}) {
+	const [name, setName] = useState(target.name);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const inputRef = useRef<HTMLInputElement | null>(null);
+	useEffect(() => {
+		const input = inputRef.current;
+		if (!input) return;
+		input.focus();
+		// Preselect the base name so typing replaces it, keeping a file's
+		// extension in place — the File Explorer's rename behaves the same.
+		const dotIndex =
+			target.kind === "file" ? target.name.lastIndexOf(".") : -1;
+		input.setSelectionRange(0, dotIndex > 0 ? dotIndex : target.name.length);
+	}, [target]);
+	const submit = () => {
+		const trimmed = name.trim();
+		if (!trimmed || trimmed === target.name) {
+			onClose();
+			return;
+		}
+		if (trimmed.includes("/")) {
+			setError("Names cannot contain slashes.");
+			return;
+		}
+		setBusy(true);
+		setError(null);
+		onRename(trimmed)
+			.then(onClose)
+			.catch((renameError: unknown) => {
+				console.error("repository-home: rename failed", renameError);
+				setBusy(false);
+				setError(
+					renameError instanceof WorkspacePathTakenError
+						? `Something here is already named “${trimmed}”.`
+						: "Unable to rename. Try again.",
+				);
+			});
+	};
+	return (
+		<div
+			className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(28,25,23,0.28)]"
+			onClick={onClose}
+		>
+			<div
+				role="dialog"
+				aria-label={`Rename ${target.name}`}
+				className="w-[340px] rounded-xl border border-border-panel bg-bg-panel p-4 shadow-[0_18px_44px_rgba(28,25,23,0.24)]"
+				onClick={(event) => event.stopPropagation()}
+			>
+				<h2 className="m-0 text-[13.5px] font-bold text-text-primary">
+					Rename {target.kind === "file" ? "file" : "folder"}
+				</h2>
+				<input
+					ref={inputRef}
+					value={name}
+					onChange={(event) => {
+						setName(event.target.value);
+						setError(null);
+					}}
+					onKeyDown={(event) => {
+						if (event.key === "Enter") submit();
+						if (event.key === "Escape") onClose();
+					}}
+					disabled={busy}
+					className="mt-3 h-9 w-full rounded-lg border border-border-panel bg-bg-app px-2.5 text-[13.5px] text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+				/>
+				{error ? (
+					<p role="alert" className="mt-2 mb-0 text-[12.5px] text-error-700">
+						{error}
+					</p>
+				) : null}
+				<div className="mt-3.5 flex justify-end gap-2">
+					<Button
+						type="button"
+						variant="ghost"
+						className="h-8 px-3 text-[13px] font-bold"
+						onClick={onClose}
+						disabled={busy}
+					>
+						Cancel
+					</Button>
+					<Button
+						type="button"
+						variant="featured"
+						className="h-8 px-3.5 text-[13px] font-bold"
+						onClick={submit}
+						disabled={busy}
+					>
+						Rename
+					</Button>
+				</div>
+			</div>
 		</div>
 	);
 }
