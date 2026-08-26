@@ -288,6 +288,9 @@ export function DirectoryView({
 			try {
 				setActionError(null);
 				const path = await createRepositoryFile(lix, dirPath, extension);
+				// Every type opens straight into its editor — naming up front is
+				// friction. Markdown names itself from the first heading; csv and
+				// drawings keep their untitled name until renamed.
 				onOpenFile(path, { newTab: false, created: true });
 			} catch (error) {
 				console.error("repository-home: unable to create file", error);
