@@ -210,8 +210,8 @@ export function useRepositoryControlPlaneData(
 
 /** The full directory/file tree, kept live via lix observe. */
 /**
- * Files as of a commit: the empty-root diff, where the commit's full state
- * appears as added rows. Null while loading (or when no commit is given).
+ * Files as of a commit, read as pinned point-in-time state. Null while
+ * loading (or when no commit is given).
  */
 export function useFilesAtCommit(
 	lix: Lix,
@@ -219,7 +219,7 @@ export function useFilesAtCommit(
 ): ReadonlyArray<{ readonly id: string; readonly path: string }> | null {
 	const rows = useObservedRows(
 		lix,
-		"SELECT row_pk ->> 0 AS id, to_path AS path FROM lix_diff('lix_file', lix_root_commit_id(), $1) ORDER BY to_path",
+		"SELECT id, path FROM lix_state_at('lix_file', $1) ORDER BY path",
 		commitId ? [commitId] : [""],
 		commitId !== null,
 	);
