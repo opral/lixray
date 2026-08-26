@@ -45,6 +45,11 @@ import {
 	isDemoEnvironment,
 	resolveOfficialMcpPosthogToken,
 } from "./mcp-posthog-env.ts";
+import {
+	USER_SIGNED_UP_PATH,
+	maybeCaptureUserSignedUp,
+	type SignupSource,
+} from "./user-signup-telemetry.ts";
 
 export interface WorkerEnv {
 	SUPABASE_URL?: string;
@@ -107,6 +112,11 @@ interface HandleRequestOptions {
 	executionContext?: RequestExecutionContext;
 	createMcpTelemetry?: typeof createMcpTelemetrySession;
 	recordMcpLixConnection?: RecordMcpLixConnection;
+	captureUserSignedUp?: (
+		env: WorkerEnv,
+		auth: AuthenticatedUser,
+		signupSource: SignupSource,
+	) => Promise<unknown>;
 }
 
 interface AuthenticatedUser {
@@ -248,6 +258,10 @@ export async function handleRequest(
 		return handleProdDevAuth(request, env, options.fetch ?? fetch);
 	}
 
+	if (url.pathname === USER_SIGNED_UP_PATH) {
+		return handleUserSignedUp(request, env, options);
+	}
+
 	if (isDemoMode(env) && isProductionOnlyPath(url.pathname)) {
 		return new Response("Not found\n", { status: 404 });
 	}
@@ -276,6 +290,13 @@ export async function handleRequest(
 			options.authenticateMcp ?? authenticateMcpWithSupabase;
 		const authResult = await authenticateMcp(request, env);
 		if (!authResult.ok) return withMcpRequestId(authResult.response, requestId);
+		scheduleUserSignedUpCapture(
+			executionContext,
+			env,
+			authResult.auth,
+			"mcp",
+			options,
+		);
 		const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
 		// This positive cache is recreated for every MCP HTTP request.
 		const authorizedLixIds = new Set<string>();
@@ -674,6 +695,65 @@ function withServerTimings(
 		statusText: response.statusText,
 		headers,
 	});
+}
+
+async function handleUserSignedUp(
+	request: Request,
+	env: WorkerEnv,
+	options: HandleRequestOptions,
+): Promise<Response> {
+	if (request.method === "OPTIONS") return corsPreflight();
+	if (request.method !== "POST") {
+		return new Response("Method not allowed\n", { status: 405 });
+	}
+
+	const authenticate = options.authenticate ?? authenticateWithSupabase;
+	const authResult = await authenticate(request, env);
+	if (!authResult.ok) return authResult.response;
+	if (authResult.auth.isDemo) return new Response(null, { status: 204 });
+
+	try {
+		await captureUserSignedUpEvent(env, authResult.auth, "web", options);
+	} catch (caught) {
+		console.warn("Failed to capture LixRay signup", caught);
+	}
+	return new Response(null, { status: 204 });
+}
+
+function scheduleUserSignedUpCapture(
+	executionContext: RequestExecutionContext,
+	env: WorkerEnv,
+	auth: AuthenticatedUser,
+	signupSource: SignupSource,
+	options: HandleRequestOptions,
+): void {
+	if (auth.isDemo) return;
+	try {
+		const work = captureUserSignedUpEvent(
+			env,
+			auth,
+			signupSource,
+			options,
+		).catch((caught: unknown) => {
+			console.warn("Failed to capture LixRay signup", caught);
+		});
+		executionContext.waitUntil(work);
+	} catch (caught) {
+		console.warn("Failed to start LixRay signup capture", caught);
+	}
+}
+
+function captureUserSignedUpEvent(
+	env: WorkerEnv,
+	auth: AuthenticatedUser,
+	signupSource: SignupSource,
+	options: HandleRequestOptions,
+): Promise<unknown> {
+	return (options.captureUserSignedUp ?? maybeCaptureUserSignedUp)(
+		env,
+		auth,
+		signupSource,
+	);
 }
 
 async function handleProdDevAuth(

@@ -690,6 +690,127 @@ void test("authenticated MCP telemetry receives identity and flushes through wai
 	assert.equal(flushes, 1);
 });
 
+void test("authenticated MCP captures account signup from the server path", async () => {
+	const waited: Promise<unknown>[] = [];
+	const captures: Array<{
+		userId: string;
+		signupSource: string;
+		isDemo?: boolean;
+	}> = [];
+	const executionContext = {
+		waitUntil: (promise: Promise<unknown>) => {
+			waited.push(promise);
+		},
+		passThroughOnException: () => undefined,
+		props: {},
+	} as unknown as RequestExecutionContext;
+
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({
+			extra: {
+				POSTHOG_PROJECT_TOKEN: "project-token",
+				POSTHOG_ENVIRONMENT: "production",
+			},
+		}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			createMcpTelemetry: () => null,
+			executionContext,
+			lixFetch: async () => new Response("unused"),
+			captureUserSignedUp: async (_env, auth, signupSource) => {
+				captures.push({
+					userId: auth.userId,
+					signupSource,
+					isDemo: auth.isDemo,
+				});
+			},
+			mcpTransport: async () => new Response("mcp response"),
+		},
+	);
+
+	assert.equal(await response.text(), "mcp response");
+	await Promise.all(waited);
+	assert.deepEqual(captures, [
+		{ userId: "user-123", signupSource: "mcp", isDemo: undefined },
+	]);
+});
+
+void test("POST /auth/signed-up captures account signup for a web OAuth session", async () => {
+	const captures: Array<{ userId: string; signupSource: string }> = [];
+
+	const response = await handleRequest(
+		new Request("https://example.test/auth/signed-up", {
+			method: "POST",
+			headers: { Authorization: "Bearer user-token" },
+		}),
+		env({
+			extra: {
+				POSTHOG_PROJECT_TOKEN: "project-token",
+				POSTHOG_ENVIRONMENT: "production",
+			},
+		}),
+		{
+			authenticate: authenticated(),
+			captureUserSignedUp: async (_env, auth, signupSource) => {
+				captures.push({ userId: auth.userId, signupSource });
+			},
+		},
+	);
+
+	assert.equal(response.status, 204);
+	assert.deepEqual(captures, [{ userId: "user-123", signupSource: "web" }]);
+});
+
+void test("demo MCP does not schedule an account signup capture", async () => {
+	const captures: Array<unknown> = [];
+	const waited: Promise<unknown>[] = [];
+	const response = await handleRequest(
+		new Request("https://preview.example/mcp", { method: "POST" }),
+		{
+			LIXRAY_DEMO: "1",
+			LIXRAY_DEMO_LIX_IDS: DEMO_LIX_ID,
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		{
+			executionContext: {
+				waitUntil: (promise: Promise<unknown>) => {
+					waited.push(promise);
+				},
+				passThroughOnException: () => undefined,
+				props: {},
+			} as unknown as RequestExecutionContext,
+			lixFetch: async () => new Response("ok"),
+			captureUserSignedUp: async () => {
+				captures.push("captured");
+			},
+			mcpTransport: async () => new Response("mcp response"),
+		},
+	);
+
+	assert.equal(response.status, 200);
+	await Promise.all(waited);
+	assert.deepEqual(captures, []);
+});
+
+void test("POST /auth/signed-up rejects an unauthenticated browser session", async () => {
+	const captures: Array<unknown> = [];
+	const response = await handleRequest(
+		new Request("https://example.test/auth/signed-up", { method: "POST" }),
+		env({ extra: { POSTHOG_ENVIRONMENT: "production" } }),
+		{
+			authenticate: rejected(401, "Unauthorized\n"),
+			captureUserSignedUp: async () => {
+				captures.push("captured");
+			},
+		},
+	);
+
+	assert.equal(response.status, 401);
+	assert.deepEqual(captures, []);
+});
+
 void test("official MCP PostHog token uses VITE_PUBLIC_POSTHOG_TOKEN when the project token is unset", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/mcp", { method: "POST" }),

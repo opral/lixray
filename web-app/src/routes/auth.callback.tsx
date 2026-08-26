@@ -10,7 +10,7 @@ import {
 	takeRepositoryShareJoinIntent,
 	takeRepositoryShareCapability,
 } from "~/lib/repository-share-capability";
-import { captureTelemetryImmediately } from "~/lib/telemetry";
+import { USER_SIGNED_UP_PATH } from "~/lib/user-signed-up";
 
 interface CallbackSearch {
 	code?: string;
@@ -54,18 +54,15 @@ function AuthCallbackPage() {
 					return;
 				}
 
-				// Track webapp_user_signed_up event for first-time users only
-				const userId = sessionData?.user?.id;
-				if (userId) {
-					const signupKey = `lixray.signup.${userId}`;
-					const hasTrackedSignup = window.localStorage.getItem(signupKey);
-					if (!hasTrackedSignup) {
-						const returnTo = peekAuthReturnTo();
-						await captureTelemetryImmediately("webapp_user_signed_up", {
-							auth_provider: "google",
-							signup_source: returnTo === "/open" ? "direct" : returnTo,
+				const accessToken = sessionData.session?.access_token;
+				if (accessToken) {
+					try {
+						await fetch(USER_SIGNED_UP_PATH, {
+							method: "POST",
+							headers: { Authorization: `Bearer ${accessToken}` },
 						});
-						window.localStorage.setItem(signupKey, "true");
+					} catch {
+						// Sign-in must not fail if signup telemetry is unavailable.
 					}
 				}
 

@@ -52,15 +52,25 @@ star. Missing or invalid PostHog config never prevents the server from
 starting.
 
 Web UI product counts use the `webapp_*` prefix. See
-[Product event rename](#product-event-rename).
+[Product event rename](#product-event-rename). Account creation is not a UI
+event: `lixray_user_signed_up` stays on the account plane.
+
+## Account signup
+
+`lixray_user_signed_up` fires once when a LixRay account is created, from
+every client (Google / lixray.com/home / MCP). The worker claims the account
+in Postgres and captures the event with `email` and `name` from the synced
+auth profile. Returning sign-in, OAuth callback, and MCP reconnect do not
+emit again. Slack #sign-ups listens to this name; do not rename it and do
+not emit `webapp_user_signed_up`.
 
 ## Product event rename
 
 Hard-cut emit (no dual-emit). Old unprefixed / `lixray_*` UI names are gone.
+`lixray_user_signed_up` is account-level and was not part of that rename.
 
 | Old name | New name |
 | --- | --- |
-| `lixray_user_signed_up` | `webapp_user_signed_up` |
 | `lixray_first_file_added` | `webapp_first_file_added` |
 | `lixray_oauth_consent_resolved` | `webapp_oauth_consent_resolved` |
 | `lixray_file_written` | `webapp_file_written` |

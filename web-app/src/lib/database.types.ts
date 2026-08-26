@@ -434,6 +434,14 @@ export type Database = {
 					namespace_name: string;
 				}[];
 			};
+			claim_lixray_user_signup: {
+				Args: never;
+				Returns: {
+					claimed: boolean;
+					email: string;
+					name: string;
+				}[];
+			};
 			create_lix_share_token: {
 				Args: { p_lix_id: string };
 				Returns: {
