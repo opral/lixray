@@ -1,10 +1,11 @@
 import type { AtelierEvent } from "@opral/atelier";
 import type { Lix } from "@lix-js/sdk";
+import { PRODUCT_EVENTS, type ProductEvent } from "./telemetry-events.ts";
 
 const DOCUMENT_MODIFIED_THROTTLE_MS = 30_000;
 
 type TelemetryCapture = (
-	event: string,
+	event: ProductEvent,
 	properties: Record<string, unknown>,
 ) => void;
 
@@ -32,7 +33,7 @@ export function createAtelierTelemetryHandler(
 		switch (event.type) {
 			case "document_open_attempted": {
 				const fileExtension = fileExtensionProperty(event.filePath);
-				capture("webapp_document_open_attempted", {
+				capture(PRODUCT_EVENTS.documentOpenAttempted, {
 					document_open_result: event.supported ? "viewed" : "unsupported",
 					file_extension: fileExtension,
 					...(event.supported
@@ -47,7 +48,7 @@ export function createAtelierTelemetryHandler(
 				break;
 			}
 			case "document_viewed":
-				capture("webapp_document_viewed", {
+				capture(PRODUCT_EVENTS.documentViewed, {
 					document_origin: event.documentOrigin,
 					file_extension: fileExtensionProperty(event.filePath),
 					view_kind: event.viewKind,
@@ -63,12 +64,12 @@ export function createAtelierTelemetryHandler(
 					break;
 				}
 				lastModificationByPath.set(event.filePath, capturedAt);
-				capture("webapp_document_modified", {
+				capture(PRODUCT_EVENTS.documentModified, {
 					file_extension: fileExtensionProperty(event.filePath),
 					modified_by: event.modifiedBy,
 				});
 
-				// Track webapp_first_file_added event for repositories
+				// Track first_file_added once for repositories.
 				if (context.lix && context.repositoryId && context.organizationId) {
 					const firstFileKey = `lixray.first-file.${context.repositoryId}`;
 					const hasTrackedFirstFile =
@@ -91,7 +92,7 @@ export function createAtelierTelemetryHandler(
 
 								// If there's exactly 1 file, this is the first one
 								if (fileCount === 1) {
-									capture("webapp_first_file_added", {
+									capture(PRODUCT_EVENTS.firstFileAdded, {
 										repository_id: context.repositoryId!,
 										organization_id: context.organizationId!,
 										file_extension: fileExtensionProperty(event.filePath),
@@ -109,18 +110,18 @@ export function createAtelierTelemetryHandler(
 				break;
 			}
 			case "extension_opened":
-				capture("webapp_extension_opened", {
+				capture(PRODUCT_EVENTS.extensionOpened, {
 					extension_id: normalizeExtensionId(event.extensionId),
 					panel: event.panel,
 				});
 				break;
 			case "diff_opened":
-				capture("webapp_diff_opened", {
+				capture(PRODUCT_EVENTS.diffOpened, {
 					file_extension: fileExtensionProperty(event.filePath),
 				});
 				break;
 			case "diff_resolved":
-				capture("webapp_diff_resolved", {
+				capture(PRODUCT_EVENTS.diffResolved, {
 					file_extension: fileExtensionProperty(event.filePath),
 					outcome: event.outcome,
 				});
