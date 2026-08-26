@@ -1777,6 +1777,12 @@ mod tests {
         "/../vendor/lix/packages/lix/tests/fixtures/v68_external_tombstones.snapshot"
     ));
 
+    // The oldest format the v75 migration chain still migrates in place.
+    const V72_REPOSITORY: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../vendor/lix/packages/lix/tests/fixtures/v72_filesystem_checkpoints.snapshot"
+    ));
+
     struct TestCacheRoot(PathBuf);
 
     impl TestCacheRoot {
@@ -1941,13 +1947,13 @@ mod tests {
     #[tokio::test]
     async fn explicit_server_migration_prepares_an_old_lix_for_open() {
         let storage =
-            lix_sdk::Memory::from_snapshot(V68_REPOSITORY).expect("decode frozen v68 repository");
+            lix_sdk::Memory::from_snapshot(V72_REPOSITORY).expect("decode frozen v72 repository");
         assert!(matches!(
             lix_sdk::migration::inspect_lix(&storage)
                 .await
                 .expect("inspect old Lix"),
             lix_sdk::migration::MigrationStatus::Required {
-                from_version: 68,
+                from_version: 72,
                 ..
             }
         ));
@@ -1972,6 +1978,22 @@ mod tests {
             .await
             .expect("open migrated Lix");
         lix.close().await.expect("close migrated Lix");
+    }
+
+    #[tokio::test]
+    async fn pre_v72_repository_surfaces_the_migration_hard_cut() {
+        // Lix v75 intentionally has no in-place migration below v72; the
+        // server must surface that instead of opening or looping.
+        let storage =
+            lix_sdk::Memory::from_snapshot(V68_REPOSITORY).expect("decode frozen v68 repository");
+        let (migration_state, _migration_status) = watch::channel(RuntimeOpenState::Opening);
+        let error = migrate_lix_if_required("migration-hard-cut", &storage, &migration_state)
+            .await
+            .expect_err("a pre-v72 repository must be rejected");
+        assert!(
+            format!("{error:?}").contains("predates the v75"),
+            "unexpected rejection: {error:?}"
+        );
     }
 
     fn memory_manager_with_open_gate(
