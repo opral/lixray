@@ -354,8 +354,14 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			// A historical snapshot read must not monopolize the live repository
 			// after its view closes. Exit immediately, while cold content may still
 			// be loading, then prove the same client can create a checkpoint below.
+			// Select an older checkpoint instead of "Latest checkpoint": this preview
+			// repository persists across CI reruns and may already have working changes,
+			// in which case selecting the latest checkpoint is intentionally a no-op.
 			await initialLeftHistory
-				.getByRole("button", { name: /Latest checkpoint/ })
+				.getByRole("list", { name: "Checkpoints" })
+				.locator(":scope > li")
+				.nth(1)
+				.getByRole("button")
 				.click();
 			const exitHistory = left.getByRole("button", { name: "Exit" });
 			await expect(exitHistory).toBeVisible({
