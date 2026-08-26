@@ -76,6 +76,23 @@ void test("GET /healthz identifies the exact Railway deployment", async () => {
 	});
 });
 
+void test("GET /.well-known/openai-apps-challenge returns the OpenAI verification token", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/.well-known/openai-apps-challenge"),
+		env({}),
+	);
+	assert.equal(response.status, 200);
+	assert.equal(
+		response.headers.get("content-type"),
+		"text/plain; charset=utf-8",
+	);
+	assert.equal(response.headers.get("cache-control"), "no-store");
+	assert.equal(
+		await response.text(),
+		"RBTbX7uPYZwmyPGnWXM2eMruvkdC6MlM3Xsh95AqROU",
+	);
+});
+
 void test("production email sign-in status is disabled outside production", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/auth/email"),
