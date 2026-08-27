@@ -255,10 +255,13 @@ lixray snapshot-reconcile <lix-id> <attempt-uuid>
 lixray snapshot-reconcile <lix-id> <attempt-uuid> --apply
 ```
 
-The command requires the locator's exact state and attempt, lists the derived
-staging prefix, deletes only that attempt's staging objects, and conditionally
-updates the observed locator version to `vacant`. It fails closed on a mismatch
-or lost CAS. Never delete a whole Lix prefix or alter a `snapshot` locator.
+The command requires the locator's exact state and attempt, then conditionally
+claims `restoring` as `reconciling` before it can delete anything. That claim
+prevents an in-flight restore from publishing while the command deletes only
+the derived attempt prefix and conditionally advances the locator to `vacant`.
+An interrupted command can resume the same `reconciling` attempt. It fails
+closed on a mismatch or lost CAS. Never delete a whole Lix prefix or alter a
+`snapshot` locator.
 
 Snapshots are the full-copy payload for backup and recovery, not the backup
 schedule. Production operations still need independent storage, retention,

@@ -227,6 +227,7 @@ struct SnapshotExportTombstone {
 enum StorageLocator {
     Direct,
     Restoring { attempt: uuid::Uuid },
+    Reconciling { attempt: uuid::Uuid },
     Snapshot { attempt: uuid::Uuid },
     Vacant,
 }
@@ -537,15 +538,42 @@ impl LixRuntimeManager {
             .put_opts(&path, "create".into(), PutOptions::from(PutMode::Create))
             .await
             .context("conditionally create locator smoke object")?;
+        let stale_version: UpdateVersion = created.into();
         let smoke = async {
             store
                 .put_opts(
                     &path,
                     "update".into(),
-                    PutOptions::from(PutMode::Update(created.into())),
+                    PutOptions::from(PutMode::Update(stale_version.clone())),
                 )
                 .await
                 .context("conditionally update locator smoke object")?;
+            anyhow::ensure!(
+                matches!(
+                    store
+                        .put_opts(
+                            &path,
+                            "duplicate-create".into(),
+                            PutOptions::from(PutMode::Create),
+                        )
+                        .await,
+                    Err(object_store::Error::AlreadyExists { .. })
+                ),
+                "backend did not reject duplicate conditional Create"
+            );
+            anyhow::ensure!(
+                matches!(
+                    store
+                        .put_opts(
+                            &path,
+                            "stale-update".into(),
+                            PutOptions::from(PutMode::Update(stale_version)),
+                        )
+                        .await,
+                    Err(object_store::Error::Precondition { .. })
+                ),
+                "backend did not reject stale conditional Update"
+            );
             let body = store
                 .get(&path)
                 .await
@@ -576,14 +604,40 @@ impl LixRuntimeManager {
         apply: bool,
     ) -> Result<SnapshotReconcileReport> {
         anyhow::ensure!(valid_lix_id(lix_id), "invalid Lix ID");
-        let (locator, version) = self
+        let (locator, mut version) = self
             .read_storage_locator(lix_id)
             .await?
             .context("snapshot locator does not exist")?;
         anyhow::ensure!(
-            locator == StorageLocator::Restoring { attempt },
-            "locator is not the expected restoring attempt"
+            matches!(
+                locator,
+                StorageLocator::Restoring { attempt: current }
+                    | StorageLocator::Reconciling { attempt: current }
+                    if current == attempt
+            ),
+            "locator is not the expected restoring or reconciling attempt"
         );
+        if apply && matches!(locator, StorageLocator::Restoring { .. }) {
+            let reconciling = StorageLocator::Reconciling { attempt };
+            version = match self
+                .write_storage_locator(lix_id, &reconciling, PutMode::Update(version))
+                .await
+            {
+                Ok(result) => result.into(),
+                Err(error) => match self.read_storage_locator(lix_id).await {
+                    Ok(Some((StorageLocator::Reconciling { attempt: current }, version)))
+                        if current == attempt =>
+                    {
+                        version
+                    }
+                    _ => {
+                        return Err(error).context(
+                            "failed to conditionally take ownership of snapshot reconciliation",
+                        );
+                    }
+                },
+            };
+        }
         let prefix = ObjectPath::from(self.snapshot_staging_prefix(lix_id, &attempt));
         let store = self.object_store();
         let mut objects = store.list(Some(&prefix)).boxed();
@@ -609,7 +663,7 @@ impl LixRuntimeManager {
                     let current = self.read_storage_locator(lix_id).await;
                     if !matches!(current, Ok(Some((StorageLocator::Vacant, _)))) {
                         return Err(error).context(
-                            "reconcile locator CAS failed; staging was cleaned but locator remains fail-closed",
+                            "final reconcile locator CAS failed; locator remains fail-closed",
                         );
                     }
                 }
@@ -728,7 +782,12 @@ impl LixRuntimeManager {
                         self.read_storage_locator(lix_id)
                             .await
                             .map_err(LixRuntimeError::Open)?,
-                        Some((StorageLocator::Restoring { .. } | StorageLocator::Vacant, _))
+                        Some((
+                            StorageLocator::Restoring { .. }
+                                | StorageLocator::Reconciling { .. }
+                                | StorageLocator::Vacant,
+                            _,
+                        ))
                     ) {
                         return Err(LixRuntimeError::Recovering);
                     }
@@ -820,7 +879,12 @@ impl LixRuntimeManager {
                 .map_err(LixRuntimeError::Open)?
             {
                 Some((StorageLocator::Snapshot { .. }, _)) => true,
-                Some((StorageLocator::Restoring { .. } | StorageLocator::Vacant, _)) => {
+                Some((
+                    StorageLocator::Restoring { .. }
+                    | StorageLocator::Reconciling { .. }
+                    | StorageLocator::Vacant,
+                    _,
+                )) => {
                     return Err(LixRuntimeError::Recovering);
                 }
                 Some((StorageLocator::Direct, _)) | None => self
@@ -1178,7 +1242,10 @@ impl LixRuntimeManager {
                 Some((StorageLocator::Snapshot { attempt }, _)) => {
                     return Ok(self.snapshot_staging_prefix(lix_id, &attempt));
                 }
-                Some((StorageLocator::Restoring { .. }, _)) => {
+                Some((
+                    StorageLocator::Restoring { .. } | StorageLocator::Reconciling { .. },
+                    _,
+                )) => {
                     return Err(anyhow::anyhow!("Lix snapshot restore is in progress"));
                 }
                 Some((StorageLocator::Vacant, version)) => match self
@@ -1720,7 +1787,10 @@ impl LixRuntimeManager {
                 Some((StorageLocator::Direct | StorageLocator::Snapshot { .. }, _)) => {
                     return Err(SnapshotRestoreError::AlreadyExists);
                 }
-                Some((StorageLocator::Restoring { .. }, _)) => {
+                Some((
+                    StorageLocator::Restoring { .. } | StorageLocator::Reconciling { .. },
+                    _,
+                )) => {
                     return Err(SnapshotRestoreError::Busy);
                 }
                 Some((StorageLocator::Vacant, version)) => PutMode::Update(version),
@@ -3205,10 +3275,31 @@ mod tests {
             .expect("dry-run reconciliation");
         assert_eq!(dry_run.staging_objects, 0);
         assert!(!dry_run.applied);
-        let applied = manager
-            .reconcile_snapshot_restore("restore-crash", claim.attempt, true)
+        let (_, version) = manager
+            .read_storage_locator("restore-crash")
             .await
-            .expect("apply reconciliation");
+            .expect("read restoring locator")
+            .expect("restoring locator");
+        manager
+            .write_storage_locator(
+                "restore-crash",
+                &StorageLocator::Reconciling {
+                    attempt: claim.attempt,
+                },
+                PutMode::Update(version),
+            )
+            .await
+            .expect("conditionally claim reconciliation");
+        assert!(matches!(
+            manager
+                .publish_snapshot_restore("restore-crash", claim)
+                .await,
+            Err(SnapshotRestoreError::Cleanup(_))
+        ));
+        let applied = manager
+            .reconcile_snapshot_restore("restore-crash", dry_run.attempt, true)
+            .await
+            .expect("resume and apply reconciliation");
         assert!(applied.applied);
         assert!(matches!(
             manager
