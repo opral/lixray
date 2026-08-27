@@ -134,7 +134,7 @@ enum StorageBackend {
 struct ManagerState {
     entries: HashMap<String, RuntimeEntry>,
     cleaning: HashMap<String, CleanupTombstone>,
-    failed_migrations: HashMap<String, FailedMigration>,
+    failed_upgrades: HashMap<String, FailedUpgrade>,
     shutting_down: bool,
     clock: u64,
     cleanup_sequence: u64,
@@ -146,6 +146,12 @@ struct ManagerState {
 struct FailedMigration {
     from_version: u32,
     to_version: u32,
+}
+
+#[derive(Clone, Copy)]
+enum FailedUpgrade {
+    Versioned(FailedMigration),
+    Unversioned,
 }
 
 #[cfg(test)]
@@ -200,8 +206,42 @@ enum RuntimeOpenState {
     Opening,
     Migrating { from_version: u32, to_version: u32 },
     MigrationFailed { from_version: u32, to_version: u32 },
+    UpgradeFailed,
     Ready,
     Failed(Arc<str>),
+}
+
+fn runtime_open_state_from_progress(progress: lix_sdk::OpenProgress) -> Option<RuntimeOpenState> {
+    match progress.phase {
+        lix_sdk::OpenPhase::Migrating | lix_sdk::OpenPhase::Validating => {
+            progress
+                .from_format
+                .map(|from_version| RuntimeOpenState::Migrating {
+                    from_version,
+                    to_version: progress.to_format,
+                })
+        }
+        lix_sdk::OpenPhase::Opening => Some(RuntimeOpenState::Opening),
+        _ => None,
+    }
+}
+
+fn runtime_error_from_failed_upgrade(failure: FailedUpgrade) -> LixRuntimeError {
+    match failure {
+        FailedUpgrade::Versioned(failure) => LixRuntimeError::MigrationFailed {
+            from_version: failure.from_version,
+            to_version: failure.to_version,
+        },
+        FailedUpgrade::Unversioned => LixRuntimeError::UpgradeFailed,
+    }
+}
+
+fn is_repository_upgrade_failure(error: &anyhow::Error) -> bool {
+    error.chain().any(|source| {
+        source
+            .downcast_ref::<lix_sdk::LixError>()
+            .is_some_and(|error| error.code == "LIX_ERROR_MIGRATION_FAILED")
+    })
 }
 
 struct PendingRuntimeOpen {
@@ -237,6 +277,7 @@ pub(crate) enum LixRuntimeError {
     AtCapacity { max: usize },
     Migrating { from_version: u32, to_version: u32 },
     MigrationFailed { from_version: u32, to_version: u32 },
+    UpgradeFailed,
     Recovering,
     ShuttingDown,
     Cleanup(Arc<str>),
@@ -336,11 +377,8 @@ impl LixRuntimeManager {
                     return Err(LixRuntimeError::ShuttingDown);
                 } else if let Some(cleanup) = state.cleaning.get(lix_id) {
                     GetRuntimeAction::WaitForCleanup(cleanup.done.clone())
-                } else if let Some(failure) = state.failed_migrations.get(lix_id) {
-                    return Err(LixRuntimeError::MigrationFailed {
-                        from_version: failure.from_version,
-                        to_version: failure.to_version,
-                    });
+                } else if let Some(failure) = state.failed_upgrades.get(lix_id) {
+                    return Err(runtime_error_from_failed_upgrade(*failure));
                 } else if state.entries.contains_key(lix_id) {
                     state.clock = state.clock.wrapping_add(1);
                     let now = state.clock;
@@ -461,6 +499,9 @@ impl LixRuntimeManager {
                                 to_version,
                             });
                         }
+                        RuntimeOpenState::UpgradeFailed => {
+                            return Err(LixRuntimeError::UpgradeFailed);
+                        }
                         RuntimeOpenState::Opening => {
                             if opened.changed().await.is_err() {
                                 return Err(LixRuntimeError::Open(anyhow::anyhow!(
@@ -506,14 +547,17 @@ impl LixRuntimeManager {
                         opener.done.send_replace(RuntimeOpenState::Ready);
                     }
                     Err(error) => {
-                        let failed_migration = match opener.done.borrow().clone() {
+                        let failed_upgrade = match opener.done.borrow().clone() {
                             RuntimeOpenState::Migrating {
                                 from_version,
                                 to_version,
-                            } => Some(FailedMigration {
+                            } => Some(FailedUpgrade::Versioned(FailedMigration {
                                 from_version,
                                 to_version,
-                            }),
+                            })),
+                            _ if is_repository_upgrade_failure(&error) => {
+                                Some(FailedUpgrade::Unversioned)
+                            }
                             _ => None,
                         };
                         // Railway records one physical line per log event. Preserve the
@@ -521,18 +565,30 @@ impl LixRuntimeManager {
                         // opener boundary instead of losing everything after the first
                         // newline in a structured Lix error.
                         let error = Arc::<str>::from(format!("{error:#}").replace('\n', " | "));
-                        if let Some(failure) = failed_migration {
-                            tracing::error!(
-                                lix_id = %opener.lix_id,
-                                from_version = failure.from_version,
-                                to_version = failure.to_version,
-                                error = %error,
-                                "Lix repository migration failed"
-                            );
-                            opener.done.send_replace(RuntimeOpenState::MigrationFailed {
-                                from_version: failure.from_version,
-                                to_version: failure.to_version,
-                            });
+                        if let Some(failure) = failed_upgrade {
+                            match failure {
+                                FailedUpgrade::Versioned(failure) => {
+                                    tracing::error!(
+                                        lix_id = %opener.lix_id,
+                                        from_version = failure.from_version,
+                                        to_version = failure.to_version,
+                                        error = %error,
+                                        "Lix repository migration failed"
+                                    );
+                                    opener.done.send_replace(RuntimeOpenState::MigrationFailed {
+                                        from_version: failure.from_version,
+                                        to_version: failure.to_version,
+                                    });
+                                }
+                                FailedUpgrade::Unversioned => {
+                                    tracing::error!(
+                                        lix_id = %opener.lix_id,
+                                        error = %error,
+                                        "Lix repository upgrade failed"
+                                    );
+                                    opener.done.send_replace(RuntimeOpenState::UpgradeFailed);
+                                }
+                            }
                         }
                         if let Some((sequence, done)) = manager
                             .begin_failed_open_cleanup(&opener.lix_id, &opener.runtime)
@@ -542,12 +598,12 @@ impl LixRuntimeManager {
                                 .retire_and_delete_cache_child(&opener.lix_id, sequence)
                                 .await;
                             if cleanup.is_ok() {
-                                if let Some(failure) = failed_migration {
+                                if let Some(failure) = failed_upgrade {
                                     manager
                                         .state
                                         .lock()
                                         .await
-                                        .failed_migrations
+                                        .failed_upgrades
                                         .insert(opener.lix_id.clone(), failure);
                                 }
                             }
@@ -555,7 +611,7 @@ impl LixRuntimeManager {
                                 .finish_cleanup(&opener.lix_id, sequence, done, cleanup)
                                 .await;
                         }
-                        if failed_migration.is_none() {
+                        if failed_upgrade.is_none() {
                             opener.done.send_replace(RuntimeOpenState::Failed(error));
                         }
                     }
@@ -639,16 +695,22 @@ impl LixRuntimeManager {
             })?;
         let storage_open_ms = elapsed_millis(storage_started);
 
-        migrate_lix_if_required(lix_id, &storage, opened).await?;
-
         let engine_started = Instant::now();
         // The canonical protocol owns the repository engine directly. Server
         // admission creates no hidden application session; each successful
         // handshake owns exactly one client session.
+        let open_state = opened.clone();
+        let open_progress =
+            lix_sdk::CallbackOpenProgressSink::new(move |progress: lix_sdk::OpenProgress| {
+                if let Some(state) = runtime_open_state_from_progress(progress) {
+                    open_state.send_replace(state);
+                }
+            });
         let protocol = async {
             lix_sdk::open_lix()
                 .with_storage(storage)
                 .with_telemetry(Arc::clone(&self.telemetry))
+                .with_open_progress_sink(Arc::new(open_progress))
                 .serve()
                 .await
                 .context("serve Lix repository through the canonical server protocol")
@@ -999,57 +1061,6 @@ impl LixRuntimeManager {
     }
 }
 
-async fn migrate_lix_if_required<S>(
-    lix_id: &str,
-    storage: &S,
-    opened: &watch::Sender<RuntimeOpenState>,
-) -> Result<()>
-where
-    S: lix_sdk::storage::Storage + Clone + Send + Sync + 'static,
-{
-    let migration_status = lix_sdk::migration::inspect_lix(storage)
-        .await
-        .context("inspect Lix repository format")?;
-    let lix_sdk::migration::MigrationStatus::Required {
-        from_version,
-        to_version,
-    } = migration_status
-    else {
-        // open_lix remains the authority for current, missing, malformed, and
-        // too-new repositories. This helper owns only automatic migration.
-        return Ok(());
-    };
-
-    let migration_started = Instant::now();
-    opened.send_replace(RuntimeOpenState::Migrating {
-        from_version,
-        to_version,
-    });
-    info!(
-        lix_id,
-        from_version, to_version, "migrating Lix repository format before opening"
-    );
-    let report = lix_sdk::migration::migrate_lix(
-        storage.clone(),
-        lix_sdk::migration::MigrationOptions::default(),
-    )
-    .await
-    .context("migrate Lix repository format")?;
-    // Migration is complete. Failures while opening the current engine from
-    // here onward are ordinary open failures, not migration failures.
-    opened.send_replace(RuntimeOpenState::Opening);
-    info!(
-        lix_id,
-        from_version = report.from_version,
-        to_version = report.to_version,
-        changes_rewritten = report.changes_rewritten,
-        commit_members_rewritten = report.commit_members_rewritten,
-        elapsed_ms = elapsed_millis(migration_started),
-        "migrated Lix repository format"
-    );
-    Ok(())
-}
-
 impl LixService {
     pub(crate) fn handle_protocol(
         &self,
@@ -1217,7 +1228,9 @@ async fn close_runtime_after_open(
                     .await
                     .context("wait for Lix runtime opening during shutdown")?;
             }
-            RuntimeOpenState::MigrationFailed { .. } | RuntimeOpenState::Failed(_) => return Ok(()),
+            RuntimeOpenState::MigrationFailed { .. }
+            | RuntimeOpenState::UpgradeFailed
+            | RuntimeOpenState::Failed(_) => return Ok(()),
             RuntimeOpenState::Ready => {
                 let runtime = runtime
                     .get()
@@ -1253,6 +1266,7 @@ impl fmt::Display for LixRuntimeError {
                 formatter,
                 "lix repository migration from v{from_version} to v{to_version} failed"
             ),
+            Self::UpgradeFailed => write!(formatter, "lix repository upgrade failed"),
             Self::Recovering => write!(formatter, "lix runtime is recovering"),
             Self::ShuttingDown => write!(formatter, "lix server is shutting down"),
             Self::Cleanup(error) => write!(formatter, "lix runtime cleanup: {error}"),
@@ -1767,6 +1781,11 @@ mod tests {
         http::{header, Request},
     };
     use http_body_util::BodyExt as _;
+    use lix_sdk::storage::{
+        BeginScanOptions, CoreProjection, KeyRange, ProjectedValue, PutBatch, PutEntry,
+        ReadOptions, SpaceId, Storage as _, StorageRead as _, StorageSpace, StorageWrite as _,
+        StoredValue, WriteOptions,
+    };
     use serde_json::{json, Value as JsonValue};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -1782,6 +1801,9 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../vendor/lix/packages/lix/tests/fixtures/v72_filesystem_checkpoints.snapshot"
     ));
+
+    const REPOSITORY_PROTOCOL_SPACE: StorageSpace =
+        StorageSpace::mutable(SpaceId(0x0004_0011), "repository.protocol.v1");
 
     struct TestCacheRoot(PathBuf);
 
@@ -1944,56 +1966,157 @@ mod tests {
         LixRuntimeManager::new_in_memory(max_open_lixes)
     }
 
+    async fn seed_repository_protocol(manager: &LixRuntimeManager, lix_id: &str, snapshot: &[u8]) {
+        let source = lix_sdk::Memory::from_snapshot(snapshot).expect("decode repository fixture");
+        let read = source
+            .begin_read(ReadOptions::default())
+            .await
+            .expect("open repository fixture read");
+        let mut cursor = read
+            .begin_scan(
+                REPOSITORY_PROTOCOL_SPACE,
+                KeyRange {
+                    lower: std::ops::Bound::Unbounded,
+                    upper: std::ops::Bound::Unbounded,
+                },
+                BeginScanOptions {
+                    projection: CoreProjection::FullValue,
+                    ..BeginScanOptions::default()
+                },
+            )
+            .await
+            .expect("scan repository protocol marker");
+        let mut entries = Vec::new();
+        loop {
+            let (page, has_more) = cursor
+                .next_page(lix_sdk::storage::MAX_SCAN_PAGE_ROWS)
+                .await
+                .expect("read repository protocol marker")
+                .into_parts();
+            entries.extend(page.into_iter().map(|entry| {
+                let ProjectedValue::FullValue(value) = entry.value else {
+                    panic!("repository protocol scan must return full values");
+                };
+                PutEntry {
+                    key: entry.key,
+                    value: StoredValue { bytes: value },
+                }
+            }));
+            if !has_more {
+                break;
+            }
+        }
+        drop(cursor);
+        drop(read);
+
+        let object_store = match &manager.backend {
+            StorageBackend::Memory { object_store } => Arc::clone(object_store),
+            StorageBackend::S3 { .. } => unreachable!("test manager must use in-memory storage"),
+        };
+        let target = SlateDB::open_object_store_with_options(
+            lix_id,
+            object_store,
+            SlateDBObjectStoreOptions::default(),
+        )
+        .expect("open fixture SlateDB storage");
+        let mut write = target
+            .begin_write(WriteOptions::default())
+            .await
+            .expect("begin fixture write");
+        write
+            .put_many(REPOSITORY_PROTOCOL_SPACE, PutBatch { entries })
+            .await
+            .expect("stage repository protocol marker");
+        write.commit().await.expect("publish repository fixture");
+        drop(target);
+    }
+
     #[tokio::test]
-    async fn explicit_server_migration_prepares_an_old_lix_for_open() {
+    async fn server_open_automatically_upgrades_an_old_lix() {
         let storage =
             lix_sdk::Memory::from_snapshot(V72_REPOSITORY).expect("decode frozen v72 repository");
-        assert!(matches!(
-            lix_sdk::migration::inspect_lix(&storage)
-                .await
-                .expect("inspect old Lix"),
-            lix_sdk::migration::MigrationStatus::Required {
-                from_version: 72,
-                ..
-            }
-        ));
 
         let (migration_state, migration_status) = watch::channel(RuntimeOpenState::Opening);
-        migrate_lix_if_required("migration-regression", &storage, &migration_state)
+        let progress_state = migration_state.clone();
+        let transitions = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed_transitions = Arc::clone(&transitions);
+        let progress =
+            lix_sdk::CallbackOpenProgressSink::new(move |progress: lix_sdk::OpenProgress| {
+                if let Some(state) = runtime_open_state_from_progress(progress) {
+                    observed_transitions
+                        .lock()
+                        .expect("record open transition")
+                        .push(state.clone());
+                    progress_state.send_replace(state);
+                }
+            });
+        let lix = lix_sdk::open_lix()
+            .with_storage(storage)
+            .with_open_progress_sink(Arc::new(progress))
             .await
-            .expect("migrate old Lix before opening");
+            .expect("open and migrate old Lix");
         assert!(matches!(
             *migration_status.borrow(),
             RuntimeOpenState::Opening
         ));
-        assert!(matches!(
-            lix_sdk::migration::inspect_lix(&storage)
-                .await
-                .expect("inspect migrated Lix"),
-            lix_sdk::migration::MigrationStatus::Current { .. }
-        ));
-
-        let lix = lix_sdk::open_lix()
-            .with_storage(storage)
-            .await
-            .expect("open migrated Lix");
+        let (migrating, opening) = {
+            let transitions = transitions.lock().expect("read open transitions");
+            let migrating = transitions
+                .iter()
+                .position(|state| {
+                    matches!(
+                        state,
+                        RuntimeOpenState::Migrating {
+                            from_version: 72,
+                            to_version: 76,
+                        }
+                    )
+                })
+                .expect("server bridge must expose the automatic migration");
+            let opening = transitions
+                .iter()
+                .rposition(|state| matches!(state, RuntimeOpenState::Opening))
+                .expect("server bridge must return to opening after migration");
+            (migrating, opening)
+        };
+        assert!(migrating < opening);
+        assert_eq!(lix.open_report().migration.unwrap().from_format, 72);
         lix.close().await.expect("close migrated Lix");
     }
 
     #[tokio::test]
     async fn pre_v72_repository_surfaces_the_migration_hard_cut() {
-        // Lix v75 intentionally has no in-place migration below v72; the
-        // server must surface that instead of opening or looping.
-        let storage =
-            lix_sdk::Memory::from_snapshot(V68_REPOSITORY).expect("decode frozen v68 repository");
-        let (migration_state, _migration_status) = watch::channel(RuntimeOpenState::Opening);
-        let error = migrate_lix_if_required("migration-hard-cut", &storage, &migration_state)
-            .await
-            .expect_err("a pre-v72 repository must be rejected");
-        assert!(
-            format!("{error:?}").contains("predates the v75"),
-            "unexpected rejection: {error:?}"
-        );
+        // The hard cut is rejected before Lix can emit a versioned migration
+        // progress event. Exercise the managed SlateDB path so the typed error
+        // cannot be flattened at the async opener boundary.
+        let manager = memory_manager(1);
+        seed_repository_protocol(&manager, "lix-v68", V68_REPOSITORY).await;
+
+        assert!(matches!(
+            manager.get("lix-v68").await,
+            Err(LixRuntimeError::UpgradeFailed)
+        ));
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let state = manager.state.lock().await;
+                if !state.entries.contains_key("lix-v68") && !state.cleaning.contains_key("lix-v68")
+                {
+                    assert!(matches!(
+                        state.failed_upgrades.get("lix-v68"),
+                        Some(FailedUpgrade::Unversioned)
+                    ));
+                    break;
+                }
+                drop(state);
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("failed upgrade cleanup must complete");
+        assert!(matches!(
+            manager.get("lix-v68").await,
+            Err(LixRuntimeError::UpgradeFailed)
+        ));
     }
 
     fn memory_manager_with_open_gate(
@@ -2092,12 +2215,12 @@ mod tests {
     #[tokio::test]
     async fn failed_migration_remains_terminal_for_every_caller() {
         let manager = memory_manager(1);
-        manager.state.lock().await.failed_migrations.insert(
+        manager.state.lock().await.failed_upgrades.insert(
             "lix-a".to_string(),
-            FailedMigration {
+            FailedUpgrade::Versioned(FailedMigration {
                 from_version: 68,
                 to_version: 71,
-            },
+            }),
         );
 
         assert!(matches!(

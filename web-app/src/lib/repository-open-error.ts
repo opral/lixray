@@ -1,21 +1,12 @@
-const UNSUPPORTED_STORAGE_PROTOCOL_MESSAGE =
-	"unsupported live-state hot-index storage protocol";
-const UNSUPPORTED_STORAGE_FORMAT_CODES = new Set([
-	"LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT",
-	"LIX_ERROR_STORAGE_FORMAT_UNSUPPORTED",
-]);
-
 export function formatRepositoryOpenError(caught: unknown): string {
 	const message = getErrorMessage(caught);
 	const code = getErrorCode(caught);
 
 	if (
-		(code && UNSUPPORTED_STORAGE_FORMAT_CODES.has(code)) ||
-		message.includes(UNSUPPORTED_STORAGE_PROTOCOL_MESSAGE)
+		code === "LIX_ERROR_LIX_MIGRATION_FAILED" ||
+		code === "LIX_ERROR_MIGRATION_FAILED" ||
+		code === "LIX_ERROR_REPOSITORY_UPGRADE"
 	) {
-		return "This repository was created with an older Lix storage format that this version can no longer read. Automatic migration is unavailable. Recreate the repository to continue; its existing files and history can only be recovered from an export or backup.";
-	}
-	if (code === "LIX_ERROR_LIX_MIGRATION_FAILED") {
 		return "Repository migration failed. Contact support to recover the repository.";
 	}
 
