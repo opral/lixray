@@ -904,6 +904,11 @@ export function RepositoryAtelier({
 				setMigration(null);
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
 				activeLixRef.current = session;
+				if (import.meta.env.DEV) {
+					// Dev-only escape hatch: lets the console (and agents driving
+					// the browser) run SQL against the open repository directly.
+					(window as { __lix?: unknown }).__lix = session.lix;
+				}
 				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
 
 				// Initialize telemetry handler with repository context
