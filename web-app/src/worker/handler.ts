@@ -2152,16 +2152,29 @@ function withRemoteLixCors(response: Response, request: Request): Response {
 	headers.set("access-control-allow-origin", origin);
 	headers.set("access-control-allow-credentials", "true");
 	const exposedHeaders = headers.get("access-control-expose-headers");
-	if (
-		!exposedHeaders
+	const exposedHeaderNames = new Set(
+		exposedHeaders
 			?.split(",")
-			.some((value) => value.trim().toLowerCase() === "lix-file-found")
-	) {
-		headers.set(
-			"access-control-expose-headers",
-			exposedHeaders ? `${exposedHeaders}, Lix-File-Found` : "Lix-File-Found",
-		);
+			.map((value) => value.trim())
+			.filter(Boolean) ?? [],
+	);
+	const normalizedExposedHeaderNames = new Set(
+		[...exposedHeaderNames].map((value) => value.toLowerCase()),
+	);
+	for (const headerName of [
+		"Accept-Ranges",
+		"Content-Range",
+		"Lix-File-Found",
+		"Range",
+	]) {
+		if (!normalizedExposedHeaderNames.has(headerName.toLowerCase())) {
+			exposedHeaderNames.add(headerName);
+		}
 	}
+	headers.set(
+		"access-control-expose-headers",
+		[...exposedHeaderNames].join(", "),
+	);
 	const vary = headers.get("vary");
 	if (
 		!vary?.split(",").some((value) => value.trim().toLowerCase() === "origin")

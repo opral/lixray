@@ -2139,16 +2139,30 @@ void test("canonical file metadata is exposed to cross-origin SDK clients", asyn
 			authorizeLix: resolved(LIX_A),
 			lixFetch: async () =>
 				new Response(new Uint8Array(), {
-					headers: { "Lix-File-Found": "true" },
+					headers: {
+						"Accept-Ranges": "bytes",
+						"Content-Range": "bytes 0-0/1",
+						"Lix-File-Found": "true",
+						Range: "bytes=0-0",
+					},
 				}),
 		},
 	);
 
-	assert.match(
-		response.headers.get("access-control-expose-headers") ?? "",
-		/Lix-File-Found/i,
-	);
+	const exposedHeaders =
+		response.headers.get("access-control-expose-headers") ?? "";
+	for (const headerName of [
+		"Accept-Ranges",
+		"Content-Range",
+		"Lix-File-Found",
+		"Range",
+	]) {
+		assert.match(exposedHeaders, new RegExp(headerName, "i"));
+	}
+	assert.equal(response.headers.get("accept-ranges"), "bytes");
+	assert.equal(response.headers.get("content-range"), "bytes 0-0/1");
 	assert.equal(response.headers.get("lix-file-found"), "true");
+	assert.equal(response.headers.get("range"), "bytes=0-0");
 });
 
 void test("LixRay projections stay outside the canonical Lix namespace", async () => {
