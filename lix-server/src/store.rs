@@ -2059,25 +2059,27 @@ mod tests {
             *migration_status.borrow(),
             RuntimeOpenState::Opening
         ));
-        let transitions = transitions.lock().expect("read open transitions");
-        let migrating = transitions
-            .iter()
-            .position(|state| {
-                matches!(
-                    state,
-                    RuntimeOpenState::Migrating {
-                        from_version: 72,
-                        to_version: 76,
-                    }
-                )
-            })
-            .expect("server bridge must expose the automatic migration");
-        let opening = transitions
-            .iter()
-            .rposition(|state| matches!(state, RuntimeOpenState::Opening))
-            .expect("server bridge must return to opening after migration");
+        let (migrating, opening) = {
+            let transitions = transitions.lock().expect("read open transitions");
+            let migrating = transitions
+                .iter()
+                .position(|state| {
+                    matches!(
+                        state,
+                        RuntimeOpenState::Migrating {
+                            from_version: 72,
+                            to_version: 76,
+                        }
+                    )
+                })
+                .expect("server bridge must expose the automatic migration");
+            let opening = transitions
+                .iter()
+                .rposition(|state| matches!(state, RuntimeOpenState::Opening))
+                .expect("server bridge must return to opening after migration");
+            (migrating, opening)
+        };
         assert!(migrating < opening);
-        drop(transitions);
         assert_eq!(lix.open_report().migration.unwrap().from_format, 72);
         lix.close().await.expect("close migrated Lix");
     }
