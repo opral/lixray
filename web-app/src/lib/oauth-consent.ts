@@ -1,6 +1,8 @@
+import { PRODUCT_EVENTS, type ProductEvent } from "./telemetry-events.ts";
+
 export const OAUTH_CONSENT_FALLBACK_MS = 2000;
 export const OAUTH_CONSENT_OPEN_HREF = "/open";
-export const OAUTH_CONSENT_RESOLVED_EVENT = "webapp_oauth_consent_resolved";
+export const OAUTH_CONSENT_RESOLVED_EVENT = PRODUCT_EVENTS.oauthConsentResolved;
 
 export type OAuthConsentDecision = "approve" | "deny";
 
@@ -74,7 +76,7 @@ export function oauthConsentResolvedProperties(input: {
 
 /**
  * Completes an OAuth consent decision: grant/deny with skipBrowserRedirect,
- * emit `webapp_oauth_consent_resolved`, then deliver the client
+ * emit `oauth_consent_resolved`, then deliver the client
  * `redirect_url`. HTTPS approve assigns this tab and waits ~2s before
  * offering /open. Loopback and custom-scheme approve paint /open first,
  * then hop in another browsing context so this tab survives.
@@ -88,7 +90,7 @@ export async function resolveOAuthConsentDecision(
 	},
 	deps: {
 		captureImmediately: (
-			event: string,
+			event: ProductEvent,
 			properties: OAuthConsentResolvedProperties,
 		) => void | Promise<void>;
 		navigate: (url: string) => void;

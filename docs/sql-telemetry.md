@@ -51,41 +51,31 @@ one WAU. Anonymous and demo accounts are not captured. Optional `source`
 star. Missing or invalid PostHog config never prevents the server from
 starting.
 
-Web UI product counts use the `webapp_*` prefix. See
-[Product event rename](#product-event-rename).
+Product events describe behavior, not the client that emitted them. Every
+product event uses the central semantic `object_action` name and carries
+`surface=web|mcp|server`. Both web and MCP-originated account creation emit the
+server-owned `user_signed_up` event. It carries `surface`, `signup_source`,
+`auth_provider`, `email`, and `name`; its UUID is the auth user ID so a retried
+callback is deduplicated by PostHog. See the complete
+[telemetry catalog](./telemetry-catalog.md).
 
 ## Product event rename
 
-Hard-cut emit (no dual-emit). Old unprefixed / `lixray_*` UI names are gone.
+Hard-cut emit (no dual-emit). Product and surface prefixes are removed. Client
+origin is the `surface` property.
 
-| Old name | New name |
-| --- | --- |
-| `lixray_user_signed_up` | `webapp_user_signed_up` |
-| `lixray_first_file_added` | `webapp_first_file_added` |
-| `lixray_oauth_consent_resolved` | `webapp_oauth_consent_resolved` |
-| `lixray_file_written` | `webapp_file_written` |
-| `lixray_import_completed` | `webapp_import_completed` |
-| `lixray_telemetry_probe` | `webapp_telemetry_probe` |
-| `repository_created` | `webapp_repository_created` |
-| `repository_deleted` | `webapp_repository_deleted` |
-| `workspace_opened` | `webapp_workspace_opened` |
-| `workspace_created` | `webapp_workspace_created` |
-| `workspace_deleted` | `webapp_workspace_deleted` |
-| `organization_created` | `webapp_organization_created` |
-| `document_open_attempted` | `webapp_document_open_attempted` |
-| `document_viewed` | `webapp_document_viewed` |
-| `document_modified` | `webapp_document_modified` |
-| `diff_opened` | `webapp_diff_opened` |
-| `extension_opened` | `webapp_extension_opened` |
-| `share_link_created` | `webapp_share_link_created` |
-| `share_link_copied` | `webapp_share_link_copied` |
-| `auth_session_orphaned` | `webapp_auth_session_orphaned` |
-| `resource_published` | `webapp_resource_published` |
-| `resource_unpublished` | `webapp_resource_unpublished` |
-| `organization_renamed` | `webapp_organization_renamed` |
-| `repository_renamed` | `webapp_repository_renamed` |
-| `diff_resolved` | `webapp_diff_resolved` |
-| `repository_opened` | deleted — use `$ai_span` `$ai_span_name=lix.repository.opened` |
+| Old name                                                         | Canonical name                                                 |
+| ---------------------------------------------------------------- | -------------------------------------------------------------- |
+| `lixray_user_signed_up`, `webapp_user_signed_up`                 | `user_signed_up`                                               |
+| `lixray_first_file_added`, `webapp_first_file_added`             | `first_file_added`                                             |
+| `lixray_oauth_consent_resolved`, `webapp_oauth_consent_resolved` | `oauth_consent_resolved`                                       |
+| `lixray_file_written`, `webapp_file_written`                     | `file_written`                                                 |
+| `lixray_import_completed`, `webapp_import_completed`             | `import_completed`                                             |
+| `webapp_*` product events                                        | strip `webapp_` and add `surface=web`                          |
+| `workspace_created`                                              | `repository_created`                                           |
+| `workspace_deleted`                                              | `repository_deleted`                                           |
+| `workspace_opened`                                               | deleted — use `$ai_span` `$ai_span_name=lix.repository.opened` |
+| `repository_opened`                                              | deleted — use `$ai_span` `$ai_span_name=lix.repository.opened` |
 
 Failures are not product events. Authentication validation, repository-list
 failures, and actionable repository request failures are captured as PostHog
@@ -110,17 +100,17 @@ migration, recovery, cancellation, and missing-chunk probes are not errors.
 
 Statement attributes:
 
-| Attribute | Meaning |
-| --- | --- |
-| `db.system.name` | Always `lix` |
-| `db.operation.name` | SQL operation such as `SELECT` or `INSERT` |
-| `db.query.text` | Whitespace-normalized SQL with comments and literal values removed |
-| `lix.sql.fingerprint` | BLAKE3 of the sanitized query text |
-| `lix.execution.kind` | `execute`, `transaction`, `observe`, `batch`, or `coherent_read_batch` |
-| `lix.batch.index` | Zero-based position when the statement belongs to a batch |
-| `db.response.returned_rows` | Rows returned on success |
-| `lix.rows_affected` | Rows changed on success |
-| `error.type` | Stable Lix error code on failure |
+| Attribute                   | Meaning                                                                |
+| --------------------------- | ---------------------------------------------------------------------- |
+| `db.system.name`            | Always `lix`                                                           |
+| `db.operation.name`         | SQL operation such as `SELECT` or `INSERT`                             |
+| `db.query.text`             | Whitespace-normalized SQL with comments and literal values removed     |
+| `lix.sql.fingerprint`       | BLAKE3 of the sanitized query text                                     |
+| `lix.execution.kind`        | `execute`, `transaction`, `observe`, `batch`, or `coherent_read_batch` |
+| `lix.batch.index`           | Zero-based position when the statement belongs to a batch              |
+| `db.response.returned_rows` | Rows returned on success                                               |
+| `lix.rows_affected`         | Rows changed on success                                                |
+| `error.type`                | Stable Lix error code on failure                                       |
 
 Bound parameter values and SQL literal values are never captured. MCP
 AI Observability spans remain the source for tool-level usability and

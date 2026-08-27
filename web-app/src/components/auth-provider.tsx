@@ -25,6 +25,7 @@ import {
 	captureTelemetryImmediately,
 	resetTelemetry,
 } from "~/lib/telemetry";
+import { PRODUCT_EVENTS } from "~/lib/telemetry-events";
 
 const RETURN_TO_KEY = "lixray.auth.return-to";
 
@@ -312,7 +313,7 @@ async function clearOrphanedSession(
 	};
 	await Promise.all([
 		captureTelemetryImmediately(
-			"webapp_auth_session_orphaned",
+			PRODUCT_EVENTS.authSessionOrphaned,
 			telemetryProperties,
 		),
 		captureErrorLogImmediately("Auth session orphaned", telemetryProperties),

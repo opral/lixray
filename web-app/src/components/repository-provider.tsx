@@ -31,6 +31,7 @@ import {
 	captureExceptionTelemetryAsync,
 	captureTelemetry,
 } from "~/lib/telemetry";
+import { PRODUCT_EVENTS } from "~/lib/telemetry-events";
 
 export type OrganizationRole = "owner" | "member";
 
@@ -272,7 +273,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 			if (createError) throw createError;
 			const organizationId = String(data);
 			await refresh({ organizationId });
-			captureTelemetry("webapp_organization_created");
+			captureTelemetry(PRODUCT_EVENTS.organizationCreated);
 			return organizationId;
 		},
 		[client, refresh],
@@ -297,7 +298,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				organizationId,
 				repositoryId: selectedRepositoryId ?? undefined,
 			});
-			captureTelemetry("webapp_organization_renamed");
+			captureTelemetry(PRODUCT_EVENTS.organizationRenamed);
 		},
 		[client, organizations, refresh, selectedRepositoryId],
 	);
@@ -329,7 +330,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				organizationId: targetOrganization.id,
 				repositoryId,
 			});
-			captureTelemetry("webapp_repository_created");
+			captureTelemetry(PRODUCT_EVENTS.repositoryCreated);
 		},
 		[client, organizations, refresh, selectedOrganization],
 	);
@@ -358,7 +359,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				organizationId: organization.id,
 				repositoryId,
 			});
-			captureTelemetry("webapp_repository_renamed");
+			captureTelemetry(PRODUCT_EVENTS.repositoryRenamed);
 		},
 		[client, organizations, refresh],
 	);
@@ -383,7 +384,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 			});
 			if (deleteError) throw deleteError;
 			await refresh();
-			captureTelemetry("webapp_repository_deleted");
+			captureTelemetry(PRODUCT_EVENTS.repositoryDeleted);
 		},
 		[client, organizations, refresh],
 	);

@@ -11,6 +11,7 @@ import {
 	scrubPostHogEvent,
 } from "./telemetry-privacy.ts";
 import { BROWSER_EXCEPTION_CAPTURE_CONFIG } from "./telemetry-exceptions.ts";
+import type { ProductEvent } from "./telemetry-events.ts";
 
 const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
 
@@ -147,12 +148,12 @@ export async function captureErrorLogImmediately(
 }
 
 export function captureTelemetry(
-	event: string,
+	event: ProductEvent,
 	properties: Properties = {},
 ): void {
 	void initializeTelemetry()
 		.then((posthog) => {
-			posthog?.capture(event, properties);
+			posthog?.capture(event, { ...properties, surface: "web" });
 		})
 		.catch((error: unknown) => {
 			console.warn("Failed to capture browser telemetry", error);
@@ -161,12 +162,16 @@ export function captureTelemetry(
 
 /** Captures before identity reset or navigation and bypasses request batching. */
 export async function captureTelemetryImmediately(
-	event: string,
+	event: ProductEvent,
 	properties: Properties = {},
 ): Promise<void> {
 	try {
 		const posthog = await initializeTelemetry();
-		posthog?.capture(event, properties, { send_instantly: true });
+		posthog?.capture(
+			event,
+			{ ...properties, surface: "web" },
+			{ send_instantly: true },
+		);
 	} catch (error: unknown) {
 		console.warn("Failed to capture browser telemetry", error);
 	}

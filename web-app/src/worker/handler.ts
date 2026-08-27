@@ -53,6 +53,14 @@ import {
 	resolveOfficialMcpPosthogToken,
 } from "./mcp-posthog-env.ts";
 import {
+	SIGNUP_TELEMETRY_PATH,
+	type SignupTelemetryContext,
+} from "../lib/signup-telemetry.ts";
+import {
+	captureUserSignedUp,
+	type SignupTelemetryResult,
+} from "./signup-telemetry.ts";
+import {
 	PUBLIC_PROFILE_ACTIVITY_FRESH_SECONDS,
 	PublicProfileActivityCache,
 } from "./profile-activity-cache.ts";
@@ -126,6 +134,7 @@ interface HandleRequestOptions {
 	executionContext?: RequestExecutionContext;
 	createMcpTelemetry?: typeof createMcpTelemetrySession;
 	recordMcpLixConnection?: RecordMcpLixConnection;
+	captureSignup?: typeof captureUserSignedUp;
 }
 
 const publicProfileActivityCache = new PublicProfileActivityCache();
@@ -400,6 +409,10 @@ export async function handleRequest(
 		return new Response("Not found\n", { status: 404 });
 	}
 
+	if (url.pathname === SIGNUP_TELEMETRY_PATH) {
+		return handleSignupTelemetry(request, env, options);
+	}
+
 	if (url.pathname === MCP_PROTECTED_RESOURCE_PATH) {
 		if (request.method === "OPTIONS") return corsPreflight();
 		if (request.method !== "GET") {
@@ -513,7 +526,6 @@ export async function handleRequest(
 						importSession.fileWrites.add(write.path);
 
 						const writeProps = {
-							file_path: write.path,
 							file_extension: fileExtension,
 							char_count: contentChars,
 							byte_count: contentBytes,
@@ -783,6 +795,50 @@ export async function handleRequest(
 	return (
 		options.fallback?.(request, env) ??
 		new Response("Not found\n", { status: 404 })
+	);
+}
+
+async function handleSignupTelemetry(
+	request: Request,
+	env: WorkerEnv,
+	options: HandleRequestOptions,
+): Promise<Response> {
+	if (request.method !== "POST") {
+		return new Response("Method not allowed\n", { status: 405 });
+	}
+	const authResult = await (options.authenticate ?? authenticateWithSupabase)(
+		request,
+		env,
+	);
+	if (!authResult.ok) return authResult.response;
+
+	let context: SignupTelemetryContext;
+	try {
+		const body: unknown = await request.json();
+		if (!body || typeof body !== "object") throw new Error("invalid body");
+		const candidate = body as Record<string, unknown>;
+		if (
+			(candidate.surface !== "web" && candidate.surface !== "mcp") ||
+			(candidate.source !== "direct" &&
+				candidate.source !== "oauth" &&
+				candidate.source !== "other")
+		) {
+			throw new Error("invalid context");
+		}
+		context = { surface: candidate.surface, source: candidate.source };
+	} catch {
+		return json({ error: "Invalid signup telemetry context" }, { status: 400 });
+	}
+
+	const result: SignupTelemetryResult = await (
+		options.captureSignup ?? captureUserSignedUp
+	)(env, authResult.auth, context, { fetch: options.fetch ?? fetch });
+	if (result === "failed") {
+		return json({ captured: false }, { status: 502 });
+	}
+	return json(
+		{ captured: result === "captured" },
+		{ headers: { "cache-control": "no-store" } },
 	);
 }
 
@@ -2008,6 +2064,7 @@ function isProductionOnlyPath(pathname: string): boolean {
 	return (
 		pathname === MCP_PROTECTED_RESOURCE_PATH ||
 		pathname === MCP_DOCUMENTATION_PATH ||
+		pathname === SIGNUP_TELEMETRY_PATH ||
 		pathname === "/auth/callback" ||
 		pathname === "/oauth/consent"
 	);

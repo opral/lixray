@@ -1,5 +1,6 @@
 import { PostHog, type EventMessage } from "posthog-node";
 import type { McpExecuteInputObservation } from "../mcp/tool-observation.ts";
+import { PRODUCT_EVENTS } from "../lib/telemetry-events.ts";
 import { createHash } from "node:crypto";
 import {
 	isDemoEnvironment,
@@ -29,7 +30,6 @@ interface LixrMcpTelemetryIdentity {
 
 export interface LixrMcpTelemetrySession {
 	captureFileWritten(properties: {
-		file_path: string;
 		file_extension: string;
 		char_count: number;
 		byte_count: number;
@@ -44,7 +44,6 @@ export interface LixrMcpTelemetrySession {
 	}): void;
 
 	captureFirstFileAdded(properties: {
-		file_path: string;
 		file_extension: string;
 		char_count: number;
 		byte_count: number;
@@ -128,6 +127,7 @@ export function createLixrMcpTelemetrySession(
 	): void => {
 		const baseProperties = {
 			...properties,
+			surface: "mcp",
 			oauth_client_id: identity.clientId,
 			environment: "production",
 			release_id: releaseId,
@@ -152,15 +152,23 @@ export function createLixrMcpTelemetrySession(
 
 	return {
 		captureFileWritten(properties) {
-			captureEvent("webapp_file_written", properties, properties.lix_id);
+			captureEvent(PRODUCT_EVENTS.fileWritten, properties, properties.lix_id);
 		},
 
 		captureFirstFileAdded(properties) {
-			captureEvent("webapp_first_file_added", properties, properties.lix_id);
+			captureEvent(
+				PRODUCT_EVENTS.firstFileAdded,
+				properties,
+				properties.lix_id,
+			);
 		},
 
 		captureImportCompleted(properties) {
-			captureEvent("webapp_import_completed", properties, properties.lix_id);
+			captureEvent(
+				PRODUCT_EVENTS.importCompleted,
+				properties,
+				properties.lix_id,
+			);
 		},
 
 		async flush(): Promise<void> {

@@ -31,7 +31,7 @@ void test("Atelier events expose extensions and outcomes without file paths", ()
 
 	assert.deepEqual(captured, [
 		{
-			event: "webapp_document_open_attempted",
+			event: "document_open_attempted",
 			properties: {
 				document_open_result: "viewed",
 				file_extension: "md",
@@ -40,7 +40,7 @@ void test("Atelier events expose extensions and outcomes without file paths", ()
 			},
 		},
 		{
-			event: "webapp_diff_resolved",
+			event: "diff_resolved",
 			properties: {
 				file_extension: "md",
 				outcome: "accepted",
@@ -70,10 +70,7 @@ void test("document modifications are throttled per private path", () => {
 	now += 30_000;
 	handler(event);
 
-	assert.deepEqual(captured, [
-		"webapp_document_modified",
-		"webapp_document_modified",
-	]);
+	assert.deepEqual(captured, ["document_modified", "document_modified"]);
 });
 
 void test("normalizes file extensions without retaining names", () => {
@@ -82,7 +79,7 @@ void test("normalizes file extensions without retaining names", () => {
 	assert.equal(fileExtensionProperty("/private/file.we!rd"), "werd");
 });
 
-void test("webapp_first_file_added fires once when repository gets its first file", async () => {
+void test("first_file_added fires once when repository gets its first file", async () => {
 	const captured: Array<{
 		event: string;
 		properties: Record<string, unknown>;
@@ -115,9 +112,9 @@ void test("webapp_first_file_added fires once when repository gets its first fil
 	await new Promise((resolve) => setTimeout(resolve, 10));
 
 	const firstFileEvent = captured.find(
-		(event) => event.event === "webapp_first_file_added",
+		(event) => event.event === "first_file_added",
 	);
-	assert.ok(firstFileEvent, "webapp_first_file_added event should be captured");
+	assert.ok(firstFileEvent, "first_file_added event should be captured");
 	assert.deepEqual(firstFileEvent?.properties, {
 		repository_id: "repo-123",
 		organization_id: "org-456",
