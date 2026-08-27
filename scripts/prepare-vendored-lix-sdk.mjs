@@ -6,6 +6,7 @@ import {
 	readFile,
 	rm,
 	stat,
+	symlink,
 	writeFile,
 } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
@@ -78,6 +79,13 @@ try {
 		await cp(join(preservedWasmRoot, "wasm"), join(sdkDist, "wasm"), {
 			recursive: true,
 		});
+		// build-wasm.js normally creates this source-side link. CI downloads only
+		// dist/, so recreate it before TypeScript resolves binding.browser.ts.
+		await rm(join(sdkRoot, "src", "wasm"), {
+			recursive: true,
+			force: true,
+		});
+		await symlink(join(sdkDist, "wasm"), join(sdkRoot, "src", "wasm"), "dir");
 	}
 } finally {
 	if (preservedWasmRoot) {
