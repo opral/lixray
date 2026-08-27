@@ -89,7 +89,7 @@ Supported operation families are:
 - `read-range-256k-2m`: one 256 KiB byte range from the 2 MiB binary fixture, recording selected transfer bytes through the bounded CAS range reader
 - `list-paths-100`: ordered listing of 100 corpus paths
 - `diff-file-history`: history-backed diff projection of one changed 4 KiB file's current and prior logical revisions
-- `branch-create`: create one named branch from the active head through `POST /lix/v1/branch/create`
+- `branch-create`: create one named branch from the active head through `POST /lix/v1/{uuid}/branch/create`
 - `branch-switch`: switch the live session between two sibling branches; their creation is setup outside the timed switch primitive
 - `create-4k`: create a unique valid 4 KiB JSON file in the existing `/corpus` directory
 - `update-4k`: replace an existing JSON file with 4 KiB
@@ -102,7 +102,7 @@ Supported operation families are:
 The three exact point-read operations accept `--file-read-transport json|binary`
 and default to `json`. The JSON control sends the exact `SELECT path, content`
 query and times JSON parsing plus Base64-to-`Buffer` decoding. The binary arm
-sends `GET /lix/v1/file?path=…` and times raw response-body materialization.
+sends `GET /lix/v1/{uuid}/file?path=…` and times raw response-body materialization.
 Both arms return and assert the same usable bytes; semantic envelope and row
 checks are outside the timer. Binary is deliberately rejected for non-point
 operations. Preconditioning uses the selected arm, so raw reads do not warm

@@ -4,7 +4,7 @@ use crate::LixRuntimeManager;
 use axum::{
     body::Body,
     extract::{Path, State},
-    http::{header, HeaderMap, HeaderValue, Request, StatusCode, Uri},
+    http::{header, HeaderMap, HeaderValue, Request, StatusCode},
     response::{IntoResponse, Response},
     routing::{any, get},
     Json, Router,
@@ -53,11 +53,11 @@ struct TracedBody {
     span: tracing::Span,
 }
 
-/// Keeps the lix's one shared Engine alive until an SSE body is finished.
+/// Keeps the Lix's one shared Engine alive until a storage-backed stream ends.
 /// Dropping the request-scoped service lease as soon as headers are returned
-/// would let Lix LRU eviction open a second Engine while an observation from
-/// the first Engine is still active. Finite protocol bodies are already
-/// serialized and must not delay terminal-runtime recovery.
+/// would let LRU eviction open a second Engine while an SSE observation or
+/// snapshot download from the first Engine is still active. Buffered protocol
+/// bodies do not need this lease and must not delay terminal-runtime recovery.
 struct LixLeaseBody {
     inner: Body,
     lix: Option<Arc<LixService>>,
@@ -163,7 +163,7 @@ impl http_body::Body for LixLeaseBody {
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
         let frame = Pin::new(&mut self.inner).poll_frame(context);
         if matches!(&frame, Poll::Ready(None)) {
-            // A completed SSE no longer needs to prevent LRU eviction or
+            // A completed stream no longer needs to prevent LRU eviction or
             // terminal-runtime cleanup, even when its response object remains
             // retained by an in-process caller.
             self.lix.take();
@@ -189,7 +189,9 @@ pub fn router(
     let request_id_key = protocol_request_id_key(internal_token.as_deref());
     Router::new()
         .route("/healthz", get(healthz))
-        .route("/lixes/{lix_id}/{*protocol_path}", any(lix_protocol))
+        .route("/lix/v1/{lix_id}", any(lix_protocol_root))
+        .route("/lix/v1/{lix_id}/", any(lix_protocol_root))
+        .route("/lix/v1/{lix_id}/{*protocol_path}", any(lix_protocol))
         .with_state(AppState {
             manager,
             internal_token: internal_token.map(Arc::from),
@@ -238,13 +240,30 @@ async fn lix_protocol(
     Path((lix_id, protocol_path)): Path<(String, String)>,
     request: Request<Body>,
 ) -> Response {
+    lix_protocol_route(state, lix_id, protocol_path, request).await
+}
+
+async fn lix_protocol_root(
+    State(state): State<AppState>,
+    Path(lix_id): Path<String>,
+    request: Request<Body>,
+) -> Response {
+    lix_protocol_route(state, lix_id, String::new(), request).await
+}
+
+async fn lix_protocol_route(
+    state: AppState,
+    lix_id: String,
+    protocol_path: String,
+    request: Request<Body>,
+) -> Response {
     let request_id = protocol_request_id(&state, &lix_id, &protocol_path);
     let span = tracing::info_span!(
         "lix.protocol.request",
         "otel.name" = "Lix protocol request",
         "otel.kind" = "server",
         "http.request.method" = %request.method(),
-        "http.route" = "/lixes/{lix_id}/{*protocol_path}",
+        "http.route" = "/lix/v1/{lix_id}/{*protocol_path}",
         "lix.lix.id" = %lix_id,
         "lix.protocol.path" = %protocol_path,
         "lix.request.id" = %request_id,
@@ -298,6 +317,18 @@ async fn lix_protocol_inner(
             .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
         return response;
     }
+    let canonical_lix_id = uuid::Uuid::parse_str(&lix_id)
+        .ok()
+        .map(|id| id.hyphenated().to_string());
+    if canonical_lix_id.as_deref() != Some(lix_id.as_str()) {
+        return protocol_error(
+            StatusCode::NOT_FOUND,
+            "LIX_NOT_FOUND",
+            "Lix not found.",
+            None,
+            None,
+        );
+    }
     // The bearer token authenticates the outer LixRay host route. It is not
     // part of the canonical Lix Server Protocol request.
     request.headers_mut().remove(header::AUTHORIZATION);
@@ -346,21 +377,6 @@ async fn lix_protocol_inner(
                 });
             }
         };
-
-    let path_and_query = request.uri().query().map_or_else(
-        || format!("/{protocol_path}"),
-        |query| format!("/{protocol_path}?{query}"),
-    );
-    let Ok(uri) = path_and_query.parse::<Uri>() else {
-        return protocol_error(
-            StatusCode::BAD_REQUEST,
-            "LIX_INVALID_ARGUMENT",
-            "Invalid protocol path.",
-            None,
-            None,
-        );
-    };
-    *request.uri_mut() = uri;
 
     let (notifier, signal) = server_protocol::durable_terminal_storage_signal();
     let context = ServerProtocolContext {
@@ -439,14 +455,14 @@ async fn lix_protocol_inner(
         let manager = Arc::clone(&state.manager);
         let recovery_runtime = Arc::clone(&runtime);
         let recovery_lix_id = lix_id.clone();
-        // SSE sends its HTTP status before an observation can hit storage.
-        // Keep the terminal signal in-process rather than parsing framed
-        // bytes, and do not retain this runtime after a normal stream end.
+        // Streaming responses can hit storage after sending their HTTP status.
+        // Keep the terminal signal in-process rather than parsing body bytes,
+        // and do not retain this runtime after a normal stream end.
         tokio::spawn(async move {
             if terminal_signal.wait_for_terminal_storage().await {
                 tracing::warn!(
                     lix_id = recovery_lix_id.as_str(),
-                    "observation hit a terminal storage error; recovering runtime"
+                    "protocol stream hit a terminal storage error; recovering runtime"
                 );
                 manager.recover(&recovery_lix_id, &recovery_runtime).await;
             }
@@ -459,7 +475,11 @@ async fn lix_protocol_inner(
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .and_then(|content_type| content_type.split(';').next())
-        .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("text/event-stream"));
+        .is_some_and(|media_type| {
+            let media_type = media_type.trim();
+            media_type.eq_ignore_ascii_case("text/event-stream")
+                || media_type.eq_ignore_ascii_case(server_protocol::SNAPSHOT_MEDIA_TYPE)
+        });
     let (mut parts, body) = response.into_parts();
     if let Ok(server_timing) = HeaderValue::from_str(&format!(
         "lix-server-protocol;dur={protocol_duration_ms:.3}"
@@ -845,6 +865,7 @@ mod tests {
     use tower::ServiceExt as _;
 
     const TEST_PROTOCOL_TIMEOUT: Duration = Duration::from_secs(60);
+    const LIX_A: &str = "11111111-1111-4111-8111-111111111111";
     static TEST_IDEMPOTENCY_KEY_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
     fn test_router() -> Router {
@@ -884,10 +905,22 @@ mod tests {
             .expect("unscoped response");
         assert_eq!(unscoped.status(), StatusCode::NOT_FOUND);
 
+        let legacy = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/lixes/11111111-1111-4111-8111-111111111111/lix/v1/")
+                    .body(Body::empty())
+                    .expect("legacy request"),
+            )
+            .await
+            .expect("legacy response");
+        assert_eq!(legacy.status(), StatusCode::NOT_FOUND);
+
         let handshake = app
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/lix-a/lix/v1/")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -915,6 +948,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn snapshot_is_an_authenticated_canonical_protocol_stream() {
+        const ACCOUNT_ID: &str = "01920000-0000-7000-8000-000000000601";
+        let response = test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/snapshot")
+                    .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .expect("snapshot request"),
+            )
+            .await
+            .expect("snapshot response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static(
+                server_protocol::SNAPSHOT_MEDIA_TYPE
+            ))
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store, no-transform"))
+        );
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("snapshot body")
+            .to_bytes();
+        assert!(bytes.starts_with(b"LIXSNAP"));
+    }
+
+    #[tokio::test]
+    async fn malformed_protocol_ids_do_not_open_storage() {
+        let manager = LixRuntimeManager::new_in_memory(1);
+        let app = router(
+            Arc::clone(&manager),
+            None,
+            TEST_PROTOCOL_TIMEOUT,
+            InFlightSqlRegistry::default(),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/lix/v1/not-a-uuid/snapshot")
+                    .body(Body::empty())
+                    .expect("malformed target request"),
+            )
+            .await
+            .expect("malformed target response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(manager.cached_lix_count().await, 0);
+    }
+
+    #[tokio::test]
     async fn trusted_account_is_provisioned_bound_and_attributed_end_to_end() {
         const ACCOUNT_ID: &str = "01920000-0000-7000-8000-000000000601";
         const OTHER_ACCOUNT_ID: &str = "01920000-0000-7000-8000-000000000602";
@@ -923,7 +1013,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/account-e2e/lix/v1/")
+                    .uri("/lix/v1/22222222-2222-4222-8222-222222222222/")
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
                     .body(Body::empty())
                     .expect("trusted handshake request"),
@@ -940,7 +1030,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lixes/account-e2e/lix/v1/execute")
+                    .uri("/lix/v1/22222222-2222-4222-8222-222222222222/execute")
                     .header(server_protocol::SESSION_ID_HEADER, session_id)
                     .header(server_protocol::IDEMPOTENCY_KEY_HEADER, "account-e2e-insert")
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
@@ -964,7 +1054,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lixes/account-e2e/lix/v1/execute")
+                    .uri("/lix/v1/22222222-2222-4222-8222-222222222222/execute")
                     .header(server_protocol::SESSION_ID_HEADER, session_id)
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
                     .header("content-type", "application/json")
@@ -984,7 +1074,7 @@ mod tests {
         let cross_account = app
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/account-e2e/lix/v1/")
+                    .uri("/lix/v1/22222222-2222-4222-8222-222222222222/")
                     .header(server_protocol::SESSION_ID_HEADER, session_id)
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, OTHER_ACCOUNT_ID)
                     .body(Body::empty())
@@ -1006,7 +1096,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/gzip-e2e/lix/v1/")
+                    .uri("/lix/v1/33333333-3333-4333-8333-333333333333/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -1026,7 +1116,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lixes/gzip-e2e/lix/v1/execute")
+                    .uri("/lix/v1/33333333-3333-4333-8333-333333333333/execute")
                     .header(server_protocol::SESSION_ID_HEADER, session_id)
                     .header(header::CONTENT_TYPE, "application/json")
                     .header(header::CONTENT_ENCODING, "gzip")
@@ -1078,7 +1168,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/lix-a/lix/v1/")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/")
                     .body(Body::empty())
                     .expect("unauthorized request"),
             )
@@ -1096,7 +1186,7 @@ mod tests {
         let authorized = app
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/lix-a/lix/v1/")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/")
                     .header(header::AUTHORIZATION, "Bearer secret")
                     .body(Body::empty())
                     .expect("authorized request"),
@@ -1109,13 +1199,13 @@ mod tests {
     #[tokio::test]
     async fn isolates_lix_data() {
         let app = test_router();
-        let lix_a_session = open_protocol_session(app.clone(), "lix-a").await;
+        let lix_a_session = open_protocol_session(app.clone(), LIX_A).await;
         let insert = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lixes/lix-a/lix/v1/execute")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/execute")
                     .header(
                         server_protocol::SESSION_ID_HEADER,
                         &lix_a_session,
@@ -1136,8 +1226,8 @@ mod tests {
             json_body(insert).await
         );
 
-        for (lix_id, expected) in [("lix-a", 1), ("lix-b", 0)] {
-            let session_id = if lix_id == "lix-a" {
+        for (lix_id, expected) in [(LIX_A, 1), ("lix-b", 0)] {
+            let session_id = if lix_id == LIX_A {
                 lix_a_session.clone()
             } else {
                 open_protocol_session(app.clone(), lix_id).await
@@ -1148,7 +1238,7 @@ mod tests {
                     Request::builder()
                         .method("POST")
                         .uri(format!(
-                            "/lixes/{lix_id}/lix/v1/execute"
+                            "/lix/v1/{lix_id}/execute"
                         ))
                         .header(server_protocol::SESSION_ID_HEADER, session_id)
                         .header("content-type", "application/json")
@@ -1284,7 +1374,7 @@ mod tests {
         let response = test_router()
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/contains%20space/lix/v1/")
+                    .uri("/lix/v1/contains%20space/")
                     .body(Body::empty())
                     .expect("unsafe request"),
             )
@@ -1479,7 +1569,7 @@ mod tests {
         let response = test_router()
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/lix-a/lix/v1?activeAccountId=spoofed")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111?activeAccountId=spoofed")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -1491,12 +1581,12 @@ mod tests {
     #[tokio::test]
     async fn cancelled_nonterminal_request_does_not_recover_its_runtime() {
         let manager = LixRuntimeManager::new_in_memory(1);
-        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let service = manager.get(LIX_A).await.expect("open lix runtime");
         let (notifier, signal) = server_protocol::durable_terminal_storage_signal();
         let cancellation_recovery = CancellationRecovery::new(
             signal,
             Arc::clone(&manager),
-            "lix-a".to_string(),
+            LIX_A.to_string(),
             Arc::clone(&service),
         );
 
@@ -1504,19 +1594,19 @@ mod tests {
         drop(cancellation_recovery);
         tokio::task::yield_now().await;
 
-        let still_active = manager.get("lix-a").await.expect("active lix runtime");
+        let still_active = manager.get(LIX_A).await.expect("active lix runtime");
         assert!(Arc::ptr_eq(&service, &still_active));
     }
 
     #[tokio::test]
     async fn cancellation_during_terminal_response_recovery_still_starts_runtime_recovery() {
         let manager = LixRuntimeManager::new_in_memory(1);
-        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let service = manager.get(LIX_A).await.expect("open lix runtime");
         let (notifier, signal) = server_protocol::durable_terminal_storage_signal();
         let mut cancellation_recovery = CancellationRecovery::new(
             signal,
             Arc::clone(&manager),
-            "lix-a".to_string(),
+            LIX_A.to_string(),
             Arc::clone(&service),
         );
 
@@ -1526,7 +1616,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                match manager.get("lix-a").await {
+                match manager.get(LIX_A).await {
                     Err(LixRuntimeError::Recovering) => return,
                     Ok(_) => tokio::time::sleep(Duration::from_millis(1)).await,
                     Err(error) => panic!("unexpected runtime state: {error}"),
@@ -1543,7 +1633,7 @@ mod tests {
         // cleanup tombstone and proves the old runtime was fully retired.
         let replacement = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                match manager.get("lix-a").await {
+                match manager.get(LIX_A).await {
                     Ok(replacement) => return replacement,
                     Err(LixRuntimeError::Recovering) => {
                         tokio::time::sleep(Duration::from_millis(1)).await;
@@ -1592,7 +1682,7 @@ mod tests {
         app.oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/lixes/{lix_id}/lix/v1/execute"))
+                .uri(format!("/lix/v1/{lix_id}/execute"))
                 .header(server_protocol::SESSION_ID_HEADER, session_id)
                 .header(
                     server_protocol::IDEMPOTENCY_KEY_HEADER,
@@ -1641,7 +1731,7 @@ mod tests {
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri(format!("/lixes/{lix_id}/lix/v1/"))
+                    .uri(format!("/lix/v1/{lix_id}/"))
                     .body(Body::empty())
                     .expect("protocol handshake request"),
             )

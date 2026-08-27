@@ -2904,7 +2904,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "lix"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "ahash",
  "async-stream",
@@ -2916,6 +2916,7 @@ dependencies = [
  "datafusion",
  "fastcdc",
  "futures-core",
+ "futures-io",
  "futures-lite",
  "futures-util",
  "getrandom 0.3.4",
@@ -2942,8 +2943,10 @@ dependencies = [
  "sha2",
  "smallvec",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-opentelemetry",
+ "url",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -2960,7 +2963,7 @@ dependencies = [
 
 [[package]]
 name = "lix-schema"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -2973,7 +2976,7 @@ dependencies = [
 
 [[package]]
 name = "lix-storage-slatedb"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "async-trait",
  "blake3",
@@ -3017,6 +3020,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -4857,6 +4861,7 @@ checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "futures-util",
  "hashbrown 0.15.5",

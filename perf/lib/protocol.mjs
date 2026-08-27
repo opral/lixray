@@ -81,9 +81,14 @@ export class ProtocolClient {
     if (typeof fetchImpl !== "function") {
       throw new Error("a fetch implementation is required");
     }
-    this.endpoint = `${baseUrl.replace(/\/+$/, "")}/lixes/${encodeURIComponent(
-      repositoryId,
-    )}/lix/v1`;
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+        repositoryId,
+      )
+    ) {
+      throw new Error("repositoryId must be a canonical UUID");
+    }
+    this.endpoint = `${baseUrl.replace(/\/+$/, "")}/lix/v1/${repositoryId}`;
     this.internalToken = internalToken;
     this.fetchImpl = fetchImpl;
     this.sessionId = undefined;

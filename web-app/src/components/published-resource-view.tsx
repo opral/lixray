@@ -9,6 +9,7 @@ export type PublishedResource = {
 };
 
 type PublishedResourceViewProps = {
+	repositoryId: string;
 	namespace: string;
 	repositorySlug: string;
 	repositoryName: string;
@@ -28,6 +29,7 @@ type PublishedDirectoryResponse = {
  * This view uses the two narrow, read-only surfaces exposed by the worker.
  */
 export function PublishedResourceView({
+	repositoryId,
 	namespace,
 	repositorySlug,
 	repositoryName,
@@ -54,12 +56,14 @@ export function PublishedResourceView({
 			</header>
 			{resource.kind === "directory" ? (
 				<PublishedDirectory
+					repositoryId={repositoryId}
 					namespace={namespace}
 					repositorySlug={repositorySlug}
 					resource={resource}
 				/>
 			) : (
 				<PublishedFile
+					repositoryId={repositoryId}
 					namespace={namespace}
 					repositorySlug={repositorySlug}
 					resource={resource}
@@ -70,6 +74,7 @@ export function PublishedResourceView({
 }
 
 function PublishedDirectory({
+	repositoryId,
 	namespace,
 	repositorySlug,
 	resource,
@@ -83,12 +88,7 @@ function PublishedDirectory({
 		const abort = new AbortController();
 		setListing(null);
 		setError(null);
-		void fetchPublishedDirectory(
-			namespace,
-			repositorySlug,
-			resource.path,
-			abort.signal,
-		)
+		void fetchPublishedDirectory(repositoryId, resource.path, abort.signal)
 			.then(setListing)
 			.catch((caught: unknown) => {
 				if (abort.signal.aborted) return;
@@ -99,7 +99,7 @@ function PublishedDirectory({
 				);
 			});
 		return () => abort.abort();
-	}, [namespace, repositorySlug, resource.path]);
+	}, [repositoryId, resource.path]);
 
 	return (
 		<section className="mx-auto w-[min(760px,calc(100%-48px))] py-10">
@@ -145,8 +145,7 @@ function PublishedDirectory({
 }
 
 function PublishedFile({
-	namespace,
-	repositorySlug,
+	repositoryId,
 	resource,
 }: Omit<PublishedResourceViewProps, "repositoryName">) {
 	const [bytes, setBytes] = useState<Uint8Array | null>(null);
@@ -170,12 +169,7 @@ function PublishedFile({
 		const abort = new AbortController();
 		setBytes(null);
 		setError(null);
-		void fetchPublishedFile(
-			namespace,
-			repositorySlug,
-			resource.path,
-			abort.signal,
-		)
+		void fetchPublishedFile(repositoryId, resource.path, abort.signal)
 			.then(setBytes)
 			.catch((caught: unknown) => {
 				if (abort.signal.aborted) return;
@@ -186,7 +180,7 @@ function PublishedFile({
 				);
 			});
 		return () => abort.abort();
-	}, [namespace, repositorySlug, resource.path]);
+	}, [repositoryId, resource.path]);
 
 	const text = useMemo(
 		() =>
@@ -261,14 +255,11 @@ function PublishedError({ children }: { children: string }) {
 }
 
 async function fetchPublishedDirectory(
-	namespace: string,
-	repositorySlug: string,
+	repositoryId: string,
 	path: string,
 	signal: AbortSignal,
 ): Promise<PublishedDirectoryResponse> {
-	const url = new URL(
-		protocolUrl(namespace, repositorySlug, "published-directory"),
-	);
+	const url = new URL(protocolUrl(repositoryId, "published-directory"));
 	url.searchParams.set("path", path);
 	const response = await fetch(url, { signal });
 	if (!response.ok) throw new Error("This directory is no longer public.");
@@ -276,12 +267,11 @@ async function fetchPublishedDirectory(
 }
 
 async function fetchPublishedFile(
-	namespace: string,
-	repositorySlug: string,
+	repositoryId: string,
 	path: string,
 	signal: AbortSignal,
 ): Promise<Uint8Array> {
-	const baseUrl = protocolUrl(namespace, repositorySlug, "");
+	const baseUrl = protocolUrl(repositoryId, "");
 	const publicHeaders = { "X-Lixray-Public-Path": path };
 	const handshake = await fetch(baseUrl, { headers: publicHeaders, signal });
 	if (!handshake.ok) throw new Error("This file is no longer public.");
@@ -294,7 +284,7 @@ async function fetchPublishedFile(
 		"Lix-Session-Id": payload.sessionId,
 	};
 	try {
-		const fileUrl = new URL(protocolUrl(namespace, repositorySlug, "file"));
+		const fileUrl = new URL(protocolUrl(repositoryId, "file"));
 		fileUrl.searchParams.set("path", path);
 		const response = await fetch(fileUrl, { headers: sessionHeaders, signal });
 		if (!response.ok || response.headers.get("lix-file-found") === "false") {
@@ -302,19 +292,15 @@ async function fetchPublishedFile(
 		}
 		return new Uint8Array(await response.arrayBuffer());
 	} finally {
-		void fetch(protocolUrl(namespace, repositorySlug, "session"), {
+		void fetch(protocolUrl(repositoryId, "session"), {
 			method: "DELETE",
 			headers: sessionHeaders,
 		}).catch(() => undefined);
 	}
 }
 
-function protocolUrl(
-	namespace: string,
-	repositorySlug: string,
-	endpoint: string,
-): string {
-	return `${window.location.origin}/@${namespace}/${repositorySlug}/lix/v1/${endpoint}`;
+function protocolUrl(repositoryId: string, endpoint: string): string {
+	return `${window.location.origin}/lix/v1/${repositoryId}/${endpoint}`;
 }
 
 function publishedResourceHref(

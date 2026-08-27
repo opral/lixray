@@ -61,7 +61,16 @@ export async function fetchLixService(
 
 	const sourceUrl = new URL(request.url);
 	const targetUrl = new URL(serviceUrl);
-	targetUrl.pathname = `/lixes/${encodeURIComponent(lixId)}${sourceUrl.pathname}`;
+	const expectedPrefix = `/lix/v1/${encodeURIComponent(lixId)}`;
+	if (
+		sourceUrl.pathname !== expectedPrefix &&
+		!sourceUrl.pathname.startsWith(`${expectedPrefix}/`)
+	) {
+		return new Response("Invalid canonical Lix protocol path\n", {
+			status: 400,
+		});
+	}
+	targetUrl.pathname = sourceUrl.pathname;
 	targetUrl.search = sourceUrl.search;
 
 	const headers = lixServiceRequestHeaders(

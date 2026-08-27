@@ -1,5 +1,7 @@
 import { expect, type Page, type Request, test } from "@playwright/test";
 
+const DEMO_LIX_ID = "00000000-0000-4000-8000-000000000002";
+
 test("deployed OPFS tabs share one replica and sync files, editors, and hot checkpoint history", async ({
 	browser,
 	baseURL,
@@ -37,7 +39,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		deploymentId: expectedDeploymentId,
 	});
 	const cacheProbeUrl = new URL(
-		"/@acme/launch-q3/lix/v1/sync/pull?after=18446744073709551615&limit=512",
+		`/lix/v1/${DEMO_LIX_ID}/sync/pull?after=18446744073709551615&limit=512`,
 		baseURL,
 	).toString();
 	await left.goto(new URL("/", baseURL).toString());
@@ -181,7 +183,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		});
 		page.on("response", (response) => {
 			const url = response.url();
-			if (!url.includes("/lix/v1/sync/")) return;
+			if (!url.includes(`/lix/v1/${DEMO_LIX_ID}/sync/`)) return;
 			if (
 				response.request().method() === "GET" &&
 				/\/sync\/blob(?:\?|$)/.test(url) &&

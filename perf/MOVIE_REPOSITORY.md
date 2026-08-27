@@ -43,8 +43,8 @@ Keep one file resource. Do not add separate multipart, range, media, and
 ordinary-file API families.
 
 ```text
-GET /lix/v1/file?path=...              # complete or one forward Range
-POST /lix/v1/file/upsert?path=...       # complete small file or one media part
+GET /lix/v1/{uuid}/file?path=...              # complete or one forward Range
+POST /lix/v1/{uuid}/file/upsert?path=...       # complete small file or one media part
 ```
 
 For a media part, `POST` carries a client-generated `Lix-Upload-Id` and

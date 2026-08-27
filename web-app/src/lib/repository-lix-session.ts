@@ -469,7 +469,9 @@ function lixRequestKey(
 	input: RequestInfo | URL,
 	init: RequestInit | undefined,
 ): string {
-	const path = lixRequestPath(input).split("/lix/v1/", 2)[1];
+	const path = lixRequestPath(input).match(
+		/^\/lix\/v1\/[0-9a-f-]+\/?(.*)$/,
+	)?.[1];
 	return `${lixRequestMethod(input, init)}:${path ?? lixRequestEndpoint(input)}`;
 }
 
@@ -497,8 +499,9 @@ function lixRequestPath(input: RequestInfo | URL): string {
 function lixRequestEndpoint(input: RequestInfo | URL): string {
 	try {
 		const path = lixRequestPath(input);
-		const marker = "/lix/v1/";
-		const endpoint = path.split(marker, 2)[1]?.split("/", 1)[0];
+		const endpoint = path
+			.match(/^\/lix\/v1\/[0-9a-f-]+\/?(.*)$/)?.[1]
+			?.split("/", 1)[0];
 		return endpoint || "unknown";
 	} catch {
 		return "unknown";
@@ -699,10 +702,7 @@ export function repositorySessionKey(
 function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {
 	const origin = options.origin ?? globalThis.location?.origin;
 	if (!origin) throw new Error("A repository server origin is required.");
-	return new URL(
-		`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.repositorySlug)}`,
-		origin,
-	);
+	return new URL(`/lix/${encodeURIComponent(options.repositoryId)}`, origin);
 }
 
 function isBranchNotFoundError(

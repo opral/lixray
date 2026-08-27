@@ -634,6 +634,7 @@ function RepositoryRoutePage() {
 		return (
 			<>
 				<PublishedResourceView
+					repositoryId={resolved.repositoryId}
 					namespace={resolved.organizationHandle}
 					repositorySlug={resolved.repositorySlug}
 					repositoryName={resolved.repositoryName}

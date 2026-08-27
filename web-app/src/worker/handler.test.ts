@@ -24,7 +24,6 @@ import {
 	validateMcpJwtClaims,
 	type AuthenticateRequest,
 	type AuthenticateMcpRequest,
-	type ResolveLix,
 	type RequestExecutionContext,
 	type WorkerEnv,
 } from "./handler.ts";
@@ -391,22 +390,25 @@ void test("profile activity queries file paths from every public Lix", async () 
 			lixFetch: async (lixId, request) => {
 				assert.equal(lixId, LIX_A);
 				const pathname = new URL(request.url).pathname;
-				if (pathname === "/lix/v1/") {
+				if (pathname === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 4,
+						protocolVersion: 5,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "profile-activity-session",
 					});
 				}
-				if (pathname === "/lix/v1/session" && request.method === "DELETE") {
+				if (
+					pathname === `/lix/v1/${LIX_A}/session` &&
+					request.method === "DELETE"
+				) {
 					return new Response(null, { status: 204 });
 				}
-				assert.equal(pathname, "/lix/v1/execute");
+				assert.equal(pathname, `/lix/v1/${LIX_A}/execute`);
 				const body = (await request.json()) as { sql?: unknown };
 				assert.equal(body.sql, "SELECT path FROM lix_file ORDER BY path");
 				return Response.json({
-					columns: ["path"],
+					columns: [{ name: "path", type: "text" }],
 					rows: [
 						[{ kind: "text", value: "/README.md" }],
 						[{ kind: "text", value: "/src/index.ts" }],
@@ -448,20 +450,23 @@ void test("profile activity shares one repository scan across visitors", async (
 		}),
 		lixFetch: async (_lixId: string, request: Request) => {
 			const pathname = new URL(request.url).pathname;
-			if (pathname === "/lix/v1/") {
+			if (pathname === `/lix/v1/${LIX_A}/`) {
 				return Response.json({
-					protocolVersion: 4,
+					protocolVersion: 5,
 					activeBranchId: "main",
 					activeAccountId: "00000000-0000-7000-8000-000000000002",
 					sessionId: "profile-cache-session",
 				});
 			}
-			if (pathname === "/lix/v1/session" && request.method === "DELETE") {
+			if (
+				pathname === `/lix/v1/${LIX_A}/session` &&
+				request.method === "DELETE"
+			) {
 				return new Response(null, { status: 204 });
 			}
 			executeRequests += 1;
 			return Response.json({
-				columns: ["path"],
+				columns: [{ name: "path", type: "text" }],
 				rows: [[{ kind: "text", value: "/README.md" }]],
 				rowsAffected: 0,
 				notices: [],
@@ -924,16 +929,16 @@ void test("MCP reuses successful lix authorization only within one HTTP request"
 
 	assert.equal(authorizationChecks, 2);
 	assert.deepEqual(protocolPaths, [
-		"/lix/v1/",
-		"/lix/v1/execute",
-		"/lix/v1/execute",
-		"/lix/v1/execute-batch",
-		"/lix/v1/session",
-		"/lix/v1/",
-		"/lix/v1/execute",
-		"/lix/v1/execute",
-		"/lix/v1/execute-batch",
-		"/lix/v1/session",
+		`/lix/v1/${LIX_A}/`,
+		`/lix/v1/${LIX_A}/execute`,
+		`/lix/v1/${LIX_A}/execute`,
+		"/lix/v1/11111111-1111-4111-8111-111111111111/execute-batch",
+		`/lix/v1/${LIX_A}/session`,
+		`/lix/v1/${LIX_A}/`,
+		`/lix/v1/${LIX_A}/execute`,
+		`/lix/v1/${LIX_A}/execute`,
+		"/lix/v1/11111111-1111-4111-8111-111111111111/execute-batch",
+		`/lix/v1/${LIX_A}/session`,
 	]);
 });
 
@@ -1002,11 +1007,11 @@ void test("MCP retries lix authorization after a denial", async () => {
 	assert.equal(response.status, 200);
 	assert.equal(authorizationChecks, 2);
 	assert.deepEqual(protocolPaths, [
-		"/lix/v1/",
-		"/lix/v1/execute",
-		"/lix/v1/execute",
-		"/lix/v1/execute",
-		"/lix/v1/session",
+		`/lix/v1/${LIX_A}/`,
+		`/lix/v1/${LIX_A}/execute`,
+		`/lix/v1/${LIX_A}/execute`,
+		`/lix/v1/${LIX_A}/execute`,
+		`/lix/v1/${LIX_A}/session`,
 	]);
 });
 
@@ -1576,32 +1581,39 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 	};
 	let proxiedRequest: Request | undefined;
 	const upstreamBody = [
-		{ columns: ["value"], rows: [], rowsAffected: 0, notices: [] },
+		{
+			columns: [{ name: "value", type: "integer" }],
+			rows: [],
+			rowsAffected: 0,
+			notices: [],
+		},
 	];
 	const upstream = Response.json(upstreamBody, {
 		headers: { "Server-Timing": "lix-server-protocol;dur=1.250" },
 	});
 	const response = await handleRequest(
-		new Request("https://example.test/@Acme/Launch-Q3/lix/v1/execute-batch", {
-			method: "POST",
-			headers: {
-				Authorization: "Bearer user-token",
-				origin: "https://atelier-preview.test",
-				"content-type": "application/json",
-				"Lix-Session-Id": "server-issued-session",
-				"Idempotency-Key": "client-retry-key",
-				"X-Lixray-Idempotency-Principal": "forged-client-principal",
+		new Request(
+			"https://example.test/lix/v1/11111111-1111-4111-8111-111111111111/execute-batch",
+			{
+				method: "POST",
+				headers: {
+					Authorization: "Bearer user-token",
+					origin: "https://atelier-preview.test",
+					"content-type": "application/json",
+					"Lix-Session-Id": "server-issued-session",
+					"Idempotency-Key": "client-retry-key",
+					"X-Lixray-Idempotency-Principal": "forged-client-principal",
+				},
+				body: JSON.stringify(body),
 			},
-			body: JSON.stringify(body),
-		}),
+		),
 		env({}),
 		{
 			authenticate: authenticated(),
-			resolveLix: async (namespace, lixSlug, auth) => {
-				assert.equal(namespace, "acme");
-				assert.equal(lixSlug, "launch-q3");
+			authorizeLix: async (lixId, auth) => {
+				assert.equal(lixId, LIX_A);
 				assert.equal(auth.userId, "user-123");
-				return { ok: true, lixId: LIX_A };
+				return null;
 			},
 			lixFetch: async (lixId, request) => {
 				assert.equal(lixId, LIX_A);
@@ -1627,7 +1639,10 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 	);
 	assert.match(response.headers.get("vary") ?? "", /Origin/);
 	assert.ok(proxiedRequest);
-	assert.equal(new URL(proxiedRequest.url).pathname, "/lix/v1/execute-batch");
+	assert.equal(
+		new URL(proxiedRequest.url).pathname,
+		"/lix/v1/11111111-1111-4111-8111-111111111111/execute-batch",
+	);
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
 	assert.equal(
 		proxiedRequest.headers.get("lix-session-id"),
@@ -1642,6 +1657,57 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 		"user-123",
 	);
 	assert.deepEqual(await proxiedRequest.json(), body);
+});
+
+void test("snapshot export uses the authenticated canonical protocol route", async () => {
+	let proxiedRequest: Request | undefined;
+	const response = await handleRequest(
+		remoteLixRequest("/snapshot", {
+			headers: { Authorization: "Bearer user-token" },
+		}),
+		env({}),
+		{
+			authenticate: authenticated(),
+			authorizeLix: resolved(LIX_A),
+			lixFetch: async (_lixId, request) => {
+				proxiedRequest = request;
+				return new Response(new Uint8Array([0x4c, 0x49, 0x58]), {
+					headers: {
+						"content-type": "application/vnd.lix.snapshot",
+						"cache-control": "no-store, no-transform",
+					},
+				});
+			},
+		},
+	);
+	assert.equal(response.status, 200);
+	assert.equal(
+		response.headers.get("content-type"),
+		"application/vnd.lix.snapshot",
+	);
+	assert.ok(proxiedRequest);
+	assert.equal(
+		new URL(proxiedRequest.url).pathname,
+		`/lix/v1/${LIX_A}/snapshot`,
+	);
+});
+
+void test("anonymous snapshot export is rejected before public resolution", async () => {
+	let publicLookups = 0;
+	let proxied = false;
+	const response = await handleRequest(remoteLixRequest("/snapshot"), env({}), {
+		resolvePublicLix: async () => {
+			publicLookups += 1;
+			return { ok: true, lixId: LIX_A };
+		},
+		lixFetch: async () => {
+			proxied = true;
+			return new Response("unexpected");
+		},
+	});
+	assert.equal(response.status, 401);
+	assert.equal(publicLookups, 0);
+	assert.equal(proxied, false);
 });
 
 void test("removed lix sidecar routes return 404 before auth", async () => {
@@ -1710,7 +1776,7 @@ void test("inaccessible lixes return 403 from mutation routes", async () => {
 			headers: { Authorization: "Bearer user-token" },
 		}),
 		env({}),
-		{ authenticate: authenticated(), resolveLix: unresolved(403) },
+		{ authenticate: authenticated(), authorizeLix: unresolved(403) },
 	);
 	assert.equal(response.status, 403);
 });
@@ -1729,10 +1795,9 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 			authenticate: async () => {
 				throw new Error("anonymous reads must not authenticate first");
 			},
-			resolvePublicLix: async (namespace, lixSlug) => {
+			resolvePublicLix: async (lixId) => {
 				publicLixLookups += 1;
-				assert.equal(namespace, "acme");
-				assert.equal(lixSlug, "launch-q3");
+				assert.equal(lixId, LIX_A);
 				return { ok: true, lixId: LIX_A };
 			},
 			lixFetch: async (lixId, request) => {
@@ -1786,7 +1851,7 @@ for (const endpoint of [
 		assert.equal(proxiedRequest.headers.get("authorization"), null);
 		assert.equal(
 			new URL(proxiedRequest.url).pathname,
-			`/lix/v1${endpoint.split("?")[0]}`,
+			`/lix/v1/${LIX_A}${endpoint.split("?")[0]}`,
 		);
 	});
 }
@@ -1857,7 +1922,7 @@ void test("anonymous public binary file reads forward without SQL parsing", asyn
 	assert.equal(response.headers.get("cache-control"), "no-store");
 	assert.ok(proxiedRequest);
 	const proxiedUrl = new URL(proxiedRequest.url);
-	assert.equal(proxiedUrl.pathname, "/lix/v1/file");
+	assert.equal(proxiedUrl.pathname, `/lix/v1/${LIX_A}/file`);
 	assert.equal(proxiedUrl.search, "?path=%2Fassets%2Freport.pdf");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
 	assert.equal(
@@ -1903,8 +1968,7 @@ void test("a published file resolves by path without exposing private SQL", asyn
 		assert.equal(fileResponse.status, 200);
 		assert.equal(await fileResponse.text(), "published file");
 		assert.deepEqual(lookupBody, {
-			p_namespace_handle: "acme",
-			p_lix_slug: "launch-q3",
+			p_lix_id: LIX_A,
 			p_path: "/finance/q1.pdf",
 		});
 
@@ -1944,9 +2008,8 @@ void test("a published directory exposes only its direct child names", async () 
 		remoteLixRequest("/published-directory?path=%2Ffinance"),
 		env({}),
 		{
-			resolvePublicLix: async (namespace, lixSlug, _env, publicPath) => {
-				assert.equal(namespace, "acme");
-				assert.equal(lixSlug, "launch-q3");
+			resolvePublicLix: async (lixId, _env, publicPath) => {
+				assert.equal(lixId, LIX_A);
 				assert.equal(publicPath, "/finance");
 				return { ok: true, lixId: LIX_A, scope: "path" };
 			},
@@ -1958,22 +2021,25 @@ void test("a published directory exposes only its direct child names", async () 
 				);
 				const path = new URL(request.url).pathname;
 				protocolPaths.push(path);
-				if (path === "/lix/v1/") {
+				if (path === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 4,
+						protocolVersion: 5,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "published-directory-session",
 					});
 				}
-				if (path === "/lix/v1/session") {
+				if (path === `/lix/v1/${LIX_A}/session`) {
 					assert.equal(request.method, "DELETE");
 					return new Response(null, { status: 204 });
 				}
-				assert.equal(path, "/lix/v1/execute");
+				assert.equal(path, `/lix/v1/${LIX_A}/execute`);
 				executeBody = await request.json();
 				return Response.json({
-					columns: ["path", "kind"],
+					columns: [
+						{ name: "path", type: "text" },
+						{ name: "kind", type: "text" },
+					],
 					rows: [
 						[
 							{ kind: "text", value: "/finance/budget.csv" },
@@ -2004,9 +2070,9 @@ void test("a published directory exposes only its direct child names", async () 
 	assert.match(String(executeBody.sql), /FROM lix_directory/);
 	assert.deepEqual(executeBody.params, [{ kind: "text", value: "/finance" }]);
 	assert.deepEqual(protocolPaths, [
-		"/lix/v1/",
-		"/lix/v1/execute",
-		"/lix/v1/session",
+		`/lix/v1/${LIX_A}/`,
+		`/lix/v1/${LIX_A}/execute`,
+		`/lix/v1/${LIX_A}/session`,
 	]);
 });
 
@@ -2191,7 +2257,7 @@ void test("authenticated non-members are downgraded to the public read transport
 		env({}),
 		{
 			authenticate: authenticated(),
-			resolveLix: unresolved(403),
+			authorizeLix: unresolved(403),
 			resolvePublicLix: async () => {
 				publicLixLookups += 1;
 				return { ok: true, lixId: LIX_A };
@@ -2224,7 +2290,7 @@ void test("authenticated repository members can proxy a write request", async ()
 		env({}),
 		{
 			authenticate: authenticated(),
-			resolveLix: resolved(LIX_A),
+			authorizeLix: resolved(LIX_A),
 			resolvePublicLix: async () => {
 				throw new Error("members must not use the public read transport");
 			},
@@ -2266,7 +2332,7 @@ void test("authorized requests route by lix, rewrite paths, preserve bodies and 
 		}),
 		{
 			authenticate: authenticated(),
-			resolveLix: resolved(LIX_A),
+			authorizeLix: resolved(LIX_A),
 			lixFetch: async (lixId, incoming) => {
 				assert.equal(lixId, LIX_A);
 				proxiedRequest = incoming;
@@ -2280,7 +2346,10 @@ void test("authorized requests route by lix, rewrite paths, preserve bodies and 
 
 	assert.equal(response.headers.get("content-type"), "text/event-stream");
 	assert.ok(proxiedRequest);
-	assert.equal(new URL(proxiedRequest.url).pathname, "/lix/v1/observe");
+	assert.equal(
+		new URL(proxiedRequest.url).pathname,
+		`/lix/v1/${LIX_A}/observe`,
+	);
 	assert.equal(new URL(proxiedRequest.url).search, "?mode=test");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
 	assert.equal(proxiedRequest.headers.get("x-client-header"), "kept");
@@ -2295,19 +2364,16 @@ void test("demo auth only resolves configured lixes", async () => {
 		},
 	});
 	const accepted = await handleRequest(
-		new Request(
-			"https://pr-42-lixray-preview.example/@acme/launch-q3/lix/v1/",
-			{
-				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
-			},
-		),
+		new Request(`https://pr-42-lixray-preview.example/lix/v1/${DEMO_LIX_ID}/`, {
+			headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
+		}),
 		testEnv,
 		{ lixFetch: async () => new Response("ok") },
 	);
 	assert.equal(accepted.status, 200);
 
 	const deniedResponse = await handleRequest(
-		new Request("https://pr-42-lixray-preview.example/@acme/missing/lix/v1/", {
+		new Request(`https://pr-42-lixray-preview.example/lix/v1/${LIX_A}/`, {
 			headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
 		}),
 		testEnv,
@@ -2376,7 +2442,7 @@ void test("Railway PR environments enable the built-in demo lix", async () => {
 			extra: { RAILWAY_ENVIRONMENT_NAME: name },
 		});
 		const response = await handleRequest(
-			new Request("https://preview.example/@acme/launch-q3/lix/v1/", {
+			new Request(`https://preview.example/lix/v1/${DEMO_LIX_ID}/`, {
 				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
 			}),
 			testEnv,
@@ -2400,22 +2466,28 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 				assert.equal(lixId, DEMO_LIX_ID);
 				assert.equal(request.headers.get("authorization"), null);
 				const pathname = new URL(request.url).pathname;
-				if (pathname === "/lix/v1/") {
+				if (pathname === `/lix/v1/${DEMO_LIX_ID}/`) {
 					return Response.json({
-						protocolVersion: 4,
+						protocolVersion: 5,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "demo-mcp-session",
 					});
 				}
-				if (pathname === "/lix/v1/session" && request.method === "DELETE") {
+				if (
+					pathname === `/lix/v1/${DEMO_LIX_ID}/session` &&
+					request.method === "DELETE"
+				) {
 					return new Response(null, { status: 204 });
 				}
-				assert.equal(pathname, "/lix/v1/execute");
+				assert.equal(pathname, `/lix/v1/${DEMO_LIX_ID}/execute`);
 				const body = (await request.json()) as { sql?: string };
 				if (typeof body.sql === "string" && body.sql.includes("file_count")) {
 					return Response.json({
-						columns: ["file_count", "directory_count"],
+						columns: [
+							{ name: "file_count", type: "integer" },
+							{ name: "directory_count", type: "integer" },
+						],
 						rows: [
 							[
 								{ kind: "int", value: 0 },
@@ -2427,7 +2499,12 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 					});
 				}
 				return Response.json({
-					columns: ["id", "name", "hidden", "commit_id"],
+					columns: [
+						{ name: "id", type: "text" },
+						{ name: "name", type: "text" },
+						{ name: "hidden", type: "boolean" },
+						{ name: "commit_id", type: "text" },
+					],
 					rows: [
 						[
 							{ kind: "text", value: "main" },
@@ -2666,10 +2743,7 @@ void test("Supabase namespace profile resolution distinguishes absence from inva
 });
 
 function remoteLixRequest(endpoint: string, init?: RequestInit) {
-	return new Request(
-		`https://example.test/@acme/launch-q3/lix/v1${endpoint}`,
-		init,
-	);
+	return new Request(`https://example.test/lix/v1/${LIX_A}${endpoint}`, init);
 }
 
 function mcpLixFetch(protocolPaths: string[], sessionId: string) {
@@ -2677,22 +2751,25 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 		assert.equal(lixId, LIX_A);
 		const path = new URL(request.url).pathname;
 		protocolPaths.push(path);
-		if (path === "/lix/v1/") {
+		if (path === `/lix/v1/${LIX_A}/`) {
 			return Response.json({
-				protocolVersion: 4,
+				protocolVersion: 5,
 				activeBranchId: "main",
 				activeAccountId: "00000000-0000-7000-8000-000000000002",
 				sessionId,
 			});
 		}
-		if (path === "/lix/v1/session" && request.method === "DELETE") {
+		if (path === `/lix/v1/${LIX_A}/session` && request.method === "DELETE") {
 			return new Response(null, { status: 204 });
 		}
-		if (path === "/lix/v1/execute") {
+		if (path === `/lix/v1/${LIX_A}/execute`) {
 			const body = (await request.json()) as { sql?: string };
 			if (typeof body.sql === "string" && body.sql.includes("file_count")) {
 				return Response.json({
-					columns: ["file_count", "directory_count"],
+					columns: [
+						{ name: "file_count", type: "integer" },
+						{ name: "directory_count", type: "integer" },
+					],
 					rows: [
 						[
 							{ kind: "int", value: 0 },
@@ -2704,17 +2781,20 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 				});
 			}
 			return Response.json({
-				columns: ["value"],
+				columns: [{ name: "value", type: "text" }],
 				rows: [[{ kind: "text", value: "commit-1" }]],
 				rowsAffected: 0,
 				notices: [],
 			});
 		}
-		assert.equal(path, "/lix/v1/execute-batch");
+		assert.equal(
+			path,
+			"/lix/v1/11111111-1111-4111-8111-111111111111/execute-batch",
+		);
 		return Response.json([
 			{
 				statementIndex: 0,
-				columns: ["value"],
+				columns: [{ name: "value", type: "integer" }],
 				rows: [[{ kind: "int", value: 1 }]],
 				rowsAffected: 0,
 				notices: [],
@@ -2760,15 +2840,15 @@ function rejected(status: number, body: string): AuthenticateRequest {
 	return async () => ({ ok: false, response: new Response(body, { status }) });
 }
 
-function resolved(lixId: string): ResolveLix {
-	return async () => ({ ok: true, lixId });
+function resolved(lixId: string) {
+	return async (requestedLixId: string) =>
+		requestedLixId === lixId
+			? null
+			: new Response("Lix access denied\n", { status: 403 });
 }
 
-function unresolved(status: number): ResolveLix {
-	return async () => ({
-		ok: false,
-		response: new Response("Lix access denied\n", { status }),
-	});
+function unresolved(status: number) {
+	return async () => new Response("Lix access denied\n", { status });
 }
 
 function env(options: { extra?: Partial<WorkerEnv> }): WorkerEnv {
