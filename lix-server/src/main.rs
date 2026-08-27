@@ -7,10 +7,20 @@ async fn main() -> anyhow::Result<()> {
     let telemetry = telemetry::init();
 
     let config = Config::from_env()?;
+    let command = std::env::args().nth(1);
+    let manager = LixRuntimeManager::new(&config, telemetry.lix_sink)?;
+    if let Some(command) = command {
+        let result = run_operator_command(&manager, &command).await;
+        match tokio::task::spawn_blocking(move || telemetry.trace_provider.shutdown()).await {
+            Ok(Err(error)) => tracing::warn!(%error, "failed to flush traces"),
+            Err(error) => tracing::warn!(%error, "failed to join trace shutdown task"),
+            Ok(Ok(())) => {}
+        }
+        return result;
+    }
     let listener = TcpListener::bind(&config.bind_addr)
         .await
         .with_context(|| format!("bind {}", config.bind_addr))?;
-    let manager = LixRuntimeManager::new(&config, telemetry.lix_sink)?;
     let internal_token = config.internal_token.clone();
     let snapshot_token = config.snapshot_token.clone();
     let shutdown_manager = manager.clone();
@@ -58,6 +68,47 @@ async fn main() -> anyhow::Result<()> {
     }
     result?;
     shutdown_result
+}
+
+async fn run_operator_command(manager: &LixRuntimeManager, command: &str) -> anyhow::Result<()> {
+    match command {
+        "snapshot-locator-smoke" => {
+            manager.snapshot_locator_smoke().await?;
+            println!("snapshot locator conditional Create/Update smoke test passed");
+            Ok(())
+        }
+        "snapshot-reconcile" => {
+            let mut arguments = std::env::args().skip(2);
+            let lix_id = arguments
+                .next()
+                .context("snapshot-reconcile requires <lix-id>")?;
+            let attempt = arguments
+                .next()
+                .context("snapshot-reconcile requires <attempt-uuid>")?
+                .parse()
+                .context("parse snapshot restore attempt UUID")?;
+            let apply = match arguments.next().as_deref() {
+                None => false,
+                Some("--apply") => true,
+                Some(other) => anyhow::bail!("unexpected snapshot-reconcile argument: {other}"),
+            };
+            anyhow::ensure!(
+                arguments.next().is_none(),
+                "too many snapshot-reconcile arguments"
+            );
+            let report = manager
+                .reconcile_snapshot_restore(&lix_id, attempt, apply)
+                .await?;
+            println!(
+                "lix_id={} attempt={} staging_objects={} applied={}",
+                report.lix_id, report.attempt, report.staging_objects, report.applied
+            );
+            Ok(())
+        }
+        other => anyhow::bail!(
+            "unknown command {other}; expected snapshot-locator-smoke or snapshot-reconcile"
+        ),
+    }
 }
 
 async fn shutdown_signal() {

@@ -232,15 +232,33 @@ roll back to a pre-locator binary because it would look only at the obsolete
 direct prefix. Back up and protect the complete `.lixray-storage-v1` namespace
 alongside Lix data: its locators are authoritative.
 
-To reconcile a process crash during restore, first quiesce all writers. Read
-the locator and its object-store ETag/version, prove that it is still the
-expected `restoring` attempt, delete only that attempt's derived staging prefix,
-then conditionally update the same locator version to `vacant`. Never delete a
-whole Lix prefix, never alter a `snapshot` locator, and stop if the conditional
-update loses its race. Before production enablement, run conditional Create and
-Update smoke tests against both the Compose MinIO version and the configured R2
-endpoint; the Rust unit tests exercise the same state machine with the in-memory
-object store.
+Before production enablement, stop `lix-server` and qualify conditional Create
+and Update against Compose MinIO:
+
+```sh
+docker compose run --rm lix-server \
+  /usr/local/bin/lixray snapshot-locator-smoke
+```
+
+Run the same binary command with the production R2 environment loaded and make
+its success a deployment gate. The command creates, conditionally updates,
+verifies, and deletes a unique object under `.lixray-storage-v1/smoke`; it never
+touches Lix data. The Rust unit test exercises the same command with the
+in-memory object store.
+
+To reconcile a process crash during restore, first quiesce all writers and copy
+the `attempt` UUID from the `restoring` locator. Dry-run the exact attempt, then
+apply it:
+
+```sh
+lixray snapshot-reconcile <lix-id> <attempt-uuid>
+lixray snapshot-reconcile <lix-id> <attempt-uuid> --apply
+```
+
+The command requires the locator's exact state and attempt, lists the derived
+staging prefix, deletes only that attempt's staging objects, and conditionally
+updates the observed locator version to `vacant`. It fails closed on a mismatch
+or lost CAS. Never delete a whole Lix prefix or alter a `snapshot` locator.
 
 Snapshots are the full-copy payload for backup and recovery, not the backup
 schedule. Production operations still need independent storage, retention,

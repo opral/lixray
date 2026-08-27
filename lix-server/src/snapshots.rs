@@ -754,6 +754,7 @@ mod tests {
             release: Arc::new(tokio::sync::Notify::new()),
         };
         let entered = Arc::clone(&gate.entered);
+        let release = Arc::clone(&gate.release);
         let manager = LixRuntimeManager::new_in_memory_with_restore_gate(3, gate);
         drop(manager.get("source").await.expect("seed source Lix"));
         let app = app(Arc::clone(&manager));
@@ -774,9 +775,18 @@ mod tests {
             .await
             .expect("unpublished destination response");
         assert_eq!(unpublished.status(), StatusCode::SERVICE_UNAVAILABLE);
-        tokio::time::timeout(std::time::Duration::from_secs(1), manager.shutdown())
+        let shutdown_manager = Arc::clone(&manager);
+        let shutdown_task = tokio::spawn(async move { shutdown_manager.shutdown().await });
+        tokio::task::yield_now().await;
+        assert!(
+            !shutdown_task.is_finished(),
+            "shutdown must await the non-detachable blocking close"
+        );
+        release.notify_one();
+        tokio::time::timeout(std::time::Duration::from_secs(1), shutdown_task)
             .await
             .expect("shutdown must cancel post-EOF restore work")
+            .expect("shutdown task")
             .expect("clean shutdown");
         let response = restore_task.await.expect("restore task");
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);

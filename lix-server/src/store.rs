@@ -112,6 +112,14 @@ pub struct LixRuntimeManager {
     _cache_root_lease: Option<CacheRootLease>,
 }
 
+#[doc(hidden)]
+pub struct SnapshotReconcileReport {
+    pub lix_id: String,
+    pub attempt: uuid::Uuid,
+    pub staging_objects: usize,
+    pub applied: bool,
+}
+
 type RecoveryTimeoutAction = dyn Fn() + Send + Sync;
 
 struct RecoveryWatchdog {
@@ -518,6 +526,101 @@ impl LixRuntimeManager {
 
     pub(crate) fn storage_layout(&self) -> &'static str {
         STORAGE_LAYOUT
+    }
+
+    #[doc(hidden)]
+    pub async fn snapshot_locator_smoke(&self) -> Result<()> {
+        let smoke_id = uuid::Uuid::new_v4().simple().to_string();
+        let path = self.storage_control_path("smoke", &smoke_id);
+        let store = self.object_store();
+        let created = store
+            .put_opts(&path, "create".into(), PutOptions::from(PutMode::Create))
+            .await
+            .context("conditionally create locator smoke object")?;
+        let smoke = async {
+            store
+                .put_opts(
+                    &path,
+                    "update".into(),
+                    PutOptions::from(PutMode::Update(created.into())),
+                )
+                .await
+                .context("conditionally update locator smoke object")?;
+            let body = store
+                .get(&path)
+                .await
+                .context("read locator smoke object")?
+                .bytes()
+                .await
+                .context("read locator smoke body")?;
+            anyhow::ensure!(
+                body.as_ref() == b"update",
+                "locator smoke update was not visible"
+            );
+            Ok::<(), anyhow::Error>(())
+        }
+        .await;
+        let cleanup = store
+            .delete(&path)
+            .await
+            .context("delete locator smoke object");
+        smoke?;
+        cleanup
+    }
+
+    #[doc(hidden)]
+    pub async fn reconcile_snapshot_restore(
+        &self,
+        lix_id: &str,
+        attempt: uuid::Uuid,
+        apply: bool,
+    ) -> Result<SnapshotReconcileReport> {
+        anyhow::ensure!(valid_lix_id(lix_id), "invalid Lix ID");
+        let (locator, version) = self
+            .read_storage_locator(lix_id)
+            .await?
+            .context("snapshot locator does not exist")?;
+        anyhow::ensure!(
+            locator == StorageLocator::Restoring { attempt },
+            "locator is not the expected restoring attempt"
+        );
+        let prefix = ObjectPath::from(self.snapshot_staging_prefix(lix_id, &attempt));
+        let store = self.object_store();
+        let mut objects = store.list(Some(&prefix)).boxed();
+        let mut staging_objects = 0_usize;
+        while objects
+            .try_next()
+            .await
+            .context("list snapshot staging attempt")?
+            .is_some()
+        {
+            staging_objects = staging_objects
+                .checked_add(1)
+                .context("snapshot staging object count overflowed")?;
+        }
+        if apply {
+            self.cleanup_snapshot_staging(lix_id, &attempt).await?;
+            match self
+                .write_storage_locator(lix_id, &StorageLocator::Vacant, PutMode::Update(version))
+                .await
+            {
+                Ok(_) => {}
+                Err(error) => {
+                    let current = self.read_storage_locator(lix_id).await;
+                    if !matches!(current, Ok(Some((StorageLocator::Vacant, _)))) {
+                        return Err(error).context(
+                            "reconcile locator CAS failed; staging was cleaned but locator remains fail-closed",
+                        );
+                    }
+                }
+            }
+        }
+        Ok(SnapshotReconcileReport {
+            lix_id: lix_id.to_string(),
+            attempt,
+            staging_objects,
+            applied: apply,
+        })
     }
 
     pub(crate) async fn get(
@@ -1530,23 +1633,39 @@ impl LixRuntimeManager {
             source,
         ));
         let mut shutdown = self.snapshot_shutdown.subscribe();
-        let outcome = tokio::select! {
-            joined = &mut restore => joined
-                .context("join snapshot restore attempt")
-                .and_then(|result| result),
+        let (outcome, cancelled) = tokio::select! {
+            joined = &mut restore => (joined, false),
             _ = wait_for_snapshot_shutdown(&mut shutdown) => {
-                restore.abort();
-                let _ = restore.await;
-                let cancelled = anyhow::anyhow!("snapshot restore cancelled during shutdown");
-                return match self.reject_snapshot_restore(lix_id, claim, cancelled).await {
-                    Err(SnapshotRestoreError::Restore(_)) => Err(SnapshotRestoreError::Cancelled),
-                    other => other,
+                // Do not abort: Lix restore cancellation owns background epoch
+                // cleanup that must unwind cooperatively. Once close has
+                // started, its blocking task is likewise non-detachable.
+                let Some(joined) = await_recovery_close(
+                    &self.recovery_watchdog,
+                    lix_id,
+                    &mut restore,
+                ).await else {
+                    return Err(SnapshotRestoreError::Cleanup(anyhow::anyhow!(
+                        "snapshot restore shutdown watchdog fired; staging remains quarantined"
+                    )));
                 };
+                (joined, true)
             }
         };
-        match outcome {
-            Ok(()) => self.publish_snapshot_restore(lix_id, claim).await,
-            Err(error) => self.reject_snapshot_restore(lix_id, claim, error).await,
+        let outcome = outcome
+            .context("join snapshot restore attempt")
+            .and_then(|result| result);
+        if cancelled {
+            let _ = outcome;
+            let cancelled = anyhow::anyhow!("snapshot restore cancelled during shutdown");
+            match self.reject_snapshot_restore(lix_id, claim, cancelled).await {
+                Err(SnapshotRestoreError::Restore(_)) => Err(SnapshotRestoreError::Cancelled),
+                other => other,
+            }
+        } else {
+            match outcome {
+                Ok(()) => self.publish_snapshot_restore(lix_id, claim).await,
+                Err(error) => self.reject_snapshot_restore(lix_id, claim, error).await,
+            }
         }
     }
 
@@ -1570,12 +1689,20 @@ impl LixRuntimeManager {
             .await
             .map_err(anyhow::Error::new)
             .context("restore Lix snapshot")?;
-        #[cfg(test)]
-        if let Some(gate) = &self.snapshot_restore_gate {
-            gate.entered.notify_one();
-            gate.release.notified().await;
-        }
-        close_restored_lix(lix).await
+        let close = close_restored_lix(
+            lix,
+            #[cfg(test)]
+            self.snapshot_restore_gate.clone(),
+        );
+        let Some(close_result) =
+            await_recovery_close(&self.recovery_watchdog, &lix_id, close).await
+        else {
+            // Production watchdogs abort the process. A custom callback that
+            // returns must still never release ownership to external cleanup.
+            std::future::pending::<()>().await;
+            unreachable!("pending future cannot complete");
+        };
+        close_result
     }
 
     async fn claim_snapshot_restore(
@@ -2038,9 +2165,17 @@ async fn close_lix_service(service: Arc<LixService>) -> Result<()> {
     .context("join Lix protocol close")?
 }
 
-async fn close_restored_lix(lix: lix_sdk::Lix<SlateDB>) -> Result<()> {
+async fn close_restored_lix(
+    lix: lix_sdk::Lix<SlateDB>,
+    #[cfg(test)] gate: Option<TestSnapshotRestoreGate>,
+) -> Result<()> {
     let runtime = Handle::current();
     tokio::task::spawn_blocking(move || {
+        #[cfg(test)]
+        if let Some(gate) = gate {
+            gate.entered.notify_one();
+            runtime.block_on(gate.release.notified());
+        }
         let result = runtime.block_on(lix.close()).context("close restored Lix");
         drop(lix);
         result
@@ -3041,6 +3176,47 @@ mod tests {
 
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(manager.storage_locator_read_count(), reads_after_open);
+    }
+
+    #[tokio::test]
+    async fn locator_smoke_exercises_conditional_create_and_update() {
+        memory_manager(1)
+            .snapshot_locator_smoke()
+            .await
+            .expect("conditional locator smoke");
+    }
+
+    #[tokio::test]
+    async fn reconciliation_requires_the_exact_attempt_and_cas_to_vacant() {
+        let manager = memory_manager(1);
+        let claim = manager
+            .claim_snapshot_restore("restore-crash")
+            .await
+            .expect("claim restore");
+        let wrong_attempt = uuid::Uuid::new_v4();
+        assert!(manager
+            .reconcile_snapshot_restore("restore-crash", wrong_attempt, false)
+            .await
+            .is_err());
+
+        let dry_run = manager
+            .reconcile_snapshot_restore("restore-crash", claim.attempt, false)
+            .await
+            .expect("dry-run reconciliation");
+        assert_eq!(dry_run.staging_objects, 0);
+        assert!(!dry_run.applied);
+        let applied = manager
+            .reconcile_snapshot_restore("restore-crash", claim.attempt, true)
+            .await
+            .expect("apply reconciliation");
+        assert!(applied.applied);
+        assert!(matches!(
+            manager
+                .read_storage_locator("restore-crash")
+                .await
+                .expect("read reconciled locator"),
+            Some((StorageLocator::Vacant, _))
+        ));
     }
 
     #[tokio::test]
