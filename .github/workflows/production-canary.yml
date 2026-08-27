@@ -30,5 +30,5 @@ jobs:
 
       - name: Check public canary repository
         env:
-          LIXRAY_CANARY_REPOSITORY_URL: ${{ vars.LIXRAY_CANARY_REPOSITORY_URL || 'https://lixray.com/@dev/ci-repo' }}
+          LIXRAY_CANARY_LIX_URL: ${{ vars.LIXRAY_CANARY_LIX_URL }}
         run: node scripts/check-production-lix.mjs

@@ -387,7 +387,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		const lix = await openLix({
 			server: {
 				mode: "remote",
-				url: "https://mcp.lixray.invalid",
+				url: `https://mcp.lixray.invalid/lix/${lixId}`,
 				fetch: (input: RequestInfo | URL, init?: RequestInit) =>
 					this.protocolFetch(lixId, input, init),
 			},
@@ -495,47 +495,53 @@ function decodeWireParam(
 
 function encodeExecuteResult(result: LixExecuteResult): ExecuteResponse {
 	return {
-		columns: [...result.columns],
+		columns: result.columns.map((column) => column.name),
 		rows: result.rows.map((row) =>
-			result.columns.map((column) => encodeLixValue(row.value(column))),
+			result.columns.map((column) =>
+				encodeLixValue(row[column.name], column.type),
+			),
 		),
 		rowsAffected: result.rowsAffected,
 		notices: result.notices.map((notice) => ({ ...notice })),
 	};
 }
 
-type LixResultValue = ReturnType<LixExecuteResult["rows"][number]["value"]>;
-
 function encodeLixValue(
-	value: LixResultValue,
+	value: unknown,
+	kind: LixExecuteResult["columns"][number]["type"],
 ): ExecuteResponse["rows"][number][number] {
-	const jsValue = value.toJS();
-	switch (value.kind) {
+	if (value === null) return { kind: "null", value: null };
+	switch (kind) {
 		case "null":
 			return { kind: "null", value: null };
 		case "boolean":
-			return { kind: "bool", value: jsValue as boolean };
+			if (typeof value === "boolean") return { kind: "bool", value };
+			break;
 		case "integer":
-			return { kind: "int", value: jsValue as number };
+			if (typeof value === "number") return { kind: "int", value };
+			break;
 		case "real":
-			return { kind: "float", value: jsValue as number };
+			if (typeof value === "number") return { kind: "float", value };
+			break;
 		case "text":
-			return { kind: "text", value: jsValue as string };
+			if (typeof value === "string") return { kind: "text", value };
+			break;
 		case "timestamptz":
-			return { kind: "timestamp", value: jsValue as string };
+			if (typeof value === "string") return { kind: "timestamp", value };
+			break;
 		case "jsonb":
-			return { kind: "json", value: jsValue };
+			return { kind: "json", value };
 		case "blob": {
-			const bytes = value.asBytes();
-			if (!bytes) {
-				throw createLixError(
-					"upstream_error",
-					"Lix returned an invalid blob value.",
-				);
+			if (value instanceof Uint8Array) {
+				return { kind: "blob", base64: bytesToBase64(value) };
 			}
-			return { kind: "blob", base64: bytesToBase64(bytes) };
+			break;
 		}
 	}
+	throw createLixError(
+		"upstream_error",
+		`Lix returned an invalid ${kind} value.`,
+	);
 }
 
 function asLixError(caught: unknown): LixError {

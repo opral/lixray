@@ -116,7 +116,6 @@ interface HandleRequestOptions {
 	authenticate?: AuthenticateRequest;
 	authenticateMcp?: AuthenticateMcpRequest;
 	authorizeLix?: AuthorizeLix;
-	resolveLix?: ResolveLix;
 	resolvePublicLix?: ResolvePublicLix;
 	resolveNamespaceProfile?: ResolveNamespaceProfile;
 	resolvePublicProfileRepositories?: ResolvePublicProfileRepositories;
@@ -172,25 +171,13 @@ type AuthorizeLix = (
 	env: WorkerEnv,
 ) => Promise<Response | null>;
 
-export type ResolveLix = (
-	namespace: string,
-	lixSlug: string,
-	auth: AuthenticatedUser,
-	env: WorkerEnv,
-) => Promise<LixResolution>;
-
-type LixResolution =
-	| { ok: true; lixId: string }
-	| { ok: false; response: Response };
-
 /**
  * Resolves a live lix for the public read transport. This deliberately
  * does not use the member-scoped lix lookup: a valid browser JWT alone
  * must never turn a public reader into an editor.
  */
 type ResolvePublicLix = (
-	namespace: string,
-	lixSlug: string,
+	lixId: string,
 	env: WorkerEnv,
 	publicPath?: string,
 ) => Promise<PublicLixResolution>;
@@ -198,6 +185,8 @@ type ResolvePublicLix = (
 type PublicLixResolution =
 	| { ok: true; lixId: string; scope?: "repository" | "path" }
 	| { ok: false; response: Response };
+
+type LixResolution = PublicLixResolution;
 
 export type ResolveNamespaceProfile = (
 	namespaceId: string,
@@ -238,7 +227,10 @@ type McpClaimsValidation =
 			description: string;
 	  };
 
-const REMOTE_LIX_API_PATH = /^\/@([^/]+)\/([^/]+)\/lix\/v1(?:\/(.*))?$/;
+const REMOTE_LIX_API_PATH =
+	/^\/lix\/v1\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(.*))?$/;
+const PUBLISHED_LIX_DIRECTORY_PATH =
+	/^\/api\/published\/lix\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/directory$/;
 const PROD_DEV_AUTH_PATH = "/auth/email";
 const OPENAI_APPS_CHALLENGE_PATH = "/.well-known/openai-apps-challenge";
 const OPENAI_APPS_CHALLENGE_TOKEN =
@@ -256,8 +248,6 @@ const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 // account. Protocol principals are persisted as lix_account IDs, so an
 // arbitrary service label is not valid here.
 const LIX_ANONYMOUS_ACCOUNT_ID = "00000000-0000-7000-8000-000000000002";
-const ORGANIZATION_HANDLE_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
-const LIX_SLUG_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,99}$/;
 
 type ServerTimingMetric = {
 	readonly name:
@@ -645,31 +635,54 @@ export async function handleRequest(
 		}
 	}
 
+	const publishedLixDirectoryMatch = PUBLISHED_LIX_DIRECTORY_PATH.exec(
+		url.pathname,
+	);
+	if (publishedLixDirectoryMatch) {
+		if (request.method !== "GET") {
+			return new Response("Method not allowed\n", { status: 405 });
+		}
+		const lixId = publishedLixDirectoryMatch[1];
+		const publicPath = url.searchParams.get("path") ?? undefined;
+		if (!publicPath || !options.lixFetch) return lixNotFound().response;
+		const publicResolution = await (
+			options.resolvePublicLix ?? resolvePublicLixWithSupabase
+		)(lixId, env, publicPath);
+		if (!publicResolution.ok) return publicResolution.response;
+		try {
+			return json(
+				await listPublishedDirectory(
+					publicResolution.lixId,
+					publicPath,
+					env,
+					options.lixFetch,
+					request.signal,
+				),
+			);
+		} catch (caught) {
+			console.error("Unable to list a published directory", caught);
+			return new Response("Published directory is unavailable\n", {
+				status: 502,
+			});
+		}
+	}
+
 	const remoteLixMatch = REMOTE_LIX_API_PATH.exec(url.pathname);
 	if (remoteLixMatch) {
 		if (request.method === "OPTIONS") return remoteLixCorsPreflight(request);
 		const response = await (async () => {
 			const serverTimings: ServerTimingMetric[] = [];
-			const namespace = normalizedRouteSegment(remoteLixMatch[1]);
-			const lixSlug = normalizedRouteSegment(remoteLixMatch[2]);
-			if (
-				!namespace ||
-				!lixSlug ||
-				!ORGANIZATION_HANDLE_PATTERN.test(namespace) ||
-				!LIX_SLUG_PATTERN.test(lixSlug)
-			) {
-				return new Response("Invalid lix path\n", { status: 400 });
-			}
-
-			const endpoint = remoteLixMatch[3]?.replace(/\/+$/, "") ?? "";
-			const protocolPath = `/lix/v1${endpoint ? `/${endpoint}` : "/"}`;
+			const lixId = remoteLixMatch[1];
+			const endpoint = remoteLixMatch[2]?.replace(/\/+$/, "") ?? "";
+			const protocolPath = `/lix/v1/${lixId}${endpoint ? `/${endpoint}` : "/"}`;
 			const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
 			const publicPath =
-				(endpoint === "file" || endpoint === "published-directory"
+				(endpoint === "file"
 					? url.searchParams.get("path")
 					: request.headers.get("x-lixray-public-path")) ?? undefined;
 
 			const authenticate = options.authenticate ?? authenticateWithSupabase;
+			const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
 			const authCheckStartedAt = performance.now();
 			if (bearerToken(request)) {
 				const authResult = await measureServerTiming(
@@ -678,24 +691,18 @@ export async function handleRequest(
 					() => authenticate(request, env),
 				);
 				if (authResult.ok) {
-					const resolution = await measureServerTiming(
+					const authorizationFailure = await measureServerTiming(
 						serverTimings,
 						"lixray-web-resolve",
-						() =>
-							(options.resolveLix ?? resolveLixWithSupabase)(
-								namespace,
-								lixSlug,
-								authResult.auth,
-								env,
-							),
+						() => authorizeLix(lixId, authResult.auth, env),
 					);
-					if (resolution.ok) {
+					if (authorizationFailure === null) {
 						const response = await measureServerTiming(
 							serverTimings,
 							"lixray-server-roundtrip",
 							() =>
 								fetchLixRequest(
-									resolution.lixId,
+									lixId,
 									request,
 									protocolPath,
 									env,
@@ -708,7 +715,7 @@ export async function handleRequest(
 					// A signed-in non-member falls through to the public read
 					// transport instead of a dead end.
 					if (!publicReadRequest) {
-						return withServerTimings(resolution.response, serverTimings);
+						return withServerTimings(authorizationFailure, serverTimings);
 					}
 				} else {
 					// A bearer token was supplied but could not be authenticated. Do not
@@ -729,8 +736,7 @@ export async function handleRequest(
 				"lixray-web-resolve",
 				() =>
 					(options.resolvePublicLix ?? resolvePublicLixWithSupabase)(
-						namespace,
-						lixSlug,
+						lixId,
 						env,
 						publicPath,
 					),
@@ -740,44 +746,9 @@ export async function handleRequest(
 			}
 			if (
 				publicResolution.scope === "path" &&
-				!(
-					!endpoint ||
-					endpoint === "session" ||
-					endpoint === "file" ||
-					endpoint === "published-directory"
-				)
+				!(!endpoint || endpoint === "session" || endpoint === "file")
 			) {
 				return withServerTimings(lixNotFound().response, serverTimings);
-			}
-			if (endpoint === "published-directory") {
-				if (!publicPath || !options.lixFetch) {
-					return withServerTimings(lixNotFound().response, serverTimings);
-				}
-				try {
-					const listing = await measureServerTiming(
-						serverTimings,
-						"lixray-server-roundtrip",
-						() =>
-							listPublishedDirectory(
-								publicResolution.lixId,
-								publicPath,
-								env,
-								options.lixFetch as NonNullable<
-									HandleRequestOptions["lixFetch"]
-								>,
-								request.signal,
-							),
-					);
-					return withServerTimings(json(listing), serverTimings);
-				} catch (caught) {
-					console.error("Unable to list a published directory", caught);
-					return withServerTimings(
-						new Response("Published directory is unavailable\n", {
-							status: 502,
-						}),
-						serverTimings,
-					);
-				}
 			}
 			const mutationRejection = await rejectPublicMutation(request, endpoint);
 			if (mutationRejection) {
@@ -1780,20 +1751,18 @@ function lixResolutionUnavailable(): {
 }
 
 /**
- * The public route resolver is deliberately separate from member resolution.
- * It exposes only live route metadata through a security-definer RPC that is
- * callable anonymously.
+ * Public resolution is deliberately separate from member authorization. It
+ * exposes only live publication state through an anonymous security-definer
+ * RPC keyed by the immutable Lix ID.
  */
 async function resolvePublicLixWithSupabase(
-	namespace: string,
-	lixSlug: string,
+	lixId: string,
 	env: WorkerEnv,
 	publicPath?: string,
 ): Promise<PublicLixResolution> {
 	if (isDemoMode(env)) {
 		const lix = demoLixSummaries(env).find(
-			(candidate) =>
-				candidate.namespace.handle === namespace && candidate.slug === lixSlug,
+			(candidate) => candidate.id === lixId,
 		);
 		return lix ? { ok: true, lixId: lix.id } : lixNotFound();
 	}
@@ -1807,7 +1776,7 @@ async function resolvePublicLixWithSupabase(
 	}
 
 	const lookupUrl = new URL(
-		"/rest/v1/rpc/resolve_public_lix_by_route",
+		"/rest/v1/rpc/resolve_public_lix",
 		env.SUPABASE_URL,
 	);
 	let response: Response;
@@ -1820,8 +1789,7 @@ async function resolvePublicLixWithSupabase(
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({
-				p_namespace_handle: namespace,
-				p_lix_slug: lixSlug,
+				p_lix_id: lixId,
 				...(publicPath ? { p_path: publicPath } : {}),
 			}),
 		});
@@ -1872,7 +1840,6 @@ function isPublicReadRemoteLixRequest(
 	if (!endpoint) return request.method === "GET";
 	if (endpoint === "session") return request.method === "DELETE";
 	if (endpoint === "file") return request.method === "GET";
-	if (endpoint === "published-directory") return request.method === "GET";
 	if (isPublicSyncReadRequest(request, endpoint)) return true;
 	return (
 		request.method === "POST" &&
@@ -2141,11 +2108,6 @@ function rewriteLixRequest(
 	return new Request(rewritten, { headers });
 }
 
-function normalizedRouteSegment(value: string | undefined): string | null {
-	if (value === undefined) return null;
-	return safeDecodeURIComponent(value)?.toLowerCase() ?? null;
-}
-
 function safeDecodeURIComponent(value: string): string | null {
 	try {
 		return decodeURIComponent(value);
@@ -2176,7 +2138,7 @@ function remoteLixCorsPreflight(request: Request): Response {
 			"access-control-allow-credentials": "true",
 			"access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
 			"access-control-allow-headers":
-				"Authorization, Content-Type, Lix-Client-Id, Lix-Session-Id, Lix-Sync-Protocol-Version, Last-Event-ID",
+				"Authorization, Content-Type, Content-Encoding, Content-Range, Idempotency-Key, Lix-Client-Id, Lix-Session-Id, Lix-Sync-Protocol-Version, Lix-Transaction-Id, Lix-Upload-Id, Last-Event-ID, Range, X-Lixray-Public-Path",
 			"access-control-max-age": "86400",
 			vary: "Origin",
 		},
@@ -2189,6 +2151,30 @@ function withRemoteLixCors(response: Response, request: Request): Response {
 	const headers = new Headers(response.headers);
 	headers.set("access-control-allow-origin", origin);
 	headers.set("access-control-allow-credentials", "true");
+	const exposedHeaders = headers.get("access-control-expose-headers");
+	const exposedHeaderNames = new Set(
+		exposedHeaders
+			?.split(",")
+			.map((value) => value.trim())
+			.filter(Boolean) ?? [],
+	);
+	const normalizedExposedHeaderNames = new Set(
+		[...exposedHeaderNames].map((value) => value.toLowerCase()),
+	);
+	for (const headerName of [
+		"Accept-Ranges",
+		"Content-Range",
+		"Lix-File-Found",
+		"Range",
+	]) {
+		if (!normalizedExposedHeaderNames.has(headerName.toLowerCase())) {
+			exposedHeaderNames.add(headerName);
+		}
+	}
+	headers.set(
+		"access-control-expose-headers",
+		[...exposedHeaderNames].join(", "),
+	);
 	const vary = headers.get("vary");
 	if (
 		!vary?.split(",").some((value) => value.trim().toLowerCase() === "origin")

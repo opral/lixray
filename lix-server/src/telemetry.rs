@@ -903,6 +903,7 @@ mod tests {
         let _protocol = lix_sdk::open_lix()
             .with_telemetry(Arc::clone(&sink))
             .serve()
+            .with_lix_id("11111111-1111-4111-8111-111111111111")
             .await
             .expect("serve protocol engine");
         flush(&provider).await;

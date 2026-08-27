@@ -50,9 +50,9 @@ Every repository maps to an isolated SlateDB object prefix. One bounded
 idle runtimes. Local development uses the same topology with MinIO in place of
 R2.
 
-The web service owns authentication, organization and repository resolution,
-`/healthz`, `/mcp`, and the repository-scoped Lix protocol. Supabase row-level
-security proves repository access before a request reaches `lix-server`.
+The web service owns authentication, organization and project pages,
+`/healthz`, `/mcp`, and the canonical Lix protocol. Supabase row-level security
+proves Lix access before a request reaches `lix-server`.
 
 ## Setup
 
@@ -173,8 +173,26 @@ codex mcp login LixRay
 Useful HTTP endpoints:
 
 - `GET /healthz` — unauthenticated service health
-- `/@namespace/workspace/lix/v1/*` — authenticated canonical Lix protocol
+- `/lix/v1/{uuid}/*` — authenticated canonical Lix REST protocol
+- `/lix/{uuid}` — stable SDK connection URL
 - `/mcp` — authenticated MCP transport
+
+An authorized operator can stream a complete Lix snapshot through that same
+protocol—there is no LixRay-only snapshot route or token:
+
+```sh
+curl --fail-with-body \
+  --header "Authorization: Bearer $ACCESS_TOKEN" \
+  --header "Accept: application/vnd.lix.snapshot" \
+  --output "$LIX_ID.lixsnap.part" \
+  "https://lixray.com/lix/v1/$LIX_ID/snapshot"
+mv "$LIX_ID.lixsnap.part" "$LIX_ID.lixsnap"
+```
+
+The response is the canonical deterministic Lix snapshot stream. Export is
+read-only; LixRay does not expose snapshot upload or resource creation through
+this route. A downloaded artifact becomes a backup only after an operator
+stores it independently with retention, access control, and restore drills.
 
 Apply `database/supabase/migrations/20260710180000_lixray_mcp_oauth.sql`
 before enabling Supabase's OAuth server, dynamic client registration, and the
@@ -298,22 +316,22 @@ requested integration environment.
 ## Performance loop
 
 ```sh
-LIXRAY_PERF_REPOSITORY=perf-baseline-c1000-read4k-r1 pnpm perf:reset
+LIXRAY_PERF_REPOSITORY=11111111-1111-4111-8111-111111111111 pnpm perf:reset
 LIXRAY_PERF_SPANS=true \
   RUST_LOG=lixray=info,lix_perf=debug \
   pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-baseline-c1000-read4k-r1 \
+  --repository 11111111-1111-4111-8111-111111111111 \
   --operation read-point-4k \
   --commits 1000 \
   --output perf/results/baseline.json
 # edit vendor/lix or lix-server
-LIXRAY_PERF_REPOSITORY=perf-candidate-c1000-read4k-r1 pnpm perf:reset
+LIXRAY_PERF_REPOSITORY=22222222-2222-4222-8222-222222222222 pnpm perf:reset
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-candidate-c1000-read4k-r1 \
+  --repository 22222222-2222-4222-8222-222222222222 \
   --operation read-point-4k \
   --commits 1000 \
   --output perf/results/candidate.json

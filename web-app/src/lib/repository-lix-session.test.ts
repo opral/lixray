@@ -226,7 +226,7 @@ void test("refreshes an expired access token and retries a sync request once", a
 		{ captureException: (error) => captured.push(error) },
 	);
 	const response = await authenticatedFetch(
-		"https://lixray.test/repos/acme/launch-q3/lix/v1/sync/pull",
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull",
 		{
 			method: "GET",
 			headers: { Authorization: "Bearer expired-token" },
@@ -264,7 +264,7 @@ void test("captures a terminal request failure as one structured exception", asy
 	);
 
 	const response = await fetch(
-		"https://lixray.test/repos/acme/private/lix/v1/sync/pull",
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull",
 		{ method: "GET" },
 	);
 
@@ -304,7 +304,8 @@ void test("deduplicates repeated request failures until the request recovers", a
 		{ repositoryId: "repo-id" },
 		{ captureException: (error) => captured.push(error) },
 	);
-	const url = "https://lixray.test/repos/acme/private/lix/v1/sync/pull";
+	const url =
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull";
 
 	await fetch(url);
 	await fetch(url);
@@ -312,7 +313,9 @@ void test("deduplicates repeated request failures until the request recovers", a
 	assert.equal(captured.length, 1);
 
 	shouldFail = false;
-	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/chunk");
+	await fetch(
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/chunk",
+	);
 	shouldFail = true;
 	await fetch(url);
 	assert.equal(captured.length, 1);
@@ -347,9 +350,15 @@ void test("does not report expected migration, recovery, or missing-chunk respon
 		{ captureException: (error) => captured.push(error) },
 	);
 
-	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/pull");
-	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/pull");
-	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/chunk");
+	await fetch(
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull",
+	);
+	await fetch(
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull",
+	);
+	await fetch(
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/chunk",
+	);
 
 	assert.deepEqual(captured, []);
 });
@@ -367,7 +376,7 @@ void test("leaves repository-open failures to their terminal exception boundary"
 	);
 
 	const response = await fetch(
-		"https://lixray.test/repos/acme/private/lix/v1/",
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/",
 	);
 
 	assert.equal(response.status, 500);
@@ -384,7 +393,8 @@ void test("captures unexpected network failures but ignores canceled requests", 
 		{ repositoryId: "repo-id" },
 		{ captureException: (error) => captured.push(error) },
 	);
-	const url = "https://lixray.test/repos/acme/private/lix/v1/sync/pull";
+	const url =
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull";
 
 	await assert.rejects(failingFetch(url), networkError);
 	await assert.rejects(failingFetch(url), networkError);

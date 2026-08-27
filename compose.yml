@@ -46,7 +46,7 @@ services:
       S3_ACCESS_KEY_ID: lixray
       S3_SECRET_ACCESS_KEY: lixray-local-secret
       S3_REGION: us-east-1
-      S3_PREFIX: local
+      S3_PREFIX: ${LIXRAY_STORAGE_PREFIX:-local}
       S3_ALLOW_HTTP: "true"
     depends_on:
       minio-init:
@@ -89,6 +89,8 @@ services:
         condition: service_completed_successfully
     environment:
       LIXRAY_PERF_REPOSITORY: ${LIXRAY_PERF_REPOSITORY:-}
+    volumes:
+      - ./scripts/validate-lix-uuid.sh:/usr/local/bin/validate-lix-uuid:ro
     entrypoint: /bin/sh
     command:
       - -c
@@ -97,22 +99,9 @@ services:
           echo "LIXRAY_PERF_REPOSITORY is required" >&2
           exit 2
         fi
-        case "$${LIXRAY_PERF_REPOSITORY}" in
-          perf-[A-Za-z0-9]*)
-            ;;
-          *)
-            echo "LIXRAY_PERF_REPOSITORY must be a benchmark id beginning with perf-" >&2
-            exit 2
-            ;;
-        esac
-        case "$${LIXRAY_PERF_REPOSITORY}" in
-          *[!A-Za-z0-9._-]*)
-            echo "LIXRAY_PERF_REPOSITORY contains invalid characters" >&2
-            exit 2
-            ;;
-        esac
+        /bin/sh /usr/local/bin/validate-lix-uuid "$${LIXRAY_PERF_REPOSITORY}"
         mc alias set local http://minio:9000 lixray lixray-local-secret
-        mc rm --recursive --force "local/lixray/local/$${LIXRAY_PERF_REPOSITORY}/"
+        mc rm --recursive --force "local/lixray/local/perf/$${LIXRAY_PERF_REPOSITORY}/"
 
   onboarding-storage-reset:
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z

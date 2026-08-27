@@ -76,8 +76,7 @@ export function RepositoryDirectory() {
 		for (const organization of organizations) {
 			for (const repository of organization.repositories) {
 				void fetchRepositoryFileCount({
-					namespace: organization.handle,
-					repositorySlug: repository.slug,
+					repositoryId: repository.id,
 					getAccessToken: auth.getAccessToken,
 				})
 					.then((count) => {
@@ -437,8 +436,7 @@ function RepositoryRow({
 		setDownloading(true);
 		try {
 			const archive = await buildRepositoryArchive({
-				namespace: organization.handle,
-				repositorySlug: repository.slug,
+				repositoryId: repository.id,
 				getAccessToken,
 			});
 			triggerBrowserDownload(

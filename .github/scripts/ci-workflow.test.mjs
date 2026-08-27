@@ -103,6 +103,18 @@ test("remote preview E2E skips Rust setup and targets visible editors", () => {
 	}
 });
 
+test("preview smoke test uses the canonical protocol and real demo Lix", () => {
+	const preview = job("deploy-preview");
+	assert.match(
+		preview,
+		/\/lix\/v1\/00000000-0000-4000-8000-000000000002\/sync\/pull/,
+	);
+	assert.doesNotMatch(
+		preview,
+		/\/lix\/v1\/11111111-1111-4111-8111-111111111111\//,
+	);
+});
+
 test("Rust cache seeding compiles only for changed dependencies and cache misses", () => {
 	assert.doesNotMatch(rustCache, /"lix-server\/\*\*"/);
 	assert.match(rustCache, /"lix-server\/Cargo\.lock"/);

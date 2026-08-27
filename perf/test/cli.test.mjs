@@ -5,6 +5,11 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 const runner = resolve(import.meta.dirname, "../runner.mjs");
+const movieRunner = resolve(
+  import.meta.dirname,
+  "../movie/remote-qualification.mjs",
+);
+const testLixId = "11111111-1111-4111-8111-111111111111";
 
 test("accepts the separator forwarded by pnpm scripts", () => {
   const result = spawnSync(process.execPath, [runner, "--", "--help"], {
@@ -16,6 +21,44 @@ test("accepts the separator forwarded by pnpm scripts", () => {
   assert.match(result.stdout, /--files <1000\|5000\|10000>/);
   assert.match(result.stdout, /--storage-backend <slatedb\|rocksdb>/);
   assert.match(result.stdout, /--file-read-transport <json\|binary>/);
+});
+
+test("requires a canonical Lix UUID", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      runner,
+      "--",
+      "--repository",
+      "perf-cli-check",
+      "--operation",
+      "read-point-4k",
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--repository must be a canonical Lix UUID/);
+});
+
+test("remote movie qualification requires a canonical Lix UUID", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      movieRunner,
+      "--url",
+      "https://lix-server.example",
+      "--repository",
+      "1111111--111-4111-8111-111111111111",
+    ],
+    {
+      encoding: "utf8",
+      env: { ...process.env, LIXRAY_INTERNAL_TOKEN: "test-token" },
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--repository must be a canonical Lix UUID/);
 });
 
 test("rejects a declared backend that disagrees with health before handshake", async (t) => {
@@ -58,7 +101,7 @@ test("rejects a declared backend that disagrees with health before handshake", a
 
   const result = await runRunner([
     "--repository",
-    "perf-attestation-mismatch",
+    testLixId,
     "--operation",
     "read-point-4k",
     "--files",
@@ -91,7 +134,7 @@ test("rejects mutating warmups before opening a server connection", () => {
       runner,
       "--",
       "--repository",
-      "perf-cli-check",
+      testLixId,
       "--operation",
       "create-4k",
       "--warmups",
@@ -114,7 +157,7 @@ test("requires a preseeded clone for hot-session mutation distributions", () => 
       runner,
       "--",
       "--repository",
-      "perf-cli-check",
+      testLixId,
       "--operation",
       "update-4k",
       "--samples",
@@ -135,7 +178,7 @@ test("requires full deterministic cycles for mixed hot writes", () => {
       runner,
       "--",
       "--repository",
-      "perf-cli-check",
+      testLixId,
       "--operation",
       "update-mixed",
       "--samples",
@@ -157,7 +200,7 @@ test("requires raw transport for the native mixed comparison", () => {
       runner,
       "--",
       "--repository",
-      "perf-cli-check",
+      testLixId,
       "--operation",
       "update-mixed-native-batch",
     ],
@@ -175,7 +218,7 @@ test("rejects binary file reads for operations without an exact-file endpoint", 
       runner,
       "--",
       "--repository",
-      "perf-cli-check",
+      testLixId,
       "--operation",
       "list-paths-100",
       "--file-read-transport",
@@ -198,7 +241,7 @@ test("rejects hot sessions for the native mixed comparison", () => {
       runner,
       "--",
       "--repository",
-      "perf-cli-check",
+      testLixId,
       "--operation",
       "update-mixed-native-batch",
       "--file-write-transport",
@@ -222,7 +265,7 @@ test("rejects corpus sizes outside the reproducible matrix", () => {
       runner,
       "--",
       "--repository",
-      "perf-cli-check",
+      testLixId,
       "--operation",
       "read-point-4k",
       "--files",
@@ -242,7 +285,7 @@ test("requires enough commits to cover all fixed-size seed commits", () => {
       runner,
       "--",
       "--repository",
-      "perf-cli-check",
+      testLixId,
       "--operation",
       "read-point-4k",
       "--files",
@@ -267,7 +310,7 @@ test("requires the extra targeted seed commit for read-point-2m", () => {
       runner,
       "--",
       "--repository",
-      "perf-cli-check",
+      testLixId,
       "--operation",
       "read-point-2m",
       "--files",

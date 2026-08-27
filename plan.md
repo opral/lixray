@@ -49,7 +49,7 @@ type RepositoryFetch = (
 Its normal implementation forwards HTTP to the repository service, for example:
 
 ```text
-/lixes/{lixId}/lix/v1/...
+/lix/v1/{lixId}/...
 ```
 
 For each request, `lix-server` validates the repository ID, finds or lazily opens

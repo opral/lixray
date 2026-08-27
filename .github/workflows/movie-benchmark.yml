@@ -12,9 +12,9 @@ on:
         required: true
         default: 4
         type: number
-      workspace:
-        description: Shared fresh workspace ID (blank uses the current revision)
-        required: false
+      lix-id:
+        description: UUID of the fresh Lix shared by all sequential segments
+        required: true
         type: string
       finalize-history:
         description: Verify all files and extend history to exactly 5,000 commits
@@ -23,7 +23,7 @@ on:
         type: boolean
 
 concurrency:
-  group: remote-movie-${{ inputs.workspace || github.sha }}
+  group: remote-movie-${{ inputs.lix-id }}
   cancel-in-progress: false
 
 permissions:
@@ -63,8 +63,40 @@ jobs:
         id: target
         shell: bash
         env:
-          REQUESTED_WORKSPACE: ${{ inputs.workspace }}
+          ALLOWED_LIX_ID: ${{ vars.MOVIE_BENCHMARK_LIX_ID }}
+          REQUESTED_LIX_ID: ${{ inputs.lix-id }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: |
+          if [[ ! "$REQUESTED_LIX_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+            echo "lix-id must be a canonical lowercase UUID" >&2
+            exit 2
+          fi
+          if [[ ! "$ALLOWED_LIX_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+            echo "the production environment must configure MOVIE_BENCHMARK_LIX_ID" >&2
+            exit 2
+          fi
+          if [[ "$REQUESTED_LIX_ID" != "$ALLOWED_LIX_ID" ]]; then
+            echo "lix-id is not the allowlisted production movie benchmark Lix" >&2
+            exit 2
+          fi
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_PROJECT_REF"
+          lix_lookup="$(
+            curl --fail-with-body --silent --show-error \
+              --request POST \
+              --url "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/database/query/read-only" \
+              --header "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              --header 'Content-Type: application/json' \
+              --data "$(jq -cn \
+                --arg query "select exists (select 1 from public.lixes where id = '$REQUESTED_LIX_ID'::uuid and deleted_at is null) as exists" \
+                '{query: $query}'
+              )"
+          )"
+          if ! jq -e 'length == 1 and .[0].exists == true' <<<"$lix_lookup" >/dev/null; then
+            echo "lix-id does not identify an existing production Lix" >&2
+            exit 2
+          fi
           variables="$(
             railway variables \
               --project "$RAILWAY_PROJECT_ID" \
@@ -79,12 +111,7 @@ jobs:
           echo "::add-mask::$internal_token"
           echo "LIXRAY_INTERNAL_TOKEN=$internal_token" >> "$GITHUB_ENV"
           echo "base-url=https://$public_domain" >> "$GITHUB_OUTPUT"
-          if test -n "$REQUESTED_WORKSPACE"; then
-            workspace="$REQUESTED_WORKSPACE"
-          else
-            workspace="perf-movie-1tib-${GITHUB_SHA:0:12}"
-          fi
-          echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
+          echo "lix-id=$REQUESTED_LIX_ID" >> "$GITHUB_OUTPUT"
 
       - name: Promote the exact tested server image
         shell: bash
@@ -97,7 +124,7 @@ jobs:
         run: |
           node perf/movie/remote-qualification.mjs \
             --url '${{ steps.target.outputs.base-url }}' \
-            --workspace '${{ steps.target.outputs.workspace }}' \
+            --repository '${{ steps.target.outputs.lix-id }}' \
             --segment-index '${{ inputs.segment-index }}' \
             --segment-count '${{ inputs.segment-count }}' \
             --finalize-history '${{ inputs.finalize-history }}' \
@@ -106,7 +133,7 @@ jobs:
       - name: Upload qualification report
         uses: actions/upload-artifact@v4
         with:
-          name: movie-${{ steps.target.outputs.workspace }}-segment-${{ inputs.segment-index }}
+          name: movie-${{ steps.target.outputs.lix-id }}-segment-${{ inputs.segment-index }}
           path: perf/results/movie-segment-${{ inputs.segment-index }}.json
           if-no-files-found: error
           retention-days: 30
