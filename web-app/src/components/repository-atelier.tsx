@@ -971,7 +971,9 @@ export function RepositoryAtelier({
 							return data.length > 0;
 						},
 						canEdit ? stableTeamApiRef.current : null,
-						canEdit ? stableSettingsApiRef.current : null,
+						canEdit && !isDemoModeEnabled && client
+							? stableSettingsApiRef.current
+							: null,
 						repositoryVisibility,
 					),
 					centralPanel: {
