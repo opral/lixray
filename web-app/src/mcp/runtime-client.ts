@@ -3,6 +3,8 @@ import {
 	type ExecuteResult as LixExecuteResult,
 	type JsonValue,
 	type Lix,
+	type ResultArrayRow,
+	type ResultColumnType,
 	type SqlParam,
 	Value,
 } from "@lix-js/sdk";
@@ -220,7 +222,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 					await session.lix.execute(
 						request.sql,
 						(request.params ?? []).map(decodeWireParam),
-						request.options,
+						{ ...request.options, rowMode: "array" },
 					),
 				);
 			});
@@ -260,7 +262,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 						sql: statement.sql,
 						params: (statement.params ?? []).map(decodeWireParam),
 					})),
-					request.options,
+					{ ...request.options, rowMode: "array" },
 				);
 				return { results: results.map(encodeExecuteResult) };
 			});
@@ -493,12 +495,14 @@ function decodeWireParam(
 	}
 }
 
-function encodeExecuteResult(result: LixExecuteResult): ExecuteResponse {
+function encodeExecuteResult(
+	result: LixExecuteResult<ResultArrayRow>,
+): ExecuteResponse {
 	return {
 		columns: result.columns.map((column) => column.name),
 		rows: result.rows.map((row) =>
-			result.columns.map((column) =>
-				encodeLixValue(row[column.name], column.type),
+			result.columns.map((column, index) =>
+				encodeLixValue(column.type, row[index]),
 			),
 		),
 		rowsAffected: result.rowsAffected,
@@ -507,11 +511,11 @@ function encodeExecuteResult(result: LixExecuteResult): ExecuteResponse {
 }
 
 function encodeLixValue(
+	type: ResultColumnType,
 	value: unknown,
-	kind: LixExecuteResult["columns"][number]["type"],
 ): ExecuteResponse["rows"][number][number] {
 	if (value === null) return { kind: "null", value: null };
-	switch (kind) {
+	switch (type) {
 		case "null":
 			return { kind: "null", value: null };
 		case "boolean":
@@ -532,15 +536,18 @@ function encodeLixValue(
 		case "jsonb":
 			return { kind: "json", value };
 		case "blob": {
-			if (value instanceof Uint8Array) {
-				return { kind: "blob", base64: bytesToBase64(value) };
+			if (!(value instanceof Uint8Array)) {
+				throw createLixError(
+					"upstream_error",
+					"Lix returned an invalid blob value.",
+				);
 			}
-			break;
+			return { kind: "blob", base64: bytesToBase64(value) };
 		}
 	}
 	throw createLixError(
 		"upstream_error",
-		`Lix returned an invalid ${kind} value.`,
+		`Lix returned an invalid ${type} value.`,
 	);
 }
 
