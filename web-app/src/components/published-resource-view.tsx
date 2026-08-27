@@ -259,7 +259,10 @@ async function fetchPublishedDirectory(
 	path: string,
 	signal: AbortSignal,
 ): Promise<PublishedDirectoryResponse> {
-	const url = new URL(protocolUrl(repositoryId, "published-directory"));
+	const url = new URL(
+		`/api/published/lix/${encodeURIComponent(repositoryId)}/directory`,
+		window.location.origin,
+	);
 	url.searchParams.set("path", path);
 	const response = await fetch(url, { signal });
 	if (!response.ok) throw new Error("This directory is no longer public.");

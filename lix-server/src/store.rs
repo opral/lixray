@@ -1788,6 +1788,7 @@ mod tests {
     use tower::ServiceExt as _;
 
     const LIX_A: &str = "11111111-1111-4111-8111-111111111111";
+    const LIX_B: &str = "22222222-2222-4222-8222-222222222222";
 
     struct TestCacheRoot(PathBuf);
 
@@ -2108,7 +2109,7 @@ mod tests {
         let manager = memory_manager(1);
         let first = manager.get(LIX_A).await.expect("open first runtime");
         drop(first);
-        let second = manager.get("lix-b").await.expect("open second runtime");
+        let second = manager.get(LIX_B).await.expect("open second runtime");
 
         assert_eq!(manager.cached_lix_count().await, 1);
         drop(second);
@@ -2123,13 +2124,13 @@ mod tests {
         let active = manager.get(LIX_A).await.expect("open active runtime");
 
         assert!(matches!(
-            manager.get("lix-b").await,
+            manager.get(LIX_B).await,
             Err(LixRuntimeError::AtCapacity { max: 1 })
         ));
 
         drop(active);
         manager
-            .get("lix-b")
+            .get(LIX_B)
             .await
             .expect("evict runtime after its final service lease is released");
     }
@@ -2145,7 +2146,7 @@ mod tests {
             .protocol_router()
             .oneshot(
                 Request::builder()
-                    .uri("/lix/v1/")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -2156,7 +2157,7 @@ mod tests {
         drop(service);
 
         assert!(matches!(
-            manager.get("lix-b").await,
+            manager.get(LIX_B).await,
             Err(LixRuntimeError::AtCapacity { max: 1 })
         ));
     }
@@ -2177,7 +2178,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lix/v1/")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -2202,7 +2203,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lix/v1/observe")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/observe")
                     .header(header::CONTENT_TYPE, "application/json")
                     .header("Lix-Session-Id", session_id)
                     .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
@@ -2246,7 +2247,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lix/v1/")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -2271,7 +2272,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lix/v1/observe")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/observe")
                     .header(header::CONTENT_TYPE, "application/json")
                     .header("Lix-Session-Id", session_id)
                     .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
@@ -2315,7 +2316,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lix/v1/")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -2340,7 +2341,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lix/v1/observe")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/observe")
                     .header(header::CONTENT_TYPE, "application/json")
                     .header("Lix-Session-Id", session_id)
                     .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
@@ -2471,7 +2472,7 @@ mod tests {
             "shutdown must wait for the manager-owned opening"
         );
         assert!(matches!(
-            manager.get("lix-b").await,
+            manager.get(LIX_B).await,
             Err(LixRuntimeError::ShuttingDown)
         ));
 
@@ -2501,7 +2502,7 @@ mod tests {
             .protocol_router()
             .oneshot(
                 Request::builder()
-                    .uri("/lix/v1/")
+                    .uri("/lix/v1/11111111-1111-4111-8111-111111111111/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -2893,7 +2894,7 @@ mod tests {
         };
 
         let waiting_manager = Arc::clone(&manager);
-        let mut opening = tokio::spawn(async move { waiting_manager.get("lix-b").await });
+        let mut opening = tokio::spawn(async move { waiting_manager.get(LIX_B).await });
         assert!(
             tokio::time::timeout(Duration::from_millis(25), &mut opening)
                 .await
@@ -2927,7 +2928,7 @@ mod tests {
             .await;
 
         assert!(matches!(
-            manager.get("lix-b").await,
+            manager.get(LIX_B).await,
             Err(LixRuntimeError::Cleanup(_))
         ));
     }
@@ -2994,7 +2995,7 @@ mod tests {
         );
 
         let replacement_manager = Arc::clone(&manager);
-        let mut replacement = tokio::spawn(async move { replacement_manager.get("lix-b").await });
+        let mut replacement = tokio::spawn(async move { replacement_manager.get(LIX_B).await });
         assert!(
             tokio::time::timeout(Duration::from_millis(25), &mut replacement)
                 .await

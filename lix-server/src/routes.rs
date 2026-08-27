@@ -23,7 +23,7 @@ use std::{
 };
 use tower_http::{
     compression::{
-        predicate::{DefaultPredicate, Predicate as _, SizeAbove},
+        predicate::{DefaultPredicate, NotForContentType, Predicate as _, SizeAbove},
         CompressionLayer, CompressionLevel,
     },
     decompression::RequestDecompressionLayer,
@@ -206,7 +206,11 @@ pub fn router(
                 .zstd(true)
                 .quality(CompressionLevel::Precise(2))
                 .compress_when(
-                    DefaultPredicate::new().and(SizeAbove::new(MIN_COMPRESSION_BODY_BYTES)),
+                    DefaultPredicate::new()
+                        .and(SizeAbove::new(MIN_COMPRESSION_BODY_BYTES))
+                        .and(NotForContentType::const_new(
+                            server_protocol::SNAPSHOT_MEDIA_TYPE,
+                        )),
                 ),
         )
         // The canonical protocol applies its body limit while consuming the
@@ -866,6 +870,8 @@ mod tests {
 
     const TEST_PROTOCOL_TIMEOUT: Duration = Duration::from_secs(60);
     const LIX_A: &str = "11111111-1111-4111-8111-111111111111";
+    const LIX_B: &str = "22222222-2222-4222-8222-222222222222";
+    const LIX_MARKDOWN: &str = "33333333-3333-4333-8333-333333333333";
     static TEST_IDEMPOTENCY_KEY_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
     fn test_router() -> Router {
@@ -1226,7 +1232,7 @@ mod tests {
             json_body(insert).await
         );
 
-        for (lix_id, expected) in [(LIX_A, 1), ("lix-b", 0)] {
+        for (lix_id, expected) in [(LIX_A, 1), (LIX_B, 0)] {
             let session_id = if lix_id == LIX_A {
                 lix_a_session.clone()
             } else {
@@ -1271,7 +1277,7 @@ mod tests {
         };
 
         let app = test_router();
-        let lix_id = "markdown-collaboration";
+        let lix_id = LIX_MARKDOWN;
         let installer = open_protocol_session(app.clone(), lix_id).await;
         expect_protocol_ok(
             protocol_execute(
@@ -1370,7 +1376,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_unsafe_lix_ids() {
+    async fn malformed_lix_ids_are_not_found_before_storage_open() {
         let response = test_router()
             .oneshot(
                 Request::builder()
@@ -1380,18 +1386,8 @@ mod tests {
             )
             .await
             .expect("unsafe response");
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(
-            json_body(response).await["error"],
-            json!({
-                "code": "LIX_INVALID_ARGUMENT",
-                "message": "Invalid lix ID.",
-                "details": {
-                    "operation": "lix_open",
-                    "retryable": false,
-                },
-            })
-        );
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(json_body(response).await["error"]["code"], "LIX_NOT_FOUND");
     }
 
     #[tokio::test]

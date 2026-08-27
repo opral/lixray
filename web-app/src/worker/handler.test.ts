@@ -1573,6 +1573,9 @@ void test("remote sync CORS permits protocol, session, and chunk headers", async
 		response.headers.get("access-control-allow-headers") ?? "";
 	assert.match(allowedHeaders, /Lix-Session-Id/i);
 	assert.match(allowedHeaders, /Lix-Sync-Protocol-Version/i);
+	assert.match(allowedHeaders, /Idempotency-Key/i);
+	assert.match(allowedHeaders, /Lix-Transaction-Id/i);
+	assert.match(allowedHeaders, /Content-Encoding/i);
 });
 
 void test("canonical Lix protocol is authenticated, resolved, and forwarded unchanged", async () => {
@@ -2005,7 +2008,9 @@ void test("a published directory exposes only its direct child names", async () 
 	const protocolPaths: string[] = [];
 	let executeBody: unknown;
 	const response = await handleRequest(
-		remoteLixRequest("/published-directory?path=%2Ffinance"),
+		new Request(
+			`https://example.test/api/published/lix/${LIX_A}/directory?path=%2Ffinance`,
+		),
 		env({}),
 		{
 			resolvePublicLix: async (lixId, _env, publicPath) => {
@@ -2074,6 +2079,33 @@ void test("a published directory exposes only its direct child names", async () 
 		`/lix/v1/${LIX_A}/execute`,
 		`/lix/v1/${LIX_A}/session`,
 	]);
+});
+
+void test("LixRay projections stay outside the canonical Lix namespace", async () => {
+	let proxiedPath: string | undefined;
+	let publicResolutionCalls = 0;
+	const response = await handleRequest(
+		remoteLixRequest("/published-directory?path=%2Ffinance", {
+			headers: { Authorization: "Bearer user-token" },
+		}),
+		env({}),
+		{
+			authenticate: authenticated(),
+			authorizeLix: resolved(LIX_A),
+			resolvePublicLix: async () => {
+				publicResolutionCalls += 1;
+				return { ok: true, lixId: LIX_A, scope: "path" };
+			},
+			lixFetch: async (_lixId, request) => {
+				proxiedPath = new URL(request.url).pathname;
+				return new Response("Not found\n", { status: 404 });
+			},
+		},
+	);
+
+	assert.equal(response.status, 404);
+	assert.equal(proxiedPath, `/lix/v1/${LIX_A}/published-directory`);
+	assert.equal(publicResolutionCalls, 0);
 });
 
 void test("anonymous binary file writes remain unauthorized", async () => {

@@ -229,6 +229,8 @@ type McpClaimsValidation =
 
 const REMOTE_LIX_API_PATH =
 	/^\/lix\/v1\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(.*))?$/;
+const PUBLISHED_LIX_DIRECTORY_PATH =
+	/^\/api\/published\/lix\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/directory$/;
 const PROD_DEV_AUTH_PATH = "/auth/email";
 const OPENAI_APPS_CHALLENGE_PATH = "/.well-known/openai-apps-challenge";
 const OPENAI_APPS_CHALLENGE_TOKEN =
@@ -633,6 +635,39 @@ export async function handleRequest(
 		}
 	}
 
+	const publishedLixDirectoryMatch = PUBLISHED_LIX_DIRECTORY_PATH.exec(
+		url.pathname,
+	);
+	if (publishedLixDirectoryMatch) {
+		if (request.method !== "GET") {
+			return new Response("Method not allowed\n", { status: 405 });
+		}
+		const lixId = publishedLixDirectoryMatch[1];
+		const publicPath = url.searchParams.get("path") ?? undefined;
+		if (!publicPath || !options.lixFetch) return lixNotFound().response;
+		const publicResolution = await (
+			options.resolvePublicLix ?? resolvePublicLixWithSupabase
+		)(lixId, env, publicPath);
+		if (!publicResolution.ok) return publicResolution.response;
+		if (publicResolution.scope !== "path") return lixNotFound().response;
+		try {
+			return json(
+				await listPublishedDirectory(
+					publicResolution.lixId,
+					publicPath,
+					env,
+					options.lixFetch,
+					request.signal,
+				),
+			);
+		} catch (caught) {
+			console.error("Unable to list a published directory", caught);
+			return new Response("Published directory is unavailable\n", {
+				status: 502,
+			});
+		}
+	}
+
 	const remoteLixMatch = REMOTE_LIX_API_PATH.exec(url.pathname);
 	if (remoteLixMatch) {
 		if (request.method === "OPTIONS") return remoteLixCorsPreflight(request);
@@ -643,7 +678,7 @@ export async function handleRequest(
 			const protocolPath = `/lix/v1/${lixId}${endpoint ? `/${endpoint}` : "/"}`;
 			const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
 			const publicPath =
-				(endpoint === "file" || endpoint === "published-directory"
+				(endpoint === "file"
 					? url.searchParams.get("path")
 					: request.headers.get("x-lixray-public-path")) ?? undefined;
 
@@ -712,44 +747,9 @@ export async function handleRequest(
 			}
 			if (
 				publicResolution.scope === "path" &&
-				!(
-					!endpoint ||
-					endpoint === "session" ||
-					endpoint === "file" ||
-					endpoint === "published-directory"
-				)
+				!(!endpoint || endpoint === "session" || endpoint === "file")
 			) {
 				return withServerTimings(lixNotFound().response, serverTimings);
-			}
-			if (endpoint === "published-directory") {
-				if (!publicPath || !options.lixFetch) {
-					return withServerTimings(lixNotFound().response, serverTimings);
-				}
-				try {
-					const listing = await measureServerTiming(
-						serverTimings,
-						"lixray-server-roundtrip",
-						() =>
-							listPublishedDirectory(
-								publicResolution.lixId,
-								publicPath,
-								env,
-								options.lixFetch as NonNullable<
-									HandleRequestOptions["lixFetch"]
-								>,
-								request.signal,
-							),
-					);
-					return withServerTimings(json(listing), serverTimings);
-				} catch (caught) {
-					console.error("Unable to list a published directory", caught);
-					return withServerTimings(
-						new Response("Published directory is unavailable\n", {
-							status: 502,
-						}),
-						serverTimings,
-					);
-				}
 			}
 			const mutationRejection = await rejectPublicMutation(request, endpoint);
 			if (mutationRejection) {
@@ -1841,7 +1841,6 @@ function isPublicReadRemoteLixRequest(
 	if (!endpoint) return request.method === "GET";
 	if (endpoint === "session") return request.method === "DELETE";
 	if (endpoint === "file") return request.method === "GET";
-	if (endpoint === "published-directory") return request.method === "GET";
 	if (isPublicSyncReadRequest(request, endpoint)) return true;
 	return (
 		request.method === "POST" &&
@@ -2140,7 +2139,7 @@ function remoteLixCorsPreflight(request: Request): Response {
 			"access-control-allow-credentials": "true",
 			"access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
 			"access-control-allow-headers":
-				"Authorization, Content-Type, Lix-Client-Id, Lix-Session-Id, Lix-Sync-Protocol-Version, Last-Event-ID",
+				"Authorization, Content-Type, Content-Encoding, Idempotency-Key, Lix-Client-Id, Lix-Session-Id, Lix-Sync-Protocol-Version, Lix-Transaction-Id, Last-Event-ID, X-Lixray-Public-Path",
 			"access-control-max-age": "86400",
 			vary: "Origin",
 		},
