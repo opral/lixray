@@ -297,14 +297,14 @@ fn restore_error(error: SnapshotRestoreError) -> Response {
             "The destination lix is already active or being restored.",
             true,
         ),
-        SnapshotRestoreError::AtCapacity { .. } | SnapshotRestoreError::ShuttingDown => {
-            snapshot_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "LIX_ERROR_SNAPSHOT_UNAVAILABLE",
-                "The snapshot service is temporarily unavailable.",
-                true,
-            )
-        }
+        SnapshotRestoreError::AtCapacity { .. }
+        | SnapshotRestoreError::ShuttingDown
+        | SnapshotRestoreError::Cancelled => snapshot_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "LIX_ERROR_SNAPSHOT_UNAVAILABLE",
+            "The snapshot service is temporarily unavailable.",
+            true,
+        ),
         SnapshotRestoreError::Restore(error) => {
             if let Some(lix_error) = error
                 .chain()
@@ -376,6 +376,7 @@ fn no_store(mut response: Response) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::TestSnapshotRestoreGate;
     use bytes::Bytes;
     use futures_util::stream;
     use http_body_util::BodyExt as _;
@@ -636,6 +637,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ambiguous_claim_retains_the_local_quarantine() {
+        let manager = LixRuntimeManager::new_in_memory_with_ambiguous_claim(2);
+        let response = restore(&app(Arc::clone(&manager)), "ambiguous", Vec::new()).await;
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(manager.snapshot_restore_count().await, 1);
+        assert!(matches!(
+            manager.get("ambiguous").await,
+            Err(LixRuntimeError::Recovering)
+        ));
+    }
+
+    #[tokio::test]
     async fn rejected_restore_cleanup_does_not_touch_a_sibling_lix() {
         let manager = LixRuntimeManager::new_in_memory(4);
         drop(manager.get("source").await.expect("seed source Lix"));
@@ -729,7 +743,43 @@ mod tests {
             .await
             .expect("request task")
             .expect("restore response");
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(manager.snapshot_restore_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn shutdown_cancels_restore_work_after_upload_eof() {
+        let gate = TestSnapshotRestoreGate {
+            entered: Arc::new(tokio::sync::Notify::new()),
+            release: Arc::new(tokio::sync::Notify::new()),
+        };
+        let entered = Arc::clone(&gate.entered);
+        let manager = LixRuntimeManager::new_in_memory_with_restore_gate(3, gate);
+        drop(manager.get("source").await.expect("seed source Lix"));
+        let app = app(Arc::clone(&manager));
+        let snapshot = export(&app, "source").await;
+        let restore_app = app.clone();
+        let restore_task =
+            tokio::spawn(async move { restore(&restore_app, "post-eof", snapshot).await });
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), entered.notified())
+            .await
+            .expect("restore reached post-verification gate");
+        let unpublished = app
+            .oneshot(authorized_request(
+                "GET",
+                "/_ops/lixes/post-eof/snapshot",
+                Body::empty(),
+            ))
+            .await
+            .expect("unpublished destination response");
+        assert_eq!(unpublished.status(), StatusCode::SERVICE_UNAVAILABLE);
+        tokio::time::timeout(std::time::Duration::from_secs(1), manager.shutdown())
+            .await
+            .expect("shutdown must cancel post-EOF restore work")
+            .expect("clean shutdown");
+        let response = restore_task.await.expect("restore task");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(manager.snapshot_restore_count().await, 0);
     }
 }

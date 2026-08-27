@@ -1147,7 +1147,7 @@ mod tests {
                 "ok": true,
                 "service": "lix-server",
                 "storageBackend": "slatedb",
-                "storageLayout": "lix-slatedb-lz4-v1",
+                "storageLayout": "lix-slatedb-lz4-locator-v1",
             })
         );
     }

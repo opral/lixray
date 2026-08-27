@@ -222,6 +222,26 @@ delete or expose another attempt's data. An interrupted service process fails
 closed with the locator still marked as restoring and requires operator
 reconciliation before that Lix ID can be reused.
 
+The upload may pause for at most 60 seconds between body chunks. Longer idle
+uploads are cancelled and their unpublished attempt is cleaned up.
+
+This storage-layout change requires a hard-cut deployment. Before enabling
+snapshot PUT, quiesce every older `lix-server` process; older binaries do not
+claim or read locators. Once any `snapshot` locator has been published, do not
+roll back to a pre-locator binary because it would look only at the obsolete
+direct prefix. Back up and protect the complete `.lixray-storage-v1` namespace
+alongside Lix data: its locators are authoritative.
+
+To reconcile a process crash during restore, first quiesce all writers. Read
+the locator and its object-store ETag/version, prove that it is still the
+expected `restoring` attempt, delete only that attempt's derived staging prefix,
+then conditionally update the same locator version to `vacant`. Never delete a
+whole Lix prefix, never alter a `snapshot` locator, and stop if the conditional
+update loses its race. Before production enablement, run conditional Create and
+Update smoke tests against both the Compose MinIO version and the configured R2
+endpoint; the Rust unit tests exercise the same state machine with the in-memory
+object store.
+
 Snapshots are the full-copy payload for backup and recovery, not the backup
 schedule. Production operations still need independent storage, retention,
 access controls, monitoring, and regular restore drills.
