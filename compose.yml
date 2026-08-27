@@ -39,6 +39,7 @@ services:
       BIND_ADDR: 0.0.0.0:8080
       LIXRAY_MAX_OPEN_LIXS: ${LIXRAY_MAX_OPEN_LIXS:-32}
       LIXRAY_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
+      LIXRAY_SNAPSHOT_TOKEN: ${LIXRAY_SNAPSHOT_TOKEN:-lixray-local-snapshot-token}
       LIXRAY_PERF_SPANS: ${LIXRAY_PERF_SPANS:-false}
       RUST_LOG: ${RUST_LOG:-lixray=info}
       S3_ENDPOINT: http://minio:9000

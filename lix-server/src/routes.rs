@@ -183,11 +183,15 @@ impl http_body::Body for LixLeaseBody {
 pub fn router(
     manager: Arc<LixRuntimeManager>,
     internal_token: Option<String>,
+    snapshot_token: Option<String>,
     protocol_timeout: Duration,
     in_flight_sql: InFlightSqlRegistry,
 ) -> Router {
     let request_id_key = protocol_request_id_key(internal_token.as_deref());
-    Router::new()
+    let snapshot_routes = snapshot_token
+        .map(|token| crate::snapshots::router(Arc::clone(&manager), token))
+        .unwrap_or_default();
+    let protocol_routes = Router::new()
         .route("/healthz", get(healthz))
         .route("/lixes/{lix_id}/{*protocol_path}", any(lix_protocol))
         .with_state(AppState {
@@ -209,7 +213,8 @@ pub fn router(
         )
         // The canonical protocol applies its body limit while consuming the
         // expanded stream, so decompression must happen before dispatch.
-        .layer(RequestDecompressionLayer::new().gzip(true))
+        .layer(RequestDecompressionLayer::new().gzip(true));
+    protocol_routes.merge(snapshot_routes)
 }
 
 #[derive(Debug, Serialize)]
@@ -852,6 +857,7 @@ mod tests {
         router(
             manager,
             None,
+            None,
             TEST_PROTOCOL_TIMEOUT,
             InFlightSqlRegistry::default(),
         )
@@ -912,6 +918,88 @@ mod tests {
             json!(lix_sdk::ANONYMOUS_ACCOUNT_ID)
         );
         assert!(handshake["sessionId"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn snapshot_routes_are_absent_without_an_operator_token() {
+        let response = test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/_ops/lixes/lix-a/snapshot")
+                    .body(Body::empty())
+                    .expect("snapshot request"),
+            )
+            .await
+            .expect("snapshot response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn snapshot_bytes_are_never_http_compressed() {
+        const SNAPSHOT_TOKEN: &str = "snapshot-secret";
+        let manager = LixRuntimeManager::new_in_memory(4);
+        let app = router(
+            manager,
+            None,
+            Some(SNAPSHOT_TOKEN.to_string()),
+            TEST_PROTOCOL_TIMEOUT,
+            InFlightSqlRegistry::default(),
+        );
+        let handshake = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/lixes/compression-source/lix/v1/")
+                    .body(Body::empty())
+                    .expect("handshake request"),
+            )
+            .await
+            .expect("handshake response");
+        let handshake = json_body(handshake).await;
+        let session_id = handshake["sessionId"].as_str().expect("session id");
+        let large_value = "x".repeat(64 * 1024);
+        let insert_body = serde_json::to_vec(&json!({
+            "sql": "INSERT INTO lix_key_value (key, value) VALUES ('large', $1)",
+            "params": [{"kind": "text", "value": large_value}],
+        }))
+        .expect("insert JSON");
+        let insert = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/lixes/compression-source/lix/v1/execute")
+                    .header(server_protocol::SESSION_ID_HEADER, session_id)
+                    .header(server_protocol::IDEMPOTENCY_KEY_HEADER, "large-value")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(insert_body))
+                    .expect("insert request"),
+            )
+            .await
+            .expect("insert response");
+        assert_eq!(insert.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/_ops/lixes/compression-source/snapshot")
+                    .header(header::AUTHORIZATION, format!("Bearer {SNAPSHOT_TOKEN}"))
+                    .header(header::ACCEPT_ENCODING, "gzip, zstd")
+                    .body(Body::empty())
+                    .expect("snapshot request"),
+            )
+            .await
+            .expect("snapshot response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("snapshot body")
+            .to_bytes();
+        assert!(bytes.starts_with(b"LIXSNAP\0"));
+        assert!(bytes.len() > usize::from(MIN_COMPRESSION_BODY_BYTES));
     }
 
     #[tokio::test]
@@ -1070,6 +1158,7 @@ mod tests {
         let app = router(
             manager,
             Some("secret".to_string()),
+            None,
             TEST_PROTOCOL_TIMEOUT,
             InFlightSqlRegistry::default(),
         );

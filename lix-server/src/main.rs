@@ -12,6 +12,7 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("bind {}", config.bind_addr))?;
     let manager = LixRuntimeManager::new(&config, telemetry.lix_sink)?;
     let internal_token = config.internal_token.clone();
+    let snapshot_token = config.snapshot_token.clone();
     let shutdown_manager = manager.clone();
     let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
     let shutdown_task = tokio::spawn(async move {
@@ -25,6 +26,7 @@ async fn main() -> anyhow::Result<()> {
         addr = %config.bind_addr,
         max_open_lixes = config.max_open_lixes,
         internal_auth = internal_token.is_some(),
+        snapshot_auth = snapshot_token.is_some(),
         "lix lix service ready"
     );
     let result = axum::serve(
@@ -32,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
         router(
             manager,
             internal_token,
+            snapshot_token,
             config.protocol_timeout,
             telemetry.in_flight_sql,
         ),

@@ -176,6 +176,56 @@ Useful HTTP endpoints:
 - `/@namespace/workspace/lix/v1/*` — authenticated canonical Lix protocol
 - `/mcp` — authenticated MCP transport
 
+### Snapshot operations
+
+The Rust service exposes snapshot operations only when
+`LIXRAY_SNAPSHOT_TOKEN` is set. This is a separate operator credential; the
+normal internal web-service token cannot use these routes.
+
+Export a complete Lix as a streamed `.lixsnap` artifact:
+
+```sh
+curl --fail-with-body \
+  -H "Authorization: Bearer $LIXRAY_SNAPSHOT_TOKEN" \
+  "https://<lix-server>/_ops/lixes/<lix-id>/snapshot" \
+  --output '<lix-id>.lixsnap.part'
+mv '<lix-id>.lixsnap.part' '<lix-id>.lixsnap'
+```
+
+The export is one coherent view of committed state and includes writes visible
+when the snapshot read begins. It does not buffer the artifact in server
+memory. This is a visible-state boundary, not proof that the source R2 writes
+have crossed a durable-read boundary. Store the completed artifact in durable,
+independent backup storage. A cancelled or failed download is intentionally
+incomplete and must be discarded; publish the file only after `curl` exits
+successfully.
+
+Restore into a fresh Lix ID:
+
+```sh
+curl --fail-with-body --request PUT \
+  -H "Authorization: Bearer $LIXRAY_SNAPSHOT_TOKEN" \
+  -H 'If-None-Match: *' \
+  -H 'Content-Type: application/vnd.lix.snapshot' \
+  --upload-file '<lix-id>.lixsnap' \
+  "https://<lix-server>/_ops/lixes/<new-lix-id>/snapshot"
+```
+
+Restore is create-only: it never merges into or replaces an existing Lix. The
+server verifies the complete snapshot, publishes it atomically, and returns
+`201 Created` only after the restored storage has closed successfully. A
+missing source export returns `404`; a destination that already exists returns
+`412 Precondition Failed`. Concurrent restores are serialized by an R2-backed
+conditional locator. Restore bytes remain in an attempt-owned staging prefix
+until one small conditional update publishes them, so a rejected attempt cannot
+delete or expose another attempt's data. An interrupted service process fails
+closed with the locator still marked as restoring and requires operator
+reconciliation before that Lix ID can be reused.
+
+Snapshots are the full-copy payload for backup and recovery, not the backup
+schedule. Production operations still need independent storage, retention,
+access controls, monitoring, and regular restore drills.
+
 Apply `database/supabase/migrations/20260710180000_lixray_mcp_oauth.sql`
 before enabling Supabase's OAuth server, dynamic client registration, and the
 `private.custom_access_token_hook`. The consent path is `/oauth/consent`.

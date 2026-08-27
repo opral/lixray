@@ -20,6 +20,7 @@ const DEFAULT_RECOVERY_CLOSE_TIMEOUT_SECS: u64 = 30;
 pub struct Config {
     pub bind_addr: String,
     pub internal_token: Option<String>,
+    pub snapshot_token: Option<String>,
     pub max_open_lixes: usize,
     pub protocol_timeout: Duration,
     pub recovery_close_timeout: Duration,
@@ -53,6 +54,7 @@ impl Config {
             format!("0.0.0.0:{port}")
         });
         let internal_token = optional_nonempty_env("LIXRAY_INTERNAL_TOKEN")?;
+        let snapshot_token = optional_nonempty_env("LIXRAY_SNAPSHOT_TOKEN")?;
         if env::var_os("RAILWAY_PROJECT_ID").is_some() && internal_token.is_none() {
             bail!("LIXRAY_INTERNAL_TOKEN is required on Railway");
         }
@@ -84,6 +86,7 @@ impl Config {
         Ok(Self {
             bind_addr,
             internal_token,
+            snapshot_token,
             max_open_lixes,
             protocol_timeout,
             recovery_close_timeout,
@@ -208,6 +211,7 @@ mod tests {
         assert_eq!(config.max_open_lixes, 32);
         assert_eq!(config.bind_addr, "0.0.0.0:8080");
         assert_eq!(config.internal_token, None);
+        assert_eq!(config.snapshot_token, None);
         assert_eq!(config.storage.endpoint, "https://s3.example");
         assert_eq!(config.storage.bucket, "lixray");
         assert_eq!(config.storage.region, "auto");
@@ -223,11 +227,13 @@ mod tests {
         set_s3_env();
         env::set_var("PORT", "4567");
         env::set_var("LIXRAY_INTERNAL_TOKEN", "test-token");
+        env::set_var("LIXRAY_SNAPSHOT_TOKEN", "snapshot-token");
 
         let config = Config::from_env().unwrap();
 
         assert_eq!(config.bind_addr, "0.0.0.0:4567");
         assert_eq!(config.internal_token.as_deref(), Some("test-token"));
+        assert_eq!(config.snapshot_token.as_deref(), Some("snapshot-token"));
         clear_lixray_env();
     }
 
@@ -240,6 +246,18 @@ mod tests {
         let error = Config::from_env().unwrap_err();
 
         assert!(format!("{error:#}").contains("LIXRAY_INTERNAL_TOKEN must not be empty"));
+        clear_lixray_env();
+    }
+
+    #[test]
+    fn from_env_rejects_empty_snapshot_token() {
+        let _guard = env_lock().lock().unwrap();
+        clear_lixray_env();
+        env::set_var("LIXRAY_SNAPSHOT_TOKEN", "");
+
+        let error = Config::from_env().unwrap_err();
+
+        assert!(format!("{error:#}").contains("LIXRAY_SNAPSHOT_TOKEN must not be empty"));
         clear_lixray_env();
     }
 
@@ -385,6 +403,7 @@ mod tests {
             "BIND_ADDR",
             "PORT",
             "LIXRAY_INTERNAL_TOKEN",
+            "LIXRAY_SNAPSHOT_TOKEN",
             "RAILWAY_PROJECT_ID",
             "RAILWAY_ENVIRONMENT_ID",
             "LIXRAY_MAX_OPEN_LIXS",

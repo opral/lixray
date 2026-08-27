@@ -2,6 +2,7 @@
 
 mod config;
 mod routes;
+mod snapshots;
 mod store;
 #[doc(hidden)]
 pub mod telemetry;

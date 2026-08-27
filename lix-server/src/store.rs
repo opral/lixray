@@ -3,18 +3,24 @@ use anyhow::{Context, Result};
 use axum::{body::Body, http::Request};
 use blake3::Hasher;
 use fs2::FileExt as _;
-use futures_util::TryStreamExt as _;
+use futures_util::{AsyncRead, AsyncWrite, StreamExt as _, TryStreamExt as _};
 use lix_sdk::server_protocol::{
     LixServerProtocol, ServerProtocolBody, ServerProtocolContext, ServerProtocolResponse,
 };
+use lix_sdk::storage::ReadDurability;
 use lix_slatedb_storage::{
     SlateDB, SlateDBCacheOptions, SlateDBIoCounters, SlateDBObjectStoreOptions,
 };
 #[cfg(test)]
 use object_store::memory::InMemory;
-use object_store::{aws::AmazonS3Builder, ClientOptions, ObjectStore, RetryConfig};
+use object_store::path::Path as ObjectPath;
 #[cfg(test)]
-use object_store::{path::Path as ObjectPath, ClientConfigKey, ObjectStoreExt};
+use object_store::ClientConfigKey;
+use object_store::{
+    aws::AmazonS3Builder, ClientOptions, ObjectStore, ObjectStoreExt, PutMode, PutOptions,
+    PutResult, RetryConfig, UpdateVersion,
+};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -27,7 +33,7 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Handle;
 #[cfg(test)]
 use tokio::sync::Notify;
-use tokio::sync::{watch, Mutex, OnceCell};
+use tokio::sync::{oneshot, watch, Mutex, OnceCell};
 use tokio::task::JoinSet;
 use tracing::{info, info_span, Instrument};
 
@@ -52,6 +58,10 @@ const S3_REQUEST_BUDGET: S3RequestBudget = S3RequestBudget {
 const CACHE_NAMESPACE_LAYOUT: &[u8] = b"lixray-slatedb-cache\0v1";
 // This cannot be a legacy Lix cache child: Lix IDs do not permit dots.
 const CACHE_NAMESPACE_PARENT: &str = ".lixray-cache-v1";
+// This namespace is outside the Lix ID grammar. A single conditional object
+// per Lix coordinates cold creation and snapshot publication across service
+// instances without changing the legacy direct-prefix layout.
+const STORAGE_LOCATOR_PARENT: &str = ".lixray-storage-v1";
 
 // These identifiers describe the physical store opened by this manager, not a
 // benchmark caller's requested cohort. Keep them alongside the adapter so a
@@ -87,6 +97,7 @@ pub struct LixRuntimeManager {
     recovery_watchdog: RecoveryWatchdog,
     state: Mutex<ManagerState>,
     telemetry: Arc<dyn lix_sdk::telemetry::TelemetrySink>,
+    snapshot_shutdown: watch::Sender<bool>,
     #[cfg(test)]
     open_gate: Option<TestOpenGate>,
     // Keep this last: struct fields drop in declaration order. The exclusive
@@ -134,6 +145,8 @@ enum StorageBackend {
 struct ManagerState {
     entries: HashMap<String, RuntimeEntry>,
     cleaning: HashMap<String, CleanupTombstone>,
+    snapshot_restores: HashMap<String, SnapshotRestoreTombstone>,
+    snapshot_exports: HashMap<u64, SnapshotExportTombstone>,
     failed_upgrades: HashMap<String, FailedUpgrade>,
     shutting_down: bool,
     clock: u64,
@@ -184,6 +197,36 @@ struct CacheRootLease {
 struct CleanupTombstone {
     sequence: u64,
     done: watch::Receiver<CleanupState>,
+}
+
+struct SnapshotRestoreTombstone {
+    sequence: u64,
+    done: watch::Receiver<CleanupState>,
+}
+
+struct SnapshotExportTombstone {
+    done: watch::Receiver<CleanupState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum StorageLocator {
+    Direct,
+    Restoring { attempt: uuid::Uuid },
+    Snapshot { attempt: uuid::Uuid },
+    Vacant,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StorageLocatorRecord {
+    version: u8,
+    #[serde(flatten)]
+    locator: StorageLocator,
+}
+
+struct SnapshotRestoreClaim {
+    attempt: uuid::Uuid,
+    version: UpdateVersion,
 }
 
 struct EvictedRuntime {
@@ -244,6 +287,33 @@ fn is_repository_upgrade_failure(error: &anyhow::Error) -> bool {
     })
 }
 
+fn is_object_store_already_exists(error: &anyhow::Error) -> bool {
+    error.chain().any(|source| {
+        source
+            .downcast_ref::<object_store::Error>()
+            .is_some_and(|error| matches!(error, object_store::Error::AlreadyExists { .. }))
+    })
+}
+
+fn is_object_store_precondition(error: &anyhow::Error) -> bool {
+    error.chain().any(|source| {
+        source
+            .downcast_ref::<object_store::Error>()
+            .is_some_and(|error| matches!(error, object_store::Error::Precondition { .. }))
+    })
+}
+
+async fn wait_for_snapshot_shutdown(shutdown: &mut watch::Receiver<bool>) {
+    loop {
+        if *shutdown.borrow() {
+            return;
+        }
+        if shutdown.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
 struct PendingRuntimeOpen {
     lix_id: String,
     runtime: Arc<OnceCell<Arc<LixRuntime>>>,
@@ -282,6 +352,17 @@ pub(crate) enum LixRuntimeError {
     ShuttingDown,
     Cleanup(Arc<str>),
     Open(anyhow::Error),
+}
+
+#[derive(Debug)]
+pub(crate) enum SnapshotRestoreError {
+    InvalidId,
+    AlreadyExists,
+    Busy,
+    AtCapacity { max: usize },
+    ShuttingDown,
+    Restore(anyhow::Error),
+    Cleanup(anyhow::Error),
 }
 
 impl LixRuntimeManager {
@@ -326,6 +407,7 @@ impl LixRuntimeManager {
             prefix: storage.prefix.clone(),
             cache,
         };
+        let (snapshot_shutdown, _) = watch::channel(false);
 
         Ok(Arc::new(Self {
             backend,
@@ -333,6 +415,7 @@ impl LixRuntimeManager {
             recovery_watchdog: RecoveryWatchdog::production(config.recovery_close_timeout),
             state: Mutex::new(ManagerState::default()),
             telemetry,
+            snapshot_shutdown,
             #[cfg(test)]
             open_gate: None,
             _cache_root_lease: Some(cache_root_lease),
@@ -341,14 +424,22 @@ impl LixRuntimeManager {
 
     #[cfg(test)]
     pub(crate) fn new_in_memory(max_open_lixes: usize) -> Arc<Self> {
+        Self::new_in_memory_with_store(max_open_lixes, Arc::new(InMemory::new()))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_in_memory_with_store(
+        max_open_lixes: usize,
+        object_store: Arc<dyn ObjectStore>,
+    ) -> Arc<Self> {
+        let (snapshot_shutdown, _) = watch::channel(false);
         Arc::new(Self {
-            backend: StorageBackend::Memory {
-                object_store: Arc::new(InMemory::new()),
-            },
+            backend: StorageBackend::Memory { object_store },
             max_open_lixes,
             recovery_watchdog: RecoveryWatchdog::test_default(),
             state: Mutex::new(ManagerState::default()),
             telemetry: test_telemetry_sink(),
+            snapshot_shutdown,
             open_gate: None,
             _cache_root_lease: None,
         })
@@ -369,12 +460,22 @@ impl LixRuntimeManager {
         if !valid_lix_id(lix_id) {
             return Err(LixRuntimeError::InvalidId);
         }
+        if matches!(
+            self.read_storage_locator(lix_id)
+                .await
+                .map_err(LixRuntimeError::Open)?,
+            Some((StorageLocator::Restoring { .. } | StorageLocator::Vacant, _))
+        ) {
+            return Err(LixRuntimeError::Recovering);
+        }
 
         let runtime_cell = 'select_runtime: loop {
             let action = {
                 let mut state = self.state.lock().await;
                 if state.shutting_down {
                     return Err(LixRuntimeError::ShuttingDown);
+                } else if state.snapshot_restores.contains_key(lix_id) {
+                    return Err(LixRuntimeError::Recovering);
                 } else if let Some(cleanup) = state.cleaning.get(lix_id) {
                     GetRuntimeAction::WaitForCleanup(cleanup.done.clone())
                 } else if let Some(failure) = state.failed_upgrades.get(lix_id) {
@@ -391,7 +492,9 @@ impl LixRuntimeManager {
                         runtime: Arc::clone(&entry.runtime),
                         opened: entry.opened.clone(),
                     }
-                } else if state.entries.len() + state.cleaning.len() >= self.max_open_lixes {
+                } else if state.entries.len() + state.cleaning.len() + state.snapshot_restores.len()
+                    >= self.max_open_lixes
+                {
                     // An eviction remains a live SlateDB runtime until its
                     // protocol has closed and its cache child is retired.
                     // Count it against the same cap so churn cannot bypass
@@ -526,6 +629,36 @@ impl LixRuntimeManager {
         }
     }
 
+    pub(crate) async fn get_existing_for_snapshot(
+        self: &Arc<Self>,
+        lix_id: &str,
+    ) -> std::result::Result<Option<Arc<LixService>>, LixRuntimeError> {
+        if !valid_lix_id(lix_id) {
+            return Err(LixRuntimeError::InvalidId);
+        }
+        let cached = self.state.lock().await.entries.contains_key(lix_id);
+        if !cached {
+            let exists = match self
+                .read_storage_locator(lix_id)
+                .await
+                .map_err(LixRuntimeError::Open)?
+            {
+                Some((StorageLocator::Snapshot { .. }, _)) => true,
+                Some((StorageLocator::Restoring { .. } | StorageLocator::Vacant, _)) => {
+                    return Err(LixRuntimeError::Recovering);
+                }
+                Some((StorageLocator::Direct, _)) | None => self
+                    .storage_prefix_exists(lix_id)
+                    .await
+                    .map_err(LixRuntimeError::Open)?,
+            };
+            if !exists {
+                return Ok(None);
+            }
+        }
+        self.get(lix_id).await.map(Some)
+    }
+
     fn spawn_runtime_open(self: &Arc<Self>, opener: PendingRuntimeOpen) {
         let manager = Arc::clone(self);
         let span = info_span!(
@@ -657,42 +790,9 @@ impl LixRuntimeManager {
         let started = Instant::now();
         let io = SlateDBIoCounters::default();
         let storage_started = Instant::now();
-        let storage =
-            info_span!("lix.storage.open", lix.id = lix_id).in_scope(|| match &self.backend {
-                #[cfg(test)]
-                StorageBackend::Memory { object_store } => {
-                    SlateDB::open_object_store_with_options_and_io_counters(
-                        lix_id,
-                        Arc::clone(object_store),
-                        SlateDBObjectStoreOptions::default(),
-                        io.clone(),
-                    )
-                    .context("open in-memory Lix SlateDB storage")
-                }
-                StorageBackend::S3 {
-                    object_store,
-                    prefix,
-                    cache,
-                } => {
-                    let storage_prefix = if prefix.is_empty() {
-                        lix_id.to_string()
-                    } else {
-                        format!("{prefix}/{lix_id}")
-                    };
-                    let mut lix_cache = cache.clone();
-                    lix_cache.root_folder = cache_child_path(&cache.root_folder, lix_id)
-                        .expect("Lix IDs are validated before opening cached storage");
-                    SlateDB::open_object_store_with_options_and_io_counters(
-                        storage_prefix,
-                        Arc::clone(object_store),
-                        SlateDBObjectStoreOptions {
-                            cache: Some(lix_cache),
-                        },
-                        io.clone(),
-                    )
-                    .context("open cached S3-backed Lix SlateDB storage")
-                }
-            })?;
+        let storage_prefix = self.resolve_storage_prefix_for_open(lix_id).await?;
+        let storage = info_span!("lix.storage.open", lix.id = lix_id)
+            .in_scope(|| self.open_storage_at(lix_id, &storage_prefix, io.clone()))?;
         let storage_open_ms = elapsed_millis(storage_started);
 
         let engine_started = Instant::now();
@@ -738,6 +838,166 @@ impl LixRuntimeManager {
             "opened lix runtime"
         );
         Ok(Arc::new(LixRuntime::new(LixService { protocol })))
+    }
+
+    fn open_storage_at(
+        &self,
+        lix_id: &str,
+        storage_prefix: &str,
+        io: SlateDBIoCounters,
+    ) -> Result<SlateDB> {
+        match &self.backend {
+            #[cfg(test)]
+            StorageBackend::Memory { object_store } => {
+                SlateDB::open_object_store_with_options_and_io_counters(
+                    storage_prefix,
+                    Arc::clone(object_store),
+                    SlateDBObjectStoreOptions::default(),
+                    io,
+                )
+                .context("open in-memory Lix SlateDB storage")
+            }
+            StorageBackend::S3 {
+                object_store,
+                cache,
+                ..
+            } => {
+                let mut lix_cache = cache.clone();
+                lix_cache.root_folder = cache_child_path(&cache.root_folder, lix_id)
+                    .expect("Lix IDs are validated before opening cached storage");
+                SlateDB::open_object_store_with_options_and_io_counters(
+                    storage_prefix,
+                    Arc::clone(object_store),
+                    SlateDBObjectStoreOptions {
+                        cache: Some(lix_cache),
+                    },
+                    io,
+                )
+                .context("open cached S3-backed Lix SlateDB storage")
+            }
+        }
+    }
+
+    fn storage_prefix(&self, lix_id: &str) -> String {
+        match &self.backend {
+            #[cfg(test)]
+            StorageBackend::Memory { .. } => lix_id.to_string(),
+            StorageBackend::S3 { prefix, .. } if prefix.is_empty() => lix_id.to_string(),
+            StorageBackend::S3 { prefix, .. } => format!("{prefix}/{lix_id}"),
+        }
+    }
+
+    fn storage_control_path(&self, kind: &str, lix_id: &str) -> ObjectPath {
+        let relative = format!("{STORAGE_LOCATOR_PARENT}/{kind}/{lix_id}");
+        match &self.backend {
+            #[cfg(test)]
+            StorageBackend::Memory { .. } => ObjectPath::from(relative),
+            StorageBackend::S3 { prefix, .. } if prefix.is_empty() => ObjectPath::from(relative),
+            StorageBackend::S3 { prefix, .. } => ObjectPath::from(format!("{prefix}/{relative}")),
+        }
+    }
+
+    fn snapshot_staging_prefix(&self, lix_id: &str, attempt: &uuid::Uuid) -> String {
+        let relative = format!("{STORAGE_LOCATOR_PARENT}/snapshots/{lix_id}/{attempt}");
+        match &self.backend {
+            #[cfg(test)]
+            StorageBackend::Memory { .. } => relative,
+            StorageBackend::S3 { prefix, .. } if prefix.is_empty() => relative,
+            StorageBackend::S3 { prefix, .. } => format!("{prefix}/{relative}"),
+        }
+    }
+
+    async fn read_storage_locator(
+        &self,
+        lix_id: &str,
+    ) -> Result<Option<(StorageLocator, UpdateVersion)>> {
+        let result = match self
+            .object_store()
+            .get(&self.storage_control_path("locators", lix_id))
+            .await
+        {
+            Ok(result) => result,
+            Err(object_store::Error::NotFound { .. }) => return Ok(None),
+            Err(error) => return Err(error).context("read Lix storage locator"),
+        };
+        let version = UpdateVersion {
+            e_tag: result.meta.e_tag.clone(),
+            version: result.meta.version.clone(),
+        };
+        let bytes = result
+            .bytes()
+            .await
+            .context("read Lix storage locator body")?;
+        let record: StorageLocatorRecord =
+            serde_json::from_slice(&bytes).context("decode Lix storage locator")?;
+        anyhow::ensure!(
+            record.version == 1,
+            "unsupported Lix storage locator version"
+        );
+        Ok(Some((record.locator, version)))
+    }
+
+    async fn write_storage_locator(
+        &self,
+        lix_id: &str,
+        locator: &StorageLocator,
+        mode: PutMode,
+    ) -> Result<PutResult> {
+        let payload = serde_json::to_vec(&StorageLocatorRecord {
+            version: 1,
+            locator: locator.clone(),
+        })
+        .context("encode Lix storage locator")?;
+        self.object_store()
+            .put_opts(
+                &self.storage_control_path("locators", lix_id),
+                payload.into(),
+                PutOptions::from(mode),
+            )
+            .await
+            .context("write Lix storage locator")
+    }
+
+    async fn resolve_storage_prefix_for_open(&self, lix_id: &str) -> Result<String> {
+        loop {
+            match self.read_storage_locator(lix_id).await? {
+                Some((StorageLocator::Direct, _)) => return Ok(self.storage_prefix(lix_id)),
+                Some((StorageLocator::Snapshot { attempt }, _)) => {
+                    return Ok(self.snapshot_staging_prefix(lix_id, &attempt));
+                }
+                Some((StorageLocator::Restoring { .. }, _)) => {
+                    return Err(anyhow::anyhow!("Lix snapshot restore is in progress"));
+                }
+                Some((StorageLocator::Vacant, version)) => match self
+                    .write_storage_locator(
+                        lix_id,
+                        &StorageLocator::Direct,
+                        PutMode::Update(version),
+                    )
+                    .await
+                {
+                    Ok(_) => return Ok(self.storage_prefix(lix_id)),
+                    Err(error) if is_object_store_precondition(&error) => continue,
+                    Err(error) => return Err(error),
+                },
+                None => match self
+                    .write_storage_locator(lix_id, &StorageLocator::Direct, PutMode::Create)
+                    .await
+                {
+                    Ok(_) => return Ok(self.storage_prefix(lix_id)),
+                    Err(error) if is_object_store_already_exists(&error) => continue,
+                    Err(error) => return Err(error),
+                },
+            }
+        }
+    }
+
+    fn object_store(&self) -> Arc<dyn ObjectStore> {
+        match &self.backend {
+            #[cfg(test)]
+            StorageBackend::Memory { object_store } => Arc::clone(object_store),
+            StorageBackend::S3 { object_store, .. } => Arc::clone(object_store),
+        }
     }
 
     fn spawn_eviction_cleanup(self: &Arc<Self>, evicted: EvictedRuntime) {
@@ -992,13 +1252,407 @@ impl LixRuntimeManager {
         Some(cleanup)
     }
 
+    pub(crate) fn spawn_snapshot_restore<R>(
+        self: &Arc<Self>,
+        lix_id: String,
+        source: R,
+    ) -> tokio::task::JoinHandle<std::result::Result<(), SnapshotRestoreError>>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+    {
+        let manager = Arc::clone(self);
+        tokio::spawn(async move { manager.restore_snapshot(lix_id, source).await })
+    }
+
+    pub(crate) async fn spawn_snapshot_export<W>(
+        self: &Arc<Self>,
+        lix_id: String,
+        service: Arc<LixService>,
+        mut destination: W,
+    ) -> std::result::Result<oneshot::Receiver<Result<(), ()>>, LixRuntimeError>
+    where
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        let (sequence, done) = {
+            let mut state = self.state.lock().await;
+            if state.shutting_down {
+                return Err(LixRuntimeError::ShuttingDown);
+            }
+            if state.snapshot_exports.len() + state.snapshot_restores.len() >= self.max_open_lixes {
+                return Err(LixRuntimeError::AtCapacity {
+                    max: self.max_open_lixes,
+                });
+            }
+            state.cleanup_sequence = state.cleanup_sequence.wrapping_add(1);
+            let sequence = state.cleanup_sequence;
+            let (done, waiting) = watch::channel(CleanupState::Running);
+            state
+                .snapshot_exports
+                .insert(sequence, SnapshotExportTombstone { done: waiting });
+            (sequence, done)
+        };
+        let (completed, completion) = oneshot::channel();
+        let manager = Arc::clone(self);
+        let mut shutdown = self.snapshot_shutdown.subscribe();
+        tokio::spawn(async move {
+            let export = service
+                .export_snapshot()
+                .durability(ReadDurability::Visible)
+                .write_to(&mut destination);
+            tokio::pin!(export);
+            let result = tokio::select! {
+                result = &mut export => Some(result),
+                _ = wait_for_snapshot_shutdown(&mut shutdown) => None,
+            };
+            let completed_result = match result {
+                Some(Ok(report)) => {
+                    info!(
+                        lix_id,
+                        entry_count = report.entry_count,
+                        payload_bytes = report.payload_bytes,
+                        digest = %blake3::Hash::from_bytes(report.digest),
+                        "exported Lix snapshot"
+                    );
+                    Ok(())
+                }
+                Some(Err(error)) => {
+                    if error.code == lix_sdk::LixError::CODE_SNAPSHOT_IO {
+                        info!(lix_id, "snapshot export stream ended before completion");
+                    } else {
+                        tracing::error!(lix_id, error = %error, "failed to export Lix snapshot");
+                    }
+                    if matches!(
+                        error.code.as_str(),
+                        lix_sdk::LixError::CODE_STORAGE_FENCED
+                            | lix_sdk::LixError::CODE_STORAGE_CLOSED
+                    ) {
+                        manager.recover(&lix_id, &service).await;
+                    }
+                    Err(())
+                }
+                None => {
+                    info!(lix_id, "cancelled snapshot export during shutdown");
+                    Err(())
+                }
+            };
+            manager.finish_snapshot_export(sequence, done).await;
+            let _ = completed.send(completed_result);
+        });
+        Ok(completion)
+    }
+
+    async fn finish_snapshot_export(&self, sequence: u64, done: watch::Sender<CleanupState>) {
+        self.state.lock().await.snapshot_exports.remove(&sequence);
+        done.send_replace(CleanupState::Complete);
+    }
+
+    pub(crate) fn snapshot_shutdown(&self) -> watch::Receiver<bool> {
+        self.snapshot_shutdown.subscribe()
+    }
+
+    async fn restore_snapshot<R>(
+        self: Arc<Self>,
+        lix_id: String,
+        source: R,
+    ) -> std::result::Result<(), SnapshotRestoreError>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+    {
+        let (sequence, done) = self.begin_snapshot_restore(&lix_id).await?;
+        let result = self.restore_snapshot_reserved(&lix_id, source).await;
+        self.finish_snapshot_restore(&lix_id, sequence, done, &result)
+            .await;
+        result
+    }
+
+    async fn begin_snapshot_restore(
+        &self,
+        lix_id: &str,
+    ) -> std::result::Result<(u64, watch::Sender<CleanupState>), SnapshotRestoreError> {
+        if !valid_lix_id(lix_id) {
+            return Err(SnapshotRestoreError::InvalidId);
+        }
+        let mut state = self.state.lock().await;
+        if state.shutting_down {
+            return Err(SnapshotRestoreError::ShuttingDown);
+        }
+        if state.snapshot_restores.contains_key(lix_id) {
+            return Err(SnapshotRestoreError::Busy);
+        }
+        if state.entries.contains_key(lix_id)
+            || state.cleaning.contains_key(lix_id)
+            || state.failed_upgrades.contains_key(lix_id)
+        {
+            return Err(SnapshotRestoreError::AlreadyExists);
+        }
+        if state.entries.len() + state.cleaning.len() + state.snapshot_restores.len()
+            >= self.max_open_lixes
+        {
+            return Err(SnapshotRestoreError::AtCapacity {
+                max: self.max_open_lixes,
+            });
+        }
+        state.cleanup_sequence = state.cleanup_sequence.wrapping_add(1);
+        let sequence = state.cleanup_sequence;
+        let (done, waiting) = watch::channel(CleanupState::Running);
+        state.snapshot_restores.insert(
+            lix_id.to_string(),
+            SnapshotRestoreTombstone {
+                sequence,
+                done: waiting,
+            },
+        );
+        Ok((sequence, done))
+    }
+
+    async fn restore_snapshot_reserved<R>(
+        &self,
+        lix_id: &str,
+        source: R,
+    ) -> std::result::Result<(), SnapshotRestoreError>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+    {
+        let claim = self.claim_snapshot_restore(lix_id).await?;
+        let staging_prefix = self.snapshot_staging_prefix(lix_id, &claim.attempt);
+        let storage = self.open_storage_at(lix_id, &staging_prefix, SlateDBIoCounters::default());
+        let storage = match storage {
+            Ok(storage) => storage,
+            Err(error) => {
+                let error = error.context("open snapshot staging storage");
+                return self.reject_snapshot_restore(lix_id, claim, error).await;
+            }
+        };
+        let restored = lix_sdk::open_lix()
+            .with_storage(storage)
+            .with_telemetry(Arc::clone(&self.telemetry))
+            .from_snapshot(source)
+            .await;
+        match restored {
+            Ok(lix) => {
+                if let Err(error) = lix.close().await.context("close restored Lix") {
+                    return self.reject_snapshot_restore(lix_id, claim, error).await;
+                }
+                self.publish_snapshot_restore(lix_id, claim).await
+            }
+            Err(error) => {
+                let restore_error = anyhow::Error::new(error).context("restore Lix snapshot");
+                self.reject_snapshot_restore(lix_id, claim, restore_error)
+                    .await
+            }
+        }
+    }
+
+    async fn claim_snapshot_restore(
+        &self,
+        lix_id: &str,
+    ) -> std::result::Result<SnapshotRestoreClaim, SnapshotRestoreError> {
+        let attempt = uuid::Uuid::new_v4();
+        let restoring = StorageLocator::Restoring { attempt };
+        loop {
+            let current = self
+                .read_storage_locator(lix_id)
+                .await
+                .map_err(SnapshotRestoreError::Restore)?;
+            let mode = match current {
+                Some((StorageLocator::Direct | StorageLocator::Snapshot { .. }, _)) => {
+                    return Err(SnapshotRestoreError::AlreadyExists);
+                }
+                Some((StorageLocator::Restoring { .. }, _)) => {
+                    return Err(SnapshotRestoreError::Busy);
+                }
+                Some((StorageLocator::Vacant, version)) => PutMode::Update(version),
+                None => {
+                    if self
+                        .storage_prefix_exists(lix_id)
+                        .await
+                        .map_err(SnapshotRestoreError::Restore)?
+                    {
+                        match self
+                            .write_storage_locator(lix_id, &StorageLocator::Direct, PutMode::Create)
+                            .await
+                        {
+                            Ok(_) => return Err(SnapshotRestoreError::AlreadyExists),
+                            Err(error) if is_object_store_already_exists(&error) => continue,
+                            Err(error) => return Err(SnapshotRestoreError::Restore(error)),
+                        }
+                    }
+                    PutMode::Create
+                }
+            };
+            match self.write_storage_locator(lix_id, &restoring, mode).await {
+                Ok(result) => {
+                    return Ok(SnapshotRestoreClaim {
+                        attempt,
+                        version: result.into(),
+                    });
+                }
+                Err(error)
+                    if is_object_store_already_exists(&error)
+                        || is_object_store_precondition(&error) =>
+                {
+                    continue;
+                }
+                Err(error) => {
+                    // A timed-out conditional write may have committed. Only
+                    // proceed when an authoritative reread proves ownership.
+                    if let Ok(Some((StorageLocator::Restoring { attempt: owner }, version))) =
+                        self.read_storage_locator(lix_id).await
+                    {
+                        if owner == attempt {
+                            return Ok(SnapshotRestoreClaim { attempt, version });
+                        }
+                    }
+                    return Err(SnapshotRestoreError::Restore(error));
+                }
+            }
+        }
+    }
+
+    async fn publish_snapshot_restore(
+        &self,
+        lix_id: &str,
+        claim: SnapshotRestoreClaim,
+    ) -> std::result::Result<(), SnapshotRestoreError> {
+        let ready = StorageLocator::Snapshot {
+            attempt: claim.attempt,
+        };
+        match self
+            .write_storage_locator(lix_id, &ready, PutMode::Update(claim.version))
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(error) => match self.read_storage_locator(lix_id).await {
+                Ok(Some((StorageLocator::Snapshot { attempt }, _))) if attempt == claim.attempt => {
+                    // The CAS committed but its response was lost.
+                    Ok(())
+                }
+                Ok(_) => Err(SnapshotRestoreError::Cleanup(error.context(
+                    "snapshot publication ownership was lost; staging remains quarantined",
+                ))),
+                Err(read_error) => Err(SnapshotRestoreError::Cleanup(read_error.context(format!(
+                    "resolve ambiguous snapshot publication after: {error:#}"
+                )))),
+            },
+        }
+    }
+
+    async fn reject_snapshot_restore(
+        &self,
+        lix_id: &str,
+        claim: SnapshotRestoreClaim,
+        restore_error: anyhow::Error,
+    ) -> std::result::Result<(), SnapshotRestoreError> {
+        if let Err(cleanup) = self.cleanup_snapshot_staging(lix_id, &claim.attempt).await {
+            return Err(SnapshotRestoreError::Cleanup(cleanup.context(format!(
+                "clean rejected snapshot staging after: {restore_error:#}"
+            ))));
+        }
+        match self
+            .write_storage_locator(
+                lix_id,
+                &StorageLocator::Vacant,
+                PutMode::Update(claim.version),
+            )
+            .await
+        {
+            Ok(_) => Err(SnapshotRestoreError::Restore(restore_error)),
+            Err(error) => match self.read_storage_locator(lix_id).await {
+                Ok(Some((StorageLocator::Vacant, _))) => {
+                    Err(SnapshotRestoreError::Restore(restore_error))
+                }
+                Ok(_) => Err(SnapshotRestoreError::Cleanup(error.context(
+                    "snapshot rejection lost its conditional locator ownership",
+                ))),
+                Err(read_error) => Err(SnapshotRestoreError::Cleanup(read_error.context(format!(
+                    "resolve ambiguous rejected snapshot locator after: {error:#}"
+                )))),
+            },
+        }
+    }
+
+    async fn finish_snapshot_restore(
+        &self,
+        lix_id: &str,
+        sequence: u64,
+        done: watch::Sender<CleanupState>,
+        result: &std::result::Result<(), SnapshotRestoreError>,
+    ) {
+        let mut state = self.state.lock().await;
+        let matches_restore = state
+            .snapshot_restores
+            .get(lix_id)
+            .is_some_and(|restore| restore.sequence == sequence);
+        if !matches_restore {
+            done.send_replace(CleanupState::Failed(Arc::from(
+                "snapshot restore lost its manager state",
+            )));
+            return;
+        }
+        match result {
+            Err(SnapshotRestoreError::Cleanup(error)) => {
+                let error = Arc::<str>::from(format!("{error:#}"));
+                tracing::error!(
+                    lix_id,
+                    sequence,
+                    error = %error,
+                    "retaining failed snapshot restore slot"
+                );
+                done.send_replace(CleanupState::Failed(error));
+            }
+            _ => {
+                state.snapshot_restores.remove(lix_id);
+                done.send_replace(CleanupState::Complete);
+            }
+        }
+    }
+
+    async fn storage_prefix_exists(&self, lix_id: &str) -> Result<bool> {
+        let object_store = self.object_store();
+        let prefix = ObjectPath::from(self.storage_prefix(lix_id));
+        object_store
+            .list(Some(&prefix))
+            .try_next()
+            .await
+            .context("list Lix storage prefix")
+            .map(|entry| entry.is_some())
+    }
+
+    async fn cleanup_snapshot_staging(&self, lix_id: &str, attempt: &uuid::Uuid) -> Result<()> {
+        if let Some(cache_root) = self.cache_root() {
+            let cache_path = cache_child_path(&cache_root, lix_id)
+                .expect("validated Lix ID has a cache child path");
+            if cache_path.exists() {
+                tokio::task::spawn_blocking(move || {
+                    delete_cache_directory(&cache_path, "failed snapshot restore cache")
+                })
+                .await
+                .context("join failed snapshot cache cleanup")??;
+            }
+        }
+
+        let object_store = self.object_store();
+        let prefix = ObjectPath::from(self.snapshot_staging_prefix(lix_id, attempt));
+        let mut deleted = object_store
+            .delete_stream(
+                object_store
+                    .list(Some(&prefix))
+                    .map_ok(|metadata| metadata.location)
+                    .boxed(),
+            )
+            .boxed();
+        while deleted.try_next().await?.is_some() {}
+        Ok(())
+    }
+
     /// Prevents new opens and closes protocol servers so their live streams
     /// cannot keep HTTP graceful shutdown from reaching the storage owners.
     pub async fn shutdown(&self) -> Result<()> {
-        let runtimes = {
+        self.snapshot_shutdown.send_replace(true);
+        let (runtimes, restores, exports) = {
             let mut state = self.state.lock().await;
             state.shutting_down = true;
-            state
+            let runtimes = state
                 .entries
                 .iter()
                 .map(|(lix_id, entry)| {
@@ -1008,7 +1662,18 @@ impl LixRuntimeManager {
                         entry.opened.clone(),
                     )
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let restores = state
+                .snapshot_restores
+                .iter()
+                .map(|(lix_id, restore)| (lix_id.clone(), restore.done.clone()))
+                .collect::<Vec<_>>();
+            let exports = state
+                .snapshot_exports
+                .iter()
+                .map(|(sequence, export)| (*sequence, export.done.clone()))
+                .collect::<Vec<_>>();
+            (runtimes, restores, exports)
         };
 
         let mut closers = JoinSet::new();
@@ -1039,6 +1704,29 @@ impl LixRuntimeManager {
             }
         }
 
+        for (lix_id, mut restore) in restores {
+            if let Err(error) = self.wait_for_cleanup(&mut restore).await {
+                tracing::error!(lix_id, error = %error, "snapshot restore did not finish cleanly during shutdown");
+                if first_error.is_none() {
+                    first_error = Some(
+                        anyhow::anyhow!(error).context(format!("finish snapshot restore {lix_id}")),
+                    );
+                }
+            }
+        }
+
+        for (sequence, mut export) in exports {
+            if let Err(error) = self.wait_for_cleanup(&mut export).await {
+                tracing::error!(sequence, error = %error, "snapshot export did not finish cleanly during shutdown");
+                if first_error.is_none() {
+                    first_error = Some(
+                        anyhow::anyhow!(error)
+                            .context(format!("finish snapshot export {sequence}")),
+                    );
+                }
+            }
+        }
+
         first_error.map_or(Ok(()), Err)
     }
 
@@ -1047,8 +1735,18 @@ impl LixRuntimeManager {
     }
 
     #[cfg(test)]
-    async fn cached_lix_count(&self) -> usize {
+    pub(crate) async fn cached_lix_count(&self) -> usize {
         self.state.lock().await.entries.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn snapshot_restore_count(&self) -> usize {
+        self.state.lock().await.snapshot_restores.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn snapshot_export_count(&self) -> usize {
+        self.state.lock().await.snapshot_exports.len()
     }
 
     #[cfg(test)]
@@ -1062,6 +1760,10 @@ impl LixRuntimeManager {
 }
 
 impl LixService {
+    pub(crate) fn export_snapshot(&self) -> lix_sdk::snapshot::SnapshotExportBuilder<SlateDB> {
+        self.protocol.export_snapshot()
+    }
+
     pub(crate) fn handle_protocol(
         &self,
         request: Request<Body>,
@@ -1279,6 +1981,32 @@ impl Error for LixRuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Open(error) => Some(error.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for SnapshotRestoreError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidId => write!(formatter, "invalid lix ID"),
+            Self::AlreadyExists => write!(formatter, "the destination lix already exists"),
+            Self::Busy => write!(formatter, "the destination lix is busy"),
+            Self::AtCapacity { max } => write!(
+                formatter,
+                "lix service is at its capacity of {max} active runtimes"
+            ),
+            Self::ShuttingDown => write!(formatter, "lix server is shutting down"),
+            Self::Restore(error) => write!(formatter, "restore snapshot: {error:#}"),
+            Self::Cleanup(error) => write!(formatter, "clean up failed snapshot: {error:#}"),
+        }
+    }
+}
+
+impl Error for SnapshotRestoreError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Restore(error) | Self::Cleanup(error) => Some(error.as_ref()),
             _ => None,
         }
     }
@@ -1780,10 +2508,10 @@ mod tests {
         body::Body,
         http::{header, Request},
     };
+    use futures_util::io::Cursor;
     use http_body_util::BodyExt as _;
     use lix_sdk::storage::{
-        BeginScanOptions, CoreProjection, KeyRange, ProjectedValue, PutBatch, PutEntry,
-        ReadOptions, SpaceId, Storage as _, StorageRead as _, StorageSpace, StorageWrite as _,
+        Key, PutBatch, PutEntry, SpaceId, Storage as _, StorageSpace, StorageWrite as _,
         StoredValue, WriteOptions,
     };
     use serde_json::{json, Value as JsonValue};
@@ -1793,13 +2521,13 @@ mod tests {
 
     const V68_REPOSITORY: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../vendor/lix/packages/lix/tests/fixtures/v68_external_tombstones.snapshot"
+        "/../vendor/lix/packages/lix/tests/fixtures/v68_external_tombstones.lixsnap"
     ));
 
     // The oldest format the v75 migration chain still migrates in place.
     const V72_REPOSITORY: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../vendor/lix/packages/lix/tests/fixtures/v72_filesystem_checkpoints.snapshot"
+        "/../vendor/lix/packages/lix/tests/fixtures/v72_filesystem_checkpoints.lixsnap"
     ));
 
     const REPOSITORY_PROTOCOL_SPACE: StorageSpace =
@@ -1966,48 +2694,48 @@ mod tests {
         LixRuntimeManager::new_in_memory(max_open_lixes)
     }
 
-    async fn seed_repository_protocol(manager: &LixRuntimeManager, lix_id: &str, snapshot: &[u8]) {
-        let source = lix_sdk::Memory::from_snapshot(snapshot).expect("decode repository fixture");
-        let read = source
-            .begin_read(ReadOptions::default())
-            .await
-            .expect("open repository fixture read");
-        let mut cursor = read
-            .begin_scan(
-                REPOSITORY_PROTOCOL_SPACE,
-                KeyRange {
-                    lower: std::ops::Bound::Unbounded,
-                    upper: std::ops::Bound::Unbounded,
-                },
-                BeginScanOptions {
-                    projection: CoreProjection::FullValue,
-                    ..BeginScanOptions::default()
-                },
-            )
-            .await
-            .expect("scan repository protocol marker");
+    fn snapshot_entries_for_space(snapshot: &[u8], target_space: u32) -> Vec<PutEntry> {
+        const HEADER_BYTES: usize = 8 + 2 + 1 + 1 + 4;
+        const ENTRY_HEADER_BYTES: usize = 1 + 4 + 4 + 4;
+        assert!(snapshot.starts_with(b"LIXSNAP\0"), "fixture snapshot magic");
+        let mut offset = HEADER_BYTES;
         let mut entries = Vec::new();
         loop {
-            let (page, has_more) = cursor
-                .next_page(lix_sdk::storage::MAX_SCAN_PAGE_ROWS)
-                .await
-                .expect("read repository protocol marker")
-                .into_parts();
-            entries.extend(page.into_iter().map(|entry| {
-                let ProjectedValue::FullValue(value) = entry.value else {
-                    panic!("repository protocol scan must return full values");
-                };
-                PutEntry {
-                    key: entry.key,
-                    value: StoredValue { bytes: value },
-                }
-            }));
-            if !has_more {
+            let tag = *snapshot.get(offset).expect("fixture record tag");
+            if tag == 0xff {
                 break;
             }
+            assert_eq!(tag, 1, "fixture entry tag");
+            let header = snapshot
+                .get(offset..offset + ENTRY_HEADER_BYTES)
+                .expect("fixture entry header");
+            let space_id = u32::from_be_bytes(header[1..5].try_into().expect("space ID"));
+            let key_len = u32::from_be_bytes(header[5..9].try_into().expect("key length")) as usize;
+            let value_len =
+                u32::from_be_bytes(header[9..13].try_into().expect("value length")) as usize;
+            offset += ENTRY_HEADER_BYTES;
+            let key = snapshot
+                .get(offset..offset + key_len)
+                .expect("fixture entry key");
+            offset += key_len;
+            let value = snapshot
+                .get(offset..offset + value_len)
+                .expect("fixture entry value");
+            offset += value_len;
+            if space_id == target_space {
+                entries.push(PutEntry {
+                    key: Key(bytes::Bytes::copy_from_slice(key)),
+                    value: StoredValue {
+                        bytes: bytes::Bytes::copy_from_slice(value),
+                    },
+                });
+            }
         }
-        drop(cursor);
-        drop(read);
+        entries
+    }
+
+    async fn seed_repository_protocol(manager: &LixRuntimeManager, lix_id: &str, snapshot: &[u8]) {
+        let entries = snapshot_entries_for_space(snapshot, REPOSITORY_PROTOCOL_SPACE.id.0);
 
         let object_store = match &manager.backend {
             StorageBackend::Memory { object_store } => Arc::clone(object_store),
@@ -2033,9 +2761,6 @@ mod tests {
 
     #[tokio::test]
     async fn server_open_automatically_upgrades_an_old_lix() {
-        let storage =
-            lix_sdk::Memory::from_snapshot(V72_REPOSITORY).expect("decode frozen v72 repository");
-
         let (migration_state, migration_status) = watch::channel(RuntimeOpenState::Opening);
         let progress_state = migration_state.clone();
         let transitions = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2051,8 +2776,8 @@ mod tests {
                 }
             });
         let lix = lix_sdk::open_lix()
-            .with_storage(storage)
             .with_open_progress_sink(Arc::new(progress))
+            .from_snapshot(Cursor::new(V72_REPOSITORY))
             .await
             .expect("open and migrate old Lix");
         assert!(matches!(
@@ -2123,6 +2848,7 @@ mod tests {
         max_open_lixes: usize,
         open_gate: TestOpenGate,
     ) -> Arc<LixRuntimeManager> {
+        let (snapshot_shutdown, _) = watch::channel(false);
         Arc::new(LixRuntimeManager {
             backend: StorageBackend::Memory {
                 object_store: Arc::new(InMemory::new()),
@@ -2131,6 +2857,7 @@ mod tests {
             recovery_watchdog: RecoveryWatchdog::test_default(),
             state: Mutex::new(ManagerState::default()),
             telemetry: test_telemetry_sink(),
+            snapshot_shutdown,
             _cache_root_lease: None,
             open_gate: Some(open_gate),
         })
@@ -2552,6 +3279,7 @@ mod tests {
         let app = crate::router(
             Arc::clone(&manager),
             None,
+            None,
             Duration::from_secs(60),
             crate::telemetry::InFlightSqlRegistry::default(),
         );
@@ -2804,6 +3532,7 @@ mod tests {
     fn cache_root_lease_outlives_manager_state_on_drop() {
         let root = TestCacheRoot::new("cache-root-drop-order");
         let observed_lease_held = Arc::new(AtomicBool::new(false));
+        let (snapshot_shutdown, _) = watch::channel(false);
         let manager = Arc::new(LixRuntimeManager {
             backend: StorageBackend::Memory {
                 object_store: Arc::new(InMemory::new()),
@@ -2818,6 +3547,7 @@ mod tests {
                 ..ManagerState::default()
             }),
             telemetry: test_telemetry_sink(),
+            snapshot_shutdown,
             _cache_root_lease: Some(
                 CacheRootLease::acquire(&root.0).expect("acquire cache-root lease"),
             ),
@@ -3187,6 +3917,7 @@ mod tests {
         let manager = memory_manager(1);
         let app = crate::router(
             Arc::clone(&manager),
+            None,
             None,
             Duration::from_secs(60),
             crate::telemetry::InFlightSqlRegistry::default(),
