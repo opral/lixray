@@ -19,6 +19,7 @@ import {
 	loadValidatedInitialSession,
 	orphanedSessionSignInUrl,
 } from "~/lib/auth-session-validation";
+import { googleOAuthSignInCredentials } from "~/lib/google-oauth";
 import {
 	captureErrorLogImmediately,
 	captureExceptionTelemetry,
@@ -172,12 +173,9 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			if (!client) throw new Error("Authentication is still loading");
 			const safeReturnTo = normalizeAuthReturnTo(returnTo);
 			window.sessionStorage.setItem(RETURN_TO_KEY, safeReturnTo);
-			const { error } = await client.auth.signInWithOAuth({
-				provider: "google",
-				options: {
-					redirectTo: `${window.location.origin}/auth/callback`,
-				},
-			});
+			const { error } = await client.auth.signInWithOAuth(
+				googleOAuthSignInCredentials(window.location.origin),
+			);
 			if (error) throw error;
 		},
 		[client],
