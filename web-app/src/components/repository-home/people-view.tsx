@@ -129,7 +129,10 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 
 	if (!teamApi) {
 		return (
-			<div className="grid h-full w-full place-content-center bg-bg-panel p-6 text-center text-[13px] text-text-secondary">
+			<div
+				className="grid h-full w-full place-content-center bg-bg-panel p-6 text-center text-[13px] text-text-secondary"
+				data-testid="repository-people-view"
+			>
 				Sign in with edit access to see who's here.
 			</div>
 		);
@@ -187,7 +190,10 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 	};
 
 	return (
-		<div className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary">
+		<div
+			className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
+			data-testid="repository-people-view"
+		>
 			<div className="mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10">
 				<div className="flex items-baseline gap-3 pb-5">
 					<h1 className="text-[22px] font-bold">People</h1>

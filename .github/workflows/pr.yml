@@ -756,6 +756,7 @@ jobs:
               --write-out '%{http_code}' \
               --header 'Authorization: Bearer lixray-demo' \
               --header 'Lix-Session-Id: 0000000000000000000000000000000000000000000000000000000000000000' \
+              --header 'Lix-Sync-Protocol-Version: 2' \
               "$PREVIEW_URL/lix/v1/00000000-0000-4000-8000-000000000002/sync/pull?after=18446744073709551615&limit=512"
           )"
           if test "$status" != 410; then
