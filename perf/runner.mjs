@@ -199,10 +199,12 @@ function parseArgs(args) {
   }
 
   const repositoryId = required(values, "--repository");
-  if (!/^perf-[A-Za-z0-9][A-Za-z0-9._-]{0,122}$/.test(repositoryId)) {
-    throw new Error(
-      "--repository must start with 'perf-' and use at most 128 letters, digits, '.', '_' or '-'",
-    );
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+      repositoryId,
+    )
+  ) {
+    throw new Error("--repository must be a canonical Lix UUID");
   }
 
   const corpusFiles = integer(values, "--files", CORPUS_FILE_COUNT, 1);
@@ -522,7 +524,7 @@ function integer(values, name, fallback, minimum) {
 function usage() {
   return `Usage:
   node perf/runner.mjs \\
-    --repository <fresh-repository-id> \\
+    --repository <fresh-lix-uuid> \\
     --operation <${operationNames.join("|")}> \\
     [--files <${SUPPORTED_CORPUS_FILE_COUNTS.join("|")}>] \\
     [--commits <total-including-genesis>] \\

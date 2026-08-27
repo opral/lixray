@@ -316,22 +316,22 @@ requested integration environment.
 ## Performance loop
 
 ```sh
-LIXRAY_PERF_REPOSITORY=perf-baseline-c1000-read4k-r1 pnpm perf:reset
+LIXRAY_PERF_REPOSITORY=11111111-1111-4111-8111-111111111111 pnpm perf:reset
 LIXRAY_PERF_SPANS=true \
   RUST_LOG=lixray=info,lix_perf=debug \
   pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-baseline-c1000-read4k-r1 \
+  --repository 11111111-1111-4111-8111-111111111111 \
   --operation read-point-4k \
   --commits 1000 \
   --output perf/results/baseline.json
 # edit vendor/lix or lix-server
-LIXRAY_PERF_REPOSITORY=perf-candidate-c1000-read4k-r1 pnpm perf:reset
+LIXRAY_PERF_REPOSITORY=22222222-2222-4222-8222-222222222222 pnpm perf:reset
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-candidate-c1000-read4k-r1 \
+  --repository 22222222-2222-4222-8222-222222222222 \
   --operation read-point-4k \
   --commits 1000 \
   --output perf/results/candidate.json

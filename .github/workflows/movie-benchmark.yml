@@ -12,9 +12,9 @@ on:
         required: true
         default: 4
         type: number
-      workspace:
-        description: Shared fresh workspace ID (blank uses the current revision)
-        required: false
+      lix-id:
+        description: UUID of the fresh Lix shared by all sequential segments
+        required: true
         type: string
       finalize-history:
         description: Verify all files and extend history to exactly 5,000 commits
@@ -23,7 +23,7 @@ on:
         type: boolean
 
 concurrency:
-  group: remote-movie-${{ inputs.workspace || github.sha }}
+  group: remote-movie-${{ inputs.lix-id }}
   cancel-in-progress: false
 
 permissions:
@@ -63,7 +63,7 @@ jobs:
         id: target
         shell: bash
         env:
-          REQUESTED_WORKSPACE: ${{ inputs.workspace }}
+          REQUESTED_LIX_ID: ${{ inputs.lix-id }}
         run: |
           variables="$(
             railway variables \
@@ -79,12 +79,8 @@ jobs:
           echo "::add-mask::$internal_token"
           echo "LIXRAY_INTERNAL_TOKEN=$internal_token" >> "$GITHUB_ENV"
           echo "base-url=https://$public_domain" >> "$GITHUB_OUTPUT"
-          if test -n "$REQUESTED_WORKSPACE"; then
-            workspace="$REQUESTED_WORKSPACE"
-          else
-            workspace="perf-movie-1tib-${GITHUB_SHA:0:12}"
-          fi
-          echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
+          test -n "$REQUESTED_LIX_ID"
+          echo "lix-id=$REQUESTED_LIX_ID" >> "$GITHUB_OUTPUT"
 
       - name: Promote the exact tested server image
         shell: bash
@@ -97,7 +93,7 @@ jobs:
         run: |
           node perf/movie/remote-qualification.mjs \
             --url '${{ steps.target.outputs.base-url }}' \
-            --workspace '${{ steps.target.outputs.workspace }}' \
+            --repository '${{ steps.target.outputs.lix-id }}' \
             --segment-index '${{ inputs.segment-index }}' \
             --segment-count '${{ inputs.segment-count }}' \
             --finalize-history '${{ inputs.finalize-history }}' \
@@ -106,7 +102,7 @@ jobs:
       - name: Upload qualification report
         uses: actions/upload-artifact@v4
         with:
-          name: movie-${{ steps.target.outputs.workspace }}-segment-${{ inputs.segment-index }}
+          name: movie-${{ steps.target.outputs.lix-id }}-segment-${{ inputs.segment-index }}
           path: perf/results/movie-segment-${{ inputs.segment-index }}.json
           if-no-files-found: error
           retention-days: 30

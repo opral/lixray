@@ -21,7 +21,7 @@ the resulting history to exactly 5,000 commits and verifies the final count:
 ```sh
 LIXRAY_INTERNAL_TOKEN=... pnpm perf:movie:remote -- \
   --url https://lix-server.example \
-  --repository perf-movie-1tib-REVISION \
+  --repository <existing-lix-uuid> \
   --segment-index 0 \
   --segment-count 4 \
   --finalize-history false

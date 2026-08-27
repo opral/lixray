@@ -59,11 +59,11 @@ instead of silently producing a misleading result.
 Start the local stack and provide its local internal token:
 
 ```sh
-LIXRAY_PERF_REPOSITORY=perf-main-c1000-read4k-r1 pnpm perf:reset
+LIXRAY_PERF_REPOSITORY=11111111-1111-4111-8111-111111111111 pnpm perf:reset
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-main-c1000-read4k-r1 \
+  --repository 11111111-1111-4111-8111-111111111111 \
   --operation read-point-4k \
   --files 1000 \
   --commits 1000 \
@@ -211,7 +211,7 @@ For the local Compose MinIO stack, a stopped template can be copied with `mc`
 ```sh
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-template-c1000 \
+  --repository 11111111-1111-4111-8111-111111111111 \
   --operation read-point-4k \
   --files 1000 \
   --commits 1000 \
@@ -221,12 +221,12 @@ docker compose stop -t 30 lix-server
 docker compose run --rm --no-deps --entrypoint /bin/sh minio-init -c \
   'mc alias set local http://minio:9000 lixray lixray-local-secret &&
    mc mirror \
-     local/lixray/local/perf-template-c1000/ \
-     local/lixray/local/perf-candidate-c1000-r1/'
+     local/lixray/local/11111111-1111-4111-8111-111111111111/ \
+     local/lixray/local/22222222-2222-4222-8222-222222222222/'
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-candidate-c1000-r1 \
+  --repository 22222222-2222-4222-8222-222222222222 \
   --operation create-4k \
   --files 1000 \
   --commits 1000 \

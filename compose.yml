@@ -98,16 +98,16 @@ services:
           exit 2
         fi
         case "$${LIXRAY_PERF_REPOSITORY}" in
-          perf-[A-Za-z0-9]*)
+          ????????-????-????-????-????????????)
             ;;
           *)
-            echo "LIXRAY_PERF_REPOSITORY must be a benchmark id beginning with perf-" >&2
+            echo "LIXRAY_PERF_REPOSITORY must be a canonical Lix UUID" >&2
             exit 2
             ;;
         esac
         case "$${LIXRAY_PERF_REPOSITORY}" in
-          *[!A-Za-z0-9._-]*)
-            echo "LIXRAY_PERF_REPOSITORY contains invalid characters" >&2
+          *[!0-9a-f-]*)
+            echo "LIXRAY_PERF_REPOSITORY must use lowercase hexadecimal UUID characters" >&2
             exit 2
             ;;
         esac
