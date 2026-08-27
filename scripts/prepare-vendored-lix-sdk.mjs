@@ -6,6 +6,7 @@ import {
 	readFile,
 	rm,
 	stat,
+	symlink,
 	writeFile,
 } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
@@ -78,6 +79,9 @@ try {
 		await cp(join(preservedWasmRoot, "wasm"), join(sdkDist, "wasm"), {
 			recursive: true,
 		});
+		const sourceWasm = join(sdkRoot, "src", "wasm");
+		await rm(sourceWasm, { recursive: true, force: true });
+		await symlink(join(sdkDist, "wasm"), sourceWasm, "dir");
 	}
 } finally {
 	if (preservedWasmRoot) {
