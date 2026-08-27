@@ -310,7 +310,7 @@ void test("execute maps protocol wire values through the SDK", async () => {
 	]);
 });
 
-void test("createBranch, checkpoint, undo, and redo use protocol HTTP", async () => {
+void test("createBranch, undo, and redo use protocol HTTP", async () => {
 	const paths: string[] = [];
 	const runtime = client(async (_lixId, request) => {
 		const pathname = testProtocolPath(request);
@@ -322,9 +322,6 @@ void test("createBranch, checkpoint, undo, and redo use protocol HTTP", async ()
 				hidden: false,
 				commitId: "commit-2",
 			});
-		}
-		if (pathname === "/lix/v1/checkpoint/create") {
-			return Response.json({ commitId: "checkpoint-1" });
 		}
 		if (pathname === "/lix/v1/undo") {
 			return Response.json({
@@ -352,9 +349,6 @@ void test("createBranch, checkpoint, undo, and redo use protocol HTTP", async ()
 			commitId: "commit-2",
 		},
 	);
-	assert.deepEqual(await runtime.createCheckpoint(LIX_ID, "main"), {
-		commitId: "checkpoint-1",
-	});
 	assert.deepEqual(await runtime.undo(LIX_ID, "main"), {
 		branchId: "main",
 		targetCommitId: "target",
@@ -367,7 +361,6 @@ void test("createBranch, checkpoint, undo, and redo use protocol HTTP", async ()
 	});
 	assert.deepEqual(paths.slice(1), [
 		"POST /lix/v1/branch/create",
-		"POST /lix/v1/checkpoint/create",
 		"POST /lix/v1/undo",
 		"POST /lix/v1/redo",
 	]);

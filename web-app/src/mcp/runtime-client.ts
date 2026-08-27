@@ -287,18 +287,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		}
 	}
 
-	async createCheckpoint(lixId: string, branchId: string) {
-		try {
-			const session = await this.session(lixId);
-			return await this.enqueueSession(session, async () => {
-				await this.ensureBranch(session, branchId);
-				return session.lix.createCheckpoint();
-			});
-		} catch (caught) {
-			throw asLixError(caught);
-		}
-	}
-
 	async undo(lixId: string, branchId: string) {
 		try {
 			const session = await this.session(lixId);
