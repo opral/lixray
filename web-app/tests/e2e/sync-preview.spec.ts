@@ -293,7 +293,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		const createFileFromHome = async (
 			page: Page,
 			buttonName: string,
-		): Promise<string> => {
+		): Promise<void> => {
 			await openHome(page);
 			const homeUrl = page.url();
 			if (await page.getByTestId("home-getting-started").isVisible()) {
@@ -312,9 +312,38 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			await expect(page).not.toHaveURL(homeUrl, {
 				timeout: repositoryOperationTimeout,
 			});
-			return decodeURIComponent(
-				new URL(page.url()).pathname.split("/").at(-1) ?? "",
+		};
+		const homeFileIds = async (page: Page): Promise<string[]> =>
+			page.getByTestId("home-file-entry").evaluateAll((entries) =>
+				entries
+					.map((entry) => entry.getAttribute("data-file-id"))
+					.filter((id): id is string => id !== null)
+					.sort(),
 			);
+		const homeFileEntry = (page: Page, fileId: string) =>
+			page
+				.getByTestId("home-file-entry")
+				.and(page.locator(`[data-file-id="${fileId}"]`));
+		const waitForNewHomeFileIds = async (
+			page: Page,
+			previousIds: readonly string[],
+			expectedCount: number,
+			timeout: number,
+		): Promise<string[]> => {
+			const previous = new Set(previousIds);
+			let addedIds: string[] = [];
+			await expect
+				.poll(
+					async () => {
+						addedIds = (await homeFileIds(page)).filter(
+							(id) => !previous.has(id),
+						);
+						return addedIds.length;
+					},
+					{ timeout },
+				)
+				.toBe(expectedCount);
+			return addedIds;
 		};
 
 		await Promise.all([openHome(left), openHome(right)]);
@@ -392,6 +421,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			]),
 		);
 
+		const fileIdsBeforeCreatedFile = await homeFileIds(left);
 		await right.getByTestId("home-new-button").click();
 		await right
 			.getByRole("button", { name: "New Markdown (.md)", exact: true })
@@ -401,13 +431,13 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		);
 		await rightEditor.waitFor({ timeout: 30_000 });
 		const createdUrl = right.url();
-		const createdName = decodeURIComponent(
-			new URL(createdUrl).pathname.split("/").at(-1) ?? "",
+		const [createdFileId] = await waitForNewHomeFileIds(
+			left,
+			fileIdsBeforeCreatedFile,
+			1,
+			realtimeTimeout,
 		);
-		await expect(left.getByTestId("home-entry-list")).toContainText(
-			createdName,
-			{ timeout: realtimeTimeout },
-		);
+		await expect(homeFileEntry(left, createdFileId!)).toBeVisible();
 		await waitForBlobLaneQuiescence([left, right]);
 		await settleBlobLaneResponses();
 		expect(blobLaneObservationFailures).toEqual([]);
@@ -451,8 +481,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				const fresh = await freshContext.newPage();
 				observePage(fresh, "fresh");
 				await fresh.goto(repositoryUrl);
-				const freshEntries = fresh.getByTestId("home-entry-list");
-				await expect(freshEntries).toContainText(createdName, {
+				await expect(homeFileEntry(fresh, createdFileId!)).toBeVisible({
 					timeout: 120_000,
 				});
 				const coldReadsBeforeFreshHistory = coldReadCount([fresh]);
@@ -480,9 +509,9 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				expect(coldReadCount([fresh])).toBeLessThanOrEqual(
 					coldReadsBeforeFreshHistory + 2,
 				);
-				return { freshContext, fresh, freshEntries };
+				return { freshContext, fresh };
 			});
-		let { fresh, freshEntries } = freshBootstrap;
+		let { fresh } = freshBootstrap;
 		const { freshContext } = freshBootstrap;
 
 		// Keep the originating editor warm for the reverse direction. Reload and
@@ -554,19 +583,24 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 
 		// Deliberately race two distinct local commits. One push should lose the
 		// authority ref-CAS and then reconcile; both replicas must retain both rows.
-		const [leftConcurrentName, rightConcurrentName] = await Promise.all([
+		const fileIdsBeforeConcurrentCreates = await homeFileIds(fresh);
+		await Promise.all([
 			createFileFromHome(left, "New Markdown (.md)"),
 			createFileFromHome(right, "New CSV (.csv)"),
 		]);
 		await Promise.all([left.goto(repositoryUrl), right.goto(repositoryUrl)]);
+		const concurrentFileIds = await waitForNewHomeFileIds(
+			fresh,
+			fileIdsBeforeConcurrentCreates,
+			2,
+			30_000,
+		);
 		for (const page of [left, right]) {
-			const entries = page.getByTestId("home-entry-list");
-			await expect(entries).toContainText(leftConcurrentName, {
-				timeout: 30_000,
-			});
-			await expect(entries).toContainText(rightConcurrentName, {
-				timeout: 30_000,
-			});
+			for (const fileId of concurrentFileIds) {
+				await expect(homeFileEntry(page, fileId)).toBeVisible({
+					timeout: 30_000,
+				});
+			}
 			await expect(
 				page.getByRole("button", {
 					name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
@@ -576,12 +610,11 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 
 		// The already-qualified incognito client must stay live through a stale
 		// push reconciliation; do not hide this behind a second cold bootstrap.
-		await expect(freshEntries).toContainText(leftConcurrentName, {
-			timeout: 30_000,
-		});
-		await expect(freshEntries).toContainText(rightConcurrentName, {
-			timeout: 30_000,
-		});
+		for (const fileId of concurrentFileIds) {
+			await expect(homeFileEntry(fresh, fileId)).toBeVisible({
+				timeout: 30_000,
+			});
+		}
 		await expect(
 			fresh.getByRole("button", {
 				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
@@ -614,8 +647,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			observePage(fresh, `fresh-reopen-${sample + 1}`);
 			const reopenStartedAt = Date.now();
 			await fresh.goto(repositoryUrl, { waitUntil: "domcontentloaded" });
-			freshEntries = fresh.getByTestId("home-entry-list");
-			await expect(freshEntries).toContainText(createdName, {
+			await expect(homeFileEntry(fresh, createdFileId!)).toBeVisible({
 				timeout: 30_000,
 			});
 			const sampleColdReads = [...(coldReads.get(fresh) ?? [])];
@@ -660,7 +692,6 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				}),
 			);
 		}
-		const reopenedEntries = freshEntries;
 		const warmReopenPhases = warmReopenProfiles[0]!.phases;
 		const startupUiHookQueryCensus =
 			warmReopenProfiles[0]!.startupUiHookQueryCensus;
@@ -740,17 +771,22 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				warmReopenPhases[index - 1]!.startTime,
 			);
 		}
-		await expect(reopenedEntries).toContainText(leftConcurrentName);
-		await expect(reopenedEntries).toContainText(rightConcurrentName);
+		for (const fileId of concurrentFileIds) {
+			await expect(homeFileEntry(fresh, fileId)).toBeVisible();
+		}
 		const reopenedHistory = await openHistoryPanel(fresh);
 		await expect(
 			reopenedHistory
 				.getByRole("list", { name: "Checkpoints" })
 				.locator(":scope > li"),
 		).toHaveCount(initialCheckpointCount + 1);
-		const afterReopenName = await createFileFromHome(
-			left,
-			"New Markdown (.md)",
+		const fileIdsBeforeAfterReopenCreate = await homeFileIds(fresh);
+		await createFileFromHome(left, "New Markdown (.md)");
+		const [afterReopenFileId] = await waitForNewHomeFileIds(
+			fresh,
+			fileIdsBeforeAfterReopenCreate,
+			1,
+			realtimeTimeout,
 		);
 		const afterReopenUrl = left.url();
 		const afterReopenEditor = left.locator(
@@ -760,7 +796,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		await afterReopenEditor.click();
 		await left.keyboard.insertText(afterReopenMarker);
 		await left.keyboard.press("Tab");
-		await expect(reopenedEntries).toContainText(afterReopenName, {
+		await expect(homeFileEntry(fresh, afterReopenFileId!)).toBeVisible({
 			timeout: realtimeTimeout,
 		});
 		await fresh.goto(afterReopenUrl);
@@ -779,6 +815,12 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		await left
 			.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
 			.click();
+		const afterReopenName = await homeFileEntry(left, afterReopenFileId!)
+			.getByTestId("home-entry-name")
+			.textContent();
+		if (!afterReopenName) {
+			throw new Error("The newly created file row has no accessible name");
+		}
 		await left
 			.getByRole("checkbox", { name: afterReopenName, exact: true })
 			.click();

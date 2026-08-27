@@ -257,6 +257,7 @@ export function listDirectoryFromFiles(
 		if (slash === -1) {
 			if (rest.length === 0) continue;
 			childFiles.push({
+				id: file.id,
 				path: file.path,
 				name: rest,
 				updatedAt: "",
@@ -372,6 +373,7 @@ type DirectoryListing = {
 		readonly hidden?: true;
 	}>;
 	readonly files: ReadonlyArray<{
+		readonly id: string;
 		readonly path: string;
 		readonly name: string;
 		readonly updatedAt: string;
@@ -422,6 +424,7 @@ export function listDirectory(
 	const files = visibleFiles
 		.filter((file) => file.directoryId === currentDirectoryId)
 		.map((file) => ({
+			id: file.id,
 			path: file.path,
 			name: file.name,
 			updatedAt: file.updatedAt,

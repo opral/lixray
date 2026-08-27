@@ -95,8 +95,8 @@ void test("lists directory entries from their separate surfaces", () => {
 		["/docs"],
 	);
 	assert.deepEqual(
-		listing.files.map((entry) => entry.path),
-		["/README.md"],
+		listing.files.map((entry) => ({ id: entry.id, path: entry.path })),
+		[{ id: "readme", path: "/README.md" }],
 	);
 });
 

@@ -508,6 +508,8 @@ export function DirectoryView({
 						{listing.files.map((file) => (
 							<EntryRow
 								key={file.path}
+								testId="home-file-entry"
+								fileId={file.id}
 								icon={
 									<img
 										src={fileIconUrl(file.name)}
@@ -1395,6 +1397,8 @@ function DiffGlyph({
 }
 
 function EntryRow({
+	testId,
+	fileId,
 	icon,
 	name,
 	meta,
@@ -1406,6 +1410,9 @@ function EntryRow({
 	onClick,
 	onContextMenu,
 }: {
+	readonly testId?: string;
+	/** Stable file identity for tests and integrations; survives path renames. */
+	readonly fileId?: string;
 	readonly icon: ReactNode;
 	readonly name: string;
 	readonly meta: string;
@@ -1444,6 +1451,8 @@ function EntryRow({
 	return (
 		<button
 			type="button"
+			data-testid={testId}
+			data-file-id={fileId}
 			onClick={onClick}
 			onContextMenu={onContextMenu}
 			className={`flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left transition-opacity hover:bg-bg-hover ${
@@ -1459,7 +1468,12 @@ function EntryRow({
 			data-changed-entry={changed ? "true" : undefined}
 		>
 			{icon}
-			<span className={`text-sm font-medium ${nameClass}`}>{name}</span>
+			<span
+				className={`text-sm font-medium ${nameClass}`}
+				data-testid={fileId ? "home-entry-name" : undefined}
+			>
+				{name}
+			</span>
 			<span className="flex-1" />
 			{/* In a review, the trailing slot carries the same orange change dot
 			    the sidebar tree uses, replacing the resting meta. */}
