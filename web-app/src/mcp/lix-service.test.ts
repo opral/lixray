@@ -88,6 +88,15 @@ class FakeRuntime implements LixRuntimeClient {
 				notices: [],
 			};
 		}
+		if (request.sql === "SELECT commit_id FROM lix_create_checkpoint()") {
+			this.commit += 1;
+			return {
+				columns: ["commit_id"],
+				rows: [[{ kind: "text" as const, value: `commit-${this.commit}` }]],
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
 		if (request.sql.includes("lix_active_branch_commit_id")) {
 			return {
 				columns: ["commit_id"],
@@ -128,10 +137,6 @@ class FakeRuntime implements LixRuntimeClient {
 
 	async createBranch() {
 		return { id: "draft", name: "Draft", hidden: false, commitId: "commit-0" };
-	}
-	async createCheckpoint() {
-		this.commit += 1;
-		return { commitId: `commit-${this.commit}` };
 	}
 	async undo() {
 		return {
@@ -326,6 +331,28 @@ void test("restore uses one parameterized SQL command on the context branch", as
 			branchId: "draft",
 			sql: "INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id",
 			params: [{ kind: "text", value: "commit-target" }],
+		},
+	]);
+});
+
+void test("checkpoint uses the canonical SQL function on the context branch", async () => {
+	const runtime = new FakeRuntime();
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const opened = await service.openLix(LIX_ID, "draft");
+	runtime.calls.length = 0;
+
+	const checkpoint = await service.createCheckpoint(opened.context);
+
+	assert.equal(checkpoint.commitId, "commit-1");
+	assert.deepEqual(runtime.calls, [
+		{
+			lixId: LIX_ID,
+			branchId: "draft",
+			sql: "SELECT commit_id FROM lix_create_checkpoint()",
+			params: undefined,
 		},
 	]);
 });

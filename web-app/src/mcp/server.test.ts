@@ -137,6 +137,14 @@ class FakeRuntime implements LixRuntimeClient {
 				notices: [],
 			};
 		}
+		if (request.sql === "SELECT commit_id FROM lix_create_checkpoint()") {
+			return {
+				columns: ["commit_id"],
+				rows: [[{ kind: "text" as const, value: "commit-1" }]],
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
 		if (request.sql.includes("lix_active_branch_commit_id")) {
 			return {
 				columns: ["commit_id"],
@@ -201,9 +209,6 @@ class FakeRuntime implements LixRuntimeClient {
 	}
 	async createBranch() {
 		return { id: "draft", name: "Draft", hidden: false, commitId: "commit-1" };
-	}
-	async createCheckpoint() {
-		return { commitId: "commit-1" };
 	}
 	async undo() {
 		return {

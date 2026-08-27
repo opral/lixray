@@ -163,10 +163,6 @@ export interface LixRuntimeClient {
 		branchId: string,
 		input: CreateBranchInput,
 	): Promise<CreateBranchResult>;
-	createCheckpoint(
-		lixId: string,
-		branchId: string,
-	): Promise<{ commitId: string }>;
 	undo(
 		lixId: string,
 		branchId: string,
@@ -385,11 +381,19 @@ export class LixService {
 
 	async createCheckpoint(contextToken: string) {
 		const context = await this.readContext(contextToken);
-		const checkpoint = await this.client.createCheckpoint(
+		const response = await this.client.execute(
 			context.lixId,
 			context.branchId,
+			{ sql: "SELECT commit_id FROM lix_create_checkpoint()" },
 		);
-		return { context: contextToken, commitId: checkpoint.commitId };
+		const commitId = response.rows[0]?.[0];
+		if (!commitId || commitId.kind !== "text") {
+			throw createLixError(
+				"upstream_error",
+				"Lix did not return a checkpoint commit id.",
+			);
+		}
+		return { context: contextToken, commitId: commitId.value };
 	}
 
 	async restore(contextToken: string, commitId: string) {
