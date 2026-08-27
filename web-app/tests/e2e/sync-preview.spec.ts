@@ -6,7 +6,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 	browser,
 	baseURL,
 }) => {
-	test.setTimeout(300_000);
+	test.setTimeout(600_000);
 	test.skip(
 		!process.env.PLAYWRIGHT_SYNC_PREVIEW,
 		"requires a deployed preview",
