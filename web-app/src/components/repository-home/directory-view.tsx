@@ -350,13 +350,13 @@ export function DirectoryView({
 	// read-only repos, and history views keep the normal chrome.
 	const showGettingStarted = Boolean(
 		listing &&
-			listing.dirs.length === 0 &&
-			listing.files.length === 0 &&
-			isHome &&
-			dirPath === "/" &&
-			!readOnly &&
-			!viewingHistory &&
-			hasAgentConnected,
+		listing.dirs.length === 0 &&
+		listing.files.length === 0 &&
+		isHome &&
+		dirPath === "/" &&
+		!readOnly &&
+		!viewingHistory &&
+		hasAgentConnected,
 	);
 
 	if (!tree || !listing) {
@@ -395,37 +395,39 @@ export function DirectoryView({
 					}
 				>
 					{showGettingStarted ? null : (
-					<div className="flex items-center gap-2 pb-5">
-						<Breadcrumb
-							dirPath={dirPath}
-							onNavigate={(path, event) =>
-								onOpenDir(path, { newTab: newTabFromMouseEvent(event) })
-							}
-						/>
-						<span className="flex-1" />
-						<div
-							className={`flex shrink-0 items-center gap-2 transition-opacity${
-								reviewFocus ? " opacity-[0.35] hover:opacity-100" : ""
-							}`}
-						>
-							<NewMenu
-								disabled={readOnly || viewingHistory}
-								onCreateFile={(extension) => void createFile(extension)}
-								onCreateFolder={() => {
-									setActionError(null);
-									void createRepositoryFolder(lix, dirPath).catch(
-										(error: unknown) => {
-											console.error(
-												"repository-home: new folder failed",
-												error,
-											);
-											setActionError("Unable to create the folder. Try again.");
-										},
-									);
-								}}
+						<div className="flex items-center gap-2 pb-5">
+							<Breadcrumb
+								dirPath={dirPath}
+								onNavigate={(path, event) =>
+									onOpenDir(path, { newTab: newTabFromMouseEvent(event) })
+								}
 							/>
+							<span className="flex-1" />
+							<div
+								className={`flex shrink-0 items-center gap-2 transition-opacity${
+									reviewFocus ? " opacity-[0.35] hover:opacity-100" : ""
+								}`}
+							>
+								<NewMenu
+									disabled={readOnly || viewingHistory}
+									onCreateFile={(extension) => void createFile(extension)}
+									onCreateFolder={() => {
+										setActionError(null);
+										void createRepositoryFolder(lix, dirPath).catch(
+											(error: unknown) => {
+												console.error(
+													"repository-home: new folder failed",
+													error,
+												);
+												setActionError(
+													"Unable to create the folder. Try again.",
+												);
+											},
+										);
+									}}
+								/>
+							</div>
 						</div>
-					</div>
 					)}
 					{actionError ? (
 						<p
@@ -572,38 +574,37 @@ export function DirectoryView({
 								sourceFilePath={listing.readmePath}
 								fileId={
 									readmeDiff?.fileId ??
-									tree.files.find(
-										(file) => file.path === listing.readmePath,
-									)?.id ??
+									tree.files.find((file) => file.path === listing.readmePath)
+										?.id ??
 									null
 								}
 								diff={readmeDiff}
-							fileName={
-								listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
-							}
-							onOpen={(event) =>
-								onOpenFile(listing.readmePath as string, {
-									newTab: newTabFromMouseEvent(event),
-								})
-							}
-							onNavigate={(href, event?) => {
-								const resolved = resolveRepositoryHref(dirPath, href);
-								if (!resolved) return false;
-								// Directory paths are authoritative on lix_directory, so look
-								// up the exact persisted path rather than inferring kind.
-								const directoryPath = persistedDirectoryPath(tree, resolved);
-								if (directoryPath) {
-									onOpenDir(directoryPath, {
-										newTab: event ? newTabFromMouseEvent(event) : false,
-									});
-								} else {
-									onOpenFile(resolved, {
-										newTab: event ? newTabFromMouseEvent(event) : false,
-									});
+								fileName={
+									listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
 								}
-								return true;
-							}}
-						/>
+								onOpen={(event) =>
+									onOpenFile(listing.readmePath as string, {
+										newTab: newTabFromMouseEvent(event),
+									})
+								}
+								onNavigate={(href, event?) => {
+									const resolved = resolveRepositoryHref(dirPath, href);
+									if (!resolved) return false;
+									// Directory paths are authoritative on lix_directory, so look
+									// up the exact persisted path rather than inferring kind.
+									const directoryPath = persistedDirectoryPath(tree, resolved);
+									if (directoryPath) {
+										onOpenDir(directoryPath, {
+											newTab: event ? newTabFromMouseEvent(event) : false,
+										});
+									} else {
+										onOpenFile(resolved, {
+											newTab: event ? newTabFromMouseEvent(event) : false,
+										});
+									}
+									return true;
+								}}
+							/>
 						</div>
 					) : null}
 					{entryMenu ? (
@@ -1651,8 +1652,7 @@ function RenameEntryDialog({
 		input.focus();
 		// Preselect the base name so typing replaces it, keeping a file's
 		// extension in place — the File Explorer's rename behaves the same.
-		const dotIndex =
-			target.kind === "file" ? target.name.lastIndexOf(".") : -1;
+		const dotIndex = target.kind === "file" ? target.name.lastIndexOf(".") : -1;
 		input.setSelectionRange(0, dotIndex > 0 ? dotIndex : target.name.length);
 	}, [target]);
 	const submit = () => {
