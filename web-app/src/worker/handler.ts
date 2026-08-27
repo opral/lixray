@@ -649,7 +649,6 @@ export async function handleRequest(
 			options.resolvePublicLix ?? resolvePublicLixWithSupabase
 		)(lixId, env, publicPath);
 		if (!publicResolution.ok) return publicResolution.response;
-		if (publicResolution.scope !== "path") return lixNotFound().response;
 		try {
 			return json(
 				await listPublishedDirectory(
@@ -2139,7 +2138,7 @@ function remoteLixCorsPreflight(request: Request): Response {
 			"access-control-allow-credentials": "true",
 			"access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
 			"access-control-allow-headers":
-				"Authorization, Content-Type, Content-Encoding, Idempotency-Key, Lix-Client-Id, Lix-Session-Id, Lix-Sync-Protocol-Version, Lix-Transaction-Id, Last-Event-ID, X-Lixray-Public-Path",
+				"Authorization, Content-Type, Content-Encoding, Content-Range, Idempotency-Key, Lix-Client-Id, Lix-Session-Id, Lix-Sync-Protocol-Version, Lix-Transaction-Id, Lix-Upload-Id, Last-Event-ID, Range, X-Lixray-Public-Path",
 			"access-control-max-age": "86400",
 			vary: "Origin",
 		},
@@ -2152,6 +2151,17 @@ function withRemoteLixCors(response: Response, request: Request): Response {
 	const headers = new Headers(response.headers);
 	headers.set("access-control-allow-origin", origin);
 	headers.set("access-control-allow-credentials", "true");
+	const exposedHeaders = headers.get("access-control-expose-headers");
+	if (
+		!exposedHeaders
+			?.split(",")
+			.some((value) => value.trim().toLowerCase() === "lix-file-found")
+	) {
+		headers.set(
+			"access-control-expose-headers",
+			exposedHeaders ? `${exposedHeaders}, Lix-File-Found` : "Lix-File-Found",
+		);
+	}
 	const vary = headers.get("vary");
 	if (
 		!vary?.split(",").some((value) => value.trim().toLowerCase() === "origin")

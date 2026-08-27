@@ -1576,6 +1576,8 @@ void test("remote sync CORS permits protocol, session, and chunk headers", async
 	assert.match(allowedHeaders, /Idempotency-Key/i);
 	assert.match(allowedHeaders, /Lix-Transaction-Id/i);
 	assert.match(allowedHeaders, /Content-Encoding/i);
+	assert.match(allowedHeaders, /Content-Range/i);
+	assert.match(allowedHeaders, /Lix-Upload-Id/i);
 });
 
 void test("canonical Lix protocol is authenticated, resolved, and forwarded unchanged", async () => {
@@ -2079,6 +2081,74 @@ void test("a published directory exposes only its direct child names", async () 
 		`/lix/v1/${LIX_A}/execute`,
 		`/lix/v1/${LIX_A}/session`,
 	]);
+});
+
+void test("a public repository can list a directory through the host projection", async () => {
+	const response = await handleRequest(
+		new Request(
+			`https://example.test/api/published/lix/${LIX_A}/directory?path=%2Ffinance`,
+		),
+		env({}),
+		{
+			resolvePublicLix: async () => ({
+				ok: true,
+				lixId: LIX_A,
+				scope: "repository",
+			}),
+			lixFetch: async (_lixId, request) => {
+				const path = new URL(request.url).pathname;
+				if (path === `/lix/v1/${LIX_A}/`) {
+					return Response.json({
+						protocolVersion: 5,
+						activeBranchId: "main",
+						activeAccountId: "00000000-0000-7000-8000-000000000002",
+						sessionId: "public-directory-session",
+					});
+				}
+				if (path === `/lix/v1/${LIX_A}/session`) {
+					return new Response(null, { status: 204 });
+				}
+				return Response.json({
+					columns: [
+						{ name: "path", type: "text" },
+						{ name: "kind", type: "text" },
+					],
+					rows: [],
+					rowsAffected: 0,
+					notices: [],
+				});
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), { entries: [], truncated: false });
+});
+
+void test("canonical file metadata is exposed to cross-origin SDK clients", async () => {
+	const response = await handleRequest(
+		remoteLixRequest("/file?path=%2Fempty.txt", {
+			headers: {
+				Authorization: "Bearer user-token",
+				origin: "https://atelier-preview.test",
+			},
+		}),
+		env({}),
+		{
+			authenticate: authenticated(),
+			authorizeLix: resolved(LIX_A),
+			lixFetch: async () =>
+				new Response(new Uint8Array(), {
+					headers: { "Lix-File-Found": "true" },
+				}),
+		},
+	);
+
+	assert.match(
+		response.headers.get("access-control-expose-headers") ?? "",
+		/Lix-File-Found/i,
+	);
+	assert.equal(response.headers.get("lix-file-found"), "true");
 });
 
 void test("LixRay projections stay outside the canonical Lix namespace", async () => {
