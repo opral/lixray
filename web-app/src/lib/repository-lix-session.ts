@@ -9,6 +9,10 @@ import { captureExceptionTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 import { waitForLixPrewarm } from "./lix-prewarm.ts";
 import {
+	canonicalLixUrl,
+	createLixrayProtocolFetch,
+} from "./lixray-protocol-fetch.ts";
+import {
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
 } from "./repository-opfs-cache.ts";
@@ -259,11 +263,16 @@ async function openOpfsSyncSession(
 				if (options.allowAnonymous) return publicPathHeaders;
 				throw new Error("A repository access token is required.");
 			},
-			fetch: createTelemetryFetch(options.fetch, {
-				repositoryId: options.repositoryId,
-				refreshAccessToken: options.refreshAccessToken,
-				signal: options.signal,
-				shouldCaptureRequestFailures: () => requestFailureReporting.enabled,
+			fetch: createLixrayProtocolFetch({
+				lixId: options.repositoryId,
+				namespace: options.namespace,
+				repositorySlug: options.repositorySlug,
+				fetch: createTelemetryFetch(options.fetch, {
+					repositoryId: options.repositoryId,
+					refreshAccessToken: options.refreshAccessToken,
+					signal: options.signal,
+					shouldCaptureRequestFailures: () => requestFailureReporting.enabled,
+				}),
 			}),
 		},
 		onProgress: (progress) =>
@@ -699,10 +708,7 @@ export function repositorySessionKey(
 function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {
 	const origin = options.origin ?? globalThis.location?.origin;
 	if (!origin) throw new Error("A repository server origin is required.");
-	return new URL(
-		`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.repositorySlug)}`,
-		origin,
-	);
+	return canonicalLixUrl(origin, options.repositoryId);
 }
 
 function isBranchNotFoundError(

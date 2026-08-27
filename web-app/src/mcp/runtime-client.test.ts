@@ -12,7 +12,7 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 	const pathname = testProtocolPath(request);
 	if (pathname === "/lix/v1/") {
 		return Response.json({
-			protocolVersion: 4,
+			protocolVersion: 5,
 			activeBranchId: "main",
 			activeAccountId: "00000000-0000-7000-8000-000000000002",
 			sessionId: "runtime-client-session",
@@ -23,7 +23,12 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 	}
 	if (pathname === "/lix/v1/execute") {
 		return Response.json({
-			columns: ["id", "name", "hidden", "commit_id"],
+			columns: [
+				{ name: "id", type: "text" },
+				{ name: "name", type: "text" },
+				{ name: "hidden", type: "boolean" },
+				{ name: "commit_id", type: "text" },
+			],
 			rows: [
 				[
 					{ kind: "text", value: "main" },
@@ -264,7 +269,12 @@ void test("execute maps protocol wire values through the SDK", async () => {
 	const runtime = client(async (_lixId, request) => {
 		if (testProtocolPath(request) === "/lix/v1/execute") {
 			return Response.json({
-				columns: ["n", "when", "payload", "bytes"],
+				columns: [
+					{ name: "n", type: "integer" },
+					{ name: "when", type: "timestamptz" },
+					{ name: "payload", type: "jsonb" },
+					{ name: "bytes", type: "blob" },
+				],
 				rows: [
 					[
 						{ kind: "int", value: 7 },

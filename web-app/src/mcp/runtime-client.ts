@@ -3,6 +3,7 @@ import {
 	type ExecuteResult as LixExecuteResult,
 	type JsonValue,
 	type Lix,
+	type ResultColumnType,
 	type SqlParam,
 	Value,
 } from "@lix-js/sdk";
@@ -387,7 +388,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		const lix = await openLix({
 			server: {
 				mode: "remote",
-				url: "https://mcp.lixray.invalid",
+				url: `https://mcp.lixray.invalid/lix/${encodeURIComponent(lixId)}`,
 				fetch: (input: RequestInfo | URL, init?: RequestInit) =>
 					this.protocolFetch(lixId, input, init),
 			},
@@ -428,7 +429,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			...init,
 			signal: init?.signal ?? this.signal,
 		});
-		const path = canonicalProtocolPath(new URL(request.url));
+		const path = canonicalProtocolPath(new URL(request.url), lixId);
 		if (path === null) return new Response("Not found\n", { status: 404 });
 		return this.lixResponse(lixId, path, request);
 	}
@@ -463,11 +464,12 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 }
 
-function canonicalProtocolPath(url: URL): string | null {
-	const marker = "/lix/v1/";
+function canonicalProtocolPath(url: URL, lixId: string): string | null {
+	const marker = `/lix/v1/${encodeURIComponent(lixId)}`;
 	const markerIndex = url.pathname.indexOf(marker);
 	if (markerIndex === -1) return null;
-	return url.pathname.slice(markerIndex);
+	const suffix = url.pathname.slice(markerIndex + marker.length);
+	return `/lix/v1${suffix || "/"}`;
 }
 
 function decodeWireParam(
@@ -495,47 +497,53 @@ function decodeWireParam(
 
 function encodeExecuteResult(result: LixExecuteResult): ExecuteResponse {
 	return {
-		columns: [...result.columns],
+		columns: result.columns.map((column) => column.name),
 		rows: result.rows.map((row) =>
-			result.columns.map((column) => encodeLixValue(row.value(column))),
+			result.columns.map((column) =>
+				encodeLixValue(row[column.name], column.type),
+			),
 		),
 		rowsAffected: result.rowsAffected,
 		notices: result.notices.map((notice) => ({ ...notice })),
 	};
 }
 
-type LixResultValue = ReturnType<LixExecuteResult["rows"][number]["value"]>;
-
 function encodeLixValue(
-	value: LixResultValue,
+	value: unknown,
+	type: ResultColumnType,
 ): ExecuteResponse["rows"][number][number] {
-	const jsValue = value.toJS();
-	switch (value.kind) {
+	switch (type) {
 		case "null":
+			if (value !== null) throw invalidResultValue(type);
 			return { kind: "null", value: null };
 		case "boolean":
-			return { kind: "bool", value: jsValue as boolean };
+			if (typeof value !== "boolean") throw invalidResultValue(type);
+			return { kind: "bool", value };
 		case "integer":
-			return { kind: "int", value: jsValue as number };
+			if (typeof value !== "number") throw invalidResultValue(type);
+			return { kind: "int", value };
 		case "real":
-			return { kind: "float", value: jsValue as number };
+			if (typeof value !== "number") throw invalidResultValue(type);
+			return { kind: "float", value };
 		case "text":
-			return { kind: "text", value: jsValue as string };
+			if (typeof value !== "string") throw invalidResultValue(type);
+			return { kind: "text", value };
 		case "timestamptz":
-			return { kind: "timestamp", value: jsValue as string };
+			if (typeof value !== "string") throw invalidResultValue(type);
+			return { kind: "timestamp", value };
 		case "jsonb":
-			return { kind: "json", value: jsValue };
-		case "blob": {
-			const bytes = value.asBytes();
-			if (!bytes) {
-				throw createLixError(
-					"upstream_error",
-					"Lix returned an invalid blob value.",
-				);
-			}
-			return { kind: "blob", base64: bytesToBase64(bytes) };
-		}
+			return { kind: "json", value };
+		case "blob":
+			if (!(value instanceof Uint8Array)) throw invalidResultValue(type);
+			return { kind: "blob", base64: bytesToBase64(value) };
 	}
+}
+
+function invalidResultValue(type: ResultColumnType): LixError {
+	return createLixError(
+		"upstream_error",
+		`Lix returned an invalid ${type} value.`,
+	);
 }
 
 function asLixError(caught: unknown): LixError {

@@ -86,7 +86,7 @@ void test("first_file_added fires once when repository gets its first file", asy
 	}> = [];
 	const mockLix = {
 		execute: async () => ({
-			rows: [{ get: () => 1 }],
+			rows: [{ count: 1 }],
 		}),
 	};
 	const handler = createAtelierTelemetryHandler(

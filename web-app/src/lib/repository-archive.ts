@@ -1,9 +1,14 @@
 import { openLix, type Lix } from "@lix-js/sdk";
 import { zipSync } from "fflate";
+import {
+	canonicalLixUrl,
+	createLixrayProtocolFetch,
+} from "./lixray-protocol-fetch";
 
 type AccessTokenGetter = () => Promise<string | null>;
 
 interface RepositoryRemote {
+	lixId: string;
 	namespace: string;
 	repositorySlug: string;
 	getAccessToken: AccessTokenGetter;
@@ -14,7 +19,7 @@ export async function fetchRepositoryFileCount(
 ): Promise<number> {
 	return withRepositoryLix(options, async (lix) => {
 		const result = await lix.execute("SELECT COUNT(*) AS count FROM lix_file");
-		const count = result.rows[0]?.toObject().count;
+		const count = result.rows[0]?.count;
 		return typeof count === "number" ? count : 0;
 	});
 }
@@ -28,9 +33,9 @@ export async function buildRepositoryArchive(
 		);
 		const entries: Record<string, Uint8Array> = {};
 		for (const row of result.rows) {
-			const path = row.value("path").toJS();
-			const content = row.value("content").asBytes();
-			if (typeof path !== "string" || !content) {
+			const path = row.path;
+			const content = row.content;
+			if (typeof path !== "string" || !(content instanceof Uint8Array)) {
 				throw new Error("Repository archive returned invalid file data.");
 			}
 			const archivePath = path.replace(/^\/+/, "");
@@ -47,10 +52,12 @@ async function withRepositoryLix<T>(
 	const lix = await openLix({
 		server: {
 			mode: "remote",
-			url: new URL(
-				`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.repositorySlug)}`,
-				globalThis.location.origin,
-			),
+			url: canonicalLixUrl(globalThis.location.origin, options.lixId),
+			fetch: createLixrayProtocolFetch({
+				lixId: options.lixId,
+				namespace: options.namespace,
+				repositorySlug: options.repositorySlug,
+			}),
 			headers: async () => {
 				const token = await options.getAccessToken();
 				if (!token) throw new Error("Sign in to access this repository.");

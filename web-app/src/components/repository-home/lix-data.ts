@@ -36,10 +36,7 @@ export type RepositoryTree = {
 	}>;
 };
 
-type ObservedRow = {
-	get(column: string): unknown;
-	value(column: string): { asBytes(): Uint8Array | undefined };
-};
+type ObservedRow = Record<string, unknown>;
 
 type ObservedRowsState<TRow> = {
 	readonly rows: TRow[] | null;
@@ -156,7 +153,7 @@ export function useRepositoryControlPlaneData(
 				[],
 			)
 			.then((result) => {
-				if (!disposed) setTableCount(asNumber(result.rows[0]?.get("n")));
+				if (!disposed) setTableCount(asNumber(result.rows[0]?.n));
 			})
 			.catch((error: unknown) => {
 				console.error(
@@ -179,27 +176,25 @@ export function useRepositoryControlPlaneData(
 		const changeSummaryRows = changeSummary.rows ?? [];
 		return {
 			totalChangeCount: changeSummary.rows
-				? asNumber(changeSummaryRows[0]?.get("total_count"))
+				? asNumber(changeSummaryRows[0]?.total_count)
 				: null,
 			tableCount,
 			checkpointCount: checkpoints.rows
-				? asNumber(checkpoints.rows[0]?.get("total_count"))
+				? asNumber(checkpoints.rows[0]?.total_count)
 				: null,
 			checkpointDates: checkpoints.rows
-				? checkpoints.rows
-						.map((row) => asText(row.get("created_at")))
-						.filter(Boolean)
+				? checkpoints.rows.map((row) => asText(row.created_at)).filter(Boolean)
 				: null,
 			changeDays: changeSummary.rows
 				? changeSummaryRows
 						.map((row) => ({
-							day: asText(row.get("day")),
-							count: asNumber(row.get("n")),
+							day: asText(row.day),
+							count: asNumber(row.n),
 						}))
 						.reverse()
 				: null,
 			createdAt: changeSummary.rows
-				? asNullableText(changeSummaryRows[0]?.get("created_at"))
+				? asNullableText(changeSummaryRows[0]?.created_at)
 				: null,
 			changeHistoryUnavailable: observations.some(
 				({ error }) => error !== null,
@@ -228,8 +223,8 @@ export function useFilesAtCommit(
 		if (!rows.rows) return null;
 		const files: Array<{ readonly id: string; readonly path: string }> = [];
 		for (const row of rows.rows) {
-			const id = row.get("id");
-			const path = row.get("path");
+			const id = row.id;
+			const path = row.path;
 			if (typeof id === "string" && typeof path === "string") {
 				files.push({ id, path });
 			}
@@ -318,19 +313,19 @@ export function useRepositoryTree(
 			tree: {
 				dirs: dirs.rows.map((row) => ({
 					kind: EntryKind.Directory,
-					id: asText(row.get("id")),
-					parentId: asNullableText(row.get("parent_id")),
-					path: asText(row.get("path")),
-					name: asText(row.get("name")),
-					updatedAt: asText(row.get("lixcol_updated_at")),
+					id: asText(row.id),
+					parentId: asNullableText(row.parent_id),
+					path: asText(row.path),
+					name: asText(row.name),
+					updatedAt: asText(row.lixcol_updated_at),
 				})),
 				files: files.rows.map((row) => ({
 					kind: EntryKind.File,
-					id: asText(row.get("id")),
-					directoryId: asNullableText(row.get("directory_id")),
-					path: asText(row.get("path")),
-					name: asText(row.get("name")),
-					updatedAt: asText(row.get("lixcol_updated_at")),
+					id: asText(row.id),
+					directoryId: asNullableText(row.directory_id),
+					path: asText(row.path),
+					name: asText(row.name),
+					updatedAt: asText(row.lixcol_updated_at),
 				})),
 			},
 			error: dirs.error ?? files.error,
@@ -477,10 +472,10 @@ export function useFileMarkdown(
 	);
 	return useMemo(() => {
 		if (!path || !rows || rows.length === 0) return null;
-		const row = rows[0];
-		const bytes = row?.value("content").asBytes();
-		if (bytes) return new TextDecoder().decode(bytes);
-		const content = row?.get("content");
+		const content = rows[0]?.content;
+		if (content instanceof Uint8Array) {
+			return new TextDecoder().decode(content);
+		}
 		if (typeof content === "string") return content;
 		return null;
 	}, [path, rows]);

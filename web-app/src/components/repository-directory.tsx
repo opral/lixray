@@ -76,6 +76,7 @@ export function RepositoryDirectory() {
 		for (const organization of organizations) {
 			for (const repository of organization.repositories) {
 				void fetchRepositoryFileCount({
+					lixId: repository.id,
 					namespace: organization.handle,
 					repositorySlug: repository.slug,
 					getAccessToken: auth.getAccessToken,
@@ -437,6 +438,7 @@ function RepositoryRow({
 		setDownloading(true);
 		try {
 			const archive = await buildRepositoryArchive({
+				lixId: repository.id,
 				namespace: organization.handle,
 				repositorySlug: repository.slug,
 				getAccessToken,

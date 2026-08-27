@@ -347,6 +347,16 @@ async fn lix_protocol_inner(
             }
         };
 
+    // LixRay owns the outer `/lixes/{id}` resource route. The canonical Lix
+    // protocol repeats that identity below `/lix/v1`, so inject the validated
+    // host id before dispatch instead of exposing a redundant public segment.
+    let protocol_path = if protocol_path == "lix/v1" {
+        format!("lix/v1/{lix_id}")
+    } else if let Some(suffix) = protocol_path.strip_prefix("lix/v1/") {
+        format!("lix/v1/{lix_id}/{suffix}")
+    } else {
+        protocol_path
+    };
     let path_and_query = request.uri().query().map_or_else(
         || format!("/{protocol_path}"),
         |query| format!("/{protocol_path}?{query}"),
@@ -887,7 +897,7 @@ mod tests {
         let handshake = app
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/lix-a/lix/v1/")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a1/lix/v1/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -923,7 +933,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/account-e2e/lix/v1/")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a4/lix/v1/")
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
                     .body(Body::empty())
                     .expect("trusted handshake request"),
@@ -940,13 +950,13 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lixes/account-e2e/lix/v1/execute")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a4/lix/v1/execute")
                     .header(server_protocol::SESSION_ID_HEADER, session_id)
-                    .header(server_protocol::IDEMPOTENCY_KEY_HEADER, "account-e2e-insert")
+                    .header(server_protocol::IDEMPOTENCY_KEY_HEADER, "01920000-0000-7000-8000-0000000000a4-insert")
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        r#"{"sql":"INSERT INTO lix_key_value (key, value) VALUES ('account-e2e', $1)","params":[{"kind":"jsonb","value":true}]}"#,
+                        r#"{"sql":"INSERT INTO lix_key_value (key, value) VALUES ('01920000-0000-7000-8000-0000000000a4', $1)","params":[{"kind":"jsonb","value":true}]}"#,
                     ))
                     .expect("attributed insert request"),
             )
@@ -964,7 +974,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lixes/account-e2e/lix/v1/execute")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a4/lix/v1/execute")
                     .header(server_protocol::SESSION_ID_HEADER, session_id)
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, ACCOUNT_ID)
                     .header("content-type", "application/json")
@@ -984,7 +994,7 @@ mod tests {
         let cross_account = app
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/account-e2e/lix/v1/")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a4/lix/v1/")
                     .header(server_protocol::SESSION_ID_HEADER, session_id)
                     .header(TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER, OTHER_ACCOUNT_ID)
                     .body(Body::empty())
@@ -1006,7 +1016,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/gzip-e2e/lix/v1/")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a5/lix/v1/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -1026,7 +1036,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lixes/gzip-e2e/lix/v1/execute")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a5/lix/v1/execute")
                     .header(server_protocol::SESSION_ID_HEADER, session_id)
                     .header(header::CONTENT_TYPE, "application/json")
                     .header(header::CONTENT_ENCODING, "gzip")
@@ -1078,7 +1088,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/lix-a/lix/v1/")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a1/lix/v1/")
                     .body(Body::empty())
                     .expect("unauthorized request"),
             )
@@ -1096,7 +1106,7 @@ mod tests {
         let authorized = app
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/lix-a/lix/v1/")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a1/lix/v1/")
                     .header(header::AUTHORIZATION, "Bearer secret")
                     .body(Body::empty())
                     .expect("authorized request"),
@@ -1109,18 +1119,19 @@ mod tests {
     #[tokio::test]
     async fn isolates_lix_data() {
         let app = test_router();
-        let lix_a_session = open_protocol_session(app.clone(), "lix-a").await;
+        let lix_a_session =
+            open_protocol_session(app.clone(), "01920000-0000-7000-8000-0000000000a1").await;
         let insert = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lixes/lix-a/lix/v1/execute")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a1/lix/v1/execute")
                     .header(
                         server_protocol::SESSION_ID_HEADER,
                         &lix_a_session,
                     )
-                    .header(server_protocol::IDEMPOTENCY_KEY_HEADER, "isolate-lix-a")
+                    .header(server_protocol::IDEMPOTENCY_KEY_HEADER, "isolate-01920000-0000-7000-8000-0000000000a1")
                     .header("content-type", "application/json")
                     .body(Body::from(
                         r#"{"sql":"INSERT INTO lix_file (path, content) VALUES ('/only-a.txt', CAST('A' AS BYTEA))"}"#,
@@ -1136,8 +1147,11 @@ mod tests {
             json_body(insert).await
         );
 
-        for (lix_id, expected) in [("lix-a", 1), ("lix-b", 0)] {
-            let session_id = if lix_id == "lix-a" {
+        for (lix_id, expected) in [
+            ("01920000-0000-7000-8000-0000000000a1", 1),
+            ("01920000-0000-7000-8000-0000000000a2", 0),
+        ] {
+            let session_id = if lix_id == "01920000-0000-7000-8000-0000000000a1" {
                 lix_a_session.clone()
             } else {
                 open_protocol_session(app.clone(), lix_id).await
@@ -1181,7 +1195,7 @@ mod tests {
         };
 
         let app = test_router();
-        let lix_id = "markdown-collaboration";
+        let lix_id = "01920000-0000-7000-8000-0000000000a6";
         let installer = open_protocol_session(app.clone(), lix_id).await;
         expect_protocol_ok(
             protocol_execute(
@@ -1479,7 +1493,7 @@ mod tests {
         let response = test_router()
             .oneshot(
                 Request::builder()
-                    .uri("/lixes/lix-a/lix/v1?activeAccountId=spoofed")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a1/lix/v1?activeAccountId=spoofed")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -1491,12 +1505,15 @@ mod tests {
     #[tokio::test]
     async fn cancelled_nonterminal_request_does_not_recover_its_runtime() {
         let manager = LixRuntimeManager::new_in_memory(1);
-        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let service = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("open lix runtime");
         let (notifier, signal) = server_protocol::durable_terminal_storage_signal();
         let cancellation_recovery = CancellationRecovery::new(
             signal,
             Arc::clone(&manager),
-            "lix-a".to_string(),
+            "01920000-0000-7000-8000-0000000000a1".to_string(),
             Arc::clone(&service),
         );
 
@@ -1504,19 +1521,25 @@ mod tests {
         drop(cancellation_recovery);
         tokio::task::yield_now().await;
 
-        let still_active = manager.get("lix-a").await.expect("active lix runtime");
+        let still_active = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("active lix runtime");
         assert!(Arc::ptr_eq(&service, &still_active));
     }
 
     #[tokio::test]
     async fn cancellation_during_terminal_response_recovery_still_starts_runtime_recovery() {
         let manager = LixRuntimeManager::new_in_memory(1);
-        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let service = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("open lix runtime");
         let (notifier, signal) = server_protocol::durable_terminal_storage_signal();
         let mut cancellation_recovery = CancellationRecovery::new(
             signal,
             Arc::clone(&manager),
-            "lix-a".to_string(),
+            "01920000-0000-7000-8000-0000000000a1".to_string(),
             Arc::clone(&service),
         );
 
@@ -1526,7 +1549,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                match manager.get("lix-a").await {
+                match manager.get("01920000-0000-7000-8000-0000000000a1").await {
                     Err(LixRuntimeError::Recovering) => return,
                     Ok(_) => tokio::time::sleep(Duration::from_millis(1)).await,
                     Err(error) => panic!("unexpected runtime state: {error}"),
@@ -1543,7 +1566,7 @@ mod tests {
         // cleanup tombstone and proves the old runtime was fully retired.
         let replacement = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                match manager.get("lix-a").await {
+                match manager.get("01920000-0000-7000-8000-0000000000a1").await {
                     Ok(replacement) => return replacement,
                     Err(LixRuntimeError::Recovering) => {
                         tokio::time::sleep(Duration::from_millis(1)).await;

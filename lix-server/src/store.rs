@@ -712,6 +712,7 @@ impl LixRuntimeManager {
                 .with_telemetry(Arc::clone(&self.telemetry))
                 .with_open_progress_sink(Arc::new(open_progress))
                 .serve()
+                .with_lix_id(lix_id)
                 .await
                 .context("serve Lix repository through the canonical server protocol")
         }
@@ -1519,11 +1520,14 @@ fn reap_stale_cache_children(namespace_root: &Path) -> Result<()> {
 }
 
 fn valid_lix_id(lix_id: &str) -> bool {
-    !lix_id.is_empty()
-        && lix_id.len() <= 128
-        && lix_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    lix_id.len() == 36
+        && lix_id.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+            }
+        })
 }
 
 fn start_cleanup(
@@ -1780,10 +1784,10 @@ mod tests {
         body::Body,
         http::{header, Request},
     };
+    use futures_util::io::Cursor;
     use http_body_util::BodyExt as _;
     use lix_sdk::storage::{
-        BeginScanOptions, CoreProjection, KeyRange, ProjectedValue, PutBatch, PutEntry,
-        ReadOptions, SpaceId, Storage as _, StorageRead as _, StorageSpace, StorageWrite as _,
+        Key, PutBatch, PutEntry, SpaceId, Storage as _, StorageSpace, StorageWrite as _,
         StoredValue, WriteOptions,
     };
     use serde_json::{json, Value as JsonValue};
@@ -1791,15 +1795,10 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use tower::ServiceExt as _;
 
-    const V68_REPOSITORY: &[u8] = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../vendor/lix/packages/lix/tests/fixtures/v68_external_tombstones.snapshot"
-    ));
-
     // The oldest format the v75 migration chain still migrates in place.
     const V72_REPOSITORY: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../vendor/lix/packages/lix/tests/fixtures/v72_filesystem_checkpoints.snapshot"
+        "/../vendor/lix/packages/lix/tests/fixtures/v72_filesystem_checkpoints.lixsnap"
     ));
 
     const REPOSITORY_PROTOCOL_SPACE: StorageSpace =
@@ -1837,7 +1836,12 @@ mod tests {
             }),
         };
 
-        let result = await_recovery_close(&watchdog, "lix-a", std::future::pending::<()>()).await;
+        let result = await_recovery_close(
+            &watchdog,
+            "01920000-0000-7000-8000-0000000000a1",
+            std::future::pending::<()>(),
+        )
+        .await;
 
         assert!(result.is_none());
         assert!(fired.load(Ordering::SeqCst));
@@ -1946,19 +1950,21 @@ mod tests {
     #[test]
     fn cache_namespace_separates_same_lix_id_across_backends() {
         let base_root = Path::new("/var/cache/lixray");
-        let first = namespace_root(base_root, "https://first.example").join("lix-123");
-        let second = namespace_root(base_root, "https://second.example").join("lix-123");
+        let first = namespace_root(base_root, "https://first.example")
+            .join("01920000-0000-7000-8000-0000000000a7");
+        let second = namespace_root(base_root, "https://second.example")
+            .join("01920000-0000-7000-8000-0000000000a7");
 
         assert_ne!(first, second);
         assert!(first.starts_with(base_root.join(CACHE_NAMESPACE_PARENT)));
         assert!(second.starts_with(base_root.join(CACHE_NAMESPACE_PARENT)));
         assert_eq!(
             first.file_name().and_then(|name| name.to_str()),
-            Some("lix-123")
+            Some("01920000-0000-7000-8000-0000000000a7")
         );
         assert_eq!(
             second.file_name().and_then(|name| name.to_str()),
-            Some("lix-123")
+            Some("01920000-0000-7000-8000-0000000000a7")
         );
     }
 
@@ -1966,49 +1972,7 @@ mod tests {
         LixRuntimeManager::new_in_memory(max_open_lixes)
     }
 
-    async fn seed_repository_protocol(manager: &LixRuntimeManager, lix_id: &str, snapshot: &[u8]) {
-        let source = lix_sdk::Memory::from_snapshot(snapshot).expect("decode repository fixture");
-        let read = source
-            .begin_read(ReadOptions::default())
-            .await
-            .expect("open repository fixture read");
-        let mut cursor = read
-            .begin_scan(
-                REPOSITORY_PROTOCOL_SPACE,
-                KeyRange {
-                    lower: std::ops::Bound::Unbounded,
-                    upper: std::ops::Bound::Unbounded,
-                },
-                BeginScanOptions {
-                    projection: CoreProjection::FullValue,
-                    ..BeginScanOptions::default()
-                },
-            )
-            .await
-            .expect("scan repository protocol marker");
-        let mut entries = Vec::new();
-        loop {
-            let (page, has_more) = cursor
-                .next_page(lix_sdk::storage::MAX_SCAN_PAGE_ROWS)
-                .await
-                .expect("read repository protocol marker")
-                .into_parts();
-            entries.extend(page.into_iter().map(|entry| {
-                let ProjectedValue::FullValue(value) = entry.value else {
-                    panic!("repository protocol scan must return full values");
-                };
-                PutEntry {
-                    key: entry.key,
-                    value: StoredValue { bytes: value },
-                }
-            }));
-            if !has_more {
-                break;
-            }
-        }
-        drop(cursor);
-        drop(read);
-
+    async fn seed_pre_migration_repository_protocol(manager: &LixRuntimeManager, lix_id: &str) {
         let object_store = match &manager.backend {
             StorageBackend::Memory { object_store } => Arc::clone(object_store),
             StorageBackend::S3 { .. } => unreachable!("test manager must use in-memory storage"),
@@ -2024,7 +1988,17 @@ mod tests {
             .await
             .expect("begin fixture write");
         write
-            .put_many(REPOSITORY_PROTOCOL_SPACE, PutBatch { entries })
+            .put_many(
+                REPOSITORY_PROTOCOL_SPACE,
+                PutBatch {
+                    entries: vec![PutEntry {
+                        key: Key(bytes::Bytes::from_static(b"current")),
+                        value: StoredValue {
+                            bytes: bytes::Bytes::from_static(b"tracked-default-branch.v68"),
+                        },
+                    }],
+                },
+            )
             .await
             .expect("stage repository protocol marker");
         write.commit().await.expect("publish repository fixture");
@@ -2033,9 +2007,6 @@ mod tests {
 
     #[tokio::test]
     async fn server_open_automatically_upgrades_an_old_lix() {
-        let storage =
-            lix_sdk::Memory::from_snapshot(V72_REPOSITORY).expect("decode frozen v72 repository");
-
         let (migration_state, migration_status) = watch::channel(RuntimeOpenState::Opening);
         let progress_state = migration_state.clone();
         let transitions = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2051,8 +2022,8 @@ mod tests {
                 }
             });
         let lix = lix_sdk::open_lix()
-            .with_storage(storage)
             .with_open_progress_sink(Arc::new(progress))
+            .from_snapshot(Cursor::new(V72_REPOSITORY))
             .await
             .expect("open and migrate old Lix");
         assert!(matches!(
@@ -2090,19 +2061,31 @@ mod tests {
         // progress event. Exercise the managed SlateDB path so the typed error
         // cannot be flattened at the async opener boundary.
         let manager = memory_manager(1);
-        seed_repository_protocol(&manager, "lix-v68", V68_REPOSITORY).await;
+        seed_pre_migration_repository_protocol(&manager, "01920000-0000-7000-8000-0000000000a3")
+            .await;
 
-        assert!(matches!(
-            manager.get("lix-v68").await,
-            Err(LixRuntimeError::UpgradeFailed)
-        ));
+        let error = match manager.get("01920000-0000-7000-8000-0000000000a3").await {
+            Ok(_) => panic!("pre-v72 repository must fail the migration hard cut"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(error, LixRuntimeError::UpgradeFailed),
+            "unexpected pre-v72 open error: {error:?}"
+        );
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 let state = manager.state.lock().await;
-                if !state.entries.contains_key("lix-v68") && !state.cleaning.contains_key("lix-v68")
+                if !state
+                    .entries
+                    .contains_key("01920000-0000-7000-8000-0000000000a3")
+                    && !state
+                        .cleaning
+                        .contains_key("01920000-0000-7000-8000-0000000000a3")
                 {
                     assert!(matches!(
-                        state.failed_upgrades.get("lix-v68"),
+                        state
+                            .failed_upgrades
+                            .get("01920000-0000-7000-8000-0000000000a3"),
                         Some(FailedUpgrade::Unversioned)
                     ));
                     break;
@@ -2114,7 +2097,7 @@ mod tests {
         .await
         .expect("failed upgrade cleanup must complete");
         assert!(matches!(
-            manager.get("lix-v68").await,
+            manager.get("01920000-0000-7000-8000-0000000000a3").await,
             Err(LixRuntimeError::UpgradeFailed)
         ));
     }
@@ -2139,7 +2122,10 @@ mod tests {
     #[tokio::test]
     async fn concurrent_gets_share_one_runtime() {
         let manager = memory_manager(2);
-        let (left, right) = tokio::join!(manager.get("lix-a"), manager.get("lix-a"));
+        let (left, right) = tokio::join!(
+            manager.get("01920000-0000-7000-8000-0000000000a1"),
+            manager.get("01920000-0000-7000-8000-0000000000a1")
+        );
         let left = left.expect("open left runtime");
         let right = right.expect("open right runtime");
 
@@ -2157,13 +2143,21 @@ mod tests {
         let manager = memory_manager_with_open_gate(1, gate.clone());
         let started = gate.started.notified();
         let opening_manager = Arc::clone(&manager);
-        let opening = tokio::spawn(async move { opening_manager.get("lix-a").await });
+        let opening = tokio::spawn(async move {
+            opening_manager
+                .get("01920000-0000-7000-8000-0000000000a1")
+                .await
+        });
         started.await;
         opening.abort();
         let _ = opening.await;
 
         let waiting_manager = Arc::clone(&manager);
-        let mut later_get = tokio::spawn(async move { waiting_manager.get("lix-a").await });
+        let mut later_get = tokio::spawn(async move {
+            waiting_manager
+                .get("01920000-0000-7000-8000-0000000000a1")
+                .await
+        });
         assert!(
             tokio::time::timeout(Duration::from_millis(25), &mut later_get)
                 .await
@@ -2192,7 +2186,7 @@ mod tests {
             to_version: 71,
         });
         manager.state.lock().await.entries.insert(
-            "lix-a".to_string(),
+            "01920000-0000-7000-8000-0000000000a1".to_string(),
             RuntimeEntry {
                 runtime,
                 opened,
@@ -2200,9 +2194,12 @@ mod tests {
             },
         );
 
-        let result = tokio::time::timeout(Duration::from_millis(25), manager.get("lix-a"))
-            .await
-            .expect("migration state must return without waiting for the opener");
+        let result = tokio::time::timeout(
+            Duration::from_millis(25),
+            manager.get("01920000-0000-7000-8000-0000000000a1"),
+        )
+        .await
+        .expect("migration state must return without waiting for the opener");
         assert!(matches!(
             result,
             Err(LixRuntimeError::Migrating {
@@ -2216,7 +2213,7 @@ mod tests {
     async fn failed_migration_remains_terminal_for_every_caller() {
         let manager = memory_manager(1);
         manager.state.lock().await.failed_upgrades.insert(
-            "lix-a".to_string(),
+            "01920000-0000-7000-8000-0000000000a1".to_string(),
             FailedUpgrade::Versioned(FailedMigration {
                 from_version: 68,
                 to_version: 71,
@@ -2224,14 +2221,14 @@ mod tests {
         );
 
         assert!(matches!(
-            manager.get("lix-a").await,
+            manager.get("01920000-0000-7000-8000-0000000000a1").await,
             Err(LixRuntimeError::MigrationFailed {
                 from_version: 68,
                 to_version: 71,
             })
         ));
         assert!(matches!(
-            manager.get("lix-a").await,
+            manager.get("01920000-0000-7000-8000-0000000000a1").await,
             Err(LixRuntimeError::MigrationFailed {
                 from_version: 68,
                 to_version: 71,
@@ -2250,7 +2247,11 @@ mod tests {
         let manager = memory_manager_with_open_gate(1, gate.clone());
         let first_started = gate.started.notified();
         let first_manager = Arc::clone(&manager);
-        let first = tokio::spawn(async move { first_manager.get("lix-a").await });
+        let first = tokio::spawn(async move {
+            first_manager
+                .get("01920000-0000-7000-8000-0000000000a1")
+                .await
+        });
         first_started.await;
         gate.release.notify_one();
         assert!(matches!(
@@ -2261,7 +2262,11 @@ mod tests {
 
         let retry_started = gate.started.notified();
         let retry_manager = Arc::clone(&manager);
-        let retry = tokio::spawn(async move { retry_manager.get("lix-a").await });
+        let retry = tokio::spawn(async move {
+            retry_manager
+                .get("01920000-0000-7000-8000-0000000000a1")
+                .await
+        });
         retry_started.await;
         gate.release.notify_one();
         let service = retry
@@ -2275,13 +2280,22 @@ mod tests {
     #[tokio::test]
     async fn evicts_the_least_recently_used_idle_runtime() {
         let manager = memory_manager(1);
-        let first = manager.get("lix-a").await.expect("open first runtime");
+        let first = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("open first runtime");
         drop(first);
-        let second = manager.get("lix-b").await.expect("open second runtime");
+        let second = manager
+            .get("01920000-0000-7000-8000-0000000000a2")
+            .await
+            .expect("open second runtime");
 
         assert_eq!(manager.cached_lix_count().await, 1);
         drop(second);
-        let reopened = manager.get("lix-a").await.expect("reopen first runtime");
+        let reopened = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("reopen first runtime");
         assert_eq!(manager.cached_lix_count().await, 1);
         drop(reopened);
     }
@@ -2289,16 +2303,19 @@ mod tests {
     #[tokio::test]
     async fn active_service_lease_prevents_runtime_eviction() {
         let manager = memory_manager(1);
-        let active = manager.get("lix-a").await.expect("open active runtime");
+        let active = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("open active runtime");
 
         assert!(matches!(
-            manager.get("lix-b").await,
+            manager.get("01920000-0000-7000-8000-0000000000a2").await,
             Err(LixRuntimeError::AtCapacity { max: 1 })
         ));
 
         drop(active);
         manager
-            .get("lix-b")
+            .get("01920000-0000-7000-8000-0000000000a2")
             .await
             .expect("evict runtime after its final service lease is released");
     }
@@ -2309,12 +2326,15 @@ mod tests {
         use tower::ServiceExt as _;
 
         let manager = memory_manager(1);
-        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let service = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("open lix runtime");
         let handshake = service
             .protocol_router()
             .oneshot(
                 Request::builder()
-                    .uri("/lix/v1/")
+                    .uri("/lix/v1/01920000-0000-7000-8000-0000000000a1/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -2325,7 +2345,7 @@ mod tests {
         drop(service);
 
         assert!(matches!(
-            manager.get("lix-b").await,
+            manager.get("01920000-0000-7000-8000-0000000000a2").await,
             Err(LixRuntimeError::AtCapacity { max: 1 })
         ));
     }
@@ -2340,13 +2360,16 @@ mod tests {
         use tower::ServiceExt as _;
 
         let manager = memory_manager(1);
-        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let service = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("open lix runtime");
         let protocol_router = service.protocol_router();
         let handshake = protocol_router
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lix/v1/")
+                    .uri("/lix/v1/01920000-0000-7000-8000-0000000000a1/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -2371,7 +2394,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lix/v1/observe")
+                    .uri("/lix/v1/01920000-0000-7000-8000-0000000000a1/observe")
                     .header(header::CONTENT_TYPE, "application/json")
                     .header("Lix-Session-Id", session_id)
                     .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
@@ -2409,13 +2432,16 @@ mod tests {
         use tower::ServiceExt as _;
 
         let manager = memory_manager(1);
-        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let service = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("open lix runtime");
         let protocol_router = service.protocol_router();
         let handshake = protocol_router
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lix/v1/")
+                    .uri("/lix/v1/01920000-0000-7000-8000-0000000000a1/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -2440,7 +2466,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lix/v1/observe")
+                    .uri("/lix/v1/01920000-0000-7000-8000-0000000000a1/observe")
                     .header(header::CONTENT_TYPE, "application/json")
                     .header("Lix-Session-Id", session_id)
                     .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
@@ -2457,7 +2483,9 @@ mod tests {
             .expect("valid observation frame");
         assert!(first_frame.is_data());
 
-        manager.recover("lix-a", &service).await;
+        manager
+            .recover("01920000-0000-7000-8000-0000000000a1", &service)
+            .await;
         manager
             .shutdown()
             .await
@@ -2478,13 +2506,16 @@ mod tests {
     #[tokio::test]
     async fn recovery_closes_observation_streams_before_waiting_for_response_leases() {
         let manager = memory_manager(1);
-        let service = manager.get("lix-a").await.expect("open lix runtime");
+        let service = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("open lix runtime");
         let protocol_router = service.protocol_router();
         let handshake = protocol_router
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/lix/v1/")
+                    .uri("/lix/v1/01920000-0000-7000-8000-0000000000a1/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -2509,7 +2540,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lix/v1/observe")
+                    .uri("/lix/v1/01920000-0000-7000-8000-0000000000a1/observe")
                     .header(header::CONTENT_TYPE, "application/json")
                     .header("Lix-Session-Id", session_id)
                     .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
@@ -2526,7 +2557,9 @@ mod tests {
             .expect("valid observation frame");
         assert!(first_frame.is_data());
 
-        manager.recover("lix-a", &service).await;
+        manager
+            .recover("01920000-0000-7000-8000-0000000000a1", &service)
+            .await;
 
         let stream_closed = tokio::time::timeout(Duration::from_secs(1), async {
             while let Some(frame) = body.frame().await {
@@ -2555,13 +2588,13 @@ mod tests {
             Duration::from_secs(60),
             crate::telemetry::InFlightSqlRegistry::default(),
         );
-        let session = open_protocol_session(&app, "lix-a").await;
+        let session = open_protocol_session(&app, "01920000-0000-7000-8000-0000000000a1").await;
         let response = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lixes/lix-a/lix/v1/observe")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a1/lix/v1/observe")
                     .header(lix_sdk::server_protocol::SESSION_ID_HEADER, session)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(r#"{"sql":"SELECT 1","params":[]}"#))
@@ -2578,8 +2611,13 @@ mod tests {
             .expect("valid observation frame");
         assert!(first_frame.is_data());
 
-        let service = manager.get("lix-a").await.expect("get active service");
-        manager.recover("lix-a", &service).await;
+        let service = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("get active service");
+        manager
+            .recover("01920000-0000-7000-8000-0000000000a1", &service)
+            .await;
         tokio::time::timeout(Duration::from_secs(1), async {
             while let Some(frame) = body.frame().await {
                 frame.expect("valid observation frame while recovering");
@@ -2616,7 +2654,11 @@ mod tests {
         let manager = memory_manager_with_open_gate(1, gate.clone());
         let started = gate.started.notified();
         let opening_manager = Arc::clone(&manager);
-        let opening = tokio::spawn(async move { opening_manager.get("lix-a").await });
+        let opening = tokio::spawn(async move {
+            opening_manager
+                .get("01920000-0000-7000-8000-0000000000a1")
+                .await
+        });
         started.await;
         opening.abort();
         assert!(matches!(opening.await, Err(error) if error.is_cancelled()));
@@ -2640,7 +2682,7 @@ mod tests {
             "shutdown must wait for the manager-owned opening"
         );
         assert!(matches!(
-            manager.get("lix-b").await,
+            manager.get("01920000-0000-7000-8000-0000000000a2").await,
             Err(LixRuntimeError::ShuttingDown)
         ));
 
@@ -2655,7 +2697,7 @@ mod tests {
             Arc::clone(
                 state
                     .entries
-                    .get("lix-a")
+                    .get("01920000-0000-7000-8000-0000000000a1")
                     .expect("manager should retain opened runtime")
                     .runtime
                     .get()
@@ -2670,7 +2712,7 @@ mod tests {
             .protocol_router()
             .oneshot(
                 Request::builder()
-                    .uri("/lix/v1/")
+                    .uri("/lix/v1/01920000-0000-7000-8000-0000000000a1/")
                     .body(Body::empty())
                     .expect("handshake request"),
             )
@@ -2741,8 +2783,12 @@ mod tests {
         assert_eq!(options.block_cache_bytes, 32);
         assert_eq!(options.metadata_cache_bytes, 8);
         assert_eq!(
-            cache_child_path(&options.root_folder, "lix-a"),
-            Some(options.root_folder.join("lix-a"))
+            cache_child_path(&options.root_folder, "01920000-0000-7000-8000-0000000000a1"),
+            Some(
+                options
+                    .root_folder
+                    .join("01920000-0000-7000-8000-0000000000a1")
+            )
         );
     }
 
@@ -2750,14 +2796,14 @@ mod tests {
     fn retires_only_the_validated_lix_cache_child() {
         let root = TestCacheRoot::new("retire-cache-child");
         let namespace = namespace_root(&root.0, "https://s3.example");
-        let lix_cache = namespace.join("lix-a");
-        let untouched = namespace.join("lix-b");
+        let lix_cache = namespace.join("01920000-0000-7000-8000-0000000000a1");
+        let untouched = namespace.join("01920000-0000-7000-8000-0000000000a2");
         std::fs::create_dir_all(lix_cache.join("nested")).expect("create Lix cache child");
         std::fs::write(lix_cache.join("nested/cache-part"), b"cached bytes")
             .expect("write cache part");
         std::fs::create_dir_all(&untouched).expect("create untouched cache child");
 
-        let retired = retire_cache_child(&namespace, "lix-a", 7)
+        let retired = retire_cache_child(&namespace, "01920000-0000-7000-8000-0000000000a1", 7)
             .expect("retire cache child")
             .expect("cache child is present");
 
@@ -2839,20 +2885,25 @@ mod tests {
         let root = TestCacheRoot::new("cache-root-reap");
         let current = namespace_root(&root.0, "https://current.example");
         let inactive = namespace_root(&root.0, "https://inactive.example");
-        let retired = retired_cache_path(&current, "lix-a", 7).expect("valid retired path");
+        let retired = retired_cache_path(&current, "01920000-0000-7000-8000-0000000000a1", 7)
+            .expect("valid retired path");
         std::fs::create_dir_all(retired.join("nested")).expect("create retired cache child");
         std::fs::write(retired.join("nested/cache-part"), b"cached bytes")
             .expect("write retired cache part");
-        let stale_current_lix = current.join("lix-stale");
+        let stale_current_lix = current.join("01920000-0000-7000-8000-0000000000a8");
         let current_unknown = current.join(".operator-notes");
         std::fs::create_dir_all(stale_current_lix.join("nested"))
             .expect("create stale current Lix cache");
         std::fs::write(stale_current_lix.join("nested/cache-part"), b"cached bytes")
             .expect("write stale current Lix cache part");
         std::fs::create_dir_all(&current_unknown).expect("create current unknown entry");
-        std::fs::create_dir_all(inactive.join("lix-old")).expect("create inactive namespace");
-        std::fs::write(inactive.join("lix-old/cache-part"), b"cached bytes")
-            .expect("write inactive namespace part");
+        std::fs::create_dir_all(inactive.join("01920000-0000-7000-8000-0000000000a9"))
+            .expect("create inactive namespace");
+        std::fs::write(
+            inactive.join("01920000-0000-7000-8000-0000000000a9/cache-part"),
+            b"cached bytes",
+        )
+        .expect("write inactive namespace part");
         let legacy_trash = root.0.join(".trash/legacy");
         let legacy_v1_lix = root.0.join("v1/legacy");
         std::fs::create_dir_all(&legacy_trash).expect("create legacy trash");
@@ -3027,7 +3078,7 @@ mod tests {
         {
             let mut state = manager.state.lock().await;
             state.cleaning.insert(
-                "lix-a".to_string(),
+                "01920000-0000-7000-8000-0000000000a1".to_string(),
                 CleanupTombstone {
                     sequence: 1,
                     done: cleanup_waiter,
@@ -3036,7 +3087,11 @@ mod tests {
         }
 
         let waiting_manager = Arc::clone(&manager);
-        let mut opening = tokio::spawn(async move { waiting_manager.get("lix-a").await });
+        let mut opening = tokio::spawn(async move {
+            waiting_manager
+                .get("01920000-0000-7000-8000-0000000000a1")
+                .await
+        });
         assert!(
             tokio::time::timeout(Duration::from_millis(25), &mut opening)
                 .await
@@ -3044,7 +3099,9 @@ mod tests {
             "same-ID open must wait until cache retirement has finished"
         );
 
-        manager.finish_cleanup("lix-a", 1, done, Ok(())).await;
+        manager
+            .finish_cleanup("01920000-0000-7000-8000-0000000000a1", 1, done, Ok(()))
+            .await;
         let service = tokio::time::timeout(Duration::from_secs(10), opening)
             .await
             .expect("same-ID open should resume after cleanup")
@@ -3058,11 +3115,19 @@ mod tests {
         let manager = memory_manager(1);
         let (sequence, done) = {
             let mut state = manager.state.lock().await;
-            start_cleanup(&mut state, "lix-a".to_string()).expect("start test cleanup")
+            start_cleanup(
+                &mut state,
+                "01920000-0000-7000-8000-0000000000a1".to_string(),
+            )
+            .expect("start test cleanup")
         };
 
         let waiting_manager = Arc::clone(&manager);
-        let mut opening = tokio::spawn(async move { waiting_manager.get("lix-b").await });
+        let mut opening = tokio::spawn(async move {
+            waiting_manager
+                .get("01920000-0000-7000-8000-0000000000a2")
+                .await
+        });
         assert!(
             tokio::time::timeout(Duration::from_millis(25), &mut opening)
                 .await
@@ -3071,7 +3136,12 @@ mod tests {
         );
 
         manager
-            .finish_cleanup("lix-a", sequence, done, Ok(()))
+            .finish_cleanup(
+                "01920000-0000-7000-8000-0000000000a1",
+                sequence,
+                done,
+                Ok(()),
+            )
             .await;
         let service = tokio::time::timeout(Duration::from_secs(10), opening)
             .await
@@ -3086,11 +3156,15 @@ mod tests {
         let manager = memory_manager(1);
         let (sequence, done) = {
             let mut state = manager.state.lock().await;
-            start_cleanup(&mut state, "lix-a".to_string()).expect("start test cleanup")
+            start_cleanup(
+                &mut state,
+                "01920000-0000-7000-8000-0000000000a1".to_string(),
+            )
+            .expect("start test cleanup")
         };
         manager
             .finish_cleanup(
-                "lix-a",
+                "01920000-0000-7000-8000-0000000000a1",
                 sequence,
                 done,
                 Err(anyhow::anyhow!("test-controlled cache delete failure")),
@@ -3098,7 +3172,7 @@ mod tests {
             .await;
 
         assert!(matches!(
-            manager.get("lix-b").await,
+            manager.get("01920000-0000-7000-8000-0000000000a2").await,
             Err(LixRuntimeError::Cleanup(_))
         ));
     }
@@ -3106,13 +3180,18 @@ mod tests {
     #[tokio::test]
     async fn recovery_removes_the_runtime_before_a_same_id_reopen() {
         let manager = memory_manager(1);
-        let service = manager.get("lix-a").await.expect("open Lix to recover");
-        manager.recover("lix-a", &service).await;
+        let service = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("open Lix to recover");
+        manager
+            .recover("01920000-0000-7000-8000-0000000000a1", &service)
+            .await;
         drop(service);
 
         let reopened = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
-                match manager.get("lix-a").await {
+                match manager.get("01920000-0000-7000-8000-0000000000a1").await {
                     Ok(service) => break service,
                     Err(LixRuntimeError::Recovering) => {
                         tokio::time::sleep(Duration::from_millis(1)).await;
@@ -3129,28 +3208,39 @@ mod tests {
     #[tokio::test]
     async fn recovery_waits_for_inflight_runtime_cell_before_releasing_capacity() {
         let manager = memory_manager(1);
-        let service = manager.get("lix-a").await.expect("open Lix to recover");
+        let service = manager
+            .get("01920000-0000-7000-8000-0000000000a1")
+            .await
+            .expect("open Lix to recover");
         let held_runtime_cell = {
             let state = manager.state.lock().await;
             Arc::clone(
                 &state
                     .entries
-                    .get("lix-a")
+                    .get("01920000-0000-7000-8000-0000000000a1")
                     .expect("opened Lix must have a runtime entry")
                     .runtime,
             )
         };
 
-        manager.recover("lix-a", &service).await;
+        manager
+            .recover("01920000-0000-7000-8000-0000000000a1", &service)
+            .await;
         drop(service);
 
         let cleanup_started = tokio::time::timeout(Duration::from_secs(1), async {
             loop {
                 let state = manager.state.lock().await;
-                if state.cleaning.contains_key("lix-a") {
+                if state
+                    .cleaning
+                    .contains_key("01920000-0000-7000-8000-0000000000a1")
+                {
                     return true;
                 }
-                if !state.entries.contains_key("lix-a") {
+                if !state
+                    .entries
+                    .contains_key("01920000-0000-7000-8000-0000000000a1")
+                {
                     return false;
                 }
                 drop(state);
@@ -3165,7 +3255,11 @@ mod tests {
         );
 
         let replacement_manager = Arc::clone(&manager);
-        let mut replacement = tokio::spawn(async move { replacement_manager.get("lix-b").await });
+        let mut replacement = tokio::spawn(async move {
+            replacement_manager
+                .get("01920000-0000-7000-8000-0000000000a2")
+                .await
+        });
         assert!(
             tokio::time::timeout(Duration::from_millis(25), &mut replacement)
                 .await
@@ -3191,13 +3285,13 @@ mod tests {
             Duration::from_secs(60),
             crate::telemetry::InFlightSqlRegistry::default(),
         );
-        let session = open_protocol_session(&app, "lix-a").await;
+        let session = open_protocol_session(&app, "01920000-0000-7000-8000-0000000000a1").await;
         let object_store = match &manager.backend {
             StorageBackend::Memory { object_store } => Arc::clone(object_store),
             StorageBackend::S3 { .. } => unreachable!("memory manager must use in-memory storage"),
         };
         let fencer = SlateDB::open_object_store_with_options(
-            "lix-a",
+            "01920000-0000-7000-8000-0000000000a1",
             object_store,
             SlateDBObjectStoreOptions::default(),
         )
@@ -3214,7 +3308,7 @@ mod tests {
                 .oneshot(
                     Request::builder()
                         .method("POST")
-                        .uri("/lixes/lix-a/lix/v1/execute")
+                        .uri("/lixes/01920000-0000-7000-8000-0000000000a1/lix/v1/execute")
                         .header(lix_sdk::server_protocol::SESSION_ID_HEADER, &session)
                         .header("content-type", "application/json")
                         .body(Body::from(r#"{"sql":"SELECT 1"}"#))
@@ -3241,7 +3335,7 @@ mod tests {
         assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
         assert!(response.headers().get(header::RETRY_AFTER).is_none());
         assert!(matches!(
-            manager.get("lix-a").await,
+            manager.get("01920000-0000-7000-8000-0000000000a1").await,
             Err(LixRuntimeError::Recovering)
         ));
 
@@ -3274,12 +3368,13 @@ mod tests {
         );
 
         drop(fencer);
-        let reopened_session = open_protocol_session(&app, "lix-a").await;
+        let reopened_session =
+            open_protocol_session(&app, "01920000-0000-7000-8000-0000000000a1").await;
         let reopened = app
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/lixes/lix-a/lix/v1/execute")
+                    .uri("/lixes/01920000-0000-7000-8000-0000000000a1/lix/v1/execute")
                     .header(
                         lix_sdk::server_protocol::SESSION_ID_HEADER,
                         reopened_session,

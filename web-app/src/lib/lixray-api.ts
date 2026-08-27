@@ -2,6 +2,7 @@ import {
 	openLix,
 	type ExecuteResult as LixExecuteResult,
 	type Lix,
+	type ResultColumnType,
 	type SqlParam,
 	Value,
 } from "@lix-js/sdk";
@@ -9,6 +10,10 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useRepository } from "~/components/repository-provider";
 import { base64ToBytes, bytesToBase64 } from "./base64";
+import {
+	canonicalLixUrl,
+	createLixrayProtocolFetch,
+} from "./lixray-protocol-fetch";
 
 type WireValue =
 	| { kind: "null"; value?: null }
@@ -110,14 +115,19 @@ export function useLixrayApi() {
 		}
 		const previous = clientRef.current;
 		if (previous) void previous.promise.then((lix) => lix.close());
-		const url = new URL(
-			`/@${encodeURIComponent(activeRepository.organization.handle)}/${encodeURIComponent(activeRepository.repository.slug)}`,
+		const url = canonicalLixUrl(
 			globalThis.location.origin,
+			activeRepository.repository.id,
 		);
 		const promise = openLix({
 			server: {
 				url,
 				mode: "remote",
+				fetch: createLixrayProtocolFetch({
+					lixId: activeRepository.repository.id,
+					namespace: activeRepository.organization.handle,
+					repositorySlug: activeRepository.repository.slug,
+				}),
 				headers: async () => {
 					const token = await getTokenRef.current();
 					if (!token) {
@@ -165,10 +175,10 @@ export function useLixrayApi() {
 					const currentBranchId = await lix.activeBranchId();
 					return {
 						branches: result.rows.map((row) => ({
-							id: requiredRowString(row.toObject(), "id"),
-							name: requiredRowString(row.toObject(), "name"),
-							hidden: requiredRowBoolean(row.toObject(), "hidden"),
-							commitId: requiredRowString(row.toObject(), "commit_id"),
+							id: requiredRowString(row, "id"),
+							name: requiredRowString(row, "name"),
+							hidden: requiredRowBoolean(row, "hidden"),
+							commitId: requiredRowString(row, "commit_id"),
 						})),
 						currentBranchId,
 					} satisfies BranchesResponse;
@@ -256,34 +266,50 @@ function toSqlParam(value: WireValue): SqlParam {
 
 function toWireResult(result: LixExecuteResult): ExecuteResponse {
 	return {
-		columns: result.columns,
+		columns: result.columns.map((column) => column.name),
 		rows: result.rows.map((row) =>
-			result.columns.map((column) => {
-				const value = row.value(column);
-				const js = value.toJS();
-				switch (value.kind) {
-					case "null":
-						return { kind: "null", value: null };
-					case "boolean":
-						return { kind: "bool", value: Boolean(js) };
-					case "integer":
-						return { kind: "int", value: Number(js) };
-					case "real":
-						return { kind: "float", value: Number(js) };
-					case "text":
-						return { kind: "text", value: String(js) };
-					case "timestamptz":
-						return { kind: "timestamp", value: String(js) };
-					case "blob":
-						return { kind: "blob", base64: bytesToBase64(value.asBytes()!) };
-					case "jsonb":
-						return { kind: "json", value: js };
-				}
-			}),
+			result.columns.map((column) =>
+				toWireValue(row[column.name], column.type),
+			),
 		),
 		rowsAffected: result.rowsAffected,
 		notices: result.notices,
 	};
+}
+
+function toWireValue(value: unknown, type: ResultColumnType): WireValue {
+	switch (type) {
+		case "null":
+			if (value !== null) throw new Error("Expected null query value");
+			return { kind: "null", value: null };
+		case "boolean":
+			if (typeof value !== "boolean")
+				throw new Error("Expected boolean query value");
+			return { kind: "bool", value };
+		case "integer":
+			if (typeof value !== "number")
+				throw new Error("Expected integer query value");
+			return { kind: "int", value };
+		case "real":
+			if (typeof value !== "number")
+				throw new Error("Expected real query value");
+			return { kind: "float", value };
+		case "text":
+			if (typeof value !== "string")
+				throw new Error("Expected text query value");
+			return { kind: "text", value };
+		case "timestamptz":
+			if (typeof value !== "string") {
+				throw new Error("Expected timestamp query value");
+			}
+			return { kind: "timestamp", value };
+		case "blob":
+			if (!(value instanceof Uint8Array))
+				throw new Error("Expected blob query value");
+			return { kind: "blob", base64: bytesToBase64(value) };
+		case "jsonb":
+			return { kind: "json", value };
+	}
 }
 
 function requiredRowString(

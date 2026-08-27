@@ -6,6 +6,7 @@ import {
 	readFile,
 	rm,
 	stat,
+	symlink,
 	writeFile,
 } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
@@ -24,6 +25,7 @@ const releaseDist = join(
 );
 const sdkRoot = join(workspaceRoot, "vendor", "lix", "packages", "js-sdk");
 const sdkDist = join(sdkRoot, "dist");
+const sdkSourceWasm = join(sdkRoot, "src", "wasm");
 const opfsStorageRoot = join(
 	workspaceRoot,
 	"vendor",
@@ -78,6 +80,11 @@ try {
 		await cp(join(preservedWasmRoot, "wasm"), join(sdkDist, "wasm"), {
 			recursive: true,
 		});
+		// Artifact uploads contain the generated dist files, but not the source
+		// symlink created by build-wasm.js. Recreate it before TypeScript resolves
+		// binding.browser.ts in a fresh CI checkout.
+		await rm(sdkSourceWasm, { recursive: true, force: true });
+		await symlink(join(sdkDist, "wasm"), sdkSourceWasm, "dir");
 	}
 } finally {
 	if (preservedWasmRoot) {
@@ -311,7 +318,7 @@ function verifyNativeSdk() {
 		"  const lix = await openLix();",
 		"  try {",
 		'    const [result] = await lix.executeBatch([{ sql: "SELECT 1 AS value" }]);',
-		'    if (result?.rows?.[0]?.values?.[0]?.toJS() !== 1) throw new Error("Vendored Lix native executeBatch smoke test failed");',
+		'    if (result?.rows?.[0]?.value !== 1) throw new Error("Vendored Lix native executeBatch smoke test failed");',
 		"  } finally {",
 		"    await lix.close();",
 		"  }",

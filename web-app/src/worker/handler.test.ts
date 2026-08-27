@@ -393,7 +393,7 @@ void test("profile activity queries file paths from every public Lix", async () 
 				const pathname = new URL(request.url).pathname;
 				if (pathname === "/lix/v1/") {
 					return Response.json({
-						protocolVersion: 4,
+						protocolVersion: 5,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "profile-activity-session",
@@ -406,7 +406,7 @@ void test("profile activity queries file paths from every public Lix", async () 
 				const body = (await request.json()) as { sql?: unknown };
 				assert.equal(body.sql, "SELECT path FROM lix_file ORDER BY path");
 				return Response.json({
-					columns: ["path"],
+					columns: [{ name: "path", type: "text" }],
 					rows: [
 						[{ kind: "text", value: "/README.md" }],
 						[{ kind: "text", value: "/src/index.ts" }],
@@ -450,7 +450,7 @@ void test("profile activity shares one repository scan across visitors", async (
 			const pathname = new URL(request.url).pathname;
 			if (pathname === "/lix/v1/") {
 				return Response.json({
-					protocolVersion: 4,
+					protocolVersion: 5,
 					activeBranchId: "main",
 					activeAccountId: "00000000-0000-7000-8000-000000000002",
 					sessionId: "profile-cache-session",
@@ -461,7 +461,7 @@ void test("profile activity shares one repository scan across visitors", async (
 			}
 			executeRequests += 1;
 			return Response.json({
-				columns: ["path"],
+				columns: [{ name: "path", type: "text" }],
 				rows: [[{ kind: "text", value: "/README.md" }]],
 				rowsAffected: 0,
 				notices: [],
@@ -1576,7 +1576,12 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 	};
 	let proxiedRequest: Request | undefined;
 	const upstreamBody = [
-		{ columns: ["value"], rows: [], rowsAffected: 0, notices: [] },
+		{
+			columns: [{ name: "value", type: "text" }],
+			rows: [],
+			rowsAffected: 0,
+			notices: [],
+		},
 	];
 	const upstream = Response.json(upstreamBody, {
 		headers: { "Server-Timing": "lix-server-protocol;dur=1.250" },
@@ -1960,7 +1965,7 @@ void test("a published directory exposes only its direct child names", async () 
 				protocolPaths.push(path);
 				if (path === "/lix/v1/") {
 					return Response.json({
-						protocolVersion: 4,
+						protocolVersion: 5,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "published-directory-session",
@@ -1973,7 +1978,10 @@ void test("a published directory exposes only its direct child names", async () 
 				assert.equal(path, "/lix/v1/execute");
 				executeBody = await request.json();
 				return Response.json({
-					columns: ["path", "kind"],
+					columns: [
+						{ name: "path", type: "text" },
+						{ name: "kind", type: "text" },
+					],
 					rows: [
 						[
 							{ kind: "text", value: "/finance/budget.csv" },
@@ -2402,7 +2410,7 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 				const pathname = new URL(request.url).pathname;
 				if (pathname === "/lix/v1/") {
 					return Response.json({
-						protocolVersion: 4,
+						protocolVersion: 5,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "demo-mcp-session",
@@ -2415,7 +2423,10 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 				const body = (await request.json()) as { sql?: string };
 				if (typeof body.sql === "string" && body.sql.includes("file_count")) {
 					return Response.json({
-						columns: ["file_count", "directory_count"],
+						columns: [
+							{ name: "file_count", type: "integer" },
+							{ name: "directory_count", type: "integer" },
+						],
 						rows: [
 							[
 								{ kind: "int", value: 0 },
@@ -2427,7 +2438,12 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 					});
 				}
 				return Response.json({
-					columns: ["id", "name", "hidden", "commit_id"],
+					columns: [
+						{ name: "id", type: "text" },
+						{ name: "name", type: "text" },
+						{ name: "hidden", type: "boolean" },
+						{ name: "commit_id", type: "text" },
+					],
 					rows: [
 						[
 							{ kind: "text", value: "main" },
@@ -2679,7 +2695,7 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 		protocolPaths.push(path);
 		if (path === "/lix/v1/") {
 			return Response.json({
-				protocolVersion: 4,
+				protocolVersion: 5,
 				activeBranchId: "main",
 				activeAccountId: "00000000-0000-7000-8000-000000000002",
 				sessionId,
@@ -2692,7 +2708,10 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 			const body = (await request.json()) as { sql?: string };
 			if (typeof body.sql === "string" && body.sql.includes("file_count")) {
 				return Response.json({
-					columns: ["file_count", "directory_count"],
+					columns: [
+						{ name: "file_count", type: "integer" },
+						{ name: "directory_count", type: "integer" },
+					],
 					rows: [
 						[
 							{ kind: "int", value: 0 },
@@ -2704,7 +2723,7 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 				});
 			}
 			return Response.json({
-				columns: ["value"],
+				columns: [{ name: "value", type: "text" }],
 				rows: [[{ kind: "text", value: "commit-1" }]],
 				rowsAffected: 0,
 				notices: [],
@@ -2714,7 +2733,7 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 		return Response.json([
 			{
 				statementIndex: 0,
-				columns: ["value"],
+				columns: [{ name: "value", type: "integer" }],
 				rows: [[{ kind: "int", value: 1 }]],
 				rowsAffected: 0,
 				notices: [],
