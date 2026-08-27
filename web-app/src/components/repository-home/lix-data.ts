@@ -257,6 +257,7 @@ export function listDirectoryFromFiles(
 		if (slash === -1) {
 			if (rest.length === 0) continue;
 			childFiles.push({
+				id: file.id,
 				path: file.path,
 				name: rest,
 				updatedAt: "",
@@ -333,13 +334,6 @@ export function useRepositoryTree(
 	}, [dirs, files]);
 }
 
-/** Decides empty-repository routing only after the first complete tree frame. */
-export function initialRepositoryTreeIsEmpty(
-	tree: RepositoryTree | null,
-): boolean | null {
-	return tree === null ? null : tree.files.length === 0;
-}
-
 /**
  * Resolves a README-relative link against a directory. Returns null for
  * absolute/external/fragment hrefs (which keep default browser behavior).
@@ -379,6 +373,7 @@ type DirectoryListing = {
 		readonly hidden?: true;
 	}>;
 	readonly files: ReadonlyArray<{
+		readonly id: string;
 		readonly path: string;
 		readonly name: string;
 		readonly updatedAt: string;
@@ -429,6 +424,7 @@ export function listDirectory(
 	const files = visibleFiles
 		.filter((file) => file.directoryId === currentDirectoryId)
 		.map((file) => ({
+			id: file.id,
 			path: file.path,
 			name: file.name,
 			updatedAt: file.updatedAt,

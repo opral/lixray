@@ -8,6 +8,8 @@ import {
 	DEMO_ORGANIZATION_NAME,
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
+	DEMO_SECONDARY_LIX_ID,
+	DEMO_SECONDARY_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import type { PublicProfileActivity } from "../lib/profile-activity-aggregate.ts";
 import { isLixError } from "../mcp/lix-service.ts";
@@ -2554,17 +2556,19 @@ void test("Railway PR environments enable the built-in demo lix", async () => {
 	// Both naming schemes: configured "lixray-pr-<n>" and Railway's default
 	// "pr-<hash>-<n>" used for recreated PR environments.
 	for (const name of ["lixray-pr-91", "pr-11b179-85"]) {
-		const testEnv = env({
-			extra: { RAILWAY_ENVIRONMENT_NAME: name },
-		});
-		const response = await handleRequest(
-			new Request(`https://preview.example/lix/v1/${DEMO_LIX_ID}/`, {
-				headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
-			}),
-			testEnv,
-			{ lixFetch: async () => new Response("ok") },
-		);
-		assert.equal(response.status, 200, name);
+		for (const lixId of [DEMO_LIX_ID, DEMO_SECONDARY_LIX_ID]) {
+			const testEnv = env({
+				extra: { RAILWAY_ENVIRONMENT_NAME: name },
+			});
+			const response = await handleRequest(
+				new Request(`https://preview.example/lix/v1/${lixId}/`, {
+					headers: { Authorization: `Bearer ${DEMO_AUTH_TOKEN}` },
+				}),
+				testEnv,
+				{ lixFetch: async () => new Response("ok") },
+			);
+			assert.equal(response.status, 200, `${name}: ${lixId}`);
+		}
 	}
 });
 
@@ -2647,9 +2651,19 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 						},
 					},
 					{
+						id: DEMO_SECONDARY_LIX_ID,
+						name: DEMO_SECONDARY_LIX_NAME,
+						slug: DEMO_SECONDARY_LIX_NAME,
+						namespace: {
+							id: DEMO_ORGANIZATION_ID,
+							name: DEMO_ORGANIZATION_NAME,
+							handle: DEMO_ORGANIZATION_NAME,
+						},
+					},
+					{
 						id: LIX_A,
-						name: "demo-lix-2",
-						slug: "demo-lix-2",
+						name: "demo-lix-3",
+						slug: "demo-lix-3",
 						namespace: {
 							id: DEMO_ORGANIZATION_ID,
 							name: DEMO_ORGANIZATION_NAME,

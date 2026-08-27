@@ -13,6 +13,8 @@ import {
 	demoProfileDocument,
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
+	DEMO_SECONDARY_LIX_ID,
+	DEMO_SECONDARY_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import { isClearlyReadOnlySql } from "../lib/lix-sql-access.ts";
 import {
@@ -2003,14 +2005,20 @@ function authenticateDemo(request: Request, env: WorkerEnv): AuthResult | null {
 }
 
 function demoLixIds(env: WorkerEnv): Set<string> {
-	const lixIds = new Set(
-		(env.LIXRAY_DEMO_LIX_IDS ?? env.LIXRAY_DEMO_REPOSITORY_IDS ?? "")
-			.split(",")
-			.map((lixId) => lixId.trim())
-			.filter(Boolean),
-	);
-	if (lixIds.size === 0 && isDemoMode(env)) {
+	const lixIds = new Set<string>();
+	if (isDemoMode(env)) {
 		lixIds.add(DEMO_LIX_ID);
+		lixIds.add(DEMO_SECONDARY_LIX_ID);
+	}
+	for (const lixId of (
+		env.LIXRAY_DEMO_LIX_IDS ??
+		env.LIXRAY_DEMO_REPOSITORY_IDS ??
+		""
+	)
+		.split(",")
+		.map((lixId) => lixId.trim())
+		.filter(Boolean)) {
+		lixIds.add(lixId);
 	}
 	return lixIds;
 }
@@ -2018,8 +2026,18 @@ function demoLixIds(env: WorkerEnv): Set<string> {
 function demoLixSummaries(env: WorkerEnv): Array<LixSummary> {
 	return [...demoLixIds(env)].map((lixId, index) => ({
 		id: lixId,
-		name: lixId === DEMO_LIX_ID ? DEMO_LIX_NAME : `demo-lix-${index + 1}`,
-		slug: lixId === DEMO_LIX_ID ? DEMO_LIX_NAME : `demo-lix-${index + 1}`,
+		name:
+			lixId === DEMO_LIX_ID
+				? DEMO_LIX_NAME
+				: lixId === DEMO_SECONDARY_LIX_ID
+					? DEMO_SECONDARY_LIX_NAME
+					: `demo-lix-${index + 1}`,
+		slug:
+			lixId === DEMO_LIX_ID
+				? DEMO_LIX_NAME
+				: lixId === DEMO_SECONDARY_LIX_ID
+					? DEMO_SECONDARY_LIX_NAME
+					: `demo-lix-${index + 1}`,
 		namespace: {
 			id: DEMO_ORGANIZATION_ID,
 			name: DEMO_ORGANIZATION_NAME,

@@ -4,19 +4,18 @@ import {
 	type AtelierExtensionRuntime,
 	type AtelierExtensionView,
 } from "@opral/atelier";
-import { Folder, Home, Settings, Sparkles, Users } from "lucide-react";
+import { Folder, Home, Settings, Users } from "lucide-react";
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
-import { DirectoryView, GettingStartedView } from "./directory-view";
+import { DirectoryView } from "./directory-view";
 import { canonicalDirectoryPath, dirNameFromPath } from "./lix-data";
 import { PeopleView, type RepositoryTeamApi } from "./people-view";
 import { SettingsView, type RepositorySettingsApi } from "./settings-view";
 
 export const LIXRAY_HOME_EXTENSION_ID = "lixray_home";
 export const LIXRAY_DIR_EXTENSION_ID = "lixray_dir";
-export const LIXRAY_GETTING_STARTED_EXTENSION_ID = "lixray_getting_started";
 export const LIXRAY_PEOPLE_EXTENSION_ID = "lixray_people";
 export const LIXRAY_SETTINGS_EXTENSION_ID = "lixray_settings";
 
@@ -132,6 +131,15 @@ function openSqlExplorerFromView(atelier: AtelierExtensionRuntime) {
 	});
 }
 
+function openHistoryFromView(atelier: AtelierExtensionRuntime) {
+	// A normal central tab — the archive read, not the review mode.
+	void atelier.views
+		.open(ATELIER_BUILTIN_EXTENSION_IDS.history)
+		.catch((error: unknown) => {
+			console.error("repository-home: unable to open History", error);
+		});
+}
+
 function mountDirectoryView({
 	element,
 	atelier,
@@ -170,6 +178,7 @@ function mountDirectoryView({
 				<DirectoryView
 					lix={atelier.lix}
 					diffSession={runtime.diff?.session ?? null}
+					onOpenHistory={() => openHistoryFromView(runtime)}
 					{...(runtime.diff
 						? {
 								onOpenDiffFile: (path: string) => runtime.diff?.openFile(path),
@@ -212,20 +221,6 @@ function mountDirectoryView({
 										target: { working: true },
 										reveal: false,
 									}),
-							}
-						: {})}
-					{...(isHome
-						? {
-								onRepositoryEmpty: () => {
-									void runtime.views
-										.open(LIXRAY_GETTING_STARTED_EXTENSION_ID)
-										.catch((error: unknown) => {
-											console.error(
-												"repository-home: unable to open Getting started",
-												error,
-											);
-										});
-								},
 							}
 						: {})}
 				/>
@@ -323,49 +318,6 @@ const createLixrayDirExtension = (
 });
 
 /**
- * The Getting started tab (12f): a regular closable content tab the host
- * opens as the default active tab while the repository is empty. Home stays
- * the pinned first tab and never changes its presentation.
- */
-const createLixrayGettingStartedExtension = (
-	connection: LixRepositoryConnection,
-	hasAgentConnected: AgentConnectionProbe,
-): AtelierExtensionRegistration => ({
-	manifest: {
-		apiVersion: 1,
-		id: LIXRAY_GETTING_STARTED_EXTENSION_ID,
-		name: "Getting started",
-		description: "Connect an agent or start your first document.",
-		placement: ["central"],
-		hidden: true,
-	},
-	entry: {
-		icon: Sparkles,
-		mount: ({ element, atelier }) => {
-			const root = createRoot(element);
-			root.render(
-				<StrictMode>
-					<GettingStartedView
-						lix={atelier.lix}
-						readOnly={atelier.readOnly}
-						connection={connection}
-						hasAgentConnected={hasAgentConnected}
-						onOpenFile={(path, options) =>
-							openFileFromView(atelier, path, options)
-						}
-					/>
-				</StrictMode>,
-			);
-			return {
-				dispose: () => {
-					queueMicrotask(() => root.unmount());
-				},
-			};
-		},
-	},
-});
-
-/**
  * The People tab (3c): the namespace roster and invite link as a regular
  * closable content tab — tabs are the shell's only navigation primitive, so
  * People behaves like any file rather than a modal or standalone route shell.
@@ -442,7 +394,6 @@ export const createLixrayRepositoryExtensions = (
 ): readonly AtelierExtensionRegistration[] => [
 	createLixrayHomeExtension(connection, hasAgentConnected, teamApi, visibility),
 	createLixrayDirExtension(connection),
-	createLixrayGettingStartedExtension(connection, hasAgentConnected),
 	createLixrayPeopleExtension(teamApi),
 	createLixraySettingsExtension(settingsApi),
 ];

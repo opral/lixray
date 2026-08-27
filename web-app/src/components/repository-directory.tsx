@@ -454,6 +454,8 @@ function RepositoryRow({
 	return (
 		<div className="relative flex min-h-[60px] items-center rounded-[10px] px-3.5 transition-colors hover:bg-bg-hover focus-within:bg-bg-hover has-[[data-state=open]]:bg-bg-hover max-[560px]:px-2">
 			<Link
+				data-testid="repository-link"
+				data-repository-id={repository.id}
 				className="flex min-w-0 flex-1 items-center gap-3.5 rounded-lg py-[13px] text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
 				to="/@{$namespace}/$repository"
 				params={{ namespace: organization.handle, repository: repository.slug }}

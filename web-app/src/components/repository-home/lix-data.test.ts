@@ -9,7 +9,6 @@ import {
 	createRepositoryFile,
 	createRepositoryFolder,
 	importDroppedFiles,
-	initialRepositoryTreeIsEmpty,
 	listDirectory,
 	persistedDirectoryPath,
 	resolveRepositoryHref,
@@ -56,12 +55,6 @@ const tree: RepositoryTree = {
 	],
 };
 
-void test("decides empty routing only from a complete initial tree", () => {
-	assert.equal(initialRepositoryTreeIsEmpty(null), null);
-	assert.equal(initialRepositoryTreeIsEmpty(tree), false);
-	assert.equal(initialRepositoryTreeIsEmpty({ dirs: [], files: [] }), true);
-});
-
 void test("keeps checkpoint dates bounded while returning the total count", () => {
 	assert.match(CHECKPOINT_SUMMARY_SQL, /count\(\*\) over \(\) AS total_count/i);
 	assert.match(CHECKPOINT_SUMMARY_SQL, /LIMIT 10$/i);
@@ -102,8 +95,8 @@ void test("lists directory entries from their separate surfaces", () => {
 		["/docs"],
 	);
 	assert.deepEqual(
-		listing.files.map((entry) => entry.path),
-		["/README.md"],
+		listing.files.map((entry) => ({ id: entry.id, path: entry.path })),
+		[{ id: "readme", path: "/README.md" }],
 	);
 });
 

@@ -6,6 +6,8 @@ export const DEMO_PROFILE_HANDLE = "samuel";
 export const DEMO_PROFILE_NAME = "Samuel Stroschein";
 export const DEMO_LIX_ID = "00000000-0000-4000-8000-000000000002";
 export const DEMO_LIX_NAME = "launch-q3";
+export const DEMO_SECONDARY_LIX_ID = "00000000-0000-4000-8000-000000000005";
+export const DEMO_SECONDARY_LIX_NAME = "research-notes";
 export const DEMO_CREATED_REPOSITORY_ID =
 	"00000000-0000-4000-8000-000000000003";
 

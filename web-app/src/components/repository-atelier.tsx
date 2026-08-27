@@ -725,6 +725,7 @@ export function RepositoryAtelier({
 	// view is already active — e.g. a forked folder tab) from outside ones
 	// (deep link, back/forward), which must hydrate the Home surface.
 	const shellDirNavigationRef = useRef<string | null>(null);
+	const [reviewFocusActive, setReviewFocusActive] = useState(false);
 	const consumeShellDirNavigation = useCallback((dirPath: string) => {
 		const matches = shellDirNavigationRef.current === dirPath;
 		shellDirNavigationRef.current = null;
@@ -733,6 +734,12 @@ export function RepositoryAtelier({
 	useEffect(() => {
 		eventHandlerRef.current = (event) => {
 			atelierTelemetryHandlerRef.current?.(event);
+			if (event.type === "diff_session_changed") {
+				// Review focus: chrome outside the changes (the brand and
+				// repository selector) recedes with the rest of the page.
+				setReviewFocusActive(event.active && event.changedFileCount > 0);
+				return;
+			}
 			if (event.type !== "central_view_activated") return;
 			if (!routeSyncedRef.current) return;
 			// Any activation supersedes an unconsumed dir-navigation marker.
@@ -897,6 +904,16 @@ export function RepositoryAtelier({
 				setMigration(null);
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
 				activeLixRef.current = session;
+				if (import.meta.env.DEV) {
+					// Dev-only escape hatch: lets the console (and agents driving
+					// the browser) run SQL against the open repository directly.
+					(window as { __lix?: unknown }).__lix = session.lix;
+					console.info(
+						"[lixray] window.__lix exposes this repository for debugging: " +
+							'await __lix.execute("SELECT …") — read row columns with ' +
+							'.get("col"). Prefer this over driving the SQL Explorer UI.',
+					);
+				}
 				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
 
 				// Initialize telemetry handler with repository context
@@ -954,7 +971,9 @@ export function RepositoryAtelier({
 							return data.length > 0;
 						},
 						canEdit ? stableTeamApiRef.current : null,
-						canEdit ? stableSettingsApiRef.current : null,
+						canEdit && !isDemoModeEnabled && client
+							? stableSettingsApiRef.current
+							: null,
 						repositoryVisibility,
 					),
 					centralPanel: {
@@ -1103,6 +1122,7 @@ export function RepositoryAtelier({
 
 	const navbarBrand = (
 		<RepositoryNavbarBrand
+			dimmed={reviewFocusActive}
 			signedIn={Boolean(user)}
 			namespaceId={namespaceId}
 			namespaceHandle={namespace}
@@ -1396,15 +1416,22 @@ function RepositoryNavbarBrand({
 	namespaceHandle,
 	repositoryName,
 	repositorySlug,
+	dimmed = false,
 }: {
 	signedIn: boolean;
 	namespaceId: string;
 	namespaceHandle: string;
 	repositoryName: string;
 	repositorySlug: string;
+	/** Review focus: the brand and selector recede; hover restores them. */
+	dimmed?: boolean;
 }) {
 	return (
-		<span className="flex min-w-0 items-center gap-2">
+		<span
+			className={`flex min-w-0 items-center gap-2 transition-opacity${
+				dimmed ? " opacity-[0.35] hover:opacity-100" : ""
+			}`}
+		>
 			<a
 				href={signedIn ? "/home" : "/"}
 				aria-label="LixRay home"

@@ -14,6 +14,8 @@ import {
 	DEMO_ORGANIZATION_NAME,
 	DEMO_LIX_ID,
 	DEMO_LIX_NAME,
+	DEMO_SECONDARY_LIX_ID,
+	DEMO_SECONDARY_LIX_NAME,
 } from "~/lib/demo-identity";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import {
@@ -498,9 +500,41 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 				role: "admin",
 				visibility: "public",
 			},
+			{
+				id: DEMO_SECONDARY_LIX_ID,
+				organizationId: DEMO_ORGANIZATION_ID,
+				name: DEMO_SECONDARY_LIX_NAME,
+				slug: DEMO_SECONDARY_LIX_NAME,
+				createdAt: "2026-07-02T12:00:00.000Z",
+				updatedAt: "2026-07-12T18:58:00.000Z",
+				role: "admin",
+				visibility: "public",
+			},
 		],
 	}));
-	const [selectedRepositoryId, setSelectedRepositoryId] = useState(DEMO_LIX_ID);
+	const [selectedRepositoryId, setSelectedRepositoryId] = useState(() => {
+		if (typeof window === "undefined") return DEMO_LIX_ID;
+		try {
+			const stored = window.localStorage.getItem(
+				"lixray:demo-active-repository:v1",
+			);
+			return stored === DEMO_SECONDARY_LIX_ID ? stored : DEMO_LIX_ID;
+		} catch {
+			return DEMO_LIX_ID;
+		}
+	});
+	const selectRepository = (repositoryId: string) => {
+		try {
+			window.localStorage.setItem(
+				"lixray:demo-active-repository:v1",
+				repositoryId,
+			);
+		} catch {
+			// Storage can be unavailable in restricted browser contexts. The
+			// current page can still switch repositories normally.
+		}
+		setSelectedRepositoryId(repositoryId);
+	};
 	const selectedRepository =
 		organization.repositories.find(
 			(repository) => repository.id === selectedRepositoryId,
@@ -535,7 +569,7 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 				repository,
 			],
 		}));
-		setSelectedRepositoryId(repository.id);
+		selectRepository(repository.id);
 		return Promise.resolve();
 	};
 	const value: RepositoryContextValue = {
@@ -548,7 +582,7 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 			: null,
 		refresh: () => Promise.resolve(),
 		selectOrganization: () => undefined,
-		selectRepository: setSelectedRepositoryId,
+		selectRepository,
 		createOrganization: unsupported,
 		renameOrganization: unsupported,
 		createRepository,
