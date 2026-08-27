@@ -481,11 +481,15 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			right.getByTestId("home-entry-list").waitFor({ timeout: 120_000 }),
 		]);
 		const initialLeftHistory = await openHistoryPanel(left);
-		const initialCheckpointCount = await initialLeftHistory
+		const initialCheckpointRows = initialLeftHistory
 			.getByRole("list", { name: "Checkpoints" })
-			.locator(":scope > li")
-			.count();
-		expect(initialCheckpointCount).toBeGreaterThan(0);
+			.locator(":scope > li");
+		await expect
+			.poll(() => initialCheckpointRows.count(), {
+				timeout: repositoryOperationTimeout,
+			})
+			.toBeGreaterThan(0);
+		const initialCheckpointCount = await initialCheckpointRows.count();
 		if (initialCheckpointCount > 1) {
 			// A historical snapshot read must not monopolize the live repository
 			// after its view closes. Exit immediately, while cold content may still
