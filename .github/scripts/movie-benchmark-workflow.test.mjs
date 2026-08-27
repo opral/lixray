@@ -14,7 +14,9 @@ const workflow = readFileSync(
 );
 
 test("movie qualification requires an existing canonical Lix", () => {
-  assert.match(workflow, /\^\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}/);
+	assert.match(workflow, /\^\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}/);
+	assert.match(workflow, /vars\.MOVIE_BENCHMARK_LIX_ID/);
+	assert.match(workflow, /REQUESTED_LIX_ID" != "\$ALLOWED_LIX_ID/);
 	assert.match(workflow, /from public\.lixes where id/);
 	assert.match(workflow, /deleted_at is null/);
   assert.match(workflow, /\.\[0\]\.exists == true/);

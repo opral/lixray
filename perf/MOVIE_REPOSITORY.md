@@ -18,6 +18,10 @@ segments so each invocation remains inside CI's execution ceiling. Segments
 must run sequentially against one fresh repository; the last segment extends
 the resulting history to exactly 5,000 commits and verifies the final count:
 
+The production environment must set `MOVIE_BENCHMARK_LIX_ID` to the UUID of a
+dedicated, existing benchmark Lix. The workflow rejects every other Lix ID and
+also verifies that the allowlisted Lix remains active in the control plane.
+
 ```sh
 LIXRAY_INTERNAL_TOKEN=... pnpm perf:movie:remote -- \
   --url https://lix-server.example \

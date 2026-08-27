@@ -63,12 +63,21 @@ jobs:
         id: target
         shell: bash
         env:
+          ALLOWED_LIX_ID: ${{ vars.MOVIE_BENCHMARK_LIX_ID }}
           REQUESTED_LIX_ID: ${{ inputs.lix-id }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: |
           if [[ ! "$REQUESTED_LIX_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
             echo "lix-id must be a canonical lowercase UUID" >&2
+            exit 2
+          fi
+          if [[ ! "$ALLOWED_LIX_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+            echo "the production environment must configure MOVIE_BENCHMARK_LIX_ID" >&2
+            exit 2
+          fi
+          if [[ "$REQUESTED_LIX_ID" != "$ALLOWED_LIX_ID" ]]; then
+            echo "lix-id is not the allowlisted production movie benchmark Lix" >&2
             exit 2
           fi
           test -n "$SUPABASE_ACCESS_TOKEN"
