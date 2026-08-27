@@ -2,6 +2,8 @@ import {
 	openLix,
 	type ExecuteResult as LixExecuteResult,
 	type Lix,
+	type ResultArrayRow,
+	type ResultColumnType,
 	type SqlParam,
 	Value,
 } from "@lix-js/sdk";
@@ -184,7 +186,7 @@ export function useLixrayApi() {
 								await lix.execute(
 									body.sql,
 									(body.params ?? []).map(toSqlParam),
-									body.options,
+									{ ...body.options, rowMode: "array" },
 								),
 							),
 						],
@@ -202,7 +204,7 @@ export function useLixrayApi() {
 									sql: statement.sql,
 									params: (statement.params ?? []).map(toSqlParam),
 								})),
-								body.options,
+								{ ...body.options, rowMode: "array" },
 							)
 						).map(toWireResult),
 					};
@@ -211,11 +213,10 @@ export function useLixrayApi() {
 				serialized(async (lix) => ({
 					results: [
 						toWireResult(
-							await lix.execute(
-								body.sql,
-								(body.params ?? []).map(toSqlParam),
-								body.options,
-							),
+							await lix.execute(body.sql, (body.params ?? []).map(toSqlParam), {
+								...body.options,
+								rowMode: "array",
+							}),
 						),
 					],
 				})),
@@ -227,7 +228,7 @@ export function useLixrayApi() {
 								sql: statement.sql,
 								params: (statement.params ?? []).map(toSqlParam),
 							})),
-							body.options,
+							{ ...body.options, rowMode: "array" },
 						)
 					).map(toWireResult),
 				})),
@@ -254,12 +255,14 @@ function toSqlParam(value: WireValue): SqlParam {
 	}
 }
 
-function toWireResult(result: LixExecuteResult): ExecuteResponse {
+function toWireResult(
+	result: LixExecuteResult<ResultArrayRow>,
+): ExecuteResponse {
 	return {
 		columns: result.columns.map((column) => column.name),
 		rows: result.rows.map((row) =>
-			result.columns.map((column) =>
-				toWireValue(row[column.name], column.type),
+			result.columns.map((column, index) =>
+				toWireValue(row[index], column.type),
 			),
 		),
 		rowsAffected: result.rowsAffected,
@@ -267,10 +270,7 @@ function toWireResult(result: LixExecuteResult): ExecuteResponse {
 	};
 }
 
-function toWireValue(
-	value: unknown,
-	kind: LixExecuteResult["columns"][number]["type"],
-): WireValue {
+function toWireValue(value: unknown, kind: ResultColumnType): WireValue {
 	if (value === null) return { kind: "null", value: null };
 	switch (kind) {
 		case "null":

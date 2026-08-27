@@ -472,9 +472,10 @@ export function useFileMarkdown(
 	);
 	return useMemo(() => {
 		if (!path || !rows || rows.length === 0) return null;
-		const row = rows[0];
-		const content = row?.content;
-		if (content instanceof Uint8Array) return new TextDecoder().decode(content);
+		const content = rows[0]?.content;
+		if (content instanceof Uint8Array) {
+			return new TextDecoder().decode(content);
+		}
 		if (typeof content === "string") return content;
 		return null;
 	}, [path, rows]);
