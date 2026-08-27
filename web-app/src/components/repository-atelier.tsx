@@ -908,6 +908,11 @@ export function RepositoryAtelier({
 					// Dev-only escape hatch: lets the console (and agents driving
 					// the browser) run SQL against the open repository directly.
 					(window as { __lix?: unknown }).__lix = session.lix;
+					console.info(
+						"[lixray] window.__lix exposes this repository for debugging: " +
+							'await __lix.execute("SELECT …") — read row columns with ' +
+							'.get("col"). Prefer this over driving the SQL Explorer UI.',
+					);
 				}
 				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
 
