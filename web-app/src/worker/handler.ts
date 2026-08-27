@@ -647,149 +647,157 @@ export async function handleRequest(
 
 	const remoteLixMatch = REMOTE_LIX_API_PATH.exec(url.pathname);
 	if (remoteLixMatch) {
-		const serverTimings: ServerTimingMetric[] = [];
-		const namespace = normalizedRouteSegment(remoteLixMatch[1]);
-		const lixSlug = normalizedRouteSegment(remoteLixMatch[2]);
-		if (
-			!namespace ||
-			!lixSlug ||
-			!ORGANIZATION_HANDLE_PATTERN.test(namespace) ||
-			!LIX_SLUG_PATTERN.test(lixSlug)
-		) {
-			return new Response("Invalid lix path\n", { status: 400 });
-		}
+		if (request.method === "OPTIONS") return remoteLixCorsPreflight(request);
+		const response = await (async () => {
+			const serverTimings: ServerTimingMetric[] = [];
+			const namespace = normalizedRouteSegment(remoteLixMatch[1]);
+			const lixSlug = normalizedRouteSegment(remoteLixMatch[2]);
+			if (
+				!namespace ||
+				!lixSlug ||
+				!ORGANIZATION_HANDLE_PATTERN.test(namespace) ||
+				!LIX_SLUG_PATTERN.test(lixSlug)
+			) {
+				return new Response("Invalid lix path\n", { status: 400 });
+			}
 
-		const endpoint = remoteLixMatch[3]?.replace(/\/+$/, "") ?? "";
-		const protocolPath = `/lix/v1${endpoint ? `/${endpoint}` : "/"}`;
-		const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
-		const publicPath =
-			(endpoint === "file" || endpoint === "published-directory"
-				? url.searchParams.get("path")
-				: request.headers.get("x-lixray-public-path")) ?? undefined;
+			const endpoint = remoteLixMatch[3]?.replace(/\/+$/, "") ?? "";
+			const protocolPath = `/lix/v1${endpoint ? `/${endpoint}` : "/"}`;
+			const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
+			const publicPath =
+				(endpoint === "file" || endpoint === "published-directory"
+					? url.searchParams.get("path")
+					: request.headers.get("x-lixray-public-path")) ?? undefined;
 
-		const authenticate = options.authenticate ?? authenticateWithSupabase;
-		const authCheckStartedAt = performance.now();
-		if (bearerToken(request)) {
-			const authResult = await measureServerTiming(
-				serverTimings,
-				"lixray-web-auth",
-				() => authenticate(request, env),
-			);
-			if (authResult.ok) {
-				const resolution = await measureServerTiming(
+			const authenticate = options.authenticate ?? authenticateWithSupabase;
+			const authCheckStartedAt = performance.now();
+			if (bearerToken(request)) {
+				const authResult = await measureServerTiming(
 					serverTimings,
-					"lixray-web-resolve",
-					() =>
-						(options.resolveLix ?? resolveLixWithSupabase)(
-							namespace,
-							lixSlug,
-							authResult.auth,
-							env,
-						),
+					"lixray-web-auth",
+					() => authenticate(request, env),
 				);
-				if (resolution.ok) {
-					const response = await measureServerTiming(
+				if (authResult.ok) {
+					const resolution = await measureServerTiming(
+						serverTimings,
+						"lixray-web-resolve",
+						() =>
+							(options.resolveLix ?? resolveLixWithSupabase)(
+								namespace,
+								lixSlug,
+								authResult.auth,
+								env,
+							),
+					);
+					if (resolution.ok) {
+						const response = await measureServerTiming(
+							serverTimings,
+							"lixray-server-roundtrip",
+							() =>
+								fetchLixRequest(
+									resolution.lixId,
+									request,
+									protocolPath,
+									env,
+									options,
+									authResult.auth.userId,
+								),
+						);
+						return withServerTimings(response, serverTimings);
+					}
+					// A signed-in non-member falls through to the public read
+					// transport instead of a dead end.
+					if (!publicReadRequest) {
+						return withServerTimings(resolution.response, serverTimings);
+					}
+				} else {
+					// A bearer token was supplied but could not be authenticated. Do not
+					// downgrade this request to public transport: an expired token must
+					// remain distinguishable from a valid non-member public reader.
+					return withServerTimings(authResult.response, serverTimings);
+				}
+			} else if (!publicReadRequest) {
+				serverTimings.push({
+					name: "lixray-web-auth",
+					durationMs: performance.now() - authCheckStartedAt,
+				});
+				return withServerTimings(unauthorized().response, serverTimings);
+			}
+
+			const publicResolution = await measureServerTiming(
+				serverTimings,
+				"lixray-web-resolve",
+				() =>
+					(options.resolvePublicLix ?? resolvePublicLixWithSupabase)(
+						namespace,
+						lixSlug,
+						env,
+						publicPath,
+					),
+			);
+			if (!publicResolution.ok) {
+				return withServerTimings(publicResolution.response, serverTimings);
+			}
+			if (
+				publicResolution.scope === "path" &&
+				!(
+					!endpoint ||
+					endpoint === "session" ||
+					endpoint === "file" ||
+					endpoint === "published-directory"
+				)
+			) {
+				return withServerTimings(lixNotFound().response, serverTimings);
+			}
+			if (endpoint === "published-directory") {
+				if (!publicPath || !options.lixFetch) {
+					return withServerTimings(lixNotFound().response, serverTimings);
+				}
+				try {
+					const listing = await measureServerTiming(
 						serverTimings,
 						"lixray-server-roundtrip",
 						() =>
-							fetchLixRequest(
-								resolution.lixId,
-								request,
-								protocolPath,
+							listPublishedDirectory(
+								publicResolution.lixId,
+								publicPath,
 								env,
-								options,
-								authResult.auth.userId,
+								options.lixFetch as NonNullable<
+									HandleRequestOptions["lixFetch"]
+								>,
+								request.signal,
 							),
 					);
-					return withServerTimings(response, serverTimings);
+					return withServerTimings(json(listing), serverTimings);
+				} catch (caught) {
+					console.error("Unable to list a published directory", caught);
+					return withServerTimings(
+						new Response("Published directory is unavailable\n", {
+							status: 502,
+						}),
+						serverTimings,
+					);
 				}
-				// A signed-in non-member falls through to the public read
-				// transport instead of a dead end.
-				if (!publicReadRequest) {
-					return withServerTimings(resolution.response, serverTimings);
-				}
-			} else {
-				// A bearer token was supplied but could not be authenticated. Do not
-				// downgrade this request to public transport: an expired token must
-				// remain distinguishable from a valid non-member public reader.
-				return withServerTimings(authResult.response, serverTimings);
 			}
-		} else if (!publicReadRequest) {
-			serverTimings.push({
-				name: "lixray-web-auth",
-				durationMs: performance.now() - authCheckStartedAt,
-			});
-			return withServerTimings(unauthorized().response, serverTimings);
-		}
-
-		const publicResolution = await measureServerTiming(
-			serverTimings,
-			"lixray-web-resolve",
-			() =>
-				(options.resolvePublicLix ?? resolvePublicLixWithSupabase)(
-					namespace,
-					lixSlug,
-					env,
-					publicPath,
-				),
-		);
-		if (!publicResolution.ok) {
-			return withServerTimings(publicResolution.response, serverTimings);
-		}
-		if (
-			publicResolution.scope === "path" &&
-			!(
-				!endpoint ||
-				endpoint === "session" ||
-				endpoint === "file" ||
-				endpoint === "published-directory"
-			)
-		) {
-			return withServerTimings(lixNotFound().response, serverTimings);
-		}
-		if (endpoint === "published-directory") {
-			if (!publicPath || !options.lixFetch) {
-				return withServerTimings(lixNotFound().response, serverTimings);
+			const mutationRejection = await rejectPublicMutation(request, endpoint);
+			if (mutationRejection) {
+				return withServerTimings(mutationRejection, serverTimings);
 			}
-			try {
-				const listing = await measureServerTiming(
-					serverTimings,
-					"lixray-server-roundtrip",
-					() =>
-						listPublishedDirectory(
-							publicResolution.lixId,
-							publicPath,
-							env,
-							options.lixFetch as NonNullable<HandleRequestOptions["lixFetch"]>,
-							request.signal,
-						),
-				);
-				return withServerTimings(json(listing), serverTimings);
-			} catch (caught) {
-				console.error("Unable to list a published directory", caught);
-				return withServerTimings(
-					new Response("Published directory is unavailable\n", { status: 502 }),
-					serverTimings,
-				);
-			}
-		}
-		const mutationRejection = await rejectPublicMutation(request, endpoint);
-		if (mutationRejection) {
-			return withServerTimings(mutationRejection, serverTimings);
-		}
-		const response = await measureServerTiming(
-			serverTimings,
-			"lixray-server-roundtrip",
-			() =>
-				fetchLixRequest(
-					publicResolution.lixId,
-					request,
-					protocolPath,
-					env,
-					options,
-				),
-		);
-		return withServerTimings(response, serverTimings);
+			const response = await measureServerTiming(
+				serverTimings,
+				"lixray-server-roundtrip",
+				() =>
+					fetchLixRequest(
+						publicResolution.lixId,
+						request,
+						protocolPath,
+						env,
+						options,
+					),
+			);
+			return withServerTimings(response, serverTimings);
+		})();
+		return withRemoteLixCors(response, request);
 	}
 
 	return (
@@ -2156,6 +2164,41 @@ function corsPreflight(): Response {
 				"Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Param-*",
 			"access-control-max-age": "86400",
 		},
+	});
+}
+
+function remoteLixCorsPreflight(request: Request): Response {
+	const origin = request.headers.get("origin") ?? "*";
+	return new Response(null, {
+		status: 204,
+		headers: {
+			"access-control-allow-origin": origin,
+			"access-control-allow-credentials": "true",
+			"access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+			"access-control-allow-headers":
+				"Authorization, Content-Type, Lix-Client-Id, Lix-Session-Id, Lix-Sync-Protocol-Version, Last-Event-ID",
+			"access-control-max-age": "86400",
+			vary: "Origin",
+		},
+	});
+}
+
+function withRemoteLixCors(response: Response, request: Request): Response {
+	const origin = request.headers.get("origin");
+	if (!origin) return response;
+	const headers = new Headers(response.headers);
+	headers.set("access-control-allow-origin", origin);
+	headers.set("access-control-allow-credentials", "true");
+	const vary = headers.get("vary");
+	if (
+		!vary?.split(",").some((value) => value.trim().toLowerCase() === "origin")
+	) {
+		headers.set("vary", vary ? `${vary}, Origin` : "Origin");
+	}
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
 	});
 }
 

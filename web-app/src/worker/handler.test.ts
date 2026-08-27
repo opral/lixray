@@ -1546,6 +1546,30 @@ void test("legacy unscoped /v1 routes return 404 before auth", async () => {
 	assert.equal(response.status, 404);
 });
 
+void test("remote sync CORS permits protocol, session, and chunk headers", async () => {
+	const response = await handleRequest(
+		remoteLixRequest("/sync/chunk", {
+			method: "OPTIONS",
+			headers: { origin: "https://atelier-preview.test" },
+		}),
+		env({}),
+	);
+
+	assert.equal(response.status, 204);
+	assert.equal(
+		response.headers.get("access-control-allow-origin"),
+		"https://atelier-preview.test",
+	);
+	assert.match(
+		response.headers.get("access-control-allow-methods") ?? "",
+		/PUT/,
+	);
+	const allowedHeaders =
+		response.headers.get("access-control-allow-headers") ?? "";
+	assert.match(allowedHeaders, /Lix-Session-Id/i);
+	assert.match(allowedHeaders, /Lix-Sync-Protocol-Version/i);
+});
+
 void test("canonical Lix protocol is authenticated, resolved, and forwarded unchanged", async () => {
 	const body = {
 		statements: [{ sql: "SELECT $1", params: [{ kind: "int", value: 1 }] }],
@@ -1562,6 +1586,7 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 			method: "POST",
 			headers: {
 				Authorization: "Bearer user-token",
+				origin: "https://atelier-preview.test",
 				"content-type": "application/json",
 				"Lix-Session-Id": "server-issued-session",
 				"Idempotency-Key": "client-retry-key",
@@ -1592,6 +1617,15 @@ void test("canonical Lix protocol is authenticated, resolved, and forwarded unch
 	assert.match(serverTiming, /lixray-web-auth;dur=\d+\.\d{3}/);
 	assert.match(serverTiming, /lixray-web-resolve;dur=\d+\.\d{3}/);
 	assert.match(serverTiming, /lixray-server-roundtrip;dur=\d+\.\d{3}/);
+	assert.equal(
+		response.headers.get("access-control-allow-origin"),
+		"https://atelier-preview.test",
+	);
+	assert.equal(
+		response.headers.get("access-control-allow-credentials"),
+		"true",
+	);
+	assert.match(response.headers.get("vary") ?? "", /Origin/);
 	assert.ok(proxiedRequest);
 	assert.equal(new URL(proxiedRequest.url).pathname, "/lix/v1/execute-batch");
 	assert.equal(proxiedRequest.headers.get("authorization"), null);
