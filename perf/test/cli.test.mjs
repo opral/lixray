@@ -5,6 +5,10 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 const runner = resolve(import.meta.dirname, "../runner.mjs");
+const movieRunner = resolve(
+  import.meta.dirname,
+  "../movie/remote-qualification.mjs",
+);
 const testLixId = "11111111-1111-4111-8111-111111111111";
 
 test("accepts the separator forwarded by pnpm scripts", () => {
@@ -31,6 +35,26 @@ test("requires a canonical Lix UUID", () => {
       "read-point-4k",
     ],
     { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--repository must be a canonical Lix UUID/);
+});
+
+test("remote movie qualification requires a canonical Lix UUID", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      movieRunner,
+      "--url",
+      "https://lix-server.example",
+      "--repository",
+      "1111111--111-4111-8111-111111111111",
+    ],
+    {
+      encoding: "utf8",
+      env: { ...process.env, LIXRAY_INTERNAL_TOKEN: "test-token" },
+    },
   );
 
   assert.equal(result.status, 1);

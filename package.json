@@ -7,7 +7,7 @@
     "dev:reset-onboarding": "node scripts/reset-onboarding.mjs",
     "test:e2e": "pnpm --dir web-app test:e2e",
     "perf:build": "docker build -f lix-server/Dockerfile -t lixray-perf .",
-    "perf:up": "docker compose up --build -d lix-server",
+    "perf:up": "LIXRAY_STORAGE_PREFIX=local/perf docker compose up --build -d lix-server",
     "perf:down": "docker compose down",
     "perf:reset": "docker compose rm --stop --force lix-server && docker compose run --rm storage-reset",
     "perf:run": "node perf/runner.mjs",

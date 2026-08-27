@@ -221,8 +221,8 @@ docker compose stop -t 30 lix-server
 docker compose run --rm --no-deps --entrypoint /bin/sh minio-init -c \
   'mc alias set local http://minio:9000 lixray lixray-local-secret &&
    mc mirror \
-     local/lixray/local/11111111-1111-4111-8111-111111111111/ \
-     local/lixray/local/22222222-2222-4222-8222-222222222222/'
+     local/lixray/local/perf/11111111-1111-4111-8111-111111111111/ \
+     local/lixray/local/perf/22222222-2222-4222-8222-222222222222/'
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
