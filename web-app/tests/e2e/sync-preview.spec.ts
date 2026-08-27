@@ -293,22 +293,15 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		};
 		const createFileFromHome = async (
 			page: Page,
-			buttonName: string,
+			extension: "md" | "csv" | "excalidraw",
 		): Promise<void> => {
 			await openHome(page);
 			const homeUrl = page.url();
 			if (await page.getByTestId("home-getting-started").isVisible()) {
-				const onboardingButtonName = buttonName
-					.replace(/^New /, "")
-					.replace(/ \(\.[^)]+\)$/, "");
-				await page
-					.getByRole("button", { name: onboardingButtonName, exact: true })
-					.click();
+				await page.getByTestId(`home-create-file-${extension}`).click();
 			} else {
 				await page.getByTestId("home-new-button").click();
-				await page
-					.getByRole("button", { name: buttonName, exact: true })
-					.click();
+				await page.getByTestId(`home-create-file-${extension}`).click();
 			}
 			await expect(page).not.toHaveURL(homeUrl, {
 				timeout: repositoryOperationTimeout,
@@ -470,7 +463,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		).toBe(false);
 
 		if (!(await left.getByTestId("home-entry-list").isVisible())) {
-			await createFileFromHome(left, "New Markdown (.md)");
+			await createFileFromHome(left, "md");
 			await right
 				.getByTestId("home-getting-started")
 				.waitFor({ state: "hidden", timeout: repositoryOperationTimeout });
@@ -532,9 +525,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 
 		const fileIdsBeforeCreatedFile = await homeFileIds(left);
 		await right.getByTestId("home-new-button").click();
-		await right
-			.getByRole("button", { name: "New Markdown (.md)", exact: true })
-			.click();
+		await right.getByTestId("home-create-file-md").click();
 		const rightEditor = right.locator(
 			'.ProseMirror[contenteditable="true"]:visible',
 		);
@@ -694,16 +685,19 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		// authority ref-CAS and then reconcile; both replicas must retain both rows.
 		const fileIdsBeforeConcurrentCreates = await homeFileIds(fresh);
 		await Promise.all([
-			createFileFromHome(left, "New Markdown (.md)"),
-			createFileFromHome(right, "New CSV (.csv)"),
+			createFileFromHome(left, "md"),
+			createFileFromHome(right, "csv"),
 		]);
-		await Promise.all([left.goto(repositoryUrl), right.goto(repositoryUrl)]);
 		const concurrentFileIds = await waitForNewHomeFileIds(
 			fresh,
 			fileIdsBeforeConcurrentCreates,
 			2,
 			30_000,
 		);
+		// Keep both writers alive until their expected ref-CAS conflicts have
+		// rebased and reached an independent replica. Navigating earlier aborts
+		// the retry loop and turns this into a lifecycle race instead of a sync gate.
+		await Promise.all([left.goto(repositoryUrl), right.goto(repositoryUrl)]);
 		for (const page of [left, right]) {
 			for (const fileId of concurrentFileIds) {
 				await expect(homeFileEntry(page, fileId)).toBeVisible({
@@ -913,7 +907,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				.locator(":scope > li"),
 		).toHaveCount(initialCheckpointCount + 1);
 		const fileIdsBeforeAfterReopenCreate = await homeFileIds(fresh);
-		await createFileFromHome(left, "New Markdown (.md)");
+		await createFileFromHome(left, "md");
 		const [afterReopenFileId] = await waitForNewHomeFileIds(
 			fresh,
 			fileIdsBeforeAfterReopenCreate,

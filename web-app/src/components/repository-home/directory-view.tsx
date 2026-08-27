@@ -1561,9 +1561,24 @@ function ReadmePreview({
 }
 
 const NEW_FILE_KINDS = [
-	{ extension: "md", label: "New Markdown", hint: "(.md)" },
-	{ extension: "csv", label: "New CSV", hint: "(.csv)" },
-	{ extension: "excalidraw", label: "New Drawing", hint: "(.excalidraw)" },
+	{
+		extension: "md",
+		label: "New Markdown",
+		hint: "(.md)",
+		testId: "home-create-file-md",
+	},
+	{
+		extension: "csv",
+		label: "New CSV",
+		hint: "(.csv)",
+		testId: "home-create-file-csv",
+	},
+	{
+		extension: "excalidraw",
+		label: "New Drawing",
+		hint: "(.excalidraw)",
+		testId: "home-create-file-excalidraw",
+	},
 ] as const;
 
 function NewMenu({
@@ -1635,6 +1650,7 @@ function NewMenu({
 							}
 							label={kind.label}
 							hint={kind.hint}
+							testId={kind.testId}
 							onClick={() => {
 								setOpen(false);
 								onCreateFile(kind.extension);
@@ -1756,17 +1772,20 @@ function MenuItem({
 	label,
 	hint,
 	shortcut,
+	testId,
 	onClick,
 }: {
 	readonly icon: ReactNode;
 	readonly label: string;
 	readonly hint?: string;
 	readonly shortcut?: string;
+	readonly testId?: string;
 	readonly onClick: () => void;
 }) {
 	return (
 		<button
 			type="button"
+			data-testid={testId}
 			onClick={onClick}
 			className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] leading-none font-medium text-text-primary hover:bg-bg-hover"
 		>
@@ -1900,6 +1919,7 @@ function GettingStarted({
 							<button
 								key={kind.extension}
 								type="button"
+								data-testid={kind.testId}
 								onClick={() => onCreateFile(kind.extension)}
 								className="inline-flex items-center gap-2 rounded-[9px] bg-bg-hover px-3.5 py-2.5 text-[13px] font-semibold text-text-secondary hover:bg-bg-active"
 							>
