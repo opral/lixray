@@ -1546,6 +1546,30 @@ void test("legacy unscoped /v1 routes return 404 before auth", async () => {
 	assert.equal(response.status, 404);
 });
 
+void test("remote sync CORS permits protocol, session, and chunk headers", async () => {
+	const response = await handleRequest(
+		remoteLixRequest("/sync/chunk", {
+			method: "OPTIONS",
+			headers: { origin: "https://atelier-preview.test" },
+		}),
+		env({}),
+	);
+
+	assert.equal(response.status, 204);
+	assert.equal(
+		response.headers.get("access-control-allow-origin"),
+		"https://atelier-preview.test",
+	);
+	assert.match(
+		response.headers.get("access-control-allow-methods") ?? "",
+		/PUT/,
+	);
+	const allowedHeaders =
+		response.headers.get("access-control-allow-headers") ?? "";
+	assert.match(allowedHeaders, /Lix-Session-Id/i);
+	assert.match(allowedHeaders, /Lix-Sync-Protocol-Version/i);
+});
+
 void test("canonical Lix protocol is authenticated, resolved, and forwarded unchanged", async () => {
 	const body = {
 		statements: [{ sql: "SELECT $1", params: [{ kind: "int", value: 1 }] }],
