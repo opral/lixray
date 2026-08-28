@@ -941,6 +941,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		await left
 			.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
 			.click();
+		await left.getByRole("checkbox", { name: "All files" }).click();
 		await left.getByTestId(`diff-scope-file:${afterReopenFileId}`).click();
 		await left.getByRole("button", { name: "Checkpoint", exact: true }).click();
 		const postReopenHistory = await openHistoryPanel(fresh);
