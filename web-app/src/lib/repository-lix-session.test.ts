@@ -3,6 +3,7 @@ import test from "node:test";
 import type { Lix, LixOpenProgress } from "@lix-js/sdk";
 import {
 	createTelemetryFetch,
+	fetchRepositoryRemoteSnapshot,
 	isRetryableRepositoryOpenError,
 	RemoteRepositoryLixSession,
 	repositoryMigrationStateFromError,
@@ -10,6 +11,35 @@ import {
 	repositorySessionKey,
 	retryRepositoryOpenDuringMigration,
 } from "./repository-lix-session.ts";
+
+void test("downloads remote snapshots from the canonical protocol route", async () => {
+	let request: Request | undefined;
+	const snapshot = await fetchRepositoryRemoteSnapshot({
+		namespace: "acme",
+		repositorySlug: "docs",
+		repositoryId: "11111111-1111-4111-8111-111111111111",
+		origin: "https://lixray.test",
+		getAccessToken: async () => "access-token",
+		authIdentity: "user-123",
+		fetch: async (input, init) => {
+			request = new Request(input, init);
+			return new Response(new Uint8Array([0x4c, 0x49, 0x58]), {
+				headers: { "content-type": "application/vnd.lix.snapshot" },
+			});
+		},
+	});
+
+	assert.ok(request);
+	assert.equal(
+		new URL(request.url).pathname,
+		"/lix/v1/11111111-1111-4111-8111-111111111111/snapshot",
+	);
+	assert.equal(request.headers.get("authorization"), "Bearer access-token");
+	assert.deepEqual(
+		new Uint8Array(await snapshot.arrayBuffer()),
+		new Uint8Array([0x4c, 0x49, 0x58]),
+	);
+});
 
 void test("does not create a synthetic observer for session health", async () => {
 	let observerCalls = 0;
