@@ -19,7 +19,7 @@ import {
 
 type TokenProvider = () => Promise<string | null>;
 
-interface OpenRepositoryLixSessionOptions {
+export interface OpenRepositoryLixSessionOptions {
 	namespace: string;
 	repositorySlug: string;
 	repositoryId: string;
@@ -47,6 +47,47 @@ interface OpenRepositoryLixSessionOptions {
 	authIdentity: string;
 	onMigration?: (state: RepositoryMigrationState | null) => void;
 	signal?: AbortSignal;
+}
+
+/**
+ * Opens an isolated server-backed handle for diagnostics. Unlike the primary
+ * repository session this has no local storage and does not participate in
+ * replica sync; callers own and must close the returned handle.
+ */
+export function openRepositoryRemoteLix(
+	options: OpenRepositoryLixSessionOptions,
+): Promise<Lix> {
+	return openLix({
+		server: {
+			mode: "remote",
+			url: repositoryUrl(options),
+			headers: async () => repositoryRequestHeaders(options),
+			fetch: createTelemetryFetch(options.fetch, {
+				repositoryId: options.repositoryId,
+				refreshAccessToken: options.refreshAccessToken,
+			}),
+		},
+	});
+}
+
+/** Downloads the canonical server-side snapshot for a reproduction archive. */
+export async function fetchRepositoryRemoteSnapshot(
+	options: OpenRepositoryLixSessionOptions,
+): Promise<Blob> {
+	const url = repositoryUrl(options);
+	url.pathname = `${url.pathname.replace(/\/+$/, "")}/snapshot`;
+	const response = await createTelemetryFetch(options.fetch, {
+		repositoryId: options.repositoryId,
+		refreshAccessToken: options.refreshAccessToken,
+	})(url, {
+		headers: await repositoryRequestHeaders(options),
+	});
+	if (!response.ok) {
+		throw new Error(
+			`Remote snapshot download failed with HTTP ${response.status}.`,
+		);
+	}
+	return response.blob();
 }
 
 type ResolvedOpenRepositoryLixSessionOptions =
@@ -244,21 +285,7 @@ async function openOpfsSyncSession(
 		server: {
 			mode: "sync",
 			url: repositoryUrl(options),
-			headers: async (): Promise<Record<string, string>> => {
-				const currentToken = await options.getAccessToken();
-				const publicPathHeaders: Record<string, string> = {};
-				if (options.publicPath) {
-					publicPathHeaders["X-Lixray-Public-Path"] = options.publicPath;
-				}
-				if (currentToken) {
-					return {
-						Authorization: `Bearer ${currentToken}`,
-						...publicPathHeaders,
-					};
-				}
-				if (options.allowAnonymous) return publicPathHeaders;
-				throw new Error("A repository access token is required.");
-			},
+			headers: async () => repositoryRequestHeaders(options),
 			fetch: createTelemetryFetch(options.fetch, {
 				repositoryId: options.repositoryId,
 				refreshAccessToken: options.refreshAccessToken,
@@ -269,6 +296,24 @@ async function openOpfsSyncSession(
 		onProgress: (progress) =>
 			publishLocalOpenProgress(repositorySessionKey(options), progress),
 	});
+}
+
+async function repositoryRequestHeaders(
+	options: OpenRepositoryLixSessionOptions,
+): Promise<Record<string, string>> {
+	const currentToken = await options.getAccessToken();
+	const publicPathHeaders: Record<string, string> = {};
+	if (options.publicPath) {
+		publicPathHeaders["X-Lixray-Public-Path"] = options.publicPath;
+	}
+	if (currentToken) {
+		return {
+			Authorization: `Bearer ${currentToken}`,
+			...publicPathHeaders,
+		};
+	}
+	if (options.allowAnonymous) return publicPathHeaders;
+	throw new Error("A repository access token is required.");
 }
 
 function publishLocalOpenProgress(

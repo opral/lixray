@@ -59,10 +59,13 @@ import {
 } from "~/lib/repository-share-url";
 import { isRepositoryShareToken } from "~/lib/repository-share-capability";
 import {
+	fetchRepositoryRemoteSnapshot,
 	openRepositoryLixSession,
+	openRepositoryRemoteLix,
 	type RepositoryMigrationState,
 	type RepositoryLixSession,
 } from "~/lib/repository-lix-session";
+import { buildRepositoryReproduction } from "~/lib/repository-reproduction";
 import { formatRepositoryOpenError } from "~/lib/repository-open-error";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
@@ -866,6 +869,8 @@ export function RepositoryAtelier({
 	useEffect(() => {
 		let disposed = false;
 		let activeLix: RepositoryLixSession | null = null;
+		let debugRemoteLix: ReturnType<typeof openRepositoryRemoteLix> | null =
+			null;
 		const openController = new AbortController();
 		resetRepositoryOpenPerformance();
 		setInstance(null);
@@ -947,9 +952,50 @@ export function RepositoryAtelier({
 					},
 				});
 				setBranchSession(repositoryBranchSession);
+				const getDebugRemoteLix = async () => {
+					debugRemoteLix ??= openRepositoryRemoteLix({
+						namespace,
+						repositorySlug,
+						repositoryId,
+						getAccessToken,
+						refreshAccessToken,
+						allowAnonymous: isReadOnly,
+						publicPath: isReadOnly ? publicPath : undefined,
+						authIdentity: atelierUserId,
+					});
+					const remote = await debugRemoteLix;
+					const activeBranchId = session.activeBranchSnapshot();
+					if ((await remote.activeBranchId()) !== activeBranchId) {
+						await remote.switchBranch({ branchId: activeBranchId });
+					}
+					return remote;
+				};
+				const getDebugRemoteSnapshot = () =>
+					fetchRepositoryRemoteSnapshot({
+						namespace,
+						repositorySlug,
+						repositoryId,
+						getAccessToken,
+						refreshAccessToken,
+						allowAnonymous: isReadOnly,
+						publicPath: isReadOnly ? publicPath : undefined,
+						authIdentity: atelierUserId,
+					});
 				const atelierInstance = createAtelier({
 					lix: session.lix,
 					readOnly: isReadOnly,
+					debug: {
+						remoteLix: getDebugRemoteLix,
+						remoteSnapshot: getDebugRemoteSnapshot,
+						snapshotName: `${namespace}-${repositorySlug}`,
+						createReproduction: ({ query, diffCsv }) =>
+							buildRepositoryReproduction({
+								localLix: session.lix,
+								remoteSnapshot: getDebugRemoteSnapshot,
+								query,
+								diffCsv,
+							}),
+					},
 					branchSession: repositoryBranchSession,
 					extensions: createLixrayRepositoryExtensions(
 						{
@@ -1025,6 +1071,9 @@ export function RepositoryAtelier({
 			const session = activeLix;
 			activeLix = null;
 			activeLixRef.current = null;
+			const remote = debugRemoteLix;
+			debugRemoteLix = null;
+			if (remote) void remote.then((lix) => lix.close()).catch(() => undefined);
 			if (session) void session.close();
 		};
 	}, [
