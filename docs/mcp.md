@@ -8,9 +8,11 @@ tools. Lix SQL is a Postgres dialect subset.
 
 1. Call `list_lixes` when the target repository is unknown. The text channel
    lists each lix as `@handle/slug` plus uuid.
-2. Call `open_lix` and retain its returned context from `structuredContent`.
-   Never copy a context token from tool text. `open_lix` reports file and
-   directory counts so empty lixes are obvious.
+2. Call `open_lix` and retain its returned context from `structuredContent`
+   when the host provides it. Never copy a context token from the prose
+   summary. Text-only hosts receive a later `content` text block that is the
+   full `structuredContent` JSON. `open_lix` reports file and directory
+   counts so empty lixes are obvious.
 3. Use `query_sql` to inspect the relevant state when you need to read.
 4. Before guessing dynamic table or column names, query `information_schema`.
 5. Use `execute_sql` for any atomic SQL batch. It is always treated as
