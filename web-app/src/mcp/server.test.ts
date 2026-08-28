@@ -60,12 +60,52 @@ function toolText(result: {
 		: "";
 }
 
+function toolTextBlocks(result: {
+	content?: Array<{ type: string; text?: string }>;
+}): Array<string> {
+	return (result.content ?? [])
+		.filter(
+			(block): block is { type: "text"; text: string } =>
+				block.type === "text" && typeof block.text === "string",
+		)
+		.map((block) => block.text);
+}
+
+function parseStructuredText(result: {
+	content?: Array<{ type: string; text?: string }>;
+}): unknown {
+	const blocks = toolTextBlocks(result);
+	assert.ok(
+		blocks.length >= 2,
+		"expected a later content text block with structuredContent JSON",
+	);
+	return JSON.parse(blocks[1] ?? "");
+}
+
 function assertTextOmitsContext(text: string, context: string): void {
 	assert.doesNotMatch(text, /context=/);
 	assert.ok(
 		!text.includes(context),
-		"tool text must not echo the signed context token",
+		"prose tool text must not echo the signed context token",
 	);
+}
+
+function assertStructuredTextFallback(
+	result: {
+		content?: Array<{ type: string; text?: string }>;
+		structuredContent?: unknown;
+	},
+	context?: string,
+): Record<string, unknown> {
+	const first = toolText(result);
+	if (context) {
+		assertTextOmitsContext(first, context);
+	} else {
+		assert.doesNotMatch(first, /context=/);
+	}
+	const parsed = parseStructuredText(result);
+	assert.deepEqual(parsed, result.structuredContent);
+	return parsed as Record<string, unknown>;
 }
 
 const SHARED_GUIDE_MARKERS = [
@@ -536,6 +576,9 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.match(openedText, /^Opened @acme\/company \(Company\) on branch/);
 		assert.match(openedText, /empty, 0 files, 0 directories/);
 		assertTextOmitsContext(openedText, context);
+		const openedFallback = assertStructuredTextFallback(opened, context);
+		assert.equal(openedFallback.context, context);
+		assert.equal(openedFallback.request_id, openedContent.request_id);
 		assert.equal(openedContent.lix_ref, "@acme/company");
 		assert.equal(openedContent.empty, true);
 		assert.equal(openedContent.file_count, 0);
@@ -581,6 +624,9 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		const queriedText = toolText(queried);
 		assert.equal(queriedText, "query_sql: 1 row");
 		assertTextOmitsContext(queriedText, context);
+		const queriedFallback = assertStructuredTextFallback(queried, context);
+		assert.equal(queriedFallback.context, context);
+		assert.deepEqual(queriedFallback.result, queriedContent.result);
 		assert.deepEqual(
 			(queried.structuredContent as { result: unknown }).result,
 			{
@@ -602,8 +648,28 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.doesNotMatch(
 			listedFilesText,
 			/\/skills\/hello\.md/,
-			"query_sql text must not dump structured rows when structuredContent is present",
+			"query_sql prose must not embed row dumps; rows belong in the later JSON block",
 		);
+		const listedFilesFallback = assertStructuredTextFallback(
+			listedFiles,
+			context,
+		);
+		assert.match(
+			toolTextBlocks(listedFiles).join("\n"),
+			/\/skills\/hello\.md/,
+			"query_sql agent-visible text must include selected cell values",
+		);
+		assert.deepEqual(listedFilesFallback.result, {
+			columns: ["path", "name"],
+			rows: [
+				[
+					{ kind: "text", value: "/skills/hello.md" },
+					{ kind: "text", value: "hello.md" },
+				],
+			],
+			rowsAffected: 0,
+			notices: [],
+		});
 		assert.deepEqual(
 			(listedFiles.structuredContent as { result: unknown }).result,
 			{
@@ -633,6 +699,17 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(mutatedText, "execute_sql: 1 row affected");
 		assertTextOmitsContext(mutatedText, context);
 		assert.doesNotMatch(mutatedText, /\[\{/);
+		const mutatedFallback = assertStructuredTextFallback(mutated, context);
+		assert.equal(mutatedFallback.context, context);
+		assert.deepEqual(mutatedFallback.results, [
+			{ columns: [], rows: [], rowsAffected: 1, notices: [] },
+			{
+				columns: ["value"],
+				rows: [[{ kind: "text", value: "ok" }]],
+				rowsAffected: 0,
+				notices: [],
+			},
+		]);
 		assert.deepEqual(
 			(mutated.structuredContent as { results: unknown }).results,
 			[
@@ -771,6 +848,8 @@ void test("list_lixes text lists @handle/slug and uuid for each lix", async () =
 			/^Found \d+ accessible Lix(?:es)?\.$/,
 			"list_lixes must not regress to a count-only sentence when lixes exist",
 		);
+		const listedFallback = assertStructuredTextFallback(listed);
+		assert.ok(Array.isArray(listedFallback.lixes));
 	} finally {
 		await client.close();
 	}
@@ -886,6 +965,7 @@ void test("MCP tool text describes outcomes without echoing the context token", 
 		assert.equal(openedContent.lix_ref, "@acme/company");
 		assert.equal(openedContent.empty, true);
 		assertTextOmitsContext(toolText(opened), context);
+		assertStructuredTextFallback(opened, context);
 
 		const cases: Array<{
 			name: string;
@@ -935,12 +1015,86 @@ void test("MCP tool text describes outcomes without echoing the context token", 
 				`${toolCall.name} must describe result`,
 			);
 			assertTextOmitsContext(text, context);
+			const fallback = assertStructuredTextFallback(result, context);
 			assert.equal(
 				(result.structuredContent as { context: string }).context.length > 0,
 				true,
 				`${toolCall.name} structuredContent must still carry context`,
 			);
+			assert.equal(
+				fallback.context,
+				(result.structuredContent as { context: string }).context,
+				`${toolCall.name} later text JSON must match structuredContent.context`,
+			);
 		}
+	} finally {
+		await client.close();
+	}
+});
+
+void test("text-only hosts get structuredContent JSON in a later text block", async () => {
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = new globalThis.Request(input, init) as unknown as Request;
+		return handleMcpTransport(request as never, service, {
+			authMode: "none",
+			serverName: "LixRay_StructuredText_Test",
+		});
+	};
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{ fetch: fetcher },
+	);
+	const client = new Client(
+		{ name: "structured-text-test-client", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: LIX_ID },
+		});
+		const openedFallback = assertStructuredTextFallback(
+			opened,
+			(opened.structuredContent as { context: string }).context,
+		);
+		const context = openedFallback.context as string;
+		assert.equal(typeof context, "string");
+		assert.ok(context.length > 0);
+		assert.equal(typeof openedFallback.request_id, "string");
+
+		const queried = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "SELECT path FROM lix_file" },
+		});
+		const queriedFallback = assertStructuredTextFallback(queried, context);
+		assert.equal(queriedFallback.context, context);
+		assert.match(toolTextBlocks(queried).join("\n"), /\/skills\/hello\.md/);
+
+		const executed = await client.callTool({
+			name: "execute_sql",
+			arguments: { context, statements: [{ sql: "SELECT 2" }] },
+		});
+		const executedFallback = assertStructuredTextFallback(executed, context);
+		assert.equal(executedFallback.context, context);
+		assert.ok(Array.isArray(executedFallback.results));
+
+		const switched = await client.callTool({
+			name: "switch_branch",
+			arguments: { context, branch_id: "main" },
+		});
+		const switchedContext = (switched.structuredContent as { context: string })
+			.context;
+		const switchedFallback = assertStructuredTextFallback(
+			switched,
+			switchedContext,
+		);
+		assert.equal(switchedFallback.context, switchedContext);
+		assert.equal(switchedFallback.branch_id, "main");
 	} finally {
 		await client.close();
 	}

@@ -41,7 +41,7 @@ export const MCP_PROTECTED_RESOURCE_URL = `${MCP_RESOURCE}${MCP_PROTECTED_RESOUR
 export const MCP_REQUEST_ID_HEADER = "X-Request-ID";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Read the context from structuredContent only — never copy a context token from tool text.
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
 
 ${LIX_SQL_OPERATING_GUIDE}
 
@@ -973,7 +973,7 @@ export function mcpDocumentationResponse(
 			`Protocol: MCP ${MCP_PROTOCOL_VERSION} (modern stateless transport only).`,
 			"Authentication: Supabase OAuth 2.1 with PKCE and dynamic client registration.",
 			"",
-			"Call list_lixes when the Lix is unknown, then open_lix. Pass the returned context from structuredContent to every later tool. Never copy a context token from tool text. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
+			"Call list_lixes when the Lix is unknown, then open_lix. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
 			"",
 			"Use query_sql for one SELECT statement and execute_sql for any atomic ordered SQL batch. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; do not expect separate file helper tools. Directory paths use /skills, not /skills/.",
 			"execute_sql already persisted the mutation. Do not follow a write with a verification SELECT.",
@@ -1082,9 +1082,10 @@ function registerTool(
 				};
 				return {
 					structuredContent,
-					content: [
-						{ type: "text" as const, text: summarizeToolResult(name, raw) },
-					],
+					content: toolResultTextBlocks(
+						summarizeToolResult(name, raw),
+						structuredContent,
+					),
 				};
 			} catch (caught) {
 				const error = toMcpError(caught, requestId);
@@ -1109,11 +1110,32 @@ function registerTool(
 				return {
 					isError: true,
 					structuredContent,
-					content: [{ type: "text" as const, text: summarizeToolError(error) }],
+					content: toolResultTextBlocks(
+						summarizeToolError(error),
+						structuredContent,
+					),
 				};
 			}
 		},
 	);
+}
+
+/**
+ * Hosts that concatenate content[].text (and drop structuredContent) still
+ * need a copy-able whole JSON object. Keep the first block as a prose
+ * summary that never embeds context=; the later block is structuredContent.
+ */
+function toolResultTextBlocks(
+	summary: string,
+	structuredContent: Record<string, unknown>,
+): Array<{ type: "text"; text: string }> {
+	return [
+		{ type: "text" as const, text: summary },
+		{
+			type: "text" as const,
+			text: JSON.stringify(structuredContent, null, 2),
+		},
+	];
 }
 
 function summarizeListLixes(result: Record<string, unknown>): string {
