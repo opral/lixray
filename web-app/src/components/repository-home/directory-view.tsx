@@ -458,7 +458,10 @@ export function DirectoryView({
 							</div>
 						)
 					) : null}
-					<div className="flex flex-col gap-px" data-testid="home-entry-list">
+					<div
+						className="flex flex-col gap-px @max-[1100px]:max-h-[min(42vh,24rem)] @max-[1100px]:overflow-x-hidden @max-[1100px]:overflow-y-auto @max-[1100px]:pr-1"
+						data-testid="home-entry-list"
+					>
 						{listing.dirs.map((dir) => (
 							<EntryRow
 								key={dir.path}
@@ -563,6 +566,15 @@ export function DirectoryView({
 							/>
 						))}
 					</div>
+					{isHome ? (
+						<RepositoryNarrowStats
+							fileCount={tree.files.length}
+							data={controlPlaneData}
+							onOpenSqlExplorer={onOpenSqlExplorer}
+							onOpenChangesReview={onOpenChangesReview}
+							onOpenHistory={onOpenHistory}
+						/>
+					) : null}
 					{listing.readmePath && readme !== null && !viewingHistory ? (
 						<div
 							className={`transition-opacity${
@@ -828,6 +840,52 @@ function RepositoryControlPlaneRail({
 			</section>
 
 			<section className={`border-b border-border-panel py-7${mutedSection}`}>
+				<RailHeading>Database</RailHeading>
+				<DatabaseSummary
+					data={data}
+					fileCount={fileCount}
+					onOpenSqlExplorer={onOpenSqlExplorer}
+				/>
+			</section>
+		</aside>
+	);
+}
+
+function RepositoryNarrowStats({
+	fileCount,
+	data,
+	onOpenSqlExplorer,
+	onOpenChangesReview,
+	onOpenHistory,
+}: {
+	readonly fileCount: number;
+	readonly data: RepositoryControlPlaneData | null;
+	readonly onOpenSqlExplorer?: () => void;
+	readonly onOpenChangesReview?: () => void;
+	readonly onOpenHistory?: () => void;
+}) {
+	return (
+		<aside
+			aria-label="Repository statistics"
+			className="mt-7 hidden min-w-0 grid-cols-2 gap-8 border-t border-border-panel px-3 pt-7 @max-[1100px]:grid @max-[640px]:grid-cols-1"
+		>
+			<section className="min-w-0">
+				<RailHeading>Changes</RailHeading>
+				{data?.changeHistoryUnavailable ? (
+					<p
+						role="status"
+						className="m-0 mt-2 text-[11.5px] leading-4 text-text-tertiary"
+					>
+						Some change history is unavailable.
+					</p>
+				) : null}
+				<ChangesSummary
+					data={data}
+					onOpenChangesReview={onOpenChangesReview}
+					onOpenHistory={onOpenHistory}
+				/>
+			</section>
+			<section className="min-w-0">
 				<RailHeading>Database</RailHeading>
 				<DatabaseSummary
 					data={data}
