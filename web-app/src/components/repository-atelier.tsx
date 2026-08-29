@@ -59,7 +59,6 @@ import {
 } from "~/lib/repository-share-url";
 import { isRepositoryShareToken } from "~/lib/repository-share-capability";
 import {
-	fetchRepositoryRemoteSnapshot,
 	openRepositoryLixSession,
 	openRepositoryRemoteLix,
 	type RepositoryMigrationState,
@@ -970,17 +969,12 @@ export function RepositoryAtelier({
 					}
 					return remote;
 				};
-				const getDebugRemoteSnapshot = () =>
-					fetchRepositoryRemoteSnapshot({
-						namespace,
-						repositorySlug,
-						repositoryId,
-						getAccessToken,
-						refreshAccessToken,
-						allowAnonymous: isReadOnly,
-						publicPath: isReadOnly ? publicPath : undefined,
-						authIdentity: atelierUserId,
-					});
+				const getDebugRemoteSnapshot = async () =>
+					new Response((await getDebugRemoteLix()).exportSnapshot(), {
+						headers: {
+							"Content-Type": "application/vnd.lix.snapshot",
+						},
+					}).blob();
 				const atelierInstance = createAtelier({
 					lix: session.lix,
 					readOnly: isReadOnly,

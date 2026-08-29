@@ -2904,7 +2904,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "lix"
-version = "0.15.0"
+version = "0.14.0"
 dependencies = [
  "ahash",
  "async-stream",
@@ -2963,7 +2963,7 @@ dependencies = [
 
 [[package]]
 name = "lix-schema"
-version = "0.15.0"
+version = "0.14.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -2976,7 +2976,7 @@ dependencies = [
 
 [[package]]
 name = "lix-storage-slatedb"
-version = "0.15.0"
+version = "0.14.0"
 dependencies = [
  "async-trait",
  "blake3",
