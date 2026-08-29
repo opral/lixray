@@ -213,6 +213,11 @@ async function verifiedArtifact({
 		};
 	} catch (error) {
 		await rm(temporaryRoot, { recursive: true, force: true });
+		if (isArtifactAuthorizationError(error)) {
+			throw new Error(
+				`downloading cross-repository Actions artifacts requires LIX_ACTIONS_READ_TOKEN (${errorMessage(error)})`,
+			);
+		}
 		log(
 			`[lix-artifact] Rejected artifact ${artifact.id} (${errorMessage(error)}).`,
 		);
@@ -329,4 +334,9 @@ async function requireFile(path) {
 
 function errorMessage(error) {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function isArtifactAuthorizationError(error) {
+	const message = errorMessage(error);
+	return message.includes("HTTP 401") || message.includes("HTTP 403");
 }
