@@ -21,15 +21,13 @@ export async function resolveLixServerImage({ mode }) {
 	console.log(`[lix-server] Selected vendored Lix ${sourceRevision}.`);
 	console.log(`[lix-server] Server input hash ${inputHash}.`);
 
-	for (const officialTag of officialTags) {
-		const officialDigest = inspectDigest(officialTag);
-		if (officialDigest) {
-			const image = `ghcr.io/opral/lix-server@${officialDigest}`;
-			console.log(
-				`[lix-server] HIT official precompiled image ${officialTag} as ${image}.`,
-			);
-			return { image, source: "lix-main-image", sourceRevision };
-		}
+	const existingOfficialImage = officialImage(officialTags);
+	if (existingOfficialImage) {
+		return {
+			image: existingOfficialImage,
+			source: "lix-main-image",
+			sourceRevision,
+		};
 	}
 
 	for (const localTag of [
@@ -83,6 +81,18 @@ export async function resolveLixServerImage({ mode }) {
 		};
 	}
 
+	// A matching main image may finish publishing while the artifact resolver
+	// waits for the exact-revision Lix workflows. Recheck before paying for a
+	// fallback build.
+	const publishedOfficialImage = officialImage(officialTags);
+	if (publishedOfficialImage) {
+		return {
+			image: publishedOfficialImage,
+			source: "lix-main-image",
+			sourceRevision,
+		};
+	}
+
 	console.log(
 		`[lix-server] SOURCE BUILD ${sourceRevision}; no reusable main image or successful CI artifact was available.`,
 	);
@@ -127,6 +137,19 @@ export async function resolveLixServerImage({ mode }) {
 	const builtImage = `${previewRepository}@${requiredDigest(previewTag)}`;
 	console.log(`[lix-server] Finished fallback source build ${builtImage}.`);
 	return { image: builtImage, source: "source-build", sourceRevision };
+}
+
+function officialImage(tags) {
+	for (const tag of tags) {
+		const digest = inspectDigest(tag);
+		if (!digest) continue;
+		const image = `ghcr.io/opral/lix-server@${digest}`;
+		console.log(
+			`[lix-server] HIT official precompiled image ${tag} as ${image}.`,
+		);
+		return image;
+	}
+	return undefined;
 }
 
 function serverInputHash() {
