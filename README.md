@@ -257,14 +257,15 @@ Put these secrets in the Infisical `prod` environment under `/ci`:
 - `VITE_SUPABASE_URL`: the public production Supabase project URL;
 - `VITE_SUPABASE_KEY`: the public production Supabase publishable key.
 
-Add `LIX_ACTIONS_READ_TOKEN` as an opral/lixray GitHub Actions secret. Use a
-fine-grained token with Actions read access to `opral/lix`; GitHub requires that
-permission to download another repository's workflow artifacts. If it is
-absent or an artifact has expired, the terminal reports the miss and LixRay
-falls back to compiling the selected submodule. CI waits for an already-running
-exact-revision Lix build before falling back, avoiding a duplicate compile when
-both pull requests start together. Local development uses the current `gh auth`
-session for the same read when available.
+Public Lix artifacts are downloaded with the workflow's `GITHUB_TOKEN`. An
+optional `LIX_ACTIONS_READ_TOKEN` GitHub Actions secret can supply Actions read
+access when repository visibility or organization policy prevents that token
+from reading `opral/lix`. If authorization fails or an artifact has expired,
+the terminal reports the miss and LixRay falls back to compiling the selected
+submodule. CI waits for an already-running exact-revision Lix build before
+falling back, avoiding a duplicate compile when both pull requests start
+together. Local development uses the current `gh auth` session for the same
+read when available.
 
 Create separate Infisical OIDC machine identities for pull requests and the
 GitHub `production` environment. Give both read access only to `/ci`, bind
