@@ -20,7 +20,7 @@ test("promotes both immutable images and waits for both deployments", async () =
   assert.match(await readFile(fixture.output, "utf8"), /web_deployment_id=new-web-service/);
   const calls = await readFile(fixture.calls, "utf8");
   assert.match(calls, /ghcr\.io\/opral\/lixray-web@sha256:web/);
-  assert.match(calls, /ghcr\.io\/opral\/lixray-server@sha256:server/);
+  assert.match(calls, /ghcr\.io\/opral\/lix-server@sha256:server/);
 });
 
 test("fails immediately when either deployment reaches a terminal state", async () => {
@@ -153,7 +153,7 @@ function runCoordinator(fixture, statuses, extraEnv = {}) {
       RAILWAY_PROJECT_ID: "project",
       RAILWAY_SERVER_SERVICE: "server-service",
       RAILWAY_WEB_SERVICE: "web-service",
-      SERVER_IMAGE: "ghcr.io/opral/lixray-server@sha256:server",
+      SERVER_IMAGE: "ghcr.io/opral/lix-server@sha256:server",
       WEB_IMAGE: "ghcr.io/opral/lixray-web@sha256:web",
     },
   });

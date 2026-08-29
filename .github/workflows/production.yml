@@ -13,6 +13,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  LIX_SERVER_IMAGE: ghcr.io/opral/lix-server@sha256:5d59180190b2a891be77adf201e4405c4d514eb6ba4a86dd94d12c3f468b4807
+
 jobs:
   images:
     name: Resolve tested images
@@ -59,7 +62,7 @@ jobs:
             echo "supabase_key=$VITE_SUPABASE_KEY"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Compute content-addressed image names
+      - name: Compute content-addressed web image name
         id: identity
         shell: bash
         env:
@@ -70,15 +73,6 @@ jobs:
         run: |
           # Keep these inputs identical to .github/workflows/pr.yml.
           tree="$(git rev-parse 'HEAD^{tree}')"
-          server_inputs="$(
-            {
-              git ls-tree HEAD -- \
-                .dockerignore \
-                .gitmodules \
-                vendor/lix
-              git ls-tree -r HEAD -- lix-server
-            } | git hash-object --stdin
-          )"
           web_inputs="$(
             {
               git ls-tree HEAD -- \
@@ -94,13 +88,9 @@ jobs:
                 "$POSTHOG_HOST" "$POSTHOG_TOKEN" "$SUPABASE_URL" "$SUPABASE_KEY"
             } | git hash-object --stdin
           )"
-          server_repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server"
           web_repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-web"
           {
             echo "tree=$tree"
-            echo "server_repository=$server_repository"
-            echo "server_content_tag=$server_repository:server-$server_inputs"
-            echo "server_tree_tag=$server_repository:tree-$tree"
             echo "web_repository=$web_repository"
             echo "web_content_tag=$web_repository:web-$web_inputs"
             echo "web_tree_tag=$web_repository:tree-$tree"
@@ -116,11 +106,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Check for existing images
+      - name: Check for existing web image
         id: existing
         shell: bash
         env:
-          SERVER_CONTENT_TAG: ${{ steps.identity.outputs.server_content_tag }}
           WEB_CONTENT_TAG: ${{ steps.identity.outputs.web_content_tag }}
         run: |
           inspect_digest() {
@@ -128,15 +117,6 @@ jobs:
               --format '{{json .Manifest.Digest}}' 2>/dev/null |
               tr -d '"'
           }
-
-          if digest="$(inspect_digest "$SERVER_CONTENT_TAG")" && test -n "$digest"; then
-            echo "server_digest=$digest" >> "$GITHUB_OUTPUT"
-            echo "server_found=true" >> "$GITHUB_OUTPUT"
-            echo "Reusing published server image $SERVER_CONTENT_TAG"
-          else
-            echo "server_found=false" >> "$GITHUB_OUTPUT"
-            echo "Server content tag $SERVER_CONTENT_TAG is missing; building it."
-          fi
 
           if digest="$(inspect_digest "$WEB_CONTENT_TAG")" && test -n "$digest"; then
             echo "web_digest=$digest" >> "$GITHUB_OUTPUT"
@@ -148,29 +128,10 @@ jobs:
           fi
 
       - name: Check out image build inputs
-        if: steps.existing.outputs.server_found != 'true' || steps.existing.outputs.web_found != 'true'
+        if: steps.existing.outputs.web_found != 'true'
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Build and push server image
-        id: build-server
-        if: steps.existing.outputs.server_found != 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: lix-server/Dockerfile
-          push: true
-          tags: |
-            ${{ steps.identity.outputs.server_content_tag }}
-            ${{ steps.identity.outputs.server_tree_tag }}
-          build-args: |
-            CARGO_BUILD_JOBS=32
-          cache-from: type=gha,scope=lix-server-release
-          cache-to: type=gha,mode=max,scope=lix-server-release
-          labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       - name: Build and push web image
         id: build-web
@@ -203,32 +164,27 @@ jobs:
         id: resolve
         shell: bash
         env:
-          SERVER_BUILT_DIGEST: ${{ steps.build-server.outputs.digest }}
-          SERVER_EXISTING_DIGEST: ${{ steps.existing.outputs.server_digest }}
-          SERVER_REPOSITORY: ${{ steps.identity.outputs.server_repository }}
           WEB_BUILT_DIGEST: ${{ steps.build-web.outputs.digest }}
           WEB_EXISTING_DIGEST: ${{ steps.existing.outputs.web_digest }}
           WEB_REPOSITORY: ${{ steps.identity.outputs.web_repository }}
         run: |
-          server_digest="${SERVER_BUILT_DIGEST:-$SERVER_EXISTING_DIGEST}"
           web_digest="${WEB_BUILT_DIGEST:-$WEB_EXISTING_DIGEST}"
-          test -n "$server_digest"
           test -n "$web_digest"
-          echo "server=$SERVER_REPOSITORY@$server_digest" >> "$GITHUB_OUTPUT"
+          case "$LIX_SERVER_IMAGE" in
+            ghcr.io/opral/lix-server@sha256:*) ;;
+            *) echo "LIX_SERVER_IMAGE must pin the public Lix server by digest" >&2; exit 1 ;;
+          esac
+          docker manifest inspect "$LIX_SERVER_IMAGE" >/dev/null
+          echo "server=$LIX_SERVER_IMAGE" >> "$GITHUB_OUTPUT"
           echo "web=$WEB_REPOSITORY@$web_digest" >> "$GITHUB_OUTPUT"
-          echo "Resolved server image: $SERVER_REPOSITORY@$server_digest"
+          echo "Resolved server image: $LIX_SERVER_IMAGE"
           echo "Resolved web image: $WEB_REPOSITORY@$web_digest"
 
       - name: Publish main aliases without rebuilding
         shell: bash
         env:
-          SERVER_IMAGE: ${{ steps.resolve.outputs.server }}
           WEB_IMAGE: ${{ steps.resolve.outputs.web }}
         run: |
-          docker buildx imagetools create \
-            --tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server:main" \
-            --tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server:sha-${GITHUB_SHA}" \
-            "$SERVER_IMAGE"
           docker buildx imagetools create \
             --tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-web:main" \
             --tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-web:sha-${GITHUB_SHA}" \

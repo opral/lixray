@@ -64,39 +64,6 @@ test("database helper fails before startup when the port remains occupied", asyn
 	]);
 });
 
-test("server-image helper exports and pulls the immutable digest", async () => {
-	const output = path.join(
-		await mkdtemp(path.join(os.tmpdir(), "lixray-image-output-")),
-		"github-output",
-	);
-	await writeFile(output, "");
-	const { calls, result } = await runWithMocks(
-		"wait-for-server-image.sh",
-		{
-			docker: `
-printf "%s\\n" "$*" >> "$MOCK_CALLS"
-if test "\${1:-} \${2:-} \${3:-}" = "buildx imagetools inspect"; then
-	printf "sha256:0123456789abcdef\\n"
-fi
-`,
-			git: 'printf "0123456789abcdef0123456789abcdef01234567\\n"\n',
-		},
-		{
-			GITHUB_OUTPUT: output,
-			GITHUB_REPOSITORY_OWNER: "Opral",
-		},
-	);
-	assert.equal(result.status, 0, result.stderr);
-	assert.match(
-		await readFile(output, "utf8"),
-		/^image=ghcr\.io\/opral\/lixray-server@sha256:0123456789abcdef$/m,
-	);
-	assert.match(
-		calls,
-		/pull ghcr\.io\/opral\/lixray-server@sha256:0123456789abcdef/,
-	);
-});
-
 test("submodule validation checks each configured vendored branch", async () => {
 	const { calls, result } = await runWithMocks("validate-submodule-branches.sh", {
 		git: 'printf "%s %s\\n" "$1" "$2" >> "$MOCK_CALLS"\n',

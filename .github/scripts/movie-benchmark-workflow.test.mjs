@@ -14,6 +14,11 @@ const workflow = readFileSync(
 );
 
 test("movie qualification requires an existing canonical Lix", () => {
+	assert.match(
+		workflow,
+		/ghcr\.io\/opral\/lix-server@sha256:[0-9a-f]{64}/,
+	);
+	assert.doesNotMatch(workflow, /lixray-server/);
 	assert.match(workflow, /\^\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}/);
 	assert.match(workflow, /vars\.MOVIE_BENCHMARK_LIX_ID/);
 	assert.match(workflow, /REQUESTED_LIX_ID" != "\$ALLOWED_LIX_ID/);

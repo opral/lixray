@@ -120,7 +120,6 @@ if (staleWebContainer.status !== 0) {
 }
 
 const stackArguments = ["compose", "up"];
-if (!process.env.LIXRAY_SERVER_IMAGE?.trim()) stackArguments.push("--build");
 stackArguments.push("-d", "lix-server");
 
 const stack = spawnSync("docker", stackArguments, {

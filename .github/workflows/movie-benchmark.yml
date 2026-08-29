@@ -116,7 +116,7 @@ jobs:
       - name: Promote the exact tested server image
         shell: bash
         env:
-          IMAGE: ghcr.io/opral/lixray-server:sha-${{ github.sha }}
+          IMAGE: ghcr.io/opral/lix-server@sha256:5d59180190b2a891be77adf201e4405c4d514eb6ba4a86dd94d12c3f468b4807
         run: .github/scripts/promote-benchmark-server.sh
 
       - name: Materialize and verify segment
