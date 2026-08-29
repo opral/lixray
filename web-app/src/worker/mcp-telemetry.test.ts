@@ -318,7 +318,7 @@ void test("PostHog delivery failures do not escape the telemetry session", async
 	]);
 });
 
-void test("open_lix does not invent a parallel mcp.open_lix $ai_span", async () => {
+void test("open_lix emits an MCP wall-clock span", async () => {
 	const captured: Array<EventMessage> = [];
 	const session = createMcpTelemetrySession(
 		{
@@ -345,7 +345,44 @@ void test("open_lix does not invent a parallel mcp.open_lix $ai_span", async () 
 		lixId: LIX_ID,
 	});
 	await session.flush();
-	assert.deepEqual(captured, []);
+	assert.equal(captured.length, 1);
+	assert.equal(captured[0]?.event, "$ai_span");
+	assert.equal(captured[0]?.properties?.$ai_span_name, "mcp.open_lix");
+	assert.equal(captured[0]?.properties?.$ai_latency, 0.042);
+});
+
+void test("MCP telemetry joins an upstream trace and session", async () => {
+	const captured: Array<EventMessage> = [];
+	const session = createMcpTelemetrySession(
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		{ userId: "user-123", clientId: "oauth-client-456" },
+		{
+			createClient: () => ({
+				captureImmediate: async (event) => {
+					captured.push(structuredClone(event));
+				},
+				shutdown: async () => undefined,
+			}),
+		},
+	);
+	assert.ok(session);
+	session.onToolCall({
+		requestId: REQUEST_ID,
+		toolName: "query_sql",
+		outcome: "success",
+		durationMs: 7,
+		surfaceVersion: SURFACE_VERSION,
+		traceId: "trace-upstream-123",
+		parentId: "parent-upstream-456",
+		sessionId: "conversation-789",
+	});
+	await session.flush();
+	assert.equal(captured[0]?.properties?.$ai_trace_id, "trace-upstream-123");
+	assert.equal(captured[0]?.properties?.$ai_parent_id, "parent-upstream-456");
+	assert.equal(captured[0]?.properties?.$ai_session_id, "conversation-789");
 });
 
 const UUID_PATTERN =

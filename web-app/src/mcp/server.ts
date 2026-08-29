@@ -39,6 +39,9 @@ export const MCP_PROTECTED_RESOURCE_PATH =
 export const MCP_DOCUMENTATION_PATH = "/mcp/docs";
 export const MCP_PROTECTED_RESOURCE_URL = `${MCP_RESOURCE}${MCP_PROTECTED_RESOURCE_PATH}`;
 export const MCP_REQUEST_ID_HEADER = "X-Request-ID";
+export const MCP_AI_TRACE_ID_HEADER = "X-PostHog-AI-Trace-ID";
+export const MCP_AI_PARENT_ID_HEADER = "X-PostHog-AI-Parent-ID";
+export const MCP_AI_SESSION_ID_HEADER = "X-PostHog-AI-Session-ID";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
 export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
@@ -75,6 +78,15 @@ export interface McpToolCallObservation {
 	fileContentByteCount?: number;
 	/** Original SQL + params for in-process file-write detection. Never sent to PostHog. */
 	rawStatements?: Array<{ sql: string; params?: Array<unknown> }>;
+	traceId?: string;
+	parentId?: string;
+	sessionId?: string;
+}
+
+export interface McpAiTraceContext {
+	traceId?: string;
+	parentId?: string;
+	sessionId?: string;
 }
 
 export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
@@ -89,6 +101,7 @@ export interface McpServerOptions {
 	posthogDistinctId?: string;
 	posthogClientId?: string;
 	onPosthogFlush?: (flush: () => Promise<void>) => void;
+	traceContext?: McpAiTraceContext;
 }
 
 type McpSecurityScheme =
@@ -164,6 +177,7 @@ export function wrapDiscoverAsOfficialHandshake(
 		distinctId?: string;
 		clientId?: string;
 		requestId?: string;
+		traceContext?: McpAiTraceContext;
 	} = {},
 ): void {
 	const lowLevel = server.server as {
@@ -202,6 +216,7 @@ function emitDiscoverAsOfficialHandshake(
 		distinctId?: string;
 		clientId?: string;
 		requestId?: string;
+		traceContext?: McpAiTraceContext;
 	},
 	durationMs: number,
 ): void {
@@ -211,6 +226,7 @@ function emitDiscoverAsOfficialHandshake(
 		mcp_server: "lixray",
 		oauth_client_id: identity.clientId,
 		request_id: identity.requestId,
+		...posthogAiTraceProperties(identity.traceContext),
 	};
 	posthog.captureInitialize({
 		distinctId: identity.distinctId,
@@ -434,6 +450,42 @@ export function requestIdForMcpRequest(request: Request): string {
 	return supplied && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(supplied)
 		? supplied
 		: crypto.randomUUID();
+}
+
+const POSTHOG_AI_ID_PATTERN = /^[A-Za-z0-9._~@()!':|-]{1,200}$/;
+const TRACEPARENT_PATTERN =
+	/^(?!ff)([0-9a-f]{2})-((?!0{32})[0-9a-f]{32})-((?!0{16})[0-9a-f]{16})-([0-9a-f]{2})(?:-.+)?$/i;
+
+function validPosthogAiId(value: string | null): string | undefined {
+	const trimmed = value?.trim();
+	return trimmed && POSTHOG_AI_ID_PATTERN.test(trimmed) ? trimmed : undefined;
+}
+
+export function aiTraceContextForMcpRequest(
+	request: Request,
+): McpAiTraceContext {
+	const traceparent = request.headers.get("traceparent")?.trim();
+	const traceparentMatch = traceparent?.match(TRACEPARENT_PATTERN);
+	return {
+		traceId:
+			validPosthogAiId(request.headers.get(MCP_AI_TRACE_ID_HEADER)) ??
+			traceparentMatch?.[2]?.toLowerCase(),
+		parentId:
+			validPosthogAiId(request.headers.get(MCP_AI_PARENT_ID_HEADER)) ??
+			traceparentMatch?.[3]?.toLowerCase(),
+		sessionId: validPosthogAiId(request.headers.get(MCP_AI_SESSION_ID_HEADER)),
+	};
+}
+
+export function posthogAiTraceProperties(
+	context: McpAiTraceContext | undefined,
+): Record<string, string> {
+	if (!context) return {};
+	return {
+		...(context.traceId ? { $ai_trace_id: context.traceId } : {}),
+		...(context.parentId ? { $ai_parent_id: context.parentId } : {}),
+		...(context.sessionId ? { $ai_session_id: context.sessionId } : {}),
+	};
 }
 
 export function withMcpRequestId(
@@ -806,6 +858,8 @@ export async function handleMcpTransport(
 	options: McpServerOptions = {},
 ): Promise<Response> {
 	const requestId = options.requestId ?? requestIdForMcpRequest(request);
+	const traceContext =
+		options.traceContext ?? aiTraceContextForMcpRequest(request);
 	if (new URL(request.url).pathname !== MCP_PATH) {
 		return withMcpRequestId(
 			new Response("Not found\n", { status: 404 }),
@@ -816,12 +870,22 @@ export async function handleMcpTransport(
 	// runs before the tool; `beforeSend` runs after, so the wrap must be
 	// bound into registerTool() — assigning onto `options` later is a no-op.
 	const observationCache = new Map<string, McpToolCallObservation>();
-	const onToolCall: McpToolCallObserver | undefined = options.posthogToken
-		? (observation) => {
-				observationCache.set(observation.requestId, observation);
-				options.onToolCall?.(observation);
-			}
-		: options.onToolCall;
+	const onToolCall: McpToolCallObserver | undefined =
+		options.posthogToken || options.onToolCall
+			? (observation) => {
+					Object.assign(observation, {
+						...(traceContext.traceId ? { traceId: traceContext.traceId } : {}),
+						...(traceContext.parentId
+							? { parentId: traceContext.parentId }
+							: {}),
+						...(traceContext.sessionId
+							? { sessionId: traceContext.sessionId }
+							: {}),
+					});
+					observationCache.set(observation.requestId, observation);
+					options.onToolCall?.(observation);
+				}
+			: undefined;
 	let shutdownPosthog: (() => Promise<void>) | undefined;
 	const posthog = options.posthogToken
 		? new PostHogMCP(options.posthogToken, {
@@ -862,6 +926,7 @@ export async function handleMcpTransport(
 						mcp_server: "lixray",
 						oauth_client_id: options.posthogClientId,
 						request_id: requestId,
+						...posthogAiTraceProperties(traceContext),
 					}),
 					beforeSend: (event) => {
 						const redacted = redactMcpAnalyticsEvent(event);
@@ -890,6 +955,7 @@ export async function handleMcpTransport(
 					distinctId: options.posthogDistinctId,
 					clientId: options.posthogClientId,
 					requestId,
+					traceContext,
 				});
 			}
 			return server;
