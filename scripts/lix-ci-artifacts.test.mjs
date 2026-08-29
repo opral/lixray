@@ -59,10 +59,10 @@ test("installs an exact-revision artifact from a successful Lix CI run", async (
 test("uses an artifact after its producer job uploads while the workflow continues", async () => {
 	const revision = "b".repeat(40);
 	const archive = zipSync({
-		"ci-artifact/server-linux-x64.json": encoder.encode(
+		"server-linux-x64.json": encoder.encode(
 			JSON.stringify({ sourceRevision: revision }),
 		),
-		"ci-artifact/lix-server-image.tar": encoder.encode("image"),
+		"lix-server-image.tar": encoder.encode("image"),
 	});
 	const fixture = await artifactApiFixture({
 		archive,

@@ -60,17 +60,14 @@ export async function installServerImageArtifact({
 	const target = "linux-x64";
 	const downloaded = await downloadArtifact({
 		artifactName: `lix-server-image-${target}-${revision}`,
-		manifestPath: `ci-artifact/server-${target}.json`,
+		manifestPath: `server-${target}.json`,
 		revision,
 		log,
 	});
 	if (!downloaded) return undefined;
 
 	try {
-		const imageSource = join(
-			downloaded.root,
-			"ci-artifact/lix-server-image.tar",
-		);
+		const imageSource = join(downloaded.root, "lix-server-image.tar");
 		await requireFile(imageSource);
 		await cp(imageSource, destination);
 		return downloaded.artifact;
