@@ -67,6 +67,7 @@ test("the SDK resolves tested Lix artifacts once and shares them with consumers"
 		assert.match(consumer, /path: vendor\/lix\/packages/);
 	}
 	assert.match(job("e2e"), /run: pnpm --dir web-app exec playwright test/);
+	assert.match(job("e2e"), /uses: docker\/login-action@v3/);
 	assert.doesNotMatch(job("e2e"), /run: pnpm test:e2e/);
 	assert.doesNotMatch(job("e2e"), /\.\/\.github\/actions\/setup-web/);
 });
