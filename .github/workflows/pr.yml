@@ -614,29 +614,6 @@ jobs:
           fi
           jq -e '.error.code == "LIX_ERROR_PROTOCOL_SESSION_GONE"' "$response_body"
 
-      - name: Print bounded preview server errors
-        if: failure() && steps.credentials.outputs.available == 'true'
-        shell: bash
-        run: |
-          # Repository migration is manager-owned and may outlive the first
-          # request's admission deadline. Poll this exact deployment until its
-          # terminal migration/open event is ingested, while keeping the final
-          # workflow output bounded.
-          logs_file="$(mktemp)"
-          for attempt in $(seq 1 10); do
-            sleep 30
-            railway logs \
-              "${{ steps.promote.outputs.server_deployment_id }}" \
-              --project "$RAILWAY_PROJECT_ID" \
-              --environment "${{ steps.environment.outputs.environment_id }}" \
-              --service "$RAILWAY_SERVER_SERVICE" \
-              --lines 250 > "$logs_file" || true
-            if grep -Eq 'migrated Lix repository format|failed to open lix runtime' "$logs_file"; then
-              break
-            fi
-          done
-          sed -n '1,250p' "$logs_file"
-
       - name: Report preview statuses
         if: steps.credentials.outputs.available == 'true'
         env:

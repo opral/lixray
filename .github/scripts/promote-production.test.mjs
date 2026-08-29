@@ -21,6 +21,21 @@ test("promotes both immutable images and waits for both deployments", async () =
   const calls = await readFile(fixture.calls, "utf8");
   assert.match(calls, /ghcr\.io\/opral\/lixray-web@sha256:web/);
   assert.match(calls, /ghcr\.io\/opral\/lix-server@sha256:server/);
+  const payloads = calls.trim().split("\n").map(JSON.parse);
+  const updates = payloads.filter((payload) =>
+    payload.query.includes("serviceInstanceUpdate"),
+  );
+  const webUpdate = updates.find(
+    (payload) => payload.variables.serviceId === "web-service",
+  );
+  const serverUpdate = updates.find(
+    (payload) => payload.variables.serviceId === "server-service",
+  );
+  assert.deepEqual(webUpdate.variables.input.registryCredentials, {
+    username: "registry-user",
+    password: "registry-token",
+  });
+  assert.equal(serverUpdate.variables.input.registryCredentials, null);
 });
 
 test("fails immediately when either deployment reaches a terminal state", async () => {
@@ -32,6 +47,8 @@ test("fails immediately when either deployment reaches a terminal state", async 
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /ended with FAILED/);
+  assert.match(result.stdout, /mock deployment log for new-web-service/);
+  assert.match(result.stdout, /mock deployment log for new-server-service/);
 });
 
 test("prints bounded deployment logs when Railway never becomes healthy", async () => {

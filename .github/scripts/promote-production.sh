@@ -70,6 +70,7 @@ update_service() {
 	local service="$1"
 	local image="$2"
 	local deploy="$3"
+	local registry_access="$4"
 	local response
 
 	response="$(
@@ -80,6 +81,7 @@ update_service() {
 			--arg image "$image" \
 			--arg username "$GHCR_READ_USERNAME" \
 			--arg password "$GHCR_READ_TOKEN" \
+			--arg registry_access "$registry_access" \
 			--argjson deploy "$deploy" \
 			'{
 				query: $query,
@@ -88,10 +90,12 @@ update_service() {
 					environmentId: $environment_id,
 					input: ($deploy + {
 						source: {image: $image},
-						registryCredentials: {
-							username: $username,
-							password: $password
-						}
+						registryCredentials: (
+							if $registry_access == "private" then {
+								username: $username,
+								password: $password
+							} else null end
+						)
 					})
 				}
 			}'
@@ -174,8 +178,10 @@ previous_server="$(previous_deployment_id "$RAILWAY_SERVER_SERVICE")"
 web_policy="$(jq -c --arg policy "$RAILWAY_DEPLOY_POLICY" '.deploy * .environments[$policy].deploy' web-app/railway.json)"
 server_policy="$(jq -c --arg policy "$RAILWAY_DEPLOY_POLICY" '.deploy * .environments[$policy].deploy' railway.json)"
 
-update_service "$RAILWAY_WEB_SERVICE" "$WEB_IMAGE" "$web_policy"
-update_service "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" "$server_policy"
+update_service "$RAILWAY_WEB_SERVICE" "$WEB_IMAGE" "$web_policy" private
+# The Lix reference image is intentionally public. Clear the credential copied
+# from the private LixRay image so Railway performs an anonymous GHCR pull.
+update_service "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" "$server_policy" public
 deploy_service "$RAILWAY_WEB_SERVICE"
 deploy_service "$RAILWAY_SERVER_SERVICE"
 
@@ -216,6 +222,8 @@ for attempt in $(seq 1 "$POLL_ATTEMPTS"); do
 		case "$state" in
 			FAILED | CRASHED | REMOVED | SKIPPED | CANCELED | CANCELLED)
 				echo "Railway $RAILWAY_RELEASE_LABEL deployment ended with $state." >&2
+				print_deployment_logs "web" "$RAILWAY_WEB_SERVICE" "$web_id"
+				print_deployment_logs "server" "$RAILWAY_SERVER_SERVICE" "$server_id"
 				exit 1
 				;;
 		esac
