@@ -4,6 +4,19 @@ LixRay exposes Lix through a deliberately small MCP surface. SQL is the
 universal interface for repository data; there are no separate file or entity
 tools. Lix SQL is a Postgres dialect subset.
 
+## End-to-end trace correlation
+
+MCP clients can attach LixRay tool calls to an existing PostHog AI trace by
+sending a W3C `traceparent` header. The trace ID and parent span ID are
+preserved as `$ai_trace_id` and `$ai_parent_id` on LixRay telemetry.
+
+Clients that already use PostHog identifiers may instead send
+`X-PostHog-AI-Trace-ID` and `X-PostHog-AI-Parent-ID`. The optional
+`X-PostHog-AI-Session-ID` groups multiple traces into one conversation or
+workflow. Explicit PostHog headers take precedence over `traceparent`.
+Identifiers containing unsupported characters are ignored. When no context is
+provided, LixRay continues to create one fallback trace per tool call.
+
 ## Recommended workflow
 
 1. Call `list_lixes` when the target repository is unknown. The text channel

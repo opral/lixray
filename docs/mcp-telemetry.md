@@ -1,21 +1,24 @@
 # MCP friction telemetry
 
 LixRay records production MCP tool friction as official `$mcp_*` harness
-events (`$mcp_duration_ms` is tool wall clock) plus optional `$ai_span`
-captures that are **not** invented `mcp.*` engine clocks. `open_lix` does
-not emit `mcp.open_lix`. The open-repo north star is the captured Lix span
-`$ai_span` named `lix.repository.opened`. SQL engine performance remains in
+events (`$mcp_duration_ms` is tool wall clock) plus `$ai_span` captures for
+every tool call. These are MCP wall-clock spans, not invented engine clocks.
+The open-repo engine north star remains the captured Lix span `$ai_span` named
+`lix.repository.opened`. SQL engine performance remains in
 the native `lix.sql.*` OpenTelemetry spans described in
 [sql-telemetry.md](./sql-telemetry.md).
 
-PostHog automatically presents each MCP span as a trace. LixRay does not set an
-`$ai_session_id`: the stateless MCP server does not receive the agent's
-conversation or task identifier, and grouping unrelated calls would be
-misleading.
+PostHog automatically presents each MCP span as a trace. By default the
+stateless MCP server does not receive the agent's conversation or task
+identifier. Clients can group LixRay spans into their end-to-end trace by
+sending W3C `traceparent`, or `X-PostHog-AI-Trace-ID` and
+`X-PostHog-AI-Parent-ID`. `X-PostHog-AI-Session-ID` optionally groups related
+traces into one conversation or workflow. Invalid identifiers are ignored and
+clients that send no trace context retain the per-tool fallback behavior.
 
 ## Span model
 
-Tool-friction `$ai_span` captures (never `open_lix` / `mcp.open_lix`) include:
+Tool-friction `$ai_span` captures include:
 
 - `$ai_trace_id`, `$ai_span_id`, `$ai_span_name`, `$ai_latency`, and
   `$ai_is_error`
