@@ -12,10 +12,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-	installBrowserArtifact,
-	installNativeArtifact,
-} from "./lix-ci-artifacts.mjs";
+import { installBrowserArtifact } from "./lix-ci-artifacts.mjs";
 
 const workspaceRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const releaseDist = join(
@@ -136,36 +133,11 @@ if (buildNative) {
 		console.log(
 			`[lix-sdk] REUSE native SDK ${nativeTarget} already prepared for ${sourceRevision}.`,
 		);
-	} else {
-		try {
-			const artifact = await installNativeArtifact({
-				revision: sourceRevision,
-				sdkRoot,
-				target: nativeTarget,
-			});
-			if (artifact) {
-				await writeBuildMarker(nativeMarker, {
-					...artifact,
-					source: "lix-ci-artifact",
-					sourceRevision,
-					target: nativeTarget,
-				});
-				nativeReady = true;
-				console.log(
-					`[lix-sdk] Installed precompiled native SDK ${nativeTarget} for ${sourceRevision}.`,
-				);
-			}
-		} catch (error) {
-			if (process.env.LIXRAY_LIX_ARTIFACTS === "only") throw error;
-			console.log(
-				`[lix-sdk] Native artifact install failed (${errorMessage(error)}); compiling from source.`,
-			);
-		}
 	}
 
 	if (!nativeReady) {
 		console.log(
-			`[lix-sdk] SOURCE BUILD native SDK ${nativeTarget} for ${sourceRevision}; no reusable artifact was available.`,
+			`[lix-sdk] SOURCE BUILD native SDK ${nativeTarget} for ${sourceRevision}; explicit native preparation was requested.`,
 		);
 		await rm(join(sdkRoot, "lix_js_sdk.node"), { force: true });
 		const toolchainEnv = {

@@ -46,8 +46,8 @@ Lix.
 
 Every repository maps to an isolated SlateDB object prefix. One bounded Lix
 reference-server process hosts multiple lixes, opens them lazily, and evicts
-idle runtimes. Lix CI retains tested SDK and server artifacts for each reviewed
-revision, and Lix main publishes content-addressed server images. LixRay
+idle runtimes. Lix CI retains tested browser SDK and server artifacts for each
+reviewed revision, and Lix main publishes content-addressed server images. LixRay
 resolves those artifacts from its exact Lix submodule pointer and only compiles
 from source when no successful artifact exists. Local development follows the
 same resolution path with MinIO in place of R2.

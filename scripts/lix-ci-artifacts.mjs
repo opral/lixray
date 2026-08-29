@@ -52,33 +52,6 @@ export async function installBrowserArtifact({
 	}
 }
 
-export async function installNativeArtifact({
-	revision,
-	sdkRoot,
-	target,
-	log = console.log,
-}) {
-	const downloaded = await downloadArtifact({
-		artifactName: `lix-native-sdk-${target}-${revision}`,
-		manifestPath: `ci-artifact/native-${target}.json`,
-		revision,
-		log,
-	});
-	if (!downloaded) return undefined;
-
-	try {
-		const nativeSource = join(
-			downloaded.root,
-			"packages/js-sdk/lix_js_sdk.node",
-		);
-		await requireFile(nativeSource);
-		await cp(nativeSource, join(sdkRoot, "lix_js_sdk.node"));
-		return downloaded.artifact;
-	} finally {
-		await rm(downloaded.temporaryRoot, { recursive: true, force: true });
-	}
-}
-
 export async function installServerImageArtifact({
 	revision,
 	destination,

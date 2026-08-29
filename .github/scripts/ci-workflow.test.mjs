@@ -24,6 +24,9 @@ const dockerignore = readFileSync(
 	path.join(repositoryRoot, ".dockerignore"),
 	"utf8",
 );
+const webPackage = JSON.parse(
+	readFileSync(path.join(repositoryRoot, "web-app/package.json"), "utf8"),
+);
 
 function job(name) {
 	const start = workflow.indexOf(`\n  ${name}:\n`);
@@ -47,11 +50,14 @@ test("submodule revisions are validated before expensive CI lanes begin", () => 
 test("the SDK resolves tested Lix artifacts once and shares them with consumers", () => {
 	const sdk = job("sdk");
 	assert.match(sdk, /pnpm install --frozen-lockfile --ignore-scripts/);
-	assert.match(sdk, /run: pnpm --dir web-app lix:build:native/);
+	assert.match(sdk, /run: pnpm --dir web-app lix:build/);
 	assert.match(sdk, /LIX_CI_ARTIFACT_GITHUB_TOKEN/);
 	assert.match(sdk, /name: vendored-lix-sdk/);
-	assert.match(sdk, /vendor\/lix\/packages\/js-sdk\/lix_js_sdk\.node/);
+	assert.doesNotMatch(sdk, /lix_js_sdk\.node/);
 	assert.match(sdk, /compression-level: 0/);
+	assert.match(webPackage.scripts["ci:prepare"], /pnpm lix:build /);
+	assert.doesNotMatch(webPackage.scripts["ci:prepare"], /lix:build:native/);
+	assert.doesNotMatch(webPackage.scripts.pretypecheck, /lix:build:native/);
 
 	for (const name of ["frontend", "e2e"]) {
 		const consumer = job(name);
