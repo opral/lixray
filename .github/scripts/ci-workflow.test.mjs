@@ -16,10 +16,6 @@ const webSetup = readFileSync(
 	path.join(repositoryRoot, ".github/actions/setup-web/action.yml"),
 	"utf8",
 );
-const rustCache = readFileSync(
-	path.join(repositoryRoot, ".github/workflows/rust-cache.yml"),
-	"utf8",
-);
 const dockerfile = readFileSync(
 	path.join(repositoryRoot, "web-app/Dockerfile"),
 	"utf8",
@@ -27,6 +23,9 @@ const dockerfile = readFileSync(
 const dockerignore = readFileSync(
 	path.join(repositoryRoot, ".dockerignore"),
 	"utf8",
+);
+const webPackage = JSON.parse(
+	readFileSync(path.join(repositoryRoot, "web-app/package.json"), "utf8"),
 );
 
 function job(name) {
@@ -48,12 +47,17 @@ test("submodule revisions are validated before expensive CI lanes begin", () => 
 	assert.match(job("web-image"), /needs:\n\s+- changes\n\s+- sdk/);
 });
 
-test("the browser SDK is built once and shared with its consumers", () => {
+test("the SDK resolves tested Lix artifacts once and shares them with consumers", () => {
 	const sdk = job("sdk");
 	assert.match(sdk, /pnpm install --frozen-lockfile --ignore-scripts/);
 	assert.match(sdk, /run: pnpm --dir web-app lix:build/);
+	assert.match(sdk, /LIX_CI_ARTIFACT_GITHUB_TOKEN/);
 	assert.match(sdk, /name: vendored-lix-sdk/);
+	assert.doesNotMatch(sdk, /lix_js_sdk\.node/);
 	assert.match(sdk, /compression-level: 0/);
+	assert.match(webPackage.scripts["ci:prepare"], /pnpm lix:build /);
+	assert.doesNotMatch(webPackage.scripts["ci:prepare"], /lix:build:native/);
+	assert.doesNotMatch(webPackage.scripts.pretypecheck, /lix:build:native/);
 
 	for (const name of ["frontend", "e2e"]) {
 		const consumer = job(name);
@@ -63,13 +67,26 @@ test("the browser SDK is built once and shared with its consumers", () => {
 		assert.match(consumer, /path: vendor\/lix\/packages/);
 	}
 	assert.match(job("e2e"), /run: pnpm --dir web-app exec playwright test/);
+	assert.match(job("e2e"), /uses: docker\/login-action@v3/);
 	assert.doesNotMatch(job("e2e"), /run: pnpm test:e2e/);
 	assert.doesNotMatch(job("e2e"), /\.\/\.github\/actions\/setup-web/);
 });
 
+test("the server resolves the exact Lix submodule artifact with source fallback", () => {
+	const server = job("server-image");
+	assert.match(server, /submodules: recursive/);
+	assert.match(server, /pnpm install --frozen-lockfile --ignore-scripts/);
+	assert.match(server, /packages: write/);
+	assert.match(server, /resolve-lix-server-image\.mjs/);
+	assert.match(server, /LIX_CI_ARTIFACT_GITHUB_TOKEN/);
+});
+
 test("web image reuses the SDK artifact while direct Docker builds remain supported", () => {
 	assert.match(job("web-image"), /path: \.lixray-ci\/vendored-lix-sdk/);
-	assert.match(dockerignore, /!\.lixray-ci\/vendored-lix-sdk\/\*\*\/dist\/\*\*/);
+	assert.match(
+		dockerignore,
+		/!\.lixray-ci\/vendored-lix-sdk\/\*\*\/dist\/\*\*/,
+	);
 	assert.match(dockerfile, /pnpm install --frozen-lockfile --ignore-scripts/);
 	assert.match(
 		dockerfile,
@@ -112,16 +129,5 @@ test("preview smoke test uses the canonical protocol and real demo Lix", () => {
 	assert.doesNotMatch(
 		preview,
 		/\/lix\/v1\/11111111-1111-4111-8111-111111111111\//,
-	);
-});
-
-test("Rust cache seeding compiles only for changed dependencies and cache misses", () => {
-	assert.doesNotMatch(rustCache, /"lix-server\/\*\*"/);
-	assert.match(rustCache, /"lix-server\/Cargo\.lock"/);
-	assert.match(rustCache, /id: rust-cache/);
-	assert.equal(
-		(rustCache.match(/if: steps\.rust-cache\.outputs\.cache-hit != 'true'/g) ?? [])
-			.length,
-		2,
 	);
 });

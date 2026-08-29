@@ -17,15 +17,6 @@ permissions:
   contents: read
 
 env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-  # keep aligned with config.toml
-  CARGO_PROFILE_DEV_DEBUG: 0
-  CARGO_PROFILE_TEST_DEBUG: 0
-  CARGO_PROFILE_RELEASE_DEBUG: 0
-  CARGO_PROFILE_BENCH_DEBUG: 0
-  CARGO_NET_RETRY: 10
-  RUSTUP_MAX_RETRIES: 10
   GIT_AUTHOR_NAME: github-actions[bot]
   GIT_COMMITTER_NAME: github-actions[bot]
   GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
@@ -44,7 +35,6 @@ jobs:
     outputs:
       frontend: ${{ steps.classify.outputs.frontend }}
       database: ${{ steps.classify.outputs.database }}
-      rust: ${{ steps.classify.outputs.rust }}
       e2e: ${{ steps.classify.outputs.e2e }}
 
     steps:
@@ -85,7 +75,10 @@ jobs:
       - name: Install dependencies without rebuilding the SDK
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Build the vendored browser SDK once
+      - name: Resolve tested SDK artifacts or build the submodule once
+        env:
+          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "900"
         run: pnpm --dir web-app lix:build
 
       - name: Share the prepared SDK with CI lanes and the web image
@@ -100,7 +93,7 @@ jobs:
           retention-days: 1
 
   server-image:
-    name: Server image
+    name: Lix server image
     needs: changes
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 25
@@ -109,7 +102,8 @@ jobs:
       packages: write
     outputs:
       image: ${{ steps.resolve.outputs.image }}
-      tree: ${{ steps.identity.outputs.tree }}
+      source: ${{ steps.resolve.outputs.source }}
+      source_revision: ${{ steps.resolve.outputs.sourceRevision }}
 
     steps:
       - name: Check out repository
@@ -117,28 +111,14 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Compute content-addressed image name
-        id: identity
-        shell: bash
-        run: |
-          tree="$(git rev-parse 'HEAD^{tree}')"
-          server_inputs="$(
-            {
-              git ls-tree HEAD -- \
-                .dockerignore \
-                .gitmodules \
-                vendor/lix
-              git ls-tree -r HEAD -- lix-server
-            } | git hash-object --stdin
-          )"
-          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lixray-server"
-          {
-            echo "tree=$tree"
-            echo "server_inputs=$server_inputs"
-            echo "repository=$repository"
-            echo "content_tag=$repository:server-$server_inputs"
-            echo "tree_tag=$repository:tree-$tree"
-          } >> "$GITHUB_OUTPUT"
+      - name: Set up artifact resolver
+        uses: ./.github/actions/setup-web
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Install artifact resolver dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -150,71 +130,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Check for an existing image
-        id: existing
-        shell: bash
-        env:
-          CONTENT_TAG: ${{ steps.identity.outputs.content_tag }}
-          TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
-        run: |
-          inspect_digest() {
-            docker buildx imagetools inspect "$1" \
-              --format '{{json .Manifest.Digest}}' 2>/dev/null |
-              tr -d '"'
-          }
-
-          if digest="$(inspect_digest "$CONTENT_TAG")" && test -n "$digest"; then
-            echo "digest=$digest" >> "$GITHUB_OUTPUT"
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            if tree_digest="$(inspect_digest "$TREE_TAG")" && test "$tree_digest" = "$digest"; then
-              echo "tree_found=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "tree_found=false" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "tree_found=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build and push server image
-        id: build
-        if: steps.existing.outputs.found != 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: lix-server/Dockerfile
-          push: true
-          tags: |
-            ${{ steps.identity.outputs.content_tag }}
-            ${{ steps.identity.outputs.tree_tag }}
-          build-args: |
-            CARGO_BUILD_JOBS=32
-          cache-from: type=gha,scope=lix-server-release
-          cache-to: type=gha,mode=max,scope=lix-server-release
-          labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-
-      - name: Resolve immutable image
+      - name: Resolve tested image or build the submodule once
         id: resolve
-        shell: bash
         env:
-          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
-          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
-          REPOSITORY: ${{ steps.identity.outputs.repository }}
-        run: |
-          digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
-          test -n "$digest"
-          echo "image=$REPOSITORY@$digest" >> "$GITHUB_OUTPUT"
-          echo "Using $REPOSITORY@$digest"
-
-      - name: Associate reused image with this Git tree
-        if: steps.existing.outputs.found == 'true' && steps.existing.outputs.tree_found != 'true'
-        shell: bash
-        env:
-          IMAGE: ${{ steps.resolve.outputs.image }}
-          TREE_TAG: ${{ steps.identity.outputs.tree_tag }}
-        run: docker buildx imagetools create --tag "$TREE_TAG" "$IMAGE"
+          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "900"
+        run: node .github/scripts/resolve-lix-server-image.mjs
 
   web-image:
     name: Web image
@@ -441,43 +362,12 @@ jobs:
       - name: Test database policies and functions
         run: .github/scripts/test-database.sh
 
-  rust:
-    name: Rust
-    needs: changes
-    if: github.event.pull_request.draft != true && needs.changes.outputs.rust == 'true'
-    runs-on: blacksmith-32vcpu-ubuntu-2404
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: nightly-2026-05-21
-          components: clippy, rustfmt
-
-      - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: lix-server
-          shared-key: lixray-server-nightly-2026-05-21
-          save-if: false
-
-      - name: Check Rust
-        run: |
-          cargo -Z bindeps fmt --manifest-path lix-server/Cargo.toml --check
-          cargo clippy --manifest-path lix-server/Cargo.toml -Z bindeps --locked --all-targets --all-features -- -D warnings
-          RUST_MIN_STACK=8388608 cargo -Z bindeps test --manifest-path lix-server/Cargo.toml --locked
-
   e2e:
     name: E2E
     needs:
       - changes
       - sdk
+      - server-image
     if: github.event.pull_request.draft != true && needs.changes.outputs.e2e == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -512,6 +402,13 @@ jobs:
           name: vendored-lix-sdk
           path: vendor/lix/packages
 
+      - name: Log in to GHCR for the tested server image
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v1
         with:
@@ -520,21 +417,9 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Wait for the content-addressed server image
-        id: server-image
-        shell: bash
-        run: .github/scripts/wait-for-server-image.sh
-
       - name: Run Compose e2e tests
         env:
-          LIXRAY_SERVER_IMAGE: ${{ steps.server-image.outputs.image }}
+          LIXRAY_SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
         run: pnpm --dir web-app exec playwright test
 
       - name: Upload Playwright failure artifacts
@@ -554,7 +439,6 @@ jobs:
       - sdk
       - frontend
       - database
-      - rust
       - e2e
       - server-image
       - web-image
@@ -573,8 +457,6 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DATABASE_SELECTED: ${{ needs.changes.outputs.database }}
           DATABASE_RESULT: ${{ needs.database.result }}
-          RUST_SELECTED: ${{ needs.changes.outputs.rust }}
-          RUST_RESULT: ${{ needs.rust.result }}
           E2E_SELECTED: ${{ needs.changes.outputs.e2e }}
           E2E_RESULT: ${{ needs.e2e.result }}
           DRAFT: ${{ github.event.pull_request.draft }}
@@ -613,7 +495,6 @@ jobs:
           require_success "Web image" "$WEB_IMAGE_RESULT"
           require_selected_success "Frontend" "$FRONTEND_SELECTED" "$FRONTEND_RESULT"
           require_selected_success "Database" "$DATABASE_SELECTED" "$DATABASE_RESULT"
-          require_selected_success "Rust" "$RUST_SELECTED" "$RUST_RESULT"
           require_selected_success "E2E" "$E2E_SELECTED" "$E2E_RESULT"
           echo "All selected CI lanes passed"
 
@@ -748,46 +629,32 @@ jobs:
           PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
         run: |
           response_body="$(mktemp)"
-          status="$(
-            curl \
-              --silent \
-              --show-error \
-              --output "$response_body" \
-              --write-out '%{http_code}' \
-              --header 'Authorization: Bearer lixray-demo' \
-              --header 'Lix-Session-Id: 0000000000000000000000000000000000000000000000000000000000000000' \
-              --header 'Lix-Sync-Protocol-Version: 2' \
-              "$PREVIEW_URL/lix/v1/00000000-0000-4000-8000-000000000002/sync/pull?after=18446744073709551615&limit=512"
-          )"
+          status=000
+          for attempt in $(seq 1 12); do
+            if status="$(
+              curl \
+                --silent \
+                --show-error \
+                --connect-timeout 5 \
+                --max-time 20 \
+                --output "$response_body" \
+                --write-out '%{http_code}' \
+                --header 'Authorization: Bearer lixray-demo' \
+                --header 'Lix-Session-Id: 0000000000000000000000000000000000000000000000000000000000000000' \
+                --header 'Lix-Sync-Protocol-Version: 2' \
+                "$PREVIEW_URL/lix/v1/00000000-0000-4000-8000-000000000002/sync/pull?after=18446744073709551615&limit=512"
+            )" && test "$status" = 410; then
+              break
+            fi
+            echo "Preview protocol is waking (HTTP $status, attempt $attempt/12)."
+            sleep 5
+          done
           if test "$status" != 410; then
             echo "Preview sync protocol returned HTTP $status; expected 410." >&2
             jq . "$response_body" >&2 || sed -n '1,80p' "$response_body" >&2
             exit 1
           fi
           jq -e '.error.code == "LIX_ERROR_PROTOCOL_SESSION_GONE"' "$response_body"
-
-      - name: Print bounded preview server errors
-        if: failure() && steps.credentials.outputs.available == 'true'
-        shell: bash
-        run: |
-          # Repository migration is manager-owned and may outlive the first
-          # request's admission deadline. Poll this exact deployment until its
-          # terminal migration/open event is ingested, while keeping the final
-          # workflow output bounded.
-          logs_file="$(mktemp)"
-          for attempt in $(seq 1 10); do
-            sleep 30
-            railway logs \
-              "${{ steps.promote.outputs.server_deployment_id }}" \
-              --project "$RAILWAY_PROJECT_ID" \
-              --environment "${{ steps.environment.outputs.environment_id }}" \
-              --service "$RAILWAY_SERVER_SERVICE" \
-              --lines 250 > "$logs_file" || true
-            if grep -Eq 'migrated Lix repository format|failed to open lix runtime' "$logs_file"; then
-              break
-            fi
-          done
-          sed -n '1,250p' "$logs_file"
 
       - name: Report preview statuses
         if: steps.credentials.outputs.available == 'true'

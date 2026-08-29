@@ -3,29 +3,31 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("Docker builds require the checked-out submodules without a revision fallback", async () => {
-	const [webDockerfile, serverDockerfile] = await Promise.all([
-		readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
-		readFile(new URL("../../lix-server/Dockerfile", import.meta.url), "utf8"),
-	]);
+	const webDockerfile = await readFile(
+		new URL("../Dockerfile", import.meta.url),
+		"utf8",
+	);
 
-	for (const dockerfile of [webDockerfile, serverDockerfile]) {
-		assert.match(dockerfile, /initialize submodules before building/);
-		assert.doesNotMatch(dockerfile, /resolve-gitlink-submodules/);
-		assert.doesNotMatch(dockerfile, /RAILWAY_GIT_REPO_/);
-		assert.doesNotMatch(dockerfile, /vendor\/revisions\.env/);
-	}
+	assert.match(webDockerfile, /initialize submodules before building/);
+	assert.doesNotMatch(webDockerfile, /resolve-gitlink-submodules/);
+	assert.doesNotMatch(webDockerfile, /RAILWAY_GIT_REPO_/);
+	assert.doesNotMatch(webDockerfile, /vendor\/revisions\.env/);
 });
 
-test("Railway watches the submodule pointers used by each service", async () => {
+test("Railway builds only the web service from repository source", async () => {
 	const [webConfig, serverConfig] = await Promise.all([
 		readFile(new URL("../railway.json", import.meta.url), "utf8"),
 		readFile(new URL("../../railway.json", import.meta.url), "utf8"),
 	]).then((sources) => sources.map((source) => JSON.parse(source)));
 
-	for (const railwayConfig of [webConfig, serverConfig]) {
-		assert.ok(railwayConfig.build.watchPatterns.includes(".gitmodules"));
-		assert.ok(railwayConfig.build.watchPatterns.includes("vendor/lix"));
-	}
+	assert.equal(serverConfig.build, undefined);
+	assert.match(serverConfig.deploy.startCommand, /LIX_SERVER_INTERNAL_TOKEN/);
+	assert.match(
+		serverConfig.deploy.startCommand,
+		/railway\/\$RAILWAY_ENVIRONMENT_ID/,
+	);
+	assert.ok(webConfig.build.watchPatterns.includes(".gitmodules"));
+	assert.ok(webConfig.build.watchPatterns.includes("vendor/lix"));
 	assert.ok(webConfig.build.watchPatterns.includes("vendor/atelier"));
 });
 
@@ -61,6 +63,8 @@ test("PR previews promote both tested images instead of rebuilding source", asyn
 	);
 
 	assert.match(workflow, /needs\.web-image\.outputs\.image/);
+	assert.match(workflow, /resolve-lix-server-image\.mjs/);
+	assert.doesNotMatch(workflow, /file: lix-server\/Dockerfile/);
 	assert.doesNotMatch(webImageJob, /pull_request\.draft/);
 	assert.match(
 		ciJob,

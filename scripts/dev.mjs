@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { dirname } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { resolveLixServerImage } from "./resolve-lix-server.mjs";
 import { waitForSupabaseAuthDatabase } from "./supabase-readiness.mjs";
 
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
@@ -84,6 +85,15 @@ await ensureLocalDevUser({
 });
 
 const composeSupabaseUrl = dockerReachableUrl(supabaseUrl);
+const explicitServerImage = process.env.LIXRAY_SERVER_IMAGE?.trim();
+const selectedServerImage = explicitServerImage
+	? explicitServerImage
+	: (await resolveLixServerImage({ mode: "local" })).image;
+if (explicitServerImage) {
+	console.log(
+		`[lix-server] Using explicit LIXRAY_SERVER_IMAGE=${explicitServerImage}.`,
+	);
+}
 
 composeEnv = {
 	...process.env,
@@ -94,6 +104,7 @@ composeEnv = {
 	LIXRAY_MINIO_CONSOLE_PORT: minioConsolePort,
 	LIXRAY_LIX_SERVICE_URL: "http://lix-server:8080",
 	LIXRAY_INTERNAL_TOKEN: internalToken,
+	LIXRAY_SERVER_IMAGE: selectedServerImage,
 	SUPABASE_URL: composeSupabaseUrl,
 	SUPABASE_JWKS_URL: `${composeSupabaseUrl}/auth/v1/.well-known/jwks.json`,
 	SUPABASE_JWT_ISSUER_URL: supabaseUrl,
@@ -120,7 +131,6 @@ if (staleWebContainer.status !== 0) {
 }
 
 const stackArguments = ["compose", "up"];
-if (!process.env.LIXRAY_SERVER_IMAGE?.trim()) stackArguments.push("--build");
 stackArguments.push("-d", "lix-server");
 
 const stack = spawnSync("docker", stackArguments, {

@@ -1,5 +1,6 @@
 /target/
 /lix-server/target/
+/.lixray-ci/
 /web-app/dist/
 /web-app/.wrangler/
 /web-app/.output/

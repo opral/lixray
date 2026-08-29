@@ -78,24 +78,16 @@ The first version does not need distributed placement, leases, replicas,
 multi-region routing, Kubernetes, or a new branch/client-state model. Those can
 be added behind the same repository routing boundary later.
 
-## One Lix source tree
+## Prebuilt Lix server artifact
 
-Both JavaScript and Rust builds must use the checked-in `vendor/lix` submodule.
-`lix-server` should use local Cargo path dependencies instead of a separately
-pinned remote Git revision.
+The reference server belongs to the Lix repository. Lix builds and publishes
+one immutable GHCR image for each selected Lix revision; LixRay pins that digest
+for local development, CI, previews, and production. LixRay does not carry a
+Rust server workspace or rebuild the server for product changes.
 
-The Docker build context must include both `lix-server` and `vendor/lix`. This
-makes the optimization loop direct:
-
-```text
-edit vendor/lix or lix-server
--> rebuild lix-server
--> rerun workload
--> compare with baseline
-```
-
-A PR therefore tests one atomic combination of the Lix engine, server protocol,
-remote SDK, Atelier, and LixRay.
+To test a local Lix fix with LixRay, build and tag the image once in the Lix
+repository, set `LIXRAY_SERVER_IMAGE` to that tag, and rerun the workload. The
+normal LixRay loop pulls the pinned image and performs no Rust compilation.
 
 ## Local and CI loop
 
@@ -121,7 +113,7 @@ perf:reset
 -> delete one explicitly named perf-* repository prefix
 
 perf:up
--> build and start lix-server
+-> pull and start the pinned lix-server image
 
 perf:run
 -> create 1,000 deterministic mixed-format files
@@ -154,7 +146,8 @@ preview instances.
 Production consists of two portable Docker services:
 
 - a public LixRay web service;
-- a private `lix-server` repository service.
+- a private `lix-server` repository service using the digest-pinned image
+  published by Lix.
 
 Durable repository data remains in R2/S3. Avoid provider-specific persistent
 volumes so the services remain portable.
@@ -165,8 +158,8 @@ awake initially.
 
 Before committing to Railway, run a small deployment spike that verifies:
 
-- `vendor/lix` submodules are checked out at the PR-pinned SHA;
-- both Dockerfiles can build from the repository-root context;
+- the public Lix server digest is anonymously pullable;
+- the LixRay web Dockerfile builds from the repository-root context;
 - PR environments contain both services and private networking works;
 - both preview services can sleep when inactive;
 - the web service can reliably wake and retry the private repository service;
@@ -206,9 +199,9 @@ The MVP is complete when:
 - one command seeds a known slow repository;
 - one command produces repeatable per-query results and compares them with a
   baseline;
-- edits to `vendor/lix` are included in the tested Rust server image;
+- the same pinned Lix server digest is used locally, in CI, and in Railway;
 - browser and MCP requests reach that same server path;
 - CI exercises the same images;
 - a PR can receive an isolated, disposable full-stack preview;
-- production deploys from the same Dockerfiles without Durable Objects or
-  per-repository containers.
+- production deploys the LixRay web image and prebuilt Lix server image without
+  Durable Objects or per-repository containers.
