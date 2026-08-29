@@ -44,7 +44,7 @@ export const MCP_AI_PARENT_ID_HEADER = "X-PostHog-AI-Parent-ID";
 export const MCP_AI_SESSION_ID_HEADER = "X-PostHog-AI-Session-ID";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Call list_lixes when you need to discover a Lix, then open_lix once and pass its returned context to every later call. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. If the user supplies an exact @handle/slug or Lix UUID, call open_lix directly; do not call list_lixes first. Call list_lixes only when the target Lix is unknown. Open a Lix once and pass its returned context to every later call. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. When target paths are known, read all of them in one parameterized query_sql statement instead of probing or reading them one at a time. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
 
 ${LIX_SQL_OPERATING_GUIDE}
 
@@ -57,10 +57,10 @@ export const RESTORE_TOOL_DESCRIPTION =
 	"Move the branch selected by context to ancestor commit_id. Restore creates no commit, does not delete abandoned commits, and is not undoable; undo only applies to commits made afterward. A later checkpoint-driven garbage-collection sweep may reclaim abandoned commits that are not reachable from a retention root; other branches and branch-local untracked rows remain unchanged. create_checkpoint returns a commit_id usable here; there is no restore_checkpoint tool.";
 
 export const LIST_LIXES_TOOL_DESCRIPTION =
-	"List LixRay lixes the signed-in user can access. Use this before open_lix when the Lix is not already known. Each result identifies a lix as @handle/slug plus uuid.";
+	"LixRay discovery only: list lixes the signed-in user can access. Call this only when the target Lix is unknown. If the user supplied an exact @handle/slug or Lix UUID, skip this tool and call open_lix directly. Each result identifies a lix as @handle/slug plus uuid.";
 
 export const OPEN_LIX_TOOL_DESCRIPTION =
-	"Resolve a lix and mint a signed context required by every later tool. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports file and directory counts so empty lixes are obvious.";
+	"LixRay starting point when the user supplied an exact @handle/slug or Lix UUID: resolve it directly without calling list_lixes first, and mint the signed context required by later tools. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports counts plus a bounded file_paths manifest; when file_paths_complete is true, do not run a separate file-list query.";
 
 type McpAuthMode = "oauth" | "none";
 
@@ -369,6 +369,8 @@ const openLixOutput = withError(
 		commit_id: z.string(),
 		file_count: z.number().int(),
 		directory_count: z.number().int(),
+		file_paths: z.array(z.string()),
+		file_paths_complete: z.boolean(),
 		empty: z.boolean(),
 	}),
 );
@@ -530,7 +532,7 @@ export function createLixrayMcpServer(
 	registerTool(
 		server,
 		"list_lixes",
-		"List lixes",
+		"LixRay: Discover lixes",
 		LIST_LIXES_TOOL_DESCRIPTION,
 		z.object({}).strict(),
 		listLixesOutput,
@@ -547,7 +549,7 @@ export function createLixrayMcpServer(
 	registerTool(
 		server,
 		"open_lix",
-		"Open a Lix",
+		"LixRay: Open a Lix",
 		OPEN_LIX_TOOL_DESCRIPTION,
 		z.object({ lix_ref: lixRef, branch_id: branchId.optional() }).strict(),
 		openLixOutput,
@@ -566,6 +568,8 @@ export function createLixrayMcpServer(
 				commit_id: opened.commitId,
 				file_count: opened.fileCount,
 				directory_count: opened.directoryCount,
+				file_paths: opened.filePaths,
+				file_paths_complete: opened.filePathsComplete,
 				empty: opened.empty,
 			};
 		},
@@ -579,7 +583,7 @@ export function createLixrayMcpServer(
 	registerTool(
 		server,
 		"query_sql",
-		"Query SQL",
+		"LixRay: Query SQL",
 		QUERY_SQL_TOOL_DESCRIPTION,
 		z
 			.object({
@@ -1039,9 +1043,9 @@ export function mcpDocumentationResponse(
 			`Protocol: MCP ${MCP_PROTOCOL_VERSION} (modern stateless transport only).`,
 			"Authentication: Supabase OAuth 2.1 with PKCE and dynamic client registration.",
 			"",
-			"Call list_lixes when the Lix is unknown, then open_lix. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
+			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, call open_lix directly and do not call list_lixes first. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
 			"",
-			"Use query_sql for one SELECT statement and execute_sql for any atomic ordered SQL batch. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; do not expect separate file helper tools. Directory paths use /skills, not /skills/.",
+			"Use query_sql for one SELECT statement and execute_sql for any atomic ordered SQL batch. When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; do not expect separate file helper tools. Directory paths use /skills, not /skills/.",
 			"execute_sql already persisted the mutation. Do not follow a write with a verification SELECT.",
 			"Every MCP response includes X-Request-ID and every tool result includes request_id. You may send X-Request-ID to preserve an upstream correlation ID; use the returned ID when reporting failures.",
 			"",

@@ -976,8 +976,28 @@ void test("shipped copy tells agents not to verify writes", async () => {
 
 void test("list_lixes and open_lix descriptions stay identity- and empty-state honest", () => {
 	assert.match(LIST_LIXES_TOOL_DESCRIPTION, /@handle\/slug/);
-	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /file and directory counts/);
-	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /empty/);
+	assert.match(
+		LIST_LIXES_TOOL_DESCRIPTION,
+		/only when the target Lix is unknown/,
+	);
+	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /without calling list_lixes first/);
+	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /file_paths/);
+});
+
+void test("shipped MCP guidance preserves the shortest read path", async () => {
+	for (const text of [
+		MCP_SERVER_INSTRUCTIONS,
+		MCP_DOCS,
+		await mcpDocumentationResponse().text(),
+	]) {
+		assert.match(text, /exact LixRay/i);
+		assert.match(text, /open_lix/i);
+		assert.match(text, /directly/i);
+		assert.match(text, /list_lixes/i);
+		assert.match(text, /only when the target.*unknown/is);
+		assert.match(text, /file_paths_complete/);
+		assert.match(text, /one parameterized/i);
+	}
 });
 
 void test("MCP tool text describes outcomes without echoing the context token", async () => {
@@ -1339,10 +1359,14 @@ void test("open_lix text reports a populated inventory without calling the lix e
 			context: string;
 			file_count: number;
 			directory_count: number;
+			file_paths: Array<string>;
+			file_paths_complete: boolean;
 			empty: boolean;
 		};
 		assert.equal(content.file_count, 4);
 		assert.equal(content.directory_count, 1);
+		assert.deepEqual(content.file_paths, ["/skills/hello.md"]);
+		assert.equal(content.file_paths_complete, false);
 		assert.equal(content.empty, false);
 		const text = toolText(opened);
 		assert.match(text, /4 files, 1 directory/);

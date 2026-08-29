@@ -68,11 +68,15 @@ export interface OpenedLixContext {
 	commitId: string;
 	fileCount: number;
 	directoryCount: number;
+	filePaths: Array<string>;
+	filePathsComplete: boolean;
 	empty: boolean;
 }
 
 export const OPEN_LIX_INVENTORY_SQL =
 	"SELECT (SELECT COUNT(*) FROM lix_file) AS file_count, (SELECT COUNT(*) FROM lix_directory) AS directory_count";
+export const OPEN_LIX_FILE_MANIFEST_LIMIT = 50;
+export const OPEN_LIX_FILE_MANIFEST_SQL = `SELECT path FROM lix_file ORDER BY path LIMIT ${OPEN_LIX_FILE_MANIFEST_LIMIT}`;
 
 export const CONTEXT_REOPEN_HINT =
 	"Call open_lix again. Use structuredContent.context; do not copy TEXT.";
@@ -304,6 +308,8 @@ export class LixService {
 			commitId,
 			fileCount: inventory.fileCount,
 			directoryCount: inventory.directoryCount,
+			filePaths: inventory.filePaths,
+			filePathsComplete: inventory.filePathsComplete,
 			empty: inventory.fileCount === 0 && inventory.directoryCount === 0,
 		};
 	}
@@ -487,7 +493,12 @@ export class LixService {
 	private async fileInventory(
 		lixId: string,
 		branchId: string,
-	): Promise<{ fileCount: number; directoryCount: number }> {
+	): Promise<{
+		fileCount: number;
+		directoryCount: number;
+		filePaths: Array<string>;
+		filePathsComplete: boolean;
+	}> {
 		const response = await this.client.execute(lixId, branchId, {
 			sql: OPEN_LIX_INVENTORY_SQL,
 		});
@@ -502,7 +513,36 @@ export class LixService {
 				},
 			);
 		}
-		return { fileCount, directoryCount };
+		if (fileCount === 0) {
+			return {
+				fileCount,
+				directoryCount,
+				filePaths: [],
+				filePathsComplete: true,
+			};
+		}
+		const manifest = await this.client.execute(lixId, branchId, {
+			sql: OPEN_LIX_FILE_MANIFEST_SQL,
+		});
+		const filePaths = manifest.rows.map((row) => {
+			const value = row[0];
+			if (!value || value.kind !== "text") {
+				throw createLixError(
+					"upstream_error",
+					"Lix did not return a valid file path manifest.",
+					{
+						hint: "Retry open_lix. If it persists, inspect lix_file with query_sql.",
+					},
+				);
+			}
+			return value.value;
+		});
+		return {
+			fileCount,
+			directoryCount,
+			filePaths,
+			filePathsComplete: filePaths.length === fileCount,
+		};
 	}
 
 	private async issueContext(

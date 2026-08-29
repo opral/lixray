@@ -19,19 +19,24 @@ provided, LixRay continues to create one fallback trace per tool call.
 
 ## Recommended workflow
 
-1. Call `list_lixes` when the target repository is unknown. The text channel
-   lists each lix as `@handle/slug` plus uuid.
-2. Call `open_lix` and retain its returned context from `structuredContent`
+1. Match the exact LixRay server name instead of searching broadly for generic
+   repository or file tools.
+2. If the user supplied an exact `@handle/slug` or Lix UUID, call `open_lix`
+   directly. Call `list_lixes` only when the target is unknown.
+3. Retain the context returned by `open_lix` from `structuredContent`
    when the host provides it. Never copy a context token from the prose
    summary. Text-only hosts receive a later `content` text block that is the
    full `structuredContent` JSON. `open_lix` reports file and directory
-   counts so empty lixes are obvious.
-3. Use `query_sql` to inspect the relevant state when you need to read.
-4. Before guessing dynamic table or column names, query `information_schema`.
-5. Use `execute_sql` for any atomic SQL batch. It is always treated as
+   counts plus a bounded `file_paths` manifest. When `file_paths_complete` is
+   true, do not run another query just to list files.
+4. Use `query_sql` to inspect the relevant state. When paths are known, read
+   every needed file in one parameterized statement rather than listing the
+   same paths first or reading files one at a time.
+5. Before guessing dynamic table or column names, query `information_schema`.
+6. Use `execute_sql` for any atomic SQL batch. It is always treated as
    potentially destructive. The mutation is already persisted — `rowsAffected`
    and any rows the batch itself returned are sufficient.
-6. Do not follow a write with a verification `SELECT`, a second `query_sql`
+7. Do not follow a write with a verification `SELECT`, a second `query_sql`
    "to check", or path/length/substring readback. One `execute_sql` batch is
    the whole write (dirs + file + `ON CONFLICT` is fine inside that batch).
    Then stop.
