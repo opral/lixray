@@ -15,7 +15,7 @@ test("promotes both immutable images and waits for both deployments", async () =
     MOCK_WEB_STATUS: "SUCCESS",
   });
 
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
   assert.match(result.stdout, /Railway production release is healthy/);
   assert.match(await readFile(fixture.output, "utf8"), /web_deployment_id=new-web-service/);
   const calls = await readFile(fixture.calls, "utf8");
@@ -86,6 +86,37 @@ test("uses preview deployment policy for a CI-managed PR environment", async () 
   assert.match(calls, /"environmentId":"preview-environment"/);
 });
 
+test("reuses matching healthy or sleeping image deployments", async () => {
+  const fixture = await createFixture();
+  const result = runCoordinator(
+    fixture,
+    {
+      MOCK_SERVER_STATUS: "SLEEPING",
+      MOCK_WEB_STATUS: "SUCCESS",
+    },
+    {
+      MOCK_CONFIGURATION_MATCHES: "true",
+      RAILWAY_DEPLOY_POLICY: "pr",
+      RAILWAY_RELEASE_LABEL: "preview",
+      RAILWAY_TARGET_ENVIRONMENT: "preview-environment",
+    },
+  );
+
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  assert.match(result.stdout, /Reusing matching Railway web deployment/);
+  assert.match(result.stdout, /Reusing matching Railway server deployment/);
+  const payloads = (await readFile(fixture.calls, "utf8"))
+    .trim()
+    .split("\n")
+    .map(JSON.parse);
+  assert.equal(
+    payloads.filter((payload) =>
+      payload.query.includes("serviceInstanceDeploy"),
+    ).length,
+    0,
+  );
+});
+
 async function createFixture() {
   const directory = await mkdtemp(join(tmpdir(), "lixray-promotion-"));
   const calls = join(directory, "calls.jsonl");
@@ -121,7 +152,12 @@ if grep -qx "$service" "$MOCK_DEPLOYED" 2>/dev/null; then
 	if test "$service" = "$RAILWAY_WEB_SERVICE"; then status="$MOCK_WEB_STATUS"; else status="$MOCK_SERVER_STATUS"; fi
 	printf '[{"id":"new-%s","status":"%s"}]\n' "$service" "$status"
 else
-	printf '[{"id":"old-%s","status":"SUCCESS"}]\n' "$service"
+	if test "$MOCK_CONFIGURATION_MATCHES" = true; then
+		if test "$service" = "$RAILWAY_WEB_SERVICE"; then status="$MOCK_WEB_STATUS"; else status="$MOCK_SERVER_STATUS"; fi
+	else
+		status=SUCCESS
+	fi
+	printf '[{"id":"old-%s","status":"%s"}]\n' "$service" "$status"
 fi
 `,
   );
@@ -135,7 +171,27 @@ while test "$#" -gt 0; do
 done
 printf '%s\n' "$payload" >> "$MOCK_CALLS"
 service="$(jq -r '.variables.serviceId' <<<"$payload")"
-if jq -e '.query | contains("serviceInstanceUpdate")' <<<"$payload" >/dev/null; then
+if jq -e '.query | contains("serviceInstance(serviceId")' <<<"$payload" >/dev/null; then
+	if test "$MOCK_CONFIGURATION_MATCHES" = true; then
+		if test "$service" = "$RAILWAY_WEB_SERVICE"; then
+			image="$WEB_IMAGE"
+			start_command=null
+		else
+			image="$SERVER_IMAGE"
+			start_command="$(jq -r '.deploy.startCommand' railway.json)"
+		fi
+		if test "$RAILWAY_DEPLOY_POLICY" = production; then sleep_application=false; else sleep_application=true; fi
+	else
+		image="ghcr.io/opral/old-image@sha256:old"
+		start_command=null
+		sleep_application=false
+	fi
+	jq -cn \
+		--arg image "$image" \
+		--arg start_command "$start_command" \
+		--argjson sleep_application "$sleep_application" \
+		'{data:{serviceInstance:{source:{image:$image,repo:null},numReplicas:1,sleepApplication:$sleep_application,startCommand:$start_command,healthcheckPath:"/healthz",healthcheckTimeout:300,restartPolicyType:"ON_FAILURE",restartPolicyMaxRetries:10,overlapSeconds:0,drainingSeconds:30}}}'
+elif jq -e '.query | contains("serviceInstanceUpdate")' <<<"$payload" >/dev/null; then
 	printf '{"data":{"serviceInstanceUpdate":true}}\n'
 else
 	printf '%s\n' "$service" >> "$MOCK_DEPLOYED"
@@ -160,6 +216,8 @@ function runCoordinator(fixture, statuses, extraEnv = {}) {
       GITHUB_STEP_SUMMARY: join(fixture.directory, "summary.md"),
       GITHUB_OUTPUT: fixture.output,
       MOCK_CALLS: fixture.calls,
+      MOCK_CONFIGURATION_MATCHES:
+        extraEnv.MOCK_CONFIGURATION_MATCHES ?? "false",
       MOCK_DEPLOYED: fixture.deployed,
       PATH: `${fixture.directory}:${process.env.PATH}`,
       POLL_ATTEMPTS: "2",
