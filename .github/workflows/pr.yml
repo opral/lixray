@@ -26,7 +26,6 @@ env:
 
   NODE_VERSION: "24"
   PNPM_VERSION: "10.13.1"
-  LIX_SERVER_IMAGE: ghcr.io/opral/lix-server@sha256:5d59180190b2a891be77adf201e4405c4d514eb6ba4a86dd94d12c3f468b4807
 
 jobs:
   changes:
@@ -76,8 +75,11 @@ jobs:
       - name: Install dependencies without rebuilding the SDK
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Build the vendored browser SDK once
-        run: pnpm --dir web-app lix:build
+      - name: Resolve tested SDK artifacts or build the submodule once
+        env:
+          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "900"
+        run: pnpm --dir web-app lix:build:native
 
       - name: Share the prepared SDK with CI lanes and the web image
         uses: actions/upload-artifact@v4
@@ -85,6 +87,7 @@ jobs:
           name: vendored-lix-sdk
           path: |
             vendor/lix/packages/js-sdk/dist
+            vendor/lix/packages/js-sdk/lix_js_sdk.node
             vendor/lix/packages/storage-opfs/dist
           if-no-files-found: error
           compression-level: 0
@@ -93,23 +96,38 @@ jobs:
   server-image:
     name: Lix server image
     needs: changes
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
     outputs:
       image: ${{ steps.resolve.outputs.image }}
+      source: ${{ steps.resolve.outputs.source }}
+      source_revision: ${{ steps.resolve.outputs.sourceRevision }}
 
     steps:
-      - name: Verify and resolve immutable image
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve tested image or build the submodule once
         id: resolve
-        shell: bash
-        run: |
-          case "$LIX_SERVER_IMAGE" in
-            ghcr.io/opral/lix-server@sha256:*) ;;
-            *) echo "LIX_SERVER_IMAGE must pin the public Lix server by digest" >&2; exit 1 ;;
-          esac
-          docker manifest inspect "$LIX_SERVER_IMAGE" >/dev/null
-          echo "image=$LIX_SERVER_IMAGE" >> "$GITHUB_OUTPUT"
-          echo "Using prebuilt Lix server $LIX_SERVER_IMAGE"
+        env:
+          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "900"
+        run: node .github/scripts/resolve-lix-server-image.mjs
 
   web-image:
     name: Web image

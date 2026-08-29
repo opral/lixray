@@ -44,11 +44,13 @@ test("submodule revisions are validated before expensive CI lanes begin", () => 
 	assert.match(job("web-image"), /needs:\n\s+- changes\n\s+- sdk/);
 });
 
-test("the browser SDK is built once and shared with its consumers", () => {
+test("the SDK resolves tested Lix artifacts once and shares them with consumers", () => {
 	const sdk = job("sdk");
 	assert.match(sdk, /pnpm install --frozen-lockfile --ignore-scripts/);
-	assert.match(sdk, /run: pnpm --dir web-app lix:build/);
+	assert.match(sdk, /run: pnpm --dir web-app lix:build:native/);
+	assert.match(sdk, /LIX_CI_ARTIFACT_GITHUB_TOKEN/);
 	assert.match(sdk, /name: vendored-lix-sdk/);
+	assert.match(sdk, /vendor\/lix\/packages\/js-sdk\/lix_js_sdk\.node/);
 	assert.match(sdk, /compression-level: 0/);
 
 	for (const name of ["frontend", "e2e"]) {
@@ -63,9 +65,20 @@ test("the browser SDK is built once and shared with its consumers", () => {
 	assert.doesNotMatch(job("e2e"), /\.\/\.github\/actions\/setup-web/);
 });
 
+test("the server resolves the exact Lix submodule artifact with source fallback", () => {
+	const server = job("server-image");
+	assert.match(server, /submodules: recursive/);
+	assert.match(server, /packages: write/);
+	assert.match(server, /resolve-lix-server-image\.mjs/);
+	assert.match(server, /LIX_CI_ARTIFACT_GITHUB_TOKEN/);
+});
+
 test("web image reuses the SDK artifact while direct Docker builds remain supported", () => {
 	assert.match(job("web-image"), /path: \.lixray-ci\/vendored-lix-sdk/);
-	assert.match(dockerignore, /!\.lixray-ci\/vendored-lix-sdk\/\*\*\/dist\/\*\*/);
+	assert.match(
+		dockerignore,
+		/!\.lixray-ci\/vendored-lix-sdk\/\*\*\/dist\/\*\*/,
+	);
 	assert.match(dockerfile, /pnpm install --frozen-lockfile --ignore-scripts/);
 	assert.match(
 		dockerfile,

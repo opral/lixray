@@ -63,7 +63,7 @@ test("PR previews promote both tested images instead of rebuilding source", asyn
 	);
 
 	assert.match(workflow, /needs\.web-image\.outputs\.image/);
-	assert.match(workflow, /ghcr\.io\/opral\/lix-server@sha256:[0-9a-f]{64}/);
+	assert.match(workflow, /resolve-lix-server-image\.mjs/);
 	assert.doesNotMatch(workflow, /file: lix-server\/Dockerfile/);
 	assert.doesNotMatch(webImageJob, /pull_request\.draft/);
 	assert.match(

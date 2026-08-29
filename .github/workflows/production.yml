@@ -13,9 +13,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  LIX_SERVER_IMAGE: ghcr.io/opral/lix-server@sha256:5d59180190b2a891be77adf201e4405c4d514eb6ba4a86dd94d12c3f468b4807
-
 jobs:
   images:
     name: Resolve tested images
@@ -36,6 +33,8 @@ jobs:
     steps:
       - name: Check out tested commit
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Fetch web build configuration from Infisical
         uses: Infisical/secrets-action@v1.0.9
@@ -106,6 +105,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Resolve tested Lix server image
+        id: server
+        env:
+          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "900"
+        run: node .github/scripts/resolve-lix-server-image.mjs
+
       - name: Check for existing web image
         id: existing
         shell: bash
@@ -126,12 +132,6 @@ jobs:
             echo "web_found=false" >> "$GITHUB_OUTPUT"
             echo "Web content tag $WEB_CONTENT_TAG is missing; building it."
           fi
-
-      - name: Check out image build inputs
-        if: steps.existing.outputs.web_found != 'true'
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Build and push web image
         id: build-web
@@ -167,17 +167,15 @@ jobs:
           WEB_BUILT_DIGEST: ${{ steps.build-web.outputs.digest }}
           WEB_EXISTING_DIGEST: ${{ steps.existing.outputs.web_digest }}
           WEB_REPOSITORY: ${{ steps.identity.outputs.web_repository }}
+          SERVER_IMAGE: ${{ steps.server.outputs.image }}
         run: |
           web_digest="${WEB_BUILT_DIGEST:-$WEB_EXISTING_DIGEST}"
           test -n "$web_digest"
-          case "$LIX_SERVER_IMAGE" in
-            ghcr.io/opral/lix-server@sha256:*) ;;
-            *) echo "LIX_SERVER_IMAGE must pin the public Lix server by digest" >&2; exit 1 ;;
-          esac
-          docker manifest inspect "$LIX_SERVER_IMAGE" >/dev/null
-          echo "server=$LIX_SERVER_IMAGE" >> "$GITHUB_OUTPUT"
+          test -n "$SERVER_IMAGE"
+          docker manifest inspect "$SERVER_IMAGE" >/dev/null
+          echo "server=$SERVER_IMAGE" >> "$GITHUB_OUTPUT"
           echo "web=$WEB_REPOSITORY@$web_digest" >> "$GITHUB_OUTPUT"
-          echo "Resolved server image: $LIX_SERVER_IMAGE"
+          echo "Resolved server image: $SERVER_IMAGE"
           echo "Resolved web image: $WEB_REPOSITORY@$web_digest"
 
       - name: Publish main aliases without rebuilding

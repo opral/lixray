@@ -46,9 +46,11 @@ Lix.
 
 Every repository maps to an isolated SlateDB object prefix. One bounded Lix
 reference-server process hosts multiple lixes, opens them lazily, and evicts
-idle runtimes. Lix publishes that server once as a digest-pinned GHCR image;
-LixRay consumes it without compiling Rust. Local development uses the same
-image with MinIO in place of R2.
+idle runtimes. Lix CI retains tested SDK and server artifacts for each reviewed
+revision, and Lix main publishes content-addressed server images. LixRay
+resolves those artifacts from its exact Lix submodule pointer and only compiles
+from source when no successful artifact exists. Local development follows the
+same resolution path with MinIO in place of R2.
 
 The web service owns authentication, organization and project pages,
 `/healthz`, `/mcp`, and the canonical Lix protocol. Supabase row-level security
@@ -202,20 +204,24 @@ LIXRAY_MCP_ACCESS_TOKEN='<token>' pnpm --dir web-app check:mcp
 
 ## CI and deployment
 
-GitHub Actions builds immutable web and server images on pull requests, tags
-them by reusable inputs and the Git tree hash, and runs the Compose browser flow
-against the server digest. Trees with unchanged inputs reuse existing images.
+GitHub Actions builds immutable web images on pull requests, resolves the Lix
+SDK and server from the exact vendored revision, and runs the Compose browser
+flow against the server digest. Successful Lix CI artifacts are reused; an
+unreviewed revision with no artifact is compiled once as an explicit fallback.
+Trees with unchanged inputs reuse existing images.
 Draft pull requests build both immutable images and refresh their deployed
 preview, while skipping the frontend, database, Rust, and local E2E validation
 lanes. Marking a pull request ready for review runs the complete validation set.
 In-progress runs for the same pull request are cancelled, and the stable `CI`
 job remains the merge gate.
 
-The separate `Production` workflow is promotion-only. Pushes to `main` must
-resolve both tested `tree-*` images before applying database migrations. The
-workflow then points both Railway services at those GHCR digests, starts them
-together, and waits up to ten minutes for both health checks. Production never
-waits for an independent Railway build and never rebuilds merged source.
+The separate `Production` workflow normally promotes existing tested images.
+Pushes to `main` resolve the web image and the server matching the Lix submodule
+before applying database migrations. A missing Lix artifact takes the same
+visible source-build fallback as local and PR workflows. The workflow then
+points both Railway services at immutable GHCR digests, starts them together,
+and waits up to ten minutes for both health checks. Production never waits for
+an independent Railway build.
 
 GitHub Actions is the only build and deployment authority:
 
@@ -250,6 +256,15 @@ Put these secrets in the Infisical `prod` environment under `/ci`:
   only if that workflow token is denied; it is not required in Infisical;
 - `VITE_SUPABASE_URL`: the public production Supabase project URL;
 - `VITE_SUPABASE_KEY`: the public production Supabase publishable key.
+
+Add `LIX_ACTIONS_READ_TOKEN` as an opral/lixray GitHub Actions secret. Use a
+fine-grained token with Actions read access to `opral/lix`; GitHub requires that
+permission to download another repository's workflow artifacts. If it is
+absent or an artifact has expired, the terminal reports the miss and LixRay
+falls back to compiling the selected submodule. CI waits for an already-running
+exact-revision Lix build before falling back, avoiding a duplicate compile when
+both pull requests start together. Local development uses the current `gh auth`
+session for the same read when available.
 
 Create separate Infisical OIDC machine identities for pull requests and the
 GitHub `production` environment. Give both read access only to `/ci`, bind

@@ -17,12 +17,10 @@ const pr = readFileSync(
 	"utf8",
 );
 const compose = readFileSync(path.join(repositoryRoot, "compose.yml"), "utf8");
-
-function pinnedLixServer(source) {
-	return source.match(
-		/ghcr\.io\/opral\/lix-server@sha256:[0-9a-f]{64}/,
-	)?.[0];
-}
+const serverResolver = readFileSync(
+	path.join(repositoryRoot, "scripts/resolve-lix-server.mjs"),
+	"utf8",
+);
 
 function extractHashInputs(source, variable) {
 	const match = source.match(
@@ -41,7 +39,9 @@ function extractWebBuildStep(source) {
 	assert.notEqual(start, -1, "missing web Docker build");
 	const window = source.slice(Math.max(0, start - 200), start + 1400);
 	const context = window.match(/^[\t ]*context: (.+)$/m)?.[1];
-	const buildArgs = window.match(/build-args: \|\n([\s\S]*?)\n[\t ]+cache-from:/)?.[1];
+	const buildArgs = window.match(
+		/build-args: \|\n([\s\S]*?)\n[\t ]+cache-from:/,
+	)?.[1];
 	assert.ok(context, "missing web build context");
 	assert.ok(buildArgs, "missing web build args");
 	return {
@@ -50,21 +50,17 @@ function extractWebBuildStep(source) {
 	};
 }
 
-test("PR, production, and local development pin the same public Lix server", () => {
-	const image = pinnedLixServer(pr);
-	assert.ok(image);
-	assert.equal(pinnedLixServer(production), image);
-	assert.equal(pinnedLixServer(compose), image);
-});
-
-test("LixRay workflows never build or publish a Rust server image", () => {
+test("PR, production, and local development resolve the server from the Lix submodule", () => {
 	for (const workflow of [pr, production]) {
-		assert.doesNotMatch(workflow, /file: lix-server\/Dockerfile/);
-		assert.doesNotMatch(workflow, /ghcr\.io\/[^\s]+\/lixray-server/);
-		assert.doesNotMatch(workflow, /build-server/);
+		assert.match(workflow, /resolve-lix-server-image\.mjs/);
+		assert.match(workflow, /submodules: recursive/);
 	}
-	assert.match(pr, /docker manifest inspect "\$LIX_SERVER_IMAGE"/);
-	assert.match(production, /docker manifest inspect "\$LIX_SERVER_IMAGE"/);
+	assert.match(compose, /image: \$\{LIXRAY_SERVER_IMAGE:-/);
+	assert.match(serverResolver, /git", \["-C", lixRoot, "rev-parse", "HEAD"\]/);
+	assert.match(serverResolver, /lix-server:content-\$\{inputHash\}/);
+	assert.match(serverResolver, /lix-server:sha-\$\{sourceRevision\}/);
+	assert.match(serverResolver, /installServerImageArtifact/);
+	assert.match(serverResolver, /SOURCE BUILD/);
 });
 
 test("production and PR CI hash the same web image inputs", () => {
