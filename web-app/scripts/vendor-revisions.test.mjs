@@ -129,12 +129,33 @@ test("Atelier resolves the vendored Lix SDK instead of npm", async () => {
 });
 
 function atelierPeerSatisfiesVendoredSdk(peerRange, version) {
-	const peer = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(peerRange);
 	const vendored = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-	if (!peer || !vendored) return false;
-	const [, peerMajor, peerMinor, peerPatch] = peer.map(Number);
-	const [, major, minor, patch] = vendored.map(Number);
-	if (major !== peerMajor) return false;
-	if (minor !== peerMinor) return false;
-	return patch >= peerPatch;
+	if (!vendored) return false;
+	const candidate = vendored.slice(1).map(Number);
+	const caret = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(peerRange);
+	if (caret) {
+		const minimum = caret.slice(1).map(Number);
+		return (
+			candidate[0] === minimum[0] &&
+			candidate[1] === minimum[1] &&
+			candidate[2] >= minimum[2]
+		);
+	}
+	const interval = /^>=(\d+)\.(\d+)\.(\d+) <(\d+)\.(\d+)\.(\d+)$/.exec(
+		peerRange,
+	);
+	if (!interval) return false;
+	const minimum = interval.slice(1, 4).map(Number);
+	const maximum = interval.slice(4, 7).map(Number);
+	return (
+		compareSemver(candidate, minimum) >= 0 &&
+		compareSemver(candidate, maximum) < 0
+	);
+}
+
+function compareSemver(left, right) {
+	for (let index = 0; index < 3; index += 1) {
+		if (left[index] !== right[index]) return left[index] - right[index];
+	}
+	return 0;
 }

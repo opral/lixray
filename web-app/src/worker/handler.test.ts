@@ -30,7 +30,11 @@ import {
 	type WorkerEnv,
 } from "./handler.ts";
 import {
+	MCP_AI_PARENT_ID_HEADER,
+	MCP_AI_SESSION_ID_HEADER,
+	MCP_AI_TRACE_ID_HEADER,
 	MCP_DOCUMENTATION_PATH,
+	MCP_PATH,
 	MCP_PROTECTED_RESOURCE_PATH,
 	MCP_RESOURCE,
 } from "../mcp/server.ts";
@@ -725,6 +729,19 @@ void test("unauthenticated localhost MCP requests challenge with local discovery
 		response.headers.get("www-authenticate") ?? "",
 		/resource_metadata="http:\/\/localhost:8787\/\.well-known\/oauth-protected-resource"/,
 	);
+});
+
+void test("MCP CORS permits end-to-end trace context headers", async () => {
+	const response = await handleRequest(
+		new Request(`https://example.test${MCP_PATH}`, { method: "OPTIONS" }),
+		env({}),
+	);
+	assert.equal(response.status, 204);
+	const allowed = response.headers.get("access-control-allow-headers") ?? "";
+	assert.match(allowed, /Traceparent/i);
+	assert.match(allowed, new RegExp(MCP_AI_TRACE_ID_HEADER, "i"));
+	assert.match(allowed, new RegExp(MCP_AI_PARENT_ID_HEADER, "i"));
+	assert.match(allowed, new RegExp(MCP_AI_SESSION_ID_HEADER, "i"));
 });
 
 void test("unauthenticated MCP tools/list returns an OAuth challenge", async () => {

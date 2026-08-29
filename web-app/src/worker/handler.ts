@@ -2141,7 +2141,7 @@ function corsPreflight(): Response {
 			"access-control-allow-origin": "*",
 			"access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
 			"access-control-allow-headers":
-				"Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Param-*",
+				"Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Param-*, Traceparent, Tracestate, X-PostHog-AI-Trace-ID, X-PostHog-AI-Parent-ID, X-PostHog-AI-Session-ID",
 			"access-control-max-age": "86400",
 		},
 	});

@@ -14,10 +14,14 @@ import {
 import { PostHog } from "posthog-node";
 import {
 	attachMcpToolCallObservationProperties,
+	aiTraceContextForMcpRequest,
 	CREATE_CHECKPOINT_TOOL_DESCRIPTION,
 	handleMcpTransport,
 	LIST_LIXES_TOOL_DESCRIPTION,
 	MCP_REQUEST_ID_HEADER,
+	MCP_AI_PARENT_ID_HEADER,
+	MCP_AI_SESSION_ID_HEADER,
+	MCP_AI_TRACE_ID_HEADER,
 	MCP_PROTOCOL_VERSION,
 	MCP_RESOURCE,
 	MCP_SERVER_INSTRUCTIONS,
@@ -409,6 +413,54 @@ void test("MCP request IDs accept a valid incoming ID and expose generated IDs",
 		response.headers.get("access-control-expose-headers") ?? "",
 		/X-Request-ID/,
 	);
+});
+
+void test("MCP AI trace context accepts explicit PostHog and W3C headers", () => {
+	const explicit = aiTraceContextForMcpRequest(
+		new Request("https://lixray.test/mcp", {
+			headers: {
+				[MCP_AI_TRACE_ID_HEADER]: "trace-explicit-123",
+				[MCP_AI_PARENT_ID_HEADER]: "parent-explicit-456",
+				[MCP_AI_SESSION_ID_HEADER]: "conversation-789",
+				traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+			},
+		}),
+	);
+	assert.deepEqual(explicit, {
+		traceId: "trace-explicit-123",
+		parentId: "parent-explicit-456",
+		sessionId: "conversation-789",
+	});
+
+	const w3c = aiTraceContextForMcpRequest(
+		new Request("https://lixray.test/mcp", {
+			headers: {
+				traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+			},
+		}),
+	);
+	assert.deepEqual(w3c, {
+		traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+		parentId: "00f067aa0ba902b7",
+		sessionId: undefined,
+	});
+});
+
+void test("MCP AI trace context rejects malformed or all-zero identifiers", () => {
+	const context = aiTraceContextForMcpRequest(
+		new Request("https://lixray.test/mcp", {
+			headers: {
+				[MCP_AI_TRACE_ID_HEADER]: "contains spaces",
+				[MCP_AI_SESSION_ID_HEADER]: "contains/slash",
+				traceparent: "00-00000000000000000000000000000000-0000000000000000-01",
+			},
+		}),
+	);
+	assert.deepEqual(context, {
+		traceId: undefined,
+		parentId: undefined,
+		sessionId: undefined,
+	});
 });
 
 void test("modern MCP discover and tool calls work without a session id", async () => {
@@ -1650,7 +1702,17 @@ void test("modern 2026-07-28 instrument() emits $mcp_tool_call for list_lixes an
 	});
 	const requests: Array<Request> = [];
 	const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
-		const request = new globalThis.Request(input, init) as unknown as Request;
+		const baseRequest = new globalThis.Request(
+			input,
+			init,
+		) as unknown as Request;
+		const headers = new Headers(baseRequest.headers);
+		headers.set(MCP_AI_TRACE_ID_HEADER, "trace-modern-123");
+		headers.set(MCP_AI_PARENT_ID_HEADER, "parent-modern-456");
+		headers.set(MCP_AI_SESSION_ID_HEADER, "conversation-modern-789");
+		const request = new globalThis.Request(baseRequest, {
+			headers,
+		}) as unknown as Request;
 		requests.push(request.clone());
 		return handleMcpTransport(request as never, service, {
 			authMode: "none",
@@ -1697,6 +1759,15 @@ void test("modern 2026-07-28 instrument() emits $mcp_tool_call for list_lixes an
 		);
 		assertOfficialToolCall(captured, "list_lixes", "felix");
 		assertOfficialToolCall(captured, "query_sql", "felix");
+		for (const event of captured.filter((candidate) =>
+			["$mcp_initialize", "$mcp_tools_list", "$mcp_tool_call"].includes(
+				candidate.event,
+			),
+		)) {
+			assert.equal(event.properties.$ai_trace_id, "trace-modern-123");
+			assert.equal(event.properties.$ai_parent_id, "parent-modern-456");
+			assert.equal(event.properties.$ai_session_id, "conversation-modern-789");
+		}
 	} finally {
 		restore();
 		await client.close();

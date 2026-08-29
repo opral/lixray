@@ -70,26 +70,6 @@ export function openRepositoryRemoteLix(
 	});
 }
 
-/** Downloads the canonical server-side snapshot for a reproduction archive. */
-export async function fetchRepositoryRemoteSnapshot(
-	options: OpenRepositoryLixSessionOptions,
-): Promise<Blob> {
-	const url = repositoryUrl(options);
-	url.pathname = `${url.pathname.replace(/\/+$/, "")}/snapshot`;
-	const response = await createTelemetryFetch(options.fetch, {
-		repositoryId: options.repositoryId,
-		refreshAccessToken: options.refreshAccessToken,
-	})(url, {
-		headers: await repositoryRequestHeaders(options),
-	});
-	if (!response.ok) {
-		throw new Error(
-			`Remote snapshot download failed with HTTP ${response.status}.`,
-		);
-	}
-	return response.blob();
-}
-
 type ResolvedOpenRepositoryLixSessionOptions =
 	OpenRepositoryLixSessionOptions & { replicaId: string };
 
