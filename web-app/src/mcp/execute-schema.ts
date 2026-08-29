@@ -86,7 +86,7 @@ ${EXECUTE_SQL_COLUMNS_QUERY}
 History table functions are read-only revision streams, not current-state snapshot tables. Call \`lix_history('lix_file')\`, \`lix_history('lix_directory')\`, or \`lix_history('<schema>')\` to start at the active branch head. For an explicit anchor commit, pass its id as the second function argument, for example \`lix_history('lix_file', $1)\`. The relation name must be a non-null text literal, not a SQL parameter.`;
 
 export const QUERY_SQL_TOOL_DESCRIPTION =
-	"Run one read-only SQL statement against the branch selected by context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes. Results arrive in structuredContent.";
+	"LixRay read path: run one read-only SQL statement against the branch selected by context. When file paths are known, read them together in one parameterized statement, for example SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path IN ($1, $2) ORDER BY path; do not list the same paths first or read each file separately. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes. Results arrive in structuredContent.";
 
 export const EXECUTE_SQL_TOOL_DESCRIPTION =
 	"Run an ordered atomic SQL batch against the branch selected by context. Always treated as potentially destructive; if any statement fails, the complete batch is rolled back. The mutation is already persisted: use rowsAffected and any returned rows, and do not follow a write with a verification SELECT. Do not call create_checkpoint after a write.";

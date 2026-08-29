@@ -1,8 +1,8 @@
 [
 	{
 		"name": "list_lixes",
-		"title": "List lixes",
-		"description": "List LixRay lixes the signed-in user can access. Use this before open_lix when the Lix is not already known. Each result identifies a lix as @handle/slug plus uuid.",
+		"title": "LixRay: Discover lixes",
+		"description": "LixRay discovery only: list lixes the signed-in user can access. Call this only when the target Lix is unknown. If the user supplied an exact @handle/slug or Lix UUID, skip this tool and call open_lix directly. Each result identifies a lix as @handle/slug plus uuid.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -106,8 +106,8 @@
 	},
 	{
 		"name": "open_lix",
-		"title": "Open a Lix",
-		"description": "Resolve a lix and mint a signed context required by every later tool. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports file and directory counts so empty lixes are obvious.",
+		"title": "LixRay: Open a Lix",
+		"description": "LixRay starting point when the user supplied an exact @handle/slug or Lix UUID: resolve it directly without calling list_lixes first, and mint the signed context required by later tools. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports counts plus a bounded file_paths manifest; when file_paths_complete is true, do not run a separate file-list query.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -171,6 +171,15 @@
 							"minimum": -9007199254740991,
 							"maximum": 9007199254740991
 						},
+						"file_paths": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						},
+						"file_paths_complete": {
+							"type": "boolean"
+						},
 						"empty": {
 							"type": "boolean"
 						},
@@ -191,6 +200,8 @@
 						"commit_id",
 						"file_count",
 						"directory_count",
+						"file_paths",
+						"file_paths_complete",
 						"empty",
 						"request_id"
 					],
@@ -242,8 +253,8 @@
 	},
 	{
 		"name": "query_sql",
-		"title": "Query SQL",
-		"description": "Run one read-only SQL statement against the branch selected by context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes. Results arrive in structuredContent.",
+		"title": "LixRay: Query SQL",
+		"description": "LixRay read path: run one read-only SQL statement against the branch selected by context. When file paths are known, read them together in one parameterized statement, for example SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path IN ($1, $2) ORDER BY path; do not list the same paths first or read each file separately. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes. Results arrive in structuredContent.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
