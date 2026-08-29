@@ -16,10 +16,6 @@ const webSetup = readFileSync(
 	path.join(repositoryRoot, ".github/actions/setup-web/action.yml"),
 	"utf8",
 );
-const rustCache = readFileSync(
-	path.join(repositoryRoot, ".github/workflows/rust-cache.yml"),
-	"utf8",
-);
 const dockerfile = readFileSync(
 	path.join(repositoryRoot, "web-app/Dockerfile"),
 	"utf8",
@@ -112,16 +108,5 @@ test("preview smoke test uses the canonical protocol and real demo Lix", () => {
 	assert.doesNotMatch(
 		preview,
 		/\/lix\/v1\/11111111-1111-4111-8111-111111111111\//,
-	);
-});
-
-test("Rust cache seeding compiles only for changed dependencies and cache misses", () => {
-	assert.doesNotMatch(rustCache, /"lix-server\/\*\*"/);
-	assert.match(rustCache, /"lix-server\/Cargo\.lock"/);
-	assert.match(rustCache, /id: rust-cache/);
-	assert.equal(
-		(rustCache.match(/if: steps\.rust-cache\.outputs\.cache-hit != 'true'/g) ?? [])
-			.length,
-		2,
 	);
 });

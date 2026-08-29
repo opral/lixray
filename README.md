@@ -1,7 +1,7 @@
 # LixRay
 
 LixRay is a collaborative repository app built from a TanStack Start control
-plane and a multi-repository Rust Lix service. Supabase supports control-plane
+plane and the prebuilt Lix reference server. Supabase supports control-plane
 identity and metadata; SlateDB stores Lix repositories in S3-compatible object
 storage.
 
@@ -12,7 +12,6 @@ Production: [lixray.com](https://lixray.com)
 ## Repository layout
 
 - `web-app/` — TanStack Start app, MCP server, and Atelier integration
-- `lix-server/` — Rust Lix HTTP service and container image
 - `database/` — Supabase schema, migrations, seeds, and database tests
 - `vendor/` — pinned Lix and Atelier submodules
 
@@ -45,10 +44,11 @@ service. Control-plane databases may index or coordinate repositories, but they
 must not become the authority for durable state that needs to travel with a
 Lix.
 
-Every repository maps to an isolated SlateDB object prefix. One bounded
-`lix-server` process hosts multiple lixes, opens them lazily, and evicts
-idle runtimes. Local development uses the same topology with MinIO in place of
-R2.
+Every repository maps to an isolated SlateDB object prefix. One bounded Lix
+reference-server process hosts multiple lixes, opens them lazily, and evicts
+idle runtimes. Lix publishes that server once as a digest-pinned GHCR image;
+LixRay consumes it without compiling Rust. Local development uses the same
+image with MinIO in place of R2.
 
 The web service owns authentication, organization and project pages,
 `/healthz`, `/mcp`, and the canonical Lix protocol. Supabase row-level security
@@ -104,9 +104,8 @@ required.
 ## Verification
 
 When changing the vendored Lix or Atelier revisions, run `pnpm vendor:sync`.
-It updates the Railway revision manifest and regenerates both Rust and pnpm
-lockfiles. `pnpm vendor:check` verifies that those derived files are committed
-and in sync.
+It regenerates the pnpm lockfile. `pnpm vendor:check` verifies that the derived
+lockfile is committed and in sync.
 
 Run the frontend source checks locally with `pnpm run ci`. Pull-request CI builds
 the production Railway bundle once through `web-app/Dockerfile`, so the
@@ -121,9 +120,6 @@ pnpm --dir web-app check
 VITE_SUPABASE_URL=https://example.invalid \
 VITE_SUPABASE_KEY=ci-public-placeholder \
 pnpm --dir web-app ci:build:node
-cargo fmt --manifest-path lix-server/Cargo.toml --check
-cargo clippy --manifest-path lix-server/Cargo.toml --locked --all-targets --all-features -- -D warnings
-cargo test --manifest-path lix-server/Cargo.toml --locked
 pnpm --dir database start
 pnpm --dir database test
 pnpm --dir web-app exec playwright install chromium
@@ -228,8 +224,8 @@ GitHub Actions is the only build and deployment authority:
   the environment when the pull request closes;
 - each healthy preview is published as a GitHub deployment with a **View
   deployment** link in the pull request;
-- merging to `main` applies database migrations and promotes the tested web and
-  server image digests together;
+- merging to `main` applies database migrations and promotes the tested web
+  image with LixRay's pinned Lix server digest;
 - `railway.json` and `web-app/railway.json` define the two services;
 - Infisical syncs runtime configuration to Railway;
 - deployment and registry credentials come from Infisical via short-lived
@@ -289,11 +285,14 @@ workflow change, and only then disable Railway's native GitHub autodeploy and
 PR environments. This keeps preview deployment available throughout the
 transition.
 
-Both services share `LIXRAY_INTERNAL_TOKEN`. The web service reaches the Rust
-service through Railway's private network. Production and preview environments
-use separate S3 storage configuration; when `S3_PREFIX` is unset, the server
-namespaces data by Railway environment ID. Preview environments never inherit
-production Supabase credentials.
+Both services share `LIXRAY_INTERNAL_TOKEN`. The Railway server start command
+maps it to the reference server's `LIX_SERVER_INTERNAL_TOKEN` and maps the
+existing timeout/cache variables to their generic `LIX_SERVER_*` names. The web
+service reaches the server through Railway's private network. Production and
+preview environments use separate S3 storage configuration; when `S3_PREFIX`
+is unset, the deployment adapter preserves the existing
+`railway/$RAILWAY_ENVIRONMENT_ID` object layout. Preview environments never
+inherit production Supabase credentials.
 
 ### Fast pull request previews
 
@@ -317,16 +316,15 @@ requested integration environment.
 
 ```sh
 LIXRAY_PERF_REPOSITORY=11111111-1111-4111-8111-111111111111 pnpm perf:reset
-LIXRAY_PERF_SPANS=true \
-  RUST_LOG=lixray=info,lix_perf=debug \
-  pnpm perf:up
+RUST_LOG=lix_server=info pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
   --repository 11111111-1111-4111-8111-111111111111 \
   --operation read-point-4k \
   --commits 1000 \
   --output perf/results/baseline.json
-# edit vendor/lix or lix-server
+# To test a local Lix change, build the server image in the Lix repository and
+# export LIXRAY_SERVER_IMAGE=<your-local-image> before starting this stack.
 LIXRAY_PERF_REPOSITORY=22222222-2222-4222-8222-222222222222 pnpm perf:reset
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \

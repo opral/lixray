@@ -24,7 +24,7 @@ case "$RAILWAY_DEPLOY_POLICY" in
 		;;
 esac
 
-POLL_ATTEMPTS="${POLL_ATTEMPTS:-60}"
+POLL_ATTEMPTS="${POLL_ATTEMPTS:-90}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-10}"
 RAILWAY_BIN="${RAILWAY_BIN:-railway}"
 
@@ -70,6 +70,7 @@ update_service() {
 	local service="$1"
 	local image="$2"
 	local deploy="$3"
+	local registry_access="$4"
 	local response
 
 	response="$(
@@ -80,6 +81,7 @@ update_service() {
 			--arg image "$image" \
 			--arg username "$GHCR_READ_USERNAME" \
 			--arg password "$GHCR_READ_TOKEN" \
+			--arg registry_access "$registry_access" \
 			--argjson deploy "$deploy" \
 			'{
 				query: $query,
@@ -88,16 +90,55 @@ update_service() {
 					environmentId: $environment_id,
 					input: ($deploy + {
 						source: {image: $image},
-						registryCredentials: {
-							username: $username,
-							password: $password
-						}
+						registryCredentials: (
+							if $registry_access == "private" then {
+								username: $username,
+								password: $password
+							} else null end
+						)
 					})
 				}
 			}'
 	)"
 	response="$(graphql "$response")"
 	test "$(jq -r '.data.serviceInstanceUpdate' <<<"$response")" = true
+}
+
+service_configuration_matches() {
+	local service="$1"
+	local image="$2"
+	local deploy="$3"
+	local payload response
+
+	payload="$(
+		jq -cn \
+			--arg query 'query($serviceId: String!, $environmentId: String!) { serviceInstance(serviceId: $serviceId, environmentId: $environmentId) { source { image repo } numReplicas sleepApplication startCommand healthcheckPath healthcheckTimeout restartPolicyType restartPolicyMaxRetries overlapSeconds drainingSeconds } }' \
+			--arg service_id "$service" \
+			--arg environment_id "$RAILWAY_TARGET_ENVIRONMENT" \
+			'{
+				query: $query,
+				variables: {
+					serviceId: $service_id,
+					environmentId: $environment_id
+				}
+			}'
+	)"
+	response="$(graphql "$payload")" || return 1
+
+	jq -e \
+		--arg image "$image" \
+		--argjson deploy "$deploy" \
+		'
+			.data.serviceInstance as $actual |
+			($deploy + {source: {image: $image}}) as $expected |
+			all($expected | to_entries[];
+				if .key == "source" then
+					$actual.source.image == .value.image and ($actual.source.repo // null) == null
+				else
+					$actual[.key] == .value
+				end
+			)
+		' <<<"$response" >/dev/null
 }
 
 deploy_service() {
@@ -137,6 +178,34 @@ deployment_status() {
 	jq -r '.status // "unknown"' <<<"$1"
 }
 
+deployment_can_be_reused() {
+	case "$1" in
+		unknown | FAILED | CRASHED | REMOVED | SKIPPED | CANCELED | CANCELLED) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+deployment_is_healthy() {
+	case "$1" in
+		SUCCESS) return 0 ;;
+		SLEEPING) test "$RAILWAY_DEPLOY_POLICY" = pr ;;
+		*) return 1 ;;
+	esac
+}
+
+deployment_is_expected() {
+	local current="$1"
+	local previous="$2"
+	local reuse="$3"
+
+	test -n "$current" || return 1
+	if test "$reuse" = true; then
+		test "$current" = "$previous"
+	else
+		test "$current" != "$previous"
+	fi
+}
+
 print_deployment_logs() {
 	local label="$1"
 	local service="$2"
@@ -156,30 +225,52 @@ print_deployment_logs() {
 	echo "::endgroup::"
 }
 
-previous_deployment_id() {
+previous_deployment() {
 	local service="$1"
-	local deployment
 
-	if deployment="$(latest_deployment "$service")"; then
-		deployment_id "$deployment"
+	if latest_deployment "$service"; then
+		return 0
 	else
 		echo "::warning::Could not read the previous Railway deployment for $service; continuing." >&2
-		printf '\n'
+		printf '{}\n'
 	fi
 }
 
-previous_web="$(previous_deployment_id "$RAILWAY_WEB_SERVICE")"
-previous_server="$(previous_deployment_id "$RAILWAY_SERVER_SERVICE")"
+previous_web_deployment="$(previous_deployment "$RAILWAY_WEB_SERVICE")"
+previous_server_deployment="$(previous_deployment "$RAILWAY_SERVER_SERVICE")"
+previous_web="$(deployment_id "$previous_web_deployment")"
+previous_server="$(deployment_id "$previous_server_deployment")"
+previous_web_status="$(deployment_status "$previous_web_deployment")"
+previous_server_status="$(deployment_status "$previous_server_deployment")"
 
 web_policy="$(jq -c --arg policy "$RAILWAY_DEPLOY_POLICY" '.deploy * .environments[$policy].deploy' web-app/railway.json)"
 server_policy="$(jq -c --arg policy "$RAILWAY_DEPLOY_POLICY" '.deploy * .environments[$policy].deploy' railway.json)"
 
-update_service "$RAILWAY_WEB_SERVICE" "$WEB_IMAGE" "$web_policy"
-update_service "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" "$server_policy"
-deploy_service "$RAILWAY_WEB_SERVICE"
-deploy_service "$RAILWAY_SERVER_SERVICE"
+reuse_web=false
+reuse_server=false
+if test -n "$previous_web" && deployment_can_be_reused "$previous_web_status" &&
+	service_configuration_matches "$RAILWAY_WEB_SERVICE" "$WEB_IMAGE" "$web_policy"; then
+	reuse_web=true
+	echo "Reusing matching Railway web deployment $previous_web ($previous_web_status)."
+fi
+if test -n "$previous_server" && deployment_can_be_reused "$previous_server_status" &&
+	service_configuration_matches "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" "$server_policy"; then
+	reuse_server=true
+	echo "Reusing matching Railway server deployment $previous_server ($previous_server_status)."
+fi
 
-echo "Started Railway $RAILWAY_RELEASE_LABEL deployment for both tested images."
+update_service "$RAILWAY_WEB_SERVICE" "$WEB_IMAGE" "$web_policy" private
+# The Lix reference image is intentionally public. Clear the credential copied
+# from the private LixRay image so Railway performs an anonymous GHCR pull.
+update_service "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" "$server_policy" public
+if test "$reuse_web" = false; then
+	deploy_service "$RAILWAY_WEB_SERVICE"
+fi
+if test "$reuse_server" = false; then
+	deploy_service "$RAILWAY_SERVER_SERVICE"
+fi
+
+echo "Railway $RAILWAY_RELEASE_LABEL promotion is tracking both tested images."
 
 last_web_status=""
 last_server_status=""
@@ -216,15 +307,24 @@ for attempt in $(seq 1 "$POLL_ATTEMPTS"); do
 		case "$state" in
 			FAILED | CRASHED | REMOVED | SKIPPED | CANCELED | CANCELLED)
 				echo "Railway $RAILWAY_RELEASE_LABEL deployment ended with $state." >&2
+				print_deployment_logs "web" "$RAILWAY_WEB_SERVICE" "$web_id"
+				print_deployment_logs "server" "$RAILWAY_SERVER_SERVICE" "$server_id"
 				exit 1
 				;;
 		esac
 	done
 
-	if test -n "$web_id" && test "$web_id" != "$previous_web" &&
-		test "$web_status" = SUCCESS &&
-		test -n "$server_id" && test "$server_id" != "$previous_server" &&
-		test "$server_status" = SUCCESS; then
+	web_is_expected=false
+	server_is_expected=false
+	if deployment_is_expected "$web_id" "$previous_web" "$reuse_web"; then
+		web_is_expected=true
+	fi
+	if deployment_is_expected "$server_id" "$previous_server" "$reuse_server"; then
+		server_is_expected=true
+	fi
+
+	if test "$web_is_expected" = true && deployment_is_healthy "$web_status" &&
+		test "$server_is_expected" = true && deployment_is_healthy "$server_status"; then
 		{
 			echo "## Railway $RAILWAY_RELEASE_LABEL release"
 			echo

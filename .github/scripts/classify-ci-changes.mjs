@@ -2,7 +2,7 @@ import { appendFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const ALL_LANES = ["frontend", "database", "rust", "e2e"];
+const ALL_LANES = ["frontend", "database", "e2e"];
 
 export function classifyCiChanges(files) {
   const lanes = Object.fromEntries(ALL_LANES.map((lane) => [lane, false]));
@@ -23,13 +23,12 @@ function lanesForFile(file) {
   if (file.startsWith(".github/")) return ALL_LANES;
 
   if (file.startsWith("database/")) return ["database", "e2e"];
-  if (file.startsWith("lix-server/")) return ["rust", "e2e"];
   if (file.startsWith("web-app/")) return ["frontend", "e2e"];
   if (file.startsWith("scripts/")) return ["frontend", "e2e"];
   if (file.startsWith("perf/")) return ["frontend"];
 
   if (file === "vendor/lix") {
-    return ["frontend", "rust", "e2e"];
+    return ["frontend", "e2e"];
   }
   if (file === "vendor/atelier") return ["frontend", "e2e"];
 
