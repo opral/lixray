@@ -70,25 +70,6 @@ export function openRepositoryRemoteLix(
 	});
 }
 
-/** Downloads the canonical server-side snapshot for a reproduction archive. */
-export async function fetchRepositoryRemoteSnapshot(
-	options: OpenRepositoryLixSessionOptions,
-): Promise<Blob> {
-	const url = repositoryProtocolUrl(options, "snapshot");
-	const response = await createTelemetryFetch(options.fetch, {
-		repositoryId: options.repositoryId,
-		refreshAccessToken: options.refreshAccessToken,
-	})(url, {
-		headers: await repositoryRequestHeaders(options),
-	});
-	if (!response.ok) {
-		throw new Error(
-			`Remote snapshot download failed with HTTP ${response.status}.`,
-		);
-	}
-	return response.blob();
-}
-
 type ResolvedOpenRepositoryLixSessionOptions =
 	OpenRepositoryLixSessionOptions & { replicaId: string };
 
@@ -747,18 +728,6 @@ function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {
 	const origin = options.origin ?? globalThis.location?.origin;
 	if (!origin) throw new Error("A repository server origin is required.");
 	return new URL(`/lix/${encodeURIComponent(options.repositoryId)}`, origin);
-}
-
-function repositoryProtocolUrl(
-	options: OpenRepositoryLixSessionOptions,
-	endpoint: string,
-): URL {
-	const origin = options.origin ?? globalThis.location?.origin;
-	if (!origin) throw new Error("A repository server origin is required.");
-	return new URL(
-		`/lix/v1/${encodeURIComponent(options.repositoryId)}/${endpoint}`,
-		origin,
-	);
 }
 
 function isBranchNotFoundError(
