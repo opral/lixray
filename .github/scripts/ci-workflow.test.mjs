@@ -68,6 +68,7 @@ test("the SDK resolves tested Lix artifacts once and shares them with consumers"
 test("the server resolves the exact Lix submodule artifact with source fallback", () => {
 	const server = job("server-image");
 	assert.match(server, /submodules: recursive/);
+	assert.match(server, /pnpm install --frozen-lockfile --ignore-scripts/);
 	assert.match(server, /packages: write/);
 	assert.match(server, /resolve-lix-server-image\.mjs/);
 	assert.match(server, /LIX_CI_ARTIFACT_GITHUB_TOKEN/);

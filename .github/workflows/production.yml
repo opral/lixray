@@ -36,6 +36,15 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Set up artifact resolver
+        uses: ./.github/actions/setup-web
+        with:
+          node-version: "24"
+          pnpm-version: "10.13.1"
+
+      - name: Install artifact resolver dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
       - name: Fetch web build configuration from Infisical
         uses: Infisical/secrets-action@v1.0.9
         with:
