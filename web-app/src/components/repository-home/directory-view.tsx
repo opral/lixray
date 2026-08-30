@@ -223,7 +223,22 @@ export function DirectoryView({
 			"commitId" in diffSession.base
 				? diffSession.base.commitId
 				: null;
-		return { fileId: file.id, baseCommitId };
+		if ("commitId" in diffSession.target) {
+			return {
+				kind: "immutable" as const,
+				fileId: file.id,
+				targetCommitId: diffSession.target.commitId,
+				baseCommitId,
+			};
+		}
+		if (!file.workingEpoch) {
+			return { kind: "unavailable" as const, fileId: file.id };
+		}
+		return {
+			kind: "working" as const,
+			fileId: file.id,
+			workingEpoch: file.workingEpoch,
+		};
 	}, [diffSession, listing?.readmePath]);
 	const readme = useFileMarkdown(
 		lix,
@@ -1560,7 +1575,23 @@ function ReadmePreview({
 	readonly sourceFilePath: string;
 	readonly fileId: string | null;
 	/** Present while a review marks the README; renders the diff itself. */
-	readonly diff: { fileId: string; baseCommitId: string | null } | null;
+	readonly diff:
+		| {
+				readonly kind: "immutable";
+				readonly fileId: string;
+				readonly targetCommitId: string;
+				readonly baseCommitId: string | null;
+		  }
+		| {
+				readonly kind: "working";
+				readonly fileId: string;
+				readonly workingEpoch: {
+					readonly beforeCommitId: string;
+					readonly afterCommitId: string;
+				};
+		  }
+		| { readonly kind: "unavailable"; readonly fileId: string }
+		| null;
 	readonly fileName: string;
 	readonly onOpen: (event: ReactMouseEvent) => void;
 	/** Returns true when the link was handled inside the tab model. */
@@ -1607,12 +1638,33 @@ function ReadmePreview({
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
 				    state shares the editor's own presentation. */}
-				<AtelierFilePreview
-					lix={lix}
-					fileId={fileId}
-					filePath={sourceFilePath}
-					diff={diff ? { baseCommitId: diff.baseCommitId } : null}
-				/>
+				{diff?.kind === "unavailable" ? (
+					<div role="alert">
+						The working diff changed while it was being reviewed. Reopen the
+						review.
+					</div>
+				) : diff?.kind === "working" ? (
+					<AtelierFilePreview
+						lix={lix}
+						fileId={fileId}
+						filePath={sourceFilePath}
+						diff={{ workingEpoch: diff.workingEpoch }}
+					/>
+				) : diff?.kind === "immutable" ? (
+					<AtelierFilePreview
+						lix={lix}
+						fileId={fileId}
+						filePath={sourceFilePath}
+						targetCommitId={diff.targetCommitId}
+						diff={{ baseCommitId: diff.baseCommitId }}
+					/>
+				) : (
+					<AtelierFilePreview
+						lix={lix}
+						fileId={fileId}
+						filePath={sourceFilePath}
+					/>
+				)}
 			</div>
 		</>
 	);
