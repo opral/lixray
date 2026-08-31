@@ -260,9 +260,11 @@ if test -n "$previous_server" && deployment_can_be_reused "$previous_server_stat
 fi
 
 update_service "$RAILWAY_WEB_SERVICE" "$WEB_IMAGE" "$web_policy" private
-# The Lix reference image is intentionally public. Clear the credential copied
-# from the private LixRay image so Railway performs an anonymous GHCR pull.
-update_service "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" "$server_policy" public
+# LixRay republishes the tested Lix artifact under its own GHCR package. New
+# packages are private by default, so Railway must receive the same read-only
+# registry credential used for the web image. Without it Railway fails before
+# the server process starts and therefore emits no container logs.
+update_service "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" "$server_policy" private
 if test "$reuse_web" = false; then
 	deploy_service "$RAILWAY_WEB_SERVICE"
 fi

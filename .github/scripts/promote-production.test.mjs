@@ -22,20 +22,17 @@ test("promotes both immutable images and waits for both deployments", async () =
   assert.match(calls, /ghcr\.io\/opral\/lixray-web@sha256:web/);
   assert.match(calls, /ghcr\.io\/opral\/lix-server@sha256:server/);
   const payloads = calls.trim().split("\n").map(JSON.parse);
-  const updates = payloads.filter((payload) =>
-    payload.query.includes("serviceInstanceUpdate"),
-  );
-  const webUpdate = updates.find(
-    (payload) => payload.variables.serviceId === "web-service",
-  );
-  const serverUpdate = updates.find(
-    (payload) => payload.variables.serviceId === "server-service",
-  );
+  const updates = payloads.filter((payload) => payload.query.includes("serviceInstanceUpdate"));
+  const webUpdate = updates.find((payload) => payload.variables.serviceId === "web-service");
+  const serverUpdate = updates.find((payload) => payload.variables.serviceId === "server-service");
   assert.deepEqual(webUpdate.variables.input.registryCredentials, {
     username: "registry-user",
     password: "registry-token",
   });
-  assert.equal(serverUpdate.variables.input.registryCredentials, null);
+  assert.deepEqual(serverUpdate.variables.input.registryCredentials, {
+    username: "registry-user",
+    password: "registry-token",
+  });
 });
 
 test("fails immediately when either deployment reaches a terminal state", async () => {
@@ -105,14 +102,9 @@ test("reuses matching healthy or sleeping image deployments", async () => {
   assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
   assert.match(result.stdout, /Reusing matching Railway web deployment/);
   assert.match(result.stdout, /Reusing matching Railway server deployment/);
-  const payloads = (await readFile(fixture.calls, "utf8"))
-    .trim()
-    .split("\n")
-    .map(JSON.parse);
+  const payloads = (await readFile(fixture.calls, "utf8")).trim().split("\n").map(JSON.parse);
   assert.equal(
-    payloads.filter((payload) =>
-      payload.query.includes("serviceInstanceDeploy"),
-    ).length,
+    payloads.filter((payload) => payload.query.includes("serviceInstanceDeploy")).length,
     0,
   );
 });
@@ -216,8 +208,7 @@ function runCoordinator(fixture, statuses, extraEnv = {}) {
       GITHUB_STEP_SUMMARY: join(fixture.directory, "summary.md"),
       GITHUB_OUTPUT: fixture.output,
       MOCK_CALLS: fixture.calls,
-      MOCK_CONFIGURATION_MATCHES:
-        extraEnv.MOCK_CONFIGURATION_MATCHES ?? "false",
+      MOCK_CONFIGURATION_MATCHES: extraEnv.MOCK_CONFIGURATION_MATCHES ?? "false",
       MOCK_DEPLOYED: fixture.deployed,
       PATH: `${fixture.directory}:${process.env.PATH}`,
       POLL_ATTEMPTS: "2",
