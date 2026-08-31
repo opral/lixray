@@ -49,7 +49,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				headers: {
 					Authorization: "Bearer lixray-demo",
 					"Lix-Session-Id": "0".repeat(64),
-					"Lix-Sync-Protocol-Version": "2",
+					"Lix-Sync-Protocol-Version": "6",
 				},
 			});
 			return {
