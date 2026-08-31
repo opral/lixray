@@ -11,7 +11,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { unzipSync } from "fflate";
 
 const defaultRepository = "opral/lix";
 const defaultApiRoot = "https://api.github.com";
@@ -76,6 +75,75 @@ export async function installServerImageArtifact({
 	}
 }
 
+export async function waitForLixArtifacts({
+	revision,
+	artifactNames,
+	log = console.log,
+}) {
+	if (process.env.LIXRAY_LIX_ARTIFACTS === "off") {
+		log(
+			`[lix-artifact] GATE bypassed; source builds were explicitly requested for ${revision}.`,
+		);
+		return { available: [], missing: [...artifactNames] };
+	}
+
+	const repository =
+		process.env.LIX_CI_ARTIFACT_REPOSITORY ?? defaultRepository;
+	const apiRoot = process.env.LIX_CI_ARTIFACT_API_ROOT ?? defaultApiRoot;
+	const deadline = Date.now() + waitDurationSeconds() * 1_000;
+	const available = new Set();
+	log(
+		`[lix-artifact] GATE waiting for ${artifactNames.join(", ")} from ${repository} at ${revision}.`,
+	);
+
+	while (true) {
+		for (const artifactName of artifactNames) {
+			if (available.has(artifactName)) continue;
+			const candidate = await findReusableArtifact({
+				apiRoot,
+				artifactName,
+				log,
+				repository,
+				revision,
+			});
+			if (!candidate) continue;
+			available.add(artifactName);
+			log(
+				`[lix-artifact] READY ${artifactName} from run ${candidate.runId}.`,
+			);
+		}
+
+		if (available.size === artifactNames.length || Date.now() >= deadline) {
+			break;
+		}
+		const pendingRun = await findPendingRun({
+			apiRoot,
+			repository,
+			revision,
+		});
+		if (!pendingRun) break;
+		const missing = artifactNames.filter((name) => !available.has(name));
+		const remainingSeconds = Math.max(
+			1,
+			Math.ceil((deadline - Date.now()) / 1_000),
+		);
+		log(
+			`[lix-artifact] GATE WAIT run ${pendingRun.id} is ${pendingRun.status}; waiting up to ${remainingSeconds}s for ${missing.join(", ")}.`,
+		);
+		await delay(Math.min(15_000, deadline - Date.now()));
+	}
+
+	const missing = artifactNames.filter((name) => !available.has(name));
+	if (missing.length > 0) {
+		log(
+			`[lix-artifact] GATE continuing with source fallback available for ${missing.join(", ")}.`,
+		);
+	} else {
+		log(`[lix-artifact] GATE complete; all exact-revision artifacts are ready.`);
+	}
+	return { available: [...available], missing };
+}
+
 async function downloadArtifact({ artifactName, manifestPath, revision, log }) {
 	if (process.env.LIXRAY_LIX_ARTIFACTS === "off") {
 		log(
@@ -92,12 +160,15 @@ async function downloadArtifact({ artifactName, manifestPath, revision, log }) {
 	log(`[lix-artifact] Looking for ${repository}/${artifactName}.`);
 
 	while (true) {
-		let artifacts;
+		let candidate;
 		try {
-			const response = await githubJson(
-				`${apiRoot}/repos/${repository}/actions/artifacts?name=${encodeURIComponent(artifactName)}&per_page=100`,
-			);
-			artifacts = response.artifacts ?? [];
+			candidate = await findReusableArtifact({
+				apiRoot,
+				artifactName,
+				log,
+				repository,
+				revision,
+			});
 		} catch (error) {
 			log(
 				`[lix-artifact] Lookup unavailable (${errorMessage(error)}); falling back to source.`,
@@ -105,37 +176,14 @@ async function downloadArtifact({ artifactName, manifestPath, revision, log }) {
 			return undefined;
 		}
 
-		for (const artifact of artifacts
-			.filter((candidate) => !candidate.expired)
-			.sort((left, right) => right.id - left.id)) {
-			const runId = artifact.workflow_run?.id;
-			if (!runId || artifact.workflow_run?.head_sha !== revision) continue;
-
-			let run;
-			try {
-				run = await githubJson(
-					`${apiRoot}/repos/${repository}/actions/runs/${runId}`,
-				);
-			} catch (error) {
-				log(
-					`[lix-artifact] Could not verify workflow run ${runId} (${errorMessage(error)}).`,
-				);
-				continue;
-			}
-			if (run.status === "completed" && run.conclusion !== "success") {
-				log(
-					`[lix-artifact] Ignoring ${artifactName} from failed run ${runId}: ${run.conclusion ?? "unknown"}.`,
-				);
-				continue;
-			}
-
+		if (candidate) {
 			const downloaded = await verifiedArtifact({
-				artifact,
+				artifact: candidate.artifact,
 				artifactName,
 				manifestPath,
 				revision,
-				run,
-				runId,
+				run: candidate.run,
+				runId: candidate.runId,
 				log,
 			});
 			if (downloaded) return downloaded;
@@ -169,6 +217,44 @@ async function downloadArtifact({ artifactName, manifestPath, revision, log }) {
 	log(`[lix-artifact] MISS ${artifactName}; ${outcome}.`);
 	if (process.env.LIXRAY_LIX_ARTIFACTS === "only") {
 		throw new Error(`Required Lix CI artifact ${artifactName} is unavailable.`);
+	}
+	return undefined;
+}
+
+async function findReusableArtifact({
+	apiRoot,
+	artifactName,
+	log,
+	repository,
+	revision,
+}) {
+	const response = await githubJson(
+		`${apiRoot}/repos/${repository}/actions/artifacts?name=${encodeURIComponent(artifactName)}&per_page=100`,
+	);
+	for (const artifact of (response.artifacts ?? [])
+		.filter((candidate) => !candidate.expired)
+		.sort((left, right) => right.id - left.id)) {
+		const runId = artifact.workflow_run?.id;
+		if (!runId || artifact.workflow_run?.head_sha !== revision) continue;
+
+		let run;
+		try {
+			run = await githubJson(
+				`${apiRoot}/repos/${repository}/actions/runs/${runId}`,
+			);
+		} catch (error) {
+			log(
+				`[lix-artifact] Could not verify workflow run ${runId} (${errorMessage(error)}).`,
+			);
+			continue;
+		}
+		if (run.status === "completed" && run.conclusion !== "success") {
+			log(
+				`[lix-artifact] Ignoring ${artifactName} from failed run ${runId}: ${run.conclusion ?? "unknown"}.`,
+			);
+			continue;
+		}
+		return { artifact, run, runId };
 	}
 	return undefined;
 }
@@ -248,6 +334,7 @@ function delay(milliseconds) {
 }
 
 async function extractZip(bytes, destination) {
+	const { unzipSync } = await import("fflate");
 	const entries = unzipSync(bytes);
 	for (const [name, contents] of Object.entries(entries)) {
 		const normalized = name.replaceAll("\\", "/");

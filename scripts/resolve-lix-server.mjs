@@ -7,7 +7,10 @@ import { installServerImageArtifact } from "./lix-ci-artifacts.mjs";
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const lixRoot = join(repositoryRoot, "vendor", "lix");
 
-export async function resolveLixServerImage({ mode }) {
+export async function resolveLixServerImage({
+	mode,
+	inspectImage = inspectDigest,
+}) {
 	if (mode !== "ci" && mode !== "local") {
 		throw new Error(`Unsupported Lix server resolution mode ${mode}.`);
 	}
@@ -21,13 +24,28 @@ export async function resolveLixServerImage({ mode }) {
 	console.log(`[lix-server] Selected vendored Lix ${sourceRevision}.`);
 	console.log(`[lix-server] Server input hash ${inputHash}.`);
 
-	const existingOfficialImage = officialImage(officialTags);
+	const existingOfficialImage = officialImage(officialTags, inspectImage);
 	if (existingOfficialImage) {
 		return {
 			image: existingOfficialImage,
 			source: "lix-main-image",
 			sourceRevision,
 		};
+	}
+	if (mode === "ci") {
+		const previewTag = previewImageTag(sourceRevision);
+		const previewDigest = inspectImage(previewTag);
+		if (previewDigest) {
+			const image = `${previewRepository()}@${previewDigest}`;
+			console.log(
+				`[lix-server] HIT previously published feature image ${previewTag} as ${image}.`,
+			);
+			return {
+				image,
+				source: "lixray-feature-image",
+				sourceRevision,
+			};
+		}
 	}
 
 	for (const localTag of [
@@ -84,7 +102,7 @@ export async function resolveLixServerImage({ mode }) {
 	// A matching main image may finish publishing while the artifact resolver
 	// waits for the exact-revision Lix workflows. Recheck before paying for a
 	// fallback build.
-	const publishedOfficialImage = officialImage(officialTags);
+	const publishedOfficialImage = officialImage(officialTags, inspectImage);
 	if (publishedOfficialImage) {
 		return {
 			image: publishedOfficialImage,
@@ -114,10 +132,7 @@ export async function resolveLixServerImage({ mode }) {
 		return { image: localTag, source: "source-build", sourceRevision };
 	}
 
-	const previewRepository = `ghcr.io/${(
-		process.env.GITHUB_REPOSITORY_OWNER ?? "opral"
-	).toLowerCase()}/lixray-server`;
-	const previewTag = `${previewRepository}:lix-${sourceRevision}`;
+	const previewTag = previewImageTag(sourceRevision);
 	run("docker", [
 		"buildx",
 		"build",
@@ -139,9 +154,9 @@ export async function resolveLixServerImage({ mode }) {
 	return { image: builtImage, source: "source-build", sourceRevision };
 }
 
-function officialImage(tags) {
+function officialImage(tags, inspectImage) {
 	for (const tag of tags) {
-		const digest = inspectDigest(tag);
+		const digest = inspectImage(tag);
 		if (!digest) continue;
 		const image = `ghcr.io/opral/lix-server@${digest}`;
 		console.log(
@@ -191,14 +206,22 @@ function serverInputHash() {
 }
 
 function publishPreviewImage({ loadedTag, sourceRevision }) {
-	const repository = `ghcr.io/${(
-		process.env.GITHUB_REPOSITORY_OWNER ?? "opral"
-	).toLowerCase()}/lixray-server`;
-	const tag = `${repository}:lix-${sourceRevision}`;
+	const repository = previewRepository();
+	const tag = previewImageTag(sourceRevision);
 	run("docker", ["tag", loadedTag, tag]);
 	console.log(`[lix-server] Publishing the tested image as ${tag}.`);
 	run("docker", ["push", tag]);
 	return `${repository}@${requiredDigest(tag)}`;
+}
+
+function previewRepository() {
+	return `ghcr.io/${(
+		process.env.GITHUB_REPOSITORY_OWNER ?? "opral"
+	).toLowerCase()}/lixray-server`;
+}
+
+function previewImageTag(sourceRevision) {
+	return `${previewRepository()}:lix-${sourceRevision}`;
 }
 
 function localImageMatches(image, revision) {

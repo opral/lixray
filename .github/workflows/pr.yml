@@ -51,9 +51,34 @@ jobs:
         id: classify
         run: node .github/scripts/classify-ci-changes.mjs
 
+  lix-artifacts:
+    name: Await Lix artifacts
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Wait for exact-revision Lix artifacts on a GitHub runner
+        env:
+          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "900"
+        run: node .github/scripts/await-lix-artifacts.mjs
+
   sdk:
     name: Vendored Lix SDK
-    needs: changes
+    needs:
+      - changes
+      - lix-artifacts
     if: >-
       needs.changes.outputs.frontend == 'true' ||
       (github.event.pull_request.draft != true && needs.changes.outputs.e2e == 'true')
@@ -78,7 +103,7 @@ jobs:
       - name: Resolve tested SDK artifacts or build the submodule once
         env:
           LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
-          LIX_CI_ARTIFACT_WAIT_SECONDS: "900"
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "0"
         run: pnpm --dir web-app lix:build
 
       - name: Share the prepared SDK with CI lanes and the web image
@@ -94,7 +119,9 @@ jobs:
 
   server-image:
     name: Lix server image
-    needs: changes
+    needs:
+      - changes
+      - lix-artifacts
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 25
     permissions:
@@ -134,7 +161,7 @@ jobs:
         id: resolve
         env:
           LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
-          LIX_CI_ARTIFACT_WAIT_SECONDS: "900"
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "0"
         run: node .github/scripts/resolve-lix-server-image.mjs
 
   web-image:
