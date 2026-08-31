@@ -9,6 +9,7 @@ import { zipSync } from "fflate";
 import {
 	installBrowserArtifact,
 	installServerImageArtifact,
+	waitForLixArtifacts,
 } from "./lix-ci-artifacts.mjs";
 
 const encoder = new TextEncoder();
@@ -89,6 +90,35 @@ test("uses an artifact after its producer job uploads while the workflow continu
 		delete process.env.LIX_CI_ARTIFACT_API_ROOT;
 		await fixture.close();
 		await rm(dirname(destination), { recursive: true, force: true });
+	}
+});
+
+test("waits for artifact metadata without downloading build outputs", async () => {
+	const revision = "c".repeat(40);
+	const fixture = await artifactApiFixture({
+		archive: new Uint8Array(),
+		revision,
+		successful: false,
+	});
+	const logs = [];
+	try {
+		process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
+		process.env.LIX_CI_ARTIFACT_WAIT_SECONDS = "0";
+		const result = await waitForLixArtifacts({
+			artifactNames: ["browser", "server"],
+			log: (message) => logs.push(message),
+			revision,
+		});
+
+		assert.deepEqual(result, {
+			available: ["browser", "server"],
+			missing: [],
+		});
+		assert.match(logs.join("\n"), /GATE complete/);
+	} finally {
+		delete process.env.LIX_CI_ARTIFACT_API_ROOT;
+		delete process.env.LIX_CI_ARTIFACT_WAIT_SECONDS;
+		await fixture.close();
 	}
 });
 

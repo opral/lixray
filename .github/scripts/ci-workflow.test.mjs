@@ -16,6 +16,10 @@ const webSetup = readFileSync(
 	path.join(repositoryRoot, ".github/actions/setup-web/action.yml"),
 	"utf8",
 );
+const serverResolver = readFileSync(
+	path.join(repositoryRoot, "scripts/resolve-lix-server.mjs"),
+	"utf8",
+);
 const dockerfile = readFileSync(
 	path.join(repositoryRoot, "web-app/Dockerfile"),
 	"utf8",
@@ -43,8 +47,26 @@ test("submodule revisions are validated before expensive CI lanes begin", () => 
 		selection.indexOf("validate-submodule-branches.sh") <
 			selection.indexOf("Classify changed files"),
 	);
-	assert.match(job("server-image"), /needs: changes/);
+	assert.match(
+		job("server-image"),
+		/needs:\n\s+- changes\n\s+- lix-artifacts/,
+	);
 	assert.match(job("web-image"), /needs:\n\s+- changes\n\s+- sdk/);
+});
+
+test("exact-revision Lix artifacts wait once on a GitHub-hosted runner", () => {
+	const gate = job("lix-artifacts");
+	assert.match(gate, /name: Await Lix artifacts/);
+	assert.match(gate, /runs-on: ubuntu-latest/);
+	assert.match(gate, /LIX_CI_ARTIFACT_WAIT_SECONDS: "900"/);
+	assert.match(gate, /await-lix-artifacts\.mjs/);
+	assert.doesNotMatch(gate, /blacksmith/);
+
+	for (const name of ["sdk", "server-image"]) {
+		const consumer = job(name);
+		assert.match(consumer, /needs:\n\s+- changes\n\s+- lix-artifacts/);
+		assert.match(consumer, /LIX_CI_ARTIFACT_WAIT_SECONDS: "0"/);
+	}
 });
 
 test("the SDK resolves tested Lix artifacts once and shares them with consumers", () => {
@@ -79,6 +101,11 @@ test("the server resolves the exact Lix submodule artifact with source fallback"
 	assert.match(server, /packages: write/);
 	assert.match(server, /resolve-lix-server-image\.mjs/);
 	assert.match(server, /LIX_CI_ARTIFACT_GITHUB_TOKEN/);
+	assert.ok(
+		serverResolver.indexOf("HIT previously published feature image") <
+			serverResolver.indexOf("artifact = await installServerImageArtifact"),
+		"feature images should be checked before downloading Lix artifacts",
+	);
 });
 
 test("web image reuses the SDK artifact while direct Docker builds remain supported", () => {
