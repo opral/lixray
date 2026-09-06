@@ -20,7 +20,7 @@ permissions:
 jobs:
   resolve:
     name: Reuse tested server image
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       image: ${{ steps.resolve.outputs.image }}

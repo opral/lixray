@@ -172,11 +172,11 @@ test("preview smoke test uses the canonical protocol and real demo Lix", () => {
 	);
 });
 
-test("artifact hits use small runners and misses retain separate compilation jobs", () => {
+test("artifact hits and ordinary checks use standard GitHub runners, with paid compilation fallback", () => {
 	for (const source of [sdkWorkflow, serverWorkflow]) {
 		assert.match(
 			source,
-			/name: Reuse tested[\s\S]*?runs-on: blacksmith-4vcpu-ubuntu-2404/,
+			/name: Reuse tested[\s\S]*?runs-on: ubuntu-(?:24\.04|slim)/,
 		);
 		assert.match(
 			source,
@@ -186,15 +186,11 @@ test("artifact hits use small runners and misses retain separate compilation job
 	assert.match(sdkWorkflow, /lix:build --resolve-only/);
 	assert.match(sdkWorkflow, /if: steps\.resolve\.outputs\.ready == 'true'/);
 	assert.match(serverWorkflow, /LIXRAY_ALLOW_SOURCE_BUILD: "false"/);
-	for (const [name, cores] of [
-		["frontend", 4],
-		["database", 4],
-		["e2e", 8],
-		["web-image", 16],
-	]) {
-		assert.match(
-			job(name),
-			new RegExp(`runs-on: blacksmith-${cores}vcpu-ubuntu-2404`),
-		);
+	for (const name of ["frontend", "database", "e2e"]) {
+		assert.match(job(name), /runs-on: ubuntu-24\.04/);
 	}
+	assert.match(
+		job("web-image"),
+		/needs\.sdk\.result == 'success' && 'ubuntu-24\.04'/,
+	);
 });

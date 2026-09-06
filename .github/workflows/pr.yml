@@ -105,7 +105,8 @@ jobs:
       always() &&
       needs.changes.result == 'success' &&
       (needs.sdk.result == 'success' || needs.sdk.result == 'skipped')
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    # A prepared SDK removes Rust compilation from the web image build.
+    runs-on: ${{ needs.sdk.result == 'success' && 'ubuntu-24.04' || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: 25
     permissions:
       contents: read
@@ -214,6 +215,10 @@ jobs:
             echo "tree_found=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Prepare Linux build runner
+        if: steps.existing.outputs.found != 'true'
+        uses: ./.github/actions/prepare-linux-runner
+
       - name: Download the prepared SDK for the Docker build
         if: steps.existing.outputs.found != 'true' && needs.sdk.result == 'success'
         uses: actions/download-artifact@v4
@@ -275,7 +280,7 @@ jobs:
       - changes
       - sdk
     if: github.event.pull_request.draft != true && needs.changes.outputs.frontend == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -307,7 +312,7 @@ jobs:
     name: Database
     needs: changes
     if: github.event.pull_request.draft != true && needs.changes.outputs.database == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -329,7 +334,7 @@ jobs:
       - sdk
       - server-image
     if: github.event.pull_request.draft != true && needs.changes.outputs.e2e == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -340,6 +345,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Prepare Linux build runner
+        uses: ./.github/actions/prepare-linux-runner
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
