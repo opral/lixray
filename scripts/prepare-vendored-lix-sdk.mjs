@@ -1,4 +1,5 @@
 import {
+	appendFile,
 	chmod,
 	cp,
 	mkdir,
@@ -40,12 +41,19 @@ const tsc = join(
 	"tsc",
 );
 const modeArguments = process.argv.slice(2);
-if (modeArguments.some((argument) => argument !== "--native")) {
+if (
+	modeArguments.some(
+		(argument) => !["--native", "--resolve-only"].includes(argument),
+	)
+) {
 	throw new Error(
 		`Unsupported vendored Lix preparation mode: ${modeArguments.join(" ")}`,
 	);
 }
 const buildNative = modeArguments.includes("--native");
+const resolveOnly = modeArguments.includes("--resolve-only");
+if (resolveOnly && buildNative)
+	throw new Error("Resolve-only mode cannot build native binaries.");
 const lixRoot = join(sdkRoot, "..", "..");
 const sourceRevision = requiredOutput(
 	"git",
@@ -111,6 +119,15 @@ if (browserReady) {
 		console.log(
 			`[lix-sdk] Artifact install failed (${errorMessage(error)}); compiling from source.`,
 		);
+	}
+}
+
+if (resolveOnly) {
+	if (process.env.GITHUB_OUTPUT)
+		await appendFile(process.env.GITHUB_OUTPUT, `ready=${browserReady}\n`);
+	if (!browserReady) {
+		console.log("[lix-sdk] Cache miss; leave compilation to the build runner.");
+		process.exit(0);
 	}
 }
 

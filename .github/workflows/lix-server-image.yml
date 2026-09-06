@@ -1,0 +1,106 @@
+name: Prepare Lix server image
+
+on:
+  workflow_call:
+    secrets:
+      LIX_ACTIONS_READ_TOKEN:
+        required: false
+    outputs:
+      image:
+        value: ${{ jobs.build.outputs.image || jobs.resolve.outputs.image }}
+      source:
+        value: ${{ jobs.build.outputs.source || jobs.resolve.outputs.source }}
+      source_revision:
+        value: ${{ jobs.build.outputs.source_revision || jobs.resolve.outputs.source_revision }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  resolve:
+    name: Reuse tested server image
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+      source: ${{ steps.resolve.outputs.source }}
+      source_revision: ${{ steps.resolve.outputs.sourceRevision }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up artifact resolver
+        uses: ./.github/actions/setup-web
+        with:
+          node-version: "24"
+          pnpm-version: "10.13.1"
+          build-rust: "false"
+
+      - name: Install only artifact resolver dependencies
+        run: pnpm install --filter lixray-repository --frozen-lockfile --ignore-scripts
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve tested image or build the submodule once
+        id: resolve
+        env:
+          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "0"
+          LIXRAY_ALLOW_SOURCE_BUILD: "false"
+        run: node .github/scripts/resolve-lix-server-image.mjs
+
+  build:
+    name: Build server on cache miss
+    needs: resolve
+    if: needs.resolve.outputs.image == ''
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 25
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+      source: ${{ steps.resolve.outputs.source }}
+      source_revision: ${{ steps.resolve.outputs.sourceRevision }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up artifact resolver
+        uses: ./.github/actions/setup-web
+        with:
+          node-version: "24"
+          pnpm-version: "10.13.1"
+          build-rust: "false"
+
+      - name: Install only artifact resolver dependencies
+        run: pnpm install --filter lixray-repository --frozen-lockfile --ignore-scripts
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve tested image or build the submodule once
+        id: resolve
+        env:
+          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "0"
+        run: node .github/scripts/resolve-lix-server-image.mjs

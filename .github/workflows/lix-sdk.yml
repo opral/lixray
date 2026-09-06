@@ -1,0 +1,96 @@
+name: Prepare Lix SDK
+
+on:
+  workflow_call:
+    secrets:
+      LIX_ACTIONS_READ_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "10.13.1"
+
+jobs:
+  resolve:
+    name: Reuse tested SDK
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    outputs:
+      ready: ${{ steps.resolve.outputs.ready }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up web toolchain
+        uses: ./.github/actions/setup-web
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          build-rust: "false"
+
+      - name: Install dependencies without rebuilding the SDK
+        run: pnpm install --filter lixray-repository --frozen-lockfile --ignore-scripts
+
+      - name: Resolve tested SDK artifacts
+        id: resolve
+        env:
+          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "0"
+        run: pnpm --dir web-app lix:build --resolve-only
+
+      - name: Share the prepared SDK with CI lanes and the web image
+        if: steps.resolve.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendored-lix-sdk
+          path: |
+            vendor/lix/packages/js-sdk/dist
+            vendor/lix/packages/storage-opfs/dist
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  build:
+    name: Build SDK on cache miss
+    needs: resolve
+    if: needs.resolve.outputs.ready != 'true'
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up web toolchain
+        uses: ./.github/actions/setup-web
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies without rebuilding the SDK
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Resolve tested SDK artifacts or build the submodule once
+        env:
+          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_ARTIFACT_WAIT_SECONDS: "0"
+        run: pnpm --dir web-app lix:build
+
+      - name: Share the prepared SDK with CI lanes and the web image
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendored-lix-sdk
+          path: |
+            vendor/lix/packages/js-sdk/dist
+            vendor/lix/packages/storage-opfs/dist
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1

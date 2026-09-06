@@ -52,7 +52,10 @@ function extractWebBuildStep(source) {
 
 test("PR, production, and local development resolve the server from the Lix submodule", () => {
 	for (const workflow of [pr, production]) {
-		assert.match(workflow, /resolve-lix-server-image\.mjs/);
+		assert.match(
+			workflow,
+			/uses: \.\/\.github\/workflows\/lix-server-image\.yml/,
+		);
 		assert.match(workflow, /submodules: recursive/);
 	}
 	assert.match(compose, /image: \$\{LIXRAY_SERVER_IMAGE:-/);

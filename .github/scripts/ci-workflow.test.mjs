@@ -32,6 +32,15 @@ const webPackage = JSON.parse(
 	readFileSync(path.join(repositoryRoot, "web-app/package.json"), "utf8"),
 );
 
+const sdkWorkflow = readFileSync(
+	path.join(repositoryRoot, ".github/workflows/lix-sdk.yml"),
+	"utf8",
+);
+const serverWorkflow = readFileSync(
+	path.join(repositoryRoot, ".github/workflows/lix-server-image.yml"),
+	"utf8",
+);
+
 function job(name) {
 	const start = workflow.indexOf(`\n  ${name}:\n`);
 	assert.notEqual(start, -1, `missing ${name} CI job`);
@@ -47,10 +56,7 @@ test("submodule revisions are validated before expensive CI lanes begin", () => 
 		selection.indexOf("validate-submodule-branches.sh") <
 			selection.indexOf("Classify changed files"),
 	);
-	assert.match(
-		job("server-image"),
-		/needs:\n\s+- changes\n\s+- lix-artifacts/,
-	);
+	assert.match(job("server-image"), /needs:\n\s+- changes\n\s+- lix-artifacts/);
 	assert.match(job("web-image"), /needs:\n\s+- changes\n\s+- sdk/);
 });
 
@@ -65,12 +71,15 @@ test("exact-revision Lix artifacts wait once on a GitHub-hosted runner", () => {
 	for (const name of ["sdk", "server-image"]) {
 		const consumer = job(name);
 		assert.match(consumer, /needs:\n\s+- changes\n\s+- lix-artifacts/);
-		assert.match(consumer, /LIX_CI_ARTIFACT_WAIT_SECONDS: "0"/);
+		assert.match(
+			name === "sdk" ? sdkWorkflow : serverWorkflow,
+			/LIX_CI_ARTIFACT_WAIT_SECONDS: "0"/,
+		);
 	}
 });
 
 test("the SDK resolves tested Lix artifacts once and shares them with consumers", () => {
-	const sdk = job("sdk");
+	const sdk = sdkWorkflow;
 	assert.match(sdk, /pnpm install --frozen-lockfile --ignore-scripts/);
 	assert.match(sdk, /run: pnpm --dir web-app lix:build/);
 	assert.match(sdk, /LIX_CI_ARTIFACT_GITHUB_TOKEN/);
@@ -95,15 +104,19 @@ test("the SDK resolves tested Lix artifacts once and shares them with consumers"
 });
 
 test("the server resolves the exact Lix submodule artifact with source fallback", () => {
-	const server = job("server-image");
+	const server = serverWorkflow;
 	assert.match(server, /submodules: recursive/);
-	assert.match(server, /pnpm install --frozen-lockfile --ignore-scripts/);
+	assert.match(
+		server,
+		/pnpm install --filter lixray-repository --frozen-lockfile --ignore-scripts/,
+	);
+	assert.match(server, /build-rust: "false"/);
 	assert.match(server, /packages: write/);
 	assert.match(server, /resolve-lix-server-image\.mjs/);
 	assert.match(server, /LIX_CI_ARTIFACT_GITHUB_TOKEN/);
 	assert.ok(
 		serverResolver.indexOf("HIT previously published feature image") <
-			serverResolver.indexOf("artifact = await installServerImageArtifact"),
+			serverResolver.indexOf("artifact = await installArtifact"),
 		"feature images should be checked before downloading Lix artifacts",
 	);
 });
@@ -157,4 +170,31 @@ test("preview smoke test uses the canonical protocol and real demo Lix", () => {
 		preview,
 		/\/lix\/v1\/11111111-1111-4111-8111-111111111111\//,
 	);
+});
+
+test("artifact hits use small runners and misses retain separate compilation jobs", () => {
+	for (const source of [sdkWorkflow, serverWorkflow]) {
+		assert.match(
+			source,
+			/name: Reuse tested[\s\S]*?runs-on: blacksmith-4vcpu-ubuntu-2404/,
+		);
+		assert.match(
+			source,
+			/name: Build[\s\S]*?needs: resolve[\s\S]*?runs-on: blacksmith-32vcpu-ubuntu-2404/,
+		);
+	}
+	assert.match(sdkWorkflow, /lix:build --resolve-only/);
+	assert.match(sdkWorkflow, /if: steps\.resolve\.outputs\.ready == 'true'/);
+	assert.match(serverWorkflow, /LIXRAY_ALLOW_SOURCE_BUILD: "false"/);
+	for (const [name, cores] of [
+		["frontend", 4],
+		["database", 4],
+		["e2e", 8],
+		["web-image", 16],
+	]) {
+		assert.match(
+			job(name),
+			new RegExp(`runs-on: blacksmith-${cores}vcpu-ubuntu-2404`),
+		);
+	}
 });
