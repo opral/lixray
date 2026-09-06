@@ -5,7 +5,10 @@ import {
 	renameWorkspaceEntry,
 	WorkspacePathTakenError,
 } from "@opral/atelier";
-import type { AtelierDiffSession } from "@opral/atelier";
+import type {
+	AtelierDiffSession,
+	AtelierFilePreviewProps,
+} from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import {
 	ArrowUp,
@@ -210,7 +213,9 @@ export function DirectoryView({
 	const reviewFocus = changedFileKinds.size > 0;
 	// A changed README previews as its diff — the review renders the change
 	// itself, not the resulting document.
-	const readmeDiff = useMemo(() => {
+	const readmeDiff = useMemo<
+		AtelierFilePreviewProps | { fileId: string; unavailable: true } | null
+	>(() => {
 		const readmePath = listing?.readmePath;
 		if (!diffSession || !readmePath) return null;
 		const file = diffSession.files.find(
@@ -223,23 +228,19 @@ export function DirectoryView({
 			"commitId" in diffSession.base
 				? diffSession.base.commitId
 				: null;
+		const preview = { lix, fileId: file.id, filePath: readmePath };
 		if ("commitId" in diffSession.target) {
 			return {
-				kind: "immutable" as const,
-				fileId: file.id,
+				...preview,
 				targetCommitId: diffSession.target.commitId,
-				baseCommitId,
+				diff: { baseCommitId },
 			};
 		}
 		if (!file.workingEpoch) {
-			return { kind: "unavailable" as const, fileId: file.id };
+			return { unavailable: true, fileId: file.id };
 		}
-		return {
-			kind: "working" as const,
-			fileId: file.id,
-			workingEpoch: file.workingEpoch,
-		};
-	}, [diffSession, listing?.readmePath]);
+		return { ...preview, diff: { workingEpoch: file.workingEpoch } };
+	}, [lix, diffSession, listing?.readmePath]);
 	const readme = useFileMarkdown(
 		lix,
 		listing?.readmePath ?? null,
@@ -1576,21 +1577,8 @@ function ReadmePreview({
 	readonly fileId: string | null;
 	/** Present while a review marks the README; renders the diff itself. */
 	readonly diff:
-		| {
-				readonly kind: "immutable";
-				readonly fileId: string;
-				readonly targetCommitId: string;
-				readonly baseCommitId: string | null;
-		  }
-		| {
-				readonly kind: "working";
-				readonly fileId: string;
-				readonly workingEpoch: {
-					readonly beforeCommitId: string;
-					readonly afterCommitId: string;
-				};
-		  }
-		| { readonly kind: "unavailable"; readonly fileId: string }
+		| AtelierFilePreviewProps
+		| { fileId: string; unavailable: true }
 		| null;
 	readonly fileName: string;
 	readonly onOpen: (event: ReactMouseEvent) => void;
@@ -1638,31 +1626,14 @@ function ReadmePreview({
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
 				    state shares the editor's own presentation. */}
-				{diff?.kind === "unavailable" ? (
+				{diff && "unavailable" in diff ? (
 					<div role="alert">
 						The working diff changed while it was being reviewed. Reopen the
 						review.
 					</div>
-				) : diff?.kind === "working" ? (
-					<AtelierFilePreview
-						lix={lix}
-						fileId={fileId}
-						filePath={sourceFilePath}
-						diff={{ workingEpoch: diff.workingEpoch }}
-					/>
-				) : diff?.kind === "immutable" ? (
-					<AtelierFilePreview
-						lix={lix}
-						fileId={fileId}
-						filePath={sourceFilePath}
-						targetCommitId={diff.targetCommitId}
-						diff={{ baseCommitId: diff.baseCommitId }}
-					/>
 				) : (
 					<AtelierFilePreview
-						lix={lix}
-						fileId={fileId}
-						filePath={sourceFilePath}
+						{...(diff ?? { lix, fileId, filePath: sourceFilePath })}
 					/>
 				)}
 			</div>

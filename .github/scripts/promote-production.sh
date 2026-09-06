@@ -70,7 +70,6 @@ update_service() {
 	local service="$1"
 	local image="$2"
 	local deploy="$3"
-	local registry_access="$4"
 	local response
 
 	response="$(
@@ -81,7 +80,6 @@ update_service() {
 			--arg image "$image" \
 			--arg username "$GHCR_READ_USERNAME" \
 			--arg password "$GHCR_READ_TOKEN" \
-			--arg registry_access "$registry_access" \
 			--argjson deploy "$deploy" \
 			'{
 				query: $query,
@@ -90,12 +88,10 @@ update_service() {
 					environmentId: $environment_id,
 					input: ($deploy + {
 						source: {image: $image},
-						registryCredentials: (
-							if $registry_access == "private" then {
-								username: $username,
-								password: $password
-							} else null end
-						)
+						registryCredentials: {
+							username: $username,
+							password: $password
+						}
 					})
 				}
 			}'
@@ -259,12 +255,12 @@ if test -n "$previous_server" && deployment_can_be_reused "$previous_server_stat
 	echo "Reusing matching Railway server deployment $previous_server ($previous_server_status)."
 fi
 
-update_service "$RAILWAY_WEB_SERVICE" "$WEB_IMAGE" "$web_policy" private
+update_service "$RAILWAY_WEB_SERVICE" "$WEB_IMAGE" "$web_policy"
 # LixRay republishes the tested Lix artifact under its own GHCR package. New
 # packages are private by default, so Railway must receive the same read-only
 # registry credential used for the web image. Without it Railway fails before
 # the server process starts and therefore emits no container logs.
-update_service "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" "$server_policy" private
+update_service "$RAILWAY_SERVER_SERVICE" "$SERVER_IMAGE" "$server_policy"
 if test "$reuse_web" = false; then
 	deploy_service "$RAILWAY_WEB_SERVICE"
 fi
