@@ -1713,15 +1713,31 @@ void test("authenticated handshake provisions the canonical account profile", as
 						sessionId: "session-1",
 					});
 				}
+				const { sql } = (await request.clone().json()) as { sql: string };
+				if (sql.startsWith("SELECT")) {
+					return Response.json({
+						rows: [
+							[
+								{ kind: "text", value: account.id },
+								{ kind: "text", value: account.kind },
+								{ kind: "null", value: null },
+							],
+						],
+					});
+				}
 				return Response.json({ rowsAffected: 1 });
 			},
 		},
 	);
 	assert.equal(response.status, 200);
-	assert.equal(requests.length, 2);
+	assert.equal(requests.length, 3);
 	assert.deepEqual(
 		requests.map((request) => new URL(request.url).pathname),
-		[`/lix/v1/${LIX_A}/`, `/lix/v1/${LIX_A}/execute`],
+		[
+			`/lix/v1/${LIX_A}/`,
+			`/lix/v1/${LIX_A}/execute`,
+			`/lix/v1/${LIX_A}/execute`,
+		],
 	);
 	for (const request of requests) {
 		assert.equal(
