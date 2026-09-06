@@ -9,6 +9,8 @@ const lixRoot = join(repositoryRoot, "vendor", "lix");
 
 export async function resolveLixServerImage({
 	mode,
+	allowBuild = true,
+	installArtifact = installServerImageArtifact,
 	inspectImage = inspectDigest,
 }) {
 	if (mode !== "ci" && mode !== "local") {
@@ -64,7 +66,7 @@ export async function resolveLixServerImage({
 
 	let artifact;
 	try {
-		artifact = await installServerImageArtifact({
+		artifact = await installArtifact({
 			destination: imageArchive,
 			revision: sourceRevision,
 		});
@@ -111,6 +113,13 @@ export async function resolveLixServerImage({
 		};
 	}
 
+	if (!allowBuild) {
+		console.log(
+			"[lix-server] Cache miss; leave compilation to the build runner.",
+		);
+		return { image: "", source: "missing", sourceRevision };
+	}
+
 	console.log(
 		`[lix-server] SOURCE BUILD ${sourceRevision}; no reusable main image or successful CI artifact was available.`,
 	);
@@ -149,7 +158,7 @@ export async function resolveLixServerImage({
 		"--push",
 		lixRoot,
 	]);
-	const builtImage = `${previewRepository}@${requiredDigest(previewTag)}`;
+	const builtImage = `${previewRepository()}@${requiredDigest(previewTag)}`;
 	console.log(`[lix-server] Finished fallback source build ${builtImage}.`);
 	return { image: builtImage, source: "source-build", sourceRevision };
 }
@@ -175,6 +184,7 @@ function serverInputHash() {
 		"HEAD",
 		"--",
 		".cargo",
+		".dockerignore",
 		"Cargo.lock",
 		"Cargo.toml",
 		"rust-toolchain.toml",

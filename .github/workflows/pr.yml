@@ -82,87 +82,19 @@ jobs:
     if: >-
       needs.changes.outputs.frontend == 'true' ||
       (github.event.pull_request.draft != true && needs.changes.outputs.e2e == 'true')
-    runs-on: blacksmith-32vcpu-ubuntu-2404
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Set up web toolchain
-        uses: ./.github/actions/setup-web
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
-
-      - name: Install dependencies without rebuilding the SDK
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Resolve tested SDK artifacts or build the submodule once
-        env:
-          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
-          LIX_CI_ARTIFACT_WAIT_SECONDS: "0"
-        run: pnpm --dir web-app lix:build
-
-      - name: Share the prepared SDK with CI lanes and the web image
-        uses: actions/upload-artifact@v4
-        with:
-          name: vendored-lix-sdk
-          path: |
-            vendor/lix/packages/js-sdk/dist
-            vendor/lix/packages/storage-opfs/dist
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+    uses: ./.github/workflows/lix-sdk.yml
+    secrets: inherit
 
   server-image:
     name: Lix server image
     needs:
       - changes
       - lix-artifacts
-    runs-on: blacksmith-32vcpu-ubuntu-2404
-    timeout-minutes: 25
     permissions:
       contents: read
       packages: write
-    outputs:
-      image: ${{ steps.resolve.outputs.image }}
-      source: ${{ steps.resolve.outputs.source }}
-      source_revision: ${{ steps.resolve.outputs.sourceRevision }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Set up artifact resolver
-        uses: ./.github/actions/setup-web
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
-
-      - name: Install artifact resolver dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Resolve tested image or build the submodule once
-        id: resolve
-        env:
-          LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
-          LIX_CI_ARTIFACT_WAIT_SECONDS: "0"
-        run: node .github/scripts/resolve-lix-server-image.mjs
+    uses: ./.github/workflows/lix-server-image.yml
+    secrets: inherit
 
   web-image:
     name: Web image
@@ -173,7 +105,8 @@ jobs:
       always() &&
       needs.changes.result == 'success' &&
       (needs.sdk.result == 'success' || needs.sdk.result == 'skipped')
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    # A prepared SDK removes Rust compilation from the web image build.
+    runs-on: ${{ needs.sdk.result == 'success' && 'ubuntu-24.04' || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: 25
     permissions:
       contents: read
@@ -282,6 +215,10 @@ jobs:
             echo "tree_found=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Prepare Linux build runner
+        if: steps.existing.outputs.found != 'true'
+        uses: ./.github/actions/prepare-linux-runner
+
       - name: Download the prepared SDK for the Docker build
         if: steps.existing.outputs.found != 'true' && needs.sdk.result == 'success'
         uses: actions/download-artifact@v4
@@ -343,7 +280,7 @@ jobs:
       - changes
       - sdk
     if: github.event.pull_request.draft != true && needs.changes.outputs.frontend == 'true'
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -357,6 +294,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
+          build-rust: "false"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -374,7 +312,7 @@ jobs:
     name: Database
     needs: changes
     if: github.event.pull_request.draft != true && needs.changes.outputs.database == 'true'
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -396,7 +334,7 @@ jobs:
       - sdk
       - server-image
     if: github.event.pull_request.draft != true && needs.changes.outputs.e2e == 'true'
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -407,6 +345,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Prepare Linux build runner
+        uses: ./.github/actions/prepare-linux-runner
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
