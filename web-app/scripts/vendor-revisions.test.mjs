@@ -32,23 +32,31 @@ test("Railway builds only the web service from repository source", async () => {
 });
 
 test("PR previews promote both tested images instead of rebuilding source", async () => {
-	const [workflow, cleanupWorkflow, coordinator] = await Promise.all([
-		readFile(
-			new URL("../../.github/workflows/pr.yml", import.meta.url),
-			"utf8",
-		),
-		readFile(
-			new URL(
-				"../../.github/workflows/railway-preview-cleanup.yml",
-				import.meta.url,
+	const [workflow, cleanupWorkflow, coordinator, serverWorkflow] =
+		await Promise.all([
+			readFile(
+				new URL("../../.github/workflows/pr.yml", import.meta.url),
+				"utf8",
 			),
-			"utf8",
-		),
-		readFile(
-			new URL("../../.github/scripts/promote-production.sh", import.meta.url),
-			"utf8",
-		),
-	]);
+			readFile(
+				new URL(
+					"../../.github/workflows/railway-preview-cleanup.yml",
+					import.meta.url,
+				),
+				"utf8",
+			),
+			readFile(
+				new URL("../../.github/scripts/promote-production.sh", import.meta.url),
+				"utf8",
+			),
+			readFile(
+				new URL(
+					"../../.github/workflows/lix-server-image.yml",
+					import.meta.url,
+				),
+				"utf8",
+			),
+		]);
 	const deployPreviewJob = workflow.slice(
 		workflow.indexOf("  deploy-preview:"),
 		workflow.indexOf("  publish-preview:"),
@@ -63,7 +71,11 @@ test("PR previews promote both tested images instead of rebuilding source", asyn
 	);
 
 	assert.match(workflow, /needs\.web-image\.outputs\.image/);
-	assert.match(workflow, /resolve-lix-server-image\.mjs/);
+	assert.match(
+		workflow,
+		/uses: \.\/\.github\/workflows\/lix-server-image\.yml/,
+	);
+	assert.match(serverWorkflow, /resolve-lix-server-image\.mjs/);
 	assert.doesNotMatch(workflow, /file: lix-server\/Dockerfile/);
 	assert.doesNotMatch(webImageJob, /pull_request\.draft/);
 	assert.match(
