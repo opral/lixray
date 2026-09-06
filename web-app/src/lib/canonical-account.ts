@@ -21,16 +21,3 @@ export function canonicalAccountIdFromAccessToken(
 		return null;
 	}
 }
-
-/** Allows one refresh per signed-in auth identity after the claim cutover. */
-export function shouldRefreshCanonicalAccountClaim(args: {
-	accountId: string | null;
-	authUserId: string | null;
-	attemptedAuthUserId: string | null;
-}): boolean {
-	return (
-		args.accountId === null &&
-		args.authUserId !== null &&
-		args.authUserId !== args.attemptedAuthUserId
-	);
-}

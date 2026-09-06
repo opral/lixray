@@ -18,6 +18,7 @@ import {
 	handleRequest,
 	resolveLixWithSupabase,
 	resolveCurrentAccount,
+	resolveNamespaceMembershipWithSupabase,
 	resolveNamespaceProfileWithSupabase,
 	resolvePublicProfileRepositoriesWithSupabase,
 	supabaseJwtIssuer,
@@ -2385,6 +2386,72 @@ void test("current account RPC maps a login to its canonical actor and profile",
 		"https://supabase.example/rest/v1/rpc/current_account",
 	);
 	assert.equal(request.headers.get("authorization"), "Bearer login-token");
+});
+
+void test("account resolution accepts accounts before profile bootstrap and rejects missing accounts", async () => {
+	for (const row of [
+		{ account_id: LIX_A, kind: "human", name: "Account", profile_uri: null },
+		null,
+	]) {
+		const result = await resolveCurrentAccount(
+			"login-token",
+			{
+				SUPABASE_URL: "https://supabase.example",
+				SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+			},
+			async () => Response.json(row ? [row] : []),
+		);
+		if (row) {
+			assert.deepEqual(result, {
+				ok: true,
+				account: {
+					id: LIX_A,
+					kind: "human",
+					name: "Account",
+					profileUri: null,
+				},
+			});
+		} else {
+			assert.equal(result.ok, false);
+			if (!result.ok) assert.equal(result.response.status, 403);
+		}
+	}
+});
+
+void test("profile refresh checks the namespace access policy for personal owners and organization members", async (t) => {
+	for (const member of [true, false]) {
+		t.mock.method(
+			globalThis,
+			"fetch",
+			(input: string | URL | Request, init?: RequestInit) => {
+				const request = new Request(input, init);
+				const url = new URL(request.url);
+				assert.equal(url.pathname, "/rest/v1/namespaces");
+				assert.equal(url.searchParams.get("id"), `eq.${NAMESPACE_ID}`);
+				assert.equal(
+					request.headers.get("authorization"),
+					"Bearer login-token",
+				);
+				return Promise.resolve(
+					Response.json(member ? [{ id: NAMESPACE_ID }] : []),
+				);
+			},
+		);
+		assert.deepEqual(
+			await resolveNamespaceMembershipWithSupabase(
+				NAMESPACE_ID,
+				"login-token",
+				env({
+					extra: {
+						SUPABASE_URL: "https://supabase.example",
+						SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+					},
+				}),
+			),
+			{ ok: true, member },
+		);
+		t.mock.restoreAll();
+	}
 });
 
 void test("demo mode keeps OAuth endpoints disabled", async () => {

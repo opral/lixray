@@ -2,7 +2,7 @@ export interface LixAccountProfile {
 	id: string;
 	kind: string;
 	name: string;
-	profileUri: string;
+	profileUri: string | null;
 }
 
 const TRUSTED_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
@@ -25,7 +25,8 @@ export async function provisionAccountAfterHandshake(options: {
 	if (
 		options.protocolPath !== "/lix/v1/" ||
 		!options.response.ok ||
-		!options.account
+		!options.account ||
+		options.account.profileUri === null
 	) {
 		return options.response;
 	}

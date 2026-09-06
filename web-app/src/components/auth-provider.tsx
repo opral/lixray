@@ -20,10 +20,7 @@ import {
 	loadValidatedInitialSession,
 	orphanedSessionSignInUrl,
 } from "~/lib/auth-session-validation";
-import {
-	canonicalAccountIdFromAccessToken,
-	shouldRefreshCanonicalAccountClaim,
-} from "~/lib/canonical-account";
+import { canonicalAccountIdFromAccessToken } from "~/lib/canonical-account";
 import {
 	captureErrorLogImmediately,
 	captureExceptionTelemetry,
@@ -252,15 +249,8 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			claimRefreshAuthUserRef.current = null;
 			return;
 		}
-		if (
-			!shouldRefreshCanonicalAccountClaim({
-				accountId,
-				authUserId,
-				attemptedAuthUserId: claimRefreshAuthUserRef.current,
-			})
-		) {
-			return;
-		}
+		// Refresh pre-cutover tokens once per login, without retrying forever.
+		if (claimRefreshAuthUserRef.current === authUserId) return;
 		claimRefreshAuthUserRef.current = authUserId;
 		void refreshSession().catch((error: unknown) => {
 			captureExceptionTelemetry(error, {

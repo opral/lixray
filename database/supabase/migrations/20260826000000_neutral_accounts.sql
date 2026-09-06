@@ -84,7 +84,7 @@ for each row execute function private.sync_auth_user_account();
 drop function private.sync_auth_user_profile();
 
 -- Put canonical account identity into every newly minted access token. The
--- worker validates the JWT signature before trusting this claim.
+-- browser uses this claim; the worker resolves the current mapping from SQL.
 create or replace function private.custom_access_token_hook(event jsonb)
 returns jsonb
 language plpgsql security definer
@@ -134,8 +134,6 @@ $$;
 -- Actor columns now reference accounts rather than auth credentials.
 alter table public.namespace_members drop constraint namespace_members_user_id_fkey;
 alter table public.namespace_members rename column user_id to account_id;
-alter table public.namespace_members rename constraint namespace_members_pkey to namespace_members_pkey_old;
-alter table public.namespace_members rename constraint namespace_members_pkey_old to namespace_members_pkey;
 alter table public.namespace_members add constraint namespace_members_account_id_fkey
 	foreign key (account_id) references public.accounts(id) on delete cascade;
 
@@ -321,9 +319,9 @@ set search_path to ''
 as $$
 	select account.id, account.kind,
 		'https://lixray.com/profile/' || namespace.id::text,
-		coalesce(profile.document #>> '{name,full}', namespace.name)
+		coalesce(nullif(btrim(profile.document #>> '{name,full}'), ''), namespace.name, 'Account')
 	from public.accounts account
-	join public.namespaces namespace on namespace.id = account.primary_namespace_id
+	left join public.namespaces namespace on namespace.id = account.primary_namespace_id
 	left join public.namespace_profiles profile on profile.namespace_id = namespace.id
 	where account.id = private.current_account_id();
 $$;
@@ -426,9 +424,6 @@ begin
 	insert into public.lixes (namespace_id, name, slug)
 	values (created_namespace_id, 'repository', 'repository')
 	returning id into created_lix_id;
-	insert into public.lix_members (lix_id, account_id, role)
-	values (created_lix_id, current_account_id, 'admin')
-	on conflict on constraint lix_members_pkey do update set role = 'admin';
 
 	return query select created_namespace_id, profile_name, claimed_handle,
 		created_lix_id, 'repository'::text, 'repository'::text, true;
@@ -706,6 +701,8 @@ declare current_account_id uuid := private.current_account_id(); owner_count int
 begin
 	if current_account_id is null then raise exception 'Authentication required'; end if;
 	if not private.is_interactive_session() then raise exception 'Interactive session required'; end if;
+	-- Serialize removals so two owners cannot both leave after counting each other.
+	perform 1 from public.namespaces where id = p_namespace_id for update;
 	if exists (
 		select 1 from public.accounts account
 		where account.primary_namespace_id = p_namespace_id

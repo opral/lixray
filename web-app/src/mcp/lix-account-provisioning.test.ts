@@ -9,6 +9,24 @@ const account = {
 	profileUri: "https://lixray.com/profile/11111111-1111-4111-8111-111111111111",
 };
 
+void test("accounts without a public profile can open repositories", async () => {
+	const handshake = Response.json({
+		activeAccountId: account.id,
+		sessionId: "session-1",
+	});
+	assert.equal(
+		await provisionAccountAfterHandshake({
+			protocolPath: "/lix/v1/",
+			response: handshake,
+			account: { ...account, profileUri: null },
+			lixFetch: () => {
+				throw new Error("There is no profile to provision");
+			},
+		}),
+		handshake,
+	);
+});
+
 void test("successful authenticated handshake enriches the repository account", async () => {
 	let request: Request | undefined;
 	const handshake = Response.json({

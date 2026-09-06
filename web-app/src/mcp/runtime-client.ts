@@ -461,17 +461,14 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			headers,
 			signal: this.signal ?? rewritten.signal,
 		});
-		if (this.lixFetch) {
-			const response = await this.lixFetch(lixId, template);
+		const lixFetch = this.lixFetch;
+		if (lixFetch) {
+			const response = await lixFetch(lixId, template);
 			return provisionAccountAfterHandshake({
 				protocolPath: path,
 				response,
 				account: this.user.account,
-				lixFetch: (provisioningRequest) =>
-					this.lixFetch?.(lixId, provisioningRequest) ??
-					Promise.resolve(
-						new Response("Lix storage is not configured.\n", { status: 500 }),
-					),
+				lixFetch: (provisioningRequest) => lixFetch(lixId, provisioningRequest),
 			});
 		}
 		return new Response("Lix storage is not configured.\n", { status: 500 });

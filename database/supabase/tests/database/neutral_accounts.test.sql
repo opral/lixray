@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(14);
+select plan(18);
 
 insert into auth.users (
 	id, instance_id, aud, role, email, encrypted_password,
@@ -50,8 +50,16 @@ select is(private.current_account_id(),
 	'82000000-0000-0000-0000-000000000001'::uuid,
 	'login resolves to its active account');
 
+select is((select account_id from public.current_account()),
+	'82000000-0000-0000-0000-000000000001'::uuid,
+	'account authentication does not depend on personal namespace bootstrap');
+select is((select name from public.current_account()), 'Account',
+	'unbootstrapped accounts have a display name without exposing login metadata');
+
 select ok((select created from public.bootstrap_personal_namespace()),
 	'personal namespace bootstrap succeeds');
+select is((select count(*) from public.namespaces), 1::bigint,
+	'namespace access policy includes the personal owner without a membership row');
 select is(
 	(select profile_uri from public.current_account()),
 	(select 'https://lixray.com/profile/' || account.primary_namespace_id::text
@@ -80,6 +88,12 @@ select is(
 	1::bigint,
 	'rejected personal namespace removal preserves repository access'
 );
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"82000000-0000-0000-0000-000000000002","role":"authenticated"}';
+select is((select count(*) from public.namespaces), 0::bigint,
+	'namespace access policy excludes unrelated accounts');
+reset role;
 
 update public.account_logins
 set account_id = '82000000-0000-0000-0000-000000000001'

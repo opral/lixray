@@ -150,11 +150,9 @@ interface AuthenticatedUser {
 	/** The credential ID in auth.users for checks against Supabase Auth. */
 	authUserId?: string;
 	token: string;
-	account?: LixAccountPrincipal;
+	account?: LixAccountProfile;
 	isDemo?: boolean;
 }
-
-export type LixAccountPrincipal = LixAccountProfile;
 
 interface AuthenticatedMcpUser extends AuthenticatedUser {
 	clientId: string;
@@ -1010,7 +1008,7 @@ async function fetchLixRequest(
 	env: WorkerEnv,
 	options: HandleRequestOptions,
 	trustedPrincipal?: string,
-	account?: LixAccountPrincipal,
+	account?: LixAccountProfile,
 ): Promise<Response> {
 	const rewrittenRequest = rewriteLixRequest(
 		request,
@@ -1087,7 +1085,7 @@ export async function authenticateWithSupabase(
 }
 
 type CurrentAccountResolution =
-	| { ok: true; account: LixAccountPrincipal }
+	| { ok: true; account: LixAccountProfile }
 	| { ok: false; response: Response };
 
 /** Resolve one validated Supabase login to its canonical LixRay account. */
@@ -1154,7 +1152,7 @@ export async function resolveCurrentAccount(
 	return { ok: true, account };
 }
 
-function parseCurrentAccount(value: unknown): LixAccountPrincipal | null {
+function parseCurrentAccount(value: unknown): LixAccountProfile | null {
 	if (!value || typeof value !== "object") return null;
 	const row = value as Record<string, unknown>;
 	const id = row.account_id;
@@ -1168,8 +1166,8 @@ function parseCurrentAccount(value: unknown): LixAccountPrincipal | null {
 		kind.trim().length === 0 ||
 		typeof name !== "string" ||
 		name.trim().length === 0 ||
-		typeof profileUri !== "string" ||
-		!isAbsoluteHttpUrl(profileUri)
+		(profileUri !== null &&
+			(typeof profileUri !== "string" || !isAbsoluteHttpUrl(profileUri)))
 	) {
 		return null;
 	}
@@ -1578,8 +1576,8 @@ export type NamespaceMembershipResolution =
 
 /**
  * Checks whether the bearer of `accessToken` is a member of the namespace by
- * querying namespace_members with the user's own token — RLS only returns
- * rows the user is entitled to see, so a non-member gets an empty result.
+ * querying namespaces with the user's own token. Its access policy includes
+ * both personal ownership and organization membership.
  */
 export async function resolveNamespaceMembershipWithSupabase(
 	namespaceId: string,
@@ -1594,9 +1592,9 @@ export async function resolveNamespaceMembershipWithSupabase(
 			}),
 		};
 	}
-	const lookupUrl = new URL("/rest/v1/namespace_members", env.SUPABASE_URL);
-	lookupUrl.searchParams.set("select", "account_id");
-	lookupUrl.searchParams.set("namespace_id", `eq.${namespaceId}`);
+	const lookupUrl = new URL("/rest/v1/namespaces", env.SUPABASE_URL);
+	lookupUrl.searchParams.set("select", "id");
+	lookupUrl.searchParams.set("id", `eq.${namespaceId}`);
 	lookupUrl.searchParams.set("limit", "1");
 
 	let response: Response;
