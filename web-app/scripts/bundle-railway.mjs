@@ -25,9 +25,11 @@ await build({
 
 await rename(bundled, outfile);
 const source = await readFile(outfile, "utf8");
+// Vite preserves the shared initializer's relative URL in the server build.
+// Relocate it alongside any browser asset URLs when flattening the bundle.
 const rewritten = source.replaceAll(
-	/\/assets\/lix_js_sdk_bg-[A-Za-z0-9_-]+\.wasm/g,
-	"../wasm/lix_js_sdk_bg.wasm",
+	/["'](?:\/assets\/lix_js_sdk_bg-[A-Za-z0-9_-]+|\.\/wasm\/lix_js_sdk_bg)\.wasm["']/g,
+	'"../wasm/lix_js_sdk_bg.wasm"',
 );
 await writeFile(outfile, rewritten);
 await bakeLixWasm();
