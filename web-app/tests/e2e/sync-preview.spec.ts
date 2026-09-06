@@ -1,4 +1,10 @@
-import { expect, type Page, type Request, test } from "@playwright/test";
+import {
+	expect,
+	type Locator,
+	type Page,
+	type Request,
+	test,
+} from "@playwright/test";
 
 const DEMO_LIX_ID = "00000000-0000-4000-8000-000000000002";
 
@@ -49,7 +55,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				headers: {
 					Authorization: "Bearer lixray-demo",
 					"Lix-Session-Id": "0".repeat(64),
-					"Lix-Sync-Protocol-Version": "2",
+					"Lix-Sync-Protocol-Version": "6",
 				},
 			});
 			return {
@@ -103,6 +109,147 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		}
 		await expect(history).toBeVisible({ timeout: 30_000 });
 		return history;
+	};
+	let authorityReadSequence = 0;
+	const authorityCheckpointCount = async (): Promise<number> => {
+		const repositoryEndpoint = new URL(
+			`/lix/v1/${DEMO_LIX_ID}/`,
+			baseURL,
+		).toString();
+		const authorization = { Authorization: "Bearer lixray-demo" };
+		const opened = await sharedContext.request.get(repositoryEndpoint, {
+			headers: authorization,
+		});
+		expect(opened.ok()).toBe(true);
+		const { sessionId } = (await opened.json()) as { sessionId: string };
+		try {
+			const response = await sharedContext.request.post(
+				new URL("execute", repositoryEndpoint).toString(),
+				{
+					headers: {
+						...authorization,
+						"Idempotency-Key": `lixray-preview-checkpoint-read-${Date.now()}-${authorityReadSequence++}`,
+						"Lix-Session-Id": sessionId,
+					},
+					data: {
+						sql: "SELECT count(*) AS checkpoint_count FROM lix_checkpoint",
+						params: [],
+					},
+				},
+			);
+			expect(response.ok()).toBe(true);
+			const result = (await response.json()) as {
+				rows?: Array<Array<{ kind?: string; value?: unknown }>>;
+			};
+			const cell = result.rows?.[0]?.[0];
+			if (cell?.kind !== "int" || typeof cell.value !== "number") {
+				throw new Error("authority returned an invalid checkpoint count");
+			}
+			return cell.value;
+		} finally {
+			const closed = await sharedContext.request.delete(
+				new URL("session", repositoryEndpoint).toString(),
+				{
+					headers: {
+						...authorization,
+						"Lix-Session-Id": sessionId,
+					},
+				},
+			);
+			expect(closed.status()).toBe(204);
+		}
+	};
+	const waitForHistoryCountsToMatchAuthority = async (
+		histories: readonly Locator[],
+		minimumCount: number,
+		timeout: number,
+	): Promise<number> => {
+		let matchedCount = 0;
+		await expect
+			.poll(
+				async () => {
+					const authorityCount = await authorityCheckpointCount();
+					const renderedCounts = await Promise.all(
+						histories.map((history) =>
+							history
+								.getByRole("list", { name: "Checkpoints" })
+								.locator(":scope > li")
+								.count(),
+						),
+					);
+					const matches =
+						authorityCount >= minimumCount &&
+						renderedCounts.every((count) => count === authorityCount);
+					if (matches) matchedCount = authorityCount;
+					return matches;
+				},
+				{ timeout },
+			)
+			.toBe(true);
+		return matchedCount;
+	};
+	const isCheckpointExecution = (request: Request): boolean => {
+		if (request.method() !== "POST" || !request.url().endsWith("/execute")) {
+			return false;
+		}
+		try {
+			const body = request.postDataJSON() as { sql?: unknown };
+			return (
+				typeof body.sql === "string" &&
+				body.sql.includes("lix_create_checkpoint")
+			);
+		} catch {
+			return false;
+		}
+	};
+	const clickCheckpoint = async (page: Page): Promise<string> => {
+		const [request] = await Promise.all([
+			page.waitForRequest(isCheckpointExecution, {
+				timeout: repositoryOperationTimeout,
+			}),
+			page.getByRole("button", { name: "Checkpoint", exact: true }).click(),
+		]);
+		const originalResponse = await request.response();
+		expect(originalResponse?.ok()).toBe(true);
+		const headers = request.headers();
+		const sessionId = headers["lix-session-id"];
+		const idempotencyKey = headers["idempotency-key"];
+		if (!sessionId || !idempotencyKey) {
+			throw new Error("checkpoint execution omitted its protocol identity");
+		}
+		// Worker fetch bodies are occasionally unavailable through Chromium's
+		// Network.getResponseBody after WASM consumes them. Replaying the exact
+		// request identity returns the durable receipt and cannot create a second
+		// checkpoint.
+		const requestBody = request.postDataJSON() as unknown;
+		const receipt = await sharedContext.request.post(request.url(), {
+			headers: {
+				Authorization: "Bearer lixray-demo",
+				"Idempotency-Key": idempotencyKey,
+				"Lix-Session-Id": sessionId,
+			},
+			data: requestBody,
+		});
+		expect(receipt.ok()).toBe(true);
+		const result = (await receipt.json()) as {
+			columns?: Array<{ name?: string }>;
+			rows?: Array<Array<{ kind?: string; value?: unknown }>>;
+		};
+		const commitIdIndex = result.columns?.findIndex(
+			(column) => column.name === "commit_id",
+		);
+		const cell =
+			commitIdIndex === undefined || commitIdIndex < 0
+				? undefined
+				: result.rows?.[0]?.[commitIdIndex];
+		if (
+			cell?.kind !== "text" ||
+			typeof cell.value !== "string" ||
+			cell.value.length === 0
+		) {
+			throw new Error("checkpoint execution omitted its commit_id receipt");
+		}
+		return cell.value;
 	};
 	const observePage = (page: Page, label: string) => {
 		const pageColdReads: string[] = [];
@@ -474,15 +621,11 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			right.getByTestId("home-entry-list").waitFor({ timeout: 120_000 }),
 		]);
 		const initialLeftHistory = await openHistoryPanel(left);
-		const initialCheckpointRows = initialLeftHistory
-			.getByRole("list", { name: "Checkpoints" })
-			.locator(":scope > li");
-		await expect
-			.poll(() => initialCheckpointRows.count(), {
-				timeout: repositoryOperationTimeout,
-			})
-			.toBeGreaterThan(0);
-		const initialCheckpointCount = await initialCheckpointRows.count();
+		const initialCheckpointCount = await waitForHistoryCountsToMatchAuthority(
+			[initialLeftHistory],
+			1,
+			repositoryOperationTimeout,
+		);
 		if (initialCheckpointCount > 1) {
 			// A historical snapshot read must not monopolize the live repository
 			// after its view closes. Exit immediately, while cold content may still
@@ -589,11 +732,11 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				await expect(
 					freshHistory.getByRole("button", { name: "Working changes" }),
 				).toBeVisible();
-				await expect(
-					freshHistory
-						.getByRole("list", { name: "Checkpoints" })
-						.locator(":scope > li"),
-				).toHaveCount(initialCheckpointCount);
+				await waitForHistoryCountsToMatchAuthority(
+					[freshHistory],
+					initialCheckpointCount,
+					repositoryOperationTimeout,
+				);
 				if (initialCheckpointCount > 1) {
 					await expect(freshHistory).toContainText("Latest checkpoint");
 				}
@@ -640,30 +783,24 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
 			})
 			.click();
-		await left.getByRole("button", { name: "Checkpoint", exact: true }).click();
+		const checkpointCountBeforeFirstClick = await authorityCheckpointCount();
+		const firstCheckpointCommitId = await clickCheckpoint(left);
 		const leftHistoryAfterCheckpoint = await openHistoryPanel(left);
-		// A Playwright click resolves after dispatch, while the async checkpoint
-		// transaction can still be committing locally. Observe the durable row
-		// directly; the header shortcut is intentionally hidden while History is open.
-		await expect(
-			leftHistoryAfterCheckpoint
-				.getByRole("list", { name: "Checkpoints" })
-				.locator(":scope > li"),
-		).toHaveCount(initialCheckpointCount + 1, {
-			timeout: repositoryOperationTimeout,
-		});
+		// A Playwright click resolves after dispatch, while the authoritative
+		// checkpoint transaction can still be committing. Compare every rendered
+		// History against the authority; this shared preview can receive legitimate
+		// checkpoints from another client while the test is running.
 		const rightHistoryAfterCheckpoint = await openHistoryPanel(right);
-		await expect(
-			rightHistoryAfterCheckpoint
-				.getByRole("list", { name: "Checkpoints" })
-				.locator(":scope > li"),
-		).toHaveCount(initialCheckpointCount + 1, { timeout: realtimeTimeout });
 		const freshHistoryAfterCheckpoint = await openHistoryPanel(fresh);
-		await expect(
-			freshHistoryAfterCheckpoint
-				.getByRole("list", { name: "Checkpoints" })
-				.locator(":scope > li"),
-		).toHaveCount(initialCheckpointCount + 1, { timeout: realtimeTimeout });
+		await waitForHistoryCountsToMatchAuthority(
+			[
+				leftHistoryAfterCheckpoint,
+				rightHistoryAfterCheckpoint,
+				freshHistoryAfterCheckpoint,
+			],
+			checkpointCountBeforeFirstClick + 1,
+			repositoryOperationTimeout,
+		);
 
 		// The checkpoint coordinate is part of branch state. A later remote edit
 		// must advance the receiver's head without silently advancing its checkpoint.
@@ -901,11 +1038,11 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			await expect(homeFileEntry(fresh, fileId)).toBeVisible();
 		}
 		const reopenedHistory = await openHistoryPanel(fresh);
-		await expect(
-			reopenedHistory
-				.getByRole("list", { name: "Checkpoints" })
-				.locator(":scope > li"),
-		).toHaveCount(initialCheckpointCount + 1);
+		await waitForHistoryCountsToMatchAuthority(
+			[reopenedHistory],
+			checkpointCountBeforeFirstClick + 1,
+			realtimeTimeout,
+		);
 		const fileIdsBeforeAfterReopenCreate = await homeFileIds(fresh);
 		await createFileFromHome(left, "md");
 		const [afterReopenFileId] = await waitForNewHomeFileIds(
@@ -943,13 +1080,15 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			.click();
 		await left.getByRole("checkbox", { name: "All files" }).click();
 		await left.getByTestId(`diff-scope-file:${afterReopenFileId}`).click();
-		await left.getByRole("button", { name: "Checkpoint", exact: true }).click();
+		const checkpointCountBeforeSecondClick = await authorityCheckpointCount();
+		const secondCheckpointCommitId = await clickCheckpoint(left);
+		expect(secondCheckpointCommitId).not.toBe(firstCheckpointCommitId);
 		const postReopenHistory = await openHistoryPanel(fresh);
-		await expect(
-			postReopenHistory
-				.getByRole("list", { name: "Checkpoints" })
-				.locator(":scope > li"),
-		).toHaveCount(initialCheckpointCount + 2, { timeout: realtimeTimeout });
+		await waitForHistoryCountsToMatchAuthority(
+			[postReopenHistory],
+			checkpointCountBeforeSecondClick + 1,
+			realtimeTimeout,
+		);
 		for (const page of [left, fresh]) {
 			await expect(
 				page.getByRole("button", {

@@ -13,8 +13,8 @@ const browserScope = {
 };
 const browserStorageKey = `${BROWSER_REPLICA_STORAGE_KEY_PREFIX}${encodeURIComponent(`${browserScope.authIdentity}:${browserScope.repositoryId}`)}`;
 
-void test("hard-cuts replicas created before selected-change locators", () => {
-	assert.equal(REPOSITORY_OPFS_CACHE_NAMESPACE, "lixray:sync-protocol-v3");
+void test("hard-cuts replicas created before authoritative hot state", () => {
+	assert.equal(REPOSITORY_OPFS_CACHE_NAMESPACE, "lixray:authoritative-hot-v1");
 	const identity = {
 		repositoryId: "11111111-1111-4111-8111-111111111111",
 		replicaId: "22222222-2222-4222-8222-222222222222",
@@ -36,6 +36,10 @@ void test("hard-cuts replicas created before selected-change locators", () => {
 	assert.notEqual(
 		name,
 		`lixray:sync-protocol-v2:${identity.repositoryId}:${identity.replicaId}`,
+	);
+	assert.notEqual(
+		name,
+		`lixray:sync-protocol-v3:${identity.repositoryId}:${identity.replicaId}`,
 	);
 });
 

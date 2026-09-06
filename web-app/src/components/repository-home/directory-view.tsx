@@ -5,7 +5,10 @@ import {
 	renameWorkspaceEntry,
 	WorkspacePathTakenError,
 } from "@opral/atelier";
-import type { AtelierDiffSession } from "@opral/atelier";
+import type {
+	AtelierDiffSession,
+	AtelierFilePreviewProps,
+} from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import {
 	ArrowUp,
@@ -210,7 +213,9 @@ export function DirectoryView({
 	const reviewFocus = changedFileKinds.size > 0;
 	// A changed README previews as its diff — the review renders the change
 	// itself, not the resulting document.
-	const readmeDiff = useMemo(() => {
+	const readmeDiff = useMemo<
+		AtelierFilePreviewProps | { fileId: string; unavailable: true } | null
+	>(() => {
 		const readmePath = listing?.readmePath;
 		if (!diffSession || !readmePath) return null;
 		const file = diffSession.files.find(
@@ -223,8 +228,19 @@ export function DirectoryView({
 			"commitId" in diffSession.base
 				? diffSession.base.commitId
 				: null;
-		return { fileId: file.id, baseCommitId };
-	}, [diffSession, listing?.readmePath]);
+		const preview = { lix, fileId: file.id, filePath: readmePath };
+		if ("commitId" in diffSession.target) {
+			return {
+				...preview,
+				targetCommitId: diffSession.target.commitId,
+				diff: { baseCommitId },
+			};
+		}
+		if (!file.workingEpoch) {
+			return { unavailable: true, fileId: file.id };
+		}
+		return { ...preview, diff: { workingEpoch: file.workingEpoch } };
+	}, [lix, diffSession, listing?.readmePath]);
 	const readme = useFileMarkdown(
 		lix,
 		listing?.readmePath ?? null,
@@ -1560,7 +1576,10 @@ function ReadmePreview({
 	readonly sourceFilePath: string;
 	readonly fileId: string | null;
 	/** Present while a review marks the README; renders the diff itself. */
-	readonly diff: { fileId: string; baseCommitId: string | null } | null;
+	readonly diff:
+		| AtelierFilePreviewProps
+		| { fileId: string; unavailable: true }
+		| null;
 	readonly fileName: string;
 	readonly onOpen: (event: ReactMouseEvent) => void;
 	/** Returns true when the link was handled inside the tab model. */
@@ -1607,12 +1626,16 @@ function ReadmePreview({
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
 				    state shares the editor's own presentation. */}
-				<AtelierFilePreview
-					lix={lix}
-					fileId={fileId}
-					filePath={sourceFilePath}
-					diff={diff ? { baseCommitId: diff.baseCommitId } : null}
-				/>
+				{diff && "unavailable" in diff ? (
+					<div role="alert">
+						The working diff changed while it was being reviewed. Reopen the
+						review.
+					</div>
+				) : (
+					<AtelierFilePreview
+						{...(diff ?? { lix, fileId, filePath: sourceFilePath })}
+					/>
+				)}
 			</div>
 		</>
 	);
