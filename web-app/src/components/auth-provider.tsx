@@ -6,6 +6,7 @@ import {
 	useContext,
 	useEffect,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
 import { getBrowserSupabaseClient, localDevCredentials } from "~/lib/supabase";
@@ -19,6 +20,7 @@ import {
 	loadValidatedInitialSession,
 	orphanedSessionSignInUrl,
 } from "~/lib/auth-session-validation";
+import { canonicalAccountIdFromAccessToken } from "~/lib/canonical-account";
 import { googleOAuthSignInCredentials } from "~/lib/google-oauth";
 import {
 	captureErrorLogImmediately,
@@ -34,6 +36,8 @@ interface AuthContextValue {
 	isLoaded: boolean;
 	session: Session | null;
 	user: User | null;
+	/** Stable application actor; distinct from the Supabase login user id. */
+	accountId: string | null;
 	client: LixraySupabaseClient | null;
 	getAccessToken: () => Promise<string | null>;
 	signInAsLocalDev: () => Promise<void>;
@@ -83,6 +87,7 @@ function DemoAuthProvider({ children }: { children: ReactNode }) {
 			isLoaded: true,
 			session: null,
 			user: PREVIEW_DEMO_USER,
+			accountId: PREVIEW_DEMO_USER.id,
 			client: null,
 			getAccessToken: () => Promise.resolve(DEMO_AUTH_TOKEN),
 			signInAsLocalDev: () => Promise.resolve(),
@@ -101,6 +106,8 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 	const [client, setClient] = useState<LixraySupabaseClient | null>(null);
 	const [session, setSession] = useState<Session | null>(null);
 	const [isLoaded, setIsLoaded] = useState(false);
+	const accountId = canonicalAccountIdFromAccessToken(session?.access_token);
+	const claimRefreshAuthUserRef = useRef<string | null>(null);
 
 	useEffect(() => {
 		const supabase = getBrowserSupabaseClient();
@@ -233,6 +240,22 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 		setSession(data.session);
 		setIsLoaded(true);
 	}, [client]);
+
+	useEffect(() => {
+		const authUserId = session?.user.id ?? null;
+		if (accountId !== null || authUserId === null) {
+			claimRefreshAuthUserRef.current = null;
+			return;
+		}
+		// Refresh pre-cutover tokens once per login, without retrying forever.
+		if (claimRefreshAuthUserRef.current === authUserId) return;
+		claimRefreshAuthUserRef.current = authUserId;
+		void refreshSession().catch((error: unknown) => {
+			captureExceptionTelemetry(error, {
+				operation: "refresh_canonical_account_claim",
+			});
+		});
+	}, [accountId, refreshSession, session?.user.id]);
 	const signOut = useCallback(async () => {
 		if (!client) return;
 		const { error } = await client.auth.signOut();
@@ -274,6 +297,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			isLoaded,
 			session,
 			user: session?.user ?? null,
+			accountId,
 			client,
 			getAccessToken,
 			signInAsLocalDev,
@@ -284,6 +308,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			validateSession,
 		}),
 		[
+			accountId,
 			client,
 			getAccessToken,
 			isLoaded,

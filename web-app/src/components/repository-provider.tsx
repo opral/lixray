@@ -98,8 +98,12 @@ export function RepositoryProvider({ children }: { children: ReactNode }) {
 }
 
 function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
-	const { client, isLoaded: authLoaded, user, validateSession } = useAuth();
-	const userId = user?.id ?? null;
+	const {
+		accountId,
+		client,
+		isLoaded: authLoaded,
+		validateSession,
+	} = useAuth();
 	const [isLoaded, setIsLoaded] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [organizations, setOrganizations] = useState<Array<Organization>>([]);
@@ -111,7 +115,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 	>(null);
 	const refresh = useCallback(
 		async (options: RefreshOptions = {}) => {
-			if (!client || !userId) {
+			if (!client || !accountId) {
 				setOrganizations([]);
 				setSelectedOrganizationId(null);
 				setSelectedRepositoryId(null);
@@ -142,7 +146,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				}
 				const nextOrganizations = await loadOrganizations(client);
 				const storedOrganizationId = window.localStorage.getItem(
-					organizationStorageKey(userId),
+					organizationStorageKey(accountId),
 				);
 				const requestedRepository = options.repositoryId
 					? nextOrganizations
@@ -165,7 +169,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 					null;
 
 				const storedRepositoryId = window.localStorage.getItem(
-					repositoryStorageKey(userId),
+					repositoryStorageKey(accountId),
 				);
 				const nextRepository =
 					requestedRepository?.repository ??
@@ -180,7 +184,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				setSelectedOrganizationId(nextOrganization?.id ?? null);
 				setSelectedRepositoryId(nextRepository?.id ?? null);
 				persistSelection(
-					userId,
+					accountId,
 					nextOrganization?.id ?? null,
 					nextRepository?.id ?? null,
 				);
@@ -206,7 +210,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				setIsLoaded(true);
 			}
 		},
-		[client, userId, validateSession],
+		[accountId, client, validateSession],
 	);
 
 	useEffect(() => {
@@ -233,7 +237,7 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 
 	const selectOrganization = useCallback(
 		(organizationId: string) => {
-			if (!userId) return;
+			if (!accountId) return;
 			const organization = organizations.find(
 				(candidate) => candidate.id === organizationId,
 			);
@@ -241,14 +245,14 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 			const repository = organization.repositories[0] ?? null;
 			setSelectedOrganizationId(organization.id);
 			setSelectedRepositoryId(repository?.id ?? null);
-			persistSelection(userId, organization.id, repository?.id ?? null);
+			persistSelection(accountId, organization.id, repository?.id ?? null);
 		},
-		[organizations, userId],
+		[accountId, organizations],
 	);
 
 	const selectRepository = useCallback(
 		(repositoryId: string) => {
-			if (!userId) return;
+			if (!accountId) return;
 			const organization = organizations.find((candidate) =>
 				candidate.repositories.some(
 					(repository) => repository.id === repositoryId,
@@ -260,9 +264,9 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 			if (!organization || !repository) return;
 			setSelectedOrganizationId(organization.id);
 			setSelectedRepositoryId(repository.id);
-			persistSelection(userId, organization.id, repository.id);
+			persistSelection(accountId, organization.id, repository.id);
 		},
-		[organizations, userId],
+		[accountId, organizations],
 	);
 
 	const createOrganization = useCallback(
@@ -623,12 +627,12 @@ function normalizeName(value: string, label: string): string {
 }
 
 function persistSelection(
-	userId: string,
+	accountId: string,
 	organizationId: string | null,
 	repositoryId: string | null,
 ) {
-	setOrRemove(organizationStorageKey(userId), organizationId);
-	setOrRemove(repositoryStorageKey(userId), repositoryId);
+	setOrRemove(organizationStorageKey(accountId), organizationId);
+	setOrRemove(repositoryStorageKey(accountId), repositoryId);
 }
 
 function setOrRemove(key: string, value: string | null) {
@@ -636,10 +640,10 @@ function setOrRemove(key: string, value: string | null) {
 	else window.localStorage.removeItem(key);
 }
 
-function organizationStorageKey(userId: string) {
-	return `lixray.active-organization.${userId}`;
+function organizationStorageKey(accountId: string) {
+	return `lixray.active-organization.${accountId}`;
 }
 
-function repositoryStorageKey(userId: string) {
-	return `lixray.active-repository.${userId}`;
+function repositoryStorageKey(accountId: string) {
+	return `lixray.active-repository.${accountId}`;
 }

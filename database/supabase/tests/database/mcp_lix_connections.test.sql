@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(12);
+select plan(13);
 
 insert into auth.users (
 	id, instance_id, aud, role, email, encrypted_password,
@@ -104,7 +104,7 @@ select throws_ok(
 
 select throws_ok(
 	$$insert into public.mcp_lix_connections (
-		user_id, lix_id, oauth_client_id, last_tool
+		account_id, lix_id, oauth_client_id, last_tool
 	) values (
 		'20000000-0000-0000-0000-000000000001',
 		'40000000-0000-0000-0000-000000000001',
@@ -112,7 +112,7 @@ select throws_ok(
 		'active_branch_id'
 	)$$,
 	'42501',
-	'permission denied for table mcp_lix_connections',
+	null,
 	'direct writes are not granted to authenticated clients'
 );
 
@@ -128,6 +128,15 @@ select lives_ok(
 		'active_branch_id'
 	)$$,
 	'a valid LixRay MCP session records the handshake'
+);
+
+select throws_ok(
+	$$select * from public.create_lix_share_token(
+		'40000000-0000-0000-0000-000000000001'
+	)$$,
+	'P0001',
+	'Interactive session required',
+	'an MCP bearer cannot mint a transferable share token'
 );
 
 select set_config(
@@ -159,7 +168,7 @@ reset role;
 select is(
 	(select count(*)
 		from public.mcp_lix_connections
-		where user_id = '20000000-0000-0000-0000-000000000001'),
+		where account_id = '20000000-0000-0000-0000-000000000001'),
 	1::bigint,
 	'exactly one connection row is stored'
 );
@@ -167,7 +176,7 @@ select is(
 select results_eq(
 	$$select oauth_client_id, last_tool
 		from public.mcp_lix_connections
-		where user_id = '20000000-0000-0000-0000-000000000001'$$,
+		where account_id = '20000000-0000-0000-0000-000000000001'$$,
 	$$values ('codex-local'::text, 'active_branch_id'::text)$$,
 	'the server derives the OAuth client and stores only connection metadata'
 );

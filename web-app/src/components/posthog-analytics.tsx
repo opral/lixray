@@ -7,20 +7,19 @@ let groupedOrganizationId: string | null = null;
 let groupedRepositoryId: string | null = null;
 
 export function PostHogAnalytics() {
-	const { isLoaded: authLoaded, user } = useAuth();
+	const { accountId, isLoaded: authLoaded, user } = useAuth();
 	const { activeRepository, isLoaded: repositoryLoaded } = useRepository();
-	const userId = user?.id;
 
 	useEffect(() => {
 		void initializeTelemetry();
 	}, []);
 
 	useEffect(() => {
-		if (!authLoaded || !user || !userId) return;
+		if (!authLoaded || !user || !accountId) return;
 		let disposed = false;
 		void initializeTelemetry().then((posthog) => {
 			if (!posthog || disposed) return;
-			posthog.identify(userId, {
+			posthog.identify(accountId, {
 				email: user.email,
 				name:
 					typeof user.user_metadata.full_name === "string"
@@ -31,7 +30,7 @@ export function PostHogAnalytics() {
 		return () => {
 			disposed = true;
 		};
-	}, [authLoaded, user, userId]);
+	}, [accountId, authLoaded, user]);
 
 	useEffect(() => {
 		if (!authLoaded || !repositoryLoaded) return;

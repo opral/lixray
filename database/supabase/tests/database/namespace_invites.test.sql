@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(7);
+select plan(13);
 
 insert into auth.users (
 	id, instance_id, aud, role, email, encrypted_password,
@@ -31,14 +31,20 @@ select set_config(
 
 select lives_ok(
 	$$select * from public.bootstrap_personal_namespace()$$,
-	'the inviter creates a namespace'
+	'the inviter creates a personal namespace'
+);
+
+select set_config(
+	'test.organization_id',
+	public.create_namespace('Invite Organization')::text,
+	true
 );
 
 select lives_ok(
 	$$insert into public.lixes (id, namespace_id, name, slug)
 	values (
 		'60000000-0000-0000-0000-000000000001',
-		(select namespace_id from public.list_accessible_lixes() limit 1),
+		current_setting('test.organization_id')::uuid,
 		'Invited Repository',
 		'invited-repository'
 	)$$,
@@ -48,7 +54,7 @@ select lives_ok(
 select set_config(
 	'test.namespace_invite_token',
 	public.get_namespace_invite_link(
-		(select namespace_id from public.list_accessible_lixes() limit 1)
+		current_setting('test.organization_id')::uuid
 	),
 	true
 );
@@ -61,7 +67,7 @@ select set_config(
 
 select is(
 	(select count(*) from public.resolve_public_lix_by_route(
-		'invite-owner', 'invited-repository'
+		'invite-organization', 'invited-repository'
 	)),
 	0::bigint,
 	'the invitee cannot discover the private repository before joining'
@@ -76,14 +82,14 @@ select lives_ok(
 
 select results_eq(
 	$$select role from public.namespace_members
-	where user_id = '50000000-0000-0000-0000-000000000002'$$,
+	where account_id = '50000000-0000-0000-0000-000000000002'$$,
 	$$values ('member'::public.namespace_role)$$,
 	'the invite creates namespace membership'
 );
 
 select results_eq(
 	$$select can_edit from public.resolve_public_lix_by_route(
-		'invite-owner', 'invited-repository'
+		'invite-organization', 'invited-repository'
 	)$$,
 	$$values (true)$$,
 	'the accepted invite resolves to edit access'
@@ -94,6 +100,65 @@ select is(
 		where id = '60000000-0000-0000-0000-000000000001'),
 	1::bigint,
 	'the joined member can read the repository through RLS'
+);
+
+select is(
+	(select email from public.list_namespace_members(
+		current_setting('test.organization_id')::uuid
+	) where account_id = '50000000-0000-0000-0000-000000000001'),
+	null::text,
+	'a team member cannot see another account login email'
+);
+
+select throws_ok(
+	$$select public.remove_namespace_member(
+		current_setting('test.organization_id')::uuid,
+		'50000000-0000-0000-0000-000000000001'
+	)$$,
+	'P0001',
+	'Namespace owner access required',
+	'a normal member cannot remove the owner'
+);
+
+select lives_ok(
+	$$select public.remove_namespace_member(
+		current_setting('test.organization_id')::uuid,
+		'50000000-0000-0000-0000-000000000002'
+	)$$,
+	'a normal member can leave the organization'
+);
+
+select is(
+	(select count(*) from public.namespace_members
+	 where namespace_id = current_setting('test.organization_id')::uuid
+		and account_id = '50000000-0000-0000-0000-000000000002'),
+	0::bigint,
+	'leaving removes organization membership'
+);
+
+reset role;
+select is(
+	(select count(*) from public.lix_members
+	 where lix_id = '60000000-0000-0000-0000-000000000001'
+		and account_id = '50000000-0000-0000-0000-000000000002'),
+	0::bigint,
+	'leaving revokes access to organization repositories'
+);
+
+set local role authenticated;
+select set_config(
+	'request.jwt.claims',
+	'{"sub":"50000000-0000-0000-0000-000000000001","role":"authenticated"}',
+	true
+);
+select throws_ok(
+	$$select public.remove_namespace_member(
+		current_setting('test.organization_id')::uuid,
+		'50000000-0000-0000-0000-000000000001'
+	)$$,
+	'P0001',
+	'An organization must keep at least one owner',
+	'the last owner cannot leave the organization'
 );
 
 select * from finish();

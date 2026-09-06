@@ -10,9 +10,9 @@ import {
 import { cn } from "~/lib/utils";
 
 export type TeamMember = {
-	readonly userId: string;
+	readonly accountId: string;
 	readonly name: string;
-	readonly email: string;
+	readonly email: string | null;
 	readonly avatarUrl: string | null;
 	readonly role: "admin" | "member";
 	readonly isSelf: boolean;
@@ -31,7 +31,7 @@ export type RepositoryTeamApi = {
 	inviteUrl(): Promise<string>;
 	/** Rotates the token; the previous link stops working. */
 	resetInviteUrl(): Promise<string>;
-	removeMember(userId: string): Promise<void>;
+	removeMember(accountId: string): Promise<void>;
 };
 
 const AVATAR_TONES = [
@@ -179,7 +179,7 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 		setBusy(true);
 		setError(null);
 		try {
-			await teamApi.removeMember(member.userId);
+			await teamApi.removeMember(member.accountId);
 			refreshMembers();
 		} catch (caught) {
 			console.error("repository-people: unable to remove member", caught);
@@ -278,7 +278,7 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 				<div className="mt-6 flex flex-col gap-px" data-testid="people-roster">
 					{(members ?? []).map((member) => (
 						<div
-							key={member.userId}
+							key={member.accountId}
 							className="group flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-bg-hover"
 						>
 							<MemberAvatar member={member} />
@@ -293,7 +293,7 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 									) : null}
 								</p>
 								<p className="truncate text-xs text-text-tertiary">
-									{member.email} ·{" "}
+									{member.email ? <>{member.email} · </> : null}
 									{member.role === "admin" ? "Admin" : "Member"}
 								</p>
 							</div>

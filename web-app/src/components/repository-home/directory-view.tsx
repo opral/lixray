@@ -1289,7 +1289,7 @@ function InviteControl({
 					<span className="flex -space-x-1.5">
 						{team.slice(0, 3).map((member) => (
 							<MemberAvatar
-								key={member.userId}
+								key={member.accountId}
 								member={member}
 								className="size-6 text-[11px] ring-2 ring-bg-panel"
 							/>

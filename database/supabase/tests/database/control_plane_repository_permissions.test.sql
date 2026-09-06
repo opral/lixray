@@ -52,7 +52,7 @@ select results_eq(
 	$$select role from public.list_lix_members(
 		(select id from public.lixes where deleted_at is null limit 1)
 	)
-	where user_id = '71000000-0000-0000-0000-000000000001'$$,
+	where account_id = '71000000-0000-0000-0000-000000000001'$$,
 	$$values ('admin'::public.lix_role)$$,
 	'the repository creator is an admin'
 );
@@ -125,7 +125,7 @@ select lives_ok(
 );
 select results_eq(
 	$$select role from public.list_lix_members(current_setting('test.repository_id')::uuid)
-	where user_id = '71000000-0000-0000-0000-000000000002'$$,
+	where account_id = '71000000-0000-0000-0000-000000000002'$$,
 	$$values ('member'::public.lix_role)$$,
 	'invitations never grant admin implicitly'
 );
@@ -164,9 +164,9 @@ select lives_ok(
 	'an admin can appoint another admin'
 );
 select results_eq(
-	$$select user_id from public.list_lix_members(current_setting('test.repository_id')::uuid)
+	$$select account_id from public.list_lix_members(current_setting('test.repository_id')::uuid)
 	where role = 'admin'
-	order by user_id$$,
+	order by account_id$$,
 	$$values
 		('71000000-0000-0000-0000-000000000001'::uuid),
 		('71000000-0000-0000-0000-000000000003'::uuid)$$,
@@ -181,7 +181,7 @@ select lives_ok(
 );
 select is(
 	(select count(*) from public.list_lix_members(current_setting('test.repository_id')::uuid)
-	where user_id = '71000000-0000-0000-0000-000000000002'),
+	where account_id = '71000000-0000-0000-0000-000000000002'),
 	0::bigint,
 	'the kicked member no longer has repository membership'
 );

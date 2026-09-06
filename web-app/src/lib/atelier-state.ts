@@ -16,7 +16,7 @@ const PREFERENCES_STATE_VERSION = 1;
 const REVIEW_STATE_VERSION = 1;
 
 export function createRepositorySessionStateStore(args: {
-	readonly userId: string;
+	readonly accountId: string;
 	readonly repositoryId: string;
 	readonly storage?: Storage;
 	/**
@@ -131,7 +131,7 @@ export function createRepositoryBranchSession(args: {
 }
 
 export function createRepositoryPreferencesStore(args: {
-	readonly userId: string;
+	readonly accountId: string;
 	readonly repositoryId: string;
 	readonly storage?: Storage;
 }): AtelierPreferencesStore {
@@ -156,7 +156,7 @@ export function createRepositoryPreferencesStore(args: {
 }
 
 export function createRepositoryReviewStatusStore(args: {
-	readonly userId: string;
+	readonly accountId: string;
 	readonly repositoryId: string;
 	readonly storage?: Storage;
 }): AtelierReviewStatusStore {
@@ -229,9 +229,9 @@ function reviewResolutionKey(review: AtelierReviewResolution): string {
 function namespacedAtelierStateKey(
 	family: "shell" | "preferences" | "reviews",
 	version: number,
-	args: { readonly userId: string; readonly repositoryId: string },
+	args: { readonly accountId: string; readonly repositoryId: string },
 ): string {
-	return `lixray.atelier.${family}.v${version}:${args.userId}:${args.repositoryId}`;
+	return `lixray.atelier.${family}.v${version}:${args.accountId}:${args.repositoryId}`;
 }
 
 function readStoredJson(storage: Storage, key: string): unknown {

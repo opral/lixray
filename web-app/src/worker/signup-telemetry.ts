@@ -25,7 +25,10 @@ interface SignupTelemetryEnvironment {
 }
 
 interface SignupTelemetryIdentity {
+	/** Stable LixRay actor used for product analytics attribution. */
 	userId: string;
+	/** Credential subject used only to verify the Supabase Auth response. */
+	authUserId?: string;
 	token: string;
 	isDemo?: boolean;
 }
@@ -164,7 +167,7 @@ async function fetchAuthenticatedUser(
 	}
 	const user = candidate as Partial<SupabaseAuthUser>;
 	if (
-		user.id !== identity.userId ||
+		user.id !== (identity.authUserId ?? identity.userId) ||
 		typeof user.created_at !== "string" ||
 		!user.created_at
 	) {

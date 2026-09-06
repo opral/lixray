@@ -196,8 +196,21 @@ async function withSignedMcpJwt(options: { persistCache?: boolean } = {}) {
 	const server = await listenJwks(() =>
 		serving ? Response.json(jwks) : new Response("gone", { status: 503 }),
 	);
+	const accountServer = await listenJwks(() =>
+		Response.json([
+			{
+				account_id: "01920000-0000-7000-8000-000000000601",
+				kind: "human",
+				name: "Example Account",
+				profile_uri:
+					"https://lixray.com/profile/11111111-1111-4111-8111-111111111111",
+			},
+		]),
+	);
 	const env: WorkerEnv = {
-		SUPABASE_URL: "https://project.supabase.co",
+		SUPABASE_URL: accountServer.origin,
+		SUPABASE_PUBLISHABLE_KEY: "publishable-key",
+		SUPABASE_JWT_ISSUER_URL: "https://project.supabase.co",
 		SUPABASE_JWKS_URL: `${server.origin}/auth/v1/.well-known/jwks.json`,
 		LIXRAY_JWKS_CACHE_PATH: cachePath,
 	};
@@ -215,6 +228,7 @@ async function withSignedMcpJwt(options: { persistCache?: boolean } = {}) {
 		async cleanup() {
 			serving = false;
 			await server.close().catch(() => undefined);
+			await accountServer.close().catch(() => undefined);
 			if (directory) await rm(directory, { recursive: true, force: true });
 		},
 	};
