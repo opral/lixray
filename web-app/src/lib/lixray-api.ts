@@ -2,6 +2,8 @@ import {
 	openLix,
 	type ExecuteResult as LixExecuteResult,
 	type Lix,
+	type ResultArrayRow,
+	type ResultColumnType,
 	type SqlParam,
 	Value,
 } from "@lix-js/sdk";
@@ -111,7 +113,7 @@ export function useLixrayApi() {
 		const previous = clientRef.current;
 		if (previous) void previous.promise.then((lix) => lix.close());
 		const url = new URL(
-			`/@${encodeURIComponent(activeRepository.organization.handle)}/${encodeURIComponent(activeRepository.repository.slug)}`,
+			`/lix/${encodeURIComponent(activeRepository.repository.id)}`,
 			globalThis.location.origin,
 		);
 		const promise = openLix({
@@ -165,10 +167,10 @@ export function useLixrayApi() {
 					const currentBranchId = await lix.activeBranchId();
 					return {
 						branches: result.rows.map((row) => ({
-							id: requiredRowString(row.toObject(), "id"),
-							name: requiredRowString(row.toObject(), "name"),
-							hidden: requiredRowBoolean(row.toObject(), "hidden"),
-							commitId: requiredRowString(row.toObject(), "commit_id"),
+							id: requiredRowString(row, "id"),
+							name: requiredRowString(row, "name"),
+							hidden: requiredRowBoolean(row, "hidden"),
+							commitId: requiredRowString(row, "commit_id"),
 						})),
 						currentBranchId,
 					} satisfies BranchesResponse;
@@ -184,7 +186,7 @@ export function useLixrayApi() {
 								await lix.execute(
 									body.sql,
 									(body.params ?? []).map(toSqlParam),
-									body.options,
+									{ ...body.options, rowMode: "array" },
 								),
 							),
 						],
@@ -202,7 +204,7 @@ export function useLixrayApi() {
 									sql: statement.sql,
 									params: (statement.params ?? []).map(toSqlParam),
 								})),
-								body.options,
+								{ ...body.options, rowMode: "array" },
 							)
 						).map(toWireResult),
 					};
@@ -211,11 +213,10 @@ export function useLixrayApi() {
 				serialized(async (lix) => ({
 					results: [
 						toWireResult(
-							await lix.execute(
-								body.sql,
-								(body.params ?? []).map(toSqlParam),
-								body.options,
-							),
+							await lix.execute(body.sql, (body.params ?? []).map(toSqlParam), {
+								...body.options,
+								rowMode: "array",
+							}),
 						),
 					],
 				})),
@@ -227,7 +228,7 @@ export function useLixrayApi() {
 								sql: statement.sql,
 								params: (statement.params ?? []).map(toSqlParam),
 							})),
-							body.options,
+							{ ...body.options, rowMode: "array" },
 						)
 					).map(toWireResult),
 				})),
@@ -254,36 +255,50 @@ function toSqlParam(value: WireValue): SqlParam {
 	}
 }
 
-function toWireResult(result: LixExecuteResult): ExecuteResponse {
+function toWireResult(
+	result: LixExecuteResult<ResultArrayRow>,
+): ExecuteResponse {
 	return {
-		columns: result.columns,
+		columns: result.columns.map((column) => column.name),
 		rows: result.rows.map((row) =>
-			result.columns.map((column) => {
-				const value = row.value(column);
-				const js = value.toJS();
-				switch (value.kind) {
-					case "null":
-						return { kind: "null", value: null };
-					case "boolean":
-						return { kind: "bool", value: Boolean(js) };
-					case "integer":
-						return { kind: "int", value: Number(js) };
-					case "real":
-						return { kind: "float", value: Number(js) };
-					case "text":
-						return { kind: "text", value: String(js) };
-					case "timestamptz":
-						return { kind: "timestamp", value: String(js) };
-					case "blob":
-						return { kind: "blob", base64: bytesToBase64(value.asBytes()!) };
-					case "jsonb":
-						return { kind: "json", value: js };
-				}
-			}),
+			result.columns.map((column, index) =>
+				toWireValue(row[index], column.type),
+			),
 		),
 		rowsAffected: result.rowsAffected,
 		notices: result.notices,
 	};
+}
+
+function toWireValue(value: unknown, kind: ResultColumnType): WireValue {
+	if (value === null) return { kind: "null", value: null };
+	switch (kind) {
+		case "null":
+			return { kind: "null", value: null };
+		case "boolean":
+			if (typeof value === "boolean") return { kind: "bool", value };
+			break;
+		case "integer":
+			if (typeof value === "number") return { kind: "int", value };
+			break;
+		case "real":
+			if (typeof value === "number") return { kind: "float", value };
+			break;
+		case "text":
+			if (typeof value === "string") return { kind: "text", value };
+			break;
+		case "timestamptz":
+			if (typeof value === "string") return { kind: "timestamp", value };
+			break;
+		case "jsonb":
+			return { kind: "json", value };
+		case "blob":
+			if (value instanceof Uint8Array) {
+				return { kind: "blob", base64: bytesToBase64(value) };
+			}
+			break;
+	}
+	throw new Error(`Invalid ${kind} result value`);
 }
 
 function requiredRowString(

@@ -1,19 +1,9 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
-  "build": {
-    "builder": "DOCKERFILE",
-    "dockerfilePath": "lix-server/Dockerfile",
-    "watchPatterns": [
-      "lix-server/**",
-      "vendor/lix",
-      "vendor/lix/**",
-      ".gitmodules",
-      "railway.json"
-    ]
-  },
   "deploy": {
     "numReplicas": 1,
     "sleepApplication": true,
+    "startCommand": "/bin/sh -c 'LIX_SERVER_INTERNAL_TOKEN=\"$LIXRAY_INTERNAL_TOKEN\" LIX_SERVER_MAX_OPEN_LIXS=\"${LIXRAY_MAX_OPEN_LIXS:-32}\" LIX_SERVER_PROTOCOL_TIMEOUT_SECS=\"${LIXRAY_PROTOCOL_TIMEOUT_SECS:-60}\" LIX_SERVER_RECOVERY_CLOSE_TIMEOUT_SECS=\"${LIXRAY_RECOVERY_CLOSE_TIMEOUT_SECS:-30}\" S3_PREFIX=\"${S3_PREFIX:-railway/$RAILWAY_ENVIRONMENT_ID}\" exec /usr/local/bin/lix-server'",
     "healthcheckPath": "/healthz",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

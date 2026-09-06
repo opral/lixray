@@ -278,17 +278,12 @@ async function ensureMarkdownFile(targetPage) {
 		.last();
 	if ((await existing.count()) > 0) return "untitled.md";
 
-	const emptyStateMarkdown = targetPage.getByRole("button", {
-		name: "Markdown",
-		exact: true,
-	});
+	const emptyStateMarkdown = targetPage.getByTestId("home-create-file-md");
 	if ((await emptyStateMarkdown.count()) > 0) {
 		await emptyStateMarkdown.click();
 	} else {
 		await targetPage.getByTestId("home-new-button").click();
-		await targetPage
-			.getByRole("button", { name: "New Markdown (.md)", exact: true })
-			.click();
+		await targetPage.getByTestId("home-create-file-md").click();
 	}
 	await waitForActiveTab(targetPage, "untitled.md");
 	await waitForMarkdownEditor(targetPage);

@@ -2,17 +2,17 @@ import {
 	chmod,
 	cp,
 	mkdir,
-	mkdtemp,
 	readFile,
 	rm,
 	stat,
+	symlink,
 	writeFile,
 } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { installBrowserArtifact } from "./lix-ci-artifacts.mjs";
 
 const workspaceRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const releaseDist = join(
@@ -46,6 +46,16 @@ if (modeArguments.some((argument) => argument !== "--native")) {
 	);
 }
 const buildNative = modeArguments.includes("--native");
+const lixRoot = join(sdkRoot, "..", "..");
+const sourceRevision = requiredOutput(
+	"git",
+	["-C", lixRoot, "rev-parse", "HEAD"],
+	process.env,
+	"vendored Lix revision",
+);
+const nativeTarget = `${process.platform}-${process.arch}`;
+const browserMarker = join(sdkDist, ".lixray-browser-build.json");
+const nativeMarker = join(sdkDist, `.lixray-native-${nativeTarget}.json`);
 
 await requireDirectory(
 	releaseDist,
@@ -55,77 +65,182 @@ await requireDirectory(
 	sdkRoot,
 	"Initialize the vendor/lix submodule before installing dependencies.",
 );
-await rm(join(sdkRoot, "lix_js_sdk.node"), { force: true });
 
-const skipWasmBuild = process.env.LIXRAY_SKIP_VENDORED_LIX_WASM === "1";
-let preservedWasmRoot;
-try {
-	if (skipWasmBuild) {
-		const wasmDir = join(sdkDist, "wasm");
-		await requireDirectory(
-			wasmDir,
-			"LIXRAY_SKIP_VENDORED_LIX_WASM=1 requires an existing vendored WASM build. Run the build once without this flag first.",
-		);
-		preservedWasmRoot = await mkdtemp(join(tmpdir(), "lixray-vendored-wasm-"));
-		await cp(wasmDir, join(preservedWasmRoot, "wasm"), { recursive: true });
-	}
+console.log(`[lix-sdk] Selected vendored Lix ${sourceRevision}.`);
 
-	await rm(sdkDist, { recursive: true, force: true });
-	await cp(releaseDist, sdkDist, { recursive: true });
+let browserReady = await preparedBrowserMatches(sourceRevision);
+if (
+	!browserReady &&
+	process.env.LIXRAY_SKIP_VENDORED_LIX_WASM === "1" &&
+	(await browserFilesExist())
+) {
+	console.log(
+		"[lix-sdk] Adopting the browser SDK supplied by the calling CI job.",
+	);
+	await writeBuildMarker(browserMarker, {
+		source: "calling-workflow",
+		sourceRevision,
+	});
+	browserReady = true;
+}
 
-	if (preservedWasmRoot) {
-		await rm(join(sdkDist, "wasm"), { recursive: true, force: true });
-		await cp(join(preservedWasmRoot, "wasm"), join(sdkDist, "wasm"), {
-			recursive: true,
+if (browserReady) {
+	console.log(
+		`[lix-sdk] REUSE browser SDK already prepared for ${sourceRevision}.`,
+	);
+} else {
+	try {
+		const artifact = await installBrowserArtifact({
+			opfsStorageRoot,
+			revision: sourceRevision,
+			sdkRoot,
 		});
-	}
-} finally {
-	if (preservedWasmRoot) {
-		await rm(preservedWasmRoot, { recursive: true, force: true });
+		if (artifact) {
+			await writeBuildMarker(browserMarker, {
+				...artifact,
+				source: "lix-ci-artifact",
+				sourceRevision,
+			});
+			browserReady = true;
+			console.log(
+				`[lix-sdk] Installed precompiled browser SDK for ${sourceRevision}.`,
+			);
+		}
+	} catch (error) {
+		if (process.env.LIXRAY_LIX_ARTIFACTS === "only") throw error;
+		console.log(
+			`[lix-sdk] Artifact install failed (${errorMessage(error)}); compiling from source.`,
+		);
 	}
 }
-const toolchainEnv = await vendoredLixToolchainEnv({
-	requireWasmBindgen: true,
-});
-if (!skipWasmBuild) {
+
+if (!browserReady) {
+	console.log(
+		`[lix-sdk] SOURCE BUILD browser SDK for ${sourceRevision}; no reusable artifact was available.`,
+	);
+	await buildBrowserFromSource();
+	await writeBuildMarker(browserMarker, {
+		source: "source-build",
+		sourceRevision,
+	});
+	console.log(`[lix-sdk] Finished browser source build for ${sourceRevision}.`);
+}
+await ensureWasmSourceLink();
+
+if (buildNative) {
+	let nativeReady = await preparedNativeMatches(sourceRevision, nativeTarget);
+	if (nativeReady) {
+		console.log(
+			`[lix-sdk] REUSE native SDK ${nativeTarget} already prepared for ${sourceRevision}.`,
+		);
+	}
+
+	if (!nativeReady) {
+		console.log(
+			`[lix-sdk] SOURCE BUILD native SDK ${nativeTarget} for ${sourceRevision}; explicit native preparation was requested.`,
+		);
+		await rm(join(sdkRoot, "lix_js_sdk.node"), { force: true });
+		const toolchainEnv = {
+			...(await vendoredLixToolchainEnv({ requireWasmBindgen: false })),
+			LIX_NATIVE_PROFILE: "test",
+		};
+		run(
+			process.execPath,
+			[join(sdkRoot, "scripts", "build-native.js")],
+			toolchainEnv,
+			sdkRoot,
+		);
+		await writeBuildMarker(nativeMarker, {
+			source: "source-build",
+			sourceRevision,
+			target: nativeTarget,
+		});
+	}
+	verifyNativeSdk();
+}
+
+async function buildBrowserFromSource() {
+	await rm(sdkDist, { recursive: true, force: true });
+	await cp(releaseDist, sdkDist, { recursive: true });
+	const toolchainEnv = await vendoredLixToolchainEnv({
+		requireWasmBindgen: true,
+	});
 	run(
 		process.execPath,
 		[join(sdkRoot, "scripts", "build-wasm.js")],
 		toolchainEnv,
 	);
-}
 
-const compiled = spawnSync(
-	process.execPath,
-	[tsc, "-p", join(sdkRoot, "tsconfig.json")],
-	{
-		stdio: "inherit",
-	},
-);
-if (compiled.error) throw compiled.error;
-if (compiled.status !== 0) process.exit(compiled.status ?? 1);
+	const compiled = spawnSync(
+		process.execPath,
+		[tsc, "-p", join(sdkRoot, "tsconfig.json")],
+		{
+			stdio: "inherit",
+		},
+	);
+	if (compiled.error) throw compiled.error;
+	if (compiled.status !== 0) process.exit(compiled.status ?? 1);
 
-run("pnpm", ["--dir", opfsStorageRoot, "build"], toolchainEnv);
-
-await rm(join(sdkDist, "bundled-plugins"), { recursive: true, force: true });
-run(
-	process.execPath,
-	[join(sdkRoot, "scripts", "build-bundled-plugins.js")],
-	toolchainEnv,
-);
-
-if (buildNative) {
-	const toolchainEnv = {
-		...(await vendoredLixToolchainEnv({ requireWasmBindgen: false })),
-		LIX_NATIVE_PROFILE: "test",
-	};
+	run("pnpm", ["--dir", opfsStorageRoot, "build"], toolchainEnv);
+	await rm(join(sdkDist, "bundled-plugins"), {
+		recursive: true,
+		force: true,
+	});
 	run(
 		process.execPath,
-		[join(sdkRoot, "scripts", "build-native.js")],
+		[join(sdkRoot, "scripts", "build-bundled-plugins.js")],
 		toolchainEnv,
-		sdkRoot,
 	);
-	verifyNativeSdk();
+}
+
+async function preparedBrowserMatches(revision) {
+	const marker = await readBuildMarker(browserMarker);
+	return marker?.sourceRevision === revision && (await browserFilesExist());
+}
+
+async function browserFilesExist() {
+	return (
+		(await isFile(join(sdkDist, "index.js"))) &&
+		(await isFile(join(sdkDist, "wasm", "lix_js_sdk_bg.wasm"))) &&
+		(await isFile(join(opfsStorageRoot, "dist", "index.js")))
+	);
+}
+
+async function preparedNativeMatches(revision, target) {
+	const marker = await readBuildMarker(nativeMarker);
+	return (
+		marker?.sourceRevision === revision &&
+		marker?.target === target &&
+		(await isFile(join(sdkRoot, "lix_js_sdk.node")))
+	);
+}
+
+async function ensureWasmSourceLink() {
+	await rm(join(sdkRoot, "src", "wasm"), { recursive: true, force: true });
+	await symlink(join(sdkDist, "wasm"), join(sdkRoot, "src", "wasm"), "dir");
+}
+
+async function writeBuildMarker(path, value) {
+	await writeFile(
+		path,
+		`${JSON.stringify({ schemaVersion: 1, ...value }, null, 2)}\n`,
+	);
+}
+
+async function readBuildMarker(path) {
+	try {
+		return JSON.parse(await readFile(path, "utf8"));
+	} catch {
+		return undefined;
+	}
+}
+
+async function isFile(path) {
+	try {
+		return (await stat(path)).isFile();
+	} catch {
+		return false;
+	}
 }
 
 async function requireDirectory(path, message) {
@@ -298,6 +413,12 @@ function commandOutput(command, args, env) {
 	return result.status === 0 ? result.stdout.trim() : undefined;
 }
 
+function requiredOutput(command, args, env, description) {
+	const output = commandOutput(command, args, env);
+	if (!output) throw new Error(`Could not read ${description}.`);
+	return output;
+}
+
 function run(command, args, env, cwd) {
 	const result = spawnSync(command, args, { cwd, env, stdio: "inherit" });
 	if (result.error) throw result.error;
@@ -311,7 +432,7 @@ function verifyNativeSdk() {
 		"  const lix = await openLix();",
 		"  try {",
 		'    const [result] = await lix.executeBatch([{ sql: "SELECT 1 AS value" }]);',
-		'    if (result?.rows?.[0]?.values?.[0]?.toJS() !== 1) throw new Error("Vendored Lix native executeBatch smoke test failed");',
+		'    if (result?.rows?.[0]?.value !== 1) throw new Error("Vendored Lix native executeBatch smoke test failed");',
 		"  } finally {",
 		"    await lix.close();",
 		"  }",
@@ -347,4 +468,8 @@ function requiredMatch(value, pattern, description) {
 	if (!match)
 		throw new Error(`Could not read ${description} from vendored Lix.`);
 	return match;
+}
+
+function errorMessage(error) {
+	return error instanceof Error ? error.message : String(error);
 }

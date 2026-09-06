@@ -160,7 +160,7 @@ test("answers 502 when the upstream fetch fails", async () => {
 				cause: new Error("Headers Timeout Error"),
 			});
 		},
-		(origin) => fetch(`${origin}/lix/v1/`),
+		(origin) => fetch(`${origin}/lix/v1/11111111-1111-4111-8111-111111111111/`),
 	);
 	assert.equal(response.status, 502);
 	assert.match(await response.text(), /Upstream service unavailable/);
@@ -230,7 +230,7 @@ test("a response body erroring mid-stream does not crash the process", async () 
 		// kept the event from killing the process (an uncaught stream error
 		// would take down this whole test run).
 		(origin) =>
-			fetch(`${origin}/lix/v1/`)
+			fetch(`${origin}/lix/v1/11111111-1111-4111-8111-111111111111/`)
 				.then((response) => response.text())
 				.then(
 					() => "completed",

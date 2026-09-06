@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { provisionAccountAfterHandshake } from "./lix-account-provisioning.ts";
 
+const lixId = "11111111-1111-4111-8111-111111111111";
+
 const account = {
 	id: "01920000-0000-7000-8000-000000000601",
 	kind: "human",
@@ -16,7 +18,8 @@ void test("accounts without a public profile can open repositories", async () =>
 	});
 	assert.equal(
 		await provisionAccountAfterHandshake({
-			protocolPath: "/lix/v1/",
+			lixId,
+			protocolPath: `/lix/v1/${lixId}/`,
 			response: handshake,
 			account: { ...account, profileUri: null },
 			lixFetch: () => {
@@ -34,7 +37,8 @@ void test("successful authenticated handshake enriches the repository account", 
 		sessionId: "session-1",
 	});
 	const response = await provisionAccountAfterHandshake({
-		protocolPath: "/lix/v1/",
+		lixId,
+		protocolPath: `/lix/v1/${lixId}/`,
 		response: handshake,
 		account,
 		lixFetch: async (candidate) => {
@@ -45,7 +49,7 @@ void test("successful authenticated handshake enriches the repository account", 
 
 	assert.equal(response, handshake);
 	assert.ok(request);
-	assert.equal(new URL(request.url).pathname, "/lix/v1/execute");
+	assert.equal(new URL(request.url).pathname, `/lix/v1/${lixId}/execute`);
 	assert.equal(request.headers.get("lix-session-id"), "session-1");
 	assert.equal(
 		request.headers.get("x-lixray-idempotency-principal"),
@@ -72,7 +76,8 @@ void test("non-handshake responses do not provision an account", async () => {
 	const response = new Response("ok");
 	assert.equal(
 		await provisionAccountAfterHandshake({
-			protocolPath: "/lix/v1/execute",
+			lixId,
+			protocolPath: `/lix/v1/${lixId}/execute`,
 			response,
 			account,
 			lixFetch: async () => {
@@ -87,7 +92,8 @@ void test("non-handshake responses do not provision an account", async () => {
 
 void test("handshake fails closed when account enrichment fails", async () => {
 	const response = await provisionAccountAfterHandshake({
-		protocolPath: "/lix/v1/",
+		lixId,
+		protocolPath: `/lix/v1/${lixId}/`,
 		response: Response.json({
 			activeAccountId: account.id,
 			sessionId: "session-1",

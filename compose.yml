@@ -26,27 +26,23 @@ services:
     # Give graceful shutdown room to drain and close repository stores; a
     # 10s SIGKILL mid-write leaves store state whose next open hangs.
     stop_grace_period: 30s
-    # CI sets this to the immutable GHCR digest built by the server-image job.
-    # Local development keeps building the Dockerfile below.
-    image: ${LIXRAY_SERVER_IMAGE:-lixray-server:local}
-    build:
-      context: .
-      dockerfile: lix-server/Dockerfile
-      args:
-        CARGO_BUILD_JOBS: 32
-        LIXRAY_IMAGE_VARIANT: perf
+    # Lix builds this image once. LixRay only pulls the immutable artifact.
+    # Set LIXRAY_SERVER_IMAGE to a locally built Lix image when developing the
+    # server itself.
+    image: ${LIXRAY_SERVER_IMAGE:-ghcr.io/opral/lix-server@sha256:5d59180190b2a891be77adf201e4405c4d514eb6ba4a86dd94d12c3f468b4807}
     environment:
       BIND_ADDR: 0.0.0.0:8080
-      LIXRAY_MAX_OPEN_LIXS: ${LIXRAY_MAX_OPEN_LIXS:-32}
-      LIXRAY_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
-      LIXRAY_PERF_SPANS: ${LIXRAY_PERF_SPANS:-false}
-      RUST_LOG: ${RUST_LOG:-lixray=info}
+      LIX_SERVER_MAX_OPEN_LIXS: ${LIXRAY_MAX_OPEN_LIXS:-32}
+      LIX_SERVER_INTERNAL_TOKEN: ${LIXRAY_INTERNAL_TOKEN:-lixray-local-internal-token}
+      LIX_SERVER_PROTOCOL_TIMEOUT_SECS: ${LIXRAY_PROTOCOL_TIMEOUT_SECS:-60}
+      LIX_SERVER_RECOVERY_CLOSE_TIMEOUT_SECS: ${LIXRAY_RECOVERY_CLOSE_TIMEOUT_SECS:-30}
+      RUST_LOG: ${RUST_LOG:-lix_server=info}
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: lixray
       S3_ACCESS_KEY_ID: lixray
       S3_SECRET_ACCESS_KEY: lixray-local-secret
       S3_REGION: us-east-1
-      S3_PREFIX: local
+      S3_PREFIX: ${LIXRAY_STORAGE_PREFIX:-local}
       S3_ALLOW_HTTP: "true"
     depends_on:
       minio-init:
@@ -89,6 +85,8 @@ services:
         condition: service_completed_successfully
     environment:
       LIXRAY_PERF_REPOSITORY: ${LIXRAY_PERF_REPOSITORY:-}
+    volumes:
+      - ./scripts/validate-lix-uuid.sh:/usr/local/bin/validate-lix-uuid:ro
     entrypoint: /bin/sh
     command:
       - -c
@@ -97,22 +95,9 @@ services:
           echo "LIXRAY_PERF_REPOSITORY is required" >&2
           exit 2
         fi
-        case "$${LIXRAY_PERF_REPOSITORY}" in
-          perf-[A-Za-z0-9]*)
-            ;;
-          *)
-            echo "LIXRAY_PERF_REPOSITORY must be a benchmark id beginning with perf-" >&2
-            exit 2
-            ;;
-        esac
-        case "$${LIXRAY_PERF_REPOSITORY}" in
-          *[!A-Za-z0-9._-]*)
-            echo "LIXRAY_PERF_REPOSITORY contains invalid characters" >&2
-            exit 2
-            ;;
-        esac
+        /bin/sh /usr/local/bin/validate-lix-uuid "$${LIXRAY_PERF_REPOSITORY}"
         mc alias set local http://minio:9000 lixray lixray-local-secret
-        mc rm --recursive --force "local/lixray/local/$${LIXRAY_PERF_REPOSITORY}/"
+        mc rm --recursive --force "local/lixray/local/perf/$${LIXRAY_PERF_REPOSITORY}/"
 
   onboarding-storage-reset:
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z

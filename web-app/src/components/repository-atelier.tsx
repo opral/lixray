@@ -60,9 +60,11 @@ import {
 import { isRepositoryShareToken } from "~/lib/repository-share-capability";
 import {
 	openRepositoryLixSession,
+	openRepositoryRemoteLix,
 	type RepositoryMigrationState,
 	type RepositoryLixSession,
 } from "~/lib/repository-lix-session";
+import { buildRepositoryReproduction } from "~/lib/repository-reproduction";
 import { formatRepositoryOpenError } from "~/lib/repository-open-error";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
@@ -727,6 +729,7 @@ export function RepositoryAtelier({
 	// view is already active — e.g. a forked folder tab) from outside ones
 	// (deep link, back/forward), which must hydrate the Home surface.
 	const shellDirNavigationRef = useRef<string | null>(null);
+	const [reviewFocusActive, setReviewFocusActive] = useState(false);
 	const consumeShellDirNavigation = useCallback((dirPath: string) => {
 		const matches = shellDirNavigationRef.current === dirPath;
 		shellDirNavigationRef.current = null;
@@ -735,6 +738,12 @@ export function RepositoryAtelier({
 	useEffect(() => {
 		eventHandlerRef.current = (event) => {
 			atelierTelemetryHandlerRef.current?.(event);
+			if (event.type === "diff_session_changed") {
+				// Review focus: chrome outside the changes (the brand and
+				// repository selector) recedes with the rest of the page.
+				setReviewFocusActive(event.active && event.changedFileCount > 0);
+				return;
+			}
 			if (event.type !== "central_view_activated") return;
 			if (!routeSyncedRef.current) return;
 			// Any activation supersedes an unconsumed dir-navigation marker.
@@ -861,6 +870,8 @@ export function RepositoryAtelier({
 	useEffect(() => {
 		let disposed = false;
 		let activeLix: RepositoryLixSession | null = null;
+		let debugRemoteLix: ReturnType<typeof openRepositoryRemoteLix> | null =
+			null;
 		const openController = new AbortController();
 		resetRepositoryOpenPerformance();
 		setInstance(null);
@@ -899,6 +910,16 @@ export function RepositoryAtelier({
 				setMigration(null);
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
 				activeLixRef.current = session;
+				if (import.meta.env.DEV) {
+					// Dev-only escape hatch: lets the console (and agents driving
+					// the browser) run SQL against the open repository directly.
+					(window as { __lix?: unknown }).__lix = session.lix;
+					console.info(
+						"[lixray] window.__lix exposes this repository for debugging: " +
+							'await __lix.execute("SELECT …") — read row columns with ' +
+							'.get("col"). Prefer this over driving the SQL Explorer UI.',
+					);
+				}
 				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
 
 				// Initialize telemetry handler with repository context
@@ -932,9 +953,45 @@ export function RepositoryAtelier({
 					},
 				});
 				setBranchSession(repositoryBranchSession);
+				const getDebugRemoteLix = async () => {
+					debugRemoteLix ??= openRepositoryRemoteLix({
+						namespace,
+						repositorySlug,
+						repositoryId,
+						getAccessToken,
+						refreshAccessToken,
+						allowAnonymous: isReadOnly,
+						publicPath: isReadOnly ? publicPath : undefined,
+						authIdentity: atelierAccountId,
+					});
+					const remote = await debugRemoteLix;
+					const activeBranchId = session.activeBranchSnapshot();
+					if ((await remote.activeBranchId()) !== activeBranchId) {
+						await remote.switchBranch({ branchId: activeBranchId });
+					}
+					return remote;
+				};
+				const getDebugRemoteSnapshot = async () =>
+					new Response((await getDebugRemoteLix()).exportSnapshot(), {
+						headers: {
+							"Content-Type": "application/vnd.lix.snapshot",
+						},
+					}).blob();
 				const atelierInstance = createAtelier({
 					lix: session.lix,
 					readOnly: isReadOnly,
+					debug: {
+						remoteLix: getDebugRemoteLix,
+						remoteSnapshot: getDebugRemoteSnapshot,
+						snapshotName: `${namespace}-${repositorySlug}`,
+						createReproduction: ({ query, diffCsv }) =>
+							buildRepositoryReproduction({
+								localLix: session.lix,
+								remoteSnapshot: getDebugRemoteSnapshot,
+								query,
+								diffCsv,
+							}),
+					},
 					branchSession: repositoryBranchSession,
 					extensions: createLixrayRepositoryExtensions(
 						{
@@ -956,7 +1013,9 @@ export function RepositoryAtelier({
 							return data.length > 0;
 						},
 						canEdit ? stableTeamApiRef.current : null,
-						canEdit ? stableSettingsApiRef.current : null,
+						canEdit && !isDemoModeEnabled && client
+							? stableSettingsApiRef.current
+							: null,
 						repositoryVisibility,
 					),
 					centralPanel: {
@@ -1008,6 +1067,9 @@ export function RepositoryAtelier({
 			const session = activeLix;
 			activeLix = null;
 			activeLixRef.current = null;
+			const remote = debugRemoteLix;
+			debugRemoteLix = null;
+			if (remote) void remote.then((lix) => lix.close()).catch(() => undefined);
 			if (session) void session.close();
 		};
 	}, [
@@ -1105,6 +1167,7 @@ export function RepositoryAtelier({
 
 	const navbarBrand = (
 		<RepositoryNavbarBrand
+			dimmed={reviewFocusActive}
 			signedIn={Boolean(user)}
 			namespaceId={namespaceId}
 			namespaceHandle={namespace}
@@ -1144,7 +1207,7 @@ export function RepositoryAtelier({
 			) : null}
 			{!instance && !error && migration ? (
 				<main className="absolute inset-0 grid place-content-center justify-items-center gap-3 bg-bg-app p-6 text-center text-text-secondary">
-					<strong>Migrating repository…</strong>
+					<strong>{repositoryMigrationHeading(migration.phase)}</strong>
 					<span className="text-sm text-text-tertiary">
 						Updating the repository from v{migration.fromVersion} to v
 						{migration.toVersion}. This happens automatically.
@@ -1373,6 +1436,20 @@ function DelayedOpeningLabel() {
 	return visible ? <>Opening repository…</> : null;
 }
 
+function repositoryMigrationHeading(
+	phase: RepositoryMigrationState["phase"],
+): string {
+	switch (phase) {
+		case "validating":
+			return "Verifying repository upgrade…";
+		case "opening":
+			return "Opening upgraded repository…";
+		case "migrating":
+		case undefined:
+			return "Upgrading repository…";
+	}
+}
+
 const REPOSITORY_TOP_BAR_PROPS = {
 	"data-app-titlebar": true,
 	className: "border-b border-border-subtle bg-bg-app",
@@ -1384,15 +1461,22 @@ function RepositoryNavbarBrand({
 	namespaceHandle,
 	repositoryName,
 	repositorySlug,
+	dimmed = false,
 }: {
 	signedIn: boolean;
 	namespaceId: string;
 	namespaceHandle: string;
 	repositoryName: string;
 	repositorySlug: string;
+	/** Review focus: the brand and selector recede; hover restores them. */
+	dimmed?: boolean;
 }) {
 	return (
-		<span className="flex min-w-0 items-center gap-2">
+		<span
+			className={`flex min-w-0 items-center gap-2 transition-opacity${
+				dimmed ? " opacity-[0.35] hover:opacity-100" : ""
+			}`}
+		>
 			<a
 				href={signedIn ? "/home" : "/"}
 				aria-label="LixRay home"

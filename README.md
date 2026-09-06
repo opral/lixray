@@ -1,7 +1,7 @@
 # LixRay
 
 LixRay is a collaborative repository app built from a TanStack Start control
-plane and a multi-repository Rust Lix service. Supabase supports control-plane
+plane and the prebuilt Lix reference server. Supabase supports control-plane
 identity and metadata; SlateDB stores Lix repositories in S3-compatible object
 storage.
 
@@ -12,7 +12,6 @@ Production: [lixray.com](https://lixray.com)
 ## Repository layout
 
 - `web-app/` — TanStack Start app, MCP server, and Atelier integration
-- `lix-server/` — Rust Lix HTTP service and container image
 - `database/` — Supabase schema, migrations, seeds, and database tests
 - `vendor/` — pinned Lix and Atelier submodules
 
@@ -45,14 +44,17 @@ service. Control-plane databases may index or coordinate repositories, but they
 must not become the authority for durable state that needs to travel with a
 Lix.
 
-Every repository maps to an isolated SlateDB object prefix. One bounded
-`lix-server` process hosts multiple lixes, opens them lazily, and evicts
-idle runtimes. Local development uses the same topology with MinIO in place of
-R2.
+Every repository maps to an isolated SlateDB object prefix. One bounded Lix
+reference-server process hosts multiple lixes, opens them lazily, and evicts
+idle runtimes. Lix CI retains tested browser SDK and server artifacts for each
+reviewed revision, and Lix main publishes content-addressed server images. LixRay
+resolves those artifacts from its exact Lix submodule pointer and only compiles
+from source when no successful artifact exists. Local development follows the
+same resolution path with MinIO in place of R2.
 
-The web service owns authentication, organization and repository resolution,
-`/healthz`, `/mcp`, and the repository-scoped Lix protocol. Supabase row-level
-security proves repository access before a request reaches `lix-server`.
+The web service owns authentication, organization and project pages,
+`/healthz`, `/mcp`, and the canonical Lix protocol. Supabase row-level security
+proves Lix access before a request reaches `lix-server`.
 
 ## Setup
 
@@ -104,9 +106,8 @@ required.
 ## Verification
 
 When changing the vendored Lix or Atelier revisions, run `pnpm vendor:sync`.
-It updates the Railway revision manifest and regenerates both Rust and pnpm
-lockfiles. `pnpm vendor:check` verifies that those derived files are committed
-and in sync.
+It regenerates the pnpm lockfile. `pnpm vendor:check` verifies that the derived
+lockfile is committed and in sync.
 
 Run the frontend source checks locally with `pnpm run ci`. Pull-request CI builds
 the production Railway bundle once through `web-app/Dockerfile`, so the
@@ -121,9 +122,6 @@ pnpm --dir web-app check
 VITE_SUPABASE_URL=https://example.invalid \
 VITE_SUPABASE_KEY=ci-public-placeholder \
 pnpm --dir web-app ci:build:node
-cargo fmt --manifest-path lix-server/Cargo.toml --check
-cargo clippy --manifest-path lix-server/Cargo.toml --locked --all-targets --all-features -- -D warnings
-cargo test --manifest-path lix-server/Cargo.toml --locked
 pnpm --dir database start
 pnpm --dir database test
 pnpm --dir web-app exec playwright install chromium
@@ -173,8 +171,26 @@ codex mcp login LixRay
 Useful HTTP endpoints:
 
 - `GET /healthz` — unauthenticated service health
-- `/@namespace/workspace/lix/v1/*` — authenticated canonical Lix protocol
+- `/lix/v1/{uuid}/*` — authenticated canonical Lix REST protocol
+- `/lix/{uuid}` — stable SDK connection URL
 - `/mcp` — authenticated MCP transport
+
+An authorized operator can stream a complete Lix snapshot through that same
+protocol—there is no LixRay-only snapshot route or token:
+
+```sh
+curl --fail-with-body \
+  --header "Authorization: Bearer $ACCESS_TOKEN" \
+  --header "Accept: application/vnd.lix.snapshot" \
+  --output "$LIX_ID.lixsnap.part" \
+  "https://lixray.com/lix/v1/$LIX_ID/snapshot"
+mv "$LIX_ID.lixsnap.part" "$LIX_ID.lixsnap"
+```
+
+The response is the canonical deterministic Lix snapshot stream. Export is
+read-only; LixRay does not expose snapshot upload or resource creation through
+this route. A downloaded artifact becomes a backup only after an operator
+stores it independently with retention, access control, and restore drills.
 
 Apply `database/supabase/migrations/20260710180000_lixray_mcp_oauth.sql`
 before enabling Supabase's OAuth server, dynamic client registration, and the
@@ -188,20 +204,24 @@ LIXRAY_MCP_ACCESS_TOKEN='<token>' pnpm --dir web-app check:mcp
 
 ## CI and deployment
 
-GitHub Actions builds immutable web and server images on pull requests, tags
-them by reusable inputs and the Git tree hash, and runs the Compose browser flow
-against the server digest. Trees with unchanged inputs reuse existing images.
+GitHub Actions builds immutable web images on pull requests, resolves the Lix
+SDK and server from the exact vendored revision, and runs the Compose browser
+flow against the server digest. Successful Lix CI artifacts are reused; an
+unreviewed revision with no artifact is compiled once as an explicit fallback.
+Trees with unchanged inputs reuse existing images.
 Draft pull requests build both immutable images and refresh their deployed
 preview, while skipping the frontend, database, Rust, and local E2E validation
 lanes. Marking a pull request ready for review runs the complete validation set.
 In-progress runs for the same pull request are cancelled, and the stable `CI`
 job remains the merge gate.
 
-The separate `Production` workflow is promotion-only. Pushes to `main` must
-resolve both tested `tree-*` images before applying database migrations. The
-workflow then points both Railway services at those GHCR digests, starts them
-together, and waits up to ten minutes for both health checks. Production never
-waits for an independent Railway build and never rebuilds merged source.
+The separate `Production` workflow normally promotes existing tested images.
+Pushes to `main` resolve the web image and the server matching the Lix submodule
+before applying database migrations. A missing Lix artifact takes the same
+visible source-build fallback as local and PR workflows. The workflow then
+points both Railway services at immutable GHCR digests, starts them together,
+and waits up to ten minutes for both health checks. Production never waits for
+an independent Railway build.
 
 GitHub Actions is the only build and deployment authority:
 
@@ -210,8 +230,8 @@ GitHub Actions is the only build and deployment authority:
   the environment when the pull request closes;
 - each healthy preview is published as a GitHub deployment with a **View
   deployment** link in the pull request;
-- merging to `main` applies database migrations and promotes the tested web and
-  server image digests together;
+- merging to `main` applies database migrations and promotes the tested web
+  image with LixRay's pinned Lix server digest;
 - `railway.json` and `web-app/railway.json` define the two services;
 - Infisical syncs runtime configuration to Railway;
 - deployment and registry credentials come from Infisical via short-lived
@@ -236,6 +256,16 @@ Put these secrets in the Infisical `prod` environment under `/ci`:
   only if that workflow token is denied; it is not required in Infisical;
 - `VITE_SUPABASE_URL`: the public production Supabase project URL;
 - `VITE_SUPABASE_KEY`: the public production Supabase publishable key.
+
+Public Lix artifacts are downloaded with the workflow's `GITHUB_TOKEN`. An
+optional `LIX_ACTIONS_READ_TOKEN` GitHub Actions secret can supply Actions read
+access when repository visibility or organization policy prevents that token
+from reading `opral/lix`. If authorization fails or an artifact has expired,
+the terminal reports the miss and LixRay falls back to compiling the selected
+submodule. CI waits for an already-running exact-revision Lix build before
+falling back, avoiding a duplicate compile when both pull requests start
+together. Local development uses the current `gh auth` session for the same
+read when available.
 
 Create separate Infisical OIDC machine identities for pull requests and the
 GitHub `production` environment. Give both read access only to `/ci`, bind
@@ -271,11 +301,14 @@ workflow change, and only then disable Railway's native GitHub autodeploy and
 PR environments. This keeps preview deployment available throughout the
 transition.
 
-Both services share `LIXRAY_INTERNAL_TOKEN`. The web service reaches the Rust
-service through Railway's private network. Production and preview environments
-use separate S3 storage configuration; when `S3_PREFIX` is unset, the server
-namespaces data by Railway environment ID. Preview environments never inherit
-production Supabase credentials.
+Both services share `LIXRAY_INTERNAL_TOKEN`. The Railway server start command
+maps it to the reference server's `LIX_SERVER_INTERNAL_TOKEN` and maps the
+existing timeout/cache variables to their generic `LIX_SERVER_*` names. The web
+service reaches the server through Railway's private network. Production and
+preview environments use separate S3 storage configuration; when `S3_PREFIX`
+is unset, the deployment adapter preserves the existing
+`railway/$RAILWAY_ENVIRONMENT_ID` object layout. Preview environments never
+inherit production Supabase credentials.
 
 ### Fast pull request previews
 
@@ -298,22 +331,21 @@ requested integration environment.
 ## Performance loop
 
 ```sh
-LIXRAY_PERF_REPOSITORY=perf-baseline-c1000-read4k-r1 pnpm perf:reset
-LIXRAY_PERF_SPANS=true \
-  RUST_LOG=lixray=info,lix_perf=debug \
-  pnpm perf:up
+LIXRAY_PERF_REPOSITORY=11111111-1111-4111-8111-111111111111 pnpm perf:reset
+RUST_LOG=lix_server=info pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-baseline-c1000-read4k-r1 \
+  --repository 11111111-1111-4111-8111-111111111111 \
   --operation read-point-4k \
   --commits 1000 \
   --output perf/results/baseline.json
-# edit vendor/lix or lix-server
-LIXRAY_PERF_REPOSITORY=perf-candidate-c1000-read4k-r1 pnpm perf:reset
+# To test a local Lix change, build the server image in the Lix repository and
+# export LIXRAY_SERVER_IMAGE=<your-local-image> before starting this stack.
+LIXRAY_PERF_REPOSITORY=22222222-2222-4222-8222-222222222222 pnpm perf:reset
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-candidate-c1000-read4k-r1 \
+  --repository 22222222-2222-4222-8222-222222222222 \
   --operation read-point-4k \
   --commits 1000 \
   --output perf/results/candidate.json

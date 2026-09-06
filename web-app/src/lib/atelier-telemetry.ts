@@ -85,10 +85,7 @@ export function createAtelierTelemetryHandler(
 									"SELECT COUNT(*) as count FROM lix_file",
 									[],
 								);
-								const row = result.rows[0] as
-									| { get(column: string): unknown }
-									| undefined;
-								const fileCount = Number(row?.get("count") ?? 0);
+								const fileCount = Number(result.rows[0]?.count ?? 0);
 
 								// If there's exactly 1 file, this is the first one
 								if (fileCount === 1) {

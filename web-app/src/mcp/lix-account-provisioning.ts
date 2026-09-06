@@ -17,13 +17,15 @@ const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
  * handshake with one trusted, conditional update in the new session.
  */
 export async function provisionAccountAfterHandshake(options: {
+	lixId: string;
 	protocolPath: string;
 	response: Response;
 	account?: LixAccountProfile;
 	lixFetch: (request: Request) => Promise<Response>;
 }): Promise<Response> {
+	const basePath = `/lix/v1/${options.lixId}`;
 	if (
-		options.protocolPath !== "/lix/v1/" ||
+		options.protocolPath.replace(/\/+$/, "") !== basePath ||
 		!options.response.ok ||
 		!options.account ||
 		options.account.profileUri === null
@@ -49,7 +51,7 @@ export async function provisionAccountAfterHandshake(options: {
 		return new Response("Lix account provisioning failed\n", { status: 502 });
 	}
 
-	const url = new URL("https://lixray.internal/lix/v1/execute");
+	const url = new URL(`${basePath}/execute`, "https://lixray.internal");
 	const provisioning = await options.lixFetch(
 		new Request(url, {
 			method: "POST",

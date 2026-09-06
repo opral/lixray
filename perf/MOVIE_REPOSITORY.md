@@ -18,10 +18,14 @@ segments so each invocation remains inside CI's execution ceiling. Segments
 must run sequentially against one fresh repository; the last segment extends
 the resulting history to exactly 5,000 commits and verifies the final count:
 
+The production environment must set `MOVIE_BENCHMARK_LIX_ID` to the UUID of a
+dedicated, existing benchmark Lix. The workflow rejects every other Lix ID and
+also verifies that the allowlisted Lix remains active in the control plane.
+
 ```sh
 LIXRAY_INTERNAL_TOKEN=... pnpm perf:movie:remote -- \
   --url https://lix-server.example \
-  --repository perf-movie-1tib-REVISION \
+  --repository <existing-lix-uuid> \
   --segment-index 0 \
   --segment-count 4 \
   --finalize-history false
@@ -43,8 +47,8 @@ Keep one file resource. Do not add separate multipart, range, media, and
 ordinary-file API families.
 
 ```text
-GET /lix/v1/file?path=...              # complete or one forward Range
-POST /lix/v1/file/upsert?path=...       # complete small file or one media part
+GET /lix/v1/{uuid}/file?path=...              # complete or one forward Range
+POST /lix/v1/{uuid}/file/upsert?path=...       # complete small file or one media part
 ```
 
 For a media part, `POST` carries a client-generated `Lix-Upload-Id` and

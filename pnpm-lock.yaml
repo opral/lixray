@@ -18,6 +18,9 @@ importers:
       '@lix-js/sdk-release':
         specifier: https://registry.npmjs.org/@lix-js/sdk/-/sdk-0.11.0.tgz
         version: '@lix-js/sdk@0.11.0'
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
 
   database:
     devDependencies:

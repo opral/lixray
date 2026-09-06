@@ -3,6 +3,8 @@ import {
 	type ExecuteResult as LixExecuteResult,
 	type JsonValue,
 	type Lix,
+	type ResultArrayRow,
+	type ResultColumnType,
 	type SqlParam,
 	Value,
 } from "@lix-js/sdk";
@@ -225,7 +227,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 					await session.lix.execute(
 						request.sql,
 						(request.params ?? []).map(decodeWireParam),
-						request.options,
+						{ ...request.options, rowMode: "array" },
 					),
 				);
 			});
@@ -265,7 +267,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 						sql: statement.sql,
 						params: (statement.params ?? []).map(decodeWireParam),
 					})),
-					request.options,
+					{ ...request.options, rowMode: "array" },
 				);
 				return { results: results.map(encodeExecuteResult) };
 			});
@@ -284,18 +286,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
 				return session.lix.createBranch(input);
-			});
-		} catch (caught) {
-			throw asLixError(caught);
-		}
-	}
-
-	async createCheckpoint(lixId: string, branchId: string) {
-		try {
-			const session = await this.session(lixId);
-			return await this.enqueueSession(session, async () => {
-				await this.ensureBranch(session, branchId);
-				return session.lix.createCheckpoint();
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -392,7 +382,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		const lix = await openLix({
 			server: {
 				mode: "remote",
-				url: "https://mcp.lixray.invalid",
+				url: `https://mcp.lixray.invalid/lix/${lixId}`,
 				fetch: (input: RequestInfo | URL, init?: RequestInit) =>
 					this.protocolFetch(lixId, input, init),
 			},
@@ -465,6 +455,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		if (lixFetch) {
 			const response = await lixFetch(lixId, template);
 			return provisionAccountAfterHandshake({
+				lixId,
 				protocolPath: path,
 				response,
 				account: this.user.account,
@@ -505,49 +496,60 @@ function decodeWireParam(
 	}
 }
 
-function encodeExecuteResult(result: LixExecuteResult): ExecuteResponse {
+function encodeExecuteResult(
+	result: LixExecuteResult<ResultArrayRow>,
+): ExecuteResponse {
 	return {
-		columns: [...result.columns],
+		columns: result.columns.map((column) => column.name),
 		rows: result.rows.map((row) =>
-			result.columns.map((column) => encodeLixValue(row.value(column))),
+			result.columns.map((column, index) =>
+				encodeLixValue(column.type, row[index]),
+			),
 		),
 		rowsAffected: result.rowsAffected,
 		notices: result.notices.map((notice) => ({ ...notice })),
 	};
 }
 
-type LixResultValue = ReturnType<LixExecuteResult["rows"][number]["value"]>;
-
 function encodeLixValue(
-	value: LixResultValue,
+	type: ResultColumnType,
+	value: unknown,
 ): ExecuteResponse["rows"][number][number] {
-	const jsValue = value.toJS();
-	switch (value.kind) {
+	if (value === null) return { kind: "null", value: null };
+	switch (type) {
 		case "null":
 			return { kind: "null", value: null };
 		case "boolean":
-			return { kind: "bool", value: jsValue as boolean };
+			if (typeof value === "boolean") return { kind: "bool", value };
+			break;
 		case "integer":
-			return { kind: "int", value: jsValue as number };
+			if (typeof value === "number") return { kind: "int", value };
+			break;
 		case "real":
-			return { kind: "float", value: jsValue as number };
+			if (typeof value === "number") return { kind: "float", value };
+			break;
 		case "text":
-			return { kind: "text", value: jsValue as string };
+			if (typeof value === "string") return { kind: "text", value };
+			break;
 		case "timestamptz":
-			return { kind: "timestamp", value: jsValue as string };
+			if (typeof value === "string") return { kind: "timestamp", value };
+			break;
 		case "jsonb":
-			return { kind: "json", value: jsValue };
+			return { kind: "json", value };
 		case "blob": {
-			const bytes = value.asBytes();
-			if (!bytes) {
+			if (!(value instanceof Uint8Array)) {
 				throw createLixError(
 					"upstream_error",
 					"Lix returned an invalid blob value.",
 				);
 			}
-			return { kind: "blob", base64: bytesToBase64(bytes) };
+			return { kind: "blob", base64: bytesToBase64(value) };
 		}
 	}
+	throw createLixError(
+		"upstream_error",
+		`Lix returned an invalid ${type} value.`,
+	);
 }
 
 function asLixError(caught: unknown): LixError {

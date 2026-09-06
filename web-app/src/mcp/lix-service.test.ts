@@ -3,6 +3,7 @@ import test from "node:test";
 import {
 	CONTEXT_REOPEN_HINT,
 	LixService,
+	OPEN_LIX_FILE_MANIFEST_SQL,
 	OPEN_LIX_INVENTORY_SQL,
 	isLixError,
 	type BindSessionInput,
@@ -18,6 +19,7 @@ class FakeRuntime implements LixRuntimeClient {
 	commit = 0;
 	fileCount = 0;
 	directoryCount = 0;
+	filePaths: Array<string> = [];
 	restoreCommitId: string | undefined;
 	readonly opened = new Set<string>();
 	readonly binds: Array<BindSessionInput> = [];
@@ -88,6 +90,15 @@ class FakeRuntime implements LixRuntimeClient {
 				notices: [],
 			};
 		}
+		if (request.sql === "SELECT commit_id FROM lix_create_checkpoint()") {
+			this.commit += 1;
+			return {
+				columns: ["commit_id"],
+				rows: [[{ kind: "text" as const, value: `commit-${this.commit}` }]],
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
 		if (request.sql.includes("lix_active_branch_commit_id")) {
 			return {
 				columns: ["commit_id"],
@@ -105,6 +116,16 @@ class FakeRuntime implements LixRuntimeClient {
 						{ kind: "int" as const, value: this.directoryCount },
 					],
 				],
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
+		if (request.sql === OPEN_LIX_FILE_MANIFEST_SQL) {
+			return {
+				columns: ["path"],
+				rows: this.filePaths.map((path) => [
+					{ kind: "text" as const, value: path },
+				]),
 				rowsAffected: 0,
 				notices: [],
 			};
@@ -128,10 +149,6 @@ class FakeRuntime implements LixRuntimeClient {
 
 	async createBranch() {
 		return { id: "draft", name: "Draft", hidden: false, commitId: "commit-0" };
-	}
-	async createCheckpoint() {
-		this.commit += 1;
-		return { commitId: `commit-${this.commit}` };
 	}
 	async undo() {
 		return {
@@ -275,6 +292,7 @@ void test("open_lix reports file and directory counts for a populated lix", asyn
 	const runtime = new FakeRuntime();
 	runtime.fileCount = 3;
 	runtime.directoryCount = 2;
+	runtime.filePaths = ["/a.md", "/b.md", "/c.md"];
 	const service = new LixService(runtime, {
 		contextSigningKey: "test-key",
 		principal: { userId: "user", clientId: "client" },
@@ -282,11 +300,30 @@ void test("open_lix reports file and directory counts for a populated lix", asyn
 	const opened = await service.openLix(LIX_ID);
 	assert.equal(opened.fileCount, 3);
 	assert.equal(opened.directoryCount, 2);
+	assert.deepEqual(opened.filePaths, ["/a.md", "/b.md", "/c.md"]);
+	assert.equal(opened.filePathsComplete, true);
 	assert.equal(opened.empty, false);
 	assert.equal(
 		runtime.calls.some((call) => call.sql === OPEN_LIX_INVENTORY_SQL),
 		true,
 	);
+	assert.equal(
+		runtime.calls.some((call) => call.sql === OPEN_LIX_FILE_MANIFEST_SQL),
+		true,
+	);
+});
+
+void test("open_lix marks a bounded file manifest incomplete", async () => {
+	const runtime = new FakeRuntime();
+	runtime.fileCount = 3;
+	runtime.filePaths = ["/a.md", "/b.md"];
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const opened = await service.openLix(LIX_ID);
+	assert.deepEqual(opened.filePaths, ["/a.md", "/b.md"]);
+	assert.equal(opened.filePathsComplete, false);
 });
 
 void test("switch_branch returns a new context and never mutates the old handle", async () => {
@@ -326,6 +363,28 @@ void test("restore uses one parameterized SQL command on the context branch", as
 			branchId: "draft",
 			sql: "INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id",
 			params: [{ kind: "text", value: "commit-target" }],
+		},
+	]);
+});
+
+void test("checkpoint uses the canonical SQL function on the context branch", async () => {
+	const runtime = new FakeRuntime();
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const opened = await service.openLix(LIX_ID, "draft");
+	runtime.calls.length = 0;
+
+	const checkpoint = await service.createCheckpoint(opened.context);
+
+	assert.equal(checkpoint.commitId, "commit-1");
+	assert.deepEqual(runtime.calls, [
+		{
+			lixId: LIX_ID,
+			branchId: "draft",
+			sql: "SELECT commit_id FROM lix_create_checkpoint()",
+			params: undefined,
 		},
 	]);
 });

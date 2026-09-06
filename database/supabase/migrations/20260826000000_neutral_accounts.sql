@@ -319,9 +319,9 @@ set search_path to ''
 as $$
 	select account.id, account.kind,
 		'https://lixray.com/profile/' || namespace.id::text,
-		coalesce(nullif(btrim(profile.document #>> '{name,full}'), ''), namespace.name, 'Account')
+		coalesce(profile.document #>> '{name,full}', namespace.name)
 	from public.accounts account
-	left join public.namespaces namespace on namespace.id = account.primary_namespace_id
+	join public.namespaces namespace on namespace.id = account.primary_namespace_id
 	left join public.namespace_profiles profile on profile.namespace_id = namespace.id
 	where account.id = private.current_account_id();
 $$;
@@ -701,8 +701,6 @@ declare current_account_id uuid := private.current_account_id(); owner_count int
 begin
 	if current_account_id is null then raise exception 'Authentication required'; end if;
 	if not private.is_interactive_session() then raise exception 'Interactive session required'; end if;
-	-- Serialize removals so two owners cannot both leave after counting each other.
-	perform 1 from public.namespaces where id = p_namespace_id for update;
 	if exists (
 		select 1 from public.accounts account
 		where account.primary_namespace_id = p_namespace_id

@@ -231,6 +231,9 @@ function parseArgs(args) {
   for (let index = 0; index < args.length; index += 2) values.set(args[index], args[index + 1]);
   const baseUrl = required(values, "--url").replace(/\/+$/, "");
   const repositoryId = required(values, "--repository");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(repositoryId)) {
+    throw new Error("--repository must be a canonical Lix UUID");
+  }
   const segmentIndex = integer(values, "--segment-index", 0);
   const segmentCount = integer(values, "--segment-count", 1);
   if (segmentIndex >= segmentCount) throw new RangeError("segment index must be smaller than segment count");

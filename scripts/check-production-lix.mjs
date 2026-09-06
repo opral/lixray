@@ -5,17 +5,14 @@ const MIGRATION_POLL_DELAY_MS = 1_000;
 const MIGRATION_TIMEOUT_MS = 9 * 60_000;
 
 export async function checkProductionLix({
-	repositoryUrl,
+	lixUrl,
 	fetchImpl = globalThis.fetch,
 	timeoutMs = REQUEST_TIMEOUT_MS,
 	migrationTimeoutMs = MIGRATION_TIMEOUT_MS,
 	nowImpl = Date.now,
 	sleepImpl = sleep,
 }) {
-	const protocolUrl = new URL(
-		`${new URL(repositoryUrl).pathname.replace(/\/$/, "")}/lix/v1/`,
-		repositoryUrl,
-	);
+	const { connectionUrl, protocolUrl } = protocolUrlFromLixUrl(lixUrl);
 	let sessionId;
 	let checkCompleted = false;
 	try {
@@ -74,7 +71,7 @@ export async function checkProductionLix({
 
 		return {
 			protocolVersion: handshake.body.protocolVersion,
-			repository: protocolUrl.pathname.replace(/\/lix\/v1\/$/, ""),
+			lix: connectionUrl.pathname,
 		};
 	} finally {
 		if (sessionId) {
@@ -95,6 +92,28 @@ export async function checkProductionLix({
 			}
 		}
 	}
+}
+
+function protocolUrlFromLixUrl(value) {
+	const connectionUrl = new URL(value);
+	if (connectionUrl.protocol !== "https:") {
+		throw new Error("The production Lix connection URL must use HTTPS.");
+	}
+	if (connectionUrl.username || connectionUrl.password) {
+		throw new Error("The Lix connection URL must not contain credentials.");
+	}
+	if (connectionUrl.search || connectionUrl.hash) {
+		throw new Error("The Lix connection URL must not contain a query or fragment.");
+	}
+	const match = connectionUrl.pathname.match(
+		/^\/lix\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/,
+	);
+	if (!match) {
+		throw new Error("The Lix connection URL path must be exactly /lix/{uuid}.");
+	}
+	const protocolUrl = new URL(connectionUrl);
+	protocolUrl.pathname = `/lix/v1/${match[1]}/`;
+	return { connectionUrl, protocolUrl };
 }
 
 function migrationTimeoutError(timeoutMs) {
@@ -154,15 +173,15 @@ if (
 	process.argv[1] &&
 	import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-	const repositoryUrl =
-		process.argv[2] || process.env.LIXRAY_CANARY_REPOSITORY_URL;
-	if (!repositoryUrl) {
+	const lixUrl =
+		process.argv[2] || process.env.LIXRAY_CANARY_LIX_URL;
+	if (!lixUrl) {
 		throw new Error(
-			"Pass a public repository URL or set LIXRAY_CANARY_REPOSITORY_URL.",
+			"Pass a Lix connection URL or set LIXRAY_CANARY_LIX_URL.",
 		);
 	}
-	const result = await checkProductionLix({ repositoryUrl });
+	const result = await checkProductionLix({ lixUrl });
 	console.log(
-		`Production Lix canary passed for repository ${result.repository} (protocol v${result.protocolVersion}).`,
+		`Production Lix canary passed for Lix ${result.lix} (protocol v${result.protocolVersion}).`,
 	);
 }

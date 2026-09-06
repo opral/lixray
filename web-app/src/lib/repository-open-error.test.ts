@@ -2,18 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { formatRepositoryOpenError } from "./repository-open-error.ts";
 
-void test("explains how to recover from an unsupported repository protocol", () => {
+void test("preserves the engine's unsupported repository protocol error", () => {
 	assert.equal(
 		formatRepositoryOpenError(
 			new Error(
 				"repository uses an unsupported live-state hot-index storage protocol; recreate the repository",
 			),
 		),
-		"This repository was created with an older Lix storage format that this version can no longer read. Automatic migration is unavailable. Recreate the repository to continue; its existing files and history can only be recovered from an export or backup.",
+		"repository uses an unsupported live-state hot-index storage protocol; recreate the repository",
 	);
 });
 
-void test("explains how to recover from the structured unsupported format error", () => {
+void test("preserves the engine's structured unsupported format error", () => {
 	const error = Object.assign(
 		new Error("This lix uses an unsupported storage format."),
 		{ code: "LIX_ERROR_STORAGE_FORMAT_UNSUPPORTED" },
@@ -21,7 +21,7 @@ void test("explains how to recover from the structured unsupported format error"
 
 	assert.equal(
 		formatRepositoryOpenError(error),
-		"This repository was created with an older Lix storage format that this version can no longer read. Automatic migration is unavailable. Recreate the repository to continue; its existing files and history can only be recovered from an export or backup.",
+		"This lix uses an unsupported storage format.",
 	);
 });
 
@@ -35,12 +35,18 @@ void test("preserves unrelated repository opening errors", () => {
 });
 
 void test("explains a terminal automatic migration failure", () => {
-	assert.equal(
-		formatRepositoryOpenError(
-			Object.assign(new Error("The lix repository migration failed."), {
-				code: "LIX_ERROR_LIX_MIGRATION_FAILED",
-			}),
-		),
-		"Repository migration failed. Contact support to recover the repository.",
-	);
+	for (const code of [
+		"LIX_ERROR_LIX_MIGRATION_FAILED",
+		"LIX_ERROR_MIGRATION_FAILED",
+		"LIX_ERROR_REPOSITORY_UPGRADE",
+	]) {
+		assert.equal(
+			formatRepositoryOpenError(
+				Object.assign(new Error("The lix repository migration failed."), {
+					code,
+				}),
+			),
+			"Repository migration failed. Contact support to recover the repository.",
+		);
+	}
 });

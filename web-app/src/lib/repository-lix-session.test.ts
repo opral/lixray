@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Lix } from "@lix-js/sdk";
+import type { Lix, LixOpenProgress } from "@lix-js/sdk";
 import {
 	createTelemetryFetch,
-	isReplicaMigrationRequiredError,
 	isRetryableRepositoryOpenError,
 	RemoteRepositoryLixSession,
 	repositoryMigrationStateFromError,
+	repositoryMigrationStateFromOpenProgress,
 	repositorySessionKey,
 	retryRepositoryOpenDuringMigration,
 } from "./repository-lix-session.ts";
@@ -105,6 +105,38 @@ void test("reads structured repository migration state from an open error", () =
 	);
 });
 
+void test("maps Rust-first open progress into transparent repository upgrade UI state", () => {
+	const progress = (
+		phase: LixOpenProgress["phase"],
+		fromFormat?: number,
+	): LixOpenProgress => ({
+		phase,
+		fromFormat,
+		toFormat: 76,
+	});
+
+	assert.deepEqual(
+		repositoryMigrationStateFromOpenProgress(progress("migrating", 75)),
+		{ fromVersion: 75, toVersion: 76, phase: "migrating" },
+	);
+	assert.deepEqual(
+		repositoryMigrationStateFromOpenProgress(progress("validating", 75)),
+		{ fromVersion: 75, toVersion: 76, phase: "validating" },
+	);
+	assert.deepEqual(
+		repositoryMigrationStateFromOpenProgress(progress("opening", 75)),
+		{ fromVersion: 75, toVersion: 76, phase: "opening" },
+	);
+	assert.equal(
+		repositoryMigrationStateFromOpenProgress(progress("inspecting")),
+		undefined,
+	);
+	assert.equal(
+		repositoryMigrationStateFromOpenProgress(progress("complete", 75)),
+		null,
+	);
+});
+
 void test("polls migration in one open lifecycle until the repository is ready", async () => {
 	let opens = 0;
 	const waits: number[] = [];
@@ -194,7 +226,7 @@ void test("refreshes an expired access token and retries a sync request once", a
 		{ captureException: (error) => captured.push(error) },
 	);
 	const response = await authenticatedFetch(
-		"https://lixray.test/repos/acme/launch-q3/lix/v1/sync/pull",
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull",
 		{
 			method: "GET",
 			headers: { Authorization: "Bearer expired-token" },
@@ -232,7 +264,7 @@ void test("captures a terminal request failure as one structured exception", asy
 	);
 
 	const response = await fetch(
-		"https://lixray.test/repos/acme/private/lix/v1/sync/pull",
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull",
 		{ method: "GET" },
 	);
 
@@ -272,7 +304,8 @@ void test("deduplicates repeated request failures until the request recovers", a
 		{ repositoryId: "repo-id" },
 		{ captureException: (error) => captured.push(error) },
 	);
-	const url = "https://lixray.test/repos/acme/private/lix/v1/sync/pull";
+	const url =
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull";
 
 	await fetch(url);
 	await fetch(url);
@@ -280,7 +313,9 @@ void test("deduplicates repeated request failures until the request recovers", a
 	assert.equal(captured.length, 1);
 
 	shouldFail = false;
-	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/chunk");
+	await fetch(
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/chunk",
+	);
 	shouldFail = true;
 	await fetch(url);
 	assert.equal(captured.length, 1);
@@ -315,9 +350,15 @@ void test("does not report expected migration, recovery, or missing-chunk respon
 		{ captureException: (error) => captured.push(error) },
 	);
 
-	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/pull");
-	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/pull");
-	await fetch("https://lixray.test/repos/acme/private/lix/v1/sync/chunk");
+	await fetch(
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull",
+	);
+	await fetch(
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull",
+	);
+	await fetch(
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/chunk",
+	);
 
 	assert.deepEqual(captured, []);
 });
@@ -335,7 +376,7 @@ void test("leaves repository-open failures to their terminal exception boundary"
 	);
 
 	const response = await fetch(
-		"https://lixray.test/repos/acme/private/lix/v1/",
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/",
 	);
 
 	assert.equal(response.status, 500);
@@ -352,7 +393,8 @@ void test("captures unexpected network failures but ignores canceled requests", 
 		{ repositoryId: "repo-id" },
 		{ captureException: (error) => captured.push(error) },
 	);
-	const url = "https://lixray.test/repos/acme/private/lix/v1/sync/pull";
+	const url =
+		"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull";
 
 	await assert.rejects(failingFetch(url), networkError);
 	await assert.rejects(failingFetch(url), networkError);
@@ -405,43 +447,5 @@ void test("isolates managed sessions when a slug is recreated", () => {
 	assert.notEqual(
 		repositorySessionKey({ ...repository, repositoryId: "repository-before" }),
 		repositorySessionKey({ ...repository, repositoryId: "repository-after" }),
-	);
-});
-
-void test("matches the replica-migration code, not messages or sibling codes", () => {
-	const migrationRequired = Object.assign(
-		new Error(
-			"repository format v72 must be migrated to v74 with lix::migration::migrate_lix before opening",
-		),
-		{ code: "LIX_ERROR_REPOSITORY_MIGRATION_REQUIRED" },
-	);
-	assert.equal(isReplicaMigrationRequiredError(migrationRequired), true);
-
-	// The message alone never matches — only the typed code does.
-	assert.equal(
-		isReplicaMigrationRequiredError(
-			new Error(
-				"repository format v72 must be migrated to v74 with lix::migration::migrate_lix before opening",
-			),
-		),
-		false,
-	);
-	// Too-new / malformed replicas share a different code and are never wiped.
-	assert.equal(
-		isReplicaMigrationRequiredError(
-			Object.assign(new Error("unsupported"), {
-				code: "LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT",
-			}),
-		),
-		false,
-	);
-	// The server migrating its own copy is a wait, not a wipe.
-	assert.equal(
-		isReplicaMigrationRequiredError(
-			Object.assign(new Error("migrating"), {
-				code: "LIX_ERROR_LIX_MIGRATING",
-			}),
-		),
-		false,
 	);
 });

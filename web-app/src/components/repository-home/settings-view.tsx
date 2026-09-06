@@ -48,7 +48,10 @@ export function SettingsView({
 }) {
 	if (!settingsApi) {
 		return (
-			<div className="grid h-full w-full place-content-center bg-bg-panel p-6 text-center text-[13px] text-text-secondary">
+			<div
+				className="grid h-full w-full place-content-center bg-bg-panel p-6 text-center text-[13px] text-text-secondary"
+				data-testid="repository-settings-view"
+			>
 				Sign in with edit access to manage this repository.
 			</div>
 		);
@@ -63,7 +66,10 @@ function SettingsContent({
 }) {
 	const info = settingsApi.info();
 	return (
-		<div className="h-full w-full overflow-auto bg-bg-panel">
+		<div
+			className="h-full w-full overflow-auto bg-bg-panel"
+			data-testid="repository-settings-view"
+		>
 			<div className="mx-auto w-[min(640px,calc(100%-48px))] pt-10 pb-16">
 				<h2 className="m-0 text-[16px] leading-tight font-bold tracking-[-0.01em]">
 					Settings

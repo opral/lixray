@@ -116,6 +116,7 @@ export function RepositoryPicker({
 						<button
 							type="button"
 							data-testid="repository-picker"
+							data-repository-id={activeRepository.id}
 							aria-label={`Switch repository — current: ${organization.handle} / ${activeRepository.name}`}
 							className="flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-[7px] border-0 bg-transparent py-0 pr-1 pl-[5px] text-[13px] font-semibold text-text-primary transition-colors hover:bg-bg-hover-canvas focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible data-[state=open]:bg-bg-active"
 						>
@@ -149,6 +150,8 @@ export function RepositoryPicker({
 									return (
 										<DropdownMenuItem
 											key={repository.id}
+											data-testid="repository-picker-item"
+											data-repository-id={repository.id}
 											data-active={isActive || undefined}
 											className="data-[active]:bg-bg-selection-current data-[active]:text-text-primary data-[active]:focus:bg-bg-selection-current"
 											onSelect={() => openRepository(owner, repository)}

@@ -12,7 +12,7 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 	const pathname = testProtocolPath(request);
 	if (pathname === "/lix/v1/") {
 		return Response.json({
-			protocolVersion: 4,
+			protocolVersion: 6,
 			activeBranchId: "main",
 			activeAccountId: "00000000-0000-7000-8000-000000000002",
 			sessionId: "runtime-client-session",
@@ -23,7 +23,12 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 	}
 	if (pathname === "/lix/v1/execute") {
 		return Response.json({
-			columns: ["id", "name", "hidden", "commit_id"],
+			columns: [
+				{ name: "id", type: "text" },
+				{ name: "name", type: "text" },
+				{ name: "hidden", type: "boolean" },
+				{ name: "commit_id", type: "text" },
+			],
 			rows: [
 				[
 					{ kind: "text", value: "main" },
@@ -55,7 +60,7 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 }
 
 function testProtocolPath(request: Request): string {
-	return new URL(request.url).pathname.replace(/^\/lixes\/[^/]+/, "");
+	return new URL(request.url).pathname.replace(/^\/lix\/v1\/[^/]+/, "/lix/v1");
 }
 
 function env(): WorkerLixRuntimeEnv {
@@ -99,7 +104,7 @@ void test("Railway Lix fetch strips OAuth and adds the trusted principal", async
 	assert.equal(requests.length, 2);
 	assert.deepEqual(
 		requests.map((request) => new URL(request.url).pathname),
-		["/lix/v1/", "/lix/v1/execute"],
+		[`/lix/v1/${LIX_ID}/`, `/lix/v1/${LIX_ID}/execute`],
 	);
 	for (const request of requests) {
 		assert.equal(request.headers.get("authorization"), null);
@@ -158,7 +163,7 @@ void test("executeBatch uses the canonical atomic endpoint", async () => {
 	assert.equal(response.results.length, 1);
 	assert.equal(
 		new URL(requests.at(-1)?.url ?? "https://invalid").pathname,
-		"/lix/v1/execute-batch",
+		`/lix/v1/${LIX_ID}/execute-batch`,
 	);
 	assert.deepEqual(await requests.at(-1)?.json(), {
 		statements: [
@@ -264,7 +269,12 @@ void test("execute maps protocol wire values through the SDK", async () => {
 	const runtime = client(async (_lixId, request) => {
 		if (testProtocolPath(request) === "/lix/v1/execute") {
 			return Response.json({
-				columns: ["n", "when", "payload", "bytes"],
+				columns: [
+					{ name: "n", type: "integer" },
+					{ name: "when", type: "timestamptz" },
+					{ name: "payload", type: "jsonb" },
+					{ name: "bytes", type: "blob" },
+				],
 				rows: [
 					[
 						{ kind: "int", value: 7 },
@@ -300,7 +310,7 @@ void test("execute maps protocol wire values through the SDK", async () => {
 	]);
 });
 
-void test("createBranch, checkpoint, undo, and redo use protocol HTTP", async () => {
+void test("createBranch, undo, and redo use protocol HTTP", async () => {
 	const paths: string[] = [];
 	const runtime = client(async (_lixId, request) => {
 		const pathname = testProtocolPath(request);
@@ -312,9 +322,6 @@ void test("createBranch, checkpoint, undo, and redo use protocol HTTP", async ()
 				hidden: false,
 				commitId: "commit-2",
 			});
-		}
-		if (pathname === "/lix/v1/checkpoint/create") {
-			return Response.json({ commitId: "checkpoint-1" });
 		}
 		if (pathname === "/lix/v1/undo") {
 			return Response.json({
@@ -342,9 +349,6 @@ void test("createBranch, checkpoint, undo, and redo use protocol HTTP", async ()
 			commitId: "commit-2",
 		},
 	);
-	assert.deepEqual(await runtime.createCheckpoint(LIX_ID, "main"), {
-		commitId: "checkpoint-1",
-	});
 	assert.deepEqual(await runtime.undo(LIX_ID, "main"), {
 		branchId: "main",
 		targetCommitId: "target",
@@ -357,7 +361,6 @@ void test("createBranch, checkpoint, undo, and redo use protocol HTTP", async ()
 	});
 	assert.deepEqual(paths.slice(1), [
 		"POST /lix/v1/branch/create",
-		"POST /lix/v1/checkpoint/create",
 		"POST /lix/v1/undo",
 		"POST /lix/v1/redo",
 	]);

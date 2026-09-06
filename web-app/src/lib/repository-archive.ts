@@ -4,8 +4,7 @@ import { zipSync } from "fflate";
 type AccessTokenGetter = () => Promise<string | null>;
 
 interface RepositoryRemote {
-	namespace: string;
-	repositorySlug: string;
+	repositoryId: string;
 	getAccessToken: AccessTokenGetter;
 }
 
@@ -14,7 +13,7 @@ export async function fetchRepositoryFileCount(
 ): Promise<number> {
 	return withRepositoryLix(options, async (lix) => {
 		const result = await lix.execute("SELECT COUNT(*) AS count FROM lix_file");
-		const count = result.rows[0]?.toObject().count;
+		const count = result.rows[0]?.count;
 		return typeof count === "number" ? count : 0;
 	});
 }
@@ -28,9 +27,9 @@ export async function buildRepositoryArchive(
 		);
 		const entries: Record<string, Uint8Array> = {};
 		for (const row of result.rows) {
-			const path = row.value("path").toJS();
-			const content = row.value("content").asBytes();
-			if (typeof path !== "string" || !content) {
+			const path = row.path;
+			const content = row.content;
+			if (typeof path !== "string" || !(content instanceof Uint8Array)) {
 				throw new Error("Repository archive returned invalid file data.");
 			}
 			const archivePath = path.replace(/^\/+/, "");
@@ -48,7 +47,7 @@ async function withRepositoryLix<T>(
 		server: {
 			mode: "remote",
 			url: new URL(
-				`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.repositorySlug)}`,
+				`/lix/${encodeURIComponent(options.repositoryId)}`,
 				globalThis.location.origin,
 			),
 			headers: async () => {

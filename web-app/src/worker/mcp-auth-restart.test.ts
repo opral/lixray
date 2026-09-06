@@ -16,6 +16,7 @@ import { resetRemoteJwksForTests } from "./jwt-verifier.ts";
 import { MCP_RESOURCE } from "../mcp/server.ts";
 
 const ISSUER = "https://project.supabase.co/auth/v1";
+const LIX_ID = "11111111-1111-4111-8111-111111111111";
 
 afterEach(() => {
 	resetRemoteJwksForTests();
@@ -110,14 +111,14 @@ void test("Lix HTTP shares the persisted JWKS store and does not 401 on a JWKS o
 			.sign(fixture.privateKey);
 
 		const first = await handleRequest(
-			new Request("https://lixray.com/@acme/launch/lix/v1/execute", {
+			new Request(`https://lixray.com/lix/v1/${LIX_ID}/execute`, {
 				method: "POST",
 				headers: { Authorization: `Bearer ${browserToken}` },
 				body: JSON.stringify({ sql: "select 1" }),
 			}),
 			fixture.env,
 			{
-				resolveLix: async () => ({ ok: true, lixId: "lix-1" }),
+				authorizeLix: async () => null,
 				lixFetch: async () => new Response("ok"),
 			},
 		);
@@ -127,14 +128,14 @@ void test("Lix HTTP shares the persisted JWKS store and does not 401 on a JWKS o
 		await fixture.stopJwks();
 
 		const second = await handleRequest(
-			new Request("https://lixray.com/@acme/launch/lix/v1/execute", {
+			new Request(`https://lixray.com/lix/v1/${LIX_ID}/execute`, {
 				method: "POST",
 				headers: { Authorization: `Bearer ${browserToken}` },
 				body: JSON.stringify({ sql: "select 1" }),
 			}),
 			fixture.env,
 			{
-				resolveLix: async () => ({ ok: true, lixId: "lix-1" }),
+				authorizeLix: async () => null,
 				lixFetch: async () => new Response("unexpected"),
 			},
 		);

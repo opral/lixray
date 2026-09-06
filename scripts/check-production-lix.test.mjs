@@ -5,17 +5,17 @@ import { checkProductionLix } from "./check-production-lix.mjs";
 void test("checks a handshake and read, then closes the canary session", async () => {
 	const requests = [];
 	const result = await checkProductionLix({
-		repositoryUrl: "https://lixray.example/@lixray/canary",
+		lixUrl: "https://lixray.example/lix/11111111-1111-4111-8111-111111111111",
 		fetchImpl: async (url, init = {}) => {
 			requests.push({
 				method: init.method ?? "GET",
 				pathname: new URL(url).pathname,
 				sessionId: init.headers?.["Lix-Session-Id"],
 			});
-			if (new URL(url).pathname.endsWith("/lix/v1/")) {
+			if (new URL(url).pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/")) {
 				return Response.json({ protocolVersion: 2, sessionId: "session-1" });
 			}
-			if (new URL(url).pathname.endsWith("/lix/v1/execute")) {
+			if (new URL(url).pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/execute")) {
 				return Response.json({ rows: [[{ kind: "int", value: 1 }]] });
 			}
 			return new Response(null, { status: 204 });
@@ -24,22 +24,22 @@ void test("checks a handshake and read, then closes the canary session", async (
 
 	assert.deepEqual(result, {
 		protocolVersion: 2,
-		repository: "/@lixray/canary",
+		lix: "/lix/11111111-1111-4111-8111-111111111111",
 	});
 	assert.deepEqual(requests, [
 		{
 			method: "GET",
-			pathname: "/@lixray/canary/lix/v1/",
+			pathname: "/lix/v1/11111111-1111-4111-8111-111111111111/",
 			sessionId: undefined,
 		},
 		{
 			method: "POST",
-			pathname: "/@lixray/canary/lix/v1/execute",
+			pathname: "/lix/v1/11111111-1111-4111-8111-111111111111/execute",
 			sessionId: "session-1",
 		},
 		{
 			method: "DELETE",
-			pathname: "/@lixray/canary/lix/v1/session",
+			pathname: "/lix/v1/11111111-1111-4111-8111-111111111111/session",
 			sessionId: "session-1",
 		},
 	]);
@@ -49,13 +49,13 @@ void test("waits for an in-progress repository migration", async () => {
 	let handshakes = 0;
 	const sleeps = [];
 	const result = await checkProductionLix({
-		repositoryUrl: "https://lixray.example/@lixray/canary",
+		lixUrl: "https://lixray.example/lix/11111111-1111-4111-8111-111111111111",
 		sleepImpl: async (milliseconds) => {
 			sleeps.push(milliseconds);
 		},
 		fetchImpl: async (url, init = {}) => {
 			const pathname = new URL(url).pathname;
-			if (pathname.endsWith("/lix/v1/")) {
+			if (pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/")) {
 				handshakes += 1;
 				if (handshakes < 3) {
 					return Response.json(
@@ -70,7 +70,7 @@ void test("waits for an in-progress repository migration", async () => {
 				}
 				return Response.json({ protocolVersion: 2, sessionId: "session-1" });
 			}
-			if (pathname.endsWith("/lix/v1/execute")) {
+			if (pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/execute")) {
 				return Response.json({ rows: [[{ kind: "int", value: 1 }]] });
 			}
 			assert.equal(init.method, "DELETE");
@@ -88,7 +88,7 @@ void test("fails when repository migration does not complete", async () => {
 	let now = 0;
 	await assert.rejects(
 		checkProductionLix({
-			repositoryUrl: "https://lixray.example/@lixray/canary",
+			lixUrl: "https://lixray.example/lix/11111111-1111-4111-8111-111111111111",
 			migrationTimeoutMs: 2_000,
 			nowImpl: () => now,
 			sleepImpl: async (milliseconds) => {
@@ -111,7 +111,7 @@ void test("reports recovering repositories and does not attempt a close", async 
 	let requests = 0;
 	await assert.rejects(
 		checkProductionLix({
-			repositoryUrl: "https://lixray.example/@lixray/canary",
+			lixUrl: "https://lixray.example/lix/11111111-1111-4111-8111-111111111111",
 			fetchImpl: async () => {
 				requests += 1;
 				return Response.json(
@@ -128,10 +128,10 @@ void test("reports recovering repositories and does not attempt a close", async 
 void test("fails when the canary session cannot close", async () => {
 	await assert.rejects(
 		checkProductionLix({
-			repositoryUrl: "https://lixray.example/@lixray/canary",
+			lixUrl: "https://lixray.example/lix/11111111-1111-4111-8111-111111111111",
 			fetchImpl: async (url, init = {}) => {
 				const pathname = new URL(url).pathname;
-				if (pathname.endsWith("/lix/v1/")) {
+				if (pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/")) {
 					return Response.json({ protocolVersion: 2, sessionId: "session-1" });
 				}
 				if (init.method === "DELETE") {
@@ -145,4 +145,16 @@ void test("fails when the canary session cannot close", async () => {
 		}),
 		/close failed with HTTP 500 LIX_ERROR_INTERNAL/,
 	);
+});
+
+void test("rejects non-root and plaintext production connection URLs", async () => {
+	for (const lixUrl of [
+		"https://lixray.example/prefix/lix/11111111-1111-4111-8111-111111111111",
+		"http://lixray.example/lix/11111111-1111-4111-8111-111111111111",
+		"https://lixray.example/lix/11111111-1111-4111-8111-111111111111/",
+	]) {
+		await assert.rejects(
+			checkProductionLix({ lixUrl, fetchImpl: async () => new Response() }),
+		);
+	}
 });

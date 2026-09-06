@@ -59,11 +59,11 @@ instead of silently producing a misleading result.
 Start the local stack and provide its local internal token:
 
 ```sh
-LIXRAY_PERF_REPOSITORY=perf-main-c1000-read4k-r1 pnpm perf:reset
+LIXRAY_PERF_REPOSITORY=11111111-1111-4111-8111-111111111111 pnpm perf:reset
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-main-c1000-read4k-r1 \
+  --repository 11111111-1111-4111-8111-111111111111 \
   --operation read-point-4k \
   --files 1000 \
   --commits 1000 \
@@ -89,7 +89,7 @@ Supported operation families are:
 - `read-range-256k-2m`: one 256 KiB byte range from the 2 MiB binary fixture, recording selected transfer bytes through the bounded CAS range reader
 - `list-paths-100`: ordered listing of 100 corpus paths
 - `diff-file-history`: history-backed diff projection of one changed 4 KiB file's current and prior logical revisions
-- `branch-create`: create one named branch from the active head through `POST /lix/v1/branch/create`
+- `branch-create`: create one named branch from the active head through `POST /lix/v1/{uuid}/branch/create`
 - `branch-switch`: switch the live session between two sibling branches; their creation is setup outside the timed switch primitive
 - `create-4k`: create a unique valid 4 KiB JSON file in the existing `/corpus` directory
 - `update-4k`: replace an existing JSON file with 4 KiB
@@ -102,7 +102,7 @@ Supported operation families are:
 The three exact point-read operations accept `--file-read-transport json|binary`
 and default to `json`. The JSON control sends the exact `SELECT path, content`
 query and times JSON parsing plus Base64-to-`Buffer` decoding. The binary arm
-sends `GET /lix/v1/file?path=…` and times raw response-body materialization.
+sends `GET /lix/v1/{uuid}/file?path=…` and times raw response-body materialization.
 Both arms return and assert the same usable bytes; semantic envelope and row
 checks are outside the timer. Binary is deliberately rejected for non-point
 operations. Preconditioning uses the selected arm, so raw reads do not warm
@@ -211,7 +211,7 @@ For the local Compose MinIO stack, a stopped template can be copied with `mc`
 ```sh
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-template-c1000 \
+  --repository 11111111-1111-4111-8111-111111111111 \
   --operation read-point-4k \
   --files 1000 \
   --commits 1000 \
@@ -221,12 +221,12 @@ docker compose stop -t 30 lix-server
 docker compose run --rm --no-deps --entrypoint /bin/sh minio-init -c \
   'mc alias set local http://minio:9000 lixray lixray-local-secret &&
    mc mirror \
-     local/lixray/local/perf-template-c1000/ \
-     local/lixray/local/perf-candidate-c1000-r1/'
+     local/lixray/local/perf/11111111-1111-4111-8111-111111111111/ \
+     local/lixray/local/perf/22222222-2222-4222-8222-222222222222/'
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
-  --repository perf-candidate-c1000-r1 \
+  --repository 22222222-2222-4222-8222-222222222222 \
   --operation create-4k \
   --files 1000 \
   --commits 1000 \

@@ -1,10 +1,14 @@
-import { openLix, type Lix, type RemoteLixFetch } from "@lix-js/sdk";
+import {
+	openLix,
+	type Lix,
+	type LixOpenProgress,
+	type RemoteLixFetch,
+} from "@lix-js/sdk";
 import { OpfsStorage } from "@lix-js/storage-opfs";
 import { captureExceptionTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 import { waitForLixPrewarm } from "./lix-prewarm.ts";
 import {
-	deleteRepositoryOpfsReplica,
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
 } from "./repository-opfs-cache.ts";
@@ -15,7 +19,7 @@ import {
 
 type TokenProvider = () => Promise<string | null>;
 
-interface OpenRepositoryLixSessionOptions {
+export interface OpenRepositoryLixSessionOptions {
 	namespace: string;
 	repositorySlug: string;
 	repositoryId: string;
@@ -45,6 +49,27 @@ interface OpenRepositoryLixSessionOptions {
 	signal?: AbortSignal;
 }
 
+/**
+ * Opens an isolated server-backed handle for diagnostics. Unlike the primary
+ * repository session this has no local storage and does not participate in
+ * replica sync; callers own and must close the returned handle.
+ */
+export function openRepositoryRemoteLix(
+	options: OpenRepositoryLixSessionOptions,
+): Promise<Lix> {
+	return openLix({
+		server: {
+			mode: "remote",
+			url: repositoryUrl(options),
+			headers: async () => repositoryRequestHeaders(options),
+			fetch: createTelemetryFetch(options.fetch, {
+				repositoryId: options.repositoryId,
+				refreshAccessToken: options.refreshAccessToken,
+			}),
+		},
+	});
+}
+
 type ResolvedOpenRepositoryLixSessionOptions =
 	OpenRepositoryLixSessionOptions & { replicaId: string };
 
@@ -72,6 +97,7 @@ export interface RepositoryLixSession {
 export interface RepositoryMigrationState {
 	fromVersion: number;
 	toVersion: number;
+	phase?: "migrating" | "validating" | "opening";
 }
 
 export async function openRepositoryLixSession(
@@ -87,16 +113,20 @@ export async function openRepositoryLixSession(
 			async (signal) => {
 				const replicaId = await repositoryBrowserReplicaId(options);
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaIdentified);
-				return retryRepositoryOpenDuringMigration({
-					open: () =>
-						openRepositoryLixSessionWithRetry({
-							...options,
-							replicaId,
-							signal,
-						}),
-					onMigration: (state) => publishMigrationProgress(sessionKey, state),
-					signal,
-				});
+				try {
+					return await retryRepositoryOpenDuringMigration({
+						open: () =>
+							openRepositoryLixSessionWithRetry({
+								...options,
+								replicaId,
+								signal,
+							}),
+						onMigration: (state) => publishMigrationProgress(sessionKey, state),
+						signal,
+					});
+				} finally {
+					publishMigrationProgress(sessionKey, null);
+				}
 			},
 			{ signal: options.signal },
 		);
@@ -173,7 +203,6 @@ export async function retryRepositoryOpenDuringMigration<T>({
 async function openRepositoryLixSessionWithRetry(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
-	let replicaRebootstrapped = false;
 	for (let attempt = 0; ; attempt += 1) {
 		options.signal?.throwIfAborted();
 		try {
@@ -182,32 +211,9 @@ async function openRepositoryLixSessionWithRetry(
 				await session.close();
 				options.signal.throwIfAborted();
 			}
-			clearReplicaRebootstrapReload(repositoryOpfsCacheName(options));
 			return session;
 		} catch (error) {
 			options.signal?.throwIfAborted();
-			// The local replica is a cache of server state. An older-format
-			// replica is a typed cache miss — the engine that shipped with this
-			// build is the migration target, and the server (same engine)
-			// migrates itself — so discard it and bootstrap fresh.
-			// TooNew/Malformed carry a different code and are never wiped —
-			// a too-new replica is newer data, not a miss.
-			if (!replicaRebootstrapped && isReplicaMigrationRequiredError(error)) {
-				replicaRebootstrapped = true;
-				const cacheName = repositoryOpfsCacheName(options);
-				const wiped = await deleteRepositoryOpfsReplica(cacheName);
-				// The storage layer's owner worker caches the SQLite pool per
-				// replica; after the wipe that cached pool still points at the
-				// deleted files, so an in-page reopen reads a poisoned pool.
-				// One guarded reload restarts the worker clean — the guard makes
-				// a reload loop impossible: on the second encounter the retry
-				// stays in-page and the failure surfaces.
-				if (wiped && takeReplicaRebootstrapReload(cacheName)) {
-					globalThis.location.reload();
-					return await new Promise<never>(() => {});
-				}
-				continue;
-			}
 			const retryDelay = OPEN_RETRY_DELAYS_MS[attempt];
 			if (!isRetryableRepositoryOpenError(error) || retryDelay === undefined) {
 				throw error;
@@ -259,21 +265,7 @@ async function openOpfsSyncSession(
 		server: {
 			mode: "sync",
 			url: repositoryUrl(options),
-			headers: async (): Promise<Record<string, string>> => {
-				const currentToken = await options.getAccessToken();
-				const publicPathHeaders: Record<string, string> = {};
-				if (options.publicPath) {
-					publicPathHeaders["X-Lixray-Public-Path"] = options.publicPath;
-				}
-				if (currentToken) {
-					return {
-						Authorization: `Bearer ${currentToken}`,
-						...publicPathHeaders,
-					};
-				}
-				if (options.allowAnonymous) return publicPathHeaders;
-				throw new Error("A repository access token is required.");
-			},
+			headers: async () => repositoryRequestHeaders(options),
 			fetch: createTelemetryFetch(options.fetch, {
 				repositoryId: options.repositoryId,
 				refreshAccessToken: options.refreshAccessToken,
@@ -281,7 +273,54 @@ async function openOpfsSyncSession(
 				shouldCaptureRequestFailures: () => requestFailureReporting.enabled,
 			}),
 		},
+		onProgress: (progress) =>
+			publishLocalOpenProgress(repositorySessionKey(options), progress),
 	});
+}
+
+async function repositoryRequestHeaders(
+	options: OpenRepositoryLixSessionOptions,
+): Promise<Record<string, string>> {
+	const currentToken = await options.getAccessToken();
+	const publicPathHeaders: Record<string, string> = {};
+	if (options.publicPath) {
+		publicPathHeaders["X-Lixray-Public-Path"] = options.publicPath;
+	}
+	if (currentToken) {
+		return {
+			Authorization: `Bearer ${currentToken}`,
+			...publicPathHeaders,
+		};
+	}
+	if (options.allowAnonymous) return publicPathHeaders;
+	throw new Error("A repository access token is required.");
+}
+
+function publishLocalOpenProgress(
+	key: string,
+	progress: LixOpenProgress,
+): void {
+	const update = repositoryMigrationStateFromOpenProgress(progress);
+	if (update !== undefined) publishMigrationProgress(key, update);
+}
+
+export function repositoryMigrationStateFromOpenProgress(
+	progress: LixOpenProgress,
+): RepositoryMigrationState | null | undefined {
+	if (progress.phase === "complete") return null;
+	if (progress.fromFormat === undefined) return undefined;
+	if (
+		progress.phase !== "migrating" &&
+		progress.phase !== "validating" &&
+		progress.phase !== "opening"
+	) {
+		return undefined;
+	}
+	return {
+		fromVersion: progress.fromFormat,
+		toVersion: progress.toFormat,
+		phase: progress.phase,
+	};
 }
 
 export function createTelemetryFetch(
@@ -455,7 +494,9 @@ function lixRequestKey(
 	input: RequestInfo | URL,
 	init: RequestInit | undefined,
 ): string {
-	const path = lixRequestPath(input).split("/lix/v1/", 2)[1];
+	const path = lixRequestPath(input).match(
+		/^\/lix\/v1\/[0-9a-f-]+\/?(.*)$/,
+	)?.[1];
 	return `${lixRequestMethod(input, init)}:${path ?? lixRequestEndpoint(input)}`;
 }
 
@@ -483,8 +524,9 @@ function lixRequestPath(input: RequestInfo | URL): string {
 function lixRequestEndpoint(input: RequestInfo | URL): string {
 	try {
 		const path = lixRequestPath(input);
-		const marker = "/lix/v1/";
-		const endpoint = path.split(marker, 2)[1]?.split("/", 1)[0];
+		const endpoint = path
+			.match(/^\/lix\/v1\/[0-9a-f-]+\/?(.*)$/)?.[1]
+			?.split("/", 1)[0];
 		return endpoint || "unknown";
 	} catch {
 		return "unknown";
@@ -520,52 +562,6 @@ export function repositoryMigrationStateFromError(
 		return null;
 	}
 	return { fromVersion, toVersion };
-}
-
-const REPLICA_MIGRATION_REQUIRED_CODE =
-	"LIX_ERROR_REPOSITORY_MIGRATION_REQUIRED";
-const REPLICA_REBOOTSTRAP_RELOAD_KEY_PREFIX = "lixray:replica-rebootstrap:";
-
-/**
- * Claims the one reload this replica's rebootstrap may perform. Returns true
- * exactly once per replica until the marker is cleared by a successful open;
- * a page that already reloaded for this replica retries in-page instead, so
- * a persistent failure surfaces rather than looping reloads.
- */
-function takeReplicaRebootstrapReload(cacheName: string): boolean {
-	try {
-		const key = `${REPLICA_REBOOTSTRAP_RELOAD_KEY_PREFIX}${cacheName}`;
-		if (globalThis.sessionStorage.getItem(key) !== null) return false;
-		globalThis.sessionStorage.setItem(key, "1");
-		return true;
-	} catch {
-		// No sessionStorage (or blocked): never reload without the guard.
-		return false;
-	}
-}
-
-function clearReplicaRebootstrapReload(cacheName: string): void {
-	try {
-		globalThis.sessionStorage.removeItem(
-			`${REPLICA_REBOOTSTRAP_RELOAD_KEY_PREFIX}${cacheName}`,
-		);
-	} catch {
-		// Nothing to clear when storage is unavailable.
-	}
-}
-
-/**
- * The local wasm engine refused an older-format OPFS replica. Matched by the
- * engine's typed code, never the message. Distinct from LIX_ERROR_LIX_MIGRATING
- * (the server migrating its own copy) and from
- * LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT (too-new or malformed — never wiped).
- */
-export function isReplicaMigrationRequiredError(error: unknown): boolean {
-	return (
-		error instanceof Error &&
-		"code" in error &&
-		error.code === REPLICA_MIGRATION_REQUIRED_CODE
-	);
 }
 
 export function isRetryableRepositoryOpenError(error: unknown): boolean {
@@ -731,10 +727,7 @@ export function repositorySessionKey(
 function repositoryUrl(options: OpenRepositoryLixSessionOptions): URL {
 	const origin = options.origin ?? globalThis.location?.origin;
 	if (!origin) throw new Error("A repository server origin is required.");
-	return new URL(
-		`/@${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.repositorySlug)}`,
-		origin,
-	);
+	return new URL(`/lix/${encodeURIComponent(options.repositoryId)}`, origin);
 }
 
 function isBranchNotFoundError(

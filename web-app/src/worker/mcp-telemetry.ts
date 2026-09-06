@@ -79,10 +79,7 @@ export function createMcpTelemetrySession(
 
 	const pendingCaptures: Array<Promise<void>> = [];
 	const onToolCall = (observation: McpToolCallObservation): void => {
-		// Open-repo is only the captured Lix span `lix.repository.opened`.
-		// Do not invent a parallel `mcp.open_lix` perf/$ai_span clock.
-		if (observation.toolName === "open_lix") return;
-		const traceId = crypto.randomUUID();
+		const traceId = observation.traceId ?? crypto.randomUUID();
 		const spanId = crypto.randomUUID();
 		const releaseId =
 			env.LIXRAY_RELEASE_ID?.trim() ||
@@ -91,6 +88,10 @@ export function createMcpTelemetrySession(
 		const properties: Record<string, unknown> = {
 			$ai_trace_id: traceId,
 			$ai_span_id: spanId,
+			...(observation.parentId ? { $ai_parent_id: observation.parentId } : {}),
+			...(observation.sessionId
+				? { $ai_session_id: observation.sessionId }
+				: {}),
 			$ai_span_name: `mcp.${observation.toolName}`,
 			$ai_latency: observation.durationMs / 1000,
 			$ai_is_error: observation.outcome === "error",
