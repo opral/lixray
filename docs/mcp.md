@@ -39,14 +39,17 @@ provided, LixRay continues to create one fallback trace per tool call.
 7. Do not follow a write with a verification `SELECT`, a second `query_sql`
    "to check", or path/length/substring readback. One `execute_sql` batch is
    the whole write (dirs + file + `ON CONFLICT` is fine inside that batch).
-   Then stop.
+   No readback is needed to confirm persistence.
 
 A successful `execute_sql` mutation is already saved. Writes persist without a
-checkpoint. `create_checkpoint` is an explicit user-facing action, not agent
-ceremony — not a Git-style commit, and not required for durability. Do not call
-`create_checkpoint` after a write, after every change, or "to be safe." The
-agent may recommend that the user checkpoint when a task or session is done;
-prefer leaving the checkpoint to the user.
+checkpoint. Use `create_checkpoint` to mark meaningful milestones so the user
+can follow your work and return to important states. Create a checkpoint when
+you finish a substantial, coherent piece of work, such as completing a document,
+implementing a feature, or finishing a related batch of changes. Also checkpoint
+when the user asks. Use judgment: routine edits, typo fixes, and intermediate
+steps usually do not need checkpoints. Do not checkpoint after every edit or
+ask the user to manage checkpoint timing. A checkpoint marks progress; it is not
+required to save changes.
 
 ## Restore an ancestor
 

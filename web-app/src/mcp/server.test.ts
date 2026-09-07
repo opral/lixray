@@ -50,10 +50,17 @@ const MCP_DOCS = readFileSync(
 );
 
 function assertCheckpointPolicy(text: string): void {
-	assert.match(text, /user-facing/);
-	assert.match(text, /do not call/i);
-	assert.match(text, /after a write/i);
-	assert.match(text, /agent may recommend/);
+	assert.match(text, /meaningful milestones/);
+	assert.match(text, /substantial, coherent piece of work/);
+	assert.match(text, /when the user asks/);
+	assert.match(text, /routine edits/);
+	assert.match(text, /Do not checkpoint after every edit/);
+	assert.match(text, /ask the user to manage checkpoint timing/);
+	assert.match(text, /not\s+required to save changes/);
+	assert.doesNotMatch(
+		text,
+		/only when the user|prefer leaving|named restore point|Do not call.*after a write/,
+	);
 }
 
 function toolText(result: {
@@ -544,7 +551,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.match(executeSqlTool.description ?? "", /verification SELECT/);
 		assert.match(
 			executeSqlTool.description ?? "",
-			/Do not call create_checkpoint after a write/,
+			/Use create_checkpoint for meaningful milestones, not after every edit/,
 		);
 		for (const tool of tools.tools) {
 			for (const marker of SHARED_GUIDE_MARKERS) {
@@ -559,7 +566,10 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			(tool) => tool.name === "create_checkpoint",
 		);
 		assert.ok(checkpointTool);
-		assert.match(checkpointTool.description ?? "", /already persist/);
+		assert.match(
+			checkpointTool.description ?? "",
+			/already saved automatically/,
+		);
 		assert.match(checkpointTool.description ?? "", /not required/);
 		assertCheckpointPolicy(checkpointTool.description ?? "");
 		const restoreTool = tools.tools.find((tool) => tool.name === "restore");
@@ -944,16 +954,15 @@ void test("list_lixes text is a clear sentence when no lixes exist", async () =>
 	}
 });
 
-void test("checkpoint copy forbids agent-initiated checkpoints after writes", () => {
+void test("checkpoint copy encourages agent judgment at meaningful milestones", () => {
 	assertCheckpointPolicy(MCP_SERVER_INSTRUCTIONS);
 	assertCheckpointPolicy(CREATE_CHECKPOINT_TOOL_DESCRIPTION);
 	assertCheckpointPolicy(MCP_DOCS);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /already saved/);
-	assert.match(CREATE_CHECKPOINT_TOOL_DESCRIPTION, /user explicitly asked/);
 	assert.match(MCP_DOCS, /Writes persist without a\s+checkpoint/);
 	assert.match(
 		EXECUTE_SQL_TOOL_DESCRIPTION,
-		/Do not call create_checkpoint after a write/,
+		/Use create_checkpoint for meaningful milestones, not after every edit/,
 	);
 });
 

@@ -575,7 +575,7 @@
 	{
 		"name": "execute_sql",
 		"title": "Execute SQL atomically",
-		"description": "Run an ordered atomic SQL batch against the branch selected by context. Always treated as potentially destructive; if any statement fails, the complete batch is rolled back. The mutation is already persisted: use rowsAffected and any returned rows, and do not follow a write with a verification SELECT. Do not call create_checkpoint after a write.",
+		"description": "Run an ordered atomic SQL batch against the branch selected by context. Always treated as potentially destructive; if any statement fails, the complete batch is rolled back. The mutation is already persisted: use rowsAffected and any returned rows, and do not follow a write with a verification SELECT. Use create_checkpoint for meaningful milestones, not after every edit; it is not required to save changes.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1217,7 +1217,7 @@
 	{
 		"name": "create_checkpoint",
 		"title": "Create checkpoint",
-		"description": "Create a named restore point on the branch selected by context. This is an explicit user-facing action, not agent ceremony — writes already persist through execute_sql and a checkpoint is not required for durability. Do not call this after a write, after every change, or to be safe; call it only when the user explicitly asked. The agent may recommend that the user checkpoint when a task or session is done; prefer leaving the checkpoint to the user.",
+		"description": "Mark meaningful milestones on the branch selected by context so the user can follow your work and return to important states. Use after completing a substantial, coherent piece of work or when the user asks. Use judgment: routine edits and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. Changes are already saved automatically; a checkpoint is not required to save changes.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",

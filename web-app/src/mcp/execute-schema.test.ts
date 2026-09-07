@@ -90,7 +90,7 @@ void test("per-tool SQL descriptions are short and omit the shared guide", () =>
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /verification SELECT/);
 	assert.match(
 		EXECUTE_SQL_TOOL_DESCRIPTION,
-		/Do not call create_checkpoint after a write/,
+		/Use create_checkpoint for meaningful milestones, not after every edit/,
 	);
 	assert.doesNotMatch(
 		EXECUTE_SQL_TOOL_DESCRIPTION,
