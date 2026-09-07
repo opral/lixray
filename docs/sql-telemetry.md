@@ -1,7 +1,7 @@
 # Production SQL telemetry
 
 Production SQL timing is emitted as OpenTelemetry spans and exported by
-`lix-server` to PostHog's native tracing endpoint. The engine's
+`lix-server` over OTLP to LixRay's authenticated telemetry gateway. The engine's
 `sql_telemetry` module owns the statement schema and redaction logic; callers
 must not emit a second SQL telemetry event.
 
@@ -33,12 +33,18 @@ session binds to a Lix (handshake session create, in-process client
 span is the north star. LixRay does not emit a parallel product event named
 `repository_opened`, `lixray_repository_opened`, or `webapp_repository_opened`.
 
-Lix spans stay `lix.*` on the TelemetrySink / OTLP path. LixRay's host-owned
-OpenTelemetry provider exports them and projects each completed identified
+Lix spans stay `lix.*` on the TelemetrySink / OTLP path. LixRay's gateway
+projects each completed identified
 `lix.repository.opened` span to a PostHog `$ai_span` whose `$ai_span_name`
-equals the Lix name. In-process WASM uses the same mapping from `onSpan` when
-`span.name` is `lix.repository.opened`. Remote/sync clients must not attach a
-second mapper: the span stays on the server.
+equals the Lix name and forwards the native OTLP payload to PostHog tracing.
+Web remote/sync and MCP clients share this server export;
+they must not attach a second mapper. Local Rust and JavaScript hosts can
+consume the same canonical span through their telemetry sink or `onSpan`;
+PostHog delivery is host-configured, not automatic in the SDK.
+
+The event means a client session was bound, not a unique logical UI open.
+Sync and reconnects can create multiple sessions. North-star DAU/WAU count
+unique people, not raw span volume.
 
 MCP `open_lix` does not invent an `mcp.open_lix` `$ai_span`. Official
 `$mcp_tool_call` keeps `$mcp_duration_ms` as harness wall clock. Cache admission
@@ -129,15 +135,29 @@ and returned rows.
 
 ## Export configuration
 
-Infisical supplies these production variables directly to the Railway
-`/railway/lix-server` service:
+The reference server supports one export path: standard OTLP HTTP/protobuf.
+Configure the production server with:
+
+- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://lixray.com/api/telemetry/otlp/v1/traces`
+- `OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer <internal-token>`
+
+Use the shared `LIXRAY_INTERNAL_TOKEN` as the internal token. Preview deployments
+must use their own gateway URL and token. Never route preview traces through
+the production gateway. No `POSTHOG_*` variables belong on the reference server.
+
+The existing LixRay web gateway owns the destination credentials:
 
 - `POSTHOG_PROJECT_TOKEN`
 - `POSTHOG_HOST`
 - `POSTHOG_ENVIRONMENT=production`
 
-The server exports OTLP HTTP/protobuf to `<POSTHOG_HOST>/i/v1/traces` and uses
-the same provider's downstream processor for the `$ai_span` projection.
+The gateway receives `/api/telemetry/otlp/v1/traces`, authenticates before
+decoding, forwards native traces to `<POSTHOG_HOST>/i/v1/traces`, and projects
+only identified repository-open spans into the existing PostHog event schema.
+There is no second event detector or vendor-specific exporter in Lix.
+Verify both native trace receipt and person-linked event receipt when changing
+deployment configuration. A successful repository request alone does not
+verify analytics delivery.
 Missing or invalid telemetry configuration never prevents the server from
 starting. `RUST_LOG` controls formatted server logs only; it does not enable or
 disable OpenTelemetry spans.
