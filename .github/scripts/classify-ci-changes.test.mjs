@@ -9,6 +9,7 @@ const all = {
   e2e: true,
   deploy: true,
   preview_e2e: true,
+  tooling: true,
 };
 
 test("documentation-only changes skip expensive validation lanes", () => {
@@ -20,6 +21,7 @@ test("documentation-only changes skip expensive validation lanes", () => {
       e2e: false,
       deploy: false,
       preview_e2e: false,
+      tooling: false,
     },
   );
 });
@@ -31,6 +33,7 @@ test("web changes run frontend and end-to-end validation", () => {
     e2e: true,
   deploy: true,
   preview_e2e: true,
+  tooling: false,
   });
 });
 
@@ -41,6 +44,7 @@ test("database changes run database and end-to-end validation", () => {
     e2e: true,
   deploy: true,
   preview_e2e: true,
+  tooling: false,
   });
 });
 
@@ -51,6 +55,7 @@ test("vendored Lix changes cover its remaining frontend consumers", () => {
     e2e: true,
   deploy: true,
   preview_e2e: true,
+  tooling: false,
   });
 });
 
@@ -66,6 +71,7 @@ test("multiple changes union their required lanes", () => {
     e2e: true,
   deploy: true,
   preview_e2e: true,
+  tooling: false,
   });
 });
 
@@ -74,7 +80,7 @@ test("icon metadata and artwork deploy without integration tests", () => {
     "web-app/src/pwa-icons.json", "web-app/public/lixray-icon-192-deadbeef.png",
     "web-app/public/manifest.webmanifest",
   ], { manifestIconsOnly: true }), {
-    frontend: false, database: false, e2e: false, deploy: true, preview_e2e: false,
+    frontend: false, database: false, e2e: false, deploy: true, preview_e2e: false, tooling: false,
   });
 });
 
@@ -101,4 +107,20 @@ test("deleted and renamed application inputs are included in the Git diff", asyn
     assert.match(output, /web-app\/src\/start.ts/);
     assert.match(output, /e2e=true/);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("database validation follows SQL and its pinned runner, not the JS lockfile", () => {
+  assert.equal(classifyCiChanges(["pnpm-lock.yaml"]).database, false);
+  assert.equal(classifyCiChanges([".github/workflows/production-canary.yml"]).database, false);
+  for (const file of ["database/supabase/config.toml", ".github/scripts/test-database.sh", ".github/workflows/pr.yml"]) {
+    assert.equal(classifyCiChanges([file]).database, true, file);
+  }
+});
+
+test("performance tooling changes need no application build", () => {
+  assert.deepEqual(classifyCiChanges(["perf/runner.mjs"]), {
+    frontend: false, database: false, e2e: false, deploy: false, preview_e2e: false, tooling: true,
+  });
+  assert.equal(classifyCiChanges(["web-app/src/start.ts"]).tooling, false);
+  assert.equal(classifyCiChanges(["scripts/dev.mjs"]).tooling, true);
 });
