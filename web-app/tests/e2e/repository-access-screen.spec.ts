@@ -58,10 +58,17 @@ for (const width of [1280, 360]) {
 				attributes: true,
 			});
 		});
+		// The server screen is visible before a cold Vite client has hydrated.
+		const accessRequest = page.waitForRequest(
+			(request) =>
+				request.url().includes("/rest/v1/rpc/resolve_public_lix_by_route"),
+			{ timeout: 60_000 },
+		);
 		await page.goto(fileUrl, { waitUntil: "domcontentloaded" });
 		const heading = page.getByRole("heading", { name: "Opening file..." });
 		await expect(heading).toBeVisible();
 		const before = await heading.boundingBox();
+		await accessRequest;
 		release();
 		const unavailable = page.getByRole("heading", {
 			name: "This file isn't available",
