@@ -11,23 +11,23 @@
 	"theme_color": "#f4f2ef",
 	"icons": [
 		{
-			"src": "/lixray-icon-192.png",
+			"src": "/lixray-icon-192-0487122b.png",
 			"sizes": "192x192",
 			"type": "image/png"
 		},
 		{
-			"src": "/lixray-icon-512.png",
+			"src": "/lixray-icon-512-dd729c0b.png",
 			"sizes": "512x512",
 			"type": "image/png"
 		},
 		{
-			"src": "/lixray-icon-maskable-192.png",
+			"src": "/lixray-icon-maskable-192-74596bee.png",
 			"sizes": "192x192",
 			"type": "image/png",
 			"purpose": "maskable"
 		},
 		{
-			"src": "/lixray-icon-maskable-512.png",
+			"src": "/lixray-icon-maskable-512-e9c4a821.png",
 			"sizes": "512x512",
 			"type": "image/png",
 			"purpose": "maskable"
