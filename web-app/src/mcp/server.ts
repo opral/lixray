@@ -83,6 +83,18 @@ export interface McpToolCallObservation {
 	sessionId?: string;
 }
 
+export interface McpTransportObservation {
+	requestId: string;
+	traceId: string;
+	parentId?: string;
+	sessionId?: string;
+	durationMs: number;
+	statusCode: number;
+	outcome: "success" | "error";
+	errorCode?: string;
+	stage: "transport";
+}
+
 export interface McpAiTraceContext {
 	traceId?: string;
 	parentId?: string;
@@ -96,6 +108,7 @@ export interface McpServerOptions {
 	requestId?: string;
 	serverName?: string;
 	onToolCall?: McpToolCallObserver;
+	onTransport?: (observation: McpTransportObservation) => void;
 	posthogToken?: string;
 	posthogHost?: string;
 	posthogDistinctId?: string;
@@ -856,10 +869,134 @@ export function createLixrayMcpServer(
 	return server;
 }
 
+/** Observe the complete SDK boundary, including failures before a tool runs. */
 export async function handleMcpTransport(
 	request: Request,
 	service: LixService,
 	options: McpServerOptions = {},
+): Promise<Response> {
+	const startedAt = Date.now();
+	const requestId = options.requestId ?? requestIdForMcpRequest(request);
+	const incomingContext =
+		options.traceContext ?? aiTraceContextForMcpRequest(request);
+	const traceContext = {
+		...incomingContext,
+		traceId: incomingContext.traceId ?? crypto.randomUUID(),
+	};
+	let errorCode: string | undefined;
+	let response: Response;
+	try {
+		response = await handleMcpTransportRequest(
+			request,
+			service,
+			{ ...options, requestId, traceContext },
+			(error) => {
+				errorCode = "MCP_PROTOCOL_ERROR";
+				console.error("LixRay MCP protocol error", { requestId, error });
+			},
+		);
+		// Never consume SSE: only JSON mode responses are finite.
+		if (
+			response.headers.get("content-type")?.split(";")[0]?.trim() ===
+			"application/json"
+		) {
+			const text = await response.text();
+			response = new Response(text, {
+				status: response.status,
+				statusText: response.statusText,
+				headers: response.headers,
+			});
+			const payload: unknown = JSON.parse(text);
+			if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+				const rpc = payload as Record<string, unknown>;
+				if (rpc.error && typeof rpc.error === "object") {
+					const error = rpc.error as Record<string, unknown>;
+					const code = typeof error.code === "number" ? error.code : -32603;
+					errorCode = `MCP_RPC_${code}`;
+					// SDK errors may contain private input or exception details.
+					const messages: Record<number, string> = {
+						[-32700]: "Parse error",
+						[-32600]: "Invalid request",
+						[-32601]: "Method not found",
+						[-32602]: "Invalid params",
+					};
+					rpc.error = {
+						code,
+						message: `${messages[code] ?? "Internal error"} (request_id: ${requestId})`,
+						data: { request_id: requestId },
+					};
+					const headers = new Headers(response.headers);
+					headers.delete("content-length");
+					response = new Response(JSON.stringify(rpc), {
+						status: response.status,
+						statusText: response.statusText,
+						headers,
+					});
+				} else if (
+					rpc.result &&
+					typeof rpc.result === "object" &&
+					(rpc.result as Record<string, unknown>).isError === true
+				) {
+					errorCode = "MCP_TOOL_ERROR";
+					const result = rpc.result as Record<string, unknown>;
+					// SDK argument validation can fail before our tool error wrapper runs.
+					const structured = result.structuredContent as
+						| Record<string, unknown>
+						| undefined;
+					if (!structured?.request_id && Array.isArray(result.content)) {
+						result.content.push({
+							type: "text",
+							text: `request_id: ${requestId}`,
+						});
+						const headers = new Headers(response.headers);
+						headers.delete("content-length");
+						response = new Response(JSON.stringify(rpc), {
+							status: response.status,
+							statusText: response.statusText,
+							headers,
+						});
+					}
+				}
+			}
+		}
+	} catch (error) {
+		console.error("LixRay MCP transport error", { requestId, error });
+		errorCode = "MCP_INTERNAL_ERROR";
+		response = Response.json(
+			{
+				jsonrpc: "2.0",
+				id: null,
+				error: {
+					code: -32603,
+					message: `Internal error (request_id: ${requestId})`,
+					data: { request_id: requestId },
+				},
+			},
+			{ status: 500, headers: { "access-control-allow-origin": "*" } },
+		);
+	}
+	errorCode ??= response.status >= 400 ? `HTTP_${response.status}` : undefined;
+	try {
+		options.onTransport?.({
+			requestId,
+			...traceContext,
+			stage: "transport",
+			durationMs: Date.now() - startedAt,
+			statusCode: response.status,
+			outcome: errorCode ? "error" : "success",
+			...(errorCode ? { errorCode } : {}),
+		});
+	} catch {
+		/* Telemetry must not change protocol responses. */
+	}
+	return withMcpRequestId(response, requestId);
+}
+
+async function handleMcpTransportRequest(
+	request: Request,
+	service: LixService,
+	options: McpServerOptions,
+	onProtocolError: (error: Error) => void,
 ): Promise<Response> {
 	const requestId = options.requestId ?? requestIdForMcpRequest(request);
 	const traceContext =
@@ -879,15 +1016,17 @@ export async function handleMcpTransport(
 			? (observation) => {
 					Object.assign(observation, {
 						...(traceContext.traceId ? { traceId: traceContext.traceId } : {}),
-						...(traceContext.parentId
-							? { parentId: traceContext.parentId }
-							: {}),
+						parentId: traceContext.traceId,
 						...(traceContext.sessionId
 							? { sessionId: traceContext.sessionId }
 							: {}),
 					});
 					observationCache.set(observation.requestId, observation);
-					options.onToolCall?.(observation);
+					try {
+						options.onToolCall?.(observation);
+					} catch {
+						/* Telemetry must not change tool results. */
+					}
 				}
 			: undefined;
 	let shutdownPosthog: (() => Promise<void>) | undefined;
@@ -967,8 +1106,7 @@ export async function handleMcpTransport(
 		{
 			legacy: "stateless",
 			responseMode: "json",
-			onerror: (error) =>
-				console.error("LixRay MCP protocol error", { requestId, error }),
+			onerror: onProtocolError,
 		},
 	);
 	try {
@@ -988,12 +1126,16 @@ export async function handleMcpTransport(
 			requestId,
 		);
 	} finally {
-		if (shutdownPosthog) {
-			if (options.onPosthogFlush) {
-				options.onPosthogFlush(shutdownPosthog);
-			} else {
-				await shutdownPosthog();
+		try {
+			if (shutdownPosthog) {
+				if (options.onPosthogFlush) {
+					options.onPosthogFlush(shutdownPosthog);
+				} else {
+					await shutdownPosthog();
+				}
 			}
+		} catch {
+			/* Analytics delivery must not fail the MCP request. */
 		}
 	}
 }

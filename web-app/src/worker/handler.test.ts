@@ -1,3 +1,4 @@
+import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -3174,3 +3175,179 @@ function env(options: { extra?: Partial<WorkerEnv> }): WorkerEnv {
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object";
 }
+
+void test("MCP boundary failures capture correlated traces before flushing", async () => {
+	for (const scenario of [
+		"auth-throw",
+		"auth-response",
+		"storage",
+		"transport-throw",
+		"transport-response",
+	] as const) {
+		const observations: Array<{
+			requestId: string;
+			stage: string;
+			statusCode: number;
+			traceId: string;
+		}> = [];
+		let flushed = 0;
+		const response = await handleRequest(
+			new Request("https://example.test/mcp", {
+				method: "POST",
+				headers: { "x-request-id": "debug-request" },
+			}),
+			env({}),
+			{
+				authenticateMcp:
+					scenario === "auth-throw"
+						? async () => {
+								throw new Error("SECRET bearer token");
+							}
+						: scenario === "auth-response"
+							? async () => ({
+									ok: false,
+									response: new Response("Unauthorized", {
+										status: 401,
+										headers: { "WWW-Authenticate": "Bearer" },
+									}),
+								})
+							: authenticatedMcp(),
+				...(scenario === "storage"
+					? {}
+					: { lixFetch: async () => new Response("unused") }),
+				createMcpTelemetry: () => ({
+					onToolCall: () => undefined,
+					onTransport: (observation) => observations.push(observation),
+					flush: async () => {
+						assert.equal(observations.length, 1);
+						flushed++;
+					},
+				}),
+				mcpTransport: async () => {
+					if (scenario === "transport-throw")
+						throw new Error("SECRET transport details");
+					return new Response("unavailable", { status: 503 });
+				},
+			},
+		);
+		assert.equal(
+			response.status,
+			scenario === "auth-response"
+				? 401
+				: scenario === "transport-response"
+					? 503
+					: 500,
+		);
+		assert.equal(observations.length, 1);
+		assert.equal(
+			observations[0]?.requestId,
+			response.headers.get("x-request-id"),
+		);
+		assert.equal(
+			observations[0]?.stage,
+			scenario.startsWith("auth")
+				? "authentication"
+				: scenario === "storage"
+					? "setup"
+					: "transport",
+		);
+		assert.ok(observations[0]?.traceId);
+		assert.equal(flushed, 1);
+		const body = await response.text();
+		assert.ok(!body.includes("SECRET"));
+		if (response.status === 500) assert.ok(body.includes("debug-request"));
+		if (response.status === 401)
+			assert.equal(response.headers.get("www-authenticate"), "Bearer");
+	}
+});
+
+void test("MCP worker forwards transport observations once and isolates telemetry failures", async () => {
+	let captures = 0;
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			lixFetch: async () => new Response("unused"),
+			createMcpTelemetry: () => ({
+				onToolCall: () => undefined,
+				onTransport: () => {
+					captures++;
+					throw new Error("capture failed");
+				},
+				flush: async () => undefined,
+			}),
+			mcpTransport: async (_request, _service, options) => {
+				options.onTransport?.({
+					requestId: options.requestId!,
+					traceId: options.traceContext!.traceId!,
+					stage: "transport",
+					statusCode: 500,
+					durationMs: 1,
+					outcome: "error",
+				});
+				return new Response("transport failure", { status: 500 });
+			},
+		},
+	);
+	assert.equal(response.status, 500);
+	assert.equal(await response.text(), "transport failure");
+	assert.equal(captures, 1);
+});
+
+void test("MCP telemetry initialization failure does not break a successful request", async () => {
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			lixFetch: async () => new Response("unused"),
+			createMcpTelemetry: () => {
+				throw new Error("unavailable telemetry");
+			},
+			mcpTransport: async () => new Response("ok"),
+		},
+	);
+	assert.equal(await response.text(), "ok");
+});
+
+void test("MCP cleanup failures preserve successful transport traces and flush telemetry", async (t) => {
+	t.mock.method(WorkerLixRuntimeClient.prototype, "close", async () => {
+		throw new Error("cleanup failed");
+	});
+	t.mock.method(console, "warn", () => undefined);
+	let flushes = 0;
+	const observations: Array<{ outcome: string; statusCode: number }> = [];
+	const response = await handleRequest(
+		new Request("https://example.test/mcp", { method: "POST" }),
+		env({}),
+		{
+			authenticateMcp: authenticatedMcp(),
+			lixFetch: async () => new Response("unused"),
+			createMcpTelemetry: () => ({
+				onToolCall: () => undefined,
+				onTransport: (observation) => observations.push(observation),
+				flush: async () => {
+					flushes++;
+				},
+			}),
+			mcpTransport: async (_request, _service, options) => {
+				options.onTransport?.({
+					requestId: options.requestId!,
+					traceId: options.traceContext!.traceId!,
+					stage: "transport",
+					statusCode: 200,
+					durationMs: 1,
+					outcome: "success",
+				});
+				return new Response("ok");
+			},
+		},
+	);
+	assert.equal(response.status, 200);
+	assert.equal(await response.text(), "ok");
+	assert.equal(flushes, 1);
+	assert.equal(observations.length, 1);
+	assert.equal(observations[0]?.outcome, "success");
+	assert.equal(observations[0]?.statusCode, 200);
+});
