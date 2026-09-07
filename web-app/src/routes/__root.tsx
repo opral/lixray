@@ -11,6 +11,7 @@ import { PostHogAnalytics } from "~/components/posthog-analytics";
 import { Toaster } from "~/components/ui/sonner";
 import { RepositoryProvider } from "~/components/repository-provider";
 import { RepositoryMcpGuidance } from "~/components/repository-mcp-guidance";
+import pwaIcons from "../pwa-icons.json";
 import appCss from "../styles.css?url";
 
 const title = "LixRay — A repository for your entire company";
@@ -37,18 +38,7 @@ export const Route = createRootRoute({
 			{ name: "twitter:card", content: "summary_large_image" },
 			{ name: "twitter:image", content: ogImage },
 		],
-		links: [
-			{ rel: "stylesheet", href: appCss },
-			{ rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
-			{
-				rel: "icon",
-				href: "/favicon-32-59b55f7c.png",
-				type: "image/png",
-				sizes: "32x32",
-			},
-			{ rel: "apple-touch-icon", href: "/apple-touch-icon-4f86c512.png" },
-			{ rel: "manifest", href: "/manifest.webmanifest" },
-		],
+		...pwaIcons,
 	}),
 	component: Outlet,
 	shellComponent: RootDocument,
