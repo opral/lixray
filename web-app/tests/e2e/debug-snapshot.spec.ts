@@ -81,6 +81,7 @@ test("snapshot inspection is temporary and does not write browser storage", asyn
 	await expect(
 		page.getByRole("heading", { name: "Open lix repository from snapshot" }),
 	).toBeVisible();
+	await expect(page.getByLabel("Snapshot file")).toBeEnabled();
 	await page.getByLabel("Snapshot file").setInputFiles({
 		name: "repro.lixsnap",
 		mimeType: "application/vnd.lix.snapshot",
@@ -104,6 +105,7 @@ test("invalid snapshots show an error and allow another file", async ({
 	page,
 }) => {
 	await page.goto("/debug");
+	await expect(page.getByLabel("Snapshot file")).toBeEnabled();
 	await page.getByLabel("Snapshot file").setInputFiles({
 		name: "invalid.lixsnap",
 		mimeType: "application/octet-stream",
@@ -116,4 +118,27 @@ test("invalid snapshots show an error and allow another file", async ({
 	await expect(
 		page.getByRole("button", { name: "Open snapshot…" }),
 	).toBeVisible();
+});
+
+test("debug snapshot picker renders without client JavaScript", async ({
+	browser,
+	baseURL,
+}) => {
+	const context = await browser.newContext({
+		baseURL,
+		javaScriptEnabled: false,
+	});
+	try {
+		const page = await context.newPage();
+		const response = await page.goto("/debug");
+		expect(response?.status()).toBe(200);
+		await expect(
+			page.getByRole("heading", { name: "Open lix repository from snapshot" }),
+		).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: "Open snapshot…" }),
+		).toBeVisible();
+	} finally {
+		await context.close();
+	}
 });

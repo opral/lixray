@@ -1,11 +1,16 @@
 import { openLix, type Lix } from "@lix-js/sdk";
-import { Atelier } from "@opral/atelier";
 import "@opral/atelier/style.css";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";
 import { AccountMenu } from "~/components/account-menu";
 import { Button } from "~/components/ui/button";
+
+// Load browser editors only after a snapshot is selected, never during SSR.
+const SnapshotAtelier = lazy(async () => {
+	const { Atelier } = await import("@opral/atelier");
+	return { default: Atelier.Shell };
+});
 
 export const Route = createFileRoute("/debug")({
 	head: () => ({
@@ -19,6 +24,8 @@ export const Route = createFileRoute("/debug")({
 
 function DebugPage() {
 	const picker = useRef<HTMLInputElement>(null);
+	const [ready, setReady] = useState(false);
+	useEffect(() => setReady(true), []);
 	const [file, setFile] = useState<File | null>(null);
 	return (
 		<div className="ph-no-capture flex h-dvh flex-col overflow-hidden bg-bg-app text-text-primary">
@@ -48,6 +55,7 @@ function DebugPage() {
 							ref={picker}
 							className="hidden"
 							aria-label="Snapshot file"
+							disabled={!ready}
 							type="file"
 							accept=".lixsnap,.snapshot,application/vnd.lix.snapshot"
 							onChange={(event) => {
@@ -55,7 +63,11 @@ function DebugPage() {
 								if (selected) setFile(selected);
 							}}
 						/>
-						<Button variant="secondary" onClick={() => picker.current?.click()}>
+						<Button
+							variant="secondary"
+							disabled={!ready}
+							onClick={() => picker.current?.click()}
+						>
 							Open snapshot…
 						</Button>
 					</main>
@@ -130,14 +142,22 @@ function SnapshotSession({
 					</div>
 					{/* Atelier's default session, preference, and review stores are all in memory. */}
 					<div className="min-h-0 flex-1">
-						<Atelier.Shell
-							lix={lix}
-							topBarProps={{
-								"data-app-titlebar": true,
-								className: "border-b border-border-subtle bg-bg-app",
-							}}
-							slots={{ navbarBrand, navbarEnd: closeButton }}
-						/>
+						<Suspense
+							fallback={
+								<p role="status" className="p-6 text-sm text-text-secondary">
+									Opening repository UI…
+								</p>
+							}
+						>
+							<SnapshotAtelier
+								lix={lix}
+								topBarProps={{
+									"data-app-titlebar": true,
+									className: "border-b border-border-subtle bg-bg-app",
+								}}
+								slots={{ navbarBrand, navbarEnd: closeButton }}
+							/>
+						</Suspense>
 					</div>
 				</div>
 			) : (
