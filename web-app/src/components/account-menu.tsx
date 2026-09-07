@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { LogOut, Pencil, UserRound } from "lucide-react";
+import { Bug, LogOut, Pencil, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { ProfileAvatar } from "~/components/profile-avatar";
@@ -103,6 +103,13 @@ export function AccountMenu({ className }: { className?: string }) {
 						</DropdownMenuItem>
 					</>
 				) : null}
+				<DropdownMenuSeparator />
+				<DropdownMenuItem asChild>
+					<Link to="/debug">
+						<Bug aria-hidden="true" />
+						Open dev tools
+					</Link>
+				</DropdownMenuItem>
 				{!isDemoModeEnabled ? (
 					<>
 						<DropdownMenuSeparator />

@@ -131,15 +131,56 @@ export default defineConfig(({ command }) => ({
 				: undefined,
 	},
 	optimizeDeps: {
-		// Atelier is linked source and first reached through a lazy workspace
-		// route. Pre-bundle its DnD runtime before that route loads so Vite does
-		// not invalidate the page with an "Outdated Optimize Dep" reload.
+		// Snapshot sessions are intentionally lost on reload. Pre-bundle the
+		// linked Atelier editors before first use so dependency discovery cannot
+		// trigger an "optimized dependencies changed" reload after opening one.
 		include:
 			command === "serve"
 				? [
 						"@opral/atelier > @dnd-kit/core",
 						"@opral/atelier > @dnd-kit/sortable",
 						"@opral/atelier > @dnd-kit/utilities",
+						"@opral/atelier > @base-ui/react/popover",
+						"@opral/atelier > @base-ui/react/select",
+						"@opral/atelier > @base-ui/react/toolbar",
+						"@opral/atelier > @base-ui/react/tooltip",
+						"@opral/atelier > @codemirror/commands",
+						"@opral/atelier > @codemirror/lang-css",
+						"@opral/atelier > @codemirror/lang-javascript",
+						"@opral/atelier > @codemirror/lang-json",
+						"@opral/atelier > @codemirror/lang-python",
+						"@opral/atelier > @codemirror/language",
+						"@opral/atelier > @codemirror/search",
+						"@opral/atelier > @codemirror/state",
+						"@opral/atelier > @codemirror/view",
+						"@opral/atelier > @glideapps/glide-data-grid",
+						"@opral/atelier > @lezer/highlight",
+						"@opral/atelier > @lix-js/html-diff",
+						"@opral/atelier > @pierre/trees/react",
+						"@opral/atelier > @radix-ui/react-context-menu",
+						"@opral/atelier > @radix-ui/react-dropdown-menu",
+						"@opral/atelier > @radix-ui/react-tooltip",
+						"@opral/atelier > @tiptap/core",
+						"@opral/atelier > @tiptap/extension-history",
+						"@opral/atelier > @tiptap/extension-placeholder",
+						"@opral/atelier > @tiptap/pm/commands",
+						"@opral/atelier > @tiptap/pm/dropcursor",
+						"@opral/atelier > @tiptap/pm/history",
+						"@opral/atelier > @tiptap/pm/state",
+						"@opral/atelier > @tiptap/pm/view",
+						"@opral/atelier > @tiptap/react",
+						"@opral/atelier > kysely",
+						"@opral/atelier > mdast-util-from-markdown",
+						"@opral/atelier > mdast-util-frontmatter",
+						"@opral/atelier > mdast-util-gfm",
+						"@opral/atelier > mdast-util-to-markdown",
+						"@opral/atelier > mermaid",
+						"@opral/atelier > micromark-extension-frontmatter",
+						"@opral/atelier > micromark-extension-gfm",
+						"@opral/atelier > papaparse",
+						"@opral/atelier > pdfjs-dist",
+						"@opral/atelier > react-resizable-panels",
+						"@opral/atelier > yaml",
 					]
 				: [],
 		// The Lix worker is lazy-loaded after workspace navigation. Keep its
