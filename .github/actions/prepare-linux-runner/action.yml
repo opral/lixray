@@ -1,17 +1,17 @@
 name: Prepare Linux build runner
-description: Free space for Rust and Docker outputs on standard GitHub runners.
+description: Reclaim unused SDK space only when a Docker build needs it.
+
+inputs:
+  minimum-free-gb:
+    description: Minimum free GiB on the workspace and Docker filesystems
+    default: "10"
 
 runs:
   using: composite
   steps:
-    - name: Reclaim unused preinstalled SDK space
+    - name: Ensure sufficient build space
       if: runner.environment == 'github-hosted'
       shell: bash
-      run: |
-        # Fresh, disposable GitHub VMs include SDKs this Rust/Node repository
-        # never uses. Keep Rust, LLVM, Node, browsers and Docker intact.
-        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/share/swift \
-          /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
-        sudo apt-get clean
-        df -h "$GITHUB_WORKSPACE"
-        free -h
+      env:
+        MINIMUM_FREE_GB: ${{ inputs.minimum-free-gb }}
+      run: bash .github/scripts/prepare-linux-runner.sh

@@ -13,6 +13,7 @@
     "perf:run": "node perf/runner.mjs",
     "perf:movie:remote": "node perf/movie/remote-qualification.mjs",
     "perf:test": "node --test perf/test/*.test.mjs",
+    "test:tooling": "pnpm test:dev && pnpm perf:test && pnpm test:ci-scripts && pnpm test:production-canary",
     "test:dev": "node --test scripts/supabase-readiness.test.mjs",
     "ci": "node scripts/ci.mjs",
     "test:ci-scripts": "node --test .github/scripts/*.test.mjs scripts/lix-ci-artifacts.test.mjs scripts/resolve-lix-server.test.mjs",

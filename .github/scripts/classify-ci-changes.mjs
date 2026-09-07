@@ -2,7 +2,7 @@ import { appendFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const ALL_LANES = ["frontend", "database", "e2e", "deploy", "preview_e2e"];
+const ALL_LANES = ["frontend", "database", "e2e", "deploy", "preview_e2e", "tooling"];
 
 export function classifyCiChanges(files, { manifestIconsOnly = false } = {}) {
   const lanes = Object.fromEntries(ALL_LANES.map((lane) => [lane, false]));
@@ -26,17 +26,26 @@ function lanesForFile(file, manifestIconsOnly) {
 
   // CI infrastructure changes exercise every lane so changes to the classifier,
   // shared actions, and workflows cannot silently skip their own validation.
-  if (file.startsWith(".github/")) return ALL_LANES;
+  if (file === ".github/workflows/pr.yml" || file.startsWith(".github/actions/") ||
+      file.startsWith(".github/scripts/classify-ci-changes")) return ALL_LANES;
+  if ([".github/workflows/production-canary.yml", ".github/workflows/movie-benchmark.yml"].includes(file)) return ["tooling"];
+  if (file === ".github/scripts/test-database.sh") return ["database", "e2e", "deploy", "preview_e2e", "tooling"];
+  if (file.startsWith(".github/")) return ALL_LANES.filter((lane) => lane !== "database");
 
   if (file.startsWith("database/")) return ["database", "e2e", "deploy", "preview_e2e"];
+  if (file === "web-app/package.json" || file === "web-app/Dockerfile" || file.startsWith("web-app/scripts/")) {
+    return ["frontend", "e2e", "deploy", "preview_e2e", "tooling"];
+  }
   if (file.startsWith("web-app/")) return ["frontend", "e2e", "deploy", "preview_e2e"];
-  if (file.startsWith("scripts/")) return ["frontend", "e2e", "deploy", "preview_e2e"];
-  if (file.startsWith("perf/")) return ["frontend", "deploy"];
+  if (file.startsWith("scripts/")) return ["frontend", "e2e", "deploy", "preview_e2e", "tooling"];
+  if (file.startsWith("perf/")) return ["tooling"];
 
   if (file === "vendor/lix") {
-    return ["frontend", "e2e", "deploy", "preview_e2e"];
+    return ["frontend", "e2e", "deploy", "preview_e2e", "tooling"];
   }
-  if (file === "vendor/atelier") return ["frontend", "e2e", "deploy", "preview_e2e"];
+  if (file === "vendor/atelier") return ["frontend", "e2e", "deploy", "preview_e2e", "tooling"];
+
+  if (file === "pnpm-lock.yaml") return ALL_LANES.filter((lane) => lane !== "database");
 
   if (
     [
@@ -45,7 +54,6 @@ function lanesForFile(file, manifestIconsOnly) {
       ".infisical.json",
       "compose.yml",
       "package.json",
-      "pnpm-lock.yaml",
       "pnpm-workspace.yaml",
       "railway.json",
     ].includes(file)

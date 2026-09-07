@@ -18,10 +18,8 @@ function run(label, args) {
 
 run("Check vendored dependencies", ["vendor:check"]);
 run("Prepare generated dependencies", ["--dir", "web-app", "ci:prepare"]);
-run("Test development environment", ["test:dev"]);
-run("Test performance harness", ["perf:test"]);
-run("Test CI scripts", ["test:ci-scripts"]);
-run("Test production canary", ["test:production-canary"]);
+// Local CI remains exhaustive; the workflow runs tooling in a selected job.
+if (!process.argv.includes("--frontend-only")) run("Test repository tooling", ["test:tooling"]);
 run("Check formatting", ["--dir", "web-app", "format:check"]);
 run("Lint frontend", ["--dir", "web-app", "ci:lint"]);
 run("Typecheck and test frontend", ["--dir", "web-app", "ci:check"]);

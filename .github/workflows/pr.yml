@@ -37,6 +37,7 @@ jobs:
       database: ${{ steps.classify.outputs.database }}
       e2e: ${{ steps.classify.outputs.e2e }}
       deploy: ${{ steps.classify.outputs.deploy }}
+      tooling: ${{ steps.classify.outputs.tooling }}
       preview_e2e: ${{ steps.classify.outputs.preview_e2e }}
 
     steps:
@@ -314,7 +315,28 @@ jobs:
           path: vendor/lix/packages
 
       - name: Run root CI command
-        run: pnpm run ci
+        run: pnpm run ci --frontend-only
+
+  tooling:
+    name: Repository tooling
+    needs: changes
+    if: needs.changes.outputs.tooling == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --filter lixray-repository --frozen-lockfile --ignore-scripts
+      - run: pnpm test:tooling
 
   database:
     name: Database
@@ -414,6 +436,7 @@ jobs:
       - changes
       - sdk
       - frontend
+      - tooling
       - database
       - e2e
       - server-image
@@ -435,6 +458,8 @@ jobs:
           DATABASE_RESULT: ${{ needs.database.result }}
           E2E_SELECTED: ${{ needs.changes.outputs.e2e }}
           E2E_RESULT: ${{ needs.e2e.result }}
+          TOOLING_SELECTED: ${{ needs.changes.outputs.tooling }}
+          TOOLING_RESULT: ${{ needs.tooling.result }}
           DEPLOY_SELECTED: ${{ needs.changes.outputs.deploy }}
           DRAFT: ${{ github.event.pull_request.draft }}
         run: |
@@ -454,6 +479,7 @@ jobs:
           }
 
           require_success "Change selection" "$CHANGES_RESULT"
+          require_selected_success "Repository tooling" "$TOOLING_SELECTED" "$TOOLING_RESULT"
           if test "$DEPLOY_SELECTED" = "false"; then
             require_selected_success "SDK" false "$SDK_RESULT"
             require_selected_success "Server image" false "$SERVER_IMAGE_RESULT"
