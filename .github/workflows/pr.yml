@@ -597,6 +597,8 @@ jobs:
           PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
         run: |
           response_body="$(mktemp)"
+          # Match vendor/lix/packages/lix/src/sync/mod.rs, not SERVER_PROTOCOL_VERSION.
+          sync_protocol_version=5
           status=000
           for attempt in $(seq 1 12); do
             if status="$(
@@ -609,7 +611,7 @@ jobs:
                 --write-out '%{http_code}' \
                 --header 'Authorization: Bearer lixray-demo' \
                 --header 'Lix-Session-Id: 0000000000000000000000000000000000000000000000000000000000000000' \
-                --header 'Lix-Sync-Protocol-Version: 6' \
+                --header "Lix-Sync-Protocol-Version: $sync_protocol_version" \
                 "$PREVIEW_URL/lix/v1/00000000-0000-4000-8000-000000000002/sync/pull?after=18446744073709551615&limit=512"
             )" && test "$status" = 410; then
               break
