@@ -1185,6 +1185,8 @@ export function mcpDocumentationResponse(
 			`Protocol: MCP ${MCP_PROTOCOL_VERSION} (modern stateless transport only).`,
 			"Authentication: Supabase OAuth 2.1 with PKCE and dynamic client registration.",
 			"",
+			"Setup: In an MCP-compatible client, add a remote connector using the endpoint above, then complete the LixRay sign-in and authorization flow. Connector support and setup menus depend on the client. If no LixRay connector is available, ask the user to connect it; a webpage cannot install a connector for the client.",
+			"",
 			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, call open_lix directly and do not call list_lixes first. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
 			"",
 			"Use query_sql for one SELECT statement and execute_sql for any atomic ordered SQL batch. When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; do not expect separate file helper tools. Directory paths use /skills, not /skills/.",
