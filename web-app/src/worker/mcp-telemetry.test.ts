@@ -396,3 +396,99 @@ function omitIds(
 	delete rest.$ai_span_id;
 	return rest;
 }
+
+void test("request failures produce a root trace without private exception payloads", async () => {
+	const captured: Array<EventMessage> = [];
+	let shutdowns = 0;
+	const session = createMcpTelemetrySession(
+		{
+			POSTHOG_PROJECT_TOKEN: "token",
+			POSTHOG_ENVIRONMENT: "production",
+			LIXRAY_RELEASE_ID: "release",
+		},
+		{ userId: "anonymous-request", clientId: "unknown" },
+		{
+			createClient: () => ({
+				captureImmediate: async (event) => {
+					captured.push(event);
+				},
+				shutdown: async () => {
+					shutdowns++;
+				},
+			}),
+		},
+	);
+	assert.ok(session?.onTransport);
+	for (const stage of ["authentication", "setup", "transport"] as const) {
+		session.onTransport({
+			requestId: REQUEST_ID,
+			traceId: "trace-123",
+			sessionId: "session-123",
+			durationMs: 25,
+			statusCode: 500,
+			outcome: "error",
+			errorCode: "-32603",
+			stage,
+			...{ message: "secret SQL and credentials", body: "private document" },
+		});
+	}
+	await session.flush();
+	assert.equal(shutdowns, 1);
+	assert.equal(captured.length, 3);
+	for (const event of captured) {
+		assert.equal(event.event, "$ai_trace");
+		assert.equal(event.properties?.$ai_trace_id, "trace-123");
+		assert.equal(event.properties?.$ai_session_id, "session-123");
+		assert.equal(event.properties?.request_id, REQUEST_ID);
+		assert.equal(event.properties?.http_status, 500);
+		assert.equal(event.properties?.$ai_is_error, true);
+		assert.equal(event.properties?.release_id, "release");
+		assert.doesNotMatch(
+			JSON.stringify(event),
+			/secret|credentials|private document/,
+		);
+	}
+	assert.deepEqual(
+		captured.map((event) => String(event.properties?.failure_stage)),
+		["authentication", "setup", "transport"],
+	);
+});
+
+void test("request telemetry captures are awaited and failures are contained", async () => {
+	const warnings: string[] = [];
+	let finish: (() => void) | undefined;
+	let shutdown = false;
+	const session = createMcpTelemetrySession(
+		{ POSTHOG_PROJECT_TOKEN: "token", POSTHOG_ENVIRONMENT: "production" },
+		{ userId: "user", clientId: "client" },
+		{
+			createClient: () => ({
+				captureImmediate: () =>
+					new Promise<void>((resolve) => {
+						finish = resolve;
+					}),
+				shutdown: async () => {
+					shutdown = true;
+					throw new Error("offline");
+				},
+			}),
+			warn: (message) => warnings.push(message),
+		},
+	);
+	assert.ok(session?.onTransport);
+	session.onTransport({
+		requestId: REQUEST_ID,
+		traceId: "trace",
+		durationMs: 1,
+		statusCode: 200,
+		outcome: "success",
+		stage: "transport",
+	});
+	const flushing = session.flush();
+	assert.equal(shutdown, false);
+	assert.ok(finish);
+	finish();
+	await flushing;
+	assert.equal(shutdown, true);
+	assert.deepEqual(warnings, ["Failed to shut down MCP telemetry"]);
+});

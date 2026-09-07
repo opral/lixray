@@ -2,6 +2,7 @@ import { PostHog, type EventMessage } from "posthog-node";
 import type {
 	McpToolCallObservation,
 	McpToolCallObserver,
+	McpTransportObservation,
 } from "../mcp/server.ts";
 import {
 	isDemoEnvironment,
@@ -29,7 +30,12 @@ interface McpTelemetryIdentity {
 	isDemo?: boolean;
 }
 
+export type McpRequestObservation = Omit<McpTransportObservation, "stage"> & {
+	stage: "transport" | "authentication" | "setup";
+};
+
 export interface McpTelemetrySession {
+	onTransport?: (observation: McpRequestObservation) => void;
 	onToolCall: McpToolCallObserver;
 	flush(): Promise<void>;
 }
@@ -151,8 +157,61 @@ export function createMcpTelemetrySession(
 		}
 	};
 
+	const onTransport = (observation: McpRequestObservation): void => {
+		// Only allowlisted metadata crosses this boundary. SDK error messages can
+		// contain SQL, file content, arguments, or authentication material.
+		const properties: Record<string, unknown> = {
+			$ai_trace_id: observation.traceId,
+			$ai_span_name: "mcp.request",
+			...(observation.parentId ? { $ai_parent_id: observation.parentId } : {}),
+			...(observation.sessionId
+				? { $ai_session_id: observation.sessionId }
+				: {}),
+			$ai_latency: observation.durationMs / 1000,
+			$ai_is_error: observation.outcome === "error",
+			mcp_server: "lixray",
+			request_id: observation.requestId,
+			outcome: observation.outcome,
+			duration_ms: observation.durationMs,
+			http_status: observation.statusCode,
+			failure_stage:
+				observation.outcome === "error" ? observation.stage : undefined,
+			oauth_client_id: identity.clientId,
+			environment: "production",
+			release_id:
+				env.LIXRAY_RELEASE_ID?.trim() ||
+				env.RAILWAY_GIT_COMMIT_SHA?.trim() ||
+				"unknown",
+			...(observation.errorCode
+				? {
+						error_code: observation.errorCode,
+						$ai_error: {
+							code: observation.errorCode,
+							stage: observation.stage,
+						},
+					}
+				: {}),
+		};
+		try {
+			pendingCaptures.push(
+				client
+					.captureImmediate({
+						distinctId: identity.userId,
+						event: "$ai_trace",
+						properties,
+					})
+					.catch((caught: unknown) =>
+						warn("Failed to capture MCP request telemetry", caught),
+					),
+			);
+		} catch (caught) {
+			warn("Failed to capture MCP request telemetry", caught);
+		}
+	};
+
 	return {
 		onToolCall,
+		onTransport,
 		async flush(): Promise<void> {
 			await Promise.all(pendingCaptures);
 			try {

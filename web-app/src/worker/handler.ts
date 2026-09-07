@@ -25,6 +25,7 @@ import {
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
 import { LixService, type LixSummary } from "../mcp/lix-service.ts";
 import {
+	aiTraceContextForMcpRequest,
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
 	MCP_PATH,
@@ -41,6 +42,7 @@ import {
 import {
 	createMcpTelemetrySession,
 	type McpTelemetrySession,
+	type McpRequestObservation,
 } from "./mcp-telemetry.ts";
 import {
 	createLixrMcpTelemetrySession,
@@ -438,215 +440,321 @@ export async function handleRequest(
 			return withMcpRequestId(corsPreflight(), requestId);
 		}
 		const executionContext = options.executionContext ?? noopExecutionContext();
-		const authenticateMcp =
-			options.authenticateMcp ?? authenticateMcpWithSupabase;
-		const authResult = await authenticateMcp(request, env);
-		if (!authResult.ok) return withMcpRequestId(authResult.response, requestId);
-		const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
-		// This positive cache is recreated for every MCP HTTP request.
-		const authorizedLixIds = new Set<string>();
-		if (!options.lixFetch) {
-			return withMcpRequestId(
-				new Response("Lix storage is not configured\n", { status: 500 }),
+		const startedAt = performance.now();
+		const incomingTrace = aiTraceContextForMcpRequest(request);
+		const traceContext = {
+			...incomingTrace,
+			traceId: incomingTrace.traceId ?? crypto.randomUUID(),
+		};
+		let telemetry: McpTelemetrySession | null = null;
+		let telemetryInitialized = false;
+		let cleanupOwnsFlush = false;
+		let observed = false;
+		let stage: McpRequestObservation["stage"] = "authentication";
+		const initializeTelemetry = (
+			identity: Parameters<typeof createMcpTelemetrySession>[1],
+		): void => {
+			telemetryInitialized = true;
+			try {
+				telemetry = (options.createMcpTelemetry ?? createMcpTelemetrySession)(
+					env,
+					identity,
+				);
+			} catch {
+				// Telemetry must never change the result of an MCP request.
+			}
+		};
+		const onTransport = (observation: McpRequestObservation): void => {
+			if (observed) return;
+			observed = true;
+			try {
+				telemetry?.onTransport?.(observation);
+			} catch {
+				/* best effort */
+			}
+		};
+		const captureFailure = (statusCode: number, errorCode: string): void => {
+			if (!telemetryInitialized)
+				initializeTelemetry({
+					userId: `mcp-anonymous:${requestId}`,
+					clientId: "unknown",
+				});
+			onTransport({
+				requestId,
+				...traceContext,
+				durationMs: performance.now() - startedAt,
+				statusCode,
+				outcome: "error",
+				errorCode,
+				stage,
+			});
+		};
+		const internalError = (): Response =>
+			withMcpRequestId(
+				json(
+					{
+						jsonrpc: "2.0",
+						id: null,
+						error: {
+							code: -32603,
+							message: `Internal error (request_id: ${requestId})`,
+							data: { request_id: requestId },
+						},
+					},
+					{ status: 500 },
+				),
 				requestId,
 			);
-		}
-		const client = new WorkerLixRuntimeClient(
-			env,
-			authResult.auth,
-			async (lixId, auth) => {
-				if (authorizedLixIds.has(lixId)) return null;
-				const failure = await authorizeLix(lixId, auth, env);
-				if (failure === null) authorizedLixIds.add(lixId);
-				return failure;
-			},
-			{
-				signal: request.signal,
-				lixFetch: options.lixFetch,
-				lixSummaries:
-					options.lixSummaries ??
-					(isDemoMode(env) ? demoLixSummaries(env) : undefined),
-			},
-		);
-		const telemetry = (options.createMcpTelemetry ?? createMcpTelemetrySession)(
-			env,
-			{
+		try {
+			const authenticateMcp =
+				options.authenticateMcp ?? authenticateMcpWithSupabase;
+			const authResult = await authenticateMcp(request, env);
+			if (!authResult.ok) {
+				captureFailure(authResult.response.status, "MCP_AUTHENTICATION_FAILED");
+				return withMcpRequestId(authResult.response, requestId);
+			}
+			stage = "setup";
+			initializeTelemetry({
 				userId: authResult.auth.userId,
 				clientId: authResult.auth.clientId,
 				isDemo: authResult.auth.isDemo,
-			},
-		);
-		const lixrTelemetry = createLixrMcpTelemetrySession(env, {
-			userId: authResult.auth.userId,
-			clientId: authResult.auth.clientId,
-			isDemo: authResult.auth.isDemo,
-		});
-		const pendingConnectionRecords: Array<Promise<void>> = [];
-		const recordMcpLixConnection =
-			options.recordMcpLixConnection ?? recordMcpLixConnectionWithSupabase;
+			});
+			const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
+			// This positive cache is recreated for every MCP HTTP request.
+			const authorizedLixIds = new Set<string>();
+			if (!options.lixFetch) {
+				captureFailure(500, "MCP_STORAGE_NOT_CONFIGURED");
+				return internalError();
+			}
+			const client = new WorkerLixRuntimeClient(
+				env,
+				authResult.auth,
+				async (lixId, auth) => {
+					if (authorizedLixIds.has(lixId)) return null;
+					const failure = await authorizeLix(lixId, auth, env);
+					if (failure === null) authorizedLixIds.add(lixId);
+					return failure;
+				},
+				{
+					signal: request.signal,
+					lixFetch: options.lixFetch,
+					lixSummaries:
+						options.lixSummaries ??
+						(isDemoMode(env) ? demoLixSummaries(env) : undefined),
+				},
+			);
+			const lixrTelemetry = createLixrMcpTelemetrySession(env, {
+				userId: authResult.auth.userId,
+				clientId: authResult.auth.clientId,
+				isDemo: authResult.auth.isDemo,
+			});
+			const pendingConnectionRecords: Array<Promise<void>> = [];
+			const recordMcpLixConnection =
+				options.recordMcpLixConnection ?? recordMcpLixConnectionWithSupabase;
 
-		const importSession = {
-			fileWrites: new Set<string>(),
-			firstFileAdded: false,
-			totalChars: 0,
-			totalBytes: 0,
-			toolCallCount: 0,
-			startTime: Date.now(),
-			lixId: undefined as string | undefined,
-		};
+			const importSession = {
+				fileWrites: new Set<string>(),
+				firstFileAdded: false,
+				totalChars: 0,
+				totalBytes: 0,
+				toolCallCount: 0,
+				startTime: Date.now(),
+				lixId: undefined as string | undefined,
+			};
 
-		const onToolCall = (observation: McpToolCallObservation): void => {
-			if (lixrTelemetry && observation.outcome === "success") {
-				const sqlAnalysis = observation.executeInput
-					? analyzeSqlOperation(observation.executeInput)
-					: undefined;
-				const fileWrites = observation.rawStatements
-					? detectFileWrites(observation.rawStatements)
-					: observation.executeInput
-						? detectFileWrites(
-								observation.executeInput.statements.map((s) => ({
-									sql: s.sanitizedSql,
-								})),
-							)
-						: [];
+			const onToolCall = (observation: McpToolCallObservation): void => {
+				if (lixrTelemetry && observation.outcome === "success") {
+					const sqlAnalysis = observation.executeInput
+						? analyzeSqlOperation(observation.executeInput)
+						: undefined;
+					const fileWrites = observation.rawStatements
+						? detectFileWrites(observation.rawStatements)
+						: observation.executeInput
+							? detectFileWrites(
+									observation.executeInput.statements.map((s) => ({
+										sql: s.sanitizedSql,
+									})),
+								)
+							: [];
 
-				importSession.toolCallCount++;
-				if (observation.lixId) importSession.lixId = observation.lixId;
+					importSession.toolCallCount++;
+					if (observation.lixId) importSession.lixId = observation.lixId;
 
-				// Enrich observation with file content size for $mcp_tool_call eventProperties
-				let totalContentChars = 0;
-				let totalContentBytes = 0;
+					// Enrich observation with file content size for $mcp_tool_call eventProperties
+					let totalContentChars = 0;
+					let totalContentBytes = 0;
 
-				for (const write of fileWrites) {
-					if (write.content) {
-						const contentBytes = Buffer.byteLength(write.content, "utf8");
-						const contentChars = write.content.length;
-						const contentHash = computeContentHash(write.content);
-						const fileExtension = getFileExtension(write.path);
+					for (const write of fileWrites) {
+						if (write.content) {
+							const contentBytes = Buffer.byteLength(write.content, "utf8");
+							const contentChars = write.content.length;
+							const contentHash = computeContentHash(write.content);
+							const fileExtension = getFileExtension(write.path);
 
-						totalContentChars += contentChars;
-						totalContentBytes += contentBytes;
-						importSession.totalChars += contentChars;
-						importSession.totalBytes += contentBytes;
-						importSession.fileWrites.add(write.path);
+							totalContentChars += contentChars;
+							totalContentBytes += contentBytes;
+							importSession.totalChars += contentChars;
+							importSession.totalBytes += contentBytes;
+							importSession.fileWrites.add(write.path);
 
-						const writeProps = {
-							file_extension: fileExtension,
-							char_count: contentChars,
-							byte_count: contentBytes,
-							content_sha256: contentHash,
-							is_bulk: sqlAnalysis?.isBulk ?? false,
-							source: "mcp" as const,
-							verified: true,
-							hash_match: true,
-							lix_id: observation.lixId,
-							repository_id: observation.lixId,
-							organization_id: undefined,
-						};
+							const writeProps = {
+								file_extension: fileExtension,
+								char_count: contentChars,
+								byte_count: contentBytes,
+								content_sha256: contentHash,
+								is_bulk: sqlAnalysis?.isBulk ?? false,
+								source: "mcp" as const,
+								verified: true,
+								hash_match: true,
+								lix_id: observation.lixId,
+								repository_id: observation.lixId,
+								organization_id: undefined,
+							};
 
-						lixrTelemetry.captureFileWritten(writeProps);
+							lixrTelemetry.captureFileWritten(writeProps);
 
-						if (!importSession.firstFileAdded) {
-							importSession.firstFileAdded = true;
-							lixrTelemetry.captureFirstFileAdded(writeProps);
+							if (!importSession.firstFileAdded) {
+								importSession.firstFileAdded = true;
+								lixrTelemetry.captureFirstFileAdded(writeProps);
+							}
 						}
+					}
+
+					// Add file content size to observation for $mcp_tool_call eventProperties
+					if (totalContentChars > 0) {
+						observation.fileContentCharCount = totalContentChars;
+						observation.fileContentByteCount = totalContentBytes;
 					}
 				}
 
-				// Add file content size to observation for $mcp_tool_call eventProperties
-				if (totalContentChars > 0) {
-					observation.fileContentCharCount = totalContentChars;
-					observation.fileContentByteCount = totalContentBytes;
+				try {
+					telemetry?.onToolCall(observation);
+				} catch {
+					/* best effort */
 				}
-			}
 
-			telemetry?.onToolCall(observation);
-
-			if (
-				authResult.auth.isDemo ||
-				observation.outcome !== "success" ||
-				!observation.lixId
-			) {
-				return;
-			}
-			pendingConnectionRecords.push(
-				recordMcpLixConnection(observation, authResult.auth, env).catch(
-					(error: unknown) => {
-						console.warn("Failed to record MCP Lix connection", {
-							lixId: observation.lixId,
-							toolName: observation.toolName,
-							error: error instanceof Error ? error.message : String(error),
-						});
-					},
-				),
-			);
-		};
-		const posthogToken = resolveOfficialMcpPosthogToken(env, {
-			isDemo: authResult.auth.isDemo,
-		});
-		const onPosthogFlush = posthogToken
-			? (flush: () => Promise<void>): void => {
-					const work = flush().catch((caught: unknown) => {
-						console.warn("Failed to flush PostHog MCP analytics", caught);
-					});
-					executionContext.waitUntil(work);
+				if (
+					authResult.auth.isDemo ||
+					observation.outcome !== "success" ||
+					!observation.lixId
+				) {
+					return;
 				}
-			: undefined;
-		let responseCleanupDeferred = false;
-		const cleanup = async (): Promise<void> => {
-			await Promise.all(pendingConnectionRecords);
-			scheduleMcpTelemetryFlush(executionContext, telemetry);
-			if (lixrTelemetry) {
-				if (importSession.fileWrites.size > 0) {
-					lixrTelemetry.captureImportCompleted({
-						file_count: importSession.fileWrites.size,
-						char_count: importSession.totalChars,
-						byte_count: importSession.totalBytes,
-						tool_call_count: importSession.toolCallCount,
-						duration_ms: Date.now() - importSession.startTime,
-						is_bulk: importSession.fileWrites.size > 1,
-						lix_id: importSession.lixId,
-						repository_id: importSession.lixId,
-					});
-				}
-				const flushWork = lixrTelemetry.flush().catch((caught: unknown) => {
-					console.warn("Failed to flush Lixr MCP telemetry", caught);
-				});
-				executionContext.waitUntil(flushWork);
-			}
-			await client.close();
-		};
-		try {
-			const response = withMcpRequestId(
-				await (options.mcpTransport ?? handleMcpTransport)(
-					request,
-					new LixService(client, {
-						contextSigningKey: env.LIXRAY_CONTEXT_SIGNING_KEY,
-						principal: {
-							userId: authResult.auth.userId,
-							clientId: authResult.auth.clientId,
+				pendingConnectionRecords.push(
+					recordMcpLixConnection(observation, authResult.auth, env).catch(
+						(error: unknown) => {
+							console.warn("Failed to record MCP Lix connection", {
+								lixId: observation.lixId,
+								toolName: observation.toolName,
+								error: error instanceof Error ? error.message : String(error),
+							});
 						},
-					}),
-					{
+					),
+				);
+			};
+			const posthogToken = resolveOfficialMcpPosthogToken(env, {
+				isDemo: authResult.auth.isDemo,
+			});
+			const onPosthogFlush = posthogToken
+				? (flush: () => Promise<void>): void => {
+						const work = flush().catch((caught: unknown) => {
+							console.warn("Failed to flush PostHog MCP analytics", caught);
+						});
+						executionContext.waitUntil(work);
+					}
+				: undefined;
+			let responseCleanupDeferred = false;
+			const cleanup = async (): Promise<void> => {
+				await Promise.allSettled(pendingConnectionRecords);
+				scheduleMcpTelemetryFlush(executionContext, telemetry);
+				try {
+					if (lixrTelemetry) {
+						if (importSession.fileWrites.size > 0) {
+							lixrTelemetry.captureImportCompleted({
+								file_count: importSession.fileWrites.size,
+								char_count: importSession.totalChars,
+								byte_count: importSession.totalBytes,
+								tool_call_count: importSession.toolCallCount,
+								duration_ms: Date.now() - importSession.startTime,
+								is_bulk: importSession.fileWrites.size > 1,
+								lix_id: importSession.lixId,
+								repository_id: importSession.lixId,
+							});
+						}
+						const flushWork = lixrTelemetry.flush().catch((caught: unknown) => {
+							console.warn("Failed to flush Lixr MCP telemetry", caught);
+						});
+						executionContext.waitUntil(flushWork);
+					}
+				} catch (error) {
+					console.warn("Failed to finalize Lixr MCP telemetry", {
+						requestId,
+						error,
+					});
+				}
+				try {
+					await client.close();
+				} catch (error) {
+					console.warn("Failed to close MCP runtime client", {
+						requestId,
+						error,
+					});
+				}
+			};
+			cleanupOwnsFlush = true;
+			try {
+				const service = new LixService(client, {
+					contextSigningKey: env.LIXRAY_CONTEXT_SIGNING_KEY,
+					principal: {
+						userId: authResult.auth.userId,
+						clientId: authResult.auth.clientId,
+					},
+				});
+				stage = "transport";
+				const response = withMcpRequestId(
+					await (options.mcpTransport ?? handleMcpTransport)(request, service, {
 						authMode: isDemoMode(env) ? "none" : "oauth",
 						requestId,
+						traceContext,
+						onTransport,
 						onToolCall,
 						posthogToken,
 						posthogHost: env.POSTHOG_HOST,
 						posthogDistinctId: authResult.auth.userId,
 						posthogClientId: authResult.auth.clientId,
 						onPosthogFlush,
-					},
-				),
-				requestId,
-			);
-			if (isStreamingMcpResponse(response)) {
-				responseCleanupDeferred = true;
-				return deferResponseCleanup(response, cleanup);
+					}),
+					requestId,
+				);
+				if (response.status >= 400)
+					captureFailure(response.status, `HTTP_${response.status}`);
+				if (isStreamingMcpResponse(response)) {
+					responseCleanupDeferred = true;
+					return deferResponseCleanup(response, cleanup);
+				}
+				return response;
+			} catch (error) {
+				console.error("MCP request failed", { requestId, stage, error });
+				captureFailure(
+					500,
+					stage === "setup" ? "MCP_SETUP_FAILED" : "MCP_TRANSPORT_FAILED",
+				);
+				return internalError();
+			} finally {
+				if (!responseCleanupDeferred) await cleanup();
 			}
-			return response;
+		} catch (error) {
+			console.error("MCP request failed", { requestId, stage, error });
+			captureFailure(
+				500,
+				stage === "authentication"
+					? "MCP_AUTHENTICATION_FAILED"
+					: "MCP_SETUP_FAILED",
+			);
+			return internalError();
 		} finally {
-			if (!responseCleanupDeferred) await cleanup();
+			if (!cleanupOwnsFlush)
+				scheduleMcpTelemetryFlush(executionContext, telemetry);
 		}
 	}
 
