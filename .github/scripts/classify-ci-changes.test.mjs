@@ -55,7 +55,7 @@ test("vendored Lix changes cover its remaining frontend consumers", () => {
     e2e: true,
   deploy: true,
   preview_e2e: true,
-  tooling: false,
+  tooling: true,
   });
 });
 

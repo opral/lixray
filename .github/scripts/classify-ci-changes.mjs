@@ -41,9 +41,9 @@ function lanesForFile(file, manifestIconsOnly) {
   if (file.startsWith("perf/")) return ["tooling"];
 
   if (file === "vendor/lix") {
-    return ["frontend", "e2e", "deploy", "preview_e2e"];
+    return ["frontend", "e2e", "deploy", "preview_e2e", "tooling"];
   }
-  if (file === "vendor/atelier") return ["frontend", "e2e", "deploy", "preview_e2e"];
+  if (file === "vendor/atelier") return ["frontend", "e2e", "deploy", "preview_e2e", "tooling"];
 
   if (file === "pnpm-lock.yaml") return ALL_LANES.filter((lane) => lane !== "database");
 
