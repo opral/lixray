@@ -566,7 +566,10 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			(tool) => tool.name === "create_checkpoint",
 		);
 		assert.ok(checkpointTool);
-		assert.match(checkpointTool.description ?? "", /already saved automatically/);
+		assert.match(
+			checkpointTool.description ?? "",
+			/already saved automatically/,
+		);
 		assert.match(checkpointTool.description ?? "", /not required/);
 		assertCheckpointPolicy(checkpointTool.description ?? "");
 		const restoreTool = tools.tools.find((tool) => tool.name === "restore");
