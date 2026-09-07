@@ -331,14 +331,57 @@ void test("createBranch, undo, and redo use protocol HTTP", async () => {
 	]);
 });
 
-void test("remote merge stays unsupported through the SDK", async () => {
-	const runtime = client(async (_lixId, request) =>
-		branchProtocolResponse(request),
+void test("remote merge and preview forward protocol requests and receipts", async () => {
+	const requests: Array<{ path: string; method: string; body: unknown }> = [];
+	const changeStats = { total: 3, added: 1, modified: 1, removed: 1 };
+	const preview = {
+		outcome: "mergeCommitted",
+		targetBranchId: "main",
+		sourceBranchId: "draft",
+		baseCommitId: "base",
+		targetHeadCommitId: "target",
+		sourceHeadCommitId: "source",
+		changeStats,
+		conflicts: [],
+	};
+	const receipt = {
+		outcome: "mergeCommitted",
+		targetBranchId: "main",
+		sourceBranchId: "draft",
+		baseCommitId: "base",
+		targetHeadBeforeCommitId: "target",
+		sourceHeadBeforeCommitId: "source",
+		targetHeadAfterCommitId: "merged",
+		createdMergeCommitId: "merged",
+		changeStats,
+	};
+	const runtime = client(async (_lixId, request) => {
+		const path = testProtocolPath(request);
+		if (
+			path === "/lix/v1/branch/merge-preview" ||
+			path === "/lix/v1/branch/merge"
+		) {
+			requests.push({
+				path,
+				method: request.method,
+				body: await request.json(),
+			});
+			return Response.json(path.endsWith("merge-preview") ? preview : receipt);
+		}
+		return branchProtocolResponse(request);
+	});
+	assert.deepEqual(
+		await runtime.mergeBranchPreview(LIX_ID, "main", "draft"),
+		preview,
 	);
-	await assert.rejects(runtime.mergeBranch(LIX_ID, "main", "draft"), {
-		code: "LIX_UNSUPPORTED_REMOTE_OPERATION",
-	});
-	await assert.rejects(runtime.mergeBranchPreview(LIX_ID, "main", "draft"), {
-		code: "LIX_UNSUPPORTED_REMOTE_OPERATION",
-	});
+	assert.deepEqual(await runtime.mergeBranch(LIX_ID, "main", "draft"), receipt);
+	assert.deepEqual(
+		requests,
+		["merge-preview", "merge"].map((operation) => ({
+			path: `/lix/v1/branch/${operation}`,
+			method: "POST",
+			body: { sourceBranchId: "draft" },
+		})),
+	);
+	await runtime.close();
 });
