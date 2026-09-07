@@ -16,7 +16,6 @@ import {
 	type ExecuteScriptResponse,
 	createLixError,
 	isLixError,
-	type BindSessionInput,
 	type LixError,
 	type LixRuntimeClient,
 	type LixSummary,
@@ -54,7 +53,6 @@ interface WorkerLixRuntimeClientOptions {
 	signal?: AbortSignal;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
-	onBindSession?: (input: BindSessionInput) => void;
 }
 
 interface LixSession {
@@ -72,9 +70,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		| ((lixId: string, request: Request) => Promise<Response>)
 		| undefined;
 	private readonly lixSummaries: ReadonlyArray<LixSummary> | undefined;
-	private readonly onBindSession:
-		| ((input: BindSessionInput) => void)
-		| undefined;
 	private readonly sessions = new Map<string, Promise<LixSession>>();
 	private closePromise: Promise<void> | undefined;
 	private closed = false;
@@ -92,15 +87,10 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		this.signal = options.signal;
 		this.lixFetch = options.lixFetch;
 		this.lixSummaries = options.lixSummaries;
-		this.onBindSession = options.onBindSession;
 	}
 
 	hasOpenRuntime(lixId: string): boolean {
 		return this.sessions.has(lixId);
-	}
-
-	bindSession(input: BindSessionInput): void {
-		this.onBindSession?.(input);
 	}
 
 	async listLixes(): Promise<Array<LixSummary>> {
