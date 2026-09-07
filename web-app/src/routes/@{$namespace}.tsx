@@ -7,6 +7,7 @@ import {
 import { ArrowRight, Lock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AccountMenu } from "~/components/account-menu";
+import { RepositoryAccessPending } from "~/components/repository-access-screen";
 import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";
 import { useAuth } from "~/components/auth-provider";
 import { useRepository } from "~/components/repository-provider";
@@ -24,6 +25,7 @@ import {
 
 export const Route = createFileRoute("/@{$namespace}")({
 	ssr: false,
+	pendingComponent: RepositoryAccessPending,
 	component: PublicProfileRoute,
 });
 

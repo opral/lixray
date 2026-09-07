@@ -2,9 +2,11 @@
 export function RepositoryMcpGuidance({
 	pathname,
 	searchStr,
+	visible = false,
 }: {
 	pathname: string;
 	searchStr: string;
+	visible?: boolean;
 }) {
 	const match = /^\/(?:@|%40)([^/]+)\/([^/]+)(?:\/(.*))?$/i.exec(pathname);
 	if (!match) return null;
@@ -26,10 +28,16 @@ export function RepositoryMcpGuidance({
 	return (
 		<section
 			aria-label="Access through LixRay MCP"
-			className="border-t bg-background px-6 py-4 text-sm text-muted-foreground"
+			className={
+				visible
+					? "space-y-3 text-sm text-text-tertiary [&_code]:break-all [&_code]:text-text-secondary"
+					: "sr-only focus-within:not-sr-only focus-within:block focus-within:bg-bg-app focus-within:p-6"
+			}
 		>
 			<p>
-				This {file ? "document" : "repository"} is available through LixRay MCP.
+				To check access and read this {file ? "file" : "repository"}, use LixRay
+				MCP. Availability depends on the connected account's permissions and
+				whether the {file ? "file" : "repository"} exists.
 			</p>
 			<p>
 				Repository: <code>{repository}</code>
@@ -46,9 +54,11 @@ export function RepositoryMcpGuidance({
 			)}
 			<p>
 				If a LixRay connector is available, call <code>open_lix</code> with{" "}
-				<code>{args}</code>. Use the returned context from{" "}
-				<code>structuredContent</code> for subsequent MCP calls. Otherwise, ask
-				the user to connect LixRay using the{" "}
+				<code>{args}</code>. On success, use the returned context from{" "}
+				<code>structuredContent</code> with <code>query_sql</code> to read the
+				{file ? " specified file" : " repository"}. Report access or
+				missing-file errors without assuming availability. If no connector is
+				available, ask the user to connect LixRay using the{" "}
 				<a className="underline" href="/mcp/docs">
 					MCP setup documentation
 				</a>
