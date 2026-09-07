@@ -38,7 +38,7 @@ export const Route = createRootRoute({
 			{ name: "twitter:card", content: "summary_large_image" },
 			{ name: "twitter:image", content: ogImage },
 		],
-		...pwaIcons,
+		links: [{ rel: "stylesheet", href: appCss }, ...pwaIcons],
 	}),
 	component: Outlet,
 	shellComponent: RootDocument,
