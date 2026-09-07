@@ -1,6 +1,5 @@
 import {
 	createFileRoute,
-	Link,
 	Outlet,
 	useNavigate,
 	useRouterState,
@@ -20,10 +19,11 @@ import {
 	PublishedResourceView,
 	type PublishedResource,
 } from "~/components/published-resource-view";
+import { RepositoryAtelier } from "~/components/repository-atelier";
 import {
-	RepositoryAtelier,
-	RepositoryOpeningSkeleton,
-} from "~/components/repository-atelier";
+	RepositoryAccessPending,
+	RepositoryAccessScreen,
+} from "~/components/repository-access-screen";
 import { useRepository } from "~/components/repository-provider";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import {
@@ -64,6 +64,7 @@ interface RepositorySearch {
 
 export const Route = createFileRoute("/@{$namespace}/$repository")({
 	ssr: false,
+	pendingComponent: RepositoryAccessPending,
 	validateSearch: (search: Record<string, unknown>): RepositorySearch => {
 		const dir = normalizeDirPath(search.dir);
 		const branch =
@@ -95,6 +96,9 @@ function RepositoryRoutePage() {
 	const navigate = useNavigate();
 	const pathname = useRouterState({
 		select: (state) => state.location.pathname,
+	});
+	const searchStr = useRouterState({
+		select: (state) => state.location.searchStr,
 	});
 	const publishedResource = publishedResourceFromRoute(
 		pathname,
@@ -559,13 +563,7 @@ function RepositoryRoutePage() {
 	}, []);
 
 	if (resolved === undefined) {
-		return (
-			<RepositoryOpeningSkeleton
-				signedIn={Boolean(authUser)}
-				namespaceHandle={namespace}
-				repositorySlug={repositorySlug}
-			/>
-		);
+		return <RepositoryAccessScreen pathname={pathname} searchStr={searchStr} />;
 	}
 	if (shouldWaitForInviteResolution) {
 		if (failedInviteKey === inviteResolutionKey) {
@@ -583,16 +581,34 @@ function RepositoryRoutePage() {
 		);
 	}
 	if (resolveError) {
-		return <RepositoryRouteStatus>{resolveError}</RepositoryRouteStatus>;
+		return (
+			<RepositoryAccessScreen
+				pathname={pathname}
+				searchStr={searchStr}
+				status="error"
+				onRetry={() => setAccessRevision((current) => current + 1)}
+			/>
+		);
 	}
 	if (!resolved) {
 		return (
-			<RepositoryRouteStatus>
-				<strong>Repository not found</strong>
-				<Button asChild variant="outline">
-					<Link to="/home">Back to repositories</Link>
-				</Button>
-			</RepositoryRouteStatus>
+			<RepositoryAccessScreen
+				pathname={pathname}
+				searchStr={searchStr}
+				status="unavailable"
+				signedIn={Boolean(authUser)}
+				onSignIn={() => {
+					void signInWithGoogle(
+						canonicalPathFromLocation(window.location),
+					).catch((error: unknown) => {
+						toast.error(
+							error instanceof Error
+								? error.message
+								: "Unable to start sign-in.",
+						);
+					});
+				}}
+			/>
 		);
 	}
 	if (
