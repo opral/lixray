@@ -1,14 +1,11 @@
 import type { Lix } from "@lix-js/sdk";
 import {
-	AtelierFilePreview,
+	Atelier,
 	deleteWorkspaceEntry,
 	renameWorkspaceEntry,
 	WorkspacePathTakenError,
 } from "@opral/atelier";
-import type {
-	AtelierDiffSession,
-	AtelierFilePreviewProps,
-} from "@opral/atelier";
+import type { AtelierDiffSession, AtelierFileViewProps } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import {
 	ArrowUp,
@@ -214,7 +211,7 @@ export function DirectoryView({
 	// A changed README previews as its diff — the review renders the change
 	// itself, not the resulting document.
 	const readmeDiff = useMemo<
-		AtelierFilePreviewProps | { fileId: string; unavailable: true } | null
+		AtelierFileViewProps | { fileId: string; unavailable: true } | null
 	>(() => {
 		const readmePath = listing?.readmePath;
 		if (!diffSession || !readmePath) return null;
@@ -1577,7 +1574,7 @@ function ReadmePreview({
 	readonly fileId: string | null;
 	/** Present while a review marks the README; renders the diff itself. */
 	readonly diff:
-		| AtelierFilePreviewProps
+		| AtelierFileViewProps
 		| { fileId: string; unavailable: true }
 		| null;
 	readonly fileName: string;
@@ -1632,7 +1629,8 @@ function ReadmePreview({
 						review.
 					</div>
 				) : (
-					<AtelierFilePreview
+					<Atelier.FileView
+						readOnly
 						{...(diff ?? { lix, fileId, filePath: sourceFilePath })}
 					/>
 				)}

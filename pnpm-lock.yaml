@@ -199,6 +199,9 @@ importers:
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       happy-dom:
         specifier: ^20.10.6
         version: 20.10.6

@@ -1,4 +1,6 @@
 import { fileIconUrl } from "@opral/atelier/file-icons";
+import { Atelier } from "@opral/atelier";
+import { createPublishedLix } from "~/lib/published-lix";
 import { Download, Folder, LockOpen } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "~/components/ui/button";
@@ -24,9 +26,8 @@ type PublishedDirectoryResponse = {
 };
 
 /**
- * Private path publications intentionally do not boot Atelier: doing so would
- * give its general SQL client more repository data than the published path.
- * This view uses the two narrow, read-only surfaces exposed by the worker.
+ * The private repository never reaches the browser. Only authorized file bytes
+ * are imported into a disposable Lix for Atelier to render.
  */
 export function PublishedResourceView({
 	repositoryId,
@@ -63,6 +64,7 @@ export function PublishedResourceView({
 				/>
 			) : (
 				<PublishedFile
+					key={`${repositoryId}:${resource.path}`}
 					repositoryId={repositoryId}
 					namespace={namespace}
 					repositorySlug={repositorySlug}
@@ -146,17 +148,21 @@ function PublishedDirectory({
 
 function PublishedFile({
 	repositoryId,
+	namespace,
+	repositorySlug,
 	resource,
 }: Omit<PublishedResourceViewProps, "repositoryName">) {
 	const [bytes, setBytes] = useState<Uint8Array | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const mimeType = mimeTypeForPath(resource.path);
+	const [preview, setPreview] = useState<Awaited<
+		ReturnType<typeof createPublishedLix>
+	> | null>(null);
 	const objectUrl = useMemo(() => {
 		if (!bytes) return null;
 		return URL.createObjectURL(
-			new Blob([new Uint8Array(bytes)], { type: mimeType }),
+			new Blob([new Uint8Array(bytes)], { type: "application/octet-stream" }),
 		);
-	}, [bytes, mimeType]);
+	}, [bytes]);
 
 	useEffect(
 		() => () => {
@@ -167,10 +173,30 @@ function PublishedFile({
 
 	useEffect(() => {
 		const abort = new AbortController();
+		let ownedPreview: Awaited<ReturnType<typeof createPublishedLix>> | null =
+			null;
 		setBytes(null);
+		setPreview(null);
 		setError(null);
 		void fetchPublishedFile(repositoryId, resource.path, abort.signal)
-			.then(setBytes)
+			.then(async (content) => {
+				if (abort.signal.aborted) return;
+				setBytes(content);
+				const next = await createPublishedLix(
+					{ path: resource.path, content },
+					{
+						signal: abort.signal,
+						readAsset: (path) =>
+							fetchPublishedFile(repositoryId, path, abort.signal),
+					},
+				);
+				if (abort.signal.aborted) {
+					await next.lix.close();
+					return;
+				}
+				ownedPreview = next;
+				setPreview(next);
+			})
 			.catch((caught: unknown) => {
 				if (abort.signal.aborted) return;
 				setError(
@@ -179,16 +205,11 @@ function PublishedFile({
 						: "Unable to open this file.",
 				);
 			});
-		return () => abort.abort();
+		return () => {
+			abort.abort();
+			if (ownedPreview) void ownedPreview.lix.close();
+		};
 	}, [repositoryId, resource.path]);
-
-	const text = useMemo(
-		() =>
-			bytes && isTextPath(resource.path)
-				? new TextDecoder().decode(bytes)
-				: null,
-		[bytes, resource.path],
-	);
 
 	return (
 		<section className="mx-auto flex w-[min(960px,calc(100%-48px))] flex-col py-8">
@@ -212,35 +233,30 @@ function PublishedFile({
 				) : null}
 			</div>
 			{error ? <PublishedError>{error}</PublishedError> : null}
-			{!error && !bytes ? (
+			{!error && !preview ? (
 				<p className="text-[13px] text-text-tertiary">Opening file…</p>
 			) : null}
-			{text !== null ? (
-				<pre className="overflow-auto rounded-xl border border-border-panel bg-bg-raised p-5 font-mono text-[13px] leading-6 whitespace-pre-wrap">
-					{text}
-				</pre>
-			) : null}
-			{objectUrl && mimeType.startsWith("image/") ? (
-				<img
-					src={objectUrl}
-					alt={fileName(resource.path)}
-					className="max-h-[calc(100vh-190px)] max-w-full self-center rounded-xl object-contain"
+			{preview ? (
+				<Atelier.FileView
+					lix={preview.lix}
+					fileId={preview.fileId}
+					readOnly
+					className="min-h-[60vh]"
+					onOpenFile={(path) => {
+						window.location.assign(
+							publishedResourceHref(namespace, repositorySlug, {
+								kind: "file",
+								path,
+							}),
+						);
+					}}
+					fallback={
+						<p>
+							Preview is not available for this file type. Use Download to open
+							it.
+						</p>
+					}
 				/>
-			) : null}
-			{objectUrl && mimeType === "application/pdf" ? (
-				<iframe
-					title={fileName(resource.path)}
-					src={objectUrl}
-					className="h-[calc(100vh-190px)] w-full rounded-xl border border-border-panel"
-				/>
-			) : null}
-			{bytes &&
-			text === null &&
-			!mimeType.startsWith("image/") &&
-			mimeType !== "application/pdf" ? (
-				<div className="rounded-xl border border-dashed border-border-panel px-6 py-16 text-center text-[13px] text-text-tertiary">
-					Preview is not available for this file type. Use Download to open it.
-				</div>
 			) : null}
 		</section>
 	);
@@ -322,28 +338,4 @@ function publishedResourceHref(
 
 function fileName(path: string): string {
 	return path.split("/").filter(Boolean).at(-1) ?? path;
-}
-
-function isTextPath(path: string): boolean {
-	return /\.(?:cedar|cedarschema|csv|css|html?|ini|js|json|jsx|log|md|mjs|sql|svg|toml|ts|tsx|txt|xml|ya?ml)$/i.test(
-		path,
-	);
-}
-
-function mimeTypeForPath(path: string): string {
-	const extension = path.split(".").at(-1)?.toLowerCase();
-	return (
-		(
-			{
-				gif: "image/gif",
-				jpeg: "image/jpeg",
-				jpg: "image/jpeg",
-				pdf: "application/pdf",
-				png: "image/png",
-				svg: "image/svg+xml",
-				webp: "image/webp",
-			} satisfies Record<string, string>
-		)[extension ?? ""] ??
-		(isTextPath(path) ? "text/plain" : "application/octet-stream")
-	);
 }

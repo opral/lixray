@@ -1,9 +1,8 @@
 import {
 	Atelier,
-	AtelierSkeleton,
-	createAtelier,
 	type AtelierEvent,
-	type AtelierInstance,
+	type AtelierShellHandle,
+	type AtelierShellProps,
 } from "@opral/atelier";
 import "@opral/atelier/style.css";
 import {
@@ -105,7 +104,7 @@ interface RepositoryAtelierProps {
 	};
 }
 
-const RepositoryAtelierContext = createContext<AtelierInstance | null>(null);
+const RepositoryAtelierContext = createContext<AtelierShellHandle | null>(null);
 const RepositoryDefaultBranchContext = createContext<string | null>(null);
 const RepositoryRouteSyncContext = createContext<(() => void) | null>(null);
 const RepositoryShellDirNavigationContext = createContext<
@@ -173,7 +172,8 @@ export function RepositoryAtelier({
 		repositoryName,
 	});
 	const isReadOnly = !canEdit;
-	const [instance, setInstance] = useState<AtelierInstance | null>(null);
+	const [instance, setInstance] = useState<AtelierShellHandle | null>(null);
+	const [shellProps, setShellProps] = useState<AtelierShellProps | null>(null);
 	const [branchSession, setBranchSession] =
 		useState<RepositoryBranchSession | null>(null);
 	const [repositoryDefaultBranchId, setRepositoryDefaultBranchId] = useState<
@@ -874,7 +874,7 @@ export function RepositoryAtelier({
 			null;
 		const openController = new AbortController();
 		resetRepositoryOpenPerformance();
-		setInstance(null);
+		setShellProps(null);
 		setBranchSession(null);
 		setRepositoryDefaultBranchId(null);
 		setError(null);
@@ -977,7 +977,7 @@ export function RepositoryAtelier({
 							"Content-Type": "application/vnd.lix.snapshot",
 						},
 					}).blob();
-				const atelierInstance = createAtelier({
+				const atelierProps: AtelierShellProps = {
 					lix: session.lix,
 					readOnly: isReadOnly,
 					debug: {
@@ -1034,9 +1034,9 @@ export function RepositoryAtelier({
 						repositoryId,
 					}),
 					onEvent: (event) => eventHandlerRef.current(event),
-				});
+				};
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.atelierReady);
-				setInstance(atelierInstance);
+				setShellProps(atelierProps);
 				const actualBranchId = session.activeBranchSnapshot();
 				if (
 					shouldNormalizeInitialBranch({
@@ -1180,7 +1180,7 @@ export function RepositoryAtelier({
 			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
 			aria-busy={!instance && !error}
 		>
-			{instance ? (
+			{shellProps ? (
 				<RepositoryDefaultBranchContext.Provider
 					value={repositoryDefaultBranchId}
 				>
@@ -1190,8 +1190,9 @@ export function RepositoryAtelier({
 								value={consumeShellDirNavigation}
 							>
 								<RepositoryAtelierContext.Provider value={instance}>
-									<Atelier
-										instance={instance}
+									<Atelier.Shell
+										{...shellProps}
+										ref={setInstance}
 										topBarProps={REPOSITORY_TOP_BAR_PROPS}
 										slots={{
 											navbarBrand,
@@ -1223,12 +1224,12 @@ export function RepositoryAtelier({
 				</main>
 			) : null}
 			{!instance && !error && !migration ? (
-				<AtelierSkeleton
+				<Atelier.ShellSkeleton
 					topBarProps={REPOSITORY_TOP_BAR_PROPS}
 					slots={{ navbarBrand, navbarEnd: headerActions }}
 				>
 					<DelayedOpeningLabel />
-				</AtelierSkeleton>
+				</Atelier.ShellSkeleton>
 			) : null}
 			{error ? (
 				<main className="absolute inset-0 grid place-content-center bg-bg-app p-6 text-center text-text-secondary">
@@ -1245,7 +1246,7 @@ export function RepositoryAtelier({
 	);
 }
 
-export function useRepositoryAtelierInstance(): AtelierInstance | null {
+export function useRepositoryAtelierInstance(): AtelierShellHandle | null {
 	return useContext(RepositoryAtelierContext);
 }
 
@@ -1520,7 +1521,7 @@ export function RepositoryOpeningSkeleton({
 			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
 			aria-busy
 		>
-			<AtelierSkeleton
+			<Atelier.ShellSkeleton
 				topBarProps={REPOSITORY_TOP_BAR_PROPS}
 				slots={{
 					navbarBrand: (
@@ -1535,7 +1536,7 @@ export function RepositoryOpeningSkeleton({
 				}}
 			>
 				<DelayedOpeningLabel />
-			</AtelierSkeleton>
+			</Atelier.ShellSkeleton>
 		</div>
 	);
 }
