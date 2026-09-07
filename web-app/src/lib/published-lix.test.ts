@@ -50,7 +50,7 @@ void test("embedded references cannot install executable Atelier extensions", ()
 		publishedAssetPaths({
 			path: "/README.md",
 			content: new TextEncoder().encode(
-				"![Manifest](/.lix/app_data/atelier/extensions/example/manifest.json)\n![Entry](/.lix/app_data/atelier/extensions/example/index.js)",
+				"![Manifest](/.lix/app_data/atelier/extensions/example/manifest.json)\n![Entry](/.lix/app_data/atelier/extensions/example/index.js)\n![Encoded](/images%2f..%2f.lix/app_data/atelier/extensions/example/index.js)",
 			),
 		}),
 		[],

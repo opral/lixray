@@ -72,7 +72,15 @@ export function publishedAssetPaths(file: {
 		try {
 			const url = new URL(token.href, base);
 			if (url.origin !== base.origin) return;
-			const path = decodeURIComponent(url.pathname);
+			const segments: string[] = [];
+			for (const segment of decodeURIComponent(url.pathname)
+				.replaceAll("\\", "/")
+				.split("/")) {
+				if (!segment || segment === ".") continue;
+				if (segment === "..") segments.pop();
+				else segments.push(segment);
+			}
+			const path = `/${segments.join("/")}`;
 			// Embedded media is data, never an extension installation request.
 			if (path.startsWith("/.lix/app_data/atelier/extensions/")) return;
 			if (path !== file.path) paths.add(path);
