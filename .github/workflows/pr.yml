@@ -535,6 +535,7 @@ jobs:
     outputs:
       preview_url: ${{ steps.preview.outputs.preview_url }}
       deployment_id: ${{ steps.promote.outputs.web_deployment_id }}
+      server_deployment_id: ${{ steps.promote.outputs.server_deployment_id }}
     permissions:
       contents: read
       id-token: write
@@ -770,6 +771,7 @@ jobs:
         env:
           PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
           DEPLOYMENT_ID: ${{ needs.deploy-preview.outputs.deployment_id }}
+          SERVER_DEPLOYMENT_ID: ${{ needs.deploy-preview.outputs.server_deployment_id }}
           WEB_IMAGE: ${{ needs.web-image.outputs.image }}
           SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
         run: node .github/scripts/preview-validation-key.mjs

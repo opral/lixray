@@ -365,6 +365,7 @@ for attempt in $(seq 1 "$POLL_ATTEMPTS"); do
 		if test -n "${GITHUB_OUTPUT:-}"; then
 			echo "web_deployment_id=$web_id" >>"$GITHUB_OUTPUT"
 			echo "server_deployment_id=$server_id" >>"$GITHUB_OUTPUT"
+			echo "server_deployment_id=$server_id" >>"$GITHUB_OUTPUT"
 		fi
 		echo "Railway $RAILWAY_RELEASE_LABEL release is healthy."
 		exit 0
