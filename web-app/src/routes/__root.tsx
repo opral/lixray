@@ -3,12 +3,14 @@ import {
 	HeadContent,
 	Outlet,
 	Scripts,
+	useRouterState,
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { AuthProvider } from "~/components/auth-provider";
 import { PostHogAnalytics } from "~/components/posthog-analytics";
 import { Toaster } from "~/components/ui/sonner";
 import { RepositoryProvider } from "~/components/repository-provider";
+import { RepositoryMcpGuidance } from "~/components/repository-mcp-guidance";
 import appCss from "../styles.css?url";
 
 const title = "LixRay — A repository for your entire company";
@@ -53,6 +55,7 @@ export const Route = createRootRoute({
 });
 
 function RootDocument({ children }: { children: ReactNode }) {
+	const location = useRouterState({ select: (state) => state.location });
 	return (
 		<html lang="en">
 			<head>
@@ -65,6 +68,10 @@ function RootDocument({ children }: { children: ReactNode }) {
 						{children}
 					</RepositoryProvider>
 				</AuthProvider>
+				<RepositoryMcpGuidance
+					pathname={location.pathname}
+					searchStr={location.searchStr}
+				/>
 				<Toaster />
 				<Scripts />
 			</body>
