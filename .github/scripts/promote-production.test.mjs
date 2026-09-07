@@ -141,6 +141,10 @@ if test "$command" = logs; then
 	exit 0
 fi
 if grep -qx "$service" "$MOCK_DEPLOYED" 2>/dev/null; then
+	if test "\${MOCK_MISSING_AFTER_DEPLOY:-false}" = true; then
+		echo 'Environment "preview-environment" not found.' >&2
+		exit 1
+	fi
 	if test "$service" = "$RAILWAY_WEB_SERVICE"; then status="$MOCK_WEB_STATUS"; else status="$MOCK_SERVER_STATUS"; fi
 	printf '[{"id":"new-%s","status":"%s"}]\n' "$service" "$status"
 else
@@ -224,3 +228,13 @@ function runCoordinator(fixture, statuses, extraEnv = {}) {
     },
   });
 }
+
+test("stops on a deleted environment instead of polling for the full timeout", async () => {
+  const fixture = await createFixture();
+  const result = runCoordinator(fixture, {
+    MOCK_SERVER_STATUS: "SUCCESS", MOCK_WEB_STATUS: "SUCCESS", MOCK_MISSING_AFTER_DEPLOY: "true",
+  });
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /environment no longer exists; stopping promotion/);
+  assert.doesNotMatch(result.stderr, /did not become healthy/);
+});
