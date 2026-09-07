@@ -70,6 +70,7 @@ import {
 	PUBLIC_PROFILE_ACTIVITY_FRESH_SECONDS,
 	PublicProfileActivityCache,
 } from "./profile-activity-cache.ts";
+import { handleOtlpTelemetry } from "./otlp-telemetry.ts";
 
 export interface WorkerEnv {
 	SUPABASE_URL?: string;
@@ -273,6 +274,10 @@ export async function handleRequest(
 	options: HandleRequestOptions = {},
 ): Promise<Response> {
 	const url = new URL(request.url);
+
+	if (url.pathname === "/api/telemetry/otlp/v1/traces") {
+		return handleOtlpTelemetry(request, env);
+	}
 
 	if (request.method === "GET" && url.pathname === "/healthz") {
 		const deploymentId = env.RAILWAY_DEPLOYMENT_ID?.trim() || null;

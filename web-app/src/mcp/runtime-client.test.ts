@@ -218,41 +218,6 @@ void test("injected Lix summaries bypass Supabase discovery", async () => {
 	]);
 });
 
-void test("cache-admit does not bind; bindSession is an identity hook", async () => {
-	const binds: Array<{ lixId: string; branchId: string; accountId: string }> =
-		[];
-	const runtime = new WorkerLixRuntimeClient(
-		env(),
-		{ userId: "user-1", token: "token" },
-		async () => null,
-		{
-			lixFetch: async (_lixId, request) => branchProtocolResponse(request),
-			onBindSession: (input) => binds.push(input),
-		},
-	);
-
-	assert.equal(runtime.hasOpenRuntime(LIX_ID), false);
-	await runtime.activeBranchId(LIX_ID);
-	assert.equal(runtime.hasOpenRuntime(LIX_ID), true);
-	assert.deepEqual(binds, []);
-
-	runtime.bindSession({
-		lixId: LIX_ID,
-		branchId: "main",
-		accountId: "user-1",
-		organizationId: "org-1",
-	});
-	assert.deepEqual(binds, [
-		{
-			lixId: LIX_ID,
-			branchId: "main",
-			accountId: "user-1",
-			organizationId: "org-1",
-		},
-	]);
-	await runtime.close();
-});
-
 void test("closing a Railway Lix session releases its remote session", async () => {
 	const paths: string[] = [];
 	const runtime = client(async (_lixId, request) => {

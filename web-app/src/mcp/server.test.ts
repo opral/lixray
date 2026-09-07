@@ -125,7 +125,6 @@ class FakeRuntime implements LixRuntimeClient {
 	hasOpenRuntime() {
 		return false;
 	}
-	bindSession() {}
 	async listLixes() {
 		return [
 			{
