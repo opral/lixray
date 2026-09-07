@@ -36,6 +36,8 @@ jobs:
       frontend: ${{ steps.classify.outputs.frontend }}
       database: ${{ steps.classify.outputs.database }}
       e2e: ${{ steps.classify.outputs.e2e }}
+      deploy: ${{ steps.classify.outputs.deploy }}
+      preview_e2e: ${{ steps.classify.outputs.preview_e2e }}
 
     steps:
       - name: Check out pull request merge
@@ -51,9 +53,14 @@ jobs:
         id: classify
         run: node .github/scripts/classify-ci-changes.mjs
 
+      - name: Validate PWA asset references
+        if: steps.classify.outputs.deploy == 'true'
+        run: node .github/scripts/check-pwa-assets.mjs
+
   lix-artifacts:
     name: Await Lix artifacts
     needs: changes
+    if: needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 16
 
@@ -80,13 +87,13 @@ jobs:
       - changes
       - lix-artifacts
     if: >-
-      needs.changes.outputs.frontend == 'true' ||
-      (github.event.pull_request.draft != true && needs.changes.outputs.e2e == 'true')
+      needs.changes.outputs.deploy == 'true'
     uses: ./.github/workflows/lix-sdk.yml
     secrets: inherit
 
   server-image:
     name: Lix server image
+    if: needs.changes.outputs.deploy == 'true'
     needs:
       - changes
       - lix-artifacts
@@ -104,6 +111,7 @@ jobs:
     if: >-
       always() &&
       needs.changes.result == 'success' &&
+      needs.changes.outputs.deploy == 'true' &&
       (needs.sdk.result == 'success' || needs.sdk.result == 'skipped')
     # A prepared SDK removes Rust compilation from the web image build.
     runs-on: ${{ needs.sdk.result == 'success' && 'ubuntu-24.04' || 'blacksmith-16vcpu-ubuntu-2404' }}
@@ -427,6 +435,7 @@ jobs:
           DATABASE_RESULT: ${{ needs.database.result }}
           E2E_SELECTED: ${{ needs.changes.outputs.e2e }}
           E2E_RESULT: ${{ needs.e2e.result }}
+          DEPLOY_SELECTED: ${{ needs.changes.outputs.deploy }}
           DRAFT: ${{ github.event.pull_request.draft }}
         run: |
           require_success() {
@@ -443,6 +452,18 @@ jobs:
               exit 1
             fi
           }
+
+          require_success "Change selection" "$CHANGES_RESULT"
+          if test "$DEPLOY_SELECTED" = "false"; then
+            require_selected_success "SDK" false "$SDK_RESULT"
+            require_selected_success "Server image" false "$SERVER_IMAGE_RESULT"
+            require_selected_success "Web image" false "$WEB_IMAGE_RESULT"
+            require_selected_success "Frontend" "$FRONTEND_SELECTED" "$FRONTEND_RESULT"
+            require_selected_success "Database" "$DATABASE_SELECTED" "$DATABASE_RESULT"
+            require_selected_success "E2E" "$E2E_SELECTED" "$E2E_RESULT"
+            echo "No deployable changes; selected checks passed."
+            exit 0
+          fi
 
           if test "$DRAFT" = "true"; then
             require_success "Change selection" "$CHANGES_RESULT"
@@ -626,6 +647,12 @@ jobs:
           fi
           jq -e '.error.code == "LIX_ERROR_PROTOCOL_SESSION_GONE"' "$response_body"
 
+      - name: Smoke test deployed PWA assets
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
+        run: node .github/scripts/check-pwa-assets.mjs --url "$PREVIEW_URL"
+
       - name: Report preview statuses
         if: steps.credentials.outputs.available == 'true'
         env:
@@ -677,10 +704,12 @@ jobs:
     name: Preview sync E2E
     if: >-
       always() &&
+      needs.changes.outputs.preview_e2e == 'true' &&
       needs.deploy-preview.result == 'success' &&
       needs.deploy-preview.outputs.preview_url != '' &&
       needs.deploy-preview.outputs.deployment_id != ''
     needs:
+      - changes
       - deploy-preview
     runs-on: ubuntu-latest
     timeout-minutes: 15
