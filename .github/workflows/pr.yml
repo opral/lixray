@@ -8,9 +8,10 @@ on:
       - reopened
       - ready_for_review
       - converted_to_draft
+      - closed
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
@@ -30,6 +31,7 @@ env:
 jobs:
   changes:
     name: Select validation lanes
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -110,7 +112,7 @@ jobs:
       - changes
       - sdk
     if: >-
-      always() &&
+      !cancelled() &&
       needs.changes.result == 'success' &&
       needs.changes.outputs.deploy == 'true' &&
       (needs.sdk.result == 'success' || needs.sdk.result == 'skipped')
@@ -431,7 +433,7 @@ jobs:
 
   ci:
     name: CI
-    if: always()
+    if: always() && github.event.action != 'closed'
     needs:
       - changes
       - sdk
@@ -515,8 +517,11 @@ jobs:
 
   deploy-preview:
     name: Deploy preview
+    concurrency:
+      group: railway-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     if: >-
-      always() &&
+      !cancelled() &&
       github.event_name == 'pull_request' &&
       needs.ci.result == 'success' &&
       needs.server-image.result == 'success' &&
@@ -530,10 +535,12 @@ jobs:
     outputs:
       preview_url: ${{ steps.preview.outputs.preview_url }}
       deployment_id: ${{ steps.promote.outputs.web_deployment_id }}
+      server_deployment_id: ${{ steps.promote.outputs.server_deployment_id }}
     permissions:
       contents: read
       id-token: write
       statuses: write
+      pull-requests: read
 
     steps:
       - name: Check out deployment coordinator
@@ -608,6 +615,15 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Require an open PR before creating a preview
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          state="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .state)"
+          test "$state" = open || { echo "PR is closed; preview creation is obsolete."; exit 1; }
 
       - name: Ensure CI-managed Railway PR environment
         if: steps.credentials.outputs.available == 'true'
@@ -708,7 +724,7 @@ jobs:
   publish-preview:
     name: Publish preview link
     if: >-
-      always() &&
+      !cancelled() &&
       needs.deploy-preview.result == 'success' &&
       needs.deploy-preview.outputs.preview_url != ''
     needs:
@@ -729,7 +745,7 @@ jobs:
   preview-e2e:
     name: Preview sync E2E
     if: >-
-      always() &&
+      !cancelled() &&
       needs.changes.outputs.preview_e2e == 'true' &&
       needs.deploy-preview.result == 'success' &&
       needs.deploy-preview.outputs.preview_url != '' &&
@@ -737,6 +753,8 @@ jobs:
     needs:
       - changes
       - deploy-preview
+      - web-image
+      - server-image
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -748,12 +766,32 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the exact preview validation inputs
+        id: identity
+        env:
+          PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
+          DEPLOYMENT_ID: ${{ needs.deploy-preview.outputs.deployment_id }}
+          SERVER_DEPLOYMENT_ID: ${{ needs.deploy-preview.outputs.server_deployment_id }}
+          WEB_IMAGE: ${{ needs.web-image.outputs.image }}
+          SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
+        run: node .github/scripts/preview-validation-key.mjs
+
+      - name: Restore a recent successful validation
+        id: previous
+        if: github.run_attempt == 1
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-preview-validation
+          key: ${{ steps.identity.outputs.key }}
+
       - name: Set up pnpm
+        if: steps.previous.outputs.cache-hit != 'true'
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Set up Node.js
+        if: steps.previous.outputs.cache-hit != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -761,23 +799,39 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
+        if: steps.previous.outputs.cache-hit != 'true'
         # This job drives an already-built remote preview. Running the repository
         # postinstall here rebuilds the vendored Lix WASM SDK and can consume the
         # entire job timeout without adding anything Playwright needs.
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install Playwright browser
+        if: steps.previous.outputs.cache-hit != 'true'
         run: pnpm --dir web-app exec playwright install --with-deps chromium
 
       - name: Test deployed two-client sync
+        if: steps.previous.outputs.cache-hit != 'true'
         env:
           PLAYWRIGHT_BASE_URL: ${{ needs.deploy-preview.outputs.preview_url }}
           PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID: ${{ needs.deploy-preview.outputs.deployment_id }}
           PLAYWRIGHT_SYNC_PREVIEW: "1"
         run: pnpm --dir web-app exec playwright test tests/e2e/sync-preview.spec.ts
 
+      - name: Record successful validation
+        if: success() && steps.previous.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .ci-preview-validation
+          echo passed > .ci-preview-validation/passed
+
+      - name: Save successful validation for unchanged previews
+        if: success() && steps.previous.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-preview-validation
+          key: ${{ steps.identity.outputs.key }}
+
       - name: Upload Playwright profile and failure artifacts
-        if: always()
+        if: always() && steps.previous.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: preview-sync-playwright

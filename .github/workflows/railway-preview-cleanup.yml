@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: railway-preview-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read

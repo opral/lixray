@@ -29,13 +29,18 @@ POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-10}"
 RAILWAY_BIN="${RAILWAY_BIN:-railway}"
 
 list_deployments() {
-	local service="$1"
-	"$RAILWAY_BIN" deployment list \
+	local service="$1" response
+	if response="$("$RAILWAY_BIN" deployment list \
 		--project "$RAILWAY_PROJECT_ID" \
 		--environment "$RAILWAY_TARGET_ENVIRONMENT" \
 		--service "$service" \
-		--limit 1 \
-		--json
+		--limit 1 --json 2>&1)"; then
+		printf '%s\n' "$response"
+	else
+		printf '%s\n' "$response" >&2
+		if [[ "$response" == *Environment*"not found"* ]]; then return 42; fi
+		return 1
+	fi
 }
 
 graphql() {
@@ -162,7 +167,7 @@ latest_deployment() {
 	local service="$1"
 	local deployments
 
-	deployments="$(list_deployments "$service")"
+	deployments="$(list_deployments "$service")" || return $?
 	jq -c '.[0] // {}' <<<"$deployments"
 }
 
@@ -276,19 +281,45 @@ web_id=""
 server_id=""
 web_status="unknown"
 server_status="unknown"
+web_read_failures=0
+server_read_failures=0
 
 for attempt in $(seq 1 "$POLL_ATTEMPTS"); do
 	if web="$(latest_deployment "$RAILWAY_WEB_SERVICE")"; then
 		web_id="$(deployment_id "$web")"
 		web_status="$(deployment_status "$web")"
+		web_read_failures=0
 	else
+		read_status=$?
+		if test "$read_status" = 42; then
+			echo "Railway environment no longer exists; stopping promotion." >&2
+			exit 1
+		fi
+		web_read_failures=$((web_read_failures + 1))
+		if test "$web_read_failures" -ge 3; then
+			echo "Could not read web deployment three times; stopping promotion." >&2
+			exit 1
+		fi
+		web_status="unknown"
 		echo "::warning::Could not read web deployment on attempt $attempt."
 	fi
 
 	if server="$(latest_deployment "$RAILWAY_SERVER_SERVICE")"; then
 		server_id="$(deployment_id "$server")"
 		server_status="$(deployment_status "$server")"
+		server_read_failures=0
 	else
+		read_status=$?
+		if test "$read_status" = 42; then
+			echo "Railway environment no longer exists; stopping promotion." >&2
+			exit 1
+		fi
+		server_read_failures=$((server_read_failures + 1))
+		if test "$server_read_failures" -ge 3; then
+			echo "Could not read server deployment three times; stopping promotion." >&2
+			exit 1
+		fi
+		server_status="unknown"
 		echo "::warning::Could not read server deployment on attempt $attempt."
 	fi
 
@@ -333,6 +364,7 @@ for attempt in $(seq 1 "$POLL_ATTEMPTS"); do
 		} >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
 		if test -n "${GITHUB_OUTPUT:-}"; then
 			echo "web_deployment_id=$web_id" >>"$GITHUB_OUTPUT"
+			echo "server_deployment_id=$server_id" >>"$GITHUB_OUTPUT"
 			echo "server_deployment_id=$server_id" >>"$GITHUB_OUTPUT"
 		fi
 		echo "Railway $RAILWAY_RELEASE_LABEL release is healthy."
