@@ -512,19 +512,37 @@ export async function createRepositoryFile(
 		base: "untitled",
 		data: "",
 	};
-	const path = await firstFreePath(lix, (suffix) =>
-		childPath(
-			dirPath,
-			suffix === null
-				? `${template.base}.${extension}`
-				: `${template.base}-${suffix}.${extension}`,
-		),
-	);
-	await lix.execute("INSERT INTO lix_file (path, content) VALUES ($1, $2)", [
-		path,
-		new TextEncoder().encode(template.data),
-	]);
-	return path;
+	for (let attempt = 0; ; attempt += 1) {
+		try {
+			const path = await firstFreePath(lix, (suffix) =>
+				childPath(
+					dirPath,
+					suffix === null
+						? `${template.base}.${extension}`
+						: `${template.base}-${suffix}.${extension}`,
+				),
+			);
+			await lix.execute(
+				"INSERT INTO lix_file (path, content) VALUES ($1, $2)",
+				[path, new TextEncoder().encode(template.data)],
+			);
+			return path;
+		} catch (error) {
+			// A sync commit can invalidate this write's snapshot. Only retry a
+			// confirmed conflict, never an ambiguous outcome or another error.
+			if (
+				attempt >= 3 ||
+				typeof error !== "object" ||
+				error === null ||
+				!("code" in error) ||
+				error.code !== "LIX_TRANSACTION_CONFLICT"
+			) {
+				throw error;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
+			// Recheck the name too: another writer may have claimed it.
+		}
+	}
 }
 
 /** Creates an empty folder in dirPath; returns its canonical persisted path. */
