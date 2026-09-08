@@ -22,7 +22,7 @@ if ss -ltnp | grep -q ':54322 '; then
 fi
 
 supabase start \
-	--exclude edge-runtime,imgproxy,kong,logflare,mailpit,postgres-meta,realtime,storage-api,studio,supavisor,vector
+	--exclude edge-runtime,imgproxy,logflare,mailpit,postgres-meta,realtime,storage-api,studio,supavisor,vector
 supabase test db
 
 # Exercise the real code-exchange/refresh lifecycle, including GoTrue deleting
