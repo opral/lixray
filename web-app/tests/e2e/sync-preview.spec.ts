@@ -190,7 +190,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			.toBe(true);
 		return matchedCount;
 	};
-	const clickCheckpoint = async (page: Page): Promise<string> => {
+	const clickCheckpoint = async (
+		page: Page,
+		selectFiles?: () => Promise<void>,
+	): Promise<string> => {
 		const before = await authorityCheckpointCount();
 		const historyBefore = await openHistoryPanel(right);
 		const localCount = await historyBefore
@@ -216,6 +219,14 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				}
 			}
 		};
+		// Count/history preparation can yield while editor side effects commit.
+		// Capture the review epoch only after that preparation has completed.
+		await page
+			.getByRole("button", {
+				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+			})
+			.click();
+		await selectFiles?.();
 		sharedContext.on("request", captureCheckpoint);
 		intentionallyOffline = true;
 		await sharedContext.setOffline(true);
@@ -771,6 +782,15 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			timeout: realtimeTimeout,
 		});
 		expect(blobLaneRequestCount([left, right])).toBe(blobLaneBeforeRightEdit);
+		// The first heading also derives the filename in a debounced commit.
+		// Settle that descriptor before later edits open a pinned working review.
+		for (const page of [left, right]) {
+			await expect(
+				page.locator(
+					`[data-attr="panel-tab-select"][title="${rightMarker}.md"]`,
+				),
+			).toBeVisible({ timeout: realtimeTimeout });
+		}
 
 		const freshBootstrap =
 			await test.step("fresh/incognito bootstrap renders hot History", async () => {
@@ -821,7 +841,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		const blobLaneBeforeLeftEdit = blobLaneRequestCount([left, right]);
 		const leftMarker = `left-${Date.now()}`;
 		await leftEditor.click();
-		await left.keyboard.press("End");
+		// Keep the reverse-direction edit in the body so it does not schedule
+		// another heading-derived filename mutation during checkpoint review.
+		await left.keyboard.press("Control+End");
+		await left.keyboard.press("Enter");
 		await left.keyboard.insertText(leftMarker);
 		await left.keyboard.press("Tab");
 		await expect(rightEditor).toContainText(leftMarker, {
@@ -836,11 +859,6 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			).toBeVisible({ timeout: 30_000 });
 		}
 
-		await left
-			.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
-			})
-			.click();
 		const checkpointCountBeforeFirstClick = await authorityCheckpointCount();
 		const firstCheckpointCommitId = await clickCheckpoint(left);
 		const leftHistoryAfterCheckpoint = await openHistoryPanel(left);
@@ -1127,18 +1145,19 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		// Exercise the same warm-replica path for branch checkpoint state. The
 		// reopened client must observe an additional checkpoint, not merely keep
 		// rendering the checkpoint rows imported during bootstrap.
-		await left
-			.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
-			})
-			.click();
-		await left
-			.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
-			.click();
-		await left.getByRole("checkbox", { name: "All files" }).click();
-		await left.getByTestId(`diff-scope-file:${afterReopenFileId}`).click();
+		await expect(
+			left.locator(
+				`[data-attr="panel-tab-select"][title="${afterReopenMarker}.md"]`,
+			),
+		).toBeVisible({ timeout: realtimeTimeout });
 		const checkpointCountBeforeSecondClick = await authorityCheckpointCount();
-		const secondCheckpointCommitId = await clickCheckpoint(left);
+		const secondCheckpointCommitId = await clickCheckpoint(left, async () => {
+			await left
+				.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
+				.click();
+			await left.getByRole("checkbox", { name: "All files" }).click();
+			await left.getByTestId(`diff-scope-file:${afterReopenFileId}`).click();
+		});
 		expect(secondCheckpointCommitId).not.toBe(firstCheckpointCommitId);
 		const postReopenHistory = await openHistoryPanel(fresh);
 		await waitForHistoryCountsToMatchAuthority(
