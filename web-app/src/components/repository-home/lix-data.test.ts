@@ -244,6 +244,55 @@ void test("creates nested files and folders with canonical separators", async ()
 	assert.deepEqual(calls.at(-1)?.params[0], "/docs/untitled.md");
 });
 
+void test("file creation retries sync conflicts with a fresh available name", async () => {
+	const paths = new Set<string>();
+	const inserts: string[] = [];
+	const lix = {
+		execute: async (sql: string, params: ReadonlyArray<unknown>) => {
+			const path = String(params[0]);
+			if (sql.startsWith("SELECT")) {
+				return { rows: paths.has(path) ? [{}] : [] };
+			}
+			inserts.push(path);
+			if (inserts.length === 1) {
+				// Another writer claims the candidate while our write is rejected.
+				paths.add(path);
+				throw Object.assign(new Error("stale transaction"), {
+					code: "LIX_TRANSACTION_CONFLICT",
+				});
+			}
+			paths.add(path);
+			return { rows: [] };
+		},
+	} as unknown as Lix;
+
+	assert.equal(await createRepositoryFile(lix, "/", "csv"), "/untitled-1.csv");
+	assert.deepEqual(inserts, ["/untitled.csv", "/untitled-1.csv"]);
+});
+
+void test("file creation bounds conflicts and does not retry ambiguous writes", async () => {
+	for (const [code, expectedWrites] of [
+		["LIX_TRANSACTION_CONFLICT", 4],
+		["LIX_STORAGE_COMMIT_OUTCOME_UNKNOWN", 1],
+		["LIX_INVALID_PARAM", 1],
+	] as const) {
+		let writes = 0;
+		const failure = Object.assign(new Error(code), { code });
+		const lix = {
+			execute: async (sql: string) => {
+				if (sql.startsWith("SELECT")) return { rows: [] };
+				writes += 1;
+				throw failure;
+			},
+		} as unknown as Lix;
+		await assert.rejects(
+			createRepositoryFile(lix, "/", "md"),
+			(error) => error === failure,
+		);
+		assert.equal(writes, expectedWrites);
+	}
+});
+
 void test("imports dropped files into a canonical nested directory", async () => {
 	const calls: Array<{ sql: string; params: ReadonlyArray<unknown> }> = [];
 	const lix = {
