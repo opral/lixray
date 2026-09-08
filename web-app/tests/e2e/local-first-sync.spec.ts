@@ -1,10 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Request } from "@playwright/test";
 
-const repositoryId = "00000000-0000-4000-8000-000000000002";
-const repositoryPath = "/@acme/launch-q3";
-
-// Runs in the default Compose suite against the seeded demo authority and
+// Runs in the default Compose suite against the seeded development account and
 // the actual browser SDK/OPFS implementation, with no external preview flags.
 test("folder moves and checkpoints commit offline, survive reload, and upload unchanged", async ({
 	page,
@@ -12,10 +9,42 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 	baseURL,
 }) => {
 	if (!baseURL) throw new Error("Playwright baseURL is required");
-	const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL);
-	const headers = { Authorization: "Bearer lixray-demo" };
+	const prefix = `offline-${randomUUID()}`;
+	await page.goto("/");
+	const repository = await page.evaluate(async (slug) => {
+		// Compose uses real Supabase authorization, unlike deployed demo previews.
+		// Load the app's configured client so the browser and setup requests share
+		// the same persisted development session and repository permissions.
+		const moduleUrl = "/src/lib/supabase.ts";
+		const { getBrowserSupabaseClient, localDevCredentials } = (await import(
+			/* @vite-ignore */ moduleUrl
+		)) as typeof import("../../src/lib/supabase");
+		if (!localDevCredentials)
+			throw new Error("Compose development credentials are unavailable");
+		const client = getBrowserSupabaseClient();
+		const signedIn = await client.auth.signInWithPassword(localDevCredentials);
+		if (signedIn.error || !signedIn.data.session)
+			throw signedIn.error ?? new Error("Development sign-in omitted session");
+		const provisioned = await client.rpc("bootstrap_personal_namespace");
+		if (provisioned.error) throw provisioned.error;
+		const namespace = provisioned.data[0];
+		if (!namespace)
+			throw new Error("Development namespace was not provisioned");
+		const id = crypto.randomUUID();
+		const inserted = await client
+			.from("lixes")
+			.insert({ id, namespace_id: namespace.namespace_id, name: slug, slug });
+		if (inserted.error) throw inserted.error;
+		return {
+			id,
+			path: `/@${namespace.namespace_handle}/${slug}`,
+			token: signedIn.data.session.access_token,
+		};
+	}, prefix);
+	const endpoint = new URL(`/lix/v1/${repository.id}/`, baseURL);
+	const headers = { Authorization: `Bearer ${repository.token}` };
 	const opened = await context.request.get(endpoint.toString(), { headers });
-	expect(opened.ok()).toBe(true);
+	expect(opened.status(), await opened.text()).toBe(200);
 	const { sessionId } = (await opened.json()) as { sessionId: string };
 	let sequence = 0;
 	async function execute(sql: string, values: string[] = []) {
@@ -30,12 +59,11 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 				data: { sql, params: values.map((value) => ({ kind: "text", value })) },
 			},
 		);
-		expect(response.ok()).toBe(true);
+		expect(response.status(), await response.text()).toBe(200);
 		return (await response.json()) as {
 			rows: Array<Array<{ kind: string; value: unknown }>>;
 		};
 	}
-	const prefix = `offline-${randomUUID()}`;
 	const source = `${prefix}-source`;
 	const target = `${prefix}-target`;
 	const finalPath = `/${target}/${source}/note.txt`;
@@ -73,7 +101,7 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		await execute("INSERT INTO lix_file (path) VALUES ($1)", [
 			`/${source}/note.txt`,
 		]);
-		await page.goto(repositoryPath);
+		await page.goto(repository.path);
 		await expect(row(source)).toBeVisible();
 		await expect(row(target)).toBeVisible();
 		context.on("request", captureCheckpoint);
