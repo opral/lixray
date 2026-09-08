@@ -1,3 +1,4 @@
+import { repositoryHead } from "~/lib/page-head";
 import {
 	createFileRoute,
 	Outlet,
@@ -63,6 +64,7 @@ interface RepositorySearch {
 }
 
 export const Route = createFileRoute("/@{$namespace}/$repository")({
+	head: ({ params }) => repositoryHead(params),
 	ssr: false,
 	pendingComponent: RepositoryAccessPending,
 	validateSearch: (search: Record<string, unknown>): RepositorySearch => {

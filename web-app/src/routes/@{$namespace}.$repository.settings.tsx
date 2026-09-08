@@ -1,3 +1,4 @@
+import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
@@ -7,6 +8,7 @@ import {
 import { LIXRAY_SETTINGS_EXTENSION_ID } from "~/components/repository-home/host-extensions";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/settings")({
+	head: ({ params }) => repositoryHead(params, "settings"),
 	component: RepositorySettingsRoute,
 });
 
