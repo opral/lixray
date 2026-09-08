@@ -10,7 +10,8 @@
 		"status": "supabase status",
 		"env": "supabase status -o env",
 		"reset": "supabase db reset",
-		"test": "supabase test db"
+		"test": "supabase test db",
+		"test:oauth": "node --experimental-strip-types scripts/test-oauth-resource.mjs"
 	},
 	"devDependencies": {
 		"supabase": "^2.109.1"

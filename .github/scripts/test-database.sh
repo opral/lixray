@@ -22,5 +22,9 @@ if ss -ltnp | grep -q ':54322 '; then
 fi
 
 supabase start \
-	--exclude edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector
+	--exclude edge-runtime,imgproxy,logflare,mailpit,postgres-meta,realtime,storage-api,studio,supavisor,vector
 supabase test db
+
+# Exercise the real code-exchange/refresh lifecycle, including GoTrue deleting
+# its authorization row. The test uses Node built-ins and the pure MCP validator.
+node --experimental-strip-types "$repository_root/database/scripts/test-oauth-resource.mjs"

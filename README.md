@@ -231,9 +231,11 @@ read-only; LixRay does not expose snapshot upload or resource creation through
 this route. A downloaded artifact becomes a backup only after an operator
 stores it independently with retention, access control, and restore drills.
 
-Apply `database/supabase/migrations/20260710180000_lixray_mcp_oauth.sql`
-before enabling Supabase's OAuth server, dynamic client registration, and the
-`private.custom_access_token_hook`. The consent path is `/oauth/consent`.
+Apply the database migrations before enabling Supabase's OAuth server, dynamic
+client registration, and `private.custom_access_token_hook`. The consent path is
+`/oauth/consent`. [Persistent MCP authorization](docs/mcp-oauth-sessions.md)
+describes session resource bindings, the one-time reconnect for existing
+connections, and the local refresh/revocation regression tests.
 
 Probe a configured environment with a temporary token:
 

@@ -171,6 +171,11 @@ test("Repository tokens have generated names, creation dates and independent del
 		await page.getByRole("button", { name: "Done", exact: true }).click();
 		await expect(panel.getByRole("listitem")).toHaveCount(2);
 		await page.reload();
+		// Reload reopens the repository and its synced storage before mounting
+		// Settings. Use the startup budget, then the usual token-action budget.
+		await expect(page.getByTestId("repository-settings-view")).toBeVisible({
+			timeout: 30_000,
+		});
 		await expect(panel.getByRole("listitem")).toHaveCount(2);
 		await expect(secret).toHaveCount(0);
 		for (const token of [first, second]) {

@@ -51,7 +51,7 @@ select lives_ok($$select public.delete_api_token('83000000-0000-4000-8000-000000
 select is((select count(*) from public.authorize_api_token(current_setting('test.one')::json->>'token','83000000-0000-4000-8000-000000000011')),0::bigint,'deleted token immediately rejected');
 select ok((select allowed from public.authorize_api_token(current_setting('test.two')::json->>'token','83000000-0000-4000-8000-000000000011')),'deleting first token preserves second');
 select is((select count(*) from public.list_api_tokens('83000000-0000-4000-8000-000000000011')),1::bigint,'deleted token is no longer listed');
-set local request.jwt.claims = '{"sub":"83000000-0000-4000-8000-000000000001","role":"authenticated","client_id":"oauth-client"}';
+set local request.jwt.claims = '{"sub":"83000000-0000-4000-8000-000000000001","role":"authenticated","client_id":"oauth-client","resource":"https://lixray.com","lixray_mcp":true}';
 select throws_ok($$select public.generate_api_token('83000000-0000-4000-8000-000000000011')$$,'P0001','Interactive session required','OAuth clients cannot mint tokens');
 select throws_ok($$select public.delete_api_token('83000000-0000-4000-8000-000000000011',(current_setting('test.two')::json->>'id')::uuid)$$,'P0001','Interactive session required','OAuth clients cannot delete tokens');
 set local role anon;

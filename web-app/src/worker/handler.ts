@@ -1,3 +1,4 @@
+import { validateMcpJwtClaims } from "../mcp/auth.ts";
 import { jwtVerify, type JWTPayload } from "jose";
 import {
 	classifyJwtVerifyError,
@@ -74,6 +75,8 @@ import {
 	PublicProfileActivityCache,
 } from "./profile-activity-cache.ts";
 import { handleOtlpTelemetry } from "./otlp-telemetry.ts";
+
+export { validateMcpJwtClaims } from "../mcp/auth.ts";
 
 export interface WorkerEnv {
 	SUPABASE_URL?: string;
@@ -232,14 +235,6 @@ type AuthResult =
 type McpAuthResult =
 	| { ok: true; auth: AuthenticatedMcpUser }
 	| { ok: false; response: Response };
-
-type McpClaimsValidation =
-	| { ok: true; userId: string; clientId: string }
-	| {
-			ok: false;
-			error: "invalid_token" | "insufficient_scope";
-			description: string;
-	  };
 
 const REMOTE_LIX_API_PATH =
 	/^\/lix\/v1\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(.*))?$/;
@@ -1506,55 +1501,6 @@ function mcpProtectedResourceUrl(url: URL): string {
 
 function isLocalDevelopmentUrl(url: URL): boolean {
 	return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-}
-
-export function validateMcpJwtClaims(
-	payload: JWTPayload,
-	expectedIssuer: string,
-	nowSeconds = Math.floor(Date.now() / 1000),
-	expectedResource = MCP_RESOURCE,
-): McpClaimsValidation {
-	const audiences = Array.isArray(payload.aud)
-		? payload.aud
-		: typeof payload.aud === "string"
-			? [payload.aud]
-			: [];
-	if (
-		payload.iss !== expectedIssuer ||
-		!audiences.includes("authenticated") ||
-		typeof payload.exp !== "number" ||
-		payload.exp <= nowSeconds ||
-		!payload.sub ||
-		payload.role !== "authenticated"
-	) {
-		return {
-			ok: false,
-			error: "invalid_token",
-			description: "The LixRay access token is invalid or expired.",
-		};
-	}
-
-	const scopes =
-		typeof payload.scope === "string" ? payload.scope.split(/\s+/) : [];
-	if (
-		typeof payload.client_id !== "string" ||
-		!payload.client_id ||
-		payload.resource !== expectedResource ||
-		payload.lixray_mcp !== true ||
-		!scopes.includes("openid")
-	) {
-		return {
-			ok: false,
-			error: "insufficient_scope",
-			description: "Authorize the LixRay MCP app to continue.",
-		};
-	}
-
-	return {
-		ok: true,
-		userId: payload.sub,
-		clientId: payload.client_id,
-	};
 }
 
 export async function authorizeLixWithSupabase(

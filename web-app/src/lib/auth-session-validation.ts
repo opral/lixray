@@ -1,7 +1,25 @@
-import type { Session, User } from "@supabase/supabase-js";
+import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 import type { Properties } from "posthog-js";
 
 const MAX_AUTH_ERROR_CODE_LENGTH = 200;
+
+// Auth state subscriptions own session updates: refresh failures can return a
+// null session while the SDK deliberately retains a recoverable stored session.
+// Successful refresh and terminal session removal emit their own auth events.
+export async function refreshBrowserSession(
+	auth: Pick<SupabaseClient["auth"], "refreshSession">,
+): Promise<void> {
+	const { error } = await auth.refreshSession();
+	if (error) throw error;
+}
+
+export async function signOutBrowserSession(
+	auth: Pick<SupabaseClient["auth"], "signOut">,
+): Promise<void> {
+	// Signing out of this browser must preserve independent MCP connections.
+	const { error } = await auth.signOut({ scope: "local" });
+	if (error) throw error;
+}
 
 interface AuthErrorShape {
 	code?: unknown;
@@ -24,6 +42,37 @@ export type ValidatedInitialSession =
 	| { kind: "signed_out" }
 	| { kind: "orphaned"; error: unknown }
 	| { kind: "validation_failed"; error: unknown; session?: Session };
+
+/** Retry an indeterminate cold start without treating it as a signed-out login. */
+export function observeInitialSession(
+	auth: PersistedSessionAuth,
+	onResult: (result: ValidatedInitialSession) => void,
+): () => void {
+	let cancelled = false;
+	let retryDelay = 1_000;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const attempt = async () => {
+		let result: ValidatedInitialSession;
+		try {
+			result = await loadValidatedInitialSession(auth);
+		} catch (error) {
+			result = { kind: "validation_failed", error };
+		}
+		if (cancelled) return;
+		onResult(result);
+		if (!cancelled && result.kind === "validation_failed" && !result.session) {
+			timer = setTimeout(() => {
+				void attempt();
+			}, retryDelay);
+			retryDelay = Math.min(retryDelay * 2, 30_000);
+		}
+	};
+	void attempt();
+	return () => {
+		cancelled = true;
+		clearTimeout(timer);
+	};
+}
 
 export async function loadValidatedInitialSession(
 	auth: PersistedSessionAuth,

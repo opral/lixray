@@ -38,14 +38,16 @@ async function runWithMocks(script, mocks, extraEnv = {}) {
 test("database helper cleans every stack before and after testing", async () => {
 	const { calls, result } = await runWithMocks("test-database.sh", {
 		docker: "exit 1\n",
+		node: 'printf "node %s\\n" "$*" >> "$MOCK_CALLS"\n',
 		ss: "exit 1\n",
 		supabase: 'printf "%s\\n" "$*" >> "$MOCK_CALLS"\n',
 	});
 	assert.equal(result.status, 0, result.stderr);
 	assert.deepEqual(calls.trim().split("\n"), [
 		"stop --all --no-backup",
-		"start --exclude edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector",
+		"start --exclude edge-runtime,imgproxy,logflare,mailpit,postgres-meta,realtime,storage-api,studio,supavisor,vector",
 		"test db",
+		`node --experimental-strip-types ${repositoryRoot}/database/scripts/test-oauth-resource.mjs`,
 		"stop --all --no-backup",
 	]);
 });

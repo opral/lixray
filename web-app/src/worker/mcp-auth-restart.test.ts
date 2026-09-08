@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach } from "node:test";
@@ -145,6 +145,125 @@ void test("Lix HTTP shares the persisted JWKS store and does not 401 on a JWKS o
 	}
 });
 
+void test("cache write failure does not reject valid MCP or Lix HTTP tokens", async (t) => {
+	const fixture = await withSignedMcpJwt();
+	const warnings: unknown[][] = [];
+	t.mock.method(console, "warn", (...args: unknown[]) => warnings.push(args));
+	try {
+		await mkdir(fixture.env.LIXRAY_JWKS_CACHE_PATH!);
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const response = await postMcp(
+				fixture.token,
+				fixture.env,
+				fixture.options,
+			);
+			assert.equal(response.status, 200);
+			assert.equal(response.reachedTransport, true);
+		}
+		const browserToken = await new SignJWT({
+			sub: "user-123",
+			role: "authenticated",
+		})
+			.setProtectedHeader({ alg: "ES256", kid: fixture.kid })
+			.setIssuer(ISSUER)
+			.setAudience("authenticated")
+			.setExpirationTime("5m")
+			.sign(fixture.privateKey);
+		const browser = await handleRequest(
+			new Request(`https://lixray.com/lix/v1/${LIX_ID}/execute`, {
+				method: "POST",
+				headers: { Authorization: `Bearer ${browserToken}` },
+				body: JSON.stringify({ sql: "select 1" }),
+			}),
+			fixture.env,
+			{
+				authorizeLix: async () => null,
+				lixFetch: async () => new Response("ok"),
+			},
+		);
+		assert.equal(browser.status, 200);
+		assert.deepEqual(warnings, [
+			["JWKS cache persistence failed; continuing with in-memory keys"],
+		]);
+	} finally {
+		await fixture.cleanup();
+	}
+});
+
+void test("cold concurrent requests share initialization and rotated keys bypass the initial cooldown once", async () => {
+	const fixture = await withSignedMcpJwt();
+	try {
+		const first = await Promise.all(
+			Array.from({ length: 8 }, () =>
+				postMcp(fixture.token, fixture.env, fixture.options),
+			),
+		);
+		assert.ok(first.every((response) => response.status === 200));
+		assert.equal(fixture.fetchCount(), 1);
+		const rotated = await fixture.rotateKey();
+		const responses = await Promise.all(
+			Array.from({ length: 8 }, () =>
+				postMcp(rotated, fixture.env, fixture.options),
+			),
+		);
+		assert.ok(responses.every((response) => response.status === 200));
+		assert.equal(fixture.fetchCount(), 2);
+	} finally {
+		await fixture.cleanup();
+	}
+});
+
+void test("unknown key retries are bounded and new keys recover when the bound expires", async (t) => {
+	const fixture = await withSignedMcpJwt({ persistCache: false });
+	try {
+		assert.equal(
+			(await postMcp(fixture.token, fixture.env, fixture.options)).status,
+			200,
+		);
+		const absent = await signMcpJwt(fixture.privateKey, "not-published");
+		const rejected = await postMcp(absent, fixture.env, fixture.options);
+		assert.equal(rejected.status, 401);
+		assert.equal(
+			(await postMcp(absent, fixture.env, fixture.options)).status,
+			401,
+		);
+		assert.equal(fixture.fetchCount(), 2);
+		// Publishing the same formerly absent kid must expire the negative result.
+		const rotated = await fixture.rotateKey("not-published");
+		const unseen = await signMcpJwt(fixture.privateKey, "another-unseen-key");
+		const throttled = await postMcp(unseen, fixture.env, fixture.options);
+		assert.equal(throttled.status, 503);
+		assert.equal(throttled.headers.get("www-authenticate"), null);
+		assert.equal(fixture.fetchCount(), 2);
+		t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+		t.mock.timers.tick(5_001);
+		assert.equal(
+			(await postMcp(rotated, fixture.env, fixture.options)).status,
+			200,
+		);
+		assert.equal(fixture.fetchCount(), 3);
+	} finally {
+		await fixture.cleanup();
+	}
+});
+
+void test("a JWKS outage while checking a rotated key is retryable", async () => {
+	const fixture = await withSignedMcpJwt({ persistCache: false });
+	try {
+		assert.equal(
+			(await postMcp(fixture.token, fixture.env, fixture.options)).status,
+			200,
+		);
+		const rotated = await fixture.rotateKey();
+		await fixture.stopJwks();
+		const response = await postMcp(rotated, fixture.env, fixture.options);
+		assert.equal(response.status, 503);
+		assert.equal(response.headers.get("www-authenticate"), null);
+	} finally {
+		await fixture.cleanup();
+	}
+});
+
 async function postMcp(
 	token: string,
 	env: WorkerEnv,
@@ -193,9 +312,13 @@ async function withSignedMcpJwt(options: { persistCache?: boolean } = {}) {
 
 	const jwks = { keys: [jwk] };
 	let serving = true;
-	const server = await listenJwks(() =>
-		serving ? Response.json(jwks) : new Response("gone", { status: 503 }),
-	);
+	let fetches = 0;
+	const server = await listenJwks(() => {
+		fetches++;
+		return serving
+			? Response.json(jwks)
+			: new Response("gone", { status: 503 });
+	});
 	const accountServer = await listenJwks(() =>
 		Response.json([
 			{
@@ -220,6 +343,18 @@ async function withSignedMcpJwt(options: { persistCache?: boolean } = {}) {
 		env,
 		kid,
 		privateKey,
+		fetchCount: () => fetches,
+		async rotateKey(rotatedKid = "rotated-key") {
+			const pair = await generateKeyPair("ES256");
+			const publicJwk = await exportJWK(pair.publicKey);
+			jwks.keys.push({
+				...publicJwk,
+				kid: rotatedKid,
+				use: "sig",
+				alg: "ES256",
+			});
+			return signMcpJwt(pair.privateKey, rotatedKid);
+		},
 		options: { lixFetch: async () => new Response("unused") },
 		async stopJwks() {
 			serving = false;
