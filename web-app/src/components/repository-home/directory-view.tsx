@@ -1492,22 +1492,23 @@ function ReadmePreview({
 	// sand header separate the rendered README from the live file list above
 	// it, and the header's actions are the only way to edit. The card spans
 	// the file list column (28px below it, the rail's section beat) so both
-	// edges line up with the rows.
+	// edges line up with the rows, and the header repeats a row's own type
+	// and icon size so the file name reads at the same weight as the list.
 	return (
 		<section
 			aria-label={`${fileName} preview`}
 			data-testid="home-readme-card"
 			className="mt-7 overflow-hidden rounded-[10px] border border-border-panel bg-bg-panel"
 		>
-			<div className="flex h-12 items-center gap-2.5 border-b border-border-panel bg-[#FAF7F2] pr-2.5 pl-3.5">
+			<div className="flex h-11 items-center gap-3 border-b border-border-panel bg-[#FAF7F2] pr-[11px] pl-[11px] text-sm">
 				<img
 					src={fileIconUrl(fileName)}
 					alt=""
 					draggable={false}
-					className="size-4 shrink-0"
+					className="size-[19px] shrink-0"
 				/>
 				<span
-					className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-text-primary"
+					className="min-w-0 flex-1 truncate font-medium text-text-primary"
 					title={fileName}
 				>
 					{fileName}
@@ -1518,7 +1519,7 @@ function ReadmePreview({
 					aria-label={`Edit ${fileName}`}
 					title={`Edit ${fileName}`}
 					onClick={(event) => onOpen(event)}
-					className="flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-semibold text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+					className="flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
 				>
 					<PencilLine aria-hidden="true" className="size-3.5" />
 					Edit
@@ -1529,7 +1530,7 @@ function ReadmePreview({
 					aria-label={`Open ${fileName} in a new tab`}
 					title={`Open ${fileName} in a new tab`}
 					onClick={(event) => onOpen(event, { newTab: true })}
-					className="flex h-8 shrink-0 items-center gap-1 rounded-md px-2.5 text-[13px] font-semibold text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+					className="flex h-8 shrink-0 items-center gap-1 rounded-md px-2.5 text-[13px] font-medium text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
 				>
 					Open
 					<ArrowUpRight aria-hidden="true" className="size-3.5" />
