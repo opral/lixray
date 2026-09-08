@@ -55,7 +55,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				headers: {
 					Authorization: "Bearer lixray-demo",
 					"Lix-Session-Id": "0".repeat(64),
-					"Lix-Sync-Protocol-Version": "6",
+					"Lix-Sync-Protocol-Version": "7",
 				},
 			});
 			return {
@@ -73,6 +73,8 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 	expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
 	const syncFailures: string[] = [];
 	const runtimeFailures: string[] = [];
+	let intentionallyOffline = false;
+	const offlineRequests = new WeakSet<Request>();
 	const coldReads = new Map<Page, string[]>();
 	const blobLaneRequests = new Map<Page, string[]>();
 	const blobLanePayloadSizes = new Map<Page, number[]>();
@@ -188,68 +190,131 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			.toBe(true);
 		return matchedCount;
 	};
-	const isCheckpointExecution = (request: Request): boolean => {
-		if (request.method() !== "POST" || !request.url().endsWith("/execute")) {
-			return false;
+	const clickCheckpoint = async (
+		page: Page,
+		selectFiles?: () => Promise<void>,
+	): Promise<string> => {
+		const before = await authorityCheckpointCount();
+		const historyBefore = await openHistoryPanel(right);
+		const localCount = await historyBefore
+			.getByRole("list", { name: "Checkpoints" })
+			.locator(":scope > li")
+			.count();
+		const localCheckpointIds = new Set<string>();
+		const captureCheckpoint = (request: Request) => {
+			if (request.method() !== "POST" || !request.url().endsWith("/sync/push"))
+				return;
+			const body = request.postDataJSON() as {
+				refUpdates?: Array<{
+					checkpointCommitId?: unknown;
+					expectedCheckpointCommitId?: unknown;
+				}>;
+			};
+			for (const update of body.refUpdates ?? []) {
+				if (
+					typeof update.checkpointCommitId === "string" &&
+					update.checkpointCommitId !== update.expectedCheckpointCommitId
+				) {
+					localCheckpointIds.add(update.checkpointCommitId);
+				}
+			}
+		};
+		// Count/history preparation can yield while editor side effects commit.
+		// Capture the review epoch only after that preparation has completed.
+		await page
+			.getByRole("button", {
+				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+			})
+			.click();
+		await selectFiles?.();
+		// Review presentation can load asynchronously. Finish that online setup
+		// before measuring the local checkpoint with the network unavailable.
+		const checkpointButton = page.getByRole("button", {
+			name: "Checkpoint",
+			exact: true,
+		});
+		await expect(checkpointButton).toBeVisible({ timeout: 30_000 });
+		await expect(checkpointButton).toBeEnabled({ timeout: 30_000 });
+		sharedContext.on("request", captureCheckpoint);
+		intentionallyOffline = true;
+		await sharedContext.setOffline(true);
+		try {
+			const checkpointDeadline = Date.now() + 5_000;
+			await checkpointButton.click({ timeout: 5_000 });
+			const remainingCheckpointTime = checkpointDeadline - Date.now();
+			expect(remainingCheckpointTime).toBeGreaterThan(0);
+			await expect(
+				page.getByRole("button", { name: /^(Checkpoint|Checkpointing…)$/ }),
+			).toHaveCount(0, { timeout: remainingCheckpointTime });
+			// The second tab observes the same durable OPFS commit while the
+			// server is unreachable; no foreground /execute receipt is needed.
+			await expect(
+				historyBefore
+					.getByRole("list", { name: "Checkpoints" })
+					.locator(":scope > li"),
+			).toHaveCount(localCount + 1, { timeout: 5_000 });
+		} finally {
+			await sharedContext.setOffline(false);
+			intentionallyOffline = false;
 		}
 		try {
-			const body = request.postDataJSON() as { sql?: unknown };
-			return (
-				typeof body.sql === "string" &&
-				body.sql.includes("lix_create_checkpoint")
-			);
-		} catch {
-			return false;
+			await expect
+				.poll(() => localCheckpointIds.size, {
+					timeout: repositoryOperationTimeout,
+				})
+				.toBe(1);
+		} finally {
+			sharedContext.off("request", captureCheckpoint);
 		}
-	};
-	const clickCheckpoint = async (page: Page): Promise<string> => {
-		const [request] = await Promise.all([
-			page.waitForRequest(isCheckpointExecution, {
-				timeout: repositoryOperationTimeout,
-			}),
-			page.getByRole("button", { name: "Checkpoint", exact: true }).click(),
-		]);
-		const originalResponse = await request.response();
-		expect(originalResponse?.ok()).toBe(true);
-		const headers = request.headers();
-		const sessionId = headers["lix-session-id"];
-		const idempotencyKey = headers["idempotency-key"];
-		if (!sessionId || !idempotencyKey) {
-			throw new Error("checkpoint execution omitted its protocol identity");
-		}
-		// Worker fetch bodies are occasionally unavailable through Chromium's
-		// Network.getResponseBody after WASM consumes them. Replaying the exact
-		// request identity returns the durable receipt and cannot create a second
-		// checkpoint.
-		const requestBody = request.postDataJSON() as unknown;
-		const receipt = await sharedContext.request.post(request.url(), {
-			headers: {
-				Authorization: "Bearer lixray-demo",
-				"Idempotency-Key": idempotencyKey,
-				"Lix-Session-Id": sessionId,
-			},
-			data: requestBody,
+		const [localCheckpointId] = localCheckpointIds;
+		if (!localCheckpointId)
+			throw new Error("local checkpoint upload omitted its identity");
+		await expect
+			.poll(authorityCheckpointCount, { timeout: repositoryOperationTimeout })
+			.toBeGreaterThanOrEqual(before + 1);
+		const endpoint = new URL(`/lix/v1/${DEMO_LIX_ID}/`, baseURL).toString();
+		const authorization = { Authorization: "Bearer lixray-demo" };
+		const opened = await sharedContext.request.get(endpoint, {
+			headers: authorization,
 		});
-		expect(receipt.ok()).toBe(true);
-		const result = (await receipt.json()) as {
-			columns?: Array<{ name?: string }>;
-			rows?: Array<Array<{ kind?: string; value?: unknown }>>;
-		};
-		const commitIdIndex = result.columns?.findIndex(
-			(column) => column.name === "commit_id",
-		);
-		const cell =
-			commitIdIndex === undefined || commitIdIndex < 0
-				? undefined
-				: result.rows?.[0]?.[commitIdIndex];
-		if (
-			cell?.kind !== "text" ||
-			typeof cell.value !== "string" ||
-			cell.value.length === 0
-		) {
-			throw new Error("checkpoint execution omitted its commit_id receipt");
+		expect(opened.ok()).toBe(true);
+		const { sessionId } = (await opened.json()) as { sessionId: string };
+		try {
+			// Verify this exact locally generated checkpoint was accepted. A
+			// different writer increasing the catalog count cannot satisfy this.
+			await expect
+				.poll(
+					async () => {
+						const response = await sharedContext.request.post(
+							new URL("execute", endpoint).toString(),
+							{
+								headers: {
+									...authorization,
+									"Lix-Session-Id": sessionId,
+									"Idempotency-Key": `local-checkpoint-read-${Date.now()}-${authorityReadSequence++}`,
+								},
+								data: {
+									sql: "SELECT commit_id FROM lix_checkpoint WHERE commit_id = $1",
+									params: [{ kind: "text", value: localCheckpointId }],
+								},
+							},
+						);
+						expect(response.ok()).toBe(true);
+						const result = (await response.json()) as {
+							rows?: Array<Array<{ kind?: string; value?: unknown }>>;
+						};
+						return result.rows?.[0]?.[0]?.value;
+					},
+					{ timeout: repositoryOperationTimeout },
+				)
+				.toBe(localCheckpointId);
+			return localCheckpointId;
+		} finally {
+			await sharedContext.request.delete(
+				new URL("session", endpoint).toString(),
+				{ headers: { ...authorization, "Lix-Session-Id": sessionId } },
+			);
 		}
-		return cell.value;
 	};
 	const observePage = (page: Page, label: string) => {
 		const pageColdReads: string[] = [];
@@ -259,6 +324,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		const pageBlobLanePayloadSizes: number[] = [];
 		blobLanePayloadSizes.set(page, pageBlobLanePayloadSizes);
 		page.on("request", (request) => {
+			if (intentionallyOffline) offlineRequests.add(request);
 			if (
 				request.method() === "GET" &&
 				/\/sync\/(history|blob|chunk)(?:\?|$)/.test(request.url())
@@ -307,13 +373,25 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			const expectedCasNoise =
 				message.type() === "error" &&
 				/Failed to load resource:.*status of 409/i.test(message.text());
-			if (message.type() === "error" && !expectedCasNoise) {
+			const expectedOfflineNoise =
+				intentionallyOffline &&
+				/ERR_INTERNET_DISCONNECTED/.test(message.text());
+			if (
+				message.type() === "error" &&
+				!expectedCasNoise &&
+				!expectedOfflineNoise
+			) {
 				runtimeFailures.push(`${label} console: ${message.text()}`);
 			}
 		});
 		page.on("requestfailed", (request) => {
 			pendingBlobLaneRequests.delete(request);
 			const errorText = request.failure()?.errorText ?? "unknown";
+			if (
+				(intentionallyOffline || offlineRequests.has(request)) &&
+				/ERR_INTERNET_DISCONNECTED/.test(errorText)
+			)
+				return;
 			if (/abort|cancel/i.test(errorText)) {
 				unreadableBlobLaneResponses.delete(request);
 			}
@@ -713,6 +791,15 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			timeout: realtimeTimeout,
 		});
 		expect(blobLaneRequestCount([left, right])).toBe(blobLaneBeforeRightEdit);
+		// The first heading also derives the filename in a debounced commit.
+		// Settle that descriptor before later edits open a pinned working review.
+		for (const page of [left, right]) {
+			await expect(
+				page.locator(
+					`[data-attr="panel-tab-select"][title="${rightMarker}.md"]`,
+				),
+			).toBeVisible({ timeout: realtimeTimeout });
+		}
 
 		const freshBootstrap =
 			await test.step("fresh/incognito bootstrap renders hot History", async () => {
@@ -763,7 +850,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		const blobLaneBeforeLeftEdit = blobLaneRequestCount([left, right]);
 		const leftMarker = `left-${Date.now()}`;
 		await leftEditor.click();
-		await left.keyboard.press("End");
+		// Keep the reverse-direction edit in the body so it does not schedule
+		// another heading-derived filename mutation during checkpoint review.
+		await left.keyboard.press("Control+End");
+		await left.keyboard.press("Enter");
 		await left.keyboard.insertText(leftMarker);
 		await left.keyboard.press("Tab");
 		await expect(rightEditor).toContainText(leftMarker, {
@@ -778,11 +868,6 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			).toBeVisible({ timeout: 30_000 });
 		}
 
-		await left
-			.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
-			})
-			.click();
 		const checkpointCountBeforeFirstClick = await authorityCheckpointCount();
 		const firstCheckpointCommitId = await clickCheckpoint(left);
 		const leftHistoryAfterCheckpoint = await openHistoryPanel(left);
@@ -818,8 +903,8 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			}),
 		).toBeVisible({ timeout: realtimeTimeout });
 
-		// Deliberately race two distinct local commits. One push should lose the
-		// authority ref-CAS and then reconcile; both replicas must retain both rows.
+		// Both tabs share one OPFS writer, so concurrent UI actions serialize
+		// into one local commit chain and both reach the independent replica.
 		const fileIdsBeforeConcurrentCreates = await homeFileIds(fresh);
 		await Promise.all([
 			createFileFromHome(left, "md"),
@@ -831,9 +916,8 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			2,
 			30_000,
 		);
-		// Keep both writers alive until their expected ref-CAS conflicts have
-		// rebased and reached an independent replica. Navigating earlier aborts
-		// the retry loop and turns this into a lifecycle race instead of a sync gate.
+		// Keep both writers alive until the background upload reaches the
+		// independent replica; reopen durability is exercised separately below.
 		await Promise.all([left.goto(repositoryUrl), right.goto(repositoryUrl)]);
 		for (const page of [left, right]) {
 			for (const fileId of concurrentFileIds) {
@@ -1070,18 +1154,19 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		// Exercise the same warm-replica path for branch checkpoint state. The
 		// reopened client must observe an additional checkpoint, not merely keep
 		// rendering the checkpoint rows imported during bootstrap.
-		await left
-			.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
-			})
-			.click();
-		await left
-			.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
-			.click();
-		await left.getByRole("checkbox", { name: "All files" }).click();
-		await left.getByTestId(`diff-scope-file:${afterReopenFileId}`).click();
+		await expect(
+			left.locator(
+				`[data-attr="panel-tab-select"][title="${afterReopenMarker}.md"]`,
+			),
+		).toBeVisible({ timeout: realtimeTimeout });
 		const checkpointCountBeforeSecondClick = await authorityCheckpointCount();
-		const secondCheckpointCommitId = await clickCheckpoint(left);
+		const secondCheckpointCommitId = await clickCheckpoint(left, async () => {
+			await left
+				.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
+				.click();
+			await left.getByRole("checkbox", { name: "All files" }).click();
+			await left.getByTestId(`diff-scope-file:${afterReopenFileId}`).click();
+		});
 		expect(secondCheckpointCommitId).not.toBe(firstCheckpointCommitId);
 		const postReopenHistory = await openHistoryPanel(fresh);
 		await waitForHistoryCountsToMatchAuthority(

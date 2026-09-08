@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 
+// Match protocol paths, not Vite /@fs/.../vendor/lix/... module assets.
+const protocolRequests = (url: URL) => url.pathname.startsWith("/lix/");
+
 // Opt-in integration test against a running full demo app and real Lix server:
 // LIXRAY_DIRECTORY_QA=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:8787 \
 //   pnpm exec playwright test tests/e2e/directory-drag.spec.ts
@@ -35,7 +38,7 @@ async function expectShell(page: Page) {
 }
 
 for (const count of [1, 2]) {
-	test(`full app drags ${count === 1 ? "a folder" : "two selected folders"} with descendants and persists after reload`, async ({
+	test(`full app drags ${count === 1 ? "a folder" : "two selected folders"} offline with descendants and syncs after reconnect`, async ({
 		page,
 	}, testInfo) => {
 		// Import only inside the opted-in test so normal app E2E discovery does
@@ -98,6 +101,9 @@ for (const count of [1, 2]) {
 					count,
 				);
 			}
+			// Block only the protocol so app assets remain available for reload.
+			// A successful drag must commit through OPFS without server writes.
+			await page.context().route(protocolRequests, (route) => route.abort());
 			await row(page, sources[0]!.name).dragTo(row(page, targetName));
 			for (const source of sources)
 				await expect(row(page, source.name)).toHaveCount(0);
@@ -121,7 +127,20 @@ for (const count of [1, 2]) {
 			await expect(row(page, "empty")).toBeVisible();
 			await expect(row(page, "note.txt")).toBeVisible();
 
+			await page.context().unroute(protocolRequests);
 			for (const source of sources) {
+				await expect
+					.poll(
+						async () => {
+							const result = await lix.execute(
+								"SELECT path FROM lix_file WHERE id = $1",
+								[source.fileId],
+							);
+							return result.rows[0]?.path;
+						},
+						{ timeout: 30_000 },
+					)
+					.toBe(`${targetPath}/${source.name}/nested/note.txt`);
 				const persisted = await lix.execute(
 					"SELECT path, content FROM lix_file WHERE id = $1",
 					[source.fileId],
@@ -150,6 +169,7 @@ for (const count of [1, 2]) {
 				"No full-app runtime errors during moves or reload",
 			).toEqual([]);
 		} finally {
+			await page.context().unroute(protocolRequests);
 			try {
 				// IDs come exclusively from this test's inserts, so cleanup follows
 				// moved entries without a broad prefix match against repository data.
