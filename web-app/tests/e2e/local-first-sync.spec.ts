@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Request } from "@playwright/test";
 
+// Match protocol paths, not Vite /@fs/.../vendor/lix/... module assets.
+const protocolRequests = (url: URL) => url.pathname.startsWith("/lix/");
+
 // Runs in the default Compose suite against the seeded development account and
 // the actual browser SDK/OPFS implementation, with no external preview flags.
 test("folder moves and checkpoints commit offline, survive reload, and upload unchanged", async ({
@@ -107,7 +110,7 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		context.on("request", captureCheckpoint);
 		// Keep navigation/assets reachable so reload tests the persisted replica,
 		// while every protocol operation from browser workers is unavailable.
-		await context.route("**/lix/**", (route) => route.abort("aborted"));
+		await context.route(protocolRequests, (route) => route.abort("aborted"));
 		await row(source).dragTo(row(target));
 		await expect(row(source)).toHaveCount(0, { timeout: 5_000 });
 		await row(target).click();
@@ -132,7 +135,7 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
 			}),
 		).toHaveCount(0);
-		await context.unroute("**/lix/**");
+		await context.unroute(protocolRequests);
 		await expect.poll(() => checkpointIds.size, { timeout: 30_000 }).toBe(1);
 		const [checkpointId] = checkpointIds;
 		if (!checkpointId)
@@ -163,7 +166,7 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 			.toBe(checkpointId);
 	} finally {
 		context.off("request", captureCheckpoint);
-		await context.unroute("**/lix/**");
+		await context.unroute(protocolRequests);
 		await context.request.delete(new URL("session", endpoint).toString(), {
 			headers: { ...headers, "Lix-Session-Id": sessionId },
 		});

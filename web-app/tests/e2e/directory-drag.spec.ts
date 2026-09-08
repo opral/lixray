@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 
+// Match protocol paths, not Vite /@fs/.../vendor/lix/... module assets.
+const protocolRequests = (url: URL) => url.pathname.startsWith("/lix/");
+
 // Opt-in integration test against a running full demo app and real Lix server:
 // LIXRAY_DIRECTORY_QA=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:8787 \
 //   pnpm exec playwright test tests/e2e/directory-drag.spec.ts
@@ -100,7 +103,7 @@ for (const count of [1, 2]) {
 			}
 			// Block only the protocol so app assets remain available for reload.
 			// A successful drag must commit through OPFS without server writes.
-			await page.context().route("**/lix/**", (route) => route.abort());
+			await page.context().route(protocolRequests, (route) => route.abort());
 			await row(page, sources[0]!.name).dragTo(row(page, targetName));
 			for (const source of sources)
 				await expect(row(page, source.name)).toHaveCount(0);
@@ -124,7 +127,7 @@ for (const count of [1, 2]) {
 			await expect(row(page, "empty")).toBeVisible();
 			await expect(row(page, "note.txt")).toBeVisible();
 
-			await page.context().unroute("**/lix/**");
+			await page.context().unroute(protocolRequests);
 			for (const source of sources) {
 				await expect
 					.poll(
@@ -166,7 +169,7 @@ for (const count of [1, 2]) {
 				"No full-app runtime errors during moves or reload",
 			).toEqual([]);
 		} finally {
-			await page.context().unroute("**/lix/**");
+			await page.context().unroute(protocolRequests);
 			try {
 				// IDs come exclusively from this test's inserts, so cleanup follows
 				// moved entries without a broad prefix match against repository data.
