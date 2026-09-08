@@ -13,3 +13,6 @@ onlyBuiltDependencies:
 publicHoistPattern:
   - "@types/react"
   - vite
+
+patchedDependencies:
+  '@glideapps/glide-data-grid@6.0.3': vendor/atelier/patches/@glideapps__glide-data-grid@6.0.3.patch
