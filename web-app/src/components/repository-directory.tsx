@@ -6,6 +6,7 @@ import {
 	Link2,
 	Plus,
 	Settings,
+	Trash2,
 } from "lucide-react";
 import {
 	type FormEvent,
@@ -36,6 +37,7 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { triggerBrowserDownload } from "~/lib/download";
@@ -233,6 +235,13 @@ export function RepositoryDirectory() {
 													repository={repository}
 													fileCount={fileCounts[repository.id]}
 													paletteIndex={paletteOrder.get(repository.id) ?? 0}
+													onDelete={() =>
+														setDialog({
+															type: "delete",
+															organization,
+															repository,
+														})
+													}
 												/>
 											))}
 										</div>
@@ -413,11 +422,13 @@ function RepositoryRow({
 	repository,
 	fileCount,
 	paletteIndex,
+	onDelete,
 }: {
 	organization: Organization;
 	repository: Repository;
 	fileCount?: number;
 	paletteIndex: number;
+	onDelete: () => void;
 }) {
 	const { getAccessToken } = useAuth();
 	const [downloading, setDownloading] = useState(false);
@@ -521,6 +532,15 @@ function RepositoryRow({
 						<Download aria-hidden="true" />
 						{downloading ? "Preparing archive…" : "Download archive"}
 					</DropdownMenuItem>
+					{repository.role === "admin" ? (
+						<>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem variant="destructive" onSelect={onDelete}>
+								<Trash2 aria-hidden="true" />
+								Delete repository…
+							</DropdownMenuItem>
+						</>
+					) : null}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</div>
@@ -628,7 +648,7 @@ function RepositoryDialog({
 						<DialogTitle>{title}</DialogTitle>
 						<DialogDescription>
 							{isDelete
-								? "This removes the repository from your directory and keeps its name reserved."
+								? "This removes the repository from every member’s directory and keeps its name reserved."
 								: dialog?.type === "rename"
 									? "The repository URL stays the same."
 									: "A shared folder for your team and agents — any file type, every change tracked."}
