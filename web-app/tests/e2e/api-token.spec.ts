@@ -54,7 +54,11 @@ test("Repository tokens have generated names, creation dates and independent del
 	});
 	try {
 		await page.goto(`/@${namespace}/${slug}/settings`);
-		await expect(page.getByTestId("repository-settings-view")).toBeVisible();
+		// The first repository opens a cold Vite module graph, WASM engine, and
+		// synced storage. Keep this startup budget separate from token actions.
+		await expect(page.getByTestId("repository-settings-view")).toBeVisible({
+			timeout: 30_000,
+		});
 		await expect(
 			page.getByRole("heading", { name: "API tokens", exact: true }),
 		).toBeVisible();
