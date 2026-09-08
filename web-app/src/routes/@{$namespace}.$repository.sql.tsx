@@ -1,3 +1,4 @@
+import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
@@ -8,6 +9,7 @@ import {
 const SQL_EXPLORER_EXTENSION_ID = "sql_explorer";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/sql")({
+	head: ({ params }) => repositoryHead(params, "sql"),
 	head: () => ({
 		meta: [{ name: "robots", content: "noindex" }],
 	}),
