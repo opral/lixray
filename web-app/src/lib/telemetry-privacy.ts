@@ -244,6 +244,7 @@ function scrubPostHogString(value: string, propertyKey?: string): string {
 
 	return value
 		.replaceAll(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+		.replaceAll(/\blixray_pat_[A-Za-z0-9_-]+\b/g, "[redacted_token]")
 		.replaceAll(
 			/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
 			"[redacted_token]",

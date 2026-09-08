@@ -500,6 +500,39 @@ export type Database = {
 		};
 		Functions: {
 			accept_lix_share_token: { Args: { p_token: string }; Returns: string };
+			list_api_tokens: {
+				Args: { p_lix_id: string };
+				Returns: {
+					id: string;
+					name: string;
+					created_at: string;
+					expires_at: string;
+				}[];
+			};
+			generate_api_token: {
+				Args: { p_lix_id: string };
+				Returns: {
+					id: string;
+					name: string;
+					token: string;
+					created_at: string;
+					expires_at: string;
+				}[];
+			};
+			delete_api_token: {
+				Args: { p_lix_id: string; p_token_id: string };
+				Returns: undefined;
+			};
+			authorize_api_token: {
+				Args: { p_token: string; p_lix_id: string };
+				Returns: {
+					account_id: string;
+					kind: string;
+					profile_uri: string | null;
+					name: string;
+					allowed: boolean;
+				}[];
+			};
 			accept_namespace_invite: {
 				Args: { p_token: string };
 				Returns: {

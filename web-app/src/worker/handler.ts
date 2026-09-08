@@ -52,6 +52,7 @@ import {
 	getFileExtension,
 } from "./lixr-mcp-telemetry.ts";
 import { resolveSupabaseLixId } from "./lix-resolver.ts";
+import { authorizeApiToken } from "./api-token.ts";
 import {
 	provisionAccountAfterHandshake,
 	type LixAccountProfile,
@@ -798,6 +799,25 @@ export async function handleRequest(
 			const lixId = remoteLixMatch[1];
 			const endpoint = remoteLixMatch[2]?.replace(/\/+$/, "") ?? "";
 			const protocolPath = `/lix/v1/${lixId}${endpoint ? `/${endpoint}` : "/"}`;
+			const apiToken = bearerToken(request);
+			if (apiToken?.startsWith("lixray_pat_")) {
+				const result = await authorizeApiToken(
+					apiToken,
+					lixId,
+					env,
+					options.fetch,
+				);
+				if (!result.ok) return result.response;
+				return fetchLixRequest(
+					lixId,
+					request,
+					protocolPath,
+					env,
+					options,
+					result.account.id,
+					result.account,
+				);
+			}
 			const publicReadRequest = isPublicReadRemoteLixRequest(request, endpoint);
 			const publicPath =
 				(endpoint === "file"

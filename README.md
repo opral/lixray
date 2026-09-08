@@ -134,6 +134,45 @@ creates a repository, completes a Lix handshake, and runs a query. Set
 
 ## MCP and HTTP API
 
+### Repository API tokens for SDKs and scripts
+
+Open a repository → **Settings → API tokens**. Generate as many tokens as you
+need, each with an automatic human-readable name such as `happy-elephant`.
+Copy the secret when generated: it is only shown once. The list shows each
+name, creation date and one-year expiry. **Delete** immediately revokes that
+specific token; other tokens continue working. Tokens are personal to their
+creator and scoped to this repository.
+
+```ts
+const lix = await openLix({
+  server: {
+    mode: "remote", // also supported with mode: "sync" and local storage
+    url: `https://lixray.com/lix/${repositoryId}`,
+    headers: async () => ({
+      Authorization: `Bearer ${process.env.LIXRAY_API_TOKEN}`,
+    }),
+  },
+});
+```
+
+Each API token works only for the repository where it was generated, even if
+its owner belongs to other repositories. The gateway checks repository scope,
+expiry, account status and current membership on every protocol request. Tokens authenticate `/lix/v1/{uuid}/*`; interactive account management
+still requires browser sign-in, and MCP continues to use OAuth. Keep tokens in
+scripts or server environments, not in a shipped browser bundle.
+
+The control plane stores only SHA-256 token digests in a private table. Apply
+`20260908000000_personal_api_tokens.sql` and
+`20260908000100_repository_api_tokens.sql`, followed by
+`20260908000200_named_api_tokens.sql`, before deploying this feature. The final
+migration preserves existing repository tokens and assigns them names. The
+second migration revokes unscoped preview tokens; generate replacements in
+repository settings. The narrow
+`authorize_api_token` RPC accepts the raw token and uses the same permission
+helper as repository RLS; it requires no Supabase service-role key.
+
+### MCP
+
 The Streamable HTTP MCP endpoint is:
 
 ```text

@@ -8,6 +8,7 @@ import {
 import type { AtelierDiffSession, AtelierFileViewProps } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import {
+	ArrowRight,
 	ArrowUp,
 	Check,
 	ChevronDown,
@@ -17,6 +18,7 @@ import {
 	LockKeyhole,
 	PencilLine,
 	Plus,
+	Settings,
 	Trash2,
 	UserRoundPlus,
 } from "lucide-react";
@@ -818,19 +820,47 @@ function RepositoryControlPlaneRail({
 			<section
 				className={`border-b border-border-panel pb-7 ${teamSection ? "pt-7" : ""}${mutedSection}`}
 			>
-				<RailHeading>About</RailHeading>
+				<RailHeading>Repository</RailHeading>
 				<button
 					type="button"
 					onClick={onOpenSettings}
-					className="mt-3 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-[7px] bg-[#f4eee5] px-2.5 text-[11.5px] font-bold text-[#57534e] transition-colors hover:bg-[#ebe2d6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+					className="-mx-2 mt-2 flex w-[calc(100%+16px)] cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
 				>
 					{visibility === "public" ? (
-						<Globe2 className="size-3.5" aria-hidden="true" />
+						<Globe2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
 					) : (
-						<LockKeyhole className="size-3.5" aria-hidden="true" />
+						<LockKeyhole
+							className="mt-0.5 size-4 shrink-0"
+							aria-hidden="true"
+						/>
 					)}
-					{visibility === "public" ? "Public" : "Private"}
+					<span className="min-w-0 flex-1">
+						<span className="block text-[12px] font-semibold">Visibility</span>
+						<span className="mt-1 block text-[11.5px] text-text-tertiary">
+							{visibility === "public" ? "Public" : "Private"}
+						</span>
+					</span>
+					<ArrowRight className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
 				</button>
+				{onOpenSettings ? (
+					<button
+						type="button"
+						onClick={onOpenSettings}
+						className="-mx-2 mt-2 flex w-[calc(100%+16px)] cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+					>
+						<Settings className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+						<span className="min-w-0 flex-1">
+							<span className="block text-[12px] font-semibold">Settings</span>
+							<span className="mt-1 block text-[11.5px] text-text-tertiary">
+								Name, access &amp; API tokens
+							</span>
+						</span>
+						<ArrowRight
+							className="mt-0.5 size-3.5 shrink-0"
+							aria-hidden="true"
+						/>
+					</button>
+				) : null}
 			</section>
 
 			<section
@@ -910,7 +940,7 @@ function RepositoryNarrowStats({
 	);
 }
 
-/** Quiet tonal chip, matching the About section's visibility chip. */
+/** Quiet tonal chip, matching the Repository section's visibility chip. */
 const RAIL_CHIP_CLASS =
 	"h-7 gap-1.5 rounded-[7px] border-0 bg-[#f4eee5] px-2.5 text-[11.5px] font-bold text-[#57534e] shadow-none hover:bg-[#ebe2d6] hover:text-[#44403c] [&_img]:size-3 [&_svg]:size-3";
 
