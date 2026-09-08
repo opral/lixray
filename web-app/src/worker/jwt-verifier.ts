@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import fs from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import {
 	createRemoteJWKSet,
@@ -18,9 +19,17 @@ interface RemoteJwksEntry {
 	getKey: CachedRemoteJwkSet;
 	cache: JWKSCacheInput;
 	cachePath?: string;
+	persistenceWarned?: boolean;
+	persistedAt?: number;
+	persistedJwks?: JWKSCacheInput["jwks"];
+	persistence?: Promise<void>;
 }
 
-const verifiers = new Map<string, RemoteJwksEntry>();
+const verifiers = new Map<string, Promise<RemoteJwksEntry>>();
+const UNKNOWN_KEY_REFRESH_INTERVAL_MS = 5_000;
+const MAX_NEGATIVE_KEYS = 128;
+
+class JwksRefreshThrottled extends Error {}
 
 function verifierKey(jwksUrl: string, cachePath?: string): string {
 	return `${jwksUrl}\0${cachePath ?? ""}`;
@@ -34,7 +43,7 @@ export async function loadPersistedJwksCache(
 	cachePath: string,
 ): Promise<JWKSCacheInput> {
 	try {
-		const parsed: unknown = JSON.parse(await readFile(cachePath, "utf8"));
+		const parsed: unknown = JSON.parse(await fs.readFile(cachePath, "utf8"));
 		if (
 			parsed &&
 			typeof parsed === "object" &&
@@ -55,8 +64,17 @@ export async function persistJwksCache(
 	cache: JWKSCacheInput,
 ): Promise<void> {
 	if (!("uat" in cache) || typeof cache.uat !== "number") return;
-	await mkdir(dirname(cachePath), { recursive: true });
-	await writeFile(cachePath, `${JSON.stringify(cache)}\n`, "utf8");
+	const temporaryPath = `${cachePath}.${randomUUID()}.tmp`;
+	await fs.mkdir(dirname(cachePath), { recursive: true });
+	try {
+		await fs.writeFile(temporaryPath, `${JSON.stringify(cache)}\n`, {
+			encoding: "utf8",
+			flag: "wx",
+		});
+		await fs.rename(temporaryPath, cachePath);
+	} finally {
+		await fs.rm(temporaryPath, { force: true });
+	}
 }
 
 export async function getRemoteJwks(
@@ -64,26 +82,113 @@ export async function getRemoteJwks(
 	options: { cachePath?: string } = {},
 ): Promise<JWTVerifyGetKey> {
 	const key = verifierKey(jwksUrl, options.cachePath);
-	const existing = verifiers.get(key);
-	if (existing) return existing.getKey;
+	let entry = verifiers.get(key);
+	if (!entry) {
+		entry = createVerifier(jwksUrl, options.cachePath);
+		verifiers.set(key, entry);
+	}
+	return (await entry).getKey;
+}
 
-	const cache = options.cachePath
-		? await loadPersistedJwksCache(options.cachePath)
-		: {};
-	const getKey = createRemoteJWKSet(new URL(jwksUrl), {
-		[jwksCache]: cache,
-	}) as CachedRemoteJwkSet;
-	verifiers.set(key, { getKey, cache, cachePath: options.cachePath });
-	return getKey;
+async function createVerifier(
+	jwksUrl: string,
+	cachePath?: string,
+): Promise<RemoteJwksEntry> {
+	const cache = cachePath ? await loadPersistedJwksCache(cachePath) : {};
+	const remote = createRemoteJWKSet(new URL(jwksUrl), { [jwksCache]: cache });
+	let lastUnknownRefresh = -Infinity;
+	let refresh: Promise<void> | undefined;
+	let negativeSnapshot = cache.jwks;
+	const negativeKeys = new Set<string>();
+	const getKey: CachedRemoteJwkSet = Object.assign(
+		async (...args: Parameters<JWTVerifyGetKey>) => {
+			try {
+				return await remote(...args);
+			} catch (error) {
+				if (!(error instanceof errors.JWKSNoMatchingKey)) throw error;
+				if (negativeSnapshot !== cache.jwks) {
+					negativeKeys.clear();
+					negativeSnapshot = cache.jwks;
+				}
+				// Bound both upstream work and memory for attacker-controlled key IDs.
+				const id = JSON.stringify([args[0].alg, args[0].kid]);
+				if (
+					negativeKeys.has(id) &&
+					Date.now() - lastUnknownRefresh < UNKNOWN_KEY_REFRESH_INTERVAL_MS
+				)
+					throw error;
+				if (!refresh) {
+					if (
+						Date.now() - lastUnknownRefresh <
+						UNKNOWN_KEY_REFRESH_INTERVAL_MS
+					) {
+						// An unseen key could have just rotated. Ask clients to retry,
+						// rather than declaring their authorization invalid.
+						throw new JwksRefreshThrottled();
+					}
+					lastUnknownRefresh = Date.now();
+					refresh = remote.reload().finally(() => {
+						refresh = undefined;
+					});
+				}
+				await refresh;
+				if (negativeSnapshot !== cache.jwks) {
+					negativeKeys.clear();
+					negativeSnapshot = cache.jwks;
+				}
+				try {
+					return await remote(...args);
+				} catch (retryError) {
+					if (
+						retryError instanceof errors.JWKSNoMatchingKey &&
+						id.length <= 512 &&
+						negativeKeys.size < MAX_NEGATIVE_KEYS
+					) {
+						negativeKeys.add(id);
+					}
+					throw retryError;
+				}
+			}
+		},
+		{ reload: () => remote.reload() },
+	);
+	return { getKey, cache, cachePath };
 }
 
 export async function persistRemoteJwksIfPresent(
 	jwksUrl: string,
 	cachePath?: string,
 ): Promise<void> {
-	const entry = verifiers.get(verifierKey(jwksUrl, cachePath));
+	const entry = await verifiers.get(verifierKey(jwksUrl, cachePath));
 	if (!entry?.cachePath) return;
-	await persistJwksCache(entry.cachePath, entry.cache);
+	entry.persistence ??= persistLatestSnapshot(entry).finally(() => {
+		entry.persistence = undefined;
+	});
+	await entry.persistence;
+}
+
+async function persistLatestSnapshot(entry: RemoteJwksEntry): Promise<void> {
+	try {
+		// Coalesce concurrent requests and serialize rotated snapshots. A newer
+		// fetch during disk I/O must be flushed after the current atomic write.
+		while (
+			entry.persistedAt !== entry.cache.uat ||
+			entry.persistedJwks !== entry.cache.jwks
+		) {
+			const snapshot = { ...entry.cache };
+			await persistJwksCache(entry.cachePath!, snapshot);
+			entry.persistedAt = snapshot.uat;
+			entry.persistedJwks = snapshot.jwks;
+		}
+	} catch {
+		// Disk is an optional restart optimization, never an authentication check.
+		if (!entry.persistenceWarned) {
+			entry.persistenceWarned = true;
+			console.warn(
+				"JWKS cache persistence failed; continuing with in-memory keys",
+			);
+		}
+	}
 }
 
 export async function warmRemoteJwks(
@@ -96,6 +201,7 @@ export async function warmRemoteJwks(
 }
 
 export function classifyJwtVerifyError(error: unknown): JwtVerifyFailureKind {
+	if (error instanceof JwksRefreshThrottled) return "jwks_unavailable";
 	if (error instanceof errors.JWKSTimeout) return "jwks_unavailable";
 	if (error instanceof errors.JWKSNoMatchingKey) return "invalid_token";
 	if (error instanceof errors.JOSEError) {

@@ -56,12 +56,24 @@ insert into auth.oauth_authorizations (
 	now()
 );
 
+insert into auth.sessions (id, user_id, oauth_client_id, scopes)
+values (
+	'32000000-0000-4000-8000-000000000001',
+	'20000000-0000-0000-0000-000000000001',
+	'30000000-0000-4000-8000-000000000001',
+	'openid email profile'
+);
+
 select is(
 	private.custom_access_token_hook(
 		jsonb_build_object(
 			'user_id', '20000000-0000-0000-0000-000000000001',
+			'authentication_method', 'oauth_provider/authorization_code',
 			'claims', jsonb_build_object(
-				'client_id', '30000000-0000-4000-8000-000000000001'
+				'client_id', '30000000-0000-4000-8000-000000000001',
+				'sub', '20000000-0000-0000-0000-000000000001',
+				'session_id', '32000000-0000-4000-8000-000000000001',
+				'scope', 'openid email profile'
 			)
 		)
 	) -> 'claims' ->> 'resource',

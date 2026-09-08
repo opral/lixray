@@ -31,8 +31,10 @@ import {
 	type McpExecuteOutputObservation,
 } from "./tool-observation.ts";
 
+import { MCP_RESOURCE } from "./auth.ts";
+
 export const MCP_PATH = "/mcp";
-export const MCP_RESOURCE = "https://lixray.com";
+export { MCP_RESOURCE } from "./auth.ts";
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
 export const MCP_PROTECTED_RESOURCE_PATH =
 	"/.well-known/oauth-protected-resource";

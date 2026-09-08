@@ -17,8 +17,10 @@ import { normalizeAuthReturnTo } from "~/lib/auth-return-to";
 import {
 	authErrorTelemetryProperties,
 	isOrphanedAuthError,
-	loadValidatedInitialSession,
+	observeInitialSession,
 	orphanedSessionSignInUrl,
+	refreshBrowserSession,
+	signOutBrowserSession,
 } from "~/lib/auth-session-validation";
 import { canonicalAccountIdFromAccessToken } from "~/lib/canonical-account";
 import { googleOAuthSignInCredentials } from "~/lib/google-oauth";
@@ -106,64 +108,66 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 	const [client, setClient] = useState<LixraySupabaseClient | null>(null);
 	const [session, setSession] = useState<Session | null>(null);
 	const [isLoaded, setIsLoaded] = useState(false);
+	const [initialValidationFailed, setInitialValidationFailed] = useState(false);
 	const accountId = canonicalAccountIdFromAccessToken(session?.access_token);
 	const claimRefreshAuthUserRef = useRef<string | null>(null);
 
 	useEffect(() => {
 		const supabase = getBrowserSupabaseClient();
 		let disposed = false;
-		let authStateChanged = false;
+		let stopInitialValidation = () => {};
 		setClient(supabase);
 
 		const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
 			if (event === "INITIAL_SESSION") return;
-			authStateChanged = true;
+			stopInitialValidation();
 			if (!disposed) {
+				setInitialValidationFailed(false);
 				setSession(nextSession);
 				setIsLoaded(true);
 			}
 		});
 
-		void loadValidatedInitialSession(supabase.auth)
-			.then(async (result) => {
-				if (disposed || authStateChanged) return;
-				if (result.kind === "orphaned") {
-					await clearOrphanedSession(
-						supabase,
-						result.error,
-						"initial_session_validation",
-					);
-					return;
-				}
-				if (result.kind === "validation_failed") {
-					captureExceptionTelemetry(result.error, {
-						operation: "auth_session_validation",
-						auth_validation_operation: "initial_session_validation",
-						...authErrorTelemetryProperties(result.error),
-					});
-				}
-				setSession(
-					result.kind === "authenticated"
-						? result.session
-						: result.kind === "validation_failed"
-							? (result.session ?? null)
-							: null,
-				);
-				setIsLoaded(true);
-			})
-			.catch((error: unknown) => {
-				if (disposed || authStateChanged) return;
-				captureExceptionTelemetry(error, {
-					operation: "auth_session_validation",
-					auth_validation_operation: "initial_session_validation",
-					...authErrorTelemetryProperties(error),
-				});
+		stopInitialValidation = observeInitialSession(supabase.auth, (result) => {
+			if (disposed) return;
+			if (result.kind === "orphaned") {
+				setInitialValidationFailed(false);
 				setSession(null);
 				setIsLoaded(true);
-			});
+				void clearOrphanedSession(
+					supabase,
+					result.error,
+					"initial_session_validation",
+				).catch((error: unknown) => {
+					captureExceptionTelemetry(error, {
+						operation: "clear_orphaned_session",
+					});
+				});
+				return;
+			}
+			if (result.kind === "validation_failed") {
+				captureExceptionTelemetry(result.error, {
+					operation: "auth_session_validation",
+					auth_validation_operation: "initial_session_validation",
+					...authErrorTelemetryProperties(result.error),
+				});
+				if (!result.session) {
+					setInitialValidationFailed(true);
+					return;
+				}
+			}
+			setInitialValidationFailed(false);
+			setSession(
+				result.kind === "authenticated" || result.kind === "validation_failed"
+					? (result.session ?? null)
+					: null,
+			);
+			setIsLoaded(true);
+		});
 
 		return () => {
 			disposed = true;
+			stopInitialValidation();
 			data.subscription.unsubscribe();
 		};
 	}, []);
@@ -228,17 +232,8 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 		[client],
 	);
 	const refreshSession = useCallback(async () => {
-		if (!client) {
-			setSession(null);
-			return;
-		}
-		const { data, error } = await client.auth.refreshSession();
-		if (error) {
-			setSession(null);
-			throw error;
-		}
-		setSession(data.session);
-		setIsLoaded(true);
+		if (!client) return;
+		await refreshBrowserSession(client.auth);
 	}, [client]);
 
 	useEffect(() => {
@@ -258,8 +253,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 	}, [accountId, refreshSession, session?.user.id]);
 	const signOut = useCallback(async () => {
 		if (!client) return;
-		const { error } = await client.auth.signOut();
-		if (error) throw error;
+		await signOutBrowserSession(client.auth);
 		resetTelemetry();
 	}, [client]);
 	const validateSession = useCallback(
@@ -322,7 +316,19 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 		],
 	);
 
-	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+	return (
+		<AuthContext.Provider value={value}>
+			{initialValidationFailed && (
+				<div
+					role="status"
+					className="border-b bg-muted p-3 text-center text-sm"
+				>
+					We couldn’t check your login. Retrying automatically…
+				</div>
+			)}
+			{children}
+		</AuthContext.Provider>
+	);
 }
 
 async function clearOrphanedSession(
