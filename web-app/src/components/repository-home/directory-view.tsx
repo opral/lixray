@@ -10,6 +10,7 @@ import { fileIconUrl } from "@opral/atelier/file-icons";
 import {
 	ArrowRight,
 	ArrowUp,
+	ArrowUpRight,
 	Check,
 	ChevronDown,
 	Copy,
@@ -613,9 +614,9 @@ export function DirectoryView({
 								fileName={
 									listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
 								}
-								onOpen={(event) =>
+								onOpen={(event, options) =>
 									onOpenFile(listing.readmePath as string, {
-										newTab: newTabFromMouseEvent(event),
+										newTab: options?.newTab ?? newTabFromMouseEvent(event),
 									})
 								}
 								onNavigate={(href, event?) => {
@@ -1478,31 +1479,62 @@ function ReadmePreview({
 		| { fileId: string; unavailable: true }
 		| null;
 	readonly fileName: string;
-	readonly onOpen: (event: ReactMouseEvent) => void;
+	/** Opens the README tab; `newTab` overrides the modifier-key default. */
+	readonly onOpen: (
+		event: ReactMouseEvent,
+		options?: { newTab: boolean },
+	) => void;
 	/** Returns true when the link was handled inside the tab model. */
 	readonly onNavigate: (href: string, event?: ReactMouseEvent) => boolean;
 }) {
 	if (!fileId) return null;
+	// The preview is a card, not the document itself: its bordered frame and
+	// sand header separate the rendered README from the live file list above
+	// it, and the header's actions are the only way to edit. The card spans
+	// the file list column (28px below it, the rail's section beat) so both
+	// edges line up with the rows, and the header repeats a row's own type
+	// and icon size so the file name reads at the same weight as the list.
 	return (
-		<>
-			<div className="flex items-center gap-1.5 px-3 pt-8 pb-3.5">
-				<button
-					type="button"
-					onClick={onOpen}
-					className="text-[13px] font-semibold text-text-secondary hover:text-text-primary"
+		<section
+			aria-label={`${fileName} preview`}
+			data-testid="home-readme-card"
+			className="mt-7 overflow-hidden rounded-[10px] border border-border-panel bg-bg-panel"
+		>
+			<div className="flex h-11 items-center gap-3 border-b border-border-panel bg-[#FAF7F2] pr-[11px] pl-[11px] text-sm">
+				<img
+					src={fileIconUrl(fileName)}
+					alt=""
+					draggable={false}
+					className="size-[19px] shrink-0"
+				/>
+				<span
+					className="min-w-0 flex-1 truncate font-medium text-text-primary"
+					title={fileName}
 				>
 					{fileName}
+				</span>
+				<button
+					type="button"
+					data-testid="home-readme-edit"
+					aria-label={`Edit ${fileName}`}
+					title={`Edit ${fileName}`}
+					onClick={(event) => onOpen(event)}
+					className="flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+				>
+					<PencilLine aria-hidden="true" className="size-3.5" />
+					Edit
 				</button>
 				<button
 					type="button"
-					aria-label={`Edit ${fileName}`}
-					title={`Edit ${fileName}`}
-					onClick={onOpen}
-					className="grid size-6 shrink-0 place-content-center rounded-md text-icon-tertiary hover:bg-bg-hover hover:text-icon-secondary"
+					data-testid="home-readme-open"
+					aria-label={`Open ${fileName} in a new tab`}
+					title={`Open ${fileName} in a new tab`}
+					onClick={(event) => onOpen(event, { newTab: true })}
+					className="flex h-8 shrink-0 items-center gap-1 rounded-md px-2.5 text-[13px] font-medium text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
 				>
-					<PencilLine aria-hidden="true" className="size-3" />
+					Open
+					<ArrowUpRight aria-hidden="true" className="size-3.5" />
 				</button>
-				<span className="ml-1 h-px flex-1 bg-border-subtle" />
 			</div>
 			{/* Relative README links navigate the tab in place (rule 3) instead
 			    of escaping to a full page load. */}
@@ -1518,13 +1550,13 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
-				className="px-3 pb-5"
 			>
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
-				    state shares the editor's own presentation. */}
+				    state shares the editor's own presentation. The document's
+				    own page padding sets the card's inner margins. */}
 				{diff && "unavailable" in diff ? (
-					<div role="alert">
+					<div role="alert" className="px-9 py-6 text-[13px]">
 						The working diff changed while it was being reviewed. Reopen the
 						review.
 					</div>
@@ -1535,7 +1567,7 @@ function ReadmePreview({
 					/>
 				)}
 			</div>
-		</>
+		</section>
 	);
 }
 

@@ -1,3 +1,4 @@
+import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
@@ -12,6 +13,7 @@ import {
 } from "~/lib/atelier-navigation";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/file/$")({
+	head: ({ params }) => repositoryHead(params, "file"),
 	component: RepositoryFileRoute,
 });
 

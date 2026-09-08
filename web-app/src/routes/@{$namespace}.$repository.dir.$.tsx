@@ -1,3 +1,4 @@
+import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
@@ -13,6 +14,7 @@ import {
 import { canonicalDirectoryPath } from "~/components/repository-home/lix-data";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/dir/$")({
+	head: ({ params }) => repositoryHead(params, "dir"),
 	component: RepositoryDirRoute,
 });
 
