@@ -227,16 +227,25 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			})
 			.click();
 		await selectFiles?.();
+		// Review presentation can load asynchronously. Finish that online setup
+		// before measuring the local checkpoint with the network unavailable.
+		const checkpointButton = page.getByRole("button", {
+			name: "Checkpoint",
+			exact: true,
+		});
+		await expect(checkpointButton).toBeVisible({ timeout: 30_000 });
+		await expect(checkpointButton).toBeEnabled({ timeout: 30_000 });
 		sharedContext.on("request", captureCheckpoint);
 		intentionallyOffline = true;
 		await sharedContext.setOffline(true);
 		try {
-			await page
-				.getByRole("button", { name: "Checkpoint", exact: true })
-				.click();
+			const checkpointDeadline = Date.now() + 5_000;
+			await checkpointButton.click({ timeout: 5_000 });
+			const remainingCheckpointTime = checkpointDeadline - Date.now();
+			expect(remainingCheckpointTime).toBeGreaterThan(0);
 			await expect(
 				page.getByRole("button", { name: /^(Checkpoint|Checkpointing…)$/ }),
-			).toHaveCount(0, { timeout: 5_000 });
+			).toHaveCount(0, { timeout: remainingCheckpointTime });
 			// The second tab observes the same durable OPFS commit while the
 			// server is unreachable; no foreground /execute receipt is needed.
 			await expect(
