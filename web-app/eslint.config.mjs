@@ -67,7 +67,7 @@ export default tseslint.config(
 		},
 	},
 	{
-		files: ["**/*.test.ts", "tests/**/*.ts"],
+		files: ["**/*.test.ts", "tests/**/*.{ts,tsx}"],
 		rules: {
 			"@typescript-eslint/require-await": "off",
 		},

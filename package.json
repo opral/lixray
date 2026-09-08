@@ -6,7 +6,7 @@
     "dev:telemetry": "infisical run --env=dev -- pnpm dev",
     "dev:reset-onboarding": "node scripts/reset-onboarding.mjs",
     "test:e2e": "pnpm --dir web-app test:e2e",
-    "perf:build": "docker pull ghcr.io/opral/lix-server@sha256:5d59180190b2a891be77adf201e4405c4d514eb6ba4a86dd94d12c3f468b4807",
+    "perf:build": "docker pull ghcr.io/opral/lix-server@sha256:f942d397e3a4e605243ab119643624bed9388915c0ad35103737887b4a17b708",
     "perf:up": "LIXRAY_STORAGE_PREFIX=local/perf docker compose up -d lix-server",
     "perf:down": "docker compose down",
     "perf:reset": "docker compose rm --stop --force lix-server && docker compose run --rm storage-reset",
@@ -23,17 +23,17 @@
     "postinstall": "pnpm --dir web-app lix:build"
   },
   "devDependencies": {
-    "@lix-js/sdk-release": "https://registry.npmjs.org/@lix-js/sdk/-/sdk-0.11.0.tgz",
+    "@lix-js/sdk-release": "https://registry.npmjs.org/@lix-js/sdk/-/sdk-0.15.1.tgz",
     "fflate": "0.8.3"
   },
   "packageManager": "pnpm@10.13.1",
   "pnpm": {
     "overrides": {
       "@lix-js/sdk": "link:vendor/lix/packages/js-sdk",
-      "@lix-js/sdk-darwin-arm64": "0.12.3",
-      "@lix-js/sdk-linux-arm64": "0.12.3",
-      "@lix-js/sdk-linux-x64": "0.12.3",
-      "@lix-js/sdk-win32-x64": "0.12.3"
+      "@lix-js/sdk-darwin-arm64": "0.15.1",
+      "@lix-js/sdk-linux-arm64": "0.15.1",
+      "@lix-js/sdk-linux-x64": "0.15.1",
+      "@lix-js/sdk-win32-x64": "0.15.1"
     }
   }
 }

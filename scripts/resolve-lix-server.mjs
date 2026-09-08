@@ -163,6 +163,16 @@ export async function resolveLixServerImage({
 	return { image: builtImage, source: "source-build", sourceRevision };
 }
 
+export function findOfficialLixServerImage(
+	sourceRevision,
+	inspectImage = inspectDigest,
+) {
+	return officialImage(
+		[`ghcr.io/opral/lix-server:sha-${sourceRevision}`],
+		inspectImage,
+	);
+}
+
 function officialImage(tags, inspectImage) {
 	for (const tag of tags) {
 		const digest = inspectImage(tag);

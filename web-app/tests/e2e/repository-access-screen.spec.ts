@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const fileUrl = "/@opral/monorepo/file/company-brain-productization.md";
 
-test("initial HTML includes the access screen and uncollapsed accessible MCP instructions", async ({
+test("initial HTML includes the opening skeleton and accessible MCP instructions", async ({
 	browser,
 	baseURL,
 }) => {
@@ -18,7 +18,12 @@ test("initial HTML includes the access screen and uncollapsed accessible MCP ins
 		await expect(
 			page.getByRole("heading", { name: "Opening file..." }),
 		).toBeVisible();
-		await expect(page.locator("details")).not.toHaveAttribute("open");
+		await expect(page.locator("[data-app-titlebar]")).toBeVisible();
+		await expect(
+			page.locator("[data-repository-access-skeleton]"),
+		).toHaveAttribute("aria-hidden", "true");
+		await expect(page.getByRole("button")).toHaveCount(0);
+		await expect(page.locator("details")).toHaveCount(0);
 		const instructions = page.locator(
 			'body > section[aria-label="Access through LixRay MCP"]',
 		);
@@ -31,7 +36,7 @@ test("initial HTML includes the access screen and uncollapsed accessible MCP ins
 });
 
 for (const width of [1280, 360]) {
-	test(`access resolution preserves the screen without an Atelier flash at ${width}px`, async ({
+	test(`access resolution replaces the opening skeleton without an Atelier flash at ${width}px`, async ({
 		page,
 	}) => {
 		await page.setViewportSize({ width, height: 900 });
@@ -51,7 +56,8 @@ for (const width of [1280, 360]) {
 				const screen = document.querySelector("[data-repository-access]");
 				const state = screen?.getAttribute("data-repository-access");
 				if (state && seen.at(-1) !== state) seen.push(state);
-				if (document.querySelector("[data-app-titlebar]")) seen.push("atelier");
+				if (document.querySelector('[data-atelier-part="top-bar"]'))
+					seen.push("atelier");
 			}).observe(document, {
 				childList: true,
 				subtree: true,
@@ -67,15 +73,27 @@ for (const width of [1280, 360]) {
 		await page.goto(fileUrl, { waitUntil: "domcontentloaded" });
 		const heading = page.getByRole("heading", { name: "Opening file..." });
 		await expect(heading).toBeVisible();
-		const before = await heading.boundingBox();
+		await expect(
+			page.locator("[data-repository-access-skeleton]"),
+		).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: /Sign in|Retry|Switch account/ }),
+		).toHaveCount(0);
+		await expect(page.locator("details")).toHaveCount(0);
+		expect(
+			await page.evaluate(
+				() => document.documentElement.scrollWidth <= window.innerWidth,
+			),
+		).toBe(true);
 		await accessRequest;
 		release();
 		const unavailable = page.getByRole("heading", {
 			name: "This file isn't available",
 		});
 		await expect(unavailable).toBeVisible();
-		const after = await unavailable.boundingBox();
-		expect(after!.y).toBeCloseTo(before!.y, 0);
+		await expect(page.locator("[data-repository-access-skeleton]")).toHaveCount(
+			0,
+		);
 		expect(
 			await page.evaluate(
 				() =>

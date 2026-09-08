@@ -32,7 +32,14 @@ import {
 	type MouseEvent as ReactMouseEvent,
 	type ReactNode,
 } from "react";
+import { DropdownMenu } from "radix-ui";
 import { Button } from "~/components/ui/button";
+import { DirectoryFileList, NameEntryDialog } from "./directory-file-list";
+import {
+	createNamedWorkspaceFolder,
+	collectDroppedWorkspaceEntries,
+	importWorkspaceEntries,
+} from "./directory-operations";
 import {
 	Dialog,
 	DialogContent,
@@ -50,9 +57,6 @@ import {
 } from "~/lib/repository-open-performance";
 import {
 	createRepositoryFile,
-	createRepositoryFolder,
-	formatUpdatedAt,
-	importDroppedFiles,
 	listDirectory,
 	persistedDirectoryPath,
 	resolveRepositoryHref,
@@ -75,7 +79,7 @@ type DirectoryViewProps = {
 	readonly diffSession?: AtelierDiffSession | null;
 	/** Opens a changed file through the diff session (review-aware). */
 	readonly onOpenDiffFile?: (path: string) => void;
-	/** Normalized trailing-slash directory path; "/" is the repository home. */
+	/** Canonical directory path; "/" is the repository home. */
 	readonly dirPath: string;
 	/** The pinned home shows the connect row. */
 	readonly isHome: boolean;
@@ -158,6 +162,49 @@ export function DirectoryView({
 	// The past is immutable, and the README preview reads live content: both
 	// creation affordances and the preview stand down while viewing history.
 	const viewingHistory = historicalCommitId !== null;
+	// Atelier reconciles file tabs by ID. Folder surfaces retain their own
+	// directory ID so moves in another tab (or by a collaborator) keep this
+	// surface at the same folder, and deletion returns it to a surviving parent.
+	const currentDirectoryRef = useRef<{
+		lix: Lix;
+		path: string;
+		id: string | null;
+	} | null>(null);
+	useEffect(() => {
+		if (!tree || viewingHistory) return;
+		const previous = currentDirectoryRef.current;
+		const current = tree.dirs.find((directory) => directory.path === dirPath);
+		if (
+			dirPath === "/" ||
+			!previous ||
+			previous.lix !== lix ||
+			previous.path !== dirPath ||
+			current
+		) {
+			currentDirectoryRef.current = {
+				lix,
+				path: dirPath,
+				id: current?.id ?? null,
+			};
+			return;
+		}
+		if (!previous.id || !isActive) return;
+		const moved = tree.dirs.find((directory) => directory.id === previous.id);
+		let next = moved?.path;
+		if (!next) {
+			const segments = dirPath.split("/").filter(Boolean);
+			do {
+				segments.pop();
+				next = segments.length ? `/${segments.join("/")}` : "/";
+			} while (
+				next !== "/" &&
+				!tree.dirs.some((directory) => directory.path === next)
+			);
+		}
+		currentDirectoryRef.current = { lix, path: next, id: moved?.id ?? null };
+		onOpenDir(next, { newTab: false });
+	}, [tree, viewingHistory, dirPath, lix, onOpenDir, isActive]);
+
 	// The open diff session marks its files in the listing, mirroring the
 	// sidebar's review indicators; folders inherit a dot from any changed
 	// descendant so drilling in stays guided.
@@ -246,7 +293,37 @@ export function DirectoryView({
 		detailsEnabled,
 	);
 	const repositoryTreeMarkedRef = useRef(false);
+	const newButtonRef = useRef<HTMLDivElement>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
+	const [newFolderOpen, setNewFolderOpen] = useState(false);
+	const [creatingFolder, setCreatingFolder] = useState(false);
+	const creatingFolderRef = useRef(false);
+	const [folderError, setFolderError] = useState<string | null>(null);
+	const startFolder = useCallback(() => {
+		if (readOnly || viewingHistory) return;
+		setFolderError(null);
+		setNewFolderOpen(true);
+	}, [readOnly, viewingHistory]);
+	const saveFolder = async (name: string) => {
+		if (readOnly || viewingHistory || creatingFolderRef.current) return;
+		creatingFolderRef.current = true;
+		setCreatingFolder(true);
+		setFolderError(null);
+		try {
+			await createNamedWorkspaceFolder(lix, dirPath, name);
+			setNewFolderOpen(false);
+		} catch (error) {
+			setFolderError(
+				error instanceof Error
+					? error.message
+					: "Unable to create the folder. Try again.",
+			);
+		} finally {
+			creatingFolderRef.current = false;
+			setCreatingFolder(false);
+		}
+	};
+
 	// Right-click file management, sharing the File Explorer's operation
 	// semantics through @opral/atelier. Deletion needs no confirmation:
 	// lix history makes it recoverable.
@@ -274,6 +351,7 @@ export function DirectoryView({
 	}, [entryMenu]);
 	const deleteEntry = useCallback(
 		(target: { kind: "file" | "directory"; path: string; id?: string }) => {
+			if (readOnly || viewingHistory) return;
 			setActionError(null);
 			void deleteWorkspaceEntry(
 				lix,
@@ -289,12 +367,12 @@ export function DirectoryView({
 				);
 			});
 		},
-		[lix],
+		[lix, readOnly, viewingHistory],
 	);
-	const { isDropTarget, dragHandlers } = useImportDrop({
+	const { isDropTarget, isImporting, dragHandlers } = useImportDrop({
 		lix,
 		dirPath,
-		readOnly,
+		readOnly: readOnly || viewingHistory,
 		onError: setActionError,
 	});
 
@@ -332,20 +410,20 @@ export function DirectoryView({
 		if (!isActive || readOnly || viewingHistory) return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (
-				!event.metaKey ||
-				event.key !== "." ||
+				!(event.metaKey || event.ctrlKey) ||
+				(event.key !== "." && event.code !== "Period") ||
 				event.altKey ||
-				event.ctrlKey
+				(event.target instanceof HTMLElement &&
+					!!event.target.closest(
+						"input,textarea,[contenteditable=true],[role=dialog]",
+					))
 			) {
 				return;
 			}
 			event.preventDefault();
 			setActionError(null);
 			if (event.shiftKey) {
-				void createRepositoryFolder(lix, dirPath).catch((error: unknown) => {
-					console.error("repository-home: new folder failed", error);
-					setActionError("Unable to create the folder. Try again.");
-				});
+				startFolder();
 				return;
 			}
 			void createRepositoryFile(lix, dirPath, "md")
@@ -357,7 +435,15 @@ export function DirectoryView({
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [dirPath, isActive, lix, onOpenFile, readOnly, viewingHistory]);
+	}, [
+		dirPath,
+		isActive,
+		lix,
+		onOpenFile,
+		readOnly,
+		viewingHistory,
+		startFolder,
+	]);
 
 	// The empty repository home renders the welcome pitch as the entire main
 	// column — the breadcrumb/New header stands down so "Connect an agent"
@@ -390,15 +476,18 @@ export function DirectoryView({
 
 	return (
 		<div
+			ref={newButtonRef}
 			className="@container relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
 			{...dragHandlers}
 		>
 			{isDropTarget ? <DropImportOverlay /> : null}
 			<div
 				className={
+					// Reserve space for the outboard checkboxes and selection toolbar,
+					// including when the app shell makes this panel narrower.
 					isHome
-						? "mx-auto grid w-[min(1020px,calc(100%-48px))] grid-cols-[minmax(0,1fr)_244px] gap-12 pt-10 pb-10 @max-[1100px]:grid-cols-1 @max-[1100px]:gap-8"
-						: "mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10"
+						? "mx-auto grid w-[min(1020px,calc(100%-96px))] grid-cols-[minmax(0,1fr)_244px] gap-12 pt-10 pb-10 max-sm:w-[calc(100%-48px)] @max-[1100px]:grid-cols-1 @max-[1100px]:gap-8"
+						: "mx-auto flex w-[min(760px,calc(100%-96px))] flex-col pt-10 pb-10 max-sm:w-[calc(100%-48px)]"
 				}
 			>
 				<main
@@ -426,20 +515,7 @@ export function DirectoryView({
 								<NewMenu
 									disabled={readOnly || viewingHistory}
 									onCreateFile={(extension) => void createFile(extension)}
-									onCreateFolder={() => {
-										setActionError(null);
-										void createRepositoryFolder(lix, dirPath).catch(
-											(error: unknown) => {
-												console.error(
-													"repository-home: new folder failed",
-													error,
-												);
-												setActionError(
-													"Unable to create the folder. Try again.",
-												);
-											},
-										);
-									}}
+									onCreateFolder={startFolder}
 								/>
 							</div>
 						</div>
@@ -452,135 +528,61 @@ export function DirectoryView({
 							{actionError}
 						</p>
 					) : null}
-					{listing.dirs.length === 0 && listing.files.length === 0 ? (
-						showGettingStarted && hasAgentConnected ? (
-							<GettingStarted
-								connection={connection}
-								hasAgentConnected={hasAgentConnected}
-								onCreateFile={(extension) => void createFile(extension)}
-							/>
-						) : (
-							<div className="rounded-[10px] border border-dashed border-border-panel px-6 py-12 text-center text-[13px] leading-6 text-text-tertiary">
-								{readOnly || viewingHistory ? (
-									"No files yet."
-								) : (
-									<>
-										No files yet — create one with{" "}
-										<b className="font-semibold text-text-secondary">New</b>, or
-										drop files anywhere to import.
-									</>
-								)}
-							</div>
-						)
+					{showGettingStarted && hasAgentConnected ? (
+						<GettingStarted
+							connection={connection}
+							hasAgentConnected={hasAgentConnected}
+							onCreateFile={(extension) => void createFile(extension)}
+						/>
+					) : (
+						<DirectoryFileList
+							key={`${dirPath}:${historicalCommitId ?? "live"}`}
+							lix={lix}
+							tree={tree}
+							listing={listing}
+							dirPath={dirPath}
+							readOnly={readOnly || viewingHistory}
+							viewingHistory={viewingHistory}
+							changedFileKinds={changedFileKinds}
+							changedDirKinds={changedDirKinds}
+							reviewFocus={reviewFocus}
+							onOpenFile={onOpenFile}
+							onOpenDir={onOpenDir}
+							{...(onOpenDiffFile ? { onOpenDiffFile } : {})}
+							onContextMenu={(entry, event) => {
+								event.preventDefault();
+								setEntryMenu({
+									kind: entry.directory ? "directory" : "file",
+									name: entry.name,
+									path: entry.path,
+									...(entry.id ? { id: entry.id } : {}),
+									x: event.clientX,
+									y: event.clientY,
+								});
+							}}
+						/>
+					)}
+					<NameEntryDialog
+						open={newFolderOpen}
+						title="New folder"
+						initialName="Untitled folder"
+						busy={creatingFolder}
+						error={folderError}
+						onClose={() => setNewFolderOpen(false)}
+						onSubmit={(name) => void saveFolder(name)}
+						onRestoreFocus={() =>
+							newButtonRef.current
+								?.querySelector<HTMLButtonElement>(
+									'[data-testid="home-new-button"]',
+								)
+								?.focus()
+						}
+					/>
+					{isImporting ? (
+						<p role="status" className="px-3 py-2 text-xs text-text-tertiary">
+							Importing files and folders…
+						</p>
 					) : null}
-					<div
-						className="flex flex-col gap-px @max-[1100px]:max-h-[min(42vh,24rem)] @max-[1100px]:overflow-x-hidden @max-[1100px]:overflow-y-auto @max-[1100px]:pr-1"
-						data-testid="home-entry-list"
-					>
-						{listing.dirs.map((dir) => (
-							<EntryRow
-								key={dir.path}
-								icon={
-									<img
-										src="/icon-sq-folder.svg"
-										alt=""
-										className="size-[19px]"
-									/>
-								}
-								name={dir.name}
-								meta={`${dir.itemCount} ${dir.itemCount === 1 ? "item" : "items"}`}
-								hidden={dir.hidden}
-								active={
-									entryMenu?.path === dir.path ||
-									renameTarget?.path === dir.path
-								}
-								dimmed={reviewFocus && !changedDirKinds.has(dir.path)}
-								{...(changedDirKinds.has(dir.path)
-									? {
-											changeKind: changedDirKinds.get(dir.path),
-											// The softened dot marks mixed contents; a fully
-											// new folder reads solid green like its files.
-											dimIndicator:
-												changedDirKinds.get(dir.path) === "modified",
-										}
-									: {})}
-								onClick={(event) =>
-									onOpenDir(dir.path, { newTab: newTabFromMouseEvent(event) })
-								}
-								{...(readOnly || viewingHistory
-									? {}
-									: {
-											onContextMenu: (event: ReactMouseEvent) => {
-												event.preventDefault();
-												setEntryMenu({
-													kind: "directory",
-													name: dir.name,
-													path: dir.path,
-													x: event.clientX,
-													y: event.clientY,
-												});
-											},
-										})}
-							/>
-						))}
-						{listing.files.map((file) => (
-							<EntryRow
-								key={file.path}
-								testId="home-file-entry"
-								fileId={file.id}
-								icon={
-									<img
-										src={fileIconUrl(file.name)}
-										alt=""
-										className="size-[19px]"
-									/>
-								}
-								name={file.name}
-								meta={formatUpdatedAt(file.updatedAt)}
-								hidden={file.hidden}
-								active={
-									entryMenu?.path === file.path ||
-									renameTarget?.path === file.path
-								}
-								dimmed={reviewFocus && !changedFileKinds.has(file.path)}
-								{...(changedFileKinds.has(file.path)
-									? { changeKind: changedFileKinds.get(file.path) }
-									: {})}
-								onClick={(event) => {
-									// A changed file opens through the diff session, keeping
-									// the review float in step with the revealed document.
-									if (
-										changedFileKinds.has(file.path) &&
-										onOpenDiffFile &&
-										!newTabFromMouseEvent(event)
-									) {
-										onOpenDiffFile(file.path);
-										return;
-									}
-									onOpenFile(file.path, {
-										newTab: newTabFromMouseEvent(event),
-									});
-								}}
-								{...(readOnly || viewingHistory
-									? {}
-									: {
-											onContextMenu: (event: ReactMouseEvent) => {
-												event.preventDefault();
-												setEntryMenu({
-													kind: "file",
-													name: file.name,
-													path: file.path,
-													id: tree.files.find(
-														(candidate) => candidate.path === file.path,
-													)?.id,
-													x: event.clientX,
-													y: event.clientY,
-												});
-											},
-										})}
-							/>
-						))}
-					</div>
 					{isHome ? (
 						<RepositoryNarrowStats
 							fileCount={tree.files.length}
@@ -689,6 +691,7 @@ export function DirectoryView({
 							target={renameTarget}
 							onClose={() => setRenameTarget(null)}
 							onRename={async (nextName) => {
+								if (readOnly || viewingHistory) return;
 								const segments = renameTarget.path.split("/").filter(Boolean);
 								segments.pop();
 								const nextPath = `/${[...segments, nextName].join("/")}`;
@@ -1375,46 +1378,74 @@ function useImportDrop({
 	readonly onError: (message: string | null) => void;
 }) {
 	const [isDropTarget, setIsDropTarget] = useState(false);
+	const [isImporting, setIsImporting] = useState(false);
+	const importingRef = useRef(false);
 	const dragDepthRef = useRef(0);
-	const handleDrop = useCallback(
-		(event: ReactDragEvent) => {
-			event.preventDefault();
-			dragDepthRef.current = 0;
-			setIsDropTarget(false);
-			if (readOnly) return;
-			const files = Array.from(event.dataTransfer?.files ?? []);
-			if (files.length === 0) return;
-			onError(null);
-			void importDroppedFiles(lix, dirPath, files)
-				.then(({ failed }) => {
-					if (failed.length > 0) {
-						onError(
-							`Could not import ${failed.length} ${failed.length === 1 ? "file" : "files"} (${failed.join(", ")}).`,
-						);
-					}
-				})
-				.catch((error: unknown) => {
-					console.error("repository-home: import failed", error);
-					onError("Unable to import the dropped files.");
-				});
-		},
-		[dirPath, lix, onError, readOnly],
-	);
+	const inList = (event: ReactDragEvent) =>
+		(event.target as HTMLElement).closest('[data-testid="home-entry-list"]');
+	const clearTarget = () => {
+		dragDepthRef.current = 0;
+		setIsDropTarget(false);
+	};
+	const handleDrop = (event: ReactDragEvent) => {
+		clearTarget();
+		if (inList(event)) return;
+		event.preventDefault();
+		if (
+			readOnly ||
+			importingRef.current ||
+			!event.dataTransfer.types.includes("Files")
+		)
+			return;
+		const entries = collectDroppedWorkspaceEntries(event.dataTransfer);
+		importingRef.current = true;
+		setIsImporting(true);
+		onError(null);
+		void entries
+			.then((items) => importWorkspaceEntries(lix, dirPath, items))
+			.then(({ failed }) => {
+				if (failed.length)
+					onError(
+						`Could not import: ${failed.join(", ")}. Existing items were kept.`,
+					);
+			})
+			.catch((error: unknown) => {
+				console.error("repository-home: import failed", error);
+				onError("Unable to import the dropped files and folders.");
+			})
+			.finally(() => {
+				importingRef.current = false;
+				setIsImporting(false);
+			});
+	};
 	return {
 		isDropTarget,
+		isImporting,
 		dragHandlers: {
 			onDragEnter: (event: ReactDragEvent) => {
+				if (inList(event)) {
+					clearTarget();
+					return;
+				}
 				event.preventDefault();
-				if (readOnly) return;
+				if (
+					readOnly ||
+					importingRef.current ||
+					!event.dataTransfer.types.includes("Files")
+				)
+					return;
 				dragDepthRef.current += 1;
 				setIsDropTarget(true);
 			},
 			onDragOver: (event: ReactDragEvent) => {
+				if (inList(event)) return;
 				event.preventDefault();
+				event.dataTransfer.dropEffect =
+					readOnly || importingRef.current ? "none" : "copy";
 			},
 			onDragLeave: () => {
 				dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-				if (dragDepthRef.current === 0) setIsDropTarget(false);
+				if (!dragDepthRef.current) setIsDropTarget(false);
 			},
 			onDrop: handleDrop,
 		},
@@ -1424,169 +1455,8 @@ function useImportDrop({
 function DropImportOverlay() {
 	return (
 		<div className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-xl border-2 border-dashed border-bg-action-primary bg-bg-panel/85 text-sm font-semibold text-text-secondary">
-			Drop files to import
+			Drop files and folders to import
 		</div>
-	);
-}
-
-/**
- * Dot-hybrid diff glyphs (design 23d), mirroring atelier's: the familiar dot
- * silhouette with a knockout so change types survive grayscale and color
- * blindness. 12px, matching the history panel's listings.
- */
-function DiffGlyph({
-	kind,
-	className,
-}: {
-	readonly kind: "added" | "modified" | "removed" | "moved";
-	readonly className?: string;
-}) {
-	const fill =
-		kind === "added"
-			? "var(--color-border-diff-added)"
-			: kind === "removed"
-				? "var(--color-border-diff-removed)"
-				: kind === "moved"
-					? "var(--color-icon-diff-moved)"
-					: "var(--color-icon-brand)";
-	const knockout = "var(--color-bg-panel)";
-	const title =
-		kind === "added"
-			? "Added in this review"
-			: kind === "removed"
-				? "Removed in this review"
-				: kind === "moved"
-					? "Moved in this review"
-					: "Changed in this review";
-	return (
-		<span
-			title={title}
-			aria-label={title}
-			className={`inline-flex ${className ?? ""}`}
-		>
-			<svg width={12} height={12} viewBox="0 0 12 12" aria-hidden="true">
-				<circle cx="6" cy="6" r="5" fill={fill} />
-				{kind === "added" ? (
-					<path
-						d="M6 3.6v4.8M3.6 6h4.8"
-						stroke={knockout}
-						strokeWidth="1.7"
-						strokeLinecap="round"
-					/>
-				) : null}
-				{kind === "removed" ? (
-					<path
-						d="M3.6 6h4.8"
-						stroke={knockout}
-						strokeWidth="1.7"
-						strokeLinecap="round"
-					/>
-				) : null}
-				{kind === "moved" ? (
-					<path
-						d="M4.8 3.6 7.2 6 4.8 8.4"
-						stroke={knockout}
-						strokeWidth="1.7"
-						fill="none"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-					/>
-				) : null}
-			</svg>
-		</span>
-	);
-}
-
-function EntryRow({
-	testId,
-	fileId,
-	icon,
-	name,
-	meta,
-	hidden = false,
-	changeKind,
-	dimIndicator = false,
-	dimmed = false,
-	active = false,
-	onClick,
-	onContextMenu,
-}: {
-	readonly testId?: string;
-	/** Stable file identity for tests and integrations; survives path renames. */
-	readonly fileId?: string;
-	readonly icon: ReactNode;
-	readonly name: string;
-	readonly meta: string;
-	readonly hidden?: boolean;
-	/**
-	 * Marked by the open diff session; mirrors the sidebar's indicator.
-	 * Shape + color (design 23d): added dot+plus green, removed dot+minus
-	 * red, moved dot+chevron blue, modified the plain brand-orange dot.
-	 */
-	readonly changeKind?: "added" | "modified" | "removed" | "moved";
-	/** Folders inherit a softened dot, matching the sidebar tree. */
-	readonly dimIndicator?: boolean;
-	/** Review focus: an unchanged row recedes; hover restores it. */
-	readonly dimmed?: boolean;
-	/** Keeps the row anchored while its context menu or dialog is open. */
-	readonly active?: boolean;
-	readonly onClick: (event: ReactMouseEvent) => void;
-	readonly onContextMenu?: (event: ReactMouseEvent) => void;
-}) {
-	const changed = changeKind !== undefined;
-	// In a review every changed name carries its action color — matching the
-	// sidebar tree's label tinting — so the action reads without hunting for
-	// the trailing glyph. Modified shares the tree's brand orange; moved the
-	// glyph's blue. Folders that merely contain changes (the dim indicator)
-	// keep a neutral name, like the tree's softened contains-changes dot.
-	const nameClass =
-		dimIndicator || changeKind === undefined
-			? "text-text-primary"
-			: changeKind === "added"
-				? "text-[var(--color-text-diff-added)]"
-				: changeKind === "removed"
-					? "text-[var(--color-text-diff-removed)]"
-					: changeKind === "modified"
-						? "text-[var(--color-icon-brand)]"
-						: "text-[var(--color-icon-diff-moved)]";
-	return (
-		<button
-			type="button"
-			data-testid={testId}
-			data-file-id={fileId}
-			onClick={onClick}
-			onContextMenu={onContextMenu}
-			className={`flex w-full items-center gap-3 rounded-[9px] px-3 py-2.25 text-left transition-opacity hover:bg-bg-hover ${
-				active ? "bg-bg-hover " : ""
-			}${
-				hidden
-					? "opacity-[0.48] hover:opacity-[0.62]"
-					: dimmed
-						? "opacity-[0.35] hover:opacity-100"
-						: ""
-			}`}
-			data-hidden-entry={hidden ? "true" : undefined}
-			data-changed-entry={changed ? "true" : undefined}
-		>
-			{icon}
-			<span
-				className={`text-sm font-medium ${nameClass}`}
-				data-testid={fileId ? "home-entry-name" : undefined}
-			>
-				{name}
-			</span>
-			<span className="flex-1" />
-			{/* In a review, the trailing slot carries the same orange change dot
-			    the sidebar tree uses, replacing the resting meta. */}
-			{changed && changeKind ? (
-				<DiffGlyph
-					kind={changeKind}
-					className={`shrink-0 ${dimIndicator ? "opacity-75" : ""}`}
-				/>
-			) : (
-				<span className="text-[12.5px] text-text-quaternary">{meta}</span>
-			)}
-		</button>
 	);
 }
 
@@ -1699,41 +1569,38 @@ function NewMenu({
 	readonly onCreateFile: (extension: "md" | "csv" | "excalidraw") => void;
 	readonly onCreateFolder: () => void;
 }) {
-	const [open, setOpen] = useState(false);
-	const containerRef = useRef<HTMLDivElement | null>(null);
-	useEffect(() => {
-		if (!open) return;
-		const onPointerDown = (event: PointerEvent) => {
-			if (!containerRef.current?.contains(event.target as Node)) {
-				setOpen(false);
-			}
-		};
-		window.addEventListener("pointerdown", onPointerDown);
-		return () => window.removeEventListener("pointerdown", onPointerDown);
-	}, [open]);
+	const handOffFocusRef = useRef(false);
 	return (
-		<div ref={containerRef} className="relative">
-			<Button
-				type="button"
-				variant="featured"
-				className="h-9 gap-1.5 px-3.5 text-[13.5px] font-bold"
-				disabled={disabled}
-				aria-expanded={open}
-				data-testid="home-new-button"
-				onClick={() => setOpen((current) => !current)}
-			>
-				<Plus className="size-3.5" aria-hidden="true" />
-				New
-				<ChevronDown className="size-3 opacity-80" aria-hidden="true" />
-			</Button>
-			{open ? (
-				<div className="absolute top-11 right-0 z-20 flex w-[248px] flex-col rounded-xl border border-border-panel bg-bg-panel p-1.5 shadow-[0_18px_44px_rgba(28,25,23,0.16)]">
+		<DropdownMenu.Root>
+			<DropdownMenu.Trigger asChild>
+				<Button
+					disabled={disabled}
+					type="button"
+					variant="featured"
+					className="h-9 gap-1.5 px-3.5 text-[13.5px] font-bold"
+					data-testid="home-new-button"
+				>
+					<Plus className="size-3.5" aria-hidden="true" />
+					New
+					<ChevronDown className="size-3 opacity-80" aria-hidden="true" />
+				</Button>
+			</DropdownMenu.Trigger>
+			<DropdownMenu.Portal>
+				<DropdownMenu.Content
+					align="end"
+					sideOffset={8}
+					onCloseAutoFocus={(event) => {
+						if (handOffFocusRef.current) event.preventDefault();
+						handOffFocusRef.current = false;
+					}}
+					className="z-50 flex w-[248px] flex-col rounded-xl border border-border-panel bg-bg-panel p-1.5 shadow-lg"
+				>
 					<MenuItem
 						icon={<img src="/icon-sq-new.svg" alt="" className="size-4" />}
 						label="New file"
 						shortcut="⌘ ."
 						onClick={() => {
-							setOpen(false);
+							handOffFocusRef.current = true;
 							onCreateFile("md");
 						}}
 					/>
@@ -1742,14 +1609,15 @@ function NewMenu({
 						label="New folder"
 						shortcut="⇧⌘ ."
 						onClick={() => {
-							setOpen(false);
+							handOffFocusRef.current = true;
 							onCreateFolder();
 						}}
 					/>
-					<span className="mx-1 my-1.5 h-px bg-border-subtle" />
+					<DropdownMenu.Separator className="mx-1 my-1.5 h-px bg-border-subtle" />
 					{NEW_FILE_KINDS.map((kind) => (
 						<MenuItem
 							key={kind.extension}
+							testId={kind.testId}
 							icon={
 								<img
 									src={fileIconUrl(`file.${kind.extension}`)}
@@ -1759,16 +1627,15 @@ function NewMenu({
 							}
 							label={kind.label}
 							hint={kind.hint}
-							testId={kind.testId}
 							onClick={() => {
-								setOpen(false);
+								handOffFocusRef.current = true;
 								onCreateFile(kind.extension);
 							}}
 						/>
 					))}
-				</div>
-			) : null}
-		</div>
+				</DropdownMenu.Content>
+			</DropdownMenu.Portal>
+		</DropdownMenu.Root>
 	);
 }
 
@@ -1877,26 +1744,25 @@ function RenameEntryDialog({
 }
 
 function MenuItem({
+	testId,
 	icon,
 	label,
 	hint,
 	shortcut,
-	testId,
 	onClick,
 }: {
+	readonly testId?: string;
 	readonly icon: ReactNode;
 	readonly label: string;
 	readonly hint?: string;
 	readonly shortcut?: string;
-	readonly testId?: string;
 	readonly onClick: () => void;
 }) {
 	return (
-		<button
-			type="button"
+		<DropdownMenu.Item
 			data-testid={testId}
-			onClick={onClick}
-			className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] leading-none font-medium text-text-primary hover:bg-bg-hover"
+			onSelect={onClick}
+			className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] leading-none font-medium text-text-primary cursor-pointer outline-none data-[highlighted]:bg-bg-hover"
 		>
 			{icon}
 			<span className="flex-1">
@@ -1906,7 +1772,7 @@ function MenuItem({
 			{shortcut ? (
 				<span className="text-[11.5px] text-text-tertiary/60">{shortcut}</span>
 			) : null}
-		</button>
+		</DropdownMenu.Item>
 	);
 }
 

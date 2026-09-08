@@ -77,20 +77,19 @@ test("renders repository guidance but leaves unrelated and malformed routes alon
 	}
 });
 
-test("the initial screen shows a neutral access check and native MCP disclosure", () => {
+test("the initial screen shows the app shell while access is checked", () => {
 	const html = renderScreen({
 		pathname: "/@opral/repo/file/notes.md",
 		searchStr: "?invite=secret",
 	});
 	assert.match(html, /Opening file/);
 	assert.match(html, /data-repository-access="pending"/);
-	assert.match(html, /disabled=""/);
-	assert.match(html, /<details[^>]*><summary/);
-	assert.match(html, /open_lix/);
-	assert.doesNotMatch(
+	assert.match(html, /data-app-titlebar="true"/);
+	assert.match(
 		html,
-		/404|isn&#x27;t available|secret|<details[^>]*open=/,
+		/aria-hidden="true" data-repository-access-skeleton="true"/,
 	);
+	assert.doesNotMatch(html, /404|isn&#x27;t available|secret|<details|<button/);
 });
 
 test("unavailable resources offer account recovery without claiming existence", () => {
