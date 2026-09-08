@@ -363,9 +363,8 @@ const createLixraySettingsExtension = (
 		apiVersion: 1,
 		id: LIXRAY_SETTINGS_EXTENSION_ID,
 		name: "Settings",
-		description: "Rename, access, and deletion for this repository.",
+		description: "Name, access, API tokens, and deletion for this repository.",
 		placement: ["central"],
-		hidden: true,
 	},
 	entry: {
 		icon: Settings,

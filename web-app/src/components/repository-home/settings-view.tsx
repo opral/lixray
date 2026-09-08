@@ -1,9 +1,13 @@
-import { Copy } from "lucide-react";
+import { Check, Copy, Globe2, LockKeyhole } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MemberAvatar } from "./people-view";
 import { Button } from "~/components/ui/button";
 import { formatCaughtError } from "~/lib/format";
+import {
+	RepositoryApiTokenPanel,
+	type RepositoryApiTokenApi,
+} from "~/components/api-token-settings";
 
 export interface DirectRepositoryMember {
 	accountId: string;
@@ -18,8 +22,9 @@ export interface DirectRepositoryMember {
  * React root outside the app's providers, so everything it needs arrives as
  * callbacks (same pattern as RepositoryTeamApi).
  */
-export interface RepositorySettingsApi {
+export interface RepositorySettingsApi extends RepositoryApiTokenApi {
 	info(): {
+		repositoryId: string;
 		namespaceHandle: string;
 		repositorySlug: string;
 		repositoryName: string;
@@ -74,11 +79,15 @@ function SettingsContent({
 				<h2 className="m-0 text-[16px] leading-tight font-bold tracking-[-0.01em]">
 					Settings
 				</h2>
-				<p className="m-0 mt-0.5 mb-5 text-[12.5px] text-text-tertiary">
+				<p className="m-0 mt-1 mb-5 text-[12.5px] text-text-tertiary">
 					lixray.com/@{info.namespaceHandle}/{info.repositorySlug}
 				</p>
 				<NamePanel settingsApi={settingsApi} />
 				<AccessPanel settingsApi={settingsApi} />
+				<RepositoryApiTokenPanel
+					key={`${info.repositoryId}:${info.currentAccountId}`}
+					api={settingsApi}
+				/>
 				{info.isAdmin ? <DangerPanel settingsApi={settingsApi} /> : null}
 			</div>
 		</div>
@@ -93,6 +102,8 @@ function NamePanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
+		if (!info.isAdmin || busy || !name.trim() || name.trim() === savedName)
+			return;
 		setBusy(true);
 		try {
 			await settingsApi.rename(name);
@@ -107,33 +118,35 @@ function NamePanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 
 	return (
 		<section className="mb-3.5 rounded-xl border border-border-panel px-[18px] py-4">
-			<h3 className="m-0 text-[13.5px] font-bold">Name</h3>
+			<h3 className="m-0 text-[13.5px] font-bold">
+				<label htmlFor="repository-name">Name</label>
+			</h3>
 			<p className="m-0 mt-0.5 mb-3 text-[12px] text-text-tertiary">
 				Renaming keeps the URL — the address stays{" "}
-				<code className="rounded bg-bg-hover px-1.5 py-0.5 text-[11.5px]">
+				<code className="text-[11.5px]">
 					@{info.namespaceHandle}/{info.repositorySlug}
 				</code>
 				.
 			</p>
 			<form className="flex gap-2" onSubmit={(event) => void submit(event)}>
 				<input
+					id="repository-name"
 					className="h-9 min-w-0 flex-1 rounded-lg border border-border-panel bg-bg-panel px-[11px] text-[13px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1 disabled:opacity-60"
 					maxLength={80}
 					value={name}
 					disabled={!info.isAdmin}
 					onChange={(event) => setName(event.target.value)}
 				/>
-				<Button
-					type="submit"
-					variant="outline"
-					size="sm"
-					className="h-9"
-					disabled={
-						!info.isAdmin || busy || !name.trim() || name.trim() === savedName
-					}
-				>
-					{busy ? "Saving…" : "Save"}
-				</Button>
+				{info.isAdmin && (name.trim() !== savedName || busy) ? (
+					<Button
+						type="submit"
+						size="sm"
+						className="h-9"
+						disabled={busy || !name.trim()}
+					>
+						{busy ? "Saving…" : "Save"}
+					</Button>
+				) : null}
 			</form>
 			{!info.isAdmin ? (
 				<p className="m-0 mt-2 text-[12px] text-text-quaternary">
@@ -150,6 +163,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 		readonly DirectRepositoryMember[] | null
 	>(null);
 	const [visibility, setVisibility] = useState(info.visibility);
+	const [visibilityBusy, setVisibilityBusy] = useState(false);
 	const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(
 		null,
 	);
@@ -211,134 +225,153 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 		}
 	};
 
-	const changeVisibility = async () => {
-		const next = visibility === "private" ? "public" : "private";
+	const changeVisibility = async (next: "private" | "public") => {
+		if (!info.isAdmin || visibilityBusy || next === visibility) return;
+		setVisibilityBusy(true);
 		try {
 			await settingsApi.setVisibility(next);
 			setVisibility(next);
 			toast.success(`Repository is now ${next}`);
 		} catch (caught) {
 			toast.error(formatCaughtError(caught));
+		} finally {
+			setVisibilityBusy(false);
 		}
 	};
 
 	return (
-		<section className="mb-3.5 rounded-xl border border-border-panel px-[18px] py-4">
-			<div className="mb-3 flex items-center gap-3 border-b border-border-subtle pb-3">
-				<div className="min-w-0 flex-1">
-					<h3 className="m-0 text-[13.5px] font-bold">Repository visibility</h3>
-					<p className="m-0 mt-0.5 text-[12px] text-text-tertiary">
-						{visibility === "public"
-							? "Anyone can read. Only members can edit."
-							: "Only repository members can open this repository. Published files remain public."}
-					</p>
-				</div>
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					disabled={!info.isAdmin}
-					onClick={() => void changeVisibility()}
-				>
-					{visibility === "public" ? "Make private" : "Make public"}
-				</Button>
-			</div>
-			<div className="flex items-center gap-2">
-				<h3 className="m-0 text-[13.5px] font-bold">Who has access</h3>
-			</div>
-			<p className="m-0 mt-1 mb-2 text-[12px] text-text-tertiary">
-				Admins can promote members and remove member access.
-			</p>
-			{directMembers?.map((member) => {
-				const isSelf = member.accountId === info.currentAccountId;
-				return (
+		<>
+			<section className="mb-3.5 rounded-xl border border-border-panel px-[18px] py-4">
+				<div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2">
+					<div className="min-w-0 flex-1 basis-[180px]">
+						<h3 className="m-0 text-[13.5px] font-bold">
+							Repository visibility
+						</h3>
+					</div>
 					<div
-						key={member.accountId}
-						className="flex items-center gap-2.5 border-t border-border-subtle py-2"
+						role="group"
+						aria-label="Repository visibility"
+						aria-busy={visibilityBusy}
+						className="grid w-[184px] shrink-0 grid-cols-2 gap-0.5 rounded-lg bg-bg-hover p-0.5"
 					>
-						<MemberAvatar
-							member={{
-								name: member.name || member.email || "Account",
-								avatarUrl: member.avatarUrl,
-							}}
-							className="size-6 text-[11px]"
-						/>
-						<span className="flex min-w-0 flex-col">
-							<span className="truncate text-[13px] leading-tight font-semibold">
-								{member.name || member.email || "Account"}
-								{isSelf ? (
-									<span className="ml-1.5 font-normal text-text-quaternary">
-										you
+						{(["private", "public"] as const).map((value) => {
+							const selected = visibility === value;
+							const Icon = value === "private" ? LockKeyhole : Globe2;
+							return (
+								<button
+									key={value}
+									type="button"
+									aria-pressed={selected}
+									disabled={!info.isAdmin || visibilityBusy}
+									onClick={() => void changeVisibility(value)}
+									className={`inline-flex h-7 min-w-0 items-center justify-center gap-1 rounded-md px-1.5 text-[11.5px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible disabled:cursor-default ${selected ? "bg-bg-panel text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-primary"}`}
+								>
+									<Icon className="size-3.5" aria-hidden="true" />
+									{value === "private" ? "Private" : "Public"}
+									<Check
+										className={`size-3 shrink-0 ${selected ? "" : "invisible"}`}
+										aria-hidden="true"
+									/>
+								</button>
+							);
+						})}
+					</div>
+				</div>
+				<p className="m-0 mt-2 text-[12px] leading-relaxed text-text-tertiary">
+					{visibility === "public"
+						? "Anyone can read. Only members can edit."
+						: "Only repository members can open this repository. Published files remain public."}
+				</p>
+			</section>
+			<section className="mb-3.5 rounded-xl border border-border-panel px-[18px] py-4">
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<h3 className="m-0 text-[13.5px] font-bold">Members</h3>
+					<Button
+						type="button"
+						variant="ghost"
+						size="sm"
+						className="-mr-2 h-7 gap-1.5 px-2 text-xs text-text-secondary"
+						title="Anyone with the invite link can join this repository as a member."
+						onClick={() => void copyInviteLink()}
+					>
+						<Copy className="size-3" aria-hidden="true" />
+						Copy invite link
+					</Button>
+				</div>
+				<p className="m-0 mt-1 mb-2 text-[12px] text-text-tertiary">
+					Admins can promote members and remove member access.
+				</p>
+				{directMembers?.map((member) => {
+					const isSelf = member.accountId === info.currentAccountId;
+					return (
+						<div
+							key={member.accountId}
+							className="flex items-center gap-3 border-t border-border-subtle pt-3 pb-1"
+						>
+							<MemberAvatar
+								member={{
+									name: member.name || member.email || "Account",
+									avatarUrl: member.avatarUrl,
+								}}
+								className="size-8 shrink-0 text-xs"
+							/>
+							<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+								<span className="truncate text-[13px] leading-tight font-semibold">
+									{member.name || member.email || "Account"}
+									{isSelf ? (
+										<span className="ml-1.5 font-normal text-text-quaternary">
+											you
+										</span>
+									) : null}
+								</span>
+								{member.email ? (
+									<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
+										{member.email}
 									</span>
 								) : null}
 							</span>
-							{member.email ? (
-								<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
-									{member.email}
-								</span>
-							) : null}
-						</span>
-						<span className="ml-auto rounded-[7px] border border-border-panel px-2 py-1 text-[12px] text-text-secondary">
-							{member.role === "admin" ? "Admin" : "Member"}
-						</span>
-						{info.isAdmin && member.role === "member" ? (
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								className="h-7 text-text-tertiary"
-								onClick={() => void promoteMember(member)}
-							>
-								Make admin
-							</Button>
-						) : null}
-						{member.role === "member" && (info.isAdmin || isSelf) ? (
-							confirmingRemoval === member.accountId ? (
-								<Button
-									type="button"
-									variant="destructive"
-									size="sm"
-									className="h-7"
-									onClick={() => void removeMember(member)}
-								>
-									Confirm
-								</Button>
-							) : (
+							<span className="ml-auto shrink-0 text-[12px] text-text-tertiary">
+								{member.role === "admin" ? "Admin" : "Member"}
+							</span>
+							{info.isAdmin && member.role === "member" ? (
 								<Button
 									type="button"
 									variant="ghost"
 									size="sm"
 									className="h-7 text-text-tertiary"
-									onClick={() => setConfirmingRemoval(member.accountId)}
+									onClick={() => void promoteMember(member)}
 								>
-									{isSelf ? "Leave" : "Remove"}
+									Make admin
 								</Button>
-							)
-						) : null}
-					</div>
-				);
-			})}
-			<div className="mt-3 flex items-center gap-3 rounded-lg border border-border-subtle bg-bg-hover px-3 py-2.5">
-				<div className="min-w-0 flex-1">
-					<p className="m-0 text-[12.5px] font-semibold text-text-primary">
-						Invite members
-					</p>
-					<p className="m-0 mt-0.5 text-[11.5px] text-text-tertiary">
-						Anyone with the invite link can join this repository as a member.
-					</p>
-				</div>
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					className="h-8 shrink-0 gap-1.5"
-					onClick={() => void copyInviteLink()}
-				>
-					<Copy className="size-3" aria-hidden="true" />
-					Copy invite link
-				</Button>
-			</div>
-		</section>
+							) : null}
+							{member.role === "member" && (info.isAdmin || isSelf) ? (
+								confirmingRemoval === member.accountId ? (
+									<Button
+										type="button"
+										variant="destructive"
+										size="sm"
+										className="h-7"
+										onClick={() => void removeMember(member)}
+									>
+										Confirm
+									</Button>
+								) : (
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										className="h-7 text-text-tertiary"
+										onClick={() => setConfirmingRemoval(member.accountId)}
+									>
+										{isSelf ? "Leave" : "Remove"}
+									</Button>
+								)
+							) : null}
+						</div>
+					);
+				})}
+			</section>
+		</>
 	);
 }
 
@@ -361,7 +394,7 @@ function DangerPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 
 	return (
 		<section className="rounded-xl border border-error-200 px-[18px] py-4">
-			<h3 className="m-0 text-[13.5px] font-bold text-error-700">
+			<h3 className="m-0 text-[13.5px] font-bold text-text-primary">
 				Danger zone
 			</h3>
 			<p className="m-0 mt-0.5 mb-3 text-[12px] text-text-tertiary">
@@ -403,9 +436,9 @@ function DangerPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 			) : (
 				<Button
 					type="button"
-					variant="outline"
+					variant="ghost"
 					size="sm"
-					className="h-9 border-error-200 text-error-700 hover:bg-error-50"
+					className="-ml-3 h-9 text-xs text-error-700 hover:bg-error-50 hover:text-error-800"
 					onClick={() => setOpen(true)}
 				>
 					Delete repository…

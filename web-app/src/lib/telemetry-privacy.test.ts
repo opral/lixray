@@ -72,6 +72,19 @@ void test("autocapture keeps only intentional safe data attributes", () => {
 	});
 });
 
+void test("scrubs personal API tokens from telemetry strings", () => {
+	const token = `lixray_pat_${"a".repeat(64)}`;
+	const event = scrubPostHogEvent({
+		uuid: "api_token_event",
+		event: "$exception",
+		properties: { note: `Credential ${token}`, header: `Bearer ${token}` },
+	});
+	assert.deepEqual(event?.properties, {
+		note: "Credential [redacted_token]",
+		header: "Bearer [redacted]",
+	});
+});
+
 void test("preserves sanitized PostHog exception messages", () => {
 	const event = scrubPostHogEvent({
 		uuid: "event_exception",
