@@ -138,7 +138,9 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 			}),
 		).toHaveCount(0);
 		await page.reload();
-		await expect(row("note.txt")).toBeVisible();
+		// Request interception disables HTTP caching. CI must reload Vite's
+		// module graph and WASM before the persisted local replica can open.
+		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
 		await expect(
 			page.getByRole("button", {
 				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
