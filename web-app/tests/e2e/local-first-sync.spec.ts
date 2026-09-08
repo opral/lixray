@@ -127,7 +127,16 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 			exact: true,
 		});
 		await checkpointButton.click();
-		await expect(checkpointButton).toHaveCount(0, { timeout: 5_000 });
+		// The action changes its label to “Checkpointing…” while SQL is pending.
+		// Wait for the entire action to disappear before destroying the page.
+		await expect(
+			page.getByRole("button", { name: /^(Checkpoint|Checkpointing…)$/ }),
+		).toHaveCount(0, { timeout: 5_000 });
+		await expect(
+			page.getByRole("button", {
+				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+			}),
+		).toHaveCount(0);
 		await page.reload();
 		await expect(row("note.txt")).toBeVisible();
 		await expect(

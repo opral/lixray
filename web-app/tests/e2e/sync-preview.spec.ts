@@ -224,7 +224,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				.getByRole("button", { name: "Checkpoint", exact: true })
 				.click();
 			await expect(
-				page.getByRole("button", { name: "Checkpoint", exact: true }),
+				page.getByRole("button", { name: /^(Checkpoint|Checkpointing…)$/ }),
 			).toHaveCount(0, { timeout: 5_000 });
 			// The second tab observes the same durable OPFS commit while the
 			// server is unreachable; no foreground /execute receipt is needed.
