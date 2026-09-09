@@ -416,7 +416,9 @@ covers the two fixed demo IDs and any configured `LIXRAY_DEMO_LIX_IDS` (or legac
 Before switching existing production storage to the lifecycle-aware server,
 export the repository UUID inventory with `SELECT id FROM public.lixes ORDER BY id`
 and explicitly register every previously backed repository. The same private
-operator command accepts IDs after the required mode, replacing the demo defaults:
+operator command accepts IDs after the required mode, replacing the demo defaults.
+Adoption allows up to nine minutes per repository for an epoch migration and does
+not retry a provisioning write automatically:
 
 ```sh
 railway ssh --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" -- node /app/web-app/scripts/provision-repositories.mjs adopt-existing REPOSITORY_UUID
@@ -431,6 +433,11 @@ after both image deployments succeed and before the public canary runs. It uses
 empty repository or preview demo IDs. This bounded release check does not replace
 the full legacy inventory migration described above. The database migration alone
 does not provision repositories.
+
+Repository opening failures display the migration error code and diagnostic text
+instead of replacing them with a generic support message. Include that text when
+reporting a failed migration; server diagnostics omit private storage connection
+details. Do not reset or recreate the repository to work around a migration error.
 
 Preview and production canary CI register a unique ephemeral SSH key for that operator command and
 revokes it afterward, including failed provisioning attempts. The existing

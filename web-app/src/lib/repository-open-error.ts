@@ -7,7 +7,7 @@ export function formatRepositoryOpenError(caught: unknown): string {
 		code === "LIX_ERROR_MIGRATION_FAILED" ||
 		code === "LIX_ERROR_REPOSITORY_UPGRADE"
 	) {
-		return "Repository migration failed. Contact support to recover the repository.";
+		return `Repository migration failed (${code}): ${message}`;
 	}
 
 	return message;
@@ -23,6 +23,15 @@ function getErrorCode(caught: unknown): string | undefined {
 }
 
 function getErrorMessage(caught: unknown): string {
+	if (
+		caught &&
+		typeof caught === "object" &&
+		"message" in caught &&
+		typeof caught.message === "string" &&
+		caught.message.trim()
+	) {
+		return caught.message;
+	}
 	if (caught instanceof Error) {
 		return caught.message;
 	}

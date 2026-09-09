@@ -74,7 +74,11 @@ export async function provisionRepositories({
 					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({ mode }),
-				signal: AbortSignal.timeout(60_000),
+				// Adoption can include a full epoch migration. Match the bounded
+				// migration window used by the production canary.
+				signal: AbortSignal.timeout(
+					mode === "adopt-existing" ? 9 * 60_000 : 60_000,
+				),
 			},
 		);
 		if (!response.ok) {
