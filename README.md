@@ -446,3 +446,51 @@ SSH private key is stored in repository or CI configuration. Before connecting,
 CI wakes the web deployment through its public health endpoint. The operator
 waits for private server health before provisioning; transient wake-up failures
 do not repeat repository writes.
+
+## Creating a hosted repository from an SDK
+
+`createLix({ server: { url: "https://lixray.com", headers }, from: localLix })`
+uses the canonical `POST /lix/v1` endpoint. The gateway authenticates the caller,
+streams the snapshot to the reference server under the canonical account's
+idempotency scope, then registers the result privately in the personal namespace.
+No Lix protocol or SDK extension is required. Repository names can be changed
+through the existing control plane after creation.
+
+Deploy migration `20260910000000_hosted_repository_creation.sql` and configure
+`SUPABASE_SERVICE_ROLE_KEY` in the **server environment only**. Never prefix it
+with `VITE_`. This credential calls the service-role-only registration RPC; a
+user token cannot claim an existing server repository ID. Missing configuration
+returns 503 before upload. Repository-scoped PATs cannot create repositories;
+use a browser session or an OAuth token bound to this Lixray origin. The user
+must already have an active account and personal namespace.
+
+A successful response means both storage creation and private ownership
+registration finished. If registration or the response is interrupted, retry
+with the **same idempotency key and identical snapshot**. The Lix reference
+server durably resolves that retry to the same repository, and the database
+receipt makes registration repeatable. Retrying does not reset permissions or
+rename the repository, and cannot resurrect a deleted repository. There is no
+distributed transaction: a failed registration can leave inaccessible storage
+until a retry completes. Do not use a new key to retry an uncertain creation.
+
+Creation copies a snapshot; it does not connect the source. Reopen the local
+repository with `openLix({ storage, server: { url: hosted.url, headers } })` to
+sync, then publish selected paths through `POST /api/repositories/<id>/share?path=/file.md`.
+`GET` reads publication status and `DELETE` removes a direct file publication.
+The gateway invokes the existing publication RPCs with the caller's token and
+retains their membership checks; publication never uses the service credential.
+Also deploy `20260910000100_desktop_file_sharing.sql` to permit resource-bound
+OAuth grants to use those RPCs.
+
+Desktop clients use the existing OAuth authorization code flow with PKCE:
+discover `/.well-known/oauth-protected-resource`, register a public client with
+a loopback redirect URI, and open authorization in the system browser. Token
+exchange and refresh use no client secret. Tokens must target this Lixray origin;
+a token for another resource is rejected. Store refresh tokens in the operating
+system's secure credential storage, never alongside repository content.
+
+Flashtype stores the hosted URL in its own workspace settings and resumes sync on
+reopen. It stages a snapshot once and uploads those same bytes with the same
+idempotency key on retry, rather than exporting a changing repository again.
+Only after the chosen file's content has reached the server does it publish the
+file and show the public link.

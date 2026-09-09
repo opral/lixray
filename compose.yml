@@ -69,6 +69,7 @@ services:
       SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-http://host.docker.internal:54321/auth/v1/.well-known/jwks.json}
       SUPABASE_JWT_ISSUER_URL: ${SUPABASE_JWT_ISSUER_URL:-http://127.0.0.1:54321}
       SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
     depends_on:
       lix-server:
         condition: service_started

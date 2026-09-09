@@ -1,3 +1,5 @@
+import { handleFileSharing } from "./repository-file-sharing.ts";
+import { createHostedRepository } from "./repository-create.ts";
 import { validateMcpJwtClaims } from "../mcp/auth.ts";
 import { jwtVerify, type JWTPayload } from "jose";
 import {
@@ -81,6 +83,8 @@ export { validateMcpJwtClaims } from "../mcp/auth.ts";
 export interface WorkerEnv {
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
+	/** Server-only credential for registering protocol-created repository ownership. */
+	SUPABASE_SERVICE_ROLE_KEY?: string;
 	SUPABASE_JWKS_URL?: string;
 	/**
 	 * Public Supabase URL used as the JWT issuer. This can differ from
@@ -292,6 +296,41 @@ export async function handleRequest(
 					...(deploymentId ? { "x-railway-deployment-id": deploymentId } : {}),
 				},
 			},
+		);
+	}
+
+	const fileShareMatch = /^\/api\/repositories\/([0-9a-f-]{36})\/share$/.exec(
+		url.pathname,
+	);
+	if (fileShareMatch) {
+		const auth = await (options.authenticate ?? authenticateRepositoryClient)(
+			request,
+			env,
+		);
+		if (!auth.ok) return auth.response;
+		return handleFileSharing(
+			request,
+			env,
+			auth.auth.token,
+			fileShareMatch[1],
+			options.fetch,
+		);
+	}
+
+	if (url.pathname === "/lix/v1") {
+		if (request.method === "OPTIONS") return remoteLixCorsPreflight(request);
+		if (request.method !== "POST")
+			return new Response("Method not allowed", { status: 405 });
+		const auth = await (options.authenticate ?? authenticateRepositoryClient)(
+			request,
+			env,
+		);
+		if (!auth.ok) return withRemoteLixCors(auth.response, request);
+		if (auth.auth.isDemo)
+			return new Response("Sign in to create a repository", { status: 403 });
+		return withRemoteLixCors(
+			await createHostedRepository(request, env, auth.auth, options.fetch),
+			request,
 		);
 	}
 
@@ -886,7 +925,7 @@ export async function handleRequest(
 					? url.searchParams.get("path")
 					: request.headers.get("x-lixray-public-path")) ?? undefined;
 
-			const authenticate = options.authenticate ?? authenticateWithSupabase;
+			const authenticate = options.authenticate ?? authenticateRepositoryClient;
 			const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
 			const authCheckStartedAt = performance.now();
 			if (bearerToken(request)) {
@@ -1208,6 +1247,7 @@ async function fetchLixRequest(
 export async function authenticateWithSupabase(
 	request: Request,
 	env: WorkerEnv,
+	allowRepositoryOAuth = false,
 ): Promise<AuthResult> {
 	const demoAuth = authenticateDemo(request, env);
 	if (demoAuth) return demoAuth;
@@ -1241,7 +1281,16 @@ export async function authenticateWithSupabase(
 			},
 		);
 		await persistRemoteJwksIfPresent(jwksUrl, cachePath);
-		if (!validateBrowserJwtClaims(payload)) return unauthorized();
+		if (
+			!(allowRepositoryOAuth
+				? validateRepositoryJwtClaims(
+						payload,
+						issuer,
+						mcpResourceUrl(new URL(request.url)),
+					)
+				: validateBrowserJwtClaims(payload))
+		)
+			return unauthorized();
 		const account = await resolveCurrentAccount(token, env);
 		if (!account.ok) return account;
 		return {
@@ -1420,6 +1469,22 @@ function deferResponseCleanup(
 		statusText: response.statusText,
 		headers: response.headers,
 	});
+}
+
+// Repository APIs accept the same resource-bound OAuth grants as Lixray's MCP API.
+// Other browser endpoints retain their first-party-session-only boundary.
+function authenticateRepositoryClient(request: Request, env: WorkerEnv) {
+	return authenticateWithSupabase(request, env, true);
+}
+export function validateRepositoryJwtClaims(
+	payload: JWTPayload,
+	issuer: string,
+	resource: string,
+) {
+	return (
+		validateBrowserJwtClaims(payload) ||
+		validateMcpJwtClaims(payload, issuer, undefined, resource).ok
+	);
 }
 
 export function validateBrowserJwtClaims(payload: JWTPayload): boolean {
