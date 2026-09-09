@@ -431,4 +431,7 @@ production adoption or creation is performed automatically by this migration.
 Preview CI registers a unique ephemeral SSH key for that operator command and
 revokes it afterward, including failed provisioning attempts. The existing
 workspace-scoped Railway API token must permit SSH key management; no permanent
-SSH private key is stored in repository or CI configuration.
+SSH private key is stored in repository or CI configuration. Before connecting,
+CI wakes the web deployment through its public health endpoint. The operator
+waits for private server health before provisioning; transient wake-up failures
+do not repeat repository writes.

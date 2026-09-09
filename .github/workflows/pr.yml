@@ -656,12 +656,6 @@ jobs:
           WEB_IMAGE: ${{ needs.web-image.outputs.image }}
         run: .github/scripts/promote-production.sh
 
-      - name: Provision disposable preview demo repositories
-        if: steps.credentials.outputs.available == 'true'
-        env:
-          RAILWAY_TARGET_ENVIRONMENT: ${{ steps.environment.outputs.environment_id }}
-        run: .github/scripts/provision-preview-repositories.sh
-
       - name: Publish preview URL
         if: steps.credentials.outputs.available == 'true'
         id: preview
@@ -669,6 +663,13 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: .github/scripts/manage-railway-preview.sh url
+
+      - name: Provision disposable preview demo repositories
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
+          RAILWAY_TARGET_ENVIRONMENT: ${{ steps.environment.outputs.environment_id }}
+        run: .github/scripts/provision-preview-repositories.sh
 
       - name: Verify preview server protocol
         if: steps.credentials.outputs.available == 'true'

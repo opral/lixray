@@ -8,6 +8,8 @@ import test from "node:test";
 const script = resolve(import.meta.dirname, "provision-preview-repositories.sh");
 for (const [name, failure, expected] of [
   ["success", "none", 0],
+  ["HTTP wake failure", "wake", 22],
+  ["SSH relay wake lag", "relay", 0],
   ["operator failure", "operator", 17],
   ["registration response failure", "register", 19],
   ["revocation failure", "revoke", 1],
@@ -18,6 +20,12 @@ for (const [name, failure, expected] of [
       const calls = join(dir, "calls.jsonl");
       const railway = join(dir, "railway");
       const sshCalls = join(dir, "ssh.jsonl");
+      await writeFile(join(dir, "curl"), `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args.at(-1) !== 'https://preview.example/healthz' || !args.includes('--fail')) process.exit(34);
+require('node:fs').appendFileSync(process.env.MOCK_CALLS, JSON.stringify(['wake']) + '\\n');
+if (process.env.MOCK_FAILURE === 'wake') process.exit(22);
+`, { mode: 0o700 });
       await writeFile(join(dir, "ssh"), `#!${process.execPath}
 require('node:fs').appendFileSync(process.env.MOCK_SSH_CALLS, JSON.stringify(process.argv.slice(2)) + '\\n');
 `, { mode: 0o700 });
@@ -36,6 +44,11 @@ if (args[2] === 'add') {
 } else if (args[1] !== 'keys') {
   const file = args[args.indexOf('--identity-file') + 1];
   if (!fs.existsSync(file)) process.exit(32);
+  if (process.env.MOCK_FAILURE === 'relay' && !fs.existsSync(process.env.MOCK_CALLS + '.relay')) {
+    fs.writeFileSync(process.env.MOCK_CALLS + '.relay', 'once');
+    console.error("No active deployment for 'fixture'");
+    process.exit(255);
+  }
   const cp = require('node:child_process');
   for (const target of ['fixture@ssh.railway.com', 'fixture@example.com']) {
     const result = cp.spawnSync('ssh', ['-i', file, '-T', target, 'true'], { stdio: 'inherit' });
@@ -51,6 +64,7 @@ if (args[2] === 'add') {
         env: {
           ...process.env,
           RAILWAY_BIN: railway,
+          PREVIEW_URL: "https://preview.example",
           RAILWAY_API_TOKEN: "fixture-token",
           RAILWAY_PROJECT_ID: "project",
           RAILWAY_TARGET_ENVIRONMENT: "preview",
@@ -63,6 +77,11 @@ if (args[2] === 'add') {
       });
       assert.equal(result.status, expected, result.stderr);
       const recorded = (await readFile(calls, "utf8")).trim().split("\n").map(JSON.parse);
+      assert.deepEqual(recorded[0], ["wake"]);
+      if (failure === "wake") {
+        assert.deepEqual(recorded, [["wake"]]);
+        return;
+      }
       const added = recorded.find((args) => args[2] === "add");
       const removed = recorded.find((args) => args[2] === "remove");
       assert.ok(added);
@@ -78,7 +97,9 @@ if (args[2] === 'add') {
         // No alternate trust store or configuration override: OpenSSH retains
         // existing host keys and rejects mismatches under accept-new.
         assert.ok(ssh.flat().every((arg) => !arg.includes("UserKnownHostsFile") && arg !== "-F"));
-        const command = recorded.find((args) => args.includes("--identity-file"));
+        const commands = recorded.filter((args) => args.includes("--identity-file"));
+        assert.equal(commands.length, failure === "relay" ? 2 : 1);
+        const command = commands[0];
         assert.deepEqual(command.slice(-3), [
           "node",
           "/app/web-app/scripts/provision-repositories.mjs",

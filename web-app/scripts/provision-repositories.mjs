@@ -7,6 +7,8 @@ export async function provisionRepositories({
 	ids: requestedIds,
 	env = process.env,
 	fetchImpl = fetch,
+	sleepImpl = (milliseconds) =>
+		new Promise((resolve) => setTimeout(resolve, milliseconds)),
 }) {
 	if (mode !== "create-new" && mode !== "adopt-existing") {
 		throw new Error(
@@ -34,6 +36,32 @@ export async function provisionRepositories({
 		) {
 			throw new Error("A configured demo repository ID is invalid.");
 		}
+	}
+	// Private traffic wakes a sleeping Railway service. Wait using a read-only
+	// request so transient wake-up failures cannot repeat a provisioning write.
+	for (let attempt = 0; attempt < 6; attempt++) {
+		let response;
+		try {
+			response = await fetchImpl(
+				new URL("/healthz", env.LIXRAY_LIX_SERVICE_URL),
+				{
+					method: "GET",
+					signal: AbortSignal.timeout(10_000),
+				},
+			);
+		} catch {
+			// Network failures during wake-up may be retried; never print credentials.
+		}
+		await response?.body?.cancel();
+		if (response?.status === 200) break;
+		const status = response ? `HTTP ${response.status}` : "network failure";
+		if (
+			(response && ![502, 503, 504].includes(response.status)) ||
+			attempt === 5
+		) {
+			throw new Error(`Private Lix service did not become ready (${status}).`);
+		}
+		await sleepImpl(5_000);
 	}
 	for (const id of ids) {
 		const response = await fetchImpl(

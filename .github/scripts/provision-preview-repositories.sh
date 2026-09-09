@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+: "${PREVIEW_URL:?}"
 : "${RAILWAY_API_TOKEN:?}"
 : "${RAILWAY_PROJECT_ID:?}"
 : "${RAILWAY_TARGET_ENVIRONMENT:?}"
 : "${RAILWAY_WEB_SERVICE:?}"
 RAILWAY_BIN="${RAILWAY_BIN:-railway}"
+
+# A reused preview can be SLEEPING. HTTP wakes its web deployment; SSH alone
+# cannot connect until the container is active. This does not provision data.
+curl --fail --silent --show-error --output /dev/null --connect-timeout 5 --max-time 20 \
+    --retry 12 --retry-all-errors --retry-delay 5 "$PREVIEW_URL/healthz"
 
 # Railway CLI 5.30 discovers public keys directly under ~/.ssh even when --key
 # is explicit. Use a fresh file there, never overwrite or reuse an existing key.
@@ -38,7 +44,7 @@ cleanup() {
 			result=1
 		fi
 	fi
-	rm -f "$key_file" "$key_file.pub" "$key_file.cleanup"
+	rm -f "$key_file" "$key_file.pub" "$key_file.cleanup" "$key_file.ssh"
 	if test -n "$ssh_wrapper_dir"; then rm -rf "$ssh_wrapper_dir"; fi
 	exit "$result"
 }
@@ -63,4 +69,18 @@ SSH
 chmod 700 "$ssh_wrapper_dir/ssh"
 registration_attempted=true
 "$RAILWAY_BIN" ssh keys add --key "$key_file.pub" --name "lixray-preview-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
-PATH="$ssh_wrapper_dir:$PATH" "$RAILWAY_BIN" ssh --identity-file "$key_file" --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" -- node /app/web-app/scripts/provision-repositories.mjs create-new
+for attempt in 1 2 3 4 5; do
+    if PATH="$ssh_wrapper_dir:$PATH" "$RAILWAY_BIN" ssh --identity-file "$key_file" --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" -- node /app/web-app/scripts/provision-repositories.mjs create-new >"$key_file.ssh" 2>&1; then
+        cat "$key_file.ssh"
+        exit 0
+    else
+        result=$?
+    fi
+    cat "$key_file.ssh" >&2
+    # The HTTP process can become ready before the SSH relay refreshes its
+    # active deployment. Never retry authentication or operator failures.
+    if ! grep -q '^No active deployment for ' "$key_file.ssh" || test "$attempt" = 5; then
+        exit "$result"
+    fi
+    sleep 2
+done

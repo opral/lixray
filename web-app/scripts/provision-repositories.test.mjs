@@ -13,6 +13,8 @@ test("operator explicitly provisions fixed demo IDs through the private host end
 		mode: "create-new",
 		env,
 		fetchImpl: async (url, request) => {
+			if (url.pathname === "/healthz")
+				return new Response(null, { status: 200 });
 			calls.push({ url: String(url), request });
 			return new Response(null, { status: 201 });
 		},
@@ -33,6 +35,8 @@ test("failed adoption never falls back to creating or ignores a tombstone", asyn
 			mode: "adopt-existing",
 			env,
 			fetchImpl: async (_url, request) => {
+				if (_url.pathname === "/healthz")
+					return new Response(null, { status: 200 });
 				calls++;
 				assert.deepEqual(JSON.parse(request.body), { mode: "adopt-existing" });
 				return new Response(null, { status: 404 });
@@ -69,6 +73,8 @@ test("explicit legacy repository IDs replace demo defaults for adoption", async 
 		ids: [id],
 		env,
 		fetchImpl: async (url, request) => {
+			if (url.pathname === "/healthz")
+				return new Response(null, { status: 200 });
 			urls.push(String(url));
 			assert.deepEqual(JSON.parse(request.body), { mode: "adopt-existing" });
 			return new Response(null, { status: 200 });
@@ -78,3 +84,52 @@ test("explicit legacy repository IDs replace demo defaults for adoption", async 
 		`http://lix-private:8080/internal/repositories/${id}/provision`,
 	]);
 });
+
+test("operator wakes the private service before any mutation", async () => {
+	const methods = [];
+	const sleeps = [];
+	let attempts = 0;
+	await provisionRepositories({
+		mode: "create-new",
+		env,
+		sleepImpl: async (milliseconds) => {
+			sleeps.push(milliseconds);
+		},
+		fetchImpl: async (url, request) => {
+			methods.push(request.method);
+			if (url.pathname === "/healthz") {
+				assert.equal(request.headers, undefined);
+				attempts++;
+				if (attempts === 1) throw new TypeError("network unavailable");
+				return new Response(null, { status: attempts === 2 ? 502 : 200 });
+			}
+			return new Response(null, { status: 201 });
+		},
+	});
+	assert.deepEqual(methods, ["GET", "GET", "GET", "POST", "POST"]);
+	assert.deepEqual(sleeps, [5000, 5000]);
+});
+
+for (const [status, expectedAttempts] of [
+	[503, 6],
+	[401, 1],
+]) {
+	test(`private readiness HTTP ${status} fails without provisioning`, async () => {
+		let attempts = 0;
+		await assert.rejects(
+			provisionRepositories({
+				mode: "create-new",
+				env,
+				sleepImpl: async () => {},
+				fetchImpl: async (url, request) => {
+					attempts++;
+					assert.equal(url.pathname, "/healthz");
+					assert.equal(request.method, "GET");
+					return new Response(null, { status });
+				},
+			}),
+			new RegExp(`HTTP ${status}`),
+		);
+		assert.equal(attempts, expectedAttempts);
+	});
+}
