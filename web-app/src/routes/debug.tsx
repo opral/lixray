@@ -9,7 +9,7 @@ import { Button } from "~/components/ui/button";
 // Load browser editors only after a snapshot is selected, never during SSR.
 const SnapshotAtelier = lazy(async () => {
 	const { Atelier } = await import("@opral/atelier");
-	return { default: Atelier.Shell };
+	return { default: Atelier };
 });
 
 export const Route = createFileRoute("/debug")({

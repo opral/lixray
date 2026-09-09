@@ -100,6 +100,7 @@ composeEnv = {
 	LIXRAY_DEV_HOST: devHost,
 	LIXRAY_DEV_PORT: devPort,
 	LIXRAY_SERVER_PORT: serverPort,
+	LIXRAY_PUBLIC_URL: `http://${devHost}:${devPort}`,
 	LIXRAY_MINIO_PORT: minioPort,
 	LIXRAY_MINIO_CONSOLE_PORT: minioConsolePort,
 	LIXRAY_LIX_SERVICE_URL: "http://lix-server:8080",

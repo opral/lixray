@@ -515,7 +515,7 @@ export class ProtocolClient {
   }
 
   requestHeaders(contentType, idempotencyKey) {
-    const headers = {};
+    const headers = { "lix-server-protocol-version": "7" };
     if (contentType !== undefined) {
       headers["content-type"] = contentType;
     }

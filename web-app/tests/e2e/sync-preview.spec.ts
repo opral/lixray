@@ -55,7 +55,8 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				headers: {
 					Authorization: "Bearer lixray-demo",
 					"Lix-Session-Id": "0".repeat(64),
-					"Lix-Sync-Protocol-Version": "7",
+					"Lix-Sync-Protocol-Version": "9",
+					"Lix-Server-Protocol-Version": "7",
 				},
 			});
 			return {
@@ -83,20 +84,32 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 	const unreadableBlobLaneResponses = new Map<Request, string>();
 	const blobLaneObservationFailures: string[] = [];
 	const openHistoryPanel = async (page: Page) => {
-		const history = page.getByRole("region", {
+		const secondary = page.getByRole("complementary", {
+			name: "Secondary",
+			exact: true,
+		});
+		const history = secondary.getByRole("region", {
 			name: "Checkpoint history",
 		});
-		if (await history.isVisible()) return history;
+		const selectRepositoryScope = async () => {
+			const scopeSwitch = secondary.getByRole("button", {
+				name: "Showing this file. Switch to the repository",
+				exact: true,
+			});
+			if (await scopeSwitch.isVisible()) await scopeSwitch.click();
+			return history;
+		};
+		if (await history.isVisible()) return selectRepositoryScope();
 		const panelToggle = page.getByRole("button", {
 			name: "Toggle right panel",
 		});
 		if ((await panelToggle.getAttribute("aria-pressed")) === "false") {
 			await panelToggle.click();
 		}
-		const historyTab = page
+		const historyTab = secondary
 			.getByRole("button", { name: "History", exact: true })
 			.last();
-		const selectedHistoryMenu = page.getByRole("button", {
+		const selectedHistoryMenu = secondary.getByRole("button", {
 			name: "History panel view menu",
 			exact: true,
 		});
@@ -110,7 +123,9 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			await historyTab.click();
 		}
 		await expect(history).toBeVisible({ timeout: 30_000 });
-		return history;
+		// The authority count describes the repository timeline, while History
+		// follows the active file by default. Select the matching product scope.
+		return selectRepositoryScope();
 	};
 	let authorityReadSequence = 0;
 	const authorityCheckpointCount = async (): Promise<number> => {
@@ -118,7 +133,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			`/lix/v1/${DEMO_LIX_ID}/`,
 			baseURL,
 		).toString();
-		const authorization = { Authorization: "Bearer lixray-demo" };
+		const authorization = {
+			Authorization: "Bearer lixray-demo",
+			"Lix-Server-Protocol-Version": "7",
+		};
 		const opened = await sharedContext.request.get(repositoryEndpoint, {
 			headers: authorization,
 		});
@@ -134,7 +152,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 						"Lix-Session-Id": sessionId,
 					},
 					data: {
-						sql: "SELECT count(*) AS checkpoint_count FROM lix_checkpoint",
+						sql: "SELECT count(*) AS checkpoint_count FROM lix_log() WHERE is_checkpoint",
 						params: [],
 					},
 				},
@@ -190,6 +208,29 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			.toBe(true);
 		return matchedCount;
 	};
+	const openRepositoryWorkingChanges = async (page: Page) => {
+		await page
+			.getByRole("button", {
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
+			})
+			.click();
+		const navigator = page.getByRole("complementary", {
+			name: "Navigator",
+			exact: true,
+		});
+		await expect(
+			navigator.getByRole("region", { name: "Checkpoint history" }),
+		).toBeVisible();
+		// The active file may already be checkpointed while other files remain dirty.
+		const repositoryScope = navigator.getByRole("button", {
+			name: "Showing this file. Switch to the repository",
+			exact: true,
+		});
+		if (await repositoryScope.isVisible()) await repositoryScope.click();
+		await navigator
+			.getByRole("button", { name: "Working changes", exact: true })
+			.click();
+	};
 	const clickCheckpoint = async (
 		page: Page,
 		selectFiles?: () => Promise<void>,
@@ -221,11 +262,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		};
 		// Count/history preparation can yield while editor side effects commit.
 		// Capture the review epoch only after that preparation has completed.
-		await page
-			.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
-			})
-			.click();
+		await openRepositoryWorkingChanges(page);
 		await selectFiles?.();
 		// Review presentation can load asynchronously. Finish that online setup
 		// before measuring the local checkpoint with the network unavailable.
@@ -273,7 +310,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			.poll(authorityCheckpointCount, { timeout: repositoryOperationTimeout })
 			.toBeGreaterThanOrEqual(before + 1);
 		const endpoint = new URL(`/lix/v1/${DEMO_LIX_ID}/`, baseURL).toString();
-		const authorization = { Authorization: "Bearer lixray-demo" };
+		const authorization = {
+			Authorization: "Bearer lixray-demo",
+			"Lix-Server-Protocol-Version": "7",
+		};
 		const opened = await sharedContext.request.get(endpoint, {
 			headers: authorization,
 		});
@@ -294,7 +334,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 									"Idempotency-Key": `local-checkpoint-read-${Date.now()}-${authorityReadSequence++}`,
 								},
 								data: {
-									sql: "SELECT commit_id FROM lix_checkpoint WHERE commit_id = $1",
+									sql: "SELECT id AS commit_id FROM lix_commit WHERE id = $1 AND is_checkpoint",
 									params: [{ kind: "text", value: localCheckpointId }],
 								},
 							},
@@ -509,10 +549,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 					exact: true,
 				});
 				await homeTab.waitFor({ timeout: 120_000 });
-				// Pinned Atelier tabs are sortable and expose aria-disabled while
-				// remaining selectable. Bypass Playwright's disabled actionability
-				// check so the test follows the same pointer activation path.
-				await homeTab.click({ force: true });
+				await homeTab.click();
 			}
 			await newButton.or(gettingStarted).first().waitFor({ timeout: 120_000 });
 		};
@@ -701,7 +738,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		const initialLeftHistory = await openHistoryPanel(left);
 		const initialCheckpointCount = await waitForHistoryCountsToMatchAuthority(
 			[initialLeftHistory],
-			1,
+			0,
 			repositoryOperationTimeout,
 		);
 		if (initialCheckpointCount > 1) {
@@ -723,6 +760,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			});
 			await exitHistory.click();
 			await expect(exitHistory).not.toBeVisible();
+			// Closing review restores a prior tab (including SQL from the entry
+			// tour). Keep the receiving client's live Home open for discovery.
+			await left.getByRole("button", { name: "Home", exact: true }).click();
+			await expect(left.getByTestId("home-entry-list")).toBeVisible();
 		}
 		// Let bootstrap and historical-view hydration finish before attributing
 		// any later blob payload to realtime work.
@@ -795,9 +836,9 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		// Settle that descriptor before later edits open a pinned working review.
 		for (const page of [left, right]) {
 			await expect(
-				page.locator(
-					`[data-attr="panel-tab-select"][title="${rightMarker}.md"]`,
-				),
+				page
+					.locator('[data-attr="panel-tab-select"]')
+					.filter({ hasText: new RegExp(`^${rightMarker}\\.md$`) }),
 			).toBeVisible({ timeout: realtimeTimeout });
 		}
 
@@ -827,15 +868,14 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				if (initialCheckpointCount > 1) {
 					await expect(freshHistory).toContainText("Latest checkpoint");
 				}
-				await expect(freshHistory).toContainText("Initial checkpoint");
+				if (initialCheckpointCount > 0) {
+					await expect(freshHistory).toContainText("Initial checkpoint");
+				}
 				await expect(
 					fresh.locator("[data-atelier-extension-suspended]"),
 				).toHaveCount(0);
-				// The relation-scoped working diff (lix_diff over the
-				// checkpoint-to-head span) evaluates from commit trees, unlike the
-				// retired lix_working_diff() hot authority — opening History may
-				// cost a bounded number of cold reads until the engine grows a hot
-				// path for the working span.
+				// Working changes use the engine's hot authority. Keep a bounded
+				// allowance for historical checkpoint metadata on a fresh replica.
 				expect(coldReadCount([fresh])).toBeLessThanOrEqual(
 					coldReadsBeforeFreshHistory + 2,
 				);
@@ -863,7 +903,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		for (const page of [left, right]) {
 			await expect(
 				page.getByRole("button", {
-					name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+					name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 				}),
 			).toBeVisible({ timeout: 30_000 });
 		}
@@ -899,7 +939,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		});
 		await expect(
 			left.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			}),
 		).toBeVisible({ timeout: realtimeTimeout });
 
@@ -927,7 +967,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			}
 			await expect(
 				page.getByRole("button", {
-					name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+					name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 				}),
 			).toBeVisible({ timeout: 30_000 });
 		}
@@ -964,7 +1004,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		]);
 		await expect(
 			fresh.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			}),
 		).toBeVisible({ timeout: 30_000 });
 
@@ -1155,17 +1195,45 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		// reopened client must observe an additional checkpoint, not merely keep
 		// rendering the checkpoint rows imported during bootstrap.
 		await expect(
-			left.locator(
-				`[data-attr="panel-tab-select"][title="${afterReopenMarker}.md"]`,
-			),
+			left
+				.locator('[data-attr="panel-tab-select"]')
+				.filter({ hasText: new RegExp(`^${afterReopenMarker}\\.md$`) }),
 		).toBeVisible({ timeout: realtimeTimeout });
 		const checkpointCountBeforeSecondClick = await authorityCheckpointCount();
+		const workingSetFileIds = async (page: Page) =>
+			page
+				.locator('[data-testid^="diff-scope-file:"]')
+				.evaluateAll((rows) =>
+					rows
+						.map((row) =>
+							row.getAttribute("data-testid")!.slice("diff-scope-file:".length),
+						)
+						.sort(),
+				);
+		let filesBeforePartialCheckpoint: string[] = [];
 		const secondCheckpointCommitId = await clickCheckpoint(left, async () => {
 			await left
 				.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
 				.click();
-			await left.getByRole("checkbox", { name: "All files" }).click();
-			await left.getByTestId(`diff-scope-file:${afterReopenFileId}`).click();
+			filesBeforePartialCheckpoint = await workingSetFileIds(left);
+			for (const id of [
+				createdFileId!,
+				...concurrentFileIds,
+				afterReopenFileId!,
+			]) {
+				expect(filesBeforePartialCheckpoint).toContain(id);
+			}
+			await left
+				.getByRole("checkbox", { name: "Seen files", exact: true })
+				.click();
+			const selectedFile = left.getByTestId(
+				`diff-scope-file:${afterReopenFileId}`,
+			);
+			await selectedFile.click();
+			await expect(selectedFile).toHaveAttribute("aria-checked", "true");
+			await expect(
+				left.locator('[data-attr="diff-scope-file"][aria-checked="true"]'),
+			).toHaveCount(1);
 		});
 		expect(secondCheckpointCommitId).not.toBe(firstCheckpointCommitId);
 		const postReopenHistory = await openHistoryPanel(fresh);
@@ -1174,12 +1242,29 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			checkpointCountBeforeSecondClick + 1,
 			realtimeTimeout,
 		);
+		const remainingFileIds = filesBeforePartialCheckpoint.filter(
+			(id) => id !== afterReopenFileId,
+		);
+		// The preview persists across runs, and unseen files stay uncheckpointed.
+		// Verify exact identity preservation instead of assuming a clean repository.
 		for (const page of [left, fresh]) {
-			await expect(
-				page.getByRole("button", {
-					name: "1 file changed since checkpoint. Open changes review",
-				}),
-			).toBeVisible({ timeout: realtimeTimeout });
+			const count = remainingFileIds.length;
+			const status = page.getByRole("button", {
+				name: `${count} ${count === 1 ? "file" : "files"} changed since checkpoint. Open checkpoint history`,
+				exact: true,
+			});
+			await expect(status).toBeVisible({ timeout: realtimeTimeout });
+			await openRepositoryWorkingChanges(page);
+			await page
+				.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
+				.click();
+			await expect
+				.poll(() => workingSetFileIds(page), { timeout: realtimeTimeout })
+				.toEqual(remainingFileIds);
+			await page
+				.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
+				.click();
+			await page.getByRole("button", { name: "Exit", exact: true }).click();
 		}
 
 		const coldReadsBeforeHistory = coldReadCount([left, right]);

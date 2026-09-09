@@ -1,5 +1,5 @@
+import { AtelierFile } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
-import { Atelier } from "@opral/atelier";
 import { createPublishedLix } from "~/lib/published-lix";
 import { Download, Folder, LockOpen } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -237,12 +237,12 @@ function PublishedFile({
 				<p className="text-[13px] text-text-tertiary">Opening file…</p>
 			) : null}
 			{preview ? (
-				<Atelier.FileView
+				<AtelierFile
 					lix={preview.lix}
 					fileId={preview.fileId}
 					readOnly
 					className="min-h-[60vh]"
-					onOpenFile={(path) => {
+					onOpenFile={(path: string) => {
 						window.location.assign(
 							publishedResourceHref(namespace, repositorySlug, {
 								kind: "file",

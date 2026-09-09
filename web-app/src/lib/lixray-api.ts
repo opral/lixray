@@ -119,7 +119,6 @@ export function useLixrayApi() {
 		const promise = openLix({
 			server: {
 				url,
-				mode: "remote",
 				headers: async () => {
 					const token = await getTokenRef.current();
 					if (!token) {

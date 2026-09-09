@@ -127,7 +127,7 @@ export type RepositoryControlPlaneData = {
 };
 
 export const CHECKPOINT_SUMMARY_SQL =
-	"SELECT lixcol_created_at AS created_at, count(*) over () AS total_count FROM lix_checkpoint ORDER BY lixcol_created_at DESC LIMIT 10";
+	"SELECT created_at, count(*) over () AS total_count FROM lix_commit WHERE is_checkpoint ORDER BY created_at DESC, id DESC LIMIT 10";
 export const CHANGE_SUMMARY_SQL =
 	"WITH daily AS (SELECT substr(created_at, 1, 10) AS day, count(*) AS day_count, min(created_at) AS day_created_at FROM lix_change GROUP BY substr(created_at, 1, 10)) SELECT day, day_count AS n, sum(day_count) over () AS total_count, min(day_created_at) over () AS created_at FROM daily ORDER BY day DESC LIMIT 10";
 
@@ -214,7 +214,7 @@ export function useFilesAtCommit(
 ): ReadonlyArray<{ readonly id: string; readonly path: string }> | null {
 	const rows = useObservedRows(
 		lix,
-		"SELECT id, path FROM lix_state_at('lix_file', $1) ORDER BY path",
+		"SELECT id, path FROM lix_as_of('lix_file', $1) ORDER BY path",
 		commitId ? [commitId] : [""],
 		commitId !== null,
 	);

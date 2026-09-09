@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Request } from "@playwright/test";
 
 // Match protocol paths, not Vite /@fs/.../vendor/lix/... module assets.
-const protocolRequests = (url: URL) => url.pathname.startsWith("/lix/");
+const protocolRequests = (url: URL) =>
+	url.pathname.startsWith("/lix/") ||
+	/^\/api\/repositories\/[^/]+\/provision$/.test(url.pathname);
 
 // Runs in the default Compose suite against the seeded development account and
 // the actual browser SDK/OPFS implementation, with no external preview flags.
@@ -13,19 +15,24 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 }) => {
 	if (!baseURL) throw new Error("Playwright baseURL is required");
 	const prefix = `offline-${randomUUID()}`;
-	await page.goto("/");
+	await page.goto("/sign-in?returnTo=/home");
+	await page
+		.getByRole("button", { name: "Continue as local developer" })
+		.click();
+	await page.waitForURL("**/home");
+	await expect(
+		page.getByRole("button", { name: "Account menu" }),
+	).toBeVisible();
 	const repository = await page.evaluate(async (slug) => {
 		// Compose uses real Supabase authorization, unlike deployed demo previews.
 		// Load the app's configured client so the browser and setup requests share
 		// the same persisted development session and repository permissions.
 		const moduleUrl = "/src/lib/supabase.ts";
-		const { getBrowserSupabaseClient, localDevCredentials } = (await import(
+		const { getBrowserSupabaseClient } = (await import(
 			/* @vite-ignore */ moduleUrl
 		)) as typeof import("../../src/lib/supabase");
-		if (!localDevCredentials)
-			throw new Error("Compose development credentials are unavailable");
 		const client = getBrowserSupabaseClient();
-		const signedIn = await client.auth.signInWithPassword(localDevCredentials);
+		const signedIn = await client.auth.getSession();
 		if (signedIn.error || !signedIn.data.session)
 			throw signedIn.error ?? new Error("Development sign-in omitted session");
 		const provisioned = await client.rpc("bootstrap_personal_namespace");
@@ -45,7 +52,15 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		};
 	}, prefix);
 	const endpoint = new URL(`/lix/v1/${repository.id}/`, baseURL);
-	const headers = { Authorization: `Bearer ${repository.token}` };
+	const headers = {
+		Authorization: `Bearer ${repository.token}`,
+		"Lix-Server-Protocol-Version": "7",
+	};
+	const provisioned = await context.request.post(
+		new URL(`/api/repositories/${repository.id}/provision`, baseURL).toString(),
+		{ headers },
+	);
+	expect(provisioned.ok(), await provisioned.text()).toBe(true);
 	const opened = await context.request.get(endpoint.toString(), { headers });
 	expect(opened.status(), await opened.text()).toBe(200);
 	const { sessionId } = (await opened.json()) as { sessionId: string };
@@ -119,8 +134,12 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		await expect(row("note.txt")).toBeVisible();
 		await page
 			.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			})
+			.click();
+		await page
+			.getByRole("complementary", { name: "Navigator", exact: true })
+			.getByRole("button", { name: "Working changes", exact: true })
 			.click();
 		const checkpointButton = page.getByRole("button", {
 			name: "Checkpoint",
@@ -134,16 +153,26 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		).toHaveCount(0, { timeout: 5_000 });
 		await expect(
 			page.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			}),
 		).toHaveCount(0);
 		await page.reload();
 		// Request interception disables HTTP caching. CI must reload Vite's
 		// module graph and WASM before the persisted local replica can open.
-		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
+		// Wait for the restored file route before navigating Home; the route
+		// command must not race the folder listing we inspect next.
+		await expect(
+			page.locator('[data-view-key="atelier_text"][data-active="true"]'),
+		).toBeVisible({ timeout: 30_000 });
+		await page.getByRole("button", { name: "Home", exact: true }).click();
+		await expect(row(target)).toBeVisible({ timeout: 30_000 });
+		await row(target).click();
+		await expect(row(source)).toBeVisible();
+		await row(source).click();
+		await expect(row("note.txt")).toBeVisible();
 		await expect(
 			page.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			}),
 		).toHaveCount(0);
 		await context.unroute(protocolRequests);
@@ -167,7 +196,7 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 			.poll(
 				async () => {
 					const result = await execute(
-						"SELECT commit_id FROM lix_checkpoint WHERE commit_id = $1",
+						"SELECT id AS commit_id FROM lix_commit WHERE id = $1 AND is_checkpoint",
 						[checkpointId],
 					);
 					return result.rows[0]?.[0]?.value;

@@ -41,7 +41,10 @@ async function fixture() {
 
 async function paths(lix: Lix, kind: "file" | "directory") {
 	return (
-		await lix.execute(`SELECT path FROM lix_${kind} ORDER BY path`, [])
+		await lix.execute(
+			`SELECT path FROM lix_${kind} WHERE path NOT LIKE '/.lix%' ORDER BY path`,
+			[],
+		)
 	).rows.map((row) => row.path);
 }
 
@@ -100,7 +103,8 @@ void test(
 	{ timeout: 15_000 },
 	async () => {
 		const lix = await fixture();
-		const query = "SELECT path FROM lix_file ORDER BY path";
+		const query =
+			"SELECT path FROM lix_file WHERE path NOT LIKE '/.lix/%' ORDER BY path";
 		const originalFiles = ["/a.txt", "/source/note.md"];
 		const events = lix.observe(query);
 		let during: ReturnType<Lix["observe"]> | undefined;

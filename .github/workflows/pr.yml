@@ -427,6 +427,12 @@ jobs:
           LIXRAY_SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
         run: pnpm --dir web-app exec playwright test
 
+      - name: Report Compose failure diagnostics
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color --tail 150 lix-server minio-init
+
       - name: Upload Playwright failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
@@ -658,6 +664,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: .github/scripts/manage-railway-preview.sh url
 
+      - name: Provision disposable preview demo repositories
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
+          RAILWAY_TARGET_ENVIRONMENT: ${{ steps.environment.outputs.environment_id }}
+        run: .github/scripts/provision-preview-repositories.sh
+
       - name: Verify preview server protocol
         if: steps.credentials.outputs.available == 'true'
         shell: bash
@@ -666,7 +679,8 @@ jobs:
         run: |
           response_body="$(mktemp)"
           # Match vendor/lix/packages/lix/src/sync/mod.rs, not SERVER_PROTOCOL_VERSION.
-          sync_protocol_version=7
+          sync_protocol_version=9
+          server_protocol_version=7
           status=000
           for attempt in $(seq 1 12); do
             if status="$(
@@ -679,6 +693,7 @@ jobs:
                 --write-out '%{http_code}' \
                 --header 'Authorization: Bearer lixray-demo' \
                 --header 'Lix-Session-Id: 0000000000000000000000000000000000000000000000000000000000000000' \
+                --header "Lix-Server-Protocol-Version: $server_protocol_version" \
                 --header "Lix-Sync-Protocol-Version: $sync_protocol_version" \
                 "$PREVIEW_URL/lix/v1/00000000-0000-4000-8000-000000000002/sync/pull?after=18446744073709551615&limit=512"
             )" && test "$status" = 410; then

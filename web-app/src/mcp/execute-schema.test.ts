@@ -29,7 +29,7 @@ const SHARED_GUIDE_MARKERS = [
 void test("SQL guidance models the public Lix surfaces", () => {
 	assert.deepEqual(
 		EXECUTE_SQL_CORE_TABLES.map((table) => table.name),
-		["lix_file", "lix_directory", "lix_branch", "lix_change"],
+		["lix_file", "lix_directory", "lix_branch", "lix_commit", "lix_change"],
 	);
 	assert.match(EXECUTE_SQL_CORE_SCHEMA, /content \(binary\)/);
 	assert.match(EXECUTE_SQL_TABLES_QUERY, /information_schema\.tables/);
@@ -73,7 +73,14 @@ void test("shared operating guide keeps file-content, upsert, and no-verify copy
 	);
 	assert.match(LIX_SQL_OPERATING_GUIDE, /without a probe SELECT/);
 	assert.match(LIX_SQL_OPERATING_GUIDE, /lix_history\('lix_file', \$1\)/);
-	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lix_file_history/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /lixcol_commit_is_checkpoint/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /actual first parent/);
+	assert.match(
+		LIX_SQL_OPERATING_GUIDE,
+		/Filtering never changes the comparison baseline/,
+	);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /lix_as_of/);
+	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lix_file_history|lix_state_at/);
 	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lixcol_branch_id/);
 	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lixcol_start_commit_id/);
 	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lixcol_entity_pk/);

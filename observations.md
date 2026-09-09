@@ -128,26 +128,24 @@ session or read-batch design while preserving observer and cancellation tests.
 
 **Status:** observing; not changed by this PR.
 
-## Checkpoint diff materializes every file snapshot — observing
+## Checkpoint snapshot materialization — superseded
 
-**Evidence.** Atelier's `loadFileSnapshotsAtCommit()` in
-`src/shell/checkpoint-diff.ts` intentionally runs
-`lix_file_history` with only `lixcol_start_commit_id`, then chooses the
-shallowest historical row for each file in JavaScript. At a 2,500-file commit,
-the query therefore asks for every file snapshot; the bounded exact-ID history
-pushdown cannot safely narrow this result.
+The former Atelier checkpoint preview loaded every file snapshot through the
+removed `lix_file_history` surface. The consolidated SQL implementation replaces
+that flow with bounded checkpoint metadata from `lix_log()` and endpoint metadata
+from `lix_history('lix_file', anchor)` or `lix_diff`. File bytes are requested
+explicitly through `lix_as_of` only when opening a comparison. Empty checkpoints
+remain visible in the log, and checkpoint filtering uses ordinary boolean columns.
 
-**Architectural direction.** A likely >50% solution is a maintained
-commit-level file-set/diff surface with explicit rebuild and invalidation rules,
-not a broader point-lookup filter. It crosses the history provider, storage and
-index lifecycle, engine correctness tests, SDK/Atelier query migration, and
-end-to-end benchmarks—well beyond a bounded patch.
+The performance harness follows the same metadata-first flow and measures the
+additional exact-snapshot reads separately; see [perf/README.md](perf/README.md).
+This removes eager content loading from checkpoint previews. Ancestor directory
+moves can still require scanning descendant paths to report derived file and
+directory path changes; metadata-first queries do not guarantee constant work
+for that case. Measure checkpoint pages and ancestor moves independently at
+2,500, 10k, and 100k files before adding further indexes.
 
-**Next measurement.** Benchmark the full checkpoint query at 2,500, 10k, and
-100k files before choosing snapshot materialization versus a dedicated diff
-surface.
-
-**Status:** observing; no bounded code change proposed.
+**Status:** superseded by the consolidated SQL and current Atelier migration.
 
 ## Root substring path search remains an O(files) scan — observing
 

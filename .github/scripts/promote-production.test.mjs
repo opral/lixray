@@ -29,6 +29,10 @@ test("promotes both immutable images and waits for both deployments", async () =
     username: "registry-user",
     password: "registry-token",
   });
+  assert.match(
+    serverUpdate.variables.input.startCommand,
+    /^env LIXRAY_PUBLIC_URL=https:\/\/web-gateway\.up\.railway\.app /,
+  );
   assert.deepEqual(serverUpdate.variables.input.registryCredentials, {
     username: "registry-user",
     password: "registry-token",
@@ -136,6 +140,10 @@ while test "$#" -gt 0; do
 		if test "$#" -gt 0 && [[ "$1" != --* ]]; then shift; fi
 	fi
 done
+if test "$command" = domain; then
+	printf '{"domain":"web-gateway.up.railway.app"}\n'
+	exit 0
+fi
 if test "$command" = logs; then
 	printf 'mock deployment log for %s\n' "$deployment"
 	exit 0
@@ -174,7 +182,7 @@ if jq -e '.query | contains("serviceInstance(serviceId")' <<<"$payload" >/dev/nu
 			start_command=null
 		else
 			image="$SERVER_IMAGE"
-			start_command="$(jq -r '.deploy.startCommand' railway.json)"
+			start_command="env LIXRAY_PUBLIC_URL=https://web-gateway.up.railway.app $(jq -r '.deploy.startCommand' railway.json)"
 		fi
 		if test "$RAILWAY_DEPLOY_POLICY" = production; then sleep_application=false; else sleep_application=true; fi
 	else
@@ -232,9 +240,42 @@ function runCoordinator(fixture, statuses, extraEnv = {}) {
 test("stops on a deleted environment instead of polling for the full timeout", async () => {
   const fixture = await createFixture();
   const result = runCoordinator(fixture, {
-    MOCK_SERVER_STATUS: "SUCCESS", MOCK_WEB_STATUS: "SUCCESS", MOCK_MISSING_AFTER_DEPLOY: "true",
+    MOCK_SERVER_STATUS: "SUCCESS",
+    MOCK_WEB_STATUS: "SUCCESS",
+    MOCK_MISSING_AFTER_DEPLOY: "true",
   });
   assert.equal(result.status, 1, result.stdout);
   assert.match(result.stderr, /environment no longer exists; stopping promotion/);
   assert.doesNotMatch(result.stderr, /did not become healthy/);
+});
+
+test("rejects public origins containing shell syntax before updating services", async () => {
+  const fixture = await createFixture();
+  const result = runCoordinator(
+    fixture,
+    { MOCK_SERVER_STATUS: "SUCCESS", MOCK_WEB_STATUS: "SUCCESS" },
+    { LIXRAY_PUBLIC_URL: "https://example.com;echo injected" },
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Expected an HTTPS web gateway origin/);
+});
+
+test("advertises an explicit custom gateway origin", async () => {
+  const fixture = await createFixture();
+  const result = runCoordinator(
+    fixture,
+    { MOCK_SERVER_STATUS: "SUCCESS", MOCK_WEB_STATUS: "SUCCESS" },
+    { LIXRAY_PUBLIC_URL: "https://lixray.com" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const payloads = (await readFile(fixture.calls, "utf8")).trim().split("\n").map(JSON.parse);
+  const update = payloads.find(
+    (payload) =>
+      payload.query.includes("serviceInstanceUpdate") &&
+      payload.variables.serviceId === "server-service",
+  );
+  assert.match(
+    update.variables.input.startCommand,
+    /^env LIXRAY_PUBLIC_URL=https:\/\/lixray\.com /,
+  );
 });

@@ -247,6 +247,25 @@ previous_server_status="$(deployment_status "$previous_server_deployment")"
 web_policy="$(jq -c --arg policy "$RAILWAY_DEPLOY_POLICY" '.deploy * .environments[$policy].deploy' web-app/railway.json)"
 server_policy="$(jq -c --arg policy "$RAILWAY_DEPLOY_POLICY" '.deploy * .environments[$policy].deploy' railway.json)"
 
+# Resolve the external web gateway before starting the server. The server's own
+# Railway domain is not the public repository origin.
+public_url="${LIXRAY_PUBLIC_URL:-}"
+if test -z "$public_url"; then
+	domains="$("$RAILWAY_BIN" domain list --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" --json)"
+	public_domain="$(jq -r '[.. | objects | .domain? // empty | select(type == "string" and endswith(".up.railway.app"))][0] // empty' <<<"$domains")"
+	if test -z "$public_domain"; then
+		domains="$("$RAILWAY_BIN" domain --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" --json)"
+		public_domain="$(jq -r '[.. | objects | .domain? // empty | select(type == "string" and endswith(".up.railway.app"))][0] // empty' <<<"$domains")"
+	fi
+	public_url="https://$public_domain"
+fi
+# Restrict this value to an HTTPS origin before embedding it in shell source.
+if [[ ! "$public_url" =~ ^https://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:[0-9]+)?$ ]]; then
+	echo "Expected an HTTPS web gateway origin for LIXRAY_PUBLIC_URL." >&2
+	exit 1
+fi
+server_policy="$(jq -c --arg origin "$public_url" '.startCommand = ("env LIXRAY_PUBLIC_URL=" + $origin + " " + .startCommand)' <<<"$server_policy")"
+
 reuse_web=false
 reuse_server=false
 if test -n "$previous_web" && deployment_can_be_reused "$previous_web_status" &&

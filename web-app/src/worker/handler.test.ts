@@ -401,7 +401,7 @@ void test("profile activity queries file paths from every public Lix", async () 
 				const pathname = new URL(request.url).pathname;
 				if (pathname === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 6,
+						protocolVersion: 7,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "profile-activity-session",
@@ -461,7 +461,7 @@ void test("profile activity shares one repository scan across visitors", async (
 			const pathname = new URL(request.url).pathname;
 			if (pathname === `/lix/v1/${LIX_A}/`) {
 				return Response.json({
-					protocolVersion: 6,
+					protocolVersion: 7,
 					activeBranchId: "main",
 					activeAccountId: "00000000-0000-7000-8000-000000000002",
 					sessionId: "profile-cache-session",
@@ -1594,6 +1594,7 @@ void test("remote sync CORS permits protocol, session, and chunk headers", async
 	const allowedHeaders =
 		response.headers.get("access-control-allow-headers") ?? "";
 	assert.match(allowedHeaders, /Lix-Session-Id/i);
+	assert.match(allowedHeaders, /Lix-Server-Protocol-Version/i);
 	assert.match(allowedHeaders, /Lix-Sync-Protocol-Version/i);
 	assert.match(allowedHeaders, /Idempotency-Key/i);
 	assert.match(allowedHeaders, /Lix-Transaction-Id/i);
@@ -2114,7 +2115,7 @@ void test("a published directory exposes only its direct child names", async () 
 				protocolPaths.push(path);
 				if (path === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 6,
+						protocolVersion: 7,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "published-directory-session",
@@ -2183,7 +2184,7 @@ void test("a public repository can list a directory through the host projection"
 				const path = new URL(request.url).pathname;
 				if (path === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 6,
+						protocolVersion: 7,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "public-directory-session",
@@ -2775,7 +2776,7 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 				const pathname = new URL(request.url).pathname;
 				if (pathname === `/lix/v1/${DEMO_LIX_ID}/`) {
 					return Response.json({
-						protocolVersion: 6,
+						protocolVersion: 7,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "demo-mcp-session",
@@ -3070,7 +3071,7 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 		protocolPaths.push(path);
 		if (path === `/lix/v1/${LIX_A}/`) {
 			return Response.json({
-				protocolVersion: 6,
+				protocolVersion: 7,
 				activeBranchId: "main",
 				activeAccountId: "00000000-0000-7000-8000-000000000002",
 				sessionId,

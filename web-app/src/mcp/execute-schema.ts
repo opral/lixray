@@ -24,11 +24,18 @@ export const EXECUTE_SQL_CORE_TABLES: ReadonlyArray<ExecuteSqlCoreTable> = [
 	{
 		name: "lix_branch",
 		purpose: "Lix branches and their current commits.",
-		columns: ["id", "name", "hidden", "commit_id"],
+		columns: ["id", "name", "hidden", "commit_id", "working_base_commit_id"],
+	},
+	{
+		name: "lix_commit",
+		purpose:
+			"Repository-global retained commits; filter is_checkpoint for checkpoint inventory.",
+		columns: ["id", "created_at", "is_checkpoint"],
 	},
 	{
 		name: "lix_change",
-		purpose: "Global immutable change ledger; use it for activity and audit.",
+		purpose:
+			"Retained repository-global source records; use them for source activity and audit, not counts of user edits or net differences.",
 		columns: [
 			"id",
 			"entity_pk",
@@ -83,7 +90,13 @@ ${EXECUTE_SQL_TABLES_QUERY}
 ${EXECUTE_SQL_COLUMNS_QUERY}
 \`\`\`
 
-History table functions are read-only revision streams, not current-state snapshot tables. Call \`lix_history('lix_file')\`, \`lix_history('lix_directory')\`, or \`lix_history('<schema>')\` to start at the active branch head. For an explicit anchor commit, pass its id as the second function argument, for example \`lix_history('lix_file', $1)\`. The relation name must be a non-null text literal, not a SQL parameter.`;
+Version-control reads use four surfaces. \`lix_log()\` lists retained commits on the active head's first-parent chain, with \`commit_id\`, \`parent_commit_id\`, \`created_at\`, \`is_checkpoint\`, and \`position\`. Use \`WHERE is_checkpoint ORDER BY position\` for the branch checkpoint timeline. Position zero is the anchor and positions are assigned before filtering. For repository-global checkpoint counts, query \`lix_commit WHERE is_checkpoint\` instead.
+
+\`lix_history('lix_file')\`, \`lix_history('lix_directory')\`, and \`lix_history('<schema>')\` return net row differences for each retained mainline commit compared with its actual first parent. For an explicit anchor, use \`lix_history('lix_file', $1)\` and \`lix_log($1)\`. History provides typed keys, \`diff_type\`, paired \`from_<column>\` / \`to_<column>\` values, \`lixcol_from_commit_id\`, \`lixcol_to_commit_id\`, \`lixcol_commit_is_checkpoint\`, \`lixcol_commit_created_at\`, and \`lixcol_position\`. Filter \`WHERE id = $2 AND lixcol_commit_is_checkpoint ORDER BY lixcol_position\` for a file's checkpoint changes. Filtering never changes the comparison baseline: a checkpoint's parent can be an unmarked fork or restore baseline. Empty commits appear in log but have no history rows. Merged-side commits are not separate mainline entries, and compaction can remove automatic revisions.
+
+\`lix_diff('lix_file')\` compares the actual working baseline with the current head; \`lix_diff('lix_file', $1, $2)\` compares explicit endpoints. Its endpoint columns identify that exact pair. Use \`lix_branch.working_base_commit_id\` for working context even when the diff is empty; the latest marked checkpoint is not necessarily the working baseline. For selected commands, reselect through the appropriate diff and guard its endpoints, rather than submitting a multi-commit history stream.
+
+\`lix_as_of('lix_file', $1)\` reads complete state at one retained commit, including file content. Read file bytes lazily through this snapshot surface; history is not a current-state snapshot. Relation arguments must be non-null text literals, not SQL parameters; commit endpoints and anchors accept parameters. Checkpoints no longer add marker records to \`lix_change\`; its counts measure retained source records, not user edits.`;
 
 export const QUERY_SQL_TOOL_DESCRIPTION =
 	"LixRay read path: run one read-only SQL statement against the branch selected by context. When file paths are known, read them together in one parameterized statement, for example SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path IN ($1, $2) ORDER BY path; do not list the same paths first or read each file separately. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes. Results arrive in structuredContent.";

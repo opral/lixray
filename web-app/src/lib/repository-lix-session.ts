@@ -1,3 +1,4 @@
+import { createProvisioningFetch } from "./provision-repository.ts";
 import {
 	openLix,
 	type Lix,
@@ -59,10 +60,9 @@ export function openRepositoryRemoteLix(
 ): Promise<Lix> {
 	return openLix({
 		server: {
-			mode: "remote",
 			url: repositoryUrl(options),
 			headers: async () => repositoryRequestHeaders(options),
-			fetch: createTelemetryFetch(options.fetch, {
+			fetch: createTelemetryFetch(createProvisioningFetch(options), {
 				repositoryId: options.repositoryId,
 				refreshAccessToken: options.refreshAccessToken,
 			}),
@@ -263,10 +263,9 @@ async function openOpfsSyncSession(
 			name: repositoryOpfsCacheName(options),
 		}),
 		server: {
-			mode: "sync",
 			url: repositoryUrl(options),
 			headers: async () => repositoryRequestHeaders(options),
-			fetch: createTelemetryFetch(options.fetch, {
+			fetch: createTelemetryFetch(createProvisioningFetch(options), {
 				repositoryId: options.repositoryId,
 				refreshAccessToken: options.refreshAccessToken,
 				signal: options.signal,

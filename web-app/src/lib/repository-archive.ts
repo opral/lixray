@@ -45,7 +45,6 @@ async function withRepositoryLix<T>(
 ): Promise<T> {
 	const lix = await openLix({
 		server: {
-			mode: "remote",
 			url: new URL(
 				`/lix/${encodeURIComponent(options.repositoryId)}`,
 				globalThis.location.origin,

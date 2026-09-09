@@ -65,6 +65,7 @@ void test("successful authenticated handshake enriches the repository account", 
 	assert.ok(request);
 	assert.equal(new URL(request.url).pathname, `/lix/v1/${lixId}/execute`);
 	assert.equal(request.headers.get("lix-session-id"), "session-1");
+	assert.equal(request.headers.get("lix-server-protocol-version"), "7");
 	assert.equal(
 		request.headers.get("x-lixray-idempotency-principal"),
 		account.id,

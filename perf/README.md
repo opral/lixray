@@ -58,6 +58,8 @@ instead of silently producing a misleading result.
 
 Start the local stack and provide its local internal token:
 
+The performance commands resolve the server image from the vendored Lix revision so its SQL and wire protocols match the SDK. Set `LIXRAY_SERVER_IMAGE` to select an explicit local image.
+
 ```sh
 LIXRAY_PERF_REPOSITORY=11111111-1111-4111-8111-111111111111 pnpm perf:reset
 pnpm perf:up
@@ -129,10 +131,12 @@ so a multi-sample live session would confound the comparison.
 `diff-file-history` is deliberately a history-backed diff projection, not a
 generic textual diff. Before its timer starts, the runner resolves each chosen
 file's stable `lix_file.id` by exact path and records that identity resolution
-as pre-timing operation setup. The timed query then reads
-`lix_file_history WHERE id = $1` at the session's pinned active-branch head,
-asserts at least two ordered revisions, and verifies that the current and prior
-payloads differ. This leaves the seeded corpus and its physical layout
+as pre-timing operation setup. The timed operation reads the latest change from
+`lix_history('lix_file') WHERE id = $1 ORDER BY lixcol_position LIMIT 1`, then
+loads the exact before/after states with two `lix_as_of('lix_file', $1)`
+queries. The three request timings and wire sizes are summed. It verifies the
+current and prior payloads against the corpus and that they differ. History
+metadata selects immutable endpoint IDs; bytes are loaded only afterward. This leaves the seeded corpus and its physical layout
 unchanged. It requires at least one post-seed history mutation, so choose
 `--commits` above the seed minimum.
 

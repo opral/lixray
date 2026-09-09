@@ -325,7 +325,7 @@ test("branch-switch times session switching after explicit branch setup", async 
 });
 
 test("diff-file-history reads distinct current and prior file revisions", async () => {
-  const protocol = new HistoryDiffProtocol(3, 1_000, { currentDepth: 2 });
+  const protocol = new HistoryDiffProtocol(3, 1_000);
   const result = await runBenchmark(protocol, {
     operation: "diff-file-history",
     targetTotalCommits: 3,
@@ -346,7 +346,8 @@ test("diff-file-history reads distinct current and prior file revisions", async 
     protocol.lastHistoryParams[0].value,
     protocol.lastResolvedHistoryId,
   );
-  assert.match(protocol.lastHistorySql, /FROM lix_file_history/);
+  assert.match(protocol.lastHistorySql, /FROM lix_history\('lix_file'\)/);
+  assert.equal(protocol.snapshotQueries, 2);
   assert.match(protocol.lastHistorySql, /WHERE id = \$1/);
   assert.doesNotMatch(protocol.lastHistorySql, /WHERE path = \$1/);
   assert.doesNotMatch(protocol.lastHistorySql, /lixcol_as_of_commit_id/);
@@ -1057,6 +1058,7 @@ class BranchSwitchProtocol extends BranchProtocol {
 
 class HistoryDiffProtocol {
   historyQueries = 0;
+  snapshotQueries = 0;
   historyIdLookups = 0;
   lastHistoryIdLookupSql = "";
   lastHistoryIdLookupParams = [];
@@ -1064,14 +1066,9 @@ class HistoryDiffProtocol {
   lastHistoryParams = [];
   lastResolvedHistoryId = "";
 
-  constructor(
-    targetTotalCommits,
-    corpusFiles = 1_000,
-    { currentDepth = 0 } = {},
-  ) {
+  constructor(targetTotalCommits, corpusFiles = 1_000) {
     this.targetTotalCommits = targetTotalCommits;
     this.corpusFiles = corpusFiles;
-    this.currentDepth = currentDepth;
     this.corpus = buildCorpusIndex(corpusFiles);
     this.byPath = new Map(this.corpus.map((file, index) => [file.path, index]));
     this.idByPath = new Map(
@@ -1099,7 +1096,7 @@ class HistoryDiffProtocol {
         },
       };
     }
-    if (sql.includes("FROM lix_file_history")) {
+    if (sql.includes("FROM lix_history(")) {
       this.historyQueries += 1;
       this.lastHistorySql = sql;
       this.lastHistoryParams = params;
@@ -1107,26 +1104,31 @@ class HistoryDiffProtocol {
       if (index === undefined) {
         throw new Error(`unknown history id: ${params[0].value}`);
       }
-      const file = this.corpus[index];
-      const path = file.path;
-      const current = this.state.get(path);
-      const previous = contentFor(file.extension, file.bytes, file.seed);
       return {
         value: {
-          rows: [
-            [
-              { kind: "text", value: path },
-              { kind: "blob", base64: current.toString("base64") },
-              { kind: "int", value: this.currentDepth },
-              { kind: "text", value: "head" },
-            ],
-            [
-              { kind: "text", value: path },
-              { kind: "blob", base64: previous.toString("base64") },
-              { kind: "int", value: this.currentDepth + 1 },
-              { kind: "text", value: "prior" },
-            ],
-          ],
+          rows: [[
+            { kind: "text", value: "prior" },
+            { kind: "text", value: "head" },
+          ]],
+        },
+        elapsedMs: 1,
+        requestBytes: 2,
+        responseBytes: 3,
+      };
+    }
+    if (sql.includes("FROM lix_as_of(")) {
+      this.snapshotQueries += 1;
+      const index = this.byId.get(params[1].value);
+      const file = this.corpus[index];
+      const bytes = params[0].value === "head"
+        ? this.state.get(file.path)
+        : contentFor(file.extension, file.bytes, file.seed);
+      return {
+        value: {
+          rows: [[
+            { kind: "text", value: file.path },
+            { kind: "blob", base64: bytes.toString("base64") },
+          ]],
         },
         elapsedMs: 1,
         requestBytes: 2,

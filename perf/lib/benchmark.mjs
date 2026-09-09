@@ -737,7 +737,7 @@ function prepareOperation(
     const casesByPath = new Map(cases.map((value) => [value.path, value]));
     return {
       description:
-        "read the current and prior logical revisions of one changed 4 KiB file through lix_file_history",
+        "read a changed file’s latest history endpoints and both 4 KiB snapshots through lix_as_of",
       mutates: false,
       corpusFileDelta: 0,
       preconditionExcludedPaths: new Set(cases.map(({ path }) => path)),
@@ -753,14 +753,40 @@ function prepareOperation(
           expected.id = assertFileIdRow(result.value, expected.path);
         }
       },
-      execute: (protocol, index) =>
-        protocol.execute(
-          `SELECT path, content, lixcol_depth, lixcol_observed_commit_id
-             FROM lix_file_history
+      execute: async (protocol, index) => {
+        const id = wireText(historyCaseId(cases[index]));
+        const history = await protocol.execute(
+          `SELECT lixcol_from_commit_id, lixcol_to_commit_id
+             FROM lix_history('lix_file')
             WHERE id = $1
-            ORDER BY lixcol_depth`,
-          [wireText(historyCaseId(cases[index]))],
-        ),
+            ORDER BY lixcol_position
+            LIMIT 1`,
+          [id],
+        );
+        const [from, to] = history.value?.rows?.[0] ?? [];
+        if (from?.kind !== "text" || to?.kind !== "text") {
+          throw new Error("history-backed diff did not return comparison endpoints");
+        }
+        const snapshots = [];
+        for (const commit of [to, from]) {
+          snapshots.push(await protocol.execute(
+            "SELECT path, content FROM lix_as_of('lix_file', $1) WHERE id = $2",
+            [commit, id],
+          ));
+        }
+        const requests = [history, ...snapshots];
+        return {
+          value: {
+            rows: snapshots.map((result, snapshotIndex) => [
+              ...(result.value?.rows?.[0] ?? []),
+              [to, from][snapshotIndex],
+            ]),
+          },
+          elapsedMs: requests.reduce((sum, result) => sum + result.elapsedMs, 0),
+          requestBytes: requests.reduce((sum, result) => sum + result.requestBytes, 0),
+          responseBytes: requests.reduce((sum, result) => sum + result.responseBytes, 0),
+        };
+      },
       assert: (result, index) => assertHistoryDiffRows(result, cases[index]),
       verify: async () => {},
     };
@@ -1318,13 +1344,13 @@ function assertHistoryDiffRows(result, expected) {
     );
   }
   const [current, previous] = rows;
-  if (current.length !== 4 || previous.length !== 4) {
+  if (current.length !== 3 || previous.length !== 3) {
     throw new Error(
       `history-backed diff for ${expected.path} had malformed rows`,
     );
   }
-  const [currentPath, currentData, currentDepth, currentCommit] = current;
-  const [previousPath, previousData, previousDepth, previousCommit] = previous;
+  const [currentPath, currentData, currentCommit] = current;
+  const [previousPath, previousData, previousCommit] = previous;
   if (
     currentPath?.kind !== "text" ||
     currentPath.value !== expected.path ||
@@ -1347,23 +1373,6 @@ function assertHistoryDiffRows(result, expected) {
       `history-backed diff returned the wrong prior data for ${expected.path}`,
     );
   }
-  const currentDepthValue = integerWireValue(
-    currentDepth,
-    "current history revision depth",
-  );
-  const previousDepthValue = integerWireValue(
-    previousDepth,
-    "prior history revision depth",
-  );
-  // A file can have been last changed many commits before the pinned branch
-  // head. `lixcol_depth` is that distance, so the current revision need not
-  // have depth zero; ascending depth still places it ahead of its prior
-  // revision.
-  if (previousDepthValue <= currentDepthValue) {
-    throw new Error(
-      `history-backed diff did not return ordered current and prior revisions for ${expected.path}`,
-    );
-  }
   if (currentBytes.equals(previousBytes)) {
     throw new Error(
       `history-backed diff did not return distinct payloads for ${expected.path}`,
@@ -1376,7 +1385,7 @@ function assertHistoryDiffRows(result, expected) {
     previousCommit.value.length === 0
   ) {
     throw new Error(
-      `history-backed diff did not return observed commit ids for ${expected.path}`,
+      `history-backed diff did not return comparison commit ids for ${expected.path}`,
     );
   }
 }
