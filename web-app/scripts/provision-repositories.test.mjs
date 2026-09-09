@@ -133,3 +133,27 @@ for (const [status, expectedAttempts] of [
 		assert.equal(attempts, expectedAttempts);
 	});
 }
+
+for (const alias of [
+	"LIXRAY_REPOSITORY_SERVICE_URL",
+	"LIXRAY_WORKSPACE_SERVICE_URL",
+]) {
+	test(`operator honors deployed service alias ${alias}`, async () => {
+		for (const primary of [undefined, "http://primary:8080"]) {
+			const urls = [];
+			await provisionRepositories({
+				mode: "create-new",
+				env: {
+					...env,
+					LIXRAY_LIX_SERVICE_URL: primary,
+					[alias]: "http://legacy:8080",
+				},
+				fetchImpl: async (url) => {
+					urls.push(url.origin);
+					return new Response(null, { status: 200 });
+				},
+			});
+			assert.deepEqual(urls, Array(3).fill(primary ?? "http://legacy:8080"));
+		}
+	});
+}

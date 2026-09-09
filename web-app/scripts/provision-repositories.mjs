@@ -15,7 +15,11 @@ export async function provisionRepositories({
 			"Choose create-new for a fresh preview or adopt-existing for existing storage.",
 		);
 	}
-	if (!env.LIXRAY_LIX_SERVICE_URL || !env.LIXRAY_INTERNAL_TOKEN) {
+	const serviceUrl =
+		env.LIXRAY_LIX_SERVICE_URL ??
+		env.LIXRAY_REPOSITORY_SERVICE_URL ??
+		env.LIXRAY_WORKSPACE_SERVICE_URL;
+	if (!serviceUrl || !env.LIXRAY_INTERNAL_TOKEN) {
 		throw new Error(
 			"The web service's private Lix connection must be configured.",
 		);
@@ -42,13 +46,10 @@ export async function provisionRepositories({
 	for (let attempt = 0; attempt < 6; attempt++) {
 		let response;
 		try {
-			response = await fetchImpl(
-				new URL("/healthz", env.LIXRAY_LIX_SERVICE_URL),
-				{
-					method: "GET",
-					signal: AbortSignal.timeout(10_000),
-				},
-			);
+			response = await fetchImpl(new URL("/healthz", serviceUrl), {
+				method: "GET",
+				signal: AbortSignal.timeout(10_000),
+			});
 		} catch {
 			// Network failures during wake-up may be retried; never print credentials.
 		}
@@ -65,10 +66,7 @@ export async function provisionRepositories({
 	}
 	for (const id of ids) {
 		const response = await fetchImpl(
-			new URL(
-				`/internal/repositories/${id}/provision`,
-				env.LIXRAY_LIX_SERVICE_URL,
-			),
+			new URL(`/internal/repositories/${id}/provision`, serviceUrl),
 			{
 				method: "POST",
 				headers: {
