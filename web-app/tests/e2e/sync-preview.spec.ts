@@ -91,7 +91,15 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		const history = secondary.getByRole("region", {
 			name: "Checkpoint history",
 		});
-		if (await history.isVisible()) return history;
+		const selectRepositoryScope = async () => {
+			const scopeSwitch = secondary.getByRole("button", {
+				name: "Showing this file. Switch to the repository",
+				exact: true,
+			});
+			if (await scopeSwitch.isVisible()) await scopeSwitch.click();
+			return history;
+		};
+		if (await history.isVisible()) return selectRepositoryScope();
 		const panelToggle = page.getByRole("button", {
 			name: "Toggle right panel",
 		});
@@ -115,7 +123,9 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			await historyTab.click();
 		}
 		await expect(history).toBeVisible({ timeout: 30_000 });
-		return history;
+		// The authority count describes the repository timeline, while History
+		// follows the active file by default. Select the matching product scope.
+		return selectRepositoryScope();
 	};
 	let authorityReadSequence = 0;
 	const authorityCheckpointCount = async (): Promise<number> => {
@@ -810,9 +820,9 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		// Settle that descriptor before later edits open a pinned working review.
 		for (const page of [left, right]) {
 			await expect(
-				page.locator(
-					`[data-attr="panel-tab-select"][title="${rightMarker}.md"]`,
-				),
+				page
+					.locator('[data-attr="panel-tab-select"]')
+					.filter({ hasText: new RegExp(`^${rightMarker}\\.md$`) }),
 			).toBeVisible({ timeout: realtimeTimeout });
 		}
 
