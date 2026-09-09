@@ -81,7 +81,7 @@ export async function checkProductionLix({
 				new URL("session", protocolUrl),
 				{
 					method: "DELETE",
-					headers: { "Lix-Session-Id": sessionId },
+					headers: { "Lix-Session-Id": sessionId, "lix-server-protocol-version": "7" },
 				},
 				timeoutMs,
 			).catch((error) => {
@@ -95,7 +95,7 @@ export async function checkProductionLix({
 	}
 }
 
-function protocolUrlFromLixUrl(value) {
+export function protocolUrlFromLixUrl(value) {
 	const connectionUrl = new URL(value);
 	if (connectionUrl.protocol !== "https:") {
 		throw new Error("The production Lix connection URL must use HTTPS.");

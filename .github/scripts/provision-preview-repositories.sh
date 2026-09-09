@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# An explicit mode/ID list also supports adoption of a production canary.
+mode="${1:-create-new}"
+if test "$#" -gt 0; then shift; fi
+case "$mode" in create-new|adopt-existing) ;; *) echo "Invalid provisioning mode." >&2; exit 2 ;; esac
+if test "$mode" = adopt-existing && test "$#" = 0; then
+    echo "Adoption requires explicit repository IDs." >&2; exit 2
+fi
+for id in "$@"; do
+    if ! [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+        echo "Invalid repository ID." >&2; exit 2
+    fi
+done
 : "${PREVIEW_URL:?}"
 : "${RAILWAY_API_TOKEN:?}"
 : "${RAILWAY_PROJECT_ID:?}"
@@ -70,7 +82,7 @@ chmod 700 "$ssh_wrapper_dir/ssh"
 registration_attempted=true
 "$RAILWAY_BIN" ssh keys add --key "$key_file.pub" --name "lixray-preview-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
 for attempt in 1 2 3 4 5; do
-    if PATH="$ssh_wrapper_dir:$PATH" "$RAILWAY_BIN" ssh --identity-file "$key_file" --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" -- node /app/web-app/scripts/provision-repositories.mjs create-new >"$key_file.ssh" 2>&1; then
+    if PATH="$ssh_wrapper_dir:$PATH" "$RAILWAY_BIN" ssh --identity-file "$key_file" --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" -- node /app/web-app/scripts/provision-repositories.mjs "$mode" "$@" >"$key_file.ssh" 2>&1; then
         cat "$key_file.ssh"
         exit 0
     else

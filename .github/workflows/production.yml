@@ -320,6 +320,11 @@ jobs:
           WEB_IMAGE: ${{ needs.images.outputs.web }}
         run: .github/scripts/promote-production.sh
 
+      - name: Adopt existing production canary storage
+        env:
+          LIXRAY_CANARY_LIX_URL: ${{ vars.LIXRAY_CANARY_LIX_URL }}
+        run: node .github/scripts/provision-production-canary.mjs
+
       - name: Check public production repository canary
         env:
           LIXRAY_CANARY_LIX_URL: ${{ vars.LIXRAY_CANARY_LIX_URL }}
