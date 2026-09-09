@@ -6,8 +6,9 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const script = resolve(import.meta.dirname, "provision-preview-repositories.sh");
-for (const [name, failure, expected] of [
+for (const [name, failure, expected, args = []] of [
   ["success", "none", 0],
+  ["production adoption", "none", 0, ["adopt-existing", "11111111-1111-4111-8111-111111111111"]],
   ["HTTP wake failure", "wake", 22],
   ["SSH relay wake lag", "relay", 0],
   ["operator failure", "operator", 17],
@@ -59,7 +60,7 @@ if (args[2] === 'add') {
 `,
         { mode: 0o700 },
       );
-      const result = spawnSync("bash", [script], {
+      const result = spawnSync("bash", [script, ...args], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -100,10 +101,10 @@ if (args[2] === 'add') {
         const commands = recorded.filter((args) => args.includes("--identity-file"));
         assert.equal(commands.length, failure === "relay" ? 2 : 1);
         const command = commands[0];
-        assert.deepEqual(command.slice(-3), [
+        assert.deepEqual(command.slice(-(args.length ? 2 + args.length : 3)), [
           "node",
           "/app/web-app/scripts/provision-repositories.mjs",
-          "create-new",
+          ...(args.length ? args : ["create-new"]),
         ]);
       }
     } finally {

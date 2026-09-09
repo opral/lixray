@@ -425,10 +425,14 @@ railway ssh --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIR
 Repeat for the exported inventory before enabling public reads or running the
 production canary. A metadata row whose repository was never initialized will
 fail adoption; classify it explicitly through the authenticated provisioning
-workflow instead of creating storage in response to a missing public read. No
-production adoption or creation is performed automatically by this migration.
+workflow instead of creating storage in response to a missing public read. Production promotion now adopts the configured `LIXRAY_CANARY_LIX_URL` explicitly
+after both image deployments succeed and before the public canary runs. It uses
+`adopt-existing`, fails on missing or rejected storage, and never substitutes an
+empty repository or preview demo IDs. This bounded release check does not replace
+the full legacy inventory migration described above. The database migration alone
+does not provision repositories.
 
-Preview CI registers a unique ephemeral SSH key for that operator command and
+Preview and production canary CI register a unique ephemeral SSH key for that operator command and
 revokes it afterward, including failed provisioning attempts. The existing
 workspace-scoped Railway API token must permit SSH key management; no permanent
 SSH private key is stored in repository or CI configuration. Before connecting,
