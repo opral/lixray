@@ -23,11 +23,8 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 		<div className="flex min-h-screen flex-col bg-[#fbf6f0] font-sans text-[#1c1917] antialiased">
 			<SiteHeader sticky />
 
-			<div className="flex w-full flex-1 flex-col px-5 sm:px-14 lg:flex-row lg:gap-14">
-				<nav
-					className="shrink-0 pt-8 lg:sticky lg:top-[90px] lg:max-h-[calc(100vh-90px)] lg:w-[200px] lg:self-start lg:overflow-y-auto lg:pt-10 lg:pb-20"
-					aria-label="Docs navigation"
-				>
+			<div className="docs-layout">
+				<nav className="docs-navigation" aria-label="Docs navigation">
 					{Object.entries(docsToc).map(([group, items]) => (
 						<div className="mb-[26px] flex flex-col gap-1.5" key={group}>
 							<span className="pb-1 font-mono text-[11.5px] font-semibold tracking-[.07em] text-[#b5afa6] uppercase">
@@ -54,11 +51,9 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 					))}
 				</nav>
 
-				<main className="min-w-0 flex-1 pt-6 pb-[120px] lg:pt-10">
-					<div className="relative max-w-[720px]">
-						{/* Pinned to the h1's first line so the heading stays level with
-						    the sidebar's group label. */}
-						<div className="absolute top-2.5 right-0">
+				<main className="docs-main">
+					<div className="docs-content">
+						<div className="mb-4 flex justify-end">
 							<CopyMarkdownButton markdown={markdown} />
 						</div>
 						<DocsArticle html={html} />

@@ -40,6 +40,15 @@ back anything built on Lix that wants hosted, shared repositories without
 running its own infrastructure. If you want to build on top of LixRay,
 email [hello@opral.com](mailto:hello@opral.com).
 
+## Internal apps
+
+Lix repositories have a SQL interface and JavaScript bindings. Companies can
+build internal apps on top of their repository: a task tracker, an approval
+queue, or a dashboard alongside the files and context their teams already use.
+Application data can share the repository's version history.
+
+[Build a mini app](./internal-apps.md) to try it with a small task tracker.
+
 ## Next steps
 
 - [MCP](./mcp.md) — the LixRay MCP server in depth.
