@@ -1540,6 +1540,9 @@ function ReadmePreview({
 			    of escaping to a full page load. */}
 			{/* Click delegation only augments the anchors inside, which stay
 			    keyboard-accessible on their own. */}
+			{/* The standalone file view strips the document's page padding, so
+			    the card owns its inner margins: 36px sides, a heading's beat
+			    above and below. */}
 			<div
 				data-testid="home-readme"
 				onClick={(event) => {
@@ -1550,13 +1553,13 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
+				className="px-9 pt-7 pb-9"
 			>
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
-				    state shares the editor's own presentation. The document's
-				    own page padding sets the card's inner margins. */}
+				    state shares the editor's own presentation. */}
 				{diff && "unavailable" in diff ? (
-					<div role="alert" className="px-9 py-6 text-[13px]">
+					<div role="alert" className="text-[13px]">
 						The working diff changed while it was being reviewed. Reopen the
 						review.
 					</div>
