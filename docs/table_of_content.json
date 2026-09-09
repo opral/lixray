@@ -2,5 +2,9 @@
 	"Platform": [
 		{ "path": "what-is-lixray.md", "label": "What is LixRay?" },
 		{ "path": "mcp.md", "label": "MCP" }
+	],
+	"Guides": [
+		{ "path": "internal-apps.md", "label": "Build an internal app" },
+		{ "path": "access-tokens.md", "label": "Create an access token" }
 	]
 }

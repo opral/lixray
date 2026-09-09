@@ -118,11 +118,48 @@
 	}
 }
 
+/* Keep the docs shell independent of utility CSS loaded by the app editor. */
+.docs-layout {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	align-content: start;
+	gap: 24px;
+	width: 100%;
+	max-width: 1120px;
+	margin-inline: auto;
+	padding: 32px 24px 120px;
+	flex: 1;
+}
+.docs-navigation,
+.docs-main {
+	min-width: 0;
+}
+.docs-content {
+	width: 100%;
+	max-width: 720px;
+	margin-inline: auto;
+}
+@media (min-width: 1024px) {
+	.docs-layout {
+		grid-template-columns: 200px minmax(0, 1fr);
+		gap: 56px;
+		padding-top: 40px;
+	}
+	.docs-navigation {
+		position: sticky;
+		top: 110px;
+		align-self: start;
+		max-height: calc(100vh - 130px);
+		overflow-y: auto;
+	}
+}
+
 /* Docs site markdown body (see src/lib/docs-markdown.ts). */
 .docs-prose {
 	color: #292524;
-	font-size: 15.5px;
+	font-size: 16px;
 	line-height: 1.7;
+	overflow-wrap: anywhere;
 }
 .docs-prose h1 {
 	font-size: 32px;
