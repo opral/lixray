@@ -208,6 +208,29 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			.toBe(true);
 		return matchedCount;
 	};
+	const openRepositoryWorkingChanges = async (page: Page) => {
+		await page
+			.getByRole("button", {
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
+			})
+			.click();
+		const navigator = page.getByRole("complementary", {
+			name: "Navigator",
+			exact: true,
+		});
+		await expect(
+			navigator.getByRole("region", { name: "Checkpoint history" }),
+		).toBeVisible();
+		// The active file may already be checkpointed while other files remain dirty.
+		const repositoryScope = navigator.getByRole("button", {
+			name: "Showing this file. Switch to the repository",
+			exact: true,
+		});
+		if (await repositoryScope.isVisible()) await repositoryScope.click();
+		await navigator
+			.getByRole("button", { name: "Working changes", exact: true })
+			.click();
+	};
 	const clickCheckpoint = async (
 		page: Page,
 		selectFiles?: () => Promise<void>,
@@ -239,15 +262,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		};
 		// Count/history preparation can yield while editor side effects commit.
 		// Capture the review epoch only after that preparation has completed.
-		await page
-			.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
-			})
-			.click();
-		await page
-			.getByRole("complementary", { name: "Navigator", exact: true })
-			.getByRole("button", { name: "Working changes", exact: true })
-			.click();
+		await openRepositoryWorkingChanges(page);
 		await selectFiles?.();
 		// Review presentation can load asynchronously. Finish that online setup
 		// before measuring the local checkpoint with the network unavailable.
@@ -1239,18 +1254,16 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				exact: true,
 			});
 			await expect(status).toBeVisible({ timeout: realtimeTimeout });
-			await status.click();
-			await page
-				.getByRole("complementary", { name: "Navigator", exact: true })
-				.getByRole("button", { name: "Working changes", exact: true })
-				.click();
+			await openRepositoryWorkingChanges(page);
 			await page
 				.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
 				.click();
 			await expect
 				.poll(() => workingSetFileIds(page), { timeout: realtimeTimeout })
 				.toEqual(remainingFileIds);
-			await page.keyboard.press("Escape");
+			await page
+				.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
+				.click();
 			await page.getByRole("button", { name: "Exit", exact: true }).click();
 		}
 
