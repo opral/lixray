@@ -49,7 +49,7 @@ RUN --mount=type=cache,id=s/c745bcb2-fef1-4ba6-9ebf-a6d112d94d05-/root/.local/sh
 		cp -a .lixray-ci/vendored-lix-sdk/js-sdk/dist vendor/lix/packages/js-sdk/dist; \
 		cp -a .lixray-ci/vendored-lix-sdk/storage-opfs/dist vendor/lix/packages/storage-opfs/dist; \
 	else \
-		pnpm --dir web-app lix:build; \
+		echo "Prepared SDK required: resolve the pinned Lix artifact before building" >&2; exit 1; \
 	fi
 # Railway names PR environments "lixray-pr-<n>" when configured, but
 # recreated ones get the default "pr-<hash>-<n>" — accept both. Keep in

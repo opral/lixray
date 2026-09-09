@@ -23,7 +23,11 @@ export default defineConfig({
 	webServer: process.env.PLAYWRIGHT_BASE_URL
 		? undefined
 		: {
-				command: "node ../scripts/dev.mjs",
+				command:
+					process.env.PLAYWRIGHT_SYNC_LOCAL === "1" &&
+					process.env.LIXRAY_WEB_IMAGE
+						? "node ../scripts/test-sync-stack.mjs"
+						: "node ../scripts/dev.mjs",
 				env: {
 					...process.env,
 					LIXRAY_DEV_HOST: host,

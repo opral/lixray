@@ -22,32 +22,13 @@ const serverResolver = readFileSync(
 	"utf8",
 );
 
-function extractHashInputs(source, variable) {
-	const match = source.match(
-		new RegExp(`${variable}="\\$\\(([\\s\\S]*?)\\n\\s*\\)"`),
-	);
-	assert.ok(match, `missing ${variable} hash inputs`);
-	return match[1]
-		.replace(/^[ \t]+/gm, "")
-		.replace(/\\\n/g, "\n")
-		.trim();
-}
-
-function extractWebBuildStep(source) {
-	const marker = "file: web-app/Dockerfile";
-	const start = source.indexOf(marker);
-	assert.notEqual(start, -1, "missing web Docker build");
-	const window = source.slice(Math.max(0, start - 200), start + 1400);
-	const context = window.match(/^[\t ]*context: (.+)$/m)?.[1];
-	const buildArgs = window.match(
-		/build-args: \|\n([\s\S]*?)\n[\t ]+cache-from:/,
-	)?.[1];
-	assert.ok(context, "missing web build context");
-	assert.ok(buildArgs, "missing web build args");
-	return {
-		context,
-		buildArgs: buildArgs.replace(/^[ \t]+/gm, "").trim(),
-	};
+const web = readFileSync(
+  path.join(repositoryRoot, ".github/workflows/web-image.yml"), "utf8",
+);
+function job(workflow, name) {
+  const start = workflow.indexOf(`  ${name}:\n`);
+  assert.notEqual(start, -1, `missing ${name} job`);
+  return workflow.slice(start + 2).split(/\n  [a-z][a-z-]*:\n/)[0];
 }
 
 test("PR, production, and local development resolve the server from the Lix submodule", () => {
@@ -56,7 +37,7 @@ test("PR, production, and local development resolve the server from the Lix subm
 			workflow,
 			/uses: \.\/\.github\/workflows\/lix-server-image\.yml/,
 		);
-		assert.match(workflow, /submodules: recursive/);
+
 	}
 	assert.match(compose, /image: \$\{LIXRAY_SERVER_IMAGE:-/);
 	assert.match(serverResolver, /git", \["-C", lixRoot, "rev-parse", "HEAD"\]/);
@@ -66,38 +47,36 @@ test("PR, production, and local development resolve the server from the Lix subm
 	assert.match(serverResolver, /SOURCE BUILD/);
 });
 
-test("production and PR CI hash the same web image inputs", () => {
-	assert.equal(
-		extractHashInputs(production, "web_inputs"),
-		extractHashInputs(pr, "web_inputs"),
-	);
+test("PR and production use one exact-checkout web image builder", () => {
+  for (const caller of [pr, production]) {
+    assert.match(job(caller, "web-image"), /uses: \.\/\.github\/workflows\/web-image\.yml/);
+    assert.doesNotMatch(caller, /file: web-app\/Dockerfile|web_inputs=|web_content_tag/);
+  }
+  assert.match(web, /submodules: recursive/);
+  assert.match(web, /file: web-app\/Dockerfile/);
+  assert.match(web, /RAILWAY_GIT_COMMIT_SHA=\$\{\{ github\.sha \}\}/);
+  assert.doesNotMatch(web, /imagetools inspect|EXISTING_DIGEST|content_tag|tree_tag/);
 });
 
-test("production builds a missing web image with the same inputs as PR CI", () => {
-	assert.deepEqual(extractWebBuildStep(production), extractWebBuildStep(pr));
-	assert.match(production, /if: steps\.existing\.outputs\.web_found != 'true'/);
-	assert.match(
-		production,
-		/web_digest="\$\{WEB_BUILT_DIGEST:-\$WEB_EXISTING_DIGEST\}"/,
-	);
+test("shared web builds require the prepared SDK before Docker", () => {
+  const download = web.indexOf("uses: actions/download-artifact@v4");
+  const build = web.indexOf("uses: docker/build-push-action@v6");
+  assert.ok(download >= 0 && download < build);
+  assert.match(web.slice(download, build), /name: vendored-lix-sdk\n\s+path: \.lixray-ci\/vendored-lix-sdk/);
+  assert.match(job(production, "web-image"), /needs: sdk/);
 });
 
-test("production supplies the prepared SDK before building a web image", () => {
-	assert.match(
-		production,
-		/  sdk:\n[\s\S]*?uses: \.\/\.github\/workflows\/lix-sdk\.yml/,
-	);
-	const images = production.split("  images:\n")[1].split("  database:\n")[0];
-	assert.match(images, /needs:\n\s+- server-image\n\s+- sdk/);
-	const download = images.indexOf("uses: actions/download-artifact@v4");
-	const build = images.indexOf("uses: docker/build-push-action@v6");
-	assert.ok(download >= 0 && download < build);
-	assert.match(
-		images.slice(0, download),
-		/if: steps\.existing\.outputs\.web_found != 'true'\n\s*$/,
-	);
-	assert.match(
-		images.slice(download, build),
-		/name: vendored-lix-sdk\n\s+path: \.lixray-ci\/vendored-lix-sdk/,
-	);
+test("production validates and promotes the same immutable candidate before database changes", () => {
+  const validate = job(production, "validate");
+  assert.match(validate, /uses: \.\/\.github\/workflows\/browser-integration\.yml/);
+  for (const name of ["web", "server"]) {
+    const digest = `needs.${name}-image.outputs.image`;
+    assert.ok(validate.includes(`${name}-image: ` + "${{ " + digest + " }}"));
+    assert.ok(job(production, "release").includes(`${name.toUpperCase()}_IMAGE: ` + "${{ " + digest + " }}"));
+  }
+  assert.match(job(production, "database"), /needs: validate/);
+  assert.match(job(production, "release"), /- validate/);
+  const release = job(production, "release");
+  assert.ok(release.indexOf("promote-production.sh") < release.indexOf("provision-production-canary.mjs"));
+  assert.ok(release.indexOf("provision-production-canary.mjs") < release.indexOf("check-production-lix.mjs"));
 });

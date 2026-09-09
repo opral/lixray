@@ -1,0 +1,69 @@
+name: Browser integration
+on:
+  workflow_call:
+    inputs:
+      web-image:
+        type: string
+        required: true
+      server-image:
+        type: string
+        required: true
+      performance:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  packages: read
+jobs:
+  browser:
+    name: Browser ${{ matrix.scenario }}
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ${{ fromJSON(inputs.performance && '["performance"]' || '["navigation", "editing", "history"]') }}
+    runs-on: ${{ inputs.performance && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    env:
+      LIXRAY_WEB_IMAGE: ${{ inputs.web-image }}
+      LIXRAY_SERVER_IMAGE: ${{ inputs.server-image }}
+      PLAYWRIGHT_SYNC_LOCAL: "1"
+      LIXRAY_LIX_SERVICE_URL: http://127.0.0.1:18080
+      LIXRAY_INTERNAL_TOKEN: lixray-local-internal-token
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: pnpm --dir web-app exec playwright install --with-deps chromium
+      - name: Run independent sync scenarios
+        if: inputs.performance != true
+        run: pnpm --dir web-app exec playwright test tests/e2e/sync-preview.spec.ts --grep "@${{ matrix.scenario }}"
+      - name: Measure warm-reopen performance
+        if: inputs.performance
+        run: pnpm --dir web-app exec playwright test --config playwright.performance.config.ts
+      - name: Capture service diagnostics
+        if: failure()
+        run: docker compose logs --no-color --tail 100 lix-server lixray-web
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-${{ matrix.scenario }}
+          path: web-app/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Stop disposable services
+        if: always()
+        run: docker compose -f compose.yml -f .github/compose-sync-ci.yml down --volumes

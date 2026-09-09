@@ -75,148 +75,37 @@ export async function installServerImageArtifact({
 	}
 }
 
-export async function waitForLixArtifacts({
-	revision,
-	artifactNames,
-	log = console.log,
-}) {
-	if (process.env.LIXRAY_LIX_ARTIFACTS === "off") {
-		log(
-			`[lix-artifact] GATE bypassed; source builds were explicitly requested for ${revision}.`,
-		);
-		return { available: [], missing: [...artifactNames] };
-	}
-
-	const repository =
-		process.env.LIX_CI_ARTIFACT_REPOSITORY ?? defaultRepository;
-	const apiRoot = process.env.LIX_CI_ARTIFACT_API_ROOT ?? defaultApiRoot;
-	const deadline = Date.now() + waitDurationSeconds() * 1_000;
-	const available = new Set();
-	log(
-		`[lix-artifact] GATE waiting for ${artifactNames.join(", ")} from ${repository} at ${revision}.`,
-	);
-
-	while (true) {
-		for (const artifactName of artifactNames) {
-			if (available.has(artifactName)) continue;
-			const candidate = await findReusableArtifact({
-				apiRoot,
-				artifactName,
-				log,
-				repository,
-				revision,
-			});
-			if (!candidate) continue;
-			available.add(artifactName);
-			log(
-				`[lix-artifact] READY ${artifactName} from run ${candidate.runId}.`,
-			);
-		}
-
-		if (available.size === artifactNames.length || Date.now() >= deadline) {
-			break;
-		}
-		const pendingRun = await findPendingRun({
-			apiRoot,
-			repository,
-			revision,
-		});
-		if (!pendingRun) break;
-		const missing = artifactNames.filter((name) => !available.has(name));
-		const remainingSeconds = Math.max(
-			1,
-			Math.ceil((deadline - Date.now()) / 1_000),
-		);
-		log(
-			`[lix-artifact] GATE WAIT run ${pendingRun.id} is ${pendingRun.status}; waiting up to ${remainingSeconds}s for ${missing.join(", ")}.`,
-		);
-		await delay(Math.min(15_000, deadline - Date.now()));
-	}
-
-	const missing = artifactNames.filter((name) => !available.has(name));
-	if (missing.length > 0) {
-		log(
-			`[lix-artifact] GATE continuing with source fallback available for ${missing.join(", ")}.`,
-		);
-	} else {
-		log(`[lix-artifact] GATE complete; all exact-revision artifacts are ready.`);
-	}
-	return { available: [...available], missing };
-}
-
 async function downloadArtifact({ artifactName, manifestPath, revision, log }) {
 	if (process.env.LIXRAY_LIX_ARTIFACTS === "off") {
-		log(
-			`[lix-artifact] Lookup disabled; source build requested for ${revision}.`,
-		);
+		log(`[lix-artifact] Lookup disabled; source build requested for ${revision}.`);
 		return undefined;
 	}
-
-	const repository =
-		process.env.LIX_CI_ARTIFACT_REPOSITORY ?? defaultRepository;
+	const repository = process.env.LIX_CI_ARTIFACT_REPOSITORY ?? defaultRepository;
 	const apiRoot = process.env.LIX_CI_ARTIFACT_API_ROOT ?? defaultApiRoot;
-	const waitSeconds = waitDurationSeconds();
-	const deadline = Date.now() + waitSeconds * 1_000;
+	const producer = `https://github.com/${repository}/commit/${revision}/checks`;
 	log(`[lix-artifact] Looking for ${repository}/${artifactName}.`);
-
-	while (true) {
-		let candidate;
-		try {
-			candidate = await findReusableArtifact({
-				apiRoot,
-				artifactName,
-				log,
-				repository,
-				revision,
-			});
-		} catch (error) {
-			log(
-				`[lix-artifact] Lookup unavailable (${errorMessage(error)}); falling back to source.`,
-			);
-			return undefined;
+	let candidate;
+	try {
+		candidate = await findReusableArtifact({ apiRoot, artifactName, log, repository, revision });
+	} catch (error) {
+		if (process.env.LIXRAY_LIX_ARTIFACTS === "only") {
+			throw new Error(`Required Lix CI artifact ${artifactName} could not be checked (${errorMessage(error)}). Check its producer: ${producer}`);
 		}
-
-		if (candidate) {
-			const downloaded = await verifiedArtifact({
-				artifact: candidate.artifact,
-				artifactName,
-				manifestPath,
-				revision,
-				run: candidate.run,
-				runId: candidate.runId,
-				log,
-			});
-			if (downloaded) return downloaded;
-		}
-
-		if (Date.now() >= deadline) break;
-		let pendingRun;
-		try {
-			pendingRun = await findPendingRun({ apiRoot, repository, revision });
-		} catch (error) {
-			log(
-				`[lix-artifact] Could not check pending Lix runs (${errorMessage(error)}).`,
-			);
-			break;
-		}
-		if (!pendingRun) break;
-		const remainingSeconds = Math.max(
-			1,
-			Math.ceil((deadline - Date.now()) / 1_000),
-		);
-		log(
-			`[lix-artifact] WAIT run ${pendingRun.id} is ${pendingRun.status}; waiting up to ${remainingSeconds}s for ${artifactName}.`,
-		);
-		await delay(Math.min(15_000, deadline - Date.now()));
+		log(`[lix-artifact] Lookup unavailable (${errorMessage(error)}); falling back to source. Producer: ${producer}`);
+		return undefined;
 	}
-
-	const outcome =
-		process.env.LIXRAY_LIX_ARTIFACTS === "only"
-			? "the required artifact is unavailable"
-			: "compiling the submodule from source";
-	log(`[lix-artifact] MISS ${artifactName}; ${outcome}.`);
+	if (candidate) {
+		const downloaded = await verifiedArtifact({
+			artifact: candidate.artifact, artifactName, manifestPath, revision,
+			run: candidate.run, runId: candidate.runId, log,
+		});
+		if (downloaded) return downloaded;
+	}
+	const outcome = process.env.LIXRAY_LIX_ARTIFACTS === "only"
+		? "the required artifact is unavailable" : "compiling the submodule from source";
+	log(`[lix-artifact] MISS ${artifactName}; ${outcome}. Producer: ${producer}`);
 	if (process.env.LIXRAY_LIX_ARTIFACTS === "only") {
-		throw new Error(`Required Lix CI artifact ${artifactName} is unavailable.`);
+		throw new Error(`Required Lix CI artifact ${artifactName} is unavailable. Check its producer: ${producer}`);
 	}
 	return undefined;
 }
@@ -306,31 +195,6 @@ async function verifiedArtifact({
 		);
 		return undefined;
 	}
-}
-
-async function findPendingRun({ apiRoot, repository, revision }) {
-	const response = await githubJson(
-		`${apiRoot}/repos/${repository}/actions/runs?head_sha=${encodeURIComponent(revision)}&per_page=100`,
-	);
-	return (response.workflow_runs ?? []).find(
-		(run) => run.status !== "completed",
-	);
-}
-
-function waitDurationSeconds() {
-	const value = process.env.LIX_CI_ARTIFACT_WAIT_SECONDS ?? "0";
-	if (!/^\d+$/.test(value)) {
-		throw new Error(
-			`LIX_CI_ARTIFACT_WAIT_SECONDS must be a non-negative integer.`,
-		);
-	}
-	return Number(value);
-}
-
-function delay(milliseconds) {
-	return new Promise((resolve) =>
-		setTimeout(resolve, Math.max(0, milliseconds)),
-	);
 }
 
 async function extractZip(bytes, destination) {

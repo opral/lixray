@@ -90,6 +90,7 @@ const explicitServerImage = process.env.LIXRAY_SERVER_IMAGE?.trim();
 const selectedServerImage = explicitServerImage
 	? explicitServerImage
 	: (await resolveLixServerImage({ mode: "local" })).image;
+if (!selectedServerImage) throw new Error("Pinned Lix server artifact missing; build it in https://github.com/opral/lix/actions/workflows/ci.yml before starting development.");
 if (explicitServerImage) {
 	console.log(
 		`[lix-server] Using explicit LIXRAY_SERVER_IMAGE=${explicitServerImage}.`,

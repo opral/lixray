@@ -245,38 +245,36 @@ LIXRAY_MCP_ACCESS_TOKEN='<token>' pnpm --dir web-app check:mcp
 
 ## CI and deployment
 
-GitHub Actions builds immutable web images on pull requests, resolves the Lix
-SDK and server from the exact vendored revision, and runs the Compose browser
-flow against the server digest. Successful Lix CI artifacts are reused; an
-unreviewed revision with no artifact is compiled once as an explicit fallback.
-Trees with unchanged inputs reuse existing images.
-Draft pull requests build both immutable images and refresh their deployed
-preview, while skipping the frontend, database, Rust, and local E2E validation
-lanes. Marking a pull request ready for review runs the complete validation set.
-In-progress runs for the same pull request are cancelled, and the stable `CI`
-job remains the merge gate.
+PRs run fast formatting and focused tests immediately, without SDK preparation,
+Docker, or Railway. Type checks and SDK-dependent tests resolve the pinned Lix
+browser artifact independently. Relevant integration changes run ordinary
+Supabase/Compose tests and isolated built-image browser scenarios in parallel.
+The stable `CI` check requires every selected lane to pass, including on drafts.
 
-The separate `Production` workflow normally promotes existing tested images.
-Pushes to `main` resolve the web image and the server matching the Lix submodule
-before applying database migrations. A missing Lix artifact takes the same
-visible source-build fallback as local and PR workflows. The workflow then
-points both Railway services at immutable GHCR digests, starts them together,
-and waits up to ten minutes for both health checks. Production never waits for
-an independent Railway build.
+Lix owns Rust compilation. LixRay resolves existing SDK/server artifacts once;
+missing artifacts fail promptly with a producer link. There is no waiting job
+or automatic Rust compilation fallback. To build artifacts for an experimental
+Lix branch (including a draft PR), dispatch its exact head:
 
-GitHub Actions is the only build and deployment authority:
+```sh
+gh workflow run ci.yml --repo opral/lix --ref BRANCH \
+  -f artifacts_only=true -f source_revision=FULL_COMMIT_SHA
+```
 
-- pull request CI creates an isolated Railway environment without initial
-  source deployments, points both services at tested image digests, and deletes
-  the environment when the pull request closes;
-- each healthy preview is published as a GitHub deployment with a **View
-  deployment** link in the pull request;
-- merging to `main` applies database migrations and promotes the tested web
-  image with LixRay's pinned Lix server digest;
-- `railway.json` and `web-app/railway.json` define the two services;
-- Infisical syncs runtime configuration to Railway;
-- deployment and registry credentials come from Infisical via short-lived
-  GitHub OIDC authentication.
+The branch must still point to that SHA. Artifact-only builds test the browser
+SDK and build the server, but do not replace Lix's full release validation.
+
+Preview deployment is opt-in: add the `preview` label to the PR. While the label
+is present, subsequent pushes refresh its preview after selected checks pass.
+Unlabeled PRs never create Railway environments. Closing the PR cleans up its
+preview. Deployment smoke tests retain canonical protocol/no-store and PWA checks.
+
+The shared `web-image.yml` builds the exact checked-out commit with Docker layer
+caching. PRs and production use that same implementation. On `main`, production
+validates the built web/server digests locally before database migrations, then
+promotes those exact digests and runs the production canary. A PR image is never
+assumed to represent an interleaved merge's final tree. GitHub Actions remains
+the sole deploy authority; Railway does not independently build source.
 
 Put these secrets in the Infisical `prod` environment under `/ci`:
 
@@ -299,14 +297,10 @@ Put these secrets in the Infisical `prod` environment under `/ci`:
 - `VITE_SUPABASE_KEY`: the public production Supabase publishable key.
 
 Public Lix artifacts are downloaded with the workflow's `GITHUB_TOKEN`. An
-optional `LIX_ACTIONS_READ_TOKEN` GitHub Actions secret can supply Actions read
-access when repository visibility or organization policy prevents that token
-from reading `opral/lix`. If authorization fails or an artifact has expired,
-the terminal reports the miss and LixRay falls back to compiling the selected
-submodule. CI waits for an already-running exact-revision Lix build before
-falling back, avoiding a duplicate compile when both pull requests start
-together. Local development uses the current `gh auth` session for the same
-read when available.
+optional `LIX_ACTIONS_READ_TOKEN` supplies Actions read access when organization
+policy prevents cross-repository access. Missing, expired, or inaccessible
+artifacts fail without falling back to source compilation. Local development
+uses the current `gh auth` session for artifact reads when available.
 
 Create separate Infisical OIDC machine identities for pull requests and the
 GitHub `production` environment. Give both read access only to `/ci`, bind
@@ -353,16 +347,33 @@ inherit production Supabase credentials.
 
 ### Sync validation
 
-The required E2E job runs the exhaustive multi-tab sync and checkpoint-history
-suite against loopback Compose services in demo mode, with isolated `ci-sync`
-storage. All convergence, runtime-error, and protocol cache-header assertions
-remain strict. This avoids making sync correctness depend on Railway edge
-availability during a long browser session.
+`browser-integration.yml` runs navigation, editing, and checkpoint/history in
+separate jobs. Each gets its own disposable Compose storage and the exact built
+web/server images, with no Supabase or Railway dependency. Strict protocol,
+convergence, runtime-error, offline durability, and checkpoint identity checks
+remain required. Ordinary authenticated Compose E2E runs separately.
 
-Railway previews retain the bounded protocol and PWA-asset smoke checks after
-deployment. The exhaustive remote test remains available for diagnostics by
-setting `PLAYWRIGHT_SYNC_PREVIEW=1`, `PLAYWRIGHT_BASE_URL`, and
-`PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID`; it is no longer a PR gate.
+For a focused local run, supply built images (prefer immutable digests):
+
+```sh
+LIXRAY_WEB_IMAGE=ghcr.io/opral/lixray-web@sha256:... \
+LIXRAY_SERVER_IMAGE=ghcr.io/opral/lix-server@sha256:... \
+LIXRAY_LIX_SERVICE_URL=http://127.0.0.1:18080 \
+LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
+PLAYWRIGHT_SYNC_LOCAL=1 \
+pnpm --dir web-app exec playwright test tests/e2e/sync-preview.spec.ts --grep @history
+```
+
+The stack uses a fresh storage prefix on every launch. Its containers persist
+until explicitly stopped; CI tears down its disposable stack after each job.
+Use `COMPOSE_PROJECT_NAME`, `E2E_PORT` for the web port, and the
+`LIXRAY_SERVER_PORT`/`LIXRAY_MINIO_PORT`/`LIXRAY_MINIO_CONSOLE_PORT` overrides to isolate a local
+run from an existing development stack.
+
+Repeated warm-reopen latency and query-budget measurements run in the separate
+`Browser performance` workflow, daily and on explicit workflow dispatch, using
+a dedicated runner class. They retain the existing limits and are not a PR gate.
+The performance Playwright config is `web-app/playwright.performance.config.ts`.
 
 ### Fast pull request previews
 
