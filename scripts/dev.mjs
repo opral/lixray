@@ -110,6 +110,7 @@ composeEnv = {
 	SUPABASE_JWKS_URL: `${composeSupabaseUrl}/auth/v1/.well-known/jwks.json`,
 	SUPABASE_JWT_ISSUER_URL: supabaseUrl,
 	SUPABASE_PUBLISHABLE_KEY: supabaseKey,
+	SUPABASE_SERVICE_ROLE_KEY: supabaseSecretKey,
 	VITE_LIXRAY_LOCAL_DEV: "1",
 	VITE_LIXRAY_LOCAL_DEV_EMAIL: localDevEmail,
 	VITE_LIXRAY_LOCAL_DEV_PASSWORD: localDevPassword,

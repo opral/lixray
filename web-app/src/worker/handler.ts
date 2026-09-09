@@ -1,3 +1,5 @@
+import { handleFileSharing } from "./repository-file-sharing.ts";
+import { createHostedRepository } from "./repository-create.ts";
 import { validateMcpJwtClaims } from "../mcp/auth.ts";
 import { jwtVerify, type JWTPayload } from "jose";
 import {
@@ -81,6 +83,8 @@ export { validateMcpJwtClaims } from "../mcp/auth.ts";
 export interface WorkerEnv {
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
+	/** Server-only credential for registering protocol-created repository ownership. */
+	SUPABASE_SERVICE_ROLE_KEY?: string;
 	SUPABASE_JWKS_URL?: string;
 	/**
 	 * Public Supabase URL used as the JWT issuer. This can differ from
@@ -292,6 +296,55 @@ export async function handleRequest(
 					...(deploymentId ? { "x-railway-deployment-id": deploymentId } : {}),
 				},
 			},
+		);
+	}
+
+	const fileShareMatch = /^\/api\/repositories\/([0-9a-f-]{36})\/share$/.exec(
+		url.pathname,
+	);
+	if (fileShareMatch) {
+		const auth = await (
+			options.authenticate ??
+			((request, env) =>
+				authenticateRepositoryClient(request, env, options.fetch))
+		)(request, env);
+		if (!auth.ok) return auth.response;
+		return handleFileSharing(
+			request,
+			env,
+			auth.auth.token,
+			fileShareMatch[1],
+			options.fetch,
+		);
+	}
+
+	if (url.pathname === "/api/account" && request.method === "GET") {
+		const token = bearerToken(request);
+		if (!token) return new Response("API token required", { status: 401 });
+		const result = await authorizeApiToken(token, null, env, options.fetch);
+		return result.ok
+			? Response.json(
+					{ id: result.account.id, name: result.account.name },
+					{ headers: { "cache-control": "no-store" } },
+				)
+			: result.response;
+	}
+
+	if (url.pathname === "/lix/v1") {
+		if (request.method === "OPTIONS") return remoteLixCorsPreflight(request);
+		if (request.method !== "POST")
+			return new Response("Method not allowed", { status: 405 });
+		const auth = await (
+			options.authenticate ??
+			((request, env) =>
+				authenticateRepositoryClient(request, env, options.fetch))
+		)(request, env);
+		if (!auth.ok) return withRemoteLixCors(auth.response, request);
+		if (auth.auth.isDemo)
+			return new Response("Sign in to create a repository", { status: 403 });
+		return withRemoteLixCors(
+			await createHostedRepository(request, env, auth.auth, options.fetch),
+			request,
 		);
 	}
 
@@ -886,7 +939,7 @@ export async function handleRequest(
 					? url.searchParams.get("path")
 					: request.headers.get("x-lixray-public-path")) ?? undefined;
 
-			const authenticate = options.authenticate ?? authenticateWithSupabase;
+			const authenticate = options.authenticate ?? authenticateRepositoryClient;
 			const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
 			const authCheckStartedAt = performance.now();
 			if (bearerToken(request)) {
@@ -1420,6 +1473,24 @@ function deferResponseCleanup(
 		statusText: response.statusText,
 		headers: response.headers,
 	});
+}
+
+async function authenticateRepositoryClient(
+	request: Request,
+	env: WorkerEnv,
+	fetcher: typeof fetch = fetch,
+): Promise<AuthResult> {
+	const token = bearerToken(request);
+	if (token?.startsWith("lixray_pat_")) {
+		const result = await authorizeApiToken(token, null, env, fetcher);
+		return result.ok
+			? {
+					ok: true,
+					auth: { userId: result.account.id, token, account: result.account },
+				}
+			: result;
+	}
+	return authenticateWithSupabase(request, env);
 }
 
 export function validateBrowserJwtClaims(payload: JWTPayload): boolean {

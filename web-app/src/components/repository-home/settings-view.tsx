@@ -4,10 +4,6 @@ import { toast } from "sonner";
 import { MemberAvatar } from "./people-view";
 import { Button } from "~/components/ui/button";
 import { formatCaughtError } from "~/lib/format";
-import {
-	RepositoryApiTokenPanel,
-	type RepositoryApiTokenApi,
-} from "~/components/api-token-settings";
 
 export interface DirectRepositoryMember {
 	accountId: string;
@@ -22,7 +18,7 @@ export interface DirectRepositoryMember {
  * React root outside the app's providers, so everything it needs arrives as
  * callbacks (same pattern as RepositoryTeamApi).
  */
-export interface RepositorySettingsApi extends RepositoryApiTokenApi {
+export interface RepositorySettingsApi {
 	info(): {
 		repositoryId: string;
 		namespaceHandle: string;
@@ -84,10 +80,7 @@ function SettingsContent({
 				</p>
 				<NamePanel settingsApi={settingsApi} />
 				<AccessPanel settingsApi={settingsApi} />
-				<RepositoryApiTokenPanel
-					key={`${info.repositoryId}:${info.currentAccountId}`}
-					api={settingsApi}
-				/>
+
 				{info.isAdmin ? <DangerPanel settingsApi={settingsApi} /> : null}
 			</div>
 		</div>

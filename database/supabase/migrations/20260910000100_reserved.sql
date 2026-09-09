@@ -1,0 +1,2 @@
+-- Reserved: this version was applied by an abandoned preview implementation.
+-- Account tokens and publication permissions are defined by the next migration.

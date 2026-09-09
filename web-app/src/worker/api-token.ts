@@ -7,7 +7,7 @@ type Result =
 /** Authorize each SDK request against the current token and membership state. */
 export async function authorizeApiToken(
 	token: string,
-	lixId: string,
+	lixId: string | null,
 	env: { SUPABASE_URL?: string; SUPABASE_PUBLISHABLE_KEY?: string },
 	fetchImpl: typeof fetch = fetch,
 ): Promise<Result> {

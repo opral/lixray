@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("Repository tokens have generated names, creation dates and independent deletion", async ({
+test("Account tokens have generated names, creation dates and independent deletion", async ({
 	page,
 	context,
 	request,
@@ -20,7 +20,7 @@ test("Repository tokens have generated names, creation dates and independent del
 		page.getByRole("button", { name: "Account menu" }),
 	).toBeVisible();
 
-	const { lixId, otherId, namespace, slug } = await page.evaluate(async () => {
+	const { lixId, otherId, namespace } = await page.evaluate(async () => {
 		const moduleUrl = "/src/lib/supabase.ts";
 		const { getBrowserSupabaseClient } = (await import(
 			/* @vite-ignore */ moduleUrl
@@ -52,11 +52,14 @@ test("Repository tokens have generated names, creation dates and independent del
 			slug: `api-token-${id}`,
 		};
 	});
+	const createdIds = [lixId, otherId];
 	try {
-		await page.goto(`/@${namespace}/${slug}/settings`);
+		await page.goto(`/settings/@${namespace}`);
 		// The first repository opens a cold Vite module graph, WASM engine, and
 		// synced storage. Keep this startup budget separate from token actions.
-		await expect(page.getByTestId("repository-settings-view")).toBeVisible({
+		await expect(
+			page.getByRole("region", { name: "API tokens", exact: true }),
+		).toBeVisible({
 			timeout: 30_000,
 		});
 		await expect(
@@ -84,26 +87,20 @@ test("Repository tokens have generated names, creation dates and independent del
 				.getAttribute("datetime"),
 		).toBeTruthy();
 		expect(first).toMatch(/^lixray_pat_[0-9a-f]{64}$/);
-		const wrongRepo = await request.get(`/lix/v1/${otherId}/`, {
+		for (const id of [lixId, otherId]) {
+			const provision = await request.post(
+				`/api/repositories/${id}/provision`,
+				{ headers: { Authorization: `Bearer ${first}` } },
+			);
+			expect(provision.ok(), await provision.text()).toBe(true);
+		}
+		const otherRepo = await request.get(`/lix/v1/${otherId}/`, {
 			headers: {
 				Authorization: `Bearer ${first}`,
 				"Lix-Server-Protocol-Version": "7",
 			},
 		});
-		expect(wrongRepo.status()).toBe(403);
-		const otherToken = await page.evaluate(async (id) => {
-			const moduleUrl = "/src/lib/supabase.ts";
-			const { getBrowserSupabaseClient } = (await import(
-				/* @vite-ignore */ moduleUrl
-			)) as typeof import("../../src/lib/supabase");
-			const { data, error } = await getBrowserSupabaseClient().rpc(
-				"generate_api_token",
-				{ p_lix_id: id },
-			);
-			if (error || !data?.[0])
-				throw new Error("Second repository token failed");
-			return data[0].token;
-		}, otherId);
+		expect(otherRepo.status()).toBe(200);
 		await page.getByRole("button", { name: "Copy token", exact: true }).click();
 		expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
 			first,
@@ -160,6 +157,88 @@ test("Repository tokens have generated names, creation dates and independent del
 		);
 		expect(paths).toEqual([{ path: "/api-token.txt" }]);
 
+		// Desktop uploads a snapshot body. Buffer this tiny browser fixture because
+		// Chromium streaming requests require HTTP/2 and the local server uses HTTP/1.
+		const snapshot = await page.evaluate(async () => {
+			const sdkUrl = "/node_modules/@lix-js/sdk/dist/index.js";
+			const { openLix } = (await import(
+				/* @vite-ignore */ sdkUrl
+			)) as typeof import("@lix-js/sdk");
+			const local = await openLix();
+			try {
+				await local.execute(
+					"INSERT INTO lix_file (path,content) VALUES ($1,$2)",
+					["/shared.txt", new TextEncoder().encode("before")],
+				);
+				await local.execute("UPDATE lix_file SET content=$1 WHERE path=$2", [
+					new TextEncoder().encode("after"),
+					"/shared.txt",
+				]);
+				await local.execute(
+					"INSERT INTO lix_file (path,content) VALUES ($1,$2)",
+					["/private.txt", new TextEncoder().encode("private")],
+				);
+				const history = (await local.execute("SELECT count(*) FROM lix_log()"))
+					.rows;
+				return {
+					history,
+					bytes: Array.from(
+						new Uint8Array(
+							await new Response(local.exportSnapshot()).arrayBuffer(),
+						),
+					),
+				};
+			} finally {
+				await local.close();
+			}
+		});
+		const creation = await request.post("/lix/v1", {
+			headers: {
+				Authorization: `Bearer ${first}`,
+				"Idempotency-Key": crypto.randomUUID(),
+				"Content-Type": "application/vnd.lix.snapshot",
+				"Lix-Server-Protocol-Version": "7",
+			},
+			data: Buffer.from(snapshot.bytes),
+		});
+		expect(creation.status(), await creation.text()).toBe(201);
+		const remote = (await creation.json()) as {
+			id: ReturnType<typeof crypto.randomUUID>;
+			url: string;
+		};
+		createdIds.push(remote.id);
+		const importedHistory = await page.evaluate(
+			async ({ token, url }) => {
+				const sdkUrl = "/node_modules/@lix-js/sdk/dist/index.js";
+				const { openLix } = (await import(
+					/* @vite-ignore */ sdkUrl
+				)) as typeof import("@lix-js/sdk");
+				const hosted = await openLix({
+					server: { url, headers: { Authorization: `Bearer ${token}` } },
+				});
+				try {
+					return (await hosted.execute("SELECT count(*) FROM lix_log()")).rows;
+				} finally {
+					await hosted.close();
+				}
+			},
+			{ token: first, url: remote.url },
+		);
+		expect(importedHistory).toEqual(snapshot.history);
+		const publication = await request.post(
+			`/api/repositories/${remote.id}/share?path=/shared.txt`,
+			{ headers: { Authorization: `Bearer ${first}` } },
+		);
+		expect(publication.status(), await publication.text()).toBe(200);
+		expect(
+			((await publication.json()) as { published: boolean }).published,
+		).toBe(true);
+		const privateFile = await request.get(
+			`/lix/v1/${remote.id}/file?path=/private.txt`,
+			{ headers: { "Lix-Server-Protocol-Version": "7" } },
+		);
+		expect([401, 403, 404]).toContain(privateFile.status());
+
 		await panel
 			.getByRole("button", { name: "Generate token", exact: true })
 			.click();
@@ -176,7 +255,9 @@ test("Repository tokens have generated names, creation dates and independent del
 		await page.reload();
 		// Reload reopens the repository and its synced storage before mounting
 		// Settings. Use the startup budget, then the usual token-action budget.
-		await expect(page.getByTestId("repository-settings-view")).toBeVisible({
+		await expect(
+			page.getByRole("region", { name: "API tokens", exact: true }),
+		).toBeVisible({
 			timeout: 30_000,
 		});
 		await expect(panel.getByRole("listitem")).toHaveCount(2);
@@ -229,18 +310,6 @@ test("Repository tokens have generated names, creation dates and independent del
 			.click();
 		await expect(panel.getByRole("listitem")).toHaveCount(0);
 
-		const otherProvisioned = await request.post(
-			`/api/repositories/${otherId}/provision`,
-			{ headers: { Authorization: `Bearer ${otherToken}` } },
-		);
-		expect(otherProvisioned.ok(), await otherProvisioned.text()).toBe(true);
-		const otherResponse = await request.get(`/lix/v1/${otherId}/`, {
-			headers: {
-				Authorization: `Bearer ${otherToken}`,
-				"Lix-Server-Protocol-Version": "7",
-			},
-		});
-		expect(otherResponse.status()).toBe(200);
 		await page.setViewportSize({ width: 390, height: 844 });
 		await expect(
 			page.getByRole("button", { name: "Generate token", exact: true }),
@@ -251,26 +320,16 @@ test("Repository tokens have generated names, creation dates and independent del
 			),
 		).toBe(true);
 	} finally {
-		await page.evaluate(
-			async (ids) => {
-				const moduleUrl = "/src/lib/supabase.ts";
-				const { getBrowserSupabaseClient } = (await import(
-					/* @vite-ignore */ moduleUrl
-				)) as typeof import("../../src/lib/supabase");
-				const client = getBrowserSupabaseClient();
-				for (const id of ids) {
-					const { data: tokens } = await client.rpc("list_api_tokens", {
-						p_lix_id: id,
-					});
-					for (const token of tokens ?? [])
-						await client.rpc("delete_api_token", {
-							p_lix_id: id,
-							p_token_id: token.id,
-						});
-					await client.rpc("delete_lix", { p_lix_id: id });
-				}
-			},
-			[lixId, otherId],
-		);
+		await page.evaluate(async (ids) => {
+			const moduleUrl = "/src/lib/supabase.ts";
+			const { getBrowserSupabaseClient } = (await import(
+				/* @vite-ignore */ moduleUrl
+			)) as typeof import("../../src/lib/supabase");
+			const client = getBrowserSupabaseClient();
+			const { data: tokens } = await client.rpc("list_api_tokens");
+			for (const token of tokens ?? [])
+				await client.rpc("delete_api_token", { p_token_id: token.id });
+			for (const id of ids) await client.rpc("delete_lix", { p_lix_id: id });
+		}, createdIds);
 	}
 });
