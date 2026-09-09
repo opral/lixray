@@ -120,7 +120,9 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 			`/${source}/note.txt`,
 		]);
 		await page.goto(repository.path);
-		await expect(row(source)).toBeVisible();
+		// A cold browser worker compiles the SDK and downloads its initial replica.
+		// Match the startup budget used by the other repository-opening tests.
+		await expect(row(source)).toBeVisible({ timeout: 30_000 });
 		await expect(row(target)).toBeVisible();
 		context.on("request", captureCheckpoint);
 		// Keep navigation/assets reachable so reload tests the persisted replica,
