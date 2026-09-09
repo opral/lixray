@@ -58,3 +58,13 @@ process.stdout.write(JSON.stringify({ args: process.argv.slice(2), prefix: proce
   assert.match(compose, /S3_PREFIX: \$\{LIXRAY_STORAGE_PREFIX:-local\}/);
   assert.match(compose, /local\/lixray\/local\/perf\/\$\$\{LIXRAY_PERF_REPOSITORY\}\//);
 });
+
+test("local Lix server advertises the web gateway origin", () => {
+  const compose = readFileSync(resolve(root, "compose.yml"), "utf8");
+  const dev = readFileSync(resolve(root, "scripts/dev.mjs"), "utf8");
+  assert.match(
+    compose,
+    /LIX_SERVER_PUBLIC_URL: \$\{LIXRAY_PUBLIC_URL:-http:\/\/127\.0\.0\.1:8787\}/,
+  );
+  assert.match(dev, /LIXRAY_PUBLIC_URL: `http:\/\/\$\{devHost\}:\$\{devPort\}`/);
+});

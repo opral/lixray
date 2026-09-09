@@ -427,6 +427,12 @@ jobs:
           LIXRAY_SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
         run: pnpm --dir web-app exec playwright test
 
+      - name: Report Compose failure diagnostics
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color --tail 150 lix-server minio-init
+
       - name: Upload Playwright failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4

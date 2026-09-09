@@ -397,3 +397,10 @@ Set `LIXRAY_PERF_URL` and `LIXRAY_INTERNAL_TOKEN` to exercise a hosted service.
 Every invocation seeds a fresh deterministic 1,000-file repository and measures
 one CRUD operation family. See [`perf/README.md`](perf/README.md) for the
 operation matrix, exact commit semantics, repetition method, and result schema.
+
+The Lix server requires `LIX_SERVER_PUBLIC_URL` to advertise repository URLs through
+the web gateway. Local development sets it to the dev server origin (including
+custom ports). Railway promotion resolves or creates the web service domain in
+the target environment and passes that HTTPS origin to the server. Set
+`LIXRAY_PUBLIC_URL` in the promotion environment to use a custom HTTPS origin.
+Direct Railway launches must set `LIXRAY_PUBLIC_URL` to the web gateway origin.
