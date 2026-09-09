@@ -46,7 +46,16 @@ void test("explains a terminal automatic migration failure", () => {
 					code,
 				}),
 			),
-			"Repository migration failed. Contact support to recover the repository.",
+			`Repository migration failed (${code}): The lix repository migration failed.`,
 		);
 	}
+});
+
+void test("preserves migration details from serialized engine errors", () => {
+	const message =
+		"copy target write failed: precondition failed: [PreconditionFailure { index: 1 }]";
+	assert.equal(
+		formatRepositoryOpenError({ code: "LIX_ERROR_MIGRATION_FAILED", message }),
+		`Repository migration failed (LIX_ERROR_MIGRATION_FAILED): ${message}`,
+	);
 });

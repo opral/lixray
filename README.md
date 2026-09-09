@@ -432,6 +432,11 @@ empty repository or preview demo IDs. This bounded release check does not replac
 the full legacy inventory migration described above. The database migration alone
 does not provision repositories.
 
+Repository opening failures display the migration error code and diagnostic text
+instead of replacing them with a generic support message. Include that text when
+reporting a failed migration; server diagnostics omit private storage connection
+details. Do not reset or recreate the repository to work around a migration error.
+
 Preview and production canary CI register a unique ephemeral SSH key for that operator command and
 revokes it afterward, including failed provisioning attempts. The existing
 workspace-scoped Railway API token must permit SSH key management; no permanent

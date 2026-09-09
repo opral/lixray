@@ -1345,7 +1345,7 @@ export function RepositoryAtelier({
 						role="alert"
 					>
 						<strong>Unable to open Atelier</strong>
-						<span>{error}</span>
+						<span className="whitespace-pre-wrap break-words">{error}</span>
 					</div>
 				</main>
 			) : null}
