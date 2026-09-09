@@ -12,7 +12,6 @@ reset role;
 set local request.jwt.claims='{"role":"service_role"}';
 select lives_ok($$select public.register_hosted_lix('85000000-0000-4000-8000-000000000011','85000000-0000-4000-8000-000000000001')$$,'register server receipt');
 select is((select visibility::text from public.lixes where id='85000000-0000-4000-8000-000000000011'),'private','creation is private');
-select is((select storage_provision_mode from public.lixes where id='85000000-0000-4000-8000-000000000011'),'adopt-existing','opening cannot replace imported storage');
 select is((select role::text from public.lix_members where lix_id='85000000-0000-4000-8000-000000000011' and account_id='85000000-0000-4000-8000-000000000001'),'admin','owner has repository administration');
 select lives_ok($$select public.register_hosted_lix('85000000-0000-4000-8000-000000000011','85000000-0000-4000-8000-000000000001')$$,'retry is successful');
 select is((select count(*) from private.hosted_lix_creations where lix_id='85000000-0000-4000-8000-000000000011'),1::bigint,'single receipt');
@@ -28,6 +27,8 @@ set local request.jwt.claims='{"role":"service_role"}';
 select throws_ok($$select public.register_hosted_lix('85000000-0000-4000-8000-000000000011','85000000-0000-4000-8000-000000000002')$$,'P0001','Repository creation receipt is no longer available','receipt cannot transfer ownership');
 update public.lixes set deleted_at=now() where id='85000000-0000-4000-8000-000000000011';
 select throws_ok($$select public.register_hosted_lix('85000000-0000-4000-8000-000000000011','85000000-0000-4000-8000-000000000001')$$,'P0001','Repository creation receipt is no longer available','retry cannot resurrect deleted repository');
-select throws_ok($$select public.register_hosted_lix((select id from public.lixes where name <> 'Renamed' limit 1),'85000000-0000-4000-8000-000000000001')$$,'P0001','Repository ID already registered','cannot claim an unrelated existing ID');
+insert into public.lixes(id,namespace_id,name,slug)
+select '85000000-0000-4000-8000-000000000099',primary_namespace_id,'Existing','existing' from public.accounts where id='85000000-0000-4000-8000-000000000001';
+select throws_ok($$select public.register_hosted_lix('85000000-0000-4000-8000-000000000099','85000000-0000-4000-8000-000000000001')$$,'P0001','Repository ID already registered','cannot claim an unrelated existing ID');
 select * from finish();
 rollback;

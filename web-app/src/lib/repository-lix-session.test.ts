@@ -450,40 +450,25 @@ void test("isolates managed sessions when a slug is recreated", () => {
 	);
 });
 
-void test("expired provisioning credentials refresh before the handshake", async () => {
-	const { createProvisioningFetch } = await import("./provision-repository.ts");
+void test("expired handshake credentials refresh without provisioning", async () => {
 	const tokens: string[] = [];
-	let handshakes = 0;
-	let refreshes = 0;
 	const wrapped = createTelemetryFetch(
-		createProvisioningFetch({
-			repositoryId: "11111111-1111-4111-8111-111111111111",
-			// Deliberately stale: the retry must prefer the refreshed request header.
-			getAccessToken: async () => "expired",
-			fetch: async (input, init) => {
-				const request = new Request(input, init);
-				if (request.url.endsWith("/provision")) {
-					const token = request.headers.get("authorization") ?? "";
-					tokens.push(token);
-					return token === "Bearer refreshed"
-						? Response.json({ ok: true })
-						: Response.json({ error: "expired" }, { status: 401 });
-				}
-				handshakes++;
-				assert.equal(request.headers.get("authorization"), "Bearer refreshed");
-				return Response.json({ ok: true });
-			},
-		}),
-		{
-			repositoryId: "repository",
-			refreshAccessToken: async () => {
-				refreshes++;
-				return "refreshed";
-			},
+		async (input, init) => {
+			const request = new Request(input, init);
+			assert.equal(
+				new URL(request.url).pathname,
+				"/lix/v1/11111111-1111-4111-8111-111111111111/",
+			);
+			const token = request.headers.get("authorization") ?? "";
+			tokens.push(token);
+			return token === "Bearer refreshed"
+				? Response.json({ ok: true })
+				: new Response(null, { status: 401 });
 		},
+		{ repositoryId: "repository", refreshAccessToken: async () => "refreshed" },
 		{
 			captureException: () => {
-				throw new Error("successful refresh must not report failure");
+				throw new Error("unexpected failure");
 			},
 		},
 	);
@@ -495,6 +480,4 @@ void test("expired provisioning credentials refresh before the handshake", async
 	);
 	assert.equal(response.status, 200);
 	assert.deepEqual(tokens, ["Bearer expired", "Bearer refreshed"]);
-	assert.equal(refreshes, 1);
-	assert.equal(handshakes, 1);
 });

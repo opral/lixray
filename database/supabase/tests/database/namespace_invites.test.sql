@@ -40,6 +40,7 @@ select set_config(
 	true
 );
 
+reset role;
 select lives_ok(
 	$$insert into public.lixes (id, namespace_id, name, slug)
 	values (
@@ -50,6 +51,7 @@ select lives_ok(
 	)$$,
 	'the inviter creates the repository'
 );
+set local role authenticated;
 
 select set_config(
 	'test.namespace_invite_token',

@@ -1,0 +1,37 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select no_plan();
+insert into auth.users(id,email,raw_app_meta_data,raw_user_meta_data) values
+ ('84000000-0000-4000-8000-000000000001','lifecycle-owner@example.com','{}','{}'),
+ ('84000000-0000-4000-8000-000000000002','lifecycle-member@example.com','{}','{}');
+set local role authenticated;
+set local request.jwt.claims='{"sub":"84000000-0000-4000-8000-000000000001","role":"authenticated"}';
+select lives_ok('select public.bootstrap_personal_namespace()','bootstrap creates namespace');
+select is((select count(*) from public.lixes),0::bigint,'bootstrap does not create phantom repository');
+select throws_ok($$insert into public.lixes(namespace_id,name,slug) select namespace_id,'Spoof','spoof' from public.bootstrap_personal_namespace()$$,'42501','permission denied for table lixes','client cannot bypass protocol creation');
+select is(to_regprocedure('public.delete_lix(uuid)')::text,null::text,'metadata-only deletion API removed');
+select is(to_regprocedure('public.resolve_lix_provision_mode(uuid,text)')::text,null::text,'provision modes removed');
+select set_config('test.namespace',public.create_namespace('Lifecycle organization')::text,true);
+reset role;
+insert into public.namespace_members(namespace_id,account_id,role) values(current_setting('test.namespace')::uuid,'84000000-0000-4000-8000-000000000002','member');
+set local role service_role;
+set local request.jwt.claims='{"role":"service_role"}';
+select lives_ok($$select public.register_hosted_lix('84000000-0000-4000-8000-000000000011','84000000-0000-4000-8000-000000000002',current_setting('test.namespace')::uuid,'Team notes')$$,'namespace member can create through gateway');
+reset role;
+select is((select namespace_id from public.lixes where id='84000000-0000-4000-8000-000000000011'),current_setting('test.namespace')::uuid,'created directly in selected namespace');
+select is((select name from public.lixes where id='84000000-0000-4000-8000-000000000011'),'Team notes','host name recorded');
+set local role service_role;
+select throws_ok($$select public.authorize_hosted_lix_deletion('84000000-0000-4000-8000-000000000011','84000000-0000-4000-8000-000000000002')$$,'42501','Repository admin access required','member cannot delete');
+select is(public.authorize_hosted_lix_deletion('84000000-0000-4000-8000-000000000011','84000000-0000-4000-8000-000000000001'),false,'namespace owner is repository admin');
+select lives_ok($$select public.delete_hosted_lix('84000000-0000-4000-8000-000000000011','84000000-0000-4000-8000-000000000001')$$,'gateway finalizes deletion');
+select is(public.authorize_hosted_lix_deletion('84000000-0000-4000-8000-000000000011','84000000-0000-4000-8000-000000000001'),true,'repeat delete authorized after metadata deletion');
+select lives_ok($$select public.delete_hosted_lix('84000000-0000-4000-8000-000000000011','84000000-0000-4000-8000-000000000001')$$,'finalization idempotent');
+reset role;
+delete from public.namespace_members where namespace_id=current_setting('test.namespace')::uuid and account_id='84000000-0000-4000-8000-000000000002';
+set local role service_role;
+select throws_ok($$select public.register_hosted_lix('84000000-0000-4000-8000-000000000012','84000000-0000-4000-8000-000000000002',current_setting('test.namespace')::uuid,'Revoked')$$,'42501','Namespace membership required','registration rechecks revoked namespace access');
+set local role authenticated;
+set local request.jwt.claims='{"sub":"84000000-0000-4000-8000-000000000001","role":"authenticated"}';
+select throws_ok($$select public.delete_hosted_lix('84000000-0000-4000-8000-000000000011','84000000-0000-4000-8000-000000000001')$$,'42501','permission denied for function delete_hosted_lix','client cannot bypass protocol deletion');
+select * from finish();
+rollback;

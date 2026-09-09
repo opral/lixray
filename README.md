@@ -479,44 +479,75 @@ CI wakes the web deployment through its public health endpoint. The operator
 waits for private server health before provisioning; transient wake-up failures
 do not repeat repository writes.
 
-## Creating a hosted repository from an SDK
+## Repository lifecycle
 
-`createLix({ server: { url: "https://lixray.com", headers }, from: localLix })`
-uses the canonical `POST /lix/v1` endpoint. The gateway authenticates the caller,
-streams the snapshot to the reference server under the canonical account's
-idempotency scope, then registers the result privately in the personal namespace.
-No Lix protocol or SDK extension is required. Repository names can be changed
-through the existing control plane after creation.
+The website, desktop clients, and other SDK consumers use the same canonical
+Lix server protocol:
 
-Deploy migration `20260910000000_hosted_repository_creation.sql` and configure
-`SUPABASE_SERVICE_ROLE_KEY` in the **server environment only**. Never prefix it
-with `VITE_`. This credential calls the service-role-only registration RPC; a
-user token cannot claim an existing server repository ID. Missing configuration
-returns 503 before upload. Creation accepts a browser session or an account API
-token. The account must have an active personal namespace. Generate tokens in
-`/settings/@<your-handle>`; `/settings` redirects to your own account settings.
-The account-token migration revokes old repository-scoped tokens rather than
-giving existing credentials broader permissions.
+| Operation | Endpoint | SDK |
+| --- | --- | --- |
+| Create empty or import a snapshot | `POST /lix/v1` | `createLix` |
+| Open existing storage | `GET /lix/v1/<id>` | `openLix` |
+| Delete hosted storage | `DELETE /lix/v1/<id>` | `deleteLix` |
 
-A successful response means both storage creation and private ownership
-registration finished. If registration or the response is interrupted, retry
-with the **same idempotency key and identical snapshot**. The Lix reference
-server durably resolves that retry to the same repository, and the database
-receipt makes registration repeatable. Retrying does not reset permissions or
-rename the repository, and cannot resurrect a deleted repository. There is no
-distributed transaction: a failed registration can leave inaccessible storage
-until a retry completes. Do not use a new key to retry an uncertain creation.
+```ts
+const headers = { authorization: `Bearer ${apiToken}` };
+const hosted = await createLix({
+  server: { url: "https://lixray.com", headers },
+  from: localLix, // Omit to create an empty repository.
+  idempotencyKey: savedCreationKey,
+});
+const remote = await openLix({ server: { url: hosted.url, headers } });
+await remote.close();
+await deleteLix({ server: { url: hosted.url, headers } });
+```
 
-Creation copies a snapshot; it does not connect the source. Reopen the local
-repository with `openLix({ storage, server: { url: hosted.url, headers } })` to
-sync, then publish selected paths through `POST /api/repositories/<id>/share?path=/file.md`.
-`GET` reads publication status and `DELETE` removes a direct file publication.
-The gateway invokes the existing publication RPCs under the token owner's
-identity and retains their membership checks. API tokens are opaque credentials;
-there is no desktop OAuth exchange, callback, or refresh flow. Paste the account
-token into Flashtype, which stores it using operating-system encryption.
+Lix owns snapshot import, storage lifecycle, and sync. Lixray's gateway
+authenticates the caller and records ownership before creation returns. It
+requires repository admin rights for deletion, deletes storage first, and then
+marks the metadata deleted. Opening never creates or provisions a repository.
+Account onboarding creates a personal namespace without initializing storage.
+The former `/api/repositories/<id>/provision`, provisioning fetch wrappers,
+metadata-only `delete_lix` RPC, and direct client repository inserts are removed.
 
-Flashtype saves the hosted URL in workspace settings and resumes sync on reopen.
-It stages a snapshot once and retries with identical bytes and the same
-idempotency key. Once the selected file reaches the server, it publishes the file
-and displays its public link.
+Creation defaults to a private repository in the caller's personal namespace.
+The website uses optional host metadata headers through the SDK's existing
+`server.headers` to choose a namespace and name:
+
+```ts
+{
+  ...headers,
+  "x-lixray-namespace-id": selectedNamespaceId,
+  "x-lixray-repository-name": encodeURIComponent(name),
+}
+```
+
+These are Lixray metadata, not additional Lix API options. The gateway checks
+namespace membership before upload and again when registering ownership.
+The headers are not forwarded to storage. Names are percent-encoded UTF-8,
+trimmed, and limited to 80 characters. First successful registration determines
+name and namespace; retries never overwrite subsequent metadata changes.
+
+Apply database migrations through `20260911000000_canonical_repository_lifecycle.sql`.
+The web server requires `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY`, `LIXRAY_LIX_SERVICE_URL`, and `LIXRAY_INTERNAL_TOKEN`.
+Service credentials belong only in the server environment, never `VITE_`
+variables. The service role registers IDs returned by a successful storage
+creation; granting this operation to a user token would allow claiming arbitrary
+existing repository IDs. Missing lifecycle configuration returns 503 before upload.
+Browser sessions and account API tokens use the same lifecycle endpoints.
+Generate account tokens at `/settings/@<your-handle>` (`/settings` redirects there).
+
+A successful creation means storage and ownership registration both finished.
+After an interrupted request, retry with the **same idempotency key and identical
+snapshot**. The reference server resolves that retry to the same repository;
+the ownership receipt makes registration repeatable without resetting metadata
+or resurrecting a deleted repository. Failed registration can leave inaccessible
+storage until the retry completes. Do not generate another key for an uncertain
+creation. Repeat the same `DELETE` to complete an interrupted deletion; retained
+admin membership authorizes retries after metadata deletion.
+
+Creation copies a snapshot; it does not connect the source. Reopen locally with
+`openLix({ storage, server: { url: hosted.url, headers } })` to sync. Publish
+individual paths separately through `POST /api/repositories/<id>/share?path=/file.md`.
+Other files remain private.

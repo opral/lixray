@@ -58,6 +58,10 @@ select is((select name from public.current_account()), 'Account',
 
 select ok((select created from public.bootstrap_personal_namespace()),
 	'personal namespace bootstrap succeeds');
+reset role;
+insert into public.lixes(namespace_id,name,slug) select primary_namespace_id,'repository','repository' from public.accounts where id='82000000-0000-0000-0000-000000000001';
+set local role authenticated;
+
 select is((select count(*) from public.namespaces), 1::bigint,
 	'namespace access policy includes the personal owner without a membership row');
 select is(

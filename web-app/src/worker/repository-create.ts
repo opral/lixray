@@ -1,7 +1,8 @@
 import type { WorkerEnv } from "./handler.ts";
 import { lixServiceRequestHeaders } from "../lib/lix-service-proxy.ts";
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const UUID =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const failure = (status: number, message: string) =>
 	Response.json(
 		{ error: { code: "LIX_HOST_CREATION_FAILED", message } },
@@ -33,31 +34,40 @@ export async function createHostedRepository(
 	if (type && type !== "application/vnd.lix.snapshot")
 		return failure(415, "Expected application/vnd.lix.snapshot.");
 	try {
-		// The account must already have completed Lixray onboarding.
-		const owner = await fetcher(
-			new URL(
-				`/rest/v1/accounts?id=eq.${encodeURIComponent(account.userId)}&status=eq.active&select=primary_namespace_id`,
-				env.SUPABASE_URL,
-			),
+		const namespaceId = request.headers.get("x-lixray-namespace-id");
+		if (namespaceId && !UUID.test(namespaceId))
+			return failure(400, "Invalid namespace ID.");
+		let name: string;
+		try {
+			name = decodeURIComponent(
+				request.headers.get("x-lixray-repository-name") ?? "Shared repository",
+			).trim();
+		} catch {
+			return failure(400, "Invalid repository name.");
+		}
+		if (!name || [...name].length > 80)
+			return failure(400, "Repository name must be 1–80 characters.");
+		const owner = await hostedRepositoryRpc(
+			env,
+			"authorize_hosted_lix_creation",
 			{
-				headers: {
-					apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-					authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-				},
+				p_account_id: account.userId,
+				p_namespace_id: namespaceId,
 			},
+			fetcher,
 		);
 		if (!owner.ok) {
 			await owner.body?.cancel();
-			return failure(503, "Account information is unavailable.");
-		}
-		const owners = JSON.parse(await readDescriptor(owner)) as Array<{
-			primary_namespace_id?: string;
-		}>;
-		if (!owners[0]?.primary_namespace_id)
 			return failure(
-				403,
-				"Finish setting up your personal account on Lixray before sharing.",
+				owner.status === 403 ? 403 : 503,
+				owner.status === 403
+					? "Namespace membership required. Finish setting up your Lixray account first."
+					: "Account information is unavailable.",
 			);
+		}
+		const resolvedNamespace: unknown = JSON.parse(await readDescriptor(owner));
+		if (typeof resolvedNamespace !== "string" || !UUID.test(resolvedNamespace))
+			return failure(502, "Invalid namespace response.");
 
 		// Allowlist headers: never trust client-supplied protocol principal or scope.
 		const headers = lixServiceRequestHeaders(
@@ -96,17 +106,16 @@ export async function createHostedRepository(
 
 		// This RPC is service-role-only. A browser must never be able to claim an
 		// arbitrary existing server ID. It atomically records the receipt and owner.
-		const registration = await fetcher(
-			new URL("/rest/v1/rpc/register_hosted_lix", env.SUPABASE_URL),
+		const registration = await hostedRepositoryRpc(
+			env,
+			"register_hosted_lix",
 			{
-				method: "POST",
-				headers: {
-					apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-					authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-					"content-type": "application/json",
-				},
-				body: JSON.stringify({ p_lix_id: id, p_account_id: account.userId }),
+				p_lix_id: id,
+				p_account_id: account.userId,
+				p_namespace_id: resolvedNamespace,
+				p_name: name,
 			},
+			fetcher,
 		);
 		await registration.body?.cancel();
 		if (!registration.ok)
@@ -127,7 +136,7 @@ export async function createHostedRepository(
 	}
 }
 
-async function readDescriptor(response: Response): Promise<string> {
+export async function readDescriptor(response: Response): Promise<string> {
 	const reader = response.body?.getReader();
 	if (!reader) throw new Error("Missing lifecycle response");
 	const chunks: Uint8Array[] = [];
@@ -141,7 +150,7 @@ async function readDescriptor(response: Response): Promise<string> {
 			chunks.push(value);
 		}
 	} finally {
-		await reader.cancel();
+		await reader.cancel().catch(() => {});
 		reader.releaseLock();
 	}
 	const bytes = new Uint8Array(size);
@@ -151,4 +160,21 @@ async function readDescriptor(response: Response): Promise<string> {
 		offset += chunk.byteLength;
 	}
 	return new TextDecoder().decode(bytes);
+}
+
+export function hostedRepositoryRpc(
+	env: WorkerEnv,
+	name: string,
+	body: unknown,
+	fetcher: typeof fetch,
+): Promise<Response> {
+	return fetcher(new URL(`/rest/v1/rpc/${name}`, env.SUPABASE_URL), {
+		method: "POST",
+		headers: {
+			apikey: env.SUPABASE_SERVICE_ROLE_KEY!,
+			authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+			"content-type": "application/json",
+		},
+		body: JSON.stringify(body),
+	});
 }
