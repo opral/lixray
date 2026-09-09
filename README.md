@@ -416,7 +416,9 @@ covers the two fixed demo IDs and any configured `LIXRAY_DEMO_LIX_IDS` (or legac
 Before switching existing production storage to the lifecycle-aware server,
 export the repository UUID inventory with `SELECT id FROM public.lixes ORDER BY id`
 and explicitly register every previously backed repository. The same private
-operator command accepts IDs after the required mode, replacing the demo defaults:
+operator command accepts IDs after the required mode, replacing the demo defaults.
+Adoption allows up to nine minutes per repository for an epoch migration and does
+not retry a provisioning write automatically:
 
 ```sh
 railway ssh --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" -- node /app/web-app/scripts/provision-repositories.mjs adopt-existing REPOSITORY_UUID
