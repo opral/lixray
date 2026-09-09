@@ -5,7 +5,6 @@ import { MemberAvatar } from "./people-view";
 import { Button } from "~/components/ui/button";
 import { formatCaughtError } from "~/lib/format";
 
-
 export interface DirectRepositoryMember {
 	accountId: string;
 	name: string;

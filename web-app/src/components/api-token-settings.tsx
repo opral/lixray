@@ -23,11 +23,7 @@ export interface AccountApiTokenApi {
 	deleteApiToken(tokenId: string): Promise<void>;
 }
 
-export function AccountApiTokenPanel({
-	api,
-}: {
-	api: AccountApiTokenApi;
-}) {
+export function AccountApiTokenPanel({ api }: { api: AccountApiTokenApi }) {
 	const [tokens, setTokens] = useState<TokenMetadata[]>([]);
 	const [created, setCreated] = useState<
 		(TokenMetadata & { token: string }) | null
@@ -123,8 +119,8 @@ export function AccountApiTokenPanel({
 					</Button>
 				</div>
 				<p className="text-xs leading-relaxed text-text-tertiary">
-					Each token can do everything your account can do. Tokens expire
-					after one year. Access follows your account’s current permissions.
+					Each token can do everything your account can do. Tokens expire after
+					one year. Access follows your account’s current permissions.
 				</p>
 				{loading ? (
 					<p role="status" className="mt-4 text-sm text-text-tertiary">

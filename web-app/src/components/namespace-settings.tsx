@@ -1,4 +1,7 @@
-import { AccountApiTokenPanel, type AccountApiTokenApi } from "./api-token-settings";
+import {
+	AccountApiTokenPanel,
+	type AccountApiTokenApi,
+} from "./api-token-settings";
 import { Link } from "@tanstack/react-router";
 import { Copy, Plus } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
@@ -108,7 +111,12 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 			</div>
 
 			<ProfilePanel organization={organization} />
-            {organization.isPersonal && organization.role === "owner" && organization.id !== DEMO_PROFILE_NAMESPACE_ID && client ? <PersonalApiTokens /> : null}
+			{organization.isPersonal &&
+			organization.role === "owner" &&
+			organization.id !== DEMO_PROFILE_NAMESPACE_ID &&
+			client ? (
+				<PersonalApiTokens />
+			) : null}
 			{organization.id !== DEMO_PROFILE_NAMESPACE_ID ? (
 				<GeneralPanel organization={organization} />
 			) : null}
@@ -794,11 +802,28 @@ function demoProfileOrganization(handle: string): Organization | undefined {
 }
 
 function PersonalApiTokens() {
- const {client} = useAuth();
- const api = useMemo<AccountApiTokenApi>(() => ({
-  async listApiTokens() { const {data,error} = await client!.rpc("list_api_tokens"); if(error) throw error; return data ?? []; },
-  async generateApiToken() { const {data,error} = await client!.rpc("generate_api_token"); if(error || !data?.[0]) throw error ?? new Error("Could not create token"); return data[0]; },
-  async deleteApiToken(id) { const {error} = await client!.rpc("delete_api_token", {p_token_id: id}); if(error) throw error; },
- }), [client]);
- return <AccountApiTokenPanel api={api} />;
+	const { client } = useAuth();
+	const api = useMemo<AccountApiTokenApi>(
+		() => ({
+			async listApiTokens() {
+				const { data, error } = await client!.rpc("list_api_tokens");
+				if (error) throw error;
+				return data ?? [];
+			},
+			async generateApiToken() {
+				const { data, error } = await client!.rpc("generate_api_token");
+				if (error || !data?.[0])
+					throw error ?? new Error("Could not create token");
+				return data[0];
+			},
+			async deleteApiToken(id) {
+				const { error } = await client!.rpc("delete_api_token", {
+					p_token_id: id,
+				});
+				if (error) throw error;
+			},
+		}),
+		[client],
+	);
+	return <AccountApiTokenPanel api={api} />;
 }

@@ -28,24 +28,33 @@ export async function handleFileSharing(
 	if (!["GET", "POST", "DELETE"].includes(request.method))
 		return new Response(null, { status: 405 });
 	const isApiToken = token.startsWith("lixray_pat_");
- const rpc = async (name: string, args: object = {}): Promise<unknown> => {
+	const rpc = async (name: string, args: object = {}): Promise<unknown> => {
 		const response = await fetcher(
-			new URL(`/rest/v1/rpc/${isApiToken ? "api_token_sharing" : name}`, env.SUPABASE_URL),
+			new URL(
+				`/rest/v1/rpc/${isApiToken ? "api_token_sharing" : name}`,
+				env.SUPABASE_URL,
+			),
 			{
 				method: "POST",
 				headers: {
 					apikey: env.SUPABASE_PUBLISHABLE_KEY ?? "",
-					...(!isApiToken ? {authorization: `Bearer ${token}`} : {}),
+					...(!isApiToken ? { authorization: `Bearer ${token}` } : {}),
 					"content-type": "application/json",
 				},
-				body: JSON.stringify(isApiToken ? {p_token: token, p_operation: name, p_args: args} : args),
+				body: JSON.stringify(
+					isApiToken
+						? { p_token: token, p_operation: name, p_args: args }
+						: args,
+				),
 			},
 		);
 		if (!response.ok) {
 			await response.body?.cancel();
 			throw new Error("Sharing permission could not be verified. Try again.");
 		}
-		return response.status === 204 ? null : (await response.json()) as unknown;
+		return response.status === 204
+			? null
+			: ((await response.json()) as unknown);
 	};
 	try {
 		const repos = (await rpc("list_accessible_lixes")) as Array<{
