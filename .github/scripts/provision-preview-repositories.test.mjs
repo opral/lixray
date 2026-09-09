@@ -17,6 +17,10 @@ for (const [name, failure, expected] of [
     try {
       const calls = join(dir, "calls.jsonl");
       const railway = join(dir, "railway");
+      const sshCalls = join(dir, "ssh.jsonl");
+      await writeFile(join(dir, "ssh"), `#!${process.execPath}
+require('node:fs').appendFileSync(process.env.MOCK_SSH_CALLS, JSON.stringify(process.argv.slice(2)) + '\\n');
+`, { mode: 0o700 });
       await writeFile(
         railway,
         `#!${process.execPath}
@@ -32,6 +36,11 @@ if (args[2] === 'add') {
 } else if (args[1] !== 'keys') {
   const file = args[args.indexOf('--identity-file') + 1];
   if (!fs.existsSync(file)) process.exit(32);
+  const cp = require('node:child_process');
+  for (const target of ['fixture@ssh.railway.com', 'fixture@example.com']) {
+    const result = cp.spawnSync('ssh', ['-i', file, '-T', target, 'true'], { stdio: 'inherit' });
+    if (result.status !== 0) process.exit(33);
+  }
   if (process.env.MOCK_FAILURE === 'operator') process.exit(17);
 }
 `,
@@ -47,6 +56,8 @@ if (args[2] === 'add') {
           RAILWAY_TARGET_ENVIRONMENT: "preview",
           RAILWAY_WEB_SERVICE: "web",
           MOCK_CALLS: calls,
+          MOCK_SSH_CALLS: sshCalls,
+          PATH: `${dir}:${process.env.PATH}`,
           MOCK_FAILURE: failure,
         },
       });
@@ -61,6 +72,12 @@ if (args[2] === 'add') {
       await assert.rejects(access(publicKey));
       await assert.rejects(access(publicKey.slice(0, -4)));
       if (failure !== "register") {
+        const ssh = (await readFile(sshCalls, "utf8")).trim().split("\n").map(JSON.parse);
+        assert.deepEqual(ssh[0].slice(0, 4), ["-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]);
+        assert.deepEqual(ssh[1], ssh[0].slice(4).map((arg) => arg === "fixture@ssh.railway.com" ? "fixture@example.com" : arg));
+        // No alternate trust store or configuration override: OpenSSH retains
+        // existing host keys and rejects mismatches under accept-new.
+        assert.ok(ssh.flat().every((arg) => !arg.includes("UserKnownHostsFile") && arg !== "-F"));
         const command = recorded.find((args) => args.includes("--identity-file"));
         assert.deepEqual(command.slice(-3), [
           "node",
