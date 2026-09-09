@@ -68,6 +68,7 @@ import {
 } from "~/lib/repository-lix-session";
 import { buildRepositoryReproduction } from "~/lib/repository-reproduction";
 import { formatRepositoryOpenError } from "~/lib/repository-open-error";
+import { ReplicaRecovery } from "./replica-recovery";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
@@ -1279,6 +1280,14 @@ export function RepositoryAtelier({
 										}}
 									/>
 									<Outlet />
+									{shellProps.lix ? (
+										<ReplicaRecovery
+											lix={shellProps.lix}
+											onReviewBranch={(recoveredBranch) => {
+												void navigateToCurrentPathBranch(recoveredBranch);
+											}}
+										/>
+									) : null}
 								</RepositoryAtelierContext.Provider>
 							</RepositoryShellDirNavigationContext.Provider>
 						</RepositoryRouteSyncContext.Provider>

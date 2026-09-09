@@ -462,14 +462,20 @@ instead of replacing them with a generic support message. Include that text when
 reporting a failed migration; server diagnostics omit private storage connection
 details. Do not reset or recreate the repository to work around a migration error.
 
-Browser replicas keep the same OPFS storage name across upgrades. Lix rebuilds
-a supported older replica from the server only when durable receipts prove its
-local work is acknowledged. It prepares and validates a separate storage epoch
-before switching; a failed download leaves the old replica available for retry.
-If local work is pending or safety cannot be established, opening pauses with
-`LIX_ERROR_REPLICA_UPGRADE_BLOCKED`. Keep that browser's storage intact and
-recover the local work before upgrading. There is no automatic cache deletion
-or replay of pending work. Server repositories still use format migrations.
+Synced replicas keep their storage identity across upgrades. Lix retains the old
+storage generation and bootstraps a fresh generation from the same server,
+repository and account. It activates the replacement only after validation;
+failed downloads leave the source intact. This is a Lix sync-mode policy shared
+by all storage backends. Standalone and authoritative repositories still migrate
+their stored data.
+
+Local work no longer blocks opening the server-backed repository. The **Saved
+device changes** panel offers restoration onto separate recovery branches and a
+download of available logical recovery data. It reports unresolved content and
+keeps the source; downloading or creating recovery branches never deletes it.
+Intentionally local-only data remains local. Recovery can be retried without
+creating duplicate branches or overwriting changes made in a recovery branch.
+Old retained generations are not reused as caches on later upgrades.
 
 Preview and production canary CI register a unique ephemeral SSH key for that operator command and
 revokes it afterward, including failed provisioning attempts. The existing
