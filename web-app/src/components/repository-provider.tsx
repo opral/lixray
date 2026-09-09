@@ -1,3 +1,4 @@
+import { provisionRepository } from "~/lib/provision-repository";
 import {
 	createContext,
 	type ReactNode,
@@ -332,6 +333,11 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				slug: repositorySlug(normalizedName),
 			});
 			if (createError) throw createError;
+			const {
+				data: { session },
+			} = await client.auth.getSession();
+			if (!session) throw new Error("Authentication required");
+			await provisionRepository(repositoryId, session.access_token);
 			await refresh({
 				organizationId: targetOrganization.id,
 				repositoryId,

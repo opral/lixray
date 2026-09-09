@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Request } from "@playwright/test";
 
 // Match protocol paths, not Vite /@fs/.../vendor/lix/... module assets.
-const protocolRequests = (url: URL) => url.pathname.startsWith("/lix/");
+const protocolRequests = (url: URL) =>
+	url.pathname.startsWith("/lix/") ||
+	/^\/api\/repositories\/[^/]+\/provision$/.test(url.pathname);
 
 // Runs in the default Compose suite against the seeded development account and
 // the actual browser SDK/OPFS implementation, with no external preview flags.
@@ -49,6 +51,11 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		Authorization: `Bearer ${repository.token}`,
 		"Lix-Server-Protocol-Version": "7",
 	};
+	const provisioned = await context.request.post(
+		new URL(`/api/repositories/${repository.id}/provision`, baseURL).toString(),
+		{ headers },
+	);
+	expect(provisioned.ok(), await provisioned.text()).toBe(true);
 	const opened = await context.request.get(endpoint.toString(), { headers });
 	expect(opened.status(), await opened.text()).toBe(200);
 	const { sessionId } = (await opened.json()) as { sessionId: string };

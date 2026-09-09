@@ -404,3 +404,26 @@ custom ports). Railway promotion resolves or creates the web service domain in
 the target environment and passes that HTTPS origin to the server. Set
 `LIXRAY_PUBLIC_URL` in the promotion environment to use a custom HTTPS origin.
 Direct Railway launches must set `LIXRAY_PUBLIC_URL` to the web gateway origin.
+
+Demo repositories are provisioned explicitly after preview deployment. CI runs
+`node /app/web-app/scripts/provision-repositories.mjs create-new` through
+`railway ssh` on the preview web service, using that service's private connection
+configuration. Existing deployment storage must instead use `adopt-existing`;
+failed adoption never falls back to creating an empty repository. The command
+covers the two fixed demo IDs and any configured `LIXRAY_DEMO_LIX_IDS` (or legacy
+`LIXRAY_DEMO_REPOSITORY_IDS`). Deleted repositories remain deleted.
+
+Before switching existing production storage to the lifecycle-aware server,
+export the repository UUID inventory with `SELECT id FROM public.lixes ORDER BY id`
+and explicitly register every previously backed repository. The same private
+operator command accepts IDs after the required mode, replacing the demo defaults:
+
+```sh
+railway ssh --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" -- node /app/web-app/scripts/provision-repositories.mjs adopt-existing REPOSITORY_UUID
+```
+
+Repeat for the exported inventory before enabling public reads or running the
+production canary. A metadata row whose repository was never initialized will
+fail adoption; classify it explicitly through the authenticated provisioning
+workflow instead of creating storage in response to a missing public read. No
+production adoption or creation is performed automatically by this migration.

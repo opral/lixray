@@ -140,6 +140,11 @@ interface HandleRequestOptions {
 	) => Promise<NamespaceMembershipResolution>;
 	mcpTransport?: typeof handleMcpTransport;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
+	provisionLix?: (
+		lixId: string,
+		token: string,
+		accountId: string,
+	) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	fetch?: typeof fetch;
@@ -287,6 +292,54 @@ export async function handleRequest(
 					...(deploymentId ? { "x-railway-deployment-id": deploymentId } : {}),
 				},
 			},
+		);
+	}
+
+	const provisionMatch =
+		/^\/api\/repositories\/([0-9a-f-]{36})\/provision$/.exec(url.pathname);
+	if (provisionMatch) {
+		if (request.method !== "POST")
+			return new Response("Method not allowed", { status: 405 });
+		const candidate = bearerToken(request);
+		if (candidate?.startsWith("lixray_pat_")) {
+			const result = await authorizeApiToken(
+				candidate,
+				provisionMatch[1],
+				env,
+				options.fetch,
+			);
+			if (!result.ok) return result.response;
+			if (!options.provisionLix)
+				return new Response("Repository provisioning is not configured", {
+					status: 503,
+				});
+			return options.provisionLix(
+				provisionMatch[1],
+				candidate,
+				result.account.id,
+			);
+		}
+		const auth = await (options.authenticate ?? authenticateWithSupabase)(
+			request,
+			env,
+		);
+		if (!auth.ok) return auth.response;
+		const denied = await (options.authorizeLix ?? authorizeLixWithSupabase)(
+			provisionMatch[1],
+			auth.auth,
+			env,
+		);
+		if (denied) return denied;
+		// Fixed demo stores are explicitly provisioned by deployment tooling.
+		if (auth.auth.isDemo) return Response.json({ id: provisionMatch[1] });
+		if (!options.provisionLix)
+			return new Response("Repository provisioning is not configured", {
+				status: 503,
+			});
+		return options.provisionLix(
+			provisionMatch[1],
+			auth.auth.token,
+			auth.auth.userId,
 		);
 	}
 
@@ -534,6 +587,20 @@ export async function handleRequest(
 				{
 					signal: request.signal,
 					lixFetch: options.lixFetch,
+					provisionLix: options.provisionLix
+						? async (lixId) => {
+								const denied = await authorizeLix(lixId, authResult.auth, env);
+								if (denied) throw new Error("Repository access required");
+								if (authResult.auth.isDemo) return;
+								const response = await options.provisionLix!(
+									lixId,
+									authResult.auth.token,
+									authResult.auth.userId,
+								);
+								if (!response.ok)
+									throw new Error("Repository provisioning failed");
+							}
+						: undefined,
 					lixSummaries:
 						options.lixSummaries ??
 						(isDemoMode(env) ? demoLixSummaries(env) : undefined),

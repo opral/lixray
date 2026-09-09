@@ -49,6 +49,7 @@ type AuthorizeLix = (
 ) => Promise<Response | null>;
 
 interface WorkerLixRuntimeClientOptions {
+	provisionLix?: (lixId: string) => Promise<void>;
 	fetcher?: typeof fetch;
 	signal?: AbortSignal;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
@@ -73,6 +74,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	private readonly sessions = new Map<string, Promise<LixSession>>();
 	private closePromise: Promise<void> | undefined;
 	private closed = false;
+	private readonly provisionLix: WorkerLixRuntimeClientOptions["provisionLix"];
 
 	constructor(
 		env: WorkerLixRuntimeEnv,
@@ -87,6 +89,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		this.signal = options.signal;
 		this.lixFetch = options.lixFetch;
 		this.lixSummaries = options.lixSummaries;
+		this.provisionLix = options.provisionLix;
 	}
 
 	hasOpenRuntime(lixId: string): boolean {
@@ -369,6 +372,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	private async openSession(lixId: string): Promise<LixSession> {
+		await this.provisionLix?.(lixId);
 		const lix = await openLix({
 			server: {
 				url: `https://mcp.lixray.invalid/lix/${lixId}`,

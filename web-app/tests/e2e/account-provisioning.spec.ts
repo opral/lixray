@@ -12,8 +12,6 @@ const internalToken =
 test("real Lix server enriches null and changed profiles and leaves unchanged history intact", async () => {
 	assert.ok(serviceUrl);
 	assert.ok(internalToken, "LIXRAY_ACCOUNT_TEST_INTERNAL_TOKEN is required");
-	const lixId = crypto.randomUUID();
-	const protocolPath = `/lix/v1/${lixId}/`;
 	const account = {
 		id: crypto.randomUUID(),
 		name: "Profile regression account",
@@ -27,9 +25,25 @@ test("real Lix server enriches null and changed profiles and leaves unchanged hi
 				headers: lixServiceRequestHeaders(request.headers, internalToken),
 			},
 		);
+	const created = await lixFetch(
+		new Request(new URL("/lix/v1", serviceUrl), {
+			method: "POST",
+			headers: {
+				"x-lixray-idempotency-principal": account.id,
+				"Lix-Server-Protocol-Version": "7",
+				"Idempotency-Key": crypto.randomUUID(),
+			},
+		}),
+	);
+	assert.equal(created.status, 201, await created.clone().text());
+	const { id: lixId } = (await created.json()) as { id: string };
+	const protocolPath = `/lix/v1/${lixId}/`;
 	const handshake = await lixFetch(
 		new Request(new URL(protocolPath, serviceUrl), {
-			headers: { "x-lixray-idempotency-principal": account.id },
+			headers: {
+				"x-lixray-idempotency-principal": account.id,
+				"Lix-Server-Protocol-Version": "7",
+			},
 		}),
 	);
 	assert.equal(handshake.status, 200, await handshake.clone().text());
@@ -40,6 +54,7 @@ test("real Lix server enriches null and changed profiles and leaves unchanged hi
 	assert.equal(activeAccountId, account.id);
 	const sessionHeaders = {
 		"Content-Type": "application/json",
+		"Lix-Server-Protocol-Version": "7",
 		"Lix-Session-Id": sessionId,
 		"x-lixray-idempotency-principal": account.id,
 	};

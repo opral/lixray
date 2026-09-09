@@ -656,6 +656,13 @@ jobs:
           WEB_IMAGE: ${{ needs.web-image.outputs.image }}
         run: .github/scripts/promote-production.sh
 
+      - name: Provision disposable preview demo repositories
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          RAILWAY_TARGET_ENVIRONMENT: ${{ steps.environment.outputs.environment_id }}
+        run: |
+          railway ssh --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" -- node /app/web-app/scripts/provision-repositories.mjs create-new
+
       - name: Publish preview URL
         if: steps.credentials.outputs.available == 'true'
         id: preview
