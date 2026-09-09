@@ -65,7 +65,7 @@ test("OPFS tabs share one replica and sync files, editors, and hot checkpoint hi
 			headers: authorization,
 		});
 		expect(opened.ok()).toBe(true);
-		const { sessionId } = await opened.json();
+		const { sessionId } = (await opened.json()) as { sessionId: string };
 		const headers = { ...authorization, "Lix-Session-Id": sessionId };
 		try {
 			for (let index = 0; index < 2; index++) {
