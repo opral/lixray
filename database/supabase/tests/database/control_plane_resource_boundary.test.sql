@@ -16,7 +16,7 @@ select set_config('test.boundary_namespace', (select namespace_id::text from pub
 select set_config('test.boundary_handle', (select namespace_handle from public.list_accessible_lixes() limit 1), true);
 select public.publish_lix_resource('84000000-0000-4000-8000-000000000011', '/public_%', 'directory');
 select public.publish_lix_resource('84000000-0000-4000-8000-000000000011', '/back\slash', 'directory');
-select set_config('test.boundary_token', (select token from public.generate_api_token('84000000-0000-4000-8000-000000000011')), true);
+select set_config('test.boundary_token', (select token from public.generate_api_token()), true);
 select is((select count(*) from public.lixes where id = '84000000-0000-4000-8000-000000000011'), 1::bigint, 'interactive repository read works');
 
 set local request.jwt.claims = '{"sub":"84000000-0000-4000-8000-000000000001","role":"authenticated","client_id":"foreign","resource":"https://unrelated.example","lixray_mcp":true}';

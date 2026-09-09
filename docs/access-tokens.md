@@ -1,18 +1,20 @@
 # Create an access token
 
-Use an API token to connect a script or internal app to a LixRay repository.
+Use an account API token to connect Flashtype, scripts, or internal apps to Lixray.
 
-1. [Open LixRay](/open) and open the repository you want to use.
-2. Open the repository's **Settings**.
-3. Under **API tokens**, click **Generate token**.
-4. Click **Copy token** and save it in your app's server environment as `LIX_ACCESS_TOKEN`. The token is shown only once.
+1. Open your [account settings](https://lixray.com/settings), such as `/settings/@samuel`.
+2. Under **API tokens**, click **Generate token**.
+3. Copy the token. It is shown only once.
+4. Paste it into Flashtype's **Share** dialog, or save it in your app's server environment as `LIX_ACCESS_TOKEN`.
 
-Each token can read and write only that repository. Tokens expire after one
-year and require you to remain a member of the repository.
+Each token has your account's permissions, including access to repositories you
+create later. Tokens expire after one year. Losing repository access also removes
+the token's access to it.
 
-Keep the token out of source control and browser code. To revoke it, return to
-**Settings → API tokens** and click **Delete** next to the token. Apps using it
-lose access immediately.
+To revoke a token, return to account settings and click **Delete** next to it.
+Keep tokens out of source control and public browser code.
 
-Continue with [Build an internal app](./internal-apps.md) to use the token with
-the JavaScript SDK.
+Repository settings no longer contain API tokens. The account-token migration
+revokes existing repository tokens; generate a new account token to reconnect.
+
+Continue with [Build an internal app](./internal-apps.md).

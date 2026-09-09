@@ -509,28 +509,6 @@ export function RepositoryAtelier({
 								data,
 							);
 						},
-						listApiTokens: async () => {
-							const { data, error } = await client.rpc("list_api_tokens", {
-								p_lix_id: repositoryId,
-							});
-							if (error) throw new Error(error.message);
-							return data ?? [];
-						},
-						generateApiToken: async () => {
-							const { data, error } = await client.rpc("generate_api_token", {
-								p_lix_id: repositoryId,
-							});
-							if (error || !data?.[0])
-								throw new Error("Could not generate API token");
-							return data[0];
-						},
-						deleteApiToken: async (tokenId) => {
-							const { error } = await client.rpc("delete_api_token", {
-								p_lix_id: repositoryId,
-								p_token_id: tokenId,
-							});
-							if (error) throw new Error(error.message);
-						},
 						deleteRepository: async () => {
 							await deleteRepository(repositoryId);
 							void navigate({ to: "/home" });
@@ -564,12 +542,6 @@ export function RepositoryAtelier({
 			requireSettingsApi(settingsApiRef.current).setVisibility(visibility),
 		getInviteLink: () =>
 			requireSettingsApi(settingsApiRef.current).getInviteLink(),
-		listApiTokens: () =>
-			requireSettingsApi(settingsApiRef.current).listApiTokens(),
-		generateApiToken: () =>
-			requireSettingsApi(settingsApiRef.current).generateApiToken(),
-		deleteApiToken: (tokenId) =>
-			requireSettingsApi(settingsApiRef.current).deleteApiToken(tokenId),
 		deleteRepository: () =>
 			requireSettingsApi(settingsApiRef.current).deleteRepository(),
 	});

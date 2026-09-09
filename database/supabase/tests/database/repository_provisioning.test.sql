@@ -23,7 +23,7 @@ reset role;
 select throws_ok($$update public.lixes set storage_provision_mode='create-new' where id='84000000-0000-4000-8000-000000000011'$$,'P0001','Repository provisioning mode is immutable','trigger also protects writes through privileged functions');
 set local role authenticated;
 select throws_ok($$insert into public.lixes(namespace_id,name,slug,storage_provision_mode) select namespace_id,'Spoof','spoof','adopt-existing' from public.lixes where id='84000000-0000-4000-8000-000000000011'$$,'P0001','New repositories must use explicit creation','client cannot spoof insertion mode');
-do $$begin perform set_config('test.provision_token',(select token from public.generate_api_token('84000000-0000-4000-8000-000000000011')),true); end$$;
+do $$begin perform set_config('test.provision_token',(select token from public.generate_api_token()),true); end$$;
 set local role anon;
 set local request.jwt.claims='{"role":"anon"}';
 select is((select count(*) from public.resolve_lix_provision_mode('84000000-0000-4000-8000-000000000011')),0::bigint,'anonymous caller cannot discover private provisioning state');

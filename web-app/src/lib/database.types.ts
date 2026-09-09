@@ -501,7 +501,7 @@ export type Database = {
 		Functions: {
 			accept_lix_share_token: { Args: { p_token: string }; Returns: string };
 			list_api_tokens: {
-				Args: { p_lix_id: string };
+				Args: Record<PropertyKey, never>;
 				Returns: {
 					id: string;
 					name: string;
@@ -510,7 +510,7 @@ export type Database = {
 				}[];
 			};
 			generate_api_token: {
-				Args: { p_lix_id: string };
+				Args: Record<PropertyKey, never>;
 				Returns: {
 					id: string;
 					name: string;
@@ -520,7 +520,7 @@ export type Database = {
 				}[];
 			};
 			delete_api_token: {
-				Args: { p_lix_id: string; p_token_id: string };
+				Args: { p_token_id: string };
 				Returns: undefined;
 			};
 			authorize_api_token: {

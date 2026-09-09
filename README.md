@@ -469,9 +469,11 @@ Deploy migration `20260910000000_hosted_repository_creation.sql` and configure
 `SUPABASE_SERVICE_ROLE_KEY` in the **server environment only**. Never prefix it
 with `VITE_`. This credential calls the service-role-only registration RPC; a
 user token cannot claim an existing server repository ID. Missing configuration
-returns 503 before upload. Repository-scoped PATs cannot create repositories;
-use a browser session or an OAuth token bound to this Lixray origin. The user
-must already have an active account and personal namespace.
+returns 503 before upload. Creation accepts a browser session or an account API
+token. The account must have an active personal namespace. Generate tokens in
+`/settings/@<your-handle>`; `/settings` redirects to your own account settings.
+The account-token migration revokes old repository-scoped tokens rather than
+giving existing credentials broader permissions.
 
 A successful response means both storage creation and private ownership
 registration finished. If registration or the response is interrupted, retry
@@ -486,20 +488,12 @@ Creation copies a snapshot; it does not connect the source. Reopen the local
 repository with `openLix({ storage, server: { url: hosted.url, headers } })` to
 sync, then publish selected paths through `POST /api/repositories/<id>/share?path=/file.md`.
 `GET` reads publication status and `DELETE` removes a direct file publication.
-The gateway invokes the existing publication RPCs with the caller's token and
-retains their membership checks; publication never uses the service credential.
-Also deploy `20260910000100_desktop_file_sharing.sql` to permit resource-bound
-OAuth grants to use those RPCs.
+The gateway invokes the existing publication RPCs under the token owner's
+identity and retains their membership checks. API tokens are opaque credentials;
+there is no desktop OAuth exchange, callback, or refresh flow. Paste the account
+token into Flashtype, which stores it using operating-system encryption.
 
-Desktop clients use the existing OAuth authorization code flow with PKCE:
-discover `/.well-known/oauth-protected-resource`, register a public client with
-a loopback redirect URI, and open authorization in the system browser. Token
-exchange and refresh use no client secret. Tokens must target this Lixray origin;
-a token for another resource is rejected. Store refresh tokens in the operating
-system's secure credential storage, never alongside repository content.
-
-Flashtype stores the hosted URL in its own workspace settings and resumes sync on
-reopen. It stages a snapshot once and uploads those same bytes with the same
-idempotency key on retry, rather than exporting a changing repository again.
-Only after the chosen file's content has reached the server does it publish the
-file and show the public link.
+Flashtype saves the hosted URL in workspace settings and resumes sync on reopen.
+It stages a snapshot once and retries with identical bytes and the same
+idempotency key. Once the selected file reaches the server, it publishes the file
+and displays its public link.

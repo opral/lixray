@@ -77,3 +77,49 @@ void test("unpublishing a file cannot remove inherited publication", async () =>
 	assert.equal(response.status, 409);
 	assert.equal(calls, 2);
 });
+void test("account PAT publication uses credential-derived RPC identity", async () => {
+	const token = `lixray_pat_${"a".repeat(64)}`;
+	const operations: string[] = [];
+	const response = await handleFileSharing(
+		new Request(`https://lixray.test/api/repositories/${id}/share?path=/a.md`, {
+			method: "POST",
+		}),
+		env,
+		token,
+		id,
+		async (input, init) => {
+			const req = new Request(input, init);
+			assert.equal(
+				req.url,
+				"https://database.test/rest/v1/rpc/api_token_sharing",
+			);
+			assert.equal(req.headers.get("authorization"), null);
+			const args = await req.json();
+			assert.equal(args.p_token, token);
+			operations.push(args.p_operation);
+			if (args.p_operation === "list_accessible_lixes")
+				return Response.json([
+					{
+						lix_id: id,
+						lix_visibility: "private",
+						namespace_handle: "sam",
+						lix_slug: "notes",
+					},
+				]);
+			if (args.p_operation === "list_lix_publications")
+				return Response.json([]);
+			assert.deepEqual(args.p_args, {
+				p_lix_id: id,
+				p_path: "/a.md",
+				p_kind: "file",
+			});
+			return Response.json(null);
+		},
+	);
+	assert.equal(response.status, 200);
+	assert.deepEqual(operations, [
+		"list_accessible_lixes",
+		"list_lix_publications",
+		"publish_lix_resource",
+	]);
+});

@@ -165,38 +165,35 @@ void test("public collection route dispatches creation and preserves CORS", asyn
 	);
 });
 
-void test("repository OAuth authentication preserves the issuer, audience and resource boundary", async () => {
-	const { validateRepositoryJwtClaims } = await import("./handler.ts");
-	const issuer = "https://auth.test/auth/v1";
-	const claims = {
-		sub: account.userId,
-		iss: issuer,
-		aud: "authenticated",
-		role: "authenticated",
-		exp: Math.floor(Date.now() / 1000) + 300,
-		client_id: "flashtype",
-		lixray_mcp: true,
-		resource: "https://lixray.com",
-		scope: "openid",
-	};
-	assert.equal(
-		validateRepositoryJwtClaims(claims, issuer, "https://lixray.com"),
-		true,
-	);
-	for (const invalid of [
-		{ resource: "https://other.test" },
-		{ iss: "https://other.test" },
-		{ aud: "other" },
-		{ scope: "" },
-		{ lixray_mcp: false },
-		{ exp: 0 },
-	])
-		assert.equal(
-			validateRepositoryJwtClaims(
-				{ ...claims, ...invalid },
-				issuer,
-				"https://lixray.com",
-			),
-			false,
-		);
+void test("account PAT creates a snapshot repository without a browser session", async () => {
+	const { handleRequest } = await import("./handler.ts");
+	const req = request();
+	req.headers.set("authorization", `Bearer lixray_pat_${"a".repeat(64)}`);
+	let authorized = false;
+	const response = await handleRequest(req, env, {
+		fetch: async (input, init) => {
+			const upstream = new Request(input, init);
+			if (upstream.url.endsWith("/authorize_api_token")) {
+				assert.equal(upstream.headers.get("authorization"), null);
+				assert.equal((await upstream.json()).p_lix_id, null);
+				authorized = true;
+				return Response.json([
+					{
+						account_id: account.userId,
+						kind: "person",
+						name: "Sam",
+						profile_uri: null,
+						allowed: true,
+					},
+				]);
+			}
+			assert.equal(authorized, true);
+			if (upstream.url.endsWith("/lix/v1")) {
+				assert.equal(upstream.headers.get("x-lix-account-id"), account.userId);
+				return Response.json({ id }, { status: 201 });
+			}
+			return Response.json([{ primary_namespace_id: "personal" }]);
+		},
+	});
+	assert.equal(response.status, 201);
 });

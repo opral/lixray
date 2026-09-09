@@ -33,8 +33,7 @@ export async function createHostedRepository(
 	if (type && type !== "application/vnd.lix.snapshot")
 		return failure(415, "Expected application/vnd.lix.snapshot.");
 	try {
-		// The account must already have completed Lixray onboarding. OAuth grants
-		// cannot impersonate browser-only namespace bootstrapping.
+		// The account must already have completed Lixray onboarding.
 		const owner = await fetcher(
 			new URL(
 				`/rest/v1/accounts?id=eq.${encodeURIComponent(account.userId)}&status=eq.active&select=primary_namespace_id`,

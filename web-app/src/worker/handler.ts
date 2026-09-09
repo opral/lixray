@@ -303,7 +303,7 @@ export async function handleRequest(
 		url.pathname,
 	);
 	if (fileShareMatch) {
-		const auth = await (options.authenticate ?? authenticateRepositoryClient)(
+		const auth = await (options.authenticate ?? ((request, env) => authenticateRepositoryClient(request, env, options.fetch)))(
 			request,
 			env,
 		);
@@ -317,11 +317,18 @@ export async function handleRequest(
 		);
 	}
 
+    if (url.pathname === "/api/account" && request.method === "GET") {
+        const token = bearerToken(request);
+        if (!token) return new Response("API token required", {status:401});
+        const result = await authorizeApiToken(token, null, env, options.fetch);
+        return result.ok ? Response.json({id:result.account.id, name:result.account.name}, {headers:{"cache-control":"no-store"}}) : result.response;
+    }
+
 	if (url.pathname === "/lix/v1") {
 		if (request.method === "OPTIONS") return remoteLixCorsPreflight(request);
 		if (request.method !== "POST")
 			return new Response("Method not allowed", { status: 405 });
-		const auth = await (options.authenticate ?? authenticateRepositoryClient)(
+		const auth = await (options.authenticate ?? ((request, env) => authenticateRepositoryClient(request, env, options.fetch)))(
 			request,
 			env,
 		);
@@ -1247,7 +1254,6 @@ async function fetchLixRequest(
 export async function authenticateWithSupabase(
 	request: Request,
 	env: WorkerEnv,
-	allowRepositoryOAuth = false,
 ): Promise<AuthResult> {
 	const demoAuth = authenticateDemo(request, env);
 	if (demoAuth) return demoAuth;
@@ -1281,16 +1287,7 @@ export async function authenticateWithSupabase(
 			},
 		);
 		await persistRemoteJwksIfPresent(jwksUrl, cachePath);
-		if (
-			!(allowRepositoryOAuth
-				? validateRepositoryJwtClaims(
-						payload,
-						issuer,
-						mcpResourceUrl(new URL(request.url)),
-					)
-				: validateBrowserJwtClaims(payload))
-		)
-			return unauthorized();
+		if (!validateBrowserJwtClaims(payload)) return unauthorized();
 		const account = await resolveCurrentAccount(token, env);
 		if (!account.ok) return account;
 		return {
@@ -1471,20 +1468,13 @@ function deferResponseCleanup(
 	});
 }
 
-// Repository APIs accept the same resource-bound OAuth grants as Lixray's MCP API.
-// Other browser endpoints retain their first-party-session-only boundary.
-function authenticateRepositoryClient(request: Request, env: WorkerEnv) {
-	return authenticateWithSupabase(request, env, true);
-}
-export function validateRepositoryJwtClaims(
-	payload: JWTPayload,
-	issuer: string,
-	resource: string,
-) {
-	return (
-		validateBrowserJwtClaims(payload) ||
-		validateMcpJwtClaims(payload, issuer, undefined, resource).ok
-	);
+async function authenticateRepositoryClient(request: Request, env: WorkerEnv, fetcher: typeof fetch = fetch): Promise<AuthResult> {
+ const token = bearerToken(request);
+ if (token?.startsWith("lixray_pat_")) {
+  const result = await authorizeApiToken(token, null, env, fetcher);
+  return result.ok ? {ok:true, auth:{userId:result.account.id, token, account:result.account}} : result;
+ }
+ return authenticateWithSupabase(request, env);
 }
 
 export function validateBrowserJwtClaims(payload: JWTPayload): boolean {

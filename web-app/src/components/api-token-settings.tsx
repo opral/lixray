@@ -17,16 +17,16 @@ type TokenMetadata = {
 	created_at: string;
 	expires_at: string;
 };
-export interface RepositoryApiTokenApi {
+export interface AccountApiTokenApi {
 	listApiTokens(): Promise<TokenMetadata[]>;
 	generateApiToken(): Promise<TokenMetadata & { token: string }>;
 	deleteApiToken(tokenId: string): Promise<void>;
 }
 
-export function RepositoryApiTokenPanel({
+export function AccountApiTokenPanel({
 	api,
 }: {
-	api: RepositoryApiTokenApi;
+	api: AccountApiTokenApi;
 }) {
 	const [tokens, setTokens] = useState<TokenMetadata[]>([]);
 	const [created, setCreated] = useState<
@@ -108,7 +108,7 @@ export function RepositoryApiTokenPanel({
 					<div className="min-w-0 flex-1 basis-[220px]">
 						<h2 className="m-0 text-[13.5px] font-bold">API tokens</h2>
 						<p className="m-0 mt-0.5 text-xs text-text-tertiary">
-							Your personal tokens for this repository.
+							Your personal access tokens.
 						</p>
 					</div>
 					<Button
@@ -123,8 +123,8 @@ export function RepositoryApiTokenPanel({
 					</Button>
 				</div>
 				<p className="text-xs leading-relaxed text-text-tertiary">
-					Each token can read and write only this repository. Tokens expire
-					after one year and require you to remain a member.
+					Each token can do everything your account can do. Tokens expire
+					after one year. Access follows your account’s current permissions.
 				</p>
 				{loading ? (
 					<p role="status" className="mt-4 text-sm text-text-tertiary">
@@ -230,7 +230,7 @@ export function RepositoryApiTokenPanel({
 							</ul>
 						) : !error ? (
 							<p className="mt-4 text-sm text-text-tertiary">
-								You haven’t generated any tokens for this repository yet.
+								You haven’t generated any account tokens yet.
 							</p>
 						) : null}
 					</>
