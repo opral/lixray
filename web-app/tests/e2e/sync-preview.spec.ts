@@ -1184,10 +1184,29 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				.filter({ hasText: new RegExp(`^${afterReopenMarker}\\.md$`) }),
 		).toBeVisible({ timeout: realtimeTimeout });
 		const checkpointCountBeforeSecondClick = await authorityCheckpointCount();
+		const workingSetFileIds = async (page: Page) =>
+			page
+				.locator('[data-testid^="diff-scope-file:"]')
+				.evaluateAll((rows) =>
+					rows
+						.map((row) =>
+							row.getAttribute("data-testid")!.slice("diff-scope-file:".length),
+						)
+						.sort(),
+				);
+		let filesBeforePartialCheckpoint: string[] = [];
 		const secondCheckpointCommitId = await clickCheckpoint(left, async () => {
 			await left
 				.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
 				.click();
+			filesBeforePartialCheckpoint = await workingSetFileIds(left);
+			for (const id of [
+				createdFileId!,
+				...concurrentFileIds,
+				afterReopenFileId!,
+			]) {
+				expect(filesBeforePartialCheckpoint).toContain(id);
+			}
 			await left
 				.getByRole("checkbox", { name: "Seen files", exact: true })
 				.click();
@@ -1207,12 +1226,31 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			checkpointCountBeforeSecondClick + 1,
 			realtimeTimeout,
 		);
+		const remainingFileIds = filesBeforePartialCheckpoint.filter(
+			(id) => id !== afterReopenFileId,
+		);
+		// The preview persists across runs, and unseen files stay uncheckpointed.
+		// Verify exact identity preservation instead of assuming a clean repository.
 		for (const page of [left, fresh]) {
-			await expect(
-				page.getByRole("button", {
-					name: "1 file changed since checkpoint. Open checkpoint history",
-				}),
-			).toBeVisible({ timeout: realtimeTimeout });
+			const count = remainingFileIds.length;
+			const status = page.getByRole("button", {
+				name: `${count} ${count === 1 ? "file" : "files"} changed since checkpoint. Open checkpoint history`,
+				exact: true,
+			});
+			await expect(status).toBeVisible({ timeout: realtimeTimeout });
+			await status.click();
+			await page
+				.getByRole("complementary", { name: "Navigator", exact: true })
+				.getByRole("button", { name: "Working changes", exact: true })
+				.click();
+			await page
+				.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
+				.click();
+			await expect
+				.poll(() => workingSetFileIds(page), { timeout: realtimeTimeout })
+				.toEqual(remainingFileIds);
+			await page.keyboard.press("Escape");
+			await page.getByRole("button", { name: "Exit", exact: true }).click();
 		}
 
 		const coldReadsBeforeHistory = coldReadCount([left, right]);
