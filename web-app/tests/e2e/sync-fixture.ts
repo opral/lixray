@@ -392,25 +392,12 @@ export async function createSyncFixture({
 		const openRepositoryWorkingChanges = async (page: Page) => {
 			await page
 				.getByRole("button", {
-					name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
+					name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
 				})
 				.click();
-			const navigator = page.getByRole("complementary", {
-				name: "Navigator",
-				exact: true,
-			});
 			await expect(
-				navigator.getByRole("region", { name: "Checkpoint history" }),
+				page.getByRole("button", { name: "Exit", exact: true }),
 			).toBeVisible();
-			// The active file may already be checkpointed while other files remain dirty.
-			const repositoryScope = navigator.getByRole("button", {
-				name: "Showing this file. Switch to the repository",
-				exact: true,
-			});
-			if (await repositoryScope.isVisible()) await repositoryScope.click();
-			await navigator
-				.getByRole("button", { name: "Working changes", exact: true })
-				.click();
 		};
 		const clickCheckpoint = async (
 			page: Page,
@@ -1106,7 +1093,7 @@ export async function createSyncFixture({
 			for (const page of [left, right]) {
 				await expect(
 					page.getByRole("button", {
-						name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
+						name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
 					}),
 				).toBeVisible({ timeout: 30_000 });
 			}
@@ -1156,7 +1143,7 @@ export async function createSyncFixture({
 			});
 			await expect(
 				left.getByRole("button", {
-					name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
+					name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
 				}),
 			).toBeVisible({ timeout: realtimeTimeout });
 
@@ -1193,7 +1180,7 @@ export async function createSyncFixture({
 				}
 				await expect(
 					page.getByRole("button", {
-						name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
+						name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
 					}),
 				).toBeVisible({ timeout: 30_000 });
 			}
@@ -1230,7 +1217,7 @@ export async function createSyncFixture({
 			]);
 			await expect(
 				fresh.getByRole("button", {
-					name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
+					name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
 				}),
 			).toBeVisible({ timeout: 30_000 });
 
@@ -1515,7 +1502,7 @@ export async function createSyncFixture({
 			for (const page of [left, fresh]) {
 				const count = remainingFileIds.length;
 				const status = page.getByRole("button", {
-					name: `${count} ${count === 1 ? "file" : "files"} changed since checkpoint. Open checkpoint history`,
+					name: `${count} ${count === 1 ? "file" : "files"} changed since checkpoint. Review working changes`,
 					exact: true,
 				});
 				await expect(status).toBeVisible({ timeout: realtimeTimeout });

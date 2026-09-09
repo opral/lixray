@@ -144,12 +144,8 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		await expect(row("note.txt")).toBeVisible();
 		await page
 			.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
+				name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
 			})
-			.click();
-		await page
-			.getByRole("complementary", { name: "Navigator", exact: true })
-			.getByRole("button", { name: "Working changes", exact: true })
 			.click();
 		const checkpointButton = page.getByRole("button", {
 			name: "Checkpoint",
@@ -163,7 +159,7 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		).toHaveCount(0, { timeout: 5_000 });
 		await expect(
 			page.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
+				name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
 			}),
 		).toHaveCount(0);
 		await page.reload();
@@ -182,7 +178,7 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		await expect(row("note.txt")).toBeVisible();
 		await expect(
 			page.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
+				name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
 			}),
 		).toHaveCount(0);
 		await context.unroute(protocolRequests);
