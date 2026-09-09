@@ -2,20 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { formatRepositoryOpenError } from "./repository-open-error.ts";
 
-void test("explains recovery without suggesting deletion of pending local work", () => {
-	const code = "LIX_ERROR_REPLICA_UPGRADE_BLOCKED";
-	const message = "The server has not acknowledged all local changes.";
-	for (const error of [
-		Object.assign(new Error(message), { code }),
-		{ code, message, details: { reason: "pending_changes" } },
-	]) {
-		assert.equal(
-			formatRepositoryOpenError(error),
-			`Local repository upgrade paused (${code}): ${message}\nYour local data has been kept. Do not clear this browser's storage; contact support to recover local changes before upgrading.`,
-		);
-	}
-});
-
 void test("preserves the engine's unsupported repository protocol error", () => {
 	assert.equal(
 		formatRepositoryOpenError(

@@ -416,12 +416,16 @@ export async function createSyncFixture({
 			page: Page,
 			selectFiles?: () => Promise<void>,
 		): Promise<string> => {
-			const before = await authorityCheckpointCount();
 			const historyBefore = await openHistoryPanel(right);
-			const localCount = await historyBefore
-				.getByRole("list", { name: "Checkpoints" })
-				.locator(":scope > li")
-				.count();
+			// Opening the panel does not mean its asynchronous timeline is loaded.
+			// Establish the server-backed baseline before going offline; otherwise
+			// seeded checkpoints arriving later look like extra local checkpoints.
+			const before = await waitForHistoryCountsToMatchAuthority(
+				[historyBefore],
+				0,
+				repositoryOperationTimeout,
+			);
+			const localCount = before;
 			const localCheckpointIds = new Set<string>();
 			const captureCheckpoint = (request: Request) => {
 				if (

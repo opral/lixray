@@ -2,10 +2,6 @@ export function formatRepositoryOpenError(caught: unknown): string {
 	const message = getErrorMessage(caught);
 	const code = getErrorCode(caught);
 
-	if (code === "LIX_ERROR_REPLICA_UPGRADE_BLOCKED") {
-		return `Local repository upgrade paused (${code}): ${message}\nYour local data has been kept. Do not clear this browser's storage; contact support to recover local changes before upgrading.`;
-	}
-
 	if (
 		code === "LIX_ERROR_LIX_MIGRATION_FAILED" ||
 		code === "LIX_ERROR_MIGRATION_FAILED" ||
