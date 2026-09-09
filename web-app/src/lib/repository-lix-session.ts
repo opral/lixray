@@ -59,7 +59,6 @@ export function openRepositoryRemoteLix(
 ): Promise<Lix> {
 	return openLix({
 		server: {
-			mode: "remote",
 			url: repositoryUrl(options),
 			headers: async () => repositoryRequestHeaders(options),
 			fetch: createTelemetryFetch(options.fetch, {
@@ -263,7 +262,6 @@ async function openOpfsSyncSession(
 			name: repositoryOpfsCacheName(options),
 		}),
 		server: {
-			mode: "sync",
 			url: repositoryUrl(options),
 			headers: async () => repositoryRequestHeaders(options),
 			fetch: createTelemetryFetch(options.fetch, {

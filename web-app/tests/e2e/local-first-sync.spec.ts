@@ -45,7 +45,10 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		};
 	}, prefix);
 	const endpoint = new URL(`/lix/v1/${repository.id}/`, baseURL);
-	const headers = { Authorization: `Bearer ${repository.token}` };
+	const headers = {
+		Authorization: `Bearer ${repository.token}`,
+		"Lix-Server-Protocol-Version": "7",
+	};
 	const opened = await context.request.get(endpoint.toString(), { headers });
 	expect(opened.status(), await opened.text()).toBe(200);
 	const { sessionId } = (await opened.json()) as { sessionId: string };
@@ -167,7 +170,7 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 			.poll(
 				async () => {
 					const result = await execute(
-						"SELECT commit_id FROM lix_checkpoint WHERE commit_id = $1",
+						"SELECT id AS commit_id FROM lix_commit WHERE id = $1 AND is_checkpoint",
 						[checkpointId],
 					);
 					return result.rows[0]?.[0]?.value;

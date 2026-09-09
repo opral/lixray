@@ -371,7 +371,6 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	private async openSession(lixId: string): Promise<LixSession> {
 		const lix = await openLix({
 			server: {
-				mode: "remote",
 				url: `https://mcp.lixray.invalid/lix/${lixId}`,
 				fetch: (input: RequestInfo | URL, init?: RequestInit) =>
 					this.protocolFetch(lixId, input, init),

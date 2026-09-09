@@ -1,8 +1,10 @@
 import {
 	Atelier,
 	type AtelierEvent,
-	type AtelierShellHandle,
-	type AtelierShellProps,
+	type AtelierExtensionRuntime,
+	type AtelierExtensionRegistration,
+	type AtelierSkeletonProps,
+	type AtelierProps,
 } from "@opral/atelier";
 import "@opral/atelier/style.css";
 import {
@@ -104,7 +106,72 @@ interface RepositoryAtelierProps {
 	};
 }
 
-const RepositoryAtelierContext = createContext<AtelierShellHandle | null>(null);
+type RepositoryAtelierHandle = Pick<
+	AtelierExtensionRuntime,
+	"lix" | "documents" | "views"
+>;
+
+function RepositoryRuntimeBridge({
+	runtime,
+	onReady,
+	children,
+}: {
+	runtime: AtelierExtensionRuntime;
+	onReady: (runtime: RepositoryAtelierHandle) => void;
+	children: React.ReactNode;
+}) {
+	const latest = useRef(runtime);
+	useLayoutEffect(() => {
+		latest.current = runtime;
+	}, [runtime]);
+	useEffect(() => {
+		// Methods delegate to the current extension runtime as the shell rerenders.
+		onReady({
+			get lix() {
+				return latest.current.lix;
+			},
+			get documents() {
+				return latest.current.documents;
+			},
+			get views() {
+				return latest.current.views;
+			},
+		});
+	}, [onReady]);
+	return children;
+}
+
+function repositoryRuntimeExtensions(
+	extensions: readonly AtelierExtensionRegistration[],
+	onReady: (runtime: RepositoryAtelierHandle) => void,
+): readonly AtelierExtensionRegistration[] {
+	return extensions.map((extension) => {
+		const View = extension.Component;
+		return {
+			...extension,
+			Component: (props) => (
+				<RepositoryRuntimeBridge runtime={props.atelier} onReady={onReady}>
+					<View {...props} />
+				</RepositoryRuntimeBridge>
+			),
+		};
+	});
+}
+
+function RepositoryShellSkeleton({ children, ...props }: AtelierSkeletonProps) {
+	return (
+		<div className="relative h-full">
+			<Atelier {...props} />
+			<div className="pointer-events-none absolute inset-0 grid place-content-center">
+				{children}
+			</div>
+		</div>
+	);
+}
+
+const RepositoryAtelierContext = createContext<RepositoryAtelierHandle | null>(
+	null,
+);
 const RepositoryDefaultBranchContext = createContext<string | null>(null);
 const RepositoryRouteSyncContext = createContext<(() => void) | null>(null);
 const RepositoryShellDirNavigationContext = createContext<
@@ -172,8 +239,10 @@ export function RepositoryAtelier({
 		repositoryName,
 	});
 	const isReadOnly = !canEdit;
-	const [instance, setInstance] = useState<AtelierShellHandle | null>(null);
-	const [shellProps, setShellProps] = useState<AtelierShellProps | null>(null);
+	const [instance, setInstance] = useState<RepositoryAtelierHandle | null>(
+		null,
+	);
+	const [shellProps, setShellProps] = useState<AtelierProps | null>(null);
 	const [branchSession, setBranchSession] =
 		useState<RepositoryBranchSession | null>(null);
 	const [repositoryDefaultBranchId, setRepositoryDefaultBranchId] = useState<
@@ -905,6 +974,7 @@ export function RepositoryAtelier({
 		const openController = new AbortController();
 		resetRepositoryOpenPerformance();
 		setShellProps(null);
+		setInstance(null);
 		setBranchSession(null);
 		setRepositoryDefaultBranchId(null);
 		setError(null);
@@ -1007,7 +1077,7 @@ export function RepositoryAtelier({
 							"Content-Type": "application/vnd.lix.snapshot",
 						},
 					}).blob();
-				const atelierProps: AtelierShellProps = {
+				const atelierProps: AtelierProps = {
 					lix: session.lix,
 					readOnly: isReadOnly,
 					debug: {
@@ -1023,30 +1093,33 @@ export function RepositoryAtelier({
 							}),
 					},
 					branchSession: repositoryBranchSession,
-					extensions: createLixrayRepositoryExtensions(
-						{
-							lixId: repositoryId,
-							namespace,
-							lixSlug: repositorySlug,
-							lixName: repositoryName,
-						},
-						async () => {
-							if (!client || !canEdit || !atelierAccountId) return false;
-							if (!(await getAccessToken())) return false;
-							const { data, error } = await client
-								.from("mcp_lix_connections")
-								.select("last_seen_at")
-								.eq("lix_id", repositoryId)
-								.order("last_seen_at", { ascending: false })
-								.limit(1);
-							if (error) throw error;
-							return data.length > 0;
-						},
-						canEdit ? stableTeamApiRef.current : null,
-						canEdit && !isDemoModeEnabled && client
-							? stableSettingsApiRef.current
-							: null,
-						repositoryVisibility,
+					extensions: repositoryRuntimeExtensions(
+						createLixrayRepositoryExtensions(
+							{
+								lixId: repositoryId,
+								namespace,
+								lixSlug: repositorySlug,
+								lixName: repositoryName,
+							},
+							async () => {
+								if (!client || !canEdit || !atelierAccountId) return false;
+								if (!(await getAccessToken())) return false;
+								const { data, error } = await client
+									.from("mcp_lix_connections")
+									.select("last_seen_at")
+									.eq("lix_id", repositoryId)
+									.order("last_seen_at", { ascending: false })
+									.limit(1);
+								if (error) throw error;
+								return data.length > 0;
+							},
+							canEdit ? stableTeamApiRef.current : null,
+							canEdit && !isDemoModeEnabled && client
+								? stableSettingsApiRef.current
+								: null,
+							repositoryVisibility,
+						),
+						setInstance,
 					),
 					centralPanel: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
@@ -1220,9 +1293,8 @@ export function RepositoryAtelier({
 								value={consumeShellDirNavigation}
 							>
 								<RepositoryAtelierContext.Provider value={instance}>
-									<Atelier.Shell
+									<Atelier
 										{...shellProps}
-										ref={setInstance}
 										topBarProps={REPOSITORY_TOP_BAR_PROPS}
 										slots={{
 											navbarBrand,
@@ -1254,12 +1326,12 @@ export function RepositoryAtelier({
 				</main>
 			) : null}
 			{!instance && !error && !migration ? (
-				<Atelier.ShellSkeleton
+				<RepositoryShellSkeleton
 					topBarProps={REPOSITORY_TOP_BAR_PROPS}
 					slots={{ navbarBrand, navbarEnd: headerActions }}
 				>
 					<DelayedOpeningLabel />
-				</Atelier.ShellSkeleton>
+				</RepositoryShellSkeleton>
 			) : null}
 			{error ? (
 				<main className="absolute inset-0 grid place-content-center bg-bg-app p-6 text-center text-text-secondary">
@@ -1276,7 +1348,7 @@ export function RepositoryAtelier({
 	);
 }
 
-export function useRepositoryAtelierInstance(): AtelierShellHandle | null {
+export function useRepositoryAtelierInstance(): RepositoryAtelierHandle | null {
 	return useContext(RepositoryAtelierContext);
 }
 
@@ -1551,7 +1623,7 @@ export function RepositoryOpeningSkeleton({
 			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
 			aria-busy
 		>
-			<Atelier.ShellSkeleton
+			<RepositoryShellSkeleton
 				topBarProps={REPOSITORY_TOP_BAR_PROPS}
 				slots={{
 					navbarBrand: (
@@ -1566,7 +1638,7 @@ export function RepositoryOpeningSkeleton({
 				}}
 			>
 				<DelayedOpeningLabel />
-			</Atelier.ShellSkeleton>
+			</RepositoryShellSkeleton>
 		</div>
 	);
 }

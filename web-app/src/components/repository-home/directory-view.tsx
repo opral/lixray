@@ -1,11 +1,11 @@
+import { AtelierFile } from "@opral/atelier";
 import type { Lix } from "@lix-js/sdk";
 import {
-	Atelier,
 	deleteWorkspaceEntry,
 	renameWorkspaceEntry,
 	WorkspacePathTakenError,
 } from "@opral/atelier";
-import type { AtelierDiffSession, AtelierFileViewProps } from "@opral/atelier";
+import type { AtelierDiffSession, AtelierFileProps } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import {
 	ArrowRight,
@@ -144,7 +144,7 @@ export function DirectoryView({
 	const controlPlaneData = useRepositoryControlPlaneData(lix, detailsEnabled);
 	// Time travel: a historical session renders the listing as of its target
 	// commit. The working review keeps the live listing — its whole point is
-	// the latest state against the last checkpoint.
+	// the latest state against its actual working baseline.
 	const historicalCommitId =
 		diffSession && "commitId" in diffSession.target
 			? diffSession.target.commitId
@@ -261,7 +261,7 @@ export function DirectoryView({
 	// A changed README previews as its diff — the review renders the change
 	// itself, not the resulting document.
 	const readmeDiff = useMemo<
-		AtelierFileViewProps | { fileId: string; unavailable: true } | null
+		AtelierFileProps | { fileId: string; unavailable: true } | null
 	>(() => {
 		const readmePath = listing?.readmePath;
 		if (!diffSession || !readmePath) return null;
@@ -1002,7 +1002,7 @@ function ChangeBars({
 	const maxCount = Math.max(1, ...days.map((day) => day.count));
 	const latestCheckpointDay = data.checkpointDates?.[0]?.slice(0, 10) ?? null;
 	// Same day-granularity rule the bar colors use: a checkpoint splits the
-	// window, and the headline counts the reviewable span after it.
+	// window. These are retained source records, not reviewable row changes.
 	const headlineCount = latestCheckpointDay
 		? days.reduce(
 				(sum, entry) =>
@@ -1027,8 +1027,8 @@ function ChangeBars({
 					{formatCompactCount(headlineCount)}
 				</strong>
 				<span className="text-[11.5px] text-text-tertiary">
-					{headlineCount === 1 ? "change" : "changes"}
-					{latestCheckpointDay ? " since checkpoint" : ""}
+					{headlineCount === 1 ? "source record" : "source records"}
+					{latestCheckpointDay ? " after checkpoint day" : " retained"}
 				</span>
 			</div>
 			<div className="mt-3 flex h-11 items-end gap-[3px] border-b border-[#ded5c8]">
@@ -1054,7 +1054,7 @@ function ChangeBars({
 							style={{ height }}
 							title={
 								entry.day
-									? `${entry.count} ${entry.count === 1 ? "change" : "changes"} on ${entry.day}`
+									? `${entry.count} ${entry.count === 1 ? "source record" : "source records"} on ${entry.day}`
 									: undefined
 							}
 						/>
@@ -1111,7 +1111,7 @@ function DatabaseSummary({
 			color: "bg-[#d8cdbc]",
 		},
 		{
-			label: "Changes",
+			label: "Source records",
 			count: data.totalChangeCount,
 			color: "bg-[#eeb17f]",
 		},
@@ -1475,7 +1475,7 @@ function ReadmePreview({
 	readonly fileId: string | null;
 	/** Present while a review marks the README; renders the diff itself. */
 	readonly diff:
-		| AtelierFileViewProps
+		| AtelierFileProps
 		| { fileId: string; unavailable: true }
 		| null;
 	readonly fileName: string;
@@ -1564,7 +1564,7 @@ function ReadmePreview({
 						review.
 					</div>
 				) : (
-					<Atelier.FileView
+					<AtelierFile
 						readOnly
 						{...(diff ?? { lix, fileId, filePath: sourceFilePath })}
 					/>

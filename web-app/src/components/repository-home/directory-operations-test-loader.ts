@@ -5,7 +5,7 @@ import { build } from "esbuild";
 import { Lix } from "@lix-js/sdk";
 import { openMemoryWasmBinding } from "../../../../vendor/lix/packages/js-sdk/dist/binding.node-wasm.js";
 
-/** Use the exact vendored browser engine, not an older published native addon. */
+/** Use the compiled vendored browser engine, never a published native fallback. */
 export async function openDirectoryTestLix(): Promise<Lix> {
 	return new Lix(await openMemoryWasmBinding());
 }
@@ -19,8 +19,8 @@ export async function openDirectoryTestLix(): Promise<Lix> {
 export async function loadDirectoryOperationsForTest() {
 	const operationsURL = new URL("./directory-operations.ts", import.meta.url);
 	const source = new URL(
-		"../../../../vendor/atelier/src/lib/workspace-file-ops.ts",
-		import.meta.url,
+		"../src/lib/workspace-file-ops.ts",
+		import.meta.resolve("@opral/atelier"),
 	);
 	const bundled = await build({
 		entryPoints: [fileURLToPath(source)],

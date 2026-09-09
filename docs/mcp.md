@@ -82,7 +82,7 @@ WHERE table_schema = 'public'
 ORDER BY ordinal_position;
 ```
 
-The stable core tables are `lix_file`, `lix_directory`, `lix_branch`, and
+The stable core tables are `lix_file`, `lix_directory`, `lix_branch`, `lix_commit`, and
 `lix_change`. Entity tables are repository-defined and must be discovered at
 runtime.
 
@@ -117,3 +117,48 @@ Parent directories: `INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (p
 
 Name the conflict columns. Lix does not support `ON CONSTRAINT`, inference
 without columns, or `DO UPDATE WHERE`.
+
+
+## Version-control reads
+
+Use `lix_log([anchor])` for retained commits on the branch's first-parent chain.
+Filter `is_checkpoint` for milestones and order by `position`, with zero at the
+anchor. For repository-global checkpoint inventory, use
+`SELECT id, created_at FROM lix_commit WHERE is_checkpoint`; it includes
+checkpoints outside the selected branch. Checkpoint dates use commit creation time.
+
+```sql
+SELECT lixcol_to_commit_id, lixcol_commit_created_at,
+       diff_type, from_path, to_path
+FROM lix_history('lix_file', $1)
+WHERE id = $2 AND lixcol_commit_is_checkpoint
+ORDER BY lixcol_position;
+```
+
+History reports each retained mainline commit's net changes relative to its
+actual first parent, identified by `lixcol_from_commit_id` and
+`lixcol_to_commit_id`. Filtering never changes that baseline. A checkpoint's
+parent can be an unmarked fork or restore baseline. Drop the checkpoint predicate
+to inspect retained automatic changes. Compaction can remove those revisions.
+Empty commits appear in log and have no history rows; merged-side commits do not
+appear separately on the first-parent timeline. Pin the same anchor when paging
+log and fetching history for its commit IDs.
+
+`lix_diff('lix_file')` compares the actual working baseline to the head;
+`lix_diff('lix_file', $1, $2)` compares explicit endpoints. Working context comes
+from `lix_branch.working_base_commit_id` and `commit_id`, including when the diff
+is empty. The latest marked checkpoint need not be the working baseline.
+Reselect through diff and guard its actual endpoint IDs for selected commands;
+do not pass multi-commit history rows as command input.
+
+```sql
+SELECT path, content
+FROM lix_as_of('lix_file', $1)
+WHERE id = $2;
+```
+
+As-of returns complete state at one retained commit and supports loading file
+bytes lazily. Relation arguments are non-null text literals; anchors and endpoints
+accept parameters. `lix_change` remains repository-global retained source-record
+activity, not a count of user edits or net differences. New checkpoints do not
+emit synthetic marker changes; old retained records remain historical facts.

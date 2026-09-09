@@ -125,7 +125,7 @@ test("Repository tokens have generated names, creation dates and independent del
 					headers: async () => ({ Authorization: `Bearer ${token}` }),
 				};
 				const remote = await openLix({
-					server: { ...connection, mode: "remote" },
+					server: connection,
 				});
 				try {
 					await remote.execute(
@@ -141,7 +141,7 @@ test("Repository tokens have generated names, creation dates and independent del
 				)) as typeof import("@lix-js/storage-opfs");
 				const sync = await openLix({
 					storage: new OpfsStorage({ name: `api-token-test-${lixId}` }),
-					server: { ...connection, mode: "sync" },
+					server: connection,
 				});
 				try {
 					return (

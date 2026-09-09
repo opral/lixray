@@ -60,7 +60,7 @@ const query = (sql: string, params: readonly unknown[] = []) => {
 				...files.map((entry) => row(entry, false)),
 			],
 		};
-	if (sql.includes("lix_state_at"))
+	if (sql.includes("lix_as_of"))
 		return { rows: [{ id: "past", path: "/past.md" }] };
 	if (sql.includes("information_schema")) return { rows: [{ n: 2 }] };
 	if (!sql.includes("lix_directory") && !sql.includes("lix_file"))

@@ -28,7 +28,7 @@ void test("the deployed Lixray and Atelier source graph uses OPFS exclusively", 
 		"utf8",
 	);
 	assert.match(repositorySession, /new OpfsStorage\(/u);
-	assert.match(repositorySession, /mode:\s*"sync"/u);
+	assert.doesNotMatch(repositorySession, /mode:\s*"(?:sync|remote)"/u);
 	assert.match(repositorySession, /headers:\s*async/u);
 	assert.match(repositorySession, /fetch:\s*createTelemetryFetch/u);
 

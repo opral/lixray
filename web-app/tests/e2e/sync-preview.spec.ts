@@ -55,7 +55,8 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				headers: {
 					Authorization: "Bearer lixray-demo",
 					"Lix-Session-Id": "0".repeat(64),
-					"Lix-Sync-Protocol-Version": "7",
+					"Lix-Sync-Protocol-Version": "9",
+					"Lix-Server-Protocol-Version": "7",
 				},
 			});
 			return {
@@ -118,7 +119,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			`/lix/v1/${DEMO_LIX_ID}/`,
 			baseURL,
 		).toString();
-		const authorization = { Authorization: "Bearer lixray-demo" };
+		const authorization = {
+			Authorization: "Bearer lixray-demo",
+			"Lix-Server-Protocol-Version": "7",
+		};
 		const opened = await sharedContext.request.get(repositoryEndpoint, {
 			headers: authorization,
 		});
@@ -134,7 +138,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 						"Lix-Session-Id": sessionId,
 					},
 					data: {
-						sql: "SELECT count(*) AS checkpoint_count FROM lix_checkpoint",
+						sql: "SELECT count(*) AS checkpoint_count FROM lix_commit WHERE is_checkpoint",
 						params: [],
 					},
 				},
@@ -273,7 +277,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			.poll(authorityCheckpointCount, { timeout: repositoryOperationTimeout })
 			.toBeGreaterThanOrEqual(before + 1);
 		const endpoint = new URL(`/lix/v1/${DEMO_LIX_ID}/`, baseURL).toString();
-		const authorization = { Authorization: "Bearer lixray-demo" };
+		const authorization = {
+			Authorization: "Bearer lixray-demo",
+			"Lix-Server-Protocol-Version": "7",
+		};
 		const opened = await sharedContext.request.get(endpoint, {
 			headers: authorization,
 		});
@@ -294,7 +301,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 									"Idempotency-Key": `local-checkpoint-read-${Date.now()}-${authorityReadSequence++}`,
 								},
 								data: {
-									sql: "SELECT commit_id FROM lix_checkpoint WHERE commit_id = $1",
+									sql: "SELECT id AS commit_id FROM lix_commit WHERE id = $1 AND is_checkpoint",
 									params: [{ kind: "text", value: localCheckpointId }],
 								},
 							},

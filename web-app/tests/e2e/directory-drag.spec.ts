@@ -46,7 +46,6 @@ for (const count of [1, 2]) {
 		const { openLix } = await import("@lix-js/sdk");
 		const lix = await openLix({
 			server: {
-				mode: "remote",
 				url: serverUrl,
 				headers: { authorization: `Bearer ${serverToken}` },
 			},

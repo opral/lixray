@@ -6,7 +6,6 @@ import {
 } from "@opral/atelier";
 import { Folder, Home, Settings, Users } from "lucide-react";
 import { StrictMode } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
 import { DirectoryView } from "./directory-view";
@@ -140,8 +139,7 @@ function openHistoryFromView(atelier: AtelierExtensionRuntime) {
 		});
 }
 
-function mountDirectoryView({
-	element,
+function RepositoryDirectoryExtension({
 	atelier,
 	view,
 	dirPath,
@@ -151,7 +149,6 @@ function mountDirectoryView({
 	hasAgentConnected,
 	visibility,
 }: {
-	element: HTMLElement;
 	atelier: AtelierExtensionRuntime;
 	view: AtelierExtensionView;
 	dirPath: (candidate: AtelierExtensionView) => string;
@@ -160,75 +157,58 @@ function mountDirectoryView({
 	teamApi: RepositoryTeamApi | null;
 	hasAgentConnected: AgentConnectionProbe | null;
 	visibility: "private" | "public";
-}): {
-	root: Root;
-	render: (
-		candidate: AtelierExtensionView,
-		runtime: AtelierExtensionRuntime,
-	) => void;
-} {
-	const root = createRoot(element);
-	// Re-rendered on view updates so shortcut bindings track isActive.
-	const render = (
-		candidate: AtelierExtensionView,
-		runtime: AtelierExtensionRuntime,
-	) => {
-		root.render(
-			<StrictMode>
-				<DirectoryView
-					lix={atelier.lix}
-					diffSession={runtime.diff?.session ?? null}
-					onOpenHistory={() => openHistoryFromView(runtime)}
-					{...(runtime.diff
-						? {
-								onOpenDiffFile: (path: string) => runtime.diff?.openFile(path),
-							}
-						: {})}
-					dirPath={dirPath(candidate)}
-					isHome={isHome}
-					showHiddenFiles={
-						runtime.preferences.get(
-							ATELIER_BUILTIN_EXTENSION_IDS.files,
-							"showHiddenFiles",
-						) === true
-					}
-					readOnly={atelier.readOnly}
-					connection={connection}
-					teamApi={teamApi}
-					hasAgentConnected={hasAgentConnected}
-					visibility={visibility}
-					isActive={candidate.isActive}
-					onOpenFile={(path, options) =>
-						openFileFromView(atelier, path, options)
-					}
-					onOpenDir={(path, options) =>
-						openDirFromView(
-							atelier,
-							{ isHome, instanceId: candidate.instanceId },
-							path,
-							options,
-						)
-					}
-					onOpenPeople={() => openPeopleFromView(atelier)}
-					onOpenSettings={() => openSettingsFromView(atelier)}
-					onOpenSqlExplorer={() => openSqlExplorerFromView(atelier)}
-					{...(!atelier.readOnly && atelier.diff
-						? {
-								// reveal: false — home stays the landing surface; the
-								// user picks the file from the review-aware listing.
-								onOpenChangesReview: () =>
-									void atelier.diff?.open({
-										target: { working: true },
-										reveal: false,
-									}),
-							}
-						: {})}
-				/>
-			</StrictMode>,
-		);
-	};
-	render(view, atelier);
-	return { root, render };
+}) {
+	return (
+		<StrictMode>
+			<DirectoryView
+				lix={atelier.lix}
+				diffSession={atelier.diff?.session ?? null}
+				onOpenHistory={() => openHistoryFromView(atelier)}
+				{...(atelier.diff
+					? {
+							onOpenDiffFile: (path: string) => atelier.diff?.openFile(path),
+						}
+					: {})}
+				dirPath={dirPath(view)}
+				isHome={isHome}
+				showHiddenFiles={
+					atelier.preferences.get(
+						ATELIER_BUILTIN_EXTENSION_IDS.files,
+						"showHiddenFiles",
+					) === true
+				}
+				readOnly={atelier.readOnly}
+				connection={connection}
+				teamApi={teamApi}
+				hasAgentConnected={hasAgentConnected}
+				visibility={visibility}
+				isActive={view.isActive}
+				onOpenFile={(path, options) => openFileFromView(atelier, path, options)}
+				onOpenDir={(path, options) =>
+					openDirFromView(
+						atelier,
+						{ isHome, instanceId: view.instanceId },
+						path,
+						options,
+					)
+				}
+				onOpenPeople={() => openPeopleFromView(atelier)}
+				onOpenSettings={() => openSettingsFromView(atelier)}
+				onOpenSqlExplorer={() => openSqlExplorerFromView(atelier)}
+				{...(!atelier.readOnly && atelier.diff
+					? {
+							// reveal: false — home stays the landing surface; the
+							// user picks the file from the review-aware listing.
+							onOpenChangesReview: () =>
+								void atelier.diff?.open({
+									target: { working: true },
+									reveal: false,
+								}),
+						}
+					: {})}
+			/>
+		</StrictMode>
+	);
 }
 
 /**
@@ -241,147 +221,71 @@ const createLixrayHomeExtension = (
 	teamApi: RepositoryTeamApi | null,
 	visibility: "private" | "public",
 ): AtelierExtensionRegistration => ({
-	manifest: {
-		apiVersion: 1,
-		id: LIXRAY_HOME_EXTENSION_ID,
-		name: "Home",
-		description: "Repository home: files, README, connect.",
-		placement: ["central"],
-		hidden: true,
-	},
-	entry: {
-		icon: Home,
-		mount: ({ element, atelier, view }) => {
-			const { root, render } = mountDirectoryView({
-				element,
-				atelier,
-				view,
-				// Home is the primary Files surface (flow A): it drills into
-				// folders in place, tracking the path in its view state.
-				dirPath: dirPathFromViewState,
-				isHome: true,
-				connection,
-				teamApi,
-				hasAgentConnected,
-				visibility,
-			});
-			return {
-				update: ({ atelier: nextAtelier, view: nextView }) =>
-					render(nextView, nextAtelier),
-				dispose: () => {
-					queueMicrotask(() => root.unmount());
-				},
-			};
-		},
-	},
+	id: LIXRAY_HOME_EXTENSION_ID,
+	name: "Home",
+	description: "Repository home: files, README, connect.",
+	placement: ["central"],
+	hidden: true,
+	icon: Home,
+	Component: ({ atelier, view }) => (
+		<RepositoryDirectoryExtension
+			atelier={atelier}
+			view={view}
+			dirPath={dirPathFromViewState}
+			isHome
+			connection={connection}
+			teamApi={teamApi}
+			hasAgentConnected={hasAgentConnected}
+			visibility={visibility}
+		/>
+	),
 });
 
-/**
- * A folder opened as its own content tab (12d): same listing as home minus
- * the connect row, navigating in place by the browser-like tab rules.
- */
 const createLixrayDirExtension = (
 	connection: LixRepositoryConnection,
 ): AtelierExtensionRegistration => ({
-	manifest: {
-		apiVersion: 1,
-		id: LIXRAY_DIR_EXTENSION_ID,
-		name: "Folder",
-		description: "A repository folder as a content tab.",
-		placement: ["central"],
-		hidden: true,
-		multiInstance: true,
-	},
-	entry: {
-		icon: Folder,
-		mount: ({ element, atelier, view }) => {
-			const { root, render } = mountDirectoryView({
-				element,
-				atelier,
-				view,
-				dirPath: dirPathFromViewState,
-				isHome: false,
-				connection,
-				teamApi: null,
-				hasAgentConnected: null,
-				visibility: "private",
-			});
-			return {
-				update: ({ atelier: nextAtelier, view: nextView }) =>
-					render(nextView, nextAtelier),
-				dispose: () => {
-					queueMicrotask(() => root.unmount());
-				},
-			};
-		},
-	},
+	id: LIXRAY_DIR_EXTENSION_ID,
+	name: "Folder",
+	description: "A repository folder as a content tab.",
+	placement: ["central"],
+	hidden: true,
+	multiInstance: true,
+	icon: Folder,
+	Component: ({ atelier, view }) => (
+		<RepositoryDirectoryExtension
+			atelier={atelier}
+			view={view}
+			dirPath={dirPathFromViewState}
+			isHome={false}
+			connection={connection}
+			teamApi={null}
+			hasAgentConnected={null}
+			visibility="private"
+		/>
+	),
 });
 
-/**
- * The People tab (3c): the namespace roster and invite link as a regular
- * closable content tab — tabs are the shell's only navigation primitive, so
- * People behaves like any file rather than a modal or standalone route shell.
- */
 const createLixrayPeopleExtension = (
 	teamApi: RepositoryTeamApi | null,
 ): AtelierExtensionRegistration => ({
-	manifest: {
-		apiVersion: 1,
-		id: LIXRAY_PEOPLE_EXTENSION_ID,
-		name: "People",
-		description: "Who's in this repository's namespace, and the invite link.",
-		placement: ["central"],
-		hidden: true,
-	},
-	entry: {
-		icon: Users,
-		mount: ({ element }) => {
-			const root = createRoot(element);
-			root.render(
-				<StrictMode>
-					<PeopleView teamApi={teamApi} />
-				</StrictMode>,
-			);
-			return {
-				dispose: () => {
-					queueMicrotask(() => root.unmount());
-				},
-			};
-		},
-	},
+	id: LIXRAY_PEOPLE_EXTENSION_ID,
+	name: "People",
+	description: "Who's in this repository's namespace, and the invite link.",
+	placement: ["central"],
+	hidden: true,
+	icon: Users,
+	Component: () => <PeopleView teamApi={teamApi} />,
 });
 
-/**
- * The Settings tab (flow A): repository management as a regular closable
- * central tab, so navigation back is just closing the tab or clicking any
- * other one.
- */
 const createLixraySettingsExtension = (
 	settingsApi: RepositorySettingsApi | null,
 ): AtelierExtensionRegistration => ({
-	manifest: {
-		apiVersion: 1,
-		id: LIXRAY_SETTINGS_EXTENSION_ID,
-		name: "Settings",
-		description: "Name, access, API tokens, and deletion for this repository.",
-		placement: ["central"],
-	},
-	entry: {
-		icon: Settings,
-		mount: ({ element }) => {
-			const root = createRoot(element);
-			root.render(
-				<StrictMode>
-					<SettingsView settingsApi={settingsApi} />
-				</StrictMode>,
-			);
-			return {
-				dispose: () => {
-					queueMicrotask(() => root.unmount());
-				},
-			};
-		},
-	},
+	id: LIXRAY_SETTINGS_EXTENSION_ID,
+	name: "Settings",
+	description: "Name, access, API tokens, and deletion for this repository.",
+	placement: ["central"],
+	icon: Settings,
+	Component: () => <SettingsView settingsApi={settingsApi} />,
 });
 
 export const createLixrayRepositoryExtensions = (

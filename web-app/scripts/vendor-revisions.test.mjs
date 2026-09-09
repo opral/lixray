@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 test("Docker builds require the checked-out submodules without a revision fallback", async () => {
 	const webDockerfile = await readFile(
@@ -131,12 +132,30 @@ test("Atelier resolves the vendored Lix SDK instead of npm", async () => {
 		rootPackage.pnpm.overrides["@lix-js/sdk"],
 		"link:vendor/lix/packages/js-sdk",
 	);
+	const peerRange = atelierPackage.peerDependencies["@lix-js/sdk"];
+	if (atelierPeerSatisfiesVendoredSdk(peerRange, lixPackage.version)) return;
+
+	// A source checkout can contain the next breaking API before release
+	// automation updates package versions. Validate that checkout against the
+	// same non-mutating release plan used by Lix, never a hardcoded exception
+	// or a broader peer range that accepts incompatible published packages.
+	const lixRoot = new URL("../../vendor/lix/", import.meta.url);
+	const { currentVersion, loadChanges, highestChangeType, bumpVersion } =
+		await import(new URL("scripts/release.mjs", lixRoot).href);
+	const root = fileURLToPath(lixRoot);
+	assert.equal(currentVersion(root), lixPackage.version);
+	const changes = loadChanges(root);
 	assert.ok(
-		atelierPeerSatisfiesVendoredSdk(
-			atelierPackage.peerDependencies["@lix-js/sdk"],
-			lixPackage.version,
-		),
-		`Atelier peer ${atelierPackage.peerDependencies["@lix-js/sdk"]} must accept vendored ${lixPackage.version}`,
+		changes.length > 0,
+		`Atelier peer ${peerRange} rejects vendored ${lixPackage.version} and no release is planned`,
+	);
+	const plannedVersion = bumpVersion(
+		lixPackage.version,
+		highestChangeType(changes),
+	);
+	assert.ok(
+		atelierPeerSatisfiesVendoredSdk(peerRange, plannedVersion),
+		`Atelier peer ${peerRange} must accept vendored ${lixPackage.version} or its planned release ${plannedVersion}`,
 	);
 });
 

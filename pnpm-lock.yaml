@@ -13,7 +13,7 @@ overrides:
 
 patchedDependencies:
   '@glideapps/glide-data-grid@6.0.3':
-    hash: 89ad9a2aeef92d594107f70bae1d62acc61649d5c40ab15a3cb0011a1cc571fd
+    hash: 4caa186a2f62fb20d155a8c8b8f5a0656d0ec60a3b1d491a03192a29cbb7d56c
     path: vendor/atelier/patches/@glideapps__glide-data-grid@6.0.3.patch
 
 importers:
@@ -85,7 +85,7 @@ importers:
         version: 0.18.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@glideapps/glide-data-grid':
         specifier: ^6.0.3
-        version: 6.0.3(patch_hash=89ad9a2aeef92d594107f70bae1d62acc61649d5c40ab15a3cb0011a1cc571fd)(lodash@4.18.1)(marked@18.0.6)(react-dom@19.2.7(react@19.2.7))(react-responsive-carousel@3.2.23)(react@19.2.7)
+        version: 6.0.3(patch_hash=4caa186a2f62fb20d155a8c8b8f5a0656d0ec60a3b1d491a03192a29cbb7d56c)(lodash@4.18.1)(marked@18.0.6)(react-dom@19.2.7(react@19.2.7))(react-responsive-carousel@3.2.23)(react@19.2.7)
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
@@ -164,9 +164,15 @@ importers:
       pdfjs-dist:
         specifier: 5.4.624
         version: 5.4.624
+      perfect-freehand:
+        specifier: 1.2.0
+        version: 1.2.0
       react-resizable-panels:
         specifier: ^4.12.1
         version: 4.12.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      roughjs:
+        specifier: 4.6.6
+        version: 4.6.6
       tailwind-merge:
         specifier: ^3.6.0
         version: 3.6.0
@@ -7305,7 +7311,7 @@ snapshots:
 
   '@floating-ui/utils@0.2.11': {}
 
-  '@glideapps/glide-data-grid@6.0.3(patch_hash=89ad9a2aeef92d594107f70bae1d62acc61649d5c40ab15a3cb0011a1cc571fd)(lodash@4.18.1)(marked@18.0.6)(react-dom@19.2.7(react@19.2.7))(react-responsive-carousel@3.2.23)(react@19.2.7)':
+  '@glideapps/glide-data-grid@6.0.3(patch_hash=4caa186a2f62fb20d155a8c8b8f5a0656d0ec60a3b1d491a03192a29cbb7d56c)(lodash@4.18.1)(marked@18.0.6)(react-dom@19.2.7(react@19.2.7))(react-responsive-carousel@3.2.23)(react@19.2.7)':
     dependencies:
       '@linaria/react': 4.5.4(react@19.2.7)
       canvas-hypertxt: 1.0.3

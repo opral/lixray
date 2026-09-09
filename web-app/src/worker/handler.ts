@@ -2375,7 +2375,7 @@ function remoteLixCorsPreflight(request: Request): Response {
 			"access-control-allow-credentials": "true",
 			"access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
 			"access-control-allow-headers":
-				"Authorization, Content-Type, Content-Encoding, Content-Range, Idempotency-Key, Lix-Client-Id, Lix-Session-Id, Lix-Sync-Protocol-Version, Lix-Transaction-Id, Lix-Upload-Id, Last-Event-ID, Range, X-Lixray-Public-Path",
+				"Authorization, Content-Type, Content-Encoding, Content-Range, Idempotency-Key, Lix-Client-Id, Lix-Session-Id, Lix-Server-Protocol-Version, Lix-Sync-Protocol-Version, Lix-Transaction-Id, Lix-Upload-Id, Last-Event-ID, Range, X-Lixray-Public-Path",
 			"access-control-max-age": "86400",
 			vary: "Origin",
 		},
