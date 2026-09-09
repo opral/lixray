@@ -81,3 +81,23 @@ test("production builds a missing web image with the same inputs as PR CI", () =
 		/web_digest="\$\{WEB_BUILT_DIGEST:-\$WEB_EXISTING_DIGEST\}"/,
 	);
 });
+
+test("production supplies the prepared SDK before building a web image", () => {
+	assert.match(
+		production,
+		/  sdk:\n[\s\S]*?uses: \.\/\.github\/workflows\/lix-sdk\.yml/,
+	);
+	const images = production.split("  images:\n")[1].split("  database:\n")[0];
+	assert.match(images, /needs:\n\s+- server-image\n\s+- sdk/);
+	const download = images.indexOf("uses: actions/download-artifact@v4");
+	const build = images.indexOf("uses: docker/build-push-action@v6");
+	assert.ok(download >= 0 && download < build);
+	assert.match(
+		images.slice(0, download),
+		/if: steps\.existing\.outputs\.web_found != 'true'\n\s*$/,
+	);
+	assert.match(
+		images.slice(download, build),
+		/name: vendored-lix-sdk\n\s+path: \.lixray-ci\/vendored-lix-sdk/,
+	);
+});

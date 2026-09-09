@@ -40,9 +40,17 @@ jobs:
     uses: ./.github/workflows/lix-server-image.yml
     secrets: inherit
 
+  sdk:
+    name: Vendored Lix SDK
+    needs: lix-artifacts
+    uses: ./.github/workflows/lix-sdk.yml
+    secrets: inherit
+
   images:
     name: Resolve tested images
-    needs: server-image
+    needs:
+      - server-image
+      - sdk
     # Retain room for a missing web image's source-build fallback. Server
     # resolution/building is handled separately on appropriately sized runners.
     runs-on: blacksmith-16vcpu-ubuntu-2404
@@ -151,6 +159,13 @@ jobs:
             echo "web_found=false" >> "$GITHUB_OUTPUT"
             echo "Web content tag $WEB_CONTENT_TAG is missing; building it."
           fi
+
+      - name: Download the prepared SDK for the Docker build
+        if: steps.existing.outputs.web_found != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: vendored-lix-sdk
+          path: .lixray-ci/vendored-lix-sdk
 
       - name: Build and push web image
         id: build-web
