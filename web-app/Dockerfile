@@ -31,9 +31,6 @@ ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL} \
 	VITE_LIXRAY_LOCAL_DEV_PASSWORD=${VITE_LIXRAY_LOCAL_DEV_PASSWORD} \
 	RAILWAY_ENVIRONMENT_NAME=${RAILWAY_ENVIRONMENT_NAME}
 RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends mold \
-	&& rm -rf /var/lib/apt/lists/*
 COPY . .
 
 RUN test -f vendor/lix/packages/js-sdk/package.json \

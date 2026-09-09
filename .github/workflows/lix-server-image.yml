@@ -38,7 +38,6 @@ jobs:
         with:
           node-version: "24"
           pnpm-version: "10.13.1"
-          build-rust: "false"
 
       - name: Install only artifact resolver dependencies
         run: pnpm install --filter lixray-repository --frozen-lockfile --ignore-scripts

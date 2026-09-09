@@ -7,8 +7,6 @@ storage.
 
 Production: [lixray.com](https://lixray.com)
 
-<!-- Content-addressed web image republish trigger; this file is outside hashed inputs. -->
-
 ## Repository layout
 
 - `web-app/` — TanStack Start app, MCP server, and Atelier integration
@@ -48,9 +46,9 @@ Every repository maps to an isolated SlateDB object prefix. One bounded Lix
 reference-server process hosts multiple lixes, opens them lazily, and evicts
 idle runtimes. Lix CI retains tested browser SDK and server artifacts for each
 reviewed revision, and Lix main publishes content-addressed server images. LixRay
-resolves those artifacts from its exact Lix submodule pointer and only compiles
-from source when no successful artifact exists. Local development follows the
-same resolution path with MinIO in place of R2.
+resolves those artifacts from its exact Lix submodule pointer. Missing artifacts
+must be built in Lix before retrying. Local development follows the same
+resolution path with MinIO in place of R2.
 
 The web service owns authentication, organization and project pages,
 `/healthz`, `/mcp`, and the canonical Lix protocol. Supabase row-level security
@@ -58,7 +56,8 @@ proves Lix access before a request reaches `lix-server`.
 
 ## Setup
 
-Requirements: Node.js 22, pnpm 10.13.1, Rust, Docker, and the Supabase CLI.
+Requirements: Node.js 24, pnpm 10.13.1, Docker, and the Supabase CLI.
+Rust is only needed for explicitly building native SDK development binaries.
 
 ```sh
 git submodule update --init --recursive

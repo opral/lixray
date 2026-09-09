@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   server-image:
+    if: github.ref == 'refs/heads/main'
     name: Lix server image
     permissions:
       contents: read
@@ -23,6 +24,7 @@ jobs:
     secrets: inherit
 
   sdk:
+    if: github.ref == 'refs/heads/main'
     name: Vendored Lix SDK
     uses: ./.github/workflows/lix-sdk.yml
     secrets: inherit

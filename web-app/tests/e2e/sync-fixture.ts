@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import {
 	expect,
 	test,
 	type Browser,
+	type BrowserContext,
 	type Locator,
 	type Page,
 	type Request,
@@ -23,9 +25,10 @@ export async function createSyncFixture({
 	scenario: SyncScenario;
 }) {
 	const local = process.env.PLAYWRIGHT_SYNC_LOCAL === "1";
+	const analyticsStubFailures: string[] = [];
 	const newContext = async () => {
 		const context = await browser.newContext();
-		if (local) {
+		if (local && scenario !== "performance") {
 			// Analytics is not part of the sync contract. Keep a built production
 			// image's telemetry off external networks and use an empty flag set.
 			await context.route(/^https:\/\/[^/]+\.posthog\.com\//, (route) =>
@@ -44,6 +47,67 @@ export async function createSyncFixture({
 		}
 		return context;
 	};
+	const newPage = async (context: BrowserContext) => {
+		const page = await context.newPage();
+		if (local && scenario === "performance") {
+			// Playwright context.route disables the HTTP cache for all requests.
+			// Narrow CDP interception leaves application assets cacheable while
+			// keeping this Chromium performance scenario off analytics networks.
+			const session = await context.newCDPSession(page);
+			session.on(
+				"Fetch.requestPaused",
+				(event: {
+					requestId: string;
+					resourceType?: string;
+					request: { headers: Record<string, string> };
+				}) => {
+					const script = event.resourceType === "Script";
+					const origin =
+						event.request.headers.Origin ?? event.request.headers.origin ?? "*";
+					void session
+						.send("Fetch.fulfillRequest", {
+							requestId: event.requestId,
+							responseCode: 200,
+							responseHeaders: [
+								{
+									name: "Content-Type",
+									value: script ? "application/javascript" : "application/json",
+								},
+								{ name: "Access-Control-Allow-Origin", value: origin },
+								{ name: "Access-Control-Allow-Credentials", value: "true" },
+								{
+									name: "Access-Control-Allow-Methods",
+									value: "GET, POST, OPTIONS",
+								},
+								{
+									name: "Access-Control-Allow-Headers",
+									value:
+										event.request.headers["Access-Control-Request-Headers"] ??
+										event.request.headers["access-control-request-headers"] ??
+										"Content-Type",
+								},
+							],
+							body: Buffer.from(
+								script
+									? ""
+									: JSON.stringify({
+											featureFlags: {},
+											featureFlagPayloads: {},
+										}),
+							).toString("base64"),
+						})
+						.catch((error: unknown) => {
+							if (!page.isClosed()) analyticsStubFailures.push(String(error));
+						});
+				},
+			);
+			await session.send("Fetch.enable", {
+				patterns: [{ urlPattern: "https://*.posthog.com/*" }],
+			});
+		}
+		return page;
+	};
+
 	test.skip(
 		!local && !process.env.PLAYWRIGHT_SYNC_PREVIEW,
 		"requires the local sync stack or an explicitly selected deployed preview",
@@ -74,8 +138,8 @@ export async function createSyncFixture({
 	const contexts = [sharedContext];
 	try {
 		const [left, right] = await Promise.all([
-			sharedContext.newPage(),
-			sharedContext.newPage(),
+			newPage(sharedContext),
+			newPage(sharedContext),
 		]);
 		const healthResponse = await contexts[0]!.request.get(
 			new URL("/healthz", baseURL).toString(),
@@ -985,7 +1049,7 @@ export async function createSyncFixture({
 					// assertions so a collaboration failure cannot mask this result.
 					const freshContext = await newContext();
 					contexts.push(freshContext);
-					const fresh = await freshContext.newPage();
+					const fresh = await newPage(freshContext);
 					observePage(fresh, "fresh");
 					await fresh.goto(repositoryUrl);
 					await expect(homeFileEntry(fresh, createdFileId!)).toBeVisible({
@@ -1202,7 +1266,7 @@ export async function createSyncFixture({
 				sample += 1
 			) {
 				await fresh.close();
-				fresh = await freshContext.newPage();
+				fresh = await newPage(freshContext);
 				observePage(fresh, `fresh-reopen-${sample + 1}`);
 				const reopenStartedAt = Date.now();
 				await fresh.goto(repositoryUrl, { waitUntil: "domcontentloaded" });
@@ -1283,8 +1347,10 @@ export async function createSyncFixture({
 				// this bound prevents a locally cached reopen from silently taking tens
 				// of seconds while remaining tolerant of shared CI runner variance.
 				const warmReopenP90CeilingMs = 10_000;
-				await test.info().attach("warm-reopen-profile.json", {
-					body: JSON.stringify(
+				const profilePath = test.info().outputPath("warm-reopen-profile.json");
+				await writeFile(
+					profilePath,
+					JSON.stringify(
 						{
 							warmReopenUsableSamplesMs,
 							warmReopenColdReads,
@@ -1301,6 +1367,9 @@ export async function createSyncFixture({
 						null,
 						2,
 					),
+				);
+				await test.info().attach("warm-reopen-profile.json", {
+					path: profilePath,
 					contentType: "application/json",
 				});
 				expect(
@@ -1510,13 +1579,20 @@ export async function createSyncFixture({
 		async function close() {
 			await test.info().attach("sync-diagnostics.json", {
 				body: JSON.stringify(
-					{ scenario, repositoryId, syncFailures, runtimeFailures },
+					{
+						scenario,
+						repositoryId,
+						syncFailures,
+						runtimeFailures,
+						analyticsStubFailures,
+					},
 					null,
 					2,
 				),
 				contentType: "application/json",
 			});
 			try {
+				expect(analyticsStubFailures).toEqual([]);
 				expect(syncFailures).toEqual([]);
 				expect(runtimeFailures).toEqual([]);
 			} finally {

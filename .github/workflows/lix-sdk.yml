@@ -32,7 +32,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
-          build-rust: "false"
 
       - name: Install dependencies without rebuilding the SDK
         run: pnpm install --filter lixray-repository --frozen-lockfile --ignore-scripts
