@@ -37,6 +37,7 @@ import {
 } from "~/components/repository-share-dialog";
 import { Button } from "~/components/ui/button";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
+import { useReviewThemeColor } from "~/lib/use-review-theme-color";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import {
@@ -220,6 +221,7 @@ export function RepositoryAtelier({
 			? accountId
 			: `public:${repositoryId}`;
 	const navigate = useNavigate();
+	const reviewThemeContainerRef = useReviewThemeColor();
 	const pathname = useRouterState({
 		select: (state) => state.location.pathname,
 	});
@@ -1259,6 +1261,7 @@ export function RepositoryAtelier({
 	return (
 		<div
 			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
+			ref={reviewThemeContainerRef}
 			aria-busy={!instance && !error}
 		>
 			{shellProps ? (
