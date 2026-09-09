@@ -1,5 +1,6 @@
 import {
 	Atelier,
+	useAtelierConnected,
 	type AtelierEvent,
 	type AtelierExtensionRuntime,
 	type AtelierExtensionRegistration,
@@ -120,11 +121,15 @@ function RepositoryRuntimeBridge({
 	onReady: (runtime: RepositoryAtelierHandle) => void;
 	children: React.ReactNode;
 }) {
+	const connected = useAtelierConnected();
 	const latest = useRef(runtime);
 	useLayoutEffect(() => {
 		latest.current = runtime;
 	}, [runtime]);
 	useEffect(() => {
+		// Prepared views render before their borrowed live session connects.
+		// Route commands can require queries absent from that prepared snapshot.
+		if (!connected) return;
 		// Methods delegate to the current extension runtime as the shell rerenders.
 		onReady({
 			get lix() {
@@ -137,7 +142,7 @@ function RepositoryRuntimeBridge({
 				return latest.current.views;
 			},
 		});
-	}, [onReady]);
+	}, [connected, onReady]);
 	return children;
 }
 
