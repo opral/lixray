@@ -28,28 +28,30 @@ test("Account tokens have generated names, creation dates and independent deleti
 		const client = getBrowserSupabaseClient();
 		const { data, error } = await client.rpc("bootstrap_personal_namespace");
 		if (error || !data?.[0]) throw new Error("Local account bootstrap failed");
-		const id = crypto.randomUUID();
-		const otherId = crypto.randomUUID();
-		const result = await client.from("lixes").insert([
-			{
-				id,
-				namespace_id: data[0].namespace_id,
-				name: "API token test",
-				slug: `api-token-${id}`,
-			},
-			{
-				id: otherId,
-				namespace_id: data[0].namespace_id,
-				name: "Other API token test",
-				slug: `api-token-${otherId}`,
-			},
-		]);
-		if (result.error) throw new Error("Test repository creation failed");
+		const {
+			data: { session },
+		} = await client.auth.getSession();
+		if (!session) throw new Error("Local session required");
+		async function create(name: string) {
+			const response = await fetch("/lix/v1", {
+				method: "POST",
+				headers: {
+					authorization: `Bearer ${session!.access_token}`,
+					"idempotency-key": crypto.randomUUID(),
+					"x-lixray-namespace-id": data![0]!.namespace_id,
+					"x-lixray-repository-name": encodeURIComponent(name),
+				},
+			});
+			if (!response.ok)
+				throw new Error(
+					`Test repository creation failed: ${response.status} ${await response.text()}`,
+				);
+			return ((await response.json()) as { id: string }).id;
+		}
 		return {
-			lixId: id,
-			otherId,
+			lixId: await create("API token test"),
+			otherId: await create("Other API token test"),
 			namespace: data[0].namespace_handle,
-			slug: `api-token-${id}`,
 		};
 	});
 	const createdIds = [lixId, otherId];
@@ -87,13 +89,6 @@ test("Account tokens have generated names, creation dates and independent deleti
 				.getAttribute("datetime"),
 		).toBeTruthy();
 		expect(first).toMatch(/^lixray_pat_[0-9a-f]{64}$/);
-		for (const id of [lixId, otherId]) {
-			const provision = await request.post(
-				`/api/repositories/${id}/provision`,
-				{ headers: { Authorization: `Bearer ${first}` } },
-			);
-			expect(provision.ok(), await provision.text()).toBe(true);
-		}
 		const otherRepo = await request.get(`/lix/v1/${otherId}/`, {
 			headers: {
 				Authorization: `Bearer ${first}`,
@@ -329,7 +324,17 @@ test("Account tokens have generated names, creation dates and independent deleti
 			const { data: tokens } = await client.rpc("list_api_tokens");
 			for (const token of tokens ?? [])
 				await client.rpc("delete_api_token", { p_token_id: token.id });
-			for (const id of ids) await client.rpc("delete_lix", { p_lix_id: id });
+			const {
+				data: { session },
+			} = await client.auth.getSession();
+			for (const id of ids) {
+				const response = await fetch(`/lix/v1/${id}`, {
+					method: "DELETE",
+					headers: { authorization: `Bearer ${session?.access_token}` },
+				});
+				if (!response.ok)
+					throw new Error(`Test repository cleanup failed: ${response.status}`);
+			}
 		}, createdIds);
 	}
 });

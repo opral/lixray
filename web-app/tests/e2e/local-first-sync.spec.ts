@@ -2,9 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Request } from "@playwright/test";
 
 // Match protocol paths, not Vite /@fs/.../vendor/lix/... module assets.
-const protocolRequests = (url: URL) =>
-	url.pathname.startsWith("/lix/") ||
-	/^\/api\/repositories\/[^/]+\/provision$/.test(url.pathname);
+const protocolRequests = (url: URL) => url.pathname.startsWith("/lix/");
 
 // Runs in the default Compose suite against the seeded development account and
 // the actual browser SDK/OPFS implementation, with no external preview flags.
@@ -40,14 +38,29 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		const namespace = provisioned.data[0];
 		if (!namespace)
 			throw new Error("Development namespace was not provisioned");
-		const id = crypto.randomUUID();
-		const inserted = await client
+		const response = await fetch("/lix/v1", {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${signedIn.data.session.access_token}`,
+				"idempotency-key": crypto.randomUUID(),
+				"x-lixray-namespace-id": namespace.namespace_id,
+				"x-lixray-repository-name": encodeURIComponent(slug),
+			},
+		});
+		if (!response.ok)
+			throw new Error(
+				`Repository creation failed: ${response.status} ${await response.text()}`,
+			);
+		const { id } = (await response.json()) as { id: string };
+		const metadata = await client
 			.from("lixes")
-			.insert({ id, namespace_id: namespace.namespace_id, name: slug, slug });
-		if (inserted.error) throw inserted.error;
+			.select("slug")
+			.eq("id", id)
+			.single();
+		if (metadata.error) throw metadata.error;
 		return {
 			id,
-			path: `/@${namespace.namespace_handle}/${slug}`,
+			path: `/@${namespace.namespace_handle}/${metadata.data.slug}`,
 			token: signedIn.data.session.access_token,
 		};
 	}, prefix);
@@ -56,11 +69,6 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		Authorization: `Bearer ${repository.token}`,
 		"Lix-Server-Protocol-Version": "7",
 	};
-	const provisioned = await context.request.post(
-		new URL(`/api/repositories/${repository.id}/provision`, baseURL).toString(),
-		{ headers },
-	);
-	expect(provisioned.ok(), await provisioned.text()).toBe(true);
 	const opened = await context.request.get(endpoint.toString(), { headers });
 	expect(opened.status(), await opened.text()).toBe(200);
 	const { sessionId } = (await opened.json()) as { sessionId: string };
@@ -212,5 +220,10 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		await context.request.delete(new URL("session", endpoint).toString(), {
 			headers: { ...headers, "Lix-Session-Id": sessionId },
 		});
+		await page.goto("/home");
+		const deleted = await context.request.delete(endpoint.toString(), {
+			headers,
+		});
+		expect(deleted.status()).toBe(204);
 	}
 });
