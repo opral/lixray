@@ -534,10 +534,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 					exact: true,
 				});
 				await homeTab.waitFor({ timeout: 120_000 });
-				// Pinned Atelier tabs are sortable and expose aria-disabled while
-				// remaining selectable. Bypass Playwright's disabled actionability
-				// check so the test follows the same pointer activation path.
-				await homeTab.click({ force: true });
+				await homeTab.click();
 			}
 			await newButton.or(gettingStarted).first().waitFor({ timeout: 120_000 });
 		};
@@ -748,6 +745,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			});
 			await exitHistory.click();
 			await expect(exitHistory).not.toBeVisible();
+			// Closing review restores a prior tab (including SQL from the entry
+			// tour). Keep the receiving client's live Home open for discovery.
+			await left.getByRole("button", { name: "Home", exact: true }).click();
+			await expect(left.getByTestId("home-entry-list")).toBeVisible();
 		}
 		// Let bootstrap and historical-view hydration finish before attributing
 		// any later blob payload to realtime work.
