@@ -1,0 +1,75 @@
+import assert from "node:assert/strict";
+import { mkdtemp, writeFile, readFile, rm, access } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import test from "node:test";
+
+const script = resolve(import.meta.dirname, "provision-preview-repositories.sh");
+for (const [name, failure, expected] of [
+  ["success", "none", 0],
+  ["operator failure", "operator", 17],
+  ["registration response failure", "register", 19],
+  ["revocation failure", "revoke", 1],
+]) {
+  test(`ephemeral SSH identity cleanup runs after ${name}`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lixray-ssh-test-"));
+    try {
+      const calls = join(dir, "calls.jsonl");
+      const railway = join(dir, "railway");
+      await writeFile(
+        railway,
+        `#!${process.execPath}
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.MOCK_CALLS, JSON.stringify(args) + '\\n');
+if (args[2] === 'add') {
+  const file = args[args.indexOf('--key') + 1];
+  if (!fs.readFileSync(file, 'utf8').startsWith('ssh-ed25519 ')) process.exit(31);
+  if (process.env.MOCK_FAILURE === 'register') process.exit(19);
+} else if (args[2] === 'remove' && process.env.MOCK_FAILURE === 'revoke') {
+  process.exit(23);
+} else if (args[1] !== 'keys') {
+  const file = args[args.indexOf('--identity-file') + 1];
+  if (!fs.existsSync(file)) process.exit(32);
+  if (process.env.MOCK_FAILURE === 'operator') process.exit(17);
+}
+`,
+        { mode: 0o700 },
+      );
+      const result = spawnSync("bash", [script], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          RAILWAY_BIN: railway,
+          RAILWAY_API_TOKEN: "fixture-token",
+          RAILWAY_PROJECT_ID: "project",
+          RAILWAY_TARGET_ENVIRONMENT: "preview",
+          RAILWAY_WEB_SERVICE: "web",
+          MOCK_CALLS: calls,
+          MOCK_FAILURE: failure,
+        },
+      });
+      assert.equal(result.status, expected, result.stderr);
+      const recorded = (await readFile(calls, "utf8")).trim().split("\n").map(JSON.parse);
+      const added = recorded.find((args) => args[2] === "add");
+      const removed = recorded.find((args) => args[2] === "remove");
+      assert.ok(added);
+      assert.match(removed?.[3] ?? "", /^SHA256:/);
+      assert.equal(recorded.at(-1)[2], "remove");
+      const publicKey = added[added.indexOf("--key") + 1];
+      await assert.rejects(access(publicKey));
+      await assert.rejects(access(publicKey.slice(0, -4)));
+      if (failure !== "register") {
+        const command = recorded.find((args) => args.includes("--identity-file"));
+        assert.deepEqual(command.slice(-3), [
+          "node",
+          "/app/web-app/scripts/provision-repositories.mjs",
+          "create-new",
+        ]);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}

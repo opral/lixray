@@ -660,8 +660,7 @@ jobs:
         if: steps.credentials.outputs.available == 'true'
         env:
           RAILWAY_TARGET_ENVIRONMENT: ${{ steps.environment.outputs.environment_id }}
-        run: |
-          railway ssh --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_TARGET_ENVIRONMENT" --service "$RAILWAY_WEB_SERVICE" -- node /app/web-app/scripts/provision-repositories.mjs create-new
+        run: .github/scripts/provision-preview-repositories.sh
 
       - name: Publish preview URL
         if: steps.credentials.outputs.available == 'true'
