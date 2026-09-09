@@ -131,12 +131,33 @@ export default defineConfig(({ command }) => ({
 				: undefined,
 	},
 	optimizeDeps: {
+		// Linked workspace routes and lazy repository views are not HTML entries.
+		// Scan them before serving the first browser page.
+		entries:
+			command === "serve"
+				? ["src/routes/**/*.{ts,tsx}", "src/components/repository-atelier.tsx"]
+				: undefined,
 		// Snapshot sessions are intentionally lost on reload. Pre-bundle the
 		// linked Atelier editors before first use so dependency discovery cannot
 		// trigger an "optimized dependencies changed" reload after opening one.
 		include:
 			command === "serve"
 				? [
+						"sonner",
+						"clsx",
+						"tailwind-merge",
+						"lucide-react",
+						"jose",
+						"@supabase/supabase-js",
+						"class-variance-authority",
+						"radix-ui",
+						"fflate",
+						"marked",
+						"react-aria-components",
+						"@opral/atelier > @tiptap/pm/schema-list",
+						"@opral/atelier > @tiptap/pm/model",
+						"@opral/atelier > roughjs",
+						"@opral/atelier > perfect-freehand",
 						"@opral/atelier > @dnd-kit/core",
 						"@opral/atelier > @dnd-kit/sortable",
 						"@opral/atelier > @dnd-kit/utilities",
