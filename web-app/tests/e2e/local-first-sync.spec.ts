@@ -159,6 +159,8 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		await page.reload();
 		// Request interception disables HTTP caching. CI must reload Vite's
 		// module graph and WASM before the persisted local replica can open.
+		// Reload restores the file route. Navigate Home to inspect the moved tree.
+		await page.getByRole("button", { name: "Home", exact: true }).click();
 		await expect(row(target)).toBeVisible({ timeout: 30_000 });
 		await row(target).click();
 		await expect(row(source)).toBeVisible();
