@@ -93,16 +93,18 @@ select lives_ok(
 	'the owner bootstraps a personal namespace'
 );
 
+reset role;
 select lives_ok(
 	$$insert into public.lixes (id, namespace_id, name, slug)
 	values (
 		'40000000-0000-0000-0000-000000000001',
-		(select namespace_id from public.list_accessible_lixes() limit 1),
+		(select primary_namespace_id from public.accounts where id='20000000-0000-0000-0000-000000000001'),
 		'MCP Repository',
 		'mcp-repository'
 	)$$,
 	'the owner explicitly creates a repository to connect'
 );
+set local role authenticated;
 
 select throws_ok(
 	$$select public.record_mcp_lix_connection(

@@ -1,4 +1,3 @@
-import { provisionLixService } from "./worker/repository-provisioning";
 import process from "node:process";
 import startHandler from "@tanstack/react-start/server-entry";
 import { addGoogleAnalytics } from "./lib/google-analytics";
@@ -23,8 +22,6 @@ export default {
 		ctx?.passThroughOnException();
 		return handleRequest(request, runtimeEnv, {
 			executionContext: ctx,
-			provisionLix: (lixId, token, accountId) =>
-				provisionLixService(runtimeEnv, lixId, token, accountId),
 			lixFetch: (lixId, lixRequest) =>
 				fetchLixService(runtimeEnv, lixId, lixRequest),
 			fallback: async (fallbackRequest) => {

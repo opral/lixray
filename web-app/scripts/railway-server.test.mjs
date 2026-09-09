@@ -239,3 +239,21 @@ test("a response body erroring mid-stream does not crash the process", async () 
 	);
 	assert.ok(result === "aborted" || result === "completed");
 });
+
+// Railway terminates TLS before forwarding to Node. Lifecycle descriptors must
+// retain the caller's HTTPS origin rather than advertise an HTTP repository.
+test("preserves HTTPS behind the Railway proxy when generating a repository URL", async () => {
+	const response = await withServer(
+		async (request) =>
+			Response.json({ url: new URL("/lix/repository", request.url).href }),
+		(origin) =>
+			fetch(`${origin}/lix/v1`, {
+				method: "POST",
+				headers: { "x-forwarded-proto": "https" },
+			}),
+	);
+	assert.match(
+		(await response.json()).url,
+		/^https:\/\/127\.0\.0\.1:\d+\/lix\/repository$/,
+	);
+});

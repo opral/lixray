@@ -1,3 +1,4 @@
+import { deleteHostedRepository } from "./repository-delete.ts";
 import { handleFileSharing } from "./repository-file-sharing.ts";
 import { createHostedRepository } from "./repository-create.ts";
 import { validateMcpJwtClaims } from "../mcp/auth.ts";
@@ -144,11 +145,6 @@ interface HandleRequestOptions {
 	) => Promise<NamespaceMembershipResolution>;
 	mcpTransport?: typeof handleMcpTransport;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
-	provisionLix?: (
-		lixId: string,
-		token: string,
-		accountId: string,
-	) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	fetch?: typeof fetch;
@@ -345,54 +341,6 @@ export async function handleRequest(
 		return withRemoteLixCors(
 			await createHostedRepository(request, env, auth.auth, options.fetch),
 			request,
-		);
-	}
-
-	const provisionMatch =
-		/^\/api\/repositories\/([0-9a-f-]{36})\/provision$/.exec(url.pathname);
-	if (provisionMatch) {
-		if (request.method !== "POST")
-			return new Response("Method not allowed", { status: 405 });
-		const candidate = bearerToken(request);
-		if (candidate?.startsWith("lixray_pat_")) {
-			const result = await authorizeApiToken(
-				candidate,
-				provisionMatch[1],
-				env,
-				options.fetch,
-			);
-			if (!result.ok) return result.response;
-			if (!options.provisionLix)
-				return new Response("Repository provisioning is not configured", {
-					status: 503,
-				});
-			return options.provisionLix(
-				provisionMatch[1],
-				candidate,
-				result.account.id,
-			);
-		}
-		const auth = await (options.authenticate ?? authenticateWithSupabase)(
-			request,
-			env,
-		);
-		if (!auth.ok) return auth.response;
-		const denied = await (options.authorizeLix ?? authorizeLixWithSupabase)(
-			provisionMatch[1],
-			auth.auth,
-			env,
-		);
-		if (denied) return denied;
-		// Fixed demo stores are explicitly provisioned by deployment tooling.
-		if (auth.auth.isDemo) return Response.json({ id: provisionMatch[1] });
-		if (!options.provisionLix)
-			return new Response("Repository provisioning is not configured", {
-				status: 503,
-			});
-		return options.provisionLix(
-			provisionMatch[1],
-			auth.auth.token,
-			auth.auth.userId,
 		);
 	}
 
@@ -640,20 +588,6 @@ export async function handleRequest(
 				{
 					signal: request.signal,
 					lixFetch: options.lixFetch,
-					provisionLix: options.provisionLix
-						? async (lixId) => {
-								const denied = await authorizeLix(lixId, authResult.auth, env);
-								if (denied) throw new Error("Repository access required");
-								if (authResult.auth.isDemo) return;
-								const response = await options.provisionLix!(
-									lixId,
-									authResult.auth.token,
-									authResult.auth.userId,
-								);
-								if (!response.ok)
-									throw new Error("Repository provisioning failed");
-							}
-						: undefined,
 					lixSummaries:
 						options.lixSummaries ??
 						(isDemoMode(env) ? demoLixSummaries(env) : undefined),
@@ -909,6 +843,32 @@ export async function handleRequest(
 	const remoteLixMatch = REMOTE_LIX_API_PATH.exec(url.pathname);
 	if (remoteLixMatch) {
 		if (request.method === "OPTIONS") return remoteLixCorsPreflight(request);
+		if (
+			request.method === "DELETE" &&
+			!remoteLixMatch[2]?.replace(/\/+$/, "")
+		) {
+			const auth = await (
+				options.authenticate ??
+				((request, env) =>
+					authenticateRepositoryClient(request, env, options.fetch))
+			)(request, env);
+			if (!auth.ok) return withRemoteLixCors(auth.response, request);
+			if (auth.auth.isDemo)
+				return withRemoteLixCors(
+					new Response("Sign in to delete a repository", { status: 403 }),
+					request,
+				);
+			return withRemoteLixCors(
+				await deleteHostedRepository(
+					request,
+					remoteLixMatch[1],
+					env,
+					auth.auth,
+					options.fetch,
+				),
+				request,
+			);
+		}
 		const response = await (async () => {
 			const serverTimings: ServerTimingMetric[] = [];
 			const lixId = remoteLixMatch[1];
@@ -2513,7 +2473,7 @@ function remoteLixCorsPreflight(request: Request): Response {
 			"access-control-allow-credentials": "true",
 			"access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
 			"access-control-allow-headers":
-				"Authorization, Content-Type, Content-Encoding, Content-Range, Idempotency-Key, Lix-Client-Id, Lix-Session-Id, Lix-Server-Protocol-Version, Lix-Sync-Protocol-Version, Lix-Transaction-Id, Lix-Upload-Id, Last-Event-ID, Range, X-Lixray-Public-Path",
+				"Authorization, Content-Type, Content-Encoding, Content-Range, Idempotency-Key, Lix-Client-Id, Lix-Session-Id, Lix-Server-Protocol-Version, Lix-Sync-Protocol-Version, Lix-Transaction-Id, Lix-Upload-Id, Last-Event-ID, Range, X-Lixray-Public-Path, X-Lixray-Namespace-Id, X-Lixray-Repository-Name",
 			"access-control-max-age": "86400",
 			vary: "Origin",
 		},

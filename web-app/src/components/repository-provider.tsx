@@ -1,4 +1,4 @@
-import { provisionRepository } from "~/lib/provision-repository";
+import { createLix, deleteLix } from "@lix-js/sdk";
 import {
 	createContext,
 	type ReactNode,
@@ -325,26 +325,34 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 				);
 			}
 			const normalizedName = normalizeName(name, "Repository");
-			const repositoryId = crypto.randomUUID();
-			const { error: createError } = await client.from("lixes").insert({
-				id: repositoryId,
-				namespace_id: targetOrganization.id,
-				name: normalizedName,
-				slug: repositorySlug(normalizedName),
-			});
-			if (createError) throw createError;
 			const {
 				data: { session },
 			} = await client.auth.getSession();
 			if (!session) throw new Error("Authentication required");
-			await provisionRepository(repositoryId, session.access_token);
+			// Keep the key across retries, including reloads after a lost response.
+			const intentKey = `lixray:create:${accountId}:${targetOrganization.id}:${normalizedName}`;
+			const idempotencyKey =
+				window.localStorage.getItem(intentKey) ?? crypto.randomUUID();
+			window.localStorage.setItem(intentKey, idempotencyKey);
+			const { id: repositoryId } = await createLix({
+				server: {
+					url: window.location.origin,
+					headers: {
+						authorization: `Bearer ${session.access_token}`,
+						"x-lixray-namespace-id": targetOrganization.id,
+						"x-lixray-repository-name": encodeURIComponent(normalizedName),
+					},
+				},
+				idempotencyKey,
+			});
+			window.localStorage.removeItem(intentKey);
 			await refresh({
 				organizationId: targetOrganization.id,
 				repositoryId,
 			});
 			captureTelemetry(PRODUCT_EVENTS.repositoryCreated);
 		},
-		[client, organizations, refresh, selectedOrganization],
+		[accountId, client, organizations, refresh, selectedOrganization],
 	);
 
 	const renameRepository = useCallback(
@@ -391,10 +399,16 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 			if (repository.role !== "admin") {
 				throw new Error("Repository admin access required");
 			}
-			const { error: deleteError } = await client.rpc("delete_lix", {
-				p_lix_id: repositoryId,
+			const {
+				data: { session },
+			} = await client.auth.getSession();
+			if (!session) throw new Error("Authentication required");
+			await deleteLix({
+				server: {
+					url: new URL(`/lix/${repositoryId}`, window.location.origin).href,
+					headers: { authorization: `Bearer ${session.access_token}` },
+				},
 			});
-			if (deleteError) throw deleteError;
 			await refresh();
 			captureTelemetry(PRODUCT_EVENTS.repositoryDeleted);
 		},

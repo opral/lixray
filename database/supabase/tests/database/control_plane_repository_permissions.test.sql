@@ -47,6 +47,10 @@ select lives_ok(
 	$$select * from public.bootstrap_personal_namespace()$$,
 	'an admin can bootstrap a repository'
 );
+reset role;
+insert into public.lixes(namespace_id,name,slug) select primary_namespace_id,'repository','repository' from public.accounts where id='71000000-0000-0000-0000-000000000001';
+set local role authenticated;
+
 
 select results_eq(
 	$$select role from public.list_lix_members(
@@ -291,7 +295,7 @@ select set_config(
 	'{"sub":"71000000-0000-0000-0000-000000000001","role":"authenticated"}',
 	true
 );
-select results_eq(
+select throws_ok(
 	$$with inserted as (
 		insert into public.lixes (id, namespace_id, name, slug)
 		values (
@@ -304,8 +308,8 @@ select results_eq(
 		returning id
 	)
 	select id from inserted$$,
-	$$values ('72000000-0000-0000-0000-000000000001'::uuid)$$,
-	'an authenticated namespace member can create and return a repository row'
+	'42501', 'permission denied for table lixes',
+	'an authenticated namespace member must create through the protocol'
 );
 
 select * from finish();

@@ -34,7 +34,7 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 
 			const requestUrl = new URL(
 				incoming.url ?? "/",
-				`http://${incoming.headers.host ?? "localhost"}`,
+				`${incoming.headers["x-forwarded-proto"] === "https" ? "https" : "http"}://${incoming.headers.host ?? "localhost"}`,
 			);
 			const method = incoming.method ?? "GET";
 			const request = new Request(requestUrl, {

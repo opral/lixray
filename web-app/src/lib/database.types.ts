@@ -569,7 +569,6 @@ export type Database = {
 					profile_uri: string;
 				}[];
 			};
-			delete_lix: { Args: { p_lix_id: string }; Returns: undefined };
 			get_lix_invite_link: { Args: { p_lix_id: string }; Returns: string };
 			get_namespace_invite_link: {
 				Args: { p_namespace_id: string };

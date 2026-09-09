@@ -180,10 +180,12 @@ try {
       ('${otherClient}','','dynamic','${redirect}','authorization_code,refresh_token','Wrong client regression','public','none');
     insert into auth.oauth_consents(id,user_id,client_id,scopes) values('${randomUUID()}','${user}','${client}','${scope}');`);
 
-	// Bootstrap through the interactive identity, producing one private repository.
+	// Bootstrap the identity, then explicitly seed repository metadata for this auth test.
 	sql(`begin; set local role authenticated;
 		select set_config('request.jwt.claims','{"sub":"${user}","role":"authenticated"}',true);
 		select * from public.bootstrap_personal_namespace(); commit;`);
+    sql(`insert into public.lixes(namespace_id,name,slug)
+        select primary_namespace_id,'OAuth fixture','oauth-fixture' from public.accounts where id='${user}';`);
 
 	const first = seedAuthorization();
 	const ambiguous = seedAuthorization(otherResource);

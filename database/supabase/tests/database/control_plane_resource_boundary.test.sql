@@ -37,7 +37,7 @@ select is((select count(*) from public.list_accessible_lixes()), 0::bigint, 'lis
 select is((select count(*) from public.resolve_public_lix('84000000-0000-4000-8000-000000000011')), 0::bigint, 'ID resolver hides private metadata from foreign resource');
 select is((select count(*) from public.resolve_public_lix_by_route(current_setting('test.boundary_handle'), 'boundary-private')), 0::bigint, 'route resolver hides private metadata from foreign resource');
 select is((select count(*) from public.list_lix_publications('84000000-0000-4000-8000-000000000011')), 0::bigint, 'publication management list rejects foreign resource');
-select throws_ok($$select public.delete_lix('84000000-0000-4000-8000-000000000011')$$, 'P0001', 'Authentication required', 'foreign resource cannot delete a repository');
+select throws_ok($$select public.delete_lix('84000000-0000-4000-8000-000000000011')$$, '42883', null, 'metadata-only deletion API is unavailable');
 select results_eq($$select can_edit, role, path_public from public.resolve_public_lix('84000000-0000-4000-8000-000000000011', '/public_%/readme.md')$$, $$values (false, null::public.lix_role, true)$$, 'foreign resource retains public reads without private role or edit authority');
 
 set local request.jwt.claims = '{"sub":"84000000-0000-4000-8000-000000000001","role":"authenticated","client_id":"missing","lixray_mcp":true}';
