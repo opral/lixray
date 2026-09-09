@@ -40,7 +40,6 @@ jobs:
       e2e: ${{ steps.classify.outputs.e2e }}
       deploy: ${{ steps.classify.outputs.deploy }}
       tooling: ${{ steps.classify.outputs.tooling }}
-      preview_e2e: ${{ steps.classify.outputs.preview_e2e }}
 
     steps:
       - name: Check out pull request merge
@@ -372,7 +371,7 @@ jobs:
       - server-image
     if: github.event.pull_request.draft != true && needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
       packages: read
@@ -426,6 +425,17 @@ jobs:
         env:
           LIXRAY_SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
         run: pnpm --dir web-app exec playwright test
+
+      - name: Test multi-tab sync against local Compose
+        env:
+          LIXRAY_SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
+          PLAYWRIGHT_SYNC_LOCAL: "1"
+          LIXRAY_DEMO: "1"
+          VITE_LIXRAY_DEMO: "1"
+          LIXRAY_STORAGE_PREFIX: ci-sync
+          LIXRAY_LIX_SERVICE_URL: http://127.0.0.1:18080
+          LIXRAY_INTERNAL_TOKEN: lixray-local-internal-token
+        run: pnpm --dir web-app exec playwright test tests/e2e/sync-preview.spec.ts
 
       - name: Report Compose failure diagnostics
         if: failure()
@@ -761,100 +771,3 @@ jobs:
     steps:
       - name: Publish GitHub deployment
         run: echo "Preview is available at ${{ needs.deploy-preview.outputs.preview_url }}"
-
-  preview-e2e:
-    name: Preview sync E2E
-    if: >-
-      !cancelled() &&
-      needs.changes.outputs.preview_e2e == 'true' &&
-      needs.deploy-preview.result == 'success' &&
-      needs.deploy-preview.outputs.preview_url != '' &&
-      needs.deploy-preview.outputs.deployment_id != ''
-    needs:
-      - changes
-      - deploy-preview
-      - web-image
-      - server-image
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Identify the exact preview validation inputs
-        id: identity
-        env:
-          PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
-          DEPLOYMENT_ID: ${{ needs.deploy-preview.outputs.deployment_id }}
-          SERVER_DEPLOYMENT_ID: ${{ needs.deploy-preview.outputs.server_deployment_id }}
-          WEB_IMAGE: ${{ needs.web-image.outputs.image }}
-          SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
-        run: node .github/scripts/preview-validation-key.mjs
-
-      - name: Restore a recent successful validation
-        id: previous
-        if: github.run_attempt == 1
-        uses: actions/cache/restore@v4
-        with:
-          path: .ci-preview-validation
-          key: ${{ steps.identity.outputs.key }}
-
-      - name: Set up pnpm
-        if: steps.previous.outputs.cache-hit != 'true'
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Set up Node.js
-        if: steps.previous.outputs.cache-hit != 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install dependencies
-        if: steps.previous.outputs.cache-hit != 'true'
-        # This job drives an already-built remote preview. Running the repository
-        # postinstall here rebuilds the vendored Lix WASM SDK and can consume the
-        # entire job timeout without adding anything Playwright needs.
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Install Playwright browser
-        if: steps.previous.outputs.cache-hit != 'true'
-        run: pnpm --dir web-app exec playwright install --with-deps chromium
-
-      - name: Test deployed two-client sync
-        if: steps.previous.outputs.cache-hit != 'true'
-        env:
-          PLAYWRIGHT_BASE_URL: ${{ needs.deploy-preview.outputs.preview_url }}
-          PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID: ${{ needs.deploy-preview.outputs.deployment_id }}
-          PLAYWRIGHT_SYNC_PREVIEW: "1"
-        run: pnpm --dir web-app exec playwright test tests/e2e/sync-preview.spec.ts
-
-      - name: Record successful validation
-        if: success() && steps.previous.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p .ci-preview-validation
-          echo passed > .ci-preview-validation/passed
-
-      - name: Save successful validation for unchanged previews
-        if: success() && steps.previous.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .ci-preview-validation
-          key: ${{ steps.identity.outputs.key }}
-
-      - name: Upload Playwright profile and failure artifacts
-        if: always() && steps.previous.outputs.cache-hit != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: preview-sync-playwright
-          path: web-app/test-results
-          if-no-files-found: ignore
-          retention-days: 7

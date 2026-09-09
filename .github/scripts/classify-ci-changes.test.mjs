@@ -8,7 +8,6 @@ const all = {
   database: true,
   e2e: true,
   deploy: true,
-  preview_e2e: true,
   tooling: true,
 };
 
@@ -20,7 +19,6 @@ test("documentation-only changes skip expensive validation lanes", () => {
       database: false,
       e2e: false,
       deploy: false,
-      preview_e2e: false,
       tooling: false,
     },
   );
@@ -32,7 +30,6 @@ test("web changes run frontend and end-to-end validation", () => {
     database: false,
     e2e: true,
   deploy: true,
-  preview_e2e: true,
   tooling: false,
   });
 });
@@ -43,7 +40,6 @@ test("database changes run database and end-to-end validation", () => {
     database: true,
     e2e: true,
   deploy: true,
-  preview_e2e: true,
   tooling: false,
   });
 });
@@ -54,7 +50,6 @@ test("vendored Lix changes cover its remaining frontend consumers", () => {
     database: false,
     e2e: true,
   deploy: true,
-  preview_e2e: true,
   tooling: true,
   });
 });
@@ -70,7 +65,6 @@ test("multiple changes union their required lanes", () => {
     database: true,
     e2e: true,
   deploy: true,
-  preview_e2e: true,
   tooling: false,
   });
 });
@@ -80,7 +74,7 @@ test("icon metadata and artwork deploy without integration tests", () => {
     "web-app/src/pwa-icons.json", "web-app/public/lixray-icon-192-deadbeef.png",
     "web-app/public/manifest.webmanifest",
   ], { manifestIconsOnly: true }), {
-    frontend: false, database: false, e2e: false, deploy: true, preview_e2e: false, tooling: false,
+    frontend: false, database: false, e2e: false, deploy: true, tooling: false,
   });
 });
 
@@ -119,7 +113,7 @@ test("database validation follows SQL and its pinned runner, not the JS lockfile
 
 test("performance tooling changes need no application build", () => {
   assert.deepEqual(classifyCiChanges(["perf/runner.mjs"]), {
-    frontend: false, database: false, e2e: false, deploy: false, preview_e2e: false, tooling: true,
+    frontend: false, database: false, e2e: false, deploy: false, tooling: true,
   });
   assert.equal(classifyCiChanges(["web-app/src/start.ts"]).tooling, false);
   assert.equal(classifyCiChanges(["scripts/dev.mjs"]).tooling, true);

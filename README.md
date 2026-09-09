@@ -351,6 +351,19 @@ is unset, the deployment adapter preserves the existing
 `railway/$RAILWAY_ENVIRONMENT_ID` object layout. Preview environments never
 inherit production Supabase credentials.
 
+### Sync validation
+
+The required E2E job runs the exhaustive multi-tab sync and checkpoint-history
+suite against loopback Compose services in demo mode, with isolated `ci-sync`
+storage. All convergence, runtime-error, and protocol cache-header assertions
+remain strict. This avoids making sync correctness depend on Railway edge
+availability during a long browser session.
+
+Railway previews retain the bounded protocol and PWA-asset smoke checks after
+deployment. The exhaustive remote test remains available for diagnostics by
+setting `PLAYWRIGHT_SYNC_PREVIEW=1`, `PLAYWRIGHT_BASE_URL`, and
+`PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID`; it is no longer a PR gate.
+
 ### Fast pull request previews
 
 CI-managed Railway environments named `lixray-pr-*` run in demo mode. The

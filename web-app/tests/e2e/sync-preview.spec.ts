@@ -5,21 +5,32 @@ import {
 	type Request,
 	test,
 } from "@playwright/test";
+import { provisionRepositories } from "../../scripts/provision-repositories.mjs";
 
 const DEMO_LIX_ID = "00000000-0000-4000-8000-000000000002";
 
-test("deployed OPFS tabs share one replica and sync files, editors, and hot checkpoint history", async ({
+test("OPFS tabs share one replica and sync files, editors, and hot checkpoint history", async ({
 	browser,
 	baseURL,
 }) => {
 	test.setTimeout(600_000);
+	const local = process.env.PLAYWRIGHT_SYNC_LOCAL === "1";
 	test.skip(
-		!process.env.PLAYWRIGHT_SYNC_PREVIEW,
-		"requires a deployed preview",
+		!local && !process.env.PLAYWRIGHT_SYNC_PREVIEW,
+		"requires the local sync stack or an explicitly selected deployed preview",
 	);
-	if (!baseURL) throw new Error("PLAYWRIGHT_BASE_URL is required");
+	if (!baseURL) throw new Error("Playwright baseURL is required");
 	const expectedDeploymentId = process.env.PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID;
-	if (!expectedDeploymentId) {
+	if (local) {
+		// This mode provisions disposable demo repositories. Never let a local
+		// CI invocation accidentally mutate a remote service or deployment.
+		const loopback = (url: string) =>
+			["127.0.0.1", "localhost", "[::1]"].includes(new URL(url).hostname);
+		const serviceUrl = process.env.LIXRAY_LIX_SERVICE_URL;
+		if (!loopback(baseURL) || !serviceUrl || !loopback(serviceUrl)) {
+			throw new Error("Local sync requires loopback web and Lix service URLs");
+		}
+	} else if (!expectedDeploymentId) {
 		throw new Error("PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID is required");
 	}
 
@@ -36,14 +47,61 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		new URL("/healthz", baseURL).toString(),
 	);
 	expect(healthResponse.status()).toBe(200);
-	expect(healthResponse.headers()["x-railway-deployment-id"]).toBe(
-		expectedDeploymentId,
-	);
-	expect(await healthResponse.json()).toMatchObject({
-		ok: true,
-		service: "lixray",
-		deploymentId: expectedDeploymentId,
-	});
+	if (local) {
+		expect(await healthResponse.json()).toMatchObject({ status: "ok" });
+		await (
+			provisionRepositories as (options: {
+				mode: "create-new";
+			}) => Promise<void>
+		)({ mode: "create-new" });
+		// A fresh fixture must exercise entering and immediately closing an older
+		// checkpoint, even when the local object store starts empty.
+		const endpoint = new URL(`/lix/v1/${DEMO_LIX_ID}/`, baseURL);
+		const authorization = {
+			Authorization: "Bearer lixray-demo",
+			"Lix-Server-Protocol-Version": "7",
+		};
+		const opened = await sharedContext.request.get(endpoint.toString(), {
+			headers: authorization,
+		});
+		expect(opened.ok()).toBe(true);
+		const { sessionId } = await opened.json();
+		const headers = { ...authorization, "Lix-Session-Id": sessionId };
+		try {
+			for (let index = 0; index < 2; index++) {
+				const checkpoint = await sharedContext.request.post(
+					new URL("execute", endpoint).toString(),
+					{
+						headers: {
+							...headers,
+							"Idempotency-Key": `local-fixture-${Date.now()}-${index}`,
+						},
+						data: {
+							sql: "SELECT commit_id FROM lix_create_checkpoint()",
+							params: [],
+						},
+					},
+				);
+				expect(checkpoint.ok()).toBe(true);
+			}
+		} finally {
+			const closed = await sharedContext.request.delete(
+				new URL("session", endpoint).toString(),
+				{ headers },
+			);
+			expect(closed.ok()).toBe(true);
+		}
+	} else {
+		expect(healthResponse.headers()["x-railway-deployment-id"]).toBe(
+			expectedDeploymentId,
+		);
+		expect(await healthResponse.json()).toMatchObject({
+			ok: true,
+			service: "lixray",
+			deploymentId: expectedDeploymentId,
+		});
+	}
+
 	const cacheProbeUrl = new URL(
 		`/lix/v1/${DEMO_LIX_ID}/sync/pull?after=18446744073709551615&limit=512`,
 		baseURL,
@@ -69,9 +127,11 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 	}, cacheProbeUrl);
 	for (const probe of cacheProbes) {
 		expect(probe).toMatchObject({ status: 410, cacheControl: "no-store" });
-		expect(probe.requestId).toBeTruthy();
+		if (!local) expect(probe.requestId).toBeTruthy();
 	}
-	expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
+	if (!local) {
+		expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
+	}
 	const syncFailures: string[] = [];
 	const runtimeFailures: string[] = [];
 	let intentionallyOffline = false;
@@ -741,6 +801,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			0,
 			repositoryOperationTimeout,
 		);
+		if (local) expect(initialCheckpointCount).toBeGreaterThan(1);
 		if (initialCheckpointCount > 1) {
 			// A historical snapshot read must not monopolize the live repository
 			// after its view closes. Exit immediately, while cold content may still
@@ -785,6 +846,15 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			]),
 		);
 
+		// Returning from a historical view restores Home asynchronously. Its shell
+		// can be visible before the live file rows have arrived. Establish the
+		// same nonempty baseline in both tabs before measuring one new file.
+		await expect
+			.poll(async () => (await homeFileIds(right)).length)
+			.toBeGreaterThan(0);
+		await expect
+			.poll(() => homeFileIds(left))
+			.toEqual(await homeFileIds(right));
 		const fileIdsBeforeCreatedFile = await homeFileIds(left);
 		await right.getByTestId("home-new-button").click();
 		await right.getByTestId("home-create-file-md").click();

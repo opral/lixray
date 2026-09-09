@@ -140,11 +140,16 @@ test("vendored SDK cache keys track the exact Lix submodule revision", () => {
 	assert.match(webSetup, /steps\.lix-revision\.outputs\.revision/);
 });
 
-test("remote preview E2E skips Rust setup and targets visible editors", () => {
-	const preview = job("preview-e2e");
-	assert.match(preview, /uses: pnpm\/action-setup@v4/);
-	assert.match(preview, /uses: actions\/setup-node@v4/);
-	assert.doesNotMatch(preview, /\.\/\.github\/actions\/setup-web/);
+test("exhaustive sync runs locally without a Railway deployment", () => {
+	const local = job("e2e");
+	assert.match(local, /PLAYWRIGHT_SYNC_LOCAL: "1"/);
+	assert.match(local, /LIXRAY_DEMO: "1"/);
+	assert.match(local, /playwright test tests\/e2e\/sync-preview\.spec\.ts/);
+	assert.doesNotMatch(
+		local,
+		/PLAYWRIGHT_BASE_URL|PLAYWRIGHT_EXPECTED_DEPLOYMENT_ID/,
+	);
+	assert.doesNotMatch(workflow, /  preview-e2e:/);
 
 	const spec = readFileSync(
 		path.join(repositoryRoot, "web-app/tests/e2e/sync-preview.spec.ts"),

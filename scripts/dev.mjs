@@ -34,9 +34,10 @@ if (teardownRequested) {
 
 const devHost = process.env.LIXRAY_DEV_HOST?.trim() || "127.0.0.1";
 const devPort = process.env.LIXRAY_DEV_PORT?.trim() || "8787";
-const serverPort = "18080";
-const minioPort = "19000";
-const minioConsolePort = "19001";
+const serverPort = process.env.LIXRAY_SERVER_PORT?.trim() || "18080";
+const minioPort = process.env.LIXRAY_MINIO_PORT?.trim() || "19000";
+const minioConsolePort =
+	process.env.LIXRAY_MINIO_CONSOLE_PORT?.trim() || "19001";
 const internalToken = "lixray-local-internal-token";
 
 await assertPortAvailable(devHost, devPort);
