@@ -15,19 +15,24 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 }) => {
 	if (!baseURL) throw new Error("Playwright baseURL is required");
 	const prefix = `offline-${randomUUID()}`;
-	await page.goto("/");
+	await page.goto("/sign-in?returnTo=/home");
+	await page
+		.getByRole("button", { name: "Continue as local developer" })
+		.click();
+	await page.waitForURL("**/home");
+	await expect(
+		page.getByRole("button", { name: "Account menu" }),
+	).toBeVisible();
 	const repository = await page.evaluate(async (slug) => {
 		// Compose uses real Supabase authorization, unlike deployed demo previews.
 		// Load the app's configured client so the browser and setup requests share
 		// the same persisted development session and repository permissions.
 		const moduleUrl = "/src/lib/supabase.ts";
-		const { getBrowserSupabaseClient, localDevCredentials } = (await import(
+		const { getBrowserSupabaseClient } = (await import(
 			/* @vite-ignore */ moduleUrl
 		)) as typeof import("../../src/lib/supabase");
-		if (!localDevCredentials)
-			throw new Error("Compose development credentials are unavailable");
 		const client = getBrowserSupabaseClient();
-		const signedIn = await client.auth.signInWithPassword(localDevCredentials);
+		const signedIn = await client.auth.getSession();
 		if (signedIn.error || !signedIn.data.session)
 			throw signedIn.error ?? new Error("Development sign-in omitted session");
 		const provisioned = await client.rpc("bootstrap_personal_namespace");
@@ -129,8 +134,12 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		await expect(row("note.txt")).toBeVisible();
 		await page
 			.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			})
+			.click();
+		await page
+			.getByRole("complementary", { name: "Navigator", exact: true })
+			.getByRole("button", { name: "Working changes", exact: true })
 			.click();
 		const checkpointButton = page.getByRole("button", {
 			name: "Checkpoint",
@@ -144,16 +153,20 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		).toHaveCount(0, { timeout: 5_000 });
 		await expect(
 			page.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			}),
 		).toHaveCount(0);
 		await page.reload();
 		// Request interception disables HTTP caching. CI must reload Vite's
 		// module graph and WASM before the persisted local replica can open.
-		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
+		await expect(row(target)).toBeVisible({ timeout: 30_000 });
+		await row(target).click();
+		await expect(row(source)).toBeVisible();
+		await row(source).click();
+		await expect(row("note.txt")).toBeVisible();
 		await expect(
 			page.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			}),
 		).toHaveCount(0);
 		await context.unroute(protocolRequests);

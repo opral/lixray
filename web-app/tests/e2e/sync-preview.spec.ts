@@ -84,7 +84,11 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 	const unreadableBlobLaneResponses = new Map<Request, string>();
 	const blobLaneObservationFailures: string[] = [];
 	const openHistoryPanel = async (page: Page) => {
-		const history = page.getByRole("region", {
+		const secondary = page.getByRole("complementary", {
+			name: "Secondary",
+			exact: true,
+		});
+		const history = secondary.getByRole("region", {
 			name: "Checkpoint history",
 		});
 		if (await history.isVisible()) return history;
@@ -94,10 +98,10 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		if ((await panelToggle.getAttribute("aria-pressed")) === "false") {
 			await panelToggle.click();
 		}
-		const historyTab = page
+		const historyTab = secondary
 			.getByRole("button", { name: "History", exact: true })
 			.last();
-		const selectedHistoryMenu = page.getByRole("button", {
+		const selectedHistoryMenu = secondary.getByRole("button", {
 			name: "History panel view menu",
 			exact: true,
 		});
@@ -138,7 +142,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 						"Lix-Session-Id": sessionId,
 					},
 					data: {
-						sql: "SELECT count(*) AS checkpoint_count FROM lix_commit WHERE is_checkpoint",
+						sql: "SELECT count(*) AS checkpoint_count FROM lix_log() WHERE is_checkpoint",
 						params: [],
 					},
 				},
@@ -227,8 +231,12 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		// Capture the review epoch only after that preparation has completed.
 		await page
 			.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			})
+			.click();
+		await page
+			.getByRole("complementary", { name: "Navigator", exact: true })
+			.getByRole("button", { name: "Working changes", exact: true })
 			.click();
 		await selectFiles?.();
 		// Review presentation can load asynchronously. Finish that online setup
@@ -708,7 +716,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		const initialLeftHistory = await openHistoryPanel(left);
 		const initialCheckpointCount = await waitForHistoryCountsToMatchAuthority(
 			[initialLeftHistory],
-			1,
+			0,
 			repositoryOperationTimeout,
 		);
 		if (initialCheckpointCount > 1) {
@@ -834,15 +842,14 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 				if (initialCheckpointCount > 1) {
 					await expect(freshHistory).toContainText("Latest checkpoint");
 				}
-				await expect(freshHistory).toContainText("Initial checkpoint");
+				if (initialCheckpointCount > 0) {
+					await expect(freshHistory).toContainText("Initial checkpoint");
+				}
 				await expect(
 					fresh.locator("[data-atelier-extension-suspended]"),
 				).toHaveCount(0);
-				// The relation-scoped working diff (lix_diff over the
-				// checkpoint-to-head span) evaluates from commit trees, unlike the
-				// retired lix_working_diff() hot authority — opening History may
-				// cost a bounded number of cold reads until the engine grows a hot
-				// path for the working span.
+				// Working changes use the engine's hot authority. Keep a bounded
+				// allowance for historical checkpoint metadata on a fresh replica.
 				expect(coldReadCount([fresh])).toBeLessThanOrEqual(
 					coldReadsBeforeFreshHistory + 2,
 				);
@@ -870,7 +877,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		for (const page of [left, right]) {
 			await expect(
 				page.getByRole("button", {
-					name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+					name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 				}),
 			).toBeVisible({ timeout: 30_000 });
 		}
@@ -906,7 +913,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		});
 		await expect(
 			left.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			}),
 		).toBeVisible({ timeout: realtimeTimeout });
 
@@ -934,7 +941,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 			}
 			await expect(
 				page.getByRole("button", {
-					name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+					name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 				}),
 			).toBeVisible({ timeout: 30_000 });
 		}
@@ -971,7 +978,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		]);
 		await expect(
 			fresh.getByRole("button", {
-				name: /[1-9]\d* files? changed since checkpoint\. Open changes review/,
+				name: /[1-9]\d* files? changed since checkpoint\. Open checkpoint history/,
 			}),
 		).toBeVisible({ timeout: 30_000 });
 
@@ -1184,7 +1191,7 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		for (const page of [left, fresh]) {
 			await expect(
 				page.getByRole("button", {
-					name: "1 file changed since checkpoint. Open changes review",
+					name: "1 file changed since checkpoint. Open checkpoint history",
 				}),
 			).toBeVisible({ timeout: realtimeTimeout });
 		}

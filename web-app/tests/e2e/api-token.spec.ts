@@ -85,7 +85,10 @@ test("Repository tokens have generated names, creation dates and independent del
 		).toBeTruthy();
 		expect(first).toMatch(/^lixray_pat_[0-9a-f]{64}$/);
 		const wrongRepo = await request.get(`/lix/v1/${otherId}/`, {
-			headers: { Authorization: `Bearer ${first}` },
+			headers: {
+				Authorization: `Bearer ${first}`,
+				"Lix-Server-Protocol-Version": "7",
+			},
 		});
 		expect(wrongRepo.status()).toBe(403);
 		const otherToken = await page.evaluate(async (id) => {
@@ -180,7 +183,10 @@ test("Repository tokens have generated names, creation dates and independent del
 		await expect(secret).toHaveCount(0);
 		for (const token of [first, second]) {
 			const response = await request.get(`/lix/v1/${lixId}/`, {
-				headers: { Authorization: `Bearer ${token}` },
+				headers: {
+					Authorization: `Bearer ${token}`,
+					"Lix-Server-Protocol-Version": "7",
+				},
 			});
 			expect(response.status()).toBe(200);
 		}
@@ -201,11 +207,17 @@ test("Repository tokens have generated names, creation dates and independent del
 			.click();
 		await expect(panel.getByRole("listitem")).toHaveCount(1);
 		const deletedResponse = await request.get(`/lix/v1/${lixId}/`, {
-			headers: { Authorization: `Bearer ${first}` },
+			headers: {
+				Authorization: `Bearer ${first}`,
+				"Lix-Server-Protocol-Version": "7",
+			},
 		});
 		expect(deletedResponse.status()).toBe(401);
 		const remainingResponse = await request.get(`/lix/v1/${lixId}/`, {
-			headers: { Authorization: `Bearer ${second}` },
+			headers: {
+				Authorization: `Bearer ${second}`,
+				"Lix-Server-Protocol-Version": "7",
+			},
 		});
 		expect(remainingResponse.status()).toBe(200);
 		await panel
@@ -217,8 +229,16 @@ test("Repository tokens have generated names, creation dates and independent del
 			.click();
 		await expect(panel.getByRole("listitem")).toHaveCount(0);
 
+		const otherProvisioned = await request.post(
+			`/api/repositories/${otherId}/provision`,
+			{ headers: { Authorization: `Bearer ${otherToken}` } },
+		);
+		expect(otherProvisioned.ok(), await otherProvisioned.text()).toBe(true);
 		const otherResponse = await request.get(`/lix/v1/${otherId}/`, {
-			headers: { Authorization: `Bearer ${otherToken}` },
+			headers: {
+				Authorization: `Bearer ${otherToken}`,
+				"Lix-Server-Protocol-Version": "7",
+			},
 		});
 		expect(otherResponse.status()).toBe(200);
 		await page.setViewportSize({ width: 390, height: 844 });
