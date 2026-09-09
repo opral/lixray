@@ -9,7 +9,7 @@ const lixRoot = join(repositoryRoot, "vendor", "lix");
 
 export async function resolveLixServerImage({
 	mode,
-	allowBuild = true,
+	allowBuild = false,
 	installArtifact = installServerImageArtifact,
 	inspectImage = inspectDigest,
 }) {
@@ -113,9 +113,9 @@ export async function resolveLixServerImage({
 		};
 	}
 
-	if (!allowBuild) {
+	if (!allowBuild || mode === "ci") {
 		console.log(
-			"[lix-server] Cache miss; leave compilation to the build runner.",
+			`[lix-server] Missing artifact for ${sourceRevision}. Build it at https://github.com/opral/lix/actions/workflows/ci.yml.`,
 		);
 		return { image: "", source: "missing", sourceRevision };
 	}
@@ -141,26 +141,6 @@ export async function resolveLixServerImage({
 		return { image: localTag, source: "source-build", sourceRevision };
 	}
 
-	const previewTag = previewImageTag(sourceRevision);
-	run("docker", [
-		"buildx",
-		"build",
-		"--file",
-		join(lixRoot, "packages", "server", "Dockerfile"),
-		"--tag",
-		previewTag,
-		"--label",
-		`org.opencontainers.image.revision=${sourceRevision}`,
-		"--cache-from",
-		"type=gha,scope=lix-server-preview-consumer",
-		"--cache-to",
-		"type=gha,mode=max,scope=lix-server-preview-consumer",
-		"--push",
-		lixRoot,
-	]);
-	const builtImage = `${previewRepository()}@${requiredDigest(previewTag)}`;
-	console.log(`[lix-server] Finished fallback source build ${builtImage}.`);
-	return { image: builtImage, source: "source-build", sourceRevision };
 }
 
 export function findOfficialLixServerImage(

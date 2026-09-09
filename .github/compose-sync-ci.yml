@@ -1,0 +1,8 @@
+# Run the exact deployable web image locally for the exhaustive browser suite.
+services:
+  lixray-web:
+    image: ${LIXRAY_WEB_IMAGE:?Set the tested web image digest}
+    environment:
+      RAILWAY_ENVIRONMENT_NAME: lixray-pr-0
+      LIXRAY_DEMO: "1"
+      LIXRAY_DEMO_LIX_IDS: ${LIXRAY_DEMO_LIX_IDS:-}

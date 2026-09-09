@@ -1,0 +1,42 @@
+name: Browser performance
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+concurrency:
+  group: browser-performance
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  sdk:
+    uses: ./.github/workflows/lix-sdk.yml
+    secrets: inherit
+  server-image:
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/lix-server-image.yml
+    secrets: inherit
+  web-image:
+    needs: sdk
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/web-image.yml
+    with:
+      infisical-identity-id: ${{ vars.INFISICAL_PRODUCTION_IDENTITY_ID }}
+      project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+      environment: production
+    secrets: inherit
+  measure:
+    needs: [web-image, server-image]
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/browser-integration.yml
+    with:
+      web-image: ${{ needs.web-image.outputs.image }}
+      server-image: ${{ needs.server-image.outputs.image }}
+      performance: true

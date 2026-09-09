@@ -1,13 +1,10 @@
 name: Set up web toolchain
-description: Install the shared Node, pnpm, vendored Lix cache, and native build prerequisites.
+description: Install Node and pnpm for artifact consumers.
 
 inputs:
   node-version:
     description: Node.js version
     required: true
-  build-rust:
-    description: Restore Cargo outputs and install native compilation prerequisites
-    default: "true"
   pnpm-version:
     description: pnpm version
     required: true
@@ -26,27 +23,3 @@ runs:
         node-version: ${{ inputs.node-version }}
         cache: pnpm
         cache-dependency-path: pnpm-lock.yaml
-
-    - name: Resolve vendored Lix revision
-      if: inputs.build-rust == 'true'
-      id: lix-revision
-      shell: bash
-      run: echo "revision=$(git rev-parse HEAD:vendor/lix)" >> "$GITHUB_OUTPUT"
-
-    - name: Cache vendored Lix SDK build
-      if: inputs.build-rust == 'true'
-      uses: actions/cache@v4
-      with:
-        path: |
-          vendor/lix/target
-          node_modules/.cache/lix-rust-toolchain
-        key: ${{ runner.os }}-${{ runner.arch }}-lix-sdk-${{ steps.lix-revision.outputs.revision }}-${{ hashFiles('scripts/prepare-vendored-lix-sdk.mjs') }}
-        restore-keys: |
-          ${{ runner.os }}-${{ runner.arch }}-lix-sdk-
-
-    - name: Install native build dependencies
-      if: inputs.build-rust == 'true'
-      shell: bash
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y mold

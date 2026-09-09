@@ -117,7 +117,7 @@ if (browserReady) {
 	} catch (error) {
 		if (process.env.LIXRAY_LIX_ARTIFACTS === "only") throw error;
 		console.log(
-			`[lix-sdk] Artifact install failed (${errorMessage(error)}); compiling from source.`,
+			`[lix-sdk] Artifact install failed (${errorMessage(error)}).`,
 		);
 	}
 }
@@ -126,21 +126,13 @@ if (resolveOnly) {
 	if (process.env.GITHUB_OUTPUT)
 		await appendFile(process.env.GITHUB_OUTPUT, `ready=${browserReady}\n`);
 	if (!browserReady) {
-		console.log("[lix-sdk] Cache miss; leave compilation to the build runner.");
+		console.log("[lix-sdk] Pinned browser SDK artifact is missing; build it in https://github.com/opral/lix/actions/workflows/ci.yml.");
 		process.exit(0);
 	}
 }
 
 if (!browserReady) {
-	console.log(
-		`[lix-sdk] SOURCE BUILD browser SDK for ${sourceRevision}; no reusable artifact was available.`,
-	);
-	await buildBrowserFromSource();
-	await writeBuildMarker(browserMarker, {
-		source: "source-build",
-		sourceRevision,
-	});
-	console.log(`[lix-sdk] Finished browser source build for ${sourceRevision}.`);
+	throw new Error(`Missing browser SDK for ${sourceRevision}. Build it in https://github.com/opral/lix/actions/workflows/ci.yml using the artifact-only action, then retry.`);
 }
 await ensureWasmSourceLink();
 
@@ -176,39 +168,6 @@ if (buildNative) {
 	verifyNativeSdk();
 }
 
-async function buildBrowserFromSource() {
-	await rm(sdkDist, { recursive: true, force: true });
-	await cp(releaseDist, sdkDist, { recursive: true });
-	const toolchainEnv = await vendoredLixToolchainEnv({
-		requireWasmBindgen: true,
-	});
-	run(
-		process.execPath,
-		[join(sdkRoot, "scripts", "build-wasm.js")],
-		toolchainEnv,
-	);
-
-	const compiled = spawnSync(
-		process.execPath,
-		[tsc, "-p", join(sdkRoot, "tsconfig.json")],
-		{
-			stdio: "inherit",
-		},
-	);
-	if (compiled.error) throw compiled.error;
-	if (compiled.status !== 0) process.exit(compiled.status ?? 1);
-
-	run("pnpm", ["--dir", opfsStorageRoot, "build"], toolchainEnv);
-	await rm(join(sdkDist, "bundled-plugins"), {
-		recursive: true,
-		force: true,
-	});
-	run(
-		process.execPath,
-		[join(sdkRoot, "scripts", "build-bundled-plugins.js")],
-		toolchainEnv,
-	);
-}
 
 async function preparedBrowserMatches(revision) {
 	const marker = await readBuildMarker(browserMarker);

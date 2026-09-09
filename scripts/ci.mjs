@@ -20,7 +20,7 @@ run("Check vendored dependencies", ["vendor:check"]);
 run("Prepare generated dependencies", ["--dir", "web-app", "ci:prepare"]);
 // Local CI remains exhaustive; the workflow runs tooling in a selected job.
 if (!process.argv.includes("--frontend-only")) run("Test repository tooling", ["test:tooling"]);
-run("Check formatting", ["--dir", "web-app", "format:check"]);
+if (!process.argv.includes("--frontend-only")) run("Fast checks", ["--dir", "web-app", "ci:fast"]);
 run("Lint frontend", ["--dir", "web-app", "ci:lint"]);
 run("Typecheck and test frontend", ["--dir", "web-app", "ci:check"]);
 run("Verify generated files are committed", ["git", "diff", "--exit-code"]);
