@@ -1179,17 +1179,26 @@ test("deployed OPFS tabs share one replica and sync files, editors, and hot chec
 		// reopened client must observe an additional checkpoint, not merely keep
 		// rendering the checkpoint rows imported during bootstrap.
 		await expect(
-			left.locator(
-				`[data-attr="panel-tab-select"][title="${afterReopenMarker}.md"]`,
-			),
+			left
+				.locator('[data-attr="panel-tab-select"]')
+				.filter({ hasText: new RegExp(`^${afterReopenMarker}\\.md$`) }),
 		).toBeVisible({ timeout: realtimeTimeout });
 		const checkpointCountBeforeSecondClick = await authorityCheckpointCount();
 		const secondCheckpointCommitId = await clickCheckpoint(left, async () => {
 			await left
 				.getByRole("button", { name: /Working set: \d+ of \d+ files/ })
 				.click();
-			await left.getByRole("checkbox", { name: "All files" }).click();
-			await left.getByTestId(`diff-scope-file:${afterReopenFileId}`).click();
+			await left
+				.getByRole("checkbox", { name: "Seen files", exact: true })
+				.click();
+			const selectedFile = left.getByTestId(
+				`diff-scope-file:${afterReopenFileId}`,
+			);
+			await selectedFile.click();
+			await expect(selectedFile).toHaveAttribute("aria-checked", "true");
+			await expect(
+				left.locator('[data-attr="diff-scope-file"][aria-checked="true"]'),
+			).toHaveCount(1);
 		});
 		expect(secondCheckpointCommitId).not.toBe(firstCheckpointCommitId);
 		const postReopenHistory = await openHistoryPanel(fresh);
