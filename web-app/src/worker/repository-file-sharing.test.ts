@@ -94,7 +94,11 @@ void test("account PAT publication uses credential-derived RPC identity", async 
 				"https://database.test/rest/v1/rpc/api_token_sharing",
 			);
 			assert.equal(req.headers.get("authorization"), null);
-			const args = await req.json();
+			const args = (await req.json()) as {
+				p_token: string;
+				p_operation: string;
+				p_args: unknown;
+			};
 			assert.equal(args.p_token, token);
 			operations.push(args.p_operation);
 			if (args.p_operation === "list_accessible_lixes")

@@ -175,7 +175,10 @@ void test("account PAT creates a snapshot repository without a browser session",
 			const upstream = new Request(input, init);
 			if (upstream.url.endsWith("/authorize_api_token")) {
 				assert.equal(upstream.headers.get("authorization"), null);
-				assert.equal((await upstream.json()).p_lix_id, null);
+				assert.equal(
+					((await upstream.json()) as { p_lix_id: unknown }).p_lix_id,
+					null,
+				);
 				authorized = true;
 				return Response.json([
 					{

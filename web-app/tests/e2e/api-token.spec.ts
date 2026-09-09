@@ -202,7 +202,10 @@ test("Account tokens have generated names, creation dates and independent deleti
 			data: Buffer.from(snapshot.bytes),
 		});
 		expect(creation.status(), await creation.text()).toBe(201);
-		const remote = await creation.json();
+		const remote = (await creation.json()) as {
+			id: ReturnType<typeof crypto.randomUUID>;
+			url: string;
+		};
 		createdIds.push(remote.id);
 		const importedHistory = await page.evaluate(
 			async ({ token, url }) => {
@@ -227,7 +230,9 @@ test("Account tokens have generated names, creation dates and independent deleti
 			{ headers: { Authorization: `Bearer ${first}` } },
 		);
 		expect(publication.status(), await publication.text()).toBe(200);
-		expect((await publication.json()).published).toBe(true);
+		expect(
+			((await publication.json()) as { published: boolean }).published,
+		).toBe(true);
 		const privateFile = await request.get(
 			`/lix/v1/${remote.id}/file?path=/private.txt`,
 			{ headers: { "Lix-Server-Protocol-Version": "7" } },
