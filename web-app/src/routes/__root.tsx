@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import { AuthProvider } from "~/components/auth-provider";
 import { PostHogAnalytics } from "~/components/posthog-analytics";
 import { Toaster } from "~/components/ui/sonner";
+import { ThemeColorSync } from "~/components/theme-color-sync";
 import { RepositoryProvider } from "~/components/repository-provider";
 import { RepositoryMcpGuidance } from "~/components/repository-mcp-guidance";
 import pwaIcons from "../pwa-icons.json";
@@ -63,6 +64,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 					searchStr={location.searchStr}
 				/>
 				<Toaster />
+				<ThemeColorSync />
 				<Scripts />
 			</body>
 		</html>
