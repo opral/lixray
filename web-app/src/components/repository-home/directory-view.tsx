@@ -10,7 +10,6 @@ import { fileIconUrl } from "@opral/atelier/file-icons";
 import {
 	ArrowRight,
 	ArrowUp,
-	ArrowUpRight,
 	Check,
 	ChevronDown,
 	Copy,
@@ -1523,17 +1522,6 @@ function ReadmePreview({
 				>
 					<PencilLine aria-hidden="true" className="size-3.5" />
 					Edit
-				</button>
-				<button
-					type="button"
-					data-testid="home-readme-open"
-					aria-label={`Open ${fileName} in a new tab`}
-					title={`Open ${fileName} in a new tab`}
-					onClick={(event) => onOpen(event, { newTab: true })}
-					className="flex h-8 shrink-0 items-center gap-1 rounded-md px-2.5 text-[13px] font-medium text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
-				>
-					Open
-					<ArrowUpRight aria-hidden="true" className="size-3.5" />
 				</button>
 			</div>
 			{/* Relative README links navigate the tab in place (rule 3) instead
