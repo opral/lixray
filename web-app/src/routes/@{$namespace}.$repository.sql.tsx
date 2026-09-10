@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
 	useMarkRepositoryRouteSynced,
+	useConsumeShellEntityNavigation,
 	useRepositoryAtelierInstance,
 } from "~/components/repository-atelier";
 
@@ -27,9 +28,14 @@ export const Route = createFileRoute("/@{$namespace}/$repository/sql")({
 function RepositorySqlRoute() {
 	const atelier = useRepositoryAtelierInstance();
 	const markRouteSynced = useMarkRepositoryRouteSynced();
+	const consumeShellNavigation = useConsumeShellEntityNavigation();
 
 	useEffect(() => {
 		if (!atelier) return;
+		if (consumeShellNavigation("view:sql")) {
+			markRouteSynced();
+			return;
+		}
 		let cancelled = false;
 		// "Shell unmounted" is a transient: the dev double-mount (and HMR)
 		// tears the shell down and remounts it on the same instance, so the
@@ -73,7 +79,7 @@ function RepositorySqlRoute() {
 		return () => {
 			cancelled = true;
 		};
-	}, [atelier, markRouteSynced]);
+	}, [atelier, markRouteSynced, consumeShellNavigation]);
 
 	return null;
 }

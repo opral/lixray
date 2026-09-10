@@ -1,3 +1,4 @@
+import { handlePublishedEntity, type EntityKind } from "./published-entity.ts";
 import { deleteHostedRepository } from "./repository-delete.ts";
 import { handleFileSharing } from "./repository-file-sharing.ts";
 import { createHostedRepository } from "./repository-create.ts";
@@ -295,6 +296,24 @@ export async function handleRequest(
 		);
 	}
 
+	if (url.pathname === "/api/published/entity") {
+		return handlePublishedEntity(
+			request,
+			env,
+			(lixId, kind, selector) =>
+				lookupLiveEntity(lixId, kind, selector, env, options, request.signal),
+			async (lixId, path) =>
+				(
+					await (options.resolvePublicLix ?? resolvePublicLixWithSupabase)(
+						lixId,
+						env,
+						path,
+					)
+				).ok,
+			options.fetch,
+		);
+	}
+
 	const fileShareMatch = /^\/api\/repositories\/([0-9a-f-]{36})\/share$/.exec(
 		url.pathname,
 	);
@@ -311,6 +330,17 @@ export async function handleRequest(
 			auth.auth.token,
 			fileShareMatch[1],
 			options.fetch,
+			async (path) =>
+				(
+					await lookupLiveEntity(
+						fileShareMatch[1],
+						"file",
+						{ path },
+						env,
+						options,
+						request.signal,
+					)
+				)?.id ?? null,
 		);
 	}
 
@@ -2169,6 +2199,7 @@ function isPublicReadRemoteLixRequest(
 }
 
 type PublishedDirectoryEntry = {
+	id: string;
 	path: string;
 	kind: "file" | "directory";
 };
@@ -2198,33 +2229,36 @@ async function listPublishedDirectory(
 WITH published_directory AS (
   SELECT id FROM lix_directory WHERE path = $1 LIMIT 1
 )
-SELECT path, 'file' AS kind
+SELECT id, path, 'file' AS kind
 FROM lix_file
 WHERE directory_id = (SELECT id FROM published_directory)
 UNION ALL
-SELECT path, 'directory' AS kind
+SELECT id, path, 'directory' AS kind
 FROM lix_directory
 WHERE parent_id = (SELECT id FROM published_directory)
 ORDER BY path
 LIMIT 1001`,
 			params: [{ kind: "text", value: directoryPath }],
 		});
+		const idColumn = result.columns.indexOf("id");
 		const pathColumn = result.columns.indexOf("path");
 		const kindColumn = result.columns.indexOf("kind");
-		if (pathColumn === -1 || kindColumn === -1) {
+		if (idColumn === -1 || pathColumn === -1 || kindColumn === -1) {
 			throw new Error("Published directory query returned unexpected columns.");
 		}
 		const entries = result.rows.flatMap((row): PublishedDirectoryEntry[] => {
+			const id = row[idColumn];
 			const path = row[pathColumn];
 			const kind = row[kindColumn];
 			if (
+				id?.kind !== "text" ||
 				path?.kind !== "text" ||
 				kind?.kind !== "text" ||
 				(kind.value !== "file" && kind.value !== "directory")
 			) {
 				return [];
 			}
-			return [{ path: path.value, kind: kind.value }];
+			return [{ id: id.value, path: path.value, kind: kind.value }];
 		});
 		return {
 			entries: entries.slice(0, 1000),
@@ -2636,4 +2670,38 @@ function json(value: unknown, init?: ResponseInit): Response {
 			...init?.headers,
 		},
 	});
+}
+
+/** Fixed server-owned identity query; callers must authorize the resulting path. */
+async function lookupLiveEntity(
+	lixId: string,
+	kind: EntityKind,
+	selector: { id: string } | { path: string },
+	env: WorkerEnv,
+	options: HandleRequestOptions,
+	signal: AbortSignal,
+): Promise<{ id: string; path: string } | null> {
+	if (!options.lixFetch) throw new Error("Internal Lix transport unavailable");
+	const client = new WorkerLixRuntimeClient(
+		env,
+		{ userId: LIX_ANONYMOUS_ACCOUNT_ID, token: "" },
+		() => Promise.resolve(null),
+		{ lixFetch: options.lixFetch, fetcher: options.fetch, signal },
+	);
+	try {
+		const result = await client.execute(lixId, {
+			sql: `SELECT id, path FROM ${kind === "file" ? "lix_file" : "lix_directory"} WHERE ${"id" in selector ? "id" : "path"} = $1 LIMIT 1`,
+			params: [
+				{ kind: "text", value: "id" in selector ? selector.id : selector.path },
+			],
+		});
+		const row = result.rows[0];
+		const id = row?.[result.columns.indexOf("id")];
+		const path = row?.[result.columns.indexOf("path")];
+		return id?.kind === "text" && path?.kind === "text"
+			? { id: id.value, path: path.value }
+			: null;
+	} finally {
+		await client.close();
+	}
 }

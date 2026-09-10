@@ -1,3 +1,4 @@
+import { entityFromRoute, resolvePublishedEntity } from "~/lib/entity-url";
 import { repositoryHead } from "~/lib/page-head";
 import {
 	createFileRoute,
@@ -102,11 +103,14 @@ function RepositoryRoutePage() {
 	const searchStr = useRouterState({
 		select: (state) => state.location.searchStr,
 	});
-	const publishedResource = publishedResourceFromRoute(
-		pathname,
-		namespace,
-		repositorySlug,
-	);
+	const [publishedResolution, setPublishedResolution] = useState<{
+		route: string;
+		resource: PublishedResource;
+	} | null>(null);
+	const publishedResource =
+		publishedResolution?.route === pathname
+			? publishedResolution.resource
+			: undefined;
 	const publicPath = publishedResource?.path;
 	const demoResolved = useMemo(
 		() =>
@@ -130,14 +134,14 @@ function RepositoryRoutePage() {
 	const [stagedTeamInvite, setStagedTeamInvite] = useState(peekTeamInvite);
 	const [failedInviteKey, setFailedInviteKey] = useState<string | null>(null);
 	const automaticJoinAttempt = useRef<string | null>(null);
-	// File and tab navigation changes `publicPath`, but a public repository or
+	// File and tab navigation changes the route, but a public repository or
 	// editable workspace has already crossed the repository authorization
 	// boundary. Only anonymous private-resource views remain path-scoped.
 	const routeAccessPath =
 		isDemoModeEnabled ||
 		(resolved && (resolved.canEdit || resolved.visibility === "public"))
 			? undefined
-			: publicPath;
+			: pathname;
 	const resolvedRepositoryId = resolved?.repositoryId;
 	const urlTeamInvite = invite && isTeamInviteToken(invite) ? invite : null;
 	const pendingTeamInvite =
@@ -157,6 +161,7 @@ function RepositoryRoutePage() {
 	// directory. A reader may have no organization membership at all.
 	useEffect(() => {
 		let disposed = false;
+		const abort = new AbortController();
 		setResolveError(null);
 		setResolved((current) => {
 			const stillSameRepository =
@@ -217,12 +222,45 @@ function RepositoryRoutePage() {
 						} satisfies PublicRepositoryRoute;
 					},
 				)
-			: resolvePublicRepositoryByRoute(
-					authClient,
-					namespace,
-					repositorySlug,
-					routeAccessPath,
-				);
+			: (async () => {
+					const repository = await resolvePublicRepositoryByRoute(
+						authClient,
+						namespace,
+						repositorySlug,
+					);
+					if (repository || !routeAccessPath || disposed) return repository;
+					const entity = entityFromRoute(
+						routeAccessPath,
+						namespace,
+						repositorySlug,
+					);
+					if (!entity) return null;
+					const published = await resolvePublishedEntity({
+						namespace,
+						repository: repositorySlug,
+						...entity,
+						signal: abort.signal,
+					});
+					if (!published) return null;
+					const candidate = await resolvePublicRepositoryByRoute(
+						authClient,
+						namespace,
+						repositorySlug,
+						published.path,
+					);
+					if (!candidate || candidate.repositoryId !== published.lixId)
+						return null;
+					if (!disposed)
+						setPublishedResolution({
+							route: routeAccessPath,
+							resource: {
+								id: published.id,
+								kind: published.kind,
+								path: published.path,
+							},
+						});
+					return candidate;
+				})();
 
 		void resolution
 			.then((nextResolved) => {
@@ -240,6 +278,7 @@ function RepositoryRoutePage() {
 
 		return () => {
 			disposed = true;
+			abort.abort();
 		};
 	}, [
 		accessRevision,
@@ -647,6 +686,14 @@ function RepositoryRoutePage() {
 		!resolved.canEdit &&
 		resolved.visibility === "private" &&
 		resolved.pathPublic &&
+		!publishedResource
+	) {
+		return <RepositoryRouteStatus>Opening item…</RepositoryRouteStatus>;
+	}
+	if (
+		!resolved.canEdit &&
+		resolved.visibility === "private" &&
+		resolved.pathPublic &&
 		publishedResource
 	) {
 		return (
@@ -686,27 +733,6 @@ function RepositoryRoutePage() {
 			}
 		/>
 	);
-}
-
-function publishedResourceFromRoute(
-	pathname: string,
-	namespace: string,
-	repositorySlug: string,
-): PublishedResource | undefined {
-	const root = `/@${namespace}/${repositorySlug}`;
-	for (const kind of ["file", "dir"] as const) {
-		const prefix = `${root}/${kind}/`;
-		if (!pathname.startsWith(prefix)) continue;
-		try {
-			return {
-				kind: kind === "dir" ? "directory" : "file",
-				path: `/${decodeURIComponent(pathname.slice(prefix.length))}`,
-			};
-		} catch {
-			return undefined;
-		}
-	}
-	return undefined;
 }
 
 function RepositoryRouteStatus({ children }: { children: ReactNode }) {

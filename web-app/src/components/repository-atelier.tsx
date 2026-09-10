@@ -1,3 +1,11 @@
+import { createShellNavigationQueue } from "~/lib/shell-navigation-queue";
+import {
+	entityUrlSplat,
+	entityRoutePath,
+	findLixEntity,
+	parseEntityUrlSplat,
+	type EntityKind,
+} from "~/lib/entity-url";
 import {
 	Atelier,
 	useAtelierConnected,
@@ -181,7 +189,7 @@ const RepositoryAtelierContext = createContext<RepositoryAtelierHandle | null>(
 );
 const RepositoryDefaultBranchContext = createContext<string | null>(null);
 const RepositoryRouteSyncContext = createContext<(() => void) | null>(null);
-const RepositoryShellDirNavigationContext = createContext<
+const RepositoryShellNavigationContext = createContext<
 	((dirPath: string) => boolean) | null
 >(null);
 const RepositoryBranchSessionContext =
@@ -266,7 +274,6 @@ export function RepositoryAtelier({
 		kind: "file" | "dir" | "team" | "settings" | "sql" | null;
 		splat: string | undefined;
 	}>({ kind: routeChildKind, splat: routeSplat });
-	const routeFilePathRef = useRef(routeFilePath);
 	const branchIdRef = useRef(branchId);
 	const routeBranchSwitchRef = useRef(0);
 	const suppressBranchNavigationRef = useRef(false);
@@ -276,13 +283,10 @@ export function RepositoryAtelier({
 	const atelierTelemetryHandlerRef = useRef<
 		ReturnType<typeof createAtelierTelemetryHandler> | undefined
 	>(undefined);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		pathnameRef.current = pathname;
 	}, [pathname]);
-	useEffect(() => {
-		routeFilePathRef.current = routeFilePath;
-	}, [routeFilePath]);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		routeChildRef.current = { kind: routeChildKind, splat: routeSplat };
 	}, [routeChildKind, routeSplat]);
 	useLayoutEffect(() => {
@@ -559,13 +563,26 @@ export function RepositoryAtelier({
 	);
 	// Sharing is available for the whole repository as well as individual files;
 	// the current browser URL is captured when the dialog is opened.
+	const resolveRouteResourcePath = async () => {
+		if (routeChildKind !== "file" && routeChildKind !== "dir") return "/";
+		const entity = parseEntityUrlSplat(routeSplat);
+		const lix = activeLixRef.current?.lix;
+		if (!entity || !lix) throw new Error("Item is unavailable.");
+		const resource = await findLixEntity(
+			lix,
+			routeChildKind === "file" ? "file" : "directory",
+			{ id: entity.id },
+		);
+		if (!resource) throw new Error("Item no longer exists.");
+		return resource.path;
+	};
 	const repositoryHeaderActions = canEdit ? (
 		client ? (
 			<RepositoryShareControl
 				loadReadAccess={async () => {
 					const resourcePath =
 						routeChildKind === "file" || routeChildKind === "dir"
-							? normalizedRouteResourcePath(routeSplat)
+							? await resolveRouteResourcePath()
 							: "/";
 					const { data: resolved, error: resolveError } = await client.rpc(
 						"resolve_public_lix",
@@ -633,7 +650,7 @@ export function RepositoryAtelier({
 				}}
 				publishReadLink={async () => {
 					if (routeChildKind === "file" || routeChildKind === "dir") {
-						const path = normalizedRouteResourcePath(routeSplat);
+						const path = await resolveRouteResourcePath();
 						const { error } = await client.rpc("publish_lix_resource", {
 							p_lix_id: repositoryId,
 							p_path: path,
@@ -653,7 +670,7 @@ export function RepositoryAtelier({
 					if (routeChildKind === "file" || routeChildKind === "dir") {
 						const { error } = await client.rpc("unpublish_lix_resource", {
 							p_lix_id: repositoryId,
-							p_path: normalizedRouteResourcePath(routeSplat),
+							p_path: await resolveRouteResourcePath(),
 							p_kind: routeChildKind === "file" ? "file" : "directory",
 						});
 						if (error) throw error;
@@ -803,18 +820,17 @@ export function RepositoryAtelier({
 	useEffect(() => {
 		routeSyncedRef.current = false;
 	}, [instance]);
-	// The folder path of the last /dir navigation this handler issued. The
-	// dir route consumes it to tell shell-originated URL changes (the right
-	// view is already active — e.g. a forked folder tab) from outside ones
-	// (deep link, back/forward), which must hydrate the Home surface.
-	const shellDirNavigationRef = useRef<string | null>(null);
+	// Shell-issued routes skip hydration: a newer tab may already be active.
+	const shellNavigationRef = useRef<string | null>(null);
 	const [reviewFocusActive, setReviewFocusActive] = useState(false);
-	const consumeShellDirNavigation = useCallback((dirPath: string) => {
-		const matches = shellDirNavigationRef.current === dirPath;
-		shellDirNavigationRef.current = null;
+	const consumeShellNavigation = useCallback((navigationKey: string) => {
+		const matches = shellNavigationRef.current === navigationKey;
+		shellNavigationRef.current = null;
 		return matches;
 	}, []);
 	useEffect(() => {
+		let navigationRevision = 0;
+		const navigationQueue = createShellNavigationQueue();
 		eventHandlerRef.current = (event) => {
 			atelierTelemetryHandlerRef.current?.(event);
 			if (event.type === "diff_session_changed") {
@@ -824,15 +840,71 @@ export function RepositoryAtelier({
 				return;
 			}
 			if (event.type !== "central_view_activated") return;
+			const revision = ++navigationRevision;
 			if (!routeSyncedRef.current) return;
-			// Any activation supersedes an unconsumed dir-navigation marker.
-			shellDirNavigationRef.current = null;
+			// Keep a pending shell marker until its own route commit consumes it.
 			const activeBranchId = activeLixRef.current?.activeBranchSnapshot();
 			const defaultBranchId = activeLixRef.current?.defaultBranchSnapshot();
 			const search =
 				activeBranchId && defaultBranchId
 					? atelierBranchSearch(activeBranchId, defaultBranchId)
 					: {};
+			const navigateEntity = async (kind: EntityKind, path: string) => {
+				const session = activeLixRef.current;
+				if (!session) return;
+				try {
+					const startingPath = await navigationQueue.settle(
+						() => pathnameRef.current,
+					);
+					if (
+						startingPath === null ||
+						revision !== navigationRevision ||
+						session !== activeLixRef.current ||
+						activeBranchId !== session.activeBranchSnapshot()
+					)
+						return;
+					const entity = await findLixEntity(session.lix, kind, { path });
+					if (
+						!entity ||
+						revision !== navigationRevision ||
+						session !== activeLixRef.current ||
+						startingPath !== pathnameRef.current ||
+						activeBranchId !== session.activeBranchSnapshot()
+					)
+						return;
+					const current = routeChildRef.current;
+					if (
+						current.kind === (kind === "file" ? "file" : "dir") &&
+						parseEntityUrlSplat(current.splat)?.id === entity.id
+					)
+						return;
+					shellNavigationRef.current = `${kind}:${entity.id}`;
+					await navigationQueue.navigate(
+						entityRoutePath(
+							namespace,
+							repositorySlug,
+							kind,
+							entity.id,
+							entity.path,
+						),
+						() =>
+							navigate({
+								to:
+									kind === "file"
+										? "/@{$namespace}/$repository/file/$"
+										: "/@{$namespace}/$repository/dir/$",
+								params: {
+									namespace,
+									repository: repositorySlug,
+									_splat: entityUrlSplat(entity.id, entity.path),
+								},
+								search,
+							}),
+					);
+				} catch (error) {
+					console.error("Unable to resolve item URL", error);
+				}
+			};
 			if (event.viewKind === LIXRAY_HOME_EXTENSION_ID) {
 				// Home is the primary Files surface (flow A): drilled into a
 				// folder it claims the /dir URL, at the root it claims the
@@ -846,60 +918,74 @@ export function RepositoryAtelier({
 						: "/";
 				const splat = dirPath.replace(/^\/+/, "");
 				if (splat) {
-					const targetPath = `/@${namespace}/${repositorySlug}/dir/${splat}`;
-					const currentPath = (() => {
-						try {
-							return decodeURIComponent(pathnameRef.current);
-						} catch {
-							return pathnameRef.current;
-						}
-					})();
-					if (currentPath === targetPath) return;
-					shellDirNavigationRef.current = `/${splat}`;
-					void navigate({
-						to: "/@{$namespace}/$repository/dir/$",
-						params: { namespace, repository: repositorySlug, _splat: splat },
-						search,
-					});
+					void navigateEntity("directory", dirPath);
 					return;
 				}
 				const targetPath = `/@${namespace}/${repositorySlug}`;
 				if (pathnameRef.current === targetPath) return;
-				void navigate({
-					to: "/@{$namespace}/$repository",
-					params: { namespace, repository: repositorySlug },
-					search,
-				});
+				shellNavigationRef.current = "view:home";
+				void navigationQueue
+					.navigate(targetPath, () =>
+						navigate({
+							to: "/@{$namespace}/$repository",
+							params: { namespace, repository: repositorySlug },
+							search,
+						}),
+					)
+					.catch((error: unknown) =>
+						console.error("Unable to navigate shell", error),
+					);
 				return;
 			}
 			if (event.viewKind === LIXRAY_PEOPLE_EXTENSION_ID) {
 				const targetPath = `/@${namespace}/${repositorySlug}/team`;
 				if (pathnameRef.current === targetPath) return;
-				void navigate({
-					to: "/@{$namespace}/$repository/team",
-					params: { namespace, repository: repositorySlug },
-					search,
-				});
+				shellNavigationRef.current = "view:team";
+				void navigationQueue
+					.navigate(targetPath, () =>
+						navigate({
+							to: "/@{$namespace}/$repository/team",
+							params: { namespace, repository: repositorySlug },
+							search,
+						}),
+					)
+					.catch((error: unknown) =>
+						console.error("Unable to navigate shell", error),
+					);
 				return;
 			}
 			if (event.viewKind === LIXRAY_SETTINGS_EXTENSION_ID) {
 				const targetPath = `/@${namespace}/${repositorySlug}/settings`;
 				if (pathnameRef.current === targetPath) return;
-				void navigate({
-					to: "/@{$namespace}/$repository/settings",
-					params: { namespace, repository: repositorySlug },
-					search,
-				});
+				shellNavigationRef.current = "view:settings";
+				void navigationQueue
+					.navigate(targetPath, () =>
+						navigate({
+							to: "/@{$namespace}/$repository/settings",
+							params: { namespace, repository: repositorySlug },
+							search,
+						}),
+					)
+					.catch((error: unknown) =>
+						console.error("Unable to navigate shell", error),
+					);
 				return;
 			}
 			if (event.viewKind === "sql_explorer") {
 				const targetPath = `/@${namespace}/${repositorySlug}/sql`;
 				if (pathnameRef.current === targetPath) return;
-				void navigate({
-					to: "/@{$namespace}/$repository/sql",
-					params: { namespace, repository: repositorySlug },
-					search,
-				});
+				shellNavigationRef.current = "view:sql";
+				void navigationQueue
+					.navigate(targetPath, () =>
+						navigate({
+							to: "/@{$namespace}/$repository/sql",
+							params: { namespace, repository: repositorySlug },
+							search,
+						}),
+					)
+					.catch((error: unknown) =>
+						console.error("Unable to navigate shell", error),
+					);
 				return;
 			}
 			if (event.viewKind === LIXRAY_DIR_EXTENSION_ID) {
@@ -915,34 +1001,13 @@ export function RepositoryAtelier({
 				// here would bounce the selection back to Home. The tab claims a
 				// URL on its first in-place navigation instead.
 				if (!splat) return;
-				const targetPath = `/@${namespace}/${repositorySlug}/dir/${splat}`;
-				const currentPath = (() => {
-					try {
-						return decodeURIComponent(pathnameRef.current);
-					} catch {
-						return pathnameRef.current;
-					}
-				})();
-				if (currentPath === targetPath) return;
-				shellDirNavigationRef.current = `/${splat}`;
-				void navigate({
-					to: "/@{$namespace}/$repository/dir/$",
-					params: { namespace, repository: repositorySlug, _splat: splat },
-					search,
-				});
+				void navigateEntity("directory", dirPath);
 				return;
 			}
-			const filePath = event.filePath?.replace(/^\/+/, "") ?? "";
-			if (!filePath || routeFilePathRef.current === filePath) return;
-			void navigate({
-				to: "/@{$namespace}/$repository/file/$",
-				params: {
-					namespace,
-					repository: repositorySlug,
-					_splat: filePath,
-				},
-				search,
-			});
+			if (event.filePath) void navigateEntity("file", event.filePath);
+		};
+		return () => {
+			navigationRevision++;
 		};
 	}, [namespace, navigate, repositorySlug]);
 
@@ -1237,6 +1302,10 @@ export function RepositoryAtelier({
 		if (!instance) return;
 		const repositoryRoot = `/@${namespace}/${repositorySlug}`;
 		if (pathname !== repositoryRoot) return;
+		if (consumeShellNavigation("view:home")) {
+			markRouteSynced();
+			return;
+		}
 		// The state reset matters as much as the activation: Home may be
 		// drilled into a folder (flow A), and the root URL means the root
 		// listing.
@@ -1246,7 +1315,14 @@ export function RepositoryAtelier({
 				console.error("Unable to activate the repository home", error);
 			})
 			.finally(markRouteSynced);
-	}, [instance, markRouteSynced, namespace, pathname, repositorySlug]);
+	}, [
+		instance,
+		markRouteSynced,
+		consumeShellNavigation,
+		namespace,
+		pathname,
+		repositorySlug,
+	]);
 
 	const navbarBrand = (
 		<RepositoryNavbarBrand
@@ -1270,8 +1346,8 @@ export function RepositoryAtelier({
 				>
 					<RepositoryBranchSessionContext.Provider value={branchSession}>
 						<RepositoryRouteSyncContext.Provider value={markRouteSynced}>
-							<RepositoryShellDirNavigationContext.Provider
-								value={consumeShellDirNavigation}
+							<RepositoryShellNavigationContext.Provider
+								value={consumeShellNavigation}
 							>
 								<RepositoryAtelierContext.Provider value={instance}>
 									<Atelier
@@ -1292,7 +1368,7 @@ export function RepositoryAtelier({
 										/>
 									) : null}
 								</RepositoryAtelierContext.Provider>
-							</RepositoryShellDirNavigationContext.Provider>
+							</RepositoryShellNavigationContext.Provider>
 						</RepositoryRouteSyncContext.Provider>
 					</RepositoryBranchSessionContext.Provider>
 				</RepositoryDefaultBranchContext.Provider>
@@ -1354,15 +1430,11 @@ export function useMarkRepositoryRouteSynced(): () => void {
 	return markRouteSynced ?? (() => undefined);
 }
 
-/**
- * True when the current /dir URL was just written by a tab activation inside
- * the shell — the right Files surface is already active, so the dir route
- * must not hydrate Home over it (it would steal focus from a forked folder
- * tab). Consuming clears the marker; outside navigations (deep link,
- * back/forward) never match and hydrate as usual.
- */
-export function useConsumeShellDirNavigation(): (dirPath: string) => boolean {
-	const consume = useContext(RepositoryShellDirNavigationContext);
+/** Consume a shell-issued route marker so URL hydration cannot steal tab focus. */
+export function useConsumeShellEntityNavigation(): (
+	entityKey: string,
+) => boolean {
+	const consume = useContext(RepositoryShellNavigationContext);
 	return consume ?? (() => false);
 }
 
@@ -1504,18 +1576,13 @@ function activeDocumentName({
 	repositoryName: string;
 }) {
 	const encodedPath = routeFilePath || pathname.split("/file/", 2)[1];
-	const encodedName = encodedPath?.split("/").filter(Boolean).at(-1);
+	const encodedName = parseEntityUrlSplat(encodedPath)?.slug;
 	if (!encodedName) return repositoryName;
 	try {
 		return decodeURIComponent(encodedName);
 	} catch {
 		return encodedName;
 	}
-}
-
-function normalizedRouteResourcePath(routeSplat: string | undefined) {
-	const path = (routeSplat ?? "").replace(/^\/+|\/+$/g, "");
-	return path ? `/${path}` : "/";
 }
 
 /** Keeps fast opens silent; the label appears only when opening is slow. */

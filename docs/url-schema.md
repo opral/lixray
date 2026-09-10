@@ -1,12 +1,18 @@
 # LixRay URL Schema Specification
 
-Status: **design reference** · Updated 2026-08-17
+Status: **design reference** · Updated 2026-09-10
 
 Implementation note: the current hard-cut schema uses one `namespaces` model for
 personal and organization ownership, one global `handles` pool, and internal
 `lixes` records rendered as “repositories” in the UI. Handle and slug redirects,
 tombstones, renames, and transfer semantics described later in this document are
 future design material and are explicitly out of scope for the current release.
+
+File and directory routes now use the existing entity UUID encoded as 22-character
+unpadded Base64url, followed by an optional descriptive slug. This is a hard URL
+refactor: old path-based URLs are not supported. Encoding is deterministic and
+reversible; there is no public-ID registry or additional field in Lix or the control
+plane. The repository route scopes the UUID and permissions remain unchanged.
 
 Scope: the public URL grammar of lixray.com, the identity model behind it (handles, namespaces,
 repositories), and the Postgres schema that implements it. v1 ships latest-only URLs, no raw-bytes
@@ -28,9 +34,9 @@ path         = "/@" handle                          ; namespace profile
              | "/" product-route                    ; app-owned, unlimited, forever
 
 sub          = ""                                   ; repository overview
-             | "/file/" file-path                   ; file viewer         (v1)
-             | "/dir" [ "/" file-path ]             ; directory listing   (v1; bare = root)
-             | "/raw/"  file-path                   ; raw bytes           (RESERVED)
+             | "/file/" entity-token [ "/" label ]    ; file viewer         (v1)
+             | "/dir/" entity-token [ "/" label ]     ; directory listing   (v1; root = repository overview)
+             | "/raw/" entity-token [ "/" label ]     ; raw bytes           (RESERVED)
              | "/llms.txt"                          ; machine index       (RESERVED)
              | "/" verb …                           ; future closed-set verbs (RESERVED)
 
@@ -46,7 +52,10 @@ handle       = lowercase [a-z0-9], internal hyphens (never consecutive, never at
 slug         = same grammar, max 100 chars
 namespace-id = canonical UUID for the immutable public namespace identity
 changeset-id = ^[a-z0-9][a-z0-9._-]{0,63}$          ; MUST NOT contain "/"; "latest","main" reserved
-file-path    = "/"-separated segments, RFC 3986 percent-encoded, NFC-normalized
+entity-token = 22-character unpadded Base64url encoding of the existing UUID's 16 bytes
+               ; alphabet [A-Za-z0-9_-], case-sensitive, canonical encoding required
+label        = optional descriptive filename/directory slug, one URL segment
+               ; never used to resolve or authorize the entity
 verb (v1)    = "file" | "dir" | "team" | "settings" | "sql"
 verb (rsvd)  = raw diff change changes history blame edit new embed
                archive zip releases agents threads blob tree folder files sync
@@ -55,8 +64,8 @@ ns-verb      = future closed set under "/@" handle "/-/" (RESERVED; none shipped
 ```
 
 Examples: `lixray.com/@samuel` · `lixray.com/profile/019c…` ·
-`lixray.com/@google/android/file/gearbox/housing.step` ·
-`lixray.com/@google/android@01hx4f…/file/launch-plan.md` (future pin).
+`lixray.com/@google/android/file/ERERERERQRGBEREREREREQ/housing.step` ·
+`lixray.com/@google/android@01hx4f…/file/ERERERERQRGBEREREREREQ/launch-plan.md` (future pin).
 
 ---
 
@@ -107,38 +116,44 @@ shared socially and are freely migratable, which is also GitHub's end state
 belong in query parameters on the profile (`/@{handle}?tab=…`), per D6's identity/view split.
 Implementations MUST NOT allocate namespace-level pages at bare segment 2.
 
-### D3 — Fixed verb segment `file` / `dir`; closed verb set; self-healing
+### D3 — Fixed verbs and stable entity identity
 
-**Decision.** Files mount at `/file/{path}`, directories at `/dir/{path}`. The verb set is
-closed and documented; `/file/` on a directory MUST 301 to `/dir/` and vice versa (GitHub does
-the equivalent blob/tree correction in both directions, verified).
+**Decision.** Files mount at `/file/{entity-token}/{label?}`, directories at
+`/dir/{entity-token}/{label?}`. The repository overview represents the root directory.
+The token is the existing entity UUID encoded as 16 bytes of unpadded Base64url
+(22 characters). Encode the UUID bytes in their displayed hexadecimal order; do not
+encode its 36-character textual representation. Require canonical encoding, including
+zero unused bits in the final Base64 character, so one UUID has one token.
 
-**Why.** (a) Bare `/{slug}/{path}` would let user file trees swallow the sub-repository URL space,
-forcing reserved words _inside user trees_ (GitLab's `PROJECT_WILDCARD_ROUTES` disaster — users
-owned `tree`, `raw`, `badges` before GitLab reserved them). (b) Two verbs make the URL
-self-describing: the router picks the renderer before any storage lookup (relevant to SlateDB
-roundtrip economics); self-healing redirects mean wrong guesses still land. (c) **Vocabulary
-rule: mass-user words, never VCS jargon** — `file` over `blob`, `dir` over `tree`. The audience
-is "your team and agents", not git natives; `blob`/`tree` mean nothing outside git, and
-guessable grammar wins with both humans and agents.
+The optional label supplies readable context. Resolve exclusively by the decoded
+UUID within the requested repository and entity kind; stale or missing labels still
+open the same entity. File and directory UUIDs are scoped by the repository and kind,
+so changing the URL's repository or verb must never bypass that scope.
 
-**Rejected.** Single content verb (router probes type — loses self-description and pre-lookup
-routing); `/-/` delimiter (unneeded under D2); `tree` (GitHub muscle memory, but git jargon —
-stays reserved; MAY 301 to `/dir/` as a courtesy alias for git-native fingers); `folder` (the
-maximal consumer word, but `dir` is the established URL abbreviation and half the length — stays
-reserved); `files` (one keystroke from `file`; near-identical verbs in a closed set are a
-permanent typo tax — stays reserved).
+**Lifecycle.** Renames and moves preserve entity UUIDs and therefore preserve links.
+Copies and deletion followed by recreation receive new UUIDs. Resolve the entity's
+current path in the selected branch before opening it. An entity absent from that
+branch must not fall back to another object at its former path. Paths and exact names
+remain visible in breadcrumbs and Copy path. No ID mapping is stored in either Lix or
+the control plane, and no allocation service or uniqueness retry is needed.
+
+**Permissions.** A token is an identifier, not a capability. Existing repository
+permissions and path publications still apply. A private published resource must be
+resolved to its current path and checked against current publication permissions
+before exposing its content; identity URLs do not turn a path publication into a
+repository-wide grant.
+
+**Migration.** This is a hard cut. Existing path-based file and directory URLs are not
+aliases. There are no compatibility redirects. Generated links always use UUID tokens.
 
 ### D4 — Version pin: `{slug}@{changeset-id}`, reserved now, shipped later
 
 **Decision.** v1 URLs mean "current state". The future immutable permalink attaches the pin to
-the repository segment: `/@{ns}/{ws}@{cs}/file/{path}`. `@` is outside slug grammar, so parsing is
+the repository segment: `/@{ns}/{ws}@{cs}/file/{entity-token}/{label?}`. `@` is outside slug grammar, so parsing is
 unambiguous by string inspection alone, forever. Unpinned = latest.
 
-**Why.** (a) Retrofit safety: a later positional ref slot (`/file/{ref}/{path}`) is fatally
-ambiguous against v1's `/file/{path}` (`/file/main/readme.md` — ref or folder?). This is GitHub's
-permanent scar (slashed branch names force DB-lookup URL splitting; ambiguous refs banned only in
-2023; Bitbucket never solved it — slashed-ref URLs 404, bug open for years). (b) One mechanism
+**Why.** (a) A repository-level revision keeps branch and version selection separate
+from entity identity, without adding another positional file-route segment. (b) One mechanism
 pins every verb (`@{cs}/dir/…`, `@{cs}/diff/…`). (c) Developers already read `@scope/pkg@version`
 (npm/unpkg/JSR) — `@google/android@01hx…` is native syntax to this audience. (d) CDN policy by
 string inspection: pinned ⇒ `cache-control: public, max-age=31536000, immutable`; floating ⇒
@@ -147,19 +162,18 @@ entire jsDelivr/RawGit proxy ecosystem; for LixRay every floating resolve is a S
 so the immutable tier is the cost model.
 
 **Rejected.** Positional ref (ambiguity above); mandatory ref from day one (uglifies every v1
-share link for a deferred feature); typed marker in path head (`/file/sha/{id}/{path}` — collides
-with legitimate filenames unless user trees are constrained; backwards); query param `?v=`
+share link for a deferred feature); typed marker in the file route (needlessly couples version selection to the entity renderer); query param `?v=`
 (a pin is identity, not view state — query params get stripped in citations and mangled by
 shorteners; identity belongs in the path, view state in query, anchors in fragment).
 
-**Consequences.** Once served, a pinned `(ns, ws, changeset, path)` MUST never resolve to
+**Consequences.** Once served, a pinned `(repository identity, changeset, entity kind, entity UUID)` MUST never resolve to
 different bytes — across deletion, rename, and slug reuse. This is what makes agent caches and
 embedded references safe (PyPI/npm/Go-proxy guarantee).
 
 ### D5 — Raw bytes: deferred, slot reserved, domain decided
 
 **Decision.** No raw serving in v1; the viewer never echoes user bytes verbatim (sanitized
-rendering only). When raw ships: sibling verb `/raw/{path}` as a mechanical `/file/`→`/raw/`
+rendering only). When raw ships: sibling verb `/raw/{entity-token}/{label?}` as a mechanical `/file/`→`/raw/`
 segment swap, where lixray.com does authz and 302s to a **separate registrable domain**
 (lixrayusercontent.com-class), never a subdomain.
 
@@ -186,7 +200,7 @@ nothing to reserve beyond convention.
 
 **Decision.** `invite` is reserved in the published query grammar. A Share action mints one
 opaque, reusable token and appends it to the otherwise byte-identical canonical URL:
-`/@{ns}/{ws}/file/{path}?invite={token}`. The token maps only to its sharer, this repository, and
+`/@{ns}/{ws}/file/{entity-token}/{label?}?invite={token}`. The token maps only to its sharer, this repository, and
 an edit grant. It never identifies a person, grants organization membership, or changes the
 resource identity in the path.
 
@@ -278,7 +292,7 @@ this" (activity feed actor) into one registry, which agents can also resolve mec
   references use this immutable ID-based URI; `@handle` remains a mutable human-facing alias.
 - `/@{ns}/{ws}/llms.txt`: auto-generated per-repository index (spec-legal at subpaths; Cloudflare
   ships per-product llms.txt). Root `lixray.com/llms.txt` documents the grammar itself.
-- Publish the grammar as RFC 6570 templates (`https://lixray.com/@{ns}/{ws}/file/{+path}`) — a
+- Publish the grammar as RFC 6570 templates (`https://lixray.com/@{ns}/{ws}/file/{entity-token}/{label}`) — a
   documented parsing contract (Figma's openapi.yaml precedent). Anonymous, SSR'd LixRay URLs are
   MCP-spec-sanctioned resource URIs as-is.
 - Public pages MUST be server-rendered with content in initial HTML (no major AI crawler except
@@ -479,7 +493,7 @@ alone.
 4. Names are mutable aliases over immutable IDs; nothing durable keys on a name.
 5. Renames 301 forever on every surface; live redirects are never shadowed; deletions tombstone
    (410) with cooldown; popular names retire permanently.
-6. A pinned `(ns, ws, changeset, path)` never resolves to different bytes.
+6. A pinned `(repository identity, changeset, entity kind, entity UUID)` never resolves to different bytes.
 7. Namespaces are taggable: mention tokens = URL segments, stored as IDs, rendered as current
    handles; agent handles come from reserved space only.
 8. User bytes are never echoed verbatim from lixray.com; raw serving (when it ships) 302s to a

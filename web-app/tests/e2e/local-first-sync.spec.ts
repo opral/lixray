@@ -6,7 +6,7 @@ const protocolRequests = (url: URL) => url.pathname.startsWith("/lix/");
 
 // Runs in the default Compose suite against the seeded development account and
 // the actual browser SDK/OPFS implementation, with no external preview flags.
-test("folder moves and checkpoints commit offline, survive reload, and upload unchanged", async ({
+test("file and directory links survive offline moves, renames, checkpoints, and reload", async ({
 	page,
 	context,
 	baseURL,
@@ -92,7 +92,8 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 	}
 	const source = `${prefix}-source`;
 	const target = `${prefix}-target`;
-	const finalPath = `/${target}/${source}/note.txt`;
+	const renamedSource = `${prefix}-renamed`;
+	const finalPath = `/${target}/${renamedSource}/note.txt`;
 	const checkpointIds = new Set<string>();
 	const captureCheckpoint = (request: Request) => {
 		if (request.method() !== "POST" || !request.url().endsWith("/sync/push"))
@@ -120,13 +121,22 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 			.getByRole("row")
 			.filter({ has: page.getByText(name, { exact: true }) });
 	try {
-		await execute("INSERT INTO lix_directory (path) VALUES ($1), ($2)", [
-			`/${source}`,
-			`/${target}`,
-		]);
-		await execute("INSERT INTO lix_file (path) VALUES ($1)", [
-			`/${source}/note.txt`,
-		]);
+		const directories = await execute(
+			"INSERT INTO lix_directory (path) VALUES ($1), ($2) RETURNING id",
+			[`/${source}`, `/${target}`],
+		);
+		const files = await execute(
+			"INSERT INTO lix_file (path) VALUES ($1) RETURNING id",
+			[`/${source}/note.txt`],
+		);
+		const directoryId = String(directories.rows[0]![0]!.value);
+		const fileId = String(files.rows[0]![0]!.value);
+		// Encode independently from application helpers so this asserts the public
+		// URL contract as well as continuity through the real browser/OPFS path.
+		const compactId = (id: string) =>
+			Buffer.from(id.replaceAll("-", ""), "hex").toString("base64url");
+		const savedDirectoryUrl = `${repository.path}/dir/${compactId(directoryId)}/${source}`;
+		const savedFileUrl = `${repository.path}/file/${compactId(fileId)}/note.txt`;
 		await page.goto(repository.path);
 		// A cold browser worker compiles the SDK and downloads its initial replica.
 		// Match the startup budget used by the other repository-opening tests.
@@ -140,8 +150,28 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		await expect(row(source)).toHaveCount(0, { timeout: 5_000 });
 		await row(target).click();
 		await expect(row(source)).toBeVisible();
-		await row(source).click();
-		await expect(row("note.txt")).toBeVisible();
+		await row(source).hover();
+		await row(source).locator("label").click();
+		await row(source).focus();
+		await page.keyboard.press("F2");
+		const renameInput = page.getByRole("dialog").getByRole("textbox");
+		await renameInput.fill(renamedSource);
+		await renameInput.press("Enter");
+		await expect(row(renamedSource)).toBeVisible();
+		// These links still contain the original location's name. Neither moving
+		// nor renaming the directory may invalidate it or its descendant file.
+		await page.goto(savedDirectoryUrl);
+		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
+		await expect(page).toHaveURL(
+			new RegExp(`/dir/${compactId(directoryId)}(?:/|$)`),
+		);
+		await page.goto(savedFileUrl);
+		await expect(
+			page.locator('[data-view-key="atelier_text"][data-active="true"]'),
+		).toBeVisible({ timeout: 30_000 });
+		await expect(page).toHaveURL(
+			new RegExp(`/file/${compactId(fileId)}(?:/|$)`),
+		);
 		await page
 			.getByRole("button", {
 				name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
@@ -173,8 +203,8 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 		await page.getByRole("button", { name: "Home", exact: true }).click();
 		await expect(row(target)).toBeVisible({ timeout: 30_000 });
 		await row(target).click();
-		await expect(row(source)).toBeVisible();
-		await row(source).click();
+		await expect(row(renamedSource)).toBeVisible();
+		await row(renamedSource).click();
 		await expect(row("note.txt")).toBeVisible();
 		await expect(
 			page.getByRole("button", {
@@ -190,14 +220,21 @@ test("folder moves and checkpoints commit offline, survive reload, and upload un
 			.poll(
 				async () => {
 					const result = await execute(
-						"SELECT path FROM lix_file WHERE path = $1",
-						[finalPath],
+						"SELECT path FROM lix_file WHERE id = $1",
+						[fileId],
 					);
 					return result.rows[0]?.[0]?.value;
 				},
 				{ timeout: 30_000 },
 			)
 			.toBe(finalPath);
+		const movedDirectory = await execute(
+			"SELECT path FROM lix_directory WHERE id = $1",
+			[directoryId],
+		);
+		expect(movedDirectory.rows[0]?.[0]?.value).toBe(
+			`/${target}/${renamedSource}`,
+		);
 		await expect
 			.poll(
 				async () => {

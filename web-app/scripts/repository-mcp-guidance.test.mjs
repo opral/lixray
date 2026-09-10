@@ -33,7 +33,9 @@ new Function("require", "module", "exports", bundle.outputFiles[0].text)(
 const { render, renderScreen } = compiled.exports;
 
 test("initial HTML explains how to access a document through MCP", () => {
-	const html = render("/@opral/monorepo/file/company-brain-productization.md");
+	const html = render(
+		"/@opral/monorepo/file/ERERERERQRGBEREREREREQ/company-brain-productization.md",
+	);
 	assert.match(html, /To check access and read this file/);
 	assert.match(html, /permissions/);
 	assert.match(html, /class="sr-only /);
@@ -42,7 +44,11 @@ test("initial HTML explains how to access a document through MCP", () => {
 		/<details|hidden=|aria-hidden=|is available through/,
 	);
 	assert.match(html, /Repository: <code>@opral\/monorepo<\/code>/);
-	assert.match(html, /File: <code>company-brain-productization.md<\/code>/);
+	assert.match(
+		html,
+		/File ID: <code>11111111-1111-4111-8111-111111111111<\/code>/,
+	);
+	assert.match(html, /SELECT id, path FROM lix_file WHERE id = \$1/);
 	assert.match(html, /open_lix/);
 	assert.match(html, /lix_ref&quot;:&quot;@opral\/monorepo/);
 	assert.match(html, /href="\/mcp\/docs"/);
@@ -50,12 +56,13 @@ test("initial HTML explains how to access a document through MCP", () => {
 	assert.match(html, /ask the user to connect LixRay/);
 });
 
-test("preserves encoded file paths and branches without leaking invite tokens", () => {
+test("resolves UUIDs regardless of cosmetic labels and preserves branch without invite tokens", () => {
 	const html = render(
-		"/%40opral/monorepo/file/notes/a%20b.md",
+		"/%40opral/monorepo/file/ERERERERQRGBEREREREREQ/a%20b.md",
 		"?branch=feature-1&invite=secret",
 	);
-	assert.match(html, /notes\/a b.md/);
+	assert.match(html, /11111111-1111-4111-8111-111111111111/);
+	assert.doesNotMatch(html, /a b.md|a%20b.md/);
 	assert.match(html, /branch_id&quot;:&quot;feature-1/);
 	assert.doesNotMatch(html, /secret|invite/);
 });
@@ -65,7 +72,10 @@ test("renders repository guidance but leaves unrelated and malformed routes alon
 		render("/@opral/monorepo"),
 		/To check access and read this repository/,
 	);
-	assert.doesNotMatch(render("/@opral/monorepo/dir/notes"), /File:/);
+	assert.match(
+		render("/@opral/monorepo/dir/ERERERERQRGBEREREREREQ/notes"),
+		/SELECT id, path FROM lix_directory/,
+	);
 	for (const path of [
 		"/",
 		"/docs/mcp",
@@ -79,7 +89,7 @@ test("renders repository guidance but leaves unrelated and malformed routes alon
 
 test("the initial screen shows the app shell while access is checked", () => {
 	const html = renderScreen({
-		pathname: "/@opral/repo/file/notes.md",
+		pathname: "/@opral/repo/file/ERERERERQRGBEREREREREQ/notes.md",
 		searchStr: "?invite=secret",
 	});
 	assert.match(html, /Opening file/);
@@ -95,7 +105,7 @@ test("the initial screen shows the app shell while access is checked", () => {
 test("unavailable resources offer account recovery without claiming existence", () => {
 	for (const signedIn of [true, false]) {
 		const html = renderScreen({
-			pathname: "/@opral/repo/file/notes.md",
+			pathname: "/@opral/repo/file/ERERERERQRGBEREREREREQ/notes.md",
 			searchStr: "",
 			status: "unavailable",
 			signedIn,
@@ -121,9 +131,9 @@ test("connection failures remain retryable errors, not false 404s", () => {
 
 test("escapes URL-controlled markup in server HTML", () => {
 	const html = render(
-		"/@opral/repo/file/%3Cscript%3Ealert(1)%3C%2Fscript%3E",
+		"/@opral/repo/file/ERERERERQRGBEREREREREQ/%3Cscript%3Ealert(1)%3C%2Fscript%3E",
 		"?branch=%3Cimg%3E",
 	);
 	assert.doesNotMatch(html, /<script>|<img>/);
-	assert.match(html, /&lt;script&gt;/);
+	assert.match(html, /&lt;img&gt;/);
 });

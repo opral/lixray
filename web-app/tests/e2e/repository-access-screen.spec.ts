@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-const fileUrl = "/@opral/monorepo/file/company-brain-productization.md";
+const fileUrl =
+	"/@opral/monorepo/file/AAAAAAAAQACAAAAAAAAAAQ/company-brain-productization.md";
 
 test("initial HTML includes the opening skeleton and accessible MCP instructions", async ({
 	browser,
@@ -33,6 +34,14 @@ test("initial HTML includes the opening skeleton and accessible MCP instructions
 	} finally {
 		await context.close();
 	}
+});
+
+// Both access stages belong to this UI fixture. Leaving the worker lookup live
+// makes an unavailable-item assertion depend on the server's database settings.
+test.beforeEach(async ({ page }) => {
+	await page.route("**/api/published/entity?*", (route) =>
+		route.fulfill({ status: 404, json: { error: "Entity not found" } }),
+	);
 });
 
 for (const width of [1280, 360]) {
@@ -121,30 +130,55 @@ for (const width of [1280, 360]) {
 	});
 }
 
-test("a failed access check offers retry without reporting a 404", async ({
-	page,
-}) => {
-	let attempts = 0;
-	await page.route("**/rest/v1/**", async (route) => {
-		if (
-			route.request().url().includes("resolve_public_lix_by_route") &&
-			attempts++ === 0
-		) {
-			await route.fulfill({
-				status: 503,
-				json: { message: "Temporarily unavailable" },
-			});
-		} else {
-			await route.fulfill({ json: [] });
-		}
+for (const failure of ["repository", "published item"] as const) {
+	test(`a failed ${failure} access check offers retry without reporting a 404`, async ({
+		page,
+	}) => {
+		let repositoryAttempts = 0;
+		let entityAttempts = 0;
+		await page.route("**/rest/v1/**", async (route) => {
+			const repositoryLookup = route
+				.request()
+				.url()
+				.includes("resolve_public_lix_by_route");
+			if (repositoryLookup) repositoryAttempts++;
+			if (
+				repositoryLookup &&
+				failure === "repository" &&
+				repositoryAttempts === 1
+			) {
+				await route.fulfill({
+					status: 503,
+					json: { message: "Temporarily unavailable" },
+				});
+			} else {
+				await route.fulfill({ json: [] });
+			}
+		});
+		await page.route("**/api/published/entity?*", async (route) => {
+			entityAttempts++;
+			if (failure === "published item" && entityAttempts === 1) {
+				await route.fulfill({
+					status: 503,
+					json: { error: "Entity resolution unavailable" },
+				});
+			} else {
+				await route.fulfill({
+					status: 404,
+					json: { error: "Entity not found" },
+				});
+			}
+		});
+		await page.goto(fileUrl);
+		await expect(
+			page.getByRole("heading", { name: "Unable to check file access" }),
+		).toBeVisible();
+		await expect(page.getByText("404", { exact: true })).toHaveCount(0);
+		await page.getByRole("button", { name: "Retry", exact: true }).click();
+		await expect(
+			page.getByRole("heading", { name: "This file isn't available" }),
+		).toBeVisible();
+		expect(repositoryAttempts).toBe(2);
+		expect(entityAttempts).toBe(failure === "published item" ? 2 : 1);
 	});
-	await page.goto(fileUrl);
-	await expect(
-		page.getByRole("heading", { name: "Unable to check file access" }),
-	).toBeVisible();
-	await expect(page.getByText("404", { exact: true })).toHaveCount(0);
-	await page.getByRole("button", { name: "Retry", exact: true }).click();
-	await expect(
-		page.getByRole("heading", { name: "This file isn't available" }),
-	).toBeVisible();
-});
+}
