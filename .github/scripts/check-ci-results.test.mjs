@@ -15,3 +15,19 @@ test("selected integration jobs cannot silently skip, fail, or cancel", () => {
 	}
 });
 test("explicit previews require every artifact even for docs-only changes", () => assert.throws(() => checkCiResults(fixture(), true), /sdk/));
+
+test("static UI needs fast checks, not SDKs, images, or browsers", () => {
+  const needs = fixture({ fast: "true", deploy: "true" });
+  needs.fast.result = "success";
+  checkCiResults(needs);
+  for (const result of ["skipped", "failure", "cancelled"]) {
+    needs.fast.result = result;
+    assert.throws(() => checkCiResults(needs), /fast/);
+  }
+});
+
+test("mixed UI and application changes still require full frontend checks", () => {
+  const needs = fixture({ fast: "true", frontend: "true" });
+  needs.fast.result = "success";
+  assert.throws(() => checkCiResults(needs), /frontend/);
+});

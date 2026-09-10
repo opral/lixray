@@ -2,7 +2,7 @@ import { appendFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const ALL_LANES = ["frontend", "database", "e2e", "deploy", "tooling"];
+const ALL_LANES = ["fast", "frontend", "database", "e2e", "deploy", "tooling"];
 
 export function classifyCiChanges(files, { manifestIconsOnly = false } = {}) {
   const lanes = Object.fromEntries(ALL_LANES.map((lane) => [lane, false]));
@@ -24,10 +24,16 @@ function lanesForFile(file, manifestIconsOnly) {
     (file === "web-app/public/manifest.webmanifest" && manifestIconsOnly)
   ) return ["deploy"];
 
-  // CI infrastructure changes exercise every lane so changes to the classifier,
-  // shared actions, and workflows cannot silently skip their own validation.
-  if (file === ".github/workflows/pr.yml" || file.startsWith(".github/actions/") ||
-      file.startsWith(".github/scripts/classify-ci-changes")) return ALL_LANES;
+  // Static public pages have no repository/backend behavior. Reuse fast source
+  // checks without preparing the SDK, building images, or running browsers.
+  if (isPresentationOnly(file)) return ["fast", "deploy"];
+
+  // Selection and aggregation changes are covered by executable tooling tests.
+  // Shared build actions still exercise every lane.
+  if (file === ".github/workflows/pr.yml" ||
+      /^\.github\/scripts\/(?:classify-ci-changes|check-ci-results)(?:\.test)?\.mjs$/.test(file) ||
+      file === ".github/scripts/ci-workflow.test.mjs") return ["tooling"];
+  if (file.startsWith(".github/actions/")) return ALL_LANES;
   if ([".github/workflows/production-canary.yml", ".github/workflows/movie-benchmark.yml"].includes(file)) return ["tooling"];
   if (file === ".github/scripts/test-database.sh") return ["database", "e2e", "deploy", "tooling"];
   if (file.startsWith(".github/")) return ALL_LANES.filter((lane) => lane !== "database");
@@ -67,9 +73,30 @@ function lanesForFile(file, manifestIconsOnly) {
   return ALL_LANES;
 }
 
+function isPresentationOnly(file) {
+  return [
+    "web-app/src/components/landing-page.tsx",
+    "web-app/src/components/vs-github-page.tsx",
+    "web-app/src/components/docs-page.tsx",
+    "web-app/src/components/legal-page.tsx",
+    "web-app/src/lib/docs-content.ts",
+    "web-app/src/lib/docs-markdown.ts",
+    "web-app/src/lib/docs-legal.test.ts",
+    "web-app/src/routes/docs.$slug.tsx",
+    "web-app/src/routes/docs.index.tsx",
+    "web-app/src/routes/lp.lixray-vs-github.tsx",
+    "web-app/src/routes/privacy.tsx",
+    "web-app/src/routes/terms.tsx",
+    "web-app/src/routes/support.tsx",
+  ].includes(file) ||
+    /^web-app\/src\/.*\.css$/.test(file) ||
+    /^web-app\/public\/landing\/.*\.(?:svg|png|jpg|jpeg|webp|avif)$/.test(file);
+}
+
 function isDocumentationOnly(file) {
   if (file.startsWith("docs/")) return true;
   if (file.startsWith("reports/")) return true;
+  if (/^handbook\/.*\.md$/.test(file)) return true;
   if (!file.includes("/") && file.endsWith(".md")) return true;
   return /^perf\/[^/]+\.md$/.test(file);
 }
