@@ -94,11 +94,17 @@ void test("per-tool SQL descriptions are short and omit the shared guide", () =>
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ordered atomic SQL batch/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /verification SELECT/);
-	assert.match(
+	// Shared rules are stated once, in the server instructions.
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /verification SELECT/);
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /create_checkpoint/);
+	assert.match(MCP_SERVER_INSTRUCTIONS, /verification SELECT/);
+	assert.match(MCP_SERVER_INSTRUCTIONS, /Do not checkpoint after every edit/);
+	for (const description of [
+		QUERY_SQL_TOOL_DESCRIPTION,
 		EXECUTE_SQL_TOOL_DESCRIPTION,
-		/Use create_checkpoint for meaningful milestones, not after every edit/,
-	);
+	]) {
+		assert.ok(description.length <= 200, `${description.length} chars`);
+	}
 	assert.doesNotMatch(
 		EXECUTE_SQL_TOOL_DESCRIPTION,
 		/never infer success from prose/,

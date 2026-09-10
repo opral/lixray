@@ -98,8 +98,11 @@ Version-control reads use four surfaces. \`lix_log()\` lists retained commits on
 
 \`lix_as_of('lix_file', $1)\` reads complete state at one retained commit, including file content. Read file bytes lazily through this snapshot surface; history is not a current-state snapshot. Relation arguments must be non-null text literals, not SQL parameters; commit endpoints and anchors accept parameters. Checkpoints no longer add marker records to \`lix_change\`; its counts measure retained source records, not user edits.`;
 
+// Per-tool descriptions say what the tool does and its one hard rule. The
+// shared SQL guide, the no-readback rule, and the checkpoint policy live once
+// in the server instructions, so nothing here repeats them.
 export const QUERY_SQL_TOOL_DESCRIPTION =
-	"LixRay read path: run one read-only SQL statement against the branch selected by context. When file paths are known, read them together in one parameterized statement, for example SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path IN ($1, $2) ORDER BY path; do not list the same paths first or read each file separately. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes. Results arrive in structuredContent.";
+	"Run one read-only SQL statement against the Lix and branch in context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.";
 
 export const EXECUTE_SQL_TOOL_DESCRIPTION =
-	"Run an ordered atomic SQL batch against the branch selected by context. Always treated as potentially destructive; if any statement fails, the complete batch is rolled back. The mutation is already persisted: use rowsAffected and any returned rows, and do not follow a write with a verification SELECT. Use create_checkpoint for meaningful milestones, not after every edit; it is not required to save changes.";
+	"Run an ordered atomic SQL batch against the Lix and branch in context. If any statement fails, the complete batch is rolled back; a returned result is already persisted.";

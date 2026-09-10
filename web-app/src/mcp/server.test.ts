@@ -550,11 +550,33 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(executeSqlTool.annotations?.destructiveHint, true);
 		assert.match(executeSqlTool.description ?? "", /ordered atomic SQL batch/);
 		assert.match(executeSqlTool.description ?? "", /already persisted/);
-		assert.match(executeSqlTool.description ?? "", /verification SELECT/);
-		assert.match(
+		// The no-readback rule and the checkpoint policy live once, in the
+		// server instructions, not on the tool.
+		assert.doesNotMatch(
 			executeSqlTool.description ?? "",
-			/Use create_checkpoint for meaningful milestones, not after every edit/,
+			/verification SELECT/,
 		);
+		assert.doesNotMatch(executeSqlTool.description ?? "", /create_checkpoint/);
+		assert.match(MCP_SERVER_INSTRUCTIONS, /verification SELECT/);
+		// The whole listing stays small: one-line descriptions, success-only
+		// output schemas, and no per-tool copy of the wire-value union.
+		const listingChars = JSON.stringify(tools.tools).length;
+		// Was 28k before descriptions and output schemas were slimmed.
+		assert.ok(
+			listingChars < 22_000,
+			`tools/list is ${listingChars} chars; keep it under 22k`,
+		);
+		for (const tool of tools.tools) {
+			assert.ok(
+				(tool.description ?? "").length <= 320,
+				`${tool.name} description is ${tool.description?.length} chars`,
+			);
+			assert.doesNotMatch(
+				JSON.stringify(tool.outputSchema ?? {}),
+				/"anyOf"/,
+				`${tool.name} output schema must not carry the error branch`,
+			);
+		}
 		for (const tool of tools.tools) {
 			for (const marker of SHARED_GUIDE_MARKERS) {
 				assert.doesNotMatch(
@@ -573,19 +595,14 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			/already saved automatically/,
 		);
 		assert.match(checkpointTool.description ?? "", /not required/);
-		assertCheckpointPolicy(checkpointTool.description ?? "");
+		assertCheckpointPolicy(MCP_SERVER_INSTRUCTIONS);
 		const restoreTool = tools.tools.find((tool) => tool.name === "restore");
 		assert.ok(restoreTool);
 		assert.match(restoreTool.description ?? "", /ancestor/);
-		assert.match(restoreTool.description ?? "", /creates no commit/);
-		assert.match(restoreTool.description ?? "", /does not delete/);
-		assert.match(restoreTool.description ?? "", /not undoable/);
+		assert.match(restoreTool.description ?? "", /without creating a commit/);
+		assert.match(restoreTool.description ?? "", /not undoable/i);
 		assert.match(restoreTool.description ?? "", /undo only applies/);
-		assert.match(restoreTool.description ?? "", /checkpoint-driven/);
-		assert.match(
-			restoreTool.description ?? "",
-			/untracked rows remain unchanged/,
-		);
+		assert.match(restoreTool.description ?? "", /other branches are unchanged/);
 		assert.match(restoreTool.description ?? "", /create_checkpoint returns/);
 		assert.match(restoreTool.description ?? "", /no restore_checkpoint/);
 		assert.equal(restoreTool.annotations?.destructiveHint, true);
@@ -958,21 +975,20 @@ void test("list_lixes text is a clear sentence when no lixes exist", async () =>
 
 void test("checkpoint copy encourages agent judgment at meaningful milestones", () => {
 	assertCheckpointPolicy(MCP_SERVER_INSTRUCTIONS);
-	assertCheckpointPolicy(CREATE_CHECKPOINT_TOOL_DESCRIPTION);
 	assertCheckpointPolicy(MCP_DOCS);
+	// The tool itself keeps only the one fact a caller needs at the call site.
+	assert.match(CREATE_CHECKPOINT_TOOL_DESCRIPTION, /not required to save/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /already saved/);
 	assert.match(MCP_DOCS, /Writes persist without a\s+checkpoint/);
-	assert.match(
-		EXECUTE_SQL_TOOL_DESCRIPTION,
-		/Use create_checkpoint for meaningful milestones, not after every edit/,
-	);
+	// execute_sql states persistence; the checkpoint policy is not repeated.
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /create_checkpoint/);
 });
 
 void test("shipped copy tells agents not to verify writes", async () => {
 	for (const text of [
 		MCP_SERVER_INSTRUCTIONS,
 		LIX_SQL_OPERATING_GUIDE,
-		EXECUTE_SQL_TOOL_DESCRIPTION,
 		MCP_DOCS,
 	]) {
 		assert.match(text, /verification [`']?SELECT/);

@@ -2,7 +2,7 @@
 	{
 		"name": "list_lixes",
 		"title": "LixRay: Discover lixes",
-		"description": "LixRay discovery only: list lixes the signed-in user can access. Call this only when the target Lix is unknown. If the user supplied an exact @handle/slug or Lix UUID, skip this tool and call open_lix directly. Each result identifies a lix as @handle/slug plus uuid.",
+		"description": "List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, call open_lix directly.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -12,13 +12,22 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"lixes": {
-							"type": "array",
-							"items": {
+			"properties": {
+				"lixes": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"name": {
+								"type": "string"
+							},
+							"slug": {
+								"type": "string"
+							},
+							"namespace": {
 								"type": "object",
 								"properties": {
 									"id": {
@@ -27,69 +36,26 @@
 									"name": {
 										"type": "string"
 									},
-									"slug": {
+									"handle": {
 										"type": "string"
-									},
-									"namespace": {
-										"type": "object",
-										"properties": {
-											"id": {
-												"type": "string"
-											},
-											"name": {
-												"type": "string"
-											},
-											"handle": {
-												"type": "string"
-											}
-										},
-										"required": ["id", "name", "handle"],
-										"additionalProperties": false
 									}
 								},
-								"required": ["id", "name", "slug", "namespace"],
+								"required": ["id", "name", "handle"],
 								"additionalProperties": false
 							}
 						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": ["lixes", "request_id"],
-					"additionalProperties": false
+						"required": ["id", "name", "slug", "namespace"],
+						"additionalProperties": false
+					}
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": ["lixes", "request_id"],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": true,
@@ -107,7 +73,7 @@
 	{
 		"name": "open_lix",
 		"title": "LixRay: Open a Lix",
-		"description": "LixRay starting point when the user supplied an exact @handle/slug or Lix UUID: resolve it directly without calling list_lixes first, and mint the signed context required by later tools. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports counts plus a bounded file_paths manifest; when file_paths_complete is true, do not run a separate file-list query.",
+		"description": "Open a Lix by exact @handle/slug or UUID without calling list_lixes first, and mint the context later tools require, pinned to the active branch unless branch_id is given. Returns counts and a bounded file_paths manifest; when file_paths_complete is true, do not list files again.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -129,114 +95,80 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
-						},
-						"context_expires_at": {
-							"type": "string"
-						},
-						"id": {
-							"type": "string"
-						},
-						"url": {
-							"type": "string"
-						},
-						"lix_ref": {
-							"type": "string"
-						},
-						"name": {
-							"type": "string"
-						},
-						"branch_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Lix branch id"
-						},
-						"commit_id": {
-							"type": "string"
-						},
-						"file_count": {
-							"type": "integer",
-							"minimum": -9007199254740991,
-							"maximum": 9007199254740991
-						},
-						"directory_count": {
-							"type": "integer",
-							"minimum": -9007199254740991,
-							"maximum": 9007199254740991
-						},
-						"file_paths": {
-							"type": "array",
-							"items": {
-								"type": "string"
-							}
-						},
-						"file_paths_complete": {
-							"type": "boolean"
-						},
-						"empty": {
-							"type": "boolean"
-						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": [
-						"context",
-						"context_expires_at",
-						"id",
-						"url",
-						"lix_ref",
-						"name",
-						"branch_id",
-						"commit_id",
-						"file_count",
-						"directory_count",
-						"file_paths",
-						"file_paths_complete",
-						"empty",
-						"request_id"
-					],
-					"additionalProperties": false
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"context_expires_at": {
+					"type": "string"
+				},
+				"id": {
+					"type": "string"
+				},
+				"url": {
+					"type": "string"
+				},
+				"lix_ref": {
+					"type": "string"
+				},
+				"name": {
+					"type": "string"
+				},
+				"branch_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Lix branch id"
+				},
+				"commit_id": {
+					"type": "string"
+				},
+				"file_count": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"directory_count": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"file_paths": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"file_paths_complete": {
+					"type": "boolean"
+				},
+				"empty": {
+					"type": "boolean"
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": [
+				"context",
+				"context_expires_at",
+				"id",
+				"url",
+				"lix_ref",
+				"name",
+				"branch_id",
+				"commit_id",
+				"file_count",
+				"directory_count",
+				"file_paths",
+				"file_paths_complete",
+				"empty",
+				"request_id"
+			],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": true,
@@ -254,7 +186,7 @@
 	{
 		"name": "query_sql",
 		"title": "LixRay: Query SQL",
-		"description": "LixRay read path: run one read-only SQL statement against the branch selected by context. When file paths are known, read them together in one parameterized statement, for example SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path IN ($1, $2) ORDER BY path; do not list the same paths first or read each file separately. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes. Results arrive in structuredContent.",
+		"description": "Run one read-only SQL statement against the Lix and branch in context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -380,184 +312,50 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"result": {
 					"type": "object",
 					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
+						"columns": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
 						},
-						"result": {
-							"type": "object",
-							"properties": {
-								"columns": {
-									"type": "array",
-									"items": {
-										"type": "string"
-									}
-								},
-								"rows": {
-									"type": "array",
-									"items": {
-										"type": "array",
-										"items": {
-											"anyOf": [
-												{
-													"type": "object",
-													"properties": {
-														"kind": {
-															"type": "string",
-															"const": "null"
-														},
-														"value": {
-															"type": "null"
-														}
-													},
-													"required": ["kind"],
-													"additionalProperties": false
-												},
-												{
-													"type": "object",
-													"properties": {
-														"kind": {
-															"type": "string",
-															"const": "bool"
-														},
-														"value": {
-															"type": "boolean"
-														}
-													},
-													"required": ["kind", "value"],
-													"additionalProperties": false
-												},
-												{
-													"type": "object",
-													"properties": {
-														"kind": {
-															"type": "string",
-															"const": "int"
-														},
-														"value": {
-															"type": "integer",
-															"minimum": -9007199254740991,
-															"maximum": 9007199254740991
-														}
-													},
-													"required": ["kind", "value"],
-													"additionalProperties": false
-												},
-												{
-													"type": "object",
-													"properties": {
-														"kind": {
-															"type": "string",
-															"const": "float"
-														},
-														"value": {
-															"type": "number"
-														}
-													},
-													"required": ["kind", "value"],
-													"additionalProperties": false
-												},
-												{
-													"type": "object",
-													"properties": {
-														"kind": {
-															"type": "string",
-															"const": "text"
-														},
-														"value": {
-															"type": "string"
-														}
-													},
-													"required": ["kind", "value"],
-													"additionalProperties": false
-												},
-												{
-													"type": "object",
-													"properties": {
-														"kind": {
-															"type": "string",
-															"const": "blob"
-														},
-														"base64": {
-															"type": "string"
-														}
-													},
-													"required": ["kind", "base64"],
-													"additionalProperties": false
-												},
-												{
-													"type": "object",
-													"properties": {
-														"kind": {
-															"type": "string",
-															"const": "json"
-														},
-														"value": {}
-													},
-													"required": ["kind", "value"],
-													"additionalProperties": false
-												}
-											]
-										}
-									}
-								},
-								"rowsAffected": {
-									"type": "integer",
-									"minimum": -9007199254740991,
-									"maximum": 9007199254740991
-								},
-								"notices": {
-									"type": "array",
-									"items": {}
-								}
+						"rows": {
+							"type": "array",
+							"items": {
+								"type": "array",
+								"items": {}
 							},
-							"required": ["columns", "rows", "rowsAffected", "notices"],
-							"additionalProperties": false
+							"description": "Rows of wire values in the same {kind, value} shape as params"
 						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
+						"rowsAffected": {
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						"notices": {
+							"type": "array",
+							"items": {}
 						}
 					},
-					"required": ["context", "result", "request_id"],
+					"required": ["columns", "rows", "rowsAffected", "notices"],
 					"additionalProperties": false
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": ["context", "result", "request_id"],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": true,
@@ -575,7 +373,7 @@
 	{
 		"name": "execute_sql",
 		"title": "Execute SQL atomically",
-		"description": "Run an ordered atomic SQL batch against the branch selected by context. Always treated as potentially destructive; if any statement fails, the complete batch is rolled back. The mutation is already persisted: use rowsAffected and any returned rows, and do not follow a write with a verification SELECT. Use create_checkpoint for meaningful milestones, not after every edit; it is not required to save changes.",
+		"description": "Run an ordered atomic SQL batch against the Lix and branch in context. If any statement fails, the complete batch is rolled back; a returned result is already persisted.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -721,187 +519,53 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
-						},
-						"results": {
-							"type": "array",
-							"items": {
-								"type": "object",
-								"properties": {
-									"columns": {
-										"type": "array",
-										"items": {
-											"type": "string"
-										}
-									},
-									"rows": {
-										"type": "array",
-										"items": {
-											"type": "array",
-											"items": {
-												"anyOf": [
-													{
-														"type": "object",
-														"properties": {
-															"kind": {
-																"type": "string",
-																"const": "null"
-															},
-															"value": {
-																"type": "null"
-															}
-														},
-														"required": ["kind"],
-														"additionalProperties": false
-													},
-													{
-														"type": "object",
-														"properties": {
-															"kind": {
-																"type": "string",
-																"const": "bool"
-															},
-															"value": {
-																"type": "boolean"
-															}
-														},
-														"required": ["kind", "value"],
-														"additionalProperties": false
-													},
-													{
-														"type": "object",
-														"properties": {
-															"kind": {
-																"type": "string",
-																"const": "int"
-															},
-															"value": {
-																"type": "integer",
-																"minimum": -9007199254740991,
-																"maximum": 9007199254740991
-															}
-														},
-														"required": ["kind", "value"],
-														"additionalProperties": false
-													},
-													{
-														"type": "object",
-														"properties": {
-															"kind": {
-																"type": "string",
-																"const": "float"
-															},
-															"value": {
-																"type": "number"
-															}
-														},
-														"required": ["kind", "value"],
-														"additionalProperties": false
-													},
-													{
-														"type": "object",
-														"properties": {
-															"kind": {
-																"type": "string",
-																"const": "text"
-															},
-															"value": {
-																"type": "string"
-															}
-														},
-														"required": ["kind", "value"],
-														"additionalProperties": false
-													},
-													{
-														"type": "object",
-														"properties": {
-															"kind": {
-																"type": "string",
-																"const": "blob"
-															},
-															"base64": {
-																"type": "string"
-															}
-														},
-														"required": ["kind", "base64"],
-														"additionalProperties": false
-													},
-													{
-														"type": "object",
-														"properties": {
-															"kind": {
-																"type": "string",
-																"const": "json"
-															},
-															"value": {}
-														},
-														"required": ["kind", "value"],
-														"additionalProperties": false
-													}
-												]
-											}
-										}
-									},
-									"rowsAffected": {
-										"type": "integer",
-										"minimum": -9007199254740991,
-										"maximum": 9007199254740991
-									},
-									"notices": {
-										"type": "array",
-										"items": {}
-									}
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"results": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"columns": {
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"rows": {
+								"type": "array",
+								"items": {
+									"type": "array",
+									"items": {}
 								},
-								"required": ["columns", "rows", "rowsAffected", "notices"],
-								"additionalProperties": false
+								"description": "Rows of wire values in the same {kind, value} shape as params"
+							},
+							"rowsAffected": {
+								"type": "integer",
+								"minimum": -9007199254740991,
+								"maximum": 9007199254740991
+							},
+							"notices": {
+								"type": "array",
+								"items": {}
 							}
 						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": ["context", "results", "request_id"],
-					"additionalProperties": false
+						"required": ["columns", "rows", "rowsAffected", "notices"],
+						"additionalProperties": false
+					}
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": ["context", "results", "request_id"],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": false,
@@ -937,62 +601,28 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
-						},
-						"branch_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Lix branch id"
-						},
-						"commit_id": {
-							"type": "string"
-						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": ["context", "branch_id", "commit_id", "request_id"],
-					"additionalProperties": false
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"branch_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Lix branch id"
+				},
+				"commit_id": {
+					"type": "string"
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": ["context", "branch_id", "commit_id", "request_id"],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": true,
@@ -1032,62 +662,28 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
-						},
-						"branch_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Lix branch id"
-						},
-						"commit_id": {
-							"type": "string"
-						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": ["context", "branch_id", "commit_id", "request_id"],
-					"additionalProperties": false
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"branch_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Lix branch id"
+				},
+				"commit_id": {
+					"type": "string"
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": ["context", "branch_id", "commit_id", "request_id"],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": true,
@@ -1132,73 +728,39 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"branch": {
 					"type": "object",
 					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
+						"id": {
+							"type": "string"
 						},
-						"branch": {
-							"type": "object",
-							"properties": {
-								"id": {
-									"type": "string"
-								},
-								"name": {
-									"type": "string"
-								},
-								"hidden": {
-									"type": "boolean"
-								},
-								"commit_id": {
-									"type": "string"
-								}
-							},
-							"required": ["id", "name", "hidden", "commit_id"],
-							"additionalProperties": false
+						"name": {
+							"type": "string"
 						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
+						"hidden": {
+							"type": "boolean"
+						},
+						"commit_id": {
+							"type": "string"
 						}
 					},
-					"required": ["context", "branch", "request_id"],
+					"required": ["id", "name", "hidden", "commit_id"],
 					"additionalProperties": false
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": ["context", "branch", "request_id"],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": false,
@@ -1217,7 +779,7 @@
 	{
 		"name": "create_checkpoint",
 		"title": "Create checkpoint",
-		"description": "Mark meaningful milestones on the branch selected by context so the user can follow your work and return to important states. Use after completing a substantial, coherent piece of work or when the user asks. Use judgment: routine edits and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. Changes are already saved automatically; a checkpoint is not required to save changes.",
+		"description": "Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1234,57 +796,23 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
-						},
-						"commit_id": {
-							"type": "string"
-						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": ["context", "commit_id", "request_id"],
-					"additionalProperties": false
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"commit_id": {
+					"type": "string"
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": ["context", "commit_id", "request_id"],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": false,
@@ -1303,7 +831,7 @@
 	{
 		"name": "restore",
 		"title": "Restore branch",
-		"description": "Move the branch selected by context to ancestor commit_id. Restore creates no commit, does not delete abandoned commits, and is not undoable; undo only applies to commits made afterward. A later checkpoint-driven garbage-collection sweep may reclaim abandoned commits that are not reachable from a retention root; other branches and branch-local untracked rows remain unchanged. create_checkpoint returns a commit_id usable here; there is no restore_checkpoint tool.",
+		"description": "Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1325,62 +853,28 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
-						},
-						"branch_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Lix branch id"
-						},
-						"commit_id": {
-							"type": "string"
-						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": ["context", "branch_id", "commit_id", "request_id"],
-					"additionalProperties": false
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"branch_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Lix branch id"
+				},
+				"commit_id": {
+					"type": "string"
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": ["context", "branch_id", "commit_id", "request_id"],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": false,
@@ -1416,71 +910,37 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
-						},
-						"branch_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Lix branch id"
-						},
-						"target_commit_id": {
-							"type": "string"
-						},
-						"inverse_commit_id": {
-							"type": "string"
-						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": [
-						"context",
-						"branch_id",
-						"target_commit_id",
-						"inverse_commit_id",
-						"request_id"
-					],
-					"additionalProperties": false
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"branch_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Lix branch id"
+				},
+				"target_commit_id": {
+					"type": "string"
+				},
+				"inverse_commit_id": {
+					"type": "string"
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": [
+				"context",
+				"branch_id",
+				"target_commit_id",
+				"inverse_commit_id",
+				"request_id"
+			],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": false,
@@ -1516,71 +976,37 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
-						},
-						"branch_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Lix branch id"
-						},
-						"target_commit_id": {
-							"type": "string"
-						},
-						"replay_commit_id": {
-							"type": "string"
-						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": [
-						"context",
-						"branch_id",
-						"target_commit_id",
-						"replay_commit_id",
-						"request_id"
-					],
-					"additionalProperties": false
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"branch_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Lix branch id"
+				},
+				"target_commit_id": {
+					"type": "string"
+				},
+				"replay_commit_id": {
+					"type": "string"
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": [
+				"context",
+				"branch_id",
+				"target_commit_id",
+				"replay_commit_id",
+				"request_id"
+			],
+			"additionalProperties": false
 		},
 		"annotations": {
 			"readOnlyHint": false,
@@ -1621,54 +1047,20 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
-						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": ["context", "request_id"],
-					"additionalProperties": {}
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": ["context", "request_id"],
+			"additionalProperties": {}
 		},
 		"annotations": {
 			"readOnlyHint": true,
@@ -1708,54 +1100,20 @@
 		"outputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
-			"anyOf": [
-				{
-					"type": "object",
-					"properties": {
-						"context": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Opaque Lix context returned by open_lix or switch_branch"
-						},
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						}
-					},
-					"required": ["context", "request_id"],
-					"additionalProperties": {}
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
 				},
-				{
-					"type": "object",
-					"properties": {
-						"request_id": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Request ID for correlating this response with server telemetry"
-						},
-						"error": {
-							"type": "object",
-							"properties": {
-								"code": {
-									"type": "string"
-								},
-								"message": {
-									"type": "string"
-								},
-								"hint": {
-									"type": "string"
-								},
-								"details": {}
-							},
-							"required": ["code", "message"],
-							"additionalProperties": false
-						}
-					},
-					"required": ["request_id", "error"],
-					"additionalProperties": false
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
 				}
-			]
+			},
+			"required": ["context", "request_id"],
+			"additionalProperties": {}
 		},
 		"annotations": {
 			"readOnlyHint": false,

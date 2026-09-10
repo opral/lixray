@@ -4,6 +4,13 @@ LixRay exposes Lix through a deliberately small MCP surface. SQL is the
 universal interface for repository data; there are no separate file or entity
 tools. Lix SQL is a Postgres dialect subset.
 
+Guidance is stated once. The server `instructions` carry the SQL operating
+guide, the no-readback rule, and the checkpoint policy; each tool description
+is one or two sentences saying what the tool does and its one hard rule, and
+output schemas describe the success shape only (errors return `isError` with
+`{ request_id, error }`). Keep it that way: repeating the guide per tool only
+adds reading overhead for every agent that lists the tools.
+
 ## End-to-end trace correlation
 
 MCP clients can attach LixRay tool calls to an existing PostHog AI trace by

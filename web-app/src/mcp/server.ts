@@ -53,16 +53,16 @@ ${LIX_SQL_OPERATING_GUIDE}
 Writes persist without a checkpoint; execute_sql already saved the files. Use create_checkpoint to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent file helper tools or branch state.`;
 
 export const CREATE_CHECKPOINT_TOOL_DESCRIPTION =
-	"Mark meaningful milestones on the branch selected by context so the user can follow your work and return to important states. Use after completing a substantial, coherent piece of work or when the user asks. Use judgment: routine edits and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. Changes are already saved automatically; a checkpoint is not required to save changes.";
+	"Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.";
 
 export const RESTORE_TOOL_DESCRIPTION =
-	"Move the branch selected by context to ancestor commit_id. Restore creates no commit, does not delete abandoned commits, and is not undoable; undo only applies to commits made afterward. A later checkpoint-driven garbage-collection sweep may reclaim abandoned commits that are not reachable from a retention root; other branches and branch-local untracked rows remain unchanged. create_checkpoint returns a commit_id usable here; there is no restore_checkpoint tool.";
+	"Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.";
 
 export const LIST_LIXES_TOOL_DESCRIPTION =
-	"LixRay discovery only: list lixes the signed-in user can access. Call this only when the target Lix is unknown. If the user supplied an exact @handle/slug or Lix UUID, skip this tool and call open_lix directly. Each result identifies a lix as @handle/slug plus uuid.";
+	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, call open_lix directly.";
 
 export const OPEN_LIX_TOOL_DESCRIPTION =
-	"LixRay starting point when the user supplied an exact @handle/slug or Lix UUID: resolve it directly without calling list_lixes first, and mint the signed context required by later tools. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports counts plus a bounded file_paths manifest; when file_paths_complete is true, do not run a separate file-list query.";
+	"Open a Lix by exact @handle/slug or UUID without calling list_lixes first, and mint the context later tools require, pinned to the active branch unless branch_id is given. Returns counts and a bounded file_paths manifest; when file_paths_complete is true, do not list files again.";
 
 type McpAuthMode = "oauth" | "none";
 
@@ -342,19 +342,11 @@ const sqlStatement = z
 	.object({ sql: z.string().min(1), params: z.array(wireValue).optional() })
 	.strict();
 
-const errorOutput = z
-	.object({
-		request_id: requestIdValue,
-		error: z
-			.object({
-				code: z.string(),
-				message: z.string(),
-				hint: z.string().optional(),
-				details: z.unknown().optional(),
-			})
-			.strict(),
-	})
-	.strict();
+// Rows carry the same {kind, value} wire shape as params; the output schema
+// says so once instead of inlining the union again per tool.
+const wireRows = z
+	.array(z.array(z.unknown()))
+	.describe("Rows of wire values in the same {kind, value} shape as params");
 
 const listLixesOutput = withError(
 	z.object({
@@ -398,7 +390,7 @@ const executeOutput = withError(
 		result: z
 			.object({
 				columns: z.array(z.string()),
-				rows: z.array(z.array(wireValue)),
+				rows: wireRows,
 				rowsAffected: z.number().int(),
 				notices: z.array(z.unknown()),
 			})
@@ -412,7 +404,7 @@ const executeBatchOutput = withError(
 			z
 				.object({
 					columns: z.array(z.string()),
-					rows: z.array(z.array(wireValue)),
+					rows: wireRows,
 					rowsAffected: z.number().int(),
 					notices: z.array(z.unknown()),
 				})
@@ -1525,8 +1517,14 @@ function toMcpError(
 	};
 }
 
+/**
+ * Output schemas describe the success shape only. Errors return
+ * `isError: true` with `{ request_id, error: { code, message, hint? } }`,
+ * which the SDK does not validate against the schema, so no tool needs to
+ * carry the error branch in tools/list.
+ */
 function withError(schema: z.ZodObject<any>) {
-	return z.union([schema.extend({ request_id: requestIdValue }), errorOutput]);
+	return schema.extend({ request_id: requestIdValue });
 }
 
 function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
