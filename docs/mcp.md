@@ -69,9 +69,16 @@ as clickable chips inside the step: `open_lix` links the repository, and an
 `execute_sql` batch links each file or directory it wrote or updated, with
 the same canonical URL `get_entity_urls` would return. The summary names the
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
-affected"), read from the batch's own statements, so an agent's narration
-is not the only trace of what happened. Reads link nothing; deletions are
-named in the summary but not linked.
+affected"), so an agent's narration is not the only trace of what happened.
+
+This comes from Lix, not from parsing SQL. Every `execute_sql` call stamps
+its changes with an `origin_key` of `mcp:<request_id>` (a caller-supplied
+`origin_key` becomes its prefix), and the server then asks `lix_change`
+what carries that key. A file with a descriptor change was written or
+renamed, one with only content or entity changes was updated, a null
+descriptor snapshot was deleted; directories likewise. Renames, writes by
+id, and cascades all show up because Lix recorded them. Reads link
+nothing; deletions are named in the summary but not linked.
 
 ## Restore an ancestor
 

@@ -1,150 +1,176 @@
 /**
- * Which files and directories an execute_sql batch touched, read from the
- * statements themselves. This feeds the human summary and the resource
- * links a host can render ("Wrote sales/lead-research.md"), so it only has
- * to be right for the SQL the operating guide teaches: INSERT with a column
- * list, UPDATE/DELETE with `path = $n` or a literal, and `path IN (…)`.
- * Anything it cannot read yields no entry rather than a wrong one.
+ * What an execute_sql batch touched, read from Lix's own change log rather
+ * than from the SQL text. Every execute stamps its changes with an
+ * `origin_key`; the server gives each MCP call a unique one and then asks
+ * `lix_change` what carries it. Renames, writes by id, cascades, and
+ * plugin entities all show up the same way, because Lix recorded them.
  */
+
+import type { WireValue } from "./lix-service.ts";
 
 export type TouchedAction = "wrote" | "updated" | "deleted";
 
 export type TouchedEntity = {
 	readonly kind: "file" | "directory";
+	/** Absolute path; for a deleted entity only the name may be known. */
 	readonly path: string;
 	readonly action: TouchedAction;
 };
 
-type Statement = {
-	readonly sql: string;
-	readonly params?: ReadonlyArray<unknown>;
+/** The origin key a call stamps on its changes; a supplied key is its prefix. */
+export function mcpOriginKey(requestId: string, supplied?: string): string {
+	const own = `mcp:${requestId}`;
+	return supplied ? `${supplied}:${own}` : own;
+}
+
+export const TOUCHED_CHANGES_SQL =
+	"SELECT c.schema_key, c.file_id, c.row_pk, CAST(c.snapshot_content AS TEXT) AS snapshot, f.path AS file_path FROM lix_change c LEFT JOIN lix_file f ON f.id = c.file_id WHERE c.origin_key = $1";
+
+export const DELETED_FILE_NAMES_SQL =
+	"SELECT file_id, CAST(snapshot_content AS TEXT) AS snapshot FROM lix_change WHERE schema_key = 'lix_file_descriptor' AND snapshot_content IS NOT NULL AND file_id IN (SELECT file_id FROM lix_change WHERE origin_key = $1 AND schema_key = 'lix_file_descriptor' AND snapshot_content IS NULL) ORDER BY created_at DESC";
+
+export function directoryPathsSql(count: number): string {
+	const placeholders = Array.from({ length: count }, (_, i) => `$${i + 1}`);
+	return `SELECT id, path FROM lix_directory WHERE id IN (${placeholders.join(", ")})`;
+}
+
+type ResultLike = {
+	readonly columns: ReadonlyArray<string>;
+	readonly rows: ReadonlyArray<ReadonlyArray<WireValue>>;
 };
 
-const TARGET =
-	/^\s*(insert\s+into|update|delete\s+from)\s+(?:public\.)?lix_(file|directory)\b/i;
+function cell(
+	result: ResultLike,
+	row: ReadonlyArray<WireValue>,
+	column: string,
+) {
+	const index = result.columns.indexOf(column);
+	return index === -1 ? undefined : row[index];
+}
 
-function paramText(params: ReadonlyArray<unknown> | undefined, ref: string) {
-	const index = Number(ref.slice(1)) - 1;
-	const value = params?.[index];
-	if (typeof value === "string") return value;
-	if (
-		value &&
-		typeof value === "object" &&
-		(value as { kind?: unknown }).kind === "text" &&
-		typeof (value as { value?: unknown }).value === "string"
-	)
-		return (value as { value: string }).value;
+function textOf(value: WireValue | undefined): string | null {
+	if (!value) return null;
+	if (value.kind === "text" || value.kind === "timestamp") return value.value;
+	if (value.kind === "json")
+		return typeof value.value === "string"
+			? value.value
+			: JSON.stringify(value.value);
 	return null;
 }
 
-/** A `$n` reference or a single-quoted literal, resolved to text. */
-function resolveToken(token: string, params?: ReadonlyArray<unknown>) {
-	const trimmed = token.trim();
-	if (/^\$\d+$/.test(trimmed)) return paramText(params, trimmed);
-	const literal = /^'((?:[^']|'')*)'$/.exec(trimmed);
-	return literal ? literal[1]!.replace(/''/g, "'") : null;
+function firstIdOf(value: WireValue | undefined): string | null {
+	if (!value) return null;
+	const raw = value.kind === "json" ? value.value : textOf(value);
+	const parsed =
+		typeof raw === "string" && raw.startsWith("[")
+			? (JSON.parse(raw) as unknown)
+			: raw;
+	if (Array.isArray(parsed) && typeof parsed[0] === "string") return parsed[0];
+	return typeof parsed === "string" ? parsed : null;
 }
 
-function isPath(value: string | null): value is string {
-	return (
-		value !== null &&
-		value.startsWith("/") &&
-		value.length > 1 &&
-		value.length <= 512 &&
-		!/[\r\n]/.test(value)
-	);
-}
-
-/** Splits on commas outside parentheses and quotes. */
-function splitTopLevel(text: string): string[] {
-	const parts: string[] = [];
-	let depth = 0;
-	let quoted = false;
-	let current = "";
-	for (const character of text) {
-		if (character === "'") quoted = !quoted;
-		if (!quoted) {
-			if (character === "(") depth += 1;
-			if (character === ")") depth -= 1;
-			if (character === "," && depth === 0) {
-				parts.push(current);
-				current = "";
-				continue;
-			}
-		}
-		current += character;
+function snapshotOf(
+	value: WireValue | undefined,
+): Record<string, unknown> | null {
+	if (!value || value.kind === "null") return null;
+	const raw = value.kind === "json" ? value.value : textOf(value);
+	if (raw && typeof raw === "object") return raw as Record<string, unknown>;
+	if (typeof raw !== "string") return null;
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		return parsed && typeof parsed === "object"
+			? (parsed as Record<string, unknown>)
+			: null;
+	} catch {
+		return null;
 	}
-	parts.push(current);
-	return parts;
 }
 
-function insertPaths(sql: string, params?: ReadonlyArray<unknown>): string[] {
-	const match = /\(([^)]*)\)\s*values\s*\(/i.exec(sql);
-	if (!match) return [];
-	const columns = match[1]!
-		.split(",")
-		.map((column) => column.trim().toLowerCase());
-	const pathIndex = columns.indexOf("path");
-	if (pathIndex === -1) return [];
-	const paths: string[] = [];
-	// Every VALUES tuple: `(…), (…)`.
-	const tuples = sql.slice(match.index + match[0].length - 1);
-	const tupleMatcher = /\(((?:[^()']|'(?:[^']|'')*'|\([^()]*\))*)\)/g;
-	for (const tuple of tuples.matchAll(tupleMatcher)) {
-		const values = splitTopLevel(tuple[1]!);
-		const resolved = resolveToken(values[pathIndex] ?? "", params);
-		if (isPath(resolved)) paths.push(resolved);
+export type TouchedChanges = {
+	/** Files still present, keyed by id, with their current path. */
+	readonly files: ReadonlyArray<TouchedEntity>;
+	/** Ids of files the batch deleted; their names need a second read. */
+	readonly deletedFileIds: ReadonlyArray<string>;
+	/** Ids of directories the batch created or renamed; paths need a read. */
+	readonly directoryIds: ReadonlyArray<string>;
+	readonly deletedDirectoryCount: number;
+};
+
+/**
+ * Folds the change rows of one origin key. A file with a descriptor change
+ * was written (created or renamed); one with only content or plugin-entity
+ * changes was updated; a null descriptor snapshot means deleted.
+ */
+export function touchedFromChanges(result: ResultLike): TouchedChanges {
+	const files = new Map<
+		string,
+		{ path: string | null; descriptor: boolean; deleted: boolean }
+	>();
+	const directoryIds = new Set<string>();
+	let deletedDirectoryCount = 0;
+	for (const row of result.rows) {
+		const schemaKey = textOf(cell(result, row, "schema_key"));
+		const snapshot = snapshotOf(cell(result, row, "snapshot"));
+		if (schemaKey === "lix_directory_descriptor") {
+			const id = firstIdOf(cell(result, row, "row_pk"));
+			if (snapshot === null) deletedDirectoryCount += 1;
+			else if (id) directoryIds.add(id);
+			continue;
+		}
+		const fileId = textOf(cell(result, row, "file_id"));
+		if (!fileId) continue;
+		const entry = files.get(fileId) ?? {
+			path: null,
+			descriptor: false,
+			deleted: false,
+		};
+		entry.path ??= textOf(cell(result, row, "file_path"));
+		if (schemaKey === "lix_file_descriptor") {
+			if (snapshot === null) entry.deleted = true;
+			else entry.descriptor = true;
+		}
+		files.set(fileId, entry);
+	}
+	const present: TouchedEntity[] = [];
+	const deletedFileIds: string[] = [];
+	for (const [id, entry] of files) {
+		if (entry.deleted || entry.path === null) {
+			deletedFileIds.push(id);
+			continue;
+		}
+		present.push({
+			kind: "file",
+			path: entry.path,
+			action: entry.descriptor ? "wrote" : "updated",
+		});
+	}
+	return {
+		files: present,
+		deletedFileIds,
+		directoryIds: [...directoryIds],
+		deletedDirectoryCount,
+	};
+}
+
+/** Names for deleted files from their last descriptor snapshot. */
+export function deletedFileNames(result: ResultLike): Map<string, string> {
+	const names = new Map<string, string>();
+	for (const row of result.rows) {
+		const id = textOf(cell(result, row, "file_id"));
+		const name = snapshotOf(cell(result, row, "snapshot"))?.name;
+		if (id && typeof name === "string" && !names.has(id)) names.set(id, name);
+	}
+	return names;
+}
+
+export function directoryPaths(result: ResultLike): Map<string, string> {
+	const paths = new Map<string, string>();
+	for (const row of result.rows) {
+		const id = textOf(cell(result, row, "id"));
+		const path = textOf(cell(result, row, "path"));
+		if (id && path) paths.set(id, path);
 	}
 	return paths;
-}
-
-function wherePaths(sql: string, params?: ReadonlyArray<unknown>): string[] {
-	const paths: string[] = [];
-	for (const match of sql.matchAll(/\bpath\s*=\s*(\$\d+|'(?:[^']|'')*')/gi)) {
-		const resolved = resolveToken(match[1]!, params);
-		if (isPath(resolved)) paths.push(resolved);
-	}
-	for (const match of sql.matchAll(/\bpath\s+in\s*\(([^)]*)\)/gi)) {
-		for (const token of match[1]!.split(",")) {
-			const resolved = resolveToken(token, params);
-			if (isPath(resolved)) paths.push(resolved);
-		}
-	}
-	return paths;
-}
-
-export function touchedEntities(
-	statements: ReadonlyArray<Statement>,
-): TouchedEntity[] {
-	const touched = new Map<string, TouchedEntity>();
-	for (const statement of statements) {
-		const match = TARGET.exec(statement.sql);
-		if (!match) continue;
-		const verb = match[1]!.toLowerCase();
-		const kind = match[2]!.toLowerCase() as TouchedEntity["kind"];
-		const action: TouchedAction = verb.startsWith("insert")
-			? "wrote"
-			: verb === "update"
-				? "updated"
-				: "deleted";
-		const paths = verb.startsWith("insert")
-			? insertPaths(statement.sql, statement.params)
-			: wherePaths(statement.sql, statement.params);
-		for (const path of paths) {
-			const key = `${kind}:${path}`;
-			const previous = touched.get(key);
-			touched.set(key, {
-				kind,
-				path,
-				// A file written then updated in one batch was written.
-				action:
-					previous?.action === "wrote" && action === "updated"
-						? "wrote"
-						: action,
-			});
-		}
-	}
-	return [...touched.values()];
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -170,6 +196,7 @@ export function mimeTypeForPath(path: string): string | undefined {
 export function describeTouched(
 	touched: ReadonlyArray<TouchedEntity>,
 	rowsAffected: number,
+	deletedDirectoryCount = 0,
 ): string {
 	const byAction = new Map<TouchedAction, string[]>();
 	for (const entity of touched) {
@@ -186,6 +213,10 @@ export function describeTouched(
 		const paths = byAction.get(action);
 		if (paths?.length) parts.push(`${label} ${paths.join(", ")}`);
 	}
+	if (deletedDirectoryCount > 0)
+		parts.push(
+			`Deleted ${deletedDirectoryCount} ${deletedDirectoryCount === 1 ? "folder" : "folders"}`,
+		);
 	parts.push(`${rowsAffected} ${rowsAffected === 1 ? "row" : "rows"} affected`);
 	return parts.join(" · ");
 }

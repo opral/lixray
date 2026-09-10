@@ -38,7 +38,7 @@ export const EXECUTE_SQL_CORE_TABLES: ReadonlyArray<ExecuteSqlCoreTable> = [
 			"Retained repository-global source records; use them for source activity and audit, not counts of user edits or net differences.",
 		columns: [
 			"id",
-			"entity_pk",
+			"row_pk",
 			"schema_key",
 			"file_id",
 			"snapshot_content",

@@ -1,91 +1,125 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	deletedFileNames,
 	describeTouched,
+	directoryPaths,
+	directoryPathsSql,
+	mcpOriginKey,
 	mimeTypeForPath,
-	touchedEntities,
+	touchedFromChanges,
 } from "./touched-entities.ts";
 
-const text = (value: string) => ({ kind: "text", value });
+const text = (value: string) => ({ kind: "text" as const, value });
+const json = (value: unknown) => ({ kind: "json" as const, value });
+const nul = { kind: "null" as const };
+const COLUMNS = ["schema_key", "file_id", "row_pk", "snapshot", "file_path"];
 
-void test("reads the path of an INSERT from its column list and params", () => {
-	assert.deepEqual(
-		touchedEntities([
-			{
-				sql: "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content",
-				params: [text("/sales/lead-research.md"), text("/not a path\nbody")],
-			},
-		]),
-		[{ kind: "file", path: "/sales/lead-research.md", action: "wrote" }],
-	);
+void test("every call gets its own origin key; a supplied one becomes its prefix", () => {
+	assert.equal(mcpOriginKey("req-1"), "mcp:req-1");
+	assert.equal(mcpOriginKey("req-1", "codex"), "codex:mcp:req-1");
 });
 
-void test("reads several VALUES tuples, literals, and directories", () => {
-	assert.deepEqual(
-		touchedEntities([
-			{
-				sql: "INSERT INTO lix_directory (path) VALUES ('/sales'), ($1) ON CONFLICT (path) DO NOTHING",
-				params: [text("/sales/archive")],
-			},
-		]),
-		[
-			{ kind: "directory", path: "/sales", action: "wrote" },
-			{ kind: "directory", path: "/sales/archive", action: "wrote" },
+void test("a descriptor change is a write, content alone is an update, a null descriptor is a delete", () => {
+	const touched = touchedFromChanges({
+		columns: COLUMNS,
+		rows: [
+			// created: descriptor + blob
+			[
+				text("lix_file_descriptor"),
+				text("f1"),
+				json(["f1"]),
+				text('{"name":"a.md"}'),
+				text("/docs/a.md"),
+			],
+			[
+				text("lix_binary_blob_ref"),
+				text("f1"),
+				json(["f1"]),
+				text('{"blob_hash":"x"}'),
+				text("/docs/a.md"),
+			],
+			// updated: blob only
+			[
+				text("lix_binary_blob_ref"),
+				text("f2"),
+				json(["f2"]),
+				text('{"blob_hash":"y"}'),
+				text("/leads.csv"),
+			],
+			// plugin entity change counts as an update of its file
+			[
+				text("csv_cell"),
+				text("f3"),
+				json(["f3", "r1", "c1"]),
+				text('{"v":"1"}'),
+				text("/data.csv"),
+			],
+			// deleted: descriptor null, file gone
+			[text("lix_file_descriptor"), text("f4"), json(["f4"]), nul, nul],
+			[text("lix_binary_blob_ref"), text("f4"), json(["f4"]), nul, nul],
+			// directory created, directory deleted
+			[
+				text("lix_directory_descriptor"),
+				nul,
+				json(["d1"]),
+				text('{"id":"d1","name":"sales"}'),
+				nul,
+			],
+			[text("lix_directory_descriptor"), nul, json(["d2"]), nul, nul],
 		],
-	);
+	});
+	assert.deepEqual(touched.files, [
+		{ kind: "file", path: "/docs/a.md", action: "wrote" },
+		{ kind: "file", path: "/leads.csv", action: "updated" },
+		{ kind: "file", path: "/data.csv", action: "updated" },
+	]);
+	assert.deepEqual(touched.deletedFileIds, ["f4"]);
+	assert.deepEqual(touched.directoryIds, ["d1"]);
+	assert.equal(touched.deletedDirectoryCount, 1);
 });
 
-void test("UPDATE and DELETE read paths from WHERE, by param, literal, or IN list", () => {
-	assert.deepEqual(
-		touchedEntities([
-			{
-				sql: "UPDATE lix_file SET content = CAST($1 AS BYTEA) WHERE path = $2",
-				params: [text("body"), text("/gtm/leads.csv")],
-			},
-			{
-				sql: "DELETE FROM lix_file WHERE path IN ('/old.csv', $1)",
-				params: [text("/older.csv")],
-			},
-			{ sql: "DELETE FROM public.lix_file WHERE path = 'it''s.md'" },
-		]),
-		[
-			{ kind: "file", path: "/gtm/leads.csv", action: "updated" },
-			{ kind: "file", path: "/old.csv", action: "deleted" },
-			{ kind: "file", path: "/older.csv", action: "deleted" },
+void test("row_pk and snapshots arrive as json or text alike", () => {
+	const touched = touchedFromChanges({
+		columns: COLUMNS,
+		rows: [
+			[
+				text("lix_directory_descriptor"),
+				nul,
+				text('["d9"]'),
+				json({ id: "d9", name: "x" }),
+				nul,
+			],
 		],
-	);
+	});
+	assert.deepEqual(touched.directoryIds, ["d9"]);
 });
 
-void test("statements it cannot read yield nothing, never a guess", () => {
+void test("follow-up reads resolve deleted file names and directory paths", () => {
 	assert.deepEqual(
-		touchedEntities([
-			{
-				sql: "UPDATE lix_file SET content = $1 WHERE id = $2",
-				params: [text("x"), text("id")],
-			},
-			{
-				sql: "INSERT INTO lix_key_value (key, value) VALUES ($1, $2)",
-				params: [text("/k"), text("v")],
-			},
-			{ sql: "SELECT path FROM lix_file WHERE path = '/read.md'" },
-		]),
-		[],
+		[
+			...deletedFileNames({
+				columns: ["file_id", "snapshot"],
+				rows: [
+					[text("f4"), text('{"name":"gone.md"}')],
+					[text("f4"), text('{"name":"older-name.md"}')],
+				],
+			}),
+		],
+		[["f4", "gone.md"]],
 	);
-});
-
-void test("a file written and then updated in one batch was written", () => {
+	assert.equal(
+		directoryPathsSql(2),
+		"SELECT id, path FROM lix_directory WHERE id IN ($1, $2)",
+	);
 	assert.deepEqual(
-		touchedEntities([
-			{
-				sql: "INSERT INTO lix_file (path, content) VALUES ('/a.md', $1)",
-				params: [text("x")],
-			},
-			{
-				sql: "UPDATE lix_file SET content = $1 WHERE path = '/a.md'",
-				params: [text("y")],
-			},
-		]),
-		[{ kind: "file", path: "/a.md", action: "wrote" }],
+		[
+			...directoryPaths({
+				columns: ["id", "path"],
+				rows: [[text("d1"), text("/sales")]],
+			}),
+		],
+		[["d1", "/sales"]],
 	);
 });
 
@@ -95,11 +129,13 @@ void test("describes the batch by action, then rows", () => {
 			[
 				{ kind: "file", path: "/sales/lead-research.md", action: "wrote" },
 				{ kind: "file", path: "/gtm/leads.csv", action: "updated" },
+				{ kind: "file", path: "gone.md", action: "deleted" },
 				{ kind: "directory", path: "/sales", action: "wrote" },
 			],
 			7,
+			1,
 		),
-		"Wrote sales/lead-research.md, sales · Updated gtm/leads.csv · 7 rows affected",
+		"Wrote sales/lead-research.md, sales · Updated gtm/leads.csv · Deleted gone.md · Deleted 1 folder · 7 rows affected",
 	);
 	assert.equal(describeTouched([], 1), "1 row affected");
 	assert.equal(mimeTypeForPath("/x/notes.MD"), "text/markdown");

@@ -131,6 +131,7 @@ const SHARED_GUIDE_MARKERS = [
 ] as const;
 
 class FakeRuntime implements LixRuntimeClient {
+	lastOriginKey: string | undefined;
 	fileCount = 0;
 	directoryCount = 0;
 	hasOpenRuntime() {
@@ -250,10 +251,33 @@ class FakeRuntime implements LixRuntimeClient {
 			};
 		}
 		if (/^\s*(?:INSERT|UPDATE|DELETE)\b/i.test(request.sql)) {
+			if (/\blix_file\b/i.test(request.sql))
+				this.lastOriginKey = request.options?.originKey;
 			return {
 				columns: [],
 				rows: [],
 				rowsAffected: 1,
+				notices: [],
+			};
+		}
+		// The change log for this call: the write above created hello.md.
+		if (/FROM lix_change c\b/.test(request.sql)) {
+			const key = request.params?.[0];
+			const matches = key?.kind === "text" && key.value === this.lastOriginKey;
+			return {
+				columns: ["schema_key", "file_id", "row_pk", "snapshot", "file_path"],
+				rows: matches
+					? [
+							[
+								{ kind: "text" as const, value: "lix_file_descriptor" },
+								{ kind: "text" as const, value: "IiIiIiIiQiKCIiIiIiIiIg" },
+								{ kind: "json" as const, value: ["IiIiIiIiQiKCIiIiIiIiIg"] },
+								{ kind: "text" as const, value: '{"name":"hello.md"}' },
+								{ kind: "text" as const, value: "/skills/hello.md" },
+							],
+						]
+					: [],
+				rowsAffected: 0,
 				notices: [],
 			};
 		}
@@ -272,7 +296,10 @@ class FakeRuntime implements LixRuntimeClient {
 		return {
 			results: await Promise.all(
 				request.statements.map((statement) =>
-					this.execute(lixId, branchId, statement),
+					this.execute(lixId, branchId, {
+						...statement,
+						options: request.options,
+					}),
 				),
 			),
 		};

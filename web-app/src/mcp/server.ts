@@ -33,9 +33,15 @@ import {
 
 import { MCP_RESOURCE } from "./auth.ts";
 import {
+	DELETED_FILE_NAMES_SQL,
+	TOUCHED_CHANGES_SQL,
+	deletedFileNames,
 	describeTouched,
+	directoryPaths,
+	directoryPathsSql,
+	mcpOriginKey,
 	mimeTypeForPath,
-	touchedEntities,
+	touchedFromChanges,
 	type TouchedEntity,
 } from "./touched-entities.ts";
 
@@ -704,10 +710,15 @@ export function createLixrayMcpServer(
 		writeAnnotations(),
 		securitySchemes,
 		async ({ context: token, statements, options: batchOptions }) => {
+			// Every change the batch makes carries this call's origin key, so
+			// the result can say what it touched without reading the SQL.
 			return {
 				...(await service.executeBatch(token, {
 					statements,
-					options: toExecuteOptions(batchOptions),
+					options: {
+						...toExecuteOptions(batchOptions),
+						originKey: mcpOriginKey(requestId, batchOptions?.origin_key),
+					},
 				})),
 			};
 		},
@@ -1377,9 +1388,13 @@ function registerTool(
 					request_id: requestId,
 				};
 				const touched =
-					name === "execute_sql" && rawStatements
-						? touchedEntities(rawStatements)
-						: [];
+					name === "execute_sql" && typeof input.context === "string"
+						? await touchedByCall(
+								service,
+								input.context,
+								mcpOriginKey(requestId, input.options?.origin_key),
+							)
+						: EMPTY_TOUCHED;
 				const summary = toolResultTextBlocks(
 					summarizeToolResult(name, raw, touched),
 					structuredContent,
@@ -1490,11 +1505,78 @@ function formatListLixIdentity(item: unknown): string {
  * only ever a canonical URL for an entity that exists; a failed lookup just
  * means no links.
  */
+type TouchedByCall = {
+	readonly entities: ReadonlyArray<TouchedEntity>;
+	readonly deletedDirectoryCount: number;
+};
+const EMPTY_TOUCHED: TouchedByCall = { entities: [], deletedDirectoryCount: 0 };
+
+/**
+ * Asks the change log what one call changed: one read joined to current
+ * file paths, plus a read for directory paths and one for deleted files'
+ * names only when the batch had any. A failed read means an unadorned
+ * result, never a wrong one.
+ */
+async function touchedByCall(
+	service: LixService,
+	context: string,
+	originKey: string,
+): Promise<TouchedByCall> {
+	try {
+		const changes = touchedFromChanges(
+			(
+				await service.execute(context, {
+					sql: TOUCHED_CHANGES_SQL,
+					params: [{ kind: "text", value: originKey }],
+				})
+			).result,
+		);
+		const entities: TouchedEntity[] = [...changes.files];
+		if (changes.directoryIds.length > 0) {
+			const paths = directoryPaths(
+				(
+					await service.execute(context, {
+						sql: directoryPathsSql(changes.directoryIds.length),
+						params: changes.directoryIds.map((id) => ({
+							kind: "text",
+							value: id,
+						})),
+					})
+				).result,
+			);
+			for (const id of changes.directoryIds) {
+				const path = paths.get(id);
+				if (path) entities.push({ kind: "directory", path, action: "wrote" });
+			}
+		}
+		if (changes.deletedFileIds.length > 0) {
+			const names = deletedFileNames(
+				(
+					await service.execute(context, {
+						sql: DELETED_FILE_NAMES_SQL,
+						params: [{ kind: "text", value: originKey }],
+					})
+				).result,
+			);
+			for (const id of changes.deletedFileIds) {
+				entities.push({
+					kind: "file",
+					path: names.get(id) ?? "1 file",
+					action: "deleted",
+				});
+			}
+		}
+		return { entities, deletedDirectoryCount: changes.deletedDirectoryCount };
+	} catch {
+		return EMPTY_TOUCHED;
+	}
+}
+
 async function resultResourceLinks(
 	name: string,
 	input: Record<string, any>,
 	raw: unknown,
-	touched: ReadonlyArray<TouchedEntity>,
+	touched: TouchedByCall,
 	service: LixService,
 	urlOrigin: string | undefined,
 ): Promise<Array<ResourceLinkBlock>> {
@@ -1516,7 +1598,7 @@ async function resultResourceLinks(
 		];
 	}
 	if (name !== "execute_sql" || typeof input.context !== "string") return [];
-	const surviving = touched
+	const surviving = touched.entities
 		.filter((entity) => entity.action !== "deleted")
 		.slice(0, 50);
 	if (surviving.length === 0) return [];
@@ -1555,7 +1637,7 @@ type ResourceLinkBlock = {
 function summarizeToolResult(
 	name: string,
 	raw: unknown,
-	touched: ReadonlyArray<TouchedEntity> = [],
+	touched: TouchedByCall = EMPTY_TOUCHED,
 ): string {
 	if (!raw || typeof raw !== "object") return `${name} completed.`;
 	const result = raw as Record<string, unknown>;
@@ -1638,16 +1720,18 @@ function summarizeQuerySql(payload: unknown): string {
 	return `query_sql: ${rows} ${rows === 1 ? "row" : "rows"}`;
 }
 
-function summarizeExecuteSql(
-	payload: unknown,
-	touched: ReadonlyArray<TouchedEntity>,
-): string {
+function summarizeExecuteSql(payload: unknown, touched: TouchedByCall): string {
 	const results: Array<unknown> = Array.isArray(payload) ? payload : [];
 	let affected = 0;
 	for (const item of results) {
 		affected += sqlRowsAffected(item);
 	}
-	if (touched.length > 0) return describeTouched(touched, affected);
+	if (touched.entities.length > 0 || touched.deletedDirectoryCount > 0)
+		return describeTouched(
+			touched.entities,
+			affected,
+			touched.deletedDirectoryCount,
+		);
 	return `execute_sql: ${affected} ${affected === 1 ? "row" : "rows"} affected`;
 }
 
