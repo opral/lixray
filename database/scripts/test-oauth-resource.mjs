@@ -340,10 +340,16 @@ try {
 			redirect: "manual",
 		});
 		assert.equal(response.status, 302);
-		const id = new URL(response.headers.get("location")).searchParams.get(
-			"authorization_id",
+		const authorizationRedirect = new URL(response.headers.get("location"));
+		const id = authorizationRedirect.searchParams.get("authorization_id");
+		// Report only protocol errors, never the redirect containing state or codes.
+		const oauthError = authorizationRedirect.searchParams.get("error");
+		const description =
+			authorizationRedirect.searchParams.get("error_description");
+		assert.ok(
+			id,
+			`authorize returns a consent transaction (OAuth error: ${oauthError ?? "none"}; ${description ?? "no description"})`,
 		);
-		assert.ok(id, "authorize returns a consent transaction");
 		const details = await fetch(`${base}/oauth/authorizations/${id}`, {
 			headers: { Authorization: `Bearer ${browser.access_token}` },
 		});
