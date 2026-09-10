@@ -45,7 +45,9 @@ export function AccountMenu({ className }: { className?: string }) {
 			<DropdownMenuTrigger asChild>
 				<button
 					className={cn(
-						"inline-flex size-[26px] cursor-pointer items-center justify-center rounded-full bg-bg-action-secondary p-0 text-[11px] font-semibold text-text-on-action-secondary transition-colors hover:bg-bg-action-secondary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible",
+						// 24px: the same footprint as the brand mark at the other end of
+						// the bar, so the two ends of the header weigh the same.
+						"inline-flex size-6 cursor-pointer items-center justify-center rounded-full bg-bg-action-secondary p-0 text-[11px] font-semibold text-text-on-action-secondary transition-colors hover:bg-bg-action-secondary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible",
 						className,
 					)}
 					type="button"
@@ -61,20 +63,22 @@ export function AccountMenu({ className }: { className?: string }) {
 			<DropdownMenuContent
 				align="end"
 				sideOffset={6}
-				className="w-[232px] min-w-[232px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2.5 [&_[data-slot=dropdown-menu-item]]:py-2 [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-item]_svg]:size-3.5 [&_[data-slot=dropdown-menu-item]_svg]:text-icon-tertiary [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle"
+				// Atelier's popup metrics: 4px panel padding, 32px rows, 12.5px
+				// labels, 14px tertiary icons, hairline separators one row apart.
+				className="w-[220px] min-w-[220px] rounded-[10px] border-border-panel bg-bg-panel p-1 shadow-lg [&_[data-slot=dropdown-menu-item]]:h-8 [&_[data-slot=dropdown-menu-item]]:gap-2 [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2 [&_[data-slot=dropdown-menu-item]]:py-0 [&_[data-slot=dropdown-menu-item]]:text-[12.5px] [&_[data-slot=dropdown-menu-item]]:font-medium [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-item]:focus]:text-text-primary [&_[data-slot=dropdown-menu-item]_svg]:size-3.5 [&_[data-slot=dropdown-menu-item]_svg]:text-icon-tertiary [&_[data-slot=dropdown-menu-separator]]:mx-1 [&_[data-slot=dropdown-menu-separator]]:my-1 [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle"
 			>
-				<div className="flex items-center gap-2.5 px-2.5 py-2">
+				<div className="flex items-center gap-2 px-2 py-1.5">
 					<ProfileAvatar
 						namespaceId={personalNamespaceId}
 						fallback={accountInitial(user.user_metadata)}
 						className="size-7 bg-bg-hover-canvas text-[12px] font-semibold text-text-secondary"
 					/>
-					<span className="flex min-w-0 flex-col gap-px">
-						<span className="truncate text-[13px] leading-tight font-semibold text-text-primary">
+					<span className="flex min-w-0 flex-col">
+						<span className="truncate text-[12.5px] leading-4 font-semibold text-text-primary">
 							{publicName ?? fullName ?? email ?? "Account"}
 						</span>
 						{fullName && email ? (
-							<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
+							<span className="truncate text-[11.5px] leading-4 text-text-tertiary">
 								{email}
 							</span>
 						) : null}
