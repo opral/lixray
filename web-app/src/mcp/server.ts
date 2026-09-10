@@ -46,9 +46,17 @@ export const MCP_AI_PARENT_ID_HEADER = "X-PostHog-AI-Parent-ID";
 export const MCP_AI_SESSION_ID_HEADER = "X-PostHog-AI-Session-ID";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
+export const MCP_URL_GUIDE =
+	"Browser links: use the exact server-generated url from open_lix.files or get_entity_urls. file_paths are SQL paths, not browser URLs. Never append a file path to /file/ or /dir/, and never invent or manually encode an entity URL. After creating or renaming files/directories, call get_entity_urls once with all items you need to link, using the current context. This read resolves canonical links; it is not a persistence verification. Preserve the returned branch query parameter. URLs do not grant access or publish private items. If resolution fails, report the error and omit the item link rather than guessing.";
+
+export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
+	"Return canonical browser URLs for up to 50 existing files or directories in the repository and branch selected by context. Supply each item's kind and exactly one of id (UUID) or path (absolute SQL path). Use after writes or renames, or for items absent from open_lix.files. Copy returned urls exactly; never construct /file/<path> links. This read-only operation resolves links and does not publish items or change permissions. Directory path / returns the repository URL.";
+
 export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. If the user supplies an exact @handle/slug or Lix UUID, call open_lix directly; do not call list_lixes first. Call list_lixes only when the target Lix is unknown. Open a Lix once and pass its returned context to every later call. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. When target paths are known, read all of them in one parameterized query_sql statement instead of probing or reading them one at a time. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
 
 ${LIX_SQL_OPERATING_GUIDE}
+
+${MCP_URL_GUIDE}
 
 Writes persist without a checkpoint; execute_sql already saved the files. Use create_checkpoint to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent file helper tools or branch state.`;
 
@@ -62,7 +70,7 @@ export const LIST_LIXES_TOOL_DESCRIPTION =
 	"LixRay discovery only: list lixes the signed-in user can access. Call this only when the target Lix is unknown. If the user supplied an exact @handle/slug or Lix UUID, skip this tool and call open_lix directly. Each result identifies a lix as @handle/slug plus uuid.";
 
 export const OPEN_LIX_TOOL_DESCRIPTION =
-	"LixRay starting point when the user supplied an exact @handle/slug or Lix UUID: resolve it directly without calling list_lixes first, and mint the signed context required by later tools. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports counts plus a bounded file_paths manifest; when file_paths_complete is true, do not run a separate file-list query.";
+	"LixRay starting point when the user supplied an exact @handle/slug or Lix UUID: resolve it directly without calling list_lixes first, and mint the signed context required by later tools. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports counts, a bounded file_paths manifest, and files with id, path, and canonical url. Use files[].url exactly for browser links; file_paths are SQL paths, not URLs. When file_paths_complete is true, do not run a separate file-list query. Use get_entity_urls for newly created items or items outside the manifest.";
 
 type McpAuthMode = "oauth" | "none";
 
@@ -109,6 +117,8 @@ export interface McpServerOptions {
 	authMode?: McpAuthMode;
 	requestId?: string;
 	serverName?: string;
+	/** Browser origin of the serving deployment; never supplied by tool arguments. */
+	urlOrigin?: string;
 	onToolCall?: McpToolCallObserver;
 	onTransport?: (observation: McpTransportObservation) => void;
 	posthogToken?: string;
@@ -384,11 +394,41 @@ const openLixOutput = withError(
 		commit_id: z.string(),
 		file_count: z.number().int(),
 		directory_count: z.number().int(),
+		files: z.array(
+			z.object({ id: z.string(), path: z.string(), url: z.string() }).strict(),
+		),
 		file_paths: z.array(z.string()),
 		file_paths_complete: z.boolean(),
 		empty: z.boolean(),
 	}),
 );
+const entityUrlsOutput = withError(
+	z.object({
+		context,
+		entities: z.array(
+			z
+				.object({
+					kind: z.enum(["file", "directory"]),
+					id: z.string().nullable(),
+					path: z.string(),
+					url: z.string(),
+				})
+				.strict(),
+		),
+	}),
+);
+const entityUrlSelector = z.union([
+	z
+		.object({ kind: z.enum(["file", "directory"]), id: z.string().uuid() })
+		.strict(),
+	z
+		.object({
+			kind: z.enum(["file", "directory"]),
+			path: z.string().startsWith("/"),
+		})
+		.strict(),
+]);
+
 const branchStateOutput = withError(
 	z.object({ context, branch_id: branchId, commit_id: z.string() }),
 );
@@ -571,12 +611,17 @@ export function createLixrayMcpServer(
 		readAnnotations(),
 		securitySchemes,
 		async ({ lix_ref, branch_id }) => {
-			const opened = await service.openLix(lix_ref, branch_id);
+			const opened = await service.openLix(
+				lix_ref,
+				branch_id,
+				options.urlOrigin,
+			);
 			return {
 				context: opened.context,
 				context_expires_at: opened.contextExpiresAt,
 				id: opened.lixId,
-				url: `${MCP_RESOURCE}/${opened.lixRef}`,
+				url: opened.url,
+				files: opened.files,
 				lix_ref: opened.lixRef,
 				name: opened.name,
 				branch_id: opened.branchId,
@@ -588,6 +633,26 @@ export function createLixrayMcpServer(
 				empty: opened.empty,
 			};
 		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+	);
+
+	registerTool(
+		server,
+		"get_entity_urls",
+		"LixRay: Get canonical item URLs",
+		GET_ENTITY_URLS_TOOL_DESCRIPTION,
+		z
+			.object({ context, entities: z.array(entityUrlSelector).min(1).max(50) })
+			.strict(),
+		entityUrlsOutput,
+		readAnnotations(),
+		securitySchemes,
+		async ({ context: token, entities }) =>
+			service.getEntityUrls(token, entities, options.urlOrigin),
 		undefined,
 		options.onToolCall,
 		surfaceVersion,
@@ -1056,6 +1121,7 @@ async function handleMcpTransportRequest(
 				requestId,
 				onToolCall,
 				serverName: options.serverName ?? mcpServerNameForUrl(request.url),
+				urlOrigin: options.urlOrigin ?? new URL(request.url).origin,
 			});
 			if (posthog) {
 				// Instrument inside the factory so 0.11.x can wrap v2 string
@@ -1191,8 +1257,9 @@ export function mcpDocumentationResponse(
 			"",
 			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, call open_lix directly and do not call list_lixes first. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
 			"",
-			"Use query_sql for one SELECT statement and execute_sql for any atomic ordered SQL batch. When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; do not expect separate file helper tools. Directory paths use /skills, not /skills/.",
+			"Use query_sql for one SELECT statement and execute_sql for any atomic ordered SQL batch. When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths use /skills, not /skills/.",
 			"execute_sql already persisted the mutation. Do not follow a write with a verification SELECT.",
+			MCP_URL_GUIDE,
 			"Every MCP response includes X-Request-ID and every tool result includes request_id. You may send X-Request-ID to preserve an upstream correlation ID; use the returned ID when reporting failures.",
 			"",
 			"Modern clients begin with server/discover. There is no initialize handshake and no MCP session id on this endpoint.",
@@ -1533,6 +1600,7 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 	return [
 		"list_lixes",
 		"open_lix",
+		"get_entity_urls",
 		"query_sql",
 		"execute_sql",
 		"active_branch_id",

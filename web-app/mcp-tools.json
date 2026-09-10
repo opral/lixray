@@ -107,7 +107,7 @@
 	{
 		"name": "open_lix",
 		"title": "LixRay: Open a Lix",
-		"description": "LixRay starting point when the user supplied an exact @handle/slug or Lix UUID: resolve it directly without calling list_lixes first, and mint the signed context required by later tools. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports counts plus a bounded file_paths manifest; when file_paths_complete is true, do not run a separate file-list query.",
+		"description": "LixRay starting point when the user supplied an exact @handle/slug or Lix UUID: resolve it directly without calling list_lixes first, and mint the signed context required by later tools. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports counts, a bounded file_paths manifest, and files with id, path, and canonical url. Use files[].url exactly for browser links; file_paths are SQL paths, not URLs. When file_paths_complete is true, do not run a separate file-list query. Use get_entity_urls for newly created items or items outside the manifest.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -171,6 +171,25 @@
 							"minimum": -9007199254740991,
 							"maximum": 9007199254740991
 						},
+						"files": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"id": {
+										"type": "string"
+									},
+									"path": {
+										"type": "string"
+									},
+									"url": {
+										"type": "string"
+									}
+								},
+								"required": ["id", "path", "url"],
+								"additionalProperties": false
+							}
+						},
 						"file_paths": {
 							"type": "array",
 							"items": {
@@ -200,11 +219,164 @@
 						"commit_id",
 						"file_count",
 						"directory_count",
+						"files",
 						"file_paths",
 						"file_paths_complete",
 						"empty",
 						"request_id"
 					],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"request_id": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Request ID for correlating this response with server telemetry"
+						},
+						"error": {
+							"type": "object",
+							"properties": {
+								"code": {
+									"type": "string"
+								},
+								"message": {
+									"type": "string"
+								},
+								"hint": {
+									"type": "string"
+								},
+								"details": {}
+							},
+							"required": ["code", "message"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["request_id", "error"],
+					"additionalProperties": false
+				}
+			]
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"openWorldHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "noauth"
+				}
+			]
+		}
+	},
+	{
+		"name": "get_entity_urls",
+		"title": "LixRay: Get canonical item URLs",
+		"description": "Return canonical browser URLs for up to 50 existing files or directories in the repository and branch selected by context. Supply each item's kind and exactly one of id (UUID) or path (absolute SQL path). Use after writes or renames, or for items absent from open_lix.files. Copy returned urls exactly; never construct /file/<path> links. This read-only operation resolves links and does not publish items or change permissions. Directory path / returns the repository URL.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"entities": {
+					"minItems": 1,
+					"maxItems": 50,
+					"type": "array",
+					"items": {
+						"anyOf": [
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"enum": ["file", "directory"]
+									},
+									"id": {
+										"type": "string",
+										"format": "uuid",
+										"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+									}
+								},
+								"required": ["kind", "id"],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"enum": ["file", "directory"]
+									},
+									"path": {
+										"type": "string",
+										"pattern": "^\\/.*"
+									}
+								},
+								"required": ["kind", "path"],
+								"additionalProperties": false
+							}
+						]
+					}
+				}
+			},
+			"required": ["context", "entities"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"anyOf": [
+				{
+					"type": "object",
+					"properties": {
+						"context": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Opaque Lix context returned by open_lix or switch_branch"
+						},
+						"entities": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"enum": ["file", "directory"]
+									},
+									"id": {
+										"anyOf": [
+											{
+												"type": "string"
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"path": {
+										"type": "string"
+									},
+									"url": {
+										"type": "string"
+									}
+								},
+								"required": ["kind", "id", "path", "url"],
+								"additionalProperties": false
+							}
+						},
+						"request_id": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Request ID for correlating this response with server telemetry"
+						}
+					},
+					"required": ["context", "entities", "request_id"],
 					"additionalProperties": false
 				},
 				{
@@ -575,7 +747,7 @@
 	{
 		"name": "execute_sql",
 		"title": "Execute SQL atomically",
-		"description": "Run an ordered atomic SQL batch against the branch selected by context. Always treated as potentially destructive; if any statement fails, the complete batch is rolled back. The mutation is already persisted: use rowsAffected and any returned rows, and do not follow a write with a verification SELECT. Use create_checkpoint for meaningful milestones, not after every edit; it is not required to save changes.",
+		"description": "Run an ordered atomic SQL batch against the branch selected by context. Always treated as potentially destructive; if any statement fails, the complete batch is rolled back. The mutation is already persisted: use rowsAffected and any returned rows, and do not follow a write with a verification SELECT. Use create_checkpoint for meaningful milestones, not after every edit; it is not required to save changes. To link created or renamed items, call get_entity_urls with their paths or UUIDs and use the returned canonical URLs.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",

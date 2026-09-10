@@ -10,8 +10,8 @@ import {
 const SQL_EXPLORER_EXTENSION_ID = "sql_explorer";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/sql")({
-	head: ({ params }) => {
-		const head = repositoryHead(params, "sql");
+	head: ({ params, match }) => {
+		const head = repositoryHead(params, "sql", match.search);
 		return {
 			...head,
 			meta: [...head.meta, { name: "robots", content: "noindex" }],
