@@ -60,6 +60,19 @@ steps usually do not need checkpoints. Do not checkpoint after every edit or
 ask the user to manage checkpoint timing. A checkpoint marks progress; it is not
 required to save changes.
 
+## What a result carries
+
+Every tool result has three parts, in order: a one-line summary, zero or
+more `resource_link` content blocks, and the full `structuredContent` as
+JSON text for hosts that only show text. The links are what a host renders
+as clickable chips inside the step: `open_lix` links the repository, and an
+`execute_sql` batch links each file or directory it wrote or updated, with
+the same canonical URL `get_entity_urls` would return. The summary names the
+action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
+affected"), read from the batch's own statements, so an agent's narration
+is not the only trace of what happened. Reads link nothing; deletions are
+named in the summary but not linked.
+
 ## Restore an ancestor
 
 Call `restore` with the open Lix `context` and a `commit_id`. The commit must

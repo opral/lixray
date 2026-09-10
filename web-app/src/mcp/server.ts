@@ -32,6 +32,12 @@ import {
 } from "./tool-observation.ts";
 
 import { MCP_RESOURCE } from "./auth.ts";
+import {
+	describeTouched,
+	mimeTypeForPath,
+	touchedEntities,
+	type TouchedEntity,
+} from "./touched-entities.ts";
 
 export const MCP_PATH = "/mcp";
 export { MCP_RESOURCE } from "./auth.ts";
@@ -591,6 +597,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -630,6 +637,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -650,6 +658,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -676,6 +685,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -706,6 +716,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -730,6 +741,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -754,6 +766,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -793,6 +806,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -813,6 +827,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -837,6 +852,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -862,6 +878,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -887,6 +904,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -905,6 +923,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -923,6 +942,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	return server;
@@ -1314,6 +1334,7 @@ function registerTool(
 	surfaceVersion: string,
 	requestId: string,
 	service: LixService,
+	urlOrigin?: string,
 ): void {
 	server.registerTool(
 		name,
@@ -1355,12 +1376,27 @@ function registerTool(
 					...(raw as Record<string, unknown>),
 					request_id: requestId,
 				};
+				const touched =
+					name === "execute_sql" && rawStatements
+						? touchedEntities(rawStatements)
+						: [];
+				const summary = toolResultTextBlocks(
+					summarizeToolResult(name, raw, touched),
+					structuredContent,
+				);
+				const links = await resultResourceLinks(
+					name,
+					input,
+					raw,
+					touched,
+					service,
+					urlOrigin,
+				);
+				// Summary, then the links a host can render as chips, then the
+				// structured JSON for text-only hosts.
 				return {
 					structuredContent,
-					content: toolResultTextBlocks(
-						summarizeToolResult(name, raw),
-						structuredContent,
-					),
+					content: [summary[0]!, ...links, ...summary.slice(1)],
 				};
 			} catch (caught) {
 				const error = toMcpError(caught, requestId);
@@ -1447,7 +1483,80 @@ function formatListLixIdentity(item: unknown): string {
 	return parts.join(" ");
 }
 
-function summarizeToolResult(name: string, raw: unknown): string {
+/**
+ * Links a host can render inline for what the call did: the repository on
+ * open_lix, and each file or directory an execute_sql batch wrote. Reads
+ * (query_sql) link nothing. Resolution reuses get_entity_urls, so a link is
+ * only ever a canonical URL for an entity that exists; a failed lookup just
+ * means no links.
+ */
+async function resultResourceLinks(
+	name: string,
+	input: Record<string, any>,
+	raw: unknown,
+	touched: ReadonlyArray<TouchedEntity>,
+	service: LixService,
+	urlOrigin: string | undefined,
+): Promise<Array<ResourceLinkBlock>> {
+	if (!raw || typeof raw !== "object") return [];
+	const result = raw as Record<string, unknown>;
+	if (name === "open_lix" && typeof result.url === "string") {
+		return [
+			{
+				type: "resource_link",
+				uri: result.url,
+				name:
+					typeof result.lix_ref === "string"
+						? result.lix_ref
+						: typeof result.name === "string"
+							? result.name
+							: "Repository",
+				description: "Opened repository",
+			},
+		];
+	}
+	if (name !== "execute_sql" || typeof input.context !== "string") return [];
+	const surviving = touched
+		.filter((entity) => entity.action !== "deleted")
+		.slice(0, 50);
+	if (surviving.length === 0) return [];
+	try {
+		const resolved = await service.getEntityUrls(
+			input.context,
+			surviving.map(({ kind, path }) => ({ kind, path })),
+			urlOrigin,
+		);
+		return resolved.entities.map((entity, index) => {
+			const action =
+				surviving[index]?.action === "updated" ? "Updated" : "Wrote";
+			const mimeType =
+				entity.kind === "file" ? mimeTypeForPath(entity.path) : undefined;
+			return {
+				type: "resource_link",
+				uri: entity.url,
+				name: entity.path.split("/").filter(Boolean).at(-1) ?? entity.path,
+				description: `${action} ${entity.path.replace(/^\//, "")}`,
+				...(mimeType ? { mimeType } : {}),
+			};
+		});
+	} catch {
+		return [];
+	}
+}
+
+type ResourceLinkBlock = {
+	type: "resource_link";
+	uri: string;
+	name: string;
+	description?: string;
+	mimeType?: string;
+};
+
+function summarizeToolResult(
+	name: string,
+	raw: unknown,
+	touched: ReadonlyArray<TouchedEntity> = [],
+): string {
 	if (!raw || typeof raw !== "object") return `${name} completed.`;
 	const result = raw as Record<string, unknown>;
 
@@ -1461,7 +1570,7 @@ function summarizeToolResult(name: string, raw: unknown): string {
 		return summarizeQuerySql(result.result);
 	}
 	if (name === "execute_sql") {
-		return summarizeExecuteSql(result.results);
+		return summarizeExecuteSql(result.results, touched);
 	}
 	if (name === "active_branch_id") {
 		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.`;
@@ -1529,12 +1638,16 @@ function summarizeQuerySql(payload: unknown): string {
 	return `query_sql: ${rows} ${rows === 1 ? "row" : "rows"}`;
 }
 
-function summarizeExecuteSql(payload: unknown): string {
+function summarizeExecuteSql(
+	payload: unknown,
+	touched: ReadonlyArray<TouchedEntity>,
+): string {
 	const results: Array<unknown> = Array.isArray(payload) ? payload : [];
 	let affected = 0;
 	for (const item of results) {
 		affected += sqlRowsAffected(item);
 	}
+	if (touched.length > 0) return describeTouched(touched, affected);
 	return `execute_sql: ${affected} ${affected === 1 ? "row" : "rows"} affected`;
 }
 

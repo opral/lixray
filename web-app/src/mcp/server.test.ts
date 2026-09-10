@@ -2072,6 +2072,52 @@ void test("MCP returns canonical links through modern and text-only tool results
 			assertStructuredTextFallback(links, context).entities,
 			content.entities,
 		);
+		// open_lix links the repository so a host can render it as a chip.
+		assert.deepEqual(
+			opened.content?.find((block) => block.type === "resource_link"),
+			{
+				type: "resource_link",
+				uri: "https://dev.lixray.com/@acme/company?branch=draft",
+				name: "@acme/company",
+				description: "Opened repository",
+			},
+		);
+		// A batch that writes a file says so, and links the file.
+		const written = await client.callTool({
+			name: "execute_sql",
+			arguments: {
+				context,
+				statements: [
+					{
+						sql: "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content",
+						params: [
+							{ kind: "text", value: "/skills/hello.md" },
+							{ kind: "text", value: "# Hello\n" },
+						],
+					},
+				],
+			},
+		});
+		assert.equal(written.isError, undefined, JSON.stringify(written));
+		assert.equal(toolText(written), "Wrote skills/hello.md · 1 row affected");
+		assert.deepEqual(
+			written.content?.filter((block) => block.type === "resource_link"),
+			[
+				{
+					type: "resource_link",
+					uri: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md?branch=draft",
+					name: "hello.md",
+					description: "Wrote skills/hello.md",
+					mimeType: "text/markdown",
+				},
+			],
+		);
+		// The structured JSON stays the last text block for text-only hosts.
+		assert.equal(
+			(assertStructuredTextFallback(written, context).results as unknown[])
+				.length,
+			1,
+		);
 		const missing = await client.callTool({
 			name: "get_entity_urls",
 			arguments: {
