@@ -221,6 +221,7 @@ void test("empty creation uses the same protocol path and selected namespace", a
 				assert.deepEqual(await upstream.json(), {
 					p_account_id: account.userId,
 					p_namespace_id: namespaceId,
+					p_name: "My résumé",
 				});
 				return Response.json(namespaceId);
 			}
@@ -244,6 +245,45 @@ void test("empty creation uses the same protocol path and selected namespace", a
 		"/lix/v1",
 		"/rest/v1/rpc/register_hosted_lix",
 	]);
+});
+
+void test("a taken name is rejected before uploading", async () => {
+	let calls = 0;
+	const response = await createHostedRepository(
+		request(),
+		env,
+		account,
+		async () => {
+			calls++;
+			return Response.json(
+				{ code: "23505", message: "already exists" },
+				{ status: 409 },
+			);
+		},
+	);
+	assert.equal(response.status, 409);
+	assert.equal(calls, 1);
+	assert.match(
+		(await response.json()).error.message,
+		/A repository named “Shared repository” already exists/,
+	);
+});
+
+void test("a name claimed during creation answers 409 at registration", async () => {
+	let calls = 0;
+	const response = await createHostedRepository(
+		request(),
+		env,
+		account,
+		async () => {
+			calls++;
+			if (calls === 1) return Response.json(namespaceId);
+			if (calls === 2) return Response.json({ id }, { status: 201 });
+			return new Response(null, { status: 409 });
+		},
+	);
+	assert.equal(response.status, 409);
+	assert.equal(calls, 3);
 });
 
 void test("namespace outsider is rejected before uploading", async () => {

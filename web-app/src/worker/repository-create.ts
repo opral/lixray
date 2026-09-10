@@ -3,6 +3,8 @@ import { lixServiceRequestHeaders } from "../lib/lix-service-proxy.ts";
 
 export const UUID =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const nameTakenMessage = (name: string) =>
+	`A repository named “${name}” already exists in this namespace. Choose another name.`;
 const failure = (status: number, message: string) =>
 	Response.json(
 		{ error: { code: "LIX_HOST_CREATION_FAILED", message } },
@@ -47,17 +49,21 @@ export async function createHostedRepository(
 		}
 		if (!name || [...name].length > 80)
 			return failure(400, "Repository name must be 1–80 characters.");
+		// Membership and the name are checked together, before any storage
+		// exists: a taken name answers 409 and creates nothing.
 		const owner = await hostedRepositoryRpc(
 			env,
 			"authorize_hosted_lix_creation",
 			{
 				p_account_id: account.userId,
 				p_namespace_id: namespaceId,
+				p_name: name,
 			},
 			fetcher,
 		);
 		if (!owner.ok) {
 			await owner.body?.cancel();
+			if (owner.status === 409) return failure(409, nameTakenMessage(name));
 			return failure(
 				owner.status === 403 ? 403 : 503,
 				owner.status === 403
@@ -118,6 +124,9 @@ export async function createHostedRepository(
 			fetcher,
 		);
 		await registration.body?.cancel();
+		// A name claimed between the check and registration loses the race.
+		if (registration.status === 409)
+			return failure(409, nameTakenMessage(name));
 		if (!registration.ok)
 			return failure(
 				503,

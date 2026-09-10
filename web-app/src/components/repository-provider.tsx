@@ -87,6 +87,15 @@ interface RepositoryContextValue {
 	createRepository: (name: string, organizationId?: string) => Promise<void>;
 	renameRepository: (repositoryId: string, name: string) => Promise<void>;
 	deleteRepository: (repositoryId: string) => Promise<void>;
+	/**
+	 * Whether a name is free in the organization. The slug is the name, so
+	 * two repositories cannot share one; the server enforces it on write.
+	 */
+	checkRepositoryName: (
+		name: string,
+		organizationId?: string,
+		options?: { excludeRepositoryId?: string },
+	) => Promise<boolean>;
 }
 
 const RepositoryContext = createContext<RepositoryContextValue | null>(null);
@@ -355,6 +364,35 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 		[accountId, client, organizations, refresh, selectedOrganization],
 	);
 
+	const checkRepositoryName = useCallback(
+		async (
+			name: string,
+			organizationId?: string,
+			options?: { excludeRepositoryId?: string },
+		) => {
+			const targetId = organizationId ?? selectedOrganization?.id;
+			if (!client || !targetId) return true;
+			const normalized = name.trim();
+			if (!normalized) return true;
+			const organization = organizations.find(
+				(candidate) => candidate.id === targetId,
+			);
+			// Renaming to the repository's own name is not a clash.
+			const own = organization?.repositories.find(
+				(repository) => repository.id === options?.excludeRepositoryId,
+			);
+			if (own && repositorySlug(own.name) === repositorySlug(normalized))
+				return true;
+			const { data, error } = await client.rpc("is_repository_name_available", {
+				p_namespace_id: targetId,
+				p_name: normalized,
+			});
+			if (error) throw error;
+			return data === true;
+		},
+		[client, organizations, selectedOrganization],
+	);
+
 	const renameRepository = useCallback(
 		async (repositoryId: string, name: string) => {
 			if (!client) throw new Error("Authentication is still loading");
@@ -430,9 +468,11 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 			createRepository,
 			renameRepository,
 			deleteRepository,
+			checkRepositoryName,
 		}),
 		[
 			activeRepository,
+			checkRepositoryName,
 			createOrganization,
 			createRepository,
 			deleteRepository,
@@ -612,6 +652,17 @@ function DemoRepositoryProvider({ children }: { children: ReactNode }) {
 		createRepository,
 		renameRepository: unsupported,
 		deleteRepository: unsupported,
+		checkRepositoryName: (name, _organizationId, options) => {
+			const slug = repositorySlug(normalizeName(name, "Repository"));
+			const squat = slug.replaceAll("-", "");
+			return Promise.resolve(
+				!organization.repositories.some(
+					(repository) =>
+						repository.id !== options?.excludeRepositoryId &&
+						repository.slug.replaceAll("-", "") === squat,
+				),
+			);
+		},
 	};
 	return (
 		<RepositoryContext.Provider value={value}>
