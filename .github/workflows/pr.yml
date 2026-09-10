@@ -36,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      fast: ${{ steps.classify.outputs.fast }}
       frontend: ${{ steps.classify.outputs.frontend }}
       database: ${{ steps.classify.outputs.database }}
       e2e: ${{ steps.classify.outputs.e2e }}
@@ -97,7 +98,7 @@ jobs:
   fast:
     name: Fast checks
     needs: changes
-    if: needs.changes.outputs.frontend == 'true'
+    if: needs.changes.outputs.fast == 'true' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

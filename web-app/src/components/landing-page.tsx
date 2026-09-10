@@ -154,18 +154,6 @@ export function LandingPage() {
 						schedule, versioned and reviewable.
 					</p>
 					<p className="m-0 text-base leading-[1.65] text-[#44403c]">
-						<b>Internal apps.</b> Lix repositories have a SQL interface and
-						JavaScript bindings, so your company can build dashboards, approval
-						tools, and other internal apps on top of its repository.{" "}
-						<Link
-							className="text-[#c2410c] underline underline-offset-2"
-							to="/docs/$slug"
-							params={{ slug: "internal-apps" }}
-						>
-							Build a mini app →
-						</Link>
-					</p>
-					<p className="m-0 text-base leading-[1.65] text-[#44403c]">
 						<b>Context layer for agents.</b> Agents read the ICP and the
 						playbook from one place. Always the current version.
 					</p>

@@ -51,3 +51,11 @@ test("the required aggregator checks out its script and ignores unrelated label 
 	assert.ok(aggregate.indexOf("uses: actions/checkout@v4") < aggregate.indexOf("check-ci-results.mjs"));
 	assert.match(pr, /label.name != 'preview' && 'ignored-label'/);
 });
+
+test("static UI selects fast checks without implicitly starting heavy jobs", () => {
+  assert.match(job("changes"), /fast: \$\{\{ steps.classify.outputs.fast \}\}/);
+  assert.match(job("fast"), /if: needs.changes.outputs.fast == 'true' \|\| needs.changes.outputs.frontend == 'true'/);
+  for (const name of ["sdk", "frontend", "server-image", "web-image", "e2e", "sync"]) {
+    assert.doesNotMatch(job(name), /outputs.fast/);
+  }
+});

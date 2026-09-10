@@ -7,6 +7,7 @@ export function checkCiResults(needs, previewRequested = false) {
 	requireSuccess("changes");
 	const selected = needs.changes.outputs;
 	for (const [lane, jobs] of Object.entries({
+		fast: ["fast"],
 		frontend: ["fast", "frontend", "sdk"],
 		tooling: ["tooling"],
 		database: ["database"],
