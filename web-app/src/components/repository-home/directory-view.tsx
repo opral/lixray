@@ -57,6 +57,7 @@ import {
 } from "~/lib/repository-open-performance";
 import {
 	createRepositoryFile,
+	describeWorkingChanges,
 	listDirectory,
 	persistedDirectoryPath,
 	resolveRepositoryHref,
@@ -1016,16 +1017,13 @@ function ChangeBars({
 	}
 	const maxCount = Math.max(1, ...days.map((day) => day.count));
 	const latestCheckpointDay = data.checkpointDates?.[0]?.slice(0, 10) ?? null;
-	// Same day-granularity rule the bar colors use: a checkpoint splits the
-	// window. These are retained source records, not reviewable row changes.
-	const headlineCount = latestCheckpointDay
-		? days.reduce(
-				(sum, entry) =>
-					entry.day > latestCheckpointDay ? sum + entry.count : sum,
-				0,
-			)
-		: (data.totalChangeCount ??
-			days.reduce((sum, entry) => sum + entry.count, 0));
+	// The headline is the status bar's number: files whose working state
+	// differs from the checkpoint. The bars stay a day-by-day activity graph.
+	const working = describeWorkingChanges(
+		data.workingFileCount,
+		data.workingChangeCount,
+	);
+	const headlineCount = working.count;
 	const visibleDays = days.length > 0 ? days : [{ day: "", count: 0 }];
 	const paddedDays = [
 		...Array.from({ length: Math.max(0, 9 - visibleDays.length) }, () => ({
@@ -1042,16 +1040,18 @@ function ChangeBars({
 					{formatCompactCount(headlineCount)}
 				</strong>
 				<span className="text-[11.5px] text-text-tertiary">
-					{headlineCount === 1 ? "source record" : "source records"}
-					{latestCheckpointDay ? " after checkpoint day" : " retained"}
+					{working.label}
 				</span>
 			</div>
 			<div className="mt-3 flex h-11 items-end gap-[3px] border-b border-[#ded5c8]">
 				{paddedDays.map((entry, index) => {
+					// The checkpoint's own day holds records from both sides of
+					// it; it reads as "after" while anything is still unreviewed.
 					const afterCheckpoint =
 						!latestCheckpointDay ||
 						!entry.day ||
-						entry.day > latestCheckpointDay;
+						entry.day > latestCheckpointDay ||
+						(entry.day === latestCheckpointDay && headlineCount > 0);
 					const isLatest = index === paddedDays.length - 1;
 					const height = entry.count
 						? Math.max(7, Math.round((entry.count / maxCount) * 38))
