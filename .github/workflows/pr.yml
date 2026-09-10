@@ -188,7 +188,7 @@ jobs:
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: 2.109.1
+          version: 2.112.0
 
       - name: Test database policies and functions
         run: .github/scripts/test-database.sh
@@ -246,7 +246,7 @@ jobs:
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: 2.109.1
+          version: 2.112.0
 
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium

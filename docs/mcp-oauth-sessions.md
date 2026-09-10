@@ -20,7 +20,8 @@ consent API calls. It cannot be bypassed by skipping LixRay's consent UI.
 Unsupported resources fail approval without issuing a code or changing an
 existing mapping. This is a LixRay integration with Supabase's internal
 `auth.oauth_authorizations` table, so the real HTTP regression is required when
-upgrading Auth. The tested Auth version is v2.195.0.
+upgrading Auth. Local setup and CI pin Supabase CLI v2.112.0, which bundles
+Auth v2.195.0 and supports the advertised `offline_access` scope.
 
 The production canonical resource remains `https://lixray.com`. The private,
 operator-owned `oauth_resource_policy` allowlist enables only that resource in
