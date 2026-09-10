@@ -1503,29 +1503,26 @@ function ReadmePreview({
 	readonly onNavigate: (href: string, event?: ReactMouseEvent) => boolean;
 }) {
 	if (!fileId) return null;
-	// The preview is a card, not the document itself: its bordered frame and
-	// sand header separate the rendered README from the live file list above
-	// it, and the header's actions are the only way to edit. The card spans
-	// the file list column (28px below it, the rail's section beat) so both
-	// edges line up with the rows, and the header repeats a row's own type
-	// and icon size so the file name reads at the same weight as the list.
+	// The preview is the document set on the page, not a card. One hairline
+	// closes the file list and carries a caption (icon, file name, Edit) in
+	// the list's own tertiary type, so it reads as the list's footer and the
+	// document's byline at once. The rule starts where a row's hover ground
+	// starts, and the caption's icon sits on the rows' icon column, so the
+	// document below is flush with the file names.
 	return (
 		<section
 			aria-label={`${fileName} preview`}
-			data-testid="home-readme-card"
-			className="mt-7 overflow-hidden rounded-[10px] border border-border-panel bg-bg-panel"
+			data-testid="home-readme-preview"
+			className="mt-7 ml-6 border-t border-border-panel sm:ml-9"
 		>
-			<div className="flex h-11 items-center gap-3 border-b border-border-panel bg-[#FAF7F2] pr-[11px] pl-[11px] text-sm">
+			<div className="flex h-11 items-center gap-3 px-3 text-xs font-medium text-text-tertiary">
 				<img
 					src={fileIconUrl(fileName)}
 					alt=""
 					draggable={false}
 					className="size-[19px] shrink-0"
 				/>
-				<span
-					className="min-w-0 flex-1 truncate font-medium text-text-primary"
-					title={fileName}
-				>
+				<span className="min-w-0 flex-1 truncate" title={fileName}>
 					{fileName}
 				</span>
 				<button
@@ -1534,7 +1531,7 @@ function ReadmePreview({
 					aria-label={`Edit ${fileName}`}
 					title={`Edit ${fileName}`}
 					onClick={(event) => onOpen(event)}
-					className="flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+					className="-mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-text-tertiary hover:bg-bg-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
 				>
 					<PencilLine aria-hidden="true" className="size-3.5" />
 					Edit
@@ -1545,8 +1542,8 @@ function ReadmePreview({
 			{/* Click delegation only augments the anchors inside, which stay
 			    keyboard-accessible on their own. */}
 			{/* The standalone file view strips the document's page padding, so
-			    the card owns its inner margins: 36px sides, a heading's beat
-			    above and below. */}
+			    the section owns its inner margins: the caption's inset on the
+			    sides, a heading's beat below. */}
 			<div
 				data-testid="home-readme"
 				onClick={(event) => {
@@ -1557,7 +1554,7 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
-				className="px-9 pt-7 pb-9"
+				className="px-3 pt-2 pb-9"
 			>
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
