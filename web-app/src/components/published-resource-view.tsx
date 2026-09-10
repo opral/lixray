@@ -1,11 +1,13 @@
+import { entityRoutePath, resolvePublishedEntity } from "~/lib/entity-url";
 import { AtelierFile } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import { createPublishedLix } from "~/lib/published-lix";
 import { Download, Folder, LockOpen } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "~/components/ui/button";
 
 export type PublishedResource = {
+	id: string;
 	kind: "file" | "directory";
 	path: string;
 };
@@ -91,7 +93,9 @@ function PublishedDirectory({
 		setListing(null);
 		setError(null);
 		void fetchPublishedDirectory(repositoryId, resource.path, abort.signal)
-			.then(setListing)
+			.then((next) => {
+				if (!abort.signal.aborted) setListing(next);
+			})
 			.catch((caught: unknown) => {
 				if (abort.signal.aborted) return;
 				setError(
@@ -152,6 +156,11 @@ function PublishedFile({
 	repositorySlug,
 	resource,
 }: Omit<PublishedResourceViewProps, "repositoryName">) {
+	const navigationAbort = useRef<AbortController | null>(null);
+	useEffect(
+		() => () => navigationAbort.current?.abort(),
+		[repositoryId, resource.path],
+	);
 	const [bytes, setBytes] = useState<Uint8Array | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [preview, setPreview] = useState<Awaited<
@@ -243,12 +252,38 @@ function PublishedFile({
 					readOnly
 					className="min-h-[60vh]"
 					onOpenFile={(path: string) => {
-						window.location.assign(
-							publishedResourceHref(namespace, repositorySlug, {
-								kind: "file",
-								path,
-							}),
-						);
+						navigationAbort.current?.abort();
+						const abort = new AbortController();
+						navigationAbort.current = abort;
+						void resolvePublishedEntity({
+							namespace,
+							repository: repositorySlug,
+							kind: "file",
+							path,
+							signal: abort.signal,
+						})
+							.then((entity) => {
+								if (!entity)
+									throw new Error("This file is no longer available.");
+								if (!abort.signal.aborted && entity.lixId === repositoryId)
+									window.location.assign(
+										entityRoutePath(
+											namespace,
+											repositorySlug,
+											"file",
+											entity.id,
+											entity.path,
+										),
+									);
+							})
+							.catch((caught: unknown) => {
+								if (!abort.signal.aborted)
+									setError(
+										caught instanceof Error
+											? caught.message
+											: "Unable to open this file.",
+									);
+							});
 					}}
 					fallback={
 						<p>
@@ -327,13 +362,13 @@ function publishedResourceHref(
 	repositorySlug: string,
 	resource: PublishedResource,
 ): string {
-	const kind = resource.kind === "directory" ? "dir" : "file";
-	const encodedPath = resource.path
-		.split("/")
-		.filter(Boolean)
-		.map(encodeURIComponent)
-		.join("/");
-	return `/@${namespace}/${repositorySlug}/${kind}/${encodedPath}`;
+	return entityRoutePath(
+		namespace,
+		repositorySlug,
+		resource.kind,
+		resource.id,
+		resource.path,
+	);
 }
 
 function fileName(path: string): string {

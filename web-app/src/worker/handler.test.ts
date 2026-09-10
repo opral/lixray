@@ -2129,15 +2129,18 @@ void test("a published directory exposes only its direct child names", async () 
 				executeBody = await request.json();
 				return Response.json({
 					columns: [
+						{ name: "id", type: "text" },
 						{ name: "path", type: "text" },
 						{ name: "kind", type: "text" },
 					],
 					rows: [
 						[
+							{ kind: "text", value: LIX_A },
 							{ kind: "text", value: "/finance/budget.csv" },
 							{ kind: "text", value: "file" },
 						],
 						[
+							{ kind: "text", value: LIX_B },
 							{ kind: "text", value: "/finance/reports" },
 							{ kind: "text", value: "directory" },
 						],
@@ -2152,8 +2155,8 @@ void test("a published directory exposes only its direct child names", async () 
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), {
 		entries: [
-			{ path: "/finance/budget.csv", kind: "file" },
-			{ path: "/finance/reports", kind: "directory" },
+			{ id: LIX_A, path: "/finance/budget.csv", kind: "file" },
+			{ id: LIX_B, path: "/finance/reports", kind: "directory" },
 		],
 		truncated: false,
 	});
@@ -2195,6 +2198,7 @@ void test("a public repository can list a directory through the host projection"
 				}
 				return Response.json({
 					columns: [
+						{ name: "id", type: "text" },
 						{ name: "path", type: "text" },
 						{ name: "kind", type: "text" },
 					],
@@ -3351,4 +3355,83 @@ void test("MCP cleanup failures preserve successful transport traces and flush t
 	assert.equal(observations.length, 1);
 	assert.equal(observations[0]?.outcome, "success");
 	assert.equal(observations[0]?.statusCode, 200);
+});
+
+void test("published entity boot resolves a UUID with a fixed query before authorizing its live path", async () => {
+	const entityId = "33333333-3333-4333-8333-333333333333";
+	let authorized = false;
+	let released = false;
+	const response = await handleRequest(
+		new Request(
+			`https://example.test/api/published/entity?namespace=opral&repository=monorepo&kind=directory&id=${entityId}`,
+		),
+		env({
+			extra: {
+				SUPABASE_URL: "https://database.test",
+				SUPABASE_SERVICE_ROLE_KEY: "server-key",
+			},
+		}),
+		{
+			fetch: async (input) =>
+				Response.json(
+					new URL(input instanceof Request ? input.url : input).pathname ===
+						"/rest/v1/handles"
+						? [{ namespace_id: LIX_A }]
+						: [{ id: LIX_A }],
+				),
+			resolvePublicLix: async (lixId, _env, path) => {
+				assert.equal(lixId, LIX_A);
+				assert.equal(path, "/published/renamed");
+				authorized = true;
+				return { ok: true, lixId, scope: "path" };
+			},
+			lixFetch: async (_lixId, request) => {
+				const path = new URL(request.url).pathname;
+				if (path === `/lix/v1/${LIX_A}/`)
+					return Response.json({
+						protocolVersion: 7,
+						activeBranchId: "main",
+						activeAccountId: "00000000-0000-7000-8000-000000000002",
+						sessionId: "entity-session",
+					});
+				if (path.endsWith("/session")) {
+					released = true;
+					return new Response(null, { status: 204 });
+				}
+				const query = (await request.json()) as {
+					sql: string;
+					params: unknown;
+				};
+				assert.equal(
+					query.sql,
+					"SELECT id, path FROM lix_directory WHERE id = $1 LIMIT 1",
+				);
+				assert.deepEqual(query.params, [{ kind: "text", value: entityId }]);
+				assert.equal(authorized, false);
+				return Response.json({
+					columns: [
+						{ name: "id", type: "text" },
+						{ name: "path", type: "text" },
+					],
+					rows: [
+						[
+							{ kind: "text", value: entityId },
+							{ kind: "text", value: "/published/renamed" },
+						],
+					],
+					rowsAffected: 0,
+					notices: [],
+				});
+			},
+		},
+	);
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), {
+		lixId: LIX_A,
+		id: entityId,
+		kind: "directory",
+		path: "/published/renamed",
+	});
+	assert.equal(authorized, true);
+	assert.equal(released, true);
 });

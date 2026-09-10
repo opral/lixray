@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { entityRoutePath } from "../lib/entity-url.ts";
 import { handleFileSharing } from "./repository-file-sharing.ts";
 const id = "11111111-1111-4111-8111-111111111111";
 const env = {
@@ -40,12 +41,13 @@ void test("publication uses the user token and a file-only grant", async () => {
 			});
 			return new Response(null, { status: 204 });
 		},
+		async () => id,
 	);
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), {
 		published: true,
 		inherited: false,
-		url: "https://lixray.test/@sam/notes/file/notes/Hello%20world.md",
+		url: `https://lixray.test${entityRoutePath("sam", "notes", "file", id, "/notes/Hello world.md")}`,
 	});
 });
 void test("unpublishing a file cannot remove inherited publication", async () => {
@@ -73,6 +75,7 @@ void test("unpublishing a file cannot remove inherited publication", async () =>
 					: [{ kind: "directory", path: "/notes" }],
 			);
 		},
+		async () => id,
 	);
 	assert.equal(response.status, 409);
 	assert.equal(calls, 2);
@@ -119,6 +122,7 @@ void test("account PAT publication uses credential-derived RPC identity", async 
 			});
 			return Response.json(null);
 		},
+		async () => id,
 	);
 	assert.equal(response.status, 200);
 	assert.deepEqual(operations, [

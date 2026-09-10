@@ -1,3 +1,4 @@
+import { entityRoutePath } from "../lib/entity-url.ts";
 import type { WorkerEnv } from "./handler.ts";
 
 /** Uses the caller's existing control-plane permissions; never a service credential. */
@@ -7,6 +8,8 @@ export async function handleFileSharing(
 	token: string,
 	id: string,
 	fetcher: typeof fetch = fetch,
+	resolveFileId: (path: string) => Promise<string | null> = () =>
+		Promise.resolve(null),
 ): Promise<Response> {
 	const url = new URL(request.url);
 	const path = url.searchParams.get("path");
@@ -66,6 +69,9 @@ export async function handleFileSharing(
 		const repository = repos.find((repo) => repo.lix_id === id);
 		if (!repository)
 			return Response.json({ error: "Repository not found." }, { status: 404 });
+		const fileId = await resolveFileId(path);
+		if (!fileId)
+			return Response.json({ error: "File not found." }, { status: 404 });
 		const publications = (await rpc("list_lix_publications", {
 			p_lix_id: id,
 		})) as Array<{ kind: string; path: string }>;
@@ -99,7 +105,13 @@ export async function handleFileSharing(
 					? false
 					: publications.some((p) => p.kind === "file" && p.path === path));
 		const fileUrl = new URL(
-			`/@${encodeURIComponent(repository.namespace_handle)}/${encodeURIComponent(repository.lix_slug)}/file/${path.slice(1).split("/").map(encodeURIComponent).join("/")}`,
+			entityRoutePath(
+				repository.namespace_handle,
+				repository.lix_slug,
+				"file",
+				fileId,
+				path,
+			),
 			url,
 		).href;
 		return Response.json(

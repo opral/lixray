@@ -1,3 +1,5 @@
+import { parseEntityUrlSplat } from "./entity-url.ts";
+
 /** Route-owned metadata keeps browser windows and share previews in sync. */
 export function pageHead(title: string, description: string) {
 	return {
@@ -21,6 +23,8 @@ export function repositoryHead(
 ) {
 	const repository = `@${params.namespace}/${params.repository}`;
 	const path = params._splat?.replace(/^\/+|\/+$/g, "");
+	const entity =
+		view === "file" || view === "dir" ? parseEntityUrlSplat(path) : null;
 	const detail =
 		view === "team"
 			? "People"
@@ -28,8 +32,8 @@ export function repositoryHead(
 				? "Settings"
 				: view === "sql"
 					? "SQL"
-					: path
-						? `${path}${view === "dir" ? "/" : ""}`
+					: view === "file" || view === "dir"
+						? (entity?.slug ?? (view === "file" ? "File" : "Folder"))
 						: undefined;
 	const root = `/@${encodeURIComponent(params.namespace)}/${encodeURIComponent(params.repository)}`;
 	const suffix =

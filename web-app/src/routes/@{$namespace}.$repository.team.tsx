@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
 	useMarkRepositoryRouteSynced,
+	useConsumeShellEntityNavigation,
 	useRepositoryAtelierInstance,
 } from "~/components/repository-atelier";
 import { LIXRAY_PEOPLE_EXTENSION_ID } from "~/components/repository-home/host-extensions";
@@ -20,9 +21,14 @@ export const Route = createFileRoute("/@{$namespace}/$repository/team")({
 function RepositoryTeamRoute() {
 	const atelier = useRepositoryAtelierInstance();
 	const markRouteSynced = useMarkRepositoryRouteSynced();
+	const consumeShellNavigation = useConsumeShellEntityNavigation();
 
 	useEffect(() => {
 		if (!atelier) return;
+		if (consumeShellNavigation("view:team")) {
+			markRouteSynced();
+			return;
+		}
 		let cancelled = false;
 		// "Shell unmounted" is a transient: the dev double-mount (and HMR)
 		// tears the shell down and remounts it on the same instance, so the
@@ -66,7 +72,7 @@ function RepositoryTeamRoute() {
 		return () => {
 			cancelled = true;
 		};
-	}, [atelier, markRouteSynced]);
+	}, [atelier, markRouteSynced, consumeShellNavigation]);
 
 	return null;
 }

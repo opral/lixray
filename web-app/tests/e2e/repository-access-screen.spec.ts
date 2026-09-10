@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-const fileUrl = "/@opral/monorepo/file/company-brain-productization.md";
+const fileUrl =
+	"/@opral/monorepo/file/AAAAAAAAQACAAAAAAAAAAQ/company-brain-productization.md";
 
 test("initial HTML includes the opening skeleton and accessible MCP instructions", async ({
 	browser,
