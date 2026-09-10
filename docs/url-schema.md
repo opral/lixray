@@ -42,7 +42,9 @@ sub          = ""                                   ; repository overview
 
 pin          = "@" changeset-id                     ; immutable permalink (RESERVED)
 query        = "?" query-param *( "&" query-param )
-query-param  = invite-param | future-query-param
+query-param  = branch-param | invite-param | future-query-param
+branch-param = "branch=" branch-id                  ; selected branch (v1)
+branch-id    = nonempty branch identifier, percent-encoded as a query value
 invite-param = "invite=" opaque-token               ; edit capability (RESERVED)
 opaque-token = 32*256( ALPHA / DIGIT / "_" / "-" )  ; implementation currently emits 64 hex chars
 
@@ -142,6 +144,13 @@ permissions and path publications still apply. A private published resource must
 resolved to its current path and checked against current publication permissions
 before exposing its content; identity URLs do not turn a path publication into a
 repository-wide grant.
+
+**Canonical links.** File and directory canonical metadata uses the token-only route;
+optional labels are readable aliases of that same identity. Preserve `?branch=` when
+selecting a branch, and exclude invite capabilities and unrelated view state from
+canonical metadata. A branchless browser URL opens the active branch from the fresh
+repository session, retained as that session's default. Links generated for an explicit
+MCP context include its selected branch so another session opens the same state.
 
 **Migration.** This is a hard cut. Existing path-based file and directory URLs are not
 aliases. There are no compatibility redirects. Generated links always use UUID tokens.

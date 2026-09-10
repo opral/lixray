@@ -20,6 +20,7 @@ export function pageHead(title: string, description: string) {
 export function repositoryHead(
 	params: { namespace: string; repository: string; _splat?: string },
 	view?: "file" | "dir" | "team" | "settings" | "sql",
+	search: { branch?: string } = {},
 ) {
 	const repository = `@${params.namespace}/${params.repository}`;
 	const path = params._splat?.replace(/^\/+|\/+$/g, "");
@@ -39,11 +40,13 @@ export function repositoryHead(
 	const suffix =
 		view === "team" || view === "settings" || view === "sql"
 			? `/${view}`
-			: view
-				? `/${view}/${(path ?? "").split("/").map(encodeURIComponent).join("/")}`
+			: entity && view
+				? `/${view}/${entity.token}`
 				: "";
+	const branch = search.branch?.trim();
+	const query = branch ? `?${new URLSearchParams({ branch })}` : "";
 	return {
-		links: [{ rel: "canonical", href: root + suffix }],
+		links: [{ rel: "canonical", href: root + suffix + query }],
 		...pageHead(
 			`${repository}${detail ? ` · ${detail}` : ""} — LixRay`,
 			`${detail ? `${detail} in` : "Explore"} ${repository} on LixRay.`,

@@ -15,7 +15,7 @@ import {
 } from "~/components/repository-home/host-extensions";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/dir/$")({
-	head: ({ params }) => repositoryHead(params, "dir"),
+	head: ({ params, match }) => repositoryHead(params, "dir", match.search),
 	beforeLoad: ({ params }) => {
 		if (!parseEntityUrlSplat(params._splat)) notFound({ throw: true });
 	},

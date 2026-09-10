@@ -9,7 +9,7 @@ import {
 import { LIXRAY_SETTINGS_EXTENSION_ID } from "~/components/repository-home/host-extensions";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/settings")({
-	head: ({ params }) => repositoryHead(params, "settings"),
+	head: ({ params, match }) => repositoryHead(params, "settings", match.search),
 	component: RepositorySettingsRoute,
 });
 

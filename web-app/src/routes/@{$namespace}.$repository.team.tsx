@@ -9,7 +9,7 @@ import {
 import { LIXRAY_PEOPLE_EXTENSION_ID } from "~/components/repository-home/host-extensions";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/team")({
-	head: ({ params }) => repositoryHead(params, "team"),
+	head: ({ params, match }) => repositoryHead(params, "team", match.search),
 	component: RepositoryTeamRoute,
 });
 

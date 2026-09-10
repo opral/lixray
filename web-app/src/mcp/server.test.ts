@@ -27,6 +27,7 @@ import {
 	MCP_PROTOCOL_VERSION,
 	MCP_RESOURCE,
 	MCP_SERVER_INSTRUCTIONS,
+	GET_ENTITY_URLS_TOOL_DESCRIPTION,
 	OPEN_LIX_TOOL_DESCRIPTION,
 	mcpAuthenticateChallenge,
 	mcpDocumentationResponse,
@@ -212,6 +213,22 @@ class FakeRuntime implements LixRuntimeClient {
 					[
 						{ kind: "int" as const, value: this.fileCount },
 						{ kind: "int" as const, value: this.directoryCount },
+					],
+				],
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
+		if (/^SELECT id, path FROM lix_file\b/.test(request.sql)) {
+			return {
+				columns: ["id", "path"],
+				rows: [
+					[
+						{
+							kind: "text" as const,
+							value: "22222222-2222-4222-8222-222222222222",
+						},
+						{ kind: "text" as const, value: "/skills/hello.md" },
 					],
 				],
 				rowsAffected: 0,
@@ -507,6 +524,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			[
 				"list_lixes",
 				"open_lix",
+				"get_entity_urls",
 				"query_sql",
 				"execute_sql",
 				"active_branch_id",
@@ -633,7 +651,10 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(typeof context, "string");
 		assert.match(openedContent.request_id, /^[0-9a-f-]{36}$/i);
 		assert.equal(openedContent.id, LIX_ID);
-		assert.equal(openedContent.url, "https://lixray.com/@acme/company");
+		assert.equal(
+			openedContent.url,
+			"https://lixray.test/@acme/company?branch=main",
+		);
 		assert.ok(Date.parse(openedContent.context_expires_at) > Date.now());
 		const openedText = toolText(opened);
 		assert.match(openedText, /^Opened @acme\/company \(Company\) on branch/);
@@ -1369,6 +1390,7 @@ void test("open_lix text reports a populated inventory without calling the lix e
 			context: string;
 			file_count: number;
 			directory_count: number;
+			files: Array<{ id: string; path: string; url: string }>;
 			file_paths: Array<string>;
 			file_paths_complete: boolean;
 			empty: boolean;
@@ -1377,6 +1399,13 @@ void test("open_lix text reports a populated inventory without calling the lix e
 		assert.equal(content.directory_count, 1);
 		assert.deepEqual(content.file_paths, ["/skills/hello.md"]);
 		assert.equal(content.file_paths_complete, false);
+		assert.deepEqual(content.files, [
+			{
+				id: "22222222-2222-4222-8222-222222222222",
+				path: "/skills/hello.md",
+				url: "https://lixray.test/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md?branch=main",
+			},
+		]);
 		assert.equal(content.empty, false);
 		const text = toolText(opened);
 		assert.match(text, /4 files, 1 directory/);
@@ -1965,4 +1994,109 @@ void test("transport generates shared trace context and isolates tool observers"
 	} finally {
 		await client.close();
 	}
+});
+
+void test("MCP returns canonical links through modern and text-only tool results", async () => {
+	const runtime = new FakeRuntime();
+	const service = new LixService(runtime, {
+		contextSigningKey: "url-test",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://dev.lixray.com/mcp"),
+		{
+			fetch: (input, init) =>
+				handleMcpTransport(new Request(input, init), service, {
+					authMode: "none",
+				}),
+		},
+	);
+	const client = new Client(
+		{ name: "canonical-url-test", version: "1" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		const tools = await client.listTools();
+		const resolver = tools.tools.find(
+			(tool) => tool.name === "get_entity_urls",
+		);
+		assert.equal(resolver?.annotations?.readOnlyHint, true);
+		assert.equal(resolver?.annotations?.destructiveHint, false);
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: "@acme/company", branch_id: "draft" },
+		});
+		const context = (opened.structuredContent as { context: string }).context;
+		const links = await client.callTool({
+			name: "get_entity_urls",
+			arguments: {
+				context,
+				entities: [
+					{ kind: "file", path: "/skills/hello.md" },
+					{ kind: "directory", path: "/" },
+				],
+			},
+		});
+		assert.equal(links.isError, undefined, JSON.stringify(links));
+		const content = links.structuredContent as {
+			entities: Array<{ url: string; id: string | null }>;
+		};
+		assert.equal(
+			content.entities[0].url,
+			"https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md?branch=draft",
+		);
+		assert.equal(
+			content.entities[1].url,
+			"https://dev.lixray.com/@acme/company?branch=draft",
+		);
+		assert.equal(content.entities[1].id, null);
+		assert.deepEqual(
+			assertStructuredTextFallback(links, context).entities,
+			content.entities,
+		);
+		const missing = await client.callTool({
+			name: "get_entity_urls",
+			arguments: {
+				context,
+				entities: [{ kind: "file", path: "/missing.csv" }],
+			},
+		});
+		assert.equal(missing.isError, true);
+		assert.equal(
+			(missing.structuredContent as { error: { code: string } }).error.code,
+			"not_found",
+		);
+		const invalid = await client.callTool({
+			name: "get_entity_urls",
+			arguments: {
+				context,
+				entities: [
+					{
+						kind: "file",
+						id: "22222222-2222-4222-8222-222222222222",
+						path: "/skills/hello.md",
+					},
+				],
+			},
+		});
+		assert.equal(invalid.isError, true);
+	} finally {
+		await client.close();
+	}
+});
+
+void test("every MCP guidance surface tells clients to use returned canonical URLs", async () => {
+	for (const text of [
+		MCP_SERVER_INSTRUCTIONS,
+		MCP_DOCS,
+		await mcpDocumentationResponse().text(),
+	]) {
+		assert.match(text, /get_entity_urls/);
+		assert.match(text, /canonical/i);
+		assert.match(text, /branch/);
+	}
+	assert.match(GET_ENTITY_URLS_TOOL_DESCRIPTION, /read-only/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /get_entity_urls/);
+	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /files\[\]\.url/);
 });

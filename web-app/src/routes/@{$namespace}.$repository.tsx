@@ -65,7 +65,7 @@ interface RepositorySearch {
 }
 
 export const Route = createFileRoute("/@{$namespace}/$repository")({
-	head: ({ params }) => repositoryHead(params),
+	head: ({ params, match }) => repositoryHead(params, undefined, match.search),
 	ssr: false,
 	pendingComponent: RepositoryAccessPending,
 	validateSearch: (search: Record<string, unknown>): RepositorySearch => {

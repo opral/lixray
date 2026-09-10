@@ -15,7 +15,7 @@ import {
 } from "~/lib/atelier-navigation";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/file/$")({
-	head: ({ params }) => repositoryHead(params, "file"),
+	head: ({ params, match }) => repositoryHead(params, "file", match.search),
 	beforeLoad: ({ params }) => {
 		if (!parseEntityUrlSplat(params._splat)) notFound({ throw: true });
 	},

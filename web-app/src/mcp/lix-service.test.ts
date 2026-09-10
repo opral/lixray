@@ -116,8 +116,12 @@ class FakeRuntime implements LixRuntimeClient {
 		}
 		if (request.sql === OPEN_LIX_FILE_MANIFEST_SQL) {
 			return {
-				columns: ["path"],
-				rows: this.filePaths.map((path) => [
+				columns: ["id", "path"],
+				rows: this.filePaths.map((path, index) => [
+					{
+						kind: "text" as const,
+						value: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+					},
 					{ kind: "text" as const, value: path },
 				]),
 				rowsAffected: 0,
@@ -406,4 +410,213 @@ void test("contexts are bound to the principal and reject tampering", async () =
 			typeof (error.details as { expires_at?: unknown }).expires_at ===
 				"string",
 	);
+});
+
+const FILE_ID = "22222222-2222-4222-8222-222222222222";
+const DIR_ID = "33333333-3333-4333-8333-333333333333";
+class EntityRuntime extends FakeRuntime {
+	entities = [
+		{ kind: "file", id: FILE_ID, path: "/notes/First name.md" },
+		{ kind: "directory", id: DIR_ID, path: "/notes" },
+	];
+	visible = true;
+	handle = "acme";
+	override async listLixes() {
+		const rows = await super.listLixes();
+		return this.visible
+			? rows.map((row) => ({
+					...row,
+					namespace: { ...row.namespace, handle: this.handle },
+				}))
+			: [];
+	}
+	override async execute(
+		lixId: string,
+		branchId: string,
+		request: ExecuteRequest,
+	) {
+		if (
+			!request.sql.startsWith("SELECT id, path FROM lix_") ||
+			request.sql === OPEN_LIX_FILE_MANIFEST_SQL
+		)
+			return super.execute(lixId, branchId, request);
+		this.calls.push({
+			lixId,
+			branchId,
+			sql: request.sql,
+			params: request.params,
+		});
+		const kind = request.sql.includes("FROM lix_file ") ? "file" : "directory";
+		const selectors = [...request.sql.matchAll(/(id|path) = \$(\d+)/g)];
+		const matches = this.entities.filter(
+			(entity) =>
+				entity.kind === kind &&
+				selectors.some((match) => {
+					const param = request.params?.[Number(match[2]) - 1];
+					return (
+						param?.kind === "text" &&
+						entity[match[1] as "id" | "path"] === param.value
+					);
+				}),
+		);
+		return {
+			columns: ["id", "path"],
+			rows: matches.map((entity) => [
+				{ kind: "text" as const, value: entity.id },
+				{ kind: "text" as const, value: entity.path },
+			]),
+			rowsAffected: 0,
+			notices: [],
+		};
+	}
+}
+const makeService = (runtime: FakeRuntime) =>
+	new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+void test("manifest includes verified UUID links and pins even the default branch", async () => {
+	const runtime = new FakeRuntime();
+	runtime.fileCount = 1;
+	runtime.filePaths = ["/First name.md"];
+	const opened = await makeService(runtime).openLix(
+		LIX_ID,
+		undefined,
+		"http://localhost:3000",
+	);
+	assert.equal(opened.url, "http://localhost:3000/@acme/company?branch=main");
+	assert.deepEqual(opened.files, [
+		{
+			id: "00000000-0000-4000-8000-000000000000",
+			path: "/First name.md",
+			url: "http://localhost:3000/@acme/company/file/AAAAAAAAQACAAAAAAAAAAA/first-name.md?branch=main",
+		},
+	]);
+});
+void test("entity URLs batch by kind, preserve request order and use the signed branch", async () => {
+	const runtime = new EntityRuntime();
+	const service = makeService(runtime);
+	const opened = await service.openLix(LIX_ID, "draft/review");
+	runtime.branch = "different";
+	runtime.calls.length = 0;
+	const result = await service.getEntityUrls(opened.context, [
+		{ kind: "directory", path: "/notes/" },
+		{ kind: "file", id: FILE_ID },
+		{ kind: "file", path: "/notes/First name.md" },
+		{ kind: "directory", path: "/" },
+	]);
+	assert.equal(result.context, opened.context);
+	assert.equal(runtime.calls.length, 2);
+	assert.ok(
+		runtime.calls.every(
+			(call) =>
+				call.lixId === LIX_ID &&
+				call.branchId === "draft/review" &&
+				call.sql?.startsWith("SELECT "),
+		),
+	);
+	assert.equal(
+		result.entities[0]?.url,
+		"https://lixray.com/@acme/company/dir/MzMzMzMzQzODMzMzMzMzMw/notes?branch=draft%2Freview",
+	);
+	assert.equal(result.entities[1]?.url, result.entities[2]?.url);
+	assert.deepEqual(result.entities[3], {
+		kind: "directory",
+		id: null,
+		path: "/",
+		url: "https://lixray.com/@acme/company?branch=draft%2Freview",
+	});
+});
+void test("UUID lookup follows file and directory renames and current namespace handles", async () => {
+	const runtime = new EntityRuntime();
+	const service = makeService(runtime);
+	const opened = await service.openLix(LIX_ID);
+	runtime.entities[0]!.path = "/moved/New title.md";
+	runtime.entities[1]!.path = "/moved";
+	runtime.handle = "new-handle";
+	const result = await service.getEntityUrls(opened.context, [
+		{ kind: "file", id: FILE_ID },
+		{ kind: "directory", id: DIR_ID },
+	]);
+	assert.match(
+		result.entities[0]!.url,
+		/\/@new-handle\/company\/file\/IiIiIiIiQiKCIiIiIiIiIg\/new-title.md\?branch=main$/,
+	);
+	assert.equal(result.entities[1]!.path, "/moved");
+	await assert.rejects(
+		service.getEntityUrls(opened.context, [
+			{ kind: "file", path: "/notes/First name.md" },
+		]),
+		(error: unknown) => isLixError(error) && error.code === "not_found",
+	);
+});
+void test("missing UUIDs, wrong kinds and revoked repository access never fabricate links", async () => {
+	const runtime = new EntityRuntime();
+	const service = makeService(runtime);
+	const opened = await service.openLix(LIX_ID);
+	for (const selector of [
+		{ kind: "directory" as const, id: FILE_ID },
+		{ kind: "file" as const, id: LIX_ID },
+	])
+		await assert.rejects(
+			service.getEntityUrls(opened.context, [selector]),
+			(error: unknown) => isLixError(error) && error.code === "not_found",
+		);
+	runtime.visible = false;
+	runtime.calls.length = 0;
+	await assert.rejects(
+		service.getEntityUrls(opened.context, [{ kind: "directory", path: "/" }]),
+		(error: unknown) => isLixError(error) && error.code === "not_found",
+	);
+	assert.equal(runtime.calls.length, 0);
+});
+void test("entity URL lookup rejects tampered contexts and invalid selectors before reading entities", async () => {
+	const runtime = new EntityRuntime();
+	const service = makeService(runtime);
+	const opened = await service.openLix(LIX_ID);
+	runtime.calls.length = 0;
+	await assert.rejects(
+		service.getEntityUrls(opened.context + "x", [
+			{ kind: "file", id: FILE_ID },
+		]),
+	);
+	for (const selectors of [
+		[],
+		Array.from({ length: 51 }, () => ({ kind: "file" as const, id: FILE_ID })),
+		[{ kind: "file" as const, id: FILE_ID, path: "/a" }],
+		[{ kind: "directory" as const, path: "" }],
+		[{ kind: "file" as const, path: "/a/../b" }],
+	])
+		await assert.rejects(
+			service.getEntityUrls(opened.context, selectors),
+			(error: unknown) => isLixError(error) && error.code === "invalid_request",
+		);
+	assert.equal(runtime.calls.length, 0);
+});
+
+void test("root directory UUID uses the repository URL and SQL-sensitive paths stay bound", async () => {
+	const runtime = new EntityRuntime();
+	const service = makeService(runtime);
+	const opened = await service.openLix(LIX_ID);
+	runtime.entities[1]!.path = "/";
+	runtime.entities[0]!.path = "/notes/quote' OR 1=1 --.md";
+	runtime.calls.length = 0;
+	const result = await service.getEntityUrls(opened.context, [
+		{ kind: "directory", id: DIR_ID },
+		{ kind: "file", path: runtime.entities[0]!.path },
+	]);
+	assert.deepEqual(result.entities[0], {
+		kind: "directory",
+		id: null,
+		path: "/",
+		url: "https://lixray.com/@acme/company?branch=main",
+	});
+	assert.ok(
+		runtime.calls.every(
+			(call) => !call.sql?.includes("quote'") && call.sql?.endsWith("LIMIT 50"),
+		),
+	);
+	assert.deepEqual(runtime.calls[0]!.params, [
+		{ kind: "text", value: runtime.entities[0]!.path },
+	]);
 });
