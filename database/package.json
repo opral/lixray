@@ -4,7 +4,7 @@
 	"private": true,
 	"packageManager": "pnpm@10.13.1",
 	"scripts": {
-		"start": "supabase start && supabase migration up --local",
+		"start": "supabase start && supabase migration up --local && node scripts/configure-local-oauth.mjs",
 		"start:ci": "supabase start --exclude edge-runtime,imgproxy,logflare,mailpit,postgres-meta,realtime,storage-api,studio,supavisor,vector",
 		"stop": "supabase stop",
 		"status": "supabase status",

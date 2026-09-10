@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { validateMcpJwtClaims } from "../../web-app/src/mcp/auth.ts";
 
 // Local integration test: synthetic consent, real GoTrue exchanges/refreshes.
 // Tokens travel through private process pipes only; never print credentials.
 const db = process.env.LIXRAY_TEST_DB_CONTAINER ?? "supabase_db_lixray";
 const auth = process.env.LIXRAY_TEST_AUTH_CONTAINER ?? "supabase_auth_lixray";
-const sql = (query) => {
+const sql = (query, databaseRole = "postgres") => {
 	try {
 		return execFileSync(
 			"docker",
@@ -18,7 +19,7 @@ const sql = (query) => {
 				"psql",
 				"-X",
 				"-U",
-				"postgres",
+				databaseRole,
 				"-d",
 				"postgres",
 				"-v",
@@ -38,6 +39,104 @@ const sql = (query) => {
 		);
 	}
 };
+// Re-run the actual rollout SQL over representative pre-migration records.
+// All DDL and fixtures roll back, restoring the running local stack unchanged.
+const checkMigration = () => {
+	const migration = readFileSync(
+		new URL(
+			"../supabase/migrations/20260911000100_oauth_client_resource.sql",
+			import.meta.url,
+		),
+		"utf8",
+	)
+		.replace(/^begin;$/m, "")
+		.replace(/^commit;$/m, "");
+	const migrationUser = randomUUID();
+	const clients = Array.from({ length: 3 }, () => randomUUID());
+	const sessions = Array.from({ length: 5 }, () => randomUUID());
+	const resources = [
+		"https://lixray.com",
+		"https://lixray.com",
+		"http://127.0.0.1:8787",
+		"https://foreign.example",
+	];
+	const clientIndexes = [0, 1, 1, 2, 0];
+	const event = (session) =>
+		JSON.stringify({
+			user_id: migrationUser,
+			authentication_method: "token_refresh",
+			claims: {
+				sub: migrationUser,
+				client_id: clients[0],
+				session_id: session,
+				scope: "openid",
+			},
+		});
+	sql(
+		`begin;
+    drop trigger lixray_bind_oauth_client_resource on auth.oauth_authorizations;
+    drop function private.bind_oauth_client_resource();
+    drop table private.oauth_client_resources;
+    drop table private.oauth_resource_policy;
+    set local role postgres;
+    insert into auth.users(id,email,raw_app_meta_data,raw_user_meta_data)
+      values('${migrationUser}','migration-${migrationUser}@example.com','{}','{}');
+    ${clients
+			.map(
+				(
+					id,
+				) => `insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method)
+      values('${id}','dynamic','http://127.0.0.1/callback','authorization_code,refresh_token','public','none');`,
+			)
+			.join("\n")}
+    ${sessions
+			.map(
+				(
+					id,
+					i,
+				) => `insert into auth.sessions(id,user_id,oauth_client_id,scopes,created_at)
+      values('${id}','${migrationUser}','${clients[clientIndexes[i]]}','openid',now()-interval '1 day');`,
+			)
+			.join("\n")}
+    ${resources
+			.map(
+				(
+					r,
+					i,
+				) => `insert into private.oauth_session_resources(session_id,user_id,client_id,authorization_id,resource,scopes)
+      values('${sessions[i]}','${migrationUser}','${clients[clientIndexes[i]]}','${randomUUID()}','${r}','openid');`,
+			)
+			.join("\n")}
+    insert into auth.oauth_authorizations(id,authorization_id,client_id,user_id,redirect_uri,scope,resource,status)
+      values('${randomUUID()}','${randomUUID()}','${clients[0]}','${migrationUser}','http://127.0.0.1/callback','openid','https://foreign.example','approved'),
+      ('${randomUUID()}','${randomUUID()}','${clients[0]}','${migrationUser}','http://127.0.0.1/callback','openid','https://lixray.com','pending');
+    ${migration}
+    do $$ begin
+      if exists(select 1 from private.oauth_resource_policy where resource <> 'https://lixray.com') then
+        raise exception 'Production rollout enabled a local resource'; end if;
+      if (select resource from private.oauth_client_resources where client_id='${clients[0]}') is distinct from 'https://lixray.com' then
+        raise exception 'Compatible client mapping was not migrated'; end if;
+      if exists(select 1 from private.oauth_client_resources where client_id in ('${clients[1]}','${clients[2]}')) then
+        raise exception 'Conflicting or foreign legacy resources gained a mapping'; end if;
+      if exists(select 1 from auth.oauth_authorizations where user_id='${migrationUser}' and status in ('pending','approved')) then
+        raise exception 'Pre-policy codes remain usable'; end if;
+      if private.custom_access_token_hook('${event(sessions[0])}'::jsonb) #>> '{claims,resource}' is distinct from 'https://lixray.com' then
+        raise exception 'Proven legacy session did not survive rollout'; end if;
+      if private.custom_access_token_hook('${event(sessions[4])}'::jsonb) #>> '{error,http_code}' is distinct from '403' then
+        raise exception 'Unbound legacy session inherited new approval'; end if;
+    end $$;
+    rollback;`,
+		"supabase_admin",
+	);
+	console.log(
+		"PASS: actual rollout SQL preserves proven sessions, excludes conflicting resources, and invalidates old codes without authorizing unbound sessions.",
+	);
+};
+checkMigration();
+sql(
+	`insert into private.oauth_resource_policy values ('http://127.0.0.1:8787') on conflict do nothing;`,
+);
+
 const ip = execFileSync(
 	"docker",
 	[
@@ -113,7 +212,7 @@ const requestToken = async (params, expectSuccess = true) => {
 			"undefined",
 			"failure must not issue credentials",
 		);
-		return;
+		return { status: response.status, body };
 	}
 	assert.equal(response.status, 200, "token endpoint must succeed");
 	assert.ok(
@@ -171,6 +270,7 @@ const validate = (token, initial, expectedResource = resource) => {
 	return claims;
 };
 
+let dynamicClient;
 try {
 	sql(`insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
     values('${user}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','oauth-resource-${user.slice(0, 8)}@example.com','',now(),'{"provider":"email","providers":["email"]}','{}',now(),now());
@@ -184,68 +284,9 @@ try {
 	sql(`begin; set local role authenticated;
 		select set_config('request.jwt.claims','{"sub":"${user}","role":"authenticated"}',true);
 		select * from public.bootstrap_personal_namespace(); commit;`);
-    sql(`insert into public.lixes(namespace_id,name,slug)
+	sql(`insert into public.lixes(namespace_id,name,slug)
         select primary_namespace_id,'OAuth fixture','oauth-fixture' from public.accounts where id='${user}';`);
 
-	const first = seedAuthorization();
-	const ambiguous = seedAuthorization(otherResource);
-	await requestToken(first.params, false);
-	assert.equal(
-		sql(`select count(*) from auth.sessions where user_id='${user}';`),
-		"0",
-		"failed exchange rolls back its session",
-	);
-	sql(
-		`update auth.oauth_authorizations set created_at=now()-interval '10 minutes', approved_at=now()-interval '9 minutes', expires_at=now()-interval '1 minute' where id='${ambiguous.id}';`,
-	);
-	await requestToken(first.params, false);
-	assert.equal(
-		sql(`select count(*) from auth.sessions where user_id='${user}';`),
-		"0",
-		"expired approved candidates also fail closed",
-	);
-	sql(`delete from auth.oauth_authorizations where id='${ambiguous.id}';`);
-	let token = await requestToken(first.params);
-	const initial = validate(token);
-	assert.equal(
-		sql(
-			`select count(*) from auth.oauth_authorizations where id='${first.id}';`,
-		),
-		"0",
-		"GoTrue must consume the original authorization",
-	);
-	assert.equal(
-		sql(
-			`select authorization_id from private.oauth_session_resources where session_id='${initial.session_id}';`,
-		),
-		first.id,
-	);
-	for (let i = 0; i < 2; i++) {
-		const previousRefresh = token.refresh_token;
-		token = await requestToken({
-			grant_type: "refresh_token",
-			refresh_token: previousRefresh,
-		});
-		assert.ok(
-			token.refresh_token !== previousRefresh,
-			"refresh must rotate its credential",
-		);
-		validate(token, initial);
-	}
-	console.log(
-		"PASS: ambiguous login fails closed; exact binding survives authorization deletion and repeated refresh.",
-	);
-
-	await assertMetadataAccess(token.access_token, 1);
-	const foreignAuthorization = seedAuthorization("https://unrelated.example");
-	const foreignToken = await requestToken(foreignAuthorization.params);
-	assert.equal(decode(foreignToken).resource, "https://unrelated.example");
-	await assertMetadataAccess(foreignToken.access_token, 0);
-	console.log(
-		"PASS: signed foreign-resource OAuth cannot read private metadata through PostgREST or RPC.",
-	);
-
-	// Browser logout is local: the independently authorized MCP grant survives.
 	const password = randomUUID();
 	sql(
 		`update auth.users set encrypted_password=extensions.crypt('${password}',extensions.gen_salt('bf')) where id='${user}';`,
@@ -260,6 +301,183 @@ try {
 	});
 	assert.equal(login.status, 200, "synthetic browser login succeeds");
 	const browser = await login.json();
+
+	// Exercise registration and consent over real HTTP, including simultaneous
+	// approvals for a client that has no mapping yet. No synthetic approved rows.
+	const registration = await fetch(`${base}/oauth/clients/register`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			client_name: "Local concurrent consent regression",
+			redirect_uris: [redirect],
+			grant_types: ["authorization_code", "refresh_token"],
+			response_types: ["code"],
+			token_endpoint_auth_method: "none",
+		}),
+	});
+	assert.equal(registration.status, 201, "dynamic registration succeeds");
+	dynamicClient = (await registration.json()).client_id;
+	assert.match(dynamicClient, /^[0-9a-f-]{36}$/);
+	assert.equal(
+		sql(
+			`select count(*) from private.oauth_client_resources where client_id='${dynamicClient}';`,
+		),
+		"0",
+	);
+	const beginConsent = async (targetResource = `${resource}/mcp`) => {
+		const verifier = randomBytes(48).toString("base64url");
+		const params = new URLSearchParams({
+			client_id: dynamicClient,
+			response_type: "code",
+			redirect_uri: redirect,
+			scope,
+			resource: targetResource,
+			code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+			code_challenge_method: "S256",
+			state: randomUUID(),
+		});
+		const response = await fetch(`${base}/oauth/authorize?${params}`, {
+			redirect: "manual",
+		});
+		assert.equal(response.status, 302);
+		const id = new URL(response.headers.get("location")).searchParams.get(
+			"authorization_id",
+		);
+		assert.ok(id, "authorize returns a consent transaction");
+		const details = await fetch(`${base}/oauth/authorizations/${id}`, {
+			headers: { Authorization: `Bearer ${browser.access_token}` },
+		});
+		return { id, verifier, details, state: params.get("state") };
+	};
+	const pending = await Promise.all([beginConsent(), beginConsent()]);
+	for (const item of pending) assert.equal(item.details.status, 200);
+	assert.equal(
+		sql(
+			`select count(*) from private.oauth_client_resources where client_id='${dynamicClient}';`,
+		),
+		"0",
+		"viewing consent is not approval",
+	);
+	const approveConsent = async (item) => {
+		const response = await fetch(
+			`${base}/oauth/authorizations/${item.id}/consent`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${browser.access_token}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ action: "approve" }),
+			},
+		);
+		assert.equal(response.status, 200, "real consent approval succeeds");
+		const callback = new URL((await response.json()).redirect_url);
+		assert.equal(callback.searchParams.get("state"), item.state);
+		return requestToken({
+			client_id: dynamicClient,
+			grant_type: "authorization_code",
+			code: callback.searchParams.get("code"),
+			redirect_uri: redirect,
+			code_verifier: item.verifier,
+		});
+	};
+	const consentTokens = await Promise.all(pending.map(approveConsent));
+	for (const issued of consentTokens) {
+		assert.equal(decode(issued).client_id, dynamicClient);
+		assert.equal(decode(issued).resource, resource);
+		assert.equal(
+			validateMcpJwtClaims(
+				decode(issued),
+				"http://127.0.0.1:54321/auth/v1",
+				undefined,
+				resource,
+			).ok,
+			true,
+		);
+		await assertMetadataAccess(issued.access_token, 1);
+	}
+	assert.notEqual(
+		decode(consentTokens[0]).session_id,
+		decode(consentTokens[1]).session_id,
+	);
+	// Existing consent auto-approval also runs through the database guard.
+	const unsupported = await beginConsent("https://unrelated.example/mcp");
+	assert.ok(
+		unsupported.details.status >= 400,
+		"foreign-resource auto-approval is rejected",
+	);
+	assert.equal(
+		sql(
+			`select count(*) from auth.oauth_authorizations where authorization_id='${unsupported.id}' and status='approved';`,
+		),
+		"0",
+	);
+	console.log(
+		"PASS: real dynamic registration, parallel consent, code exchange, and RLS access; foreign-resource auto-approval rejected.",
+	);
+
+	assert.equal(
+		sql(
+			`select count(*) from private.oauth_client_resources where client_id='${client}';`,
+		),
+		"0",
+		"registration alone grants no resource",
+	);
+	const first = seedAuthorization();
+	const secondConcurrent = seedAuthorization();
+	const abandoned = seedAuthorization();
+	sql(
+		`update auth.oauth_authorizations set created_at=now()-interval '10 minutes', expires_at=now()-interval '1 minute' where id='${abandoned.id}';`,
+	);
+	const exchanges = await Promise.all([
+		requestToken(first.params),
+		requestToken(secondConcurrent.params),
+	]);
+	let token = exchanges[0];
+	const initial = validate(token);
+	validate(exchanges[1]);
+	assert.notEqual(initial.session_id, decode(exchanges[1]).session_id);
+	assert.equal(
+		sql(
+			`select count(*) from auth.oauth_authorizations where id in ('${first.id}','${secondConcurrent.id}');`,
+		),
+		"0",
+	);
+	await requestToken(first.params, false);
+	await requestToken(abandoned.params, false);
+	console.log(
+		"PASS: concurrent same-client code exchanges succeed despite an abandoned expired approval; consumed and expired codes cannot be reused.",
+	);
+	for (let i = 0; i < 2; i++) {
+		const previousRefresh = token.refresh_token;
+		token = await requestToken({
+			grant_type: "refresh_token",
+			refresh_token: previousRefresh,
+		});
+		assert.ok(
+			token.refresh_token !== previousRefresh,
+			"refresh must rotate its credential",
+		);
+		validate(token, initial);
+	}
+	console.log(
+		"PASS: client resource survives authorization deletion and repeated refresh.",
+	);
+
+	await assertMetadataAccess(token.access_token, 1);
+	assert.throws(
+		() => seedAuthorization("https://unrelated.example"),
+		/OAuth fixture SQL failed/,
+	);
+	assert.throws(
+		() => seedAuthorization("https://lixray.com"),
+		/OAuth fixture SQL failed/,
+	);
+	console.log(
+		"PASS: unsupported resources and attempts to rebind a client are rejected at approval.",
+	);
+
+	// Browser logout is local: the independently authorized MCP grant survives.
 	const logout = await fetch(`${base}/logout?scope=local`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${browser.access_token}` },
@@ -274,24 +492,18 @@ try {
 		"PASS: local website logout preserves the independent MCP session.",
 	);
 
-	const second = seedAuthorization(otherResource);
+	const second = seedAuthorization();
 	token = await requestToken({
 		grant_type: "refresh_token",
 		refresh_token: token.refresh_token,
 	});
 	validate(token, initial);
 	let secondToken = await requestToken(second.params);
-	const secondInitial = validate(secondToken, undefined, otherResource);
+	const secondInitial = validate(secondToken);
 	assert.notEqual(
 		secondInitial.session_id,
 		initial.session_id,
 		"separate authorizations create separate sessions",
-	);
-	assert.equal(
-		sql(
-			`select authorization_id from private.oauth_session_resources where session_id='${secondInitial.session_id}';`,
-		),
-		second.id,
 	);
 	assert.equal(
 		sql(
@@ -308,9 +520,9 @@ try {
 		grant_type: "refresh_token",
 		refresh_token: secondToken.refresh_token,
 	});
-	validate(secondToken, secondInitial, otherResource);
+	validate(secondToken, secondInitial);
 	console.log(
-		"PASS: two sessions for the same user/client retain isolated resources, including while another authorization is pending.",
+		"PASS: independently refreshed sessions retain the fixed client resource while other approvals exist.",
 	);
 
 	// A newly launched process receives only the persisted refresh credential.
@@ -365,18 +577,16 @@ try {
 		"the actual OAuth grant revocation API must succeed",
 	);
 	assert.equal(
-		sql(
-			`select count(*) from private.oauth_session_resources where session_id='${initial.session_id}';`,
-		),
+		sql(`select count(*) from auth.sessions where id='${initial.session_id}';`),
 		"0",
-		"revocation cascades to durable binding",
+		"revocation deletes the session",
 	);
 	assert.equal(
 		sql(
-			`select count(*) from private.oauth_session_resources where session_id='${secondInitial.session_id}';`,
+			`select count(*) from auth.sessions where id='${secondInitial.session_id}';`,
 		),
 		"0",
-		"grant revocation also removes the second session binding",
+		"grant revocation also removes the second session",
 	);
 	await requestToken(
 		{ grant_type: "refresh_token", refresh_token: token.refresh_token },
@@ -387,32 +597,25 @@ try {
 		false,
 	);
 	console.log(
-		"PASS: actual grant revocation removes both session bindings and prevents both refreshes.",
+		"PASS: actual grant revocation removes sessions and prevents refreshes.",
 	);
 
 	const legacy = seedAuthorization();
 	const legacyToken = await requestToken(legacy.params);
 	const legacyClaims = validate(legacyToken);
 	sql(
-		`delete from private.oauth_session_resources where session_id='${legacyClaims.session_id}';`,
+		`update auth.sessions set created_at=now()-interval '1 day' where id='${legacyClaims.session_id}';`,
 	);
-	seedAuthorization(otherResource);
 	await requestToken(
 		{ grant_type: "refresh_token", refresh_token: legacyToken.refresh_token },
 		false,
 	);
-	assert.equal(
-		sql(
-			`select count(*) from private.oauth_session_resources where session_id='${legacyClaims.session_id}';`,
-		),
-		"0",
-	);
 	console.log(
-		"PASS: a legacy session without a binding cannot borrow a newer authorization.",
+		"PASS: a pre-approval session without a proven legacy binding cannot inherit client approval.",
 	);
 } finally {
 	sql(
-		`delete from auth.oauth_clients where id in ('${client}','${otherClient}');
+		`delete from auth.oauth_clients where id in ('${client}','${otherClient}','${dynamicClient ?? otherClient}');
 		do $$ declare personal_namespace uuid; begin
 			select primary_namespace_id into personal_namespace from public.accounts where id='${user}';
 			update public.accounts set primary_namespace_id=null where id='${user}';

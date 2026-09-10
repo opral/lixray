@@ -13,6 +13,8 @@ insert into auth.sessions (id, user_id, oauth_client_id, scopes)
 values ('85000000-0000-4000-8000-000000000004', '85000000-0000-4000-8000-000000000001', '85000000-0000-4000-8000-000000000003', 'openid offline_access');
 insert into auth.oauth_authorizations (id, authorization_id, client_id, user_id, redirect_uri, scope, resource, status)
 values ('85000000-0000-4000-8000-000000000005', 'account-identity', '85000000-0000-4000-8000-000000000003', '85000000-0000-4000-8000-000000000001', 'http://127.0.0.1/callback', 'openid offline_access', 'https://lixray.com/mcp', 'approved');
+update auth.sessions set created_at = clock_timestamp() where id = '85000000-0000-4000-8000-000000000004';
+
 create function pg_temp.account_token_event(method text default 'token_refresh', patch jsonb default '{}')
 returns jsonb language sql as $$
 select jsonb_build_object('user_id', '85000000-0000-4000-8000-000000000001', 'authentication_method', method,

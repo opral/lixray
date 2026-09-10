@@ -2,6 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 select plan(13);
+insert into private.oauth_resource_policy values ('http://127.0.0.1:8787') on conflict do nothing;
 
 insert into auth.users (
 	id, instance_id, aud, role, email, encrypted_password,
@@ -64,6 +65,8 @@ values (
 	'openid email profile'
 );
 
+update auth.sessions set created_at = clock_timestamp() where id = '32000000-0000-4000-8000-000000000001';
+
 select is(
 	private.custom_access_token_hook(
 		jsonb_build_object(
@@ -73,7 +76,8 @@ select is(
 				'client_id', '30000000-0000-4000-8000-000000000001',
 				'sub', '20000000-0000-0000-0000-000000000001',
 				'session_id', '32000000-0000-4000-8000-000000000001',
-				'scope', 'openid email profile'
+				'scope', 'openid email profile',
+				'iss', 'http://127.0.0.1:54321/auth/v1'
 			)
 		)
 	) -> 'claims' ->> 'resource',
