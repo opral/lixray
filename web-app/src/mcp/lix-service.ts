@@ -1,3 +1,4 @@
+import { entityRoutePath } from "../lib/entity-url.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
 
 const LIX_UUID_PATTERN =
@@ -64,6 +65,8 @@ export interface OpenedLixContext {
 	lixId: string;
 	lixRef: string;
 	name: string;
+	url: string;
+	files: Array<{ id: string; path: string; url: string }>;
 	branchId: string;
 	commitId: string;
 	fileCount: number;
@@ -76,7 +79,7 @@ export interface OpenedLixContext {
 export const OPEN_LIX_INVENTORY_SQL =
 	"SELECT (SELECT COUNT(*) FROM lix_file) AS file_count, (SELECT COUNT(*) FROM lix_directory) AS directory_count";
 export const OPEN_LIX_FILE_MANIFEST_LIMIT = 50;
-export const OPEN_LIX_FILE_MANIFEST_SQL = `SELECT path FROM lix_file ORDER BY path LIMIT ${OPEN_LIX_FILE_MANIFEST_LIMIT}`;
+export const OPEN_LIX_FILE_MANIFEST_SQL = `SELECT id, path FROM lix_file ORDER BY path LIMIT ${OPEN_LIX_FILE_MANIFEST_LIMIT}`;
 
 export const CONTEXT_REOPEN_HINT =
 	"Call open_lix again. Use structuredContent.context; do not copy TEXT.";
@@ -272,7 +275,11 @@ export class LixService {
 		);
 	}
 
-	async openLix(lixRef: string, branchId?: string): Promise<OpenedLixContext> {
+	async openLix(
+		lixRef: string,
+		branchId?: string,
+		origin = "https://lixray.com",
+	): Promise<OpenedLixContext> {
 		const repository = await this.resolveLixSummary(lixRef);
 		const lixId = repository.id;
 		const selectedBranchId = branchId
@@ -287,6 +294,14 @@ export class LixService {
 			lixId,
 			lixRef: `@${repository.namespace.handle}/${repository.slug}`,
 			name: repository.name,
+			url: canonicalEntityUrl(repository, selectedBranchId, origin),
+			files: inventory.files.map((file) => ({
+				...file,
+				url: canonicalEntityUrl(repository, selectedBranchId, origin, {
+					kind: "file",
+					...file,
+				}),
+			})),
 			branchId: selectedBranchId,
 			commitId,
 			fileCount: inventory.fileCount,
@@ -294,6 +309,122 @@ export class LixService {
 			filePaths: inventory.filePaths,
 			filePathsComplete: inventory.filePathsComplete,
 			empty: inventory.fileCount === 0 && inventory.directoryCount === 0,
+		};
+	}
+
+	async getEntityUrls(
+		contextToken: string,
+		entities: Array<{ kind: "file" | "directory"; id?: string; path?: string }>,
+		origin = "https://lixray.com",
+	): Promise<{
+		context: string;
+		entities: Array<{
+			kind: "file" | "directory";
+			id: string | null;
+			path: string;
+			url: string;
+		}>;
+	}> {
+		const context = await this.readContext(contextToken);
+		if (
+			!Array.isArray(entities) ||
+			entities.length === 0 ||
+			entities.length > 50 ||
+			entities.some(
+				(entity) =>
+					!entity ||
+					(entity.kind !== "file" && entity.kind !== "directory") ||
+					(entity.id === undefined) === (entity.path === undefined) ||
+					(entity.id !== undefined &&
+						(typeof entity.id !== "string" ||
+							!ENTITY_UUID_PATTERN.test(entity.id))) ||
+					(entity.path !== undefined &&
+						(typeof entity.path !== "string" ||
+							!canonicalLookupPath(entity.path, entity.kind))),
+			)
+		)
+			throw createLixError(
+				"invalid_request",
+				"Provide 1–50 entities, each with a kind and exactly one UUID or canonical absolute path.",
+			);
+		const repository = await this.resolveLixSummary(context.lixId);
+		const found = new Map<string, Array<{ id: string; path: string }>>();
+		for (const kind of ["file", "directory"] as const) {
+			const selectors = entities.filter(
+				(entity) =>
+					entity.kind === kind &&
+					!(kind === "directory" && entity.path === "/"),
+			);
+			if (!selectors.length) continue;
+			const response = await this.client.execute(
+				context.lixId,
+				context.branchId,
+				{
+					sql: `SELECT id, path FROM ${kind === "file" ? "lix_file" : "lix_directory"} WHERE ${selectors.map((entity, index) => `${entity.id !== undefined ? "id" : "path"} = $${index + 1}`).join(" OR ")} LIMIT 50`,
+					params: selectors.map((entity) => ({
+						kind: "text",
+						value:
+							entity.id?.toLowerCase() ??
+							canonicalLookupPath(entity.path!, kind)!,
+					})),
+				},
+			);
+			const idColumn = response.columns.indexOf("id");
+			const pathColumn = response.columns.indexOf("path");
+			found.set(
+				kind,
+				response.rows.map((row) => {
+					const id = row[idColumn];
+					const path = row[pathColumn];
+					if (
+						id?.kind !== "text" ||
+						!ENTITY_UUID_PATTERN.test(id.value) ||
+						path?.kind !== "text"
+					)
+						throw createLixError(
+							"upstream_error",
+							"Lix returned an invalid entity.",
+						);
+					return { id: id.value, path: path.value };
+				}),
+			);
+		}
+		return {
+			context: contextToken,
+			entities: entities.map((selector) => {
+				if (selector.kind === "directory" && selector.path === "/")
+					return {
+						kind: selector.kind,
+						id: null,
+						path: "/",
+						url: canonicalEntityUrl(repository, context.branchId, origin),
+					};
+				const entity = found
+					.get(selector.kind)
+					?.find((candidate) =>
+						selector.id !== undefined
+							? candidate.id.toLowerCase() === selector.id.toLowerCase()
+							: candidate.path ===
+								canonicalLookupPath(selector.path!, selector.kind),
+					);
+				if (!entity)
+					throw createLixError(
+						"not_found",
+						"Entity not found in the selected Lix branch.",
+					);
+				return {
+					...entity,
+					id:
+						selector.kind === "directory" && entity.path === "/"
+							? null
+							: entity.id,
+					kind: selector.kind,
+					url: canonicalEntityUrl(repository, context.branchId, origin, {
+						...entity,
+						kind: selector.kind,
+					}),
+				};
+			}),
 		};
 	}
 
@@ -479,6 +610,7 @@ export class LixService {
 	): Promise<{
 		fileCount: number;
 		directoryCount: number;
+		files: Array<{ id: string; path: string }>;
 		filePaths: Array<string>;
 		filePathsComplete: boolean;
 	}> {
@@ -500,6 +632,7 @@ export class LixService {
 			return {
 				fileCount,
 				directoryCount,
+				files: [],
 				filePaths: [],
 				filePathsComplete: true,
 			};
@@ -507,9 +640,15 @@ export class LixService {
 		const manifest = await this.client.execute(lixId, branchId, {
 			sql: OPEN_LIX_FILE_MANIFEST_SQL,
 		});
-		const filePaths = manifest.rows.map((row) => {
-			const value = row[0];
-			if (!value || value.kind !== "text") {
+		const files = manifest.rows.map((row) => {
+			const id = row[manifest.columns.indexOf("id")];
+			const value = row[manifest.columns.indexOf("path")];
+			if (
+				!value ||
+				value.kind !== "text" ||
+				id?.kind !== "text" ||
+				!ENTITY_UUID_PATTERN.test(id.value)
+			) {
 				throw createLixError(
 					"upstream_error",
 					"Lix did not return a valid file path manifest.",
@@ -518,9 +657,11 @@ export class LixService {
 					},
 				);
 			}
-			return value.value;
+			return { id: id.value, path: value.value };
 		});
+		const filePaths = files.map((file) => file.path);
 		return {
+			files,
 			fileCount,
 			directoryCount,
 			filePaths,
@@ -678,4 +819,48 @@ function decodeBase64Url(value: string): string {
 
 function toBase64(value: string): string {
 	return `${value.replaceAll("-", "+").replaceAll("_", "/")}${"=".repeat((4 - (value.length % 4)) % 4)}`;
+}
+
+const ENTITY_UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function canonicalLookupPath(
+	path: string,
+	kind: "file" | "directory",
+): string | null {
+	if (!path.startsWith("/")) return null;
+	const normalized =
+		kind === "directory" && path !== "/" ? path.replace(/\/$/, "") : path;
+	if (normalized === "/" && path !== "/") return null;
+	if (
+		!normalized.startsWith("/") ||
+		normalized.includes("\\") ||
+		[...normalized].some((character) => character.charCodeAt(0) < 32) ||
+		(normalized !== "/" &&
+			normalized
+				.slice(1)
+				.split("/")
+				.some((part) => !part || part === "." || part === ".."))
+	)
+		return null;
+	return normalized;
+}
+function canonicalEntityUrl(
+	repository: LixSummary,
+	branchId: string,
+	origin: string,
+	entity?: { kind: "file" | "directory"; id: string; path: string },
+): string {
+	const path =
+		entity && !(entity.kind === "directory" && entity.path === "/")
+			? entityRoutePath(
+					repository.namespace.handle,
+					repository.slug,
+					entity.kind,
+					entity.id,
+					entity.path,
+				)
+			: `/@${encodeURIComponent(repository.namespace.handle)}/${encodeURIComponent(repository.slug)}`;
+	const url = new URL(path, origin);
+	url.searchParams.set("branch", branchId);
+	return url.href;
 }

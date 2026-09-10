@@ -1,8 +1,7 @@
 # MCP
 
 LixRay exposes Lix through a deliberately small MCP surface. SQL is the
-universal interface for repository data; there are no separate file or entity
-tools. Lix SQL is a Postgres dialect subset.
+universal interface for repository data; file and entity CRUD stays in SQL. `get_entity_urls` resolves browser links without changing repository data or permissions. Lix SQL is a Postgres dialect subset.
 
 Guidance is stated once. The server `instructions` carry the SQL operating
 guide, the no-readback rule, and the checkpoint policy; each tool description
@@ -34,7 +33,7 @@ provided, LixRay continues to create one fallback trace per tool call.
    when the host provides it. Never copy a context token from the prose
    summary. Text-only hosts receive a later `content` text block that is the
    full `structuredContent` JSON. `open_lix` reports file and directory
-   counts plus a bounded `file_paths` manifest. When `file_paths_complete` is
+   counts plus a bounded `file_paths` manifest and `files` containing `id`, `path`, and canonical `url`. Use `files[].url` exactly when linking existing files. When `file_paths_complete` is
    true, do not run another query just to list files.
 4. Use `query_sql` to inspect the relevant state. When paths are known, read
    every needed file in one parameterized statement rather than listing the
@@ -47,6 +46,9 @@ provided, LixRay continues to create one fallback trace per tool call.
    "to check", or path/length/substring readback. One `execute_sql` batch is
    the whole write (dirs + file + `ON CONFLICT` is fine inside that batch).
    No readback is needed to confirm persistence.
+8. To link created or renamed items, call `get_entity_urls` with their UUIDs or
+   absolute paths in one batch, retaining the current context. This resolves
+   browser links; it is not a persistence-verification read.
 
 A successful `execute_sql` mutation is already saved. Writes persist without a
 checkpoint. Use `create_checkpoint` to mark meaningful milestones so the user
@@ -169,3 +171,36 @@ bytes lazily. Relation arguments are non-null text literals; anchors and endpoin
 accept parameters. `lix_change` remains repository-global retained source-record
 activity, not a count of user edits or net differences. New checkpoints do not
 emit synthetic marker changes; old retained records remain historical facts.
+
+## Canonical browser URLs
+
+`file_paths` values are SQL paths and must never be appended to `/file/` or
+`/dir/`. Browser URLs identify entities using their UUID encoded as unpadded
+Base64url, with a descriptive slug. Clients should copy the server-generated
+`url` from `open_lix.files` or `get_entity_urls`, preserving its branch parameter.
+Do not manually encode IDs or guess URLs. The server uses the same URL builder
+as app navigation and sharing.
+
+For example, after writing `/gtm/social/posts.csv`, call:
+
+```json
+{
+  "context": "<context returned by open_lix>",
+  "entities": [
+    { "kind": "file", "path": "/gtm/social/posts.csv" },
+    { "kind": "directory", "path": "/gtm/social" }
+  ]
+}
+```
+
+`get_entity_urls` returns `entities` with `kind`, `id`, `path`, and `url` in the
+requested order. Each selector requires exactly one UUID `id` or absolute
+`path`; batches contain 1–50 selectors. UUID selectors follow renames and moves.
+A root-directory selector (`kind: directory`, `path: /`) returns the repository
+URL with `id: null`. Missing items return a tool error, never a fabricated link.
+If resolution fails, report it and omit the item link rather than guessing.
+
+These are navigation links, not capabilities: they do not publish private data
+or grant access. Resolution uses the signed context's repository and branch,
+and current namespace/repository names. Link resolution remains a separate
+read-only operation so a failure cannot misreport a successful write as failed.

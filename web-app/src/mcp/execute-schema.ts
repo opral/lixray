@@ -78,7 +78,7 @@ UTF-8 / text files: pass \`$1\` (path) and \`$2\` (file body) as \`kind: "text"\
 
 Lix supports Postgres \`INSERT ... ON CONFLICT (cols) DO UPDATE\` / \`DO NOTHING\` with \`excluded.col\` on files (\`lix_file\` on \`path\` or \`id\`) and schema-driven views such as \`lix_key_value\`. Example: \`INSERT INTO lix_key_value (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value\`. This is how you create-or-update without a probe SELECT. Name the conflict columns; \`ON CONSTRAINT\`, inference without columns, and \`DO UPDATE WHERE\` are not supported.
 
-execute_sql already persisted the mutation. \`rowsAffected\` and any rows the batch itself returned are sufficient. Do not follow a write with a verification SELECT, a second query_sql to check, or path/length/substring readback. One execute_sql batch is the whole write (dirs + file + ON CONFLICT is fine inside that batch). No readback is needed to confirm persistence.
+execute_sql already persisted the mutation. \`rowsAffected\` and any rows the batch itself returned are sufficient. Do not follow a write with a verification SELECT, a second query_sql to check, or path/length/substring readback. One execute_sql batch is the whole write (dirs + file + ON CONFLICT is fine inside that batch). No readback is needed to confirm persistence. When a browser link is needed, use get_entity_urls to resolve the canonical URL; that is a separate link-resolution read, not write verification.
 
 Entity tables are lix-dynamic: discover names through information_schema before guessing.
 

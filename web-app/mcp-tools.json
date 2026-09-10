@@ -73,7 +73,7 @@
 	{
 		"name": "open_lix",
 		"title": "LixRay: Open a Lix",
-		"description": "Open a Lix by exact @handle/slug or UUID without calling list_lixes first, and mint the context later tools require, pinned to the active branch unless branch_id is given. Returns counts and a bounded file_paths manifest; when file_paths_complete is true, do not list files again.",
+		"description": "Open a Lix by exact @handle/slug or UUID without calling list_lixes first, and mint the context later tools require (active branch unless branch_id is given). Returns counts, file_paths (SQL paths, not URLs), and files with id, path, and canonical url; when file_paths_complete is true, do not list files again.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -134,6 +134,25 @@
 					"minimum": -9007199254740991,
 					"maximum": 9007199254740991
 				},
+				"files": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"path": {
+								"type": "string"
+							},
+							"url": {
+								"type": "string"
+							}
+						},
+						"required": ["id", "path", "url"],
+						"additionalProperties": false
+					}
+				},
 				"file_paths": {
 					"type": "array",
 					"items": {
@@ -163,11 +182,130 @@
 				"commit_id",
 				"file_count",
 				"directory_count",
+				"files",
 				"file_paths",
 				"file_paths_complete",
 				"empty",
 				"request_id"
 			],
+			"additionalProperties": false
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"openWorldHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "noauth"
+				}
+			]
+		}
+	},
+	{
+		"name": "get_entity_urls",
+		"title": "LixRay: Get canonical item URLs",
+		"description": "Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"entities": {
+					"minItems": 1,
+					"maxItems": 50,
+					"type": "array",
+					"items": {
+						"anyOf": [
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"enum": ["file", "directory"]
+									},
+									"id": {
+										"type": "string",
+										"format": "uuid",
+										"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+									}
+								},
+								"required": ["kind", "id"],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"enum": ["file", "directory"]
+									},
+									"path": {
+										"type": "string",
+										"pattern": "^\\/.*"
+									}
+								},
+								"required": ["kind", "path"],
+								"additionalProperties": false
+							}
+						]
+					}
+				}
+			},
+			"required": ["context", "entities"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"entities": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"enum": ["file", "directory"]
+							},
+							"id": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"path": {
+								"type": "string"
+							},
+							"url": {
+								"type": "string"
+							}
+						},
+						"required": ["kind", "id", "path", "url"],
+						"additionalProperties": false
+					}
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
+				}
+			},
+			"required": ["context", "entities", "request_id"],
 			"additionalProperties": false
 		},
 		"annotations": {

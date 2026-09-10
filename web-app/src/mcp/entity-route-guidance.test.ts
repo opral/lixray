@@ -28,6 +28,32 @@ void test("metadata uses cosmetic labels and useful token-only fallbacks", () =>
 	}
 });
 
+void test("canonical metadata merges cosmetic aliases and preserves branch identity only", () => {
+	const params = {
+		namespace: "acme",
+		repository: "repo",
+		_splat: `${token}/stale-name.md`,
+	};
+	for (const view of ["file", "dir"] as const) {
+		const expected = `/@acme/repo/${view}/${token}?branch=feature%2Fdocs`;
+		assert.equal(
+			repositoryHead(params, view, { branch: "feature/docs" }).links[0]?.href,
+			expected,
+		);
+		assert.equal(
+			repositoryHead({ ...params, _splat: token }, view, {
+				branch: "feature/docs",
+			}).links[0]?.href,
+			expected,
+		);
+	}
+	assert.equal(
+		repositoryHead(params, undefined, { branch: "feature/docs" }).links[0]
+			?.href,
+		"/@acme/repo?branch=feature%2Fdocs",
+	);
+});
+
 void test("SSR guidance resolves UUIDs with parameterized branch-context queries, never the slug", async () => {
 	const directory = await mkdtemp(
 		fileURLToPath(new URL("./.guidance-test-", import.meta.url)),
