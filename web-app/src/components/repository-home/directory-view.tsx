@@ -649,13 +649,29 @@ export function DirectoryView({
 						>
 							<div
 								role="menu"
+								data-entry-context-menu=""
 								className="absolute flex min-w-[164px] flex-col rounded-[10px] border border-border-panel bg-bg-panel p-1 shadow-[0_10px_28px_rgba(28,25,23,0.14)]"
 								style={{
 									left: Math.min(entryMenu.x + 2, window.innerWidth - 180),
-									top: Math.min(entryMenu.y + 2, window.innerHeight - 84),
+									top: Math.min(entryMenu.y + 2, window.innerHeight - 116),
 								}}
 								onClick={(event) => event.stopPropagation()}
 							>
+								<button
+									type="button"
+									role="menuitem"
+									onClick={() => {
+										void copyText(entryLink(connection, entryMenu));
+										setEntryMenu(null);
+									}}
+									className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-text-primary hover:bg-bg-hover"
+								>
+									<Link2
+										className="size-3.5 text-icon-secondary"
+										aria-hidden="true"
+									/>
+									Copy link
+								</button>
 								<button
 									type="button"
 									role="menuitem"
@@ -2281,6 +2297,24 @@ function useAgentConnectionPrompt(
 		}
 	};
 	return { details, copyPrompt, copyState };
+}
+
+/**
+ * The address of a file or folder in this repository, on the page's own
+ * origin and branch, so a pasted link lands exactly where the reader is.
+ */
+function entryLink(
+	connection: Omit<LixConnectionPromptInput, "origin">,
+	entry: { kind: "file" | "directory"; path: string },
+): string {
+	const url = new URL(window.location.href);
+	const segments = entry.path
+		.split("/")
+		.filter(Boolean)
+		.map(encodeURIComponent);
+	url.pathname = `/@${encodeURIComponent(connection.namespace)}/${encodeURIComponent(connection.lixSlug)}/${entry.kind === "directory" ? "dir" : "file"}/${segments.join("/")}`;
+	url.hash = "";
+	return url.toString();
 }
 
 async function copyText(text: string): Promise<void> {
