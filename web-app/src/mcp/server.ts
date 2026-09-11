@@ -14,10 +14,13 @@ import { z } from "zod";
 import { sqlLooksLikeWrite } from "../lib/lix-sql-access.ts";
 import {
 	EXECUTE_SQL_TOOL_DESCRIPTION,
+	LIST_FILES_TOOL_DESCRIPTION,
 	LIX_CATALOG_HINT,
 	LIX_IS_NOT_SQLITE_MESSAGE,
 	LIX_SQL_OPERATING_GUIDE,
 	QUERY_SQL_TOOL_DESCRIPTION,
+	READ_FILES_TOOL_DESCRIPTION,
+	WRITE_FILES_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 import {
 	createLixError,
@@ -424,6 +427,49 @@ const entityUrlsOutput = withError(
 		),
 	}),
 );
+const fileContent = z.union([
+	z.object({ text: z.string() }).strict(),
+	z.object({ base64: z.string() }).strict(),
+]);
+const fileMetadata = z.record(z.string(), z.unknown());
+const listedFile = z
+	.object({ id: z.string(), path: z.string(), url: z.string() })
+	.strict();
+const listFilesOutput = withError(
+	z.object({
+		context,
+		commit_id: z.string(),
+		files: z.array(listedFile),
+		truncated: z.boolean(),
+	}),
+);
+const readFilesOutput = withError(
+	z.object({
+		context,
+		commit_id: z.string(),
+		files: z.array(
+			z
+				.object({
+					id: z.string(),
+					path: z.string(),
+					url: z.string(),
+					size: z.number().int(),
+					content: fileContent,
+					lixcol_metadata: fileMetadata.nullable(),
+				})
+				.strict(),
+		),
+		missing: z.array(z.string()),
+	}),
+);
+const writeFilesOutput = withError(
+	z.object({
+		context,
+		commit_id: z.string(),
+		files: z.array(listedFile),
+		checkpoint_commit_id: z.string().optional(),
+	}),
+);
 const entityUrlSelector = z.union([
 	z
 		.object({ kind: z.enum(["file", "directory"]), id: z.string().uuid() })
@@ -667,6 +713,130 @@ export function createLixrayMcpServer(
 		securitySchemes,
 		async ({ context: token, entities }) =>
 			service.getEntityUrls(token, entities, options.urlOrigin),
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+		options.urlOrigin,
+	);
+
+	registerTool(
+		server,
+		"list_files",
+		"LixRay: List files",
+		LIST_FILES_TOOL_DESCRIPTION,
+		z
+			.object({
+				context,
+				directory: z.string().min(1).optional(),
+				name: z.string().min(1).optional(),
+			})
+			.strict(),
+		listFilesOutput,
+		readAnnotations(),
+		securitySchemes,
+		async ({ context: token, directory, name }) => {
+			const listed = await service.listFiles(
+				token,
+				{ ...(directory ? { directory } : {}), ...(name ? { name } : {}) },
+				options.urlOrigin,
+			);
+			return {
+				context: listed.context,
+				commit_id: listed.commitId,
+				files: listed.files,
+				truncated: listed.truncated,
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+		options.urlOrigin,
+	);
+
+	registerTool(
+		server,
+		"read_files",
+		"LixRay: Read files",
+		READ_FILES_TOOL_DESCRIPTION,
+		z
+			.object({ context, paths: z.array(z.string().min(1)).min(1).max(100) })
+			.strict(),
+		readFilesOutput,
+		readAnnotations(),
+		securitySchemes,
+		async ({ context: token, paths }) => {
+			const read = await service.readFiles(token, paths, options.urlOrigin);
+			return {
+				context: read.context,
+				commit_id: read.commitId,
+				files: read.files,
+				missing: read.missing,
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+		options.urlOrigin,
+	);
+
+	registerTool(
+		server,
+		"write_files",
+		"LixRay: Write files",
+		WRITE_FILES_TOOL_DESCRIPTION,
+		z
+			.object({
+				context,
+				files: z
+					.array(
+						z
+							.object({
+								path: z.string().min(1),
+								content: fileContent.optional(),
+								lixcol_metadata: fileMetadata.nullable().optional(),
+							})
+							.strict(),
+					)
+					.min(1)
+					.max(100),
+				last_seen_commit_id: commitId.optional(),
+				checkpoint: z.boolean().optional(),
+			})
+			.strict(),
+		writeFilesOutput,
+		writeAnnotations(),
+		securitySchemes,
+		async (
+			{ context: token, files, last_seen_commit_id, checkpoint },
+			callId,
+		) => {
+			const written = await service.writeFiles(
+				token,
+				{
+					files,
+					...(last_seen_commit_id
+						? { lastSeenCommitId: last_seen_commit_id }
+						: {}),
+					...(checkpoint ? { checkpoint } : {}),
+					originKey: mcpOriginKey(callId),
+				},
+				options.urlOrigin,
+			);
+			return {
+				context: written.context,
+				commit_id: written.commitId,
+				files: written.files,
+				...(written.checkpointCommitId
+					? { checkpoint_commit_id: written.checkpointCommitId }
+					: {}),
+			};
+		},
 		undefined,
 		options.onToolCall,
 		surfaceVersion,
@@ -1632,6 +1802,20 @@ async function resultResourceLinks(
 			},
 		];
 	}
+	if (name === "write_files" && Array.isArray(result.files)) {
+		return (result.files as Array<{ path: string; url: string }>)
+			.slice(0, 50)
+			.map((file) => {
+				const mimeType = mimeTypeForPath(file.path);
+				return {
+					type: "resource_link",
+					uri: file.url,
+					name: file.path.split("/").filter(Boolean).at(-1) ?? file.path,
+					description: `Wrote ${file.path.replace(/^\//, "")}`,
+					...(mimeType ? { mimeType } : {}),
+				};
+			});
+	}
 	if (name !== "execute_sql" || typeof input.context !== "string") return [];
 	const surviving = touched.entities
 		.filter((entity) => entity.action !== "deleted")
@@ -1688,6 +1872,28 @@ function summarizeToolResult(
 	}
 	if (name === "execute_sql") {
 		return summarizeExecuteSql(result.results, touched);
+	}
+	if (name === "list_files") {
+		const files = Array.isArray(result.files) ? result.files : [];
+		return `Listed ${files.length} ${files.length === 1 ? "file" : "files"}${result.truncated ? " (truncated; narrow the filter)" : ""} at commit ${String(result.commit_id)}.`;
+	}
+	if (name === "read_files") {
+		const files = Array.isArray(result.files) ? result.files : [];
+		const missing = Array.isArray(result.missing) ? result.missing : [];
+		return `Read ${files.length} ${files.length === 1 ? "file" : "files"}${missing.length ? `; missing: ${missing.join(", ")}` : ""} at commit ${String(result.commit_id)}.`;
+	}
+	if (name === "write_files") {
+		const files = Array.isArray(result.files)
+			? (result.files as Array<{ path?: unknown }>)
+			: [];
+		const names = files.map((file) =>
+			typeof file.path === "string" ? file.path.replace(/^\//, "") : "?",
+		);
+		const checkpoint =
+			typeof result.checkpoint_commit_id === "string"
+				? ` (checkpoint ${result.checkpoint_commit_id})`
+				: "";
+		return `Wrote ${names.join(" · ")} at commit ${String(result.commit_id)}${checkpoint}.`;
 	}
 	if (name === "active_branch_id") {
 		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.`;
@@ -1856,6 +2062,9 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"list_lixes",
 		"open_lix",
 		"get_entity_urls",
+		"list_files",
+		"read_files",
+		"write_files",
 		"query_sql",
 		"execute_sql",
 		"active_branch_id",

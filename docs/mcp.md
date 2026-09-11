@@ -3,11 +3,12 @@
 LixRay exposes Lix through a deliberately small MCP surface. SQL is the
 universal interface for repository data; file and entity CRUD stays in SQL. `get_entity_urls` resolves browser links without changing repository data or permissions. Lix SQL is a Postgres dialect subset.
 
-The two SQL tools carry their guide in their own descriptions: `query_sql`
-says how to discover tables and columns through `information_schema` (Lix is
-not SQLite; a query against `sqlite_master` gets that answer by name) and how
-to read files; `execute_sql` says how to write files and directories and that
-no readback follows a write. That is what an agent reads before its first
+Each tool carries its own guide in its description: the file tools say how
+bytes and metadata travel and how conflicts are reported; `query_sql` says
+how to discover tables and columns through `information_schema` (Lix is not
+SQLite; a query against `sqlite_master` gets that answer by name);
+`execute_sql` says how renames and deletes look and that no readback follows
+a write. That is what an agent reads before its first
 query, and hosts do not reliably show the server `instructions` to the model;
 the instructions repeat the workflow for hosts that do. Every other tool
 description is one or two sentences. Output schemas describe the success shape
@@ -19,8 +20,20 @@ violation.
 ## Tools
 
 - `list_lixes`, `open_lix`: find a Lix and mint its context (see below).
-- `query_sql`, `execute_sql`: every read and every write, including files and
-  directories.
+- `list_files`, `read_files`, `write_files`: the file path. `read_files`
+  returns bytes as `{ text }` (UTF-8) or `{ base64 }`, `lixcol_metadata`,
+  size, id, canonical `url`, and the `commit_id` the read reflects.
+  `write_files` creates or updates files in one atomic commit, parents
+  included, with content, `lixcol_metadata` (omitted keeps, an object
+  replaces, `null` clears), an optional `checkpoint: true`, and
+  `last_seen_commit_id`: a target file that changed since that commit refuses
+  the whole write, and the error carries `current_commit_id` and the current
+  contents of the conflicting files; unrelated changes never block. The
+  check and the write are two steps, so a write to the same file landing
+  between them is not caught; the window is milliseconds.
+- `query_sql`, `execute_sql`: everything else. Files and directories are
+  still tables (`lix_file`, `lix_directory`): rename, delete, and any query
+  go through SQL.
 - `get_entity_urls`: canonical browser links for files and directories.
 - `create_checkpoint`, `restore`, `undo`, `redo`: milestones and moving the
   branch head.

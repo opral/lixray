@@ -69,6 +69,9 @@ function assertCheckpointPolicy(text: string): void {
 
 const isSqlTool = (name: string) =>
 	name === "query_sql" || name === "execute_sql";
+/** Tools whose card carries a guide, not one line. */
+const isGuidedTool = (name: string) =>
+	isSqlTool(name) || ["list_files", "read_files", "write_files"].includes(name);
 
 function toolText(result: {
 	content?: Array<{ type: string; text?: string }>;
@@ -157,7 +160,25 @@ const SHARED_GUIDE_MARKERS = [
 ] as const;
 
 class FakeRuntime implements LixRuntimeClient {
+	/** Files the file tools see, by path. */
+	files = new Map<
+		string,
+		{ id: string; base64: string; metadata: Record<string, unknown> | null }
+	>([
+		[
+			"/skills/hello.md",
+			{
+				id: "22222222-2222-4222-8222-222222222222",
+				base64: Buffer.from("# Hello\n", "utf8").toString("base64"),
+				metadata: null,
+			},
+		],
+	]);
+	/** Target paths lix_diff reports as changed since last_seen_commit_id. */
+	changedSinceLastSeen: string[] = [];
+	writes: string[] = [];
 	lastOriginKey: string | undefined;
+
 	fileCount = 0;
 	directoryCount = 0;
 	hasOpenRuntime() {
@@ -263,6 +284,83 @@ class FakeRuntime implements LixRuntimeClient {
 					],
 				],
 				rowsAffected: 0,
+				notices: [],
+			};
+		}
+		if (
+			/^SELECT id, path, content, lixcol_metadata FROM lix_file WHERE path IN/.test(
+				request.sql,
+			)
+		) {
+			const wanted = (request.params ?? []).flatMap((param) =>
+				param.kind === "text" ? [param.value] : [],
+			);
+			return {
+				columns: ["id", "path", "content", "lixcol_metadata"],
+				rows: wanted
+					.filter((path) => this.files.has(path))
+					.map((path) => {
+						const file = this.files.get(path)!;
+						return [
+							{ kind: "text" as const, value: file.id },
+							{ kind: "text" as const, value: path },
+							{ kind: "blob" as const, base64: file.base64 },
+							file.metadata === null
+								? { kind: "null" as const }
+								: { kind: "json" as const, value: file.metadata },
+						];
+					}),
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
+		if (
+			/^SELECT from_path, to_path FROM lix_diff\('lix_file', \$1, \$2\)/.test(
+				request.sql,
+			)
+		) {
+			const [from] = request.params ?? [];
+			if (from?.kind === "text" && from.value === "unknown-commit")
+				throw createLixError("LIX_COMMIT_NOT_FOUND", "commit not found");
+			return {
+				columns: ["from_path", "to_path"],
+				rows: this.changedSinceLastSeen.map((path) => [
+					{ kind: "text" as const, value: path },
+					{ kind: "text" as const, value: path },
+				]),
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
+		if (/RETURNING id, path$/.test(request.sql)) {
+			const path = request.params?.[0];
+			if (path?.kind !== "text") throw new Error("path param missing");
+			this.lastOriginKey = request.options?.originKey;
+			const content = request.params?.[1];
+			const existing = this.files.get(path.value);
+			const id =
+				existing?.id ??
+				`33333333-3333-4333-8333-${String(this.files.size + 1).padStart(12, "0")}`;
+			this.files.set(path.value, {
+				id,
+				base64:
+					content?.kind === "blob"
+						? content.base64
+						: content?.kind === "text"
+							? Buffer.from(content.value, "utf8").toString("base64")
+							: (existing?.base64 ?? ""),
+				metadata: existing?.metadata ?? null,
+			});
+			this.writes.push(request.sql);
+			return {
+				columns: ["id", "path"],
+				rows: [
+					[
+						{ kind: "text" as const, value: id },
+						{ kind: "text" as const, value: path.value },
+					],
+				],
+				rowsAffected: 1,
 				notices: [],
 			};
 		}
@@ -582,6 +680,9 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				"list_lixes",
 				"open_lix",
 				"get_entity_urls",
+				"list_files",
+				"read_files",
+				"write_files",
 				"query_sql",
 				"execute_sql",
 				"active_branch_id",
@@ -630,19 +731,27 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		// reads before its first query. The instructions repeat the rules.
 		assert.match(queryTool.description ?? "", /information_schema\.tables/);
 		assert.match(queryTool.description ?? "", /not SQLite/);
-		assert.match(executeSqlTool.description ?? "", /CAST\(\$2 AS BYTEA\)/);
+		assert.match(executeSqlTool.description ?? "", /UPDATE lix_file SET path/);
 		assert.match(executeSqlTool.description ?? "", /verification SELECT/);
 		assert.match(executeSqlTool.description ?? "", /create_checkpoint/);
+		// The file recipe lives on write_files; the SQL cards point at it.
+		const writeFilesTool = tools.tools.find(
+			(tool) => tool.name === "write_files",
+		);
+		assert.match(writeFilesTool?.description ?? "", /last_seen_commit_id/);
+		assert.match(writeFilesTool?.description ?? "", /lixcol_metadata/);
+		assert.match(executeSqlTool.description ?? "", /use write_files/);
+		assert.match(queryTool.description ?? "", /read_files and list_files/);
 		assert.match(MCP_SERVER_INSTRUCTIONS, /verification SELECT/);
 		// The listing stays bounded: the guide lives on two tools only, the
 		// rest are one-liners, output schemas are success-only.
 		const listingChars = JSON.stringify(tools.tools).length;
 		assert.ok(
-			listingChars < 26_000,
-			`tools/list is ${listingChars} chars; keep it under 26k`,
+			listingChars < 34_000,
+			`tools/list is ${listingChars} chars; keep it under 34k`,
 		);
 		for (const tool of tools.tools) {
-			const limit = isSqlTool(tool.name) ? 1_800 : 320;
+			const limit = isGuidedTool(tool.name) ? 1_800 : 320;
 			assert.ok(
 				(tool.description ?? "").length <= limit,
 				`${tool.name} description is ${tool.description?.length} chars`,
@@ -705,7 +814,13 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				?.destructiveHint,
 			true,
 		);
-		assert.ok(!tools.tools.some((tool) => tool.name.includes("file")));
+		// The file tools are the only file-named surface; no typed CRUD beyond them.
+		assert.deepEqual(
+			tools.tools
+				.map((tool) => tool.name)
+				.filter((name) => name.includes("file")),
+			["list_files", "read_files", "write_files"],
+		);
 		const opened = await client.callTool({
 			name: "open_lix",
 			arguments: { lix_ref: LIX_ID },
@@ -2257,4 +2372,184 @@ void test("every MCP guidance surface tells clients to use returned canonical UR
 	assert.match(MCP_URL_GUIDE, /get_entity_urls/);
 	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /get_entity_urls/);
 	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /canonical url/);
+});
+
+void test("file tools list, read, and write files with metadata and conflict checks", async () => {
+	const runtime = new FakeRuntime();
+	const service = new LixService(runtime, {
+		contextSigningKey: "file-tools",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://dev.lixray.com/mcp"),
+		{
+			fetch: (input, init) =>
+				handleMcpTransport(new Request(input, init), service, {
+					authMode: "none",
+				}),
+		},
+	);
+	const client = new Client(
+		{ name: "file-tools-test", version: "1" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		await client.listTools();
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: "@acme/company" },
+		});
+		const context = (opened.structuredContent as { context: string }).context;
+
+		const listed = await client.callTool({
+			name: "list_files",
+			arguments: { context, directory: "/skills" },
+		});
+		assert.equal(listed.isError, undefined, JSON.stringify(listed));
+		const listing = listed.structuredContent as {
+			commit_id: string;
+			files: Array<{ id: string; path: string; url: string }>;
+			truncated: boolean;
+		};
+		assert.equal(listing.commit_id, "commit-1");
+		assert.deepEqual(listing.files, [
+			{
+				id: "22222222-2222-4222-8222-222222222222",
+				path: "/skills/hello.md",
+				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md",
+			},
+		]);
+		assert.equal(listing.truncated, false);
+		assert.match(toolText(listed), /Listed 1 file at commit commit-1/);
+
+		const read = await client.callTool({
+			name: "read_files",
+			arguments: { context, paths: ["/skills/hello.md", "/missing.md"] },
+		});
+		assert.equal(read.isError, undefined, JSON.stringify(read));
+		const contents = read.structuredContent as {
+			commit_id: string;
+			files: Array<Record<string, unknown>>;
+			missing: string[];
+		};
+		assert.deepEqual(contents.files, [
+			{
+				id: "22222222-2222-4222-8222-222222222222",
+				path: "/skills/hello.md",
+				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md",
+				size: 8,
+				content: { text: "# Hello\n" },
+				lixcol_metadata: null,
+			},
+		]);
+		assert.deepEqual(contents.missing, ["/missing.md"]);
+		assert.match(toolText(read), /Read 1 file; missing: \/missing\.md/);
+
+		// A write: parent directories, one file per statement, metadata along.
+		const written = await client.callTool({
+			name: "write_files",
+			arguments: {
+				context,
+				last_seen_commit_id: "commit-1",
+				files: [
+					{
+						path: "/gtm/campaigns/icp.md",
+						content: { text: "# ICP" },
+						lixcol_metadata: { atelier_csv: { version: 1, columns: [] } },
+					},
+					{ path: "/skills/hello.md", lixcol_metadata: null },
+				],
+			},
+		});
+		assert.equal(written.isError, undefined, JSON.stringify(written));
+		const wrote = written.structuredContent as {
+			commit_id: string;
+			files: Array<{ id: string; path: string; url: string }>;
+		};
+		assert.deepEqual(
+			wrote.files.map((file) => file.path),
+			["/gtm/campaigns/icp.md", "/skills/hello.md"],
+		);
+		assert.match(
+			wrote.files[0]!.url,
+			/^https:\/\/dev\.lixray\.com\/@acme\/company\/file\//,
+		);
+		assert.deepEqual(runtime.writes, [
+			"INSERT INTO lix_file (path, content, lixcol_metadata) VALUES ($1, CAST($2 AS BYTEA), $3) ON CONFLICT (path) DO UPDATE SET content = excluded.content, lixcol_metadata = excluded.lixcol_metadata RETURNING id, path",
+			"UPDATE lix_file SET lixcol_metadata = $2 WHERE path = $1 RETURNING id, path",
+		]);
+		assert.match(runtime.lastOriginKey ?? "", /^mcp:/);
+		assert.match(
+			toolText(written),
+			/Wrote gtm\/campaigns\/icp\.md · skills\/hello\.md/,
+		);
+		assert.equal(
+			written.content?.filter((block) => block.type === "resource_link").length,
+			2,
+		);
+
+		// Metadata alone on a file that does not exist is refused before writing.
+		const orphan = await client.callTool({
+			name: "write_files",
+			arguments: {
+				context,
+				files: [{ path: "/nowhere.md", lixcol_metadata: { a: 1 } }],
+			},
+		});
+		assert.equal(orphan.isError, true);
+		assert.equal(toolErrorContent(orphan).error.code, "not_found");
+
+		// A conflicting file since last_seen_commit_id refuses the write and
+		// hands back the current contents; unrelated changes never block.
+		runtime.changedSinceLastSeen = ["/skills/hello.md"];
+		const conflict = await client.callTool({
+			name: "write_files",
+			arguments: {
+				context,
+				last_seen_commit_id: "commit-0",
+				files: [
+					{ path: "/skills/hello.md", content: { text: "# Hello again" } },
+					{ path: "/other.md", content: { text: "x" } },
+				],
+			},
+		});
+		assert.equal(conflict.isError, true);
+		const conflictError = toolErrorContent(conflict).error;
+		assert.equal(conflictError.code, "conflict");
+		assert.match(conflictError.message, /\/skills\/hello\.md/);
+		assert.deepEqual(conflictError.details, {
+			current_commit_id: "commit-1",
+			files: [
+				{
+					path: "/skills/hello.md",
+					content: { text: "# Hello\n" },
+					lixcol_metadata: null,
+				},
+			],
+		});
+		// Nothing was written.
+		assert.equal(runtime.writes.length, 2);
+		const unrelated = await client.callTool({
+			name: "write_files",
+			arguments: {
+				context,
+				last_seen_commit_id: "commit-0",
+				files: [{ path: "/other.md", content: { text: "x" } }],
+			},
+		});
+		assert.equal(unrelated.isError, undefined, JSON.stringify(unrelated));
+		const unknown = await client.callTool({
+			name: "write_files",
+			arguments: {
+				context,
+				last_seen_commit_id: "unknown-commit",
+				files: [{ path: "/other.md", content: { text: "y" } }],
+			},
+		});
+		assert.equal(unknown.isError, true);
+		assert.equal(toolErrorContent(unknown).error.code, "invalid_request");
+	} finally {
+		await client.close();
+	}
 });

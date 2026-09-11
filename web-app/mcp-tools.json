@@ -325,9 +325,361 @@
 		}
 	},
 	{
+		"name": "list_files",
+		"title": "LixRay: List files",
+		"description": "List the files of the Lix and branch in context with id, path, and canonical url, sorted by path. Optional directory (an absolute path prefix such as /gtm) and name (a case-insensitive substring of the file name) narrow the list; truncated says to narrow further. Read-only.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"directory": {
+					"type": "string",
+					"minLength": 1
+				},
+				"name": {
+					"type": "string",
+					"minLength": 1
+				}
+			},
+			"required": ["context"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"commit_id": {
+					"type": "string"
+				},
+				"files": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"path": {
+								"type": "string"
+							},
+							"url": {
+								"type": "string"
+							}
+						},
+						"required": ["id", "path", "url"],
+						"additionalProperties": false
+					}
+				},
+				"truncated": {
+					"type": "boolean"
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
+				}
+			},
+			"required": ["context", "commit_id", "files", "truncated", "request_id"],
+			"additionalProperties": false
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"openWorldHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "noauth"
+				}
+			]
+		}
+	},
+	{
+		"name": "read_files",
+		"title": "LixRay: Read files",
+		"description": "Read files by absolute path. Each returns id, canonical url, size, content as { text } when the bytes are UTF-8 (else { base64 }), and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to write_files as last_seen_commit_id.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"paths": {
+					"minItems": 1,
+					"maxItems": 100,
+					"type": "array",
+					"items": {
+						"type": "string",
+						"minLength": 1
+					}
+				}
+			},
+			"required": ["context", "paths"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"commit_id": {
+					"type": "string"
+				},
+				"files": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"path": {
+								"type": "string"
+							},
+							"url": {
+								"type": "string"
+							},
+							"size": {
+								"type": "integer",
+								"minimum": -9007199254740991,
+								"maximum": 9007199254740991
+							},
+							"content": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										},
+										"required": ["text"],
+										"additionalProperties": false
+									},
+									{
+										"type": "object",
+										"properties": {
+											"base64": {
+												"type": "string"
+											}
+										},
+										"required": ["base64"],
+										"additionalProperties": false
+									}
+								]
+							},
+							"lixcol_metadata": {
+								"anyOf": [
+									{
+										"type": "object",
+										"propertyNames": {
+											"type": "string"
+										},
+										"additionalProperties": {}
+									},
+									{
+										"type": "null"
+									}
+								]
+							}
+						},
+						"required": [
+							"id",
+							"path",
+							"url",
+							"size",
+							"content",
+							"lixcol_metadata"
+						],
+						"additionalProperties": false
+					}
+				},
+				"missing": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
+				}
+			},
+			"required": ["context", "commit_id", "files", "missing", "request_id"],
+			"additionalProperties": false
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"openWorldHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "noauth"
+				}
+			]
+		}
+	},
+	{
+		"name": "write_files",
+		"title": "LixRay: Write files",
+		"description": "Create or update files in one atomic commit, parent directories included. Each file takes content as { text } or { base64 } and, optionally, lixcol_metadata (omitted keeps it, an object replaces it, null clears it); metadata alone updates an existing file. With last_seen_commit_id, a file that changed since that commit refuses the whole write: the error carries current_commit_id and the current content of the conflicting files, so merge and write again; unrelated changes never block. checkpoint: true marks the resulting commit. The write is already saved; do not read it back. Rename, delete, and everything else: execute_sql on lix_file and lix_directory.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"files": {
+					"minItems": 1,
+					"maxItems": 100,
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"path": {
+								"type": "string",
+								"minLength": 1
+							},
+							"content": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"text": {
+												"type": "string"
+											}
+										},
+										"required": ["text"],
+										"additionalProperties": false
+									},
+									{
+										"type": "object",
+										"properties": {
+											"base64": {
+												"type": "string"
+											}
+										},
+										"required": ["base64"],
+										"additionalProperties": false
+									}
+								]
+							},
+							"lixcol_metadata": {
+								"anyOf": [
+									{
+										"type": "object",
+										"propertyNames": {
+											"type": "string"
+										},
+										"additionalProperties": {}
+									},
+									{
+										"type": "null"
+									}
+								]
+							}
+						},
+						"required": ["path"],
+						"additionalProperties": false
+					}
+				},
+				"last_seen_commit_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Lix commit id"
+				},
+				"checkpoint": {
+					"type": "boolean"
+				}
+			},
+			"required": ["context", "files"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by open_lix or switch_branch"
+				},
+				"commit_id": {
+					"type": "string"
+				},
+				"files": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"path": {
+								"type": "string"
+							},
+							"url": {
+								"type": "string"
+							}
+						},
+						"required": ["id", "path", "url"],
+						"additionalProperties": false
+					}
+				},
+				"checkpoint_commit_id": {
+					"type": "string"
+				},
+				"request_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Request ID for correlating this response with server telemetry"
+				}
+			},
+			"required": ["context", "commit_id", "files", "request_id"],
+			"additionalProperties": false
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": true,
+			"idempotentHint": false,
+			"openWorldHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "noauth"
+				}
+			]
+		}
+	},
+	{
 		"name": "query_sql",
 		"title": "LixRay: Query SQL",
-		"description": "Run one read-only SQL statement against the Lix and branch in context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.\n\nLix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;` and columns, with their descriptions, with `SELECT column_name, data_type, is_nullable, description FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position;`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: \"text\", value: \"…\" }] (kinds: text, int, float, json, blob). Read a text file with `SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1`, and several at once with `WHERE path IN ($1, $2)` in one statement. History: lix_log() lists retained commits, lix_history('lix_file') the net change per commit, lix_diff('lix_file') the working changes, lix_as_of('lix_file', $1) the state at a commit.",
+		"description": "Run one read-only SQL statement against the Lix and branch in context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.\n\nFiles: use read_files and list_files; this tool is for everything else. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;` and columns, with their descriptions, with `SELECT column_name, data_type, is_nullable, description FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position;`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: \"text\", value: \"…\" }] (kinds: text, int, float, json, blob); file bytes read as CAST(content AS TEXT). History: lix_log() lists retained commits, lix_history('lix_file') the net change per commit, lix_diff('lix_file') the working changes, lix_as_of('lix_file', $1) the state at a commit.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -514,7 +866,7 @@
 	{
 		"name": "execute_sql",
 		"title": "Execute SQL atomically",
-		"description": "Run an ordered atomic SQL batch against the Lix and branch in context. If any statement fails, the complete batch is rolled back; a returned result is already persisted.\n\nWrite a text file with `INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content`, passing both params as kind \"text\" (binaries: kind \"blob\" without CAST; never CAST(... AS BLOB)). Create parent directories first, in the same batch: `INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (path) DO NOTHING` (paths have no trailing slash: /skills, not /skills/). Rename with `UPDATE lix_file SET path = $1 WHERE path = $2`; delete with `DELETE FROM lix_file WHERE path = $1`. ON CONFLICT names its columns; ON CONSTRAINT and DO UPDATE WHERE are not supported. The result names what the batch wrote, with links; do not follow a write with a verification SELECT or any readback. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.",
+		"description": "Run an ordered atomic SQL batch against the Lix and branch in context. If any statement fails, the complete batch is rolled back; a returned result is already persisted.\n\nFiles: use write_files to create or update; this tool is for everything else, lix_file and lix_directory included. Rename with `UPDATE lix_file SET path = $1 WHERE path = $2`; delete with `DELETE FROM lix_file WHERE path = $1`; directories likewise on lix_directory (paths have no trailing slash: /skills, not /skills/). Lix supports `INSERT … ON CONFLICT (cols) DO UPDATE SET col = excluded.col` and DO NOTHING; ON CONSTRAINT and DO UPDATE WHERE are not supported; text bound for a byte column is written as `CAST($n AS BYTEA)`. The result names what the batch wrote, with links; do not follow a write with a verification SELECT or any readback. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",

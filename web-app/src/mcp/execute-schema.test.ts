@@ -9,8 +9,11 @@ import {
 	EXECUTE_SQL_CORE_TABLES,
 	EXECUTE_SQL_TOOL_DESCRIPTION,
 	EXECUTE_SQL_TABLES_QUERY,
+	LIST_FILES_TOOL_DESCRIPTION,
 	LIX_SQL_OPERATING_GUIDE,
 	QUERY_SQL_TOOL_DESCRIPTION,
+	READ_FILES_TOOL_DESCRIPTION,
+	WRITE_FILES_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 import { MCP_SERVER_INSTRUCTIONS } from "./server.ts";
 
@@ -22,8 +25,8 @@ const MCP_DOCS = readFileSync(
 const SHARED_GUIDE_MARKERS = [
 	/lix_history\('lix_file'/,
 	/information_schema\.tables/,
-	/CAST\(\$2 AS BYTEA\)/,
-	/ON CONFLICT \(path\) DO UPDATE/,
+	/UPDATE lix_file SET path/,
+	/excluded\.col/,
 ] as const;
 
 void test("SQL guidance models the public Lix surfaces", () => {
@@ -88,13 +91,14 @@ void test("shared operating guide keeps file-content, upsert, and no-verify copy
 	assert.match(MCP_DOCS, /ON CONFLICT \(path\) DO UPDATE/);
 });
 
-void test("the SQL tools carry their guide on the card an agent reads first", () => {
+void test("each tool carries its own guide; the SQL cards defer files to the file tools", () => {
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /INSERT, UPDATE, and DELETE/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /use execute_sql for writes/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ordered atomic SQL batch/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
-	// Reads: not SQLite, the catalog, core tables, params, file reads, history.
+	// Reads: files elsewhere, not SQLite, the catalog, core tables, params, history.
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /use read_files and list_files/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /not SQLite/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.columns/);
@@ -103,31 +107,39 @@ void test("the SQL tools carry their guide on the card an agent reads first", ()
 		/lix_file \(id, path, directory_id, name, content\)/,
 	);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /kind: "text"/);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /CAST\(content AS TEXT\)/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /lix_history\('lix_file'\)/);
-	// Writes: the file recipe, directories, rename, delete, no readback.
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /CAST\(\$2 AS BYTEA\)/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ON CONFLICT \(path\) DO UPDATE/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /kind "text"/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /never CAST\(\.\.\. AS BLOB\)/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /INSERT INTO lix_directory/);
+	// Writes: files elsewhere, rename, delete, upsert shape, no readback.
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /use write_files/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /UPDATE lix_file SET path/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /DELETE FROM lix_file/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /excluded\.col/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /\/skills, not \/skills\//);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /verification SELECT/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /create_checkpoint/);
+	// The file tools carry the file guide the SQL cards used to.
+	assert.match(READ_FILES_TOOL_DESCRIPTION, /\{ text \}/);
+	assert.match(READ_FILES_TOOL_DESCRIPTION, /atelier_csv/);
+	assert.match(READ_FILES_TOOL_DESCRIPTION, /last_seen_commit_id/);
+	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /parent directories included/);
+	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /null clears it/);
+	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /unrelated changes never block/);
+	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /do not read it back/);
+	assert.match(LIST_FILES_TOOL_DESCRIPTION, /truncated/);
 	// The instructions still carry the full guide for hosts that show it.
 	assert.match(MCP_SERVER_INSTRUCTIONS, /verification SELECT/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /Do not checkpoint after every edit/);
 	for (const description of [
 		QUERY_SQL_TOOL_DESCRIPTION,
 		EXECUTE_SQL_TOOL_DESCRIPTION,
+		LIST_FILES_TOOL_DESCRIPTION,
+		READ_FILES_TOOL_DESCRIPTION,
+		WRITE_FILES_TOOL_DESCRIPTION,
 	]) {
-		assert.ok(description.length <= 1_800, `${description.length} chars`);
+		assert.ok(description.length <= 1_400, `${description.length} chars`);
 		assert.doesNotMatch(description, /never infer success from prose/);
 		assert.doesNotMatch(description, /lixcol_branch_id/);
-		assert.doesNotMatch(description, /lixcol_start_commit_id/);
-		assert.doesNotMatch(description, /lixcol_entity_pk/);
 	}
-	// Each half stays on its own tool.
+	// Each half of the SQL guide stays on its own tool.
 	for (const marker of SHARED_GUIDE_MARKERS) {
 		const carriers = [
 			QUERY_SQL_TOOL_DESCRIPTION,
