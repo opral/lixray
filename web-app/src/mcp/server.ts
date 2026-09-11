@@ -14,6 +14,8 @@ import { z } from "zod";
 import { sqlLooksLikeWrite } from "../lib/lix-sql-access.ts";
 import {
 	EXECUTE_SQL_TOOL_DESCRIPTION,
+	LIX_CATALOG_HINT,
+	LIX_IS_NOT_SQLITE_MESSAGE,
 	LIX_SQL_OPERATING_GUIDE,
 	QUERY_SQL_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
@@ -403,6 +405,7 @@ const openLixOutput = withError(
 		),
 		file_paths: z.array(z.string()),
 		file_paths_complete: z.boolean(),
+		file_paths_sql: z.string().optional(),
 		empty: z.boolean(),
 	}),
 );
@@ -635,6 +638,11 @@ export function createLixrayMcpServer(
 				directory_count: opened.directoryCount,
 				file_paths: opened.filePaths,
 				file_paths_complete: opened.filePathsComplete,
+				// A truncated manifest says how to get the rest, so an agent that
+				// trusts the open payload is not left with a partial list.
+				...(opened.filePathsComplete
+					? {}
+					: { file_paths_sql: OPEN_LIX_ALL_FILE_PATHS_SQL }),
 				empty: opened.empty,
 			};
 		},
@@ -683,6 +691,7 @@ export function createLixrayMcpServer(
 		readAnnotations(),
 		securitySchemes,
 		async (args) => {
+			assertLixCatalog(args.sql);
 			assertReadOnlyQuery(args.sql);
 			return service.execute(args.context, toExecuteRequest(args));
 		},
@@ -710,6 +719,7 @@ export function createLixrayMcpServer(
 		writeAnnotations(),
 		securitySchemes,
 		async ({ context: token, statements, options: batchOptions }, callId) => {
+			for (const statement of statements) assertLixCatalog(statement.sql);
 			// Every change the batch makes carries this call's origin key, so
 			// the result can say what it touched without reading the SQL.
 			return {
@@ -1029,11 +1039,23 @@ export async function handleMcpTransport(
 				) {
 					errorCode = "MCP_TOOL_ERROR";
 					const result = rpc.result as Record<string, unknown>;
-					// SDK argument validation can fail before our tool error wrapper runs.
+					// SDK argument validation can fail before our tool error wrapper
+					// runs; our own errors carry request_id in their JSON text block.
 					const structured = result.structuredContent as
 						| Record<string, unknown>
 						| undefined;
-					if (!structured?.request_id && Array.isArray(result.content)) {
+					const carriesRequestId =
+						structured?.request_id !== undefined ||
+						(Array.isArray(result.content) &&
+							result.content.some(
+								(block) =>
+									typeof (block as { text?: unknown }).text === "string" &&
+									(block as { text: string }).text.startsWith("{") &&
+									(block as { text: string }).text.includes(
+										`"request_id": "${requestId}"`,
+									),
+							));
+					if (!carriesRequestId && Array.isArray(result.content)) {
 						result.content.push({
 							type: "text",
 							text: `request_id: ${requestId}`,
@@ -1280,7 +1302,7 @@ export function mcpDocumentationResponse(
 			"",
 			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, call open_lix directly and do not call list_lixes first. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
 			"",
-			"Use query_sql for one SELECT statement and execute_sql for any atomic ordered SQL batch. When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths use /skills, not /skills/.",
+			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
 			"execute_sql already persisted the mutation. Do not follow a write with a verification SELECT.",
 			MCP_URL_GUIDE,
 			"Every MCP response includes X-Request-ID and every tool result includes request_id. You may send X-Request-ID to preserve an upstream correlation ID; use the returned ID when reporting failures.",
@@ -1437,14 +1459,16 @@ function registerTool(
 						error: errorDetails(caught),
 					});
 				}
-				const structuredContent = { request_id: requestId, error };
+				// No structuredContent on an error: clients validate structured
+				// content against the success-only output schema whenever it is
+				// present, and would turn this into a -32602 schema violation.
+				// The JSON text block still carries { request_id, error }.
 				return {
 					isError: true,
-					structuredContent,
-					content: toolResultTextBlocks(
-						summarizeToolError(error),
-						structuredContent,
-					),
+					content: toolResultTextBlocks(summarizeToolError(error), {
+						request_id: requestId,
+						error,
+					}),
 				};
 			}
 		},
@@ -1708,8 +1732,16 @@ function summarizeOpenLix(result: Record<string, unknown>): string {
 		typeof result.name === "string" && result.name.length > 0
 			? ` (${result.name})`
 			: "";
-	return `Opened ${identity}${name} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.${formatInventory(result)} Context expires at ${String(result.context_expires_at)}.`;
+	const manifest =
+		result.file_paths_complete === false && Array.isArray(result.file_paths)
+			? ` file_paths lists the first ${result.file_paths.length}; for every path run query_sql: ${OPEN_LIX_ALL_FILE_PATHS_SQL}.`
+			: "";
+	return `Opened ${identity}${name} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.${formatInventory(result)}${manifest} Context expires at ${String(result.context_expires_at)}.`;
 }
+
+/** The follow-up for a truncated open_lix manifest. */
+const OPEN_LIX_ALL_FILE_PATHS_SQL =
+	"SELECT id, path FROM lix_file ORDER BY path";
 
 function formatInventory(result: Record<string, unknown>): string {
 	if (
@@ -1836,6 +1868,17 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"merge_branch_preview",
 		"merge_branch",
 	].map((name) => ({ name }));
+}
+
+/** SQLite catalog habits get the Lix catalog by name, not a parse error. */
+const SQLITE_CATALOG_PATTERN =
+	/\bsqlite_(?:master|schema|temp_master|temp_schema)\b|\bpragma\s+\w/i;
+
+function assertLixCatalog(sql: string): void {
+	if (!SQLITE_CATALOG_PATTERN.test(sql)) return;
+	throw createLixError("invalid_request", LIX_IS_NOT_SQLITE_MESSAGE, {
+		hint: LIX_CATALOG_HINT,
+	});
 }
 
 function assertReadOnlyQuery(sql: string): void {

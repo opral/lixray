@@ -67,6 +67,9 @@ function assertCheckpointPolicy(text: string): void {
 	);
 }
 
+const isSqlTool = (name: string) =>
+	name === "query_sql" || name === "execute_sql";
+
 function toolText(result: {
 	content?: Array<{ type: string; text?: string }>;
 }): string {
@@ -84,6 +87,29 @@ function toolTextBlocks(result: {
 				block.type === "text" && typeof block.text === "string",
 		)
 		.map((block) => block.text);
+}
+
+/** A failed call's { request_id, error }: the JSON text block, never structuredContent. */
+function toolErrorContent(result: {
+	content?: Array<{ type: string; text?: string }>;
+	structuredContent?: unknown;
+}): {
+	request_id: string;
+	error: {
+		code: string;
+		message: string;
+		hint?: string;
+		details?: Record<string, unknown>;
+	};
+} {
+	assert.equal(
+		result.structuredContent,
+		undefined,
+		"error results must not carry structuredContent",
+	);
+	const json = toolTextBlocks(result).find((block) => block.startsWith("{"));
+	assert.ok(json, "expected a JSON text block on the error result");
+	return JSON.parse(json) as ReturnType<typeof toolErrorContent>;
 }
 
 function parseStructuredText(result: {
@@ -596,25 +622,26 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(executeSqlTool.annotations?.destructiveHint, true);
 		assert.match(executeSqlTool.description ?? "", /ordered atomic SQL batch/);
 		assert.match(executeSqlTool.description ?? "", /already persisted/);
-		// The no-readback rule and the checkpoint policy live once, in the
-		// server instructions, not on the tool.
-		assert.doesNotMatch(
-			executeSqlTool.description ?? "",
-			/verification SELECT/,
-		);
-		assert.doesNotMatch(executeSqlTool.description ?? "", /create_checkpoint/);
+		// The two SQL tools carry their guide themselves: hosts do not
+		// reliably show server instructions, and the card is what an agent
+		// reads before its first query. The instructions repeat the rules.
+		assert.match(queryTool.description ?? "", /information_schema\.tables/);
+		assert.match(queryTool.description ?? "", /not SQLite/);
+		assert.match(executeSqlTool.description ?? "", /CAST\(\$2 AS BYTEA\)/);
+		assert.match(executeSqlTool.description ?? "", /verification SELECT/);
+		assert.match(executeSqlTool.description ?? "", /create_checkpoint/);
 		assert.match(MCP_SERVER_INSTRUCTIONS, /verification SELECT/);
-		// The whole listing stays small: one-line descriptions, success-only
-		// output schemas, and no per-tool copy of the wire-value union.
+		// The listing stays bounded: the guide lives on two tools only, the
+		// rest are one-liners, output schemas are success-only.
 		const listingChars = JSON.stringify(tools.tools).length;
-		// Was 28k before descriptions and output schemas were slimmed.
 		assert.ok(
-			listingChars < 22_000,
-			`tools/list is ${listingChars} chars; keep it under 22k`,
+			listingChars < 26_000,
+			`tools/list is ${listingChars} chars; keep it under 26k`,
 		);
 		for (const tool of tools.tools) {
+			const limit = isSqlTool(tool.name) ? 1_800 : 320;
 			assert.ok(
-				(tool.description ?? "").length <= 320,
+				(tool.description ?? "").length <= limit,
 				`${tool.name} description is ${tool.description?.length} chars`,
 			);
 			assert.equal(
@@ -624,6 +651,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			);
 		}
 		for (const tool of tools.tools) {
+			if (isSqlTool(tool.name)) continue;
 			for (const marker of SHARED_GUIDE_MARKERS) {
 				assert.doesNotMatch(
 					tool.description ?? "",
@@ -733,7 +761,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		});
 		assert.equal(failedRestore.isError, true);
 		assert.deepEqual(
-			(failedRestore.structuredContent as { error: Record<string, unknown> })
+			(toolErrorContent(failedRestore) as { error: Record<string, unknown> })
 				.error,
 			{
 				code: "LIX_COMMIT_NOT_FOUND",
@@ -856,7 +884,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			arguments: { context, sql: "SELECT error" },
 		});
 		assert.equal(failed.isError, true);
-		const failedContent = failed.structuredContent as {
+		const failedContent = toolErrorContent(failed) as {
 			request_id: string;
 			error: Record<string, unknown>;
 		};
@@ -877,11 +905,11 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		});
 		assert.equal(mutationThroughQuery.isError, true);
 		assert.match(
-			JSON.stringify(mutationThroughQuery.structuredContent),
+			JSON.stringify(toolErrorContent(mutationThroughQuery)),
 			/query_sql rejects INSERT, UPDATE, and DELETE/,
 		);
 		assert.match(
-			JSON.stringify(mutationThroughQuery.structuredContent),
+			JSON.stringify(toolErrorContent(mutationThroughQuery)),
 			/Use execute_sql for writes/,
 		);
 		const insertThroughQuery = await client.callTool({
@@ -920,7 +948,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			arguments: { context, sql: "SELECT internal_error" },
 		});
 		assert.equal(internalFailure.isError, true);
-		const internalContent = internalFailure.structuredContent as {
+		const internalContent = toolErrorContent(internalFailure) as {
 			request_id: string;
 			error: { message: string; hint: string };
 		};
@@ -928,6 +956,35 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.match(internalContent.error.hint, /Retry once/);
 		assert.match(internalContent.error.hint, /request_id/);
 		assert.match(internalContent.error.hint, /LixRay support/);
+
+		// A host that cached the output schemas validates structuredContent
+		// whenever it is present; an error must therefore carry none, or the
+		// host reports a schema violation instead of the error.
+		await client.listTools();
+		const sqlite = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "SELECT name FROM sqlite_master" },
+		});
+		assert.equal(sqlite.isError, true);
+		const sqliteError = toolErrorContent(sqlite);
+		assert.match(sqliteError.error.message, /not SQLite/);
+		assert.match(sqliteError.error.hint, /information_schema\.tables/);
+		assert.match(sqliteError.error.hint, /information_schema\.columns/);
+		const pragma = await client.callTool({
+			name: "execute_sql",
+			arguments: {
+				context,
+				statements: [{ sql: "SELECT 1" }, { sql: "PRAGMA table_info(x)" }],
+			},
+		});
+		assert.equal(pragma.isError, true);
+		assert.match(toolErrorContent(pragma).error.message, /not SQLite/);
+		const validatedFailure = await client.callTool({
+			name: "query_sql",
+			arguments: { context, sql: "SELECT internal_error" },
+		});
+		assert.equal(validatedFailure.isError, true);
+		assert.equal(validatedFailure.structuredContent, undefined);
 		assert.doesNotMatch(internalContent.error.hint, /private implementation/);
 		assert.ok(
 			requests.length >= 4,
@@ -1029,9 +1086,11 @@ void test("checkpoint copy encourages agent judgment at meaningful milestones", 
 	assert.match(CREATE_CHECKPOINT_TOOL_DESCRIPTION, /not required to save/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /already saved/);
 	assert.match(MCP_DOCS, /Writes persist without a\s+checkpoint/);
-	// execute_sql states persistence; the checkpoint policy is not repeated.
+	// execute_sql states persistence and points at create_checkpoint in one
+	// sentence; the policy itself is not repeated there.
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
-	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /create_checkpoint/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /saving needs no checkpoint/);
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /Use judgment/);
 });
 
 void test("shipped copy tells agents not to verify writes", async () => {
@@ -1298,7 +1357,7 @@ void test("typed context errors include hint, server time, and advertised expira
 		});
 		assert.equal(expired.isError, true);
 		const expiredError = (
-			expired.structuredContent as {
+			toolErrorContent(expired) as {
 				error: {
 					code: string;
 					hint?: string;
@@ -1331,7 +1390,7 @@ void test("typed context errors include hint, server time, and advertised expira
 		});
 		assert.equal(malformed.isError, true);
 		const malformedError = (
-			malformed.structuredContent as {
+			toolErrorContent(malformed) as {
 				error: {
 					code: string;
 					hint?: string;
@@ -1353,7 +1412,7 @@ void test("typed context errors include hint, server time, and advertised expira
 		assert.equal(malformedWrite.isError, true);
 		assert.equal(
 			(
-				malformedWrite.structuredContent as {
+				toolErrorContent(malformedWrite) as {
 					error: { code: string };
 				}
 			).error.code,
@@ -1380,7 +1439,7 @@ void test("typed context errors include hint, server time, and advertised expira
 		});
 		assert.equal(signature.isError, true);
 		const signatureError = (
-			signature.structuredContent as {
+			toolErrorContent(signature) as {
 				error: {
 					code: string;
 					hint?: string;
@@ -1437,12 +1496,19 @@ void test("open_lix text reports a populated inventory without calling the lix e
 			files: Array<{ id: string; path: string; url: string }>;
 			file_paths: Array<string>;
 			file_paths_complete: boolean;
+			file_paths_sql?: string;
 			empty: boolean;
 		};
 		assert.equal(content.file_count, 4);
 		assert.equal(content.directory_count, 1);
 		assert.deepEqual(content.file_paths, ["/skills/hello.md"]);
 		assert.equal(content.file_paths_complete, false);
+		// A truncated manifest says how to get the rest.
+		assert.equal(
+			content.file_paths_sql,
+			"SELECT id, path FROM lix_file ORDER BY path",
+		);
+		assert.match(toolText(opened), /for every path run query_sql/);
 		assert.deepEqual(content.files, [
 			{
 				id: "22222222-2222-4222-8222-222222222222",
@@ -1592,7 +1658,7 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 			},
 		});
 		assert.equal(failed.isError, true);
-		const failedContent = failed.structuredContent as {
+		const failedContent = toolErrorContent(failed) as {
 			request_id: string;
 			error: { code: string };
 		};
@@ -2154,7 +2220,7 @@ void test("MCP returns canonical links through modern and text-only tool results
 		});
 		assert.equal(missing.isError, true);
 		assert.equal(
-			(missing.structuredContent as { error: { code: string } }).error.code,
+			(toolErrorContent(missing) as { error: { code: string } }).error.code,
 			"not_found",
 		);
 		const invalid = await client.callTool({

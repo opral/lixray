@@ -162,6 +162,9 @@
 				"file_paths_complete": {
 					"type": "boolean"
 				},
+				"file_paths_sql": {
+					"type": "string"
+				},
 				"empty": {
 					"type": "boolean"
 				},
@@ -324,7 +327,7 @@
 	{
 		"name": "query_sql",
 		"title": "LixRay: Query SQL",
-		"description": "Run one read-only SQL statement against the Lix and branch in context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.",
+		"description": "Run one read-only SQL statement against the Lix and branch in context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.\n\nLix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;` and columns, with their descriptions, with `SELECT column_name, data_type, is_nullable, description FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position;`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: \"text\", value: \"…\" }] (kinds: text, int, float, json, blob). Read a text file with `SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1`, and several at once with `WHERE path IN ($1, $2)` in one statement. History: lix_log() lists retained commits, lix_history('lix_file') the net change per commit, lix_diff('lix_file') the working changes, lix_as_of('lix_file', $1) the state at a commit.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -511,7 +514,7 @@
 	{
 		"name": "execute_sql",
 		"title": "Execute SQL atomically",
-		"description": "Run an ordered atomic SQL batch against the Lix and branch in context. If any statement fails, the complete batch is rolled back; a returned result is already persisted.",
+		"description": "Run an ordered atomic SQL batch against the Lix and branch in context. If any statement fails, the complete batch is rolled back; a returned result is already persisted.\n\nWrite a text file with `INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content`, passing both params as kind \"text\" (binaries: kind \"blob\" without CAST; never CAST(... AS BLOB)). Create parent directories first, in the same batch: `INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (path) DO NOTHING` (paths have no trailing slash: /skills, not /skills/). Rename with `UPDATE lix_file SET path = $1 WHERE path = $2`; delete with `DELETE FROM lix_file WHERE path = $1`. ON CONFLICT names its columns; ON CONSTRAINT and DO UPDATE WHERE are not supported. The result names what the batch wrote, with links; do not follow a write with a verification SELECT or any readback. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",

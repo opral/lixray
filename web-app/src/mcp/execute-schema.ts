@@ -98,11 +98,32 @@ Version-control reads use four surfaces. \`lix_log()\` lists retained commits on
 
 \`lix_as_of('lix_file', $1)\` reads complete state at one retained commit, including file content. Read file bytes lazily through this snapshot surface; history is not a current-state snapshot. Relation arguments must be non-null text literals, not SQL parameters; commit endpoints and anchors accept parameters. Checkpoints no longer add marker records to \`lix_change\`; its counts measure retained source records, not user edits.`;
 
-// Per-tool descriptions say what the tool does and its one hard rule. The
-// shared SQL guide, the no-readback rule, and the checkpoint policy live once
-// in the server instructions, so nothing here repeats them.
-export const QUERY_SQL_TOOL_DESCRIPTION =
-	"Run one read-only SQL statement against the Lix and branch in context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.";
+export const EXECUTE_SQL_COLUMNS_WITH_DESCRIPTIONS_QUERY = `SELECT column_name, data_type, is_nullable, description
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = $1
+ORDER BY ordinal_position;`;
 
-export const EXECUTE_SQL_TOOL_DESCRIPTION =
-	"Run an ordered atomic SQL batch against the Lix and branch in context. If any statement fails, the complete batch is rolled back; a returned result is already persisted.";
+/**
+ * What an agent that hits a SQLite habit needs to hear. Lix is not SQLite:
+ * the catalog is information_schema, and the answer names the exact query.
+ */
+export const LIX_IS_NOT_SQLITE_MESSAGE =
+	"Lix is not SQLite: there is no sqlite_master, sqlite_schema, or PRAGMA. The catalog is information_schema.";
+export const LIX_CATALOG_HINT = `Discover tables with: ${EXECUTE_SQL_TABLES_QUERY.replace(/\s+/g, " ")} Discover columns with: ${EXECUTE_SQL_COLUMNS_WITH_DESCRIPTIONS_QUERY.replace(/\s+/g, " ")}`;
+
+// The two SQL tools carry the guide an agent needs to use them, in their own
+// descriptions: hosts do not reliably show server instructions to the model,
+// and the tool card is what an agent reads before its first query. Reads and
+// writes each get their half; the other tools stay one or two sentences.
+const LIX_SQL_READ_GUIDE = `Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with \`${EXECUTE_SQL_TABLES_QUERY.replace(/\s+/g, " ")}\` and columns, with their descriptions, with \`${EXECUTE_SQL_COLUMNS_WITH_DESCRIPTIONS_QUERY.replace(/\s+/g, " ")}\`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: "text", value: "…" }] (kinds: text, int, float, json, blob). Read a text file with \`SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1\`, and several at once with \`WHERE path IN ($1, $2)\` in one statement. History: lix_log() lists retained commits, lix_history('lix_file') the net change per commit, lix_diff('lix_file') the working changes, lix_as_of('lix_file', $1) the state at a commit.`;
+
+const LIX_SQL_WRITE_GUIDE = `Write a text file with \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content\`, passing both params as kind "text" (binaries: kind "blob" without CAST; never CAST(... AS BLOB)). Create parent directories first, in the same batch: \`INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (path) DO NOTHING\` (paths have no trailing slash: /skills, not /skills/). Rename with \`UPDATE lix_file SET path = $1 WHERE path = $2\`; delete with \`DELETE FROM lix_file WHERE path = $1\`. ON CONFLICT names its columns; ON CONSTRAINT and DO UPDATE WHERE are not supported. The result names what the batch wrote, with links; do not follow a write with a verification SELECT or any readback. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.`;
+
+export const QUERY_SQL_TOOL_DESCRIPTION = `Run one read-only SQL statement against the Lix and branch in context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.
+
+${LIX_SQL_READ_GUIDE}`;
+
+export const EXECUTE_SQL_TOOL_DESCRIPTION = `Run an ordered atomic SQL batch against the Lix and branch in context. If any statement fails, the complete batch is rolled back; a returned result is already persisted.
+
+${LIX_SQL_WRITE_GUIDE}`;

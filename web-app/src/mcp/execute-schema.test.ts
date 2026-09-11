@@ -88,40 +88,51 @@ void test("shared operating guide keeps file-content, upsert, and no-verify copy
 	assert.match(MCP_DOCS, /ON CONFLICT \(path\) DO UPDATE/);
 });
 
-void test("per-tool SQL descriptions are short and omit the shared guide", () => {
+void test("the SQL tools carry their guide on the card an agent reads first", () => {
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /INSERT, UPDATE, and DELETE/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /use execute_sql for writes/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ordered atomic SQL batch/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
-	// Shared rules are stated once, in the server instructions.
-	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /verification SELECT/);
-	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /create_checkpoint/);
+	// Reads: not SQLite, the catalog, core tables, params, file reads, history.
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /not SQLite/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.columns/);
+	assert.match(
+		QUERY_SQL_TOOL_DESCRIPTION,
+		/lix_file \(id, path, directory_id, name, content\)/,
+	);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /kind: "text"/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /CAST\(content AS TEXT\)/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /lix_history\('lix_file'\)/);
+	// Writes: the file recipe, directories, rename, delete, no readback.
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /CAST\(\$2 AS BYTEA\)/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ON CONFLICT \(path\) DO UPDATE/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /kind "text"/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /never CAST\(\.\.\. AS BLOB\)/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /INSERT INTO lix_directory/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /\/skills, not \/skills\//);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /verification SELECT/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /create_checkpoint/);
+	// The instructions still carry the full guide for hosts that show it.
 	assert.match(MCP_SERVER_INSTRUCTIONS, /verification SELECT/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /Do not checkpoint after every edit/);
 	for (const description of [
 		QUERY_SQL_TOOL_DESCRIPTION,
 		EXECUTE_SQL_TOOL_DESCRIPTION,
 	]) {
-		assert.ok(description.length <= 200, `${description.length} chars`);
-	}
-	assert.doesNotMatch(
-		EXECUTE_SQL_TOOL_DESCRIPTION,
-		/never infer success from prose/,
-	);
-	for (const description of [
-		QUERY_SQL_TOOL_DESCRIPTION,
-		EXECUTE_SQL_TOOL_DESCRIPTION,
-	]) {
-		for (const marker of SHARED_GUIDE_MARKERS) {
-			assert.doesNotMatch(
-				description,
-				marker,
-				`tool description must not repeat ${marker}`,
-			);
-		}
+		assert.ok(description.length <= 1_800, `${description.length} chars`);
+		assert.doesNotMatch(description, /never infer success from prose/);
 		assert.doesNotMatch(description, /lixcol_branch_id/);
 		assert.doesNotMatch(description, /lixcol_start_commit_id/);
 		assert.doesNotMatch(description, /lixcol_entity_pk/);
+	}
+	// Each half stays on its own tool.
+	for (const marker of SHARED_GUIDE_MARKERS) {
+		const carriers = [
+			QUERY_SQL_TOOL_DESCRIPTION,
+			EXECUTE_SQL_TOOL_DESCRIPTION,
+		].filter((description) => marker.test(description));
+		assert.equal(carriers.length, 1, `${marker} must live on one tool`);
 	}
 });

@@ -3,12 +3,39 @@
 LixRay exposes Lix through a deliberately small MCP surface. SQL is the
 universal interface for repository data; file and entity CRUD stays in SQL. `get_entity_urls` resolves browser links without changing repository data or permissions. Lix SQL is a Postgres dialect subset.
 
-Guidance is stated once. The server `instructions` carry the SQL operating
-guide, the no-readback rule, and the checkpoint policy; each tool description
-is one or two sentences saying what the tool does and its one hard rule, and
-output schemas describe the success shape only (errors return `isError` with
-`{ request_id, error }`). Keep it that way: repeating the guide per tool only
-adds reading overhead for every agent that lists the tools.
+The two SQL tools carry their guide in their own descriptions: `query_sql`
+says how to discover tables and columns through `information_schema` (Lix is
+not SQLite; a query against `sqlite_master` gets that answer by name) and how
+to read files; `execute_sql` says how to write files and directories and that
+no readback follows a write. That is what an agent reads before its first
+query, and hosts do not reliably show the server `instructions` to the model;
+the instructions repeat the workflow for hosts that do. Every other tool
+description is one or two sentences. Output schemas describe the success shape
+only. A failed call returns `isError` with `{ request_id, error }` in its JSON
+text block and no `structuredContent`, so clients that validate structured
+content against the output schema report the error instead of a schema
+violation.
+
+## Tools
+
+- `list_lixes`, `open_lix`: find a Lix and mint its context (see below).
+- `query_sql`, `execute_sql`: every read and every write, including files and
+  directories.
+- `get_entity_urls`: canonical browser links for files and directories.
+- `create_checkpoint`, `restore`, `undo`, `redo`: milestones and moving the
+  branch head.
+- `active_branch_id`, `create_branch`, `switch_branch`, `merge_branch_preview`,
+  `merge_branch`: branches. `switch_branch` returns a new context pinned to the
+  branch; nothing is switched server-side.
+
+## Context
+
+`open_lix` returns a signed `context` that selects one Lix and one branch, and
+`context_expires_at` (24 hours after opening). Pass it to every later call.
+When a call answers `context_expired`, `malformed_context`, or
+`invalid_context`, call `open_lix` again and take the new context from
+`structuredContent`; nothing else needs redoing, because contexts carry no
+state of their own.
 
 ## End-to-end trace correlation
 
@@ -34,7 +61,9 @@ provided, LixRay continues to create one fallback trace per tool call.
    summary. Text-only hosts receive a later `content` text block that is the
    full `structuredContent` JSON. `open_lix` reports file and directory
    counts plus a bounded `file_paths` manifest and `files` containing `id`, `path`, and canonical `url`. Use `files[].url` exactly when linking existing files. When `file_paths_complete` is
-   true, do not run another query just to list files.
+   true, do not run another query just to list files; when it is false, the
+   result carries `file_paths_sql`, the one `query_sql` statement that lists
+   every path.
 4. Use `query_sql` to inspect the relevant state. When paths are known, read
    every needed file in one parameterized statement rather than listing the
    same paths first or reading files one at a time.
@@ -62,12 +91,13 @@ required to save changes.
 
 ## What a result carries
 
-Every tool result has three parts, in order: a one-line summary, zero or
-more `resource_link` content blocks, and the full `structuredContent` as
-JSON text for hosts that only show text. The links are what a host renders
+Every successful tool result has three parts, in order: a one-line summary,
+zero or more `resource_link` content blocks, and the full `structuredContent`
+as JSON text for hosts that only show text. The links are what a host renders
 as clickable chips inside the step: `open_lix` links the repository, and an
 `execute_sql` batch links each file or directory it wrote or updated, with
-the same canonical URL `get_entity_urls` would return. The summary names the
+the same canonical URL `get_entity_urls` would return. Other tools carry no
+links, and a failed call has the summary and the JSON text only. The summary names the
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
 
