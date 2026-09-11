@@ -1525,7 +1525,7 @@ function ReadmePreview({
 		<section
 			aria-label={`${fileName} preview`}
 			data-testid="home-readme-preview"
-			className="mt-7 ml-6 border-t border-border-panel sm:ml-9"
+			className="mt-7 border-t border-border-panel"
 		>
 			<div className="flex h-11 items-center gap-3 px-3 text-xs font-medium text-text-tertiary">
 				<img
@@ -1554,8 +1554,9 @@ function ReadmePreview({
 			{/* Click delegation only augments the anchors inside, which stay
 			    keyboard-accessible on their own. */}
 			{/* The standalone file view strips the document's page padding, so
-			    the section owns its inner margins: the caption's inset on the
-			    sides, a heading's beat below. */}
+			    the section owns its inner margins: the document starts on the
+			    file-name column (the caption's inset, icon, and gap), keeps
+			    the caption's inset on the right, and a heading's beat below. */}
 			<div
 				data-testid="home-readme"
 				onClick={(event) => {
@@ -1566,7 +1567,7 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
-				className="px-3 pt-2 pb-9"
+				className="pt-2 pr-3 pb-9 pl-[43px]"
 			>
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
