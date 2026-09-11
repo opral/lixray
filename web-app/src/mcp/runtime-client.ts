@@ -58,6 +58,8 @@ interface WorkerLixRuntimeClientOptions {
 interface LixSession {
 	lix: Lix;
 	queue: Promise<void>;
+	/** The branch the Lix opened on, before any switch: its default. */
+	defaultBranchId: string;
 }
 
 export class WorkerLixRuntimeClient implements LixRuntimeClient {
@@ -379,7 +381,16 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		return {
 			lix,
 			queue: Promise.resolve(),
+			defaultBranchId: await lix.activeBranchId(),
 		};
+	}
+
+	async defaultBranchId(lixId: string): Promise<string> {
+		try {
+			return (await this.session(lixId)).defaultBranchId;
+		} catch (caught) {
+			throw asLixError(caught);
+		}
 	}
 
 	private async enqueueSession<T>(

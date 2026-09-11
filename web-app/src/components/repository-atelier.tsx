@@ -44,6 +44,7 @@ import {
 	type ReadShareAccess,
 } from "~/components/repository-share-dialog";
 import { Button } from "~/components/ui/button";
+import { createAtelierDocumentLinks } from "~/lib/atelier-document-links";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
@@ -1123,6 +1124,15 @@ export function RepositoryAtelier({
 				const atelierProps: AtelierProps = {
 					lix: session.lix,
 					readOnly: isReadOnly,
+					// Links to this repository's own file URLs behave like
+					// relative links; mentions write the permanent form.
+					documentLinks: createAtelierDocumentLinks({
+						origin: window.location.origin,
+						namespace,
+						repository: repositorySlug,
+						activeBranchId: () => session.activeBranchSnapshot(),
+						defaultBranchId: () => session.defaultBranchSnapshot(),
+					}),
 					debug: {
 						remoteLix: getDebugRemoteLix,
 						remoteSnapshot: getDebugRemoteSnapshot,

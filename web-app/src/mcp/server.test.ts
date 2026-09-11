@@ -176,6 +176,9 @@ class FakeRuntime implements LixRuntimeClient {
 	async activeBranchId(_lixId: string, branchId?: string) {
 		return branchId ?? "main";
 	}
+	async defaultBranchId() {
+		return "main";
+	}
 	async switchBranch(_lixId: string, branchId: string) {
 		return { branchId };
 	}
@@ -724,10 +727,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(typeof context, "string");
 		assert.match(openedContent.request_id, /^[0-9a-f-]{36}$/i);
 		assert.equal(openedContent.id, LIX_ID);
-		assert.equal(
-			openedContent.url,
-			"https://lixray.test/@acme/company?branch=main",
-		);
+		assert.equal(openedContent.url, "https://lixray.test/@acme/company");
 		assert.ok(Date.parse(openedContent.context_expires_at) > Date.now());
 		const openedText = toolText(opened);
 		assert.match(openedText, /^Opened @acme\/company \(Company\) on branch/);
@@ -1513,7 +1513,7 @@ void test("open_lix text reports a populated inventory without calling the lix e
 			{
 				id: "22222222-2222-4222-8222-222222222222",
 				path: "/skills/hello.md",
-				url: "https://lixray.test/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md?branch=main",
+				url: "https://lixray.test/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md",
 			},
 		]);
 		assert.equal(content.empty, false);

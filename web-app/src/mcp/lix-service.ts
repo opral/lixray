@@ -146,6 +146,8 @@ export interface LixRuntimeClient {
 	listLixes(): Promise<Array<LixSummary>>;
 	hasOpenRuntime(lixId: string): boolean;
 	activeBranchId(lixId: string, branchId?: string): Promise<string>;
+	/** The branch a Lix opens on; URLs name any other branch explicitly. */
+	defaultBranchId(lixId: string): Promise<string>;
 	switchBranch(lixId: string, branchId: string): Promise<{ branchId: string }>;
 	execute(
 		lixId: string,
@@ -288,16 +290,18 @@ export class LixService {
 		const issuedContext = await this.issueContext(lixId, selectedBranchId);
 		const commitId = await this.commitId(lixId, selectedBranchId);
 		const inventory = await this.fileInventory(lixId, selectedBranchId);
+		const defaultBranchId = await this.client.defaultBranchId(lixId);
+		const branch = { id: selectedBranchId, defaultId: defaultBranchId };
 		return {
 			context: issuedContext.token,
 			contextExpiresAt: new Date(issuedContext.expiresAt).toISOString(),
 			lixId,
 			lixRef: `@${repository.namespace.handle}/${repository.slug}`,
 			name: repository.name,
-			url: canonicalEntityUrl(repository, selectedBranchId, origin),
+			url: canonicalEntityUrl(repository, branch, origin),
 			files: inventory.files.map((file) => ({
 				...file,
-				url: canonicalEntityUrl(repository, selectedBranchId, origin, {
+				url: canonicalEntityUrl(repository, branch, origin, {
 					kind: "file",
 					...file,
 				}),
@@ -389,6 +393,10 @@ export class LixService {
 				}),
 			);
 		}
+		const branch = {
+			id: context.branchId,
+			defaultId: await this.client.defaultBranchId(context.lixId),
+		};
 		return {
 			context: contextToken,
 			entities: entities.map((selector) => {
@@ -397,7 +405,7 @@ export class LixService {
 						kind: selector.kind,
 						id: null,
 						path: "/",
-						url: canonicalEntityUrl(repository, context.branchId, origin),
+						url: canonicalEntityUrl(repository, branch, origin),
 					};
 				const entity = found
 					.get(selector.kind)
@@ -419,7 +427,7 @@ export class LixService {
 							? null
 							: entity.id,
 					kind: selector.kind,
-					url: canonicalEntityUrl(repository, context.branchId, origin, {
+					url: canonicalEntityUrl(repository, branch, origin, {
 						...entity,
 						kind: selector.kind,
 					}),
@@ -844,9 +852,10 @@ function canonicalLookupPath(
 		return null;
 	return normalized;
 }
+/** A URL names its branch only when that is not the Lix's default branch. */
 function canonicalEntityUrl(
 	repository: LixSummary,
-	branchId: string,
+	branch: { id: string; defaultId: string },
 	origin: string,
 	entity?: { kind: "file" | "directory"; id: string; path: string },
 ): string {
@@ -861,6 +870,6 @@ function canonicalEntityUrl(
 				)
 			: `/@${encodeURIComponent(repository.namespace.handle)}/${encodeURIComponent(repository.slug)}`;
 	const url = new URL(path, origin);
-	url.searchParams.set("branch", branchId);
+	if (branch.id !== branch.defaultId) url.searchParams.set("branch", branch.id);
 	return url.href;
 }

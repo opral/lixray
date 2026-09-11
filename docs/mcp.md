@@ -227,7 +227,9 @@ emit synthetic marker changes; old retained records remain historical facts.
 `file_paths` values are SQL paths and must never be appended to `/file/` or
 `/dir/`. Browser URLs identify entities using their UUID encoded as unpadded
 Base64url, with a descriptive slug. Clients should copy the server-generated
-`url` from `open_lix.files` or `get_entity_urls`, preserving its branch parameter.
+`url` from `open_lix.files` or `get_entity_urls` exactly as returned. A URL carries a
+`branch` parameter only when its branch is not the Lix's default branch, the
+same rule the app applies to its own links.
 Do not manually encode IDs or guess URLs. The server uses the same URL builder
 as app navigation and sharing.
 
