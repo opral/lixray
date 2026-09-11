@@ -70,7 +70,9 @@ jobs:
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: 2.112.0
+          # 2.112.0 rejects the Management API's timestamps during `link`
+          # (supabase/cli#6115); fixed in 2.113.0.
+          version: 2.113.0
 
       - name: Validate production configuration
         env:
