@@ -968,8 +968,8 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(sqlite.isError, true);
 		const sqliteError = toolErrorContent(sqlite);
 		assert.match(sqliteError.error.message, /not SQLite/);
-		assert.match(sqliteError.error.hint, /information_schema\.tables/);
-		assert.match(sqliteError.error.hint, /information_schema\.columns/);
+		assert.match(sqliteError.error.hint ?? "", /information_schema\.tables/);
+		assert.match(sqliteError.error.hint ?? "", /information_schema\.columns/);
 		const pragma = await client.callTool({
 			name: "execute_sql",
 			arguments: {

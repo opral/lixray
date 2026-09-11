@@ -523,6 +523,20 @@ export type Database = {
 				Args: { p_token_id: string };
 				Returns: undefined;
 			};
+			forget_mcp_client: {
+				Args: { p_client_id: string };
+				Returns: undefined;
+			};
+			list_mcp_client_connections: {
+				Args: never;
+				Returns: {
+					oauth_client_id: string;
+					repository_count: number;
+					last_tool: string;
+					last_seen_at: string;
+					connected_at: string;
+				}[];
+			};
 			authorize_api_token: {
 				Args: { p_token: string; p_lix_id: string };
 				Returns: {
