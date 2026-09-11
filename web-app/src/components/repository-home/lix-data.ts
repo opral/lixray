@@ -115,6 +115,10 @@ const asNumber = (value: unknown): number => {
 
 export type RepositoryControlPlaneData = {
 	readonly totalChangeCount: number | null;
+	/** Files with uncheckpointed changes: the status bar's own number. */
+	readonly workingFileCount: number | null;
+	/** Row-level changes behind those files. */
+	readonly workingChangeCount: number | null;
 	readonly tableCount: number | null;
 	readonly checkpointCount: number | null;
 	readonly checkpointDates: readonly string[] | null;
@@ -128,6 +132,12 @@ export type RepositoryControlPlaneData = {
 
 export const CHECKPOINT_SUMMARY_SQL =
 	"SELECT created_at, count(*) over () AS total_count FROM lix_commit WHERE is_checkpoint ORDER BY created_at DESC, id DESC LIMIT 10";
+/**
+ * The same working diff Atelier's status bar counts ("N files changed since
+ * checkpoint"), so Home's Changes panel and the status bar agree.
+ */
+export const WORKING_CHANGE_SQL =
+	"SELECT count(*) AS file_count, coalesce(sum(row_count), 0) AS change_count FROM lix_diff('lix_file')";
 export const CHANGE_SUMMARY_SQL =
 	"WITH daily AS (SELECT substr(created_at, 1, 10) AS day, count(*) AS day_count, min(created_at) AS day_created_at FROM lix_change GROUP BY substr(created_at, 1, 10)) SELECT day, day_count AS n, sum(day_count) over () AS total_count, min(day_created_at) over () AS created_at FROM daily ORDER BY day DESC LIMIT 10";
 
@@ -138,6 +148,7 @@ export function useRepositoryControlPlaneData(
 ): RepositoryControlPlaneData | null {
 	const checkpoints = useObservedRows(lix, CHECKPOINT_SUMMARY_SQL, [], enabled);
 	const changeSummary = useObservedRows(lix, CHANGE_SUMMARY_SQL, [], enabled);
+	const workingChanges = useObservedRows(lix, WORKING_CHANGE_SQL, [], enabled);
 	const [tableCount, setTableCount] = useState<number | null>(null);
 
 	useEffect(() => {
@@ -167,7 +178,7 @@ export function useRepositoryControlPlaneData(
 	}, [enabled, lix]);
 
 	return useMemo(() => {
-		const observations = [checkpoints, changeSummary];
+		const observations = [checkpoints, changeSummary, workingChanges];
 		if (observations.some(({ rows, error }) => rows === null && !error)) {
 			return null;
 		}
@@ -177,6 +188,12 @@ export function useRepositoryControlPlaneData(
 		return {
 			totalChangeCount: changeSummary.rows
 				? asNumber(changeSummaryRows[0]?.total_count)
+				: null,
+			workingFileCount: workingChanges.rows
+				? asNumber(workingChanges.rows[0]?.file_count)
+				: null,
+			workingChangeCount: workingChanges.rows
+				? asNumber(workingChanges.rows[0]?.change_count)
 				: null,
 			tableCount,
 			checkpointCount: checkpoints.rows
@@ -200,7 +217,29 @@ export function useRepositoryControlPlaneData(
 				({ error }) => error !== null,
 			),
 		};
-	}, [changeSummary, checkpoints, tableCount]);
+	}, [changeSummary, checkpoints, tableCount, workingChanges]);
+}
+
+/**
+ * Home's Changes headline, worded like the status bar: files when any file
+ * differs from the checkpoint, otherwise the row-level change count.
+ */
+export function describeWorkingChanges(
+	fileCount: number | null,
+	changeCount: number | null,
+): { readonly count: number; readonly label: string } {
+	const files = fileCount ?? 0;
+	const changes = changeCount ?? 0;
+	if (files > 0) {
+		return {
+			count: files,
+			label: `${files === 1 ? "file" : "files"} changed since checkpoint`,
+		};
+	}
+	return {
+		count: changes,
+		label: `${changes === 1 ? "change" : "changes"} since checkpoint`,
+	};
 }
 
 /** The full directory/file tree, kept live via lix observe. */

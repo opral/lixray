@@ -3,6 +3,13 @@
 LixRay exposes Lix through a deliberately small MCP surface. SQL is the
 universal interface for repository data; file and entity CRUD stays in SQL. `get_entity_urls` resolves browser links without changing repository data or permissions. Lix SQL is a Postgres dialect subset.
 
+Guidance is stated once. The server `instructions` carry the SQL operating
+guide, the no-readback rule, and the checkpoint policy; each tool description
+is one or two sentences saying what the tool does and its one hard rule, and
+output schemas describe the success shape only (errors return `isError` with
+`{ request_id, error }`). Keep it that way: repeating the guide per tool only
+adds reading overhead for every agent that lists the tools.
+
 ## End-to-end trace correlation
 
 MCP clients can attach LixRay tool calls to an existing PostHog AI trace by
@@ -52,6 +59,26 @@ when the user asks. Use judgment: routine edits, typo fixes, and intermediate
 steps usually do not need checkpoints. Do not checkpoint after every edit or
 ask the user to manage checkpoint timing. A checkpoint marks progress; it is not
 required to save changes.
+
+## What a result carries
+
+Every tool result has three parts, in order: a one-line summary, zero or
+more `resource_link` content blocks, and the full `structuredContent` as
+JSON text for hosts that only show text. The links are what a host renders
+as clickable chips inside the step: `open_lix` links the repository, and an
+`execute_sql` batch links each file or directory it wrote or updated, with
+the same canonical URL `get_entity_urls` would return. The summary names the
+action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
+affected"), so an agent's narration is not the only trace of what happened.
+
+This comes from Lix, not from parsing SQL. Every `execute_sql` call stamps
+its changes with an `origin_key` of `mcp:<request_id>` (a caller-supplied
+`origin_key` becomes its prefix), and the server then asks `lix_change`
+what carries that key. A file with a descriptor change was written or
+renamed, one with only content or entity changes was updated, a null
+descriptor snapshot was deleted; directories likewise. Renames, writes by
+id, and cascades all show up because Lix recorded them. Reads link
+nothing; deletions are named in the summary but not linked.
 
 ## Restore an ancestor
 

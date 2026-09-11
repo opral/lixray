@@ -28,6 +28,7 @@ import {
 	MCP_RESOURCE,
 	MCP_SERVER_INSTRUCTIONS,
 	GET_ENTITY_URLS_TOOL_DESCRIPTION,
+	MCP_URL_GUIDE,
 	OPEN_LIX_TOOL_DESCRIPTION,
 	mcpAuthenticateChallenge,
 	mcpDocumentationResponse,
@@ -130,6 +131,7 @@ const SHARED_GUIDE_MARKERS = [
 ] as const;
 
 class FakeRuntime implements LixRuntimeClient {
+	lastOriginKey: string | undefined;
 	fileCount = 0;
 	directoryCount = 0;
 	hasOpenRuntime() {
@@ -249,10 +251,33 @@ class FakeRuntime implements LixRuntimeClient {
 			};
 		}
 		if (/^\s*(?:INSERT|UPDATE|DELETE)\b/i.test(request.sql)) {
+			if (/\blix_file\b/i.test(request.sql))
+				this.lastOriginKey = request.options?.originKey;
 			return {
 				columns: [],
 				rows: [],
 				rowsAffected: 1,
+				notices: [],
+			};
+		}
+		// The change log for this call: the write above created hello.md.
+		if (/FROM lix_change c\b/.test(request.sql)) {
+			const key = request.params?.[0];
+			const matches = key?.kind === "text" && key.value === this.lastOriginKey;
+			return {
+				columns: ["schema_key", "file_id", "row_pk", "snapshot", "file_path"],
+				rows: matches
+					? [
+							[
+								{ kind: "text" as const, value: "lix_file_descriptor" },
+								{ kind: "text" as const, value: "IiIiIiIiQiKCIiIiIiIiIg" },
+								{ kind: "json" as const, value: ["IiIiIiIiQiKCIiIiIiIiIg"] },
+								{ kind: "text" as const, value: '{"name":"hello.md"}' },
+								{ kind: "text" as const, value: "/skills/hello.md" },
+							],
+						]
+					: [],
+				rowsAffected: 0,
 				notices: [],
 			};
 		}
@@ -271,7 +296,10 @@ class FakeRuntime implements LixRuntimeClient {
 		return {
 			results: await Promise.all(
 				request.statements.map((statement) =>
-					this.execute(lixId, branchId, statement),
+					this.execute(lixId, branchId, {
+						...statement,
+						options: request.options,
+					}),
 				),
 			),
 		};
@@ -568,11 +596,33 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(executeSqlTool.annotations?.destructiveHint, true);
 		assert.match(executeSqlTool.description ?? "", /ordered atomic SQL batch/);
 		assert.match(executeSqlTool.description ?? "", /already persisted/);
-		assert.match(executeSqlTool.description ?? "", /verification SELECT/);
-		assert.match(
+		// The no-readback rule and the checkpoint policy live once, in the
+		// server instructions, not on the tool.
+		assert.doesNotMatch(
 			executeSqlTool.description ?? "",
-			/Use create_checkpoint for meaningful milestones, not after every edit/,
+			/verification SELECT/,
 		);
+		assert.doesNotMatch(executeSqlTool.description ?? "", /create_checkpoint/);
+		assert.match(MCP_SERVER_INSTRUCTIONS, /verification SELECT/);
+		// The whole listing stays small: one-line descriptions, success-only
+		// output schemas, and no per-tool copy of the wire-value union.
+		const listingChars = JSON.stringify(tools.tools).length;
+		// Was 28k before descriptions and output schemas were slimmed.
+		assert.ok(
+			listingChars < 22_000,
+			`tools/list is ${listingChars} chars; keep it under 22k`,
+		);
+		for (const tool of tools.tools) {
+			assert.ok(
+				(tool.description ?? "").length <= 320,
+				`${tool.name} description is ${tool.description?.length} chars`,
+			);
+			assert.equal(
+				(tool.outputSchema as { anyOf?: unknown } | undefined)?.anyOf,
+				undefined,
+				`${tool.name} output schema must not carry the error branch`,
+			);
+		}
 		for (const tool of tools.tools) {
 			for (const marker of SHARED_GUIDE_MARKERS) {
 				assert.doesNotMatch(
@@ -591,19 +641,14 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			/already saved automatically/,
 		);
 		assert.match(checkpointTool.description ?? "", /not required/);
-		assertCheckpointPolicy(checkpointTool.description ?? "");
+		assertCheckpointPolicy(MCP_SERVER_INSTRUCTIONS);
 		const restoreTool = tools.tools.find((tool) => tool.name === "restore");
 		assert.ok(restoreTool);
 		assert.match(restoreTool.description ?? "", /ancestor/);
-		assert.match(restoreTool.description ?? "", /creates no commit/);
-		assert.match(restoreTool.description ?? "", /does not delete/);
-		assert.match(restoreTool.description ?? "", /not undoable/);
+		assert.match(restoreTool.description ?? "", /without creating a commit/);
+		assert.match(restoreTool.description ?? "", /not undoable/i);
 		assert.match(restoreTool.description ?? "", /undo only applies/);
-		assert.match(restoreTool.description ?? "", /checkpoint-driven/);
-		assert.match(
-			restoreTool.description ?? "",
-			/untracked rows remain unchanged/,
-		);
+		assert.match(restoreTool.description ?? "", /other branches are unchanged/);
 		assert.match(restoreTool.description ?? "", /create_checkpoint returns/);
 		assert.match(restoreTool.description ?? "", /no restore_checkpoint/);
 		assert.equal(restoreTool.annotations?.destructiveHint, true);
@@ -979,21 +1024,20 @@ void test("list_lixes text is a clear sentence when no lixes exist", async () =>
 
 void test("checkpoint copy encourages agent judgment at meaningful milestones", () => {
 	assertCheckpointPolicy(MCP_SERVER_INSTRUCTIONS);
-	assertCheckpointPolicy(CREATE_CHECKPOINT_TOOL_DESCRIPTION);
 	assertCheckpointPolicy(MCP_DOCS);
+	// The tool itself keeps only the one fact a caller needs at the call site.
+	assert.match(CREATE_CHECKPOINT_TOOL_DESCRIPTION, /not required to save/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /already saved/);
 	assert.match(MCP_DOCS, /Writes persist without a\s+checkpoint/);
-	assert.match(
-		EXECUTE_SQL_TOOL_DESCRIPTION,
-		/Use create_checkpoint for meaningful milestones, not after every edit/,
-	);
+	// execute_sql states persistence; the checkpoint policy is not repeated.
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /create_checkpoint/);
 });
 
 void test("shipped copy tells agents not to verify writes", async () => {
 	for (const text of [
 		MCP_SERVER_INSTRUCTIONS,
 		LIX_SQL_OPERATING_GUIDE,
-		EXECUTE_SQL_TOOL_DESCRIPTION,
 		MCP_DOCS,
 	]) {
 		assert.match(text, /verification [`']?SELECT/);
@@ -2055,6 +2099,52 @@ void test("MCP returns canonical links through modern and text-only tool results
 			assertStructuredTextFallback(links, context).entities,
 			content.entities,
 		);
+		// open_lix links the repository so a host can render it as a chip.
+		assert.deepEqual(
+			opened.content?.find((block) => block.type === "resource_link"),
+			{
+				type: "resource_link",
+				uri: "https://dev.lixray.com/@acme/company?branch=draft",
+				name: "@acme/company",
+				description: "Opened repository",
+			},
+		);
+		// A batch that writes a file says so, and links the file.
+		const written = await client.callTool({
+			name: "execute_sql",
+			arguments: {
+				context,
+				statements: [
+					{
+						sql: "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content",
+						params: [
+							{ kind: "text", value: "/skills/hello.md" },
+							{ kind: "text", value: "# Hello\n" },
+						],
+					},
+				],
+			},
+		});
+		assert.equal(written.isError, undefined, JSON.stringify(written));
+		assert.equal(toolText(written), "Wrote skills/hello.md · 1 row affected");
+		assert.deepEqual(
+			written.content?.filter((block) => block.type === "resource_link"),
+			[
+				{
+					type: "resource_link",
+					uri: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md?branch=draft",
+					name: "hello.md",
+					description: "Wrote skills/hello.md",
+					mimeType: "text/markdown",
+				},
+			],
+		);
+		// The structured JSON stays the last text block for text-only hosts.
+		assert.equal(
+			(assertStructuredTextFallback(written, context).results as unknown[])
+				.length,
+			1,
+		);
 		const missing = await client.callTool({
 			name: "get_entity_urls",
 			arguments: {
@@ -2096,7 +2186,9 @@ void test("every MCP guidance surface tells clients to use returned canonical UR
 		assert.match(text, /canonical/i);
 		assert.match(text, /branch/);
 	}
-	assert.match(GET_ENTITY_URLS_TOOL_DESCRIPTION, /read-only/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /get_entity_urls/);
-	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /files\[\]\.url/);
+	assert.match(GET_ENTITY_URLS_TOOL_DESCRIPTION, /Read-only/);
+	// The link rule is stated once, in the URL guide; execute_sql stays short.
+	assert.match(MCP_URL_GUIDE, /get_entity_urls/);
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /get_entity_urls/);
+	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /canonical url/);
 });

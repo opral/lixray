@@ -1479,9 +1479,18 @@ export async function createSyncFixture({
 				]) {
 					expect(filesBeforePartialCheckpoint).toContain(id);
 				}
-				await left
-					.getByRole("checkbox", { name: "Seen files", exact: true })
-					.click();
+				// The "All files" master row ticks everything unless everything
+				// is ticked, in which case it unticks everything: start from none.
+				const allFiles = left.getByRole("checkbox", {
+					name: "All files",
+					exact: true,
+				});
+				if ((await allFiles.getAttribute("aria-checked")) !== "true") {
+					await allFiles.click();
+					await expect(allFiles).toHaveAttribute("aria-checked", "true");
+				}
+				await allFiles.click();
+				await expect(allFiles).toHaveAttribute("aria-checked", "false");
 				const selectedFile = left.getByTestId(
 					`diff-scope-file:${afterReopenFileId}`,
 				);

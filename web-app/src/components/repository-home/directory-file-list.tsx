@@ -169,15 +169,18 @@ export function DirectoryFileList({
 	const dragPaths = useRef<string[]>([]);
 	useEffect(() => {
 		if (!paths.length) return;
+		// Only a popup the user can see owns the gesture: a hidden tab's
+		// listbox or a row's own context menu must not keep the selection.
 		const hasActiveInteraction = () =>
 			busyRef.current ||
 			dialog !== null ||
 			menuOpen ||
 			dragPaths.current.length > 0 ||
-			// Portals (including New's naming dialog) own their dismissal first.
-			document.querySelector(
-				'[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]',
-			) !== null;
+			[
+				...document.querySelectorAll(
+					'[role="dialog"], [role="alertdialog"], [role="menu"]:not([data-entry-context-menu]), [role="listbox"]',
+				),
+			].some((element) => element.getClientRects().length > 0);
 		const onPointerDown = (event: PointerEvent) => {
 			if (event.button !== 0 || hasActiveInteraction()) return;
 			const target = event.target;

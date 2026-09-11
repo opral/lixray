@@ -32,6 +32,18 @@ import {
 } from "./tool-observation.ts";
 
 import { MCP_RESOURCE } from "./auth.ts";
+import {
+	DELETED_FILE_NAMES_SQL,
+	TOUCHED_CHANGES_SQL,
+	deletedFileNames,
+	describeTouched,
+	directoryPaths,
+	directoryPathsSql,
+	mcpOriginKey,
+	mimeTypeForPath,
+	touchedFromChanges,
+	type TouchedEntity,
+} from "./touched-entities.ts";
 
 export const MCP_PATH = "/mcp";
 export { MCP_RESOURCE } from "./auth.ts";
@@ -50,7 +62,7 @@ export const MCP_URL_GUIDE =
 	"Browser links: use the exact server-generated url from open_lix.files or get_entity_urls. file_paths are SQL paths, not browser URLs. Never append a file path to /file/ or /dir/, and never invent or manually encode an entity URL. After creating or renaming files/directories, call get_entity_urls once with all items you need to link, using the current context. This read resolves canonical links; it is not a persistence verification. Preserve the returned branch query parameter. URLs do not grant access or publish private items. If resolution fails, report the error and omit the item link rather than guessing.";
 
 export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
-	"Return canonical browser URLs for up to 50 existing files or directories in the repository and branch selected by context. Supply each item's kind and exactly one of id (UUID) or path (absolute SQL path). Use after writes or renames, or for items absent from open_lix.files. Copy returned urls exactly; never construct /file/<path> links. This read-only operation resolves links and does not publish items or change permissions. Directory path / returns the repository URL.";
+	"Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.";
 
 export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. If the user supplies an exact @handle/slug or Lix UUID, call open_lix directly; do not call list_lixes first. Call list_lixes only when the target Lix is unknown. Open a Lix once and pass its returned context to every later call. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. When target paths are known, read all of them in one parameterized query_sql statement instead of probing or reading them one at a time. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
 
@@ -61,16 +73,16 @@ ${MCP_URL_GUIDE}
 Writes persist without a checkpoint; execute_sql already saved the files. Use create_checkpoint to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent file helper tools or branch state.`;
 
 export const CREATE_CHECKPOINT_TOOL_DESCRIPTION =
-	"Mark meaningful milestones on the branch selected by context so the user can follow your work and return to important states. Use after completing a substantial, coherent piece of work or when the user asks. Use judgment: routine edits and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. Changes are already saved automatically; a checkpoint is not required to save changes.";
+	"Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.";
 
 export const RESTORE_TOOL_DESCRIPTION =
-	"Move the branch selected by context to ancestor commit_id. Restore creates no commit, does not delete abandoned commits, and is not undoable; undo only applies to commits made afterward. A later checkpoint-driven garbage-collection sweep may reclaim abandoned commits that are not reachable from a retention root; other branches and branch-local untracked rows remain unchanged. create_checkpoint returns a commit_id usable here; there is no restore_checkpoint tool.";
+	"Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.";
 
 export const LIST_LIXES_TOOL_DESCRIPTION =
-	"LixRay discovery only: list lixes the signed-in user can access. Call this only when the target Lix is unknown. If the user supplied an exact @handle/slug or Lix UUID, skip this tool and call open_lix directly. Each result identifies a lix as @handle/slug plus uuid.";
+	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, call open_lix directly.";
 
 export const OPEN_LIX_TOOL_DESCRIPTION =
-	"LixRay starting point when the user supplied an exact @handle/slug or Lix UUID: resolve it directly without calling list_lixes first, and mint the signed context required by later tools. If branch_id is omitted, pin the context to the Lix's current active branch. The response reports counts, a bounded file_paths manifest, and files with id, path, and canonical url. Use files[].url exactly for browser links; file_paths are SQL paths, not URLs. When file_paths_complete is true, do not run a separate file-list query. Use get_entity_urls for newly created items or items outside the manifest.";
+	"Open a Lix by exact @handle/slug or UUID without calling list_lixes first, and mint the context later tools require (active branch unless branch_id is given). Returns counts, file_paths (SQL paths, not URLs), and files with id, path, and canonical url; when file_paths_complete is true, do not list files again.";
 
 type McpAuthMode = "oauth" | "none";
 
@@ -352,19 +364,11 @@ const sqlStatement = z
 	.object({ sql: z.string().min(1), params: z.array(wireValue).optional() })
 	.strict();
 
-const errorOutput = z
-	.object({
-		request_id: requestIdValue,
-		error: z
-			.object({
-				code: z.string(),
-				message: z.string(),
-				hint: z.string().optional(),
-				details: z.unknown().optional(),
-			})
-			.strict(),
-	})
-	.strict();
+// Rows carry the same {kind, value} wire shape as params; the output schema
+// says so once instead of inlining the union again per tool.
+const wireRows = z
+	.array(z.array(z.unknown()))
+	.describe("Rows of wire values in the same {kind, value} shape as params");
 
 const listLixesOutput = withError(
 	z.object({
@@ -438,7 +442,7 @@ const executeOutput = withError(
 		result: z
 			.object({
 				columns: z.array(z.string()),
-				rows: z.array(z.array(wireValue)),
+				rows: wireRows,
 				rowsAffected: z.number().int(),
 				notices: z.array(z.unknown()),
 			})
@@ -452,7 +456,7 @@ const executeBatchOutput = withError(
 			z
 				.object({
 					columns: z.array(z.string()),
-					rows: z.array(z.array(wireValue)),
+					rows: wireRows,
 					rowsAffected: z.number().int(),
 					notices: z.array(z.unknown()),
 				})
@@ -599,6 +603,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -638,6 +643,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -658,6 +664,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -684,6 +691,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -701,11 +709,16 @@ export function createLixrayMcpServer(
 		executeBatchOutput,
 		writeAnnotations(),
 		securitySchemes,
-		async ({ context: token, statements, options: batchOptions }) => {
+		async ({ context: token, statements, options: batchOptions }, callId) => {
+			// Every change the batch makes carries this call's origin key, so
+			// the result can say what it touched without reading the SQL.
 			return {
 				...(await service.executeBatch(token, {
 					statements,
-					options: toExecuteOptions(batchOptions),
+					options: {
+						...toExecuteOptions(batchOptions),
+						originKey: mcpOriginKey(callId, batchOptions?.origin_key),
+					},
 				})),
 			};
 		},
@@ -714,6 +727,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -738,6 +752,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -762,6 +777,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -801,6 +817,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -821,6 +838,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -845,6 +863,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -870,6 +889,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -895,6 +915,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -913,6 +934,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	registerTool(
@@ -931,6 +953,7 @@ export function createLixrayMcpServer(
 		surfaceVersion,
 		requestId,
 		service,
+		options.urlOrigin,
 	);
 
 	return server;
@@ -1316,12 +1339,13 @@ function registerTool(
 	outputSchema: z.ZodTypeAny,
 	annotations: ToolAnnotations,
 	securitySchemes: Array<McpSecurityScheme>,
-	call: (args: Record<string, any>) => Promise<any>,
+	call: (args: Record<string, any>, callId: string) => Promise<any>,
 	observationName: string | undefined,
 	observer: McpToolCallObserver | undefined,
 	surfaceVersion: string,
 	requestId: string,
 	service: LixService,
+	urlOrigin?: string,
 ): void {
 	server.registerTool(
 		name,
@@ -1342,7 +1366,10 @@ function registerTool(
 				? observeExecuteInput(rawStatements)
 				: undefined;
 			try {
-				const raw = await call(input);
+				// A request can carry several calls; each stamps its own key, so
+				// the readback below sees only this call's changes.
+				const callId = `${requestId}.${crypto.randomUUID()}`;
+				const raw = await call(input, callId);
 				const executeOutput = isSqlTool(name)
 					? observeExecuteOutput(
 							name === "query_sql" ? { results: [raw.result] } : raw,
@@ -1363,12 +1390,33 @@ function registerTool(
 					...(raw as Record<string, unknown>),
 					request_id: requestId,
 				};
+				const touched =
+					name === "execute_sql" &&
+					typeof input.context === "string" &&
+					!readOnlyResults(raw)
+						? await touchedByCall(
+								service,
+								input.context,
+								mcpOriginKey(callId, input.options?.origin_key),
+							)
+						: EMPTY_TOUCHED;
+				const summary = toolResultTextBlocks(
+					summarizeToolResult(name, raw, touched),
+					structuredContent,
+				);
+				const links = await resultResourceLinks(
+					name,
+					input,
+					raw,
+					touched,
+					service,
+					urlOrigin,
+				);
+				// Summary, then the links a host can render as chips, then the
+				// structured JSON for text-only hosts.
 				return {
 					structuredContent,
-					content: toolResultTextBlocks(
-						summarizeToolResult(name, raw),
-						structuredContent,
-					),
+					content: [summary[0]!, ...links, ...summary.slice(1)],
 				};
 			} catch (caught) {
 				const error = toMcpError(caught, requestId);
@@ -1455,7 +1503,153 @@ function formatListLixIdentity(item: unknown): string {
 	return parts.join(" ");
 }
 
-function summarizeToolResult(name: string, raw: unknown): string {
+/**
+ * Links a host can render inline for what the call did: the repository on
+ * open_lix, and each file or directory an execute_sql batch wrote. Reads
+ * (query_sql) link nothing. Resolution reuses get_entity_urls, so a link is
+ * only ever a canonical URL for an entity that exists; a failed lookup just
+ * means no links.
+ */
+type TouchedByCall = {
+	readonly entities: ReadonlyArray<TouchedEntity>;
+	readonly deletedDirectoryCount: number;
+};
+const EMPTY_TOUCHED: TouchedByCall = { entities: [], deletedDirectoryCount: 0 };
+
+/**
+ * Asks the change log what one call changed: one read joined to current
+ * file paths, plus a read for directory paths and one for deleted files'
+ * names only when the batch had any. A failed read means an unadorned
+ * result, never a wrong one.
+ */
+async function touchedByCall(
+	service: LixService,
+	context: string,
+	originKey: string,
+): Promise<TouchedByCall> {
+	try {
+		const changes = touchedFromChanges(
+			(
+				await service.execute(context, {
+					sql: TOUCHED_CHANGES_SQL,
+					params: [{ kind: "text", value: originKey }],
+				})
+			).result,
+		);
+		const entities: TouchedEntity[] = [...changes.files];
+		if (changes.directoryIds.length > 0) {
+			const paths = directoryPaths(
+				(
+					await service.execute(context, {
+						sql: directoryPathsSql(changes.directoryIds.length),
+						params: changes.directoryIds.map((id) => ({
+							kind: "text",
+							value: id,
+						})),
+					})
+				).result,
+			);
+			for (const id of changes.directoryIds) {
+				const path = paths.get(id);
+				if (path) entities.push({ kind: "directory", path, action: "wrote" });
+			}
+		}
+		if (changes.deletedFileIds.length > 0) {
+			const names = deletedFileNames(
+				(
+					await service.execute(context, {
+						sql: DELETED_FILE_NAMES_SQL,
+						params: [{ kind: "text", value: originKey }],
+					})
+				).result,
+			);
+			let unnamed = 0;
+			for (const id of changes.deletedFileIds) {
+				const path = names.get(id);
+				if (path) entities.push({ kind: "file", path, action: "deleted" });
+				else unnamed += 1;
+			}
+			if (unnamed > 0) {
+				entities.push({
+					kind: "file",
+					path: `${unnamed} ${unnamed === 1 ? "file" : "files"}`,
+					action: "deleted",
+				});
+			}
+		}
+		return { entities, deletedDirectoryCount: changes.deletedDirectoryCount };
+	} catch {
+		return EMPTY_TOUCHED;
+	}
+}
+
+async function resultResourceLinks(
+	name: string,
+	input: Record<string, any>,
+	raw: unknown,
+	touched: TouchedByCall,
+	service: LixService,
+	urlOrigin: string | undefined,
+): Promise<Array<ResourceLinkBlock>> {
+	if (!raw || typeof raw !== "object") return [];
+	const result = raw as Record<string, unknown>;
+	if (name === "open_lix" && typeof result.url === "string") {
+		return [
+			{
+				type: "resource_link",
+				uri: result.url,
+				name:
+					typeof result.lix_ref === "string"
+						? result.lix_ref
+						: typeof result.name === "string"
+							? result.name
+							: "Repository",
+				description: "Opened repository",
+			},
+		];
+	}
+	if (name !== "execute_sql" || typeof input.context !== "string") return [];
+	const surviving = touched.entities
+		.filter((entity) => entity.action !== "deleted")
+		.slice(0, 50);
+	if (surviving.length === 0) return [];
+	try {
+		const resolved = await service.getEntityUrls(
+			input.context,
+			surviving.map(({ kind, path }) => ({ kind, path })),
+			urlOrigin,
+		);
+		return resolved.entities.map((entity, index) => {
+			const action =
+				surviving[index]?.action === "updated" ? "Updated" : "Wrote";
+			const mimeType =
+				entity.kind === "file" ? mimeTypeForPath(entity.path) : undefined;
+			return {
+				type: "resource_link",
+				uri: entity.url,
+				name: entity.path.split("/").filter(Boolean).at(-1) ?? entity.path,
+				description: `${action} ${entity.path.replace(/^\//, "")}`,
+				...(mimeType ? { mimeType } : {}),
+			};
+		});
+	} catch {
+		return [];
+	}
+}
+
+type ResourceLinkBlock = {
+	type: "resource_link";
+	uri: string;
+	name: string;
+	description?: string;
+	mimeType?: string;
+};
+
+function summarizeToolResult(
+	name: string,
+	raw: unknown,
+	touched: TouchedByCall = EMPTY_TOUCHED,
+): string {
 	if (!raw || typeof raw !== "object") return `${name} completed.`;
 	const result = raw as Record<string, unknown>;
 
@@ -1469,7 +1663,7 @@ function summarizeToolResult(name: string, raw: unknown): string {
 		return summarizeQuerySql(result.result);
 	}
 	if (name === "execute_sql") {
-		return summarizeExecuteSql(result.results);
+		return summarizeExecuteSql(result.results, touched);
 	}
 	if (name === "active_branch_id") {
 		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.`;
@@ -1537,12 +1731,18 @@ function summarizeQuerySql(payload: unknown): string {
 	return `query_sql: ${rows} ${rows === 1 ? "row" : "rows"}`;
 }
 
-function summarizeExecuteSql(payload: unknown): string {
+function summarizeExecuteSql(payload: unknown, touched: TouchedByCall): string {
 	const results: Array<unknown> = Array.isArray(payload) ? payload : [];
 	let affected = 0;
 	for (const item of results) {
 		affected += sqlRowsAffected(item);
 	}
+	if (touched.entities.length > 0 || touched.deletedDirectoryCount > 0)
+		return describeTouched(
+			touched.entities,
+			affected,
+			touched.deletedDirectoryCount,
+		);
 	return `execute_sql: ${affected} ${affected === 1 ? "row" : "rows"} affected`;
 }
 
@@ -1550,6 +1750,23 @@ function sqlRowCount(payload: unknown): number {
 	if (!payload || typeof payload !== "object") return 0;
 	const rows = (payload as { rows?: unknown }).rows;
 	return Array.isArray(rows) ? rows.length : 0;
+}
+
+/**
+ * A batch whose every statement returned a result set and changed no rows
+ * is a read; the change readback would find nothing.
+ */
+function readOnlyResults(raw: unknown): boolean {
+	const results = (raw as { results?: unknown } | null)?.results;
+	if (!Array.isArray(results) || results.length === 0) return false;
+	return results.every((result) => {
+		const columns = (result as { columns?: unknown } | null)?.columns;
+		return (
+			Array.isArray(columns) &&
+			columns.length > 0 &&
+			sqlRowsAffected(result) === 0
+		);
+	});
 }
 
 function sqlRowsAffected(payload: unknown): number {
@@ -1592,8 +1809,14 @@ function toMcpError(
 	};
 }
 
+/**
+ * Output schemas describe the success shape only. Errors return
+ * `isError: true` with `{ request_id, error: { code, message, hint? } }`,
+ * which the SDK does not validate against the schema, so no tool needs to
+ * carry the error branch in tools/list.
+ */
 function withError(schema: z.ZodObject<any>) {
-	return z.union([schema.extend({ request_id: requestIdValue }), errorOutput]);
+	return schema.extend({ request_id: requestIdValue });
 }
 
 function toolSurfaceDescriptions(): Array<Record<string, unknown>> {

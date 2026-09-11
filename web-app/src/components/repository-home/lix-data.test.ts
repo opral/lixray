@@ -5,6 +5,8 @@ import { EntryKind } from "../../lib/entry-kind.ts";
 import {
 	CHANGE_SUMMARY_SQL,
 	CHECKPOINT_SUMMARY_SQL,
+	WORKING_CHANGE_SQL,
+	describeWorkingChanges,
 	canonicalDirectoryPath,
 	createRepositoryFile,
 	createRepositoryFolder,
@@ -72,6 +74,31 @@ void test("derives change totals and dates from one bounded daily query", () => 
 		/min\(day_created_at\) over \(\) AS created_at/i,
 	);
 	assert.match(CHANGE_SUMMARY_SQL, /LIMIT 10$/i);
+});
+
+void test("counts working changes through the status bar's own diff", () => {
+	assert.match(WORKING_CHANGE_SQL, /FROM lix_diff\('lix_file'\)/);
+	assert.match(WORKING_CHANGE_SQL, /count\(\*\) AS file_count/i);
+	assert.match(WORKING_CHANGE_SQL, /sum\(row_count\), 0\) AS change_count/i);
+});
+
+void test("words the Changes headline like the status bar", () => {
+	assert.deepEqual(describeWorkingChanges(1, 4), {
+		count: 1,
+		label: "file changed since checkpoint",
+	});
+	assert.deepEqual(describeWorkingChanges(3, 9), {
+		count: 3,
+		label: "files changed since checkpoint",
+	});
+	assert.deepEqual(describeWorkingChanges(0, 0), {
+		count: 0,
+		label: "changes since checkpoint",
+	});
+	assert.deepEqual(describeWorkingChanges(null, null), {
+		count: 0,
+		label: "changes since checkpoint",
+	});
 });
 
 void test("observer failures expose first-frame errors without inventing rows", () => {

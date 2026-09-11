@@ -22,6 +22,7 @@ import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";
 import {
 	type Organization,
 	type Repository,
+	repositorySlug,
 	useRepository,
 } from "~/components/repository-provider";
 import { Button } from "~/components/ui/button";
@@ -585,8 +586,12 @@ function RepositoryDialog({
 	organizations: Array<Organization>;
 	onClose: () => void;
 }) {
-	const { createRepository, deleteRepository, renameRepository } =
-		useRepository();
+	const {
+		createRepository,
+		deleteRepository,
+		renameRepository,
+		checkRepositoryName,
+	} = useRepository();
 	const defaultOrganizationId = organizations[0]?.id ?? "";
 	const [name, setName] = useState("");
 	const [organizationId, setOrganizationId] = useState(defaultOrganizationId);
@@ -594,6 +599,61 @@ function RepositoryDialog({
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [creatingOrganization, setCreatingOrganization] = useState(false);
+	// The URL is the name: show where the repository will live as the name is
+	// typed, and say so before submit when the name is already taken.
+	const [availability, setAvailability] = useState<
+		"free" | "taken" | "checking" | null
+	>(null);
+	const slug = repositorySlug(name);
+	const namedTarget =
+		dialog?.type === "create" || dialog?.type === "rename" ? name.trim() : "";
+	const targetOrganizationId =
+		dialog?.type === "rename" ? dialog.organization.id : organizationId;
+	const excludedRepositoryId =
+		dialog?.type === "rename" ? dialog.repository.id : undefined;
+	useEffect(() => {
+		if (!namedTarget) {
+			setAvailability(null);
+			return;
+		}
+		let cancelled = false;
+		setAvailability("checking");
+		const timer = window.setTimeout(() => {
+			void checkRepositoryName(namedTarget, targetOrganizationId, {
+				excludeRepositoryId: excludedRepositoryId,
+			}).then(
+				(available) => {
+					if (!cancelled) setAvailability(available ? "free" : "taken");
+				},
+				() => {
+					// The server rejects a clash on submit regardless.
+					if (!cancelled) setAvailability(null);
+				},
+			);
+		}, 250);
+		return () => {
+			cancelled = true;
+			window.clearTimeout(timer);
+		};
+	}, [
+		checkRepositoryName,
+		excludedRepositoryId,
+		namedTarget,
+		targetOrganizationId,
+	]);
+	const organizationHandle = organizations.find(
+		(organization) => organization.id === targetOrganizationId,
+	)?.handle;
+	const nameHint = !namedTarget ? null : availability === "taken" ? (
+		<p role="alert" className="text-xs text-text-error">
+			@{organizationHandle}/{slug} is taken. Choose another name.
+		</p>
+	) : (
+		<p className="text-xs text-text-quaternary">
+			{typeof window === "undefined" ? "" : window.location.host}/@
+			{organizationHandle ?? ""}/{slug}
+		</p>
+	);
 
 	useEffect(() => {
 		setName(dialog?.type === "rename" ? dialog.repository.name : "");
@@ -610,6 +670,10 @@ function RepositoryDialog({
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
 		if (!dialog) return;
+		if (availability === "taken") {
+			setError(`A repository named “${name.trim()}” already exists.`);
+			return;
+		}
 		setBusy(true);
 		setError(null);
 		try {
@@ -650,7 +714,7 @@ function RepositoryDialog({
 							{isDelete
 								? "This removes the repository from every member’s directory and keeps its name reserved."
 								: dialog?.type === "rename"
-									? "The repository URL stays the same."
+									? "The repository URL changes with the name."
 									: "A shared folder for your team and agents — any file type, every change tracked."}
 						</DialogDescription>
 					</DialogHeader>
@@ -706,6 +770,7 @@ function RepositoryDialog({
 										onChange={(event) => setName(event.target.value)}
 									/>
 								</div>
+								{nameHint}
 							</>
 						) : null}
 
@@ -734,6 +799,7 @@ function RepositoryDialog({
 									value={name}
 									onChange={(event) => setName(event.target.value)}
 								/>
+								{nameHint}
 							</label>
 						) : null}
 						{error ? (

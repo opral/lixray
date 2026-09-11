@@ -7,6 +7,7 @@ import {
 } from "@opral/atelier";
 import type { AtelierDiffSession, AtelierFileProps } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
+import { entityRoutePath } from "~/lib/entity-url";
 import {
 	ArrowRight,
 	ArrowUp,
@@ -57,6 +58,7 @@ import {
 } from "~/lib/repository-open-performance";
 import {
 	createRepositoryFile,
+	describeWorkingChanges,
 	listDirectory,
 	persistedDirectoryPath,
 	resolveRepositoryHref,
@@ -649,13 +651,40 @@ export function DirectoryView({
 						>
 							<div
 								role="menu"
+								data-entry-context-menu=""
 								className="absolute flex min-w-[164px] flex-col rounded-[10px] border border-border-panel bg-bg-panel p-1 shadow-[0_10px_28px_rgba(28,25,23,0.14)]"
 								style={{
 									left: Math.min(entryMenu.x + 2, window.innerWidth - 180),
-									top: Math.min(entryMenu.y + 2, window.innerHeight - 84),
+									top: Math.min(entryMenu.y + 2, window.innerHeight - 116),
 								}}
 								onClick={(event) => event.stopPropagation()}
 							>
+								{entryMenu.id ? (
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => {
+											const id = entryMenu.id;
+											if (id) {
+												void copyText(
+													entryLink(connection, {
+														kind: entryMenu.kind,
+														id,
+														path: entryMenu.path,
+													}),
+												);
+											}
+											setEntryMenu(null);
+										}}
+										className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-text-primary hover:bg-bg-hover"
+									>
+										<Link2
+											className="size-3.5 text-icon-secondary"
+											aria-hidden="true"
+										/>
+										Copy link
+									</button>
+								) : null}
 								<button
 									type="button"
 									role="menuitem"
@@ -1000,16 +1029,13 @@ function ChangeBars({
 	}
 	const maxCount = Math.max(1, ...days.map((day) => day.count));
 	const latestCheckpointDay = data.checkpointDates?.[0]?.slice(0, 10) ?? null;
-	// Same day-granularity rule the bar colors use: a checkpoint splits the
-	// window. These are retained source records, not reviewable row changes.
-	const headlineCount = latestCheckpointDay
-		? days.reduce(
-				(sum, entry) =>
-					entry.day > latestCheckpointDay ? sum + entry.count : sum,
-				0,
-			)
-		: (data.totalChangeCount ??
-			days.reduce((sum, entry) => sum + entry.count, 0));
+	// The headline is the status bar's number: files whose working state
+	// differs from the checkpoint. The bars stay a day-by-day activity graph.
+	const working = describeWorkingChanges(
+		data.workingFileCount,
+		data.workingChangeCount,
+	);
+	const headlineCount = working.count;
 	const visibleDays = days.length > 0 ? days : [{ day: "", count: 0 }];
 	const paddedDays = [
 		...Array.from({ length: Math.max(0, 9 - visibleDays.length) }, () => ({
@@ -1026,16 +1052,18 @@ function ChangeBars({
 					{formatCompactCount(headlineCount)}
 				</strong>
 				<span className="text-[11.5px] text-text-tertiary">
-					{headlineCount === 1 ? "source record" : "source records"}
-					{latestCheckpointDay ? " after checkpoint day" : " retained"}
+					{working.label}
 				</span>
 			</div>
 			<div className="mt-3 flex h-11 items-end gap-[3px] border-b border-[#ded5c8]">
 				{paddedDays.map((entry, index) => {
+					// The checkpoint's own day holds records from both sides of
+					// it; it reads as "after" while anything is still unreviewed.
 					const afterCheckpoint =
 						!latestCheckpointDay ||
 						!entry.day ||
-						entry.day > latestCheckpointDay;
+						entry.day > latestCheckpointDay ||
+						(entry.day === latestCheckpointDay && headlineCount > 0);
 					const isLatest = index === paddedDays.length - 1;
 					const height = entry.count
 						? Math.max(7, Math.round((entry.count / maxCount) * 38))
@@ -1487,29 +1515,26 @@ function ReadmePreview({
 	readonly onNavigate: (href: string, event?: ReactMouseEvent) => boolean;
 }) {
 	if (!fileId) return null;
-	// The preview is a card, not the document itself: its bordered frame and
-	// sand header separate the rendered README from the live file list above
-	// it, and the header's actions are the only way to edit. The card spans
-	// the file list column (28px below it, the rail's section beat) so both
-	// edges line up with the rows, and the header repeats a row's own type
-	// and icon size so the file name reads at the same weight as the list.
+	// The preview is the document set on the page, not a card. One hairline
+	// closes the file list and carries a caption (icon, file name, Edit) in
+	// the list's own tertiary type, so it reads as the list's footer and the
+	// document's byline at once. The rule starts where a row's hover ground
+	// starts, and the caption's icon sits on the rows' icon column, so the
+	// document below is flush with the file names.
 	return (
 		<section
 			aria-label={`${fileName} preview`}
-			data-testid="home-readme-card"
-			className="mt-7 overflow-hidden rounded-[10px] border border-border-panel bg-bg-panel"
+			data-testid="home-readme-preview"
+			className="mt-7 ml-6 border-t border-border-panel sm:ml-9"
 		>
-			<div className="flex h-11 items-center gap-3 border-b border-border-panel bg-[#FAF7F2] pr-[11px] pl-[11px] text-sm">
+			<div className="flex h-11 items-center gap-3 px-3 text-xs font-medium text-text-tertiary">
 				<img
 					src={fileIconUrl(fileName)}
 					alt=""
 					draggable={false}
 					className="size-[19px] shrink-0"
 				/>
-				<span
-					className="min-w-0 flex-1 truncate font-medium text-text-primary"
-					title={fileName}
-				>
+				<span className="min-w-0 flex-1 truncate" title={fileName}>
 					{fileName}
 				</span>
 				<button
@@ -1518,7 +1543,7 @@ function ReadmePreview({
 					aria-label={`Edit ${fileName}`}
 					title={`Edit ${fileName}`}
 					onClick={(event) => onOpen(event)}
-					className="flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+					className="-mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-text-tertiary hover:bg-bg-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
 				>
 					<PencilLine aria-hidden="true" className="size-3.5" />
 					Edit
@@ -1529,8 +1554,8 @@ function ReadmePreview({
 			{/* Click delegation only augments the anchors inside, which stay
 			    keyboard-accessible on their own. */}
 			{/* The standalone file view strips the document's page padding, so
-			    the card owns its inner margins: 36px sides, a heading's beat
-			    above and below. */}
+			    the section owns its inner margins: the caption's inset on the
+			    sides, a heading's beat below. */}
 			<div
 				data-testid="home-readme"
 				onClick={(event) => {
@@ -1541,7 +1566,7 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
-				className="px-9 pt-7 pb-9"
+				className="px-3 pt-2 pb-9"
 			>
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
@@ -2281,6 +2306,27 @@ function useAgentConnectionPrompt(
 		}
 	};
 	return { details, copyPrompt, copyState };
+}
+
+/**
+ * The address of a file or folder in this repository, on the page's own
+ * origin and branch, so a pasted link lands exactly where the reader is.
+ * It is the entity route the app itself navigates to, id included.
+ */
+function entryLink(
+	connection: Omit<LixConnectionPromptInput, "origin">,
+	entry: { kind: "file" | "directory"; id: string; path: string },
+): string {
+	const url = new URL(window.location.href);
+	url.pathname = entityRoutePath(
+		connection.namespace,
+		connection.lixSlug,
+		entry.kind,
+		entry.id,
+		entry.path,
+	);
+	url.hash = "";
+	return url.toString();
 }
 
 async function copyText(text: string): Promise<void> {
