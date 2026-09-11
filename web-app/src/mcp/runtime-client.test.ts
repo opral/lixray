@@ -12,7 +12,7 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 	const pathname = testProtocolPath(request);
 	if (pathname === "/lix/v1/") {
 		return Response.json({
-			protocolVersion: 7,
+			protocolVersion: 8,
 			activeBranchId: "main",
 			activeAccountId: "00000000-0000-7000-8000-000000000002",
 			sessionId: "runtime-client-session",

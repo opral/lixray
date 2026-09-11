@@ -2271,8 +2271,21 @@ LIMIT 1001`,
 
 function isPublicSyncReadRequest(request: Request, endpoint: string): boolean {
 	return (
-		request.method === "GET" &&
-		["sync/pull", "sync/history", "sync/blob", "sync/chunk"].includes(endpoint)
+		(request.method === "GET" &&
+			[
+				"sync/pull",
+				"sync/history",
+				"sync/descriptor",
+				"sync/blob",
+				"sync/chunk",
+			].includes(endpoint)) ||
+		(request.method === "POST" &&
+			[
+				"sync/native-objects",
+				"sync/native-object-range",
+				"sync/native-metadata",
+				"sync/baseline-lease/renew",
+			].includes(endpoint))
 	);
 }
 

@@ -4,7 +4,7 @@ import type { Lix, LixOpenProgress } from "@lix-js/sdk";
 import {
 	createTelemetryFetch,
 	isRetryableRepositoryOpenError,
-	RemoteRepositoryLixSession,
+	ManagedRepositoryLixSession,
 	repositoryMigrationStateFromError,
 	repositoryMigrationStateFromOpenProgress,
 	repositorySessionKey,
@@ -23,7 +23,7 @@ void test("does not create a synthetic observer for session health", async () =>
 			closeCalls += 1;
 		},
 	} as unknown as Lix;
-	const session = new RemoteRepositoryLixSession(lix, "main");
+	const session = new ManagedRepositoryLixSession(lix, "main");
 	assert.equal(observerCalls, 0);
 	await session.close();
 	assert.equal(closeCalls, 1);

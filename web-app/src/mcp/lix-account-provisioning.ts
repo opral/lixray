@@ -61,7 +61,7 @@ export async function provisionAccountAfterHandshake(options: {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
-					"Lix-Server-Protocol-Version": "7",
+					"Lix-Server-Protocol-Version": "8",
 					[SESSION_ID_HEADER]: sessionId,
 					[IDEMPOTENCY_KEY_HEADER]: `account-profile-${crypto.randomUUID()}`,
 					[TRUSTED_PRINCIPAL_HEADER]: account.id,
