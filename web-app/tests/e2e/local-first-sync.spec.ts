@@ -135,6 +135,7 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		grid
 			.getByRole("row")
 			.filter({ has: page.getByText(name, { exact: true }) });
+	let primaryFailure = false;
 	try {
 		const directories = await execute(
 			"INSERT INTO lix_directory (path) VALUES ($1), ($2) RETURNING id",
@@ -263,6 +264,7 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 			name: "Checkpoint",
 			exact: true,
 		});
+		await expect(checkpointButton).toBeVisible({ timeout: 10_000 });
 		await checkpointButton.click();
 		// The action changes its label to “Checkpointing…” while SQL is pending.
 		// Wait for the entire action to disappear before destroying the page.
@@ -348,16 +350,24 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 				{ timeout: 30_000 },
 			)
 			.toBe(checkpointId);
+	} catch (error) {
+		primaryFailure = true;
+		throw error;
 	} finally {
 		context.off("request", captureCheckpoint);
-		await context.unroute(protocolRequests);
-		await context.request.delete(new URL("session", endpoint).toString(), {
-			headers: { ...headers, "Lix-Session-Id": sessionId },
+		await (async () => {
+			await context.unroute(protocolRequests);
+			await context.request.delete(new URL("session", endpoint).toString(), {
+				headers: { ...headers, "Lix-Session-Id": sessionId },
+			});
+			await page.goto("/home");
+			const deleted = await context.request.delete(endpoint.toString(), {
+				headers,
+			});
+			expect(deleted.status()).toBe(204);
+		})().catch((error: unknown) => {
+			// Preserve the original failure if teardown finds a closed context.
+			if (!primaryFailure) throw error;
 		});
-		await page.goto("/home");
-		const deleted = await context.request.delete(endpoint.toString(), {
-			headers,
-		});
-		expect(deleted.status()).toBe(204);
 	}
 });

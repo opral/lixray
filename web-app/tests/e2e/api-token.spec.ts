@@ -136,7 +136,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 				)) as typeof import("@lix-js/storage-opfs");
 				const sync = await openLix({
 					storage: new OpfsStorage({ name: `api-token-test-${lixId}` }),
-					server: connection,
+					server: { ...connection, mode: "partial_replica" },
 				});
 				try {
 					return (
