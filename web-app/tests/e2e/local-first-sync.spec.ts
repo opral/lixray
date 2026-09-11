@@ -85,7 +85,7 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 	expect(opened.status(), await opened.text()).toBe(200);
 	const { sessionId } = (await opened.json()) as { sessionId: string };
 	let sequence = 0;
-	async function execute(sql: string, values: string[] = []) {
+	async function execute(sql: string, values: (string | Uint8Array)[] = []) {
 		const response = await context.request.post(
 			new URL("execute", endpoint).toString(),
 			{
@@ -94,7 +94,14 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 					"Lix-Session-Id": sessionId,
 					"Idempotency-Key": `offline-compose-${prefix}-${sequence++}`,
 				},
-				data: { sql, params: values.map((value) => ({ kind: "text", value })) },
+				data: {
+					sql,
+					params: values.map((value) =>
+						typeof value === "string"
+							? { kind: "text", value }
+							: { kind: "blob", base64: Buffer.from(value).toString("base64") },
+					),
+				},
 			},
 		);
 		expect(response.status(), await response.text()).toBe(200);
@@ -109,6 +116,7 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 	const target = `${prefix}-target`;
 	const renamedSource = `${prefix}-renamed`;
 	const finalPath = `/${target}/${renamedSource}/note.txt`;
+	const seededContent = `Offline move preserves ${prefix}.`;
 	const checkpointIds = new Set<string>();
 	const captureCheckpoint = (request: Request) => {
 		if (request.method() !== "POST" || !request.url().endsWith("/sync/push"))
@@ -142,8 +150,8 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 			[`/${source}`, `/${target}`],
 		);
 		const files = await execute(
-			"INSERT INTO lix_file (path) VALUES ($1) RETURNING id",
-			[`/${source}/note.txt`],
+			"INSERT INTO lix_file (path, content) VALUES ($1, $2) RETURNING id",
+			[`/${source}/note.txt`, new TextEncoder().encode(seededContent)],
 		);
 		const directoryId = String(directories.rows[0]![0]!.value);
 		const fileId = String(files.rows[0]![0]!.value);
@@ -223,6 +231,33 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		await page.goto(repository.path);
 		// A cold browser worker compiles the SDK and downloads its initial replica.
 		// Match the startup budget used by the other repository-opening tests.
+		await expect(row(source)).toBeVisible({ timeout: 30_000 });
+		await expect(row(target)).toBeVisible();
+		// First use may hydrate native inputs. Read the actual file and open
+		// working review online before asserting those workflows work offline.
+		await page.goto(savedFileUrl);
+		const textView = page.locator(
+			'[data-view-key="atelier_text"][data-active="true"]',
+		);
+		await expect(textView).toBeVisible({ timeout: 30_000 });
+		await expect(textView).toContainText(seededContent);
+		await page
+			.getByRole("button", {
+				name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
+			})
+			.click();
+		await expect(
+			page.getByRole("button", { name: "Checkpoint", exact: true }),
+		).toBeVisible();
+		await page
+			.getByRole("button", {
+				name: /[1-9]\d* files? changed since checkpoint\. Close review/,
+			})
+			.click();
+		await expect(
+			page.getByRole("button", { name: "Checkpoint", exact: true }),
+		).toHaveCount(0);
+		await page.goto(repository.path);
 		await expect(row(source)).toBeVisible({ timeout: 30_000 });
 		await expect(row(target)).toBeVisible();
 		context.on("request", captureCheckpoint);
