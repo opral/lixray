@@ -575,7 +575,11 @@ export type Database = {
 				Returns: string;
 			};
 			is_repository_name_available: {
-				Args: { p_name: string; p_namespace_id: string };
+				Args: {
+					p_exclude_lix_id?: string;
+					p_name: string;
+					p_namespace_id: string;
+				};
 				Returns: boolean;
 			};
 			list_accessible_lixes: {

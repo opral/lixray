@@ -26,6 +26,9 @@ returns boolean language sql stable security definer set search_path to '' as $$
 	)
 $$;
 
+revoke all on function private.repository_slug(text) from public, anon, authenticated;
+revoke all on function private.repository_slug_taken(uuid, text, uuid) from public, anon, authenticated;
+
 -- Backfill before the trigger exists: tombstones release their names, and live
 -- repositories that were stuck with a generated slug take their name's slug
 -- where it is free (oldest first, so the first claimant keeps it).
@@ -52,8 +55,9 @@ $$;
 -- The slug follows the name on rename, becomes the tombstone on delete, and is
 -- never chosen by a client directly. Clashes raise unique_violation so
 -- PostgREST answers 409.
+-- Runs as the owner: a user renaming a repository may call neither helper.
 create function private.derive_repository_slug()
-returns trigger language plpgsql set search_path to '' as $$
+returns trigger language plpgsql security definer set search_path to '' as $$
 begin
 	if new.deleted_at is not null then
 		new.slug := 'repo-' || new.id::text;
@@ -63,9 +67,8 @@ begin
 		new.slug := old.slug;
 		return new;
 	end if;
-	if tg_op = 'UPDATE' or new.slug is null then
-		new.slug := private.repository_slug(new.name);
-	end if;
+	-- The slug is the name's, whatever a caller supplied.
+	new.slug := private.repository_slug(new.name);
 	if private.repository_slug_taken(new.namespace_id, new.slug, new.id) then
 		raise exception 'A repository named "%" already exists in this namespace', btrim(new.name)
 			using errcode = '23505';
@@ -127,11 +130,12 @@ begin
 end;
 $$;
 
--- The New repository dialog checks a name as it is typed.
-create function public.is_repository_name_available(p_namespace_id uuid, p_name text)
+-- The New repository dialog checks a name as it is typed; the rename dialog
+-- passes the repository being renamed, whose own name is not a clash.
+create function public.is_repository_name_available(p_namespace_id uuid, p_name text, p_exclude_lix_id uuid default null)
 returns boolean language sql stable security definer set search_path to '' as $$
 	select private.is_namespace_member(p_namespace_id)
-		and not private.repository_slug_taken(p_namespace_id, private.repository_slug(p_name))
+		and not private.repository_slug_taken(p_namespace_id, private.repository_slug(p_name), p_exclude_lix_id)
 $$;
-revoke all on function public.is_repository_name_available(uuid,text) from public,anon;
-grant execute on function public.is_repository_name_available(uuid,text) to authenticated;
+revoke all on function public.is_repository_name_available(uuid,text,uuid) from public,anon;
+grant execute on function public.is_repository_name_available(uuid,text,uuid) to authenticated;

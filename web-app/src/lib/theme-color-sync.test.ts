@@ -28,10 +28,24 @@ void test("parses the colour forms a computed style can carry", () => {
 	assert.ok(srgb);
 	assert.equal(Math.round(srgb.r), 12);
 	assert.equal(srgb.a, 0.38);
+	const white = parseCssColor("oklch(1 0 0)");
+	assert.ok(white);
+	assert.deepEqual(
+		[white.r, white.g, white.b].map(Math.round),
+		[255, 255, 255],
+	);
+	const black = parseCssColor("oklch(0% 0 none / 50%)");
+	assert.ok(black);
+	assert.deepEqual([black.r, black.g, black.b].map(Math.round), [0, 0, 0]);
+	assert.equal(black.a, 0.5);
+	// Tailwind's red-500.
+	const red = parseCssColor("oklch(0.637 0.237 25.331)");
+	assert.ok(red);
+	assert.deepEqual([red.r, red.g, red.b].map(Math.round), [251, 44, 54]);
 	assert.deepEqual(parseCssColor("#f4f2ef"), APP_BG);
 	assert.deepEqual(parseCssColor("#0008"), { r: 0, g: 0, b: 0, a: 136 / 255 });
 	assert.deepEqual(parseCssColor("transparent"), { r: 0, g: 0, b: 0, a: 0 });
-	assert.equal(parseCssColor("oklch(0.5 0.1 30)"), null);
+	assert.equal(parseCssColor("lab(50% 40 30)"), null);
 });
 
 void test("a dialog backdrop over the app ground yields the dimmed grey", () => {

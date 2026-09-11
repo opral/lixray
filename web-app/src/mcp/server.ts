@@ -709,7 +709,7 @@ export function createLixrayMcpServer(
 		executeBatchOutput,
 		writeAnnotations(),
 		securitySchemes,
-		async ({ context: token, statements, options: batchOptions }) => {
+		async ({ context: token, statements, options: batchOptions }, callId) => {
 			// Every change the batch makes carries this call's origin key, so
 			// the result can say what it touched without reading the SQL.
 			return {
@@ -717,7 +717,7 @@ export function createLixrayMcpServer(
 					statements,
 					options: {
 						...toExecuteOptions(batchOptions),
-						originKey: mcpOriginKey(requestId, batchOptions?.origin_key),
+						originKey: mcpOriginKey(callId, batchOptions?.origin_key),
 					},
 				})),
 			};
@@ -1339,7 +1339,7 @@ function registerTool(
 	outputSchema: z.ZodTypeAny,
 	annotations: ToolAnnotations,
 	securitySchemes: Array<McpSecurityScheme>,
-	call: (args: Record<string, any>) => Promise<any>,
+	call: (args: Record<string, any>, callId: string) => Promise<any>,
 	observationName: string | undefined,
 	observer: McpToolCallObserver | undefined,
 	surfaceVersion: string,
@@ -1366,7 +1366,10 @@ function registerTool(
 				? observeExecuteInput(rawStatements)
 				: undefined;
 			try {
-				const raw = await call(input);
+				// A request can carry several calls; each stamps its own key, so
+				// the readback below sees only this call's changes.
+				const callId = `${requestId}.${crypto.randomUUID()}`;
+				const raw = await call(input, callId);
 				const executeOutput = isSqlTool(name)
 					? observeExecuteOutput(
 							name === "query_sql" ? { results: [raw.result] } : raw,
@@ -1388,11 +1391,13 @@ function registerTool(
 					request_id: requestId,
 				};
 				const touched =
-					name === "execute_sql" && typeof input.context === "string"
+					name === "execute_sql" &&
+					typeof input.context === "string" &&
+					!readOnlyResults(raw)
 						? await touchedByCall(
 								service,
 								input.context,
-								mcpOriginKey(requestId, input.options?.origin_key),
+								mcpOriginKey(callId, input.options?.origin_key),
 							)
 						: EMPTY_TOUCHED;
 				const summary = toolResultTextBlocks(
@@ -1558,10 +1563,16 @@ async function touchedByCall(
 					})
 				).result,
 			);
+			let unnamed = 0;
 			for (const id of changes.deletedFileIds) {
+				const path = names.get(id);
+				if (path) entities.push({ kind: "file", path, action: "deleted" });
+				else unnamed += 1;
+			}
+			if (unnamed > 0) {
 				entities.push({
 					kind: "file",
-					path: names.get(id) ?? "1 file",
+					path: `${unnamed} ${unnamed === 1 ? "file" : "files"}`,
 					action: "deleted",
 				});
 			}
@@ -1739,6 +1750,23 @@ function sqlRowCount(payload: unknown): number {
 	if (!payload || typeof payload !== "object") return 0;
 	const rows = (payload as { rows?: unknown }).rows;
 	return Array.isArray(rows) ? rows.length : 0;
+}
+
+/**
+ * A batch whose every statement returned a result set and changed no rows
+ * is a read; the change readback would find nothing.
+ */
+function readOnlyResults(raw: unknown): boolean {
+	const results = (raw as { results?: unknown } | null)?.results;
+	if (!Array.isArray(results) || results.length === 0) return false;
+	return results.every((result) => {
+		const columns = (result as { columns?: unknown } | null)?.columns;
+		return (
+			Array.isArray(columns) &&
+			columns.length > 0 &&
+			sqlRowsAffected(result) === 0
+		);
+	});
 }
 
 function sqlRowsAffected(payload: unknown): number {

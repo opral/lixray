@@ -25,6 +25,8 @@ select is((select slug from public.lixes where id='86000000-0000-4000-8000-00000
 select throws_ok($$update public.lixes set name='demo notes' where id='86000000-0000-4000-8000-000000000011'$$,'23505','A repository named "demo notes" already exists in this namespace','rename rejects a taken name');
 update public.lixes set slug='chosen' where id='86000000-0000-4000-8000-000000000011';
 select is((select slug from public.lixes where id='86000000-0000-4000-8000-000000000011'),'demo-renamed','a slug cannot be chosen directly');
+insert into public.lixes(id,namespace_id,name,slug) values ('86000000-0000-4000-8000-000000000015',current_setting('test.namespace')::uuid,'Direct insert','chosen');
+select is((select slug from public.lixes where id='86000000-0000-4000-8000-000000000015'),'direct-insert','an inserted slug is derived, not taken from the caller');
 select lives_ok($$select public.delete_hosted_lix('86000000-0000-4000-8000-000000000011','86000000-0000-4000-8000-000000000001')$$,'delete');
 select is((select slug from public.lixes where id='86000000-0000-4000-8000-000000000011'),'repo-86000000-0000-4000-8000-000000000011','a deleted repository keeps a tombstone slug');
 select lives_ok($$select public.register_hosted_lix('86000000-0000-4000-8000-000000000014','86000000-0000-4000-8000-000000000001',null,'Demo renamed')$$,'a deleted name is free again');
@@ -33,6 +35,9 @@ set local role authenticated;
 set local request.jwt.claims='{"sub":"86000000-0000-4000-8000-000000000001","role":"authenticated"}';
 select is(public.is_repository_name_available(current_setting('test.namespace')::uuid,'Demo Notes'),false,'taken name reports unavailable');
 select is(public.is_repository_name_available(current_setting('test.namespace')::uuid,'Fresh'),true,'free name reports available');
+select is(public.is_repository_name_available(current_setting('test.namespace')::uuid,'DEMO NOTES','86000000-0000-4000-8000-000000000013'),true,'a repository may keep its own name');
+select is(public.is_repository_name_available(current_setting('test.namespace')::uuid,'Demo Notes','86000000-0000-4000-8000-000000000014'),false,'excluding another repository frees nothing');
+select throws_ok('select private.repository_slug(''x'')','42501','permission denied for function repository_slug','the slug helper is not callable by users');
 set local request.jwt.claims='{"sub":"86000000-0000-4000-8000-000000000002","role":"authenticated"}';
 select lives_ok('select public.bootstrap_personal_namespace()','bootstrap outsider');
 select is(public.is_repository_name_available(current_setting('test.namespace')::uuid,'Fresh'),false,'an outsider learns nothing about another namespace');

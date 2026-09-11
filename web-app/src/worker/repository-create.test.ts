@@ -263,8 +263,9 @@ void test("a taken name is rejected before uploading", async () => {
 	);
 	assert.equal(response.status, 409);
 	assert.equal(calls, 1);
+	const body = (await response.json()) as { error: { message: string } };
 	assert.match(
-		(await response.json()).error.message,
+		body.error.message,
 		/A repository named “Shared repository” already exists/,
 	);
 });

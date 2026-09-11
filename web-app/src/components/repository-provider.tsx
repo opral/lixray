@@ -374,23 +374,19 @@ function SupabaseRepositoryProvider({ children }: { children: ReactNode }) {
 			if (!client || !targetId) return true;
 			const normalized = name.trim();
 			if (!normalized) return true;
-			const organization = organizations.find(
-				(candidate) => candidate.id === targetId,
-			);
-			// Renaming to the repository's own name is not a clash.
-			const own = organization?.repositories.find(
-				(repository) => repository.id === options?.excludeRepositoryId,
-			);
-			if (own && repositorySlug(own.name) === repositorySlug(normalized))
-				return true;
+			// Renaming to the repository's own name is not a clash; the
+			// database excludes it, squat key included.
 			const { data, error } = await client.rpc("is_repository_name_available", {
 				p_namespace_id: targetId,
 				p_name: normalized,
+				...(options?.excludeRepositoryId
+					? { p_exclude_lix_id: options.excludeRepositoryId }
+					: {}),
 			});
 			if (error) throw error;
 			return data === true;
 		},
-		[client, organizations, selectedOrganization],
+		[client, selectedOrganization],
 	);
 
 	const renameRepository = useCallback(

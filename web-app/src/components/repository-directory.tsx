@@ -650,7 +650,8 @@ function RepositoryDialog({
 		</p>
 	) : (
 		<p className="text-xs text-text-quaternary">
-			{window.location.host}/@{organizationHandle}/{slug}
+			{typeof window === "undefined" ? "" : window.location.host}/@
+			{organizationHandle ?? ""}/{slug}
 		</p>
 	);
 

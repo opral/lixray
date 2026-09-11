@@ -7,6 +7,7 @@ import {
 } from "@opral/atelier";
 import type { AtelierDiffSession, AtelierFileProps } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
+import { entityRoutePath } from "~/lib/entity-url";
 import {
 	ArrowRight,
 	ArrowUp,
@@ -658,21 +659,32 @@ export function DirectoryView({
 								}}
 								onClick={(event) => event.stopPropagation()}
 							>
-								<button
-									type="button"
-									role="menuitem"
-									onClick={() => {
-										void copyText(entryLink(connection, entryMenu));
-										setEntryMenu(null);
-									}}
-									className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-text-primary hover:bg-bg-hover"
-								>
-									<Link2
-										className="size-3.5 text-icon-secondary"
-										aria-hidden="true"
-									/>
-									Copy link
-								</button>
+								{entryMenu.id ? (
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => {
+											const id = entryMenu.id;
+											if (id) {
+												void copyText(
+													entryLink(connection, {
+														kind: entryMenu.kind,
+														id,
+														path: entryMenu.path,
+													}),
+												);
+											}
+											setEntryMenu(null);
+										}}
+										className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-text-primary hover:bg-bg-hover"
+									>
+										<Link2
+											className="size-3.5 text-icon-secondary"
+											aria-hidden="true"
+										/>
+										Copy link
+									</button>
+								) : null}
 								<button
 									type="button"
 									role="menuitem"
@@ -2299,17 +2311,20 @@ function useAgentConnectionPrompt(
 /**
  * The address of a file or folder in this repository, on the page's own
  * origin and branch, so a pasted link lands exactly where the reader is.
+ * It is the entity route the app itself navigates to, id included.
  */
 function entryLink(
 	connection: Omit<LixConnectionPromptInput, "origin">,
-	entry: { kind: "file" | "directory"; path: string },
+	entry: { kind: "file" | "directory"; id: string; path: string },
 ): string {
 	const url = new URL(window.location.href);
-	const segments = entry.path
-		.split("/")
-		.filter(Boolean)
-		.map(encodeURIComponent);
-	url.pathname = `/@${encodeURIComponent(connection.namespace)}/${encodeURIComponent(connection.lixSlug)}/${entry.kind === "directory" ? "dir" : "file"}/${segments.join("/")}`;
+	url.pathname = entityRoutePath(
+		connection.namespace,
+		connection.lixSlug,
+		entry.kind,
+		entry.id,
+		entry.path,
+	);
 	url.hash = "";
 	return url.toString();
 }

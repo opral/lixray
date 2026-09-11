@@ -37,6 +37,8 @@ export const TINTS: ReadonlyArray<{
 	{ selector: '[data-review-mode="true"]', color: "rgba(249, 115, 22, 0.24)" },
 ];
 
+/** Samples coalesce per frame and, while a page keeps changing, per interval. */
+const SYNC_INTERVAL_MS = 100;
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 const channel = (value: string): number => {
 	const trimmed = value.trim();
@@ -97,7 +99,53 @@ export function parseCssColor(value: string): Rgba | null {
 			a: clamp01(alpha(parts[3])),
 		};
 	}
+	// Tailwind v4 palettes are oklch, and Chrome keeps them so in computed
+	// styles rather than serializing to rgb().
+	const oklch = /^oklch\((.+)\)$/.exec(text);
+	if (oklch) {
+		const parts = oklch[1]!.replace("/", " ").split(/\s+/).filter(Boolean);
+		if (parts.length < 3) return null;
+		const lightness = parts[0]!.endsWith("%")
+			? Number.parseFloat(parts[0]!) / 100
+			: Number.parseFloat(parts[0]!);
+		const chroma = parts[1]!.endsWith("%")
+			? Number.parseFloat(parts[1]!) * 0.004
+			: Number.parseFloat(parts[1]!);
+		const hue = parts[2] === "none" ? 0 : Number.parseFloat(parts[2]!);
+		if (![lightness, chroma, hue].every(Number.isFinite)) return null;
+		return {
+			...oklchToSrgb(lightness, chroma, hue),
+			a: clamp01(alpha(parts[3])),
+		};
+	}
 	return null;
+}
+
+/** OKLCH to gamma-encoded sRGB channels in 0..255 (Björn Ottosson's matrices). */
+function oklchToSrgb(
+	lightness: number,
+	chroma: number,
+	hueDegrees: number,
+): { r: number; g: number; b: number } {
+	const hue = (hueDegrees * Math.PI) / 180;
+	const a = chroma * Math.cos(hue);
+	const b = chroma * Math.sin(hue);
+	const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+	const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+	const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3;
+	const gamma = (linear: number) => {
+		const value = clamp01(linear);
+		return (
+			(value <= 0.0031308
+				? 12.92 * value
+				: 1.055 * value ** (1 / 2.4) - 0.055) * 255
+		);
+	};
+	return {
+		r: gamma(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+		g: gamma(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+		b: gamma(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
+	};
 }
 
 const toHex = (value: number) =>
@@ -220,30 +268,51 @@ export function installThemeColorSync(win: Window = window): () => void {
 		if (meta.content !== next) meta.content = next;
 	};
 
+	// A burst of changes (a mount, a transition settling) becomes one sample
+	// per frame, and a page that keeps changing is sampled once per interval.
 	let frame: number | null = null;
+	let timer: number | null = null;
+	let lastSync = Number.NEGATIVE_INFINITY;
+	const run = () => {
+		frame = null;
+		lastSync = win.performance.now();
+		sync();
+	};
 	const request = () => {
-		if (frame !== null) return;
-		frame = win.requestAnimationFrame(() => {
-			frame = null;
-			sync();
-		});
+		if (frame !== null || timer !== null) return;
+		const wait = SYNC_INTERVAL_MS - (win.performance.now() - lastSync);
+		if (wait > 0) {
+			timer = win.setTimeout(() => {
+				timer = null;
+				frame = win.requestAnimationFrame(run);
+			}, wait);
+			return;
+		}
+		frame = win.requestAnimationFrame(run);
 	};
 
-	// Anything that changes what is painted: DOM and attribute changes
-	// (dialogs mount, data-state flips, review mode toggles), the end of
-	// transitions and animations (fades settle), looping glows, resizes, and
-	// the overlay's own geometry.
+	// Anything that changes what is painted: DOM changes and the attributes
+	// that style elements (dialogs mount, data-state flips, review mode
+	// toggles), the end of transitions and animations (fades settle),
+	// resizes, and the overlay's own geometry. Text edits and the many
+	// attributes that do not paint are left alone.
 	const observer = new MutationObserver(request);
 	observer.observe(doc.documentElement, {
 		subtree: true,
 		childList: true,
 		attributes: true,
+		attributeFilter: [
+			"class",
+			"style",
+			"hidden",
+			"open",
+			"aria-hidden",
+			"data-state",
+			"data-theme",
+			"data-review-mode",
+		],
 	});
-	const events = [
-		"transitionend",
-		"animationend",
-		"animationiteration",
-	] as const;
+	const events = ["transitionend", "animationend"] as const;
 	for (const type of events)
 		doc.addEventListener(type, request, { capture: true, passive: true });
 	win.addEventListener("resize", request, { passive: true });
@@ -258,6 +327,7 @@ export function installThemeColorSync(win: Window = window): () => void {
 		win.removeEventListener("resize", request);
 		overlay?.removeEventListener("geometrychange", request);
 		if (frame !== null) win.cancelAnimationFrame(frame);
+		if (timer !== null) win.clearTimeout(timer);
 		meta.content = original;
 	};
 }
