@@ -169,7 +169,16 @@ for (const failure of ["repository", "published item"] as const) {
 				});
 			}
 		});
-		await page.goto(fileUrl);
+		// Measure the error transition after the client actually starts access
+		// resolution. A cold Vite graph can leave the SSR skeleton visible while
+		// modules load; that is not a completed (or failed) access check.
+		const accessRequest = page.waitForRequest(
+			(request) =>
+				request.url().includes("/rest/v1/rpc/resolve_public_lix_by_route"),
+			{ timeout: 60_000 },
+		);
+		await page.goto(fileUrl, { waitUntil: "domcontentloaded" });
+		await accessRequest;
 		await expect(
 			page.getByRole("heading", { name: "Unable to check file access" }),
 		).toBeVisible();

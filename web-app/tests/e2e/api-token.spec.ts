@@ -92,7 +92,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 		const otherRepo = await request.get(`/lix/v1/${otherId}/`, {
 			headers: {
 				Authorization: `Bearer ${first}`,
-				"Lix-Server-Protocol-Version": "7",
+				"Lix-Server-Protocol-Version": "8",
 			},
 		});
 		expect(otherRepo.status()).toBe(200);
@@ -192,7 +192,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 				Authorization: `Bearer ${first}`,
 				"Idempotency-Key": crypto.randomUUID(),
 				"Content-Type": "application/vnd.lix.snapshot",
-				"Lix-Server-Protocol-Version": "7",
+				"Lix-Server-Protocol-Version": "8",
 			},
 			data: Buffer.from(snapshot.bytes),
 		});
@@ -230,7 +230,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 		).toBe(true);
 		const privateFile = await request.get(
 			`/lix/v1/${remote.id}/file?path=/private.txt`,
-			{ headers: { "Lix-Server-Protocol-Version": "7" } },
+			{ headers: { "Lix-Server-Protocol-Version": "8" } },
 		);
 		expect([401, 403, 404]).toContain(privateFile.status());
 
@@ -261,7 +261,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 			const response = await request.get(`/lix/v1/${lixId}/`, {
 				headers: {
 					Authorization: `Bearer ${token}`,
-					"Lix-Server-Protocol-Version": "7",
+					"Lix-Server-Protocol-Version": "8",
 				},
 			});
 			expect(response.status()).toBe(200);
@@ -285,14 +285,14 @@ test("Account tokens have generated names, creation dates and independent deleti
 		const deletedResponse = await request.get(`/lix/v1/${lixId}/`, {
 			headers: {
 				Authorization: `Bearer ${first}`,
-				"Lix-Server-Protocol-Version": "7",
+				"Lix-Server-Protocol-Version": "8",
 			},
 		});
 		expect(deletedResponse.status()).toBe(401);
 		const remainingResponse = await request.get(`/lix/v1/${lixId}/`, {
 			headers: {
 				Authorization: `Bearer ${second}`,
-				"Lix-Server-Protocol-Version": "7",
+				"Lix-Server-Protocol-Version": "8",
 			},
 		});
 		expect(remainingResponse.status()).toBe(200);
