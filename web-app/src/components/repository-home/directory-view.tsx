@@ -1519,8 +1519,8 @@ function ReadmePreview({
 	// closes the file list and carries a caption (icon, file name, Edit) in
 	// the list's own tertiary type, so it reads as the list's footer and the
 	// document's byline at once. The rule starts where a row's hover ground
-	// starts, and the caption's icon sits on the rows' icon column, so the
-	// document below is flush with the file names.
+	// starts, the caption's icon sits on the rows' icon column, and the
+	// document below starts where the rule starts.
 	return (
 		<section
 			aria-label={`${fileName} preview`}
@@ -1554,9 +1554,8 @@ function ReadmePreview({
 			{/* Click delegation only augments the anchors inside, which stay
 			    keyboard-accessible on their own. */}
 			{/* The standalone file view strips the document's page padding, so
-			    the section owns its inner margins: the document starts on the
-			    file-name column (the caption's inset, icon, and gap), keeps
-			    the caption's inset on the right, and a heading's beat below. */}
+			    the section owns its inner margins: the document spans exactly
+			    the width of the rule above it, with a heading's beat below. */}
 			<div
 				data-testid="home-readme"
 				onClick={(event) => {
@@ -1567,7 +1566,7 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
-				className="pt-2 pr-3 pb-9 pl-[43px]"
+				className="pt-2 pb-9"
 			>
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
