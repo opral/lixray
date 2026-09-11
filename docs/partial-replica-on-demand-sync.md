@@ -35,3 +35,15 @@ query inputs. These are historical local measurements of that opener, not a
 measurement of this PR’s current-main UI or its Railway preview. Broad queries,
 new write dependencies, server startup and production network latency remain
 separate costs.
+
+## Optional history totals
+
+The Home sidebar keeps its working-change summary on the local partial replica,
+including pending edits. Repository-wide `lix_commit` checkpoint totals and
+`lix_change` daily totals require an authoritative inventory that the partial
+replica does not provide. Those two optional queries treat the SDK's exact
+`LIX_PARTIAL_REPLICA_SCOPE_UNSUPPORTED` result as unavailable: counts remain
+unknown, inventory graphs are omitted, and the sidebar says complete history
+totals are unavailable. Available working changes and their review action remain
+visible. Other query failures continue to be reported. The app does not replace
+these totals with server-only counts that would omit pending local commits.

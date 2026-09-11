@@ -85,11 +85,15 @@ function useObservedRows(
 				}
 			} catch (error) {
 				if (!disposed) {
-					console.error("repository-home: lix observe failed", error);
+					const unavailable = isOptionalHistoryInventoryUnavailable(sql, error);
+					if (!unavailable)
+						console.error("repository-home: lix observe failed", error);
 					const failure =
 						error instanceof Error ? error : new Error(String(error));
 					setState((current) =>
-						preserveObservedRowsAfterError(current, failure),
+						unavailable
+							? { rows: null, error: failure }
+							: preserveObservedRowsAfterError(current, failure),
 					);
 				}
 			}
@@ -140,6 +144,20 @@ export const WORKING_CHANGE_SQL =
 	"SELECT count(*) AS file_count, coalesce(sum(row_count), 0) AS change_count FROM lix_diff('lix_file')";
 export const CHANGE_SUMMARY_SQL =
 	"WITH daily AS (SELECT substr(created_at, 1, 10) AS day, count(*) AS day_count, min(created_at) AS day_created_at FROM lix_change GROUP BY substr(created_at, 1, 10)) SELECT day, day_count AS n, sum(day_count) over () AS total_count, min(day_created_at) over () AS created_at FROM daily ORDER BY day DESC LIMIT 10";
+
+/** Only these optional totals require an authoritative, repository-wide inventory. */
+export function isOptionalHistoryInventoryUnavailable(
+	sql: string,
+	error: unknown,
+): boolean {
+	return (
+		(sql === CHECKPOINT_SUMMARY_SQL || sql === CHANGE_SUMMARY_SQL) &&
+		typeof error === "object" &&
+		error !== null &&
+		"code" in error &&
+		error.code === "LIX_PARTIAL_REPLICA_SCOPE_UNSUPPORTED"
+	);
+}
 
 /** Live, repository-derived facts used by the Home control-plane rail. */
 export function useRepositoryControlPlaneData(

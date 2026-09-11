@@ -3,6 +3,7 @@ import test from "node:test";
 import type { Lix } from "@lix-js/sdk";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import {
+	isOptionalHistoryInventoryUnavailable,
 	CHANGE_SUMMARY_SQL,
 	CHECKPOINT_SUMMARY_SQL,
 	WORKING_CHANGE_SQL,
@@ -340,4 +341,43 @@ void test("imports dropped files into a canonical nested directory", async () =>
 		failed: [],
 	});
 	assert.equal(calls.at(-1)?.params[0], "/docs/notes.md");
+});
+
+void test("only optional whole-history inventories treat the typed partial boundary as unavailable", () => {
+	const unsupported = Object.assign(new Error("inventory is not complete"), {
+		code: "LIX_PARTIAL_REPLICA_SCOPE_UNSUPPORTED",
+	});
+	assert.equal(
+		isOptionalHistoryInventoryUnavailable(CHECKPOINT_SUMMARY_SQL, unsupported),
+		true,
+	);
+	assert.equal(
+		isOptionalHistoryInventoryUnavailable(CHANGE_SUMMARY_SQL, unsupported),
+		true,
+	);
+	assert.equal(
+		isOptionalHistoryInventoryUnavailable(WORKING_CHANGE_SQL, unsupported),
+		false,
+	);
+	assert.equal(
+		isOptionalHistoryInventoryUnavailable(
+			"SELECT content FROM lix_file",
+			unsupported,
+		),
+		false,
+	);
+	assert.equal(
+		isOptionalHistoryInventoryUnavailable(
+			CHANGE_SUMMARY_SQL,
+			new Error(unsupported.message),
+		),
+		false,
+	);
+	assert.equal(
+		isOptionalHistoryInventoryUnavailable(
+			CHANGE_SUMMARY_SQL,
+			Object.assign(new Error("offline"), { code: "LIX_NETWORK_ERROR" }),
+		),
+		false,
+	);
 });
