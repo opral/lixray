@@ -52,7 +52,7 @@ void test("retries only transient repository-open transport failures", () => {
 	assert.equal(
 		isRetryableRepositoryOpenError(
 			Object.assign(new Error("The replica is recovering"), {
-				code: "LIX_ERROR_LIX_RECOVERING",
+				code: "LIX_ERROR_RECOVERING",
 			}),
 		),
 		true,
@@ -80,7 +80,7 @@ void test("reads structured repository migration state from an open error", () =
 	assert.deepEqual(
 		repositoryMigrationStateFromError(
 			Object.assign(new Error("The lix repository is being migrated."), {
-				code: "LIX_ERROR_LIX_MIGRATING",
+				code: "LIX_ERROR_MIGRATING",
 				details: { fromVersion: 68, toVersion: 71, retryable: true },
 			}),
 		),
@@ -89,7 +89,7 @@ void test("reads structured repository migration state from an open error", () =
 	assert.equal(
 		repositoryMigrationStateFromError(
 			Object.assign(new Error("Malformed migration state"), {
-				code: "LIX_ERROR_LIX_MIGRATING",
+				code: "LIX_ERROR_MIGRATING",
 				details: { fromVersion: "68", toVersion: 71 },
 			}),
 		),
@@ -98,7 +98,7 @@ void test("reads structured repository migration state from an open error", () =
 	assert.equal(
 		repositoryMigrationStateFromError(
 			Object.assign(new Error("The replica is recovering"), {
-				code: "LIX_ERROR_LIX_RECOVERING",
+				code: "LIX_ERROR_RECOVERING",
 			}),
 		),
 		null,
@@ -188,7 +188,7 @@ void test("stops polling and clears progress when its owner aborts", async () =>
 
 function migrationError(): Error {
 	return Object.assign(new Error("The lix repository is being migrated."), {
-		code: "LIX_ERROR_LIX_MIGRATING",
+		code: "LIX_ERROR_MIGRATING",
 		details: { fromVersion: 68, toVersion: 71, retryable: true },
 	});
 }
@@ -331,11 +331,11 @@ void test("does not report expected migration, recovery, or missing-chunk respon
 	const captured: unknown[] = [];
 	const responses = [
 		Response.json(
-			{ error: { code: "LIX_ERROR_LIX_MIGRATING" } },
+			{ error: { code: "LIX_ERROR_MIGRATING" } },
 			{ status: 503 },
 		),
 		Response.json(
-			{ error: { code: "LIX_ERROR_LIX_RECOVERING" } },
+			{ error: { code: "LIX_ERROR_RECOVERING" } },
 			{ status: 503 },
 		),
 		new Response(null, { status: 404 }),
