@@ -161,6 +161,12 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 				expect(lixId).toBe(repository.id);
 				return branchId;
 			},
+			// The repository opens on its default branch, which is what the
+			// service compares against when deciding to name one in a URL.
+			defaultBranchId: async (lixId: string) => {
+				expect(lixId).toBe(repository.id);
+				return branchId;
+			},
 			execute: async (
 				lixId: string,
 				selectedBranch: string,
@@ -218,7 +224,8 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		);
 		for (const entity of links.entities) {
 			expect(new URL(entity.url).origin).toBe(new URL(baseURL).origin);
-			expect(new URL(entity.url).searchParams.get("branch")).toBe(branchId);
+			// On the default branch a URL says nothing about branches.
+			expect(new URL(entity.url).searchParams.get("branch")).toBeNull();
 		}
 		await page.goto(repository.path);
 		// A cold browser worker compiles the SDK and downloads its initial replica.
