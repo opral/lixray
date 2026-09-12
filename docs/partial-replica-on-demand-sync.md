@@ -27,19 +27,38 @@ the same resident data and pending edits. This browser path requires SharedWorke
 Web Locks, and OPFS support.
 
 The SDK and reference server use Lix main revision
-`48aec47b74b151dfb44c9b66259d280971014bce`, merged through
-[Lix PR #1755](https://github.com/opral/lix/pull/1755). Upgrade both together.
+`1060e19baa0ef478c8c1ac7e57c9e37823dbcc0c`, merged through
+[Lix PR #1757](https://github.com/opral/lix/pull/1757). Upgrade both together.
 Server protocol is 8 and sync protocol is 11. Browser conversion is separate from
 any authoritative repository migration; never reset server storage for an upgrade.
 
-Controlled profiling of this SDK revision in the earlier Lixray opener measured
-median SDK opening of 293 ms for a small repository and 301 ms with 320 MiB of
-content, using two requests and about 2.3 KB. Session readiness including navigation
-SQL was 487/500 ms. All 18 runs supported offline edits and reopen without fetching
-query inputs. These are historical local measurements of that opener, not a
-measurement of this PR’s current-main UI or its Railway preview. Broad queries,
-new write dependencies, server startup and production network latency remain
-separate costs.
+Controlled local profiling of this integration used three fresh small replicas
+and three with 320 MiB of unrelated content (335,547,662 physical blob bytes).
+The native authority, release WASM, SDK and app source were held fixed throughout.
+
+| Median measurement                      |       Small |     320 MiB |
+| --------------------------------------- | ----------: | ----------: |
+| SDK opening                             |      283 ms |      287 ms |
+| Session ready, including navigation SQL |      467 ms |      469 ms |
+| Opening requests / response body bytes  | 2 / 2,327 B | 2 / 2,321 B |
+| Warm offline read                       |      4.9 ms |      5.3 ms |
+| Warm offline write                      |      8.6 ms |     9.75 ms |
+| Offline reopen session ready            |      241 ms |      252 ms |
+
+All 180 offline writes and 360 reads passed, with no native-input requests and no
+successful offline network responses. Background upload attempts and reopen
+authentication attempts were blocked; they were not absent. First offline writes
+took 42/47 ms. The first measured SELECT took 64/116 ms, and one 693 ms small-opening
+outlier remains in the results. These are local measurements after module import:
+they exclude application/SDK/WASM downloads, HTTP headers, full UI rendering,
+production network latency and server startup. They demonstrate bounded opening
+for an unchanged working set while unrelated repository content grows; broader
+queries and new write dependencies can require more hydration.
+
+Pending edits and checkpoint dependencies upload in bounded waves. A single
+native commit or minimal checkpoint publication closure over the 1 MiB JSON
+request budget remains pending until multipart preparation is supported. Binary
+file content uses a separate blob uploader and does not count toward that limit.
 
 ## Optional history totals
 
