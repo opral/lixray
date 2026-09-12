@@ -569,6 +569,7 @@ export async function createRepositoryFile(
 		base: "untitled",
 		data: "",
 	};
+	const creationId = crypto.randomUUID();
 	for (let attempt = 0; ; attempt += 1) {
 		try {
 			const path = await firstFreePath(lix, (suffix) =>
@@ -580,16 +581,14 @@ export async function createRepositoryFile(
 				),
 			);
 			await lix.execute(
-				"INSERT INTO lix_file (path, content) VALUES ($1, $2)",
-				[path, new TextEncoder().encode(template.data)],
+				"INSERT INTO lix_file (path, content, id) VALUES ($1, $2, $3)",
+				[path, new TextEncoder().encode(template.data), creationId],
 			);
 			return path;
 		} catch (error) {
-			// A writer can invalidate the snapshot or claim the selected name
-			// before INSERT. Both errors reject the write atomically; recheck
-			// availability, but never replay an ambiguous commit outcome.
+			// Keep the operation identity across retries: a conflict can arrive
+			// after publication. Reconcile that exact file before choosing a name.
 			if (
-				attempt >= 3 ||
 				typeof error !== "object" ||
 				error === null ||
 				!("code" in error) ||
@@ -598,6 +597,13 @@ export async function createRepositoryFile(
 			) {
 				throw error;
 			}
+			const persisted = await lix.execute(
+				"SELECT path FROM lix_file WHERE id = $1",
+				[creationId],
+			);
+			const persistedPath = persisted.rows[0]?.path;
+			if (typeof persistedPath === "string") return persistedPath;
+			if (attempt >= 3) throw error;
 			await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
 			// Recheck the name too: another writer may have claimed it.
 		}

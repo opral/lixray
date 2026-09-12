@@ -277,6 +277,7 @@ void test("creates nested files and folders with canonical separators", async ()
 void test("file creation retries sync conflicts with a fresh available name", async () => {
 	const paths = new Set<string>();
 	const inserts: string[] = [];
+	const creationIds: unknown[] = [];
 	const lix = {
 		execute: async (sql: string, params: ReadonlyArray<unknown>) => {
 			const path = String(params[0]);
@@ -284,6 +285,7 @@ void test("file creation retries sync conflicts with a fresh available name", as
 				return { rows: paths.has(path) ? [{}] : [] };
 			}
 			inserts.push(path);
+			creationIds.push(params[2]);
 			if (inserts.length === 1) {
 				// Another writer claims the candidate while our write is rejected.
 				paths.add(path);
@@ -298,6 +300,8 @@ void test("file creation retries sync conflicts with a fresh available name", as
 
 	assert.equal(await createRepositoryFile(lix, "/", "csv"), "/untitled-1.csv");
 	assert.deepEqual(inserts, ["/untitled.csv", "/untitled-1.csv"]);
+	assert.equal(new Set(creationIds).size, 1);
+	assert.equal(typeof creationIds[0], "string");
 });
 
 void test("file creation bounds conflicts and does not retry ambiguous writes", async () => {
@@ -432,4 +436,60 @@ void test("concurrent file creators retry an atomically rejected name without ov
 		await second.close();
 		await first.close();
 	}
+});
+
+void test("file creation reconciles an accepted insert before retrying a conflict", async () => {
+	const { openDirectoryTestLix } =
+		await import("./directory-operations-test-loader.ts");
+	const lix = await openDirectoryTestLix();
+	let inserts = 0;
+	const session = {
+		execute: async (sql: string, params: ReadonlyArray<unknown>) => {
+			const result = await lix.execute(
+				sql,
+				params as Parameters<Lix["execute"]>[1],
+			);
+			if (sql.startsWith("INSERT INTO lix_file")) {
+				inserts += 1;
+				throw Object.assign(new Error("conflict reported after publication"), {
+					code: "LIX_TRANSACTION_CONFLICT",
+				});
+			}
+			return result;
+		},
+	} as unknown as Lix;
+	try {
+		assert.equal(
+			await createRepositoryFile(session, "/", "md"),
+			"/untitled.md",
+		);
+		assert.equal(inserts, 1);
+		const rows = (
+			await lix.execute(
+				"SELECT id, path FROM lix_file WHERE path IN ('/untitled.md', '/untitled-1.md')",
+			)
+		).rows;
+		assert.equal(rows.length, 1);
+		assert.equal(rows[0]!.path, "/untitled.md");
+	} finally {
+		await lix.close();
+	}
+});
+
+void test("file creation does not retry when exact identity reconciliation fails", async () => {
+	let inserts = 0;
+	const failure = new Error("reconciliation unavailable");
+	const lix = {
+		execute: async (sql: string) => {
+			if (sql === "SELECT path FROM lix_file WHERE id = $1") throw failure;
+			if (sql.startsWith("SELECT")) return { rows: [] };
+			inserts += 1;
+			throw Object.assign(new Error("conflict"), { code: "LIX_ERROR_UNIQUE" });
+		},
+	} as unknown as Lix;
+	await assert.rejects(
+		createRepositoryFile(lix, "/", "md"),
+		(error) => error === failure,
+	);
+	assert.equal(inserts, 1);
 });
