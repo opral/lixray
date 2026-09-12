@@ -39,7 +39,7 @@ function span(name = "lix.repository.opened", account = "account-123") {
 		],
 	};
 }
-function encode(spans: ReturnType<typeof span>[]) {
+function encode(spans: object[]) {
 	return codec
 		.encode(
 			codec.fromObject({
@@ -166,6 +166,116 @@ void test("SQL-only batches preserve native tracing without product capture", as
 		200,
 	);
 	assert.equal(calls, 1);
+});
+
+void test("server error logs become exceptions with diagnostics, correlation and stable replay IDs", async () => {
+	const body = encode([
+		{
+			...span("lix.runtime.open", ""),
+			events: [
+				{
+					name: "Retrying migration",
+					attributes: [{ key: "level", value: { stringValue: "WARN" } }],
+				},
+				{
+					name: "Lix repository migration failed",
+					timeUnixNano: "1788735601123456789",
+					attributes: [
+						{ key: "level", value: { stringValue: "ERROR" } },
+						{
+							key: "error",
+							value: {
+								stringValue:
+									"open authority: certified-authority-v4 is unsupported; Bearer secret-value",
+							},
+						},
+						{ key: "from_version", value: { intValue: 78 } },
+						{ key: "to_version", value: { intValue: 79 } },
+						{ key: "sql", value: { stringValue: "private SQL" } },
+					],
+				},
+			],
+		},
+	]);
+	const batches: CaptureBatch[] = [];
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batches.push((await sent.json()) as CaptureBatch);
+		return new Response();
+	};
+	for (let retry = 0; retry < 2; retry++) {
+		assert.equal(
+			(await handleOtlpTelemetry(request(body), env, { fetch: fetcher }))
+				.status,
+			200,
+		);
+	}
+	assert.deepEqual(batches[0], batches[1]);
+	assert.equal(batches[0].batch.length, 1);
+	const captured = batches[0].batch[0];
+	assert.equal(captured.event, "$exception");
+	assert.equal(captured.distinct_id, "lix-server:lix-123");
+	assert.equal(captured.timestamp, "2026-09-06T23:00:01.123Z");
+	assert.deepEqual(captured.properties.$exception_list, [
+		{
+			type: "LixServerError",
+			value:
+				"open authority: certified-authority-v4 is unsupported; Bearer [REDACTED]",
+			mechanism: { type: "generic", handled: true },
+		},
+	]);
+	assert.equal(
+		captured.properties.server_log_message,
+		"Lix repository migration failed",
+	);
+	assert.equal(captured.properties.$otel_trace_id, "01".repeat(16));
+	assert.equal(captured.properties.$otel_span_id, "02".repeat(8));
+	assert.equal(captured.properties.migration_from_version, "78");
+	assert.equal(captured.properties.migration_to_version, "79");
+	assert.equal(captured.properties.repository_id, "lix-123");
+	assert.doesNotMatch(
+		JSON.stringify(captured),
+		/secret-value|private SQL|must-not-project/,
+	);
+});
+
+void test("standard OTel exceptions preserve the cause without inventing a stack trace", async () => {
+	const body = encode([
+		{
+			...span("lix.protocol.request"),
+			events: [
+				{
+					name: "exception",
+					attributes: [
+						{ key: "exception.type", value: { stringValue: "StorageError" } },
+						{
+							key: "exception.message",
+							value: { stringValue: "storage unavailable" },
+						},
+					],
+				},
+			],
+		},
+	]);
+	let captured: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			captured = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	assert.deepEqual(captured!.batch[0].properties.$exception_list, [
+		{
+			type: "StorageError",
+			value: "storage unavailable",
+			mechanism: { type: "generic", handled: true },
+		},
+	]);
 });
 
 void test("auth, malformed protobuf, unsupported formats, and compressed expansion are rejected before export", async () => {
