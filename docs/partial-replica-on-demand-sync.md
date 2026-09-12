@@ -54,14 +54,15 @@ loaded file do not need this namespace scan. This does not add repository-wide
 work to opening.
 
 The SDK and reference server use Lix main revision
-`7b2b4402e639a5c2b5bafa3506a594e36c72929d`, merged through
+`c09dd0faa5e5fa24ab5f9b8331609a5ae92a5e8f`, including
 [Lix PR #1758](https://github.com/opral/lix/pull/1758),
-[Lix PR #1759](https://github.com/opral/lix/pull/1759), and
-[Lix PR #1761](https://github.com/opral/lix/pull/1761). Upgrade both together.
+[Lix PR #1759](https://github.com/opral/lix/pull/1759),
+[Lix PR #1761](https://github.com/opral/lix/pull/1761), and
+[Lix PR #1763](https://github.com/opral/lix/pull/1763). Upgrade both together.
 Server protocol is 8 and sync protocol is 12. Browser conversion is separate from
 any authoritative repository migration; never reset server storage for an upgrade.
 
-Controlled local profiling of this integration used three fresh small replicas
+The original opening profile at Lix `7b2b4402e` used three fresh small replicas
 and three with 320 MiB of unrelated content (335,547,662 physical blob bytes).
 The native authority, release WASM, SDK and app source were held fixed throughout.
 
@@ -98,6 +99,30 @@ Pending edits and checkpoint dependencies upload in bounded waves. A single
 native commit or minimal checkpoint publication closure over the 1 MiB JSON
 request budget remains pending until multipart preparation is supported. Binary
 file content uses a separate blob uploader and does not count toward that limit.
+
+## Edit propagation latency
+
+Markdown persistence uses a 20 ms coalescing window from the first edit. Further
+typing does not reset its deadline. Saves remain serialized; an in-flight save
+drains the latest pending snapshot. The window bounds scheduling, not storage
+completion. Ten isolated edits per setting with native Memory storage measured
+median editor-change-to-save completion of 509.7 ms with a 500 ms window and
+27.2 ms with the new default. Separate tests cover continuous typing.
+
+Partial sync batches up to 32 selected missing metadata records through the
+existing endpoint and groups local residency checks. A local two-replica profile
+reduced first-update metadata requests from 16 to 4. First 96 KiB file updates in
+each direction changed from 990/1,038 ms to 640/624 ms on loopback, and from
+1,695/1,731 ms to 1,000/980 ms with 25 ms added before each request.
+
+Those timings start before SQL UPDATE and end when a peer SELECT observes the
+exact new bytes. They exclude editor scheduling and full UI rendering, use a
+native Memory authority, and include 10 ms SELECT polling. The added request
+delay is a sensitivity experiment, not a full network emulator. Thirty baseline
+and thirty candidate edits passed; an additional 40-edit ABBA confirmation found
+warm medians of 223.3 ms before and 231.7 ms after, with unchanged warm metadata
+and range request counts. No warm speedup or sub-200 ms networked convergence is
+claimed. The dependent publication and content-fetch request chain remains.
 
 ## Optional history totals
 
