@@ -1628,7 +1628,7 @@ void test("open_lix text reports a populated inventory without calling the lix e
 			{
 				id: "22222222-2222-4222-8222-222222222222",
 				path: "/skills/hello.md",
-				url: "https://lixray.test/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md",
+				url: "https://lixray.test/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
 			},
 		]);
 		assert.equal(content.empty, false);
@@ -2269,7 +2269,7 @@ void test("MCP returns canonical links through modern and text-only tool results
 		};
 		assert.equal(
 			content.entities[0].url,
-			"https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md?branch=draft",
+			"https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md?branch=draft",
 		);
 		assert.equal(
 			content.entities[1].url,
@@ -2313,7 +2313,7 @@ void test("MCP returns canonical links through modern and text-only tool results
 			[
 				{
 					type: "resource_link",
-					uri: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md?branch=draft",
+					uri: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md?branch=draft",
 					name: "hello.md",
 					description: "Wrote skills/hello.md",
 					mimeType: "text/markdown",
@@ -2417,7 +2417,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			{
 				id: "22222222-2222-4222-8222-222222222222",
 				path: "/skills/hello.md",
-				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md",
+				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
 			},
 		]);
 		assert.equal(listing.truncated, false);
@@ -2437,7 +2437,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			{
 				id: "22222222-2222-4222-8222-222222222222",
 				path: "/skills/hello.md",
-				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/hello.md",
+				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
 				size: 8,
 				content: { text: "# Hello\n" },
 				lixcol_metadata: null,

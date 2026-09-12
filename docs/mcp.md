@@ -237,10 +237,14 @@ emit synthetic marker changes; old retained records remain historical facts.
 
 ## Canonical browser URLs
 
-`file_paths` values are SQL paths and must never be appended to `/file/` or
-`/dir/`. Browser URLs identify entities using their UUID encoded as unpadded
-Base64url, with a descriptive slug. Clients should copy the server-generated
-`url` from `open_lix.files` or `get_entity_urls` exactly as returned. A URL carries a
+A browser URL is `/file/<id>/<path>` for a file and `/folder/<id>/<path>` for a
+folder: the entity's UUID encoded as unpadded Base64url, then the entity's own
+path so the link reads as what it opens. The id is what resolves — the app
+rewrites the path from it, so a link that names no path, or a path the entity
+has since outgrown, still opens the right item and corrects itself. Folders
+carried `/dir/` before; those links redirect. Clients should copy the
+server-generated `url` from `open_lix.files` or `get_entity_urls` exactly as
+returned rather than building one from `file_paths`, which are SQL paths. A URL carries a
 `branch` parameter only when its branch is not the Lix's default branch, the
 same rule the app applies to its own links.
 Do not manually encode IDs or guess URLs. The server uses the same URL builder

@@ -5,6 +5,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type EntityKind = "file" | "directory";
 
+/** The verb an entity URL carries: /file/… for files, /folder/… for folders. */
+export function entityUrlVerb(kind: EntityKind): "file" | "folder" {
+	return kind === "directory" ? "folder" : "file";
+}
+
 export async function findLixEntity(
 	lix: Pick<Lix, "execute">,
 	kind: EntityKind,
@@ -53,37 +58,73 @@ export function decodeEntityId(token: string): string {
 	return id;
 }
 
-export function parseEntityUrlSplat(
-	splat: string | undefined,
-): { id: string; token: string; slug?: string } | null {
-	const match = /^([A-Za-z0-9_-]{22})(?:\/([^/]+))?\/?$/.exec(splat ?? "");
+/**
+ * An entity URL is its id followed by the entity's own path, so a link reads
+ * as the file or folder it opens: `/file/<id>/gtm/GTM playbook.md`. The id is
+ * what resolves; the path is decoration, and a missing or stale one is
+ * corrected when the URL is opened (see canonicalEntitySplat).
+ */
+export function parseEntityUrlSplat(splat: string | undefined): {
+	id: string;
+	token: string;
+	/** The trailing path the URL claims, absolute as Lix writes it. */
+	path?: string;
+	/** Its last segment: the file or folder name the URL claims. */
+	name?: string;
+} | null {
+	const match = /^([A-Za-z0-9_-]{22})(?:\/(.*))?$/.exec(
+		(splat ?? "").replace(/\/+$/, ""),
+	);
 	if (!match) return null;
+	let id: string;
 	try {
-		return {
-			id: decodeEntityId(match[1]!),
-			token: match[1]!,
-			...(match[2] ? { slug: match[2] } : {}),
-		};
+		id = decodeEntityId(match[1]!);
 	} catch {
 		return null;
 	}
+	// A splat reaches this both decoded (router params) and raw (a pathname
+	// sliced by hand), so each segment is decoded defensively.
+	const segments = (match[2] ?? "")
+		.split("/")
+		.filter(Boolean)
+		.map((segment) => {
+			try {
+				return decodeURIComponent(segment);
+			} catch {
+				return segment;
+			}
+		});
+	return {
+		id,
+		token: match[1]!,
+		...(segments.length > 0
+			? { path: `/${segments.join("/")}`, name: segments.at(-1)! }
+			: {}),
+	};
 }
 
 export function entityUrlSplat(id: string, path: string): string {
-	const name = path.split("/").filter(Boolean).at(-1) ?? "";
-	const slug = Array.from(
-		name
-			.normalize("NFC")
-			.toLowerCase()
-			.replace(/[^\p{L}\p{N}.-]+/gu, "-")
-			.replace(/^-+|-+$/g, ""),
-	)
-		.slice(0, 120)
-		.join("");
-	return (
-		encodeEntityId(id) +
-		(slug && slug !== "." && slug !== ".." ? `/${slug}` : "")
-	);
+	return [encodeEntityId(id), ...path.split("/").filter(Boolean)].join("/");
+}
+
+/**
+ * The splat the URL should carry for this entity, or null when it already
+ * does. A URL that names no path, or a path the entity has outgrown (renamed,
+ * moved, or simply mistyped), is rewritten from the id, which never changes.
+ */
+export function canonicalEntitySplat(
+	splat: string | undefined,
+	entity: { id: string; path: string },
+): string | null {
+	const canonical = entityUrlSplat(entity.id, entity.path);
+	const current = parseEntityUrlSplat(splat);
+	if (!current || current.id !== entity.id) return canonical;
+	// A trailing slash is a deviation like any other: the canonical URL has
+	// none, so the parse's normalization must not hide it.
+	if ((splat ?? "").endsWith("/")) return canonical;
+	return `${current.token}${current.path ?? ""}` === canonical
+		? null
+		: canonical;
 }
 
 export function entityRoutePath(
@@ -97,7 +138,7 @@ export function entityRoutePath(
 		.split("/")
 		.map(encodeURIComponent)
 		.join("/");
-	return `/@${encodeURIComponent(namespace)}/${encodeURIComponent(repository)}/${kind === "directory" ? "dir" : "file"}/${splat}`;
+	return `/@${encodeURIComponent(namespace)}/${encodeURIComponent(repository)}/${entityUrlVerb(kind)}/${splat}`;
 }
 
 export function entityFromRoute(
@@ -106,7 +147,8 @@ export function entityFromRoute(
 	repository: string,
 ): { id: string; kind: EntityKind } | null {
 	const root = `/@${encodeURIComponent(namespace)}/${encodeURIComponent(repository)}`;
-	for (const verb of ["file", "dir"] as const) {
+	// "dir" is the verb folders used to carry; links written then still open.
+	for (const verb of ["file", "folder", "dir"] as const) {
 		const prefix = `${root}/${verb}/`;
 		if (!pathname.startsWith(prefix)) continue;
 		const entity = parseEntityUrlSplat(pathname.slice(prefix.length));

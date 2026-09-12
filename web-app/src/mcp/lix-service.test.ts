@@ -492,7 +492,7 @@ void test("manifest includes verified UUID links and names no branch on the defa
 		{
 			id: "00000000-0000-4000-8000-000000000000",
 			path: "/First name.md",
-			url: "http://localhost:3000/@acme/company/file/AAAAAAAAQACAAAAAAAAAAA/first-name.md",
+			url: "http://localhost:3000/@acme/company/file/AAAAAAAAQACAAAAAAAAAAA/First%20name.md",
 		},
 	]);
 });
@@ -520,7 +520,7 @@ void test("entity URLs batch by kind, preserve request order and use the signed 
 	);
 	assert.equal(
 		result.entities[0]?.url,
-		"https://lixray.com/@acme/company/dir/MzMzMzMzQzODMzMzMzMzMw/notes?branch=draft%2Freview",
+		"https://lixray.com/@acme/company/folder/MzMzMzMzQzODMzMzMzMzMw/notes?branch=draft%2Freview",
 	);
 	assert.equal(result.entities[1]?.url, result.entities[2]?.url);
 	assert.deepEqual(result.entities[3], {
@@ -541,11 +541,16 @@ void test("UUID lookup follows file and directory renames and current namespace 
 		{ kind: "file", id: FILE_ID },
 		{ kind: "directory", id: DIR_ID },
 	]);
+	// The id is the identity; the URL carries the path the entity has now.
 	assert.match(
 		result.entities[0]!.url,
-		/\/@new-handle\/company\/file\/IiIiIiIiQiKCIiIiIiIiIg\/new-title.md$/,
+		/\/@new-handle\/company\/file\/IiIiIiIiQiKCIiIiIiIiIg\/moved\/New%20title\.md$/,
 	);
 	assert.equal(result.entities[1]!.path, "/moved");
+	assert.match(
+		result.entities[1]!.url,
+		/\/@new-handle\/company\/folder\/[A-Za-z0-9_-]{22}\/moved$/,
+	);
 	await assert.rejects(
 		service.getEntityUrls(opened.context, [
 			{ kind: "file", path: "/notes/First name.md" },

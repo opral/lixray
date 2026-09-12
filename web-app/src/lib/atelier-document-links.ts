@@ -42,17 +42,15 @@ export function createAtelierDocumentLinks({
 			if (!match) return null;
 			let handle: string;
 			let slug: string;
-			let splat: string;
 			try {
 				handle = decodeURIComponent(match[1]!);
 				slug = decodeURIComponent(match[2]!);
-				splat = match[3]!
-					.split("/")
-					.map((segment) => decodeURIComponent(segment))
-					.join("/");
 			} catch {
 				return null;
 			}
+			// The splat stays as written: parseEntityUrlSplat decodes it, and
+			// decoding twice would eat a percent that belongs to the name.
+			const splat = match[3]!;
 			if (!sameName(handle, namespace) || !sameName(slug, repository))
 				return null;
 			// A link into another branch is a navigation, not a tab.

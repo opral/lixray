@@ -1,4 +1,8 @@
-import { findLixEntity, parseEntityUrlSplat } from "~/lib/entity-url";
+import {
+	canonicalEntitySplat,
+	findLixEntity,
+	parseEntityUrlSplat,
+} from "~/lib/entity-url";
 import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
@@ -47,6 +51,20 @@ function RepositoryFileRoute() {
 				if (cancelled) return;
 				if (!entity) throw new Error("Entity not found");
 				requestedPath = entity.path;
+				// The id resolved; the path in the URL is decoration. Write the
+				// file's own path back over whatever the link claimed — a bare
+				// id, a stale name, a typo.
+				const canonical = canonicalEntitySplat(filePath, entity);
+				if (canonical)
+					void navigate({
+						to: "/@{$namespace}/$repository/file/$",
+						params: { namespace, repository, _splat: canonical },
+						search:
+							branch && defaultBranchId
+								? atelierBranchSearch(branch, defaultBranchId)
+								: {},
+						replace: true,
+					});
 				await atelier.documents.open(requestedPath);
 				if (!cancelled) markRouteSynced();
 			})
@@ -85,6 +103,7 @@ function RepositoryFileRoute() {
 		branch,
 		defaultBranchId,
 		entityId,
+		filePath,
 		consumeShellNavigation,
 		markRouteSynced,
 		namespace,

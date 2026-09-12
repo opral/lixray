@@ -8,6 +8,7 @@ import {
 	entityUrlSplat,
 	parseEntityUrlSplat,
 	entityFromRoute,
+	canonicalEntitySplat,
 	resolvePublishedEntity,
 } from "./entity-url.ts";
 
@@ -42,27 +43,78 @@ void test("malformed and noncanonical tokens cannot alias an entity", () => {
 	assert.throws(() => encodeEntityId("not-a-uuid"));
 });
 
-void test("file and directory names are optional labels, not identities", () => {
+void test("an entity URL carries the id, then the entity's own path", () => {
 	assert.equal(
 		entityUrlSplat(uuid, "/gtm/GTM playbook.md"),
-		`${token}/gtm-playbook.md`,
+		`${token}/gtm/GTM playbook.md`,
 	);
+	assert.equal(
+		entityRoutePath("opral", "monorepo", "file", uuid, "/gtm/GTM playbook.md"),
+		`/@opral/monorepo/file/${token}/gtm/GTM%20playbook.md`,
+	);
+	// Folders read as folders; the root has no path to carry.
 	assert.equal(
 		entityRoutePath("opral", "monorepo", "directory", uuid, "/teams/GTM"),
-		`/@opral/monorepo/dir/${token}/gtm`,
+		`/@opral/monorepo/folder/${token}/teams/GTM`,
 	);
-	for (const splat of [token, `${token}/old-name`, `${token}/new-name`]) {
-		assert.equal(parseEntityUrlSplat(splat)?.id, uuid);
-	}
+	assert.equal(
+		entityRoutePath("opral", "monorepo", "directory", uuid, "/"),
+		`/@opral/monorepo/folder/${token}`,
+	);
+	const parsed = parseEntityUrlSplat(`${token}/gtm/GTM%20playbook.md`);
+	assert.equal(parsed?.id, uuid);
+	assert.equal(parsed?.path, "/gtm/GTM playbook.md");
+	assert.equal(parsed?.name, "GTM playbook.md");
+	assert.equal(parseEntityUrlSplat(token)?.path, undefined);
+	assert.equal(parseEntityUrlSplat(`${token}/`)?.path, undefined);
 	assert.equal(parseEntityUrlSplat("gtm/GTM playbook.md"), null);
-	assert.equal(parseEntityUrlSplat(`${token}/a/b`), null);
+});
+
+void test("the id is the identity; the path is rewritten from it", () => {
+	const entity = { id: uuid, path: "/gtm/correct.md" };
+	// A bare id, a stale name, and a path from another folder all resolve to
+	// the same file, and each is corrected to the file's own path.
+	for (const splat of [
+		token,
+		`${token}/peter.md`,
+		`${token}/old/correct.md`,
+		`${token}/gtm/correct.md/`,
+	]) {
+		assert.equal(parseEntityUrlSplat(splat)?.id, uuid);
+		assert.equal(
+			canonicalEntitySplat(splat, entity),
+			`${token}/gtm/correct.md`,
+		);
+	}
+	// Already right: nothing to rewrite, so the URL is left alone.
+	assert.equal(canonicalEntitySplat(`${token}/gtm/correct.md`, entity), null);
+	assert.equal(canonicalEntitySplat(token, { id: uuid, path: "/" }), null);
+	// Another entity's URL is never silently adopted.
+	assert.equal(
+		canonicalEntitySplat("AX8i4nmwfMOYxNwMDAc5jw", {
+			id: "017f22e2-79b0-7cc3-98c4-dc0c0c07398e",
+			path: "/other.md",
+		}),
+		"AX8i4nmwfMOYxNwMDAc5jg/other.md",
+	);
+});
+
+void test("folder links written as /dir still open", () => {
+	for (const pathname of [
+		`/@opral/monorepo/folder/${token}/teams/GTM`,
+		`/@opral/monorepo/dir/${token}/teams/GTM`,
+	]) {
+		const entity = entityFromRoute(pathname, "opral", "monorepo");
+		assert.equal(entity?.id, uuid);
+		assert.equal(entity?.kind, "directory");
+	}
 	assert.equal(
 		entityFromRoute(
-			`/@opral/monorepo/file/${token}/old-name`,
+			`/@opral/monorepo/file/${token}/gtm/correct.md`,
 			"opral",
 			"monorepo",
-		)?.id,
-		uuid,
+		)?.kind,
+		"file",
 	);
 	assert.equal(
 		entityFromRoute(`/@opral/other/file/${token}`, "opral", "monorepo"),
@@ -101,11 +153,24 @@ void test("published lookup distinguishes unavailable items from service failure
 	assert.equal((await resolvePublishedEntity(args))?.path, "/renamed.md");
 });
 
-void test("long Unicode labels remain URL-encodable at the truncation boundary", () => {
-	const path = "/" + "a".repeat(119) + "𐐀𐐀";
-	const url = entityRoutePath("opral", "monorepo", "file", uuid, path);
-	assert.equal(
-		decodeURIComponent(url).split("/").at(-1),
-		"a".repeat(119) + "𐐨",
-	);
+void test("every path character survives the round trip", () => {
+	for (const path of [
+		"/gtm/GTM playbook.md",
+		"/a b/c#d?e&f.md",
+		"/𐐀 unicode/𐐀.md",
+		"/" + "a".repeat(300) + ".md",
+		"/100% done/plan (final).md",
+	]) {
+		const url = entityRoutePath("opral", "monorepo", "file", uuid, path);
+		const splat = url.split(`/file/`)[1]!;
+		assert.equal(parseEntityUrlSplat(splat)?.path, path);
+		// The router encodes a splat segment by segment the same way.
+		assert.equal(
+			splat,
+			[
+				token,
+				...path.split("/").filter(Boolean).map(encodeURIComponent),
+			].join("/"),
+		);
+	}
 });

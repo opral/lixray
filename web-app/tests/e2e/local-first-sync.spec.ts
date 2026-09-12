@@ -209,11 +209,12 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		expect(openedContext.files.find((file) => file.id === fileId)?.url).toBe(
 			savedFileUrl,
 		);
+		// A link carries the entity's own path: its folder and its name.
 		expect(new URL(savedDirectoryUrl).pathname).toBe(
-			`${repository.path}/dir/${compactId(directoryId)}/${source}`,
+			`${repository.path}/folder/${compactId(directoryId)}/${source}`,
 		);
 		expect(new URL(savedFileUrl).pathname).toBe(
-			`${repository.path}/file/${compactId(fileId)}/note.txt`,
+			`${repository.path}/file/${compactId(fileId)}/${source}/note.txt`,
 		);
 		for (const entity of links.entities) {
 			expect(new URL(entity.url).origin).toBe(new URL(baseURL).origin);
@@ -241,18 +242,24 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		await renameInput.press("Enter");
 		await expect(row(renamedSource)).toBeVisible();
 		// These links still contain the original location's name. Neither moving
-		// nor renaming the directory may invalidate it or its descendant file.
+		// nor renaming the directory may invalidate it or its descendant file,
+		// and each URL is rewritten to where the entity lives now.
 		await page.goto(savedDirectoryUrl);
 		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
 		await expect(page).toHaveURL(
-			new RegExp(`/dir/${compactId(directoryId)}(?:/|$)`),
+			new RegExp(
+				`/folder/${compactId(directoryId)}/${target}/${renamedSource}(?:\\?.*)?$`,
+			),
 		);
 		await page.goto(savedFileUrl);
 		await expect(
 			page.locator('[data-view-key="atelier_text"][data-active="true"]'),
 		).toBeVisible({ timeout: 30_000 });
+		// The file moved with its folder: the URL says where it lives now.
 		await expect(page).toHaveURL(
-			new RegExp(`/file/${compactId(fileId)}(?:/|$)`),
+			new RegExp(
+				`/file/${compactId(fileId)}/${target}/${renamedSource}/note\\.txt(?:\\?.*)?$`,
+			),
 		);
 		await page
 			.getByRole("button", {
