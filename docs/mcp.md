@@ -21,10 +21,26 @@ SQLite; a query against `sqlite_master` gets that answer by name);
 query, and hosts do not reliably show the server `instructions` to the model;
 the instructions repeat the workflow for hosts that do. Every other tool
 description is one or two sentences. Output schemas describe the success shape
-only. A failed call returns `isError` with `{ request_id, error }` in its JSON
+only. A failed call returns `isError` with `{ error }` in its JSON
 text block and no `structuredContent`, so clients that validate structured
 content against the output schema report the error instead of a schema
 violation.
+
+## Data boundaries
+
+Use only explicit snippets and repository content needed for the current task.
+Do not import chat history or remembered personal profiles. Do not send health
+information, biometric data, government identifiers, payment card data, passwords,
+API keys, or other authentication secrets. Ask for a non-sensitive or redacted
+version when needed. The same guidance appears on every tool card.
+
+Discovery returns repository identifiers and namespace handles, without namespace
+UUIDs or profile names. Contexts use authenticated AES-GCM encryption, retain user
+and OAuth client binding and expiry, and never grant access without authentication.
+Old signed contexts must be reopened with `open_lix` after deployment.
+Request IDs remain in HTTP `X-Request-ID` headers and server telemetry, not tool
+results or error messages. Context errors provide a reopen instruction without
+diagnostic timestamps or identifiers.
 
 ## Tools
 
@@ -52,7 +68,7 @@ violation.
 
 ## Context
 
-`open_lix` returns a signed `context` that selects one Lix and one branch, and
+`open_lix` returns a encrypted `context` that selects one Lix and one branch, and
 `context_expires_at` (24 hours after opening). SQL calls can instead use lix_ref directly. Other repository tools accept this context, including contexts returned by SQL calls.
 When a call answers `context_expired`, `malformed_context`, or
 `invalid_context`, call `open_lix` again and take the new context from
@@ -277,6 +293,6 @@ URL with `id: null`. Missing items return a tool error, never a fabricated link.
 If resolution fails, report it and omit the item link rather than guessing.
 
 These are navigation links, not capabilities: they do not publish private data
-or grant access. Resolution uses the signed context's repository and branch,
+or grant access. Resolution uses the encrypted context's repository and branch,
 and current namespace/repository names. Link resolution remains a separate
 read-only operation so a failure cannot misreport a successful write as failed.
