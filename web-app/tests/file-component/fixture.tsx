@@ -31,6 +31,20 @@ const files: Entry[] = [
 		content: new TextEncoder().encode("Child"),
 	},
 ];
+if (
+	typeof location !== "undefined" &&
+	new URLSearchParams(location.search).has("readme")
+) {
+	// The README preview is its own mode: it adds a row the selection tests
+	// count, so only the test that measures the seam opts in.
+	files.push({
+		id: "readme",
+		path: "/README.md",
+		content: new TextEncoder().encode(
+			"# Acme\n\nOne company. One shared repository.\n",
+		),
+	});
+}
 const calls: { sql: string; params: unknown[] }[] = [];
 let writeDelay = 0;
 let failNextWrite = false;

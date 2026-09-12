@@ -876,6 +876,38 @@ test("historical listings preserve immutable snapshot navigation", async ({
 	).toHaveLength(0);
 });
 
+test("the README preview keeps the rows' own inset", async ({ page }) => {
+	await page.goto("/?readme");
+	await page.waitForSelector("[data-testid=home-readme]");
+	// The document, the caption above it and the rows above that share one
+	// column: the seam reads as the list's footer, not as a second margin.
+	const columns = await page.evaluate(() => {
+		const inset = (element: Element) => {
+			const style = getComputedStyle(element);
+			const rect = element.getBoundingClientRect();
+			return [
+				Math.round(rect.left + Number.parseFloat(style.paddingLeft)),
+				Math.round(rect.right - Number.parseFloat(style.paddingRight)),
+			];
+		};
+		const row = document.querySelector("[data-path]")!;
+		const icon = row.querySelector("img")!.getBoundingClientRect();
+		return {
+			row: inset(row),
+			rowIcon: Math.round(icon.left),
+			caption: Math.round(
+				document
+					.querySelector("[data-testid=home-readme-preview] img")!
+					.getBoundingClientRect().left,
+			),
+			document: inset(document.querySelector("[data-testid=home-readme]")!),
+		};
+	});
+	expect(columns.document).toEqual(columns.row);
+	expect(columns.caption).toBe(columns.rowIcon);
+	expect(columns.rowIcon).toBe(columns.row[0]);
+});
+
 test("working changes mark the listing without a review open", async ({
 	page,
 }) => {
