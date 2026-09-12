@@ -527,14 +527,12 @@ export async function handleRequest(
 			traceId: incomingTrace.traceId ?? crypto.randomUUID(),
 		};
 		let telemetry: McpTelemetrySession | null = null;
-		let telemetryInitialized = false;
 		let cleanupOwnsFlush = false;
 		let observed = false;
 		let stage: McpRequestObservation["stage"] = "authentication";
 		const initializeTelemetry = (
 			identity: Parameters<typeof createMcpTelemetrySession>[1],
 		): void => {
-			telemetryInitialized = true;
 			try {
 				telemetry = (options.createMcpTelemetry ?? createMcpTelemetrySession)(
 					env,
@@ -554,11 +552,9 @@ export async function handleRequest(
 			}
 		};
 		const captureFailure = (statusCode: number, errorCode: string): void => {
-			if (!telemetryInitialized)
-				initializeTelemetry({
-					userId: `mcp-anonymous:${requestId}`,
-					clientId: "unknown",
-				});
+			// Only authenticated requests have a telemetry session. Auth challenges
+			// and retries must not create billable AI traces or anonymous people.
+			if (!telemetry) return;
 			onTransport({
 				requestId,
 				...traceContext,

@@ -1,14 +1,63 @@
 # MCP
 
+## Direct SQL calls
+
+When the repository is known, call `query_sql` or `execute_sql` with `lix_ref` (an exact `@handle/slug` or UUID) and optional `branch_id`. Opening first is unnecessary. The omitted branch is the repository default branch, independent of any browser or previous call's active branch. Alternatively, pass an existing `context` alone to retain its selected branch. `open_lix` remains available for inventory and for obtaining contexts used by branch and file helper tools.
+
+Example: `execute_sql({ lix_ref: "@acme/company", statements: [{ sql: "UPDATE lix_file SET content = CAST($1 AS BYTEA) WHERE path = $2", params: [{ kind: "text", value: "hello" }, { kind: "text", value: "/notes.txt" }] }] })`.
+
+DataFusion scalar expressions such as `REPLACE`, `CONCAT`, and `||` work inside a `BYTEA` cast for file updates. Use one statement per batch entry and explicit `ON CONFLICT (path)` targets. SQL remains a first-class interface; file helpers are optional.
+
+Execution errors return `isError: true` and a JSON text block, without success-schema `structuredContent`. Errors include the original code, message, hint and details, plus zero-based `statement_index` when known. Write `outcome` is `not_committed` for known rejections, `unknown` for ambiguous transport/internal failures, and `committed` for response failures after confirmed completion. Correct rejected statements before retrying. Inspect affected state for unknown outcomes; never blindly replay a batch. Verify successful writes when the user requested validation, rather than routinely reading every write back.
+
 LixRay exposes Lix through a deliberately small MCP surface. SQL is the
 universal interface for repository data; file and entity CRUD stays in SQL. `get_entity_urls` resolves browser links without changing repository data or permissions. Lix SQL is a Postgres dialect subset.
 
-Guidance is stated once. The server `instructions` carry the SQL operating
-guide, the no-readback rule, and the checkpoint policy; each tool description
-is one or two sentences saying what the tool does and its one hard rule, and
-output schemas describe the success shape only (errors return `isError` with
-`{ request_id, error }`). Keep it that way: repeating the guide per tool only
-adds reading overhead for every agent that lists the tools.
+Each tool carries its own guide in its description: the file tools say how
+bytes and metadata travel and how conflicts are reported; `query_sql` says
+how to discover tables and columns through `information_schema` (Lix is not
+SQLite; a query against `sqlite_master` gets that answer by name);
+`execute_sql` says how renames and deletes look and how to recover from failed writes. That is what an agent reads before its first
+query, and hosts do not reliably show the server `instructions` to the model;
+the instructions repeat the workflow for hosts that do. Every other tool
+description is one or two sentences. Output schemas describe the success shape
+only. A failed call returns `isError` with `{ request_id, error }` in its JSON
+text block and no `structuredContent`, so clients that validate structured
+content against the output schema report the error instead of a schema
+violation.
+
+## Tools
+
+- `list_lixes`, `open_lix`: find a Lix and mint its context (see below).
+- `list_files`, `read_files`, `write_files`: the file path. `read_files`
+  returns bytes as `{ text }` (UTF-8) or `{ base64 }`, `lixcol_metadata`,
+  size, id, canonical `url`, and the `commit_id` the read reflects.
+  `write_files` creates or updates files in one atomic commit, parents
+  included, with content, `lixcol_metadata` (omitted keeps, an object
+  replaces, `null` clears), an optional `checkpoint: true`, and
+  `last_seen_commit_id`: a target file that changed since that commit refuses
+  the whole write, and the error carries `current_commit_id` and the current
+  contents of the conflicting files; unrelated changes never block. The
+  check and the write are two steps, so a write to the same file landing
+  between them is not caught; the window is milliseconds.
+- `query_sql`, `execute_sql`: everything else. Files and directories are
+  still tables (`lix_file`, `lix_directory`): rename, delete, and any query
+  go through SQL.
+- `get_entity_urls`: canonical browser links for files and directories.
+- `create_checkpoint`, `restore`, `undo`, `redo`: milestones and moving the
+  branch head.
+- `active_branch_id`, `create_branch`, `switch_branch`, `merge_branch_preview`,
+  `merge_branch`: branches. `switch_branch` returns a new context pinned to the
+  branch; nothing is switched server-side.
+
+## Context
+
+`open_lix` returns a signed `context` that selects one Lix and one branch, and
+`context_expires_at` (24 hours after opening). SQL calls can instead use lix_ref directly. Other repository tools accept this context, including contexts returned by SQL calls.
+When a call answers `context_expired`, `malformed_context`, or
+`invalid_context`, call `open_lix` again and take the new context from
+`structuredContent`; nothing else needs redoing, because contexts carry no
+state of their own.
 
 ## End-to-end trace correlation
 
@@ -27,14 +76,15 @@ provided, LixRay continues to create one fallback trace per tool call.
 
 1. Match the exact LixRay server name instead of searching broadly for generic
    repository or file tools.
-2. If the user supplied an exact `@handle/slug` or Lix UUID, call `open_lix`
-   directly. Call `list_lixes` only when the target is unknown.
-3. Retain the context returned by `open_lix` from `structuredContent`
+2. If the user supplied an exact `@handle/slug` or Lix UUID, pass it as lix_ref directly to query_sql or execute_sql. Call `list_lixes` only when the target is unknown.
+3. Use open_lix when inventory is useful. Retain the context returned by SQL or open_lix from `structuredContent`
    when the host provides it. Never copy a context token from the prose
    summary. Text-only hosts receive a later `content` text block that is the
    full `structuredContent` JSON. `open_lix` reports file and directory
    counts plus a bounded `file_paths` manifest and `files` containing `id`, `path`, and canonical `url`. Use `files[].url` exactly when linking existing files. When `file_paths_complete` is
-   true, do not run another query just to list files.
+   true, do not run another query just to list files; when it is false, the
+   result carries `file_paths_sql`, the one `query_sql` statement that lists
+   every path.
 4. Use `query_sql` to inspect the relevant state. When paths are known, read
    every needed file in one parameterized statement rather than listing the
    same paths first or reading files one at a time.
@@ -42,10 +92,8 @@ provided, LixRay continues to create one fallback trace per tool call.
 6. Use `execute_sql` for any atomic SQL batch. It is always treated as
    potentially destructive. The mutation is already persisted — `rowsAffected`
    and any rows the batch itself returned are sufficient.
-7. Do not follow a write with a verification `SELECT`, a second `query_sql`
-   "to check", or path/length/substring readback. One `execute_sql` batch is
-   the whole write (dirs + file + `ON CONFLICT` is fine inside that batch).
-   No readback is needed to confirm persistence.
+7. Successful batches are persisted. Read back when the outcome is unknown or
+   validation is part of the task; never blindly replay an uncertain write.
 8. To link created or renamed items, call `get_entity_urls` with their UUIDs or
    absolute paths in one batch, retaining the current context. This resolves
    browser links; it is not a persistence-verification read.
@@ -62,12 +110,13 @@ required to save changes.
 
 ## What a result carries
 
-Every tool result has three parts, in order: a one-line summary, zero or
-more `resource_link` content blocks, and the full `structuredContent` as
-JSON text for hosts that only show text. The links are what a host renders
+Every successful tool result has three parts, in order: a one-line summary,
+zero or more `resource_link` content blocks, and the full `structuredContent`
+as JSON text for hosts that only show text. The links are what a host renders
 as clickable chips inside the step: `open_lix` links the repository, and an
 `execute_sql` batch links each file or directory it wrote or updated, with
-the same canonical URL `get_entity_urls` would return. The summary names the
+the same canonical URL `get_entity_urls` would return. Other tools carry no
+links, and a failed call has the summary and the JSON text only. The summary names the
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
 
@@ -194,10 +243,17 @@ emit synthetic marker changes; old retained records remain historical facts.
 
 ## Canonical browser URLs
 
-`file_paths` values are SQL paths and must never be appended to `/file/` or
-`/dir/`. Browser URLs identify entities using their UUID encoded as unpadded
-Base64url, with a descriptive slug. Clients should copy the server-generated
-`url` from `open_lix.files` or `get_entity_urls`, preserving its branch parameter.
+A browser URL is `/file/<id>/<path>` for a file and `/folder/<id>/<path>` for a
+folder: the entity's UUID encoded as unpadded Base64url, then its path as a
+slug, so `/gtm/GTM playbook.md` reads as `/gtm/gtm-playbook.md`. The slug is
+for the reader; the id is what resolves. The app rewrites the path from the id
+on arrival, so a link that names no path, or one the entity has since outgrown,
+still opens the right item and corrects itself. Folders carried `/dir/` before;
+those links redirect. Clients should copy the server-generated `url` from
+`open_lix.files` or `get_entity_urls` exactly as returned rather than building
+one from `file_paths`, which are SQL paths. A URL carries a
+`branch` parameter only when its branch is not the Lix's default branch, the
+same rule the app applies to its own links.
 Do not manually encode IDs or guess URLs. The server uses the same URL builder
 as app navigation and sharing.
 

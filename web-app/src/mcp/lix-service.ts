@@ -1,4 +1,14 @@
 import { entityRoutePath } from "../lib/entity-url.ts";
+import {
+	CHANGED_FILES_SQL,
+	READ_FILES_SQL,
+	encodeFileContent,
+	escapeLike,
+	fileWriteStatements,
+	normalizeFilePath,
+	type FileContent,
+	type FileWrite,
+} from "./file-tools.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
 
 const LIX_UUID_PATTERN =
@@ -146,6 +156,8 @@ export interface LixRuntimeClient {
 	listLixes(): Promise<Array<LixSummary>>;
 	hasOpenRuntime(lixId: string): boolean;
 	activeBranchId(lixId: string, branchId?: string): Promise<string>;
+	/** The branch a Lix opens on; URLs name any other branch explicitly. */
+	defaultBranchId(lixId: string): Promise<string>;
 	switchBranch(lixId: string, branchId: string): Promise<{ branchId: string }>;
 	execute(
 		lixId: string,
@@ -263,7 +275,7 @@ export class LixService {
 		if (matches.length === 1) return matches[0];
 		if (matches.length === 0) {
 			throw createLixError("not_found", "Lix not found.", {
-				hint: "Call list_lixes and pass an exact @handle/slug or Lix UUID to open_lix.",
+				hint: "Call list_lixes and pass an exact @handle/slug or Lix UUID as lix_ref.",
 			});
 		}
 		throw createLixError(
@@ -273,6 +285,31 @@ export class LixService {
 				hint: "Call list_lixes and pass the exact Lix UUID or @namespace/slug.",
 			},
 		);
+	}
+
+	/** Resolve an explicit SQL target without loading a file manifest or changing the active branch. */
+	async contextForSqlTarget(target: {
+		context?: string;
+		lix_ref?: string;
+		branch_id?: string;
+	}): Promise<string> {
+		if (target.context) {
+			if (target.lix_ref || target.branch_id)
+				throw createLixError(
+					"invalid_request",
+					"Pass context alone, or lix_ref with optional branch_id.",
+				);
+			return target.context;
+		}
+		if (!target.lix_ref)
+			throw createLixError(
+				"invalid_request",
+				"Pass lix_ref (@handle/slug or UUID), optionally branch_id. open_lix is not required.",
+			);
+		const lixId = await this.resolveLixRef(target.lix_ref);
+		const branchId =
+			target.branch_id ?? (await this.client.defaultBranchId(lixId));
+		return (await this.issueContext(lixId, branchId)).token;
 	}
 
 	async openLix(
@@ -288,16 +325,18 @@ export class LixService {
 		const issuedContext = await this.issueContext(lixId, selectedBranchId);
 		const commitId = await this.commitId(lixId, selectedBranchId);
 		const inventory = await this.fileInventory(lixId, selectedBranchId);
+		const defaultBranchId = await this.client.defaultBranchId(lixId);
+		const branch = { id: selectedBranchId, defaultId: defaultBranchId };
 		return {
 			context: issuedContext.token,
 			contextExpiresAt: new Date(issuedContext.expiresAt).toISOString(),
 			lixId,
 			lixRef: `@${repository.namespace.handle}/${repository.slug}`,
 			name: repository.name,
-			url: canonicalEntityUrl(repository, selectedBranchId, origin),
+			url: canonicalEntityUrl(repository, branch, origin),
 			files: inventory.files.map((file) => ({
 				...file,
-				url: canonicalEntityUrl(repository, selectedBranchId, origin, {
+				url: canonicalEntityUrl(repository, branch, origin, {
 					kind: "file",
 					...file,
 				}),
@@ -389,6 +428,10 @@ export class LixService {
 				}),
 			);
 		}
+		const branch = {
+			id: context.branchId,
+			defaultId: await this.client.defaultBranchId(context.lixId),
+		};
 		return {
 			context: contextToken,
 			entities: entities.map((selector) => {
@@ -397,7 +440,7 @@ export class LixService {
 						kind: selector.kind,
 						id: null,
 						path: "/",
-						url: canonicalEntityUrl(repository, context.branchId, origin),
+						url: canonicalEntityUrl(repository, branch, origin),
 					};
 				const entity = found
 					.get(selector.kind)
@@ -419,7 +462,7 @@ export class LixService {
 							? null
 							: entity.id,
 					kind: selector.kind,
-					url: canonicalEntityUrl(repository, context.branchId, origin, {
+					url: canonicalEntityUrl(repository, branch, origin, {
 						...entity,
 						kind: selector.kind,
 					}),
@@ -497,6 +540,307 @@ export class LixService {
 				commitId: branch.commitId,
 			},
 		};
+	}
+
+	/** Files by path prefix and name, with ids and canonical URLs. */
+	async listFiles(
+		contextToken: string,
+		filter: { directory?: string; name?: string },
+		origin = "https://lixray.com",
+	): Promise<{
+		context: string;
+		commitId: string;
+		files: Array<{ id: string; path: string; url: string }>;
+		truncated: boolean;
+	}> {
+		const context = await this.readContext(contextToken);
+		const conditions: string[] = [];
+		const params: WireValue[] = [];
+		if (filter.directory) {
+			const directory = filter.directory.trim().replace(/\/+$/, "");
+			if (!directory.startsWith("/"))
+				throw createLixError(
+					"invalid_request",
+					"directory must be an absolute path such as /gtm.",
+				);
+			params.push({ kind: "text", value: `${escapeLike(directory)}/%` });
+			conditions.push(`path LIKE $${params.length} ESCAPE '\\'`);
+		}
+		if (filter.name) {
+			params.push({
+				kind: "text",
+				value: `%${escapeLike(filter.name.trim().toLowerCase())}%`,
+			});
+			conditions.push(`LOWER(name) LIKE $${params.length} ESCAPE '\\'`);
+		}
+		const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
+		const [response, commitId, url] = await Promise.all([
+			this.client.execute(context.lixId, context.branchId, {
+				sql: `SELECT id, path FROM lix_file${where} ORDER BY path LIMIT ${LIST_FILES_LIMIT + 1}`,
+				params,
+			}),
+			this.commitId(context.lixId, context.branchId),
+			this.entityUrl(context, origin),
+		]);
+		const rows = readIdPathRows(response);
+		return {
+			context: contextToken,
+			commitId,
+			files: rows
+				.slice(0, LIST_FILES_LIMIT)
+				.map((file) => ({ ...file, url: url("file", file) })),
+			truncated: rows.length > LIST_FILES_LIMIT,
+		};
+	}
+
+	/** Files by absolute path: bytes, metadata, and the commit the read reflects. */
+	async readFiles(
+		contextToken: string,
+		paths: readonly string[],
+		origin = "https://lixray.com",
+	): Promise<ReadFilesResult> {
+		const context = await this.readContext(contextToken);
+		const normalized = paths.map(normalizeFilePathOrThrow);
+		const [files, commitId, url] = await Promise.all([
+			this.fileRows(context, normalized),
+			this.commitId(context.lixId, context.branchId),
+			this.entityUrl(context, origin),
+		]);
+		const found = new Set(files.map((file) => file.path));
+		return {
+			context: contextToken,
+			commitId,
+			files: files.map((file) => ({ ...file, url: url("file", file) })),
+			missing: normalized.filter((path) => !found.has(path)),
+		};
+	}
+
+	/**
+	 * Creates or updates files in one commit. With `lastSeenCommitId`, a
+	 * target file that changed since that commit refuses the whole write and
+	 * the error carries the current commit and contents; unrelated changes
+	 * never block. The check and the write are two steps, so a write landing
+	 * between them on the same file is not caught; the window is small.
+	 */
+	async writeFiles(
+		contextToken: string,
+		input: {
+			files: readonly FileWrite[];
+			lastSeenCommitId?: string;
+			checkpoint?: boolean;
+			originKey: string;
+		},
+		origin = "https://lixray.com",
+	): Promise<{
+		context: string;
+		commitId: string;
+		files: Array<{ id: string; path: string; url: string }>;
+		checkpointCommitId?: string;
+	}> {
+		const context = await this.readContext(contextToken);
+		const files = input.files.map((file) => ({
+			...file,
+			path: normalizeFilePathOrThrow(file.path),
+		}));
+		const paths = files.map((file) => file.path);
+		if (new Set(paths).size !== paths.length)
+			throw createLixError("invalid_request", "Each path may appear once.");
+		const metadataOnly = files
+			.filter((file) => file.content === undefined)
+			.map((file) => file.path);
+		if (
+			files.some(
+				(file) =>
+					file.content === undefined && file.lixcol_metadata === undefined,
+			)
+		)
+			throw createLixError(
+				"invalid_request",
+				"A file needs content, lixcol_metadata, or both.",
+			);
+		if (input.lastSeenCommitId !== undefined) {
+			const head = await this.commitId(context.lixId, context.branchId);
+			if (head !== input.lastSeenCommitId) {
+				const changed = await this.changedSince(
+					context,
+					input.lastSeenCommitId,
+					head,
+					paths,
+				);
+				if (changed.length > 0) {
+					const current = await this.fileRows(context, changed);
+					throw createLixError(
+						"conflict",
+						`${changed.length === 1 ? "A file" : `${changed.length} files`} changed since last_seen_commit_id: ${changed.join(", ")}.`,
+						{
+							hint: "Merge your edit into the current contents in details.files, then write again with last_seen_commit_id = details.current_commit_id.",
+							details: {
+								current_commit_id: head,
+								files: current.map((file) => ({
+									path: file.path,
+									content: file.content,
+									lixcol_metadata: file.lixcol_metadata,
+								})),
+							},
+						},
+					);
+				}
+			}
+		}
+		if (metadataOnly.length > 0) {
+			const existing = new Set(
+				(await this.fileRows(context, metadataOnly)).map((file) => file.path),
+			);
+			const missing = metadataOnly.filter((path) => !existing.has(path));
+			if (missing.length > 0)
+				throw createLixError(
+					"not_found",
+					`No file to update metadata on: ${missing.join(", ")}. Give it content to create it.`,
+				);
+		}
+		const statements = fileWriteStatements(files);
+		const batch = await this.client.executeBatch(
+			context.lixId,
+			context.branchId,
+			{
+				statements: statements.map(({ sql, params }) => ({ sql, params })),
+				options: { originKey: input.originKey },
+			},
+		);
+		const written: Array<{ id: string; path: string }> = [];
+		statements.forEach((statement, index) => {
+			if (!statement.path) return;
+			const row = readIdPathRows(batch.results[index] ?? EMPTY_RESPONSE)[0];
+			if (!row)
+				throw createLixError(
+					"upstream_error",
+					`Lix did not return the written file ${statement.path}.`,
+				);
+			written.push(row);
+		});
+		const checkpointCommitId = input.checkpoint
+			? (await this.createCheckpoint(contextToken)).commitId
+			: undefined;
+		const [commitId, url] = await Promise.all([
+			this.commitId(context.lixId, context.branchId),
+			this.entityUrl(context, origin),
+		]);
+		return {
+			context: contextToken,
+			commitId,
+			files: written.map((file) => ({ ...file, url: url("file", file) })),
+			...(checkpointCommitId ? { checkpointCommitId } : {}),
+		};
+	}
+
+	/** The target paths that a diff between two commits touched. */
+	private async changedSince(
+		context: LixContext,
+		fromCommitId: string,
+		toCommitId: string,
+		paths: readonly string[],
+	): Promise<string[]> {
+		let response: ExecuteResponse;
+		try {
+			response = await this.client.execute(context.lixId, context.branchId, {
+				sql: CHANGED_FILES_SQL(paths.length),
+				params: [
+					{ kind: "text", value: fromCommitId },
+					{ kind: "text", value: toCommitId },
+					...paths.map((path): WireValue => ({ kind: "text", value: path })),
+				],
+			});
+		} catch (caught) {
+			const message = caught instanceof Error ? caught.message : String(caught);
+			throw createLixError(
+				"invalid_request",
+				`last_seen_commit_id could not be compared with the branch head: ${message}`,
+				{
+					hint: "Pass the commit_id a read_files or write_files result returned.",
+				},
+			);
+		}
+		const from = response.columns.indexOf("from_path");
+		const to = response.columns.indexOf("to_path");
+		const wanted = new Set(paths);
+		const changed = new Set<string>();
+		for (const row of response.rows) {
+			for (const value of [row[from], row[to]]) {
+				if (value?.kind === "text" && wanted.has(value.value))
+					changed.add(value.value);
+			}
+		}
+		return paths.filter((path) => changed.has(path));
+	}
+
+	private async fileRows(
+		context: LixContext,
+		paths: readonly string[],
+	): Promise<Array<ReadFile>> {
+		if (paths.length === 0) return [];
+		const response = await this.client.execute(
+			context.lixId,
+			context.branchId,
+			{
+				sql: READ_FILES_SQL(paths.length),
+				params: paths.map((path): WireValue => ({ kind: "text", value: path })),
+			},
+		);
+		const columns = {
+			id: response.columns.indexOf("id"),
+			path: response.columns.indexOf("path"),
+			content: response.columns.indexOf("content"),
+			metadata: response.columns.indexOf("lixcol_metadata"),
+		};
+		const byPath = new Map<string, ReadFile>();
+		for (const row of response.rows) {
+			const id = row[columns.id];
+			const path = row[columns.path];
+			const content = row[columns.content];
+			const metadata = row[columns.metadata];
+			if (
+				id?.kind !== "text" ||
+				path?.kind !== "text" ||
+				content?.kind !== "blob"
+			)
+				throw createLixError(
+					"upstream_error",
+					"Lix returned an invalid file row.",
+				);
+			byPath.set(path.value, {
+				id: id.value,
+				path: path.value,
+				...encodeFileContent(base64ToBytes(content.base64)),
+				lixcol_metadata:
+					metadata?.kind === "json" &&
+					metadata.value !== null &&
+					typeof metadata.value === "object" &&
+					!Array.isArray(metadata.value)
+						? (metadata.value as Record<string, unknown>)
+						: null,
+			});
+		}
+		// Result order follows the request.
+		return paths.flatMap((path) => {
+			const file = byPath.get(path);
+			return file ? [file] : [];
+		});
+	}
+
+	/** Canonical URLs for this context's Lix and branch. */
+	private async entityUrl(
+		context: LixContext,
+		origin: string,
+	): Promise<
+		(kind: "file" | "directory", entity: { id: string; path: string }) => string
+	> {
+		const [repository, defaultId] = await Promise.all([
+			this.resolveLixSummary(context.lixId),
+			this.client.defaultBranchId(context.lixId),
+		]);
+		const branch = { id: context.branchId, defaultId };
+		return (kind, entity) =>
+			canonicalEntityUrl(repository, branch, origin, { kind, ...entity });
 	}
 
 	async createCheckpoint(contextToken: string) {
@@ -783,6 +1127,60 @@ function finiteTimestamp(value: unknown): number | undefined {
 		: undefined;
 }
 
+/** Files listed per call before `truncated` says to narrow the filter. */
+const LIST_FILES_LIMIT = 1000;
+
+const EMPTY_RESPONSE: ExecuteResponse = {
+	columns: [],
+	rows: [],
+	rowsAffected: 0,
+	notices: [],
+};
+
+export type ReadFile = {
+	id: string;
+	path: string;
+	content: FileContent;
+	size: number;
+	lixcol_metadata: Record<string, unknown> | null;
+};
+
+export type ReadFilesResult = {
+	context: string;
+	commitId: string;
+	files: Array<ReadFile & { url: string }>;
+	missing: string[];
+};
+
+function normalizeFilePathOrThrow(path: string): string {
+	try {
+		return normalizeFilePath(path);
+	} catch (caught) {
+		throw createLixError(
+			"invalid_request",
+			caught instanceof Error ? caught.message : String(caught),
+		);
+	}
+}
+
+function readIdPathRows(
+	response: ExecuteResponse,
+): Array<{ id: string; path: string }> {
+	const idColumn = response.columns.indexOf("id");
+	const pathColumn = response.columns.indexOf("path");
+	return response.rows.map((row) => {
+		const id = row[idColumn];
+		const path = row[pathColumn];
+		if (
+			id?.kind !== "text" ||
+			!ENTITY_UUID_PATTERN.test(id.value) ||
+			path?.kind !== "text"
+		)
+			throw createLixError("upstream_error", "Lix returned an invalid file.");
+		return { id: id.value, path: path.value };
+	});
+}
+
 function wireNonNegativeInt(value: WireValue | undefined): number | undefined {
 	if (!value) return undefined;
 	if (
@@ -844,9 +1242,10 @@ function canonicalLookupPath(
 		return null;
 	return normalized;
 }
+/** A URL names its branch only when that is not the Lix's default branch. */
 function canonicalEntityUrl(
 	repository: LixSummary,
-	branchId: string,
+	branch: { id: string; defaultId: string },
 	origin: string,
 	entity?: { kind: "file" | "directory"; id: string; path: string },
 ): string {
@@ -861,6 +1260,6 @@ function canonicalEntityUrl(
 				)
 			: `/@${encodeURIComponent(repository.namespace.handle)}/${encodeURIComponent(repository.slug)}`;
 	const url = new URL(path, origin);
-	url.searchParams.set("branch", branchId);
+	if (branch.id !== branch.defaultId) url.searchParams.set("branch", branch.id);
 	return url.href;
 }

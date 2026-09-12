@@ -47,6 +47,7 @@ import {
 	type ReadShareAccess,
 } from "~/components/repository-share-dialog";
 import { Button } from "~/components/ui/button";
+import { createAtelierDocumentLinks } from "~/lib/atelier-document-links";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
@@ -238,11 +239,11 @@ export function RepositoryAtelier({
 	const routeParams = useParams({ strict: false });
 	const routeSplat = "_splat" in routeParams ? routeParams._splat : undefined;
 	const repositoryRootPath = `/@${namespace}/${repositorySlug}`;
-	const routeChildKind: "file" | "dir" | "team" | "settings" | "sql" | null =
+	const routeChildKind: "file" | "folder" | "team" | "settings" | "sql" | null =
 		pathname.startsWith(`${repositoryRootPath}/file/`)
 			? "file"
-			: pathname.startsWith(`${repositoryRootPath}/dir/`)
-				? "dir"
+			: pathname.startsWith(`${repositoryRootPath}/folder/`)
+				? "folder"
 				: pathname === `${repositoryRootPath}/team`
 					? "team"
 					: pathname === `${repositoryRootPath}/settings`
@@ -273,7 +274,7 @@ export function RepositoryAtelier({
 	const activeLixRef = useRef<RepositoryLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeChildRef = useRef<{
-		kind: "file" | "dir" | "team" | "settings" | "sql" | null;
+		kind: "file" | "folder" | "team" | "settings" | "sql" | null;
 		splat: string | undefined;
 	}>({ kind: routeChildKind, splat: routeSplat });
 	const branchIdRef = useRef(branchId);
@@ -566,7 +567,7 @@ export function RepositoryAtelier({
 	// Sharing is available for the whole repository as well as individual files;
 	// the current browser URL is captured when the dialog is opened.
 	const resolveRouteResourcePath = async () => {
-		if (routeChildKind !== "file" && routeChildKind !== "dir") return "/";
+		if (routeChildKind !== "file" && routeChildKind !== "folder") return "/";
 		const entity = parseEntityUrlSplat(routeSplat);
 		const lix = activeLixRef.current?.lix;
 		if (!entity || !lix) throw new Error("Item is unavailable.");
@@ -583,7 +584,7 @@ export function RepositoryAtelier({
 			<RepositoryShareControl
 				loadReadAccess={async () => {
 					const resourcePath =
-						routeChildKind === "file" || routeChildKind === "dir"
+						routeChildKind === "file" || routeChildKind === "folder"
 							? await resolveRouteResourcePath()
 							: "/";
 					const { data: resolved, error: resolveError } = await client.rpc(
@@ -603,7 +604,7 @@ export function RepositoryAtelier({
 								routeChildKind === null && currentAccess.role === "admin",
 						};
 					}
-					if (routeChildKind !== "file" && routeChildKind !== "dir") {
+					if (routeChildKind !== "file" && routeChildKind !== "folder") {
 						return {
 							status: "private",
 							canPublish: currentAccess.role === "admin",
@@ -651,7 +652,7 @@ export function RepositoryAtelier({
 					return { status: "private", canPublish: true };
 				}}
 				publishReadLink={async () => {
-					if (routeChildKind === "file" || routeChildKind === "dir") {
+					if (routeChildKind === "file" || routeChildKind === "folder") {
 						const path = await resolveRouteResourcePath();
 						const { error } = await client.rpc("publish_lix_resource", {
 							p_lix_id: repositoryId,
@@ -669,7 +670,7 @@ export function RepositoryAtelier({
 					await refresh({ organizationId: namespaceId, repositoryId });
 				}}
 				unpublishReadLink={async () => {
-					if (routeChildKind === "file" || routeChildKind === "dir") {
+					if (routeChildKind === "file" || routeChildKind === "folder") {
 						const { error } = await client.rpc("unpublish_lix_resource", {
 							p_lix_id: repositoryId,
 							p_path: await resolveRouteResourcePath(),
@@ -688,7 +689,7 @@ export function RepositoryAtelier({
 				publicationLabel={
 					routeChildKind === "file"
 						? "file"
-						: routeChildKind === "dir"
+						: routeChildKind === "folder"
 							? "folder"
 							: "repository"
 				}
@@ -784,8 +785,8 @@ export function RepositoryAtelier({
 			if (routeChild.kind && routeChild.splat !== undefined) {
 				await navigate({
 					to:
-						routeChild.kind === "dir"
-							? "/@{$namespace}/$repository/dir/$"
+						routeChild.kind === "folder"
+							? "/@{$namespace}/$repository/folder/$"
 							: "/@{$namespace}/$repository/file/$",
 					params: {
 						namespace,
@@ -896,7 +897,7 @@ export function RepositoryAtelier({
 						return;
 					const current = routeChildRef.current;
 					if (
-						current.kind === (kind === "file" ? "file" : "dir") &&
+						current.kind === (kind === "file" ? "file" : "folder") &&
 						parseEntityUrlSplat(current.splat)?.id === entity.id
 					)
 						return;
@@ -914,7 +915,7 @@ export function RepositoryAtelier({
 								to:
 									kind === "file"
 										? "/@{$namespace}/$repository/file/$"
-										: "/@{$namespace}/$repository/dir/$",
+										: "/@{$namespace}/$repository/folder/$",
 								params: {
 									namespace,
 									repository: repositorySlug,
@@ -929,7 +930,7 @@ export function RepositoryAtelier({
 			};
 			if (event.viewKind === LIXRAY_HOME_EXTENSION_ID) {
 				// Home is the primary Files surface (flow A): drilled into a
-				// folder it claims the /dir URL, at the root it claims the
+				// folder it claims the /folder URL, at the root it claims the
 				// repository root URL.
 				const state = event.state;
 				const dirPath =
@@ -1147,6 +1148,15 @@ export function RepositoryAtelier({
 				const atelierProps: AtelierProps = {
 					lix: session.lix,
 					readOnly: isReadOnly,
+					// Links to this repository's own file URLs behave like
+					// relative links; mentions write the permanent form.
+					documentLinks: createAtelierDocumentLinks({
+						origin: window.location.origin,
+						namespace,
+						repository: repositorySlug,
+						activeBranchId: () => session.activeBranchSnapshot(),
+						defaultBranchId: () => session.defaultBranchSnapshot(),
+					}),
 					debug: {
 						remoteLix: getDebugRemoteLix,
 						remoteSnapshot: getDebugRemoteSnapshot,
@@ -1597,7 +1607,7 @@ function activeDocumentName({
 	repositoryName: string;
 }) {
 	const encodedPath = routeFilePath || pathname.split("/file/", 2)[1];
-	const encodedName = parseEntityUrlSplat(encodedPath)?.slug;
+	const encodedName = parseEntityUrlSplat(encodedPath)?.name;
 	if (!encodedName) return repositoryName;
 	try {
 		return decodeURIComponent(encodedName);

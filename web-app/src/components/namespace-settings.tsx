@@ -1,4 +1,9 @@
 import {
+	type ConnectedApp,
+	type ConnectedAppsApi,
+	ConnectedAppsPanel,
+} from "./connected-apps-settings";
+import {
 	AccountApiTokenPanel,
 	type AccountApiTokenApi,
 } from "./api-token-settings";
@@ -115,7 +120,10 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 			organization.role === "owner" &&
 			organization.id !== DEMO_PROFILE_NAMESPACE_ID &&
 			client ? (
-				<PersonalApiTokens />
+				<>
+					<PersonalConnectedApps />
+					<PersonalApiTokens />
+				</>
 			) : null}
 			{organization.id !== DEMO_PROFILE_NAMESPACE_ID ? (
 				<GeneralPanel organization={organization} />
@@ -799,6 +807,53 @@ function demoProfileOrganization(handle: string): Organization | undefined {
 		updatedAt: "2026-08-21T00:00:00.000Z",
 		repositories: [],
 	};
+}
+
+function PersonalConnectedApps() {
+	const { client } = useAuth();
+	const api = useMemo<ConnectedAppsApi>(
+		() => ({
+			async listConnectedApps() {
+				// Supabase owns the grants; LixRay only knows what each client did.
+				const [grants, connections] = await Promise.all([
+					client!.auth.oauth.listGrants(),
+					client!.rpc("list_mcp_client_connections"),
+				]);
+				if (grants.error) throw grants.error;
+				if (connections.error) throw connections.error;
+				const useByClient = new Map(
+					(connections.data ?? []).map((row) => [row.oauth_client_id, row]),
+				);
+				return (grants.data ?? []).map((grant): ConnectedApp => {
+					const use = useByClient.get(grant.client.id);
+					return {
+						clientId: grant.client.id,
+						name: grant.client.name || "Unnamed app",
+						uri: grant.client.uri || null,
+						scopes: grant.scopes,
+						grantedAt: grant.granted_at,
+						use: use
+							? {
+									repositoryCount: use.repository_count,
+									lastTool: use.last_tool,
+									lastSeenAt: use.last_seen_at,
+								}
+							: null,
+					};
+				});
+			},
+			async revokeConnectedApp(clientId) {
+				const revoked = await client!.auth.oauth.revokeGrant({ clientId });
+				if (revoked.error) throw revoked.error;
+				const { error } = await client!.rpc("forget_mcp_client", {
+					p_client_id: clientId,
+				});
+				if (error) throw error;
+			},
+		}),
+		[client],
+	);
+	return <ConnectedAppsPanel api={api} />;
 }
 
 function PersonalApiTokens() {

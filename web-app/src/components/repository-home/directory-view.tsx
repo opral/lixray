@@ -67,7 +67,9 @@ import {
 	listDirectoryFromFiles,
 	useFilesAtCommit,
 	useRepositoryTree,
+	useWorkingFileChanges,
 	type RepositoryControlPlaneData,
+	type WorkingFileChangeKind,
 } from "./lix-data";
 import {
 	MemberAvatar,
@@ -117,6 +119,10 @@ const newTabFromMouseEvent = (event: ReactMouseEvent): boolean =>
  * Folders first, then files, then the directory's README rendered below —
  * the tab names the location, so the view carries no title of its own.
  */
+/** Nothing marked: one shared instance keeps the listing's memo stable. */
+const EMPTY_CHANGED_FILE_KINDS: ReadonlyMap<string, WorkingFileChangeKind> =
+	new Map();
+
 export function DirectoryView({
 	lix,
 	diffSession = null,
@@ -207,12 +213,17 @@ export function DirectoryView({
 		onOpenDir(next, { newTab: false });
 	}, [tree, viewingHistory, dirPath, lix, onOpenDir, isActive]);
 
-	// The open diff session marks its files in the listing, mirroring the
-	// sidebar's review indicators; folders inherit a dot from any changed
-	// descendant so drilling in stays guided.
-	const changedFileKinds = useMemo(() => {
+	// What the listing marks. A review session names its own files (it may
+	// span any two commits, and it carries each file's review status), and
+	// with no session open the live working diff stands in, so a folder
+	// always says whether something under it changed. Folders inherit a dot
+	// from any changed descendant, so drilling in stays guided.
+	const sessionFileKinds = useMemo(() => {
+		// An open session that names no file says nothing about the listing;
+		// the live working diff still can.
+		if (!diffSession || diffSession.files.length === 0) return null;
 		return new Map(
-			(diffSession?.files ?? []).map((file) => [
+			diffSession.files.map((file) => [
 				file.path,
 				file.movedFromPath && file.changeKind === "modified"
 					? ("moved" as const)
@@ -220,6 +231,22 @@ export function DirectoryView({
 			]),
 		);
 	}, [diffSession]);
+	// The past is what it was: a historical listing never carries today's
+	// working changes.
+	// Paint the directory before preparing historical descriptor paths for
+	// badges. The background diff still covers changed descendants so folders
+	// retain their change indicators.
+	const workingFileChangesEnabled = useAfterInitialIdle(
+		isActive && tree !== null && sessionFileKinds === null && !viewingHistory,
+	);
+	const workingFileKinds = useWorkingFileChanges(
+		lix,
+		workingFileChangesEnabled,
+	);
+	const changedFileKinds = useMemo(
+		() => sessionFileKinds ?? workingFileKinds ?? EMPTY_CHANGED_FILE_KINDS,
+		[sessionFileKinds, workingFileKinds],
+	);
 	const changedDirKinds = useMemo(() => {
 		// Ancestors use the canonical directory convention: absolute, no
 		// trailing slash (see canonicalDirectoryPath). A directory whose every
@@ -257,8 +284,9 @@ export function DirectoryView({
 	}, [changedFileKinds, historicalFiles, tree]);
 	// Variant "dim the unchanged": while a review session marks rows, the
 	// untouched entries recede so the action-colored changes are the only
-	// thing at full contrast.
-	const reviewFocus = changedFileKinds.size > 0;
+	// thing at full contrast. Outside a review the listing is the ordinary
+	// file list — it points at the changes without dimming everything else.
+	const reviewFocus = sessionFileKinds !== null && changedFileKinds.size > 0;
 	// A changed README previews as its diff — the review renders the change
 	// itself, not the resulting document.
 	const readmeDiff = useMemo<
@@ -1542,8 +1570,8 @@ function ReadmePreview({
 	// closes the file list and carries a caption (icon, file name, Edit) in
 	// the list's own tertiary type, so it reads as the list's footer and the
 	// document's byline at once. The rule starts where a row's hover ground
-	// starts, and the caption's icon sits on the rows' icon column, so the
-	// document below is flush with the file names.
+	// starts, the caption's icon sits on the rows' icon column, and the
+	// document below starts where the rule starts.
 	return (
 		<section
 			aria-label={`${fileName} preview`}
@@ -1577,9 +1605,8 @@ function ReadmePreview({
 			{/* Click delegation only augments the anchors inside, which stay
 			    keyboard-accessible on their own. */}
 			{/* The standalone file view strips the document's page padding, so
-			    the section owns its inner margins: the document starts on the
-			    file-name column (the caption's inset, icon, and gap), keeps
-			    the caption's inset on the right, and a heading's beat below. */}
+			    the section owns its inner margins: the document spans exactly
+			    the width of the rule above it, with a heading's beat below. */}
 			<div
 				data-testid="home-readme"
 				onClick={(event) => {
@@ -1590,7 +1617,7 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
-				className="pt-2 pr-3 pb-9 pl-[43px]"
+				className="pt-2 pb-9"
 			>
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every

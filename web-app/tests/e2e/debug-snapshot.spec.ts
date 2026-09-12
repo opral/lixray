@@ -142,3 +142,79 @@ test("debug snapshot picker renders without client JavaScript", async ({
 		await context.close();
 	}
 });
+
+test("CSV checkpoint diffs show added company-size columns from a snapshot", async ({
+	page,
+}) => {
+	await page.goto("/debug");
+	await expect(page.getByLabel("Snapshot file")).toBeEnabled();
+	const bytes = await page.evaluate(async () => {
+		const sdkUrl = "/node_modules/@lix-js/sdk/dist/index.js";
+		const { openLix } = (await import(
+			/* @vite-ignore */ sdkUrl
+		)) as typeof import("@lix-js/sdk");
+		const lix = await openLix();
+		try {
+			await lix.execute(
+				"INSERT INTO lix_file (path, content) VALUES ($1, $2)",
+				[
+					"/leads.csv",
+					new TextEncoder().encode(
+						"company,website\r\nExample,https://example.com\r\n",
+					),
+				],
+			);
+			await lix.execute("SELECT commit_id FROM lix_create_checkpoint()");
+			await lix.execute("UPDATE lix_file SET content = $1 WHERE path = $2", [
+				new TextEncoder().encode(
+					"company,website,company_size_min,company_size_max\r\nExample,https://example.com,51,200\r\n",
+				),
+				"/leads.csv",
+			]);
+			await lix.execute("SELECT commit_id FROM lix_create_checkpoint()");
+			return Array.from(
+				new Uint8Array(await new Response(lix.exportSnapshot()).arrayBuffer()),
+			);
+		} finally {
+			await lix.close();
+		}
+	});
+	await page.getByLabel("Snapshot file").setInputFiles({
+		name: "leads.lixsnap",
+		mimeType: "application/vnd.lix.snapshot",
+		buffer: Buffer.from(bytes),
+	});
+	await expect(
+		page.getByRole("treeitem", { name: "leads.csv", exact: true }).first(),
+	).toBeVisible();
+	await page
+		.getByRole("button", {
+			name: "Latest checkpoint. Review latest checkpoint",
+			exact: true,
+		})
+		.click();
+	const table = page.locator(".csv-review-table");
+	await expect(table).toBeVisible();
+	for (const name of ["company_size_min", "company_size_max"]) {
+		await expect(
+			table.getByRole("columnheader", { name: new RegExp(name) }),
+		).toHaveAttribute("data-diff-status", "added");
+	}
+	await expect(
+		table.getByRole("columnheader", { name: "company", exact: true }),
+	).toHaveAttribute("data-diff-status", "unchanged");
+	await expect(
+		page.getByRole("button", { name: "Review changes", exact: true }),
+	).toContainText("2 changes");
+	await expect(page.locator("[data-atelier-initial-content]")).toHaveCount(0);
+	// Exiting restores the editor; reopening also converts an already-open CSV.
+	await page.getByRole("button", { name: "Exit", exact: true }).click();
+	await expect(table).toHaveCount(0);
+	await page
+		.getByRole("button", {
+			name: "Latest checkpoint. Review latest checkpoint",
+			exact: true,
+		})
+		.click();
+	await expect(table).toBeVisible();
+});

@@ -4,6 +4,7 @@
  * Lix service remain the runtime type guards for these values.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+import { sqlToolError } from "./sql-errors.ts";
 import { instrument, PostHogMCP } from "@posthog/mcp";
 import {
 	createMcpHandler,
@@ -14,8 +15,13 @@ import { z } from "zod";
 import { sqlLooksLikeWrite } from "../lib/lix-sql-access.ts";
 import {
 	EXECUTE_SQL_TOOL_DESCRIPTION,
+	LIST_FILES_TOOL_DESCRIPTION,
+	LIX_CATALOG_HINT,
+	LIX_IS_NOT_SQLITE_MESSAGE,
 	LIX_SQL_OPERATING_GUIDE,
 	QUERY_SQL_TOOL_DESCRIPTION,
+	READ_FILES_TOOL_DESCRIPTION,
+	WRITE_FILES_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 import {
 	createLixError,
@@ -59,12 +65,12 @@ export const MCP_AI_SESSION_ID_HEADER = "X-PostHog-AI-Session-ID";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
 export const MCP_URL_GUIDE =
-	"Browser links: use the exact server-generated url from open_lix.files or get_entity_urls. file_paths are SQL paths, not browser URLs. Never append a file path to /file/ or /dir/, and never invent or manually encode an entity URL. After creating or renaming files/directories, call get_entity_urls once with all items you need to link, using the current context. This read resolves canonical links; it is not a persistence verification. Preserve the returned branch query parameter. URLs do not grant access or publish private items. If resolution fails, report the error and omit the item link rather than guessing.";
+	"Browser links: use the exact server-generated url from open_lix.files or get_entity_urls. file_paths are SQL paths, not browser URLs. Never build one by hand: an entity URL is /file/<id>/<path-slug> or /folder/<id>/<path-slug>, and the app rewrites the slug from the id anyway. After creating or renaming files/directories, call get_entity_urls once with all items you need to link, using the current context. This read resolves canonical links; it is not a persistence verification. A url carries a branch parameter only when it is not the Lix's default branch; keep it exactly as returned. URLs do not grant access or publish private items. If resolution fails, report the error and omit the item link rather than guessing.";
 
 export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
 	"Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.";
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. If the user supplies an exact @handle/slug or Lix UUID, call open_lix directly; do not call list_lixes first. Call list_lixes only when the target Lix is unknown. Open a Lix once and pass its returned context to every later call. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. When target paths are known, read all of them in one parameterized query_sql statement instead of probing or reading them one at a time. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. If the user supplies an exact @handle/slug or Lix UUID, pass it as lix_ref directly to query_sql or execute_sql; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. When target paths are known, read all of them in one parameterized query_sql statement instead of probing or reading them one at a time. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
 
 ${LIX_SQL_OPERATING_GUIDE}
 
@@ -79,10 +85,10 @@ export const RESTORE_TOOL_DESCRIPTION =
 	"Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.";
 
 export const LIST_LIXES_TOOL_DESCRIPTION =
-	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, call open_lix directly.";
+	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, pass lix_ref directly to query_sql or execute_sql.";
 
 export const OPEN_LIX_TOOL_DESCRIPTION =
-	"Open a Lix by exact @handle/slug or UUID without calling list_lixes first, and mint the context later tools require (active branch unless branch_id is given). Returns counts, file_paths (SQL paths, not URLs), and files with id, path, and canonical url; when file_paths_complete is true, do not list files again.";
+	"Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, canonical url; when file_paths_complete is true, do not list files again.";
 
 type McpAuthMode = "oauth" | "none";
 
@@ -338,7 +344,9 @@ const lixRef = z
 const context = z
 	.string()
 	.min(1)
-	.describe("Opaque Lix context returned by open_lix or switch_branch");
+	.describe(
+		"Opaque Lix context returned by SQL tools, open_lix or switch_branch",
+	);
 const branchId = z.string().min(1).describe("Lix branch id");
 const commitId = z.string().min(1).describe("Lix commit id");
 const sourceBranchId = z.string().min(1).describe("Source branch id");
@@ -403,6 +411,7 @@ const openLixOutput = withError(
 		),
 		file_paths: z.array(z.string()),
 		file_paths_complete: z.boolean(),
+		file_paths_sql: z.string().optional(),
 		empty: z.boolean(),
 	}),
 );
@@ -419,6 +428,49 @@ const entityUrlsOutput = withError(
 				})
 				.strict(),
 		),
+	}),
+);
+const fileContent = z.union([
+	z.object({ text: z.string() }).strict(),
+	z.object({ base64: z.string() }).strict(),
+]);
+const fileMetadata = z.record(z.string(), z.unknown());
+const listedFile = z
+	.object({ id: z.string(), path: z.string(), url: z.string() })
+	.strict();
+const listFilesOutput = withError(
+	z.object({
+		context,
+		commit_id: z.string(),
+		files: z.array(listedFile),
+		truncated: z.boolean(),
+	}),
+);
+const readFilesOutput = withError(
+	z.object({
+		context,
+		commit_id: z.string(),
+		files: z.array(
+			z
+				.object({
+					id: z.string(),
+					path: z.string(),
+					url: z.string(),
+					size: z.number().int(),
+					content: fileContent,
+					lixcol_metadata: fileMetadata.nullable(),
+				})
+				.strict(),
+		),
+		missing: z.array(z.string()),
+	}),
+);
+const writeFilesOutput = withError(
+	z.object({
+		context,
+		commit_id: z.string(),
+		files: z.array(listedFile),
+		checkpoint_commit_id: z.string().optional(),
 	}),
 );
 const entityUrlSelector = z.union([
@@ -635,6 +687,11 @@ export function createLixrayMcpServer(
 				directory_count: opened.directoryCount,
 				file_paths: opened.filePaths,
 				file_paths_complete: opened.filePathsComplete,
+				// A truncated manifest says how to get the rest, so an agent that
+				// trusts the open payload is not left with a partial list.
+				...(opened.filePathsComplete
+					? {}
+					: { file_paths_sql: OPEN_LIX_ALL_FILE_PATHS_SQL }),
 				empty: opened.empty,
 			};
 		},
@@ -669,12 +726,146 @@ export function createLixrayMcpServer(
 
 	registerTool(
 		server,
+		"list_files",
+		"LixRay: List files",
+		LIST_FILES_TOOL_DESCRIPTION,
+		z
+			.object({
+				context,
+				directory: z.string().min(1).optional(),
+				name: z.string().min(1).optional(),
+			})
+			.strict(),
+		listFilesOutput,
+		readAnnotations(),
+		securitySchemes,
+		async ({ context: token, directory, name }) => {
+			const listed = await service.listFiles(
+				token,
+				{ ...(directory ? { directory } : {}), ...(name ? { name } : {}) },
+				options.urlOrigin,
+			);
+			return {
+				context: listed.context,
+				commit_id: listed.commitId,
+				files: listed.files,
+				truncated: listed.truncated,
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+		options.urlOrigin,
+	);
+
+	registerTool(
+		server,
+		"read_files",
+		"LixRay: Read files",
+		READ_FILES_TOOL_DESCRIPTION,
+		z
+			.object({ context, paths: z.array(z.string().min(1)).min(1).max(100) })
+			.strict(),
+		readFilesOutput,
+		readAnnotations(),
+		securitySchemes,
+		async ({ context: token, paths }) => {
+			const read = await service.readFiles(token, paths, options.urlOrigin);
+			return {
+				context: read.context,
+				commit_id: read.commitId,
+				files: read.files,
+				missing: read.missing,
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+		options.urlOrigin,
+	);
+
+	registerTool(
+		server,
+		"write_files",
+		"LixRay: Write files",
+		WRITE_FILES_TOOL_DESCRIPTION,
+		z
+			.object({
+				context,
+				files: z
+					.array(
+						z
+							.object({
+								path: z.string().min(1),
+								content: fileContent.optional(),
+								lixcol_metadata: fileMetadata.nullable().optional(),
+							})
+							.strict(),
+					)
+					.min(1)
+					.max(100),
+				last_seen_commit_id: commitId.optional(),
+				checkpoint: z.boolean().optional(),
+			})
+			.strict(),
+		writeFilesOutput,
+		writeAnnotations(),
+		securitySchemes,
+		async (
+			{ context: token, files, last_seen_commit_id, checkpoint },
+			callId,
+		) => {
+			const written = await service.writeFiles(
+				token,
+				{
+					files,
+					...(last_seen_commit_id
+						? { lastSeenCommitId: last_seen_commit_id }
+						: {}),
+					...(checkpoint ? { checkpoint } : {}),
+					originKey: mcpOriginKey(callId),
+				},
+				options.urlOrigin,
+			);
+			return {
+				context: written.context,
+				commit_id: written.commitId,
+				files: written.files,
+				...(written.checkpointCommitId
+					? { checkpoint_commit_id: written.checkpointCommitId }
+					: {}),
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+		options.urlOrigin,
+	);
+
+	registerTool(
+		server,
 		"query_sql",
 		"LixRay: Query SQL",
 		QUERY_SQL_TOOL_DESCRIPTION,
 		z
 			.object({
-				context,
+				context: context.optional(),
+				lix_ref: z
+					.string()
+					.min(1)
+					.optional()
+					.describe("Exact @handle/slug or UUID. No open_lix call required."),
+				branch_id: branchId
+					.optional()
+					.describe(
+						"Defaults to the repository default branch when lix_ref is used.",
+					),
 				sql: z.string().min(1),
 				params: z.array(wireValue).optional(),
 			})
@@ -683,6 +874,7 @@ export function createLixrayMcpServer(
 		readAnnotations(),
 		securitySchemes,
 		async (args) => {
+			assertLixCatalog(args.sql);
 			assertReadOnlyQuery(args.sql);
 			return service.execute(args.context, toExecuteRequest(args));
 		},
@@ -701,7 +893,17 @@ export function createLixrayMcpServer(
 		EXECUTE_SQL_TOOL_DESCRIPTION,
 		z
 			.object({
-				context,
+				context: context.optional(),
+				lix_ref: z
+					.string()
+					.min(1)
+					.optional()
+					.describe("Exact @handle/slug or UUID. No open_lix call required."),
+				branch_id: branchId
+					.optional()
+					.describe(
+						"Defaults to the repository default branch when lix_ref is used.",
+					),
 				statements: z.array(sqlStatement).min(1),
 				options: executeOptions.optional(),
 			})
@@ -710,6 +912,20 @@ export function createLixrayMcpServer(
 		writeAnnotations(),
 		securitySchemes,
 		async ({ context: token, statements, options: batchOptions }, callId) => {
+			for (const [statementIndex, statement] of (
+				statements as Array<{ sql: string }>
+			).entries()) {
+				try {
+					assertLixCatalog(statement.sql);
+				} catch (caught) {
+					if (!isLixError(caught)) throw caught;
+					throw createLixError(
+						caught.code ?? "invalid_request",
+						caught.message,
+						{ hint: caught.hint, details: { statementIndex } },
+					);
+				}
+			}
 			// Every change the batch makes carries this call's origin key, so
 			// the result can say what it touched without reading the SQL.
 			return {
@@ -1029,11 +1245,23 @@ export async function handleMcpTransport(
 				) {
 					errorCode = "MCP_TOOL_ERROR";
 					const result = rpc.result as Record<string, unknown>;
-					// SDK argument validation can fail before our tool error wrapper runs.
+					// SDK argument validation can fail before our tool error wrapper
+					// runs; our own errors carry request_id in their JSON text block.
 					const structured = result.structuredContent as
 						| Record<string, unknown>
 						| undefined;
-					if (!structured?.request_id && Array.isArray(result.content)) {
+					const carriesRequestId =
+						structured?.request_id !== undefined ||
+						(Array.isArray(result.content) &&
+							result.content.some(
+								(block) =>
+									typeof (block as { text?: unknown }).text === "string" &&
+									(block as { text: string }).text.startsWith("{") &&
+									(block as { text: string }).text.includes(
+										`"request_id": "${requestId}"`,
+									),
+							));
+					if (!carriesRequestId && Array.isArray(result.content)) {
 						result.content.push({
 							type: "text",
 							text: `request_id: ${requestId}`,
@@ -1278,10 +1506,10 @@ export function mcpDocumentationResponse(
 			"",
 			"Setup: In an MCP-compatible client, add a remote connector using the endpoint above, then complete the LixRay sign-in and authorization flow. Connector support and setup menus depend on the client. If no LixRay connector is available, ask the user to connect it; a webpage cannot install a connector for the client.",
 			"",
-			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, call open_lix directly and do not call list_lixes first. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
+			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, pass lix_ref directly to query_sql or execute_sql, optionally branch_id; no opening call is required. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
 			"",
-			"Use query_sql for one SELECT statement and execute_sql for any atomic ordered SQL batch. When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths use /skills, not /skills/.",
-			"execute_sql already persisted the mutation. Do not follow a write with a verification SELECT.",
+			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
+			"A successful execute_sql persisted the mutation. Read back only when the write outcome is unknown or validation is part of the task.",
 			MCP_URL_GUIDE,
 			"Every MCP response includes X-Request-ID and every tool result includes request_id. You may send X-Request-ID to preserve an upstream correlation ID; use the returned ID when reporting failures.",
 			"",
@@ -1365,11 +1593,17 @@ function registerTool(
 			const executeInput = rawStatements
 				? observeExecuteInput(rawStatements)
 				: undefined;
+			let executionStarted = false;
+			let executionCompleted = false;
 			try {
+				if (isSqlTool(name))
+					input.context = await service.contextForSqlTarget(input);
 				// A request can carry several calls; each stamps its own key, so
 				// the readback below sees only this call's changes.
 				const callId = `${requestId}.${crypto.randomUUID()}`;
+				executionStarted = true;
 				const raw = await call(input, callId);
+				executionCompleted = true;
 				const executeOutput = isSqlTool(name)
 					? observeExecuteOutput(
 							name === "query_sql" ? { results: [raw.result] } : raw,
@@ -1419,7 +1653,15 @@ function registerTool(
 					content: [summary[0]!, ...links, ...summary.slice(1)],
 				};
 			} catch (caught) {
-				const error = toMcpError(caught, requestId);
+				const baseError = toMcpError(caught, requestId);
+				const error = isSqlTool(name)
+					? sqlToolError(baseError, {
+							write: name === "execute_sql",
+							started: executionStarted,
+							completed: executionCompleted,
+							statementCount: rawStatements?.length ?? 0,
+						})
+					: baseError;
 				const lixId = await observationLixId(service, input);
 				observeToolCall(observer, startedAt, {
 					requestId,
@@ -1437,14 +1679,16 @@ function registerTool(
 						error: errorDetails(caught),
 					});
 				}
-				const structuredContent = { request_id: requestId, error };
+				// No structuredContent on an error: clients validate structured
+				// content against the success-only output schema whenever it is
+				// present, and would turn this into a -32602 schema violation.
+				// The JSON text block still carries { request_id, error }.
 				return {
 					isError: true,
-					structuredContent,
-					content: toolResultTextBlocks(
-						summarizeToolError(error),
-						structuredContent,
-					),
+					content: toolResultTextBlocks(summarizeToolError(error), {
+						request_id: requestId,
+						error,
+					}),
 				};
 			}
 		},
@@ -1608,6 +1852,20 @@ async function resultResourceLinks(
 			},
 		];
 	}
+	if (name === "write_files" && Array.isArray(result.files)) {
+		return (result.files as Array<{ path: string; url: string }>)
+			.slice(0, 50)
+			.map((file) => {
+				const mimeType = mimeTypeForPath(file.path);
+				return {
+					type: "resource_link",
+					uri: file.url,
+					name: file.path.split("/").filter(Boolean).at(-1) ?? file.path,
+					description: `Wrote ${file.path.replace(/^\//, "")}`,
+					...(mimeType ? { mimeType } : {}),
+				};
+			});
+	}
 	if (name !== "execute_sql" || typeof input.context !== "string") return [];
 	const surviving = touched.entities
 		.filter((entity) => entity.action !== "deleted")
@@ -1665,6 +1923,28 @@ function summarizeToolResult(
 	if (name === "execute_sql") {
 		return summarizeExecuteSql(result.results, touched);
 	}
+	if (name === "list_files") {
+		const files = Array.isArray(result.files) ? result.files : [];
+		return `Listed ${files.length} ${files.length === 1 ? "file" : "files"}${result.truncated ? " (truncated; narrow the filter)" : ""} at commit ${String(result.commit_id)}.`;
+	}
+	if (name === "read_files") {
+		const files = Array.isArray(result.files) ? result.files : [];
+		const missing = Array.isArray(result.missing) ? result.missing : [];
+		return `Read ${files.length} ${files.length === 1 ? "file" : "files"}${missing.length ? `; missing: ${missing.join(", ")}` : ""} at commit ${String(result.commit_id)}.`;
+	}
+	if (name === "write_files") {
+		const files = Array.isArray(result.files)
+			? (result.files as Array<{ path?: unknown }>)
+			: [];
+		const names = files.map((file) =>
+			typeof file.path === "string" ? file.path.replace(/^\//, "") : "?",
+		);
+		const checkpoint =
+			typeof result.checkpoint_commit_id === "string"
+				? ` (checkpoint ${result.checkpoint_commit_id})`
+				: "";
+		return `Wrote ${names.join(" · ")} at commit ${String(result.commit_id)}${checkpoint}.`;
+	}
 	if (name === "active_branch_id") {
 		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.`;
 	}
@@ -1708,8 +1988,16 @@ function summarizeOpenLix(result: Record<string, unknown>): string {
 		typeof result.name === "string" && result.name.length > 0
 			? ` (${result.name})`
 			: "";
-	return `Opened ${identity}${name} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.${formatInventory(result)} Context expires at ${String(result.context_expires_at)}.`;
+	const manifest =
+		result.file_paths_complete === false && Array.isArray(result.file_paths)
+			? ` file_paths lists the first ${result.file_paths.length}; for every path run query_sql: ${OPEN_LIX_ALL_FILE_PATHS_SQL}.`
+			: "";
+	return `Opened ${identity}${name} on branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.${formatInventory(result)}${manifest} Context expires at ${String(result.context_expires_at)}.`;
 }
+
+/** The follow-up for a truncated open_lix manifest. */
+const OPEN_LIX_ALL_FILE_PATHS_SQL =
+	"SELECT id, path FROM lix_file ORDER BY path";
 
 function formatInventory(result: Record<string, unknown>): string {
 	if (
@@ -1781,8 +2069,9 @@ function summarizeToolError(error: {
 	code: string;
 	message: string;
 	hint?: string;
+	statement_index?: number;
 }): string {
-	return `LixRay error ${error.code}: ${error.message}${error.hint ? ` Hint: ${error.hint}` : ""}`;
+	return `${error.statement_index !== undefined ? `Statement ${error.statement_index + 1} (statements[${error.statement_index}]): ` : ""}LixRay error ${error.code}: ${error.message}${error.hint ? ` Hint: ${error.hint}` : ""}`;
 }
 
 function toMcpError(
@@ -1805,7 +2094,7 @@ function toMcpError(
 	return {
 		code: "internal_error",
 		message: "The LixRay tool call failed.",
-		hint: `Retry once. If the failure persists, contact LixRay support with request_id ${requestId}.`,
+		hint: `Contact LixRay support with request_id ${requestId} if the problem persists.`,
 	};
 }
 
@@ -1824,6 +2113,9 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"list_lixes",
 		"open_lix",
 		"get_entity_urls",
+		"list_files",
+		"read_files",
+		"write_files",
 		"query_sql",
 		"execute_sql",
 		"active_branch_id",
@@ -1836,6 +2128,17 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"merge_branch_preview",
 		"merge_branch",
 	].map((name) => ({ name }));
+}
+
+/** SQLite catalog habits get the Lix catalog by name, not a parse error. */
+const SQLITE_CATALOG_PATTERN =
+	/\bsqlite_(?:master|schema|temp_master|temp_schema)\b|\bpragma\s+\w/i;
+
+function assertLixCatalog(sql: string): void {
+	if (!SQLITE_CATALOG_PATTERN.test(sql)) return;
+	throw createLixError("invalid_request", LIX_IS_NOT_SQLITE_MESSAGE, {
+		hint: LIX_CATALOG_HINT,
+	});
 }
 
 function assertReadOnlyQuery(sql: string): void {

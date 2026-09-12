@@ -113,7 +113,7 @@ for (const count of [1, 2]) {
 
 			await row(page, targetName).click();
 			await expect(page).toHaveURL(
-				new RegExp(`/dir/[A-Za-z0-9_-]{22}/${targetName}/?(?:\\?.*)?$`),
+				new RegExp(`/folder/[A-Za-z0-9_-]{22}/${targetName}(?:\\?.*)?$`),
 			);
 			for (const source of sources)
 				await expect(row(page, source.name)).toBeVisible();

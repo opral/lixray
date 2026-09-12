@@ -54,8 +54,9 @@ loaded file do not need this namespace scan. This does not add repository-wide
 work to opening.
 
 The SDK and reference server use Lix main revision
-`bfcd165badd8d64f20f708332471ced665938272`, merged through
-[Lix PR #1758](https://github.com/opral/lix/pull/1758). Upgrade both together.
+`8d2ffc51c303c844b2b6f15e13968e057c0a6997`, merged through
+[Lix PR #1758](https://github.com/opral/lix/pull/1758) and
+[Lix PR #1759](https://github.com/opral/lix/pull/1759). Upgrade both together.
 Server protocol is 8 and sync protocol is 12. Browser conversion is separate from
 any authoritative repository migration; never reset server storage for an upgrade.
 
@@ -98,6 +99,11 @@ request budget remains pending until multipart preparation is supported. Binary
 file content uses a separate blob uploader and does not count toward that limit.
 
 ## Optional history totals
+
+Directory change badges begin after the tree loads and the existing idle gate
+opens. Their background diff still covers changed descendants and can load
+repository-wide changed-file metadata; the opening measurements above do not
+include that background work.
 
 The Home sidebar keeps its working-change summary on the local partial replica,
 including pending edits. Repository-wide `lix_commit` checkpoint totals and
