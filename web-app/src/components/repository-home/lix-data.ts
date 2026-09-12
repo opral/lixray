@@ -603,7 +603,15 @@ export async function createRepositoryFile(
 			);
 			const persistedPath = persisted.rows[0]?.path;
 			if (typeof persistedPath === "string") return persistedPath;
-			if (attempt >= 3) throw error;
+			const details = "details" in error ? error.details : undefined;
+			const replayForbidden =
+				typeof details === "object" &&
+				details !== null &&
+				(("nonRetryableAfterCommit" in details &&
+					details.nonRetryableAfterCommit === true) ||
+					("nonRetryableAfterExecution" in details &&
+						details.nonRetryableAfterExecution === true));
+			if (replayForbidden || attempt >= 3) throw error;
 			await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
 			// Recheck the name too: another writer may have claimed it.
 		}

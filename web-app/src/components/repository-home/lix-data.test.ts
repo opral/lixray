@@ -493,3 +493,37 @@ void test("file creation does not retry when exact identity reconciliation fails
 	);
 	assert.equal(inserts, 1);
 });
+
+void test("file creation never replays a marked conflict after an absent identity lookup", async () => {
+	for (const marker of [
+		"nonRetryableAfterCommit",
+		"nonRetryableAfterExecution",
+	]) {
+		let inserts = 0;
+		let reconciliations = 0;
+		const failure = Object.assign(
+			new Error("execution already crossed its retry boundary"),
+			{
+				code: "LIX_TRANSACTION_CONFLICT",
+				details: { [marker]: true },
+			},
+		);
+		const lix = {
+			execute: async (sql: string) => {
+				if (sql === "SELECT path FROM lix_file WHERE id = $1") {
+					reconciliations += 1;
+					return { rows: [] };
+				}
+				if (sql.startsWith("SELECT")) return { rows: [] };
+				inserts += 1;
+				throw failure;
+			},
+		} as unknown as Lix;
+		await assert.rejects(
+			createRepositoryFile(lix, "/", "md"),
+			(error) => error === failure,
+		);
+		assert.equal(inserts, 1);
+		assert.equal(reconciliations, 1);
+	}
+});
