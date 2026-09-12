@@ -245,7 +245,13 @@ function App() {
 	const [dirPath, setDirPath] = useState("/");
 	const params = new URLSearchParams(location.search);
 	const readOnly = params.has("readonly");
-	const diffSession = params.has("history")
+	const diffSession = params.has("review-empty")
+		? ({
+				target: { working: true },
+				base: null,
+				files: [],
+			} as unknown as AtelierDiffSession)
+		: params.has("history")
 		? ({
 				target: { commitId: "past" },
 				base: null,

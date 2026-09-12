@@ -219,7 +219,9 @@ export function DirectoryView({
 	// always says whether something under it changed. Folders inherit a dot
 	// from any changed descendant, so drilling in stays guided.
 	const sessionFileKinds = useMemo(() => {
-		if (!diffSession) return null;
+		// An open session that names no file says nothing about the listing;
+		// the live working diff still can.
+		if (!diffSession || diffSession.files.length === 0) return null;
 		return new Map(
 			diffSession.files.map((file) => [
 				file.path,
@@ -229,9 +231,11 @@ export function DirectoryView({
 			]),
 		);
 	}, [diffSession]);
+	// The past is what it was: a historical listing never carries today's
+	// working changes.
 	const workingFileKinds = useWorkingFileChanges(
 		lix,
-		isActive && diffSession === null,
+		isActive && sessionFileKinds === null && !viewingHistory,
 	);
 	const changedFileKinds = useMemo(
 		() => sessionFileKinds ?? workingFileKinds ?? EMPTY_CHANGED_FILE_KINDS,

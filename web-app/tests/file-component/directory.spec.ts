@@ -929,6 +929,19 @@ test("an open review names the rows; the rest recede", async ({ page }) => {
 	).not.toBe("1");
 });
 
+test("a review that names no file falls back to the working diff", async ({
+	page,
+}) => {
+	await page.goto("/?review-empty");
+	await expect(
+		item(page, "alpha.md").locator("span[aria-label]").first(),
+	).toHaveAttribute("title", "Modified");
+	await expect(item(page, "docs")).toHaveAttribute(
+		"data-changed-entry",
+		"true",
+	);
+});
+
 test("reviewed file actions preserve diff-aware navigation", async ({
 	page,
 }) => {
