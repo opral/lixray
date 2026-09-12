@@ -22,3 +22,32 @@ export function createShellNavigationQueue() {
 		},
 	};
 }
+
+/** Keep a shell-issued route idempotent across React effect cleanup/replay. */
+export function createShellRouteHydrationGuard() {
+	let previous: {
+		owner: object | null;
+		route: string;
+		shellIssued: boolean;
+	} | null = null;
+	return {
+		reset() {
+			previous = null;
+		},
+		isShellIssued(
+			owner: object | null,
+			route: string,
+			consume: () => boolean,
+		): boolean {
+			if (
+				previous?.owner === owner &&
+				previous.route === route &&
+				previous.shellIssued
+			)
+				return true;
+			const shellIssued = consume();
+			previous = { owner, route, shellIssued };
+			return shellIssued;
+		},
+	};
+}

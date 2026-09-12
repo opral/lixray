@@ -1,4 +1,7 @@
-import { createShellNavigationQueue } from "~/lib/shell-navigation-queue";
+import {
+	createShellNavigationQueue,
+	createShellRouteHydrationGuard,
+} from "~/lib/shell-navigation-queue";
 import {
 	entityUrlSplat,
 	entityRoutePath,
@@ -228,9 +231,10 @@ export function RepositoryAtelier({
 			? accountId
 			: `public:${repositoryId}`;
 	const navigate = useNavigate();
-	const pathname = useRouterState({
-		select: (state) => state.location.pathname,
+	const routeLocation = useRouterState({
+		select: (state) => state.location,
 	});
+	const pathname = routeLocation.pathname;
 	const routeParams = useParams({ strict: false });
 	const routeSplat = "_splat" in routeParams ? routeParams._splat : undefined;
 	const repositoryRootPath = `/@${namespace}/${repositorySlug}`;
@@ -821,10 +825,30 @@ export function RepositoryAtelier({
 	// Shell-issued routes skip hydration: a newer tab may already be active.
 	const shellNavigationRef = useRef<string | null>(null);
 	const [reviewFocusActive, setReviewFocusActive] = useState(false);
+	const shellHydrationGuard = useRef(createShellRouteHydrationGuard());
+	const routeVisit = JSON.stringify([
+		routeLocation.state.__TSR_key,
+		routeLocation.href,
+	]);
+	const shellRouteVisitRef = useRef({ instance, routeVisit });
+	useLayoutEffect(() => {
+		const previous = shellRouteVisitRef.current;
+		if (previous.instance !== instance || previous.routeVisit !== routeVisit) {
+			shellHydrationGuard.current.reset();
+		}
+		shellRouteVisitRef.current = { instance, routeVisit };
+	}, [instance, routeVisit]);
 	const consumeShellNavigation = useCallback((navigationKey: string) => {
-		const matches = shellNavigationRef.current === navigationKey;
-		shellNavigationRef.current = null;
-		return matches;
+		const visit = shellRouteVisitRef.current;
+		return shellHydrationGuard.current.isShellIssued(
+			visit.instance,
+			JSON.stringify([visit.routeVisit, navigationKey]),
+			() => {
+				const matches = shellNavigationRef.current === navigationKey;
+				shellNavigationRef.current = null;
+				return matches;
+			},
+		);
 	}, []);
 	useEffect(() => {
 		let navigationRevision = 0;
