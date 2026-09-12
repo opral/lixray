@@ -635,6 +635,25 @@ export function repositoryMigrationStateFromError(
 }
 
 export function isRetryableRepositoryOpenError(error: unknown): boolean {
+	// A completed mutation/execution must never be replayed, even if its
+	// completion error otherwise looks transient.
+	const details =
+		typeof error === "object" && error !== null && "details" in error
+			? error.details
+			: undefined;
+	if (
+		typeof details === "object" &&
+		details !== null &&
+		(("nonRetryableAfterCommit" in details &&
+			details.nonRetryableAfterCommit === true) ||
+			("nonRetryableAfterExecution" in details &&
+				details.nonRetryableAfterExecution === true))
+	)
+		return false;
+	// Opening owns no user mutation. A failed open/conversion releases its
+	// handles; the next attempt re-admits the same durable OPFS replica, including
+	// any completed migration and retained pending edits.
+	if (isErrorCode(error, "LIX_STORAGE_READ_EXPIRED")) return true;
 	if (isLixRecoveringError(error)) return true;
 	if (!(error instanceof Error)) return false;
 	if (error.name === "AbortError") return true;
