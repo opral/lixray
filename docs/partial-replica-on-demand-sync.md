@@ -54,9 +54,10 @@ loaded file do not need this namespace scan. This does not add repository-wide
 work to opening.
 
 The SDK and reference server use Lix main revision
-`8d2ffc51c303c844b2b6f15e13968e057c0a6997`, merged through
-[Lix PR #1758](https://github.com/opral/lix/pull/1758) and
-[Lix PR #1759](https://github.com/opral/lix/pull/1759). Upgrade both together.
+`7b2b4402e639a5c2b5bafa3506a594e36c72929d`, merged through
+[Lix PR #1758](https://github.com/opral/lix/pull/1758),
+[Lix PR #1759](https://github.com/opral/lix/pull/1759), and
+[Lix PR #1761](https://github.com/opral/lix/pull/1761). Upgrade both together.
 Server protocol is 8 and sync protocol is 12. Browser conversion is separate from
 any authoritative repository migration; never reset server storage for an upgrade.
 
@@ -66,18 +67,18 @@ The native authority, release WASM, SDK and app source were held fixed throughou
 
 | Median measurement                      |       Small |     320 MiB |
 | --------------------------------------- | ----------: | ----------: |
-| SDK opening                             |    271.5 ms |    283.1 ms |
-| Session ready, including navigation SQL |    449.2 ms |    469.4 ms |
-| Opening requests / response body bytes  | 2 / 2,320 B | 2 / 2,326 B |
-| Warm offline read                       |      6.0 ms |      6.1 ms |
-| Warm offline write                      |      8.6 ms |     9.8 ms |
-| Offline reopen session ready            |    252.1 ms |    266.9 ms |
+| SDK opening                             |    285.1 ms |    290.9 ms |
+| Session ready, including navigation SQL |    470.2 ms |    465.4 ms |
+| Opening requests / response body bytes  | 2 / 2,318 B | 2 / 2,325 B |
+| Warm offline read                       |      5.9 ms |      6.3 ms |
+| Warm offline write                      |      9.0 ms |     10.1 ms |
+| Offline reopen session ready            |    248.8 ms |    252.4 ms |
 
 All 180 offline writes, 360 reads, and six reopens passed with no native-input
 requests or successful offline network responses. Background upload and reopen
-admission attempts were blocked, not absent. First offline writes took 38.9/42.2
-ms; first data SELECTs took 67.3/102.3 ms. The large arm had a slow third opening
-sample of 485 ms; all samples remain in the report.
+admission attempts were blocked, not absent. First offline writes took 42.5/42.1
+ms; first data SELECTs took 63.6/106.0 ms. Both arms had a slow first opening
+sample of approximately 480 ms; all samples remain in the report.
 
 These are local key/value measurements after module import. They exclude
 application/SDK/WASM downloads, HTTP headers, full UI rendering, production
@@ -88,7 +89,7 @@ query or write dependency.
 A separate 96 KiB opaque-file test passed both acceptance orders with 16 rows,
 16,000 rows, and 320 MiB unrelated content. SELECT-only prefetch supported first
 offline writes with zero hydration attempts, and both replicas converged after
-reconnection. Cold file preparation measured approximately 0.37/0.59/3.09 seconds
+reconnection. Cold file preparation measured approximately 0.40/0.59/3.07 seconds
 across those dimensions; it is not constant-cost. The parsed-file browser profile
 reached the unsupported plugin-runtime boundary described above and is not
 reported as passing.
