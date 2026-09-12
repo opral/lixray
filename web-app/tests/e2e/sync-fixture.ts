@@ -541,8 +541,12 @@ export async function createSyncFixture({
 			page.on("request", (request) => {
 				if (intentionallyOffline) offlineRequests.add(request);
 				if (
-					request.method() === "GET" &&
-					/\/sync\/(history|blob|chunk)(?:\?|$)/.test(request.url())
+					(request.method() === "GET" &&
+						/\/sync\/(history|blob|chunk)(?:\?|$)/.test(request.url())) ||
+					(request.method() === "POST" &&
+						/\/sync\/(native-objects|native-object-range|native-metadata)(?:\?|$)/.test(
+							request.url(),
+						))
 				) {
 					pageColdReads.push(request.url());
 				}
@@ -1012,7 +1016,8 @@ export async function createSyncFixture({
 			// two already-open clients, not extension startup or demand hydration.
 			await leftEditor.waitFor({ timeout: 30_000 });
 
-			const blobLaneBeforeRightEdit = blobLaneRequestCount([left, right]);
+			// Warm typing must not download inputs; background blob uploads are allowed.
+			const coldReadsBeforeRightEdit = coldReadCount([left, right]);
 			const rightMarker = `right-${Date.now()}`;
 			await rightEditor.click();
 			await right.keyboard.insertText(rightMarker);
@@ -1022,7 +1027,7 @@ export async function createSyncFixture({
 			await expect(leftEditor).toContainText(rightMarker, {
 				timeout: realtimeTimeout,
 			});
-			expect(blobLaneRequestCount([left, right])).toBe(blobLaneBeforeRightEdit);
+			expect(coldReadCount([left, right])).toBe(coldReadsBeforeRightEdit);
 			// The first heading also derives the filename in a debounced commit.
 			// Settle that descriptor before later edits open a pinned working review.
 			for (const page of [left, right]) {
@@ -1081,7 +1086,7 @@ export async function createSyncFixture({
 			// Keep the originating editor warm for the reverse direction. Reload and
 			// OPFS-resume behavior is qualified independently below; coupling it to the
 			// realtime budget made this assertion measure startup contention.
-			const blobLaneBeforeLeftEdit = blobLaneRequestCount([left, right]);
+			const coldReadsBeforeLeftEdit = coldReadCount([left, right]);
 			const leftMarker = `left-${Date.now()}`;
 			await leftEditor.click();
 			// Keep the reverse-direction edit in the body so it does not schedule
@@ -1093,7 +1098,7 @@ export async function createSyncFixture({
 			await expect(rightEditor).toContainText(leftMarker, {
 				timeout: realtimeTimeout,
 			});
-			expect(blobLaneRequestCount([left, right])).toBe(blobLaneBeforeLeftEdit);
+			expect(coldReadCount([left, right])).toBe(coldReadsBeforeLeftEdit);
 			for (const page of [left, right]) {
 				await expect(
 					page.getByRole("button", {
