@@ -381,3 +381,55 @@ void test("only optional whole-history inventories treat the typed partial bound
 		false,
 	);
 });
+
+void test("concurrent file creators retry an atomically rejected name without overwriting", async () => {
+	const { openDirectoryTestLix } =
+		await import("./directory-operations-test-loader.ts");
+	const first = await openDirectoryTestLix();
+	const second = await first.openAnotherSession();
+	let readers = 0;
+	let release!: () => void;
+	const bothRead = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const session = (lix: Lix) =>
+		({
+			execute: async (sql: string, params: ReadonlyArray<unknown>) => {
+				if (sql.startsWith("SELECT") && params[0] === "/untitled.md") {
+					const result = await lix.execute(
+						sql,
+						params as Parameters<Lix["execute"]>[1],
+					);
+					if (result.rows.length === 0 && readers < 2) {
+						readers += 1;
+						if (readers === 2) release();
+						await bothRead;
+					}
+					return result;
+				}
+				return lix.execute(sql, params as Parameters<Lix["execute"]>[1]);
+			},
+		}) as unknown as Lix;
+	try {
+		const created = await Promise.all([
+			createRepositoryFile(session(first), "/", "md"),
+			createRepositoryFile(session(second), "/", "md"),
+		]);
+		assert.deepEqual(created.sort(), ["/untitled-1.md", "/untitled.md"]);
+		assert.equal(readers, 2);
+		const rows = (
+			await first.execute(
+				"SELECT id, path FROM lix_file WHERE path IN ('/untitled.md', '/untitled-1.md') ORDER BY path",
+			)
+		).rows;
+		assert.equal(rows.length, 2);
+		assert.notEqual(rows[0]!.id, rows[1]!.id);
+		assert.deepEqual(
+			rows.map((row) => row.path),
+			created,
+		);
+	} finally {
+		await second.close();
+		await first.close();
+	}
+});

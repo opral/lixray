@@ -585,14 +585,16 @@ export async function createRepositoryFile(
 			);
 			return path;
 		} catch (error) {
-			// A sync commit can invalidate this write's snapshot. Only retry a
-			// confirmed conflict, never an ambiguous outcome or another error.
+			// A writer can invalidate the snapshot or claim the selected name
+			// before INSERT. Both errors reject the write atomically; recheck
+			// availability, but never replay an ambiguous commit outcome.
 			if (
 				attempt >= 3 ||
 				typeof error !== "object" ||
 				error === null ||
 				!("code" in error) ||
-				error.code !== "LIX_TRANSACTION_CONFLICT"
+				(error.code !== "LIX_TRANSACTION_CONFLICT" &&
+					error.code !== "LIX_ERROR_UNIQUE")
 			) {
 				throw error;
 			}
