@@ -54,12 +54,13 @@ loaded file do not need this namespace scan. This does not add repository-wide
 work to opening.
 
 The SDK and reference server use Lix main revision
-`c09dd0faa5e5fa24ab5f9b8331609a5ae92a5e8f`, including
+`852c1151f9fad27b640570c18a2caebbc5e41d55`, including
 [Lix PR #1758](https://github.com/opral/lix/pull/1758),
 [Lix PR #1759](https://github.com/opral/lix/pull/1759),
-[Lix PR #1761](https://github.com/opral/lix/pull/1761), and
-[Lix PR #1763](https://github.com/opral/lix/pull/1763). Upgrade both together.
-Server protocol is 8 and sync protocol is 12. Browser conversion is separate from
+[Lix PR #1761](https://github.com/opral/lix/pull/1761),
+[Lix PR #1763](https://github.com/opral/lix/pull/1763), and
+[Lix PR #1767](https://github.com/opral/lix/pull/1767). Upgrade both together.
+Server protocol is 8 and sync protocol is 13. Browser conversion is separate from
 any authoritative repository migration; never reset server storage for an upgrade.
 
 The original opening profile at Lix `7b2b4402e` used three fresh small replicas
@@ -97,8 +98,9 @@ reported as passing.
 
 Pending edits and checkpoint dependencies upload in bounded waves. A single
 native commit or minimal checkpoint publication closure over the 1 MiB JSON
-request budget remains pending until multipart preparation is supported. Binary
-file content uses a separate blob uploader and does not count toward that limit.
+request budget remains pending until multipart preparation is supported. Small binary file content can travel inline with publication; larger content
+uses manifest/chunk upload. The combined request is bounded separately from the
+frozen native commit batch.
 
 ## Edit propagation latency
 
@@ -122,7 +124,39 @@ delay is a sensitivity experiment, not a full network emulator. Thirty baseline
 and thirty candidate edits passed; an additional 40-edit ABBA confirmation found
 warm medians of 223.3 ms before and 231.7 ms after, with unchanged warm metadata
 and range request counts. No warm speedup or sub-200 ms networked convergence is
-claimed. The dependent publication and content-fetch request chain remains.
+claimed for that first batching change.
+
+The transport combines small-file publication and complete working-set
+updates. Files up to 256 KiB can use one push within a 1 MiB combined request
+budget. The waiting peer receives a leased descriptor and up to 1 MiB of native
+inputs for its retained SQL read interests. It validates and installs missing
+inputs, then uses the existing local candidate publication. Larger working sets
+retain on-demand hydration. Opening remains bounded metadata only.
+
+Acknowledged local commits retain their valid resident physical representation.
+Unchanged updates re-arm the authority long poll immediately, using the last
+processed cursor to avoid sending the same working set again. An explicit
+upload-size rejection falls back to the existing chunk transfer; ambiguous
+publication failures retain the original durable attempt. Authoritative row and
+plugin merging use the same machinery as before.
+
+A follow-up profile against Lix main `94db8faef` measured 30 alternating SQL
+updates across two independent Chromium OPFS replicas. All updates converged.
+Warm medians exclude only the first edit from each replica:
+
+| Workload | Before combined delivery | Combined delivery |
+| --- | ---: | ---: |
+| 1 KiB loopback | 220.8 ms | 151.0 ms |
+| 96 KiB loopback | 237.0 ms | 168.6 ms |
+| 96 KiB +25 ms/request | 487.9 ms | 187.8 ms |
+
+Each update used one push and all warm updates needed zero additional native
+hydration requests. Warm local SQL writes took 18.8–23.1 ms median. The previous
+one-second reconciliation stalls disappeared after clearing stale backoff on
+successful upload progress. Outliers up to 393.7 ms remain included; eight warm
+samples per workload do not establish a tail-latency guarantee. These SDK
+measurements exclude editor scheduling and rendering and use the same disposable
+Memory-authority setup and request-delay limitations described above.
 
 ## Optional history totals
 
