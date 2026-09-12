@@ -326,6 +326,50 @@ export function listDirectoryFromFiles(
 	};
 }
 
+/**
+ * The working diff Atelier's status bar counts ("N files changed since
+ * checkpoint"), one row per changed file. The listing marks its entries from
+ * this whenever no review session is open, so a folder always says whether
+ * something under it changed.
+ */
+export const WORKING_FILE_DIFF_SQL =
+	"SELECT diff_type, from_path, to_path, coalesce(to_path, from_path) AS path FROM lix_diff('lix_file')";
+
+export type WorkingFileChangeKind = "added" | "modified" | "removed" | "moved";
+
+/** Changed file paths mapped to their kind; null until the first read lands. */
+export function useWorkingFileChanges(
+	lix: Lix,
+	enabled = true,
+): ReadonlyMap<string, WorkingFileChangeKind> | null {
+	const changes = useObservedRows(lix, WORKING_FILE_DIFF_SQL, [], enabled);
+	return useMemo(() => {
+		if (!changes.rows) return null;
+		const kinds = new Map<string, WorkingFileChangeKind>();
+		for (const row of changes.rows) {
+			const path = asText(row.path);
+			if (!path) continue;
+			const diffType = asText(row.diff_type);
+			const fromPath = asNullableText(row.from_path);
+			const toPath = asNullableText(row.to_path);
+			const moved =
+				diffType === "modified" &&
+				fromPath !== null &&
+				toPath !== null &&
+				fromPath !== toPath;
+			kinds.set(
+				path,
+				moved
+					? "moved"
+					: diffType === "added" || diffType === "removed"
+						? diffType
+						: "modified",
+			);
+		}
+		return kinds;
+	}, [changes]);
+}
+
 export function useRepositoryTree(
 	lix: Lix,
 	enabled = true,

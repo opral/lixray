@@ -1,4 +1,5 @@
 import type { Lix } from "@lix-js/sdk";
+import { DiffGlyph } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import {
 	Check,
@@ -227,7 +228,16 @@ export function DirectoryFileList({
 	const open = (path: string, newTab = false) => {
 		const entry = entries.find((item) => item.path === path);
 		if (entry?.directory) onOpenDir(path, { newTab });
-		else if (entry && !newTab && changedFileKinds.has(path) && onOpenDiffFile)
+		// Inside a review a marked row opens its diff, which is what the
+		// reader came for. Outside one the same mark only says "something
+		// changed here", and a click still opens the file.
+		else if (
+			entry &&
+			!newTab &&
+			reviewFocus &&
+			changedFileKinds.has(path) &&
+			onOpenDiffFile
+		)
 			onOpenDiffFile(path);
 		else if (entry) onOpenFile(path, { newTab });
 	};
@@ -995,65 +1005,3 @@ export function NameEntryDialog({
 	);
 }
 
-function DiffGlyph({
-	kind,
-	className,
-}: {
-	readonly kind: "added" | "modified" | "removed" | "moved";
-	readonly className?: string;
-}) {
-	const fill =
-		kind === "added"
-			? "var(--color-border-diff-added)"
-			: kind === "removed"
-				? "var(--color-border-diff-removed)"
-				: kind === "moved"
-					? "var(--color-icon-diff-moved)"
-					: "var(--color-icon-brand)";
-	const knockout = "var(--color-bg-panel)";
-	const title =
-		kind === "added"
-			? "Added in this review"
-			: kind === "removed"
-				? "Removed in this review"
-				: kind === "moved"
-					? "Moved in this review"
-					: "Changed in this review";
-	return (
-		<span
-			title={title}
-			aria-label={title}
-			className={`inline-flex ${className ?? ""}`}
-		>
-			<svg width={12} height={12} viewBox="0 0 12 12" aria-hidden="true">
-				<circle cx="6" cy="6" r="5" fill={fill} />
-				{kind === "added" ? (
-					<path
-						d="M6 3.6v4.8M3.6 6h4.8"
-						stroke={knockout}
-						strokeWidth="1.7"
-						strokeLinecap="round"
-					/>
-				) : null}
-				{kind === "removed" ? (
-					<path
-						d="M3.6 6h4.8"
-						stroke={knockout}
-						strokeWidth="1.7"
-						strokeLinecap="round"
-					/>
-				) : null}
-				{kind === "moved" ? (
-					<path
-						d="M4.8 3.6 7.2 6 4.8 8.4"
-						stroke={knockout}
-						strokeWidth="1.7"
-						fill="none"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-					/>
-				) : null}
-			</svg>
-		</span>
-	);
-}

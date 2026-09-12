@@ -876,6 +876,59 @@ test("historical listings preserve immutable snapshot navigation", async ({
 	).toHaveLength(0);
 });
 
+test("working changes mark the listing without a review open", async ({
+	page,
+}) => {
+	await page.goto("/");
+	// The glyph replaces the row's meta, and a folder inherits one from the
+	// change under it, so the listing says where to click in.
+	// The glyph is the only labelled span in a row; the name carries a
+	// plain title.
+	const glyphTitle = (name: string) =>
+		item(page, name).locator("span[aria-label]").first();
+	await expect(glyphTitle("alpha.md")).toHaveAttribute("title", "Modified");
+	await expect(glyphTitle("gamma.csv")).toHaveAttribute("title", "Added");
+	await expect(glyphTitle("beta.md")).toHaveAttribute("title", "Moved");
+	await expect(glyphTitle("docs")).toHaveAttribute("title", "Modified");
+	await expect(item(page, "research")).toHaveText(/0 items/);
+	// The glyphs are Atelier's own shapes at the listing's 12px.
+	expect(
+		await glyphTitle("alpha.md").locator("svg").getAttribute("width"),
+	).toBe("12");
+	expect(
+		await glyphTitle("alpha.md").locator("path").getAttribute("d"),
+	).toBe("M3.3 6.3c.9-1.5 1.8-1.5 2.7 0s1.8 1.5 2.7 0");
+	// Outside a review nothing recedes: this is the ordinary file list.
+	for (const name of ["alpha.md", "research", "docs"]) {
+		expect(
+			await item(page, name).evaluate((row) => getComputedStyle(row).opacity),
+		).toBe("1");
+	}
+});
+
+test("an open review names the rows; the rest recede", async ({ page }) => {
+	await page.goto("/?review");
+	await expect(item(page, "alpha.md")).toHaveAttribute(
+		"data-changed-entry",
+		"true",
+	);
+	await expect(item(page, "docs")).toHaveAttribute(
+		"data-changed-entry",
+		"true",
+	);
+	// gamma.csv is a working change the review does not carry: the session
+	// is the authority while it is open.
+	await expect(item(page, "gamma.csv")).not.toHaveAttribute(
+		"data-changed-entry",
+		"true",
+	);
+	expect(
+		await item(page, "gamma.csv").evaluate(
+			(row) => getComputedStyle(row).opacity,
+		),
+	).not.toBe("1");
+});
+
 test("reviewed file actions preserve diff-aware navigation", async ({
 	page,
 }) => {

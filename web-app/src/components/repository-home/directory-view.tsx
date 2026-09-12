@@ -67,7 +67,9 @@ import {
 	listDirectoryFromFiles,
 	useFilesAtCommit,
 	useRepositoryTree,
+	useWorkingFileChanges,
 	type RepositoryControlPlaneData,
+	type WorkingFileChangeKind,
 } from "./lix-data";
 import {
 	MemberAvatar,
@@ -117,6 +119,10 @@ const newTabFromMouseEvent = (event: ReactMouseEvent): boolean =>
  * Folders first, then files, then the directory's README rendered below —
  * the tab names the location, so the view carries no title of its own.
  */
+/** Nothing marked: one shared instance keeps the listing's memo stable. */
+const EMPTY_CHANGED_FILE_KINDS: ReadonlyMap<string, WorkingFileChangeKind> =
+	new Map();
+
 export function DirectoryView({
 	lix,
 	diffSession = null,
@@ -207,12 +213,15 @@ export function DirectoryView({
 		onOpenDir(next, { newTab: false });
 	}, [tree, viewingHistory, dirPath, lix, onOpenDir, isActive]);
 
-	// The open diff session marks its files in the listing, mirroring the
-	// sidebar's review indicators; folders inherit a dot from any changed
-	// descendant so drilling in stays guided.
-	const changedFileKinds = useMemo(() => {
+	// What the listing marks. A review session names its own files (it may
+	// span any two commits, and it carries each file's review status), and
+	// with no session open the live working diff stands in, so a folder
+	// always says whether something under it changed. Folders inherit a dot
+	// from any changed descendant, so drilling in stays guided.
+	const sessionFileKinds = useMemo(() => {
+		if (!diffSession) return null;
 		return new Map(
-			(diffSession?.files ?? []).map((file) => [
+			diffSession.files.map((file) => [
 				file.path,
 				file.movedFromPath && file.changeKind === "modified"
 					? ("moved" as const)
@@ -220,6 +229,14 @@ export function DirectoryView({
 			]),
 		);
 	}, [diffSession]);
+	const workingFileKinds = useWorkingFileChanges(
+		lix,
+		isActive && diffSession === null,
+	);
+	const changedFileKinds = useMemo(
+		() => sessionFileKinds ?? workingFileKinds ?? EMPTY_CHANGED_FILE_KINDS,
+		[sessionFileKinds, workingFileKinds],
+	);
 	const changedDirKinds = useMemo(() => {
 		// Ancestors use the canonical directory convention: absolute, no
 		// trailing slash (see canonicalDirectoryPath). A directory whose every
@@ -257,8 +274,9 @@ export function DirectoryView({
 	}, [changedFileKinds, historicalFiles, tree]);
 	// Variant "dim the unchanged": while a review session marks rows, the
 	// untouched entries recede so the action-colored changes are the only
-	// thing at full contrast.
-	const reviewFocus = changedFileKinds.size > 0;
+	// thing at full contrast. Outside a review the listing is the ordinary
+	// file list — it points at the changes without dimming everything else.
+	const reviewFocus = sessionFileKinds !== null && changedFileKinds.size > 0;
 	// A changed README previews as its diff — the review renders the change
 	// itself, not the resulting document.
 	const readmeDiff = useMemo<
