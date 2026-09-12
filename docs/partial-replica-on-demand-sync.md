@@ -66,18 +66,18 @@ The native authority, release WASM, SDK and app source were held fixed throughou
 
 | Median measurement                      |       Small |     320 MiB |
 | --------------------------------------- | ----------: | ----------: |
-| SDK opening                             |    275.9 ms |    278.6 ms |
-| Session ready, including navigation SQL |    451.5 ms |    454.4 ms |
-| Opening requests / response body bytes  | 2 / 2,322 B | 2 / 2,311 B |
-| Warm offline read                       |      6.0 ms |      6.5 ms |
-| Warm offline write                      |      8.4 ms |     10.4 ms |
-| Offline reopen session ready            |    249.3 ms |    260.0 ms |
+| SDK opening                             |    271.5 ms |    283.1 ms |
+| Session ready, including navigation SQL |    449.2 ms |    469.4 ms |
+| Opening requests / response body bytes  | 2 / 2,320 B | 2 / 2,326 B |
+| Warm offline read                       |      6.0 ms |      6.1 ms |
+| Warm offline write                      |      8.6 ms |     9.8 ms |
+| Offline reopen session ready            |    252.1 ms |    266.9 ms |
 
 All 180 offline writes, 360 reads, and six reopens passed with no native-input
 requests or successful offline network responses. Background upload and reopen
-admission attempts were blocked, not absent. First offline writes took 39.4/46.5
-ms; first data SELECTs took 58.3/107.3 ms. Both arms had a slow third opening
-sample of approximately 486–489 ms; all samples remain in the report.
+admission attempts were blocked, not absent. First offline writes took 38.9/42.2
+ms; first data SELECTs took 67.3/102.3 ms. The large arm had a slow third opening
+sample of 485 ms; all samples remain in the report.
 
 These are local key/value measurements after module import. They exclude
 application/SDK/WASM downloads, HTTP headers, full UI rendering, production
@@ -88,7 +88,7 @@ query or write dependency.
 A separate 96 KiB opaque-file test passed both acceptance orders with 16 rows,
 16,000 rows, and 320 MiB unrelated content. SELECT-only prefetch supported first
 offline writes with zero hydration attempts, and both replicas converged after
-reconnection. Cold file preparation measured approximately 0.38/0.60/3.08 seconds
+reconnection. Cold file preparation measured approximately 0.37/0.59/3.09 seconds
 across those dimensions; it is not constant-cost. The parsed-file browser profile
 reached the unsupported plugin-runtime boundary described above and is not
 reported as passing.
