@@ -559,6 +559,28 @@ async function firstFreePath(
 	throw new Error("Unable to find a free file name.");
 }
 
+/** Only fixed, side-effect-free name/identity SELECTs use this retry boundary. */
+async function retryFileCreationRead<T>(read: () => Promise<T>): Promise<T> {
+	for (let attempt = 0; ; attempt += 1) {
+		try {
+			return await read();
+		} catch (error) {
+			if (
+				attempt >= 3 ||
+				typeof error !== "object" ||
+				error === null ||
+				!("code" in error) ||
+				(error.code !== "LIX_STORAGE_READ_EXPIRED" &&
+					error.code !== "LIX_TRANSACTION_CONFLICT")
+			)
+				throw error;
+			// A completed SELECT may fail while retaining its read interests. Repeating
+			// these pure reads is safe; this helper never executes an INSERT.
+			await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
+		}
+	}
+}
+
 /** Creates an empty file of the given type in dirPath; returns its path. */
 export async function createRepositoryFile(
 	lix: Lix,
@@ -571,15 +593,19 @@ export async function createRepositoryFile(
 	};
 	const creationId = crypto.randomUUID();
 	for (let attempt = 0; ; attempt += 1) {
+		let insertStarted = false;
 		try {
-			const path = await firstFreePath(lix, (suffix) =>
-				childPath(
-					dirPath,
-					suffix === null
-						? `${template.base}.${extension}`
-						: `${template.base}-${suffix}.${extension}`,
+			const path = await retryFileCreationRead(() =>
+				firstFreePath(lix, (suffix) =>
+					childPath(
+						dirPath,
+						suffix === null
+							? `${template.base}.${extension}`
+							: `${template.base}-${suffix}.${extension}`,
+					),
 				),
 			);
+			insertStarted = true;
 			await lix.execute(
 				"INSERT INTO lix_file (path, content, id) VALUES ($1, $2, $3)",
 				[path, new TextEncoder().encode(template.data), creationId],
@@ -589,17 +615,18 @@ export async function createRepositoryFile(
 			// Keep the operation identity across retries: a conflict can arrive
 			// after publication. Reconcile that exact file before choosing a name.
 			if (
+				!insertStarted ||
 				typeof error !== "object" ||
 				error === null ||
 				!("code" in error) ||
 				(error.code !== "LIX_TRANSACTION_CONFLICT" &&
-					error.code !== "LIX_ERROR_UNIQUE")
+					error.code !== "LIX_ERROR_UNIQUE" &&
+					error.code !== "LIX_STORAGE_READ_EXPIRED")
 			) {
 				throw error;
 			}
-			const persisted = await lix.execute(
-				"SELECT path FROM lix_file WHERE id = $1",
-				[creationId],
+			const persisted = await retryFileCreationRead(() =>
+				lix.execute("SELECT path FROM lix_file WHERE id = $1", [creationId]),
 			);
 			const persistedPath = persisted.rows[0]?.path;
 			if (typeof persistedPath === "string") return persistedPath;

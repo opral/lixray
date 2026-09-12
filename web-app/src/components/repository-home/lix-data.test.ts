@@ -495,35 +495,134 @@ void test("file creation does not retry when exact identity reconciliation fails
 });
 
 void test("file creation never replays a marked conflict after an absent identity lookup", async () => {
-	for (const marker of [
-		"nonRetryableAfterCommit",
-		"nonRetryableAfterExecution",
-	]) {
-		let inserts = 0;
-		let reconciliations = 0;
-		const failure = Object.assign(
-			new Error("execution already crossed its retry boundary"),
-			{
-				code: "LIX_TRANSACTION_CONFLICT",
-				details: { [marker]: true },
-			},
-		);
-		const lix = {
-			execute: async (sql: string) => {
-				if (sql === "SELECT path FROM lix_file WHERE id = $1") {
-					reconciliations += 1;
-					return { rows: [] };
-				}
-				if (sql.startsWith("SELECT")) return { rows: [] };
+	for (const code of ["LIX_TRANSACTION_CONFLICT", "LIX_STORAGE_READ_EXPIRED"]) {
+		for (const marker of [
+			"nonRetryableAfterCommit",
+			"nonRetryableAfterExecution",
+		]) {
+			let inserts = 0;
+			let reconciliations = 0;
+			const failure = Object.assign(
+				new Error("execution already crossed its retry boundary"),
+				{
+					code,
+					details: { [marker]: true },
+				},
+			);
+			const lix = {
+				execute: async (sql: string) => {
+					if (sql === "SELECT path FROM lix_file WHERE id = $1") {
+						reconciliations += 1;
+						return { rows: [] };
+					}
+					if (sql.startsWith("SELECT")) return { rows: [] };
+					inserts += 1;
+					throw failure;
+				},
+			} as unknown as Lix;
+			await assert.rejects(
+				createRepositoryFile(lix, "/", "md"),
+				(error) => error === failure,
+			);
+			assert.equal(inserts, 1);
+			assert.equal(reconciliations, 1);
+		}
+	}
+});
+
+void test("file creation retries only pure reads when completion bookkeeping expires", async () => {
+	const { openDirectoryTestLix } =
+		await import("./directory-operations-test-loader.ts");
+	const lix = await openDirectoryTestLix();
+	let nameFailures = 0;
+	let identityFailures = 0;
+	let inserts = 0;
+	const expiry = () =>
+		Object.assign(new Error("completed read bookkeeping expired"), {
+			code: "LIX_STORAGE_READ_EXPIRED",
+			details: { nonRetryableAfterExecution: true },
+		});
+	const session = {
+		execute: async (sql: string, params: ReadonlyArray<unknown>) => {
+			if (sql.startsWith("SELECT 1") && nameFailures++ < 2) throw expiry();
+			if (
+				sql === "SELECT path FROM lix_file WHERE id = $1" &&
+				identityFailures++ < 2
+			)
+				throw expiry();
+			const result = await lix.execute(
+				sql,
+				params as Parameters<Lix["execute"]>[1],
+			);
+			if (sql.startsWith("INSERT")) {
 				inserts += 1;
-				throw failure;
-			},
-		} as unknown as Lix;
-		await assert.rejects(
-			createRepositoryFile(lix, "/", "md"),
-			(error) => error === failure,
+				throw Object.assign(
+					new Error("insert published before bookkeeping expired"),
+					{
+						code: "LIX_STORAGE_READ_EXPIRED",
+						details: { nonRetryableAfterCommit: true },
+					},
+				);
+			}
+			return result;
+		},
+	} as unknown as Lix;
+	try {
+		assert.equal(
+			await createRepositoryFile(session, "/", "md"),
+			"/untitled.md",
 		);
 		assert.equal(inserts, 1);
-		assert.equal(reconciliations, 1);
+		assert.equal(nameFailures, 3);
+		assert.equal(identityFailures, 3);
+		const rows = (
+			await lix.execute(
+				"SELECT id FROM lix_file WHERE path IN ('/untitled.md', '/untitled-1.md')",
+			)
+		).rows;
+		assert.equal(rows.length, 1);
+	} finally {
+		await lix.close();
 	}
+});
+
+void test("expired creation reads remain bounded and never reach an INSERT", async () => {
+	let reads = 0;
+	const failure = Object.assign(new Error("read keeps expiring"), {
+		code: "LIX_STORAGE_READ_EXPIRED",
+	});
+	const lix = {
+		execute: async (sql: string) => {
+			assert.ok(sql.startsWith("SELECT"));
+			reads += 1;
+			throw failure;
+		},
+	} as unknown as Lix;
+	await assert.rejects(
+		createRepositoryFile(lix, "/", "md"),
+		(error) => error === failure,
+	);
+	assert.equal(reads, 4);
+});
+
+void test("file name lookup retries a journal conflict before creating once", async () => {
+	let reads = 0;
+	let inserts = 0;
+	const lix = {
+		execute: async (sql: string) => {
+			if (sql.startsWith("SELECT")) {
+				if (reads++ === 0)
+					throw Object.assign(new Error("read journal conflict"), {
+						code: "LIX_TRANSACTION_CONFLICT",
+						details: { nonRetryableAfterExecution: true },
+					});
+				return { rows: [] };
+			}
+			inserts += 1;
+			return { rows: [] };
+		},
+	} as unknown as Lix;
+	assert.equal(await createRepositoryFile(lix, "/", "md"), "/untitled.md");
+	assert.equal(reads, 2);
+	assert.equal(inserts, 1);
 });
