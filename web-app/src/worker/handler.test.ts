@@ -3181,7 +3181,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object";
 }
 
-void test("MCP boundary failures capture correlated traces before flushing", async () => {
+void test("MCP boundary failures capture traces only after authentication", async () => {
 	for (const scenario of [
 		"auth-throw",
 		"auth-response",
@@ -3196,6 +3196,7 @@ void test("MCP boundary failures capture correlated traces before flushing", asy
 			traceId: string;
 		}> = [];
 		let flushed = 0;
+		let initialized = 0;
 		const response = await handleRequest(
 			new Request("https://example.test/mcp", {
 				method: "POST",
@@ -3220,14 +3221,17 @@ void test("MCP boundary failures capture correlated traces before flushing", asy
 				...(scenario === "storage"
 					? {}
 					: { lixFetch: async () => new Response("unused") }),
-				createMcpTelemetry: () => ({
-					onToolCall: () => undefined,
-					onTransport: (observation) => observations.push(observation),
-					flush: async () => {
-						assert.equal(observations.length, 1);
-						flushed++;
-					},
-				}),
+				createMcpTelemetry: () => {
+					initialized++;
+					return {
+						onToolCall: () => undefined,
+						onTransport: (observation) => observations.push(observation),
+						flush: async () => {
+							assert.equal(observations.length, 1);
+							flushed++;
+						},
+					};
+				},
 				mcpTransport: async () => {
 					if (scenario === "transport-throw")
 						throw new Error("SECRET transport details");
@@ -3243,21 +3247,21 @@ void test("MCP boundary failures capture correlated traces before flushing", asy
 					? 503
 					: 500,
 		);
-		assert.equal(observations.length, 1);
-		assert.equal(
-			observations[0]?.requestId,
-			response.headers.get("x-request-id"),
-		);
-		assert.equal(
-			observations[0]?.stage,
-			scenario.startsWith("auth")
-				? "authentication"
-				: scenario === "storage"
-					? "setup"
-					: "transport",
-		);
-		assert.ok(observations[0]?.traceId);
-		assert.equal(flushed, 1);
+		const authenticated = !scenario.startsWith("auth");
+		assert.equal(initialized, authenticated ? 1 : 0);
+		assert.equal(observations.length, authenticated ? 1 : 0);
+		assert.equal(flushed, authenticated ? 1 : 0);
+		if (authenticated) {
+			assert.equal(
+				observations[0]?.requestId,
+				response.headers.get("x-request-id"),
+			);
+			assert.equal(
+				observations[0]?.stage,
+				scenario === "storage" ? "setup" : "transport",
+			);
+			assert.ok(observations[0]?.traceId);
+		}
 		const body = await response.text();
 		assert.ok(!body.includes("SECRET"));
 		if (response.status === 500) assert.ok(body.includes("debug-request"));

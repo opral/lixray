@@ -16,6 +16,7 @@ ARG VITE_LIXRAY_LOCAL_DEV
 ARG VITE_LIXRAY_LOCAL_DEV_EMAIL
 ARG VITE_LIXRAY_LOCAL_DEV_PASSWORD
 ARG RAILWAY_ENVIRONMENT_NAME
+ARG RAILWAY_GIT_COMMIT_SHA
 
 WORKDIR /app
 ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL} \
@@ -29,7 +30,8 @@ ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL} \
 	VITE_LIXRAY_LOCAL_DEV=${VITE_LIXRAY_LOCAL_DEV} \
 	VITE_LIXRAY_LOCAL_DEV_EMAIL=${VITE_LIXRAY_LOCAL_DEV_EMAIL} \
 	VITE_LIXRAY_LOCAL_DEV_PASSWORD=${VITE_LIXRAY_LOCAL_DEV_PASSWORD} \
-	RAILWAY_ENVIRONMENT_NAME=${RAILWAY_ENVIRONMENT_NAME}
+	RAILWAY_ENVIRONMENT_NAME=${RAILWAY_ENVIRONMENT_NAME} \
+	RAILWAY_GIT_COMMIT_SHA=${RAILWAY_GIT_COMMIT_SHA}
 RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
 COPY . .
 
@@ -71,6 +73,8 @@ COPY --from=builder /app/web-app/scripts/railway-server.mjs ./scripts/railway-se
 COPY --from=builder /app/web-app/scripts/start-railway.mjs ./scripts/start-railway.mjs
 COPY --from=builder /app/web-app/scripts/provision-repositories.mjs ./scripts/provision-repositories.mjs
 
+ARG RAILWAY_GIT_COMMIT_SHA
+ENV LIXRAY_RELEASE_ID=${RAILWAY_GIT_COMMIT_SHA}
 ENV PORT=8080
 EXPOSE 8080
 CMD ["node", "scripts/start-railway.mjs"]

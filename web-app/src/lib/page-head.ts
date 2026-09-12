@@ -19,13 +19,13 @@ export function pageHead(title: string, description: string) {
 
 export function repositoryHead(
 	params: { namespace: string; repository: string; _splat?: string },
-	view?: "file" | "dir" | "team" | "settings" | "sql",
+	view?: "file" | "folder" | "team" | "settings" | "sql",
 	search: { branch?: string } = {},
 ) {
 	const repository = `@${params.namespace}/${params.repository}`;
 	const path = params._splat?.replace(/^\/+|\/+$/g, "");
 	const entity =
-		view === "file" || view === "dir" ? parseEntityUrlSplat(path) : null;
+		view === "file" || view === "folder" ? parseEntityUrlSplat(path) : null;
 	const detail =
 		view === "team"
 			? "People"
@@ -33,8 +33,8 @@ export function repositoryHead(
 				? "Settings"
 				: view === "sql"
 					? "SQL"
-					: view === "file" || view === "dir"
-						? (entity?.slug ?? (view === "file" ? "File" : "Folder"))
+					: view === "file" || view === "folder"
+						? (entity?.name ?? (view === "file" ? "File" : "Folder"))
 						: undefined;
 	const root = `/@${encodeURIComponent(params.namespace)}/${encodeURIComponent(params.repository)}`;
 	const suffix =

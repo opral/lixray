@@ -60,6 +60,35 @@ const query = (sql: string, params: readonly unknown[] = []) => {
 				...files.map((entry) => row(entry, false)),
 			],
 		};
+	if (sql.includes("lix_diff("))
+		return {
+			rows: [
+				{
+					diff_type: "modified",
+					from_path: "/docs/child.md",
+					to_path: "/docs/child.md",
+					path: "/docs/child.md",
+				},
+				{
+					diff_type: "added",
+					from_path: null,
+					to_path: "/gamma.csv",
+					path: "/gamma.csv",
+				},
+				{
+					diff_type: "modified",
+					from_path: "/alpha.md",
+					to_path: "/alpha.md",
+					path: "/alpha.md",
+				},
+				{
+					diff_type: "modified",
+					from_path: "/old-beta.md",
+					to_path: "/beta.md",
+					path: "/beta.md",
+				},
+			],
+		};
 	if (sql.includes("lix_as_of"))
 		return { rows: [{ id: "past", path: "/past.md" }] };
 	if (sql.includes("information_schema")) return { rows: [{ n: 2 }] };
@@ -216,19 +245,28 @@ function App() {
 	const [dirPath, setDirPath] = useState("/");
 	const params = new URLSearchParams(location.search);
 	const readOnly = params.has("readonly");
-	const diffSession = params.has("history")
+	const diffSession = params.has("review-empty")
 		? ({
-				target: { commitId: "past" },
+				target: { working: true },
 				base: null,
 				files: [],
 			} as unknown as AtelierDiffSession)
-		: params.has("review")
+		: params.has("history")
 			? ({
-					target: { working: true },
+					target: { commitId: "past" },
 					base: null,
-					files: [{ id: "alpha", path: "/alpha.md", changeKind: "modified" }],
+					files: [],
 				} as unknown as AtelierDiffSession)
-			: null;
+			: params.has("review")
+				? ({
+						target: { working: true },
+						base: null,
+						files: [
+							{ id: "alpha", path: "/alpha.md", changeKind: "modified" },
+							{ id: "child", path: "/docs/child.md", changeKind: "modified" },
+						],
+					} as unknown as AtelierDiffSession)
+				: null;
 	return (
 		<main style={{ height: "100vh" }}>
 			<div data-testid="current-directory">{dirPath}</div>

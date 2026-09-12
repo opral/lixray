@@ -16,6 +16,10 @@ sending W3C `traceparent`, or `X-PostHog-AI-Trace-ID` and
 traces into one conversation or workflow. Invalid identifiers are ignored and
 clients that send no trace context retain the per-tool fallback behavior.
 
+Unauthenticated requests (including authentication challenges and rejected credentials)
+do not initialize PostHog telemetry or emit AI traces. Authenticated setup and
+transport failures retain correlated request traces and request IDs.
+
 ## Span model
 
 Tool-friction `$ai_span` captures include:

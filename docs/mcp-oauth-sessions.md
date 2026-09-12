@@ -57,6 +57,20 @@ fixed target, not a user's consent. Deleting the OAuth client removes its mappin
 Already-issued access tokens remain valid until expiry; the migration adds no
 per-request revocation lookup.
 
+An approval the client never exchanged (a lost code, a failed browser handoff)
+keeps its `auth.oauth_authorizations` row past expiry, and every retry adds
+one. Nothing reads those rows for token issuance any more, so a fresh approval
+for the client sweeps its expired pending and approved rows in the same
+transaction (`private.bind_oauth_client_resource`,
+`20260911030000_oauth_authorization_hygiene.sql`).
+
+Settings → Connected apps lists the OAuth clients the account has granted
+(`auth.oauth.listGrants`) next to what LixRay recorded of their use
+(`public.list_mcp_client_connections`: repositories touched, last tool, last
+use). Revoking calls `auth.oauth.revokeGrant` and then
+`public.forget_mcp_client`, so the app disappears from the list; its access
+tokens still expire on their own within the hour.
+
 ## Related authentication boundaries
 
 Ordinary website logout targets only its browser session, preserving independently

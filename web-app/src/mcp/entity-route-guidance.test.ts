@@ -14,7 +14,7 @@ const token = encodeEntityId(id);
 void test("metadata uses cosmetic labels and useful token-only fallbacks", () => {
 	for (const [view, label] of [
 		["file", "File"],
-		["dir", "Folder"],
+		["folder", "Folder"],
 	] as const) {
 		const params = { namespace: "acme", repository: "repo", _splat: token };
 		const head = repositoryHead(params, view);
@@ -34,7 +34,7 @@ void test("canonical metadata merges cosmetic aliases and preserves branch ident
 		repository: "repo",
 		_splat: `${token}/stale-name.md`,
 	};
-	for (const view of ["file", "dir"] as const) {
+	for (const view of ["file", "folder"] as const) {
 		const expected = `/@acme/repo/${view}/${token}?branch=feature%2Fdocs`;
 		assert.equal(
 			repositoryHead(params, view, { branch: "feature/docs" }).links[0]?.href,
@@ -83,6 +83,8 @@ void test("SSR guidance resolves UUIDs with parameterized branch-context queries
 		};
 		for (const [verb, table] of [
 			["file", "lix_file"],
+			["folder", "lix_directory"],
+			// Folder links written before /folder still resolve.
 			["dir", "lix_directory"],
 		]) {
 			const html = renderToStaticMarkup(

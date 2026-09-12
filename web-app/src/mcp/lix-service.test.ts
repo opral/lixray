@@ -53,6 +53,9 @@ class FakeRuntime implements LixRuntimeClient {
 		return this.branch;
 	}
 
+	async defaultBranchId() {
+		return "main";
+	}
 	async switchBranch(lixId: string, branchId: string) {
 		this.admit(lixId);
 		this.branch = branchId;
@@ -475,7 +478,7 @@ const makeService = (runtime: FakeRuntime) =>
 		contextSigningKey: "test-key",
 		principal: { userId: "user", clientId: "client" },
 	});
-void test("manifest includes verified UUID links and pins even the default branch", async () => {
+void test("manifest includes verified UUID links and names no branch on the default branch", async () => {
 	const runtime = new FakeRuntime();
 	runtime.fileCount = 1;
 	runtime.filePaths = ["/First name.md"];
@@ -484,12 +487,12 @@ void test("manifest includes verified UUID links and pins even the default branc
 		undefined,
 		"http://localhost:3000",
 	);
-	assert.equal(opened.url, "http://localhost:3000/@acme/company?branch=main");
+	assert.equal(opened.url, "http://localhost:3000/@acme/company");
 	assert.deepEqual(opened.files, [
 		{
 			id: "00000000-0000-4000-8000-000000000000",
 			path: "/First name.md",
-			url: "http://localhost:3000/@acme/company/file/AAAAAAAAQACAAAAAAAAAAA/first-name.md?branch=main",
+			url: "http://localhost:3000/@acme/company/file/AAAAAAAAQACAAAAAAAAAAA/first-name.md",
 		},
 	]);
 });
@@ -517,7 +520,7 @@ void test("entity URLs batch by kind, preserve request order and use the signed 
 	);
 	assert.equal(
 		result.entities[0]?.url,
-		"https://lixray.com/@acme/company/dir/MzMzMzMzQzODMzMzMzMzMw/notes?branch=draft%2Freview",
+		"https://lixray.com/@acme/company/folder/MzMzMzMzQzODMzMzMzMzMw/notes?branch=draft%2Freview",
 	);
 	assert.equal(result.entities[1]?.url, result.entities[2]?.url);
 	assert.deepEqual(result.entities[3], {
@@ -538,11 +541,16 @@ void test("UUID lookup follows file and directory renames and current namespace 
 		{ kind: "file", id: FILE_ID },
 		{ kind: "directory", id: DIR_ID },
 	]);
+	// The id is the identity; the URL carries the path the entity has now.
 	assert.match(
 		result.entities[0]!.url,
-		/\/@new-handle\/company\/file\/IiIiIiIiQiKCIiIiIiIiIg\/new-title.md\?branch=main$/,
+		/\/@new-handle\/company\/file\/IiIiIiIiQiKCIiIiIiIiIg\/moved\/new-title\.md$/,
 	);
 	assert.equal(result.entities[1]!.path, "/moved");
+	assert.match(
+		result.entities[1]!.url,
+		/\/@new-handle\/company\/folder\/[A-Za-z0-9_-]{22}\/moved$/,
+	);
 	await assert.rejects(
 		service.getEntityUrls(opened.context, [
 			{ kind: "file", path: "/notes/First name.md" },
@@ -609,7 +617,7 @@ void test("root directory UUID uses the repository URL and SQL-sensitive paths s
 		kind: "directory",
 		id: null,
 		path: "/",
-		url: "https://lixray.com/@acme/company?branch=main",
+		url: "https://lixray.com/@acme/company",
 	});
 	assert.ok(
 		runtime.calls.every(
@@ -619,4 +627,40 @@ void test("root directory UUID uses the repository URL and SQL-sensitive paths s
 	assert.deepEqual(runtime.calls[0]!.params, [
 		{ kind: "text", value: runtime.entities[0]!.path },
 	]);
+});
+
+void test("direct SQL targets default to the repository branch without inventory or switching", async () => {
+	const runtime = new FakeRuntime();
+	runtime.branch = "feature";
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const context = await service.contextForSqlTarget({
+		lix_ref: "@acme/company",
+	});
+	assert.equal(runtime.calls.length, 0);
+	assert.equal(runtime.branch, "feature");
+	await service.executeBatch(context, { statements: [{ sql: "SELECT 1" }] });
+	assert.equal(runtime.calls[0]?.branchId, "main");
+	const feature = await service.contextForSqlTarget({
+		lix_ref: LIX_ID,
+		branch_id: "feature",
+	});
+	await service.executeBatch(feature, { statements: [{ sql: "SELECT 2" }] });
+	assert.equal(runtime.calls[1]?.branchId, "feature");
+	assert.equal(
+		await service.contextForSqlTarget({ context: feature }),
+		feature,
+	);
+	for (const target of [
+		{},
+		{ context, lix_ref: LIX_ID },
+		{ context, branch_id: "main" },
+		{ branch_id: "main" },
+		{ lix_ref: "@other/private" },
+	]) {
+		await assert.rejects(service.contextForSqlTarget(target));
+	}
+	assert.equal(runtime.calls.length, 2);
 });
