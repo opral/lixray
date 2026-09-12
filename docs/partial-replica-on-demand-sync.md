@@ -21,6 +21,11 @@ The canonical default branch comes from tracked, fileless GLOBAL SQL. Pending
 initial switches keep the cached branch available. Retrying a create-and-switch
 uses its already-created branch ID within that session.
 
+Tabs opening the same browser replica share one SDK engine through a SharedWorker,
+with separate SQL sessions. Closing one tab leaves the other tabs connected to
+the same resident data and pending edits. This browser path requires SharedWorker,
+Web Locks, and OPFS support.
+
 The SDK and reference server use Lix main revision
 `48aec47b74b151dfb44c9b66259d280971014bce`, merged through
 [Lix PR #1755](https://github.com/opral/lix/pull/1755). Upgrade both together.
