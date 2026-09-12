@@ -16,7 +16,7 @@ void test("preserves the engine's unsupported repository protocol error", () => 
 void test("preserves the engine's structured unsupported format error", () => {
 	const error = Object.assign(
 		new Error("This lix uses an unsupported storage format."),
-		{ code: "LIX_ERROR_STORAGE_FORMAT_UNSUPPORTED" },
+		{ code: "LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT" },
 	);
 
 	assert.equal(
@@ -36,7 +36,7 @@ void test("preserves unrelated repository opening errors", () => {
 
 void test("explains a terminal automatic migration failure", () => {
 	for (const code of [
-		"LIX_ERROR_LIX_MIGRATION_FAILED",
+		"LIX_ERROR_MIGRATION_FAILED",
 		"LIX_ERROR_MIGRATION_FAILED",
 		"LIX_ERROR_REPOSITORY_UPGRADE",
 	]) {

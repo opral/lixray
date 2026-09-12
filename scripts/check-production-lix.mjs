@@ -126,7 +126,7 @@ function migrationTimeoutError(timeoutMs) {
 function isMigrationInProgress(result) {
 	return (
 		result.response.status === 503 &&
-		result.body?.error?.code === "LIX_ERROR_LIX_MIGRATING"
+		result.body?.error?.code === "LIX_ERROR_MIGRATING"
 	);
 }
 

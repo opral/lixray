@@ -140,6 +140,7 @@ Configure the production server with:
 
 - `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://lixray.com/api/telemetry/otlp/v1/traces`
 - `OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer <internal-token>`
+- `RUST_LOG=info,lix_sql=info` (the reference server's Rust target is `lix_server`)
 
 Use the shared `LIXRAY_INTERNAL_TOKEN` as the internal token. Preview deployments
 must use their own gateway URL and token. Never route preview traces through
@@ -153,7 +154,18 @@ The existing LixRay web gateway owns the destination credentials:
 
 The gateway receives `/api/telemetry/otlp/v1/traces`, authenticates before
 decoding, forwards native traces to `<POSTHOG_HOST>/i/v1/traces`, and projects
-only identified repository-open spans into the existing PostHog event schema.
+identified repository-open spans into the existing PostHog event schema.
+Server ERROR log events and standard OTel exception events are also projected
+as PostHog `$exception` events. Each exception includes `server_log_message`,
+`server_error_detail`, repository ID, migration versions when present, and
+`$otel_trace_id`/`$otel_span_id` for the native diagnostic trace. Projection
+uses stable event UUIDs so exporter retries do not create new occurrences.
+An ERROR span status alone is not captured: retryable migration 503s are not
+terminal server errors. Only diagnostic fields are projected, with bounded
+messages and credential redaction; request bodies and arbitrary log fields
+are not copied. Diagnostic detail stays in the authenticated telemetry path,
+not in public repository error responses. These are server exceptions, separate
+from the browser's generic repository-open exception.
 There is no second event detector or vendor-specific exporter in Lix.
 Verify both native trace receipt and person-linked event receipt when changing
 deployment configuration. A successful repository request alone does not

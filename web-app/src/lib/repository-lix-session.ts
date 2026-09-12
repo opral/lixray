@@ -81,7 +81,7 @@ type ResolvedOpenRepositoryLixSessionOptions =
 	OpenRepositoryLixSessionOptions & { replicaId: string };
 
 const OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
-const MIGRATION_ERROR_CODE = "LIX_ERROR_LIX_MIGRATING";
+const MIGRATION_ERROR_CODE = "LIX_ERROR_MIGRATING";
 const MIGRATION_RETRY_DELAY_MS = 1_000;
 
 interface MigrationProgress {
@@ -497,7 +497,7 @@ async function reportLixRequestFailure(
 	const method = lixRequestMethod(input, init);
 	if (
 		code === MIGRATION_ERROR_CODE ||
-		code === "LIX_ERROR_LIX_RECOVERING" ||
+		code === "LIX_ERROR_RECOVERING" ||
 		(response.status === 404 &&
 			method === "GET" &&
 			lixRequestPath(input).endsWith("/sync/chunk"))
@@ -605,11 +605,11 @@ function lixRequestEndpoint(input: RequestInfo | URL): string {
 
 function isLixRecoveringError(
 	error: unknown,
-): error is Error & { code: "LIX_ERROR_LIX_RECOVERING" } {
+): error is Error & { code: "LIX_ERROR_RECOVERING" } {
 	return (
 		error instanceof Error &&
 		"code" in error &&
-		error.code === "LIX_ERROR_LIX_RECOVERING"
+		error.code === "LIX_ERROR_RECOVERING"
 	);
 }
 

@@ -58,39 +58,62 @@ async function atomic<T>(
 	lix: Lix,
 	work: (transaction: LixTransaction) => Promise<T>,
 ): Promise<T> {
-	// Explicit transactions must restart their entire read/validation phase if
-	// OPFS invalidates its snapshot. Never replay a commit whose outcome may
-	// already be accepted, or continue after rollback failed.
+	let retryDeadline: number | undefined;
 	for (let attempt = 0; ; attempt += 1) {
-		const transaction = await lix.beginTransaction();
+		let transaction: LixTransaction | undefined;
 		let committing = false;
 		try {
+			transaction = await lix.beginTransaction();
 			const result = await work(transaction);
 			committing = true;
 			await transaction.commit();
 			return result;
 		} catch (error) {
-			let rolledBack = false;
-			try {
-				await transaction.rollback();
-				rolledBack = true;
-			} catch {
-				/* Preserve the original failure; cleanup cannot authorize retry. */
+			// commit() consumes the SDK handle even on failure. Before commit,
+			// require successful rollback before restarting all reads and writes.
+			let released = !transaction || committing;
+			if (transaction && !committing) {
+				try {
+					await transaction.rollback();
+					released = true;
+				} catch {
+					/* Preserve the failure; an unreleased transaction cannot retry. */
+				}
 			}
-			if (
-				!committing &&
-				rolledBack &&
-				attempt < 2 &&
-				typeof error === "object" &&
-				error !== null &&
-				"code" in error &&
-				error.code === "LIX_STORAGE_READ_EXPIRED"
-			) {
-				continue;
-			}
-			throw error;
+			if (!released || !isRetryableReadExpiration(error)) throw error;
+			// Native commit reports expiration during preparation too. Failures
+			// after durable mutation carry nonRetryableAfterCommit; never replay
+			// those or failures after completed SQL execution.
+			retryDeadline ??= Date.now() + 3_000;
+			const remaining = retryDeadline - Date.now();
+			if (remaining <= 0) throw error;
+			await new Promise((resolve) =>
+				setTimeout(
+					resolve,
+					Math.min(10 * 2 ** Math.min(attempt, 4), 100, remaining),
+				),
+			);
 		}
 	}
+}
+
+function isRetryableReadExpiration(error: unknown): boolean {
+	if (
+		typeof error !== "object" ||
+		error === null ||
+		!("code" in error) ||
+		error.code !== "LIX_STORAGE_READ_EXPIRED"
+	)
+		return false;
+	const details = "details" in error ? error.details : undefined;
+	return !(
+		typeof details === "object" &&
+		details !== null &&
+		(("nonRetryableAfterCommit" in details &&
+			details.nonRetryableAfterCommit === true) ||
+			("nonRetryableAfterExecution" in details &&
+				details.nonRetryableAfterExecution === true))
+	);
 }
 
 function requireParent(all: Entry[], path: string): void {

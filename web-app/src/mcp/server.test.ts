@@ -27,6 +27,7 @@ import {
 	MCP_PROTOCOL_VERSION,
 	MCP_RESOURCE,
 	MCP_SERVER_INSTRUCTIONS,
+	MCP_DATA_GUIDE,
 	GET_ENTITY_URLS_TOOL_DESCRIPTION,
 	MCP_URL_GUIDE,
 	OPEN_LIX_TOOL_DESCRIPTION,
@@ -92,7 +93,7 @@ function toolTextBlocks(result: {
 		.map((block) => block.text);
 }
 
-/** A failed call's { request_id, error }: the JSON text block, never structuredContent. */
+/** A failed call's { error }: the JSON text block, never structuredContent. */
 function toolErrorContent(result: {
 	content?: Array<{ type: string; text?: string }>;
 	structuredContent?: unknown;
@@ -750,11 +751,17 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		// rest are one-liners, output schemas are success-only.
 		const listingChars = JSON.stringify(tools.tools).length;
 		assert.ok(
-			listingChars < 34_000,
-			`tools/list is ${listingChars} chars; keep it under 34k`,
+			listingChars < 34_000 + tools.tools.length * (MCP_DATA_GUIDE.length + 2),
+			`tools/list is ${listingChars} chars; keep the base listing under 34k plus per-tool privacy guidance`,
 		);
 		for (const tool of tools.tools) {
-			const limit = isGuidedTool(tool.name) ? 1_800 : 320;
+			const limit =
+				(isGuidedTool(tool.name) ? 1_800 : 320) + MCP_DATA_GUIDE.length + 2;
+			assert.ok(tool.description?.endsWith(MCP_DATA_GUIDE));
+			assert.doesNotMatch(
+				JSON.stringify(tool.outputSchema),
+				/request_id|server_time/,
+			);
 			assert.ok(
 				(tool.description ?? "").length <= limit,
 				`${tool.name} description is ${tool.description?.length} chars`,
@@ -843,7 +850,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		};
 		const context = openedContent.context;
 		assert.equal(typeof context, "string");
-		assert.match(openedContent.request_id, /^[0-9a-f-]{36}$/i);
+		assert.equal(openedContent.request_id, undefined);
 		assert.equal(openedContent.id, LIX_ID);
 		assert.equal(openedContent.url, "https://lixray.test/@acme/company");
 		assert.ok(Date.parse(openedContent.context_expires_at) > Date.now());
@@ -858,7 +865,8 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(openedContent.empty, true);
 		assert.equal(openedContent.file_count, 0);
 		assert.equal(openedContent.directory_count, 0);
-		assert.equal(responseRequestIds.at(-1), openedContent.request_id);
+		assert.equal(openedContent.request_id, undefined);
+		assert.match(responseRequestIds.at(-1) ?? "", /^[0-9a-f-]{36}$/i);
 		const restored = await client.callTool({
 			name: "restore",
 			arguments: { context, commit_id: "commit-target" },
@@ -868,7 +876,6 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			context,
 			branch_id: "main",
 			commit_id: "commit-target",
-			request_id: responseRequestIds.at(-1),
 		});
 		const restoredText = toolText(restored);
 		assert.match(restoredText, /Restored branch main to commit commit-target/);
@@ -911,7 +918,8 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				notices: [],
 			},
 		);
-		assert.equal(responseRequestIds.at(-1), queriedContent.request_id);
+		assert.equal(queriedContent.request_id, undefined);
+		assert.match(responseRequestIds.at(-1) ?? "", /^[0-9a-f-]{36}$/i);
 		const listedFiles = await client.callTool({
 			name: "query_sql",
 			arguments: { context, sql: "SELECT path, name FROM lix_file" },
@@ -1013,7 +1021,8 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			details: { operation: "execute" },
 			statement_index: 0,
 		});
-		assert.equal(responseRequestIds.at(-1), failedContent.request_id);
+		assert.equal(failedContent.request_id, undefined);
+		assert.match(responseRequestIds.at(-1) ?? "", /^[0-9a-f-]{36}$/i);
 		assert.match(
 			failed.content?.[0]?.type === "text" ? failed.content[0].text : "",
 			/Use SELECT 1 instead\./,
@@ -1073,7 +1082,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		};
 		assert.equal(internalContent.error.message, "The LixRay tool call failed.");
 		assert.match(internalContent.error.hint, /Contact LixRay support/);
-		assert.match(internalContent.error.hint, /request_id/);
+		assert.doesNotMatch(internalContent.error.hint, /request_id/);
 		assert.match(internalContent.error.hint, /LixRay support/);
 
 		// A host that cached the output schemas validates structuredContent
@@ -1390,7 +1399,7 @@ void test("text-only hosts get structuredContent JSON in a later text block", as
 		const context = openedFallback.context as string;
 		assert.equal(typeof context, "string");
 		assert.ok(context.length > 0);
-		assert.equal(typeof openedFallback.request_id, "string");
+		assert.equal(openedFallback.request_id, undefined);
 
 		const queried = await client.callTool({
 			name: "query_sql",
@@ -1425,7 +1434,7 @@ void test("text-only hosts get structuredContent JSON in a later text block", as
 	}
 });
 
-void test("typed context errors include hint, server time, and advertised expiration", async () => {
+void test("typed context errors provide hints without diagnostic metadata", async () => {
 	const expiredService = new LixService(new FakeRuntime(), {
 		contextSigningKey: "test-key",
 		principal: { userId: "user", clientId: "client" },
@@ -1486,8 +1495,7 @@ void test("typed context errors include hint, server time, and advertised expira
 		).error;
 		assert.equal(expiredError.code, "context_expired");
 		assert.equal(expiredError.hint, CONTEXT_REOPEN_HINT);
-		assert.equal(typeof expiredError.details?.server_time, "string");
-		assert.equal(typeof expiredError.details?.expires_at, "string");
+		assert.equal(expiredError.details, undefined);
 		assert.match(toolText(expired), /Call open_lix again/);
 		assert.match(toolText(expired), /structuredContent\.context/);
 		assertTextOmitsContext(toolText(expired), expiredContext);
@@ -1519,7 +1527,7 @@ void test("typed context errors include hint, server time, and advertised expira
 		).error;
 		assert.equal(malformedError.code, "malformed_context");
 		assert.equal(malformedError.hint, CONTEXT_REOPEN_HINT);
-		assert.equal(typeof malformedError.details?.server_time, "string");
+		assert.equal(malformedError.details, undefined);
 
 		const malformedWrite = await liveClient.callTool({
 			name: "execute_sql",
@@ -1568,9 +1576,7 @@ void test("typed context errors include hint, server time, and advertised expira
 		).error;
 		assert.equal(signatureError.code, "invalid_context");
 		assert.equal(signatureError.hint, CONTEXT_REOPEN_HINT);
-		assert.equal(typeof signatureError.details?.server_time, "string");
-		assert.equal(typeof signatureError.details?.expires_at, "string");
-		assert.equal(signatureError.details?.lix_id, undefined);
+		assert.equal(signatureError.details, undefined);
 		await wrongKeyClient.close();
 	} finally {
 		await expiredClient.close();
@@ -1820,8 +1826,10 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 		assert.ok(retry);
 		assert.equal(first.distinctId, "felix");
 		assert.equal(retry.distinctId, "felix");
-		assert.equal(first.properties.request_id, failedContent.request_id);
-		assert.equal(retry.properties.request_id, succeededContent.request_id);
+		assert.equal(failedContent.request_id, undefined);
+		assert.equal(typeof first.properties.request_id, "string");
+		assert.equal(succeededContent.request_id, undefined);
+		assert.equal(typeof retry.properties.request_id, "string");
 		assert.notEqual(first.properties.request_id, retry.properties.request_id);
 		assert.equal(first.properties.lix_id, LIX_ID);
 		assert.equal(retry.properties.lix_id, LIX_ID);
@@ -2110,8 +2118,8 @@ void test("transport observes and correlates protocol failures before tool execu
 			id: number | null;
 			error: { code: number; message: string; data: { request_id: string } };
 		};
-		assert.equal(payload.error.data.request_id, "transport-test");
-		assert.match(payload.error.message, /request_id: transport-test/);
+		assert.equal(payload.error.data, undefined);
+		assert.doesNotMatch(payload.error.message, /request_id/);
 		assert.doesNotMatch(text, /private-/);
 		assert.equal(observations.length, 1);
 		assert.equal(
@@ -2165,8 +2173,7 @@ void test("transport contains setup and observer failures with a correlated safe
 		id: null,
 		error: {
 			code: -32603,
-			message: "Internal error (request_id: setup-test)",
-			data: { request_id: "setup-test" },
+			message: "Internal error",
 		},
 	});
 	assert.equal(observations.length, 1);
@@ -2212,10 +2219,7 @@ void test("transport generates shared trace context and isolates tool observers"
 		assert.equal(calls[0]?.parentId, observed?.traceId);
 		const invalid = await client.callTool({ name: "open_lix", arguments: {} });
 		assert.equal(invalid.isError, true);
-		assert.match(
-			JSON.stringify(invalid.content),
-			new RegExp(`request_id: ${observations.at(-1)?.requestId}`),
-		);
+		assert.doesNotMatch(JSON.stringify(invalid.content), /request_id/);
 		assert.equal(calls.length, 1);
 		assert.equal(observations.at(-1)?.outcome, "error");
 		assert.equal(observations.at(-1)?.statusCode, 200);

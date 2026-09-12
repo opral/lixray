@@ -3,7 +3,6 @@ export function formatRepositoryOpenError(caught: unknown): string {
 	const code = getErrorCode(caught);
 
 	if (
-		code === "LIX_ERROR_LIX_MIGRATION_FAILED" ||
 		code === "LIX_ERROR_MIGRATION_FAILED" ||
 		code === "LIX_ERROR_REPOSITORY_UPGRADE"
 	) {

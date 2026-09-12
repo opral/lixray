@@ -62,7 +62,7 @@ void test("waits for an in-progress repository migration", async () => {
 					return Response.json(
 						{
 							error: {
-								code: "LIX_ERROR_LIX_MIGRATING",
+								code: "LIX_ERROR_MIGRATING",
 								details: { fromVersion: 68, toVersion: 71 },
 							},
 						},
@@ -98,7 +98,7 @@ void test("fails when repository migration does not complete", async () => {
 			fetchImpl: async () => {
 				requests += 1;
 				return Response.json(
-					{ error: { code: "LIX_ERROR_LIX_MIGRATING" } },
+					{ error: { code: "LIX_ERROR_MIGRATING" } },
 					{ status: 503, headers: { "Retry-After": "1" } },
 				);
 			},
@@ -116,12 +116,12 @@ void test("reports recovering repositories and does not attempt a close", async 
 			fetchImpl: async () => {
 				requests += 1;
 				return Response.json(
-					{ error: { code: "LIX_ERROR_LIX_RECOVERING" } },
+					{ error: { code: "LIX_ERROR_RECOVERING" } },
 					{ status: 503 },
 				);
 			},
 		}),
-		/HTTP 503 LIX_ERROR_LIX_RECOVERING/,
+		/HTTP 503 LIX_ERROR_RECOVERING/,
 	);
 	assert.equal(requests, 1);
 });
