@@ -139,7 +139,7 @@ await test("browser opening explicitly selects partial replica and persistent pe
 await test("retries a recovering authority without remote fallback", async () => {
 	failures = [
 		Object.assign(new Error("recovering"), {
-			code: "LIX_ERROR_LIX_RECOVERING",
+			code: "LIX_ERROR_RECOVERING",
 		}),
 	];
 	const session = await openRepositoryLixSession(options());
