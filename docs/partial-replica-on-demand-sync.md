@@ -26,10 +26,37 @@ with separate SQL sessions. Closing one tab leaves the other tabs connected to
 the same resident data and pending edits. This browser path requires SharedWorker,
 Web Locks, and OPFS support.
 
+Independent browser replicas reconcile valid concurrent row edits in the same
+native merge pipeline as branch merges. Registered schema/plugin merge hooks
+run for their rows; the default for overlapping values is last write wins in
+server acceptance order. Files parsed by plugins are serialized from the merged
+rows. Opaque file content is atomic. Once background acknowledgment and updates
+settle, each replica and its editors show the authoritative result. Retrying a
+lost acknowledgment preserves the original acceptance order, and newer local
+edits remain pending. No foreground server round trip is required for resident
+reads and writes.
+
+The native engine can prepare a plugin-managed file's parsed rows and executable
+through a content SELECT when its host supplies a plugin runtime. The current
+browser SDK does not execute installed WASM file plugins locally. Such files can
+be read, but local edits requiring their parser or serializer remain unsupported;
+server/native plugin row merging uses the shared pipeline. This is distinct from
+opaque file editing, which the browser supports locally.
+
+The first SQL read can also prepare registered schema metadata needed to open
+later local write transactions, without loading rows from those schemas.
+Repository opening does not perform this preparation. Prefetch through ordinary
+SQL; no separate preparation API is required.
+
+Cold file creation or rename can require namespace metadata for path validation.
+That preparation can grow with file count; content-only edits to an already
+loaded file do not need this namespace scan. This does not add repository-wide
+work to opening.
+
 The SDK and reference server use Lix main revision
-`1060e19baa0ef478c8c1ac7e57c9e37823dbcc0c`, merged through
-[Lix PR #1757](https://github.com/opral/lix/pull/1757). Upgrade both together.
-Server protocol is 8 and sync protocol is 11. Browser conversion is separate from
+`bfcd165badd8d64f20f708332471ced665938272`, merged through
+[Lix PR #1758](https://github.com/opral/lix/pull/1758). Upgrade both together.
+Server protocol is 8 and sync protocol is 12. Browser conversion is separate from
 any authoritative repository migration; never reset server storage for an upgrade.
 
 Controlled local profiling of this integration used three fresh small replicas
@@ -38,22 +65,32 @@ The native authority, release WASM, SDK and app source were held fixed throughou
 
 | Median measurement                      |       Small |     320 MiB |
 | --------------------------------------- | ----------: | ----------: |
-| SDK opening                             |      283 ms |      287 ms |
-| Session ready, including navigation SQL |      467 ms |      469 ms |
-| Opening requests / response body bytes  | 2 / 2,327 B | 2 / 2,321 B |
-| Warm offline read                       |      4.9 ms |      5.3 ms |
-| Warm offline write                      |      8.6 ms |     9.75 ms |
-| Offline reopen session ready            |      241 ms |      252 ms |
+| SDK opening                             |    275.9 ms |    278.6 ms |
+| Session ready, including navigation SQL |    451.5 ms |    454.4 ms |
+| Opening requests / response body bytes  | 2 / 2,322 B | 2 / 2,311 B |
+| Warm offline read                       |      6.0 ms |      6.5 ms |
+| Warm offline write                      |      8.4 ms |     10.4 ms |
+| Offline reopen session ready            |    249.3 ms |    260.0 ms |
 
-All 180 offline writes and 360 reads passed, with no native-input requests and no
-successful offline network responses. Background upload attempts and reopen
-authentication attempts were blocked; they were not absent. First offline writes
-took 42/47 ms. The first measured SELECT took 64/116 ms, and one 693 ms small-opening
-outlier remains in the results. These are local measurements after module import:
-they exclude application/SDK/WASM downloads, HTTP headers, full UI rendering,
-production network latency and server startup. They demonstrate bounded opening
-for an unchanged working set while unrelated repository content grows; broader
-queries and new write dependencies can require more hydration.
+All 180 offline writes, 360 reads, and six reopens passed with no native-input
+requests or successful offline network responses. Background upload and reopen
+admission attempts were blocked, not absent. First offline writes took 39.4/46.5
+ms; first data SELECTs took 58.3/107.3 ms. Both arms had a slow third opening
+sample of approximately 486–489 ms; all samples remain in the report.
+
+These are local key/value measurements after module import. They exclude
+application/SDK/WASM downloads, HTTP headers, full UI rendering, production
+network latency and server startup. They show bounded opening transfers for an
+unchanged working set as unrelated content grows, not constant cost for every
+query or write dependency.
+
+A separate 96 KiB opaque-file test passed both acceptance orders with 16 rows,
+16,000 rows, and 320 MiB unrelated content. SELECT-only prefetch supported first
+offline writes with zero hydration attempts, and both replicas converged after
+reconnection. Cold file preparation measured approximately 0.38/0.60/3.08 seconds
+across those dimensions; it is not constant-cost. The parsed-file browser profile
+reached the unsupported plugin-runtime boundary described above and is not
+reported as passing.
 
 Pending edits and checkpoint dependencies upload in bounded waves. A single
 native commit or minimal checkpoint publication closure over the 1 MiB JSON

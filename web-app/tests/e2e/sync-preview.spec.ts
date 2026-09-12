@@ -61,3 +61,34 @@ test("@history offline checkpoints survive reopen and preserve exact full and pa
 		await fixture.close();
 	}
 });
+
+test("@conflicts independent replicas converge after both orders of same-row offline edits", async ({
+	browser,
+	baseURL,
+}) => {
+	test.skip(
+		process.env.PLAYWRIGHT_SYNC_LOCAL !== "1",
+		"conflict injection requires disposable local repositories",
+	);
+	test.setTimeout(300_000);
+	const fixture = await createSyncFixture({
+		browser,
+		baseURL,
+		scenario: "conflicts",
+	});
+	let primaryFailure = false;
+	try {
+		await fixture.independentConflicts(await fixture.editing());
+	} catch (error) {
+		primaryFailure = true;
+		throw error;
+	} finally {
+		await fixture.close().catch((error: unknown) => {
+			if (!primaryFailure) throw error;
+			test.info().annotations.push({
+				type: "cleanup-error",
+				description: String(error),
+			});
+		});
+	}
+});

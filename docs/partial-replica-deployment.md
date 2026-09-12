@@ -2,7 +2,7 @@
 
 LixRay uses the upstream Lix reference-server image resolved from the exact
 `vendor/lix` revision and server content hash. The browser SDK and server must
-come from that same revision (server protocol 8, sync protocol 11). Use the
+come from that same revision (server protocol 8, sync protocol 12). Use the
 existing image resolver and preview workflow; the removed custom `lix-server`
 source and its Dockerfile are not part of this deployment.
 

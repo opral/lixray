@@ -13,7 +13,12 @@ import { provisionRepositories } from "../../scripts/provision-repositories.mjs"
 
 const DEMO_REPOSITORY_ID = "00000000-0000-4000-8000-000000000002";
 const SECONDARY_REPOSITORY_ID = "00000000-0000-4000-8000-000000000005";
-export type SyncScenario = "navigation" | "editing" | "history" | "performance";
+export type SyncScenario =
+	| "navigation"
+	| "editing"
+	| "history"
+	| "conflicts"
+	| "performance";
 
 export async function createSyncFixture({
 	browser,
@@ -234,7 +239,7 @@ export async function createSyncFixture({
 					headers: {
 						Authorization: "Bearer lixray-demo",
 						"Lix-Session-Id": "0".repeat(64),
-						"Lix-Sync-Protocol-Version": "11",
+						"Lix-Sync-Protocol-Version": "12",
 						"Lix-Server-Protocol-Version": "8",
 					},
 				});
@@ -1118,6 +1123,147 @@ export async function createSyncFixture({
 			};
 		}
 		type EditingState = Awaited<ReturnType<typeof editing>>;
+		async function independentConflicts(state: EditingState) {
+			const {
+				createdFileId,
+				createdUrl,
+				leftEditor,
+				rightEditor,
+				fresh,
+				freshContext,
+			} = state;
+			expect(freshContext).not.toBe(sharedContext);
+			const mirror = await newPage(freshContext);
+			observePage(mirror, "independent-mirror");
+			await Promise.all([fresh.goto(createdUrl), mirror.goto(createdUrl)]);
+			const editor = (page: Page) =>
+				page.locator('.ProseMirror[contenteditable="true"]:visible');
+			const editors = [leftEditor, rightEditor, editor(fresh), editor(mirror)];
+			const baseline = await leftEditor.locator("p").last().innerText();
+			for (const view of editors) {
+				await expect(view.locator("p").last()).toHaveText(baseline, {
+					timeout: realtimeTimeout,
+				});
+			}
+
+			const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL).toString();
+			const authorization = {
+				Authorization: "Bearer lixray-demo",
+				"Lix-Server-Protocol-Version": "8",
+			};
+			const opened = await sharedContext.request.get(endpoint, {
+				headers: authorization,
+			});
+			expect(opened.ok()).toBe(true);
+			const { sessionId } = (await opened.json()) as { sessionId: string };
+			const headers = { ...authorization, "Lix-Session-Id": sessionId };
+			const authorityContent = async () => {
+				const response = await sharedContext.request.post(
+					new URL("execute", endpoint).toString(),
+					{
+						headers: {
+							...headers,
+							"Idempotency-Key": `conflict-read-${randomUUID()}`,
+						},
+						data: {
+							sql: "SELECT content FROM lix_file WHERE id = $1",
+							params: [{ kind: "text", value: createdFileId }],
+						},
+					},
+				);
+				expect(response.ok(), await response.text()).toBe(true);
+				const result = (await response.json()) as {
+					rows: Array<Array<{ kind: string; base64?: string }>>;
+				};
+				const value = result.rows[0]?.[0];
+				expect(value?.kind).toBe("blob");
+				expect(typeof value?.base64).toBe("string");
+				return Buffer.from(value!.base64!, "base64").toString("utf8");
+			};
+			const replicas = [
+				{
+					context: sharedContext,
+					page: left,
+					view: leftEditor,
+					mirror: rightEditor,
+				},
+				{
+					context: freshContext,
+					page: fresh,
+					view: editor(fresh),
+					mirror: editor(mirror),
+				},
+			];
+			let primaryFailure = false;
+			let cleanupFailure: PromiseRejectedResult | undefined;
+			try {
+				for (const first of [0, 1]) {
+					const last = 1 - first;
+					const markers = [0, 1].map(
+						(index) => `independent-${first}-${index}-${randomUUID()}`,
+					);
+					intentionallyOffline = true;
+					await Promise.all(
+						replicas.map(({ context }) => context.setOffline(true)),
+					);
+					await Promise.all(
+						replicas.map(async ({ page, view }, index) => {
+							await view.locator("p").last().click();
+							await page.keyboard.press("Home");
+							await page.keyboard.press("Shift+End");
+							await page.keyboard.insertText(markers[index]!);
+						}),
+					);
+					// The other tab in each profile proves durable local publication,
+					// rather than merely observing the writer's unsaved editor draft.
+					for (const [index, replica] of replicas.entries()) {
+						await expect(replica.mirror.locator("p").last()).toHaveText(
+							markers[index]!,
+							{ timeout: 5_000 },
+						);
+					}
+					await replicas[first]!.context.setOffline(false);
+					await expect
+						.poll(authorityContent, { timeout: realtimeTimeout })
+						.toContain(markers[first]!);
+					await expect(replicas[last]!.view.locator("p").last()).toHaveText(
+						markers[last]!,
+					);
+					await replicas[last]!.context.setOffline(false);
+					intentionallyOffline = false;
+					await expect
+						.poll(authorityContent, { timeout: realtimeTimeout })
+						.toContain(markers[last]!);
+					for (const view of editors) {
+						await expect(view.locator("p").last()).toHaveText(markers[last]!, {
+							timeout: realtimeTimeout,
+						});
+					}
+					expect(await authorityContent()).not.toContain(markers[first]!);
+				}
+			} catch (error) {
+				primaryFailure = true;
+				throw error;
+			} finally {
+				const cleanup = await Promise.allSettled([
+					...replicas.map(({ context }) => context.setOffline(false)),
+					sharedContext.request.delete(
+						new URL("session", endpoint).toString(),
+						{ headers },
+					),
+				]);
+				intentionallyOffline = false;
+				for (const result of cleanup) {
+					if (result.status !== "rejected") continue;
+					if (!primaryFailure) cleanupFailure ??= result;
+					test.info().annotations.push({
+						type: "cleanup-error",
+						description: String(result.reason),
+					});
+				}
+			}
+			if (cleanupFailure) throw cleanupFailure.reason;
+		}
 		async function checkpoint(state: EditingState) {
 			const { fresh, leftEditor, rightEditor } = state;
 
@@ -1609,6 +1755,7 @@ export async function createSyncFixture({
 			editing,
 			checkpoint,
 			concurrent,
+			independentConflicts,
 			reopen,
 			partialCheckpoint,
 			history,
