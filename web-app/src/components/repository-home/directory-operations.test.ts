@@ -463,3 +463,92 @@ void test("drop traversal consumes all directory reader batches and keeps empty 
 		],
 	);
 });
+
+void test("rename retries an expired pre-commit snapshot and preserves descendants", async () => {
+	const lix = await fixture();
+	let attempts = 0;
+	let rollbacks = 0;
+	const wrapped = Object.create(lix) as Lix;
+	wrapped.beginTransaction = async () => {
+		const transaction = await lix.beginTransaction();
+		attempts += 1;
+		if (attempts !== 1) return transaction;
+		return new Proxy(transaction, {
+			get(target, key) {
+				if (key === "execute")
+					return async () => {
+						throw Object.assign(new Error("expired"), {
+							code: "LIX_STORAGE_READ_EXPIRED",
+						});
+					};
+				if (key === "rollback")
+					return async () => {
+						rollbacks += 1;
+						await target.rollback();
+					};
+				const value: unknown = Reflect.get(target, key);
+				return typeof value === "function"
+					? (value as (...args: unknown[]) => unknown).bind(target)
+					: value;
+			},
+		});
+	};
+	try {
+		const before = await lix.execute(
+			"SELECT id FROM lix_file WHERE path = '/source/note.md'",
+		);
+		assert.equal(
+			await renameWorkspaceEntry(wrapped, "/source", "renamed"),
+			"/renamed",
+		);
+		assert.equal(attempts, 2);
+		assert.equal(rollbacks, 1);
+		assert.deepEqual(
+			(
+				await lix.execute(
+					"SELECT id FROM lix_file WHERE path = '/renamed/note.md'",
+				)
+			).rows,
+			before.rows,
+		);
+		assert.ok((await paths(lix, "directory")).includes("/renamed/empty"));
+	} finally {
+		await lix.close();
+	}
+});
+
+void test("rename never replays a commit error even when it reports read expiration", async () => {
+	const lix = await fixture();
+	let attempts = 0;
+	const failure = Object.assign(new Error("commit failed"), {
+		code: "LIX_STORAGE_READ_EXPIRED",
+	});
+	const wrapped = Object.create(lix) as Lix;
+	wrapped.beginTransaction = async () => {
+		attempts += 1;
+		const transaction = await lix.beginTransaction();
+		return new Proxy(transaction, {
+			get(target, key) {
+				if (key === "commit")
+					return async () => {
+						await target.commit();
+						throw failure;
+					};
+				const value: unknown = Reflect.get(target, key);
+				return typeof value === "function"
+					? (value as (...args: unknown[]) => unknown).bind(target)
+					: value;
+			},
+		});
+	};
+	try {
+		await assert.rejects(
+			renameWorkspaceEntry(wrapped, "/source", "renamed"),
+			(error) => error === failure,
+		);
+		assert.equal(attempts, 1);
+		assert.ok((await paths(lix, "directory")).includes("/renamed"));
+	} finally {
+		await lix.close();
+	}
+});
