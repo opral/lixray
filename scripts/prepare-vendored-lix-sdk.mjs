@@ -16,13 +16,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { installBrowserArtifact } from "./lix-ci-artifacts.mjs";
 
 const workspaceRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const releaseDist = join(
-	workspaceRoot,
-	"node_modules",
-	"@lix-js",
-	"sdk-release",
-	"dist",
-);
 const sdkRoot = join(workspaceRoot, "vendor", "lix", "packages", "js-sdk");
 const sdkDist = join(sdkRoot, "dist");
 const opfsStorageRoot = join(
@@ -65,10 +58,6 @@ const nativeTarget = `${process.platform}-${process.arch}`;
 const browserMarker = join(sdkDist, ".lixray-browser-build.json");
 const nativeMarker = join(sdkDist, `.lixray-native-${nativeTarget}.json`);
 
-await requireDirectory(
-	releaseDist,
-	"Install workspace dependencies before building the vendored Lix SDK.",
-);
 await requireDirectory(
 	sdkRoot,
 	"Initialize the vendor/lix submodule before installing dependencies.",

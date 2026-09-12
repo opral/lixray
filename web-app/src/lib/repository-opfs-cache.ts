@@ -3,9 +3,8 @@ export interface RepositoryOpfsCacheIdentity {
 	replicaId: string;
 }
 
-// Hard-cut this prefix whenever an unshipped sync protocol or durable replica
-// layout changes. Reusing the old `lixray:` names would let incompatible OPFS
-// rows participate in bootstrap before the new server can repair them.
+// Keep this namespace stable across upgrades. Convert supported replica layouts
+// in the same OPFS storage so cached data and pending local edits are preserved.
 export const REPOSITORY_OPFS_CACHE_NAMESPACE = "lixray:local-first-v1";
 
 export const BROWSER_REPLICA_STORAGE_KEY_PREFIX = "lixray:browser-replica:v3:";

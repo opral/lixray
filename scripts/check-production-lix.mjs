@@ -22,7 +22,7 @@ export async function checkProductionLix({
 			const requestTimeout = migrationDeadline
 				? Math.min(timeoutMs, Math.max(1, migrationDeadline - nowImpl()))
 				: timeoutMs;
-			handshake = await request(fetchImpl, protocolUrl, { headers: { "lix-server-protocol-version": "7" } }, requestTimeout);
+			handshake = await request(fetchImpl, protocolUrl, { headers: { "lix-server-protocol-version": "8" } }, requestTimeout);
 			if (handshake.response.ok) break;
 			if (!isMigrationInProgress(handshake)) {
 				throw responseError("handshake", handshake.response, handshake.body);
@@ -56,7 +56,7 @@ export async function checkProductionLix({
 				headers: {
 					"Content-Type": "application/json",
 					"Lix-Session-Id": sessionId,
-					"lix-server-protocol-version": "7",
+					"lix-server-protocol-version": "8",
 				},
 				body: JSON.stringify({ sql: "SELECT 1", params: [] }),
 			},
@@ -81,7 +81,7 @@ export async function checkProductionLix({
 				new URL("session", protocolUrl),
 				{
 					method: "DELETE",
-					headers: { "Lix-Session-Id": sessionId, "lix-server-protocol-version": "7" },
+					headers: { "Lix-Session-Id": sessionId, "lix-server-protocol-version": "8" },
 				},
 				timeoutMs,
 			).catch((error) => {

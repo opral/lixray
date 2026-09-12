@@ -1,8 +1,10 @@
 import {
+	convertReplicaToPartial,
 	openLix,
 	type Lix,
 	type LixOpenProgress,
 	type RemoteLixFetch,
+	type PartialReplicaLixServerOptions,
 } from "@lix-js/sdk";
 import { OpfsStorage } from "@lix-js/storage-opfs";
 import { captureExceptionTelemetry } from "./telemetry.ts";
@@ -16,6 +18,8 @@ import {
 	markRepositoryOpenPerformance,
 	REPOSITORY_OPEN_MARKS,
 } from "./repository-open-performance.ts";
+
+const GLOBAL_BRANCH_ID = "ffffffff-ffff-7fff-bfff-ffffffffffff";
 
 type TokenProvider = () => Promise<string | null>;
 
@@ -59,6 +63,7 @@ export function openRepositoryRemoteLix(
 ): Promise<Lix> {
 	return openLix({
 		server: {
+			mode: "remote",
 			url: repositoryUrl(options),
 			headers: async () => repositoryRequestHeaders(options),
 			fetch: createTelemetryFetch(
@@ -113,7 +118,9 @@ export async function openRepositoryLixSession(
 		const lease = await acquireManagedRepositoryResource(
 			sessionKey,
 			async (signal) => {
-				const replicaId = await repositoryBrowserReplicaId(options);
+				const replicaId = options.publicPath
+					? "remote-public-path"
+					: await repositoryBrowserReplicaId(options);
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaIdentified);
 				try {
 					return await retryRepositoryOpenDuringMigration({
@@ -233,19 +240,61 @@ async function openRepositoryLixSessionOnce(
 	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.lixOpened);
 
 	try {
-		const defaultBranchId = await lix.activeBranchId();
-		markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.branchReady);
-		const session = new RemoteRepositoryLixSession(lix, defaultBranchId);
-		if (
-			options.initialBranchId &&
-			options.initialBranchId !== defaultBranchId
-		) {
+		const activeBranchId = await lix.activeBranchId();
+		// Read the canonical tracked, fileless GLOBAL setting independently
+		// of the resumed branch. Native uniqueness prevents an untracked row
+		// from shadowing a tracked identity; the explicit retention predicate
+		// also refuses any noncanonical untracked setting.
+		let defaultBranchId: unknown = activeBranchId;
+		if (!options.publicPath) {
+			const defaultSession = await lix.openAnotherSession({
+				branchId: GLOBAL_BRANCH_ID,
+			});
 			try {
-				await session.switchBranch(options.initialBranchId);
-			} catch (error) {
-				if (!isBranchNotFoundError(error)) throw error;
+				const defaults = await defaultSession.execute(
+					"SELECT value FROM lix_key_value WHERE key = $1 AND lixcol_file_id IS NULL AND lixcol_untracked = false",
+					["lix_default_branch_id"],
+				);
+				defaultBranchId =
+					defaults.rows.length === 1 ? defaults.rows[0].value : undefined;
+			} finally {
+				await defaultSession.close();
 			}
 		}
+		if (typeof defaultBranchId !== "string" || !defaultBranchId) {
+			throw new Error("The repository has no valid default branch.");
+		}
+		const session = new ManagedRepositoryLixSession(
+			lix,
+			defaultBranchId,
+			activeBranchId,
+		);
+		const requestedBranchId = options.initialBranchId ?? defaultBranchId;
+		if (requestedBranchId !== activeBranchId) {
+			try {
+				await session.switchBranch(requestedBranchId);
+			} catch (error) {
+				// Offline or slow pending uploads must not hide the cached branch.
+				// An explicit later switch still reports its failure to the caller.
+				if (isErrorCode(error, "LIX_PARTIAL_BRANCH_SWITCH_PENDING")) {
+					markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.branchReady);
+					requestFailureReporting.enabled = true;
+					return session;
+				}
+				if (!isBranchNotFoundError(error)) throw error;
+				if (session.activeBranchSnapshot() !== defaultBranchId) {
+					try {
+						await session.switchBranch(defaultBranchId);
+					} catch (fallbackError) {
+						if (
+							!isErrorCode(fallbackError, "LIX_PARTIAL_BRANCH_SWITCH_PENDING")
+						)
+							throw fallbackError;
+					}
+				}
+			}
+		}
+		markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.branchReady);
 		requestFailureReporting.enabled = true;
 		return session;
 	} catch (error) {
@@ -260,26 +309,43 @@ async function openOpfsSyncSession(
 ): Promise<Lix> {
 	await waitForLixPrewarm();
 	options.signal?.throwIfAborted();
-	return openLix({
-		storage: new OpfsStorage({
-			name: repositoryOpfsCacheName(options),
-		}),
-		server: {
-			url: repositoryUrl(options),
-			headers: async () => repositoryRequestHeaders(options),
-			fetch: createTelemetryFetch(
-				options.fetch ?? globalThis.fetch.bind(globalThis),
-				{
-					repositoryId: options.repositoryId,
-					refreshAccessToken: options.refreshAccessToken,
-					signal: options.signal,
-					shouldCaptureRequestFailures: () => requestFailureReporting.enabled,
-				},
-			),
+	const fetcher = createTelemetryFetch(
+		options.fetch ?? globalThis.fetch.bind(globalThis),
+		{
+			repositoryId: options.repositoryId,
+			refreshAccessToken: options.refreshAccessToken,
+			signal: options.signal,
+			shouldCaptureRequestFailures: () => requestFailureReporting.enabled,
 		},
-		onProgress: (progress) =>
-			publishLocalOpenProgress(repositorySessionKey(options), progress),
-	});
+	);
+	const commonServer = {
+		url: repositoryUrl(options),
+		headers: async () => repositoryRequestHeaders(options),
+		fetch: fetcher,
+	};
+	const onProgress = (progress: LixOpenProgress) =>
+		publishLocalOpenProgress(repositorySessionKey(options), progress);
+	// Native chunks may contain data outside a published path. Keep path-scoped
+	// public access on the worker's SQL-authorized remote transport.
+	if (options.publicPath)
+		return openLix({ server: { ...commonServer, mode: "remote" } });
+	const storage = new OpfsStorage({ name: repositoryOpfsCacheName(options) });
+	const server: PartialReplicaLixServerOptions = {
+		...commonServer,
+		mode: "partial_replica",
+	};
+	try {
+		return await openLix({ storage, server, onProgress });
+	} catch (error) {
+		if (!isErrorCode(error, "LIX_PARTIAL_REPLICA_MIGRATION_REQUIRED"))
+			throw error;
+		options.signal?.throwIfAborted();
+		// Failed opening releases ownership. Preserve the same storage and all
+		// pending edits while the SDK performs closed-storage conversion.
+		await convertReplicaToPartial({ storage, server });
+		options.signal?.throwIfAborted();
+		return openLix({ storage, server, onProgress });
+	}
 }
 
 async function repositoryRequestHeaders(
@@ -602,17 +668,22 @@ function abortError(signal: AbortSignal): Error {
 		: new DOMException("The operation was aborted.", "AbortError");
 }
 
-export class RemoteRepositoryLixSession implements RepositoryLixSession {
+export class ManagedRepositoryLixSession implements RepositoryLixSession {
 	readonly lix: Lix;
 	readonly #listeners = new Set<() => void>();
+	readonly #pendingCreations = new Map<string, Promise<string>>();
 	readonly #defaultBranchId: string;
 	#activeBranchId: string;
 	#closed = false;
 
-	constructor(lix: Lix, defaultBranchId: string) {
+	constructor(
+		lix: Lix,
+		defaultBranchId: string,
+		activeBranchId = defaultBranchId,
+	) {
 		this.lix = lix;
 		this.#defaultBranchId = defaultBranchId;
-		this.#activeBranchId = defaultBranchId;
+		this.#activeBranchId = activeBranchId;
 	}
 
 	activeBranchSnapshot(): string {
@@ -633,24 +704,57 @@ export class RemoteRepositoryLixSession implements RepositoryLixSession {
 
 	async createBranch(name: string): Promise<string> {
 		this.#assertOpen();
-		const branch = await this.lix.createBranch({ name });
-		await this.switchBranch(branch.id);
-		return branch.id;
+		// A retry belongs to the same source branch and exact requested name.
+		// Share an in-flight creation too, before its durable ID is available.
+		const key = JSON.stringify([this.#activeBranchId, name]);
+		let creation = this.#pendingCreations.get(key);
+		if (!creation) {
+			creation = this.lix.createBranch({ name }).then((branch) => branch.id);
+			this.#pendingCreations.set(key, creation);
+		}
+		let branchId: string;
+		try {
+			branchId = await creation;
+		} catch (error) {
+			if (this.#pendingCreations.get(key) === creation)
+				this.#pendingCreations.delete(key);
+			throw error;
+		}
+		await this.switchBranch(branchId);
+		if (this.#pendingCreations.get(key) === creation)
+			this.#pendingCreations.delete(key);
+		return branchId;
 	}
 
 	async switchBranch(branchId: string): Promise<string> {
 		this.#assertOpen();
 		if (branchId === this.#activeBranchId) return branchId;
-		const switched = await this.lix.switchBranch({ branchId });
-		this.#activeBranchId = switched.branchId;
-		for (const listener of [...this.#listeners]) listener();
-		return switched.branchId;
+		for (let attempt = 0; ; attempt += 1) {
+			this.#assertOpen();
+			try {
+				const switched = await this.lix.switchBranch({ branchId });
+				this.#activeBranchId = switched.branchId;
+				for (const listener of [...this.#listeners]) listener();
+				return switched.branchId;
+			} catch (error) {
+				const retryDelay = OPEN_RETRY_DELAYS_MS[attempt];
+				if (
+					!isErrorCode(error, "LIX_PARTIAL_BRANCH_SWITCH_PENDING") ||
+					retryDelay === undefined
+				)
+					throw error;
+				// Keep this handle and its sync worker alive while pending edits
+				// upload. Creating a branch is never repeated by this retry.
+				await delay(retryDelay);
+			}
+		}
 	}
 
 	async close(): Promise<void> {
 		if (this.#closed) return;
 		this.#closed = true;
 		this.#listeners.clear();
+		this.#pendingCreations.clear();
 		await this.lix.close();
 	}
 
@@ -741,5 +845,14 @@ function isBranchNotFoundError(
 		error instanceof Error &&
 		"code" in error &&
 		error.code === "LIX_BRANCH_NOT_FOUND"
+	);
+}
+
+function isErrorCode(error: unknown, code: string): boolean {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"code" in error &&
+		error.code === code
 	);
 }

@@ -58,15 +58,38 @@ async function atomic<T>(
 	lix: Lix,
 	work: (transaction: LixTransaction) => Promise<T>,
 ): Promise<T> {
-	// Lix isolates the transaction while keeping this handle's live queries usable.
-	const transaction = await lix.beginTransaction();
-	try {
-		const result = await work(transaction);
-		await transaction.commit();
-		return result;
-	} catch (error) {
-		await transaction.rollback().catch(() => undefined);
-		throw error;
+	// Explicit transactions must restart their entire read/validation phase if
+	// OPFS invalidates its snapshot. Never replay a commit whose outcome may
+	// already be accepted, or continue after rollback failed.
+	for (let attempt = 0; ; attempt += 1) {
+		const transaction = await lix.beginTransaction();
+		let committing = false;
+		try {
+			const result = await work(transaction);
+			committing = true;
+			await transaction.commit();
+			return result;
+		} catch (error) {
+			let rolledBack = false;
+			try {
+				await transaction.rollback();
+				rolledBack = true;
+			} catch {
+				/* Preserve the original failure; cleanup cannot authorize retry. */
+			}
+			if (
+				!committing &&
+				rolledBack &&
+				attempt < 2 &&
+				typeof error === "object" &&
+				error !== null &&
+				"code" in error &&
+				error.code === "LIX_STORAGE_READ_EXPIRED"
+			) {
+				continue;
+			}
+			throw error;
+		}
 	}
 }
 

@@ -85,11 +85,15 @@ function useObservedRows(
 				}
 			} catch (error) {
 				if (!disposed) {
-					console.error("repository-home: lix observe failed", error);
+					const unavailable = isOptionalHistoryInventoryUnavailable(sql, error);
+					if (!unavailable)
+						console.error("repository-home: lix observe failed", error);
 					const failure =
 						error instanceof Error ? error : new Error(String(error));
 					setState((current) =>
-						preserveObservedRowsAfterError(current, failure),
+						unavailable
+							? { rows: null, error: failure }
+							: preserveObservedRowsAfterError(current, failure),
 					);
 				}
 			}
@@ -140,6 +144,20 @@ export const WORKING_CHANGE_SQL =
 	"SELECT count(*) AS file_count, coalesce(sum(row_count), 0) AS change_count FROM lix_diff('lix_file')";
 export const CHANGE_SUMMARY_SQL =
 	"WITH daily AS (SELECT substr(created_at, 1, 10) AS day, count(*) AS day_count, min(created_at) AS day_created_at FROM lix_change GROUP BY substr(created_at, 1, 10)) SELECT day, day_count AS n, sum(day_count) over () AS total_count, min(day_created_at) over () AS created_at FROM daily ORDER BY day DESC LIMIT 10";
+
+/** Only these optional totals require an authoritative, repository-wide inventory. */
+export function isOptionalHistoryInventoryUnavailable(
+	sql: string,
+	error: unknown,
+): boolean {
+	return (
+		(sql === CHECKPOINT_SUMMARY_SQL || sql === CHANGE_SUMMARY_SQL) &&
+		typeof error === "object" &&
+		error !== null &&
+		"code" in error &&
+		error.code === "LIX_PARTIAL_REPLICA_SCOPE_UNSUPPORTED"
+	);
+}
 
 /** Live, repository-derived facts used by the Home control-plane rail. */
 export function useRepositoryControlPlaneData(
@@ -585,6 +603,28 @@ async function firstFreePath(
 	throw new Error("Unable to find a free file name.");
 }
 
+/** Only fixed, side-effect-free name/identity SELECTs use this retry boundary. */
+async function retryFileCreationRead<T>(read: () => Promise<T>): Promise<T> {
+	for (let attempt = 0; ; attempt += 1) {
+		try {
+			return await read();
+		} catch (error) {
+			if (
+				attempt >= 3 ||
+				typeof error !== "object" ||
+				error === null ||
+				!("code" in error) ||
+				(error.code !== "LIX_STORAGE_READ_EXPIRED" &&
+					error.code !== "LIX_TRANSACTION_CONFLICT")
+			)
+				throw error;
+			// A completed SELECT may fail while retaining its read interests. Repeating
+			// these pure reads is safe; this helper never executes an INSERT.
+			await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
+		}
+	}
+}
+
 /** Creates an empty file of the given type in dirPath; returns its path. */
 export async function createRepositoryFile(
 	lix: Lix,
@@ -595,33 +635,54 @@ export async function createRepositoryFile(
 		base: "untitled",
 		data: "",
 	};
+	const creationId = crypto.randomUUID();
 	for (let attempt = 0; ; attempt += 1) {
+		let insertStarted = false;
 		try {
-			const path = await firstFreePath(lix, (suffix) =>
-				childPath(
-					dirPath,
-					suffix === null
-						? `${template.base}.${extension}`
-						: `${template.base}-${suffix}.${extension}`,
+			const path = await retryFileCreationRead(() =>
+				firstFreePath(lix, (suffix) =>
+					childPath(
+						dirPath,
+						suffix === null
+							? `${template.base}.${extension}`
+							: `${template.base}-${suffix}.${extension}`,
+					),
 				),
 			);
+			insertStarted = true;
 			await lix.execute(
-				"INSERT INTO lix_file (path, content) VALUES ($1, $2)",
-				[path, new TextEncoder().encode(template.data)],
+				"INSERT INTO lix_file (path, content, id) VALUES ($1, $2, $3)",
+				[path, new TextEncoder().encode(template.data), creationId],
 			);
 			return path;
 		} catch (error) {
-			// A sync commit can invalidate this write's snapshot. Only retry a
-			// confirmed conflict, never an ambiguous outcome or another error.
+			// Keep the operation identity across retries: a conflict can arrive
+			// after publication. Reconcile that exact file before choosing a name.
 			if (
-				attempt >= 3 ||
+				!insertStarted ||
 				typeof error !== "object" ||
 				error === null ||
 				!("code" in error) ||
-				error.code !== "LIX_TRANSACTION_CONFLICT"
+				(error.code !== "LIX_TRANSACTION_CONFLICT" &&
+					error.code !== "LIX_ERROR_UNIQUE" &&
+					error.code !== "LIX_STORAGE_READ_EXPIRED")
 			) {
 				throw error;
 			}
+			const persisted = await retryFileCreationRead(() =>
+				lix.execute("SELECT path FROM lix_file WHERE id = $1", [creationId]),
+			);
+			const persistedPath = persisted.rows[0]?.path;
+			if (typeof persistedPath === "string") return persistedPath;
+			const details = "details" in error ? error.details : undefined;
+			const replayForbidden =
+				typeof details === "object" &&
+				details !== null &&
+				(("nonRetryableAfterCommit" in details &&
+					details.nonRetryableAfterCommit === true) ||
+					("nonRetryableAfterExecution" in details &&
+						details.nonRetryableAfterExecution === true));
+			if (replayForbidden || attempt >= 3) throw error;
 			await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
 			// Recheck the name too: another writer may have claimed it.
 		}

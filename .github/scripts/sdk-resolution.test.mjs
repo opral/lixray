@@ -20,7 +20,6 @@ test("SDK resolve-only mode reports misses without requiring any Rust toolchain"
 	t.after(() => rmSync(root, { recursive: true, force: true }));
 	for (const directory of [
 		"scripts",
-		"node_modules/@lix-js/sdk-release/dist",
 		"vendor/lix/packages/js-sdk/src",
 		"vendor/lix/packages/storage-opfs/dist",
 	])

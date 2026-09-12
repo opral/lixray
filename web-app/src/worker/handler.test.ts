@@ -401,7 +401,7 @@ void test("profile activity queries file paths from every public Lix", async () 
 				const pathname = new URL(request.url).pathname;
 				if (pathname === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 7,
+						protocolVersion: 8,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "profile-activity-session",
@@ -461,7 +461,7 @@ void test("profile activity shares one repository scan across visitors", async (
 			const pathname = new URL(request.url).pathname;
 			if (pathname === `/lix/v1/${LIX_A}/`) {
 				return Response.json({
-					protocolVersion: 7,
+					protocolVersion: 8,
 					activeBranchId: "main",
 					activeAccountId: "00000000-0000-7000-8000-000000000002",
 					sessionId: "profile-cache-session",
@@ -2115,7 +2115,7 @@ void test("a published directory exposes only its direct child names", async () 
 				protocolPaths.push(path);
 				if (path === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 7,
+						protocolVersion: 8,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "published-directory-session",
@@ -2187,7 +2187,7 @@ void test("a public repository can list a directory through the host projection"
 				const path = new URL(request.url).pathname;
 				if (path === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 7,
+						protocolVersion: 8,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "public-directory-session",
@@ -2780,7 +2780,7 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 				const pathname = new URL(request.url).pathname;
 				if (pathname === `/lix/v1/${DEMO_LIX_ID}/`) {
 					return Response.json({
-						protocolVersion: 7,
+						protocolVersion: 8,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "demo-mcp-session",
@@ -3075,7 +3075,7 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 		protocolPaths.push(path);
 		if (path === `/lix/v1/${LIX_A}/`) {
 			return Response.json({
-				protocolVersion: 7,
+				protocolVersion: 8,
 				activeBranchId: "main",
 				activeAccountId: "00000000-0000-7000-8000-000000000002",
 				sessionId,
@@ -3393,7 +3393,7 @@ void test("published entity boot resolves a UUID with a fixed query before autho
 				const path = new URL(request.url).pathname;
 				if (path === `/lix/v1/${LIX_A}/`)
 					return Response.json({
-						protocolVersion: 7,
+						protocolVersion: 8,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "entity-session",
@@ -3439,3 +3439,45 @@ void test("published entity boot resolves a UUID with a fixed query before autho
 	assert.equal(authorized, true);
 	assert.equal(released, true);
 });
+
+for (const [endpoint, method] of [
+	["/sync/descriptor", "GET"],
+	["/sync/native-objects", "POST"],
+	["/sync/native-object-range", "POST"],
+	["/sync/native-metadata", "POST"],
+	["/sync/baseline-lease/renew", "POST"],
+] as const) {
+	for (const scope of ["repository", "path"] as const) {
+		void test(`partial hydration ${endpoint} requires repository public access (${scope})`, async () => {
+			let proxied = false;
+			const response = await handleRequest(
+				remoteLixRequest(endpoint, {
+					method,
+					headers: {
+						"x-lixray-public-path": "/finance",
+						"content-type": "application/json",
+					},
+					...(method === "POST"
+						? { body: JSON.stringify({ bounded: "native request" }) }
+						: {}),
+				}),
+				env({}),
+				{
+					resolvePublicLix: async () => ({ ok: true, lixId: LIX_A, scope }),
+					lixFetch: async (_id, request) => {
+						proxied = true;
+						assert.equal(request.method, method);
+						assert.equal(request.headers.get("authorization"), null);
+						if (method === "POST")
+							assert.deepEqual(await request.json(), {
+								bounded: "native request",
+							});
+						return Response.json({ ok: true });
+					},
+				},
+			);
+			assert.equal(response.status, scope === "repository" ? 200 : 404);
+			assert.equal(proxied, scope === "repository");
+		});
+	}
+}

@@ -23,17 +23,12 @@
     "postinstall": "pnpm --dir web-app lix:build"
   },
   "devDependencies": {
-    "@lix-js/sdk-release": "https://registry.npmjs.org/@lix-js/sdk/-/sdk-0.15.1.tgz",
     "fflate": "0.8.3"
   },
   "packageManager": "pnpm@10.13.1",
   "pnpm": {
     "overrides": {
-      "@lix-js/sdk": "link:vendor/lix/packages/js-sdk",
-      "@lix-js/sdk-darwin-arm64": "0.15.1",
-      "@lix-js/sdk-linux-arm64": "0.15.1",
-      "@lix-js/sdk-linux-x64": "0.15.1",
-      "@lix-js/sdk-win32-x64": "0.15.1"
+      "@lix-js/sdk": "link:vendor/lix/packages/js-sdk"
     }
   }
 }

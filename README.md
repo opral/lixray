@@ -7,6 +7,11 @@ storage.
 
 Production: [lixray.com](https://lixray.com)
 
+The repository browser uses an OPFS-backed **partial replica with on-demand sync**,
+with explicit `server.mode: "partial_replica"`. SQL fetches missing inputs and
+retains them locally; applications prefetch by executing a SELECT on hover.
+There is no `lix.prepare()` API. See [browser synchronization](docs/partial-replica-on-demand-sync.md).
+
 ## Repository layout
 
 - `web-app/` — TanStack Start app, MCP server, and Atelier integration
@@ -145,7 +150,7 @@ creator and scoped to this repository.
 ```ts
 const lix = await openLix({
   server: {
-    mode: "remote", // also supported with mode: "sync" and local storage
+    mode: "remote", // default; opt into "partial_replica" with local storage
     url: `https://lixray.com/lix/${repositoryId}`,
     headers: async () => ({
       Authorization: `Bearer ${process.env.LIXRAY_API_TOKEN}`,
@@ -490,11 +495,11 @@ do not repeat repository writes.
 The website, desktop clients, and other SDK consumers use the same canonical
 Lix server protocol:
 
-| Operation | Endpoint | SDK |
-| --- | --- | --- |
-| Create empty or import a snapshot | `POST /lix/v1` | `createLix` |
-| Open existing storage | `GET /lix/v1/<id>` | `openLix` |
-| Delete hosted storage | `DELETE /lix/v1/<id>` | `deleteLix` |
+| Operation                         | Endpoint              | SDK         |
+| --------------------------------- | --------------------- | ----------- |
+| Create empty or import a snapshot | `POST /lix/v1`        | `createLix` |
+| Open existing storage             | `GET /lix/v1/<id>`    | `openLix`   |
+| Delete hosted storage             | `DELETE /lix/v1/<id>` | `deleteLix` |
 
 ```ts
 const headers = { authorization: `Bearer ${apiToken}` };

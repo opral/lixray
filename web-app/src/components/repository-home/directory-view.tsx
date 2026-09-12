@@ -233,9 +233,15 @@ export function DirectoryView({
 	}, [diffSession]);
 	// The past is what it was: a historical listing never carries today's
 	// working changes.
+	// Paint the directory before preparing historical descriptor paths for
+	// badges. The background diff still covers changed descendants so folders
+	// retain their change indicators.
+	const workingFileChangesEnabled = useAfterInitialIdle(
+		isActive && tree !== null && sessionFileKinds === null && !viewingHistory,
+	);
 	const workingFileKinds = useWorkingFileChanges(
 		lix,
-		isActive && sessionFileKinds === null && !viewingHistory,
+		workingFileChangesEnabled,
 	);
 	const changedFileKinds = useMemo(
 		() => sessionFileKinds ?? workingFileKinds ?? EMPTY_CHANGED_FILE_KINDS,
@@ -926,7 +932,7 @@ function RepositoryControlPlaneRail({
 						role="status"
 						className="m-0 mt-2 text-[11.5px] leading-4 text-text-tertiary"
 					>
-						Some change history is unavailable.
+						Complete history totals are unavailable in this view.
 					</p>
 				) : null}
 				<ChangesSummary
@@ -973,7 +979,7 @@ function RepositoryNarrowStats({
 						role="status"
 						className="m-0 mt-2 text-[11.5px] leading-4 text-text-tertiary"
 					>
-						Some change history is unavailable.
+						Complete history totals are unavailable in this view.
 					</p>
 				) : null}
 				<ChangesSummary
@@ -1040,12 +1046,35 @@ function ChangeBars({
 }) {
 	const days = data.changeDays;
 	if (days === null) {
+		const working = describeWorkingChanges(
+			data.workingFileCount,
+			data.workingChangeCount,
+		);
+		const available =
+			data.workingFileCount !== null && data.workingChangeCount !== null;
 		return (
-			<div
-				className="mt-4 h-11 border-b border-[#ded5c8] text-center text-[18px] leading-10 text-text-quaternary"
-				aria-hidden="true"
-			>
-				—
+			<div className="mt-2.5">
+				{available ? (
+					<p className="text-[12px] text-text-tertiary">
+						<strong className="text-[20px] text-text-primary">
+							{formatCompactCount(working.count)}
+						</strong>{" "}
+						{working.label}
+					</p>
+				) : (
+					<p className="text-[12px] text-text-tertiary">
+						Working changes unavailable.
+					</p>
+				)}
+				{available && working.count > 0 && onOpenChangesReview ? (
+					<button
+						type="button"
+						onClick={onOpenChangesReview}
+						className="mt-4 cursor-pointer text-[12px] font-semibold text-[#c2410c]"
+					>
+						Review changes →
+					</button>
+				) : null}
 			</div>
 		);
 	}
