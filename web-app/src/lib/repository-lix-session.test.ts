@@ -330,14 +330,8 @@ void test("deduplicates repeated request failures until the request recovers", a
 void test("does not report expected migration, recovery, or missing-chunk responses", async () => {
 	const captured: unknown[] = [];
 	const responses = [
-		Response.json(
-			{ error: { code: "LIX_ERROR_MIGRATING" } },
-			{ status: 503 },
-		),
-		Response.json(
-			{ error: { code: "LIX_ERROR_RECOVERING" } },
-			{ status: 503 },
-		),
+		Response.json({ error: { code: "LIX_ERROR_MIGRATING" } }, { status: 503 }),
+		Response.json({ error: { code: "LIX_ERROR_RECOVERING" } }, { status: 503 }),
 		new Response(null, { status: 404 }),
 	];
 	const fetch = createTelemetryFetch(
