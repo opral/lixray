@@ -1,19 +1,12 @@
 import protobuf from "protobufjs/light.js";
 import schema from "./otlp-traces.schema.json" with { type: "json" };
+import { serverErrorEvents, type OtlpSpan } from "./otlp-server-errors.ts";
 
 export interface OtlpTelemetryEnvironment {
 	LIXRAY_INTERNAL_TOKEN?: string;
 	POSTHOG_PROJECT_TOKEN?: string;
 	POSTHOG_HOST?: string;
 	POSTHOG_ENVIRONMENT?: string;
-}
-
-interface OtlpSpan {
-	name?: string;
-	traceId?: Uint8Array;
-	spanId?: Uint8Array;
-	startTimeUnixNano?: { toString(): string };
-	attributes?: Array<{ key?: string; value?: { stringValue?: string } }>;
 }
 
 interface TraceRequest {
@@ -199,9 +192,11 @@ export async function handleOtlpTelemetry(
 				(resource) =>
 					resource.scopeSpans?.flatMap((scope) => scope.spans ?? []) ?? [],
 			) ?? [];
-		const events = (await Promise.all(spans.map(openedEvent))).filter(
+		const opens = (await Promise.all(spans.map(openedEvent))).filter(
 			(event) => event !== null,
 		);
+		const errors = (await Promise.all(spans.map(serverErrorEvents))).flat();
+		const events = [...opens, ...errors];
 		const fetcher = dependencies.fetch ?? fetch;
 		const deliveries = [
 			fetcher(new URL("/i/v1/traces", host), {

@@ -1,6 +1,6 @@
 # LixRay Privacy Policy
 
-Last updated: 18 August 2026
+Last updated: 12 September 2026
 
 This policy describes how **Opral US Inc.** (“we”) handles personal data when you use LixRay at [lixray.com](https://lixray.com), including the remote MCP server at `https://lixray.com/mcp`.
 
@@ -10,7 +10,7 @@ Contact: [hello@opral.com](mailto:hello@opral.com)
 
 **Account.** When you sign in with Google we receive the name, email address, and profile identifier Google provides. We store the account in Supabase.
 
-**Repository content.** Files, SQL rows, and version history you put in a LixRay repository. This can include personal data if you store it there. You control that content.
+**Repository content.** Files, SQL rows, and version history you put in a LixRay repository. You control that content. Through the MCP connector, share only the specific non-sensitive content needed for your current task. Do not submit health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets. The connector is not intended to collect these categories or import chat history or remembered personal profiles.
 
 **MCP access.** When an MCP client connects, we complete OAuth (scopes: `openid`, `email`, `profile`, and `offline_access`) and log tool use at a metadata level (which tool, success or error, timing). We do not store raw SQL or file contents in analytics.
 

@@ -66,6 +66,8 @@ function posthogSourceMapPlugins(command: string) {
 }
 
 export default defineConfig(({ command }) => ({
+	// The SDK Component host loads modules asynchronously inside its workers.
+	worker: { format: "es" },
 	resolve: {
 		tsconfigPaths: true,
 		alias:

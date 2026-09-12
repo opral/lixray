@@ -517,11 +517,12 @@ void test("rename retries an expired pre-commit snapshot and preserves descendan
 	}
 });
 
-void test("rename never replays a commit error even when it reports read expiration", async () => {
+void test("rename never replays read expiration after a durable commit", async () => {
 	const lix = await fixture();
 	let attempts = 0;
 	const failure = Object.assign(new Error("commit failed"), {
 		code: "LIX_STORAGE_READ_EXPIRED",
+		details: { nonRetryableAfterCommit: true },
 	});
 	const wrapped = Object.create(lix) as Lix;
 	wrapped.beginTransaction = async () => {
@@ -552,3 +553,53 @@ void test("rename never replays a commit error even when it reports read expirat
 		await lix.close();
 	}
 });
+
+for (const phase of ["begin", "commit"] as const) {
+	void test(`move retries expired ${phase} preparation without losing file identity`, async () => {
+		const lix = await fixture();
+		let attempts = 0;
+		const expired = Object.assign(new Error("expired preparation"), {
+			code: "LIX_STORAGE_READ_EXPIRED",
+		});
+		const wrapped = Object.create(lix) as Lix;
+		wrapped.beginTransaction = async () => {
+			attempts += 1;
+			if (attempts === 1 && phase === "begin") throw expired;
+			const transaction = await lix.beginTransaction();
+			if (attempts !== 1) return transaction;
+			return new Proxy(transaction, {
+				get(target, key) {
+					if (key === "commit")
+						return async () => {
+							// Failed native commit preparation consumes and discards the
+							// transaction. Nothing has been durably published.
+							await target.rollback();
+							throw expired;
+						};
+					const value: unknown = Reflect.get(target, key);
+					return typeof value === "function"
+						? (value as (...args: unknown[]) => unknown).bind(target)
+						: value;
+				},
+			});
+		};
+		try {
+			const before = await lix.execute(
+				"SELECT id FROM lix_file WHERE path = '/source/note.md'",
+			);
+			await moveWorkspaceEntries(wrapped, ["/source"], "/target");
+			assert.equal(attempts, 2);
+			assert.deepEqual(
+				(
+					await lix.execute(
+						"SELECT id FROM lix_file WHERE path = '/target/source/note.md'",
+					)
+				).rows,
+				before.rows,
+			);
+			assert.ok(!(await paths(lix, "directory")).includes("/source"));
+		} finally {
+			await lix.close();
+		}
+	});
+}

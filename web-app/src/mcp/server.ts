@@ -70,7 +70,12 @@ export const MCP_URL_GUIDE =
 export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
 	"Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.";
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. If the user supplies an exact @handle/slug or Lix UUID, pass it as lix_ref directly to query_sql or execute_sql; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. When target paths are known, read all of them in one parameterized query_sql statement instead of probing or reading them one at a time. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
+export const MCP_DATA_GUIDE =
+	"Use only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.";
+
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. If the user supplies an exact @handle/slug or Lix UUID, pass it as lix_ref directly to query_sql or execute_sql; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. When target paths are known, read all of them in one parameterized query_sql statement instead of probing or reading them one at a time. The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
+
+${MCP_DATA_GUIDE}
 
 ${LIX_SQL_OPERATING_GUIDE}
 
@@ -350,10 +355,6 @@ const context = z
 const branchId = z.string().min(1).describe("Lix branch id");
 const commitId = z.string().min(1).describe("Lix commit id");
 const sourceBranchId = z.string().min(1).describe("Source branch id");
-const requestIdValue = z
-	.string()
-	.min(1)
-	.describe("Request ID for correlating this response with server telemetry");
 const wireValue = z.union([
 	z.object({ kind: z.literal("null"), value: z.null().optional() }).strict(),
 	z.object({ kind: z.literal("bool"), value: z.boolean() }).strict(),
@@ -386,9 +387,7 @@ const listLixesOutput = withError(
 					id: z.string(),
 					name: z.string(),
 					slug: z.string(),
-					namespace: z
-						.object({ id: z.string(), name: z.string(), handle: z.string() })
-						.strict(),
+					namespace: z.object({ handle: z.string() }).strict(),
 				})
 				.strict(),
 		),
@@ -649,7 +648,16 @@ export function createLixrayMcpServer(
 		listLixesOutput,
 		readAnnotations(),
 		securitySchemes,
-		async () => ({ lixes: await service.listLixes() }),
+		async () => ({
+			lixes: (await service.listLixes()).map(
+				({ id, name, slug, namespace }) => ({
+					id,
+					name,
+					slug,
+					namespace: { handle: namespace.handle },
+				}),
+			),
+		}),
 		undefined,
 		options.onToolCall,
 		surfaceVersion,
@@ -1228,8 +1236,7 @@ export async function handleMcpTransport(
 					};
 					rpc.error = {
 						code,
-						message: `${messages[code] ?? "Internal error"} (request_id: ${requestId})`,
-						data: { request_id: requestId },
+						message: messages[code] ?? "Internal error",
 					};
 					const headers = new Headers(response.headers);
 					headers.delete("content-length");
@@ -1244,36 +1251,6 @@ export async function handleMcpTransport(
 					(rpc.result as Record<string, unknown>).isError === true
 				) {
 					errorCode = "MCP_TOOL_ERROR";
-					const result = rpc.result as Record<string, unknown>;
-					// SDK argument validation can fail before our tool error wrapper
-					// runs; our own errors carry request_id in their JSON text block.
-					const structured = result.structuredContent as
-						| Record<string, unknown>
-						| undefined;
-					const carriesRequestId =
-						structured?.request_id !== undefined ||
-						(Array.isArray(result.content) &&
-							result.content.some(
-								(block) =>
-									typeof (block as { text?: unknown }).text === "string" &&
-									(block as { text: string }).text.startsWith("{") &&
-									(block as { text: string }).text.includes(
-										`"request_id": "${requestId}"`,
-									),
-							));
-					if (!carriesRequestId && Array.isArray(result.content)) {
-						result.content.push({
-							type: "text",
-							text: `request_id: ${requestId}`,
-						});
-						const headers = new Headers(response.headers);
-						headers.delete("content-length");
-						response = new Response(JSON.stringify(rpc), {
-							status: response.status,
-							statusText: response.statusText,
-							headers,
-						});
-					}
 				}
 			}
 		}
@@ -1286,8 +1263,7 @@ export async function handleMcpTransport(
 				id: null,
 				error: {
 					code: -32603,
-					message: `Internal error (request_id: ${requestId})`,
-					data: { request_id: requestId },
+					message: "Internal error",
 				},
 			},
 			{ status: 500, headers: { "access-control-allow-origin": "*" } },
@@ -1506,12 +1482,13 @@ export function mcpDocumentationResponse(
 			"",
 			"Setup: In an MCP-compatible client, add a remote connector using the endpoint above, then complete the LixRay sign-in and authorization flow. Connector support and setup menus depend on the client. If no LixRay connector is available, ask the user to connect it; a webpage cannot install a connector for the client.",
 			"",
-			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, pass lix_ref directly to query_sql or execute_sql, optionally branch_id; no opening call is required. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
+			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, pass lix_ref directly to query_sql or execute_sql, optionally branch_id; no opening call is required. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is encrypted, expiring, and independent from the MCP transport request.",
 			"",
 			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
 			"A successful execute_sql persisted the mutation. Read back only when the write outcome is unknown or validation is part of the task.",
 			MCP_URL_GUIDE,
-			"Every MCP response includes X-Request-ID and every tool result includes request_id. You may send X-Request-ID to preserve an upstream correlation ID; use the returned ID when reporting failures.",
+			MCP_DATA_GUIDE,
+			"HTTP responses include X-Request-ID for support correlation. Diagnostic identifiers stay out of tool results.",
 			"",
 			"Modern clients begin with server/discover. There is no initialize handshake and no MCP session id on this endpoint.",
 		].join("\n"),
@@ -1579,7 +1556,7 @@ function registerTool(
 		name,
 		{
 			title,
-			description,
+			description: `${description}\n\n${MCP_DATA_GUIDE}`,
 			inputSchema,
 			outputSchema,
 			annotations,
@@ -1622,7 +1599,6 @@ function registerTool(
 				});
 				const structuredContent = {
 					...(raw as Record<string, unknown>),
-					request_id: requestId,
 				};
 				const touched =
 					name === "execute_sql" &&
@@ -1653,7 +1629,7 @@ function registerTool(
 					content: [summary[0]!, ...links, ...summary.slice(1)],
 				};
 			} catch (caught) {
-				const baseError = toMcpError(caught, requestId);
+				const baseError = toMcpError(caught);
 				const error = isSqlTool(name)
 					? sqlToolError(baseError, {
 							write: name === "execute_sql",
@@ -1682,11 +1658,10 @@ function registerTool(
 				// No structuredContent on an error: clients validate structured
 				// content against the success-only output schema whenever it is
 				// present, and would turn this into a -32602 schema violation.
-				// The JSON text block still carries { request_id, error }.
+				// The JSON text block still carries { error }.
 				return {
 					isError: true,
 					content: toolResultTextBlocks(summarizeToolError(error), {
-						request_id: requestId,
 						error,
 					}),
 				};
@@ -2074,10 +2049,7 @@ function summarizeToolError(error: {
 	return `${error.statement_index !== undefined ? `Statement ${error.statement_index + 1} (statements[${error.statement_index}]): ` : ""}LixRay error ${error.code}: ${error.message}${error.hint ? ` Hint: ${error.hint}` : ""}`;
 }
 
-function toMcpError(
-	caught: unknown,
-	requestId: string,
-): {
+function toMcpError(caught: unknown): {
 	code: string;
 	message: string;
 	hint?: string;
@@ -2094,18 +2066,18 @@ function toMcpError(
 	return {
 		code: "internal_error",
 		message: "The LixRay tool call failed.",
-		hint: `Contact LixRay support with request_id ${requestId} if the problem persists.`,
+		hint: "Contact LixRay support if the problem persists.",
 	};
 }
 
 /**
  * Output schemas describe the success shape only. Errors return
- * `isError: true` with `{ request_id, error: { code, message, hint? } }`,
+ * `isError: true` with `{ error: { code, message, hint? } }`,
  * which the SDK does not validate against the schema, so no tool needs to
  * carry the error branch in tools/list.
  */
 function withError(schema: z.ZodObject<any>) {
-	return schema.extend({ request_id: requestIdValue });
+	return schema;
 }
 
 function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
