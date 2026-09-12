@@ -59,17 +59,17 @@ export function decodeEntityId(token: string): string {
 }
 
 /**
- * An entity URL is its id followed by the entity's own path, so a link reads
- * as the file or folder it opens: `/file/<id>/gtm/GTM playbook.md`. The id is
- * what resolves; the path is decoration, and a missing or stale one is
- * corrected when the URL is opened (see canonicalEntitySplat).
+ * An entity URL is its id followed by the entity's path, slugified, so a link
+ * reads as the file or folder it opens: `/file/<id>/gtm/gtm-playbook.md`. The
+ * id is what resolves; the path is for the reader, and a missing or stale one
+ * is rewritten when the URL is opened (see canonicalEntitySplat).
  */
 export function parseEntityUrlSplat(splat: string | undefined): {
 	id: string;
 	token: string;
-	/** The trailing path the URL claims, absolute as Lix writes it. */
+	/** The trailing path the URL claims, as slugified segments. */
 	path?: string;
-	/** Its last segment: the file or folder name the URL claims. */
+	/** Its last segment: the name the URL reads as. */
 	name?: string;
 } | null {
 	const match = /^([A-Za-z0-9_-]{22})(?:\/(.*))?$/.exec(
@@ -103,14 +103,42 @@ export function parseEntityUrlSplat(splat: string | undefined): {
 	};
 }
 
+/**
+ * A path segment as a URL reads it: lowercase, punctuation and whitespace
+ * collapsed to hyphens, length bounded. The URL's path is for a human
+ * skimming it, so "GTM playbook.md" becomes "gtm-playbook.md"; the id beside
+ * it is what actually resolves.
+ */
+function slugSegment(segment: string): string {
+	return Array.from(
+		segment
+			.normalize("NFC")
+			.toLowerCase()
+			.replace(/[^\p{L}\p{N}.-]+/gu, "-")
+			// A hyphen next to the dot is punctuation that became a hyphen:
+			// "plan (final).md" reads as plan-final.md, not plan-final-.md.
+			.replace(/-+\./g, ".")
+			.replace(/\.-+/g, ".")
+			.replace(/^-+|-+$/g, ""),
+	)
+		.slice(0, 120)
+		.join("");
+}
+
 export function entityUrlSplat(id: string, path: string): string {
-	return [encodeEntityId(id), ...path.split("/").filter(Boolean)].join("/");
+	const segments = path
+		.split("/")
+		.map(slugSegment)
+		.filter((segment) => segment !== "" && segment !== "." && segment !== "..");
+	return [encodeEntityId(id), ...segments].join("/");
 }
 
 /**
  * The splat the URL should carry for this entity, or null when it already
  * does. A URL that names no path, or a path the entity has outgrown (renamed,
  * moved, or simply mistyped), is rewritten from the id, which never changes.
+ * The comparison is against the slugified path, so a URL that already reads
+ * right is left alone.
  */
 export function canonicalEntitySplat(
 	splat: string | undefined,

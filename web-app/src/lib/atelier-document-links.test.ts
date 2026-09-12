@@ -50,9 +50,10 @@ void test("recognizes this repository's file URLs on the branch being viewed", (
 void test("a link with a path resolves by id, whatever the path says", () => {
 	const file = { id: FILE_ID, path: "/docs/100% plan.md" };
 	const href = links().href(file);
+	// The path is for the reader: a plain, lowercase, hyphenated slug.
 	assert.equal(
 		href,
-		`https://lixray.test/@acme/company/file/${TOKEN}/docs/100%25%20plan.md`,
+		`https://lixray.test/@acme/company/file/${TOKEN}/docs/100-plan.md`,
 	);
 	assert.deepEqual(links().resolve(href), { id: FILE_ID });
 	// A stale or wrong path still opens the file the id names.
@@ -69,11 +70,11 @@ void test("writes the permanent URL, with a branch only off the default", () => 
 	// The link reads as the file it opens: its id, then its own path.
 	assert.equal(
 		links().href(file),
-		`https://lixray.test/@acme/company/file/${TOKEN}/docs/Hello%20World.md`,
+		`https://lixray.test/@acme/company/file/${TOKEN}/docs/hello-world.md`,
 	);
 	assert.equal(
 		links("feature").href(file),
-		`https://lixray.test/@acme/company/file/${TOKEN}/docs/Hello%20World.md?branch=feature`,
+		`https://lixray.test/@acme/company/file/${TOKEN}/docs/hello-world.md?branch=feature`,
 	);
 	// What it writes, it recognizes.
 	assert.deepEqual(links("feature").resolve(links("feature").href(file)), {

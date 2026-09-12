@@ -492,7 +492,7 @@ void test("manifest includes verified UUID links and names no branch on the defa
 		{
 			id: "00000000-0000-4000-8000-000000000000",
 			path: "/First name.md",
-			url: "http://localhost:3000/@acme/company/file/AAAAAAAAQACAAAAAAAAAAA/First%20name.md",
+			url: "http://localhost:3000/@acme/company/file/AAAAAAAAQACAAAAAAAAAAA/first-name.md",
 		},
 	]);
 });
@@ -544,7 +544,7 @@ void test("UUID lookup follows file and directory renames and current namespace 
 	// The id is the identity; the URL carries the path the entity has now.
 	assert.match(
 		result.entities[0]!.url,
-		/\/@new-handle\/company\/file\/IiIiIiIiQiKCIiIiIiIiIg\/moved\/New%20title\.md$/,
+		/\/@new-handle\/company\/file\/IiIiIiIiQiKCIiIiIiIiIg\/moved\/new-title\.md$/,
 	);
 	assert.equal(result.entities[1]!.path, "/moved");
 	assert.match(

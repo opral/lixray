@@ -43,35 +43,35 @@ void test("malformed and noncanonical tokens cannot alias an entity", () => {
 	assert.throws(() => encodeEntityId("not-a-uuid"));
 });
 
-void test("an entity URL carries the id, then the entity's own path", () => {
+void test("an entity URL reads as the path it opens, slugified", () => {
 	assert.equal(
 		entityUrlSplat(uuid, "/gtm/GTM playbook.md"),
-		`${token}/gtm/GTM playbook.md`,
+		`${token}/gtm/gtm-playbook.md`,
 	);
 	assert.equal(
 		entityRoutePath("opral", "monorepo", "file", uuid, "/gtm/GTM playbook.md"),
-		`/@opral/monorepo/file/${token}/gtm/GTM%20playbook.md`,
+		`/@opral/monorepo/file/${token}/gtm/gtm-playbook.md`,
 	);
 	// Folders read as folders; the root has no path to carry.
 	assert.equal(
 		entityRoutePath("opral", "monorepo", "directory", uuid, "/teams/GTM"),
-		`/@opral/monorepo/folder/${token}/teams/GTM`,
+		`/@opral/monorepo/folder/${token}/teams/gtm`,
 	);
 	assert.equal(
 		entityRoutePath("opral", "monorepo", "directory", uuid, "/"),
 		`/@opral/monorepo/folder/${token}`,
 	);
-	const parsed = parseEntityUrlSplat(`${token}/gtm/GTM%20playbook.md`);
+	const parsed = parseEntityUrlSplat(`${token}/gtm/gtm-playbook.md`);
 	assert.equal(parsed?.id, uuid);
-	assert.equal(parsed?.path, "/gtm/GTM playbook.md");
-	assert.equal(parsed?.name, "GTM playbook.md");
+	assert.equal(parsed?.path, "/gtm/gtm-playbook.md");
+	assert.equal(parsed?.name, "gtm-playbook.md");
 	assert.equal(parseEntityUrlSplat(token)?.path, undefined);
 	assert.equal(parseEntityUrlSplat(`${token}/`)?.path, undefined);
 	assert.equal(parseEntityUrlSplat("gtm/GTM playbook.md"), null);
 });
 
 void test("the id is the identity; the path is rewritten from it", () => {
-	const entity = { id: uuid, path: "/gtm/correct.md" };
+	const entity = { id: uuid, path: "/gtm/Correct.md" };
 	// A bare id, a stale name, and a path from another folder all resolve to
 	// the same file, and each is corrected to the file's own path.
 	for (const splat of [
@@ -153,23 +153,27 @@ void test("published lookup distinguishes unavailable items from service failure
 	assert.equal((await resolvePublishedEntity(args))?.path, "/renamed.md");
 });
 
-void test("every path character survives the round trip", () => {
-	for (const path of [
-		"/gtm/GTM playbook.md",
-		"/a b/c#d?e&f.md",
-		"/𐐀 unicode/𐐀.md",
-		"/" + "a".repeat(300) + ".md",
-		"/100% done/plan (final).md",
-	]) {
+void test("a slug stays a plain URL segment, whatever the name holds", () => {
+	for (const [path, expected] of [
+		["/gtm/GTM playbook.md", "/gtm/gtm-playbook.md"],
+		["/a b/c#d?e&f.md", "/a-b/c-d-e-f.md"],
+		["/100% done/plan (final).md", "/100-done/plan-final.md"],
+		// Lowercasing follows the script: Deseret capitals have lowercase forms.
+		["/𐐀 unicode/𐐀.md", "/𐐨-unicode/𐐨.md"],
+		// A name that slugs to nothing drops out; the id still resolves.
+		["/??/keep.md", "/keep.md"],
+		["/" + "a".repeat(300) + ".md", "/" + "a".repeat(120)],
+	] as const) {
 		const url = entityRoutePath("opral", "monorepo", "file", uuid, path);
-		const splat = url.split(`/file/`)[1]!;
-		assert.equal(parseEntityUrlSplat(splat)?.path, path);
-		// The router encodes a splat segment by segment the same way.
+		const splat = url.split("/file/")[1]!;
+		assert.equal(parseEntityUrlSplat(splat)?.path, expected);
+		// The router encodes a splat segment by segment the same way, so the
+		// URL the app builds is the URL the router navigates to.
 		assert.equal(
 			splat,
 			[
 				token,
-				...path.split("/").filter(Boolean).map(encodeURIComponent),
+				...expected.split("/").filter(Boolean).map(encodeURIComponent),
 			].join("/"),
 		);
 	}
