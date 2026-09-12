@@ -275,7 +275,7 @@ export class LixService {
 		if (matches.length === 1) return matches[0];
 		if (matches.length === 0) {
 			throw createLixError("not_found", "Lix not found.", {
-				hint: "Call list_lixes and pass an exact @handle/slug or Lix UUID to open_lix.",
+				hint: "Call list_lixes and pass an exact @handle/slug or Lix UUID as lix_ref.",
 			});
 		}
 		throw createLixError(
@@ -285,6 +285,31 @@ export class LixService {
 				hint: "Call list_lixes and pass the exact Lix UUID or @namespace/slug.",
 			},
 		);
+	}
+
+	/** Resolve an explicit SQL target without loading a file manifest or changing the active branch. */
+	async contextForSqlTarget(target: {
+		context?: string;
+		lix_ref?: string;
+		branch_id?: string;
+	}): Promise<string> {
+		if (target.context) {
+			if (target.lix_ref || target.branch_id)
+				throw createLixError(
+					"invalid_request",
+					"Pass context alone, or lix_ref with optional branch_id.",
+				);
+			return target.context;
+		}
+		if (!target.lix_ref)
+			throw createLixError(
+				"invalid_request",
+				"Pass lix_ref (@handle/slug or UUID), optionally branch_id. open_lix is not required.",
+			);
+		const lixId = await this.resolveLixRef(target.lix_ref);
+		const branchId =
+			target.branch_id ?? (await this.client.defaultBranchId(lixId));
+		return (await this.issueContext(lixId, branchId)).token;
 	}
 
 	async openLix(

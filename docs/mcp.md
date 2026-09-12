@@ -1,5 +1,15 @@
 # MCP
 
+## Direct SQL calls
+
+When the repository is known, call `query_sql` or `execute_sql` with `lix_ref` (an exact `@handle/slug` or UUID) and optional `branch_id`. Opening first is unnecessary. The omitted branch is the repository default branch, independent of any browser or previous call's active branch. Alternatively, pass an existing `context` alone to retain its selected branch. `open_lix` remains available for inventory and for obtaining contexts used by branch and file helper tools.
+
+Example: `execute_sql({ lix_ref: "@acme/company", statements: [{ sql: "UPDATE lix_file SET content = CAST($1 AS BYTEA) WHERE path = $2", params: [{ kind: "text", value: "hello" }, { kind: "text", value: "/notes.txt" }] }] })`.
+
+DataFusion scalar expressions such as `REPLACE`, `CONCAT`, and `||` work inside a `BYTEA` cast for file updates. Use one statement per batch entry and explicit `ON CONFLICT (path)` targets. SQL remains a first-class interface; file helpers are optional.
+
+Execution errors return `isError: true` and a JSON text block, without success-schema `structuredContent`. Errors include the original code, message, hint and details, plus zero-based `statement_index` when known. Write `outcome` is `not_committed` for known rejections, `unknown` for ambiguous transport/internal failures, and `committed` for response failures after confirmed completion. Correct rejected statements before retrying. Inspect affected state for unknown outcomes; never blindly replay a batch. Verify successful writes when the user requested validation, rather than routinely reading every write back.
+
 LixRay exposes Lix through a deliberately small MCP surface. SQL is the
 universal interface for repository data; file and entity CRUD stays in SQL. `get_entity_urls` resolves browser links without changing repository data or permissions. Lix SQL is a Postgres dialect subset.
 
@@ -7,8 +17,7 @@ Each tool carries its own guide in its description: the file tools say how
 bytes and metadata travel and how conflicts are reported; `query_sql` says
 how to discover tables and columns through `information_schema` (Lix is not
 SQLite; a query against `sqlite_master` gets that answer by name);
-`execute_sql` says how renames and deletes look and that no readback follows
-a write. That is what an agent reads before its first
+`execute_sql` says how renames and deletes look and how to recover from failed writes. That is what an agent reads before its first
 query, and hosts do not reliably show the server `instructions` to the model;
 the instructions repeat the workflow for hosts that do. Every other tool
 description is one or two sentences. Output schemas describe the success shape
@@ -44,7 +53,7 @@ violation.
 ## Context
 
 `open_lix` returns a signed `context` that selects one Lix and one branch, and
-`context_expires_at` (24 hours after opening). Pass it to every later call.
+`context_expires_at` (24 hours after opening). SQL calls can instead use lix_ref directly. Other repository tools accept this context, including contexts returned by SQL calls.
 When a call answers `context_expired`, `malformed_context`, or
 `invalid_context`, call `open_lix` again and take the new context from
 `structuredContent`; nothing else needs redoing, because contexts carry no
@@ -67,9 +76,8 @@ provided, LixRay continues to create one fallback trace per tool call.
 
 1. Match the exact LixRay server name instead of searching broadly for generic
    repository or file tools.
-2. If the user supplied an exact `@handle/slug` or Lix UUID, call `open_lix`
-   directly. Call `list_lixes` only when the target is unknown.
-3. Retain the context returned by `open_lix` from `structuredContent`
+2. If the user supplied an exact `@handle/slug` or Lix UUID, pass it as lix_ref directly to query_sql or execute_sql. Call `list_lixes` only when the target is unknown.
+3. Use open_lix when inventory is useful. Retain the context returned by SQL or open_lix from `structuredContent`
    when the host provides it. Never copy a context token from the prose
    summary. Text-only hosts receive a later `content` text block that is the
    full `structuredContent` JSON. `open_lix` reports file and directory
@@ -84,10 +92,8 @@ provided, LixRay continues to create one fallback trace per tool call.
 6. Use `execute_sql` for any atomic SQL batch. It is always treated as
    potentially destructive. The mutation is already persisted — `rowsAffected`
    and any rows the batch itself returned are sufficient.
-7. Do not follow a write with a verification `SELECT`, a second `query_sql`
-   "to check", or path/length/substring readback. One `execute_sql` batch is
-   the whole write (dirs + file + `ON CONFLICT` is fine inside that batch).
-   No readback is needed to confirm persistence.
+7. Successful batches are persisted. Read back when the outcome is unknown or
+   validation is part of the task; never blindly replay an uncertain write.
 8. To link created or renamed items, call `get_entity_urls` with their UUIDs or
    absolute paths in one batch, retaining the current context. This resolves
    browser links; it is not a persistence-verification read.

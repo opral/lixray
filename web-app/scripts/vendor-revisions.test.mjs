@@ -187,3 +187,27 @@ function compareSemver(left, right) {
 	}
 	return 0;
 }
+
+test("the image build SHA reaches both the builder and production telemetry", async () => {
+	const dockerfile = await readFile(
+		new URL("../Dockerfile", import.meta.url),
+		"utf8",
+	);
+	const workflow = await readFile(
+		new URL("../../.github/workflows/web-image.yml", import.meta.url),
+		"utf8",
+	);
+	assert.match(workflow, /RAILWAY_GIT_COMMIT_SHA=\$\{\{ github\.sha \}\}/);
+	const stages = dockerfile.split(/^FROM /m).slice(1);
+	assert.equal(stages.length, 2);
+	for (const stage of stages)
+		assert.match(stage, /^ARG RAILWAY_GIT_COMMIT_SHA$/m);
+	assert.match(
+		stages[0],
+		/RAILWAY_GIT_COMMIT_SHA=\$\{RAILWAY_GIT_COMMIT_SHA\}/,
+	);
+	assert.match(
+		stages[1],
+		/^ENV LIXRAY_RELEASE_ID=\$\{RAILWAY_GIT_COMMIT_SHA\}$/m,
+	);
+});

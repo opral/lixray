@@ -4,6 +4,7 @@
  * Lix service remain the runtime type guards for these values.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+import { sqlToolError } from "./sql-errors.ts";
 import { instrument, PostHogMCP } from "@posthog/mcp";
 import {
 	createMcpHandler,
@@ -69,7 +70,7 @@ export const MCP_URL_GUIDE =
 export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
 	"Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.";
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. If the user supplies an exact @handle/slug or Lix UUID, call open_lix directly; do not call list_lixes first. Call list_lixes only when the target Lix is unknown. Open a Lix once and pass its returned context to every later call. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. When target paths are known, read all of them in one parameterized query_sql statement instead of probing or reading them one at a time. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. If the user supplies an exact @handle/slug or Lix UUID, pass it as lix_ref directly to query_sql or execute_sql; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. When target paths are known, read all of them in one parameterized query_sql statement instead of probing or reading them one at a time. The context is an explicit, signed Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context, request_id, and SQL rows.
 
 ${LIX_SQL_OPERATING_GUIDE}
 
@@ -84,10 +85,10 @@ export const RESTORE_TOOL_DESCRIPTION =
 	"Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.";
 
 export const LIST_LIXES_TOOL_DESCRIPTION =
-	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, call open_lix directly.";
+	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, pass lix_ref directly to query_sql or execute_sql.";
 
 export const OPEN_LIX_TOOL_DESCRIPTION =
-	"Open a Lix by exact @handle/slug or UUID without calling list_lixes first, and mint the context later tools require (active branch unless branch_id is given). Returns counts, file_paths (SQL paths, not URLs), and files with id, path, and canonical url; when file_paths_complete is true, do not list files again.";
+	"Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, canonical url; when file_paths_complete is true, do not list files again.";
 
 type McpAuthMode = "oauth" | "none";
 
@@ -343,7 +344,9 @@ const lixRef = z
 const context = z
 	.string()
 	.min(1)
-	.describe("Opaque Lix context returned by open_lix or switch_branch");
+	.describe(
+		"Opaque Lix context returned by SQL tools, open_lix or switch_branch",
+	);
 const branchId = z.string().min(1).describe("Lix branch id");
 const commitId = z.string().min(1).describe("Lix commit id");
 const sourceBranchId = z.string().min(1).describe("Source branch id");
@@ -852,7 +855,17 @@ export function createLixrayMcpServer(
 		QUERY_SQL_TOOL_DESCRIPTION,
 		z
 			.object({
-				context,
+				context: context.optional(),
+				lix_ref: z
+					.string()
+					.min(1)
+					.optional()
+					.describe("Exact @handle/slug or UUID. No open_lix call required."),
+				branch_id: branchId
+					.optional()
+					.describe(
+						"Defaults to the repository default branch when lix_ref is used.",
+					),
 				sql: z.string().min(1),
 				params: z.array(wireValue).optional(),
 			})
@@ -880,7 +893,17 @@ export function createLixrayMcpServer(
 		EXECUTE_SQL_TOOL_DESCRIPTION,
 		z
 			.object({
-				context,
+				context: context.optional(),
+				lix_ref: z
+					.string()
+					.min(1)
+					.optional()
+					.describe("Exact @handle/slug or UUID. No open_lix call required."),
+				branch_id: branchId
+					.optional()
+					.describe(
+						"Defaults to the repository default branch when lix_ref is used.",
+					),
 				statements: z.array(sqlStatement).min(1),
 				options: executeOptions.optional(),
 			})
@@ -889,7 +912,20 @@ export function createLixrayMcpServer(
 		writeAnnotations(),
 		securitySchemes,
 		async ({ context: token, statements, options: batchOptions }, callId) => {
-			for (const statement of statements) assertLixCatalog(statement.sql);
+			for (const [statementIndex, statement] of (
+				statements as Array<{ sql: string }>
+			).entries()) {
+				try {
+					assertLixCatalog(statement.sql);
+				} catch (caught) {
+					if (!isLixError(caught)) throw caught;
+					throw createLixError(
+						caught.code ?? "invalid_request",
+						caught.message,
+						{ hint: caught.hint, details: { statementIndex } },
+					);
+				}
+			}
 			// Every change the batch makes carries this call's origin key, so
 			// the result can say what it touched without reading the SQL.
 			return {
@@ -1470,10 +1506,10 @@ export function mcpDocumentationResponse(
 			"",
 			"Setup: In an MCP-compatible client, add a remote connector using the endpoint above, then complete the LixRay sign-in and authorization flow. Connector support and setup menus depend on the client. If no LixRay connector is available, ask the user to connect it; a webpage cannot install a connector for the client.",
 			"",
-			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, call open_lix directly and do not call list_lixes first. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
+			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, pass lix_ref directly to query_sql or execute_sql, optionally branch_id; no opening call is required. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is signed, expiring, and independent from the MCP transport request.",
 			"",
 			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
-			"execute_sql already persisted the mutation. Do not follow a write with a verification SELECT.",
+			"A successful execute_sql persisted the mutation. Read back only when the write outcome is unknown or validation is part of the task.",
 			MCP_URL_GUIDE,
 			"Every MCP response includes X-Request-ID and every tool result includes request_id. You may send X-Request-ID to preserve an upstream correlation ID; use the returned ID when reporting failures.",
 			"",
@@ -1557,11 +1593,17 @@ function registerTool(
 			const executeInput = rawStatements
 				? observeExecuteInput(rawStatements)
 				: undefined;
+			let executionStarted = false;
+			let executionCompleted = false;
 			try {
+				if (isSqlTool(name))
+					input.context = await service.contextForSqlTarget(input);
 				// A request can carry several calls; each stamps its own key, so
 				// the readback below sees only this call's changes.
 				const callId = `${requestId}.${crypto.randomUUID()}`;
+				executionStarted = true;
 				const raw = await call(input, callId);
+				executionCompleted = true;
 				const executeOutput = isSqlTool(name)
 					? observeExecuteOutput(
 							name === "query_sql" ? { results: [raw.result] } : raw,
@@ -1611,7 +1653,15 @@ function registerTool(
 					content: [summary[0]!, ...links, ...summary.slice(1)],
 				};
 			} catch (caught) {
-				const error = toMcpError(caught, requestId);
+				const baseError = toMcpError(caught, requestId);
+				const error = isSqlTool(name)
+					? sqlToolError(baseError, {
+							write: name === "execute_sql",
+							started: executionStarted,
+							completed: executionCompleted,
+							statementCount: rawStatements?.length ?? 0,
+						})
+					: baseError;
 				const lixId = await observationLixId(service, input);
 				observeToolCall(observer, startedAt, {
 					requestId,
@@ -2019,8 +2069,9 @@ function summarizeToolError(error: {
 	code: string;
 	message: string;
 	hint?: string;
+	statement_index?: number;
 }): string {
-	return `LixRay error ${error.code}: ${error.message}${error.hint ? ` Hint: ${error.hint}` : ""}`;
+	return `${error.statement_index !== undefined ? `Statement ${error.statement_index + 1} (statements[${error.statement_index}]): ` : ""}LixRay error ${error.code}: ${error.message}${error.hint ? ` Hint: ${error.hint}` : ""}`;
 }
 
 function toMcpError(
@@ -2043,7 +2094,7 @@ function toMcpError(
 	return {
 		code: "internal_error",
 		message: "The LixRay tool call failed.",
-		hint: `Retry once. If the failure persists, contact LixRay support with request_id ${requestId}.`,
+		hint: `Contact LixRay support with request_id ${requestId} if the problem persists.`,
 	};
 }
 

@@ -628,3 +628,39 @@ void test("root directory UUID uses the repository URL and SQL-sensitive paths s
 		{ kind: "text", value: runtime.entities[0]!.path },
 	]);
 });
+
+void test("direct SQL targets default to the repository branch without inventory or switching", async () => {
+	const runtime = new FakeRuntime();
+	runtime.branch = "feature";
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const context = await service.contextForSqlTarget({
+		lix_ref: "@acme/company",
+	});
+	assert.equal(runtime.calls.length, 0);
+	assert.equal(runtime.branch, "feature");
+	await service.executeBatch(context, { statements: [{ sql: "SELECT 1" }] });
+	assert.equal(runtime.calls[0]?.branchId, "main");
+	const feature = await service.contextForSqlTarget({
+		lix_ref: LIX_ID,
+		branch_id: "feature",
+	});
+	await service.executeBatch(feature, { statements: [{ sql: "SELECT 2" }] });
+	assert.equal(runtime.calls[1]?.branchId, "feature");
+	assert.equal(
+		await service.contextForSqlTarget({ context: feature }),
+		feature,
+	);
+	for (const target of [
+		{},
+		{ context, lix_ref: LIX_ID },
+		{ context, branch_id: "main" },
+		{ branch_id: "main" },
+		{ lix_ref: "@other/private" },
+	]) {
+		await assert.rejects(service.contextForSqlTarget(target));
+	}
+	assert.equal(runtime.calls.length, 2);
+});

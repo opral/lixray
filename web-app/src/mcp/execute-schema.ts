@@ -1,3 +1,5 @@
+import { SQL_TEXT_WRITE_RECIPE } from "./sql-errors.ts";
+
 interface ExecuteSqlCoreTable {
 	name: string;
 	purpose: string;
@@ -69,7 +71,7 @@ ORDER BY ordinal_position;`;
  * Shared Lix operating guide. Lives once on server instructions / docs — not
  * on every tool description.
  */
-export const LIX_SQL_OPERATING_GUIDE = `SQL is the interface for repository data. Lix SQL is a Postgres dialect subset. File and directory creation, reads, edits, deletes, and path changes use query_sql or execute_sql against public lix_file and lix_directory. Do not invent file helper tools.
+export const LIX_SQL_OPERATING_GUIDE = `SQL is the interface for repository data. Lix SQL is a Postgres dialect subset. File and directory creation, reads, edits, deletes, and path changes use query_sql or execute_sql against public lix_file and lix_directory. Use the registered tools only.
 
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}
@@ -78,7 +80,7 @@ UTF-8 / text files: pass \`$1\` (path) and \`$2\` (file body) as \`kind: "text"\
 
 Lix supports Postgres \`INSERT ... ON CONFLICT (cols) DO UPDATE\` / \`DO NOTHING\` with \`excluded.col\` on files (\`lix_file\` on \`path\` or \`id\`) and schema-driven views such as \`lix_key_value\`. Example: \`INSERT INTO lix_key_value (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value\`. This is how you create-or-update without a probe SELECT. Name the conflict columns; \`ON CONSTRAINT\`, inference without columns, and \`DO UPDATE WHERE\` are not supported.
 
-execute_sql already persisted the mutation. \`rowsAffected\` and any rows the batch itself returned are sufficient. Do not follow a write with a verification SELECT, a second query_sql to check, or path/length/substring readback. One execute_sql batch is the whole write (dirs + file + ON CONFLICT is fine inside that batch). No readback is needed to confirm persistence. When a browser link is needed, use get_entity_urls to resolve the canonical URL; that is a separate link-resolution read, not write verification.
+execute_sql already persisted the mutation. \`rowsAffected\` and any rows the batch itself returned are sufficient. Read back when the outcome is unknown or validation is part of the task. Never blindly retry an uncertain write. When a browser link is needed, use get_entity_urls to resolve the canonical URL; that is a separate link-resolution read, not write verification.
 
 Entity tables are lix-dynamic: discover names through information_schema before guessing.
 
@@ -116,9 +118,9 @@ export const LIX_CATALOG_HINT = `Discover tables with: ${EXECUTE_SQL_TABLES_QUER
 // descriptions: hosts do not reliably show server instructions to the model,
 // and the tool card is what an agent reads before its first query. Reads and
 // writes each get their half; the other tools stay one or two sentences.
-const LIX_SQL_READ_GUIDE = `Files: use read_files and list_files; this tool is for everything else. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with \`${EXECUTE_SQL_TABLES_QUERY.replace(/\s+/g, " ")}\` and columns, with their descriptions, with \`${EXECUTE_SQL_COLUMNS_WITH_DESCRIPTIONS_QUERY.replace(/\s+/g, " ")}\`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: "text", value: "…" }] (kinds: text, int, float, json, blob); file bytes read as CAST(content AS TEXT). History: lix_log() lists retained commits, lix_history('lix_file') the net change per commit, lix_diff('lix_file') the working changes, lix_as_of('lix_file', $1) the state at a commit.`;
+const LIX_SQL_READ_GUIDE = `Read repository data and files with SQL; read_files and list_files are optional conveniences. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with \`${EXECUTE_SQL_TABLES_QUERY.replace(/\s+/g, " ")}\` and columns, with their descriptions, with \`${EXECUTE_SQL_COLUMNS_WITH_DESCRIPTIONS_QUERY.replace(/\s+/g, " ")}\`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: "text", value: "…" }] (kinds: text, int, float, json, blob); file bytes read as CAST(content AS TEXT). History: lix_log() lists retained commits, lix_history('lix_file') the net change per commit, lix_diff('lix_file') the working changes, lix_as_of('lix_file', $1) the state at a commit.`;
 
-const LIX_SQL_WRITE_GUIDE = `Files: use write_files to create or update; this tool is for everything else, lix_file and lix_directory included. Rename with \`UPDATE lix_file SET path = $1 WHERE path = $2\`; delete with \`DELETE FROM lix_file WHERE path = $1\`; directories likewise on lix_directory (paths have no trailing slash: /skills, not /skills/). Lix supports \`INSERT … ON CONFLICT (cols) DO UPDATE SET col = excluded.col\` and DO NOTHING; ON CONSTRAINT and DO UPDATE WHERE are not supported; text bound for a byte column is written as \`CAST($n AS BYTEA)\`. The result names what the batch wrote, with links; do not follow a write with a verification SELECT or any readback. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.`;
+const LIX_SQL_WRITE_GUIDE = `${SQL_TEXT_WRITE_RECIPE} write_files is an optional convenience. Rename with \`UPDATE lix_file SET path = $1 WHERE path = $2\`; delete with \`DELETE FROM lix_file WHERE path = $1\`; directories likewise on lix_directory (paths have no trailing slash: /skills, not /skills/). Lix supports \`INSERT … ON CONFLICT (cols) DO UPDATE SET col = excluded.col\` and DO NOTHING; ON CONSTRAINT and DO UPDATE WHERE are not supported; text bound for a byte column is written as \`CAST($n AS BYTEA)\`. Successful writes are persisted; read back only when the outcome is unknown or validation is part of the task. Errors identify a zero-based statement_index when available and report outcome as not_committed, unknown, or committed. Never blindly retry an unknown or committed outcome. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.`;
 
 export const LIST_FILES_TOOL_DESCRIPTION =
 	"List the files of the Lix and branch in context with id, path, and canonical url, sorted by path. Optional directory (an absolute path prefix such as /gtm) and name (a case-insensitive substring of the file name) narrow the list; truncated says to narrow further. Read-only.";
@@ -127,12 +129,12 @@ export const READ_FILES_TOOL_DESCRIPTION =
 	"Read files by absolute path. Each returns id, canonical url, size, content as { text } when the bytes are UTF-8 (else { base64 }), and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to write_files as last_seen_commit_id.";
 
 export const WRITE_FILES_TOOL_DESCRIPTION =
-	"Create or update files in one atomic commit, parent directories included. Each file takes content as { text } or { base64 } and, optionally, lixcol_metadata (omitted keeps it, an object replaces it, null clears it); metadata alone updates an existing file. With last_seen_commit_id, a file that changed since that commit refuses the whole write: the error carries current_commit_id and the current content of the conflicting files, so merge and write again; unrelated changes never block. checkpoint: true marks the resulting commit. The write is already saved; do not read it back. Rename, delete, and everything else: execute_sql on lix_file and lix_directory.";
+	"Create or update files in one atomic commit, parent directories included. Each file takes content as { text } or { base64 } and, optionally, lixcol_metadata (omitted keeps it, an object replaces it, null clears it); metadata alone updates an existing file. With last_seen_commit_id, a file that changed since that commit refuses the whole write: the error carries current_commit_id and the current content of the conflicting files, so merge and write again; unrelated changes never block. checkpoint: true marks the resulting commit. A successful write is already saved; read back if its outcome is uncertain or validation is requested. Rename, delete, and everything else: execute_sql on lix_file and lix_directory.";
 
-export const QUERY_SQL_TOOL_DESCRIPTION = `Run one read-only SQL statement against the Lix and branch in context. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.
+export const QUERY_SQL_TOOL_DESCRIPTION = `Run one read-only SQL statement against lix_ref (@handle/slug or UUID), optionally branch_id. Defaults to the repository default branch; no open_lix needed. Or pass context alone for its pinned branch. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.
 
 ${LIX_SQL_READ_GUIDE}`;
 
-export const EXECUTE_SQL_TOOL_DESCRIPTION = `Run an ordered atomic SQL batch against the Lix and branch in context. If any statement fails, the complete batch is rolled back; a returned result is already persisted.
+export const EXECUTE_SQL_TOOL_DESCRIPTION = `Run an ordered atomic SQL batch against lix_ref (@handle/slug or UUID), optionally branch_id. Defaults to the repository default branch; no open_lix needed. Or pass context alone for its pinned branch. If any statement fails, the complete batch is rolled back; a returned result is already persisted.
 
 ${LIX_SQL_WRITE_GUIDE}`;

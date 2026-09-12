@@ -732,7 +732,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.match(queryTool.description ?? "", /information_schema\.tables/);
 		assert.match(queryTool.description ?? "", /not SQLite/);
 		assert.match(executeSqlTool.description ?? "", /UPDATE lix_file SET path/);
-		assert.match(executeSqlTool.description ?? "", /verification SELECT/);
+		assert.match(executeSqlTool.description ?? "", /outcome is unknown/);
 		assert.match(executeSqlTool.description ?? "", /create_checkpoint/);
 		// The file recipe lives on write_files; the SQL cards point at it.
 		const writeFilesTool = tools.tools.find(
@@ -740,9 +740,12 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		);
 		assert.match(writeFilesTool?.description ?? "", /last_seen_commit_id/);
 		assert.match(writeFilesTool?.description ?? "", /lixcol_metadata/);
-		assert.match(executeSqlTool.description ?? "", /use write_files/);
+		assert.match(
+			executeSqlTool.description ?? "",
+			/write_files is an optional/,
+		);
 		assert.match(queryTool.description ?? "", /read_files and list_files/);
-		assert.match(MCP_SERVER_INSTRUCTIONS, /verification SELECT/);
+		assert.match(MCP_SERVER_INSTRUCTIONS, /outcome is unknown/);
 		// The listing stays bounded: the guide lives on two tools only, the
 		// rest are one-liners, output schemas are success-only.
 		const listingChars = JSON.stringify(tools.tools).length;
@@ -1008,6 +1011,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			message: "This SQL statement is not supported.",
 			hint: "Use SELECT 1 instead.",
 			details: { operation: "execute" },
+			statement_index: 0,
 		});
 		assert.equal(responseRequestIds.at(-1), failedContent.request_id);
 		assert.match(
@@ -1068,7 +1072,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			error: { message: string; hint: string };
 		};
 		assert.equal(internalContent.error.message, "The LixRay tool call failed.");
-		assert.match(internalContent.error.hint, /Retry once/);
+		assert.match(internalContent.error.hint, /Contact LixRay support/);
 		assert.match(internalContent.error.hint, /request_id/);
 		assert.match(internalContent.error.hint, /LixRay support/);
 
@@ -1208,19 +1212,19 @@ void test("checkpoint copy encourages agent judgment at meaningful milestones", 
 	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /Use judgment/);
 });
 
-void test("shipped copy tells agents not to verify writes", async () => {
+void test("shipped copy explains when write readback is useful", async () => {
 	for (const text of [
 		MCP_SERVER_INSTRUCTIONS,
 		LIX_SQL_OPERATING_GUIDE,
 		MCP_DOCS,
 	]) {
-		assert.match(text, /verification [`']?SELECT/);
+		assert.match(text, /outcome is unknown/);
 		assert.doesNotMatch(text, /inspect the relevant rows first/);
 		assert.doesNotMatch(text, /final verification SELECT is recommended/);
 	}
-	assert.match(MCP_SERVER_INSTRUCTIONS, /do not follow a write/i);
-	assert.match(MCP_DOCS, /Do not follow a write/);
-	assert.match(await mcpDocumentationResponse().text(), /verification SELECT/);
+	assert.match(MCP_SERVER_INSTRUCTIONS, /validation is part of the task/i);
+	assert.match(MCP_DOCS, /validation is part of the task/);
+	assert.match(await mcpDocumentationResponse().text(), /outcome is unknown/);
 });
 
 void test("list_lixes and open_lix descriptions stay identity- and empty-state honest", () => {
@@ -2549,6 +2553,82 @@ void test("file tools list, read, and write files with metadata and conflict che
 		});
 		assert.equal(unknown.isError, true);
 		assert.equal(toolErrorContent(unknown).error.code, "invalid_request");
+	} finally {
+		await client.close();
+	}
+});
+
+void test("SQL calls need no opening and failures survive SDK output validation", async () => {
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://lixray.test/mcp"),
+		{
+			fetch: async (input, init) =>
+				handleMcpTransport(
+					new globalThis.Request(input, init) as never,
+					service,
+					{ authMode: "none" },
+				),
+		},
+	);
+	const client = new Client(
+		{ name: "direct-sql-test", version: "1" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		await client.listTools(); // Load output schemas into the validating client.
+		const read = await client.callTool({
+			name: "query_sql",
+			arguments: { lix_ref: "@acme/company", sql: "SELECT 1" },
+		});
+		assert.notEqual(read.isError, true);
+		assert.equal(
+			typeof (read.structuredContent as { context: string }).context,
+			"string",
+		);
+		const write = await client.callTool({
+			name: "execute_sql",
+			arguments: {
+				lix_ref: "@acme/company",
+				branch_id: "feature",
+				statements: [{ sql: "SELECT 1" }],
+			},
+		});
+		assert.notEqual(write.isError, true);
+		for (const [sql, outcome] of [
+			["SELECT error", "not_committed"],
+			["SELECT internal_error", "unknown"],
+		]) {
+			const result = await client.callTool({
+				name: "execute_sql",
+				arguments: { lix_ref: "@acme/company", statements: [{ sql }] },
+			});
+			assert.equal(result.isError, true);
+			assert.equal(result.structuredContent, undefined);
+			const error = (
+				toolErrorContent(result) as unknown as {
+					error: { outcome: string; statement_index?: number; hint: string };
+				}
+			).error;
+			assert.equal(error.outcome, outcome);
+			if (outcome === "not_committed") {
+				assert.equal(error.statement_index, 0);
+				assert.match(error.hint, /CAST/);
+			} else assert.match(error.hint, /Read the affected state/);
+		}
+		const ambiguous = await client.callTool({
+			name: "query_sql",
+			arguments: {
+				lix_ref: "@acme/company",
+				context: (read.structuredContent as { context: string }).context,
+				sql: "SELECT 1",
+			},
+		});
+		assert.equal(ambiguous.isError, true);
 	} finally {
 		await client.close();
 	}

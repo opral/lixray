@@ -39,7 +39,7 @@ void test("SQL guidance models the public Lix surfaces", () => {
 	assert.match(EXECUTE_SQL_COLUMNS_QUERY, /information_schema\.columns/);
 });
 
-void test("shared operating guide keeps file-content, upsert, and no-verify copy", () => {
+void test("shared operating guide keeps file-content, upsert, and outcome-aware recovery copy", () => {
 	for (const text of [
 		LIX_SQL_OPERATING_GUIDE,
 		MCP_SERVER_INSTRUCTIONS,
@@ -56,8 +56,8 @@ void test("shared operating guide keeps file-content, upsert, and no-verify copy
 		);
 		assert.doesNotMatch(text, /Pass binary values as/);
 		assert.doesNotMatch(text, /MCP callers pass/);
-		assert.match(text, /verification [`']?SELECT/);
-		assert.match(text, /do not follow a write/i);
+		assert.match(text, /outcome is unknown/);
+		assert.match(text, /validation is part of the task/i);
 		assert.doesNotMatch(text, /inspect the relevant rows first/);
 		assert.doesNotMatch(text, /final verification SELECT is recommended/);
 		assert.doesNotMatch(
@@ -91,14 +91,17 @@ void test("shared operating guide keeps file-content, upsert, and no-verify copy
 	assert.match(MCP_DOCS, /ON CONFLICT \(path\) DO UPDATE/);
 });
 
-void test("each tool carries its own guide; the SQL cards defer files to the file tools", () => {
+void test("each tool carries its own guide; SQL supports files directly", () => {
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /INSERT, UPDATE, and DELETE/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /use execute_sql for writes/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ordered atomic SQL batch/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
 	// Reads: files elsewhere, not SQLite, the catalog, core tables, params, history.
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /use read_files and list_files/);
+	assert.match(
+		QUERY_SQL_TOOL_DESCRIPTION,
+		/read_files and list_files are optional/,
+	);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /not SQLite/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.columns/);
@@ -109,12 +112,12 @@ void test("each tool carries its own guide; the SQL cards defer files to the fil
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /kind: "text"/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /lix_history\('lix_file'\)/);
 	// Writes: files elsewhere, rename, delete, upsert shape, no readback.
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /use write_files/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /write_files is an optional/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /UPDATE lix_file SET path/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /DELETE FROM lix_file/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /excluded\.col/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /\/skills, not \/skills\//);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /verification SELECT/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /outcome is unknown/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /create_checkpoint/);
 	// The file tools carry the file guide the SQL cards used to.
 	assert.match(READ_FILES_TOOL_DESCRIPTION, /\{ text \}/);
@@ -123,10 +126,10 @@ void test("each tool carries its own guide; the SQL cards defer files to the fil
 	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /parent directories included/);
 	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /null clears it/);
 	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /unrelated changes never block/);
-	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /do not read it back/);
+	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /validation/);
 	assert.match(LIST_FILES_TOOL_DESCRIPTION, /truncated/);
 	// The instructions still carry the full guide for hosts that show it.
-	assert.match(MCP_SERVER_INSTRUCTIONS, /verification SELECT/);
+	assert.match(MCP_SERVER_INSTRUCTIONS, /outcome is unknown/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /Do not checkpoint after every edit/);
 	for (const description of [
 		QUERY_SQL_TOOL_DESCRIPTION,
