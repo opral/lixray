@@ -173,7 +173,7 @@ class FakeRuntime implements LixRuntimeClient {
 	}
 }
 
-void test("open_lix returns a signed context pinned to the selected branch", async () => {
+void test("open_lix returns an encrypted context pinned to the selected branch", async () => {
 	const runtime = new FakeRuntime();
 	const service = new LixService(runtime, {
 		contextSigningKey: "test-key",
@@ -187,7 +187,7 @@ void test("open_lix returns a signed context pinned to the selected branch", asy
 	assert.equal(opened.fileCount, 0);
 	assert.equal(opened.directoryCount, 0);
 	assert.equal(opened.empty, true);
-	assert.match(opened.context, /^[^.]+\.[^.]+$/);
+	assert.match(opened.context, /^v2\.[^.]+\.[^.]+$/);
 	assert.ok(Date.parse(opened.contextExpiresAt) > Date.now());
 
 	const result = await service.execute(opened.context, { sql: "SELECT 1" });
@@ -195,7 +195,52 @@ void test("open_lix returns a signed context pinned to the selected branch", asy
 	assert.equal(runtime.calls.at(-1)?.branchId, "main");
 });
 
-void test("expired contexts identify the Lix and branch needed to reopen", async () => {
+void test("encrypted contexts conceal claims and survive fresh service instances", async () => {
+	const runtime = new FakeRuntime();
+	const options = {
+		contextSigningKey: "test-key",
+		principal: { userId: "private-user-id", clientId: "private-client-id" },
+	};
+	const service = new LixService(runtime, options);
+	const opened = await service.openLix(LIX_ID);
+	const second = await service.openLix(LIX_ID);
+	assert.notEqual(opened.context, second.context);
+	const decoded = opened.context
+		.split(".")
+		.slice(1)
+		.map((part) => Buffer.from(part, "base64url").toString("utf8"))
+		.join("");
+	assert.doesNotMatch(
+		decoded,
+		/private-user-id|private-client-id|userId|clientId/,
+	);
+	await new LixService(runtime, options).execute(opened.context, {
+		sql: "SELECT 1",
+	});
+	await assert.rejects(
+		new LixService(runtime, {
+			...options,
+			principal: { ...options.principal, clientId: "other-client" },
+		}).execute(opened.context, { sql: "SELECT 1" }),
+		(error: unknown) => isLixError(error) && error.code === "invalid_context",
+	);
+	const parts = opened.context.split(".");
+	const bytes = Buffer.from(parts[2], "base64url");
+	bytes[0] ^= 1;
+	parts[2] = bytes.toString("base64url");
+	await assert.rejects(
+		service.execute(parts.join("."), { sql: "SELECT 1" }),
+		(error: unknown) => isLixError(error) && error.code === "invalid_context",
+	);
+	await assert.rejects(
+		service.execute("eyJ1c2VySWQiOiJwcml2YXRlIn0.signature", {
+			sql: "SELECT 1",
+		}),
+		(error: unknown) => isLixError(error) && error.hint === CONTEXT_REOPEN_HINT,
+	);
+});
+
+void test("expired contexts provide reopening guidance without diagnostic identifiers", async () => {
 	const runtime = new FakeRuntime();
 	const service = new LixService(runtime, {
 		contextSigningKey: "test-key",
@@ -210,14 +255,7 @@ void test("expired contexts identify the Lix and branch needed to reopen", async
 			assert.equal(error.hint, CONTEXT_REOPEN_HINT);
 			assert.match(error.hint ?? "", /structuredContent\.context/);
 			assert.match(error.hint ?? "", /do not copy TEXT/);
-			const details = error.details as Record<string, unknown>;
-			assert.equal(typeof details.server_time, "string");
-			assert.ok(Date.parse(String(details.server_time)));
-			assert.equal(typeof details.expires_at, "string");
-			assert.ok(Date.parse(String(details.expires_at)));
-			assert.equal(details.lix_id, LIX_ID);
-			assert.equal(details.branch_id, "main");
-			assert.doesNotMatch(JSON.stringify(error), new RegExp(opened.context));
+			assert.equal(error.details, undefined);
 			return true;
 		},
 	);
@@ -355,8 +393,7 @@ void test("contexts are bound to the principal and reject tampering", async () =
 			isLixError(error) &&
 			error.code === "malformed_context" &&
 			error.hint === CONTEXT_REOPEN_HINT &&
-			typeof (error.details as { server_time?: unknown }).server_time ===
-				"string",
+			error.details === undefined,
 	);
 
 	const truncated = opened.context.slice(
@@ -365,20 +402,19 @@ void test("contexts are bound to the principal and reject tampering", async () =
 	);
 	await assert.rejects(
 		service.execute(truncated, { sql: "SELECT 1" }),
-		(error: unknown) => isLixError(error) && error.code === "malformed_context",
+		(error: unknown) =>
+			isLixError(error) &&
+			["malformed_context", "invalid_context"].includes(error.code ?? ""),
 	);
 
-	const [encodedClaims, encodedSignature] = opened.context.split(".");
-	const nonCanonical = `${encodedClaims}.${encodedSignature}=`;
+	const nonCanonical = `${opened.context}=`;
 	await assert.rejects(
 		service.execute(nonCanonical, { sql: "SELECT 1" }),
 		(error: unknown) => {
 			if (!isLixError(error) || error.code !== "malformed_context")
 				return false;
 			assert.equal(error.hint, CONTEXT_REOPEN_HINT);
-			const details = error.details as Record<string, unknown>;
-			assert.equal(typeof details.server_time, "string");
-			assert.equal(typeof details.expires_at, "string");
+			assert.equal(error.details, undefined);
 			return true;
 		},
 	);
@@ -392,10 +428,7 @@ void test("contexts are bound to the principal and reject tampering", async () =
 		(error: unknown) => {
 			if (!isLixError(error) || error.code !== "invalid_context") return false;
 			assert.equal(error.hint, CONTEXT_REOPEN_HINT);
-			const details = error.details as Record<string, unknown>;
-			assert.equal(typeof details.server_time, "string");
-			assert.equal(typeof details.expires_at, "string");
-			assert.equal(details.lix_id, undefined);
+			assert.equal(error.details, undefined);
 			return true;
 		},
 	);
@@ -410,8 +443,7 @@ void test("contexts are bound to the principal and reject tampering", async () =
 			isLixError(error) &&
 			error.code === "invalid_context" &&
 			error.hint === CONTEXT_REOPEN_HINT &&
-			typeof (error.details as { expires_at?: unknown }).expires_at ===
-				"string",
+			error.details === undefined,
 	);
 });
 

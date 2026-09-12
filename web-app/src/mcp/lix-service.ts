@@ -203,7 +203,7 @@ export interface LixRuntimeClient {
 }
 
 interface ContextClaims {
-	v: 1;
+	v: 2;
 	userId: string;
 	clientId: string;
 	lixId: string;
@@ -220,7 +220,7 @@ interface LixServiceOptions {
 /**
  * Stateless application context. It is deliberately separate from the MCP
  * transport session: hosts may create a fresh MCP server for every request,
- * while this signed value carries the selected Lix and branch forward.
+ * while this encrypted value carries the selected Lix and branch forward.
  */
 export class LixService {
 	private readonly client: LixRuntimeClient;
@@ -238,13 +238,18 @@ export class LixService {
 			clientId: "local",
 		};
 		this.contextTtlMs = options.contextTtlMs ?? DEFAULT_CONTEXT_TTL_MS;
-		this.cryptoKeyPromise = crypto.subtle.importKey(
-			"raw",
-			new TextEncoder().encode(this.signingKey),
-			{ name: "HMAC", hash: "SHA-256" },
-			false,
-			["sign", "verify"],
-		);
+		// Derive a domain-separated AES key from the existing server secret.
+		this.cryptoKeyPromise = crypto.subtle
+			.digest(
+				"SHA-256",
+				new TextEncoder().encode(`lixray-mcp-context-v2:${this.signingKey}`),
+			)
+			.then((key) =>
+				crypto.subtle.importKey("raw", key, "AES-GCM", false, [
+					"encrypt",
+					"decrypt",
+				]),
+			);
 	}
 
 	async listLixes(): Promise<Array<LixSummary>> {
@@ -1019,23 +1024,21 @@ export class LixService {
 	): Promise<{ token: string; expiresAt: number }> {
 		const expiresAt = Date.now() + this.contextTtlMs;
 		const claims: ContextClaims = {
-			v: 1,
+			v: 2,
 			userId: this.principal.userId,
 			clientId: this.principal.clientId,
 			lixId,
 			branchId,
 			expiresAt,
 		};
-		const encodedClaims = encodeBase64Url(
+		const iv = crypto.getRandomValues(new Uint8Array(12));
+		const ciphertext = await crypto.subtle.encrypt(
+			{ name: "AES-GCM", iv },
+			await this.cryptoKeyPromise,
 			new TextEncoder().encode(JSON.stringify(claims)),
 		);
-		const signature = await crypto.subtle.sign(
-			"HMAC",
-			await this.cryptoKeyPromise,
-			new TextEncoder().encode(encodedClaims),
-		);
 		return {
-			token: `${encodedClaims}.${encodeBase64Url(new Uint8Array(signature))}`,
+			token: `v2.${encodeBase64Url(iv)}.${encodeBase64Url(new Uint8Array(ciphertext))}`,
 			expiresAt,
 		};
 	}
@@ -1045,54 +1048,50 @@ export class LixService {
 			throw contextError("malformed_context", "context must be a string.");
 		}
 		const parts = token.split(".");
-		if (parts.length !== 2) {
+		// Legacy signed contexts must be reopened; they expose account claims.
+		if (parts.length !== 3 || parts[0] !== "v2") {
 			throw contextError("malformed_context", "context is malformed.");
 		}
-		const [encodedClaims, encodedSignature] = parts;
-		let claims: ContextClaims | undefined;
-		let signature: Uint8Array<ArrayBuffer> | undefined;
+		let iv: Uint8Array<ArrayBuffer>;
+		let ciphertext: Uint8Array<ArrayBuffer>;
 		try {
-			const parsed: unknown = JSON.parse(decodeBase64Url(encodedClaims));
-			if (!parsed || typeof parsed !== "object")
-				throw new Error("invalid claims");
-			claims = parsed as ContextClaims;
-			signature = base64ToBytes(toBase64(encodedSignature));
-			if (encodeBase64Url(signature) !== encodedSignature) {
-				throw new Error("non-canonical signature");
+			iv = base64ToBytes(toBase64(parts[1]));
+			ciphertext = base64ToBytes(toBase64(parts[2]));
+			if (
+				iv.length !== 12 ||
+				ciphertext.length < 16 ||
+				encodeBase64Url(iv) !== parts[1] ||
+				encodeBase64Url(ciphertext) !== parts[2]
+			) {
+				throw new Error("non-canonical context");
 			}
 		} catch {
-			throw contextError("malformed_context", "context is malformed.", {
-				expiresAt: finiteTimestamp(claims?.expiresAt),
-			});
+			throw contextError("malformed_context", "context is malformed.");
 		}
-		const advertisedExpiresAt = finiteTimestamp(claims.expiresAt);
-		const valid = await crypto.subtle.verify(
-			"HMAC",
-			await this.cryptoKeyPromise,
-			signature,
-			new TextEncoder().encode(encodedClaims),
-		);
+		let claims: ContextClaims;
+		try {
+			const plaintext = await crypto.subtle.decrypt(
+				{ name: "AES-GCM", iv },
+				await this.cryptoKeyPromise,
+				ciphertext,
+			);
+			claims = JSON.parse(new TextDecoder().decode(plaintext)) as ContextClaims;
+		} catch {
+			throw contextError("invalid_context", "context is invalid.");
+		}
 		if (
-			!valid ||
-			claims.v !== 1 ||
+			!claims ||
+			claims.v !== 2 ||
 			claims.userId !== this.principal.userId ||
 			claims.clientId !== this.principal.clientId ||
 			typeof claims.lixId !== "string" ||
 			typeof claims.branchId !== "string"
 		) {
-			throw contextError("invalid_context", "context is invalid.", {
-				expiresAt: advertisedExpiresAt,
-			});
+			throw contextError("invalid_context", "context is invalid.");
 		}
-		if (
-			advertisedExpiresAt === undefined ||
-			advertisedExpiresAt <= Date.now()
-		) {
-			throw contextError("context_expired", "The Lix context has expired.", {
-				expiresAt: advertisedExpiresAt,
-				lixId: claims.lixId,
-				branchId: claims.branchId,
-			});
+		const expiresAt = finiteTimestamp(claims.expiresAt);
+		if (expiresAt === undefined || expiresAt <= Date.now()) {
+			throw contextError("context_expired", "The Lix context has expired.");
 		}
 		return { lixId: claims.lixId, branchId: claims.branchId };
 	}
@@ -1101,24 +1100,8 @@ export class LixService {
 function contextError(
 	code: "context_expired" | "malformed_context" | "invalid_context",
 	message: string,
-	options: {
-		expiresAt?: number;
-		lixId?: string;
-		branchId?: string;
-	} = {},
 ): LixError {
-	const details: Record<string, unknown> = {
-		server_time: new Date().toISOString(),
-	};
-	if (options.expiresAt !== undefined) {
-		details.expires_at = new Date(options.expiresAt).toISOString();
-	}
-	if (options.lixId) details.lix_id = options.lixId;
-	if (options.branchId) details.branch_id = options.branchId;
-	return createLixError(code, message, {
-		hint: CONTEXT_REOPEN_HINT,
-		details,
-	});
+	return createLixError(code, message, { hint: CONTEXT_REOPEN_HINT });
 }
 
 function finiteTimestamp(value: unknown): number | undefined {
@@ -1209,10 +1192,6 @@ function encodeBase64Url(bytes: Uint8Array): string {
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
 		.replace(/=+$/g, "");
-}
-
-function decodeBase64Url(value: string): string {
-	return new TextDecoder().decode(base64ToBytes(toBase64(value)));
 }
 
 function toBase64(value: string): string {

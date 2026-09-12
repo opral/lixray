@@ -2,7 +2,7 @@
 	{
 		"name": "list_lixes",
 		"title": "LixRay: Discover lixes",
-		"description": "List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, pass lix_ref directly to query_sql or execute_sql.",
+		"description": "List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, pass lix_ref directly to query_sql or execute_sql.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -30,31 +30,20 @@
 							"namespace": {
 								"type": "object",
 								"properties": {
-									"id": {
-										"type": "string"
-									},
-									"name": {
-										"type": "string"
-									},
 									"handle": {
 										"type": "string"
 									}
 								},
-								"required": ["id", "name", "handle"],
+								"required": ["handle"],
 								"additionalProperties": false
 							}
 						},
 						"required": ["id", "name", "slug", "namespace"],
 						"additionalProperties": false
 					}
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["lixes", "request_id"],
+			"required": ["lixes"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -73,7 +62,7 @@
 	{
 		"name": "open_lix",
 		"title": "LixRay: Open a Lix",
-		"description": "Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, canonical url; when file_paths_complete is true, do not list files again.",
+		"description": "Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, canonical url; when file_paths_complete is true, do not list files again.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -167,11 +156,6 @@
 				},
 				"empty": {
 					"type": "boolean"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
 			"required": [
@@ -188,8 +172,7 @@
 				"files",
 				"file_paths",
 				"file_paths_complete",
-				"empty",
-				"request_id"
+				"empty"
 			],
 			"additionalProperties": false
 		},
@@ -209,7 +192,7 @@
 	{
 		"name": "get_entity_urls",
 		"title": "LixRay: Get canonical item URLs",
-		"description": "Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.",
+		"description": "Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -301,14 +284,9 @@
 						"required": ["kind", "id", "path", "url"],
 						"additionalProperties": false
 					}
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "entities", "request_id"],
+			"required": ["context", "entities"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -327,7 +305,7 @@
 	{
 		"name": "list_files",
 		"title": "LixRay: List files",
-		"description": "List the files of the Lix and branch in context with id, path, and canonical url, sorted by path. Optional directory (an absolute path prefix such as /gtm) and name (a case-insensitive substring of the file name) narrow the list; truncated says to narrow further. Read-only.",
+		"description": "List the files of the Lix and branch in context with id, path, and canonical url, sorted by path. Optional directory (an absolute path prefix such as /gtm) and name (a case-insensitive substring of the file name) narrow the list; truncated says to narrow further. Read-only.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -382,14 +360,9 @@
 				},
 				"truncated": {
 					"type": "boolean"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "commit_id", "files", "truncated", "request_id"],
+			"required": ["context", "commit_id", "files", "truncated"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -408,7 +381,7 @@
 	{
 		"name": "read_files",
 		"title": "LixRay: Read files",
-		"description": "Read files by absolute path. Each returns id, canonical url, size, content as { text } when the bytes are UTF-8 (else { base64 }), and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to write_files as last_seen_commit_id.",
+		"description": "Read files by absolute path. Each returns id, canonical url, size, content as { text } when the bytes are UTF-8 (else { base64 }), and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to write_files as last_seen_commit_id.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -517,14 +490,9 @@
 					"items": {
 						"type": "string"
 					}
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "commit_id", "files", "missing", "request_id"],
+			"required": ["context", "commit_id", "files", "missing"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -543,7 +511,7 @@
 	{
 		"name": "write_files",
 		"title": "LixRay: Write files",
-		"description": "Create or update files in one atomic commit, parent directories included. Each file takes content as { text } or { base64 } and, optionally, lixcol_metadata (omitted keeps it, an object replaces it, null clears it); metadata alone updates an existing file. With last_seen_commit_id, a file that changed since that commit refuses the whole write: the error carries current_commit_id and the current content of the conflicting files, so merge and write again; unrelated changes never block. checkpoint: true marks the resulting commit. A successful write is already saved; read back if its outcome is uncertain or validation is requested. Rename, delete, and everything else: execute_sql on lix_file and lix_directory.",
+		"description": "Create or update files in one atomic commit, parent directories included. Each file takes content as { text } or { base64 } and, optionally, lixcol_metadata (omitted keeps it, an object replaces it, null clears it); metadata alone updates an existing file. With last_seen_commit_id, a file that changed since that commit refuses the whole write: the error carries current_commit_id and the current content of the conflicting files, so merge and write again; unrelated changes never block. checkpoint: true marks the resulting commit. A successful write is already saved; read back if its outcome is uncertain or validation is requested. Rename, delete, and everything else: execute_sql on lix_file and lix_directory.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -652,14 +620,9 @@
 				},
 				"checkpoint_commit_id": {
 					"type": "string"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "commit_id", "files", "request_id"],
+			"required": ["context", "commit_id", "files"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -679,7 +642,7 @@
 	{
 		"name": "query_sql",
 		"title": "LixRay: Query SQL",
-		"description": "Run one read-only SQL statement against lix_ref (@handle/slug or UUID), optionally branch_id. Defaults to the repository default branch; no open_lix needed. Or pass context alone for its pinned branch. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.\n\nRead repository data and files with SQL; read_files and list_files are optional conveniences. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;` and columns, with their descriptions, with `SELECT column_name, data_type, is_nullable, description FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position;`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: \"text\", value: \"…\" }] (kinds: text, int, float, json, blob); file bytes read as CAST(content AS TEXT). History: lix_log() lists retained commits, lix_history('lix_file') the net change per commit, lix_diff('lix_file') the working changes, lix_as_of('lix_file', $1) the state at a commit.",
+		"description": "Run one read-only SQL statement against lix_ref (@handle/slug or UUID), optionally branch_id. Defaults to the repository default branch; no open_lix needed. Or pass context alone for its pinned branch. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.\n\nRead repository data and files with SQL; read_files and list_files are optional conveniences. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;` and columns, with their descriptions, with `SELECT column_name, data_type, is_nullable, description FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position;`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: \"text\", value: \"…\" }] (kinds: text, int, float, json, blob); file bytes read as CAST(content AS TEXT). History: lix_log() lists retained commits, lix_history('lix_file') the net change per commit, lix_diff('lix_file') the working changes, lix_as_of('lix_file', $1) the state at a commit.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -850,14 +813,9 @@
 					},
 					"required": ["columns", "rows", "rowsAffected", "notices"],
 					"additionalProperties": false
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "result", "request_id"],
+			"required": ["context", "result"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -876,7 +834,7 @@
 	{
 		"name": "execute_sql",
 		"title": "Execute SQL atomically",
-		"description": "Run an ordered atomic SQL batch against lix_ref (@handle/slug or UUID), optionally branch_id. Defaults to the repository default branch; no open_lix needed. Or pass context alone for its pinned branch. If any statement fails, the complete batch is rolled back; a returned result is already persisted.\n\nFor text files use UPDATE lix_file SET content = CAST($1 AS BYTEA) WHERE path = $2 with two kind: \"text\" parameters (content, path). REPLACE, CONCAT and || can be used inside the BYTEA cast. Use one SQL statement per statements[] entry; use an explicit ON CONFLICT (path) target. write_files is an optional convenience. Rename with `UPDATE lix_file SET path = $1 WHERE path = $2`; delete with `DELETE FROM lix_file WHERE path = $1`; directories likewise on lix_directory (paths have no trailing slash: /skills, not /skills/). Lix supports `INSERT … ON CONFLICT (cols) DO UPDATE SET col = excluded.col` and DO NOTHING; ON CONSTRAINT and DO UPDATE WHERE are not supported; text bound for a byte column is written as `CAST($n AS BYTEA)`. Successful writes are persisted; read back only when the outcome is unknown or validation is part of the task. Errors identify a zero-based statement_index when available and report outcome as not_committed, unknown, or committed. Never blindly retry an unknown or committed outcome. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.",
+		"description": "Run an ordered atomic SQL batch against lix_ref (@handle/slug or UUID), optionally branch_id. Defaults to the repository default branch; no open_lix needed. Or pass context alone for its pinned branch. If any statement fails, the complete batch is rolled back; a returned result is already persisted.\n\nFor text files use UPDATE lix_file SET content = CAST($1 AS BYTEA) WHERE path = $2 with two kind: \"text\" parameters (content, path). REPLACE, CONCAT and || can be used inside the BYTEA cast. Use one SQL statement per statements[] entry; use an explicit ON CONFLICT (path) target. write_files is an optional convenience. Rename with `UPDATE lix_file SET path = $1 WHERE path = $2`; delete with `DELETE FROM lix_file WHERE path = $1`; directories likewise on lix_directory (paths have no trailing slash: /skills, not /skills/). Lix supports `INSERT … ON CONFLICT (cols) DO UPDATE SET col = excluded.col` and DO NOTHING; ON CONSTRAINT and DO UPDATE WHERE are not supported; text bound for a byte column is written as `CAST($n AS BYTEA)`. Successful writes are persisted; read back only when the outcome is unknown or validation is part of the task. Errors identify a zero-based statement_index when available and report outcome as not_committed, unknown, or committed. Never blindly retry an unknown or committed outcome. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1070,14 +1028,9 @@
 						"required": ["columns", "rows", "rowsAffected", "notices"],
 						"additionalProperties": false
 					}
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "results", "request_id"],
+			"required": ["context", "results"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -1097,7 +1050,7 @@
 	{
 		"name": "active_branch_id",
 		"title": "Get active branch",
-		"description": "Return the branch selected by context and its current commit id.",
+		"description": "Return the branch selected by context and its current commit id.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1127,14 +1080,9 @@
 				},
 				"commit_id": {
 					"type": "string"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "branch_id", "commit_id", "request_id"],
+			"required": ["context", "branch_id", "commit_id"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -1153,7 +1101,7 @@
 	{
 		"name": "switch_branch",
 		"title": "Switch branch",
-		"description": "Return a new context pinned to branch_id. Context switching is explicit and stateless; pass the returned context to subsequent calls.",
+		"description": "Return a new context pinned to branch_id. Context switching is explicit and stateless; pass the returned context to subsequent calls.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1188,14 +1136,9 @@
 				},
 				"commit_id": {
 					"type": "string"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "branch_id", "commit_id", "request_id"],
+			"required": ["context", "branch_id", "commit_id"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -1214,7 +1157,7 @@
 	{
 		"name": "create_branch",
 		"title": "Create branch",
-		"description": "Create a branch from the branch selected by context. The new branch is not made active; call switch_branch when the agent wants to work there.",
+		"description": "Create a branch from the branch selected by context. The new branch is not made active; call switch_branch when the agent wants to work there.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1265,14 +1208,9 @@
 					},
 					"required": ["id", "name", "hidden", "commit_id"],
 					"additionalProperties": false
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "branch", "request_id"],
+			"required": ["context", "branch"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -1292,7 +1230,7 @@
 	{
 		"name": "create_checkpoint",
 		"title": "Create checkpoint",
-		"description": "Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.",
+		"description": "Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1317,14 +1255,9 @@
 				},
 				"commit_id": {
 					"type": "string"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "commit_id", "request_id"],
+			"required": ["context", "commit_id"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -1344,7 +1277,7 @@
 	{
 		"name": "restore",
 		"title": "Restore branch",
-		"description": "Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.",
+		"description": "Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1379,14 +1312,9 @@
 				},
 				"commit_id": {
 					"type": "string"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "branch_id", "commit_id", "request_id"],
+			"required": ["context", "branch_id", "commit_id"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -1406,7 +1334,7 @@
 	{
 		"name": "undo",
 		"title": "Undo last commit",
-		"description": "Undo the latest commit on the branch selected by context.",
+		"description": "Undo the latest commit on the branch selected by context.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1439,19 +1367,13 @@
 				},
 				"inverse_commit_id": {
 					"type": "string"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
 			"required": [
 				"context",
 				"branch_id",
 				"target_commit_id",
-				"inverse_commit_id",
-				"request_id"
+				"inverse_commit_id"
 			],
 			"additionalProperties": false
 		},
@@ -1472,7 +1394,7 @@
 	{
 		"name": "redo",
 		"title": "Redo commit",
-		"description": "Redo the latest undone commit on the branch selected by context.",
+		"description": "Redo the latest undone commit on the branch selected by context.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1505,19 +1427,13 @@
 				},
 				"replay_commit_id": {
 					"type": "string"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
 			"required": [
 				"context",
 				"branch_id",
 				"target_commit_id",
-				"replay_commit_id",
-				"request_id"
+				"replay_commit_id"
 			],
 			"additionalProperties": false
 		},
@@ -1538,7 +1454,7 @@
 	{
 		"name": "merge_branch_preview",
 		"title": "Preview branch merge",
-		"description": "Preview merging source_branch_id into the active branch selected by context. This does not mutate Lix state.",
+		"description": "Preview merging source_branch_id into the active branch selected by context. This does not mutate Lix state.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1565,14 +1481,9 @@
 					"type": "string",
 					"minLength": 1,
 					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "request_id"],
+			"required": ["context"],
 			"additionalProperties": {}
 		},
 		"annotations": {
@@ -1591,7 +1502,7 @@
 	{
 		"name": "merge_branch",
 		"title": "Merge branch",
-		"description": "Merge source_branch_id into the active branch selected by context. Preview first and resolve conflicts before calling this mutating operation.",
+		"description": "Merge source_branch_id into the active branch selected by context. Preview first and resolve conflicts before calling this mutating operation.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1618,14 +1529,9 @@
 					"type": "string",
 					"minLength": 1,
 					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
-				},
-				"request_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Request ID for correlating this response with server telemetry"
 				}
 			},
-			"required": ["context", "request_id"],
+			"required": ["context"],
 			"additionalProperties": {}
 		},
 		"annotations": {
