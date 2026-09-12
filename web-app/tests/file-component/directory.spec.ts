@@ -895,9 +895,9 @@ test("working changes mark the listing without a review open", async ({
 	expect(
 		await glyphTitle("alpha.md").locator("svg").getAttribute("width"),
 	).toBe("12");
-	expect(
-		await glyphTitle("alpha.md").locator("path").getAttribute("d"),
-	).toBe("M3.3 6.3c.9-1.5 1.8-1.5 2.7 0s1.8 1.5 2.7 0");
+	expect(await glyphTitle("alpha.md").locator("path").getAttribute("d")).toBe(
+		"M3.3 6.3c.9-1.5 1.8-1.5 2.7 0s1.8 1.5 2.7 0",
+	);
 	// Outside a review nothing recedes: this is the ordinary file list.
 	for (const name of ["alpha.md", "research", "docs"]) {
 		expect(

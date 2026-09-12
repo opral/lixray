@@ -87,10 +87,7 @@ void test("counts working changes through the status bar's own diff", () => {
 	assert.doesNotMatch(WORKING_FILE_DIFF_SQL, /SELECT \*/);
 	for (const column of ["diff_type", "from_path", "to_path"])
 		assert.match(WORKING_FILE_DIFF_SQL, new RegExp(column));
-	assert.match(
-		WORKING_FILE_DIFF_SQL,
-		/coalesce\(to_path, from_path\) AS path/,
-	);
+	assert.match(WORKING_FILE_DIFF_SQL, /coalesce\(to_path, from_path\) AS path/);
 	assert.match(WORKING_CHANGE_SQL, /sum\(row_count\), 0\) AS change_count/i);
 });
 

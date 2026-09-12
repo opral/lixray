@@ -252,21 +252,21 @@ function App() {
 				files: [],
 			} as unknown as AtelierDiffSession)
 		: params.has("history")
-		? ({
-				target: { commitId: "past" },
-				base: null,
-				files: [],
-			} as unknown as AtelierDiffSession)
-		: params.has("review")
 			? ({
-					target: { working: true },
+					target: { commitId: "past" },
 					base: null,
-					files: [
-						{ id: "alpha", path: "/alpha.md", changeKind: "modified" },
-						{ id: "child", path: "/docs/child.md", changeKind: "modified" },
-					],
+					files: [],
 				} as unknown as AtelierDiffSession)
-			: null;
+			: params.has("review")
+				? ({
+						target: { working: true },
+						base: null,
+						files: [
+							{ id: "alpha", path: "/alpha.md", changeKind: "modified" },
+							{ id: "child", path: "/docs/child.md", changeKind: "modified" },
+						],
+					} as unknown as AtelierDiffSession)
+				: null;
 	return (
 		<main style={{ height: "100vh" }}>
 			<div data-testid="current-directory">{dirPath}</div>
