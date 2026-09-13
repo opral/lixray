@@ -30,8 +30,10 @@ Independent browser replicas reconcile valid concurrent row edits in the same
 native merge pipeline as branch merges. Registered schema/plugin merge hooks
 run for their rows; the default for overlapping values is last write wins in
 server acceptance order. Files parsed by plugins are serialized from the merged
-rows. Opaque file content is atomic. Once background acknowledgment and updates
-settle, each replica and its editors show the authoritative result. Retrying a
+rows. Opaque file content is atomic. If the server’s selected branch head changes before a recovery
+batch is admitted while GLOBAL coordinates stay unchanged, the replica restarts recovery against the new head while
+preserving pending edits. Once background acknowledgment and updates settle,
+each replica and its editors show the authoritative result. Retrying a
 lost acknowledgment preserves the original acceptance order, and newer local
 edits remain pending. No foreground server round trip is required for resident
 reads and writes.
@@ -54,14 +56,17 @@ loaded file do not need this namespace scan. This does not add repository-wide
 work to opening.
 
 The SDK and reference server use Lix main revision
-`7b2b4402e639a5c2b5bafa3506a594e36c72929d`, merged through
+`c8fb003d78d8ffb2e1b694676827229fb4006b0c`, including
 [Lix PR #1758](https://github.com/opral/lix/pull/1758),
-[Lix PR #1759](https://github.com/opral/lix/pull/1759), and
-[Lix PR #1761](https://github.com/opral/lix/pull/1761). Upgrade both together.
-Server protocol is 8 and sync protocol is 12. Browser conversion is separate from
+[Lix PR #1759](https://github.com/opral/lix/pull/1759),
+[Lix PR #1761](https://github.com/opral/lix/pull/1761),
+[Lix PR #1763](https://github.com/opral/lix/pull/1763),
+[Lix PR #1767](https://github.com/opral/lix/pull/1767), and
+[Lix PR #1768](https://github.com/opral/lix/pull/1768). Upgrade both together.
+Server protocol is 8 and sync protocol is 13. Browser conversion is separate from
 any authoritative repository migration; never reset server storage for an upgrade.
 
-Controlled local profiling of this integration used three fresh small replicas
+The original opening profile at Lix `7b2b4402e` used three fresh small replicas
 and three with 320 MiB of unrelated content (335,547,662 physical blob bytes).
 The native authority, release WASM, SDK and app source were held fixed throughout.
 
@@ -96,8 +101,65 @@ reported as passing.
 
 Pending edits and checkpoint dependencies upload in bounded waves. A single
 native commit or minimal checkpoint publication closure over the 1 MiB JSON
-request budget remains pending until multipart preparation is supported. Binary
-file content uses a separate blob uploader and does not count toward that limit.
+request budget remains pending until multipart preparation is supported. Small binary file content can travel inline with publication; larger content
+uses manifest/chunk upload. The combined request is bounded separately from the
+frozen native commit batch.
+
+## Edit propagation latency
+
+Markdown persistence uses a 20 ms coalescing window from the first edit. Further
+typing does not reset its deadline. Saves remain serialized; an in-flight save
+drains the latest pending snapshot. The window bounds scheduling, not storage
+completion. Ten isolated edits per setting with native Memory storage measured
+median editor-change-to-save completion of 509.7 ms with a 500 ms window and
+27.2 ms with the new default. Separate tests cover continuous typing.
+
+Partial sync batches up to 32 selected missing metadata records through the
+existing endpoint and groups local residency checks. A local two-replica profile
+reduced first-update metadata requests from 16 to 4. First 96 KiB file updates in
+each direction changed from 990/1,038 ms to 640/624 ms on loopback, and from
+1,695/1,731 ms to 1,000/980 ms with 25 ms added before each request.
+
+Those timings start before SQL UPDATE and end when a peer SELECT observes the
+exact new bytes. They exclude editor scheduling and full UI rendering, use a
+native Memory authority, and include 10 ms SELECT polling. The added request
+delay is a sensitivity experiment, not a full network emulator. Thirty baseline
+and thirty candidate edits passed; an additional 40-edit ABBA confirmation found
+warm medians of 223.3 ms before and 231.7 ms after, with unchanged warm metadata
+and range request counts. No warm speedup or sub-200 ms networked convergence is
+claimed for that first batching change.
+
+The transport combines small-file publication and complete working-set
+updates. Files up to 256 KiB can use one push within a 1 MiB combined request
+budget. The waiting peer receives a leased descriptor and up to 1 MiB of native
+inputs for its retained SQL read interests. It validates and installs missing
+inputs, then uses the existing local candidate publication. Larger working sets
+retain on-demand hydration. Opening remains bounded metadata only.
+
+Acknowledged local commits retain their valid resident physical representation.
+Unchanged updates re-arm the authority long poll immediately, using the last
+processed cursor to avoid sending the same working set again. An explicit
+upload-size rejection falls back to the existing chunk transfer; ambiguous
+publication failures retain the original durable attempt. Authoritative row and
+plugin merging use the same machinery as before.
+
+A follow-up profile against Lix main `94db8faef` measured 30 alternating SQL
+updates across two independent Chromium OPFS replicas. All updates converged.
+Warm medians exclude only the first edit from each replica:
+
+| Workload | Before combined delivery | Combined delivery |
+| --- | ---: | ---: |
+| 1 KiB loopback | 220.8 ms | 151.0 ms |
+| 96 KiB loopback | 237.0 ms | 168.6 ms |
+| 96 KiB +25 ms/request | 487.9 ms | 187.8 ms |
+
+Each update used one push and all warm updates needed zero additional native
+hydration requests. Warm local SQL writes took 18.8–23.1 ms median. The previous
+one-second reconciliation stalls disappeared after clearing stale backoff on
+successful upload progress. Outliers up to 393.7 ms remain included; eight warm
+samples per workload do not establish a tail-latency guarantee. These SDK
+measurements exclude editor scheduling and rendering and use the same disposable
+Memory-authority setup and request-delay limitations described above.
 
 ## Optional history totals
 
