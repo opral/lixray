@@ -13,8 +13,9 @@ test("preview protocol probe matches the selected Lix sync protocol", async () =
   assert.ok(probeVersion, "preview probe must declare its sync protocol version");
   assert.ok(sdkVersion, "selected SDK must declare its sync protocol version");
   assert.equal(probeVersion, sdkVersion, "update the preview probe with the SDK pin");
-  const fixtureVersion = fixture.match(/"Lix-Sync-Protocol-Version": "(\d+)"/u)?.[1];
-  assert.equal(fixtureVersion, sdkVersion, "update the browser fixture with the SDK pin");
+  const browserProbeVersion = fixture.match(/"Lix-Sync-Protocol-Version": "(\d+)"/u)?.[1];
+  assert.ok(browserProbeVersion, "browser probe must declare its sync protocol version");
+  assert.equal(browserProbeVersion, sdkVersion, "update the browser probe with the SDK pin");
 });
 
 test("preview protocol probe authenticates the current server protocol", async () => {
