@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
 test("acknowledged copies do not create a recovery task", async ({ page }) => {
@@ -10,27 +11,24 @@ test("acknowledged copies do not create a recovery task", async ({ page }) => {
 	).toHaveCount(0);
 });
 
-test("restores for review and exports without hiding unresolved work", async ({
+test("exports saved work and its recovery limitations without creating a branch", async ({
 	page,
 }) => {
 	await page.goto("/recovery.html");
-	await page
-		.getByRole("button", { name: "Restore to recovery branches" })
-		.click();
 	await expect(
-		page.getByText("Recovery branches are ready for review.", { exact: false }),
-	).toBeVisible();
-	await page.getByRole("button", { name: "Review recovery branch 1" }).click();
-	await expect(page.locator("output")).toHaveText("recovered-branch");
-	await page.getByText("Some saved content still needs recovery").click();
-	await expect(
-		page.getByText("A local-only value remains on this device"),
-	).toBeVisible();
+		page.getByRole("button", { name: "Restore to recovery branches" }),
+	).toHaveCount(0);
 	const download = page.waitForEvent("download");
 	await page.getByRole("button", { name: "Download recovery data" }).click();
-	expect((await download).suggestedFilename()).toBe(
-		"lix-recovery-repo-legacy.json",
+	const downloaded = await download;
+	expect(downloaded.suggestedFilename()).toBe("lix-recovery-repo-legacy.json");
+	const data: unknown = JSON.parse(
+		await readFile((await downloaded.path())!, "utf8"),
 	);
+	expect(data).toMatchObject({
+		source: { id: "legacy" },
+		unresolved: ["Local-only value preserved"],
+	});
 	await expect(
 		page.getByRole("complementary", { name: "Saved device changes" }),
 	).toBeVisible();
@@ -43,18 +41,16 @@ test("listing errors can retry without preventing repository access", async ({
 	await expect(page.getByRole("alert")).toContainText("Device storage is busy");
 	await page.getByRole("button", { name: "Check again" }).click();
 	await expect(
-		page.getByRole("button", { name: "Restore to recovery branches" }),
+		page.getByRole("button", { name: "Download recovery data" }),
 	).toBeVisible();
 	await expect(
 		page.getByText("Current repository remains usable"),
 	).toBeVisible();
 });
 
-test("a failed restoration keeps export available", async ({ page }) => {
-	await page.goto("/recovery.html?mode=recover-error");
-	await page
-		.getByRole("button", { name: "Restore to recovery branches" })
-		.click();
+test("a failed export can be retried", async ({ page }) => {
+	await page.goto("/recovery.html?mode=export-error");
+	await page.getByRole("button", { name: "Download recovery data" }).click();
 	await expect(page.getByRole("alert")).toContainText(
 		"Saved content is not available yet",
 	);
@@ -67,29 +63,25 @@ test("old asynchronous results do not appear after switching account", async ({
 	page,
 }) => {
 	await page.goto("/recovery.html?mode=delayed");
-	await page
-		.getByRole("button", { name: "Restore to recovery branches" })
-		.click();
+	await page.getByRole("button", { name: "Download recovery data" }).click();
 	await page.getByRole("button", { name: "Switch account" }).click();
-	await page.getByRole("button", { name: "Finish old recovery" }).click();
+	await page.getByRole("button", { name: "Finish old download" }).click();
 	await expect(
 		page.getByRole("complementary", { name: "Saved device changes" }),
 	).toHaveCount(0);
 	await expect(
-		page.getByRole("button", { name: "Review recovery branch 1" }),
+		page.getByRole("button", { name: "Download recovery data" }),
 	).toHaveCount(0);
 });
 
-test("switching back releases controls while an old recovery is pending", async ({
+test("switching back releases controls while an old download is pending", async ({
 	page,
 }) => {
 	await page.goto("/recovery.html?mode=delayed");
-	await page
-		.getByRole("button", { name: "Restore to recovery branches" })
-		.click();
+	await page.getByRole("button", { name: "Download recovery data" }).click();
 	await page.getByRole("button", { name: "Switch account" }).click();
 	await page.getByRole("button", { name: "Switch account" }).click();
 	await expect(
-		page.getByRole("button", { name: "Restore to recovery branches" }),
+		page.getByRole("button", { name: "Download recovery data" }),
 	).toBeEnabled();
 });
