@@ -837,7 +837,7 @@ export function createLixrayMcpServer(
 						: {}),
 					...(checkpoint ? { checkpoint } : {}),
 					originKey: mcpOriginKey(callId),
-					previews: true,
+					previews: MAX_DIFF_CARDS,
 				},
 				options.urlOrigin,
 			);
@@ -1586,7 +1586,10 @@ function registerTool(
 				executionCompleted = true;
 				// UI blocks travel beside the result, never inside it: hosts
 				// validate structuredContent against the output schema.
-				const ui = (returned[UI_RESULT_KEY] ?? []) as EmbeddedUiResource[];
+				const declared = returned[UI_RESULT_KEY];
+				const ui = (
+					Array.isArray(declared) ? declared : []
+				) as EmbeddedUiResource[];
 				const raw =
 					UI_RESULT_KEY in returned
 						? Object.fromEntries(
@@ -1835,7 +1838,12 @@ type EmbeddedUiResource = {
 };
 
 function diffCards(
-	previews: ReadonlyArray<{ path: string; before: string; after: string }>,
+	previews: ReadonlyArray<{
+		path: string;
+		before: string;
+		after: string;
+		existed: boolean;
+	}>,
 	files: ReadonlyArray<{ path: string; url: string }>,
 ): EmbeddedUiResource[] {
 	const urls = new Map(files.map((file) => [file.path, file.url]));
@@ -1844,6 +1852,7 @@ function diffCards(
 		if (cards.length >= MAX_DIFF_CARDS) break;
 		const url = urls.get(preview.path);
 		if (!url) continue;
+		const repository = repositoryOf(url);
 		let card: ReturnType<typeof renderDiffCard>;
 		try {
 			card = renderDiffCard({
@@ -1851,7 +1860,8 @@ function diffCards(
 				url,
 				beforeMarkdown: preview.before,
 				afterMarkdown: preview.after,
-				...(repositoryOf(url) ? { repository: repositoryOf(url)! } : {}),
+				existed: preview.existed,
+				...(repository ? { repository } : {}),
 			});
 		} catch (caught) {
 			// A card is a courtesy; a write that succeeded still succeeded.
@@ -1865,7 +1875,7 @@ function diffCards(
 		cards.push({
 			type: "resource",
 			resource: {
-				uri: `ui://lixray/diff${preview.path.startsWith("/") ? "" : "/"}${preview.path}`,
+				uri: uiDiffUri(preview.path),
 				mimeType: "text/html",
 				text: card.html,
 			},
@@ -1873,6 +1883,15 @@ function diffCards(
 		});
 	}
 	return cards;
+}
+
+/**
+ * The card's address. A path is not a URI: `?` and `#` in a file name would
+ * turn the rest of it into a query and a fragment.
+ */
+function uiDiffUri(path: string): string {
+	const segments = path.split("/").filter(Boolean).map(encodeURIComponent);
+	return `ui://lixray/diff/${segments.join("/")}`;
 }
 
 function uiField(

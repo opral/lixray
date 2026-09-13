@@ -141,13 +141,24 @@ embedded `text/html` resource under `ui://lixray/diff/<path>`, annotated for
 the user. The card is rendered with Atelier's own review engine — the same
 document alignment, the same marks, the same palette the app draws — so a
 change reads the same in a chat as it does in LixRay. It is a self-contained
-document: no scripts, no fetches, its stylesheet inlined. At most three cards
-travel with a write, each trimmed to the lines that changed with a note of
-what it left out, and a card that would still be too large keeps its header
-and sends the reader to the file. Hosts that cannot render UI blocks ignore
-them and lose nothing: the summary and the JSON say the same thing. The cards
-are content blocks only — `structuredContent` stays exactly the shape the
-output schema declares.
+document: no scripts, no network of any kind, its stylesheet inlined and its
+images named rather than loaded, because the address in an image is chosen by
+whoever wrote the document.
+
+At most three cards travel with a write, and the before side is read for
+those three files only. Each is trimmed to the lines that changed, with a gap
+naming what was skipped; a card that is still too large for a thread keeps
+its header and sends the reader to the file. A snapshot over 100 KB, or one
+nested past two dozen levels, gets no card at all — rendering walks the whole
+document, and the document was written by whoever is talking to the server.
+
+Hosts that cannot render UI blocks ignore them and lose nothing: the summary
+and the JSON say the same thing. The cards are content blocks only —
+`structuredContent` stays exactly the shape the output schema declares, which
+matters because the advertised schema forbids extra properties. Nothing asks
+the client whether it can render HTML, because the protocol has no such
+question; a host that flattens every block to text would print the card's
+source, and `audience: ["user"]` is the only signal available against that.
 
 This comes from Lix, not from parsing SQL. Every `execute_sql` call stamps
 its changes with an `origin_key` of `mcp:<request_id>` (a caller-supplied

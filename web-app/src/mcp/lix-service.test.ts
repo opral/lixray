@@ -21,6 +21,12 @@ class FakeRuntime implements LixRuntimeClient {
 	filePaths: Array<string> = [];
 	restoreCommitId: string | undefined;
 	readonly opened = new Set<string>();
+	/** What each path holds, for reads: text, or raw bytes. */
+	readonly stored = new Map<string, string | Uint8Array>();
+	/** Set to make every read fail, the way a flaky upstream would. */
+	readFailure: Error | undefined;
+	reads = 0;
+	batches = 0;
 	readonly calls: Array<{
 		lixId: string;
 		branchId: string;
@@ -104,6 +110,58 @@ class FakeRuntime implements LixRuntimeClient {
 				notices: [],
 			};
 		}
+		if (request.sql.startsWith("INSERT INTO lix_file (path, content")) {
+			const path = request.params?.[0];
+			return {
+				columns: ["id", "path"],
+				rows: [
+					[
+						{
+							kind: "text" as const,
+							value: "00000000-0000-4000-8000-00000000000f",
+						},
+						path?.kind === "text"
+							? path
+							: { kind: "text" as const, value: "/unknown" },
+					],
+				],
+				rowsAffected: 1,
+				notices: [],
+			};
+		}
+		if (request.sql.startsWith("SELECT id, path, content, lixcol_metadata")) {
+			this.reads += 1;
+			if (this.readFailure) throw this.readFailure;
+			const wanted = (request.params ?? []).flatMap((param) =>
+				param.kind === "text" ? [param.value] : [],
+			);
+			const rows = wanted.flatMap((path, index) => {
+				const held = this.stored.get(path);
+				if (held === undefined) return [];
+				const bytes =
+					typeof held === "string" ? new TextEncoder().encode(held) : held;
+				return [
+					[
+						{
+							kind: "text" as const,
+							value: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+						},
+						{ kind: "text" as const, value: path },
+						{
+							kind: "blob" as const,
+							base64: Buffer.from(bytes).toString("base64"),
+						},
+						{ kind: "null" as const },
+					],
+				];
+			});
+			return {
+				columns: ["id", "path", "content", "lixcol_metadata"],
+				rows,
+				rowsAffected: 0,
+				notices: [],
+			};
+		}
 		if (request.sql === OPEN_LIX_INVENTORY_SQL) {
 			return {
 				columns: ["file_count", "directory_count"],
@@ -139,6 +197,7 @@ class FakeRuntime implements LixRuntimeClient {
 		branchId: string,
 		request: ExecuteBatchRequest,
 	) {
+		this.batches += 1;
 		return {
 			results: await Promise.all(
 				request.statements.map((statement) =>
@@ -695,4 +754,102 @@ void test("direct SQL targets default to the repository branch without inventory
 		await assert.rejects(service.contextForSqlTarget(target));
 	}
 	assert.equal(runtime.calls.length, 2);
+});
+
+void test("a preview reads the before side, bounded by what the caller shows", async () => {
+	const runtime = new FakeRuntime();
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const opened = await service.openLix("@acme/company");
+	runtime.stored.set("/notes.md", "# Notes\n");
+
+	const written = await service.writeFiles(opened.context, {
+		originKey: "mcp:test",
+		previews: 2,
+		files: [
+			{ path: "/notes.md", content: { text: "# Notes\n\nAnd more.\n" } },
+			{ path: "/new.md", content: { text: "# New\n" } },
+			// Past the caller's budget: never read.
+			{ path: "/third.md", content: { text: "# Third\n" } },
+			// Not Markdown, and not text: neither is previewed.
+			{ path: "/data.csv", content: { text: "a,b\n" } },
+			{ path: "/image.md", content: { base64: "AAECAw==" } },
+		],
+	});
+
+	assert.deepEqual(written.previews, [
+		{
+			path: "/notes.md",
+			before: "# Notes\n",
+			after: "# Notes\n\nAnd more.\n",
+			existed: true,
+		},
+		{ path: "/new.md", before: "", after: "# New\n", existed: false },
+	]);
+	// One read for the two targets, not one per file in the write.
+	assert.equal(runtime.reads, 1);
+});
+
+void test("a preview never costs the write", async () => {
+	const runtime = new FakeRuntime();
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const opened = await service.openLix("@acme/company");
+	runtime.stored.set("/notes.md", "# Notes\n");
+	runtime.readFailure = new Error("upstream is having a day");
+
+	const written = await service.writeFiles(opened.context, {
+		originKey: "mcp:test",
+		previews: 3,
+		files: [{ path: "/notes.md", content: { text: "# Notes again\n" } }],
+	});
+
+	// The file is written; there is simply nothing to show.
+	assert.equal(written.previews, undefined);
+	assert.equal(runtime.batches, 1);
+	assert.deepEqual(
+		written.files.map((file) => file.path),
+		["/notes.md"],
+	);
+});
+
+void test("a before side that is not text is left uncarded, not called new", async () => {
+	const runtime = new FakeRuntime();
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const opened = await service.openLix("@acme/company");
+	// A .md path holding bytes no diff can read: empty is text, this is not.
+	runtime.stored.set("/notes.md", new Uint8Array([0xff, 0xfe, 0x00]));
+
+	const written = await service.writeFiles(opened.context, {
+		originKey: "mcp:test",
+		previews: 3,
+		files: [{ path: "/notes.md", content: { text: "# Notes\n" } }],
+	});
+
+	assert.equal(written.previews, undefined);
+});
+
+void test("no previews asked for, no read taken", async () => {
+	const runtime = new FakeRuntime();
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const opened = await service.openLix("@acme/company");
+	runtime.stored.set("/notes.md", "# Notes\n");
+
+	const written = await service.writeFiles(opened.context, {
+		originKey: "mcp:test",
+		files: [{ path: "/notes.md", content: { text: "# Notes again\n" } }],
+	});
+
+	assert.equal(written.previews, undefined);
+	assert.equal(runtime.reads, 0);
 });

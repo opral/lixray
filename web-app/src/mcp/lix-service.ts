@@ -636,10 +636,11 @@ export class LixService {
 			checkpoint?: boolean;
 			originKey: string;
 			/**
-			 * Read each target's current text before writing, so the caller can
-			 * render the change. One extra read, only when someone will look.
+			 * How many Markdown targets to read before writing, so the caller
+			 * can render the change. One extra read, bounded by what the caller
+			 * will actually show.
 			 */
-			previews?: boolean;
+			previews?: number;
 		},
 		origin = "https://lixray.com",
 	): Promise<{
@@ -648,7 +649,13 @@ export class LixService {
 		files: Array<{ id: string; path: string; url: string }>;
 		checkpointCommitId?: string;
 		/** Present only when previews were asked for; never part of the tool's output. */
-		previews?: Array<{ path: string; before: string; after: string }>;
+		previews?: Array<{
+			path: string;
+			before: string;
+			after: string;
+			/** False when the write created the file. */
+			existed: boolean;
+		}>;
 	}> {
 		const context = await this.readContext(contextToken);
 		const files = input.files.map((file) => ({
@@ -711,23 +718,20 @@ export class LixService {
 					`No file to update metadata on: ${missing.join(", ")}. Give it content to create it.`,
 				);
 		}
-		// The before side, read while it is still the before side.
-		const previewTargets = input.previews
-			? files.filter(
-					(file) => file.content !== undefined && isPreviewablePath(file.path),
-				)
-			: [];
-		const previousText = new Map<string, string>();
-		if (previewTargets.length > 0) {
-			const existing = await this.fileRows(
-				context,
-				previewTargets.map((file) => file.path),
-			);
-			for (const file of existing) {
-				const text = fileContentText(file.content);
-				if (text !== null) previousText.set(file.path, text);
-			}
-		}
+		// The before side, read while it is still the before side, and only for
+		// as many files as the caller will render.
+		const previewTargets = files
+			.filter(
+				(file) =>
+					file.content !== undefined &&
+					"text" in file.content &&
+					isPreviewablePath(file.path),
+			)
+			.slice(0, Math.max(0, input.previews ?? 0));
+		const previousText = await this.textBeforeWrite(
+			context,
+			previewTargets.map((file) => file.path),
+		);
 		const statements = fileWriteStatements(files);
 		const batch = await this.client.executeBatch(
 			context.lixId,
@@ -758,13 +762,12 @@ export class LixService {
 		const previews = previewTargets.flatMap((file) => {
 			const after = file.content ? fileContentText(file.content) : null;
 			if (after === null) return [];
-			return [
-				{
-					path: file.path,
-					before: previousText.get(file.path) ?? "",
-					after,
-				},
-			];
+			const existed = previousText.has(file.path);
+			const before = previousText.get(file.path) ?? null;
+			// A file whose old bytes are not text has a change no diff can
+			// show; sending "" would render it as a file that never existed.
+			if (existed && before === null) return [];
+			return [{ path: file.path, before: before ?? "", after, existed }];
 		});
 		return {
 			context: contextToken,
@@ -867,6 +870,29 @@ export class LixService {
 			const file = byPath.get(path);
 			return file ? [file] : [];
 		});
+	}
+
+	/**
+	 * What each path holds right now, keyed by path.
+	 *
+	 * A path missing from the map does not exist yet; a path mapped to null
+	 * exists but holds bytes no diff can show. A read that fails maps every
+	 * path to null: a preview is a courtesy, and a write that would have
+	 * succeeded still succeeds without one.
+	 */
+	private async textBeforeWrite(
+		context: LixContext,
+		paths: readonly string[],
+	): Promise<Map<string, string | null>> {
+		if (paths.length === 0) return new Map();
+		try {
+			const existing = await this.fileRows(context, paths);
+			return new Map(
+				existing.map((file) => [file.path, fileContentText(file.content)]),
+			);
+		} catch {
+			return new Map(paths.map((path) => [path, null]));
+		}
 	}
 
 	/** Canonical URLs for this context's Lix and branch. */

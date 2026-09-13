@@ -20,6 +20,15 @@ const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
 /** Cards past this size stop being a card; the reader is sent to the app. */
 const MAX_CARD_BYTES = 24_000;
 
+/**
+ * Snapshots past this size are not carded at all.
+ *
+ * Rendering parses both sides, so the work scales with the document, not
+ * with the change: a megabyte of Markdown is a second and a half of a
+ * server's attention to produce a card that would be trimmed to nothing.
+ */
+const MAX_SOURCE_BYTES = 100_000;
+
 export type DiffCardInput = {
 	readonly path: string;
 	readonly url: string;
@@ -27,6 +36,8 @@ export type DiffCardInput = {
 	readonly afterMarkdown: string;
 	/** "@opral/monorepo", shown as the card's quiet second line. */
 	readonly repository?: string;
+	/** False when the write created the file. Defaults to "before was empty". */
+	readonly existed?: boolean;
 };
 
 export type DiffCard = {
@@ -46,6 +57,13 @@ export function isMarkdownPath(path: string): boolean {
 
 export function renderDiffCard(input: DiffCardInput): DiffCard | null {
 	if (!isMarkdownPath(input.path)) return null;
+	if (
+		byteLength(input.beforeMarkdown) > MAX_SOURCE_BYTES ||
+		byteLength(input.afterMarkdown) > MAX_SOURCE_BYTES
+	)
+		return null;
+	if (tooDeep(input.beforeMarkdown) || tooDeep(input.afterMarkdown))
+		return null;
 	const diff = renderMarkdownDiff({
 		beforeMarkdown: input.beforeMarkdown,
 		afterMarkdown: input.afterMarkdown,
@@ -53,7 +71,8 @@ export function renderDiffCard(input: DiffCardInput): DiffCard | null {
 		maxLines: 12,
 	});
 	if (diff.unchanged) return null;
-	const created = input.beforeMarkdown === "";
+	const created =
+		input.existed === undefined ? input.beforeMarkdown === "" : !input.existed;
 	const body = cardDocument({
 		...input,
 		diffHtml: diff.html,
@@ -61,24 +80,43 @@ export function renderDiffCard(input: DiffCardInput): DiffCard | null {
 		hidden: diff.hidden,
 		created,
 	});
-	if (body.length <= MAX_CARD_BYTES)
+	if (byteLength(body) <= MAX_CARD_BYTES)
 		return { html: body, stats: diff.stats, hidden: diff.hidden };
-	// Too big to read in a thread anyway: keep the header, drop the diff.
+	// Too big to read in a thread anyway: keep the header, drop the diff. What
+	// the reader is missing is now the whole change, not just the trimmed tail.
+	const hidden =
+		diff.hidden + diff.stats.added + diff.stats.removed + diff.stats.modified;
 	return {
 		html: cardDocument({
 			...input,
 			diffHtml: "",
 			stats: diff.stats,
-			hidden: diff.hidden + countLines(diff.html),
+			hidden,
 			created,
 		}),
 		stats: diff.stats,
-		hidden: diff.hidden,
+		hidden,
 	};
 }
 
-function countLines(html: string): number {
-	return (html.match(/<(?:li|p|h[1-6]|tr|pre)\b/g) ?? []).length;
+/**
+ * Nesting a parser walks by recursion, and a document is written by whoever
+ * opened the chat. A hundred levels of quote or list is not a document anyone
+ * reads; it is a stack the server would rather keep.
+ */
+const MAX_NESTING = 24;
+
+function tooDeep(markdown: string): boolean {
+	for (const line of markdown.split("\n")) {
+		const quotes = (/^[\s>]*/.exec(line)?.[0] ?? "").split(">").length - 1;
+		const indent = (/^[ \t]*/.exec(line)?.[0] ?? "").length;
+		if (quotes > MAX_NESTING || indent / 2 > MAX_NESTING) return true;
+	}
+	return false;
+}
+
+function byteLength(value: string): number {
+	return new TextEncoder().encode(value).length;
 }
 
 export function escapeHtml(value: string): string {
@@ -86,11 +124,13 @@ export function escapeHtml(value: string): string {
 		.replaceAll("&", "&amp;")
 		.replaceAll("<", "&lt;")
 		.replaceAll(">", "&gt;")
-		.replaceAll('"', "&quot;");
+		.replaceAll('"', "&quot;")
+		.replaceAll("'", "&#39;");
 }
 
 function statsLabel(stats: MarkdownDiffStats, created: boolean): string {
-	if (created) return `new file · ${stats.added} lines`;
+	if (created)
+		return `new file · ${stats.added} ${stats.added === 1 ? "line" : "lines"}`;
 	const parts: string[] = [];
 	if (stats.added > 0) parts.push(`<span class="plus">+${stats.added}</span>`);
 	if (stats.removed > 0)
@@ -121,8 +161,10 @@ function cardDocument(args: {
 	const segments = args.path.split("/").filter(Boolean);
 	const name = segments.at(-1) ?? args.path;
 	const directory = segments.slice(0, -1).join("/");
+	// The trimmed body names its own gaps; saying it again in the footer reads
+	// as a second set of missing lines.
 	const hiddenNote =
-		args.hidden > 0
+		args.hidden > 0 && !args.diffHtml.includes("md-diff-gap")
 			? `<div class="rest">${args.hidden} more ${args.hidden === 1 ? "line" : "lines"} in LixRay</div>`
 			: "";
 	return `<!doctype html>
@@ -140,7 +182,7 @@ ${MARKDOWN_DIFF_CSS}
 <article class="card">
 	<header>
 		${glyph(args.created)}
-		<span class="path">${directory ? `<span class="dir">${escapeHtml(directory)}/</span>` : ""}${escapeHtml(name)}</span>
+		<span class="path">${directory ? `<span class="dir">${escapeHtml(directory)}/</span>` : ""}<span class="name">${escapeHtml(name)}</span></span>
 		<span class="counts">${statsLabel(args.stats, args.created)}</span>
 	</header>
 	${args.diffHtml ? `<div class="md-diff">${args.diffHtml}</div>` : ""}
@@ -178,15 +220,24 @@ body {
 	border-bottom: 1px solid rgb(244, 241, 236);
 }
 .card > header .path {
+	display: flex;
 	flex: 1;
 	min-width: 0;
 	font-size: 13px;
 	font-weight: 500;
+}
+/* The directory gives way; the file name is the one thing the reader
+   cannot do without. */
+.card > header .dir {
+	flex: 0 1 auto;
+	min-width: 0;
+	color: rgb(120, 113, 108);
+	font-weight: 400;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.card > header .dir { color: rgb(168, 162, 158); font-weight: 400; }
+.card > header .name { flex: none; white-space: nowrap; }
 .card > header .counts {
 	flex: none;
 	font-size: 12px;
@@ -197,10 +248,11 @@ body {
 .card > header .minus { color: rgb(153, 27, 27); }
 .card > header .edited { color: rgb(120, 113, 108); }
 .card .md-diff { padding: 12px 14px 14px; }
+.card > header + .rest { padding-top: 10px; }
 .card .rest {
 	padding: 0 14px 12px;
 	font-size: 12px;
-	color: rgb(168, 162, 158);
+	color: rgb(120, 113, 108);
 }
 .card > footer {
 	display: flex;
@@ -214,7 +266,7 @@ body {
 	flex: 1;
 	min-width: 0;
 	font-size: 12px;
-	color: rgb(168, 162, 158);
+	color: rgb(120, 113, 108);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
