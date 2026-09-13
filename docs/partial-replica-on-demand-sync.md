@@ -30,8 +30,10 @@ Independent browser replicas reconcile valid concurrent row edits in the same
 native merge pipeline as branch merges. Registered schema/plugin merge hooks
 run for their rows; the default for overlapping values is last write wins in
 server acceptance order. Files parsed by plugins are serialized from the merged
-rows. Opaque file content is atomic. Once background acknowledgment and updates
-settle, each replica and its editors show the authoritative result. Retrying a
+rows. Opaque file content is atomic. If the server’s selected branch head changes before a recovery
+batch is admitted while GLOBAL coordinates stay unchanged, the replica restarts recovery against the new head while
+preserving pending edits. Once background acknowledgment and updates settle,
+each replica and its editors show the authoritative result. Retrying a
 lost acknowledgment preserves the original acceptance order, and newer local
 edits remain pending. No foreground server round trip is required for resident
 reads and writes.
@@ -54,12 +56,13 @@ loaded file do not need this namespace scan. This does not add repository-wide
 work to opening.
 
 The SDK and reference server use Lix main revision
-`852c1151f9fad27b640570c18a2caebbc5e41d55`, including
+`c8fb003d78d8ffb2e1b694676827229fb4006b0c`, including
 [Lix PR #1758](https://github.com/opral/lix/pull/1758),
 [Lix PR #1759](https://github.com/opral/lix/pull/1759),
 [Lix PR #1761](https://github.com/opral/lix/pull/1761),
-[Lix PR #1763](https://github.com/opral/lix/pull/1763), and
-[Lix PR #1767](https://github.com/opral/lix/pull/1767). Upgrade both together.
+[Lix PR #1763](https://github.com/opral/lix/pull/1763),
+[Lix PR #1767](https://github.com/opral/lix/pull/1767), and
+[Lix PR #1768](https://github.com/opral/lix/pull/1768). Upgrade both together.
 Server protocol is 8 and sync protocol is 13. Browser conversion is separate from
 any authoritative repository migration; never reset server storage for an upgrade.
 

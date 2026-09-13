@@ -35,6 +35,7 @@ test("@editing shared OPFS tabs edit in both directions and converge with an ind
 	try {
 		const state = await fixture.editing();
 		await fixture.concurrent(state);
+		await fixture.continuousIndependentEdits(state);
 	} finally {
 		await fixture.close();
 	}

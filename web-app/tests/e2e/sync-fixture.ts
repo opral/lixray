@@ -1264,6 +1264,50 @@ export async function createSyncFixture({
 			}
 			if (cleanupFailure) throw cleanupFailure.reason;
 		}
+		async function continuousIndependentEdits(state: EditingState) {
+			const pages = [left, state.fresh];
+			await Promise.all(pages.map((page) => page.goto(state.createdUrl)));
+			const editors = pages.map((page) =>
+				page.locator('.ProseMirror[contenteditable="true"]:visible'),
+			);
+			for (const editor of editors) await expect(editor).toBeVisible();
+			await expect
+				.poll(async () => await editors[1]!.innerText(), {
+					timeout: realtimeTimeout,
+				})
+				.toBe(await editors[0]!.innerText());
+			// Keep the authority moving while the other independent replica recovers
+			// from a stale push. Waiting for convergence after each edit hides this race.
+			for (let round = 0; round < 12; round++) {
+				const index = round % 2;
+				await editors[index]!.click();
+				await pages[index]!.keyboard.press("Control+End");
+				await pages[index]!.keyboard.insertText(` online-${index}-${round}`);
+				await new Promise((resolve) => setTimeout(resolve, 150));
+			}
+			await expect
+				.poll(
+					async () => {
+						const values = await Promise.all(
+							editors.map((editor) => editor.innerText()),
+						);
+						return values[0] === values[1];
+					},
+					{ timeout: 30_000 },
+				)
+				.toBe(true);
+			// Equality alone can pass before pending uploads settle. Require a later
+			// unique edit from each writer to reach its peer, with both editors open.
+			for (let index = 0; index < 2; index++) {
+				const marker = ` recovered-${index}-${randomUUID()}`;
+				await editors[index]!.click();
+				await pages[index]!.keyboard.press("Control+End");
+				await pages[index]!.keyboard.insertText(marker);
+				await expect(editors[1 - index]!).toContainText(marker, {
+					timeout: 30_000,
+				});
+			}
+		}
 		async function checkpoint(state: EditingState) {
 			const { fresh, leftEditor, rightEditor } = state;
 
@@ -1756,6 +1800,7 @@ export async function createSyncFixture({
 			checkpoint,
 			concurrent,
 			independentConflicts,
+			continuousIndependentEdits,
 			reopen,
 			partialCheckpoint,
 			history,
