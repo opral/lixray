@@ -1073,14 +1073,20 @@ test("review indicators refresh when entering and leaving review", async ({
 	await page.goto("/?review");
 	const alpha = item(page, "alpha.md");
 	const beta = item(page, "beta.md");
+	const gamma = item(page, "gamma.csv");
 	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
 	await expect(beta).toHaveClass(/opacity-\[0\.35\]/);
+	await expect(gamma).not.toHaveAttribute("data-changed-entry", "true");
 	await page.getByRole("button", { name: "Toggle review" }).click();
-	await expect(alpha).not.toHaveAttribute("data-changed-entry", "true");
+	// Closing review restores the working diff, which still includes alpha
+	// and also includes gamma, absent from this review.
+	await expect(gamma).toHaveAttribute("data-changed-entry", "true");
+	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
 	await expect(beta).not.toHaveClass(/opacity-\[0\.35\]/);
 	await alpha.click();
 	expect(await page.evaluate(() => window.directoryQA.diffOpened)).toEqual([]);
 	await page.getByRole("button", { name: "Toggle review" }).click();
 	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
 	await expect(beta).toHaveClass(/opacity-\[0\.35\]/);
+	await expect(gamma).not.toHaveAttribute("data-changed-entry", "true");
 });
