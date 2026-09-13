@@ -9,11 +9,14 @@ const opens: MockOpenOptions[] = [];
 const conversions: MockOpenOptions[] = [];
 let failures: Error[] = [];
 let conversionError: Error | undefined;
+let conversionFailures: Error[] = [];
 let branch = "main";
 let defaultBranch = "main";
 let defaultSessionCalls = 0;
 let defaultSessionCloses = 0;
 let defaultQueryError: Error | undefined;
+let defaultQueryFailures: Error[] = [];
+const handles: { closeCalls: number }[] = [];
 const defaultQueries: { sql: string; params: unknown[] }[] = [];
 let switchFailures: Error[] = [];
 let switchCalls = 0;
@@ -26,6 +29,7 @@ mock.module("@lix-js/sdk", {
 			const failure = failures.shift();
 			if (failure) throw failure;
 			const handle = (currentHandle = { closeCalls: 0 });
+			handles.push(handle);
 			return {
 				activeBranchId: async () => branch,
 				execute: async () => ({ rows: [{ value: "selected-branch-shadow" }] }),
@@ -35,7 +39,8 @@ mock.module("@lix-js/sdk", {
 					return {
 						execute: async (sql: string, params: unknown[]) => {
 							defaultQueries.push({ sql, params });
-							if (defaultQueryError) throw defaultQueryError;
+							const failure = defaultQueryFailures.shift() ?? defaultQueryError;
+							if (failure) throw failure;
 							assert.match(sql, /FROM lix_key_value/);
 							assert.match(
 								sql,
@@ -66,7 +71,8 @@ mock.module("@lix-js/sdk", {
 		},
 		convertReplicaToPartial: async (options: MockOpenOptions) => {
 			conversions.push(options);
-			if (conversionError) throw conversionError;
+			const failure = conversionFailures.shift() ?? conversionError;
+			if (failure) throw failure;
 		},
 	},
 });
@@ -97,11 +103,14 @@ beforeEach(() => {
 	conversions.length = 0;
 	failures = [];
 	conversionError = undefined;
+	conversionFailures = [];
 	branch = "main";
 	defaultBranch = "main";
 	defaultSessionCalls = 0;
 	defaultSessionCloses = 0;
 	defaultQueryError = undefined;
+	defaultQueryFailures = [];
+	handles.length = 0;
 	defaultQueries.length = 0;
 	switchFailures = [];
 	switchCalls = 0;
@@ -368,4 +377,101 @@ await test("published-path sessions remain remote and avoid native storage and G
 		"X-Lixray-Public-Path": "/published.md",
 	});
 	await session.close();
+});
+
+await test("retries expired closed-storage conversion using the same persistent replica", async () => {
+	const migration = () =>
+		Object.assign(new Error("migration required"), {
+			code: "LIX_PARTIAL_REPLICA_MIGRATION_REQUIRED",
+		});
+	failures = [migration(), migration()];
+	conversionFailures = [
+		Object.assign(
+			new Error(
+				"the coherent storage read was invalidated by a concurrent commit",
+			),
+			{ code: "LIX_STORAGE_READ_EXPIRED" },
+		),
+	];
+	const session = await openRepositoryLixSession(options());
+	assert.equal(conversions.length, 2);
+	assert.equal(opens.length, 3);
+	assert.ok(
+		opens.every(
+			(open) => open.storage!.options.name === opens[0].storage!.options.name,
+		),
+	);
+	assert.ok(opens.every((open) => open.server.mode === "partial_replica"));
+	await session.close();
+});
+
+await test("never repeats conversion after an error marked as durably committed", async () => {
+	failures = [
+		Object.assign(new Error("migration required"), {
+			code: "LIX_PARTIAL_REPLICA_MIGRATION_REQUIRED",
+		}),
+	];
+	conversionError = Object.assign(new Error("completion failed"), {
+		code: "LIX_STORAGE_READ_EXPIRED",
+		details: { nonRetryableAfterCommit: true },
+	});
+	await assert.rejects(
+		openRepositoryLixSession(options()),
+		(error) => error === conversionError,
+	);
+	assert.equal(conversions.length, 1);
+	assert.equal(opens.length, 1);
+});
+
+await test("expired default-branch read releases failed sessions before reopening the same replica", async () => {
+	defaultQueryFailures = [
+		Object.assign(new Error("read expired"), {
+			code: "LIX_STORAGE_READ_EXPIRED",
+		}),
+	];
+	const session = await openRepositoryLixSession(options());
+	assert.equal(opens.length, 2);
+	assert.equal(opens[0].storage!.options.name, opens[1].storage!.options.name);
+	assert.equal(defaultSessionCloses, 2);
+	assert.deepEqual(
+		handles.map((handle) => handle.closeCalls),
+		[1, 0],
+	);
+	assert.equal(session.defaultBranchSnapshot(), "main");
+	await session.close();
+});
+
+await test("expired opening stops at its retry limit without replacing the persistent cache", async () => {
+	const expired = Object.assign(new Error("read expired"), {
+		code: "LIX_STORAGE_READ_EXPIRED",
+	});
+	failures = Array.from({ length: 7 }, () => expired);
+	await assert.rejects(
+		openRepositoryLixSession(options()),
+		(error) => error === expired,
+	);
+	assert.equal(opens.length, 7);
+	assert.equal(conversions.length, 0);
+	assert.ok(
+		opens.every(
+			(open) => open.storage!.options.name === opens[0].storage!.options.name,
+		),
+	);
+});
+
+await test("expired default-branch execution marked completed is never replayed", async () => {
+	defaultQueryError = Object.assign(new Error("completion failed"), {
+		code: "LIX_STORAGE_READ_EXPIRED",
+		details: { nonRetryableAfterExecution: true },
+	});
+	await assert.rejects(
+		openRepositoryLixSession(options()),
+		(error) => error === defaultQueryError,
+	);
+	assert.equal(defaultQueries.length, 1);
+	assert.equal(defaultSessionCloses, 1);
+	assert.deepEqual(
+		handles.map((handle) => handle.closeCalls),
+		[1],
+	);
 });
