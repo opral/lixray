@@ -10,6 +10,7 @@ import {
 	type FileWrite,
 } from "./file-tools.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
+import { isMarkdownPath } from "./diff-card.ts";
 
 const LIX_UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -634,6 +635,11 @@ export class LixService {
 			lastSeenCommitId?: string;
 			checkpoint?: boolean;
 			originKey: string;
+			/**
+			 * Read each target's current text before writing, so the caller can
+			 * render the change. One extra read, only when someone will look.
+			 */
+			previews?: boolean;
 		},
 		origin = "https://lixray.com",
 	): Promise<{
@@ -641,6 +647,8 @@ export class LixService {
 		commitId: string;
 		files: Array<{ id: string; path: string; url: string }>;
 		checkpointCommitId?: string;
+		/** Present only when previews were asked for; never part of the tool's output. */
+		previews?: Array<{ path: string; before: string; after: string }>;
 	}> {
 		const context = await this.readContext(contextToken);
 		const files = input.files.map((file) => ({
@@ -703,6 +711,23 @@ export class LixService {
 					`No file to update metadata on: ${missing.join(", ")}. Give it content to create it.`,
 				);
 		}
+		// The before side, read while it is still the before side.
+		const previewTargets = input.previews
+			? files.filter(
+					(file) => file.content !== undefined && isPreviewablePath(file.path),
+				)
+			: [];
+		const previousText = new Map<string, string>();
+		if (previewTargets.length > 0) {
+			const existing = await this.fileRows(
+				context,
+				previewTargets.map((file) => file.path),
+			);
+			for (const file of existing) {
+				const text = fileContentText(file.content);
+				if (text !== null) previousText.set(file.path, text);
+			}
+		}
 		const statements = fileWriteStatements(files);
 		const batch = await this.client.executeBatch(
 			context.lixId,
@@ -730,11 +755,23 @@ export class LixService {
 			this.commitId(context.lixId, context.branchId),
 			this.entityUrl(context, origin),
 		]);
+		const previews = previewTargets.flatMap((file) => {
+			const after = file.content ? fileContentText(file.content) : null;
+			if (after === null) return [];
+			return [
+				{
+					path: file.path,
+					before: previousText.get(file.path) ?? "",
+					after,
+				},
+			];
+		});
 		return {
 			context: contextToken,
 			commitId,
 			files: written.map((file) => ({ ...file, url: url("file", file) })),
 			...(checkpointCommitId ? { checkpointCommitId } : {}),
+			...(previews.length > 0 ? { previews } : {}),
 		};
 	}
 
@@ -1134,6 +1171,16 @@ export type ReadFilesResult = {
 	files: Array<ReadFile & { url: string }>;
 	missing: string[];
 };
+
+/** Files whose change a reader can be shown inline. */
+function isPreviewablePath(path: string): boolean {
+	return isMarkdownPath(path);
+}
+
+/** The text of a file's content, or null when it is not text. */
+function fileContentText(content: FileContent): string | null {
+	return "text" in content ? content.text : null;
+}
 
 function normalizeFilePathOrThrow(path: string): string {
 	try {

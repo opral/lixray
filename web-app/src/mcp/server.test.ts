@@ -2496,6 +2496,29 @@ void test("file tools list, read, and write files with metadata and conflict che
 			written.content?.filter((block) => block.type === "resource_link").length,
 			2,
 		);
+		// The Markdown write comes back with its change rendered: a host that
+		// can show UI shows it, and the structured result stays schema-clean.
+		const cards = (written.content ?? []).filter(
+			(block) => block.type === "resource",
+		) as Array<{
+			resource: { uri: string; mimeType: string; text: string };
+			annotations?: { audience?: string[] };
+		}>;
+		assert.equal(cards.length, 1);
+		assert.equal(
+			cards[0]!.resource.uri,
+			"ui://lixray/diff/gtm/campaigns/icp.md",
+		);
+		assert.equal(cards[0]!.resource.mimeType, "text/html");
+		assert.match(cards[0]!.resource.text, /<h1[^>]*>ICP<\/h1>/);
+		assert.match(cards[0]!.resource.text, /Open in LixRay/);
+		assert.deepEqual(cards[0]!.annotations?.audience, ["user"]);
+		assert.equal(
+			Object.keys(
+				written.structuredContent as Record<string, unknown>,
+			).includes("_ui"),
+			false,
+		);
 
 		// Metadata alone on a file that does not exist is refused before writing.
 		const orphan = await client.callTool({

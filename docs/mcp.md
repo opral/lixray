@@ -136,6 +136,19 @@ links, and a failed call has the summary and the JSON text only. The summary nam
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
 
+A Markdown write carries one thing more: the change itself, as an
+embedded `text/html` resource under `ui://lixray/diff/<path>`, annotated for
+the user. The card is rendered with Atelier's own review engine — the same
+document alignment, the same marks, the same palette the app draws — so a
+change reads the same in a chat as it does in LixRay. It is a self-contained
+document: no scripts, no fetches, its stylesheet inlined. At most three cards
+travel with a write, each trimmed to the lines that changed with a note of
+what it left out, and a card that would still be too large keeps its header
+and sends the reader to the file. Hosts that cannot render UI blocks ignore
+them and lose nothing: the summary and the JSON say the same thing. The cards
+are content blocks only — `structuredContent` stays exactly the shape the
+output schema declares.
+
 This comes from Lix, not from parsing SQL. Every `execute_sql` call stamps
 its changes with an `origin_key` of `mcp:<request_id>` (a caller-supplied
 `origin_key` becomes its prefix), and the server then asks `lix_change`

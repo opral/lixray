@@ -38,6 +38,7 @@ import {
 } from "./tool-observation.ts";
 
 import { MCP_RESOURCE } from "./auth.ts";
+import { renderDiffCard } from "./diff-card.ts";
 import {
 	DELETED_FILE_NAMES_SQL,
 	TOUCHED_CHANGES_SQL,
@@ -836,6 +837,7 @@ export function createLixrayMcpServer(
 						: {}),
 					...(checkpoint ? { checkpoint } : {}),
 					originKey: mcpOriginKey(callId),
+					previews: true,
 				},
 				options.urlOrigin,
 			);
@@ -846,6 +848,7 @@ export function createLixrayMcpServer(
 				...(written.checkpointCommitId
 					? { checkpoint_commit_id: written.checkpointCommitId }
 					: {}),
+				...uiField(diffCards(written.previews ?? [], written.files)),
 			};
 		},
 		undefined,
@@ -1579,8 +1582,19 @@ function registerTool(
 				// the readback below sees only this call's changes.
 				const callId = `${requestId}.${crypto.randomUUID()}`;
 				executionStarted = true;
-				const raw = await call(input, callId);
+				const returned = (await call(input, callId)) as Record<string, unknown>;
 				executionCompleted = true;
+				// UI blocks travel beside the result, never inside it: hosts
+				// validate structuredContent against the output schema.
+				const ui = (returned[UI_RESULT_KEY] ?? []) as EmbeddedUiResource[];
+				const raw =
+					UI_RESULT_KEY in returned
+						? Object.fromEntries(
+								Object.entries(returned).filter(
+									([key]) => key !== UI_RESULT_KEY,
+								),
+							)
+						: returned;
 				const executeOutput = isSqlTool(name)
 					? observeExecuteOutput(
 							name === "query_sql" ? { results: [raw.result] } : raw,
@@ -1626,7 +1640,7 @@ function registerTool(
 				// structured JSON for text-only hosts.
 				return {
 					structuredContent,
-					content: [summary[0]!, ...links, ...summary.slice(1)],
+					content: [summary[0]!, ...links, ...ui, ...summary.slice(1)],
 				};
 			} catch (caught) {
 				const baseError = toMcpError(caught);
@@ -1800,6 +1814,77 @@ async function touchedByCall(
 	} catch {
 		return EMPTY_TOUCHED;
 	}
+}
+
+/**
+ * Cards a host can render beside a write.
+ *
+ * A tool result tells the reader a file changed; the card shows them what
+ * changed, in Atelier's own review UI, without leaving the thread. Hosts that
+ * cannot render UI ignore these blocks and still get the summary and the JSON.
+ */
+const UI_RESULT_KEY = "_ui";
+
+/** How many cards a single write is allowed to put in a thread. */
+const MAX_DIFF_CARDS = 3;
+
+type EmbeddedUiResource = {
+	type: "resource";
+	resource: { uri: string; mimeType: "text/html"; text: string };
+	annotations: { audience: Array<"user">; priority: number };
+};
+
+function diffCards(
+	previews: ReadonlyArray<{ path: string; before: string; after: string }>,
+	files: ReadonlyArray<{ path: string; url: string }>,
+): EmbeddedUiResource[] {
+	const urls = new Map(files.map((file) => [file.path, file.url]));
+	const cards: EmbeddedUiResource[] = [];
+	for (const preview of previews) {
+		if (cards.length >= MAX_DIFF_CARDS) break;
+		const url = urls.get(preview.path);
+		if (!url) continue;
+		let card: ReturnType<typeof renderDiffCard>;
+		try {
+			card = renderDiffCard({
+				path: preview.path,
+				url,
+				beforeMarkdown: preview.before,
+				afterMarkdown: preview.after,
+				...(repositoryOf(url) ? { repository: repositoryOf(url)! } : {}),
+			});
+		} catch (caught) {
+			// A card is a courtesy; a write that succeeded still succeeded.
+			console.error("LixRay MCP diff card failed", {
+				path: preview.path,
+				error: errorDetails(caught),
+			});
+			continue;
+		}
+		if (!card) continue;
+		cards.push({
+			type: "resource",
+			resource: {
+				uri: `ui://lixray/diff${preview.path.startsWith("/") ? "" : "/"}${preview.path}`,
+				mimeType: "text/html",
+				text: card.html,
+			},
+			annotations: { audience: ["user"], priority: 0.9 },
+		});
+	}
+	return cards;
+}
+
+function uiField(
+	cards: EmbeddedUiResource[],
+): Record<string, EmbeddedUiResource[]> {
+	return cards.length > 0 ? { [UI_RESULT_KEY]: cards } : {};
+}
+
+/** "@opral/monorepo" out of a LixRay entity URL, when it carries one. */
+function repositoryOf(url: string): string | undefined {
+	const match = /\/(@[^/]+\/[^/]+)\//.exec(url);
+	return match?.[1];
 }
 
 async function resultResourceLinks(
