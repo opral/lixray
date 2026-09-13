@@ -259,6 +259,7 @@ function App() {
 	const [dirPath, setDirPath] = useState("/");
 	const params = new URLSearchParams(location.search);
 	const readOnly = params.has("readonly");
+	const [reviewOpen, setReviewOpen] = useState(params.has("review"));
 	const diffSession = params.has("review-empty")
 		? ({
 				target: { working: true },
@@ -271,7 +272,7 @@ function App() {
 					base: null,
 					files: [],
 				} as unknown as AtelierDiffSession)
-			: params.has("review")
+			: reviewOpen
 				? ({
 						target: { working: true },
 						base: null,
@@ -283,6 +284,9 @@ function App() {
 				: null;
 	return (
 		<main style={{ height: "100vh" }}>
+			<button onClick={() => setReviewOpen((open) => !open)}>
+				Toggle review
+			</button>
 			<div data-testid="current-directory">{dirPath}</div>
 			<DirectoryView
 				lix={lix}

@@ -1066,3 +1066,21 @@ test("inactive folder changes wait until activation before navigating", async ({
 	await expect(page.getByTestId("current-directory")).toHaveText("/renamed");
 	await expect(page.getByText("child.md", { exact: true })).toBeVisible();
 });
+
+test("review indicators refresh when entering and leaving review", async ({
+	page,
+}) => {
+	await page.goto("/?review");
+	const alpha = item(page, "alpha.md");
+	const beta = item(page, "beta.md");
+	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
+	await expect(beta).toHaveClass(/opacity-\[0\.35\]/);
+	await page.getByRole("button", { name: "Toggle review" }).click();
+	await expect(alpha).not.toHaveAttribute("data-changed-entry", "true");
+	await expect(beta).not.toHaveClass(/opacity-\[0\.35\]/);
+	await alpha.click();
+	expect(await page.evaluate(() => window.directoryQA.diffOpened)).toEqual([]);
+	await page.getByRole("button", { name: "Toggle review" }).click();
+	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
+	await expect(beta).toHaveClass(/opacity-\[0\.35\]/);
+});
