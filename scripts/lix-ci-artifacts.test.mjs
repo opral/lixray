@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -140,7 +140,48 @@ test("required artifact lookup errors do not silently fall back to a source buil
 	}
 });
 
-async function artifactApiFixture({ archive, revision, successful, missing = false, lookupStatus = 200 }) {
+test("artifact fixtures bind fetch-safe dynamic ports", async (t) => {
+	const listen = Server.prototype.listen;
+	t.mock.method(Server.prototype, "listen", function (port, ...args) {
+		assert.ok(port >= 49152 && port <= 65535, `unsafe fixture port: ${port}`);
+		return listen.call(this, port, ...args);
+	});
+	const fixture = await artifactApiFixture({ archive: new Uint8Array(), lookupStatus: 503 });
+	try {
+		const response = await fetch(`${fixture.url}/repos/opral/lix/actions/artifacts`);
+		assert.equal(response.status, 503);
+		await response.arrayBuffer();
+		assert.equal(fixture.requests.length, 1);
+	} finally {
+		await fixture.close();
+	}
+});
+
+test("artifact fixtures can bind while another fixture occupies their first port", async () => {
+	const first = await artifactApiFixture({ archive: new Uint8Array(), lookupStatus: 503 });
+	try {
+		const second = await artifactApiFixture({
+			archive: new Uint8Array(),
+			lookupStatus: 503,
+			startPort: Number(new URL(first.url).port),
+		});
+		try {
+			assert.notEqual(second.url, first.url);
+			for (const fixture of [first, second]) {
+				const response = await fetch(`${fixture.url}/repos/opral/lix/actions/artifacts`);
+				assert.equal(response.status, 503);
+				await response.arrayBuffer();
+				assert.equal(fixture.requests.length, 1);
+			}
+		} finally {
+			await second.close();
+		}
+	} finally {
+		await first.close();
+	}
+});
+
+async function artifactApiFixture({ archive, revision, successful, missing = false, lookupStatus = 200, startPort }) {
 	const requests = [];
 	const digest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
 	const server = createServer((request, response) => {
@@ -174,12 +215,42 @@ async function artifactApiFixture({ archive, revision, successful, missing = fal
 		}
 		response.writeHead(404).end();
 	});
-	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	await listenForFetch(server, startPort);
 	return {
 		requests,
 		close: () => new Promise((resolve) => server.close(resolve)),
 		url: fixtureUrl(server),
 	};
+}
+
+async function listenForFetch(server, startPort = randomInt(49152, 65536)) {
+	// Port 0 can select a Fetch-blocked port (for example 10080) when the host's
+	// ephemeral range includes it. Bind directly in the dynamic/private range:
+	// https://fetch.spec.whatwg.org/#port-blocking
+	const firstPort = 49152;
+	const portCount = 16384;
+	for (let offset = 0; offset < portCount; offset++) {
+		const port = firstPort + ((startPort - firstPort + offset) % portCount);
+		try {
+			await new Promise((resolve, reject) => {
+				const onError = (error) => {
+					server.off("listening", onListening);
+					reject(error);
+				};
+				const onListening = () => {
+					server.off("error", onError);
+					resolve();
+				};
+				server.once("error", onError);
+				server.once("listening", onListening);
+				server.listen(port, "127.0.0.1");
+			});
+			return;
+		} catch (error) {
+			if (error.code !== "EADDRINUSE") throw error;
+		}
+	}
+	throw new Error("No dynamic port available for the artifact HTTP fixture");
 }
 
 function fixtureUrl(server) {
