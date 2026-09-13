@@ -76,6 +76,27 @@ void test("retries only transient repository-open transport failures", () => {
 	);
 });
 
+void test("gateway recovery respects completed mutation and execution boundaries", () => {
+	for (const httpStatus of [502, 503, 504]) {
+		const error = (details: Record<string, unknown>) =>
+			Object.assign(new Error("gateway response lost"), {
+				code: "LIX_INTERNAL_ERROR",
+				details: { httpStatus, ...details },
+			});
+		assert.equal(isRetryableRepositoryOpenError(error({})), true);
+		for (const flag of [
+			"nonRetryableAfterCommit",
+			"nonRetryableAfterExecution",
+		]) {
+			assert.equal(
+				isRetryableRepositoryOpenError(error({ [flag]: true })),
+				false,
+				`${httpStatus} must not override ${flag}`,
+			);
+		}
+	}
+});
+
 void test("reads structured repository migration state from an open error", () => {
 	assert.deepEqual(
 		repositoryMigrationStateFromError(

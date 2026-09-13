@@ -653,6 +653,15 @@ export function isRetryableRepositoryOpenError(error: unknown): boolean {
 	// Opening owns no user mutation. A failed open/conversion releases its
 	// handles; the next attempt re-admits the same durable OPFS replica, including
 	// any completed migration and retained pending edits.
+	// A gateway can lose a migration merge response after the server accepted it.
+	// Re-admitting the same replica resumes its durable conversion receipt; it
+	// does not repeat an arbitrary SQL mutation or replace the browser cache.
+	if (
+		isRecord(details) &&
+		typeof details.httpStatus === "number" &&
+		[502, 503, 504].includes(details.httpStatus)
+	)
+		return true;
 	if (isErrorCode(error, "LIX_STORAGE_READ_EXPIRED")) return true;
 	if (isLixRecoveringError(error)) return true;
 	if (!(error instanceof Error)) return false;

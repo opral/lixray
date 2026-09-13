@@ -405,6 +405,29 @@ await test("retries expired closed-storage conversion using the same persistent 
 	await session.close();
 });
 
+await test("resumes conversion after lost merge responses without replacing the replica", async () => {
+	const migration = () =>
+		Object.assign(new Error("migration required"), {
+			code: "LIX_PARTIAL_REPLICA_MIGRATION_REQUIRED",
+		});
+	failures = [migration(), migration(), migration()];
+	conversionFailures = [502, 504].map((httpStatus) =>
+		Object.assign(new Error("merge response lost"), {
+			code: "LIX_INTERNAL_ERROR",
+			details: { httpStatus },
+		}),
+	);
+	const session = await openRepositoryLixSession(options());
+	assert.equal(conversions.length, 3);
+	assert.equal(opens.length, 4);
+	assert.ok(
+		opens.every(
+			(open) => open.storage!.options.name === opens[0].storage!.options.name,
+		),
+	);
+	await session.close();
+});
+
 await test("never repeats conversion after an error marked as durably committed", async () => {
 	failures = [
 		Object.assign(new Error("migration required"), {
