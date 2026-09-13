@@ -16,7 +16,6 @@ let resolveRecovery: (() => void) | undefined;
 
 function Fixture() {
 	const [otherAccount, setOtherAccount] = useState(false);
-	const [branch, setBranch] = useState("");
 	const lix = useMemo(
 		() =>
 			({
@@ -26,21 +25,13 @@ function Fixture() {
 						throw new Error("Device storage is busy");
 					return [{ ...source, recoveryRequired: mode !== "clean" }];
 				},
-				async recoverReplica() {
-					if (mode === "recover-error")
+				async exportReplicaRecovery() {
+					if (mode === "export-error")
 						throw new Error("Saved content is not available yet");
 					if (mode === "delayed")
 						await new Promise<void>((resolve) => {
 							resolveRecovery = resolve;
 						});
-					return {
-						branchIds: ["recovered-branch"],
-						restoredFiles: 1,
-						restoredRows: 2,
-						unresolved: ["A local-only value remains on this device"],
-					};
-				},
-				async exportReplicaRecovery() {
 					return {
 						version: 1,
 						source,
@@ -61,10 +52,9 @@ function Fixture() {
 				Switch account
 			</button>
 			<button type="button" onClick={() => resolveRecovery?.()}>
-				Finish old recovery
+				Finish old download
 			</button>
-			<output>{branch}</output>
-			<ReplicaRecovery lix={lix} onReviewBranch={setBranch} />
+			<ReplicaRecovery lix={lix} />
 		</>
 	);
 }

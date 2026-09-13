@@ -1,34 +1,20 @@
-import type {
-	Lix,
-	ReplicaRecoveryReceipt,
-	ReplicaRecoverySource,
-} from "@lix-js/sdk";
+import type { Lix, ReplicaRecoverySource } from "@lix-js/sdk";
 import { useEffect, useRef, useState } from "react";
 
 /** Recovery is independent of opening the current server-backed repository. */
-export function ReplicaRecovery({
-	lix,
-	onReviewBranch,
-}: {
-	lix: Lix;
-	onReviewBranch: (branchId: string) => void;
-}) {
+export function ReplicaRecovery({ lix }: { lix: Lix }) {
 	const currentLix = useRef<Lix | null>(lix);
 	const [sources, setSources] = useState<ReplicaRecoverySource[]>([]);
 	const [error, setError] = useState<string | null>(null);
 	const [attempt, setAttempt] = useState(0);
 	const [expanded, setExpanded] = useState(true);
 	const [busy, setBusy] = useState<string | null>(null);
-	const [results, setResults] = useState<
-		Record<string, ReplicaRecoveryReceipt>
-	>({});
 
 	useEffect(() => {
 		let active = true;
 		currentLix.current = lix;
 		setError(null);
 		setSources([]);
-		setResults({});
 		setBusy(null);
 		void lix.replicaRecoverySources().then(
 			(value) => {
@@ -46,20 +32,6 @@ export function ReplicaRecovery({
 	}, [lix, attempt]);
 
 	if (sources.length === 0 && !error) return null;
-
-	async function recover(source: ReplicaRecoverySource) {
-		setBusy(source.id);
-		setError(null);
-		try {
-			const result = await lix.recoverReplica(source.id);
-			if (currentLix.current !== lix) return;
-			setResults((previous) => ({ ...previous, [source.id]: result }));
-		} catch (caught) {
-			if (currentLix.current === lix) setError(errorMessage(caught));
-		} finally {
-			if (currentLix.current === lix) setBusy(null);
-		}
-	}
 
 	async function download(source: ReplicaRecoverySource) {
 		setBusy(source.id);
@@ -109,7 +81,7 @@ export function ReplicaRecovery({
 					{error ? (
 						<div role="alert" className="grid gap-2">
 							<p className="break-words">
-								Could not complete recovery: {error}
+								Could not load recovery data: {error}
 							</p>
 							{sources.length === 0 ? (
 								<button
@@ -121,66 +93,23 @@ export function ReplicaRecovery({
 							) : null}
 						</div>
 					) : null}
-					{sources.map((source, index) => {
-						const result = results[source.id];
-						return (
-							<section
-								key={source.id}
-								className="grid gap-2 border-t border-border-subtle pt-3"
+					{sources.map((source, index) => (
+						<section
+							key={source.id}
+							className="grid gap-2 border-t border-border-subtle pt-3"
+						>
+							<strong>Saved copy {index + 1}</strong>
+							<button
+								type="button"
+								disabled={busy !== null}
+								onClick={() => void download(source)}
 							>
-								<strong>Saved copy {index + 1}</strong>
-								<div className="flex flex-wrap gap-3">
-									<button
-										type="button"
-										disabled={busy !== null}
-										onClick={() => void recover(source)}
-									>
-										{busy === source.id
-											? "Working…"
-											: "Restore to recovery branches"}
-									</button>
-									<button
-										type="button"
-										disabled={busy !== null}
-										onClick={() => void download(source)}
-									>
-										Download recovery data
-									</button>
-								</div>
-								{result ? (
-									<div className="grid gap-2" role="status">
-										<p>
-											{result.branchIds.length > 0
-												? "Recovery branches are ready for review."
-												: "No recovery branch was created."}{" "}
-											The original saved copy is still retained.
-										</p>
-										{result.branchIds.map((branchId, branchIndex) => (
-											<button
-												key={branchId}
-												type="button"
-												onClick={() => onReviewBranch(branchId)}
-											>
-												Review recovery branch {branchIndex + 1}
-											</button>
-										))}
-										{result.unresolved.length > 0 ? (
-											<details>
-												<summary>
-													Some saved content still needs recovery
-												</summary>
-												<ul className="list-disc space-y-1 pl-5">
-													{result.unresolved.map((message, itemIndex) => (
-														<li key={itemIndex}>{message}</li>
-													))}
-												</ul>
-											</details>
-										) : null}
-									</div>
-								) : null}
-							</section>
-						);
-					})}
+								{busy === source.id
+									? "Preparing download…"
+									: "Download recovery data"}
+							</button>
+						</section>
+					))}
 				</div>
 			) : null}
 		</aside>

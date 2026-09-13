@@ -1391,12 +1391,7 @@ export function RepositoryAtelier({
 									/>
 									<Outlet />
 									{shellProps.lix ? (
-										<ReplicaRecovery
-											lix={shellProps.lix}
-											onReviewBranch={(recoveredBranch) => {
-												void navigateToCurrentPathBranch(recoveredBranch);
-											}}
-										/>
+										<ReplicaRecovery lix={shellProps.lix} />
 									) : null}
 								</RepositoryAtelierContext.Provider>
 							</RepositoryShellNavigationContext.Provider>
