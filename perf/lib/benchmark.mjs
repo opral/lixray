@@ -521,7 +521,7 @@ export async function seedCorpus(
     const statements = chunks(seedFiles, 100).map(fileInsertStatement);
     const result = await protocol.executeBatch(statements);
     assertBatchRowsAffected(
-      result.value,
+      result.value.results,
       statements.map((statement) => statement.params.length / 2),
       "corpus insert",
     );
