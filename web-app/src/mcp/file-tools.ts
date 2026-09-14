@@ -9,17 +9,43 @@ import type { WireValue } from "./lix-service.ts";
 
 export { base64ToBytes, bytesToBase64 };
 
-/** Bytes as JSON: text when UTF-8 says so, base64 otherwise. */
-export type FileContent = { text: string } | { base64: string };
+/**
+ * What a read says about a file it cannot hand over as text.
+ *
+ * The reason travels with the answer. A single union of text-or-base64 said
+ * neither which of the two it was nor why, so every consumer re-derived it —
+ * and a file over the ceiling was indistinguishable from a PNG.
+ */
+export type FileEncoding = "binary" | "too-large";
 
+/**
+ * A file's bytes as a read hands them over: text, or nothing and a reason.
+ *
+ * Base64 of an image is not something the reader asking for it can use — it
+ * costs thousands of tokens and shows them nothing. Bytes are fetched
+ * deliberately, through SQL, by a caller that wants bytes.
+ */
+export type FileRead = {
+	size: number;
+	/** The file's text. Absent exactly when `encoding` says why it is not here. */
+	content?: string;
+	/** Why there is no text. Absent exactly when `content` is present. */
+	encoding?: FileEncoding;
+};
+
+/**
+ * A file to write. Text and bytes are separate fields, because which one the
+ * caller used is the encoding decision — there is nothing to infer later.
+ */
 export type FileWrite = {
 	path: string;
-	content?: FileContent;
+	content?: string;
+	content_base64?: string;
 	/** Omitted keeps the file's metadata; an object replaces it; null clears it. */
 	lixcol_metadata?: Record<string, unknown> | null;
 };
 
-/** Text is offered up to this many bytes; larger files travel as base64. */
+/** Text is offered up to this many bytes; larger files are named, not sent. */
 export const TEXT_CONTENT_LIMIT = 1024 * 1024;
 
 const FILE_PATH = /^\/(?:[^/]+\/)*[^/]+$/;
@@ -55,27 +81,35 @@ export function escapeLike(value: string): string {
 
 const encoder = new TextEncoder();
 
-/** How a file's bytes travel: UTF-8 text when they are that, else base64. */
-export function encodeFileContent(bytes: Uint8Array): {
-	content: FileContent;
-	size: number;
-} {
+/**
+ * A file's bytes as text, or the reason they are not on offer.
+ *
+ * The only decoder: everything downstream reads `content` or does not, rather
+ * than deciding for itself what UTF-8 means. It is strict on purpose — a
+ * lenient decode answers "is this text?" with "yes, always", and hands a CSV
+ * grid a screen of replacement characters instead of refusing the file.
+ */
+export function readFileContent(bytes: Uint8Array): FileRead {
 	const size = bytes.byteLength;
-	if (size <= TEXT_CONTENT_LIMIT) {
-		try {
-			const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-			return { content: { text }, size };
-		} catch {
-			// Not UTF-8: fall through to base64.
-		}
+	if (size > TEXT_CONTENT_LIMIT) return { encoding: "too-large", size };
+	try {
+		return { content: decodeUtf8(bytes), size };
+	} catch {
+		return { encoding: "binary", size };
 	}
-	return { content: { base64: bytesToBase64(bytes) }, size };
 }
 
-export function contentBytes(content: FileContent): Uint8Array {
-	return "text" in content
-		? encoder.encode(content.text)
-		: base64ToBytes(content.base64);
+/** Throws on anything that is not UTF-8, rather than mangling it. */
+export function decodeUtf8(bytes: Uint8Array): string {
+	return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
+/** The bytes a write carries, whichever field the caller used. */
+export function writeBytes(file: FileWrite): Uint8Array | undefined {
+	if (file.content !== undefined) return encoder.encode(file.content);
+	if (file.content_base64 !== undefined)
+		return base64ToBytes(file.content_base64);
+	return undefined;
 }
 
 export type FileWriteStatement = {
@@ -94,6 +128,7 @@ export type FileWriteStatement = {
  */
 export function fileWriteStatements(
 	files: readonly FileWrite[],
+	previewPaths: ReadonlySet<string> = new Set(),
 ): FileWriteStatement[] {
 	const statements: FileWriteStatement[] = [];
 	const directories = new Set<string>();
@@ -114,7 +149,7 @@ export function fileWriteStatements(
 				: file.lixcol_metadata === null
 					? { kind: "null" }
 					: { kind: "json", value: file.lixcol_metadata };
-		if (file.content === undefined) {
+		if (file.content === undefined && file.content_base64 === undefined) {
 			statements.push({
 				sql: "UPDATE lix_file SET lixcol_metadata = $2 WHERE path = $1 RETURNING id, path",
 				params: [
@@ -125,11 +160,13 @@ export function fileWriteStatements(
 			});
 			continue;
 		}
-		const contentParam: WireValue =
-			"text" in file.content
-				? { kind: "text", value: file.content.text }
-				: { kind: "blob", base64: file.content.base64 };
-		const contentSql = "text" in file.content ? "CAST($2 AS BYTEA)" : "$2";
+		// Which field the caller used says how to bind it; nothing is inferred
+		// from the shape of a value here.
+		const isText = file.content !== undefined;
+		const contentParam: WireValue = isText
+			? { kind: "text", value: file.content as string }
+			: { kind: "blob", base64: file.content_base64 as string };
+		const contentSql = isText ? "CAST($2 AS BYTEA)" : "$2";
 		if (metadata === undefined) {
 			statements.push({
 				sql: `INSERT INTO lix_file (path, content) VALUES ($1, ${contentSql}) ON CONFLICT (path) DO UPDATE SET content = excluded.content RETURNING id, path`,
@@ -144,7 +181,14 @@ export function fileWriteStatements(
 			});
 		}
 	}
-	return statements;
+	return statements.map((statement) =>
+		statement.path && previewPaths.has(statement.path)
+			? {
+					...statement,
+					sql: `${statement.sql}, OLD.content AS before, NEW.content AS after`,
+				}
+			: statement,
+	);
 }
 
 /** The paths a diff over the target files reports as changed. */

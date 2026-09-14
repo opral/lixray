@@ -4,9 +4,10 @@ import {
 	CHANGED_FILES_SQL,
 	READ_FILES_SQL,
 	bytesToBase64,
-	contentBytes,
-	encodeFileContent,
+	readFileContent,
+	writeBytes,
 	escapeLike,
+	TEXT_CONTENT_LIMIT,
 	fileWriteStatements,
 	normalizeFilePath,
 	parentDirectories,
@@ -25,24 +26,44 @@ void test("paths are absolute files; directories come shallowest first", () => {
 	assert.equal(escapeLike("50%_off\\"), "50\\%\\_off\\\\");
 });
 
-void test("bytes travel as text when UTF-8, as base64 otherwise", () => {
-	const text = encodeFileContent(new TextEncoder().encode("héllo"));
-	assert.deepEqual(text, { content: { text: "héllo" }, size: 6 });
-	const binary = encodeFileContent(new Uint8Array([0xff, 0xfe, 0x00]));
-	assert.deepEqual(binary, { content: { base64: "//4A" }, size: 3 });
+void test("a read hands over text, or says why it cannot", () => {
+	assert.deepEqual(readFileContent(new TextEncoder().encode("héllo")), {
+		content: "héllo",
+		size: 6,
+	});
+	// Not text, and over the ceiling, are different answers — the old shape
+	// gave both of them the same one.
+	assert.deepEqual(readFileContent(new Uint8Array([0xff, 0xfe, 0x00])), {
+		encoding: "binary",
+		size: 3,
+	});
+	const huge = new Uint8Array(TEXT_CONTENT_LIMIT + 1).fill(0x41);
+	assert.deepEqual(readFileContent(huge), {
+		encoding: "too-large",
+		size: TEXT_CONTENT_LIMIT + 1,
+	});
+});
+
+void test("a write's bytes come from whichever field the caller used", () => {
+	assert.deepEqual([...(writeBytes({ path: "/a", content: "A" }) ?? [])], [65]);
 	assert.deepEqual(
-		[...contentBytes({ base64: bytesToBase64(new Uint8Array([1, 2, 3])) })],
+		[
+			...(writeBytes({
+				path: "/a",
+				content_base64: bytesToBase64(new Uint8Array([1, 2, 3])),
+			}) ?? []),
+		],
 		[1, 2, 3],
 	);
-	assert.deepEqual([...contentBytes({ text: "A" })], [65]);
+	assert.equal(writeBytes({ path: "/a" }), undefined);
 });
 
 void test("a write batch creates parents once, then upserts each file in one commit", () => {
 	const statements = fileWriteStatements([
-		{ path: "/gtm/campaigns/icp.md", content: { text: "# ICP" } },
+		{ path: "/gtm/campaigns/icp.md", content: "# ICP" },
 		{
 			path: "/gtm/leads.csv",
-			content: { base64: "AAEC" },
+			content_base64: "AAEC",
 			lixcol_metadata: { atelier_csv: { version: 1, columns: [] } },
 		},
 		{ path: "/gtm/notes.md", lixcol_metadata: null },

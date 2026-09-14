@@ -46,11 +46,17 @@ diagnostic timestamps or identifiers.
 
 - `list_lixes`, `open_lix`: find a Lix and mint its context (see below).
 - `list_files`, `read_files`, `write_files`: the file path. `read_files`
-  returns bytes as `{ text }` (UTF-8) or `{ base64 }`, `lixcol_metadata`,
-  size, id, canonical `url`, and the `commit_id` the read reflects.
+  returns `content` as text, `lixcol_metadata`, size, id, canonical `url`,
+  and the `commit_id` the read reflects. A file whose bytes are not UTF-8,
+  or that is over a megabyte, comes back with no `content` and an
+  `encoding` of `binary` or `too-large` saying which — base64 of an image
+  is not something the reader asking for it can use, and bytes are fetched
+  deliberately with `SELECT content FROM lix_file WHERE path = $1`.
   `write_files` creates or updates files in one atomic commit, parents
-  included, with content, `lixcol_metadata` (omitted keeps, an object
-  replaces, `null` clears), an optional `checkpoint: true`, and
+  included, with `content` (text) or `content_base64` (bytes) — which field
+  you use is the encoding, so there is nothing to infer —
+  `lixcol_metadata` (omitted keeps, an object replaces, `null` clears), an
+  optional `checkpoint: true`, and
   `last_seen_commit_id`: a target file that changed since that commit refuses
   the whole write, and the error carries `current_commit_id` and the current
   contents of the conflicting files; unrelated changes never block. The
@@ -135,6 +141,50 @@ the same canonical URL `get_entity_urls` would return. Other tools carry no
 links, and a failed call has the summary and the JSON text only. The summary names the
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
+
+A write to a file Atelier can render carries one thing more: the change
+itself, as an embedded resource under `ui://lixray/diff/<path>` with the MCP
+Apps media type `text/html;profile=mcp-app`, annotated for the user. The card
+is Atelier's own view of that file — the same document alignment, the same
+marks, the same palette the app draws — so a change reads the same in a chat
+as it does in LixRay. Markdown and CSV have such a view today; anything else
+gets its link, as before. It is a self-contained document: no scripts, no
+network of any kind, its stylesheet inlined and its images named rather than
+loaded, because the address in an image is chosen by whoever wrote the
+document.
+
+At most three cards travel with a write. Their before/after bytes come from
+`RETURNING OLD.content, NEW.content` on the mutation itself, so another writer
+cannot change what the card describes. Only those targets project image bytes. Each is trimmed to what changed, with a note of what
+was skipped; a change too large for a thread keeps its header and sends the
+reader to the file, which is also what a snapshot over 100 KB or one nested
+past two dozen levels gets — rendering walks the whole document, and the
+document was written by whoever is talking to the server.
+
+`write_files` validates `last_seen_commit_id` and metadata-only targets, and runs
+all file writes in one transaction. An optional checkpoint runs afterward and returns its
+own `checkpoint_commit_id`; it may include concurrent changes. Checkpoint failure
+reports a saved warning and never repeats the write. A concurrent branch
+change retries the full validation against a fresh snapshot; an unrelated edit
+can proceed, while a changed target rejects the whole write. `read_files`
+returns bytes and `commit_id` from one snapshot.
+
+SQL execution preserves Lix's receipt: `query_sql.result.commit` is null for a
+read; `execute_sql` has one top-level `commit: { before, after } | null` for the
+batch. Its per-statement results contain rows, counts and notices, without
+repeating the receipt. `write_files.commit` describes its durable write and
+`commit_id` is its `after` endpoint. If completion reporting loses the receipt,
+the write still succeeds with a warning and no `commit_id`; do not repeat it.
+A card rendering failure similarly reports "Files saved, preview unavailable."
+
+
+Hosts that cannot render UI blocks ignore them and lose nothing: the summary
+and the JSON say the same thing. The cards are content blocks only —
+`structuredContent` stays exactly the shape the output schema declares, which
+matters because the advertised schema forbids extra properties. Nothing asks
+the client whether it can render HTML, because the protocol has no such
+question; a host that flattens every block to text would print the card's
+source, and `audience: ["user"]` is the only signal available against that.
 
 This comes from Lix, not from parsing SQL. Every `execute_sql` call stamps
 its changes with an `origin_key` of `mcp:<request_id>` (a caller-supplied

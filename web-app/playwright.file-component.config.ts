@@ -1,4 +1,4 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
 export default defineConfig({
 	testDir: "./tests/file-component",
 	testMatch: "*.spec.ts",
@@ -12,5 +12,8 @@ export default defineConfig({
 		reuseExistingServer: !process.env.CI,
 		timeout: 60_000,
 	},
-	projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+	// Keep the native user agent: ControlOrMeta follows the host OS, and React
+	// Aria chooses the same modifier from the browser platform. A Windows device
+	// preset on macOS makes those disagree (Cmd+A versus Ctrl+A).
+	projects: [{ name: "chromium", use: { browserName: "chromium" } }],
 });

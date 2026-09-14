@@ -121,8 +121,6 @@ export type RepositoryControlPlaneData = {
 	readonly totalChangeCount: number | null;
 	/** Files with uncheckpointed changes: the status bar's own number. */
 	readonly workingFileCount: number | null;
-	/** Row-level changes behind those files. */
-	readonly workingChangeCount: number | null;
 	readonly tableCount: number | null;
 	readonly checkpointCount: number | null;
 	readonly checkpointDates: readonly string[] | null;
@@ -141,7 +139,7 @@ export const CHECKPOINT_SUMMARY_SQL =
  * checkpoint"), so Home's Changes panel and the status bar agree.
  */
 export const WORKING_CHANGE_SQL =
-	"SELECT count(*) AS file_count, coalesce(sum(row_count), 0) AS change_count FROM lix_diff('lix_file')";
+	"SELECT count(*) AS file_count FROM lix_diff('lix_file')";
 export const CHANGE_SUMMARY_SQL =
 	"WITH daily AS (SELECT substr(created_at, 1, 10) AS day, count(*) AS day_count, min(created_at) AS day_created_at FROM lix_change GROUP BY substr(created_at, 1, 10)) SELECT day, day_count AS n, sum(day_count) over () AS total_count, min(day_created_at) over () AS created_at FROM daily ORDER BY day DESC LIMIT 10";
 
@@ -210,9 +208,6 @@ export function useRepositoryControlPlaneData(
 			workingFileCount: workingChanges.rows
 				? asNumber(workingChanges.rows[0]?.file_count)
 				: null,
-			workingChangeCount: workingChanges.rows
-				? asNumber(workingChanges.rows[0]?.change_count)
-				: null,
 			tableCount,
 			checkpointCount: checkpoints.rows
 				? asNumber(checkpoints.rows[0]?.total_count)
@@ -238,25 +233,15 @@ export function useRepositoryControlPlaneData(
 	}, [changeSummary, checkpoints, tableCount, workingChanges]);
 }
 
-/**
- * Home's Changes headline, worded like the status bar: files when any file
- * differs from the checkpoint, otherwise the row-level change count.
- */
-export function describeWorkingChanges(
-	fileCount: number | null,
-	changeCount: number | null,
-): { readonly count: number; readonly label: string } {
+/** Home counts the logical files displayed in the working diff. */
+export function describeWorkingChanges(fileCount: number | null): {
+	readonly count: number;
+	readonly label: string;
+} {
 	const files = fileCount ?? 0;
-	const changes = changeCount ?? 0;
-	if (files > 0) {
-		return {
-			count: files,
-			label: `${files === 1 ? "file" : "files"} changed since checkpoint`,
-		};
-	}
 	return {
-		count: changes,
-		label: `${changes === 1 ? "change" : "changes"} since checkpoint`,
+		count: files,
+		label: `${files === 1 ? "file" : "files"} changed since checkpoint`,
 	};
 }
 

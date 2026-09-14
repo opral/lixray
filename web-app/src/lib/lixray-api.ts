@@ -1,6 +1,7 @@
 import {
 	openLix,
 	type ExecuteResult as LixExecuteResult,
+	type StatementResult as LixStatementResult,
 	type Lix,
 	type ResultArrayRow,
 	type ResultColumnType,
@@ -34,16 +35,15 @@ interface BranchesResponse {
 	currentBranchId: string;
 }
 
-export interface ExecuteResponse {
-	columns: Array<string>;
-	rows: Array<Array<WireValue>>;
-	rowsAffected: number;
-	notices: Array<unknown>;
-}
-
-export interface ExecuteScriptResponse {
-	results: Array<ExecuteResponse>;
-}
+export type {
+	ExecuteResponse,
+	ExecuteScriptResponse,
+} from "../mcp/lix-service.ts";
+import type {
+	ExecuteResponse,
+	ExecuteScriptResponse,
+	StatementResponse,
+} from "../mcp/lix-service.ts";
 
 interface ExecuteRequest {
 	branchId: string;
@@ -179,58 +179,53 @@ export function useLixrayApi() {
 					if ((await lix.activeBranchId()) !== body.branchId) {
 						await lix.switchBranch({ branchId: body.branchId });
 					}
-					return {
-						results: [
-							toWireResult(
-								await lix.execute(
-									body.sql,
-									(body.params ?? []).map(toSqlParam),
-									{ ...body.options, rowMode: "array" },
-								),
-							),
-						],
-					};
-				}),
-			executeBatch: (body: ExecuteBatchRequest) =>
-				serialized(async (lix) => {
-					if ((await lix.activeBranchId()) !== body.branchId) {
-						await lix.switchBranch({ branchId: body.branchId });
-					}
-					return {
-						results: (
-							await lix.executeBatch(
-								body.statements.map((statement) => ({
-									sql: statement.sql,
-									params: (statement.params ?? []).map(toSqlParam),
-								})),
-								{ ...body.options, rowMode: "array" },
-							)
-						).map(toWireResult),
-					};
-				}),
-			executeActive: (body: Omit<ExecuteRequest, "branchId">) =>
-				serialized(async (lix) => ({
-					results: [
+					return toWireSingle(
 						toWireResult(
 							await lix.execute(body.sql, (body.params ?? []).map(toSqlParam), {
 								...body.options,
 								rowMode: "array",
 							}),
 						),
-					],
-				})),
-			executeBatchActive: (body: Omit<ExecuteBatchRequest, "branchId">) =>
-				serialized(async (lix) => ({
-					results: (
+					);
+				}),
+			executeBatch: (body: ExecuteBatchRequest) =>
+				serialized(async (lix) => {
+					if ((await lix.activeBranchId()) !== body.branchId) {
+						await lix.switchBranch({ branchId: body.branchId });
+					}
+					return toWireBatch(
 						await lix.executeBatch(
 							body.statements.map((statement) => ({
 								sql: statement.sql,
 								params: (statement.params ?? []).map(toSqlParam),
 							})),
 							{ ...body.options, rowMode: "array" },
-						)
-					).map(toWireResult),
-				})),
+						),
+					);
+				}),
+			executeActive: (body: Omit<ExecuteRequest, "branchId">) =>
+				serialized(async (lix) =>
+					toWireSingle(
+						toWireResult(
+							await lix.execute(body.sql, (body.params ?? []).map(toSqlParam), {
+								...body.options,
+								rowMode: "array",
+							}),
+						),
+					),
+				),
+			executeBatchActive: (body: Omit<ExecuteBatchRequest, "branchId">) =>
+				serialized(async (lix) =>
+					toWireBatch(
+						await lix.executeBatch(
+							body.statements.map((statement) => ({
+								sql: statement.sql,
+								params: (statement.params ?? []).map(toSqlParam),
+							})),
+							{ ...body.options, rowMode: "array" },
+						),
+					),
+				),
 		}),
 		[serialized, repositoryId],
 	);
@@ -266,6 +261,7 @@ function toWireResult(
 		),
 		rowsAffected: result.rowsAffected,
 		notices: result.notices,
+		commit: result.commit ?? null,
 	};
 }
 
@@ -369,4 +365,26 @@ export function parseParamsJson(value: string): Array<WireValue> {
 		throw new Error("Params must be a JSON array of Lix wire values.");
 	}
 	return parsed as Array<WireValue>;
+}
+
+function toWireSingle(result: ExecuteResponse): ExecuteScriptResponse {
+	const { commit, ...statement } = result;
+	return { results: [statement], commit };
+}
+function toWireBatch(batch: {
+	results: readonly LixStatementResult<ResultArrayRow>[];
+	commit: ExecuteResponse["commit"];
+}): ExecuteScriptResponse {
+	return {
+		results: batch.results.map((result): StatementResponse => {
+			const wire = toWireResult({ ...result, commit: null });
+			return {
+				columns: wire.columns,
+				rows: wire.rows,
+				rowsAffected: wire.rowsAffected,
+				notices: wire.notices,
+			};
+		}),
+		commit: batch.commit,
+	};
 }

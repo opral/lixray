@@ -465,7 +465,7 @@ jobs:
           response_body="$(mktemp)"
           # Match vendor/lix/packages/lix/src/sync/mod.rs, not SERVER_PROTOCOL_VERSION.
           sync_protocol_version=15
-          server_protocol_version=9
+          server_protocol_version=10
           status=000
           for attempt in $(seq 1 12); do
             if status="$(

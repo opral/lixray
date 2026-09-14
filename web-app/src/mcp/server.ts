@@ -38,6 +38,7 @@ import {
 } from "./tool-observation.ts";
 
 import { MCP_RESOURCE } from "./auth.ts";
+import { renderDiffCard } from "./diff-card.ts";
 import {
 	DELETED_FILE_NAMES_SQL,
 	TOUCHED_CHANGES_SQL,
@@ -429,10 +430,7 @@ const entityUrlsOutput = withError(
 		),
 	}),
 );
-const fileContent = z.union([
-	z.object({ text: z.string() }).strict(),
-	z.object({ base64: z.string() }).strict(),
-]);
+
 const fileMetadata = z.record(z.string(), z.unknown());
 const listedFile = z
 	.object({ id: z.string(), path: z.string(), url: z.string() })
@@ -456,7 +454,9 @@ const readFilesOutput = withError(
 					path: z.string(),
 					url: z.string(),
 					size: z.number().int(),
-					content: fileContent,
+					/** The file's text; absent when `encoding` says why it is not. */
+					content: z.string().optional(),
+					encoding: z.enum(["binary", "too-large"]).optional(),
 					lixcol_metadata: fileMetadata.nullable(),
 				})
 				.strict(),
@@ -467,9 +467,11 @@ const readFilesOutput = withError(
 const writeFilesOutput = withError(
 	z.object({
 		context,
-		commit_id: z.string(),
+		commit_id: z.string().optional(),
 		files: z.array(listedFile),
 		checkpoint_commit_id: z.string().optional(),
+		commit: z.object({ before: z.string(), after: z.string() }).nullable(),
+		warning: z.string().optional(),
 	}),
 );
 const entityUrlSelector = z.union([
@@ -487,6 +489,7 @@ const entityUrlSelector = z.union([
 const branchStateOutput = withError(
 	z.object({ context, branch_id: branchId, commit_id: z.string() }),
 );
+const commitSpan = z.object({ before: z.string(), after: z.string() }).strict();
 const executeOutput = withError(
 	z.object({
 		context,
@@ -496,6 +499,7 @@ const executeOutput = withError(
 				rows: wireRows,
 				rowsAffected: z.number().int(),
 				notices: z.array(z.unknown()),
+				commit: commitSpan.nullable(),
 			})
 			.strict(),
 	}),
@@ -503,6 +507,7 @@ const executeOutput = withError(
 const executeBatchOutput = withError(
 	z.object({
 		context,
+		commit: commitSpan.nullable(),
 		results: z.array(
 			z
 				.object({
@@ -809,7 +814,8 @@ export function createLixrayMcpServer(
 						z
 							.object({
 								path: z.string().min(1),
-								content: fileContent.optional(),
+								content: z.string().optional(),
+								content_base64: z.string().optional(),
 								lixcol_metadata: fileMetadata.nullable().optional(),
 							})
 							.strict(),
@@ -836,9 +842,19 @@ export function createLixrayMcpServer(
 						: {}),
 					...(checkpoint ? { checkpoint } : {}),
 					originKey: mcpOriginKey(callId),
+					previews: MAX_DIFF_CARDS,
 				},
 				options.urlOrigin,
 			);
+			const rendered = diffCards(written.previews ?? [], written.files);
+			const warning = [
+				written.warning,
+				rendered.failed
+					? "Files saved, preview unavailable. Do not repeat the write."
+					: undefined,
+			]
+				.filter(Boolean)
+				.join(" ");
 			return {
 				context: written.context,
 				commit_id: written.commitId,
@@ -846,6 +862,9 @@ export function createLixrayMcpServer(
 				...(written.checkpointCommitId
 					? { checkpoint_commit_id: written.checkpointCommitId }
 					: {}),
+				...uiField(rendered.cards),
+				commit: written.commit,
+				...(warning ? { warning } : {}),
 			};
 		},
 		undefined,
@@ -1579,8 +1598,22 @@ function registerTool(
 				// the readback below sees only this call's changes.
 				const callId = `${requestId}.${crypto.randomUUID()}`;
 				executionStarted = true;
-				const raw = await call(input, callId);
+				const returned = (await call(input, callId)) as Record<string, unknown>;
 				executionCompleted = true;
+				// UI blocks travel beside the result, never inside it: hosts
+				// validate structuredContent against the output schema.
+				const declared = returned[UI_RESULT_KEY];
+				const ui = (
+					Array.isArray(declared) ? declared : []
+				) as EmbeddedUiResource[];
+				const raw =
+					UI_RESULT_KEY in returned
+						? Object.fromEntries(
+								Object.entries(returned).filter(
+									([key]) => key !== UI_RESULT_KEY,
+								),
+							)
+						: returned;
 				const executeOutput = isSqlTool(name)
 					? observeExecuteOutput(
 							name === "query_sql" ? { results: [raw.result] } : raw,
@@ -1626,7 +1659,7 @@ function registerTool(
 				// structured JSON for text-only hosts.
 				return {
 					structuredContent,
-					content: [summary[0]!, ...links, ...summary.slice(1)],
+					content: [summary[0]!, ...links, ...ui, ...summary.slice(1)],
 				};
 			} catch (caught) {
 				const baseError = toMcpError(caught);
@@ -1802,6 +1835,100 @@ async function touchedByCall(
 	}
 }
 
+/**
+ * Cards a host can render beside a write.
+ *
+ * A tool result tells the reader a file changed; the card shows them what
+ * changed, in Atelier's own review UI, without leaving the thread. Hosts that
+ * cannot render UI ignore these blocks and still get the summary and the JSON.
+ */
+const UI_RESULT_KEY = "_ui";
+
+/** How many cards a single write is allowed to put in a thread. */
+const MAX_DIFF_CARDS = 3;
+
+/**
+ * The MCP Apps media type (SEP-1865): `text/html` with a profile parameter
+ * that tells a host this document is a UI to render rather than a file to
+ * show. Hosts matching on the base type are unaffected by the parameter.
+ */
+const MCP_APP_HTML = "text/html;profile=mcp-app";
+
+type EmbeddedUiResource = {
+	type: "resource";
+	resource: { uri: string; mimeType: typeof MCP_APP_HTML; text: string };
+	annotations: { audience: Array<"user">; priority: number };
+};
+
+function diffCards(
+	previews: ReadonlyArray<{
+		path: string;
+		before?: Uint8Array;
+		after?: Uint8Array;
+	}>,
+	files: ReadonlyArray<{ path: string; url: string }>,
+): { cards: EmbeddedUiResource[]; failed: boolean } {
+	const urls = new Map(files.map((file) => [file.path, file.url]));
+	const cards: EmbeddedUiResource[] = [];
+	let failed = false;
+	for (const preview of previews) {
+		if (cards.length >= MAX_DIFF_CARDS) break;
+		const url = urls.get(preview.path);
+		if (!url) continue;
+		const repository = repositoryOf(url);
+		let card: ReturnType<typeof renderDiffCard>;
+		try {
+			card = renderDiffCard({
+				path: preview.path,
+				url,
+				...(preview.before !== undefined ? { before: preview.before } : {}),
+				...(preview.after !== undefined ? { after: preview.after } : {}),
+				...(repository ? { repository } : {}),
+			});
+		} catch (caught) {
+			failed = true;
+			// A card is a courtesy; a write that succeeded still succeeded.
+			console.error("LixRay MCP diff card failed", {
+				path: preview.path,
+				error: errorDetails(caught),
+			});
+			continue;
+		}
+		if (!card) continue;
+		cards.push({
+			type: "resource",
+			resource: {
+				uri: uiDiffUri(preview.path),
+				mimeType: MCP_APP_HTML,
+				text: card.html,
+			},
+			annotations: { audience: ["user"], priority: 0.9 },
+		});
+	}
+	return { cards, failed };
+}
+
+/**
+ * The card's address. A path is not a URI: `?` and `#` in a file name would
+ * turn the rest of it into a query and a fragment.
+ */
+function uiDiffUri(path: string): string {
+	const segments = path.split("/").filter(Boolean).map(encodeURIComponent);
+	return `ui://lixray/diff/${segments.join("/")}`;
+}
+
+function uiField(
+	cards: EmbeddedUiResource[],
+): Record<string, EmbeddedUiResource[]> {
+	return cards.length > 0 ? { [UI_RESULT_KEY]: cards } : {};
+}
+
+/** "@opral/monorepo" out of a LixRay entity URL, when it carries one. */
+function repositoryOf(url: string): string | undefined {
+	const match = /\/(@[^/]+\/[^/]+)\//.exec(url);
+	return match?.[1];
+}
+
 async function resultResourceLinks(
 	name: string,
 	input: Record<string, any>,
@@ -1918,7 +2045,7 @@ function summarizeToolResult(
 			typeof result.checkpoint_commit_id === "string"
 				? ` (checkpoint ${result.checkpoint_commit_id})`
 				: "";
-		return `Wrote ${names.join(" · ")} at commit ${String(result.commit_id)}${checkpoint}.`;
+		return `Wrote ${names.join(" · ")}${typeof result.commit_id === "string" ? ` at commit ${result.commit_id}` : ""}${checkpoint}.${typeof result.warning === "string" ? ` ${result.warning}` : ""}`;
 	}
 	if (name === "active_branch_id") {
 		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.`;
