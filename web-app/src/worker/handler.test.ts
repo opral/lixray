@@ -401,7 +401,7 @@ void test("profile activity queries file paths from every public Lix", async () 
 				const pathname = new URL(request.url).pathname;
 				if (pathname === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 8,
+						protocolVersion: 9,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "profile-activity-session",
@@ -461,7 +461,7 @@ void test("profile activity shares one repository scan across visitors", async (
 			const pathname = new URL(request.url).pathname;
 			if (pathname === `/lix/v1/${LIX_A}/`) {
 				return Response.json({
-					protocolVersion: 8,
+					protocolVersion: 9,
 					activeBranchId: "main",
 					activeAccountId: "00000000-0000-7000-8000-000000000002",
 					sessionId: "profile-cache-session",
@@ -1913,6 +1913,7 @@ void test("anonymous public reads resolve publicly and forward without auth", as
 });
 
 for (const endpoint of [
+	"/admission",
 	"/sync/pull?limit=512",
 	"/sync/history?commitId=commit-1",
 	"/sync/blob?blobId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -2115,7 +2116,7 @@ void test("a published directory exposes only its direct child names", async () 
 				protocolPaths.push(path);
 				if (path === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 8,
+						protocolVersion: 9,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "published-directory-session",
@@ -2187,7 +2188,7 @@ void test("a public repository can list a directory through the host projection"
 				const path = new URL(request.url).pathname;
 				if (path === `/lix/v1/${LIX_A}/`) {
 					return Response.json({
-						protocolVersion: 8,
+						protocolVersion: 9,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "public-directory-session",
@@ -2780,7 +2781,7 @@ void test("demo mode exposes authless MCP through the in-memory lix fetcher", as
 				const pathname = new URL(request.url).pathname;
 				if (pathname === `/lix/v1/${DEMO_LIX_ID}/`) {
 					return Response.json({
-						protocolVersion: 8,
+						protocolVersion: 9,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "demo-mcp-session",
@@ -3075,7 +3076,7 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 		protocolPaths.push(path);
 		if (path === `/lix/v1/${LIX_A}/`) {
 			return Response.json({
-				protocolVersion: 8,
+				protocolVersion: 9,
 				activeBranchId: "main",
 				activeAccountId: "00000000-0000-7000-8000-000000000002",
 				sessionId,
@@ -3393,7 +3394,7 @@ void test("published entity boot resolves a UUID with a fixed query before autho
 				const path = new URL(request.url).pathname;
 				if (path === `/lix/v1/${LIX_A}/`)
 					return Response.json({
-						protocolVersion: 8,
+						protocolVersion: 9,
 						activeBranchId: "main",
 						activeAccountId: "00000000-0000-7000-8000-000000000002",
 						sessionId: "entity-session",

@@ -167,6 +167,9 @@ async function browserFilesExist() {
 	return (
 		(await isFile(join(sdkDist, "index.js"))) &&
 		(await isFile(join(sdkDist, "wasm", "lix_js_sdk_bg.wasm"))) &&
+		(await isFile(join(sdkDist, "migration.js"))) &&
+		(await isFile(join(sdkDist, "migration-wasm", "lix_js_sdk_bg.wasm"))) &&
+		(await isFile(join(opfsStorageRoot, "dist", "migration.worker.js"))) &&
 		(await isFile(join(opfsStorageRoot, "dist", "index.js")))
 	);
 }
@@ -183,6 +186,8 @@ async function preparedNativeMatches(revision, target) {
 async function ensureWasmSourceLink() {
 	await rm(join(sdkRoot, "src", "wasm"), { recursive: true, force: true });
 	await symlink(join(sdkDist, "wasm"), join(sdkRoot, "src", "wasm"), "dir");
+	await rm(join(sdkRoot, "src", "migration-wasm"), { recursive: true, force: true });
+	await symlink(join(sdkDist, "migration-wasm"), join(sdkRoot, "src", "migration-wasm"), "dir");
 }
 
 async function writeBuildMarker(path, value) {

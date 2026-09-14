@@ -6,10 +6,8 @@ interface MockOpenOptions {
 	server: { mode: string; headers: () => Promise<Record<string, string>> };
 }
 const opens: MockOpenOptions[] = [];
-const conversions: MockOpenOptions[] = [];
+const routedNames: string[] = [];
 let failures: Error[] = [];
-let conversionError: Error | undefined;
-let conversionFailures: Error[] = [];
 let branch = "main";
 let defaultBranch = "main";
 let defaultSessionCalls = 0;
@@ -69,11 +67,7 @@ mock.module("@lix-js/sdk", {
 				},
 			};
 		},
-		convertReplicaToPartial: async (options: MockOpenOptions) => {
-			conversions.push(options);
-			const failure = conversionFailures.shift() ?? conversionError;
-			if (failure) throw failure;
-		},
+		networkFetch: globalThis.fetch.bind(globalThis),
 	},
 });
 mock.module("@lix-js/storage-opfs", {
@@ -96,14 +90,20 @@ mock.module("./repository-opfs-cache.ts", {
 		}) => `lixray:local-first-v1:${options.repositoryId}:${options.replicaId}`,
 	},
 });
+mock.module("./repository-migration.ts", {
+	namedExports: {
+		currentReplicaStorage: async (name: string) => {
+			routedNames.push(name);
+			return `${name}:format81:current`;
+		},
+	},
+});
 const { openRepositoryLixSession } =
 	await import("./repository-lix-session.ts");
 beforeEach(() => {
 	opens.length = 0;
-	conversions.length = 0;
+	routedNames.length = 0;
 	failures = [];
-	conversionError = undefined;
-	conversionFailures = [];
 	branch = "main";
 	defaultBranch = "main";
 	defaultSessionCalls = 0;
@@ -135,13 +135,12 @@ await test("browser opening explicitly selects partial replica and persistent pe
 	assert.equal(opens[0].server.mode, "partial_replica");
 	assert.equal(
 		opens[0].storage!.options.name,
-		`lixray:local-first-v1:${input.repositoryId}:${input.authIdentity}:replica`,
+		`lixray:local-first-v1:${input.repositoryId}:${input.authIdentity}:replica:format81:current`,
 	);
 	assert.deepEqual(await opens[0].server.headers(), {
 		Authorization: "Bearer token",
 	});
 	assert.equal(session.activeBranchSnapshot(), "main");
-	assert.equal(conversions.length, 0);
 	await session.close();
 });
 
@@ -158,37 +157,6 @@ await test("retries a recovering authority without remote fallback", async () =>
 	await session.close();
 });
 
-await test("converts an existing full replica using the same storage before reopening", async () => {
-	failures = [
-		Object.assign(new Error("migration required"), {
-			code: "LIX_PARTIAL_REPLICA_MIGRATION_REQUIRED",
-		}),
-	];
-	const session = await openRepositoryLixSession(options());
-	assert.equal(conversions.length, 1);
-	assert.strictEqual(conversions[0].storage, opens[0].storage);
-	assert.strictEqual(opens[1].storage, opens[0].storage);
-	assert.strictEqual(conversions[0].server, opens[0].server);
-	await session.close();
-});
-
-await test("recovery-required conversion stops without resetting storage or opening remotely", async () => {
-	failures = [
-		Object.assign(new Error("migration required"), {
-			code: "LIX_PARTIAL_REPLICA_MIGRATION_REQUIRED",
-		}),
-	];
-	conversionError = Object.assign(new Error("recover pending edits"), {
-		code: "LIX_PARTIAL_REPLICA_CONVERSION_RECOVERY_REQUIRED",
-	});
-	await assert.rejects(
-		openRepositoryLixSession(options()),
-		(error) => error === conversionError,
-	);
-	assert.equal(opens.length, 1);
-	assert.equal(conversions.length, 1);
-});
-
 await test("unrelated opening failures do not trigger conversion", async () => {
 	const error = new Error("network unavailable");
 	failures = [error];
@@ -196,7 +164,6 @@ await test("unrelated opening failures do not trigger conversion", async () => {
 		openRepositoryLixSession(options()),
 		(value) => value === error,
 	);
-	assert.equal(conversions.length, 0);
 });
 
 await test("initial branch selection uses the local partial session", async () => {
@@ -372,99 +339,13 @@ await test("published-path sessions remain remote and avoid native storage and G
 	assert.equal(opens[0].server.mode, "remote");
 	assert.equal(opens[0].storage, undefined);
 	assert.equal(defaultSessionCalls, 0);
-	assert.equal(conversions.length, 0);
 	assert.deepEqual(await opens[0].server.headers(), {
 		"X-Lixray-Public-Path": "/published.md",
 	});
 	await session.close();
 });
 
-await test("retries expired closed-storage conversion using the same persistent replica", async () => {
-	const migration = () =>
-		Object.assign(new Error("migration required"), {
-			code: "LIX_PARTIAL_REPLICA_MIGRATION_REQUIRED",
-		});
-	failures = [migration(), migration()];
-	conversionFailures = [
-		Object.assign(
-			new Error(
-				"the coherent storage read was invalidated by a concurrent commit",
-			),
-			{ code: "LIX_STORAGE_READ_EXPIRED" },
-		),
-	];
-	const session = await openRepositoryLixSession(options());
-	assert.equal(conversions.length, 2);
-	assert.equal(opens.length, 3);
-	assert.ok(
-		opens.every(
-			(open) => open.storage!.options.name === opens[0].storage!.options.name,
-		),
-	);
-	assert.ok(opens.every((open) => open.server.mode === "partial_replica"));
-	await session.close();
-});
-
-await test("resumes conversion after lost merge responses without replacing the replica", async () => {
-	const migration = () =>
-		Object.assign(new Error("migration required"), {
-			code: "LIX_PARTIAL_REPLICA_MIGRATION_REQUIRED",
-		});
-	failures = [migration(), migration(), migration()];
-	conversionFailures = [502, 504].map((httpStatus) =>
-		Object.assign(new Error("merge response lost"), {
-			code: "LIX_INTERNAL_ERROR",
-			details: { httpStatus },
-		}),
-	);
-	const session = await openRepositoryLixSession(options());
-	assert.equal(conversions.length, 3);
-	assert.equal(opens.length, 4);
-	assert.ok(
-		opens.every(
-			(open) => open.storage!.options.name === opens[0].storage!.options.name,
-		),
-	);
-	await session.close();
-});
-
-await test("never repeats conversion after an error marked as durably committed", async () => {
-	failures = [
-		Object.assign(new Error("migration required"), {
-			code: "LIX_PARTIAL_REPLICA_MIGRATION_REQUIRED",
-		}),
-	];
-	conversionError = Object.assign(new Error("completion failed"), {
-		code: "LIX_STORAGE_READ_EXPIRED",
-		details: { nonRetryableAfterCommit: true },
-	});
-	await assert.rejects(
-		openRepositoryLixSession(options()),
-		(error) => error === conversionError,
-	);
-	assert.equal(conversions.length, 1);
-	assert.equal(opens.length, 1);
-});
-
-await test("expired default-branch read releases failed sessions before reopening the same replica", async () => {
-	defaultQueryFailures = [
-		Object.assign(new Error("read expired"), {
-			code: "LIX_STORAGE_READ_EXPIRED",
-		}),
-	];
-	const session = await openRepositoryLixSession(options());
-	assert.equal(opens.length, 2);
-	assert.equal(opens[0].storage!.options.name, opens[1].storage!.options.name);
-	assert.equal(defaultSessionCloses, 2);
-	assert.deepEqual(
-		handles.map((handle) => handle.closeCalls),
-		[1, 0],
-	);
-	assert.equal(session.defaultBranchSnapshot(), "main");
-	await session.close();
-});
-
-await test("expired opening stops at its retry limit without replacing the persistent cache", async () => {
+await test("read expiration is not replayed by the frontend or used to replace the persistent cache", async () => {
 	const expired = Object.assign(new Error("read expired"), {
 		code: "LIX_STORAGE_READ_EXPIRED",
 	});
@@ -473,8 +354,7 @@ await test("expired opening stops at its retry limit without replacing the persi
 		openRepositoryLixSession(options()),
 		(error) => error === expired,
 	);
-	assert.equal(opens.length, 7);
-	assert.equal(conversions.length, 0);
+	assert.equal(opens.length, 1);
 	assert.ok(
 		opens.every(
 			(open) => open.storage!.options.name === opens[0].storage!.options.name,

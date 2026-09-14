@@ -7,14 +7,14 @@ void test("checks a handshake and read, then closes the canary session", async (
 	const result = await checkProductionLix({
 		lixUrl: "https://lixray.example/lix/11111111-1111-4111-8111-111111111111",
 		fetchImpl: async (url, init = {}) => {
-			assert.equal(new Headers(init.headers).get("lix-server-protocol-version"), "8");
+			assert.equal(new Headers(init.headers).get("lix-server-protocol-version"), "9");
 			requests.push({
 				method: init.method ?? "GET",
 				pathname: new URL(url).pathname,
 				sessionId: init.headers?.["Lix-Session-Id"],
 			});
 			if (new URL(url).pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/")) {
-				return Response.json({ protocolVersion: 2, sessionId: "session-1" });
+				return Response.json({ protocolVersion: 9, sessionId: "session-1" });
 			}
 			if (new URL(url).pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/execute")) {
 				return Response.json({ rows: [[{ kind: "int", value: 1 }]] });
@@ -24,7 +24,7 @@ void test("checks a handshake and read, then closes the canary session", async (
 	});
 
 	assert.deepEqual(result, {
-		protocolVersion: 2,
+		protocolVersion: 9,
 		lix: "/lix/11111111-1111-4111-8111-111111111111",
 	});
 	assert.deepEqual(requests, [
@@ -46,66 +46,13 @@ void test("checks a handshake and read, then closes the canary session", async (
 	]);
 });
 
-void test("waits for an in-progress repository migration", async () => {
-	let handshakes = 0;
-	const sleeps = [];
-	const result = await checkProductionLix({
-		lixUrl: "https://lixray.example/lix/11111111-1111-4111-8111-111111111111",
-		sleepImpl: async (milliseconds) => {
-			sleeps.push(milliseconds);
-		},
-		fetchImpl: async (url, init = {}) => {
-			const pathname = new URL(url).pathname;
-			if (pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/")) {
-				handshakes += 1;
-				if (handshakes < 3) {
-					return Response.json(
-						{
-							error: {
-								code: "LIX_ERROR_MIGRATING",
-								details: { fromVersion: 68, toVersion: 71 },
-							},
-						},
-						{ status: 503, headers: { "Retry-After": "2" } },
-					);
-				}
-				return Response.json({ protocolVersion: 2, sessionId: "session-1" });
-			}
-			if (pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/execute")) {
-				return Response.json({ rows: [[{ kind: "int", value: 1 }]] });
-			}
-			assert.equal(init.method, "DELETE");
-			return new Response(null, { status: 204 });
-		},
-	});
-
-	assert.equal(handshakes, 3);
-	assert.deepEqual(sleeps, [2_000, 2_000]);
-	assert.equal(result.protocolVersion, 2);
-});
-
-void test("fails when repository migration does not complete", async () => {
-	let requests = 0;
-	let now = 0;
-	await assert.rejects(
-		checkProductionLix({
-			lixUrl: "https://lixray.example/lix/11111111-1111-4111-8111-111111111111",
-			migrationTimeoutMs: 2_000,
-			nowImpl: () => now,
-			sleepImpl: async (milliseconds) => {
-				now += milliseconds;
-			},
-			fetchImpl: async () => {
-				requests += 1;
-				return Response.json(
-					{ error: { code: "LIX_ERROR_MIGRATING" } },
-					{ status: 503, headers: { "Retry-After": "1" } },
-				);
-			},
-		}),
-		/did not complete within 2000ms/,
-	);
-	assert.equal(requests, 2);
+void test("migration-required repositories fail immediately instead of polling ordinary opening", async () => {
+ let calls = 0;
+ await assert.rejects(checkProductionLix({lixUrl:"https://lixray.example/lix/11111111-1111-4111-8111-111111111111", fetchImpl: async () => {
+  calls += 1;
+  return Response.json({error:{code:"LIX_MIGRATION_REQUIRED"}}, {status:503});
+ }}), /HTTP 503 LIX_MIGRATION_REQUIRED/);
+ assert.equal(calls,1);
 });
 
 void test("reports recovering repositories and does not attempt a close", async () => {
@@ -133,7 +80,7 @@ void test("fails when the canary session cannot close", async () => {
 			fetchImpl: async (url, init = {}) => {
 				const pathname = new URL(url).pathname;
 				if (pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/")) {
-					return Response.json({ protocolVersion: 2, sessionId: "session-1" });
+					return Response.json({ protocolVersion: 9, sessionId: "session-1" });
 				}
 				if (init.method === "DELETE") {
 					return Response.json(

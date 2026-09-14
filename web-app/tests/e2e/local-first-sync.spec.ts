@@ -79,7 +79,7 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 	const endpoint = new URL(`/lix/v1/${repository.id}/`, baseURL);
 	const headers = {
 		Authorization: `Bearer ${repository.token}`,
-		"Lix-Server-Protocol-Version": "8",
+		"Lix-Server-Protocol-Version": "9",
 	};
 	const opened = await context.request.get(endpoint.toString(), { headers });
 	expect(opened.status(), await opened.text()).toBe(200);
