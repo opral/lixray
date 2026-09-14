@@ -6,7 +6,7 @@ import {
 import { zipSync } from "fflate";
 
 type Entry = { id: string; path: string; kind: "file" | "directory" };
-type Executor = Pick<Lix, "execute">;
+type Executor = Pick<LixTransaction, "execute">;
 
 const withoutSlash = (path: string) => path.replace(/\/+$/, "") || "/";
 const directoryPath = (path: string) =>

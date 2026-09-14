@@ -128,6 +128,7 @@ export type FileWriteStatement = {
  */
 export function fileWriteStatements(
 	files: readonly FileWrite[],
+	previewPaths: ReadonlySet<string> = new Set(),
 ): FileWriteStatement[] {
 	const statements: FileWriteStatement[] = [];
 	const directories = new Set<string>();
@@ -180,7 +181,14 @@ export function fileWriteStatements(
 			});
 		}
 	}
-	return statements;
+	return statements.map((statement) =>
+		statement.path && previewPaths.has(statement.path)
+			? {
+					...statement,
+					sql: `${statement.sql}, OLD.content AS before, NEW.content AS after`,
+				}
+			: statement,
+	);
 }
 
 /** The paths a diff over the target files reports as changed. */

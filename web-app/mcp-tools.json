@@ -578,9 +578,32 @@
 				},
 				"checkpoint_commit_id": {
 					"type": "string"
+				},
+				"commit": {
+					"anyOf": [
+						{
+							"type": "object",
+							"properties": {
+								"before": {
+									"type": "string"
+								},
+								"after": {
+									"type": "string"
+								}
+							},
+							"required": ["before", "after"],
+							"additionalProperties": false
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"warning": {
+					"type": "string"
 				}
 			},
-			"required": ["context", "commit_id", "files"],
+			"required": ["context", "files", "commit"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -767,9 +790,29 @@
 						"notices": {
 							"type": "array",
 							"items": {}
+						},
+						"commit": {
+							"anyOf": [
+								{
+									"type": "object",
+									"properties": {
+										"before": {
+											"type": "string"
+										},
+										"after": {
+											"type": "string"
+										}
+									},
+									"required": ["before", "after"],
+									"additionalProperties": false
+								},
+								{
+									"type": "null"
+								}
+							]
 						}
 					},
-					"required": ["columns", "rows", "rowsAffected", "notices"],
+					"required": ["columns", "rows", "rowsAffected", "notices", "commit"],
 					"additionalProperties": false
 				}
 			},
@@ -954,6 +997,26 @@
 					"minLength": 1,
 					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
 				},
+				"commit": {
+					"anyOf": [
+						{
+							"type": "object",
+							"properties": {
+								"before": {
+									"type": "string"
+								},
+								"after": {
+									"type": "string"
+								}
+							},
+							"required": ["before", "after"],
+							"additionalProperties": false
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
 				"results": {
 					"type": "array",
 					"items": {
@@ -988,7 +1051,7 @@
 					}
 				}
 			},
-			"required": ["context", "results"],
+			"required": ["context", "commit", "results"],
 			"additionalProperties": false
 		},
 		"annotations": {

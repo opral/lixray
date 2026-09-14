@@ -1,6 +1,7 @@
 import {
 	openLix,
 	type ExecuteResult as LixExecuteResult,
+	type StatementResult as LixStatementResult,
 	type JsonValue,
 	type Lix,
 	type ResultArrayRow,
@@ -14,6 +15,9 @@ import {
 	type ExecuteRequest,
 	type ExecuteResponse,
 	type ExecuteScriptResponse,
+	type StatementResponse,
+	type TransactionClient,
+	type CommitSpan,
 	createLixError,
 	isLixError,
 	type LixError,
@@ -261,7 +265,81 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 					})),
 					{ ...request.options, rowMode: "array" },
 				);
-				return { results: results.map(encodeExecuteResult) };
+				return {
+					results: results.results.map(encodeStatementResult),
+					commit: results.commit,
+				};
+			});
+		} catch (caught) {
+			throw asLixError(caught);
+		}
+	}
+
+	/** The callback only performs database work and can be replayed on a definite conflict. */
+	async transaction<T>(
+		lixId: string,
+		branchId: string,
+		run: (tx: TransactionClient) => Promise<T>,
+	): Promise<{ value: T; commit: CommitSpan | null; warning?: string }> {
+		try {
+			const session = await this.session(lixId);
+			return await this.enqueueSession(session, async () => {
+				await this.ensureBranch(session, branchId);
+				for (let attempt = 0; ; attempt++) {
+					const tx = await session.lix.beginTransaction();
+					let finished = false;
+					try {
+						const value = await run({
+							execute: async (request) =>
+								encodeStatementResult(
+									await tx.execute(
+										request.sql,
+										(request.params ?? []).map(decodeWireParam),
+										{ ...request.options, rowMode: "array" },
+									),
+								),
+						});
+						finished = true;
+						try {
+							const { commit } = await tx.commit();
+							return { value, commit };
+						} catch (caught) {
+							const error = asLixError(caught);
+							const details = error.details as
+								| Record<string, unknown>
+								| undefined;
+							if (details?.nonRetryableAfterCommit !== true) throw error;
+							const span = details.commit as
+								| Partial<CommitSpan>
+								| null
+								| undefined;
+							const commit =
+								typeof span?.before === "string" &&
+								typeof span.after === "string"
+									? { before: span.before, after: span.after }
+									: null;
+							return {
+								value,
+								commit,
+								warning:
+									"Files saved; completion reporting failed. Do not repeat the write.",
+							};
+						}
+					} catch (caught) {
+						if (!finished) await tx.rollback().catch(() => undefined);
+						const error = asLixError(caught);
+						const details = error.details as
+							| Record<string, unknown>
+							| undefined;
+						if (
+							attempt >= 2 ||
+							error.code !== "LIX_TRANSACTION_CONFLICT" ||
+							details?.nonRetryableAfterCommit === true ||
+							details?.nonRetryableAfterExecution === true
+						)
+							throw error;
+					}
+				}
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -499,6 +577,12 @@ function decodeWireParam(
 function encodeExecuteResult(
 	result: LixExecuteResult<ResultArrayRow>,
 ): ExecuteResponse {
+	return { ...encodeStatementResult(result), commit: result.commit ?? null };
+}
+
+function encodeStatementResult(
+	result: LixStatementResult<ResultArrayRow>,
+): StatementResponse {
 	return {
 		columns: result.columns.map((column) => column.name),
 		rows: result.rows.map((row) =>
