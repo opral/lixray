@@ -2509,7 +2509,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			cards[0]!.resource.uri,
 			"ui://lixray/diff/gtm/campaigns/icp.md",
 		);
-		assert.equal(cards[0]!.resource.mimeType, "text/html");
+		assert.equal(cards[0]!.resource.mimeType, "text/html;profile=mcp-app");
 		assert.match(cards[0]!.resource.text, /<h1[^>]*>ICP<\/h1>/);
 		assert.match(cards[0]!.resource.text, /Open in LixRay/);
 		assert.deepEqual(cards[0]!.annotations?.audience, ["user"]);

@@ -136,21 +136,23 @@ links, and a failed call has the summary and the JSON text only. The summary nam
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
 
-A Markdown write carries one thing more: the change itself, as an
-embedded `text/html` resource under `ui://lixray/diff/<path>`, annotated for
-the user. The card is rendered with Atelier's own review engine — the same
-document alignment, the same marks, the same palette the app draws — so a
-change reads the same in a chat as it does in LixRay. It is a self-contained
-document: no scripts, no network of any kind, its stylesheet inlined and its
-images named rather than loaded, because the address in an image is chosen by
-whoever wrote the document.
+A write to a file Atelier can render carries one thing more: the change
+itself, as an embedded resource under `ui://lixray/diff/<path>` with the MCP
+Apps media type `text/html;profile=mcp-app`, annotated for the user. The card
+is Atelier's own view of that file — the same document alignment, the same
+marks, the same palette the app draws — so a change reads the same in a chat
+as it does in LixRay. Markdown and CSV have such a view today; anything else
+gets its link, as before. It is a self-contained document: no scripts, no
+network of any kind, its stylesheet inlined and its images named rather than
+loaded, because the address in an image is chosen by whoever wrote the
+document.
 
 At most three cards travel with a write, and the before side is read for
-those three files only. Each is trimmed to the lines that changed, with a gap
-naming what was skipped; a card that is still too large for a thread keeps
-its header and sends the reader to the file. A snapshot over 100 KB, or one
-nested past two dozen levels, gets no card at all — rendering walks the whole
-document, and the document was written by whoever is talking to the server.
+those three files only. Each is trimmed to what changed, with a note of what
+was skipped; a change too large for a thread keeps its header and sends the
+reader to the file, which is also what a snapshot over 100 KB or one nested
+past two dozen levels gets — rendering walks the whole document, and the
+document was written by whoever is talking to the server.
 
 Hosts that cannot render UI blocks ignore them and lose nothing: the summary
 and the JSON say the same thing. The cards are content blocks only —

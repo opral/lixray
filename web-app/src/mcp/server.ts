@@ -1831,9 +1831,16 @@ const UI_RESULT_KEY = "_ui";
 /** How many cards a single write is allowed to put in a thread. */
 const MAX_DIFF_CARDS = 3;
 
+/**
+ * The MCP Apps media type (SEP-1865): `text/html` with a profile parameter
+ * that tells a host this document is a UI to render rather than a file to
+ * show. Hosts matching on the base type are unaffected by the parameter.
+ */
+const MCP_APP_HTML = "text/html;profile=mcp-app";
+
 type EmbeddedUiResource = {
 	type: "resource";
-	resource: { uri: string; mimeType: "text/html"; text: string };
+	resource: { uri: string; mimeType: typeof MCP_APP_HTML; text: string };
 	annotations: { audience: Array<"user">; priority: number };
 };
 
@@ -1858,9 +1865,8 @@ function diffCards(
 			card = renderDiffCard({
 				path: preview.path,
 				url,
-				beforeMarkdown: preview.before,
-				afterMarkdown: preview.after,
-				existed: preview.existed,
+				...(preview.existed ? { before: encode(preview.before) } : {}),
+				after: encode(preview.after),
 				...(repository ? { repository } : {}),
 			});
 		} catch (caught) {
@@ -1876,13 +1882,18 @@ function diffCards(
 			type: "resource",
 			resource: {
 				uri: uiDiffUri(preview.path),
-				mimeType: "text/html",
+				mimeType: MCP_APP_HTML,
 				text: card.html,
 			},
 			annotations: { audience: ["user"], priority: 0.9 },
 		});
 	}
 	return cards;
+}
+
+/** A view renders bytes, because that is what a Lix file is. */
+function encode(value: string): Uint8Array {
+	return new TextEncoder().encode(value);
 }
 
 /**

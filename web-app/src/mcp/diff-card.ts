@@ -1,118 +1,101 @@
-import {
-	MARKDOWN_DIFF_CSS,
-	renderMarkdownDiff,
-	type MarkdownDiffStats,
-} from "@opral/atelier/markdown-diff";
+import { isRendered, RENDER_CSS, toHtml } from "@opral/atelier/render";
+import type { RenderCounts, RenderKind } from "@opral/atelier/render";
 
 /**
  * The card a write sends back to the chat.
  *
  * A tool result says a file changed; the change itself is what the reader
- * wants, and it used to live one navigation away. This renders it inline,
- * in Atelier's own review UI — the same document builder, the same marks,
- * the same palette the app and the review float draw — as one self-contained
- * HTML document with no scripts and nothing to fetch.
+ * wants, and it used to live one navigation away. Atelier renders the file —
+ * whichever view claims it, in the app's own review UI — and this wraps that
+ * in the chrome a message needs: which file, how much changed, and the way
+ * back. One self-contained document, no scripts and nothing to fetch.
  */
-
-/** Files the diff renderer understands. Others get their link, as before. */
-const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
 
 /** Cards past this size stop being a card; the reader is sent to the app. */
 const MAX_CARD_BYTES = 24_000;
 
-/**
- * Snapshots past this size are not carded at all.
- *
- * Rendering parses both sides, so the work scales with the document, not
- * with the change: a megabyte of Markdown is a second and a half of a
- * server's attention to produce a card that would be trimmed to nothing.
- */
-const MAX_SOURCE_BYTES = 100_000;
-
 export type DiffCardInput = {
 	readonly path: string;
 	readonly url: string;
-	readonly beforeMarkdown: string;
-	readonly afterMarkdown: string;
+	readonly before?: Uint8Array;
+	readonly after?: Uint8Array;
 	/** "@opral/monorepo", shown as the card's quiet second line. */
 	readonly repository?: string;
-	/** False when the write created the file. Defaults to "before was empty". */
-	readonly existed?: boolean;
 };
 
 export type DiffCard = {
 	readonly html: string;
-	readonly stats: MarkdownDiffStats;
-	/** Lines the card left out because of its height budget. */
+	readonly counts?: RenderCounts;
+	readonly kind: RenderKind;
+	/** Entities the card left out because of its height budget. */
 	readonly hidden: number;
 };
 
-export function isMarkdownPath(path: string): boolean {
-	const name = path.split("/").filter(Boolean).at(-1) ?? "";
-	const extension = name.includes(".")
-		? name.split(".").at(-1)?.toLowerCase()
-		: undefined;
-	return extension !== undefined && MARKDOWN_EXTENSIONS.has(extension);
+/** Whether Atelier has a static view for this path, without rendering it. */
+export function isRenderablePath(path: string): boolean {
+	const probe = toHtml({ path, after: new Uint8Array([0x20]) });
+	return !(!isRendered(probe) && probe.skipped === "unsupported");
 }
 
 export function renderDiffCard(input: DiffCardInput): DiffCard | null {
-	if (!isMarkdownPath(input.path)) return null;
-	if (
-		byteLength(input.beforeMarkdown) > MAX_SOURCE_BYTES ||
-		byteLength(input.afterMarkdown) > MAX_SOURCE_BYTES
-	)
-		return null;
-	if (tooDeep(input.beforeMarkdown) || tooDeep(input.afterMarkdown))
-		return null;
-	const diff = renderMarkdownDiff({
-		beforeMarkdown: input.beforeMarkdown,
-		afterMarkdown: input.afterMarkdown,
-		context: 1,
-		maxLines: 12,
-	});
-	if (diff.unchanged) return null;
-	const created =
-		input.existed === undefined ? input.beforeMarkdown === "" : !input.existed;
+	const content = {
+		path: input.path,
+		...(input.before !== undefined ? { before: input.before } : {}),
+		...(input.after !== undefined ? { after: input.after } : {}),
+	};
+	// The chrome takes about 4 kB of the budget; the view gets the rest.
+	const view = toHtml(content, { maxBytes: MAX_CARD_BYTES - 4_000 });
+	if (!isRendered(view)) {
+		// A change too big to read in a thread is still a change worth
+		// announcing: the header says which file, the footer leads to it.
+		if (view.skipped !== "too-large") return null;
+		const kind: RenderKind =
+			input.before === undefined
+				? "added"
+				: input.after === undefined
+					? "removed"
+					: "modified";
+		return {
+			html: cardDocument({
+				...input,
+				viewHtml: "",
+				kind,
+				hidden: 0,
+				tooLarge: true,
+			}),
+			kind,
+			hidden: 0,
+		};
+	}
 	const body = cardDocument({
 		...input,
-		diffHtml: diff.html,
-		stats: diff.stats,
-		hidden: diff.hidden,
-		created,
+		viewHtml: view.html,
+		counts: view.counts,
+		kind: view.kind,
+		hidden: view.hidden,
 	});
 	if (byteLength(body) <= MAX_CARD_BYTES)
-		return { html: body, stats: diff.stats, hidden: diff.hidden };
-	// Too big to read in a thread anyway: keep the header, drop the diff. What
-	// the reader is missing is now the whole change, not just the trimmed tail.
-	const hidden =
-		diff.hidden + diff.stats.added + diff.stats.removed + diff.stats.modified;
+		return {
+			html: body,
+			kind: view.kind,
+			hidden: view.hidden,
+			...(view.counts ? { counts: view.counts } : {}),
+		};
+	// The view fitted its own budget and the whole card still did not: keep
+	// the header, drop the view, and say so rather than counting again.
 	return {
 		html: cardDocument({
 			...input,
-			diffHtml: "",
-			stats: diff.stats,
-			hidden,
-			created,
+			viewHtml: "",
+			...(view.counts ? { counts: view.counts } : {}),
+			kind: view.kind,
+			hidden: view.hidden,
+			tooLarge: true,
 		}),
-		stats: diff.stats,
-		hidden,
+		kind: view.kind,
+		hidden: view.hidden,
+		...(view.counts ? { counts: view.counts } : {}),
 	};
-}
-
-/**
- * Nesting a parser walks by recursion, and a document is written by whoever
- * opened the chat. A hundred levels of quote or list is not a document anyone
- * reads; it is a stack the server would rather keep.
- */
-const MAX_NESTING = 24;
-
-function tooDeep(markdown: string): boolean {
-	for (const line of markdown.split("\n")) {
-		const quotes = (/^[\s>]*/.exec(line)?.[0] ?? "").split(">").length - 1;
-		const indent = (/^[ \t]*/.exec(line)?.[0] ?? "").length;
-		if (quotes > MAX_NESTING || indent / 2 > MAX_NESTING) return true;
-	}
-	return false;
 }
 
 function byteLength(value: string): number {
@@ -128,43 +111,59 @@ export function escapeHtml(value: string): string {
 		.replaceAll("'", "&#39;");
 }
 
-function statsLabel(stats: MarkdownDiffStats, created: boolean): string {
-	if (created)
-		return `new file · ${stats.added} ${stats.added === 1 ? "line" : "lines"}`;
+function countsLabel(
+	counts: RenderCounts | undefined,
+	kind: RenderKind,
+): string {
+	if (!counts) return kind === "added" ? "new file" : "";
+	if (kind === "added")
+		return `new file · ${counts.added} ${counts.added === 1 ? "entry" : "entries"}`;
 	const parts: string[] = [];
-	if (stats.added > 0) parts.push(`<span class="plus">+${stats.added}</span>`);
-	if (stats.removed > 0)
-		parts.push(`<span class="minus">−${stats.removed}</span>`);
-	if (stats.modified > 0)
-		parts.push(`<span class="edited">${stats.modified} edited</span>`);
+	if (counts.added > 0)
+		parts.push(`<span class="plus">+${counts.added}</span>`);
+	if (counts.removed > 0)
+		parts.push(`<span class="minus">−${counts.removed}</span>`);
+	if (counts.modified > 0)
+		parts.push(`<span class="edited">${counts.modified} edited</span>`);
 	return parts.join(" · ") || "no change";
 }
 
 /** The dot-hybrid glyph Atelier draws beside a changed file. */
-function glyph(created: boolean): string {
-	const fill = created ? "rgb(21,128,61)" : "rgb(234,88,12)";
-	const knockout = created
-		? "M6 3.6v4.8M3.6 6h4.8"
-		: "M3.3 6.3c.9-1.5 1.8-1.5 2.7 0s1.8 1.5 2.7 0";
-	return `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="${fill}"></circle><path d="${knockout}" stroke="#fff" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+function glyph(kind: RenderKind): string {
+	const fill =
+		kind === "added"
+			? "var(--atelier-added-edge)"
+			: kind === "removed"
+				? "var(--atelier-removed-edge)"
+				: "var(--atelier-accent)";
+	const knockout =
+		kind === "added"
+			? "M6 3.6v4.8M3.6 6h4.8"
+			: kind === "removed"
+				? "M3.6 6h4.8"
+				: "M3.3 6.3c.9-1.5 1.8-1.5 2.7 0s1.8 1.5 2.7 0";
+	return `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="${fill}"></circle><path d="${knockout}" stroke="var(--atelier-bg)" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
 }
 
 function cardDocument(args: {
 	readonly path: string;
 	readonly url: string;
 	readonly repository?: string;
-	readonly diffHtml: string;
-	readonly stats: MarkdownDiffStats;
+	readonly viewHtml: string;
+	readonly counts?: RenderCounts;
+	readonly kind: RenderKind;
 	readonly hidden: number;
-	readonly created: boolean;
+	/** The change does not fit a message; the card is header and link only. */
+	readonly tooLarge?: boolean;
 }): string {
 	const segments = args.path.split("/").filter(Boolean);
 	const name = segments.at(-1) ?? args.path;
 	const directory = segments.slice(0, -1).join("/");
-	// The trimmed body names its own gaps; saying it again in the footer reads
-	// as a second set of missing lines.
-	const hiddenNote =
-		args.hidden > 0 && !args.diffHtml.includes("md-diff-gap")
+	// The trimmed body names its own gaps; saying it again reads as a second
+	// set of missing lines.
+	const hiddenNote = args.tooLarge
+		? `<div class="rest">Too much changed to show here — open it in LixRay</div>`
+		: args.hidden > 0 && !args.viewHtml.includes("md-diff-gap")
 			? `<div class="rest">${args.hidden} more ${args.hidden === 1 ? "line" : "lines"} in LixRay</div>`
 			: "";
 	return `<!doctype html>
@@ -174,18 +173,18 @@ function cardDocument(args: {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(name)}</title>
 <style>
+${RENDER_CSS}
 ${CARD_CSS}
-${MARKDOWN_DIFF_CSS}
 </style>
 </head>
 <body>
-<article class="card">
+<article class="card atelier-render">
 	<header>
-		${glyph(args.created)}
+		${glyph(args.kind)}
 		<span class="path">${directory ? `<span class="dir">${escapeHtml(directory)}/</span>` : ""}<span class="name">${escapeHtml(name)}</span></span>
-		<span class="counts">${statsLabel(args.stats, args.created)}</span>
+		<span class="counts">${countsLabel(args.counts, args.kind)}</span>
 	</header>
-	${args.diffHtml ? `<div class="md-diff">${args.diffHtml}</div>` : ""}
+	${args.viewHtml ? `<div class="body">${args.viewHtml}</div>` : ""}
 	${hiddenNote}
 	<footer>
 		<span class="repo">${args.repository ? escapeHtml(args.repository) : ""}</span>
@@ -196,20 +195,14 @@ ${MARKDOWN_DIFF_CSS}
 </html>`;
 }
 
-/** The card's own chrome: Atelier's neutrals, sized for a message. */
+/** The card's own chrome. Atelier owns the view; LixRay owns the frame. */
 const CARD_CSS = `
 :root { color-scheme: light; }
-body {
-	margin: 0;
-	padding: 0;
-	background: transparent;
-	font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-	color: rgb(28, 25, 23);
-}
+body { margin: 0; padding: 0; background: transparent; }
 .card {
-	border: 1px solid rgb(236, 232, 226);
+	border: 1px solid var(--atelier-border);
 	border-radius: 12px;
-	background: #fff;
+	background: var(--atelier-bg);
 	overflow: hidden;
 }
 .card > header {
@@ -217,7 +210,7 @@ body {
 	align-items: center;
 	gap: 10px;
 	padding: 11px 13px;
-	border-bottom: 1px solid rgb(244, 241, 236);
+	border-bottom: 1px solid var(--atelier-border-subtle);
 }
 .card > header .path {
 	display: flex;
@@ -226,12 +219,10 @@ body {
 	font-size: 13px;
 	font-weight: 500;
 }
-/* The directory gives way; the file name is the one thing the reader
-   cannot do without. */
 .card > header .dir {
 	flex: 0 1 auto;
 	min-width: 0;
-	color: rgb(120, 113, 108);
+	color: var(--atelier-ink-subtle);
 	font-weight: 400;
 	white-space: nowrap;
 	overflow: hidden;
@@ -242,31 +233,30 @@ body {
 	flex: none;
 	font-size: 12px;
 	font-variant-numeric: tabular-nums;
-	color: rgb(120, 113, 108);
+	color: var(--atelier-ink-subtle);
 }
-.card > header .plus { color: rgb(22, 101, 52); }
-.card > header .minus { color: rgb(153, 27, 27); }
-.card > header .edited { color: rgb(120, 113, 108); }
-.card .md-diff { padding: 12px 14px 14px; }
+.card > header .plus { color: var(--atelier-added-ink); }
+.card > header .minus { color: var(--atelier-removed-ink); }
+.card .body { padding: 12px 14px 14px; }
 .card > header + .rest { padding-top: 10px; }
 .card .rest {
 	padding: 0 14px 12px;
 	font-size: 12px;
-	color: rgb(120, 113, 108);
+	color: var(--atelier-ink-subtle);
 }
 .card > footer {
 	display: flex;
 	align-items: center;
 	gap: 10px;
 	padding: 10px 13px;
-	border-top: 1px solid rgb(244, 241, 236);
-	background: rgb(250, 250, 249);
+	border-top: 1px solid var(--atelier-border-subtle);
+	background: var(--atelier-bg-muted);
 }
 .card > footer .repo {
 	flex: 1;
 	min-width: 0;
 	font-size: 12px;
-	color: rgb(120, 113, 108);
+	color: var(--atelier-ink-subtle);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -275,8 +265,8 @@ body {
 	flex: none;
 	padding: 6px 11px;
 	border-radius: 7px;
-	background: rgb(194, 65, 12);
-	color: #fff;
+	background: var(--atelier-action);
+	color: var(--atelier-bg);
 	font-size: 12px;
 	font-weight: 500;
 	text-decoration: none;

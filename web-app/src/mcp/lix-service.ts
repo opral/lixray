@@ -10,7 +10,7 @@ import {
 	type FileWrite,
 } from "./file-tools.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
-import { isMarkdownPath } from "./diff-card.ts";
+import { isRenderablePath } from "./diff-card.ts";
 
 const LIX_UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1200,7 +1200,7 @@ export type ReadFilesResult = {
 
 /** Files whose change a reader can be shown inline. */
 function isPreviewablePath(path: string): boolean {
-	return isMarkdownPath(path);
+	return isRenderablePath(path);
 }
 
 /** The text of a file's content, or null when it is not text. */
