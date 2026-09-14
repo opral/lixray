@@ -401,7 +401,7 @@ function verifyNativeSdk() {
 		`  const { openLix } = await import(${JSON.stringify(pathToFileURL(join(sdkDist, "index.js")).href)});`,
 		"  const lix = await openLix();",
 		"  try {",
-		'    const [result] = await lix.executeBatch([{ sql: "SELECT 1 AS value" }]);',
+		'    const { results: [result] } = await lix.executeBatch([{ sql: "SELECT 1 AS value" }]);',
 		'    if (result?.rows?.[0]?.value !== 1) throw new Error("Vendored Lix native executeBatch smoke test failed");',
 		"  } finally {",
 		"    await lix.close();",

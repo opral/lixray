@@ -1,6 +1,6 @@
 # Replica architecture implementation
 
-The implementation replaces SQL-based identity probing with authenticated catalog admission, replaces hidden fetch extensions with a typed transport contract, and separates historical migration from ordinary opening. Runtime epochs are storage 81, sync 15, SQL 9 and OPFS RPC 4. See `ARCHITECTURE-PLAN.md` for the approved design and `REPLICA-CUTOVER.md` for deployment and recovery procedures.
+The implementation replaces SQL-based identity probing with authenticated catalog admission, replaces hidden fetch extensions with a typed transport contract, and separates historical migration from ordinary opening. Runtime epochs are storage 81, sync 15, SQL 10 and OPFS RPC 4. See `ARCHITECTURE-PLAN.md` for the approved design and `REPLICA-CUTOVER.md` for deployment and recovery procedures.
 
 The immediate opening failure was a transport contract mismatch before the network request. The broader changes address distinct architectural weaknesses found during investigation: credential/lifecycle ownership, coherent reads during background writes, and migration coupled to opening. These were not all manifestations of one underlying bug.
 

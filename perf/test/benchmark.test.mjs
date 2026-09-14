@@ -667,7 +667,7 @@ class SeedProtocol {
     });
     this.filesPerInsertBatch.push(filesInBatch);
     return {
-      value,
+      value: { results: value, commit: null },
     };
   }
 
