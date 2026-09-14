@@ -155,8 +155,8 @@ document.
 
 At most three cards travel with a write. Their before/after bytes come from
 `RETURNING OLD.content, NEW.content` on the mutation itself, so another writer
-cannot change what the card describes. Only those targets project image bytes. Each is trimmed to what changed, with a note of what
-was skipped; a change too large for a thread keeps its header and sends the
+cannot change what the card describes, and only those targets project bytes at
+all. Each card is trimmed to what changed, with a note of what was skipped; a change too large for a thread keeps its header and sends the
 reader to the file, which is also what a snapshot over 100 KB or one nested
 past two dozen levels gets — rendering walks the whole document, and the
 document was written by whoever is talking to the server.
@@ -167,7 +167,7 @@ own `checkpoint_commit_id`; it may include concurrent changes. Checkpoint failur
 reports a saved warning and never repeats the write. A concurrent branch
 change retries the full validation against a fresh snapshot; an unrelated edit
 can proceed, while a changed target rejects the whole write. `read_files`
-returns bytes and `commit_id` from one snapshot.
+returns its text and `commit_id` from one snapshot.
 
 SQL execution preserves Lix's receipt: `query_sql.result.commit` is null for a
 read; `execute_sql` has one top-level `commit: { before, after } | null` for the
