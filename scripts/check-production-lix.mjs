@@ -1,44 +1,20 @@
 import { pathToFileURL } from "node:url";
 
 const REQUEST_TIMEOUT_MS = 20_000;
-const MIGRATION_POLL_DELAY_MS = 1_000;
-const MIGRATION_TIMEOUT_MS = 9 * 60_000;
 
 export async function checkProductionLix({
 	lixUrl,
 	fetchImpl = globalThis.fetch,
 	timeoutMs = REQUEST_TIMEOUT_MS,
-	migrationTimeoutMs = MIGRATION_TIMEOUT_MS,
-	nowImpl = Date.now,
-	sleepImpl = sleep,
 }) {
 	const { connectionUrl, protocolUrl } = protocolUrlFromLixUrl(lixUrl);
 	let sessionId;
 	let checkCompleted = false;
 	try {
-		let handshake;
-		let migrationDeadline;
-		for (;;) {
-			const requestTimeout = migrationDeadline
-				? Math.min(timeoutMs, Math.max(1, migrationDeadline - nowImpl()))
-				: timeoutMs;
-			handshake = await request(fetchImpl, protocolUrl, { headers: { "lix-server-protocol-version": "8" } }, requestTimeout);
-			if (handshake.response.ok) break;
-			if (!isMigrationInProgress(handshake)) {
-				throw responseError("handshake", handshake.response, handshake.body);
-			}
-			migrationDeadline ??= nowImpl() + migrationTimeoutMs;
-			const remaining = migrationDeadline - nowImpl();
-			if (remaining <= 0) throw migrationTimeoutError(migrationTimeoutMs);
-			await sleepImpl(
-				Math.min(retryDelayMilliseconds(handshake.response), remaining),
-			);
-			if (nowImpl() >= migrationDeadline) {
-				throw migrationTimeoutError(migrationTimeoutMs);
-			}
-		}
+		const handshake = await request(fetchImpl, protocolUrl, {headers: {"lix-server-protocol-version": "9"}}, timeoutMs);
+		if (!handshake.response.ok) throw responseError("handshake", handshake.response, handshake.body);
 		if (
-			typeof handshake.body?.protocolVersion !== "number" ||
+			handshake.body?.protocolVersion !== 9 ||
 			typeof handshake.body?.sessionId !== "string" ||
 			!handshake.body.sessionId
 		) {
@@ -56,7 +32,7 @@ export async function checkProductionLix({
 				headers: {
 					"Content-Type": "application/json",
 					"Lix-Session-Id": sessionId,
-					"lix-server-protocol-version": "8",
+					"lix-server-protocol-version": "9",
 				},
 				body: JSON.stringify({ sql: "SELECT 1", params: [] }),
 			},
@@ -81,7 +57,7 @@ export async function checkProductionLix({
 				new URL("session", protocolUrl),
 				{
 					method: "DELETE",
-					headers: { "Lix-Session-Id": sessionId, "lix-server-protocol-version": "8" },
+					headers: { "Lix-Session-Id": sessionId, "lix-server-protocol-version": "9" },
 				},
 				timeoutMs,
 			).catch((error) => {
@@ -115,30 +91,6 @@ export function protocolUrlFromLixUrl(value) {
 	const protocolUrl = new URL(connectionUrl);
 	protocolUrl.pathname = `/lix/v1/${match[1]}/`;
 	return { connectionUrl, protocolUrl };
-}
-
-function migrationTimeoutError(timeoutMs) {
-	return new Error(
-		`The production Lix migration did not complete within ${timeoutMs}ms.`,
-	);
-}
-
-function isMigrationInProgress(result) {
-	return (
-		result.response.status === 503 &&
-		result.body?.error?.code === "LIX_ERROR_MIGRATING"
-	);
-}
-
-function retryDelayMilliseconds(response) {
-	const seconds = Number(response.headers.get("retry-after"));
-	return Number.isFinite(seconds) && seconds > 0
-		? Math.min(seconds * 1_000, 10_000)
-		: MIGRATION_POLL_DELAY_MS;
-}
-
-function sleep(milliseconds) {
-	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function request(fetchImpl, url, init, timeoutMs) {

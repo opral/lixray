@@ -5,10 +5,8 @@ import {
 	createTelemetryFetch,
 	isRetryableRepositoryOpenError,
 	ManagedRepositoryLixSession,
-	repositoryMigrationStateFromError,
 	repositoryMigrationStateFromOpenProgress,
 	repositorySessionKey,
-	retryRepositoryOpenDuringMigration,
 } from "./repository-lix-session.ts";
 
 void test("does not create a synthetic observer for session health", async () => {
@@ -27,103 +25,6 @@ void test("does not create a synthetic observer for session health", async () =>
 	assert.equal(observerCalls, 0);
 	await session.close();
 	assert.equal(closeCalls, 1);
-});
-
-void test("retries only transient repository-open transport failures", () => {
-	assert.equal(
-		isRetryableRepositoryOpenError(new TypeError("Failed to fetch")),
-		true,
-	);
-	assert.equal(
-		isRetryableRepositoryOpenError(
-			new Error("browser sync fetch failed: Failed to fetch"),
-		),
-		true,
-	);
-	const aborted = new Error("The operation was aborted");
-	aborted.name = "AbortError";
-	assert.equal(isRetryableRepositoryOpenError(aborted), true);
-	assert.equal(
-		isRetryableRepositoryOpenError(
-			new Error("browser sync fetch failed: The operation was aborted"),
-		),
-		true,
-	);
-	assert.equal(
-		isRetryableRepositoryOpenError(
-			Object.assign(new Error("The replica is recovering"), {
-				code: "LIX_ERROR_RECOVERING",
-			}),
-		),
-		true,
-	);
-
-	assert.equal(
-		isRetryableRepositoryOpenError(
-			Object.assign(new Error("unrelated internal failure"), {
-				code: "LIX_INTERNAL_ERROR",
-			}),
-		),
-		false,
-	);
-	assert.equal(
-		isRetryableRepositoryOpenError(new Error("request failed with status 500")),
-		false,
-	);
-	assert.equal(
-		isRetryableRepositoryOpenError(new Error("Failed to fetch repository row")),
-		false,
-	);
-});
-
-void test("gateway recovery respects completed mutation and execution boundaries", () => {
-	for (const httpStatus of [502, 503, 504]) {
-		const error = (details: Record<string, unknown>) =>
-			Object.assign(new Error("gateway response lost"), {
-				code: "LIX_INTERNAL_ERROR",
-				details: { httpStatus, ...details },
-			});
-		assert.equal(isRetryableRepositoryOpenError(error({})), true);
-		for (const flag of [
-			"nonRetryableAfterCommit",
-			"nonRetryableAfterExecution",
-		]) {
-			assert.equal(
-				isRetryableRepositoryOpenError(error({ [flag]: true })),
-				false,
-				`${httpStatus} must not override ${flag}`,
-			);
-		}
-	}
-});
-
-void test("reads structured repository migration state from an open error", () => {
-	assert.deepEqual(
-		repositoryMigrationStateFromError(
-			Object.assign(new Error("The lix repository is being migrated."), {
-				code: "LIX_ERROR_MIGRATING",
-				details: { fromVersion: 68, toVersion: 71, retryable: true },
-			}),
-		),
-		{ fromVersion: 68, toVersion: 71 },
-	);
-	assert.equal(
-		repositoryMigrationStateFromError(
-			Object.assign(new Error("Malformed migration state"), {
-				code: "LIX_ERROR_MIGRATING",
-				details: { fromVersion: "68", toVersion: 71 },
-			}),
-		),
-		null,
-	);
-	assert.equal(
-		repositoryMigrationStateFromError(
-			Object.assign(new Error("The replica is recovering"), {
-				code: "LIX_ERROR_RECOVERING",
-			}),
-		),
-		null,
-	);
 });
 
 void test("maps Rust-first open progress into transparent repository upgrade UI state", () => {
@@ -157,62 +58,6 @@ void test("maps Rust-first open progress into transparent repository upgrade UI 
 		null,
 	);
 });
-
-void test("polls migration in one open lifecycle until the repository is ready", async () => {
-	let opens = 0;
-	const waits: number[] = [];
-	const states: Array<{ fromVersion: number; toVersion: number } | null> = [];
-	const session = await retryRepositoryOpenDuringMigration({
-		open: async () => {
-			opens += 1;
-			if (opens < 3) throw migrationError();
-			return "ready";
-		},
-		onMigration: (state) => states.push(state),
-		wait: async (milliseconds) => {
-			waits.push(milliseconds);
-		},
-	});
-
-	assert.equal(session, "ready");
-	assert.equal(opens, 3);
-	assert.deepEqual(waits, [1_000, 1_000]);
-	assert.deepEqual(states, [
-		{ fromVersion: 68, toVersion: 71 },
-		{ fromVersion: 68, toVersion: 71 },
-		null,
-	]);
-});
-
-void test("stops polling and clears progress when its owner aborts", async () => {
-	const controller = new AbortController();
-	let opens = 0;
-	const states: Array<{ fromVersion: number; toVersion: number } | null> = [];
-	await assert.rejects(
-		retryRepositoryOpenDuringMigration({
-			open: async () => {
-				opens += 1;
-				throw migrationError();
-			},
-			onMigration: (state) => states.push(state),
-			signal: controller.signal,
-			wait: async (_milliseconds, signal) => {
-				controller.abort();
-				signal?.throwIfAborted();
-			},
-		}),
-		{ name: "AbortError" },
-	);
-	assert.equal(opens, 1);
-	assert.deepEqual(states, [{ fromVersion: 68, toVersion: 71 }, null]);
-});
-
-function migrationError(): Error {
-	return Object.assign(new Error("The lix repository is being migrated."), {
-		code: "LIX_ERROR_MIGRATING",
-		details: { fromVersion: 68, toVersion: 71, retryable: true },
-	});
-}
 
 void test("refreshes an expired access token and retries a sync request once", async () => {
 	let refreshCalls = 0;
@@ -495,4 +340,39 @@ void test("expired handshake credentials refresh without provisioning", async ()
 	);
 	assert.equal(response.status, 200);
 	assert.deepEqual(tokens, ["Bearer expired", "Bearer refreshed"]);
+});
+
+void test("only typed network failure and server recovery are retried by opening", () => {
+	assert.equal(
+		isRetryableRepositoryOpenError(
+			Object.assign(new Error("offline"), { code: "LIX_TRANSPORT_NETWORK" }),
+		),
+		true,
+	);
+	for (const code of [
+		"LIX_TRANSPORT_CONTRACT",
+		"LIX_TRANSPORT_CALLBACK",
+		"LIX_TRANSPORT_ABORTED",
+		"LIX_STORAGE_READ_EXPIRED",
+		"LIX_MIGRATION_REQUIRED",
+	])
+		assert.equal(
+			isRetryableRepositoryOpenError(
+				Object.assign(new Error("failure"), { code }),
+			),
+			false,
+		);
+	assert.equal(
+		isRetryableRepositoryOpenError(new TypeError("Failed to fetch")),
+		false,
+	);
+	assert.equal(
+		isRetryableRepositoryOpenError(
+			Object.assign(new Error("completed"), {
+				code: "LIX_TRANSPORT_NETWORK",
+				details: { nonRetryableAfterCommit: true },
+			}),
+		),
+		false,
+	);
 });

@@ -30,7 +30,7 @@ test("real Lix server enriches null and changed profiles and leaves unchanged hi
 			method: "POST",
 			headers: {
 				"x-lixray-idempotency-principal": account.id,
-				"Lix-Server-Protocol-Version": "8",
+				"Lix-Server-Protocol-Version": "9",
 				"Idempotency-Key": crypto.randomUUID(),
 			},
 		}),
@@ -42,7 +42,7 @@ test("real Lix server enriches null and changed profiles and leaves unchanged hi
 		new Request(new URL(protocolPath, serviceUrl), {
 			headers: {
 				"x-lixray-idempotency-principal": account.id,
-				"Lix-Server-Protocol-Version": "8",
+				"Lix-Server-Protocol-Version": "9",
 			},
 		}),
 	);
@@ -54,7 +54,7 @@ test("real Lix server enriches null and changed profiles and leaves unchanged hi
 	assert.equal(activeAccountId, account.id);
 	const sessionHeaders = {
 		"Content-Type": "application/json",
-		"Lix-Server-Protocol-Version": "8",
+		"Lix-Server-Protocol-Version": "9",
 		"Lix-Session-Id": sessionId,
 		"x-lixray-idempotency-principal": account.id,
 	};
