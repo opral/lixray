@@ -153,12 +153,30 @@ network of any kind, its stylesheet inlined and its images named rather than
 loaded, because the address in an image is chosen by whoever wrote the
 document.
 
-At most three cards travel with a write, and the before side is read for
-those three files only. Each is trimmed to what changed, with a note of what
+At most three cards travel with a write. Their before/after bytes come from
+`RETURNING OLD.content, NEW.content` on the mutation itself, so another writer
+cannot change what the card describes. Only those targets project image bytes. Each is trimmed to what changed, with a note of what
 was skipped; a change too large for a thread keeps its header and sends the
 reader to the file, which is also what a snapshot over 100 KB or one nested
 past two dozen levels gets — rendering walks the whole document, and the
 document was written by whoever is talking to the server.
+
+`write_files` validates `last_seen_commit_id` and metadata-only targets, and runs
+all file writes in one transaction. An optional checkpoint runs afterward and returns its
+own `checkpoint_commit_id`; it may include concurrent changes. Checkpoint failure
+reports a saved warning and never repeats the write. A concurrent branch
+change retries the full validation against a fresh snapshot; an unrelated edit
+can proceed, while a changed target rejects the whole write. `read_files`
+returns bytes and `commit_id` from one snapshot.
+
+SQL execution preserves Lix's receipt: `query_sql.result.commit` is null for a
+read; `execute_sql` has one top-level `commit: { before, after } | null` for the
+batch. Its per-statement results contain rows, counts and notices, without
+repeating the receipt. `write_files.commit` describes its durable write and
+`commit_id` is its `after` endpoint. If completion reporting loses the receipt,
+the write still succeeds with a warning and no `commit_id`; do not repeat it.
+A card rendering failure similarly reports "Files saved, preview unavailable."
+
 
 Hosts that cannot render UI blocks ignore them and lose nothing: the summary
 and the JSON say the same thing. The cards are content blocks only —

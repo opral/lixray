@@ -1046,12 +1046,8 @@ function ChangeBars({
 }) {
 	const days = data.changeDays;
 	if (days === null) {
-		const working = describeWorkingChanges(
-			data.workingFileCount,
-			data.workingChangeCount,
-		);
-		const available =
-			data.workingFileCount !== null && data.workingChangeCount !== null;
+		const working = describeWorkingChanges(data.workingFileCount);
+		const available = data.workingFileCount !== null;
 		return (
 			<div className="mt-2.5">
 				{available ? (
@@ -1082,10 +1078,7 @@ function ChangeBars({
 	const latestCheckpointDay = data.checkpointDates?.[0]?.slice(0, 10) ?? null;
 	// The headline is the status bar's number: files whose working state
 	// differs from the checkpoint. The bars stay a day-by-day activity graph.
-	const working = describeWorkingChanges(
-		data.workingFileCount,
-		data.workingChangeCount,
-	);
+	const working = describeWorkingChanges(data.workingFileCount);
 	const headlineCount = working.count;
 	const visibleDays = days.length > 0 ? days : [{ day: "", count: 0 }];
 	const paddedDays = [

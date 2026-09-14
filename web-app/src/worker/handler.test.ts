@@ -3114,15 +3114,18 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 			path,
 			"/lix/v1/11111111-1111-4111-8111-111111111111/execute-batch",
 		);
-		return Response.json([
-			{
-				statementIndex: 0,
-				columns: [{ name: "value", type: "integer" }],
-				rows: [[{ kind: "int", value: 1 }]],
-				rowsAffected: 0,
-				notices: [],
-			},
-		]);
+		return Response.json({
+			commit: null,
+			results: [
+				{
+					statementIndex: 0,
+					columns: [{ name: "value", type: "integer" }],
+					rows: [[{ kind: "int", value: 1 }]],
+					rowsAffected: 0,
+					notices: [],
+				},
+			],
+		});
 	};
 }
 

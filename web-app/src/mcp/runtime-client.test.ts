@@ -46,15 +46,18 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 		return Response.json({ branchId: body.branchId });
 	}
 	if (pathname === "/lix/v1/execute-batch") {
-		return Response.json([
-			{
-				statementIndex: 0,
-				columns: [],
-				rows: [],
-				rowsAffected: 0,
-				notices: [],
-			},
-		]);
+		return Response.json({
+			commit: { before: "before", after: "after" },
+			results: [
+				{
+					statementIndex: 0,
+					columns: [],
+					rows: [],
+					rowsAffected: 0,
+					notices: [],
+				},
+			],
+		});
 	}
 	return new Response("Not found", { status: 404 });
 }
@@ -161,6 +164,8 @@ void test("executeBatch uses the canonical atomic endpoint", async () => {
 	});
 
 	assert.equal(response.results.length, 1);
+	assert.deepEqual(response.commit, { before: "before", after: "after" });
+	assert.equal("commit" in response.results[0]!, false);
 	assert.equal(
 		new URL(requests.at(-1)?.url ?? "https://invalid").pathname,
 		`/lix/v1/${LIX_ID}/execute-batch`,
@@ -384,4 +389,134 @@ void test("remote merge and preview forward protocol requests and receipts", asy
 		})),
 	);
 	await runtime.close();
+});
+
+void test("transaction retries the whole callback on a definite conflict and returns only the successful receipt", async () => {
+	let begins = 0;
+	let commits = 0;
+	const seen: number[] = [];
+	const runtime = client(async (_id, request) => {
+		const path = testProtocolPath(request);
+		if (path === "/lix/v1/transaction/begin")
+			return Response.json({ transactionId: `tx-${++begins}` });
+		if (path === "/lix/v1/transaction/execute")
+			return Response.json({
+				columns: [{ name: "attempt", type: "integer" }],
+				rows: [[{ kind: "int", value: begins }]],
+				rowsAffected: 0,
+				notices: [],
+			});
+		if (path === "/lix/v1/transaction/commit") {
+			if (++commits === 1)
+				return Response.json(
+					{
+						error: {
+							code: "LIX_TRANSACTION_CONFLICT",
+							message: "branch advanced",
+						},
+					},
+					{ status: 409 },
+				);
+			return Response.json({
+				commit: { before: "concurrent-head", after: "our-write" },
+			});
+		}
+		return branchProtocolResponse(request);
+	});
+	const result = await runtime.transaction(LIX_ID, "main", async (tx) => {
+		const read = await tx.execute({ sql: "SELECT guard" });
+		const value = read.rows[0]![0]!;
+		assert.equal(value.kind, "int");
+		if (value.kind !== "int") throw new Error("unexpected result");
+		seen.push(value.value);
+		return value.value;
+	});
+	assert.deepEqual(seen, [1, 2]);
+	assert.deepEqual(result, {
+		value: 2,
+		commit: { before: "concurrent-head", after: "our-write" },
+	});
+});
+
+for (const failure of [
+	{ code: "LIX_STORAGE_COMMIT_OUTCOME_UNKNOWN", message: "uncertain" },
+	{
+		code: "LIX_TRANSACTION_CONFLICT",
+		message: "postexecution",
+		details: { nonRetryableAfterExecution: true },
+	},
+]) {
+	void test(`transaction does not replay ${failure.message}`, async () => {
+		let begins = 0;
+		let runs = 0;
+		const runtime = client(async (_id, request) => {
+			const path = testProtocolPath(request);
+			if (path === "/lix/v1/transaction/begin")
+				return Response.json({ transactionId: `tx-${++begins}` });
+			if (path === "/lix/v1/transaction/commit")
+				return Response.json({ error: failure }, { status: 409 });
+			return branchProtocolResponse(request);
+		});
+		await assert.rejects(
+			runtime.transaction(LIX_ID, "main", async () => ++runs),
+			{ code: failure.code },
+		);
+		assert.equal(begins, 1);
+		assert.equal(runs, 1);
+	});
+}
+
+void test("transaction callback failures roll back and release the session queue", async () => {
+	let rollbacks = 0;
+	const runtime = client(async (_id, request) => {
+		const path = testProtocolPath(request);
+		if (path === "/lix/v1/transaction/begin")
+			return Response.json({ transactionId: "tx" });
+		if (path === "/lix/v1/transaction/rollback") {
+			rollbacks++;
+			return new Response(null, { status: 204 });
+		}
+		return branchProtocolResponse(request);
+	});
+	await assert.rejects(
+		runtime.transaction(LIX_ID, "main", async () => {
+			throw new Error("target changed");
+		}),
+		/target changed/,
+	);
+	await runtime.execute(LIX_ID, "main", { sql: "SELECT 1" });
+	assert.equal(rollbacks, 1);
+});
+
+void test("a known durable completion failure returns its receipt without replay", async () => {
+	let begins = 0;
+	const runtime = client(async (_id, request) => {
+		const path = testProtocolPath(request);
+		if (path === "/lix/v1/transaction/begin")
+			return Response.json({ transactionId: `tx-${++begins}` });
+		if (path === "/lix/v1/transaction/commit")
+			return Response.json(
+				{
+					error: {
+						code: "LIX_TRANSACTION_CONFLICT",
+						message: "completion failed",
+						details: {
+							nonRetryableAfterCommit: true,
+							commit: { before: "before", after: "saved" },
+						},
+					},
+				},
+				{ status: 409 },
+			);
+		return branchProtocolResponse(request);
+	});
+	const result = await runtime.transaction(
+		LIX_ID,
+		"main",
+		async () => "saved rows",
+	);
+	assert.equal(result.value, "saved rows");
+	assert.deepEqual(result.commit, { before: "before", after: "saved" });
+	assert.match(result.warning ?? "", /Files saved/);
+	assert.equal(begins, 1);
 });

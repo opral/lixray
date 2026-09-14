@@ -467,9 +467,11 @@ const readFilesOutput = withError(
 const writeFilesOutput = withError(
 	z.object({
 		context,
-		commit_id: z.string(),
+		commit_id: z.string().optional(),
 		files: z.array(listedFile),
 		checkpoint_commit_id: z.string().optional(),
+		commit: z.object({ before: z.string(), after: z.string() }).nullable(),
+		warning: z.string().optional(),
 	}),
 );
 const entityUrlSelector = z.union([
@@ -487,6 +489,7 @@ const entityUrlSelector = z.union([
 const branchStateOutput = withError(
 	z.object({ context, branch_id: branchId, commit_id: z.string() }),
 );
+const commitSpan = z.object({ before: z.string(), after: z.string() }).strict();
 const executeOutput = withError(
 	z.object({
 		context,
@@ -496,6 +499,7 @@ const executeOutput = withError(
 				rows: wireRows,
 				rowsAffected: z.number().int(),
 				notices: z.array(z.unknown()),
+				commit: commitSpan.nullable(),
 			})
 			.strict(),
 	}),
@@ -503,6 +507,7 @@ const executeOutput = withError(
 const executeBatchOutput = withError(
 	z.object({
 		context,
+		commit: commitSpan.nullable(),
 		results: z.array(
 			z
 				.object({
@@ -841,6 +846,15 @@ export function createLixrayMcpServer(
 				},
 				options.urlOrigin,
 			);
+			const rendered = diffCards(written.previews ?? [], written.files);
+			const warning = [
+				written.warning,
+				rendered.failed
+					? "Files saved, preview unavailable. Do not repeat the write."
+					: undefined,
+			]
+				.filter(Boolean)
+				.join(" ");
 			return {
 				context: written.context,
 				commit_id: written.commitId,
@@ -848,7 +862,9 @@ export function createLixrayMcpServer(
 				...(written.checkpointCommitId
 					? { checkpoint_commit_id: written.checkpointCommitId }
 					: {}),
-				...uiField(diffCards(written.previews ?? [], written.files)),
+				...uiField(rendered.cards),
+				commit: written.commit,
+				...(warning ? { warning } : {}),
 			};
 		},
 		undefined,
@@ -1847,14 +1863,14 @@ type EmbeddedUiResource = {
 function diffCards(
 	previews: ReadonlyArray<{
 		path: string;
-		before: string;
-		after: string;
-		existed: boolean;
+		before?: Uint8Array;
+		after?: Uint8Array;
 	}>,
 	files: ReadonlyArray<{ path: string; url: string }>,
-): EmbeddedUiResource[] {
+): { cards: EmbeddedUiResource[]; failed: boolean } {
 	const urls = new Map(files.map((file) => [file.path, file.url]));
 	const cards: EmbeddedUiResource[] = [];
+	let failed = false;
 	for (const preview of previews) {
 		if (cards.length >= MAX_DIFF_CARDS) break;
 		const url = urls.get(preview.path);
@@ -1865,11 +1881,12 @@ function diffCards(
 			card = renderDiffCard({
 				path: preview.path,
 				url,
-				...(preview.existed ? { before: encode(preview.before) } : {}),
-				after: encode(preview.after),
+				...(preview.before !== undefined ? { before: preview.before } : {}),
+				...(preview.after !== undefined ? { after: preview.after } : {}),
 				...(repository ? { repository } : {}),
 			});
 		} catch (caught) {
+			failed = true;
 			// A card is a courtesy; a write that succeeded still succeeded.
 			console.error("LixRay MCP diff card failed", {
 				path: preview.path,
@@ -1888,12 +1905,7 @@ function diffCards(
 			annotations: { audience: ["user"], priority: 0.9 },
 		});
 	}
-	return cards;
-}
-
-/** A view renders bytes, because that is what a Lix file is. */
-function encode(value: string): Uint8Array {
-	return new TextEncoder().encode(value);
+	return { cards, failed };
 }
 
 /**
@@ -2033,7 +2045,7 @@ function summarizeToolResult(
 			typeof result.checkpoint_commit_id === "string"
 				? ` (checkpoint ${result.checkpoint_commit_id})`
 				: "";
-		return `Wrote ${names.join(" · ")} at commit ${String(result.commit_id)}${checkpoint}.`;
+		return `Wrote ${names.join(" · ")}${typeof result.commit_id === "string" ? ` at commit ${result.commit_id}` : ""}${checkpoint}.${typeof result.warning === "string" ? ` ${result.warning}` : ""}`;
 	}
 	if (name === "active_branch_id") {
 		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.`;
