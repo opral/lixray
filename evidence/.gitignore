@@ -1,0 +1,13 @@
+# Operational inventories and raw qualification diagnostics stay local.
+production-*.json
+production-*.log
+local-qualification-*.log
+*rustc-ice*.txt
+
+# Generated browser failure diagnostics remain local.
+**/*.png
+browser-diagnostics/
+
+# Test logs are local validation output, summarized in IMPLEMENTATION.md.
+*.log
+posthog-*.json

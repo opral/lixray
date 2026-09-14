@@ -2184,7 +2184,7 @@ function isPublicReadRemoteLixRequest(
 ): boolean {
 	if (!endpoint) return request.method === "GET";
 	if (endpoint === "session") return request.method === "DELETE";
-	if (endpoint === "file") return request.method === "GET";
+	if (endpoint === "file" || endpoint === "admission") return request.method === "GET";
 	if (isPublicSyncReadRequest(request, endpoint)) return true;
 	return (
 		request.method === "POST" &&
@@ -2300,7 +2300,7 @@ async function rejectPublicMutation(
 	if (
 		!endpoint ||
 		endpoint === "session" ||
-		(endpoint === "file" && request.method === "GET") ||
+		((endpoint === "file" || endpoint === "admission") && request.method === "GET") ||
 		isPublicSyncReadRequest(request, endpoint)
 	) {
 		return null;

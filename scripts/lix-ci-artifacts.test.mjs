@@ -20,6 +20,10 @@ test("installs an exact-revision artifact from a successful Lix CI run", async (
 			JSON.stringify({ sourceRevision: revision }),
 		),
 		"packages/js-sdk/dist/index.js": encoder.encode("export const sdk = 1;"),
+		"packages/js-sdk/dist/migration.js": encoder.encode("export const migrate = 1;"),
+		"packages/js-sdk/dist/migration-wasm/lix_js_sdk.js": encoder.encode("export default async () => {};"),
+		"packages/js-sdk/dist/migration-wasm/lix_js_sdk_bg.wasm": new Uint8Array([0,97,115,109]),
+		"packages/storage-opfs/dist/migration.worker.js": encoder.encode("self.onmessage = () => {};"),
 		"packages/js-sdk/dist/wasm/lix_js_sdk_bg.wasm": new Uint8Array([
 			0, 97, 115, 109,
 		]),
