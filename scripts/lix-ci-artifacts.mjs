@@ -31,6 +31,10 @@ export async function installBrowserArtifact({
 
 	try {
 		await requireFile(join(downloaded.root, "packages/js-sdk/dist/index.js"));
+		await requireFile(join(downloaded.root, "packages/js-sdk/dist/migration.js"));
+		await requireFile(join(downloaded.root, "packages/js-sdk/dist/migration-wasm/lix_js_sdk.js"));
+		await requireFile(join(downloaded.root, "packages/js-sdk/dist/migration-wasm/lix_js_sdk_bg.wasm"));
+		await requireFile(join(downloaded.root, "packages/storage-opfs/dist/migration.worker.js"));
 		await requireFile(
 			join(downloaded.root, "packages/js-sdk/dist/wasm/lix_js_sdk_bg.wasm"),
 		);

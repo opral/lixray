@@ -1,12 +1,13 @@
 import {
-	convertReplicaToPartial,
 	openLix,
+	networkFetch,
 	type Lix,
 	type LixOpenProgress,
 	type RemoteLixFetch,
 	type PartialReplicaLixServerOptions,
 } from "@lix-js/sdk";
 import { OpfsStorage } from "@lix-js/storage-opfs";
+import { currentReplicaStorage } from "./repository-migration.ts";
 import { captureExceptionTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 import { waitForLixPrewarm } from "./lix-prewarm.ts";
@@ -66,13 +67,10 @@ export function openRepositoryRemoteLix(
 			mode: "remote",
 			url: repositoryUrl(options),
 			headers: async () => repositoryRequestHeaders(options),
-			fetch: createTelemetryFetch(
-				options.fetch ?? globalThis.fetch.bind(globalThis),
-				{
-					repositoryId: options.repositoryId,
-					refreshAccessToken: options.refreshAccessToken,
-				},
-			),
+			fetch: createTelemetryFetch(options.fetch ?? networkFetch, {
+				repositoryId: options.repositoryId,
+				refreshAccessToken: options.refreshAccessToken,
+			}),
 		},
 	});
 }
@@ -82,7 +80,6 @@ type ResolvedOpenRepositoryLixSessionOptions =
 
 const OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
 const MIGRATION_ERROR_CODE = "LIX_ERROR_MIGRATING";
-const MIGRATION_RETRY_DELAY_MS = 1_000;
 
 interface MigrationProgress {
 	state: RepositoryMigrationState | null;
@@ -123,14 +120,9 @@ export async function openRepositoryLixSession(
 					: await repositoryBrowserReplicaId(options);
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaIdentified);
 				try {
-					return await retryRepositoryOpenDuringMigration({
-						open: () =>
-							openRepositoryLixSessionWithRetry({
-								...options,
-								replicaId,
-								signal,
-							}),
-						onMigration: (state) => publishMigrationProgress(sessionKey, state),
+					return await openRepositoryLixSessionWithRetry({
+						...options,
+						replicaId,
 						signal,
 					});
 				} finally {
@@ -174,38 +166,6 @@ function publishMigrationProgress(
 	for (const listener of progress.listeners) listener(state);
 	if (progress.listeners.size === 0 && !state) {
 		migrationProgressBySession.delete(key);
-	}
-}
-
-export async function retryRepositoryOpenDuringMigration<T>({
-	open,
-	onMigration,
-	wait = delay,
-	signal,
-}: {
-	open: () => Promise<T>;
-	onMigration?: (state: RepositoryMigrationState | null) => void;
-	wait?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
-	signal?: AbortSignal;
-}): Promise<T> {
-	let observedMigration = false;
-	try {
-		for (;;) {
-			signal?.throwIfAborted();
-			try {
-				const session = await open();
-				return session;
-			} catch (error) {
-				signal?.throwIfAborted();
-				const migration = repositoryMigrationStateFromError(error);
-				if (!migration) throw error;
-				observedMigration = true;
-				onMigration?.(migration);
-				await wait(MIGRATION_RETRY_DELAY_MS, signal);
-			}
-		}
-	} finally {
-		if (observedMigration) onMigration?.(null);
 	}
 }
 
@@ -309,15 +269,12 @@ async function openOpfsSyncSession(
 ): Promise<Lix> {
 	await waitForLixPrewarm();
 	options.signal?.throwIfAborted();
-	const fetcher = createTelemetryFetch(
-		options.fetch ?? globalThis.fetch.bind(globalThis),
-		{
-			repositoryId: options.repositoryId,
-			refreshAccessToken: options.refreshAccessToken,
-			signal: options.signal,
-			shouldCaptureRequestFailures: () => requestFailureReporting.enabled,
-		},
-	);
+	const fetcher = createTelemetryFetch(options.fetch ?? networkFetch, {
+		repositoryId: options.repositoryId,
+		refreshAccessToken: options.refreshAccessToken,
+		signal: options.signal,
+		shouldCaptureRequestFailures: () => requestFailureReporting.enabled,
+	});
 	const commonServer = {
 		url: repositoryUrl(options),
 		headers: async () => repositoryRequestHeaders(options),
@@ -329,23 +286,19 @@ async function openOpfsSyncSession(
 	// public access on the worker's SQL-authorized remote transport.
 	if (options.publicPath)
 		return openLix({ server: { ...commonServer, mode: "remote" } });
-	const storage = new OpfsStorage({ name: repositoryOpfsCacheName(options) });
+	const storageName = await currentReplicaStorage(
+		repositoryOpfsCacheName(options),
+		{
+			url: String(commonServer.url),
+			headers: Object.entries(await repositoryRequestHeaders(options)),
+		},
+	);
+	const storage = new OpfsStorage({ name: storageName });
 	const server: PartialReplicaLixServerOptions = {
 		...commonServer,
 		mode: "partial_replica",
 	};
-	try {
-		return await openLix({ storage, server, onProgress });
-	} catch (error) {
-		if (!isErrorCode(error, "LIX_PARTIAL_REPLICA_MIGRATION_REQUIRED"))
-			throw error;
-		options.signal?.throwIfAborted();
-		// Failed opening releases ownership. Preserve the same storage and all
-		// pending edits while the SDK performs closed-storage conversion.
-		await convertReplicaToPartial({ storage, server });
-		options.signal?.throwIfAborted();
-		return openLix({ storage, server, onProgress });
-	}
+	return openLix({ storage, server, onProgress });
 }
 
 async function repositoryRequestHeaders(
@@ -405,7 +358,7 @@ export function createTelemetryFetch(
 		captureException?: typeof captureExceptionTelemetry;
 	} = {},
 ): RemoteLixFetch {
-	const fetcher = customFetch ?? globalThis.fetch?.bind(globalThis);
+	const fetcher = customFetch ?? networkFetch;
 	if (!fetcher) {
 		throw new TypeError("A fetch implementation is required for a repository.");
 	}
@@ -613,27 +566,6 @@ function isLixRecoveringError(
 	);
 }
 
-export function repositoryMigrationStateFromError(
-	error: unknown,
-): RepositoryMigrationState | null {
-	if (!(error instanceof Error) || !("code" in error)) return null;
-	if (error.code !== MIGRATION_ERROR_CODE || !("details" in error)) {
-		return null;
-	}
-	const details = error.details;
-	if (!isRecord(details)) return null;
-	const { fromVersion, toVersion } = details;
-	if (
-		typeof fromVersion !== "number" ||
-		!Number.isInteger(fromVersion) ||
-		typeof toVersion !== "number" ||
-		!Number.isInteger(toVersion)
-	) {
-		return null;
-	}
-	return { fromVersion, toVersion };
-}
-
 export function isRetryableRepositoryOpenError(error: unknown): boolean {
 	// A completed mutation/execution must never be replayed, even if its
 	// completion error otherwise looks transient.
@@ -650,26 +582,10 @@ export function isRetryableRepositoryOpenError(error: unknown): boolean {
 				details.nonRetryableAfterExecution === true))
 	)
 		return false;
-	// Opening owns no user mutation. A failed open/conversion releases its
-	// handles; the next attempt re-admits the same durable OPFS replica, including
-	// any completed migration and retained pending edits.
-	// A gateway can lose a migration merge response after the server accepted it.
-	// Re-admitting the same replica resumes its durable conversion receipt; it
-	// does not repeat an arbitrary SQL mutation or replace the browser cache.
-	if (
-		isRecord(details) &&
-		typeof details.httpStatus === "number" &&
-		[502, 503, 504].includes(details.httpStatus)
-	)
-		return true;
-	if (isErrorCode(error, "LIX_STORAGE_READ_EXPIRED")) return true;
-	if (isLixRecoveringError(error)) return true;
-	if (!(error instanceof Error)) return false;
-	if (error.name === "AbortError") return true;
+	// Storage coherence belongs to the engine; configuration/authentication and
+	// cancelled operations are not network retries. Opening never migrates.
 	return (
-		error.message === "Failed to fetch" ||
-		error.message === "browser sync fetch failed: Failed to fetch" ||
-		error.message === "browser sync fetch failed: The operation was aborted"
+		isLixRecoveringError(error) || isErrorCode(error, "LIX_TRANSPORT_NETWORK")
 	);
 }
 
