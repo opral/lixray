@@ -2,14 +2,15 @@ import { entityRoutePath } from "../lib/entity-url.ts";
 import {
 	CHANGED_FILES_SQL,
 	READ_FILES_SQL,
-	encodeFileContent,
+	readFileContent,
 	escapeLike,
 	fileWriteStatements,
 	normalizeFilePath,
-	type FileContent,
+	type FileRead,
 	type FileWrite,
 } from "./file-tools.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
+import { isRenderablePath } from "./diff-card.ts";
 
 const LIX_UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -38,11 +39,24 @@ export interface ExecuteRequest {
 	options?: ExecuteOptions;
 }
 
-export interface ExecuteResponse {
+export interface CommitSpan {
+	before: string;
+	after: string;
+}
+
+export interface StatementResponse {
 	columns: Array<string>;
 	rows: Array<Array<WireValue>>;
 	rowsAffected: number;
 	notices: Array<unknown>;
+}
+
+export interface ExecuteResponse extends StatementResponse {
+	commit: CommitSpan | null;
+}
+
+export interface TransactionClient {
+	execute(request: ExecuteRequest): Promise<StatementResponse>;
 }
 
 export interface ExecuteBatchRequest {
@@ -54,7 +68,8 @@ export interface ExecuteBatchRequest {
 }
 
 export interface ExecuteScriptResponse {
-	results: Array<ExecuteResponse>;
+	results: Array<StatementResponse>;
+	commit: CommitSpan | null;
 }
 
 export interface LixSummary {
@@ -153,6 +168,11 @@ export function isLixError(value: unknown): value is LixError {
  * underlying SDK handle to it before executing.
  */
 export interface LixRuntimeClient {
+	transaction<T>(
+		lixId: string,
+		branchId: string,
+		run: (tx: TransactionClient) => Promise<T>,
+	): Promise<{ value: T; commit: CommitSpan | null; warning?: string }>;
 	listLixes(): Promise<Array<LixSummary>>;
 	hasOpenRuntime(lixId: string): boolean;
 	activeBranchId(lixId: string, branchId?: string): Promise<string>;
@@ -523,9 +543,11 @@ export class LixService {
 		const context = await this.readContext(contextToken);
 		return {
 			context: contextToken,
-			results: (
-				await this.client.executeBatch(context.lixId, context.branchId, request)
-			).results,
+			...(await this.client.executeBatch(
+				context.lixId,
+				context.branchId,
+				request,
+			)),
 		};
 	}
 
@@ -606,11 +628,14 @@ export class LixService {
 	): Promise<ReadFilesResult> {
 		const context = await this.readContext(contextToken);
 		const normalized = paths.map(normalizeFilePathOrThrow);
-		const [files, commitId, url] = await Promise.all([
-			this.fileRows(context, normalized),
-			this.commitId(context.lixId, context.branchId),
+		const [snapshot, url] = await Promise.all([
+			this.client.transaction(context.lixId, context.branchId, async (tx) => ({
+				files: await this.fileRows(context, normalized, tx),
+				commitId: await this.commitId(context.lixId, context.branchId, tx),
+			})),
 			this.entityUrl(context, origin),
 		]);
+		const { files, commitId } = snapshot.value;
 		const found = new Set(files.map((file) => file.path));
 		return {
 			context: contextToken,
@@ -624,8 +649,7 @@ export class LixService {
 	 * Creates or updates files in one commit. With `lastSeenCommitId`, a
 	 * target file that changed since that commit refuses the whole write and
 	 * the error carries the current commit and contents; unrelated changes
-	 * never block. The check and the write are two steps, so a write landing
-	 * between them on the same file is not caught; the window is small.
+	 * never block after retrying the transaction on a concurrent branch change.
 	 */
 	async writeFiles(
 		contextToken: string,
@@ -634,13 +658,25 @@ export class LixService {
 			lastSeenCommitId?: string;
 			checkpoint?: boolean;
 			originKey: string;
+			/**
+			 * How many supported targets include OLD/NEW bytes in RETURNING.
+			 */
+			previews?: number;
 		},
 		origin = "https://lixray.com",
 	): Promise<{
 		context: string;
-		commitId: string;
+		commitId?: string;
 		files: Array<{ id: string; path: string; url: string }>;
 		checkpointCommitId?: string;
+		commit: CommitSpan | null;
+		warning?: string;
+		/** Present only when previews were asked for; never part of the tool's output. */
+		previews?: Array<{
+			path: string;
+			before?: Uint8Array;
+			after?: Uint8Array;
+		}>;
 	}> {
 		const context = await this.readContext(contextToken);
 		const files = input.files.map((file) => ({
@@ -650,91 +686,186 @@ export class LixService {
 		const paths = files.map((file) => file.path);
 		if (new Set(paths).size !== paths.length)
 			throw createLixError("invalid_request", "Each path may appear once.");
-		const metadataOnly = files
-			.filter((file) => file.content === undefined)
-			.map((file) => file.path);
 		if (
 			files.some(
 				(file) =>
-					file.content === undefined && file.lixcol_metadata === undefined,
+					file.content !== undefined && file.content_base64 !== undefined,
 			)
 		)
 			throw createLixError(
 				"invalid_request",
-				"A file needs content, lixcol_metadata, or both.",
+				"A file takes content or content_base64, not both.",
 			);
-		if (input.lastSeenCommitId !== undefined) {
-			const head = await this.commitId(context.lixId, context.branchId);
-			if (head !== input.lastSeenCommitId) {
-				const changed = await this.changedSince(
-					context,
-					input.lastSeenCommitId,
-					head,
-					paths,
-				);
-				if (changed.length > 0) {
-					const current = await this.fileRows(context, changed);
-					throw createLixError(
-						"conflict",
-						`${changed.length === 1 ? "A file" : `${changed.length} files`} changed since last_seen_commit_id: ${changed.join(", ")}.`,
-						{
-							hint: "Merge your edit into the current contents in details.files, then write again with last_seen_commit_id = details.current_commit_id.",
-							details: {
-								current_commit_id: head,
-								files: current.map((file) => ({
-									path: file.path,
-									content: file.content,
-									lixcol_metadata: file.lixcol_metadata,
-								})),
-							},
-						},
-					);
-				}
-			}
-		}
-		if (metadataOnly.length > 0) {
-			const existing = new Set(
-				(await this.fileRows(context, metadataOnly)).map((file) => file.path),
+		const hasContent = (file: (typeof files)[number]): boolean =>
+			file.content !== undefined || file.content_base64 !== undefined;
+		const metadataOnly = files
+			.filter((file) => !hasContent(file))
+			.map((file) => file.path);
+		if (
+			files.some(
+				(file) => !hasContent(file) && file.lixcol_metadata === undefined,
+			)
+		)
+			throw createLixError(
+				"invalid_request",
+				"A file needs content, content_base64, lixcol_metadata, or both.",
 			);
-			const missing = metadataOnly.filter((path) => !existing.has(path));
-			if (missing.length > 0)
-				throw createLixError(
-					"not_found",
-					`No file to update metadata on: ${missing.join(", ")}. Give it content to create it.`,
-				);
-		}
-		const statements = fileWriteStatements(files);
-		const batch = await this.client.executeBatch(
+		const url = await this.entityUrl(context, origin);
+		const previewPaths = new Set(
+			files
+				.filter(
+					(file) => file.content !== undefined && isPreviewablePath(file.path),
+				)
+				.slice(0, Math.max(0, input.previews ?? 0))
+				.map((file) => file.path),
+		);
+		const transaction = await this.client.transaction(
 			context.lixId,
 			context.branchId,
-			{
-				statements: statements.map(({ sql, params }) => ({ sql, params })),
-				options: { originKey: input.originKey },
+			async (tx) => {
+				if (input.lastSeenCommitId !== undefined) {
+					const head = await this.commitId(context.lixId, context.branchId, tx);
+					if (head !== input.lastSeenCommitId) {
+						const changed = await this.changedSince(
+							context,
+							input.lastSeenCommitId,
+							head,
+							paths,
+							tx,
+						);
+						if (changed.length > 0) {
+							const current = await this.fileRows(context, changed, tx);
+							throw createLixError(
+								"conflict",
+								`${changed.length === 1 ? "A file" : `${changed.length} files`} changed since last_seen_commit_id: ${changed.join(", ")}.`,
+								{
+									hint: "Merge your edit into the current contents in details.files, then write again with last_seen_commit_id = details.current_commit_id.",
+									details: {
+										current_commit_id: head,
+										files: current.map((file) => ({
+											path: file.path,
+											...(file.content !== undefined
+												? { content: file.content }
+												: { encoding: file.encoding }),
+											lixcol_metadata: file.lixcol_metadata,
+										})),
+									},
+								},
+							);
+						}
+					}
+				}
+				if (metadataOnly.length > 0) {
+					const existing = new Set(
+						readIdPathRows(
+							await tx.execute({
+								sql: `SELECT id, path FROM lix_file WHERE path IN (${metadataOnly.map((_, index) => `$${index + 1}`).join(", ")})`,
+								params: metadataOnly.map((path) => ({
+									kind: "text",
+									value: path,
+								})),
+							}),
+						).map((file) => file.path),
+					);
+					const missing = metadataOnly.filter((path) => !existing.has(path));
+					if (missing.length > 0)
+						throw createLixError(
+							"not_found",
+							`No file to update metadata on: ${missing.join(", ")}. Give it content to create it.`,
+						);
+				}
+				const statements = fileWriteStatements(files, previewPaths);
+				const results: StatementResponse[] = [];
+				for (const statement of statements)
+					results.push(
+						await tx.execute({
+							...statement,
+							options: { originKey: input.originKey },
+						}),
+					);
+				const written: Array<{ id: string; path: string }> = [];
+				statements.forEach((statement, index) => {
+					if (!statement.path) return;
+					const row = readIdPathRows(results[index] ?? EMPTY_RESPONSE)[0];
+					if (!row)
+						throw createLixError(
+							"upstream_error",
+							`Lix did not return the written file ${statement.path}.`,
+						);
+					written.push(row);
+				});
+				return { written, statements, results };
 			},
 		);
-		const written: Array<{ id: string; path: string }> = [];
-		statements.forEach((statement, index) => {
-			if (!statement.path) return;
-			const row = readIdPathRows(batch.results[index] ?? EMPTY_RESPONSE)[0];
-			if (!row)
-				throw createLixError(
-					"upstream_error",
-					`Lix did not return the written file ${statement.path}.`,
-				);
-			written.push(row);
-		});
-		const checkpointCommitId = input.checkpoint
-			? (await this.createCheckpoint(contextToken)).commitId
-			: undefined;
-		const [commitId, url] = await Promise.all([
-			this.commitId(context.lixId, context.branchId),
-			this.entityUrl(context, origin),
-		]);
+		const { written, statements, results } = transaction.value;
+		const commitId = transaction.commit?.after;
+		let warning: string | undefined =
+			transaction.warning ??
+			(commitId
+				? undefined
+				: "Files saved; commit receipt unavailable. Do not repeat the write.");
+
+		let checkpointCommitId: string | undefined;
+		if (input.checkpoint) {
+			try {
+				checkpointCommitId = (await this.createCheckpoint(contextToken))
+					.commitId;
+			} catch {
+				warning = [
+					warning,
+					"Files saved; checkpoint unavailable. Do not repeat the write.",
+				]
+					.filter(Boolean)
+					.join(" ");
+			}
+		}
+
+		const previews: Array<{
+			path: string;
+			before?: Uint8Array;
+			after?: Uint8Array;
+		}> = [];
+		try {
+			statements.forEach((statement, index) => {
+				if (!statement.path || !previewPaths.has(statement.path)) return;
+				const result = results[index]!;
+				const before = result.rows[0]?.[result.columns.indexOf("before")];
+				const after = result.rows[0]?.[result.columns.indexOf("after")];
+				if (
+					!before ||
+					!after ||
+					!["blob", "null"].includes(before.kind) ||
+					!["blob", "null"].includes(after.kind)
+				)
+					throw new Error("Invalid preview row");
+				previews.push({
+					path: statement.path,
+					...(before.kind === "blob"
+						? { before: base64ToBytes(before.base64) }
+						: {}),
+					...(after.kind === "blob"
+						? { after: base64ToBytes(after.base64) }
+						: {}),
+				});
+			});
+		} catch {
+			warning = [
+				warning,
+				"Files saved, preview unavailable. Do not repeat the write.",
+			]
+				.filter(Boolean)
+				.join(" ");
+			previews.length = 0;
+		}
+
 		return {
 			context: contextToken,
 			commitId,
 			files: written.map((file) => ({ ...file, url: url("file", file) })),
 			...(checkpointCommitId ? { checkpointCommitId } : {}),
+			...(previews.length > 0 ? { previews } : {}),
+			...(warning ? { warning } : {}),
+			commit: transaction.commit,
 		};
 	}
 
@@ -744,10 +875,15 @@ export class LixService {
 		fromCommitId: string,
 		toCommitId: string,
 		paths: readonly string[],
+		tx?: TransactionClient,
 	): Promise<string[]> {
-		let response: ExecuteResponse;
+		let response: StatementResponse;
 		try {
-			response = await this.client.execute(context.lixId, context.branchId, {
+			response = await (
+				tx?.execute ??
+				((request) =>
+					this.client.execute(context.lixId, context.branchId, request))
+			)({
 				sql: CHANGED_FILES_SQL(paths.length),
 				params: [
 					{ kind: "text", value: fromCommitId },
@@ -756,6 +892,8 @@ export class LixService {
 				],
 			});
 		} catch (caught) {
+			if (isLixError(caught) && caught.code !== "LIX_COMMIT_NOT_FOUND")
+				throw caught;
 			const message = caught instanceof Error ? caught.message : String(caught);
 			throw createLixError(
 				"invalid_request",
@@ -781,16 +919,17 @@ export class LixService {
 	private async fileRows(
 		context: LixContext,
 		paths: readonly string[],
+		tx?: TransactionClient,
 	): Promise<Array<ReadFile>> {
 		if (paths.length === 0) return [];
-		const response = await this.client.execute(
-			context.lixId,
-			context.branchId,
-			{
-				sql: READ_FILES_SQL(paths.length),
-				params: paths.map((path): WireValue => ({ kind: "text", value: path })),
-			},
-		);
+		const response = await (
+			tx?.execute ??
+			((request) =>
+				this.client.execute(context.lixId, context.branchId, request))
+		)({
+			sql: READ_FILES_SQL(paths.length),
+			params: paths.map((path): WireValue => ({ kind: "text", value: path })),
+		});
 		const columns = {
 			id: response.columns.indexOf("id"),
 			path: response.columns.indexOf("path"),
@@ -815,7 +954,7 @@ export class LixService {
 			byPath.set(path.value, {
 				id: id.value,
 				path: path.value,
-				...encodeFileContent(base64ToBytes(content.base64)),
+				...readFileContent(base64ToBytes(content.base64)),
 				lixcol_metadata:
 					metadata?.kind === "json" &&
 					metadata.value !== null &&
@@ -936,8 +1075,15 @@ export class LixService {
 		return (await this.readContext(contextToken)).lixId;
 	}
 
-	private async commitId(lixId: string, branchId: string): Promise<string> {
-		const response = await this.client.execute(lixId, branchId, {
+	private async commitId(
+		lixId: string,
+		branchId: string,
+		tx?: TransactionClient,
+	): Promise<string> {
+		const response = await (
+			tx?.execute ??
+			((request) => this.client.execute(lixId, branchId, request))
+		)({
 			sql: "SELECT lix_active_branch_commit_id() AS commit_id",
 		});
 		const value = response.rows[0]?.[0];
@@ -1113,7 +1259,7 @@ function finiteTimestamp(value: unknown): number | undefined {
 /** Files listed per call before `truncated` says to narrow the filter. */
 const LIST_FILES_LIMIT = 1000;
 
-const EMPTY_RESPONSE: ExecuteResponse = {
+const EMPTY_RESPONSE: StatementResponse = {
 	columns: [],
 	rows: [],
 	rowsAffected: 0,
@@ -1123,10 +1269,8 @@ const EMPTY_RESPONSE: ExecuteResponse = {
 export type ReadFile = {
 	id: string;
 	path: string;
-	content: FileContent;
-	size: number;
 	lixcol_metadata: Record<string, unknown> | null;
-};
+} & FileRead;
 
 export type ReadFilesResult = {
 	context: string;
@@ -1134,6 +1278,20 @@ export type ReadFilesResult = {
 	files: Array<ReadFile & { url: string }>;
 	missing: string[];
 };
+
+/**
+ * Files whose change a reader can be shown inline.
+ *
+ * This runs on the write's path, so it answers rather than throws: a card is
+ * a courtesy, and a write that would have succeeded still succeeds.
+ */
+function isPreviewablePath(path: string): boolean {
+	try {
+		return isRenderablePath(path);
+	} catch {
+		return false;
+	}
+}
 
 function normalizeFilePathOrThrow(path: string): string {
 	try {
@@ -1147,7 +1305,7 @@ function normalizeFilePathOrThrow(path: string): string {
 }
 
 function readIdPathRows(
-	response: ExecuteResponse,
+	response: StatementResponse,
 ): Array<{ id: string; path: string }> {
 	const idColumn = response.columns.indexOf("id");
 	const pathColumn = response.columns.indexOf("path");

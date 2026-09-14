@@ -9,6 +9,7 @@ import {
 	LixService,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
+	type TransactionClient,
 	type LixRuntimeClient,
 } from "./lix-service.ts";
 import { PostHog } from "posthog-node";
@@ -241,6 +242,7 @@ class FakeRuntime implements LixRuntimeClient {
 				rows: [[request.params?.[0] ?? { kind: "null" as const }]],
 				rowsAffected: 1,
 				notices: [],
+				commit: null,
 			};
 		}
 		if (request.sql === "SELECT commit_id FROM lix_create_checkpoint()") {
@@ -249,6 +251,7 @@ class FakeRuntime implements LixRuntimeClient {
 				rows: [[{ kind: "text" as const, value: "commit-1" }]],
 				rowsAffected: 0,
 				notices: [],
+				commit: null,
 			};
 		}
 		if (request.sql.includes("lix_active_branch_commit_id")) {
@@ -257,6 +260,7 @@ class FakeRuntime implements LixRuntimeClient {
 				rows: [[{ kind: "text" as const, value: "commit-1" }]],
 				rowsAffected: 0,
 				notices: [],
+				commit: null,
 			};
 		}
 		if (request.sql === OPEN_LIX_INVENTORY_SQL) {
@@ -270,6 +274,7 @@ class FakeRuntime implements LixRuntimeClient {
 				],
 				rowsAffected: 0,
 				notices: [],
+				commit: null,
 			};
 		}
 		if (/^SELECT id, path FROM lix_file\b/.test(request.sql)) {
@@ -286,6 +291,7 @@ class FakeRuntime implements LixRuntimeClient {
 				],
 				rowsAffected: 0,
 				notices: [],
+				commit: null,
 			};
 		}
 		if (
@@ -313,6 +319,7 @@ class FakeRuntime implements LixRuntimeClient {
 					}),
 				rowsAffected: 0,
 				notices: [],
+				commit: null,
 			};
 		}
 		if (
@@ -331,9 +338,10 @@ class FakeRuntime implements LixRuntimeClient {
 				]),
 				rowsAffected: 0,
 				notices: [],
+				commit: null,
 			};
 		}
-		if (/RETURNING id, path$/.test(request.sql)) {
+		if (/RETURNING id, path/.test(request.sql)) {
 			const path = request.params?.[0];
 			if (path?.kind !== "text") throw new Error("path param missing");
 			this.lastOriginKey = request.options?.originKey;
@@ -354,15 +362,31 @@ class FakeRuntime implements LixRuntimeClient {
 			});
 			this.writes.push(request.sql);
 			return {
-				columns: ["id", "path"],
+				columns: [
+					"id",
+					"path",
+					...(request.sql.includes("OLD.content") ? ["before", "after"] : []),
+				],
 				rows: [
 					[
 						{ kind: "text" as const, value: id },
 						{ kind: "text" as const, value: path.value },
+						...(request.sql.includes("OLD.content")
+							? [
+									existing
+										? { kind: "blob" as const, base64: existing.base64 }
+										: { kind: "null" as const },
+									{
+										kind: "blob" as const,
+										base64: this.files.get(path.value)!.base64,
+									},
+								]
+							: []),
 					],
 				],
 				rowsAffected: 1,
 				notices: [],
+				commit: null,
 			};
 		}
 		if (/FROM lix_file\b/i.test(request.sql)) {
@@ -376,6 +400,7 @@ class FakeRuntime implements LixRuntimeClient {
 				],
 				rowsAffected: 0,
 				notices: [],
+				commit: null,
 			};
 		}
 		if (/^\s*(?:INSERT|UPDATE|DELETE)\b/i.test(request.sql)) {
@@ -386,6 +411,7 @@ class FakeRuntime implements LixRuntimeClient {
 				rows: [],
 				rowsAffected: 1,
 				notices: [],
+				commit: null,
 			};
 		}
 		// The change log for this call: the write above created hello.md.
@@ -407,6 +433,7 @@ class FakeRuntime implements LixRuntimeClient {
 					: [],
 				rowsAffected: 0,
 				notices: [],
+				commit: null,
 			};
 		}
 		return {
@@ -414,22 +441,42 @@ class FakeRuntime implements LixRuntimeClient {
 			rows: [[{ kind: "text" as const, value: "ok" }]],
 			rowsAffected: 0,
 			notices: [],
+			commit: null,
 		};
 	}
+	async transaction<T>(
+		lixId: string,
+		branchId: string,
+		run: (tx: TransactionClient) => Promise<T>,
+	) {
+		const value = await run({
+			execute: (request) => this.execute(lixId, branchId, request),
+		});
+		return { value, commit: { before: "commit-0", after: "commit-1" } };
+	}
+
 	async executeBatch(
 		lixId: string,
 		branchId: string,
 		request: ExecuteBatchRequest,
 	) {
 		return {
-			results: await Promise.all(
-				request.statements.map((statement) =>
-					this.execute(lixId, branchId, {
-						...statement,
-						options: request.options,
-					}),
-				),
-			),
+			commit: { before: "commit-0", after: "commit-1" },
+			results: (
+				await Promise.all(
+					request.statements.map((statement) =>
+						this.execute(lixId, branchId, {
+							...statement,
+							options: request.options,
+						}),
+					),
+				)
+			).map(({ columns, rows, rowsAffected, notices }) => ({
+				columns,
+				rows,
+				rowsAffected,
+				notices,
+			})),
 		};
 	}
 	async createBranch() {
@@ -916,6 +963,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				rows: [[{ kind: "text", value: "ok" }]],
 				rowsAffected: 0,
 				notices: [],
+				commit: null,
 			},
 		);
 		assert.equal(queriedContent.request_id, undefined);
@@ -952,6 +1000,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			],
 			rowsAffected: 0,
 			notices: [],
+			commit: null,
 		});
 		assert.deepEqual(
 			(listedFiles.structuredContent as { result: unknown }).result,
@@ -965,6 +1014,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				],
 				rowsAffected: 0,
 				notices: [],
+				commit: null,
 			},
 		);
 		const mutated = await client.callTool({
@@ -2447,7 +2497,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 				path: "/skills/hello.md",
 				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
 				size: 8,
-				content: { text: "# Hello\n" },
+				content: "# Hello\n",
 				lixcol_metadata: null,
 			},
 		]);
@@ -2463,7 +2513,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 				files: [
 					{
 						path: "/gtm/campaigns/icp.md",
-						content: { text: "# ICP" },
+						content: "# ICP",
 						lixcol_metadata: { atelier_csv: { version: 1, columns: [] } },
 					},
 					{ path: "/skills/hello.md", lixcol_metadata: null },
@@ -2484,7 +2534,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			/^https:\/\/dev\.lixray\.com\/@acme\/company\/file\//,
 		);
 		assert.deepEqual(runtime.writes, [
-			"INSERT INTO lix_file (path, content, lixcol_metadata) VALUES ($1, CAST($2 AS BYTEA), $3) ON CONFLICT (path) DO UPDATE SET content = excluded.content, lixcol_metadata = excluded.lixcol_metadata RETURNING id, path",
+			"INSERT INTO lix_file (path, content, lixcol_metadata) VALUES ($1, CAST($2 AS BYTEA), $3) ON CONFLICT (path) DO UPDATE SET content = excluded.content, lixcol_metadata = excluded.lixcol_metadata RETURNING id, path, OLD.content AS before, NEW.content AS after",
 			"UPDATE lix_file SET lixcol_metadata = $2 WHERE path = $1 RETURNING id, path",
 		]);
 		assert.match(runtime.lastOriginKey ?? "", /^mcp:/);
@@ -2495,6 +2545,29 @@ void test("file tools list, read, and write files with metadata and conflict che
 		assert.equal(
 			written.content?.filter((block) => block.type === "resource_link").length,
 			2,
+		);
+		// The Markdown write comes back with its change rendered: a host that
+		// can show UI shows it, and the structured result stays schema-clean.
+		const cards = (written.content ?? []).filter(
+			(block) => block.type === "resource",
+		) as Array<{
+			resource: { uri: string; mimeType: string; text: string };
+			annotations?: { audience?: string[] };
+		}>;
+		assert.equal(cards.length, 1);
+		assert.equal(
+			cards[0]!.resource.uri,
+			"ui://lixray/diff/gtm/campaigns/icp.md",
+		);
+		assert.equal(cards[0]!.resource.mimeType, "text/html;profile=mcp-app");
+		assert.match(cards[0]!.resource.text, /<h1[^>]*>ICP<\/h1>/);
+		assert.match(cards[0]!.resource.text, /Open in LixRay/);
+		assert.deepEqual(cards[0]!.annotations?.audience, ["user"]);
+		assert.equal(
+			Object.keys(
+				written.structuredContent as Record<string, unknown>,
+			).includes("_ui"),
+			false,
 		);
 
 		// Metadata alone on a file that does not exist is refused before writing.
@@ -2517,8 +2590,8 @@ void test("file tools list, read, and write files with metadata and conflict che
 				context,
 				last_seen_commit_id: "commit-0",
 				files: [
-					{ path: "/skills/hello.md", content: { text: "# Hello again" } },
-					{ path: "/other.md", content: { text: "x" } },
+					{ path: "/skills/hello.md", content: "# Hello again" },
+					{ path: "/other.md", content: "x" },
 				],
 			},
 		});
@@ -2531,7 +2604,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			files: [
 				{
 					path: "/skills/hello.md",
-					content: { text: "# Hello\n" },
+					content: "# Hello\n",
 					lixcol_metadata: null,
 				},
 			],
@@ -2543,7 +2616,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			arguments: {
 				context,
 				last_seen_commit_id: "commit-0",
-				files: [{ path: "/other.md", content: { text: "x" } }],
+				files: [{ path: "/other.md", content: "x" }],
 			},
 		});
 		assert.equal(unrelated.isError, undefined, JSON.stringify(unrelated));
@@ -2552,7 +2625,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			arguments: {
 				context,
 				last_seen_commit_id: "unknown-commit",
-				files: [{ path: "/other.md", content: { text: "y" } }],
+				files: [{ path: "/other.md", content: "y" }],
 			},
 		});
 		assert.equal(unknown.isError, true);

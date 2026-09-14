@@ -26,7 +26,7 @@
 		"build:node": "node scripts/assert-railway-env.mjs && LIXRAY_SKIP_VENDORED_LIX_WASM=1 pnpm build",
 		"start:railway": "node scripts/start-railway.mjs",
 		"routes:generate": "node scripts/generate-routes.mjs",
-		"pretest:e2e": "pnpm lix:build",
+		"pretest:e2e": "pnpm lix:build && pnpm ci:prepare:web",
 		"test:e2e": "playwright test",
 		"test:file-component": "playwright test --config playwright.file-component.config.ts",
 		"test:analytics": "node --test --experimental-strip-types src/lib/*telemetry*.test.ts",

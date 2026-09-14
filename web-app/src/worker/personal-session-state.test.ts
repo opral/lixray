@@ -35,7 +35,7 @@ void test("shell state survives reloads within one tab but is isolated across ta
 	});
 
 	storeA.setSnapshot({
-		focusedPanel: "central",
+		focusedPanel: "main",
 		panels: {
 			left: { views: [], activeInstance: null },
 			central: {
@@ -88,7 +88,7 @@ void test("shell state survives reloads within one tab but is isolated across ta
 
 void test("session shell state applies the first-visit initializer", () => {
 	const seededState = {
-		focusedPanel: "central" as const,
+		focusedPanel: "main" as const,
 		panels: {
 			left: { views: [], activeInstance: null },
 			central: {
@@ -210,10 +210,12 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 		repositoryId: LIX,
 		storage,
 	});
+	// Written under the old names, to prove a saved layout survives the
+	// rename of the middle area.
 	await preferences.save({
 		version: 1,
 		layout: { sizes: { left: 20, central: 50, right: 30 } },
-	});
+	} as never);
 	assert.deepEqual(
 		await createRepositoryPreferencesStore({
 			accountId: USER,
@@ -222,7 +224,7 @@ void test("demo preferences and tab-local review status survive a same-tab reloa
 		}).load(),
 		{
 			version: 1,
-			layout: { sizes: { left: 20, central: 50, right: 30 } },
+			layout: { sizes: { left: 20, main: 50, right: 30 } },
 			review: { autoAcceptAgentChanges: false },
 		},
 	);

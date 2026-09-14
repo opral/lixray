@@ -876,6 +876,38 @@ test("historical listings preserve immutable snapshot navigation", async ({
 	).toHaveLength(0);
 });
 
+test("the README preview keeps the rows' own inset", async ({ page }) => {
+	await page.goto("/?readme");
+	await page.waitForSelector("[data-testid=home-readme]");
+	// The document, the caption above it and the rows above that share one
+	// column: the seam reads as the list's footer, not as a second margin.
+	const columns = await page.evaluate(() => {
+		const inset = (element: Element) => {
+			const style = getComputedStyle(element);
+			const rect = element.getBoundingClientRect();
+			return [
+				Math.round(rect.left + Number.parseFloat(style.paddingLeft)),
+				Math.round(rect.right - Number.parseFloat(style.paddingRight)),
+			];
+		};
+		const row = document.querySelector("[data-path]")!;
+		const icon = row.querySelector("img")!.getBoundingClientRect();
+		return {
+			row: inset(row),
+			rowIcon: Math.round(icon.left),
+			caption: Math.round(
+				document
+					.querySelector("[data-testid=home-readme-preview] img")!
+					.getBoundingClientRect().left,
+			),
+			document: inset(document.querySelector("[data-testid=home-readme]")!),
+		};
+	});
+	expect(columns.document).toEqual(columns.row);
+	expect(columns.caption).toBe(columns.rowIcon);
+	expect(columns.rowIcon).toBe(columns.row[0]);
+});
+
 test("working changes mark the listing without a review open", async ({
 	page,
 }) => {
@@ -1033,4 +1065,28 @@ test("inactive folder changes wait until activation before navigating", async ({
 	await page.evaluate(() => window.directoryQA.setActive(true));
 	await expect(page.getByTestId("current-directory")).toHaveText("/renamed");
 	await expect(page.getByText("child.md", { exact: true })).toBeVisible();
+});
+
+test("review indicators refresh when entering and leaving review", async ({
+	page,
+}) => {
+	await page.goto("/?review");
+	const alpha = item(page, "alpha.md");
+	const beta = item(page, "beta.md");
+	const gamma = item(page, "gamma.csv");
+	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
+	await expect(beta).toHaveClass(/opacity-\[0\.35\]/);
+	await expect(gamma).not.toHaveAttribute("data-changed-entry", "true");
+	await page.getByRole("button", { name: "Toggle review" }).click();
+	// Closing review restores the working diff, which still includes alpha
+	// and also includes gamma, absent from this review.
+	await expect(gamma).toHaveAttribute("data-changed-entry", "true");
+	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
+	await expect(beta).not.toHaveClass(/opacity-\[0\.35\]/);
+	await alpha.click();
+	expect(await page.evaluate(() => window.directoryQA.diffOpened)).toEqual([]);
+	await page.getByRole("button", { name: "Toggle review" }).click();
+	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
+	await expect(beta).toHaveClass(/opacity-\[0\.35\]/);
+	await expect(gamma).not.toHaveAttribute("data-changed-entry", "true");
 });

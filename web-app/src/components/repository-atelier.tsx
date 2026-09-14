@@ -15,7 +15,6 @@ import {
 	type AtelierEvent,
 	type AtelierExtensionRuntime,
 	type AtelierExtensionRegistration,
-	type AtelierSkeletonProps,
 	type AtelierProps,
 } from "@opral/atelier";
 import "@opral/atelier/style.css";
@@ -176,7 +175,16 @@ function repositoryRuntimeExtensions(
 	});
 }
 
-function RepositoryShellSkeleton({ children, ...props }: AtelierSkeletonProps) {
+/** The chrome we show while an instance opens: Atelier's own, plus a label. */
+type RepositoryShellSkeletonProps = Pick<
+	AtelierProps,
+	"slots" | "topBarProps"
+> & { readonly children?: React.ReactNode };
+
+function RepositoryShellSkeleton({
+	children,
+	...props
+}: RepositoryShellSkeletonProps) {
 	return (
 		<div className="relative h-full">
 			<Atelier {...props} />
@@ -862,7 +870,7 @@ export function RepositoryAtelier({
 				setReviewFocusActive(event.active && event.changedFileCount > 0);
 				return;
 			}
-			if (event.type !== "central_view_activated") return;
+			if (event.type !== "main_view_activated") return;
 			const revision = ++navigationRevision;
 			if (!routeSyncedRef.current) return;
 			// Keep a pending shell marker until its own route commit consumes it.
@@ -1198,7 +1206,7 @@ export function RepositoryAtelier({
 						),
 						setInstance,
 					),
-					centralPanel: {
+					mainArea: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
 					},
 					sessionStateStore: createRepositorySessionStateStore({

@@ -173,7 +173,7 @@ export async function createSyncFixture({
 			const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL);
 			const authorization = {
 				Authorization: "Bearer lixray-demo",
-				"Lix-Server-Protocol-Version": "9",
+				"Lix-Server-Protocol-Version": "10",
 			};
 			const opened = await sharedContext.request.get(endpoint.toString(), {
 				headers: authorization,
@@ -240,7 +240,7 @@ export async function createSyncFixture({
 						Authorization: "Bearer lixray-demo",
 						"Lix-Session-Id": "0".repeat(64),
 						"Lix-Sync-Protocol-Version": "15",
-						"Lix-Server-Protocol-Version": "9",
+						"Lix-Server-Protocol-Version": "10",
 					},
 				});
 				return {
@@ -321,7 +321,7 @@ export async function createSyncFixture({
 			).toString();
 			const authorization = {
 				Authorization: "Bearer lixray-demo",
-				"Lix-Server-Protocol-Version": "9",
+				"Lix-Server-Protocol-Version": "10",
 			};
 			const opened = await sharedContext.request.get(repositoryEndpoint, {
 				headers: authorization,
@@ -492,7 +492,7 @@ export async function createSyncFixture({
 			const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL).toString();
 			const authorization = {
 				Authorization: "Bearer lixray-demo",
-				"Lix-Server-Protocol-Version": "9",
+				"Lix-Server-Protocol-Version": "10",
 			};
 			const opened = await sharedContext.request.get(endpoint, {
 				headers: authorization,
@@ -1149,7 +1149,7 @@ export async function createSyncFixture({
 			const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL).toString();
 			const authorization = {
 				Authorization: "Bearer lixray-demo",
-				"Lix-Server-Protocol-Version": "9",
+				"Lix-Server-Protocol-Version": "10",
 			};
 			const opened = await sharedContext.request.get(endpoint, {
 				headers: authorization,

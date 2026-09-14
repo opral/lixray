@@ -28,6 +28,14 @@ test("fast feedback and ordinary E2E never wait for a web image or deployment", 
 	assert.doesNotMatch(job("e2e"), /web-image|PLAYWRIGHT_SYNC_LOCAL|deploy-preview/);
 	assert.match(job("sync"), /browser-integration.yml/);
 });
+test("E2E prepares generated dependencies before Playwright imports fixtures", () => {
+	const e2e = job("e2e");
+	const prepare = e2e.indexOf("run: pnpm --dir web-app ci:prepare:web");
+	const collect = e2e.indexOf("run: pnpm --dir web-app exec playwright test");
+	assert.ok(prepare >= 0 && prepare < collect);
+	const scripts = JSON.parse(read("web-app/package.json")).scripts;
+	assert.match(scripts["pretest:e2e"], /pnpm ci:prepare:web/);
+});
 test("only an explicitly labeled PR can deploy a preview", () => {
 	assert.match(job("deploy-preview"), /contains\(github.event.pull_request.labels.\*.name, 'preview'\)/);
 	assert.match(job("deploy-preview"), /needs.ci.result == 'success'/);

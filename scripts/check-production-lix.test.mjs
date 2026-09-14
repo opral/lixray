@@ -7,14 +7,14 @@ void test("checks a handshake and read, then closes the canary session", async (
 	const result = await checkProductionLix({
 		lixUrl: "https://lixray.example/lix/11111111-1111-4111-8111-111111111111",
 		fetchImpl: async (url, init = {}) => {
-			assert.equal(new Headers(init.headers).get("lix-server-protocol-version"), "9");
+			assert.equal(new Headers(init.headers).get("lix-server-protocol-version"), "10");
 			requests.push({
 				method: init.method ?? "GET",
 				pathname: new URL(url).pathname,
 				sessionId: init.headers?.["Lix-Session-Id"],
 			});
 			if (new URL(url).pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/")) {
-				return Response.json({ protocolVersion: 9, sessionId: "session-1" });
+				return Response.json({ protocolVersion: 10, sessionId: "session-1" });
 			}
 			if (new URL(url).pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/execute")) {
 				return Response.json({ rows: [[{ kind: "int", value: 1 }]] });
@@ -24,7 +24,7 @@ void test("checks a handshake and read, then closes the canary session", async (
 	});
 
 	assert.deepEqual(result, {
-		protocolVersion: 9,
+		protocolVersion: 10,
 		lix: "/lix/11111111-1111-4111-8111-111111111111",
 	});
 	assert.deepEqual(requests, [
@@ -80,7 +80,7 @@ void test("fails when the canary session cannot close", async () => {
 			fetchImpl: async (url, init = {}) => {
 				const pathname = new URL(url).pathname;
 				if (pathname.endsWith("/lix/v1/11111111-1111-4111-8111-111111111111/")) {
-					return Response.json({ protocolVersion: 9, sessionId: "session-1" });
+					return Response.json({ protocolVersion: 10, sessionId: "session-1" });
 				}
 				if (init.method === "DELETE") {
 					return Response.json(
