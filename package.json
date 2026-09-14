@@ -16,7 +16,7 @@
     "test:tooling": "pnpm test:dev && pnpm perf:test && pnpm test:ci-scripts && pnpm test:production-canary",
     "test:dev": "node --test scripts/supabase-readiness.test.mjs",
     "ci": "node scripts/ci.mjs",
-    "test:ci-scripts": "node --test .github/scripts/*.test.mjs scripts/lix-ci-artifacts.test.mjs scripts/resolve-lix-server.test.mjs",
+    "test:ci-scripts": "node --test .github/scripts/*.test.mjs scripts/lix-ci-artifacts.test.mjs scripts/resolve-lix-server.test.mjs scripts/reconcile-authority-inventory.test.mjs",
     "vendor:sync": "node scripts/sync-vendor.mjs",
     "vendor:check": "node scripts/sync-vendor.mjs --check",
     "test:production-canary": "node --test scripts/check-production-lix.test.mjs",

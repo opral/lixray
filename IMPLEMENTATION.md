@@ -26,16 +26,21 @@ Initial implementation checks (before the additional CI and cohort fixes):
 - Lixray repository tests: 124 passed; worker/MCP tests: 307 passed. Typecheck, changed-code lint and production Vite build passed.
 - Isolated production copies: all 28 catalogued authorities passed migration verification, including a subsequently refreshed stable copy of `@opral/monorepo`. Format 80 uses exact logical-record preservation; format 79 uses a source-derived canonicalization witness whose expected digest matched the migrated destination. The initially changing source was qualified from a later unchanged, conditionally downloaded snapshot. No production writes were performed.
 
-PRs: https://github.com/opral/lix/pull/1779 and https://github.com/opral/lixray/pull/392. Lixray still pins `0fec4119a` pending the final qualified Lix artifact revision. Neither PR has been merged.
+PRs: https://github.com/opral/lix/pull/1779 and https://github.com/opral/lixray/pull/392. Lixray pins `4ebec357a`; matching artifact qualification and final remote CI are required before merge. Neither PR has been merged.
 
-Additional qualification in progress:
+Additional local qualification for Lix `4ebec357a` (remote CI pending):
 
+- Engine all-simulations: 3,943 passed, 74 skipped; doctests: 10 passed.
+- Server including offline adoption and retained tombstones: 108 passed, 1 ignored.
 - Optimized native SDK: 312 tests passed after bounding the inline read futures.
 - Full Rust end-to-end suite: 228 passed, 27 skipped.
-- Historical 68/71 bridge: 18 copied repositories passed source/history/current-row preservation checks; independent negative checks and the subsequent current-format hop are being qualified.
-- Deterministic OPFS regression reproduces a competing initializer changing the source revision during seed planning. The targeted conflict classification is awaiting final browser verification.
+- Packaged historical 68/71 bridge: 18 copied repositories passed source/history/current-row preservation; both deliberate corruption probes passed. All 19 subsequent current-format migrations passed, including the native format-77 authority. All 18 two-step physical manifests match.
+- The deterministic OPFS competing-initializer regression fails on the old artifact and passes on the fixed artifact. Full OPFS: 63 passed; packaged production smoke passed.
+- Actual local object-store adoption: standalone and existing authority activation/publication plus repeat invocations passed (4/4).
+- Final optimized composed browser suite: 4 passed, including full format-77 detached migration.
+- Retained tombstone and retry tests preserve active/retired sources; injected catalog races refuse publication; post-CAS lost acknowledgement retries repair durable reports.
 - Retained quarantine publication passed local object-store checks for source retention, create-only publication, live-control rejection, and exact control-inventory binding.
-- Final full-workspace CI is pending new verifier and reconciliation code; earlier focused passes do not qualify these later changes.
+- Final PR CI is running on the combined main/implementation tree; the latest main branch also contains separately merged Markdown changes.
 
 Local test logs and raw operational inventories are retained under `evidence/` but excluded from Git. Failed exploratory runs are also retained there; the results above identify their respective implementation stages.
 
@@ -48,3 +53,5 @@ Stop every serving writer and automatic restart, perform a fresh reconciled back
 Returning offline devices migrate on return. Late edits made by old tabs remain in retained source stores; they are not automatically detected or merged into the new workspace. This implementation performs no source cleanup.
 
 Production promotion now requires explicit manual dispatch with `promote=true`; ordinary pushes build and validate only. The Production workflow was temporarily disabled in preparation for merging to prevent the previous automatic promotion path from bypassing migration.
+
+The reviewed scoped execution plan is `PRODUCTION-CUTOVER-42.md`: 42 source-backed live repositories, two retained metadata tombstones, 26 quarantined physical sources, and the exact 17 unchanged/unavailable controls. The ordinary reconciler remains nonzero for those 17; an explicit snapshot-bound exception manifest may establish scoped cutover readiness without claiming full migration.

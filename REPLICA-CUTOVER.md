@@ -51,8 +51,17 @@ produces reviewable manifests without publishing them. The plan contains the
 BLAKE3 digest of the exact control inventory and explicit `storageId`/`reason`
 entries. The tool rejects live control IDs and catalogued physical sources.
 Use standard AWS credentials plus explicit `S3_ENDPOINT`, `S3_BUCKET`, and
-nonempty `S3_PREFIX`. Install `boto3` and `blake3` in the operator environment.
+nonempty `S3_PREFIX`. The local operator qualification used `boto3==1.43.93` and `blake3==1.0.9`
+in an isolated Python environment.
 After the writer/restart barrier is established, `--publish --writers-stopped`
 re-verifies the sources and publishes manifests with create-only writes.
 Original objects are retained. This disposition must never be used to hide a
 live repository whose source still needs migration.
+
+### Historical browser namespace coverage
+
+The selected `lixray:local-first-v1` OPFS namespace was introduced by Lixray commit `4877ef1fdab42e14da881a9e32cf04a662bc95fe` on 2026-09-08, pinning Lix `016477b173913046b78c5b8d16848909423a6295` (storage format 77). The detached current migrator covers formats created in that namespace from 77 onward, subject to its preservation checks. Failed qualification retains the source and does not publish a destination.
+
+Earlier releases used other namespaces, including `lixray:authoritative-hot-v1` and `lixray:sync-protocol-v3`. Format 68 was present in the August 19 Lixray pin (`7392464` → Lix `e2ea478f`). Such older browser directories may still exist, but the current application already did not select them before this cutover. This release retains them; it does not discover or automatically recover them. Do not describe this cutover as recovering all historical browser data.
+
+A future recovery path must discover those directories within the same origin, bind each to its repository and principal, and run the separately pinned historical bridge on an isolated copy before the current migrator. The native historical authority qualification does not establish preservation of old browser pending edits or uploads with lost acknowledgements; those require dedicated replica fixtures before automatic publication. Until then, retain/export the original for explicit recovery and never treat an unsupported profile as permission to delete it.
