@@ -36,3 +36,23 @@ Old tabs know only the old namespace and cannot modify the new destination. Thei
 Before target-format writes are accepted, a failed candidate leaves the original authority/catalog available under the write barrier. Recover using its exact catalog provenance and verified backup, or retry forward. After target-format writes are accepted, do not restore a stale source or downgrade the runtime. Recover forward while preserving new writes and upload receipt identities.
 
 No production mutation or deployment has been performed during this implementation's validation. The read-only inventory found catalog discrepancies; detailed inventories and qualification copies remain local investigation evidence, not deployment inputs that can be silently assumed current.
+
+Retaining unreferenced physical sources
+--------------------------------------
+
+A reviewed nonlive source can remain at its original physical prefix with a
+`.lix-quarantine/<storage-id>.json` manifest. This does not create a hosted
+repository or certify that the source is empty. Inventory verifies every
+object's byte length and BLAKE3 digest and the exact object set; changed,
+malformed, or already catalogued sources block fleet migration.
+
+`scripts/retain-unreferenced-storage.py PLAN.json OUTPUT_DIR --control-inventory CONTROL.json`
+produces reviewable manifests without publishing them. The plan contains the
+BLAKE3 digest of the exact control inventory and explicit `storageId`/`reason`
+entries. The tool rejects live control IDs and catalogued physical sources.
+Use standard AWS credentials plus explicit `S3_ENDPOINT`, `S3_BUCKET`, and
+nonempty `S3_PREFIX`. Install `boto3` and `blake3` in the operator environment.
+After the writer/restart barrier is established, `--publish --writers-stopped`
+re-verifies the sources and publishes manifests with create-only writes.
+Original objects are retained. This disposition must never be used to hide a
+live repository whose source still needs migration.

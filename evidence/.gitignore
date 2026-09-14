@@ -11,3 +11,7 @@ browser-diagnostics/
 # Test logs are local validation output, summarized in IMPLEMENTATION.md.
 *.log
 posthog-*.json
+
+# Historical copy reports contain production repository identifiers.
+historical*.json
+current-legacy-copy-cohort.json
