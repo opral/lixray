@@ -82,32 +82,32 @@ void test("counts working changes through the status bar's own diff", () => {
 	assert.match(WORKING_CHANGE_SQL, /FROM lix_diff\('lix_file'\)/);
 	assert.match(WORKING_CHANGE_SQL, /count\(\*\) AS file_count/i);
 	// The listing marks its rows from the same working diff the status bar
-	// counts, one row per changed file. lix_diff rejects a bare star (it
-	// would project file content), so the columns stay explicit.
+	// counts, one row per changed file. Keep explicit columns to avoid
+	// projecting file content into a metadata-only listing.
 	assert.match(WORKING_FILE_DIFF_SQL, /FROM lix_diff\('lix_file'\)/);
 	assert.doesNotMatch(WORKING_FILE_DIFF_SQL, /SELECT \*/);
 	for (const column of ["diff_type", "from_path", "to_path"])
 		assert.match(WORKING_FILE_DIFF_SQL, new RegExp(column));
 	assert.match(WORKING_FILE_DIFF_SQL, /coalesce\(to_path, from_path\) AS path/);
-	assert.match(WORKING_CHANGE_SQL, /sum\(row_count\), 0\) AS change_count/i);
+	assert.doesNotMatch(WORKING_CHANGE_SQL, /row_count/);
 });
 
 void test("words the Changes headline like the status bar", () => {
-	assert.deepEqual(describeWorkingChanges(1, 4), {
+	assert.deepEqual(describeWorkingChanges(1), {
 		count: 1,
 		label: "file changed since checkpoint",
 	});
-	assert.deepEqual(describeWorkingChanges(3, 9), {
+	assert.deepEqual(describeWorkingChanges(3), {
 		count: 3,
 		label: "files changed since checkpoint",
 	});
-	assert.deepEqual(describeWorkingChanges(0, 0), {
+	assert.deepEqual(describeWorkingChanges(0), {
 		count: 0,
-		label: "changes since checkpoint",
+		label: "files changed since checkpoint",
 	});
-	assert.deepEqual(describeWorkingChanges(null, null), {
+	assert.deepEqual(describeWorkingChanges(null), {
 		count: 0,
-		label: "changes since checkpoint",
+		label: "files changed since checkpoint",
 	});
 });
 

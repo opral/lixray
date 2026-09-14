@@ -31,6 +31,20 @@ const files: Entry[] = [
 		content: new TextEncoder().encode("Child"),
 	},
 ];
+if (
+	typeof location !== "undefined" &&
+	new URLSearchParams(location.search).has("readme")
+) {
+	// The README preview is its own mode: it adds a row the selection tests
+	// count, so only the test that measures the seam opts in.
+	files.push({
+		id: "readme",
+		path: "/README.md",
+		content: new TextEncoder().encode(
+			"# Acme\n\nOne company. One shared repository.\n",
+		),
+	});
+}
 const calls: { sql: string; params: unknown[] }[] = [];
 let writeDelay = 0;
 let failNextWrite = false;
@@ -245,6 +259,7 @@ function App() {
 	const [dirPath, setDirPath] = useState("/");
 	const params = new URLSearchParams(location.search);
 	const readOnly = params.has("readonly");
+	const [reviewOpen, setReviewOpen] = useState(params.has("review"));
 	const diffSession = params.has("review-empty")
 		? ({
 				target: { working: true },
@@ -257,7 +272,7 @@ function App() {
 					base: null,
 					files: [],
 				} as unknown as AtelierDiffSession)
-			: params.has("review")
+			: reviewOpen
 				? ({
 						target: { working: true },
 						base: null,
@@ -269,6 +284,9 @@ function App() {
 				: null;
 	return (
 		<main style={{ height: "100vh" }}>
+			<button onClick={() => setReviewOpen((open) => !open)}>
+				Toggle review
+			</button>
 			<div data-testid="current-directory">{dirPath}</div>
 			<DirectoryView
 				lix={lix}

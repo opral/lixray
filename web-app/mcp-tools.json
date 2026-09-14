@@ -381,7 +381,7 @@
 	{
 		"name": "read_files",
 		"title": "LixRay: Read files",
-		"description": "Read files by absolute path. Each returns id, canonical url, size, content as { text } when the bytes are UTF-8 (else { base64 }), and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to write_files as last_seen_commit_id.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
+		"description": "Read files by absolute path. Each returns id, canonical url, size, content as text, and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). A file whose bytes are not text, or that is over a megabyte, comes back with no content and an encoding of \"binary\" or \"too-large\" saying why; read its bytes with SQL (SELECT content FROM lix_file WHERE path = $1) when you need them. Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to write_files as last_seen_commit_id.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -436,28 +436,11 @@
 								"maximum": 9007199254740991
 							},
 							"content": {
-								"anyOf": [
-									{
-										"type": "object",
-										"properties": {
-											"text": {
-												"type": "string"
-											}
-										},
-										"required": ["text"],
-										"additionalProperties": false
-									},
-									{
-										"type": "object",
-										"properties": {
-											"base64": {
-												"type": "string"
-											}
-										},
-										"required": ["base64"],
-										"additionalProperties": false
-									}
-								]
+								"type": "string"
+							},
+							"encoding": {
+								"type": "string",
+								"enum": ["binary", "too-large"]
 							},
 							"lixcol_metadata": {
 								"anyOf": [
@@ -474,14 +457,7 @@
 								]
 							}
 						},
-						"required": [
-							"id",
-							"path",
-							"url",
-							"size",
-							"content",
-							"lixcol_metadata"
-						],
+						"required": ["id", "path", "url", "size", "lixcol_metadata"],
 						"additionalProperties": false
 					}
 				},
@@ -511,7 +487,7 @@
 	{
 		"name": "write_files",
 		"title": "LixRay: Write files",
-		"description": "Create or update files in one atomic commit, parent directories included. Each file takes content as { text } or { base64 } and, optionally, lixcol_metadata (omitted keeps it, an object replaces it, null clears it); metadata alone updates an existing file. With last_seen_commit_id, a file that changed since that commit refuses the whole write: the error carries current_commit_id and the current content of the conflicting files, so merge and write again; unrelated changes never block. checkpoint: true marks the resulting commit. A successful write is already saved; read back if its outcome is uncertain or validation is requested. Rename, delete, and everything else: execute_sql on lix_file and lix_directory.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
+		"description": "Create or update files in one atomic commit, parent directories included. Each file takes content (text) or content_base64 (bytes), not both, and optionally lixcol_metadata (omitted keeps it, an object replaces it, null clears it); metadata alone updates an existing file. With last_seen_commit_id, a file that changed since that commit refuses the whole write: the error carries current_commit_id and the current content of the conflicting files, so merge and write again; unrelated changes never block. checkpoint: true marks the resulting commit. A successful write is already saved; read back if its outcome is uncertain or validation is requested. A write to a file LixRay can render (Markdown, CSV) returns the change as a card the reader can see, so describe the edit in a sentence rather than repeating the diff. Rename, delete, and everything else: execute_sql on lix_file and lix_directory.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -533,28 +509,10 @@
 								"minLength": 1
 							},
 							"content": {
-								"anyOf": [
-									{
-										"type": "object",
-										"properties": {
-											"text": {
-												"type": "string"
-											}
-										},
-										"required": ["text"],
-										"additionalProperties": false
-									},
-									{
-										"type": "object",
-										"properties": {
-											"base64": {
-												"type": "string"
-											}
-										},
-										"required": ["base64"],
-										"additionalProperties": false
-									}
-								]
+								"type": "string"
+							},
+							"content_base64": {
+								"type": "string"
 							},
 							"lixcol_metadata": {
 								"anyOf": [
@@ -620,9 +578,32 @@
 				},
 				"checkpoint_commit_id": {
 					"type": "string"
+				},
+				"commit": {
+					"anyOf": [
+						{
+							"type": "object",
+							"properties": {
+								"before": {
+									"type": "string"
+								},
+								"after": {
+									"type": "string"
+								}
+							},
+							"required": ["before", "after"],
+							"additionalProperties": false
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"warning": {
+					"type": "string"
 				}
 			},
-			"required": ["context", "commit_id", "files"],
+			"required": ["context", "files", "commit"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -809,9 +790,29 @@
 						"notices": {
 							"type": "array",
 							"items": {}
+						},
+						"commit": {
+							"anyOf": [
+								{
+									"type": "object",
+									"properties": {
+										"before": {
+											"type": "string"
+										},
+										"after": {
+											"type": "string"
+										}
+									},
+									"required": ["before", "after"],
+									"additionalProperties": false
+								},
+								{
+									"type": "null"
+								}
+							]
 						}
 					},
-					"required": ["columns", "rows", "rowsAffected", "notices"],
+					"required": ["columns", "rows", "rowsAffected", "notices", "commit"],
 					"additionalProperties": false
 				}
 			},
@@ -996,6 +997,26 @@
 					"minLength": 1,
 					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
 				},
+				"commit": {
+					"anyOf": [
+						{
+							"type": "object",
+							"properties": {
+								"before": {
+									"type": "string"
+								},
+								"after": {
+									"type": "string"
+								}
+							},
+							"required": ["before", "after"],
+							"additionalProperties": false
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
 				"results": {
 					"type": "array",
 					"items": {
@@ -1030,7 +1051,7 @@
 					}
 				}
 			},
-			"required": ["context", "results"],
+			"required": ["context", "commit", "results"],
 			"additionalProperties": false
 		},
 		"annotations": {

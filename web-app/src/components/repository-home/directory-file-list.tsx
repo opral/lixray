@@ -560,7 +560,14 @@ export function DirectoryFileList({
 				dragAndDropHooks={readOnly ? undefined : dragAndDropHooks}
 				aria-busy={busy}
 				data-testid="home-entry-list"
-				dependencies={[busy, readOnly, paths.length > 0]}
+				dependencies={[
+					busy,
+					readOnly,
+					paths.length > 0,
+					changedFileKinds,
+					changedDirKinds,
+					reviewFocus,
+				]}
 				className="-ml-6 sm:-ml-9 flex min-h-24 flex-col gap-px rounded-lg outline-none data-[drop-target]:bg-bg-hover data-[drop-target]:ring-2 data-[drop-target]:ring-ring-focus-visible"
 				renderEmptyState={() => (
 					<div className="rounded-lg border border-dashed border-border-panel px-6 py-12 text-center text-sm text-text-tertiary">

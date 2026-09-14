@@ -1046,12 +1046,8 @@ function ChangeBars({
 }) {
 	const days = data.changeDays;
 	if (days === null) {
-		const working = describeWorkingChanges(
-			data.workingFileCount,
-			data.workingChangeCount,
-		);
-		const available =
-			data.workingFileCount !== null && data.workingChangeCount !== null;
+		const working = describeWorkingChanges(data.workingFileCount);
+		const available = data.workingFileCount !== null;
 		return (
 			<div className="mt-2.5">
 				{available ? (
@@ -1082,10 +1078,7 @@ function ChangeBars({
 	const latestCheckpointDay = data.checkpointDates?.[0]?.slice(0, 10) ?? null;
 	// The headline is the status bar's number: files whose working state
 	// differs from the checkpoint. The bars stay a day-by-day activity graph.
-	const working = describeWorkingChanges(
-		data.workingFileCount,
-		data.workingChangeCount,
-	);
+	const working = describeWorkingChanges(data.workingFileCount);
 	const headlineCount = working.count;
 	const visibleDays = days.length > 0 ? days : [{ day: "", count: 0 }];
 	const paddedDays = [
@@ -1570,8 +1563,9 @@ function ReadmePreview({
 	// closes the file list and carries a caption (icon, file name, Edit) in
 	// the list's own tertiary type, so it reads as the list's footer and the
 	// document's byline at once. The rule starts where a row's hover ground
-	// starts, the caption's icon sits on the rows' icon column, and the
-	// document below starts where the rule starts.
+	// starts, and everything under it — the caption and the document — keeps
+	// the rows' own inset, so the text sits on the rows' icon column and ends
+	// where their right edge does.
 	return (
 		<section
 			aria-label={`${fileName} preview`}
@@ -1605,8 +1599,8 @@ function ReadmePreview({
 			{/* Click delegation only augments the anchors inside, which stay
 			    keyboard-accessible on their own. */}
 			{/* The standalone file view strips the document's page padding, so
-			    the section owns its inner margins: the document spans exactly
-			    the width of the rule above it, with a heading's beat below. */}
+			    the section owns its inner margins: the same inset the rows and
+			    the caption carry, with a heading's beat below. */}
 			<div
 				data-testid="home-readme"
 				onClick={(event) => {
@@ -1617,7 +1611,7 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
-				className="pt-2 pb-9"
+				className="px-3 pt-2 pb-9"
 			>
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
