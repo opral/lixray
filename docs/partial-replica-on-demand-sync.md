@@ -38,12 +38,23 @@ lost acknowledgment preserves the original acceptance order, and newer local
 edits remain pending. No foreground server round trip is required for resident
 reads and writes.
 
-The native engine can prepare a plugin-managed file's parsed rows and executable
-through a content SELECT when its host supplies a plugin runtime. The current
-browser SDK does not execute installed WASM file plugins locally. Such files can
-be read, but local edits requiring their parser or serializer remain unsupported;
-server/native plugin row merging uses the shared pipeline. This is distinct from
-opaque file editing, which the browser supports locally.
+The engine can prepare a plugin-managed file's parsed rows and executable through
+a content SELECT when its host supplies a plugin runtime. The browser SDK now
+supplies that runtime and executes installed Wasm file plugins locally through
+the shared JavaScript Component host. Local plugin-managed editing, including
+parsing file edits and serializing SQL row edits, is supported. Server/native
+plugin row merging continues to use the shared pipeline. Partial replicas still
+need the required plugin executable, schema metadata, and file inputs resident
+before an edit can run offline; a cold operation can require hydration.
+
+This support is present in Lixray's pinned Lix revision
+[`b43c44827d8abb4368958a04ea82e04691a4022e`](https://github.com/opral/lix/tree/b43c44827d8abb4368958a04ea82e04691a4022e).
+The [browser binding](https://github.com/opral/lix/blob/b43c44827d8abb4368958a04ea82e04691a4022e/packages/js-sdk/native/wasm.rs)
+installs the runtime when opening the engine. The
+[Chromium plugin execution contract](https://github.com/opral/lix/blob/b43c44827d8abb4368958a04ea82e04691a4022e/packages/js-sdk/tests/plugin-execution-contract.ts)
+covers CSV parsing, SQL-edit serialization, plugin merges, and Markdown editing
+after snapshot restore. These tests are included in the successful
+[browser SDK CI run](https://github.com/opral/lix/actions/runs/34807357541).
 
 The first SQL read can also prepare registered schema metadata needed to open
 later local write transactions, without loading rows from those schemas.
@@ -55,7 +66,7 @@ That preparation can grow with file count; content-only edits to an already
 loaded file do not need this namespace scan. This does not add repository-wide
 work to opening.
 
-The SDK and reference server use Lix main revision
+The original rollout used SDK and reference server Lix main revision
 `c8fb003d78d8ffb2e1b694676827229fb4006b0c`, including
 [Lix PR #1758](https://github.com/opral/lix/pull/1758),
 [Lix PR #1759](https://github.com/opral/lix/pull/1759),
@@ -95,9 +106,11 @@ A separate 96 KiB opaque-file test passed both acceptance orders with 16 rows,
 16,000 rows, and 320 MiB unrelated content. SELECT-only prefetch supported first
 offline writes with zero hydration attempts, and both replicas converged after
 reconnection. Cold file preparation measured approximately 0.40/0.59/3.07 seconds
-across those dimensions; it is not constant-cost. The parsed-file browser profile
-reached the unsupported plugin-runtime boundary described above and is not
-reported as passing.
+across those dimensions; it is not constant-cost. At the time, the parsed-file
+browser profile reached the then-unsupported plugin-runtime boundary and was not
+reported as passing. Browser plugin execution is now supported as described
+above, but that historical partial-replica profile has not been rerun here and
+does not establish current parsed-file offline or convergence performance.
 
 Pending edits and checkpoint dependencies upload in bounded waves. A single
 native commit or minimal checkpoint publication closure over the 1 MiB JSON

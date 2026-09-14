@@ -3446,11 +3446,16 @@ void test("published entity boot resolves a UUID with a fixed query before autho
 
 for (const [endpoint, method] of [
 	["/sync/descriptor", "GET"],
+	["/sync/update", "POST"],
 	["/sync/native-objects", "POST"],
 	["/sync/native-object-range", "POST"],
 	["/sync/native-metadata", "POST"],
 	["/sync/baseline-lease/renew", "POST"],
 ] as const) {
+	const payload =
+		endpoint === "/sync/update"
+			? { branchId: LIX_A, after: 0, knownCursor: 0, interests: [] }
+			: { bounded: "native request" };
 	for (const scope of ["repository", "path"] as const) {
 		void test(`partial hydration ${endpoint} requires repository public access (${scope})`, async () => {
 			let proxied = false;
@@ -3461,9 +3466,7 @@ for (const [endpoint, method] of [
 						"x-lixray-public-path": "/finance",
 						"content-type": "application/json",
 					},
-					...(method === "POST"
-						? { body: JSON.stringify({ bounded: "native request" }) }
-						: {}),
+					...(method === "POST" ? { body: JSON.stringify(payload) } : {}),
 				}),
 				env({}),
 				{
@@ -3473,9 +3476,7 @@ for (const [endpoint, method] of [
 						assert.equal(request.method, method);
 						assert.equal(request.headers.get("authorization"), null);
 						if (method === "POST")
-							assert.deepEqual(await request.json(), {
-								bounded: "native request",
-							});
+							assert.deepEqual(await request.json(), payload);
 						return Response.json({ ok: true });
 					},
 				},
