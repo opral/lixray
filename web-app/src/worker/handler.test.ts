@@ -3449,9 +3449,10 @@ for (const [endpoint, method] of [
 	["/sync/native-metadata", "POST"],
 	["/sync/baseline-lease/renew", "POST"],
 ] as const) {
-	const payload = endpoint === "/sync/update"
-		? { branchId: LIX_A, after: 0, knownCursor: 0, interests: [] }
-		: { bounded: "native request" };
+	const payload =
+		endpoint === "/sync/update"
+			? { branchId: LIX_A, after: 0, knownCursor: 0, interests: [] }
+			: { bounded: "native request" };
 	for (const scope of ["repository", "path"] as const) {
 		void test(`partial hydration ${endpoint} requires repository public access (${scope})`, async () => {
 			let proxied = false;
@@ -3462,9 +3463,7 @@ for (const [endpoint, method] of [
 						"x-lixray-public-path": "/finance",
 						"content-type": "application/json",
 					},
-					...(method === "POST"
-						? { body: JSON.stringify(payload) }
-						: {}),
+					...(method === "POST" ? { body: JSON.stringify(payload) } : {}),
 				}),
 				env({}),
 				{
