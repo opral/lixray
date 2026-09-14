@@ -1207,11 +1207,12 @@ export async function createSyncFixture({
 						replicas.map(({ context }) => context.setOffline(true)),
 					);
 					await Promise.all(
-						replicas.map(async ({ page, view }, index) => {
-							await view.locator("p").last().click();
-							await page.keyboard.press("Home");
-							await page.keyboard.press("Shift+End");
-							await page.keyboard.insertText(markers[index]!);
+						replicas.map(async ({ view }, index) => {
+							// Replace this paragraph as one input action. Separate Home /
+							// Shift+End events depend on a transient selection.
+							const paragraph = view.locator("p").last();
+							await paragraph.fill(markers[index]!);
+							await expect(paragraph).toHaveText(markers[index]!);
 						}),
 					);
 					// The other tab in each profile proves durable local publication,
