@@ -2447,7 +2447,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 				path: "/skills/hello.md",
 				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
 				size: 8,
-				content: { text: "# Hello\n" },
+				content: "# Hello\n",
 				lixcol_metadata: null,
 			},
 		]);
@@ -2463,7 +2463,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 				files: [
 					{
 						path: "/gtm/campaigns/icp.md",
-						content: { text: "# ICP" },
+						content: "# ICP",
 						lixcol_metadata: { atelier_csv: { version: 1, columns: [] } },
 					},
 					{ path: "/skills/hello.md", lixcol_metadata: null },
@@ -2540,8 +2540,8 @@ void test("file tools list, read, and write files with metadata and conflict che
 				context,
 				last_seen_commit_id: "commit-0",
 				files: [
-					{ path: "/skills/hello.md", content: { text: "# Hello again" } },
-					{ path: "/other.md", content: { text: "x" } },
+					{ path: "/skills/hello.md", content: "# Hello again" },
+					{ path: "/other.md", content: "x" },
 				],
 			},
 		});
@@ -2554,7 +2554,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			files: [
 				{
 					path: "/skills/hello.md",
-					content: { text: "# Hello\n" },
+					content: "# Hello\n",
 					lixcol_metadata: null,
 				},
 			],
@@ -2566,7 +2566,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			arguments: {
 				context,
 				last_seen_commit_id: "commit-0",
-				files: [{ path: "/other.md", content: { text: "x" } }],
+				files: [{ path: "/other.md", content: "x" }],
 			},
 		});
 		assert.equal(unrelated.isError, undefined, JSON.stringify(unrelated));
@@ -2575,7 +2575,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			arguments: {
 				context,
 				last_seen_commit_id: "unknown-commit",
-				files: [{ path: "/other.md", content: { text: "y" } }],
+				files: [{ path: "/other.md", content: "y" }],
 			},
 		});
 		assert.equal(unknown.isError, true);

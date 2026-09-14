@@ -120,7 +120,10 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /outcome is unknown/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /create_checkpoint/);
 	// The file tools carry the file guide the SQL cards used to.
-	assert.match(READ_FILES_TOOL_DESCRIPTION, /\{ text \}/);
+	// A read hands over text, and names the reason when it cannot.
+	assert.match(READ_FILES_TOOL_DESCRIPTION, /content as text/);
+	assert.match(READ_FILES_TOOL_DESCRIPTION, /"binary" or "too-large"/);
+	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /content_base64/);
 	assert.match(READ_FILES_TOOL_DESCRIPTION, /atelier_csv/);
 	assert.match(READ_FILES_TOOL_DESCRIPTION, /last_seen_commit_id/);
 	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /parent directories included/);

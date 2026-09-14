@@ -430,10 +430,7 @@ const entityUrlsOutput = withError(
 		),
 	}),
 );
-const fileContent = z.union([
-	z.object({ text: z.string() }).strict(),
-	z.object({ base64: z.string() }).strict(),
-]);
+
 const fileMetadata = z.record(z.string(), z.unknown());
 const listedFile = z
 	.object({ id: z.string(), path: z.string(), url: z.string() })
@@ -457,7 +454,9 @@ const readFilesOutput = withError(
 					path: z.string(),
 					url: z.string(),
 					size: z.number().int(),
-					content: fileContent,
+					/** The file's text; absent when `encoding` says why it is not. */
+					content: z.string().optional(),
+					encoding: z.enum(["binary", "too-large"]).optional(),
 					lixcol_metadata: fileMetadata.nullable(),
 				})
 				.strict(),
@@ -810,7 +809,8 @@ export function createLixrayMcpServer(
 						z
 							.object({
 								path: z.string().min(1),
-								content: fileContent.optional(),
+								content: z.string().optional(),
+								content_base64: z.string().optional(),
 								lixcol_metadata: fileMetadata.nullable().optional(),
 							})
 							.strict(),

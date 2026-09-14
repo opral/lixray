@@ -2,11 +2,11 @@ import { entityRoutePath } from "../lib/entity-url.ts";
 import {
 	CHANGED_FILES_SQL,
 	READ_FILES_SQL,
-	encodeFileContent,
+	readFileContent,
 	escapeLike,
 	fileWriteStatements,
 	normalizeFilePath,
-	type FileContent,
+	type FileRead,
 	type FileWrite,
 } from "./file-tools.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
@@ -665,18 +665,29 @@ export class LixService {
 		const paths = files.map((file) => file.path);
 		if (new Set(paths).size !== paths.length)
 			throw createLixError("invalid_request", "Each path may appear once.");
-		const metadataOnly = files
-			.filter((file) => file.content === undefined)
-			.map((file) => file.path);
 		if (
 			files.some(
 				(file) =>
-					file.content === undefined && file.lixcol_metadata === undefined,
+					file.content !== undefined && file.content_base64 !== undefined,
 			)
 		)
 			throw createLixError(
 				"invalid_request",
-				"A file needs content, lixcol_metadata, or both.",
+				"A file takes content or content_base64, not both.",
+			);
+		const hasContent = (file: (typeof files)[number]): boolean =>
+			file.content !== undefined || file.content_base64 !== undefined;
+		const metadataOnly = files
+			.filter((file) => !hasContent(file))
+			.map((file) => file.path);
+		if (
+			files.some(
+				(file) => !hasContent(file) && file.lixcol_metadata === undefined,
+			)
+		)
+			throw createLixError(
+				"invalid_request",
+				"A file needs content, content_base64, lixcol_metadata, or both.",
 			);
 		if (input.lastSeenCommitId !== undefined) {
 			const head = await this.commitId(context.lixId, context.branchId);
@@ -698,7 +709,9 @@ export class LixService {
 								current_commit_id: head,
 								files: current.map((file) => ({
 									path: file.path,
-									content: file.content,
+									...(file.content !== undefined
+										? { content: file.content }
+										: { encoding: file.encoding }),
 									lixcol_metadata: file.lixcol_metadata,
 								})),
 							},
@@ -722,10 +735,7 @@ export class LixService {
 		// as many files as the caller will render.
 		const previewTargets = files
 			.filter(
-				(file) =>
-					file.content !== undefined &&
-					"text" in file.content &&
-					isPreviewablePath(file.path),
+				(file) => file.content !== undefined && isPreviewablePath(file.path),
 			)
 			.slice(0, Math.max(0, input.previews ?? 0));
 		const previousText = await this.textBeforeWrite(
@@ -760,7 +770,7 @@ export class LixService {
 			this.entityUrl(context, origin),
 		]);
 		const previews = previewTargets.flatMap((file) => {
-			const after = file.content ? fileContentText(file.content) : null;
+			const after = file.content ?? null;
 			if (after === null) return [];
 			const existed = previousText.has(file.path);
 			const before = previousText.get(file.path) ?? null;
@@ -855,7 +865,7 @@ export class LixService {
 			byPath.set(path.value, {
 				id: id.value,
 				path: path.value,
-				...encodeFileContent(base64ToBytes(content.base64)),
+				...readFileContent(base64ToBytes(content.base64)),
 				lixcol_metadata:
 					metadata?.kind === "json" &&
 					metadata.value !== null &&
@@ -887,9 +897,7 @@ export class LixService {
 		if (paths.length === 0) return new Map();
 		try {
 			const existing = await this.fileRows(context, paths);
-			return new Map(
-				existing.map((file) => [file.path, fileContentText(file.content)]),
-			);
+			return new Map(existing.map((file) => [file.path, file.content ?? null]));
 		} catch {
 			return new Map(paths.map((path) => [path, null]));
 		}
@@ -1186,10 +1194,8 @@ const EMPTY_RESPONSE: ExecuteResponse = {
 export type ReadFile = {
 	id: string;
 	path: string;
-	content: FileContent;
-	size: number;
 	lixcol_metadata: Record<string, unknown> | null;
-};
+} & FileRead;
 
 export type ReadFilesResult = {
 	context: string;
@@ -1210,11 +1216,6 @@ function isPreviewablePath(path: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-/** The text of a file's content, or null when it is not text. */
-function fileContentText(content: FileContent): string | null {
-	return "text" in content ? content.text : null;
 }
 
 function normalizeFilePathOrThrow(path: string): string {

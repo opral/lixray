@@ -46,11 +46,17 @@ diagnostic timestamps or identifiers.
 
 - `list_lixes`, `open_lix`: find a Lix and mint its context (see below).
 - `list_files`, `read_files`, `write_files`: the file path. `read_files`
-  returns bytes as `{ text }` (UTF-8) or `{ base64 }`, `lixcol_metadata`,
-  size, id, canonical `url`, and the `commit_id` the read reflects.
+  returns `content` as text, `lixcol_metadata`, size, id, canonical `url`,
+  and the `commit_id` the read reflects. A file whose bytes are not UTF-8,
+  or that is over a megabyte, comes back with no `content` and an
+  `encoding` of `binary` or `too-large` saying which — base64 of an image
+  is not something the reader asking for it can use, and bytes are fetched
+  deliberately with `SELECT content FROM lix_file WHERE path = $1`.
   `write_files` creates or updates files in one atomic commit, parents
-  included, with content, `lixcol_metadata` (omitted keeps, an object
-  replaces, `null` clears), an optional `checkpoint: true`, and
+  included, with `content` (text) or `content_base64` (bytes) — which field
+  you use is the encoding, so there is nothing to infer —
+  `lixcol_metadata` (omitted keeps, an object replaces, `null` clears), an
+  optional `checkpoint: true`, and
   `last_seen_commit_id`: a target file that changed since that commit refuses
   the whole write, and the error carries `current_commit_id` and the current
   contents of the conflicting files; unrelated changes never block. The

@@ -769,13 +769,13 @@ void test("a preview reads the before side, bounded by what the caller shows", a
 		originKey: "mcp:test",
 		previews: 2,
 		files: [
-			{ path: "/notes.md", content: { text: "# Notes\n\nAnd more.\n" } },
-			{ path: "/new.md", content: { text: "# New\n" } },
+			{ path: "/notes.md", content: "# Notes\n\nAnd more.\n" },
+			{ path: "/new.md", content: "# New\n" },
 			// Past the caller's budget: never read.
-			{ path: "/third.md", content: { text: "# Third\n" } },
+			{ path: "/third.md", content: "# Third\n" },
 			// Not Markdown, and not text: neither is previewed.
-			{ path: "/data.csv", content: { text: "a,b\n" } },
-			{ path: "/image.md", content: { base64: "AAECAw==" } },
+			{ path: "/data.csv", content: "a,b\n" },
+			{ path: "/image.md", content_base64: "AAECAw==" },
 		],
 	});
 
@@ -805,7 +805,7 @@ void test("a preview never costs the write", async () => {
 	const written = await service.writeFiles(opened.context, {
 		originKey: "mcp:test",
 		previews: 3,
-		files: [{ path: "/notes.md", content: { text: "# Notes again\n" } }],
+		files: [{ path: "/notes.md", content: "# Notes again\n" }],
 	});
 
 	// The file is written; there is simply nothing to show.
@@ -830,7 +830,7 @@ void test("a before side that is not text is left uncarded, not called new", asy
 	const written = await service.writeFiles(opened.context, {
 		originKey: "mcp:test",
 		previews: 3,
-		files: [{ path: "/notes.md", content: { text: "# Notes\n" } }],
+		files: [{ path: "/notes.md", content: "# Notes\n" }],
 	});
 
 	assert.equal(written.previews, undefined);
@@ -847,7 +847,7 @@ void test("no previews asked for, no read taken", async () => {
 
 	const written = await service.writeFiles(opened.context, {
 		originKey: "mcp:test",
-		files: [{ path: "/notes.md", content: { text: "# Notes again\n" } }],
+		files: [{ path: "/notes.md", content: "# Notes again\n" }],
 	});
 
 	assert.equal(written.previews, undefined);
