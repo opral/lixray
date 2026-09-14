@@ -109,7 +109,7 @@ export function createAtelierTelemetryHandler(
 			case "extension_opened":
 				capture(PRODUCT_EVENTS.extensionOpened, {
 					extension_id: normalizeExtensionId(event.extensionId),
-					panel: event.panel,
+					panel: event.area,
 				});
 				break;
 			case "diff_opened":

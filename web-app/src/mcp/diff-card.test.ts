@@ -121,7 +121,7 @@ void test("a long change is trimmed, and the body says what is missing", () => {
 	assert.ok(card.hidden > 30, `hidden ${card.hidden}`);
 	assert.ok(byteLength(card.html) <= 24_000, `size ${byteLength(card.html)}`);
 	assert.match(card.html, /⋯ \d+ unchanged lines/);
-	assert.doesNotMatch(card.html, /more lines in LixRay/);
+	assert.doesNotMatch(card.html, /more entries in LixRay/);
 	assert.match(card.html, /The new one/);
 });
 
@@ -200,6 +200,50 @@ void test("content a writer controls cannot become markup in the card", () => {
 	// asks the reader's client to fetch it.
 	assert.doesNotMatch(card.html, /<img/);
 	assert.doesNotMatch(card.html, /p\.gif/);
+});
+
+void test("a diff that fits the card is shown, not summarised away", () => {
+	// The frame carries the whole stylesheet. Guessing its size sent
+	// mid-sized diffs — the common case — to a bare link.
+	const line = `- ${"word ".repeat(140)}`;
+	const before = Array.from({ length: 30 }, () => line).join("\n");
+	const after = before.replace("word word word", "word CHANGED word");
+	const card = renderDiffCard({
+		path: "/CHANGELOG.md",
+		url: URL_FOR("/CHANGELOG.md"),
+		before: bytes(`${before}\n`),
+		after: bytes(`${after}\n`),
+	});
+
+	assert.ok(card);
+	assert.match(card.html, /class="body"/);
+	assert.match(card.html, /CHANGED/);
+	assert.ok(byteLength(card.html) <= 24_000, `size ${byteLength(card.html)}`);
+});
+
+void test("a path no header could show still makes a card that fits", () => {
+	const card = renderDiffCard({
+		path: `/docs/${"n".repeat(5_600)}.md`,
+		url: URL_FOR("/docs/long.md"),
+		after: bytes("# Hi\n"),
+	});
+
+	assert.ok(card);
+	assert.ok(byteLength(card.html) <= 24_000, `size ${byteLength(card.html)}`);
+	// The tail identifies the file; the ellipsis goes in the middle.
+	assert.match(card.html, /…/);
+});
+
+void test("a deleted file reads as deleted", () => {
+	const card = renderDiffCard({
+		path: "/old.md",
+		url: URL_FOR("/old.md"),
+		before: bytes("# Old\n\nOne paragraph.\n"),
+	});
+
+	assert.ok(card);
+	assert.equal(card.kind, "removed");
+	assert.match(card.html, /deleted · 2 entries/);
 });
 
 function byteLength(value: string): number {

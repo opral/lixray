@@ -1198,9 +1198,18 @@ export type ReadFilesResult = {
 	missing: string[];
 };
 
-/** Files whose change a reader can be shown inline. */
+/**
+ * Files whose change a reader can be shown inline.
+ *
+ * This runs on the write's path, so it answers rather than throws: a card is
+ * a courtesy, and a write that would have succeeded still succeeds.
+ */
 function isPreviewablePath(path: string): boolean {
-	return isRenderablePath(path);
+	try {
+		return isRenderablePath(path);
+	} catch {
+		return false;
+	}
 }
 
 /** The text of a file's content, or null when it is not text. */

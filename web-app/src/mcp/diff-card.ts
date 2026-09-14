@@ -118,6 +118,8 @@ function countsLabel(
 	if (!counts) return kind === "added" ? "new file" : "";
 	if (kind === "added")
 		return `new file · ${counts.added} ${counts.added === 1 ? "entry" : "entries"}`;
+	if (kind === "removed" && counts.removed > 0 && counts.added === 0)
+		return `deleted · ${counts.removed} ${counts.removed === 1 ? "entry" : "entries"}`;
 	const parts: string[] = [];
 	if (counts.added > 0)
 		parts.push(`<span class="plus">+${counts.added}</span>`);
@@ -157,14 +159,14 @@ function cardDocument(args: {
 	readonly tooLarge?: boolean;
 }): string {
 	const segments = args.path.split("/").filter(Boolean);
-	const name = segments.at(-1) ?? args.path;
-	const directory = segments.slice(0, -1).join("/");
+	const name = clip(segments.at(-1) ?? args.path, 64);
+	const directory = clipDirectory(segments.slice(0, -1));
 	// The trimmed body names its own gaps; saying it again reads as a second
 	// set of missing lines.
 	const hiddenNote = args.tooLarge
 		? `<div class="rest">Too much changed to show here — open it in LixRay</div>`
 		: args.hidden > 0 && !args.viewHtml.includes("md-diff-gap")
-			? `<div class="rest">${args.hidden} more ${args.hidden === 1 ? "line" : "lines"} in LixRay</div>`
+			? `<div class="rest">${args.hidden} more ${args.hidden === 1 ? "entry" : "entries"} in LixRay</div>`
 			: "";
 	return `<!doctype html>
 <html lang="en">
@@ -182,7 +184,7 @@ ${CARD_CSS}
 	<header>
 		${glyph(args.kind)}
 		<span class="path">${directory ? `<span class="dir">${escapeHtml(directory)}/</span>` : ""}<span class="name">${escapeHtml(name)}</span></span>
-		<span class="counts">${countsLabel(args.counts, args.kind)}</span>
+		<span class="counts">${args.tooLarge ? "too large" : countsLabel(args.counts, args.kind)}</span>
 	</header>
 	${args.viewHtml ? `<div class="body">${args.viewHtml}</div>` : ""}
 	${hiddenNote}
@@ -193,6 +195,21 @@ ${CARD_CSS}
 </article>
 </body>
 </html>`;
+}
+
+/**
+ * A path's last two folders, which is what tells a reader where they are.
+ * Trimming the tail with an ellipsis would keep the half that does not.
+ */
+function clipDirectory(segments: readonly string[]): string {
+	if (segments.length === 0) return "";
+	const tail = segments.slice(-2).map((segment) => clip(segment, 24));
+	return `${segments.length > 2 ? "…/" : ""}${tail.join("/")}`;
+}
+
+/** A name longer than this is not a name a header can show. */
+function clip(value: string, limit: number): string {
+	return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
 }
 
 /** The card's own chrome. Atelier owns the view; LixRay owns the frame. */
@@ -216,6 +233,7 @@ body { margin: 0; padding: 0; background: transparent; }
 	display: flex;
 	flex: 1;
 	min-width: 0;
+	overflow: hidden;
 	font-size: 13px;
 	font-weight: 500;
 }
@@ -228,7 +246,13 @@ body { margin: 0; padding: 0; background: transparent; }
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.card > header .name { flex: none; white-space: nowrap; }
+.card > header .name {
+	flex: 0 1 auto;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
 .card > header .counts {
 	flex: none;
 	font-size: 12px;
@@ -241,8 +265,8 @@ body { margin: 0; padding: 0; background: transparent; }
 .card > header + .rest { padding-top: 10px; }
 .card .rest {
 	padding: 0 14px 12px;
-	font-size: 12px;
-	color: var(--atelier-ink-subtle);
+	font-size: 13px;
+	color: var(--atelier-ink-muted);
 }
 .card > footer {
 	display: flex;
