@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      promote:
+        description: "Promote only after the authority migration and inventory reconciliation are complete"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: production
@@ -56,7 +62,12 @@ jobs:
       web-image: ${{ needs.web-image.outputs.image }}
       server-image: ${{ needs.server-image.outputs.image }}
 
+  # Hard-cut rollout barrier: pushes and default manual runs build/validate only.
+  # After fleet migration is verified, dispatch this workflow on main with
+  # promote=true. Keep these gates until the cutover is verified; restoring
+  # automatic promotion requires an explicit reviewed change to both jobs.
   database:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.promote == true
     name: Apply database migrations
     needs: validate
     runs-on: ubuntu-latest
@@ -111,6 +122,7 @@ jobs:
         run: supabase db push --linked --dry-run
 
   release:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.promote == true
     name: Promote production release
     needs:
       - database
@@ -118,8 +130,8 @@ jobs:
       - web-image
       - server-image
     runs-on: ubuntu-latest
-    # Promotion can legitimately include the canary waiting through one
-    # bounded, server-owned repository migration.
+    # Authority migration must finish under the external write barrier before
+    # this job starts. Ordinary serving hosts never migrate repositories.
     timeout-minutes: 25
     environment: production
     permissions:
