@@ -81,7 +81,7 @@ export async function installServerImageArtifact({
 
 async function downloadArtifact({ artifactName, manifestPath, revision, log }) {
 	if (process.env.LIXRAY_LIX_ARTIFACTS === "off") {
-		log(`[lix-artifact] Lookup disabled; source build requested for ${revision}.`);
+		log(`[lix-artifact] Lookup disabled for ${revision}; no artifact installed.`);
 		return undefined;
 	}
 	const repository = process.env.LIX_CI_ARTIFACT_REPOSITORY ?? defaultRepository;
@@ -95,7 +95,7 @@ async function downloadArtifact({ artifactName, manifestPath, revision, log }) {
 		if (process.env.LIXRAY_LIX_ARTIFACTS === "only") {
 			throw new Error(`Required Lix CI artifact ${artifactName} could not be checked (${errorMessage(error)}). Check its producer: ${producer}`);
 		}
-		log(`[lix-artifact] Lookup unavailable (${errorMessage(error)}); falling back to source. Producer: ${producer}`);
+		log(`[lix-artifact] Lookup unavailable (${errorMessage(error)}); no artifact installed. Producer: ${producer}`);
 		return undefined;
 	}
 	if (candidate) {
@@ -105,9 +105,7 @@ async function downloadArtifact({ artifactName, manifestPath, revision, log }) {
 		});
 		if (downloaded) return downloaded;
 	}
-	const outcome = process.env.LIXRAY_LIX_ARTIFACTS === "only"
-		? "the required artifact is unavailable" : "compiling the submodule from source";
-	log(`[lix-artifact] MISS ${artifactName}; ${outcome}. Producer: ${producer}`);
+	log(`[lix-artifact] MISS ${artifactName}; artifact unavailable. Build it at https://github.com/${repository}/actions/workflows/ci.yml using the artifact-only action, then retry. Producer: ${producer}`);
 	if (process.env.LIXRAY_LIX_ARTIFACTS === "only") {
 		throw new Error(`Required Lix CI artifact ${artifactName} is unavailable. Check its producer: ${producer}`);
 	}

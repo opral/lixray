@@ -2278,6 +2278,7 @@ function isPublicSyncReadRequest(request: Request, endpoint: string): boolean {
 			].includes(endpoint)) ||
 		(request.method === "POST" &&
 			[
+				"sync/update",
 				"sync/native-objects",
 				"sync/native-object-range",
 				"sync/native-metadata",
