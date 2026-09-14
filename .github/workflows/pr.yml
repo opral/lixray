@@ -242,6 +242,9 @@ jobs:
           name: vendored-lix-sdk
           path: vendor/lix/packages
 
+      - name: Prepare generated web dependencies
+        run: pnpm --dir web-app ci:prepare:web
+
       - name: Log in to GHCR for the tested server image
         uses: docker/login-action@v3
         with:
