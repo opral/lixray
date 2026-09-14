@@ -11,10 +11,10 @@ export async function checkProductionLix({
 	let sessionId;
 	let checkCompleted = false;
 	try {
-		const handshake = await request(fetchImpl, protocolUrl, {headers: {"lix-server-protocol-version": "9"}}, timeoutMs);
+		const handshake = await request(fetchImpl, protocolUrl, {headers: {"lix-server-protocol-version": "10"}}, timeoutMs);
 		if (!handshake.response.ok) throw responseError("handshake", handshake.response, handshake.body);
 		if (
-			handshake.body?.protocolVersion !== 9 ||
+			handshake.body?.protocolVersion !== 10 ||
 			typeof handshake.body?.sessionId !== "string" ||
 			!handshake.body.sessionId
 		) {
@@ -32,7 +32,7 @@ export async function checkProductionLix({
 				headers: {
 					"Content-Type": "application/json",
 					"Lix-Session-Id": sessionId,
-					"lix-server-protocol-version": "9",
+					"lix-server-protocol-version": "10",
 				},
 				body: JSON.stringify({ sql: "SELECT 1", params: [] }),
 			},
@@ -57,7 +57,7 @@ export async function checkProductionLix({
 				new URL("session", protocolUrl),
 				{
 					method: "DELETE",
-					headers: { "Lix-Session-Id": sessionId, "lix-server-protocol-version": "9" },
+					headers: { "Lix-Session-Id": sessionId, "lix-server-protocol-version": "10" },
 				},
 				timeoutMs,
 			).catch((error) => {
