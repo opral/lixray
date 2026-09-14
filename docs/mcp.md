@@ -153,10 +153,14 @@ network of any kind, its stylesheet inlined and its images named rather than
 loaded, because the address in an image is chosen by whoever wrote the
 document.
 
-At most three cards travel with a write. Their before/after bytes come from
-`RETURNING OLD.content, NEW.content` on the mutation itself, so another writer
-cannot change what the card describes, and only those targets project bytes at
-all. Each card is trimmed to what changed, with a note of what was skipped; a change too large for a thread keeps its header and sends the
+At most three cards travel with a write. The write itself carries no bytes
+of the change: it returns the commit span it moved between, and the cards come
+from asking Lix what changed between those two commits — `lix_diff('lix_file',
+before, after)` with `from_content` and `to_content`, for the previewed paths
+only. That is the same question a checkpoint, or any two commits, would be
+asked, so one render path serves every source of a diff; and because the
+answer is keyed to the commits rather than to a moment in time, nothing another
+writer does afterwards changes what the card describes. Each card is trimmed to what changed, with a note of what was skipped; a change too large for a thread keeps its header and sends the
 reader to the file, which is also what a snapshot over 100 KB or one nested
 past two dozen levels gets — rendering walks the whole document, and the
 document was written by whoever is talking to the server.

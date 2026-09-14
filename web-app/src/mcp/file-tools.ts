@@ -128,7 +128,6 @@ export type FileWriteStatement = {
  */
 export function fileWriteStatements(
 	files: readonly FileWrite[],
-	previewPaths: ReadonlySet<string> = new Set(),
 ): FileWriteStatement[] {
 	const statements: FileWriteStatement[] = [];
 	const directories = new Set<string>();
@@ -181,15 +180,27 @@ export function fileWriteStatements(
 			});
 		}
 	}
-	return statements.map((statement) =>
-		statement.path && previewPaths.has(statement.path)
-			? {
-					...statement,
-					sql: `${statement.sql}, OLD.content AS before, NEW.content AS after`,
-				}
-			: statement,
-	);
+	return statements;
 }
+
+/**
+ * What changed between two commits, both sides included.
+ *
+ * A card is a function of a commit span, whatever produced the span — the
+ * receipt of a write, a checkpoint, two commits someone pasted. Lix answers
+ * this keyed to the commits, so nothing another writer does afterwards
+ * changes the answer. With paths, only those files; without, every file.
+ */
+export const FILE_CHANGES_SQL = (count: number): string => {
+	const select =
+		"SELECT id, diff_type, from_path, to_path, from_content, to_content FROM lix_diff('lix_file', $1, $2)";
+	if (count === 0) return select;
+	const placeholders = Array.from(
+		{ length: count },
+		(_, index) => `$${index + 3}`,
+	).join(", ");
+	return `${select} WHERE from_path IN (${placeholders}) OR to_path IN (${placeholders})`;
+};
 
 /** The paths a diff over the target files reports as changed. */
 export const CHANGED_FILES_SQL = (count: number): string => {
