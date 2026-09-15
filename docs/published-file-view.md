@@ -19,6 +19,10 @@ Private files and source history are not copied. Upstream authorization/session 
 are service errors; only publication authorization or a missing matching file yields an unavailable file.
 Protocol mismatch remains HTTP 426 and service failures return HTTP 502.
 
+The database migration explicitly grants the gateway service role SELECT on the
+handle and repository metadata tables; fresh databases must apply it before serving
+public entity lookups. Publication authorization still runs before metadata is returned.
+
 ## Browser and Atelier
 
 The loader creates a fresh local Lix and inserts the document's original ID, path
@@ -47,7 +51,7 @@ Document and image downloads are separate reads, not one atomic repository snaps
   invalid paths, upstream failures and session cleanup.
 - The Compose API-token e2e test publishes Markdown, opens it in an anonymous
   browser against the real server and denies a fresh download after unpublishing.
-  The full Compose/Supabase test remains to be run before production promotion.
+  CI runs the full Compose/Supabase suite before production promotion.
 - Atelier tests cover standalone asset loading and cleanup.
 
 There are no Lix engine or reference-server changes. The pinned Atelier revision
