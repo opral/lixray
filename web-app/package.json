@@ -40,7 +40,8 @@
 		"mcp:tools:generate": "node --experimental-strip-types scripts/generate-mcp-tools.mjs",
 		"typecheck": "pnpm run routes:generate && tsc --noEmit",
 		"ci:fast": "pnpm format:check && pnpm test:auth && pnpm test:profile && pnpm test:docs",
-		"test:partial-replica": "node --test --experimental-strip-types --experimental-test-module-mocks src/lib/repository-lix-session-open.test.ts"
+		"test:partial-replica": "node --test --experimental-strip-types --experimental-test-module-mocks src/lib/repository-lix-session-open.test.ts",
+		"test:published": "playwright test --config playwright.published.config.ts"
 	},
 	"dependencies": {
 		"@lix-js/sdk": "workspace:*",

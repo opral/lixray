@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("Account tokens have generated names, creation dates and independent deletion", async ({
+	browser,
 	page,
 	context,
 	request,
@@ -173,6 +174,15 @@ test("Account tokens have generated names, creation dates and independent deleti
 					"INSERT INTO lix_file (path,content) VALUES ($1,$2)",
 					["/private.txt", new TextEncoder().encode("private")],
 				);
+				await local.execute(
+					"INSERT INTO lix_file (path,content) VALUES ($1,$2)",
+					[
+						"/public.md",
+						new TextEncoder().encode(
+							"# Published markdown through Atelier\n\nThis is the public document.",
+						),
+					],
+				);
 				const history = (await local.execute("SELECT count(*) FROM lix_log()"))
 					.rows;
 				return {
@@ -233,6 +243,58 @@ test("Account tokens have generated names, creation dates and independent deleti
 			{ headers: { "Lix-Server-Protocol-Version": "10" } },
 		);
 		expect([401, 403, 404]).toContain(privateFile.status());
+		// Real anonymous browser + pinned SDK/server: protocol mocks cannot
+		// hide a missing version header or a broken authorized download.
+		const markdownPublication = await request.post(
+			`/api/repositories/${remote.id}/share?path=/public.md`,
+			{
+				headers: { Authorization: `Bearer ${first}` },
+			},
+		);
+		expect(markdownPublication.status()).toBe(200);
+		const { url: publicUrl } = (await markdownPublication.json()) as {
+			url: string;
+		};
+		const anonymous = await browser.newContext({ baseURL });
+		try {
+			const reader = await anonymous.newPage();
+			const resolved = reader.waitForResponse(
+				(response) =>
+					new URL(response.url()).pathname === "/api/published/entity",
+				{ timeout: 30_000 },
+			);
+			const downloaded = reader.waitForResponse(
+				(response) =>
+					new URL(response.url()).pathname ===
+					`/api/published/lix/${remote.id}/file`,
+				{ timeout: 30_000 },
+			);
+			void downloaded.catch(() => undefined);
+			await reader.goto(publicUrl);
+			expect((await resolved).status()).toBe(200);
+			const downloadUrl = (await downloaded).url();
+			await expect(
+				reader.getByRole("heading", {
+					name: "Published markdown through Atelier",
+					exact: true,
+				}),
+			).toBeVisible({ timeout: 60_000 });
+			await expect(reader.locator(".atelier-file-view")).toHaveAttribute(
+				"data-read-only",
+				"true",
+			);
+			const unpublish = await request.delete(
+				`/api/repositories/${remote.id}/share?path=/public.md`,
+				{
+					headers: { Authorization: `Bearer ${first}` },
+				},
+			);
+			expect(unpublish.status()).toBe(200);
+			const denied = await anonymous.request.get(downloadUrl);
+			expect(denied.status()).toBe(404);
+		} finally {
+			await anonymous.close();
+		}
 
 		await panel
 			.getByRole("button", { name: "Generate token", exact: true })
