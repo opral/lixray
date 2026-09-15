@@ -1,4 +1,10 @@
 import assert from "node:assert/strict";
+import {
+	WRITE_PREVIEW_URI,
+	WRITE_PREVIEW_META,
+	MCP_APP_HTML,
+	WRITE_PREVIEW_HTML,
+} from "./write-preview.ts";
 import test from "node:test";
 import {
 	Client,
@@ -826,15 +832,23 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.match(executeSqlTool.description ?? "", /outcome is unknown/);
 		assert.match(executeSqlTool.description ?? "", /create_checkpoint/);
 		// The file recipe lives on write_files; the SQL cards point at it.
+		const undoTool = tools.tools.find((tool) => tool.name === "undo")!;
+		assert.match(undoTool.description ?? "", /latest undoable/);
+		assert.match(undoTool.description ?? "", /inverse commit/);
+		assert.match(undoTool.description ?? "", /No commit_id parameter/);
+		assert.deepEqual(
+			Object.keys((undoTool.inputSchema as { properties: object }).properties),
+			["context"],
+		);
+		const sqlGuide = await client.readResource({ uri: "lixray://docs/sql" });
+		assert.ok(sqlGuide.contents[0] && "text" in sqlGuide.contents[0]);
+		assert.equal(sqlGuide.contents[0].text, LIX_SQL_OPERATING_GUIDE);
 		const writeFilesTool = tools.tools.find(
 			(tool) => tool.name === "write_files",
 		);
 		assert.match(writeFilesTool?.description ?? "", /last_seen_commit_id/);
 		assert.match(writeFilesTool?.description ?? "", /lixcol_metadata/);
-		assert.match(
-			executeSqlTool.description ?? "",
-			/write_files is an optional/,
-		);
+		assert.match(executeSqlTool.description ?? "", /Prefer write_files/);
 		assert.match(queryTool.description ?? "", /read_files and list_files/);
 		assert.match(MCP_SERVER_INSTRUCTIONS, /outcome is unknown/);
 		// The listing stays bounded: the guide lives on two tools only, the
@@ -1351,7 +1365,7 @@ void test("shipped MCP guidance preserves the shortest read path", async () => {
 		assert.match(text, /list_lixes/i);
 		assert.match(text, /only when the target.*unknown/is);
 		assert.match(text, /file_paths_complete/);
-		assert.match(text, /one parameterized/i);
+		assert.match(text, /[Bb]atch known paths together/);
 	}
 });
 
@@ -2589,28 +2603,34 @@ void test("file tools list, read, and write files with metadata and conflict che
 			written.content?.filter((block) => block.type === "resource_link").length,
 			2,
 		);
-		// The Markdown write comes back with its change rendered: a host that
-		// can show UI shows it, and the structured result stays schema-clean.
-		const cards = (written.content ?? []).filter(
-			(block) => block.type === "resource",
-		) as Array<{
-			resource: { uri: string; mimeType: string; text: string };
-			annotations?: { audience?: string[] };
-		}>;
-		assert.equal(cards.length, 1);
-		assert.equal(
-			cards[0]!.resource.uri,
-			"ui://lixray/diff/gtm/campaigns/icp.md",
+		// Every client gets a normal receipt; only the optional metadata carries HTML.
+		assert.deepEqual(
+			written.content?.map((block) => block.type),
+			["text", "resource_link", "resource_link", "text"],
 		);
-		assert.equal(cards[0]!.resource.mimeType, "text/html;profile=mcp-app");
-		assert.match(cards[0]!.resource.text, /<h1[^>]*>ICP<\/h1>/);
-		assert.match(cards[0]!.resource.text, /Open in LixRay/);
-		assert.deepEqual(cards[0]!.annotations?.audience, ["user"]);
-		assert.equal(
-			Object.keys(
-				written.structuredContent as Record<string, unknown>,
-			).includes("_ui"),
-			false,
+		const cards = (
+			written._meta?.[WRITE_PREVIEW_META] as { cards: Array<{ html: string }> }
+		).cards;
+		assert.equal(cards.length, 1);
+		assert.match(cards[0]!.html, /<h1[^>]*>ICP<\/h1>/);
+		assert.match(cards[0]!.html, /Open in LixRay/);
+		assert.equal("_ui" in (written.structuredContent as object), false);
+		assert.doesNotMatch(JSON.stringify(written.content), /<!doctype html>/);
+		const resources = await client.listResources();
+		assert.ok(
+			resources.resources.some(
+				(resource) => resource.uri === WRITE_PREVIEW_URI,
+			),
+		);
+		const resource = await client.readResource({ uri: WRITE_PREVIEW_URI });
+		assert.equal(resource.contents[0]?.mimeType, MCP_APP_HTML);
+		assert.ok(resource.contents[0] && "text" in resource.contents[0]);
+		assert.equal(resource.contents[0].text, WRITE_PREVIEW_HTML);
+		assert.doesNotMatch(resource.contents[0].text, /ICP|campaigns/);
+		const tools = await client.listTools();
+		assert.deepEqual(
+			tools.tools.find((tool) => tool.name === "write_files")?._meta?.ui,
+			{ resourceUri: WRITE_PREVIEW_URI },
 		);
 
 		// Metadata alone on a file that does not exist is refused before writing.

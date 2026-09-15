@@ -40,11 +40,7 @@ void test("SQL guidance models the public Lix surfaces", () => {
 });
 
 void test("shared operating guide keeps file-content, upsert, and outcome-aware recovery copy", () => {
-	for (const text of [
-		LIX_SQL_OPERATING_GUIDE,
-		MCP_SERVER_INSTRUCTIONS,
-		MCP_DOCS,
-	]) {
+	for (const text of [LIX_SQL_OPERATING_GUIDE, MCP_DOCS]) {
 		assert.match(text, /Lix SQL is a Postgres dialect subset\./);
 		assert.match(text, /CAST\(\$2 AS BYTEA\)/);
 		assert.match(text, /kind: "text"/);
@@ -98,10 +94,7 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
 	// Reads: files elsewhere, not SQLite, the catalog, core tables, params, history.
-	assert.match(
-		QUERY_SQL_TOOL_DESCRIPTION,
-		/read_files and list_files are optional/,
-	);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /Prefer read_files and list_files/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /not SQLite/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.columns/);
@@ -112,7 +105,7 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /kind: "text"/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /lix_history\('lix_file'\)/);
 	// Writes: files elsewhere, rename, delete, upsert shape, no readback.
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /write_files is an optional/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /Prefer write_files/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /UPDATE lix_file SET path/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /DELETE FROM lix_file/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /excluded\.col/);
@@ -131,8 +124,10 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /unrelated changes never block/);
 	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /validation/);
 	assert.match(LIST_FILES_TOOL_DESCRIPTION, /truncated/);
-	// The instructions still carry the full guide for hosts that show it.
+	// The instructions carry recovery/routing; the full guide is a resource.
 	assert.match(MCP_SERVER_INSTRUCTIONS, /outcome is unknown/);
+	assert.match(MCP_SERVER_INSTRUCTIONS, /lixray:\/\/docs\/sql/);
+	assert.doesNotMatch(MCP_SERVER_INSTRUCTIONS, /INSERT INTO/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /Do not checkpoint after every edit/);
 	for (const description of [
 		QUERY_SQL_TOOL_DESCRIPTION,

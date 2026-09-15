@@ -38,6 +38,13 @@ import {
 } from "./tool-observation.ts";
 
 import { MCP_RESOURCE } from "./auth.ts";
+import {
+	MCP_APP_HTML,
+	WRITE_PREVIEW_URI,
+	WRITE_PREVIEW_META,
+	WRITE_PREVIEW_HTML,
+	type WritePreviewCard,
+} from "./write-preview.ts";
 import { isRenderablePath, renderDiffCard } from "./diff-card.ts";
 import {
 	DELETED_FILE_NAMES_SQL,
@@ -63,6 +70,7 @@ export const MCP_REQUEST_ID_HEADER = "X-Request-ID";
 export const MCP_AI_TRACE_ID_HEADER = "X-PostHog-AI-Trace-ID";
 export const MCP_AI_PARENT_ID_HEADER = "X-PostHog-AI-Parent-ID";
 export const MCP_AI_SESSION_ID_HEADER = "X-PostHog-AI-Session-ID";
+export const SQL_GUIDE_URI = "lixray://docs/sql";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
 export const MCP_URL_GUIDE =
@@ -74,15 +82,20 @@ export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
 export const MCP_DATA_GUIDE =
 	"Use only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.";
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. If the user supplies an exact @handle/slug or Lix UUID, pass it as lix_ref directly to query_sql or execute_sql; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. When target paths are known, read all of them in one parameterized query_sql statement instead of probing or reading them one at a time. The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
+export const UNDO_TOOL_DESCRIPTION =
+	"Undo the latest undoable change on the context branch by creating an inverse commit. Prefer this to manual SQL reversal when asked to undo that change. No commit_id parameter; inspect history first if later edits may exist. Stops at checkpoints; restore is different and not undoable.";
+
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. Prefer read_files and write_files for ordinary file reads and creates/updates; use list_files only to discover paths. Batch known paths together. Use query_sql for advanced reads and execute_sql for other mutations, including renames/deletes and directory operations. The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
 
 ${MCP_DATA_GUIDE}
 
-${LIX_SQL_OPERATING_GUIDE}
+Lix SQL is a Postgres dialect subset, not SQLite. Discover tables/columns through information_schema; use $1, $2 parameters. The SQL tools carry essential guidance; the full SQL reference is available at ${SQL_GUIDE_URI}. A successful mutation is already saved. Read back when the outcome is unknown or validation is part of the task; never blindly retry an uncertain write.
+
+${UNDO_TOOL_DESCRIPTION}
 
 ${MCP_URL_GUIDE}
 
-Writes persist without a checkpoint; execute_sql already saved the files. Use create_checkpoint to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent file helper tools or branch state.`;
+Writes persist without a checkpoint; execute_sql already saved the files. Use create_checkpoint to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent tools, arguments, or branch state.`;
 
 export const CREATE_CHECKPOINT_TOOL_DESCRIPTION =
 	"Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.";
@@ -91,7 +104,7 @@ export const RESTORE_TOOL_DESCRIPTION =
 	"Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.";
 
 export const LIST_LIXES_TOOL_DESCRIPTION =
-	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, pass lix_ref directly to query_sql or execute_sql.";
+	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; With an exact reference, use open_lix for file-tool context or lix_ref directly for SQL.";
 
 export const OPEN_LIX_TOOL_DESCRIPTION =
 	"Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, canonical url; when file_paths_complete is true, do not list files again.";
@@ -638,11 +651,52 @@ export function createLixrayMcpServer(
 	const server = new McpServer(
 		{ name: options.serverName ?? "LixRay", version: "0.2.0" },
 		{
-			capabilities: { tools: {} },
+			capabilities: { tools: {}, resources: {} },
 			instructions: MCP_SERVER_INSTRUCTIONS,
 		},
 	);
 	const surfaceVersion = mcpSurfaceVersion(toolSurfaceDescriptions());
+	server.registerResource(
+		"sql-guide",
+		SQL_GUIDE_URI,
+		{
+			title: "Lix SQL reference",
+			mimeType: "text/plain",
+		},
+		(uri) => ({
+			contents: [
+				{
+					uri: uri.href,
+					mimeType: "text/plain",
+					text: LIX_SQL_OPERATING_GUIDE,
+				},
+			],
+		}),
+	);
+	server.registerResource(
+		"write-preview",
+		WRITE_PREVIEW_URI,
+		{
+			title: "LixRay file changes",
+			mimeType: MCP_APP_HTML,
+			description: "Rendered file changes for write_files.",
+		},
+		(uri) => ({
+			contents: [
+				{
+					uri: uri.href,
+					mimeType: MCP_APP_HTML,
+					text: WRITE_PREVIEW_HTML,
+					_meta: {
+						ui: {
+							csp: { connectDomains: [], resourceDomains: [] },
+							prefersBorder: false,
+						},
+					},
+				},
+			],
+		}),
+	);
 
 	registerTool(
 		server,
@@ -1109,8 +1163,8 @@ export function createLixrayMcpServer(
 	registerTool(
 		server,
 		"undo",
-		"Undo last commit",
-		"Undo the latest commit on the branch selected by context.",
+		"Undo latest change",
+		UNDO_TOOL_DESCRIPTION,
 		z.object({ context }).strict(),
 		undoOutput,
 		writeAnnotations(),
@@ -1498,9 +1552,9 @@ export function mcpDocumentationResponse(
 			"",
 			"Setup: In an MCP-compatible client, add a remote connector using the endpoint above, then complete the LixRay sign-in and authorization flow. Connector support and setup menus depend on the client. If no LixRay connector is available, ask the user to connect it; a webpage cannot install a connector for the client.",
 			"",
-			"Match the exact LixRay server name instead of broad repository or file keywords. If the user supplied an exact @handle/slug or Lix UUID, pass lix_ref directly to query_sql or execute_sql, optionally branch_id; no opening call is required. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is encrypted, expiring, and independent from the MCP transport request.",
+			"Match the exact LixRay server name instead of broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly to query_sql or execute_sql, optionally branch_id; no opening call is required. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is encrypted, expiring, and independent from the MCP transport request.",
 			"",
-			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). When target file paths are known, read them together in one parameterized query_sql statement; do not list those paths first or read files one at a time. execute_sql is always treated as potentially destructive. File and directory operations are SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
+			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). Prefer read_files and write_files for ordinary file work; batch known paths together. Use SQL for advanced queries and other mutations. execute_sql is always treated as potentially destructive. File renames/deletes and directory operations use SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
 			"A successful execute_sql persisted the mutation. Read back only when the write outcome is unknown or validation is part of the task.",
 			MCP_URL_GUIDE,
 			MCP_DATA_GUIDE,
@@ -1576,7 +1630,12 @@ function registerTool(
 			inputSchema,
 			outputSchema,
 			annotations,
-			_meta: { securitySchemes },
+			_meta: {
+				securitySchemes,
+				...(name === "write_files"
+					? { ui: { resourceUri: WRITE_PREVIEW_URI } }
+					: {}),
+			},
 		},
 		async (args) => {
 			const startedAt = Date.now();
@@ -1597,12 +1656,12 @@ function registerTool(
 				executionStarted = true;
 				const returned = (await call(input, callId)) as Record<string, unknown>;
 				executionCompleted = true;
-				// UI blocks travel beside the result, never inside it: hosts
+				// Preview metadata travels outside content and structuredContent: hosts
 				// validate structuredContent against the output schema.
 				const declared = returned[UI_RESULT_KEY];
 				const ui = (
 					Array.isArray(declared) ? declared : []
-				) as EmbeddedUiResource[];
+				) as WritePreviewCard[];
 				const raw =
 					UI_RESULT_KEY in returned
 						? Object.fromEntries(
@@ -1656,7 +1715,10 @@ function registerTool(
 				// structured JSON for text-only hosts.
 				return {
 					structuredContent,
-					content: [summary[0]!, ...links, ...ui, ...summary.slice(1)],
+					content: [summary[0]!, ...links, ...summary.slice(1)],
+					...(ui.length
+						? { _meta: { [WRITE_PREVIEW_META]: { cards: ui } } }
+						: {}),
 				};
 			} catch (caught) {
 				const baseError = toMcpError(caught);
@@ -1837,7 +1899,7 @@ async function touchedByCall(
  *
  * A tool result tells the reader a file changed; the card shows them what
  * changed, in Atelier's own review UI, without leaving the thread. Hosts that
- * cannot render UI ignore these blocks and still get the summary and the JSON.
+ * cannot render UI still get the summary and JSON; HTML stays in result metadata.
  */
 const UI_RESULT_KEY = "_ui";
 
@@ -1861,15 +1923,17 @@ async function writeCards(
 	token: string,
 	written: Awaited<ReturnType<LixService["writeFiles"]>>,
 	requested: ReadonlyArray<{ path: string; content?: string }>,
-): Promise<{ cards: EmbeddedUiResource[]; failed: boolean }> {
+): Promise<{ cards: WritePreviewCard[]; failed: boolean }> {
 	const span = written.commit;
 	if (!span || span.before === span.after) return { cards: [], failed: false };
-	const paths = requested
-		.filter((file) => file.content !== undefined && isRenderablePath(file.path))
-		.map((file) => file.path)
-		.slice(0, MAX_DIFF_CARDS);
-	if (paths.length === 0) return { cards: [], failed: false };
 	try {
+		const paths = requested
+			.filter(
+				(file) => file.content !== undefined && isRenderablePath(file.path),
+			)
+			.map((file) => file.path)
+			.slice(0, MAX_DIFF_CARDS);
+		if (paths.length === 0) return { cards: [], failed: false };
 		const changes = await service.fileChanges(token, span, paths);
 		return diffCards(changes, written.files);
 	} catch (caught) {
@@ -1880,19 +1944,6 @@ async function writeCards(
 	}
 }
 
-/**
- * The MCP Apps media type (SEP-1865): `text/html` with a profile parameter
- * that tells a host this document is a UI to render rather than a file to
- * show. Hosts matching on the base type are unaffected by the parameter.
- */
-const MCP_APP_HTML = "text/html;profile=mcp-app";
-
-type EmbeddedUiResource = {
-	type: "resource";
-	resource: { uri: string; mimeType: typeof MCP_APP_HTML; text: string };
-	annotations: { audience: Array<"user">; priority: number };
-};
-
 function diffCards(
 	changes: ReadonlyArray<{
 		path: string;
@@ -1900,9 +1951,9 @@ function diffCards(
 		after?: Uint8Array;
 	}>,
 	files: ReadonlyArray<{ path: string; url: string }>,
-): { cards: EmbeddedUiResource[]; failed: boolean } {
+): { cards: WritePreviewCard[]; failed: boolean } {
 	const urls = new Map(files.map((file) => [file.path, file.url]));
-	const cards: EmbeddedUiResource[] = [];
+	const cards: WritePreviewCard[] = [];
 	let failed = false;
 	for (const change of changes) {
 		if (cards.length >= MAX_DIFF_CARDS) break;
@@ -1928,31 +1979,14 @@ function diffCards(
 			continue;
 		}
 		if (!card) continue;
-		cards.push({
-			type: "resource",
-			resource: {
-				uri: uiDiffUri(change.path),
-				mimeType: MCP_APP_HTML,
-				text: card.html,
-			},
-			annotations: { audience: ["user"], priority: 0.9 },
-		});
+		cards.push({ html: card.html });
 	}
 	return { cards, failed };
 }
 
-/**
- * The card's address. A path is not a URI: `?` and `#` in a file name would
- * turn the rest of it into a query and a fragment.
- */
-function uiDiffUri(path: string): string {
-	const segments = path.split("/").filter(Boolean).map(encodeURIComponent);
-	return `ui://lixray/diff/${segments.join("/")}`;
-}
-
 function uiField(
-	cards: EmbeddedUiResource[],
-): Record<string, EmbeddedUiResource[]> {
+	cards: WritePreviewCard[],
+): Record<string, WritePreviewCard[]> {
 	return cards.length > 0 ? { [UI_RESULT_KEY]: cards } : {};
 }
 

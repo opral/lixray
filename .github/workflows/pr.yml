@@ -260,6 +260,9 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium
 
+      - name: Test MCP Apps write preview
+        run: pnpm --dir web-app test:mcp-ui
+
       - name: Test device recovery controls
         run: pnpm --dir web-app exec playwright test --config playwright.file-component.config.ts recovery.spec.ts
 
