@@ -5,12 +5,6 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      promote:
-        description: "Promote only after the authority migration and inventory reconciliation are complete"
-        type: boolean
-        required: false
-        default: false
 
 concurrency:
   group: production
@@ -62,12 +56,9 @@ jobs:
       web-image: ${{ needs.web-image.outputs.image }}
       server-image: ${{ needs.server-image.outputs.image }}
 
-  # Hard-cut rollout barrier: pushes and default manual runs build/validate only.
-  # After fleet migration is verified, dispatch this workflow on main with
-  # promote=true. Keep these gates until the cutover is verified; restoring
-  # automatic promotion requires an explicit reviewed change to both jobs.
+  # Promote main only after the matching web/server images pass validation.
   database:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.promote == true
+    if: github.ref == 'refs/heads/main'
     name: Apply database migrations
     needs: validate
     runs-on: ubuntu-latest
@@ -122,7 +113,7 @@ jobs:
         run: supabase db push --linked --dry-run
 
   release:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.promote == true
+    if: github.ref == 'refs/heads/main'
     name: Promote production release
     needs:
       - database
@@ -130,8 +121,8 @@ jobs:
       - web-image
       - server-image
     runs-on: ubuntu-latest
-    # Authority migration must finish under the external write barrier before
-    # this job starts. Ordinary serving hosts never migrate repositories.
+    # Future storage-format cutovers require offline migration before promotion.
+    # Ordinary serving hosts never migrate repositories.
     timeout-minutes: 25
     environment: production
     permissions:
