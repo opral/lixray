@@ -1,3 +1,4 @@
+import { compatibility } from "@lix-js/sdk/compatibility";
 import { randomUUID } from "node:crypto";
 import {
 	LixService,
@@ -79,7 +80,7 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 	const endpoint = new URL(`/lix/v1/${repository.id}/`, baseURL);
 	const headers = {
 		Authorization: `Bearer ${repository.token}`,
-		"Lix-Server-Protocol-Version": "10",
+		"Lix-Server-Protocol-Version": String(compatibility.serverProtocolVersion),
 	};
 	const opened = await context.request.get(endpoint.toString(), { headers });
 	expect(opened.status(), await opened.text()).toBe(200);

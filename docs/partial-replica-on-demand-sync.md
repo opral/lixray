@@ -74,7 +74,8 @@ The original rollout used SDK and reference server Lix main revision
 [Lix PR #1763](https://github.com/opral/lix/pull/1763),
 [Lix PR #1767](https://github.com/opral/lix/pull/1767), and
 [Lix PR #1768](https://github.com/opral/lix/pull/1768). Upgrade both together.
-Server protocol is 8 and sync protocol is 13. Browser conversion is separate from
+That rollout used server protocol 8 and sync protocol 13. The current matched
+SDK/server use server protocol 10 and sync protocol 16. Browser conversion is separate from
 any authoritative repository migration; never reset server storage for an upgrade.
 
 The original opening profile at Lix `7b2b4402e` used three fresh small replicas

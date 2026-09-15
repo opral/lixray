@@ -1,3 +1,4 @@
+import { compatibility } from "@lix-js/sdk/compatibility";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { provisionAccountAfterHandshake } from "./lix-account-provisioning.ts";
@@ -65,7 +66,10 @@ void test("successful authenticated handshake enriches the repository account", 
 	assert.ok(request);
 	assert.equal(new URL(request.url).pathname, `/lix/v1/${lixId}/execute`);
 	assert.equal(request.headers.get("lix-session-id"), "session-1");
-	assert.equal(request.headers.get("lix-server-protocol-version"), "10");
+	assert.equal(
+		request.headers.get("lix-server-protocol-version"),
+		String(compatibility.serverProtocolVersion),
+	);
 	assert.equal(
 		request.headers.get("x-lixray-idempotency-principal"),
 		account.id,

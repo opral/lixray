@@ -1,33 +1,31 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { getCompatibility } from "../../vendor/lix/scripts/compatibility.mjs";
 
-test("preview protocol probe matches the selected Lix sync protocol", async () => {
-  const [workflow, sync, fixture] = await Promise.all([
+test("deployment probes use the pinned Lix compatibility contract before SDK build", async () => {
+  const [workflow, fixture] = await Promise.all([
     readFile(new URL("../workflows/pr.yml", import.meta.url), "utf8"),
-    readFile(new URL("../../vendor/lix/packages/lix/src/sync/mod.rs", import.meta.url), "utf8"),
     readFile(new URL("../../web-app/tests/e2e/sync-fixture.ts", import.meta.url), "utf8"),
   ]);
-  const probeVersion = workflow.match(/sync_protocol_version=(\d+)/u)?.[1];
-  const sdkVersion = sync.match(/const SYNC_PROTOCOL_VERSION: u32 = (\d+);/u)?.[1];
-  assert.ok(probeVersion, "preview probe must declare its sync protocol version");
-  assert.ok(sdkVersion, "selected SDK must declare its sync protocol version");
-  assert.equal(probeVersion, sdkVersion, "update the preview probe with the SDK pin");
-  const browserProbeVersion = fixture.match(/"Lix-Sync-Protocol-Version": "(\d+)"/u)?.[1];
-  assert.ok(browserProbeVersion, "browser probe must declare its sync protocol version");
-  assert.equal(browserProbeVersion, sdkVersion, "update the browser probe with the SDK pin");
+  const metadata = JSON.parse(execFileSync(process.execPath, [
+    new URL("../../vendor/lix/scripts/compatibility.mjs", import.meta.url).pathname,
+  ], { encoding: "utf8" }));
+  assert.deepEqual(metadata, getCompatibility());
+  assert.match(workflow, /node vendor\/lix\/scripts\/compatibility\.mjs/u);
+  assert.match(workflow, /\.syncProtocolVersion/u);
+  assert.match(workflow, /\.serverProtocolVersion/u);
+  assert.doesNotMatch(workflow, /(?:sync|server)_protocol_version=\d+/u);
+  assert.match(fixture, /import \{ getCompatibility \} from "\.\.\/\.\.\/\.\.\/vendor\/lix\/scripts\/compatibility\.mjs"/u);
+  assert.match(fixture, /compatibility: getCompatibility\(\)/u);
+  assert.match(fixture, /String\(\s*compatibility\.syncProtocolVersion,?\s*\)/u);
+  assert.match(fixture, /String\(\s*compatibility\.serverProtocolVersion,?\s*\)/u);
+  assert.doesNotMatch(fixture, /"Lix-(?:Sync|Server)-Protocol-Version": "\d+"/u);
 });
 
-test("preview protocol probe authenticates the current server protocol", async () => {
+test("preview protocol probe sends both Lix-owned protocol versions", async () => {
   const workflow = await readFile(new URL("../workflows/pr.yml", import.meta.url), "utf8");
-  const library = await readFile(
-    new URL("../../vendor/lix/packages/lix/src/lib.rs", import.meta.url),
-    "utf8",
-  );
-  const probe = workflow.match(/server_protocol_version=(\d+)/u)?.[1];
-  const server = library.match(/const SERVER_PROTOCOL_VERSION: u32 = (\d+);/u)?.[1];
-  assert.ok(probe);
-  assert.ok(server);
-  assert.equal(probe, server);
   assert.match(workflow, /Lix-Server-Protocol-Version: \$server_protocol_version/u);
+  assert.match(workflow, /Lix-Sync-Protocol-Version: \$sync_protocol_version/u);
 });

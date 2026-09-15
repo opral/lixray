@@ -1,3 +1,4 @@
+import { compatibility } from "@lix-js/sdk/compatibility";
 import assert from "node:assert/strict";
 import { test } from "@playwright/test";
 import { provisionAccountAfterHandshake } from "../../src/mcp/lix-account-provisioning.ts";
@@ -30,7 +31,9 @@ test("real Lix server enriches null and changed profiles and leaves unchanged hi
 			method: "POST",
 			headers: {
 				"x-lixray-idempotency-principal": account.id,
-				"Lix-Server-Protocol-Version": "10",
+				"Lix-Server-Protocol-Version": String(
+					compatibility.serverProtocolVersion,
+				),
 				"Idempotency-Key": crypto.randomUUID(),
 			},
 		}),
@@ -42,7 +45,9 @@ test("real Lix server enriches null and changed profiles and leaves unchanged hi
 		new Request(new URL(protocolPath, serviceUrl), {
 			headers: {
 				"x-lixray-idempotency-principal": account.id,
-				"Lix-Server-Protocol-Version": "10",
+				"Lix-Server-Protocol-Version": String(
+					compatibility.serverProtocolVersion,
+				),
 			},
 		}),
 	);
@@ -54,7 +59,7 @@ test("real Lix server enriches null and changed profiles and leaves unchanged hi
 	assert.equal(activeAccountId, account.id);
 	const sessionHeaders = {
 		"Content-Type": "application/json",
-		"Lix-Server-Protocol-Version": "10",
+		"Lix-Server-Protocol-Version": String(compatibility.serverProtocolVersion),
 		"Lix-Session-Id": sessionId,
 		"x-lixray-idempotency-principal": account.id,
 	};
