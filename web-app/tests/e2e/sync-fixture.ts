@@ -239,7 +239,7 @@ export async function createSyncFixture({
 					headers: {
 						Authorization: "Bearer lixray-demo",
 						"Lix-Session-Id": "0".repeat(64),
-						"Lix-Sync-Protocol-Version": "15",
+						"Lix-Sync-Protocol-Version": "16",
 						"Lix-Server-Protocol-Version": "10",
 					},
 				});
