@@ -38,7 +38,7 @@ import {
 } from "./tool-observation.ts";
 
 import { MCP_RESOURCE } from "./auth.ts";
-import { renderDiffCard } from "./diff-card.ts";
+import { isRenderablePath, renderDiffCard } from "./diff-card.ts";
 import {
 	DELETED_FILE_NAMES_SQL,
 	TOUCHED_CHANGES_SQL,
@@ -842,16 +842,13 @@ export function createLixrayMcpServer(
 						: {}),
 					...(checkpoint ? { checkpoint } : {}),
 					originKey: mcpOriginKey(callId),
-					previews: MAX_DIFF_CARDS,
 				},
 				options.urlOrigin,
 			);
-			const rendered = diffCards(written.previews ?? [], written.files);
+			const rendered = await writeCards(service, token, written, files);
 			const warning = [
 				written.warning,
-				rendered.failed
-					? "Files saved, preview unavailable. Do not repeat the write."
-					: undefined,
+				rendered.failed ? PREVIEW_UNAVAILABLE : undefined,
 			]
 				.filter(Boolean)
 				.join(" ");
@@ -1847,6 +1844,42 @@ const UI_RESULT_KEY = "_ui";
 /** How many cards a single write is allowed to put in a thread. */
 const MAX_DIFF_CARDS = 3;
 
+const PREVIEW_UNAVAILABLE =
+	"Files saved, preview unavailable. Do not repeat the write.";
+
+/**
+ * The cards for a write: what changed between the commits its receipt names.
+ *
+ * The write does not carry its own before-bytes. It carries a commit span,
+ * and the span is asked what changed — the same question a checkpoint or any
+ * two commits would be asked, so one render path serves them all. A write
+ * that published no commit has nothing to show; a failure here is a warning
+ * on a write that already succeeded.
+ */
+async function writeCards(
+	service: LixService,
+	token: string,
+	written: Awaited<ReturnType<LixService["writeFiles"]>>,
+	requested: ReadonlyArray<{ path: string; content?: string }>,
+): Promise<{ cards: EmbeddedUiResource[]; failed: boolean }> {
+	const span = written.commit;
+	if (!span || span.before === span.after) return { cards: [], failed: false };
+	const paths = requested
+		.filter((file) => file.content !== undefined && isRenderablePath(file.path))
+		.map((file) => file.path)
+		.slice(0, MAX_DIFF_CARDS);
+	if (paths.length === 0) return { cards: [], failed: false };
+	try {
+		const changes = await service.fileChanges(token, span, paths);
+		return diffCards(changes, written.files);
+	} catch (caught) {
+		console.error("LixRay MCP file changes failed", {
+			error: errorDetails(caught),
+		});
+		return { cards: [], failed: true };
+	}
+}
+
 /**
  * The MCP Apps media type (SEP-1865): `text/html` with a profile parameter
  * that tells a host this document is a UI to render rather than a file to
@@ -1861,7 +1894,7 @@ type EmbeddedUiResource = {
 };
 
 function diffCards(
-	previews: ReadonlyArray<{
+	changes: ReadonlyArray<{
 		path: string;
 		before?: Uint8Array;
 		after?: Uint8Array;
@@ -1871,25 +1904,25 @@ function diffCards(
 	const urls = new Map(files.map((file) => [file.path, file.url]));
 	const cards: EmbeddedUiResource[] = [];
 	let failed = false;
-	for (const preview of previews) {
+	for (const change of changes) {
 		if (cards.length >= MAX_DIFF_CARDS) break;
-		const url = urls.get(preview.path);
+		const url = urls.get(change.path);
 		if (!url) continue;
 		const repository = repositoryOf(url);
 		let card: ReturnType<typeof renderDiffCard>;
 		try {
 			card = renderDiffCard({
-				path: preview.path,
+				path: change.path,
 				url,
-				...(preview.before !== undefined ? { before: preview.before } : {}),
-				...(preview.after !== undefined ? { after: preview.after } : {}),
+				...(change.before !== undefined ? { before: change.before } : {}),
+				...(change.after !== undefined ? { after: change.after } : {}),
 				...(repository ? { repository } : {}),
 			});
 		} catch (caught) {
 			failed = true;
 			// A card is a courtesy; a write that succeeded still succeeded.
 			console.error("LixRay MCP diff card failed", {
-				path: preview.path,
+				path: change.path,
 				error: errorDetails(caught),
 			});
 			continue;
@@ -1898,7 +1931,7 @@ function diffCards(
 		cards.push({
 			type: "resource",
 			resource: {
-				uri: uiDiffUri(preview.path),
+				uri: uiDiffUri(change.path),
 				mimeType: MCP_APP_HTML,
 				text: card.html,
 			},

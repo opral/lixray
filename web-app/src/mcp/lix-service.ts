@@ -1,6 +1,7 @@
 import { entityRoutePath } from "../lib/entity-url.ts";
 import {
 	CHANGED_FILES_SQL,
+	FILE_CHANGES_SQL,
 	READ_FILES_SQL,
 	readFileContent,
 	escapeLike,
@@ -10,7 +11,6 @@ import {
 	type FileWrite,
 } from "./file-tools.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
-import { isRenderablePath } from "./diff-card.ts";
 
 const LIX_UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -658,10 +658,6 @@ export class LixService {
 			lastSeenCommitId?: string;
 			checkpoint?: boolean;
 			originKey: string;
-			/**
-			 * How many supported targets include OLD/NEW bytes in RETURNING.
-			 */
-			previews?: number;
 		},
 		origin = "https://lixray.com",
 	): Promise<{
@@ -671,12 +667,6 @@ export class LixService {
 		checkpointCommitId?: string;
 		commit: CommitSpan | null;
 		warning?: string;
-		/** Present only when previews were asked for; never part of the tool's output. */
-		previews?: Array<{
-			path: string;
-			before?: Uint8Array;
-			after?: Uint8Array;
-		}>;
 	}> {
 		const context = await this.readContext(contextToken);
 		const files = input.files.map((file) => ({
@@ -711,14 +701,6 @@ export class LixService {
 				"A file needs content, content_base64, lixcol_metadata, or both.",
 			);
 		const url = await this.entityUrl(context, origin);
-		const previewPaths = new Set(
-			files
-				.filter(
-					(file) => file.content !== undefined && isPreviewablePath(file.path),
-				)
-				.slice(0, Math.max(0, input.previews ?? 0))
-				.map((file) => file.path),
-		);
 		const transaction = await this.client.transaction(
 			context.lixId,
 			context.branchId,
@@ -774,7 +756,7 @@ export class LixService {
 							`No file to update metadata on: ${missing.join(", ")}. Give it content to create it.`,
 						);
 				}
-				const statements = fileWriteStatements(files, previewPaths);
+				const statements = fileWriteStatements(files);
 				const results: StatementResponse[] = [];
 				for (const statement of statements)
 					results.push(
@@ -794,10 +776,10 @@ export class LixService {
 						);
 					written.push(row);
 				});
-				return { written, statements, results };
+				return { written };
 			},
 		);
-		const { written, statements, results } = transaction.value;
+		const { written } = transaction.value;
 		const commitId = transaction.commit?.after;
 		let warning: string | undefined =
 			transaction.warning ??
@@ -820,53 +802,85 @@ export class LixService {
 			}
 		}
 
-		const previews: Array<{
-			path: string;
-			before?: Uint8Array;
-			after?: Uint8Array;
-		}> = [];
-		try {
-			statements.forEach((statement, index) => {
-				if (!statement.path || !previewPaths.has(statement.path)) return;
-				const result = results[index]!;
-				const before = result.rows[0]?.[result.columns.indexOf("before")];
-				const after = result.rows[0]?.[result.columns.indexOf("after")];
-				if (
-					!before ||
-					!after ||
-					!["blob", "null"].includes(before.kind) ||
-					!["blob", "null"].includes(after.kind)
-				)
-					throw new Error("Invalid preview row");
-				previews.push({
-					path: statement.path,
-					...(before.kind === "blob"
-						? { before: base64ToBytes(before.base64) }
-						: {}),
-					...(after.kind === "blob"
-						? { after: base64ToBytes(after.base64) }
-						: {}),
-				});
-			});
-		} catch {
-			warning = [
-				warning,
-				"Files saved, preview unavailable. Do not repeat the write.",
-			]
-				.filter(Boolean)
-				.join(" ");
-			previews.length = 0;
-		}
-
 		return {
 			context: contextToken,
 			commitId,
 			files: written.map((file) => ({ ...file, url: url("file", file) })),
 			...(checkpointCommitId ? { checkpointCommitId } : {}),
-			...(previews.length > 0 ? { previews } : {}),
 			...(warning ? { warning } : {}),
 			commit: transaction.commit,
 		};
+	}
+
+	/**
+	 * The files that changed between two commits, with both sides' bytes.
+	 *
+	 * A card is a function of a commit span. The receipt of a write is one;
+	 * a checkpoint is one; two commits someone pasted are one. This is the
+	 * one question all of them ask, and Lix answers it keyed to the commits
+	 * rather than to a moment in time, so nothing another writer does after
+	 * the span was taken changes the answer.
+	 */
+	async fileChanges(
+		contextToken: string,
+		span: CommitSpan,
+		paths: readonly string[] = [],
+	): Promise<FileChange[]> {
+		const context = await this.readContext(contextToken);
+		const response = await this.client.execute(
+			context.lixId,
+			context.branchId,
+			{
+				sql: FILE_CHANGES_SQL(paths.length),
+				params: [
+					{ kind: "text", value: span.before },
+					{ kind: "text", value: span.after },
+					...paths.map((path): WireValue => ({ kind: "text", value: path })),
+				],
+			},
+		);
+		const column = (name: string): number => response.columns.indexOf(name);
+		const at = {
+			id: column("id"),
+			kind: column("diff_type"),
+			fromPath: column("from_path"),
+			toPath: column("to_path"),
+			before: column("from_content"),
+			after: column("to_content"),
+		};
+		return response.rows.map((row) => {
+			const id = row[at.id];
+			const kind = row[at.kind];
+			const fromPath = row[at.fromPath];
+			const toPath = row[at.toPath];
+			const before = row[at.before];
+			const after = row[at.after];
+			// A deleted file has only a from_path; everything else has a to_path.
+			const path = toPath?.kind === "text" ? toPath : fromPath;
+			if (
+				id?.kind !== "text" ||
+				kind?.kind !== "text" ||
+				!isChangeKind(kind.value) ||
+				path?.kind !== "text" ||
+				!isBytesOrNull(before) ||
+				!isBytesOrNull(after)
+			)
+				throw createLixError(
+					"upstream_error",
+					"Lix returned an invalid file change row.",
+				);
+			return {
+				id: id.value,
+				path: path.value,
+				kind: kind.value,
+				...(before.kind === "blob"
+					? { before: base64ToBytes(before.base64) }
+					: {}),
+				...(after.kind === "blob"
+					? { after: base64ToBytes(after.base64) }
+					: {}),
+			};
+		});
 	}
 
 	/** The target paths that a diff between two commits touched. */
@@ -1266,6 +1280,27 @@ const EMPTY_RESPONSE: StatementResponse = {
 	notices: [],
 };
 
+/** One file's change between two commits, in `lix_diff`'s words. */
+export type FileChange = {
+	id: string;
+	path: string;
+	kind: "added" | "modified" | "removed";
+	/** Absent when the file did not exist at the span's start. */
+	before?: Uint8Array;
+	/** Absent when the file does not exist at the span's end. */
+	after?: Uint8Array;
+};
+
+function isChangeKind(value: string): value is FileChange["kind"] {
+	return value === "added" || value === "modified" || value === "removed";
+}
+
+function isBytesOrNull(
+	value: WireValue | undefined,
+): value is { kind: "blob"; base64: string } | { kind: "null"; value?: null } {
+	return value?.kind === "blob" || value?.kind === "null";
+}
+
 export type ReadFile = {
 	id: string;
 	path: string;
@@ -1278,20 +1313,6 @@ export type ReadFilesResult = {
 	files: Array<ReadFile & { url: string }>;
 	missing: string[];
 };
-
-/**
- * Files whose change a reader can be shown inline.
- *
- * This runs on the write's path, so it answers rather than throws: a card is
- * a courtesy, and a write that would have succeeded still succeeds.
- */
-function isPreviewablePath(path: string): boolean {
-	try {
-		return isRenderablePath(path);
-	} catch {
-		return false;
-	}
-}
 
 function normalizeFilePathOrThrow(path: string): string {
 	try {

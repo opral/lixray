@@ -322,6 +322,55 @@ class FakeRuntime implements LixRuntimeClient {
 				commit: null,
 			};
 		}
+		if (request.sql.startsWith("SELECT id, diff_type, from_path, to_path")) {
+			if (this.changesFailure) throw this.changesFailure;
+			const wanted = (request.params ?? [])
+				.slice(2)
+				.flatMap((param) => (param.kind === "text" ? [param.value] : []));
+			const paths = [
+				...new Set([...this.previousFiles.keys(), ...this.files.keys()]),
+			].filter((path) => wanted.length === 0 || wanted.includes(path));
+			const rows = paths.flatMap((path) => {
+				const before = this.previousFiles.get(path);
+				const after = this.files.get(path);
+				if (before && after && before.base64 === after.base64) return [];
+				const blob = (file: { base64: string } | undefined) =>
+					file
+						? { kind: "blob" as const, base64: file.base64 }
+						: { kind: "null" as const };
+				const side = (file: unknown) =>
+					file
+						? { kind: "text" as const, value: path }
+						: { kind: "null" as const };
+				return [
+					[
+						{ kind: "text" as const, value: (after ?? before)!.id },
+						{
+							kind: "text" as const,
+							value: !before ? "added" : !after ? "removed" : "modified",
+						},
+						side(before),
+						side(after),
+						blob(before),
+						blob(after),
+					],
+				];
+			});
+			return {
+				columns: [
+					"id",
+					"diff_type",
+					"from_path",
+					"to_path",
+					"from_content",
+					"to_content",
+				],
+				rows,
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+		}
 		if (
 			/^SELECT from_path, to_path FROM lix_diff\('lix_file', \$1, \$2\)/.test(
 				request.sql,
@@ -362,26 +411,11 @@ class FakeRuntime implements LixRuntimeClient {
 			});
 			this.writes.push(request.sql);
 			return {
-				columns: [
-					"id",
-					"path",
-					...(request.sql.includes("OLD.content") ? ["before", "after"] : []),
-				],
+				columns: ["id", "path"],
 				rows: [
 					[
 						{ kind: "text" as const, value: id },
 						{ kind: "text" as const, value: path.value },
-						...(request.sql.includes("OLD.content")
-							? [
-									existing
-										? { kind: "blob" as const, base64: existing.base64 }
-										: { kind: "null" as const },
-									{
-										kind: "blob" as const,
-										base64: this.files.get(path.value)!.base64,
-									},
-								]
-							: []),
 					],
 				],
 				rowsAffected: 1,
@@ -444,11 +478,20 @@ class FakeRuntime implements LixRuntimeClient {
 			commit: null,
 		};
 	}
+	/** What the last transaction started from, for the change query. */
+	previousFiles = new Map<
+		string,
+		{ id: string; base64: string; metadata: Record<string, unknown> | null }
+	>();
+	/** Set to make the change query fail, the way a flaky upstream would. */
+	changesFailure: Error | undefined;
+
 	async transaction<T>(
 		lixId: string,
 		branchId: string,
 		run: (tx: TransactionClient) => Promise<T>,
 	) {
+		this.previousFiles = new Map(this.files);
 		const value = await run({
 			execute: (request) => this.execute(lixId, branchId, request),
 		});
@@ -2534,7 +2577,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			/^https:\/\/dev\.lixray\.com\/@acme\/company\/file\//,
 		);
 		assert.deepEqual(runtime.writes, [
-			"INSERT INTO lix_file (path, content, lixcol_metadata) VALUES ($1, CAST($2 AS BYTEA), $3) ON CONFLICT (path) DO UPDATE SET content = excluded.content, lixcol_metadata = excluded.lixcol_metadata RETURNING id, path, OLD.content AS before, NEW.content AS after",
+			"INSERT INTO lix_file (path, content, lixcol_metadata) VALUES ($1, CAST($2 AS BYTEA), $3) ON CONFLICT (path) DO UPDATE SET content = excluded.content, lixcol_metadata = excluded.lixcol_metadata RETURNING id, path",
 			"UPDATE lix_file SET lixcol_metadata = $2 WHERE path = $1 RETURNING id, path",
 		]);
 		assert.match(runtime.lastOriginKey ?? "", /^mcp:/);
@@ -2630,6 +2673,67 @@ void test("file tools list, read, and write files with metadata and conflict che
 		});
 		assert.equal(unknown.isError, true);
 		assert.equal(toolErrorContent(unknown).error.code, "invalid_request");
+	} finally {
+		await client.close();
+	}
+});
+
+void test("a change query that fails leaves the write saved, with a warning", async () => {
+	const runtime = new FakeRuntime();
+	runtime.changesFailure = new Error("upstream is having a day");
+	const service = new LixService(runtime, {
+		contextSigningKey: "file-tools",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://dev.lixray.com/mcp"),
+		{
+			fetch: (input, init) =>
+				handleMcpTransport(new Request(input, init), service, {
+					authMode: "none",
+				}),
+		},
+	);
+	const client = new Client(
+		{ name: "file-tools-test", version: "1" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: "@acme/company" },
+		});
+		const context = (opened.structuredContent as { context: string }).context;
+		const written = await client.callTool({
+			name: "write_files",
+			arguments: {
+				context,
+				files: [{ path: "/gtm/notes.md", content: "# Notes" }],
+			},
+		});
+		// The card is a courtesy; the write it describes already happened, and
+		// the agent is told not to try again.
+		assert.equal(written.isError, undefined, JSON.stringify(written));
+		const result = written.structuredContent as {
+			files: Array<{ path: string }>;
+			warning?: string;
+		};
+		assert.deepEqual(
+			result.files.map((file) => file.path),
+			["/gtm/notes.md"],
+		);
+		assert.match(result.warning ?? "", /preview unavailable/);
+		assert.match(result.warning ?? "", /Do not repeat the write/);
+		assert.equal(
+			(written.content ?? []).some((block) => block.type === "resource"),
+			false,
+		);
+		assert.equal(
+			(written.content ?? []).filter((block) => block.type === "resource_link")
+				.length,
+			1,
+		);
 	} finally {
 		await client.close();
 	}

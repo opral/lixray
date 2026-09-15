@@ -117,7 +117,6 @@ class FakeRuntime implements LixRuntimeClient {
 		if (request.sql.startsWith("INSERT INTO lix_file (path, content")) {
 			const path = request.params?.[0];
 			if (path?.kind !== "text") throw new Error("missing path");
-			const old = this.stored.get(path.value);
 			const param = request.params?.[1];
 			const bytes =
 				param?.kind === "text"
@@ -126,9 +125,8 @@ class FakeRuntime implements LixRuntimeClient {
 						? new Uint8Array(Buffer.from(param.base64, "base64"))
 						: new Uint8Array();
 			this.stored.set(path.value, bytes);
-			const preview = request.sql.includes("OLD.content");
 			return {
-				columns: ["id", "path", ...(preview ? ["before", "after"] : [])],
+				columns: ["id", "path"],
 				rows: [
 					[
 						{
@@ -136,27 +134,79 @@ class FakeRuntime implements LixRuntimeClient {
 							value: "00000000-0000-4000-8000-00000000000f",
 						},
 						path,
-						...(preview
-							? [
-									old === undefined
-										? { kind: "null" as const }
-										: {
-												kind: "blob" as const,
-												base64: Buffer.from(
-													typeof old === "string"
-														? new TextEncoder().encode(old)
-														: old,
-												).toString("base64"),
-											},
-									{
-										kind: "blob" as const,
-										base64: Buffer.from(bytes).toString("base64"),
-									},
-								]
-							: []),
 					],
 				],
 				rowsAffected: 1,
+				notices: [],
+				commit: null,
+			};
+		}
+		if (request.sql.startsWith("SELECT id, diff_type, from_path, to_path")) {
+			if (this.readFailure) throw this.readFailure;
+			// The span's two sides are what the last transaction started from
+			// and what it left behind.
+			const wanted = (request.params ?? [])
+				.slice(2)
+				.flatMap((param) => (param.kind === "text" ? [param.value] : []));
+			const paths = [
+				...new Set([...this.previousStored.keys(), ...this.stored.keys()]),
+			].filter((path) => wanted.length === 0 || wanted.includes(path));
+			const blob = (held: string | Uint8Array | undefined) =>
+				held === undefined
+					? { kind: "null" as const }
+					: {
+							kind: "blob" as const,
+							base64: Buffer.from(
+								typeof held === "string"
+									? new TextEncoder().encode(held)
+									: held,
+							).toString("base64"),
+						};
+			const rows = paths.flatMap((path, index) => {
+				const before = this.previousStored.get(path);
+				const after = this.stored.get(path);
+				const same =
+					before !== undefined &&
+					after !== undefined &&
+					blob(before).base64 === blob(after).base64;
+				if (same) return [];
+				return [
+					[
+						{
+							kind: "text" as const,
+							value: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+						},
+						{
+							kind: "text" as const,
+							value:
+								before === undefined
+									? "added"
+									: after === undefined
+										? "removed"
+										: "modified",
+						},
+						before === undefined
+							? { kind: "null" as const }
+							: { kind: "text" as const, value: path },
+						after === undefined
+							? { kind: "null" as const }
+							: { kind: "text" as const, value: path },
+						blob(before),
+						blob(after),
+					],
+				];
+			});
+			return {
+				columns: [
+					"id",
+					"diff_type",
+					"from_path",
+					"to_path",
+					"from_content",
+					"to_content",
+				],
+				rows,
+				rowsAffected: 0,
 				notices: [],
 				commit: null,
 			};
@@ -233,12 +283,16 @@ class FakeRuntime implements LixRuntimeClient {
 		};
 	}
 
+	/** What the last transaction started from, for the change query. */
+	previousStored = new Map<string, string | Uint8Array>();
+
 	async transaction<T>(
 		lixId: string,
 		branchId: string,
 		run: (tx: TransactionClient) => Promise<T>,
 	): Promise<{ value: T; commit: { before: string; after: string } | null }> {
 		this.batches += 1;
+		this.previousStored = new Map(this.stored);
 		const value = await run({
 			execute: (request) => this.execute(lixId, branchId, request),
 		});
@@ -818,7 +872,7 @@ void test("direct SQL targets default to the repository branch without inventory
 	assert.equal(runtime.calls.length, 2);
 });
 
-void test("a preview returns exact row images only for the requested targets", async () => {
+void test("the changes of a write come from its receipt, both sides included", async () => {
 	const runtime = new FakeRuntime();
 	const service = new LixService(runtime, {
 		contextSigningKey: "test-key",
@@ -829,100 +883,87 @@ void test("a preview returns exact row images only for the requested targets", a
 
 	const written = await service.writeFiles(opened.context, {
 		originKey: "mcp:test",
-		previews: 2,
 		files: [
 			{ path: "/notes.md", content: "# Notes\n\nAnd more.\n" },
 			{ path: "/new.md", content: "# New\n" },
-			// Past the caller's budget: never read.
 			{ path: "/third.md", content: "# Third\n" },
-			// Not Markdown, and not text: neither is previewed.
-			{ path: "/data.csv", content: "a,b\n" },
-			{ path: "/image.md", content_base64: "AAECAw==" },
 		],
 	});
+	assert.deepEqual(written.commit, { before: "commit-0", after: "commit-1" });
 
-	assert.deepEqual(written.previews, [
+	// The write carries no bytes of its own: the span is asked what changed,
+	// and only about the files the caller will show.
+	const changes = await service.fileChanges(opened.context, written.commit!, [
+		"/notes.md",
+		"/new.md",
+	]);
+	assert.deepEqual(changes, [
 		{
+			id: "00000000-0000-4000-8000-000000000000",
 			path: "/notes.md",
+			kind: "modified",
 			before: new TextEncoder().encode("# Notes\n"),
 			after: new TextEncoder().encode("# Notes\n\nAnd more.\n"),
 		},
-		{ path: "/new.md", after: new TextEncoder().encode("# New\n") },
+		{
+			id: "00000000-0000-4000-8000-000000000001",
+			path: "/new.md",
+			kind: "added",
+			after: new TextEncoder().encode("# New\n"),
+		},
 	]);
-	// OLD/NEW is projected on exactly two target statements; no pre-read.
 	assert.equal(runtime.reads, 0);
 	assert.equal(
-		runtime.calls.filter((call) => call.sql?.includes("OLD.content")).length,
-		2,
+		runtime.calls.some((call) => call.sql?.includes("OLD.content")),
+		false,
+	);
+	assert.equal(
+		runtime.calls.filter((call) =>
+			call.sql?.startsWith("SELECT id, diff_type, from_path, to_path"),
+		).length,
+		1,
 	);
 });
 
-void test("a preview never costs the write", async () => {
+void test("a file that was empty is not a file that did not exist", async () => {
 	const runtime = new FakeRuntime();
-	const service = new LixService(runtime, {
-		contextSigningKey: "test-key",
-		principal: { userId: "user", clientId: "client" },
-	});
+	const service = new LixService(runtime);
 	const opened = await service.openLix("@acme/company");
-	runtime.stored.set("/notes.md", "# Notes\n");
-	runtime.readFailure = new Error("upstream is having a day");
-
+	runtime.stored.set("/empty.md", "");
 	const written = await service.writeFiles(opened.context, {
-		originKey: "mcp:test",
-		previews: 3,
-		files: [{ path: "/notes.md", content: "# Notes again\n" }],
+		originKey: "test",
+		files: [
+			{ path: "/empty.md", content: "changed" },
+			{ path: "/new.md", content: "" },
+		],
 	});
 
-	// No preview SELECT is needed, so a failed read cannot affect the card.
-	assert.equal(written.previews?.length, 1);
-	assert.equal(runtime.batches, 1);
-	assert.deepEqual(
-		written.files.map((file) => file.path),
-		["/notes.md"],
-	);
+	const changes = await service.fileChanges(opened.context, written.commit!);
+	const byPath = new Map(changes.map((change) => [change.path, change]));
+	// Zero bytes on the before side; no before side at all.
+	assert.deepEqual(byPath.get("/empty.md")?.before, new Uint8Array());
+	assert.equal(byPath.get("/empty.md")?.kind, "modified");
+	assert.equal(byPath.get("/new.md")?.before, undefined);
+	assert.equal(byPath.get("/new.md")?.kind, "added");
+	assert.deepEqual(byPath.get("/new.md")?.after, new Uint8Array());
 });
 
-void test("binary old bytes preserve existence for the renderer", async () => {
+void test("bytes that are not text still say the file existed", async () => {
 	const runtime = new FakeRuntime();
-	const service = new LixService(runtime, {
-		contextSigningKey: "test-key",
-		principal: { userId: "user", clientId: "client" },
-	});
+	const service = new LixService(runtime);
 	const opened = await service.openLix("@acme/company");
-	// A .md path holding bytes no diff can read: empty is text, this is not.
 	runtime.stored.set("/notes.md", new Uint8Array([0xff, 0xfe, 0x00]));
 
 	const written = await service.writeFiles(opened.context, {
-		originKey: "mcp:test",
-		previews: 3,
+		originKey: "test",
 		files: [{ path: "/notes.md", content: "# Notes\n" }],
 	});
-
-	assert.deepEqual(
-		written.previews?.[0]?.before,
-		new Uint8Array([0xff, 0xfe, 0x00]),
-	);
+	const [change] = await service.fileChanges(opened.context, written.commit!);
+	assert.deepEqual(change?.before, new Uint8Array([0xff, 0xfe, 0x00]));
+	assert.equal(change?.kind, "modified");
 });
 
-void test("no previews asked for, no read taken", async () => {
-	const runtime = new FakeRuntime();
-	const service = new LixService(runtime, {
-		contextSigningKey: "test-key",
-		principal: { userId: "user", clientId: "client" },
-	});
-	const opened = await service.openLix("@acme/company");
-	runtime.stored.set("/notes.md", "# Notes\n");
-
-	const written = await service.writeFiles(opened.context, {
-		originKey: "mcp:test",
-		files: [{ path: "/notes.md", content: "# Notes again\n" }],
-	});
-
-	assert.equal(written.previews, undefined);
-	assert.equal(runtime.reads, 0);
-});
-
-void test("missing and empty OLD bytes remain distinct and the receipt does not follow a later head", async () => {
+void test("the receipt does not follow a head that moved afterwards", async () => {
 	class AdvancedHeadRuntime extends FakeRuntime {
 		override async transaction<T>(
 			lixId: string,
@@ -937,49 +978,42 @@ void test("missing and empty OLD bytes remain distinct and the receipt does not 
 	const runtime = new AdvancedHeadRuntime();
 	const service = new LixService(runtime);
 	const opened = await service.openLix("@acme/company");
-	runtime.stored.set("/empty.md", "");
 	const written = await service.writeFiles(opened.context, {
 		originKey: "test",
-		previews: 2,
-		files: [
-			{ path: "/empty.md", content: "changed" },
-			{ path: "/new.md", content: "" },
-		],
+		files: [{ path: "/new.md", content: "" }],
 	});
 	assert.equal(written.commitId, "commit-1");
 	assert.deepEqual(written.commit, { before: "commit-0", after: "commit-1" });
-	assert.deepEqual(written.previews?.[0]?.before, new Uint8Array());
-	assert.equal(written.previews?.[1]?.before, undefined);
-	assert.deepEqual(written.previews?.[1]?.after, new Uint8Array());
 });
 
-void test("invalid preview rows report saved without repeating the write", async () => {
-	class BrokenPreviewRuntime extends FakeRuntime {
+void test("a change row Lix cannot vouch for is refused, not rendered", async () => {
+	class BrokenChangesRuntime extends FakeRuntime {
 		override async execute(
 			lixId: string,
 			branchId: string,
 			request: ExecuteRequest,
 		) {
 			const result = await super.execute(lixId, branchId, request);
-			if (request.sql.includes("OLD.content")) result.columns = ["id", "path"];
+			if (request.sql.startsWith("SELECT id, diff_type"))
+				result.columns = ["id", "diff_type"];
 			return result;
 		}
 	}
-	const runtime = new BrokenPreviewRuntime();
+	const runtime = new BrokenChangesRuntime();
 	const service = new LixService(runtime);
 	const opened = await service.openLix("@acme/company");
 	const written = await service.writeFiles(opened.context, {
 		originKey: "test",
-		previews: 1,
 		files: [{ path: "/new.md", content: "saved" }],
 	});
-	assert.match(written.warning ?? "", /Files saved, preview unavailable/);
+	// The write is already saved; only the question about it fails.
 	assert.equal(written.commitId, "commit-1");
-	assert.equal(runtime.batches, 1);
-	assert.equal(
-		runtime.calls.filter((call) => call.sql?.startsWith("INSERT INTO lix_file"))
-			.length,
-		1,
+	await assert.rejects(
+		service.fileChanges(opened.context, written.commit!),
+		(error: unknown) =>
+			typeof error === "object" &&
+			error !== null &&
+			(error as { code?: unknown }).code === "upstream_error",
 	);
 });
 

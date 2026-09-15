@@ -443,7 +443,25 @@ export async function createSyncFixture({
 			// Count/history preparation can yield while editor side effects commit.
 			// Capture the review epoch only after that preparation has completed.
 			await openRepositoryWorkingChanges(page);
-			await selectFiles?.();
+			if (selectFiles) {
+				await selectFiles();
+			} else {
+				// The primary action checkpoints the selection, not every file.
+				const scope = page.getByRole("button", {
+					name: /Working set: \d+ of \d+ files/,
+				});
+				if (await scope.count()) {
+					await scope.click();
+					const allFiles = page.getByRole("checkbox", {
+						name: "All files",
+						exact: true,
+					});
+					if ((await allFiles.getAttribute("aria-checked")) !== "true") {
+						await allFiles.click();
+					}
+					await expect(allFiles).toHaveAttribute("aria-checked", "true");
+				}
+			}
 			// Review presentation can load asynchronously. Finish that online setup
 			// before measuring the local checkpoint with the network unavailable.
 			const checkpointButton = page.getByRole("button", {
@@ -458,18 +476,24 @@ export async function createSyncFixture({
 			try {
 				const checkpointDeadline = Date.now() + 5_000;
 				await checkpointButton.click({ timeout: 5_000 });
-				const remainingCheckpointTime = checkpointDeadline - Date.now();
-				expect(remainingCheckpointTime).toBeGreaterThan(0);
-				await expect(
-					page.getByRole("button", { name: /^(Checkpoint|Checkpointing…)$/ }),
-				).toHaveCount(0, { timeout: remainingCheckpointTime });
 				// The second tab observes the same durable OPFS commit while the
 				// server is unreachable; no foreground /execute receipt is needed.
+				const remainingCheckpointTime = checkpointDeadline - Date.now();
+				expect(remainingCheckpointTime).toBeGreaterThan(0);
 				await expect(
 					historyBefore
 						.getByRole("list", { name: "Checkpoints" })
 						.locator(":scope > li"),
-				).toHaveCount(localCount + 1, { timeout: 5_000 });
+				).toHaveCount(localCount + 1, { timeout: remainingCheckpointTime });
+				if (selectFiles) {
+					// A partial checkpoint leaves the remaining files in review.
+					await expect(checkpointButton).toBeVisible();
+					await page.getByRole("button", { name: "Exit", exact: true }).click();
+				} else {
+					await expect(
+						page.getByRole("button", { name: /^(Checkpoint|Checkpointing…)$/ }),
+					).toHaveCount(0);
+				}
 			} finally {
 				await sharedContext.setOffline(false);
 				intentionallyOffline = false;
