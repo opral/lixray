@@ -1172,6 +1172,7 @@ export function RepositoryAtelier({
 						createReproduction: ({ query, diffCsv }) =>
 							buildRepositoryReproduction({
 								localLix: session.lix,
+								selectedBranchIdAtSnapshotStart: session.activeBranchSnapshot(),
 								remoteSnapshot: getDebugRemoteSnapshot,
 								query,
 								diffCsv,
