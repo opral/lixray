@@ -65,7 +65,7 @@ export function reconcileAuthorityInventory(controlPlane, authorityInventory, un
     issues.push({ kind: "malformed-authority-catalog", path });
   const readinessIssues = authorityInventory.entries
     .filter((entry) => entry.state === "live" && (entry.requiresMigration !== false
-      || entry.storageEpoch !== 81 || entry.protocolEpoch !== 15))
+      || entry.storageEpoch !== 81 || entry.protocolEpoch !== 16))
     .map((entry) => ({ kind: "authority-not-current", repositoryId: entry.repositoryId,
       storageEpoch: entry.storageEpoch ?? null, protocolEpoch: entry.protocolEpoch ?? null }));
   return {
