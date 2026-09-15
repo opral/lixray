@@ -54,6 +54,13 @@ export function createAtelierTelemetryHandler(
 					view_kind: event.viewKind,
 				});
 				break;
+			case "document_loaded":
+				capture(PRODUCT_EVENTS.documentLoaded, {
+					file_extension: fileExtensionProperty(event.filePath),
+					view_kind: event.viewKind,
+					duration_ms: event.durationMs,
+				});
+				break;
 			case "document_modified": {
 				const capturedAt = now();
 				const lastCapturedAt = lastModificationByPath.get(event.filePath);

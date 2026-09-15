@@ -121,3 +121,26 @@ void test("first_file_added fires once when repository gets its first file", asy
 		file_extension: "md",
 	});
 });
+
+void test("document loaded records measured latency without document identity", () => {
+	const captured: unknown[] = [];
+	const handler = createAtelierTelemetryHandler((event, properties) =>
+		captured.push({ event, properties }),
+	);
+	handler({
+		type: "document_loaded",
+		filePath: "/private/posts.csv",
+		viewKind: "atelier_csv",
+		durationMs: 123.5,
+	});
+	assert.deepEqual(captured, [
+		{
+			event: "document_loaded",
+			properties: {
+				file_extension: "csv",
+				view_kind: "atelier_csv",
+				duration_ms: 123.5,
+			},
+		},
+	]);
+});
