@@ -258,12 +258,20 @@ test("Account tokens have generated names, creation dates and independent deleti
 		const anonymous = await browser.newContext({ baseURL });
 		try {
 			const reader = await anonymous.newPage();
+			const resolved = reader.waitForResponse(
+				(response) =>
+					new URL(response.url()).pathname === "/api/published/entity",
+				{ timeout: 30_000 },
+			);
 			const downloaded = reader.waitForResponse(
 				(response) =>
 					new URL(response.url()).pathname ===
 					`/api/published/lix/${remote.id}/file`,
+				{ timeout: 30_000 },
 			);
+			void downloaded.catch(() => undefined);
 			await reader.goto(publicUrl);
+			expect((await resolved).status()).toBe(200);
 			const downloadUrl = (await downloaded).url();
 			await expect(
 				reader.getByRole("heading", {

@@ -37,6 +37,7 @@ export async function handlePublishedEntity(
 		return reply({ error: "Invalid entity locator" }, 400);
 	if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY)
 		return reply({ error: "Entity resolution unavailable" }, 503);
+	let stage = "namespace";
 	try {
 		const headers = {
 			apikey: env.SUPABASE_SERVICE_ROLE_KEY,
@@ -50,10 +51,14 @@ export async function handlePublishedEntity(
 			limit: "1",
 		}).toString();
 		const handleResponse = await fetcher(handleUrl, { headers });
-		if (!handleResponse.ok) throw new Error("Namespace lookup failed");
+		if (!handleResponse.ok)
+			throw new Error(
+				`Namespace lookup failed (HTTP ${handleResponse.status})`,
+			);
 		const handles = (await handleResponse.json()) as { namespace_id: string }[];
 		if (!handles[0] || !UUID.test(handles[0].namespace_id))
 			return reply({ error: "Entity not found" }, 404);
+		stage = "repository";
 		const repoUrl = new URL("/rest/v1/lixes", env.SUPABASE_URL);
 		repoUrl.search = new URLSearchParams({
 			select: "id",
@@ -63,16 +68,19 @@ export async function handlePublishedEntity(
 			limit: "1",
 		}).toString();
 		const repoResponse = await fetcher(repoUrl, { headers });
-		if (!repoResponse.ok) throw new Error("Repository lookup failed");
+		if (!repoResponse.ok)
+			throw new Error(`Repository lookup failed (HTTP ${repoResponse.status})`);
 		const repos = (await repoResponse.json()) as { id: string }[];
 		const lixId = repos[0]?.id;
 		if (!lixId || !UUID.test(lixId))
 			return reply({ error: "Entity not found" }, 404);
+		stage = "file identity";
 		const entity = await lookup(lixId, kind, id ? { id } : { path: path! });
 		if (!entity || !(await authorize(lixId, entity.path)))
 			return reply({ error: "Entity not found" }, 404);
 		return reply({ ...entity, lixId, kind });
-	} catch {
+	} catch (error) {
+		console.error("Published entity resolution failed", { stage, error });
 		return reply({ error: "Entity resolution unavailable" }, 502);
 	}
 }
