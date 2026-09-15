@@ -41,7 +41,8 @@
 		"typecheck": "pnpm run routes:generate && tsc --noEmit",
 		"ci:fast": "pnpm format:check && pnpm test:auth && pnpm test:profile && pnpm test:docs",
 		"test:partial-replica": "node --test --experimental-strip-types --experimental-test-module-mocks src/lib/repository-lix-session-open.test.ts",
-		"test:mcp-ui": "node --test --experimental-strip-types tests/mcp-ui/*.test.mjs"
+		"test:mcp-ui": "node --test --experimental-strip-types tests/mcp-ui/*.test.mjs",
+		"test:published": "playwright test --config playwright.published.config.ts"
 	},
 	"dependencies": {
 		"@lix-js/sdk": "workspace:*",

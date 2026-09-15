@@ -1,3 +1,4 @@
+import { publishedResponseError } from "./published-error.ts";
 import type { Lix } from "@lix-js/sdk";
 
 /** UUIDs keep their identity in Lix; this is only their URL representation. */
@@ -211,8 +212,7 @@ export async function resolvePublishedEntity(args: {
 		signal: args.signal,
 	});
 	if (response.status === 404) return null;
-	if (!response.ok)
-		throw new Error("This item could not be found or is no longer public.");
+	if (!response.ok) throw new Error(await publishedResponseError(response));
 	const data: unknown = await response.json();
 	if (
 		!data ||
