@@ -4,27 +4,73 @@ on:
   pull_request:
     types:
       - closed
-
-concurrency:
-  group: railway-preview-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  cleanup-railway:
-    name: Delete Railway preview
+  discover:
+    name: Find Railway previews to reconcile
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
       id-token: write
+    outputs:
+      pull_requests: ${{ steps.previews.outputs.pull_requests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Fetch deployment secrets from Infisical
+        if: github.event_name != 'pull_request'
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PREVIEW_IDENTITY_ID }}
+          oidc-audience: https://github.com/opral
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: /ci
+      - name: Find CI-managed previews
+        id: previews
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if test -n "$PR_NUMBER"; then
+            previews="$(jq -cn --arg number "$PR_NUMBER" '[$number]')"
+          else
+            previews="$(.github/scripts/manage-railway-preview.sh list-previews)"
+          fi
+          echo "pull_requests=$previews" >> "$GITHUB_OUTPUT"
 
+  cleanup-railway:
+    name: Delete closed PR Railway preview
+    needs: discover
+    if: needs.discover.outputs.pull_requests != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.discover.outputs.pull_requests) }}
+    # Never interrupt an in-flight Railway create: wait for deployment to finish,
+    # then recheck the PR. Deployments use this same per-PR lock.
+    concurrency:
+      group: railway-preview-${{ matrix.pr }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
     steps:
       - name: Check out cleanup coordinator
         uses: actions/checkout@v4
-
+        with:
+          ref: main
       - name: Fetch deployment secrets from Infisical
         uses: Infisical/secrets-action@v1.0.9
         with:
@@ -34,13 +80,14 @@ jobs:
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           env-slug: prod
           secret-path: /ci
-
-      - name: Delete CI-managed Railway preview
+      - name: Delete CI-managed Railway preview if PR is still closed
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: .github/scripts/manage-railway-preview.sh delete
+          PR_NUMBER: ${{ matrix.pr }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/manage-railway-preview.sh delete-if-closed
 
   cleanup-github:
+    if: github.event_name == 'pull_request'
     name: Delete GitHub preview
     runs-on: ubuntu-latest
     timeout-minutes: 5
