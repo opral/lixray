@@ -1,3 +1,4 @@
+import { getCompatibility } from "../vendor/lix/scripts/compatibility.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { reconcileAuthorityInventory } from "./reconcile-authority-inventory.mjs";
@@ -63,9 +64,10 @@ await test("explicit unchanged unavailable records are accounted for but never c
 
 await test("cutover readiness requires current admission for every live authority", () => {
   const controls = [{ id: "a", deleted_at: null }];
-  const current = { ...entry, requiresMigration: false, storageEpoch: 81, protocolEpoch: 16 };
+  const compatibility = getCompatibility();
+  const current = { ...entry, requiresMigration: false, storageEpoch: compatibility.storageFormatVersion, protocolEpoch: compatibility.syncProtocolVersion };
   assert.equal(reconcileAuthorityInventory(controls, { ...inventory, entries: [current] }).cutoverReady, true);
-  for (const changed of [{ requiresMigration: true }, { storageEpoch: 80 }, { protocolEpoch: 15 }, { protocolEpoch: 14 }, { storageEpoch: undefined }]) {
+  for (const changed of [{ requiresMigration: true }, { storageEpoch: compatibility.storageFormatVersion - 1 }, { protocolEpoch: compatibility.syncProtocolVersion - 1 }, { storageEpoch: undefined }]) {
     const result = reconcileAuthorityInventory(controls, { ...inventory, entries: [{ ...current, ...changed }] });
     assert.equal(result.reconciled, true);
     assert.equal(result.cutoverReady, false);

@@ -1,3 +1,4 @@
+import { compatibility } from "@lix-js/sdk/compatibility";
 export interface LixAccountProfile {
 	id: string;
 	kind: string;
@@ -61,7 +62,9 @@ export async function provisionAccountAfterHandshake(options: {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
-					"Lix-Server-Protocol-Version": "10",
+					"Lix-Server-Protocol-Version": String(
+						compatibility.serverProtocolVersion,
+					),
 					[SESSION_ID_HEADER]: sessionId,
 					[IDEMPOTENCY_KEY_HEADER]: `account-profile-${crypto.randomUUID()}`,
 					[TRUSTED_PRINCIPAL_HEADER]: account.id,

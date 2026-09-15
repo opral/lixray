@@ -1,3 +1,4 @@
+import { getCompatibility } from "../../../vendor/lix/scripts/compatibility.mjs";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import {
@@ -10,6 +11,8 @@ import {
 	type Request,
 } from "@playwright/test";
 import { provisionRepositories } from "../../scripts/provision-repositories.mjs";
+
+const compatibility = getCompatibility();
 
 const DEMO_REPOSITORY_ID = "00000000-0000-4000-8000-000000000002";
 const SECONDARY_REPOSITORY_ID = "00000000-0000-4000-8000-000000000005";
@@ -173,7 +176,9 @@ export async function createSyncFixture({
 			const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL);
 			const authorization = {
 				Authorization: "Bearer lixray-demo",
-				"Lix-Server-Protocol-Version": "10",
+				"Lix-Server-Protocol-Version": String(
+					compatibility.serverProtocolVersion,
+				),
 			};
 			const opened = await sharedContext.request.get(endpoint.toString(), {
 				headers: authorization,
@@ -233,24 +238,31 @@ export async function createSyncFixture({
 			baseURL,
 		).toString();
 		await left.goto(new URL("/", baseURL).toString());
-		const cacheProbes = await left.evaluate(async (url) => {
-			const probe = async () => {
-				const response = await fetch(url, {
-					headers: {
-						Authorization: "Bearer lixray-demo",
-						"Lix-Session-Id": "0".repeat(64),
-						"Lix-Sync-Protocol-Version": "16",
-						"Lix-Server-Protocol-Version": "10",
-					},
-				});
-				return {
-					status: response.status,
-					cacheControl: response.headers.get("cache-control"),
-					requestId: response.headers.get("x-railway-request-id"),
+		const cacheProbes = await left.evaluate(
+			async ({ url, compatibility }) => {
+				const probe = async () => {
+					const response = await fetch(url, {
+						headers: {
+							Authorization: "Bearer lixray-demo",
+							"Lix-Session-Id": "0".repeat(64),
+							"Lix-Sync-Protocol-Version": String(
+								compatibility.syncProtocolVersion,
+							),
+							"Lix-Server-Protocol-Version": String(
+								compatibility.serverProtocolVersion,
+							),
+						},
+					});
+					return {
+						status: response.status,
+						cacheControl: response.headers.get("cache-control"),
+						requestId: response.headers.get("x-railway-request-id"),
+					};
 				};
-			};
-			return [await probe(), await probe()];
-		}, cacheProbeUrl);
+				return [await probe(), await probe()];
+			},
+			{ url: cacheProbeUrl, compatibility: getCompatibility() },
+		);
 		for (const probe of cacheProbes) {
 			expect(probe).toMatchObject({ status: 410, cacheControl: "no-store" });
 			if (!local) expect(probe.requestId).toBeTruthy();
@@ -321,7 +333,9 @@ export async function createSyncFixture({
 			).toString();
 			const authorization = {
 				Authorization: "Bearer lixray-demo",
-				"Lix-Server-Protocol-Version": "10",
+				"Lix-Server-Protocol-Version": String(
+					compatibility.serverProtocolVersion,
+				),
 			};
 			const opened = await sharedContext.request.get(repositoryEndpoint, {
 				headers: authorization,
@@ -516,7 +530,9 @@ export async function createSyncFixture({
 			const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL).toString();
 			const authorization = {
 				Authorization: "Bearer lixray-demo",
-				"Lix-Server-Protocol-Version": "10",
+				"Lix-Server-Protocol-Version": String(
+					compatibility.serverProtocolVersion,
+				),
 			};
 			const opened = await sharedContext.request.get(endpoint, {
 				headers: authorization,
@@ -1173,7 +1189,9 @@ export async function createSyncFixture({
 			const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL).toString();
 			const authorization = {
 				Authorization: "Bearer lixray-demo",
-				"Lix-Server-Protocol-Version": "10",
+				"Lix-Server-Protocol-Version": String(
+					compatibility.serverProtocolVersion,
+				),
 			};
 			const opened = await sharedContext.request.get(endpoint, {
 				headers: authorization,

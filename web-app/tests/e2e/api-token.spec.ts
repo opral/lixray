@@ -1,3 +1,4 @@
+import { compatibility } from "@lix-js/sdk/compatibility";
 import { expect, test } from "@playwright/test";
 
 test("Account tokens have generated names, creation dates and independent deletion", async ({
@@ -93,7 +94,9 @@ test("Account tokens have generated names, creation dates and independent deleti
 		const otherRepo = await request.get(`/lix/v1/${otherId}/`, {
 			headers: {
 				Authorization: `Bearer ${first}`,
-				"Lix-Server-Protocol-Version": "10",
+				"Lix-Server-Protocol-Version": String(
+					compatibility.serverProtocolVersion,
+				),
 			},
 		});
 		expect(otherRepo.status()).toBe(200);
@@ -202,7 +205,9 @@ test("Account tokens have generated names, creation dates and independent deleti
 				Authorization: `Bearer ${first}`,
 				"Idempotency-Key": crypto.randomUUID(),
 				"Content-Type": "application/vnd.lix.snapshot",
-				"Lix-Server-Protocol-Version": "10",
+				"Lix-Server-Protocol-Version": String(
+					compatibility.serverProtocolVersion,
+				),
 			},
 			data: Buffer.from(snapshot.bytes),
 		});
@@ -240,7 +245,13 @@ test("Account tokens have generated names, creation dates and independent deleti
 		).toBe(true);
 		const privateFile = await request.get(
 			`/lix/v1/${remote.id}/file?path=/private.txt`,
-			{ headers: { "Lix-Server-Protocol-Version": "10" } },
+			{
+				headers: {
+					"Lix-Server-Protocol-Version": String(
+						compatibility.serverProtocolVersion,
+					),
+				},
+			},
 		);
 		expect([401, 403, 404]).toContain(privateFile.status());
 		// Real anonymous browser + pinned SDK/server: protocol mocks cannot
@@ -323,7 +334,9 @@ test("Account tokens have generated names, creation dates and independent deleti
 			const response = await request.get(`/lix/v1/${lixId}/`, {
 				headers: {
 					Authorization: `Bearer ${token}`,
-					"Lix-Server-Protocol-Version": "10",
+					"Lix-Server-Protocol-Version": String(
+						compatibility.serverProtocolVersion,
+					),
 				},
 			});
 			expect(response.status()).toBe(200);
@@ -347,14 +360,18 @@ test("Account tokens have generated names, creation dates and independent deleti
 		const deletedResponse = await request.get(`/lix/v1/${lixId}/`, {
 			headers: {
 				Authorization: `Bearer ${first}`,
-				"Lix-Server-Protocol-Version": "10",
+				"Lix-Server-Protocol-Version": String(
+					compatibility.serverProtocolVersion,
+				),
 			},
 		});
 		expect(deletedResponse.status()).toBe(401);
 		const remainingResponse = await request.get(`/lix/v1/${lixId}/`, {
 			headers: {
 				Authorization: `Bearer ${second}`,
-				"Lix-Server-Protocol-Version": "10",
+				"Lix-Server-Protocol-Version": String(
+					compatibility.serverProtocolVersion,
+				),
 			},
 		});
 		expect(remainingResponse.status()).toBe(200);

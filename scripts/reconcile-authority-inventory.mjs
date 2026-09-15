@@ -1,3 +1,4 @@
+import { getCompatibility } from "../vendor/lix/scripts/compatibility.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { readFile } from "node:fs/promises";
@@ -5,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 /** Reconcile both catalogs before deciding which repositories a fleet migration covers. */
 export function reconcileAuthorityInventory(controlPlane, authorityInventory, unavailable = []) {
+  const compatibility = getCompatibility();
   const issues = [];
   const controls = new Map();
   for (const record of controlPlane) {
@@ -65,7 +67,8 @@ export function reconcileAuthorityInventory(controlPlane, authorityInventory, un
     issues.push({ kind: "malformed-authority-catalog", path });
   const readinessIssues = authorityInventory.entries
     .filter((entry) => entry.state === "live" && (entry.requiresMigration !== false
-      || entry.storageEpoch !== 81 || entry.protocolEpoch !== 16))
+      || entry.storageEpoch !== compatibility.storageFormatVersion
+      || entry.protocolEpoch !== compatibility.syncProtocolVersion))
     .map((entry) => ({ kind: "authority-not-current", repositoryId: entry.repositoryId,
       storageEpoch: entry.storageEpoch ?? null, protocolEpoch: entry.protocolEpoch ?? null }));
   return {
