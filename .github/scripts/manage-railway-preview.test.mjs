@@ -58,12 +58,68 @@ test("publishes a Railway domain for the GitHub deployment URL", async () => {
   assert.match(calls, /--service web-service/);
 });
 
+test("reconciliation discovers only exact managed preview names", async () => {
+  const fixture = await createFixture("with-preview");
+  const result = runManager(fixture, "list-previews");
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), ["214"]);
+  assert.doesNotMatch(await readFile(fixture.calls, "utf8"), /environmentDelete/);
+});
+
+for (const state of ["open", "closed", "unknown", "api-error"]) {
+  test(`reconciliation handles GitHub PR state ${state} safely`, async () => {
+    const fixture = await createFixture("with-preview");
+    const result = runManager(fixture, "delete-if-closed", true, { MOCK_PR_STATE: state });
+    assert.equal(result.status === 0, ["open", "closed"].includes(state), result.stderr);
+    const calls = await readFile(fixture.calls, "utf8");
+    if (state === "closed") {
+      assert.match(calls, /environmentDelete/);
+      assert.match(calls, /"id":"existing-preview"/);
+    } else {
+      assert.doesNotMatch(calls, /environmentDelete/);
+    }
+  });
+}
+
+test("rejects malformed PR numbers before any API call", async () => {
+  const fixture = await createFixture("with-preview");
+  for (const value of ["production", "../production", "0", "214-extra", "-1"]) {
+    const result = runManager(fixture, "delete", true, { PR_NUMBER: value });
+    assert.notEqual(result.status, 0);
+  }
+  assert.equal(await readFile(fixture.calls, "utf8"), "");
+});
+
+test("deleting an absent preview is idempotent", async () => {
+  const fixture = await createFixture("production-only");
+  const result = runManager(fixture, "delete-if-closed");
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(await readFile(fixture.calls, "utf8"), /environmentDelete/);
+});
+
+test("refuses configured production or preview-base even if misnamed", async () => {
+  for (const variable of ["RAILWAY_PRODUCTION_ENVIRONMENT", "RAILWAY_PREVIEW_BASE_ENVIRONMENT"]) {
+    const fixture = await createFixture("with-preview");
+    const result = runManager(fixture, "delete", true, { [variable]: "existing-preview" });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /protected Railway environment/);
+    assert.doesNotMatch(await readFile(fixture.calls, "utf8"), /environmentDelete/);
+  }
+});
+
 async function createFixture(mode) {
   const directory = await mkdtemp(join(tmpdir(), "lixray-preview-"));
   const calls = join(directory, "calls.jsonl");
   const output = join(directory, "github-output");
   const curl = join(directory, "curl");
   const railway = join(directory, "railway");
+  const gh = join(directory, "gh");
+  await writeFile(gh, `#!/usr/bin/env bash
+set -euo pipefail
+if test "$MOCK_PR_STATE" = api-error; then exit 1; fi
+printf '%s\\n' "$MOCK_PR_STATE"
+`);
+  await chmod(gh, 0o755);
   await Promise.all([writeFile(calls, ""), writeFile(output, "")]);
   await writeFile(
     curl,
@@ -79,7 +135,7 @@ if jq -e '.query | contains("environmentCreate")' <<<"$payload" >/dev/null; then
 elif jq -e '.query | contains("environmentDelete")' <<<"$payload" >/dev/null; then
 	printf '{"data":{"environmentDelete":true}}\n'
 elif test "$MOCK_MODE" = with-preview; then
-	printf '{"data":{"project":{"environments":{"edges":[{"node":{"id":"production-id","name":"preview-base"}},{"node":{"id":"existing-preview","name":"lixray-pr-214"}}]}}}}\n'
+	printf '{"data":{"project":{"environments":{"edges":[{"node":{"id":"production-id","name":"preview-base"}},{"node":{"id":"existing-preview","name":"lixray-pr-214"}},{"node":{"id":"production","name":"production"}},{"node":{"id":"unmanaged","name":"lixray-pr-214-backup"}}]}}}}\n'
 else
 	printf '{"data":{"project":{"environments":{"edges":[{"node":{"id":"production-id","name":"preview-base"}}]}}}}\n'
 fi
@@ -103,7 +159,7 @@ fi
   return { calls, directory, mode, output, railway };
 }
 
-function runManager(fixture, action, includePreviewBase = true) {
+function runManager(fixture, action, includePreviewBase = true, overrides = {}) {
   return spawnSync("bash", [manager, action], {
     cwd: repositoryRoot,
     encoding: "utf8",
@@ -112,6 +168,8 @@ function runManager(fixture, action, includePreviewBase = true) {
       GITHUB_OUTPUT: fixture.output,
       MOCK_CALLS: fixture.calls,
       MOCK_MODE: fixture.mode,
+      MOCK_PR_STATE: "closed",
+      GITHUB_REPOSITORY: "opral/lixray",
       PATH: `${fixture.directory}:${process.env.PATH}`,
       PR_NUMBER: "214",
       RAILWAY_API_TOKEN: "railway-token",
@@ -119,6 +177,22 @@ function runManager(fixture, action, includePreviewBase = true) {
       RAILWAY_PROJECT_ID: "project",
       RAILWAY_WEB_SERVICE: "web-service",
       ...(includePreviewBase ? { RAILWAY_PREVIEW_BASE_ENVIRONMENT: "preview-base" } : {}),
+      ...overrides,
     },
   });
 }
+
+test("close and reconciliation cleanup share the deployment lock without cancellation", async () => {
+  const cleanup = await readFile(resolve(repositoryRoot, ".github/workflows/railway-preview-cleanup.yml"), "utf8");
+  const pr = await readFile(resolve(repositoryRoot, ".github/workflows/pr.yml"), "utf8");
+  assert.match(cleanup, /schedule:\n\s+- cron:/);
+  assert.match(cleanup, /workflow_dispatch:/);
+  assert.match(cleanup, /group: railway-preview-\$\{\{ matrix.pr \}\}\n\s+cancel-in-progress: false/);
+  assert.match(pr, /group: railway-preview-\$\{\{ github.event.pull_request.number \}\}\n\s+cancel-in-progress: false/);
+  assert.doesNotMatch(cleanup, /cancel-in-progress: true/);
+  assert.match(pr, /cancel-in-progress: \$\{\{ github.event.action != 'closed' \}\}/);
+  assert.match(cleanup, /manage-railway-preview.sh list-previews/);
+  assert.match(cleanup, /manage-railway-preview.sh delete-if-closed/);
+  assert.match(pr, /Retire preview if PR closed during deployment\n\s+if: always\(\)/);
+  assert.match(pr, /state=.*gh api[\s\S]*?test "\$state" = open[\s\S]*?manage-railway-preview.sh ensure/);
+});

@@ -270,8 +270,16 @@ SDK and build the server, but do not replace Lix's full release validation.
 
 Preview deployment is opt-in: add the `preview` label to the PR. While the label
 is present, subsequent pushes refresh its preview after selected checks pass.
-Unlabeled PRs never create Railway environments. Closing the PR cleans up its
-preview. Deployment smoke tests retain canonical protocol/no-store and PWA checks.
+Unlabeled PRs never create Railway environments. Closing or merging the PR
+removes its preview. Cleanup shares the deployment lock and rechecks GitHub state;
+closing a PR does not cancel an in-flight Railway creation. A final deployment
+check retires previews whose PR closed during deployment. Hourly reconciliation
+(and manual dispatch of `railway-preview-cleanup.yml`) removes orphaned
+`lixray-pr-N` environments after confirming their PR is still closed, covering
+missed events and interrupted jobs. Open PRs, production, and the preview template
+are retained. Keep the preview template stopped; it supplies configuration, not a
+running service. Deployment smoke tests retain canonical protocol/no-store and
+PWA checks.
 
 The shared `web-image.yml` builds the exact checked-out commit with Docker layer
 caching. PRs and production use that same implementation. On `main`, production
@@ -308,9 +316,14 @@ uses the current `gh auth` session for artifact reads when available.
 
 Create separate Infisical OIDC machine identities for pull requests and the
 GitHub `production` environment. Give both read access only to `/ci`, bind
-their subjects to `repo:opral/lixray:pull_request` and
+the preview identity with an empty Bound Subject and a `sub` Bound Claim
+containing the exact comma-separated allowlist
+`repo:opral/lixray:pull_request,repo:opral/lixray:ref:refs/heads/main`. The main
+subject permits hourly/manual preview reconciliation; do not use a wildcard.
+Bind the production identity subject to
 `repo:opral/lixray:environment:production`, and use
-`https://github.com/opral` as the audience. Configure their public identifiers
+`https://github.com/opral` as the audience and
+`https://token.actions.githubusercontent.com` as the issuer. Configure their public identifiers
 as GitHub Actions variables:
 
 - `INFISICAL_PROJECT_SLUG`;
@@ -348,6 +361,16 @@ preview environments use separate S3 storage configuration; when `S3_PREFIX`
 is unset, the deployment adapter preserves the existing
 `railway/$RAILWAY_ENVIRONMENT_ID` object layout. Preview environments never
 inherit production Supabase credentials.
+
+The reference server closes unused Lix runtimes after 60 seconds of observed
+idle time, checked at most every five seconds, even below its open-runtime limit.
+Set `LIX_SERVER_IDLE_TIMEOUT_SECS` to a positive integer to adjust this interval.
+Closing releases SlateDB background metadata polling and allows preview services
+to sleep. Active requests, observation streams, and unexpired protocol sessions
+are protected; abandoned sessions retain the existing 30-minute session expiry
+before the runtime idle timer starts. The next request reopens the database only
+after the previous runtime has finished closing. This trades a cold open after
+idle periods for lower R2 operation costs.
 
 ### Sync validation
 

@@ -13,7 +13,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}-${{ github.event.action == 'labeled' && github.event.label.name != 'preview' && 'ignored-label' || 'validation' }}
-  cancel-in-progress: true
+  # Closing must not interrupt a Railway create before serialized cleanup.
+  cancel-in-progress: ${{ github.event.action != 'closed' }}
 
 permissions:
   contents: read
@@ -531,6 +532,13 @@ jobs:
 
           report_status 'lixray - lixray-web'
           report_status 'lixray - lix-server'
+
+      - name: Retire preview if PR closed during deployment
+        if: always() && steps.credentials.outputs.available == 'true'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/manage-railway-preview.sh delete-if-closed
 
   publish-preview:
     name: Publish preview link
