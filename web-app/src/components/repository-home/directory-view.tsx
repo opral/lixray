@@ -5,7 +5,11 @@ import {
 	renameWorkspaceEntry,
 	WorkspacePathTakenError,
 } from "@opral/atelier";
-import type { AtelierDiffSession, AtelierFileProps } from "@opral/atelier";
+import type {
+	AtelierDiffSession,
+	AtelierDocumentLinks,
+	AtelierFileProps,
+} from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import { entityRoutePath } from "~/lib/entity-url";
 import {
@@ -90,6 +94,8 @@ type DirectoryViewProps = {
 	/** Mirrors the bundled Atelier Files extension's authoritative preference. */
 	readonly showHiddenFiles?: boolean;
 	readonly readOnly: boolean;
+	/** The repository's own file URLs, so README links behave like file rows. */
+	readonly documentLinks?: AtelierDocumentLinks;
 	readonly connection: Omit<LixConnectionPromptInput, "origin">;
 	/** Present on the home of an editable repository; drives the Invite control. */
 	readonly teamApi?: RepositoryTeamApi | null;
@@ -131,6 +137,7 @@ export function DirectoryView({
 	isHome,
 	showHiddenFiles = false,
 	readOnly,
+	documentLinks,
 	connection,
 	teamApi = null,
 	hasAgentConnected = null,
@@ -643,6 +650,8 @@ export function DirectoryView({
 								fileName={
 									listing.readmePath.split("/").filter(Boolean).at(-1) ?? ""
 								}
+								{...(documentLinks ? { documentLinks } : {})}
+								onOpenLinkedFile={(path) => onOpenFile(path, { newTab: true })}
 								onOpen={(event, options) =>
 									onOpenFile(listing.readmePath as string, {
 										newTab: options?.newTab ?? newTabFromMouseEvent(event),
@@ -1538,7 +1547,9 @@ function ReadmePreview({
 	fileId,
 	diff,
 	fileName,
+	documentLinks,
 	onOpen,
+	onOpenLinkedFile,
 	onNavigate,
 }: {
 	readonly lix: Lix;
@@ -1550,11 +1561,15 @@ function ReadmePreview({
 		| { fileId: string; unavailable: true }
 		| null;
 	readonly fileName: string;
+	/** Lets the preview recognise this repository's own file URLs. */
+	readonly documentLinks?: AtelierDocumentLinks;
 	/** Opens the README tab; `newTab` overrides the modifier-key default. */
 	readonly onOpen: (
 		event: ReactMouseEvent,
 		options?: { newTab: boolean },
 	) => void;
+	/** Opens a file the README links to, in a tab of this workspace. */
+	readonly onOpenLinkedFile: (path: string) => void;
 	/** Returns true when the link was handled inside the tab model. */
 	readonly onNavigate: (href: string, event?: ReactMouseEvent) => boolean;
 }) {
@@ -1624,6 +1639,8 @@ function ReadmePreview({
 				) : (
 					<AtelierFile
 						readOnly
+						{...(documentLinks ? { documentLinks } : {})}
+						onOpenFile={onOpenLinkedFile}
 						{...(diff ?? { lix, fileId, filePath: sourceFilePath })}
 					/>
 				)}
