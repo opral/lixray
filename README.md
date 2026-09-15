@@ -462,6 +462,14 @@ empty repository or preview demo IDs. This bounded release check does not replac
 the full legacy inventory migration described above. The database migration alone
 does not provision repositories.
 
+The public production canary first requests repository admission using compatibility
+metadata from the checked-out Lix SDK source. It validates the repository and
+compatibility epochs, then matches the SQL session's repository and principal to
+that admission before running `SELECT 1` and closing the session. Admission and
+handshake migration polling share a two-minute budget; only typed migration
+responses are retried. The SQL read itself is never replayed. Both canary workflows
+check out the Lix submodule so this check uses the deployed source contract.
+
 Repository opening failures display the migration error code and diagnostic text
 instead of replacing them with a generic support message. Include that text when
 reporting a failed migration; server diagnostics omit private storage connection
