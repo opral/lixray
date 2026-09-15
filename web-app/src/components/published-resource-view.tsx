@@ -1,7 +1,8 @@
 import { entityRoutePath, resolvePublishedEntity } from "~/lib/entity-url";
 import { AtelierFile } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
-import { createPublishedLix } from "~/lib/published-lix";
+import { openPublishedLix, publishedResponseError } from "~/lib/published-lix";
+import type { Lix } from "@lix-js/sdk";
 import { Download, Folder, LockOpen } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "~/components/ui/button";
@@ -28,8 +29,8 @@ type PublishedDirectoryResponse = {
 };
 
 /**
- * The private repository never reaches the browser. Only authorized file bytes
- * are imported into a disposable Lix for Atelier to render.
+ * Authorized downloads populate a local in-memory Lix. Atelier renders it
+ * through the same file component used by the repository workspace.
  */
 export function PublishedResourceView({
 	repositoryId,
@@ -150,12 +151,74 @@ function PublishedDirectory({
 	);
 }
 
-function PublishedFile({
+function PublishedFile(
+	props: Omit<PublishedResourceViewProps, "repositoryName">,
+) {
+	const { repositoryId, namespace, repositorySlug, resource } = props;
+	const [lix, setLix] = useState<Lix | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	useEffect(() => {
+		const abort = new AbortController();
+		let owned: Lix | undefined;
+		setLix(null);
+		setError(null);
+		void openPublishedLix({
+			origin: window.location.origin,
+			repositoryId,
+			namespace,
+			repositorySlug,
+			fileId: resource.id,
+			path: resource.path,
+			signal: abort.signal,
+		})
+			.then(async (client) => {
+				if (abort.signal.aborted) {
+					await client.close();
+					return;
+				}
+				owned = client;
+				setLix(client);
+			})
+			.catch((caught: unknown) => {
+				if (!abort.signal.aborted)
+					setError(
+						caught instanceof Error
+							? caught.message
+							: "Unable to load this public view.",
+					);
+			});
+		return () => {
+			abort.abort();
+			void owned?.close().catch(() => undefined);
+		};
+	}, [repositoryId, namespace, repositorySlug, resource.id, resource.path]);
+	if (error)
+		return (
+			<section className="mx-auto w-[min(960px,calc(100%-48px))] py-8">
+				<PublishedError>{error}</PublishedError>
+			</section>
+		);
+	if (!lix)
+		return (
+			<p className="mx-auto w-[min(960px,calc(100%-48px))] py-8 text-[13px] text-text-tertiary">
+				Opening file…
+			</p>
+		);
+	return <PublishedFileView {...props} lix={lix} fileId={resource.id} />;
+}
+
+/** Rendering owns no protocol requests or client lifetime. */
+export function PublishedFileView({
+	lix,
+	fileId,
 	repositoryId,
 	namespace,
 	repositorySlug,
 	resource,
-}: Omit<PublishedResourceViewProps, "repositoryName">) {
+}: Omit<PublishedResourceViewProps, "repositoryName"> & {
+	lix: Lix;
+	fileId: string;
+}) {
 	const navigationAbort = useRef<AbortController | null>(null);
 	useEffect(
 		() => () => navigationAbort.current?.abort(),
@@ -163,9 +226,6 @@ function PublishedFile({
 	);
 	const [bytes, setBytes] = useState<Uint8Array | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [preview, setPreview] = useState<Awaited<
-		ReturnType<typeof createPublishedLix>
-	> | null>(null);
 	const objectUrl = useMemo(() => {
 		if (!bytes) return null;
 		return URL.createObjectURL(
@@ -181,44 +241,26 @@ function PublishedFile({
 	);
 
 	useEffect(() => {
-		const abort = new AbortController();
-		let ownedPreview: Awaited<ReturnType<typeof createPublishedLix>> | null =
-			null;
+		let active = true;
 		setBytes(null);
-		setPreview(null);
-		setError(null);
-		void fetchPublishedFile(repositoryId, resource.path, abort.signal)
-			.then(async (content) => {
-				if (abort.signal.aborted) return;
-				setBytes(content);
-				const next = await createPublishedLix(
-					{ path: resource.path, content },
-					{
-						signal: abort.signal,
-						readAsset: (path) =>
-							fetchPublishedFile(repositoryId, path, abort.signal),
-					},
-				);
-				if (abort.signal.aborted) {
-					await next.lix.close();
-					return;
-				}
-				ownedPreview = next;
-				setPreview(next);
+		void lix
+			.execute("SELECT content FROM lix_file WHERE id = $1", [fileId])
+			.then((result) => {
+				const content = result.rows[0]?.content;
+				if (active && content instanceof Uint8Array) setBytes(content);
 			})
 			.catch((caught: unknown) => {
-				if (abort.signal.aborted) return;
-				setError(
-					caught instanceof Error
-						? caught.message
-						: "Unable to open this file.",
-				);
+				if (active)
+					setError(
+						caught instanceof Error
+							? caught.message
+							: "Unable to prepare download.",
+					);
 			});
 		return () => {
-			abort.abort();
-			if (ownedPreview) void ownedPreview.lix.close();
+			active = false;
 		};
-	}, [repositoryId, resource.path]);
+	}, [lix, fileId]);
 
 	return (
 		<section className="mx-auto flex w-[min(960px,calc(100%-48px))] flex-col py-8">
@@ -242,57 +284,51 @@ function PublishedFile({
 				) : null}
 			</div>
 			{error ? <PublishedError>{error}</PublishedError> : null}
-			{!error && !preview ? (
-				<p className="text-[13px] text-text-tertiary">Opening file…</p>
-			) : null}
-			{preview ? (
-				<AtelierFile
-					lix={preview.lix}
-					fileId={preview.fileId}
-					readOnly
-					className="min-h-[60vh]"
-					onOpenFile={(path: string) => {
-						navigationAbort.current?.abort();
-						const abort = new AbortController();
-						navigationAbort.current = abort;
-						void resolvePublishedEntity({
-							namespace,
-							repository: repositorySlug,
-							kind: "file",
-							path,
-							signal: abort.signal,
+			<AtelierFile
+				lix={lix}
+				fileId={fileId}
+				readOnly
+				className="min-h-[60vh]"
+				onOpenFile={(path: string) => {
+					navigationAbort.current?.abort();
+					const abort = new AbortController();
+					navigationAbort.current = abort;
+					void resolvePublishedEntity({
+						namespace,
+						repository: repositorySlug,
+						kind: "file",
+						path,
+						signal: abort.signal,
+					})
+						.then((entity) => {
+							if (!entity) throw new Error("This file is no longer available.");
+							if (!abort.signal.aborted && entity.lixId === repositoryId)
+								window.location.assign(
+									entityRoutePath(
+										namespace,
+										repositorySlug,
+										"file",
+										entity.id,
+										entity.path,
+									),
+								);
 						})
-							.then((entity) => {
-								if (!entity)
-									throw new Error("This file is no longer available.");
-								if (!abort.signal.aborted && entity.lixId === repositoryId)
-									window.location.assign(
-										entityRoutePath(
-											namespace,
-											repositorySlug,
-											"file",
-											entity.id,
-											entity.path,
-										),
-									);
-							})
-							.catch((caught: unknown) => {
-								if (!abort.signal.aborted)
-									setError(
-										caught instanceof Error
-											? caught.message
-											: "Unable to open this file.",
-									);
-							});
-					}}
-					fallback={
-						<p>
-							Preview is not available for this file type. Use Download to open
-							it.
-						</p>
-					}
-				/>
-			) : null}
+						.catch((caught: unknown) => {
+							if (!abort.signal.aborted)
+								setError(
+									caught instanceof Error
+										? caught.message
+										: "Unable to open this file.",
+								);
+						});
+				}}
+				fallback={
+					<p>
+						Preview is not available for this file type. Use Download to open
+						it.
+					</p>
+				}
+			/>
 		</section>
 	);
 }
@@ -316,45 +352,8 @@ async function fetchPublishedDirectory(
 	);
 	url.searchParams.set("path", path);
 	const response = await fetch(url, { signal });
-	if (!response.ok) throw new Error("This directory is no longer public.");
+	if (!response.ok) throw new Error(await publishedResponseError(response));
 	return (await response.json()) as PublishedDirectoryResponse;
-}
-
-async function fetchPublishedFile(
-	repositoryId: string,
-	path: string,
-	signal: AbortSignal,
-): Promise<Uint8Array> {
-	const baseUrl = protocolUrl(repositoryId, "");
-	const publicHeaders = { "X-Lixray-Public-Path": path };
-	const handshake = await fetch(baseUrl, { headers: publicHeaders, signal });
-	if (!handshake.ok) throw new Error("This file is no longer public.");
-	const payload = (await handshake.json()) as { sessionId?: unknown };
-	if (typeof payload.sessionId !== "string") {
-		throw new Error("Unable to open this file.");
-	}
-	const sessionHeaders = {
-		...publicHeaders,
-		"Lix-Session-Id": payload.sessionId,
-	};
-	try {
-		const fileUrl = new URL(protocolUrl(repositoryId, "file"));
-		fileUrl.searchParams.set("path", path);
-		const response = await fetch(fileUrl, { headers: sessionHeaders, signal });
-		if (!response.ok || response.headers.get("lix-file-found") === "false") {
-			throw new Error("This file could not be found.");
-		}
-		return new Uint8Array(await response.arrayBuffer());
-	} finally {
-		void fetch(protocolUrl(repositoryId, "session"), {
-			method: "DELETE",
-			headers: sessionHeaders,
-		}).catch(() => undefined);
-	}
-}
-
-function protocolUrl(repositoryId: string, endpoint: string): string {
-	return `${window.location.origin}/lix/v1/${repositoryId}/${endpoint}`;
 }
 
 function publishedResourceHref(

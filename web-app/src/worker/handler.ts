@@ -1,3 +1,4 @@
+import { downloadPublishedFile } from "./published-file.ts";
 import { handlePublishedEntity, type EntityKind } from "./published-entity.ts";
 import { deleteHostedRepository } from "./repository-delete.ts";
 import { handleFileSharing } from "./repository-file-sharing.ts";
@@ -832,6 +833,43 @@ export async function handleRequest(
 			if (!cleanupOwnsFlush)
 				scheduleMcpTelemetryFlush(executionContext, telemetry);
 		}
+	}
+
+	const publishedFileMatch =
+		/^\/api\/published\/lix\/([0-9a-f-]{36})\/file$/.exec(url.pathname);
+	if (publishedFileMatch) {
+		if (request.method !== "GET")
+			return new Response("Method not allowed", { status: 405 });
+		const path = url.searchParams.get("path");
+		const id = url.searchParams.get("id");
+		// Authorize exactly the canonical path used by the query, never a caller's SQL.
+		if (
+			!path ||
+			!id ||
+			!path.startsWith("/") ||
+			path.includes("\\") ||
+			path
+				.split("/")
+				.some((part, i) => i > 0 && (!part || part === "." || part === "..")) ||
+			path.startsWith("/.lix/") ||
+			[...path].some(
+				(char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
+			)
+		)
+			return new Response("Invalid file path", { status: 400 });
+		if (!options.lixFetch)
+			return new Response("File service unavailable", { status: 503 });
+		const resolution = await (
+			options.resolvePublicLix ?? resolvePublicLixWithSupabase
+		)(publishedFileMatch[1], env, path);
+		if (!resolution.ok) return resolution.response;
+		return downloadPublishedFile({
+			lixId: resolution.lixId,
+			id,
+			path,
+			signal: request.signal,
+			lixFetch: options.lixFetch,
+		});
 	}
 
 	const publishedLixDirectoryMatch = PUBLISHED_LIX_DIRECTORY_PATH.exec(
