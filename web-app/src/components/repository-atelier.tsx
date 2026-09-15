@@ -1,3 +1,4 @@
+import { RepositoryUpgradeProgress } from "./repository-upgrade-progress";
 import {
 	createShellNavigationQueue,
 	createShellRouteHydrationGuard,
@@ -1409,21 +1410,7 @@ export function RepositoryAtelier({
 				</RepositoryDefaultBranchContext.Provider>
 			) : null}
 			{!instance && !error && migration ? (
-				<main className="absolute inset-0 grid place-content-center justify-items-center gap-3 bg-bg-app p-6 text-center text-text-secondary">
-					<strong>{repositoryMigrationHeading(migration.phase)}</strong>
-					<span className="text-sm text-text-tertiary">
-						Updating the repository from v{migration.fromVersion} to v
-						{migration.toVersion}. This happens automatically.
-					</span>
-					<div
-						className="h-1.5 w-64 max-w-full overflow-hidden rounded-full bg-border-subtle"
-						role="progressbar"
-						aria-label="Repository migration"
-						aria-valuetext="Migration in progress"
-					>
-						<div className="h-full w-1/3 animate-pulse rounded-full bg-text-secondary" />
-					</div>
-				</main>
+				<RepositoryUpgradeProgress phase={migration.phase} />
 			) : null}
 			{!instance && !error && !migration ? (
 				<RepositoryShellSkeleton
@@ -1628,20 +1615,6 @@ function DelayedOpeningLabel() {
 		return () => window.clearTimeout(timer);
 	}, []);
 	return visible ? <>Opening repository…</> : null;
-}
-
-function repositoryMigrationHeading(
-	phase: RepositoryMigrationState["phase"],
-): string {
-	switch (phase) {
-		case "validating":
-			return "Verifying repository upgrade…";
-		case "opening":
-			return "Opening upgraded repository…";
-		case "migrating":
-		case undefined:
-			return "Upgrading repository…";
-	}
 }
 
 const REPOSITORY_TOP_BAR_PROPS = {

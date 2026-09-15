@@ -99,8 +99,8 @@ export interface RepositoryLixSession {
 }
 
 export interface RepositoryMigrationState {
-	fromVersion: number;
-	toVersion: number;
+	fromVersion?: number;
+	toVersion?: number;
 	phase?: "migrating" | "validating" | "opening";
 }
 
@@ -285,7 +285,7 @@ async function openOpfsSyncSession(
 	// Native chunks may contain data outside a published path. Keep path-scoped
 	// public access on the worker's SQL-authorized remote transport.
 	if (options.publicPath)
-		return openLix({ server: { ...commonServer, mode: "remote" } });
+		return openLix({ server: { ...commonServer, mode: "remote" }, onProgress });
 	const storageName = await currentReplicaStorage(
 		repositoryOpfsCacheName(options),
 		{
@@ -331,7 +331,12 @@ export function repositoryMigrationStateFromOpenProgress(
 	progress: LixOpenProgress,
 ): RepositoryMigrationState | null | undefined {
 	if (progress.phase === "complete") return null;
-	if (progress.fromFormat === undefined) return undefined;
+	if (
+		progress.fromFormat === undefined &&
+		progress.phase !== "migrating" &&
+		progress.scope !== "authority"
+	)
+		return undefined;
 	if (
 		progress.phase !== "migrating" &&
 		progress.phase !== "validating" &&
@@ -450,6 +455,7 @@ async function reportLixRequestFailure(
 	const method = lixRequestMethod(input, init);
 	if (
 		code === MIGRATION_ERROR_CODE ||
+		code === "LIX_REPOSITORY_MIGRATING" ||
 		code === "LIX_ERROR_RECOVERING" ||
 		(response.status === 404 &&
 			method === "GET" &&
@@ -583,7 +589,7 @@ export function isRetryableRepositoryOpenError(error: unknown): boolean {
 	)
 		return false;
 	// Storage coherence belongs to the engine; configuration/authentication and
-	// cancelled operations are not network retries. Opening never migrates.
+	// cancelled operations are not network retries. The SDK owns migration waits.
 	return (
 		isLixRecoveringError(error) || isErrorCode(error, "LIX_TRANSPORT_NETWORK")
 	);

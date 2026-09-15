@@ -121,8 +121,8 @@ jobs:
       - web-image
       - server-image
     runs-on: ubuntu-latest
-    # Future storage-format cutovers require offline migration before promotion.
-    # Ordinary serving hosts never migrate repositories.
+    # Supported storage upgrades run in the server-owned opener. The canary
+    # awaits admission and checks the same deployed compatibility contract.
     timeout-minutes: 25
     environment: production
     permissions:
@@ -132,6 +132,8 @@ jobs:
     steps:
       - name: Check out release coordinator
         uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Validate Infisical configuration
         env:

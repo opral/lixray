@@ -355,6 +355,8 @@ void test("only typed network failure and server recovery are retried by opening
 		"LIX_TRANSPORT_ABORTED",
 		"LIX_STORAGE_READ_EXPIRED",
 		"LIX_MIGRATION_REQUIRED",
+		"LIX_ERROR_MIGRATING",
+		"LIX_REPOSITORY_MIGRATING",
 	])
 		assert.equal(
 			isRetryableRepositoryOpenError(
@@ -374,5 +376,23 @@ void test("only typed network failure and server recovery are retried by opening
 			}),
 		),
 		false,
+	);
+});
+
+void test("authority upgrade transitions do not turn ordinary opening into an upgrade", () => {
+	assert.equal(
+		repositoryMigrationStateFromOpenProgress({
+			phase: "opening",
+			toFormat: 81,
+		}),
+		undefined,
+	);
+	assert.deepEqual(
+		repositoryMigrationStateFromOpenProgress({
+			phase: "opening",
+			scope: "authority",
+			toFormat: 81,
+		}),
+		{ fromVersion: undefined, toVersion: 81, phase: "opening" },
 	);
 });
