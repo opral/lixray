@@ -193,6 +193,13 @@ test("CSV checkpoint diffs show added company-size columns from a snapshot", asy
 			exact: true,
 		})
 		.click();
+	// Entering review preserves the current view; choose the file to inspect.
+	await expect(
+		page.getByRole("button", { name: "Exit", exact: true }),
+	).toBeVisible();
+	await page
+		.getByRole("button", { name: "Next changed file", exact: true })
+		.click();
 	const table = page.locator(".csv-review-table");
 	await expect(table).toBeVisible();
 	for (const name of ["company_size_min", "company_size_max"]) {
@@ -207,7 +214,8 @@ test("CSV checkpoint diffs show added company-size columns from a snapshot", asy
 		page.getByRole("button", { name: "Review changes", exact: true }),
 	).toContainText("2 changes");
 	await expect(page.locator("[data-atelier-initial-content]")).toHaveCount(0);
-	// Exiting restores the editor; reopening also converts an already-open CSV.
+	// Exit restores the pre-review layout. Reopening still lets the user
+	// choose the same historical file without opening its live editor.
 	await page.getByRole("button", { name: "Exit", exact: true }).click();
 	await expect(table).toHaveCount(0);
 	await page
@@ -215,6 +223,12 @@ test("CSV checkpoint diffs show added company-size columns from a snapshot", asy
 			name: "Latest checkpoint. Review latest checkpoint",
 			exact: true,
 		})
+		.click();
+	await expect(
+		page.getByRole("button", { name: "Exit", exact: true }),
+	).toBeVisible();
+	await page
+		.getByRole("button", { name: "Next changed file", exact: true })
 		.click();
 	await expect(table).toBeVisible();
 });
