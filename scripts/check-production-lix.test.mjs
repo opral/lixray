@@ -288,3 +288,40 @@ void test("handshake migration is bounded and other failures are terminal", asyn
 		assert.equal(handshakes, code === "LIX_ERROR_MIGRATING" ? 120 : 1);
 	}
 });
+
+void test("hosted admission can route to a different embedded repository identity", async () => {
+	let reads = 0;
+	await checkProductionLix({
+		lixUrl,
+		fetchImpl: async (url, init) => {
+			if (new URL(url).pathname.endsWith(`/${repositoryId}/`)) {
+				return Response.json({
+					...handshake,
+					lixId: "22222222-2222-4222-8222-222222222222",
+				});
+			}
+			if (init.method === "POST") reads++;
+			return success(url, init);
+		},
+	});
+	assert.equal(reads, 1);
+});
+
+void test("invalid embedded identity closes the allocated session before SQL", async () => {
+	for (const lixId of [undefined, "", "not-a-repository-id"]) {
+		const methods = [];
+		await assert.rejects(
+			checkProductionLix({
+				lixUrl,
+				fetchImpl: async (url, init) => {
+					methods.push(init.method ?? "GET");
+					if (new URL(url).pathname.endsWith(`/${repositoryId}/`))
+						return Response.json({ ...handshake, lixId });
+					return success(url, init);
+				},
+			}),
+			/handshake returned an invalid response/,
+		);
+		assert.deepEqual(methods, ["GET", "GET", "DELETE"]);
+	}
+});

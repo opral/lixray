@@ -464,8 +464,10 @@ does not provision repositories.
 
 The public production canary first requests repository admission using compatibility
 metadata from the checked-out Lix SDK source. It validates the repository and
-compatibility epochs, then matches the SQL session's repository and principal to
-that admission before running `SELECT 1` and closing the session. Admission and
+compatibility epochs, validates the SQL session's embedded repository ID, and
+matches its principal to admission before running `SELECT 1` and closing the
+session. Hosted URL identity and portable embedded identity may differ after a
+clone or restore. Admission and
 handshake migration polling share a two-minute budget; only typed migration
 responses are retried. The SQL read itself is never replayed. Both canary workflows
 check out the Lix submodule so this check uses the deployed source contract.

@@ -5,6 +5,8 @@ import { getCompatibility } from "../vendor/lix/scripts/compatibility.mjs";
 const REQUEST_TIMEOUT_MS = 20_000;
 const ADMISSION_TIMEOUT_MS = 120_000;
 const MAX_ADMISSION_ATTEMPTS = 120;
+const REPOSITORY_UUID =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export async function checkProductionLix({
 	lixUrl,
@@ -52,7 +54,10 @@ export async function checkProductionLix({
 			handshake.body?.syncProtocolVersion !==
 				compatibility.syncProtocolVersion ||
 			handshake.body?.activeAccountId !== admission.principalId ||
-			handshake.body?.lixId !== admission.repositoryId ||
+			// The handshake carries portable repository identity. A hosted URL may
+			// alias that identity after cloning/restoring; admission binds the URL.
+			typeof handshake.body?.lixId !== "string" ||
+			!REPOSITORY_UUID.test(handshake.body.lixId) ||
 			typeof handshake.body?.sessionId !== "string" ||
 			!handshake.body.sessionId
 		) {
