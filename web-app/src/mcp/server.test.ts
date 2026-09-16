@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import {
-	WRITE_PREVIEW_URI,
-	WRITE_PREVIEW_META,
+	DIFF_CARD_URI,
+	DIFF_CARD_META,
 	MCP_APP_HTML,
-	WRITE_PREVIEW_HTML,
-} from "./write-preview.ts";
+	DIFF_CARD_HTML,
+} from "./diff-card-app.ts";
+import type { DiffCardPayload } from "./diff-card.ts";
 import test from "node:test";
 import {
 	Client,
@@ -260,6 +261,55 @@ class FakeRuntime implements LixRuntimeClient {
 				commit: null,
 			};
 		}
+		if (
+			request.sql.startsWith(
+				"SELECT commit_id FROM lix_log() WHERE is_checkpoint",
+			)
+		) {
+			return {
+				columns: ["commit_id"],
+				rows: this.checkpoints
+					.slice(0, 1)
+					.map((id) => [{ kind: "text" as const, value: id }]),
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+		}
+		if (
+			/^SELECT id FROM lix_commit WHERE id = \$1( AND is_checkpoint)? LIMIT 1$/.test(
+				request.sql,
+			)
+		) {
+			const id = request.params?.[0];
+			const known =
+				id?.kind === "text" &&
+				(request.sql.includes("is_checkpoint")
+					? this.checkpoints.includes(id.value)
+					: id.value !== "missing-commit");
+			return {
+				columns: ["id"],
+				rows: known ? [[id]] : [],
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+		}
+		if (
+			request.sql === "SELECT commit_id FROM lix_branch WHERE id = $1 LIMIT 1"
+		) {
+			const id = request.params?.[0];
+			return {
+				columns: ["commit_id"],
+				rows:
+					id?.kind === "text" && id.value === "main"
+						? [[{ kind: "text" as const, value: "commit-1" }]]
+						: [],
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+		}
 		if (request.sql.includes("lix_active_branch_commit_id")) {
 			return {
 				columns: ["commit_id"],
@@ -491,6 +541,8 @@ class FakeRuntime implements LixRuntimeClient {
 	>();
 	/** Set to make the change query fail, the way a flaky upstream would. */
 	changesFailure: Error | undefined;
+	/** Checkpoint commit ids on the branch, newest first. */
+	checkpoints: string[] = ["checkpoint-0"];
 
 	async transaction<T>(
 		lixId: string,
@@ -2608,29 +2660,36 @@ void test("file tools list, read, and write files with metadata and conflict che
 			written.content?.map((block) => block.type),
 			["text", "resource_link", "resource_link", "text"],
 		);
-		const cards = (
-			written._meta?.[WRITE_PREVIEW_META] as { cards: Array<{ html: string }> }
-		).cards;
-		assert.equal(cards.length, 1);
-		assert.match(cards[0]!.html, /<h1[^>]*>ICP<\/h1>/);
-		assert.match(cards[0]!.html, /Open in LixRay/);
+		const card = written._meta?.[DIFF_CARD_META] as DiffCardPayload;
+		assert.equal(card.title, "1 file written");
+		assert.equal(card.folder, "/gtm/campaigns");
+		assert.equal(card.tally, "1 new");
+		assert.equal(card.repository, "@acme/company");
+		assert.equal(card.files.length, 1);
+		assert.equal(card.files[0]!.status, "added");
+		assert.match(card.files[0]!.html ?? "", /<h1[^>]*>ICP<\/h1>/);
+		assert.equal(card.files[0]!.url, wrote.files[0]!.url);
 		assert.equal("_ui" in (written.structuredContent as object), false);
-		assert.doesNotMatch(JSON.stringify(written.content), /<!doctype html>/);
+		assert.doesNotMatch(JSON.stringify(written.content), /<h1/);
 		const resources = await client.listResources();
 		assert.ok(
-			resources.resources.some(
-				(resource) => resource.uri === WRITE_PREVIEW_URI,
-			),
+			resources.resources.some((resource) => resource.uri === DIFF_CARD_URI),
 		);
-		const resource = await client.readResource({ uri: WRITE_PREVIEW_URI });
+		const resource = await client.readResource({ uri: DIFF_CARD_URI });
 		assert.equal(resource.contents[0]?.mimeType, MCP_APP_HTML);
 		assert.ok(resource.contents[0] && "text" in resource.contents[0]);
-		assert.equal(resource.contents[0].text, WRITE_PREVIEW_HTML);
+		assert.equal(resource.contents[0].text, DIFF_CARD_HTML);
 		assert.doesNotMatch(resource.contents[0].text, /ICP|campaigns/);
 		const tools = await client.listTools();
-		assert.deepEqual(
-			tools.tools.find((tool) => tool.name === "write_files")?._meta?.ui,
-			{ resourceUri: WRITE_PREVIEW_URI },
+		for (const name of ["write_files", "execute_sql"])
+			assert.deepEqual(
+				tools.tools.find((tool) => tool.name === name)?._meta?.ui,
+				{ resourceUri: DIFF_CARD_URI },
+				name,
+			);
+		assert.equal(
+			tools.tools.find((tool) => tool.name === "read_files")?._meta?.ui,
+			undefined,
 		);
 
 		// Metadata alone on a file that does not exist is refused before writing.

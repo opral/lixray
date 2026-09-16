@@ -140,35 +140,48 @@ the same canonical URL `get_entity_urls` would return. File tools also return ca
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
 
-`write_files` advertises `_meta.ui.resourceUri: "ui://lixray/write-preview/v1"`.
-MCP Apps hosts fetch that static HTML resource using `resources/read`; it is
-available before the write and across stateless requests, without repository
-data in its URL or template. The view initializes through `ui/initialize`, then
-receives the write result through `ui/notifications/tool-result`.
+`write_files` and `execute_sql` advertise
+`_meta.ui.resourceUri: "ui://lixray/diff-card/v1"`. MCP Apps hosts fetch that
+static HTML resource using `resources/read`; it is available before the call
+and across stateless requests, without repository data in its URL or template.
+The view initializes through `ui/initialize`, then receives the result through
+`ui/notifications/tool-result`.
 
-Per-call previews travel in result `_meta["lixray/write-preview"].cards`, outside
-both `content` and `structuredContent`. No embedded HTML resource appears in
-content. Standard clients still receive the text summary, file links, and saved
-receipt even when they do not support MCP Apps. A preview is optional; agents
-must not claim the user saw one merely because the write succeeded.
+Per-call cards travel in result `_meta["lixray/diff-card"]`, outside both
+`content` and `structuredContent`: the bar's words (`title`, `folder`, `tally`,
+`repository`) and one entry per file (`path`, `name`, `status`, `label`, `url`,
+an inline `icon`, and Atelier's `html` view or a `note` saying why there is
+none). No embedded HTML resource appears in content. Standard clients still
+receive the text summary, file links, and saved receipt even when they do not
+support MCP Apps. A card is optional; agents must not claim the user saw one
+merely because the call succeeded.
 
-Markdown and CSV cards use Atelier's static renderer. Card documents have no
-scripts or external resources. The view has a small lifecycle script; it
-mounts the sanitized, server-rendered cards in isolated shadow roots and opens
-links through the host's `ui/open-link` capability. The resource requests no
-external network access. It does not invoke write tools.
+The card is collapsed by default: one 44px bar with the files' type icons,
+"N files written", the deepest common folder, and
+"2 new · 1 edited" counts, so a long chat reads as a list of writes. Opened,
+the bar becomes the header and below it sits Atelier's static render of one
+file's change in a scrolling panel, with a dark pill to page through the
+files (each with its diff glyph and counts) and an "Open in LixRay" button
+that goes through the host's `ui/open-link`. The view reports its height on
+every toggle and page change. Markdown and CSV previews use Atelier's static
+renderer; they carry no scripts or external resources, and the view mounts
+them in a shadow root. The resource requests no external network access and
+invokes no tools.
 
-At most three cards travel with a write. The write itself carries no bytes
-of the change: it returns the commit span it moved between, and the cards come
-from asking Lix what changed between those two commits — `lix_diff('lix_file',
-before, after)` with `from_content` and `to_content`, for the previewed paths
-only. That is the same question a checkpoint, or any two commits, would be
-asked, so one render path serves every source of a diff; and because the
-answer is keyed to the commits rather than to a moment in time, nothing another
-writer does afterwards changes what the card describes. Each card is trimmed to what changed, with a note of what was skipped; a change too large for a thread keeps its header and sends the
-reader to the file, which is also what a snapshot over 100 KB or one nested
-past two dozen levels gets — rendering walks the whole document, and the
-document was written by whoever is talking to the server.
+A card lists up to 50 files and carries previews for the first six; the rest
+are paged with a note. The call itself carries no bytes of the change: it
+returns the commit span it moved between, and the card comes from asking Lix
+what changed between those two commits — `lix_diff('lix_file', before,
+after)` with `from_content` and `to_content`. That is the same question a
+checkpoint, or any two commits, would be asked, so one render path serves a
+write and an SQL batch (the files its change log says it touched);
+and because the answer is keyed to the commits rather than to a moment in
+time, nothing another writer does afterwards changes what the card describes.
+Each preview is trimmed to what changed, with a note of what was skipped; a
+change too large for a thread keeps its page and sends the reader to the file,
+which is also what a snapshot over 100 KB or one nested past two dozen levels
+gets — rendering walks the whole document, and the document was written by
+whoever is talking to the server.
 
 `write_files` validates `last_seen_commit_id` and metadata-only targets, and runs
 all file writes in one transaction. An optional checkpoint runs afterward and returns its

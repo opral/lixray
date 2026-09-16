@@ -11,8 +11,8 @@ import {
 	handleMcpTransport,
 	MCP_PROTOCOL_VERSION,
 } from "../../src/mcp/server.ts";
-import { WRITE_PREVIEW_META } from "../../src/mcp/write-preview.ts";
-import { renderDiffCard } from "../../src/mcp/diff-card.ts";
+import { DIFF_CARD_META } from "../../src/mcp/diff-card-app.ts";
+import { diffCardPayload } from "../../src/mcp/diff-card.ts";
 void test("MCP Apps resource initializes, renders, opens links and tears down with the official AppBridge", async () => {
 	const service = new LixService(
 		new Proxy(
@@ -105,28 +105,38 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 		const url = "https://lixray.com/@opral/demo/file/id/mcp-ui-demo.md";
 		const markdown =
 			"# MCP UI demo\n\n## Features\n\n- One\n- Two\n\n| Feature | Status |\n| --- | --- |\n| Markdown | Ready |\n\n- [x] Saved\n- [ ] Review\n\n![external](https://unexpected.invalid/image.png)\n\n<script>window.pwned=true</script>\n";
-		const card = renderDiffCard({
-			path: "/mcp-ui-demo.md",
-			url,
-			after: new TextEncoder().encode(markdown),
+		const card = diffCardPayload({
+			verb: "written",
+			repository: "@opral/demo",
+			changes: [
+				{
+					path: "/mcp-ui-demo.md",
+					url,
+					after: new TextEncoder().encode(markdown),
+				},
+			],
 		});
 		assert.ok(card);
 		const receipt = {
 			content: [{ type: "text", text: "Wrote mcp-ui-demo.md" }],
 			structuredContent: { commit_id: "saved-commit" },
-			_meta: { [WRITE_PREVIEW_META]: { cards: [{ html: card.html }] } },
+			_meta: { [DIFF_CARD_META]: card },
 		};
 		await page.evaluate(
 			(receipt2) => window.bridge.sendToolResult(receipt2),
 			receipt,
 		);
 		const view = page.frameLocator("iframe");
+		// Collapsed by default: one 44px bar, which the reader opens.
+		await view.getByRole("button", { name: /1 file written/ }).waitFor();
+		assert.equal(await page.evaluate(() => window.heights.at(-1)), 44);
+		await view.getByRole("button", { name: /1 file written/ }).click();
 		await view.locator("h1").waitFor();
 		assert.equal(await view.locator("h1").innerText(), "MCP UI demo");
 		assert.equal(await view.locator("h2").count(), 1);
 		assert.equal(await view.locator("table").count(), 1);
 		assert.equal(await view.locator("li[data-task]").count(), 2);
-		await view.getByRole("link", { name: "Open in LixRay" }).click();
+		await view.getByRole("button", { name: "Open in LixRay" }).click();
 		await page.waitForFunction(() => !!window.openedUrl);
 		assert.equal(await page.evaluate(() => window.openedUrl), url);
 		assert.deepEqual(pageErrors, []);
@@ -173,7 +183,7 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 		await view
 			.getByText("Files saved, preview unavailable. Do not repeat the write.")
 			.waitFor();
-		assert.equal(await view.locator(".preview").count(), 0);
+		assert.equal(await view.locator("#card:not([hidden])").count(), 0);
 		await page.evaluate(() =>
 			window.bridge.sendToolResult({
 				isError: true,
@@ -181,7 +191,7 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 			}),
 		);
 		await view.getByText("Write conflict").waitFor();
-		assert.equal(await view.locator(".preview").count(), 0);
+		assert.equal(await view.locator("#card:not([hidden])").count(), 0);
 		await page.evaluate(() => window.bridge.teardownResource({}));
 	} finally {
 		await browser.close();

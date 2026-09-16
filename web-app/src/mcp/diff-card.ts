@@ -1,22 +1,32 @@
+import { fileIconUrl } from "@opral/atelier/file-icons";
 import { isRendered, RENDER_CSS, toHtml } from "@opral/atelier/render";
-import type { RenderCounts, RenderKind } from "@opral/atelier/render";
+import type { RenderCounts } from "@opral/atelier/render";
+import { base64ToBytes } from "../lib/base64.ts";
 
 /**
- * The card a write sends back to the chat.
+ * The card a change sends back to the chat.
  *
- * A tool result says a file changed; the change itself is what the reader
- * wants, and it used to live one navigation away. Atelier renders the file —
- * whichever view claims it, in the app's own review UI — and this wraps that
- * in the chrome a message needs: which file, how much changed, and the way
- * back. One self-contained document, no scripts and nothing to fetch.
+ * A tool result says files changed; the change itself is what the reader
+ * wants, and it used to live one navigation away. Atelier renders each file
+ * — whichever view claims it, in the app's own review UI — and this collects
+ * those renders with the words the card's bar and footer say: how many
+ * files, where they sit, what happened to each. The card's chrome lives in
+ * the static MCP Apps resource; this is the data it shows. Nothing here runs
+ * in the reader's browser, and nothing here fetches.
  */
 
-/** Cards past this size stop being a card; the reader is sent to the app. */
-const MAX_CARD_BYTES = 24_000;
+/** A preview past this size stops being a preview; the reader is sent to the app. */
+const MAX_PREVIEW_BYTES = 24_000;
+
+/** How many files a single card carries a preview for. */
+export const MAX_PREVIEWS = 6;
+
+/** How many files a single card lists at all. */
+export const MAX_CARD_FILES = 50;
 
 /**
  * Atelier's stylesheet, whitespace collapsed outside quoted strings. It is
- * written for reading, and inlined in every card it would spend a fifth of
+ * written for reading, and inlined in the resource it would spend a fifth of
  * the budget on indentation.
  */
 function compactCss(css: string): string {
@@ -44,23 +54,51 @@ function compactCss(css: string): string {
 	}
 	return out.replaceAll(";}", "}");
 }
-const STYLE = compactCss(RENDER_CSS);
 
-export type DiffCardInput = {
+/** Atelier's tokens and view styles, for the resource and every preview. */
+export const DIFF_CARD_STYLE = compactCss(RENDER_CSS);
+
+export type DiffCardStatus = "added" | "modified" | "removed" | "moved";
+
+/** One changed file, as the card lists it. */
+export type DiffCardChange = {
 	readonly path: string;
+	/** The path at the span's start, when the file moved. */
+	readonly movedFrom?: string;
 	readonly url: string;
 	readonly before?: Uint8Array;
 	readonly after?: Uint8Array;
-	/** "@opral/monorepo", shown as the card's quiet second line. */
-	readonly repository?: string;
 };
 
-export type DiffCard = {
-	readonly html: string;
+export type DiffCardFile = {
+	readonly path: string;
+	readonly name: string;
+	readonly status: DiffCardStatus;
+	/** "edited · +12 −3 rows": the footer's muted words. */
+	readonly label: string;
+	readonly url: string;
+	/** The file-type icon, inline SVG markup. */
+	readonly icon: string;
+	/** Atelier's view of the change, for an element with class atelier-render. */
+	readonly html?: string;
+	/** What stands in for the view, or follows it, when it does not say everything. */
+	readonly note?: string;
 	readonly counts?: RenderCounts;
-	readonly kind: RenderKind;
-	/** Entities the card left out because of its height budget. */
-	readonly hidden: number;
+};
+
+/** What travels in `_meta` beside a result: the card's bar and its pages. */
+export type DiffCardPayload = {
+	/** "3 files written" */
+	readonly title: string;
+	/** The deepest folder every file is under; absent at the root. */
+	readonly folder?: string;
+	/** "2 new · 1 edited" */
+	readonly tally: string;
+	/** "@opral/monorepo" */
+	readonly repository?: string;
+	readonly files: ReadonlyArray<DiffCardFile>;
+	/** Files the card could not list; the bar's count includes them. */
+	readonly more: number;
 };
 
 /** Whether Atelier has a static view for this path, without rendering it. */
@@ -69,265 +107,220 @@ export function isRenderablePath(path: string): boolean {
 	return !(!isRendered(probe) && probe.skipped === "unsupported");
 }
 
-export function renderDiffCard(input: DiffCardInput): DiffCard | null {
-	const content = {
-		path: input.path,
-		...(input.before !== undefined ? { before: input.before } : {}),
-		...(input.after !== undefined ? { after: input.after } : {}),
-	};
-	// The stylesheet is most of the chrome; the header and footer take about
-	// 1 kB more, and the view gets the rest.
-	const view = toHtml(content, {
-		maxBytes: MAX_CARD_BYTES - byteLength(STYLE) - 1_000,
-	});
-	if (!isRendered(view)) {
-		// A change too big to read in a thread is still a change worth
-		// announcing: the header says which file, the footer leads to it.
-		if (view.skipped !== "too-large") return null;
-		const kind: RenderKind =
-			input.before === undefined
-				? "added"
-				: input.after === undefined
-					? "removed"
-					: "modified";
-		return {
-			html: cardDocument({
-				...input,
-				viewHtml: "",
-				kind,
-				hidden: 0,
-				tooLarge: true,
-			}),
-			kind,
-			hidden: 0,
-		};
-	}
-	const body = cardDocument({
-		...input,
-		viewHtml: view.html,
-		counts: view.counts,
-		kind: view.kind,
-		hidden: view.hidden,
-	});
-	if (byteLength(body) <= MAX_CARD_BYTES)
-		return {
-			html: body,
-			kind: view.kind,
-			hidden: view.hidden,
-			...(view.counts ? { counts: view.counts } : {}),
-		};
-	// The view fitted its own budget and the whole card still did not: keep
-	// the header, drop the view, and say so rather than counting again.
-	return {
-		html: cardDocument({
-			...input,
-			viewHtml: "",
-			...(view.counts ? { counts: view.counts } : {}),
-			kind: view.kind,
-			hidden: view.hidden,
-			tooLarge: true,
-		}),
-		kind: view.kind,
-		hidden: view.hidden,
-		...(view.counts ? { counts: view.counts } : {}),
-	};
-}
-
-function byteLength(value: string): number {
-	return new TextEncoder().encode(value).length;
-}
-
-export function escapeHtml(value: string): string {
-	return value
-		.replaceAll("&", "&amp;")
-		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;")
-		.replaceAll('"', "&quot;")
-		.replaceAll("'", "&#39;");
-}
-
-function countsLabel(
-	counts: RenderCounts | undefined,
-	kind: RenderKind,
-): string {
-	if (!counts) return kind === "added" ? "new file" : "";
-	if (kind === "added")
-		return `new file · ${counts.added} ${counts.added === 1 ? "entry" : "entries"}`;
-	if (kind === "removed" && counts.removed > 0 && counts.added === 0)
-		return `deleted · ${counts.removed} ${counts.removed === 1 ? "entry" : "entries"}`;
-	const parts: string[] = [];
-	if (counts.added > 0)
-		parts.push(`<span class="plus">+${counts.added}</span>`);
-	if (counts.removed > 0)
-		parts.push(`<span class="minus">−${counts.removed}</span>`);
-	if (counts.modified > 0)
-		parts.push(`<span class="edited">${counts.modified} edited</span>`);
-	return parts.join(" · ") || "no change";
-}
-
-/** The dot-hybrid glyph Atelier draws beside a changed file. */
-function glyph(kind: RenderKind): string {
-	const fill =
-		kind === "added"
-			? "var(--atelier-diff-added)"
-			: kind === "removed"
-				? "var(--atelier-diff-removed)"
-				: "var(--atelier-link)";
-	const knockout =
-		kind === "added"
-			? "M6 3.6v4.8M3.6 6h4.8"
-			: kind === "removed"
-				? "M3.6 6h4.8"
-				: "M3.3 6.3c.9-1.5 1.8-1.5 2.7 0s1.8 1.5 2.7 0";
-	return `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="${fill}"></circle><path d="${knockout}" stroke="var(--atelier-panel)" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
-}
-
-function cardDocument(args: {
-	readonly path: string;
-	readonly url: string;
-	readonly repository?: string;
-	readonly viewHtml: string;
-	readonly counts?: RenderCounts;
-	readonly kind: RenderKind;
-	readonly hidden: number;
-	/** The change does not fit a message; the card is header and link only. */
-	readonly tooLarge?: boolean;
-}): string {
-	const segments = args.path.split("/").filter(Boolean);
-	const name = clip(segments.at(-1) ?? args.path, 64);
-	const directory = clipDirectory(segments.slice(0, -1));
-	// The trimmed body names its own gaps; saying it again reads as a second
-	// set of missing lines.
-	const hiddenNote = args.tooLarge
-		? `<div class="rest">Too much changed to show here — open it in LixRay</div>`
-		: args.hidden > 0 && !args.viewHtml.includes("md-diff-gap")
-			? `<div class="rest">${args.hidden} more ${args.hidden === 1 ? "entry" : "entries"} in LixRay</div>`
-			: "";
-	return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(name)}</title>
-<style>
-${STYLE}
-${CARD_CSS}
-</style>
-</head>
-<body>
-<article class="card atelier-render">
-	<header>
-		${glyph(args.kind)}
-		<span class="path">${directory ? `<span class="dir">${escapeHtml(directory)}/</span>` : ""}<span class="name">${escapeHtml(name)}</span></span>
-		<span class="counts">${args.tooLarge ? "too large" : countsLabel(args.counts, args.kind)}</span>
-	</header>
-	${args.viewHtml ? `<div class="body">${args.viewHtml}</div>` : ""}
-	${hiddenNote}
-	<footer>
-		<span class="repo">${args.repository ? escapeHtml(args.repository) : ""}</span>
-		<a class="open" href="${escapeHtml(args.url)}" target="_blank" rel="noreferrer noopener">Open in LixRay</a>
-	</footer>
-</article>
-</body>
-</html>`;
+export function diffCardStatus(change: {
+	readonly movedFrom?: string;
+	readonly before?: Uint8Array;
+	readonly after?: Uint8Array;
+}): DiffCardStatus {
+	if (change.before === undefined) return "added";
+	if (change.after === undefined) return "removed";
+	return change.movedFrom !== undefined ? "moved" : "modified";
 }
 
 /**
- * A path's last two folders, which is what tells a reader where they are.
- * Trimming the tail with an ellipsis would keep the half that does not.
+ * The deepest directory every path is under, or "" at the root. One file
+ * is under its own folder.
  */
-function clipDirectory(segments: readonly string[]): string {
-	if (segments.length === 0) return "";
-	const tail = segments.slice(-2).map((segment) => clip(segment, 24));
-	return `${segments.length > 2 ? "…/" : ""}${tail.join("/")}`;
+export function commonFolder(paths: ReadonlyArray<string>): string {
+	if (paths.length === 0) return "";
+	let common: string[] | undefined;
+	for (const path of paths) {
+		const segments = path.split("/").filter(Boolean).slice(0, -1);
+		if (!common) {
+			common = segments;
+			continue;
+		}
+		let shared = 0;
+		while (
+			shared < common.length &&
+			shared < segments.length &&
+			common[shared] === segments[shared]
+		)
+			shared += 1;
+		common = common.slice(0, shared);
+	}
+	return common && common.length > 0 ? `/${common.join("/")}` : "";
 }
 
-/** A name longer than this is not a name a header can show. */
-function clip(value: string, limit: number): string {
-	return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+const TALLY_ORDER: ReadonlyArray<[DiffCardStatus, string]> = [
+	["added", "new"],
+	["modified", "edited"],
+	["moved", "moved"],
+	["removed", "deleted"],
+];
+
+/** "2 new · 1 edited": only what happened, in a fixed order. */
+export function tallyLabel(statuses: ReadonlyArray<DiffCardStatus>): string {
+	const parts: string[] = [];
+	for (const [status, word] of TALLY_ORDER) {
+		const count = statuses.filter((each) => each === status).length;
+		if (count > 0) parts.push(`${count} ${word}`);
+	}
+	return parts.join(" · ");
 }
 
-/** The card's own chrome. Atelier owns the view; LixRay owns the frame. */
-const CARD_CSS = `
-:root { color-scheme: light; }
-body { margin: 0; padding: 0; background: transparent; }
-.card {
-	border: 1px solid var(--atelier-border);
-	border-radius: 12px;
-	background: var(--atelier-panel);
-	overflow: hidden;
+/** "3 files written", "1 file changed". */
+export function cardTitle(count: number, verb: "written" | "changed"): string {
+	return `${count} ${count === 1 ? "file" : "files"} ${verb}`;
 }
-.card > header {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 11px 13px;
-	border-bottom: 1px solid var(--atelier-border-subtle);
+
+/** What Atelier counts for a file: rows of a table, lines of a document. */
+export function countUnit(path: string): string {
+	const extension = path.split(".").at(-1)?.toLowerCase();
+	return extension === "csv" ? "rows" : "lines";
 }
-.card > header .path {
-	display: flex;
-	flex: 1;
-	min-width: 0;
-	overflow: hidden;
-	font-size: 13px;
-	font-weight: 500;
+
+/**
+ * The footer's words for one file: what happened, then how much, as far as
+ * the render counted it.
+ */
+export function fileLabel(
+	status: DiffCardStatus,
+	counts: RenderCounts | undefined,
+	unit: string,
+	moved?: { readonly from: string; readonly to: string },
+): string {
+	const word =
+		status === "added"
+			? "new"
+			: status === "removed"
+				? "deleted"
+				: status === "moved"
+					? "moved"
+					: "edited";
+	if (status === "moved" && moved !== undefined) {
+		const from = movedFromHint(moved.from, moved.to);
+		return counts && counts.added + counts.removed + counts.modified > 0
+			? `${word} from ${from} · ${changeTally(counts, unit)}`
+			: `${word} from ${from}`;
+	}
+	if (!counts) return word;
+	if (status === "added")
+		return `${word} · ${counts.added} ${unitWord(counts.added, unit)}`;
+	if (status === "removed" && counts.added === 0)
+		return `${word} · ${counts.removed} ${unitWord(counts.removed, unit)}`;
+	const tally = changeTally(counts, unit);
+	return tally ? `${word} · ${tally}` : word;
 }
-.card > header .dir {
-	flex: 0 1 auto;
-	min-width: 0;
-	color: var(--atelier-fg-subtle);
-	font-weight: 400;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+
+function changeTally(counts: RenderCounts, unit: string): string {
+	const parts: string[] = [];
+	if (counts.added > 0) parts.push(`+${counts.added}`);
+	if (counts.removed > 0) parts.push(`−${counts.removed}`);
+	if (counts.modified > 0) parts.push(`~${counts.modified}`);
+	return parts.length ? `${parts.join(" ")} ${unit}` : "";
 }
-.card > header .name {
-	flex: 0 1 auto;
-	min-width: 0;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+
+function unitWord(count: number, unit: string): string {
+	return count === 1 ? unit.replace(/s$/, "") : unit;
 }
-.card > header .counts {
-	flex: none;
-	font-size: 12px;
-	font-variant-numeric: tabular-nums;
-	color: var(--atelier-fg-subtle);
+
+/** The old folder for a move across folders, the old name for a rename. */
+function movedFromHint(movedFrom: string, path: string): string {
+	const from = movedFrom.split("/").filter(Boolean);
+	const to = path.split("/").filter(Boolean);
+	const name = from.pop() ?? movedFrom;
+	to.pop();
+	if (from.join("/") === to.join("/")) return name;
+	return from.length > 0 ? `${from.join("/")}/` : "/";
 }
-.card > header .plus { color: var(--atelier-diff-added); }
-.card > header .minus { color: var(--atelier-diff-removed); }
-.card .body { padding: 12px 14px 14px; }
-.card > header + .rest { padding-top: 10px; }
-.card .rest {
-	padding: 0 14px 12px;
-	font-size: 13px;
-	color: var(--atelier-fg-muted);
+
+/** Atelier's icon for the file type, as markup the card can inline. */
+export function fileIconSvg(path: string): string {
+	const url = fileIconUrl(path);
+	const comma = url.indexOf(",");
+	const header = url.slice(0, comma);
+	const data = url.slice(comma + 1);
+	const svg = header.endsWith(";base64")
+		? new TextDecoder().decode(base64ToBytes(data))
+		: decodeURIComponent(data);
+	return svg.trim();
 }
-.card > footer {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 10px 13px;
-	border-top: 1px solid var(--atelier-border-subtle);
-	background: var(--atelier-bg-subtle);
+
+/**
+ * The card for a set of changes. Files past the preview budget are still
+ * listed and paged, with a note in place of a view; files past the listing
+ * budget are only counted. Returns null when nothing changed.
+ */
+export function diffCardPayload(input: {
+	readonly verb: "written" | "changed";
+	readonly changes: ReadonlyArray<DiffCardChange>;
+	readonly repository?: string;
+}): DiffCardPayload | null {
+	if (input.changes.length === 0) return null;
+	const listed = input.changes.slice(0, MAX_CARD_FILES);
+	const files = listed.map((change, index) =>
+		cardFile(change, index < MAX_PREVIEWS),
+	);
+	const folder = commonFolder(listed.map((file) => file.path));
+	return {
+		title: cardTitle(input.changes.length, input.verb),
+		...(folder ? { folder } : {}),
+		tally: tallyLabel(files.map((file) => file.status)),
+		...(input.repository ? { repository: input.repository } : {}),
+		files,
+		more: input.changes.length - listed.length,
+	};
 }
-.card > footer .repo {
-	flex: 1;
-	min-width: 0;
-	font-size: 12px;
-	color: var(--atelier-fg-subtle);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+
+function cardFile(change: DiffCardChange, withPreview: boolean): DiffCardFile {
+	const status = diffCardStatus(change);
+	const unit = countUnit(change.path);
+	const moved =
+		change.movedFrom !== undefined
+			? { from: change.movedFrom, to: change.path }
+			: undefined;
+	const base = {
+		path: change.path,
+		name: change.path.split("/").filter(Boolean).at(-1) ?? change.path,
+		status,
+		url: change.url,
+		icon: fileIconSvg(change.path),
+	};
+	if (!withPreview)
+		return {
+			...base,
+			label: fileLabel(status, undefined, unit, moved),
+			note: "Open it in LixRay to see this change",
+		};
+	const view = toHtml(
+		{
+			path: change.path,
+			...(change.before !== undefined ? { before: change.before } : {}),
+			...(change.after !== undefined ? { after: change.after } : {}),
+		},
+		{ maxBytes: MAX_PREVIEW_BYTES },
+	);
+	if (!isRendered(view)) {
+		const note =
+			view.skipped === "too-large"
+				? "Too much changed to show here — open it in LixRay"
+				: view.skipped === "unchanged"
+					? status === "moved"
+						? "Moved; the content is unchanged"
+						: "The content is unchanged"
+					: view.skipped === "unsupported"
+						? "No preview for this file type — open it in LixRay"
+						: view.skipped === "empty"
+							? "The file is empty"
+							: "Preview unavailable — open it in LixRay";
+		return {
+			...base,
+			label: fileLabel(status, undefined, unit, moved),
+			note,
+		};
+	}
+	// The trimmed body names its own gaps; saying it again reads as a second
+	// set of missing lines.
+	const note =
+		view.hidden > 0 && !view.html.includes("md-diff-gap")
+			? `${view.hidden} more ${unitWord(view.hidden, unit)} in LixRay`
+			: undefined;
+	return {
+		...base,
+		label: fileLabel(status, view.counts, unit, moved),
+		html: view.html,
+		...(note ? { note } : {}),
+		...(view.counts ? { counts: view.counts } : {}),
+	};
 }
-.card > footer .open {
-	flex: none;
-	padding: 6px 11px;
-	border-radius: 7px;
-	background: var(--atelier-accent);
-	color: var(--atelier-panel);
-	font-size: 12px;
-	font-weight: 500;
-	text-decoration: none;
-}
-`;
