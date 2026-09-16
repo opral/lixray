@@ -27,6 +27,7 @@ import {
 	createLixError,
 	isLixError,
 	LixService,
+	type DiffRef,
 	type ExecuteRequest,
 	type FileChange,
 } from "./lix-service.ts";
@@ -47,6 +48,7 @@ import {
 } from "./diff-card-app.ts";
 import {
 	diffCardPayload,
+	diffCardStatus,
 	isRenderablePath,
 	MAX_CARD_FILES,
 	type DiffCardPayload,
@@ -92,7 +94,10 @@ export const UNDO_TOOL_DESCRIPTION =
 
 /** What the host shows after a change, and what the agent should not repeat. */
 export const DIFF_CARD_GUIDE =
-	"After write_files or execute_sql, MCP Apps hosts render a collapsible card of what changed: one bar naming the files, which the user expands to page through each file's rendered change and open it in LixRay. The card is collapsed by default and the user opens it; name the change in one sentence and do not repeat the file list in prose. Other hosts get the same receipt and file links; do not assume a card was displayed.";
+	"After write_files, execute_sql, or diff, MCP Apps hosts render a collapsible card of what changed: one bar naming the files, which the user expands to page through each file's rendered change and open it in LixRay. When the user asks what changed between two points (a checkpoint, a commit, a branch, the working state), call diff and the same card appears. The card is collapsed by default and the user opens it; name the change in one sentence and do not repeat the file list in prose. Other hosts get the same receipt and file links; do not assume a card was displayed.";
+
+export const DIFF_TOOL_DESCRIPTION =
+	'List the files that differ between two points of the Lix in context, each added, modified, removed, or moved (with before_path). before and after are each { checkpoint_id }, { commit_id }, { branch_id }, "working" (the branch as it stands), or "latest_checkpoint" (the nearest checkpoint behind it); paths narrows the list. Read-only. "What changed since the last checkpoint" is { before: "latest_checkpoint", after: "working" }. MCP Apps hosts render the same collapsible card a write shows; summarize in one sentence rather than listing the files.';
 
 export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. Prefer read_files and write_files for ordinary file reads and creates/updates; use list_files only to discover paths. Batch known paths together. Use query_sql for advanced reads and execute_sql for other mutations, including renames/deletes and directory operations. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
 
@@ -494,6 +499,34 @@ const writeFilesOutput = withError(
 		checkpoint_commit_id: z.string().optional(),
 		commit: z.object({ before: z.string(), after: z.string() }).nullable(),
 		warning: z.string().optional(),
+	}),
+);
+const diffRef = z.union([
+	z.object({ checkpoint_id: commitId }).strict(),
+	z.object({ commit_id: commitId }).strict(),
+	z.object({ branch_id: branchId }).strict(),
+	z.literal("working"),
+	z.literal("latest_checkpoint"),
+]);
+const diffOutput = withError(
+	z.object({
+		context,
+		files: z.array(
+			z
+				.object({
+					path: z.string(),
+					status: z.enum(["added", "modified", "removed", "moved"]),
+					before_path: z.string().optional(),
+					before_commit_id: z.string(),
+					after_commit_id: z.string(),
+					url: z.string(),
+				})
+				.strict(),
+		),
+		before: z.string(),
+		after: z.string(),
+		commit_id: z.string(),
+		url: z.string(),
 	}),
 );
 const entityUrlSelector = z.union([
@@ -932,6 +965,64 @@ export function createLixrayMcpServer(
 				...uiField(rendered.card),
 				commit: written.commit,
 				...(warning ? { warning } : {}),
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+		options.urlOrigin,
+	);
+
+	registerTool(
+		server,
+		"diff",
+		"LixRay: Diff two points",
+		DIFF_TOOL_DESCRIPTION,
+		z
+			.object({
+				context,
+				before: diffRef,
+				after: diffRef,
+				paths: z.array(z.string().min(1)).min(1).max(100).optional(),
+			})
+			.strict(),
+		diffOutput,
+		readAnnotations(),
+		securitySchemes,
+		async ({ context: token, before, after, paths }) => {
+			const [beforeId, afterId] = await Promise.all([
+				service.resolveDiffRef(token, before),
+				service.resolveDiffRef(token, after),
+			]);
+			const span = { before: beforeId, after: afterId };
+			const changes =
+				beforeId === afterId
+					? []
+					: await service.fileChanges(token, span, paths ?? []);
+			const urls = await service.changeUrls(token, changes, options.urlOrigin);
+			const files = changes.map((change, index) => ({
+				path: change.path,
+				status: diffCardStatus(change),
+				...(change.movedFrom !== undefined
+					? { before_path: change.movedFrom }
+					: {}),
+				before_commit_id: beforeId,
+				after_commit_id: afterId,
+				url: urls.files[index]!,
+			}));
+			const named = files.map((file) => file.path.replace(/^\//, ""));
+			const shown = named.slice(0, 20);
+			return {
+				context: token,
+				files,
+				before: beforeId,
+				after: afterId,
+				commit_id: afterId,
+				url: urls.repository,
+				...uiField(changeCard(changes, urls.files, "changed", urls.repository)),
+				[SUMMARY_KEY]: `${files.length} ${files.length === 1 ? "file" : "files"} changed between ${describeDiffRef(before, beforeId)} and ${describeDiffRef(after, afterId)}${shown.length ? `: ${shown.join(", ")}${named.length > shown.length ? `, +${named.length - shown.length} more` : ""}` : ""}.`,
 			};
 		},
 		undefined,
@@ -1934,7 +2025,7 @@ const UI_RESULT_KEY = "_ui";
 const SUMMARY_KEY = "_summary";
 
 /** The tools whose result the diff card resource renders. */
-const CARD_TOOLS = new Set(["write_files", "execute_sql"]);
+const CARD_TOOLS = new Set(["write_files", "execute_sql", "diff"]);
 
 const PREVIEW_UNAVAILABLE =
 	"Files saved, preview unavailable. Do not repeat the write.";
@@ -2054,6 +2145,15 @@ function uiField(
 	return card ? { [UI_RESULT_KEY]: card } : {};
 }
 
+/** "checkpoint a1b2", "working (commit c3d4)": a ref as the summary says it. */
+function describeDiffRef(ref: DiffRef, commitId: string): string {
+	if (ref === "working") return `working (commit ${commitId})`;
+	if (ref === "latest_checkpoint") return `latest checkpoint ${commitId}`;
+	if ("checkpoint_id" in ref) return `checkpoint ${ref.checkpoint_id}`;
+	if ("commit_id" in ref) return `commit ${ref.commit_id}`;
+	return `branch ${ref.branch_id} (commit ${commitId})`;
+}
+
 /** "@opral/monorepo" out of a LixRay entity URL, when it carries one. */
 function repositoryOf(url: string): string | undefined {
 	const match = /\/(@[^/]+\/[^/?#]+)(?:[/?#]|$)/.exec(url);
@@ -2095,6 +2195,23 @@ async function resultResourceLinks(
 					uri: file.url,
 					name: file.path.split("/").filter(Boolean).at(-1) ?? file.path,
 					description: `Wrote ${file.path.replace(/^\//, "")}`,
+					...(mimeType ? { mimeType } : {}),
+				};
+			});
+	}
+	if (name === "diff" && Array.isArray(result.files)) {
+		return (
+			result.files as Array<{ path: string; url: string; status: string }>
+		)
+			.filter((file) => file.status !== "removed")
+			.slice(0, 50)
+			.map((file) => {
+				const mimeType = mimeTypeForPath(file.path);
+				return {
+					type: "resource_link",
+					uri: file.url,
+					name: file.path.split("/").filter(Boolean).at(-1) ?? file.path,
+					description: `${file.status === "added" ? "Added" : file.status === "moved" ? "Moved" : "Modified"} ${file.path.replace(/^\//, "")}`,
 					...(mimeType ? { mimeType } : {}),
 				};
 			});
@@ -2346,6 +2463,7 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"list_files",
 		"read_files",
 		"write_files",
+		"diff",
 		"query_sql",
 		"execute_sql",
 		"active_branch_id",

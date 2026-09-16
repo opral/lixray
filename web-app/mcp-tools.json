@@ -624,6 +624,204 @@
 		}
 	},
 	{
+		"name": "diff",
+		"title": "LixRay: Diff two points",
+		"description": "List the files that differ between two points of the Lix in context, each added, modified, removed, or moved (with before_path). before and after are each { checkpoint_id }, { commit_id }, { branch_id }, \"working\" (the branch as it stands), or \"latest_checkpoint\" (the nearest checkpoint behind it); paths narrows the list. Read-only. \"What changed since the last checkpoint\" is { before: \"latest_checkpoint\", after: \"working\" }. MCP Apps hosts render the same collapsible card a write shows; summarize in one sentence rather than listing the files.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
+				},
+				"before": {
+					"anyOf": [
+						{
+							"type": "object",
+							"properties": {
+								"checkpoint_id": {
+									"type": "string",
+									"minLength": 1,
+									"description": "Lix commit id"
+								}
+							},
+							"required": ["checkpoint_id"],
+							"additionalProperties": false
+						},
+						{
+							"type": "object",
+							"properties": {
+								"commit_id": {
+									"type": "string",
+									"minLength": 1,
+									"description": "Lix commit id"
+								}
+							},
+							"required": ["commit_id"],
+							"additionalProperties": false
+						},
+						{
+							"type": "object",
+							"properties": {
+								"branch_id": {
+									"type": "string",
+									"minLength": 1,
+									"description": "Lix branch id"
+								}
+							},
+							"required": ["branch_id"],
+							"additionalProperties": false
+						},
+						{
+							"type": "string",
+							"const": "working"
+						},
+						{
+							"type": "string",
+							"const": "latest_checkpoint"
+						}
+					]
+				},
+				"after": {
+					"anyOf": [
+						{
+							"type": "object",
+							"properties": {
+								"checkpoint_id": {
+									"type": "string",
+									"minLength": 1,
+									"description": "Lix commit id"
+								}
+							},
+							"required": ["checkpoint_id"],
+							"additionalProperties": false
+						},
+						{
+							"type": "object",
+							"properties": {
+								"commit_id": {
+									"type": "string",
+									"minLength": 1,
+									"description": "Lix commit id"
+								}
+							},
+							"required": ["commit_id"],
+							"additionalProperties": false
+						},
+						{
+							"type": "object",
+							"properties": {
+								"branch_id": {
+									"type": "string",
+									"minLength": 1,
+									"description": "Lix branch id"
+								}
+							},
+							"required": ["branch_id"],
+							"additionalProperties": false
+						},
+						{
+							"type": "string",
+							"const": "working"
+						},
+						{
+							"type": "string",
+							"const": "latest_checkpoint"
+						}
+					]
+				},
+				"paths": {
+					"minItems": 1,
+					"maxItems": 100,
+					"type": "array",
+					"items": {
+						"type": "string",
+						"minLength": 1
+					}
+				}
+			},
+			"required": ["context", "before", "after"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
+				},
+				"files": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"path": {
+								"type": "string"
+							},
+							"status": {
+								"type": "string",
+								"enum": ["added", "modified", "removed", "moved"]
+							},
+							"before_path": {
+								"type": "string"
+							},
+							"before_commit_id": {
+								"type": "string"
+							},
+							"after_commit_id": {
+								"type": "string"
+							},
+							"url": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"path",
+							"status",
+							"before_commit_id",
+							"after_commit_id",
+							"url"
+						],
+						"additionalProperties": false
+					}
+				},
+				"before": {
+					"type": "string"
+				},
+				"after": {
+					"type": "string"
+				},
+				"commit_id": {
+					"type": "string"
+				},
+				"url": {
+					"type": "string"
+				}
+			},
+			"required": ["context", "files", "before", "after", "commit_id", "url"],
+			"additionalProperties": false
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"openWorldHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "noauth"
+				}
+			],
+			"ui": {
+				"resourceUri": "ui://lixray/diff-card/v1"
+			}
+		}
+	},
+	{
 		"name": "query_sql",
 		"title": "LixRay: Query SQL",
 		"description": "Run one read-only SQL statement against lix_ref (@handle/slug or UUID), optionally branch_id. Defaults to the repository default branch; no open_lix needed. Or pass context alone for its pinned branch. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.\n\nPrefer read_files and list_files for ordinary file work; use query_sql for repository data and advanced file queries. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;` and columns, with their descriptions, with `SELECT column_name, data_type, is_nullable, description FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position;`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: \"text\", value: \"…\" }] (kinds: text, int, float, json, blob); file bytes read as CAST(content AS TEXT). History: lix_log() lists retained commits, lix_history('lix_file') the net change per commit, lix_diff('lix_file') the working changes, lix_as_of('lix_file', $1) the state at a commit.\n\nUse only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.",

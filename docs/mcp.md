@@ -140,7 +140,7 @@ the same canonical URL `get_entity_urls` would return. File tools also return ca
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
 
-`write_files` and `execute_sql` advertise
+`write_files`, `execute_sql`, and `diff` advertise
 `_meta.ui.resourceUri: "ui://lixray/diff-card/v1"`. MCP Apps hosts fetch that
 static HTML resource using `resources/read`; it is available before the call
 and across stateless requests, without repository data in its URL or template.
@@ -157,7 +157,7 @@ support MCP Apps. A card is optional; agents must not claim the user saw one
 merely because the call succeeded.
 
 The card is collapsed by default: one 44px bar with the files' type icons,
-"N files written", the deepest common folder, and
+"N files written" (or "changed" for `diff`), the deepest common folder, and
 "2 new · 1 edited" counts, so a long chat reads as a list of writes. Opened,
 the bar becomes the header and below it sits Atelier's static render of one
 file's change in a scrolling panel, with a dark pill to page through the
@@ -174,7 +174,7 @@ returns the commit span it moved between, and the card comes from asking Lix
 what changed between those two commits — `lix_diff('lix_file', before,
 after)` with `from_content` and `to_content`. That is the same question a
 checkpoint, or any two commits, would be asked, so one render path serves a
-write and an SQL batch (the files its change log says it touched);
+write, an SQL batch (the files its change log says it touched), and `diff`;
 and because the answer is keyed to the commits rather than to a moment in
 time, nothing another writer does afterwards changes what the card describes.
 Each preview is trimmed to what changed, with a note of what was skipped; a
@@ -182,6 +182,16 @@ change too large for a thread keeps its page and sends the reader to the file,
 which is also what a snapshot over 100 KB or one nested past two dozen levels
 gets — rendering walks the whole document, and the document was written by
 whoever is talking to the server.
+
+`diff` compares two points of the Lix in context: `before` and `after` are each
+`{ checkpoint_id }`, `{ commit_id }`, `{ branch_id }`, `"working"` (the branch
+as it stands), or `"latest_checkpoint"` (the nearest checkpoint behind it),
+with optional `paths` to narrow. It returns `files` (`path`, `status` of
+added/modified/removed/moved, `before_path` for a move, the two commit ids,
+`url`), the resolved `before` and `after`, `commit_id` (the after end), the
+repository `url`, a one-line summary ("3 files changed between latest
+checkpoint … and working: …"), file links, and the same card. A ref that names
+nothing is refused with a hint before Lix is asked to compare.
 
 `write_files` validates `last_seen_commit_id` and metadata-only targets, and runs
 all file writes in one transaction. An optional checkpoint runs afterward and returns its
