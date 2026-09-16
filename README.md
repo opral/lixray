@@ -55,6 +55,11 @@ resolves those artifacts from its exact Lix submodule pointer. Missing artifacts
 must be built in Lix before retrying. Local development follows the same
 resolution path with MinIO in place of R2.
 
+Sync clients recover lost server sessions with a fresh handshake and bounded
+request replay, preserving local edits. Failed recovery backs off from one to
+thirty seconds. Stale session IDs cannot open a server runtime or extend its
+idle lifetime, including when an old browser tab keeps retrying after a deploy.
+
 The web service owns authentication, organization and project pages,
 `/healthz`, `/mcp`, and the canonical Lix protocol. Supabase row-level security
 proves Lix access before a request reaches `lix-server`.
