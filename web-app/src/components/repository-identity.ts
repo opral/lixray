@@ -24,7 +24,8 @@ export const TILE_PALETTES: readonly RepositoryPalette[] = [
 	},
 	{
 		background: "var(--atelier-tag-blue)",
-		border: "color-mix(in srgb, var(--atelier-tag-blue-fg) 20%, var(--atelier-tag-blue))",
+		border:
+			"color-mix(in srgb, var(--atelier-tag-blue-fg) 20%, var(--atelier-tag-blue))",
 		color: "var(--atelier-tag-blue-fg)",
 	},
 	{

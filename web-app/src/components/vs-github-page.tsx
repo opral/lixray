@@ -143,7 +143,12 @@ export function VsGithubPage() {
 												fill="none"
 											/>
 											<circle cx="56" cy="62" r="4" fill="var(--atelier-fg)" />
-											<circle cx="346" cy="62" r="4" fill="var(--atelier-accent)" />
+											<circle
+												cx="346"
+												cy="62"
+												r="4"
+												fill="var(--atelier-accent)"
+											/>
 										</svg>
 										<span className="absolute bottom-0.5 left-[3%] inline-flex items-center rounded-[5px] bg-bg-hover-strong px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-fg-muted">
 											create branch

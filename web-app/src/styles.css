@@ -300,11 +300,13 @@
 	}
 	@keyframes connect-agent-dot-pulse {
 		0% {
-			box-shadow: 0 0 0 0 color-mix(in srgb, var(--atelier-link) 45%, transparent);
+			box-shadow: 0 0 0 0
+				color-mix(in srgb, var(--atelier-link) 45%, transparent);
 		}
 		70%,
 		100% {
-			box-shadow: 0 0 0 9px color-mix(in srgb, var(--atelier-link) 0%, transparent);
+			box-shadow: 0 0 0 9px
+				color-mix(in srgb, var(--atelier-link) 0%, transparent);
 		}
 	}
 	@keyframes auth-progress-sweep {
