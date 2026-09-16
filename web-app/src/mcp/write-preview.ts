@@ -14,6 +14,11 @@ export const WRITE_PREVIEW_HTML = String.raw`<!doctype html>
 <style>
 body { margin: 0; font: 14px system-ui, sans-serif; }
 #status { margin: 12px; }
+#status[hidden] { display: none; }
+/* The host sizes the frame to what we report, and past its own limit it
+   scrolls the frame inside the chat. Capping the cards here keeps that
+   scroll ours: the transcript stays still and the cards move. */
+#previews { max-height: 520px; overflow-y: auto; overscroll-behavior: contain; }
 .preview { display: block; margin-bottom: 12px; }
 </style></head><body>
 <p id="status" role="status">Waiting for the write result…</p>
@@ -38,7 +43,11 @@ body { margin: 0; font: 14px system-ui, sans-serif; }
     const summary = result.content?.find(block => block.type === 'text')?.text;
     status.textContent = summary || (result.isError ? 'The write failed.' : 'Files saved.');
     const cards = result.isError ? [] : result._meta?.['lixray/write-preview']?.cards;
-    for (const card of (Array.isArray(cards) ? cards : []).slice(0, 3)) {
+    const shown = (Array.isArray(cards) ? cards : []).slice(0, 3);
+    // The host already prints the receipt beside this view; a card says the
+    // rest. The line stays only where there is no card to say it.
+    status.hidden = shown.length > 0;
+    for (const card of shown) {
       if (typeof card.html !== 'string' || card.html.length > 24000) continue;
       const parsed = new DOMParser().parseFromString(card.html, 'text/html');
       const container = document.createElement('section');
@@ -91,6 +100,7 @@ body { margin: 0; font: 14px system-ui, sans-serif; }
     if (message.method === 'ui/notifications/tool-result') render(message.params || {});
     else if (message.method === 'ui/notifications/tool-cancelled') {
       previews.replaceChildren();
+      status.hidden = false;
       status.textContent = 'The tool call was cancelled. Check its outcome before repeating a write.';
     } else if (message.method === 'ping' && message.id !== undefined) send({ id: message.id, result: {} });
     else if (message.method === 'ui/resource-teardown' && message.id !== undefined) {
