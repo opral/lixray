@@ -162,6 +162,11 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
 .pill .arrow svg { width: 12px; height: 12px; }
 .pill .badge { display: inline-flex; flex: none; }
 .pill .badge svg { width: 12px; height: 12px; }
+/* The file's own icon beside its badge: the badge says what happened, the
+   icon says to what — the same pair the bar leads with. */
+.pill .file-icon { display: inline-flex; flex: none; }
+.pill .file-icon svg { display: block; width: 14px; height: 14px; }
+.pill .file-icon:empty { display: none; }
 .pill .name { flex: 0 1 auto; min-width: 0; overflow: hidden; font-size: 12px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 .pill .label { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--atelier-overlay-fg-subtle); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
 .pill .dots { display: inline-flex; flex: none; align-items: center; gap: 4px; margin-left: 2px; }
@@ -199,6 +204,7 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
 			<div class="pill" id="pill">
 				<button class="arrow" id="prev" type="button" aria-label="Previous file"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
 				<span class="badge" id="badge"></span>
+				<span class="file-icon" id="file-icon"></span>
 				<span class="name" id="name"></span>
 				<span class="label" id="label"></span>
 				<span class="dots" id="dots"></span>
@@ -355,6 +361,8 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
     note.className = preview.hidden ? 'note only' : 'note';
     panel.scrollTop = 0;
     $('badge').replaceChildren(glyph(file.status));
+    const fileIcon = iconNode(file.icon);
+    $('file-icon').replaceChildren(...(fileIcon ? [fileIcon] : []));
     $('name').textContent = typeof file.name === 'string' ? file.name : file.path;
     $('label').textContent = typeof file.label === 'string' ? file.label : '';
     const dots = $('dots');
