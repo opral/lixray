@@ -44,9 +44,6 @@ function compactCss(css: string): string {
 	}
 	return out.replaceAll(";}", "}");
 }
-// Atelier's build prunes render/styles.d.ts, the declaration behind RENDER_CSS,
-// so the import has no type until scripts/prune-types.mjs keeps it.
-// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
 const STYLE = compactCss(RENDER_CSS);
 
 export type DiffCardInput = {
