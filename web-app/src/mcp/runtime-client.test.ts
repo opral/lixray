@@ -1,3 +1,4 @@
+import { compatibility } from "@lix-js/sdk/compatibility";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -12,7 +13,7 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 	const pathname = testProtocolPath(request);
 	if (pathname === "/lix/v1/") {
 		return Response.json({
-			protocolVersion: 10,
+			protocolVersion: compatibility.serverProtocolVersion,
 			activeBranchId: "main",
 			activeAccountId: "00000000-0000-7000-8000-000000000002",
 			sessionId: "runtime-client-session",
@@ -347,7 +348,6 @@ void test("remote merge and preview forward protocol requests and receipts", asy
 		targetHeadCommitId: "target",
 		sourceHeadCommitId: "source",
 		changeStats,
-		conflicts: [],
 	};
 	const receipt = {
 		outcome: "mergeCommitted",
