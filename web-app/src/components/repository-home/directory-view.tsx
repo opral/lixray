@@ -2,13 +2,19 @@ import { AtelierFile } from "@opral/atelier";
 import type { Lix } from "@lix-js/sdk";
 import {
 	deleteWorkspaceEntry,
+	ensureDirectoryPath,
+	NewFileMenu,
+	pickerFolders,
 	renameWorkspaceEntry,
+	resolveCreateDirectory,
 	WorkspacePathTakenError,
 } from "@opral/atelier";
 import type {
 	AtelierDiffSession,
 	AtelierDocumentLinks,
 	AtelierFileProps,
+	DefaultFolderFileType,
+	DefaultFolders,
 } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import { entityRoutePath } from "~/lib/entity-url";
@@ -33,11 +39,11 @@ import {
 	useMemo,
 	useRef,
 	useState,
+	forwardRef,
 	type DragEvent as ReactDragEvent,
 	type MouseEvent as ReactMouseEvent,
 	type ReactNode,
 } from "react";
-import { DropdownMenu } from "radix-ui";
 import { Button } from "~/components/ui/button";
 import { DirectoryFileList, NameEntryDialog } from "./directory-file-list";
 import {
@@ -93,6 +99,17 @@ type DirectoryViewProps = {
 	readonly isHome: boolean;
 	/** Mirrors the bundled Atelier Files extension's authoritative preference. */
 	readonly showHiddenFiles?: boolean;
+	/**
+	 * Where a new file of each type goes, as the Files view stores it. Home
+	 * creates files too, so it obeys and offers the same rule rather than a
+	 * second one of its own.
+	 */
+	readonly defaultFolders?: DefaultFolders;
+	/** Absent on a read-only or historical view, where nothing is set. */
+	readonly onSetDefaultFolder?: (
+		fileType: DefaultFolderFileType,
+		folder: string | null,
+	) => void;
 	readonly readOnly: boolean;
 	/** The repository's own file URLs, so README links behave like file rows. */
 	readonly documentLinks?: AtelierDocumentLinks;
@@ -125,6 +142,25 @@ const newTabFromMouseEvent = (event: ReactMouseEvent): boolean =>
  * Folders first, then files, then the directory's README rendered below —
  * the tab names the location, so the view carries no title of its own.
  */
+/** No folder set for any type: one instance, so memos stay stable. */
+const NO_DEFAULT_FOLDERS: DefaultFolders = {};
+
+/** The type each row and each shortcut creates, for the default-folder rule. */
+const FILE_TYPE_BY_EXTENSION = {
+	md: "markdown",
+	csv: "csv",
+	excalidraw: "excalidraw",
+} as const satisfies Record<string, DefaultFolderFileType>;
+
+const EXTENSION_BY_FILE_TYPE = {
+	// "New file" and the ⌘ . shortcut make a Markdown file here, so the plain
+	// row follows the plain rule rather than Markdown's.
+	generic: "md",
+	markdown: "md",
+	csv: "csv",
+	excalidraw: "excalidraw",
+} as const satisfies Record<DefaultFolderFileType, "md" | "csv" | "excalidraw">;
+
 /** Nothing marked: one shared instance keeps the listing's memo stable. */
 const EMPTY_CHANGED_FILE_KINDS: ReadonlyMap<string, WorkingFileChangeKind> =
 	new Map();
@@ -136,6 +172,8 @@ export function DirectoryView({
 	dirPath,
 	isHome,
 	showHiddenFiles = false,
+	defaultFolders = NO_DEFAULT_FOLDERS,
+	onSetDefaultFolder,
 	readOnly,
 	documentLinks,
 	connection,
@@ -413,11 +451,42 @@ export function DirectoryView({
 		onError: setActionError,
 	});
 
+	const existingDirectories = useMemo(
+		() =>
+			new Set(
+				(tree?.dirs ?? []).map((directory) =>
+					ensureDirectoryPath(directory.path),
+				),
+			),
+		[tree],
+	);
+	const folderOptions = useMemo(
+		() => pickerFolders(existingDirectories, { showHiddenFiles }),
+		[existingDirectories, showHiddenFiles],
+	);
 	const createFile = useCallback(
-		async (extension: "md" | "csv" | "excalidraw") => {
+		async (
+			extension: "md" | "csv" | "excalidraw",
+			options: {
+				/** The row's own type, where it is not the extension's. */
+				readonly fileType?: DefaultFolderFileType;
+				/** `Create here this time`: the default stands, this file does not. */
+				readonly here?: boolean;
+			} = {},
+		) => {
+			const fileType = options.fileType ?? FILE_TYPE_BY_EXTENSION[extension];
 			try {
 				setActionError(null);
-				const path = await createRepositoryFile(lix, dirPath, extension);
+				const path = await createRepositoryFile(
+					lix,
+					resolveCreateDirectory({
+						hereDirectory: dirPath,
+						defaultFolder: defaultFolders[fileType],
+						existingDirectories,
+						...(options.here === true ? { oneOffHere: true } : {}),
+					}),
+					extension,
+				);
 				// Every type opens straight into its editor — naming up front is
 				// friction. Markdown names itself from the first heading; csv and
 				// drawings keep their untitled name until renamed.
@@ -427,7 +496,23 @@ export function DirectoryView({
 				setActionError("Unable to create the file. Try again.");
 			}
 		},
-		[dirPath, lix, onOpenFile],
+		[defaultFolders, dirPath, existingDirectories, lix, onOpenFile],
+	);
+	/**
+	 * `New folder…` inside the folder picker. The tree's own New folder names
+	 * itself inline; this one is named in the picker's field and committed at
+	 * once, because the listing is not on screen to type into under a menu.
+	 */
+	const createFolderAtPath = useCallback(
+		async (parentDirectory: string, name: string): Promise<string | null> => {
+			try {
+				return await createNamedWorkspaceFolder(lix, parentDirectory, name);
+			} catch (error) {
+				console.error("repository-home: unable to create the folder", error);
+				return null;
+			}
+		},
+		[lix],
 	);
 
 	useEffect(() => {
@@ -463,24 +548,11 @@ export function DirectoryView({
 				startFolder();
 				return;
 			}
-			void createRepositoryFile(lix, dirPath, "md")
-				.then((path) => onOpenFile(path, { newTab: false, created: true }))
-				.catch((error: unknown) => {
-					console.error("repository-home: new file failed", error);
-					setActionError("Unable to create the file. Try again.");
-				});
+			void createFile("md", { fileType: "generic" });
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [
-		dirPath,
-		isActive,
-		lix,
-		onOpenFile,
-		readOnly,
-		viewingHistory,
-		startFolder,
-	]);
+	}, [createFile, isActive, readOnly, viewingHistory, startFolder]);
 
 	// The empty repository home renders the welcome pitch as the entire main
 	// column — the breadcrumb/New header stands down so "Connect an agent"
@@ -549,11 +621,36 @@ export function DirectoryView({
 									reviewFocus ? " opacity-[0.35] hover:opacity-100" : ""
 								}`}
 							>
-								<NewMenu
-									disabled={readOnly || viewingHistory}
-									onCreateFile={(extension) => void createFile(extension)}
-									onCreateFolder={startFolder}
-								/>
+								{readOnly || viewingHistory ? (
+									<NewButton disabled />
+								) : (
+									<NewFileMenu
+										// The button ends the header row; a menu starting
+										// where it starts would hang off the column.
+										align="end"
+										defaultFolders={defaultFolders}
+										folderOptions={folderOptions}
+										hereDirectory={dirPath}
+										existingDirectories={existingDirectories}
+										{...(onSetDefaultFolder ? { onSetDefaultFolder } : {})}
+										onNewFile={() =>
+											void createFile("md", { fileType: "generic" })
+										}
+										onNewFolder={startFolder}
+										onNewMarkdown={() => void createFile("md")}
+										onNewCsv={() => void createFile("csv")}
+										onNewExcalidraw={() => void createFile("excalidraw")}
+										onCreateHereOnce={(fileType) =>
+											void createFile(EXTENSION_BY_FILE_TYPE[fileType], {
+												fileType,
+												here: true,
+											})
+										}
+										onCreateFolder={createFolderAtPath}
+									>
+										<NewButton />
+									</NewFileMenu>
+								)}
 							</div>
 						</div>
 					)}
@@ -1649,105 +1746,43 @@ function ReadmePreview({
 	);
 }
 
+/**
+ * What the empty repository offers to start with. The New menu names the same
+ * three types; here they are buttons, so they carry the bare type name.
+ */
 const NEW_FILE_KINDS = [
-	{
-		extension: "md",
-		label: "New Markdown",
-		hint: "(.md)",
-		testId: "home-create-file-md",
-	},
-	{
-		extension: "csv",
-		label: "New CSV",
-		hint: "(.csv)",
-		testId: "home-create-file-csv",
-	},
+	{ extension: "md", label: "Markdown", testId: "home-create-file-md" },
+	{ extension: "csv", label: "CSV", testId: "home-create-file-csv" },
 	{
 		extension: "excalidraw",
-		label: "New Drawing",
-		hint: "(.excalidraw)",
+		label: "Drawing",
 		testId: "home-create-file-excalidraw",
 	},
 ] as const;
 
-function NewMenu({
-	disabled = false,
-	onCreateFile,
-	onCreateFolder,
-}: {
-	readonly disabled?: boolean;
-	readonly onCreateFile: (extension: "md" | "csv" | "excalidraw") => void;
-	readonly onCreateFolder: () => void;
-}) {
-	const handOffFocusRef = useRef(false);
+/**
+ * Home's own New button. Atelier's New menu renders it as its trigger, so the
+ * menu below it is the workspace's menu and the button above it is home's.
+ */
+const NewButton = forwardRef<
+	HTMLButtonElement,
+	{ readonly disabled?: boolean }
+>(function NewButton({ disabled = false }, ref) {
 	return (
-		<DropdownMenu.Root>
-			<DropdownMenu.Trigger asChild>
-				<Button
-					disabled={disabled}
-					type="button"
-					variant="featured"
-					className="h-9 gap-1.5 px-3.5 text-[13.5px] font-bold"
-					data-testid="home-new-button"
-				>
-					<Plus className="size-3.5" aria-hidden="true" />
-					New
-					<ChevronDown className="size-3 opacity-80" aria-hidden="true" />
-				</Button>
-			</DropdownMenu.Trigger>
-			<DropdownMenu.Portal>
-				<DropdownMenu.Content
-					align="end"
-					sideOffset={8}
-					onCloseAutoFocus={(event) => {
-						if (handOffFocusRef.current) event.preventDefault();
-						handOffFocusRef.current = false;
-					}}
-					className="z-50 flex w-[248px] flex-col rounded-xl border border-border-panel bg-bg-panel p-1.5 shadow-lg"
-				>
-					<MenuItem
-						icon={<img src="/icon-sq-new.svg" alt="" className="size-4" />}
-						label="New file"
-						shortcut="⌘ ."
-						onClick={() => {
-							handOffFocusRef.current = true;
-							onCreateFile("md");
-						}}
-					/>
-					<MenuItem
-						icon={<img src="/icon-sq-folder.svg" alt="" className="size-4" />}
-						label="New folder"
-						shortcut="⇧⌘ ."
-						onClick={() => {
-							handOffFocusRef.current = true;
-							onCreateFolder();
-						}}
-					/>
-					<DropdownMenu.Separator className="mx-1 my-1.5 h-px bg-border-subtle" />
-					{NEW_FILE_KINDS.map((kind) => (
-						<MenuItem
-							key={kind.extension}
-							testId={kind.testId}
-							icon={
-								<img
-									src={fileIconUrl(`file.${kind.extension}`)}
-									alt=""
-									className="size-4"
-								/>
-							}
-							label={kind.label}
-							hint={kind.hint}
-							onClick={() => {
-								handOffFocusRef.current = true;
-								onCreateFile(kind.extension);
-							}}
-						/>
-					))}
-				</DropdownMenu.Content>
-			</DropdownMenu.Portal>
-		</DropdownMenu.Root>
+		<Button
+			ref={ref}
+			disabled={disabled}
+			type="button"
+			variant="featured"
+			className="h-9 gap-1.5 px-3.5 text-[13.5px] font-bold"
+			data-testid="home-new-button"
+		>
+			<Plus className="size-3.5" aria-hidden="true" />
+			New
+			<ChevronDown className="size-3 opacity-80" aria-hidden="true" />
+		</Button>
 	);
-}
+});
 
 function RenameEntryDialog({
 	target,
@@ -1850,39 +1885,6 @@ function RenameEntryDialog({
 				</div>
 			</div>
 		</div>
-	);
-}
-
-function MenuItem({
-	testId,
-	icon,
-	label,
-	hint,
-	shortcut,
-	onClick,
-}: {
-	readonly testId?: string;
-	readonly icon: ReactNode;
-	readonly label: string;
-	readonly hint?: string;
-	readonly shortcut?: string;
-	readonly onClick: () => void;
-}) {
-	return (
-		<DropdownMenu.Item
-			data-testid={testId}
-			onSelect={onClick}
-			className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] leading-none font-medium text-text-primary cursor-pointer outline-none data-[highlighted]:bg-bg-hover"
-		>
-			{icon}
-			<span className="flex-1">
-				{label}
-				{hint ? <span className="text-text-tertiary"> {hint}</span> : null}
-			</span>
-			{shortcut ? (
-				<span className="text-[11.5px] text-text-tertiary/60">{shortcut}</span>
-			) : null}
-		</DropdownMenu.Item>
 	);
 }
 
@@ -2013,7 +2015,7 @@ function GettingStarted({
 									alt=""
 									className="size-4"
 								/>
-								{kind.label.replace("New ", "")}
+								{kind.label}
 							</button>
 						))}
 					</div>
