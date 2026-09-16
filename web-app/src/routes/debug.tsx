@@ -44,7 +44,7 @@ function DebugPage() {
 						>
 							← Repositories
 						</Link>
-						<h1 className="text-[20px]/7 font-semibold">
+						<h1 className="text-xl font-semibold">
 							Open lix repository from snapshot
 						</h1>
 						<p className="text-sm text-fg-muted">

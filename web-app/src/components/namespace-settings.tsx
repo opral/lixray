@@ -131,7 +131,7 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 			{!organization.isPersonal && client ? (
 				<>
 					<MembersPanel organization={organization} />
-					<div className="rounded-[12px] border border-dashed border-border px-[18px] py-4 opacity-70">
+					<div className="rounded-xl border border-dashed border-border px-[18px] py-4 opacity-70">
 						<h3 className="m-0 text-[13.5px] font-bold text-danger-border">
 							Danger zone
 						</h3>
@@ -262,7 +262,7 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 	};
 
 	return (
-		<section className="mb-3.5 rounded-[12px] border border-border bg-panel px-[18px] py-4">
+		<section className="mb-3.5 rounded-xl border border-border bg-panel px-[18px] py-4">
 			<div className="flex items-start gap-3">
 				<div className="min-w-0 flex-1">
 					<h3 className="m-0 text-[13.5px] font-bold">Public profile</h3>
@@ -522,7 +522,7 @@ function GeneralPanel({ organization }: { organization: Organization }) {
 	};
 
 	return (
-		<section className="mb-3.5 rounded-[12px] border border-border bg-panel px-[18px] py-4">
+		<section className="mb-3.5 rounded-xl border border-border bg-panel px-[18px] py-4">
 			<h3 className="m-0 text-[13.5px] font-bold">Name</h3>
 			<p className="m-0 mt-0.5 mb-3 text-[12px] text-fg-subtle">
 				Shown across LixRay. Renaming keeps the handle and all URLs.
@@ -663,7 +663,7 @@ function MembersPanel({ organization }: { organization: Organization }) {
 	};
 
 	return (
-		<section className="mb-3.5 rounded-[12px] border border-border bg-panel px-[18px] py-4">
+		<section className="mb-3.5 rounded-xl border border-border bg-panel px-[18px] py-4">
 			<div className="flex items-center gap-2">
 				<h3 className="m-0 text-[13.5px] font-bold">
 					Members

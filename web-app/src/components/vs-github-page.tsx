@@ -13,11 +13,11 @@ import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 import { cn } from "~/lib/utils";
 
 const primaryButton =
-	"inline-flex items-center justify-center rounded-[12px] bg-[image:var(--at-accent-gradient)] px-7 py-[15px] text-[17px] font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
+	"inline-flex items-center justify-center rounded-xl bg-[image:var(--at-accent-gradient)] px-7 py-[15px] text-[17px] font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
 const secondaryButton =
-	"inline-flex items-center justify-center rounded-[12px] border border-fg/12 bg-panel px-6 py-3.5 text-[16px]/6 font-semibold whitespace-nowrap text-fg no-underline transition hover:border-fg/25";
+	"inline-flex items-center justify-center rounded-xl border border-fg/12 bg-panel px-6 py-3.5 text-base font-semibold whitespace-nowrap text-fg no-underline transition hover:border-fg/25";
 const visualCard =
-	"rounded-[16px] border border-fg/8 bg-panel shadow-[0_24px_60px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)]";
+	"rounded-2xl border border-fg/8 bg-panel shadow-[0_24px_60px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)]";
 
 export function VsGithubPage() {
 	const { user, repositoryTo } = useRepositoryCta();
@@ -105,9 +105,9 @@ export function VsGithubPage() {
 							truth, real review, agents that ship. But GitHub is built for
 							software engineers. Everyone else hits three walls.
 						</p>
-						<div className="mt-[26px] flex flex-col items-start gap-8 rounded-[16px] border border-fg/8 bg-bg px-8 py-7 lg:flex-row lg:items-center lg:gap-12">
+						<div className="mt-[26px] flex flex-col items-start gap-8 rounded-2xl border border-fg/8 bg-bg px-8 py-7 lg:flex-row lg:items-center lg:gap-12">
 							<div className="flex max-w-[340px] shrink-0 flex-col gap-3">
-								<h3 className="m-0 text-[20px]/7 font-bold tracking-[-.01em]">
+								<h3 className="m-0 text-xl font-bold tracking-[-.01em]">
 									Branching, commits and pull requests are too complicated
 								</h3>
 								<p className="m-0 text-[15.5px] leading-[1.6] text-fg-muted text-pretty">
@@ -185,7 +185,7 @@ export function VsGithubPage() {
 							</div>
 						</div>
 						<div className="grid gap-6 sm:grid-cols-2">
-							<div className="flex flex-col gap-3 rounded-[16px] border border-fg/8 bg-bg p-7">
+							<div className="flex flex-col gap-3 rounded-2xl border border-fg/8 bg-bg p-7">
 								<span className="inline-flex items-center gap-[7px]">
 									<img
 										className="size-[19px] opacity-55 grayscale"
@@ -203,7 +203,7 @@ export function VsGithubPage() {
 										alt=""
 									/>
 								</span>
-								<h3 className="m-0 mt-1.5 text-[20px]/7 font-bold tracking-[-.01em]">
+								<h3 className="m-0 mt-1.5 text-xl font-bold tracking-[-.01em]">
 									Large files are a problem
 								</h3>
 								<p className="m-0 text-[15.5px] leading-[1.6] text-fg-muted text-pretty">
@@ -226,14 +226,14 @@ export function VsGithubPage() {
 									</span>
 								</div>
 							</div>
-							<div className="flex flex-col gap-3 rounded-[16px] border border-fg/8 bg-bg p-7">
+							<div className="flex flex-col gap-3 rounded-2xl border border-fg/8 bg-bg p-7">
 								<span className="inline-flex items-center gap-1.5 font-mono text-xs text-fg-subtle">
 									<span className="inline-flex items-center gap-[5px] rounded-[5px] bg-bg-hover-strong px-2 py-[3px]">
 										<LockIcon size={11} />
 										all-or-nothing
 									</span>
 								</span>
-								<h3 className="m-0 mt-1.5 text-[20px]/7 font-bold tracking-[-.01em]">
+								<h3 className="m-0 mt-1.5 text-xl font-bold tracking-[-.01em]">
 									No permissions
 								</h3>
 								<p className="m-0 text-[15.5px] leading-[1.6] text-fg-muted text-pretty">
@@ -404,12 +404,12 @@ export function VsGithubPage() {
 							<span className="flex-1 border-t-[1.5px] border-dashed border-border-strong" />
 						</div>
 						<div className="flex flex-col items-start gap-6 rounded-[14px] border border-fg/6 bg-bg-hover px-7 py-6 lg:flex-row lg:items-center lg:gap-9">
-							<p className="m-0 max-w-[340px] text-[16px] leading-[1.55] text-fg text-pretty">
+							<p className="m-0 max-w-[340px] text-base leading-[1.55] text-fg text-pretty">
 								<b>Your source code stays in GitHub.</b> LixRay is for the repos
 								that are not source code.
 							</p>
 							<div className="flex flex-1 flex-wrap items-center justify-center gap-4 lg:flex-nowrap">
-								<div className="flex shrink-0 flex-col gap-[11px] rounded-[12px] border border-fg/10 bg-panel px-[18px] py-4">
+								<div className="flex shrink-0 flex-col gap-[11px] rounded-xl border border-fg/10 bg-panel px-[18px] py-4">
 									<span className="inline-flex items-center gap-2">
 										<img
 											className="size-4"
@@ -429,7 +429,7 @@ export function VsGithubPage() {
 									</span>
 								</div>
 								<span className="text-lg font-semibold text-fg-faint">+</span>
-								<div className="flex flex-col gap-[11px] rounded-[12px] border border-accent-border bg-accent-subtle px-[18px] py-4">
+								<div className="flex flex-col gap-[11px] rounded-xl border border-accent-border bg-accent-subtle px-[18px] py-4">
 									<span className="inline-flex items-center gap-2">
 										<img
 											className="size-4"
@@ -611,7 +611,7 @@ function HeroVisual() {
 				/>
 				<circle cx="80" cy="160" r="3" fill="var(--at-accent)" />
 			</svg>
-			<div className="flex w-[320px] shrink-0 flex-col gap-px rounded-[16px] border border-fg/10 bg-panel px-3 py-[18px] text-[13px] text-fg shadow-[0_30px_80px_color-mix(in_srgb,var(--at-overlay)_14%,transparent)]">
+			<div className="flex w-[320px] shrink-0 flex-col gap-px rounded-2xl border border-fg/10 bg-panel px-3 py-[18px] text-[13px] text-fg shadow-[0_30px_80px_color-mix(in_srgb,var(--at-overlay)_14%,transparent)]">
 				<span className="mx-1 mb-3 flex rounded-lg border border-border bg-bg px-3 py-[7px] font-mono text-xs text-fg-subtle">
 					<span>
 						lixray.com/<b className="text-fg">@acme/company</b>
@@ -912,7 +912,7 @@ function FileRow({
 function ProposalsVisual() {
 	return (
 		<div className={cn(visualCard, "flex flex-col gap-2.5 p-4")}>
-			<div className="flex flex-col gap-2.5 rounded-[12px] border border-accent-border bg-accent-subtle px-4 py-3.5">
+			<div className="flex flex-col gap-2.5 rounded-xl border border-accent-border bg-accent-subtle px-4 py-3.5">
 				<span className="flex flex-col gap-0.5">
 					<span className="text-[13.5px] font-bold text-fg">
 						Update refund policy to 30 days
@@ -1238,7 +1238,7 @@ function RepoArea({
 	Icon: LucideIcon;
 }) {
 	return (
-		<div className="flex flex-col gap-2.5 rounded-[16px] border border-fg/8 bg-bg p-6">
+		<div className="flex flex-col gap-2.5 rounded-2xl border border-fg/8 bg-bg p-6">
 			<span className="inline-flex items-center gap-2.5">
 				<span className="relative inline-flex size-8 shrink-0 items-center justify-center">
 					<img

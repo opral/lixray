@@ -141,7 +141,7 @@ function DocsArticle({ html }: { html: string }) {
 
 	return (
 		<article
-			className="docs-prose"
+			className="atelier-document docs-article"
 			ref={articleRef}
 			// The HTML is rendered from repo-owned markdown with all raw content
 			// escaped by renderDocsMarkdown; no user input reaches this string.

@@ -307,7 +307,7 @@ function EmptyOrganizationSection({
 }) {
 	return (
 		<div
-			className="mx-3.5 rounded-[12px] border border-border bg-panel px-6 py-[22px] text-center max-[560px]:mx-2"
+			className="mx-3.5 rounded-xl border border-border bg-panel px-6 py-[22px] text-center max-[560px]:mx-2"
 			data-testid="empty-organization-section"
 		>
 			<p className="m-0 text-[14px] font-bold">
@@ -366,7 +366,7 @@ function RepositoryEmptyState() {
 				<div className="absolute top-[64px] right-[32px] h-px w-[92px] rotate-[24deg] border-t-2 border-dashed border-border" />
 				<div className="absolute top-[28px] right-[58px] h-px w-[74px] -rotate-[20deg] border-t-2 border-dashed border-border" />
 
-				<div className="absolute top-8 left-1/2 w-[230px] -translate-x-1/2 overflow-hidden rounded-[12px] border border-border bg-panel shadow-[0_18px_40px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)]">
+				<div className="absolute top-8 left-1/2 w-[230px] -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-panel shadow-[0_18px_40px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)]">
 					<div className="flex h-10 items-center gap-2 border-b border-border-subtle px-3">
 						<img className="size-4" src="/landing/icon-folder.svg" alt="" />
 						<span className="h-2 w-20 rounded-full bg-panel/20" />
@@ -397,13 +397,13 @@ function RepositoryEmptyState() {
 					</div>
 				</div>
 
-				<div className="absolute bottom-0 left-4 grid size-11 place-items-center rounded-[12px] border border-border bg-accent-subtle shadow-sm">
+				<div className="absolute bottom-0 left-4 grid size-11 place-items-center rounded-xl border border-border bg-accent-subtle shadow-sm">
 					<img className="size-6" src="/landing/claude-spark.svg" alt="" />
 				</div>
-				<div className="absolute top-2 right-5 grid size-11 place-items-center rounded-[12px] border border-border bg-panel shadow-sm">
+				<div className="absolute top-2 right-5 grid size-11 place-items-center rounded-xl border border-border bg-panel shadow-sm">
 					<img className="size-5" src="/landing/brand-openai.svg" alt="" />
 				</div>
-				<div className="absolute right-1 bottom-1 grid size-11 place-items-center rounded-[12px] border border-border bg-panel shadow-sm">
+				<div className="absolute right-1 bottom-1 grid size-11 place-items-center rounded-xl border border-border bg-panel shadow-sm">
 					<img className="size-5" src="/landing/brand-gemini.svg" alt="" />
 				</div>
 			</div>

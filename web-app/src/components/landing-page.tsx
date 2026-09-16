@@ -3,9 +3,9 @@ import { type ReactNode } from "react";
 import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 
 const primaryButton =
-	"inline-flex items-center justify-center rounded-[10px] bg-[image:var(--at-accent-gradient)] px-[22px] py-3 text-[16px]/6 font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
+	"inline-flex items-center justify-center rounded-[10px] bg-[image:var(--at-accent-gradient)] px-[22px] py-3 text-base font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
 const secondaryButton =
-	"inline-flex items-center justify-center rounded-[10px] border border-fg/15 bg-panel px-5 py-[11px] text-[16px]/6 font-semibold whitespace-nowrap text-fg no-underline transition hover:border-fg/30";
+	"inline-flex items-center justify-center rounded-[10px] border border-fg/15 bg-panel px-5 py-[11px] text-base font-semibold whitespace-nowrap text-fg no-underline transition hover:border-fg/30";
 const bookDemoHref = "mailto:hello@opral.com?subject=LixRay%20demo";
 
 export function LandingPage() {
@@ -114,7 +114,7 @@ export function LandingPage() {
 						</span>
 						<span>and any MCP agent</span>
 					</div>
-					<div className="w-full self-stretch overflow-hidden rounded-[12px] border border-fg/12 bg-panel">
+					<div className="w-full self-stretch overflow-hidden rounded-xl border border-fg/12 bg-panel">
 						<div className="flex items-center gap-2 border-b border-fg/8 bg-bg-hover px-5 py-2.5 font-mono text-[12.5px] text-fg-subtle">
 							lixray.com/<b className="text-fg">@acme/repository</b>
 						</div>
@@ -140,20 +140,20 @@ export function LandingPage() {
 					aria-labelledby="why-title"
 				>
 					<h2
-						className="m-0 text-[24px]/8 font-bold tracking-[-.02em]"
+						className="m-0 text-2xl font-bold tracking-[-.02em]"
 						id="why-title"
 					>
 						Why?
 					</h2>
-					<p className="m-0 text-[16px] leading-[1.65] text-fg-muted">
+					<p className="m-0 text-base leading-[1.65] text-fg-muted">
 						<b>Sharing skills.</b> Write a skill once. Every agent on the team
 						runs the same version.
 					</p>
-					<p className="m-0 text-[16px] leading-[1.65] text-fg-muted">
+					<p className="m-0 text-base leading-[1.65] text-fg-muted">
 						<b>Storing automations.</b> The scripts your agents run on a
 						schedule, versioned and reviewable.
 					</p>
-					<p className="m-0 text-[16px] leading-[1.65] text-fg-muted">
+					<p className="m-0 text-base leading-[1.65] text-fg-muted">
 						<b>Context layer for agents.</b> Agents read the ICP and the
 						playbook from one place. Always the current version.
 					</p>
@@ -164,12 +164,12 @@ export function LandingPage() {
 					aria-labelledby="comparison-title"
 				>
 					<h2
-						className="m-0 text-[24px]/8 font-bold tracking-[-.02em]"
+						className="m-0 text-2xl font-bold tracking-[-.02em]"
 						id="comparison-title"
 					>
 						Comparison
 					</h2>
-					<p className="m-0 text-[16px] leading-[1.65] text-fg-muted">
+					<p className="m-0 text-base leading-[1.65] text-fg-muted">
 						<Link
 							className="text-fg-muted underline decoration-fg-muted/30 underline-offset-2 hover:text-link hover:decoration-link/40"
 							to="/lp/lixray-vs-github"
@@ -178,7 +178,7 @@ export function LandingPage() {
 							lacks permissions.
 						</Link>
 					</p>
-					<p className="m-0 text-[16px] leading-[1.65] text-fg-muted">
+					<p className="m-0 text-base leading-[1.65] text-fg-muted">
 						<b>Google Drive</b> has no version control and is not designed for
 						programmatic usage.
 					</p>

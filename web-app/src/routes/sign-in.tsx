@@ -67,7 +67,7 @@ function SignInPage() {
 					<span>LixRay</span>
 				</a>
 				<div className="grid gap-[7px] text-center">
-					<h1 className="m-0 text-[20px] font-bold leading-tight">
+					<h1 className="m-0 text-xl font-bold leading-tight">
 						{joiningSharedRepository ? "Join to edit" : "Sign in to LixRay"}
 					</h1>
 					<p className="m-0 text-[13.5px] leading-normal text-fg-faint">

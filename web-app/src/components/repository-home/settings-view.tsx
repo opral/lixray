@@ -110,7 +110,7 @@ function NamePanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 	};
 
 	return (
-		<section className="mb-3.5 rounded-[12px] border border-border px-[18px] py-4">
+		<section className="mb-3.5 rounded-xl border border-border px-[18px] py-4">
 			<h3 className="m-0 text-[13.5px] font-bold">
 				<label htmlFor="repository-name">Name</label>
 			</h3>
@@ -234,7 +234,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 
 	return (
 		<>
-			<section className="mb-3.5 rounded-[12px] border border-border px-[18px] py-4">
+			<section className="mb-3.5 rounded-xl border border-border px-[18px] py-4">
 				<div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2">
 					<div className="min-w-0 flex-1 basis-[180px]">
 						<h3 className="m-0 text-[13.5px] font-bold">
@@ -276,7 +276,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 						: "Only repository members can open this repository. Published files remain public."}
 				</p>
 			</section>
-			<section className="mb-3.5 rounded-[12px] border border-border px-[18px] py-4">
+			<section className="mb-3.5 rounded-xl border border-border px-[18px] py-4">
 				<div className="flex flex-wrap items-center justify-between gap-2">
 					<h3 className="m-0 text-[13.5px] font-bold">Members</h3>
 					<Button
@@ -386,7 +386,7 @@ function DangerPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 	};
 
 	return (
-		<section className="rounded-[12px] border border-danger-subtle px-[18px] py-4">
+		<section className="rounded-xl border border-danger-subtle px-[18px] py-4">
 			<h3 className="m-0 text-[13.5px] font-bold text-fg">Danger zone</h3>
 			<p className="m-0 mt-0.5 mb-3 text-[12px] text-fg-subtle">
 				Deleting removes the repository from every member’s directory and keeps

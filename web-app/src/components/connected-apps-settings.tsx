@@ -87,7 +87,7 @@ export function ConnectedAppsPanel({ api }: { api: ConnectedAppsApi }) {
 		<>
 			<section
 				aria-label="Connected apps"
-				className="mb-3.5 rounded-[12px] border border-border bg-panel px-[18px] py-4"
+				className="mb-3.5 rounded-xl border border-border bg-panel px-[18px] py-4"
 			>
 				<div className="mb-3">
 					<h2 className="m-0 text-[13.5px] font-bold">Connected apps</h2>

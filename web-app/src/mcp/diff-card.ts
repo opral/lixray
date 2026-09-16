@@ -14,6 +14,41 @@ import type { RenderCounts, RenderKind } from "@opral/atelier/render";
 /** Cards past this size stop being a card; the reader is sent to the app. */
 const MAX_CARD_BYTES = 24_000;
 
+/**
+ * Atelier's stylesheet, whitespace collapsed outside quoted strings. It is
+ * written for reading, and inlined in every card it would spend a fifth of
+ * the budget on indentation.
+ */
+function compactCss(css: string): string {
+	let out = "";
+	let quote: string | null = null;
+	let space = false;
+	for (const char of css.replace(/\/\*[\s\S]*?\*\//g, "")) {
+		if (quote) {
+			out += char;
+			if (char === quote) quote = null;
+			continue;
+		}
+		if (char === '"' || char === "'") {
+			quote = char;
+			out += char;
+			continue;
+		}
+		if (/\s/.test(char)) {
+			space = true;
+			continue;
+		}
+		if (space && !/[{}:;,>)]/.test(char) && !/[{}:;,>(]$/.test(out)) out += " ";
+		space = false;
+		out += char;
+	}
+	return out.replaceAll(";}", "}");
+}
+// Atelier's build prunes render/styles.d.ts, the declaration behind RENDER_CSS,
+// so the import has no type until scripts/prune-types.mjs keeps it.
+// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+const STYLE = compactCss(RENDER_CSS);
+
 export type DiffCardInput = {
 	readonly path: string;
 	readonly url: string;
@@ -43,8 +78,11 @@ export function renderDiffCard(input: DiffCardInput): DiffCard | null {
 		...(input.before !== undefined ? { before: input.before } : {}),
 		...(input.after !== undefined ? { after: input.after } : {}),
 	};
-	// The chrome takes about 4 kB of the budget; the view gets the rest.
-	const view = toHtml(content, { maxBytes: MAX_CARD_BYTES - 4_000 });
+	// The stylesheet is most of the chrome; the header and footer take about
+	// 1 kB more, and the view gets the rest.
+	const view = toHtml(content, {
+		maxBytes: MAX_CARD_BYTES - byteLength(STYLE) - 1_000,
+	});
 	if (!isRendered(view)) {
 		// A change too big to read in a thread is still a change worth
 		// announcing: the header says which file, the footer leads to it.
@@ -175,7 +213,7 @@ function cardDocument(args: {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(name)}</title>
 <style>
-${RENDER_CSS}
+${STYLE}
 ${CARD_CSS}
 </style>
 </head>

@@ -687,7 +687,7 @@ export function DirectoryFileList({
 						event.preventDefault();
 						restoreFocus();
 					}}
-					className="gap-0 overflow-hidden rounded-[12px] border-border bg-panel p-0 text-fg shadow-lg sm:max-w-[480px]"
+					className="gap-0 overflow-hidden rounded-xl border-border bg-panel p-0 text-fg shadow-xl sm:max-w-[480px]"
 				>
 					<DialogHeader className="gap-1.5 px-6 pt-6 pb-5 text-left">
 						<DialogTitle>

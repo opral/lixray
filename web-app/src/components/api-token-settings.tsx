@@ -98,7 +98,7 @@ export function AccountApiTokenPanel({ api }: { api: AccountApiTokenApi }) {
 		<>
 			<section
 				aria-label="API tokens"
-				className="mb-3.5 rounded-[12px] border border-border bg-panel px-[18px] py-4"
+				className="mb-3.5 rounded-xl border border-border bg-panel px-[18px] py-4"
 			>
 				<div className="mb-3 flex flex-wrap items-center gap-3">
 					<div className="min-w-0 flex-1 basis-[220px]">

@@ -14,7 +14,7 @@ export function LegalPage({ slug }: { slug: LegalSlug }) {
 
 			<main className="mx-auto w-full max-w-[720px] flex-1 px-5 pt-10 pb-[120px] sm:px-14">
 				<article
-					className="docs-prose"
+					className="atelier-document docs-article"
 					// The HTML is rendered from repo-owned markdown with all raw content
 					// escaped by renderDocsMarkdown; no user input reaches this string.
 					dangerouslySetInnerHTML={{ __html: html }}

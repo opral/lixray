@@ -1630,7 +1630,7 @@ function useImportDrop({
 
 function DropImportOverlay() {
 	return (
-		<div className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-[12px] border-2 border-dashed border-accent bg-panel/85 text-sm font-semibold text-fg-muted">
+		<div className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-xl border-2 border-dashed border-accent bg-panel/85 text-sm font-semibold text-fg-muted">
 			Drop files and folders to import
 		</div>
 	);
@@ -1836,7 +1836,7 @@ function RenameEntryDialog({
 			<div
 				role="dialog"
 				aria-label={`Rename ${target.name}`}
-				className="w-[340px] rounded-[12px] border border-border bg-panel p-4 shadow-[0_18px_44px_color-mix(in_srgb,var(--at-overlay)_24%,transparent)]"
+				className="w-[340px] rounded-xl border border-border bg-panel p-4 shadow-[0_18px_44px_color-mix(in_srgb,var(--at-overlay)_24%,transparent)]"
 				onClick={(event) => event.stopPropagation()}
 			>
 				<h2 className="m-0 text-[13.5px] font-bold text-fg">
@@ -1983,7 +1983,7 @@ function GettingStarted({
 			>
 				<div className="flex w-[min(560px,100%)] flex-col items-center">
 					<GettingStartedIllustration />
-					<h1 className="m-0 text-[24px]/8 font-bold tracking-[-0.02em]">
+					<h1 className="m-0 text-2xl font-bold tracking-[-0.02em]">
 						Welcome to your Lix repository
 					</h1>
 					<p className="mt-3 mb-0 max-w-[470px] text-[14.5px] leading-[1.6] text-fg-muted">
@@ -2051,7 +2051,7 @@ function AgentConnectionDialog({
 	const connectionStatus = useMcpConnectionStatus(open, hasAgentConnected);
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-h-[calc(100vh-2rem)] w-[min(520px,calc(100vw-2rem))] max-w-none gap-0 overflow-y-auto rounded-[16px] border-border bg-panel p-0 text-fg shadow-[0_30px_90px_color-mix(in_srgb,var(--at-overlay)_30%,transparent)] sm:max-w-none">
+			<DialogContent className="max-h-[calc(100vh-2rem)] w-[min(520px,calc(100vw-2rem))] max-w-none gap-0 overflow-y-auto rounded-2xl border-border bg-panel p-0 text-fg shadow-[0_30px_90px_color-mix(in_srgb,var(--at-overlay)_30%,transparent)] sm:max-w-none">
 				<DialogHeader className="gap-1.5 px-8 pt-8 pr-14 text-left">
 					<DialogTitle className="text-lg leading-tight font-bold tracking-[-0.01em]">
 						Connect an agent
@@ -2201,7 +2201,7 @@ function AgentConnectionDialog({
 									</span>
 								</div>
 								<div className="mt-4 flex items-center gap-3">
-									<span className="text-[16px] leading-none text-overlay-fg-subtle">
+									<span className="text-base leading-none text-overlay-fg-subtle">
 										＋
 									</span>
 									<span className="flex-1" />

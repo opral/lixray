@@ -140,7 +140,7 @@ export function RepositoryAccessScreen({
 					<p className="mb-3 font-mono text-xs text-fg-subtle">
 						{failed ? "CONNECTION ERROR" : "404"}
 					</p>
-					<h1 className="mb-3 min-h-16 text-[24px] font-semibold leading-tight sm:min-h-8">
+					<h1 className="mb-3 min-h-16 text-2xl font-semibold leading-tight sm:min-h-8">
 						{failed
 							? `Unable to check ${resource} access`
 							: `This ${resource} isn't available`}

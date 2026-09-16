@@ -136,7 +136,7 @@ export function RepositoryShareDialog({
 					aria-label={`Share ${documentName}`}
 					onOpenAutoFocus={(event) => event.preventDefault()}
 					className={cn(
-						"z-50 grid w-[min(384px,calc(100vw-2rem))] gap-3.5 rounded-[12px] border border-border bg-panel p-[18px] text-fg shadow-[0_18px_50px_color-mix(in_srgb,var(--at-overlay)_18%,transparent),0_2px_8px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)] outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+						"z-50 grid w-[min(384px,calc(100vw-2rem))] gap-3.5 rounded-xl border border-border bg-panel p-[18px] text-fg shadow-[0_18px_50px_color-mix(in_srgb,var(--at-overlay)_18%,transparent),0_2px_8px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)] outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
 						className,
 					)}
 				>
