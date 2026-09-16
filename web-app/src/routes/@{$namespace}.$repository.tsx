@@ -737,7 +737,7 @@ function RepositoryRoutePage() {
 
 function RepositoryRouteStatus({ children }: { children: ReactNode }) {
 	return (
-		<main className="grid min-h-[70vh] place-content-center justify-items-center gap-3.5 p-8 text-center text-text-secondary">
+		<main className="grid min-h-[70vh] place-content-center justify-items-center gap-3.5 p-8 text-center text-fg-muted">
 			{children}
 		</main>
 	);

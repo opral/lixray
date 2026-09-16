@@ -321,7 +321,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 			{initialValidationFailed && (
 				<div
 					role="status"
-					className="border-b bg-muted p-3 text-center text-sm"
+					className="border-b bg-bg-subtle p-3 text-center text-sm"
 				>
 					We couldn’t check your login. Retrying automatically…
 				</div>

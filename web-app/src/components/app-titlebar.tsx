@@ -21,7 +21,7 @@ export function AppTitlebar({
 		<header
 			{...props}
 			className={cn(
-				"flex h-[46px] shrink-0 items-center border-b border-border-subtle bg-bg-app text-text-primary",
+				"flex h-[46px] shrink-0 items-center border-b border-border-subtle bg-bg text-fg",
 				className,
 			)}
 			data-app-titlebar
@@ -47,7 +47,7 @@ export function AppTitlebarTitle({
 		<span
 			{...props}
 			className={cn(
-				"pointer-events-none absolute inset-x-24 min-w-0 truncate text-center text-[12.5px] font-semibold text-text-primary",
+				"pointer-events-none absolute inset-x-24 min-w-0 truncate text-center text-[12.5px] font-semibold text-fg",
 				className,
 			)}
 			data-app-titlebar-title
@@ -65,7 +65,7 @@ export function AppTitlebarBrand({
 			{...props}
 			aria-label={props["aria-label"] ?? "LixRay home"}
 			className={cn(
-				"-ml-2.5 inline-flex shrink-0 items-center gap-2 text-sm font-bold tracking-[-0.01em] text-text-primary no-underline max-[560px]:-ml-1",
+				"-ml-2.5 inline-flex shrink-0 items-center gap-2 text-sm font-bold tracking-[-0.01em] text-fg no-underline max-[560px]:-ml-1",
 				className,
 			)}
 			href={href}

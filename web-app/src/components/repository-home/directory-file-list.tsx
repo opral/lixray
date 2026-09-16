@@ -400,7 +400,7 @@ export function DirectoryFileList({
 			{paths.length > 0 ? (
 				<Toolbar
 					aria-label="Selection actions"
-					className="absolute bottom-full @min-[640px]:left-[calc(-2.25rem-5px)] z-20 mb-3 flex max-w-full items-center divide-x divide-border-panel rounded-lg border border-border-panel bg-bg-panel text-text-secondary shadow-[0_2px_8px_rgba(0,0,0,0.08)] @max-[640px]:fixed @max-[640px]:bottom-6 @max-[640px]:left-1/2 @max-[640px]:mb-0 @max-[640px]:w-max @max-[640px]:max-w-[calc(100vw-24px)] @max-[640px]:-translate-x-1/2"
+					className="absolute bottom-full @min-[640px]:left-[calc(-2.25rem-5px)] z-20 mb-3 flex max-w-full items-center divide-x divide-border rounded-lg border border-border bg-panel text-fg-muted shadow-[0_2px_8px_color-mix(in_srgb,var(--atelier-overlay)_8%,transparent)] @max-[640px]:fixed @max-[640px]:bottom-6 @max-[640px]:left-1/2 @max-[640px]:mb-0 @max-[640px]:w-max @max-[640px]:max-w-[calc(100vw-24px)] @max-[640px]:-translate-x-1/2"
 				>
 					<div className="flex items-center gap-1 pl-1 pr-3">
 						<Checkbox
@@ -420,10 +420,10 @@ export function DirectoryFileList({
 									setSelection(new Set(entries.map((entry) => entry.path)));
 								}
 							}}
-							className="grid size-8 shrink-0 cursor-pointer place-items-center rounded outline-none data-[focus-visible]:ring-2 data-[focus-visible]:ring-ring-focus-visible data-[disabled]:opacity-50"
+							className="grid size-8 shrink-0 cursor-pointer place-items-center rounded outline-none data-[focus-visible]:ring-2 data-[focus-visible]:ring-ring data-[disabled]:opacity-50"
 						>
 							{({ isIndeterminate }) => (
-								<span className="grid size-4 place-items-center rounded border border-icon-brand bg-icon-brand text-white">
+								<span className="grid size-4 place-items-center rounded border border-link bg-link text-accent-on">
 									{isIndeterminate ? (
 										<Minus aria-hidden="true" className="size-3" />
 									) : (
@@ -433,7 +433,7 @@ export function DirectoryFileList({
 							)}
 						</Checkbox>
 						<span
-							className="whitespace-nowrap py-2 text-sm font-medium text-icon-brand"
+							className="whitespace-nowrap py-2 text-sm font-medium text-link"
 							aria-live="polite"
 						>
 							{paths.length} selected
@@ -447,7 +447,7 @@ export function DirectoryFileList({
 								setDestination(dirPath);
 								setDialog("move");
 							}}
-							className="flex h-9 items-center gap-2 px-3 text-sm outline-none hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring-focus-visible disabled:opacity-50"
+							className="flex h-9 items-center gap-2 px-3 text-sm outline-none hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50"
 						>
 							<FolderInput className="size-4" />
 							Move
@@ -458,7 +458,7 @@ export function DirectoryFileList({
 							<AriaButton
 								aria-label="More selection actions"
 								isDisabled={busy}
-								className="grid size-9 place-items-center outline-none hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring-focus-visible disabled:opacity-50"
+								className="grid size-9 place-items-center outline-none hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50"
 							>
 								<MoreHorizontal className="size-4" />
 							</AriaButton>
@@ -467,7 +467,7 @@ export function DirectoryFileList({
 							<DropdownMenu.Content
 								align="start"
 								sideOffset={6}
-								className="z-50 min-w-44 rounded-lg border border-border-panel bg-bg-panel p-1 text-sm text-text-secondary shadow-lg"
+								className="z-50 min-w-44 rounded-lg border border-border bg-panel p-1 text-sm text-fg-muted shadow-lg"
 							>
 								<DropdownMenu.Item
 									className="cursor-default rounded px-3 py-2 outline-none data-[highlighted]:bg-bg-hover"
@@ -512,7 +512,7 @@ export function DirectoryFileList({
 								setError(null);
 								setDialog("delete");
 							}}
-							className="grid size-9 place-items-center outline-none hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring-focus-visible disabled:opacity-50"
+							className="grid size-9 place-items-center outline-none hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50"
 						>
 							<Trash2 className="size-4" />
 						</AriaButton>
@@ -524,22 +524,20 @@ export function DirectoryFileList({
 							setSelection(new Set());
 							restoreFocus();
 						}}
-						className="grid size-9 place-items-center rounded-r-lg outline-none hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring-focus-visible disabled:opacity-50"
+						className="grid size-9 place-items-center rounded-r-lg outline-none hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50"
 					>
 						<X className="size-4" />
 					</AriaButton>
 				</Toolbar>
 			) : null}
 			{error && !dialog ? (
-				<p role="alert" className="px-3 text-sm text-error-700">
+				<p role="alert" className="px-3 text-sm text-danger-border">
 					{error}
 				</p>
 			) : null}
 			<div
 				role="status"
-				className={
-					busy || status ? "px-3 text-xs text-text-tertiary" : "sr-only"
-				}
+				className={busy || status ? "px-3 text-xs text-fg-subtle" : "sr-only"}
 			>
 				{busy ? "Working…" : status}
 			</div>
@@ -568,9 +566,9 @@ export function DirectoryFileList({
 					changedDirKinds,
 					reviewFocus,
 				]}
-				className="-ml-6 sm:-ml-9 flex min-h-24 flex-col gap-px rounded-lg outline-none data-[drop-target]:bg-bg-hover data-[drop-target]:ring-2 data-[drop-target]:ring-ring-focus-visible"
+				className="-ml-6 sm:-ml-9 flex min-h-24 flex-col gap-px rounded-lg outline-none data-[drop-target]:bg-bg-hover data-[drop-target]:ring-2 data-[drop-target]:ring-ring"
 				renderEmptyState={() => (
-					<div className="rounded-lg border border-dashed border-border-panel px-6 py-12 text-center text-sm text-text-tertiary">
+					<div className="rounded-lg border border-dashed border-border px-6 py-12 text-center text-sm text-fg-subtle">
 						{readOnly
 							? "No files yet."
 							: "This folder is empty. Create something with New, or drop files and folders here."}
@@ -584,14 +582,14 @@ export function DirectoryFileList({
 					const dimIndicator = entry.directory && changeKind === "modified";
 					const nameClass =
 						dimIndicator || !changeKind
-							? "text-text-primary"
+							? "text-fg"
 							: changeKind === "added"
-								? "text-[var(--color-text-diff-added)]"
+								? "text-diff-added"
 								: changeKind === "removed"
-									? "text-[var(--color-text-diff-removed)]"
+									? "text-diff-removed"
 									: changeKind === "modified"
-										? "text-[var(--color-icon-brand)]"
-										: "text-[var(--color-icon-diff-moved)]";
+										? "text-link"
+										: "text-diff-moved";
 					return (
 						<GridListItem
 							id={entry.path}
@@ -607,7 +605,7 @@ export function DirectoryFileList({
 									onContextMenu?.(entry, event);
 								}
 							}}
-							className={`group relative flex min-h-11 cursor-pointer select-none items-center gap-3 rounded-lg py-2 pl-9 sm:pl-12 pr-3 text-sm outline-none transition-opacity before:pointer-events-none before:absolute before:inset-y-0 before:left-6 sm:before:left-9 before:right-0 before:-z-10 before:rounded-lg isolate hover:before:bg-bg-hover data-[selected]:before:bg-bg-active data-[focus-visible]:before:ring-2 data-[focus-visible]:before:ring-inset data-[focus-visible]:before:ring-ring-focus-visible data-[drop-target]:before:bg-bg-active data-[drop-target]:before:ring-2 data-[drop-target]:before:ring-ring-focus-visible ${entry.hidden ? "opacity-[0.48] hover:opacity-[0.62]" : reviewFocus && !changeKind ? "opacity-[0.35] hover:opacity-100" : ""}`}
+							className={`group relative flex min-h-11 cursor-pointer select-none items-center gap-3 rounded-lg py-2 pl-9 sm:pl-12 pr-3 text-sm outline-none transition-opacity before:pointer-events-none before:absolute before:inset-y-0 before:left-6 sm:before:left-9 before:right-0 before:-z-10 before:rounded-lg isolate hover:before:bg-bg-hover data-[selected]:before:bg-bg-active data-[focus-visible]:before:ring-2 data-[focus-visible]:before:ring-inset data-[focus-visible]:before:ring-ring data-[drop-target]:before:bg-bg-active data-[drop-target]:before:ring-2 data-[drop-target]:before:ring-ring ${entry.hidden ? "opacity-[0.48] hover:opacity-[0.62]" : reviewFocus && !changeKind ? "opacity-[0.35] hover:opacity-100" : ""}`}
 						>
 							{({ state }) => (
 								<>
@@ -643,7 +641,7 @@ export function DirectoryFileList({
 											className={`shrink-0 ${dimIndicator ? "opacity-75" : ""}`}
 										/>
 									) : (
-										<span className="shrink-0 text-xs text-text-quaternary">
+										<span className="shrink-0 text-xs text-fg-faint">
 											{entry.meta}
 										</span>
 									)}
@@ -651,7 +649,7 @@ export function DirectoryFileList({
 										<AriaButton
 											slot="drag"
 											aria-label={`Drag ${entry.name}`}
-											className="grid size-6 shrink-0 cursor-grab place-items-center rounded text-text-quaternary opacity-0 outline-none group-hover:opacity-100 group-data-[focus-visible]:opacity-100 group-data-[focus-visible-within]:opacity-100 data-[focus-visible]:opacity-100 focus-visible:ring-2"
+											className="grid size-6 shrink-0 cursor-grab place-items-center rounded text-fg-faint opacity-0 outline-none group-hover:opacity-100 group-data-[focus-visible]:opacity-100 group-data-[focus-visible-within]:opacity-100 data-[focus-visible]:opacity-100 focus-visible:ring-2"
 										>
 											<GripVertical className="size-3.5" />
 										</AriaButton>
@@ -689,7 +687,7 @@ export function DirectoryFileList({
 						event.preventDefault();
 						restoreFocus();
 					}}
-					className="gap-0 overflow-hidden rounded-xl border-border-panel bg-bg-panel p-0 text-text-primary shadow-xl sm:max-w-[480px]"
+					className="gap-0 overflow-hidden rounded-xl border-border bg-panel p-0 text-fg shadow-xl sm:max-w-[480px]"
 				>
 					<DialogHeader className="gap-1.5 px-6 pt-6 pb-5 text-left">
 						<DialogTitle>
@@ -712,11 +710,11 @@ export function DirectoryFileList({
 						/>
 					) : null}
 					{error ? (
-						<p role="alert" className="px-6 pb-4 text-sm text-error-700">
+						<p role="alert" className="px-6 pb-4 text-sm text-danger-border">
 							{error}
 						</p>
 					) : null}
-					<div className="flex justify-end gap-2 border-t border-border-panel px-6 py-4">
+					<div className="flex justify-end gap-2 border-t border-border px-6 py-4">
 						<Button
 							variant="outline"
 							disabled={busy}
@@ -794,14 +792,14 @@ function MoveFolderBrowser({
 						{index > 0 ? (
 							<ChevronRight
 								aria-hidden="true"
-								className="size-3.5 text-text-tertiary"
+								className="size-3.5 text-fg-subtle"
 							/>
 						) : null}
 						<AriaButton
 							isDisabled={busy}
 							aria-current={crumb.path === destination ? "location" : undefined}
 							onPress={() => onNavigate(crumb.path)}
-							className="flex max-w-56 items-center gap-2 rounded-md px-2 py-1.5 text-text-secondary outline-none hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-ring-focus-visible aria-[current=location]:font-medium aria-[current=location]:text-text-primary disabled:opacity-50"
+							className="flex max-w-56 items-center gap-2 rounded-md px-2 py-1.5 text-fg-muted outline-none hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-ring aria-[current=location]:font-medium aria-[current=location]:text-fg disabled:opacity-50"
 						>
 							{index === 0 ? (
 								<House aria-hidden="true" className="size-3.5" />
@@ -817,20 +815,20 @@ function MoveFolderBrowser({
 				selectionMode="none"
 				disabledKeys={busy ? folders.map((dir) => dir.path) : []}
 				onAction={(key) => onNavigate(String(key))}
-				className="h-52 overflow-y-auto rounded-lg border border-border-panel p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible"
+				className="h-52 overflow-y-auto rounded-lg border border-border p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				renderEmptyState={() => (
 					<div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
 						<FolderOpen
 							aria-hidden="true"
-							className="mb-1 size-7 text-text-tertiary"
+							className="mb-1 size-7 text-fg-subtle"
 							strokeWidth={1.5}
 						/>
-						<p className="text-sm font-medium text-text-secondary">
+						<p className="text-sm font-medium text-fg-muted">
 							{hasAlternative
 								? "No folders inside"
 								: "No other folders available"}
 						</p>
-						<p className="max-w-72 text-xs leading-relaxed text-text-tertiary">
+						<p className="max-w-72 text-xs leading-relaxed text-fg-subtle">
 							{destination !== currentDirectory
 								? "You can move your items here."
 								: hasAlternative
@@ -844,18 +842,18 @@ function MoveFolderBrowser({
 					<GridListItem
 						id={folder.path}
 						textValue={folder.name}
-						className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-sm outline-none hover:bg-bg-hover data-[focus-visible]:bg-bg-hover data-[focus-visible]:ring-2 data-[focus-visible]:ring-inset data-[focus-visible]:ring-ring-focus-visible data-[disabled]:opacity-50"
+						className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-sm outline-none hover:bg-bg-hover data-[focus-visible]:bg-bg-hover data-[focus-visible]:ring-2 data-[focus-visible]:ring-inset data-[focus-visible]:ring-ring data-[disabled]:opacity-50"
 					>
 						<img src="/icon-sq-folder.svg" alt="" className="size-5 shrink-0" />
 						<span className="min-w-0 flex-1 truncate">{folder.name}</span>
 						<ChevronRight
 							aria-hidden="true"
-							className="size-4 shrink-0 text-text-tertiary"
+							className="size-4 shrink-0 text-fg-subtle"
 						/>
 					</GridListItem>
 				)}
 			</GridList>
-			<p aria-live="polite" className="mt-3 text-xs text-text-tertiary">
+			<p aria-live="polite" className="mt-3 text-xs text-fg-subtle">
 				{destination === currentDirectory
 					? "These items are already in this folder."
 					: `Move to ${segments.at(-1) ?? "Home"}`}
@@ -897,11 +895,11 @@ function FileSelectionCheckbox({
 				else state.selectionManager.toggleSelection(path);
 				shift.current = false;
 			}}
-			className={`absolute left-0 grid size-8 cursor-pointer place-items-center rounded outline-none transition-opacity data-[focus-visible]:ring-2 data-[focus-visible]:ring-ring-focus-visible ${selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-data-[focus-visible]:opacity-100 group-data-[focus-visible-within]:opacity-100 data-[focus-visible]:opacity-100 [@media(hover:none)]:opacity-100"}`}
+			className={`absolute left-0 grid size-8 cursor-pointer place-items-center rounded outline-none transition-opacity data-[focus-visible]:ring-2 data-[focus-visible]:ring-ring ${selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-data-[focus-visible]:opacity-100 group-data-[focus-visible-within]:opacity-100 data-[focus-visible]:opacity-100 [@media(hover:none)]:opacity-100"}`}
 		>
 			{({ isSelected }) => (
 				<span
-					className={`grid size-4 place-items-center rounded border ${isSelected ? "border-icon-brand bg-icon-brand text-white" : "border-border-panel bg-bg-panel"}`}
+					className={`grid size-4 place-items-center rounded border ${isSelected ? "border-link bg-link text-accent-on" : "border-border bg-panel"}`}
 				>
 					{isSelected ? <Check className="size-3" /> : null}
 				</span>
@@ -939,7 +937,7 @@ export function NameEntryDialog({
 		>
 			<DialogContent
 				showCloseButton={!busy}
-				className="bg-bg-panel text-text-primary"
+				className="bg-panel text-fg"
 				onCloseAutoFocus={(event) => {
 					if (onRestoreFocus) {
 						event.preventDefault();
@@ -977,14 +975,14 @@ export function NameEntryDialog({
 							maxLength={255}
 							aria-invalid={!!error}
 							aria-describedby={error ? "entry-name-error" : undefined}
-							className="h-10 w-full rounded-lg border border-border-panel bg-bg-panel px-3 outline-none focus:ring-2 focus:ring-ring-focus-visible"
+							className="h-10 w-full rounded-lg border border-border bg-panel px-3 outline-none focus:ring-2 focus:ring-ring"
 						/>
 					</label>
 					{error ? (
 						<p
 							id="entry-name-error"
 							role="alert"
-							className="text-sm text-error-700"
+							className="text-sm text-danger-border"
 						>
 							{error}
 						</p>

@@ -568,7 +568,7 @@ export function RepositoryAtelier({
 		<span
 			aria-disabled="true"
 			title="Nothing to share yet"
-			className="inline-flex h-7 cursor-default items-center rounded-[7px] px-2.5 text-xs font-semibold text-text-tertiary/70"
+			className="inline-flex h-7 cursor-default items-center rounded-[7px] px-2.5 text-xs font-semibold text-fg-subtle/70"
 		>
 			Share
 		</span>
@@ -1378,7 +1378,7 @@ export function RepositoryAtelier({
 	);
 	return (
 		<div
-			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
+			className="fixed inset-0 h-full w-full overflow-hidden bg-bg"
 			aria-busy={!instance && !error}
 		>
 			{shellProps ? (
@@ -1421,9 +1421,9 @@ export function RepositoryAtelier({
 				</RepositoryShellSkeleton>
 			) : null}
 			{error ? (
-				<main className="absolute inset-0 grid place-content-center bg-bg-app p-6 text-center text-text-secondary">
+				<main className="absolute inset-0 grid place-content-center bg-bg p-6 text-center text-fg-muted">
 					<div
-						className="grid justify-items-center gap-2 [&_span]:max-w-[640px] [&_span]:text-text-tertiary"
+						className="grid justify-items-center gap-2 [&_span]:max-w-[640px] [&_span]:text-fg-subtle"
 						role="alert"
 					>
 						<strong>Unable to open Atelier</strong>
@@ -1579,7 +1579,7 @@ function RepositoryShareControl({
 					type="button"
 					size="xs"
 					variant="ghost"
-					className="h-7 rounded-[7px] px-2.5 text-xs font-semibold text-text-secondary hover:bg-bg-hover-canvas hover:text-text-primary"
+					className="h-7 rounded-[7px] px-2.5 text-xs font-semibold text-fg-muted hover:bg-bg-hover-strong hover:text-fg"
 				>
 					Share
 				</Button>
@@ -1619,7 +1619,7 @@ function DelayedOpeningLabel() {
 
 const REPOSITORY_TOP_BAR_PROPS = {
 	"data-app-titlebar": true,
-	className: "border-b border-border-subtle bg-bg-app",
+	className: "border-b border-border-subtle bg-bg",
 } as const;
 
 function RepositoryNavbarBrand({
@@ -1650,7 +1650,7 @@ function RepositoryNavbarBrand({
 				// -ml-1.5 pulls the mark from the top bar's 14px content line to
 				// x=8 — the same x as the profile and home headers' mark. The
 				// sidebar's 14px icon column centers under the 24px mark.
-				className="-ml-1.5 inline-flex shrink-0 items-center rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+				className="-ml-1.5 inline-flex shrink-0 items-center rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 			>
 				<img className="size-6" src="/lixray-mark.svg" alt="" />
 			</a>
@@ -1684,7 +1684,7 @@ export function RepositoryOpeningSkeleton({
 }) {
 	return (
 		<div
-			className="fixed inset-0 h-full w-full overflow-hidden bg-bg-app"
+			className="fixed inset-0 h-full w-full overflow-hidden bg-bg"
 			aria-busy
 		>
 			<RepositoryShellSkeleton

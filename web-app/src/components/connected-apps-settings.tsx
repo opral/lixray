@@ -87,21 +87,21 @@ export function ConnectedAppsPanel({ api }: { api: ConnectedAppsApi }) {
 		<>
 			<section
 				aria-label="Connected apps"
-				className="mb-3.5 rounded-xl border border-border-panel bg-bg-panel px-[18px] py-4"
+				className="mb-3.5 rounded-xl border border-border bg-panel px-[18px] py-4"
 			>
 				<div className="mb-3">
 					<h2 className="m-0 text-[13.5px] font-bold">Connected apps</h2>
-					<p className="m-0 mt-0.5 text-xs text-text-tertiary">
+					<p className="m-0 mt-0.5 text-xs text-fg-subtle">
 						MCP clients you have allowed to act as you.
 					</p>
 				</div>
-				<p className="text-xs leading-relaxed text-text-tertiary">
+				<p className="text-xs leading-relaxed text-fg-subtle">
 					Each app can read and write every repository your account can.
 					Disconnecting ends its access; a token it already holds expires within
 					the hour.
 				</p>
 				{loading ? (
-					<p role="status" className="mt-4 text-sm text-text-tertiary">
+					<p role="status" className="mt-4 text-sm text-fg-subtle">
 						Loading connected apps…
 					</p>
 				) : apps.length ? (
@@ -118,12 +118,12 @@ export function ConnectedAppsPanel({ api }: { api: ConnectedAppsApi }) {
 											{app.name}
 										</span>
 										{app.uri ? (
-											<span className="truncate text-xs text-text-tertiary">
+											<span className="truncate text-xs text-fg-subtle">
 												{app.uri}
 											</span>
 										) : null}
 									</div>
-									<p className="m-0 mt-1 text-xs leading-relaxed text-text-tertiary">
+									<p className="m-0 mt-1 text-xs leading-relaxed text-fg-subtle">
 										Connected{" "}
 										<time
 											dateTime={app.grantedAt}
@@ -156,7 +156,7 @@ export function ConnectedAppsPanel({ api }: { api: ConnectedAppsApi }) {
 								<Button
 									variant="ghost"
 									size="sm"
-									className="text-xs text-text-tertiary hover:text-error-700"
+									className="text-xs text-fg-subtle hover:text-danger-border"
 									aria-label={`Disconnect ${app.name}`}
 									disabled={busy}
 									onClick={() => setRevoking(app)}
@@ -168,13 +168,13 @@ export function ConnectedAppsPanel({ api }: { api: ConnectedAppsApi }) {
 						))}
 					</ul>
 				) : !error ? (
-					<p className="mt-4 text-sm text-text-tertiary">
+					<p className="mt-4 text-sm text-fg-subtle">
 						No app is connected. Add LixRay as an MCP server in your client and
 						it will appear here after you allow it.
 					</p>
 				) : null}
 				{error ? (
-					<div role="alert" className="my-4 text-sm text-error-700">
+					<div role="alert" className="my-4 text-sm text-danger-border">
 						<p>{error}</p>
 						<Button
 							variant="outline"

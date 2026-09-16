@@ -873,6 +873,11 @@ export class LixService {
 				id: id.value,
 				path: path.value,
 				kind: kind.value,
+				...(fromPath?.kind === "text" &&
+				toPath?.kind === "text" &&
+				fromPath.value !== toPath.value
+					? { movedFrom: fromPath.value }
+					: {}),
 				...(before.kind === "blob"
 					? { before: base64ToBytes(before.base64) }
 					: {}),
@@ -881,6 +886,86 @@ export class LixService {
 					: {}),
 			};
 		});
+	}
+
+	/**
+	 * The commit a diff endpoint names. A checkpoint and a commit are ids on
+	 * the retained log; a branch is its head; "working" is the branch in
+	 * context as it stands; "latest_checkpoint" is the nearest checkpoint
+	 * behind that head. A ref that names nothing is refused here, before Lix
+	 * is asked to compare, so the error can say which end was wrong.
+	 */
+	async resolveDiffRef(contextToken: string, ref: DiffRef): Promise<string> {
+		const context = await this.readContext(contextToken);
+		if (ref === "working")
+			return this.commitId(context.lixId, context.branchId);
+		const query: { sql: string; params: WireValue[]; missing: string } =
+			ref === "latest_checkpoint"
+				? {
+						sql: "SELECT commit_id FROM lix_log() WHERE is_checkpoint ORDER BY position LIMIT 1",
+						params: [],
+						missing:
+							"The branch in context has no checkpoint yet; compare against a commit_id or create_checkpoint first.",
+					}
+				: "checkpoint_id" in ref
+					? {
+							sql: "SELECT id FROM lix_commit WHERE id = $1 AND is_checkpoint LIMIT 1",
+							params: [{ kind: "text", value: ref.checkpoint_id }],
+							missing: `No checkpoint ${ref.checkpoint_id}. create_checkpoint returns a usable id; lix_log() lists the branch's checkpoints.`,
+						}
+					: "commit_id" in ref
+						? {
+								sql: "SELECT id FROM lix_commit WHERE id = $1 LIMIT 1",
+								params: [{ kind: "text", value: ref.commit_id }],
+								missing: `No commit ${ref.commit_id}. lix_log() lists retained commits on the branch in context.`,
+							}
+						: {
+								sql: "SELECT commit_id FROM lix_branch WHERE id = $1 LIMIT 1",
+								params: [{ kind: "text", value: ref.branch_id }],
+								missing: `No branch ${ref.branch_id}. active_branch_id and lix_branch name the branches.`,
+							};
+		const response = await this.client.execute(
+			context.lixId,
+			context.branchId,
+			{ sql: query.sql, params: query.params },
+		);
+		const value = response.rows[0]?.[0];
+		if (!value || value.kind !== "text")
+			throw createLixError("not_found", query.missing, {
+				hint: 'Each of before and after is one of { checkpoint_id }, { commit_id }, { branch_id }, "working" or "latest_checkpoint".',
+			});
+		return value.value;
+	}
+
+	/**
+	 * Where a change leads: the file for one that still exists at the span's
+	 * end, the repository for one that does not. Built from the diff's own
+	 * ids, so no lookup can fail on a file that has since gone.
+	 */
+	async changeUrls(
+		contextToken: string,
+		changes: readonly FileChange[],
+		origin = "https://lixray.com",
+	): Promise<{ repository: string; files: string[] }> {
+		const context = await this.readContext(contextToken);
+		const [summary, defaultId] = await Promise.all([
+			this.resolveLixSummary(context.lixId),
+			this.client.defaultBranchId(context.lixId),
+		]);
+		const branch = { id: context.branchId, defaultId };
+		const repository = canonicalEntityUrl(summary, branch, origin);
+		return {
+			repository,
+			files: changes.map((change) =>
+				change.kind === "removed"
+					? repository
+					: canonicalEntityUrl(summary, branch, origin, {
+							kind: "file",
+							id: change.id,
+							path: change.path,
+						}),
+			),
+		};
 	}
 
 	/** The target paths that a diff between two commits touched. */
@@ -1280,11 +1365,22 @@ const EMPTY_RESPONSE: StatementResponse = {
 	notices: [],
 };
 
+/** One end of a diff, as the `diff` tool takes it. */
+export type DiffRef =
+	| { checkpoint_id: string }
+	| { commit_id: string }
+	| { branch_id: string }
+	| "working"
+	| "latest_checkpoint";
+
 /** One file's change between two commits, in `lix_diff`'s words. */
 export type FileChange = {
 	id: string;
+	/** Where the file is at the span's end; where it was, when removed. */
 	path: string;
 	kind: "added" | "modified" | "removed";
+	/** The path at the span's start, when the file moved between the two. */
+	movedFrom?: string;
 	/** Absent when the file did not exist at the span's start. */
 	before?: Uint8Array;
 	/** Absent when the file does not exist at the span's end. */

@@ -1017,6 +1017,131 @@ void test("a change row Lix cannot vouch for is refused, not rendered", async ()
 	);
 });
 
+void test("a file whose path changed across the span is a move", async () => {
+	class RenamedRuntime extends FakeRuntime {
+		override async execute(
+			lixId: string,
+			branchId: string,
+			request: ExecuteRequest,
+		) {
+			const result = await super.execute(lixId, branchId, request);
+			if (request.sql.startsWith("SELECT id, diff_type")) {
+				const text = (value: string) => ({ kind: "text" as const, value });
+				const blob = (value: string) => ({
+					kind: "blob" as const,
+					base64: Buffer.from(value, "utf8").toString("base64"),
+				});
+				result.rows = [
+					[
+						text("00000000-0000-4000-8000-000000000000"),
+						text("modified"),
+						text("/old/notes.md"),
+						text("/notes.md"),
+						blob("# Notes\n"),
+						blob("# Notes\n"),
+					],
+				];
+			}
+			return result;
+		}
+	}
+	const service = new LixService(new RenamedRuntime());
+	const opened = await service.openLix("@acme/company");
+	const changes = await service.fileChanges(opened.context, {
+		before: "commit-0",
+		after: "commit-1",
+	});
+	assert.equal(changes.length, 1);
+	assert.equal(changes[0]!.path, "/notes.md");
+	assert.equal(changes[0]!.movedFrom, "/old/notes.md");
+	assert.equal(changes[0]!.kind, "modified");
+	// A moved file links where it is now; a removed one links the repository.
+	const urls = await service.changeUrls(opened.context, [
+		changes[0]!,
+		{
+			id: "00000000-0000-4000-8000-000000000001",
+			path: "/gone.md",
+			kind: "removed",
+		},
+	]);
+	assert.equal(urls.repository, "https://lixray.com/@acme/company");
+	assert.match(
+		urls.files[0]!,
+		/^https:\/\/lixray\.com\/@acme\/company\/file\/.*\/notes\.md$/,
+	);
+	assert.equal(urls.files[1], urls.repository);
+});
+
+void test("a diff ref resolves to a commit, or is refused with the reason", async () => {
+	class RefRuntime extends FakeRuntime {
+		override async execute(
+			lixId: string,
+			branchId: string,
+			request: ExecuteRequest,
+		) {
+			const text = (value: string) => ({ kind: "text" as const, value });
+			const answer = (column: string, values: string[]) => ({
+				columns: [column],
+				rows: values.map((value) => [text(value)]),
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			});
+			const id = request.params?.[0];
+			const given = id?.kind === "text" ? id.value : "";
+			if (
+				request.sql.startsWith(
+					"SELECT commit_id FROM lix_log() WHERE is_checkpoint",
+				)
+			)
+				return answer("commit_id", this.checkpoints.slice(0, 1));
+			if (
+				request.sql ===
+				"SELECT id FROM lix_commit WHERE id = $1 AND is_checkpoint LIMIT 1"
+			)
+				return answer("id", this.checkpoints.includes(given) ? [given] : []);
+			if (request.sql === "SELECT id FROM lix_commit WHERE id = $1 LIMIT 1")
+				return answer("id", given.startsWith("commit-") ? [given] : []);
+			if (
+				request.sql === "SELECT commit_id FROM lix_branch WHERE id = $1 LIMIT 1"
+			)
+				return answer("commit_id", given === "draft" ? ["commit-7"] : []);
+			return super.execute(lixId, branchId, request);
+		}
+		checkpoints = ["commit-3"];
+	}
+	const runtime = new RefRuntime();
+	const service = new LixService(runtime);
+	const opened = await service.openLix("@acme/company");
+	const resolve = (ref: Parameters<LixService["resolveDiffRef"]>[1]) =>
+		service.resolveDiffRef(opened.context, ref);
+	assert.equal(await resolve("working"), "commit-0");
+	assert.equal(await resolve("latest_checkpoint"), "commit-3");
+	assert.equal(await resolve({ checkpoint_id: "commit-3" }), "commit-3");
+	assert.equal(await resolve({ commit_id: "commit-9" }), "commit-9");
+	assert.equal(await resolve({ branch_id: "draft" }), "commit-7");
+	const refused = async (
+		ref: Parameters<LixService["resolveDiffRef"]>[1],
+		message: RegExp,
+	) =>
+		assert.rejects(resolve(ref), (error: unknown) => {
+			const failure = error as {
+				code?: unknown;
+				message: string;
+				hint?: string;
+			};
+			assert.equal(failure.code, "not_found");
+			assert.match(failure.message, message);
+			assert.match(failure.hint ?? "", /latest_checkpoint/);
+			return true;
+		});
+	await refused({ checkpoint_id: "commit-9" }, /No checkpoint commit-9/);
+	await refused({ commit_id: "nope" }, /No commit nope/);
+	await refused({ branch_id: "main" }, /No branch main/);
+	runtime.checkpoints = [];
+	await refused("latest_checkpoint", /no checkpoint yet/);
+});
+
 void test("readFiles takes bytes and the read commit through the same transaction", async () => {
 	class SnapshotRuntime extends FakeRuntime {
 		inside = false;

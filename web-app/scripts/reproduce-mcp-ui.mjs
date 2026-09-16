@@ -9,10 +9,7 @@ import { Client as V1Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport as V1Transport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { WorkerLixRuntimeClient } from "../src/mcp/runtime-client.ts";
 import { LixService } from "../src/mcp/lix-service.ts";
-import {
-	WRITE_PREVIEW_META,
-	WRITE_PREVIEW_URI,
-} from "../src/mcp/write-preview.ts";
+import { DIFF_CARD_META, DIFF_CARD_URI } from "../src/mcp/diff-card-app.ts";
 import { handleMcpTransport, MCP_PROTOCOL_VERSION } from "../src/mcp/server.ts";
 const out = new URL("../../artifacts/mcp-ui-fix/", import.meta.url);
 await mkdir(out, { recursive: true });
@@ -103,9 +100,9 @@ for (const version of ["v2", "v1"]) {
 		);
 		assert.equal(written.isError, void 0, JSON.stringify(written));
 		assert.ok(written.content.every((x) => x.type !== "resource"));
-		const cards = written._meta[WRITE_PREVIEW_META].cards;
-		assert.equal(cards.length, 1);
-		const html = cards[0].html;
+		const card = written._meta[DIFF_CARD_META];
+		assert.equal(card.files.length, 1);
+		const html = card.files[0].html;
 		for (const pattern of [
 			/<h1\b/,
 			/<h2\b/,
@@ -138,7 +135,7 @@ for (const version of ["v2", "v1"]) {
 		);
 		let resourceResult;
 		try {
-			const resource = await client.readResource({ uri: WRITE_PREVIEW_URI });
+			const resource = await client.readResource({ uri: DIFF_CARD_URI });
 			assert.equal(resource.contents[0].mimeType, "text/html;profile=mcp-app");
 			await writeFile(
 				new URL(`${version}-app.html`, out),

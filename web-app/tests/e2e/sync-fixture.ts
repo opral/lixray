@@ -501,7 +501,9 @@ export async function createSyncFixture({
 				).toHaveCount(localCount + 1, { timeout: remainingCheckpointTime });
 				if (selectFiles) {
 					// A partial checkpoint leaves the remaining files in review.
-					await expect(checkpointButton).toBeVisible();
+					await expect(
+						page.getByRole("button", { name: "Checkpointed", exact: true }),
+					).toBeDisabled();
 					await page.getByRole("button", { name: "Exit", exact: true }).click();
 				} else {
 					await expect(
@@ -776,6 +778,12 @@ export async function createSyncFixture({
 			}
 			await newButton.or(gettingStarted).first().waitFor({ timeout: 120_000 });
 		};
+		/**
+		 * Home's New menu is Atelier's, so its rows are named the way Atelier
+		 * names them. The getting-started buttons are home's own.
+		 */
+		const newMenuRow = (extension: "md" | "csv" | "excalidraw") =>
+			`[data-attr="file-new-${extension === "md" ? "markdown" : extension}"]`;
 		const createFileFromHome = async (
 			page: Page,
 			extension: "md" | "csv" | "excalidraw",
@@ -786,7 +794,7 @@ export async function createSyncFixture({
 				await page.getByTestId(`home-create-file-${extension}`).click();
 			} else {
 				await page.getByTestId("home-new-button").click();
-				await page.getByTestId(`home-create-file-${extension}`).click();
+				await page.locator(newMenuRow(extension)).click();
 			}
 			await expect(page).not.toHaveURL(homeUrl, {
 				timeout: repositoryOperationTimeout,
@@ -1027,7 +1035,7 @@ export async function createSyncFixture({
 				.toEqual(await homeFileIds(right));
 			const fileIdsBeforeCreatedFile = await homeFileIds(left);
 			await right.getByTestId("home-new-button").click();
-			await right.getByTestId("home-create-file-md").click();
+			await right.locator(newMenuRow("md")).click();
 			const rightEditor = right.locator(
 				'.ProseMirror[contenteditable="true"]:visible',
 			);

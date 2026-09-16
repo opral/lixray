@@ -28,7 +28,7 @@ function DebugPage() {
 	useEffect(() => setReady(true), []);
 	const [file, setFile] = useState<File | null>(null);
 	return (
-		<div className="ph-no-capture flex h-dvh flex-col overflow-hidden bg-bg-app text-text-primary">
+		<div className="ph-no-capture flex h-dvh flex-col overflow-hidden bg-bg text-fg">
 			{file ? (
 				<SnapshotSession file={file} onClose={() => setFile(null)} />
 			) : (
@@ -40,14 +40,14 @@ function DebugPage() {
 					<main className="flex w-full max-w-2xl flex-col items-start gap-4 overflow-auto px-[18px] py-8 max-[560px]:px-3">
 						<Link
 							to="/home"
-							className="rounded text-sm text-text-secondary hover:text-text-primary focus-visible:outline-2 focus-visible:outline-ring-focus-visible"
+							className="rounded text-sm text-fg-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-ring"
 						>
 							← Repositories
 						</Link>
 						<h1 className="text-xl font-semibold">
 							Open lix repository from snapshot
 						</h1>
-						<p className="text-sm text-text-secondary">
+						<p className="text-sm text-fg-muted">
 							Opens in memory. Nothing is uploaded or saved. Closing or
 							refreshing discards the session.
 						</p>
@@ -120,7 +120,7 @@ function SnapshotSession({
 		<Link
 			to="/home"
 			aria-label="LixRay home"
-			className="-ml-1.5 inline-flex shrink-0 items-center rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+			className="-ml-1.5 inline-flex shrink-0 items-center rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 		>
 			<img className="size-6" src="/lixray-mark.svg" alt="" />
 		</Link>
@@ -135,7 +135,7 @@ function SnapshotSession({
 			{lix ? (
 				<div className="relative flex min-h-0 flex-1 flex-col">
 					<div
-						className="shrink-0 truncate px-3.5 py-1 text-xs text-text-tertiary"
+						className="shrink-0 truncate px-3.5 py-1 text-xs text-fg-subtle"
 						title={file.name}
 					>
 						{file.name} · <span>In memory · discarded on close or refresh</span>
@@ -144,7 +144,7 @@ function SnapshotSession({
 					<div className="min-h-0 flex-1">
 						<Suspense
 							fallback={
-								<p role="status" className="p-6 text-sm text-text-secondary">
+								<p role="status" className="p-6 text-sm text-fg-muted">
 									Opening repository UI…
 								</p>
 							}
@@ -153,7 +153,7 @@ function SnapshotSession({
 								lix={lix}
 								topBarProps={{
 									"data-app-titlebar": true,
-									className: "border-b border-border-subtle bg-bg-app",
+									className: "border-b border-border-subtle bg-bg",
 								}}
 								slots={{ navbarBrand, navbarEnd: closeButton }}
 							/>
@@ -170,7 +170,7 @@ function SnapshotSession({
 						{error ? (
 							<div role="alert" className="max-w-xl break-words">
 								<h1 className="font-semibold">Unable to open snapshot</h1>
-								<p className="mt-2 text-sm text-text-secondary">{error}</p>
+								<p className="mt-2 text-sm text-fg-muted">{error}</p>
 								<Button className="mt-4" variant="secondary" onClick={onClose}>
 									Choose another snapshot
 								</Button>

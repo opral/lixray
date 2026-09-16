@@ -74,7 +74,7 @@ export function CreateOrganizationDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-			<DialogContent className="border-border-panel bg-bg-panel shadow-lg">
+			<DialogContent className="border-border bg-panel shadow-lg">
 				<form className="grid gap-5" onSubmit={(event) => void submit(event)}>
 					<DialogHeader>
 						<DialogTitle>Create an organization</DialogTitle>
@@ -86,11 +86,11 @@ export function CreateOrganizationDialog({
 
 					<div className="grid gap-2">
 						<label className="grid gap-2">
-							<span className="text-[13px] font-semibold text-text-secondary">
+							<span className="text-[13px] font-semibold text-fg-muted">
 								Organization name
 							</span>
 							<input
-								className="h-10 w-full rounded-lg border border-border-panel bg-bg-panel px-[11px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1"
+								className="h-10 w-full rounded-lg border border-border bg-panel px-[11px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
 								autoFocus
 								maxLength={80}
 								value={name}
@@ -98,7 +98,7 @@ export function CreateOrganizationDialog({
 							/>
 						</label>
 						<p
-							className="m-0 min-h-[18px] text-[12.5px] text-text-tertiary"
+							className="m-0 min-h-[18px] text-[12.5px] text-fg-subtle"
 							data-testid="organization-handle-preview"
 						>
 							{handlePreview ? (
@@ -112,7 +112,7 @@ export function CreateOrganizationDialog({
 						</p>
 						{error ? (
 							<p
-								className="m-0 rounded-lg bg-error-50 px-3 py-2.5 text-[13px] text-error-700"
+								className="m-0 rounded-lg bg-danger-subtle px-3 py-2.5 text-[13px] text-danger-border"
 								role="alert"
 							>
 								{error}

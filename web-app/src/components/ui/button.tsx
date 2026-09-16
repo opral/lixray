@@ -5,23 +5,20 @@ import { Slot } from "radix-ui";
 import { cn } from "~/lib/utils";
 
 const buttonVariants = cva(
-	"inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+	"inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-danger aria-invalid:ring-danger/20 dark:aria-invalid:ring-danger/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
 	{
 		variants: {
 			variant: {
-				default:
-					"bg-bg-action-primary text-text-on-action-primary hover:bg-bg-action-primary-hover",
+				default: "bg-accent text-accent-on hover:bg-accent-hover",
 				featured:
-					"bg-[linear-gradient(180deg,var(--color-bg-action-primary-start)_0%,var(--color-bg-action-primary-end)_100%)] text-text-on-action-primary shadow-[var(--shadow-action-primary)] hover:brightness-105 active:translate-y-px",
+					"bg-[linear-gradient(180deg,var(--atelier-link)_0%,var(--atelier-link)_100%)] text-accent-on shadow-shadow-accent hover:brightness-105 active:translate-y-px",
 				destructive:
-					"bg-error-700 text-text-on-action-primary hover:bg-error-800 focus-visible:ring-error-700/20 dark:focus-visible:ring-error-700/40",
+					"bg-danger-border text-accent-on hover:bg-diff-removed focus-visible:ring-danger-border/20 dark:focus-visible:ring-danger-border/40",
 				outline:
-					"border border-border-action-secondary bg-bg-panel font-semibold text-text-secondary shadow-action-secondary hover:bg-bg-hover hover:text-text-primary dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
-				secondary:
-					"bg-bg-action-secondary text-text-on-action-secondary hover:bg-bg-action-secondary-hover",
-				ghost:
-					"hover:bg-bg-hover hover:text-text-primary dark:hover:bg-bg-hover/50",
-				link: "text-text-link underline-offset-4 hover:text-text-link-hover hover:underline",
+					"border border-border-strong bg-panel font-semibold text-fg-muted shadow-sm hover:bg-bg-hover hover:text-fg dark:border-border dark:bg-bg-subtle/30 dark:hover:bg-bg-subtle/50",
+				secondary: "bg-panel text-fg-muted hover:bg-bg-hover",
+				ghost: "hover:bg-bg-hover hover:text-fg dark:hover:bg-bg-hover/50",
+				link: "text-link underline-offset-4 hover:text-link-hover hover:underline",
 			},
 			size: {
 				default: "h-9 px-4 py-2 has-[>svg]:px-3",

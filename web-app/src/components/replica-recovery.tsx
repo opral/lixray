@@ -58,7 +58,7 @@ export function ReplicaRecovery({ lix }: { lix: Lix }) {
 	return (
 		<aside
 			aria-label="Saved device changes"
-			className="absolute bottom-4 left-4 z-50 max-h-[70vh] w-[min(26rem,calc(100%_-_2rem))] overflow-auto rounded-lg border border-border-subtle bg-bg-app p-4 text-sm text-text-secondary shadow-lg"
+			className="absolute bottom-4 left-4 z-50 max-h-[70vh] w-[min(26rem,calc(100%_-_2rem))] overflow-auto rounded-lg border border-border-subtle bg-bg p-4 text-sm text-fg-muted shadow-lg"
 		>
 			<div className="flex items-center justify-between gap-4">
 				<strong>Saved device changes</strong>

@@ -35,11 +35,11 @@ export type RepositoryTeamApi = {
 };
 
 const AVATAR_TONES = [
-	"bg-amber-200 text-amber-900",
-	"bg-emerald-200 text-emerald-900",
-	"bg-violet-200 text-violet-900",
-	"bg-sky-200 text-sky-900",
-	"bg-rose-200 text-rose-900",
+	"bg-tag-yellow text-tag-yellow-fg",
+	"bg-tag-green text-tag-green-fg",
+	"bg-tag-purple text-tag-purple-fg",
+	"bg-tag-blue text-tag-blue-fg",
+	"bg-tag-pink text-tag-pink-fg",
 ] as const;
 
 function avatarTone(seed: string): string {
@@ -130,7 +130,7 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 	if (!teamApi) {
 		return (
 			<div
-				className="grid h-full w-full place-content-center bg-bg-panel p-6 text-center text-[13px] text-text-secondary"
+				className="grid h-full w-full place-content-center bg-panel p-6 text-center text-[13px] text-fg-muted"
 				data-testid="repository-people-view"
 			>
 				Sign in with edit access to see who's here.
@@ -191,14 +191,14 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 
 	return (
 		<div
-			className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
+			className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-panel font-sans text-fg"
 			data-testid="repository-people-view"
 		>
 			<div className="mx-auto flex w-[min(760px,calc(100%-48px))] flex-col pt-10 pb-10">
 				<div className="flex items-baseline gap-3 pb-5">
 					<h1 className="text-[22px] font-bold">People</h1>
 					{members ? (
-						<span className="text-[13px] text-text-tertiary">
+						<span className="text-[13px] text-fg-subtle">
 							{members.length} {members.length === 1 ? "member" : "members"} of{" "}
 							{namespaceHandle}
 						</span>
@@ -207,14 +207,14 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 				{error ? (
 					<p
 						role="alert"
-						className="mb-3 rounded-lg bg-error-700/10 px-3 py-2 text-[13px] text-error-700"
+						className="mb-3 rounded-lg bg-danger-border/10 px-3 py-2 text-[13px] text-danger-border"
 					>
 						{error}
 					</p>
 				) : null}
 				<div className="flex min-w-0 items-stretch gap-2">
 					<div
-						className="flex h-9 min-w-0 grow cursor-text select-all items-center overflow-hidden rounded-lg border border-border-panel bg-bg-panel px-3 font-mono text-[11px] text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+						className="flex h-9 min-w-0 grow cursor-text select-all items-center overflow-hidden rounded-lg border border-border bg-panel px-3 font-mono text-[11px] text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 						tabIndex={0}
 						role="textbox"
 						aria-readonly="true"
@@ -260,18 +260,16 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 						Reset
 					</Button>
 				</div>
-				<p className="mt-2 text-xs leading-5 text-text-tertiary">
+				<p className="mt-2 text-xs leading-5 text-fg-subtle">
 					{copyState === "error" ? (
-						<span className="text-error-700" role="alert">
+						<span className="text-danger-border" role="alert">
 							Couldn’t copy the link. Select it above and copy it manually.
 						</span>
 					) : (
 						<>
 							Anyone who opens the link joins this repository as a member with
 							edit access. Repository:{" "}
-							<b className="font-semibold text-text-secondary">
-								{namespaceHandle}
-							</b>
+							<b className="font-semibold text-fg-muted">{namespaceHandle}</b>
 						</>
 					)}
 				</p>
@@ -286,13 +284,10 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 								<p className="truncate text-[13px] font-semibold">
 									{member.name}
 									{member.isSelf ? (
-										<span className="font-normal text-text-tertiary">
-											{" "}
-											· you
-										</span>
+										<span className="font-normal text-fg-subtle"> · you</span>
 									) : null}
 								</p>
-								<p className="truncate text-xs text-text-tertiary">
+								<p className="truncate text-xs text-fg-subtle">
 									{member.email ? <>{member.email} · </> : null}
 									{member.role === "admin" ? "Admin" : "Member"}
 								</p>
@@ -309,14 +304,14 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 											variant="ghost"
 											size="icon-sm"
 											aria-label={`Actions for ${member.name}`}
-											className="text-text-tertiary opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+											className="text-fg-subtle opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
 										>
 											<MoreHorizontal aria-hidden="true" />
 										</Button>
 									</DropdownMenuTrigger>
 									<DropdownMenuContent
 										align="end"
-										className="min-w-[190px] rounded-xl border-border-panel bg-bg-panel p-1.5 shadow-[0_18px_44px_rgba(28,25,23,0.16)]"
+										className="min-w-[190px] rounded-xl border-border bg-panel p-1.5 shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_16%,transparent)]"
 									>
 										<DropdownMenuItem
 											variant="destructive"
@@ -347,7 +342,7 @@ function InviteLinkText({ url }: { url: string }) {
 	return (
 		<span className="block truncate">
 			{displayUrl.slice(0, tokenStart)}
-			<span className="font-medium text-text-primary">
+			<span className="font-medium text-fg">
 				{displayUrl.slice(tokenStart)}
 			</span>
 		</span>

@@ -50,7 +50,7 @@ export function SettingsView({
 	if (!settingsApi) {
 		return (
 			<div
-				className="grid h-full w-full place-content-center bg-bg-panel p-6 text-center text-[13px] text-text-secondary"
+				className="grid h-full w-full place-content-center bg-panel p-6 text-center text-[13px] text-fg-muted"
 				data-testid="repository-settings-view"
 			>
 				Sign in with edit access to manage this repository.
@@ -68,14 +68,14 @@ function SettingsContent({
 	const info = settingsApi.info();
 	return (
 		<div
-			className="h-full w-full overflow-auto bg-bg-panel"
+			className="h-full w-full overflow-auto bg-panel"
 			data-testid="repository-settings-view"
 		>
 			<div className="mx-auto w-[min(640px,calc(100%-48px))] pt-10 pb-16">
 				<h2 className="m-0 text-[16px] leading-tight font-bold tracking-[-0.01em]">
 					Settings
 				</h2>
-				<p className="m-0 mt-1 mb-5 text-[12.5px] text-text-tertiary">
+				<p className="m-0 mt-1 mb-5 text-[12.5px] text-fg-subtle">
 					lixray.com/@{info.namespaceHandle}/{info.repositorySlug}
 				</p>
 				<NamePanel settingsApi={settingsApi} />
@@ -110,11 +110,11 @@ function NamePanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 	};
 
 	return (
-		<section className="mb-3.5 rounded-xl border border-border-panel px-[18px] py-4">
+		<section className="mb-3.5 rounded-xl border border-border px-[18px] py-4">
 			<h3 className="m-0 text-[13.5px] font-bold">
 				<label htmlFor="repository-name">Name</label>
 			</h3>
-			<p className="m-0 mt-0.5 mb-3 text-[12px] text-text-tertiary">
+			<p className="m-0 mt-0.5 mb-3 text-[12px] text-fg-subtle">
 				Renaming keeps the URL — the address stays{" "}
 				<code className="text-[11.5px]">
 					@{info.namespaceHandle}/{info.repositorySlug}
@@ -124,7 +124,7 @@ function NamePanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 			<form className="flex gap-2" onSubmit={(event) => void submit(event)}>
 				<input
 					id="repository-name"
-					className="h-9 min-w-0 flex-1 rounded-lg border border-border-panel bg-bg-panel px-[11px] text-[13px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1 disabled:opacity-60"
+					className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-panel px-[11px] text-[13px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-60"
 					maxLength={80}
 					value={name}
 					disabled={!info.isAdmin}
@@ -142,7 +142,7 @@ function NamePanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 				) : null}
 			</form>
 			{!info.isAdmin ? (
-				<p className="m-0 mt-2 text-[12px] text-text-quaternary">
+				<p className="m-0 mt-2 text-[12px] text-fg-faint">
 					Only repository admins can rename this repository.
 				</p>
 			) : null}
@@ -234,7 +234,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 
 	return (
 		<>
-			<section className="mb-3.5 rounded-xl border border-border-panel px-[18px] py-4">
+			<section className="mb-3.5 rounded-xl border border-border px-[18px] py-4">
 				<div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2">
 					<div className="min-w-0 flex-1 basis-[180px]">
 						<h3 className="m-0 text-[13.5px] font-bold">
@@ -257,7 +257,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 									aria-pressed={selected}
 									disabled={!info.isAdmin || visibilityBusy}
 									onClick={() => void changeVisibility(value)}
-									className={`inline-flex h-7 min-w-0 items-center justify-center gap-1 rounded-md px-1.5 text-[11.5px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible disabled:cursor-default ${selected ? "bg-bg-panel text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-primary"}`}
+									className={`inline-flex h-7 min-w-0 items-center justify-center gap-1 rounded-md px-1.5 text-[11.5px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default ${selected ? "bg-panel text-fg shadow-sm" : "text-fg-subtle hover:text-fg"}`}
 								>
 									<Icon className="size-3.5" aria-hidden="true" />
 									{value === "private" ? "Private" : "Public"}
@@ -270,20 +270,20 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 						})}
 					</div>
 				</div>
-				<p className="m-0 mt-2 text-[12px] leading-relaxed text-text-tertiary">
+				<p className="m-0 mt-2 text-[12px] leading-relaxed text-fg-subtle">
 					{visibility === "public"
 						? "Anyone can read. Only members can edit."
 						: "Only repository members can open this repository. Published files remain public."}
 				</p>
 			</section>
-			<section className="mb-3.5 rounded-xl border border-border-panel px-[18px] py-4">
+			<section className="mb-3.5 rounded-xl border border-border px-[18px] py-4">
 				<div className="flex flex-wrap items-center justify-between gap-2">
 					<h3 className="m-0 text-[13.5px] font-bold">Members</h3>
 					<Button
 						type="button"
 						variant="ghost"
 						size="sm"
-						className="-mr-2 h-7 gap-1.5 px-2 text-xs text-text-secondary"
+						className="-mr-2 h-7 gap-1.5 px-2 text-xs text-fg-muted"
 						title="Anyone with the invite link can join this repository as a member."
 						onClick={() => void copyInviteLink()}
 					>
@@ -291,7 +291,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 						Copy invite link
 					</Button>
 				</div>
-				<p className="m-0 mt-1 mb-2 text-[12px] text-text-tertiary">
+				<p className="m-0 mt-1 mb-2 text-[12px] text-fg-subtle">
 					Admins can promote members and remove member access.
 				</p>
 				{directMembers?.map((member) => {
@@ -312,18 +312,18 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 								<span className="truncate text-[13px] leading-tight font-semibold">
 									{member.name || member.email || "Account"}
 									{isSelf ? (
-										<span className="ml-1.5 font-normal text-text-quaternary">
+										<span className="ml-1.5 font-normal text-fg-faint">
 											you
 										</span>
 									) : null}
 								</span>
 								{member.email ? (
-									<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
+									<span className="truncate text-[11.5px] leading-tight text-fg-subtle">
 										{member.email}
 									</span>
 								) : null}
 							</span>
-							<span className="ml-auto shrink-0 text-[12px] text-text-tertiary">
+							<span className="ml-auto shrink-0 text-[12px] text-fg-subtle">
 								{member.role === "admin" ? "Admin" : "Member"}
 							</span>
 							{info.isAdmin && member.role === "member" ? (
@@ -331,7 +331,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 									type="button"
 									variant="ghost"
 									size="sm"
-									className="h-7 text-text-tertiary"
+									className="h-7 text-fg-subtle"
 									onClick={() => void promoteMember(member)}
 								>
 									Make admin
@@ -353,7 +353,7 @@ function AccessPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 										type="button"
 										variant="ghost"
 										size="sm"
-										className="h-7 text-text-tertiary"
+										className="h-7 text-fg-subtle"
 										onClick={() => setConfirmingRemoval(member.accountId)}
 									>
 										{isSelf ? "Leave" : "Remove"}
@@ -386,18 +386,16 @@ function DangerPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 	};
 
 	return (
-		<section className="rounded-xl border border-error-200 px-[18px] py-4">
-			<h3 className="m-0 text-[13.5px] font-bold text-text-primary">
-				Danger zone
-			</h3>
-			<p className="m-0 mt-0.5 mb-3 text-[12px] text-text-tertiary">
+		<section className="rounded-xl border border-danger-subtle px-[18px] py-4">
+			<h3 className="m-0 text-[13.5px] font-bold text-fg">Danger zone</h3>
+			<p className="m-0 mt-0.5 mb-3 text-[12px] text-fg-subtle">
 				Deleting removes the repository from every member’s directory and keeps
 				its name reserved.
 			</p>
 			{open ? (
 				<div className="flex flex-wrap items-center gap-2">
 					<input
-						className="h-9 min-w-0 flex-1 rounded-lg border border-border-panel bg-bg-panel px-[11px] text-[13px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1"
+						className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-panel px-[11px] text-[13px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
 						autoFocus
 						placeholder={`Type “${info.repositoryName}” to confirm`}
 						value={confirmation}
@@ -417,7 +415,7 @@ function DangerPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 						type="button"
 						variant="ghost"
 						size="sm"
-						className="h-9 text-text-tertiary"
+						className="h-9 text-fg-subtle"
 						onClick={() => {
 							setOpen(false);
 							setConfirmation("");
@@ -431,7 +429,7 @@ function DangerPanel({ settingsApi }: { settingsApi: RepositorySettingsApi }) {
 					type="button"
 					variant="ghost"
 					size="sm"
-					className="-ml-3 h-9 text-xs text-error-700 hover:bg-error-50 hover:text-error-800"
+					className="-ml-3 h-9 text-xs text-danger-border hover:bg-danger-subtle hover:text-diff-removed"
 					onClick={() => setOpen(true)}
 				>
 					Delete repository…

@@ -1,249 +1,314 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import test from "node:test";
-import { isRenderablePath, renderDiffCard } from "./diff-card.ts";
+import { fileURLToPath } from "node:url";
+import {
+	cardTitle,
+	commonFolder,
+	countUnit,
+	DIFF_CARD_STYLE,
+	diffCardPayload,
+	diffCardStatus,
+	fileIconSvg,
+	fileLabel,
+	isRenderablePath,
+	MAX_CARD_FILES,
+	MAX_PREVIEWS,
+	tallyLabel,
+} from "./diff-card.ts";
+import {
+	DIFF_CARD_BAR_HEIGHT,
+	DIFF_CARD_HTML,
+	DIFF_CARD_META,
+	DIFF_CARD_URI,
+	DIFF_GLYPH,
+} from "./diff-card-app.ts";
 
 const URL_FOR = (path: string) =>
 	`https://lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg${path}`;
 const bytes = (value: string): Uint8Array => new TextEncoder().encode(value);
+const here = dirname(fileURLToPath(import.meta.url));
 
-void test("a card is offered for the files Atelier can draw", () => {
+void test("a preview is offered for the files Atelier can draw", () => {
 	for (const path of ["/README.md", "/gtm/plan.markdown", "/leads.csv"])
 		assert.equal(isRenderablePath(path), true, path);
 	for (const path of ["/logo.png", "/slides.pdf", "/Makefile"])
 		assert.equal(isRenderablePath(path), false, path);
+});
+
+void test("the bar says how many, where, and what happened", () => {
+	assert.equal(cardTitle(1, "written"), "1 file written");
+	assert.equal(cardTitle(3, "changed"), "3 files changed");
 	assert.equal(
-		renderDiffCard({
-			path: "/logo.png",
-			url: URL_FOR("/logo.png"),
-			before: bytes("a"),
-			after: bytes("b"),
+		commonFolder(["/gtm/campaigns/icp.md", "/gtm/campaigns/q3/plan.md"]),
+		"/gtm/campaigns",
+	);
+	assert.equal(commonFolder(["/gtm/a.md", "/sales/b.md"]), "");
+	assert.equal(commonFolder(["/README.md"]), "");
+	assert.equal(commonFolder(["/docs/guide.md"]), "/docs");
+	assert.equal(commonFolder([]), "");
+	// Only what happened, in a fixed order.
+	assert.equal(
+		tallyLabel(["removed", "added", "modified", "added", "moved"]),
+		"2 new · 1 edited · 1 moved · 1 deleted",
+	);
+	assert.equal(tallyLabel(["modified"]), "1 edited");
+});
+
+void test("the footer's words follow the render's counts", () => {
+	assert.equal(countUnit("/leads.csv"), "rows");
+	assert.equal(countUnit("/notes.md"), "lines");
+	assert.equal(
+		fileLabel("added", { added: 5, modified: 0, removed: 0 }, "rows"),
+		"new · 5 rows",
+	);
+	assert.equal(
+		fileLabel("added", { added: 1, modified: 0, removed: 0 }, "rows"),
+		"new · 1 row",
+	);
+	assert.equal(
+		fileLabel("modified", { added: 12, modified: 0, removed: 3 }, "lines"),
+		"edited · +12 −3 lines",
+	);
+	assert.equal(
+		fileLabel("modified", { added: 1, modified: 2, removed: 0 }, "rows"),
+		"edited · +1 ~2 rows",
+	);
+	assert.equal(
+		fileLabel("removed", { added: 0, modified: 0, removed: 4 }, "lines"),
+		"deleted · 4 lines",
+	);
+	assert.equal(fileLabel("modified", undefined, "lines"), "edited");
+	assert.equal(
+		fileLabel("moved", undefined, "lines", { from: "/old/a.md", to: "/a.md" }),
+		"moved from old/",
+	);
+	assert.equal(
+		fileLabel("moved", undefined, "lines", {
+			from: "/docs/a.md",
+			to: "/docs/b.md",
 		}),
-		null,
+		"moved from a.md",
+	);
+	assert.equal(
+		fileLabel("moved", { added: 2, modified: 0, removed: 0 }, "lines", {
+			from: "/a.md",
+			to: "/docs/a.md",
+		}),
+		"moved from / · +2 lines",
+	);
+});
+
+void test("a status per side, and a move when the path changed", () => {
+	assert.equal(diffCardStatus({ after: bytes("a") }), "added");
+	assert.equal(diffCardStatus({ before: bytes("a") }), "removed");
+	assert.equal(
+		diffCardStatus({ before: bytes("a"), after: bytes("b") }),
+		"modified",
+	);
+	assert.equal(
+		diffCardStatus({ before: bytes("a"), after: bytes("a"), movedFrom: "/x" }),
+		"moved",
 	);
 });
 
 void test("a card carries the change, the file, and the way back", () => {
-	const card = renderDiffCard({
-		path: "/gtm/playbook.md",
-		url: URL_FOR("/gtm/playbook.md"),
-		before: bytes("## Experiments\n\n- [ ] Company brain\n"),
-		after: bytes(
-			"## Experiments\n\n- [ ] Company brain\n- [ ] AI consultants\n",
-		),
+	const card = diffCardPayload({
+		verb: "written",
 		repository: "@acme/company",
+		changes: [
+			{
+				path: "/gtm/playbook.md",
+				url: URL_FOR("/gtm/playbook.md"),
+				before: bytes("## Experiments\n\n- [ ] Company brain\n"),
+				after: bytes(
+					"## Experiments\n\n- [ ] Company brain\n- [ ] AI consultants\n",
+				),
+			},
+			{
+				path: "/gtm/leads.csv",
+				url: URL_FOR("/gtm/leads.csv"),
+				after: bytes("name,stage\nAcme,lead\nBeta,lead\n"),
+			},
+			{
+				path: "/gtm/old.md",
+				url: "https://lixray.com/@acme/company",
+				before: bytes("# Old\n\nOne paragraph.\n"),
+			},
+		],
 	});
 
 	assert.ok(card);
-	assert.equal(card.kind, "modified");
-	assert.deepEqual(card.counts, { added: 1, modified: 0, removed: 0 });
-	assert.equal(card.hidden, 0);
-	// Atelier's own view, inlined: the marks and the tokens that paint them.
-	assert.match(card.html, /data-review-status="added"/);
-	assert.match(card.html, /--atelier-added-bg/);
-	assert.match(card.html, /AI consultants/);
-	// The header names the file, the footer leads back to it.
-	assert.match(card.html, /gtm\/<\/span><span class="name">playbook\.md</);
-	assert.match(card.html, /\+1/);
-	assert.match(card.html, /@acme\/company/);
-	assert.match(
-		card.html,
-		/href="https:\/\/lixray\.com\/@acme\/company\/file\//,
-	);
-	assert.match(card.html, /Open in LixRay/);
-	// Nothing to run and nothing to fetch: a card is a document, not a page.
-	assert.doesNotMatch(card.html, /<script/);
-	assert.doesNotMatch(card.html, /<link/);
+	assert.equal(card.title, "3 files written");
+	assert.equal(card.folder, "/gtm");
+	assert.equal(card.tally, "1 new · 1 edited · 1 deleted");
+	assert.equal(card.repository, "@acme/company");
+	assert.equal(card.more, 0);
+	const [edited, added, removed] = card.files;
+	assert.equal(edited!.status, "modified");
+	assert.equal(edited!.name, "playbook.md");
+	assert.equal(edited!.label, "edited · +1 lines");
+	assert.deepEqual(edited!.counts, { added: 1, modified: 0, removed: 0 });
+	// Atelier's own view: the marks and the tokens that paint them.
+	assert.match(edited!.html ?? "", /data-review-status="added"/);
+	assert.match(edited!.html ?? "", /AI consultants/);
+	assert.match(DIFF_CARD_STYLE, /--atelier-diff-added-subtle/);
+	assert.equal(added!.status, "added");
+	assert.equal(added!.label, "new · 3 rows");
+	assert.match(added!.html ?? "", /<table>/);
+	assert.equal(removed!.status, "removed");
+	assert.equal(removed!.label, "deleted · 2 lines");
+	assert.equal(removed!.url, "https://lixray.com/@acme/company");
+	// The file-type icon is Atelier's, inlined: nothing to fetch.
+	for (const file of card.files) {
+		assert.match(file.icon, /^<svg[\s\S]*<\/svg>$/);
+		assert.doesNotMatch(file.icon, /<script/);
+		assert.doesNotMatch(file.html ?? "", /<script|<link/);
+	}
+	assert.notEqual(edited!.icon, added!.icon);
 });
 
-void test("a spreadsheet gets the same card, counted in rows", () => {
-	const card = renderDiffCard({
-		path: "/leads.csv",
-		url: URL_FOR("/leads.csv"),
-		before: bytes("name,stage\nAcme,lead\n"),
-		after: bytes("name,stage\nAcme,qualified\nBeta,lead\n"),
-		repository: "@acme/company",
+void test("a change that draws nothing is still a page, with a note", () => {
+	const card = diffCardPayload({
+		verb: "changed",
+		changes: [
+			{
+				path: "/logo.png",
+				url: URL_FOR("/logo.png"),
+				before: bytes("a"),
+				after: bytes("b"),
+			},
+			{
+				path: "/README.md",
+				url: URL_FOR("/README.md"),
+				before: bytes("# Acme\n"),
+				after: bytes("# Acme\n"),
+				movedFrom: "/docs/README.md",
+			},
+			{
+				path: "/huge.md",
+				url: URL_FOR("/huge.md"),
+				after: bytes(`${"word ".repeat(30_000)}\n`),
+			},
+		],
 	});
-
 	assert.ok(card);
-	assert.deepEqual(card.counts, { added: 1, modified: 1, removed: 0 });
-	assert.match(card.html, /<table>/);
-	assert.match(card.html, /qualified/);
-	assert.match(card.html, /Open in LixRay/);
-});
-
-void test("which side is missing says what happened", () => {
-	const created = renderDiffCard({
-		path: "/README.md",
-		url: URL_FOR("/README.md"),
-		after: bytes("# Acme\n\nOne company. One repository.\n"),
-	});
-	assert.ok(created);
-	assert.equal(created.kind, "added");
-	assert.match(created.html, /new file · 2 entries/);
-	assert.match(created.html, /--atelier-added-edge/);
-
-	// An empty file that existed is an overwrite, not a new file.
-	const overwritten = renderDiffCard({
-		path: "/README.md",
-		url: URL_FOR("/README.md"),
-		before: bytes(""),
-		after: bytes("# Acme\n"),
-	});
-	assert.ok(overwritten);
-	assert.equal(overwritten.kind, "modified");
-	assert.doesNotMatch(overwritten.html, /new file/);
-});
-
-void test("a write that changes nothing gets no card", () => {
-	assert.equal(
-		renderDiffCard({
-			path: "/README.md",
-			url: URL_FOR("/README.md"),
-			before: bytes("# Acme\n"),
-			after: bytes("# Acme\n"),
-		}),
-		null,
-	);
+	assert.equal(card.title, "3 files changed");
+	assert.equal(card.tally, "1 new · 1 edited · 1 moved");
+	assert.equal(card.files[0]!.html, undefined);
+	assert.match(card.files[0]!.note ?? "", /No preview for this file type/);
+	assert.equal(card.files[1]!.status, "moved");
+	assert.equal(card.files[1]!.label, "moved from docs/");
+	assert.match(card.files[1]!.note ?? "", /content is unchanged/);
+	assert.match(card.files[2]!.note ?? "", /Too much changed to show here/);
 });
 
 void test("a long change is trimmed, and the body says what is missing", () => {
 	const before = Array.from({ length: 60 }, (_, i) => `- Item ${i + 1}`).join(
 		"\n",
 	);
-	const card = renderDiffCard({
-		path: "/list.md",
-		url: URL_FOR("/list.md"),
-		before: bytes(`${before}\n`),
-		after: bytes(`${before}\n- The new one\n`),
+	const card = diffCardPayload({
+		verb: "written",
+		changes: [
+			{
+				path: "/list.md",
+				url: URL_FOR("/list.md"),
+				before: bytes(`${before}\n`),
+				after: bytes(`${before}\n- The new one\n`),
+			},
+		],
 	});
-
 	assert.ok(card);
-	assert.ok(card.hidden > 30, `hidden ${card.hidden}`);
-	assert.ok(byteLength(card.html) <= 24_000, `size ${byteLength(card.html)}`);
-	assert.match(card.html, /⋯ \d+ unchanged lines/);
-	assert.doesNotMatch(card.html, /more entries in LixRay/);
-	assert.match(card.html, /The new one/);
+	const [file] = card.files;
+	assert.ok(byteLength(file!.html ?? "") <= 24_000);
+	assert.match(file!.html ?? "", /⋯ \d+ unchanged lines/);
+	assert.equal(file!.note, undefined);
+	assert.match(file!.html ?? "", /The new one/);
 });
 
-void test("a card too big for a thread keeps its header and drops the view", () => {
-	// Few enough lines to survive the trim, each long enough that the kept
-	// window alone outgrows a message.
-	const paragraph = "word ".repeat(1_200);
-	const body = Array.from({ length: 12 }, () => paragraph).join("\n\n");
-	const card = renderDiffCard({
-		path: "/wide.md",
-		url: URL_FOR("/wide.md"),
-		after: bytes(`${body}\n`),
-	});
-
+void test("previews stop at the budget; the list stops later; the count never", () => {
+	const changes = Array.from({ length: MAX_CARD_FILES + 5 }, (_, i) => ({
+		path: `/notes/${i}.md`,
+		url: URL_FOR(`/notes/${i}.md`),
+		after: bytes(`# Note ${i}\n`),
+	}));
+	const card = diffCardPayload({ verb: "written", changes });
 	assert.ok(card);
-	assert.ok(byteLength(card.html) <= 24_000, `size ${byteLength(card.html)}`);
-	assert.doesNotMatch(
-		card.html.slice(card.html.indexOf("<article")),
-		/data-review-status/,
+	assert.equal(card.title, `${MAX_CARD_FILES + 5} files written`);
+	assert.equal(card.files.length, MAX_CARD_FILES);
+	assert.equal(card.more, 5);
+	assert.equal(
+		card.files.filter((file) => file.html !== undefined).length,
+		MAX_PREVIEWS,
 	);
-	assert.match(card.html, /Too much changed to show here/);
-	assert.match(card.html, /Open in LixRay/);
-});
-
-void test("the budget is bytes, not characters", () => {
-	const line = `- ${"変更された行の説明です。".repeat(6)}`;
-	const body = Array.from({ length: 40 }, () => line).join("\n");
-	const card = renderDiffCard({
-		path: "/cjk.md",
-		url: URL_FOR("/cjk.md"),
-		after: bytes(`${body}\n`),
-	});
-
-	assert.ok(card);
-	assert.ok(byteLength(card.html) <= 24_000, `bytes ${byteLength(card.html)}`);
-});
-
-void test("a document too large to draw still gets its name and its link", () => {
-	// Rendering is declined — the file is a megabyte, or nested past reading —
-	// but the reader is still told which file changed and where to see it.
-	for (const after of [
-		bytes(`${"word ".repeat(30_000)}\n`),
-		bytes(`${">".repeat(200)} deep\n`),
-	]) {
-		const card = renderDiffCard({
-			path: "/huge.md",
-			url: URL_FOR("/huge.md"),
-			after,
-		});
-		assert.ok(card);
-		assert.match(card.html, /huge\.md/);
-		assert.match(card.html, /Too much changed to show here/);
-		assert.match(card.html, /Open in LixRay/);
-		assert.ok(byteLength(card.html) <= 24_000);
-	}
+	assert.match(card.files[MAX_PREVIEWS]!.note ?? "", /Open it in LixRay/);
+	assert.equal(diffCardPayload({ verb: "written", changes: [] }), null);
 });
 
 void test("content a writer controls cannot become markup in the card", () => {
-	const card = renderDiffCard({
-		path: "/<img src=x onerror=alert(1)>.md",
-		url: 'https://lixray.com/"onload="alert(1)',
-		before: bytes("ok\n"),
-		after: bytes(
-			"ok\n\n<script>alert(1)</script>\n\n[x](javascript:alert(1))\n\n![p](https://tracker.example/p.gif)\n",
-		),
+	const card = diffCardPayload({
+		verb: "written",
 		repository: "<b>acme</b>",
+		changes: [
+			{
+				path: "/<img src=x onerror=alert(1)>.md",
+				url: 'https://lixray.com/"onload="alert(1)',
+				before: bytes("ok\n"),
+				after: bytes(
+					"ok\n\n<script>alert(1)</script>\n\n[x](javascript:alert(1))\n\n![p](https://tracker.example/p.gif)\n",
+				),
+			},
+		],
 	});
-
 	assert.ok(card);
-	assert.doesNotMatch(card.html, /<script>alert/);
-	assert.doesNotMatch(card.html, /javascript:/);
-	assert.doesNotMatch(card.html, /<b>acme/);
-	assert.doesNotMatch(card.html, /onerror=alert\(1\)>/);
-	assert.doesNotMatch(card.html, /"onload="/);
+	const html = card.files[0]!.html ?? "";
+	assert.doesNotMatch(html, /<script>alert/);
+	assert.doesNotMatch(html, /javascript:/);
 	// An image address is the document author's; the card names it, never
 	// asks the reader's client to fetch it.
-	assert.doesNotMatch(card.html, /<img/);
-	assert.doesNotMatch(card.html, /p\.gif/);
+	assert.doesNotMatch(html, /<img/);
+	assert.doesNotMatch(html, /p\.gif/);
+	// Names and repository travel as data; the view sets them as text.
+	assert.equal(card.repository, "<b>acme</b>");
+	assert.doesNotMatch(DIFF_CARD_HTML, /innerHTML/);
 });
 
-void test("a diff that fits the card is shown, not summarised away", () => {
-	// The frame carries the whole stylesheet. Guessing its size sent
-	// mid-sized diffs — the common case — to a bare link.
-	const line = `- ${"word ".repeat(140)}`;
-	const before = Array.from({ length: 30 }, () => line).join("\n");
-	const after = before.replace("word word word", "word CHANGED word");
-	const card = renderDiffCard({
-		path: "/CHANGELOG.md",
-		url: URL_FOR("/CHANGELOG.md"),
-		before: bytes(`${before}\n`),
-		after: bytes(`${after}\n`),
-	});
-
-	assert.ok(card);
-	assert.match(card.html, /class="body"/);
-	assert.match(card.html, /CHANGED/);
-	assert.ok(byteLength(card.html) <= 24_000, `size ${byteLength(card.html)}`);
+void test("the resource is one bar until opened, and draws Atelier's glyph", () => {
+	assert.equal(DIFF_CARD_URI, "ui://lixray/diff-card/v1");
+	assert.equal(DIFF_CARD_META, "lixray/diff-card");
+	assert.equal(DIFF_CARD_BAR_HEIGHT, 44);
+	// The bar is 42px inside a 1px border: 44 to the host, open or closed.
+	assert.match(DIFF_CARD_HTML, /\.bar \{[^}]*height: 42px/);
+	assert.match(DIFF_CARD_HTML, /\.card \{[^}]*border: 1px solid/);
+	assert.match(DIFF_CARD_HTML, /aria-expanded="false"/);
+	assert.match(DIFF_CARD_HTML, /ui\/notifications\/size-changed/);
+	assert.match(DIFF_CARD_HTML, /ui\/open-link/);
+	assert.match(DIFF_CARD_HTML, /ui\/resource-teardown/);
+	assert.match(DIFF_CARD_HTML, /max-height: 420px/);
+	// Atelier's tokens are inlined once, and the chrome names no colour.
+	assert.match(DIFF_CARD_HTML, /--atelier-overlay:/);
+	assert.match(DIFF_CARD_HTML, /background: var\(--atelier-overlay\)/);
+	assert.match(DIFF_CARD_HTML, /var\(--atelier-accent\)/);
+	for (const kind of ["added", "modified", "removed", "moved"])
+		assert.match(DIFF_CARD_HTML, new RegExp(`--atelier-diff-${kind}\\)`));
+	// The glyph is the one Atelier draws, path for path.
+	const geometry = readFileSync(
+		join(here, "../../../vendor/atelier/src/components/diff-glyph-geometry.ts"),
+		"utf8",
+	);
+	for (const [kind, path] of Object.entries(DIFF_GLYPH.knockout))
+		assert.ok(geometry.includes(`${kind}: "${path}"`), kind);
+	assert.match(geometry, /DIFF_GLYPH_RADIUS = 5;/);
+	assert.match(geometry, /DIFF_GLYPH_STROKE = 1\.7;/);
+	assert.match(DIFF_CARD_HTML, /<script>/);
+	assert.doesNotMatch(DIFF_CARD_HTML, /<link|src="http/);
 });
 
-void test("a path no header could show still makes a card that fits", () => {
-	const card = renderDiffCard({
-		path: `/docs/${"n".repeat(5_600)}.md`,
-		url: URL_FOR("/docs/long.md"),
-		after: bytes("# Hi\n"),
-	});
-
-	assert.ok(card);
-	assert.ok(byteLength(card.html) <= 24_000, `size ${byteLength(card.html)}`);
-	// The tail identifies the file; the ellipsis goes in the middle.
-	assert.match(card.html, /…/);
-});
-
-void test("a deleted file reads as deleted", () => {
-	const card = renderDiffCard({
-		path: "/old.md",
-		url: URL_FOR("/old.md"),
-		before: bytes("# Old\n\nOne paragraph.\n"),
-	});
-
-	assert.ok(card);
-	assert.equal(card.kind, "removed");
-	assert.match(card.html, /deleted · 2 entries/);
+void test("the icon is decoded from Atelier's data URI whichever way it is encoded", () => {
+	assert.match(fileIconSvg("/a.md"), /^<svg/);
+	assert.match(fileIconSvg("/a.excalidraw"), /^<svg/);
+	assert.match(fileIconSvg("/Makefile"), /^<svg/);
 });
 
 function byteLength(value: string): number {

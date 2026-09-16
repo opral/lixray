@@ -27,7 +27,9 @@ import {
 	createLixError,
 	isLixError,
 	LixService,
+	type DiffRef,
 	type ExecuteRequest,
+	type FileChange,
 } from "./lix-service.ts";
 import {
 	mcpSurfaceVersion,
@@ -40,12 +42,17 @@ import {
 import { MCP_RESOURCE } from "./auth.ts";
 import {
 	MCP_APP_HTML,
-	WRITE_PREVIEW_URI,
-	WRITE_PREVIEW_META,
-	WRITE_PREVIEW_HTML,
-	type WritePreviewCard,
-} from "./write-preview.ts";
-import { isRenderablePath, renderDiffCard } from "./diff-card.ts";
+	DIFF_CARD_URI,
+	DIFF_CARD_META,
+	DIFF_CARD_HTML,
+} from "./diff-card-app.ts";
+import {
+	diffCardPayload,
+	diffCardStatus,
+	isRenderablePath,
+	MAX_CARD_FILES,
+	type DiffCardPayload,
+} from "./diff-card.ts";
 import {
 	DELETED_FILE_NAMES_SQL,
 	TOUCHED_CHANGES_SQL,
@@ -85,7 +92,14 @@ export const MCP_DATA_GUIDE =
 export const UNDO_TOOL_DESCRIPTION =
 	"Undo the latest undoable change on the context branch by creating an inverse commit. Prefer this to manual SQL reversal when asked to undo that change. No commit_id parameter; inspect history first if later edits may exist. Stops at checkpoints; restore is different and not undoable.";
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. Prefer read_files and write_files for ordinary file reads and creates/updates; use list_files only to discover paths. Batch known paths together. Use query_sql for advanced reads and execute_sql for other mutations, including renames/deletes and directory operations. The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
+/** What the host shows after a change, and what the agent should not repeat. */
+export const DIFF_CARD_GUIDE =
+	"After write_files, execute_sql, or diff, MCP Apps hosts render a collapsible card of what changed: one bar naming the files, which the user expands to page through each file's rendered change and open it in LixRay. When the user asks what changed between two points (a checkpoint, a commit, a branch, the working state), call diff and the same card appears. The card is collapsed by default and the user opens it; name the change in one sentence and do not repeat the file list in prose. Other hosts get the same receipt and file links; do not assume a card was displayed.";
+
+export const DIFF_TOOL_DESCRIPTION =
+	'List the files that differ between two points of the Lix in context, each added, modified, removed, or moved (with before_path). before and after are each { checkpoint_id }, { commit_id }, { branch_id }, "working" (the branch as it stands), or "latest_checkpoint" (the nearest checkpoint behind it); paths narrows the list. Read-only. "What changed since the last checkpoint" is { before: "latest_checkpoint", after: "working" }. MCP Apps hosts render the same collapsible card a write shows; summarize in one sentence rather than listing the files.';
+
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. Prefer read_files and write_files for ordinary file reads and creates/updates; use list_files only to discover paths. Batch known paths together. Use query_sql for advanced reads and execute_sql for other mutations, including renames/deletes and directory operations. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
 
 ${MCP_DATA_GUIDE}
 
@@ -487,6 +501,34 @@ const writeFilesOutput = withError(
 		warning: z.string().optional(),
 	}),
 );
+const diffRef = z.union([
+	z.object({ checkpoint_id: commitId }).strict(),
+	z.object({ commit_id: commitId }).strict(),
+	z.object({ branch_id: branchId }).strict(),
+	z.literal("working"),
+	z.literal("latest_checkpoint"),
+]);
+const diffOutput = withError(
+	z.object({
+		context,
+		files: z.array(
+			z
+				.object({
+					path: z.string(),
+					status: z.enum(["added", "modified", "removed", "moved"]),
+					before_path: z.string().optional(),
+					before_commit_id: z.string(),
+					after_commit_id: z.string(),
+					url: z.string(),
+				})
+				.strict(),
+		),
+		before: z.string(),
+		after: z.string(),
+		commit_id: z.string(),
+		url: z.string(),
+	}),
+);
 const entityUrlSelector = z.union([
 	z
 		.object({ kind: z.enum(["file", "directory"]), id: z.string().uuid() })
@@ -674,19 +716,20 @@ export function createLixrayMcpServer(
 		}),
 	);
 	server.registerResource(
-		"write-preview",
-		WRITE_PREVIEW_URI,
+		"diff-card",
+		DIFF_CARD_URI,
 		{
 			title: "LixRay file changes",
 			mimeType: MCP_APP_HTML,
-			description: "Rendered file changes for write_files.",
+			description:
+				"A collapsible card of the files write_files, execute_sql, or diff changed.",
 		},
 		(uri) => ({
 			contents: [
 				{
 					uri: uri.href,
 					mimeType: MCP_APP_HTML,
-					text: WRITE_PREVIEW_HTML,
+					text: DIFF_CARD_HTML,
 					_meta: {
 						ui: {
 							csp: { connectDomains: [], resourceDomains: [] },
@@ -899,7 +942,13 @@ export function createLixrayMcpServer(
 				},
 				options.urlOrigin,
 			);
-			const rendered = await writeCards(service, token, written, files);
+			const rendered = await writeCard(
+				service,
+				token,
+				written,
+				files,
+				options.urlOrigin,
+			);
 			const warning = [
 				written.warning,
 				rendered.failed ? PREVIEW_UNAVAILABLE : undefined,
@@ -913,9 +962,67 @@ export function createLixrayMcpServer(
 				...(written.checkpointCommitId
 					? { checkpoint_commit_id: written.checkpointCommitId }
 					: {}),
-				...uiField(rendered.cards),
+				...uiField(rendered.card),
 				commit: written.commit,
 				...(warning ? { warning } : {}),
+			};
+		},
+		undefined,
+		options.onToolCall,
+		surfaceVersion,
+		requestId,
+		service,
+		options.urlOrigin,
+	);
+
+	registerTool(
+		server,
+		"diff",
+		"LixRay: Diff two points",
+		DIFF_TOOL_DESCRIPTION,
+		z
+			.object({
+				context,
+				before: diffRef,
+				after: diffRef,
+				paths: z.array(z.string().min(1)).min(1).max(100).optional(),
+			})
+			.strict(),
+		diffOutput,
+		readAnnotations(),
+		securitySchemes,
+		async ({ context: token, before, after, paths }) => {
+			const [beforeId, afterId] = await Promise.all([
+				service.resolveDiffRef(token, before),
+				service.resolveDiffRef(token, after),
+			]);
+			const span = { before: beforeId, after: afterId };
+			const changes =
+				beforeId === afterId
+					? []
+					: await service.fileChanges(token, span, paths ?? []);
+			const urls = await service.changeUrls(token, changes, options.urlOrigin);
+			const files = changes.map((change, index) => ({
+				path: change.path,
+				status: diffCardStatus(change),
+				...(change.movedFrom !== undefined
+					? { before_path: change.movedFrom }
+					: {}),
+				before_commit_id: beforeId,
+				after_commit_id: afterId,
+				url: urls.files[index]!,
+			}));
+			const named = files.map((file) => file.path.replace(/^\//, ""));
+			const shown = named.slice(0, 20);
+			return {
+				context: token,
+				files,
+				before: beforeId,
+				after: afterId,
+				commit_id: afterId,
+				url: urls.repository,
+				...uiField(changeCard(changes, urls.files, "changed", urls.repository)),
+				[SUMMARY_KEY]: `${files.length} ${files.length === 1 ? "file" : "files"} changed between ${describeDiffRef(before, beforeId)} and ${describeDiffRef(after, afterId)}${shown.length ? `: ${shown.join(", ")}${named.length > shown.length ? `, +${named.length - shown.length} more` : ""}` : ""}.`,
 			};
 		},
 		undefined,
@@ -1632,9 +1739,7 @@ function registerTool(
 			annotations,
 			_meta: {
 				securitySchemes,
-				...(name === "write_files"
-					? { ui: { resourceUri: WRITE_PREVIEW_URI } }
-					: {}),
+				...(CARD_TOOLS.has(name) ? { ui: { resourceUri: DIFF_CARD_URI } } : {}),
 			},
 		},
 		async (args) => {
@@ -1659,14 +1764,18 @@ function registerTool(
 				// Preview metadata travels outside content and structuredContent: hosts
 				// validate structuredContent against the output schema.
 				const declared = returned[UI_RESULT_KEY];
-				const ui = (
-					Array.isArray(declared) ? declared : []
-				) as WritePreviewCard[];
+				let ui = (
+					declared && typeof declared === "object" ? declared : null
+				) as DiffCardPayload | null;
+				const ownSummary =
+					typeof returned[SUMMARY_KEY] === "string"
+						? (returned[SUMMARY_KEY] as string)
+						: undefined;
 				const raw =
-					UI_RESULT_KEY in returned
+					UI_RESULT_KEY in returned || SUMMARY_KEY in returned
 						? Object.fromEntries(
 								Object.entries(returned).filter(
-									([key]) => key !== UI_RESULT_KEY,
+									([key]) => key !== UI_RESULT_KEY && key !== SUMMARY_KEY,
 								),
 							)
 						: returned;
@@ -1699,8 +1808,18 @@ function registerTool(
 								mcpOriginKey(callId, input.options?.origin_key),
 							)
 						: EMPTY_TOUCHED;
+				// An execute_sql batch has the same receipt a write has — a commit
+				// span and the files it touched — so it gets the same card.
+				if (name === "execute_sql" && typeof input.context === "string")
+					ui = await executeCard(
+						service,
+						input.context,
+						raw,
+						touched,
+						urlOrigin,
+					);
 				const summary = toolResultTextBlocks(
-					summarizeToolResult(name, raw, touched),
+					ownSummary ?? summarizeToolResult(name, raw, touched),
 					structuredContent,
 				);
 				const links = await resultResourceLinks(
@@ -1716,9 +1835,7 @@ function registerTool(
 				return {
 					structuredContent,
 					content: [summary[0]!, ...links, ...summary.slice(1)],
-					...(ui.length
-						? { _meta: { [WRITE_PREVIEW_META]: { cards: ui } } }
-						: {}),
+					...(ui ? { _meta: { [DIFF_CARD_META]: ui } } : {}),
 				};
 			} catch (caught) {
 				const baseError = toMcpError(caught);
@@ -1895,22 +2012,26 @@ async function touchedByCall(
 }
 
 /**
- * Cards a host can render beside a write.
+ * The card a host can render beside a change.
  *
- * A tool result tells the reader a file changed; the card shows them what
+ * A tool result tells the reader files changed; the card shows them what
  * changed, in Atelier's own review UI, without leaving the thread. Hosts that
- * cannot render UI still get the summary and JSON; HTML stays in result metadata.
+ * cannot render UI still get the summary and JSON; the card stays in result
+ * metadata.
  */
 const UI_RESULT_KEY = "_ui";
 
-/** How many cards a single write is allowed to put in a thread. */
-const MAX_DIFF_CARDS = 3;
+/** A tool's own one-line summary, when the output alone cannot say it. */
+const SUMMARY_KEY = "_summary";
+
+/** The tools whose result the diff card resource renders. */
+const CARD_TOOLS = new Set(["write_files", "execute_sql", "diff"]);
 
 const PREVIEW_UNAVAILABLE =
 	"Files saved, preview unavailable. Do not repeat the write.";
 
 /**
- * The cards for a write: what changed between the commits its receipt names.
+ * The card for a write: what changed between the commits its receipt names.
  *
  * The write does not carry its own before-bytes. It carries a commit span,
  * and the span is asked what changed — the same question a checkpoint or any
@@ -1918,81 +2039,124 @@ const PREVIEW_UNAVAILABLE =
  * that published no commit has nothing to show; a failure here is a warning
  * on a write that already succeeded.
  */
-async function writeCards(
+async function writeCard(
 	service: LixService,
 	token: string,
 	written: Awaited<ReturnType<LixService["writeFiles"]>>,
 	requested: ReadonlyArray<{ path: string; content?: string }>,
-): Promise<{ cards: WritePreviewCard[]; failed: boolean }> {
+	urlOrigin: string | undefined,
+): Promise<{ card: DiffCardPayload | null; failed: boolean }> {
 	const span = written.commit;
-	if (!span || span.before === span.after) return { cards: [], failed: false };
+	if (!span || span.before === span.after) return { card: null, failed: false };
 	try {
 		const paths = requested
-			.filter(
-				(file) => file.content !== undefined && isRenderablePath(file.path),
-			)
+			.filter((file) => file.content !== undefined)
 			.map((file) => file.path)
-			.slice(0, MAX_DIFF_CARDS);
-		if (paths.length === 0) return { cards: [], failed: false };
+			.slice(0, MAX_CARD_FILES);
+		if (paths.length === 0) return { card: null, failed: false };
 		const changes = await service.fileChanges(token, span, paths);
-		return diffCards(changes, written.files);
+		const urls = await service.changeUrls(token, changes, urlOrigin);
+		return {
+			card: changeCard(changes, urls.files, "written", urls.repository),
+			failed: false,
+		};
 	} catch (caught) {
 		console.error("LixRay MCP file changes failed", {
 			error: errorDetails(caught),
 		});
-		return { cards: [], failed: true };
+		return { card: null, failed: true };
 	}
 }
 
-function diffCards(
-	changes: ReadonlyArray<{
-		path: string;
-		before?: Uint8Array;
-		after?: Uint8Array;
-	}>,
-	files: ReadonlyArray<{ path: string; url: string }>,
-): { cards: WritePreviewCard[]; failed: boolean } {
-	const urls = new Map(files.map((file) => [file.path, file.url]));
-	const cards: WritePreviewCard[] = [];
-	let failed = false;
-	for (const change of changes) {
-		if (cards.length >= MAX_DIFF_CARDS) break;
-		const url = urls.get(change.path);
-		if (!url) continue;
-		const repository = repositoryOf(url);
-		let card: ReturnType<typeof renderDiffCard>;
-		try {
-			card = renderDiffCard({
-				path: change.path,
-				url,
-				...(change.before !== undefined ? { before: change.before } : {}),
-				...(change.after !== undefined ? { after: change.after } : {}),
-				...(repository ? { repository } : {}),
-			});
-		} catch (caught) {
-			failed = true;
-			// A card is a courtesy; a write that succeeded still succeeded.
-			console.error("LixRay MCP diff card failed", {
-				path: change.path,
-				error: errorDetails(caught),
-			});
-			continue;
-		}
-		if (!card) continue;
-		cards.push({ html: card.html });
+/**
+ * The card for an execute_sql batch: the files the change log says it
+ * touched, asked of the commit span the batch moved between. A batch that
+ * touched no file, or published no commit, has no card; a failure here
+ * leaves the receipt unadorned rather than wrong.
+ */
+async function executeCard(
+	service: LixService,
+	token: string,
+	raw: unknown,
+	touched: TouchedByCall,
+	urlOrigin: string | undefined,
+): Promise<DiffCardPayload | null> {
+	const span = (raw as { commit?: { before: string; after: string } | null })
+		.commit;
+	if (!span || span.before === span.after) return null;
+	const paths = touched.entities
+		.filter(
+			(entity) => entity.kind === "file" && !/^\d+ files?$/.test(entity.path),
+		)
+		.map((entity) => entity.path)
+		.slice(0, MAX_CARD_FILES);
+	if (paths.length === 0) return null;
+	try {
+		const changes = await service.fileChanges(token, span, paths);
+		const urls = await service.changeUrls(token, changes, urlOrigin);
+		return changeCard(changes, urls.files, "written", urls.repository);
+	} catch (caught) {
+		console.error("LixRay MCP file changes failed", {
+			error: errorDetails(caught),
+		});
+		return null;
 	}
-	return { cards, failed };
+}
+
+/**
+ * Builds the card, with Atelier's views first: the files it can draw come
+ * before the ones it can only name, so the previews are the first pages.
+ * A view that fails to render is a note on a card that still lists the file.
+ */
+function changeCard(
+	changes: ReadonlyArray<FileChange>,
+	urls: ReadonlyArray<string>,
+	verb: "written" | "changed",
+	repositoryUrl: string,
+): DiffCardPayload | null {
+	const repository = repositoryOf(repositoryUrl);
+	const listed = changes.map((change, index) => ({
+		path: change.path,
+		...(change.movedFrom !== undefined ? { movedFrom: change.movedFrom } : {}),
+		url: urls[index] ?? repositoryUrl,
+		...(change.before !== undefined ? { before: change.before } : {}),
+		...(change.after !== undefined ? { after: change.after } : {}),
+	}));
+	const drawable = listed.filter((change) => isRenderablePath(change.path));
+	const named = listed.filter((change) => !isRenderablePath(change.path));
+	try {
+		return diffCardPayload({
+			verb,
+			changes: [...drawable, ...named],
+			...(repository ? { repository } : {}),
+		});
+	} catch (caught) {
+		// A card is a courtesy; a change that happened still happened.
+		console.error("LixRay MCP diff card failed", {
+			error: errorDetails(caught),
+		});
+		return null;
+	}
 }
 
 function uiField(
-	cards: WritePreviewCard[],
-): Record<string, WritePreviewCard[]> {
-	return cards.length > 0 ? { [UI_RESULT_KEY]: cards } : {};
+	card: DiffCardPayload | null,
+): Record<string, DiffCardPayload> {
+	return card ? { [UI_RESULT_KEY]: card } : {};
+}
+
+/** "checkpoint a1b2", "working (commit c3d4)": a ref as the summary says it. */
+function describeDiffRef(ref: DiffRef, commitId: string): string {
+	if (ref === "working") return `working (commit ${commitId})`;
+	if (ref === "latest_checkpoint") return `latest checkpoint ${commitId}`;
+	if ("checkpoint_id" in ref) return `checkpoint ${ref.checkpoint_id}`;
+	if ("commit_id" in ref) return `commit ${ref.commit_id}`;
+	return `branch ${ref.branch_id} (commit ${commitId})`;
 }
 
 /** "@opral/monorepo" out of a LixRay entity URL, when it carries one. */
 function repositoryOf(url: string): string | undefined {
-	const match = /\/(@[^/]+\/[^/]+)\//.exec(url);
+	const match = /\/(@[^/]+\/[^/?#]+)(?:[/?#]|$)/.exec(url);
 	return match?.[1];
 }
 
@@ -2031,6 +2195,23 @@ async function resultResourceLinks(
 					uri: file.url,
 					name: file.path.split("/").filter(Boolean).at(-1) ?? file.path,
 					description: `Wrote ${file.path.replace(/^\//, "")}`,
+					...(mimeType ? { mimeType } : {}),
+				};
+			});
+	}
+	if (name === "diff" && Array.isArray(result.files)) {
+		return (
+			result.files as Array<{ path: string; url: string; status: string }>
+		)
+			.filter((file) => file.status !== "removed")
+			.slice(0, 50)
+			.map((file) => {
+				const mimeType = mimeTypeForPath(file.path);
+				return {
+					type: "resource_link",
+					uri: file.url,
+					name: file.path.split("/").filter(Boolean).at(-1) ?? file.path,
+					description: `${file.status === "added" ? "Added" : file.status === "moved" ? "Moved" : "Modified"} ${file.path.replace(/^\//, "")}`,
 					...(mimeType ? { mimeType } : {}),
 				};
 			});
@@ -2282,6 +2463,7 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"list_files",
 		"read_files",
 		"write_files",
+		"diff",
 		"query_sql",
 		"execute_sql",
 		"active_branch_id",

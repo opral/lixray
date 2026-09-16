@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import {
-	WRITE_PREVIEW_URI,
-	WRITE_PREVIEW_META,
+	DIFF_CARD_URI,
+	DIFF_CARD_META,
 	MCP_APP_HTML,
-	WRITE_PREVIEW_HTML,
-} from "./write-preview.ts";
+	DIFF_CARD_HTML,
+} from "./diff-card-app.ts";
+import type { DiffCardPayload } from "./diff-card.ts";
 import test from "node:test";
 import {
 	Client,
@@ -79,7 +80,8 @@ const isSqlTool = (name: string) =>
 	name === "query_sql" || name === "execute_sql";
 /** Tools whose card carries a guide, not one line. */
 const isGuidedTool = (name: string) =>
-	isSqlTool(name) || ["list_files", "read_files", "write_files"].includes(name);
+	isSqlTool(name) ||
+	["list_files", "read_files", "write_files", "diff"].includes(name);
 
 function toolText(result: {
 	content?: Array<{ type: string; text?: string }>;
@@ -255,6 +257,55 @@ class FakeRuntime implements LixRuntimeClient {
 			return {
 				columns: ["commit_id"],
 				rows: [[{ kind: "text" as const, value: "commit-1" }]],
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+		}
+		if (
+			request.sql.startsWith(
+				"SELECT commit_id FROM lix_log() WHERE is_checkpoint",
+			)
+		) {
+			return {
+				columns: ["commit_id"],
+				rows: this.checkpoints
+					.slice(0, 1)
+					.map((id) => [{ kind: "text" as const, value: id }]),
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+		}
+		if (
+			/^SELECT id FROM lix_commit WHERE id = \$1( AND is_checkpoint)? LIMIT 1$/.test(
+				request.sql,
+			)
+		) {
+			const id = request.params?.[0];
+			const known =
+				id?.kind === "text" &&
+				(request.sql.includes("is_checkpoint")
+					? this.checkpoints.includes(id.value)
+					: id.value !== "missing-commit");
+			return {
+				columns: ["id"],
+				rows: known ? [[id]] : [],
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+		}
+		if (
+			request.sql === "SELECT commit_id FROM lix_branch WHERE id = $1 LIMIT 1"
+		) {
+			const id = request.params?.[0];
+			return {
+				columns: ["commit_id"],
+				rows:
+					id?.kind === "text" && id.value === "main"
+						? [[{ kind: "text" as const, value: "commit-1" }]]
+						: [],
 				rowsAffected: 0,
 				notices: [],
 				commit: null,
@@ -491,6 +542,8 @@ class FakeRuntime implements LixRuntimeClient {
 	>();
 	/** Set to make the change query fail, the way a flaky upstream would. */
 	changesFailure: Error | undefined;
+	/** Checkpoint commit ids on the branch, newest first. */
+	checkpoints: string[] = ["checkpoint-0"];
 
 	async transaction<T>(
 		lixId: string,
@@ -780,6 +833,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				"list_files",
 				"read_files",
 				"write_files",
+				"diff",
 				"query_sql",
 				"execute_sql",
 				"active_branch_id",
@@ -2608,29 +2662,36 @@ void test("file tools list, read, and write files with metadata and conflict che
 			written.content?.map((block) => block.type),
 			["text", "resource_link", "resource_link", "text"],
 		);
-		const cards = (
-			written._meta?.[WRITE_PREVIEW_META] as { cards: Array<{ html: string }> }
-		).cards;
-		assert.equal(cards.length, 1);
-		assert.match(cards[0]!.html, /<h1[^>]*>ICP<\/h1>/);
-		assert.match(cards[0]!.html, /Open in LixRay/);
+		const card = written._meta?.[DIFF_CARD_META] as DiffCardPayload;
+		assert.equal(card.title, "1 file written");
+		assert.equal(card.folder, "/gtm/campaigns");
+		assert.equal(card.tally, "1 new");
+		assert.equal(card.repository, "@acme/company");
+		assert.equal(card.files.length, 1);
+		assert.equal(card.files[0]!.status, "added");
+		assert.match(card.files[0]!.html ?? "", /<h1[^>]*>ICP<\/h1>/);
+		assert.equal(card.files[0]!.url, wrote.files[0]!.url);
 		assert.equal("_ui" in (written.structuredContent as object), false);
-		assert.doesNotMatch(JSON.stringify(written.content), /<!doctype html>/);
+		assert.doesNotMatch(JSON.stringify(written.content), /<h1/);
 		const resources = await client.listResources();
 		assert.ok(
-			resources.resources.some(
-				(resource) => resource.uri === WRITE_PREVIEW_URI,
-			),
+			resources.resources.some((resource) => resource.uri === DIFF_CARD_URI),
 		);
-		const resource = await client.readResource({ uri: WRITE_PREVIEW_URI });
+		const resource = await client.readResource({ uri: DIFF_CARD_URI });
 		assert.equal(resource.contents[0]?.mimeType, MCP_APP_HTML);
 		assert.ok(resource.contents[0] && "text" in resource.contents[0]);
-		assert.equal(resource.contents[0].text, WRITE_PREVIEW_HTML);
+		assert.equal(resource.contents[0].text, DIFF_CARD_HTML);
 		assert.doesNotMatch(resource.contents[0].text, /ICP|campaigns/);
 		const tools = await client.listTools();
-		assert.deepEqual(
-			tools.tools.find((tool) => tool.name === "write_files")?._meta?.ui,
-			{ resourceUri: WRITE_PREVIEW_URI },
+		for (const name of ["write_files", "execute_sql", "diff"])
+			assert.deepEqual(
+				tools.tools.find((tool) => tool.name === name)?._meta?.ui,
+				{ resourceUri: DIFF_CARD_URI },
+				name,
+			);
+		assert.equal(
+			tools.tools.find((tool) => tool.name === "read_files")?._meta?.ui,
+			undefined,
 		);
 
 		// Metadata alone on a file that does not exist is refused before writing.
@@ -2754,6 +2815,202 @@ void test("a change query that fails leaves the write saved, with a warning", as
 				.length,
 			1,
 		);
+	} finally {
+		await client.close();
+	}
+});
+
+void test("diff compares two points and sends the same card a write does", async () => {
+	const runtime = new FakeRuntime();
+	const encode = (text: string) => Buffer.from(text, "utf8").toString("base64");
+	runtime.previousFiles = new Map([
+		[
+			"/gtm/leads.csv",
+			{
+				id: "44444444-4444-4444-8444-444444444441",
+				base64: encode("name,stage\nAcme,lead\n"),
+				metadata: null,
+			},
+		],
+		[
+			"/gtm/old.md",
+			{
+				id: "44444444-4444-4444-8444-444444444442",
+				base64: encode("# Old\n"),
+				metadata: null,
+			},
+		],
+	]);
+	runtime.files = new Map([
+		[
+			"/gtm/leads.csv",
+			{
+				id: "44444444-4444-4444-8444-444444444441",
+				base64: encode("name,stage\nAcme,qualified\nBeta,lead\n"),
+				metadata: null,
+			},
+		],
+		[
+			"/gtm/plan.md",
+			{
+				id: "44444444-4444-4444-8444-444444444443",
+				base64: encode("# Plan\n"),
+				metadata: null,
+			},
+		],
+	]);
+	const service = new LixService(runtime, {
+		contextSigningKey: "file-tools",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const transport = new StreamableHTTPClientTransport(
+		new URL("https://dev.lixray.com/mcp"),
+		{
+			fetch: (input, init) =>
+				handleMcpTransport(new Request(input, init), service, {
+					authMode: "none",
+				}),
+		},
+	);
+	const client = new Client(
+		{ name: "diff-test", version: "1" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	try {
+		await client.connect(transport);
+		await client.listTools();
+		const opened = await client.callTool({
+			name: "open_lix",
+			arguments: { lix_ref: "@acme/company" },
+		});
+		const context = (opened.structuredContent as { context: string }).context;
+		const diffed = await client.callTool({
+			name: "diff",
+			arguments: { context, before: "latest_checkpoint", after: "working" },
+		});
+		assert.equal(diffed.isError, undefined, JSON.stringify(diffed));
+		const result = diffed.structuredContent as {
+			files: Array<Record<string, unknown>>;
+			before: string;
+			after: string;
+			commit_id: string;
+			url: string;
+		};
+		assert.equal(result.before, "checkpoint-0");
+		assert.equal(result.after, "commit-1");
+		assert.equal(result.commit_id, "commit-1");
+		assert.equal(result.url, "https://dev.lixray.com/@acme/company");
+		assert.deepEqual(
+			result.files.map((file) => [file.path, file.status]),
+			[
+				["/gtm/leads.csv", "modified"],
+				["/gtm/old.md", "removed"],
+				["/gtm/plan.md", "added"],
+			],
+		);
+		for (const file of result.files) {
+			assert.equal(file.before_commit_id, "checkpoint-0");
+			assert.equal(file.after_commit_id, "commit-1");
+			assert.equal(typeof file.url, "string");
+		}
+		assert.match(
+			toolText(diffed),
+			/^3 files changed between latest checkpoint checkpoint-0 and working \(commit commit-1\): gtm\/leads\.csv, gtm\/old\.md, gtm\/plan\.md\./,
+		);
+		// The surviving files link; the deleted one has nowhere to go.
+		assert.deepEqual(
+			diffed.content
+				?.filter((block) => block.type === "resource_link")
+				.map((block) => (block as { description?: string }).description),
+			["Modified gtm/leads.csv", "Added gtm/plan.md"],
+		);
+		const card = diffed._meta?.[DIFF_CARD_META] as DiffCardPayload;
+		assert.equal(card.title, "3 files changed");
+		assert.equal(card.folder, "/gtm");
+		assert.equal(card.tally, "1 new · 1 edited · 1 deleted");
+		assert.deepEqual(
+			card.files.map((file) => file.label),
+			["edited · +1 ~1 rows", "deleted · 1 line", "new · 1 line"],
+		);
+		assert.match(card.files[0]!.html ?? "", /qualified/);
+		assert.equal(card.files[1]!.url, result.url);
+
+		// An explicit span narrowed to one path.
+		const narrowed = await client.callTool({
+			name: "diff",
+			arguments: {
+				context,
+				before: { checkpoint_id: "checkpoint-0" },
+				after: { branch_id: "main" },
+				paths: ["/gtm/plan.md"],
+			},
+		});
+		assert.equal(narrowed.isError, undefined, JSON.stringify(narrowed));
+		assert.match(
+			toolText(narrowed),
+			/^1 file changed between checkpoint checkpoint-0 and branch main \(commit commit-1\): gtm\/plan\.md\./,
+		);
+
+		// The same point twice is an empty diff, not a question for Lix.
+		const same = await client.callTool({
+			name: "diff",
+			arguments: {
+				context,
+				before: { commit_id: "commit-1" },
+				after: "working",
+			},
+		});
+		assert.equal(same.isError, undefined, JSON.stringify(same));
+		assert.match(
+			toolText(same),
+			/^0 files changed between commit commit-1 and working/,
+		);
+		assert.equal(same._meta?.[DIFF_CARD_META], undefined);
+
+		// A ref that names nothing is refused with a hint, before any compare.
+		const missing = await client.callTool({
+			name: "diff",
+			arguments: {
+				context,
+				before: { checkpoint_id: "commit-1" },
+				after: "working",
+			},
+		});
+		assert.equal(missing.isError, true);
+		assert.match(toolText(missing), /No checkpoint commit-1/);
+		runtime.checkpoints = [];
+		const none = await client.callTool({
+			name: "diff",
+			arguments: { context, before: "latest_checkpoint", after: "working" },
+		});
+		assert.equal(none.isError, true);
+		assert.match(toolText(none), /no checkpoint yet/);
+
+		// An SQL batch that touched a file gets the same card, from its receipt.
+		const executed = await client.callTool({
+			name: "execute_sql",
+			arguments: {
+				context,
+				statements: [
+					{
+						sql: "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) RETURNING id, path",
+						params: [
+							{ kind: "text", value: "/skills/hello.md" },
+							{ kind: "text", value: "# Hello\n" },
+						],
+					},
+				],
+			},
+		});
+		assert.equal(executed.isError, undefined, JSON.stringify(executed));
+		const executedCard = executed._meta?.[DIFF_CARD_META] as DiffCardPayload;
+		assert.equal(executedCard.title, "1 file written");
+		assert.equal(executedCard.folder, "/skills");
+		assert.deepEqual(
+			executedCard.files.map((file) => [file.name, file.status]),
+			[["hello.md", "added"]],
+		);
+		assert.match(executedCard.files[0]!.html ?? "", /Hello/);
 	} finally {
 		await client.close();
 	}

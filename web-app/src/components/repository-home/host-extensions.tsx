@@ -1,5 +1,6 @@
 import {
 	ATELIER_BUILTIN_EXTENSION_IDS,
+	useDefaultFolders,
 	type AtelierExtensionRegistration,
 	type AtelierExtensionRuntime,
 	type AtelierExtensionView,
@@ -158,6 +159,9 @@ function RepositoryDirectoryExtension({
 	hasAgentConnected: AgentConnectionProbe | null;
 	visibility: "private" | "public";
 }) {
+	// The folder a new file of each type goes in is the repository's answer,
+	// not a surface's: home reads and writes the one the Files view keeps.
+	const { folders: defaultFolders, setFolder } = useDefaultFolders(atelier);
 	return (
 		<StrictMode>
 			<DirectoryView
@@ -177,6 +181,8 @@ function RepositoryDirectoryExtension({
 						"showHiddenFiles",
 					) === true
 				}
+				defaultFolders={defaultFolders}
+				{...(atelier.readOnly ? {} : { onSetDefaultFolder: setFolder })}
 				readOnly={atelier.readOnly}
 				{...(atelier.documentLinks
 					? { documentLinks: atelier.documentLinks }

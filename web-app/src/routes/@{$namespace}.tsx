@@ -90,7 +90,7 @@ function PublicProfilePage() {
 	}, [namespace]);
 
 	return (
-		<div className="min-h-dvh bg-bg-app font-sans text-text-primary">
+		<div className="min-h-dvh bg-bg font-sans text-fg">
 			<ProfileHeader authLoaded={authLoaded} signedIn={Boolean(user)} />
 			{profile === undefined ? (
 				<ProfileStatus>Loading profile…</ProfileStatus>
@@ -161,7 +161,7 @@ function ProfileContent({
 	return (
 		<main className="mx-auto flex w-full max-w-[1240px] gap-[72px] px-16 pt-14 pb-20 max-[900px]:gap-10 max-[760px]:flex-col max-[760px]:gap-7 max-[760px]:px-6 max-[760px]:pt-7 max-[760px]:pb-12">
 			<aside className="flex w-[264px] shrink-0 flex-col gap-5 max-[760px]:w-full">
-				<div className="size-[108px] overflow-hidden rounded-full border border-[#1c1917]/10 bg-[#1c1917] text-[42px] font-bold text-[#fbf6f0] max-[760px]:size-[68px] max-[760px]:text-[28px]">
+				<div className="size-[108px] overflow-hidden rounded-full border border-fg/10 bg-overlay text-[42px] font-bold text-overlay-fg max-[760px]:size-[68px] max-[760px]:text-[28px]">
 					{profile.avatarUri ? (
 						<img
 							src={profile.avatarUri}
@@ -179,12 +179,12 @@ function ProfileContent({
 					<h1 className="m-0 text-[27px] leading-[1.15] font-bold tracking-[-0.025em] max-[760px]:text-[21px]">
 						{profile.name}
 					</h1>
-					<p className="m-0 font-mono text-[14px] text-[#8a8178]">
+					<p className="m-0 font-mono text-[14px] text-fg-subtle">
 						@{profile.handle}
 					</p>
 				</div>
 				{profile.bio ? (
-					<p className="m-0 text-[14.5px] leading-[1.6] text-[#57534e]">
+					<p className="m-0 text-[14.5px] leading-[1.6] text-fg-muted">
 						{profile.bio}
 					</p>
 				) : null}
@@ -193,7 +193,7 @@ function ProfileContent({
 						asChild
 						variant="outline"
 						size="sm"
-						className="h-8 w-full bg-white/40"
+						className="h-8 w-full bg-panel/40"
 					>
 						<Link
 							to="/settings/@{$namespace}"
@@ -206,8 +206,8 @@ function ProfileContent({
 
 				{hasDetails ? (
 					<>
-						<div className="h-px bg-[#eae2d6]" />
-						<div className="flex flex-col gap-[9px] text-[13.5px] text-[#57534e]">
+						<div className="h-px bg-border" />
+						<div className="flex flex-col gap-[9px] text-[13.5px] text-fg-muted">
 							{profile.title || profile.organization ? (
 								<span>
 									{[profile.title, profile.organization]
@@ -219,7 +219,7 @@ function ProfileContent({
 							{profile.links.map((link) => (
 								<a
 									key={link.uri}
-									className="font-semibold text-[#c2410c] no-underline hover:text-[#9a3412]"
+									className="font-semibold text-accent no-underline hover:text-accent-hover"
 									href={link.uri}
 									target="_blank"
 									rel="noreferrer"
@@ -231,8 +231,8 @@ function ProfileContent({
 					</>
 				) : null}
 
-				<div className="h-px bg-[#eae2d6]" />
-				<span className="text-[12px] text-[#b5afa6]">
+				<div className="h-px bg-border" />
+				<span className="text-[12px] text-fg-faint">
 					On LixRay since {joinedMonth(profile.joinedAt)}
 				</span>
 			</aside>
@@ -296,7 +296,7 @@ function ProfileActivityContent({
 					<h2 id="profile-files-title" className="m-0 text-[15px] font-bold">
 						Statistics
 					</h2>
-					<p className="m-0 text-[12.5px] text-[#a8a29e]">
+					<p className="m-0 text-[12.5px] text-fg-faint">
 						{profileFileSummary(activity)}
 						{activity.computedAt
 							? ` · updated ${formatRelativeTime(activity.computedAt)}`
@@ -322,7 +322,7 @@ function ProfileActivityContent({
 						<div className="mt-2.5">
 							{visibleFileMix.map((segment) => (
 								<div
-									className="flex items-center gap-2.5 border-t border-[#efe8dc] px-0.5 py-2 text-[13px] first:border-t-0"
+									className="flex items-center gap-2.5 border-t border-border px-0.5 py-2 text-[13px] first:border-t-0"
 									key={segment.label}
 								>
 									<span
@@ -330,10 +330,10 @@ function ProfileActivityContent({
 										style={{ background: segment.color }}
 									/>
 									<span className="font-semibold">{segment.label}</span>
-									<span className="text-[12px] text-[#a8a29e]">
+									<span className="text-[12px] text-fg-faint">
 										{segment.examples}
 									</span>
-									<span className="ml-auto shrink-0 text-[12px] text-[#a8a29e]">
+									<span className="ml-auto shrink-0 text-[12px] text-fg-faint">
 										{segment.percentage}%
 									</span>
 								</div>
@@ -341,7 +341,7 @@ function ProfileActivityContent({
 						</div>
 					</>
 				) : (
-					<p className="m-0 mt-3 text-[13px] text-[#8a8178]">
+					<p className="m-0 mt-3 text-[13px] text-fg-subtle">
 						{activity.repositories.length === 0
 							? "No public repositories yet."
 							: activity.failedRepositories === activity.repositories.length
@@ -350,7 +350,7 @@ function ProfileActivityContent({
 					</p>
 				)}
 				{activity.failedRepositories > 0 ? (
-					<p className="m-0 mt-2 text-[12px] text-[#a8a29e]">
+					<p className="m-0 mt-2 text-[12px] text-fg-faint">
 						{activity.failedRepositories} recovering{" "}
 						{activity.failedRepositories === 1
 							? "repository is"
@@ -363,14 +363,14 @@ function ProfileActivityContent({
 			<div>
 				<div className="flex items-baseline gap-2.5 pb-3">
 					<h2 className="m-0 text-[15px] font-bold">Repositories</h2>
-					<p className="m-0 text-[12.5px] text-[#a8a29e]">
+					<p className="m-0 text-[12.5px] text-fg-faint">
 						{publicCount} public
 						{privateCount > 0 ? ` · ${privateCount} private` : ""}
 					</p>
 				</div>
 				{activity.repositories.length === 0 &&
 				memberOnlyRepositories.length === 0 ? (
-					<p className="m-0 text-[13px] text-[#8a8178]">
+					<p className="m-0 text-[13px] text-fg-subtle">
 						Public repositories will appear here.
 					</p>
 				) : null}
@@ -410,7 +410,7 @@ function ProfileActivityStatus({ children }: { children: React.ReactNode }) {
 			<h2 id="profile-files-title" className="m-0 text-[15px] font-bold">
 				Statistics
 			</h2>
-			<p className="m-0 mt-3 text-[13px] text-[#8a8178]">{children}</p>
+			<p className="m-0 mt-3 text-[13px] text-fg-subtle">{children}</p>
 		</div>
 	);
 }
@@ -436,19 +436,19 @@ function RepositoryRow({
 			to="/@{$namespace}/$repository"
 			params={{ namespace: handle, repository: repository.slug }}
 			search={{}}
-			className="group -mx-3 flex items-center gap-5 rounded-lg border-t border-[#eae2d6] px-3 py-3.5 no-underline transition hover:bg-[#f6efe4]"
+			className="group -mx-3 flex items-center gap-5 rounded-lg border-t border-border px-3 py-3.5 no-underline transition hover:bg-bg-hover"
 		>
-			<strong className="min-w-0 flex-1 truncate text-[14.5px] font-semibold tracking-[-0.01em] text-[#1c1917] group-hover:text-[#c2410c]">
+			<strong className="min-w-0 flex-1 truncate text-[14.5px] font-semibold tracking-[-0.01em] text-fg group-hover:text-accent">
 				{repository.slug}
 			</strong>
 			{isPrivate ? (
-				<span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#eae2d6] px-2 py-0.5 text-[11px] font-semibold text-[#8a8178]">
+				<span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-semibold text-fg-subtle">
 					<Lock className="size-3" aria-hidden="true" />
 					Private
 				</span>
 			) : null}
 			<ArrowRight
-				className="ml-auto size-3.5 shrink-0 text-[#c9c2b8] transition-transform group-hover:translate-x-0.5 group-hover:text-[#c2410c]"
+				className="ml-auto size-3.5 shrink-0 text-fg-faint transition-transform group-hover:translate-x-0.5 group-hover:text-accent"
 				aria-hidden="true"
 			/>
 		</Link>
@@ -466,7 +466,7 @@ function joinedMonth(value: string): string {
 
 function ProfileStatus({ children }: { children: React.ReactNode }) {
 	return (
-		<main className="grid min-h-[calc(100dvh-44px)] place-items-center px-6 text-center text-sm text-[#766d65]">
+		<main className="grid min-h-[calc(100dvh-44px)] place-items-center px-6 text-center text-sm text-fg-subtle">
 			{children}
 		</main>
 	);

@@ -12,6 +12,15 @@ export default defineConfig({
 			"~": at("../../src"),
 			"@": at("../../../vendor/atelier/src"),
 			"@opral/atelier/style.css": at("../../../vendor/atelier/src/index.css"),
+			"@opral/atelier/theme.css": at(
+				"../../../vendor/atelier/src/shell/theme.css",
+			),
+			"@opral/atelier/tailwind.css": at(
+				"../../../vendor/atelier/src/shell/tailwind.css",
+			),
+			"@opral/atelier/document.css": at(
+				"../../../vendor/atelier/src/shell/document.css",
+			),
 			"@opral/atelier/file-icons": at(
 				"../../../vendor/atelier/src/file-icons.ts",
 			),

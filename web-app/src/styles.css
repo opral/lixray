@@ -3,68 +3,18 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 /*
- * LixRay reuses Atelier's semantic Tailwind tokens 1:1. Their role,
- * prominence, and interaction-state aliases are modeled after Subframe's
- * semantic color guidance:
- * https://www.subframe.com/blog/how-to-setup-semantic-tailwind-colors
+ * LixRay speaks Atelier's design tokens and nothing else: theme.css is the
+ * one vocabulary (var(--atelier-…)), tailwind.css the adapter that turns it into
+ * utilities (bg-panel, text-fg-muted, border-border-subtle). Nothing here
+ * declares a colour; `pnpm tokens:check` keeps it that way.
  */
-@import "../../vendor/atelier/src/shell/theme.css";
+@import "@opral/atelier/theme.css";
+@import "@opral/atelier/tailwind.css";
+@import "@opral/atelier/document.css";
 
 @custom-variant dark (&:is(.dark *));
-
-@theme inline {
-	--font-sans:
-		ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
-		"Segoe UI Symbol", "Noto Color Emoji";
-	--font-mono:
-		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-		"Courier New", monospace;
-	--radius-sm: calc(var(--radius) - 4px);
-	--radius-md: calc(var(--radius) - 2px);
-	--radius-lg: var(--radius);
-	--radius-xl: calc(var(--radius) + 4px);
-	--color-background: var(--background);
-	--color-foreground: var(--foreground);
-	--color-card: var(--card);
-	--color-card-foreground: var(--card-foreground);
-	--color-popover: var(--popover);
-	--color-popover-foreground: var(--popover-foreground);
-	--color-primary: var(--primary);
-	--color-primary-foreground: var(--primary-foreground);
-	--color-secondary: var(--secondary);
-	--color-secondary-foreground: var(--secondary-foreground);
-	--color-muted: var(--muted);
-	--color-muted-foreground: var(--muted-foreground);
-	--color-accent: var(--accent);
-	--color-accent-foreground: var(--accent-foreground);
-	--color-destructive: var(--destructive);
-	--color-destructive-foreground: var(--destructive-foreground);
-	--color-border: var(--border);
-	--color-input: var(--input);
-	--color-ring: var(--ring);
-}
-
-:root {
-	--radius: 0.625rem;
-	--background: var(--color-bg-panel);
-	--foreground: var(--color-text-primary);
-	--card: var(--color-bg-panel);
-	--card-foreground: var(--color-text-primary);
-	--popover: var(--color-bg-panel);
-	--popover-foreground: var(--color-text-primary);
-	--primary: var(--color-bg-action-primary);
-	--primary-foreground: var(--color-text-on-action-primary);
-	--secondary: var(--color-bg-notice-neutral);
-	--secondary-foreground: var(--color-text-notice-neutral);
-	--muted: var(--color-bg-panel-muted);
-	--muted-foreground: var(--color-text-secondary);
-	--accent: var(--color-bg-hover);
-	--accent-foreground: var(--color-text-primary);
-	--destructive: var(--color-error-700);
-	--destructive-foreground: var(--color-text-on-action-primary);
-	--border: var(--color-border-subtle);
-	--input: var(--color-border-subtle);
-	--ring: var(--color-ring-focus-visible);
+.dark {
+	color-scheme: dark;
 }
 
 @layer base {
@@ -74,9 +24,9 @@
 
 	body {
 		min-width: 320px;
-		background: var(--color-bg-app);
-		color: var(--color-text-primary);
-		font-family: var(--font-sans);
+		background: var(--atelier-bg);
+		color: var(--atelier-fg);
+		font-family: var(--atelier-font-sans);
 	}
 }
 
@@ -154,152 +104,41 @@
 	}
 }
 
-/* Docs site markdown body (see src/lib/docs-markdown.ts). */
-.docs-prose {
-	color: #292524;
-	font-size: 16px;
-	line-height: 1.7;
-	overflow-wrap: anywhere;
-}
-.docs-prose h1 {
-	font-size: 32px;
-	font-weight: 700;
-	letter-spacing: -0.025em;
-	line-height: 1.2;
-	color: #1c1917;
-	margin: 0 0 18px;
-}
-.docs-prose h2 {
-	font-size: 22px;
-	font-weight: 700;
-	letter-spacing: -0.015em;
-	color: #1c1917;
-	margin: 40px 0 12px;
-	padding-top: 8px;
-}
-.docs-prose h3 {
-	font-size: 17px;
-	font-weight: 700;
-	color: #1c1917;
-	margin: 28px 0 8px;
-}
-.docs-prose h4 {
-	font-size: 15.5px;
-	font-weight: 700;
-	color: #1c1917;
-	margin: 22px 0 6px;
-}
-.docs-prose :is(h1, h2, h3, h4) .anchor {
+/* Docs site markdown body: Atelier's document stylesheet, plus the two
+   affordances renderDocsMarkdown adds (src/lib/docs-markdown.ts). */
+.docs-article :is(h1, h2, h3, h4) .anchor {
 	opacity: 0;
 	margin-left: 8px;
 	font-weight: 400;
-	color: #c2410c;
+	color: var(--atelier-accent);
 	text-decoration: none;
+	border-bottom: 0;
 }
-.docs-prose :is(h2, h3, h4):hover .anchor {
+.docs-article :is(h2, h3, h4):hover .anchor {
 	opacity: 1;
 }
-.docs-prose p {
-	margin: 0 0 14px;
-}
-.docs-prose a {
-	color: #c2410c;
-	text-decoration: none;
-	border-bottom: 1px solid rgba(194, 65, 12, 0.3);
-}
-.docs-prose a:hover {
-	border-bottom-color: #c2410c;
-}
-.docs-prose code {
-	font-family: var(--font-mono);
-	font-size: 0.88em;
-	background: #f3eee6;
-	border-radius: 5px;
-	padding: 1.5px 5px;
-	color: #1c1917;
-}
-.docs-prose pre {
-	position: relative;
-	background: #1c1917;
-	border-radius: 12px;
-	padding: 18px 20px;
-	overflow-x: auto;
-	margin: 0 0 18px;
-}
-.docs-prose pre .copy {
+.docs-article pre .copy {
 	position: absolute;
 	top: 10px;
 	right: 10px;
-	font-family: var(--font-sans);
+	font-family: var(--atelier-font-sans);
 	font-size: 11.5px;
 	font-weight: 600;
-	color: #a8a29e;
-	background: rgba(255, 255, 255, 0.08);
+	color: var(--atelier-fg-subtle);
+	background: var(--atelier-bg-hover-strong);
 	border: none;
 	border-radius: 6px;
 	padding: 4px 10px;
 	cursor: pointer;
 	opacity: 0;
-	transition: opacity 0.15s;
+	transition: opacity var(--atelier-duration-slow);
 }
-.docs-prose pre:hover .copy {
+.docs-article pre:hover .copy {
 	opacity: 1;
 }
-.docs-prose pre .copy:hover {
-	color: #ffffff;
-	background: rgba(255, 255, 255, 0.16);
-}
-.docs-prose pre code {
-	background: none;
-	padding: 0;
-	color: #e7e0d6;
-	font-size: 13px;
-	line-height: 1.65;
-}
-.docs-prose ul,
-.docs-prose ol {
-	margin: 0 0 14px;
-	padding-left: 24px;
-	list-style: revert;
-}
-.docs-prose li {
-	margin: 4px 0;
-}
-.docs-prose blockquote {
-	margin: 0 0 14px;
-	padding: 2px 18px;
-	border-left: 3px solid #e8590c;
-	background: #fbf3e8;
-	border-radius: 0 10px 10px 0;
-}
-.docs-prose blockquote p {
-	margin: 10px 0;
-}
-.docs-prose hr {
-	border: none;
-	border-top: 1px solid rgba(28, 25, 23, 0.1);
-	margin: 32px 0;
-}
-.docs-prose table {
-	border-collapse: collapse;
-	width: 100%;
-	margin: 0 0 18px;
-	font-size: 14px;
-}
-.docs-prose th {
-	text-align: left;
-	font-weight: 700;
-	color: #1c1917;
-	border-bottom: 2px solid rgba(28, 25, 23, 0.12);
-	padding: 8px 12px 8px 0;
-}
-.docs-prose td {
-	border-bottom: 1px solid rgba(28, 25, 23, 0.07);
-	padding: 8px 12px 8px 0;
-	vertical-align: top;
-}
-.docs-prose td code {
-	white-space: nowrap;
+.docs-article pre .copy:hover {
+	color: var(--atelier-fg);
+	background: var(--atelier-bg-active);
 }
 
 /* ── Product animations, registered as Tailwind animate-* utilities ── */
@@ -408,21 +247,21 @@
 	@keyframes connect-agent-send {
 		0%,
 		61% {
-			background-color: #3a3a3a;
+			background-color: var(--atelier-overlay-hover);
 			transform: scale(1);
 		}
 		64% {
-			background-color: #e8590c;
+			background-color: var(--atelier-link);
 			transform: scale(1.12);
 		}
 		67%,
 		92% {
-			background-color: #e8590c;
+			background-color: var(--atelier-link);
 			transform: scale(1);
 		}
 		97%,
 		100% {
-			background-color: #3a3a3a;
+			background-color: var(--atelier-overlay-hover);
 			transform: scale(1);
 		}
 	}
@@ -461,11 +300,13 @@
 	}
 	@keyframes connect-agent-dot-pulse {
 		0% {
-			box-shadow: 0 0 0 0 rgba(232, 89, 12, 0.45);
+			box-shadow: 0 0 0 0
+				color-mix(in srgb, var(--atelier-link) 45%, transparent);
 		}
 		70%,
 		100% {
-			box-shadow: 0 0 0 9px rgba(232, 89, 12, 0);
+			box-shadow: 0 0 0 9px
+				color-mix(in srgb, var(--atelier-link) 0%, transparent);
 		}
 	}
 	@keyframes auth-progress-sweep {

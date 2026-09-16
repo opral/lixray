@@ -13,18 +13,18 @@ import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 import { cn } from "~/lib/utils";
 
 const primaryButton =
-	"inline-flex items-center justify-center rounded-xl bg-[linear-gradient(180deg,#F97316_0%,#E8590C_100%)] px-7 py-[15px] text-[17px] font-bold whitespace-nowrap text-white no-underline shadow-[0_10px_26px_rgba(232,89,12,.35),inset_0_1px_0_rgba(255,255,255,.28)] transition hover:brightness-105";
+	"inline-flex items-center justify-center rounded-xl bg-[image:var(--atelier-accent-gradient)] px-7 py-[15px] text-[17px] font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
 const secondaryButton =
-	"inline-flex items-center justify-center rounded-xl border border-[#1c1917]/12 bg-white px-6 py-3.5 text-base font-semibold whitespace-nowrap text-[#1c1917] no-underline transition hover:border-[#1c1917]/25";
+	"inline-flex items-center justify-center rounded-xl border border-fg/12 bg-panel px-6 py-3.5 text-base font-semibold whitespace-nowrap text-fg no-underline transition hover:border-fg/25";
 const visualCard =
-	"rounded-2xl border border-[#1c1917]/8 bg-white shadow-[0_24px_60px_rgba(28,25,23,.08)]";
+	"rounded-2xl border border-fg/8 bg-panel shadow-[0_24px_60px_color-mix(in_srgb,var(--atelier-overlay)_8%,transparent)]";
 
 export function VsGithubPage() {
 	const { user, repositoryTo } = useRepositoryCta();
 	const heroCtaLabel = user ? "Open LixRay" : "Create your repo for free";
 
 	return (
-		<div className="min-h-screen bg-white font-sans text-[#1c1917] antialiased">
+		<div className="min-h-screen bg-panel font-sans text-fg antialiased">
 			<SiteHeader />
 
 			<main>
@@ -40,7 +40,7 @@ export function VsGithubPage() {
 						<br />
 						LixRay is for the rest of your company.
 					</h1>
-					<p className="m-0 max-w-[680px] text-[21px] leading-[1.55] text-[#57534e] text-pretty">
+					<p className="m-0 max-w-[680px] text-[21px] leading-[1.55] text-fg-muted text-pretty">
 						One repo for GTM, ops, sales, finance, and the agents working in
 						them.
 					</p>
@@ -54,7 +54,7 @@ export function VsGithubPage() {
 							</a>
 						)}
 					</div>
-					<div className="mt-0.5 flex flex-wrap items-center justify-center gap-2.5 text-sm text-[#8a8178]">
+					<div className="mt-0.5 flex flex-wrap items-center justify-center gap-2.5 text-sm text-fg-subtle">
 						<span>Works with</span>
 						<span
 							className="inline-flex items-center gap-2"
@@ -90,7 +90,7 @@ export function VsGithubPage() {
 				</div>
 
 				<section
-					className="border-t border-[#1c1917]/7 bg-white"
+					className="border-t border-fg/7 bg-panel"
 					aria-labelledby="git-wall-title"
 				>
 					<div className="mx-auto flex max-w-[1040px] flex-col gap-[22px] px-5 py-20 sm:px-14 sm:py-[110px]">
@@ -100,17 +100,17 @@ export function VsGithubPage() {
 						>
 							Non-developers struggle with GitHub
 						</h2>
-						<p className="m-0 max-w-[640px] text-[17px] leading-[1.6] text-[#57534e] text-pretty">
+						<p className="m-0 max-w-[640px] text-[17px] leading-[1.6] text-fg-muted text-pretty">
 							Companies set up GitHub repos for good reason: one source of
 							truth, real review, agents that ship. But GitHub is built for
 							software engineers. Everyone else hits three walls.
 						</p>
-						<div className="mt-[26px] flex flex-col items-start gap-8 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] px-8 py-7 lg:flex-row lg:items-center lg:gap-12">
+						<div className="mt-[26px] flex flex-col items-start gap-8 rounded-2xl border border-fg/8 bg-bg px-8 py-7 lg:flex-row lg:items-center lg:gap-12">
 							<div className="flex max-w-[340px] shrink-0 flex-col gap-3">
 								<h3 className="m-0 text-xl font-bold tracking-[-.01em]">
 									Branching, commits and pull requests are too complicated
 								</h3>
-								<p className="m-0 text-[15.5px] leading-[1.6] text-[#57534e] text-pretty">
+								<p className="m-0 text-[15.5px] leading-[1.6] text-fg-muted text-pretty">
 									Clone, branch, stage, commit, open a PR, resolve conflicts.
 									That workflow is built for engineers shipping code. Everyone
 									else just needs to make a change and move on.
@@ -118,7 +118,7 @@ export function VsGithubPage() {
 							</div>
 							<div className="flex w-full flex-1 flex-col gap-1.5">
 								<div className="flex items-center gap-3.5">
-									<span className="w-[110px] shrink-0 text-[11px] leading-[1.5] font-bold tracking-[.06em] text-[#8a8178] uppercase">
+									<span className="w-[110px] shrink-0 text-[11px] leading-[1.5] font-bold tracking-[.06em] text-fg-subtle uppercase">
 										Git
 									</span>
 									<div className="relative h-[88px] flex-1">
@@ -130,50 +130,59 @@ export function VsGithubPage() {
 											preserveAspectRatio="none"
 											aria-hidden="true"
 										>
-											<path d="M0 62 H400" stroke="#E3DACC" strokeWidth="1.5" />
+											<path
+												d="M0 62 H400"
+												stroke="var(--atelier-border-strong)"
+												strokeWidth="1.5"
+											/>
 											<path
 												d="M56 62 C 76 62, 76 26, 100 26 H 302 C 326 26, 326 62, 346 62"
-												stroke="#D9CFC0"
+												stroke="var(--atelier-border-strong)"
 												strokeWidth="1.5"
 												strokeDasharray="4 4"
 												fill="none"
 											/>
-											<circle cx="56" cy="62" r="4" fill="#1C1917" />
-											<circle cx="346" cy="62" r="4" fill="#C2410C" />
+											<circle cx="56" cy="62" r="4" fill="var(--atelier-fg)" />
+											<circle
+												cx="346"
+												cy="62"
+												r="4"
+												fill="var(--atelier-accent)"
+											/>
 										</svg>
-										<span className="absolute bottom-0.5 left-[3%] inline-flex items-center rounded-[5px] bg-[#efe9e1] px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-[#57534e]">
+										<span className="absolute bottom-0.5 left-[3%] inline-flex items-center rounded-[5px] bg-bg-hover-strong px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-fg-muted">
 											create branch
 										</span>
-										<span className="absolute top-1.5 left-[30%] inline-flex items-center rounded-[5px] bg-[#efe9e1] px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-[#57534e]">
+										<span className="absolute top-1.5 left-[30%] inline-flex items-center rounded-[5px] bg-bg-hover-strong px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-fg-muted">
 											open PR
 										</span>
-										<span className="absolute top-1.5 left-[58%] inline-flex items-center rounded-[5px] bg-[#efe9e1] px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-[#57534e]">
+										<span className="absolute top-1.5 left-[58%] inline-flex items-center rounded-[5px] bg-bg-hover-strong px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-fg-muted">
 											wait for CI
 										</span>
-										<span className="absolute right-0 bottom-0.5 inline-flex items-center rounded-[5px] bg-[#1c1917] px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-[#fbf6f0]">
+										<span className="absolute right-0 bottom-0.5 inline-flex items-center rounded-[5px] bg-overlay px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-overlay-fg">
 											merged · next day
 										</span>
 									</div>
 								</div>
 								<div className="flex items-start gap-3.5">
-									<span className="w-[110px] shrink-0 text-[11px] leading-[1.5] font-bold tracking-[.06em] text-[#c2410c] uppercase">
+									<span className="w-[110px] shrink-0 text-[11px] leading-[1.5] font-bold tracking-[.06em] text-accent uppercase">
 										Non-devs want
 									</span>
 									<div className="relative h-12 flex-1">
-										<span className="absolute top-[18px] right-0 left-0 h-[1.5px] bg-[#e3dacc]" />
-										<span className="absolute top-[18px] left-[10%] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#c2410c]" />
-										<span className="absolute top-[18px] left-[40%] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#c2410c]" />
-										<span className="absolute top-[18px] left-[68%] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#c2410c]" />
-										<span className="absolute top-[30px] left-[10%] -translate-x-1/2 font-mono text-[10px] whitespace-nowrap text-[#9a6b4f]">
+										<span className="absolute top-[18px] right-0 left-0 h-[1.5px] bg-border-strong" />
+										<span className="absolute top-[18px] left-[10%] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent" />
+										<span className="absolute top-[18px] left-[40%] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent" />
+										<span className="absolute top-[18px] left-[68%] size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent" />
+										<span className="absolute top-[30px] left-[10%] -translate-x-1/2 font-mono text-[10px] whitespace-nowrap text-accent">
 											edit plan
 										</span>
-										<span className="absolute top-[30px] left-[40%] -translate-x-1/2 font-mono text-[10px] whitespace-nowrap text-[#9a6b4f]">
+										<span className="absolute top-[30px] left-[40%] -translate-x-1/2 font-mono text-[10px] whitespace-nowrap text-accent">
 											update csv
 										</span>
-										<span className="absolute top-[30px] left-[68%] -translate-x-1/2 font-mono text-[10px] whitespace-nowrap text-[#9a6b4f]">
+										<span className="absolute top-[30px] left-[68%] -translate-x-1/2 font-mono text-[10px] whitespace-nowrap text-accent">
 											fix pricing
 										</span>
-										<span className="absolute top-[18px] right-0 inline-flex -translate-y-1/2 items-center rounded-[5px] border border-[#f3d8be] bg-[#fbefe4] px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-[#9a6b4f]">
+										<span className="absolute top-[18px] right-0 inline-flex -translate-y-1/2 items-center rounded-[5px] border border-accent-border bg-accent-subtle px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-accent">
 											done
 										</span>
 									</div>
@@ -181,7 +190,7 @@ export function VsGithubPage() {
 							</div>
 						</div>
 						<div className="grid gap-6 sm:grid-cols-2">
-							<div className="flex flex-col gap-3 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-7">
+							<div className="flex flex-col gap-3 rounded-2xl border border-fg/8 bg-bg p-7">
 								<span className="inline-flex items-center gap-[7px]">
 									<img
 										className="size-[19px] opacity-55 grayscale"
@@ -202,29 +211,29 @@ export function VsGithubPage() {
 								<h3 className="m-0 mt-1.5 text-xl font-bold tracking-[-.01em]">
 									Large files are a problem
 								</h3>
-								<p className="m-0 text-[15.5px] leading-[1.6] text-[#57534e] text-pretty">
+								<p className="m-0 text-[15.5px] leading-[1.6] text-fg-muted text-pretty">
 									Git chokes on big binaries. The launch video, the board deck,
 									design files: everything needs LFS, a bolt-on with size
 									limits, extra setup, and its own bills.
 								</p>
-								<div className="mt-2 flex flex-col gap-[5px] rounded-[10px] bg-[#1c1917] px-3.5 py-3 font-mono text-[11.5px] leading-[1.5]">
-									<span className="text-[#d6d3d1]">
-										<span className="text-[#78716c]">$</span> git push
+								<div className="mt-2 flex flex-col gap-[5px] rounded-[10px] bg-overlay px-3.5 py-3 font-mono text-[11.5px] leading-[1.5]">
+									<span className="text-overlay-fg">
+										<span className="text-overlay-fg-subtle">$</span> git push
 									</span>
-									<span className="text-[#fca5a5]">
+									<span className="text-overlay-danger">
 										remote: error: launch-video.mp4 is 2.1 GB
 									</span>
-									<span className="text-[#fca5a5]">
+									<span className="text-overlay-danger">
 										remote: this exceeds the 100 MB file limit
 									</span>
-									<span className="text-[#78716c]">
+									<span className="text-overlay-fg-subtle">
 										! [remote rejected] main -&gt; main
 									</span>
 								</div>
 							</div>
-							<div className="flex flex-col gap-3 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-7">
-								<span className="inline-flex items-center gap-1.5 font-mono text-xs text-[#8a8178]">
-									<span className="inline-flex items-center gap-[5px] rounded-[5px] bg-[#efe9e1] px-2 py-[3px]">
+							<div className="flex flex-col gap-3 rounded-2xl border border-fg/8 bg-bg p-7">
+								<span className="inline-flex items-center gap-1.5 font-mono text-xs text-fg-subtle">
+									<span className="inline-flex items-center gap-[5px] rounded-[5px] bg-bg-hover-strong px-2 py-[3px]">
 										<LockIcon size={11} />
 										all-or-nothing
 									</span>
@@ -232,22 +241,22 @@ export function VsGithubPage() {
 								<h3 className="m-0 mt-1.5 text-xl font-bold tracking-[-.01em]">
 									No permissions
 								</h3>
-								<p className="m-0 text-[15.5px] leading-[1.6] text-[#57534e] text-pretty">
+								<p className="m-0 text-[15.5px] leading-[1.6] text-fg-muted text-pretty">
 									Access is per-repo, all or nothing. No view-only, no
 									finance-only folder, no approvals. Anyone who is in can change
 									anything.
 								</p>
-								<div className="mt-2 flex flex-col gap-0.5 rounded-[10px] border border-[#1c1917]/8 bg-white p-2">
+								<div className="mt-2 flex flex-col gap-0.5 rounded-[10px] border border-fg/8 bg-panel p-2">
 									<div className="flex items-center gap-[9px] rounded-[7px] px-2 py-1.5">
 										<img
 											className="size-[15px]"
 											src="/landing/icon-folder.svg"
 											alt=""
 										/>
-										<span className="text-[12.5px] font-semibold text-[#1c1917]">
+										<span className="text-[12.5px] font-semibold text-fg">
 											gtm
 										</span>
-										<span className="ml-auto inline-flex items-center rounded-full border border-[#ece8e2] bg-[#f7f3ed] px-[9px] py-0.5 text-[11px] font-semibold text-[#57534e]">
+										<span className="ml-auto inline-flex items-center rounded-full border border-border bg-bg-hover px-[9px] py-0.5 text-[11px] font-semibold text-fg-muted">
 											Everyone · edit
 										</span>
 									</div>
@@ -257,26 +266,26 @@ export function VsGithubPage() {
 											src="/landing/icon-folder.svg"
 											alt=""
 										/>
-										<span className="text-[12.5px] font-semibold text-[#1c1917]">
+										<span className="text-[12.5px] font-semibold text-fg">
 											sales
 										</span>
-										<span className="ml-auto inline-flex items-center rounded-full border border-[#ece8e2] bg-[#f7f3ed] px-[9px] py-0.5 text-[11px] font-semibold text-[#57534e]">
+										<span className="ml-auto inline-flex items-center rounded-full border border-border bg-bg-hover px-[9px] py-0.5 text-[11px] font-semibold text-fg-muted">
 											Everyone · edit
 										</span>
 									</div>
-									<div className="flex items-center gap-[9px] rounded-[7px] bg-[#fef2f2] px-2 py-1.5">
+									<div className="flex items-center gap-[9px] rounded-[7px] bg-danger-subtle px-2 py-1.5">
 										<img
 											className="size-[15px]"
 											src="/landing/icon-folder.svg"
 											alt=""
 										/>
-										<span className="text-[12.5px] font-semibold text-[#1c1917]">
+										<span className="text-[12.5px] font-semibold text-fg">
 											finance
 										</span>
-										<span className="text-[11px] text-[#b91c1c]">
+										<span className="text-[11px] text-danger-border">
 											salaries, board decks
 										</span>
-										<span className="ml-auto inline-flex items-center rounded-full border border-[#fecaca] bg-white px-[9px] py-0.5 text-[11px] font-semibold text-[#b91c1c]">
+										<span className="ml-auto inline-flex items-center rounded-full border border-danger/25 bg-panel px-[9px] py-0.5 text-[11px] font-semibold text-danger-border">
 											Everyone · edit
 										</span>
 									</div>
@@ -287,7 +296,7 @@ export function VsGithubPage() {
 				</section>
 
 				<section
-					className="border-t border-[#1c1917]/7 bg-[#fbf6f0]"
+					className="border-t border-fg/7 bg-bg"
 					aria-labelledby="offers-title"
 				>
 					<div className="mx-auto flex max-w-[1040px] flex-col gap-24 px-5 py-24 sm:px-14 sm:py-[120px] lg:gap-[120px]">
@@ -338,7 +347,7 @@ export function VsGithubPage() {
 				</section>
 
 				<section
-					className="border-t border-[#1c1917]/7 bg-white"
+					className="border-t border-fg/7 bg-panel"
 					aria-labelledby="what-goes-in-title"
 				>
 					<div className="mx-auto flex max-w-[1040px] flex-col gap-14 px-5 py-24 sm:px-14 sm:py-[110px]">
@@ -349,7 +358,7 @@ export function VsGithubPage() {
 							>
 								What goes in the company repo
 							</h2>
-							<p className="m-0 max-w-[560px] text-[17px] leading-[1.55] text-[#57534e] text-pretty">
+							<p className="m-0 max-w-[560px] text-[17px] leading-[1.55] text-fg-muted text-pretty">
 								Everything a 5–20 person startup runs on that isn&apos;t source
 								code.
 							</p>
@@ -393,26 +402,26 @@ export function VsGithubPage() {
 							/>
 						</div>
 						<div className="flex items-center gap-[18px]">
-							<span className="flex-1 border-t-[1.5px] border-dashed border-[#d9cfc0]" />
-							<span className="text-sm font-bold whitespace-nowrap text-[#8a8178]">
+							<span className="flex-1 border-t-[1.5px] border-dashed border-border-strong" />
+							<span className="text-sm font-bold whitespace-nowrap text-fg-subtle">
 								What does not go in
 							</span>
-							<span className="flex-1 border-t-[1.5px] border-dashed border-[#d9cfc0]" />
+							<span className="flex-1 border-t-[1.5px] border-dashed border-border-strong" />
 						</div>
-						<div className="flex flex-col items-start gap-6 rounded-[14px] border border-[#1c1917]/6 bg-[#f7f3ed] px-7 py-6 lg:flex-row lg:items-center lg:gap-9">
-							<p className="m-0 max-w-[340px] text-base leading-[1.55] text-[#292524] text-pretty">
+						<div className="flex flex-col items-start gap-6 rounded-[14px] border border-fg/6 bg-bg-hover px-7 py-6 lg:flex-row lg:items-center lg:gap-9">
+							<p className="m-0 max-w-[340px] text-base leading-[1.55] text-fg text-pretty">
 								<b>Your source code stays in GitHub.</b> LixRay is for the repos
 								that are not source code.
 							</p>
 							<div className="flex flex-1 flex-wrap items-center justify-center gap-4 lg:flex-nowrap">
-								<div className="flex shrink-0 flex-col gap-[11px] rounded-xl border border-[#1c1917]/10 bg-white px-[18px] py-4">
+								<div className="flex shrink-0 flex-col gap-[11px] rounded-xl border border-fg/10 bg-panel px-[18px] py-4">
 									<span className="inline-flex items-center gap-2">
 										<img
 											className="size-4"
 											src="/landing/brand-github.svg"
 											alt="GitHub"
 										/>
-										<span className="font-mono text-[12.5px] font-bold text-[#1c1917]">
+										<span className="font-mono text-[12.5px] font-bold text-fg">
 											github.com/acme
 										</span>
 									</span>
@@ -420,19 +429,19 @@ export function VsGithubPage() {
 										<RepoChip variant="github">frontend</RepoChip>
 										<RepoChip variant="github">backend</RepoChip>
 									</span>
-									<span className="text-[11.5px] font-semibold text-[#8a8178]">
+									<span className="text-[11.5px] font-semibold text-fg-subtle">
 										source code
 									</span>
 								</div>
-								<span className="text-lg font-semibold text-[#c9c2b8]">+</span>
-								<div className="flex flex-col gap-[11px] rounded-xl border border-[#f3d8be] bg-[#fbefe4] px-[18px] py-4">
+								<span className="text-lg font-semibold text-fg-faint">+</span>
+								<div className="flex flex-col gap-[11px] rounded-xl border border-accent-border bg-accent-subtle px-[18px] py-4">
 									<span className="inline-flex items-center gap-2">
 										<img
 											className="size-4"
 											src="/landing/lixray-glyph.svg"
 											alt="LixRay"
 										/>
-										<span className="font-mono text-[12.5px] font-bold text-[#1c1917]">
+										<span className="font-mono text-[12.5px] font-bold text-fg">
 											lixray.com/@acme/company
 										</span>
 									</span>
@@ -443,7 +452,7 @@ export function VsGithubPage() {
 										<RepoChip>finance</RepoChip>
 										<RepoChip>skills</RepoChip>
 									</span>
-									<span className="text-[11.5px] font-semibold text-[#c2410c]">
+									<span className="text-[11.5px] font-semibold text-accent">
 										everything else
 									</span>
 								</div>
@@ -452,7 +461,7 @@ export function VsGithubPage() {
 					</div>
 				</section>
 
-				<section className="flex flex-col items-center gap-[22px] border-t border-[#1c1917]/7 bg-white px-5 py-24 text-center sm:py-[120px]">
+				<section className="flex flex-col items-center gap-[22px] border-t border-fg/7 bg-panel px-5 py-24 text-center sm:py-[120px]">
 					<h2 className="m-0 max-w-[720px] text-[clamp(2rem,4.5vw,2.625rem)] leading-[1.1] font-bold tracking-[-.03em] text-balance">
 						Put your company into a repo
 					</h2>
@@ -462,13 +471,13 @@ export function VsGithubPage() {
 				</section>
 			</main>
 
-			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-[#1c1917]/7 px-5 py-6 text-sm text-[#8a8178] sm:px-14">
+			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-fg/7 px-5 py-6 text-sm text-fg-subtle sm:px-14">
 				<span className="inline-flex items-center gap-2">
 					<img className="size-4" src="/lixray-mark.svg" alt="" />
-					<span className="font-semibold text-[#57534e]">LixRay</span>
+					<span className="font-semibold text-fg-muted">LixRay</span>
 				</span>
 				<a
-					className="no-underline hover:text-[#57534e]"
+					className="no-underline hover:text-fg-muted"
 					href="https://opral.com"
 					target="_blank"
 					rel="noreferrer"
@@ -476,17 +485,17 @@ export function VsGithubPage() {
 					© 2026 Opral
 				</a>
 				<nav className="flex flex-wrap items-center gap-4">
-					<Link className="no-underline hover:text-[#57534e]" to="/privacy">
+					<Link className="no-underline hover:text-fg-muted" to="/privacy">
 						Privacy
 					</Link>
-					<Link className="no-underline hover:text-[#57534e]" to="/terms">
+					<Link className="no-underline hover:text-fg-muted" to="/terms">
 						Terms
 					</Link>
-					<Link className="no-underline hover:text-[#57534e]" to="/support">
+					<Link className="no-underline hover:text-fg-muted" to="/support">
 						Support
 					</Link>
 					<a
-						className="font-semibold text-[#57534e] no-underline"
+						className="font-semibold text-fg-muted no-underline"
 						href="https://github.com/opral"
 						target="_blank"
 						rel="noreferrer"
@@ -506,52 +515,54 @@ function HeroVisual() {
 			aria-label="Agents in ChatGPT, Slack, Claude, and the terminal all working against one LixRay repository"
 		>
 			<div className="flex w-[300px] shrink-0 flex-col gap-7">
-				<div className="overflow-hidden rounded-[14px] border border-[#1c1917]/18 bg-white shadow-[0_18px_44px_rgba(28,25,23,.1)]">
-					<div className="flex items-center gap-2 bg-[#1c1917] px-3.5 py-2.5">
+				<div className="overflow-hidden rounded-[14px] border border-fg/18 bg-panel shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_10%,transparent)]">
+					<div className="flex items-center gap-2 bg-overlay px-3.5 py-2.5">
 						<img
 							className="size-3.5 object-contain brightness-0 invert"
 							src="/landing/brand-openai.svg"
 							alt=""
 						/>
-						<span className="text-[12.5px] font-bold text-white">ChatGPT</span>
-						<span className="ml-auto text-[11px] text-[#a8a29e]">Jonas</span>
+						<span className="text-[12.5px] font-bold text-accent-on">
+							ChatGPT
+						</span>
+						<span className="ml-auto text-[11px] text-fg-faint">Jonas</span>
 					</div>
 					<div className="flex flex-col gap-2 px-3.5 py-3">
-						<div className="max-w-[230px] self-end rounded-[14px] bg-[#f0f0f0] px-3 py-[7px] text-[12.5px] leading-[1.45] text-[#1f1f1f]">
+						<div className="max-w-[230px] self-end rounded-[14px] bg-bg-hover-strong px-3 py-[7px] text-[12.5px] leading-[1.45] text-fg">
 							Move Northwind to Negotiation, $48k
 						</div>
-						<span className="inline-flex items-center gap-1.5 self-start rounded-full border border-[#e5e5e5] bg-[#f7f7f8] px-2.5 py-1 text-[11.5px] text-[#444444]">
+						<span className="inline-flex items-center gap-1.5 self-start rounded-full border border-border bg-bg-subtle px-2.5 py-1 text-[11.5px] text-fg-muted">
 							<CheckIcon size={10} />
 							Edited pipeline.csv
 						</span>
 					</div>
 				</div>
-				<div className="overflow-hidden rounded-[14px] border border-[#1c1917]/10 bg-white shadow-[0_18px_44px_rgba(28,25,23,.1)]">
-					<div className="flex items-center gap-2 border-b border-[#f0ede8] px-3.5 py-2.5">
+				<div className="overflow-hidden rounded-[14px] border border-fg/10 bg-panel shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_10%,transparent)]">
+					<div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5">
 						<img
 							className="size-3.5"
 							src="/landing/brand-slack.svg"
 							alt="Slack"
 						/>
-						<span className="text-[13px] font-extrabold text-[#1d1c1d]">
+						<span className="text-[13px] font-extrabold text-fg">
 							#go-to-market
 						</span>
-						<span className="ml-auto text-[11px] text-[#a8a29e]">
+						<span className="ml-auto text-[11px] text-fg-faint">
 							24 members
 						</span>
 					</div>
 					<div className="flex flex-col gap-3 px-3.5 py-3">
 						<div className="flex gap-[9px]">
-							<span className="inline-flex size-[26px] shrink-0 items-center justify-center rounded-[7px] bg-[#1c1917] text-[11px] font-bold text-[#fbf6f0]">
+							<span className="inline-flex size-[26px] shrink-0 items-center justify-center rounded-[7px] bg-overlay text-[11px] font-bold text-overlay-fg">
 								M
 							</span>
 							<span className="flex flex-col gap-0.5">
 								<span className="text-xs">
-									<b className="text-[#1d1c1d]">Mara</b>{" "}
-									<span className="text-[11px] text-[#a8a29e]">2:03 PM</span>
+									<b className="text-fg">Mara</b>{" "}
+									<span className="text-[11px] text-fg-faint">2:03 PM</span>
 								</span>
-								<span className="text-[12.5px] leading-[1.45] text-[#1f1f1f]">
-									<span className="rounded bg-[#e8f5fa] px-[3px] font-semibold text-[#1264a3]">
+								<span className="text-[12.5px] leading-[1.45] text-fg">
+									<span className="rounded bg-tag-blue px-[3px] font-semibold text-tag-blue-fg">
 										@Claude
 									</span>{" "}
 									update the runbook with the new on-call rotation
@@ -559,7 +570,7 @@ function HeroVisual() {
 							</span>
 						</div>
 						<div className="flex gap-[9px]">
-							<span className="inline-flex size-[26px] shrink-0 items-center justify-center rounded-[7px] bg-[#fdf1e7]">
+							<span className="inline-flex size-[26px] shrink-0 items-center justify-center rounded-[7px] bg-accent-subtle">
 								<img
 									className="size-[13px]"
 									src="/landing/claude-spark.svg"
@@ -568,15 +579,15 @@ function HeroVisual() {
 							</span>
 							<span className="flex flex-col gap-0.5">
 								<span className="text-xs">
-									<b className="text-[#1d1c1d]">Claude</b>{" "}
-									<span className="rounded-[3px] bg-[#f0f0f0] px-1 py-px text-[9.5px] font-bold text-[#7a7a7a]">
+									<b className="text-fg">Claude</b>{" "}
+									<span className="rounded-[3px] bg-bg-hover-strong px-1 py-px text-[9.5px] font-bold text-fg-subtle">
 										APP
 									</span>{" "}
-									<span className="text-[11px] text-[#a8a29e]">2:04 PM</span>
+									<span className="text-[11px] text-fg-faint">2:04 PM</span>
 								</span>
-								<span className="text-[12.5px] leading-[1.45] text-[#1f1f1f]">
+								<span className="text-[12.5px] leading-[1.45] text-fg">
 									Done. Proposed an edit to{" "}
-									<span className="rounded bg-[#f7f3ed] px-1 font-mono text-[11.5px]">
+									<span className="rounded bg-bg-hover px-1 font-mono text-[11.5px]">
 										ops/runbook.md
 									</span>
 								</span>
@@ -595,20 +606,20 @@ function HeroVisual() {
 			>
 				<path
 					d="M0 70 C 44 70, 36 160, 80 160"
-					stroke="#E3DACC"
+					stroke="var(--atelier-border-strong)"
 					strokeWidth="1.5"
 				/>
 				<path
 					d="M0 250 C 44 250, 36 160, 80 160"
-					stroke="#E3DACC"
+					stroke="var(--atelier-border-strong)"
 					strokeWidth="1.5"
 				/>
-				<circle cx="80" cy="160" r="3" fill="#C2410C" />
+				<circle cx="80" cy="160" r="3" fill="var(--atelier-accent)" />
 			</svg>
-			<div className="flex w-[320px] shrink-0 flex-col gap-px rounded-2xl border border-[#1c1917]/10 bg-white px-3 py-[18px] text-[13px] text-[#292524] shadow-[0_30px_80px_rgba(28,25,23,.14)]">
-				<span className="mx-1 mb-3 flex rounded-lg border border-[#ece8e2] bg-[#f4f2ef] px-3 py-[7px] font-mono text-xs text-[#8a8178]">
+			<div className="flex w-[320px] shrink-0 flex-col gap-px rounded-2xl border border-fg/10 bg-panel px-3 py-[18px] text-[13px] text-fg shadow-[0_30px_80px_color-mix(in_srgb,var(--atelier-overlay)_14%,transparent)]">
+				<span className="mx-1 mb-3 flex rounded-lg border border-border bg-bg px-3 py-[7px] font-mono text-xs text-fg-subtle">
 					<span>
-						lixray.com/<b className="text-[#1c1917]">@acme/company</b>
+						lixray.com/<b className="text-fg">@acme/company</b>
 					</span>
 				</span>
 				<TreeFolder>gtm</TreeFolder>
@@ -622,8 +633,8 @@ function HeroVisual() {
 					highlighted
 					meta={
 						<span className="font-mono text-[11.5px]">
-							<span className="text-[#15803d]">+12</span>{" "}
-							<span className="text-[#b91c1c]">−3</span>
+							<span className="text-success-border">+12</span>{" "}
+							<span className="text-danger-border">−3</span>
 						</span>
 					}
 				>
@@ -636,8 +647,8 @@ function HeroVisual() {
 					highlighted
 					meta={
 						<span className="font-mono text-[11.5px]">
-							<span className="text-[#15803d]">+3</span>{" "}
-							<span className="text-[#b91c1c]">−3</span>
+							<span className="text-success-border">+3</span>{" "}
+							<span className="text-danger-border">−3</span>
 						</span>
 					}
 				>
@@ -649,7 +660,7 @@ function HeroVisual() {
 					icon="/landing/icon-sq-pdf.svg"
 					highlighted
 					meta={
-						<span className="font-mono text-[11.5px] text-[#8a8178]">
+						<span className="font-mono text-[11.5px] text-fg-subtle">
 							v4 → v5
 						</span>
 					}
@@ -669,50 +680,54 @@ function HeroVisual() {
 			>
 				<path
 					d="M80 70 C 36 70, 44 160, 0 160"
-					stroke="#E3DACC"
+					stroke="var(--atelier-border-strong)"
 					strokeWidth="1.5"
 				/>
 				<path
 					d="M80 250 C 36 250, 44 160, 0 160"
-					stroke="#E3DACC"
+					stroke="var(--atelier-border-strong)"
 					strokeWidth="1.5"
 				/>
-				<circle cx="0" cy="160" r="3" fill="#C2410C" />
+				<circle cx="0" cy="160" r="3" fill="var(--atelier-accent)" />
 			</svg>
 			<div className="flex w-[300px] shrink-0 flex-col gap-7">
-				<div className="overflow-hidden rounded-[14px] border border-[#f3d8be] bg-[#fbf5ea] shadow-[0_18px_44px_rgba(28,25,23,.1)]">
+				<div className="overflow-hidden rounded-[14px] border border-accent-border bg-accent-subtle shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_10%,transparent)]">
 					<div className="flex items-center gap-2 px-3.5 py-2.5">
 						<img className="size-3.5" src="/landing/claude-spark.svg" alt="" />
-						<span className="text-[12.5px] font-bold text-[#c2410c]">
-							Claude
-						</span>
-						<span className="ml-auto text-[11px] text-[#c88a5f]">Mara</span>
+						<span className="text-[12.5px] font-bold text-accent">Claude</span>
+						<span className="ml-auto text-[11px] text-fg-subtle">Mara</span>
 					</div>
 					<div className="flex flex-col gap-2 px-3.5 pb-3">
-						<div className="max-w-[230px] self-end rounded-[14px_14px_4px_14px] bg-[#efe3cc] px-3 py-[7px] text-[12.5px] leading-[1.45] text-[#292524]">
+						<div className="max-w-[230px] self-end rounded-[14px_14px_4px_14px] bg-accent-border px-3 py-[7px] text-[12.5px] leading-[1.45] text-fg">
 							Rewrite launch pricing to usage-based
 						</div>
-						<span className="inline-flex items-center gap-1.5 self-start rounded-full border border-[#ebdcc3] bg-white px-2.5 py-1 text-[11.5px] text-[#8a6a4c]">
+						<span className="inline-flex items-center gap-1.5 self-start rounded-full border border-accent-border bg-panel px-2.5 py-1 text-[11.5px] text-accent">
 							<CheckIcon size={10} />
 							Proposed edit to launch-plan.md
 						</span>
 					</div>
 				</div>
-				<div className="flex flex-col overflow-hidden rounded-[14px] bg-[#1c1917] shadow-[0_18px_44px_rgba(28,25,23,.2)]">
-					<div className="flex items-center gap-1.5 bg-[#292524] px-3 py-[9px]">
-						<span className="size-2.5 rounded-full bg-[#ff5f57]" />
-						<span className="size-2.5 rounded-full bg-[#febc2e]" />
-						<span className="size-2.5 rounded-full bg-[#28c840]" />
-						<span className="flex-1 pr-[42px] text-center text-[11px] text-[#a8a29e]">
+				<div className="flex flex-col overflow-hidden rounded-[14px] bg-overlay shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_20%,transparent)]">
+					<div className="flex items-center gap-1.5 bg-overlay-raised px-3 py-[9px]">
+						<span
+							className="size-2.5 rounded-full bg-[#ff5f57]" /* token-literal: macOS window control */
+						/>
+						<span
+							className="size-2.5 rounded-full bg-[#febc2e]" /* token-literal: macOS window control */
+						/>
+						<span
+							className="size-2.5 rounded-full bg-[#28c840]" /* token-literal: macOS window control */
+						/>
+						<span className="flex-1 pr-[42px] text-center text-[11px] text-fg-faint">
 							Terminal
 						</span>
 					</div>
 					<div className="flex flex-col gap-[7px] px-4 pt-3 pb-3.5 font-mono text-xs leading-[1.5]">
-						<span className="text-[#d6d3d1]">
-							<span className="text-[#78716c]">$</span> codex &quot;new board
-							deck version&quot;
+						<span className="text-overlay-fg">
+							<span className="text-overlay-fg-subtle">$</span> codex &quot;new
+							board deck version&quot;
 						</span>
-						<span className="text-[#86efac]">
+						<span className="text-overlay-success">
 							✓ uploaded finance/board-deck.pdf v5
 						</span>
 					</div>
@@ -746,7 +761,7 @@ function TreeFile({
 		<span
 			className={cn(
 				"flex items-center gap-2 py-[5px] pr-2.5 pl-[34px]",
-				highlighted && "rounded-[7px] bg-[#fbefe4] font-semibold",
+				highlighted && "rounded-[7px] bg-accent-subtle font-semibold",
 			)}
 		>
 			<img className="size-[15px]" src={icon} alt="" />
@@ -766,10 +781,10 @@ function RepoChip({
 	return (
 		<span
 			className={cn(
-				"inline-flex items-center gap-[5px] rounded-md border px-[9px] py-1 font-mono text-[11px] text-[#57534e]",
+				"inline-flex items-center gap-[5px] rounded-md border px-[9px] py-1 font-mono text-[11px] text-fg-muted",
 				variant === "github"
-					? "border-[#ececec] bg-[#f7f7f8]"
-					: "border-[#f0dfc8] bg-white",
+					? "border-border bg-bg-subtle"
+					: "border-accent-border bg-panel",
 			)}
 		>
 			<img
@@ -805,7 +820,7 @@ function Band({
 			)}
 		>
 			<div className={cn("flex flex-col gap-4", reverse && "lg:order-2")}>
-				<span className="text-sm font-bold tracking-[.02em] text-[#c2410c]">
+				<span className="text-sm font-bold tracking-[.02em] text-accent">
 					{label}
 				</span>
 				<div className="flex items-center gap-3">
@@ -813,12 +828,12 @@ function Band({
 						{title}
 					</h3>
 					{soon ? (
-						<span className="rounded-full border border-[#f3d8be] bg-[#fbefe4] px-2.5 py-[3px] text-[10.5px] font-bold tracking-[.06em] text-[#c2410c] uppercase">
+						<span className="rounded-full border border-accent-border bg-accent-subtle px-2.5 py-[3px] text-[10.5px] font-bold tracking-[.06em] text-accent uppercase">
 							Soon
 						</span>
 					) : null}
 				</div>
-				<p className="m-0 text-[16.5px] leading-[1.6] text-[#57534e] text-pretty">
+				<p className="m-0 text-[16.5px] leading-[1.6] text-fg-muted text-pretty">
 					{body}
 				</p>
 			</div>
@@ -843,8 +858,8 @@ function FileFormatsVisual() {
 					<>
 						34 edits ·{" "}
 						<span className="font-mono">
-							<span className="text-[#15803d]">+9</span>{" "}
-							<span className="text-[#b91c1c]">−4</span>
+							<span className="text-success-border">+9</span>{" "}
+							<span className="text-danger-border">−4</span>
 						</span>{" "}
 						today
 					</>
@@ -856,7 +871,7 @@ function FileFormatsVisual() {
 				meta={
 					<>
 						row-level diffs ·{" "}
-						<span className="font-mono text-[#15803d]">+12 rows</span>
+						<span className="font-mono text-success-border">+12 rows</span>
 					</>
 				}
 			/>
@@ -889,12 +904,12 @@ function FileRow({
 		<div
 			className={cn(
 				"flex items-center gap-[11px] rounded-[9px] px-3 py-[11px]",
-				highlighted && "bg-[#f7f3ed]",
+				highlighted && "bg-bg-hover",
 			)}
 		>
 			<img className="size-[18px]" src={icon} alt="" />
-			<span className="text-[13.5px] font-semibold text-[#1c1917]">{name}</span>
-			<span className="ml-auto text-right text-xs text-[#8a8178]">{meta}</span>
+			<span className="text-[13.5px] font-semibold text-fg">{name}</span>
+			<span className="ml-auto text-right text-xs text-fg-subtle">{meta}</span>
 		</div>
 	);
 }
@@ -902,45 +917,45 @@ function FileRow({
 function ProposalsVisual() {
 	return (
 		<div className={cn(visualCard, "flex flex-col gap-2.5 p-4")}>
-			<div className="flex flex-col gap-2.5 rounded-xl border border-[#f3d8be] bg-[#fbefe4] px-4 py-3.5">
+			<div className="flex flex-col gap-2.5 rounded-xl border border-accent-border bg-accent-subtle px-4 py-3.5">
 				<span className="flex flex-col gap-0.5">
-					<span className="text-[13.5px] font-bold text-[#1c1917]">
+					<span className="text-[13.5px] font-bold text-fg">
 						Update refund policy to 30 days
 					</span>
-					<span className="text-xs text-[#9a6b4f]">
+					<span className="text-xs text-accent">
 						proposal on kb/refunds.md ·{" "}
-						<span className="font-semibold text-[#c2410c]">
+						<span className="font-semibold text-accent">
 							Jonas&apos;s ChatGPT
 						</span>{" "}
 						·{" "}
 						<span className="font-mono">
-							<span className="text-[#15803d]">+4</span>{" "}
-							<span className="text-[#b91c1c]">−4</span>
+							<span className="text-success-border">+4</span>{" "}
+							<span className="text-danger-border">−4</span>
 						</span>
 					</span>
 				</span>
-				<span className="text-[13px] leading-[1.55] text-[#292524]">
-					<span className="rounded bg-[#fee2e2] px-1 py-px text-[#8a5050] line-through decoration-[#dc8181]">
+				<span className="text-[13px] leading-[1.55] text-fg">
+					<span className="rounded bg-diff-removed-subtle px-1 py-px text-diff-removed line-through decoration-diff-removed">
 						within 14 days of purchase
 					</span>{" "}
-					<span className="rounded bg-[#dcfce7] px-1 py-px shadow-[inset_0_0_0_1px_#bbe7c9]">
+					<span className="rounded bg-diff-added-subtle px-1 py-px ring-1 ring-diff-added/30 ring-inset">
 						within 30 days of purchase
 					</span>
 				</span>
 				<span className="flex gap-2">
-					<span className="rounded-lg bg-[linear-gradient(180deg,#F97316_0%,#E8590C_100%)] px-3.5 py-1.5 text-[12.5px] font-bold text-white">
+					<span className="rounded-lg bg-[image:var(--atelier-accent-gradient)] px-3.5 py-1.5 text-[12.5px] font-bold text-accent-on">
 						Accept
 					</span>
-					<span className="rounded-lg border border-[#ebdcc7] bg-white px-3.5 py-1.5 text-[12.5px] font-semibold text-[#44403c]">
+					<span className="rounded-lg border border-accent-border bg-panel px-3.5 py-1.5 text-[12.5px] font-semibold text-fg-muted">
 						Reject
 					</span>
 				</span>
 			</div>
-			<div className="flex items-center gap-[9px] px-4 pt-0.5 pb-1 text-[12.5px] text-[#a8a29e]">
+			<div className="flex items-center gap-[9px] px-4 pt-0.5 pb-1 text-[12.5px] text-fg-faint">
 				<CheckIcon size={13} />
 				<span>
-					<b className="text-[#57534e]">Pricing one-pager v3</b> accepted by
-					Mara · 2 hr ago
+					<b className="text-fg-muted">Pricing one-pager v3</b> accepted by Mara
+					· 2 hr ago
 				</span>
 			</div>
 		</div>
@@ -951,10 +966,10 @@ function ActivityVisual() {
 	return (
 		<div className={cn(visualCard, "flex flex-col px-5 py-4")}>
 			<div className="relative flex flex-col">
-				<span className="absolute top-4 bottom-4 left-[3.75px] w-[1.5px] bg-[#ede7dd]" />
+				<span className="absolute top-4 bottom-4 left-[3.75px] w-[1.5px] bg-border" />
 				<ActivityRow
 					iconSrc="/landing/claude-spark.svg"
-					iconClass="bg-[#fdf1e7]"
+					iconClass="bg-accent-subtle"
 					who="Mara's Claude"
 					verb="edited"
 					file="gtm/launch-plan.md"
@@ -963,7 +978,7 @@ function ActivityVisual() {
 				/>
 				<ActivityRow
 					iconSrc="/landing/brand-openai.svg"
-					iconClass="bg-[#f1f0ee]"
+					iconClass="bg-bg-hover"
 					who="Jonas's ChatGPT"
 					verb="updated"
 					file="sales/pipeline.csv"
@@ -972,7 +987,7 @@ function ActivityVisual() {
 				/>
 				<ActivityRow
 					iconSrc="/landing/codex-icon.svg"
-					iconClass="bg-[#1c1917]"
+					iconClass="bg-overlay"
 					iconSize="size-2.5"
 					who="Codex"
 					verb="uploaded"
@@ -981,7 +996,7 @@ function ActivityVisual() {
 				/>
 				<ActivityRow
 					iconSrc="/landing/claude-spark.svg"
-					iconClass="bg-[#fdf1e7]"
+					iconClass="bg-accent-subtle"
 					who="Mara's Claude"
 					verb="edited"
 					file="kb/refunds.md"
@@ -1013,7 +1028,7 @@ function ActivityRow({
 }) {
 	return (
 		<div className="flex items-center gap-3.5 px-1 py-2.5">
-			<span className="relative z-[1] size-[9px] shrink-0 rounded-full bg-[#c2410c] shadow-[0_0_0_3px_#ffffff]" />
+			<span className="relative z-[1] size-[9px] shrink-0 rounded-full bg-accent shadow-[0_0_0_3px_var(--atelier-panel)]" />
 			<span
 				className={cn(
 					"inline-flex size-5 shrink-0 items-center justify-center rounded-md",
@@ -1022,16 +1037,14 @@ function ActivityRow({
 			>
 				<img className={cn("object-contain", iconSize)} src={iconSrc} alt="" />
 			</span>
-			<span className="min-w-0 text-[13px] text-[#44403c]">
-				<b className="text-[#1c1917]">{who}</b> {verb}{" "}
-				<span className="rounded bg-[#f7f3ed] px-[5px] py-px font-mono text-xs">
+			<span className="min-w-0 text-[13px] text-fg-muted">
+				<b className="text-fg">{who}</b> {verb}{" "}
+				<span className="rounded bg-bg-hover px-[5px] py-px font-mono text-xs">
 					{file}
 				</span>
 			</span>
-			<span className="ml-auto inline-flex items-center gap-1.5 text-xs whitespace-nowrap text-[#8a8178]">
-				{live ? (
-					<span className="size-[7px] rounded-full bg-[#19a463]" />
-				) : null}
+			<span className="ml-auto inline-flex items-center gap-1.5 text-xs whitespace-nowrap text-fg-subtle">
+				{live ? <span className="size-[7px] rounded-full bg-success" /> : null}
 				{time}
 			</span>
 		</div>
@@ -1076,11 +1089,11 @@ function PermissionRow({
 		<div
 			className={cn(
 				"flex items-center gap-[11px] rounded-[9px] px-3 py-[11px]",
-				highlighted && "bg-[#fbefe4]",
+				highlighted && "bg-accent-subtle",
 			)}
 		>
 			<img className="size-[18px]" src="/landing/icon-folder.svg" alt="" />
-			<span className="text-[13.5px] font-semibold text-[#1c1917]">{name}</span>
+			<span className="text-[13.5px] font-semibold text-fg">{name}</span>
 			<span className="ml-auto inline-flex flex-wrap items-center justify-end gap-1.5">
 				{children}
 			</span>
@@ -1100,8 +1113,8 @@ function PermChip({
 			className={cn(
 				"inline-flex items-center gap-[5px] rounded-full border px-2.5 py-[3px] text-[11.5px] font-semibold whitespace-nowrap",
 				variant === "locked"
-					? "border-[#f3d8be] bg-white text-[#9a6b4f]"
-					: "border-[#ece8e2] bg-[#f7f3ed] text-[#57534e]",
+					? "border-accent-border bg-panel text-accent"
+					: "border-border bg-bg-hover text-fg-muted",
 			)}
 		>
 			{children}
@@ -1113,10 +1126,10 @@ function InsightsVisual() {
 	return (
 		<div className={cn(visualCard, "flex flex-col gap-0.5 p-4")}>
 			<div className="flex items-center justify-between px-3 pt-1 pb-2.5">
-				<span className="text-[13.5px] font-bold text-[#1c1917]">
+				<span className="text-[13.5px] font-bold text-fg">
 					What agents read
 				</span>
-				<span className="text-xs text-[#8a8178]">last 30 days</span>
+				<span className="text-xs text-fg-subtle">last 30 days</span>
 			</div>
 			<InsightRow
 				icon="/landing/icon-sq-md.svg"
@@ -1176,21 +1189,21 @@ function InsightRow({
 			<span
 				className={cn(
 					"w-[130px] shrink-0 truncate text-[13px] font-semibold sm:w-[210px]",
-					dead ? "text-[#a8a29e]" : "text-[#1c1917]",
+					dead ? "text-fg-faint" : "text-fg",
 				)}
 			>
 				{name}
 			</span>
-			<span className="h-2 flex-1 overflow-hidden rounded-full bg-[#f0ede8]">
+			<span className="h-2 flex-1 overflow-hidden rounded-full bg-border">
 				<span
-					className="block h-full rounded-full bg-[linear-gradient(90deg,#F97316,#C2410C)]"
+					className="block h-full rounded-full bg-[linear-gradient(90deg,var(--atelier-link),var(--atelier-accent))]"
 					style={{ width: `${percent}%` }}
 				/>
 			</span>
 			<span
 				className={cn(
 					"w-9 shrink-0 text-right font-mono text-xs sm:w-[74px]",
-					dead ? "text-[#a8a29e]" : "text-[#57534e]",
+					dead ? "text-fg-faint" : "text-fg-muted",
 				)}
 			>
 				{count}
@@ -1206,7 +1219,7 @@ function LockIcon({ size = 12 }: { size?: number }) {
 			height={size}
 			viewBox="0 0 24 24"
 			fill="none"
-			stroke="#8A8178"
+			stroke="var(--atelier-fg-subtle)"
 			strokeWidth="2.2"
 			strokeLinecap="round"
 			strokeLinejoin="round"
@@ -1230,7 +1243,7 @@ function RepoArea({
 	Icon: LucideIcon;
 }) {
 	return (
-		<div className="flex flex-col gap-2.5 rounded-2xl border border-[#1c1917]/8 bg-[#fbf6f0] p-6">
+		<div className="flex flex-col gap-2.5 rounded-2xl border border-fg/8 bg-bg p-6">
 			<span className="inline-flex items-center gap-2.5">
 				<span className="relative inline-flex size-8 shrink-0 items-center justify-center">
 					<img
@@ -1240,17 +1253,17 @@ function RepoArea({
 					/>
 					{/* Nudged below box center onto the folder's front panel. */}
 					<Icon
-						className="relative top-1 size-3 text-[#dbeafe]"
+						className="relative top-1 size-3 text-tag-blue"
 						strokeWidth={2.4}
 						aria-hidden="true"
 					/>
 				</span>
-				<span className="font-mono text-[15px] font-bold text-[#c2410c]">
+				<span className="font-mono text-[15px] font-bold text-accent">
 					{path}
 				</span>
 			</span>
-			<h3 className="m-0 text-[17px] font-bold text-[#1c1917]">{title}</h3>
-			<p className="m-0 text-sm leading-[1.6] text-[#57534e]">{body}</p>
+			<h3 className="m-0 text-[17px] font-bold text-fg">{title}</h3>
+			<p className="m-0 text-sm leading-[1.6] text-fg-muted">{body}</p>
 		</div>
 	);
 }
@@ -1262,7 +1275,7 @@ function CheckIcon({ size = 11 }: { size?: number }) {
 			height={size}
 			viewBox="0 0 24 24"
 			fill="none"
-			stroke="#19A463"
+			stroke="var(--atelier-success)"
 			strokeWidth="2.6"
 			strokeLinecap="round"
 			strokeLinejoin="round"
@@ -1285,7 +1298,7 @@ export function GeneralHeroCopy() {
 				<br />
 				into a repository
 			</h1>
-			<p className="m-0 max-w-[680px] text-[21px] leading-[1.55] text-[#57534e] text-pretty">
+			<p className="m-0 max-w-[680px] text-[21px] leading-[1.55] text-fg-muted text-pretty">
 				Your code already lives in one. LixRay is the repository for everything
 				else: GTM, ops, sales, finance. Built for every file format and every
 				person, not just engineers.

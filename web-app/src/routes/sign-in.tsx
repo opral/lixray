@@ -56,8 +56,8 @@ function SignInPage() {
 	};
 
 	return (
-		<main className="grid min-h-screen place-items-center bg-bg-app px-5 py-8 text-text-primary">
-			<div className="grid w-full max-w-[400px] justify-items-center gap-[22px] rounded-[14px] border border-border-panel bg-bg-panel px-7 py-9 shadow-[0_18px_50px_rgba(28,25,23,0.1),0_2px_8px_rgba(28,25,23,0.05)]">
+		<main className="grid min-h-screen place-items-center bg-bg px-5 py-8 text-fg">
+			<div className="grid w-full max-w-[400px] justify-items-center gap-[22px] rounded-[14px] border border-border bg-panel px-7 py-9 shadow-[0_18px_50px_color-mix(in_srgb,var(--atelier-overlay)_10%,transparent),0_2px_8px_color-mix(in_srgb,var(--atelier-overlay)_5%,transparent)]">
 				<a
 					href="/"
 					className="inline-flex items-center gap-2 text-[15px] font-[750] no-underline"
@@ -70,7 +70,7 @@ function SignInPage() {
 					<h1 className="m-0 text-xl font-bold leading-tight">
 						{joiningSharedRepository ? "Join to edit" : "Sign in to LixRay"}
 					</h1>
-					<p className="m-0 text-[13.5px] leading-normal text-text-quaternary">
+					<p className="m-0 text-[13.5px] leading-normal text-fg-faint">
 						{usesPreviewAccount
 							? joiningSharedRepository
 								? "Sign in with the preview test account and you’ll land back on the shared file, ready to edit."
@@ -119,7 +119,7 @@ function SignInPage() {
 					</Button>
 				)}
 				{error ? (
-					<p className="whitespace-pre-wrap rounded-lg border border-error-200 bg-error-50 px-3.5 py-3 text-sm text-error-800">
+					<p className="whitespace-pre-wrap rounded-lg border border-danger-subtle bg-danger-subtle px-3.5 py-3 text-sm text-diff-removed">
 						{error}
 					</p>
 				) : null}
