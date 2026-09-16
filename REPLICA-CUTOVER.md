@@ -1,6 +1,6 @@
 # Replica architecture cutover
 
-Target: storage format 81, sync protocol 15, SQL protocol 10, internal OPFS RPC 4. The ordinary SDK/server does not migrate historical data. Build the runtime and the separately loaded migration artifacts from the same Lix commit.
+Target: storage format 81, sync protocol 16, SQL protocol 10, internal OPFS RPC 4. The ordinary SDK/server does not migrate historical data. Build the runtime and the separately loaded migration artifacts from the same Lix commit.
 
 ## Before cutover
 

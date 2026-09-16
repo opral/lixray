@@ -4,10 +4,14 @@ set -euo pipefail
 
 : "${RAILWAY_API_TOKEN:?}"
 : "${RAILWAY_PROJECT_ID:?}"
-: "${PR_NUMBER:?}"
 
 ACTION="${1:-}"
-PREVIEW_NAME="lixray-pr-$PR_NUMBER"
+PREVIEW_NAME=""
+if test "$ACTION" != list-previews; then
+	: "${PR_NUMBER:?}"
+	[[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid PR number" >&2; exit 2; }
+	PREVIEW_NAME="lixray-pr-$PR_NUMBER"
+fi
 RAILWAY_BIN="${RAILWAY_BIN:-railway}"
 
 graphql() {
@@ -105,13 +109,19 @@ ensure_preview() {
 }
 
 delete_preview() {
-	local environments preview_id payload response
+	local environments preview_id payload response protected
 	environments="$(list_environments)"
 	preview_id="$(environment_id_by_name "$environments" "$PREVIEW_NAME")"
 	if test -z "$preview_id"; then
 		echo "Railway preview environment $PREVIEW_NAME is already absent."
 		return 0
 	fi
+	for protected in "${RAILWAY_PRODUCTION_ENVIRONMENT:-}" "${RAILWAY_PREVIEW_BASE_ENVIRONMENT:-}"; do
+		if test -n "$protected" && { test "$protected" = "$preview_id" || test "$protected" = "$PREVIEW_NAME"; }; then
+			echo "Refusing to delete a protected Railway environment." >&2
+			return 1
+		fi
+	done
 	payload="$(
 		jq -cn \
 			--arg query 'mutation($id: String!) { environmentDelete(id: $id) }' \
@@ -180,12 +190,29 @@ resolve_preview_url() {
 	fi
 }
 
+# Only a successfully fetched, explicitly closed PR permits deletion. API errors
+# must never be interpreted as a closed PR (including permissions/404 failures).
+delete_if_closed() {
+	: "${GITHUB_REPOSITORY:?}"
+	local state
+	state="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .state)"
+	case "$state" in
+		closed) delete_preview ;;
+		open) echo "PR $PR_NUMBER is open; retaining its preview." ;;
+		*) echo "Unknown PR state: $state" >&2; return 1 ;;
+	esac
+}
+
 case "$ACTION" in
+	list-previews)
+		list_environments | jq -c '[.[] | .name | select(test("^lixray-pr-[1-9][0-9]*$")) | sub("^lixray-pr-"; "")] | unique'
+		;;
+	delete-if-closed) delete_if_closed ;;
 	ensure) ensure_preview ;;
 	delete) delete_preview ;;
 	url) resolve_preview_url ;;
 	*)
-		echo "Usage: $0 ensure|delete|url" >&2
+		echo "Usage: $0 ensure|delete|delete-if-closed|list-previews|url" >&2
 		exit 2
 		;;
 esac

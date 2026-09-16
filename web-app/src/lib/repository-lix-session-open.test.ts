@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { beforeEach, mock, test } from "node:test";
 
 interface MockOpenOptions {
+	onProgress?: (progress: { phase: "migrating"; toFormat: number }) => void;
 	storage?: { options: { name: string } };
 	server: { mode: string; headers: () => Promise<Record<string, string>> };
 }
 const opens: MockOpenOptions[] = [];
 const routedNames: string[] = [];
 let failures: Error[] = [];
+let emitMigration = false;
 let branch = "main";
 let defaultBranch = "main";
 let defaultSessionCalls = 0;
@@ -24,6 +26,8 @@ mock.module("@lix-js/sdk", {
 	namedExports: {
 		openLix: async (options: MockOpenOptions) => {
 			opens.push(options);
+			if (emitMigration)
+				options.onProgress?.({ phase: "migrating", toFormat: 81 });
 			const failure = failures.shift();
 			if (failure) throw failure;
 			const handle = (currentHandle = { closeCalls: 0 });
@@ -102,6 +106,7 @@ const { openRepositoryLixSession } =
 	await import("./repository-lix-session.ts");
 beforeEach(() => {
 	opens.length = 0;
+	emitMigration = false;
 	routedNames.length = 0;
 	failures = [];
 	branch = "main";
@@ -377,4 +382,30 @@ await test("expired default-branch execution marked completed is never replayed"
 		handles.map((handle) => handle.closeCalls),
 		[1],
 	);
+});
+
+await test("SDK server upgrade progress reaches UI and clears after success or failure", async () => {
+	for (const publicPath of [undefined, "README.md"]) {
+		for (const fail of [false, true]) {
+			emitMigration = true;
+			if (fail)
+				failures.push(
+					Object.assign(new Error("upgrade failed"), {
+						code: "LIX_REPOSITORY_OPEN_FAILED",
+					}),
+				);
+			const updates: unknown[] = [];
+			const pending = openRepositoryLixSession({
+				...options(),
+				publicPath,
+				onMigration: (state) => updates.push(state),
+			});
+			if (fail) await assert.rejects(pending, /upgrade failed/);
+			else await (await pending).close();
+			assert.deepEqual(updates, [
+				{ fromVersion: undefined, toVersion: 81, phase: "migrating" },
+				null,
+			]);
+		}
+	}
 });
