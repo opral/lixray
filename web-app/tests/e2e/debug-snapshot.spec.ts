@@ -77,7 +77,9 @@ test("snapshot inspection is temporary and does not write browser storage", asyn
 					.snapshotStorageWrites,
 		),
 	).toEqual([]);
-	await page.getByRole("button", { name: "Close snapshot", exact: true }).click();
+	await page
+		.getByRole("button", { name: "Close snapshot", exact: true })
+		.click();
 	await expect(
 		page.getByRole("heading", { name: "Open lix repository from snapshot" }),
 	).toBeVisible();
