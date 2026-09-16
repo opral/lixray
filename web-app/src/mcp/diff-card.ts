@@ -172,17 +172,17 @@ function countsLabel(
 function glyph(kind: RenderKind): string {
 	const fill =
 		kind === "added"
-			? "var(--at-diff-added)"
+			? "var(--atelier-diff-added)"
 			: kind === "removed"
-				? "var(--at-diff-removed)"
-				: "var(--at-link)";
+				? "var(--atelier-diff-removed)"
+				: "var(--atelier-link)";
 	const knockout =
 		kind === "added"
 			? "M6 3.6v4.8M3.6 6h4.8"
 			: kind === "removed"
 				? "M3.6 6h4.8"
 				: "M3.3 6.3c.9-1.5 1.8-1.5 2.7 0s1.8 1.5 2.7 0";
-	return `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="${fill}"></circle><path d="${knockout}" stroke="var(--at-panel)" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+	return `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="${fill}"></circle><path d="${knockout}" stroke="var(--atelier-panel)" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
 }
 
 function cardDocument(args: {
@@ -255,9 +255,9 @@ const CARD_CSS = `
 :root { color-scheme: light; }
 body { margin: 0; padding: 0; background: transparent; }
 .card {
-	border: 1px solid var(--at-border);
+	border: 1px solid var(--atelier-border);
 	border-radius: 12px;
-	background: var(--at-panel);
+	background: var(--atelier-panel);
 	overflow: hidden;
 }
 .card > header {
@@ -265,7 +265,7 @@ body { margin: 0; padding: 0; background: transparent; }
 	align-items: center;
 	gap: 10px;
 	padding: 11px 13px;
-	border-bottom: 1px solid var(--at-border-subtle);
+	border-bottom: 1px solid var(--atelier-border-subtle);
 }
 .card > header .path {
 	display: flex;
@@ -278,7 +278,7 @@ body { margin: 0; padding: 0; background: transparent; }
 .card > header .dir {
 	flex: 0 1 auto;
 	min-width: 0;
-	color: var(--at-fg-subtle);
+	color: var(--atelier-fg-subtle);
 	font-weight: 400;
 	white-space: nowrap;
 	overflow: hidden;
@@ -295,30 +295,30 @@ body { margin: 0; padding: 0; background: transparent; }
 	flex: none;
 	font-size: 12px;
 	font-variant-numeric: tabular-nums;
-	color: var(--at-fg-subtle);
+	color: var(--atelier-fg-subtle);
 }
-.card > header .plus { color: var(--at-diff-added); }
-.card > header .minus { color: var(--at-diff-removed); }
+.card > header .plus { color: var(--atelier-diff-added); }
+.card > header .minus { color: var(--atelier-diff-removed); }
 .card .body { padding: 12px 14px 14px; }
 .card > header + .rest { padding-top: 10px; }
 .card .rest {
 	padding: 0 14px 12px;
 	font-size: 13px;
-	color: var(--at-fg-muted);
+	color: var(--atelier-fg-muted);
 }
 .card > footer {
 	display: flex;
 	align-items: center;
 	gap: 10px;
 	padding: 10px 13px;
-	border-top: 1px solid var(--at-border-subtle);
-	background: var(--at-bg-subtle);
+	border-top: 1px solid var(--atelier-border-subtle);
+	background: var(--atelier-bg-subtle);
 }
 .card > footer .repo {
 	flex: 1;
 	min-width: 0;
 	font-size: 12px;
-	color: var(--at-fg-subtle);
+	color: var(--atelier-fg-subtle);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -327,8 +327,8 @@ body { margin: 0; padding: 0; background: transparent; }
 	flex: none;
 	padding: 6px 11px;
 	border-radius: 7px;
-	background: var(--at-accent);
-	color: var(--at-panel);
+	background: var(--atelier-accent);
+	color: var(--atelier-panel);
 	font-size: 12px;
 	font-weight: 500;
 	text-decoration: none;

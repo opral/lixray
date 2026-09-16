@@ -12,26 +12,26 @@ export interface RepositoryPalette {
 
 export const TILE_PALETTES: readonly RepositoryPalette[] = [
 	{
-		background: "var(--at-accent-subtle)",
-		border: "var(--at-accent-border)",
-		color: "var(--at-accent)",
+		background: "var(--atelier-accent-subtle)",
+		border: "var(--atelier-accent-border)",
+		color: "var(--atelier-accent)",
 	},
 	{
-		background: "var(--at-tag-green)",
+		background: "var(--atelier-tag-green)",
 		border:
-			"color-mix(in srgb, var(--at-tag-green-fg) 20%, var(--at-tag-green))",
-		color: "var(--at-tag-green-fg)",
+			"color-mix(in srgb, var(--atelier-tag-green-fg) 20%, var(--atelier-tag-green))",
+		color: "var(--atelier-tag-green-fg)",
 	},
 	{
-		background: "var(--at-tag-blue)",
-		border: "color-mix(in srgb, var(--at-tag-blue-fg) 20%, var(--at-tag-blue))",
-		color: "var(--at-tag-blue-fg)",
+		background: "var(--atelier-tag-blue)",
+		border: "color-mix(in srgb, var(--atelier-tag-blue-fg) 20%, var(--atelier-tag-blue))",
+		color: "var(--atelier-tag-blue-fg)",
 	},
 	{
-		background: "var(--at-tag-purple)",
+		background: "var(--atelier-tag-purple)",
 		border:
-			"color-mix(in srgb, var(--at-tag-purple-fg) 20%, var(--at-tag-purple))",
-		color: "var(--at-tag-purple-fg)",
+			"color-mix(in srgb, var(--atelier-tag-purple-fg) 20%, var(--atelier-tag-purple))",
+		color: "var(--atelier-tag-purple-fg)",
 	},
 ] as const;
 

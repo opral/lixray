@@ -36,7 +36,7 @@ export const TINTS: ReadonlyArray<{
 	// The review glow: the top inset shadow over the shell, at the corner.
 	{
 		selector: '[data-review-mode="true"]',
-		color: "rgba(194, 65, 12, 0.24)", // token-literal: --at-accent (light) at the glow's 24%; the composite runs on numbers, not var()
+		color: "rgba(194, 65, 12, 0.24)", // token-literal: --atelier-accent (light) at the glow's 24%; the composite runs on numbers, not var()
 	},
 ];
 

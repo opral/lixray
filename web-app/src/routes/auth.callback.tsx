@@ -109,7 +109,7 @@ function AuthCallbackPage() {
 	return (
 		<main className="grid min-h-screen place-items-center bg-bg px-5 py-8 text-fg">
 			{error ? (
-				<div className="grid w-full max-w-[400px] justify-items-center gap-[18px] rounded-[14px] border border-border bg-panel px-7 py-8 text-center shadow-[0_18px_50px_color-mix(in_srgb,var(--at-overlay)_10%,transparent)]">
+				<div className="grid w-full max-w-[400px] justify-items-center gap-[18px] rounded-[14px] border border-border bg-panel px-7 py-8 text-center shadow-[0_18px_50px_color-mix(in_srgb,var(--atelier-overlay)_10%,transparent)]">
 					<img src="/lixray-mark.svg" alt="" className="size-6" />
 					<h1 className="m-0 text-[19px] leading-tight font-bold">
 						Unable to sign in

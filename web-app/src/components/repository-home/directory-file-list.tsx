@@ -400,7 +400,7 @@ export function DirectoryFileList({
 			{paths.length > 0 ? (
 				<Toolbar
 					aria-label="Selection actions"
-					className="absolute bottom-full @min-[640px]:left-[calc(-2.25rem-5px)] z-20 mb-3 flex max-w-full items-center divide-x divide-border rounded-lg border border-border bg-panel text-fg-muted shadow-[0_2px_8px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)] @max-[640px]:fixed @max-[640px]:bottom-6 @max-[640px]:left-1/2 @max-[640px]:mb-0 @max-[640px]:w-max @max-[640px]:max-w-[calc(100vw-24px)] @max-[640px]:-translate-x-1/2"
+					className="absolute bottom-full @min-[640px]:left-[calc(-2.25rem-5px)] z-20 mb-3 flex max-w-full items-center divide-x divide-border rounded-lg border border-border bg-panel text-fg-muted shadow-[0_2px_8px_color-mix(in_srgb,var(--atelier-overlay)_8%,transparent)] @max-[640px]:fixed @max-[640px]:bottom-6 @max-[640px]:left-1/2 @max-[640px]:mb-0 @max-[640px]:w-max @max-[640px]:max-w-[calc(100vw-24px)] @max-[640px]:-translate-x-1/2"
 				>
 					<div className="flex items-center gap-1 pl-1 pr-3">
 						<Checkbox

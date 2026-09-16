@@ -366,7 +366,7 @@ function RepositoryEmptyState() {
 				<div className="absolute top-[64px] right-[32px] h-px w-[92px] rotate-[24deg] border-t-2 border-dashed border-border" />
 				<div className="absolute top-[28px] right-[58px] h-px w-[74px] -rotate-[20deg] border-t-2 border-dashed border-border" />
 
-				<div className="absolute top-8 left-1/2 w-[230px] -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-panel shadow-[0_18px_40px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)]">
+				<div className="absolute top-8 left-1/2 w-[230px] -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-panel shadow-[0_18px_40px_color-mix(in_srgb,var(--atelier-overlay)_8%,transparent)]">
 					<div className="flex h-10 items-center gap-2 border-b border-border-subtle px-3">
 						<img className="size-4" src="/landing/icon-folder.svg" alt="" />
 						<span className="h-2 w-20 rounded-full bg-panel/20" />

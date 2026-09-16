@@ -212,7 +212,7 @@ function OAuthConsentPage() {
 	// Continue in LixRay immediately.
 	return (
 		<main className="grid min-h-screen place-items-center bg-bg px-5 py-8 text-fg">
-			<div className="flex w-full max-w-[420px] flex-col gap-5 rounded-[14px] border border-border bg-panel px-7 pt-8 pb-6 shadow-[0_18px_50px_color-mix(in_srgb,var(--at-overlay)_10%,transparent),0_2px_8px_color-mix(in_srgb,var(--at-overlay)_5%,transparent)]">
+			<div className="flex w-full max-w-[420px] flex-col gap-5 rounded-[14px] border border-border bg-panel px-7 pt-8 pb-6 shadow-[0_18px_50px_color-mix(in_srgb,var(--atelier-overlay)_10%,transparent),0_2px_8px_color-mix(in_srgb,var(--atelier-overlay)_5%,transparent)]">
 				<div className="flex flex-col items-center gap-4">
 					<div className="flex items-center gap-3.5" aria-hidden="true">
 						<span className="inline-flex size-11 items-center justify-center rounded-xl bg-accent-subtle ring-1 ring-border ring-inset">
@@ -227,7 +227,7 @@ function OAuthConsentPage() {
 							height="12"
 							viewBox="0 0 26 12"
 							fill="none"
-							stroke="var(--at-fg-faint)"
+							stroke="var(--atelier-fg-faint)"
 							strokeWidth="2"
 							strokeLinecap="round"
 						>

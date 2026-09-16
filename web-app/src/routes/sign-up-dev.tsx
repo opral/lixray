@@ -79,7 +79,7 @@ function SignUpDevPage() {
 
 	return (
 		<main className="grid min-h-screen place-items-center bg-bg px-5 py-8 text-fg">
-			<div className="grid w-full max-w-[400px] justify-items-center gap-[22px] rounded-[14px] border border-border bg-panel px-7 py-9 shadow-[0_18px_50px_color-mix(in_srgb,var(--at-overlay)_10%,transparent),0_2px_8px_color-mix(in_srgb,var(--at-overlay)_5%,transparent)]">
+			<div className="grid w-full max-w-[400px] justify-items-center gap-[22px] rounded-[14px] border border-border bg-panel px-7 py-9 shadow-[0_18px_50px_color-mix(in_srgb,var(--atelier-overlay)_10%,transparent),0_2px_8px_color-mix(in_srgb,var(--atelier-overlay)_5%,transparent)]">
 				<a
 					href="/"
 					className="inline-flex items-center gap-2 text-[15px] font-[750] no-underline"

@@ -786,7 +786,7 @@ export function DirectoryView({
 							<div
 								role="menu"
 								data-entry-context-menu=""
-								className="absolute flex min-w-[164px] flex-col rounded-[10px] border border-border bg-panel p-1 shadow-[0_10px_28px_color-mix(in_srgb,var(--at-overlay)_14%,transparent)]"
+								className="absolute flex min-w-[164px] flex-col rounded-[10px] border border-border bg-panel p-1 shadow-[0_10px_28px_color-mix(in_srgb,var(--atelier-overlay)_14%,transparent)]"
 								style={{
 									left: Math.min(entryMenu.x + 2, window.innerWidth - 180),
 									top: Math.min(entryMenu.y + 2, window.innerHeight - 116),
@@ -1836,7 +1836,7 @@ function RenameEntryDialog({
 			<div
 				role="dialog"
 				aria-label={`Rename ${target.name}`}
-				className="w-[340px] rounded-xl border border-border bg-panel p-4 shadow-[0_18px_44px_color-mix(in_srgb,var(--at-overlay)_24%,transparent)]"
+				className="w-[340px] rounded-xl border border-border bg-panel p-4 shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_24%,transparent)]"
 				onClick={(event) => event.stopPropagation()}
 			>
 				<h2 className="m-0 text-[13.5px] font-bold text-fg">
@@ -1896,7 +1896,7 @@ function RenameEntryDialog({
 function GettingStartedIllustration() {
 	return (
 		<div aria-hidden="true" className="relative mb-6 h-[118px] w-[300px]">
-			<div className="absolute top-0 left-1/2 flex w-[230px] -translate-x-1/2 rotate-[-1.5deg] flex-col gap-[7px] rounded-[10px] border border-border bg-panel px-3.5 py-3 shadow-[0_10px_26px_color-mix(in_srgb,var(--at-overlay)_9%,transparent)]">
+			<div className="absolute top-0 left-1/2 flex w-[230px] -translate-x-1/2 rotate-[-1.5deg] flex-col gap-[7px] rounded-[10px] border border-border bg-panel px-3.5 py-3 shadow-[0_10px_26px_color-mix(in_srgb,var(--atelier-overlay)_9%,transparent)]">
 				<div className="flex items-center gap-[7px]">
 					<img src={fileIconUrl("file.md")} alt="" className="size-[13px]" />
 					<span className="h-[7px] w-24 rounded bg-border-strong" />
@@ -1924,20 +1924,20 @@ function GettingStartedIllustration() {
 					<span className="h-[7px] w-[118px] rounded bg-border" />
 				</div>
 			</div>
-			<span className="absolute bottom-3.5 left-2 inline-flex size-[34px] rotate-[-6deg] items-center justify-center rounded-[10px] bg-accent-subtle ring-1 ring-border ring-inset shadow-[0_6px_14px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)]">
+			<span className="absolute bottom-3.5 left-2 inline-flex size-[34px] rotate-[-6deg] items-center justify-center rounded-[10px] bg-accent-subtle ring-1 ring-border ring-inset shadow-[0_6px_14px_color-mix(in_srgb,var(--atelier-overlay)_8%,transparent)]">
 				<img src="/landing/claude-spark.svg" alt="" className="size-[19px]" />
 			</span>
 			<img
 				src="/landing/codex-icon.svg"
 				alt=""
-				className="absolute right-2.5 bottom-3 size-[34px] rotate-[5deg] drop-shadow-[0_6px_14px_color-mix(in_srgb,var(--at-overlay)_12%,transparent)]"
+				className="absolute right-2.5 bottom-3 size-[34px] rotate-[5deg] drop-shadow-[0_6px_14px_color-mix(in_srgb,var(--atelier-overlay)_12%,transparent)]"
 			/>
 			<svg
 				width="46"
 				height="30"
 				viewBox="0 0 46 30"
 				fill="none"
-				stroke="var(--at-border-strong)"
+				stroke="var(--atelier-border-strong)"
 				strokeWidth="1.8"
 				strokeLinecap="round"
 				className="absolute bottom-[26px] left-11"
@@ -1949,7 +1949,7 @@ function GettingStartedIllustration() {
 				height="30"
 				viewBox="0 0 46 30"
 				fill="none"
-				stroke="var(--at-border-strong)"
+				stroke="var(--atelier-border-strong)"
 				strokeWidth="1.8"
 				strokeLinecap="round"
 				className="absolute right-[46px] bottom-6"
@@ -1994,7 +1994,7 @@ function GettingStarted({
 					<button
 						type="button"
 						onClick={() => setConnectDialogOpen(true)}
-						className="mt-5.5 mb-10.5 inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--at-link)_0%,var(--at-link)_100%)] px-4.5 py-2.75 text-sm font-bold text-accent-on shadow-shadow-accent hover:brightness-105"
+						className="mt-5.5 mb-10.5 inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--atelier-link)_0%,var(--atelier-link)_100%)] px-4.5 py-2.75 text-sm font-bold text-accent-on shadow-shadow-accent hover:brightness-105"
 					>
 						<Link2 className="size-3.5" aria-hidden="true" />
 						Connect an agent
@@ -2051,7 +2051,7 @@ function AgentConnectionDialog({
 	const connectionStatus = useMcpConnectionStatus(open, hasAgentConnected);
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-h-[calc(100vh-2rem)] w-[min(520px,calc(100vw-2rem))] max-w-none gap-0 overflow-y-auto rounded-2xl border-border bg-panel p-0 text-fg shadow-[0_30px_90px_color-mix(in_srgb,var(--at-overlay)_30%,transparent)] sm:max-w-none">
+			<DialogContent className="max-h-[calc(100vh-2rem)] w-[min(520px,calc(100vw-2rem))] max-w-none gap-0 overflow-y-auto rounded-2xl border-border bg-panel p-0 text-fg shadow-[0_30px_90px_color-mix(in_srgb,var(--atelier-overlay)_30%,transparent)] sm:max-w-none">
 				<DialogHeader className="gap-1.5 px-8 pt-8 pr-14 text-left">
 					<DialogTitle className="text-lg leading-tight font-bold tracking-[-0.01em]">
 						Connect an agent
@@ -2067,7 +2067,7 @@ function AgentConnectionDialog({
 					<button
 						type="button"
 						onClick={() => void copyPrompt()}
-						className="inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--at-link)_0%,var(--at-link)_100%)] px-4.5 py-2.75 text-sm font-bold text-accent-on shadow-shadow-accent hover:brightness-105"
+						className="inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--atelier-link)_0%,var(--atelier-link)_100%)] px-4.5 py-2.75 text-sm font-bold text-accent-on shadow-shadow-accent hover:brightness-105"
 					>
 						{/* Icon crossfade per Atelier's copy-markdown button: the Copy
 						    glyph gives way to a green check, then swaps back so the
@@ -2110,7 +2110,7 @@ function AgentConnectionDialog({
 					    so the chat reads as the user's own browser tab — not a real
 					    input. The cursor presses Copy prompt, carries it down, pastes,
 					    and sends. Reduced motion shows the pasted end state statically. */}
-					<div className="rounded-[14px] shadow-[0_10px_28px_color-mix(in_srgb,var(--at-overlay)_18%,transparent)]">
+					<div className="rounded-[14px] shadow-[0_10px_28px_color-mix(in_srgb,var(--atelier-overlay)_18%,transparent)]">
 						<div
 							aria-hidden="true"
 							className="flex items-center gap-2.5 rounded-t-[14px] border-b border-overlay-hairline bg-overlay-raised px-3 py-2"
@@ -2223,21 +2223,21 @@ function AgentConnectionDialog({
 										width="17"
 										height="20"
 										viewBox="0 0 17 20"
-										className="drop-shadow-[0_2px_4px_color-mix(in_srgb,var(--at-overlay)_50%,transparent)]"
+										className="drop-shadow-[0_2px_4px_color-mix(in_srgb,var(--atelier-overlay)_50%,transparent)]"
 									>
 										<path
 											d="M1 1l0 14.5 3.9-3.4 2.5 6 2.7-1.1-2.5-5.9 5.4-.4z"
-											fill="var(--at-overlay-fg)"
-											stroke="var(--at-overlay)"
+											fill="var(--atelier-overlay-fg)"
+											stroke="var(--atelier-overlay)"
 											strokeWidth="1.3"
 											strokeLinejoin="round"
 										/>
 									</svg>
 									<span className="absolute top-4 left-4 inline-flex gap-1 opacity-0 animate-connect-keys">
-										<span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md bg-bg px-[5px] text-[11px] font-bold text-fg shadow-[0_2px_0_var(--at-fg-faint),0_4px_10px_var(--at-scrim)]">
+										<span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md bg-bg px-[5px] text-[11px] font-bold text-fg shadow-[0_2px_0_var(--atelier-fg-faint),0_4px_10px_var(--atelier-scrim)]">
 											⌘
 										</span>
-										<span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md bg-bg text-[11px] font-bold text-fg shadow-[0_2px_0_var(--at-fg-faint),0_4px_10px_var(--at-scrim)]">
+										<span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md bg-bg text-[11px] font-bold text-fg shadow-[0_2px_0_var(--atelier-fg-faint),0_4px_10px_var(--atelier-scrim)]">
 											V
 										</span>
 									</span>

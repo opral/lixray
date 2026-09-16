@@ -311,7 +311,7 @@ export function PeopleView({ teamApi }: { teamApi: RepositoryTeamApi | null }) {
 									</DropdownMenuTrigger>
 									<DropdownMenuContent
 										align="end"
-										className="min-w-[190px] rounded-xl border-border bg-panel p-1.5 shadow-[0_18px_44px_color-mix(in_srgb,var(--at-overlay)_16%,transparent)]"
+										className="min-w-[190px] rounded-xl border-border bg-panel p-1.5 shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_16%,transparent)]"
 									>
 										<DropdownMenuItem
 											variant="destructive"

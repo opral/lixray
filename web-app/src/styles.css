@@ -4,7 +4,7 @@
 @import "tw-animate-css";
 /*
  * LixRay speaks Atelier's design tokens and nothing else: theme.css is the
- * one vocabulary (var(--at-…)), tailwind.css the adapter that turns it into
+ * one vocabulary (var(--atelier-…)), tailwind.css the adapter that turns it into
  * utilities (bg-panel, text-fg-muted, border-border-subtle). Nothing here
  * declares a colour; `pnpm tokens:check` keeps it that way.
  */
@@ -24,9 +24,9 @@
 
 	body {
 		min-width: 320px;
-		background: var(--at-bg);
-		color: var(--at-fg);
-		font-family: var(--at-font-sans);
+		background: var(--atelier-bg);
+		color: var(--atelier-fg);
+		font-family: var(--atelier-font-sans);
 	}
 }
 
@@ -110,7 +110,7 @@
 	opacity: 0;
 	margin-left: 8px;
 	font-weight: 400;
-	color: var(--at-accent);
+	color: var(--atelier-accent);
 	text-decoration: none;
 	border-bottom: 0;
 }
@@ -121,24 +121,24 @@
 	position: absolute;
 	top: 10px;
 	right: 10px;
-	font-family: var(--at-font-sans);
+	font-family: var(--atelier-font-sans);
 	font-size: 11.5px;
 	font-weight: 600;
-	color: var(--at-fg-subtle);
-	background: var(--at-bg-hover-strong);
+	color: var(--atelier-fg-subtle);
+	background: var(--atelier-bg-hover-strong);
 	border: none;
 	border-radius: 6px;
 	padding: 4px 10px;
 	cursor: pointer;
 	opacity: 0;
-	transition: opacity var(--at-duration-slow);
+	transition: opacity var(--atelier-duration-slow);
 }
 .docs-article pre:hover .copy {
 	opacity: 1;
 }
 .docs-article pre .copy:hover {
-	color: var(--at-fg);
-	background: var(--at-bg-active);
+	color: var(--atelier-fg);
+	background: var(--atelier-bg-active);
 }
 
 /* ── Product animations, registered as Tailwind animate-* utilities ── */
@@ -247,21 +247,21 @@
 	@keyframes connect-agent-send {
 		0%,
 		61% {
-			background-color: var(--at-overlay-hover);
+			background-color: var(--atelier-overlay-hover);
 			transform: scale(1);
 		}
 		64% {
-			background-color: var(--at-link);
+			background-color: var(--atelier-link);
 			transform: scale(1.12);
 		}
 		67%,
 		92% {
-			background-color: var(--at-link);
+			background-color: var(--atelier-link);
 			transform: scale(1);
 		}
 		97%,
 		100% {
-			background-color: var(--at-overlay-hover);
+			background-color: var(--atelier-overlay-hover);
 			transform: scale(1);
 		}
 	}
@@ -300,11 +300,11 @@
 	}
 	@keyframes connect-agent-dot-pulse {
 		0% {
-			box-shadow: 0 0 0 0 color-mix(in srgb, var(--at-link) 45%, transparent);
+			box-shadow: 0 0 0 0 color-mix(in srgb, var(--atelier-link) 45%, transparent);
 		}
 		70%,
 		100% {
-			box-shadow: 0 0 0 9px color-mix(in srgb, var(--at-link) 0%, transparent);
+			box-shadow: 0 0 0 9px color-mix(in srgb, var(--atelier-link) 0%, transparent);
 		}
 	}
 	@keyframes auth-progress-sweep {

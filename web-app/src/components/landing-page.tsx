@@ -3,7 +3,7 @@ import { type ReactNode } from "react";
 import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 
 const primaryButton =
-	"inline-flex items-center justify-center rounded-[10px] bg-[image:var(--at-accent-gradient)] px-[22px] py-3 text-base font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
+	"inline-flex items-center justify-center rounded-[10px] bg-[image:var(--atelier-accent-gradient)] px-[22px] py-3 text-base font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
 const secondaryButton =
 	"inline-flex items-center justify-center rounded-[10px] border border-fg/15 bg-panel px-5 py-[11px] text-base font-semibold whitespace-nowrap text-fg no-underline transition hover:border-fg/30";
 const bookDemoHref = "mailto:hello@opral.com?subject=LixRay%20demo";
@@ -62,7 +62,7 @@ export function LandingPage() {
 							overflow: hidden;
 							height: 1.12em;
 							vertical-align: bottom;
-							color: var(--at-link);
+							color: var(--atelier-link);
 						}
 						.landing-headline-reel {
 							display: flex;

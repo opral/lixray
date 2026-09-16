@@ -39,7 +39,7 @@ const FILE_CATEGORIES = [
 	{
 		label: "Docs",
 		examples: "markdown, text",
-		color: "color-mix(in srgb, var(--at-tag-brown-fg) 48%, var(--at-panel))",
+		color: "color-mix(in srgb, var(--atelier-tag-brown-fg) 48%, var(--atelier-panel))",
 		extensions: new Set([
 			"adoc",
 			"doc",
@@ -56,7 +56,7 @@ const FILE_CATEGORIES = [
 	{
 		label: "Code",
 		examples: "ts, rust",
-		color: "color-mix(in srgb, var(--at-tag-brown-fg) 36%, var(--at-panel))",
+		color: "color-mix(in srgb, var(--atelier-tag-brown-fg) 36%, var(--atelier-panel))",
 		extensions: new Set([
 			"c",
 			"cc",
@@ -95,19 +95,19 @@ const FILE_CATEGORIES = [
 	{
 		label: "Sheets",
 		examples: "csv, tables",
-		color: "color-mix(in srgb, var(--at-tag-brown-fg) 26%, var(--at-panel))",
+		color: "color-mix(in srgb, var(--atelier-tag-brown-fg) 26%, var(--atelier-panel))",
 		extensions: new Set(["csv", "numbers", "ods", "tsv", "xls", "xlsx"]),
 	},
 	{
 		label: "Decks",
 		examples: "slides",
-		color: "color-mix(in srgb, var(--at-tag-brown-fg) 17%, var(--at-panel))",
+		color: "color-mix(in srgb, var(--atelier-tag-brown-fg) 17%, var(--atelier-panel))",
 		extensions: new Set(["key", "odp", "ppt", "pptx"]),
 	},
 	{
 		label: "PDFs & other",
 		examples: "pdf, images",
-		color: "color-mix(in srgb, var(--at-tag-brown-fg) 10%, var(--at-panel))",
+		color: "color-mix(in srgb, var(--atelier-tag-brown-fg) 10%, var(--atelier-panel))",
 		extensions: null,
 	},
 ] as const;

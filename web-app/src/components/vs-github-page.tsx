@@ -13,11 +13,11 @@ import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 import { cn } from "~/lib/utils";
 
 const primaryButton =
-	"inline-flex items-center justify-center rounded-xl bg-[image:var(--at-accent-gradient)] px-7 py-[15px] text-[17px] font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
+	"inline-flex items-center justify-center rounded-xl bg-[image:var(--atelier-accent-gradient)] px-7 py-[15px] text-[17px] font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
 const secondaryButton =
 	"inline-flex items-center justify-center rounded-xl border border-fg/12 bg-panel px-6 py-3.5 text-base font-semibold whitespace-nowrap text-fg no-underline transition hover:border-fg/25";
 const visualCard =
-	"rounded-2xl border border-fg/8 bg-panel shadow-[0_24px_60px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)]";
+	"rounded-2xl border border-fg/8 bg-panel shadow-[0_24px_60px_color-mix(in_srgb,var(--atelier-overlay)_8%,transparent)]";
 
 export function VsGithubPage() {
 	const { user, repositoryTo } = useRepositoryCta();
@@ -132,18 +132,18 @@ export function VsGithubPage() {
 										>
 											<path
 												d="M0 62 H400"
-												stroke="var(--at-border-strong)"
+												stroke="var(--atelier-border-strong)"
 												strokeWidth="1.5"
 											/>
 											<path
 												d="M56 62 C 76 62, 76 26, 100 26 H 302 C 326 26, 326 62, 346 62"
-												stroke="var(--at-border-strong)"
+												stroke="var(--atelier-border-strong)"
 												strokeWidth="1.5"
 												strokeDasharray="4 4"
 												fill="none"
 											/>
-											<circle cx="56" cy="62" r="4" fill="var(--at-fg)" />
-											<circle cx="346" cy="62" r="4" fill="var(--at-accent)" />
+											<circle cx="56" cy="62" r="4" fill="var(--atelier-fg)" />
+											<circle cx="346" cy="62" r="4" fill="var(--atelier-accent)" />
 										</svg>
 										<span className="absolute bottom-0.5 left-[3%] inline-flex items-center rounded-[5px] bg-bg-hover-strong px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-fg-muted">
 											create branch
@@ -510,7 +510,7 @@ function HeroVisual() {
 			aria-label="Agents in ChatGPT, Slack, Claude, and the terminal all working against one LixRay repository"
 		>
 			<div className="flex w-[300px] shrink-0 flex-col gap-7">
-				<div className="overflow-hidden rounded-[14px] border border-fg/18 bg-panel shadow-[0_18px_44px_color-mix(in_srgb,var(--at-overlay)_10%,transparent)]">
+				<div className="overflow-hidden rounded-[14px] border border-fg/18 bg-panel shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_10%,transparent)]">
 					<div className="flex items-center gap-2 bg-overlay px-3.5 py-2.5">
 						<img
 							className="size-3.5 object-contain brightness-0 invert"
@@ -532,7 +532,7 @@ function HeroVisual() {
 						</span>
 					</div>
 				</div>
-				<div className="overflow-hidden rounded-[14px] border border-fg/10 bg-panel shadow-[0_18px_44px_color-mix(in_srgb,var(--at-overlay)_10%,transparent)]">
+				<div className="overflow-hidden rounded-[14px] border border-fg/10 bg-panel shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_10%,transparent)]">
 					<div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5">
 						<img
 							className="size-3.5"
@@ -601,17 +601,17 @@ function HeroVisual() {
 			>
 				<path
 					d="M0 70 C 44 70, 36 160, 80 160"
-					stroke="var(--at-border-strong)"
+					stroke="var(--atelier-border-strong)"
 					strokeWidth="1.5"
 				/>
 				<path
 					d="M0 250 C 44 250, 36 160, 80 160"
-					stroke="var(--at-border-strong)"
+					stroke="var(--atelier-border-strong)"
 					strokeWidth="1.5"
 				/>
-				<circle cx="80" cy="160" r="3" fill="var(--at-accent)" />
+				<circle cx="80" cy="160" r="3" fill="var(--atelier-accent)" />
 			</svg>
-			<div className="flex w-[320px] shrink-0 flex-col gap-px rounded-2xl border border-fg/10 bg-panel px-3 py-[18px] text-[13px] text-fg shadow-[0_30px_80px_color-mix(in_srgb,var(--at-overlay)_14%,transparent)]">
+			<div className="flex w-[320px] shrink-0 flex-col gap-px rounded-2xl border border-fg/10 bg-panel px-3 py-[18px] text-[13px] text-fg shadow-[0_30px_80px_color-mix(in_srgb,var(--atelier-overlay)_14%,transparent)]">
 				<span className="mx-1 mb-3 flex rounded-lg border border-border bg-bg px-3 py-[7px] font-mono text-xs text-fg-subtle">
 					<span>
 						lixray.com/<b className="text-fg">@acme/company</b>
@@ -675,18 +675,18 @@ function HeroVisual() {
 			>
 				<path
 					d="M80 70 C 36 70, 44 160, 0 160"
-					stroke="var(--at-border-strong)"
+					stroke="var(--atelier-border-strong)"
 					strokeWidth="1.5"
 				/>
 				<path
 					d="M80 250 C 36 250, 44 160, 0 160"
-					stroke="var(--at-border-strong)"
+					stroke="var(--atelier-border-strong)"
 					strokeWidth="1.5"
 				/>
-				<circle cx="0" cy="160" r="3" fill="var(--at-accent)" />
+				<circle cx="0" cy="160" r="3" fill="var(--atelier-accent)" />
 			</svg>
 			<div className="flex w-[300px] shrink-0 flex-col gap-7">
-				<div className="overflow-hidden rounded-[14px] border border-accent-border bg-accent-subtle shadow-[0_18px_44px_color-mix(in_srgb,var(--at-overlay)_10%,transparent)]">
+				<div className="overflow-hidden rounded-[14px] border border-accent-border bg-accent-subtle shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_10%,transparent)]">
 					<div className="flex items-center gap-2 px-3.5 py-2.5">
 						<img className="size-3.5" src="/landing/claude-spark.svg" alt="" />
 						<span className="text-[12.5px] font-bold text-accent">Claude</span>
@@ -702,7 +702,7 @@ function HeroVisual() {
 						</span>
 					</div>
 				</div>
-				<div className="flex flex-col overflow-hidden rounded-[14px] bg-overlay shadow-[0_18px_44px_color-mix(in_srgb,var(--at-overlay)_20%,transparent)]">
+				<div className="flex flex-col overflow-hidden rounded-[14px] bg-overlay shadow-[0_18px_44px_color-mix(in_srgb,var(--atelier-overlay)_20%,transparent)]">
 					<div className="flex items-center gap-1.5 bg-overlay-raised px-3 py-[9px]">
 						<span
 							className="size-2.5 rounded-full bg-[#ff5f57]" /* token-literal: macOS window control */
@@ -938,7 +938,7 @@ function ProposalsVisual() {
 					</span>
 				</span>
 				<span className="flex gap-2">
-					<span className="rounded-lg bg-[image:var(--at-accent-gradient)] px-3.5 py-1.5 text-[12.5px] font-bold text-accent-on">
+					<span className="rounded-lg bg-[image:var(--atelier-accent-gradient)] px-3.5 py-1.5 text-[12.5px] font-bold text-accent-on">
 						Accept
 					</span>
 					<span className="rounded-lg border border-accent-border bg-panel px-3.5 py-1.5 text-[12.5px] font-semibold text-fg-muted">
@@ -1023,7 +1023,7 @@ function ActivityRow({
 }) {
 	return (
 		<div className="flex items-center gap-3.5 px-1 py-2.5">
-			<span className="relative z-[1] size-[9px] shrink-0 rounded-full bg-accent shadow-[0_0_0_3px_var(--at-panel)]" />
+			<span className="relative z-[1] size-[9px] shrink-0 rounded-full bg-accent shadow-[0_0_0_3px_var(--atelier-panel)]" />
 			<span
 				className={cn(
 					"inline-flex size-5 shrink-0 items-center justify-center rounded-md",
@@ -1191,7 +1191,7 @@ function InsightRow({
 			</span>
 			<span className="h-2 flex-1 overflow-hidden rounded-full bg-border">
 				<span
-					className="block h-full rounded-full bg-[linear-gradient(90deg,var(--at-link),var(--at-accent))]"
+					className="block h-full rounded-full bg-[linear-gradient(90deg,var(--atelier-link),var(--atelier-accent))]"
 					style={{ width: `${percent}%` }}
 				/>
 			</span>
@@ -1214,7 +1214,7 @@ function LockIcon({ size = 12 }: { size?: number }) {
 			height={size}
 			viewBox="0 0 24 24"
 			fill="none"
-			stroke="var(--at-fg-subtle)"
+			stroke="var(--atelier-fg-subtle)"
 			strokeWidth="2.2"
 			strokeLinecap="round"
 			strokeLinejoin="round"
@@ -1270,7 +1270,7 @@ function CheckIcon({ size = 11 }: { size?: number }) {
 			height={size}
 			viewBox="0 0 24 24"
 			fill="none"
-			stroke="var(--at-success)"
+			stroke="var(--atelier-success)"
 			strokeWidth="2.6"
 			strokeLinecap="round"
 			strokeLinejoin="round"
