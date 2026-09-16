@@ -178,6 +178,9 @@ function RepositoryDirectoryExtension({
 					) === true
 				}
 				readOnly={atelier.readOnly}
+				{...(atelier.documentLinks
+					? { documentLinks: atelier.documentLinks }
+					: {})}
 				connection={connection}
 				teamApi={teamApi}
 				hasAgentConnected={hasAgentConnected}

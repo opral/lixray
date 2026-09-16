@@ -2,7 +2,7 @@
 
 ## Direct SQL calls
 
-When the repository is known, call `query_sql` or `execute_sql` with `lix_ref` (an exact `@handle/slug` or UUID) and optional `branch_id`. Opening first is unnecessary. The omitted branch is the repository default branch, independent of any browser or previous call's active branch. Alternatively, pass an existing `context` alone to retain its selected branch. `open_lix` remains available for inventory and for obtaining contexts used by branch and file helper tools.
+For SQL when the repository is known, call `query_sql` or `execute_sql` with `lix_ref` (an exact `@handle/slug` or UUID) and optional `branch_id`. Opening first is unnecessary. The omitted branch is the repository default branch, independent of any browser or previous call's active branch. Alternatively, pass an existing `context` alone to retain its selected branch. `open_lix` remains available for inventory and for obtaining contexts used by branch and file helper tools.
 
 Example: `execute_sql({ lix_ref: "@acme/company", statements: [{ sql: "UPDATE lix_file SET content = CAST($1 AS BYTEA) WHERE path = $2", params: [{ kind: "text", value: "hello" }, { kind: "text", value: "/notes.txt" }] }] })`.
 
@@ -45,7 +45,7 @@ diagnostic timestamps or identifiers.
 ## Tools
 
 - `list_lixes`, `open_lix`: find a Lix and mint its context (see below).
-- `list_files`, `read_files`, `write_files`: the file path. `read_files`
+- `list_files`, `read_files`, `write_files`: preferred for ordinary file work. `read_files`
   returns `content` as text, `lixcol_metadata`, size, id, canonical `url`,
   and the `commit_id` the read reflects. A file whose bytes are not UTF-8,
   or that is over a megabyte, comes back with no `content` and an
@@ -59,9 +59,8 @@ diagnostic timestamps or identifiers.
   optional `checkpoint: true`, and
   `last_seen_commit_id`: a target file that changed since that commit refuses
   the whole write, and the error carries `current_commit_id` and the current
-  contents of the conflicting files; unrelated changes never block. The
-  check and the write are two steps, so a write to the same file landing
-  between them is not caught; the window is milliseconds.
+  contents of the conflicting files; unrelated changes never block. Validation and the write run in one transaction; concurrent conflicts retry
+  validation against a fresh snapshot.
 - `query_sql`, `execute_sql`: everything else. Files and directories are
   still tables (`lix_file`, `lix_directory`): rename, delete, and any query
   go through SQL.
@@ -98,7 +97,7 @@ provided, LixRay continues to create one fallback trace per tool call.
 
 1. Match the exact LixRay server name instead of searching broadly for generic
    repository or file tools.
-2. If the user supplied an exact `@handle/slug` or Lix UUID, pass it as lix_ref directly to query_sql or execute_sql. Call `list_lixes` only when the target is unknown.
+2. For SQL with an exact `@handle/slug` or Lix UUID, pass lix_ref directly to query_sql or execute_sql. For file tools, obtain context with open_lix or reuse a returned SQL context. Call `list_lixes` only when the target is unknown.
 3. Use open_lix when inventory is useful. Retain the context returned by SQL or open_lix from `structuredContent`
    when the host provides it. Never copy a context token from the prose
    summary. Text-only hosts receive a later `content` text block that is the
@@ -107,9 +106,9 @@ provided, LixRay continues to create one fallback trace per tool call.
    true, do not run another query just to list files; when it is false, the
    result carries `file_paths_sql`, the one `query_sql` statement that lists
    every path.
-4. Use `query_sql` to inspect the relevant state. When paths are known, read
-   every needed file in one parameterized statement rather than listing the
-   same paths first or reading files one at a time.
+4. Prefer read_files and write_files for ordinary file reads and creates/updates.
+   Batch known paths together instead of listing them first. Use query_sql
+   for repository data and advanced file queries; list_files discovers paths.
 5. Before guessing dynamic table or column names, query `information_schema`.
 6. Use `execute_sql` for any atomic SQL batch. It is always treated as
    potentially destructive. The mutation is already persisted — `rowsAffected`
@@ -137,21 +136,27 @@ zero or more `resource_link` content blocks, and the full `structuredContent`
 as JSON text for hosts that only show text. The links are what a host renders
 as clickable chips inside the step: `open_lix` links the repository, and an
 `execute_sql` batch links each file or directory it wrote or updated, with
-the same canonical URL `get_entity_urls` would return. Other tools carry no
-links, and a failed call has the summary and the JSON text only. The summary names the
+the same canonical URL `get_entity_urls` would return. File tools also return canonical file links, and a failed call has the summary and the JSON text only. The summary names the
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
 
-A write to a file Atelier can render carries one thing more: the change
-itself, as an embedded resource under `ui://lixray/diff/<path>` with the MCP
-Apps media type `text/html;profile=mcp-app`, annotated for the user. The card
-is Atelier's own view of that file — the same document alignment, the same
-marks, the same palette the app draws — so a change reads the same in a chat
-as it does in LixRay. Markdown and CSV have such a view today; anything else
-gets its link, as before. It is a self-contained document: no scripts, no
-network of any kind, its stylesheet inlined and its images named rather than
-loaded, because the address in an image is chosen by whoever wrote the
-document.
+`write_files` advertises `_meta.ui.resourceUri: "ui://lixray/write-preview/v1"`.
+MCP Apps hosts fetch that static HTML resource using `resources/read`; it is
+available before the write and across stateless requests, without repository
+data in its URL or template. The view initializes through `ui/initialize`, then
+receives the write result through `ui/notifications/tool-result`.
+
+Per-call previews travel in result `_meta["lixray/write-preview"].cards`, outside
+both `content` and `structuredContent`. No embedded HTML resource appears in
+content. Standard clients still receive the text summary, file links, and saved
+receipt even when they do not support MCP Apps. A preview is optional; agents
+must not claim the user saw one merely because the write succeeded.
+
+Markdown and CSV cards use Atelier's static renderer. Card documents have no
+scripts or external resources. The view has a small lifecycle script; it
+mounts the sanitized, server-rendered cards in isolated shadow roots and opens
+links through the host's `ui/open-link` capability. The resource requests no
+external network access. It does not invoke write tools.
 
 At most three cards travel with a write. The write itself carries no bytes
 of the change: it returns the commit span it moved between, and the cards come
@@ -182,13 +187,17 @@ the write still succeeds with a warning and no `commit_id`; do not repeat it.
 A card rendering failure similarly reports "Files saved, preview unavailable."
 
 
-Hosts that cannot render UI blocks ignore them and lose nothing: the summary
-and the JSON say the same thing. The cards are content blocks only —
-`structuredContent` stays exactly the shape the output schema declares, which
-matters because the advertised schema forbids extra properties. Nothing asks
-the client whether it can render HTML, because the protocol has no such
-question; a host that flattens every block to text would print the card's
-source, and `audience: ["user"]` is the only signal available against that.
+The full SQL reference is also available via `resources/read` at
+`lixray://docs/sql`. Server instructions give routing and recovery rules; SQL
+tool descriptions retain the essentials needed to make a first query.
+
+When asked to undo the last change, prefer `undo` over manual SQL reversal
+when that change is still the latest undoable action. Inspect history if later
+edits may exist. On the current SDK and engine, `undo` accepts context only,
+not a commit ID; it creates an inverse commit and stops at checkpoints.
+`restore(commit_id)` moves the branch head and is not a substitute for undo.
+Targeted reversal needs an engine-supported atomic target check; a separate
+read followed by undo cannot protect against a concurrent writer.
 
 This comes from Lix, not from parsing SQL. Every `execute_sql` call stamps
 its changes with an `origin_key` of `mcp:<request_id>` (a caller-supplied

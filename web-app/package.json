@@ -41,6 +41,7 @@
 		"typecheck": "pnpm run routes:generate && tsc --noEmit",
 		"ci:fast": "pnpm format:check && pnpm test:auth && pnpm test:profile && pnpm test:docs",
 		"test:partial-replica": "node --test --experimental-strip-types --experimental-test-module-mocks src/lib/repository-lix-session-open.test.ts",
+		"test:mcp-ui": "node --test --experimental-strip-types tests/mcp-ui/*.test.mjs",
 		"test:published": "playwright test --config playwright.published.config.ts"
 	},
 	"dependencies": {
@@ -66,14 +67,15 @@
 		"protobufjs": "8.8.0",
 		"radix-ui": "^1.6.2",
 		"react": "^19.2.7",
-		"react-dom": "^19.2.7",
 		"react-aria-components": "^1.21.1",
+		"react-dom": "^19.2.7",
 		"sonner": "^2.0.7",
 		"tailwind-merge": "^3.6.0",
 		"zod": "4.4.3"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
+		"@modelcontextprotocol/ext-apps": "^2.0.0",
 		"@playwright/test": "^1.61.1",
 		"@posthog/rollup-plugin": "1.4.7",
 		"@tailwindcss/vite": "^4.3.2",

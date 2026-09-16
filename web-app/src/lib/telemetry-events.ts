@@ -10,6 +10,7 @@ export const PRODUCT_EVENTS = {
 	authSessionOrphaned: "auth_session_orphaned",
 	diffOpened: "diff_opened",
 	diffResolved: "diff_resolved",
+	documentLoaded: "document_loaded",
 	documentModified: "document_modified",
 	documentOpenAttempted: "document_open_attempted",
 	documentViewed: "document_viewed",
