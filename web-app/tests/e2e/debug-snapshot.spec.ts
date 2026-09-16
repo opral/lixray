@@ -77,7 +77,7 @@ test("snapshot inspection is temporary and does not write browser storage", asyn
 					.snapshotStorageWrites,
 		),
 	).toEqual([]);
-	await page.getByRole("button", { name: "Close snapshot" }).click();
+	await page.getByRole("button", { name: "Close snapshot", exact: true }).click();
 	await expect(
 		page.getByRole("heading", { name: "Open lix repository from snapshot" }),
 	).toBeVisible();
@@ -97,7 +97,7 @@ test("snapshot inspection is temporary and does not write browser storage", asyn
 		page.getByRole("heading", { name: "Open lix repository from snapshot" }),
 	).toBeVisible();
 	await expect(
-		page.getByRole("button", { name: "Close snapshot" }),
+		page.getByRole("button", { name: "Close snapshot", exact: true }),
 	).toHaveCount(0);
 });
 
