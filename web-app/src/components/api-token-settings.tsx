@@ -98,18 +98,18 @@ export function AccountApiTokenPanel({ api }: { api: AccountApiTokenApi }) {
 		<>
 			<section
 				aria-label="API tokens"
-				className="mb-3.5 rounded-xl border border-border-panel bg-bg-panel px-[18px] py-4"
+				className="mb-3.5 rounded-[12px] border border-border bg-panel px-[18px] py-4"
 			>
 				<div className="mb-3 flex flex-wrap items-center gap-3">
 					<div className="min-w-0 flex-1 basis-[220px]">
 						<h2 className="m-0 text-[13.5px] font-bold">API tokens</h2>
-						<p className="m-0 mt-0.5 text-xs text-text-tertiary">
+						<p className="m-0 mt-0.5 text-xs text-fg-subtle">
 							Your personal access tokens.
 						</p>
 					</div>
 					<Button
 						variant="ghost"
-						className="text-xs text-text-secondary"
+						className="text-xs text-fg-muted"
 						size="sm"
 						disabled={loading || busy || !!error || !!created}
 						onClick={() => void generate()}
@@ -118,25 +118,25 @@ export function AccountApiTokenPanel({ api }: { api: AccountApiTokenApi }) {
 						{busy && !deleting ? "Generating…" : "Generate token"}
 					</Button>
 				</div>
-				<p className="text-xs leading-relaxed text-text-tertiary">
+				<p className="text-xs leading-relaxed text-fg-subtle">
 					Each token can do everything your account can do. Tokens expire after
 					one year. Access follows your account’s current permissions.
 				</p>
 				{loading ? (
-					<p role="status" className="mt-4 text-sm text-text-tertiary">
+					<p role="status" className="mt-4 text-sm text-fg-subtle">
 						Loading tokens…
 					</p>
 				) : (
 					<>
 						{created ? (
 							<div
-								className="ph-no-capture my-4 rounded-lg border border-border-panel bg-bg-app p-4"
+								className="ph-no-capture my-4 rounded-lg border border-border bg-bg p-4"
 								data-ph-no-capture
 							>
 								<p className="m-0 mb-1 break-words text-[13px] font-semibold">
 									{created.name}
 								</p>
-								<p className="m-0 mb-3 text-xs text-text-secondary">
+								<p className="m-0 mb-3 text-xs text-fg-muted">
 									Copy this token now. You won’t be able to see it again.
 								</p>
 								<label htmlFor="api-token-secret" className="sr-only">
@@ -148,7 +148,7 @@ export function AccountApiTokenPanel({ api }: { api: AccountApiTokenApi }) {
 									value={created.token}
 									rows={3}
 									spellCheck={false}
-									className="ph-no-capture w-full resize-none break-all rounded-md border border-border-panel bg-bg-panel p-3 font-mono text-xs"
+									className="ph-no-capture w-full resize-none break-all rounded-md border border-border bg-panel p-3 font-mono text-xs"
 								/>
 								<div className="mt-3 flex gap-2">
 									<Button
@@ -191,12 +191,12 @@ export function AccountApiTokenPanel({ api }: { api: AccountApiTokenApi }) {
 													{token.name}
 												</span>
 												{Date.parse(token.expires_at) <= now ? (
-													<span className="rounded bg-bg-hover-canvas px-1.5 py-0.5 text-[11px] text-text-secondary">
+													<span className="rounded bg-bg-hover-strong px-1.5 py-0.5 text-[11px] text-fg-muted">
 														Expired
 													</span>
 												) : null}
 											</div>
-											<p className="m-0 mt-1 text-xs leading-relaxed text-text-tertiary">
+											<p className="m-0 mt-1 text-xs leading-relaxed text-fg-subtle">
 												Created{" "}
 												<time
 													dateTime={token.created_at}
@@ -213,7 +213,7 @@ export function AccountApiTokenPanel({ api }: { api: AccountApiTokenApi }) {
 										<Button
 											variant="ghost"
 											size="sm"
-											className="text-xs text-text-tertiary hover:text-error-700"
+											className="text-xs text-fg-subtle hover:text-danger-border"
 											aria-label={`Delete ${token.name}`}
 											disabled={busy}
 											onClick={() => setDeleting(token)}
@@ -225,14 +225,14 @@ export function AccountApiTokenPanel({ api }: { api: AccountApiTokenApi }) {
 								))}
 							</ul>
 						) : !error ? (
-							<p className="mt-4 text-sm text-text-tertiary">
+							<p className="mt-4 text-sm text-fg-subtle">
 								You haven’t generated any account tokens yet.
 							</p>
 						) : null}
 					</>
 				)}
 				{error ? (
-					<div role="alert" className="my-4 text-sm text-error-700">
+					<div role="alert" className="my-4 text-sm text-danger-border">
 						<p>{error}</p>
 						<Button
 							variant="outline"
@@ -248,7 +248,7 @@ export function AccountApiTokenPanel({ api }: { api: AccountApiTokenApi }) {
 					href="https://lix.dev/docs/hosting"
 					target="_blank"
 					rel="noopener noreferrer"
-					className="mt-4 inline-block rounded-sm text-xs font-medium text-text-link underline-offset-4 hover:text-text-link-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring-focus-visible"
+					className="mt-4 inline-block rounded-sm text-xs font-medium text-link underline-offset-4 hover:text-link-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
 				>
 					Get started using the API →
 				</a>

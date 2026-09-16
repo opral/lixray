@@ -574,7 +574,7 @@ export function DirectoryView({
 			return (
 				<div
 					role="alert"
-					className="grid h-full w-full place-content-center px-6 text-center text-[13px] text-text-secondary"
+					className="grid h-full w-full place-content-center px-6 text-center text-[13px] text-fg-muted"
 				>
 					Unable to load repository files. Reload to try again.
 				</div>
@@ -586,7 +586,7 @@ export function DirectoryView({
 	return (
 		<div
 			ref={newButtonRef}
-			className="@container relative flex h-full min-h-0 flex-col overflow-y-auto bg-bg-panel font-sans text-text-primary"
+			className="@container relative flex h-full min-h-0 flex-col overflow-y-auto bg-panel font-sans text-fg"
 			{...dragHandlers}
 		>
 			{isDropTarget ? <DropImportOverlay /> : null}
@@ -657,7 +657,7 @@ export function DirectoryView({
 					{actionError ? (
 						<p
 							role="alert"
-							className="mb-3 rounded-lg bg-error-700/10 px-3 py-2 text-[13px] text-error-700"
+							className="mb-3 rounded-lg bg-danger-border/10 px-3 py-2 text-[13px] text-danger-border"
 						>
 							{actionError}
 						</p>
@@ -713,7 +713,7 @@ export function DirectoryView({
 						}
 					/>
 					{isImporting ? (
-						<p role="status" className="px-3 py-2 text-xs text-text-tertiary">
+						<p role="status" className="px-3 py-2 text-xs text-fg-subtle">
 							Importing files and folders…
 						</p>
 					) : null}
@@ -786,7 +786,7 @@ export function DirectoryView({
 							<div
 								role="menu"
 								data-entry-context-menu=""
-								className="absolute flex min-w-[164px] flex-col rounded-[10px] border border-border-panel bg-bg-panel p-1 shadow-[0_10px_28px_rgba(28,25,23,0.14)]"
+								className="absolute flex min-w-[164px] flex-col rounded-[10px] border border-border bg-panel p-1 shadow-[0_10px_28px_color-mix(in_srgb,var(--at-overlay)_14%,transparent)]"
 								style={{
 									left: Math.min(entryMenu.x + 2, window.innerWidth - 180),
 									top: Math.min(entryMenu.y + 2, window.innerHeight - 116),
@@ -810,10 +810,10 @@ export function DirectoryView({
 											}
 											setEntryMenu(null);
 										}}
-										className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-text-primary hover:bg-bg-hover"
+										className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-fg hover:bg-bg-hover"
 									>
 										<Link2
-											className="size-3.5 text-icon-secondary"
+											className="size-3.5 text-fg-muted"
 											aria-hidden="true"
 										/>
 										Copy link
@@ -826,10 +826,10 @@ export function DirectoryView({
 										setRenameTarget(entryMenu);
 										setEntryMenu(null);
 									}}
-									className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-text-primary hover:bg-bg-hover"
+									className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-fg hover:bg-bg-hover"
 								>
 									<PencilLine
-										className="size-3.5 text-icon-secondary"
+										className="size-3.5 text-fg-muted"
 										aria-hidden="true"
 									/>
 									Rename…
@@ -841,7 +841,7 @@ export function DirectoryView({
 										deleteEntry(entryMenu);
 										setEntryMenu(null);
 									}}
-									className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-text-primary hover:bg-error-700/10 hover:text-error-700"
+									className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-none font-medium text-fg hover:bg-danger-border/10 hover:text-danger-border"
 								>
 									<Trash2 className="size-3.5" aria-hidden="true" />
 									Delete
@@ -976,7 +976,7 @@ function RepositoryControlPlaneRail({
 			className="min-w-0 @max-[1100px]:hidden"
 		>
 			{teamSection ? (
-				<section className={`border-b border-border-panel pb-7${mutedSection}`}>
+				<section className={`border-b border-border pb-7${mutedSection}`}>
 					<RailHeading>Team &amp; agents</RailHeading>
 					<div className="mt-3 flex flex-wrap items-center gap-2">
 						{teamSection}
@@ -984,13 +984,13 @@ function RepositoryControlPlaneRail({
 				</section>
 			) : null}
 			<section
-				className={`border-b border-border-panel pb-7 ${teamSection ? "pt-7" : ""}${mutedSection}`}
+				className={`border-b border-border pb-7 ${teamSection ? "pt-7" : ""}${mutedSection}`}
 			>
 				<RailHeading>Repository</RailHeading>
 				<button
 					type="button"
 					onClick={onOpenSettings}
-					className="-mx-2 mt-2 flex w-[calc(100%+16px)] cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+					className="-mx-2 mt-2 flex w-[calc(100%+16px)] cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-fg-muted transition-colors hover:bg-bg-hover hover:text-fg focus-visible:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 				>
 					{visibility === "public" ? (
 						<Globe2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
@@ -1002,7 +1002,7 @@ function RepositoryControlPlaneRail({
 					)}
 					<span className="min-w-0 flex-1">
 						<span className="block text-[12px] font-semibold">Visibility</span>
-						<span className="mt-1 block text-[11.5px] text-text-tertiary">
+						<span className="mt-1 block text-[11.5px] text-fg-subtle">
 							{visibility === "public" ? "Public" : "Private"}
 						</span>
 					</span>
@@ -1012,12 +1012,12 @@ function RepositoryControlPlaneRail({
 					<button
 						type="button"
 						onClick={onOpenSettings}
-						className="-mx-2 mt-2 flex w-[calc(100%+16px)] cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+						className="-mx-2 mt-2 flex w-[calc(100%+16px)] cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-fg-muted transition-colors hover:bg-bg-hover hover:text-fg focus-visible:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 					>
 						<Settings className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
 						<span className="min-w-0 flex-1">
 							<span className="block text-[12px] font-semibold">Settings</span>
-							<span className="mt-1 block text-[11.5px] text-text-tertiary">
+							<span className="mt-1 block text-[11.5px] text-fg-subtle">
 								Name, access &amp; API tokens
 							</span>
 						</span>
@@ -1030,13 +1030,13 @@ function RepositoryControlPlaneRail({
 			</section>
 
 			<section
-				className={`border-b border-border-panel py-7 @max-[1100px]:border-t-0${mutedSection}`}
+				className={`border-b border-border py-7 @max-[1100px]:border-t-0${mutedSection}`}
 			>
 				<RailHeading>Changes</RailHeading>
 				{data?.changeHistoryUnavailable ? (
 					<p
 						role="status"
-						className="m-0 mt-2 text-[11.5px] leading-4 text-text-tertiary"
+						className="m-0 mt-2 text-[11.5px] leading-4 text-fg-subtle"
 					>
 						Complete history totals are unavailable in this view.
 					</p>
@@ -1048,7 +1048,7 @@ function RepositoryControlPlaneRail({
 				/>
 			</section>
 
-			<section className={`border-b border-border-panel py-7${mutedSection}`}>
+			<section className={`border-b border-border py-7${mutedSection}`}>
 				<RailHeading>Database</RailHeading>
 				<DatabaseSummary
 					data={data}
@@ -1076,14 +1076,14 @@ function RepositoryNarrowStats({
 	return (
 		<aside
 			aria-label="Repository statistics"
-			className="mt-7 hidden min-w-0 grid-cols-2 gap-8 border-t border-border-panel px-3 pt-7 @max-[1100px]:grid @max-[640px]:grid-cols-1"
+			className="mt-7 hidden min-w-0 grid-cols-2 gap-8 border-t border-border px-3 pt-7 @max-[1100px]:grid @max-[640px]:grid-cols-1"
 		>
 			<section className="min-w-0">
 				<RailHeading>Changes</RailHeading>
 				{data?.changeHistoryUnavailable ? (
 					<p
 						role="status"
-						className="m-0 mt-2 text-[11.5px] leading-4 text-text-tertiary"
+						className="m-0 mt-2 text-[11.5px] leading-4 text-fg-subtle"
 					>
 						Complete history totals are unavailable in this view.
 					</p>
@@ -1108,11 +1108,11 @@ function RepositoryNarrowStats({
 
 /** Quiet tonal chip, matching the Repository section's visibility chip. */
 const RAIL_CHIP_CLASS =
-	"h-7 gap-1.5 rounded-[7px] border-0 bg-[#f4eee5] px-2.5 text-[11.5px] font-bold text-[#57534e] shadow-none hover:bg-[#ebe2d6] hover:text-[#44403c] [&_img]:size-3 [&_svg]:size-3";
+	"h-7 gap-1.5 rounded-[7px] border-0 bg-bg-hover px-2.5 text-[11.5px] font-bold text-fg-muted shadow-none hover:bg-bg-hover-strong hover:text-fg-muted [&_img]:size-3 [&_svg]:size-3";
 
 function RailHeading({ children }: { readonly children: ReactNode }) {
 	return (
-		<h2 className="m-0 text-[11.5px] font-bold tracking-[0.08em] text-text-quaternary uppercase">
+		<h2 className="m-0 text-[11.5px] font-bold tracking-[0.08em] text-fg-faint uppercase">
 			{children}
 		</h2>
 	);
@@ -1157,14 +1157,14 @@ function ChangeBars({
 		return (
 			<div className="mt-2.5">
 				{available ? (
-					<p className="text-[12px] text-text-tertiary">
-						<strong className="text-[20px] text-text-primary">
+					<p className="text-[12px] text-fg-subtle">
+						<strong className="text-[20px] text-fg">
 							{formatCompactCount(working.count)}
 						</strong>{" "}
 						{working.label}
 					</p>
 				) : (
-					<p className="text-[12px] text-text-tertiary">
+					<p className="text-[12px] text-fg-subtle">
 						Working changes unavailable.
 					</p>
 				)}
@@ -1172,7 +1172,7 @@ function ChangeBars({
 					<button
 						type="button"
 						onClick={onOpenChangesReview}
-						className="mt-4 cursor-pointer text-[12px] font-semibold text-[#c2410c]"
+						className="mt-4 cursor-pointer text-[12px] font-semibold text-accent"
 					>
 						Review changes →
 					</button>
@@ -1198,14 +1198,12 @@ function ChangeBars({
 	return (
 		<div className="mt-2.5">
 			<div className="flex items-baseline gap-1.5">
-				<strong className="text-[20px] leading-none font-semibold tracking-[-0.03em] text-text-primary">
+				<strong className="text-[20px] leading-none font-semibold tracking-[-0.03em] text-fg">
 					{formatCompactCount(headlineCount)}
 				</strong>
-				<span className="text-[11.5px] text-text-tertiary">
-					{working.label}
-				</span>
+				<span className="text-[11.5px] text-fg-subtle">{working.label}</span>
 			</div>
-			<div className="mt-3 flex h-11 items-end gap-[3px] border-b border-[#ded5c8]">
+			<div className="mt-3 flex h-11 items-end gap-[3px] border-b border-border-strong">
 				{paddedDays.map((entry, index) => {
 					// The checkpoint's own day holds records from both sides of
 					// it; it reads as "after" while anything is still unreviewed.
@@ -1224,9 +1222,9 @@ function ChangeBars({
 							className={`min-w-0 flex-1 rounded-t-[2px] ${
 								afterCheckpoint
 									? isLatest
-										? "bg-[#e8590c]"
-										: "bg-[#f0b48a]"
-									: "bg-[#ebe2d4]"
+										? "bg-link"
+										: "bg-link/50"
+									: "bg-bg-hover-strong"
 							}`}
 							style={{ height }}
 							title={
@@ -1238,7 +1236,7 @@ function ChangeBars({
 					);
 				})}
 			</div>
-			<div className="mt-1.5 flex items-center justify-between text-[9.5px] text-text-quaternary">
+			<div className="mt-1.5 flex items-center justify-between text-[9.5px] text-fg-faint">
 				<span>{formatShortDate(data.createdAt)}</span>
 				{latestCheckpointDay ? <span>⚑ checkpoint</span> : null}
 				<span>today</span>
@@ -1249,7 +1247,7 @@ function ChangeBars({
 				<button
 					type="button"
 					onClick={onOpenChangesReview}
-					className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-[#c2410c] hover:text-[#9a3412] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+					className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-accent hover:text-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 				>
 					Review changes →
 				</button>
@@ -1257,7 +1255,7 @@ function ChangeBars({
 				<button
 					type="button"
 					onClick={onOpenHistory}
-					className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-[#c2410c] hover:text-[#9a3412] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+					className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-accent hover:text-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 				>
 					Show history →
 				</button>
@@ -1281,26 +1279,26 @@ function DatabaseSummary({
 		);
 	}
 	const rows = [
-		{ label: "Files", count: fileCount, color: "bg-[#e8590c]" },
+		{ label: "Files", count: fileCount, color: "bg-link" },
 		{
 			label: "Checkpoints",
 			count: data.checkpointCount,
-			color: "bg-[#d8cdbc]",
+			color: "bg-border-strong",
 		},
 		{
 			label: "Source records",
 			count: data.totalChangeCount,
-			color: "bg-[#eeb17f]",
+			color: "bg-link/50",
 		},
 	];
 
 	return (
 		<div className="mt-2.5">
 			<div className="flex items-baseline gap-1.5">
-				<strong className="text-[20px] leading-none font-semibold tracking-[-0.03em] text-text-primary">
+				<strong className="text-[20px] leading-none font-semibold tracking-[-0.03em] text-fg">
 					{data.tableCount === null ? "—" : formatCompactCount(data.tableCount)}
 				</strong>
-				<span className="text-[11.5px] text-text-tertiary">
+				<span className="text-[11.5px] text-fg-subtle">
 					{data.tableCount === 1 ? "table" : "tables"}
 				</span>
 			</div>
@@ -1317,11 +1315,11 @@ function DatabaseSummary({
 				{rows.map((row) => (
 					<li
 						key={row.label}
-						className="flex items-center gap-2 text-[11px] text-text-tertiary"
+						className="flex items-center gap-2 text-[11px] text-fg-subtle"
 					>
 						<span className={`size-1.5 rounded-full ${row.color}`} />
 						<span>{row.label}</span>
-						<span className="flex-1 border-b border-dotted border-border-panel" />
+						<span className="flex-1 border-b border-dotted border-border" />
 						<span className="tabular-nums">
 							{row.count === null ? "—" : formatCompactCount(row.count)}
 						</span>
@@ -1332,7 +1330,7 @@ function DatabaseSummary({
 				<button
 					type="button"
 					onClick={onOpenSqlExplorer}
-					className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-[#c2410c] hover:text-[#9a3412] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+					className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-accent hover:text-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 				>
 					Open SQL Explorer →
 				</button>
@@ -1389,7 +1387,7 @@ function Breadcrumb({
 				return (
 					<span key={crumb.path} className="flex min-w-0 items-center gap-0.5">
 						{index > 0 ? (
-							<span aria-hidden className="text-[12px] text-text-quaternary">
+							<span aria-hidden className="text-[12px] text-fg-faint">
 								/
 							</span>
 						) : null}
@@ -1397,7 +1395,7 @@ function Breadcrumb({
 							<span
 								aria-current="location"
 								className={`max-w-[220px] truncate px-2 ${
-									index === 0 ? "text-text-quaternary" : "text-text-primary"
+									index === 0 ? "text-fg-faint" : "text-fg"
 								}`}
 							>
 								{crumb.label}
@@ -1406,7 +1404,7 @@ function Breadcrumb({
 							<button
 								type="button"
 								onClick={(event) => onNavigate(crumb.path, event)}
-								className="flex h-[30px] max-w-[180px] cursor-pointer items-center truncate rounded-[7px] px-2 text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+								className="flex h-[30px] max-w-[180px] cursor-pointer items-center truncate rounded-[7px] px-2 text-fg-subtle transition-colors hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
 							>
 								{crumb.label}
 							</button>
@@ -1508,18 +1506,18 @@ function InviteControl({
 					disabled={disabled}
 					onClick={onOpenPeople}
 					aria-label={`${team.length} people — open People`}
-					className="flex cursor-pointer items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible disabled:cursor-not-allowed disabled:opacity-50"
+					className="flex cursor-pointer items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
 				>
 					<span className="flex -space-x-1.5">
 						{team.slice(0, 3).map((member) => (
 							<MemberAvatar
 								key={member.accountId}
 								member={member}
-								className="size-6 text-[11px] ring-2 ring-bg-panel"
+								className="size-6 text-[11px] ring-2 ring-panel"
 							/>
 						))}
 						{overflow > 0 ? (
-							<span className="flex size-6 items-center justify-center rounded-full bg-bg-hover text-[10px] font-semibold text-text-secondary ring-2 ring-bg-panel">
+							<span className="flex size-6 items-center justify-center rounded-full bg-bg-hover text-[10px] font-semibold text-fg-muted ring-2 ring-panel">
 								+{overflow}
 							</span>
 						) : null}
@@ -1632,7 +1630,7 @@ function useImportDrop({
 
 function DropImportOverlay() {
 	return (
-		<div className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-xl border-2 border-dashed border-bg-action-primary bg-bg-panel/85 text-sm font-semibold text-text-secondary">
+		<div className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-[12px] border-2 border-dashed border-accent bg-panel/85 text-sm font-semibold text-fg-muted">
 			Drop files and folders to import
 		</div>
 	);
@@ -1682,9 +1680,9 @@ function ReadmePreview({
 		<section
 			aria-label={`${fileName} preview`}
 			data-testid="home-readme-preview"
-			className="mt-7 border-t border-border-panel"
+			className="mt-7 border-t border-border"
 		>
-			<div className="flex h-11 items-center gap-3 px-3 text-xs font-medium text-text-tertiary">
+			<div className="flex h-11 items-center gap-3 px-3 text-xs font-medium text-fg-subtle">
 				<img
 					src={fileIconUrl(fileName)}
 					alt=""
@@ -1700,7 +1698,7 @@ function ReadmePreview({
 					aria-label={`Edit ${fileName}`}
 					title={`Edit ${fileName}`}
 					onClick={(event) => onOpen(event)}
-					className="-mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-text-tertiary hover:bg-bg-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+					className="-mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-fg-subtle hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
 				>
 					<PencilLine aria-hidden="true" className="size-3.5" />
 					Edit
@@ -1832,16 +1830,16 @@ function RenameEntryDialog({
 	};
 	return (
 		<div
-			className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(28,25,23,0.28)]"
+			className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/30"
 			onClick={onClose}
 		>
 			<div
 				role="dialog"
 				aria-label={`Rename ${target.name}`}
-				className="w-[340px] rounded-xl border border-border-panel bg-bg-panel p-4 shadow-[0_18px_44px_rgba(28,25,23,0.24)]"
+				className="w-[340px] rounded-[12px] border border-border bg-panel p-4 shadow-[0_18px_44px_color-mix(in_srgb,var(--at-overlay)_24%,transparent)]"
 				onClick={(event) => event.stopPropagation()}
 			>
-				<h2 className="m-0 text-[13.5px] font-bold text-text-primary">
+				<h2 className="m-0 text-[13.5px] font-bold text-fg">
 					Rename {target.kind === "file" ? "file" : "folder"}
 				</h2>
 				<input
@@ -1856,10 +1854,13 @@ function RenameEntryDialog({
 						if (event.key === "Escape") onClose();
 					}}
 					disabled={busy}
-					className="mt-3 h-9 w-full rounded-lg border border-border-panel bg-bg-app px-2.5 text-[13.5px] text-text-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+					className="mt-3 h-9 w-full rounded-lg border border-border bg-bg px-2.5 text-[13.5px] text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
 				/>
 				{error ? (
-					<p role="alert" className="mt-2 mb-0 text-[12.5px] text-error-700">
+					<p
+						role="alert"
+						className="mt-2 mb-0 text-[12.5px] text-danger-border"
+					>
 						{error}
 					</p>
 				) : null}
@@ -1895,12 +1896,12 @@ function RenameEntryDialog({
 function GettingStartedIllustration() {
 	return (
 		<div aria-hidden="true" className="relative mb-6 h-[118px] w-[300px]">
-			<div className="absolute top-0 left-1/2 flex w-[230px] -translate-x-1/2 rotate-[-1.5deg] flex-col gap-[7px] rounded-[10px] border border-border-panel bg-bg-panel px-3.5 py-3 shadow-[0_10px_26px_rgba(28,25,23,0.09)]">
+			<div className="absolute top-0 left-1/2 flex w-[230px] -translate-x-1/2 rotate-[-1.5deg] flex-col gap-[7px] rounded-[10px] border border-border bg-panel px-3.5 py-3 shadow-[0_10px_26px_color-mix(in_srgb,var(--at-overlay)_9%,transparent)]">
 				<div className="flex items-center gap-[7px]">
 					<img src={fileIconUrl("file.md")} alt="" className="size-[13px]" />
-					<span className="h-[7px] w-24 rounded bg-[#E4DDD1]" />
+					<span className="h-[7px] w-24 rounded bg-border-strong" />
 					<span className="flex-1" />
-					<span className="inline-flex size-[15px] items-center justify-center rounded-[4.5px] bg-[#FAF4EC] shadow-[inset_0_0_0_1px_#EDE2D2]">
+					<span className="inline-flex size-[15px] items-center justify-center rounded-[4.5px] bg-accent-subtle ring-1 ring-border ring-inset">
 						<img
 							src="/landing/claude-spark.svg"
 							alt=""
@@ -1910,7 +1911,7 @@ function GettingStartedIllustration() {
 				</div>
 				<div className="flex items-center gap-[7px]">
 					<img src={fileIconUrl("file.csv")} alt="" className="size-[13px]" />
-					<span className="h-[7px] w-[68px] rounded bg-[#ECE8E2]" />
+					<span className="h-[7px] w-[68px] rounded bg-border" />
 					<span className="flex-1" />
 					<img src="/landing/codex-icon.svg" alt="" className="size-[15px]" />
 				</div>
@@ -1920,23 +1921,23 @@ function GettingStartedIllustration() {
 						alt=""
 						className="size-[13px]"
 					/>
-					<span className="h-[7px] w-[118px] rounded bg-[#ECE8E2]" />
+					<span className="h-[7px] w-[118px] rounded bg-border" />
 				</div>
 			</div>
-			<span className="absolute bottom-3.5 left-2 inline-flex size-[34px] rotate-[-6deg] items-center justify-center rounded-[10px] bg-[#FAF4EC] shadow-[inset_0_0_0_1px_#EDE2D2,0_6px_14px_rgba(28,25,23,0.08)]">
+			<span className="absolute bottom-3.5 left-2 inline-flex size-[34px] rotate-[-6deg] items-center justify-center rounded-[10px] bg-accent-subtle ring-1 ring-border ring-inset shadow-[0_6px_14px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)]">
 				<img src="/landing/claude-spark.svg" alt="" className="size-[19px]" />
 			</span>
 			<img
 				src="/landing/codex-icon.svg"
 				alt=""
-				className="absolute right-2.5 bottom-3 size-[34px] rotate-[5deg] drop-shadow-[0_6px_14px_rgba(28,25,23,0.12)]"
+				className="absolute right-2.5 bottom-3 size-[34px] rotate-[5deg] drop-shadow-[0_6px_14px_color-mix(in_srgb,var(--at-overlay)_12%,transparent)]"
 			/>
 			<svg
 				width="46"
 				height="30"
 				viewBox="0 0 46 30"
 				fill="none"
-				stroke="#D8CFC2"
+				stroke="var(--at-border-strong)"
 				strokeWidth="1.8"
 				strokeLinecap="round"
 				className="absolute bottom-[26px] left-11"
@@ -1948,7 +1949,7 @@ function GettingStartedIllustration() {
 				height="30"
 				viewBox="0 0 46 30"
 				fill="none"
-				stroke="#D8CFC2"
+				stroke="var(--at-border-strong)"
 				strokeWidth="1.8"
 				strokeLinecap="round"
 				className="absolute right-[46px] bottom-6"
@@ -1982,10 +1983,10 @@ function GettingStarted({
 			>
 				<div className="flex w-[min(560px,100%)] flex-col items-center">
 					<GettingStartedIllustration />
-					<h1 className="m-0 text-2xl font-bold tracking-[-0.02em]">
+					<h1 className="m-0 text-[24px]/8 font-bold tracking-[-0.02em]">
 						Welcome to your Lix repository
 					</h1>
-					<p className="mt-3 mb-0 max-w-[470px] text-[14.5px] leading-[1.6] text-text-secondary">
+					<p className="mt-3 mb-0 max-w-[470px] text-[14.5px] leading-[1.6] text-fg-muted">
 						A shared folder for you and your AI agents. Connect Claude, Codex,
 						or Cursor — everything it writes lands here, with full change
 						history.
@@ -1993,12 +1994,12 @@ function GettingStarted({
 					<button
 						type="button"
 						onClick={() => setConnectDialogOpen(true)}
-						className="mt-5.5 mb-10.5 inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--color-bg-action-primary-start)_0%,var(--color-bg-action-primary-end)_100%)] px-4.5 py-2.75 text-sm font-bold text-text-on-action-primary shadow-[var(--shadow-action-primary)] hover:brightness-105"
+						className="mt-5.5 mb-10.5 inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--at-link)_0%,var(--at-link)_100%)] px-4.5 py-2.75 text-sm font-bold text-accent-on shadow-shadow-accent hover:brightness-105"
 					>
 						<Link2 className="size-3.5" aria-hidden="true" />
 						Connect an agent
 					</button>
-					<div className="mb-3.5 text-[11.5px] font-bold tracking-[0.06em] text-text-quaternary uppercase">
+					<div className="mb-3.5 text-[11.5px] font-bold tracking-[0.06em] text-fg-faint uppercase">
 						or start yourself
 					</div>
 					<div className="flex justify-center gap-2.5">
@@ -2008,7 +2009,7 @@ function GettingStarted({
 								type="button"
 								data-testid={kind.testId}
 								onClick={() => onCreateFile(kind.extension)}
-								className="inline-flex items-center gap-2 rounded-[9px] bg-bg-hover px-3.5 py-2.5 text-[13px] font-semibold text-text-secondary hover:bg-bg-active"
+								className="inline-flex items-center gap-2 rounded-[9px] bg-bg-hover px-3.5 py-2.5 text-[13px] font-semibold text-fg-muted hover:bg-bg-active"
 							>
 								<img
 									src={fileIconUrl(`file.${kind.extension}`)}
@@ -2019,7 +2020,7 @@ function GettingStarted({
 							</button>
 						))}
 					</div>
-					<div className="mt-4.5 text-xs text-text-quaternary">
+					<div className="mt-4.5 text-xs text-fg-faint">
 						…or drop files anywhere in this window to import
 					</div>
 				</div>
@@ -2050,12 +2051,12 @@ function AgentConnectionDialog({
 	const connectionStatus = useMcpConnectionStatus(open, hasAgentConnected);
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-h-[calc(100vh-2rem)] w-[min(520px,calc(100vw-2rem))] max-w-none gap-0 overflow-y-auto rounded-2xl border-border-panel bg-bg-panel p-0 text-text-primary shadow-[0_30px_90px_rgba(28,25,23,0.3)] sm:max-w-none">
+			<DialogContent className="max-h-[calc(100vh-2rem)] w-[min(520px,calc(100vw-2rem))] max-w-none gap-0 overflow-y-auto rounded-[16px] border-border bg-panel p-0 text-fg shadow-[0_30px_90px_color-mix(in_srgb,var(--at-overlay)_30%,transparent)] sm:max-w-none">
 				<DialogHeader className="gap-1.5 px-8 pt-8 pr-14 text-left">
 					<DialogTitle className="text-lg leading-tight font-bold tracking-[-0.01em]">
 						Connect an agent
 					</DialogTitle>
-					<DialogDescription className="text-[13.5px] leading-[1.55] text-text-secondary">
+					<DialogDescription className="text-[13.5px] leading-[1.55] text-fg-muted">
 						Copy the prompt into Claude, ChatGPT, or Gemini. It handles the
 						rest.
 					</DialogDescription>
@@ -2066,7 +2067,7 @@ function AgentConnectionDialog({
 					<button
 						type="button"
 						onClick={() => void copyPrompt()}
-						className="inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--color-bg-action-primary-start)_0%,var(--color-bg-action-primary-end)_100%)] px-4.5 py-2.75 text-sm font-bold text-text-on-action-primary shadow-[var(--shadow-action-primary)] hover:brightness-105"
+						className="inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--at-link)_0%,var(--at-link)_100%)] px-4.5 py-2.75 text-sm font-bold text-accent-on shadow-shadow-accent hover:brightness-105"
 					>
 						{/* Icon crossfade per Atelier's copy-markdown button: the Copy
 						    glyph gives way to a green check, then swaps back so the
@@ -2081,14 +2082,14 @@ function AgentConnectionDialog({
 								aria-hidden="true"
 							/>
 							<span
-								className={`absolute inset-0 grid place-items-center rounded-full bg-white transition-all duration-150 ${
+								className={`absolute inset-0 grid place-items-center rounded-full bg-panel transition-all duration-150 ${
 									copyState === "copied"
 										? "scale-100 opacity-100"
 										: "scale-75 opacity-0"
 								}`}
 							>
 								<Check
-									className="size-3 text-[var(--color-text-status-success)]"
+									className="size-3 text-success"
 									strokeWidth={3}
 									aria-hidden="true"
 								/>
@@ -2109,17 +2110,23 @@ function AgentConnectionDialog({
 					    so the chat reads as the user's own browser tab — not a real
 					    input. The cursor presses Copy prompt, carries it down, pastes,
 					    and sends. Reduced motion shows the pasted end state statically. */}
-					<div className="rounded-[14px] shadow-[0_10px_28px_rgba(28,25,23,0.18)]">
+					<div className="rounded-[14px] shadow-[0_10px_28px_color-mix(in_srgb,var(--at-overlay)_18%,transparent)]">
 						<div
 							aria-hidden="true"
-							className="flex items-center gap-2.5 rounded-t-[14px] border-b border-white/10 bg-[#2C2C2C] px-3 py-2"
+							className="flex items-center gap-2.5 rounded-t-[14px] border-b border-overlay-hairline bg-overlay-raised px-3 py-2"
 						>
 							<span className="flex items-center gap-1.5">
-								<span className="size-2.5 rounded-full bg-[#FF5F57]" />
-								<span className="size-2.5 rounded-full bg-[#FEBC2E]" />
-								<span className="size-2.5 rounded-full bg-[#28C840]" />
+								<span
+									className="size-2.5 rounded-full bg-[#FF5F57]" /* token-literal: macOS window control */
+								/>
+								<span
+									className="size-2.5 rounded-full bg-[#FEBC2E]" /* token-literal: macOS window control */
+								/>
+								<span
+									className="size-2.5 rounded-full bg-[#28C840]" /* token-literal: macOS window control */
+								/>
 							</span>
-							<span className="flex items-center gap-1 text-[#8A8A8A]">
+							<span className="flex items-center gap-1 text-overlay-fg-subtle">
 								<svg
 									width="14"
 									height="14"
@@ -2146,7 +2153,7 @@ function AgentConnectionDialog({
 									<path d="M9 6l6 6-6 6" />
 								</svg>
 							</span>
-							<span className="flex flex-1 items-center gap-1.5 rounded-[7px] bg-[#1F1F1F] px-2.5 py-1.5 text-[11px] font-medium text-[#9A9A9A]">
+							<span className="flex flex-1 items-center gap-1.5 rounded-[7px] bg-overlay px-2.5 py-1.5 text-[11px] font-medium text-overlay-fg-subtle">
 								<svg
 									width="9"
 									height="10"
@@ -2179,32 +2186,32 @@ function AgentConnectionDialog({
 								/>
 							</span>
 						</div>
-						<div className="rounded-b-[14px] bg-[#141414] p-4">
-							<div className="relative rounded-[14px] bg-[#212121] px-4 pt-3.5 pb-3 text-left shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]">
+						<div className="rounded-b-[14px] bg-overlay p-4">
+							<div className="relative rounded-[14px] bg-overlay-raised px-4 pt-3.5 pb-3 text-left ring-1 ring-overlay-hairline ring-inset">
 								<div className="relative h-[21px] text-[13.5px]">
 									<span
 										aria-hidden="true"
-										className="absolute top-0 left-0 text-[#6B6B6B] animate-connect-placeholder motion-reduce:hidden"
+										className="absolute top-0 left-0 text-overlay-fg-subtle animate-connect-placeholder motion-reduce:hidden"
 									>
-										<span className="mr-[3px] inline-block h-[15px] w-[1.5px] bg-[#E5E5E5] align-text-bottom animate-connect-caret" />
+										<span className="mr-[3px] inline-block h-[15px] w-[1.5px] bg-overlay-fg align-text-bottom animate-connect-caret" />
 										Do anything
 									</span>
-									<span className="absolute top-0 left-0 inline-flex rounded-[5px] bg-[rgba(232,89,12,0.16)] px-[7px] py-0.5 font-mono text-xs text-[#F0A47C] opacity-0 animate-connect-chip motion-reduce:opacity-100 motion-reduce:animate-none">
+									<span className="absolute top-0 left-0 inline-flex rounded-[5px] bg-link/15 px-[7px] py-0.5 font-mono text-xs text-overlay-accent opacity-0 animate-connect-chip motion-reduce:opacity-100 motion-reduce:animate-none">
 										[prompt]
 									</span>
 								</div>
 								<div className="mt-4 flex items-center gap-3">
-									<span className="text-base leading-none text-[#8A8A8A]">
+									<span className="text-[16px] leading-none text-overlay-fg-subtle">
 										＋
 									</span>
 									<span className="flex-1" />
-									<span className="relative inline-flex size-[26px] items-center justify-center rounded-full bg-[#3A3A3A] animate-connect-send motion-reduce:animate-none">
+									<span className="relative inline-flex size-[26px] items-center justify-center rounded-full bg-overlay-hover animate-connect-send motion-reduce:animate-none">
 										<ArrowUp
-											className="size-3.5 text-[#E5E5E5] animate-connect-send-arrow motion-reduce:animate-none"
+											className="size-3.5 text-overlay-fg animate-connect-send-arrow motion-reduce:animate-none"
 											aria-hidden="true"
 										/>
 										<span className="absolute inset-0 flex items-center justify-center opacity-0 animate-connect-spinner-show motion-reduce:hidden">
-											<span className="box-border size-[13px] rounded-full border-2 border-white/25 border-t-white animate-connect-spin" />
+											<span className="box-border size-[13px] rounded-full border-2 border-overlay-fg/25 border-t-overlay-fg animate-connect-spin" />
 										</span>
 									</span>
 								</div>
@@ -2216,21 +2223,21 @@ function AgentConnectionDialog({
 										width="17"
 										height="20"
 										viewBox="0 0 17 20"
-										className="drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
+										className="drop-shadow-[0_2px_4px_color-mix(in_srgb,var(--at-overlay)_50%,transparent)]"
 									>
 										<path
 											d="M1 1l0 14.5 3.9-3.4 2.5 6 2.7-1.1-2.5-5.9 5.4-.4z"
-											fill="#FFFFFF"
-											stroke="#1C1917"
+											fill="var(--at-overlay-fg)"
+											stroke="var(--at-overlay)"
 											strokeWidth="1.3"
 											strokeLinejoin="round"
 										/>
 									</svg>
 									<span className="absolute top-4 left-4 inline-flex gap-1 opacity-0 animate-connect-keys">
-										<span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md bg-[#FBF6F0] px-[5px] text-[11px] font-bold text-[#1C1917] shadow-[0_2px_0_#C9C2B8,0_4px_10px_rgba(0,0,0,0.4)]">
+										<span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md bg-bg px-[5px] text-[11px] font-bold text-fg shadow-[0_2px_0_var(--at-fg-faint),0_4px_10px_var(--at-scrim)]">
 											⌘
 										</span>
-										<span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md bg-[#FBF6F0] text-[11px] font-bold text-[#1C1917] shadow-[0_2px_0_#C9C2B8,0_4px_10px_rgba(0,0,0,0.4)]">
+										<span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md bg-bg text-[11px] font-bold text-fg shadow-[0_2px_0_var(--at-fg-faint),0_4px_10px_var(--at-scrim)]">
 											V
 										</span>
 									</span>
@@ -2245,19 +2252,19 @@ function AgentConnectionDialog({
 					aria-live="polite"
 				>
 					<div
-						className="inline-flex items-center gap-2.5 rounded-[10px] bg-bg-hover px-4.5 py-2.75 text-[13.5px] font-semibold text-text-secondary"
+						className="inline-flex items-center gap-2.5 rounded-[10px] bg-bg-hover px-4.5 py-2.75 text-[13.5px] font-semibold text-fg-muted"
 						data-testid="agent-connection-status"
 					>
 						{connectionStatus === "connected" ? (
 							<>
-								<span className="inline-flex size-4 items-center justify-center rounded-full bg-success-600 text-white">
+								<span className="inline-flex size-4 items-center justify-center rounded-full bg-success text-accent-on">
 									<Check className="size-2.5" aria-hidden="true" />
 								</span>
 								Agent connected
 							</>
 						) : (
 							<>
-								<span className="size-2 rounded-full bg-bg-action-primary animate-connect-dot-pulse motion-reduce:animate-none" />
+								<span className="size-2 rounded-full bg-accent animate-connect-dot-pulse motion-reduce:animate-none" />
 								Waiting for agent…
 							</>
 						)}
@@ -2325,13 +2332,13 @@ function ConnectionStep({
 			<span
 				className={
 					active
-						? "inline-flex size-[18px] items-center justify-center rounded-full bg-text-primary text-[10.5px] font-bold text-bg-panel"
-						: "inline-flex size-[18px] items-center justify-center rounded-full bg-bg-hover text-[10.5px] font-bold text-text-secondary"
+						? "inline-flex size-[18px] items-center justify-center rounded-full bg-fg text-[10.5px] font-bold text-panel"
+						: "inline-flex size-[18px] items-center justify-center rounded-full bg-bg-hover text-[10.5px] font-bold text-fg-muted"
 				}
 			>
 				{number}
 			</span>
-			<span className="text-xs font-bold tracking-[0.05em] text-text-secondary uppercase">
+			<span className="text-xs font-bold tracking-[0.05em] text-fg-muted uppercase">
 				{label}
 			</span>
 		</div>

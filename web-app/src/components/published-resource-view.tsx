@@ -40,20 +40,20 @@ export function PublishedResourceView({
 	resource,
 }: PublishedResourceViewProps) {
 	return (
-		<main className="min-h-screen bg-bg-panel font-sans text-text-primary">
-			<header className="flex h-[82px] items-center gap-3 border-b border-border-panel px-6">
+		<main className="min-h-screen bg-panel font-sans text-fg">
+			<header className="flex h-[82px] items-center gap-3 border-b border-border px-6">
 				<a
 					href={`/@${namespace}/${repositorySlug}`}
 					className="truncate text-[18px] font-semibold hover:underline"
 				>
 					{repositoryName}
 				</a>
-				<span className="text-text-quaternary">/</span>
-				<span className="min-w-0 truncate text-[15px] text-text-secondary">
+				<span className="text-fg-faint">/</span>
+				<span className="min-w-0 truncate text-[15px] text-fg-muted">
 					{resource.path.split("/").filter(Boolean).at(-1)}
 				</span>
 				<span className="flex-1" />
-				<span className="flex shrink-0 items-center gap-1.5 rounded-full border border-border-panel px-3 py-1.5 text-[12px] font-medium text-text-tertiary">
+				<span className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[12px] font-medium text-fg-subtle">
 					<LockOpen className="size-3.5" aria-hidden />
 					Public · read-only
 				</span>
@@ -115,10 +115,10 @@ function PublishedDirectory({
 			</h1>
 			{error ? <PublishedError>{error}</PublishedError> : null}
 			{!error && !listing ? (
-				<p className="text-[13px] text-text-tertiary">Opening directory…</p>
+				<p className="text-[13px] text-fg-subtle">Opening directory…</p>
 			) : null}
 			{listing?.entries.length === 0 ? (
-				<div className="rounded-[10px] border border-dashed border-border-panel px-6 py-12 text-center text-[13px] text-text-tertiary">
+				<div className="rounded-[10px] border border-dashed border-border px-6 py-12 text-center text-[13px] text-fg-subtle">
 					This directory is empty.
 				</div>
 			) : null}
@@ -127,10 +127,10 @@ function PublishedDirectory({
 					<a
 						key={`${entry.kind}:${entry.path}`}
 						href={publishedResourceHref(namespace, repositorySlug, entry)}
-						className="flex min-h-11 items-center gap-3 rounded-[9px] px-3 text-[14px] transition-colors hover:bg-bg-raised"
+						className="flex min-h-11 items-center gap-3 rounded-[9px] px-3 text-[14px] transition-colors hover:bg-panel"
 					>
 						{entry.kind === "directory" ? (
-							<Folder className="size-[19px] fill-blue-400 text-blue-500" />
+							<Folder className="size-[19px] fill-folder/60 text-folder" />
 						) : (
 							<img
 								src={fileIconUrl(fileName(entry.path))}
@@ -143,7 +143,7 @@ function PublishedDirectory({
 				))}
 			</div>
 			{listing?.truncated ? (
-				<p className="mt-4 text-[12px] text-text-tertiary">
+				<p className="mt-4 text-[12px] text-fg-subtle">
 					Showing the first 1,000 items.
 				</p>
 			) : null}
@@ -200,7 +200,7 @@ function PublishedFile(
 		);
 	if (!lix)
 		return (
-			<p className="mx-auto w-[min(960px,calc(100%-48px))] py-8 text-[13px] text-text-tertiary">
+			<p className="mx-auto w-[min(960px,calc(100%-48px))] py-8 text-[13px] text-fg-subtle">
 				Opening file…
 			</p>
 		);
@@ -335,7 +335,7 @@ export function PublishedFileView({
 
 function PublishedError({ children }: { children: string }) {
 	return (
-		<p className="rounded-lg bg-error-700/10 px-3 py-2 text-[13px] text-error-700">
+		<p className="rounded-lg bg-danger-border/10 px-3 py-2 text-[13px] text-danger-border">
 			{children}
 		</p>
 	);

@@ -29,29 +29,27 @@ export function SiteHeader({
 		<header
 			className={cn(
 				"z-20 flex items-center justify-between px-5 py-6 sm:px-14",
-				sticky
-					? "sticky top-0 border-b border-[#1c1917]/8 bg-[#fbf6f0]"
-					: "relative",
+				sticky ? "sticky top-0 border-b border-fg/8 bg-bg" : "relative",
 			)}
 		>
 			<div className="flex items-center gap-[18px]">
 				<Link
-					className="inline-flex items-center gap-[9px] text-lg font-bold tracking-[-.01em] text-[#1c1917] no-underline"
+					className="inline-flex items-center gap-[9px] text-lg font-bold tracking-[-.01em] text-fg no-underline"
 					to="/"
 					aria-label="LixRay home"
 				>
 					<img className="size-[26px]" src="/lixray-mark.svg" alt="" />
 					<span>LixRay</span>
 				</Link>
-				<span className="h-[18px] w-px bg-[#1c1917]/15" aria-hidden="true" />
+				<span className="h-[18px] w-px bg-overlay/15" aria-hidden="true" />
 				<Link
-					className="text-[15px] font-semibold text-[#57534e] no-underline hover:text-[#1c1917]"
+					className="text-[15px] font-semibold text-fg-muted no-underline hover:text-fg"
 					to="/docs"
 				>
 					Docs
 				</Link>
 				<a
-					className="hidden text-[15px] font-semibold text-[#57534e] no-underline hover:text-[#1c1917] sm:block"
+					className="hidden text-[15px] font-semibold text-fg-muted no-underline hover:text-fg sm:block"
 					href="https://github.com/opral"
 					target="_blank"
 					rel="noreferrer"
@@ -65,19 +63,19 @@ export function SiteHeader({
 			>
 				{user ? (
 					<button
-						className="cursor-pointer border-0 bg-transparent p-0 text-[#1c1917] hover:text-[#e8590c]"
+						className="cursor-pointer border-0 bg-transparent p-0 text-fg hover:text-link"
 						type="button"
 						onClick={() => void signOut()}
 					>
 						Log out
 					</button>
 				) : (
-					<a className="text-[#1c1917] no-underline" href="/sign-in">
+					<a className="text-fg no-underline" href="/sign-in">
 						Sign in
 					</a>
 				)}
 				<a
-					className="rounded-[10px] border border-[#1c1917]/15 bg-white px-[18px] py-2.5 font-semibold text-[#1c1917] no-underline transition hover:border-[#1c1917]/30"
+					className="rounded-[10px] border border-fg/15 bg-panel px-[18px] py-2.5 font-semibold text-fg no-underline transition hover:border-fg/30"
 					href={repositoryTo}
 				>
 					{user ? "Open LixRay" : "Get started"}

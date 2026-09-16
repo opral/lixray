@@ -34,7 +34,7 @@ function OpenAppPage() {
 	]);
 
 	return (
-		<div className="min-h-screen bg-bg-app">
+		<div className="min-h-screen bg-bg">
 			<AppTitlebar>
 				<AppTitlebarBrand />
 			</AppTitlebar>

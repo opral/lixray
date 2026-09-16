@@ -3,9 +3,9 @@ import { type ReactNode } from "react";
 import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 
 const primaryButton =
-	"inline-flex items-center justify-center rounded-[10px] bg-[linear-gradient(180deg,#F97316_0%,#E8590C_100%)] px-[22px] py-3 text-base font-bold whitespace-nowrap text-white no-underline shadow-[0_6px_16px_rgba(232,89,12,.3),inset_0_1px_0_rgba(255,255,255,.25)] transition hover:brightness-105";
+	"inline-flex items-center justify-center rounded-[10px] bg-[image:var(--at-accent-gradient)] px-[22px] py-3 text-[16px]/6 font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
 const secondaryButton =
-	"inline-flex items-center justify-center rounded-[10px] border border-[#1c1917]/15 bg-white px-5 py-[11px] text-base font-semibold whitespace-nowrap text-[#1c1917] no-underline transition hover:border-[#1c1917]/30";
+	"inline-flex items-center justify-center rounded-[10px] border border-fg/15 bg-panel px-5 py-[11px] text-[16px]/6 font-semibold whitespace-nowrap text-fg no-underline transition hover:border-fg/30";
 const bookDemoHref = "mailto:hello@opral.com?subject=LixRay%20demo";
 
 export function LandingPage() {
@@ -24,7 +24,7 @@ export function LandingPage() {
 	);
 
 	return (
-		<div className="min-h-screen bg-[#fbf6f0] font-sans text-[#1c1917] antialiased">
+		<div className="min-h-screen bg-bg font-sans text-fg antialiased">
 			<SiteHeader />
 
 			<main className="mx-auto flex w-full max-w-[660px] flex-col gap-16 px-6 pt-16 pb-[130px] sm:px-8 sm:pt-20">
@@ -62,7 +62,7 @@ export function LandingPage() {
 							overflow: hidden;
 							height: 1.12em;
 							vertical-align: bottom;
-							color: #e8590c;
+							color: var(--at-link);
 						}
 						.landing-headline-reel {
 							display: flex;
@@ -85,12 +85,12 @@ export function LandingPage() {
 							.landing-headline-reel { animation: none; }
 						}
 					`}</style>
-					<p className="m-0 text-lg leading-[1.6] text-[#57534e] text-pretty">
+					<p className="m-0 text-lg leading-[1.6] text-fg-muted text-pretty">
 						One repo you and your agents share. Any file type, every change
 						tracked.
 					</p>
 					<div className="mt-0.5">{ctaRow}</div>
-					<div className="flex flex-wrap items-center gap-[9px] text-sm text-[#8a8178]">
+					<div className="flex flex-wrap items-center gap-[9px] text-sm text-fg-subtle">
 						<span>Works with</span>
 						<span
 							className="inline-flex items-center gap-2"
@@ -114,9 +114,9 @@ export function LandingPage() {
 						</span>
 						<span>and any MCP agent</span>
 					</div>
-					<div className="w-full self-stretch overflow-hidden rounded-xl border border-[#1c1917]/12 bg-white">
-						<div className="flex items-center gap-2 border-b border-[#1c1917]/8 bg-[#f7f3ed] px-5 py-2.5 font-mono text-[12.5px] text-[#8a8178]">
-							lixray.com/<b className="text-[#1c1917]">@acme/repository</b>
+					<div className="w-full self-stretch overflow-hidden rounded-[12px] border border-fg/12 bg-panel">
+						<div className="flex items-center gap-2 border-b border-fg/8 bg-bg-hover px-5 py-2.5 font-mono text-[12.5px] text-fg-subtle">
+							lixray.com/<b className="text-fg">@acme/repository</b>
 						</div>
 						<div className="flex flex-col gap-2.5 px-6 py-5 font-mono text-[13.5px]">
 							<RepoRow folder="sales/">
@@ -140,20 +140,20 @@ export function LandingPage() {
 					aria-labelledby="why-title"
 				>
 					<h2
-						className="m-0 text-2xl font-bold tracking-[-.02em]"
+						className="m-0 text-[24px]/8 font-bold tracking-[-.02em]"
 						id="why-title"
 					>
 						Why?
 					</h2>
-					<p className="m-0 text-base leading-[1.65] text-[#44403c]">
+					<p className="m-0 text-[16px] leading-[1.65] text-fg-muted">
 						<b>Sharing skills.</b> Write a skill once. Every agent on the team
 						runs the same version.
 					</p>
-					<p className="m-0 text-base leading-[1.65] text-[#44403c]">
+					<p className="m-0 text-[16px] leading-[1.65] text-fg-muted">
 						<b>Storing automations.</b> The scripts your agents run on a
 						schedule, versioned and reviewable.
 					</p>
-					<p className="m-0 text-base leading-[1.65] text-[#44403c]">
+					<p className="m-0 text-[16px] leading-[1.65] text-fg-muted">
 						<b>Context layer for agents.</b> Agents read the ICP and the
 						playbook from one place. Always the current version.
 					</p>
@@ -164,34 +164,34 @@ export function LandingPage() {
 					aria-labelledby="comparison-title"
 				>
 					<h2
-						className="m-0 text-2xl font-bold tracking-[-.02em]"
+						className="m-0 text-[24px]/8 font-bold tracking-[-.02em]"
 						id="comparison-title"
 					>
 						Comparison
 					</h2>
-					<p className="m-0 text-base leading-[1.65] text-[#44403c]">
+					<p className="m-0 text-[16px] leading-[1.65] text-fg-muted">
 						<Link
-							className="text-[#44403c] underline decoration-[#44403c]/30 underline-offset-2 hover:text-[#e8590c] hover:decoration-[#e8590c]/40"
+							className="text-fg-muted underline decoration-fg-muted/30 underline-offset-2 hover:text-link hover:decoration-link/40"
 							to="/lp/lixray-vs-github"
 						>
 							<b>GitHub</b> is too technical (branch, commit, pull request) and
 							lacks permissions.
 						</Link>
 					</p>
-					<p className="m-0 text-base leading-[1.65] text-[#44403c]">
+					<p className="m-0 text-[16px] leading-[1.65] text-fg-muted">
 						<b>Google Drive</b> has no version control and is not designed for
 						programmatic usage.
 					</p>
 				</section>
 			</main>
 
-			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-[#1c1917]/7 px-5 py-6 text-sm text-[#8a8178] sm:px-14">
+			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-fg/7 px-5 py-6 text-sm text-fg-subtle sm:px-14">
 				<span className="inline-flex items-center gap-2">
 					<img className="size-4" src="/lixray-mark.svg" alt="" />
-					<span className="font-semibold text-[#57534e]">LixRay</span>
+					<span className="font-semibold text-fg-muted">LixRay</span>
 				</span>
 				<a
-					className="no-underline hover:text-[#57534e]"
+					className="no-underline hover:text-fg-muted"
 					href="https://opral.com"
 					target="_blank"
 					rel="noreferrer"
@@ -199,17 +199,17 @@ export function LandingPage() {
 					© 2026 Opral
 				</a>
 				<nav className="flex flex-wrap items-center gap-4">
-					<Link className="no-underline hover:text-[#57534e]" to="/privacy">
+					<Link className="no-underline hover:text-fg-muted" to="/privacy">
 						Privacy
 					</Link>
-					<Link className="no-underline hover:text-[#57534e]" to="/terms">
+					<Link className="no-underline hover:text-fg-muted" to="/terms">
 						Terms
 					</Link>
-					<Link className="no-underline hover:text-[#57534e]" to="/support">
+					<Link className="no-underline hover:text-fg-muted" to="/support">
 						Support
 					</Link>
 					<a
-						className="font-semibold text-[#57534e] no-underline"
+						className="font-semibold text-fg-muted no-underline"
 						href="https://github.com/opral"
 						target="_blank"
 						rel="noreferrer"
@@ -231,10 +231,8 @@ function RepoRow({
 }) {
 	return (
 		<span className="flex flex-col gap-0.5 sm:flex-row sm:gap-3.5">
-			<span className="w-[130px] shrink-0 font-bold text-[#c2410c]">
-				{folder}
-			</span>
-			<span className="text-[#8a8178]">{children}</span>
+			<span className="w-[130px] shrink-0 font-bold text-accent">{folder}</span>
+			<span className="text-fg-subtle">{children}</span>
 		</span>
 	);
 }

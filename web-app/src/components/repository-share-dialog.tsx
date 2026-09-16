@@ -136,7 +136,7 @@ export function RepositoryShareDialog({
 					aria-label={`Share ${documentName}`}
 					onOpenAutoFocus={(event) => event.preventDefault()}
 					className={cn(
-						"z-50 grid w-[min(384px,calc(100vw-2rem))] gap-3.5 rounded-xl border border-border-panel bg-bg-panel p-[18px] text-text-primary shadow-[0_18px_50px_rgba(28,25,23,0.18),0_2px_8px_rgba(28,25,23,0.08)] outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+						"z-50 grid w-[min(384px,calc(100vw-2rem))] gap-3.5 rounded-[12px] border border-border bg-panel p-[18px] text-fg shadow-[0_18px_50px_color-mix(in_srgb,var(--at-overlay)_18%,transparent),0_2px_8px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)] outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
 						className,
 					)}
 				>
@@ -157,15 +157,15 @@ export function RepositoryShareDialog({
 						className={cn(
 							"flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-xs",
 							isPublished
-								? "border-success-200 bg-success-50 text-success-800"
-								: "border-border-subtle bg-bg-hover text-text-secondary",
+								? "border-success-subtle bg-success-subtle text-diff-added"
+								: "border-border-subtle bg-bg-hover text-fg-muted",
 						)}
 					>
 						{isPublished ? (
 							<Globe2 className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
 						) : (
 							<LockKeyhole
-								className="mt-0.5 size-3.5 shrink-0 text-text-tertiary"
+								className="mt-0.5 size-3.5 shrink-0 text-fg-subtle"
 								aria-hidden="true"
 							/>
 						)}
@@ -185,7 +185,7 @@ export function RepositoryShareDialog({
 					{isPublished ? (
 						<div className="flex min-w-0 items-stretch gap-2 max-[420px]:flex-col">
 							<div
-								className="flex h-9 min-w-0 grow cursor-text select-all items-center overflow-hidden rounded-lg border border-border-panel bg-bg-panel px-3 font-mono text-[11px] text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+								className="flex h-9 min-w-0 grow cursor-text select-all items-center overflow-hidden rounded-lg border border-border bg-panel px-3 font-mono text-[11px] text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 								tabIndex={0}
 								role="textbox"
 								aria-readonly="true"
@@ -228,12 +228,9 @@ export function RepositoryShareDialog({
 						</Button>
 					) : null}
 
-					<p
-						className="text-xs leading-5 text-text-tertiary"
-						aria-live="polite"
-					>
+					<p className="text-xs leading-5 text-fg-subtle" aria-live="polite">
 						{errorMessage ? (
-							<span className="text-error-700" role="alert">
+							<span className="text-danger-border" role="alert">
 								{errorMessage}
 							</span>
 						) : readAccess?.status === "private" ? (
@@ -267,7 +264,7 @@ export function RepositoryShareDialog({
 							onClick={() =>
 								void runPermissionChange("unpublish", unpublishReadLink)
 							}
-							className="w-fit text-xs font-semibold text-text-secondary underline decoration-border-strong underline-offset-4 hover:text-text-primary disabled:opacity-50"
+							className="w-fit text-xs font-semibold text-fg-muted underline decoration-border-strong underline-offset-4 hover:text-fg disabled:opacity-50"
 						>
 							{busy === "unpublish" ? "Updating…" : unpublishLabel}
 						</button>
@@ -277,10 +274,10 @@ export function RepositoryShareDialog({
 						<button
 							type="button"
 							onClick={onOpenTeam}
-							className="-mx-1.5 flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-semibold text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+							className="-mx-1.5 flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-semibold text-fg-muted transition-colors hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 						>
 							<Users
-								className="size-3.5 shrink-0 text-text-tertiary"
+								className="size-3.5 shrink-0 text-fg-subtle"
 								aria-hidden="true"
 							/>
 							Invite your team

@@ -78,8 +78,8 @@ function SignUpDevPage() {
 	const isEnabled = status === "enabled" && accountEmail !== null;
 
 	return (
-		<main className="grid min-h-screen place-items-center bg-bg-app px-5 py-8 text-text-primary">
-			<div className="grid w-full max-w-[400px] justify-items-center gap-[22px] rounded-[14px] border border-border-panel bg-bg-panel px-7 py-9 shadow-[0_18px_50px_rgba(28,25,23,0.1),0_2px_8px_rgba(28,25,23,0.05)]">
+		<main className="grid min-h-screen place-items-center bg-bg px-5 py-8 text-fg">
+			<div className="grid w-full max-w-[400px] justify-items-center gap-[22px] rounded-[14px] border border-border bg-panel px-7 py-9 shadow-[0_18px_50px_color-mix(in_srgb,var(--at-overlay)_10%,transparent),0_2px_8px_color-mix(in_srgb,var(--at-overlay)_5%,transparent)]">
 				<a
 					href="/"
 					className="inline-flex items-center gap-2 text-[15px] font-[750] no-underline"
@@ -89,10 +89,10 @@ function SignUpDevPage() {
 					<span>LixRay</span>
 				</a>
 				<div className="grid gap-[7px] text-center">
-					<h1 className="m-0 text-xl font-bold leading-tight">
+					<h1 className="m-0 text-[20px] font-bold leading-tight">
 						Developer sign in
 					</h1>
-					<p className="m-0 text-[13.5px] leading-normal text-text-quaternary">
+					<p className="m-0 text-[13.5px] leading-normal text-fg-faint">
 						{isEnabled
 							? `Use the dedicated production developer account (${accountEmail}).`
 							: status === "loading"
@@ -110,7 +110,7 @@ function SignUpDevPage() {
 					</Button>
 				) : isEnabled ? (
 					<>
-						<label className="grid w-full gap-1.5 text-left text-[12.5px] font-semibold text-text-secondary">
+						<label className="grid w-full gap-1.5 text-left text-[12.5px] font-semibold text-fg-muted">
 							<span>Password</span>
 							<input
 								type="password"
@@ -118,7 +118,7 @@ function SignUpDevPage() {
 								value={password}
 								onChange={(event) => setPassword(event.target.value)}
 								disabled={!isLoaded || submitting}
-								className="h-10 w-full rounded-[9px] border border-border-panel bg-bg-app px-3 text-sm font-normal text-text-primary outline-none focus:border-bg-action-primary focus:ring-2 focus:ring-bg-action-primary/20"
+								className="h-10 w-full rounded-[9px] border border-border bg-bg px-3 text-sm font-normal text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
 							/>
 						</label>
 						<Button
@@ -134,13 +134,13 @@ function SignUpDevPage() {
 					</>
 				) : null}
 				{error ? (
-					<p className="whitespace-pre-wrap rounded-lg border border-error-200 bg-error-50 px-3.5 py-3 text-sm text-error-800">
+					<p className="whitespace-pre-wrap rounded-lg border border-danger-subtle bg-danger-subtle px-3.5 py-3 text-sm text-diff-removed">
 						{error}
 					</p>
 				) : null}
 				<a
 					href="/sign-in"
-					className="text-[13px] font-semibold text-text-secondary underline underline-offset-2"
+					className="text-[13px] font-semibold text-fg-muted underline underline-offset-2"
 				>
 					Back to standard sign in
 				</a>

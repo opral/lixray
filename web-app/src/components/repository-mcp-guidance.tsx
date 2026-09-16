@@ -45,8 +45,8 @@ export function RepositoryMcpGuidance({
 			aria-label="Access through LixRay MCP"
 			className={
 				visible
-					? "space-y-3 text-sm text-text-tertiary [&_code]:break-all [&_code]:text-text-secondary"
-					: "sr-only focus-within:not-sr-only focus-within:block focus-within:bg-bg-app focus-within:p-6"
+					? "space-y-3 text-sm text-fg-subtle [&_code]:break-all [&_code]:text-fg-muted"
+					: "sr-only focus-within:not-sr-only focus-within:block focus-within:bg-bg focus-within:p-6"
 			}
 		>
 			<p>

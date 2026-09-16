@@ -12,13 +12,27 @@ export interface RepositoryPalette {
 
 export const TILE_PALETTES: readonly RepositoryPalette[] = [
 	{
-		background: "var(--color-bg-selection-current)",
-		border: "var(--color-border-selection-current)",
-		color: "var(--color-icon-selection-current)",
+		background: "var(--at-accent-subtle)",
+		border: "var(--at-accent-border)",
+		color: "var(--at-accent)",
 	},
-	{ background: "#eff2e9", border: "#dce3cc", color: "#5a7052" },
-	{ background: "#ebf0f4", border: "#d3dfe8", color: "#4a6b85" },
-	{ background: "#f3eef6", border: "#e2d7e9", color: "#7a5e8c" },
+	{
+		background: "var(--at-tag-green)",
+		border:
+			"color-mix(in srgb, var(--at-tag-green-fg) 20%, var(--at-tag-green))",
+		color: "var(--at-tag-green-fg)",
+	},
+	{
+		background: "var(--at-tag-blue)",
+		border: "color-mix(in srgb, var(--at-tag-blue-fg) 20%, var(--at-tag-blue))",
+		color: "var(--at-tag-blue-fg)",
+	},
+	{
+		background: "var(--at-tag-purple)",
+		border:
+			"color-mix(in srgb, var(--at-tag-purple-fg) 20%, var(--at-tag-purple))",
+		color: "var(--at-tag-purple-fg)",
+	},
 ] as const;
 
 export function repositoryPalette(index: number): RepositoryPalette {

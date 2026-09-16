@@ -6,11 +6,11 @@ export function RepositoryUpgradeProgress({
 	phase: RepositoryMigrationState["phase"];
 }) {
 	return (
-		<main className="absolute inset-0 grid place-content-center justify-items-center gap-3 bg-bg-app p-6 text-center text-text-secondary">
+		<main className="absolute inset-0 grid place-content-center justify-items-center gap-3 bg-bg p-6 text-center text-fg-muted">
 			<strong role="status" aria-live="polite">
 				{repositoryMigrationHeading(phase)}
 			</strong>
-			<span className="text-sm text-text-tertiary">
+			<span className="text-sm text-fg-subtle">
 				Your repository is being updated automatically.
 			</span>
 			<div
@@ -19,7 +19,7 @@ export function RepositoryUpgradeProgress({
 				aria-label="Upgrading repository"
 				aria-valuetext="Upgrade in progress"
 			>
-				<div className="h-full w-1/3 motion-safe:animate-pulse rounded-full bg-text-secondary" />
+				<div className="h-full w-1/3 motion-safe:animate-pulse rounded-full bg-fg-muted" />
 			</div>
 		</main>
 	);

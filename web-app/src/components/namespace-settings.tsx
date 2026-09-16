@@ -62,7 +62,7 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 	if (!authLoaded || !repositoryState.isLoaded) {
 		return (
 			<SettingsShell>
-				<p className="text-text-tertiary">Loading settings…</p>
+				<p className="text-fg-subtle">Loading settings…</p>
 			</SettingsShell>
 		);
 	}
@@ -73,7 +73,7 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 					<p className="m-0 text-[15px] font-bold">
 						These settings aren’t available.
 					</p>
-					<p className="m-0 text-[13px] text-text-tertiary">
+					<p className="m-0 text-[13px] text-fg-subtle">
 						You need to be a member of @{handle} to see its settings.
 					</p>
 					<Button asChild variant="secondary">
@@ -87,18 +87,18 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 	return (
 		<SettingsShell>
 			<nav
-				className="mb-4 text-[12.5px] text-text-tertiary"
+				className="mb-4 text-[12.5px] text-fg-subtle"
 				aria-label="Breadcrumb"
 			>
 				<Link to="/home" className="text-inherit no-underline hover:underline">
 					Repositories
 				</Link>{" "}
-				/ <span className="text-text-secondary">@{organization.handle}</span> /
+				/ <span className="text-fg-muted">@{organization.handle}</span> /
 				Settings
 			</nav>
 			<div className="mb-5 flex items-center gap-3">
 				<span
-					className={`inline-flex size-10 shrink-0 items-center justify-center bg-bg-hover-canvas text-[15px] font-bold text-text-secondary ${
+					className={`inline-flex size-10 shrink-0 items-center justify-center bg-bg-hover-strong text-[15px] font-bold text-fg-muted ${
 						!organization.isPersonal ? "rounded-[11px]" : "rounded-full"
 					}`}
 					aria-hidden="true"
@@ -109,7 +109,7 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 					<h1 className="m-0 truncate text-[17px] leading-tight font-bold tracking-[-0.01em]">
 						{organization.name}
 					</h1>
-					<p className="m-0 text-[12.5px] text-text-tertiary">
+					<p className="m-0 text-[12.5px] text-fg-subtle">
 						lixray.com/@{organization.handle}
 					</p>
 				</div>
@@ -131,11 +131,11 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 			{!organization.isPersonal && client ? (
 				<>
 					<MembersPanel organization={organization} />
-					<div className="rounded-xl border border-dashed border-border-panel px-[18px] py-4 opacity-70">
-						<h3 className="m-0 text-[13.5px] font-bold text-error-700">
+					<div className="rounded-[12px] border border-dashed border-border px-[18px] py-4 opacity-70">
+						<h3 className="m-0 text-[13.5px] font-bold text-danger-border">
 							Danger zone
 						</h3>
-						<p className="m-0 mt-0.5 text-[12px] text-text-tertiary">
+						<p className="m-0 mt-0.5 text-[12px] text-fg-subtle">
 							Deleting an organization arrives with the supporting RPCs — kept
 							out of this version.
 						</p>
@@ -148,7 +148,7 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 
 function SettingsShell({ children }: { children: React.ReactNode }) {
 	return (
-		<div className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary">
+		<div className="flex min-h-dvh flex-col bg-bg font-sans text-fg">
 			<DirectoryHeader />
 			<main className="flex min-h-0 flex-1 justify-center overflow-auto">
 				<section className="w-[min(640px,calc(100%-32px))] pt-12 pb-[60px]">
@@ -262,11 +262,11 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 	};
 
 	return (
-		<section className="mb-3.5 rounded-xl border border-border-panel bg-bg-panel px-[18px] py-4">
+		<section className="mb-3.5 rounded-[12px] border border-border bg-panel px-[18px] py-4">
 			<div className="flex items-start gap-3">
 				<div className="min-w-0 flex-1">
 					<h3 className="m-0 text-[13.5px] font-bold">Public profile</h3>
-					<p className="m-0 mt-0.5 text-[12px] text-text-tertiary">
+					<p className="m-0 mt-0.5 text-[12px] text-fg-subtle">
 						The information shown at lixray.com/@{organization.handle}.
 					</p>
 				</div>
@@ -278,10 +278,10 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 			</div>
 
 			{error && !values ? (
-				<p className="m-0 mt-3 text-[12.5px] text-error-700">{error}</p>
+				<p className="m-0 mt-3 text-[12.5px] text-danger-border">{error}</p>
 			) : null}
 			{!values && !error ? (
-				<p className="m-0 mt-3 text-[12.5px] text-text-tertiary">
+				<p className="m-0 mt-3 text-[12.5px] text-fg-subtle">
 					Loading profile…
 				</p>
 			) : null}
@@ -359,7 +359,7 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 						<div className="flex items-center">
 							<span
 								id="profile-links-label"
-								className="text-[12px] font-semibold text-text-secondary"
+								className="text-[12px] font-semibold text-fg-muted"
 							>
 								Links
 							</span>
@@ -385,9 +385,7 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 							</Button>
 						</div>
 						{values.links.length === 0 ? (
-							<p className="m-0 text-[12px] text-text-tertiary">
-								No links yet.
-							</p>
+							<p className="m-0 text-[12px] text-fg-subtle">No links yet.</p>
 						) : null}
 						{values.links.map((link, index) => (
 							<div
@@ -434,7 +432,7 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 									type="button"
 									variant="ghost"
 									size="sm"
-									className="h-9 px-2 text-[12px] text-text-tertiary"
+									className="h-9 px-2 text-[12px] text-fg-subtle"
 									disabled={!isOwner || busy}
 									onClick={() =>
 										update(
@@ -452,7 +450,7 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 					</div>
 
 					{error ? (
-						<p className="m-0 text-[12.5px] text-error-700">{error}</p>
+						<p className="m-0 text-[12.5px] text-danger-border">{error}</p>
 					) : null}
 					<div className="flex items-center gap-2 border-t border-border-subtle pt-3.5">
 						<Button
@@ -464,7 +462,7 @@ function ProfilePanel({ organization }: { organization: Organization }) {
 							{busy ? "Saving…" : "Save profile"}
 						</Button>
 						{!isOwner ? (
-							<span className="text-[12px] text-text-quaternary">
+							<span className="text-[12px] text-fg-faint">
 								Only namespace owners can edit this profile.
 							</span>
 						) : null}
@@ -485,13 +483,11 @@ function ProfileField({
 	label: string;
 }) {
 	return (
-		<label className="grid gap-1.5 text-[12px] font-semibold text-text-secondary">
+		<label className="grid gap-1.5 text-[12px] font-semibold text-fg-muted">
 			<span>
 				{label}
 				{hint ? (
-					<span className="ml-1.5 font-normal text-text-quaternary">
-						{hint}
-					</span>
+					<span className="ml-1.5 font-normal text-fg-faint">{hint}</span>
 				) : null}
 			</span>
 			{children}
@@ -500,7 +496,7 @@ function ProfileField({
 }
 
 const profileInputClass =
-	"h-9 min-w-0 rounded-lg border border-border-panel bg-bg-panel px-[11px] text-[13px] font-normal text-text-primary outline-none placeholder:text-text-quaternary focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1 disabled:opacity-60";
+	"h-9 min-w-0 rounded-lg border border-border bg-panel px-[11px] text-[13px] font-normal text-fg outline-none placeholder:text-fg-faint focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-60";
 
 function GeneralPanel({ organization }: { organization: Organization }) {
 	const { renameOrganization } = useRepository();
@@ -526,14 +522,14 @@ function GeneralPanel({ organization }: { organization: Organization }) {
 	};
 
 	return (
-		<section className="mb-3.5 rounded-xl border border-border-panel bg-bg-panel px-[18px] py-4">
+		<section className="mb-3.5 rounded-[12px] border border-border bg-panel px-[18px] py-4">
 			<h3 className="m-0 text-[13.5px] font-bold">Name</h3>
-			<p className="m-0 mt-0.5 mb-3 text-[12px] text-text-tertiary">
+			<p className="m-0 mt-0.5 mb-3 text-[12px] text-fg-subtle">
 				Shown across LixRay. Renaming keeps the handle and all URLs.
 			</p>
 			<form className="flex gap-2" onSubmit={(event) => void submit(event)}>
 				<input
-					className="h-9 min-w-0 flex-1 rounded-lg border border-border-panel bg-bg-panel px-[11px] text-[13px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1 disabled:opacity-60"
+					className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-panel px-[11px] text-[13px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-60"
 					maxLength={80}
 					value={name}
 					disabled={!isOwner}
@@ -554,17 +550,15 @@ function GeneralPanel({ organization }: { organization: Organization }) {
 					{busy ? "Saving…" : "Save"}
 				</Button>
 			</form>
-			<p className="m-0 mt-2.5 text-[12px] text-text-tertiary">
+			<p className="m-0 mt-2.5 text-[12px] text-fg-subtle">
 				URL{"  "}
 				<code className="rounded bg-bg-hover px-1.5 py-0.5 text-[11.5px]">
 					lixray.com/@{organization.handle}
 				</code>{" "}
-				<span className="text-text-quaternary">
-					· handles can’t be changed yet
-				</span>
+				<span className="text-fg-faint">· handles can’t be changed yet</span>
 			</p>
 			{!isOwner ? (
-				<p className="m-0 mt-2 text-[12px] text-text-quaternary">
+				<p className="m-0 mt-2 text-[12px] text-fg-faint">
 					Only owners can rename this organization.
 				</p>
 			) : null}
@@ -669,12 +663,12 @@ function MembersPanel({ organization }: { organization: Organization }) {
 	};
 
 	return (
-		<section className="mb-3.5 rounded-xl border border-border-panel bg-bg-panel px-[18px] py-4">
+		<section className="mb-3.5 rounded-[12px] border border-border bg-panel px-[18px] py-4">
 			<div className="flex items-center gap-2">
 				<h3 className="m-0 text-[13.5px] font-bold">
 					Members
 					{members ? (
-						<span className="ml-1.5 font-medium text-text-tertiary">
+						<span className="ml-1.5 font-medium text-fg-subtle">
 							· {members.length}
 						</span>
 					) : null}
@@ -701,21 +695,21 @@ function MembersPanel({ organization }: { organization: Organization }) {
 						type="button"
 						variant="ghost"
 						size="sm"
-						className="h-8 text-text-tertiary"
+						className="h-8 text-fg-subtle"
 						onClick={() => void resetInviteLink()}
 					>
 						Reset link
 					</Button>
 				) : null}
 			</div>
-			<p className="m-0 mt-1 mb-2 text-[12px] text-text-tertiary">
+			<p className="m-0 mt-1 mb-2 text-[12px] text-fg-subtle">
 				Everyone here sees every repository in @{organization.handle}.
 			</p>
 			{error ? (
-				<p className="m-0 py-2 text-[12.5px] text-error-700">{error}</p>
+				<p className="m-0 py-2 text-[12.5px] text-danger-border">{error}</p>
 			) : null}
 			{members === null && !error ? (
-				<p className="m-0 py-2 text-[12.5px] text-text-tertiary">
+				<p className="m-0 py-2 text-[12.5px] text-fg-subtle">
 					Loading members…
 				</p>
 			) : null}
@@ -739,18 +733,16 @@ function MembersPanel({ organization }: { organization: Organization }) {
 							<span className="truncate text-[13px] leading-tight font-semibold">
 								{member.name || member.email || "Account"}
 								{isSelf ? (
-									<span className="ml-1.5 font-normal text-text-quaternary">
-										you
-									</span>
+									<span className="ml-1.5 font-normal text-fg-faint">you</span>
 								) : null}
 							</span>
 							{member.email ? (
-								<span className="truncate text-[11.5px] leading-tight text-text-tertiary">
+								<span className="truncate text-[11.5px] leading-tight text-fg-subtle">
 									{member.email}
 								</span>
 							) : null}
 						</span>
-						<span className="ml-auto rounded-[7px] border border-border-panel px-2 py-1 text-[12px] text-text-secondary capitalize">
+						<span className="ml-auto rounded-[7px] border border-border px-2 py-1 text-[12px] text-fg-muted capitalize">
 							{member.role}
 						</span>
 						{removable ? (
@@ -769,7 +761,7 @@ function MembersPanel({ organization }: { organization: Organization }) {
 									type="button"
 									variant="ghost"
 									size="sm"
-									className="h-7 text-text-tertiary"
+									className="h-7 text-fg-subtle"
 									onClick={() => setConfirmingRemoval(member.accountId)}
 								>
 									{isSelf ? "Leave" : "Remove"}

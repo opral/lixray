@@ -20,14 +20,14 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 		index < docsEntries.length - 1 ? docsEntries[index + 1] : undefined;
 
 	return (
-		<div className="flex min-h-screen flex-col bg-[#fbf6f0] font-sans text-[#1c1917] antialiased">
+		<div className="flex min-h-screen flex-col bg-bg font-sans text-fg antialiased">
 			<SiteHeader sticky />
 
 			<div className="docs-layout">
 				<nav className="docs-navigation" aria-label="Docs navigation">
 					{Object.entries(docsToc).map(([group, items]) => (
 						<div className="mb-[26px] flex flex-col gap-1.5" key={group}>
-							<span className="pb-1 font-mono text-[11.5px] font-semibold tracking-[.07em] text-[#b5afa6] uppercase">
+							<span className="pb-1 font-mono text-[11.5px] font-semibold tracking-[.07em] text-fg-faint uppercase">
 								{group}
 							</span>
 							{items.map((item) => {
@@ -36,8 +36,8 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 								return (
 									<Link
 										className={cn(
-											"block py-[3px] text-sm text-[#57534e] no-underline hover:text-[#1c1917]",
-											active && "font-semibold text-[#c2410c]",
+											"block py-[3px] text-sm text-fg-muted no-underline hover:text-fg",
+											active && "font-semibold text-accent",
 										)}
 										key={item.path}
 										to="/docs/$slug"
@@ -57,7 +57,7 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 							<CopyMarkdownButton markdown={markdown} />
 						</div>
 						<DocsArticle html={html} />
-						<div className="mt-14 flex items-center justify-between border-t border-[#1c1917]/8 pt-6 text-sm">
+						<div className="mt-14 flex items-center justify-between border-t border-fg/8 pt-6 text-sm">
 							{previous ? (
 								<PagerLink entry={previous} direction="previous" />
 							) : (
@@ -69,13 +69,13 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 				</main>
 			</div>
 
-			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-[#1c1917]/7 px-5 py-6 text-sm text-[#8a8178] sm:px-14">
+			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-fg/7 px-5 py-6 text-sm text-fg-subtle sm:px-14">
 				<span className="inline-flex items-center gap-2">
 					<img className="size-4" src="/lixray-mark.svg" alt="" />
-					<span className="font-semibold text-[#57534e]">LixRay</span>
+					<span className="font-semibold text-fg-muted">LixRay</span>
 				</span>
 				<a
-					className="no-underline hover:text-[#57534e]"
+					className="no-underline hover:text-fg-muted"
 					href="https://opral.com"
 					target="_blank"
 					rel="noreferrer"
@@ -83,17 +83,17 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 					© 2026 Opral
 				</a>
 				<nav className="flex flex-wrap items-center gap-4">
-					<Link className="no-underline hover:text-[#57534e]" to="/privacy">
+					<Link className="no-underline hover:text-fg-muted" to="/privacy">
 						Privacy
 					</Link>
-					<Link className="no-underline hover:text-[#57534e]" to="/terms">
+					<Link className="no-underline hover:text-fg-muted" to="/terms">
 						Terms
 					</Link>
-					<Link className="no-underline hover:text-[#57534e]" to="/support">
+					<Link className="no-underline hover:text-fg-muted" to="/support">
 						Support
 					</Link>
 					<a
-						className="font-semibold text-[#57534e] no-underline"
+						className="font-semibold text-fg-muted no-underline"
 						href="https://github.com/opral"
 						target="_blank"
 						rel="noreferrer"
@@ -155,7 +155,7 @@ function CopyMarkdownButton({ markdown }: { markdown: string }) {
 
 	return (
 		<button
-			className="inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-mono text-xs text-[#8a8178] transition hover:text-[#1c1917]"
+			className="inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-mono text-xs text-fg-subtle transition hover:text-fg"
 			type="button"
 			onClick={() => {
 				void navigator.clipboard.writeText(markdown);
@@ -179,7 +179,7 @@ function PagerLink({
 	const next = direction === "next";
 	return (
 		<Link
-			className="font-semibold text-[#57534e] no-underline transition hover:text-[#c2410c]"
+			className="font-semibold text-fg-muted no-underline transition hover:text-accent"
 			to="/docs/$slug"
 			params={{ slug: entry.slug }}
 		>

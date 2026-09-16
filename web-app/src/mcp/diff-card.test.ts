@@ -39,7 +39,7 @@ void test("a card carries the change, the file, and the way back", () => {
 	assert.equal(card.hidden, 0);
 	// Atelier's own view, inlined: the marks and the tokens that paint them.
 	assert.match(card.html, /data-review-status="added"/);
-	assert.match(card.html, /--atelier-added-bg/);
+	assert.match(card.html, /--at-diff-added-subtle/);
 	assert.match(card.html, /AI consultants/);
 	// The header names the file, the footer leads back to it.
 	assert.match(card.html, /gtm\/<\/span><span class="name">playbook\.md</);
@@ -80,7 +80,7 @@ void test("which side is missing says what happened", () => {
 	assert.ok(created);
 	assert.equal(created.kind, "added");
 	assert.match(created.html, /new file · 2 entries/);
-	assert.match(created.html, /--atelier-added-edge/);
+	assert.match(created.html, /--at-diff-added/);
 
 	// An empty file that existed is an overwrite, not a new file.
 	const overwritten = renderDiffCard({

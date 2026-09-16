@@ -135,7 +135,7 @@ export function RepositoryDirectory() {
 	);
 	return (
 		<div
-			className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary"
+			className="flex min-h-dvh flex-col bg-bg font-sans text-fg"
 			data-testid="repository-directory"
 		>
 			<DirectoryHeader />
@@ -164,7 +164,7 @@ export function RepositoryDirectory() {
 						</Button>
 					</div>
 					{repositoryCount > 0 ? (
-						<p className="m-0 px-3.5 pb-[30px] text-[13.5px] leading-normal text-text-tertiary max-[560px]:px-2 max-[560px]:pt-1 max-[560px]:pb-6">
+						<p className="m-0 px-3.5 pb-[30px] text-[13.5px] leading-normal text-fg-subtle max-[560px]:px-2 max-[560px]:pt-1 max-[560px]:pb-6">
 							{repositoryCount}{" "}
 							{pluralize(repositoryCount, "repository", "repositories")} across{" "}
 							{namespaceCount} {pluralize(namespaceCount, "namespace")}
@@ -192,12 +192,12 @@ export function RepositoryDirectory() {
 												to="/@{$namespace}"
 												params={{ namespace: organization.handle }}
 												aria-label={`View the @${organization.handle} profile`}
-												className="rounded-[5px] text-inherit no-underline transition-colors hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+												className="rounded-[5px] text-inherit no-underline transition-colors hover:text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
 											>
 												@{organization.handle}
 											</Link>
 										</h2>
-										<span className="text-[12px] text-text-tertiary">
+										<span className="text-[12px] text-fg-subtle">
 											{organization.repositories.length}{" "}
 											{pluralize(
 												organization.repositories.length,
@@ -211,7 +211,7 @@ export function RepositoryDirectory() {
 												to="/settings/@{$namespace}"
 												params={{ namespace: organization.handle }}
 												aria-label={`Settings for @${organization.handle}`}
-												className="inline-flex size-6 shrink-0 items-center justify-center self-center rounded-[7px] text-icon-quaternary transition-colors hover:bg-bg-hover-canvas hover:text-icon-secondary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring-focus-visible"
+												className="inline-flex size-6 shrink-0 items-center justify-center self-center rounded-[7px] text-fg-faint transition-colors hover:bg-bg-hover-strong hover:text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
 											>
 												<Settings className="size-[14px]" aria-hidden="true" />
 											</Link>
@@ -255,22 +255,22 @@ export function RepositoryDirectory() {
 					{!isDemoModeEnabled &&
 					!organizations.some((organization) => !organization.isPersonal) ? (
 						<button
-							className="mx-3.5 mt-[26px] flex w-[calc(100%-28px)] cursor-pointer items-center gap-3.5 rounded-[10px] border-[1.5px] border-dashed border-border-action-secondary bg-transparent px-4 py-[13px] text-left transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible max-[560px]:mx-2 max-[560px]:w-[calc(100%-16px)]"
+							className="mx-3.5 mt-[26px] flex w-[calc(100%-28px)] cursor-pointer items-center gap-3.5 rounded-[10px] border-[1.5px] border-dashed border-border-strong bg-transparent px-4 py-[13px] text-left transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-[560px]:mx-2 max-[560px]:w-[calc(100%-16px)]"
 							type="button"
 							data-testid="create-organization-row"
 							onClick={() => setCreatingOrganization(true)}
 						>
 							<span
-								className="inline-flex size-[30px] shrink-0 items-center justify-center rounded-lg bg-bg-hover-canvas text-[15px] text-text-secondary"
+								className="inline-flex size-[30px] shrink-0 items-center justify-center rounded-lg bg-bg-hover-strong text-[15px] text-fg-muted"
 								aria-hidden="true"
 							>
 								<Plus className="size-4" />
 							</span>
 							<span className="flex min-w-0 flex-col gap-0.5">
-								<span className="text-[13.5px] leading-tight font-semibold text-text-secondary">
+								<span className="text-[13.5px] leading-tight font-semibold text-fg-muted">
 									Create an organization
 								</span>
-								<span className="text-[12.5px] leading-tight text-text-tertiary">
+								<span className="text-[12.5px] leading-tight text-fg-subtle">
 									Shared repositories for your company — teammates and agents
 									work in one place.
 								</span>
@@ -307,13 +307,13 @@ function EmptyOrganizationSection({
 }) {
 	return (
 		<div
-			className="mx-3.5 rounded-xl border border-border-panel bg-bg-panel px-6 py-[22px] text-center max-[560px]:mx-2"
+			className="mx-3.5 rounded-[12px] border border-border bg-panel px-6 py-[22px] text-center max-[560px]:mx-2"
 			data-testid="empty-organization-section"
 		>
 			<p className="m-0 text-[14px] font-bold">
 				@{organization.handle} is ready
 			</p>
-			<p className="mx-auto mt-1.5 mb-3.5 max-w-[440px] text-[12.5px] leading-normal text-text-tertiary">
+			<p className="mx-auto mt-1.5 mb-3.5 max-w-[440px] text-[12.5px] leading-normal text-fg-subtle">
 				No repositories yet. Create the first one, or bring your team in —
 				everyone you invite sees every repository in this organization.
 			</p>
@@ -362,19 +362,19 @@ function RepositoryEmptyState() {
 				className="relative mb-8 h-[176px] w-[360px] max-w-full"
 				aria-hidden="true"
 			>
-				<div className="absolute top-[86px] left-[28px] h-px w-[95px] -rotate-[28deg] border-t-2 border-dashed border-border-panel" />
-				<div className="absolute top-[64px] right-[32px] h-px w-[92px] rotate-[24deg] border-t-2 border-dashed border-border-panel" />
-				<div className="absolute top-[28px] right-[58px] h-px w-[74px] -rotate-[20deg] border-t-2 border-dashed border-border-panel" />
+				<div className="absolute top-[86px] left-[28px] h-px w-[95px] -rotate-[28deg] border-t-2 border-dashed border-border" />
+				<div className="absolute top-[64px] right-[32px] h-px w-[92px] rotate-[24deg] border-t-2 border-dashed border-border" />
+				<div className="absolute top-[28px] right-[58px] h-px w-[74px] -rotate-[20deg] border-t-2 border-dashed border-border" />
 
-				<div className="absolute top-8 left-1/2 w-[230px] -translate-x-1/2 overflow-hidden rounded-xl border border-border-panel bg-bg-panel shadow-[0_18px_40px_rgba(28,25,23,0.08)]">
+				<div className="absolute top-8 left-1/2 w-[230px] -translate-x-1/2 overflow-hidden rounded-[12px] border border-border bg-panel shadow-[0_18px_40px_color-mix(in_srgb,var(--at-overlay)_8%,transparent)]">
 					<div className="flex h-10 items-center gap-2 border-b border-border-subtle px-3">
 						<img className="size-4" src="/landing/icon-folder.svg" alt="" />
-						<span className="h-2 w-20 rounded-full bg-bg-action-secondary/20" />
+						<span className="h-2 w-20 rounded-full bg-panel/20" />
 					</div>
 					<div className="grid gap-3 p-3">
 						<div className="flex items-center gap-2">
-							<span className="size-3 rounded-[3px] bg-[#25211f]" />
-							<span className="h-2 w-24 rounded-full bg-bg-action-secondary/20" />
+							<span className="size-3 rounded-[3px] bg-overlay" />
+							<span className="h-2 w-24 rounded-full bg-panel/20" />
 							<img
 								className="ml-auto size-4"
 								src="/landing/brand-openai.svg"
@@ -382,8 +382,8 @@ function RepositoryEmptyState() {
 							/>
 						</div>
 						<div className="flex items-center gap-2">
-							<span className="size-3 rounded-[3px] bg-[#3b82f6]" />
-							<span className="h-2 w-16 rounded-full bg-bg-action-secondary/20" />
+							<span className="size-3 rounded-[3px] bg-tag-blue-fg" />
+							<span className="h-2 w-16 rounded-full bg-panel/20" />
 							<img
 								className="ml-auto size-4"
 								src="/landing/claude-spark.svg"
@@ -391,26 +391,26 @@ function RepositoryEmptyState() {
 							/>
 						</div>
 						<div className="flex items-center gap-2">
-							<span className="size-3 rounded-[3px] bg-[#8b5cf6]" />
-							<span className="h-2 w-28 rounded-full bg-bg-action-secondary/20" />
+							<span className="size-3 rounded-[3px] bg-tag-purple-fg" />
+							<span className="h-2 w-28 rounded-full bg-panel/20" />
 						</div>
 					</div>
 				</div>
 
-				<div className="absolute bottom-0 left-4 grid size-11 place-items-center rounded-xl border border-[#eadfce] bg-[#fff9ef] shadow-sm">
+				<div className="absolute bottom-0 left-4 grid size-11 place-items-center rounded-[12px] border border-border bg-accent-subtle shadow-sm">
 					<img className="size-6" src="/landing/claude-spark.svg" alt="" />
 				</div>
-				<div className="absolute top-2 right-5 grid size-11 place-items-center rounded-xl border border-border-panel bg-bg-panel shadow-sm">
+				<div className="absolute top-2 right-5 grid size-11 place-items-center rounded-[12px] border border-border bg-panel shadow-sm">
 					<img className="size-5" src="/landing/brand-openai.svg" alt="" />
 				</div>
-				<div className="absolute right-1 bottom-1 grid size-11 place-items-center rounded-xl border border-border-panel bg-bg-panel shadow-sm">
+				<div className="absolute right-1 bottom-1 grid size-11 place-items-center rounded-[12px] border border-border bg-panel shadow-sm">
 					<img className="size-5" src="/landing/brand-gemini.svg" alt="" />
 				</div>
 			</div>
 			<h2 className="m-0 text-[20px] leading-tight font-bold tracking-[-0.015em]">
 				No repositories yet
 			</h2>
-			<p className="mt-2 mb-0 max-w-[480px] text-[14px] leading-[1.5] text-text-tertiary">
+			<p className="mt-2 mb-0 max-w-[480px] text-[14px] leading-[1.5] text-fg-subtle">
 				Create one to get going — a repository is a shared folder where you and
 				agents like Claude, ChatGPT, and Gemini work in the same files.
 			</p>
@@ -468,7 +468,7 @@ function RepositoryRow({
 			<Link
 				data-testid="repository-link"
 				data-repository-id={repository.id}
-				className="flex min-w-0 flex-1 items-center gap-3.5 rounded-lg py-[13px] text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible"
+				className="flex min-w-0 flex-1 items-center gap-3.5 rounded-lg py-[13px] text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 				to="/@{$namespace}/$repository"
 				params={{ namespace: organization.handle, repository: repository.slug }}
 				search={{}}
@@ -485,10 +485,10 @@ function RepositoryRow({
 					{repositoryInitials(repository.name)}
 				</span>
 				<span className="flex min-w-0 flex-col gap-0.5">
-					<strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[15px] leading-tight font-semibold text-text-primary">
+					<strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[15px] leading-tight font-semibold text-fg">
 						{repository.name}
 					</strong>
-					<span className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] leading-tight text-text-tertiary">
+					<span className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] leading-tight text-fg-subtle">
 						{fileCount === undefined ? "…" : fileCount}{" "}
 						{pluralize(fileCount ?? 0, "file")} · active{" "}
 						{formatRelativeTime(repository.updatedAt)}
@@ -498,7 +498,7 @@ function RepositoryRow({
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
 					<button
-						className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[7px] border-0 bg-transparent p-0 text-icon-tertiary transition-colors hover:bg-bg-hover hover:text-icon-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring-focus-visible data-[state=open]:bg-bg-hover data-[state=open]:text-icon-secondary [&_svg]:size-[15px] [&_svg]:stroke-[2.3]"
+						className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[7px] border-0 bg-transparent p-0 text-fg-subtle transition-colors hover:bg-bg-hover hover:text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=open]:bg-bg-hover data-[state=open]:text-fg-muted [&_svg]:size-[15px] [&_svg]:stroke-[2.3]"
 						type="button"
 						aria-label={`Actions for ${repository.name}`}
 					>
@@ -508,7 +508,7 @@ function RepositoryRow({
 				<DropdownMenuContent
 					align="end"
 					sideOffset={4}
-					className="w-[210px] min-w-[210px] rounded-[10px] border-border-panel bg-bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2.5 [&_[data-slot=dropdown-menu-item]]:py-2 [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:leading-tight [&_[data-slot=dropdown-menu-item]]:text-text-secondary [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-item]_svg]:size-3.5 [&_[data-slot=dropdown-menu-item]_svg]:text-icon-tertiary [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle [&_[data-variant=destructive]]:text-error-700 [&_[data-variant=destructive]:focus]:bg-error-50 [&_[data-variant=destructive]:focus]:text-error-700"
+					className="w-[210px] min-w-[210px] rounded-[10px] border-border bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2.5 [&_[data-slot=dropdown-menu-item]]:py-2 [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:leading-tight [&_[data-slot=dropdown-menu-item]]:text-fg-muted [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-item]_svg]:size-3.5 [&_[data-slot=dropdown-menu-item]_svg]:text-fg-subtle [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle [&_[data-variant=destructive]]:text-danger-border [&_[data-variant=destructive]:focus]:bg-danger-subtle [&_[data-variant=destructive]:focus]:text-danger-border"
 				>
 					<DropdownMenuItem asChild>
 						<Link
@@ -645,11 +645,11 @@ function RepositoryDialog({
 		(organization) => organization.id === targetOrganizationId,
 	)?.handle;
 	const nameHint = !namedTarget ? null : availability === "taken" ? (
-		<p role="alert" className="text-xs text-text-error">
+		<p role="alert" className="text-xs text-danger">
 			@{organizationHandle}/{slug} is taken. Choose another name.
 		</p>
 	) : (
-		<p className="text-xs text-text-quaternary">
+		<p className="text-xs text-fg-faint">
 			{typeof window === "undefined" ? "" : window.location.host}/@
 			{organizationHandle ?? ""}/{slug}
 		</p>
@@ -706,7 +706,7 @@ function RepositoryDialog({
 
 	return (
 		<Dialog open={Boolean(dialog)} onOpenChange={(open) => !open && onClose()}>
-			<DialogContent className="border-border-panel bg-bg-panel shadow-lg">
+			<DialogContent className="border-border bg-panel shadow-lg">
 				<form className="grid gap-5" onSubmit={(event) => void submit(event)}>
 					<DialogHeader>
 						<DialogTitle>{title}</DialogTitle>
@@ -722,14 +722,14 @@ function RepositoryDialog({
 					<div className="grid gap-2" data-testid="repository-dialog-fields">
 						{dialog?.type === "create" && !isDemoModeEnabled ? (
 							<>
-								<div className="flex h-11 items-center rounded-lg border border-border-panel bg-bg-panel pr-2.5 pl-3 focus-within:ring-2 focus-within:ring-ring-focus-visible focus-within:ring-offset-1">
-									<span className="relative inline-flex h-full shrink-0 cursor-pointer items-center gap-0.5 text-[13.5px] font-semibold text-text-primary">
+								<div className="flex h-11 items-center rounded-lg border border-border bg-panel pr-2.5 pl-3 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1">
+									<span className="relative inline-flex h-full shrink-0 cursor-pointer items-center gap-0.5 text-[13.5px] font-semibold text-fg">
 										@
 										{organizations.find(
 											(organization) => organization.id === organizationId,
 										)?.handle ?? "…"}
 										<ChevronDown
-											className="size-3.5 text-icon-tertiary"
+											className="size-3.5 text-fg-subtle"
 											aria-hidden="true"
 										/>
 										<select
@@ -755,14 +755,14 @@ function RepositoryDialog({
 										</select>
 									</span>
 									<span
-										className="px-1 text-[13.5px] text-text-quaternary"
+										className="px-1 text-[13.5px] text-fg-faint"
 										aria-hidden="true"
 									>
 										/
 									</span>
 									<input
 										aria-label="Repository name"
-										className="h-full min-w-0 flex-1 bg-transparent text-[13.5px] text-text-primary outline-none placeholder:text-text-quaternary"
+										className="h-full min-w-0 flex-1 bg-transparent text-[13.5px] text-fg outline-none placeholder:text-fg-faint"
 										autoFocus
 										maxLength={80}
 										placeholder="repository-name"
@@ -776,11 +776,11 @@ function RepositoryDialog({
 
 						{isDelete ? (
 							<label className="grid gap-2">
-								<span className="text-[13px] font-semibold text-text-secondary">
+								<span className="text-[13px] font-semibold text-fg-muted">
 									Type <strong>{dialog.repository.name}</strong> to confirm
 								</span>
 								<input
-									className="h-10 w-full rounded-lg border border-border-panel bg-bg-panel px-[11px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1"
+									className="h-10 w-full rounded-lg border border-border bg-panel px-[11px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
 									autoFocus
 									value={confirmation}
 									onChange={(event) => setConfirmation(event.target.value)}
@@ -789,11 +789,11 @@ function RepositoryDialog({
 						) : dialog?.type === "rename" ||
 						  (dialog?.type === "create" && isDemoModeEnabled) ? (
 							<label className="grid gap-2">
-								<span className="text-[13px] font-semibold text-text-secondary">
+								<span className="text-[13px] font-semibold text-fg-muted">
 									Repository name
 								</span>
 								<input
-									className="h-10 w-full rounded-lg border border-border-panel bg-bg-panel px-[11px] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring-focus-visible focus-visible:ring-offset-1"
+									className="h-10 w-full rounded-lg border border-border bg-panel px-[11px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
 									autoFocus
 									maxLength={80}
 									value={name}
@@ -804,7 +804,7 @@ function RepositoryDialog({
 						) : null}
 						{error ? (
 							<p
-								className="m-0 rounded-lg bg-error-50 px-3 py-2.5 text-[13px] text-error-700"
+								className="m-0 rounded-lg bg-danger-subtle px-3 py-2.5 text-[13px] text-danger-border"
 								role="alert"
 							>
 								{error}
@@ -852,7 +852,7 @@ const CREATE_ORGANIZATION_OPTION = "__create-organization__";
 
 function DirectoryStatus({ children }: { children: ReactNode }) {
 	return (
-		<div className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary">
+		<div className="flex min-h-dvh flex-col bg-bg font-sans text-fg">
 			<AppTitlebar>
 				<AppTitlebarBrand href="/" />
 			</AppTitlebar>
@@ -863,7 +863,7 @@ function DirectoryStatus({ children }: { children: ReactNode }) {
 
 function DirectoryStatusContent({ children }: { children: ReactNode }) {
 	return (
-		<main className="grid min-h-0 flex-1 place-content-center justify-items-center gap-3.5 bg-bg-app p-6 text-center text-text-secondary [&_h1]:max-w-[520px] [&_h1]:text-[28px]">
+		<main className="grid min-h-0 flex-1 place-content-center justify-items-center gap-3.5 bg-bg p-6 text-center text-fg-muted [&_h1]:max-w-[520px] [&_h1]:text-[28px]">
 			{children}
 		</main>
 	);
@@ -871,7 +871,7 @@ function DirectoryStatusContent({ children }: { children: ReactNode }) {
 
 function SignedOutDirectory() {
 	return (
-		<div className="flex min-h-dvh flex-col bg-bg-app font-sans text-text-primary">
+		<div className="flex min-h-dvh flex-col bg-bg font-sans text-fg">
 			<AppTitlebar>
 				<AppTitlebarBrand />
 			</AppTitlebar>

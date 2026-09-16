@@ -106,8 +106,8 @@ void test("the review glow is declared once and composited in place", () => {
 	assert.equal(layers.length, 2);
 	assert.ok(layers[0]?.tint);
 	const result = formatHexColor(compositeLayers(layers, APP_BG));
-	// A warm tint over the app ground, near the old hand-picked #f4cdb3.
-	assert.equal(result, "#f5d4bb");
+	// The accent glow over the app ground.
+	assert.equal(result, "#e8c8b9");
 	assert.equal(TINTS.length, 1);
 });
 
@@ -121,7 +121,7 @@ void test("a backdrop above the review shell dims the glow too", () => {
 		],
 		APP_BG,
 	);
-	assert.equal(formatHexColor(result), "#9d8777");
+	assert.equal(formatHexColor(result), "#948076");
 });
 
 void test("hidden elements paint nothing", () => {
