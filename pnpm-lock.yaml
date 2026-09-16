@@ -288,19 +288,6 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@types/node@24.13.3)(@vitest/browser-playwright@4.1.10)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
-    optionalDependencies:
-      '@lix-js/sdk-darwin-arm64':
-        specifier: 0.16.1
-        version: 0.16.1
-      '@lix-js/sdk-linux-arm64':
-        specifier: 0.16.1
-        version: 0.16.1
-      '@lix-js/sdk-linux-x64':
-        specifier: 0.16.1
-        version: 0.16.1
-      '@lix-js/sdk-win32-x64':
-        specifier: 0.16.1
-        version: 0.16.1
 
   vendor/lix/packages/storage-opfs:
     dependencies:
@@ -1535,26 +1522,6 @@ packages:
 
   '@lix-js/html-diff@0.1.0':
     resolution: {integrity: sha512-4dr7+xo8UEncWGjne9PoL6KqFGcOHZXyeBTTghTW196kK5xidQ8h4hufjHXYxv6x5VAFzXcBCuFnW1GgPS5kqw==}
-
-  '@lix-js/sdk-darwin-arm64@0.16.1':
-    resolution: {integrity: sha512-BKUerxQ5DV1o9L8n3uxZMTdUyjNGDLyh4zoYCQ1sakeAa2mQbb4aYnhYrpJT8Ob+zA5B/IZMQfphz6zOSrXNcw==}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@lix-js/sdk-linux-arm64@0.16.1':
-    resolution: {integrity: sha512-rJ5qtFStX+BlU7NXtTVJjRl5mumzFRJs6UcJTui/ib9M6d1nw9wTtRwB/DuFACExRrnDQkmqL9W7Ulm14Mluyw==}
-    cpu: [arm64]
-    os: [linux]
-
-  '@lix-js/sdk-linux-x64@0.16.1':
-    resolution: {integrity: sha512-xZxSKMiGFWFXbV+QFEfa0K+EBvgE7WIn32imVKQC/ZMfUnPH4SmdN2FbdS7qe2TAKdx38qUdI8mvcnrhNZ8nAw==}
-    cpu: [x64]
-    os: [linux]
-
-  '@lix-js/sdk-win32-x64@0.16.1':
-    resolution: {integrity: sha512-1H84YqSd6VhzyUl5hdW4106QCnhO0NE9xRfT6ci6JvU/opNC9JWiOyKLboqlJWkupSIW9VlfL5Cwza6fZs5mLw==}
-    cpu: [x64]
-    os: [win32]
 
   '@marijn/find-cluster-break@1.0.3':
     resolution: {integrity: sha512-FY+MKLBoTsLNJF/eLWaOsXGdz6uh3Iu1axjPf6TUq92IYumcTcXWHoS747JARLkcdlJ/Waiaxc5wQfFO8jC6NA==}
@@ -7949,18 +7916,6 @@ snapshots:
     dependencies:
       diff: 8.0.4
       parse5: 7.3.0
-
-  '@lix-js/sdk-darwin-arm64@0.16.1':
-    optional: true
-
-  '@lix-js/sdk-linux-arm64@0.16.1':
-    optional: true
-
-  '@lix-js/sdk-linux-x64@0.16.1':
-    optional: true
-
-  '@lix-js/sdk-win32-x64@0.16.1':
-    optional: true
 
   '@marijn/find-cluster-break@1.0.3': {}
 

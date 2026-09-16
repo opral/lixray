@@ -40,6 +40,7 @@ import {
 	useRef,
 	useState,
 	forwardRef,
+	type ComponentPropsWithoutRef,
 	type DragEvent as ReactDragEvent,
 	type MouseEvent as ReactMouseEvent,
 	type ReactNode,
@@ -1764,8 +1765,8 @@ const NEW_FILE_KINDS = [
  */
 const NewButton = forwardRef<
 	HTMLButtonElement,
-	{ readonly disabled?: boolean }
->(function NewButton({ disabled = false }, ref) {
+	ComponentPropsWithoutRef<typeof Button>
+>(function NewButton({ disabled = false, ...props }, ref) {
 	return (
 		<Button
 			ref={ref}
@@ -1774,6 +1775,7 @@ const NewButton = forwardRef<
 			variant="featured"
 			className="h-9 gap-1.5 px-3.5 text-[13.5px] font-bold"
 			data-testid="home-new-button"
+			{...props}
 		>
 			<Plus className="size-3.5" aria-hidden="true" />
 			New
