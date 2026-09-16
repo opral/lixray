@@ -152,7 +152,11 @@ export default defineConfig(({ command }) => ({
 		// Scan them before serving the first browser page.
 		entries:
 			command === "serve"
-				? ["src/routes/**/*.{ts,tsx}", "src/components/repository-atelier.tsx"]
+				? [
+						"src/routes/**/*.{ts,tsx}",
+						"src/components/repository-atelier.tsx",
+						"../vendor/atelier/src/index.ts",
+					]
 				: undefined,
 		// Snapshot sessions are intentionally lost on reload. Pre-bundle the
 		// linked Atelier editors before first use so dependency discovery cannot
@@ -190,6 +194,7 @@ export default defineConfig(({ command }) => ({
 						"@opral/atelier > @codemirror/lang-python",
 						"@opral/atelier > @codemirror/lang-sql",
 						"@opral/atelier > @codemirror/language",
+						"@opral/atelier > @codemirror/merge",
 						"@opral/atelier > @codemirror/search",
 						"@opral/atelier > @codemirror/state",
 						"@opral/atelier > @codemirror/view",
@@ -197,6 +202,8 @@ export default defineConfig(({ command }) => ({
 						"@opral/atelier > @lezer/highlight",
 						"@opral/atelier > @lix-js/html-diff",
 						"@opral/atelier > @pierre/trees/react",
+						"@opral/atelier > @pierre/trees",
+						"@opral/atelier > @excalidraw/excalidraw",
 						"@opral/atelier > @radix-ui/react-context-menu",
 						"@opral/atelier > @radix-ui/react-dropdown-menu",
 						"@opral/atelier > @radix-ui/react-tooltip",

@@ -501,7 +501,9 @@ export async function createSyncFixture({
 				).toHaveCount(localCount + 1, { timeout: remainingCheckpointTime });
 				if (selectFiles) {
 					// A partial checkpoint leaves the remaining files in review.
-					await expect(checkpointButton).toBeVisible();
+					await expect(
+						page.getByRole("button", { name: "Checkpointed", exact: true }),
+					).toBeDisabled();
 					await page.getByRole("button", { name: "Exit", exact: true }).click();
 				} else {
 					await expect(
