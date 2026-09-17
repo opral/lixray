@@ -167,10 +167,11 @@ height whatever the file is — a long document scrolls inside the panel — so
 opening one moves the chat by a known amount and no card leaves a strip of
 empty frame below it. The view reports that height on every toggle, and sets
 it on its own document for hosts that measure the frame instead. The card's
-head takes its colour scheme from the chat around it, so a closed card reads
-as one more line of that chat; the file below it is Atelier's view in
-Atelier's own light scheme, and the foot carries a toggle for a reader who
-wants to read it in the dark one. Markdown
+chrome — head, foot, the ground they sit on — takes its colour scheme from
+the chat around it, so a closed card reads as one more line of that chat.
+The rendered file does not: it is a document in Atelier, and Atelier is
+light. The foot carries a toggle for a reader who wants that file dark.
+Markdown
 and CSV previews use Atelier's static renderer; they carry no scripts or
 external resources, and the view mounts them in a shadow root. The resource
 requests no external network access and invokes no tools.

@@ -228,7 +228,7 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 	}
 });
 
-void test("the head follows the chat, the file keeps Atelier's light scheme, and the pill keeps its own tones", async () => {
+void test("the chrome follows the chat, the rendered file keeps Atelier's light scheme, and the pill keeps its own tones", async () => {
 	const browser = await chromium.launch();
 	try {
 		const receipt = demoReceipt([
@@ -264,7 +264,8 @@ void test("the head follows the chat, the file keeps Atelier's light scheme, and
 				return {
 					open: document.documentElement.getBoundingClientRect().height,
 					card: style(document.getElementById("card")).backgroundColor,
-					body: style(document.getElementById("details")).backgroundColor,
+					foot: style(document.getElementById("repo")).color,
+					body: style(document.getElementById("panel")).backgroundColor,
 					scheme: style(document.getElementById("panel")).colorScheme,
 					document: style(preview).color,
 					word: style(document.querySelector("#label .word")).color,
@@ -288,7 +289,7 @@ void test("the head follows the chat, the file keeps Atelier's light scheme, and
 				return {
 					card: getComputedStyle(document.getElementById("card"))
 						.backgroundColor,
-					body: getComputedStyle(document.getElementById("details"))
+					body: getComputedStyle(document.getElementById("panel"))
 						.backgroundColor,
 					document: getComputedStyle(preview).color,
 					label: document.getElementById("scheme").getAttribute("aria-label"),
@@ -321,16 +322,19 @@ void test("the head follows the chat, the file keeps Atelier's light scheme, and
 		assert.equal(light.closed, 44);
 		assert.equal(dark.open, 480);
 		assert.equal(light.open, 480);
-		// The head is chrome and follows the chat, so a closed card reads as
-		// one more line of it; below the head the card is Atelier, and
-		// Atelier is light, in either chat.
+		// The chrome — head, foot, the ground they sit on — follows the chat,
+		// so a closed card reads as one more line of it.
 		assert.equal(dark.card, "rgb(28, 25, 23)");
 		assert.equal(light.card, "rgb(255, 255, 255)");
+		assert.equal(dark.foot, "rgb(140, 133, 124)");
+		assert.equal(light.foot, "rgb(120, 113, 108)");
+		// The rendered file does not: it is a document in Atelier, and
+		// Atelier is light, in either chat.
 		assert.equal(dark.body, "rgb(255, 255, 255)");
 		assert.equal(light.body, "rgb(255, 255, 255)");
 		assert.equal(dark.document, "rgb(28, 25, 23)");
 		assert.equal(light.document, "rgb(28, 25, 23)");
-		// The preview takes that from the body — the flip below is the proof
+		// The preview takes that from the panel — the flip below is the proof
 		// that it inherits rather than pinning a scheme of its own.
 		assert.equal(dark.scheme, "light");
 		assert.equal(light.scheme, "light");
@@ -341,8 +345,8 @@ void test("the head follows the chat, the file keeps Atelier's light scheme, and
 		// And "edited" is the diff palette's orange, never the old yellow.
 		assert.equal(dark.edited, "rgb(253, 186, 116)");
 		assert.equal(light.edited, "rgb(253, 186, 116)");
-		// A reader who wants the dark one takes it, in either chat, and the
-		// head stays where it was.
+		// A reader who wants the file dark takes it, in either chat, and the
+		// chrome stays where it was.
 		for (const flipped of [dark.flipped, light.flipped]) {
 			assert.equal(flipped.body, "rgb(28, 25, 23)");
 			assert.equal(flipped.document, "rgb(245, 242, 237)");
