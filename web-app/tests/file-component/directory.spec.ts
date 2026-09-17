@@ -908,34 +908,18 @@ test("the README preview keeps the rows' own inset", async ({ page }) => {
 	expect(columns.rowIcon).toBe(columns.row[0]);
 });
 
-test("working changes mark the listing without a review open", async ({
+test("working changes do not mark the listing outside review", async ({
 	page,
 }) => {
 	await page.goto("/");
-	// The glyph replaces the row's meta, and a folder inherits one from the
-	// change under it, so the listing says where to click in.
-	// The glyph is the only labelled span in a row; the name carries a
-	// plain title.
-	const glyphTitle = (name: string) =>
-		item(page, name).locator("span[aria-label]").first();
-	await expect(glyphTitle("alpha.md")).toHaveAttribute("title", "Modified");
-	await expect(glyphTitle("gamma.csv")).toHaveAttribute("title", "Added");
-	await expect(glyphTitle("beta.md")).toHaveAttribute("title", "Moved");
-	await expect(glyphTitle("docs")).toHaveAttribute("title", "Modified");
-	await expect(item(page, "research")).toHaveText(/0 items/);
-	// The glyphs are Atelier's own shapes at the listing's 12px.
-	expect(
-		await glyphTitle("alpha.md").locator("svg").getAttribute("width"),
-	).toBe("12");
-	expect(await glyphTitle("alpha.md").locator("path").getAttribute("d")).toBe(
-		"M3.3 6.3c.9-1.5 1.8-1.5 2.7 0s1.8 1.5 2.7 0",
-	);
-	// Outside a review nothing recedes: this is the ordinary file list.
-	for (const name of ["alpha.md", "research", "docs"]) {
-		expect(
-			await item(page, name).evaluate((row) => getComputedStyle(row).opacity),
-		).toBe("1");
+	for (const name of ["alpha.md", "gamma.csv", "beta.md", "docs"]) {
+		await expect(item(page, name)).not.toHaveAttribute(
+			"data-changed-entry",
+			"true",
+		);
+		await expect(item(page, name).locator("span[aria-label]")).toHaveCount(0);
 	}
+	await expect(item(page, "docs")).toHaveText(/items/);
 });
 
 test("an open review names the rows; the rest recede", async ({ page }) => {
@@ -1078,10 +1062,9 @@ test("review indicators refresh when entering and leaving review", async ({
 	await expect(beta).toHaveClass(/opacity-\[0\.35\]/);
 	await expect(gamma).not.toHaveAttribute("data-changed-entry", "true");
 	await page.getByRole("button", { name: "Toggle review" }).click();
-	// Closing review restores the working diff, which still includes alpha
-	// and also includes gamma, absent from this review.
-	await expect(gamma).toHaveAttribute("data-changed-entry", "true");
-	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
+	// Closing review restores ordinary file metadata, without change markers.
+	await expect(gamma).not.toHaveAttribute("data-changed-entry", "true");
+	await expect(alpha).not.toHaveAttribute("data-changed-entry", "true");
 	await expect(beta).not.toHaveClass(/opacity-\[0\.35\]/);
 	await alpha.click();
 	expect(await page.evaluate(() => window.directoryQA.diffOpened)).toEqual([]);

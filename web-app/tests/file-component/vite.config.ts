@@ -8,6 +8,7 @@ export default defineConfig({
 	root: at("./"),
 	publicDir: at("../../public"),
 	resolve: {
+		dedupe: ["react", "react-dom"],
 		alias: {
 			"~": at("../../src"),
 			"@": at("../../../vendor/atelier/src"),

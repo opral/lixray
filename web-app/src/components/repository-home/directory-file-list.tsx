@@ -576,9 +576,11 @@ export function DirectoryFileList({
 				)}
 			>
 				{(entry) => {
-					const changeKind = entry.directory
-						? changedDirKinds.get(entry.path)
-						: changedFileKinds.get(entry.path);
+					const changeKind = !reviewFocus
+						? undefined
+						: entry.directory
+							? changedDirKinds.get(entry.path)
+							: changedFileKinds.get(entry.path);
 					const dimIndicator = entry.directory && changeKind === "modified";
 					const nameClass =
 						dimIndicator || !changeKind
