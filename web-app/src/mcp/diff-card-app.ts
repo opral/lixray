@@ -11,7 +11,10 @@ import { DIFF_CARD_STYLE } from "./diff-card.ts";
  * from the change itself.
  *
  * Both heights are fixed — a one-line note and a long document open the same
- * amount — and the card takes its colour scheme from the chat it sits in.
+ * amount. The head follows the chat's colour scheme, so a closed card reads
+ * as one more line of it; the file below the head is Atelier's view in
+ * Atelier's own light scheme, with a toggle in the foot for a reader who
+ * wants it dark.
  */
 export const DIFF_CARD_URI = "ui://lixray/diff-card/v1";
 export const MCP_APP_HTML = "text/html;profile=mcp-app";
@@ -56,9 +59,11 @@ export const DIFF_CARD_HTML = String.raw`<!doctype html>
 <title>LixRay file changes</title>
 <style id="atelier">${DIFF_CARD_STYLE}</style>
 <style>
-/* Atelier pins the light scheme for the app; a card is a guest in someone
-   else's chat and follows the scheme that chat is in. The host has the last
-   word: it sets the scheme on this document directly. */
+/* The card's head is chrome: it belongs to the chat and follows the scheme
+   that chat is in, so a closed card reads as one more line of it. The host
+   has the last word — it sets the scheme on this document directly. What is
+   below the head is Atelier, in Atelier's own light palette (see .details),
+   until the reader asks for the other one. */
 :root { color-scheme: light dark; }
 html, body { margin: 0; padding: 0; background: transparent; }
 body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
@@ -137,6 +142,8 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
 }
 .chevron { flex: none; width: 14px; height: 14px; color: var(--atelier-fg-subtle); transition: transform 120ms; }
 .bar[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+/* The file, and the words around it: Atelier's view, in Atelier's scheme
+   rather than the chat's. The toggle in the foot sets this one property. */
 .details {
 	display: flex;
 	flex: 1 1 auto;
@@ -144,6 +151,9 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
 	min-height: 0;
 	border-top: 1px solid var(--atelier-border-subtle);
 	padding: 10px 12px 12px;
+	background: var(--atelier-panel);
+	color: var(--atelier-fg);
+	color-scheme: light;
 }
 /* The frame is one height, so the panel is what is left of it, and a file
    longer than that scrolls here: the transcript stays still, the file moves. */
@@ -210,6 +220,25 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
 .pill .dots i.on { background: var(--atelier-overlay-fg); }
 .pill.single .arrow, .pill.single .dots { display: none; }
 .repo { flex: 0 1 auto; min-width: 0; overflow: hidden; margin-left: auto; color: var(--atelier-fg-subtle); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+/* The scheme the card is read in: the chat's, until the reader says
+   otherwise. A quiet icon beside the way back to the app. */
+.scheme {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	border: 0;
+	border-radius: 13px;
+	background: transparent;
+	color: var(--atelier-fg-subtle);
+	cursor: pointer;
+}
+.scheme:hover { background: var(--atelier-bg-hover); color: var(--atelier-fg-muted); }
+.scheme:focus-visible { outline: 2px solid var(--atelier-ring); outline-offset: -2px; }
+.scheme svg { display: block; width: 14px; height: 14px; }
 .open {
 	flex: none;
 	padding: 6px 11px;
@@ -247,6 +276,7 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
 				<button class="arrow" id="next" type="button" aria-label="Next file"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
 			</div>
 			<span class="repo" id="repo"></span>
+			<button class="scheme" id="scheme" type="button"></button>
 			<button class="open" id="open" type="button">Open in LixRay</button>
 		</div>
 	</div>
@@ -433,6 +463,28 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
     $('next').disabled = index === files.length - 1;
     reportSize();
   }
+  // The scheme the file is read in. The head follows the chat; below it the
+  // card is Atelier, and Atelier is a light application — until the reader
+  // says otherwise for this card, on one element, which the preview's shadow
+  // root inherits along with everything else in the body.
+  const SUN = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14"><circle cx="7" cy="7" r="2.9" fill="currentColor"/><g stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M7 .8v1.5M7 11.7v1.5M13.2 7h-1.5M2.3 7H.8M11.4 2.6l-1.1 1.1M3.7 10.3l-1.1 1.1M11.4 11.4l-1.1-1.1M3.7 3.7 2.6 2.6"/></g></svg>';
+  const MOON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14"><path d="M12.2 8.7A5.5 5.5 0 0 1 5.3 1.8a5.7 5.7 0 1 0 6.9 6.9Z" fill="currentColor"/></svg>';
+  const scheme = $('scheme');
+  let bodyDark = false;
+  function paintScheme() {
+    scheme.replaceChildren(iconNode(bodyDark ? SUN : MOON));
+    const label = bodyDark
+      ? 'Read this file in the light scheme'
+      : 'Read this file in the dark scheme';
+    scheme.setAttribute('aria-label', label);
+    scheme.title = label;
+  }
+  scheme.addEventListener('click', () => {
+    bodyDark = !bodyDark;
+    details.style.setProperty('color-scheme', bodyDark ? 'dark' : 'light');
+    paintScheme();
+  });
+  paintScheme();
   bar.addEventListener('click', () => setExpanded(!expanded));
   $('prev').addEventListener('click', () => page(index - 1));
   $('next').addEventListener('click', () => page(index + 1));

@@ -228,7 +228,7 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 	}
 });
 
-void test("the card follows the chat's colour scheme and keeps the pill's own tones", async () => {
+void test("the head follows the chat, the file keeps Atelier's light scheme, and the pill keeps its own tones", async () => {
 	const browser = await chromium.launch();
 	try {
 		const receipt = demoReceipt([
@@ -264,6 +264,7 @@ void test("the card follows the chat's colour scheme and keeps the pill's own to
 				return {
 					open: document.documentElement.getBoundingClientRect().height,
 					card: style(document.getElementById("card")).backgroundColor,
+					body: style(document.getElementById("details")).backgroundColor,
 					scheme: style(document.getElementById("panel")).colorScheme,
 					document: style(preview).color,
 					word: style(document.querySelector("#label .word")).color,
@@ -276,6 +277,23 @@ void test("the card follows the chat's colour scheme and keeps the pill's own to
 					path: `${process.env.MCP_UI_SCREENSHOT_DIR}/card-${colorScheme}.png`,
 					fullPage: true,
 				});
+			// The toggle in the foot reads the file in the other scheme, the
+			// preview inside the shadow root with it — and leaves the head
+			// with the chat.
+			await view.locator("#scheme").click();
+			const flipped = await frame.evaluate(() => {
+				const preview = document
+					.getElementById("panel")
+					.shadowRoot.querySelector(".preview");
+				return {
+					card: getComputedStyle(document.getElementById("card"))
+						.backgroundColor,
+					body: getComputedStyle(document.getElementById("details"))
+						.backgroundColor,
+					document: getComputedStyle(preview).color,
+					label: document.getElementById("scheme").getAttribute("aria-label"),
+				};
+			});
 			// The same pill, for a file that was edited rather than created.
 			await page.evaluate(
 				(receipt2) => window.bridge.sendToolResult(receipt2),
@@ -295,7 +313,7 @@ void test("the card follows the chat's colour scheme and keeps the pill's own to
 				() => getComputedStyle(document.querySelector("#label .word")).color,
 			);
 			await page.close();
-			return { closed, edited, ...measured };
+			return { closed, edited, flipped, ...measured };
 		};
 		const dark = await read("dark");
 		const light = await read("light");
@@ -303,16 +321,19 @@ void test("the card follows the chat's colour scheme and keeps the pill's own to
 		assert.equal(light.closed, 44);
 		assert.equal(dark.open, 480);
 		assert.equal(light.open, 480);
-		// The preview takes the document's scheme instead of Atelier's pinned
-		// light one, and the colours say which scheme won: the chat is dark,
-		// so the card is, and so is Atelier's view inside it. A white page in
-		// a dark chat was the bug.
-		assert.equal(dark.scheme, "light dark");
-		assert.equal(light.scheme, "light dark");
+		// The head is chrome and follows the chat, so a closed card reads as
+		// one more line of it; below the head the card is Atelier, and
+		// Atelier is light, in either chat.
 		assert.equal(dark.card, "rgb(28, 25, 23)");
-		assert.equal(dark.document, "rgb(245, 242, 237)");
 		assert.equal(light.card, "rgb(255, 255, 255)");
+		assert.equal(dark.body, "rgb(255, 255, 255)");
+		assert.equal(light.body, "rgb(255, 255, 255)");
+		assert.equal(dark.document, "rgb(28, 25, 23)");
 		assert.equal(light.document, "rgb(28, 25, 23)");
+		// The preview takes that from the body — the flip below is the proof
+		// that it inherits rather than pinning a scheme of its own.
+		assert.equal(dark.scheme, "light");
+		assert.equal(light.scheme, "light");
 		// The pill is dark chrome in either scheme, and "new" is green on it
 		// in both: the page's scheme is the wrong question there.
 		assert.equal(dark.word, "rgb(134, 239, 172)");
@@ -320,6 +341,15 @@ void test("the card follows the chat's colour scheme and keeps the pill's own to
 		// And "edited" is the diff palette's orange, never the old yellow.
 		assert.equal(dark.edited, "rgb(253, 186, 116)");
 		assert.equal(light.edited, "rgb(253, 186, 116)");
+		// A reader who wants the dark one takes it, in either chat, and the
+		// head stays where it was.
+		for (const flipped of [dark.flipped, light.flipped]) {
+			assert.equal(flipped.body, "rgb(28, 25, 23)");
+			assert.equal(flipped.document, "rgb(245, 242, 237)");
+			assert.equal(flipped.label, "Read this file in the light scheme");
+		}
+		assert.equal(dark.flipped.card, dark.card);
+		assert.equal(light.flipped.card, light.card);
 	} finally {
 		await browser.close();
 	}

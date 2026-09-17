@@ -291,10 +291,17 @@ void test("the resource is one bar until opened, and draws Atelier's glyph", () 
 		DIFF_CARD_HTML,
 		/document\.documentElement\.style\.height = next \+ 'px'/,
 	);
-	// A card is a guest in someone else's chat: it follows that chat's
-	// scheme, in the document and inside the preview's shadow root.
+	// The head is a guest in someone else's chat and follows that chat's
+	// scheme; the file below it is Atelier, in Atelier's light one, which
+	// the preview's shadow root inherits rather than pinning.
 	assert.match(DIFF_CARD_HTML, /:root \{ color-scheme: light dark; \}/);
+	assert.match(DIFF_CARD_HTML, /\.details \{[^}]*color-scheme: light;/);
 	assert.match(DIFF_CARD_HTML, /:host\{color-scheme:inherit\}/);
+	// And a reader who wants the dark one takes it, for this card.
+	assert.match(DIFF_CARD_HTML, /<button class="scheme" id="scheme"/);
+	assert.match(DIFF_CARD_HTML, /Read this file in the dark scheme/);
+	assert.match(DIFF_CARD_HTML, /Read this file in the light scheme/);
+	assert.match(DIFF_CARD_HTML, /details\.style\.setProperty\('color-scheme'/);
 	assert.match(DIFF_CARD_HTML, /\.card \{[^}]*border: 1px solid/);
 	assert.match(DIFF_CARD_HTML, /aria-expanded="false"/);
 	assert.match(DIFF_CARD_HTML, /ui\/notifications\/size-changed/);
