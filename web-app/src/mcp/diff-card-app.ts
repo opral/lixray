@@ -9,6 +9,9 @@ import { DIFF_CARD_STYLE } from "./diff-card.ts";
  * dark pill to page through the rest and the way back to the app. A long
  * chat therefore reads as a list of writes, and each one is a glance away
  * from the change itself.
+ *
+ * Both heights are fixed — a one-line note and a long document open the same
+ * amount — and the card takes its colour scheme from the chat it sits in.
  */
 export const DIFF_CARD_URI = "ui://lixray/diff-card/v1";
 export const MCP_APP_HTML = "text/html;profile=mcp-app";
@@ -16,6 +19,15 @@ export const DIFF_CARD_META = "lixray/diff-card";
 
 /** The bar's height in both states; the host sizes the frame to it. */
 export const DIFF_CARD_BAR_HEIGHT = 44;
+
+/**
+ * The card's height open, whatever file it carries.
+ *
+ * A short note and a long document would otherwise open to different heights,
+ * and a chat of cards would jump by a different amount each time one is
+ * opened. The frame is this tall for every card; the file scrolls inside it.
+ */
+export const DIFF_CARD_OPEN_HEIGHT = 480;
 
 /**
  * Atelier's diff glyph (design 23d), mirrored from
@@ -44,17 +56,26 @@ export const DIFF_CARD_HTML = String.raw`<!doctype html>
 <title>LixRay file changes</title>
 <style id="atelier">${DIFF_CARD_STYLE}</style>
 <style>
+/* Atelier pins the light scheme for the app; a card is a guest in someone
+   else's chat and follows the scheme that chat is in. The host has the last
+   word: it sets the scheme on this document directly. */
+:root { color-scheme: light dark; }
 html, body { margin: 0; padding: 0; background: transparent; }
 body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
 #status { margin: 0; padding: 12px; color: var(--atelier-fg-muted); }
 #status[hidden], .card[hidden], .details[hidden], [hidden] { display: none; }
 .card {
+	display: flex;
+	flex-direction: column;
 	box-sizing: border-box;
 	border: 1px solid var(--atelier-border);
 	border-radius: 10px;
 	background: var(--atelier-panel);
 	overflow: hidden;
 }
+/* One height open, for every card: see DIFF_CARD_OPEN_HEIGHT. The state is
+   not called "open": that class is the button that opens LixRay. */
+.card.expanded { height: ${DIFF_CARD_OPEN_HEIGHT}px; }
 /* The bar is 44px with its borders, open or closed: a chat of these is a list. */
 .bar {
 	display: flex;
@@ -116,20 +137,27 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
 }
 .chevron { flex: none; width: 14px; height: 14px; color: var(--atelier-fg-subtle); transition: transform 120ms; }
 .bar[aria-expanded="true"] .chevron { transform: rotate(180deg); }
-.details { border-top: 1px solid var(--atelier-border-subtle); padding: 10px 12px 12px; }
-/* The host sizes the frame to what we report, and past its own limit it
-   scrolls the frame inside the chat. Capping the preview here keeps that
-   scroll ours: the transcript stays still and the file moves. */
+.details {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	min-height: 0;
+	border-top: 1px solid var(--atelier-border-subtle);
+	padding: 10px 12px 12px;
+}
+/* The frame is one height, so the panel is what is left of it, and a file
+   longer than that scrolls here: the transcript stays still, the file moves. */
 .panel {
 	box-sizing: border-box;
-	max-height: 420px;
+	flex: 1 1 auto;
+	min-height: 0;
 	overflow: auto;
 	overscroll-behavior: contain;
 	border: 1px solid var(--atelier-border-subtle);
 	border-radius: 8px;
 	background: var(--atelier-panel);
 }
-.foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.foot { display: flex; flex: none; align-items: center; gap: 10px; margin-top: 10px; }
 .pill {
 	display: inline-flex;
 	flex: 0 1 auto;
@@ -169,6 +197,14 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
 .pill .file-icon:empty { display: none; }
 .pill .name { flex: 0 1 auto; min-width: 0; overflow: hidden; font-size: 12px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 .pill .label { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--atelier-overlay-fg-subtle); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
+/* "new · 10 lines": what happened carries the glyph's colour, the count
+   stays quiet. The pill is dark chrome in either scheme, so these are the
+   overlay's own diff tones rather than the page's. */
+.pill .label .word { font-weight: 600; }
+.pill .label[data-status="added"] .word { color: var(--atelier-overlay-diff-added); }
+.pill .label[data-status="modified"] .word { color: var(--atelier-overlay-diff-modified); }
+.pill .label[data-status="removed"] .word { color: var(--atelier-overlay-diff-removed); }
+.pill .label[data-status="moved"] .word { color: var(--atelier-overlay-diff-moved); }
 .pill .dots { display: inline-flex; flex: none; align-items: center; gap: 4px; margin-left: 2px; }
 .pill .dots i { display: block; width: 5px; height: 5px; border-radius: 3px; background: var(--atelier-overlay-fg-subtle); }
 .pill .dots i.on { background: var(--atelier-overlay-fg); }
@@ -230,17 +266,30 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
   let expanded = false;
   const send = message => parent.postMessage({ jsonrpc: '2.0', ...message }, hostOrigin);
   const notify = (method, params) => send({ method, params });
-  const height = () => Math.ceil(document.body.getBoundingClientRect().height);
-  const reportSize = () => { if (ready) notify('ui/notifications/size-changed', { height: height() }); };
+  // Two heights, and the file inside the card absorbs the difference: a
+  // chat of cards is a list that does not reflow as one of them is opened.
+  const BAR = ${DIFF_CARD_BAR_HEIGHT}, OPEN = ${DIFF_CARD_OPEN_HEIGHT};
+  const height = () => card.hidden
+    ? Math.ceil(document.body.getBoundingClientRect().height)
+    : (expanded ? OPEN : BAR);
+  // A host that honours the notification resizes on it; one that measures the
+  // frame instead reads this document's own height, and finds the card and
+  // nothing else — no strip of the host's background below it.
+  const reportSize = () => {
+    const next = height();
+    document.documentElement.style.height = next + 'px';
+    if (ready) notify('ui/notifications/size-changed', { height: next });
+  };
   const size = new ResizeObserver(() => { fitFolder(); reportSize(); });
   size.observe(document.body);
+  reportSize();
 
   // The glyph is Atelier's: a status-coloured dot with a knockout in the
   // colour of the ground it sits on (the pill).
   const GLYPH = ${JSON.stringify(DIFF_GLYPH)};
   const FILL = {
-    added: 'var(--atelier-diff-added)', modified: 'var(--atelier-diff-modified)',
-    removed: 'var(--atelier-diff-removed)', moved: 'var(--atelier-diff-moved)'
+    added: 'var(--atelier-overlay-diff-added)', modified: 'var(--atelier-overlay-diff-modified)',
+    removed: 'var(--atelier-overlay-diff-removed)', moved: 'var(--atelier-overlay-diff-moved)'
   };
   const WORD = { added: 'Added', modified: 'Modified', removed: 'Removed', moved: 'Moved' };
   const svgNs = 'http://www.w3.org/2000/svg';
@@ -278,7 +327,7 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
   const theme = document.createElement('style');
   theme.textContent = $('atelier').textContent.replaceAll(':root', ':host');
   const chrome = document.createElement('style');
-  chrome.textContent = '.preview{display:block;padding:12px 14px 14px}.note{padding:12px 14px;color:var(--atelier-fg-muted)}.note.only{padding:28px 14px;text-align:center}[hidden]{display:none}';
+  chrome.textContent = ':host{color-scheme:inherit}.preview{display:block;padding:12px 14px 14px}.note{padding:12px 14px;color:var(--atelier-fg-muted)}.note.only{display:flex;box-sizing:border-box;min-height:100%;align-items:center;justify-content:center;padding:28px 14px;text-align:center}[hidden]{display:none}';
   const preview = document.createElement('div');
   preview.className = 'preview atelier-render';
   const note = document.createElement('div');
@@ -341,6 +390,7 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
   function setExpanded(next) {
     expanded = next;
     bar.setAttribute('aria-expanded', String(next));
+    card.classList.toggle('expanded', next);
     details.hidden = !next;
     reportSize();
   }
@@ -364,7 +414,14 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
     const fileIcon = iconNode(file.icon);
     $('file-icon').replaceChildren(...(fileIcon ? [fileIcon] : []));
     $('name').textContent = typeof file.name === 'string' ? file.name : file.path;
-    $('label').textContent = typeof file.label === 'string' ? file.label : '';
+    const label = $('label');
+    const words = typeof file.label === 'string' ? file.label : '';
+    const cut = words.indexOf(' · ');
+    const word = document.createElement('span');
+    word.className = 'word';
+    word.textContent = cut === -1 ? words : words.slice(0, cut);
+    label.dataset.status = FILL[file.status] ? file.status : 'modified';
+    label.replaceChildren(word, cut === -1 ? '' : words.slice(cut));
     const dots = $('dots');
     dots.replaceChildren(...files.map((_, i) => {
       const dot = document.createElement('i');

@@ -162,11 +162,15 @@ The card is collapsed by default: one 44px bar with the files' type icons,
 the bar becomes the header and below it sits Atelier's static render of one
 file's change in a scrolling panel, with a dark pill to page through the
 files (each with its diff glyph and counts) and an "Open in LixRay" button
-that goes through the host's `ui/open-link`. The view reports its height on
-every toggle and page change. Markdown and CSV previews use Atelier's static
-renderer; they carry no scripts or external resources, and the view mounts
-them in a shadow root. The resource requests no external network access and
-invokes no tools.
+that goes through the host's `ui/open-link`. Open, every card is the same
+height whatever the file is — a long document scrolls inside the panel — so
+opening one moves the chat by a known amount and no card leaves a strip of
+empty frame below it. The view reports that height on every toggle, and sets
+it on its own document for hosts that measure the frame instead. The card
+takes its colour scheme from the chat around it, preview included. Markdown
+and CSV previews use Atelier's static renderer; they carry no scripts or
+external resources, and the view mounts them in a shadow root. The resource
+requests no external network access and invokes no tools.
 
 A card lists up to 50 files and carries previews for the first six; the rest
 are paged with a note. The call itself carries no bytes of the change: it

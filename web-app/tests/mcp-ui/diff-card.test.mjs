@@ -13,40 +13,45 @@ import {
 } from "../../src/mcp/server.ts";
 import { DIFF_CARD_META } from "../../src/mcp/diff-card-app.ts";
 import { diffCardPayload } from "../../src/mcp/diff-card.ts";
-void test("MCP Apps resource initializes, renders, opens links and tears down with the official AppBridge", async () => {
-	const service = new LixService(
-		new Proxy(
-			{},
-			{
-				get: () => () => {
-					throw new Error("Static resource must not access repository state");
+/**
+ * The resource as a host gets it: read over the wire, with the official
+ * AppBridge bundled to drive it. Both are the same for every test.
+ */
+let served;
+async function serveResource() {
+	if (served) return served;
+	served = (async () => {
+		const service = new LixService(
+			new Proxy(
+				{},
+				{
+					get: () => () => {
+						throw new Error("Static resource must not access repository state");
+					},
 				},
-			},
-		),
-	);
-	const client = new Client(
-		{ name: "preview-test", version: "1" },
-		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
-	);
-	await client.connect(
-		new StreamableHTTPClientTransport(new URL("https://lixray.test/mcp"), {
-			fetch: (input, init) =>
-				handleMcpTransport(new Request(input, init), service, {
-					authMode: "none",
-				}),
-		}),
-	);
-	const browser = await chromium.launch();
-	try {
-		const tools = await client.listTools();
-		const uri = tools.tools.find((tool) => tool.name === "write_files")?._meta
-			?.ui?.resourceUri;
-		assert.ok(uri);
-		const resource = await client.readResource({ uri });
-		const html = resource.contents[0].text;
-		const result = await build({
-			stdin: {
-				contents: `
+			),
+		);
+		const client = new Client(
+			{ name: "preview-test", version: "1" },
+			{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+		);
+		await client.connect(
+			new StreamableHTTPClientTransport(new URL("https://lixray.test/mcp"), {
+				fetch: (input, init) =>
+					handleMcpTransport(new Request(input, init), service, {
+						authMode: "none",
+					}),
+			}),
+		);
+		try {
+			const tools = await client.listTools();
+			const uri = tools.tools.find((tool) => tool.name === "write_files")?._meta
+				?.ui?.resourceUri;
+			assert.ok(uri);
+			const resource = await client.readResource({ uri });
+			const bundle = await build({
+				stdin: {
+					contents: `
         import { AppBridge, PostMessageTransport } from '@modelcontextprotocol/ext-apps/app-bridge';
         const frame = document.querySelector('iframe');
         const bridge = new AppBridge(null, { name: 'test-host', version: '1' }, { openLinks: {} });
@@ -63,65 +68,90 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
         await bridge.connect(new PostMessageTransport(frame.contentWindow, frame.contentWindow));
         frame.src = '/app.html';
       `,
-				resolveDir: process.cwd(),
-			},
-			bundle: true,
-			write: false,
-			format: "esm",
-			platform: "browser",
-		});
-		const page = await browser.newPage({
-			viewport: { width: 800, height: 800 },
-		});
-		const pageErrors = [];
-		page.on("pageerror", (error) => pageErrors.push(String(error)));
-		const requests = [];
-		await page.route("**/*", async (route) => {
-			const path = new URL(route.request().url()).pathname;
-			requests.push(path);
-			if (path === "/")
-				return route.fulfill({
-					contentType: "text/html",
-					body: '<iframe sandbox="allow-scripts" style="width:760px;height:700px;border:0"></iframe><script type="module" src="/host.js"></script>',
-				});
-			if (path === "/host.js")
-				return route.fulfill({
-					contentType: "text/javascript",
-					body: result.outputFiles[0].text,
-				});
-			if (path === "/app.html")
-				return route.fulfill({
-					contentType: "text/html",
-					body: html,
-					headers: {
-						"content-security-policy":
-							"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'",
-					},
-				});
-			await route.abort();
-		});
-		await page.goto("http://mcp-ui.test");
-		await page.waitForFunction(() => window.ready);
-		const url = "https://lixray.com/@opral/demo/file/id/mcp-ui-demo.md";
-		const markdown =
-			"# MCP UI demo\n\n## Features\n\n- One\n- Two\n\n| Feature | Status |\n| --- | --- |\n| Markdown | Ready |\n\n- [x] Saved\n- [ ] Review\n\n![external](https://unexpected.invalid/image.png)\n\n<script>window.pwned=true</script>\n";
-		const card = diffCardPayload({
-			verb: "written",
-			repository: "@opral/demo",
-			changes: [
-				{
-					path: "/mcp-ui-demo.md",
-					url,
-					after: new TextEncoder().encode(markdown),
+					resolveDir: process.cwd(),
 				},
-			],
-		});
-		assert.ok(card);
-		const receipt = {
-			content: [{ type: "text", text: "Wrote mcp-ui-demo.md" }],
-			structuredContent: { commit_id: "saved-commit" },
-			_meta: { [DIFF_CARD_META]: card },
-		};
+				bundle: true,
+				write: false,
+				format: "esm",
+				platform: "browser",
+			});
+			return {
+				html: resource.contents[0].text,
+				host: bundle.outputFiles[0].text,
+			};
+		} finally {
+			await client.close();
+		}
+	})();
+	return served;
+}
+
+/** A host page with the resource in its frame, in the scheme it asks for. */
+async function openHost(browser, options = {}) {
+	const { html, host } = await serveResource();
+	const page = await browser.newPage({
+		viewport: { width: 800, height: 800 },
+		...(options.colorScheme ? { colorScheme: options.colorScheme } : {}),
+	});
+	const pageErrors = [];
+	page.on("pageerror", (error) => pageErrors.push(String(error)));
+	const requests = [];
+	await page.route("**/*", async (route) => {
+		const path = new URL(route.request().url()).pathname;
+		requests.push(path);
+		if (path === "/")
+			return route.fulfill({
+				contentType: "text/html",
+				body: '<iframe sandbox="allow-scripts" style="width:760px;height:700px;border:0"></iframe><script type="module" src="/host.js"></script>',
+			});
+		if (path === "/host.js")
+			return route.fulfill({ contentType: "text/javascript", body: host });
+		if (path === "/app.html")
+			return route.fulfill({
+				contentType: "text/html",
+				body: html,
+				headers: {
+					"content-security-policy":
+						"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'",
+				},
+			});
+		await route.abort();
+	});
+	await page.goto("http://mcp-ui.test");
+	await page.waitForFunction(() => window.ready);
+	return { page, pageErrors, requests };
+}
+
+/** The demo document, and the card one write of it sends back. */
+const DEMO_URL = "https://lixray.com/@opral/demo/file/id/mcp-ui-demo.md";
+const DEMO_MARKDOWN =
+	"# MCP UI demo\n\n## Features\n\n- One\n- Two\n\n| Feature | Status |\n| --- | --- |\n| Markdown | Ready |\n\n- [x] Saved\n- [ ] Review\n\n![external](https://unexpected.invalid/image.png)\n\n<script>window.pwned=true</script>\n";
+
+function demoReceipt(changes) {
+	const card = diffCardPayload({
+		verb: "written",
+		repository: "@opral/demo",
+		changes,
+	});
+	assert.ok(card);
+	return {
+		content: [{ type: "text", text: "Wrote mcp-ui-demo.md" }],
+		structuredContent: { commit_id: "saved-commit" },
+		_meta: { [DIFF_CARD_META]: card },
+	};
+}
+
+void test("MCP Apps resource initializes, renders, opens links and tears down with the official AppBridge", async () => {
+	const browser = await chromium.launch();
+	try {
+		const { page, pageErrors, requests } = await openHost(browser);
+		const receipt = demoReceipt([
+			{
+				path: "/mcp-ui-demo.md",
+				url: DEMO_URL,
+				after: new TextEncoder().encode(DEMO_MARKDOWN),
+			},
+		]);
 		await page.evaluate(
 			(receipt2) => window.bridge.sendToolResult(receipt2),
 			receipt,
@@ -138,13 +168,13 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 		assert.equal(await view.locator("li[data-task]").count(), 2);
 		await view.getByRole("button", { name: "Open in LixRay" }).click();
 		await page.waitForFunction(() => !!window.openedUrl);
-		assert.equal(await page.evaluate(() => window.openedUrl), url);
+		assert.equal(await page.evaluate(() => window.openedUrl), DEMO_URL);
 		assert.deepEqual(pageErrors, []);
 		assert.deepEqual(await page.evaluate(() => window.errors), []);
 		assert.deepEqual(requests.sort(), ["/", "/app.html", "/host.js"]);
-		assert.ok(
-			await page.evaluate(() => window.heights.some((height) => height > 100)),
-		);
+		// Open, the card is one height whatever it carries, and it says so
+		// on its own document too, for a host that measures the frame.
+		assert.equal(await page.evaluate(() => window.heights.at(-1)), 480);
 		if (process.env.MCP_UI_SCREENSHOT) {
 			await page.screenshot({
 				path: process.env.MCP_UI_SCREENSHOT,
@@ -195,6 +225,102 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 		await page.evaluate(() => window.bridge.teardownResource({}));
 	} finally {
 		await browser.close();
-		await client.close();
+	}
+});
+
+void test("the card follows the chat's colour scheme and keeps the pill's own tones", async () => {
+	const browser = await chromium.launch();
+	try {
+		const receipt = demoReceipt([
+			{
+				path: "/mcp-ui-demo.md",
+				url: DEMO_URL,
+				after: new TextEncoder().encode(DEMO_MARKDOWN),
+			},
+		]);
+		const read = async (colorScheme) => {
+			const { page } = await openHost(browser, { colorScheme });
+			await page.evaluate(
+				(receipt2) => window.bridge.sendToolResult(receipt2),
+				receipt,
+			);
+			const view = page.frameLocator("iframe");
+			await view.getByRole("button", { name: /1 file written/ }).waitFor();
+			const frame = page
+				.frames()
+				.find((each) => each.url().endsWith("/app.html"));
+			// Closed, the document is the bar and nothing else: a host that
+			// sizes the frame from it leaves no strip of its own below.
+			const closed = await frame.evaluate(
+				() => document.documentElement.getBoundingClientRect().height,
+			);
+			await view.getByRole("button", { name: /1 file written/ }).click();
+			await view.locator("h1").waitFor();
+			const measured = await frame.evaluate(() => {
+				const style = (element) => getComputedStyle(element);
+				const preview = document
+					.getElementById("panel")
+					.shadowRoot.querySelector(".preview");
+				return {
+					open: document.documentElement.getBoundingClientRect().height,
+					card: style(document.getElementById("card")).backgroundColor,
+					scheme: style(document.getElementById("panel")).colorScheme,
+					document: style(preview).color,
+					word: style(document.querySelector("#label .word")).color,
+				};
+			});
+			// Both schemes, side by side, when someone is looking at them:
+			// MCP_UI_SCREENSHOT_DIR=/tmp/cards pnpm test:mcp-ui
+			if (process.env.MCP_UI_SCREENSHOT_DIR)
+				await page.screenshot({
+					path: `${process.env.MCP_UI_SCREENSHOT_DIR}/card-${colorScheme}.png`,
+					fullPage: true,
+				});
+			// The same pill, for a file that was edited rather than created.
+			await page.evaluate(
+				(receipt2) => window.bridge.sendToolResult(receipt2),
+				demoReceipt([
+					{
+						path: "/mcp-ui-demo.md",
+						url: DEMO_URL,
+						before: new TextEncoder().encode("# MCP UI demo\n"),
+						after: new TextEncoder().encode(DEMO_MARKDOWN),
+					},
+				]),
+			);
+			await view
+				.locator("#label .word", { hasText: "edited" })
+				.waitFor({ state: "attached" });
+			const edited = await frame.evaluate(
+				() => getComputedStyle(document.querySelector("#label .word")).color,
+			);
+			await page.close();
+			return { closed, edited, ...measured };
+		};
+		const dark = await read("dark");
+		const light = await read("light");
+		assert.equal(dark.closed, 44);
+		assert.equal(light.closed, 44);
+		assert.equal(dark.open, 480);
+		assert.equal(light.open, 480);
+		// The preview takes the document's scheme instead of Atelier's pinned
+		// light one, and the colours say which scheme won: the chat is dark,
+		// so the card is, and so is Atelier's view inside it. A white page in
+		// a dark chat was the bug.
+		assert.equal(dark.scheme, "light dark");
+		assert.equal(light.scheme, "light dark");
+		assert.equal(dark.card, "rgb(28, 25, 23)");
+		assert.equal(dark.document, "rgb(245, 242, 237)");
+		assert.equal(light.card, "rgb(255, 255, 255)");
+		assert.equal(light.document, "rgb(28, 25, 23)");
+		// The pill is dark chrome in either scheme, and "new" is green on it
+		// in both: the page's scheme is the wrong question there.
+		assert.equal(dark.word, "rgb(134, 239, 172)");
+		assert.equal(light.word, "rgb(134, 239, 172)");
+		// And "edited" is the diff palette's orange, never the old yellow.
+		assert.equal(dark.edited, "rgb(253, 186, 116)");
+		assert.equal(light.edited, "rgb(253, 186, 116)");
+	} finally {
+		await browser.close();
 	}
 });

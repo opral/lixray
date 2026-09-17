@@ -21,6 +21,7 @@ import {
 	DIFF_CARD_BAR_HEIGHT,
 	DIFF_CARD_HTML,
 	DIFF_CARD_META,
+	DIFF_CARD_OPEN_HEIGHT,
 	DIFF_CARD_URI,
 	DIFF_GLYPH,
 } from "./diff-card-app.ts";
@@ -280,18 +281,37 @@ void test("the resource is one bar until opened, and draws Atelier's glyph", () 
 	assert.equal(DIFF_CARD_BAR_HEIGHT, 44);
 	// The bar is 42px inside a 1px border: 44 to the host, open or closed.
 	assert.match(DIFF_CARD_HTML, /\.bar \{[^}]*height: 42px/);
+	// Open, every card is the same height, whatever file it carries, and the
+	// view sets that height on the document for a host that measures it.
+	assert.equal(DIFF_CARD_OPEN_HEIGHT, 480);
+	assert.match(DIFF_CARD_HTML, /\.card\.expanded \{ height: 480px; \}/);
+	// "open" is the button that opens LixRay; the state class is not it.
+	assert.doesNotMatch(DIFF_CARD_HTML, /\.card\.open\b/);
+	assert.match(
+		DIFF_CARD_HTML,
+		/document\.documentElement\.style\.height = next \+ 'px'/,
+	);
+	// A card is a guest in someone else's chat: it follows that chat's
+	// scheme, in the document and inside the preview's shadow root.
+	assert.match(DIFF_CARD_HTML, /:root \{ color-scheme: light dark; \}/);
+	assert.match(DIFF_CARD_HTML, /:host\{color-scheme:inherit\}/);
 	assert.match(DIFF_CARD_HTML, /\.card \{[^}]*border: 1px solid/);
 	assert.match(DIFF_CARD_HTML, /aria-expanded="false"/);
 	assert.match(DIFF_CARD_HTML, /ui\/notifications\/size-changed/);
 	assert.match(DIFF_CARD_HTML, /ui\/open-link/);
 	assert.match(DIFF_CARD_HTML, /ui\/resource-teardown/);
-	assert.match(DIFF_CARD_HTML, /max-height: 420px/);
+
 	// Atelier's tokens are inlined once, and the chrome names no colour.
 	assert.match(DIFF_CARD_HTML, /--atelier-overlay:/);
 	assert.match(DIFF_CARD_HTML, /background: var\(--atelier-overlay\)/);
 	assert.match(DIFF_CARD_HTML, /var\(--atelier-accent\)/);
+	// The pill is dark chrome in either scheme, so its glyphs and its status
+	// words take the overlay scale rather than the page's diff colours.
 	for (const kind of ["added", "modified", "removed", "moved"])
-		assert.match(DIFF_CARD_HTML, new RegExp(`--atelier-diff-${kind}\\)`));
+		assert.match(
+			DIFF_CARD_HTML,
+			new RegExp(`--atelier-overlay-diff-${kind}\\)`),
+		);
 	// The glyph is the one Atelier draws, path for path.
 	const geometry = readFileSync(
 		join(here, "../../../vendor/atelier/src/components/diff-glyph-geometry.ts"),
