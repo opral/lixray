@@ -290,6 +290,7 @@ export async function createSyncFixture({
 		let intentionallyOffline = false;
 		const offlineRequests = new WeakSet<Request>();
 		const coldReads = new Map<Page, string[]>();
+		const pendingColdReads = new Map<Page, Set<Request>>();
 		const blobLaneRequests = new Map<Page, string[]>();
 		const blobLanePayloadSizes = new Map<Page, number[]>();
 		const pendingBlobLaneResponses = new Set<Promise<void>>();
@@ -596,6 +597,14 @@ export async function createSyncFixture({
 		const observePage = (page: Page, label: string) => {
 			const pageColdReads: string[] = [];
 			coldReads.set(page, pageColdReads);
+			const pagePendingColdReads = new Set<Request>();
+			pendingColdReads.set(page, pagePendingColdReads);
+			page.on("requestfinished", (request) =>
+				pagePendingColdReads.delete(request),
+			);
+			page.on("requestfailed", (request) =>
+				pagePendingColdReads.delete(request),
+			);
 			const pageBlobLaneRequests: string[] = [];
 			blobLaneRequests.set(page, pageBlobLaneRequests);
 			const pageBlobLanePayloadSizes: number[] = [];
@@ -611,6 +620,7 @@ export async function createSyncFixture({
 						))
 				) {
 					pageColdReads.push(request.url());
+					pagePendingColdReads.add(request);
 				}
 				if (/\/sync\/(blob|chunk)(?:\?|$)/.test(request.url())) {
 					pageBlobLaneRequests.push(`${request.method()} ${request.url()}`);
@@ -785,6 +795,25 @@ export async function createSyncFixture({
 				(count, page) => count + (coldReads.get(page)?.length ?? 0),
 				0,
 			);
+		const waitForColdReadQuiescence = async (pages: Page[]) => {
+			let lastCount = coldReadCount(pages);
+			let stableSamples = 0;
+			await expect
+				.poll(
+					() => {
+						const currentCount = coldReadCount(pages);
+						const pending = pages.some(
+							(page) => (pendingColdReads.get(page)?.size ?? 0) > 0,
+						);
+						stableSamples =
+							currentCount === lastCount && !pending ? stableSamples + 1 : 0;
+						lastCount = currentCount;
+						return stableSamples;
+					},
+					{ intervals: [500], timeout: 30_000 },
+				)
+				.toBeGreaterThanOrEqual(8);
+		};
 		const blobLaneRequestCount = (pages: Page[]) =>
 			pages.reduce(
 				(count, page) => count + (blobLaneRequests.get(page)?.length ?? 0),
@@ -1121,6 +1150,10 @@ export async function createSyncFixture({
 			// two already-open clients, not extension startup or demand hydration.
 			await leftEditor.waitFor({ timeout: 30_000 });
 
+			// Progressive views can render before unrelated native/history hydration
+			// settles. Qualify all measured download lanes after this page mount,
+			// then retain the zero-download budget for the actual warm edit.
+			await waitForColdReadQuiescence([left, right]);
 			// Warm typing must not download inputs; background blob uploads are allowed.
 			const coldReadsBeforeRightEdit = coldReadCount([left, right]);
 			const rightMarker = `right-${Date.now()}`;
@@ -1191,6 +1224,7 @@ export async function createSyncFixture({
 			// Keep the originating editor warm for the reverse direction. Reload and
 			// OPFS-resume behavior is qualified independently below; coupling it to the
 			// realtime budget made this assertion measure startup contention.
+			await waitForColdReadQuiescence([left, right]);
 			const coldReadsBeforeLeftEdit = coldReadCount([left, right]);
 			const leftMarker = `left-${Date.now()}`;
 			await leftEditor.click();
