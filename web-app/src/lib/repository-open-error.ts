@@ -1,3 +1,7 @@
+export function isRepositoryStorageInUse(caught: unknown): boolean {
+	return getErrorCode(caught) === "LIX_STORAGE_IN_USE";
+}
+
 export function formatRepositoryOpenError(caught: unknown): string {
 	const message = getErrorMessage(caught);
 	const code = getErrorCode(caught);

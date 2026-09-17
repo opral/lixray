@@ -259,29 +259,32 @@ function App() {
 	const [dirPath, setDirPath] = useState("/");
 	const params = new URLSearchParams(location.search);
 	const readOnly = params.has("readonly");
-	const [reviewOpen, setReviewOpen] = useState(params.has("review"));
-	const diffSession = params.has("review-empty")
-		? ({
-				target: { working: true },
-				base: null,
-				files: [],
-			} as unknown as AtelierDiffSession)
-		: params.has("history")
+	const [reviewOpen, setReviewOpen] = useState(
+		params.has("review") || params.has("review-empty"),
+	);
+	const diffSession =
+		reviewOpen && params.has("review-empty")
 			? ({
-					target: { commitId: "past" },
+					target: { working: true },
 					base: null,
 					files: [],
 				} as unknown as AtelierDiffSession)
-			: reviewOpen
+			: params.has("history")
 				? ({
-						target: { working: true },
+						target: { commitId: "past" },
 						base: null,
-						files: [
-							{ id: "alpha", path: "/alpha.md", changeKind: "modified" },
-							{ id: "child", path: "/docs/child.md", changeKind: "modified" },
-						],
+						files: [],
 					} as unknown as AtelierDiffSession)
-				: null;
+				: reviewOpen
+					? ({
+							target: { working: true },
+							base: null,
+							files: [
+								{ id: "alpha", path: "/alpha.md", changeKind: "modified" },
+								{ id: "child", path: "/docs/child.md", changeKind: "modified" },
+							],
+						} as unknown as AtelierDiffSession)
+					: null;
 	return (
 		<main style={{ height: "100vh" }}>
 			<button onClick={() => setReviewOpen((open) => !open)}>

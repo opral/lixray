@@ -53,7 +53,6 @@ export default tseslint.config(
 						"playwright.config.ts",
 						"playwright.performance.config.ts",
 						"src/worker/*.test.ts",
-						"tests/e2e/*.ts",
 					],
 					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 32,
 					defaultProject: "tsconfig.eslint.json",

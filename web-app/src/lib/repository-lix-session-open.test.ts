@@ -96,7 +96,7 @@ mock.module("./repository-opfs-cache.ts", {
 });
 mock.module("./repository-migration.ts", {
 	namedExports: {
-		currentReplicaStorage: async (name: string) => {
+		currentReplicaStorage: (name: string) => {
 			routedNames.push(name);
 			return `${name}:format81:current`;
 		},
@@ -408,4 +408,67 @@ await test("SDK server upgrade progress reaches UI and clears after success or f
 			]);
 		}
 	}
+});
+
+await test("opens the same replica after a temporary storage owner releases its lock", async () => {
+	const locked = Object.assign(new Error("owned elsewhere"), {
+		code: "LIX_STORAGE_IN_USE",
+	});
+	failures = [locked, locked];
+	const session = await openRepositoryLixSession(options());
+	assert.equal(opens.length, 3);
+	assert.equal(
+		new Set(opens.map((open) => open.storage!.options.name)).size,
+		1,
+	);
+	assert.equal(handles.length, 1);
+	assert.equal(session.activeBranchSnapshot(), "main");
+	await session.close();
+});
+await test("persistent storage ownership exhausts the bounded retry budget without opening a handle", async () => {
+	const locked = Object.assign(new Error("owned elsewhere"), {
+		code: "LIX_STORAGE_IN_USE",
+	});
+	failures = Array.from({ length: 8 }, () => locked);
+	await assert.rejects(
+		openRepositoryLixSession(options()),
+		(error) => error === locked,
+	);
+	assert.equal(opens.length, 7);
+	assert.equal(failures.length, 1);
+	assert.equal(
+		new Set(opens.map((open) => open.storage!.options.name)).size,
+		1,
+	);
+	assert.equal(handles.length, 0);
+});
+await test("cancelling storage-lock backoff stops retries", async () => {
+	const controller = new AbortController();
+	failures = [
+		Object.assign(new Error("owned elsewhere"), { code: "LIX_STORAGE_IN_USE" }),
+	];
+	const opening = openRepositoryLixSession({
+		...options(),
+		signal: controller.signal,
+	});
+	const rejected = assert.rejects(opening, { name: "AbortError" });
+	while (opens.length === 0)
+		await new Promise((resolve) => setTimeout(resolve, 1));
+	controller.abort();
+	await rejected;
+	await new Promise((resolve) => setTimeout(resolve, 150));
+	assert.equal(opens.length, 1);
+	assert.equal(handles.length, 0);
+});
+await test("unrelated storage failures are not retried", async () => {
+	const fenced = Object.assign(new Error("fenced"), {
+		code: "LIX_STORAGE_FENCED",
+	});
+	failures = [fenced];
+	await assert.rejects(
+		openRepositoryLixSession(options()),
+		(error) => error === fenced,
+	);
+	assert.equal(opens.length, 1);
+	assert.equal(handles.length, 0);
 });

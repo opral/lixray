@@ -286,13 +286,7 @@ async function openOpfsSyncSession(
 	// public access on the worker's SQL-authorized remote transport.
 	if (options.publicPath)
 		return openLix({ server: { ...commonServer, mode: "remote" }, onProgress });
-	const storageName = await currentReplicaStorage(
-		repositoryOpfsCacheName(options),
-		{
-			url: String(commonServer.url),
-			headers: Object.entries(await repositoryRequestHeaders(options)),
-		},
-	);
+	const storageName = currentReplicaStorage(repositoryOpfsCacheName(options));
 	const storage = new OpfsStorage({ name: storageName });
 	const server: PartialReplicaLixServerOptions = {
 		...commonServer,
@@ -588,10 +582,13 @@ export function isRetryableRepositoryOpenError(error: unknown): boolean {
 				details.nonRetryableAfterExecution === true))
 	)
 		return false;
-	// Storage coherence belongs to the engine; configuration/authentication and
-	// cancelled operations are not network retries. The SDK owns migration waits.
+	// A closing storage owner may briefly retain its lock. Retry normal opening
+	// within the same bounded budget; never force ownership or replace storage.
+	// The SDK owns migration waits; configuration/authentication stay terminal.
 	return (
-		isLixRecoveringError(error) || isErrorCode(error, "LIX_TRANSPORT_NETWORK")
+		isLixRecoveringError(error) ||
+		isErrorCode(error, "LIX_TRANSPORT_NETWORK") ||
+		isErrorCode(error, "LIX_STORAGE_IN_USE")
 	);
 }
 

@@ -12,6 +12,11 @@ import {
 } from "@playwright/test";
 import { provisionRepositories } from "../../scripts/provision-repositories.mjs";
 
+import {
+	createRetainedBodyRecoveryTracker,
+	isRetainedBodyUpload,
+} from "./retained-body-recovery";
+
 const compatibility = getCompatibility();
 
 const DEMO_REPOSITORY_ID = "00000000-0000-4000-8000-000000000002";
@@ -271,6 +276,7 @@ export async function createSyncFixture({
 			expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
 		}
 		const syncFailures: string[] = [];
+		const retainedBodyRecovery = createRetainedBodyRecoveryTracker();
 		const runtimeFailures: string[] = [];
 		let intentionallyOffline = false;
 		const offlineRequests = new WeakSet<Request>();
@@ -634,8 +640,8 @@ export async function createSyncFixture({
 			});
 			page.on("console", (message) => {
 				// Chromium mirrors an expected HTTP 409 response to the console without
-				// exposing its URL. The response listener below classifies the push CAS
-				// conflict precisely and still rejects every other sync failure.
+				// exposing its URL. The response listener and exact-replay tracker below
+				// retain unexpected or unrecovered sync failures for close().
 				const expectedCasNoise =
 					message.type() === "error" &&
 					/Failed to load resource:.*status of 409/i.test(message.text());
@@ -718,10 +724,19 @@ export async function createSyncFixture({
 				) {
 					syncFailures.push(`cacheable protocol response ${url}`);
 				}
+				const pendingRetainedBodyReplay =
+					isRetainedBodyUpload(response.request().method(), url) &&
+					retainedBodyRecovery.observe({
+						method: response.request().method(),
+						url,
+						status: response.status(),
+						body: response.request().postDataBuffer(),
+					});
 				// Push has no idempotency key, so its only 409 mapping is the expected
 				// ref-CAS race. Convergence below proves that reconciliation completed.
 				if (
 					response.status() >= 400 &&
+					!pendingRetainedBodyReplay &&
 					!(response.status() === 409 && url.endsWith("/sync/push"))
 				) {
 					syncFailures.push(`${response.status()} ${url}`);
@@ -1823,12 +1838,17 @@ export async function createSyncFixture({
 			});
 		}
 		async function close() {
+			const unresolvedSyncFailures = [
+				...syncFailures,
+				...retainedBodyRecovery.failures(),
+			];
 			await test.info().attach("sync-diagnostics.json", {
 				body: JSON.stringify(
 					{
 						scenario,
 						repositoryId,
-						syncFailures,
+						syncFailures: unresolvedSyncFailures,
+						recoveredRetainedBodyResponses: retainedBodyRecovery.recovered(),
 						runtimeFailures,
 						analyticsStubFailures,
 					},
@@ -1839,7 +1859,9 @@ export async function createSyncFixture({
 			});
 			try {
 				expect(analyticsStubFailures).toEqual([]);
-				expect(syncFailures).toEqual([]);
+				expect([...syncFailures, ...retainedBodyRecovery.failures()]).toEqual(
+					[],
+				);
 				expect(runtimeFailures).toEqual([]);
 			} finally {
 				await Promise.all(contexts.map((context) => context.close()));
