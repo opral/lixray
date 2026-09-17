@@ -351,6 +351,8 @@ jobs:
     steps:
       - name: Check out deployment coordinator
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Check Infisical configuration
         id: infisical
