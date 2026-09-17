@@ -31,7 +31,7 @@ services:
     # Lix builds this image once. LixRay only pulls the immutable artifact.
     # Set LIXRAY_SERVER_IMAGE to a locally built Lix image when developing the
     # server itself.
-    image: ${LIXRAY_SERVER_IMAGE:-ghcr.io/opral/lix-server@sha256:7b34ebac60c7dc98109d1afee422af57bb1a5bf8ea4d91040849f797e7219781}
+    image: ${LIXRAY_SERVER_IMAGE:-ghcr.io/opral/lixray-server:lix-821cc87944b6e91b95394e56d8567ff18b98e184}
     environment:
       BIND_ADDR: 0.0.0.0:8080
       LIX_SERVER_PUBLIC_URL: ${LIXRAY_PUBLIC_URL:-http://127.0.0.1:8787}
