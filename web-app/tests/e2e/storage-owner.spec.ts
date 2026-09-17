@@ -51,6 +51,7 @@ for (const releaseDuringRetry of [false, true]) {
 		const repositoryUrl = new URL("/@acme/launch-q3", baseURL).toString();
 		await page.goto(repositoryUrl);
 		await waitForRepository(page);
+		await expect(page.getByTestId("home-file-entry").first()).toBeVisible();
 		const before = await fileIds(page);
 		const owners = await page.evaluate(
 			async () =>
