@@ -96,7 +96,7 @@ mock.module("./repository-opfs-cache.ts", {
 });
 mock.module("./repository-migration.ts", {
 	namedExports: {
-		currentReplicaStorage: async (name: string) => {
+		currentReplicaStorage: (name: string) => {
 			routedNames.push(name);
 			return `${name}:format81:current`;
 		},

@@ -286,13 +286,7 @@ async function openOpfsSyncSession(
 	// public access on the worker's SQL-authorized remote transport.
 	if (options.publicPath)
 		return openLix({ server: { ...commonServer, mode: "remote" }, onProgress });
-	const storageName = await currentReplicaStorage(
-		repositoryOpfsCacheName(options),
-		{
-			url: String(commonServer.url),
-			headers: Object.entries(await repositoryRequestHeaders(options)),
-		},
-	);
+	const storageName = currentReplicaStorage(repositoryOpfsCacheName(options));
 	const storage = new OpfsStorage({ name: storageName });
 	const server: PartialReplicaLixServerOptions = {
 		...commonServer,

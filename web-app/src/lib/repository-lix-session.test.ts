@@ -32,6 +32,7 @@ void test("maps Rust-first open progress into transparent repository upgrade UI 
 		phase: LixOpenProgress["phase"],
 		fromFormat?: number,
 	): LixOpenProgress => ({
+		scope: "local",
 		phase,
 		fromFormat,
 		toFormat: 76,
@@ -383,6 +384,7 @@ void test("authority upgrade transitions do not turn ordinary opening into an up
 	assert.equal(
 		repositoryMigrationStateFromOpenProgress({
 			phase: "opening",
+			scope: "local",
 			toFormat: 81,
 		}),
 		undefined,
