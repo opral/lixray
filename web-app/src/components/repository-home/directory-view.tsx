@@ -259,11 +259,8 @@ export function DirectoryView({
 		onOpenDir(next, { newTab: false });
 	}, [tree, viewingHistory, dirPath, lix, onOpenDir, isActive]);
 
-	// What the listing marks. A review session names its own files (it may
-	// span any two commits, and it carries each file's review status), and
-	// with no session open the live working diff stands in, so a folder
-	// always says whether something under it changed. Folders inherit a dot
-	// from any changed descendant, so drilling in stays guided.
+	// Per-file change decorations belong to the active review session.
+	// Ordinary browsing keeps neutral rows even while working changes exist.
 	const sessionFileKinds = useMemo(() => {
 		// An open session that names no file says nothing about the listing;
 		// the live working diff still can.
@@ -277,21 +274,27 @@ export function DirectoryView({
 			]),
 		);
 	}, [diffSession]);
-	// The past is what it was: a historical listing never carries today's
-	// working changes.
-	// Paint the directory before preparing historical descriptor paths for
-	// badges. The background diff still covers changed descendants so folders
-	// retain their change indicators.
+	// An active working review may still be preparing its file list. Historical
+	// views and ordinary browsing never subscribe to today's working diff.
 	const workingFileChangesEnabled = useAfterInitialIdle(
-		isActive && tree !== null && sessionFileKinds === null && !viewingHistory,
+		isActive &&
+			tree !== null &&
+			diffSession !== null &&
+			sessionFileKinds === null &&
+			!viewingHistory,
 	);
 	const workingFileKinds = useWorkingFileChanges(
 		lix,
 		workingFileChangesEnabled,
 	);
 	const changedFileKinds = useMemo(
-		() => sessionFileKinds ?? workingFileKinds ?? EMPTY_CHANGED_FILE_KINDS,
-		[sessionFileKinds, workingFileKinds],
+		() =>
+			diffSession === null
+				? EMPTY_CHANGED_FILE_KINDS
+				: (sessionFileKinds ??
+					(viewingHistory ? null : workingFileKinds) ??
+					EMPTY_CHANGED_FILE_KINDS),
+		[diffSession, sessionFileKinds, viewingHistory, workingFileKinds],
 	);
 	const changedDirKinds = useMemo(() => {
 		// Ancestors use the canonical directory convention: absolute, no
@@ -328,11 +331,8 @@ export function DirectoryView({
 		}
 		return dirs;
 	}, [changedFileKinds, historicalFiles, tree]);
-	// Variant "dim the unchanged": while a review session marks rows, the
-	// untouched entries recede so the action-colored changes are the only
-	// thing at full contrast. Outside a review the listing is the ordinary
-	// file list — it points at the changes without dimming everything else.
-	const reviewFocus = sessionFileKinds !== null && changedFileKinds.size > 0;
+	// Only an active review dims unchanged entries and opens changed rows as diffs.
+	const reviewFocus = diffSession !== null && changedFileKinds.size > 0;
 	// A changed README previews as its diff — the review renders the change
 	// itself, not the resulting document.
 	const readmeDiff = useMemo<
