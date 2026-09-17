@@ -12,10 +12,9 @@ import {
 } from "~/lib/entity-url";
 import {
 	Atelier,
-	useAtelierConnected,
+	AtelierSkeleton,
 	type AtelierEvent,
-	type AtelierExtensionRuntime,
-	type AtelierExtensionRegistration,
+	type AtelierHandle,
 	type AtelierProps,
 } from "@opral/atelier";
 import "@opral/atelier/style.css";
@@ -124,61 +123,7 @@ interface RepositoryAtelierProps {
 	};
 }
 
-type RepositoryAtelierHandle = Pick<
-	AtelierExtensionRuntime,
-	"lix" | "documents" | "views"
->;
-
-function RepositoryRuntimeBridge({
-	runtime,
-	onReady,
-	children,
-}: {
-	runtime: AtelierExtensionRuntime;
-	onReady: (runtime: RepositoryAtelierHandle) => void;
-	children: React.ReactNode;
-}) {
-	const connected = useAtelierConnected();
-	const latest = useRef(runtime);
-	useLayoutEffect(() => {
-		latest.current = runtime;
-	}, [runtime]);
-	useEffect(() => {
-		// Prepared views render before their borrowed live session connects.
-		// Route commands can require queries absent from that prepared snapshot.
-		if (!connected) return;
-		// Methods delegate to the current extension runtime as the shell rerenders.
-		onReady({
-			get lix() {
-				return latest.current.lix;
-			},
-			get documents() {
-				return latest.current.documents;
-			},
-			get views() {
-				return latest.current.views;
-			},
-		});
-	}, [connected, onReady]);
-	return children;
-}
-
-function repositoryRuntimeExtensions(
-	extensions: readonly AtelierExtensionRegistration[],
-	onReady: (runtime: RepositoryAtelierHandle) => void,
-): readonly AtelierExtensionRegistration[] {
-	return extensions.map((extension) => {
-		const View = extension.Component;
-		return {
-			...extension,
-			Component: (props) => (
-				<RepositoryRuntimeBridge runtime={props.atelier} onReady={onReady}>
-					<View {...props} />
-				</RepositoryRuntimeBridge>
-			),
-		};
-	});
-}
+type RepositoryAtelierHandle = AtelierHandle;
 
 /** The chrome we show while an instance opens: Atelier's own, plus a label. */
 type RepositoryShellSkeletonProps = Pick<
@@ -192,7 +137,7 @@ function RepositoryShellSkeleton({
 }: RepositoryShellSkeletonProps) {
 	return (
 		<div className="relative h-full">
-			<Atelier {...props} />
+			<AtelierSkeleton {...props} />
 			<div className="pointer-events-none absolute inset-0 grid place-content-center">
 				{children}
 			</div>
@@ -1163,6 +1108,12 @@ export function RepositoryAtelier({
 					}).blob();
 				const atelierProps: AtelierProps = {
 					lix: session.lix,
+					onError: (error) =>
+						captureExceptionTelemetry(error, {
+							operation: "atelier_view_render",
+							lix_id: repositoryId,
+							namespace_id: namespace,
+						}),
 					readOnly: isReadOnly,
 					// Links to this repository's own file URLs behave like
 					// relative links; mentions write the permanent form.
@@ -1187,34 +1138,32 @@ export function RepositoryAtelier({
 							}),
 					},
 					branchSession: repositoryBranchSession,
-					extensions: repositoryRuntimeExtensions(
-						createLixrayRepositoryExtensions(
-							{
-								lixId: repositoryId,
-								namespace,
-								lixSlug: repositorySlug,
-								lixName: repositoryName,
-							},
-							async () => {
-								if (!client || !canEdit || !atelierAccountId) return false;
-								if (!(await getAccessToken())) return false;
-								const { data, error } = await client
-									.from("mcp_lix_connections")
-									.select("last_seen_at")
-									.eq("lix_id", repositoryId)
-									.order("last_seen_at", { ascending: false })
-									.limit(1);
-								if (error) throw error;
-								return data.length > 0;
-							},
-							canEdit ? stableTeamApiRef.current : null,
-							canEdit && !isDemoModeEnabled && client
-								? stableSettingsApiRef.current
-								: null,
-							repositoryVisibility,
-						),
-						setInstance,
+					extensions: createLixrayRepositoryExtensions(
+						{
+							lixId: repositoryId,
+							namespace,
+							lixSlug: repositorySlug,
+							lixName: repositoryName,
+						},
+						async () => {
+							if (!client || !canEdit || !atelierAccountId) return false;
+							if (!(await getAccessToken())) return false;
+							const { data, error } = await client
+								.from("mcp_lix_connections")
+								.select("last_seen_at")
+								.eq("lix_id", repositoryId)
+								.order("last_seen_at", { ascending: false })
+								.limit(1);
+							if (error) throw error;
+							return data.length > 0;
+						},
+						canEdit ? stableTeamApiRef.current : null,
+						canEdit && !isDemoModeEnabled && client
+							? stableSettingsApiRef.current
+							: null,
+						repositoryVisibility,
 					),
+					onReady: setInstance,
 					mainArea: {
 						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
 					},
@@ -1360,12 +1309,20 @@ export function RepositoryAtelier({
 		// The state reset matters as much as the activation: Home may be
 		// drilled into a folder (flow A), and the root URL means the root
 		// listing.
+		const controller = new AbortController();
 		void instance.views
-			.open(LIXRAY_HOME_EXTENSION_ID, { state: lixrayHomeDirState("/") })
-			.catch((error: unknown) => {
-				console.error("Unable to activate the repository home", error);
+			.open(LIXRAY_HOME_EXTENSION_ID, {
+				state: lixrayHomeDirState("/"),
+				signal: controller.signal,
 			})
-			.finally(markRouteSynced);
+			.catch((error: unknown) => {
+				if (!controller.signal.aborted)
+					console.error("Unable to activate the repository home", error);
+			})
+			.finally(() => {
+				if (!controller.signal.aborted) markRouteSynced();
+			});
+		return () => controller.abort();
 	}, [
 		instance,
 		markRouteSynced,
@@ -1388,7 +1345,7 @@ export function RepositoryAtelier({
 	return (
 		<div
 			className="fixed inset-0 h-full w-full overflow-hidden bg-bg"
-			aria-busy={!instance && !error}
+			aria-busy={!shellProps && !error}
 		>
 			{shellProps ? (
 				<RepositoryDefaultBranchContext.Provider
@@ -1418,10 +1375,10 @@ export function RepositoryAtelier({
 					</RepositoryBranchSessionContext.Provider>
 				</RepositoryDefaultBranchContext.Provider>
 			) : null}
-			{!instance && !error && migration ? (
+			{!shellProps && !error && migration ? (
 				<RepositoryUpgradeProgress phase={migration.phase} />
 			) : null}
-			{!instance && !error && !migration ? (
+			{!shellProps && !error && !migration ? (
 				<RepositoryShellSkeleton
 					topBarProps={REPOSITORY_TOP_BAR_PROPS}
 					slots={{ navbarBrand, navbarEnd: headerActions }}

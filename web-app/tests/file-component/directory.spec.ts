@@ -10,6 +10,7 @@ type QAState = {
 	opened: { path: string; options: { newTab: boolean } }[];
 	diffOpened: string[];
 	refresh: () => void;
+	releaseListing: () => void;
 	setActive: (active: boolean) => void;
 	setWriteDelay: (ms: number) => void;
 	failNextWrite: () => void;
@@ -1112,4 +1113,29 @@ test("review indicators refresh when entering and leaving review", async ({
 	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
 	await expect(beta).toHaveClass(/opacity-\[0\.35\]/);
 	await expect(gamma).not.toHaveAttribute("data-changed-entry", "true");
+});
+
+test("pending file queries show loading rather than an empty repository", async ({
+	page,
+}) => {
+	await page.goto("/?hold-listing");
+	await expect(page.getByRole("status")).toHaveText("Loading files…");
+	await expect(page.getByTestId("home-getting-started")).toHaveCount(0);
+	await page.evaluate(() => window.directoryQA.releaseListing());
+	await expect(page.getByText("alpha.md", { exact: true })).toBeVisible();
+	await expect(page.getByText("Loading files…", { exact: true })).toHaveCount(
+		0,
+	);
+});
+
+test("a failed file query retries in place without reloading the workspace", async ({
+	page,
+}) => {
+	await page.goto("/?fail-listing");
+	await expect(page.getByRole("alert")).toContainText(
+		"Unable to load repository files.",
+	);
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await expect(page.getByText("alpha.md", { exact: true })).toBeVisible();
+	await expect(page.getByRole("alert")).toHaveCount(0);
 });

@@ -335,6 +335,12 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 			page.locator('[data-view-key="atelier_text"][data-active="true"]'),
 		).toBeVisible({ timeout: 30_000 });
 		await page.getByRole("button", { name: "Home", exact: true }).click();
+		// Home restores its saved folder; opening the workspace does not reset
+		// tab state. The breadcrumb explicitly returns to the repository root.
+		const folderPath = page.getByRole("navigation", { name: "Folder path" });
+		await expect(folderPath).toContainText(renamedSource);
+		await expect(row("note.txt")).toBeVisible();
+		await folderPath.getByRole("button", { name: "Home", exact: true }).click();
 		await expect(row(target)).toBeVisible({ timeout: 30_000 });
 		await row(target).click();
 		await expect(row(renamedSource)).toBeVisible();
