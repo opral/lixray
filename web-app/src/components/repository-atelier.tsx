@@ -79,7 +79,11 @@ import {
 	type RepositoryLixSession,
 } from "~/lib/repository-lix-session";
 import { buildRepositoryReproduction } from "~/lib/repository-reproduction";
-import { formatRepositoryOpenError } from "~/lib/repository-open-error";
+import {
+	formatRepositoryOpenError,
+	isRepositoryStorageInUse,
+} from "~/lib/repository-open-error";
+import { RepositoryOpenFailure } from "./repository-open-failure";
 import { ReplicaRecovery } from "./replica-recovery";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
@@ -277,6 +281,8 @@ export function RepositoryAtelier({
 		string | null
 	>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [storageBusy, setStorageBusy] = useState(false);
+	const [openAttempt, setOpenAttempt] = useState(0);
 	const [migration, setMigration] = useState<RepositoryMigrationState | null>(
 		null,
 	);
@@ -1055,6 +1061,7 @@ export function RepositoryAtelier({
 		setBranchSession(null);
 		setRepositoryDefaultBranchId(null);
 		setError(null);
+		setStorageBusy(false);
 		setMigration(null);
 		routeSyncedRef.current = false;
 
@@ -1247,6 +1254,7 @@ export function RepositoryAtelier({
 						lix_id: repositoryId,
 						namespace_id: namespace,
 					});
+					setStorageBusy(isRepositoryStorageInUse(caught));
 					setError(formatRepositoryOpenError(caught));
 				}
 			});
@@ -1263,6 +1271,7 @@ export function RepositoryAtelier({
 			if (session) void session.close();
 		};
 	}, [
+		openAttempt,
 		client,
 		atelierAccountId,
 		canEdit,
@@ -1421,15 +1430,15 @@ export function RepositoryAtelier({
 				</RepositoryShellSkeleton>
 			) : null}
 			{error ? (
-				<main className="absolute inset-0 grid place-content-center bg-bg p-6 text-center text-fg-muted">
-					<div
-						className="grid justify-items-center gap-2 [&_span]:max-w-[640px] [&_span]:text-fg-subtle"
-						role="alert"
-					>
-						<strong>Unable to open Atelier</strong>
-						<span className="whitespace-pre-wrap break-words">{error}</span>
-					</div>
-				</main>
+				<RepositoryOpenFailure
+					message={error}
+					storageBusy={storageBusy}
+					onRetry={() => {
+						setError(null);
+						setStorageBusy(false);
+						setOpenAttempt((attempt) => attempt + 1);
+					}}
+				/>
 			) : null}
 		</div>
 	);

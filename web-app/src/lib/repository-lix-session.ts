@@ -582,10 +582,13 @@ export function isRetryableRepositoryOpenError(error: unknown): boolean {
 				details.nonRetryableAfterExecution === true))
 	)
 		return false;
-	// Storage coherence belongs to the engine; configuration/authentication and
-	// cancelled operations are not network retries. The SDK owns migration waits.
+	// A closing storage owner may briefly retain its lock. Retry normal opening
+	// within the same bounded budget; never force ownership or replace storage.
+	// The SDK owns migration waits; configuration/authentication stay terminal.
 	return (
-		isLixRecoveringError(error) || isErrorCode(error, "LIX_TRANSPORT_NETWORK")
+		isLixRecoveringError(error) ||
+		isErrorCode(error, "LIX_TRANSPORT_NETWORK") ||
+		isErrorCode(error, "LIX_STORAGE_IN_USE")
 	);
 }
 

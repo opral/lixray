@@ -85,3 +85,30 @@ test("switching back releases controls while an old download is pending", async 
 		page.getByRole("button", { name: "Download recovery data" }),
 	).toBeEnabled();
 });
+
+test("occupied storage explains safe recovery and retry leaves the error screen", async ({
+	page,
+}) => {
+	await page.goto("/recovery.html?mode=storage-busy");
+	await expect(page.getByRole("alert")).toContainText(
+		"Close its other tabs and windows, then retry",
+	);
+	await expect(page.getByRole("alert")).toContainText(
+		"Your saved local changes will be kept",
+	);
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await expect(page.getByRole("alert")).toHaveCount(0);
+	await expect(page.getByRole("status")).toHaveText("Opening repository");
+});
+
+test("unrelated opening errors keep their diagnostic without lock recovery", async ({
+	page,
+}) => {
+	await page.goto("/recovery.html?mode=open-error");
+	await expect(page.getByRole("alert")).toContainText(
+		"Unrelated opening error",
+	);
+	await expect(
+		page.getByRole("button", { name: "Retry", exact: true }),
+	).toHaveCount(0);
+});

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatRepositoryOpenError } from "./repository-open-error.ts";
+import {
+	formatRepositoryOpenError,
+	isRepositoryStorageInUse,
+} from "./repository-open-error.ts";
 
 void test("preserves the engine's unsupported repository protocol error", () => {
 	assert.equal(
@@ -58,4 +61,18 @@ void test("preserves migration details from serialized engine errors", () => {
 		formatRepositoryOpenError({ code: "LIX_ERROR_MIGRATION_FAILED", message }),
 		`Repository migration failed (LIX_ERROR_MIGRATION_FAILED): ${message}`,
 	);
+});
+
+void test("only the typed storage ownership conflict offers recovery", () => {
+	assert.equal(
+		isRepositoryStorageInUse({ code: "LIX_STORAGE_IN_USE", message: "busy" }),
+		true,
+	);
+	for (const error of [
+		new Error("storage is already open by another owner"),
+		{ code: "LIX_STORAGE_CORRUPT" },
+		null,
+	]) {
+		assert.equal(isRepositoryStorageInUse(error), false);
+	}
 });

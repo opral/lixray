@@ -343,14 +343,28 @@ void test("expired handshake credentials refresh without provisioning", async ()
 	assert.deepEqual(tokens, ["Bearer expired", "Bearer refreshed"]);
 });
 
-void test("only typed network failure and server recovery are retried by opening", () => {
+void test("only typed network failure, storage contention, and server recovery are retried by opening", () => {
 	assert.equal(
 		isRetryableRepositoryOpenError(
 			Object.assign(new Error("offline"), { code: "LIX_TRANSPORT_NETWORK" }),
 		),
 		true,
 	);
+	assert.equal(
+		isRetryableRepositoryOpenError({ code: "LIX_STORAGE_IN_USE" }),
+		true,
+	);
+	for (const details of [
+		{ nonRetryableAfterCommit: true },
+		{ nonRetryableAfterExecution: true },
+	])
+		assert.equal(
+			isRetryableRepositoryOpenError({ code: "LIX_STORAGE_IN_USE", details }),
+			false,
+		);
 	for (const code of [
+		"LIX_STORAGE_FENCED",
+		"LIX_STORAGE_CLOSED",
 		"LIX_TRANSPORT_CONTRACT",
 		"LIX_TRANSPORT_CALLBACK",
 		"LIX_TRANSPORT_ABORTED",
