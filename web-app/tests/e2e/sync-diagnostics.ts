@@ -5,6 +5,11 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 	await context.addInitScript(() => {
 		if (typeof SharedWorker === "undefined") return;
 		const ports: MessagePort[] = [];
+		const lifecycle: unknown[] = [];
+		const recordLifecycle = (value: unknown) => {
+			lifecycle.push(value);
+			if (lifecycle.length > 100) lifecycle.shift();
+		};
 		const observerFrames: unknown[] = [];
 		const record = (value: unknown) => {
 			let budget = 32768;
@@ -54,6 +59,8 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 				) {
 					const message = args[0] as {
 						id?: number;
+						kind?: string;
+						sessionId?: number;
 						operation?: { kind?: string };
 					} | null;
 					if (
@@ -66,11 +73,34 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 						if (requests.size > 200)
 							requests.delete(requests.keys().next().value!);
 					}
+					if (message)
+						recordLifecycle({
+							direction: "send",
+							at: performance.now(),
+							id: message.id,
+							sessionId: message.sessionId,
+							kind: message.operation?.kind ?? message.kind,
+						});
 					Reflect.apply(post, this, args);
 				};
 				worker.port.addEventListener(
 					"message",
-					(event: MessageEvent<{ id?: number }>) => {
+					(
+						event: MessageEvent<{
+							id?: number;
+							kind?: string;
+							ok?: boolean;
+							error?: { code?: string };
+						}>,
+					) => {
+						recordLifecycle({
+							direction: "receive",
+							at: performance.now(),
+							id: event.data?.id,
+							kind: event.data?.kind,
+							ok: event.data?.ok,
+							errorCode: event.data?.error?.code,
+						});
 						if (
 							typeof event.data?.id !== "number" ||
 							!requests.has(event.data.id)
@@ -125,7 +155,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 						params: [{ kind: "text", value: path }],
 					}),
 				]);
-				return { health, rows, observerFrames };
+				return { health, rows, observerFrames, lifecycle };
 			},
 		});
 	});
@@ -207,7 +237,13 @@ export async function collectSyncDiagnostics(page: Page) {
 				}
 			}
 		}
+		const locks = await navigator.locks.query();
 		return {
+			locks,
+			openMarks: performance
+				.getEntriesByType("mark")
+				.filter((entry) => entry.name.startsWith("lixray:repository-open:"))
+				.map(({ name, startTime }) => ({ name, startTime })),
 			sources,
 			url: location.href,
 			path,

@@ -47,7 +47,8 @@ export async function createSyncFixture({
 	const analyticsStubFailures: string[] = [];
 	const newContext = async () => {
 		const context = await browser.newContext();
-		if (scenario === "editing") await installSyncDiagnostics(context);
+		if (scenario === "editing" || scenario === "history")
+			await installSyncDiagnostics(context);
 		if (local && scenario !== "performance") {
 			// Analytics is not part of the sync contract. Keep a built production
 			// image's telemetry off external networks and use an empty flag set.
@@ -1939,7 +1940,7 @@ export async function createSyncFixture({
 		}
 		async function close(primaryFailure?: unknown) {
 			await Promise.all([...pendingMergeClassifications]);
-			if (scenario === "editing") {
+			if (scenario === "editing" || scenario === "history") {
 				const diagnostics = await Promise.allSettled(
 					contexts
 						.flatMap((context) => context.pages())
