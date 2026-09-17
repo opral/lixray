@@ -183,45 +183,6 @@ export async function createSyncFixture({
 						? [DEMO_REPOSITORY_ID, SECONDARY_REPOSITORY_ID]
 						: [repositoryId],
 			});
-			// A fresh fixture must exercise entering and immediately closing an older
-			// checkpoint, even when the local object store starts empty.
-			const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL);
-			const authorization = {
-				Authorization: "Bearer lixray-demo",
-				"Lix-Server-Protocol-Version": String(
-					compatibility.serverProtocolVersion,
-				),
-			};
-			const opened = await sharedContext.request.get(endpoint.toString(), {
-				headers: authorization,
-			});
-			expect(opened.ok()).toBe(true);
-			const { sessionId } = (await opened.json()) as { sessionId: string };
-			const headers = { ...authorization, "Lix-Session-Id": sessionId };
-			try {
-				for (let index = 0; index < 2; index++) {
-					const checkpoint = await sharedContext.request.post(
-						new URL("execute", endpoint).toString(),
-						{
-							headers: {
-								...headers,
-								"Idempotency-Key": `local-fixture-${scenario}-${randomUUID()}`,
-							},
-							data: {
-								sql: "SELECT commit_id FROM lix_create_checkpoint()",
-								params: [],
-							},
-						},
-					);
-					expect(checkpoint.ok(), await checkpoint.text()).toBe(true);
-				}
-			} finally {
-				const closed = await sharedContext.request.delete(
-					new URL("session", endpoint).toString(),
-					{ headers },
-				);
-				expect(closed.ok()).toBe(true);
-			}
 		} else {
 			expect(healthResponse.headers()["x-railway-deployment-id"]).toBe(
 				expectedDeploymentId,
@@ -231,6 +192,74 @@ export async function createSyncFixture({
 				service: "lixray",
 				deploymentId: expectedDeploymentId,
 			});
+		}
+
+		// Both fresh local stacks and explicitly verified preview deployments need
+		// an older checkpoint to exercise history. Seed only missing prerequisites
+		// in this fixed disposable demo repository; reruns preserve existing history.
+		const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL);
+		const authorization = {
+			Authorization: "Bearer lixray-demo",
+			"Lix-Server-Protocol-Version": String(
+				compatibility.serverProtocolVersion,
+			),
+		};
+		const opened = await sharedContext.request.get(endpoint.toString(), {
+			headers: authorization,
+		});
+		expect(opened.ok()).toBe(true);
+		const { sessionId } = (await opened.json()) as { sessionId: string };
+		const headers = { ...authorization, "Lix-Session-Id": sessionId };
+		try {
+			const countResponse = await sharedContext.request.post(
+				new URL("execute", endpoint).toString(),
+				{
+					headers: {
+						...headers,
+						"Idempotency-Key": `fixture-count-${scenario}-${randomUUID()}`,
+					},
+					data: {
+						sql: "SELECT count(*) AS checkpoint_count FROM lix_log() WHERE is_checkpoint",
+						params: [],
+					},
+				},
+			);
+			expect(countResponse.ok(), await countResponse.text()).toBe(true);
+			const countResult = (await countResponse.json()) as {
+				rows?: Array<Array<{ value?: unknown }>>;
+			};
+			const checkpointCount = countResult.rows?.[0]?.[0]?.value;
+			if (
+				typeof checkpointCount !== "number" ||
+				!Number.isSafeInteger(checkpointCount) ||
+				checkpointCount < 0
+			) {
+				throw new Error(
+					"Fixture authority returned an invalid checkpoint count",
+				);
+			}
+			for (let index = checkpointCount; index < 2; index++) {
+				const checkpoint = await sharedContext.request.post(
+					new URL("execute", endpoint).toString(),
+					{
+						headers: {
+							...headers,
+							"Idempotency-Key": `fixture-checkpoint-${scenario}-${randomUUID()}`,
+						},
+						data: {
+							sql: "SELECT commit_id FROM lix_create_checkpoint()",
+							params: [],
+						},
+					},
+				);
+				expect(checkpoint.ok(), await checkpoint.text()).toBe(true);
+			}
+		} finally {
+			const closed = await sharedContext.request.delete(
+				new URL("session", endpoint).toString(),
+				{ headers },
+			);
+			expect(closed.ok()).toBe(true);
 		}
 
 		if (local) {
