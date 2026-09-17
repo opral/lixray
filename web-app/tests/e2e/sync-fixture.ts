@@ -15,7 +15,13 @@ import { provisionRepositories } from "../../scripts/provision-repositories.mjs"
 import {
 	createRetainedBodyRecoveryTracker,
 	isRetainedBodyUpload,
+	isRetryableMergeConflict,
 } from "./retained-body-recovery";
+
+import {
+	installSyncDiagnostics,
+	collectSyncDiagnostics,
+} from "./sync-diagnostics";
 
 const compatibility = getCompatibility();
 
@@ -41,6 +47,7 @@ export async function createSyncFixture({
 	const analyticsStubFailures: string[] = [];
 	const newContext = async () => {
 		const context = await browser.newContext();
+		if (scenario === "editing") await installSyncDiagnostics(context);
 		if (local && scenario !== "performance") {
 			// Analytics is not part of the sync contract. Keep a built production
 			// image's telemetry off external networks and use an empty flag set.
@@ -276,6 +283,8 @@ export async function createSyncFixture({
 			expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
 		}
 		const syncFailures: string[] = [];
+		const pendingMergeClassifications = new Set<Promise<void>>();
+		const recoveredMergeConflicts: string[] = [];
 		const retainedBodyRecovery = createRetainedBodyRecoveryTracker();
 		const runtimeFailures: string[] = [];
 		let intentionallyOffline = false;
@@ -739,7 +748,35 @@ export async function createSyncFixture({
 					!pendingRetainedBodyReplay &&
 					!(response.status() === 409 && url.endsWith("/sync/push"))
 				) {
-					syncFailures.push(`${response.status()} ${url}`);
+					const failure = `${response.status()} ${url}`;
+					syncFailures.push(failure);
+					if (
+						response.status() === 409 &&
+						response.request().method() === "POST" &&
+						new URL(url).pathname.endsWith("/sync/merge")
+					) {
+						const classification = response
+							.json()
+							.then((body: unknown) => {
+								if (
+									!isRetryableMergeConflict(
+										response.request().method(),
+										url,
+										response.status(),
+										body,
+									)
+								)
+									return;
+								const index = syncFailures.indexOf(failure);
+								if (index >= 0) syncFailures.splice(index, 1);
+								recoveredMergeConflicts.push(failure);
+							})
+							.catch(() => undefined);
+						pendingMergeClassifications.add(classification);
+						void classification.finally(() =>
+							pendingMergeClassifications.delete(classification),
+						);
+					}
 				}
 			});
 		};
@@ -1837,7 +1874,21 @@ export async function createSyncFixture({
 				),
 			});
 		}
-		async function close() {
+		async function close(primaryFailure?: unknown) {
+			await Promise.all([...pendingMergeClassifications]);
+			if (scenario === "editing") {
+				const diagnostics = await Promise.allSettled(
+					contexts
+						.flatMap((context) => context.pages())
+						.filter((page) => !page.isClosed())
+						.slice(0, 4)
+						.map(collectSyncDiagnostics),
+				);
+				await test.info().attach("replica-editor-diagnostics.json", {
+					body: JSON.stringify(diagnostics, null, 2),
+					contentType: "application/json",
+				});
+			}
 			const unresolvedSyncFailures = [
 				...syncFailures,
 				...retainedBodyRecovery.failures(),
@@ -1849,6 +1900,7 @@ export async function createSyncFixture({
 						repositoryId,
 						syncFailures: unresolvedSyncFailures,
 						recoveredRetainedBodyResponses: retainedBodyRecovery.recovered(),
+						typedMergeConflicts: recoveredMergeConflicts,
 						runtimeFailures,
 						analyticsStubFailures,
 					},
@@ -1863,6 +1915,12 @@ export async function createSyncFixture({
 					[],
 				);
 				expect(runtimeFailures).toEqual([]);
+			} catch (error) {
+				if (primaryFailure === undefined) throw error;
+				await test.info().attach("cleanup-failure.txt", {
+					body: String(error),
+					contentType: "text/plain",
+				});
 			} finally {
 				await Promise.all(contexts.map((context) => context.close()));
 			}

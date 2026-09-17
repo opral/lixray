@@ -32,12 +32,16 @@ test("@editing shared OPFS tabs edit in both directions and converge with an ind
 		baseURL,
 		scenario: "editing",
 	});
+	let primaryFailure: unknown;
 	try {
 		const state = await fixture.editing();
 		await fixture.concurrent(state);
 		await fixture.continuousIndependentEdits(state);
+	} catch (error) {
+		primaryFailure = error;
+		throw error;
 	} finally {
-		await fixture.close();
+		await fixture.close(primaryFailure);
 	}
 });
 

@@ -78,3 +78,33 @@ export function createRetainedBodyRecoveryTracker() {
 		recovered: () => recovered.map((event) => ({ ...event })),
 	};
 }
+
+/** A merge CAS conflict is expected only when the server supplies its exact typed code. */
+export function isRetryableMergeConflict(
+	method: string,
+	value: string,
+	status: number,
+	body: unknown,
+): boolean {
+	if (method !== "POST" || status !== 409) return false;
+	try {
+		const url = new URL(value);
+		if (
+			!/^\/lix\/v1\/[^/]+\/sync\/merge$/.test(url.pathname) ||
+			url.search ||
+			url.hash ||
+			!["http:", "https:"].includes(url.protocol)
+		)
+			return false;
+	} catch {
+		return false;
+	}
+	if (!body || typeof body !== "object" || !("error" in body)) return false;
+	const error = body.error;
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"code" in error &&
+		error.code === "LIX_TRANSACTION_CONFLICT"
+	);
+}
