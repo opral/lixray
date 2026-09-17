@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
 	useMarkRepositoryRouteSynced,
+	useBeginRepositoryRouteNavigation,
 	useConsumeShellEntityNavigation,
 	useRepositoryAtelierInstance,
 } from "~/components/repository-atelier";
@@ -21,6 +22,7 @@ export const Route = createFileRoute("/@{$namespace}/$repository/settings")({
 function RepositorySettingsRoute() {
 	const atelier = useRepositoryAtelierInstance();
 	const markRouteSynced = useMarkRepositoryRouteSynced();
+	const beginRouteNavigation = useBeginRepositoryRouteNavigation();
 	const consumeShellNavigation = useConsumeShellEntityNavigation();
 
 	useEffect(() => {
@@ -29,7 +31,7 @@ function RepositorySettingsRoute() {
 			markRouteSynced();
 			return;
 		}
-		let cancelled = false;
+		const controller = beginRouteNavigation();
 		// "Shell unmounted" is a transient: the dev double-mount (and HMR)
 		// tears the shell down and remounts it on the same instance, so the
 		// command just needs another try — the effect deps never change.
@@ -39,26 +41,26 @@ function RepositorySettingsRoute() {
 			// restore racing the command can wipe the fresh tab, leaving the
 			// promise pending forever — so a quiet open is retried too.
 			const timer = setTimeout(() => {
-				if (!cancelled && !settled && retriesLeft > 0) {
+				if (!controller.signal.aborted && !settled && retriesLeft > 0) {
 					attempt(retriesLeft - 1);
 				}
 			}, 800);
 			atelier.views
-				.open(LIXRAY_SETTINGS_EXTENSION_ID)
+				.open(LIXRAY_SETTINGS_EXTENSION_ID, { signal: controller.signal })
 				.then(() => {
 					settled = true;
 					clearTimeout(timer);
-					if (!cancelled) markRouteSynced();
+					if (!controller.signal.aborted) markRouteSynced();
 				})
 				.catch((error: unknown) => {
 					settled = true;
 					clearTimeout(timer);
-					if (cancelled) return;
+					if (controller.signal.aborted) return;
 					const transient =
 						error instanceof Error && error.message.includes("shell unmounted");
 					if (transient && retriesLeft > 0) {
 						setTimeout(() => {
-							if (!cancelled) attempt(retriesLeft - 1);
+							if (!controller.signal.aborted) attempt(retriesLeft - 1);
 						}, 150);
 						return;
 					}
@@ -70,9 +72,9 @@ function RepositorySettingsRoute() {
 		};
 		attempt(5);
 		return () => {
-			cancelled = true;
+			controller.abort();
 		};
-	}, [atelier, markRouteSynced, consumeShellNavigation]);
+	}, [atelier, beginRouteNavigation, markRouteSynced, consumeShellNavigation]);
 
 	return null;
 }

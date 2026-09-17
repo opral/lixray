@@ -1,3 +1,4 @@
+import { createRepositoryRouteLifecycle } from "~/lib/repository-route-lifecycle";
 import { RepositoryUpgradeProgress } from "./repository-upgrade-progress";
 import {
 	createShellNavigationQueue,
@@ -149,6 +150,9 @@ const RepositoryAtelierContext = createContext<RepositoryAtelierHandle | null>(
 	null,
 );
 const RepositoryDefaultBranchContext = createContext<string | null>(null);
+const RepositoryRouteLifecycleContext = createContext<
+	(() => AbortController) | null
+>(null);
 const RepositoryRouteSyncContext = createContext<(() => void) | null>(null);
 const RepositoryShellNavigationContext = createContext<
 	((dirPath: string) => boolean) | null
@@ -771,7 +775,17 @@ export function RepositoryAtelier({
 	// URL ⇄ tabs: the URL always names the ACTIVE central view. Atelier
 	// reports activations (open, tab click, close, restore); the routes below
 	// drive the reverse direction. Suppressed until the initial route has been
-	// applied so a restored session cannot clobber a deep link.
+	// applied so a restored session cannot clobber a deep link. Explicit user
+	// tab selection cancels that pending route and takes precedence.
+	const routeLifecycle = useRef(createRepositoryRouteLifecycle());
+	const beginRouteNavigation = useCallback(
+		() => routeLifecycle.current.begin(),
+		[],
+	);
+	useEffect(() => {
+		const lifecycle = routeLifecycle.current;
+		return () => lifecycle.cancel();
+	}, []);
 	const routeSyncedRef = useRef(false);
 	const markRouteSynced = useCallback(() => {
 		routeSyncedRef.current = true;
@@ -822,7 +836,10 @@ export function RepositoryAtelier({
 				setReviewFocusActive(event.active && event.changedFileCount > 0);
 				return;
 			}
-			if (event.type !== "main_view_activated") return;
+			if (event.type === "main_view_navigation_requested") {
+				routeLifecycle.current.cancel();
+				routeSyncedRef.current = true;
+			} else if (event.type !== "main_view_activated") return;
 			const revision = ++navigationRevision;
 			if (!routeSyncedRef.current) return;
 			// Keep a pending shell marker until its own route commit consumes it.
@@ -1309,7 +1326,7 @@ export function RepositoryAtelier({
 		// The state reset matters as much as the activation: Home may be
 		// drilled into a folder (flow A), and the root URL means the root
 		// listing.
-		const controller = new AbortController();
+		const controller = beginRouteNavigation();
 		void instance.views
 			.open(LIXRAY_HOME_EXTENSION_ID, {
 				state: lixrayHomeDirState("/"),
@@ -1325,6 +1342,7 @@ export function RepositoryAtelier({
 		return () => controller.abort();
 	}, [
 		instance,
+		beginRouteNavigation,
 		markRouteSynced,
 		consumeShellNavigation,
 		namespace,
@@ -1352,26 +1370,30 @@ export function RepositoryAtelier({
 					value={repositoryDefaultBranchId}
 				>
 					<RepositoryBranchSessionContext.Provider value={branchSession}>
-						<RepositoryRouteSyncContext.Provider value={markRouteSynced}>
-							<RepositoryShellNavigationContext.Provider
-								value={consumeShellNavigation}
-							>
-								<RepositoryAtelierContext.Provider value={instance}>
-									<Atelier
-										{...shellProps}
-										topBarProps={REPOSITORY_TOP_BAR_PROPS}
-										slots={{
-											navbarBrand,
-											navbarEnd: headerActions,
-										}}
-									/>
-									<Outlet />
-									{shellProps.lix ? (
-										<ReplicaRecovery lix={shellProps.lix} />
-									) : null}
-								</RepositoryAtelierContext.Provider>
-							</RepositoryShellNavigationContext.Provider>
-						</RepositoryRouteSyncContext.Provider>
+						<RepositoryRouteLifecycleContext.Provider
+							value={beginRouteNavigation}
+						>
+							<RepositoryRouteSyncContext.Provider value={markRouteSynced}>
+								<RepositoryShellNavigationContext.Provider
+									value={consumeShellNavigation}
+								>
+									<RepositoryAtelierContext.Provider value={instance}>
+										<Atelier
+											{...shellProps}
+											topBarProps={REPOSITORY_TOP_BAR_PROPS}
+											slots={{
+												navbarBrand,
+												navbarEnd: headerActions,
+											}}
+										/>
+										<Outlet />
+										{shellProps.lix ? (
+											<ReplicaRecovery lix={shellProps.lix} />
+										) : null}
+									</RepositoryAtelierContext.Provider>
+								</RepositoryShellNavigationContext.Provider>
+							</RepositoryRouteSyncContext.Provider>
+						</RepositoryRouteLifecycleContext.Provider>
 					</RepositoryBranchSessionContext.Provider>
 				</RepositoryDefaultBranchContext.Provider>
 			) : null}
@@ -1407,6 +1429,11 @@ export function useRepositoryAtelierInstance(): RepositoryAtelierHandle | null {
 
 export function useRepositoryDefaultBranchId(): string | null {
 	return useContext(RepositoryDefaultBranchContext);
+}
+
+export function useBeginRepositoryRouteNavigation(): () => AbortController {
+	const begin = useContext(RepositoryRouteLifecycleContext);
+	return begin ?? (() => new AbortController());
 }
 
 /**

@@ -1,3 +1,4 @@
+import { readRepositoryRoute } from "~/lib/repository-route-lifecycle";
 import {
 	canonicalEntitySplat,
 	findLixEntity,
@@ -8,6 +9,7 @@ import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import {
 	useMarkRepositoryRouteSynced,
+	useBeginRepositoryRouteNavigation,
 	useConsumeShellEntityNavigation,
 	useRepositoryActiveBranchId,
 	useRepositoryAtelierInstance,
@@ -30,6 +32,7 @@ function RepositoryFileRoute() {
 	const atelier = useRepositoryAtelierInstance();
 	const defaultBranchId = useRepositoryDefaultBranchId();
 	const markRouteSynced = useMarkRepositoryRouteSynced();
+	const beginRouteNavigation = useBeginRepositoryRouteNavigation();
 	const consumeShellNavigation = useConsumeShellEntityNavigation();
 	const navigate = useNavigate();
 	const { namespace, repository, _splat: filePath } = Route.useParams();
@@ -44,11 +47,13 @@ function RepositoryFileRoute() {
 			markRouteSynced();
 			return;
 		}
-		let cancelled = false;
+		const controller = beginRouteNavigation();
 		let requestedPath = "";
-		void findLixEntity(atelier.lix, "file", { id: entityId })
+		void readRepositoryRoute(controller.signal, () =>
+			findLixEntity(atelier.lix, "file", { id: entityId }),
+		)
 			.then(async (entity) => {
-				if (cancelled) return;
+				if (controller.signal.aborted) return;
 				if (!entity) throw new Error("Entity not found");
 				requestedPath = entity.path;
 				// The id resolved; the path in the URL is decoration. Write the
@@ -65,11 +70,13 @@ function RepositoryFileRoute() {
 								: {},
 						replace: true,
 					});
-				await atelier.documents.open(requestedPath);
-				if (!cancelled) markRouteSynced();
+				await atelier.documents.open(requestedPath, {
+					signal: controller.signal,
+				});
+				if (!controller.signal.aborted) markRouteSynced();
 			})
 			.catch((error: unknown) => {
-				if (cancelled) return;
+				if (controller.signal.aborted) return;
 				if (
 					!(error instanceof Error && error.message === "Entity not found") &&
 					!isAtelierFileNotFoundError(error, requestedPath)
@@ -80,7 +87,7 @@ function RepositoryFileRoute() {
 					markRouteSynced();
 					return;
 				}
-				if (cancelled) {
+				if (controller.signal.aborted) {
 					return;
 				}
 				const routedBranch = branch ?? activeBranchId ?? undefined;
@@ -95,9 +102,10 @@ function RepositoryFileRoute() {
 				});
 			});
 		return () => {
-			cancelled = true;
+			controller.abort();
 		};
 	}, [
+		beginRouteNavigation,
 		activeBranchId,
 		atelier,
 		branch,
