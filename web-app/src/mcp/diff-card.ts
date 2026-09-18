@@ -88,11 +88,11 @@ export type DiffCardFile = {
 
 /** What travels in `_meta` beside a result: the card's bar and its pages. */
 export type DiffCardPayload = {
-	/** "1 file created", or "3 files written" when they did several things. */
+	/** "1 file added", or "3 files written" when they did several things. */
 	readonly title: string;
 	/** The deepest folder every file is under; absent at the root. */
 	readonly folder?: string;
-	/** "2 new · 1 edited", or "" when the title already said it. */
+	/** "2 added · 1 modified", or "" when the title already said it. */
 	readonly tally: string;
 	/** "@opral/monorepo" */
 	readonly repository?: string;
@@ -142,20 +142,22 @@ export function commonFolder(paths: ReadonlyArray<string>): string {
 	return common && common.length > 0 ? `/${common.join("/")}` : "";
 }
 
+/**
+ * One vocabulary for what happened to a file: Lix's own diff words, which
+ * are the words Atelier's glyphs and review carry too. A card is a view of a
+ * Lix diff; it should not rename what it is looking at.
+ */
 const TALLY_ORDER: ReadonlyArray<[DiffCardStatus, string]> = [
-	["added", "new"],
-	["modified", "edited"],
+	["added", "added"],
+	["modified", "modified"],
 	["moved", "moved"],
-	["removed", "deleted"],
+	["removed", "removed"],
 ];
 
 /** The one word for a set of changes that are all the same thing. */
-const SINGLE_STATUS_WORD: Record<DiffCardStatus, string> = {
-	added: "created",
-	modified: "edited",
-	moved: "moved",
-	removed: "deleted",
-};
+const SINGLE_STATUS_WORD: Record<DiffCardStatus, string> = Object.fromEntries(
+	TALLY_ORDER,
+) as Record<DiffCardStatus, string>;
 
 /** The status every change shares, or null when they differ. */
 function sharedStatus(
@@ -167,7 +169,7 @@ function sharedStatus(
 }
 
 /**
- * "2 new · 1 edited": only what happened, in a fixed order — and nothing at
+ * "2 added · 1 modified": only what happened, in a fixed order — and nothing at
  * all when every change is the same thing, because then the title has said
  * it and the bar would be saying it twice.
  */
@@ -182,7 +184,7 @@ export function tallyLabel(statuses: ReadonlyArray<DiffCardStatus>): string {
 }
 
 /**
- * "1 file created", "3 files edited" — what happened, when one word covers
+ * "1 file added", "3 files modified" — what happened, when one word covers
  * it. A set that did several things at once falls back to the tool's own
  * verb, "3 files written", and the bar's tally breaks it down.
  */
@@ -212,14 +214,7 @@ export function fileLabel(
 	unit: string,
 	moved?: { readonly from: string; readonly to: string },
 ): string {
-	const word =
-		status === "added"
-			? "new"
-			: status === "removed"
-				? "deleted"
-				: status === "moved"
-					? "moved"
-					: "edited";
+	const word = SINGLE_STATUS_WORD[status];
 	if (status === "moved" && moved !== undefined) {
 		const from = movedFromHint(moved.from, moved.to);
 		return counts && counts.added + counts.removed + counts.modified > 0

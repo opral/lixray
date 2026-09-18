@@ -40,16 +40,16 @@ void test("a preview is offered for the files Atelier can draw", () => {
 
 void test("the bar says how many, where, and what happened", () => {
 	// One thing happened: the title says which, and the tally says nothing,
-	// because a bar that says "1 file created · 1 new" says it twice.
-	assert.equal(cardTitle(1, "written", ["added"]), "1 file created");
+	// because a bar that says "1 file added · 1 added" says it twice.
+	assert.equal(cardTitle(1, "written", ["added"]), "1 file added");
 	assert.equal(
 		cardTitle(3, "written", ["modified", "modified", "modified"]),
-		"3 files edited",
+		"3 files modified",
 	);
 	assert.equal(cardTitle(1, "changed", ["moved"]), "1 file moved");
 	assert.equal(
 		cardTitle(2, "changed", ["removed", "removed"]),
-		"2 files deleted",
+		"2 files removed",
 	);
 	assert.equal(tallyLabel(["added"]), "");
 	assert.equal(tallyLabel(["modified", "modified"]), "");
@@ -71,9 +71,9 @@ void test("the bar says how many, where, and what happened", () => {
 	// Only what happened, in a fixed order.
 	assert.equal(
 		tallyLabel(["removed", "added", "modified", "added", "moved"]),
-		"2 new · 1 edited · 1 moved · 1 deleted",
+		"2 added · 1 modified · 1 moved · 1 removed",
 	);
-	assert.equal(tallyLabel(["modified", "added"]), "1 new · 1 edited");
+	assert.equal(tallyLabel(["modified", "added"]), "1 added · 1 modified");
 });
 
 void test("the footer's words follow the render's counts", () => {
@@ -81,25 +81,25 @@ void test("the footer's words follow the render's counts", () => {
 	assert.equal(countUnit("/notes.md"), "lines");
 	assert.equal(
 		fileLabel("added", { added: 5, modified: 0, removed: 0 }, "rows"),
-		"new · 5 rows",
+		"added · 5 rows",
 	);
 	assert.equal(
 		fileLabel("added", { added: 1, modified: 0, removed: 0 }, "rows"),
-		"new · 1 row",
+		"added · 1 row",
 	);
 	assert.equal(
 		fileLabel("modified", { added: 12, modified: 0, removed: 3 }, "lines"),
-		"edited · +12 −3 lines",
+		"modified · +12 −3 lines",
 	);
 	assert.equal(
 		fileLabel("modified", { added: 1, modified: 2, removed: 0 }, "rows"),
-		"edited · +1 ~2 rows",
+		"modified · +1 ~2 rows",
 	);
 	assert.equal(
 		fileLabel("removed", { added: 0, modified: 0, removed: 4 }, "lines"),
-		"deleted · 4 lines",
+		"removed · 4 lines",
 	);
-	assert.equal(fileLabel("modified", undefined, "lines"), "edited");
+	assert.equal(fileLabel("modified", undefined, "lines"), "modified");
 	assert.equal(
 		fileLabel("moved", undefined, "lines", { from: "/old/a.md", to: "/a.md" }),
 		"moved from old/",
@@ -162,23 +162,23 @@ void test("a card carries the change, the file, and the way back", () => {
 	assert.ok(card);
 	assert.equal(card.title, "3 files written");
 	assert.equal(card.folder, "/gtm");
-	assert.equal(card.tally, "1 new · 1 edited · 1 deleted");
+	assert.equal(card.tally, "1 added · 1 modified · 1 removed");
 	assert.equal(card.repository, "@acme/company");
 	assert.equal(card.more, 0);
 	const [edited, added, removed] = card.files;
 	assert.equal(edited!.status, "modified");
 	assert.equal(edited!.name, "playbook.md");
-	assert.equal(edited!.label, "edited · +1 lines");
+	assert.equal(edited!.label, "modified · +1 lines");
 	assert.deepEqual(edited!.counts, { added: 1, modified: 0, removed: 0 });
 	// Atelier's own view: the marks and the tokens that paint them.
 	assert.match(edited!.html ?? "", /data-review-status="added"/);
 	assert.match(edited!.html ?? "", /AI consultants/);
 	assert.match(DIFF_CARD_STYLE, /--atelier-diff-added-subtle/);
 	assert.equal(added!.status, "added");
-	assert.equal(added!.label, "new · 3 rows");
+	assert.equal(added!.label, "added · 3 rows");
 	assert.match(added!.html ?? "", /<table>/);
 	assert.equal(removed!.status, "removed");
-	assert.equal(removed!.label, "deleted · 2 lines");
+	assert.equal(removed!.label, "removed · 2 lines");
 	assert.equal(removed!.url, "https://lixray.com/@acme/company");
 	// The file-type icon is Atelier's, inlined: nothing to fetch.
 	for (const file of card.files) {
@@ -215,7 +215,7 @@ void test("a change that draws nothing is still a page, with a note", () => {
 	});
 	assert.ok(card);
 	assert.equal(card.title, "3 files changed");
-	assert.equal(card.tally, "1 new · 1 edited · 1 moved");
+	assert.equal(card.tally, "1 added · 1 modified · 1 moved");
 	assert.equal(card.files[0]!.html, undefined);
 	assert.match(card.files[0]!.note ?? "", /No preview for this file type/);
 	assert.equal(card.files[1]!.status, "moved");
@@ -273,7 +273,7 @@ void test("a long ledger comes back as a table, not as a refusal", () => {
 	assert.match(file.html, /csv-diff-gap/);
 	assert.match(file.html, /unchanged rows/);
 	assert.equal(file.note, undefined);
-	assert.match(file.label, /^edited/);
+	assert.match(file.label, /^modified/);
 });
 
 void test("previews stop at the budget; the list stops later; the count never", () => {
@@ -285,7 +285,7 @@ void test("previews stop at the budget; the list stops later; the count never", 
 	const card = diffCardPayload({ verb: "written", changes });
 	assert.ok(card);
 	// Every one of them was created, the five the card could not list too.
-	assert.equal(card.title, `${MAX_CARD_FILES + 5} files created`);
+	assert.equal(card.title, `${MAX_CARD_FILES + 5} files added`);
 	assert.equal(card.tally, "");
 	assert.equal(card.files.length, MAX_CARD_FILES);
 	assert.equal(card.more, 5);

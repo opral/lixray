@@ -2663,7 +2663,7 @@ void test("file tools list, read, and write files with metadata and conflict che
 			["text", "resource_link", "resource_link", "text"],
 		);
 		const card = written._meta?.[DIFF_CARD_META] as DiffCardPayload;
-		assert.equal(card.title, "1 file created");
+		assert.equal(card.title, "1 file added");
 		assert.equal(card.folder, "/gtm/campaigns");
 		// The title said it; the tally would be saying it twice.
 		assert.equal(card.tally, "");
@@ -2928,10 +2928,10 @@ void test("diff compares two points and sends the same card a write does", async
 		const card = diffed._meta?.[DIFF_CARD_META] as DiffCardPayload;
 		assert.equal(card.title, "3 files changed");
 		assert.equal(card.folder, "/gtm");
-		assert.equal(card.tally, "1 new · 1 edited · 1 deleted");
+		assert.equal(card.tally, "1 added · 1 modified · 1 removed");
 		assert.deepEqual(
 			card.files.map((file) => file.label),
-			["edited · +1 ~1 rows", "deleted · 1 line", "new · 1 line"],
+			["modified · +1 ~1 rows", "removed · 1 line", "added · 1 line"],
 		);
 		assert.match(card.files[0]!.html ?? "", /qualified/);
 		assert.equal(card.files[1]!.url, result.url);
@@ -3005,7 +3005,7 @@ void test("diff compares two points and sends the same card a write does", async
 		});
 		assert.equal(executed.isError, undefined, JSON.stringify(executed));
 		const executedCard = executed._meta?.[DIFF_CARD_META] as DiffCardPayload;
-		assert.equal(executedCard.title, "1 file created");
+		assert.equal(executedCard.title, "1 file added");
 		assert.equal(executedCard.folder, "/skills");
 		assert.deepEqual(
 			executedCard.files.map((file) => [file.name, file.status]),

@@ -164,10 +164,10 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 		const view = page.frameLocator("iframe");
 		// Collapsed by default: one 44px bar, which the reader opens.
 		// The bar says what happened, so the tally has nothing left to add.
-		await view.getByRole("button", { name: /1 file created/ }).waitFor();
+		await view.getByRole("button", { name: /1 file added/ }).waitFor();
 		assert.equal(await page.evaluate(() => window.heights.at(-1)), 44);
 		assert.equal(await view.locator("#tally").innerText(), "");
-		await view.getByRole("button", { name: /1 file created/ }).click();
+		await view.getByRole("button", { name: /1 file added/ }).click();
 		await view.locator("h1").waitFor();
 		assert.equal(await view.locator("h1").innerText(), "MCP UI demo");
 		assert.equal(await view.locator("h2").count(), 1);
@@ -264,14 +264,14 @@ void test("the chrome follows the chat, the rendered file keeps Atelier's light 
 				receipt,
 			);
 			const view = page.frameLocator("iframe");
-			await view.getByRole("button", { name: /1 file created/ }).waitFor();
+			await view.getByRole("button", { name: /1 file added/ }).waitFor();
 			const frame = appFrameOf(page);
 			// Closed, the document is the bar and nothing else: a host that
 			// sizes the frame from it leaves no strip of its own below.
 			const closed = await frame.evaluate(
 				() => document.documentElement.getBoundingClientRect().height,
 			);
-			await view.getByRole("button", { name: /1 file created/ }).click();
+			await view.getByRole("button", { name: /1 file added/ }).click();
 			await view.locator("h1").waitFor();
 			const measured = await frame.evaluate(() => {
 				const style = (element) => getComputedStyle(element);
@@ -324,9 +324,9 @@ void test("the chrome follows the chat, the rendered file keeps Atelier's light 
 					},
 				]),
 			);
-			await view.getByRole("button", { name: /1 file edited/ }).waitFor();
+			await view.getByRole("button", { name: /1 file modified/ }).waitFor();
 			await view
-				.locator("#label .word", { hasText: "edited" })
+				.locator("#label .word", { hasText: "modified" })
 				.waitFor({ state: "attached" });
 			const edited = await frame.evaluate(
 				() => getComputedStyle(document.querySelector("#label .word")).color,
