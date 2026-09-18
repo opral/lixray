@@ -157,8 +157,11 @@ support MCP Apps. A card is optional; agents must not claim the user saw one
 merely because the call succeeded.
 
 The card is collapsed by default: one 44px bar with the files' type icons,
-"N files written" (or "changed" for `diff`), the deepest common folder, and
-"2 new · 1 edited" counts, so a long chat reads as a list of writes. Opened,
+what happened ("1 file created", "3 files edited"; "N files written", or
+"changed" for `diff`, when a set did several things at once), the deepest
+common folder, and — only for such a mixed set — "2 new · 1 edited" counts,
+so a long chat reads as a list of writes and none of them says a thing
+twice. Opened,
 the bar becomes the header and below it sits Atelier's static render of one
 file's change in a scrolling panel, with a dark pill to page through the
 files (each with its diff glyph and counts) and an "Open in LixRay" button

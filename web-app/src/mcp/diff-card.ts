@@ -88,11 +88,11 @@ export type DiffCardFile = {
 
 /** What travels in `_meta` beside a result: the card's bar and its pages. */
 export type DiffCardPayload = {
-	/** "3 files written" */
+	/** "1 file created", or "3 files written" when they did several things. */
 	readonly title: string;
 	/** The deepest folder every file is under; absent at the root. */
 	readonly folder?: string;
-	/** "2 new · 1 edited" */
+	/** "2 new · 1 edited", or "" when the title already said it. */
 	readonly tally: string;
 	/** "@opral/monorepo" */
 	readonly repository?: string;
@@ -149,8 +149,30 @@ const TALLY_ORDER: ReadonlyArray<[DiffCardStatus, string]> = [
 	["removed", "deleted"],
 ];
 
-/** "2 new · 1 edited": only what happened, in a fixed order. */
+/** The one word for a set of changes that are all the same thing. */
+const SINGLE_STATUS_WORD: Record<DiffCardStatus, string> = {
+	added: "created",
+	modified: "edited",
+	moved: "moved",
+	removed: "deleted",
+};
+
+/** The status every change shares, or null when they differ. */
+function sharedStatus(
+	statuses: ReadonlyArray<DiffCardStatus>,
+): DiffCardStatus | null {
+	const first = statuses[0];
+	if (first === undefined) return null;
+	return statuses.every((status) => status === first) ? first : null;
+}
+
+/**
+ * "2 new · 1 edited": only what happened, in a fixed order — and nothing at
+ * all when every change is the same thing, because then the title has said
+ * it and the bar would be saying it twice.
+ */
 export function tallyLabel(statuses: ReadonlyArray<DiffCardStatus>): string {
+	if (sharedStatus(statuses)) return "";
 	const parts: string[] = [];
 	for (const [status, word] of TALLY_ORDER) {
 		const count = statuses.filter((each) => each === status).length;
@@ -159,9 +181,19 @@ export function tallyLabel(statuses: ReadonlyArray<DiffCardStatus>): string {
 	return parts.join(" · ");
 }
 
-/** "3 files written", "1 file changed". */
-export function cardTitle(count: number, verb: "written" | "changed"): string {
-	return `${count} ${count === 1 ? "file" : "files"} ${verb}`;
+/**
+ * "1 file created", "3 files edited" — what happened, when one word covers
+ * it. A set that did several things at once falls back to the tool's own
+ * verb, "3 files written", and the bar's tally breaks it down.
+ */
+export function cardTitle(
+	count: number,
+	verb: "written" | "changed",
+	statuses: ReadonlyArray<DiffCardStatus> = [],
+): string {
+	const shared = sharedStatus(statuses);
+	const word = shared ? SINGLE_STATUS_WORD[shared] : verb;
+	return `${count} ${count === 1 ? "file" : "files"} ${word}`;
 }
 
 /** What Atelier counts for a file: rows of a table, lines of a document. */
@@ -253,10 +285,13 @@ export function diffCardPayload(input: {
 		cardFile(change, index < MAX_PREVIEWS),
 	);
 	const folder = commonFolder(listed.map((file) => file.path));
+	// Over every change, not only the listed ones: what the title says has to
+	// hold for the files the card could not carry as well.
+	const statuses = input.changes.map((change) => diffCardStatus(change));
 	return {
-		title: cardTitle(input.changes.length, input.verb),
+		title: cardTitle(input.changes.length, input.verb, statuses),
 		...(folder ? { folder } : {}),
-		tally: tallyLabel(files.map((file) => file.status)),
+		tally: tallyLabel(statuses),
 		...(input.repository ? { repository: input.repository } : {}),
 		files,
 		more: input.changes.length - listed.length,

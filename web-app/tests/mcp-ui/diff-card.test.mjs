@@ -163,9 +163,11 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 		);
 		const view = page.frameLocator("iframe");
 		// Collapsed by default: one 44px bar, which the reader opens.
-		await view.getByRole("button", { name: /1 file written/ }).waitFor();
+		// The bar says what happened, so the tally has nothing left to add.
+		await view.getByRole("button", { name: /1 file created/ }).waitFor();
 		assert.equal(await page.evaluate(() => window.heights.at(-1)), 44);
-		await view.getByRole("button", { name: /1 file written/ }).click();
+		assert.equal(await view.locator("#tally").innerText(), "");
+		await view.getByRole("button", { name: /1 file created/ }).click();
 		await view.locator("h1").waitFor();
 		assert.equal(await view.locator("h1").innerText(), "MCP UI demo");
 		assert.equal(await view.locator("h2").count(), 1);
@@ -262,14 +264,14 @@ void test("the chrome follows the chat, the rendered file keeps Atelier's light 
 				receipt,
 			);
 			const view = page.frameLocator("iframe");
-			await view.getByRole("button", { name: /1 file written/ }).waitFor();
+			await view.getByRole("button", { name: /1 file created/ }).waitFor();
 			const frame = appFrameOf(page);
 			// Closed, the document is the bar and nothing else: a host that
 			// sizes the frame from it leaves no strip of its own below.
 			const closed = await frame.evaluate(
 				() => document.documentElement.getBoundingClientRect().height,
 			);
-			await view.getByRole("button", { name: /1 file written/ }).click();
+			await view.getByRole("button", { name: /1 file created/ }).click();
 			await view.locator("h1").waitFor();
 			const measured = await frame.evaluate(() => {
 				const style = (element) => getComputedStyle(element);
@@ -322,6 +324,7 @@ void test("the chrome follows the chat, the rendered file keeps Atelier's light 
 					},
 				]),
 			);
+			await view.getByRole("button", { name: /1 file edited/ }).waitFor();
 			await view
 				.locator("#label .word", { hasText: "edited" })
 				.waitFor({ state: "attached" });

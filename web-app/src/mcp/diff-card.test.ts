@@ -39,8 +39,27 @@ void test("a preview is offered for the files Atelier can draw", () => {
 });
 
 void test("the bar says how many, where, and what happened", () => {
+	// One thing happened: the title says which, and the tally says nothing,
+	// because a bar that says "1 file created · 1 new" says it twice.
+	assert.equal(cardTitle(1, "written", ["added"]), "1 file created");
+	assert.equal(
+		cardTitle(3, "written", ["modified", "modified", "modified"]),
+		"3 files edited",
+	);
+	assert.equal(cardTitle(1, "changed", ["moved"]), "1 file moved");
+	assert.equal(
+		cardTitle(2, "changed", ["removed", "removed"]),
+		"2 files deleted",
+	);
+	assert.equal(tallyLabel(["added"]), "");
+	assert.equal(tallyLabel(["modified", "modified"]), "");
+	// Several things did: the tool's own verb, and the tally breaks it down.
 	assert.equal(cardTitle(1, "written"), "1 file written");
 	assert.equal(cardTitle(3, "changed"), "3 files changed");
+	assert.equal(
+		cardTitle(2, "written", ["added", "modified"]),
+		"2 files written",
+	);
 	assert.equal(
 		commonFolder(["/gtm/campaigns/icp.md", "/gtm/campaigns/q3/plan.md"]),
 		"/gtm/campaigns",
@@ -54,7 +73,7 @@ void test("the bar says how many, where, and what happened", () => {
 		tallyLabel(["removed", "added", "modified", "added", "moved"]),
 		"2 new · 1 edited · 1 moved · 1 deleted",
 	);
-	assert.equal(tallyLabel(["modified"]), "1 edited");
+	assert.equal(tallyLabel(["modified", "added"]), "1 new · 1 edited");
 });
 
 void test("the footer's words follow the render's counts", () => {
@@ -236,7 +255,9 @@ void test("previews stop at the budget; the list stops later; the count never", 
 	}));
 	const card = diffCardPayload({ verb: "written", changes });
 	assert.ok(card);
-	assert.equal(card.title, `${MAX_CARD_FILES + 5} files written`);
+	// Every one of them was created, the five the card could not list too.
+	assert.equal(card.title, `${MAX_CARD_FILES + 5} files created`);
+	assert.equal(card.tally, "");
 	assert.equal(card.files.length, MAX_CARD_FILES);
 	assert.equal(card.more, 5);
 	assert.equal(
