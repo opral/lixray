@@ -122,10 +122,15 @@ async function openHost(browser, options = {}) {
 	return { page, pageErrors, requests };
 }
 
+/** The view's own frame, for measurements Playwright locators cannot take. */
+function appFrameOf(page) {
+	return page.frames().find((frame) => frame.url().endsWith("/app.html"));
+}
+
 /** The demo document, and the card one write of it sends back. */
 const DEMO_URL = "https://lixray.com/@opral/demo/file/id/mcp-ui-demo.md";
 const DEMO_MARKDOWN =
-	"# MCP UI demo\n\n## Features\n\n- One\n- Two\n\n| Feature | Status |\n| --- | --- |\n| Markdown | Ready |\n\n- [x] Saved\n- [ ] Review\n\n![external](https://unexpected.invalid/image.png)\n\n<script>window.pwned=true</script>\n";
+	"# MCP UI demo\n\n## Features\n\n- One\n- Two\n\n| Feature | Status | Notes |\n| --- | --- | --- |\n| Markdown | Ready | The cells of a wide table wrap onto the lines they need, the way they would in the app |\n\n- [x] Saved\n- [ ] Review\n\n![external](https://unexpected.invalid/image.png)\n\n<script>window.pwned=true</script>\n";
 
 function demoReceipt(changes) {
 	const card = diffCardPayload({
@@ -165,6 +170,20 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 		assert.equal(await view.locator("h1").innerText(), "MCP UI demo");
 		assert.equal(await view.locator("h2").count(), 1);
 		assert.equal(await view.locator("table").count(), 1);
+		// A table is read across, but not off the card: the cells wrap into
+		// the panel's width instead of the row scrolling sideways.
+		const table = await appFrameOf(page).evaluate(() => {
+			const root = document.getElementById("panel").shadowRoot;
+			const room = root.querySelector("table");
+			const cell = root.querySelectorAll("td")[2];
+			const line = parseFloat(getComputedStyle(cell).lineHeight);
+			return {
+				scrolls: room.scrollWidth > room.clientWidth + 1,
+				wrapped: cell.getBoundingClientRect().height > line * 2,
+			};
+		});
+		assert.equal(table.scrolls, false);
+		assert.equal(table.wrapped, true);
 		assert.equal(await view.locator("li[data-task]").count(), 2);
 		await view.getByRole("button", { name: "Open in LixRay" }).click();
 		await page.waitForFunction(() => !!window.openedUrl);
@@ -181,9 +200,7 @@ void test("MCP Apps resource initializes, renders, opens links and tears down wi
 				fullPage: true,
 			});
 		}
-		const appFrame = page
-			.frames()
-			.find((frame) => frame.url().endsWith("/app.html"));
+		const appFrame = appFrameOf(page);
 		assert.equal(await appFrame.evaluate(() => window.pwned), void 0);
 		await appFrame.evaluate(() =>
 			window.postMessage(
@@ -246,9 +263,7 @@ void test("the chrome follows the chat, the rendered file keeps Atelier's light 
 			);
 			const view = page.frameLocator("iframe");
 			await view.getByRole("button", { name: /1 file written/ }).waitFor();
-			const frame = page
-				.frames()
-				.find((each) => each.url().endsWith("/app.html"));
+			const frame = appFrameOf(page);
 			// Closed, the document is the bar and nothing else: a host that
 			// sizes the frame from it leaves no strip of its own below.
 			const closed = await frame.evaluate(
