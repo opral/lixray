@@ -95,3 +95,25 @@ void test("unmatched conflicts survive another wave's successful recovery", () =
 	tracker.observe(conflict);
 	assert.equal(tracker.failures().length, 2, "earlier success is not cached");
 });
+
+void test("merge retries require the exact endpoint, method, status, and transaction-conflict code", async () => {
+	const { isRetryableMergeConflict } =
+		await import("./retained-body-recovery.ts");
+	const url = "https://lixray.test/lix/v1/repository/sync/merge";
+	const body = { error: { code: "LIX_TRANSACTION_CONFLICT" } };
+	assert.equal(isRetryableMergeConflict("POST", url, 409, body), true);
+	for (const [method, target, status, response] of [
+		["GET", url, 409, body],
+		["POST", url, 500, body],
+		["POST", url + "?other=1", 409, body],
+		["POST", url.replace("merge", "retained-bodies"), 409, body],
+		["POST", url, 409, { error: { code: "LIX_STORAGE_FENCED" } }],
+		["POST", url, 409, { error: { code: "LIX_SYNC_IDEMPOTENCY_KEY_REUSED" } }],
+		["POST", url, 409, null],
+		["POST", url, 409, { code: "LIX_TRANSACTION_CONFLICT" }],
+	] as const)
+		assert.equal(
+			isRetryableMergeConflict(method, target, status, response),
+			false,
+		);
+});

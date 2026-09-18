@@ -48,6 +48,8 @@ if (
 const calls: { sql: string; params: unknown[] }[] = [];
 let writeDelay = 0;
 let failNextWrite = false;
+let holdListing = new URLSearchParams(location.search).has("hold-listing");
+let failListing = new URLSearchParams(location.search).has("fail-listing");
 const observers = new Set<() => void>();
 const parent = (path: string) =>
 	path
@@ -144,7 +146,11 @@ const lix = {
 	observe(sql: string, params: readonly unknown[] = []) {
 		let closed = false;
 		let pending: ((event: unknown) => void) | undefined;
-		const queue: unknown[] = [{ result: query(sql, params) }];
+		const listingQuery = /FROM lix_(file|directory) ORDER BY path/.test(sql);
+		let fail = listingQuery && failListing;
+		if (fail) failListing = false;
+		const queue: unknown[] =
+			listingQuery && holdListing ? [] : [{ result: query(sql, params) }];
 		const update = () => {
 			const frame = { result: query(sql, params) };
 			if (pending) {
@@ -155,14 +161,19 @@ const lix = {
 		};
 		observers.add(update);
 		return {
-			next: () =>
-				closed
+			next: () => {
+				if (fail) {
+					fail = false;
+					return Promise.reject(new Error("Synthetic listing read failed"));
+				}
+				return closed
 					? Promise.resolve(null)
 					: queue.length
 						? Promise.resolve(queue.shift())
 						: new Promise((resolve) => {
 								pending = resolve;
-							}),
+							});
+			},
 			close: () => {
 				closed = true;
 				observers.delete(update);
@@ -239,6 +250,10 @@ Object.assign(window, {
 		calls,
 		opened,
 		diffOpened,
+		releaseListing: () => {
+			holdListing = false;
+			for (const update of observers) update();
+		},
 		setActive: (active: boolean) => setActiveView(active),
 		refresh: () => {
 			for (const update of observers) update();

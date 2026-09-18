@@ -10,7 +10,6 @@ import { OpfsStorage } from "@lix-js/storage-opfs";
 import { currentReplicaStorage } from "./repository-migration.ts";
 import { captureExceptionTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
-import { waitForLixPrewarm } from "./lix-prewarm.ts";
 import {
 	repositoryBrowserReplicaId,
 	repositoryOpfsCacheName,
@@ -267,7 +266,6 @@ async function openOpfsSyncSession(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 	requestFailureReporting: { enabled: boolean },
 ): Promise<Lix> {
-	await waitForLixPrewarm();
 	options.signal?.throwIfAborted();
 	const fetcher = createTelemetryFetch(options.fetch ?? networkFetch, {
 		repositoryId: options.repositoryId,

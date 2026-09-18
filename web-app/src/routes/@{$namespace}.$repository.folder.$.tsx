@@ -1,3 +1,4 @@
+import { readRepositoryRoute } from "~/lib/repository-route-lifecycle";
 import {
 	canonicalEntitySplat,
 	findLixEntity,
@@ -9,6 +10,7 @@ import { useEffect } from "react";
 import {
 	useConsumeShellEntityNavigation,
 	useMarkRepositoryRouteSynced,
+	useBeginRepositoryRouteNavigation,
 	useRepositoryActiveBranchId,
 	useRepositoryDefaultBranchId,
 	useRepositoryAtelierInstance,
@@ -34,6 +36,7 @@ export const Route = createFileRoute("/@{$namespace}/$repository/folder/$")({
 function RepositoryFolderRoute() {
 	const atelier = useRepositoryAtelierInstance();
 	const markRouteSynced = useMarkRepositoryRouteSynced();
+	const beginRouteNavigation = useBeginRepositoryRouteNavigation();
 	const consumeShellNavigation = useConsumeShellEntityNavigation();
 	const { _splat: dirSplat, namespace, repository } = Route.useParams();
 	const entityId = parseEntityUrlSplat(dirSplat)?.id;
@@ -49,10 +52,12 @@ function RepositoryFolderRoute() {
 			markRouteSynced();
 			return;
 		}
-		let cancelled = false;
-		void findLixEntity(atelier.lix, "directory", { id: entityId })
+		const controller = beginRouteNavigation();
+		void readRepositoryRoute(controller.signal, () =>
+			findLixEntity(atelier.lix, "directory", { id: entityId }),
+		)
 			.then((entity) => {
-				if (cancelled) return;
+				if (controller.signal.aborted) return;
 				if (!entity) {
 					markRouteSynced();
 					void navigate({
@@ -89,29 +94,30 @@ function RepositoryFolderRoute() {
 					// restore racing the command can wipe fresh state, leaving the
 					// promise pending forever — so a quiet open is retried too.
 					const timer = setTimeout(() => {
-						if (!cancelled && !settled && retriesLeft > 0) {
+						if (!controller.signal.aborted && !settled && retriesLeft > 0) {
 							attempt(retriesLeft - 1);
 						}
 					}, 800);
 					atelier.views
 						.open(LIXRAY_HOME_EXTENSION_ID, {
 							state: lixrayHomeDirState(dirPath),
+							signal: controller.signal,
 						})
 						.then(() => {
 							settled = true;
 							clearTimeout(timer);
-							if (!cancelled) markRouteSynced();
+							if (!controller.signal.aborted) markRouteSynced();
 						})
 						.catch((error: unknown) => {
 							settled = true;
 							clearTimeout(timer);
-							if (cancelled) return;
+							if (controller.signal.aborted) return;
 							const transient =
 								error instanceof Error &&
 								error.message.includes("shell unmounted");
 							if (transient && retriesLeft > 0) {
 								setTimeout(() => {
-									if (!cancelled) attempt(retriesLeft - 1);
+									if (!controller.signal.aborted) attempt(retriesLeft - 1);
 								}, 150);
 								return;
 							}
@@ -127,15 +133,16 @@ function RepositoryFolderRoute() {
 				attempt(5);
 			})
 			.catch((error: unknown) => {
-				if (!cancelled) {
+				if (!controller.signal.aborted) {
 					console.error("Unable to resolve directory", error);
 					markRouteSynced();
 				}
 			});
 		return () => {
-			cancelled = true;
+			controller.abort();
 		};
 	}, [
+		beginRouteNavigation,
 		activeBranchId,
 		atelier,
 		branch,

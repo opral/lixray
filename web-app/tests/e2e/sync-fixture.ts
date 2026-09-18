@@ -15,7 +15,13 @@ import { provisionRepositories } from "../../scripts/provision-repositories.mjs"
 import {
 	createRetainedBodyRecoveryTracker,
 	isRetainedBodyUpload,
+	isRetryableMergeConflict,
 } from "./retained-body-recovery";
+
+import {
+	installSyncDiagnostics,
+	collectSyncDiagnostics,
+} from "./sync-diagnostics";
 
 const compatibility = getCompatibility();
 
@@ -41,6 +47,8 @@ export async function createSyncFixture({
 	const analyticsStubFailures: string[] = [];
 	const newContext = async () => {
 		const context = await browser.newContext();
+		if (scenario === "editing" || scenario === "history")
+			await installSyncDiagnostics(context);
 		if (local && scenario !== "performance") {
 			// Analytics is not part of the sync contract. Keep a built production
 			// image's telemetry off external networks and use an empty flag set.
@@ -176,45 +184,6 @@ export async function createSyncFixture({
 						? [DEMO_REPOSITORY_ID, SECONDARY_REPOSITORY_ID]
 						: [repositoryId],
 			});
-			// A fresh fixture must exercise entering and immediately closing an older
-			// checkpoint, even when the local object store starts empty.
-			const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL);
-			const authorization = {
-				Authorization: "Bearer lixray-demo",
-				"Lix-Server-Protocol-Version": String(
-					compatibility.serverProtocolVersion,
-				),
-			};
-			const opened = await sharedContext.request.get(endpoint.toString(), {
-				headers: authorization,
-			});
-			expect(opened.ok()).toBe(true);
-			const { sessionId } = (await opened.json()) as { sessionId: string };
-			const headers = { ...authorization, "Lix-Session-Id": sessionId };
-			try {
-				for (let index = 0; index < 2; index++) {
-					const checkpoint = await sharedContext.request.post(
-						new URL("execute", endpoint).toString(),
-						{
-							headers: {
-								...headers,
-								"Idempotency-Key": `local-fixture-${scenario}-${randomUUID()}`,
-							},
-							data: {
-								sql: "SELECT commit_id FROM lix_create_checkpoint()",
-								params: [],
-							},
-						},
-					);
-					expect(checkpoint.ok(), await checkpoint.text()).toBe(true);
-				}
-			} finally {
-				const closed = await sharedContext.request.delete(
-					new URL("session", endpoint).toString(),
-					{ headers },
-				);
-				expect(closed.ok()).toBe(true);
-			}
 		} else {
 			expect(healthResponse.headers()["x-railway-deployment-id"]).toBe(
 				expectedDeploymentId,
@@ -224,6 +193,74 @@ export async function createSyncFixture({
 				service: "lixray",
 				deploymentId: expectedDeploymentId,
 			});
+		}
+
+		// Both fresh local stacks and explicitly verified preview deployments need
+		// an older checkpoint to exercise history. Seed only missing prerequisites
+		// in this fixed disposable demo repository; reruns preserve existing history.
+		const endpoint = new URL(`/lix/v1/${repositoryId}/`, baseURL);
+		const authorization = {
+			Authorization: "Bearer lixray-demo",
+			"Lix-Server-Protocol-Version": String(
+				compatibility.serverProtocolVersion,
+			),
+		};
+		const opened = await sharedContext.request.get(endpoint.toString(), {
+			headers: authorization,
+		});
+		expect(opened.ok()).toBe(true);
+		const { sessionId } = (await opened.json()) as { sessionId: string };
+		const headers = { ...authorization, "Lix-Session-Id": sessionId };
+		try {
+			const countResponse = await sharedContext.request.post(
+				new URL("execute", endpoint).toString(),
+				{
+					headers: {
+						...headers,
+						"Idempotency-Key": `fixture-count-${scenario}-${randomUUID()}`,
+					},
+					data: {
+						sql: "SELECT count(*) AS checkpoint_count FROM lix_log() WHERE is_checkpoint",
+						params: [],
+					},
+				},
+			);
+			expect(countResponse.ok(), await countResponse.text()).toBe(true);
+			const countResult = (await countResponse.json()) as {
+				rows?: Array<Array<{ value?: unknown }>>;
+			};
+			const checkpointCount = countResult.rows?.[0]?.[0]?.value;
+			if (
+				typeof checkpointCount !== "number" ||
+				!Number.isSafeInteger(checkpointCount) ||
+				checkpointCount < 0
+			) {
+				throw new Error(
+					"Fixture authority returned an invalid checkpoint count",
+				);
+			}
+			for (let index = checkpointCount; index < 2; index++) {
+				const checkpoint = await sharedContext.request.post(
+					new URL("execute", endpoint).toString(),
+					{
+						headers: {
+							...headers,
+							"Idempotency-Key": `fixture-checkpoint-${scenario}-${randomUUID()}`,
+						},
+						data: {
+							sql: "SELECT commit_id FROM lix_create_checkpoint()",
+							params: [],
+						},
+					},
+				);
+				expect(checkpoint.ok(), await checkpoint.text()).toBe(true);
+			}
+		} finally {
+			const closed = await sharedContext.request.delete(
+				new URL("session", endpoint).toString(),
+				{ headers },
+			);
+			expect(closed.ok()).toBe(true);
 		}
 
 		if (local) {
@@ -276,11 +313,14 @@ export async function createSyncFixture({
 			expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
 		}
 		const syncFailures: string[] = [];
+		const pendingMergeClassifications = new Set<Promise<void>>();
+		const recoveredMergeConflicts: string[] = [];
 		const retainedBodyRecovery = createRetainedBodyRecoveryTracker();
 		const runtimeFailures: string[] = [];
 		let intentionallyOffline = false;
 		const offlineRequests = new WeakSet<Request>();
 		const coldReads = new Map<Page, string[]>();
+		const pendingColdReads = new Map<Page, Set<Request>>();
 		const blobLaneRequests = new Map<Page, string[]>();
 		const blobLanePayloadSizes = new Map<Page, number[]>();
 		const pendingBlobLaneResponses = new Set<Promise<void>>();
@@ -587,6 +627,14 @@ export async function createSyncFixture({
 		const observePage = (page: Page, label: string) => {
 			const pageColdReads: string[] = [];
 			coldReads.set(page, pageColdReads);
+			const pagePendingColdReads = new Set<Request>();
+			pendingColdReads.set(page, pagePendingColdReads);
+			page.on("requestfinished", (request) =>
+				pagePendingColdReads.delete(request),
+			);
+			page.on("requestfailed", (request) =>
+				pagePendingColdReads.delete(request),
+			);
 			const pageBlobLaneRequests: string[] = [];
 			blobLaneRequests.set(page, pageBlobLaneRequests);
 			const pageBlobLanePayloadSizes: number[] = [];
@@ -602,6 +650,7 @@ export async function createSyncFixture({
 						))
 				) {
 					pageColdReads.push(request.url());
+					pagePendingColdReads.add(request);
 				}
 				if (/\/sync\/(blob|chunk)(?:\?|$)/.test(request.url())) {
 					pageBlobLaneRequests.push(`${request.method()} ${request.url()}`);
@@ -739,7 +788,35 @@ export async function createSyncFixture({
 					!pendingRetainedBodyReplay &&
 					!(response.status() === 409 && url.endsWith("/sync/push"))
 				) {
-					syncFailures.push(`${response.status()} ${url}`);
+					const failure = `${response.status()} ${url}`;
+					syncFailures.push(failure);
+					if (
+						response.status() === 409 &&
+						response.request().method() === "POST" &&
+						new URL(url).pathname.endsWith("/sync/merge")
+					) {
+						const classification = response
+							.json()
+							.then((body: unknown) => {
+								if (
+									!isRetryableMergeConflict(
+										response.request().method(),
+										url,
+										response.status(),
+										body,
+									)
+								)
+									return;
+								const index = syncFailures.indexOf(failure);
+								if (index >= 0) syncFailures.splice(index, 1);
+								recoveredMergeConflicts.push(failure);
+							})
+							.catch(() => undefined);
+						pendingMergeClassifications.add(classification);
+						void classification.finally(() =>
+							pendingMergeClassifications.delete(classification),
+						);
+					}
 				}
 			});
 		};
@@ -748,6 +825,25 @@ export async function createSyncFixture({
 				(count, page) => count + (coldReads.get(page)?.length ?? 0),
 				0,
 			);
+		const waitForColdReadQuiescence = async (pages: Page[]) => {
+			let lastCount = coldReadCount(pages);
+			let stableSamples = 0;
+			await expect
+				.poll(
+					() => {
+						const currentCount = coldReadCount(pages);
+						const pending = pages.some(
+							(page) => (pendingColdReads.get(page)?.size ?? 0) > 0,
+						);
+						stableSamples =
+							currentCount === lastCount && !pending ? stableSamples + 1 : 0;
+						lastCount = currentCount;
+						return stableSamples;
+					},
+					{ intervals: [500], timeout: 30_000 },
+				)
+				.toBeGreaterThanOrEqual(8);
+		};
 		const blobLaneRequestCount = (pages: Page[]) =>
 			pages.reduce(
 				(count, page) => count + (blobLaneRequests.get(page)?.length ?? 0),
@@ -1084,6 +1180,10 @@ export async function createSyncFixture({
 			// two already-open clients, not extension startup or demand hydration.
 			await leftEditor.waitFor({ timeout: 30_000 });
 
+			// Progressive views can render before unrelated native/history hydration
+			// settles. Qualify all measured download lanes after this page mount,
+			// then retain the zero-download budget for the actual warm edit.
+			await waitForColdReadQuiescence([left, right]);
 			// Warm typing must not download inputs; background blob uploads are allowed.
 			const coldReadsBeforeRightEdit = coldReadCount([left, right]);
 			const rightMarker = `right-${Date.now()}`;
@@ -1154,6 +1254,7 @@ export async function createSyncFixture({
 			// Keep the originating editor warm for the reverse direction. Reload and
 			// OPFS-resume behavior is qualified independently below; coupling it to the
 			// realtime budget made this assertion measure startup contention.
+			await waitForColdReadQuiescence([left, right]);
 			const coldReadsBeforeLeftEdit = coldReadCount([left, right]);
 			const leftMarker = `left-${Date.now()}`;
 			await leftEditor.click();
@@ -1837,7 +1938,21 @@ export async function createSyncFixture({
 				),
 			});
 		}
-		async function close() {
+		async function close(primaryFailure?: unknown) {
+			await Promise.all([...pendingMergeClassifications]);
+			if (scenario === "editing" || scenario === "history") {
+				const diagnostics = await Promise.allSettled(
+					contexts
+						.flatMap((context) => context.pages())
+						.filter((page) => !page.isClosed())
+						.slice(0, 4)
+						.map(collectSyncDiagnostics),
+				);
+				await test.info().attach("replica-editor-diagnostics.json", {
+					body: JSON.stringify(diagnostics, null, 2),
+					contentType: "application/json",
+				});
+			}
 			const unresolvedSyncFailures = [
 				...syncFailures,
 				...retainedBodyRecovery.failures(),
@@ -1849,6 +1964,7 @@ export async function createSyncFixture({
 						repositoryId,
 						syncFailures: unresolvedSyncFailures,
 						recoveredRetainedBodyResponses: retainedBodyRecovery.recovered(),
+						typedMergeConflicts: recoveredMergeConflicts,
 						runtimeFailures,
 						analyticsStubFailures,
 					},
@@ -1863,6 +1979,12 @@ export async function createSyncFixture({
 					[],
 				);
 				expect(runtimeFailures).toEqual([]);
+			} catch (error) {
+				if (primaryFailure === undefined) throw error;
+				await test.info().attach("cleanup-failure.txt", {
+					body: String(error),
+					contentType: "text/plain",
+				});
 			} finally {
 				await Promise.all(contexts.map((context) => context.close()));
 			}

@@ -190,7 +190,12 @@ export function DirectoryView({
 	onOpenChangesReview,
 	onOpenHistory,
 }: DirectoryViewProps) {
-	const { tree, error: treeError } = useRepositoryTree(lix, isActive);
+	const [listingAttempt, setListingAttempt] = useState(0);
+	const { tree, error: treeError } = useRepositoryTree(
+		lix,
+		isActive,
+		listingAttempt,
+	);
 	const detailsEnabled = useAfterInitialIdle(
 		isActive && isHome && tree !== null,
 	);
@@ -202,7 +207,10 @@ export function DirectoryView({
 		diffSession && "commitId" in diffSession.target
 			? diffSession.target.commitId
 			: null;
-	const historicalFiles = useFilesAtCommit(lix, historicalCommitId);
+	const historicalFiles = useFilesAtCommit(
+		lix,
+		isActive ? historicalCommitId : null,
+	);
 	const listing = useMemo(() => {
 		if (historicalCommitId) {
 			return historicalFiles
@@ -577,11 +585,26 @@ export function DirectoryView({
 					role="alert"
 					className="grid h-full w-full place-content-center px-6 text-center text-[13px] text-fg-muted"
 				>
-					Unable to load repository files. Reload to try again.
+					<p>Unable to load repository files.</p>
+					<Button
+						variant="outline"
+						className="mx-auto mt-3"
+						onClick={() => setListingAttempt((attempt) => attempt + 1)}
+					>
+						Retry
+					</Button>
 				</div>
 			);
 		}
-		return <div className="h-full w-full" aria-busy="true" />;
+		return (
+			<div
+				className="grid h-full w-full place-content-center text-sm text-fg-subtle"
+				aria-busy="true"
+				role="status"
+			>
+				Loading files…
+			</div>
+		);
 	}
 
 	return (
