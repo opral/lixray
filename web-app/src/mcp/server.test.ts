@@ -2663,9 +2663,10 @@ void test("file tools list, read, and write files with metadata and conflict che
 			["text", "resource_link", "resource_link", "text"],
 		);
 		const card = written._meta?.[DIFF_CARD_META] as DiffCardPayload;
-		assert.equal(card.title, "1 file written");
+		assert.equal(card.title, "1 file created");
 		assert.equal(card.folder, "/gtm/campaigns");
-		assert.equal(card.tally, "1 new");
+		// The title said it; the tally would be saying it twice.
+		assert.equal(card.tally, "");
 		assert.equal(card.repository, "@acme/company");
 		assert.equal(card.files.length, 1);
 		assert.equal(card.files[0]!.status, "added");
@@ -3004,7 +3005,7 @@ void test("diff compares two points and sends the same card a write does", async
 		});
 		assert.equal(executed.isError, undefined, JSON.stringify(executed));
 		const executedCard = executed._meta?.[DIFF_CARD_META] as DiffCardPayload;
-		assert.equal(executedCard.title, "1 file written");
+		assert.equal(executedCard.title, "1 file created");
 		assert.equal(executedCard.folder, "/skills");
 		assert.deepEqual(
 			executedCard.files.map((file) => [file.name, file.status]),
