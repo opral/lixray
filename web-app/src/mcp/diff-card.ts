@@ -345,10 +345,11 @@ function cardFile(change: DiffCardChange, withPreview: boolean): DiffCardFile {
 			note,
 		};
 	}
-	// The trimmed body names its own gaps; saying it again reads as a second
-	// set of missing lines.
+	// The trimmed body names its own gaps — a document's pruned run, a
+	// table's unchanged rows; saying it again reads as a second set of
+	// missing lines.
 	const note =
-		view.hidden > 0 && !view.html.includes("md-diff-gap")
+		view.hidden > 0 && !view.html.includes("-diff-gap")
 			? `${view.hidden} more ${unitWord(view.hidden, unit)} in LixRay`
 			: undefined;
 	return {

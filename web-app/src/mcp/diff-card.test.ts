@@ -247,6 +247,35 @@ void test("a long change is trimmed, and the body says what is missing", () => {
 	assert.match(file!.html ?? "", /The new one/);
 });
 
+void test("a long ledger comes back as a table, not as a refusal", () => {
+	const rows = Array.from({ length: 600 }, (_, i) => `${i},acme,open`).join(
+		"\n",
+	);
+	const before = `id,account,state\n${rows}\n`;
+	const after = before.replace("300,acme,open", "300,acme,closed");
+	const card = diffCardPayload({
+		verb: "written",
+		changes: [
+			{
+				path: "/gtm/leads.csv",
+				url: URL_FOR("/gtm/leads.csv"),
+				before: bytes(before),
+				after: bytes(after),
+			},
+		],
+	});
+	assert.ok(card);
+	const file = card.files[0]!;
+	// The row that changed is in the card, the ones that did not are named
+	// where they were, and nobody is told to go and look somewhere else.
+	assert.ok(file.html);
+	assert.match(file.html, /closed/);
+	assert.match(file.html, /csv-diff-gap/);
+	assert.match(file.html, /unchanged rows/);
+	assert.equal(file.note, undefined);
+	assert.match(file.label, /^edited/);
+});
+
 void test("previews stop at the budget; the list stops later; the count never", () => {
 	const changes = Array.from({ length: MAX_CARD_FILES + 5 }, (_, i) => ({
 		path: `/notes/${i}.md`,
