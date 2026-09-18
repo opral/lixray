@@ -1,6 +1,7 @@
 import type { Lix, ReplicaRecoverySource } from "@lix-js/sdk";
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { RepositoryOpenFailure } from "../../src/components/repository-open-failure";
 import { ReplicaRecovery } from "../../src/components/replica-recovery";
 
 const mode = new URLSearchParams(location.search).get("mode");
@@ -13,6 +14,19 @@ const source: ReplicaRecoverySource = {
 };
 let attempts = 0;
 let resolveRecovery: (() => void) | undefined;
+
+function OpenFailureFixture() {
+	const [retrying, setRetrying] = useState(false);
+	return retrying ? (
+		<p role="status">Opening repository</p>
+	) : (
+		<RepositoryOpenFailure
+			message="Unrelated opening error"
+			storageBusy={mode === "storage-busy"}
+			onRetry={() => setRetrying(true)}
+		/>
+	);
+}
 
 function Fixture() {
 	const [otherAccount, setOtherAccount] = useState(false);
@@ -59,4 +73,10 @@ function Fixture() {
 	);
 }
 
-createRoot(document.getElementById("root")!).render(<Fixture />);
+createRoot(document.getElementById("root")!).render(
+	mode === "storage-busy" || mode === "open-error" ? (
+		<OpenFailureFixture />
+	) : (
+		<Fixture />
+	),
+);

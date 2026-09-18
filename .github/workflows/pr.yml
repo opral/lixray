@@ -267,8 +267,8 @@ jobs:
       - name: Test published file rendering
         run: pnpm --dir web-app test:published
 
-      - name: Test device recovery controls
-        run: pnpm --dir web-app exec playwright test --config playwright.file-component.config.ts recovery.spec.ts
+      - name: Test device recovery and directory review controls
+        run: pnpm --dir web-app exec playwright test --config playwright.file-component.config.ts recovery.spec.ts directory.spec.ts
 
       - name: Run Compose e2e tests
         env:
@@ -351,6 +351,8 @@ jobs:
     steps:
       - name: Check out deployment coordinator
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Check Infisical configuration
         id: infisical

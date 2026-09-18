@@ -229,8 +229,7 @@ export function DirectoryFileList({
 		const entry = entries.find((item) => item.path === path);
 		if (entry?.directory) onOpenDir(path, { newTab });
 		// Inside a review a marked row opens its diff, which is what the
-		// reader came for. Outside one the same mark only says "something
-		// changed here", and a click still opens the file.
+		// reader came for. Ordinary browsing always opens the file.
 		else if (
 			entry &&
 			!newTab &&
@@ -576,11 +575,11 @@ export function DirectoryFileList({
 				)}
 			>
 				{(entry) => {
-					const changeKind = !reviewFocus
-						? undefined
-						: entry.directory
+					const changeKind = reviewFocus
+						? entry.directory
 							? changedDirKinds.get(entry.path)
-							: changedFileKinds.get(entry.path);
+							: changedFileKinds.get(entry.path)
+						: undefined;
 					const dimIndicator = entry.directory && changeKind === "modified";
 					const nameClass =
 						dimIndicator || !changeKind

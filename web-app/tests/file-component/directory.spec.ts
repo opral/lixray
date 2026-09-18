@@ -10,6 +10,7 @@ type QAState = {
 	opened: { path: string; options: { newTab: boolean } }[];
 	diffOpened: string[];
 	refresh: () => void;
+	releaseListing: () => void;
 	setActive: (active: boolean) => void;
 	setWriteDelay: (ms: number) => void;
 	failNextWrite: () => void;
@@ -908,18 +909,30 @@ test("the README preview keeps the rows' own inset", async ({ page }) => {
 	expect(columns.rowIcon).toBe(columns.row[0]);
 });
 
-test("working changes do not mark the listing outside review", async ({
+test("working changes do not decorate ordinary directory browsing", async ({
 	page,
 }) => {
 	await page.goto("/");
-	for (const name of ["alpha.md", "gamma.csv", "beta.md", "docs"]) {
-		await expect(item(page, name)).not.toHaveAttribute(
-			"data-changed-entry",
-			"true",
+	await expect(item(page, "alpha.md")).toBeVisible();
+	for (const name of ["alpha.md", "beta.md", "gamma.csv", "docs", "research"]) {
+		const row = item(page, name);
+		await expect(row).not.toHaveAttribute("data-changed-entry", "true");
+		await expect(row.locator("span[aria-label]")).toHaveCount(0);
+		await expect(
+			row.locator(
+				".text-diff-added, .text-diff-removed, .text-diff-moved, .text-link",
+			),
+		).toHaveCount(0);
+		expect(await row.evaluate((entry) => getComputedStyle(entry).opacity)).toBe(
+			"1",
 		);
-		await expect(item(page, name).locator("span[aria-label]")).toHaveCount(0);
 	}
-	await expect(item(page, "docs")).toHaveText(/items/);
+	await expect(item(page, "docs")).toHaveText(/2 items/);
+	await expect(item(page, "research")).toHaveText(/0 items/);
+	await page.evaluate(() => window.directoryQA.refresh());
+	await expect(page.locator('[data-changed-entry="true"]')).toHaveCount(0);
+	await item(page, "alpha.md").click();
+	expect(await page.evaluate(() => window.directoryQA.diffOpened)).toEqual([]);
 });
 
 test("an open review names the rows; the rest recede", async ({ page }) => {
@@ -953,6 +966,31 @@ test("a review that names no file falls back to the working diff", async ({
 		item(page, "alpha.md").locator("span[aria-label]").first(),
 	).toHaveAttribute("title", "Modified");
 	await expect(item(page, "docs")).toHaveAttribute(
+		"data-changed-entry",
+		"true",
+	);
+});
+
+test("closing a working review clears cached markers after observer updates", async ({
+	page,
+}) => {
+	await page.goto("/?review-empty");
+	await expect(item(page, "gamma.csv")).toHaveAttribute(
+		"data-changed-entry",
+		"true",
+	);
+	await expect(
+		item(page, "beta.md").locator("span[aria-label]").first(),
+	).toHaveAttribute("title", "Moved");
+	await page.getByRole("button", { name: "Toggle review" }).click();
+	await expect(page.locator('[data-changed-entry="true"]')).toHaveCount(0);
+	await page.evaluate(() => window.directoryQA.refresh());
+	await expect(page.locator('[data-changed-entry="true"]')).toHaveCount(0);
+	await expect(item(page, "docs")).toHaveText(/2 items/);
+	await item(page, "alpha.md").click();
+	expect(await page.evaluate(() => window.directoryQA.diffOpened)).toEqual([]);
+	await page.getByRole("button", { name: "Toggle review" }).click();
+	await expect(item(page, "gamma.csv")).toHaveAttribute(
 		"data-changed-entry",
 		"true",
 	);
@@ -1062,9 +1100,12 @@ test("review indicators refresh when entering and leaving review", async ({
 	await expect(beta).toHaveClass(/opacity-\[0\.35\]/);
 	await expect(gamma).not.toHaveAttribute("data-changed-entry", "true");
 	await page.getByRole("button", { name: "Toggle review" }).click();
-	// Closing review restores ordinary file metadata, without change markers.
+	// Closing review restores neutral rows even though working changes remain.
 	await expect(gamma).not.toHaveAttribute("data-changed-entry", "true");
 	await expect(alpha).not.toHaveAttribute("data-changed-entry", "true");
+	await expect(alpha.locator("span[aria-label]")).toHaveCount(0);
+	await page.evaluate(() => window.directoryQA.refresh());
+	await expect(page.locator('[data-changed-entry="true"]')).toHaveCount(0);
 	await expect(beta).not.toHaveClass(/opacity-\[0\.35\]/);
 	await alpha.click();
 	expect(await page.evaluate(() => window.directoryQA.diffOpened)).toEqual([]);
@@ -1072,4 +1113,29 @@ test("review indicators refresh when entering and leaving review", async ({
 	await expect(alpha).toHaveAttribute("data-changed-entry", "true");
 	await expect(beta).toHaveClass(/opacity-\[0\.35\]/);
 	await expect(gamma).not.toHaveAttribute("data-changed-entry", "true");
+});
+
+test("pending file queries show loading rather than an empty repository", async ({
+	page,
+}) => {
+	await page.goto("/?hold-listing");
+	await expect(page.getByRole("status")).toHaveText("Loading files…");
+	await expect(page.getByTestId("home-getting-started")).toHaveCount(0);
+	await page.evaluate(() => window.directoryQA.releaseListing());
+	await expect(page.getByText("alpha.md", { exact: true })).toBeVisible();
+	await expect(page.getByText("Loading files…", { exact: true })).toHaveCount(
+		0,
+	);
+});
+
+test("a failed file query retries in place without reloading the workspace", async ({
+	page,
+}) => {
+	await page.goto("/?fail-listing");
+	await expect(page.getByRole("alert")).toContainText(
+		"Unable to load repository files.",
+	);
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await expect(page.getByText("alpha.md", { exact: true })).toBeVisible();
+	await expect(page.getByRole("alert")).toHaveCount(0);
 });

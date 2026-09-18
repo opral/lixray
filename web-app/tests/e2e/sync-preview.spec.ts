@@ -32,12 +32,16 @@ test("@editing shared OPFS tabs edit in both directions and converge with an ind
 		baseURL,
 		scenario: "editing",
 	});
+	let primaryFailure: unknown;
 	try {
 		const state = await fixture.editing();
 		await fixture.concurrent(state);
 		await fixture.continuousIndependentEdits(state);
+	} catch (error) {
+		primaryFailure = error;
+		throw error;
 	} finally {
-		await fixture.close();
+		await fixture.close(primaryFailure);
 	}
 });
 
@@ -51,6 +55,7 @@ test("@history offline checkpoints survive reopen and preserve exact full and pa
 		baseURL,
 		scenario: "history",
 	});
+	let primaryFailure: unknown;
 	try {
 		const edited = await fixture.editing();
 		const checkpointed = await fixture.checkpoint(edited);
@@ -58,8 +63,11 @@ test("@history offline checkpoints survive reopen and preserve exact full and pa
 		const reopened = await fixture.reopen(concurrent);
 		await fixture.partialCheckpoint(reopened);
 		await fixture.history(reopened);
+	} catch (error) {
+		primaryFailure = error;
+		throw error;
 	} finally {
-		await fixture.close();
+		await fixture.close(primaryFailure);
 	}
 });
 

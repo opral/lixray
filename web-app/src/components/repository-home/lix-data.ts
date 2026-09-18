@@ -55,6 +55,7 @@ function useObservedRows(
 	sql: string,
 	params: ReadonlyArray<string>,
 	enabled = true,
+	retryAttempt = 0,
 ): ObservedRowsState<ObservedRow> {
 	const [state, setState] = useState<ObservedRowsState<ObservedRow>>({
 		rows: null,
@@ -102,7 +103,7 @@ function useObservedRows(
 			disposed = true;
 			events.close();
 		};
-	}, [enabled, lix, sql, paramsKey]);
+	}, [enabled, lix, sql, paramsKey, retryAttempt]);
 	return state;
 }
 
@@ -376,6 +377,7 @@ export function useWorkingFileChanges(
 export function useRepositoryTree(
 	lix: Lix,
 	enabled = true,
+	retryAttempt = 0,
 ): {
 	readonly tree: RepositoryTree | null;
 	readonly error: Error | null;
@@ -385,12 +387,14 @@ export function useRepositoryTree(
 		"SELECT id, parent_id, path, name, lixcol_updated_at FROM lix_directory ORDER BY path",
 		[],
 		enabled,
+		retryAttempt,
 	);
 	const files = useObservedRows(
 		lix,
 		"SELECT id, directory_id, path, name, lixcol_updated_at FROM lix_file ORDER BY path",
 		[],
 		enabled,
+		retryAttempt,
 	);
 	return useMemo(() => {
 		if (!dirs.rows || !files.rows) {
