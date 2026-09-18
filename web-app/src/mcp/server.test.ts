@@ -35,7 +35,6 @@ import {
 	MCP_PROTOCOL_VERSION,
 	MCP_RESOURCE,
 	MCP_SERVER_INSTRUCTIONS,
-	MCP_DATA_GUIDE,
 	GET_ENTITY_URLS_TOOL_DESCRIPTION,
 	MCP_URL_GUIDE,
 	OPEN_LIX_TOOL_DESCRIPTION,
@@ -909,13 +908,11 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		// rest are one-liners, output schemas are success-only.
 		const listingChars = JSON.stringify(tools.tools).length;
 		assert.ok(
-			listingChars < 34_000 + tools.tools.length * (MCP_DATA_GUIDE.length + 2),
-			`tools/list is ${listingChars} chars; keep the base listing under 34k plus per-tool privacy guidance`,
+			listingChars < 34_000,
+			`tools/list is ${listingChars} chars; keep it under 34k`,
 		);
 		for (const tool of tools.tools) {
-			const limit =
-				(isGuidedTool(tool.name) ? 1_800 : 320) + MCP_DATA_GUIDE.length + 2;
-			assert.ok(tool.description?.endsWith(MCP_DATA_GUIDE));
+			const limit = isGuidedTool(tool.name) ? 1_800 : 320;
 			assert.doesNotMatch(
 				JSON.stringify(tool.outputSchema),
 				/request_id|server_time/,
