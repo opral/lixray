@@ -77,13 +77,12 @@ function useObservedRows(
 		setState({ rows: null, error: null });
 		void (async () => {
 			try {
-				while (!disposed) {
-					const event = await events.next();
-					if (!event) throw new Error("Lix observer ended unexpectedly.");
+				for await (const event of events) {
 					if (!disposed) {
 						setState({ rows: event.result.rows, error: null });
 					}
 				}
+				// Repository close can end the iterator before React cleans up this effect.
 			} catch (error) {
 				if (!disposed) {
 					const unavailable = isOptionalHistoryInventoryUnavailable(sql, error);
@@ -101,7 +100,7 @@ function useObservedRows(
 		})();
 		return () => {
 			disposed = true;
-			events.close();
+			void events.return?.();
 		};
 	}, [enabled, lix, sql, paramsKey, retryAttempt]);
 	return state;
@@ -166,33 +165,13 @@ export function useRepositoryControlPlaneData(
 	const checkpoints = useObservedRows(lix, CHECKPOINT_SUMMARY_SQL, [], enabled);
 	const changeSummary = useObservedRows(lix, CHANGE_SUMMARY_SQL, [], enabled);
 	const workingChanges = useObservedRows(lix, WORKING_CHANGE_SQL, [], enabled);
-	const [tableCount, setTableCount] = useState<number | null>(null);
-
-	useEffect(() => {
-		if (!enabled) {
-			setTableCount(null);
-			return;
-		}
-		let disposed = false;
-		setTableCount(null);
-		void lix
-			.execute(
-				"SELECT count(DISTINCT table_name) AS n FROM information_schema.columns WHERE table_schema = 'public' AND table_name NOT LIKE '%_history' AND table_name NOT LIKE '%_by_branch'",
-				[],
-			)
-			.then((result) => {
-				if (!disposed) setTableCount(asNumber(result.rows[0]?.n));
-			})
-			.catch((error: unknown) => {
-				console.error(
-					"repository-home: unable to count database tables",
-					error,
-				);
-			});
-		return () => {
-			disposed = true;
-		};
-	}, [enabled, lix]);
+	const tables = useObservedRows(
+		lix,
+		"SELECT count(DISTINCT table_name) AS n FROM information_schema.columns WHERE table_schema = 'public' AND table_name NOT LIKE '%_history' AND table_name NOT LIKE '%_by_branch'",
+		[],
+		enabled,
+	);
+	const tableCount = tables.rows ? asNumber(tables.rows[0]?.n) : null;
 
 	return useMemo(() => {
 		const observations = [checkpoints, changeSummary, workingChanges];

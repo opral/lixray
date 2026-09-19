@@ -187,7 +187,13 @@ void test(
 			// Evaluate the pre-existing observer only after the move has staged a
 			// write, exercising the old active-transaction read guard directly.
 			assert.deepEqual(
-				(await bounded(events.next()))?.result.rows.map((row) => row.path),
+				(
+					await bounded(
+						events
+							.next()
+							.then((result) => (result.done ? undefined : result.value)),
+					)
+				)?.result.rows.map((row) => row.path),
 				originalFiles,
 			);
 
@@ -195,10 +201,18 @@ void test(
 			// the same root handle has a staged transaction.
 			during = lix.observe(query);
 			assert.deepEqual(
-				(await bounded(during.next()))?.result.rows.map((row) => row.path),
+				(
+					await bounded(
+						during
+							.next()
+							.then((result) => (result.done ? undefined : result.value)),
+					)
+				)?.result.rows.map((row) => row.path),
 				originalFiles,
 			);
-			const committedUpdate = events.next();
+			const committedUpdate = events
+				.next()
+				.then((result) => (result.done ? undefined : result.value));
 			assert.equal(
 				await Promise.race([
 					committedUpdate.then(() => "event"),
@@ -235,8 +249,8 @@ void test(
 		} finally {
 			release();
 			await move?.catch(() => undefined);
-			during?.close();
-			events.close();
+			during?.return?.();
+			events.return?.();
 			await lix.close();
 		}
 	},
