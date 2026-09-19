@@ -1915,6 +1915,11 @@ export async function createSyncFixture({
 			const coldReadsBeforeHistory = coldReadCount([left, right]);
 			for (const page of [left, right]) {
 				const history = await openHistoryPanel(page);
+				await waitForHistoryCountsToMatchAuthority(
+					[history],
+					0,
+					repositoryOperationTimeout,
+				);
 				await expect(history).toContainText("Working changes");
 				await expect(history).toContainText("Latest checkpoint");
 				await expect(history).toContainText("Initial checkpoint");
