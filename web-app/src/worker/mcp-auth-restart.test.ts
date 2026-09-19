@@ -214,6 +214,10 @@ void test("cold concurrent requests share initialization and rotated keys bypass
 });
 
 void test("unknown key retries are bounded and new keys recover when the bound expires", async (t) => {
+	// Keep JWT exp/iat and the verifier's cooldown on one clock. Creating the
+	// fixture before enabling Date mocks lets a loaded worker suite straddle a
+	// wall-clock second between signing and the first verification.
+	t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
 	const fixture = await withSignedMcpJwt({ persistCache: false });
 	try {
 		assert.equal(
@@ -235,7 +239,6 @@ void test("unknown key retries are bounded and new keys recover when the bound e
 		assert.equal(throttled.status, 503);
 		assert.equal(throttled.headers.get("www-authenticate"), null);
 		assert.equal(fixture.fetchCount(), 2);
-		t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
 		t.mock.timers.tick(5_001);
 		assert.equal(
 			(await postMcp(rotated, fixture.env, fixture.options)).status,
