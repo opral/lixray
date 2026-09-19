@@ -319,7 +319,10 @@ function cardFile(change: DiffCardChange, withPreview: boolean): DiffCardFile {
 			...(change.before !== undefined ? { before: change.before } : {}),
 			...(change.after !== undefined ? { after: change.after } : {}),
 		},
-		{ maxBytes: MAX_PREVIEW_BYTES },
+		// The pictures in a document are part of what changed. A host that
+		// refuses them shows their alt text, which is what the card used to
+		// print in their place anyway.
+		{ maxBytes: MAX_PREVIEW_BYTES, images: "embed" },
 	);
 	if (!isRendered(view)) {
 		const note =

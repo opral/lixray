@@ -316,10 +316,10 @@ void test("content a writer controls cannot become markup in the card", () => {
 	const html = card.files[0]!.html ?? "";
 	assert.doesNotMatch(html, /<script>alert/);
 	assert.doesNotMatch(html, /javascript:/);
-	// An image address is the document author's; the card names it, never
-	// asks the reader's client to fetch it.
-	assert.doesNotMatch(html, /<img/);
-	assert.doesNotMatch(html, /p\.gif/);
+	// A picture is part of the change, so the card draws it — from the
+	// address the document gives, escaped, and never as markup of its own.
+	assert.match(html, /<img[^>]+src="https:\/\/tracker\.example\/p\.gif"/);
+	assert.doesNotMatch(html, /onerror=/);
 	// Names and repository travel as data; the view sets them as text.
 	assert.equal(card.repository, "<b>acme</b>");
 	assert.doesNotMatch(DIFF_CARD_HTML, /innerHTML/);

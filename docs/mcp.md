@@ -177,8 +177,9 @@ The rendered file does not: it is a document in Atelier, and Atelier is
 light. The foot carries a toggle for a reader who wants that file dark.
 Markdown
 and CSV previews use Atelier's static renderer; they carry no scripts or
-external resources, and the view mounts them in a shadow root. The resource
-requests no external network access and invokes no tools.
+scripts, and the view mounts them in a shadow root. A document's pictures are
+drawn from the addresses it names, so a host that refuses them shows their
+alt text; the resource itself invokes no tools and asks for nothing else.
 
 A card lists up to 50 files and carries previews for the first six; the rest
 are paged with a note. The call itself carries no bytes of the change: it
