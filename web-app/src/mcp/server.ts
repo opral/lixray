@@ -87,7 +87,7 @@ export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
 	"Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.";
 
 export const UNDO_TOOL_DESCRIPTION =
-	"Undo the latest undoable change on the context branch by creating an inverse commit. Prefer this to manual SQL reversal when asked to undo that change. No commit_id parameter; inspect history first if later edits may exist. Stops at checkpoints; restore is different and not undoable.";
+	"Undo the latest undoable change on the context branch by creating an inverse commit. Prefer this to manual SQL reversal when asked to undo that change. No commit_id parameter; inspect history first if later edits may exist. Stops at checkpoints; restore copies a saved state into a new undoable commit.";
 
 /** What the host shows after a change, and what the agent should not repeat. */
 export const DIFF_CARD_GUIDE =
@@ -104,13 +104,13 @@ ${UNDO_TOOL_DESCRIPTION}
 
 ${MCP_URL_GUIDE}
 
-Writes persist without a checkpoint; execute_sql already saved the files. Use create_checkpoint to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent tools, arguments, or branch state.`;
+Writes persist without a checkpoint; execute_sql already saved the files. Use create_checkpoint to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to copy that saved state into a new commit on the selected branch. Do not invent tools, arguments, or branch state.`;
 
 export const CREATE_CHECKPOINT_TOOL_DESCRIPTION =
 	"Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.";
 
 export const RESTORE_TOOL_DESCRIPTION =
-	"Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.";
+	"Copy content from commit_id into a new commit on the context branch. Preserves history and working baseline; undo can reverse it. Returns the new commit_id, or null if unchanged. Use a commit_id from create_checkpoint or history.";
 
 export const LIST_LIXES_TOOL_DESCRIPTION =
 	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; With an exact reference, use open_lix for file-tool context or lix_ref directly for SQL.";
@@ -1243,7 +1243,13 @@ export function createLixrayMcpServer(
 		"Restore branch",
 		RESTORE_TOOL_DESCRIPTION,
 		z.object({ context, commit_id: commitId }).strict(),
-		branchStateOutput,
+		withError(
+			z.object({
+				context,
+				branch_id: branchId,
+				commit_id: z.string().nullable(),
+			}),
+		),
 		writeAnnotations(true, true),
 		securitySchemes,
 		async ({ context: token, commit_id }) => {
@@ -2306,7 +2312,9 @@ function summarizeToolResult(
 		return `Checkpoint created at commit ${String(result.commit_id)}.`;
 	}
 	if (name === "restore") {
-		return `Restored branch ${String(result.branch_id)} to commit ${String(result.commit_id)}.`;
+		return typeof result.commit_id === "string"
+			? `Restored content on branch ${String(result.branch_id)} in new commit ${result.commit_id}.`
+			: `Branch ${String(result.branch_id)} already matches the requested state.`;
 	}
 	if (name === "undo") {
 		return `Undone to commit ${String(result.target_commit_id)} (inverse commit ${String(result.inverse_commit_id)}).`;
@@ -2487,7 +2495,7 @@ function assertReadOnlyQuery(sql: string): void {
 	if (sqlLooksLikeWrite(sql)) {
 		throw createLixError(
 			"invalid_request",
-			"query_sql rejects INSERT, UPDATE, and DELETE.",
+			"query_sql rejects mutating SQL, including checkpoint and recovery SELECT commands.",
 			{
 				hint: "Use execute_sql for writes.",
 			},

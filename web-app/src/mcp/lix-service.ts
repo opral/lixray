@@ -1109,28 +1109,29 @@ export class LixService {
 			context.lixId,
 			context.branchId,
 			{
-				sql: "INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id",
+				sql: "SELECT commit_id FROM lix_restore($1)",
 				params: [{ kind: "text", value: commitId }],
 			},
 		);
 		const restoredCommitId = response.rows[0]?.[0];
 		if (
 			!restoredCommitId ||
-			restoredCommitId.kind !== "text" ||
-			restoredCommitId.value !== commitId
+			(restoredCommitId.kind !== "text" && restoredCommitId.kind !== "null") ||
+			response.rows.length !== 1
 		) {
 			throw createLixError(
 				"upstream_error",
-				"Lix did not confirm the requested restore commit id.",
+				"Lix did not return a restore commit receipt.",
 				{
-					hint: "Pass a commit_id that exists on the selected branch. create_checkpoint returns a usable commit_id.",
+					hint: "Pass an available source commit_id. create_checkpoint returns a usable commit_id.",
 				},
 			);
 		}
 		return {
 			context: contextToken,
 			branchId: context.branchId,
-			commitId: restoredCommitId.value,
+			commitId:
+				restoredCommitId.kind === "text" ? restoredCommitId.value : null,
 		};
 	}
 

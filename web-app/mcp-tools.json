@@ -1502,7 +1502,7 @@
 	{
 		"name": "restore",
 		"title": "Restore branch",
-		"description": "Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.",
+		"description": "Copy content from commit_id into a new commit on the context branch. Preserves history and working baseline; undo can reverse it. Returns the new commit_id, or null if unchanged. Use a commit_id from create_checkpoint or history.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1536,7 +1536,14 @@
 					"description": "Lix branch id"
 				},
 				"commit_id": {
-					"type": "string"
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
 				}
 			},
 			"required": ["context", "branch_id", "commit_id"],
@@ -1559,7 +1566,7 @@
 	{
 		"name": "undo",
 		"title": "Undo latest change",
-		"description": "Undo the latest undoable change on the context branch by creating an inverse commit. Prefer this to manual SQL reversal when asked to undo that change. No commit_id parameter; inspect history first if later edits may exist. Stops at checkpoints; restore is different and not undoable.",
+		"description": "Undo the latest undoable change on the context branch by creating an inverse commit. Prefer this to manual SQL reversal when asked to undo that change. No commit_id parameter; inspect history first if later edits may exist. Stops at checkpoints; restore copies a saved state into a new undoable commit.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",

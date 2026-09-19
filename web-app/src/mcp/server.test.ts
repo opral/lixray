@@ -231,10 +231,7 @@ class FakeRuntime implements LixRuntimeClient {
 				hint: "Bind a text value.",
 			});
 		}
-		if (
-			request.sql ===
-			"INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id"
-		) {
+		if (request.sql === "SELECT commit_id FROM lix_restore($1)") {
 			if (
 				request.params?.[0]?.kind === "text" &&
 				request.params[0].value === "missing-commit"
@@ -949,13 +946,14 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assertCheckpointPolicy(MCP_SERVER_INSTRUCTIONS);
 		const restoreTool = tools.tools.find((tool) => tool.name === "restore");
 		assert.ok(restoreTool);
-		assert.match(restoreTool.description ?? "", /ancestor/);
-		assert.match(restoreTool.description ?? "", /without creating a commit/);
-		assert.match(restoreTool.description ?? "", /not undoable/i);
-		assert.match(restoreTool.description ?? "", /undo only applies/);
-		assert.match(restoreTool.description ?? "", /other branches are unchanged/);
-		assert.match(restoreTool.description ?? "", /create_checkpoint returns/);
-		assert.match(restoreTool.description ?? "", /no restore_checkpoint/);
+		assert.match(restoreTool.description ?? "", /content from commit_id/);
+		assert.match(restoreTool.description ?? "", /into a new commit/);
+		assert.match(restoreTool.description ?? "", /undo can reverse/);
+		assert.match(restoreTool.description ?? "", /working baseline/);
+		assert.match(
+			restoreTool.description ?? "",
+			/commit_id from create_checkpoint/,
+		);
 		assert.equal(restoreTool.annotations?.destructiveHint, true);
 		assert.equal(restoreTool.annotations?.idempotentHint, true);
 		assert.match(JSON.stringify(restoreTool.inputSchema), /commit_id/);
@@ -1033,7 +1031,10 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			commit_id: "commit-target",
 		});
 		const restoredText = toolText(restored);
-		assert.match(restoredText, /Restored branch main to commit commit-target/);
+		assert.match(
+			restoredText,
+			/Restored content on branch main in new commit commit-target/,
+		);
 		assertTextOmitsContext(restoredText, context);
 		const failedRestore = await client.callTool({
 			name: "restore",
@@ -1192,7 +1193,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(mutationThroughQuery.isError, true);
 		assert.match(
 			JSON.stringify(toolErrorContent(mutationThroughQuery)),
-			/query_sql rejects INSERT, UPDATE, and DELETE/,
+			/query_sql rejects mutating SQL/,
 		);
 		assert.match(
 			JSON.stringify(toolErrorContent(mutationThroughQuery)),
