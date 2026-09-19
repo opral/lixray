@@ -249,8 +249,8 @@ void test(
 		} finally {
 			release();
 			await move?.catch(() => undefined);
-			during?.return?.();
-			events.return?.();
+			await during?.return?.();
+			await events.return?.();
 			await lix.close();
 		}
 	},
