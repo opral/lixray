@@ -9,24 +9,34 @@ export default defineConfig({
 	publicDir: at("../../public"),
 	resolve: {
 		dedupe: ["react", "react-dom"],
-		alias: {
-			"~": at("../../src"),
-			"@": at("../../../vendor/atelier/src"),
-			"@opral/atelier/style.css": at("../../../vendor/atelier/src/index.css"),
-			"@opral/atelier/theme.css": at(
-				"../../../vendor/atelier/src/shell/theme.css",
-			),
-			"@opral/atelier/tailwind.css": at(
-				"../../../vendor/atelier/src/shell/tailwind.css",
-			),
-			"@opral/atelier/document.css": at(
-				"../../../vendor/atelier/src/shell/document.css",
-			),
-			"@opral/atelier/file-icons": at(
-				"../../../vendor/atelier/src/file-icons.ts",
-			),
-			"@opral/atelier": at("../../../vendor/atelier/src/index.ts"),
-		},
+		alias: [
+			{
+				find: "@opral/atelier/style.css",
+				replacement: at("../../../vendor/atelier/src/index.css"),
+			},
+			{
+				find: "@opral/atelier/theme.css",
+				replacement: at("../../../vendor/atelier/src/shell/theme.css"),
+			},
+			{
+				find: "@opral/atelier/tailwind.css",
+				replacement: at("../../../vendor/atelier/src/shell/tailwind.css"),
+			},
+			{
+				find: "@opral/atelier/document.css",
+				replacement: at("../../../vendor/atelier/src/shell/document.css"),
+			},
+			{
+				find: "@opral/atelier/file-icons",
+				replacement: at("../../../vendor/atelier/src/file-icons.ts"),
+			},
+			{
+				find: /^@opral\/atelier$/,
+				replacement: at("../../../vendor/atelier/src/index.ts"),
+			},
+			{ find: "~", replacement: at("../../src") },
+			{ find: "@", replacement: at("../../../vendor/atelier/src") },
+		],
 	},
 	plugins: [react(), tailwindcss()],
 	server: {

@@ -145,7 +145,7 @@ const lix = {
 	},
 	observe(sql: string, params: readonly unknown[] = []) {
 		let closed = false;
-		let pending: ((event: unknown) => void) | undefined;
+		let pending: ((event: IteratorResult<unknown>) => void) | undefined;
 		const listingQuery = /FROM lix_(file|directory) ORDER BY path/.test(sql);
 		let fail = listingQuery && failListing;
 		if (fail) failListing = false;
@@ -156,7 +156,7 @@ const lix = {
 			if (pending) {
 				const resolve = pending;
 				pending = undefined;
-				resolve(frame);
+				resolve({ done: false, value: frame });
 			} else queue.push(frame);
 		};
 		observers.add(update);
@@ -167,17 +167,22 @@ const lix = {
 					return Promise.reject(new Error("Synthetic listing read failed"));
 				}
 				return closed
-					? Promise.resolve(null)
+					? Promise.resolve({ done: true, value: undefined })
 					: queue.length
-						? Promise.resolve(queue.shift())
-						: new Promise((resolve) => {
+						? Promise.resolve({ done: false, value: queue.shift() })
+						: new Promise<IteratorResult<unknown>>((resolve) => {
 								pending = resolve;
 							});
 			},
-			close: () => {
+			return: async () => {
 				closed = true;
 				observers.delete(update);
-				pending?.(null);
+				pending?.({ done: true, value: undefined });
+				pending = undefined;
+				return { done: true, value: undefined };
+			},
+			[Symbol.asyncIterator]() {
+				return this;
 			},
 		};
 	},
