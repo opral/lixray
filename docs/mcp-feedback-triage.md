@@ -14,7 +14,7 @@ P0 means an immediate critical incident (for example, widespread data loss or a 
 
 ## Corrections to the feedback
 
-- Current Lix JavaScript `undo()` takes no arguments (`vendor/lix/packages/js-sdk/src/lix.ts`). The Rust session API also takes no target (`vendor/lix/packages/lix/src/session/undo_redo.rs`). The MCP's context-only schema matches that capability; “just expose the existing commit_id parameter” is not supported by these revisions.
+- Current Lix exposes undo and redo through SQL (`SELECT commit_id FROM lix_undo()` / `lix_redo()`); the JavaScript and Rust typed methods are removed. The MCP's context-only tools execute those statements and return their single `commit_id` receipt.
 - Undo itself creates an inverse commit. A manual delete and undo differ in reversal semantics and redo behavior, not in whether they create a commit. Checkpoints form an undo boundary.
 - Before this change, the full SQL guide was in server instructions and the two SQL tools carried focused SQL guides. Every tool did not repeat the full SDK guide; they do each carry shared privacy guidance. The correction retains essential self-contained tool instructions.
 - A successful standard SDK parse does not prove the original host rendered the UI or accepted every content block. The exact host error was not reproduced locally.

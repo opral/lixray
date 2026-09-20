@@ -198,17 +198,13 @@ export interface LixRuntimeClient {
 		lixId: string,
 		branchId: string,
 	): Promise<{
-		branchId: string;
-		targetCommitId: string;
-		inverseCommitId: string;
+		commitId: string | null;
 	}>;
 	redo(
 		lixId: string,
 		branchId: string,
 	): Promise<{
-		branchId: string;
-		targetCommitId: string;
-		replayCommitId: string;
+		commitId: string | null;
 	}>;
 	mergeBranchPreview(
 		lixId: string,
@@ -1138,13 +1134,13 @@ export class LixService {
 	async undo(contextToken: string) {
 		const context = await this.readContext(contextToken);
 		const receipt = await this.client.undo(context.lixId, context.branchId);
-		return { context: contextToken, ...receipt };
+		return { context: contextToken, commitId: receipt.commitId };
 	}
 
 	async redo(contextToken: string) {
 		const context = await this.readContext(contextToken);
 		const receipt = await this.client.redo(context.lixId, context.branchId);
-		return { context: contextToken, ...receipt };
+		return { context: contextToken, commitId: receipt.commitId };
 	}
 
 	async mergeBranchPreview(contextToken: string, sourceBranchId: string) {

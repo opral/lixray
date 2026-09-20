@@ -11,6 +11,11 @@ void test("sqlLooksLikeWrite matches INSERT, UPDATE, and DELETE", () => {
 	assert.equal(sqlLooksLikeWrite("SELECT inserted_at, updated_at"), false);
 });
 
+void test("sqlLooksLikeWrite recognizes undo and redo SQL functions", () => {
+	assert.equal(sqlLooksLikeWrite("SELECT commit_id FROM lix_undo()"), true);
+	assert.equal(sqlLooksLikeWrite("SELECT commit_id FROM lix_redo($1)"), true);
+});
+
 void test("isClearlyReadOnlySql keeps SELECT/VALUES and rejects writes", () => {
 	assert.equal(isClearlyReadOnlySql("SELECT path FROM lix_file"), true);
 	assert.equal(isClearlyReadOnlySql("VALUES (1)"), true);

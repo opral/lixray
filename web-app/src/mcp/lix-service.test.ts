@@ -326,18 +326,10 @@ class FakeRuntime implements LixRuntimeClient {
 		return { id: "draft", name: "Draft", hidden: false, commitId: "commit-0" };
 	}
 	async undo() {
-		return {
-			branchId: this.branch,
-			targetCommitId: "old",
-			inverseCommitId: "inverse",
-		};
+		return { commitId: "inverse" };
 	}
 	async redo() {
-		return {
-			branchId: this.branch,
-			targetCommitId: "next",
-			replayCommitId: "replay",
-		};
+		return { commitId: "replay" };
 	}
 	async mergeBranchPreview() {
 		return { outcome: "alreadyUpToDate" };

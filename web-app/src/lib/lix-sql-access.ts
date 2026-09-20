@@ -1,5 +1,5 @@
 const MUTATING_SQL_FUNCTION =
-	/^lix_(?:create_checkpoint|restore|revert(?:_range)?|apply)$/i;
+	/^lix_(?:create_checkpoint|restore|revert(?:_range)?|apply|undo|redo)$/i;
 
 /** Lex only the tokens needed for conservative write classification. */
 function sqlTokens(sql: string): { value: string; quoted: boolean }[] {

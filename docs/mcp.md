@@ -227,10 +227,12 @@ The full SQL reference is also available via `resources/read` at
 `lixray://docs/sql`. Server instructions give routing and recovery rules; SQL
 tool descriptions retain the essentials needed to make a first query.
 
-When asked to undo the last change, prefer `undo` over manual SQL reversal
-when that change is still the latest undoable action. Inspect history if later
-edits may exist. On the current SDK and engine, `undo` accepts context only,
-not a commit ID; it creates an inverse commit and stops at checkpoints.
+When asked to undo the last change, prefer the `undo` tool over manual SQL
+reversal when that change is still the latest undoable action. The tool executes
+`SELECT commit_id FROM lix_undo()` on the context branch and returns its one-row
+receipt; inspect history if later edits may exist. `redo` uses
+`SELECT commit_id FROM lix_redo()`. Both return `commit_id: null` when there is
+nothing to apply and stop at checkpoints.
 `restore(commit_id)` moves the branch head and is not a substitute for undo.
 Targeted reversal needs an engine-supported atomic target check; a separate
 read followed by undo cannot protect against a concurrent writer.

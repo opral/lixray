@@ -87,7 +87,7 @@ export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
 	"Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.";
 
 export const UNDO_TOOL_DESCRIPTION =
-	"Undo the latest undoable change on the context branch by creating an inverse commit. Prefer this to manual SQL reversal when asked to undo that change. No commit_id parameter; inspect history first if later edits may exist. Stops at checkpoints; restore copies a saved state into a new undoable commit.";
+	"Undo the latest undoable change on the context branch through SELECT commit_id FROM lix_undo(). Returns the inverse commit_id, or null when there is nothing to undo. Inspect history first if later edits may exist.";
 
 /** What the host shows after a change, and what the agent should not repeat. */
 export const DIFF_CARD_GUIDE =
@@ -589,17 +589,13 @@ const checkpointOutput = withError(
 const undoOutput = withError(
 	z.object({
 		context,
-		branch_id: branchId,
-		target_commit_id: z.string(),
-		inverse_commit_id: z.string(),
+		commit_id: z.string().nullable(),
 	}),
 );
 const redoOutput = withError(
 	z.object({
 		context,
-		branch_id: branchId,
-		target_commit_id: z.string(),
-		replay_commit_id: z.string(),
+		commit_id: z.string().nullable(),
 	}),
 );
 
@@ -1281,9 +1277,7 @@ export function createLixrayMcpServer(
 			const result = await service.undo(token);
 			return {
 				context: result.context,
-				branch_id: result.branchId,
-				target_commit_id: result.targetCommitId,
-				inverse_commit_id: result.inverseCommitId,
+				commit_id: result.commitId,
 			};
 		},
 		undefined,
@@ -1298,7 +1292,7 @@ export function createLixrayMcpServer(
 		server,
 		"redo",
 		"Redo commit",
-		"Redo the latest undone commit on the branch selected by context.",
+		"Redo the latest undone commit through SELECT commit_id FROM lix_redo(). Returns the replay commit_id, or null when there is nothing to redo.",
 		z.object({ context }).strict(),
 		redoOutput,
 		writeAnnotations(),
@@ -1307,9 +1301,7 @@ export function createLixrayMcpServer(
 			const result = await service.redo(token);
 			return {
 				context: result.context,
-				branch_id: result.branchId,
-				target_commit_id: result.targetCommitId,
-				replay_commit_id: result.replayCommitId,
+				commit_id: result.commitId,
 			};
 		},
 		undefined,
@@ -2317,10 +2309,14 @@ function summarizeToolResult(
 			: `Branch ${String(result.branch_id)} already matches the requested state.`;
 	}
 	if (name === "undo") {
-		return `Undone to commit ${String(result.target_commit_id)} (inverse commit ${String(result.inverse_commit_id)}).`;
+		return typeof result.commit_id === "string"
+			? `Undo committed as ${result.commit_id}.`
+			: "Nothing to undo.";
 	}
 	if (name === "redo") {
-		return `Redone to commit ${String(result.target_commit_id)} (replay commit ${String(result.replay_commit_id)}).`;
+		return typeof result.commit_id === "string"
+			? `Redo committed as ${result.commit_id}.`
+			: "Nothing to redo.";
 	}
 	if (name === "merge_branch_preview") {
 		return "Merge preview completed.";

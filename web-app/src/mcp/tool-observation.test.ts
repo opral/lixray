@@ -112,6 +112,20 @@ void test("execute output observations keep only aggregate results and notice co
 	);
 });
 
+void test("execute input observations classify undo and redo SQL as mutations", () => {
+	const observed = observeExecuteInput([
+		{ sql: "SELECT commit_id FROM lix_undo()" },
+		{
+			sql: "SELECT commit_id FROM lix_redo($1)",
+			params: [{ kind: "text", value: "id" }],
+		},
+	]);
+	assert.deepEqual(
+		observed?.statements.map((statement) => statement.operation),
+		["UNDO", "REDO"],
+	);
+});
+
 void test("MCP surface versions are stable and content-addressed", () => {
 	assert.equal(mcpSurfaceVersion([{ name: "execute" }]), "fnv1a32:0625663b");
 	assert.equal(

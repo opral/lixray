@@ -266,6 +266,8 @@ function numericLiteralEnd(value: string, start: number): number {
 }
 
 function sqlOperation(sanitizedSql: string): string {
+	if (/\blix_undo\s*\(/i.test(sanitizedSql)) return "UNDO";
+	if (/\blix_redo\s*\(/i.test(sanitizedSql)) return "REDO";
 	const operations = Array.from(
 		sanitizedSql.matchAll(
 			/\b(select|insert|update|delete|merge|create|alter|drop|explain|pragma|vacuum|begin|commit|rollback|with)\b/g,

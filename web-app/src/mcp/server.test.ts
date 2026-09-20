@@ -581,18 +581,10 @@ class FakeRuntime implements LixRuntimeClient {
 		return { id: "draft", name: "Draft", hidden: false, commitId: "commit-1" };
 	}
 	async undo() {
-		return {
-			branchId: "main",
-			targetCommitId: "old",
-			inverseCommitId: "inverse",
-		};
+		return { commitId: "inverse" };
 	}
 	async redo() {
-		return {
-			branchId: "main",
-			targetCommitId: "next",
-			replayCommitId: "replay",
-		};
+		return { commitId: "replay" };
 	}
 	async mergeBranchPreview() {
 		return { outcome: "alreadyUpToDate" };
@@ -884,8 +876,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		// The file recipe lives on write_files; the SQL cards point at it.
 		const undoTool = tools.tools.find((tool) => tool.name === "undo")!;
 		assert.match(undoTool.description ?? "", /latest undoable/);
-		assert.match(undoTool.description ?? "", /inverse commit/);
-		assert.match(undoTool.description ?? "", /No commit_id parameter/);
+		assert.match(undoTool.description ?? "", /SELECT commit_id FROM lix_undo/);
 		assert.deepEqual(
 			Object.keys((undoTool.inputSchema as { properties: object }).properties),
 			["context"],
@@ -1485,8 +1476,8 @@ void test("MCP tool text describes outcomes without echoing the context token", 
 				arguments: { context },
 				text: /Checkpoint created/,
 			},
-			{ name: "undo", arguments: { context }, text: /Undone to commit/ },
-			{ name: "redo", arguments: { context }, text: /Redone to commit/ },
+			{ name: "undo", arguments: { context }, text: /Undo committed as/ },
+			{ name: "redo", arguments: { context }, text: /Redo committed as/ },
 			{
 				name: "merge_branch_preview",
 				arguments: { context, source_branch_id: "main" },

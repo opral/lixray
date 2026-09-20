@@ -1566,7 +1566,7 @@
 	{
 		"name": "undo",
 		"title": "Undo latest change",
-		"description": "Undo the latest undoable change on the context branch by creating an inverse commit. Prefer this to manual SQL reversal when asked to undo that change. No commit_id parameter; inspect history first if later edits may exist. Stops at checkpoints; restore copies a saved state into a new undoable commit.",
+		"description": "Undo the latest undoable change on the context branch through SELECT commit_id FROM lix_undo(). Returns the inverse commit_id, or null when there is nothing to undo. Inspect history first if later edits may exist.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1589,24 +1589,18 @@
 					"minLength": 1,
 					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
 				},
-				"branch_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Lix branch id"
-				},
-				"target_commit_id": {
-					"type": "string"
-				},
-				"inverse_commit_id": {
-					"type": "string"
+				"commit_id": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
 				}
 			},
-			"required": [
-				"context",
-				"branch_id",
-				"target_commit_id",
-				"inverse_commit_id"
-			],
+			"required": ["context", "commit_id"],
 			"additionalProperties": false
 		},
 		"annotations": {
@@ -1626,7 +1620,7 @@
 	{
 		"name": "redo",
 		"title": "Redo commit",
-		"description": "Redo the latest undone commit on the branch selected by context.",
+		"description": "Redo the latest undone commit through SELECT commit_id FROM lix_redo(). Returns the replay commit_id, or null when there is nothing to redo.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1649,24 +1643,18 @@
 					"minLength": 1,
 					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
 				},
-				"branch_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Lix branch id"
-				},
-				"target_commit_id": {
-					"type": "string"
-				},
-				"replay_commit_id": {
-					"type": "string"
+				"commit_id": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
 				}
 			},
-			"required": [
-				"context",
-				"branch_id",
-				"target_commit_id",
-				"replay_commit_id"
-			],
+			"required": ["context", "commit_id"],
 			"additionalProperties": false
 		},
 		"annotations": {
