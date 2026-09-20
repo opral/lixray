@@ -64,6 +64,7 @@ export async function installServerImageArtifact({
 	const downloaded = await downloadArtifact({
 		artifactName: `lix-server-image-${target}-${revision}`,
 		manifestPath: `server-${target}.json`,
+		validateManifest: validateServerImageManifest,
 		revision,
 		log,
 	});
@@ -79,7 +80,26 @@ export async function installServerImageArtifact({
 	}
 }
 
-async function downloadArtifact({ artifactName, manifestPath, revision, log }) {
+export function validateServerImageManifest(manifest, revision) {
+	if (
+		!/^[a-f0-9]{40}$/.test(revision) ||
+		manifest.schemaVersion !== 1 ||
+		manifest.kind !== "lix-server-image" ||
+		manifest.target !== "linux-x64" ||
+		manifest.sourceRevision !== revision ||
+		manifest.image !== `lix-server-ci:${revision}`
+	) {
+		throw new Error("unexpected Lix server image manifest");
+	}
+}
+
+async function downloadArtifact({
+	artifactName,
+	manifestPath,
+	validateManifest,
+	revision,
+	log,
+}) {
 	if (process.env.LIXRAY_LIX_ARTIFACTS === "off") {
 		log(`[lix-artifact] Lookup disabled for ${revision}; no artifact installed.`);
 		return undefined;
@@ -100,7 +120,8 @@ async function downloadArtifact({ artifactName, manifestPath, revision, log }) {
 	}
 	if (candidate) {
 		const downloaded = await verifiedArtifact({
-			artifact: candidate.artifact, artifactName, manifestPath, revision,
+			artifact: candidate.artifact, artifactName, manifestPath,
+			validateManifest, revision,
 			run: candidate.run, runId: candidate.runId, log,
 		});
 		if (downloaded) return downloaded;
@@ -139,6 +160,17 @@ async function findReusableArtifact({
 			);
 			continue;
 		}
+		if (
+			run.path !== ".github/workflows/ci.yml" ||
+			run.head_sha !== revision ||
+			run.head_repository?.full_name !== repository ||
+			!["pull_request", "push", "workflow_dispatch"].includes(run.event)
+		) {
+			log(
+				`[lix-artifact] Ignoring ${artifactName} from unexpected workflow producer ${runId}.`,
+			);
+			continue;
+		}
 		if (run.status === "completed" && run.conclusion !== "success") {
 			log(
 				`[lix-artifact] Ignoring ${artifactName} from failed run ${runId}: ${run.conclusion ?? "unknown"}.`,
@@ -154,6 +186,7 @@ async function verifiedArtifact({
 	artifact,
 	artifactName,
 	manifestPath,
+	validateManifest,
 	revision,
 	run,
 	runId,
@@ -168,7 +201,9 @@ async function verifiedArtifact({
 		const manifest = JSON.parse(
 			await readFile(join(extracted, manifestPath), "utf8"),
 		);
-		if (manifest.sourceRevision !== revision) {
+		if (validateManifest) {
+			validateManifest(manifest, revision);
+		} else if (manifest.sourceRevision !== revision) {
 			throw new Error(
 				`artifact revision ${manifest.sourceRevision} does not match ${revision}`,
 			);

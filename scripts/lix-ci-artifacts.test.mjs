@@ -9,6 +9,7 @@ import { zipSync } from "fflate";
 import {
 	installBrowserArtifact,
 	installServerImageArtifact,
+	validateServerImageManifest,
 } from "./lix-ci-artifacts.mjs";
 
 const encoder = new TextEncoder();
@@ -35,6 +36,7 @@ test("installs an exact-revision artifact from a successful Lix CI run", async (
 		archive,
 		revision,
 		successful: true,
+		producerRun: { event: "push" },
 	});
 	const destination = await mkdtemp(join(tmpdir(), "lix-artifact-test-"));
 	const logs = [];
@@ -60,11 +62,41 @@ test("installs an exact-revision artifact from a successful Lix CI run", async (
 	}
 });
 
+test("server image manifests carry the expected artifact identity", () => {
+	const revision = "f".repeat(40);
+	const manifest = {
+		schemaVersion: 1,
+		kind: "lix-server-image",
+		sourceRevision: revision,
+		target: "linux-x64",
+		image: `lix-server-ci:${revision}`,
+	};
+	assert.doesNotThrow(() => validateServerImageManifest(manifest, revision));
+	for (const patch of [
+		{ schemaVersion: 2 },
+		{ kind: "other" },
+		{ target: "linux-arm64" },
+		{ sourceRevision: "e".repeat(40) },
+		{ image: "lix-server-ci:other" },
+	]) {
+		assert.throws(
+			() => validateServerImageManifest({ ...manifest, ...patch }, revision),
+			/unexpected Lix server image manifest/,
+		);
+	}
+});
+
 test("uses an artifact after its producer job uploads while the workflow continues", async () => {
 	const revision = "b".repeat(40);
 	const archive = zipSync({
 		"server-linux-x64.json": encoder.encode(
-			JSON.stringify({ sourceRevision: revision }),
+			JSON.stringify({
+				schemaVersion: 1,
+				kind: "lix-server-image",
+				sourceRevision: revision,
+				target: "linux-x64",
+				image: `lix-server-ci:${revision}`,
+			}),
 		),
 		"lix-server-image.tar": encoder.encode("image"),
 	});
@@ -93,6 +125,43 @@ test("uses an artifact after its producer job uploads while the workflow continu
 		delete process.env.LIX_CI_ARTIFACT_API_ROOT;
 		await fixture.close();
 		await rm(dirname(destination), { recursive: true, force: true });
+	}
+});
+
+test("ignores server artifacts from an unexpected workflow producer", async () => {
+	const revision = "1".repeat(40);
+	const archive = zipSync({
+		"server-linux-x64.json": encoder.encode(JSON.stringify({
+			schemaVersion: 1,
+			kind: "lix-server-image",
+			sourceRevision: revision,
+			target: "linux-x64",
+			image: `lix-server-ci:${revision}`,
+		})),
+		"lix-server-image.tar": encoder.encode("image"),
+	});
+	for (const producerRun of [
+		{ path: ".github/workflows/other.yml" },
+		{ head_repository: { full_name: "attacker/lix" } },
+		{ event: "schedule" },
+	]) {
+		const fixture = await artifactApiFixture({
+			archive,
+			producerRun,
+			revision,
+			successful: true,
+		});
+		try {
+			process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
+			assert.equal(
+				await installServerImageArtifact({ revision, destination: "unused", log() {} }),
+				undefined,
+			);
+			assert.equal(fixture.requests.filter((request) => request === "/artifact.zip").length, 0);
+		} finally {
+			delete process.env.LIX_CI_ARTIFACT_API_ROOT;
+			await fixture.close();
+		}
 	}
 });
 
@@ -185,7 +254,15 @@ test("artifact fixtures can bind while another fixture occupies their first port
 	}
 });
 
-async function artifactApiFixture({ archive, revision, successful, missing = false, lookupStatus = 200, startPort }) {
+async function artifactApiFixture({
+	archive,
+	revision,
+	successful,
+	missing = false,
+	lookupStatus = 200,
+	producerRun = {},
+	startPort,
+}) {
 	const requests = [];
 	const digest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
 	const server = createServer((request, response) => {
@@ -209,6 +286,11 @@ async function artifactApiFixture({ archive, revision, successful, missing = fal
 			json(response, {
 				conclusion: successful ? "success" : null,
 				status: successful ? "completed" : "in_progress",
+				event: "pull_request",
+				head_repository: { full_name: "opral/lix" },
+				head_sha: revision,
+				path: ".github/workflows/ci.yml",
+				...producerRun,
 			});
 			return;
 		}
