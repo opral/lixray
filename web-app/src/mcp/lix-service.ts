@@ -888,7 +888,8 @@ export class LixService {
 	 * The commit a diff endpoint names. A checkpoint and a commit are ids on
 	 * the retained log; a branch is its head; "working" is the branch in
 	 * context as it stands; "latest_checkpoint" is the nearest checkpoint
-	 * behind that head. A ref that names nothing is refused here, before Lix
+	 * behind that head. Checkpoint validation reads the active log at the
+	 * current branch head. A ref that names nothing is refused here, before Lix
 	 * is asked to compare, so the error can say which end was wrong.
 	 */
 	async resolveDiffRef(contextToken: string, ref: DiffRef): Promise<string> {
@@ -905,7 +906,7 @@ export class LixService {
 					}
 				: "checkpoint_id" in ref
 					? {
-							sql: "SELECT id FROM lix_commit WHERE id = $1 AND is_checkpoint LIMIT 1",
+							sql: "SELECT commit_id FROM lix_log() WHERE commit_id = $1 AND is_checkpoint LIMIT 1",
 							params: [{ kind: "text", value: ref.checkpoint_id }],
 							missing: `No checkpoint ${ref.checkpoint_id}. create_checkpoint returns a usable id; lix_log() lists the branch's checkpoints.`,
 						}

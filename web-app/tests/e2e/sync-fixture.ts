@@ -617,7 +617,7 @@ export async function createSyncFixture({
 										"Idempotency-Key": `checkpoint-id-${scenario}-${randomUUID()}-${authorityReadSequence++}`,
 									},
 									data: {
-										sql: "SELECT id AS commit_id FROM lix_commit WHERE id = $1 AND is_checkpoint",
+										sql: "SELECT commit_id FROM lix_log() WHERE commit_id = $1 AND is_checkpoint",
 										params: [{ kind: "text", value: localCheckpointId }],
 									},
 								},

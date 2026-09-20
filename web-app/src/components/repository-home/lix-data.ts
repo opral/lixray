@@ -133,7 +133,7 @@ export type RepositoryControlPlaneData = {
 };
 
 export const CHECKPOINT_SUMMARY_SQL =
-	"SELECT created_at, count(*) over () AS total_count FROM lix_commit WHERE is_checkpoint ORDER BY created_at DESC, id DESC LIMIT 10";
+	"SELECT created_at, count(*) over () AS total_count FROM lix_log() WHERE is_checkpoint ORDER BY position LIMIT 10";
 /**
  * The same working diff Atelier's status bar counts ("N files changed since
  * checkpoint"), so Home's Changes panel and the status bar agree.

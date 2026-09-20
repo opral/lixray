@@ -1099,7 +1099,7 @@ void test("a diff ref resolves to a commit, or is refused with the reason", asyn
 				return answer("commit_id", this.checkpoints.slice(0, 1));
 			if (
 				request.sql ===
-				"SELECT id FROM lix_commit WHERE id = $1 AND is_checkpoint LIMIT 1"
+				"SELECT commit_id FROM lix_log() WHERE commit_id = $1 AND is_checkpoint LIMIT 1"
 			)
 				return answer("id", this.checkpoints.includes(given) ? [given] : []);
 			if (request.sql === "SELECT id FROM lix_commit WHERE id = $1 LIMIT 1")

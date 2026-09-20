@@ -274,7 +274,7 @@ class FakeRuntime implements LixRuntimeClient {
 			};
 		}
 		if (
-			/^SELECT id FROM lix_commit WHERE id = \$1( AND is_checkpoint)? LIMIT 1$/.test(
+			/^SELECT (?:id FROM lix_commit|commit_id FROM lix_log\(\)) WHERE (?:id|commit_id) = \$1( AND is_checkpoint)? LIMIT 1$/.test(
 				request.sql,
 			)
 		) {

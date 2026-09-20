@@ -61,8 +61,8 @@ const tree: RepositoryTree = {
 
 void test("keeps checkpoint dates bounded while returning the total count", () => {
 	assert.match(CHECKPOINT_SUMMARY_SQL, /count\(\*\) over \(\) AS total_count/i);
-	assert.match(CHECKPOINT_SUMMARY_SQL, /FROM lix_commit WHERE is_checkpoint/i);
-	assert.match(CHECKPOINT_SUMMARY_SQL, /ORDER BY created_at DESC, id DESC/i);
+	assert.match(CHECKPOINT_SUMMARY_SQL, /FROM lix_log\(\) WHERE is_checkpoint/i);
+	assert.match(CHECKPOINT_SUMMARY_SQL, /ORDER BY position/i);
 	assert.match(CHECKPOINT_SUMMARY_SQL, /LIMIT 10$/i);
 });
 

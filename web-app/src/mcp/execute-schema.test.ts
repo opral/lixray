@@ -72,11 +72,16 @@ void test("shared operating guide keeps file-content, upsert, and outcome-aware 
 	);
 	assert.match(LIX_SQL_OPERATING_GUIDE, /without a probe SELECT/);
 	assert.match(LIX_SQL_OPERATING_GUIDE, /lix_history\('lix_file', \$1\)/);
-	assert.match(LIX_SQL_OPERATING_GUIDE, /lixcol_commit_is_checkpoint/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /log\.is_checkpoint/);
+	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lixcol_commit_is_checkpoint/);
+	assert.doesNotMatch(
+		LIX_SQL_OPERATING_GUIDE,
+		/lix_commit WHERE is_checkpoint/,
+	);
 	assert.match(LIX_SQL_OPERATING_GUIDE, /actual first parent/);
 	assert.match(
 		LIX_SQL_OPERATING_GUIDE,
-		/Filtering never changes the comparison baseline/,
+		/Filtering the joined result never changes the comparison baseline/,
 	);
 	assert.match(LIX_SQL_OPERATING_GUIDE, /lix_as_of/);
 	assert.doesNotMatch(LIX_SQL_OPERATING_GUIDE, /lix_file_history|lix_state_at/);
@@ -103,7 +108,7 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 		/lix_file \(id, path, directory_id, name, content\)/,
 	);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /kind: "text"/);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /lix_history\('lix_file'\)/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /lix_history\('lix_file'/);
 	// Writes: files elsewhere, rename, delete, upsert shape, no readback.
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /Prefer write_files/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /UPDATE lix_file SET path/);

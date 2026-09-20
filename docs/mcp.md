@@ -318,26 +318,31 @@ without columns, or `DO UPDATE WHERE`.
 
 Use `lix_log([anchor])` for retained commits on the branch's first-parent chain.
 Filter `is_checkpoint` for milestones and order by `position`, with zero at the
-anchor. For repository-global checkpoint inventory, use
-`SELECT id, created_at FROM lix_commit WHERE is_checkpoint`; it includes
-checkpoints outside the selected branch. Checkpoint dates use commit creation time.
+anchor. The flag is active at the selected anchor, so this is the eligible
+checkpoint timeline for that branch. `lix_commit` contains only retained commit
+identity and creation time; it has no checkpoint flag. Checkpoint dates use
+commit creation time.
 
 ```sql
-SELECT lixcol_to_commit_id, lixcol_commit_created_at,
-       diff_type, from_path, to_path
-FROM lix_history('lix_file', $1)
-WHERE id = $2 AND lixcol_commit_is_checkpoint
-ORDER BY lixcol_position;
+SELECT log.commit_id, history.lixcol_commit_created_at,
+       history.diff_type, history.from_path, history.to_path
+FROM lix_log($1) AS log
+JOIN lix_history('lix_file', $1) AS history
+  ON history.lixcol_to_commit_id = log.commit_id
+WHERE history.id = $2 AND log.is_checkpoint
+ORDER BY log.position;
 ```
 
 History reports each retained mainline commit's net changes relative to its
 actual first parent, identified by `lixcol_from_commit_id` and
-`lixcol_to_commit_id`. Filtering never changes that baseline. A checkpoint's
-parent can be an unmarked fork or restore baseline. Drop the checkpoint predicate
-to inspect retained automatic changes. Compaction can remove those revisions.
-Empty commits appear in log and have no history rows; merged-side commits do not
-appear separately on the first-parent timeline. Pin the same anchor when paging
-log and fetching history for its commit IDs.
+`lixcol_to_commit_id`. The history function has no checkpoint marker column;
+join it to `lix_log` on the destination commit ID and filter the log's active
+`is_checkpoint` flag. Filtering the joined result never changes that baseline.
+A checkpoint's parent can be an unmarked fork or restore baseline. Drop the
+checkpoint predicate to inspect retained automatic changes. Compaction can
+remove those revisions. Empty commits appear in log and have no history rows;
+merged-side commits do not appear separately on the first-parent timeline. Pin
+the same anchor when paging log and fetching history for its commit IDs.
 
 `lix_diff('lix_file')` compares the actual working baseline to the head;
 `lix_diff('lix_file', $1, $2)` compares explicit endpoints. Working context comes

@@ -398,7 +398,7 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 			.poll(
 				async () => {
 					const result = await execute(
-						"SELECT id AS commit_id FROM lix_commit WHERE id = $1 AND is_checkpoint",
+						"SELECT commit_id FROM lix_log() WHERE commit_id = $1 AND is_checkpoint",
 						[checkpointId],
 					);
 					return result.rows[0]?.[0]?.value;
