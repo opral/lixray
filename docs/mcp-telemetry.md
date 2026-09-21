@@ -1,60 +1,106 @@
-# MCP friction telemetry
+# MCP telemetry
 
-LixRay records production MCP tool friction as official `$mcp_*` harness
-events (`$mcp_duration_ms` is tool wall clock) plus `$ai_span` captures for
-every tool call. These are MCP wall-clock spans, not invented engine clocks.
-The open-repo engine north star remains the captured Lix span `$ai_span` named
-`lix.repository.opened`. SQL engine performance remains in
-the native `lix.sql.*` OpenTelemetry spans described in
-[sql-telemetry.md](./sql-telemetry.md).
+Native OpenTelemetry is the performance trace for hosted MCP. LixRay and the
+Lix reference server share W3C `traceparent` and `tracestate`; custom PostHog
+trace/parent/session headers and MCP `$ai_trace` / `$ai_span` timers are removed.
+There is no dual emission or legacy ID conversion.
 
-PostHog automatically presents each MCP span as a trace. By default the
-stateless MCP server does not receive the agent's conversation or task
-identifier. Clients can group LixRay spans into their end-to-end trace by
-sending W3C `traceparent`, or `X-PostHog-AI-Trace-ID` and
-`X-PostHog-AI-Parent-ID`. `X-PostHog-AI-Session-ID` optionally groups related
-traces into one conversation or workflow. Invalid identifiers are ignored and
-clients that send no trace context retain the per-tool fallback behavior.
+## Lifetimes
 
-Unauthenticated requests (including authentication challenges and rejected credentials)
-do not initialize PostHog telemetry or emit AI traces. Authenticated setup and
-transport failures retain correlated request traces and request IDs.
+The Node host starts an HTTP SERVER span at `/mcp` admission, before
+authentication. `response_ready` records when the Web Response is available.
+The span ends once when Node finishes writing the response, or on premature
+close/error. This is server completion, not proof of delivery to the client.
+For SSE the root measures connection lifetime, not individual tool latency.
 
-## Span model
+Each SDK `tools/call` dispatch owns one `mcp.tool` span. Its lifetime includes
+tool argument validation, target resolution, service work, preview/change lookup,
+resource links, response construction and SDK output validation. The bounded
+`mcp.tool.name` and `mcp.tool.outcome` distinguish successful calls from tool
+errors inside HTTP 200 responses. A completed-call summary is published once
+after dispatch, keyed by its native span identity; there is no request-wide
+last-tool cache. HTTP status, tool outcome, and engine transaction status are
+different facts. `lix.commit.outcome=committed` confirms completion of the
+mutating operation; it can include a no-op write and does not assert that a
+new repository commit was created. Preview fallback does not undo a persisted write. Malformed
+protocol envelopes can fail before tools/call dispatch; these attach a bounded
+protocol error to the HTTP span without manufacturing a tool span.
 
-Tool-friction `$ai_span` captures include:
+Authentication, repository authorization, remote runtime operations, response
+preparation and blocking cleanup provide phase spans. Outbound Lix protocol
+attempts inject the active W3C context, including handshake provisioning,
+transactions, retries and close. The reference server extracts that parent
+before its protocol span, connecting existing `lix.sql.*` and checkpoint work.
+Source revision and service instance resources identify the emitting deployment.
 
-- `$ai_trace_id`, `$ai_span_id`, `$ai_span_name`, `$ai_latency`, and
-  `$ai_is_error`
-- `mcp_server`, `mcp_tool`, `oauth_client_id`, `lix_id`, and `outcome`
-- `release_id` from `LIXRAY_RELEASE_ID` or Railway's commit SHA
-- `mcp_surface_version`, a content hash of the advertised MCP tool descriptors
-- stable `error_code` and `$ai_error.code` on failure
+Stream readers and cleanup explicitly retain their originating context.
+Official analytics shutdown happens after response EOF, error or cancellation,
+never immediately after constructing an SSE Response. Export delivery is
+background work and cannot fail a tool or block response completion.
 
-`query_sql` and `execute_sql` spans add a privacy-safe `$ai_input_state`
-containing SQL operations,
-sanitized statement shapes, shape IDs, parameter counts, and literal-redaction
-counts. `$ai_output_state` contains only result counts, row counts, affected-row
-counts, and notice codes.
+## Product analytics and privacy
 
-SQL comments, literals, and bound values are never captured. Returned columns,
-rows, file contents, notice messages, error details, and unsanitized SQL are
-never captured. Sanitized SQL is capped at 4 KiB per statement.
+Official `@posthog/mcp` `$mcp_*` events remain for discovery, usage and friction
+analytics. `trace_id` and `span_id` link an event to the native trace. The SDK's
+`$mcp_duration_ms` is an analytics field, not a second diagnostic waterfall.
+The SDK v2 adapter and `server/discover` handshake mapping remain necessary
+for supported protocol clients.
 
-## Analyze with an agent
+Tool parameters, response bodies and raw error messages are removed from
+PostHog events. SQL summaries retain only their existing sanitized shape and
+aggregate result metadata. Raw SQL and bindings are used only in process for
+product import detection. Native tracing does not capture document contents,
+credentials, context tokens or exception messages. Unknown tool names are
+recorded as `unknown` rather than copying arbitrary input into traces.
 
-Connect the analysis agent to PostHog's MCP server and point it at the LixRay
-project. A useful starting prompt is:
+The existing engine-owned `lix.repository.opened` product projection and
+reference-server error projections remain separate from MCP performance
+instrumentation. See [SQL telemetry](./sql-telemetry.md).
 
-> Analyze LixRay MCP `$ai_span` traces from the last seven days. Group recurring
-> friction by `mcp_surface_version`, `error_code`, `notice_codes`,
-> `sql_shape_ids`, and `sql_operations`. Inspect representative trace IDs and
-> report unsupported SQL, unnecessary schema discovery, zero-row query shapes,
-> excessive statement counts, and recurring notices. Treat `lix.sql.query`
-> traces as SQL performance telemetry, not MCP usability evidence. Include the
-> trace IDs supporting every finding.
+## Investigating a slow call
 
-The large `$ai_input_state` and `$ai_output_state` fields live in
-`posthog.ai_events`. Metadata remains queryable as normal PostHog event
-properties. There is intentionally no scheduler or automated remediation in
-this implementation.
+Find the canonical trace using the official event's `trace_id`, then compare
+intervals: admission/authentication, tool work, remote protocol attempts and
+their Rust descendants, response preparation, and cleanup. Do not subtract
+unrelated event clocks or add nested span durations. A small `response_ready`
+interval with a long tool span is valid for streaming; a completed HTTP span
+must include all work that blocks its response.
+
+PostHog trace access requires `tracing:read`. Event access alone cannot identify
+the engine bottleneck. A missing connector permission is not evidence that
+native traces were never emitted.
+
+## Node exporter lifecycle
+
+The Railway entry point initializes one OTel provider before importing the
+application and drains it during process shutdown. Native export is enabled
+with `POSTHOG_ENVIRONMENT=production` and `POSTHOG_PROJECT_TOKEN`, excluding demo/PR environments; `POSTHOG_HOST`
+selects the destination. Export goes directly to `/i/v1/traces` using OTLP
+protobuf. The bounded batch processor queues at most 2,048 spans, sends up to
+256 per batch, and schedules delivery every second. Delivery has a four-second
+HTTP timeout and a five-second processor timeout. Requests never await export.
+The exporter is not wrapped in application HTTP instrumentation.
+
+Resources include `service.name=lixray`, `service.version`,
+`service.instance.id`, `vcs.ref.head.revision`, and
+`deployment.environment.name`. The reference server uses `service.name=lix-server`
+and its corresponding revision/instance resources. Repository and request IDs
+are span attributes, not metric dimensions.
+
+## Cross-service contract test
+
+With workspace dependencies installed and the vendored JS SDK prepared, run the
+opt-in Rust harness from the LixRay checkout:
+
+```sh
+LIX_TRACE_NODE_FIXTURE="$PWD/web-app/scripts/trace-integration.mjs" \
+  cargo test --manifest-path vendor/lix/Cargo.toml -p lix-server --lib \
+  node_client_trace_integration -- --ignored --nocapture
+```
+
+It starts the real reference-server router with in-memory storage on a local TCP
+port, invokes `WorkerLixRuntimeClient`, and compares exported JS and Rust span
+IDs. It covers handshake/account provisioning, a write transaction, checkpoint,
+and session close, without production credentials or data. This cross-repository
+harness is opt-in; the default suites separately cover propagation, streaming
+lifetimes, concurrent call isolation, shared-open links, and exporter failure.

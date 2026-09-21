@@ -46,8 +46,12 @@ The event means a client session was bound, not a unique logical UI open.
 Sync and reconnects can create multiple sessions. North-star DAU/WAU count
 unique people, not raw span volume.
 
-MCP `open_lix` does not invent an `mcp.open_lix` `$ai_span`. Official
-`$mcp_tool_call` keeps `$mcp_duration_ms` as harness wall clock. Cache admission
+MCP `open_lix` has one native `mcp.tool` span around the complete SDK dispatch,
+with `mcp.tool.name=open_lix`. MCP emits no custom `$ai_trace` or `$ai_span`
+performance events. Official `$mcp_tool_call` retains `$mcp_duration_ms` for
+usage analytics and links the native trace via `trace_id` and `span_id`.
+W3C context propagates from the Node HTTP root through remote protocol calls
+to the reference server, so SQL spans are descendants of the owning tool. Cache admission
 uses `open_lix().with_telemetry(...).serve()` and owns only the repository
 engine, so it is not a client bind.
 

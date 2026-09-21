@@ -3,6 +3,14 @@ import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve } from "node:path";
 import { Readable } from "node:stream";
+import {
+	context,
+	propagation,
+	ROOT_CONTEXT,
+	trace,
+	SpanKind,
+	SpanStatusCode,
+} from "@opentelemetry/api";
 
 const IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATED_STATIC_CACHE_CONTROL = "public, max-age=0, must-revalidate";
@@ -13,7 +21,55 @@ const HTML_CACHE_CONTROL = "private, no-cache";
  * testable without a built `dist/server` bundle.
  */
 export function createRailwayServer({ app, clientRoot, env = process.env }) {
-	return createServer(async (incoming, outgoing) => {
+	return createServer((incoming, outgoing) => {
+		let pathname;
+		try {
+			pathname = new URL(incoming.url ?? "/", "http://localhost").pathname;
+		} catch {
+			outgoing.statusCode = 400;
+			outgoing.end("Bad request\n");
+			return;
+		}
+		if (pathname !== "/mcp") return handle(incoming, outgoing);
+		const parent = propagation.extract(ROOT_CONTEXT, incoming.headers);
+		const span = trace.getTracer("lixray").startSpan(
+			`${incoming.method ?? "GET"} /mcp`,
+			{
+				kind: SpanKind.SERVER,
+				attributes: {
+					"http.request.method": incoming.method ?? "GET",
+					"http.route": "/mcp",
+				},
+			},
+			parent,
+		);
+		let ended = false;
+		const failureState = {};
+		const finish = (failure) => {
+			if (ended) return;
+			ended = true;
+			span.setAttribute("http.response.status_code", outgoing.statusCode);
+			failure = failureState.category ?? failure;
+			if (failure || outgoing.statusCode >= 500) {
+				span.setAttribute(
+					"error.type",
+					failure ?? `HTTP_${outgoing.statusCode}`,
+				);
+				span.setStatus({ code: SpanStatusCode.ERROR });
+			}
+			span.end();
+		};
+		outgoing.once("finish", () => finish());
+		outgoing.once("close", () =>
+			finish(outgoing.writableFinished ? undefined : "cancelled"),
+		);
+		outgoing.once("error", () => finish("response_failed"));
+		return context.with(trace.setSpan(parent, span), () =>
+			handle(incoming, outgoing, span, failureState),
+		);
+	});
+
+	async function handle(incoming, outgoing, requestSpan, failureState = {}) {
 		let upstreamFailure = false;
 		try {
 			if (await serveStatic(clientRoot, incoming, outgoing, env)) return;
@@ -50,6 +106,7 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 			let response;
 			try {
 				response = await app.fetch(request, env, executionContext());
+				requestSpan?.addEvent("response_ready");
 			} catch (error) {
 				upstreamFailure = isUpstreamFetchFailure(error);
 				throw error;
@@ -83,9 +140,15 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 			// process. A wedged upstream is a per-request problem.
 			body.on("error", (error) => {
 				console.error("LixRay response stream failed", error);
+				failureState.category = "response_body_failed";
+				requestSpan?.setAttribute("error.type", "response_body_failed");
+				requestSpan?.setStatus({ code: SpanStatusCode.ERROR });
 				outgoing.destroy();
 			});
 			outgoing.on("error", () => body.destroy());
+			outgoing.once("close", () => {
+				if (!outgoing.writableFinished) body.destroy();
+			});
 			body.pipe(outgoing);
 		} catch (error) {
 			console.error("LixRay request failed", error);
@@ -98,7 +161,7 @@ export function createRailwayServer({ app, clientRoot, env = process.env }) {
 					: "Internal server error\n",
 			);
 		}
-	});
+	}
 }
 
 function isUpstreamFetchFailure(error) {

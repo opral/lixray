@@ -1,3 +1,14 @@
+import { SpanStatusCode } from "@opentelemetry/api";
+import {
+	NodeTracerProvider,
+	InMemorySpanExporter,
+	SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-node";
+const spanExporter = new InMemorySpanExporter();
+const tracerProvider = new NodeTracerProvider({
+	spanProcessors: [new SimpleSpanProcessor(spanExporter)],
+});
+tracerProvider.register();
 import assert from "node:assert/strict";
 import {
 	DIFF_CARD_URI,
@@ -21,17 +32,12 @@ import {
 } from "./lix-service.ts";
 import { PostHog } from "posthog-node";
 import {
-	type McpTransportObservation,
 	type McpToolCallObservation,
 	attachMcpToolCallObservationProperties,
-	aiTraceContextForMcpRequest,
 	CREATE_CHECKPOINT_TOOL_DESCRIPTION,
 	handleMcpTransport,
 	LIST_LIXES_TOOL_DESCRIPTION,
 	MCP_REQUEST_ID_HEADER,
-	MCP_AI_PARENT_ID_HEADER,
-	MCP_AI_SESSION_ID_HEADER,
-	MCP_AI_TRACE_ID_HEADER,
 	MCP_PROTOCOL_VERSION,
 	MCP_RESOURCE,
 	MCP_SERVER_INSTRUCTIONS,
@@ -648,7 +654,6 @@ void test("observation properties attach success and error_code on both outcomes
 			requestId: "fail-1",
 			toolName: "execute_sql",
 			outcome: "error",
-			durationMs: 4,
 			surfaceVersion: "test",
 			errorCode: "LIX_TYPE_MISMATCH",
 			lixId: LIX_ID,
@@ -681,7 +686,6 @@ void test("observation properties attach success and error_code on both outcomes
 			requestId: "ok-1",
 			toolName: "execute_sql",
 			outcome: "success",
-			durationMs: 6,
 			surfaceVersion: "test",
 			lixId: LIX_ID,
 			executeInput: {
@@ -731,54 +735,6 @@ void test("MCP request IDs accept a valid incoming ID and expose generated IDs",
 		response.headers.get("access-control-expose-headers") ?? "",
 		/X-Request-ID/,
 	);
-});
-
-void test("MCP AI trace context accepts explicit PostHog and W3C headers", () => {
-	const explicit = aiTraceContextForMcpRequest(
-		new Request("https://lixray.test/mcp", {
-			headers: {
-				[MCP_AI_TRACE_ID_HEADER]: "trace-explicit-123",
-				[MCP_AI_PARENT_ID_HEADER]: "parent-explicit-456",
-				[MCP_AI_SESSION_ID_HEADER]: "conversation-789",
-				traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-			},
-		}),
-	);
-	assert.deepEqual(explicit, {
-		traceId: "trace-explicit-123",
-		parentId: "parent-explicit-456",
-		sessionId: "conversation-789",
-	});
-
-	const w3c = aiTraceContextForMcpRequest(
-		new Request("https://lixray.test/mcp", {
-			headers: {
-				traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-			},
-		}),
-	);
-	assert.deepEqual(w3c, {
-		traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-		parentId: "00f067aa0ba902b7",
-		sessionId: undefined,
-	});
-});
-
-void test("MCP AI trace context rejects malformed or all-zero identifiers", () => {
-	const context = aiTraceContextForMcpRequest(
-		new Request("https://lixray.test/mcp", {
-			headers: {
-				[MCP_AI_TRACE_ID_HEADER]: "contains spaces",
-				[MCP_AI_SESSION_ID_HEADER]: "contains/slash",
-				traceparent: "00-00000000000000000000000000000000-0000000000000000-01",
-			},
-		}),
-	);
-	assert.deepEqual(context, {
-		traceId: undefined,
-		parentId: undefined,
-		sessionId: undefined,
-	});
 });
 
 void test("modern MCP discover and tool calls work without a session id", async () => {
@@ -2157,9 +2113,6 @@ void test("modern 2026-07-28 instrument() emits $mcp_tool_call for list_lixes an
 			init,
 		) as unknown as Request;
 		const headers = new Headers(baseRequest.headers);
-		headers.set(MCP_AI_TRACE_ID_HEADER, "trace-modern-123");
-		headers.set(MCP_AI_PARENT_ID_HEADER, "parent-modern-456");
-		headers.set(MCP_AI_SESSION_ID_HEADER, "conversation-modern-789");
 		const request = new globalThis.Request(baseRequest, {
 			headers,
 		}) as unknown as Request;
@@ -2214,9 +2167,9 @@ void test("modern 2026-07-28 instrument() emits $mcp_tool_call for list_lixes an
 				candidate.event,
 			),
 		)) {
-			assert.equal(event.properties.$ai_trace_id, "trace-modern-123");
-			assert.equal(event.properties.$ai_parent_id, "parent-modern-456");
-			assert.equal(event.properties.$ai_session_id, "conversation-modern-789");
+			if (event.event === "$mcp_tool_call")
+				assert.match(String(event.properties.trace_id), /^[0-9a-f]{32}$/);
+			assert.equal(event.properties.$ai_trace_id, undefined);
 		}
 	} finally {
 		restore();
@@ -2243,7 +2196,6 @@ void test("transport observes and correlates protocol failures before tool execu
 			},
 		}),
 	]) {
-		const observations: McpTransportObservation[] = [];
 		const calls: McpToolCallObservation[] = [];
 		const response = await handleMcpTransport(
 			new Request("https://lixray.test/mcp", {
@@ -2259,7 +2211,6 @@ void test("transport observes and correlates protocol failures before tool execu
 			}),
 			service,
 			{
-				onTransport: (value) => observations.push(value),
 				onToolCall: (value) => calls.push(value),
 			},
 		);
@@ -2271,15 +2222,6 @@ void test("transport observes and correlates protocol failures before tool execu
 		assert.equal(payload.error.data, undefined);
 		assert.doesNotMatch(payload.error.message, /request_id/);
 		assert.doesNotMatch(text, /private-/);
-		assert.equal(observations.length, 1);
-		assert.equal(
-			observations[0]?.requestId,
-			response.headers.get("x-request-id"),
-		);
-		assert.equal(observations[0]?.outcome, "error");
-		assert.equal(observations[0]?.statusCode, response.status);
-		assert.equal(observations[0]?.errorCode, `MCP_RPC_${payload.error.code}`);
-		assert.ok(observations[0]?.traceId);
 		assert.equal(calls.length, 0);
 		if (body.startsWith('{"jsonrpc')) {
 			assert.equal(response.status, 404);
@@ -2293,7 +2235,6 @@ void test("transport contains setup and observer failures with a correlated safe
 		contextSigningKey: "test-key",
 		principal: { userId: "user", clientId: "client" },
 	});
-	const observations: McpTransportObservation[] = [];
 	const response = await handleMcpTransport(
 		new Request("https://lixray.test/mcp", {
 			method: "POST",
@@ -2309,10 +2250,6 @@ void test("transport contains setup and observer failures with a correlated safe
 			get serverName(): string {
 				throw new Error("secret database credentials");
 			},
-			onTransport: (value) => {
-				observations.push(value);
-				throw new Error("analytics unavailable");
-			},
 		},
 	);
 	const text = await response.text();
@@ -2326,9 +2263,7 @@ void test("transport contains setup and observer failures with a correlated safe
 			message: "Internal error",
 		},
 	});
-	assert.equal(observations.length, 1);
-	assert.equal(observations[0]?.errorCode, "MCP_INTERNAL_ERROR");
-	assert.doesNotMatch(JSON.stringify(observations), /secret|credentials/);
+	assert.doesNotMatch(text, /secret|credentials/);
 });
 
 void test("transport generates shared trace context and isolates tool observers", async () => {
@@ -2336,14 +2271,12 @@ void test("transport generates shared trace context and isolates tool observers"
 		contextSigningKey: "test-key",
 		principal: { userId: "user", clientId: "client" },
 	});
-	const observations: McpTransportObservation[] = [];
 	const calls: McpToolCallObservation[] = [];
 	const transport = new StreamableHTTPClientTransport(
 		new URL("https://lixray.test/mcp"),
 		{
 			fetch: async (input, init) =>
 				handleMcpTransport(new Request(input, init), service, {
-					onTransport: (value) => observations.push(value),
 					onToolCall: (value) => {
 						calls.push(value);
 						throw new Error("analytics unavailable");
@@ -2360,20 +2293,12 @@ void test("transport generates shared trace context and isolates tool observers"
 		const result = await client.callTool({ name: "list_lixes", arguments: {} });
 		assert.equal(result.isError, undefined);
 		assert.equal(calls.length, 1);
-		const observed = observations.find(
-			(value) => value.requestId === calls[0]?.requestId,
-		);
-		assert.ok(observed?.traceId);
-		assert.equal(observed?.traceId, calls[0]?.traceId);
-		assert.equal(observed?.outcome, "success");
-		assert.equal(calls[0]?.parentId, observed?.traceId);
+		assert.match(calls[0]!.traceId!, /^[0-9a-f]{32}$/);
 		const invalid = await client.callTool({ name: "open_lix", arguments: {} });
 		assert.equal(invalid.isError, true);
 		assert.doesNotMatch(JSON.stringify(invalid.content), /request_id/);
-		assert.equal(calls.length, 1);
-		assert.equal(observations.at(-1)?.outcome, "error");
-		assert.equal(observations.at(-1)?.statusCode, 200);
-		assert.equal(observations.at(-1)?.errorCode, "MCP_TOOL_ERROR");
+		assert.equal(calls.length, 2);
+		assert.equal(calls[1]?.outcome, "error");
 	} finally {
 		await client.close();
 	}
@@ -3080,4 +3005,345 @@ void test("SQL calls need no opening and failures survive SDK output validation"
 	} finally {
 		await client.close();
 	}
+});
+
+function telemetryGate() {
+	let release!: () => void;
+	let enter!: () => void;
+	const entered = new Promise<void>((resolve) => {
+		enter = resolve;
+	});
+	const wait = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	return { entered, enter, wait, release };
+}
+
+async function telemetryClient(
+	service: LixService,
+	calls: McpToolCallObservation[],
+	options: NonNullable<Parameters<typeof handleMcpTransport>[2]> = {},
+) {
+	const client = new Client(
+		{ name: "telemetry-regression", version: "1" },
+		{
+			versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } },
+		},
+	);
+	await client.connect(
+		new StreamableHTTPClientTransport(new URL("https://lixray.test/mcp"), {
+			fetch: (input, init) =>
+				handleMcpTransport(new Request(input, init), service, {
+					...options,
+					authMode: "none",
+					requestId: "same-http-id",
+					onToolCall: (call) => calls.push(call),
+				}),
+		}),
+	);
+	return client;
+}
+
+void test("tool span and summary wait for execute_sql preview and resource links", async (t) => {
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test",
+		principal: { userId: "u", clientId: "c" },
+	});
+	const calls: McpToolCallObservation[] = [];
+	const client = await telemetryClient(service, calls);
+	t.after(() => client.close());
+	const opened = await client.callTool({
+		name: "open_lix",
+		arguments: { lix_ref: LIX_ID },
+	});
+	const token = (opened.structuredContent as { context: string }).context;
+	const preview = telemetryGate();
+	const links = telemetryGate();
+	let preparingLinks = false;
+	const originalChanges = service.fileChanges.bind(service);
+	service.fileChanges = async (...args) => {
+		preview.enter();
+		await preview.wait;
+		preparingLinks = true;
+		return originalChanges(...args);
+	};
+	const originalLinks = service.getEntityUrls.bind(service);
+	service.getEntityUrls = async (...args) => {
+		if (preparingLinks) {
+			links.enter();
+			await links.wait;
+		}
+		return originalLinks(...args);
+	};
+	const before = spanExporter.getFinishedSpans().length;
+	const work = client.callTool({
+		name: "execute_sql",
+		arguments: {
+			context: token,
+			statements: [
+				{
+					sql: "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) RETURNING id, path",
+					params: [
+						{ kind: "text", value: "/skills/hello.md" },
+						{ kind: "text", value: "# Hello\n" },
+					],
+				},
+			],
+		},
+	});
+	await preview.entered;
+	assert.equal(
+		calls.filter((call) => call.toolName === "execute_sql").length,
+		0,
+	);
+	assert.equal(
+		spanExporter
+			.getFinishedSpans()
+			.slice(before)
+			.filter((span) => span.name === "mcp.tool").length,
+		0,
+	);
+	preview.release();
+	await links.entered;
+	assert.equal(
+		calls.filter((call) => call.toolName === "execute_sql").length,
+		0,
+	);
+	links.release();
+	const result = await work;
+	assert.notEqual(result.isError, true);
+	const spans = spanExporter.getFinishedSpans().slice(before);
+	const tool = spans.find((span) => span.name === "mcp.tool")!;
+	assert.equal(tool.attributes["mcp.tool.outcome"], "success");
+	assert.equal(tool.attributes["lix.commit.outcome"], "committed");
+	for (const name of ["mcp.response.preview", "mcp.response.links"]) {
+		const phase = spans.find((span) => span.name === name)!;
+		assert.ok(phase, name);
+		assert.equal(phase.parentSpanContext?.spanId, tool.spanContext().spanId);
+		assert.ok(
+			spans.indexOf(phase) < spans.indexOf(tool),
+			"phase must finish before tool",
+		);
+	}
+	assert.equal(
+		calls.filter((call) => call.toolName === "execute_sql").length,
+		1,
+	);
+});
+
+void test("late serialization and SDK output validation publish only terminal error summaries", async (t) => {
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test",
+		principal: { userId: "u", clientId: "c" },
+	});
+	const calls: McpToolCallObservation[] = [];
+	const client = await telemetryClient(service, calls);
+	t.after(() => client.close());
+	for (const invalidName of [123, BigInt(123)]) {
+		service.listLixes = async () =>
+			[
+				{
+					id: LIX_ID,
+					name: invalidName,
+					slug: "repo",
+					namespace: { handle: "user" },
+				},
+			] as unknown as Awaited<ReturnType<LixService["listLixes"]>>;
+		const before = calls.length;
+		const result = await client.callTool({ name: "list_lixes", arguments: {} });
+		assert.equal(result.isError, true);
+		assert.equal(calls.length, before + 1);
+		assert.equal(calls.at(-1)?.outcome, "error");
+		const span = spanExporter
+			.getFinishedSpans()
+			.find((span) => span.spanContext().spanId === calls.at(-1)?.spanId)!;
+		assert.equal(span.status.code, SpanStatusCode.ERROR);
+	}
+});
+
+void test("concurrent tools sharing an HTTP request ID keep distinct native identities", async (t) => {
+	const captured: CapturedMcpEvent[] = [];
+	const restore = stubPosthogCapture(captured);
+	t.after(restore);
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test",
+		principal: { userId: "u", clientId: "c" },
+	});
+	const calls: McpToolCallObservation[] = [];
+	const client = await telemetryClient(service, calls, {
+		posthogToken: "phc_test",
+		posthogDistinctId: "u",
+	});
+	t.after(() => client.close());
+	const gate = telemetryGate();
+	const list = service.listLixes.bind(service);
+	service.listLixes = async () => {
+		gate.enter();
+		await gate.wait;
+		return list();
+	};
+	const slow = client.callTool({ name: "list_lixes", arguments: {} });
+	await gate.entered;
+	const invalid = await client.callTool({ name: "open_lix", arguments: {} });
+	assert.equal(invalid.isError, true);
+	assert.equal(calls.length, 1);
+	assert.equal(calls[0]?.toolName, "open_lix");
+	gate.release();
+	await slow;
+	assert.equal(calls.length, 2);
+	assert.equal(calls[1]?.toolName, "list_lixes");
+	assert.equal(calls[0]?.requestId, calls[1]?.requestId);
+	assert.notEqual(calls[0]?.spanId, calls[1]?.spanId);
+	assert.equal(calls[1]?.outcome, "success");
+	await drainPosthogMcp();
+	const events = captured.filter((event) => event.event === "$mcp_tool_call");
+	assert.equal(events.length, 2);
+	for (const call of calls) {
+		const event = events.find(
+			(event) => event.properties.span_id === call.spanId,
+		)!;
+		assert.ok(event);
+		assert.equal(event.properties.$mcp_tool_name, call.toolName);
+		assert.equal(event.properties.success, call.outcome === "success");
+	}
+});
+
+void test("official analytics waits for final validation and completed-call enrichment", async (t) => {
+	const captured: CapturedMcpEvent[] = [];
+	const restore = stubPosthogCapture(captured);
+	t.after(restore);
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test",
+		principal: { userId: "u", clientId: "c" },
+	});
+	service.listLixes = async () =>
+		[
+			{ id: LIX_ID, name: 123, slug: "repo", namespace: { handle: "u" } },
+		] as unknown as Awaited<ReturnType<LixService["listLixes"]>>;
+	const summaries: McpToolCallObservation[] = [];
+	const client = new Client(
+		{ name: "analytics-terminal", version: "1" },
+		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
+	);
+	t.after(() => client.close());
+	await client.connect(
+		new StreamableHTTPClientTransport(new URL("https://lixray.test/mcp"), {
+			fetch: (input, init) =>
+				handleMcpTransport(new Request(input, init), service, {
+					posthogToken: "phc_test",
+					posthogDistinctId: "u",
+					onToolCall: (summary) => {
+						summaries.push(summary);
+						summary.fileContentCharCount = 10;
+						summary.fileContentByteCount = 12;
+					},
+				}),
+		}),
+	);
+	const result = await client.callTool({ name: "list_lixes", arguments: {} });
+	assert.equal(result.isError, true);
+	await drainPosthogMcp();
+	const events = captured.filter((event) => event.event === "$mcp_tool_call");
+	assert.equal(events.length, 1);
+	assert.equal(events[0]?.properties.success, false);
+	assert.equal(events[0]?.properties.char_count, 10);
+	assert.equal(events[0]?.properties.byte_count, 12);
+	assert.equal(events[0]?.properties.span_id, summaries[0]?.spanId);
+	assert.equal(events[0]?.properties.trace_id, summaries[0]?.traceId);
+});
+
+void test("cancelling an SSE response does not shutdown analytics before its tool unwinds", async (t) => {
+	const captured: CapturedMcpEvent[] = [];
+	const restore = stubPosthogCapture(captured);
+	let shutdowns = 0;
+	PostHog.prototype.shutdown = async () => {
+		shutdowns++;
+	};
+	t.after(restore);
+	const gate = telemetryGate();
+	t.after(gate.release);
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test",
+		principal: { userId: "u", clientId: "c" },
+	});
+	const list = service.listLixes.bind(service);
+	service.listLixes = async () => {
+		gate.enter();
+		await gate.wait;
+		return list();
+	};
+	const calls: McpToolCallObservation[] = [];
+	const response = await handleMcpTransport(
+		new Request("https://lixray.test/mcp", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				accept: "application/json, text/event-stream",
+				"mcp-protocol-version": "2025-11-25",
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "list_lixes", arguments: {} },
+			}),
+		}),
+		service,
+		{
+			posthogToken: "phc_test",
+			posthogDistinctId: "u",
+			onToolCall: (call) => calls.push(call),
+		},
+	);
+	assert.match(
+		response.headers.get("content-type") ?? "",
+		/text\/event-stream/,
+	);
+	await gate.entered;
+	assert.equal(calls.length, 0);
+	assert.equal(shutdowns, 0);
+	await response.body!.cancel();
+	await drainPosthogMcp();
+	assert.equal(shutdowns, 0);
+	gate.release();
+	await drainPosthogMcp();
+	await drainPosthogMcp();
+	assert.equal(calls.length, 1);
+	assert.equal(shutdowns, 1);
+});
+
+void test("malformed protocol envelopes annotate the HTTP context without inventing a tool span", async () => {
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test",
+		principal: { userId: "u", clientId: "c" },
+	});
+	const before = spanExporter.getFinishedSpans().length;
+	await tracerProvider
+		.getTracer("test-http")
+		.startActiveSpan("test HTTP root", async (span) => {
+			try {
+				const response = await handleMcpTransport(
+					new Request("https://lixray.test/mcp", {
+						method: "POST",
+						headers: {
+							"content-type": "application/json",
+							accept: "application/json, text/event-stream",
+							"mcp-protocol-version": MCP_PROTOCOL_VERSION,
+						},
+						body: "{private-malformed-json",
+					}),
+					service,
+				);
+				assert.doesNotMatch(await response.text(), /private-malformed-json/);
+			} finally {
+				span.end();
+			}
+		});
+	const spans = spanExporter.getFinishedSpans().slice(before);
+	assert.equal(spans.filter((span) => span.name === "mcp.tool").length, 0);
+	assert.match(
+		String(spans.at(-1)?.attributes["mcp.error.type"]),
+		/^MCP_(RPC_|PROTOCOL_ERROR)/,
+	);
+	assert.equal(spans.at(-1)?.attributes["mcp.failure.stage"], "transport");
 });

@@ -1,3 +1,5 @@
+import { context, trace, type SpanContext } from "@opentelemetry/api";
+import { withSpan, fetchLixWithTrace, failSpan } from "../telemetry.ts";
 import {
 	openLix,
 	type ExecuteResult as LixExecuteResult,
@@ -77,6 +79,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		| undefined;
 	private readonly lixSummaries: ReadonlyArray<LixSummary> | undefined;
 	private readonly sessions = new Map<string, Promise<LixSession>>();
+	private readonly openingSpans = new Map<string, SpanContext>();
 	private closePromise: Promise<void> | undefined;
 	private closed = false;
 
@@ -283,64 +286,89 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	): Promise<{ value: T; commit: CommitSpan | null; warning?: string }> {
 		try {
 			const session = await this.session(lixId);
-			return await this.enqueueSession(session, async () => {
-				await this.ensureBranch(session, branchId);
-				for (let attempt = 0; ; attempt++) {
-					const tx = await session.lix.beginTransaction();
-					let finished = false;
-					try {
-						const value = await run({
-							execute: async (request) =>
-								encodeStatementResult(
-									await tx.execute(
-										request.sql,
-										(request.params ?? []).map(decodeWireParam),
-										{ ...request.options, rowMode: "array" },
-									),
-								),
-						});
-						finished = true;
+			return await this.enqueueSession(
+				session,
+				async () => {
+					await this.ensureBranch(session, branchId);
+					const transactionSpan = trace.getSpan(context.active());
+					transactionSpan?.setAttribute("lix.commit.outcome", "not_attempted");
+					for (let attempt = 0; ; attempt++) {
+						const tx = await session.lix.beginTransaction();
+						let finished = false;
 						try {
-							const { commit } = await tx.commit();
-							return { value, commit };
+							const value = await run({
+								execute: async (request) =>
+									encodeStatementResult(
+										await tx.execute(
+											request.sql,
+											(request.params ?? []).map(decodeWireParam),
+											{ ...request.options, rowMode: "array" },
+										),
+									),
+							});
+							finished = true;
+							try {
+								transactionSpan?.setAttribute("lix.commit.outcome", "unknown");
+								const { commit } = await withSpan(
+									"lix.transaction.commit",
+									() => tx.commit(),
+								);
+								transactionSpan?.setAttribute(
+									"lix.commit.outcome",
+									"committed",
+								);
+								return { value, commit };
+							} catch (caught) {
+								const error = asLixError(caught);
+								const details = error.details as
+									| Record<string, unknown>
+									| undefined;
+								if (details?.nonRetryableAfterCommit !== true) throw error;
+								transactionSpan?.setAttribute(
+									"lix.commit.outcome",
+									"committed",
+								);
+								const span = details.commit as
+									| Partial<CommitSpan>
+									| null
+									| undefined;
+								const commit =
+									typeof span?.before === "string" &&
+									typeof span.after === "string"
+										? { before: span.before, after: span.after }
+										: null;
+								return {
+									value,
+									commit,
+									warning:
+										"Files saved; completion reporting failed. Do not repeat the write.",
+								};
+							}
 						} catch (caught) {
+							if (!finished) await tx.rollback().catch(() => undefined);
 							const error = asLixError(caught);
 							const details = error.details as
 								| Record<string, unknown>
 								| undefined;
-							if (details?.nonRetryableAfterCommit !== true) throw error;
-							const span = details.commit as
-								| Partial<CommitSpan>
-								| null
-								| undefined;
-							const commit =
-								typeof span?.before === "string" &&
-								typeof span.after === "string"
-									? { before: span.before, after: span.after }
-									: null;
-							return {
-								value,
-								commit,
-								warning:
-									"Files saved; completion reporting failed. Do not repeat the write.",
-							};
+							if (
+								attempt >= 2 ||
+								error.code !== "LIX_TRANSACTION_CONFLICT" ||
+								details?.nonRetryableAfterCommit === true ||
+								details?.nonRetryableAfterExecution === true
+							)
+								throw error;
+							transactionSpan?.setAttribute(
+								"lix.commit.outcome",
+								"not_attempted",
+							);
+							transactionSpan?.addEvent("transaction_retry", {
+								attempt: attempt + 1,
+							});
 						}
-					} catch (caught) {
-						if (!finished) await tx.rollback().catch(() => undefined);
-						const error = asLixError(caught);
-						const details = error.details as
-							| Record<string, unknown>
-							| undefined;
-						if (
-							attempt >= 2 ||
-							error.code !== "LIX_TRANSACTION_CONFLICT" ||
-							details?.nonRetryableAfterCommit === true ||
-							details?.nonRetryableAfterExecution === true
-						)
-							throw error;
 					}
-				}
-			});
+				},
+				"lix.transaction",
+			);
 		} catch (caught) {
 			throw asLixError(caught);
 		}
@@ -447,17 +475,36 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	private session(lixId: string): Promise<LixSession> {
-		if (this.closed) {
-			throw createLixError("upstream_error", "Lix client is closed.");
-		}
-		let pending = this.sessions.get(lixId);
-		if (pending) return pending;
-		pending = this.openSession(lixId).catch((error) => {
-			this.sessions.delete(lixId);
-			throw error;
-		});
-		this.sessions.set(lixId, pending);
-		return pending;
+		return withSpan(
+			"lix.session.acquire",
+			async (span) => {
+				if (this.closed) {
+					throw createLixError("upstream_error", "Lix client is closed.");
+				}
+				let pending = this.sessions.get(lixId);
+				if (pending) {
+					const opener = this.openingSpans.get(lixId);
+					if (opener) span.addLink({ context: opener });
+					return pending;
+				}
+				pending = withSpan(
+					"lix.session.open",
+					(openSpan) => {
+						this.openingSpans.set(lixId, openSpan.spanContext());
+						return this.openSession(lixId);
+					},
+					{ "lix.id": lixId },
+				)
+					.catch((error) => {
+						this.sessions.delete(lixId);
+						throw error;
+					})
+					.finally(() => this.openingSpans.delete(lixId));
+				this.sessions.set(lixId, pending);
+				return pending;
+			},
+			{ "lix.id": lixId },
+		);
 	}
 
 	private async openSession(lixId: string): Promise<LixSession> {
@@ -486,8 +533,17 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	private async enqueueSession<T>(
 		session: LixSession,
 		operation: () => Promise<T>,
+		operationName = "lix.session.operation",
 	): Promise<T> {
-		const result = session.queue.then(operation, operation);
+		const operationContext = context.active();
+		const queueSpan = trace.getTracer("lixray").startSpan("lix.session.queue");
+		const run = () => {
+			queueSpan.end();
+			return context.with(operationContext, () =>
+				withSpan(operationName, operation),
+			);
+		};
+		const result = session.queue.then(run, run);
 		session.queue = result.then(
 			() => undefined,
 			() => undefined,
@@ -523,10 +579,14 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		path: string,
 		request: Request,
 	): Promise<Response> {
-		const authorizationFailure = await this.authorizeLix(
-			lixId,
-			this.user,
-			this.env,
+		const authorizationFailure = await withSpan(
+			"lix.authorization",
+			async (span) => {
+				const failure = await this.authorizeLix(lixId, this.user, this.env);
+				if (failure) failSpan(span, "authorization_denied");
+				return failure;
+			},
+			{ "lix.id": lixId },
 		);
 		if (authorizationFailure) return authorizationFailure;
 
@@ -543,13 +603,18 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		});
 		const lixFetch = this.lixFetch;
 		if (lixFetch) {
-			const response = await lixFetch(lixId, template);
+			const response = await fetchLixWithTrace(lixId, template, lixFetch);
 			return provisionAccountAfterHandshake({
 				lixId,
 				protocolPath: path,
 				response,
 				account: this.user.account,
-				lixFetch: (provisioningRequest) => lixFetch(lixId, provisioningRequest),
+				lixFetch: (provisioningRequest) =>
+					fetchLixWithTrace(
+						lixId,
+						new Request(provisioningRequest, { signal: this.signal }),
+						lixFetch,
+					),
 			});
 		}
 		return new Response("Lix storage is not configured.\n", { status: 500 });
