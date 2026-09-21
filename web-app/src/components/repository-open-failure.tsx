@@ -23,15 +23,13 @@ export function RepositoryOpenFailure({
 						? "Another tab or app window is using this repository. Close its other tabs and windows, then retry. Your saved local changes will be kept."
 						: message}
 				</span>
-				{storageBusy ? (
-					<button
-						type="button"
-						className="mt-2 rounded-md bg-fg px-4 py-2 text-bg focus-visible:outline-2 focus-visible:outline-offset-2"
-						onClick={onRetry}
-					>
-						Retry
-					</button>
-				) : null}
+				<button
+					type="button"
+					className="mt-2 rounded-md bg-fg px-4 py-2 text-bg focus-visible:outline-2 focus-visible:outline-offset-2"
+					onClick={onRetry}
+				>
+					Retry
+				</button>
 			</div>
 		</main>
 	);

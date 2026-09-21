@@ -1607,7 +1607,7 @@ function DelayedOpeningLabel() {
 		const timer = window.setTimeout(() => setVisible(true), 500);
 		return () => window.clearTimeout(timer);
 	}, []);
-	return visible ? <>Opening repository…</> : null;
+	return visible ? <>Connecting to repository…</> : null;
 }
 
 const REPOSITORY_TOP_BAR_PROPS = {

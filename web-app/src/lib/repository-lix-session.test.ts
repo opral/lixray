@@ -412,3 +412,15 @@ void test("authority upgrade transitions do not turn ordinary opening into an up
 		{ fromVersion: undefined, toVersion: 81, phase: "opening" },
 	);
 });
+
+void test("exhausted admission does not restart the SDK retry budget", () => {
+	assert.equal(
+		isRetryableRepositoryOpenError(
+			Object.assign(new Error("offline"), {
+				code: "LIX_TRANSPORT_NETWORK",
+				details: { admissionRetryExhausted: true },
+			}),
+		),
+		false,
+	);
+});

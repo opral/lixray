@@ -574,8 +574,10 @@ export function isRetryableRepositoryOpenError(error: unknown): boolean {
 	if (
 		typeof details === "object" &&
 		details !== null &&
-		(("nonRetryableAfterCommit" in details &&
-			details.nonRetryableAfterCommit === true) ||
+		(("admissionRetryExhausted" in details &&
+			details.admissionRetryExhausted === true) ||
+			("nonRetryableAfterCommit" in details &&
+				details.nonRetryableAfterCommit === true) ||
 			("nonRetryableAfterExecution" in details &&
 				details.nonRetryableAfterExecution === true))
 	)
