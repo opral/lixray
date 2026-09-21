@@ -87,6 +87,14 @@ Resources include `service.name=lixray`, `service.version`,
 and its corresponding revision/instance resources. Repository and request IDs
 are span attributes, not metric dimensions.
 
+For Lix server images, `vcs.ref.head.revision` matches the image's OCI revision
+label. Merge-artifact promotion updates both metadata values without rebuilding
+the tested filesystem layers. Content-tag reuse deliberately preserves the
+original image digest and its build revision: that revision can precede the
+requested `vendor/lix` checkout because the server inputs are identical. The
+resolver's `sourceRevision` identifies the requested checkout, not necessarily
+the reused image's build revision.
+
 ## Cross-service contract test
 
 With workspace dependencies installed and the vendored JS SDK prepared, run the
