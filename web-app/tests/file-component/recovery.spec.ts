@@ -101,14 +101,17 @@ test("occupied storage explains safe recovery and retry leaves the error screen"
 	await expect(page.getByRole("status")).toHaveText("Opening repository");
 });
 
-test("unrelated opening errors keep their diagnostic without lock recovery", async ({
+test("opening errors keep their diagnostic and can retry without lock recovery", async ({
 	page,
 }) => {
 	await page.goto("/recovery.html?mode=open-error");
 	await expect(page.getByRole("alert")).toContainText(
 		"Unrelated opening error",
 	);
-	await expect(
-		page.getByRole("button", { name: "Retry", exact: true }),
-	).toHaveCount(0);
+	await expect(page.getByRole("alert")).not.toContainText(
+		"Close its other tabs and windows",
+	);
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await expect(page.getByRole("alert")).toHaveCount(0);
+	await expect(page.getByRole("status")).toHaveText("Opening repository");
 });
