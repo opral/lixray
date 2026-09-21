@@ -1,5 +1,5 @@
 /**
- * Server-side PostHog env for official `@posthog/mcp` and custom MCP spans.
+ * Server-side PostHog environment for official MCP and product analytics.
  * Keep Railway PR naming in sync with Dockerfile and assert-railway-env.mjs.
  */
 const RAILWAY_PR_ENVIRONMENT = /^(lixray-pr-\d+|pr-[a-z0-9]+-\d+)$/;
@@ -61,8 +61,8 @@ export function resolvePosthogProjectToken(
 }
 
 /**
- * Official `@posthog/mcp` token. Independent of the custom `$ai_span` session
- * and of `POSTHOG_ENVIRONMENT`. Disabled in demo / Railway PR environments.
+ * Official `@posthog/mcp` usage token, independent of native trace export.
+ * Disabled in demo / Railway PR environments.
  */
 export function resolveOfficialMcpPosthogToken(
 	env: PosthogProjectTokenEnv & DemoTelemetryEnv,

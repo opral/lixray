@@ -118,3 +118,28 @@ test("loaded server image validation covers the expected OCI platform fields", (
 		/unexpected OCI provenance or platform/,
 	);
 });
+
+
+test("local source builds embed the same telemetry revision as the OCI label", async () => {
+  const calls = [];
+  const resolved = await resolveLixServerImage({
+    mode: "local",
+    allowBuild: true,
+    inspectImage: () => undefined,
+    inspectLocalImage: () => false,
+    installArtifact: async () => undefined,
+    runCommand: (command, args) => calls.push({ command, args }),
+  });
+  assert.equal(resolved.source, "source-build");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "docker");
+  const args = calls[0].args;
+  assert.equal(
+    args[args.indexOf("--build-arg") + 1],
+    `LIX_SOURCE_REVISION=${resolved.sourceRevision}`,
+  );
+  assert.equal(
+    args[args.indexOf("--label") + 1],
+    `org.opencontainers.image.revision=${resolved.sourceRevision}`,
+  );
+});

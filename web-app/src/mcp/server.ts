@@ -4,6 +4,14 @@
  * Lix service remain the runtime type guards for these values.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+import {
+	context as otelContext,
+	createContextKey,
+	isSpanContextValid,
+	trace,
+	SpanStatusCode,
+} from "@opentelemetry/api";
+import { withSpan } from "../telemetry.ts";
 import { sqlToolError } from "./sql-errors.ts";
 import { instrument, PostHogMCP } from "@posthog/mcp";
 import {
@@ -74,9 +82,6 @@ export const MCP_PROTECTED_RESOURCE_PATH =
 export const MCP_DOCUMENTATION_PATH = "/mcp/docs";
 export const MCP_PROTECTED_RESOURCE_URL = `${MCP_RESOURCE}${MCP_PROTECTED_RESOURCE_PATH}`;
 export const MCP_REQUEST_ID_HEADER = "X-Request-ID";
-export const MCP_AI_TRACE_ID_HEADER = "X-PostHog-AI-Trace-ID";
-export const MCP_AI_PARENT_ID_HEADER = "X-PostHog-AI-Parent-ID";
-export const MCP_AI_SESSION_ID_HEADER = "X-PostHog-AI-Session-ID";
 export const SQL_GUIDE_URI = "lixray://docs/sql";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
@@ -124,7 +129,7 @@ export interface McpToolCallObservation {
 	requestId: string;
 	toolName: string;
 	outcome: "success" | "error";
-	durationMs: number;
+	spanId?: string;
 	surfaceVersion: string;
 	errorCode?: string;
 	lixId?: string;
@@ -135,26 +140,6 @@ export interface McpToolCallObservation {
 	/** Original SQL + params for in-process file-write detection. Never sent to PostHog. */
 	rawStatements?: Array<{ sql: string; params?: Array<unknown> }>;
 	traceId?: string;
-	parentId?: string;
-	sessionId?: string;
-}
-
-export interface McpTransportObservation {
-	requestId: string;
-	traceId: string;
-	parentId?: string;
-	sessionId?: string;
-	durationMs: number;
-	statusCode: number;
-	outcome: "success" | "error";
-	errorCode?: string;
-	stage: "transport";
-}
-
-export interface McpAiTraceContext {
-	traceId?: string;
-	parentId?: string;
-	sessionId?: string;
 }
 
 export type McpToolCallObserver = (observation: McpToolCallObservation) => void;
@@ -166,13 +151,13 @@ export interface McpServerOptions {
 	/** Browser origin of the serving deployment; never supplied by tool arguments. */
 	urlOrigin?: string;
 	onToolCall?: McpToolCallObserver;
-	onTransport?: (observation: McpTransportObservation) => void;
 	posthogToken?: string;
 	posthogHost?: string;
 	posthogDistinctId?: string;
 	posthogClientId?: string;
 	onPosthogFlush?: (flush: () => Promise<void>) => void;
-	traceContext?: McpAiTraceContext;
+	/** Internal transport factory installs tracing outside official analytics. */
+	deferToolTracing?: boolean;
 }
 
 type McpSecurityScheme =
@@ -248,7 +233,6 @@ export function wrapDiscoverAsOfficialHandshake(
 		distinctId?: string;
 		clientId?: string;
 		requestId?: string;
-		traceContext?: McpAiTraceContext;
 	} = {},
 ): void {
 	const lowLevel = server.server as {
@@ -287,7 +271,6 @@ function emitDiscoverAsOfficialHandshake(
 		distinctId?: string;
 		clientId?: string;
 		requestId?: string;
-		traceContext?: McpAiTraceContext;
 	},
 	durationMs: number,
 ): void {
@@ -297,7 +280,7 @@ function emitDiscoverAsOfficialHandshake(
 		mcp_server: "lixray",
 		oauth_client_id: identity.clientId,
 		request_id: identity.requestId,
-		...posthogAiTraceProperties(identity.traceContext),
+		...canonicalTraceProperties(),
 	};
 	posthog.captureInitialize({
 		distinctId: identity.distinctId,
@@ -615,40 +598,111 @@ export function requestIdForMcpRequest(request: Request): string {
 		: crypto.randomUUID();
 }
 
-const POSTHOG_AI_ID_PATTERN = /^[A-Za-z0-9._~@()!':|-]{1,200}$/;
-const TRACEPARENT_PATTERN =
-	/^(?!ff)([0-9a-f]{2})-((?!0{32})[0-9a-f]{32})-((?!0{16})[0-9a-f]{16})-([0-9a-f]{2})(?:-.+)?$/i;
-
-function validPosthogAiId(value: string | null): string | undefined {
-	const trimmed = value?.trim();
-	return trimmed && POSTHOG_AI_ID_PATTERN.test(trimmed) ? trimmed : undefined;
+function canonicalTraceProperties(): Record<string, string> {
+	const span = trace.getActiveSpan()?.spanContext();
+	return span && isSpanContextValid(span)
+		? { trace_id: span.traceId, span_id: span.spanId }
+		: {};
 }
 
-export function aiTraceContextForMcpRequest(
-	request: Request,
-): McpAiTraceContext {
-	const traceparent = request.headers.get("traceparent")?.trim();
-	const traceparentMatch = traceparent?.match(TRACEPARENT_PATTERN);
-	return {
-		traceId:
-			validPosthogAiId(request.headers.get(MCP_AI_TRACE_ID_HEADER)) ??
-			traceparentMatch?.[2]?.toLowerCase(),
-		parentId:
-			validPosthogAiId(request.headers.get(MCP_AI_PARENT_ID_HEADER)) ??
-			traceparentMatch?.[3]?.toLowerCase(),
-		sessionId: validPosthogAiId(request.headers.get(MCP_AI_SESSION_ID_HEADER)),
-	};
+interface ToolCallState {
+	completed?: Promise<void>;
+	observation?: McpToolCallObservation;
+	commitOutcome?: "not_committed" | "committed" | "unknown";
 }
+const TOOL_CALL_STATE = createContextKey("lixray.mcp.tool-call");
 
-export function posthogAiTraceProperties(
-	context: McpAiTraceContext | undefined,
-): Record<string, string> {
-	if (!context) return {};
-	return {
-		...(context.traceId ? { $ai_trace_id: context.traceId } : {}),
-		...(context.parentId ? { $ai_parent_id: context.parentId } : {}),
-		...(context.sessionId ? { $ai_session_id: context.sessionId } : {}),
+/** Own the SDK dispatch boundary, including input and output validation. */
+function traceToolDispatch(
+	server: McpServer,
+	options: McpServerOptions,
+	pendingCalls?: Set<Promise<unknown>>,
+): void {
+	const lowLevel = server.server as unknown as {
+		_requestHandlers: Map<
+			string,
+			(
+				request: { params?: { name?: string } },
+				extra: unknown,
+			) => Promise<{ isError?: boolean }>
+		>;
 	};
+	const handler = lowLevel._requestHandlers.get("tools/call");
+	if (!handler) throw new Error("MCP tools/call handler is not registered");
+	lowLevel._requestHandlers.set("tools/call", async (request, extra) => {
+		let complete!: () => void;
+		const state: ToolCallState = {
+			completed: new Promise<void>((resolve) => {
+				complete = resolve;
+			}),
+		};
+		// Only advertise known tool names; unknown names can contain private input.
+		const requestedTool = request.params?.name ?? "";
+		const toolName = registeredMcpToolNames(server).includes(requestedTool)
+			? requestedTool
+			: "unknown";
+		if (
+			[
+				"write_files",
+				"execute_sql",
+				"create_checkpoint",
+				"restore",
+				"undo",
+				"redo",
+				"create_branch",
+				"delete_branch",
+			].includes(toolName)
+		)
+			state.commitOutcome = "not_committed";
+		const work = withSpan(
+			"mcp.tool",
+			async (span) =>
+				otelContext.with(
+					otelContext.active().setValue(TOOL_CALL_STATE, state),
+					async () => {
+						let outcome: "success" | "error" = "error";
+						try {
+							const result = await handler(request, extra);
+							outcome = result?.isError === true ? "error" : "success";
+							return result;
+						} finally {
+							span.setAttribute("mcp.tool.outcome", outcome);
+							if (state.commitOutcome)
+								span.setAttribute("lix.commit.outcome", state.commitOutcome);
+							if (outcome === "error")
+								span.setStatus({ code: SpanStatusCode.ERROR });
+							const observation: McpToolCallObservation = {
+								requestId: options.requestId ?? "",
+								toolName,
+								surfaceVersion: mcpSurfaceVersion(toolSurfaceDescriptions()),
+								...state.observation,
+								outcome,
+								traceId: span.spanContext().traceId,
+								spanId: span.spanContext().spanId,
+							};
+							if (observation.lixId)
+								span.setAttribute("lix.id", observation.lixId);
+							if (observation.errorCode)
+								span.setAttribute("error.type", observation.errorCode);
+							try {
+								options.onToolCall?.(observation);
+							} catch {
+								/* Analytics cannot affect results. */
+							}
+							state.observation = Object.freeze(observation);
+							complete();
+						}
+					},
+				),
+			{ "mcp.tool.name": toolName, "request.id": options.requestId ?? "" },
+		);
+		pendingCalls?.add(work);
+		try {
+			return await work;
+		} finally {
+			pendingCalls?.delete(work);
+		}
+	});
 }
 
 export function withMcpRequestId(
@@ -752,7 +806,6 @@ export function createLixrayMcpServer(
 			),
 		}),
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -797,7 +850,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -818,7 +870,6 @@ export function createLixrayMcpServer(
 		async ({ context: token, entities }) =>
 			service.getEntityUrls(token, entities, options.urlOrigin),
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -854,7 +905,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -882,7 +932,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -933,12 +982,12 @@ export function createLixrayMcpServer(
 				},
 				options.urlOrigin,
 			);
-			const rendered = await writeCard(
-				service,
-				token,
-				written,
-				files,
-				options.urlOrigin,
+			const callState = otelContext.active().getValue(TOOL_CALL_STATE) as
+				| ToolCallState
+				| undefined;
+			if (callState) callState.commitOutcome = "committed";
+			const rendered = await withSpan("mcp.response.preview", () =>
+				writeCard(service, token, written, files, options.urlOrigin),
 			);
 			const warning = [
 				written.warning,
@@ -959,7 +1008,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1017,7 +1065,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1055,7 +1102,6 @@ export function createLixrayMcpServer(
 			return service.execute(args.context, toExecuteRequest(args));
 		},
 		"query_sql",
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1115,7 +1161,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		"execute_sql",
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1140,7 +1185,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1165,7 +1209,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1205,7 +1248,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1226,7 +1268,6 @@ export function createLixrayMcpServer(
 			return { context: result.context, commit_id: result.commitId };
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1257,7 +1298,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1281,7 +1321,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1305,7 +1344,6 @@ export function createLixrayMcpServer(
 			};
 		},
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1324,7 +1362,6 @@ export function createLixrayMcpServer(
 		async ({ context: token, source_branch_id }) =>
 			service.mergeBranchPreview(token, source_branch_id),
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
@@ -1343,39 +1380,35 @@ export function createLixrayMcpServer(
 		async ({ context: token, source_branch_id }) =>
 			service.mergeBranch(token, source_branch_id),
 		undefined,
-		options.onToolCall,
 		surfaceVersion,
 		requestId,
 		service,
 		options.urlOrigin,
 	);
 
+	if (!options.deferToolTracing)
+		traceToolDispatch(server, { ...options, requestId });
 	return server;
 }
 
-/** Observe the complete SDK boundary, including failures before a tool runs. */
+/** Sanitize protocol errors at the SDK boundary, including failures before a tool runs. */
 export async function handleMcpTransport(
 	request: Request,
 	service: LixService,
 	options: McpServerOptions = {},
 ): Promise<Response> {
-	const startedAt = Date.now();
 	const requestId = options.requestId ?? requestIdForMcpRequest(request);
-	const incomingContext =
-		options.traceContext ?? aiTraceContextForMcpRequest(request);
-	const traceContext = {
-		...incomingContext,
-		traceId: incomingContext.traceId ?? crypto.randomUUID(),
-	};
-	let errorCode: string | undefined;
 	let response: Response;
 	try {
 		response = await handleMcpTransportRequest(
 			request,
 			service,
-			{ ...options, requestId, traceContext },
+			{ ...options, requestId },
 			(error) => {
-				errorCode = "MCP_PROTOCOL_ERROR";
+				trace.getActiveSpan()?.setAttributes({
+					"mcp.error.type": "MCP_PROTOCOL_ERROR",
+					"mcp.failure.stage": "transport",
+				});
 				console.error("LixRay MCP protocol error", { requestId, error });
 			},
 		);
@@ -1396,7 +1429,15 @@ export async function handleMcpTransport(
 				if (rpc.error && typeof rpc.error === "object") {
 					const error = rpc.error as Record<string, unknown>;
 					const code = typeof error.code === "number" ? error.code : -32603;
-					errorCode = `MCP_RPC_${code}`;
+					const category = [-32700, -32600, -32601, -32602, -32603].includes(
+						code,
+					)
+						? `MCP_RPC_${code}`
+						: "MCP_RPC_ERROR";
+					trace.getActiveSpan()?.setAttributes({
+						"mcp.error.type": category,
+						"mcp.failure.stage": "transport",
+					});
 					// SDK errors may contain private input or exception details.
 					const messages: Record<number, string> = {
 						[-32700]: "Parse error",
@@ -1415,18 +1456,15 @@ export async function handleMcpTransport(
 						statusText: response.statusText,
 						headers,
 					});
-				} else if (
-					rpc.result &&
-					typeof rpc.result === "object" &&
-					(rpc.result as Record<string, unknown>).isError === true
-				) {
-					errorCode = "MCP_TOOL_ERROR";
 				}
 			}
 		}
 	} catch (error) {
+		trace.getActiveSpan()?.setAttributes({
+			"mcp.error.type": "MCP_INTERNAL_ERROR",
+			"mcp.failure.stage": "transport",
+		});
 		console.error("LixRay MCP transport error", { requestId, error });
-		errorCode = "MCP_INTERNAL_ERROR";
 		response = Response.json(
 			{
 				jsonrpc: "2.0",
@@ -1439,20 +1477,6 @@ export async function handleMcpTransport(
 			{ status: 500, headers: { "access-control-allow-origin": "*" } },
 		);
 	}
-	errorCode ??= response.status >= 400 ? `HTTP_${response.status}` : undefined;
-	try {
-		options.onTransport?.({
-			requestId,
-			...traceContext,
-			stage: "transport",
-			durationMs: Date.now() - startedAt,
-			statusCode: response.status,
-			outcome: errorCode ? "error" : "success",
-			...(errorCode ? { errorCode } : {}),
-		});
-	} catch {
-		/* Telemetry must not change protocol responses. */
-	}
 	return withMcpRequestId(response, requestId);
 }
 
@@ -1463,36 +1487,13 @@ async function handleMcpTransportRequest(
 	onProtocolError: (error: Error) => void,
 ): Promise<Response> {
 	const requestId = options.requestId ?? requestIdForMcpRequest(request);
-	const traceContext =
-		options.traceContext ?? aiTraceContextForMcpRequest(request);
 	if (new URL(request.url).pathname !== MCP_PATH) {
 		return withMcpRequestId(
 			new Response("Not found\n", { status: 404 }),
 			requestId,
 		);
 	}
-	// Cache observations before constructing the server. `eventProperties`
-	// runs before the tool; `beforeSend` runs after, so the wrap must be
-	// bound into registerTool() — assigning onto `options` later is a no-op.
-	const observationCache = new Map<string, McpToolCallObservation>();
-	const onToolCall: McpToolCallObserver | undefined =
-		options.posthogToken || options.onToolCall
-			? (observation) => {
-					Object.assign(observation, {
-						...(traceContext.traceId ? { traceId: traceContext.traceId } : {}),
-						parentId: traceContext.traceId,
-						...(traceContext.sessionId
-							? { sessionId: traceContext.sessionId }
-							: {}),
-					});
-					observationCache.set(observation.requestId, observation);
-					try {
-						options.onToolCall?.(observation);
-					} catch {
-						/* Telemetry must not change tool results. */
-					}
-				}
-			: undefined;
+	const pendingCalls = new Set<Promise<unknown>>();
 	let shutdownPosthog: (() => Promise<void>) | undefined;
 	const posthog = options.posthogToken
 		? new PostHogMCP(options.posthogToken, {
@@ -1503,6 +1504,7 @@ async function handleMcpTransportRequest(
 		: undefined;
 	if (posthog) {
 		shutdownPosthog = async () => {
+			await Promise.allSettled([...pendingCalls]);
 			// @posthog/mcp publishes through an internal async redaction pipeline.
 			// Drain microtasks, then one macrotask, before shutting the client.
 			await Promise.resolve();
@@ -1516,7 +1518,7 @@ async function handleMcpTransportRequest(
 			const server = createLixrayMcpServer(service, {
 				...options,
 				requestId,
-				onToolCall,
+				deferToolTracing: true,
 				serverName: options.serverName ?? mcpServerNameForUrl(request.url),
 				urlOrigin: options.urlOrigin ?? new URL(request.url).origin,
 			});
@@ -1534,9 +1536,15 @@ async function handleMcpTransportRequest(
 						mcp_server: "lixray",
 						oauth_client_id: options.posthogClientId,
 						request_id: requestId,
-						...posthogAiTraceProperties(traceContext),
+						...canonicalTraceProperties(),
 					}),
-					beforeSend: (event) => {
+					beforeSend: async (event) => {
+						const call = otelContext.active().getValue(TOOL_CALL_STATE) as
+							| ToolCallState
+							| undefined;
+						// The pinned SDK publishes asynchronously without awaiting this sink.
+						// Wait for output validation and product enrichment before exporting.
+						if (event.event === "$mcp_tool_call") await call?.completed;
 						const redacted = redactMcpAnalyticsEvent(event);
 						if (
 							!redacted.properties ||
@@ -1552,7 +1560,7 @@ async function handleMcpTransportRequest(
 						if (redacted.event === "$mcp_tool_call") {
 							attachMcpToolCallObservationProperties(
 								props,
-								observationCache.get(requestId),
+								call?.observation,
 								props.$mcp_is_error === true,
 							);
 						}
@@ -1563,9 +1571,9 @@ async function handleMcpTransportRequest(
 					distinctId: options.posthogDistinctId,
 					clientId: options.posthogClientId,
 					requestId,
-					traceContext,
 				});
 			}
+			traceToolDispatch(server, { ...options, requestId }, pendingCalls);
 			return server;
 		},
 		{
@@ -1574,6 +1582,17 @@ async function handleMcpTransportRequest(
 			onerror: onProtocolError,
 		},
 	);
+	const finishAnalytics = (): void => {
+		if (!shutdownPosthog) return;
+		const shutdown = shutdownPosthog;
+		shutdownPosthog = undefined;
+		try {
+			if (options.onPosthogFlush) options.onPosthogFlush(shutdown);
+			else void shutdown().catch(() => undefined);
+		} catch {
+			/* Analytics cannot affect responses. */
+		}
+	};
 	try {
 		const response = await handler.fetch(request);
 		const headers = new Headers(response.headers);
@@ -1583,25 +1602,16 @@ async function handleMcpTransportRequest(
 			"MCP-Protocol-Version, Mcp-Method, Mcp-Name",
 		);
 		return withMcpRequestId(
-			new Response(response.body, {
+			new Response(finishAnalyticsBody(response.body, finishAnalytics), {
 				status: response.status,
 				statusText: response.statusText,
 				headers,
 			}),
 			requestId,
 		);
-	} finally {
-		try {
-			if (shutdownPosthog) {
-				if (options.onPosthogFlush) {
-					options.onPosthogFlush(shutdownPosthog);
-				} else {
-					await shutdownPosthog();
-				}
-			}
-		} catch {
-			/* Analytics delivery must not fail the MCP request. */
-		}
+	} catch (error) {
+		finishAnalytics();
+		throw error;
 	}
 }
 
@@ -1715,7 +1725,6 @@ function registerTool(
 	securitySchemes: Array<McpSecurityScheme>,
 	call: (args: Record<string, any>, callId: string) => Promise<any>,
 	observationName: string | undefined,
-	observer: McpToolCallObserver | undefined,
 	surfaceVersion: string,
 	requestId: string,
 	service: LixService,
@@ -1735,7 +1744,6 @@ function registerTool(
 			},
 		},
 		async (args) => {
-			const startedAt = Date.now();
 			const toolName = observationName ?? name;
 			const input = args as Record<string, any>;
 			const rawStatements = sqlToolStatements(name, input);
@@ -1751,8 +1759,13 @@ function registerTool(
 				// the readback below sees only this call's changes.
 				const callId = `${requestId}.${crypto.randomUUID()}`;
 				executionStarted = true;
+				const callState = otelContext.active().getValue(TOOL_CALL_STATE) as
+					| ToolCallState
+					| undefined;
+				if (callState?.commitOutcome) callState.commitOutcome = "unknown";
 				const returned = (await call(input, callId)) as Record<string, unknown>;
 				executionCompleted = true;
+				if (callState?.commitOutcome) callState.commitOutcome = "committed";
 				// Preview metadata travels outside content and structuredContent: hosts
 				// validate structuredContent against the output schema.
 				const declared = returned[UI_RESULT_KEY];
@@ -1777,7 +1790,36 @@ function registerTool(
 						)
 					: undefined;
 				const lixId = await observationLixId(service, input, raw);
-				observeToolCall(observer, startedAt, {
+
+				const structuredContent = {
+					...(raw as Record<string, unknown>),
+				};
+				const touched =
+					name === "execute_sql" &&
+					typeof input.context === "string" &&
+					!readOnlyResults(raw)
+						? await withSpan("mcp.response.changes", () =>
+								touchedByCall(
+									service,
+									input.context,
+									mcpOriginKey(callId, input.options?.origin_key),
+								),
+							)
+						: EMPTY_TOUCHED;
+				// An execute_sql batch has the same receipt a write has — a commit
+				// span and the files it touched — so it gets the same card.
+				if (name === "execute_sql" && typeof input.context === "string")
+					ui = await withSpan("mcp.response.preview", () =>
+						executeCard(service, input.context, raw, touched, urlOrigin),
+					);
+				const summary = toolResultTextBlocks(
+					ownSummary ?? summarizeToolResult(name, raw, touched),
+					structuredContent,
+				);
+				const links = await withSpan("mcp.response.links", () =>
+					resultResourceLinks(name, input, raw, touched, service, urlOrigin),
+				);
+				stageToolSummary({
 					requestId,
 					toolName,
 					outcome: "success",
@@ -1787,41 +1829,6 @@ function registerTool(
 					...(executeOutput ? { executeOutput } : {}),
 					...(rawStatements ? { rawStatements } : {}),
 				});
-				const structuredContent = {
-					...(raw as Record<string, unknown>),
-				};
-				const touched =
-					name === "execute_sql" &&
-					typeof input.context === "string" &&
-					!readOnlyResults(raw)
-						? await touchedByCall(
-								service,
-								input.context,
-								mcpOriginKey(callId, input.options?.origin_key),
-							)
-						: EMPTY_TOUCHED;
-				// An execute_sql batch has the same receipt a write has — a commit
-				// span and the files it touched — so it gets the same card.
-				if (name === "execute_sql" && typeof input.context === "string")
-					ui = await executeCard(
-						service,
-						input.context,
-						raw,
-						touched,
-						urlOrigin,
-					);
-				const summary = toolResultTextBlocks(
-					ownSummary ?? summarizeToolResult(name, raw, touched),
-					structuredContent,
-				);
-				const links = await resultResourceLinks(
-					name,
-					input,
-					raw,
-					touched,
-					service,
-					urlOrigin,
-				);
 				// Summary, then the links a host can render as chips, then the
 				// structured JSON for text-only hosts.
 				return {
@@ -1839,8 +1846,19 @@ function registerTool(
 							statementCount: rawStatements?.length ?? 0,
 						})
 					: baseError;
+				const callState = otelContext.active().getValue(TOOL_CALL_STATE) as
+					| ToolCallState
+					| undefined;
+				if (
+					callState &&
+					"outcome" in error &&
+					(error.outcome === "committed" ||
+						error.outcome === "not_committed" ||
+						error.outcome === "unknown")
+				)
+					callState.commitOutcome = error.outcome;
 				const lixId = await observationLixId(service, input);
-				observeToolCall(observer, startedAt, {
+				stageToolSummary({
 					requestId,
 					toolName,
 					outcome: "error",
@@ -2569,23 +2587,12 @@ function writeAnnotations(
 	};
 }
 
-function observeToolCall(
-	observer: McpToolCallObserver | undefined,
-	startedAt: number,
-	observation: Omit<McpToolCallObservation, "durationMs">,
-): void {
-	if (!observer) return;
-	try {
-		observer({
-			...observation,
-			durationMs: Math.max(0, Date.now() - startedAt),
-		});
-	} catch (caught) {
-		console.warn(
-			"Failed to observe LixRay MCP tool call",
-			errorDetails(caught),
-		);
-	}
+function stageToolSummary(observation: McpToolCallObservation): void {
+	const state = otelContext.active().getValue(TOOL_CALL_STATE) as
+		| ToolCallState
+		| undefined;
+	if (state) state.observation = observation;
+	// Dispatch publishes one completed summary after SDK output validation.
 }
 
 function errorDetails(caught: unknown): Record<string, unknown> {
@@ -2594,4 +2601,40 @@ function errorDetails(caught: unknown): Record<string, unknown> {
 	return caught && typeof caught === "object"
 		? { ...(caught as Record<string, unknown>) }
 		: { value: String(caught) };
+}
+
+/** Defer analytics shutdown until EOF/error/cancel, never await network export. */
+function finishAnalyticsBody(
+	body: ReadableStream<Uint8Array> | null,
+	finish: () => void,
+): ReadableStream<Uint8Array> | null {
+	if (!body) {
+		finish();
+		return null;
+	}
+	const reader = body.getReader();
+	return new ReadableStream(
+		{
+			async pull(controller) {
+				try {
+					const next = await reader.read();
+					if (next.done) {
+						finish();
+						controller.close();
+					} else controller.enqueue(next.value);
+				} catch (error) {
+					finish();
+					controller.error(error);
+				}
+			},
+			async cancel(reason) {
+				try {
+					await reader.cancel(reason);
+				} finally {
+					finish();
+				}
+			},
+		},
+		{ highWaterMark: 0 },
+	);
 }

@@ -34,3 +34,21 @@ const rewritten = source.replaceAll(
 await writeFile(outfile, rewritten);
 await bakeLixWasm();
 await assertRailwayBundle(outfile);
+
+// The runtime image has no node_modules. Bundle host tracing alongside its
+// HTTP adapter; all copies of the OTel API share the registered global provider.
+await build({
+	entryPoints: [
+		resolve(root, "telemetry.mjs"),
+		resolve(root, "railway-server.mjs"),
+	],
+	outdir: resolve(root, "../dist/runtime"),
+	outExtension: { ".js": ".mjs" },
+	bundle: true,
+	platform: "node",
+	format: "esm",
+	external: ["node:*"],
+	banner: {
+		js: 'import { createRequire as createNodeRequire } from "node:module"; const require = createNodeRequire(import.meta.url);',
+	},
+});

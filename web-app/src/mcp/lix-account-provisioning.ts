@@ -80,6 +80,7 @@ export async function provisionAccountAfterHandshake(options: {
 		[options.account.id],
 	);
 	if (!currentProfile.ok) {
+		await currentProfile.body?.cancel();
 		return new Response("Lix account provisioning failed\n", { status: 502 });
 	}
 	let result: { rows?: Array<Array<{ kind?: string; value?: unknown }>> };
@@ -114,6 +115,8 @@ export async function provisionAccountAfterHandshake(options: {
 		"UPDATE lix_account SET name = $2, kind = $3, profile_uri = $4 WHERE id = $1",
 		[options.account.id, ...desiredProfile],
 	);
+	// Consume the finite result before returning the handshake, including its RPC span.
+	await provisioning.arrayBuffer();
 	if (!provisioning.ok) {
 		return new Response("Lix account provisioning failed\n", { status: 502 });
 	}

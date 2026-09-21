@@ -82,16 +82,15 @@ state of their own.
 
 ## End-to-end trace correlation
 
-MCP clients can attach LixRay tool calls to an existing PostHog AI trace by
-sending a W3C `traceparent` header. The trace ID and parent span ID are
-preserved as `$ai_trace_id` and `$ai_parent_id` on LixRay telemetry.
+MCP clients can attach LixRay calls to an existing OpenTelemetry trace by
+sending valid W3C `traceparent` and optional `tracestate` headers. LixRay
+creates an HTTP server span with that remote parent, one child span per tool,
+and propagates context to the Lix reference server. Without a valid parent,
+the HTTP request starts a new trace.
 
-Clients that already use PostHog identifiers may instead send
-`X-PostHog-AI-Trace-ID` and `X-PostHog-AI-Parent-ID`. The optional
-`X-PostHog-AI-Session-ID` groups multiple traces into one conversation or
-workflow. Explicit PostHog headers take precedence over `traceparent`.
-Identifiers containing unsupported characters are ignored. When no context is
-provided, LixRay continues to create one fallback trace per tool call.
+Official MCP analytics expose `trace_id` and `span_id` for correlation with
+native tracing. PostHog-specific trace and parent headers are not supported.
+See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
 
 ## Recommended workflow
 
