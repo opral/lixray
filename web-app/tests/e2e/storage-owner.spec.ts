@@ -110,10 +110,8 @@ for (const releaseDuringRetry of [false, true]) {
 			} else {
 				await waitForRepository(contender);
 				await expect(
-					contender
-						.getByRole("status")
-						.filter({ hasText: "Previous device data is preserved" }),
-				).toContainText("Previous device data is preserved");
+					contender.getByText("Reopened from the server.", { exact: false }),
+				).toHaveCount(0);
 				const retained = await contender.evaluate(() =>
 					Object.keys(localStorage)
 						.filter((key) => key.startsWith("lixray:replica-replacement:v1:"))
