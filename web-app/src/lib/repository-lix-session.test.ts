@@ -354,6 +354,10 @@ void test("only typed network failure, storage contention, and server recovery a
 		isRetryableRepositoryOpenError({ code: "LIX_STORAGE_IN_USE" }),
 		true,
 	);
+	assert.equal(
+		isRetryableRepositoryOpenError({ code: "LIX_STORAGE_FENCED" }),
+		true,
+	);
 	for (const details of [
 		{ nonRetryableAfterCommit: true },
 		{ nonRetryableAfterExecution: true },
@@ -363,7 +367,6 @@ void test("only typed network failure, storage contention, and server recovery a
 			false,
 		);
 	for (const code of [
-		"LIX_STORAGE_FENCED",
 		"LIX_STORAGE_CLOSED",
 		"LIX_TRANSPORT_CONTRACT",
 		"LIX_TRANSPORT_CALLBACK",

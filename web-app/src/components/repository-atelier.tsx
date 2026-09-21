@@ -231,6 +231,7 @@ export function RepositoryAtelier({
 	>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [storageBusy, setStorageBusy] = useState(false);
+	const [retainedReplica, setRetainedReplica] = useState(false);
 	const [openAttempt, setOpenAttempt] = useState(0);
 	const [migration, setMigration] = useState<RepositoryMigrationState | null>(
 		null,
@@ -1024,6 +1025,7 @@ export function RepositoryAtelier({
 		setRepositoryDefaultBranchId(null);
 		setError(null);
 		setStorageBusy(false);
+		setRetainedReplica(false);
 		setMigration(null);
 		routeSyncedRef.current = false;
 
@@ -1053,6 +1055,7 @@ export function RepositoryAtelier({
 					return;
 				}
 				activeLix = session;
+				setRetainedReplica((session.retainedReplicaCount ?? 0) > 0);
 				setMigration(null);
 				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
 				activeLixRef.current = session;
@@ -1396,6 +1399,15 @@ export function RepositoryAtelier({
 						</RepositoryRouteLifecycleContext.Provider>
 					</RepositoryBranchSessionContext.Provider>
 				</RepositoryDefaultBranchContext.Provider>
+			) : null}
+			{shellProps && retainedReplica ? (
+				<p
+					role="status"
+					className="fixed bottom-4 left-4 z-50 max-w-md rounded-md border bg-background p-3 text-sm"
+				>
+					Reopened from the server. Previous device data is preserved; unsynced
+					edits may still need recovery.
+				</p>
 			) : null}
 			{!shellProps && !error && migration ? (
 				<RepositoryUpgradeProgress phase={migration.phase} />
