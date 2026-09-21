@@ -1,27 +1,12 @@
 import { Link } from "@tanstack/react-router";
-import { type ReactNode } from "react";
 import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 
 const primaryButton =
 	"inline-flex items-center justify-center rounded-[10px] bg-[image:var(--atelier-accent-gradient)] px-[22px] py-3 text-base font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
-const secondaryButton =
-	"inline-flex items-center justify-center rounded-[10px] border border-fg/15 bg-panel px-5 py-[11px] text-base font-semibold whitespace-nowrap text-fg no-underline transition hover:border-fg/30";
-const bookDemoHref = "mailto:hello@opral.com?subject=LixRay%20demo";
 
 export function LandingPage() {
 	const { user, repositoryTo } = useRepositoryCta();
 	const heroCtaLabel = user ? "Open LixRay" : "Create your repo for free";
-
-	const ctaRow = (
-		<div className="flex flex-wrap items-center gap-3">
-			<a className={primaryButton} href={repositoryTo}>
-				{heroCtaLabel}
-			</a>
-			<a className={secondaryButton} href={bookDemoHref}>
-				Book a demo
-			</a>
-		</div>
-	);
 
 	return (
 		<div className="min-h-screen bg-bg font-sans text-fg antialiased">
@@ -32,64 +17,21 @@ export function LandingPage() {
 					className="flex flex-col items-start gap-[22px]"
 					aria-labelledby="landing-title"
 				>
-					{/* Design 26a: the audience phrase rotates on a CSS reel — no
-					    interaction, no JS. The reel spans company and personal
-					    audiences, replacing the old pitch toggle. All phrases stay
-					    in the DOM for crawlers; the aria-label keeps the accessible
-					    name stable. */}
 					<h1
-						className="m-0 text-[clamp(2.25rem,5.5vw,2.875rem)] leading-[1.12] font-bold tracking-[-.03em]"
+						className="m-0 text-[clamp(2.25rem,5.5vw,2.875rem)] leading-[1.12] font-bold tracking-[-.03em] text-balance"
 						id="landing-title"
-						aria-label="A repository for your entire company"
 					>
-						A repository for
-						<br />
-						your{" "}
-						<span className="landing-headline-slot">
-							<span className="landing-headline-reel">
-								<span>entire company</span>
-								<span>sales team</span>
-								<span>marketing team</span>
-								<span>personal life</span>
-								{/* Duplicate of the first phrase closes the loop. */}
-								<span aria-hidden="true">entire company</span>
-							</span>
-						</span>
+						Version control, made simple.
 					</h1>
-					<style>{`
-						.landing-headline-slot {
-							display: inline-block;
-							overflow: hidden;
-							height: 1.12em;
-							vertical-align: bottom;
-							color: var(--atelier-link);
-						}
-						.landing-headline-reel {
-							display: flex;
-							flex-direction: column;
-							animation: landing-headline-rotate 10s infinite
-								cubic-bezier(0.6, 0, 0.2, 1);
-						}
-						.landing-headline-reel > span {
-							white-space: nowrap;
-							line-height: 1.12;
-						}
-						@keyframes landing-headline-rotate {
-							0%, 18% { transform: translateY(0); }
-							23%, 41% { transform: translateY(-20%); }
-							46%, 64% { transform: translateY(-40%); }
-							69%, 87% { transform: translateY(-60%); }
-							92%, 100% { transform: translateY(-80%); }
-						}
-						@media (prefers-reduced-motion: reduce) {
-							.landing-headline-reel { animation: none; }
-						}
-					`}</style>
 					<p className="m-0 text-lg leading-[1.6] text-fg-muted text-pretty">
-						One repo you and your agents share. Any file type, every change
-						tracked.
+						A repository for any file type. Every change is tracked and
+						reversible. Shared with your team and your agents.
 					</p>
-					<div className="mt-0.5">{ctaRow}</div>
+					<div className="mt-0.5 flex flex-wrap items-center gap-3">
+						<a className={primaryButton} href={repositoryTo}>
+							{heroCtaLabel}
+						</a>
+					</div>
 					<div className="flex flex-wrap items-center gap-[9px] text-sm text-fg-subtle">
 						<span>Works with</span>
 						<span
@@ -114,49 +56,18 @@ export function LandingPage() {
 						</span>
 						<span>and any MCP agent</span>
 					</div>
-					<div className="w-full self-stretch overflow-hidden rounded-xl border border-fg/12 bg-panel">
+					<div className="mt-5 w-full self-stretch overflow-hidden rounded-xl border border-fg/12 bg-panel text-[13.5px]">
 						<div className="flex items-center gap-2 border-b border-fg/8 bg-bg-hover px-5 py-2.5 font-mono text-[12.5px] text-fg-subtle">
 							lixray.com/<b className="text-fg">@acme/repository</b>
 						</div>
-						<div className="flex flex-col gap-2.5 px-6 py-5 font-mono text-[13.5px]">
-							<RepoRow folder="sales/">
-								playbook.md · icp.md · leads.csv
-							</RepoRow>
-							<RepoRow folder="brand/">
-								logo.png · launch-video.mp4 · deck.pdf
-							</RepoRow>
-							<RepoRow folder="skills/">
-								call-prep/SKILL.md · research/SKILL.md
-							</RepoRow>
-							<RepoRow folder="automations/">
-								crm-sync.py · weekly-report.js
-							</RepoRow>
+						<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-5 px-5 pt-2 pb-3">
+							<span className={repoColumnHeading}>Name</span>
+							<span className={repoColumnHeading}>Last change</span>
+							{repoFiles.map((file) => (
+								<RepoFileRow key={file.name} {...file} />
+							))}
 						</div>
 					</div>
-				</section>
-
-				<section
-					className="flex flex-col gap-[18px]"
-					aria-labelledby="why-title"
-				>
-					<h2
-						className="m-0 text-2xl font-bold tracking-[-.02em]"
-						id="why-title"
-					>
-						Why?
-					</h2>
-					<p className="m-0 text-base leading-[1.65] text-fg-muted">
-						<b>Sharing skills.</b> Write a skill once. Every agent on the team
-						runs the same version.
-					</p>
-					<p className="m-0 text-base leading-[1.65] text-fg-muted">
-						<b>Storing automations.</b> The scripts your agents run on a
-						schedule, versioned and reviewable.
-					</p>
-					<p className="m-0 text-base leading-[1.65] text-fg-muted">
-						<b>Context layer for agents.</b> Agents read the ICP and the
-						playbook from one place. Always the current version.
-					</p>
 				</section>
 
 				<section
@@ -174,20 +85,26 @@ export function LandingPage() {
 							className="text-fg-muted underline decoration-fg-muted/30 underline-offset-2 hover:text-link hover:decoration-link/40"
 							to="/lp/lixray-vs-github"
 						>
-							<b>GitHub</b> is too technical (branch, commit, pull request) and
-							lacks permissions.
+							<b>GitHub</b> is too complicated for non-developers. Branch,
+							commit, pull request is designed for software engineers, and
+							non-code files are secondary.
 						</Link>
 					</p>
 					<p className="m-0 text-base leading-[1.65] text-fg-muted">
-						<b>Google Drive</b> has no version control and is not designed for
-						programmatic usage.
+						<b>Google Drive</b> lacks version control. Per-file history, no
+						state across files, so anything with dependencies between files,
+						like code, doesn't work.
+					</p>
+					<p className="m-0 text-base leading-[1.65] text-fg-muted">
+						<b>Notion</b> is not file-based. It can't store code and lacks the
+						interoperability of files.
 					</p>
 				</section>
 			</main>
 
 			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-fg/7 px-5 py-6 text-sm text-fg-subtle sm:px-14">
 				<span className="inline-flex items-center gap-2">
-					<img className="size-4" src="/lixray-mark.svg" alt="" />
+					<img className="size-4" src="/landing/lixray-glyph.svg" alt="" />
 					<span className="font-semibold text-fg-muted">LixRay</span>
 				</span>
 				<a
@@ -222,17 +139,72 @@ export function LandingPage() {
 	);
 }
 
-function RepoRow({
-	folder,
-	children,
-}: {
-	folder: string;
-	children: ReactNode;
-}) {
+const repoColumnHeading =
+	"pt-2 pb-1.5 text-[11.5px] font-semibold tracking-[.03em] text-fg-faint uppercase";
+
+type RepoFile = {
+	name: string;
+	icon: string;
+	author: string;
+	/** Agent brand mark shown before the author; people have none. */
+	authorIcon?: string;
+	when: string;
+};
+
+const repoFiles: RepoFile[] = [
+	{ name: "brand", icon: "icon-folder", author: "Anna", when: "Mar 3" },
+	{ name: "handbook.md", icon: "icon-sq-md", author: "Anna", when: "1h ago" },
+	{
+		name: "leads.csv",
+		icon: "icon-sq-csv",
+		author: "Claude",
+		authorIcon: "claude-spark",
+		when: "4 min ago",
+	},
+	{
+		name: "crm-sync.py",
+		icon: "icon-sq-py",
+		author: "Claude",
+		authorIcon: "claude-spark",
+		when: "2h ago",
+	},
+	{
+		name: "launch-deck.pdf",
+		icon: "icon-sq-pdf",
+		author: "Tom",
+		when: "yesterday",
+	},
+	{
+		name: "launch-video.mp4",
+		icon: "icon-sq-mp4",
+		author: "ChatGPT",
+		authorIcon: "brand-openai",
+		when: "Mon",
+	},
+	{ name: "logo.png", icon: "icon-sq-png", author: "Anna", when: "Mar 3" },
+];
+
+function RepoFileRow({ name, icon, author, authorIcon, when }: RepoFile) {
 	return (
-		<span className="flex flex-col gap-0.5 sm:flex-row sm:gap-3.5">
-			<span className="w-[130px] shrink-0 font-bold text-accent">{folder}</span>
-			<span className="text-fg-subtle">{children}</span>
-		</span>
+		<>
+			<span className="inline-flex min-w-0 items-center gap-2.5 border-t border-fg/6 py-2 font-medium">
+				<img
+					className="size-[18px] shrink-0"
+					src={`/landing/${icon}.svg`}
+					alt=""
+				/>
+				<span className="truncate">{name}</span>
+			</span>
+			<span className="inline-flex items-center gap-[7px] border-t border-fg/6 py-2 whitespace-nowrap text-fg-muted">
+				{authorIcon ? (
+					<img
+						className="size-[13px] object-contain"
+						src={`/landing/${authorIcon}.svg`}
+						alt=""
+					/>
+				) : null}
+				{author} · {when}
+			</span>
+		</>
 	);
 }
