@@ -1,5 +1,3 @@
-import { SQL_TEXT_WRITE_RECIPE } from "./sql-errors.ts";
-
 interface ExecuteSqlCoreTable {
 	name: string;
 	purpose: string;
@@ -30,9 +28,8 @@ export const EXECUTE_SQL_CORE_TABLES: ReadonlyArray<ExecuteSqlCoreTable> = [
 	},
 	{
 		name: "lix_commit",
-		purpose:
-			"Repository-global retained commits; filter is_checkpoint for checkpoint inventory.",
-		columns: ["id", "created_at", "is_checkpoint"],
+		purpose: "Repository-global retained commit identity and creation time.",
+		columns: ["id", "created_at"],
 	},
 	{
 		name: "lix_change",
@@ -92,9 +89,9 @@ ${EXECUTE_SQL_TABLES_QUERY}
 ${EXECUTE_SQL_COLUMNS_QUERY}
 \`\`\`
 
-Version-control reads use four surfaces. \`lix_log()\` lists retained commits on the active head's first-parent chain, with \`commit_id\`, \`parent_commit_id\`, \`created_at\`, \`is_checkpoint\`, and \`position\`. Use \`WHERE is_checkpoint ORDER BY position\` for the branch checkpoint timeline. Position zero is the anchor and positions are assigned before filtering. For repository-global checkpoint counts, query \`lix_commit WHERE is_checkpoint\` instead.
+Version-control reads use four surfaces. \`lix_log([anchor])\` lists retained commits on the first-parent chain ending at the anchor, with \`commit_id\`, \`parent_commit_id\`, \`created_at\`, \`is_checkpoint\`, and \`position\`. The \`is_checkpoint\` value is active at that anchor; use \`WHERE is_checkpoint ORDER BY position\` for the eligible checkpoint timeline. Position zero is the anchor and positions are assigned before filtering. \`lix_commit\` exposes retained commit identity and creation time, without checkpoint metadata.
 
-\`lix_history('lix_file')\`, \`lix_history('lix_directory')\`, and \`lix_history('<schema>')\` return net row differences for each retained mainline commit compared with its actual first parent. For an explicit anchor, use \`lix_history('lix_file', $1)\` and \`lix_log($1)\`. History provides typed keys, \`diff_type\`, paired \`from_<column>\` / \`to_<column>\` values, \`lixcol_from_commit_id\`, \`lixcol_to_commit_id\`, \`lixcol_commit_is_checkpoint\`, \`lixcol_commit_created_at\`, and \`lixcol_position\`. Filter \`WHERE id = $2 AND lixcol_commit_is_checkpoint ORDER BY lixcol_position\` for a file's checkpoint changes. Filtering never changes the comparison baseline: a checkpoint's parent can be an unmarked fork or restore baseline. Empty commits appear in log but have no history rows. Merged-side commits are not separate mainline entries, and compaction can remove automatic revisions.
+\`lix_history('lix_file')\`, \`lix_history('lix_directory')\`, and \`lix_history('<schema>')\` return net row differences for each retained mainline commit compared with its actual first parent. For an explicit anchor, use the same anchor with \`lix_history('lix_file', $1)\` and \`lix_log($1)\`. History provides typed keys, \`diff_type\`, paired \`from_<column>\` / \`to_<column>\` values, \`lixcol_from_commit_id\`, \`lixcol_to_commit_id\`, \`lixcol_commit_created_at\`, and \`lixcol_position\`. To read a file's checkpoint changes, join \`lix_log($1)\` to \`lix_history('lix_file', $1)\` on \`log.commit_id = history.lixcol_to_commit_id\`, filter \`log.is_checkpoint\` and the file id, and order by \`log.position\`. Filtering the joined result never changes the comparison baseline: a checkpoint's parent can be an unmarked fork or restore baseline. Empty commits appear in log but have no history rows. Merged-side commits are not separate mainline entries, and compaction can remove automatic revisions.
 
 \`lix_diff('lix_file')\` compares the actual working baseline with the current head; \`lix_diff('lix_file', $1, $2)\` compares explicit endpoints. Its endpoint columns identify that exact pair. Use \`lix_branch.working_base_commit_id\` for working context even when the diff is empty; the latest marked checkpoint is not necessarily the working baseline. For selected commands, reselect through the appropriate diff and guard its endpoints, rather than submitting a multi-commit history stream.
 
@@ -118,9 +115,9 @@ export const LIX_CATALOG_HINT = `Discover tables with: ${EXECUTE_SQL_TABLES_QUER
 // descriptions: hosts do not reliably show server instructions to the model,
 // and the tool card is what an agent reads before its first query. Reads and
 // writes each get their half; the other tools stay one or two sentences.
-const LIX_SQL_READ_GUIDE = `Prefer read_files and list_files for ordinary file work; use query_sql for repository data and advanced file queries. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with \`${EXECUTE_SQL_TABLES_QUERY.replace(/\s+/g, " ")}\` and columns, with their descriptions, with \`${EXECUTE_SQL_COLUMNS_WITH_DESCRIPTIONS_QUERY.replace(/\s+/g, " ")}\`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: "text", value: "…" }] (kinds: text, int, float, json, blob); file bytes read as CAST(content AS TEXT). History: lix_log() lists retained commits, lix_history('lix_file') the net change per commit, lix_diff('lix_file') the working changes, lix_as_of('lix_file', $1) the state at a commit.`;
+const LIX_SQL_READ_GUIDE = `Prefer read_files and list_files for ordinary file work; use query_sql for repository data. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with \`${EXECUTE_SQL_TABLES_QUERY.replace(/\s+/g, " ")}\` and columns with \`${EXECUTE_SQL_COLUMNS_WITH_DESCRIPTIONS_QUERY.replace(/\s+/g, " ")}\`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: "text", value: "…" }]. History: lix_log([anchor]) lists retained commits with active checkpoint metadata; lix_history('lix_file'[, anchor]) gives net changes; lix_diff('lix_file') gives working changes; lix_as_of('lix_file', $1) gives state at a commit. Join log to history on destination commit ID for checkpoint filters.`;
 
-const LIX_SQL_WRITE_GUIDE = `${SQL_TEXT_WRITE_RECIPE} Prefer write_files for file creates/updates. Rename with \`UPDATE lix_file SET path = $1 WHERE path = $2\`; delete with \`DELETE FROM lix_file WHERE path = $1\`; directories likewise on lix_directory (no trailing slash on paths: /skills, not /skills/). \`INSERT … ON CONFLICT (cols) DO UPDATE SET col = excluded.col\` and DO NOTHING work; ON CONSTRAINT and DO UPDATE WHERE do not; bind text for a byte column as \`CAST($n AS BYTEA)\`. Writes are persisted; read back only when the outcome is unknown or validation is part of the task. Errors carry a zero-based statement_index when known and an outcome of not_committed, unknown, or committed; never blindly retry the latter two. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.`;
+const LIX_SQL_WRITE_GUIDE = `Prefer write_files for file creates/updates; a failed write answers with the recipe it needed. Rename with \`UPDATE lix_file SET path = $1 WHERE path = $2\`; delete with \`DELETE FROM lix_file WHERE path = $1\`; directories likewise on lix_directory (no trailing slash on paths: /skills, not /skills/). \`INSERT … ON CONFLICT (cols) DO UPDATE SET col = excluded.col\` and DO NOTHING work; ON CONSTRAINT and DO UPDATE WHERE do not; bind text for a byte column as \`CAST($n AS BYTEA)\`. Writes are persisted; read back only when the outcome is unknown or validation is part of the task. Errors carry a zero-based statement_index when known and an outcome of not_committed, unknown, or committed; never blindly retry the latter two. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.`;
 
 export const LIST_FILES_TOOL_DESCRIPTION =
 	"List the files of the Lix and branch in context with id, path, and canonical url, sorted by path. Optional directory (an absolute path prefix such as /gtm) and name (a case-insensitive substring of the file name) narrow the list; truncated says to narrow further. Read-only.";

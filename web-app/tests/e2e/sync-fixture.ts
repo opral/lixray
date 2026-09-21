@@ -425,6 +425,24 @@ export async function createSyncFixture({
 				expect(closed.status()).toBe(204);
 			}
 		};
+		const renderedCheckpointCount = async (
+			history: Locator,
+			expected: number,
+		) => {
+			const rows = history
+				.getByRole("list", { name: "Checkpoints" })
+				.locator(":scope > li");
+			// History deliberately starts with ten rows. Expand its next page when
+			// comparing the rendered timeline with the durable checkpoint count.
+			if ((await rows.count()) < expected) {
+				const older = history.getByRole("button", {
+					name: "Load older checkpoints",
+					exact: true,
+				});
+				if (await older.isVisible()) await older.click();
+			}
+			return rows.count();
+		};
 		const waitForHistoryCountsToMatchAuthority = async (
 			histories: readonly Locator[],
 			minimumCount: number,
@@ -437,10 +455,7 @@ export async function createSyncFixture({
 						const authorityCount = await authorityCheckpointCount();
 						const renderedCounts = await Promise.all(
 							histories.map((history) =>
-								history
-									.getByRole("list", { name: "Checkpoints" })
-									.locator(":scope > li")
-									.count(),
+								renderedCheckpointCount(history, authorityCount),
 							),
 						);
 						const matches =
@@ -540,11 +555,11 @@ export async function createSyncFixture({
 				// server is unreachable; no foreground /execute receipt is needed.
 				const remainingCheckpointTime = checkpointDeadline - Date.now();
 				expect(remainingCheckpointTime).toBeGreaterThan(0);
-				await expect(
-					historyBefore
-						.getByRole("list", { name: "Checkpoints" })
-						.locator(":scope > li"),
-				).toHaveCount(localCount + 1, { timeout: remainingCheckpointTime });
+				await expect
+					.poll(() => renderedCheckpointCount(historyBefore, localCount + 1), {
+						timeout: remainingCheckpointTime,
+					})
+					.toBe(localCount + 1);
 				if (selectFiles) {
 					// A partial checkpoint leaves the remaining files in review.
 					await expect(
@@ -602,7 +617,7 @@ export async function createSyncFixture({
 										"Idempotency-Key": `checkpoint-id-${scenario}-${randomUUID()}-${authorityReadSequence++}`,
 									},
 									data: {
-										sql: "SELECT id AS commit_id FROM lix_commit WHERE id = $1 AND is_checkpoint",
+										sql: "SELECT commit_id FROM lix_log() WHERE commit_id = $1 AND is_checkpoint",
 										params: [{ kind: "text", value: localCheckpointId }],
 									},
 								},
@@ -1900,6 +1915,11 @@ export async function createSyncFixture({
 			const coldReadsBeforeHistory = coldReadCount([left, right]);
 			for (const page of [left, right]) {
 				const history = await openHistoryPanel(page);
+				await waitForHistoryCountsToMatchAuthority(
+					[history],
+					0,
+					repositoryOperationTimeout,
+				);
 				await expect(history).toContainText("Working changes");
 				await expect(history).toContainText("Latest checkpoint");
 				await expect(history).toContainText("Initial checkpoint");

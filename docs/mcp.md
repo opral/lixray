@@ -157,16 +157,29 @@ support MCP Apps. A card is optional; agents must not claim the user saw one
 merely because the call succeeded.
 
 The card is collapsed by default: one 44px bar with the files' type icons,
-"N files written" (or "changed" for `diff`), the deepest common folder, and
-"2 new · 1 edited" counts, so a long chat reads as a list of writes. Opened,
+what happened ("1 file added", "3 files modified"; "N files written", or
+"changed" for `diff`, when a set did several things at once), the deepest
+common folder, and — only for such a mixed set — "2 added · 1 modified"
+counts,
+so a long chat reads as a list of writes and none of them says a thing
+twice. Opened,
 the bar becomes the header and below it sits Atelier's static render of one
 file's change in a scrolling panel, with a dark pill to page through the
 files (each with its diff glyph and counts) and an "Open in LixRay" button
-that goes through the host's `ui/open-link`. The view reports its height on
-every toggle and page change. Markdown and CSV previews use Atelier's static
-renderer; they carry no scripts or external resources, and the view mounts
-them in a shadow root. The resource requests no external network access and
-invokes no tools.
+that goes through the host's `ui/open-link`. Open, every card is the same
+height whatever the file is — a long document scrolls inside the panel — so
+opening one moves the chat by a known amount and no card leaves a strip of
+empty frame below it. The view reports that height on every toggle, and sets
+it on its own document for hosts that measure the frame instead. The card's
+chrome — head, foot, the ground they sit on — takes its colour scheme from
+the chat around it, so a closed card reads as one more line of that chat.
+The rendered file does not: it is a document in Atelier, and Atelier is
+light. The foot carries a toggle for a reader who wants that file dark.
+Markdown
+and CSV previews use Atelier's static renderer; they carry no scripts or
+scripts, and the view mounts them in a shadow root. A document's pictures are
+drawn from the addresses it names, so a host that refuses them shows their
+alt text; the resource itself invokes no tools and asks for nothing else.
 
 A card lists up to 50 files and carries previews for the first six; the rest
 are paged with a note. The call itself carries no bytes of the change: it
@@ -214,10 +227,12 @@ The full SQL reference is also available via `resources/read` at
 `lixray://docs/sql`. Server instructions give routing and recovery rules; SQL
 tool descriptions retain the essentials needed to make a first query.
 
-When asked to undo the last change, prefer `undo` over manual SQL reversal
-when that change is still the latest undoable action. Inspect history if later
-edits may exist. On the current SDK and engine, `undo` accepts context only,
-not a commit ID; it creates an inverse commit and stops at checkpoints.
+When asked to undo the last change, prefer the `undo` tool over manual SQL
+reversal when that change is still the latest undoable action. The tool executes
+`SELECT commit_id FROM lix_undo()` on the context branch and returns its one-row
+receipt; inspect history if later edits may exist. `redo` uses
+`SELECT commit_id FROM lix_redo()`. Both return `commit_id: null` when there is
+nothing to apply and stop at checkpoints.
 `restore(commit_id)` moves the branch head and is not a substitute for undo.
 Targeted reversal needs an engine-supported atomic target check; a separate
 read followed by undo cannot protect against a concurrent writer.
@@ -303,26 +318,31 @@ without columns, or `DO UPDATE WHERE`.
 
 Use `lix_log([anchor])` for retained commits on the branch's first-parent chain.
 Filter `is_checkpoint` for milestones and order by `position`, with zero at the
-anchor. For repository-global checkpoint inventory, use
-`SELECT id, created_at FROM lix_commit WHERE is_checkpoint`; it includes
-checkpoints outside the selected branch. Checkpoint dates use commit creation time.
+anchor. The flag is active at the selected anchor, so this is the eligible
+checkpoint timeline for that branch. `lix_commit` contains only retained commit
+identity and creation time; it has no checkpoint flag. Checkpoint dates use
+commit creation time.
 
 ```sql
-SELECT lixcol_to_commit_id, lixcol_commit_created_at,
-       diff_type, from_path, to_path
-FROM lix_history('lix_file', $1)
-WHERE id = $2 AND lixcol_commit_is_checkpoint
-ORDER BY lixcol_position;
+SELECT log.commit_id, history.lixcol_commit_created_at,
+       history.diff_type, history.from_path, history.to_path
+FROM lix_log($1) AS log
+JOIN lix_history('lix_file', $1) AS history
+  ON history.lixcol_to_commit_id = log.commit_id
+WHERE history.id = $2 AND log.is_checkpoint
+ORDER BY log.position;
 ```
 
 History reports each retained mainline commit's net changes relative to its
 actual first parent, identified by `lixcol_from_commit_id` and
-`lixcol_to_commit_id`. Filtering never changes that baseline. A checkpoint's
-parent can be an unmarked fork or restore baseline. Drop the checkpoint predicate
-to inspect retained automatic changes. Compaction can remove those revisions.
-Empty commits appear in log and have no history rows; merged-side commits do not
-appear separately on the first-parent timeline. Pin the same anchor when paging
-log and fetching history for its commit IDs.
+`lixcol_to_commit_id`. The history function has no checkpoint marker column;
+join it to `lix_log` on the destination commit ID and filter the log's active
+`is_checkpoint` flag. Filtering the joined result never changes that baseline.
+A checkpoint's parent can be an unmarked fork or restore baseline. Drop the
+checkpoint predicate to inspect retained automatic changes. Compaction can
+remove those revisions. Empty commits appear in log and have no history rows;
+merged-side commits do not appear separately on the first-parent timeline. Pin
+the same anchor when paging log and fetching history for its commit IDs.
 
 `lix_diff('lix_file')` compares the actual working baseline to the head;
 `lix_diff('lix_file', $1, $2)` compares explicit endpoints. Working context comes

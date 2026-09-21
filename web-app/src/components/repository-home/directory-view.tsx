@@ -2129,6 +2129,13 @@ function AgentConnectionDialog({
 									: "Copy prompt"}
 					</button>
 
+					{/* The prompt itself, not only a button that claims to have
+					    copied it: a reader can see what they are about to paste,
+					    select part of it, or read it to someone. */}
+					<pre className="mt-3 max-h-56 overflow-auto rounded-[10px] border border-border-subtle bg-bg-subtle px-3.5 py-3 text-[12.5px] leading-[1.55] whitespace-pre-wrap text-fg-muted select-text">
+						{details.prompt}
+					</pre>
+
 					<ConnectionStep number={2} label="Paste it into your AI chat" />
 					{/* A looping 7s mock of the copy-paste-send moment (12g), staged
 					    inside a fake browser window (traffic-light navbar, page area)

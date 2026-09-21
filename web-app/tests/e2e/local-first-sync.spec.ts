@@ -237,19 +237,43 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 			// On the default branch a URL says nothing about branches.
 			expect(new URL(entity.url).searchParams.get("branch")).toBeNull();
 		}
+		// A sleeping authority may refuse the first read-only admission request.
+		let admissionFailures = 1;
+		let admissionRequests = 0;
+		await page.route(`**/lix/v1/${repository.id}/admission`, async (route) => {
+			admissionRequests += 1;
+			if (admissionFailures > 0) {
+				admissionFailures -= 1;
+				await route.fulfill({ status: 502, body: "Bad Gateway" });
+			} else {
+				await route.continue();
+			}
+		});
 		await page.goto(repository.path);
 		// A cold browser worker compiles the SDK and downloads its initial replica.
 		// Match the startup budget used by the other repository-opening tests.
 		await expect(row(source)).toBeVisible({ timeout: 30_000 });
 		await expect(row(target)).toBeVisible();
+		expect(admissionRequests).toBe(2);
 		// First use may hydrate native inputs. Read the actual file and open
 		// working review online before asserting those workflows work offline.
+		// Exhaust the bounded admission budget, then recover in place. The
+		// previously downloaded local replica and seeded content must survive.
+		const beforeRetry = admissionRequests;
+		admissionFailures = 5;
 		await page.goto(savedFileUrl);
+		await expect(
+			page.getByText("Unable to open Atelier", { exact: true }),
+		).toBeVisible({ timeout: 30_000 });
+		expect(admissionRequests - beforeRetry).toBe(5);
+		await page.getByRole("button", { name: "Retry", exact: true }).click();
 		const textView = page.locator(
 			'[data-view-key="atelier_text"][data-active="true"]',
 		);
 		await expect(textView).toBeVisible({ timeout: 30_000 });
 		await expect(textView).toContainText(seededContent);
+		expect(admissionRequests - beforeRetry).toBe(6);
+		await page.unroute(`**/lix/v1/${repository.id}/admission`);
 		await page
 			.getByRole("button", {
 				name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
@@ -398,7 +422,7 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 			.poll(
 				async () => {
 					const result = await execute(
-						"SELECT id AS commit_id FROM lix_commit WHERE id = $1 AND is_checkpoint",
+						"SELECT commit_id FROM lix_log() WHERE commit_id = $1 AND is_checkpoint",
 						[checkpointId],
 					);
 					return result.rows[0]?.[0]?.value;

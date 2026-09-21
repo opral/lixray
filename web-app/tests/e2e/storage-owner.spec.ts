@@ -24,7 +24,7 @@ async function fileIds(page: Page) {
 }
 
 for (const releaseDuringRetry of [false, true]) {
-	test(`storage ownership ${releaseDuringRetry ? "opens after temporary ownership contention" : "offers manual retry after bounded waiting"}`, async ({
+	test(`storage ownership ${releaseDuringRetry ? "opens after temporary ownership contention" : "replaces an inaccessible replica without releasing the old lock"}`, async ({
 		page,
 		baseURL,
 	}) => {
@@ -108,16 +108,33 @@ for (const releaseDuringRetry of [false, true]) {
 					);
 				});
 			} else {
-				await expect(contender.getByRole("alert")).toContainText(
-					"Repository is already open",
-					{ timeout: 30_000 },
+				await waitForRepository(contender);
+				await expect(
+					contender.getByText("Reopened from the server.", { exact: false }),
+				).toHaveCount(0);
+				const retained = await contender.evaluate(() =>
+					Object.keys(localStorage)
+						.filter((key) => key.startsWith("lixray:replica-replacement:v1:"))
+						.map(
+							(key) =>
+								JSON.parse(localStorage.getItem(key)!) as {
+									activeName: string;
+									retainedSources: string[];
+								},
+						),
 				);
-				await holder.evaluate(() =>
-					(window as unknown as { heldOwner: HeldOwner }).heldOwner.release?.(),
-				);
-				await contender
-					.getByRole("button", { name: "Retry", exact: true })
-					.click();
+				expect(retained).toHaveLength(1);
+				expect(retained[0].retainedSources).toHaveLength(1);
+				expect(retained[0].activeName).not.toBe(retained[0].retainedSources[0]);
+				expect(
+					await holder.evaluate(
+						async (name) =>
+							(await navigator.locks.query()).held?.some(
+								(lock) => lock.name === name,
+							),
+						ownerName,
+					),
+				).toBe(true);
 			}
 			await waitForRepository(contender);
 			await expect(contender.getByRole("alert")).toHaveCount(0);

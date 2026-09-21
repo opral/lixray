@@ -35,7 +35,6 @@ import {
 	MCP_PROTOCOL_VERSION,
 	MCP_RESOURCE,
 	MCP_SERVER_INSTRUCTIONS,
-	MCP_DATA_GUIDE,
 	GET_ENTITY_URLS_TOOL_DESCRIPTION,
 	MCP_URL_GUIDE,
 	OPEN_LIX_TOOL_DESCRIPTION,
@@ -232,10 +231,7 @@ class FakeRuntime implements LixRuntimeClient {
 				hint: "Bind a text value.",
 			});
 		}
-		if (
-			request.sql ===
-			"INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id"
-		) {
+		if (request.sql === "SELECT commit_id FROM lix_restore($1)") {
 			if (
 				request.params?.[0]?.kind === "text" &&
 				request.params[0].value === "missing-commit"
@@ -278,7 +274,7 @@ class FakeRuntime implements LixRuntimeClient {
 			};
 		}
 		if (
-			/^SELECT id FROM lix_commit WHERE id = \$1( AND is_checkpoint)? LIMIT 1$/.test(
+			/^SELECT (?:id FROM lix_commit|commit_id FROM lix_log\(\)) WHERE (?:id|commit_id) = \$1( AND is_checkpoint)? LIMIT 1$/.test(
 				request.sql,
 			)
 		) {
@@ -585,18 +581,10 @@ class FakeRuntime implements LixRuntimeClient {
 		return { id: "draft", name: "Draft", hidden: false, commitId: "commit-1" };
 	}
 	async undo() {
-		return {
-			branchId: "main",
-			targetCommitId: "old",
-			inverseCommitId: "inverse",
-		};
+		return { commitId: "inverse" };
 	}
 	async redo() {
-		return {
-			branchId: "main",
-			targetCommitId: "next",
-			replayCommitId: "replay",
-		};
+		return { commitId: "replay" };
 	}
 	async mergeBranchPreview() {
 		return { outcome: "alreadyUpToDate" };
@@ -888,8 +876,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		// The file recipe lives on write_files; the SQL cards point at it.
 		const undoTool = tools.tools.find((tool) => tool.name === "undo")!;
 		assert.match(undoTool.description ?? "", /latest undoable/);
-		assert.match(undoTool.description ?? "", /inverse commit/);
-		assert.match(undoTool.description ?? "", /No commit_id parameter/);
+		assert.match(undoTool.description ?? "", /SELECT commit_id FROM lix_undo/);
 		assert.deepEqual(
 			Object.keys((undoTool.inputSchema as { properties: object }).properties),
 			["context"],
@@ -909,13 +896,11 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		// rest are one-liners, output schemas are success-only.
 		const listingChars = JSON.stringify(tools.tools).length;
 		assert.ok(
-			listingChars < 34_000 + tools.tools.length * (MCP_DATA_GUIDE.length + 2),
-			`tools/list is ${listingChars} chars; keep the base listing under 34k plus per-tool privacy guidance`,
+			listingChars < 34_000,
+			`tools/list is ${listingChars} chars; keep it under 34k`,
 		);
 		for (const tool of tools.tools) {
-			const limit =
-				(isGuidedTool(tool.name) ? 1_800 : 320) + MCP_DATA_GUIDE.length + 2;
-			assert.ok(tool.description?.endsWith(MCP_DATA_GUIDE));
+			const limit = isGuidedTool(tool.name) ? 1_800 : 320;
 			assert.doesNotMatch(
 				JSON.stringify(tool.outputSchema),
 				/request_id|server_time/,
@@ -952,13 +937,14 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assertCheckpointPolicy(MCP_SERVER_INSTRUCTIONS);
 		const restoreTool = tools.tools.find((tool) => tool.name === "restore");
 		assert.ok(restoreTool);
-		assert.match(restoreTool.description ?? "", /ancestor/);
-		assert.match(restoreTool.description ?? "", /without creating a commit/);
-		assert.match(restoreTool.description ?? "", /not undoable/i);
-		assert.match(restoreTool.description ?? "", /undo only applies/);
-		assert.match(restoreTool.description ?? "", /other branches are unchanged/);
-		assert.match(restoreTool.description ?? "", /create_checkpoint returns/);
-		assert.match(restoreTool.description ?? "", /no restore_checkpoint/);
+		assert.match(restoreTool.description ?? "", /content from commit_id/);
+		assert.match(restoreTool.description ?? "", /into a new commit/);
+		assert.match(restoreTool.description ?? "", /undo can reverse/);
+		assert.match(restoreTool.description ?? "", /working baseline/);
+		assert.match(
+			restoreTool.description ?? "",
+			/commit_id from create_checkpoint/,
+		);
 		assert.equal(restoreTool.annotations?.destructiveHint, true);
 		assert.equal(restoreTool.annotations?.idempotentHint, true);
 		assert.match(JSON.stringify(restoreTool.inputSchema), /commit_id/);
@@ -1036,7 +1022,10 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			commit_id: "commit-target",
 		});
 		const restoredText = toolText(restored);
-		assert.match(restoredText, /Restored branch main to commit commit-target/);
+		assert.match(
+			restoredText,
+			/Restored content on branch main in new commit commit-target/,
+		);
 		assertTextOmitsContext(restoredText, context);
 		const failedRestore = await client.callTool({
 			name: "restore",
@@ -1195,7 +1184,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.equal(mutationThroughQuery.isError, true);
 		assert.match(
 			JSON.stringify(toolErrorContent(mutationThroughQuery)),
-			/query_sql rejects INSERT, UPDATE, and DELETE/,
+			/query_sql rejects mutating SQL/,
 		);
 		assert.match(
 			JSON.stringify(toolErrorContent(mutationThroughQuery)),
@@ -1487,8 +1476,8 @@ void test("MCP tool text describes outcomes without echoing the context token", 
 				arguments: { context },
 				text: /Checkpoint created/,
 			},
-			{ name: "undo", arguments: { context }, text: /Undone to commit/ },
-			{ name: "redo", arguments: { context }, text: /Redone to commit/ },
+			{ name: "undo", arguments: { context }, text: /Undo committed as/ },
+			{ name: "redo", arguments: { context }, text: /Redo committed as/ },
 			{
 				name: "merge_branch_preview",
 				arguments: { context, source_branch_id: "main" },
@@ -2663,9 +2652,10 @@ void test("file tools list, read, and write files with metadata and conflict che
 			["text", "resource_link", "resource_link", "text"],
 		);
 		const card = written._meta?.[DIFF_CARD_META] as DiffCardPayload;
-		assert.equal(card.title, "1 file written");
+		assert.equal(card.title, "1 file added");
 		assert.equal(card.folder, "/gtm/campaigns");
-		assert.equal(card.tally, "1 new");
+		// The title said it; the tally would be saying it twice.
+		assert.equal(card.tally, "");
 		assert.equal(card.repository, "@acme/company");
 		assert.equal(card.files.length, 1);
 		assert.equal(card.files[0]!.status, "added");
@@ -2927,10 +2917,10 @@ void test("diff compares two points and sends the same card a write does", async
 		const card = diffed._meta?.[DIFF_CARD_META] as DiffCardPayload;
 		assert.equal(card.title, "3 files changed");
 		assert.equal(card.folder, "/gtm");
-		assert.equal(card.tally, "1 new · 1 edited · 1 deleted");
+		assert.equal(card.tally, "1 added · 1 modified · 1 removed");
 		assert.deepEqual(
 			card.files.map((file) => file.label),
-			["edited · +1 ~1 rows", "deleted · 1 line", "new · 1 line"],
+			["modified · +1 ~1 rows", "removed · 1 line", "added · 1 line"],
 		);
 		assert.match(card.files[0]!.html ?? "", /qualified/);
 		assert.equal(card.files[1]!.url, result.url);
@@ -3004,7 +2994,7 @@ void test("diff compares two points and sends the same card a write does", async
 		});
 		assert.equal(executed.isError, undefined, JSON.stringify(executed));
 		const executedCard = executed._meta?.[DIFF_CARD_META] as DiffCardPayload;
-		assert.equal(executedCard.title, "1 file written");
+		assert.equal(executedCard.title, "1 file added");
 		assert.equal(executedCard.folder, "/skills");
 		assert.deepEqual(
 			executedCard.files.map((file) => [file.name, file.status]),

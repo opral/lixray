@@ -198,17 +198,13 @@ export interface LixRuntimeClient {
 		lixId: string,
 		branchId: string,
 	): Promise<{
-		branchId: string;
-		targetCommitId: string;
-		inverseCommitId: string;
+		commitId: string | null;
 	}>;
 	redo(
 		lixId: string,
 		branchId: string,
 	): Promise<{
-		branchId: string;
-		targetCommitId: string;
-		replayCommitId: string;
+		commitId: string | null;
 	}>;
 	mergeBranchPreview(
 		lixId: string,
@@ -892,7 +888,8 @@ export class LixService {
 	 * The commit a diff endpoint names. A checkpoint and a commit are ids on
 	 * the retained log; a branch is its head; "working" is the branch in
 	 * context as it stands; "latest_checkpoint" is the nearest checkpoint
-	 * behind that head. A ref that names nothing is refused here, before Lix
+	 * behind that head. Checkpoint validation reads the active log at the
+	 * current branch head. A ref that names nothing is refused here, before Lix
 	 * is asked to compare, so the error can say which end was wrong.
 	 */
 	async resolveDiffRef(contextToken: string, ref: DiffRef): Promise<string> {
@@ -909,7 +906,7 @@ export class LixService {
 					}
 				: "checkpoint_id" in ref
 					? {
-							sql: "SELECT id FROM lix_commit WHERE id = $1 AND is_checkpoint LIMIT 1",
+							sql: "SELECT commit_id FROM lix_log() WHERE commit_id = $1 AND is_checkpoint LIMIT 1",
 							params: [{ kind: "text", value: ref.checkpoint_id }],
 							missing: `No checkpoint ${ref.checkpoint_id}. create_checkpoint returns a usable id; lix_log() lists the branch's checkpoints.`,
 						}
@@ -1109,41 +1106,42 @@ export class LixService {
 			context.lixId,
 			context.branchId,
 			{
-				sql: "INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id",
+				sql: "SELECT commit_id FROM lix_restore($1)",
 				params: [{ kind: "text", value: commitId }],
 			},
 		);
 		const restoredCommitId = response.rows[0]?.[0];
 		if (
 			!restoredCommitId ||
-			restoredCommitId.kind !== "text" ||
-			restoredCommitId.value !== commitId
+			(restoredCommitId.kind !== "text" && restoredCommitId.kind !== "null") ||
+			response.rows.length !== 1
 		) {
 			throw createLixError(
 				"upstream_error",
-				"Lix did not confirm the requested restore commit id.",
+				"Lix did not return a restore commit receipt.",
 				{
-					hint: "Pass a commit_id that exists on the selected branch. create_checkpoint returns a usable commit_id.",
+					hint: "Pass an available source commit_id. create_checkpoint returns a usable commit_id.",
 				},
 			);
 		}
 		return {
 			context: contextToken,
 			branchId: context.branchId,
-			commitId: restoredCommitId.value,
+			commitId:
+				restoredCommitId.kind === "text" ? restoredCommitId.value : null,
 		};
 	}
 
 	async undo(contextToken: string) {
 		const context = await this.readContext(contextToken);
 		const receipt = await this.client.undo(context.lixId, context.branchId);
-		return { context: contextToken, ...receipt };
+		return { context: contextToken, commitId: receipt.commitId };
 	}
 
 	async redo(contextToken: string) {
 		const context = await this.readContext(contextToken);
 		const receipt = await this.client.redo(context.lixId, context.branchId);
-		return { context: contextToken, ...receipt };
+		return { context: contextToken, commitId: receipt.commitId };
 	}
 
 	async mergeBranchPreview(contextToken: string, sourceBranchId: string) {

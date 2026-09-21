@@ -31,15 +31,11 @@ export function createLixConnectionDetails({
 	const previewUrl = `${normalizedOrigin}/@${encodeURIComponent(namespace)}/${encodeURIComponent(lixSlug)}`;
 	const lixReference = `@${namespace}/${lixSlug}`;
 
-	const prompt = `Lixray is a host for Lix repositories. Documentation is under https://lixray.com/docs.
+	const prompt = `Connect the user to Lixray's MCP.
 
-This Lixray repository is ${lixReference} (${lixId}). Ask the user whether it is for personal stuff or company stuff, then treat it that way.
+Docs can be found under https://lixray.com/docs. This Lixray repository is ${lixReference} (${lixId}). Lixray is added as a normal MCP connector. Guide the user to add ${serverName} from the marketplace, or add the MCP manually at ${mcpUrl} and authenticate. If ${serverName} is already connected, reuse it.
 
-Lixray is added as a normal MCP connector. Guide the user to add ${serverName} from the cloud marketplace, or add the MCP manually at ${mcpUrl} and authenticate. If ${serverName} is already connected, reuse it.
-
-Skills, guidelines, and working files live here. Read from it and write to it. Guide the user to add this rule to AGENTS.md if it exists, CLAUDE.md if it exists, or both: Lixray ${lixReference} is this personal or company repository. Read from it and write to it. If Lixray is not connected, tell the user to add ${mcpUrl} and reopen the chat.
-
-Once connected, ask the user which single skill to put in Lixray. They pick or create it. Write only that one skill file. Use content the user explicitly selects for this task. Do not import chat history, remembered personal details, or unrelated profile data. Do not request or transfer health information, biometric data, government identifiers, payment card data, passwords, API keys, or authentication secrets; ask for non-sensitive or redacted content instead.`;
+Guide the user on usage of lixray.`;
 
 	return {
 		serverName,

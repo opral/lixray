@@ -8,6 +8,8 @@ interface MockOpenOptions {
 }
 const opens: MockOpenOptions[] = [];
 const routedNames: string[] = [];
+let replacementName: string | undefined;
+let replacements = 0;
 let failures: Error[] = [];
 let emitMigration = false;
 let branch = "main";
@@ -102,9 +104,21 @@ mock.module("./repository-migration.ts", {
 		},
 	},
 });
+mock.module("./repository-replica-replacement.ts", {
+	namedExports: {
+		activeReplicaStorage: (name: string) => replacementName ?? name,
+		retainedReplicaCount: () => replacements,
+		replaceRepositoryReplica: async ({ source }: { source: string }) => {
+			replacements++;
+			return (replacementName = `${source}:replacement:test`);
+		},
+	},
+});
 const { openRepositoryLixSession } =
 	await import("./repository-lix-session.ts");
 beforeEach(() => {
+	replacementName = undefined;
+	replacements = 0;
 	opens.length = 0;
 	emitMigration = false;
 	routedNames.length = 0;
@@ -144,6 +158,7 @@ await test("browser opening explicitly selects partial replica and persistent pe
 	);
 	assert.deepEqual(await opens[0].server.headers(), {
 		Authorization: "Bearer token",
+		"lix-replica-id": opens[0].storage!.options.name,
 	});
 	assert.equal(session.activeBranchSnapshot(), "main");
 	await session.close();
@@ -425,7 +440,7 @@ await test("opens the same replica after a temporary storage owner releases its 
 	assert.equal(session.activeBranchSnapshot(), "main");
 	await session.close();
 });
-await test("persistent storage ownership exhausts the bounded retry budget without opening a handle", async () => {
+await test("persistent ownership replaces once and stops if the replacement cannot open", async () => {
 	const locked = Object.assign(new Error("owned elsewhere"), {
 		code: "LIX_STORAGE_IN_USE",
 	});
@@ -434,11 +449,12 @@ await test("persistent storage ownership exhausts the bounded retry budget witho
 		openRepositoryLixSession(options()),
 		(error) => error === locked,
 	);
-	assert.equal(opens.length, 7);
-	assert.equal(failures.length, 1);
+	assert.equal(opens.length, 8);
+	assert.equal(replacements, 1);
+	assert.equal(failures.length, 0);
 	assert.equal(
 		new Set(opens.map((open) => open.storage!.options.name)).size,
-		1,
+		2,
 	);
 	assert.equal(handles.length, 0);
 });
@@ -462,7 +478,7 @@ await test("cancelling storage-lock backoff stops retries", async () => {
 });
 await test("unrelated storage failures are not retried", async () => {
 	const fenced = Object.assign(new Error("fenced"), {
-		code: "LIX_STORAGE_FENCED",
+		code: "LIX_STORAGE_UNSUPPORTED",
 	});
 	failures = [fenced];
 	await assert.rejects(
@@ -471,4 +487,22 @@ await test("unrelated storage failures are not retried", async () => {
 	);
 	assert.equal(opens.length, 1);
 	assert.equal(handles.length, 0);
+});
+
+await test("persistent compatible-owner fencing opens a fresh server-backed replica", async () => {
+	failures = Array.from({ length: 7 }, () =>
+		Object.assign(new Error("compatible owner"), {
+			code: "LIX_STORAGE_FENCED",
+		}),
+	);
+	const session = await openRepositoryLixSession(options());
+	assert.equal(replacements, 1);
+	assert.equal(opens.length, 8);
+	assert.equal(opens[7].storage!.options.name, replacementName);
+	assert.equal(
+		(await opens[7].server.headers())["lix-replica-id"],
+		replacementName,
+	);
+	assert.equal(session.retainedReplicaCount, 1);
+	await session.close();
 });

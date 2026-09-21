@@ -12,6 +12,9 @@ export async function resolveLixServerImage({
 	allowBuild = false,
 	installArtifact = installServerImageArtifact,
 	inspectImage = inspectDigest,
+	loadImage = loadDockerImage,
+	inspectLoadedImage = inspectDockerImage,
+	inspectLocalImage = localImageMatches,
 }) {
 	if (mode !== "ci" && mode !== "local") {
 		throw new Error(`Unsupported Lix server resolution mode ${mode}.`);
@@ -54,7 +57,7 @@ export async function resolveLixServerImage({
 		`lix-server-ci:${sourceRevision}`,
 		`lixray-lix-server-local:${sourceRevision}`,
 	]) {
-		if (mode === "local" && localImageMatches(localTag, sourceRevision)) {
+		if (mode === "local" && inspectLocalImage(localTag, sourceRevision)) {
 			console.log(`[lix-server] REUSE local image ${localTag}.`);
 			return { image: localTag, source: "local-image", sourceRevision };
 		}
@@ -81,8 +84,12 @@ export async function resolveLixServerImage({
 		console.log(
 			`[lix-server] Loading tested server artifact from Lix CI run ${artifact.runId}.`,
 		);
-		run("docker", ["load", "--input", imageArchive]);
 		const loadedTag = `lix-server-ci:${sourceRevision}`;
+		loadImage(imageArchive);
+		validateLoadedServerImage(
+			inspectLoadedImage(loadedTag),
+			sourceRevision,
+		);
 		if (mode === "local") {
 			console.log(`[lix-server] Reused precompiled Lix CI image ${loadedTag}.`);
 			return {
@@ -141,6 +148,18 @@ export async function resolveLixServerImage({
 		return { image: localTag, source: "source-build", sourceRevision };
 	}
 
+}
+
+export function validateLoadedServerImage(image, revision) {
+	if (
+		image?.Os !== "linux" ||
+		image?.Architecture !== "amd64" ||
+		image?.Config?.Labels?.["org.opencontainers.image.revision"] !== revision
+	) {
+		throw new Error(
+			`loaded Lix server image lix-server-ci:${revision} has unexpected OCI provenance or platform`,
+		);
+	}
 }
 
 export function findOfficialLixServerImage(
@@ -237,6 +256,24 @@ function localImageMatches(image, revision) {
 		{ encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
 	);
 	return result.status === 0 && result.stdout.trim() === revision;
+}
+
+function loadDockerImage(imageArchive) {
+	run("docker", ["load", "--input", imageArchive]);
+}
+
+function inspectDockerImage(image) {
+	const result = spawnSync(
+		"docker",
+		["image", "inspect", image],
+		{ encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+	);
+	if (result.status !== 0) return undefined;
+	try {
+		return JSON.parse(result.stdout)[0];
+	} catch {
+		return undefined;
+	}
 }
 
 function inspectDigest(image) {

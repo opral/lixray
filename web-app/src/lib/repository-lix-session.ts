@@ -7,6 +7,11 @@ import {
 	type PartialReplicaLixServerOptions,
 } from "@lix-js/sdk";
 import { OpfsStorage } from "@lix-js/storage-opfs";
+import {
+	activeReplicaStorage,
+	replaceRepositoryReplica,
+	retainedReplicaCount,
+} from "./repository-replica-replacement.ts";
 import { currentReplicaStorage } from "./repository-migration.ts";
 import { captureExceptionTelemetry } from "./telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
@@ -75,7 +80,7 @@ export function openRepositoryRemoteLix(
 }
 
 type ResolvedOpenRepositoryLixSessionOptions =
-	OpenRepositoryLixSessionOptions & { replicaId: string };
+	OpenRepositoryLixSessionOptions & { replicaId: string; storageName?: string };
 
 const OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
 const MIGRATION_ERROR_CODE = "LIX_ERROR_MIGRATING";
@@ -88,6 +93,7 @@ interface MigrationProgress {
 const migrationProgressBySession = new Map<string, MigrationProgress>();
 
 export interface RepositoryLixSession {
+	readonly retainedReplicaCount?: number;
 	readonly lix: Lix;
 	activeBranchSnapshot(): string;
 	defaultBranchSnapshot(): string;
@@ -171,10 +177,19 @@ function publishMigrationProgress(
 async function openRepositoryLixSessionWithRetry(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
+	let replaced = false;
 	for (let attempt = 0; ; attempt += 1) {
 		options.signal?.throwIfAborted();
+		const source = options.publicPath
+			? undefined
+			: currentReplicaStorage(repositoryOpfsCacheName(options));
+		const attemptedName =
+			source === undefined ? undefined : activeReplicaStorage(source);
 		try {
-			const session = await openRepositoryLixSessionOnce(options);
+			const session = await openRepositoryLixSessionOnce({
+				...options,
+				storageName: attemptedName,
+			});
 			if (options.signal?.aborted) {
 				await session.close();
 				options.signal.throwIfAborted();
@@ -184,6 +199,27 @@ async function openRepositoryLixSessionWithRetry(
 			options.signal?.throwIfAborted();
 			const retryDelay = OPEN_RETRY_DELAYS_MS[attempt];
 			if (!isRetryableRepositoryOpenError(error) || retryDelay === undefined) {
+				if (
+					!replaced &&
+					!options.publicPath &&
+					isReplicaOwnershipError(error)
+				) {
+					await replaceRepositoryReplica({
+						source: source!,
+						failedName: attemptedName!,
+						url: repositoryUrl(options),
+						headers: () => repositoryRequestHeaders(options),
+						fetch: createTelemetryFetch(options.fetch ?? networkFetch, {
+							repositoryId: options.repositoryId,
+							refreshAccessToken: options.refreshAccessToken,
+							signal: options.signal,
+							shouldCaptureRequestFailures: () => false,
+						}),
+						signal: options.signal,
+					});
+					replaced = true;
+					continue;
+				}
 				throw error;
 			}
 			await delay(retryDelay, options.signal);
@@ -227,6 +263,11 @@ async function openRepositoryLixSessionOnce(
 			lix,
 			defaultBranchId,
 			activeBranchId,
+			options.publicPath
+				? 0
+				: retainedReplicaCount(
+						currentReplicaStorage(repositoryOpfsCacheName(options)),
+					),
 		);
 		const requestedBranchId = options.initialBranchId ?? defaultBranchId;
 		if (requestedBranchId !== activeBranchId) {
@@ -284,10 +325,18 @@ async function openOpfsSyncSession(
 	// public access on the worker's SQL-authorized remote transport.
 	if (options.publicPath)
 		return openLix({ server: { ...commonServer, mode: "remote" }, onProgress });
-	const storageName = currentReplicaStorage(repositoryOpfsCacheName(options));
+	const storageName =
+		options.storageName ??
+		activeReplicaStorage(
+			currentReplicaStorage(repositoryOpfsCacheName(options)),
+		);
 	const storage = new OpfsStorage({ name: storageName });
 	const server: PartialReplicaLixServerOptions = {
 		...commonServer,
+		headers: async () => ({
+			...(await repositoryRequestHeaders(options)),
+			"lix-replica-id": storageName,
+		}),
 		mode: "partial_replica",
 	};
 	return openLix({ storage, server, onProgress });
@@ -564,6 +613,28 @@ function isLixRecoveringError(
 	);
 }
 
+function isReplicaOwnershipError(error: unknown): boolean {
+	if (
+		typeof error === "object" &&
+		error !== null &&
+		"details" in error &&
+		typeof error.details === "object" &&
+		error.details !== null &&
+		(("nonRetryableAfterCommit" in error.details &&
+			error.details.nonRetryableAfterCommit === true) ||
+			("nonRetryableAfterExecution" in error.details &&
+				error.details.nonRetryableAfterExecution === true))
+	)
+		return false;
+	return [
+		"LIX_STORAGE_IN_USE",
+		"LIX_STORAGE_FENCED",
+		"LIX_OWNER_LOST",
+		"LIX_OPEN_TIMEOUT",
+		"LIX_REPLICA_RETIRED",
+	].some((code) => isErrorCode(error, code));
+}
+
 export function isRetryableRepositoryOpenError(error: unknown): boolean {
 	// A completed mutation/execution must never be replayed, even if its
 	// completion error otherwise looks transient.
@@ -574,8 +645,10 @@ export function isRetryableRepositoryOpenError(error: unknown): boolean {
 	if (
 		typeof details === "object" &&
 		details !== null &&
-		(("nonRetryableAfterCommit" in details &&
-			details.nonRetryableAfterCommit === true) ||
+		(("admissionRetryExhausted" in details &&
+			details.admissionRetryExhausted === true) ||
+			("nonRetryableAfterCommit" in details &&
+				details.nonRetryableAfterCommit === true) ||
 			("nonRetryableAfterExecution" in details &&
 				details.nonRetryableAfterExecution === true))
 	)
@@ -586,7 +659,8 @@ export function isRetryableRepositoryOpenError(error: unknown): boolean {
 	return (
 		isLixRecoveringError(error) ||
 		isErrorCode(error, "LIX_TRANSPORT_NETWORK") ||
-		isErrorCode(error, "LIX_STORAGE_IN_USE")
+		isErrorCode(error, "LIX_STORAGE_IN_USE") ||
+		isErrorCode(error, "LIX_STORAGE_FENCED")
 	);
 }
 
@@ -615,6 +689,7 @@ function abortError(signal: AbortSignal): Error {
 
 export class ManagedRepositoryLixSession implements RepositoryLixSession {
 	readonly lix: Lix;
+	readonly retainedReplicaCount: number;
 	readonly #listeners = new Set<() => void>();
 	readonly #pendingCreations = new Map<string, Promise<string>>();
 	readonly #defaultBranchId: string;
@@ -625,8 +700,10 @@ export class ManagedRepositoryLixSession implements RepositoryLixSession {
 		lix: Lix,
 		defaultBranchId: string,
 		activeBranchId = defaultBranchId,
+		retainedReplicaCount = 0,
 	) {
 		this.lix = lix;
+		this.retainedReplicaCount = retainedReplicaCount;
 		this.#defaultBranchId = defaultBranchId;
 		this.#activeBranchId = activeBranchId;
 	}
@@ -710,6 +787,9 @@ export class ManagedRepositoryLixSession implements RepositoryLixSession {
 
 class RepositoryLixSessionLease implements RepositoryLixSession {
 	readonly lix: Lix;
+	get retainedReplicaCount() {
+		return this.#session.retainedReplicaCount ?? 0;
+	}
 	readonly #session: RepositoryLixSession;
 	readonly #subscriptions = new Set<() => void>();
 	readonly #release: () => void;

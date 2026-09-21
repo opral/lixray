@@ -20,7 +20,7 @@ class FakeRuntime implements LixRuntimeClient {
 	fileCount = 0;
 	directoryCount = 0;
 	filePaths: Array<string> = [];
-	restoreCommitId: string | undefined;
+	restoreCommitId: string | null | undefined;
 	readonly opened = new Set<string>();
 	/** What each path holds, for reads: text, or raw bytes. */
 	readonly stored = new Map<string, string | Uint8Array>();
@@ -77,17 +77,17 @@ class FakeRuntime implements LixRuntimeClient {
 			sql: request.sql,
 			params: request.params,
 		});
-		if (
-			request.sql ===
-			"INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id"
-		) {
+		if (request.sql === "SELECT commit_id FROM lix_restore($1)") {
 			return {
 				columns: ["commit_id"],
 				rows: [
 					[
-						this.restoreCommitId === undefined
-							? (request.params?.[0] ?? { kind: "null" as const })
-							: { kind: "text" as const, value: this.restoreCommitId },
+						this.restoreCommitId === null
+							? { kind: "null" as const }
+							: {
+									kind: "text" as const,
+									value: this.restoreCommitId ?? "new-restore-commit",
+								},
 					],
 				],
 				rowsAffected: 1,
@@ -326,18 +326,10 @@ class FakeRuntime implements LixRuntimeClient {
 		return { id: "draft", name: "Draft", hidden: false, commitId: "commit-0" };
 	}
 	async undo() {
-		return {
-			branchId: this.branch,
-			targetCommitId: "old",
-			inverseCommitId: "inverse",
-		};
+		return { commitId: "inverse" };
 	}
 	async redo() {
-		return {
-			branchId: this.branch,
-			targetCommitId: "next",
-			replayCommitId: "replay",
-		};
+		return { commitId: "replay" };
 	}
 	async mergeBranchPreview() {
 		return { outcome: "alreadyUpToDate" };
@@ -502,13 +494,13 @@ void test("restore uses one parameterized SQL command on the context branch", as
 	assert.deepEqual(restored, {
 		context: opened.context,
 		branchId: "draft",
-		commitId: "commit-target",
+		commitId: "new-restore-commit",
 	});
 	assert.deepEqual(runtime.calls, [
 		{
 			lixId: LIX_ID,
 			branchId: "draft",
-			sql: "INSERT INTO lix_restore (commit_id) VALUES ($1) RETURNING commit_id",
+			sql: "SELECT commit_id FROM lix_restore($1)",
 			params: [{ kind: "text", value: "commit-target" }],
 		},
 	]);
@@ -536,7 +528,7 @@ void test("checkpoint uses the canonical SQL function on the context branch", as
 	]);
 });
 
-void test("restore rejects a mismatched commit id from Lix", async () => {
+void test("restore returns the newly created commit rather than the source", async () => {
 	const runtime = new FakeRuntime();
 	runtime.restoreCommitId = "unexpected-commit";
 	const service = new LixService(runtime, {
@@ -545,11 +537,21 @@ void test("restore rejects a mismatched commit id from Lix", async () => {
 	});
 	const opened = await service.openLix(LIX_ID, "draft");
 
-	await assert.rejects(
-		service.restore(opened.context, "commit-target"),
-		(error: unknown) =>
-			error instanceof Error &&
-			error.message === "Lix did not confirm the requested restore commit id.",
+	const restored = await service.restore(opened.context, "commit-target");
+	assert.equal(restored.commitId, "unexpected-commit");
+});
+
+void test("restore accepts an unchanged-state NULL receipt", async () => {
+	const runtime = new FakeRuntime();
+	runtime.restoreCommitId = null;
+	const service = new LixService(runtime, {
+		contextSigningKey: "test-key",
+		principal: { userId: "user", clientId: "client" },
+	});
+	const opened = await service.openLix(LIX_ID, "draft");
+	assert.equal(
+		(await service.restore(opened.context, "commit-target")).commitId,
+		null,
 	);
 });
 
@@ -1097,7 +1099,7 @@ void test("a diff ref resolves to a commit, or is refused with the reason", asyn
 				return answer("commit_id", this.checkpoints.slice(0, 1));
 			if (
 				request.sql ===
-				"SELECT id FROM lix_commit WHERE id = $1 AND is_checkpoint LIMIT 1"
+				"SELECT commit_id FROM lix_log() WHERE commit_id = $1 AND is_checkpoint LIMIT 1"
 			)
 				return answer("id", this.checkpoints.includes(given) ? [given] : []);
 			if (request.sql === "SELECT id FROM lix_commit WHERE id = $1 LIMIT 1")

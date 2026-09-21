@@ -67,7 +67,7 @@ void test("a write's receipt names a span, and the span says what changed", asyn
 		);
 		assert.equal(actual.rows[0]?.commit_id, checkpoint.rows[0]?.commit_id);
 		const history = await lix.execute(
-			"SELECT is_checkpoint FROM lix_commit WHERE id = $1",
+			"SELECT is_checkpoint FROM lix_log() WHERE commit_id = $1",
 			[checkpoint.rows[0]?.commit_id as string],
 		);
 		assert.equal(history.rows[0]?.is_checkpoint, true);

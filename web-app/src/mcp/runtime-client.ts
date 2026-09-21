@@ -367,7 +367,13 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.lix.undo();
+				const result = await session.lix.execute(
+					"SELECT commit_id FROM lix_undo()",
+					[],
+					{ rowMode: "object" },
+				);
+				const value = result.rows[0]?.commit_id;
+				return { commitId: typeof value === "string" ? value : null };
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -379,7 +385,13 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				return session.lix.redo();
+				const result = await session.lix.execute(
+					"SELECT commit_id FROM lix_redo()",
+					[],
+					{ rowMode: "object" },
+				);
+				const value = result.rows[0]?.commit_id;
+				return { commitId: typeof value === "string" ? value : null };
 			});
 		} catch (caught) {
 			throw asLixError(caught);

@@ -354,6 +354,10 @@ void test("only typed network failure, storage contention, and server recovery a
 		isRetryableRepositoryOpenError({ code: "LIX_STORAGE_IN_USE" }),
 		true,
 	);
+	assert.equal(
+		isRetryableRepositoryOpenError({ code: "LIX_STORAGE_FENCED" }),
+		true,
+	);
 	for (const details of [
 		{ nonRetryableAfterCommit: true },
 		{ nonRetryableAfterExecution: true },
@@ -363,7 +367,6 @@ void test("only typed network failure, storage contention, and server recovery a
 			false,
 		);
 	for (const code of [
-		"LIX_STORAGE_FENCED",
 		"LIX_STORAGE_CLOSED",
 		"LIX_TRANSPORT_CONTRACT",
 		"LIX_TRANSPORT_CALLBACK",
@@ -410,5 +413,17 @@ void test("authority upgrade transitions do not turn ordinary opening into an up
 			toFormat: 81,
 		}),
 		{ fromVersion: undefined, toVersion: 81, phase: "opening" },
+	);
+});
+
+void test("exhausted admission does not restart the SDK retry budget", () => {
+	assert.equal(
+		isRetryableRepositoryOpenError(
+			Object.assign(new Error("offline"), {
+				code: "LIX_TRANSPORT_NETWORK",
+				details: { admissionRetryExhausted: true },
+			}),
+		),
+		false,
 	);
 });

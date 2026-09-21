@@ -86,11 +86,8 @@ export const MCP_URL_GUIDE =
 export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
 	"Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.";
 
-export const MCP_DATA_GUIDE =
-	"Use only the files, records, and explicit snippets needed for the user's current repository task. Do not copy chat history, remembered personal details, or unrelated profile data into LixRay. Do not solicit, collect, or process health information, biometric data, government identifiers, payment card data, passwords, API keys, or other authentication secrets through these tools. If a requested transfer contains such data, ask the user for a non-sensitive or redacted version instead. Read only the requested paths and columns; do not retrieve account or profile records unless the user explicitly requests them for the task.";
-
 export const UNDO_TOOL_DESCRIPTION =
-	"Undo the latest undoable change on the context branch by creating an inverse commit. Prefer this to manual SQL reversal when asked to undo that change. No commit_id parameter; inspect history first if later edits may exist. Stops at checkpoints; restore is different and not undoable.";
+	"Undo the latest undoable change on the context branch through SELECT commit_id FROM lix_undo(). Returns the inverse commit_id, or null when there is nothing to undo. Inspect history first if later edits may exist.";
 
 /** What the host shows after a change, and what the agent should not repeat. */
 export const DIFF_CARD_GUIDE =
@@ -101,21 +98,19 @@ export const DIFF_TOOL_DESCRIPTION =
 
 export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. Prefer read_files and write_files for ordinary file reads and creates/updates; use list_files only to discover paths. Batch known paths together. Use query_sql for advanced reads and execute_sql for other mutations, including renames/deletes and directory operations. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
 
-${MCP_DATA_GUIDE}
-
 Lix SQL is a Postgres dialect subset, not SQLite. Discover tables/columns through information_schema; use $1, $2 parameters. The SQL tools carry essential guidance; the full SQL reference is available at ${SQL_GUIDE_URI}. A successful mutation is already saved. Read back when the outcome is unknown or validation is part of the task; never blindly retry an uncertain write.
 
 ${UNDO_TOOL_DESCRIPTION}
 
 ${MCP_URL_GUIDE}
 
-Writes persist without a checkpoint; execute_sql already saved the files. Use create_checkpoint to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to move the selected branch back to an ancestor without creating a commit. Do not invent tools, arguments, or branch state.`;
+Writes persist without a checkpoint; execute_sql already saved the files. Use create_checkpoint to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to copy that saved state into a new commit on the selected branch. Do not invent tools, arguments, or branch state.`;
 
 export const CREATE_CHECKPOINT_TOOL_DESCRIPTION =
 	"Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.";
 
 export const RESTORE_TOOL_DESCRIPTION =
-	"Move the branch in context back to ancestor commit_id without creating a commit. Not undoable: undo only applies to commits made afterward. Abandoned commits are kept until garbage collection; other branches are unchanged. create_checkpoint returns a usable commit_id; there is no restore_checkpoint tool.";
+	"Copy content from commit_id into a new commit on the context branch. Preserves history and working baseline; undo can reverse it. Returns the new commit_id, or null if unchanged. Use a commit_id from create_checkpoint or history.";
 
 export const LIST_LIXES_TOOL_DESCRIPTION =
 	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; With an exact reference, use open_lix for file-tool context or lix_ref directly for SQL.";
@@ -594,17 +589,13 @@ const checkpointOutput = withError(
 const undoOutput = withError(
 	z.object({
 		context,
-		branch_id: branchId,
-		target_commit_id: z.string(),
-		inverse_commit_id: z.string(),
+		commit_id: z.string().nullable(),
 	}),
 );
 const redoOutput = withError(
 	z.object({
 		context,
-		branch_id: branchId,
-		target_commit_id: z.string(),
-		replay_commit_id: z.string(),
+		commit_id: z.string().nullable(),
 	}),
 );
 
@@ -1248,7 +1239,13 @@ export function createLixrayMcpServer(
 		"Restore branch",
 		RESTORE_TOOL_DESCRIPTION,
 		z.object({ context, commit_id: commitId }).strict(),
-		branchStateOutput,
+		withError(
+			z.object({
+				context,
+				branch_id: branchId,
+				commit_id: z.string().nullable(),
+			}),
+		),
 		writeAnnotations(true, true),
 		securitySchemes,
 		async ({ context: token, commit_id }) => {
@@ -1280,9 +1277,7 @@ export function createLixrayMcpServer(
 			const result = await service.undo(token);
 			return {
 				context: result.context,
-				branch_id: result.branchId,
-				target_commit_id: result.targetCommitId,
-				inverse_commit_id: result.inverseCommitId,
+				commit_id: result.commitId,
 			};
 		},
 		undefined,
@@ -1297,7 +1292,7 @@ export function createLixrayMcpServer(
 		server,
 		"redo",
 		"Redo commit",
-		"Redo the latest undone commit on the branch selected by context.",
+		"Redo the latest undone commit through SELECT commit_id FROM lix_redo(). Returns the replay commit_id, or null when there is nothing to redo.",
 		z.object({ context }).strict(),
 		redoOutput,
 		writeAnnotations(),
@@ -1306,9 +1301,7 @@ export function createLixrayMcpServer(
 			const result = await service.redo(token);
 			return {
 				context: result.context,
-				branch_id: result.branchId,
-				target_commit_id: result.targetCommitId,
-				replay_commit_id: result.replayCommitId,
+				commit_id: result.commitId,
 			};
 		},
 		undefined,
@@ -1664,7 +1657,6 @@ export function mcpDocumentationResponse(
 			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). Prefer read_files and write_files for ordinary file work; batch known paths together. Use SQL for advanced queries and other mutations. execute_sql is always treated as potentially destructive. File renames/deletes and directory operations use SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
 			"A successful execute_sql persisted the mutation. Read back only when the write outcome is unknown or validation is part of the task.",
 			MCP_URL_GUIDE,
-			MCP_DATA_GUIDE,
 			"HTTP responses include X-Request-ID for support correlation. Diagnostic identifiers stay out of tool results.",
 			"",
 			"Modern clients begin with server/discover. There is no initialize handshake and no MCP session id on this endpoint.",
@@ -1733,7 +1725,7 @@ function registerTool(
 		name,
 		{
 			title,
-			description: `${description}\n\n${MCP_DATA_GUIDE}`,
+			description,
 			inputSchema,
 			outputSchema,
 			annotations,
@@ -2312,13 +2304,19 @@ function summarizeToolResult(
 		return `Checkpoint created at commit ${String(result.commit_id)}.`;
 	}
 	if (name === "restore") {
-		return `Restored branch ${String(result.branch_id)} to commit ${String(result.commit_id)}.`;
+		return typeof result.commit_id === "string"
+			? `Restored content on branch ${String(result.branch_id)} in new commit ${result.commit_id}.`
+			: `Branch ${String(result.branch_id)} already matches the requested state.`;
 	}
 	if (name === "undo") {
-		return `Undone to commit ${String(result.target_commit_id)} (inverse commit ${String(result.inverse_commit_id)}).`;
+		return typeof result.commit_id === "string"
+			? `Undo committed as ${result.commit_id}.`
+			: "Nothing to undo.";
 	}
 	if (name === "redo") {
-		return `Redone to commit ${String(result.target_commit_id)} (replay commit ${String(result.replay_commit_id)}).`;
+		return typeof result.commit_id === "string"
+			? `Redo committed as ${result.commit_id}.`
+			: "Nothing to redo.";
 	}
 	if (name === "merge_branch_preview") {
 		return "Merge preview completed.";
@@ -2493,7 +2491,7 @@ function assertReadOnlyQuery(sql: string): void {
 	if (sqlLooksLikeWrite(sql)) {
 		throw createLixError(
 			"invalid_request",
-			"query_sql rejects INSERT, UPDATE, and DELETE.",
+			"query_sql rejects mutating SQL, including checkpoint and recovery SELECT commands.",
 			{
 				hint: "Use execute_sql for writes.",
 			},

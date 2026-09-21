@@ -281,7 +281,7 @@ void test("execute maps protocol wire values through the SDK", async () => {
 	]);
 });
 
-void test("createBranch, undo, and redo use protocol HTTP", async () => {
+void test("createBranch, undo, and redo use SQL over protocol HTTP", async () => {
 	const paths: string[] = [];
 	const runtime = client(async (_lixId, request) => {
 		const pathname = testProtocolPath(request);
@@ -294,18 +294,14 @@ void test("createBranch, undo, and redo use protocol HTTP", async () => {
 				commitId: "commit-2",
 			});
 		}
-		if (pathname === "/lix/v1/undo") {
+		if (pathname === "/lix/v1/execute") {
+			const body = JSON.parse(await request.text()) as { sql: string };
+			assert.match(body.sql, /^SELECT commit_id FROM lix_(?:undo|redo)\(\)$/);
 			return Response.json({
-				branchId: "main",
-				targetCommitId: "target",
-				inverseCommitId: "inverse",
-			});
-		}
-		if (pathname === "/lix/v1/redo") {
-			return Response.json({
-				branchId: "main",
-				targetCommitId: "target",
-				replayCommitId: "replay",
+				columns: [{ name: "commit_id", type: "text" }],
+				rows: [[{ kind: "text", value: "new-commit" }]],
+				rowsAffected: 1,
+				notices: [],
 			});
 		}
 		return branchProtocolResponse(request);
@@ -321,19 +317,15 @@ void test("createBranch, undo, and redo use protocol HTTP", async () => {
 		},
 	);
 	assert.deepEqual(await runtime.undo(LIX_ID, "main"), {
-		branchId: "main",
-		targetCommitId: "target",
-		inverseCommitId: "inverse",
+		commitId: "new-commit",
 	});
 	assert.deepEqual(await runtime.redo(LIX_ID, "main"), {
-		branchId: "main",
-		targetCommitId: "target",
-		replayCommitId: "replay",
+		commitId: "new-commit",
 	});
 	assert.deepEqual(paths.slice(1), [
 		"POST /lix/v1/branch/create",
-		"POST /lix/v1/undo",
-		"POST /lix/v1/redo",
+		"POST /lix/v1/execute",
+		"POST /lix/v1/execute",
 	]);
 });
 

@@ -88,11 +88,11 @@ export type DiffCardFile = {
 
 /** What travels in `_meta` beside a result: the card's bar and its pages. */
 export type DiffCardPayload = {
-	/** "3 files written" */
+	/** "1 file added", or "3 files written" when they did several things. */
 	readonly title: string;
 	/** The deepest folder every file is under; absent at the root. */
 	readonly folder?: string;
-	/** "2 new · 1 edited" */
+	/** "2 added · 1 modified", or "" when the title already said it. */
 	readonly tally: string;
 	/** "@opral/monorepo" */
 	readonly repository?: string;
@@ -142,15 +142,39 @@ export function commonFolder(paths: ReadonlyArray<string>): string {
 	return common && common.length > 0 ? `/${common.join("/")}` : "";
 }
 
+/**
+ * One vocabulary for what happened to a file: Lix's own diff words, which
+ * are the words Atelier's glyphs and review carry too. A card is a view of a
+ * Lix diff; it should not rename what it is looking at.
+ */
 const TALLY_ORDER: ReadonlyArray<[DiffCardStatus, string]> = [
-	["added", "new"],
-	["modified", "edited"],
+	["added", "added"],
+	["modified", "modified"],
 	["moved", "moved"],
-	["removed", "deleted"],
+	["removed", "removed"],
 ];
 
-/** "2 new · 1 edited": only what happened, in a fixed order. */
+/** The one word for a set of changes that are all the same thing. */
+const SINGLE_STATUS_WORD: Record<DiffCardStatus, string> = Object.fromEntries(
+	TALLY_ORDER,
+) as Record<DiffCardStatus, string>;
+
+/** The status every change shares, or null when they differ. */
+function sharedStatus(
+	statuses: ReadonlyArray<DiffCardStatus>,
+): DiffCardStatus | null {
+	const first = statuses[0];
+	if (first === undefined) return null;
+	return statuses.every((status) => status === first) ? first : null;
+}
+
+/**
+ * "2 added · 1 modified": only what happened, in a fixed order — and nothing at
+ * all when every change is the same thing, because then the title has said
+ * it and the bar would be saying it twice.
+ */
 export function tallyLabel(statuses: ReadonlyArray<DiffCardStatus>): string {
+	if (sharedStatus(statuses)) return "";
 	const parts: string[] = [];
 	for (const [status, word] of TALLY_ORDER) {
 		const count = statuses.filter((each) => each === status).length;
@@ -159,9 +183,19 @@ export function tallyLabel(statuses: ReadonlyArray<DiffCardStatus>): string {
 	return parts.join(" · ");
 }
 
-/** "3 files written", "1 file changed". */
-export function cardTitle(count: number, verb: "written" | "changed"): string {
-	return `${count} ${count === 1 ? "file" : "files"} ${verb}`;
+/**
+ * "1 file added", "3 files modified" — what happened, when one word covers
+ * it. A set that did several things at once falls back to the tool's own
+ * verb, "3 files written", and the bar's tally breaks it down.
+ */
+export function cardTitle(
+	count: number,
+	verb: "written" | "changed",
+	statuses: ReadonlyArray<DiffCardStatus> = [],
+): string {
+	const shared = sharedStatus(statuses);
+	const word = shared ? SINGLE_STATUS_WORD[shared] : verb;
+	return `${count} ${count === 1 ? "file" : "files"} ${word}`;
 }
 
 /** What Atelier counts for a file: rows of a table, lines of a document. */
@@ -180,14 +214,7 @@ export function fileLabel(
 	unit: string,
 	moved?: { readonly from: string; readonly to: string },
 ): string {
-	const word =
-		status === "added"
-			? "new"
-			: status === "removed"
-				? "deleted"
-				: status === "moved"
-					? "moved"
-					: "edited";
+	const word = SINGLE_STATUS_WORD[status];
 	if (status === "moved" && moved !== undefined) {
 		const from = movedFromHint(moved.from, moved.to);
 		return counts && counts.added + counts.removed + counts.modified > 0
@@ -253,10 +280,13 @@ export function diffCardPayload(input: {
 		cardFile(change, index < MAX_PREVIEWS),
 	);
 	const folder = commonFolder(listed.map((file) => file.path));
+	// Over every change, not only the listed ones: what the title says has to
+	// hold for the files the card could not carry as well.
+	const statuses = input.changes.map((change) => diffCardStatus(change));
 	return {
-		title: cardTitle(input.changes.length, input.verb),
+		title: cardTitle(input.changes.length, input.verb, statuses),
 		...(folder ? { folder } : {}),
-		tally: tallyLabel(files.map((file) => file.status)),
+		tally: tallyLabel(statuses),
 		...(input.repository ? { repository: input.repository } : {}),
 		files,
 		more: input.changes.length - listed.length,
@@ -289,7 +319,10 @@ function cardFile(change: DiffCardChange, withPreview: boolean): DiffCardFile {
 			...(change.before !== undefined ? { before: change.before } : {}),
 			...(change.after !== undefined ? { after: change.after } : {}),
 		},
-		{ maxBytes: MAX_PREVIEW_BYTES },
+		// The pictures in a document are part of what changed. A host that
+		// refuses them shows their alt text, which is what the card used to
+		// print in their place anyway.
+		{ maxBytes: MAX_PREVIEW_BYTES, images: "embed" },
 	);
 	if (!isRendered(view)) {
 		const note =
@@ -310,10 +343,11 @@ function cardFile(change: DiffCardChange, withPreview: boolean): DiffCardFile {
 			note,
 		};
 	}
-	// The trimmed body names its own gaps; saying it again reads as a second
-	// set of missing lines.
+	// The trimmed body names its own gaps — a document's pruned run, a
+	// table's unchanged rows; saying it again reads as a second set of
+	// missing lines.
 	const note =
-		view.hidden > 0 && !view.html.includes("md-diff-gap")
+		view.hidden > 0 && !view.html.includes("-diff-gap")
 			? `${view.hidden} more ${unitWord(view.hidden, unit)} in LixRay`
 			: undefined;
 	return {
