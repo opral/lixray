@@ -13,6 +13,7 @@ void test("extracts safe Lix protocol fields for exception telemetry", () => {
 	});
 
 	assert.deepEqual(lixErrorTelemetryProperties(error), {
+		error_kind: "LixError",
 		lix_error_code: "LIX_COLUMN_NOT_FOUND",
 		lix_error_status: 404,
 		lix_error_hint: "Use the canonical file column.",
@@ -41,8 +42,10 @@ void test("extracts HTTP status preserved in structured Lix error details", () =
 	});
 
 	assert.deepEqual(lixErrorTelemetryProperties(error), {
+		error_kind: "LixError",
 		lix_error_code: "LIX_ERROR_PROTOCOL_SESSION_GONE",
 		lix_error_status: 410,
+		httpStatus: 410,
 	});
 	assert.doesNotMatch(
 		JSON.stringify(lixErrorTelemetryProperties(error)),

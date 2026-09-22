@@ -1,3 +1,4 @@
+import { repositoryOpenDiagnostics } from "./repository-open-telemetry.ts";
 import type {
 	LogAttributes,
 	PostHog,
@@ -40,6 +41,7 @@ export function lixErrorTelemetryProperties(error: unknown): Properties {
 				: undefined;
 
 	return {
+		...repositoryOpenDiagnostics(error),
 		...(code
 			? { lix_error_code: code.slice(0, MAX_LIX_TELEMETRY_STRING_LENGTH) }
 			: {}),
@@ -90,6 +92,7 @@ function registerTelemetryEnvironment(
 	posthog: Pick<PostHog, "register">,
 ): void {
 	posthog.register({
+		client_release: import.meta.env.VITE_LIXRAY_RELEASE_ID ?? "unknown",
 		environment: telemetryEnvironment(
 			import.meta.env.VITE_PUBLIC_TELEMETRY_ENVIRONMENT,
 			import.meta.env.PROD,
