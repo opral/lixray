@@ -66,6 +66,11 @@ function posthogSourceMapPlugins(command: string) {
 }
 
 export default defineConfig(({ command }) => ({
+	define: {
+		"import.meta.env.VITE_LIXRAY_RELEASE_ID": JSON.stringify(
+			process.env.RAILWAY_GIT_COMMIT_SHA?.trim() || "development",
+		),
+	},
 	// The SDK Component host loads modules asynchronously inside its workers.
 	worker: { format: "es" },
 	resolve: {

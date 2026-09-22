@@ -1,3 +1,8 @@
+import {
+	captureRepositoryOpenReport,
+	parseRepositoryOpenReport,
+} from "./repository-open-telemetry.ts";
+import { REPOSITORY_OPEN_DIAGNOSTICS_PATH } from "../lib/repository-open-telemetry.ts";
 import { context, trace } from "@opentelemetry/api";
 import { failSpan, withSpan } from "../telemetry.ts";
 import { downloadPublishedFile } from "./published-file.ts";
@@ -274,6 +279,82 @@ export async function handleRequest(
 	options: HandleRequestOptions = {},
 ): Promise<Response> {
 	const url = new URL(request.url);
+
+	if (url.pathname === REPOSITORY_OPEN_DIAGNOSTICS_PATH) {
+		if (request.method !== "POST") return new Response(null, { status: 405 });
+		const origin = request.headers.get("origin");
+		if (origin && origin !== url.origin)
+			return new Response(null, { status: 403 });
+		if (Number(request.headers.get("content-length")) > 4096)
+			return new Response(null, { status: 413 });
+		let report;
+		try {
+			const reader = request.body?.getReader();
+			if (!reader) return new Response(null, { status: 400 });
+			const timer = setTimeout(() => {
+				void reader.cancel().catch(() => {});
+			}, 4_000);
+			const chunks: Uint8Array[] = [];
+			let size = 0;
+			try {
+				for (;;) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					size += value.byteLength;
+					if (size > 4096) return new Response(null, { status: 413 });
+					chunks.push(value);
+				}
+			} finally {
+				clearTimeout(timer);
+				await reader.cancel();
+			}
+			const bytes = new Uint8Array(size);
+			let offset = 0;
+			for (const chunk of chunks) {
+				bytes.set(chunk, offset);
+				offset += chunk.length;
+			}
+			report = parseRepositoryOpenReport(
+				JSON.parse(new TextDecoder().decode(bytes)),
+			);
+		} catch {
+			return new Response(null, { status: 400 });
+		}
+		if (!report) return new Response(null, { status: 400 });
+		let userId = LIX_ANONYMOUS_ACCOUNT_ID;
+		if (request.headers.has("authorization")) {
+			const auth = await (options.authenticate ?? authenticateWithSupabase)(
+				request,
+				env,
+			);
+			if (!auth.ok) return auth.response;
+			const denied = await (options.authorizeLix ?? authorizeLixWithSupabase)(
+				report.repositoryId,
+				auth.auth,
+				env,
+			);
+			if (denied) return denied;
+			userId = auth.auth.userId;
+		} else {
+			const resolution = await (
+				options.resolvePublicLix ?? resolvePublicLixWithSupabase
+			)(report.repositoryId, env);
+			if (!resolution.ok) return resolution.response;
+		}
+		const captured = await captureRepositoryOpenReport(
+			report,
+			userId,
+			env,
+			options.fetch ?? fetch,
+		);
+		return json(
+			{ captured },
+			{
+				status: captured ? 200 : 502,
+				headers: { "cache-control": "no-store" },
+			},
+		);
+	}
 
 	if (url.pathname === "/api/telemetry/otlp/v1/traces") {
 		return handleOtlpTelemetry(request, env);
