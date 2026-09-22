@@ -1,3 +1,4 @@
+import { reportRepositoryOpenFailure } from "~/lib/repository-open-telemetry";
 import { createRepositoryRouteLifecycle } from "~/lib/repository-route-lifecycle";
 import { RepositoryUpgradeProgress } from "./repository-upgrade-progress";
 import {
@@ -1221,6 +1222,11 @@ export function RepositoryAtelier({
 						namespace_id: namespace,
 					});
 					setStorageBusy(isRepositoryStorageInUse(caught));
+					void reportRepositoryOpenFailure(caught, {
+						repositoryId,
+						release: import.meta.env.VITE_LIXRAY_RELEASE_ID ?? "unknown",
+						getAccessToken,
+					});
 					setError(formatRepositoryOpenError(caught));
 				}
 			});

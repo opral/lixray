@@ -153,3 +153,15 @@ References:
 - [PostHog product analytics best practices](https://posthog.com/docs/product-analytics/best-practices)
 - [PostHog identify documentation](https://posthog.com/docs/product-analytics/identify)
 - [PostHog data management](https://posthog.com/docs/data)
+
+### Repository opening failures
+
+Every failure caught while opening a repository also sends a bounded report to
+`/api/repository-open-diagnostics`, independently of browser PostHog initialization.
+The gateway checks member or public repository access and records an allowlisted
+server log before delivering a PostHog `$exception` with `operation=repository_open`
+and `delivery=first_party`. Reports include client/server release, stable error
+code or JavaScript error kind, and available admission epoch/root coordinates.
+Raw error messages, URLs, tokens and repository contents are not accepted by this
+endpoint. Direct browser exception reporting remains available for stack traces.
+Failures to reach the gateway cannot be delivered through this path.
