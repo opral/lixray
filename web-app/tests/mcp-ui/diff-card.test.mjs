@@ -45,7 +45,7 @@ async function serveResource() {
 		);
 		try {
 			const tools = await client.listTools();
-			const uri = tools.tools.find((tool) => tool.name === "write_files")?._meta
+			const uri = tools.tools.find((tool) => tool.name === "execute_sql")?._meta
 				?.ui?.resourceUri;
 			assert.ok(uri);
 			const resource = await client.readResource({ uri });
@@ -63,7 +63,7 @@ async function serveResource() {
         window.sizes = [];
         bridge.onsizechange = size => { window.heights.push(size.height); window.sizes.push(size); };
         bridge.oninitialized = async () => {
-          await bridge.sendToolInput({ arguments: { files: [{ path: '/mcp-ui-demo.md' }] } });
+          await bridge.sendToolInput({ arguments: { statements: [{ sql: 'INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))' }] } });
           window.ready = true;
         };
         await bridge.connect(new PostMessageTransport(frame.contentWindow, frame.contentWindow));

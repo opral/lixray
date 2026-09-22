@@ -29,7 +29,6 @@ import {
 	LIX_SQL_OPERATING_GUIDE,
 	QUERY_SQL_TOOL_DESCRIPTION,
 	READ_FILES_TOOL_DESCRIPTION,
-	WRITE_FILES_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 import {
 	createLixError,
@@ -96,12 +95,12 @@ export const UNDO_TOOL_DESCRIPTION =
 
 /** What the host shows after a change, and what the agent should not repeat. */
 export const DIFF_CARD_GUIDE =
-	"After write_files, execute_sql, or diff, MCP Apps hosts render a collapsible card of what changed: one bar naming the files, which the user expands to page through each file's rendered change and open it in LixRay. When the user asks what changed between two points (a checkpoint, a commit, a branch, the working state), call diff and the same card appears. The card is collapsed by default and the user opens it; name the change in one sentence and do not repeat the file list in prose. Other hosts get the same receipt and file links; do not assume a card was displayed.";
+	"After execute_sql or diff, MCP Apps hosts render a collapsible card of what changed: one bar naming the files, which the user expands to page through each file's rendered change and open it in LixRay. When the user asks what changed between two points (a checkpoint, a commit, a branch, the working state), call diff and the same card appears. The card is collapsed by default and the user opens it; name the change in one sentence and do not repeat the file list in prose. Other hosts get the same receipt and file links; do not assume a card was displayed.";
 
 export const DIFF_TOOL_DESCRIPTION =
 	'List the files that differ between two points of the Lix in context, each added, modified, removed, or moved (with before_path). before and after are each { checkpoint_id }, { commit_id }, { branch_id }, "working" (the branch as it stands), or "latest_checkpoint" (the nearest checkpoint behind it); paths narrows the list. Read-only. "What changed since the last checkpoint" is { before: "latest_checkpoint", after: "working" }. MCP Apps hosts render the same collapsible card a write shows; summarize in one sentence rather than listing the files.';
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. Prefer read_files and write_files for ordinary file reads and creates/updates; use list_files only to discover paths. Batch known paths together. Use query_sql for advanced reads and execute_sql for other mutations, including renames/deletes and directory operations. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. Use read_files for ordinary file reads and list_files only to discover paths; batch known paths together. Use query_sql for advanced reads. execute_sql is the one write path: put every create, update, move, rename, copy, delete and directory change of one coherent change into one ordered atomic batch, with last_seen_commit_id to guard it and checkpoint: true to mark it. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
 
 Lix SQL is a Postgres dialect subset, not SQLite. Discover tables/columns through information_schema; use $1, $2 parameters. The SQL tools carry essential guidance; the full SQL reference is available at ${SQL_GUIDE_URI}. A successful mutation is already saved. Read back when the outcome is unknown or validation is part of the task; never blindly retry an uncertain write.
 
@@ -109,7 +108,7 @@ ${UNDO_TOOL_DESCRIPTION}
 
 ${MCP_URL_GUIDE}
 
-Writes persist without a checkpoint; execute_sql already saved the files. Use create_checkpoint to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to copy that saved state into a new commit on the selected branch. Do not invent tools, arguments, or branch state.`;
+Writes persist without a checkpoint; execute_sql already saved the files. Use checkpoint: true on the batch, or create_checkpoint, to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to copy that saved state into a new commit on the selected branch. Do not invent tools, arguments, or branch state.`;
 
 export const CREATE_CHECKPOINT_TOOL_DESCRIPTION =
 	"Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.";
@@ -469,16 +468,6 @@ const readFilesOutput = withError(
 		missing: z.array(z.string()),
 	}),
 );
-const writeFilesOutput = withError(
-	z.object({
-		context,
-		commit_id: z.string().optional(),
-		files: z.array(listedFile),
-		checkpoint_commit_id: z.string().optional(),
-		commit: z.object({ before: z.string(), after: z.string() }).nullable(),
-		warning: z.string().optional(),
-	}),
-);
 const diffRef = z.union([
 	z.object({ checkpoint_id: commitId }).strict(),
 	z.object({ commit_id: commitId }).strict(),
@@ -541,6 +530,8 @@ const executeBatchOutput = withError(
 	z.object({
 		context,
 		commit: commitSpan.nullable(),
+		checkpoint_commit_id: z.string().optional(),
+		warning: z.string().optional(),
 		results: z.array(
 			z
 				.object({
@@ -643,7 +634,6 @@ function traceToolDispatch(
 			: "unknown";
 		if (
 			[
-				"write_files",
 				"execute_sql",
 				"create_checkpoint",
 				"restore",
@@ -767,7 +757,7 @@ export function createLixrayMcpServer(
 			title: "LixRay file changes",
 			mimeType: MCP_APP_HTML,
 			description:
-				"A collapsible card of the files write_files, execute_sql, or diff changed.",
+				"A collapsible card of the files execute_sql or diff changed.",
 		},
 		(uri) => ({
 			contents: [
@@ -940,82 +930,6 @@ export function createLixrayMcpServer(
 
 	registerTool(
 		server,
-		"write_files",
-		"LixRay: Write files",
-		WRITE_FILES_TOOL_DESCRIPTION,
-		z
-			.object({
-				context,
-				files: z
-					.array(
-						z
-							.object({
-								path: z.string().min(1),
-								content: z.string().optional(),
-								content_base64: z.string().optional(),
-								lixcol_metadata: fileMetadata.nullable().optional(),
-							})
-							.strict(),
-					)
-					.min(1)
-					.max(100),
-				last_seen_commit_id: commitId.optional(),
-				checkpoint: z.boolean().optional(),
-			})
-			.strict(),
-		writeFilesOutput,
-		writeAnnotations(),
-		securitySchemes,
-		async (
-			{ context: token, files, last_seen_commit_id, checkpoint },
-			callId,
-		) => {
-			const written = await service.writeFiles(
-				token,
-				{
-					files,
-					...(last_seen_commit_id
-						? { lastSeenCommitId: last_seen_commit_id }
-						: {}),
-					...(checkpoint ? { checkpoint } : {}),
-					originKey: mcpOriginKey(callId),
-				},
-				options.urlOrigin,
-			);
-			const callState = otelContext.active().getValue(TOOL_CALL_STATE) as
-				| ToolCallState
-				| undefined;
-			if (callState) callState.commitOutcome = "committed";
-			const rendered = await withSpan("mcp.response.preview", () =>
-				writeCard(service, token, written, files, options.urlOrigin),
-			);
-			const warning = [
-				written.warning,
-				rendered.failed ? PREVIEW_UNAVAILABLE : undefined,
-			]
-				.filter(Boolean)
-				.join(" ");
-			return {
-				context: written.context,
-				commit_id: written.commitId,
-				files: written.files,
-				...(written.checkpointCommitId
-					? { checkpoint_commit_id: written.checkpointCommitId }
-					: {}),
-				...uiField(rendered.card),
-				commit: written.commit,
-				...(warning ? { warning } : {}),
-			};
-		},
-		undefined,
-		surfaceVersion,
-		requestId,
-		service,
-		options.urlOrigin,
-	);
-
-	registerTool(
-		server,
 		"diff",
 		"LixRay: Diff two points",
 		DIFF_TOOL_DESCRIPTION,
@@ -1127,13 +1041,28 @@ export function createLixrayMcpServer(
 						"Defaults to the repository default branch when lix_ref is used.",
 					),
 				statements: z.array(sqlStatement).min(1),
+				last_seen_commit_id: commitId
+					.optional()
+					.describe(
+						"Refuse the batch if a file it touches changed since this commit.",
+					),
+				checkpoint: z.boolean().optional(),
 				options: executeOptions.optional(),
 			})
 			.strict(),
 		executeBatchOutput,
 		writeAnnotations(),
 		securitySchemes,
-		async ({ context: token, statements, options: batchOptions }, callId) => {
+		async (
+			{
+				context: token,
+				statements,
+				last_seen_commit_id,
+				checkpoint,
+				options: batchOptions,
+			},
+			callId,
+		) => {
 			for (const [statementIndex, statement] of (
 				statements as Array<{ sql: string }>
 			).entries()) {
@@ -1150,14 +1079,25 @@ export function createLixrayMcpServer(
 			}
 			// Every change the batch makes carries this call's origin key, so
 			// the result can say what it touched without reading the SQL.
+			const executed = await service.executeBatch(token, {
+				statements,
+				options: {
+					...toExecuteOptions(batchOptions),
+					originKey: mcpOriginKey(callId, batchOptions?.origin_key),
+				},
+				...(last_seen_commit_id
+					? { lastSeenCommitId: last_seen_commit_id }
+					: {}),
+				...(checkpoint ? { checkpoint } : {}),
+			});
 			return {
-				...(await service.executeBatch(token, {
-					statements,
-					options: {
-						...toExecuteOptions(batchOptions),
-						originKey: mcpOriginKey(callId, batchOptions?.origin_key),
-					},
-				})),
+				context: executed.context,
+				commit: executed.commit,
+				results: executed.results,
+				...(executed.checkpointCommitId
+					? { checkpoint_commit_id: executed.checkpointCommitId }
+					: {}),
+				...(executed.warning ? { warning: executed.warning } : {}),
 			};
 		},
 		"execute_sql",
@@ -1664,7 +1604,7 @@ export function mcpDocumentationResponse(
 			"",
 			"Match the exact LixRay server name instead of broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly to query_sql or execute_sql, optionally branch_id; no opening call is required. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is encrypted, expiring, and independent from the MCP transport request.",
 			"",
-			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). Prefer read_files and write_files for ordinary file work; batch known paths together. Use SQL for advanced queries and other mutations. execute_sql is always treated as potentially destructive. File renames/deletes and directory operations use SQL against public lix_file and lix_directory tables; get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
+			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). Prefer read_files for ordinary file reads; batch known paths together. execute_sql is the one write path and is always treated as potentially destructive: file creates, updates, moves, renames, deletes and directory operations are one ordered atomic batch against public lix_file and lix_directory tables. A move is UPDATE lix_file SET path, which keeps the file id so links survive; copy plus delete does not. last_seen_commit_id refuses a batch that touches a file changed since that commit; checkpoint: true marks the result. get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
 			"A successful execute_sql persisted the mutation. Read back only when the write outcome is unknown or validation is part of the task.",
 			MCP_URL_GUIDE,
 			"HTTP responses include X-Request-ID for support correlation. Diagnostic identifiers stay out of tool results.",
@@ -2035,48 +1975,7 @@ const UI_RESULT_KEY = "_ui";
 const SUMMARY_KEY = "_summary";
 
 /** The tools whose result the diff card resource renders. */
-const CARD_TOOLS = new Set(["write_files", "execute_sql", "diff"]);
-
-const PREVIEW_UNAVAILABLE =
-	"Files saved, preview unavailable. Do not repeat the write.";
-
-/**
- * The card for a write: what changed between the commits its receipt names.
- *
- * The write does not carry its own before-bytes. It carries a commit span,
- * and the span is asked what changed — the same question a checkpoint or any
- * two commits would be asked, so one render path serves them all. A write
- * that published no commit has nothing to show; a failure here is a warning
- * on a write that already succeeded.
- */
-async function writeCard(
-	service: LixService,
-	token: string,
-	written: Awaited<ReturnType<LixService["writeFiles"]>>,
-	requested: ReadonlyArray<{ path: string; content?: string }>,
-	urlOrigin: string | undefined,
-): Promise<{ card: DiffCardPayload | null; failed: boolean }> {
-	const span = written.commit;
-	if (!span || span.before === span.after) return { card: null, failed: false };
-	try {
-		const paths = requested
-			.filter((file) => file.content !== undefined)
-			.map((file) => file.path)
-			.slice(0, MAX_CARD_FILES);
-		if (paths.length === 0) return { card: null, failed: false };
-		const changes = await service.fileChanges(token, span, paths);
-		const urls = await service.changeUrls(token, changes, urlOrigin);
-		return {
-			card: changeCard(changes, urls.files, "written", urls.repository),
-			failed: false,
-		};
-	} catch (caught) {
-		console.error("LixRay MCP file changes failed", {
-			error: errorDetails(caught),
-		});
-		return { card: null, failed: true };
-	}
-}
+const CARD_TOOLS = new Set(["execute_sql", "diff"]);
 
 /**
  * The card for an execute_sql batch: the files the change log says it
@@ -2195,20 +2094,6 @@ async function resultResourceLinks(
 			},
 		];
 	}
-	if (name === "write_files" && Array.isArray(result.files)) {
-		return (result.files as Array<{ path: string; url: string }>)
-			.slice(0, 50)
-			.map((file) => {
-				const mimeType = mimeTypeForPath(file.path);
-				return {
-					type: "resource_link",
-					uri: file.url,
-					name: file.path.split("/").filter(Boolean).at(-1) ?? file.path,
-					description: `Wrote ${file.path.replace(/^\//, "")}`,
-					...(mimeType ? { mimeType } : {}),
-				};
-			});
-	}
 	if (name === "diff" && Array.isArray(result.files)) {
 		return (
 			result.files as Array<{ path: string; url: string; status: string }>
@@ -2281,7 +2166,13 @@ function summarizeToolResult(
 		return summarizeQuerySql(result.result);
 	}
 	if (name === "execute_sql") {
-		return summarizeExecuteSql(result.results, touched);
+		const checkpoint =
+			typeof result.checkpoint_commit_id === "string"
+				? ` · checkpoint ${result.checkpoint_commit_id}`
+				: "";
+		const warning =
+			typeof result.warning === "string" ? `. ${result.warning}` : "";
+		return `${summarizeExecuteSql(result.results, touched)}${checkpoint}${warning}`;
 	}
 	if (name === "list_files") {
 		const files = Array.isArray(result.files) ? result.files : [];
@@ -2291,19 +2182,6 @@ function summarizeToolResult(
 		const files = Array.isArray(result.files) ? result.files : [];
 		const missing = Array.isArray(result.missing) ? result.missing : [];
 		return `Read ${files.length} ${files.length === 1 ? "file" : "files"}${missing.length ? `; missing: ${missing.join(", ")}` : ""} at commit ${String(result.commit_id)}.`;
-	}
-	if (name === "write_files") {
-		const files = Array.isArray(result.files)
-			? (result.files as Array<{ path?: unknown }>)
-			: [];
-		const names = files.map((file) =>
-			typeof file.path === "string" ? file.path.replace(/^\//, "") : "?",
-		);
-		const checkpoint =
-			typeof result.checkpoint_commit_id === "string"
-				? ` (checkpoint ${result.checkpoint_commit_id})`
-				: "";
-		return `Wrote ${names.join(" · ")}${typeof result.commit_id === "string" ? ` at commit ${result.commit_id}` : ""}${checkpoint}.${typeof result.warning === "string" ? ` ${result.warning}` : ""}`;
 	}
 	if (name === "active_branch_id") {
 		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.`;
@@ -2478,7 +2356,6 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"get_entity_urls",
 		"list_files",
 		"read_files",
-		"write_files",
 		"diff",
 		"query_sql",
 		"execute_sql",

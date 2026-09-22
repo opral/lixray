@@ -13,7 +13,6 @@ import {
 	LIX_SQL_OPERATING_GUIDE,
 	QUERY_SQL_TOOL_DESCRIPTION,
 	READ_FILES_TOOL_DESCRIPTION,
-	WRITE_FILES_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 import { MCP_SERVER_INSTRUCTIONS } from "./server.ts";
 
@@ -26,7 +25,7 @@ const SHARED_GUIDE_MARKERS = [
 	/lix_history\('lix_file'/,
 	/information_schema\.tables/,
 	/UPDATE lix_file SET path/,
-	/excluded\.col/,
+	/excluded\.content/,
 ] as const;
 
 void test("SQL guidance models the public Lix surfaces", () => {
@@ -109,25 +108,35 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /kind: "text"/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /lix_history\('lix_file'/);
-	// Writes: files elsewhere, rename, delete, upsert shape, no readback.
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /Prefer write_files/);
+	// Writes: the one write path, with its guard, checkpoint, and recipes.
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /one write path/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /one call per coherent change/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /checkpoint: true/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /last_seen_commit_id/);
+	assert.match(
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		/INSERT INTO lix_file \(path, content\) VALUES \(\$1, CAST\(\$2 AS BYTEA\)\) ON CONFLICT \(path\) DO UPDATE SET content = excluded\.content/,
+	);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /lixcol_metadata/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /parents are created/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /UPDATE lix_file SET path/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /keeps the id, so links survive/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /Copy\+delete makes a new id/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /occupied target fails the batch/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /DELETE FROM lix_file/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /excluded\.col/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /\/skills, not \/skills\//);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /Example: \[/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /outcome is unknown/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /create_checkpoint/);
-	// The file tools carry the file guide the SQL cards used to.
+	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /write_files/);
+	// The read tools carry the read guide and point writes at execute_sql.
 	// A read hands over text, and names the reason when it cannot.
 	assert.match(READ_FILES_TOOL_DESCRIPTION, /content as text/);
 	assert.match(READ_FILES_TOOL_DESCRIPTION, /"binary" or "too-large"/);
-	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /content_base64/);
 	assert.match(READ_FILES_TOOL_DESCRIPTION, /atelier_csv/);
-	assert.match(READ_FILES_TOOL_DESCRIPTION, /last_seen_commit_id/);
-	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /parent directories included/);
-	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /null clears it/);
-	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /unrelated changes never block/);
-	assert.match(WRITE_FILES_TOOL_DESCRIPTION, /validation/);
+	assert.match(
+		READ_FILES_TOOL_DESCRIPTION,
+		/pass it to execute_sql as last_seen_commit_id/,
+	);
 	assert.match(LIST_FILES_TOOL_DESCRIPTION, /truncated/);
 	// The instructions carry recovery/routing; the full guide is a resource.
 	assert.match(MCP_SERVER_INSTRUCTIONS, /outcome is unknown/);
@@ -139,12 +148,26 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 		EXECUTE_SQL_TOOL_DESCRIPTION,
 		LIST_FILES_TOOL_DESCRIPTION,
 		READ_FILES_TOOL_DESCRIPTION,
-		WRITE_FILES_TOOL_DESCRIPTION,
 	]) {
 		assert.ok(description.length <= 1_400, `${description.length} chars`);
 		assert.doesNotMatch(description, /never infer success from prose/);
 		assert.doesNotMatch(description, /lixcol_branch_id/);
 	}
+	// execute_sql is the one write path; nothing routes writes elsewhere.
+	for (const text of [
+		LIX_SQL_OPERATING_GUIDE,
+		MCP_SERVER_INSTRUCTIONS,
+		MCP_DOCS,
+		QUERY_SQL_TOOL_DESCRIPTION,
+		EXECUTE_SQL_TOOL_DESCRIPTION,
+		LIST_FILES_TOOL_DESCRIPTION,
+		READ_FILES_TOOL_DESCRIPTION,
+	])
+		assert.doesNotMatch(text, /write_files/);
+	assert.match(MCP_SERVER_INSTRUCTIONS, /execute_sql is the one write path/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /execute_sql is the one write path/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /keeps its id, so links to it survive/);
+	assert.match(MCP_DOCS, /`execute_sql` is the one write path/);
 	// Each half of the SQL guide stays on its own tool.
 	for (const marker of SHARED_GUIDE_MARKERS) {
 		const carriers = [

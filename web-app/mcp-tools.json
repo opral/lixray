@@ -381,7 +381,7 @@
 	{
 		"name": "read_files",
 		"title": "LixRay: Read files",
-		"description": "Prefer this tool for ordinary reads; batch absolute paths together. Each returns id, canonical url, size, content as text, and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). A file whose bytes are not text, or that is over a megabyte, comes back with no content and an encoding of \"binary\" or \"too-large\" saying why; read its bytes with SQL (SELECT content FROM lix_file WHERE path = $1) when you need them. Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to write_files as last_seen_commit_id.",
+		"description": "Prefer this tool for ordinary reads; batch absolute paths together. Each returns id, canonical url, size, content as text, and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). A file whose bytes are not text, or that is over a megabyte, comes back with no content and an encoding of \"binary\" or \"too-large\" saying why; read its bytes with SQL (SELECT content FROM lix_file WHERE path = $1) when you need them. Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to execute_sql as last_seen_commit_id.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -482,145 +482,6 @@
 					"type": "noauth"
 				}
 			]
-		}
-	},
-	{
-		"name": "write_files",
-		"title": "LixRay: Write files",
-		"description": "Prefer this tool to create/update files in one atomic commit, parent directories included. Each file takes content (text) or content_base64 (bytes), not both, and optionally lixcol_metadata (omitted keeps it, an object replaces it, null clears it); metadata alone updates an existing file. With last_seen_commit_id, a file that changed since that commit refuses the whole write: the error carries current_commit_id and the current content of the conflicting files, so merge and write again; unrelated changes never block. checkpoint: true marks the resulting commit. Already saved on success; read back if the outcome is uncertain or validation is requested. MCP Apps hosts render a collapsible card of the files written, with Atelier's view of each Markdown or CSV change; name the change in one sentence rather than listing the files. Other hosts receive the same saved receipt and file links; do not assume a card was displayed. When asked to reverse this write, prefer undo if it is still the latest undoable change; undo cannot target a commit ID. Rename, delete, and everything else: execute_sql on lix_file and lix_directory.",
-		"inputSchema": {
-			"$schema": "https://json-schema.org/draft/2020-12/schema",
-			"type": "object",
-			"properties": {
-				"context": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
-				},
-				"files": {
-					"minItems": 1,
-					"maxItems": 100,
-					"type": "array",
-					"items": {
-						"type": "object",
-						"properties": {
-							"path": {
-								"type": "string",
-								"minLength": 1
-							},
-							"content": {
-								"type": "string"
-							},
-							"content_base64": {
-								"type": "string"
-							},
-							"lixcol_metadata": {
-								"anyOf": [
-									{
-										"type": "object",
-										"propertyNames": {
-											"type": "string"
-										},
-										"additionalProperties": {}
-									},
-									{
-										"type": "null"
-									}
-								]
-							}
-						},
-						"required": ["path"],
-						"additionalProperties": false
-					}
-				},
-				"last_seen_commit_id": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Lix commit id"
-				},
-				"checkpoint": {
-					"type": "boolean"
-				}
-			},
-			"required": ["context", "files"],
-			"additionalProperties": false
-		},
-		"outputSchema": {
-			"$schema": "https://json-schema.org/draft/2020-12/schema",
-			"type": "object",
-			"properties": {
-				"context": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
-				},
-				"commit_id": {
-					"type": "string"
-				},
-				"files": {
-					"type": "array",
-					"items": {
-						"type": "object",
-						"properties": {
-							"id": {
-								"type": "string"
-							},
-							"path": {
-								"type": "string"
-							},
-							"url": {
-								"type": "string"
-							}
-						},
-						"required": ["id", "path", "url"],
-						"additionalProperties": false
-					}
-				},
-				"checkpoint_commit_id": {
-					"type": "string"
-				},
-				"commit": {
-					"anyOf": [
-						{
-							"type": "object",
-							"properties": {
-								"before": {
-									"type": "string"
-								},
-								"after": {
-									"type": "string"
-								}
-							},
-							"required": ["before", "after"],
-							"additionalProperties": false
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"warning": {
-					"type": "string"
-				}
-			},
-			"required": ["context", "files", "commit"],
-			"additionalProperties": false
-		},
-		"annotations": {
-			"readOnlyHint": false,
-			"destructiveHint": true,
-			"idempotentHint": false,
-			"openWorldHint": false
-		},
-		"_meta": {
-			"securitySchemes": [
-				{
-					"type": "noauth"
-				}
-			],
-			"ui": {
-				"resourceUri": "ui://lixray/diff-card/v1"
-			}
 		}
 	},
 	{
@@ -1036,7 +897,7 @@
 	{
 		"name": "execute_sql",
 		"title": "Execute SQL atomically",
-		"description": "Run an ordered atomic SQL batch against lix_ref (@handle/slug or UUID), optionally branch_id. Defaults to the repository default branch; no open_lix needed. Or pass context alone for its pinned branch. If a statement fails, the complete batch is rolled back; a returned result is already persisted. UI hosts show the touched files as a card; summarize, do not list.\n\nPrefer write_files for file creates/updates; a failed write answers with the recipe it needed. Rename with `UPDATE lix_file SET path = $1 WHERE path = $2`; delete with `DELETE FROM lix_file WHERE path = $1`; directories likewise on lix_directory (no trailing slash on paths: /skills, not /skills/). `INSERT … ON CONFLICT (cols) DO UPDATE SET col = excluded.col` and DO NOTHING work; ON CONSTRAINT and DO UPDATE WHERE do not; bind text for a byte column as `CAST($n AS BYTEA)`. Writes are persisted; read back only when the outcome is unknown or validation is part of the task. Errors carry a zero-based statement_index when known and an outcome of not_committed, unknown, or committed; never blindly retry the latter two. Mark meaningful milestones with create_checkpoint; saving needs no checkpoint.",
+		"description": "Run an ordered atomic SQL batch against lix_ref (@handle/slug or UUID; no open_lix needed), optionally branch_id, or context alone for its pinned branch. If a statement fails, the complete batch is rolled back; a returned result is already persisted, read back only if the outcome is unknown or validation is part of the task. UI hosts show a card; summarize, do not list files.\n\nThe one write path: one call per coherent change, its creates, updates, moves, copies, deletes and directory changes in order. checkpoint: true marks a milestone (saving needs no checkpoint); last_seen_commit_id (read_files' commit_id or a batch's commit.after) refuses the batch if a file it touches changed since. Upsert: `INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content` (metadata: lixcol_metadata); parents are created. Move/rename: `UPDATE lix_file SET path = $1 WHERE path = $2` keeps the id, so links survive; an occupied target fails the batch. Copy+delete makes a new id; never move that way. Delete: `DELETE FROM lix_file WHERE path = $1`. Directories likewise on lix_directory (no trailing slash: /skills, not /skills/). Example: [upsert /gtm/plan.md, move /gtm/a.md to /gtm/archive/a.md, upsert a redirect at /gtm/a.md], checkpoint: true. Errors carry statement_index and an outcome; never blindly retry unknown or committed.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1176,6 +1037,14 @@
 						"additionalProperties": false
 					}
 				},
+				"last_seen_commit_id": {
+					"description": "Refuse the batch if a file it touches changed since this commit.",
+					"type": "string",
+					"minLength": 1
+				},
+				"checkpoint": {
+					"type": "boolean"
+				},
 				"options": {
 					"type": "object",
 					"properties": {
@@ -1217,6 +1086,12 @@
 							"type": "null"
 						}
 					]
+				},
+				"checkpoint_commit_id": {
+					"type": "string"
+				},
+				"warning": {
+					"type": "string"
 				},
 				"results": {
 					"type": "array",

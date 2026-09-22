@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	BATCH_CHECKPOINT_WARNING,
 	CONTEXT_REOPEN_HINT,
 	LixService,
 	OPEN_LIX_FILE_MANIFEST_SQL,
@@ -13,6 +14,17 @@ import {
 } from "./lix-service.ts";
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
+
+/** The create-or-update a batch runs for one text file. */
+function upsert(path: string, content: string) {
+	return {
+		sql: "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content",
+		params: [
+			{ kind: "text" as const, value: path },
+			{ kind: "text" as const, value: content },
+		],
+	};
+}
 
 class FakeRuntime implements LixRuntimeClient {
 	branch = "main";
@@ -305,6 +317,7 @@ class FakeRuntime implements LixRuntimeClient {
 		request: ExecuteBatchRequest,
 	) {
 		this.batches += 1;
+		this.previousStored = new Map(this.stored);
 		return {
 			commit: { before: "commit-0", after: "commit-1" },
 			results: (
@@ -883,12 +896,12 @@ void test("the changes of a write come from its receipt, both sides included", a
 	const opened = await service.openLix("@acme/company");
 	runtime.stored.set("/notes.md", "# Notes\n");
 
-	const written = await service.writeFiles(opened.context, {
-		originKey: "mcp:test",
-		files: [
-			{ path: "/notes.md", content: "# Notes\n\nAnd more.\n" },
-			{ path: "/new.md", content: "# New\n" },
-			{ path: "/third.md", content: "# Third\n" },
+	const written = await service.executeBatch(opened.context, {
+		options: { originKey: "mcp:test" },
+		statements: [
+			upsert("/notes.md", "# Notes\n\nAnd more.\n"),
+			upsert("/new.md", "# New\n"),
+			upsert("/third.md", "# Third\n"),
 		],
 	});
 	assert.deepEqual(written.commit, { before: "commit-0", after: "commit-1" });
@@ -932,12 +945,8 @@ void test("a file that was empty is not a file that did not exist", async () => 
 	const service = new LixService(runtime);
 	const opened = await service.openLix("@acme/company");
 	runtime.stored.set("/empty.md", "");
-	const written = await service.writeFiles(opened.context, {
-		originKey: "test",
-		files: [
-			{ path: "/empty.md", content: "changed" },
-			{ path: "/new.md", content: "" },
-		],
+	const written = await service.executeBatch(opened.context, {
+		statements: [upsert("/empty.md", "changed"), upsert("/new.md", "")],
 	});
 
 	const changes = await service.fileChanges(opened.context, written.commit!);
@@ -956,9 +965,8 @@ void test("bytes that are not text still say the file existed", async () => {
 	const opened = await service.openLix("@acme/company");
 	runtime.stored.set("/notes.md", new Uint8Array([0xff, 0xfe, 0x00]));
 
-	const written = await service.writeFiles(opened.context, {
-		originKey: "test",
-		files: [{ path: "/notes.md", content: "# Notes\n" }],
+	const written = await service.executeBatch(opened.context, {
+		statements: [upsert("/notes.md", "# Notes\n")],
 	});
 	const [change] = await service.fileChanges(opened.context, written.commit!);
 	assert.deepEqual(change?.before, new Uint8Array([0xff, 0xfe, 0x00]));
@@ -980,11 +988,10 @@ void test("the receipt does not follow a head that moved afterwards", async () =
 	const runtime = new AdvancedHeadRuntime();
 	const service = new LixService(runtime);
 	const opened = await service.openLix("@acme/company");
-	const written = await service.writeFiles(opened.context, {
-		originKey: "test",
-		files: [{ path: "/new.md", content: "" }],
+	const written = await service.executeBatch(opened.context, {
+		lastSeenCommitId: "commit-0",
+		statements: [upsert("/new.md", "")],
 	});
-	assert.equal(written.commitId, "commit-1");
 	assert.deepEqual(written.commit, { before: "commit-0", after: "commit-1" });
 });
 
@@ -1004,12 +1011,11 @@ void test("a change row Lix cannot vouch for is refused, not rendered", async ()
 	const runtime = new BrokenChangesRuntime();
 	const service = new LixService(runtime);
 	const opened = await service.openLix("@acme/company");
-	const written = await service.writeFiles(opened.context, {
-		originKey: "test",
-		files: [{ path: "/new.md", content: "saved" }],
+	const written = await service.executeBatch(opened.context, {
+		statements: [upsert("/new.md", "saved")],
 	});
 	// The write is already saved; only the question about it fails.
-	assert.equal(written.commitId, "commit-1");
+	assert.deepEqual(written.commit, { before: "commit-0", after: "commit-1" });
 	await assert.rejects(
 		service.fileChanges(opened.context, written.commit!),
 		(error: unknown) =>
@@ -1178,185 +1184,53 @@ void test("readFiles takes bytes and the read commit through the same transactio
 	assert.equal(reads.commitId, "commit-0");
 });
 
-for (const concurrentPath of ["/target.md", "/unrelated.md"]) {
-	void test(`a retry revalidates the whole write batch after ${concurrentPath} changes`, async () => {
-		class ConcurrentRuntime extends FakeRuntime {
-			attempts = 0;
-			override async transaction<T>(
-				lixId: string,
-				branchId: string,
-				run: (tx: TransactionClient) => Promise<T>,
-			) {
-				const original = new Map(this.stored);
-				const execute = (request: ExecuteRequest) =>
-					this.execute(lixId, branchId, request);
-				this.attempts++;
-				await run({ execute });
-				// A definite engine conflict discards the first attempt before retry.
-				this.stored.clear();
-				for (const [path, bytes] of original) this.stored.set(path, bytes);
-				this.stored.set(concurrentPath, "concurrent edit");
-				this.commit = 2;
-				this.attempts++;
-				const value = await run({ execute });
-				return { value, commit: { before: "commit-2", after: "commit-3" } };
-			}
-			override async execute(
-				lixId: string,
-				branchId: string,
-				request: ExecuteRequest,
-			) {
-				if (request.sql.startsWith("SELECT from_path, to_path"))
-					return {
-						columns: ["from_path", "to_path"],
-						rows: [
-							[
-								{ kind: "text" as const, value: concurrentPath },
-								{ kind: "text" as const, value: concurrentPath },
-							],
-						],
-						rowsAffected: 0,
-						notices: [],
-						commit: null,
-					};
-				return super.execute(lixId, branchId, request);
-			}
-		}
-		const runtime = new ConcurrentRuntime();
-		const service = new LixService(runtime);
-		const opened = await service.openLix("@acme/company");
-		runtime.stored.set("/target.md", "original");
-		const write = service.writeFiles(opened.context, {
-			originKey: "test",
-			lastSeenCommitId: "commit-0",
-			files: [
-				{ path: "/target.md", content: "ours" },
-				{ path: "/second.md", content: "second" },
-			],
-		});
-		if (concurrentPath === "/target.md") {
-			await assert.rejects(write, { code: "conflict" });
-			assert.equal(runtime.stored.get("/target.md"), "concurrent edit");
-			assert.equal(runtime.stored.has("/second.md"), false);
-		} else {
-			assert.equal((await write).commitId, "commit-3");
-			assert.equal(
-				new TextDecoder().decode(
-					runtime.stored.get("/target.md") as Uint8Array,
-				),
-				"ours",
-			);
-			assert.equal(runtime.stored.get("/unrelated.md"), "concurrent edit");
-		}
-		assert.equal(runtime.attempts, 2);
-	});
-}
-
-void test("a missing receipt after commit is still a saved response", async () => {
-	class MissingReceiptRuntime extends FakeRuntime {
-		override async transaction<T>(
-			lixId: string,
-			branchId: string,
-			run: (tx: TransactionClient) => Promise<T>,
-		) {
-			const result = await super.transaction(lixId, branchId, run);
-			return { value: result.value, commit: null };
-		}
-	}
-	const runtime = new MissingReceiptRuntime();
-	const service = new LixService(runtime);
-	const opened = await service.openLix("@acme/company");
-	const written = await service.writeFiles(opened.context, {
-		originKey: "test",
-		files: [{ path: "/saved.md", content: "saved" }],
-	});
-	assert.equal(written.commit, null);
-	assert.equal(written.commitId, undefined);
-	assert.match(
-		written.warning ?? "",
-		/Files saved; commit receipt unavailable/,
-	);
-	assert.equal(written.files.length, 1);
-	assert.equal(runtime.batches, 1);
-});
-
-void test("metadata-only validation never requests file bytes", async () => {
-	class MetadataRuntime extends FakeRuntime {
-		override async execute(
-			lixId: string,
-			branchId: string,
-			request: ExecuteRequest,
-		) {
-			if (
-				request.sql.startsWith("SELECT id, path FROM lix_file WHERE") ||
-				request.sql.startsWith("UPDATE lix_file SET lixcol_metadata")
-			) {
-				assert.doesNotMatch(request.sql, /\bcontent\b/);
-				return {
-					columns: ["id", "path"],
-					rows: [
-						[
-							{
-								kind: "text" as const,
-								value: "00000000-0000-4000-8000-00000000000f",
-							},
-							{ kind: "text" as const, value: "/asset.bin" },
-						],
-					],
-					rowsAffected: 1,
-					notices: [],
-					commit: null,
-				};
-			}
-			return super.execute(lixId, branchId, request);
-		}
-	}
-	const runtime = new MetadataRuntime();
-	const service = new LixService(runtime);
-	const opened = await service.openLix("@acme/company");
-	runtime.readFailure = new Error("blob unavailable");
-	const written = await service.writeFiles(opened.context, {
-		originKey: "test",
-		files: [{ path: "/asset.bin", lixcol_metadata: { label: "asset" } }],
-	});
-	assert.equal(written.files[0]?.path, "/asset.bin");
-	assert.equal(runtime.reads, 0);
-});
-
 for (const failCheckpoint of [false, true]) {
-	void test(`optional checkpoint keeps the saved write receipt when checkpoint ${failCheckpoint ? "fails" : "advances the head"}`, async () => {
+	void test(`checkpoint keeps the saved batch receipt when checkpoint ${failCheckpoint ? "fails" : "advances the head"}`, async () => {
 		class CheckpointRuntime extends FakeRuntime {
 			override async execute(
 				lixId: string,
 				branchId: string,
 				request: ExecuteRequest,
 			) {
-				if (request.sql === "SELECT commit_id FROM lix_create_checkpoint()") {
-					if (failCheckpoint) throw new Error("checkpoint failed");
-					this.commit = 1;
-				}
+				if (
+					request.sql === "SELECT commit_id FROM lix_create_checkpoint()" &&
+					failCheckpoint
+				)
+					throw new Error("checkpoint failed");
 				return super.execute(lixId, branchId, request);
 			}
 		}
 		const runtime = new CheckpointRuntime();
 		const service = new LixService(runtime);
 		const opened = await service.openLix("@acme/company");
-		const written = await service.writeFiles(opened.context, {
-			originKey: "test",
+		runtime.commit = 1;
+		const written = await service.executeBatch(opened.context, {
+			statements: [upsert("/saved.md", "saved")],
 			checkpoint: true,
-			files: [{ path: "/saved.md", content: "saved" }],
 		});
 		assert.deepEqual(written.commit, { before: "commit-0", after: "commit-1" });
-		assert.equal(written.commitId, "commit-1");
 		assert.equal(runtime.batches, 1);
 		if (failCheckpoint) {
 			assert.equal(written.checkpointCommitId, undefined);
-			assert.match(
-				written.warning ?? "",
-				/Files saved; checkpoint unavailable/,
-			);
+			assert.equal(written.warning, BATCH_CHECKPOINT_WARNING);
 		} else {
 			assert.equal(written.checkpointCommitId, "commit-2");
+			assert.equal(written.warning, undefined);
 		}
 	});
 }
+
+void test("a batch without checkpoint or guard is one executeBatch call", async () => {
+	const runtime = new FakeRuntime();
+	const service = new LixService(runtime);
+	const opened = await service.openLix("@acme/company");
+	const written = await service.executeBatch(opened.context, {
+		statements: [upsert("/a.md", "a")],
+	});
+	assert.equal(runtime.batches, 1);
+	assert.equal(written.checkpointCommitId, undefined);
+	assert.equal(
+		runtime.calls.some((call) => call.sql?.includes("lix_create_checkpoint")),
+		false,
+	);
+});

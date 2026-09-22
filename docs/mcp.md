@@ -2,22 +2,23 @@
 
 ## Direct SQL calls
 
-For SQL when the repository is known, call `query_sql` or `execute_sql` with `lix_ref` (an exact `@handle/slug` or UUID) and optional `branch_id`. Opening first is unnecessary. The omitted branch is the repository default branch, independent of any browser or previous call's active branch. Alternatively, pass an existing `context` alone to retain its selected branch. `open_lix` remains available for inventory and for obtaining contexts used by branch and file helper tools.
+For SQL when the repository is known, call `query_sql` or `execute_sql` with `lix_ref` (an exact `@handle/slug` or UUID) and optional `branch_id`. Opening first is unnecessary. The omitted branch is the repository default branch, independent of any browser or previous call's active branch. Alternatively, pass an existing `context` alone to retain its selected branch. `open_lix` remains available for inventory and for obtaining contexts used by branch and file read tools.
 
 Example: `execute_sql({ lix_ref: "@acme/company", statements: [{ sql: "UPDATE lix_file SET content = CAST($1 AS BYTEA) WHERE path = $2", params: [{ kind: "text", value: "hello" }, { kind: "text", value: "/notes.txt" }] }] })`.
 
-DataFusion scalar expressions such as `REPLACE`, `CONCAT`, and `||` work inside a `BYTEA` cast for file updates. Use one statement per batch entry and explicit `ON CONFLICT (path)` targets. SQL remains a first-class interface; file helpers are optional.
+DataFusion scalar expressions such as `REPLACE`, `CONCAT`, and `||` work inside a `BYTEA` cast for file updates. Use one statement per batch entry and explicit `ON CONFLICT (path)` targets. `execute_sql` is the one write path; `list_files` and `read_files` are read conveniences.
 
-Execution errors return `isError: true` and a JSON text block, without success-schema `structuredContent`. Errors include the original code, message, hint and details, plus zero-based `statement_index` when known. Write `outcome` is `not_committed` for known rejections, `unknown` for ambiguous transport/internal failures, and `committed` for response failures after confirmed completion. Correct rejected statements before retrying. Inspect affected state for unknown outcomes; never blindly replay a batch. Verify successful writes when the user requested validation, rather than routinely reading every write back.
+Execution errors return `isError: true` and a JSON text block, without success-schema `structuredContent`. Errors include the code, message, hint and details, plus zero-based `statement_index` when known. Two Lix errors are restated in the caller's terms: a move or write onto a path that is taken names that destination path (Lix names the parent directory by id) with the hint "The destination exists; pick another path or delete it first in the same batch.", and text bound straight into `lix_file.content` gets "Bind text as CAST($n AS BYTEA) with a text param." Write `outcome` is `not_committed` for known rejections, `unknown` for ambiguous transport/internal failures, and `committed` for response failures after confirmed completion. Correct rejected statements before retrying. Inspect affected state for unknown outcomes; never blindly replay a batch. Verify successful writes when the user requested validation, rather than routinely reading every write back.
 
 LixRay exposes Lix through a deliberately small MCP surface. SQL is the
 universal interface for repository data; file and entity CRUD stays in SQL. `get_entity_urls` resolves browser links without changing repository data or permissions. Lix SQL is a Postgres dialect subset.
 
-Each tool carries its own guide in its description: the file tools say how
-bytes and metadata travel and how conflicts are reported; `query_sql` says
+Each tool carries its own guide in its description: the file read tools say
+how text and metadata come back; `query_sql` says
 how to discover tables and columns through `information_schema` (Lix is not
 SQLite; a query against `sqlite_master` gets that answer by name);
-`execute_sql` says how renames and deletes look and how to recover from failed writes. That is what an agent reads before its first
+`execute_sql` says how every write looks — upserts, moves, deletes, the guard
+and the checkpoint — and how to recover from failed writes. That is what an agent reads before its first
 query, and hosts do not reliably show the server `instructions` to the model;
 the instructions repeat the workflow for hosts that do. Every other tool
 description is one or two sentences. Output schemas describe the success shape
@@ -45,25 +46,17 @@ diagnostic timestamps or identifiers.
 ## Tools
 
 - `list_lixes`, `open_lix`: find a Lix and mint its context (see below).
-- `list_files`, `read_files`, `write_files`: preferred for ordinary file work. `read_files`
+- `list_files`, `read_files`: preferred for ordinary file reads. `read_files`
   returns `content` as text, `lixcol_metadata`, size, id, canonical `url`,
   and the `commit_id` the read reflects. A file whose bytes are not UTF-8,
   or that is over a megabyte, comes back with no `content` and an
   `encoding` of `binary` or `too-large` saying which — base64 of an image
   is not something the reader asking for it can use, and bytes are fetched
   deliberately with `SELECT content FROM lix_file WHERE path = $1`.
-  `write_files` creates or updates files in one atomic commit, parents
-  included, with `content` (text) or `content_base64` (bytes) — which field
-  you use is the encoding, so there is nothing to infer —
-  `lixcol_metadata` (omitted keeps, an object replaces, `null` clears), an
-  optional `checkpoint: true`, and
-  `last_seen_commit_id`: a target file that changed since that commit refuses
-  the whole write, and the error carries `current_commit_id` and the current
-  contents of the conflicting files; unrelated changes never block. Validation and the write run in one transaction; concurrent conflicts retry
-  validation against a fresh snapshot.
+  Pass that `commit_id` to `execute_sql` as `last_seen_commit_id`.
 - `query_sql`, `execute_sql`: everything else. Files and directories are
-  still tables (`lix_file`, `lix_directory`): rename, delete, and any query
-  go through SQL.
+  tables (`lix_file`, `lix_directory`), and `execute_sql` is the one write
+  path: see [Writing files](#writing-files).
 - `get_entity_urls`: canonical browser links for files and directories.
 - `create_checkpoint`, `restore`, `undo`, `redo`: milestones and moving the
   branch head.
@@ -96,7 +89,7 @@ See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
 
 1. Match the exact LixRay server name instead of searching broadly for generic
    repository or file tools.
-2. For SQL with an exact `@handle/slug` or Lix UUID, pass lix_ref directly to query_sql or execute_sql. For file tools, obtain context with open_lix or reuse a returned SQL context. Call `list_lixes` only when the target is unknown.
+2. For SQL with an exact `@handle/slug` or Lix UUID, pass lix_ref directly to query_sql or execute_sql. For the file read tools, obtain context with open_lix or reuse a returned SQL context. Call `list_lixes` only when the target is unknown.
 3. Use open_lix when inventory is useful. Retain the context returned by SQL or open_lix from `structuredContent`
    when the host provides it. Never copy a context token from the prose
    summary. Text-only hosts receive a later `content` text block that is the
@@ -105,11 +98,14 @@ See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
    true, do not run another query just to list files; when it is false, the
    result carries `file_paths_sql`, the one `query_sql` statement that lists
    every path.
-4. Prefer read_files and write_files for ordinary file reads and creates/updates.
-   Batch known paths together instead of listing them first. Use query_sql
-   for repository data and advanced file queries; list_files discovers paths.
+4. Prefer read_files for ordinary file reads. Batch known paths together
+   instead of listing them first. Use query_sql for repository data and
+   advanced file queries; list_files discovers paths.
 5. Before guessing dynamic table or column names, query `information_schema`.
-6. Use `execute_sql` for any atomic SQL batch. It is always treated as
+6. Write with `execute_sql`, one call per coherent change: its creates,
+   updates, moves, renames, copies, deletes and directory changes in one
+   ordered atomic batch, guarded by `last_seen_commit_id` and marked by
+   `checkpoint: true` when it is a milestone. It is always treated as
    potentially destructive. The mutation is already persisted — `rowsAffected`
    and any rows the batch itself returned are sufficient.
 7. Successful batches are persisted. Read back when the outcome is unknown or
@@ -119,7 +115,8 @@ See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
    browser links; it is not a persistence-verification read.
 
 A successful `execute_sql` mutation is already saved. Writes persist without a
-checkpoint. Use `create_checkpoint` to mark meaningful milestones so the user
+checkpoint. Use `checkpoint: true` on the batch, or `create_checkpoint`, to
+mark meaningful milestones so the user
 can follow your work and return to important states. Create a checkpoint when
 you finish a substantial, coherent piece of work, such as completing a document,
 implementing a feature, or finishing a related batch of changes. Also checkpoint
@@ -135,11 +132,11 @@ zero or more `resource_link` content blocks, and the full `structuredContent`
 as JSON text for hosts that only show text. The links are what a host renders
 as clickable chips inside the step: `open_lix` links the repository, and an
 `execute_sql` batch links each file or directory it wrote or updated, with
-the same canonical URL `get_entity_urls` would return. File tools also return canonical file links, and a failed call has the summary and the JSON text only. The summary names the
+the same canonical URL `get_entity_urls` would return. File read tools return canonical file URLs in their results, and a failed call has the summary and the JSON text only. The summary names the
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
 
-`write_files`, `execute_sql`, and `diff` advertise
+`execute_sql` and `diff` advertise
 `_meta.ui.resourceUri: "ui://lixray/diff-card/v1"`. MCP Apps hosts fetch that
 static HTML resource using `resources/read`; it is available before the call
 and across stateless requests, without repository data in its URL or template.
@@ -185,8 +182,8 @@ are paged with a note. The call itself carries no bytes of the change: it
 returns the commit span it moved between, and the card comes from asking Lix
 what changed between those two commits — `lix_diff('lix_file', before,
 after)` with `from_content` and `to_content`. That is the same question a
-checkpoint, or any two commits, would be asked, so one render path serves a
-write, an SQL batch (the files its change log says it touched), and `diff`;
+checkpoint, or any two commits, would be asked, so one render path serves an
+SQL batch (the files its change log says it touched) and `diff`;
 and because the answer is keyed to the commits rather than to a moment in
 time, nothing another writer does afterwards changes what the card describes.
 Each preview is trimmed to what changed, with a note of what was skipped; a
@@ -205,21 +202,16 @@ repository `url`, a one-line summary ("3 files changed between latest
 checkpoint … and working: …"), file links, and the same card. A ref that names
 nothing is refused with a hint before Lix is asked to compare.
 
-`write_files` validates `last_seen_commit_id` and metadata-only targets, and runs
-all file writes in one transaction. An optional checkpoint runs afterward and returns its
-own `checkpoint_commit_id`; it may include concurrent changes. Checkpoint failure
-reports a saved warning and never repeats the write. A concurrent branch
-change retries the full validation against a fresh snapshot; an unrelated edit
-can proceed, while a changed target rejects the whole write. `read_files`
-returns its text and `commit_id` from one snapshot.
+`read_files` returns its text and `commit_id` from one snapshot.
 
 SQL execution preserves Lix's receipt: `query_sql.result.commit` is null for a
 read; `execute_sql` has one top-level `commit: { before, after } | null` for the
 batch. Its per-statement results contain rows, counts and notices, without
-repeating the receipt. `write_files.commit` describes its durable write and
-`commit_id` is its `after` endpoint. If completion reporting loses the receipt,
-the write still succeeds with a warning and no `commit_id`; do not repeat it.
-A card rendering failure similarly reports "Files saved, preview unavailable."
+repeating the receipt; `commit.after` is the commit to pass as the next
+batch's `last_seen_commit_id`. With `checkpoint: true` the result also carries
+`checkpoint_commit_id`. If completion reporting or the checkpoint fails after
+the batch committed, the result is still a success and carries a `warning`
+("Saved; checkpoint unavailable. Do not repeat the batch."); do not repeat it.
 
 
 The full SQL reference is also available via `resources/read` at
@@ -280,7 +272,79 @@ The stable core tables are `lix_file`, `lix_directory`, `lix_branch`, `lix_commi
 `lix_change`. Entity tables are repository-defined and must be discovered at
 runtime.
 
-## Files remain SQL
+## Writing files
+
+`execute_sql` is the one write path. One call carries one coherent change —
+its creates, updates, moves, renames, copies, deletes and directory changes —
+as an ordered batch that commits or rolls back as a whole.
+
+- Create or update: `INSERT INTO lix_file (path, content) VALUES ($1,
+  CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content =
+  excluded.content`. Missing parent directories are created. Per-file JSON
+  metadata is the `lixcol_metadata` column, bound as `kind: "json"`.
+- Move or rename: `UPDATE lix_file SET path = $1 WHERE path = $2`. The file
+  keeps its id, so links to it survive, and missing parents are created. A
+  destination that already exists fails the whole batch. Copy plus delete
+  makes a new id and breaks links; do not move that way.
+- Delete: `DELETE FROM lix_file WHERE path = $1`. Directories work the same
+  on `lix_directory`; moving a directory moves its files, ids kept. Paths
+  have no trailing slash.
+- `checkpoint: true` marks the batch's result as a checkpoint and returns
+  `checkpoint_commit_id`.
+- `last_seen_commit_id` (the `commit_id` of `read_files`, or `commit.after`
+  of an earlier batch) guards the batch. It runs in one transaction that
+  finds the files and directories that changed between that commit and the
+  head, runs the statements, and compares each of those entities as the
+  batch left it — path, content and metadata, or its absence — with the
+  head. Any difference refuses the whole batch with a `conflict` error:
+  `details.current_commit_id` and, for each conflicting file, its current
+  `path`, `content` (or `encoding`) and `lixcol_metadata`. Merge and run the
+  batch again with `last_seen_commit_id = details.current_commit_id`.
+  Changes the batch does not touch never block, and a concurrent commit
+  replays the transaction, guard included.
+
+A consolidation — update the plan, move two drafts into `archive/` (their
+ids and links survive), leave a redirect where one was, and checkpoint:
+
+```json
+{
+  "lix_ref": "@acme/company",
+  "last_seen_commit_id": "<commit_id from read_files>",
+  "checkpoint": true,
+  "statements": [
+    {
+      "sql": "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content",
+      "params": [
+        { "kind": "text", "value": "/gtm/plan.md" },
+        { "kind": "text", "value": "# Plan\n\nMerged from a.md and b.md.\n" }
+      ]
+    },
+    {
+      "sql": "UPDATE lix_file SET path = $1 WHERE path = $2",
+      "params": [
+        { "kind": "text", "value": "/gtm/archive/a.md" },
+        { "kind": "text", "value": "/gtm/a.md" }
+      ]
+    },
+    {
+      "sql": "UPDATE lix_file SET path = $1 WHERE path = $2",
+      "params": [
+        { "kind": "text", "value": "/gtm/archive/b.md" },
+        { "kind": "text", "value": "/gtm/b.md" }
+      ]
+    },
+    {
+      "sql": "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))",
+      "params": [
+        { "kind": "text", "value": "/gtm/a.md" },
+        { "kind": "text", "value": "Moved to [plan.md](plan.md).\n" }
+      ]
+    }
+  ]
+}
+```
+
+Reading stays SQL too:
 
 ```sql
 SELECT path, CAST(content AS TEXT) AS content

@@ -1,15 +1,12 @@
 import { withSpan } from "../telemetry.ts";
 import { entityRoutePath } from "../lib/entity-url.ts";
 import {
-	CHANGED_FILES_SQL,
 	FILE_CHANGES_SQL,
 	READ_FILES_SQL,
 	readFileContent,
 	escapeLike,
-	fileWriteStatements,
 	normalizeFilePath,
 	type FileRead,
-	type FileWrite,
 } from "./file-tools.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
 import {
@@ -541,20 +538,110 @@ export class LixService {
 		};
 	}
 
-	async executeBatch(contextToken: string, request: ExecuteBatchRequest) {
-		const context = await this.readContext(contextToken);
-		try {
-			return {
-				context: contextToken,
-				...(await this.client.executeBatch(
-					context.lixId,
-					context.branchId,
-					request,
-				)),
-			};
-		} catch (caught) {
-			throw await this.explainBatchError(context, request, caught);
+	/**
+	 * Runs an ordered SQL batch atomically: a failed statement rolls the
+	 * whole batch back.
+	 *
+	 * With `lastSeenCommitId` the batch runs in a transaction that is also a
+	 * guard. It first asks which files and directories changed between that
+	 * commit and the head, runs the statements, and then compares each of
+	 * those entities as the batch left it with the head. A difference means
+	 * the batch touched something that changed since the caller looked: the
+	 * transaction rolls back with a `conflict` carrying the current contents.
+	 * Unrelated changes never block. A concurrent commit replays the whole
+	 * transaction, guard included, so the check and the write are one step.
+	 *
+	 * `checkpoint` marks the head once the batch has committed; failing to is
+	 * a warning on a batch that is already saved, never an error.
+	 */
+	async executeBatch(
+		contextToken: string,
+		request: ExecuteBatchRequest & {
+			lastSeenCommitId?: string;
+			checkpoint?: boolean;
+		},
+	): Promise<
+		ExecuteScriptResponse & {
+			context: string;
+			checkpointCommitId?: string;
+			warning?: string;
 		}
+	> {
+		const context = await this.readContext(contextToken);
+		const { lastSeenCommitId, checkpoint, ...batch } = request;
+		let executed: ExecuteScriptResponse & { warning?: string };
+		try {
+			executed =
+				lastSeenCommitId === undefined
+					? await this.client.executeBatch(
+							context.lixId,
+							context.branchId,
+							batch,
+						)
+					: await this.guardedBatch(context, batch, lastSeenCommitId);
+		} catch (caught) {
+			throw await this.explainBatchError(context, batch, caught);
+		}
+		let warning = executed.warning;
+		let checkpointCommitId: string | undefined;
+		if (checkpoint) {
+			try {
+				checkpointCommitId = (await this.createCheckpoint(contextToken))
+					.commitId;
+			} catch {
+				warning = [warning, BATCH_CHECKPOINT_WARNING].filter(Boolean).join(" ");
+			}
+		}
+		return {
+			context: contextToken,
+			results: executed.results,
+			commit: executed.commit,
+			...(checkpointCommitId ? { checkpointCommitId } : {}),
+			...(warning ? { warning } : {}),
+		};
+	}
+
+	/** The batch, run inside one transaction with the last-seen guard. */
+	private async guardedBatch(
+		context: LixContext,
+		batch: ExecuteBatchRequest,
+		lastSeenCommitId: string,
+	): Promise<ExecuteScriptResponse & { warning?: string }> {
+		const transaction = await this.client.transaction(
+			context.lixId,
+			context.branchId,
+			async (tx) => {
+				const head = await this.commitId(context.lixId, context.branchId, tx);
+				const since =
+					head === lastSeenCommitId
+						? []
+						: await this.changedSince(lastSeenCommitId, head, tx);
+				const results: StatementResponse[] = [];
+				for (const [index, statement] of batch.statements.entries()) {
+					try {
+						results.push(
+							await tx.execute({
+								sql: statement.sql,
+								...(statement.params ? { params: statement.params } : {}),
+								...(batch.options ? { options: batch.options } : {}),
+							}),
+						);
+					} catch (caught) {
+						throw withStatementIndex(caught, index);
+					}
+				}
+				if (since.length > 0) {
+					const conflicts = await this.touchedSince(since, head, tx);
+					if (conflicts.length > 0) throw lastSeenConflict(head, conflicts);
+				}
+				return results;
+			},
+		);
+		return {
+			results: transaction.value,
+			commit: transaction.commit,
+			...(transaction.warning ? { warning: transaction.warning } : {}),
+		};
 	}
 
 	/**
@@ -699,173 +786,6 @@ export class LixService {
 			commitId,
 			files: files.map((file) => ({ ...file, url: url("file", file) })),
 			missing: normalized.filter((path) => !found.has(path)),
-		};
-	}
-
-	/**
-	 * Creates or updates files in one commit. With `lastSeenCommitId`, a
-	 * target file that changed since that commit refuses the whole write and
-	 * the error carries the current commit and contents; unrelated changes
-	 * never block after retrying the transaction on a concurrent branch change.
-	 */
-	async writeFiles(
-		contextToken: string,
-		input: {
-			files: readonly FileWrite[];
-			lastSeenCommitId?: string;
-			checkpoint?: boolean;
-			originKey: string;
-		},
-		origin = "https://lixray.com",
-	): Promise<{
-		context: string;
-		commitId?: string;
-		files: Array<{ id: string; path: string; url: string }>;
-		checkpointCommitId?: string;
-		commit: CommitSpan | null;
-		warning?: string;
-	}> {
-		const context = await this.readContext(contextToken);
-		const files = input.files.map((file) => ({
-			...file,
-			path: normalizeFilePathOrThrow(file.path),
-		}));
-		const paths = files.map((file) => file.path);
-		if (new Set(paths).size !== paths.length)
-			throw createLixError("invalid_request", "Each path may appear once.");
-		if (
-			files.some(
-				(file) =>
-					file.content !== undefined && file.content_base64 !== undefined,
-			)
-		)
-			throw createLixError(
-				"invalid_request",
-				"A file takes content or content_base64, not both.",
-			);
-		const hasContent = (file: (typeof files)[number]): boolean =>
-			file.content !== undefined || file.content_base64 !== undefined;
-		const metadataOnly = files
-			.filter((file) => !hasContent(file))
-			.map((file) => file.path);
-		if (
-			files.some(
-				(file) => !hasContent(file) && file.lixcol_metadata === undefined,
-			)
-		)
-			throw createLixError(
-				"invalid_request",
-				"A file needs content, content_base64, lixcol_metadata, or both.",
-			);
-		const url = await this.entityUrl(context, origin);
-		const transaction = await this.client.transaction(
-			context.lixId,
-			context.branchId,
-			async (tx) => {
-				if (input.lastSeenCommitId !== undefined) {
-					const head = await this.commitId(context.lixId, context.branchId, tx);
-					if (head !== input.lastSeenCommitId) {
-						const changed = await this.changedSince(
-							context,
-							input.lastSeenCommitId,
-							head,
-							paths,
-							tx,
-						);
-						if (changed.length > 0) {
-							const current = await this.fileRows(context, changed, tx);
-							throw createLixError(
-								"conflict",
-								`${changed.length === 1 ? "A file" : `${changed.length} files`} changed since last_seen_commit_id: ${changed.join(", ")}.`,
-								{
-									hint: "Merge your edit into the current contents in details.files, then write again with last_seen_commit_id = details.current_commit_id.",
-									details: {
-										current_commit_id: head,
-										files: current.map((file) => ({
-											path: file.path,
-											...(file.content !== undefined
-												? { content: file.content }
-												: { encoding: file.encoding }),
-											lixcol_metadata: file.lixcol_metadata,
-										})),
-									},
-								},
-							);
-						}
-					}
-				}
-				if (metadataOnly.length > 0) {
-					const existing = new Set(
-						readIdPathRows(
-							await tx.execute({
-								sql: `SELECT id, path FROM lix_file WHERE path IN (${metadataOnly.map((_, index) => `$${index + 1}`).join(", ")})`,
-								params: metadataOnly.map((path) => ({
-									kind: "text",
-									value: path,
-								})),
-							}),
-						).map((file) => file.path),
-					);
-					const missing = metadataOnly.filter((path) => !existing.has(path));
-					if (missing.length > 0)
-						throw createLixError(
-							"not_found",
-							`No file to update metadata on: ${missing.join(", ")}. Give it content to create it.`,
-						);
-				}
-				const statements = fileWriteStatements(files);
-				const results: StatementResponse[] = [];
-				for (const statement of statements)
-					results.push(
-						await tx.execute({
-							...statement,
-							options: { originKey: input.originKey },
-						}),
-					);
-				const written: Array<{ id: string; path: string }> = [];
-				statements.forEach((statement, index) => {
-					if (!statement.path) return;
-					const row = readIdPathRows(results[index] ?? EMPTY_RESPONSE)[0];
-					if (!row)
-						throw createLixError(
-							"upstream_error",
-							`Lix did not return the written file ${statement.path}.`,
-						);
-					written.push(row);
-				});
-				return { written };
-			},
-		);
-		const { written } = transaction.value;
-		const commitId = transaction.commit?.after;
-		let warning: string | undefined =
-			transaction.warning ??
-			(commitId
-				? undefined
-				: "Files saved; commit receipt unavailable. Do not repeat the write.");
-
-		let checkpointCommitId: string | undefined;
-		if (input.checkpoint) {
-			try {
-				checkpointCommitId = (await this.createCheckpoint(contextToken))
-					.commitId;
-			} catch {
-				warning = [
-					warning,
-					"Files saved; checkpoint unavailable. Do not repeat the write.",
-				]
-					.filter(Boolean)
-					.join(" ");
-			}
-		}
-
-		return {
-			context: contextToken,
-			commitId,
-			files: written.map((file) => ({ ...file, url: url("file", file) })),
-			...(checkpointCommitId ? { checkpointCommitId } : {}),
-			...(warning ? { warning } : {}),
-			commit: transaction.commit,
 		};
 	}
 
@@ -1026,51 +946,115 @@ export class LixService {
 		};
 	}
 
-	/** The target paths that a diff between two commits touched. */
+	/**
+	 * The files and directories whose state differs between two commits,
+	 * moves, deletions and additions included.
+	 */
 	private async changedSince(
-		context: LixContext,
 		fromCommitId: string,
 		toCommitId: string,
-		paths: readonly string[],
-		tx?: TransactionClient,
-	): Promise<string[]> {
-		let response: StatementResponse;
-		try {
-			response = await (
-				tx?.execute ??
-				((request) =>
-					this.client.execute(context.lixId, context.branchId, request))
-			)({
-				sql: CHANGED_FILES_SQL(paths.length),
-				params: [
-					{ kind: "text", value: fromCommitId },
-					{ kind: "text", value: toCommitId },
-					...paths.map((path): WireValue => ({ kind: "text", value: path })),
-				],
-			});
-		} catch (caught) {
-			if (isLixError(caught) && caught.code !== "LIX_COMMIT_NOT_FOUND")
-				throw caught;
-			const message = caught instanceof Error ? caught.message : String(caught);
-			throw createLixError(
-				"invalid_request",
-				`last_seen_commit_id could not be compared with the branch head: ${message}`,
-				{
-					hint: "Pass the commit_id a read_files or write_files result returned.",
-				},
-			);
-		}
-		const from = response.columns.indexOf("from_path");
-		const to = response.columns.indexOf("to_path");
-		const wanted = new Set(paths);
-		const changed = new Set<string>();
-		for (const row of response.rows) {
-			for (const value of [row[from], row[to]]) {
-				if (value?.kind === "text" && wanted.has(value.value))
-					changed.add(value.value);
+		tx: TransactionClient,
+	): Promise<ChangedEntity[]> {
+		const changed: ChangedEntity[] = [];
+		for (const kind of ["file", "directory"] as const) {
+			let response: StatementResponse;
+			try {
+				response = await tx.execute({
+					sql: `SELECT id, from_path, to_path FROM lix_diff('lix_${kind}', $1, $2)`,
+					params: [
+						{ kind: "text", value: fromCommitId },
+						{ kind: "text", value: toCommitId },
+					],
+				});
+			} catch (caught) {
+				const code = (caught as { code?: unknown } | null)?.code;
+				if (
+					typeof code !== "string" ||
+					!code.startsWith("LIX_") ||
+					code.startsWith("LIX_REMOTE_") ||
+					code === "LIX_TRANSACTION_CONFLICT"
+				)
+					throw caught;
+				const message =
+					caught instanceof Error ? caught.message : String(caught);
+				throw createLixError(
+					"invalid_request",
+					`last_seen_commit_id could not be compared with the branch head: ${message}`,
+					{
+						hint: "Pass the commit_id read_files returned, or commit.after from an earlier execute_sql result.",
+					},
+				);
+			}
+			const at = {
+				id: response.columns.indexOf("id"),
+				from: response.columns.indexOf("from_path"),
+				to: response.columns.indexOf("to_path"),
+			};
+			for (const row of response.rows) {
+				const id = row[at.id];
+				const paths = [row[at.from], row[at.to]].flatMap((value) =>
+					value?.kind === "text" ? [value.value] : [],
+				);
+				if (id?.kind !== "text" || paths.length === 0)
+					throw createLixError(
+						"upstream_error",
+						"Lix returned an invalid change row.",
+					);
+				changed.push({ kind, id: id.value, paths });
 			}
 		}
-		return paths.filter((path) => changed.has(path));
+		return changed;
+	}
+
+	/**
+	 * The changed entities the batch left different from the head. Reads in a
+	 * transaction see its own writes, so the current rows are the batch's
+	 * result; `lix_as_of` is the head the others committed. Each entity is
+	 * compared by id (was it edited, moved, deleted?) and each path it held
+	 * by what is there (was a file written onto a path someone else freed?).
+	 */
+	private async touchedSince(
+		changed: readonly ChangedEntity[],
+		head: string,
+		tx: TransactionClient,
+	): Promise<LastSeenConflict[]> {
+		const conflicts = new Map<string, LastSeenConflict>();
+		const refuse = (
+			kind: ChangedEntity["kind"],
+			path: string,
+			atHead: EntityState | undefined,
+		) => {
+			const key = `${kind}:${path}`;
+			if (!conflicts.has(key))
+				conflicts.set(key, { kind, path, ...(atHead ? { atHead } : {}) });
+		};
+		for (const kind of ["file", "directory"] as const) {
+			const entities = changed.filter((entity) => entity.kind === kind);
+			if (entities.length === 0) continue;
+			const ids = entities.map((entity) => entity.id);
+			const paths = [...new Set(entities.flatMap((entity) => entity.paths))];
+			const [byId, byIdAtHead, byPath, byPathAtHead] = [
+				await entityStates(tx, kind, "id", ids),
+				await entityStates(tx, kind, "id", ids, head),
+				await entityStates(tx, kind, "path", paths),
+				await entityStates(tx, kind, "path", paths, head),
+			];
+			for (const entity of entities) {
+				const ours = byId.get(entity.id);
+				const theirs = byIdAtHead.get(entity.id);
+				if (ours?.key !== theirs?.key)
+					refuse(
+						kind,
+						theirs?.path ?? ours?.path ?? entity.paths.at(-1)!,
+						theirs,
+					);
+			}
+			for (const path of paths) {
+				const theirs = byPathAtHead.get(path);
+				if (byPath.get(path)?.key !== theirs?.key) refuse(kind, path, theirs);
+			}
+		}
+		return [...conflicts.values()];
 	}
 
 	private async fileRows(
@@ -1419,12 +1403,179 @@ function finiteTimestamp(value: unknown): number | undefined {
 /** Files listed per call before `truncated` says to narrow the filter. */
 const LIST_FILES_LIMIT = 1000;
 
-const EMPTY_RESPONSE: StatementResponse = {
-	columns: [],
-	rows: [],
-	rowsAffected: 0,
-	notices: [],
+/** The batch committed; only the checkpoint after it did not happen. */
+export const BATCH_CHECKPOINT_WARNING =
+	"Saved; checkpoint unavailable. Do not repeat the batch.";
+
+/** A file or directory whose state differs between two commits. */
+type ChangedEntity = {
+	kind: "file" | "directory";
+	id: string;
+	/** Where it was at the earlier commit and is at the later, as they exist. */
+	paths: string[];
 };
+
+/** A changed entity the guarded batch left different from the head. */
+type LastSeenConflict = {
+	kind: "file" | "directory";
+	path: string;
+	/** Its state at the head; absent when someone else deleted it. */
+	atHead?: EntityState;
+};
+
+type EntityState = {
+	id: string;
+	path: string;
+	/** Everything the comparison looks at, as one comparable string. */
+	key: string;
+	bytes?: Uint8Array;
+	metadata: Record<string, unknown> | null;
+};
+
+/**
+ * Files or directories by id or by path, as the transaction sees them now
+ * or as they were at `commitId`: id, path, bytes for files, and metadata.
+ */
+async function entityStates(
+	tx: TransactionClient,
+	kind: "file" | "directory",
+	by: "id" | "path",
+	values: readonly string[],
+	commitId?: string,
+): Promise<Map<string, EntityState>> {
+	const offset = commitId === undefined ? 0 : 1;
+	const placeholders = values.map((_, index) => `$${index + offset + 1}`);
+	const source =
+		commitId === undefined ? `lix_${kind}` : `lix_as_of('lix_${kind}', $1)`;
+	const columns =
+		kind === "file"
+			? "id, path, content, lixcol_metadata"
+			: "id, path, lixcol_metadata";
+	const response = await tx.execute({
+		sql: `SELECT ${columns} FROM ${source} WHERE ${by} IN (${placeholders.join(", ")})`,
+		params: [
+			...(commitId === undefined
+				? []
+				: [{ kind: "text" as const, value: commitId }]),
+			...values.map((value): WireValue => ({ kind: "text", value })),
+		],
+	});
+	const at = {
+		id: response.columns.indexOf("id"),
+		path: response.columns.indexOf("path"),
+		content: response.columns.indexOf("content"),
+		metadata: response.columns.indexOf("lixcol_metadata"),
+	};
+	const states = new Map<string, EntityState>();
+	for (const row of response.rows) {
+		const id = row[at.id];
+		const path = row[at.path];
+		const content = at.content === -1 ? undefined : row[at.content];
+		const metadata = row[at.metadata];
+		if (
+			id?.kind !== "text" ||
+			path?.kind !== "text" ||
+			(kind === "file" && content?.kind !== "blob")
+		)
+			throw createLixError(
+				"upstream_error",
+				`Lix returned an invalid ${kind} row.`,
+			);
+		const object =
+			metadata?.kind === "json" &&
+			metadata.value !== null &&
+			typeof metadata.value === "object" &&
+			!Array.isArray(metadata.value)
+				? (metadata.value as Record<string, unknown>)
+				: null;
+		const base64 = content?.kind === "blob" ? content.base64 : null;
+		states.set(by === "id" ? id.value : path.value, {
+			id: id.value,
+			path: path.value,
+			key: JSON.stringify([
+				id.value,
+				path.value,
+				base64,
+				metadata?.kind === "json" ? canonicalJson(metadata.value) : null,
+			]),
+			...(base64 !== null ? { bytes: base64ToBytes(base64) } : {}),
+			metadata: object,
+		});
+	}
+	return states;
+}
+
+/** JSON with object keys sorted, so equal values compare equal. */
+function canonicalJson(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+	if (value && typeof value === "object")
+		return `{${Object.keys(value)
+			.sort()
+			.map(
+				(key) =>
+					`${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`,
+			)
+			.join(",")}}`;
+	return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * The refusal of a guarded batch: which entities changed under it, and the
+ * current contents of the files among them, so the caller can merge and
+ * run the batch again against the head it names.
+ */
+function lastSeenConflict(
+	head: string,
+	conflicts: readonly LastSeenConflict[],
+): LixError {
+	const named = conflicts.map(
+		(conflict) =>
+			`${conflict.kind === "directory" ? "directory " : ""}${conflict.path}${conflict.atHead ? "" : " (deleted)"}`,
+	);
+	return createLixError(
+		"conflict",
+		`${conflicts.length === 1 ? "An entry" : `${conflicts.length} entries`} this batch touches changed since last_seen_commit_id: ${named.join(", ")}. Nothing was saved.`,
+		{
+			hint: "Re-read, merge, and run the batch again with last_seen_commit_id = details.current_commit_id.",
+			details: {
+				current_commit_id: head,
+				files: conflicts.flatMap((conflict) => {
+					if (conflict.kind !== "file" || !conflict.atHead?.bytes) return [];
+					const read = readFileContent(conflict.atHead.bytes);
+					return [
+						{
+							path: conflict.path,
+							...(read.content !== undefined
+								? { content: read.content }
+								: { encoding: read.encoding }),
+							lixcol_metadata: conflict.atHead.metadata,
+						},
+					];
+				}),
+			},
+		},
+	);
+}
+
+/**
+ * The index of the statement that failed, where executeBatch would have
+ * put it. The error is otherwise kept as it is, so its code, status and
+ * retry flags still reach the transaction and the tool unchanged.
+ */
+function withStatementIndex(caught: unknown, statementIndex: number): unknown {
+	if (!caught || typeof caught !== "object") return caught;
+	const error = caught as { details?: unknown };
+	const details = error.details;
+	error.details = {
+		...(details && typeof details === "object" && !Array.isArray(details)
+			? details
+			: details === undefined
+				? {}
+				: { cause: details }),
+		statementIndex,
+	};
+	return caught;
+}
 
 /** One end of a diff, as the `diff` tool takes it. */
 export type DiffRef =
