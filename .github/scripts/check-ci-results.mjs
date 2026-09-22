@@ -1,11 +1,14 @@
 import { pathToFileURL } from "node:url";
 
-export function checkCiResults(needs, previewRequested = false) {
+export function checkCiResults(needs, previewRequested = false, forkPullRequest = false) {
 	const requireSuccess = (job) => {
 		if (needs[job]?.result !== "success") throw new Error(`${job} did not succeed: ${needs[job]?.result ?? "missing"}`);
 	};
 	requireSuccess("changes");
 	const selected = needs.changes.outputs;
+	if (forkPullRequest && (selected.e2e === "true" || previewRequested)) {
+		throw new Error("Fork PR requires credential-dependent integration. Review the changes, then run full CI on a branch in this repository before merging; fork PRs cannot publish images or deploy previews.");
+	}
 	for (const [lane, jobs] of Object.entries({
 		fast: ["fast"],
 		frontend: ["fast", "frontend", "sdk"],
@@ -22,6 +25,7 @@ export function checkCiResults(needs, previewRequested = false) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-	checkCiResults(JSON.parse(process.env.RESULTS), process.env.PREVIEW_REQUESTED === "true");
+	const forkPullRequest = process.env.FORK_PULL_REQUEST === "true";
+	checkCiResults(JSON.parse(process.env.RESULTS), process.env.PREVIEW_REQUESTED === "true", forkPullRequest);
 	console.log("All selected checks passed");
 }

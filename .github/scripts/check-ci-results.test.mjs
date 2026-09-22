@@ -16,6 +16,25 @@ test("selected integration jobs cannot silently skip, fail, or cancel", () => {
 });
 test("explicit previews require every artifact even for docs-only changes", () => assert.throws(() => checkCiResults(fixture(), true), /sdk/));
 
+test("forks cannot silently bypass required integration or request a preview", () => {
+  const needs = fixture({ frontend: "true", e2e: "true", tooling: "true", database: "true" });
+  for (const name of ["fast", "frontend", "sdk", "tooling", "database"]) needs[name].result = "success";
+  assert.throws(() => checkCiResults(needs, false, true), /Fork PR requires credential-dependent integration/);
+  assert.throws(() => checkCiResults(fixture(), true, true), /Fork PR requires credential-dependent integration/);
+  assert.throws(() => checkCiResults(needs, false, false), /server-image/);
+  needs.changes.outputs.e2e = "false";
+  checkCiResults(needs, false, true);
+  for (const name of ["fast", "frontend", "sdk", "tooling", "database"]) {
+    for (const result of ["skipped", "failure", "cancelled"]) {
+      const broken = structuredClone(needs);
+      broken[name].result = result;
+      assert.throws(() => checkCiResults(broken, false, true), new RegExp(name));
+    }
+  }
+  needs["web-image"].result = "failure";
+  assert.throws(() => checkCiResults(needs, false, true), /web-image/);
+});
+
 test("static UI needs fast checks, not SDKs, images, or browsers", () => {
   const needs = fixture({ fast: "true", deploy: "true" });
   needs.fast.result = "success";

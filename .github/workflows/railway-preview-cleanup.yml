@@ -14,6 +14,7 @@ permissions:
 jobs:
   discover:
     name: Find Railway previews to reconcile
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -87,7 +88,7 @@ jobs:
         run: .github/scripts/manage-railway-preview.sh delete-if-closed
 
   cleanup-github:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     name: Delete GitHub preview
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -98,6 +99,8 @@ jobs:
     steps:
       - name: Check out cleanup coordinator
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Delete GitHub preview environments
         env:
